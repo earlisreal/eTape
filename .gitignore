@@ -1,0 +1,25 @@
+# OS / IDE
+.DS_Store
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# Node (ui/)
+node_modules/
+dist/
+
+# Vendored moomoo skills package — no redistribution license; install from moomoo
+.claude/skills/
+
+# Reconstructed TradeZero OpenAPI spec — kept local (ToS gray zone)
+docs/tradezero/
+
+# Local-only settings
+.claude/settings.local.json
+
+# Re-include design specs (globally ignored via ~/.gitignore_global for work repos;
+# in this repo they are the design record)
+!docs/superpowers/
+!docs/superpowers/**
