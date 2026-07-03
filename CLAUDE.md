@@ -5,7 +5,10 @@ feeds and rendering candlestick charts, a Level 2 DOM ladder, and time & sales.
 Priorities: runtime speed, execution, stability. All code is AI-written, so
 reviewability and compiler-enforced safety weigh heavily.
 
-Full stack rationale: `docs/2026-07-03-stack-decision.md`.
+Full stack rationale: `docs/2026-07-03-stack-decision.md`. Approved designs:
+execution/portfolio (`docs/superpowers/specs/2026-07-03-portfolio-orders-design.md`),
+UI (`docs/superpowers/specs/2026-07-03-ui-design.md`),
+Go engine (`docs/superpowers/specs/2026-07-03-go-engine-design.md`).
 
 ## Stack (decided)
 
@@ -70,8 +73,9 @@ timezone, `US.` code prefix, `extended_time` on subscriptions, LV3 entitlement.
   - Lifecycle: `InitConnect` (1001) handshake first (returns connID + keepalive
     interval) → `KeepAlive` (1004) heartbeat → request/response correlated by
     serialNo; pushes dispatched by protoID.
-  - Leading option: **raw TCP + generated Go protobuf** (framing is ~200–300 lines
-    of Go). OpenD's WebSocket port is the fallback if TCP framing surprises.
+  - **Decided (2026-07-03, engine design): raw TCP + generated Go protobuf**
+    (framing is ~200–300 lines of Go). OpenD's WebSocket port is the fallback if
+    TCP framing surprises.
   - Rule: the Go client must NOT implement `unlock_trade` — live unlock stays
     manual in the OpenD GUI.
 - Quota rules that shape the ingestion design: subscriptions cost 1 quota per stock per
@@ -148,11 +152,13 @@ when implementing the wire protocol.
   `~/.eJournal/credentials.json` key `alpaca`). Alpaca market data = no L2 depth, so
   the moomoo DOM stays either way. Decide after the Monday order-latency benchmark
   (run both brokers' paper APIs in one session).
-- Go protocol client vs. sidecar bridge for OpenD (see above)
-- Historical OHLCV storage (likely SQLite)
-- Backtesting scope
-- Order-management safety rules (kill switch, max position, duplicate-order guards)
-- Indicator set for v1
-- News aggregation source — options + recommendation in
-  `docs/2026-07-03-news-aggregation-options.md` (lean: poll `Qot_GetSearchNews`
-  from the Go engine for v1; news is poll-only, no push subtype exists)
+
+Closed by the three approved designs (2026-07-03): OpenD client = raw TCP + Go
+protobuf (engine design); market-data storage = always-on SQLite feed journal +
+1m/daily bar archives, everything else derived (engine design; supersedes
+"persist ticks" above — the journal also records book/quote/bar1m); backtesting =
+record from day one, interactive practice mode v1.5 on replay+SimBroker seams,
+algorithmic backtesting deferred (engine design); order-safety rules = gate envelope
+(execution design); indicator set v1 = VWAP, EMA, SMA, MACD, volume, buy/sell delta
+(UI design); news = poll `Qot_GetSearchNews` from the engine (engine design, per
+`docs/2026-07-03-news-aggregation-options.md`).
