@@ -1,5 +1,6 @@
 import type { ISocket } from "../src/wire/WsClient";
 import type { RafLike } from "../src/render/surface";
+import type { LinkBus } from "../src/chrome/linkGroups";
 
 export class FakeSocket implements ISocket {
   static instances: FakeSocket[] = [];
@@ -30,4 +31,22 @@ export class FakeRaf implements RafLike {
   cancel(id: number): void { this.cbs.delete(id); }
   // test helper: run one frame (snapshots callbacks so re-registration lands next frame)
   tick(): void { const batch = [...this.cbs.values()]; this.cbs.clear(); batch.forEach((cb) => cb()); }
+}
+
+// Shared in-memory bus simulating BroadcastChannel across "windows".
+export class FakeBusHub {
+  private buses = new Set<FakeBus>();
+  join(b: FakeBus): void { this.buses.add(b); }
+  leave(b: FakeBus): void { this.buses.delete(b); }
+  broadcast(from: FakeBus, msg: { group: unknown; symbol: string }): void {
+    this.buses.forEach((b) => { if (b !== from) b.deliver(msg); });
+  }
+}
+export class FakeBus implements LinkBus {
+  private cb: ((msg: { group: any; symbol: string }) => void) | null = null;
+  constructor(private hub: FakeBusHub) { hub.join(this); }
+  post(msg: { group: any; symbol: string }): void { this.hub.broadcast(this, msg); }
+  onMessage(cb: (msg: { group: any; symbol: string }) => void): () => void { this.cb = cb; return () => { this.cb = null; }; }
+  deliver(msg: { group: any; symbol: string }): void { this.cb?.(msg); }
+  close(): void { this.hub.leave(this); }
 }
