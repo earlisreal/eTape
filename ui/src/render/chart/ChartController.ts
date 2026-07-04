@@ -58,10 +58,19 @@ export class ChartController {
     const last = bars[bars.length - 1];
     const grew = bars.length > this.lastAppliedCount;
     const lastChanged = keyOf(last) !== this.lastAppliedKey;
-    if (grew || lastChanged) {
+    if (grew) {
+      // Push every newly-appended bar in order — update() only appends/replaces the
+      // single bar it's given, so a multi-bucket jump (backgrounded tab, missed rAF
+      // tick, reconnect burst) must be replayed bar-by-bar or the gap is permanent.
+      for (let i = this.lastAppliedCount; i < bars.length; i++) {
+        this.candle.update(toCandle(bars[i]));
+        this.volume.update(toVolume(bars[i], this.palette));
+      }
+      this.lastAppliedCount = bars.length;
+      this.lastAppliedKey = keyOf(last);
+    } else if (lastChanged) {
       this.candle.update(toCandle(last));
       this.volume.update(toVolume(last, this.palette));
-      this.lastAppliedCount = bars.length;
       this.lastAppliedKey = keyOf(last);
       // Auto-follow is LWC's default when already at the right edge; never force it
       // when the user has scrolled back (honesty: don't yank their view).

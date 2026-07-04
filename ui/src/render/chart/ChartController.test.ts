@@ -133,4 +133,18 @@ describe("ChartController", () => {
     expect(() => ctrl.sync()).not.toThrow();
     expect(facade.created[0].series.calls).not.toContain("setData");
   });
+
+  it("multiple new buckets between two syncs are all pushed via update, not just the last", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // backfill
+    const candle = facade.created[0].series;
+    const updatesBefore = candle.calls.filter((c) => c === "update").length;
+    bars.push(bar("2026-07-06T13:31:00Z", 11));
+    bars.push(bar("2026-07-06T13:32:00Z", 12));
+    bars.push(bar("2026-07-06T13:33:00Z", 13, true));
+    ctrl.sync(); // three new buckets appeared since the last sync
+    const updatesAfter = candle.calls.filter((c) => c === "update").length;
+    expect(updatesAfter - updatesBefore).toBe(3); // all three new bars pushed, not just the last
+  });
 });
