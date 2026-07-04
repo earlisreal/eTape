@@ -144,7 +144,7 @@ Expected: FAIL — `npm` errors because there is no `package.json` / dependencie
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint . --ext .ts,.tsx",
-    "typecheck": "tsc -b --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "mock-engine": "tsx mock-engine/run.ts"
   },
   "dependencies": {
@@ -286,6 +286,7 @@ module.exports = {
 node_modules
 dist
 *.local
+*.tsbuildinfo
 ```
 
 - [ ] **Step 4: Install and run the test to verify it passes**
