@@ -102,13 +102,3 @@ func (m *mockOpenD) dialCount() int {
 	defer m.mu.Unlock()
 	return m.dials
 }
-
-// requestCount is a reserved assertion helper (no test in this task needs a
-// total-request count yet; dialCount covers Task 11's reconnect tests).
-//
-//nolint:unused // kept for future opend tests
-func (m *mockOpenD) requestCount() int {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return len(m.requests)
-}

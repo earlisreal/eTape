@@ -158,6 +158,13 @@ func (c *Client) serveConn(ctx context.Context, conn net.Conn) error {
 	defer cancel()
 
 	c.setConn(conn)
+	// Close the socket on every exit path (ctx cancel, readErr, kaErr, or a
+	// handshake/keepalive timeout where OpenD keeps TCP open but stops replying).
+	// Without this the reader goroutine stays blocked in ReadFrame (io.ReadFull,
+	// no deadline) and both it and the fd leak; closing unblocks ReadFrame, which
+	// then returns an error and the reader exits. Single close on the way out —
+	// no double-close.
+	defer func() { _ = conn.Close() }()
 	defer c.clearConn()
 
 	readErr := make(chan error, 1)

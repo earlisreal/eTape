@@ -3,6 +3,8 @@ package opend
 import (
 	"context"
 	"net"
+	"runtime"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -204,6 +206,83 @@ func TestRunReconnectsAfterDrop(t *testing.T) {
 		select {
 		case <-deadline:
 			t.Fatalf("only %d dials, want >=3 (reconnect not happening)", m.dialCount())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+}
+
+// TestRunReconnectsAfterKeepAliveTimeout drives the kaErr exit path: a wedged
+// OpenD that answers InitConnect and the first heartbeat, then goes silent
+// WITHOUT closing the TCP socket. The client must (1) time out the next
+// KeepAlive and reconnect, and (2) close the dead socket so the reader goroutine
+// unblocks and exits. Before serveConn closed the conn on exit, the reader
+// stayed blocked in ReadFrame (io.ReadFull, no deadline) on the still-open
+// socket, leaking the goroutine + fd on every wedged session.
+func TestRunReconnectsAfterKeepAliveTimeout(t *testing.T) {
+	m := newMockOpenD(t)
+	var kaSeen atomic.Int32
+	m.handler = func(mm *mockOpenD, conn net.Conn, f Frame) {
+		switch f.ProtoID {
+		case ProtoInitConnect:
+			// Full success reply (ServerVer etc. are proto2-required) with a
+			// fast 1s keepalive interval so the heartbeat loop ticks quickly.
+			resp := &initconnect.Response{
+				RetType: proto.Int32(0),
+				S2C: &initconnect.S2C{
+					ServerVer:         proto.Int32(900),
+					LoginUserID:       proto.Uint64(1),
+					ConnID:            proto.Uint64(0xABCDEF),
+					ConnAESKey:        proto.String("0000000000000000"),
+					KeepAliveInterval: proto.Int32(1),
+				},
+			}
+			mm.reply(conn, f, resp)
+		case ProtoKeepAlive:
+			if kaSeen.Add(1) <= 1 {
+				mm.defaultHandler(mm, conn, f) // answer the first heartbeat only
+			}
+			// otherwise: stay silent, keep the socket open (the wedge scenario)
+		}
+	}
+
+	base := runtime.NumGoroutine()
+
+	c := New(Options{
+		Addr: m.addr(), Clock: clock.System{},
+		RequestTimeout: 50 * time.Millisecond,
+		ReconnectMin:   time.Millisecond, ReconnectMax: 5 * time.Millisecond,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = c.Run(ctx); close(done) }()
+
+	// (1) dialCount>=2 proves the keepalive timeout ended the wedged session and
+	// the client redialed on a socket the server never closed.
+	deadline := time.After(4 * time.Second)
+	for m.dialCount() < 2 {
+		select {
+		case <-deadline:
+			cancel()
+			t.Fatalf("only %d dials, want >=2 (keepalive-timeout reconnect not happening)", m.dialCount())
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+
+	// (2) Stop Run and assert the wedged session's reader goroutine was cleaned
+	// up. Without serveConn closing the socket on the kaErr path, each wedged
+	// connection leaks a reader blocked in ReadFrame; goroutine count would stay
+	// elevated instead of settling back toward the pre-Run baseline.
+	cancel()
+	<-done
+	leakDeadline := time.After(2 * time.Second)
+	for {
+		if runtime.NumGoroutine() <= base+2 {
+			return
+		}
+		select {
+		case <-leakDeadline:
+			t.Fatalf("goroutines did not settle after cancel: base=%d now=%d (leaked reader on kaErr path?)",
+				base, runtime.NumGoroutine())
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
