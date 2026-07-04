@@ -1,7 +1,10 @@
 # eTape — Go Engine Design (v1)
 
 **Date:** 2026-07-03
-**Status:** Approved (design); implementation plan not yet written
+**Status:** Approved (design); implementation plan not yet written.
+**Amended 2026-07-04** by `2026-07-04-multi-broker-execution-design.md`: exec is
+multi-venue (TZ + Alpaca v1, moomoo v1.x); the feed-client trading-incapability rule
+is reworded there (feed connection has no `Trd_*`; unlock never implemented).
 **Depends on:** `docs/2026-07-03-stack-decision.md`,
 `docs/superpowers/specs/2026-07-03-portfolio-orders-design.md`,
 `docs/superpowers/specs/2026-07-03-ui-design.md`,

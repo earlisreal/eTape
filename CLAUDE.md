@@ -8,7 +8,10 @@ reviewability and compiler-enforced safety weigh heavily.
 Full stack rationale: `docs/2026-07-03-stack-decision.md`. Approved designs:
 execution/portfolio (`docs/superpowers/specs/2026-07-03-portfolio-orders-design.md`),
 UI (`docs/superpowers/specs/2026-07-03-ui-design.md`),
-Go engine (`docs/superpowers/specs/2026-07-03-go-engine-design.md`).
+Go engine (`docs/superpowers/specs/2026-07-03-go-engine-design.md`),
+multi-broker execution
+(`docs/superpowers/specs/2026-07-04-multi-broker-execution-design.md` — revises the
+execution spec: venues, two-layer gate, TZ + Alpaca v1, moomoo v1.x).
 
 ## Stack (decided)
 
@@ -22,9 +25,13 @@ Go engine (`docs/superpowers/specs/2026-07-03-go-engine-design.md`).
 
 ## Market data: moomoo OpenD (primary source)
 
-moomoo OpenD is the primary source of quotes, ticks, and order-book data —
-**market data only**. Order execution will go through **TradeZero** (separate broker,
-integration planned later). TradeZero API fully researched 2026-07-03 —
+moomoo OpenD is the primary source of quotes, ticks, and order-book data.
+**Execution (decided 2026-07-04): multi-broker** — TradeZero + Alpaca adapters in v1,
+moomoo as a third execution venue in v1.x (its paper env can't validate fills); every
+order names its venue explicitly; broker-selection UX deferred to a later UI design
+revision. Spec: `docs/superpowers/specs/2026-07-04-multi-broker-execution-design.md`;
+moomoo trading API research: `docs/2026-07-04-moomoo-trading-api.md`.
+TradeZero API fully researched 2026-07-03 —
 `docs/2026-07-03-tradezero-api.md` (REST + WebSocket, order model, locates, rate
 limits, eTape design consequences) + reconstructed OpenAPI spec in `docs/tradezero/`;
 confirmed TradeZero exposes **no market data**, so the moomoo/TradeZero split stands.
@@ -76,8 +83,12 @@ timezone, `US.` code prefix, `extended_time` on subscriptions, LV3 entitlement.
   - **Decided (2026-07-03, engine design): raw TCP + generated Go protobuf**
     (framing is ~200–300 lines of Go). OpenD's WebSocket port is the fallback if
     TCP framing surprises.
-  - Rule: the Go client must NOT implement `unlock_trade` — live unlock stays
-    manual in the OpenD GUI.
+  - Rule (amended 2026-07-04): eTape never implements `Trd_UnlockTrade` (2005) —
+    the trade password never touches eTape. Unlock is per-OpenD-process and happens
+    outside the engine (OpenD GUI if it exposes it — verify Monday — else a manual
+    Python SDK one-liner per OpenD restart). The **feed connection implements no
+    `Trd_*` protocols**; order writes live only in the separate `broker/moomoo`
+    adapter connection (v1.x, multi-broker spec).
 - Quota rules that shape the ingestion design: subscriptions cost 1 quota per stock per
   subtype; minimum 1 minute before unsubscribing; historical K-line has its own quota.
   Details: `.claude/skills/moomooapi/docs/API_LIMITS.md`.
@@ -145,13 +156,12 @@ when implementing the wire protocol.
 
 ## Open questions (design phase)
 
-- **Execution broker: TradeZero vs Alpaca** — Alpaca researched 2026-07-03
-  (`docs/2026-07-03-alpaca-api.md`): ~70–90 ms faster warm round trip than TZ from
-  Earl's machine, native order replace, server-side brackets/OCO, HTB locates API,
-  $0 commission; but 200 req/min pool and no live account yet (paper keys verified,
-  `~/.eJournal/credentials.json` key `alpaca`). Alpaca market data = no L2 depth, so
-  the moomoo DOM stays either way. Decide after the Monday order-latency benchmark
-  (run both brokers' paper APIs in one session).
+- **Execution broker — resolved 2026-07-04: multi-broker, all three** (TZ + Alpaca +
+  moomoo as configured venues; multi-broker spec). Alpaca research:
+  `docs/2026-07-03-alpaca-api.md` (paper keys verified, key `alpaca`; no live account
+  yet; no L2 depth, so the moomoo DOM stays). Monday's order-latency benchmark is now
+  a **routing input**, not a broker decision — still run TZ + Alpaca paper in one
+  session.
 
 Closed by the three approved designs (2026-07-03): OpenD client = raw TCP + Go
 protobuf (engine design); market-data storage = always-on SQLite feed journal +

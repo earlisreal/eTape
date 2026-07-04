@@ -1,7 +1,10 @@
 # eTape — Execution & Portfolio Management Design
 
 **Date:** 2026-07-03
-**Status:** Approved (design); implementation plan not yet written
+**Status:** Approved (design); implementation plan not yet written.
+**Revised 2026-07-04** by `2026-07-04-multi-broker-execution-design.md` (multi-venue:
+TZ + Alpaca + moomoo; venue-keyed fold, two-layer gate, `ReplaceOrder` in the
+`Broker` interface). Unrevised sections stand.
 **Depends on:** `docs/2026-07-03-stack-decision.md`, `docs/2026-07-03-tradezero-api.md`
 
 ## Purpose
