@@ -1,4 +1,5 @@
 import type { ISocket } from "../src/wire/WsClient";
+import type { RafLike } from "../src/render/surface";
 
 export class FakeSocket implements ISocket {
   static instances: FakeSocket[] = [];
@@ -20,4 +21,13 @@ export class FakeSocket implements ISocket {
   dropFromServer(): void { this.onclose?.(); }
   static last(): FakeSocket { return FakeSocket.instances[FakeSocket.instances.length - 1]; }
   static reset(): void { FakeSocket.instances = []; }
+}
+
+export class FakeRaf implements RafLike {
+  private cbs = new Map<number, () => void>();
+  private id = 0;
+  request(cb: () => void): number { const id = ++this.id; this.cbs.set(id, cb); return id; }
+  cancel(id: number): void { this.cbs.delete(id); }
+  // test helper: run one frame (snapshots callbacks so re-registration lands next frame)
+  tick(): void { const batch = [...this.cbs.values()]; this.cbs.clear(); batch.forEach((cb) => cb()); }
 }
