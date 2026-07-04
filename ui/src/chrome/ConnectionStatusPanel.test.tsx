@@ -1,0 +1,21 @@
+// @vitest-environment jsdom
+import { describe, it, expect } from "vitest";
+import { render, screen, act } from "@testing-library/react";
+import { HealthStore } from "../data/HealthStore";
+import { ConnectionStatusPanel } from "./panels/ConnectionStatusPanel";
+
+describe("ConnectionStatusPanel", () => {
+  it("renders latency rows and appends events from the store", () => {
+    const health = new HealthStore();
+    render(<ConnectionStatusPanel health={health} />);
+    act(() => {
+      health.apply({ kind: "snapshot", topic: "sys.health",
+        payload: { links: [{ link: "engine-moomoo", ms: 12, min: 8, avg: 12, max: 20, status: "ok" }] } });
+      health.apply({ kind: "delta", topic: "sys.events",
+        payload: { seq: 1, ts: "t1", kind: "boot", detail: "engine started" } });
+    });
+    expect(screen.getByText(/engine-moomoo/)).toBeTruthy();
+    expect(screen.getAllByText(/12/).length).toBeGreaterThan(0);
+    expect(screen.getByText(/engine started/)).toBeTruthy();
+  });
+});

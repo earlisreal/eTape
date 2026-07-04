@@ -14,7 +14,7 @@ export class HealthStore extends ReactStore<HealthState> {
       return;
     }
     if (m.topic === "sys.events") {
-      const incoming = m.kind === "snapshot" ? (m.payload as SysEvent[]) : [m.payload as SysEvent];
+      const incoming = Array.isArray(m.payload) ? (m.payload as SysEvent[]) : [m.payload as SysEvent];
       const events = [...cur.events, ...incoming];
       this.set({ ...cur, events: events.slice(Math.max(0, events.length - MAX_EVENTS)) });
     }
