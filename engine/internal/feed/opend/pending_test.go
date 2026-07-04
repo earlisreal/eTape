@@ -15,9 +15,9 @@ func TestSerialGenMonotonic(t *testing.T) {
 
 func TestPendingResolveDeliversToWaiter(t *testing.T) {
 	p := newPending()
-	ch := p.register(7)
-	if ok := p.resolve(7, Frame{ProtoID: 1001, SerialNo: 7}); !ok {
-		t.Fatal("resolve returned false for a registered serial")
+	ch := p.register(7, 1001)
+	if ok := p.resolve(Frame{ProtoID: 1001, SerialNo: 7}); !ok {
+		t.Fatal("resolve returned false for a registered serial with matching protoID")
 	}
 	f := <-ch
 	if f.SerialNo != 7 {
@@ -27,16 +27,25 @@ func TestPendingResolveDeliversToWaiter(t *testing.T) {
 
 func TestPendingResolveUnknownIsPush(t *testing.T) {
 	p := newPending()
-	if ok := p.resolve(99, Frame{SerialNo: 99}); ok {
+	if ok := p.resolve(Frame{ProtoID: 1001, SerialNo: 99}); ok {
 		t.Fatal("resolve of unregistered serial returned true (should be treated as push)")
+	}
+}
+
+func TestPendingResolveMismatchedProtoIDIsPush(t *testing.T) {
+	p := newPending()
+	_ = p.register(7, 1004) // register with protoID 1004
+	// Try to resolve with a different protoID (3011)
+	if ok := p.resolve(Frame{ProtoID: 3011, SerialNo: 7}); ok {
+		t.Fatal("resolve of mismatched protoID returned true (should be treated as push)")
 	}
 }
 
 func TestPendingCancelThenResolveIsPush(t *testing.T) {
 	p := newPending()
-	_ = p.register(5)
+	_ = p.register(5, 1001)
 	p.cancel(5)
-	if ok := p.resolve(5, Frame{SerialNo: 5}); ok {
+	if ok := p.resolve(Frame{ProtoID: 1001, SerialNo: 5}); ok {
 		t.Fatal("resolve after cancel returned true")
 	}
 	p.cancel(5) // idempotent, must not panic
@@ -44,7 +53,7 @@ func TestPendingCancelThenResolveIsPush(t *testing.T) {
 
 func TestPendingFailAllClosesWaiters(t *testing.T) {
 	p := newPending()
-	ch := p.register(3)
+	ch := p.register(3, 1001)
 	p.failAll()
 	if _, ok := <-ch; ok {
 		t.Fatal("expected channel closed after failAll")
@@ -59,8 +68,8 @@ func TestPendingConcurrentResolveCancel(t *testing.T) {
 		wg.Add(1)
 		go func(s uint32) {
 			defer wg.Done()
-			ch := p.register(s)
-			go p.resolve(s, Frame{SerialNo: s})
+			ch := p.register(s, 1001)
+			go p.resolve(Frame{SerialNo: s, ProtoID: 1001})
 			select {
 			case <-ch:
 			default:

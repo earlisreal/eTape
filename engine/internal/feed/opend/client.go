@@ -116,7 +116,7 @@ func (c *Client) Request(ctx context.Context, protoID uint32, req proto.Message)
 		return Frame{}, err
 	}
 	serial := c.serial.next()
-	ch := c.pending.register(serial)
+	ch := c.pending.register(serial, protoID)
 	defer c.pending.cancel(serial) // no-op if already resolved
 
 	if err := c.send(Encode(protoID, serial, body)); err != nil {
@@ -176,7 +176,7 @@ func (c *Client) serveConn(ctx context.Context, conn net.Conn) error {
 				readErr <- err
 				return
 			}
-			if !c.pending.resolve(f.SerialNo, f) {
+			if IsPushProtoID(f.ProtoID) || !c.pending.resolve(f) {
 				select {
 				case c.pushes <- f:
 				case <-sctx.Done():

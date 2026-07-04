@@ -91,10 +91,12 @@ func (m *mockOpenD) reply(conn net.Conn, req Frame, msg proto.Message) {
 	_, _ = conn.Write(Encode(req.ProtoID, req.SerialNo, body))
 }
 
-// push sends an unsolicited frame (serialNo 0 → no waiter → routed as a push).
-func (m *mockOpenD) push(conn net.Conn, protoID uint32, msg proto.Message) {
+// push sends an unsolicited frame. Real OpenD pushes carry an independent
+// nonzero server-side serial — the mock must too, or tests can't catch
+// serial-collision bugs.
+func (m *mockOpenD) push(conn net.Conn, protoID, serialNo uint32, msg proto.Message) {
 	body, _ := proto.Marshal(msg)
-	_, _ = conn.Write(Encode(protoID, 0, body))
+	_, _ = conn.Write(Encode(protoID, serialNo, body))
 }
 
 func (m *mockOpenD) dialCount() int {

@@ -13,7 +13,10 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/initconnect"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/keepalive"
+	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
+	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetbasicqot"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotsub"
+	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotupdateticker"
 )
 
 func dialClient(t *testing.T, m *mockOpenD) (*Client, net.Conn) {
@@ -33,7 +36,7 @@ func dialClient(t *testing.T, m *mockOpenD) (*Client, net.Conn) {
 			if err != nil {
 				return
 			}
-			if !c.pending.resolve(f.SerialNo, f) {
+			if IsPushProtoID(f.ProtoID) || !c.pending.resolve(f) {
 				c.pushes <- f
 			}
 		}
@@ -77,7 +80,7 @@ func TestUnsolicitedFrameRoutesToPushes(t *testing.T) {
 	// Reply to the request AND emit a push on the same conn.
 	m.handler = func(mm *mockOpenD, conn net.Conn, f Frame) {
 		mm.defaultHandler(mm, conn, f)
-		mm.push(conn, ProtoQotUpdateTicker, &qotsub.Response{RetType: proto.Int32(0)})
+		mm.push(conn, ProtoQotUpdateTicker, 1500, &qotsub.Response{RetType: proto.Int32(0)})
 	}
 	c, _ := dialClient(t, m)
 
@@ -306,5 +309,65 @@ func TestRunStopsOnContextCancel(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after cancel")
+	}
+}
+
+// waitForState blocks until the client reports the wanted state (draining
+// intermediate transitions) or fails the test after 3s.
+func waitForState(t *testing.T, c *Client, want ConnState) {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	for {
+		select {
+		case st := <-c.State():
+			if st == want {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for connection state %v", want)
+		}
+	}
+}
+
+// TestPushSerialCollisionDoesNotHijackRequest reproduces the live observation
+// that OpenD pushes carry their own serial numbers: a push whose serial equals
+// an in-flight request's serial must NOT resolve that request.
+func TestPushSerialCollisionDoesNotHijackRequest(t *testing.T) {
+	m := newMockOpenD(t)
+	m.handler = func(m *mockOpenD, conn net.Conn, f Frame) {
+		switch f.ProtoID {
+		case ProtoInitConnect, ProtoKeepAlive:
+			m.defaultHandler(m, conn, f)
+		case ProtoQotGetBasicQot:
+			// Adversarial ordering: first a ticker push reusing the request's
+			// serial, then the real response.
+			m.push(conn, ProtoQotUpdateTicker, f.SerialNo, &qotupdateticker.Response{
+				RetType: proto.Int32(0),
+				S2C:     &qotupdateticker.S2C{Security: &qotcommon.Security{Market: proto.Int32(11), Code: proto.String("AAPL")}},
+			})
+			m.reply(conn, f, &qotgetbasicqot.Response{RetType: proto.Int32(0), S2C: &qotgetbasicqot.S2C{}})
+		}
+	}
+
+	c := New(Options{Addr: m.addr()})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = c.Run(ctx) }()
+	waitForState(t, c, ConnUp)
+
+	f, err := c.Request(ctx, ProtoQotGetBasicQot, &qotgetbasicqot.Request{C2S: &qotgetbasicqot.C2S{}})
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	if f.ProtoID != ProtoQotGetBasicQot {
+		t.Fatalf("request resolved with protoID %d (hijacked by push), want %d", f.ProtoID, ProtoQotGetBasicQot)
+	}
+	select {
+	case p := <-c.Pushes():
+		if p.ProtoID != ProtoQotUpdateTicker {
+			t.Fatalf("push protoID = %d, want %d", p.ProtoID, ProtoQotUpdateTicker)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("push frame never delivered to Pushes()")
 	}
 }
