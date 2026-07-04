@@ -11,9 +11,18 @@ const fixture: Fixture = {
   deltas: [{ afterMs: 10, topic: "md.quote", key: "US.AAPL", payload: { last: 3.6 } }],
 };
 
-function collect(ws: WebSocket, n: number, timeoutMs = 1000): Promise<any[]> {
+interface WireMsg {
+  kind: string;
+  topic?: string;
+  key?: string;
+  payload?: { symbol?: string; last?: number };
+  corrId?: string;
+  status?: string;
+}
+
+function collect(ws: WebSocket, n: number, timeoutMs = 1000): Promise<WireMsg[]> {
   return new Promise((resolve, reject) => {
-    const out: any[] = [];
+    const out: WireMsg[] = [];
     const timer = setTimeout(() => reject(new Error(`only got ${out.length}/${n}`)), timeoutMs);
     ws.on("message", (d) => {
       out.push(JSON.parse(d.toString()));
@@ -32,7 +41,7 @@ describe("mock engine", () => {
     const [snap, delta] = await msgs;
     expect(snap.kind).toBe("snapshot");
     expect(delta.kind).toBe("delta");
-    expect(delta.payload.last).toBe(3.6);
+    expect(delta.payload?.last).toBe(3.6);
     ws.close();
   });
 

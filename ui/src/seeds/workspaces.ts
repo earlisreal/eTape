@@ -19,6 +19,7 @@ export const SEED_WORKSPACES: Record<"monitoring" | "trading", Workspace> = {
       { id: "m-movers", panelId: "movers", group: null, settings: {} },
       { id: "m-news", panelId: "news", group: "green", settings: {} },
       { id: "m-conn", panelId: "connection-status", group: null, settings: {} },
+      { id: "m-smoke", panelId: "smoke-painter", group: null, settings: {} },
     ],
     layout: { grid: "seed-monitoring" },
   },

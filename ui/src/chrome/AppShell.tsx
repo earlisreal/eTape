@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { DockviewReact, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview";
+import { DockviewReact, type DockviewReadyEvent } from "dockview";
 import "dockview/dist/styles/dockview.css";
 import { PanelFrame } from "./PanelFrame";
 import type { Workspace } from "./workspace";
@@ -24,7 +24,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore }: P
   const components = Object.fromEntries(
     ws.panels.map((p) => [
       p.id,
-      (_props: IDockviewPanelProps) => <PanelFrame config={p} stores={stores} scheduler={scheduler} />,
+      () => <PanelFrame config={p} stores={stores} scheduler={scheduler} />,
     ]),
   );
 
