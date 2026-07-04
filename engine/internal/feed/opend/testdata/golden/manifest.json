@@ -1,10 +1,11 @@
 {
   "sdk_version": "10.08.6808",
-  "captured_frames": 19,
+  "captured_frames": 17,
   "encryption": "off",
   "proto_fmt": "protobuf",
   "excluded_proto_ids": [
-    1001
+    1001,
+    1002
   ],
-  "note": "InitConnect(1001) excluded both directions (loginUserID PII). body_hex/frame_hex are byte-exact round-trip targets; decoded_json is null (the Go test decodes selected bodies via generated types)."
+  "note": "Excluded both directions (public repo): InitConnect(1001) S2C carries loginUserID; GetGlobalState(1002) S2C embeds moomoo upstream server IPs. body_hex/frame_hex are byte-exact round-trip targets; decoded_json is null (the Go test decodes selected bodies via generated types)."
 }

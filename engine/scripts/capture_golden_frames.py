@@ -41,7 +41,10 @@ OUT = os.path.join(
 )
 os.makedirs(OUT, exist_ok=True)
 
-EXCLUDE = {1001}  # InitConnect: S2C carries loginUserID; drop both directions (public repo)
+EXCLUDE = {
+    1001,  # InitConnect: S2C carries loginUserID; drop both directions (public repo)
+    1002,  # GetGlobalState: S2C embeds moomoo's upstream server IPs (qotSvrIpAddr/trdSvrIpAddr) — public repo
+}
 captured = {}     # (proto_id, direction) -> record, deduped
 
 
@@ -129,10 +132,11 @@ def main():
         "encryption": "off",
         "proto_fmt": "protobuf",
         "excluded_proto_ids": sorted(EXCLUDE),
-        "note": ("InitConnect(1001) excluded both directions (loginUserID PII). "
-                 "body_hex/frame_hex are byte-exact round-trip targets; "
-                 "decoded_json is null (the Go test decodes selected bodies "
-                 "via generated types)."),
+        "note": ("Excluded both directions (public repo): InitConnect(1001) "
+                 "S2C carries loginUserID; GetGlobalState(1002) S2C embeds "
+                 "moomoo upstream server IPs. body_hex/frame_hex are byte-exact "
+                 "round-trip targets; decoded_json is null (the Go test decodes "
+                 "selected bodies via generated types)."),
     }
     with open(os.path.join(OUT, "manifest.json"), "w") as f:
         json.dump(manifest, f, indent=2)
