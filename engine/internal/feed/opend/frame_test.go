@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha1"
 	"encoding/binary"
+	"io"
 	"testing"
 )
 
@@ -81,4 +82,63 @@ func TestDecodeErrors(t *testing.T) {
 	if _, err := Decode(corrupt); err != ErrBadSHA1 {
 		t.Fatalf("sha1 err = %v, want ErrBadSHA1", err)
 	}
+}
+
+func TestFrameReaderPipelinedAndPartial(t *testing.T) {
+	// Two frames concatenated, fed through a reader that yields tiny chunks,
+	// exercising both pipelining (>1 frame buffered) and partial reads.
+	a := Encode(1001, 1, []byte("first"))
+	b := Encode(1004, 2, []byte("second-frame-body"))
+	stream := append(append([]byte(nil), a...), b...)
+
+	fr := NewFrameReader(&chunkyReader{data: stream, chunk: 3})
+
+	f1, err := fr.ReadFrame()
+	if err != nil {
+		t.Fatalf("frame 1: %v", err)
+	}
+	if f1.ProtoID != 1001 || string(f1.Body) != "first" {
+		t.Fatalf("frame 1 = %+v", f1)
+	}
+	f2, err := fr.ReadFrame()
+	if err != nil {
+		t.Fatalf("frame 2: %v", err)
+	}
+	if f2.ProtoID != 1004 || string(f2.Body) != "second-frame-body" {
+		t.Fatalf("frame 2 = %+v", f2)
+	}
+	if _, err := fr.ReadFrame(); err != io.EOF {
+		t.Fatalf("after last frame err = %v, want io.EOF", err)
+	}
+}
+
+func TestFrameReaderRejectsCorruptBody(t *testing.T) {
+	f := Encode(3001, 9, []byte("payload"))
+	f[HeaderLen+1] ^= 0xFF // corrupt a body byte
+	if _, err := NewFrameReader(bytes.NewReader(f)).ReadFrame(); err != ErrBadSHA1 {
+		t.Fatalf("err = %v, want ErrBadSHA1", err)
+	}
+}
+
+// chunkyReader yields at most `chunk` bytes per Read to simulate a dribbling socket.
+type chunkyReader struct {
+	data  []byte
+	chunk int
+	pos   int
+}
+
+func (c *chunkyReader) Read(p []byte) (int, error) {
+	if c.pos >= len(c.data) {
+		return 0, io.EOF
+	}
+	n := c.chunk
+	if n > len(p) {
+		n = len(p)
+	}
+	if n > len(c.data)-c.pos {
+		n = len(c.data) - c.pos
+	}
+	copy(p, c.data[c.pos:c.pos+n])
+	c.pos += n
+	return n, nil
 }

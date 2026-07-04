@@ -3,9 +3,11 @@
 package opend
 
 import (
+	"bufio"
 	"crypto/sha1"
 	"encoding/binary"
 	"errors"
+	"io"
 )
 
 // HeaderLen is the fixed OpenD frame header size (verified from the SDK:
@@ -106,5 +108,44 @@ func Decode(frame []byte) (Frame, error) {
 		ProtoVer: h.protoVer,
 		SerialNo: h.serialNo,
 		Body:     append([]byte(nil), body...),
+	}, nil
+}
+
+// FrameReader reads whole frames from a byte stream (e.g. a TCP connection),
+// blocking until each frame is complete. It is used by exactly one reader
+// goroutine per connection.
+type FrameReader struct {
+	r *bufio.Reader
+}
+
+// NewFrameReader wraps r with a 128 KiB buffer (matching the SDK's recv size).
+func NewFrameReader(r io.Reader) *FrameReader {
+	return &FrameReader{r: bufio.NewReaderSize(r, 128*1024)}
+}
+
+// ReadFrame reads exactly one frame. It returns the underlying read error
+// (io.EOF/io.ErrUnexpectedEOF on close) or a codec error on corruption.
+func (fr *FrameReader) ReadFrame() (Frame, error) {
+	var head [HeaderLen]byte
+	if _, err := io.ReadFull(fr.r, head[:]); err != nil {
+		return Frame{}, err
+	}
+	h, err := parseHeader(head[:])
+	if err != nil {
+		return Frame{}, err
+	}
+	body := make([]byte, h.bodyLen)
+	if _, err := io.ReadFull(fr.r, body); err != nil {
+		return Frame{}, err
+	}
+	if sha1.Sum(body) != h.sha20 {
+		return Frame{}, ErrBadSHA1
+	}
+	return Frame{
+		ProtoID:  h.protoID,
+		FmtType:  h.fmtType,
+		ProtoVer: h.protoVer,
+		SerialNo: h.serialNo,
+		Body:     body,
 	}, nil
 }
