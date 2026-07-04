@@ -3,6 +3,7 @@ import { QuoteStore } from "./QuoteStore";
 import { BookStore } from "./BookStore";
 import { TapeRing } from "./TapeRing";
 import { BarStore } from "./BarStore";
+import { IndicatorStore } from "./IndicatorStore";
 import { HealthStore } from "./HealthStore";
 import { ExecStore } from "./ExecStore";
 import { ScannerStore } from "./ScannerStore";
@@ -13,6 +14,7 @@ export interface Stores {
   book: BookStore;
   tape: TapeRing;
   bars: BarStore;
+  indicators: IndicatorStore;
   health: HealthStore;
   exec: ExecStore;
   scanner: ScannerStore;
@@ -25,6 +27,7 @@ export function makeStores(): Stores {
     book: new BookStore(),
     tape: new TapeRing(),
     bars: new BarStore(),
+    indicators: new IndicatorStore(),
     health: new HealthStore(),
     exec: new ExecStore(),
     scanner: new ScannerStore(),
@@ -38,7 +41,7 @@ export function routeToStore(stores: Stores, m: SnapshotMsg | DeltaMsg): void {
     case "md.book": stores.book.apply(m); return;
     case "md.tape": stores.tape.apply(m); return;
     case "md.bars": stores.bars.apply(m); return;
-    case "md.indicator": return; // Plan 2 adds an IndicatorStore
+    case "md.indicator": stores.indicators.apply(m); return;
     case "scanner.rank":
     case "scanner.hit": stores.scanner.apply(m); return;
     case "news.item": stores.news.apply(m); return;
