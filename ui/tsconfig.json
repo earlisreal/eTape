@@ -12,7 +12,8 @@
     "noFallthroughCasesInSwitch": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
-    "types": ["vitest/globals"]
+    "types": ["vitest/globals"],
+    "noEmit": true
   },
   "include": ["src", "test", "mock-engine"],
   "references": [{ "path": "./tsconfig.node.json" }]

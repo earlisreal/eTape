@@ -101,7 +101,7 @@ ui/
 - Create: `ui/vite.config.ts`
 - Create: `ui/vitest.config.ts`
 - Create: `ui/index.html`
-- Create: `ui/.eslintrc.cjs`, `ui/.gitignore`
+- Create: `ui/.eslintrc.cjs`, `ui/.gitignore`, `ui/.npmrc`
 - Create: `ui/src/main.tsx` (placeholder)
 - Test: `ui/src/sanity.test.ts`
 
@@ -139,7 +139,7 @@ Expected: FAIL — `npm` errors because there is no `package.json` / dependencie
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run typecheck && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -187,12 +187,23 @@ Expected: FAIL — `npm` errors because there is no `package.json` / dependencie
     "noFallthroughCasesInSwitch": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
-    "types": ["vitest/globals"]
+    "types": ["vitest/globals"],
+    "noEmit": true
   },
   "include": ["src", "test", "mock-engine"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }
 ```
+`noEmit` is required here: with no `outDir` set, a plain `tsc` invocation
+(as `npm run build`'s old `tsc -b && vite build` performed) would otherwise
+write compiled `.js`/`.d.ts` files directly next to their `.ts`/`.tsx`
+sources — none of which `.gitignore` covers — since Vite/esbuild does the
+actual bundling and type-checking is the only thing `tsc` needs to do here.
+Note `tsconfig.node.json` (below) must stay emit-capable — it is a
+`composite` project referenced from here, and TS6310 rejects a referenced
+composite project with `noEmit` set — so `npm run build` type-checks via
+the same non-build `tsc -p ... --noEmit` invocations as `npm run typecheck`
+(see `build` script above) rather than `tsc -b`.
 
 `ui/tsconfig.node.json`:
 ```json
@@ -289,17 +300,31 @@ dist
 *.tsbuildinfo
 ```
 
+`ui/.npmrc`:
+```ini
+registry=https://registry.npmjs.org/
+```
+eTape is a public, personal repo unrelated to any employer — pin the public
+registry here so `npm install`/`npm ci` always resolve packages from it,
+regardless of a machine-level `~/.npmrc` override (e.g. a corporate
+Artifactory mirror). Without this, installing on a machine with such an
+override bakes its private hostname into every `"resolved"` URL in
+`package-lock.json`, and `npm ci` fails to resolve packages anywhere that
+mirror isn't reachable (CI, a fresh clone, a non-corporate machine).
+
 - [ ] **Step 4: Install and run the test to verify it passes**
 
 Run: `cd ui && npm install && npm test`
 Expected: PASS — `sanity.test.ts` green; `npm run dev` and `npm run build` are wired but not yet exercised.
+Verify `package-lock.json`'s `"resolved"` URLs all point at
+`registry.npmjs.org` (not a private mirror) before committing.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add ui/package.json ui/package-lock.json ui/tsconfig.json ui/tsconfig.node.json \
   ui/vite.config.ts ui/vitest.config.ts ui/index.html ui/.eslintrc.cjs ui/.gitignore \
-  ui/src/main.tsx ui/src/sanity.test.ts
+  ui/.npmrc ui/src/main.tsx ui/src/sanity.test.ts
 git commit -m "chore(ui): scaffold Vite + React + TS + Vitest project"
 ```
 
