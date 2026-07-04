@@ -2475,3 +2475,52 @@ git commit -m "feat(engine/cmd): minimal etape harness — connect to OpenD, log
 **2. Inline Execution** — Execute tasks in this session using executing-plans, batch execution with checkpoints.
 
 **Which approach?** (Or: shall I write Plan 2 next instead of executing?)
+
+---
+
+## Post-implementation corrections (executed 2026-07-04/05, subagent-driven)
+
+Plan 1 was implemented in full and merged. All 12 tasks passed per-task review; the
+final whole-branch review (opus) returned **ready to merge**. The following
+corrections were made during execution and supersede the code shown above where
+they differ — recorded here so the plan matches what shipped:
+
+1. **Task 4 (protoc generation):** `golangci-lint` on the machine is **v2**, whose
+   config format differs (top-level `version: "2"`; `gofmt`/`goimports` live under a
+   separate `formatters:` key). The `.golangci.yml` was written in v2 format
+   (Task 1). `protoc-gen-go` lives at `~/go/bin` (added to PATH for generation).
+2. **Task 7 (golden capture):** the capture script's SDK monkeypatch targets in the
+   draft above are wrong (they hook `pack_pb_req`/`parse_rsp` in the wrong namespace
+   and test `err is None` when success is `ParseRspErr.OK`, capturing nothing). The
+   shipped `scripts/capture_golden_frames.py` instead hooks **`NetManager.send`** for
+   c2s and **`open_context_base.parse_rsp`** (a bound global via `from .utils import *`)
+   gated on `ParseRspErr.OK` for s2c. It excludes **InitConnect (1001)** *and*
+   **GetGlobalState (1002)** from the committed corpus (loginUserID PII and moomoo
+   upstream server IPs respectively — public repo). Corpus = 17 real frames.
+3. **Task 10 (keepalive) — race fix:** reading `c.kaInt` directly in `keepAliveLoop`
+   races `setConnInfo`'s locked write across reconnects (caught by `-race`). Shipped
+   code adds a mutex-guarded `keepAliveInterval()` accessor (mirrors `ConnID()`).
+4. **Task 9/11 (serveConn) — Critical leak fix:** `serveConn` must
+   `defer func() { _ = conn.Close() }()` immediately after `setConn(conn)`. Without
+   it the reader goroutine (blocked in `io.ReadFull`, no deadline) and its fd leak on
+   the ctx-cancel / keepalive-timeout / handshake-timeout exit paths. A regression
+   test (`TestRunReconnectsAfterKeepAliveTimeout`) drives the wedged-OpenD path and
+   asserts goroutines settle.
+
+**Carried to Plan 2 (required before subscriptions):** response correlation is
+currently serialNo-only. Real OpenD **pushes carry an independent, nonzero
+server-side serial** (observed: pushes at serial ~1517–1519 while client requests
+were at ~2752–2758). Once Plan 2 subscribes and pushes flow, a push serial could
+collide with an in-flight request serial and be mis-delivered to that request's
+waiter. **Fix in Plan 2's feed wrapper: route known push protoIDs
+(3005/3007/3009/3011/3013/…) to `Pushes()` regardless of serial; only match a
+pending waiter when protoID matches too.** Also make the mock emit pushes with a
+realistic nonzero serial.
+
+**Hardening backlog (not blocking v1):** add a per-write deadline in `send()` (a
+non-reading-but-open OpenD can wedge `conn.Write` before the keepalive timeout
+fires); cap `bodyLen` before allocating in `ReadFrame`/`Decode` (guards against a
+corrupt length from a compromised gateway); reset reconnect backoff on successful
+handshake (`ConnUp`) rather than on successful dial; emit an initial `ConnDown` /
+dial-failure signal on `State()` so Plan 2 can distinguish "connecting" from
+"never started"; pin the `protoc-gen-go` version in `gen_proto.sh`'s error hint.
