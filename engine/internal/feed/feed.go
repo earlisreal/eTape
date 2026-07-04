@@ -74,11 +74,11 @@ type Book struct {
 // Bar is a raw OHLCV bar keyed by its bucket START (epoch ms). The adapter
 // normalizes moomoo's end-labeled intraday K-lines before they reach here.
 type Bar struct {
-	Symbol   string
-	BucketMs int64
+	Symbol     string
+	BucketMs   int64
 	O, H, L, C float64
-	Volume   int64
-	Turnover float64
+	Volume     int64
+	Turnover   float64
 }
 
 // SubType is a broker-agnostic subscription kind.
