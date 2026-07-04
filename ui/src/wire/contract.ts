@@ -2,6 +2,12 @@
 // Superseded by tygo-generated `ui/src/gen/*` once the engine lands. Keep every
 // field name identical to the approved specs so regeneration is a drop-in.
 
+// md.indicator keying convention: single-series indicators (VWAP/EMA/SMA/VOLUME/
+// DELTA) stream under the bare instanceId as the message `key`. Multi-series
+// indicators (currently only MACD) stream each sub-series under
+// `${instanceId}#${slot}` as the message key (e.g. `macd-1#macd`, `macd-1#signal`,
+// `macd-1#hist`) — see `render/chart/indicatorSeries.ts`'s `describeIndicator` for
+// the slot names per type. The engine must emit one snapshot/delta per slot.
 export type TopicName =
   | "md.quote" | "md.book" | "md.tape" | "md.bars" | "md.indicator"
   | "scanner.rank" | "scanner.hit"

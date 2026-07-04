@@ -6,25 +6,41 @@ import type { Workspace } from "./workspace";
 import { WorkspaceStore } from "./workspace";
 import type { Stores } from "../data/registry";
 import type { Scheduler } from "../render/Scheduler";
+import type { LinkGroups } from "./linkGroups";
+import type { PanelProps } from "./panels/registry";
+import { WorkspaceHeader } from "./WorkspaceHeader";
+import { useTheme } from "./ThemeProvider";
 
 interface Props {
   workspaceName: "monitoring" | "trading";
   stores: Stores;
   scheduler: Scheduler;
   workspaceStore: WorkspaceStore;
+  linkGroups: LinkGroups;
+  commands: PanelProps["commands"];
 }
 
-export function AppShell({ workspaceName, stores, scheduler, workspaceStore }: Props): JSX.Element {
+export function AppShell({ workspaceName, stores, scheduler, workspaceStore, linkGroups, commands }: Props): JSX.Element {
   const [ws, setWs] = useState<Workspace | null>(null);
+  const { mode } = useTheme();
   useEffect(() => { void workspaceStore.load(workspaceName).then(setWs); }, [workspaceName, workspaceStore]);
   if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
+
+  // A stable per-panel onConfigChange updates ws.panels[i].settings then saves.
+  const onConfigChange = (panelId: string, settings: Record<string, unknown>) => {
+    const next = { ...ws, panels: ws.panels.map((p) => (p.id === panelId ? { ...p, settings } : p)) };
+    setWs(next);                 // keep local state authoritative for subsequent edits
+    workspaceStore.save(next);   // debounced persist (config key workspace.<name>)
+  };
 
   // Stable React keys: panels are keyed by config.id so dockview drag/resize
   // never remounts them (canvas keeps its context).
   const components = Object.fromEntries(
     ws.panels.map((p) => [
       p.id,
-      () => <PanelFrame config={p} stores={stores} scheduler={scheduler} />,
+      () => <PanelFrame config={p} stores={stores} scheduler={scheduler}
+        linkGroups={linkGroups} commands={commands}
+        onConfigChange={(settings) => onConfigChange(p.id, settings)} />,
     ]),
   );
 
@@ -54,5 +70,13 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore }: P
     });
   };
 
-  return <DockviewReact components={components} onReady={onReady} className="dockview-theme-dark" />;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <WorkspaceHeader workspaceName={workspaceName} linkGroups={linkGroups} />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <DockviewReact components={components} onReady={onReady}
+          className={mode === "light" ? "dockview-theme-light" : "dockview-theme-dark"} />
+      </div>
+    </div>
+  );
 }

@@ -4,16 +4,23 @@ import { PANELS, type PanelProps } from "./panels/registry";
 import type { PanelConfig } from "./workspace";
 import type { Stores } from "../data/registry";
 import type { Scheduler } from "../render/Scheduler";
-import type { LinkGroup } from "./linkGroups";
+import type { LinkGroup, LinkGroups } from "./linkGroups";
+import { useTheme } from "./ThemeProvider";
+import type { Palette } from "../render/palette";
 
-const swatch = (g: LinkGroup) =>
-  g === null ? "transparent" : { red: "#ef4444", green: "#22c55e", blue: "#3b82f6", yellow: "#eab308" }[g];
+const swatch = (g: LinkGroup, palette: Palette) =>
+  g === null ? "transparent" : { red: palette.linkRed, green: palette.linkGreen, blue: palette.linkBlue, yellow: palette.linkYellow }[g];
 
 export function PanelFrame(
-  { config, stores, scheduler }: { config: PanelConfig; stores: Stores; scheduler: Scheduler },
+  { config, stores, scheduler, linkGroups, commands, onConfigChange }: {
+    config: PanelConfig; stores: Stores; scheduler: Scheduler;
+    linkGroups: LinkGroups; commands: PanelProps["commands"];
+    onConfigChange: (settings: Record<string, unknown>) => void;
+  },
 ): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
+  const { palette } = useTheme();
 
   useEffect(() => {
     const el = hostRef.current;
@@ -28,18 +35,19 @@ export function PanelFrame(
 
   const def = PANELS[config.panelId];
   const Body = def?.component;
-  const props: PanelProps = { config, stores, scheduler, width: size.width, height: size.height };
+  const props: PanelProps = { config, stores, scheduler, width: size.width, height: size.height,
+    linkGroups, commands, onConfigChange };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 8px",
-        background: "#141821", borderBottom: "1px solid #1f2430", fontSize: 12 }}>
-        <span style={{ width: 8, height: 8, borderRadius: 2, background: swatch(config.group) as string }} />
+        background: palette.surface, borderBottom: `1px solid ${palette.border}`, fontSize: 12 }}>
+        <span style={{ width: 8, height: 8, borderRadius: 2, background: swatch(config.group, palette) as string }} />
         <span>{config.panelId}</span>
       </div>
       <div ref={hostRef} style={{ flex: 1, minHeight: 0 }}>
         <ErrorBoundary label={config.panelId}>
-          {Body ? <Body {...props} /> : <div style={{ padding: 12, color: "#64748b" }}>“{config.panelId}” — coming in a later plan</div>}
+          {Body ? <Body {...props} /> : <div style={{ padding: 12, color: palette.textMuted }}>“{config.panelId}” — coming in a later plan</div>}
         </ErrorBoundary>
       </div>
     </div>

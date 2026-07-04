@@ -9,6 +9,7 @@ import { SEED_WORKSPACES } from "./seeds/workspaces";
 import { PANELS } from "./chrome/panels/registry";
 import { AppShell } from "./chrome/AppShell";
 import { ReconnectOverlay } from "./chrome/ReconnectOverlay";
+import { ThemeProvider } from "./chrome/ThemeProvider";
 import type { TopicName } from "./wire/contract";
 
 export function App({ workspaceName }: { workspaceName: "monitoring" | "trading" }): JSX.Element {
@@ -54,11 +55,14 @@ export function App({ workspaceName }: { workspaceName: "monitoring" | "trading"
     return () => { window.clearInterval(ping); disposeStores(); scheduler.stop(); client.stop(); };
   }, [client, stores, scheduler, workspaceName]);
 
-  void linkGroups; // wired into panel headers in Plan 2+ (chart/ladder follow groups)
+  const commands = { sendCommand: (name: string, args: unknown) => client.sendCommand(name, args) };
 
   return (
-    <ReconnectOverlay state={state}>
-      <AppShell workspaceName={workspaceName} stores={stores} scheduler={scheduler} workspaceStore={workspaceStore} />
-    </ReconnectOverlay>
+    <ThemeProvider commands={commands}>
+      <ReconnectOverlay state={state}>
+        <AppShell workspaceName={workspaceName} stores={stores} scheduler={scheduler}
+          workspaceStore={workspaceStore} linkGroups={linkGroups} commands={commands} />
+      </ReconnectOverlay>
+    </ThemeProvider>
   );
 }

@@ -5,9 +5,15 @@
 
 export abstract class PaintStore {
   private dirty = false;
-  protected markDirty(): void { this.dirty = true; }
+  private rev = 0;
+  protected markDirty(): void { this.dirty = true; this.rev++; }
   isDirty(): boolean { return this.dirty; }
   consumeDirty(): boolean { const d = this.dirty; this.dirty = false; return d; }
+  // Multi-consumer alternative to isDirty()/consumeDirty(): unlike consumeDirty(),
+  // reading the revision never resets state for other consumers, so N independent
+  // surfaces (e.g. several chart panels sharing one BarStore) can each track their
+  // own "have I seen this change yet" cursor without starving each other.
+  getRev(): number { return this.rev; }
 }
 
 export abstract class ReactStore<S> {
