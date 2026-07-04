@@ -32,6 +32,23 @@ function etMidnightMs(tsMs: number): number {
   return tsMs - secsSinceEtMidnight * 1000 - (new Date(tsMs).getUTCMilliseconds());
 }
 
+// Finds the epoch ms for 00:00 ET on a specific ET calendar date (targetY/targetMo/targetD),
+// starting from a nearby ET-midnight guess. Steps day-by-day, re-snapping to the true ET
+// midnight of the landed-on day each time — this self-corrects for the 23h/25h DST-transition
+// day instead of assuming every day is a fixed 86,400,000ms (which drifts month bucket starts
+// by an hour whenever the walked range crosses a DST transition).
+function etMidnightForDate(guessMs: number, targetY: number, targetMo: number, targetD: number): number {
+  let ms = etMidnightMs(guessMs);
+  for (let i = 0; i < 40; i++) {
+    const p = etParts(ms);
+    if (p.y === targetY && p.mo === targetMo && p.d === targetD) return ms;
+    const cur = Date.UTC(p.y, p.mo - 1, p.d);       // calendar-date comparison only, not a real instant
+    const target = Date.UTC(targetY, targetMo - 1, targetD);
+    ms = etMidnightMs(ms + (cur < target ? 1 : -1) * 86400 * 1000);
+  }
+  throw new Error("etMidnightForDate: failed to converge");
+}
+
 const ANCHOR_SECS = 9 * 3600 + 30 * 60; // 09:30 ET session anchor
 
 export function bucketStartMs(tsMs: number, tf: Timeframe): number {
@@ -53,15 +70,22 @@ export function bucketStartMs(tsMs: number, tf: Timeframe): number {
     case "60m": return floorTo(60 * 60, ANCHOR_SECS);
     case "D":   return midnight;
     case "W": {
-      // Week starts Monday 00:00 ET.
+      // Week starts Monday 00:00 ET. Resolve via etMidnightForDate (not a fixed
+      // day-count subtraction) so this stays correct across a DST transition;
+      // in practice the US transition always falls on a non-trading Sunday so
+      // no real week's span crosses it, but this keeps the logic uniform with "M".
       const p = etParts(tsMs);
       const daysFromMonday = (p.wday + 6) % 7;
-      return midnight - daysFromMonday * 86400 * 1000;
+      if (daysFromMonday === 0) return midnight;
+      const target = new Date(Date.UTC(p.y, p.mo - 1, p.d - daysFromMonday));
+      return etMidnightForDate(midnight, target.getUTCFullYear(), target.getUTCMonth() + 1, target.getUTCDate());
     }
     case "M": {
       const p = etParts(tsMs);
-      // First of the ET month at 00:00 ET: subtract (day-1) days from ET midnight.
-      return midnight - (p.d - 1) * 86400 * 1000;
+      // First of the ET month at 00:00 ET, resolved by day-snapping (not a fixed
+      // day-count subtraction) so it doesn't drift by an hour across the March/
+      // November DST transition.
+      return etMidnightForDate(midnight, p.y, p.mo, 1);
     }
   }
 }

@@ -31,4 +31,25 @@ describe("bucketStartMs — session-anchored at 09:30 ET", () => {
   it("D buckets start at 00:00 ET (04:00Z in EDT)", () => {
     expect(bucketStartMs(at("2026-07-06T18:00:00Z"), "D")).toBe(at("2026-07-06T04:00:00Z"));
   });
+
+  it("M buckets are DST-transition-safe: pre- and post-transition ticks in the same ET month resolve to the same instant", () => {
+    // 2026-03-08 is the US spring-forward Sunday. A tick before it (EST, UTC-5) and a
+    // tick after it (EDT, UTC-4) are both "March 2026" and must bucket to the same
+    // month-start epoch: 00:00 ET on 2026-03-01 == 05:00Z (EST, UTC-5, still in effect
+    // on March 1st).
+    const pre = bucketStartMs(at("2026-03-05T15:00:00Z"), "M"); // EST
+    const post = bucketStartMs(at("2026-03-20T15:00:00Z"), "M"); // EDT
+    expect(pre).toBe(at("2026-03-01T05:00:00Z"));
+    expect(post).toBe(at("2026-03-01T05:00:00Z"));
+    expect(pre).toBe(post);
+  });
+
+  it("W buckets are self-consistent across the week (no DST transition in practice, but exercised for uniformity)", () => {
+    const monday = bucketStartMs(at("2026-07-06T13:31:00Z"), "W"); // Monday itself
+    const wednesday = bucketStartMs(at("2026-07-08T18:00:00Z"), "W");
+    const friday = bucketStartMs(at("2026-07-10T20:00:00Z"), "W");
+    expect(monday).toBe(at("2026-07-06T04:00:00Z"));
+    expect(wednesday).toBe(monday);
+    expect(friday).toBe(monday);
+  });
 });
