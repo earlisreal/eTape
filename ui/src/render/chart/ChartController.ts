@@ -62,7 +62,11 @@ export class ChartController {
       // Push every newly-appended bar in order — update() only appends/replaces the
       // single bar it's given, so a multi-bucket jump (backgrounded tab, missed rAF
       // tick, reconnect burst) must be replayed bar-by-bar or the gap is permanent.
-      for (let i = this.lastAppliedCount; i < bars.length; i++) {
+      // Start one bar before `lastAppliedCount`: that bar was `last` as of the previous
+      // applied state and may have itself changed (e.g. finalized) during the same
+      // missed window that produced the new bars — re-flushing it is harmless/idempotent
+      // if unchanged, and necessary if it did change.
+      for (let i = Math.max(0, this.lastAppliedCount - 1); i < bars.length; i++) {
         this.candle.update(toCandle(bars[i]));
         this.volume.update(toVolume(bars[i], this.palette));
       }

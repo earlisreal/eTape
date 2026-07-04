@@ -145,6 +145,23 @@ describe("ChartController", () => {
     bars.push(bar("2026-07-06T13:33:00Z", 13, true));
     ctrl.sync(); // three new buckets appeared since the last sync
     const updatesAfter = candle.calls.filter((c) => c === "update").length;
-    expect(updatesAfter - updatesBefore).toBe(3); // all three new bars pushed, not just the last
+    // 4, not 3: the loop re-flushes the previously-last bar (index 0, unchanged here)
+    // alongside the 3 genuinely new bars, in case that bar itself changed during the
+    // same missed window — see the "finalizes the previously-last bar" test below.
+    expect(updatesAfter - updatesBefore).toBe(4);
+  });
+
+  it("growth that also finalizes the previously-last bar re-flushes that bar too", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10, true)]; // in-progress
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // backfill
+    const candle = facade.created[0].series;
+    // Simulate a missed window: the previously-last bar finalizes AND a new bar appears.
+    bars[0] = bar("2026-07-06T13:30:00Z", 10.5, false); // finalized, different close
+    bars.push(bar("2026-07-06T13:31:00Z", 11, true));   // new bar
+    const updatesBefore = candle.calls.filter((c) => c === "update").length;
+    ctrl.sync();
+    const updatesAfter = candle.calls.filter((c) => c === "update").length;
+    expect(updatesAfter - updatesBefore).toBe(2); // both the finalized bar AND the new bar are pushed
   });
 });
