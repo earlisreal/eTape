@@ -82,11 +82,26 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     applySymbol();
     const offLink = linkGroups.subscribe(applySymbol);
 
-    // One Surface per chart: dirty if bars OR indicators changed (consume BOTH —
-    // never short-circuit, or one store's flag would be left stuck).
+    // Each chart panel tracks its own last-seen revision per store, rather than
+    // consuming a shared boolean flag — BarStore/IndicatorStore are shared across
+    // every chart panel in a workspace (see App.tsx's single makeStores() call), so
+    // a shared consume-and-reset flag would let only the first-visited panel each
+    // frame ever see the change, starving every other panel including its own
+    // initial backfill. Sentinel -1 guarantees the first check after mount is
+    // always "dirty" (so a panel mounting after data already exists still picks
+    // it up on its very first scheduled frame, not just on the next new message).
+    let lastBarsRev = -1;
+    let lastIndicatorsRev = -1;
     const off = scheduler.register({
       id: `chart:${config.id}`,
-      isDirty: () => { const b = stores.bars.consumeDirty(); const i = stores.indicators.consumeDirty(); return b || i; },
+      isDirty: () => {
+        const barsRev = stores.bars.getRev();
+        const indicatorsRev = stores.indicators.getRev();
+        const changed = barsRev !== lastBarsRev || indicatorsRev !== lastIndicatorsRev;
+        lastBarsRev = barsRev;
+        lastIndicatorsRev = indicatorsRev;
+        return changed;
+      },
       paint: () => controller.sync(),
     });
 
@@ -113,7 +128,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
 
   const changeTimeframe = (tf: string) => { setTf(tf); controllerRef.current?.setTimeframe(tf); persist({ timeframe: tf }); };
   const addIndicator = (type: IndicatorType) => {
-    const inst: IndicatorInstance = { instanceId: `${type}-${idSeq.current++}`, type, params: withDefaultParams(type) };
+    const inst: IndicatorInstance = { instanceId: `${config.id}:${type}-${idSeq.current++}`, type, params: withDefaultParams(type) };
     const next = [...instances, inst];
     setInstances(next); controllerRef.current?.addIndicator(inst); persist({ indicators: next });
   };

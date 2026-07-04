@@ -32,4 +32,32 @@ describe("IndicatorStore", () => {
     expect(s.consumeDirty()).toBe(true);
     expect(s.consumeDirty()).toBe(false);
   });
+
+  it("routes a MACD instance's three suffixed keys (#macd, #signal, #hist) as fully independent series", () => {
+    // Wire-contract convention documented in ui/src/wire/contract.ts: MACD (the only
+    // multi-series indicator in the v1 catalog) streams each sub-series under
+    // `${instanceId}#${slot}` — see indicatorSeries.ts's describeIndicator.
+    const s = new IndicatorStore();
+    s.apply(snap("macd-1#macd", [{ timeMs: 1000, value: 0.5 }, { timeMs: 2000, value: 0.6 }]));
+    s.apply(snap("macd-1#signal", [{ timeMs: 1000, value: 0.4 }]));
+    s.apply(snap("macd-1#hist", [{ timeMs: 1000, value: 0.1 }]));
+
+    expect(s.series("macd-1#macd")).toEqual([
+      { timeMs: 1000, value: 0.5 }, { timeMs: 2000, value: 0.6 },
+    ]);
+    expect(s.series("macd-1#signal")).toEqual([{ timeMs: 1000, value: 0.4 }]);
+    expect(s.series("macd-1#hist")).toEqual([{ timeMs: 1000, value: 0.1 }]);
+    // The bare instanceId (no slot) never received any payload of its own.
+    expect(s.series("macd-1")).toEqual([]);
+
+    // Deltas target only their own slot, never bleeding into a sibling slot.
+    s.apply(delta("macd-1#signal", { timeMs: 2000, value: 0.55 }));
+    expect(s.series("macd-1#signal")).toEqual([
+      { timeMs: 1000, value: 0.4 }, { timeMs: 2000, value: 0.55 },
+    ]);
+    expect(s.series("macd-1#macd")).toEqual([
+      { timeMs: 1000, value: 0.5 }, { timeMs: 2000, value: 0.6 },
+    ]); // unaffected by the sibling-slot delta
+    expect(s.series("macd-1#hist")).toEqual([{ timeMs: 1000, value: 0.1 }]); // unaffected
+  });
 });
