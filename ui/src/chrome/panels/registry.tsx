@@ -3,8 +3,10 @@ import type { TopicName } from "../../wire/contract";
 import type { PanelConfig } from "../workspace";
 import type { Stores } from "../../data/registry";
 import type { Scheduler } from "../../render/Scheduler";
+import type { LinkGroups } from "../linkGroups";
 import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
 import { SmokePainterPanel } from "./SmokePainterPanel";
+import { ChartPanel } from "./ChartPanel";
 
 export interface PanelProps {
   config: PanelConfig;
@@ -12,6 +14,11 @@ export interface PanelProps {
   scheduler: Scheduler;
   width: number;
   height: number;
+  linkGroups: LinkGroups;
+  commands: { sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown }> };
+  // Persist a panel's own settings (timeframe, indicators, …). AppShell updates the
+  // workspace doc's matching panel entry and debounce-saves via WorkspaceStore.
+  onConfigChange: (settings: Record<string, unknown>) => void;
 }
 export interface PanelDef { component: FC<PanelProps>; topics: TopicName[] }
 
@@ -26,5 +33,9 @@ export const PANELS: Record<string, PanelDef> = {
   "smoke-painter": {
     component: SmokePainterPanel,
     topics: ["md.quote"],
+  },
+  "chart": {
+    component: ChartPanel,
+    topics: ["md.bars", "md.indicator"],
   },
 };

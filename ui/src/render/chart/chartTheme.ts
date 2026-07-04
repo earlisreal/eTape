@@ -52,6 +52,7 @@ export function candleOptions(p: Palette): CandleOpts {
 }
 
 export function volumeOptions(p: Palette): HistogramOpts {
+  void p; // signature parity with chartOptions/candleOptions; volume color is per-bar, not palette-level
   // Overlaid on the main pane, its own invisible scale; per-bar color is set on
   // each data point (up/down) at setData/update time by the controller.
   return { priceScaleId: "", priceFormat: { type: "volume" } };

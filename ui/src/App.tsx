@@ -54,11 +54,12 @@ export function App({ workspaceName }: { workspaceName: "monitoring" | "trading"
     return () => { window.clearInterval(ping); disposeStores(); scheduler.stop(); client.stop(); };
   }, [client, stores, scheduler, workspaceName]);
 
-  void linkGroups; // wired into panel headers in Plan 2+ (chart/ladder follow groups)
+  const commands = { sendCommand: (name: string, args: unknown) => client.sendCommand(name, args) };
 
   return (
     <ReconnectOverlay state={state}>
-      <AppShell workspaceName={workspaceName} stores={stores} scheduler={scheduler} workspaceStore={workspaceStore} />
+      <AppShell workspaceName={workspaceName} stores={stores} scheduler={scheduler}
+        workspaceStore={workspaceStore} linkGroups={linkGroups} commands={commands} />
     </ReconnectOverlay>
   );
 }

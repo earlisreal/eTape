@@ -1,0 +1,136 @@
+import { useEffect, useRef, useState } from "react";
+import { createChart, CandlestickSeries, HistogramSeries, LineSeries, type IChartApi, type ISeriesApi, type Time } from "lightweight-charts";
+import type { PanelProps } from "./registry";
+import { ChartController } from "../../render/chart/ChartController";
+import type { ChartApiFacade, LwcSeries } from "../../render/chart/ChartApiFacade";
+import { DiamondFillPrimitive } from "../../render/chart/diamondPrimitive";
+import { SessionShadingPrimitive } from "../../render/chart/sessionPrimitive";
+import { withDefaultParams, type IndicatorInstance, type IndicatorType } from "../../render/chart/indicatorSeries";
+import type { Palette } from "../../render/palette";
+import { ChartControls } from "./ChartControls";
+import { useTheme } from "../ThemeProvider";
+
+// Adapts a real LWC v5 IChartApi to the controller's minimal ChartApiFacade.
+function makeFacade(chart: IChartApi, palette: Palette): {
+  facade: ChartApiFacade; setPalette: (p: Palette) => void;
+} {
+  let candle: ISeriesApi<"Candlestick"> | null = null;
+  const session = new SessionShadingPrimitive(palette);
+  const diamonds = new DiamondFillPrimitive(palette);
+
+  const facade: ChartApiFacade = {
+    addSeries: (kind, options, paneIndex) => {
+      const s = kind === "candle" ? chart.addSeries(CandlestickSeries, options as object, paneIndex)
+        : kind === "line" ? chart.addSeries(LineSeries, options as object, paneIndex)
+        : chart.addSeries(HistogramSeries, options as object, paneIndex);
+      if (kind === "candle") {
+        candle = s as ISeriesApi<"Candlestick">;
+        candle.attachPrimitive(diamonds);
+        // Pane primitive on the main pane (index 0) for session shading:
+        chart.panes()[0]?.attachPrimitive?.(session);
+      }
+      return s as unknown as LwcSeries;
+    },
+    removeSeries: (s) => chart.removeSeries(s as unknown as ISeriesApi<"Line">),
+    setSessionBands: (bands) => session.setBands(bands),
+    setFillMarkers: (m) => diamonds.setMarkers(m),
+    timeToCoordinate: (ms) => chart.timeScale().timeToCoordinate((Math.floor(ms / 1000)) as unknown as Time),
+    priceToCoordinate: (price) => candle?.priceToCoordinate(price) ?? null,
+    scrollToRealTime: () => chart.timeScale().scrollToRealTime(),
+    isAtRightEdge: () => {
+      const r = chart.timeScale().scrollPosition();
+      return r >= -1; // at/near the right edge (LWC scrollPosition 0 = latest bar at right)
+    },
+    resize: (w, h) => chart.resize(w, h),
+    applyOptions: (o) => chart.applyOptions(o as object),
+    remove: () => chart.remove(),
+  };
+  return { facade, setPalette: (p) => { session.setPalette(p); diamonds.setPalette(p); } };
+}
+
+export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange }: PanelProps): JSX.Element {
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const controllerRef = useRef<ChartController | null>(null);
+  const setFacadePaletteRef = useRef<((p: Palette) => void) | null>(null);
+  const idSeq = useRef(0);
+  const { palette } = useTheme();
+  const symbol = (config.settings.symbol as string) ?? "US.AAPL";
+  const timeframe0 = (config.settings.timeframe as string) ?? "1m";
+
+  // Config surfaces (timeframe + indicators) ARE low-rate chrome, so React state is
+  // fine here (the hard rule is about market data, not per-chart config).
+  const [timeframe, setTf] = useState(timeframe0);
+  const [instances, setInstances] = useState<IndicatorInstance[]>(
+    (config.settings.indicators as IndicatorInstance[]) ?? [],
+  );
+
+  useEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const chart = createChart(host, { width, height });
+    const { facade, setPalette } = makeFacade(chart, palette);
+    setFacadePaletteRef.current = setPalette;
+    const controller = new ChartController(facade, palette, { symbol, timeframe: timeframe0 },
+      { bars: stores.bars, indicators: stores.indicators, commands });
+    controller.mount();
+    controllerRef.current = controller;
+
+    // Restore persisted indicator instances (colors + params) saved with the workspace.
+    for (const inst of instances) controller.addIndicator(inst);
+
+    const applySymbol = () => controller.setSymbol(linkGroups.symbolFor(config.group) ?? symbol);
+    applySymbol();
+    const offLink = linkGroups.subscribe(applySymbol);
+
+    // One Surface per chart: dirty if bars OR indicators changed (consume BOTH —
+    // never short-circuit, or one store's flag would be left stuck).
+    const off = scheduler.register({
+      id: `chart:${config.id}`,
+      isDirty: () => { const b = stores.bars.consumeDirty(); const i = stores.indicators.consumeDirty(); return b || i; },
+      paint: () => controller.sync(),
+    });
+
+    const ro = new ResizeObserver((entries) => {
+      const r = entries[0].contentRect;
+      controller.resize(Math.floor(r.width), Math.floor(r.height));
+    });
+    ro.observe(host);
+
+    return () => { off(); offLink(); ro.disconnect(); controller.dispose(); controllerRef.current = null; };
+    // Intentionally [config.id] only: symbol/timeframe/indicator/palette changes are
+    // handled imperatively via the controller (see the effects/callbacks below) — the
+    // chart must never remount on those changes (the canvas keeps its context).
+  }, [config.id]);
+
+  // Theme switch: re-apply palette to chart, series and the custom primitives.
+  useEffect(() => {
+    controllerRef.current?.setPalette(palette);
+    setFacadePaletteRef.current?.(palette);
+  }, [palette]);
+
+  // ---- config mutations: drive the controller imperatively, then persist ----
+  const persist = (patch: Record<string, unknown>) => onConfigChange({ ...config.settings, timeframe, indicators: instances, ...patch });
+
+  const changeTimeframe = (tf: string) => { setTf(tf); controllerRef.current?.setTimeframe(tf); persist({ timeframe: tf }); };
+  const addIndicator = (type: IndicatorType) => {
+    const inst: IndicatorInstance = { instanceId: `${type}-${idSeq.current++}`, type, params: withDefaultParams(type) };
+    const next = [...instances, inst];
+    setInstances(next); controllerRef.current?.addIndicator(inst); persist({ indicators: next });
+  };
+  const updateIndicator = (inst: IndicatorInstance) => {
+    const next = instances.map((i) => (i.instanceId === inst.instanceId ? inst : i));
+    setInstances(next); controllerRef.current?.updateIndicator(inst); persist({ indicators: next });
+  };
+  const removeIndicator = (id: string) => {
+    const next = instances.filter((i) => i.instanceId !== id);
+    setInstances(next); controllerRef.current?.removeIndicator(id); persist({ indicators: next });
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <ChartControls timeframe={timeframe} instances={instances} palette={palette}
+        onTimeframe={changeTimeframe} onAdd={addIndicator} onUpdate={updateIndicator} onRemove={removeIndicator} />
+      <div ref={hostRef} style={{ flex: 1, minHeight: 0, position: "relative" }} />
+    </div>
+  );
+}
