@@ -8,6 +8,8 @@ import type { Stores } from "../data/registry";
 import type { Scheduler } from "../render/Scheduler";
 import type { LinkGroups } from "./linkGroups";
 import type { PanelProps } from "./panels/registry";
+import { WorkspaceHeader } from "./WorkspaceHeader";
+import { useTheme } from "./ThemeProvider";
 
 interface Props {
   workspaceName: "monitoring" | "trading";
@@ -20,6 +22,7 @@ interface Props {
 
 export function AppShell({ workspaceName, stores, scheduler, workspaceStore, linkGroups, commands }: Props): JSX.Element {
   const [ws, setWs] = useState<Workspace | null>(null);
+  const { mode } = useTheme();
   useEffect(() => { void workspaceStore.load(workspaceName).then(setWs); }, [workspaceName, workspaceStore]);
   if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
 
@@ -67,5 +70,13 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     });
   };
 
-  return <DockviewReact components={components} onReady={onReady} className="dockview-theme-dark" />;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      <WorkspaceHeader workspaceName={workspaceName} linkGroups={linkGroups} />
+      <div style={{ flex: 1, minHeight: 0 }}>
+        <DockviewReact components={components} onReady={onReady}
+          className={mode === "light" ? "dockview-theme-light" : "dockview-theme-dark"} />
+      </div>
+    </div>
+  );
 }
