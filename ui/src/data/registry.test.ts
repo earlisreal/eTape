@@ -13,6 +13,13 @@ describe("routeToStore", () => {
       payload: { links: [{ link: "ui-engine", ms: 1, min: 1, avg: 1, max: 1, status: "ok" }] } });
     expect(stores.health.getSnapshot().links).toHaveLength(1);
   });
+
+  it("routes md.indicator to the IndicatorStore keyed by instanceId", () => {
+    const stores = makeStores();
+    routeToStore(stores, { kind: "snapshot", topic: "md.indicator", key: "vwap-1",
+      payload: [{ timeMs: 1000, value: 10 }] });
+    expect(stores.indicators.series("vwap-1")).toHaveLength(1);
+  });
 });
 
 describe("connectStores", () => {
