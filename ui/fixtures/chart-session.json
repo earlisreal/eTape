@@ -6,15 +6,15 @@
       { "symbol": "US.AAPL", "timeframe": "1m", "bucketStart": "2026-07-06T13:32:00Z", "o": 3.58, "h": 3.59, "l": 3.52, "c": 3.53, "v": 7000,  "inProgress": true }
     ] },
     { "topic": "md.indicator", "key": "seed-vwap", "payload": [
-      { "timeMs": 1783776600000, "value": 3.48 },
-      { "timeMs": 1783776660000, "value": 3.52 },
-      { "timeMs": 1783776720000, "value": 3.54 }
+      { "timeMs": 1783344600000, "value": 3.48 },
+      { "timeMs": 1783344660000, "value": 3.52 },
+      { "timeMs": 1783344720000, "value": 3.54 }
     ] }
   ],
   "deltas": [
     { "afterMs": 80,  "topic": "md.bars", "key": "US.AAPL:1m", "payload": { "symbol": "US.AAPL", "timeframe": "1m", "bucketStart": "2026-07-06T13:32:00Z", "o": 3.58, "h": 3.61, "l": 3.52, "c": 3.60, "v": 8200, "inProgress": true } },
     { "afterMs": 160, "topic": "md.bars", "key": "US.AAPL:1m", "payload": { "symbol": "US.AAPL", "timeframe": "1m", "bucketStart": "2026-07-06T13:32:00Z", "o": 3.58, "h": 3.62, "l": 3.52, "c": 3.61, "v": 9100, "inProgress": false } },
     { "afterMs": 240, "topic": "md.bars", "key": "US.AAPL:1m", "payload": { "symbol": "US.AAPL", "timeframe": "1m", "bucketStart": "2026-07-06T13:33:00Z", "o": 3.61, "h": 3.64, "l": 3.60, "c": 3.63, "v": 4000, "inProgress": true } },
-    { "afterMs": 320, "topic": "md.indicator", "key": "seed-vwap", "payload": { "timeMs": 1783776780000, "value": 3.57 } }
+    { "afterMs": 320, "topic": "md.indicator", "key": "seed-vwap", "payload": { "timeMs": 1783344780000, "value": 3.57 } }
   ]
 }
