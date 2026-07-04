@@ -22,9 +22,9 @@ export interface PanelProps {
 }
 export interface PanelDef { component: FC<PanelProps>; topics: TopicName[] }
 
-// Plan 1 registers the two panels needed to prove the stack. Plans 2–5 register
-// chart / ladder / tape / scanner / movers / news / account-bar / positions /
-// open-orders / order-ticket here.
+// Plan 1 registered the two panels needed to prove the stack; Plan 2 adds the
+// real chart panel. Plans 3–5 still owe ladder / tape / scanner / movers / news /
+// account-bar / positions / open-orders / order-ticket here.
 export const PANELS: Record<string, PanelDef> = {
   "connection-status": {
     component: ({ stores }) => <ConnectionStatusPanel health={stores.health} />,

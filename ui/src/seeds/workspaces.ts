@@ -1,9 +1,10 @@
 import type { Workspace } from "../chrome/workspace";
 
 // Seed documents. Panel ids match the registry in chrome/panels/registry.tsx.
-// Later plans add chart/ladder/tape/etc. panelIds; Plan 1 registers only
-// connection-status and smoke-painter, so unknown panelIds render a "coming soon"
-// placeholder frame rather than crashing (see PanelFrame).
+// Plan 1 registered only connection-status and smoke-painter; Plan 2 adds the
+// real chart panel used below. Remaining panelIds (ladder/tape/scanner/movers/
+// news/account-bar/positions/open-orders/order-ticket) still render the
+// "coming soon" placeholder frame rather than crashing (see PanelFrame).
 const chart = (id: string, symbol: string, timeframe: string, group: NonNullable<Workspace["panels"][number]["group"]>): Workspace["panels"][number] =>
   ({ id, panelId: "chart", group, settings: { symbol, timeframe } });
 
