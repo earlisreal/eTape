@@ -160,8 +160,11 @@ when implementing the wire protocol.
   moomoo as configured venues; multi-broker spec). Alpaca research:
   `docs/2026-07-03-alpaca-api.md` (paper keys verified, key `alpaca`; no live account
   yet; no L2 depth, so the moomoo DOM stays). Monday's order-latency benchmark is now
-  a **routing input**, not a broker decision — still run TZ + Alpaca paper in one
-  session.
+  a **routing input**, not a broker decision — run **three venues in one session**:
+  TZ paper + Alpaca paper + **moomoo live** (paper can't validate fills; Earl
+  authorized live benchmark orders 2026-07-04 — 1-share marketable limits, cheap
+  liquid symbol, flatten immediately, RTH only, trade unlock done outside eTape
+  first).
 
 Closed by the three approved designs (2026-07-03): OpenD client = raw TCP + Go
 protobuf (engine design); market-data storage = always-on SQLite feed journal +

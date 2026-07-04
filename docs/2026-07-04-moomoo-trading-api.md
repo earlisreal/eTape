@@ -201,7 +201,13 @@ as app. The only per-order fee among eTape's three venues — a routing consider
   (universal-account `cashInfoList` shape for USD).
 - Paper ETH contradiction; whether the US paper account delivers order pushes
   reliably enough to skip the polling fallback.
-- Place→push ack latency on paper + live (extend the Monday benchmark script).
+- Place→push ack latency: **in scope for Monday's benchmark** (amended
+  2026-07-04) — run the moomoo **live** account alongside TZ paper + Alpaca paper
+  in the same session, same measurements (place → order-push ack → fill push).
+  Live because paper can't validate fills. Earl authorized live benchmark orders
+  2026-07-04: 1-share marketable limits on a cheap liquid symbol, flatten
+  immediately, RTH only. Requires trade unlock first (GUI or SDK one-liner —
+  the unlock verification above is a prerequisite of the same session).
 - `Order.remark` echo on **fill** correlation path (fill push has no remark — join
   via `orderID`).
 - Whether cancel-all (`forAll`) acks synchronously or only via per-order pushes.
