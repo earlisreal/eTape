@@ -1,0 +1,27 @@
+version: "2"
+linters:
+  enable:
+    - misspell
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - internal/feed/opend/pb
+      - third_party$
+      - builtin$
+      - examples$
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  exclusions:
+    generated: lax
+    paths:
+      - internal/feed/opend/pb
+      - third_party$
+      - builtin$
+      - examples$
