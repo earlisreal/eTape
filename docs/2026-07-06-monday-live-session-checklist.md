@@ -6,20 +6,20 @@ venue-routing decision, and the moomoo unlock runbook.
 
 **Safety rules for this session:**
 
-- TradeZero keys on disk are **LIVE** — read-only endpoints only; the TZ benchmark
-  leg runs on **paper keys** (see prerequisites).
-- moomoo live orders are authorized (2026-07-04) but **re-confirm Earl's explicit
-  go-ahead in the conversation that runs them**: 1-share marketable limits, cheap
-  liquid symbol, flatten immediately, RTH only.
+- The benchmark places **real-money orders on two live venues**: TZ live (paper
+  keygen failed 2026-07-04, Earl authorized live instead) and moomoo live
+  (authorized 2026-07-04). Both legs: 1-share marketable limits, cheap liquid
+  symbol, **long side only** (buy → sell, no shorts/locates), flatten
+  immediately, RTH only — and **re-confirm Earl's explicit go-ahead in the
+  conversation that runs them** (per the CLAUDE.md safety rule).
+- Outside the benchmark orders, TZ live keys stay **read-only**.
 - Trade unlock happens **outside eTape** (OpenD GUI or manual SDK one-liner) —
   the trade password never touches eTape code.
 
 ## 0. Prerequisites (before the session)
 
-- [ ] Generate **TradeZero paper API keys** — blocks the TZ benchmark leg and all
-      v1 integration tests
 - [ ] Extend `prototypes/tz_order_latency_bench.py` to three venues in one run:
-      TZ paper + Alpaca paper (REST) + moomoo live (OpenD, Python SDK)
+      TZ live + Alpaca paper (REST) + moomoo live (OpenD, Python SDK)
 - [ ] OpenD running, quote + trade logged in; confirm US LV3 entitlement active
 - [ ] Pick the benchmark symbol (cheap, liquid, tight spread)
 
@@ -45,17 +45,20 @@ Routing input, not a broker decision. Record **place→ack** and **place→fill*
 separately for every venue (moomoo's path is local TCP → OpenD → moomoo servers
 vs direct REST for TZ/Alpaca — keep the OpenD hop visible).
 
-- [ ] **TZ paper**: order POST → Portfolio-stream ack → fill
+- [ ] **TZ live**: order POST → Portfolio-stream ack → fill
+      (⚠️ real money — re-confirm go-ahead; 1 share, marketable limit, long
+      only, flatten immediately)
 - [ ] **Alpaca paper**: order POST → `new` ack → `fill` on `trade_updates`
 - [ ] **moomoo live**: `Trd_PlaceOrder` → order push ack → fill push
-      (⚠️ real money — re-confirm go-ahead; 1 share, marketable limit, flatten
-      immediately)
+      (⚠️ real money — same guardrails as TZ live)
 - [ ] Warm vs cold connection numbers (Alpaca cold TLS was ~430 ms; keep-alive
       pool assumed)
 
 ## 4. Broker side-checks (while connected)
 
-TradeZero (paper, plus read-only on live keys):
+TradeZero (live account — the benchmark's own orders plus read-only endpoints;
+note: **paper keys still wanted eventually** — keygen failed 2026-07-04, they
+gate v1 integration/E2E tests, not this session):
 
 - [ ] Capture real Portfolio/P&L WebSocket frames → freeze the Go structs
 - [ ] Does the Portfolio stream emit one update per partial fill?

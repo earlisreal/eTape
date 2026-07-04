@@ -60,10 +60,11 @@ here and built in v1.x.
 
 Monday's order-latency benchmark is reframed: a **routing input** (which venue to
 prefer for what), no longer a broker decision. Scope (amended 2026-07-04): **three
-venues in one session** — TZ paper, Alpaca paper, and the **moomoo live account**
-(its paper env can't validate fills, so live is the only place its order path can
-be measured; Earl authorized live benchmark orders 2026-07-04 — minimal size,
-cheap liquid symbol, flatten immediately).
+venues in one session** — **TZ live** (paper keygen failed 2026-07-04; Earl
+authorized live instead), Alpaca paper, and the **moomoo live account** (its paper
+env can't validate fills). Live-order guardrails on both live legs: minimal size,
+cheap liquid symbol, long side only, flatten immediately; re-confirm authorization
+in the session that runs it.
 
 ## Domain changes (`exec`)
 
@@ -293,17 +294,19 @@ eJournal export (unchanged).
 ## Open items
 
 - Monday: OpenD GUI unlock control — exists or not (decides the unlock runbook)
-- Monday: extend the benchmark script to **three venues in one session** — TZ
-  paper + Alpaca paper (order POST → ack/fill) + **moomoo live** (place → order
-  push ack → fill push, via OpenD; same measurements). moomoo live authorized by
-  Earl 2026-07-04: 1-share marketable-limit orders on a cheap liquid symbol,
-  flattened immediately, RTH only. Prerequisite: trade unlock (the GUI check
-  above, else the manual SDK one-liner). Note moomoo's path differs (local TCP →
-  OpenD → moomoo servers vs direct REST) — record both place→ack and place→fill
-  so the OpenD hop is visible in the comparison.
+- Monday: extend the benchmark script to **three venues in one session** —
+  **TZ live** + Alpaca paper + **moomoo live** (order/place → ack → fill on
+  each; moomoo via OpenD pushes). Both live legs authorized by Earl 2026-07-04
+  (TZ moved to live after paper keygen failed): 1-share marketable-limit orders
+  on a cheap liquid symbol, long side only, flattened immediately, RTH only;
+  re-confirm in the running session. moomoo prerequisite: trade unlock (the GUI
+  check above, else the manual SDK one-liner). Note moomoo's path differs
+  (local TCP → OpenD → moomoo servers vs direct REST) — record both place→ack
+  and place→fill so the OpenD hop is visible in the comparison.
 - moomoo day-P&L field in `Trd_GetFunds` (USD `cashInfoList` shape) for gate rule 5
 - moomoo paper: ETH contradiction; whether order pushes arrive reliably on the US
   paper account (decides if the polling fallback is primary there)
 - Alpaca: `client_order_id` reuse semantics after terminal states; paper
   binary-frame payload encoding
-- TZ paper keys (carried) — blocks v1 integration tests
+- TZ paper keys (carried) — keygen failed 2026-07-04; still blocks v1
+  integration/E2E tests (the Monday benchmark runs on TZ live instead)
