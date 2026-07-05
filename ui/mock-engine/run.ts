@@ -9,6 +9,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 // dev flow — unchanged so its docs/tests keep working). Select another fixture
 // file from ui/fixtures/<name>.json via a CLI arg or the FIXTURE env var:
 //   npm run mock-engine -- chart-session      (candles + VWAP dev-app fixture, Plan 2)
+//   npm run mock-engine -- ladder-tape        (L2 book + tape + working orders, Plan 3)
 //   FIXTURE=chart-session npm run mock-engine
 const name = process.argv[2] ?? process.env.FIXTURE ?? "session-basic";
 const fixture = JSON.parse(
