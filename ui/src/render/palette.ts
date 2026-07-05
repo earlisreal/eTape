@@ -21,6 +21,14 @@ export interface Palette {
   buyFill: string;     // buy diamond fill (soft green)
   sellFill: string;    // sell diamond fill (soft pink)
   fillOutline: string; // thin dark outline on both
+  // ladder / tape (Plan 3)
+  neutral: string;      // NEUTRAL tick prints + last-trade text with no direction
+  depthBid: string;     // ladder cumulative depth bar fill, bid side (rgba, low alpha)
+  depthAsk: string;     // ladder cumulative depth bar fill, ask side (rgba, low alpha)
+  flashBuy: string;     // last-trade flash row fill at full strength (painter decays via globalAlpha)
+  flashSell: string;
+  flashNeutral: string;
+  orderMark: string;    // display-only working-order marks on the ladder
   // ET session shading (rgba, low alpha — drawn behind bars)
   sessionPre: string;
   sessionRth: string;  // usually transparent
@@ -60,6 +68,13 @@ export const LIGHT: Palette = {
   buyFill: "#4CC79E",
   sellFill: "#F58DA1",
   fillOutline: "#10151C",
+  neutral: "#5F6B78",
+  depthBid: "rgba(23,166,124,0.14)",
+  depthAsk: "rgba(224,82,110,0.12)",
+  flashBuy: "rgba(23,166,124,0.30)",
+  flashSell: "rgba(224,82,110,0.28)",
+  flashNeutral: "rgba(90,102,114,0.22)",
+  orderMark: "#C0872E",
   sessionPre: "rgba(92,120,160,0.07)",
   sessionRth: "rgba(0,0,0,0)",
   sessionPost: "rgba(198,150,64,0.08)",
@@ -95,6 +110,13 @@ export const DARK: Palette = {
   buyFill: "#35C79E",
   sellFill: "#F98AA3",
   fillOutline: "#05070A",
+  neutral: "#8B98A5",
+  depthBid: "rgba(43,184,148,0.16)",
+  depthAsk: "rgba(240,100,126,0.14)",
+  flashBuy: "rgba(43,184,148,0.32)",
+  flashSell: "rgba(240,100,126,0.30)",
+  flashNeutral: "rgba(122,135,148,0.25)",
+  orderMark: "#E0A64B",
   sessionPre: "rgba(120,150,190,0.12)",
   sessionRth: "rgba(0,0,0,0)",
   sessionPost: "rgba(200,155,70,0.10)",

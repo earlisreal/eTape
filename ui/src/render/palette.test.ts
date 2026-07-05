@@ -30,4 +30,16 @@ describe("palette", () => {
     expect(getPalette("light")).toBe(LIGHT);
     expect(getPalette("dark")).toBe(DARK);
   });
+
+  it("defines the ladder/tape tokens (Plan 3) in both variants", () => {
+    for (const p of [LIGHT, DARK]) {
+      for (const k of ["neutral", "depthBid", "depthAsk", "flashBuy", "flashSell", "flashNeutral", "orderMark"] as const) {
+        expect(p[k]).toBeTruthy();
+      }
+      // depth bars and flashes are translucent fills layered under text — must be rgba()
+      for (const k of ["depthBid", "depthAsk", "flashBuy", "flashSell", "flashNeutral"] as const) {
+        expect(p[k].startsWith("rgba(")).toBe(true);
+      }
+    }
+  });
 });
