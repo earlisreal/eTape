@@ -1,0 +1,7 @@
+/* Minimal global reset: without an explicit height chain, html/body/#root
+   collapse to content height and dockview's layout gets a 0px content area —
+   every panel renders but is invisible below the header. */
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}

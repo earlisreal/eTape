@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import "./global.css";
 import { App } from "./App";
 
 const params = new URLSearchParams(location.search);

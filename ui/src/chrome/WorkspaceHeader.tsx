@@ -4,6 +4,14 @@ import { LinkGroups, type LinkGroup } from "./linkGroups";
 
 const GROUPS: Exclude<LinkGroup, null>[] = ["red", "green", "blue", "yellow"];
 
+// Already-qualified symbols ("HK.00700", "US.NVDA") carry their own market
+// prefix; a bare ticker gets the project-wide default market (US.) so it
+// matches the `US.<TICKER>` convention every store/fixture keys by.
+const QUALIFIED = /^[A-Z]+\./;
+export function normalizeSymbol(raw: string): string {
+  return QUALIFIED.test(raw) ? raw : `US.${raw}`;
+}
+
 // Minimal v1 header: one type-to-focus symbol box per link group + a theme toggle.
 export function WorkspaceHeader({ workspaceName, linkGroups }: { workspaceName: string; linkGroups: LinkGroups }): JSX.Element {
   const { palette, mode, setMode } = useTheme();
@@ -28,7 +36,7 @@ function GroupBox({ group, linkGroups, palette }: { group: Exclude<LinkGroup, nu
       <span style={{ width: 8, height: 8, borderRadius: 2, background: swatch }} />
       <input aria-label={`focus ${group}`} value={text} placeholder="symbol"
         onChange={(e) => setText(e.target.value.toUpperCase())}
-        onKeyDown={(e) => { if (e.key === "Enter" && text.trim()) linkGroups.focus(group, text.trim()); }}
+        onKeyDown={(e) => { if (e.key === "Enter" && text.trim()) linkGroups.focus(group, normalizeSymbol(text.trim())); }}
         style={{ width: 84, fontSize: 12 }} />
     </span>
   );
