@@ -130,9 +130,14 @@ func (s *Store) writer(flush time.Duration) {
 				commit()
 				return
 			}
-			if fr, isFlush := op.(flushReq); isFlush {
+			switch v := op.(type) {
+			case flushReq:
 				commit()
-				close(fr.done)
+				close(v.done)
+				continue
+			case execAppendOp:
+				commit() // flush any pending batch first, then the sync exec tx
+				v.done <- s.commitExecAppend(v)
 				continue
 			}
 			buf = append(buf, op.render()...)
