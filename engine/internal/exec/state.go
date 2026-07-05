@@ -80,18 +80,21 @@ func (s *State) Apply(ev Event) {
 		s.applyFill(e)
 	case OrderCanceled:
 		s.mutate(e.V, e.OID, e.Ts, func(o *Order) {
-			if o.Status != StatusFilled {
+			if o.Working() {
 				o.Status = StatusCanceled
 			}
 		})
 	case OrderExpired:
 		s.mutate(e.V, e.OID, e.Ts, func(o *Order) {
-			if o.Status != StatusFilled {
+			if o.Working() {
 				o.Status = StatusExpired
 			}
 		})
 	case OrderReplaced:
 		s.mutate(e.V, e.OID, e.Ts, func(o *Order) {
+			if !o.Working() {
+				return
+			}
 			o.Qty = e.NewQty
 			if e.NewLimit > 0 {
 				o.LimitPrice = e.NewLimit

@@ -93,3 +93,35 @@ func TestReplayEqualsState(t *testing.T) {
 		t.Fatal("Replay != incremental Apply")
 	}
 }
+
+func TestApplyReplaceNoOpOnTerminalOrder(t *testing.T) {
+	s := NewState([]VenueID{"sim-1"})
+	s.Apply(submitEv("sim-1", "ET1", "AAPL", SideBuy, 10, 100, 1000))
+	s.Apply(OrderFilled{F: Fill{Venue: "sim-1", OrderID: "ET1", Symbol: "AAPL", Side: SideBuy, Qty: 10, Price: 100, TsMs: 1001}, CumQty: 10, LeavesQty: 0, AvgPrice: 100})
+	before := s.Venue("sim-1").Orders["ET1"]
+	if before.Status != StatusFilled {
+		t.Fatalf("precondition: order should be Filled, got %+v", before)
+	}
+	s.Apply(OrderReplaced{V: "sim-1", OID: "ET1", NewQty: 20, NewLimit: 200, Ts: 1002})
+	after := s.Venue("sim-1").Orders["ET1"]
+	if after.Status != StatusFilled || after.Working() {
+		t.Fatalf("replace against a terminal order should be a no-op on Status/Working, got %+v", after)
+	}
+	if after.Qty != before.Qty || after.LimitPrice != before.LimitPrice || after.LeavesQty != before.LeavesQty {
+		t.Fatalf("replace against a terminal order should not mutate Qty/LimitPrice/LeavesQty, before=%+v after=%+v", before, after)
+	}
+}
+
+func TestApplyCancelExpireNoOpOnAlreadyTerminal(t *testing.T) {
+	s := NewState([]VenueID{"sim-1"})
+	s.Apply(submitEv("sim-1", "ET1", "AAPL", SideBuy, 10, 100, 1000))
+	s.Apply(OrderCanceled{V: "sim-1", OID: "ET1", Ts: 1001})
+	if o := s.Venue("sim-1").Orders["ET1"]; o.Status != StatusCanceled {
+		t.Fatalf("precondition: order should be Canceled, got %+v", o)
+	}
+	// A later, out-of-order Expired against the same now-terminal order must not overwrite it.
+	s.Apply(OrderExpired{V: "sim-1", OID: "ET1", Ts: 1002})
+	if o := s.Venue("sim-1").Orders["ET1"]; o.Status != StatusCanceled {
+		t.Fatalf("Expired against an already-Canceled order should be a no-op, got %+v", o)
+	}
+}
