@@ -120,6 +120,22 @@ func TestDecodePushTicker(t *testing.T) {
 	}
 }
 
+// TestDecodePushTickerNoSecurity covers the case with an actually-reachable
+// nil Security: s2c itself is "optional" at the Response level, so a
+// malformed push can omit it entirely. (Security is "required" *within*
+// S2C, so proto2 unmarshal itself rejects any wire message that has S2C
+// present with a missing Security — that combination never reaches our
+// code. The s2c-absent case is the real gap: before this fix, DecodePush
+// silently returned (nil, nil) here instead of counting a decode failure.)
+func TestDecodePushTickerNoSecurity(t *testing.T) {
+	resp := &qotupdateticker.Response{RetType: proto.Int32(0)} // S2C omitted entirely
+	body, _ := proto.Marshal(resp)
+	evs, err := DecodePush(Frame{ProtoID: ProtoQotUpdateTicker, Body: body})
+	if err == nil {
+		t.Fatalf("ticker push without security must be a decode error, got evs=%v", evs)
+	}
+}
+
 func TestDecodePushBookUsesTypoField(t *testing.T) {
 	resp := &qotupdateorderbook.Response{
 		RetType: proto.Int32(0),

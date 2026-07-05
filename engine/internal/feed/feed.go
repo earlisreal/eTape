@@ -1,5 +1,5 @@
 // Package feed defines the broker-agnostic market-data domain: tick, quote,
-// book and bar types, the FeedEvent union, subscription demands, and the Feed
+// book and bar types, the Event union, subscription demands, and the Feed
 // interface implemented by feed/opend (live) and replay (Plan 3, journal).
 // It sits at the bottom of the domain graph and imports nothing but stdlib.
 package feed

@@ -157,6 +157,9 @@ func DecodePush(f Frame) ([]feed.Event, error) {
 			return nil, fmt.Errorf("opend: ticker push retType=%d msg=%q", resp.GetRetType(), resp.GetRetMsg())
 		}
 		s2c := resp.GetS2C()
+		if s2c.GetSecurity() == nil {
+			return nil, fmt.Errorf("opend: ticker push without security")
+		}
 		symbol := formatSymbol(s2c.GetSecurity())
 		ticks := make([]feed.Tick, 0, len(s2c.GetTickerList()))
 		for _, t := range s2c.GetTickerList() {
@@ -194,6 +197,9 @@ func DecodePush(f Frame) ([]feed.Event, error) {
 			return nil, fmt.Errorf("opend: book push retType=%d msg=%q", resp.GetRetType(), resp.GetRetMsg())
 		}
 		s2c := resp.GetS2C()
+		if s2c.GetSecurity() == nil {
+			return nil, fmt.Errorf("opend: book push without security")
+		}
 		book := feed.Book{
 			Symbol: formatSymbol(s2c.GetSecurity()),
 			TsMs:   tsMs(math.Max(s2c.GetSvrRecvTimeBidTimestamp(), s2c.GetSvrRecvTimeAskTimestamp())),
@@ -214,6 +220,9 @@ func DecodePush(f Frame) ([]feed.Event, error) {
 		// eTape only subscribes K_1M; ignore anything else defensively.
 		if s2c.GetKlType() != int32(qotcommon.KLType_KLType_1Min) {
 			return nil, nil
+		}
+		if s2c.GetSecurity() == nil {
+			return nil, fmt.Errorf("opend: kl push without security")
 		}
 		symbol := formatSymbol(s2c.GetSecurity())
 		bars := make([]feed.Bar, 0, len(s2c.GetKlList()))
