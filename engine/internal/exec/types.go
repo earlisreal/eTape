@@ -218,3 +218,27 @@ type OrderAck struct {
 	Accepted bool
 	Message  string
 }
+
+// EventEnvelope is the persisted form of an Event: the indexed columns plus the
+// JSON payload. Defined in exec so the store imports exec (never the reverse).
+type EventEnvelope struct {
+	Seq     int64
+	TsMs    int64
+	Source  string
+	Venue   string
+	OrderID string
+	Kind    string
+	Payload []byte
+}
+
+// FillRow is the fills-projection row written in the same transaction as an
+// OrderFilled event.
+type FillRow struct {
+	OrderID string
+	Symbol  string
+	Side    string
+	Qty     float64
+	Price   float64
+	TsMs    int64
+	Venue   string
+}
