@@ -22,6 +22,9 @@ func sampleEvents() []feed.Event {
 		feed.BookEvent{Seed: false, Book: feed.Book{Symbol: "US.AAPL", TsMs: 1_700_000_005_000,
 			Bids: []feed.BookLevel{{Price: 309.1, Volume: 300, Orders: 4}, {Price: 309.0, Volume: 500, Orders: 7}},
 			Asks: []feed.BookLevel{{Price: 309.2, Volume: 200, Orders: 3}}}},
+		feed.BookEvent{Seed: true, Book: feed.Book{Symbol: "US.MSFT", TsMs: 1_700_000_006_000,
+			Bids: []feed.BookLevel{{Price: 400.1, Volume: 100, Orders: 2}},
+			Asks: []feed.BookLevel{{Price: 400.2, Volume: 150, Orders: 3}}}},
 		feed.Bars1mEvent{Seed: true, Bars: []feed.Bar{
 			{Symbol: "US.AAPL", BucketMs: 1_700_000_040_000, O: 100, H: 101, L: 99.5, C: 100.4, Volume: 4000, Turnover: 400000}}},
 		feed.Bars1mEvent{Seed: false, Bars: []feed.Bar{
@@ -59,6 +62,26 @@ func TestEventColumnHelpers(t *testing.T) {
 	cu := feed.ConnUpEvent{}
 	if eventKind(cu) != kindConnUp || eventSymbol(cu) != "" || eventExchTs(cu, 42) != 42 {
 		t.Fatalf("conn helpers wrong: %s %q %d", eventKind(cu), eventSymbol(cu), eventExchTs(cu, 42))
+	}
+}
+
+func TestEventColumnHelpersEmptyBatch(t *testing.T) {
+	// Test empty-batch fallback paths: eventSymbol returns "", eventExchTs returns fallback.
+	emptyTicks := feed.TicksEvent{}
+	if symbol := eventSymbol(emptyTicks); symbol != "" {
+		t.Fatalf("empty TicksEvent eventSymbol = %q, want empty string", symbol)
+	}
+	const fallback int64 = 999
+	if ts := eventExchTs(emptyTicks, fallback); ts != fallback {
+		t.Fatalf("empty TicksEvent eventExchTs = %d, want %d", ts, fallback)
+	}
+
+	emptyBars := feed.Bars1mEvent{}
+	if symbol := eventSymbol(emptyBars); symbol != "" {
+		t.Fatalf("empty Bars1mEvent eventSymbol = %q, want empty string", symbol)
+	}
+	if ts := eventExchTs(emptyBars, fallback); ts != fallback {
+		t.Fatalf("empty Bars1mEvent eventExchTs = %d, want %d", ts, fallback)
 	}
 }
 
