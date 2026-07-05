@@ -61,6 +61,16 @@ describe("buildTapeRows", () => {
     expect(rows[0].seq).toBe(30);
   });
 
+  it("an anchor that aged out of the retained ring renders live (eviction honesty)", () => {
+    // Same generation as the view (not the already-covered stale-generation case) but the
+    // ring's oldest retained tick has advanced past the anchor — it was evicted while paused.
+    const evicted: TapeSource = { ...src, oldestSeq: () => 10 };
+    const view: TapeView = { anchorSeq: 5, generation: 1 };
+    const { paused, rows } = buildTapeRows(evicted, view, { symbol: "US.AAPL", minSize: 0, maxRows: 3 });
+    expect(paused).toBe(false);
+    expect(rows[0].seq).toBe(src.lastSeq());
+  });
+
   it("formats rows: ET time, uniform decimals, grouped sizes", () => {
     const one = srcFrom([mkTick(1, { price: 3.5, size: 1428, ts: "2026-07-06T13:30:05Z" })]);
     const { rows } = buildTapeRows(one, liveView(one), { symbol: "US.AAPL", minSize: 0, maxRows: 1 });

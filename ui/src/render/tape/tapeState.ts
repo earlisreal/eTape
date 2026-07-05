@@ -48,7 +48,16 @@ export function buildTapeRows(
   opts: { symbol: string; minSize: number; maxRows: number },
 ): { rows: TapeRow[]; paused: boolean } {
   const last = src.lastSeq();
-  const anchorValid = view.anchorSeq !== null && view.generation === src.generation() && view.anchorSeq < last;
+  // An anchor is only meaningful if it is still within the retained window:
+  // same generation, not ahead of the newest tick, and not aged out below the
+  // oldest retained tick. An anchor that fell below oldestSeq() (evicted from
+  // the ring during a long pause) is treated the same as a stale-generation
+  // anchor — resume live rather than render a degenerate partial window.
+  const anchorValid =
+    view.anchorSeq !== null &&
+    view.generation === src.generation() &&
+    view.anchorSeq >= src.oldestSeq() &&
+    view.anchorSeq < last;
   // An anchor that fell off the ring tail clamps to the oldest retained tick.
   const start = Math.max(anchorValid ? (view.anchorSeq as number) : last, src.oldestSeq());
   const raw: Tick[] = [];
