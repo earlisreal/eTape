@@ -72,3 +72,62 @@ func (s *Store) maxSeq(day string) int64 {
 	}
 	return 0
 }
+
+// JournalRow is one decoded journal entry.
+type JournalRow struct {
+	Seq    int64
+	TsExch int64
+	TsRecv int64
+	Day    string
+	Symbol string
+	Kind   string
+	Seed   bool
+	Event  feed.Event
+}
+
+// ReadJournalDay returns a day's events in seq order, decoded to feed.Events.
+func (s *Store) ReadJournalDay(day string) ([]JournalRow, error) {
+	rows, err := s.db.Query(
+		`SELECT seq, ts_exch, ts_recv, symbol, kind, seed, payload
+		 FROM journal WHERE day=? ORDER BY seq`, day)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []JournalRow
+	for rows.Next() {
+		var r JournalRow
+		var seed int
+		var payload string
+		if err := rows.Scan(&r.Seq, &r.TsExch, &r.TsRecv, &r.Symbol, &r.Kind, &seed, &payload); err != nil {
+			return nil, err
+		}
+		r.Day = day
+		r.Seed = seed != 0
+		ev, err := decodePayload(r.Kind, []byte(payload))
+		if err != nil {
+			return nil, err
+		}
+		r.Event = ev
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// JournalDays returns the distinct recorded days, ascending.
+func (s *Store) JournalDays() ([]string, error) {
+	rows, err := s.db.Query("SELECT DISTINCT day FROM journal ORDER BY day")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var d string
+		if err := rows.Scan(&d); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, rows.Err()
+}

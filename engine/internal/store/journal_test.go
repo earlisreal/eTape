@@ -2,6 +2,7 @@ package store
 
 import (
 	"math"
+	"reflect"
 	"testing"
 
 	"github.com/earlisreal/eTape/engine/internal/feed"
@@ -103,5 +104,45 @@ func TestRecordDropsRowOnEncodeFailure(t *testing.T) {
 	}
 	if seq != 1 {
 		t.Fatalf("seq = %d, want 1 (dropped row must not burn a seq)", seq)
+	}
+}
+
+func TestReadJournalDayRoundTrips(t *testing.T) {
+	s := open(t)
+	in := sampleEvents()
+	for i, ev := range in {
+		s.RecordEvent(ev, recvBase+int64(i))
+	}
+	s.Flush()
+
+	rows, err := s.ReadJournalDay("2026-07-06")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != len(in) {
+		t.Fatalf("read %d rows, want %d", len(rows), len(in))
+	}
+	for i, r := range rows {
+		if r.Seq != int64(i+1) {
+			t.Fatalf("row %d seq = %d, want %d", i, r.Seq, i+1)
+		}
+		if !reflect.DeepEqual(r.Event, in[i]) {
+			t.Fatalf("row %d event mismatch:\n in: %#v\nout: %#v", i, in[i], r.Event)
+		}
+	}
+}
+
+func TestJournalDaysDistinct(t *testing.T) {
+	s := open(t)
+	// One event on 2026-07-06, one a day later (recvBase + 24h).
+	s.RecordEvent(feed.ConnUpEvent{}, recvBase)
+	s.RecordEvent(feed.ConnUpEvent{}, recvBase+24*3600*1000)
+	s.Flush()
+	days, err := s.JournalDays()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(days) != 2 || days[0] != "2026-07-06" || days[1] != "2026-07-07" {
+		t.Fatalf("days = %v, want [2026-07-06 2026-07-07]", days)
 	}
 }
