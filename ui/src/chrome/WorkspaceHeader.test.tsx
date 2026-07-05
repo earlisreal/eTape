@@ -44,4 +44,9 @@ describe("normalizeSymbol", () => {
     expect(normalizeSymbol("HK.00700")).toBe("HK.00700");
     expect(normalizeSymbol("US.NVDA")).toBe("US.NVDA");
   });
+
+  it("prefixes real US tickers that contain a dot, instead of mistaking them for market-qualified", () => {
+    expect(normalizeSymbol("BRK.B")).toBe("US.BRK.B");
+    expect(normalizeSymbol("BF.A")).toBe("US.BF.A");
+  });
 });

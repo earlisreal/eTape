@@ -7,9 +7,16 @@ const GROUPS: Exclude<LinkGroup, null>[] = ["red", "green", "blue", "yellow"];
 // Already-qualified symbols ("HK.00700", "US.NVDA") carry their own market
 // prefix; a bare ticker gets the project-wide default market (US.) so it
 // matches the `US.<TICKER>` convention every store/fixture keys by.
-const QUALIFIED = /^[A-Z]+\./;
+//
+// This must be an explicit allow-list, not an open-ended `/^[A-Z]+\./` (or
+// even a fixed-length `/^[A-Z]{2}\./`) pattern: real US tickers contain a
+// dot as part of the ticker itself (BRK.B, BRK.A, BF.B, BF.A), and any
+// leading-letters-then-dot rule misclassifies them as already market-
+// qualified, leaving them unprefixed.
+const MARKET_PREFIXES = ["US.", "HK."];
 export function normalizeSymbol(raw: string): string {
-  return QUALIFIED.test(raw) ? raw : `US.${raw}`;
+  const upper = raw.toUpperCase();
+  return MARKET_PREFIXES.some((p) => upper.startsWith(p)) ? raw : `US.${raw}`;
 }
 
 // Minimal v1 header: one type-to-focus symbol box per link group + a theme toggle.
