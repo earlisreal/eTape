@@ -48,5 +48,13 @@ describe("paintTape goldens", () => {
       expectGolden(`tape-paused-${mode}`, renderScene(W, H, (ctx) =>
         paintTape(ctx, { rows, paused, width: W, height: H, palette })));
     });
+
+    it(`paused tape with zero matching rows still shows the warn strip — ${mode}`, () => {
+      // Regression: a paused view whose window has no rows (e.g. a minSize
+      // filter excludes every tick at the anchor) must still render the
+      // honesty-policy warn strip, not just "no prints yet".
+      expectGolden(`tape-paused-empty-${mode}`, renderScene(W, H, (ctx) =>
+        paintTape(ctx, { rows: [], paused: true, width: W, height: H, palette })));
+    });
   }
 });

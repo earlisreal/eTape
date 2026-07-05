@@ -10,6 +10,14 @@ export function paintTape(ctx: CanvasRenderingContext2D, s: TapePaintState): voi
   ctx.fillStyle = p.bg;
   ctx.fillRect(0, 0, s.width, s.height);
 
+  // honesty: a paused tape is visibly not live (the chrome pill is the control;
+  // this strip marks the surface itself) — draw unconditionally on `paused` so
+  // an empty-rows paused view (e.g. filtered out entirely) still shows it.
+  if (s.paused) {
+    ctx.fillStyle = p.warn;
+    ctx.fillRect(0, 0, s.width, 2);
+  }
+
   if (s.rows.length === 0) {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -34,12 +42,5 @@ export function paintTape(ctx: CanvasRenderingContext2D, s: TapePaintState): voi
     ctx.textAlign = "right";
     ctx.fillText(r.price, s.width * 0.68, midY);
     ctx.fillText(r.size, s.width - PAD, midY);
-  }
-
-  // honesty: a paused tape is visibly not live (the chrome pill is the control;
-  // this strip marks the surface itself)
-  if (s.paused) {
-    ctx.fillStyle = p.warn;
-    ctx.fillRect(0, 0, s.width, 2);
   }
 }
