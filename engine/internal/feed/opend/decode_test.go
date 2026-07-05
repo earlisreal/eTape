@@ -7,6 +7,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
+	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotupdatebasicqot"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotupdatekl"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotupdateorderbook"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotupdateticker"
@@ -146,6 +147,73 @@ func TestDecodePushBookUsesTypoField(t *testing.T) {
 	if be.Book.TsMs != 1782146001500 { // max(bid, ask) server recv time
 		t.Fatalf("book TsMs = %d", be.Book.TsMs)
 	}
+}
+
+func TestDecodePushBasicQot(t *testing.T) {
+	resp := &qotupdatebasicqot.Response{
+		RetType: proto.Int32(0),
+		S2C: &qotupdatebasicqot.S2C{
+			BasicQotList: []*qotcommon.BasicQot{{
+				Security:        sec(11, "AAPL"),
+				IsSuspended:     proto.Bool(false),
+				ListTime:        proto.String("1980-12-12"),
+				PriceSpread:     proto.Float64(0.01),
+				UpdateTime:      proto.String("2026-07-02 12:33:20"),
+				UpdateTimestamp: proto.Float64(1782146000.0),
+				HighPrice:       proto.Float64(310.0),
+				OpenPrice:       proto.Float64(305.0),
+				LowPrice:        proto.Float64(304.5),
+				CurPrice:        proto.Float64(309.1),
+				LastClosePrice:  proto.Float64(300.0),
+				Volume:          proto.Int64(1_000_000),
+				Turnover:        proto.Float64(3.09e8),
+				TurnoverRate:    proto.Float64(1.2),
+				Amplitude:       proto.Float64(1.8),
+			}},
+		},
+	}
+	body, _ := proto.Marshal(resp)
+	evs, err := DecodePush(Frame{ProtoID: ProtoQotUpdateBasicQot, Body: body})
+	if err != nil {
+		t.Fatal(err)
+	}
+	qe, ok := evs[0].(feed.QuoteEvent)
+	if !ok {
+		t.Fatalf("got %#v, want QuoteEvent", evs)
+	}
+	q := qe.Quote
+	if q.Symbol != "US.AAPL" || q.TsMs != 1782146000000 || q.Last != 309.1 ||
+		q.Open != 305.0 || q.High != 310.0 || q.Low != 304.5 ||
+		q.PrevClose != 300.0 || q.Volume != 1_000_000 || q.Turnover != 3.09e8 {
+		t.Fatalf("quote = %+v", q)
+	}
+}
+
+func TestDecodeBasicQotNoSecurity(t *testing.T) {
+	if _, err := decodeBasicQot(&qotcommon.BasicQot{}); err == nil {
+		t.Fatal("BasicQot without Security must be a decode error")
+	}
+}
+
+func TestDecodePushErrors(t *testing.T) {
+	t.Run("non-zero RetType", func(t *testing.T) {
+		resp := &qotupdateticker.Response{
+			RetType: proto.Int32(1),
+			RetMsg:  proto.String("some error"),
+		}
+		body, _ := proto.Marshal(resp)
+		if _, err := DecodePush(Frame{ProtoID: ProtoQotUpdateTicker, Body: body}); err == nil {
+			t.Fatal("non-zero RetType must return an error")
+		}
+	})
+
+	t.Run("malformed body", func(t *testing.T) {
+		garbage := []byte{0xff, 0x00, 0xff, 0x00, 0xff}
+		evs, err := DecodePush(Frame{ProtoID: ProtoQotUpdateTicker, Body: garbage})
+		if err == nil {
+			t.Fatalf("malformed body must return an error, got evs=%v", evs)
+		}
+	})
 }
 
 func TestDecodePushKLFiltersNon1m(t *testing.T) {
