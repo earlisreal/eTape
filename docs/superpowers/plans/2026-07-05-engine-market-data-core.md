@@ -580,7 +580,7 @@ func TestBucketStartMs(t *testing.T) {
 		// 08:12 is in [07:30,08:30) relative to the 09:30 anchor → 07:30 ET.
 		{"5m pre-market", "2026-07-06T12:12:00Z", TF5m, "2026-07-06T12:10:00Z"},
 		{"60m pre-market", "2026-07-06T12:12:00Z", TF60m, "2026-07-06T11:30:00Z"},
-		{"60m RTH", "2026-07-06T14:45:00Z", TF60m, "2026-07-06T13:30:00Z"},
+		{"60m RTH", "2026-07-06T14:45:00Z", TF60m, "2026-07-06T14:30:00Z"},
 		// EST (UTC-5): 2026-01-06 14:30 UTC = 09:30 ET.
 		{"1m in EST", "2026-01-06T14:31:30Z", TF1m, "2026-01-06T14:31:00Z"},
 		{"30m in EST", "2026-01-06T15:10:00Z", TF30m, "2026-01-06T15:00:00Z"},
@@ -5958,7 +5958,7 @@ Extend Plan 1's capture harness to the Plan 2 protocol surface so the decoders a
 - Modify: `engine/internal/feed/opend/golden_test.go`
 - Create: `engine/internal/feed/opend/testdata/golden/qot_*.jsonl` (captured), update `manifest.json`
 
-**Interfaces:** none new — extends the existing JSONL fixture format (`{"direction","proto_id","serial","body_b64"}` per line, per Plan 1).
+**Interfaces:** none new — extends the existing JSONL fixture format (`{"proto_id","direction","is_push","proto_fmt_type","proto_ver","serial_no","body_len","body_sha1_hex","frame_hex"}` per line, per Plan 1).
 
 - [ ] **Step 1: Extend the capture script**
 

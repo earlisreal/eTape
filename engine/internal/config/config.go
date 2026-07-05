@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -22,14 +23,43 @@ type OpenD struct {
 // Addr returns host:port for net.Dial.
 func (o OpenD) Addr() string { return net.JoinHostPort(o.Host, strconv.Itoa(o.Port)) }
 
+// Feed configures the market-data feed adapter.
+type Feed struct {
+	Watchlist           []string `toml:"watchlist"`
+	ExtendedTime        bool     `toml:"extended_time"`
+	UnsubHysteresisSecs int      `toml:"unsub_hysteresis_secs"`
+	QuotaSlots          int      `toml:"quota_slots"`
+}
+
+// MD configures the market-data core.
+type MD struct {
+	TapeRing      int    `toml:"tape_ring"`
+	SessionAnchor string `toml:"session_anchor"` // "HH:MM" ET
+}
+
+// AnchorSecs parses SessionAnchor into seconds-since-ET-midnight.
+func (m MD) AnchorSecs() (int64, error) {
+	t, err := time.Parse("15:04", m.SessionAnchor)
+	if err != nil {
+		return 0, fmt.Errorf("config: session_anchor %q must be HH:MM: %w", m.SessionAnchor, err)
+	}
+	return int64(t.Hour())*3600 + int64(t.Minute())*60, nil
+}
+
 // Config is the engine's bootstrap configuration.
 type Config struct {
 	OpenD OpenD `toml:"opend"`
+	Feed  Feed  `toml:"feed"`
+	MD    MD    `toml:"md"`
 }
 
 // Default returns the built-in defaults used when a field or the whole file is absent.
 func Default() Config {
-	return Config{OpenD: OpenD{Host: "127.0.0.1", Port: 11111}}
+	return Config{
+		OpenD: OpenD{Host: "127.0.0.1", Port: 11111},
+		Feed:  Feed{ExtendedTime: true, UnsubHysteresisSecs: 300, QuotaSlots: 100},
+		MD:    MD{TapeRing: 65536, SessionAnchor: "09:30"},
+	}
 }
 
 // Load reads the TOML file at path over the defaults. A non-existent file is

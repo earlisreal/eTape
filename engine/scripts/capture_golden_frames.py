@@ -21,6 +21,7 @@ Run with the default PATH (the pyenv python3 that has `moomoo` installed); do NO
 prepend Homebrew to PATH, which would shadow pyenv and break `import moomoo`.
 """
 import binascii
+import datetime as dt
 import hashlib
 import json
 import os
@@ -35,11 +36,33 @@ from moomoo.common.utils import ParseRspErr
 
 assert not SysConfig.is_proto_encrypt(), "encryption must be OFF for golden capture"
 
+HOST = "127.0.0.1"
+PORT = 11111
+
 OUT = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
     "internal", "feed", "opend", "testdata", "golden",
 )
 os.makedirs(OUT, exist_ok=True)
+
+# Plan 2 Qot protocol surface -> per-protocol golden fixture file. Request
+# protos (Sub/GetBasicQot/GetKL/GetTicker/GetOrderBook/RequestHistoryKL) carry
+# both c2s and s2c frames in one file; push protos (Update*) are s2c-only and
+# only populate if the market was live during capture. None of these carry
+# account data (loginUserID/connAESKey live only in 1001/1002, excluded
+# above), so the whole Qot surface is public-repo safe.
+QOT_FILES = {
+    ProtoId.Qot_Sub: "qot_sub.jsonl",
+    ProtoId.Qot_GetBasicQot: "qot_getbasicqot.jsonl",
+    ProtoId.Qot_GetKL: "qot_getkl.jsonl",
+    ProtoId.Qot_GetTicker: "qot_getticker.jsonl",
+    ProtoId.Qot_GetOrderBook: "qot_getorderbook.jsonl",
+    ProtoId.Qot_RequestHistoryKL: "qot_requesthistorykl.jsonl",
+    ProtoId.Qot_UpdateBasicQot: "qot_update_basicqot.jsonl",
+    ProtoId.Qot_UpdateTicker: "qot_update_ticker.jsonl",
+    ProtoId.Qot_UpdateOrderBook: "qot_update_orderbook.jsonl",
+    ProtoId.Qot_UpdateKL: "qot_update_kl.jsonl",
+}
 
 EXCLUDE = {
     1001,  # InitConnect: S2C carries loginUserID; drop both directions (public repo)
@@ -150,5 +173,96 @@ def main():
         print("  captured", key)
 
 
+def capture_qot(symbol: str, secs: int) -> None:
+    """Subscribe QUOTE/ORDER_BOOK/TICKER/K_1M on symbol, let pushes flow for
+    secs, and exercise every Plan 2 request once. The global hooks record
+    all frames; Qot frames carry no account data (public-repo safe)."""
+    from moomoo import AuType, KLType, RET_OK, SubType
+
+    ctx = moomoo.OpenQuoteContext(host=HOST, port=PORT)
+    try:
+        ret, err = ctx.subscribe(
+            [symbol],
+            [SubType.QUOTE, SubType.ORDER_BOOK, SubType.TICKER, SubType.K_1M],
+            subscribe_push=True, extended_time=True,
+        )                                                            # 3001 (+ pushes if live)
+        assert ret == RET_OK, f"subscribe failed: {err}"
+        time.sleep(secs)                                             # pushes accumulate
+        ctx.get_stock_quote([symbol])                                # 3004
+        ctx.get_cur_kline(symbol, 100, ktype=KLType.K_1M, autype=AuType.QFQ)  # 3006
+        ctx.get_rt_ticker(symbol, 100)                                # 3010
+        ctx.get_order_book(symbol, num=10)                            # 3012
+        today = dt.date.today().isoformat()
+        ctx.request_history_kline(
+            symbol, start=today, end=today,
+            ktype=KLType.K_1M, autype=AuType.QFQ, max_count=100,
+        )                                                             # 3103
+    finally:
+        ctx.close()
+
+
+def write_qot_corpus(symbol: str, secs: int) -> dict:
+    """Write per-protocol golden files for whatever Qot frames were captured,
+    and record the capture context in manifest.json (additive: preserves the
+    Plan 1 frames.jsonl manifest fields already there)."""
+    written = {}
+    for proto_id, filename in QOT_FILES.items():
+        recs = [captured[key] for key in sorted(captured) if key[0] == proto_id]
+        if not recs:
+            continue
+        with open(os.path.join(OUT, filename), "w") as f:
+            for rec in recs:
+                f.write(json.dumps(rec) + "\n")
+        written[filename] = len(recs)
+
+    manifest_path = os.path.join(OUT, "manifest.json")
+    manifest = {}
+    if os.path.exists(manifest_path):
+        with open(manifest_path) as f:
+            manifest = json.load(f)
+    manifest["qot_capture"] = {
+        "sdk_version": getattr(moomoo, "__version__", "unknown"),
+        "captured_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "symbol": symbol,
+        "secs": secs,
+        "files": written,
+        "excluded_proto_ids": sorted(EXCLUDE),
+        "note": ("Plan 2 protocol surface: Qot_Sub/GetBasicQot/GetKL/GetTicker/"
+                 "GetOrderBook/RequestHistoryKL (request+response) plus "
+                 "Qot_Update* pushes when the market was live during capture. "
+                 "No account data — safe for the public repo."),
+    }
+    with open(manifest_path, "w") as f:
+        json.dump(manifest, f, indent=2)
+        f.write("\n")
+    return written
+
+
+def main_qot(symbol: str, secs: int) -> None:
+    capture_qot(symbol, secs)
+    written = write_qot_corpus(symbol, secs)
+    print(f"wrote qot corpus for {symbol} ({secs}s of pushes) to {OUT}")
+    if not written:
+        print("  (no frames captured — check OpenD connectivity/entitlements)")
+    for filename, n in sorted(written.items()):
+        print(f"  {filename}: {n} frame(s)")
+
+
 if __name__ == "__main__":
-    main()
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--qot", metavar="SYMBOL",
+        help="capture the Plan 2 Qot protocol surface for SYMBOL "
+             "(e.g. CC.BTC on weekends, US.AAPL during RTH)",
+    )
+    parser.add_argument(
+        "--secs", type=int, default=30,
+        help="seconds to let pushes accumulate after subscribing (default: 30)",
+    )
+    args = parser.parse_args()
+    if args.qot:
+        main_qot(args.qot, args.secs)
+    else:
+        main()

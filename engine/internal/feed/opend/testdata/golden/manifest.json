@@ -7,5 +7,28 @@
     1001,
     1002
   ],
-  "note": "Excluded both directions (public repo): InitConnect(1001) S2C carries loginUserID; GetGlobalState(1002) S2C embeds moomoo upstream server IPs. body_hex/frame_hex are byte-exact round-trip targets; decoded_json is null (the Go test decodes selected bodies via generated types)."
+  "note": "Excluded both directions (public repo): InitConnect(1001) S2C carries loginUserID; GetGlobalState(1002) S2C embeds moomoo upstream server IPs. body_hex/frame_hex are byte-exact round-trip targets; decoded_json is null (the Go test decodes selected bodies via generated types).",
+  "qot_capture": {
+    "sdk_version": "10.08.6808",
+    "captured_at": "2026-07-05T08:43:07.191441+00:00",
+    "symbol": "CC.BTC",
+    "secs": 30,
+    "files": {
+      "qot_sub.jsonl": 2,
+      "qot_getbasicqot.jsonl": 2,
+      "qot_getkl.jsonl": 2,
+      "qot_getticker.jsonl": 2,
+      "qot_getorderbook.jsonl": 2,
+      "qot_requesthistorykl.jsonl": 2,
+      "qot_update_basicqot.jsonl": 1,
+      "qot_update_ticker.jsonl": 1,
+      "qot_update_orderbook.jsonl": 1,
+      "qot_update_kl.jsonl": 1
+    },
+    "excluded_proto_ids": [
+      1001,
+      1002
+    ],
+    "note": "Plan 2 protocol surface: Qot_Sub/GetBasicQot/GetKL/GetTicker/GetOrderBook/RequestHistoryKL (request+response) plus Qot_Update* pushes when the market was live during capture. No account data \u2014 safe for the public repo."
+  }
 }

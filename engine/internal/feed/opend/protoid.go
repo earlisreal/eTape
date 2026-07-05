@@ -30,3 +30,21 @@ const (
 	ProtoQotGetSearchNews         uint32 = 3263
 	ProtoQotGetUSPreMarketRank    uint32 = 3410
 )
+
+// pushProtoIDs are server-initiated update protocols. A frame with one of
+// these IDs is never a response, no matter what its serialNo says — real
+// OpenD pushes carry an independent server-side serial that can collide with
+// an in-flight request serial (observed live 2026-07-05).
+var pushProtoIDs = map[uint32]struct{}{
+	ProtoQotUpdateBasicQot:  {},
+	ProtoQotUpdateKL:        {},
+	ProtoQotUpdateRT:        {},
+	ProtoQotUpdateTicker:    {},
+	ProtoQotUpdateOrderBook: {},
+}
+
+// IsPushProtoID reports whether protoID is a known push protocol.
+func IsPushProtoID(id uint32) bool {
+	_, ok := pushProtoIDs[id]
+	return ok
+}

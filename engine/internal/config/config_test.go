@@ -39,3 +39,43 @@ func TestLoadMalformedFileErrors(t *testing.T) {
 		t.Fatal("Load: expected error for malformed TOML, got nil")
 	}
 }
+
+func TestFeedAndMDSectionsWithDefaults(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	content := `
+[feed]
+watchlist = ["US.AAPL", "US.TSLA"]
+quota_slots = 300
+
+[md]
+session_anchor = "09:00"
+`
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Feed.Watchlist) != 2 || cfg.Feed.QuotaSlots != 300 {
+		t.Fatalf("feed = %+v", cfg.Feed)
+	}
+	if !cfg.Feed.ExtendedTime || cfg.Feed.UnsubHysteresisSecs != 300 {
+		t.Fatalf("feed defaults not preserved: %+v", cfg.Feed)
+	}
+	if cfg.MD.TapeRing != 65536 {
+		t.Fatalf("md defaults not preserved: %+v", cfg.MD)
+	}
+	secs, err := cfg.MD.AnchorSecs()
+	if err != nil || secs != 9*3600 {
+		t.Fatalf("AnchorSecs = %d, %v; want 32400", secs, err)
+	}
+}
+
+func TestAnchorSecsRejectsGarbage(t *testing.T) {
+	m := MD{SessionAnchor: "9am"}
+	if _, err := m.AnchorSecs(); err == nil {
+		t.Fatal("want parse error for '9am'")
+	}
+}

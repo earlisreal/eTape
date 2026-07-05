@@ -1,0 +1,209 @@
+// Package md is the market-data core: one goroutine owns books, tape, quotes,
+// bars and indicators, consuming feed events and control messages from a
+// single inbox and emitting typed updates + last-trade marks. The apply path
+// does no I/O and never reads the wall clock — replaying the same events
+// reproduces the same state, always.
+package md
+
+import (
+	"context"
+	"sync/atomic"
+
+	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/session"
+)
+
+// Config sizes the core. Zero values get defaults.
+type Config struct {
+	TapeRing   int   // per-symbol tick ring capacity (default 65536)
+	AnchorSecs int64 // intraday bucket anchor (default session.AnchorSecsDefault)
+}
+
+type inMsg interface{ isInMsg() }
+
+type eventMsg struct{ ev feed.Event }
+type ensureIndicatorMsg struct {
+	id   string
+	spec IndicatorSpec
+}
+type releaseIndicatorMsg struct{ id string }
+type seedDailyMsg struct {
+	symbol string
+	bars   []feed.Bar
+}
+type seedHistory1mMsg struct {
+	symbol string
+	bars   []feed.Bar
+}
+
+func (eventMsg) isInMsg()            {}
+func (ensureIndicatorMsg) isInMsg()  {}
+func (releaseIndicatorMsg) isInMsg() {}
+func (seedDailyMsg) isInMsg()        {}
+func (seedHistory1mMsg) isInMsg()    {}
+
+// Core is the single-writer market-data state machine.
+type Core struct {
+	cfg     Config
+	inbox   chan inMsg
+	updates chan Update
+	marks   chan Mark
+	dropped atomic.Uint64
+
+	// Domain state — touched ONLY inside Run's goroutine.
+	books   *bookStore
+	quotes  *quoteStore
+	tapes   map[string]*ring
+	lastSeq map[string]int64 // per-symbol tick dedup high-water
+	lastDay map[string]int64 // ET day of lastSeq (sequences restart daily)
+	bars    *barEngine       // Task 11
+	inds    *indicatorSet    // Task 12
+}
+
+// New builds a Core; Run must be started before Feed is called.
+func New(cfg Config) *Core {
+	if cfg.TapeRing == 0 {
+		cfg.TapeRing = 65536
+	}
+	if cfg.AnchorSecs == 0 {
+		cfg.AnchorSecs = session.AnchorSecsDefault
+	}
+	return &Core{
+		cfg:     cfg,
+		inbox:   make(chan inMsg, 1024),
+		updates: make(chan Update, 8192),
+		marks:   make(chan Mark, 1024),
+		books:   newBookStore(),
+		quotes:  newQuoteStore(),
+		tapes:   make(map[string]*ring),
+		lastSeq: make(map[string]int64),
+		lastDay: make(map[string]int64),
+		bars:    newBarEngine(cfg.AnchorSecs),
+		inds:    newIndicatorSet(),
+	}
+}
+
+func (c *Core) Updates() <-chan Update { return c.updates }
+func (c *Core) Marks() <-chan Mark     { return c.marks }
+func (c *Core) DroppedUpdates() uint64 { return c.dropped.Load() }
+
+// Feed enqueues a feed event. Blocking by design: the inbox is deep and the
+// apply path is allocation-light, so sustained blocking means the core is
+// genuinely overloaded — that must surface upstream, not vanish.
+func (c *Core) Feed(ev feed.Event) { c.inbox <- eventMsg{ev: ev} }
+
+func (c *Core) EnsureIndicator(id string, spec IndicatorSpec) {
+	c.inbox <- ensureIndicatorMsg{id: id, spec: spec}
+}
+func (c *Core) ReleaseIndicator(id string) { c.inbox <- releaseIndicatorMsg{id: id} }
+func (c *Core) SeedDaily(symbol string, bars []feed.Bar) {
+	c.inbox <- seedDailyMsg{symbol: symbol, bars: bars}
+}
+func (c *Core) SeedHistory1m(symbol string, bars []feed.Bar) {
+	c.inbox <- seedHistory1mMsg{symbol: symbol, bars: bars}
+}
+
+// Run is the single writer. It returns when ctx is done.
+func (c *Core) Run(ctx context.Context) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case m := <-c.inbox:
+			c.apply(m)
+		}
+	}
+}
+
+func (c *Core) emit(u Update) {
+	select {
+	case c.updates <- u:
+	default:
+		c.dropped.Add(1)
+	}
+}
+
+// barOut is the single door for bar emissions: update stream + indicators.
+func (c *Core) barOut(b Bar) {
+	c.emit(BarUpdate{Bar: b})
+	c.inds.onBar(c, b)
+}
+
+func (c *Core) mark(m Mark) {
+	select {
+	case c.marks <- m:
+	default: // marks are keep-latest downstream; dropping stale ones is safe
+	}
+}
+
+func (c *Core) apply(m inMsg) {
+	switch msg := m.(type) {
+	case eventMsg:
+		c.applyEvent(msg.ev)
+	case ensureIndicatorMsg:
+		c.inds.ensure(c, msg.id, msg.spec) // Task 12
+	case releaseIndicatorMsg:
+		c.inds.release(msg.id)
+	case seedDailyMsg:
+		c.bars.seedDaily(c, msg.symbol, msg.bars) // Task 11
+	case seedHistory1mMsg:
+		c.bars.seedHistory1m(c, msg.symbol, msg.bars)
+	}
+}
+
+func (c *Core) applyEvent(ev feed.Event) {
+	switch e := ev.(type) {
+	case feed.TicksEvent:
+		c.applyTicks(e)
+	case feed.QuoteEvent:
+		c.emit(QuoteUpdate{Quote: c.quotes.set(e.Quote)})
+	case feed.BookEvent:
+		c.emit(BookUpdate{Book: c.books.set(e.Book)})
+	case feed.Bars1mEvent:
+		c.bars.apply1m(c, e.Bars) // Task 11
+	case feed.ConnUpEvent:
+		c.emit(ConnUpdate{Up: true})
+	case feed.ConnDownEvent:
+		c.emit(ConnUpdate{Up: false})
+	case feed.ResyncedEvent:
+		c.bars.markGaps() // Task 11: next tick-derived bars carry Gap
+		c.emit(ResyncedUpdate{})
+	}
+}
+
+// applyTicks dedups by (day, seq), appends to the tape, drives tick-derived
+// bars, and emits one TapeUpdate + one Mark per accepted batch.
+func (c *Core) applyTicks(e feed.TicksEvent) {
+	if len(e.Ticks) == 0 {
+		return
+	}
+	symbol := e.Ticks[0].Symbol
+	accepted := make([]feed.Tick, 0, len(e.Ticks))
+	for _, t := range e.Ticks {
+		day := session.DayMs(t.TsMs)
+		if day != c.lastDay[t.Symbol] {
+			c.lastDay[t.Symbol] = day
+			c.lastSeq[t.Symbol] = 0
+		}
+		if t.Seq != 0 && t.Seq <= c.lastSeq[t.Symbol] {
+			continue // seed/live overlap or duplicate push
+		}
+		c.lastSeq[t.Symbol] = t.Seq
+		accepted = append(accepted, t)
+	}
+	if len(accepted) == 0 {
+		return
+	}
+	tape := c.tapes[symbol]
+	if tape == nil {
+		tape = newRing(c.cfg.TapeRing)
+		c.tapes[symbol] = tape
+	}
+	for _, t := range accepted {
+		tape.append(t)
+	}
+	c.bars.applyTicks(c, accepted) // Task 11 (10s + shadow 1m)
+	c.emit(TapeUpdate{Symbol: symbol, Ticks: accepted})
+	last := accepted[len(accepted)-1]
+	c.mark(Mark{Symbol: last.Symbol, Price: last.Price, TsMs: last.TsMs})
+}
