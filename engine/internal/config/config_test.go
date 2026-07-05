@@ -79,3 +79,31 @@ func TestAnchorSecsRejectsGarbage(t *testing.T) {
 		t.Fatal("want parse error for '9am'")
 	}
 }
+
+func TestStoreDefaults(t *testing.T) {
+	cfg := Default()
+	if cfg.Store.RetentionDays != 30 {
+		t.Fatalf("RetentionDays default = %d, want 30", cfg.Store.RetentionDays)
+	}
+	if cfg.Store.FlushMs != 250 {
+		t.Fatalf("FlushMs default = %d, want 250", cfg.Store.FlushMs)
+	}
+	if cfg.Store.DBPath != "" {
+		t.Fatalf("DBPath default = %q, want empty (resolved by main)", cfg.Store.DBPath)
+	}
+}
+
+func TestStoreOverride(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[store]\ndb_path = \"/tmp/x.db\"\nretention_days = 7\nflush_ms = 100\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Store.DBPath != "/tmp/x.db" || cfg.Store.RetentionDays != 7 || cfg.Store.FlushMs != 100 {
+		t.Fatalf("store override not applied: %+v", cfg.Store)
+	}
+}
