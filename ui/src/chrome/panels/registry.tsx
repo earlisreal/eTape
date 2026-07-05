@@ -10,6 +10,7 @@ import { ChartPanel } from "./ChartPanel";
 import { LadderPanel } from "./LadderPanel";
 import { TapePanel } from "./TapePanel";
 import { ScannerPanel } from "./ScannerPanel";
+import { NewsPanel } from "./NewsPanel";
 
 export interface PanelProps {
   config: PanelConfig;
@@ -56,5 +57,9 @@ export const PANELS: Record<string, PanelDef> = {
   "movers": {
     component: (p) => <ScannerPanel {...p} session="rth" />,
     topics: ["scanner.rank", "scanner.hit"],
+  },
+  "news": {
+    component: NewsPanel,
+    topics: ["news.item"],
   },
 };
