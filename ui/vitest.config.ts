@@ -8,5 +8,10 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    // node-canvas's native addon isn't safe to load into more than one
+    // worker thread per process ("Module did not self-register" once a
+    // second golden test file requires it) — run test files in separate
+    // child processes instead of the default worker-thread pool.
+    pool: "forks",
   },
 });
