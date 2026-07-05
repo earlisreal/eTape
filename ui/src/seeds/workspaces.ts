@@ -32,7 +32,7 @@ export const SEED_WORKSPACES: Record<"monitoring" | "trading", Workspace> = {
       chart("t-c3", "US.AAPL", "5m", "green"),
       chart("t-c4", "US.AAPL", "60m", "green"),
       { id: "t-ladder", panelId: "ladder", group: "green", settings: { symbol: "US.AAPL" } },
-      { id: "t-tape", panelId: "tape", group: "green", settings: {} },
+      { id: "t-tape", panelId: "tape", group: "green", settings: { symbol: "US.AAPL", minSize: 0 } },
       { id: "t-account", panelId: "account-bar", group: null, settings: {} },
       { id: "t-positions", panelId: "positions", group: null, settings: {} },
       { id: "t-orders", panelId: "open-orders", group: null, settings: {} },

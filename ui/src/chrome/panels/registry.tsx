@@ -8,6 +8,7 @@ import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
 import { SmokePainterPanel } from "./SmokePainterPanel";
 import { ChartPanel } from "./ChartPanel";
 import { LadderPanel } from "./LadderPanel";
+import { TapePanel } from "./TapePanel";
 
 export interface PanelProps {
   config: PanelConfig;
@@ -42,5 +43,9 @@ export const PANELS: Record<string, PanelDef> = {
   "ladder": {
     component: LadderPanel,
     topics: ["md.book", "md.tape", "exec.orders"],
+  },
+  "tape": {
+    component: TapePanel,
+    topics: ["md.tape"],
   },
 };
