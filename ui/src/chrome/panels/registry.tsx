@@ -7,6 +7,7 @@ import type { LinkGroups } from "../linkGroups";
 import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
 import { SmokePainterPanel } from "./SmokePainterPanel";
 import { ChartPanel } from "./ChartPanel";
+import { LadderPanel } from "./LadderPanel";
 
 export interface PanelProps {
   config: PanelConfig;
@@ -37,5 +38,9 @@ export const PANELS: Record<string, PanelDef> = {
   "chart": {
     component: ChartPanel,
     topics: ["md.bars", "md.indicator"],
+  },
+  "ladder": {
+    component: LadderPanel,
+    topics: ["md.book", "md.tape", "exec.orders"],
   },
 };
