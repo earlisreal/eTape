@@ -25,8 +25,9 @@ export interface PanelProps {
 export interface PanelDef { component: FC<PanelProps>; topics: TopicName[] }
 
 // Plan 1 registered the two panels needed to prove the stack; Plan 2 adds the
-// real chart panel. Plans 3–5 still owe ladder / tape / scanner / movers / news /
-// account-bar / positions / open-orders / order-ticket here.
+// real chart panel; Plan 3 delivers the L2 ladder and time & sales panels below.
+// Plans 4–5 still owe scanner / movers / news / account-bar / positions /
+// open-orders / order-ticket here.
 export const PANELS: Record<string, PanelDef> = {
   "connection-status": {
     component: ({ stores }) => <ConnectionStatusPanel health={stores.health} />,
