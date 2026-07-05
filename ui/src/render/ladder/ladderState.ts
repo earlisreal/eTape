@@ -92,9 +92,9 @@ export function workingOrderMarks(orders: unknown[], symbol: string): OrderMark[
     const r = o as Record<string, unknown>;
     if (r.symbol !== symbol) continue;
     if (typeof r.status !== "string" || !WORKING_STATUSES.has(r.status)) continue;
-    if (typeof r.price !== "number" || r.price <= 0) continue;
+    if (typeof r.price !== "number" || !Number.isFinite(r.price) || r.price <= 0) continue;
     const qty = typeof r.leavesQty === "number" ? r.leavesQty : typeof r.qty === "number" ? r.qty : 0;
-    if (qty <= 0) continue;
+    if (!Number.isFinite(qty) || qty <= 0) continue;
     const side = typeof r.side === "string" && r.side.toLowerCase().startsWith("s") ? "sell" : "buy";
     marks.push({ price: r.price, side, qty });
   }

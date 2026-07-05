@@ -77,6 +77,42 @@ describe("workingOrderMarks (tolerant until Plan 5 types exec)", () => {
       { price: 3.53, side: "sell", qty: 50 },
     ]);
   });
+  it("rejects orders with NaN price", () => {
+    const ordersWithNaN = [
+      { symbol: "US.AAPL", price: NaN, side: "Buy", qty: 100, status: "New" },
+      { symbol: "US.AAPL", price: 3.47, side: "Buy", qty: 100, status: "New" },
+    ];
+    expect(workingOrderMarks(ordersWithNaN, "US.AAPL")).toEqual([
+      { price: 3.47, side: "buy", qty: 100 },
+    ]);
+  });
+  it("rejects orders with NaN leavesQty", () => {
+    const ordersWithNaN = [
+      { symbol: "US.AAPL", price: 3.47, side: "Buy", leavesQty: NaN, qty: 100, status: "New" },
+      { symbol: "US.AAPL", price: 3.53, side: "Buy", leavesQty: 50, status: "New" },
+    ];
+    expect(workingOrderMarks(ordersWithNaN, "US.AAPL")).toEqual([
+      { price: 3.53, side: "buy", qty: 50 },
+    ]);
+  });
+  it("rejects orders with NaN qty when leavesQty is absent", () => {
+    const ordersWithNaN = [
+      { symbol: "US.AAPL", price: 3.47, side: "Buy", qty: NaN, status: "New" },
+      { symbol: "US.AAPL", price: 3.53, side: "Buy", qty: 100, status: "New" },
+    ];
+    expect(workingOrderMarks(ordersWithNaN, "US.AAPL")).toEqual([
+      { price: 3.53, side: "buy", qty: 100 },
+    ]);
+  });
+  it("rejects orders with Infinity price", () => {
+    const ordersWithInfinity = [
+      { symbol: "US.AAPL", price: Infinity, side: "Buy", qty: 100, status: "New" },
+      { symbol: "US.AAPL", price: 3.47, side: "Buy", qty: 100, status: "New" },
+    ];
+    expect(workingOrderMarks(ordersWithInfinity, "US.AAPL")).toEqual([
+      { price: 3.47, side: "buy", qty: 100 },
+    ]);
+  });
 });
 
 describe("flashAlpha", () => {
