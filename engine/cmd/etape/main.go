@@ -90,8 +90,10 @@ func main() {
 		st.AppendSysEvent("boot", "engine up")
 		startLive(ctx, log, st, core, cfg, splitCSV(*watch), splitCSV(*focus), &pipeWG)
 		log.Info("engine up (live)", "opend", cfg.OpenD.Addr(), "anchor", cfg.MD.SessionAnchor, "db", dbPath)
-	} else {
-		startReplay(ctx, log, st, core, *replayDay, *speed, splitCSV(*focus), &pipeWG)
+	}
+	replayOK := true
+	if !live {
+		replayOK = startReplay(ctx, log, st, core, *replayDay, *speed, splitCSV(*focus), &pipeWG, stop)
 	}
 
 	// Consume updates until shutdown; tap finalized 1m/daily bars to the archive
@@ -108,6 +110,10 @@ func main() {
 		log.Error("close store", "err", err)
 	}
 	log.Info("shutdown complete", "droppedUpdates", core.DroppedUpdates(), "droppedJournal", st.DroppedJournalRows())
+
+	if !live && !replayOK {
+		os.Exit(1)
+	}
 }
 
 // startLive wires OpenD → journal tee → core and installs demands + indicators.
@@ -139,23 +145,30 @@ func startLive(ctx context.Context, log *slog.Logger, st *store.Store, core *md.
 }
 
 // startReplay wires replay.Feed → core (no journal tee) from a recorded day.
-func startReplay(ctx context.Context, log *slog.Logger, st *store.Store, core *md.Core, day string, speed float64, focus []string, pipeWG *sync.WaitGroup) {
+// It returns false if the day couldn't be replayed (no such journal, or empty),
+// in which case main must not block waiting for a run that never started.
+func startReplay(ctx context.Context, log *slog.Logger, st *store.Store, core *md.Core, day string, speed float64, focus []string, pipeWG *sync.WaitGroup, stop context.CancelFunc) bool {
 	rows, err := st.ReadJournalDay(day)
 	if err != nil {
 		log.Error("read journal", "err", err, "day", day)
-		return
+		return false
 	}
 	if len(rows) == 0 {
 		log.Warn("no journal rows for day", "day", day)
-		return
+		return false
 	}
+	// sim advances to each event's exchange timestamp but has no runtime consumer
+	// yet (md.Core is clock-free by design); correctness is proven by
+	// replay/clock_test.go alone until Plan 4's SimBroker consumes it.
 	sim := replay.NewClock(time.UnixMilli(rows[0].TsExch))
 	fd := replay.NewFeed(replay.FeedOptions{Rows: rows, Sim: sim, Pace: clock.System{}, Speed: speed})
 	go func() { _ = fd.Run(ctx) }()
 	pipeWG.Add(1)
 	go pipe(ctx, pipeWG, fd.Events(), core, nil) // nil journal → no re-recording
+	go func() { pipeWG.Wait(); stop() }()        // self-terminate once the journal is exhausted
 	setupIndicators(core, focus)
 	log.Info("engine up (replay)", "day", day, "rows", len(rows), "speed", speed)
+	return true
 }
 
 // pipe forwards feed events into the core, journaling each first when journal != nil.
