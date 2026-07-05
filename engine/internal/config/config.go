@@ -46,11 +46,19 @@ func (m MD) AnchorSecs() (int64, error) {
 	return int64(t.Hour())*3600 + int64(t.Minute())*60, nil
 }
 
+// Store configures SQLite persistence (journal, bar archives, config, sys_events).
+type Store struct {
+	DBPath        string `toml:"db_path"`        // empty → resolved to ~/.eTape/etape.db by main
+	RetentionDays int    `toml:"retention_days"` // journal pruned older than this many days
+	FlushMs       int    `toml:"flush_ms"`       // writer batch-flush interval
+}
+
 // Config is the engine's bootstrap configuration.
 type Config struct {
 	OpenD OpenD `toml:"opend"`
 	Feed  Feed  `toml:"feed"`
 	MD    MD    `toml:"md"`
+	Store Store `toml:"store"`
 }
 
 // Default returns the built-in defaults used when a field or the whole file is absent.
@@ -59,6 +67,7 @@ func Default() Config {
 		OpenD: OpenD{Host: "127.0.0.1", Port: 11111},
 		Feed:  Feed{ExtendedTime: true, UnsubHysteresisSecs: 300, QuotaSlots: 100},
 		MD:    MD{TapeRing: 65536, SessionAnchor: "09:30"},
+		Store: Store{DBPath: "", RetentionDays: 30, FlushMs: 250},
 	}
 }
 
