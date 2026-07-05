@@ -1,0 +1,143 @@
+package exec
+
+import "math"
+
+// GlobalLimits caps aggregate risk across all venues. A zero value means "cap
+// not set — do not enforce".
+type GlobalLimits struct {
+	MaxDayLoss              float64
+	MaxSymbolPositionValue  float64
+	MaxSymbolPositionShares float64
+}
+
+// VenueLimits caps one venue's risk. Zero values mean "cap not set".
+type VenueLimits struct {
+	MaxOrderValue     float64
+	MaxPositionValue  float64
+	MaxPositionShares float64
+	MaxOpenOrders     int
+}
+
+type GateConfig struct {
+	Global GlobalLimits
+	Venue  map[VenueID]VenueLimits
+}
+
+// signedQty returns the request's signed effect on a position (long +, short -).
+func signedQty(req OrderRequest) float64 {
+	if longward(req.Side) {
+		return req.Qty
+	}
+	return -req.Qty
+}
+
+// orderValue values an order for the max-order-value / position-value checks:
+// limit orders at their limit price, market orders at the last-trade mark. ok is
+// false when a market order has no mark (cannot be valued → must block).
+func orderValue(req OrderRequest, marks MarkSource) (float64, bool) {
+	px := req.LimitPrice
+	if req.Type == TypeMarket {
+		m, ok := marks.LastTrade(req.Symbol)
+		if !ok {
+			return 0, false
+		}
+		px = m
+	}
+	return req.Qty * px, true
+}
+
+// markOr returns the last-trade mark, falling back to the request price for
+// value caps (a limit order always has a price).
+func markOr(req OrderRequest, marks MarkSource) float64 {
+	if m, ok := marks.LastTrade(req.Symbol); ok {
+		return m
+	}
+	return req.LimitPrice
+}
+
+// Evaluate runs the two-layer gate. Returns (true, "") to allow, or (false,
+// reason) at the first failing rule. Pure — the Core calls it in-loop.
+func Evaluate(s *State, cfg GateConfig, req OrderRequest, marks MarkSource) (bool, string) {
+	// 1. master armed
+	if !s.MasterArmed {
+		return false, "master disarmed"
+	}
+	// 2. venue armed
+	if vs, ok := s.Venues[req.Venue]; !ok || !vs.Armed {
+		return false, "venue disarmed"
+	}
+	// 3. duplicate ID (global — one event log)
+	if _, dup := s.orderIndex[req.ClientOrderID]; dup {
+		return false, "duplicate order id"
+	}
+
+	vl := cfg.Venue[req.Venue]
+
+	// 4a. per-venue max order value
+	val, ok := orderValue(req, marks)
+	if !ok {
+		return false, "no mark to value market order"
+	}
+	if vl.MaxOrderValue > 0 && val > vl.MaxOrderValue {
+		return false, "order value exceeds venue cap"
+	}
+
+	// 4b. per-venue max resulting position (shares + value)
+	mark := markOr(req, marks)
+	venueResult := s.VenuePositionShares(req.Venue, req.Symbol) +
+		directional(s.VenueWorkingSameDir(req.Venue, req.Symbol, req.Side), req.Side) +
+		signedQty(req)
+	if vl.MaxPositionShares > 0 && math.Abs(venueResult) > vl.MaxPositionShares {
+		return false, "resulting venue position exceeds share cap"
+	}
+	if vl.MaxPositionValue > 0 && math.Abs(venueResult)*mark > vl.MaxPositionValue {
+		return false, "resulting venue position exceeds value cap"
+	}
+
+	// 4c. per-venue max open orders
+	if vl.MaxOpenOrders > 0 && workingCount(s.Venue(req.Venue), req.Symbol) >= vl.MaxOpenOrders {
+		return false, "max open orders on venue"
+	}
+
+	// 5. global max resulting per-symbol position (shares + value) across venues
+	globalResult := s.SymbolNetShares(req.Symbol) +
+		directional(s.SymbolWorkingSameDir(req.Symbol, req.Side), req.Side) +
+		signedQty(req)
+	if cfg.Global.MaxSymbolPositionShares > 0 && math.Abs(globalResult) > cfg.Global.MaxSymbolPositionShares {
+		return false, "resulting symbol position exceeds global share cap"
+	}
+	if cfg.Global.MaxSymbolPositionValue > 0 && math.Abs(globalResult)*mark > cfg.Global.MaxSymbolPositionValue {
+		return false, "resulting symbol position exceeds global value cap"
+	}
+	return true, ""
+}
+
+// directional signs a same-direction working-exposure magnitude by side.
+func directional(mag float64, side Side) float64 {
+	if longward(side) {
+		return mag
+	}
+	return -mag
+}
+
+// workingCount counts working orders (any symbol) on a venue — the max-open-
+// orders cap is a venue-wide working-order count.
+func workingCount(vs *VenueState, _ string) int {
+	n := 0
+	for _, o := range vs.Orders {
+		if o.Working() {
+			n++
+		}
+	}
+	return n
+}
+
+// BreachedDayLoss reports whether the summed venue day P&L has breached the
+// global max-day-loss cap. The Core calls this on each account refresh and
+// auto-disarms the master switch on breach.
+func BreachedDayLoss(s *State, cfg GateConfig) bool {
+	if cfg.Global.MaxDayLoss <= 0 {
+		return false
+	}
+	return s.TotalDayPnL() <= -cfg.Global.MaxDayLoss
+}
