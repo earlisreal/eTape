@@ -139,42 +139,6 @@ func (e OrderExpired) TsMs() int64   { return e.Ts }
 func (e OrderReplaced) TsMs() int64  { return e.Ts }
 func (e StreamGap) TsMs() int64      { return e.Ts }
 
-// newByKind returns a fresh pointer of the concrete type for a kind, for
-// json.Unmarshal to populate.
-func newByKind(kind string) (Event, any, error) {
-	switch kind {
-	case "order_submitted":
-		v := &OrderSubmitted{}
-		return nil, v, nil
-	case "order_accepted":
-		v := &OrderAccepted{}
-		return nil, v, nil
-	case "order_rejected":
-		v := &OrderRejected{}
-		return nil, v, nil
-	case "order_blocked":
-		v := &OrderBlocked{}
-		return nil, v, nil
-	case "order_filled":
-		v := &OrderFilled{}
-		return nil, v, nil
-	case "order_canceled":
-		v := &OrderCanceled{}
-		return nil, v, nil
-	case "order_expired":
-		v := &OrderExpired{}
-		return nil, v, nil
-	case "order_replaced":
-		v := &OrderReplaced{}
-		return nil, v, nil
-	case "stream_gap":
-		v := &StreamGap{}
-		return nil, v, nil
-	default:
-		return nil, nil, fmt.Errorf("exec: unknown event kind %q", kind)
-	}
-}
-
 // EncodeEvent serializes an event to its kind + JSON payload (the concrete
 // struct; sealed unions carry no struct tags, matching the feed/md convention).
 func EncodeEvent(ev Event) (string, []byte, error) {
@@ -187,35 +151,63 @@ func EncodeEvent(ev Event) (string, []byte, error) {
 
 // DecodeEvent reconstructs a typed event from its kind + JSON payload.
 func DecodeEvent(kind string, payload []byte) (Event, error) {
-	_, target, err := newByKind(kind)
-	if err != nil {
-		return nil, err
-	}
-	if err := json.Unmarshal(payload, target); err != nil {
-		return nil, fmt.Errorf("exec: decode %s: %w", kind, err)
-	}
-	// target is *T; return the T value so DeepEqual matches the encoded value.
-	switch v := target.(type) {
-	case *OrderSubmitted:
-		return *v, nil
-	case *OrderAccepted:
-		return *v, nil
-	case *OrderRejected:
-		return *v, nil
-	case *OrderBlocked:
-		return *v, nil
-	case *OrderFilled:
-		return *v, nil
-	case *OrderCanceled:
-		return *v, nil
-	case *OrderExpired:
-		return *v, nil
-	case *OrderReplaced:
-		return *v, nil
-	case *StreamGap:
-		return *v, nil
+	switch kind {
+	case "order_submitted":
+		var v OrderSubmitted
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, fmt.Errorf("exec: decode %s: %w", kind, err)
+		}
+		return v, nil
+	case "order_accepted":
+		var v OrderAccepted
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, fmt.Errorf("exec: decode %s: %w", kind, err)
+		}
+		return v, nil
+	case "order_rejected":
+		var v OrderRejected
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, fmt.Errorf("exec: decode %s: %w", kind, err)
+		}
+		return v, nil
+	case "order_blocked":
+		var v OrderBlocked
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, fmt.Errorf("exec: decode %s: %w", kind, err)
+		}
+		return v, nil
+	case "order_filled":
+		var v OrderFilled
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, fmt.Errorf("exec: decode %s: %w", kind, err)
+		}
+		return v, nil
+	case "order_canceled":
+		var v OrderCanceled
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, fmt.Errorf("exec: decode %s: %w", kind, err)
+		}
+		return v, nil
+	case "order_expired":
+		var v OrderExpired
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, fmt.Errorf("exec: decode %s: %w", kind, err)
+		}
+		return v, nil
+	case "order_replaced":
+		var v OrderReplaced
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, fmt.Errorf("exec: decode %s: %w", kind, err)
+		}
+		return v, nil
+	case "stream_gap":
+		var v StreamGap
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, fmt.Errorf("exec: decode %s: %w", kind, err)
+		}
+		return v, nil
 	default:
-		return nil, fmt.Errorf("exec: decode: unhandled target %T", target)
+		return nil, fmt.Errorf("exec: unknown event kind %q", kind)
 	}
 }
 
