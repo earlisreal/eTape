@@ -2,3 +2,4 @@ node_modules
 dist
 *.local
 *.tsbuildinfo
+test/golden/__output__/
