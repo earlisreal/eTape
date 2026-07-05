@@ -33,3 +33,38 @@ describe("TapeRing", () => {
     expect(r.latest(1)[0].price).toBe(9);
   });
 });
+
+describe("sequence tracking (Plan 3 pause anchoring)", () => {
+  // Named to avoid shadowing the file's existing top-level snapshot helper.
+  const seqTick = (n: number): Tick =>
+    ({ symbol: "US.AAPL", price: 3.5, size: n, direction: "BUY", ts: `2026-07-06T13:30:0${n % 10}Z` });
+  const seqSnap = (ticks: Tick[]): SnapshotMsg => ({ kind: "snapshot", topic: "md.tape", payload: ticks });
+  const seqDel = (ticks: Tick[]): DeltaMsg => ({ kind: "delta", topic: "md.tape", payload: ticks });
+
+  it("numbers ticks monotonically and exposes the retained seq window", () => {
+    const ring = new TapeRing(3);
+    ring.apply(seqSnap([seqTick(1), seqTick(2)]));            // seqs 1, 2
+    ring.apply(seqDel([seqTick(3), seqTick(4), seqTick(5)])); // seqs 3, 4, 5 — capacity 3 retains 3..5
+    expect(ring.lastSeq()).toBe(5);
+    expect(ring.oldestSeq()).toBe(3);
+    expect(ring.tickBySeq(4)).toEqual(seqTick(4));
+    expect(ring.tickBySeq(2)).toBeUndefined(); // overwritten
+    expect(ring.tickBySeq(6)).toBeUndefined(); // not yet appended
+  });
+
+  it("bumps the generation and restarts seq on snapshot rebuild (reconnect)", () => {
+    const ring = new TapeRing(8);
+    ring.apply(seqSnap([seqTick(1), seqTick(2)]));
+    const g1 = ring.generation();
+    ring.apply(seqSnap([seqTick(3)]));
+    expect(ring.generation()).toBe(g1 + 1);
+    expect(ring.lastSeq()).toBe(1);
+    expect(ring.tickBySeq(1)).toEqual(seqTick(3));
+  });
+
+  it("reports an empty seq window before any ticks", () => {
+    const ring = new TapeRing(8);
+    expect(ring.lastSeq()).toBe(0);
+    expect(ring.oldestSeq()).toBe(1); // empty range: oldest > last
+  });
+});
