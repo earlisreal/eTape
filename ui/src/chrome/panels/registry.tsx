@@ -9,6 +9,7 @@ import { SmokePainterPanel } from "./SmokePainterPanel";
 import { ChartPanel } from "./ChartPanel";
 import { LadderPanel } from "./LadderPanel";
 import { TapePanel } from "./TapePanel";
+import { ScannerPanel } from "./ScannerPanel";
 
 export interface PanelProps {
   config: PanelConfig;
@@ -24,10 +25,9 @@ export interface PanelProps {
 }
 export interface PanelDef { component: FC<PanelProps>; topics: TopicName[] }
 
-// Plan 1 registered the two panels needed to prove the stack; Plan 2 adds the
-// real chart panel; Plan 3 delivers the L2 ladder and time & sales panels below.
-// Plans 4–5 still owe scanner / movers / news / account-bar / positions /
-// open-orders / order-ticket here.
+// Plan 1 registered the two stack-proving panels; Plan 2 added the chart panel;
+// Plan 3 added the L2 ladder + time & sales; Plan 4 adds scanner / movers / news
+// below. Plan 5 still owes account-bar / positions / open-orders / order-ticket.
 export const PANELS: Record<string, PanelDef> = {
   "connection-status": {
     component: ({ stores }) => <ConnectionStatusPanel health={stores.health} />,
@@ -48,5 +48,13 @@ export const PANELS: Record<string, PanelDef> = {
   "tape": {
     component: TapePanel,
     topics: ["md.tape"],
+  },
+  "scanner": {
+    component: (p) => <ScannerPanel {...p} session="premarket" />,
+    topics: ["scanner.rank", "scanner.hit"],
+  },
+  "movers": {
+    component: (p) => <ScannerPanel {...p} session="rth" />,
+    topics: ["scanner.rank", "scanner.hit"],
   },
 };
