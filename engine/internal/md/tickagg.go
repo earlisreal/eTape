@@ -27,6 +27,9 @@ func newTickAgg(symbol string, tf session.Timeframe) *tickAgg {
 
 func (a *tickAgg) lateDrops() uint64 { return a.late }
 
+// openBar returns the in-progress bar for bucketMs, or nil.
+func (a *tickAgg) openBar(bucketMs int64) *Bar { return a.open[bucketMs] }
+
 // addTick returns the emissions caused by t, in order: zero or more FINAL
 // bars (watermark-closed buckets), then the in-progress bar for t's bucket.
 // gapFlag marks the first NEW bucket opened after a resync.

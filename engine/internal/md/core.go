@@ -123,6 +123,12 @@ func (c *Core) emit(u Update) {
 	}
 }
 
+// barOut is the single door for bar emissions: update stream + indicators.
+func (c *Core) barOut(b Bar) {
+	c.emit(BarUpdate{Bar: b})
+	c.inds.onBar(c, b)
+}
+
 func (c *Core) mark(m Mark) {
 	select {
 	case c.marks <- m:
