@@ -35,6 +35,23 @@ export interface HealthLink {
 export interface HealthSnapshot { links: HealthLink[] }
 export interface SysEvent { seq: number; ts: string; kind: string; detail: string }
 
+// ---- scanner (Plan 4) ----
+// Session travels on the message `key` ("premarket" | "rth" | "afterhours").
+export type ScannerSession = "premarket" | "rth" | "afterhours";
+export interface ScannerRow {
+  symbol: string;
+  changePct: number | null;   // % change; null = no print yet (never a fabricated 0)
+  last: number | null;        // last trade price; null = no print yet
+  floatShares: number | null; // true free float in ACTUAL shares (engine already
+                              // converts moomoo's thousands unit); null = unknown
+  volume: number;             // session cumulative volume (0 is legitimate)
+}
+export interface ScannerRankPayload { refreshedAt: string; rows: ScannerRow[] } // one full ranking
+export interface ScanHitPayload { symbol: string; at: string }                  // explicit new-qualifier event
+
+// ---- news (Plan 4) ----
+export interface NewsItem { symbol: string; headline: string; source: string; url: string; seen_at: string }
+
 // ---- server → client ----
 export interface SnapshotMsg { kind: "snapshot"; topic: TopicName; key?: string; payload: unknown }
 export interface DeltaMsg { kind: "delta"; topic: TopicName; key?: string; payload: unknown }
