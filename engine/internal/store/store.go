@@ -26,8 +26,8 @@ type Store struct {
 	batch  int
 
 	wg        sync.WaitGroup
-	closeOnce sync.Once    // Close is idempotent (tests Close explicitly AND via t.Cleanup)
-	dropped   atomicUint64 //nolint:unused // journal rows dropped on encode failure (see RecordEvent, Task 3)
+	closeOnce sync.Once // Close is idempotent (tests Close explicitly AND via t.Cleanup)
+	dropped   atomic.Uint64
 
 	daySeq map[string]int64 // per-day next-seq cache; writer goroutine ONLY (Task 3)
 }
@@ -54,9 +54,6 @@ type Options struct {
 	FlushInterval time.Duration
 	BatchMax      int
 }
-
-//nolint:unused // consumed once dropped is incremented/read starting Task 3
-type atomicUint64 = atomic.Uint64
 
 // Open opens (creating if absent) the SQLite DB, applies WAL pragmas, migrates
 // the schema, and starts the writer goroutine.
