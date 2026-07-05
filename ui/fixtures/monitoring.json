@@ -1,0 +1,36 @@
+{
+  "snapshots": [
+    { "topic": "scanner.rank", "key": "premarket", "payload": { "refreshedAt": "2026-07-06T08:30:00Z", "rows": [
+      { "symbol": "US.DJT",  "changePct": 42.1, "last": 31.50, "floatShares": 110000000,  "volume": 3400000 },
+      { "symbol": "US.KO",   "changePct": 18.4, "last": 62.10, "floatShares": 4300000000, "volume": 1250000 },
+      { "symbol": "US.ABCD", "changePct": 7.2,  "last": 2.15,  "floatShares": 8500000,    "volume": 640000 },
+      { "symbol": "US.WXYZ", "changePct": null, "last": null,  "floatShares": 21000000,   "volume": 0 }
+    ] } },
+    { "topic": "scanner.rank", "key": "rth", "payload": { "refreshedAt": "2026-07-06T14:00:00Z", "rows": [
+      { "symbol": "US.NVDA", "changePct": 3.4,  "last": 130.20, "floatShares": 2400000000, "volume": 5200000 },
+      { "symbol": "US.SPY",  "changePct": 1.2,  "last": 560.10, "floatShares": 900000000,  "volume": 11000000 },
+      { "symbol": "US.TSLA", "changePct": -2.1, "last": 240.50, "floatShares": 2800000000, "volume": 8000000 }
+    ] } },
+    { "topic": "news.item", "payload": [
+      { "symbol": "US.AAPL", "headline": "Apple ships record quarter",  "source": "Reuters",   "url": "https://ex.com/a1", "seen_at": "2026-07-06T13:29:50Z" },
+      { "symbol": "US.AAPL", "headline": "Analysts raise AAPL targets", "source": "Bloomberg", "url": "https://ex.com/a2", "seen_at": "2026-07-06T13:28:10Z" },
+      { "symbol": "US.NVDA", "headline": "NVDA unveils new GPU line",    "source": "CNBC",      "url": "https://ex.com/n1", "seen_at": "2026-07-06T13:25:00Z" }
+    ] }
+  ],
+  "deltas": [
+    { "afterMs": 1500, "topic": "news.item", "payload":
+      { "symbol": "US.AAPL", "headline": "Apple schedules fall event", "source": "WSJ", "url": "https://ex.com/a3", "seen_at": "2026-07-06T13:31:00Z" } },
+    { "afterMs": 2000, "topic": "scanner.rank", "key": "premarket", "payload": { "refreshedAt": "2026-07-06T08:30:02Z", "rows": [
+      { "symbol": "US.DJT",  "changePct": 40.5, "last": 30.90, "floatShares": 110000000, "volume": 3600000 },
+      { "symbol": "US.KO",   "changePct": 19.1, "last": 62.60, "floatShares": 4300000000, "volume": 1300000 },
+      { "symbol": "US.GHIJ", "changePct": 12.5, "last": 4.40,  "floatShares": 6000000,    "volume": 900000 },
+      { "symbol": "US.ABCD", "changePct": 7.0,  "last": 2.10,  "floatShares": 8500000,    "volume": 660000 }
+    ] } },
+    { "afterMs": 2500, "topic": "scanner.hit", "key": "premarket", "payload": { "symbol": "US.KO", "at": "2026-07-06T08:30:02.5Z" } },
+    { "afterMs": 3000, "topic": "scanner.rank", "key": "rth", "payload": { "refreshedAt": "2026-07-06T14:00:03Z", "rows": [
+      { "symbol": "US.AMD",  "changePct": 6.8,  "last": 168.30, "floatShares": 1600000000, "volume": 4100000 },
+      { "symbol": "US.NVDA", "changePct": 3.6,  "last": 130.60, "floatShares": 2400000000, "volume": 5400000 },
+      { "symbol": "US.SPY",  "changePct": 1.3,  "last": 560.40, "floatShares": 900000000,  "volume": 11400000 }
+    ] } }
+  ]
+}
