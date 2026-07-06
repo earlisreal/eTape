@@ -11,6 +11,7 @@ import (
 	"errors"
 	"flag"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -150,7 +151,23 @@ func main() {
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
 	}, execCore, st, core)
 	go func() { _ = hub.Run(ctx) }()
-	httpSrv := &http.Server{Addr: cfg.UIHub.Addr(), Handler: srv.Handler(), ReadHeaderTimeout: 5 * time.Second}
+	httpSrv := &http.Server{
+		Addr: cfg.UIHub.Addr(), Handler: srv.Handler(), ReadHeaderTimeout: 5 * time.Second,
+		// BaseContext ties every accepted connection's r.Context() to the
+		// top-level shutdown ctx, independently of Hub's own lifecycle. Without
+		// this, a connection accepted (and its conn.run(r.Context()) started)
+		// after Hub.Run has already returned would never be told to close: its
+		// hub.Register call silently no-ops against the already-closed Hub (see
+		// Hub.Register's <-h.closed race), so it never lands in h.clients, and
+		// Hub.Run's <-ctx.Done() teardown loop (which calls c.close() on every
+		// registered client) can never reach it either. That connection's
+		// readLoop would then block forever in ws.Read(r.Context()) waiting on a
+		// client that may never send or disconnect, so srv.Wait() (which has no
+		// timeout) would hang the whole shutdown sequence. Deriving r.Context()
+		// from ctx here unblocks that Read as soon as the top-level ctx is
+		// cancelled, regardless of Hub's state.
+		BaseContext: func(net.Listener) context.Context { return ctx },
+	}
 	go func() {
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Error("uihub listen", "err", err)

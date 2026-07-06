@@ -54,9 +54,14 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	c.SetReadLimit(1 << 20) // 1 MiB frame cap
 	id := s.nextID.Add(1)
 	conn := newConn(id, coderSocket{c: c}, s.hub, s.cmd, s.qry, s.cfg.OutBuf)
-	s.hub.Register(conn)
+	// Add(1) before Register: Wait() must count this connection from the
+	// instant it exists, not after it's (possibly unsuccessfully) handed to the
+	// hub -- otherwise a Wait() call landing in the gap between accept and
+	// Register could observe a zero counter and return before this goroutine
+	// has even started running.
 	s.connWG.Add(1)
 	defer s.connWG.Done()
+	s.hub.Register(conn)
 	conn.run(r.Context()) // blocks until the socket closes; run() calls hub.Unregister
 }
 

@@ -376,3 +376,110 @@ func TestServerWaitBlocksUntilConnectionDrains(t *testing.T) {
 		t.Fatalf("expected exactly 1 SetConfig call, got %d", got)
 	}
 }
+
+// TestServerWaitBoundedByBaseContextAfterHubExit is a regression test for a
+// residual gap found in re-review of the fix TestServerWaitBlocksUntilConnectionDrains
+// covers: Server.Wait()'s boundedness depended entirely on Hub.Run's
+// <-ctx.Done() branch calling c.close() on every registered client. But a
+// connection accepted (and hub.Register'd) AFTER Hub.Run has already returned
+// races into Hub.Register's own <-h.closed branch and silently no-ops -- the
+// connection never lands in h.clients, so Hub.Run's teardown loop (which
+// already returned anyway) can never tell it to close either. Before this fix,
+// that connection's readLoop would block forever in ws.Read(r.Context())
+// because r.Context() was tied only to the individual HTTP request, not to any
+// cancellable top-level context -- so Server.Wait() (no timeout) would hang.
+//
+// This test reproduces exactly that ordering -- Hub.Run exits FIRST, then a
+// new connection is accepted and registered against the already-exited hub --
+// and proves the fix (httpSrv.BaseContext tying r.Context() to a top-level
+// ctx, wired in cmd/etape/main.go) bounds it: Server.Wait() blocks while the
+// connection's read is pending, and returns promptly once the top-level ctx
+// (not any Hub state) is cancelled.
+func TestServerWaitBoundedByBaseContextAfterHubExit(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h, _ := uihub.NewHubForTest(clk)
+
+	// Run and immediately exit the hub -- simulating Hub.Run having already
+	// returned by the time the phantom connection is accepted.
+	hubCtx, cancelHub := context.WithCancel(context.Background())
+	hubDone := make(chan struct{})
+	go func() { defer close(hubDone); _ = h.Run(hubCtx) }()
+	cancelHub()
+	select {
+	case <-hubDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("hub.Run did not exit")
+	}
+
+	srv := uihub.NewServer(h,
+		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}),
+		uihub.NewQueriesForTest(fillsNoop{}),
+		uihub.ServerConfig{OutBuf: 32})
+
+	// topCtx stands in for main.go's top-level shutdown ctx. Wiring it via
+	// BaseContext (as cmd/etape/main.go now does) is the fix under test: it
+	// must be what unblocks the phantom connection's Read, not anything Hub-
+	// related.
+	topCtx, cancelTop := context.WithCancel(context.Background())
+	defer cancelTop()
+
+	ts := httptest.NewUnstartedServer(srv.Handler())
+	ts.Config.BaseContext = func(net.Listener) context.Context { return topCtx }
+	ts.Start()
+	defer ts.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
+	dialCtx, dialCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer dialCancel()
+	c, _, err := websocket.Dial(dialCtx, wsURL, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = c.CloseNow() }()
+
+	// Round-trip a ping/pong before touching srv.Wait(): dispatch()'s "ping"
+	// case answers entirely inside conn.run()'s own readLoop/writeLoop, with no
+	// hub involvement (unlike "subscribe", which would go nowhere here -- the
+	// hub already exited, so hub.Subscribe would just race into its own
+	// <-h.closed no-op branch and never reply). Receiving the pong back
+	// guarantees serveWS has already executed connWG.Add(1) + hub.Register and
+	// started conn.run() for this connection, establishing the happens-before
+	// edge srv.Wait() (called next) needs: sync.WaitGroup requires any Add(1)
+	// racing a zero counter to happen-before the Wait call it's paired with,
+	// and a bare successful Dial (the handshake response is written before
+	// serveWS ever reaches connWG.Add) does not by itself provide that.
+	ping, _ := json.Marshal(map[string]any{"kind": "ping", "t": 42})
+	if err := c.Write(dialCtx, websocket.MessageText, ping); err != nil {
+		t.Fatal(err)
+	}
+	pongCtx, pongCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if _, _, err := c.Read(pongCtx); err != nil {
+		pongCancel()
+		t.Fatalf("did not get pong reply: %v", err)
+	}
+	pongCancel()
+
+	// The client never sends or disconnects again, so with the old
+	// (per-request) r.Context(), readLoop's next ws.Read would block forever --
+	// there is no Hub state left to ever close this connection (Hub.Run
+	// already returned, and this connection's hub.Register call raced into the
+	// <-h.closed no-op branch, so it was never added to h.clients).
+	waitDone := make(chan struct{})
+	go func() { srv.Wait(); close(waitDone) }()
+
+	select {
+	case <-waitDone:
+		t.Fatal("Server.Wait() returned before the phantom connection's read was unblocked")
+	case <-time.After(200 * time.Millisecond):
+	}
+
+	// Cancel the top-level ctx (not any Hub-related ctx) -- this is the only
+	// thing that can unblock the phantom connection now.
+	cancelTop()
+
+	select {
+	case <-waitDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Server.Wait() did not return after the top-level ctx was cancelled")
+	}
+}
