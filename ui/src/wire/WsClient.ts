@@ -36,6 +36,7 @@ export class WsClient {
   private readonly handlers = new Map<TopicName, Set<TopicHandler>>();
   private readonly stateCbs = new Set<(s: ConnState) => void>();
   private readonly pending = new Map<string, (ack: AckMsg) => void>();
+  private readonly pendingQueries = new Map<string, (payload: unknown) => void>();
   private readonly outbox: string[] = []; // commands buffered while not open
   private readonly backoff: (attempt: number) => number;
 
@@ -73,6 +74,14 @@ export class WsClient {
     return new Promise<AckMsg>((resolve) => {
       this.pending.set(corrId, resolve);
       this.sendRaw({ kind: "command", corrId, name, args });
+    });
+  }
+
+  sendQuery(name: string, args: unknown): Promise<unknown> {
+    const corrId = `q${++this.corr}`;
+    return new Promise<unknown>((resolve) => {
+      this.pendingQueries.set(corrId, resolve);
+      this.sendRaw({ kind: "query", corrId, name, args });
     });
   }
 
@@ -126,6 +135,11 @@ export class WsClient {
         this.lastRtt = this.opts.now() - msg.t;
         return;
       }
+      case "result": {
+        const resolve = this.pendingQueries.get(msg.corrId);
+        if (resolve) { this.pendingQueries.delete(msg.corrId); resolve(msg.payload); }
+        return;
+      }
     }
   }
 
@@ -136,7 +150,7 @@ export class WsClient {
     }
     // Not open: buffer commands (each carries a pending promise); drop subscribe/
     // unsubscribe (reconstructed from handlers on open) and pings (re-fired on interval).
-    if (msg.kind === "command") this.outbox.push(encodeClientMessage(msg));
+    if (msg.kind === "command" || msg.kind === "query") this.outbox.push(encodeClientMessage(msg));
   }
 
   private flushOutbox(): void {

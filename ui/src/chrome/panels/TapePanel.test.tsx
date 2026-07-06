@@ -34,7 +34,7 @@ function renderTape() {
     <ThemeProvider>
       <TapePanel config={config} stores={stores} scheduler={scheduler} width={260} height={400}
         linkGroups={new LinkGroups(new BroadcastChannelBus(), () => {})}
-        commands={{ sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })) }}
+        commands={{ sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })), sendQuery: vi.fn(async () => []) }}
         onConfigChange={onConfigChange} />
     </ThemeProvider>,
   );

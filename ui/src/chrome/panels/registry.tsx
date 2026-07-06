@@ -23,7 +23,7 @@ export interface PanelProps {
   width: number;
   height: number;
   linkGroups: LinkGroups;
-  commands: { sendCommand(name: string, args: unknown): Promise<AckMsg> };
+  commands: { sendCommand(name: string, args: unknown): Promise<AckMsg>; sendQuery(name: string, args: unknown): Promise<unknown> };
   // Persist a panel's own settings (timeframe, indicators, …). AppShell updates the
   // workspace doc's matching panel entry and debounce-saves via WorkspaceStore.
   onConfigChange: (settings: Record<string, unknown>) => void;

@@ -1,6 +1,6 @@
 import type { ClientMessage, ServerMessage } from "./contract";
 
-const SERVER_KINDS = new Set(["snapshot", "delta", "ack", "pong"]);
+const SERVER_KINDS = new Set(["snapshot", "delta", "ack", "pong", "result"]);
 
 // Never throws: a malformed or unknown frame yields null so the reader loop
 // can drop-and-count rather than crash (honesty policy + burst tolerance).

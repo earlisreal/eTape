@@ -114,11 +114,13 @@ export interface AckMsg {
   value?: unknown;     // returned on a GetConfig accept (already relied on by ThemeProvider/WorkspaceStore)
 }
 export interface PongMsg { kind: "pong"; t: number }
-export type ServerMessage = SnapshotMsg | DeltaMsg | AckMsg | PongMsg;
+export interface ResultMsg { kind: "result"; corrId: string; payload: unknown }
+export type ServerMessage = SnapshotMsg | DeltaMsg | AckMsg | PongMsg | ResultMsg;
 
 // ---- client → server ----
 export interface SubscribeMsg { kind: "subscribe"; topic: TopicName }
 export interface UnsubscribeMsg { kind: "unsubscribe"; topic: TopicName }
 export interface CommandMsg { kind: "command"; corrId: string; name: string; args: unknown }
+export interface QueryMsg { kind: "query"; corrId: string; name: string; args: unknown }
 export interface PingMsg { kind: "ping"; t: number }
-export type ClientMessage = SubscribeMsg | UnsubscribeMsg | CommandMsg | PingMsg;
+export type ClientMessage = SubscribeMsg | UnsubscribeMsg | CommandMsg | QueryMsg | PingMsg;

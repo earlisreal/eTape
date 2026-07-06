@@ -11,7 +11,7 @@ import type { PanelProps } from "./registry";
 function mkProps() {
   const stores = makeStores();
   const sent: Array<{ name: string; args: unknown }> = [];
-  const commands = { sendCommand: vi.fn(async (name: string, args: unknown): Promise<AckMsg> => { sent.push({ name, args }); return { kind: "ack", corrId: "c", status: "accepted", orderId: "ETX" }; }) };
+  const commands = { sendCommand: vi.fn(async (name: string, args: unknown): Promise<AckMsg> => { sent.push({ name, args }); return { kind: "ack", corrId: "c", status: "accepted", orderId: "ETX" }; }), sendQuery: vi.fn(async () => []) };
   const props = { config: { id: "t-positions", panelId: "positions", group: null, settings: {} }, stores, scheduler: {} as never, width: 400, height: 200, linkGroups: {} as never, commands, onConfigChange: () => {} } as PanelProps;
   return { props, stores, sent };
 }

@@ -28,7 +28,7 @@ function renderLadder(settings: Record<string, unknown> = { symbol: "US.AAPL" })
   const utils = render(
     <ThemeProvider>
       <LadderPanel config={config} stores={stores} scheduler={scheduler} width={300} height={480}
-        linkGroups={linkGroups} commands={{ sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })) }}
+        linkGroups={linkGroups} commands={{ sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })), sendQuery: vi.fn(async () => []) }}
         onConfigChange={vi.fn()} />
     </ThemeProvider>,
   );

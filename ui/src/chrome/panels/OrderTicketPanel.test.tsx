@@ -13,7 +13,7 @@ import type { PanelProps } from "./registry";
 function mkProps() {
   const stores = makeStores();
   const sent: Array<{ name: string; args: unknown }> = [];
-  const commands = { sendCommand: vi.fn(async (name: string, args: unknown): Promise<AckMsg> => { sent.push({ name, args }); return { kind: "ack", corrId: "c", status: "accepted", orderId: "ETX", value: undefined }; }) };
+  const commands = { sendCommand: vi.fn(async (name: string, args: unknown): Promise<AckMsg> => { sent.push({ name, args }); return { kind: "ack", corrId: "c", status: "accepted", orderId: "ETX", value: undefined }; }), sendQuery: vi.fn(async () => []) };
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
   const props = { config: { id: "t-ticket", panelId: "order-ticket", group: "green", settings: {} }, stores, scheduler: {} as never, width: 320, height: 400, linkGroups, commands, onConfigChange: () => {} } as PanelProps;
   return { props, stores, sent, linkGroups };

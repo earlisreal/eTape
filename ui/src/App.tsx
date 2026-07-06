@@ -57,7 +57,10 @@ export function App({ workspaceName }: { workspaceName: "monitoring" | "trading"
     return () => { window.clearInterval(ping); disposeStores(); scheduler.stop(); client.stop(); };
   }, [client, stores, scheduler, workspaceName]);
 
-  const commands = { sendCommand: (name: string, args: unknown) => client.sendCommand(name, args) };
+  const commands = {
+    sendCommand: (name: string, args: unknown) => client.sendCommand(name, args),
+    sendQuery: (name: string, args: unknown) => client.sendQuery(name, args),
+  };
 
   return (
     <ThemeProvider commands={commands}>

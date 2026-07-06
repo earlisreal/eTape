@@ -20,7 +20,7 @@ function renderPanel() {
   const linkGroups = new LinkGroups(fakeBus() as never, () => {});
   const config: PanelConfig = { id: "m-news", panelId: "news", group: "green", settings: {} };
   const props = { config, stores, linkGroups, onConfigChange: vi.fn(), scheduler: {} as never,
-    width: 400, height: 300, commands: { sendCommand: async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" }) } } as PanelProps;
+    width: 400, height: 300, commands: { sendCommand: async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" }), sendQuery: async () => [] } } as PanelProps;
   render(<ThemeProvider><NewsPanel {...props} /></ThemeProvider>);
   return { news, linkGroups };
 }
