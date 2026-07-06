@@ -73,3 +73,80 @@ func TestMapTickDirection(t *testing.T) {
 		t.Fatalf("tick map wrong: %+v", w)
 	}
 }
+
+func TestMapFillFieldsAndSide(t *testing.T) {
+	f := exec.Fill{
+		Venue: "tz", OrderID: "TZ123", Symbol: "US.AAPL",
+		Side: exec.SideShort, Qty: 50, Price: 3.55, TsMs: 1_783_344_660_000,
+	}
+	w := mapFill(f)
+	if w.Venue != "tz" || w.OrderID != "TZ123" || w.Symbol != "US.AAPL" {
+		t.Fatalf("fill basic fields wrong: %+v", w)
+	}
+	if w.Side != wsmsg.SideShort {
+		t.Fatalf("fill side must map via sideToWire: got %v, want SideShort", w.Side)
+	}
+	if w.Qty != 50 || w.Price != 3.55 || w.TsMs != 1_783_344_660_000 {
+		t.Fatalf("fill qty/price/ts wrong: %+v", w)
+	}
+}
+
+func TestMapAccountFields(t *testing.T) {
+	a := exec.AccountSnapshot{
+		Venue: "sim", Equity: 10000, BuyingPower: 20000,
+		AvailableCash: 5000, SodEquity: 9500, Realized: 500,
+		DayPnL: -250, Leverage: 1.5, TsMs: 1_783_344_660_000,
+	}
+	w := mapAccount(a)
+	if w.Venue != "sim" {
+		t.Fatalf("account venue wrong: %q", w.Venue)
+	}
+	if w.Equity != 10000 || w.BuyingPower != 20000 || w.AvailableCash != 5000 {
+		t.Fatalf("account equity/bp/cash wrong: %+v", w)
+	}
+	if w.SodEquity != 9500 || w.Realized != 500 || w.DayPnl != -250 {
+		t.Fatalf("account sod/realized/dayPnl wrong: %+v", w)
+	}
+	if w.Leverage != 1.5 || w.TsMs != 1_783_344_660_000 {
+		t.Fatalf("account leverage/ts wrong: %+v", w)
+	}
+}
+
+func TestMapBookLevelsAndTimestamp(t *testing.T) {
+	b := feed.Book{
+		Symbol: "US.AAPL",
+		TsMs:   1_783_344_660_000, // 2026-07-06T13:31:00Z
+		Bids: []feed.BookLevel{
+			{Price: 3.48, Volume: 100, Orders: 2},
+			{Price: 3.47, Volume: 50, Orders: 1},
+		},
+		Asks: []feed.BookLevel{
+			{Price: 3.49, Volume: 75, Orders: 1},
+			{Price: 3.50, Volume: 200, Orders: 3},
+		},
+	}
+	w := mapBook(b)
+	if w.Symbol != "US.AAPL" {
+		t.Fatalf("book symbol wrong: %q", w.Symbol)
+	}
+	if w.Ts != "2026-07-06T13:31:00.000Z" {
+		t.Fatalf("book ts must be ISO-8601 UTC ms: %q", w.Ts)
+	}
+	if len(w.Bids) != 2 || len(w.Asks) != 2 {
+		t.Fatalf("book levels count wrong: bids=%d asks=%d", len(w.Bids), len(w.Asks))
+	}
+	if w.Bids[0].Price != 3.48 || w.Bids[0].Size != 100 {
+		t.Fatalf("bid level 0 wrong: %+v", w.Bids[0])
+	}
+	if w.Asks[1].Price != 3.50 || w.Asks[1].Size != 200 {
+		t.Fatalf("ask level 1 wrong: %+v", w.Asks[1])
+	}
+}
+
+func TestMapIndicatorPointFields(t *testing.T) {
+	p := md.Point{TimeMs: 1_783_344_660_000, Value: 42.5}
+	w := mapIndicatorPoint(p)
+	if w.TimeMs != 1_783_344_660_000 || w.Value != 42.5 {
+		t.Fatalf("indicator point fields wrong: %+v", w)
+	}
+}
