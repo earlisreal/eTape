@@ -2,6 +2,16 @@ import { describe, it, expect, vi } from "vitest";
 import { OrderCommands, type CommandAdapter } from "./commands";
 import { ExecStore } from "../../data/ExecStore";
 import type { AckMsg, Order, SubmitOrderArgs } from "../../wire/contract";
+import type { SoundApi } from "../../sound/SoundEngine";
+
+function soundSpy(): SoundApi & { placed: string[]; rejected: number } {
+  const s = {
+    placed: [] as string[], rejected: 0,
+    orderPlaced: (side: string) => { s.placed.push(side); },
+    orderRejected: () => { s.rejected += 1; },
+  };
+  return s as SoundApi & { placed: string[]; rejected: number };
+}
 
 function fakes(ack: Partial<AckMsg> = {}) {
   const sent: Array<{ name: string; args: unknown }> = [];
@@ -48,5 +58,34 @@ describe("OrderCommands", () => {
     sent.length = 0;
     await oc.cancelAll("focused", "US.AAPL");
     expect(sent.map((s) => (s.args as { orderId: string }).orderId).sort()).toEqual(["ET1", "ET2"]);
+  });
+});
+
+describe("OrderCommands sound triggers", () => {
+  it("submit accepted -> orderPlaced(side); blocked -> orderRejected", async () => {
+    const sound = soundSpy();
+    const okCmd: CommandAdapter = { sendCommand: vi.fn(async () => ({ kind: "ack", corrId: "c", status: "accepted", orderId: "x" }) as AckMsg) };
+    const oc = new OrderCommands({ cmd: okCmd, exec: { addOptimistic: vi.fn() } as never, toast: { push: vi.fn() } as never, now: () => 0, sound });
+    await oc.submit({ venue: "alpaca-paper", symbol: "US.AAPL", side: "SELL", type: "LIMIT", tif: "DAY", qty: 1, limitPrice: 1, stopPrice: 0 }, "flash");
+    expect(sound.placed).toEqual(["SELL"]);
+
+    const blockCmd: CommandAdapter = { sendCommand: vi.fn(async () => ({ kind: "ack", corrId: "c", status: "blocked", reason: "disarmed" }) as AckMsg) };
+    const oc2 = new OrderCommands({ cmd: blockCmd, exec: {} as never, toast: { push: vi.fn() } as never, now: () => 0, sound });
+    await oc2.submit({ venue: "alpaca-paper", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", qty: 1, limitPrice: 1, stopPrice: 0 }, "flash");
+    expect(sound.rejected).toBe(1);
+  });
+
+  it("flatten accepted -> orderPlaced('SELL'); cancel/replace blocked -> orderRejected", async () => {
+    const sound = soundSpy();
+    const okCmd: CommandAdapter = { sendCommand: vi.fn(async () => ({ kind: "ack", corrId: "c", status: "accepted" }) as AckMsg) };
+    const oc = new OrderCommands({ cmd: okCmd, exec: {} as never, toast: { push: vi.fn() } as never, now: () => 0, sound });
+    await oc.flatten("alpaca-paper");
+    expect(sound.placed).toEqual(["SELL"]);
+
+    const blockCmd: CommandAdapter = { sendCommand: vi.fn(async () => ({ kind: "ack", corrId: "c", status: "blocked" }) as AckMsg) };
+    const oc2 = new OrderCommands({ cmd: blockCmd, exec: {} as never, toast: { push: vi.fn() } as never, now: () => 0, sound });
+    await oc2.cancel("alpaca-paper", "o1");
+    await oc2.replace({ venue: "alpaca-paper", orderId: "o1", qty: 1, limitPrice: 1, stopPrice: 0 });
+    expect(sound.rejected).toBe(2);
   });
 });
