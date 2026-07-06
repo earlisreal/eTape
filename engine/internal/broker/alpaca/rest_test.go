@@ -158,7 +158,7 @@ func TestReplaceOrder_Success(t *testing.T) {
 	defer srv.Close()
 
 	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
-	err := rc.replaceOrder(context.Background(), "b-1", exec.ReplaceRequest{Qty: 20, LimitPrice: 190.5049})
+	err := rc.replaceOrder(context.Background(), "b-1", "ET-1", exec.ReplaceRequest{Qty: 20, LimitPrice: 190.5049})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,6 +176,31 @@ func TestReplaceOrder_Success(t *testing.T) {
 	}
 }
 
+// TestReplaceOrder_IncludesOriginalClientOrderID guards against Alpaca's
+// documented PATCH behavior of auto-generating a brand-new client_order_id
+// when the field is omitted from the replace request: this adapter's whole
+// id-stability design (brokerIDByClientID, WS "replaced" correlation,
+// reconcile) assumes client_order_id never changes across a replace, so the
+// PATCH body must always explicitly re-send the ORIGINAL one.
+func TestReplaceOrder_IncludesOriginalClientOrderID(t *testing.T) {
+	mux := http.NewServeMux()
+	var gotBody map[string]any
+	mux.HandleFunc("/v2/orders/b-1", func(w http.ResponseWriter, r *http.Request) {
+		_ = jsonDecode(t, r, &gotBody)
+		_, _ = w.Write([]byte(`{"id":"b-1r","client_order_id":"ET-original","status":"pending_replace"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.replaceOrder(context.Background(), "b-1", "ET-original", exec.ReplaceRequest{Qty: 15}); err != nil {
+		t.Fatal(err)
+	}
+	if got := gotBody["client_order_id"]; got != "ET-original" {
+		t.Fatalf("PATCH body client_order_id = %v, want %q (must be sent explicitly or Alpaca auto-generates a new one)", got, "ET-original")
+	}
+}
+
 func TestReplaceOrder_ErrorStatusNeverSilentlyAccepted(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v2/orders/b-1", func(w http.ResponseWriter, _ *http.Request) {
@@ -186,7 +211,7 @@ func TestReplaceOrder_ErrorStatusNeverSilentlyAccepted(t *testing.T) {
 	defer srv.Close()
 
 	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
-	if err := rc.replaceOrder(context.Background(), "b-1", exec.ReplaceRequest{Qty: 20}); err == nil {
+	if err := rc.replaceOrder(context.Background(), "b-1", "ET-1", exec.ReplaceRequest{Qty: 20}); err == nil {
 		t.Fatal("expected a 422 to surface as an error")
 	}
 }

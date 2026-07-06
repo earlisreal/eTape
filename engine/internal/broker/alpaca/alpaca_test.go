@@ -788,3 +788,142 @@ func TestAdapter_Reconcile_MissingOrderResolvesTerminalStatus(t *testing.T) {
 		t.Fatalf("orderByClientID called %d times, want exactly 1 (no re-resolution of an already-terminal order)", lookupCount)
 	}
 }
+
+// TestAdapter_Reconcile_MissingOrderAfterReplaceStillResolvesTerminalStatus
+// mirrors TestAdapter_Reconcile_MissingOrderResolvesTerminalStatus but seeds
+// lastKnownStatus as exec.StatusReplaced (the state a just-replaced order is
+// tracked under, per handleUpdate's restOrderStatusDomain("replaced") ->
+// StatusReplaced) instead of StatusAccepted. Before the isWorkingStatus fix,
+// StatusReplaced was excluded from the "still working" set, so an order that
+// replaced then went terminal (filled/canceled/rejected) while disconnected
+// would never be checked against the open-orders list on reconnect -- its
+// disappearance would be silently ignored forever, AND lastKnownStatus would
+// stay stuck at StatusReplaced permanently, excluding it from every FUTURE
+// reconcile too. This proves the fix: the missing, just-replaced order IS
+// detected and resolved to its real terminal status.
+func TestAdapter_Reconcile_MissingOrderAfterReplaceStillResolvesTerminalStatus(t *testing.T) {
+	lookupCount := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/account", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"equity":"100000","last_equity":"99000","buying_power":"400000","cash":"100000","multiplier":"4"}`))
+	})
+	mux.HandleFunc("/v2/positions", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`[]`)) })
+	mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`[]`)) }) // always empty: nothing open
+	mux.HandleFunc("/v2/orders:by_client_order_id", func(w http.ResponseWriter, r *http.Request) {
+		lookupCount++
+		// Filled at the broker while disconnected, after having replaced
+		// earlier in its life.
+		_, _ = w.Write([]byte(`{"id":"b-9","client_order_id":"ET9","symbol":"TSLA","side":"sell","order_type":"limit","qty":"25","filled_qty":"25","filled_avg_price":"251.5","status":"filled"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	a, err := New(Config{Venue: "alpaca", RESTBase: srv.URL, Creds: creds.Pair{KeyID: "K", SecretKey: "S"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.runCtx = context.Background()
+
+	// Simulate: a prior WS "replaced" event set lastKnownStatus["ET9"] to
+	// StatusReplaced (handleUpdate's normal bookkeeping), and the connection
+	// then dropped before any further event -- the order went on to fill at
+	// the broker while disconnected.
+	a.mu.Lock()
+	a.lastKnownStatus["ET9"] = exec.StatusReplaced
+	a.lastKnownFilledQty["ET9"] = 0
+	a.connectedOnce = true
+	a.mu.Unlock()
+
+	a.handleConn(true)
+	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.BrokerAccount); return ok })
+	fillEv := waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.OrderFilled); return ok })
+	fill := fillEv.(exec.OrderFilled)
+	if fill.F.OrderID != "ET9" || fill.CumQty != 25 {
+		t.Fatalf("resolved catch-up fill = %+v, want the fill that happened while disconnected after the replace", fill)
+	}
+	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
+	drainNonBlocking(a.Events())
+
+	if lookupCount != 1 {
+		t.Fatalf("orderByClientID called %d times, want exactly 1", lookupCount)
+	}
+
+	a.mu.Lock()
+	st := a.lastKnownStatus["ET9"]
+	a.mu.Unlock()
+	if st != exec.StatusFilled {
+		t.Fatalf("lastKnownStatus[ET9] = %v, want StatusFilled -- must not stay stuck at StatusReplaced", st)
+	}
+
+	// A second reconnect must NOT re-resolve (now genuinely terminal) -- no
+	// second lookup, no second event.
+	a.handleConn(false)
+	a.handleConn(true)
+	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
+	select {
+	case e := <-a.Events():
+		t.Fatalf("unexpected event on the second reconnect: %+v", e)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if lookupCount != 1 {
+		t.Fatalf("orderByClientID called %d times after the second reconnect, want still exactly 1", lookupCount)
+	}
+}
+
+// TestAdapter_Reconcile_MissingOrderStillMidReplaceIsRetriedNotDropped covers
+// resolveMissingOrder's own StatusReplaced case: orderByClientID itself can
+// answer with an order still showing status "replaced"/"pending_replace" (a
+// genuinely non-terminal, transitional wire state, not yet the order's real
+// fate). That must not be silently dropped either -- no event is emitted for
+// it, but the id stays "working" (isWorkingStatus(StatusReplaced) == true)
+// so the NEXT reconcile retries the lookup instead of abandoning the order.
+func TestAdapter_Reconcile_MissingOrderStillMidReplaceIsRetriedNotDropped(t *testing.T) {
+	lookupCount := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/account", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"equity":"100000","last_equity":"99000","buying_power":"400000","cash":"100000","multiplier":"4"}`))
+	})
+	mux.HandleFunc("/v2/positions", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`[]`)) })
+	mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`[]`)) }) // always empty: nothing open
+	mux.HandleFunc("/v2/orders:by_client_order_id", func(w http.ResponseWriter, r *http.Request) {
+		lookupCount++
+		_, _ = w.Write([]byte(`{"id":"b-9","client_order_id":"ET9","symbol":"TSLA","side":"sell","order_type":"limit","qty":"25","filled_qty":"0","limit_price":"250","status":"pending_replace"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	a, err := New(Config{Venue: "alpaca", RESTBase: srv.URL, Creds: creds.Pair{KeyID: "K", SecretKey: "S"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.runCtx = context.Background()
+
+	a.mu.Lock()
+	a.lastKnownStatus["ET9"] = exec.StatusAccepted
+	a.lastKnownFilledQty["ET9"] = 0
+	a.connectedOnce = true
+	a.mu.Unlock()
+
+	// First reconnect: orderByClientID answers "pending_replace" -- no
+	// terminal event, but the id must remain trackable.
+	a.handleConn(true)
+	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.BrokerAccount); return ok })
+	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
+	select {
+	case e := <-a.Events():
+		t.Fatalf("unexpected terminal event while still mid-replace: %+v", e)
+	case <-time.After(150 * time.Millisecond):
+	}
+	if lookupCount != 1 {
+		t.Fatalf("orderByClientID called %d times after first reconnect, want 1", lookupCount)
+	}
+
+	// Second reconnect: the id must still be re-examined (not permanently
+	// dropped) -- a second lookup call proves it wasn't abandoned.
+	a.handleConn(false)
+	a.handleConn(true)
+	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
+	if lookupCount != 2 {
+		t.Fatalf("orderByClientID called %d times after second reconnect, want 2 (still working, must be retried)", lookupCount)
+	}
+}

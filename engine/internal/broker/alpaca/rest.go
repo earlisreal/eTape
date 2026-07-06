@@ -148,8 +148,19 @@ func (rc *restClient) submitOrder(ctx context.Context, req exec.OrderRequest, cl
 // TradeZero's cancel-then-re-place emulation. Only non-zero fields of rr are
 // sent so an unset field is left as-is on Alpaca's side rather than being
 // coerced to zero.
-func (rc *restClient) replaceOrder(ctx context.Context, brokerID string, rr exec.ReplaceRequest) error {
-	payload := map[string]any{}
+//
+// clientOrderID is the domain order's ORIGINAL client_order_id, explicitly
+// re-sent in the PATCH body. Alpaca's documented replace behavior is to
+// auto-generate a brand-new client_order_id for the replaced order when this
+// field is left out of the request — which would silently break every piece
+// of this adapter's bookkeeping (brokerIDByClientID, the WS "replaced" event
+// correlation, reconcile) that assumes client_order_id never changes across
+// a replace (see the package doc). Sending it back unchanged is what actually
+// keeps that assumption true.
+func (rc *restClient) replaceOrder(ctx context.Context, brokerID, clientOrderID string, rr exec.ReplaceRequest) error {
+	payload := map[string]any{
+		"client_order_id": clientOrderID,
+	}
 	if rr.Qty > 0 {
 		payload["qty"] = rr.Qty
 	}

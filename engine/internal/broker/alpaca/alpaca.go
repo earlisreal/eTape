@@ -288,12 +288,21 @@ func (a *Adapter) resolveBrokerID(ctx context.Context, domainOID string) (string
 // mirrors nothing from TradeZero's ReplaceOrder — there is no cancel, no
 // await-confirmation, no resubmit, no replaceState — because none of that
 // emulation is needed when the broker itself guarantees atomicity.
+//
+// domainOID (== the order's original client_order_id, per the package doc)
+// is passed through to restClient.replaceOrder so the PATCH body explicitly
+// re-sends it: Alpaca's documented PATCH behavior is to AUTO-GENERATE a new
+// client_order_id for the replaced order when the field is omitted, which
+// would silently mint a fresh id, breaking brokerIDByClientID, the WS
+// "replaced" event's correlation back to this domain order, and every
+// assumption this whole adapter makes about client_order_id being stable
+// across a replace.
 func (a *Adapter) ReplaceOrder(ctx context.Context, domainOID string, req exec.ReplaceRequest) error {
 	brokerID, err := a.resolveBrokerID(ctx, domainOID)
 	if err != nil {
 		return fmt.Errorf("alpaca: replace: %w", err)
 	}
-	return a.rest.replaceOrder(ctx, brokerID, req)
+	return a.rest.replaceOrder(ctx, brokerID, domainOID, req)
 }
 
 // CancelOrder DELETEs the order currently backing domainOID.
@@ -477,8 +486,24 @@ func (a *Adapter) reconcile() {
 // still be sitting in Alpaca's open-orders list — exec.Order.Working() would
 // do the same check on a full Order, but reconcile only has the bare status
 // for a tracked-but-now-missing id.
+//
+// exec.StatusReplaced MUST be included here even though exec.Order.Working()
+// itself doesn't special-case it: Order.Working() never actually needs to,
+// because state.go's OrderReplaced fold rewrites a replaced order's Status to
+// StatusAccepted (see internal/exec/state.go), so a *domain* Order's Status
+// field is never literally StatusReplaced. But lastKnownStatus here is
+// populated straight from the wire via restOrderStatusDomain (handleUpdate
+// sets it to restOrderStatusDomain(tu.Order.Status) for every WS event,
+// including "replaced", and resolveMissingOrder below can also observe it via
+// orderByClientID) — a RAW wire status, not a folded domain Status. Treating
+// StatusReplaced as NOT working here would exclude a just-replaced order from
+// every future reconcile permanently: it would never be re-checked against
+// the open-orders list, so any fill/cancel/reject that happens after a
+// replace while disconnected would be silently dropped forever, and the id
+// would stay wrongly "not working" on every subsequent reconcile too.
 func isWorkingStatus(s exec.OrderStatus) bool {
-	return s == exec.StatusSubmitted || s == exec.StatusAccepted || s == exec.StatusPartiallyFilled
+	return s == exec.StatusSubmitted || s == exec.StatusAccepted ||
+		s == exec.StatusPartiallyFilled || s == exec.StatusReplaced
 }
 
 // diffOpenOrderLocked compares a currently-open order's snapshot state
@@ -555,6 +580,17 @@ func (a *Adapter) resolveMissingOrder(ctx context.Context, oid string) []exec.Br
 		out = append(out, exec.OrderRejected{V: a.venue, OID: oid, Reason: reason, Ts: ts})
 	case exec.StatusExpired:
 		out = append(out, exec.OrderExpired{V: a.venue, OID: oid, Ts: ts})
+	case exec.StatusReplaced:
+		// orderByClientID caught the order mid-replace: Alpaca answered with
+		// the object that just got replaced (status "replaced"/
+		// "pending_replace"), not yet a definitive terminal state. Emitting
+		// nothing here is deliberate, NOT a drop: lastKnownStatus[oid] was
+		// already set to o.Status (StatusReplaced) above, and isWorkingStatus
+		// now treats StatusReplaced as working, so this id stays eligible for
+		// missingTracked and gets re-examined on the NEXT reconcile instead of
+		// being abandoned — the same bug isWorkingStatus's doc comment
+		// describes, guarded against here too in case a future edit narrows
+		// isWorkingStatus again without touching this switch.
 		// StatusFilled: the OrderFilled synthesized above (LeavesQty==0) IS
 		// the terminal signal, matching sim's and TradeZero's convention —
 		// there is no separate "filled" domain event type.
