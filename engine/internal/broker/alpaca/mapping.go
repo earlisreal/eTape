@@ -37,8 +37,17 @@ func tifWire(t exec.TIF) (string, error) {
 		return "day", nil
 	case exec.TIFGTC:
 		return "gtc", nil
+	case exec.TIFFOK:
+		return "fok", nil
+	case exec.TIFIOC:
+		// Verified 2026-07-06 (docs/2026-07-03-alpaca-api.md): IOC is rejected
+		// (42210000) outside market hours on a standard account -- a session-time
+		// gate, not an Elite-tier restriction (FOK/OPG/CLS are all accepted). This
+		// function has no session-time context, so IOC is rejected here rather
+		// than risking an order Alpaca would bounce anyway.
+		return "", fmt.Errorf("alpaca: TIF %v is accepted by Alpaca only during market hours; submit during RTH", t)
 	default:
-		return "", fmt.Errorf("alpaca: TIF %v requires an Elite account (standard is day/gtc)", t)
+		return "", fmt.Errorf("alpaca: unsupported TIF %v", t)
 	}
 }
 

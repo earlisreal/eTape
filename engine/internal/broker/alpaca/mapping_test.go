@@ -36,12 +36,22 @@ func TestRoundPrice_SubPenny(t *testing.T) {
 	}
 }
 
-func TestTifWire_RejectsElite(t *testing.T) {
+func TestTifWire(t *testing.T) {
+	// Verified 2026-07-06 against a real paper account: FOK is accepted on a
+	// standard account (not Elite-only); IOC is rejected outside market hours
+	// (a session-time gate this pure function can't evaluate), so it stays
+	// rejected here, but for the correct reason.
+	if got, err := tifWire(exec.TIFFOK); err != nil || got != "fok" {
+		t.Fatalf("FOK -> %q, %v; want \"fok\", nil (FOK is accepted on a standard account)", got, err)
+	}
 	if _, err := tifWire(exec.TIFIOC); err == nil {
-		t.Fatal("IOC should error on a standard account")
+		t.Fatal("IOC should still error (market-hours-only, not evaluable here)")
 	}
 	if got, _ := tifWire(exec.TIFDay); got != "day" {
 		t.Fatalf("day -> %q", got)
+	}
+	if got, _ := tifWire(exec.TIFGTC); got != "gtc" {
+		t.Fatalf("gtc -> %q", got)
 	}
 }
 
