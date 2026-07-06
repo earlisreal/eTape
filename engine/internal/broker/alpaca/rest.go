@@ -214,17 +214,34 @@ type alpacaBatchItem struct {
 // to have an outer status < 400) for per-item failures. It decodes the body
 // as a JSON array of alpacaBatchItem and joins an error for every item whose
 // own status is >= 400, mirroring the errors.Join pattern the symbol-scoped
-// cancelAll path already uses per-order. A body that isn't a JSON array (an
-// empty body, or any other shape) is treated as success rather than an
-// error: Alpaca's documented "nothing to cancel/flatten" response for these
-// two endpoints is a plain 200, and this must never invent a false failure
-// out of a shape it doesn't recognize -- only a genuine per-item >=400 status
-// counts.
+// cancelAll path already uses per-order.
+//
+// Only a genuinely empty body -- no bytes, whitespace only, the literal `[]`,
+// or the literal `null` -- is treated as success without further inspection:
+// that is Alpaca's documented "nothing to cancel/flatten" response for these
+// two endpoints. Anything else that fails to decode as []alpacaBatchItem
+// (a truncated array, a different envelope shape such as
+// `{"orders":[...]}`, a per-item field type drift, etc.) is a REAL error and
+// must fail closed rather than silently reporting success -- a body we
+// cannot understand may well contain a failed cancel/close we then hide.
 func checkBatchItems(body []byte) error {
-	var items []alpacaBatchItem
-	if err := json.Unmarshal(body, &items); err != nil {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("[]")) || bytes.Equal(trimmed, []byte("null")) {
 		return nil
 	}
+
+	var items []alpacaBatchItem
+	if err := json.Unmarshal(trimmed, &items); err != nil {
+		const maxSnippet = 500
+		snippet := trimmed
+		suffix := ""
+		if len(snippet) > maxSnippet {
+			snippet = snippet[:maxSnippet]
+			suffix = "...(truncated)"
+		}
+		return fmt.Errorf("alpaca: batch response body is neither empty nor a decodable item array: %w (body=%s%s)", err, snippet, suffix)
+	}
+
 	var errs []error
 	for _, it := range items {
 		if it.Status >= 400 {

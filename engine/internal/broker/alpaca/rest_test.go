@@ -325,6 +325,25 @@ func TestFlatten_207PartialFailureIsReported(t *testing.T) {
 	}
 }
 
+// TestCancelAll_NoSymbol_UndecodableBodyIsError confirms the call site
+// (not just checkBatchItems in isolation) fails closed when the
+// account-wide cancel-all's 207/200 body is present but undecodable, per
+// the task-13 reviewer's finding.
+func TestCancelAll_NoSymbol_UndecodableBodyIsError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(`{"orders":[{"id":"b-1","status":500}]}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.cancelAll(context.Background(), ""); err == nil {
+		t.Fatal("expected an undecodable cancel-all batch body to surface as an error, not silent success")
+	}
+}
+
 // TestFlatten_207AllSuccessIsNotAnError confirms flatten also discriminates:
 // an all-success 207 (or plain 200) must still return nil.
 func TestFlatten_207AllSuccessIsNotAnError(t *testing.T) {
@@ -339,6 +358,76 @@ func TestFlatten_207AllSuccessIsNotAnError(t *testing.T) {
 	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
 	if err := rc.flatten(context.Background()); err != nil {
 		t.Fatalf("expected an all-success 207 to return nil, got %v", err)
+	}
+}
+
+// TestCheckBatchItems_EmptyBodyIsSuccess confirms the genuinely-empty cases
+// -- no bytes, whitespace-only, the literal `[]`, and the literal `null` --
+// all still return nil. This is Alpaca's documented shape for "nothing to
+// cancel/flatten" and must not be turned into a false error by the fix
+// below.
+func TestCheckBatchItems_EmptyBodyIsSuccess(t *testing.T) {
+	for _, body := range [][]byte{nil, []byte(""), []byte("   \n\t "), []byte("[]"), []byte("null")} {
+		if err := checkBatchItems(body); err != nil {
+			t.Fatalf("checkBatchItems(%q) = %v, want nil", body, err)
+		}
+	}
+}
+
+// TestCheckBatchItems_TruncatedArrayIsError is the task-13 reviewer's first
+// demonstrated gap: a truncated/malformed JSON array (e.g. a network glitch
+// or proxy cutting the response short) previously fell through the blanket
+// "any unmarshal error means success" fallback, silently hiding whatever
+// failed items were in the part that got cut off. It must now surface as a
+// real error.
+func TestCheckBatchItems_TruncatedArrayIsError(t *testing.T) {
+	body := []byte(`[{"id":"b-1","status":200},{"id":"b-2","status":5`)
+	if err := checkBatchItems(body); err == nil {
+		t.Fatal("expected a truncated batch array to surface as an error, got nil")
+	}
+}
+
+// TestCheckBatchItems_WrappedEnvelopeIsError is the reviewer's second
+// demonstrated gap: an unexpected envelope shape (e.g. `{"orders":[...]}`
+// instead of a bare array) is API version drift, not a "nothing happened"
+// signal, and must not be silently treated as success even though it
+// contains a failed item's status.
+func TestCheckBatchItems_WrappedEnvelopeIsError(t *testing.T) {
+	body := []byte(`{"orders":[{"id":"b-1","status":500}]}`)
+	if err := checkBatchItems(body); err == nil {
+		t.Fatal("expected a wrapped/unexpected envelope shape to surface as an error, got nil")
+	}
+}
+
+// TestCheckBatchItems_PerItemTypeDriftIsError is the reviewer's third
+// demonstrated gap: a single item's status field arriving as a JSON string
+// instead of a number fails the whole array's unmarshal due to the type
+// mismatch, which previously hid whatever real failures were elsewhere in
+// the array. It must now surface as a real error rather than silent success.
+func TestCheckBatchItems_PerItemTypeDriftIsError(t *testing.T) {
+	body := []byte(`[{"id":"b-1","status":200},{"id":"b-2","status":"500"}]`)
+	if err := checkBatchItems(body); err == nil {
+		t.Fatal("expected a per-item status type mismatch to surface as an error, got nil")
+	}
+}
+
+// TestFlatten_UndecodableBodyIsError confirms flatten's call site fails
+// closed when the emergency kill-switch's response body is present but
+// undecodable (e.g. truncated), per the task-13 reviewer's finding --
+// silent success here could make an operator believe the account is flat
+// during a live incident when it never was checked at all.
+func TestFlatten_UndecodableBodyIsError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/positions", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(`[{"symbol":"AAPL","status":200},{"symbol":"TSLA","status":4`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.flatten(context.Background()); err == nil {
+		t.Fatal("expected an undecodable flatten batch body to surface as an error, not silent success")
 	}
 }
 
