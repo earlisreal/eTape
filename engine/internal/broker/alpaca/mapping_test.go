@@ -44,3 +44,57 @@ func TestTifWire_RejectsElite(t *testing.T) {
 		t.Fatalf("day -> %q", got)
 	}
 }
+
+func TestSideDomain(t *testing.T) {
+	cases := []struct {
+		name              string
+		alpacaSide        string
+		positionQtyBefore float64
+		want              exec.Side
+	}{
+		{
+			name:              "buy with negative position -> Cover",
+			alpacaSide:        "buy",
+			positionQtyBefore: -10,
+			want:              exec.SideCover,
+		},
+		{
+			name:              "buy with zero position -> Buy",
+			alpacaSide:        "buy",
+			positionQtyBefore: 0,
+			want:              exec.SideBuy,
+		},
+		{
+			name:              "buy with positive position -> Buy",
+			alpacaSide:        "buy",
+			positionQtyBefore: 10,
+			want:              exec.SideBuy,
+		},
+		{
+			name:              "sell with positive position -> Sell",
+			alpacaSide:        "sell",
+			positionQtyBefore: 10,
+			want:              exec.SideSell,
+		},
+		{
+			name:              "sell with zero position -> Short",
+			alpacaSide:        "sell",
+			positionQtyBefore: 0,
+			want:              exec.SideShort,
+		},
+		{
+			name:              "sell with negative position -> Short",
+			alpacaSide:        "sell",
+			positionQtyBefore: -10,
+			want:              exec.SideShort,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := sideDomain(tc.alpacaSide, tc.positionQtyBefore)
+			if got != tc.want {
+				t.Errorf("sideDomain(%q, %v) = %v, want %v", tc.alpacaSide, tc.positionQtyBefore, got, tc.want)
+			}
+		})
+	}
+}
