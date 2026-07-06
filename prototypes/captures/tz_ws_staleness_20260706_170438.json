@@ -1,0 +1,72 @@
+[
+ {
+  "t": 1783328083.525,
+  "kind": "text",
+  "brief": "system:PENDING_AUTH"
+ },
+ {
+  "t": 1783328083.896,
+  "kind": "text",
+  "brief": "system:CONNECTED"
+ },
+ {
+  "t": 1783328084.696,
+  "kind": "text",
+  "brief": "system:INVALID_DATA"
+ },
+ {
+  "t": 1783328132.421,
+  "kind": "ping",
+  "brief": ""
+ },
+ {
+  "t": 1783328186.42,
+  "kind": "ping",
+  "brief": ""
+ },
+ {
+  "t": 1783328240.444,
+  "kind": "ping",
+  "brief": ""
+ },
+ {
+  "t": 1783328294.446,
+  "kind": "ping",
+  "brief": ""
+ },
+ {
+  "t": 1783328348.445,
+  "kind": "ping",
+  "brief": ""
+ },
+ {
+  "t": 1783328402.444,
+  "kind": "ping",
+  "brief": ""
+ },
+ {
+  "t": 1783328456.441,
+  "kind": "ping",
+  "brief": ""
+ },
+ {
+  "t": 1783328510.444,
+  "kind": "ping",
+  "brief": ""
+ },
+ {
+  "t": 1783328564.468,
+  "kind": "ping",
+  "brief": ""
+ },
+ {
+  "t": 1783328618.444,
+  "kind": "ping",
+  "brief": ""
+ },
+ {
+  "t": 1783328672.435,
+  "kind": "ping",
+  "brief": ""
+ }
+]

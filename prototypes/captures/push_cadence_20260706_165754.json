@@ -1,0 +1,267 @@
+{
+ "watchlist": [
+  "US.AAPL",
+  "US.TSLA",
+  "US.NVDA",
+  "US.ZCMD",
+  "US.LHSW",
+  "US.MSS",
+  "US.YHC"
+ ],
+ "window_s": 180.0,
+ "summary": {
+  "US.AAPL/K_1M": {
+   "pushes_per_s": 0.16,
+   "rows": 29,
+   "bytes_per_s": 40.6,
+   "gap_ms": {
+    "median": 3418.8,
+    "min": 104.3
+   }
+  },
+  "US.AAPL/ORDER_BOOK": {
+   "pushes_per_s": 0.46,
+   "rows": 82,
+   "bytes_per_s": 2234.1,
+   "gap_ms": {
+    "median": 1383.6,
+    "min": 0.4
+   }
+  },
+  "US.AAPL/QUOTE": {
+   "pushes_per_s": 0.16,
+   "rows": 29,
+   "bytes_per_s": 251.5,
+   "gap_ms": {
+    "median": 3393.5,
+    "min": 37.1
+   }
+  },
+  "US.AAPL/TICKER": {
+   "pushes_per_s": 0.17,
+   "rows": 1034,
+   "bytes_per_s": 1359.9,
+   "gap_ms": {
+    "median": 3662.1,
+    "min": 37.0
+   }
+  },
+  "US.LHSW/K_1M": {
+   "pushes_per_s": 2.24,
+   "rows": 403,
+   "bytes_per_s": 606.6,
+   "gap_ms": {
+    "median": 303.9,
+    "min": 102.9
+   }
+  },
+  "US.LHSW/ORDER_BOOK": {
+   "pushes_per_s": 5.07,
+   "rows": 913,
+   "bytes_per_s": 21008.6,
+   "gap_ms": {
+    "median": 297.7,
+    "min": 0.2
+   }
+  },
+  "US.LHSW/QUOTE": {
+   "pushes_per_s": 2.99,
+   "rows": 539,
+   "bytes_per_s": 4661.1,
+   "gap_ms": {
+    "median": 208.9,
+    "min": 4.3
+   }
+  },
+  "US.LHSW/TICKER": {
+   "pushes_per_s": 2.99,
+   "rows": 1716,
+   "bytes_per_s": 2480.6,
+   "gap_ms": {
+    "median": 210.3,
+    "min": 3.9
+   }
+  },
+  "US.MSS/K_1M": {
+   "pushes_per_s": 1.85,
+   "rows": 333,
+   "bytes_per_s": 482.7,
+   "gap_ms": {
+    "median": 401.6,
+    "min": 102.8
+   }
+  },
+  "US.MSS/ORDER_BOOK": {
+   "pushes_per_s": 4.54,
+   "rows": 818,
+   "bytes_per_s": 15729.6,
+   "gap_ms": {
+    "median": 298.1,
+    "min": 0.2
+   }
+  },
+  "US.MSS/QUOTE": {
+   "pushes_per_s": 2.54,
+   "rows": 457,
+   "bytes_per_s": 3937.3,
+   "gap_ms": {
+    "median": 212.1,
+    "min": 5.2
+   }
+  },
+  "US.MSS/TICKER": {
+   "pushes_per_s": 2.55,
+   "rows": 1839,
+   "bytes_per_s": 2538.8,
+   "gap_ms": {
+    "median": 212.3,
+    "min": 2.9
+   }
+  },
+  "US.NVDA/K_1M": {
+   "pushes_per_s": 0.38,
+   "rows": 69,
+   "bytes_per_s": 98.3,
+   "gap_ms": {
+    "median": 1510.9,
+    "min": 194.1
+   }
+  },
+  "US.NVDA/ORDER_BOOK": {
+   "pushes_per_s": 1.57,
+   "rows": 282,
+   "bytes_per_s": 7359.0,
+   "gap_ms": {
+    "median": 303.9,
+    "min": 0.2
+   }
+  },
+  "US.NVDA/QUOTE": {
+   "pushes_per_s": 0.44,
+   "rows": 79,
+   "bytes_per_s": 683.5,
+   "gap_ms": {
+    "median": 1171.9,
+    "min": 5.4
+   }
+  },
+  "US.NVDA/TICKER": {
+   "pushes_per_s": 0.44,
+   "rows": 1109,
+   "bytes_per_s": 1465.9,
+   "gap_ms": {
+    "median": 1173.9,
+    "min": 3.3
+   }
+  },
+  "US.TSLA/K_1M": {
+   "pushes_per_s": 0.23,
+   "rows": 41,
+   "bytes_per_s": 58.1,
+   "gap_ms": {
+    "median": 2761.4,
+    "min": 196.8
+   }
+  },
+  "US.TSLA/ORDER_BOOK": {
+   "pushes_per_s": 0.59,
+   "rows": 107,
+   "bytes_per_s": 2889.1,
+   "gap_ms": {
+    "median": 434.8,
+    "min": 0.2
+   }
+  },
+  "US.TSLA/QUOTE": {
+   "pushes_per_s": 0.24,
+   "rows": 43,
+   "bytes_per_s": 372.3,
+   "gap_ms": {
+    "median": 2573.2,
+    "min": 6.6
+   }
+  },
+  "US.TSLA/TICKER": {
+   "pushes_per_s": 0.24,
+   "rows": 1065,
+   "bytes_per_s": 1402.6,
+   "gap_ms": {
+    "median": 2571.7,
+    "min": 5.1
+   }
+  },
+  "US.YHC/K_1M": {
+   "pushes_per_s": 2.93,
+   "rows": 527,
+   "bytes_per_s": 755.6,
+   "gap_ms": {
+    "median": 203.7,
+    "min": 1.5
+   }
+  },
+  "US.YHC/ORDER_BOOK": {
+   "pushes_per_s": 4.06,
+   "rows": 730,
+   "bytes_per_s": 17204.2,
+   "gap_ms": {
+    "median": 299.0,
+    "min": 0.2
+   }
+  },
+  "US.YHC/QUOTE": {
+   "pushes_per_s": 4.6,
+   "rows": 828,
+   "bytes_per_s": 7219.5,
+   "gap_ms": {
+    "median": 133.9,
+    "min": 2.1
+   }
+  },
+  "US.YHC/TICKER": {
+   "pushes_per_s": 4.6,
+   "rows": 2326,
+   "bytes_per_s": 3165.8,
+   "gap_ms": {
+    "median": 134.4,
+    "min": 2.1
+   }
+  },
+  "US.ZCMD/K_1M": {
+   "pushes_per_s": 2.01,
+   "rows": 361,
+   "bytes_per_s": 507.8,
+   "gap_ms": {
+    "median": 398.9,
+    "min": 100.2
+   }
+  },
+  "US.ZCMD/ORDER_BOOK": {
+   "pushes_per_s": 4.41,
+   "rows": 794,
+   "bytes_per_s": 16772.8,
+   "gap_ms": {
+    "median": 298.3,
+    "min": 0.2
+   }
+  },
+  "US.ZCMD/QUOTE": {
+   "pushes_per_s": 2.56,
+   "rows": 460,
+   "bytes_per_s": 3950.9,
+   "gap_ms": {
+    "median": 240.3,
+    "min": 7.2
+   }
+  },
+  "US.ZCMD/TICKER": {
+   "pushes_per_s": 2.56,
+   "rows": 787,
+   "bytes_per_s": 1064.8,
+   "gap_ms": {
+    "median": 239.5,
+    "min": 6.6
+   }
+  }
+ },
+ "est_16h_mb": 6929.4
+}

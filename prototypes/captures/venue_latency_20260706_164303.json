@@ -1,0 +1,77 @@
+{
+ "symbol": "F",
+ "timelines": [
+  {
+   "venue": "alpaca",
+   "side": "buy",
+   "cycle": 1,
+   "cold": true,
+   "t_send": 2284.567999653518,
+   "api_return_ms": 196.2,
+   "ack_ms": 207.1,
+   "fill_ms": 432.7,
+   "order_id": "458a6134-3bae-4102-a8cc-39875cb21034",
+   "fill_price": "13.41"
+  },
+  {
+   "venue": "alpaca",
+   "side": "sell",
+   "cycle": 1,
+   "cold": false,
+   "t_send": 3273.1782495975494,
+   "api_return_ms": 195.4,
+   "ack_ms": 210.0,
+   "fill_ms": 579.5,
+   "order_id": "11267ef2-e757-49a5-b54c-e70c258bbf90",
+   "fill_price": "13.38"
+  },
+  {
+   "venue": "alpaca",
+   "side": "buy",
+   "cycle": 2,
+   "cold": false,
+   "t_send": 4919.904374983162,
+   "api_return_ms": 197.5,
+   "ack_ms": 211.2,
+   "fill_ms": 645.1,
+   "order_id": "5ff0f978-b57e-43a0-ad98-b17839341eb7",
+   "fill_price": "13.41"
+  },
+  {
+   "venue": "alpaca",
+   "side": "sell",
+   "cycle": 2,
+   "cold": false,
+   "t_send": 6126.63483293727,
+   "api_return_ms": 201.3,
+   "ack_ms": 214.5,
+   "fill_ms": 1001.9,
+   "order_id": "e82e8f8c-a841-4b96-8f2e-c88e164dc8da",
+   "fill_price": "13.38"
+  },
+  {
+   "venue": "alpaca",
+   "side": "buy",
+   "cycle": 3,
+   "cold": false,
+   "t_send": 8181.849041953683,
+   "api_return_ms": 198.6,
+   "ack_ms": 213.0,
+   "fill_ms": 796.6,
+   "order_id": "15173e22-7f69-40b4-a029-24db4a4782af",
+   "fill_price": "13.41"
+  },
+  {
+   "venue": "alpaca",
+   "side": "sell",
+   "cycle": 3,
+   "cold": false,
+   "t_send": 9550.224457867444,
+   "api_return_ms": 198.5,
+   "ack_ms": 211.7,
+   "fill_ms": 978.8,
+   "order_id": "57a82351-f3c6-4a07-8d76-811f409bdf9a",
+   "fill_price": "13.38"
+  }
+ ]
+}

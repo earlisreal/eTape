@@ -72,11 +72,30 @@ plus `CUR_PRICE`, `MARKET_VAL`, and accumulate `CHANGE_RATE(days)`.
 4. Rank + filter + snapshot are all request/response — **zero subscription quota**, so the
    100-slot budget stays for TICKER/book/kline of actual watched symbols.
 
-## Open items (Monday live session)
+## Open items (Monday live session) — CLOSED 2026-07-06 pre-market
 
-- Refresh latency of rank data during live pre-market (expect seconds; measure).
-- Whether rank rows appear for symbols with tiny pre-market prints (CLLS showed up on 1,831 shares
-  → volume floor is mandatory).
+Measured live 04:12–04:16 ET (239 polls @1 Hz, top-35 rank + parallel real-time
+snapshots of the top 5; raw: `prototypes/captures/premarket_rank_latency_*.json`,
+script: `prototypes/premarket_rank_latency.py`):
+
+- **Refresh latency**: hot symbols' rank rows change every **~1–2 s** (median 2.0 s
+  per-symbol change interval, n=976) → the planned ~2 s poll cadence is right.
+  Poll RTT median 83 ms (p95 120 ms).
+- **Staleness vs real time**: rank values lag the LV3 snapshot by **median 7 s,
+  p95 17 s, max 19 s** (measured via monotonic pre-market volume). Consequence:
+  on a scanner hit, immediately re-snapshot the candidate — never trust rank-row
+  price/volume for the alert payload.
+- **Tiny prints: confirmed, worse than CLLS** — rows ranked >+10% on pre-market
+  volume of **1 share** (XRTX, DK; several more <200 sh). The client-side volume
+  floor is mandatory, full stop.
+- **FLOAT_SHARE filter sanity (unit = thousands): confirmed** — `filter_max=50_000`
+  returns a 3,888-symbol universe (with price $0.5–$50; 600 rows in 10.4 s ≈ well
+  inside the warm-up budget) whose sampled snapshot floats all fall 3.7M–49.2M,
+  hugging the 50M cap. ⚠️ The V1 filter does **not echo FLOAT_SHARE values** (even
+  as sort field — `Unknown key`) → warm-up gives *set membership only*; float
+  values come from snapshots on demand (or the V2 screener's `retrieves`).
+  Also reconfirmed: OTC codes fail snapshot per-code ("US OTC market quote is not
+  available"), preferreds/units return float 0 — drop both row types.
 - Entitlement: worked with US LV3; not tested whether LV1 suffices (irrelevant for us).
 
 ## Alternatives considered (not needed)

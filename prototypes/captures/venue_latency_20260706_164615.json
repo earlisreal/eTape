@@ -1,0 +1,101 @@
+{
+ "symbol": "F",
+ "timelines": [
+  {
+   "venue": "tz",
+   "side": "buy",
+   "cycle": 1,
+   "cold": true,
+   "t_send": 8202.620999887586,
+   "api_return_ms": 321.4,
+   "ack_ms": 408.9,
+   "fill_ms": 409.9,
+   "order_id": "ET-BENCH-buy-1-084603",
+   "fill_price": null
+  },
+  {
+   "venue": "tz",
+   "side": "sell",
+   "cycle": 1,
+   "cold": false,
+   "t_send": 9165.930709335953,
+   "api_return_ms": 326.9,
+   "ack_ms": 348.1,
+   "fill_ms": 348.6,
+   "order_id": "ET-BENCH-sell-1-084604",
+   "fill_price": null
+  },
+  {
+   "venue": "tz",
+   "side": "buy",
+   "cycle": 2,
+   "cold": false,
+   "t_send": 10584.831125102937,
+   "api_return_ms": 283.0,
+   "ack_ms": 326.2,
+   "fill_ms": 425.6,
+   "order_id": "ET-BENCH-buy-2-084605",
+   "fill_price": null
+  },
+  {
+   "venue": "tz",
+   "side": "sell",
+   "cycle": 2,
+   "cold": false,
+   "t_send": 11573.604125063866,
+   "api_return_ms": 297.3,
+   "ack_ms": 337.4,
+   "fill_ms": 337.9,
+   "order_id": "ET-BENCH-sell-2-084606",
+   "fill_price": null
+  },
+  {
+   "venue": "moomoo",
+   "side": "buy",
+   "cycle": 1,
+   "cold": true,
+   "t_send": 13467.152084223926,
+   "api_return_ms": 291.3,
+   "ack_ms": 287.8,
+   "fill_ms": 1037.1,
+   "order_id": "FS1CC8838C1FBA1000",
+   "fill_price": 13.4168
+  },
+  {
+   "venue": "moomoo",
+   "side": "sell",
+   "cycle": 1,
+   "cold": false,
+   "t_send": 15063.423875253648,
+   "api_return_ms": 280.2,
+   "ack_ms": 276.6,
+   "fill_ms": 869.7,
+   "order_id": "FS1CC8838DAD927000",
+   "fill_price": 13.41
+  },
+  {
+   "venue": "moomoo",
+   "side": "buy",
+   "cycle": 2,
+   "cold": false,
+   "t_send": 16987.418333999813,
+   "api_return_ms": 312.0,
+   "ack_ms": 306.7,
+   "fill_ms": 906.6,
+   "order_id": "FS1CC8838F8EBA1000",
+   "fill_price": 13.4168
+  },
+  {
+   "venue": "moomoo",
+   "side": "sell",
+   "cycle": 2,
+   "cold": false,
+   "t_send": 18465.77487513423,
+   "api_return_ms": 268.2,
+   "ack_ms": 265.7,
+   "fill_ms": 987.9,
+   "order_id": "FS1CC88390FF927000",
+   "fill_price": 13.41
+  }
+ ]
+}

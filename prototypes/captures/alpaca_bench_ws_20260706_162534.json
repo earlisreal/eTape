@@ -1,0 +1,25 @@
+[
+ {
+  "t_ms": 9670.3,
+  "encoding": "json-in-binary",
+  "frame": {
+   "stream": "authorization",
+   "data": {
+    "action": "authenticate",
+    "status": "authorized"
+   }
+  }
+ },
+ {
+  "t_ms": 9860.3,
+  "encoding": "json-in-binary",
+  "frame": {
+   "stream": "listening",
+   "data": {
+    "streams": [
+     "trade_updates"
+    ]
+   }
+  }
+ }
+]

@@ -1,0 +1,335 @@
+{
+ "all_count": 3888,
+ "fetched": 600,
+ "elapsed_s": 10.5,
+ "checks": [
+  {
+   "code": "US.LIME",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "6956522",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.FITB.PRI",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "0",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.PECE",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "5935000",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.HDRN",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "22771750",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.VIDA",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "3750000",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.QXL",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "6272788",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.ILLU",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "20200000",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.RMIX",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "49175683",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.OIO",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "8935248",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.DBCA",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "28750000",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.XFLH.U",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "0",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.MWH",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "20500000",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.HCAC",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "17269175",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.EQPT",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "30500000",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.IGAC",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "16290000",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.ANDG",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "10558936",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.APAC",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "6133750",
+   "ratio": null,
+   "ok": false
+  },
+  {
+   "code": "US.CCID",
+   "filter_float_sh": null,
+   "snapshot_outstanding": "0",
+   "ratio": null,
+   "ok": false
+  }
+ ],
+ "first_rows": [
+  {
+   "code": "US.GTCDD",
+   "name": "GETTY COPPER INC"
+  },
+  {
+   "code": "US.GSRV",
+   "name": "GSR V ACQUISITION CORP"
+  },
+  {
+   "code": "US.FXHO",
+   "name": "Utime"
+  },
+  {
+   "code": "US.VII.U",
+   "name": "VIKING ACQUISITION CORPORATION II UNIT 1 ORD SHS CL A & 1/3 WT EXP"
+  },
+  {
+   "code": "US.MIACU",
+   "name": "MERIDIAN3 INDUSTRIALS ACQUIS CORP UNIT EACH REP 1 ORD SHS & 0.5 WT"
+  },
+  {
+   "code": "US.CIRC",
+   "name": "Circle8"
+  },
+  {
+   "code": "US.GOGYD",
+   "name": "GOLDEN GRAIL TECHNOLOGY CORP"
+  },
+  {
+   "code": "US.AESP",
+   "name": "AEON ACQUISITION I CORP"
+  },
+  {
+   "code": "US.NSLR",
+   "name": "Neostellar Capital"
+  },
+  {
+   "code": "US.HODO",
+   "name": "House of Doge"
+  },
+  {
+   "code": "US.NSLRL",
+   "name": "NEOSTELLAR CAPITAL CORPORATION 6.00% NOTES DUE 30/12/2026"
+  },
+  {
+   "code": "US.OSPRU",
+   "name": "OSPREY ACQUISITION CORPORATION III UNITS EACH CONST OF 1 CL A ORD & 1/3 WT"
+  },
+  {
+   "code": "US.RBRS",
+   "name": "RIDGEBACK RESOURCES"
+  },
+  {
+   "code": "US.CUAI",
+   "name": "COPPER INTELLIGENCE INC"
+  },
+  {
+   "code": "US.PCGC",
+   "name": "PEAKCART GROUP CORP"
+  },
+  {
+   "code": "US.AAC.U",
+   "name": "ARES ACQUISITION CORPORATION III UNIT 1 ORD SHS CL A & 1/10 WT EXP"
+  },
+  {
+   "code": "US.DMC",
+   "name": "Del Monte"
+  },
+  {
+   "code": "US.APMC",
+   "name": "AMPERCAP ACQUISITION CO"
+  },
+  {
+   "code": "US.OTAI",
+   "name": "Starlink AI Acquisition Corporation"
+  },
+  {
+   "code": "US.SGYEF",
+   "name": "SURGE ENERGY INC"
+  },
+  {
+   "code": "US.USDE",
+   "name": "StablecoinX"
+  },
+  {
+   "code": "US.MFPVV",
+   "name": "MIDERA FOOD PROCESSING INC"
+  },
+  {
+   "code": "US.RGKUY",
+   "name": "RIGAKU HOLDINGS CORPORATION UNSPONSORED ADS EAH REP 1 ORD SHS"
+  },
+  {
+   "code": "US.FWACU",
+   "name": "FUTUREWAVE ACQUISITION CORPORATION UNITS EACH REP 1 ORD & 1 RT & 1 WT"
+  },
+  {
+   "code": "US.CGCFU",
+   "name": "CARTESIAN GROWTH CORPORATION IV UNIT EACH REP 1 CL A ORD & 1/3 WT"
+  },
+  {
+   "code": "US.SLEC",
+   "name": "SHUNLIAN E-COMMERCE INC"
+  },
+  {
+   "code": "US.ORISF",
+   "name": "Oriental Rise Holdings"
+  },
+  {
+   "code": "US.QLEP",
+   "name": "QUANTUM LEAP ACQUISITION CORP"
+  },
+  {
+   "code": "US.TPTS",
+   "name": "TERRA PROPERTY TRUST INC 7% SR NTS 30/03/2029 USD25"
+  },
+  {
+   "code": "US.GHXIU",
+   "name": "GORES HOLDINGS XI INC UNIT EACH 1 CL A ORD & 0.25 WT(24/06/31)"
+  },
+  {
+   "code": "US.LIME",
+   "name": "Neutron Holdings"
+  },
+  {
+   "code": "US.SIND",
+   "name": "Sinda"
+  },
+  {
+   "code": "US.PKTED",
+   "name": "PARKIT ENTERPRISE INCORPORATION"
+  },
+  {
+   "code": "US.GCGR",
+   "name": "GENERAL CATALYST GBL RESILIENCE MRG"
+  },
+  {
+   "code": "US.FTHA",
+   "name": "FOREFRONT TECH HLDGS ACQUISITION"
+  },
+  {
+   "code": "US.FIRY",
+   "name": "Firy"
+  },
+  {
+   "code": "US.MCAH",
+   "name": "MOUNTAIN CREST ACQUISITION 6 CORP"
+  },
+  {
+   "code": "US.CAII",
+   "name": "COLLECTIVE ACQUISITION CORP II"
+  },
+  {
+   "code": "US.KEYY",
+   "name": "KEYSTONE ACQUISITION CORP"
+  },
+  {
+   "code": "US.ITG",
+   "name": "ITG Inc"
+  },
+  {
+   "code": "US.ALPXU",
+   "name": "ALPEX ACQUISITION CORPORATION UNIT CON 1 CL A ORD & 1 WT & 1 RT"
+  },
+  {
+   "code": "US.WGSK",
+   "name": "WORLD GU SHAN KANG HOLDING GROUP"
+  },
+  {
+   "code": "US.ALURD",
+   "name": "Allurion Technologies"
+  },
+  {
+   "code": "US.PLUN",
+   "name": "Plutonian Acquisition Corp II"
+  },
+  {
+   "code": "US.IACQ",
+   "name": "IRENIC ACQUISITION CORPORATION"
+  },
+  {
+   "code": "US.WLCOU",
+   "name": "WILCO 63 CORPORATION UNIT CONS 1 CL A ORD & 0.5 WT(29/05/2031"
+  },
+  {
+   "code": "US.DSC",
+   "name": "DSC Holdings"
+  },
+  {
+   "code": "US.WRDLD",
+   "name": "Worldline SA"
+  },
+  {
+   "code": "US.CAES",
+   "name": "Cantor Equity Partners VII, Inc"
+  },
+  {
+   "code": "US.KAZR",
+   "name": "Kaz Resources"
+  }
+ ]
+}

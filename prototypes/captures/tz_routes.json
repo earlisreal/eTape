@@ -1,0 +1,60 @@
+{
+ "routes": [
+  {
+   "orderTypes": [
+    "Market",
+    "Limit",
+    "Stop",
+    "StopLimit",
+    "MarketOnClose",
+    "LimitOnClose",
+    "RangeOrder",
+    "TrailStop"
+   ],
+   "routeName": "SMART",
+   "securityTypes": [
+    "Stock"
+   ],
+   "timesInForce": [
+    "Day",
+    "GoodTillCancel",
+    "AtTheOpening",
+    "Day_Plus",
+    "GTC_Plus"
+   ],
+   "useDisplayQty": true
+  },
+  {
+   "orderTypes": [
+    "Market",
+    "Limit",
+    "Stop",
+    "StopLimit"
+   ],
+   "routeName": "SMARTO",
+   "securityTypes": [
+    "Option"
+   ],
+   "timesInForce": [
+    "Day",
+    "GoodTillCancel"
+   ],
+   "useDisplayQty": false
+  },
+  {
+   "orderTypes": [
+    "Market",
+    "Limit"
+   ],
+   "routeName": "SMARTM",
+   "securityTypes": [
+    "Option",
+    "MLEG"
+   ],
+   "timesInForce": [
+    "Day"
+   ],
+   "useDisplayQty": false
+  }
+ ]
+}

@@ -1,0 +1,119 @@
+{
+ "watchlist": [
+  "US.FXHO",
+  "US.ZCMD",
+  "US.LHSW"
+ ],
+ "window_s": 180.0,
+ "summary": {
+  "US.FXHO/K_1M": {
+   "pushes_per_s": 3.76,
+   "rows": 676,
+   "bytes_per_s": 953.9,
+   "gap_ms": {
+    "median": 202.0,
+    "min": 97.6
+   }
+  },
+  "US.FXHO/ORDER_BOOK": {
+   "pushes_per_s": 4.76,
+   "rows": 857,
+   "bytes_per_s": 17197.7,
+   "gap_ms": {
+    "median": 298.1,
+    "min": 0.2
+   }
+  },
+  "US.FXHO/QUOTE": {
+   "pushes_per_s": 6.9,
+   "rows": 1242,
+   "bytes_per_s": 10605.4,
+   "gap_ms": {
+    "median": 87.5,
+    "min": 3.1
+   }
+  },
+  "US.FXHO/TICKER": {
+   "pushes_per_s": 6.9,
+   "rows": 1708,
+   "bytes_per_s": 2269.9,
+   "gap_ms": {
+    "median": 86.9,
+    "min": 5.6
+   }
+  },
+  "US.LHSW/K_1M": {
+   "pushes_per_s": 1.86,
+   "rows": 335,
+   "bytes_per_s": 504.1,
+   "gap_ms": {
+    "median": 401.2,
+    "min": 101.5
+   }
+  },
+  "US.LHSW/ORDER_BOOK": {
+   "pushes_per_s": 4.55,
+   "rows": 819,
+   "bytes_per_s": 18290.4,
+   "gap_ms": {
+    "median": 298.3,
+    "min": 0.2
+   }
+  },
+  "US.LHSW/QUOTE": {
+   "pushes_per_s": 2.44,
+   "rows": 440,
+   "bytes_per_s": 3804.1,
+   "gap_ms": {
+    "median": 245.7,
+    "min": 4.6
+   }
+  },
+  "US.LHSW/TICKER": {
+   "pushes_per_s": 2.44,
+   "rows": 1577,
+   "bytes_per_s": 2292.0,
+   "gap_ms": {
+    "median": 249.1,
+    "min": 5.0
+   }
+  },
+  "US.ZCMD/K_1M": {
+   "pushes_per_s": 1.74,
+   "rows": 313,
+   "bytes_per_s": 443.1,
+   "gap_ms": {
+    "median": 402.4,
+    "min": 98.8
+   }
+  },
+  "US.ZCMD/ORDER_BOOK": {
+   "pushes_per_s": 4.11,
+   "rows": 740,
+   "bytes_per_s": 15540.4,
+   "gap_ms": {
+    "median": 298.6,
+    "min": 0.2
+   }
+  },
+  "US.ZCMD/QUOTE": {
+   "pushes_per_s": 2.17,
+   "rows": 390,
+   "bytes_per_s": 3349.1,
+   "gap_ms": {
+    "median": 297.9,
+    "min": 5.6
+   }
+  },
+  "US.ZCMD/TICKER": {
+   "pushes_per_s": 2.17,
+   "rows": 1496,
+   "bytes_per_s": 2028.1,
+   "gap_ms": {
+    "median": 298.7,
+    "min": 5.5
+   }
+  }
+ },
+ "est_16h_mb": 4451.2
+}

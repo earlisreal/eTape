@@ -1,0 +1,31 @@
+{
+ "account": "TZ-ACCT-REDACTED",
+ "frames": [
+  {
+   "t_ms": 6805.5,
+   "frame": {
+    "@system": true,
+    "ts": 1783326331259,
+    "status": "PENDING_AUTH",
+    "message": "Send authenticate message"
+   }
+  },
+  {
+   "t_ms": 7157.6,
+   "frame": {
+    "@system": true,
+    "ts": 1783326331614,
+    "status": "CONNECTED"
+   }
+  },
+  {
+   "t_ms": 7506.4,
+   "frame": {
+    "ts": 1783326331959,
+    "accountId": "TZ-ACCT-REDACTED",
+    "action": "meta",
+    "requestConfirmed": true
+   }
+  }
+ ]
+}

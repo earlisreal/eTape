@@ -124,11 +124,11 @@ protocol ID registered). No dedicated global-cancel protocol — cancel-all ride
   interface" (official unlock page). Survives until OpenD restarts; OpenD pushes
   "needs re-unlock" notifications to connections with `recvNotify=true`.
 - **Paper accounts never need unlock.**
-- ⚠️ Discrepancy: the skill's TROUBLESHOOTING.md says unlock is done "manually in
-  the OpenD GUI"; the official OpenD ops/CLI docs list **no GUI or config unlock
-  option**. Worst case: one manual Python SDK unlock call per OpenD restart.
-  **Either way the trade password never touches eTape** — the Go engine never
-  implements 2005. Verify which mechanism exists in the GUI on Monday.
+- ~~⚠️ Discrepancy~~ **Resolved 2026-07-06: the OpenD GUI DOES expose an
+  unlock-trade control** (the skill's TROUBLESHOOTING.md was right; the official
+  ops/CLI docs simply omit it). Runbook: unlock in the GUI once per OpenD
+  restart. **The trade password never touches eTape** — the Go engine never
+  implements 2005.
 - Gotcha: Futu-token 2FA breaks API unlock (turn it off first). One-time API
   questionnaire/disclaimer per firm required before trading APIs work (QA Q11).
 
@@ -195,12 +195,33 @@ as app. The only per-order fee among eTape's three venues — a routing consider
 
 ## To verify empirically
 
-- OpenD GUI: does a trade-unlock control exist (skill docs say yes, official docs
-  silent)? If not: one-shot SDK unlock per OpenD restart.
-- Day-P&L source field(s) in `Trd_GetFunds` for the gate's global day-loss rule
-  (universal-account `cashInfoList` shape for USD).
-- Paper ETH contradiction; whether the US paper account delivers order pushes
-  reliably enough to skip the polling fallback.
+Verified 2026-07-06 pre-market (`prototypes/moomoo_paper_side_checks.py`,
+raw: `prototypes/captures/moomoo_paper_side_checks_*.json`):
+
+- ✅ **Day-P&L in `Trd_GetFunds`: there is none.** On the universal account
+  (REAL FUTUSG margin, queried read-only) `unrealized_pl`/`realized_pl` are N/A
+  and no `today_pl`-like column exists among all 68 SDK columns. Per-currency
+  blocks are present (`us_cash`, `usd_assets`, `usd_net_cash_power`, …) and
+  `currency=USD` converts the whole view. **Gate rule 5 (global day-loss) must be
+  computed from eTape's own fill/position ledger** (or position-level P&L), not
+  from the funds call.
+- ✅ **US paper margin account DOES deliver order pushes**: SUBMITTING + SUBMITTED
+  arrived 0.3–0.9 s after `place_order` returned (2/2 orders). Polling stays as
+  fallback only. `place_order` RTT on paper: 118–133 ms.
+- ✅ **Paper ETH**: `fill_outside_rth=True` is *accepted* on the US margin paper
+  account (order reaches SUBMITTED). Whether ETH fills actually happen on paper
+  remains unvalidated (paper has no fill data anyway).
+- ✅ **`remark` echo confirmed** on order pushes and `order_list_query`
+  (`ET-CHECK-…` round-tripped). Fill-side correlation (join `orderID` on the fill
+  push) validated during the RTH live benchmark.
+- ✅ **cancel-all on paper: unsupported** — `cancel_all_order` fails synchronously
+  (ret=-1, "operation Cancel is not supported", 5 ms) with no pushes; per-order
+  cancels work fine. Live cancel-all untested (no reason to send one).
+
+- ✅ **OpenD GUI unlock control: EXISTS** (resolved 2026-07-06 — Earl unlocked
+  via the GUI before the Monday session; skill docs were right, official docs
+  just omit it). **Unlock runbook: GUI unlock once per OpenD restart**; no SDK
+  one-liner needed; the trade password never touches eTape.
 - Place→push ack latency: **in scope for Monday's benchmark** (amended
   2026-07-04) — run the moomoo **live** account alongside TZ paper + Alpaca paper
   in the same session, same measurements (place → order-push ack → fill push).

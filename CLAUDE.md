@@ -85,8 +85,8 @@ timezone, `US.` code prefix, `extended_time` on subscriptions, LV3 entitlement.
     TCP framing surprises.
   - Rule (amended 2026-07-04): eTape never implements `Trd_UnlockTrade` (2005) —
     the trade password never touches eTape. Unlock is per-OpenD-process and happens
-    outside the engine (OpenD GUI if it exposes it — verify Monday — else a manual
-    Python SDK one-liner per OpenD restart). The **feed connection implements no
+    outside the engine (verified 2026-07-06: the OpenD GUI exposes an unlock
+    control — runbook is GUI unlock once per OpenD restart). The **feed connection implements no
     `Trd_*` protocols**; order writes live only in the separate `broker/moomoo`
     adapter connection (v1.x, multi-broker spec).
 - Quota rules that shape the ingestion design: subscriptions cost 1 quota per stock per

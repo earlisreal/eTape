@@ -226,11 +226,27 @@ client owns reconnect + REST re-snapshot, same as the TZ adapter design.
 
 ## To verify empirically
 
-- Order POST→`new` ack and →`fill` latency, Alpaca paper vs TradeZero (extend Monday's
-  benchmark script; run both in one session for a fair wire comparison)
-- Whether IOC/FOK/OPG/CLS TIFs work on a standard (non-Elite) account
-- `client_order_id` reuse semantics after terminal states
+Verified 2026-07-06 pre-market on paper (`prototypes/alpaca_side_checks.py`,
+raw: `prototypes/captures/alpaca_side_checks_*.json`):
+
+- ✅ **TIFs on a standard account**: `fok`/`opg`/`cls` all **accepted**
+  (`pending_new`); `ioc` rejected with 42210000 *"ioc orders are only accepted
+  during market hours"* — a time gate, **not** an Elite entitlement gate.
+  (IOC re-verified during the RTH benchmark session.)
+- ✅ **`client_order_id` reuse: permanently consumed** — re-place after `canceled`
+  → 422 `40010001 "client_order_id must be unique"`. Same semantics as TZ R114:
+  eTape must always mint fresh ids.
+- ✅ **Paper stream encoding: plain JSON inside binary frames** (14/14 frames;
+  no msgpack). Go client: JSON-decode both text and binary frames.
+- ✅ Cold TLS reconfirmed: first `GET /account` 583 ms (2026-07-06); keep-alive
+  pool stands. `DELETE /v2/orders` (cancel-all) returns **HTTP 207** multi-status.
+- Order lifecycle even pre-market: `pending_new` → `new` events arrive on
+  `trade_updates` within the first seconds; `canceled` confirmed per order.
+
+Still open:
+
+- Order POST→`new` ack and →`fill` latency vs TZ/moomoo (Monday RTH benchmark —
+  script ready: `prototypes/venue_order_latency_bench.py`)
 - `trade_updates` granularity: one `partial_fill` event per execution (docs imply yes)
-- Paper binary-frame payload format (msgpack? raw JSON in binary frames?)
 - Real fill quality of $0-commission wholesale routing vs TZ SMART/direct (live only)
 - Data stream: whether Algo Trader Plus lifts the 1-connection limit

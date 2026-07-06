@@ -191,8 +191,9 @@ Full protocol detail in `docs/2026-07-04-moomoo-trading-api.md`.
   `Trd_*` encoding/decoding exists only here. Trade writes carry
   `PacketID{connID, serialNo}` anti-replay.
 - **Unlock:** never implements `Trd_UnlockTrade` (2005) — the trade password never
-  touches eTape. Unlock is per-OpenD-process and happens outside the engine (GUI if
-  it exposes it — verify Monday — else a manual SDK one-liner per OpenD restart). An
+  touches eTape. Unlock is per-OpenD-process and happens outside the engine
+  (verified 2026-07-06: the OpenD GUI exposes an unlock control — runbook is GUI
+  unlock once per OpenD restart). An
   OpenD "unlock needed" error parks the venue blocked with a banner requiring human
   action; never auto-unlock. Paper needs no unlock.
 - **Startup:** `GetAccList` (validate accID/securityFirm) → `SubAccPush` (full accID
@@ -293,20 +294,27 @@ eJournal export (unchanged).
 
 ## Open items
 
-- Monday: OpenD GUI unlock control — exists or not (decides the unlock runbook)
-- Monday: extend the benchmark script to **three venues in one session** —
-  **TZ live** + Alpaca paper + **moomoo live** (order/place → ack → fill on
-  each; moomoo via OpenD pushes). Both live legs authorized by Earl 2026-07-04
-  (TZ moved to live after paper keygen failed): 1-share marketable-limit orders
-  on a cheap liquid symbol, long side only, flattened immediately, RTH only;
-  re-confirm in the running session. moomoo prerequisite: trade unlock (the GUI
-  check above, else the manual SDK one-liner). Note moomoo's path differs
-  (local TCP → OpenD → moomoo servers vs direct REST) — record both place→ack
-  and place→fill so the OpenD hop is visible in the comparison.
-- moomoo day-P&L field in `Trd_GetFunds` (USD `cashInfoList` shape) for gate rule 5
-- moomoo paper: ETH contradiction; whether order pushes arrive reliably on the US
-  paper account (decides if the polling fallback is primary there)
-- Alpaca: `client_order_id` reuse semantics after terminal states; paper
-  binary-frame payload encoding
+Most closed in the 2026-07-06 Monday live session — details in
+`docs/2026-07-06-monday-live-session-checklist.md` and the per-broker research docs:
+
+- ✅ OpenD GUI unlock control **exists** → unlock runbook = GUI once per OpenD
+  restart (2026-07-06)
+- ✅ Three-venue benchmark **run 2026-07-06 pre-market** (Earl amended RTH-only
+  in-session; live legs re-confirmed before ordering). Results:
+  `docs/2026-07-06-venue-latency-benchmark.md`. Headline: ack — Alpaca ~210 ms
+  < moomoo ~285 ms ≲ TZ ~345 ms (OpenD hop adds ~nothing: the ack push lands
+  before the RPC returns); real fills — TZ 0.34–0.43 s vs moomoo 0.87–1.04 s;
+  fill prices identical at this scale; moomoo's US$0.99/order platform fee is
+  the standing non-latency routing consideration. Optional RTH re-run pending.
+- ✅ moomoo `Trd_GetFunds` has **no day-P&L field** on the universal account →
+  gate rule 5 computes day-loss from eTape's own fill/position ledger
+  (2026-07-06; per-currency cash blocks exist, `currency=USD` converts)
+- ✅ moomoo US paper account **does deliver order pushes** (0.3–0.9 s) → polling
+  is fallback, not primary; `fill_outside_rth=true` accepted on paper; paper
+  cancel-all unsupported (per-order cancels only) (2026-07-06)
+- ✅ Alpaca: `client_order_id` permanently consumed after terminal states (same
+  as TZ R114 — always mint fresh ids); paper stream = plain JSON in binary
+  frames; FOK/OPG/CLS accepted on standard account, IOC time-gated not
+  entitlement-gated (2026-07-06)
 - TZ paper keys (carried) — keygen failed 2026-07-04; still blocks v1
   integration/E2E tests (the Monday benchmark runs on TZ live instead)
