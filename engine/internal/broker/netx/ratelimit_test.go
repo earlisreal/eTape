@@ -13,7 +13,9 @@ func TestTokenBucket_BurstThenRefill(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	tb := NewTokenBucket(clk, 2, 2) // 2/sec, burst 2
 
-	if !tb.Allow() || !tb.Allow() {
+	ok1 := tb.Allow()
+	ok2 := tb.Allow()
+	if !ok1 || !ok2 {
 		t.Fatal("first two Allow() should succeed (full burst)")
 	}
 	if tb.Allow() {
