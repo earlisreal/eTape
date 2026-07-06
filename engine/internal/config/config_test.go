@@ -107,3 +107,60 @@ func TestStoreOverride(t *testing.T) {
 		t.Fatalf("store override not applied: %+v", cfg.Store)
 	}
 }
+
+func TestVenueAndGateParse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	body := `
+[[venue]]
+id = "alpaca-paper"
+broker = "alpaca"
+env = "paper"
+credentials = "alpaca"
+
+[[venue]]
+id = "tz-live"
+broker = "tradezero"
+env = "live"
+credentials = "tradeZero"
+account_id = "ACC123"
+
+[gate.global]
+max_day_loss = 1000.0
+max_symbol_position_value = 100000.0
+max_symbol_position_shares = 1000.0
+
+[gate.venue.alpaca-paper]
+max_order_value = 5000.0
+max_position_value = 20000.0
+max_position_shares = 200.0
+max_open_orders = 3
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Venues) != 2 || cfg.Venues[0].ID != "alpaca-paper" || cfg.Venues[1].Broker != "tradezero" || cfg.Venues[1].AccountID != "ACC123" {
+		t.Fatalf("venues wrong: %+v", cfg.Venues)
+	}
+	if cfg.Gate.Global.MaxDayLoss != 1000 {
+		t.Fatalf("gate global wrong: %+v", cfg.Gate.Global)
+	}
+	gv, ok := cfg.Gate.Venue["alpaca-paper"]
+	if !ok || gv.MaxOrderValue != 5000 || gv.MaxOpenOrders != 3 {
+		t.Fatalf("gate venue wrong: %+v ok=%v", gv, ok)
+	}
+}
+
+func TestVenueDefaultsEmpty(t *testing.T) {
+	cfg := Default()
+	if len(cfg.Venues) != 0 {
+		t.Fatalf("default venues should be empty, got %+v", cfg.Venues)
+	}
+	if cfg.Gate.Venue != nil && len(cfg.Gate.Venue) != 0 {
+		t.Fatalf("default gate venue map should be empty, got %+v", cfg.Gate.Venue)
+	}
+}

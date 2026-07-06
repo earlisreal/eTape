@@ -53,12 +53,44 @@ type Store struct {
 	FlushMs       int    `toml:"flush_ms"`       // writer batch-flush interval
 }
 
+// Venue is one configured execution venue.  ->  [[venue]]
+type Venue struct {
+	ID          string `toml:"id"`          // slug used in events, topics, commands, gate config
+	Broker      string `toml:"broker"`      // tradezero | alpaca | moomoo | sim
+	Env         string `toml:"env"`         // paper | live
+	Credentials string `toml:"credentials"` // key into ~/.eJournal/credentials.json
+	AccountID   string `toml:"account_id"`  // broker-specific (TZ accountId, moomoo accID)
+}
+
+// GateGlobal caps aggregate risk across all venues.  ->  [gate.global]
+type GateGlobal struct {
+	MaxDayLoss              float64 `toml:"max_day_loss"`
+	MaxSymbolPositionValue  float64 `toml:"max_symbol_position_value"`
+	MaxSymbolPositionShares float64 `toml:"max_symbol_position_shares"`
+}
+
+// GateVenue caps one venue's risk.  ->  [gate.venue.<id>]
+type GateVenue struct {
+	MaxOrderValue     float64 `toml:"max_order_value"`
+	MaxPositionValue  float64 `toml:"max_position_value"`
+	MaxPositionShares float64 `toml:"max_position_shares"`
+	MaxOpenOrders     int     `toml:"max_open_orders"`
+}
+
+// Gate is the two-layer safety-gate config.  ->  [gate]
+type Gate struct {
+	Global GateGlobal           `toml:"global"`
+	Venue  map[string]GateVenue `toml:"venue"`
+}
+
 // Config is the engine's bootstrap configuration.
 type Config struct {
-	OpenD OpenD `toml:"opend"`
-	Feed  Feed  `toml:"feed"`
-	MD    MD    `toml:"md"`
-	Store Store `toml:"store"`
+	OpenD  OpenD   `toml:"opend"`
+	Feed   Feed    `toml:"feed"`
+	MD     MD      `toml:"md"`
+	Store  Store   `toml:"store"`
+	Venues []Venue `toml:"venue"`
+	Gate   Gate    `toml:"gate"`
 }
 
 // Default returns the built-in defaults used when a field or the whole file is absent.
