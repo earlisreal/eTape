@@ -36,8 +36,20 @@ func TestQueryFillsReturnsFills(t *testing.T) {
 func TestQueryFillsEmptyOnError(t *testing.T) {
 	q := newQueries(&spyFills{err: errors.New("boom")})
 	out := q.handle("QueryFills", json.RawMessage(`{"symbol":"X","fromMs":0,"toMs":1}`))
-	if fills, ok := out.([]wsmsg.Fill); !ok || len(fills) != 0 {
-		t.Fatalf("error must yield empty []wsmsg.Fill (never nil/hang): %T %v", out, out)
+	// must marshal to "[]", not null, so the UI promise resolves to []
+	b, _ := json.Marshal(out)
+	if string(b) != "[]" {
+		t.Fatalf("error must yield empty []wsmsg.Fill (never nil/hang); marshaled to %s", b)
+	}
+}
+
+func TestQueryFillsMalformedArgsReturnsEmptySlice(t *testing.T) {
+	q := newQueries(&spyFills{})
+	out := q.handle("QueryFills", json.RawMessage(`invalid-json`))
+	// malformed args must marshal to "[]", not null, so the UI promise resolves to []
+	b, _ := json.Marshal(out)
+	if string(b) != "[]" {
+		t.Fatalf("malformed args must yield empty []wsmsg.Fill (never nil/hang); marshaled to %s", b)
 	}
 }
 
