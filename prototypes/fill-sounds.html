@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>eTape — fill sound audition</title>
+<style>
+  body {
+    background: #14171f;
+    color: #cbd5e1;
+    font: 14px/1.5 -apple-system, "Segoe UI", sans-serif;
+    max-width: 760px;
+    margin: 40px auto;
+    padding: 0 20px;
+  }
+  h1 { font-size: 18px; color: #e2e8f0; }
+  h2 { font-size: 15px; color: #e2e8f0; margin-top: 30px; }
+  p.note { color: #7d8598; font-size: 13px; }
+  .card {
+    background: #1f2430;
+    border: 1px solid #2c3342;
+    border-radius: 8px;
+    padding: 14px 16px;
+    margin: 12px 0;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .card .info { flex: 1; }
+  .card .name { font-weight: 600; color: #e2e8f0; }
+  .card .desc { font-size: 12.5px; color: #8b94a7; }
+  button {
+    font: 13px/1 inherit;
+    padding: 8px 14px;
+    border-radius: 6px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    background: #2c3342;
+    color: #cbd5e1;
+  }
+  button.buy  { background: #12351f; border-color: #4ade80; color: #4ade80; }
+  button.sell { background: #2a1416; border-color: #f87171; color: #f87171; }
+  button.burst { background: transparent; border-color: #fbbf24; color: #fbbf24; }
+  button:active { transform: translateY(1px); }
+  .controls { display: flex; align-items: center; gap: 10px; margin: 18px 0; }
+  input[type=range] { width: 180px; accent-color: #4ade80; }
+</style>
+</head>
+<body>
+<h1>eTape — fill sound audition</h1>
+<p class="note">
+  All candidates are pure Web Audio synthesis — no asset files; the patch functions below are
+  the code that would ship. Buy = ascending/higher pitch, Sell = descending/lower.
+  <b>Burst ×6</b> simulates six partial fills at 0/35/80/140/380/700&nbsp;ms through the
+  200&nbsp;ms coalescing gate (you should hear exactly 3 plays).
+</p>
+
+<div class="controls">
+  <label for="vol">Master volume</label>
+  <input type="range" id="vol" min="0" max="100" value="60">
+  <span id="volpct">60%</span>
+</div>
+
+<div id="cards"></div>
+
+<h2>Order-event vocabulary (proposal)</h2>
+<p class="note">
+  Placement click on engine ack (“your hotkey registered”), plus five reject-sound
+  candidates for gate/venue rejects — pick one. <b>Full trade sequence</b> plays a realistic
+  trade: click, then the Two-Tone fill 450&nbsp;ms later.
+</p>
+<div id="events"></div>
+
+<script>
+'use strict';
+
+let ctx = null;
+let master = null;
+
+function audio() {
+  if (!ctx) {
+    ctx = new AudioContext();
+    master = ctx.createGain();
+    master.gain.value = document.getElementById('vol').value / 100;
+    master.connect(ctx.destination);
+  }
+  if (ctx.state === 'suspended') ctx.resume();
+  return ctx;
+}
+
+document.getElementById('vol').addEventListener('input', (e) => {
+  document.getElementById('volpct').textContent = e.target.value + '%';
+  if (master) master.gain.value = e.target.value / 100;
+});
+
+// ---- synthesis helpers ---------------------------------------------------
+
+// Envelope-shaped gain node: fast attack, exponential decay to silence.
+function env(c, when, peak, attack, decay) {
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, when);
+  g.gain.exponentialRampToValueAtTime(peak, when + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, when + attack + decay);
+  return g;
+}
+
+function tone(c, type, freq, when, peak, attack, decay, dest) {
+  const o = c.createOscillator();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, when);
+  const g = env(c, when, peak, attack, decay);
+  o.connect(g).connect(dest);
+  o.start(when);
+  o.stop(when + attack + decay + 0.05);
+  return o;
+}
+
+function noiseBurst(c, when, peak, decay, filterType, freq, q, dest) {
+  const len = Math.ceil(c.sampleRate * (decay + 0.02));
+  const buf = c.createBuffer(1, len, c.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const src = c.createBufferSource();
+  src.buffer = buf;
+  const f = c.createBiquadFilter();
+  f.type = filterType;
+  f.frequency.value = freq;
+  f.Q.value = q;
+  const g = env(c, when, peak, 0.002, decay);
+  src.connect(f).connect(g).connect(dest);
+  src.start(when);
+}
+
+// ---- candidate patches ---------------------------------------------------
+// Each: (c, out, variant, when) — variant 'buy' | 'sell', when = schedule time.
+
+const SOUNDS = [
+  {
+    name: 'Soft Blip',
+    desc: 'Single rounded blip, 150 ms. The minimalist — near-zero fatigue.',
+    play(c, out, v, t) {
+      const f = v === 'buy' ? 659.25 : 440;           // E5 / A4
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 2800;
+      lp.connect(out);
+      tone(c, 'triangle', f, t, 0.5, 0.003, 0.14, lp);
+    },
+  },
+  {
+    name: 'Two-Tone',
+    desc: 'Two quick notes — buy rises C5→G5, sell falls G5→C5. The classic broker chime.',
+    play(c, out, v, t) {
+      const seq = v === 'buy' ? [523.25, 783.99] : [783.99, 523.25];
+      for (let i = 0; i < 2; i++) {
+        const at = t + i * 0.095;
+        tone(c, 'sine', seq[i], at, 0.45, 0.004, 0.09, out);
+        tone(c, 'sine', seq[i] * 2, at, 0.08, 0.004, 0.06, out);  // body
+      }
+    },
+  },
+  {
+    name: 'Marimba',
+    desc: 'Warm woody strike, 220 ms. Soft on the ears over hundreds of plays.',
+    play(c, out, v, t) {
+      const f = v === 'buy' ? 698.46 : 466.16;        // F5 / Bb4
+      tone(c, 'sine', f, t, 0.5, 0.0015, 0.22, out);
+      tone(c, 'sine', f * 3.9, t, 0.14, 0.0015, 0.07, out);  // strike partial
+    },
+  },
+  {
+    name: 'Cash Bell',
+    desc: 'Bright inharmonic ding with a mechanical “chik” — the rewarding one.',
+    play(c, out, v, t) {
+      const base = v === 'buy' ? 880 : 587.33;        // A5 / D5
+      const partials = [[1, 0.42, 0.25], [2.76, 0.2, 0.15], [5.40, 0.09, 0.08]];
+      for (const [ratio, peak, decay] of partials)
+        tone(c, 'sine', base * ratio, t, peak, 0.002, decay, out);
+      noiseBurst(c, t, 0.12, 0.012, 'highpass', 3000, 0.7, out);
+    },
+  },
+  {
+    name: 'Tick',
+    desc: 'A 40 ms mechanical click, barely-there. For when fills are constant background.',
+    play(c, out, v, t) {
+      const f = v === 'buy' ? 2200 : 1100;
+      noiseBurst(c, t, 0.45, 0.025, 'bandpass', f, 6, out);
+      tone(c, 'sine', f, t, 0.18, 0.002, 0.03, out);
+    },
+  },
+  {
+    name: 'Glass Ping',
+    desc: 'Clean airy bell with a slow 350 ms shimmer. Elegant, slightly longer tail.',
+    play(c, out, v, t) {
+      const f = v === 'buy' ? 1174.66 : 783.99;       // D6 / G5
+      tone(c, 'sine', f, t, 0.3, 0.004, 0.32, out);
+      tone(c, 'sine', f + 2.5, t, 0.18, 0.004, 0.32, out);   // beat shimmer
+      tone(c, 'sine', f * 2.32, t, 0.08, 0.004, 0.12, out);  // glass partial
+    },
+  },
+  {
+    name: 'Pop',
+    desc: 'Bubbly 130 ms pitch sweep — buy swoops up, sell swoops down. The playful one.',
+    play(c, out, v, t) {
+      const [f0, f1] = v === 'buy' ? [380, 720] : [720, 380];
+      const o = c.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(f0, t);
+      o.frequency.exponentialRampToValueAtTime(f1, t + 0.09);
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 2000;
+      const g = env(c, t, 0.55, 0.003, 0.125);
+      o.connect(lp).connect(g).connect(out);
+      o.start(t); o.stop(t + 0.2);
+    },
+  },
+];
+
+// ---- order-event vocabulary (proposal) -----------------------------------
+
+const EVENT_SOUNDS = [
+  {
+    name: 'Order Placed — Click',
+    desc: 'Subtle 25 ms click on engine ack. Deliberately subordinate to the fill chime.',
+    variants: ['buy', 'sell'],
+    play(c, out, v, t) {
+      const f = v === 'buy' ? 1800 : 900;
+      noiseBurst(c, t, 0.35, 0.02, 'bandpass', f, 5, out);
+      tone(c, 'sine', f, t, 0.12, 0.002, 0.02, out);
+    },
+  },
+  {
+    name: 'Reject 1 — Buzz',
+    desc: 'Low descending “brrt” — rough, mechanical, classic error texture.',
+    variants: ['play'],
+    play(c, out, v, t) {
+      for (const f0 of [220, 226]) {
+        const o = c.createOscillator();
+        o.type = 'sawtooth';
+        o.frequency.setValueAtTime(f0, t);
+        o.frequency.exponentialRampToValueAtTime(f0 * 0.77, t + 0.15);
+        const lp = c.createBiquadFilter();
+        lp.type = 'lowpass'; lp.frequency.value = 900;
+        const g = env(c, t, 0.22, 0.005, 0.2);
+        o.connect(lp).connect(g).connect(out);
+        o.start(t); o.stop(t + 0.3);
+      }
+    },
+  },
+  {
+    name: 'Reject 2 — Dun-Dun',
+    desc: 'Two descending notes, a musical “denied”. The politest of the set.',
+    variants: ['play'],
+    play(c, out, v, t) {
+      tone(c, 'triangle', 466.16, t, 0.4, 0.004, 0.09, out);          // Bb4
+      tone(c, 'triangle', 329.63, t + 0.11, 0.4, 0.004, 0.16, out);   // E4
+    },
+  },
+  {
+    name: 'Reject 3 — Double Knock',
+    desc: 'Two low thumps — a physical “uh-uh”. Deep, felt more than heard.',
+    variants: ['play'],
+    play(c, out, v, t) {
+      for (const at of [t, t + 0.12]) {
+        const o = c.createOscillator();
+        o.type = 'sine';
+        o.frequency.setValueAtTime(160, at);
+        o.frequency.exponentialRampToValueAtTime(80, at + 0.05);
+        const g = env(c, at, 0.55, 0.003, 0.07);
+        o.connect(g).connect(out);
+        o.start(at); o.stop(at + 0.15);
+      }
+    },
+  },
+  {
+    name: 'Reject 4 — Alert Beeps',
+    desc: 'Two quick urgent pings — the attention-grabber. Loudest read as “warning”.',
+    variants: ['play'],
+    play(c, out, v, t) {
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 2500;
+      lp.connect(out);
+      tone(c, 'square', 987.77, t, 0.16, 0.003, 0.045, lp);           // B5
+      tone(c, 'square', 987.77, t + 0.075, 0.16, 0.003, 0.045, lp);
+    },
+  },
+  {
+    name: 'Reject 5 — Power-Down',
+    desc: 'Single falling swoop, like something switching off. Legible without being harsh.',
+    variants: ['play'],
+    play(c, out, v, t) {
+      const o = c.createOscillator();
+      o.type = 'sawtooth';
+      o.frequency.setValueAtTime(330, t);
+      o.frequency.exponentialRampToValueAtTime(110, t + 0.25);
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 1200;
+      const g = env(c, t, 0.3, 0.005, 0.27);
+      o.connect(lp).connect(g).connect(out);
+      o.start(t); o.stop(t + 0.35);
+    },
+  },
+];
+
+// ---- coalescing gate (the logic that would ship) -------------------------
+
+const COALESCE_MS = 200;
+const lastPlay = new Map();  // key: `${soundIdx}:${variant}`
+
+function playFill(idx, variant, atMs) {
+  const key = idx + ':' + variant;
+  const last = lastPlay.get(key);
+  if (last !== undefined && atMs - last < COALESCE_MS) return false;
+  lastPlay.set(key, atMs);
+  const c = audio();
+  SOUNDS[idx].play(c, master, variant, c.currentTime + Math.max(0, atMs - performance.now()) / 1000);
+  return true;
+}
+
+// ---- UI ------------------------------------------------------------------
+
+const cards = document.getElementById('cards');
+SOUNDS.forEach((s, i) => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML =
+    '<div class="info"><div class="name">' + (i + 1) + '. ' + s.name + '</div>' +
+    '<div class="desc">' + s.desc + '</div></div>';
+  const mk = (label, cls, fn) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.className = cls;
+    b.addEventListener('click', fn);
+    card.appendChild(b);
+  };
+  mk('▲ Buy', 'buy', () => { lastPlay.clear(); playFill(i, 'buy', performance.now()); });
+  mk('▼ Sell', 'sell', () => { lastPlay.clear(); playFill(i, 'sell', performance.now()); });
+  mk('Burst ×6', 'burst', () => {
+    lastPlay.clear();
+    const t0 = performance.now();
+    for (const dt of [0, 35, 80, 140, 380, 700]) playFill(i, 'buy', t0 + dt);
+  });
+  cards.appendChild(card);
+});
+
+const events = document.getElementById('events');
+EVENT_SOUNDS.forEach((s) => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML =
+    '<div class="info"><div class="name">' + s.name + '</div>' +
+    '<div class="desc">' + s.desc + '</div></div>';
+  for (const v of s.variants) {
+    const b = document.createElement('button');
+    b.textContent = v === 'buy' ? '▲ Buy' : v === 'sell' ? '▼ Sell' : 'Play';
+    b.className = v === 'play' ? 'burst' : v;
+    b.addEventListener('click', () => {
+      const c = audio();
+      s.play(c, master, v, c.currentTime);
+    });
+    card.appendChild(b);
+  }
+  events.appendChild(card);
+});
+
+{
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML =
+    '<div class="info"><div class="name">Full trade sequence</div>' +
+    '<div class="desc">Click on placement, Two-Tone fill 450 ms later — the “sent… filled” cadence of a real trade.</div></div>';
+  const mkSeq = (label, cls, v) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.className = cls;
+    b.addEventListener('click', () => {
+      const c = audio();
+      EVENT_SOUNDS[0].play(c, master, v, c.currentTime);
+      SOUNDS[1].play(c, master, v, c.currentTime + 0.45);
+    });
+    card.appendChild(b);
+  };
+  mkSeq('▲ Buy trade', 'buy', 'buy');
+  mkSeq('▼ Sell trade', 'sell', 'sell');
+  events.appendChild(card);
+}
+</script>
+</body>
+</html>
