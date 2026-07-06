@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { ScannerStore } from "./ScannerStore";
 import type { ScannerRankPayload, ScanHitPayload, SnapshotMsg, DeltaMsg } from "../wire/contract";
 
@@ -70,5 +70,40 @@ describe("ScannerStore", () => {
 
   it("view of an unknown session is empty", () => {
     expect(new ScannerStore().view("afterhours")).toEqual({ rows: [], refreshedAt: null });
+  });
+});
+
+// Distinct name to avoid colliding with the file's existing `rank(kind, session, payload)`.
+const rankMsg = (kind: "snapshot" | "delta", symbols: string[]) => ({
+  kind, topic: "scanner.rank" as const, key: "premarket",
+  payload: { refreshedAt: "2026-07-06T13:00:00Z", rows: symbols.map((symbol) => ({ symbol, changePct: 5, last: 1, floatShares: 1, volume: 1 })) },
+});
+
+describe("ScannerStore.onNewHit", () => {
+  it("fires for a delta row whose symbol is not yet seen", () => {
+    const s = new ScannerStore();
+    const cb = vi.fn();
+    s.onNewHit(cb);
+    s.apply(rankMsg("delta", ["AAA"]));            // new -> fires
+    s.apply(rankMsg("delta", ["AAA", "BBB"]));     // AAA seen (silent), BBB new (fires)
+    expect(cb.mock.calls.map((c) => c[0])).toEqual(["AAA", "BBB"]);
+  });
+
+  it("is silent on snapshots and for already-seen symbols", () => {
+    const s = new ScannerStore();
+    const cb = vi.fn();
+    s.onNewHit(cb);
+    s.apply(rankMsg("snapshot", ["AAA"]));  // seeds silently
+    s.apply(rankMsg("delta", ["AAA"]));     // already seen
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("fires on a scanner.hit force-flash even for an already-seen symbol", () => {
+    const s = new ScannerStore();
+    const cb = vi.fn();
+    s.onNewHit(cb);
+    s.apply(rankMsg("snapshot", ["AAA"]));  // AAA now seen, silent
+    s.apply({ kind: "delta", topic: "scanner.hit", key: "premarket", payload: { symbol: "AAA", at: "2026-07-06T13:01:00Z" } });
+    expect(cb).toHaveBeenCalledWith("AAA");
   });
 });

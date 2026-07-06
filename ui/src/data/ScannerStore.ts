@@ -14,7 +14,13 @@ interface ScannerState { sessions: Partial<Record<ScannerSession, ScannerSession
 // explicit force-flash for a symbol already in the current ranking.
 export class ScannerStore extends ReactStore<ScannerState> {
   private readonly seen = new Map<ScannerSession, Set<string>>();
+  private readonly hitListeners = new Set<(symbol: string) => void>();
   constructor() { super({ sessions: {} }); }
+
+  onNewHit(cb: (symbol: string) => void): () => void {
+    this.hitListeners.add(cb);
+    return () => { this.hitListeners.delete(cb); };
+  }
 
   apply(m: SnapshotMsg | DeltaMsg): void {
     const session = (m.key ?? "premarket") as ScannerSession;
@@ -25,6 +31,7 @@ export class ScannerStore extends ReactStore<ScannerState> {
     const view: ScannerRowView[] = rows.map((row) => {
       const isNewHit = m.kind === "delta" && !seen.has(row.symbol);
       const muted = m.kind === "delta" && seen.has(row.symbol);
+      if (isNewHit) for (const cb of this.hitListeners) cb(row.symbol);
       return { ...row, isNewHit, muted };
     });
     for (const row of rows) seen.add(row.symbol);
@@ -41,6 +48,7 @@ export class ScannerStore extends ReactStore<ScannerState> {
   }
 
   private applyHit(session: ScannerSession, hit: ScanHitPayload): void {
+    for (const cb of this.hitListeners) cb(hit.symbol);
     this.seenFor(session).add(hit.symbol);
     const cur = this.getSnapshot().sessions[session];
     if (!cur) return;
