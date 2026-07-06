@@ -98,6 +98,36 @@ const (
 	BrokerMoomoo    Broker = "moomoo"
 )
 
+// AckStatus is AckMsg.Status's typed enum (kept narrow so tygo emits a
+// literal union instead of `string`).
+type AckStatus string
+
+const (
+	AckAccepted AckStatus = "accepted"
+	AckBlocked  AckStatus = "blocked"
+)
+
+// LinkName identifies a monitored engine<->peer link (typed so tygo would
+// emit a literal union instead of `string`, if this file weren't excluded
+// from tygo generation — see tygo.yaml frontmatter for the hand-declared
+// TS equivalent).
+type LinkName string
+
+const (
+	LinkUIEngine     LinkName = "ui-engine"
+	LinkEngineMoomoo LinkName = "engine-moomoo"
+	LinkEngineTZ     LinkName = "engine-tz"
+)
+
+// LinkStatus is HealthLink.Status's typed enum.
+type LinkStatus string
+
+const (
+	LinkOK       LinkStatus = "ok"
+	LinkDegraded LinkStatus = "degraded"
+	LinkDown     LinkStatus = "down"
+)
+
 // ---- server -> client frames ----
 // Struct names carry the "Msg" suffix to match ui/src/wire/contract.ts exactly
 // (SnapshotMsg/DeltaMsg/AckMsg/PongMsg/ResultMsg) so the tygo output is a
@@ -118,12 +148,12 @@ type DeltaMsg struct {
 }
 
 type AckMsg struct {
-	Kind    string `json:"kind"` // always "ack"
-	CorrID  string `json:"corrId"`
-	Status  string `json:"status"` // "accepted" | "blocked"
-	Reason  string `json:"reason,omitempty"`
-	OrderID string `json:"orderId,omitempty"`
-	Value   any    `json:"value,omitempty"`
+	Kind    string    `json:"kind"` // always "ack"
+	CorrID  string    `json:"corrId"`
+	Status  AckStatus `json:"status"`
+	Reason  string    `json:"reason,omitempty"`
+	OrderID string    `json:"orderId,omitempty"`
+	Value   any       `json:"value,omitempty"`
 }
 
 type PongMsg struct {
@@ -168,55 +198,8 @@ type PingMsg struct {
 	T    int64  `json:"t"`
 }
 
-// ---- command / query argument DTOs ----
-
-type SubmitOrderArgs struct {
-	Venue      string    `json:"venue"`
-	Symbol     string    `json:"symbol"`
-	Side       Side      `json:"side"`
-	Type       OrderType `json:"type"`
-	TIF        TIF       `json:"tif"`
-	Qty        float64   `json:"qty"`
-	LimitPrice float64   `json:"limitPrice"`
-	StopPrice  float64   `json:"stopPrice"`
-}
-
-type CancelOrderArgs struct {
-	Venue   string `json:"venue"`
-	OrderID string `json:"orderId"`
-}
-
-type ReplaceOrderArgs struct {
-	Venue      string  `json:"venue"`
-	OrderID    string  `json:"orderId"`
-	Qty        float64 `json:"qty"`
-	LimitPrice float64 `json:"limitPrice"`
-	StopPrice  float64 `json:"stopPrice"`
-}
-
-type FlattenArgs struct {
-	Venue string `json:"venue"`
-}
-
-type KillSwitchArgs struct {
-	Venue string `json:"venue,omitempty"` // omitted/empty => all venues
-}
-
-type ArmArgs struct {
-	Venue string `json:"venue,omitempty"` // omitted/empty => master
-}
-
-type QueryFillsArgs struct {
-	Symbol string `json:"symbol"`
-	FromMs int64  `json:"fromMs"`
-	ToMs   int64  `json:"toMs"`
-}
-
-type GetConfigArgs struct {
-	Key string `json:"key"`
-}
-
-type SetConfigArgs struct {
-	Key   string          `json:"key"`
-	Value json.RawMessage `json:"value"`
-}
+// Command/query argument DTOs live in payloads.go, not here — see the note
+// in tygo.yaml: wsmsg.go is excluded from tygo generation (its envelope
+// `kind` discriminants and enum consts are hand-declared as TS literal
+// unions in tygo.yaml's frontmatter instead), so any type that needs to be
+// tygo-generated must live outside this file.

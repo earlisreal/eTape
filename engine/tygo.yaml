@@ -1,0 +1,124 @@
+packages:
+  - path: "github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
+    output_path: "../ui/src/gen/wsmsg.ts"
+    type_mappings:
+      "json.RawMessage": "unknown"
+    # wsmsg.go holds only the wire enum consts (Topic/Side/OrderType/TIF/
+    # OrderStatus/TickDirection/Broker/AckStatus/LinkName/LinkStatus) and the
+    # 10 envelope frame structs (SnapshotMsg/DeltaMsg/AckMsg/.../PingMsg).
+    # tygo's mechanical Go->TS conversion can't produce what we need for
+    # either group:
+    #   - the enum consts would emit as a loose `export type X = string`
+    #     (tygo's `enum_style: union` heuristic only correctly infers a
+    #     literal union when the const names share the *exact* type name as
+    #     prefix — true for Side/TIF/Broker/Topic here, false for
+    #     OrderType/OrderStatus/TickDirection/AckStatus/LinkName/LinkStatus,
+    #     whose const names use shorter, more ergonomic Go prefixes
+    #     (OrderMarket, StatusSubmitted, DirBuy, AckAccepted, LinkUIEngine,
+    #     LinkOK) — verified against tygo v0.2.21's detectEnumGroup, which
+    #     falls back to inferring the type name from the consts' longest
+    #     common prefix and then rejects the group when that doesn't match
+    #     the Go type's actual name);
+    #   - each envelope struct's `Kind string` field is deliberately a plain
+    #     Go string (one shared type can't carry a different literal per
+    #     struct), so it would emit as `kind: string`, weakening the
+    #     ServerMessage/ClientMessage discriminated-union narrowing the UI's
+    #     WsClient.onMessage relies on.
+    # So wsmsg.go is excluded here and hand-declared below instead (option
+    # (a) from the Task 4 brief's "Discriminant-field fidelity" note); the
+    # arg DTOs that used to live in wsmsg.go were moved to payloads.go so
+    # tygo still generates them mechanically. Everything in payloads.go
+    # (Quote/Book/.../HealthLink/SysEvent/*Args) has no such problem and is
+    # generated normally — including cross-file references to the
+    # frontmatter-declared enum types (Side, TickDirection, Broker,
+    # LinkName, LinkStatus), which tygo emits as bare identifiers without
+    # resolving them, so the split is invisible in the combined output file.
+    exclude_files:
+      - "wsmsg.go"
+    frontmatter: |
+      // Source: engine/internal/uihub/wsmsg. Regenerate with `make gen-ts`
+      // in engine/. CI fails on drift (`make gen-ts-check`).
+      //
+      // wsmsg.go is excluded from mechanical generation (see tygo.yaml) —
+      // the topic/enum types and envelope frames below are hand-declared to
+      // match it field-for-field and const-for-const so this stays a
+      // deterministic, reviewable diff against the Go source.
+
+      // ---- topics ----
+      export type Topic =
+        | "md.quote" | "md.book" | "md.tape" | "md.bars" | "md.indicator"
+        | "scanner.rank" | "scanner.hit"
+        | "news.item"
+        | "exec.account" | "exec.positions" | "exec.orders" | "exec.fills" | "exec.status"
+        | "sys.health" | "sys.events"
+        | "config";
+
+      // ---- wire enums (mirrors wsmsg.go's typed string consts) ----
+      export type Side = "BUY" | "SELL" | "SHORT" | "COVER";
+      export type OrderType = "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT";
+      export type TIF = "DAY" | "GTC" | "IOC" | "FOK";
+      export type OrderStatus =
+        | "SUBMITTED" | "ACCEPTED" | "PARTIALLY_FILLED" | "FILLED"
+        | "CANCELED" | "REJECTED" | "EXPIRED" | "BLOCKED" | "REPLACED";
+      export type TickDirection = "BUY" | "SELL" | "NEUTRAL";
+      export type Broker = "tradezero" | "alpaca" | "moomoo";
+      export type AckStatus = "accepted" | "blocked";
+      export type LinkName = "ui-engine" | "engine-moomoo" | "engine-tz";
+      export type LinkStatus = "ok" | "degraded" | "down";
+
+      // ---- envelope frames (wsmsg.go's *Msg structs) ----
+      export interface SnapshotMsg {
+        kind: "snapshot";
+        topic: Topic;
+        key?: string;
+        payload: unknown;
+      }
+      export interface DeltaMsg {
+        kind: "delta";
+        topic: Topic;
+        key?: string;
+        payload: unknown;
+      }
+      export interface AckMsg {
+        kind: "ack";
+        corrId: string;
+        status: AckStatus;
+        reason?: string;
+        orderId?: string;
+        value?: unknown;
+      }
+      export interface PongMsg {
+        kind: "pong";
+        t: number;
+      }
+      export interface ResultMsg {
+        kind: "result";
+        corrId: string;
+        payload: unknown;
+      }
+      export interface SubscribeMsg {
+        kind: "subscribe";
+        topic: Topic;
+      }
+      export interface UnsubscribeMsg {
+        kind: "unsubscribe";
+        topic: Topic;
+      }
+      export interface CommandMsg {
+        kind: "command";
+        corrId: string;
+        name: string;
+        args: unknown;
+      }
+      export interface QueryMsg {
+        kind: "query";
+        corrId: string;
+        name: string;
+        args: unknown;
+      }
+      export interface PingMsg {
+        kind: "ping";
+        t: number;
+      }
+      export type ServerMessage = SnapshotMsg | DeltaMsg | AckMsg | PongMsg | ResultMsg;
+      export type ClientMessage = SubscribeMsg | UnsubscribeMsg | CommandMsg | QueryMsg | PingMsg;

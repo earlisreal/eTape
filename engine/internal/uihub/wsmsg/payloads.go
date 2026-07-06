@@ -1,5 +1,7 @@
 package wsmsg
 
+import "encoding/json"
+
 // ---- market-data payloads (timestamps are ISO-8601 UTC strings) ----
 
 type Quote struct {
@@ -81,8 +83,9 @@ type Fill struct {
 }
 
 // PositionRow.Venue is a pointer so a cross-venue net row serializes venue:null.
+// tstype forces tygo to emit a literal `| null` union instead of `venue?:`.
 type PositionRow struct {
-	Venue         *string `json:"venue"`
+	Venue         *string `json:"venue" tstype:"string | null,required"`
 	Symbol        string  `json:"symbol"`
 	Qty           float64 `json:"qty"`
 	AvgPrice      float64 `json:"avgPrice"`
@@ -121,7 +124,7 @@ type VenueStatus struct {
 	VenueArmed       bool           `json:"venueArmed"`
 	ReconcilePending bool           `json:"reconcilePending"`
 	Note             string         `json:"note"`
-	LastReconcileMs  *int64         `json:"lastReconcileMs"`
+	LastReconcileMs  *int64         `json:"lastReconcileMs" tstype:"number | null,required"`
 	Gate             GateLimitsView `json:"gate"`
 }
 
@@ -135,10 +138,10 @@ type ExecStatus struct {
 
 type ScannerRow struct {
 	Symbol      string   `json:"symbol"`
-	ChangePct   *float64 `json:"changePct"`   // null = no print yet
-	Last        *float64 `json:"last"`        // null = no print yet
-	FloatShares *float64 `json:"floatShares"` // ACTUAL shares (engine converts moomoo thousands); null = unknown
-	Volume      int64    `json:"volume"`      // 0 is legitimate
+	ChangePct   *float64 `json:"changePct" tstype:"number | null,required"`   // null = no print yet
+	Last        *float64 `json:"last" tstype:"number | null,required"`        // null = no print yet
+	FloatShares *float64 `json:"floatShares" tstype:"number | null,required"` // ACTUAL shares (engine converts moomoo thousands); null = unknown
+	Volume      int64    `json:"volume"`                                      // 0 is legitimate
 }
 
 type ScannerRankPayload struct {
@@ -159,13 +162,16 @@ type NewsItem struct {
 	SeenAt   string `json:"seen_at"`
 }
 
+// LinkName and LinkStatus (HealthLink's typed enums) live in wsmsg.go
+// alongside the other wire enum types, not here — see the note there.
+
 type HealthLink struct {
-	Link   string   `json:"link"` // "ui-engine" | "engine-moomoo" | "engine-tz"
-	Ms     *float64 `json:"ms"`
-	Min    *float64 `json:"min"`
-	Avg    *float64 `json:"avg"`
-	Max    *float64 `json:"max"`
-	Status string   `json:"status"` // "ok" | "degraded" | "down"
+	Link   LinkName   `json:"link"`
+	Ms     *float64   `json:"ms" tstype:"number | null,required"`
+	Min    *float64   `json:"min" tstype:"number | null,required"`
+	Avg    *float64   `json:"avg" tstype:"number | null,required"`
+	Max    *float64   `json:"max" tstype:"number | null,required"`
+	Status LinkStatus `json:"status"`
 }
 
 type HealthSnapshot struct {
@@ -177,4 +183,58 @@ type SysEvent struct {
 	Ts     string `json:"ts"`
 	Kind   string `json:"kind"`
 	Detail string `json:"detail"`
+}
+
+// ---- command / query argument DTOs (moved from wsmsg.go so tygo can still
+// generate them while wsmsg.go itself is excluded — see tygo.yaml) ----
+
+type SubmitOrderArgs struct {
+	Venue      string    `json:"venue"`
+	Symbol     string    `json:"symbol"`
+	Side       Side      `json:"side"`
+	Type       OrderType `json:"type"`
+	TIF        TIF       `json:"tif"`
+	Qty        float64   `json:"qty"`
+	LimitPrice float64   `json:"limitPrice"`
+	StopPrice  float64   `json:"stopPrice"`
+}
+
+type CancelOrderArgs struct {
+	Venue   string `json:"venue"`
+	OrderID string `json:"orderId"`
+}
+
+type ReplaceOrderArgs struct {
+	Venue      string  `json:"venue"`
+	OrderID    string  `json:"orderId"`
+	Qty        float64 `json:"qty"`
+	LimitPrice float64 `json:"limitPrice"`
+	StopPrice  float64 `json:"stopPrice"`
+}
+
+type FlattenArgs struct {
+	Venue string `json:"venue"`
+}
+
+type KillSwitchArgs struct {
+	Venue string `json:"venue,omitempty"` // omitted/empty => all venues
+}
+
+type ArmArgs struct {
+	Venue string `json:"venue,omitempty"` // omitted/empty => master
+}
+
+type QueryFillsArgs struct {
+	Symbol string `json:"symbol"`
+	FromMs int64  `json:"fromMs"`
+	ToMs   int64  `json:"toMs"`
+}
+
+type GetConfigArgs struct {
+	Key string `json:"key"`
+}
+
+type SetConfigArgs struct {
+	Key   string          `json:"key"`
+	Value json.RawMessage `json:"value"`
 }
