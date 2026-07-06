@@ -118,19 +118,33 @@ func (rc *restClient) submitOrder(ctx context.Context, req exec.OrderRequest, tz
 		if resp.StatusCode == http.StatusBadRequest {
 			return orderResp{OrderStatus: "Rejected", Text: "HTTP 400 schema: " + string(b)}, true, nil
 		}
+		if resp.StatusCode >= 400 {
+			// Any other >=400 (401/403/5xx, e.g. an expired key or a TZ
+			// outage) is NOT a semantic order-status response — the body is
+			// not trustworthy as JSON matching orderResp, and unlike the 400
+			// case above, TZ does not document this as "rejection reported
+			// via non-200". Treat it as a hard transport-level failure so it
+			// feeds the same retry-once logic as a dropped connection,
+			// instead of silently falling through to a default-accept.
+			return orderResp{}, false, fmt.Errorf("tradezero: submit status=%d body=%s", resp.StatusCode, b)
+		}
 		var or orderResp
 		_ = json.Unmarshal(b, &or)
 		return or, true, nil
 	}
 
-	or, ok, err := attempt()
-	if !ok { // transport failure -> retry once with the SAME id (R114 probe)
-		or, ok, err = attempt()
+	or, ok, _ := attempt()
+	if !ok { // transport/hard-status failure -> retry once with the SAME id (R114 probe)
+		var retryErr error
+		or, ok, retryErr = attempt()
 		if !ok {
-			return false, "", fmt.Errorf("tradezero: submit transport failed twice: %w", err)
+			return false, "", fmt.Errorf("tradezero: submit transport failed twice: %w", retryErr)
 		}
-		if strings.HasPrefix(or.Text, "R114") {
-			// duplicate -> the ORIGINAL landed; treat as accepted.
+		if strings.Contains(or.Text, "R114") {
+			// duplicate -> the ORIGINAL landed; treat as accepted. Contains
+			// (not HasPrefix) so this also matches when R114 arrives via the
+			// 400-schema-violation path above, where Text is rewritten to
+			// "HTTP 400 schema: " + body rather than the raw R-code prefix.
 			return true, "", nil
 		}
 	}
@@ -364,7 +378,7 @@ type tzPosition struct {
 func (rc *restClient) snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {
 	var acct exec.AccountSnapshot
 
-	if resp, err := rc.do(ctx, http.MethodGet, "/v1/api/accounts/"+rc.accountID, nil, rc.bAcct); err == nil {
+	if resp, err := rc.do(ctx, http.MethodGet, "/v1/api/account/"+rc.accountID, nil, rc.bAcct); err == nil {
 		b, rerr := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
 		if rerr == nil && resp.StatusCode == http.StatusOK {

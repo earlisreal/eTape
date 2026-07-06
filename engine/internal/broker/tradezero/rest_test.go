@@ -192,9 +192,47 @@ func TestSubmit_TransportFail_BothAttemptsFail(t *testing.T) {
 	}
 }
 
+// TestSubmit_HTTPErrorStatus_NeverSilentlyAccepted covers the critical fix:
+// a non-200, non-400 status (401/403/5xx — auth failure or a TZ outage) must
+// never fall through to a default-accept just because the body doesn't parse
+// into the expected orderStatus shape. It must surface as a hard error.
+func TestSubmit_HTTPErrorStatus_NeverSilentlyAccepted(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{"500 with HTML error page", http.StatusInternalServerError, "<html><body>Internal Server Error</body></html>"},
+		{"401 with unexpected JSON shape", http.StatusUnauthorized, `{"message":"invalid API key"}`},
+		{"503 with empty body", http.StatusServiceUnavailable, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/v1/api/accounts/2TZ00001/order", func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(tc.body))
+			})
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+
+			rc := newRESTClient(srv.URL, "2TZ00001", "K", "S", clock.NewFake(time.UnixMilli(0)))
+			accepted, _, err := rc.submitOrder(context.Background(), exec.OrderRequest{
+				Venue: "tz", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 100,
+				ClientOrderID: "ET-err",
+			}, "ET-err", "SMART")
+			if err == nil {
+				t.Fatalf("expected an error for HTTP %d, got accepted=%v", tc.status, accepted)
+			}
+			if accepted {
+				t.Fatalf("HTTP %d must never be silently treated as accepted", tc.status)
+			}
+		})
+	}
+}
+
 func TestSnapshot_ParsesAccountsPositions(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/api/accounts/2TZ00001", serveFile(t, "accounts.json"))            // GET /account/{id} not used; simplify
+	mux.HandleFunc("/v1/api/account/2TZ00001", serveFile(t, "accounts.json"))
 	mux.HandleFunc("/v1/api/accounts/2TZ00001/pnl", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"dayPnl":-25.5,"realized":10}`)) })
 	mux.HandleFunc("/v1/api/accounts/2TZ00001/positions", serveFile(t, "positions.json"))
 	mux.HandleFunc("/v1/api/accounts/2TZ00001/orders", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`[]`)) })
@@ -225,7 +263,7 @@ func TestSnapshot_ParsesAccountsPositions(t *testing.T) {
 
 func TestSnapshot_ShortPositionIsNegativeQty(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/api/accounts/2TZ00001", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) })
+	mux.HandleFunc("/v1/api/account/2TZ00001", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) })
 	mux.HandleFunc("/v1/api/accounts/2TZ00001/pnl", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) })
 	mux.HandleFunc("/v1/api/accounts/2TZ00001/positions", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`[{"symbol":"GME","side":"Short","shares":50,"priceAvg":20.5}]`))
