@@ -11,6 +11,7 @@ import type { PanelProps } from "./panels/registry";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import { useTheme } from "./ThemeProvider";
 import { useHotkeys } from "./exec/useHotkeys";
+import { useSoundWiring } from "../sound/useSoundWiring";
 
 interface Props {
   workspaceName: "monitoring" | "trading";
@@ -28,6 +29,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // Mounted once, globally — must run unconditionally, before the loading-state
   // early return below, per the Rules of Hooks.
   useHotkeys({ stores, commands, linkGroups });
+  useSoundWiring(stores);
   if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
 
   // A stable per-panel onConfigChange updates ws.panels[i].settings then saves.
