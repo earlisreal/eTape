@@ -1,0 +1,41 @@
+import { PaintStore } from "./store";
+import type { Fill, SnapshotMsg, DeltaMsg } from "../wire/contract";
+import { sideIsSell } from "../wire/orderStatus";
+
+// A fill marker as consumed by the chart. Declared structurally here (not imported
+// from render/chart/diamondMarker) so data/ never imports render/ — the shape is
+// identical to render's FillMarker, so ChartController.setFills accepts it.
+export interface FillPoint { timeMs: number; price: number; side: "buy" | "sell" }
+
+// Fills are append-only events (not a replaceable snapshot): a reconnect
+// re-snapshot MERGES + dedupes rather than wiping backfilled history. Bucketed by
+// symbol; forSymbol() maps to the chart's fill-marker shape.
+const key = (f: Fill) => `${f.venue}|${f.orderId}|${f.tsMs}|${f.price}|${f.qty}`;
+
+export class FillStore extends PaintStore {
+  private readonly bySymbol = new Map<string, Fill[]>();
+  private readonly seen = new Set<string>();
+
+  apply(m: SnapshotMsg | DeltaMsg): void {
+    this.ingest(m.kind === "snapshot" ? (m.payload as Fill[]) : [m.payload as Fill]);
+  }
+
+  ingest(fills: Fill[]): void {
+    let changed = false;
+    for (const f of fills) {
+      const k = key(f);
+      if (this.seen.has(k)) continue;
+      this.seen.add(k);
+      const arr = this.bySymbol.get(f.symbol) ?? [];
+      arr.push(f);
+      arr.sort((a, b) => a.tsMs - b.tsMs);
+      this.bySymbol.set(f.symbol, arr);
+      changed = true;
+    }
+    if (changed) this.markDirty();
+  }
+
+  forSymbol(symbol: string): FillPoint[] {
+    return (this.bySymbol.get(symbol) ?? []).map((f) => ({ timeMs: f.tsMs, price: f.price, side: sideIsSell(f.side) ? "sell" : "buy" }));
+  }
+}

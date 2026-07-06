@@ -5,7 +5,7 @@ export interface Band { startMs: number; endMs: number; session: Session }
 
 const PRE = 4 * 60, RTH = 9 * 60 + 30, POST = 16 * 60, CLOSE = 20 * 60; // minutes into ET day
 
-function sessionAt(tsMs: number): Session {
+export function sessionAt(tsMs: number): Session {
   const p = etParts(tsMs);
   const m = p.h * 60 + p.mi;
   if (p.wday === 0 || p.wday === 6) return "closed"; // weekend (holidays: engine may override later)

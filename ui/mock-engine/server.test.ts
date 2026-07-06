@@ -55,4 +55,44 @@ describe("mock engine", () => {
     expect(ack).toMatchObject({ kind: "ack", corrId: "c1", status: "accepted" });
     ws.close();
   });
+
+  it("routes commands through onCommand (orderId ack + emitted event)", async () => {
+    handle = startMockEngine({
+      port: PORT,
+      fixture: { snapshots: [], deltas: [] },
+      onCommand: (msg, send) => {
+        send({ kind: "ack", corrId: msg.corrId, status: "accepted", orderId: "ET-mock-1" });
+        send({ kind: "delta", topic: "exec.orders", key: "ET-mock-1", payload: { id: "ET-mock-1", status: "SUBMITTED" } }, 5);
+      },
+    });
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+    await new Promise((r) => ws.on("open", r));
+    const got = collect(ws, 2);
+    ws.send(JSON.stringify({ kind: "command", corrId: "c1", name: "SubmitOrder", args: {} }));
+    const msgs = await got;
+    expect(msgs[0]).toMatchObject({ kind: "ack", corrId: "c1", orderId: "ET-mock-1" });
+    expect(msgs[1]).toMatchObject({ kind: "delta", topic: "exec.orders", key: "ET-mock-1" });
+  });
+
+  it("answers a query via onQuery with a correlated result", async () => {
+    handle = startMockEngine({
+      port: PORT,
+      fixture: { snapshots: [], deltas: [] },
+      onQuery: (msg, send) => send({ kind: "result", corrId: msg.corrId, payload: [] }),
+    });
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+    await new Promise((r) => ws.on("open", r));
+    const got = collect(ws, 1);
+    ws.send(JSON.stringify({ kind: "query", corrId: "q1", name: "QueryFills", args: {} }));
+    expect((await got)[0]).toMatchObject({ kind: "result", corrId: "q1" });
+  });
+
+  it("defaults an unhandled query to an empty result (no dangling promise)", async () => {
+    handle = startMockEngine({ port: PORT, fixture: { snapshots: [], deltas: [] } }); // no onQuery
+    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+    await new Promise((r) => ws.on("open", r));
+    const got = collect(ws, 1);
+    ws.send(JSON.stringify({ kind: "query", corrId: "q9", name: "QueryFills", args: {} }));
+    expect((await got)[0]).toMatchObject({ kind: "result", corrId: "q9", payload: [] });
+  });
 });

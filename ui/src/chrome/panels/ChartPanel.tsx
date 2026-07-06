@@ -78,7 +78,17 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     // Restore persisted indicator instances (colors + params) saved with the workspace.
     for (const inst of instances) controller.addIndicator(inst);
 
-    const applySymbol = () => controller.setSymbol(linkGroups.symbolFor(config.group) ?? symbol);
+    let currentSymbol = linkGroups.symbolFor(config.group) ?? symbol;
+    const backfillFills = (sym: string) => {
+      controller.setFills(stores.fills.forSymbol(sym));
+      void commands.sendQuery("QueryFills", { symbol: sym, fromMs: 0, toMs: Date.now() })
+        .then((payload) => { stores.fills.ingest((payload as Parameters<typeof stores.fills.ingest>[0]) ?? []); });
+    };
+    const applySymbol = () => {
+      currentSymbol = linkGroups.symbolFor(config.group) ?? symbol;
+      controller.setSymbol(currentSymbol);
+      backfillFills(currentSymbol);
+    };
     applySymbol();
     const offLink = linkGroups.subscribe(applySymbol);
 
@@ -92,17 +102,20 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     // it up on its very first scheduled frame, not just on the next new message).
     let lastBarsRev = -1;
     let lastIndicatorsRev = -1;
+    let lastFillsRev = -1;
     const off = scheduler.register({
       id: `chart:${config.id}`,
       isDirty: () => {
         const barsRev = stores.bars.getRev();
         const indicatorsRev = stores.indicators.getRev();
-        const changed = barsRev !== lastBarsRev || indicatorsRev !== lastIndicatorsRev;
+        const fillsRev = stores.fills.getRev();
+        const changed = barsRev !== lastBarsRev || indicatorsRev !== lastIndicatorsRev || fillsRev !== lastFillsRev;
         lastBarsRev = barsRev;
         lastIndicatorsRev = indicatorsRev;
+        lastFillsRev = fillsRev;
         return changed;
       },
-      paint: () => controller.sync(),
+      paint: () => { controller.sync(); controller.setFills(stores.fills.forSymbol(currentSymbol)); },
     });
 
     const ro = new ResizeObserver((entries) => {

@@ -22,6 +22,7 @@ import { makeStores } from "../../data/registry";
 import { Scheduler } from "../../render/Scheduler";
 import { browserRaf } from "../../render/surface";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
+import type { AckMsg } from "../../wire/contract";
 
 // jsdom has no ResizeObserver; ChartPanel's resize wiring only needs observe/disconnect.
 class MockResizeObserver {
@@ -37,7 +38,10 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>) {
   const stores = sharedStores ?? makeStores();
   const scheduler = new Scheduler(browserRaf, () => {});
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
-  const commands = { sendCommand: vi.fn(async () => ({ status: "accepted" })) };
+  const commands = {
+    sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })),
+    sendQuery: vi.fn(async () => []),
+  };
   const config = { id, panelId: "chart", group: "green" as const, settings: { symbol: "US.AAPL", timeframe: "1m" } };
   const utils = render(
     <ThemeProvider>

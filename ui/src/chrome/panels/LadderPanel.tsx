@@ -61,11 +61,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
       }
     });
 
-    let orders: unknown[] = stores.exec.getSnapshot().orders;
-    const offExec = stores.exec.subscribe(() => {
-      orders = stores.exec.getSnapshot().orders;
-      forceRef.current++;
-    });
+    const offExec = stores.exec.subscribe(() => { forceRef.current++; });
 
     let lastBookRev = -1;
     let lastTapeRev = -1;
@@ -104,7 +100,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
         paintLadder(ctx, buildLadderState({
           symbol,
           book: stores.book.get(symbol),
-          orders,
+          orders: stores.exec.workingOrdersFor(symbol),
           flash,
           last,
           nowMs: performance.now(),

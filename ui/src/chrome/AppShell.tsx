@@ -10,6 +10,7 @@ import type { LinkGroups } from "./linkGroups";
 import type { PanelProps } from "./panels/registry";
 import { WorkspaceHeader } from "./WorkspaceHeader";
 import { useTheme } from "./ThemeProvider";
+import { useHotkeys } from "./exec/useHotkeys";
 
 interface Props {
   workspaceName: "monitoring" | "trading";
@@ -24,6 +25,9 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const [ws, setWs] = useState<Workspace | null>(null);
   const { mode } = useTheme();
   useEffect(() => { void workspaceStore.load(workspaceName).then(setWs); }, [workspaceName, workspaceStore]);
+  // Mounted once, globally — must run unconditionally, before the loading-state
+  // early return below, per the Rules of Hooks.
+  useHotkeys({ stores, commands, linkGroups });
   if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
 
   // A stable per-panel onConfigChange updates ws.panels[i].settings then saves.

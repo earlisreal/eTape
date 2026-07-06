@@ -8,6 +8,7 @@ import { HealthStore } from "./HealthStore";
 import { ExecStore } from "./ExecStore";
 import { ScannerStore } from "./ScannerStore";
 import { NewsStore } from "./NewsStore";
+import { FillStore } from "./FillStore";
 
 export interface Stores {
   quote: QuoteStore;
@@ -19,6 +20,7 @@ export interface Stores {
   exec: ExecStore;
   scanner: ScannerStore;
   news: NewsStore;
+  fills: FillStore;
 }
 
 export function makeStores(): Stores {
@@ -32,6 +34,7 @@ export function makeStores(): Stores {
     exec: new ExecStore(),
     scanner: new ScannerStore(),
     news: new NewsStore(),
+    fills: new FillStore(),
   };
 }
 
@@ -48,8 +51,8 @@ export function routeToStore(stores: Stores, m: SnapshotMsg | DeltaMsg): void {
     case "exec.account":
     case "exec.positions":
     case "exec.orders":
-    case "exec.fills":
     case "exec.status": stores.exec.apply(m); return;
+    case "exec.fills": stores.fills.apply(m); return;
     case "sys.health":
     case "sys.events": stores.health.apply(m); return;
     case "config": return; // handled by workspace.ts, not a store

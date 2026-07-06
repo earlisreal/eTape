@@ -98,6 +98,18 @@ describe("WsClient", () => {
     expect(client.rttMs()).toBe(0); // now() is fixed at 1000 in the fake
   });
 
+  it("sendQuery resolves with the correlated result payload", async () => {
+    const { client } = makeClient();
+    client.start();
+    FakeSocket.last().open();
+    const p = client.sendQuery("QueryFills", { symbol: "US.AAPL", fromMs: 0, toMs: 9 });
+    const sent = JSON.parse(FakeSocket.last().sent.at(-1)!);
+    expect(sent.kind).toBe("query");
+    FakeSocket.last().emit(JSON.stringify({ kind: "result", corrId: sent.corrId,
+      payload: [{ venue: "v", orderId: "ET1", symbol: "US.AAPL", side: "BUY", qty: 1, price: 3.5, tsMs: 5 }] }));
+    await expect(p).resolves.toHaveLength(1);
+  });
+
   it("buffers a command issued before open and flushes it on connect", () => {
     const { client } = makeClient();
     client.start();                 // connecting, socket not open yet

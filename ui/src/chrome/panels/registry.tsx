@@ -1,5 +1,5 @@
 import type { FC } from "react";
-import type { TopicName } from "../../wire/contract";
+import type { AckMsg, TopicName } from "../../wire/contract";
 import type { PanelConfig } from "../workspace";
 import type { Stores } from "../../data/registry";
 import type { Scheduler } from "../../render/Scheduler";
@@ -11,6 +11,10 @@ import { LadderPanel } from "./LadderPanel";
 import { TapePanel } from "./TapePanel";
 import { ScannerPanel } from "./ScannerPanel";
 import { NewsPanel } from "./NewsPanel";
+import { AccountBarPanel } from "./AccountBarPanel";
+import { PositionsPanel } from "./PositionsPanel";
+import { OpenOrdersPanel } from "./OpenOrdersPanel";
+import { OrderTicketPanel } from "./OrderTicketPanel";
 
 export interface PanelProps {
   config: PanelConfig;
@@ -19,7 +23,7 @@ export interface PanelProps {
   width: number;
   height: number;
   linkGroups: LinkGroups;
-  commands: { sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown }> };
+  commands: { sendCommand(name: string, args: unknown): Promise<AckMsg>; sendQuery(name: string, args: unknown): Promise<unknown> };
   // Persist a panel's own settings (timeframe, indicators, …). AppShell updates the
   // workspace doc's matching panel entry and debounce-saves via WorkspaceStore.
   onConfigChange: (settings: Record<string, unknown>) => void;
@@ -27,8 +31,9 @@ export interface PanelProps {
 export interface PanelDef { component: FC<PanelProps>; topics: TopicName[] }
 
 // Plan 1 registered the two stack-proving panels; Plan 2 added the chart panel;
-// Plan 3 added the L2 ladder + time & sales; Plan 4 adds scanner / movers / news
-// below. Plan 5 still owes account-bar / positions / open-orders / order-ticket.
+// Plan 3 added the L2 ladder + time & sales; Plan 4 added scanner / movers / news;
+// Plan 5 adds the execution surfaces (account-bar / positions / open-orders /
+// order-ticket). Plan 6 owns Playwright smoke E2E + ui/dist static serving.
 export const PANELS: Record<string, PanelDef> = {
   "connection-status": {
     component: ({ stores }) => <ConnectionStatusPanel health={stores.health} />,
@@ -61,5 +66,21 @@ export const PANELS: Record<string, PanelDef> = {
   "news": {
     component: NewsPanel,
     topics: ["news.item"],
+  },
+  "account-bar": {
+    component: AccountBarPanel,
+    topics: ["exec.account", "exec.status"],
+  },
+  "positions": {
+    component: PositionsPanel,
+    topics: ["exec.positions", "md.quote"],
+  },
+  "open-orders": {
+    component: OpenOrdersPanel,
+    topics: ["exec.orders", "exec.status"],
+  },
+  "order-ticket": {
+    component: OrderTicketPanel,
+    topics: ["md.quote", "exec.account", "exec.positions", "exec.status"],
   },
 };

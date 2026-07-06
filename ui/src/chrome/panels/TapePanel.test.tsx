@@ -8,7 +8,7 @@ import { makeStores } from "../../data/registry";
 import { Scheduler } from "../../render/Scheduler";
 import { browserRaf, type Surface } from "../../render/surface";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
-import type { Tick } from "../../wire/contract";
+import type { Tick, AckMsg } from "../../wire/contract";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -34,7 +34,7 @@ function renderTape() {
     <ThemeProvider>
       <TapePanel config={config} stores={stores} scheduler={scheduler} width={260} height={400}
         linkGroups={new LinkGroups(new BroadcastChannelBus(), () => {})}
-        commands={{ sendCommand: vi.fn(async () => ({ status: "accepted" })) }}
+        commands={{ sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })), sendQuery: vi.fn(async () => []) }}
         onConfigChange={onConfigChange} />
     </ThemeProvider>,
   );
