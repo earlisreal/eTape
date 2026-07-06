@@ -203,10 +203,19 @@ func (rc *restClient) cancelOrder(ctx context.Context, brokerID string) error {
 // orders, `{"symbol":"...","status":422,"body":{...}}` for positions), so a
 // caller that only checks the outer status can silently miss a failed
 // cancel/close.
+//
+// Status is a pointer rather than a plain int: a plain int's zero value
+// (0) is indistinguishable from an absent or JSON-null status key, and 0 is
+// NOT >= 400, so a per-item field silently missing from the response (a
+// plausible API-shape change, stripping proxy, or partial-response bug on
+// Alpaca's side that still produces syntactically valid JSON) would
+// previously decode cleanly and be treated as a genuine success. A nil
+// pointer means "presence unconfirmed" and checkBatchItems treats that as a
+// hard failure rather than a pass-through.
 type alpacaBatchItem struct {
 	ID     string          `json:"id,omitempty"`
 	Symbol string          `json:"symbol,omitempty"`
-	Status int             `json:"status"`
+	Status *int            `json:"status"`
 	Body   json.RawMessage `json:"body,omitempty"`
 }
 
@@ -244,12 +253,16 @@ func checkBatchItems(body []byte) error {
 
 	var errs []error
 	for _, it := range items {
-		if it.Status >= 400 {
-			label := it.ID
-			if label == "" {
-				label = it.Symbol
-			}
-			errs = append(errs, fmt.Errorf("item %s: status=%d body=%s", label, it.Status, it.Body))
+		label := it.ID
+		if label == "" {
+			label = it.Symbol
+		}
+		if it.Status == nil {
+			errs = append(errs, fmt.Errorf("item %s: status field missing or null -- cannot confirm success, failing closed (body=%s)", label, it.Body))
+			continue
+		}
+		if *it.Status >= 400 {
+			errs = append(errs, fmt.Errorf("item %s: status=%d body=%s", label, *it.Status, it.Body))
 		}
 	}
 	return errors.Join(errs...)

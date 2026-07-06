@@ -344,6 +344,42 @@ func TestCancelAll_NoSymbol_UndecodableBodyIsError(t *testing.T) {
 	}
 }
 
+// TestCancelAll_NoSymbol_MissingStatusKeyIsError is the fourth reviewer-found
+// gap applied at the cancelAll call site: an item with the `status` key
+// entirely omitted must not be mistaken for a genuine success just because
+// it decodes cleanly.
+func TestCancelAll_NoSymbol_MissingStatusKeyIsError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(`[{"id":"b-1","status":200},{"id":"b-2"}]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.cancelAll(context.Background(), ""); err == nil {
+		t.Fatal("expected a cancel-all item with a missing status key to surface as an error, not silent success")
+	}
+}
+
+// TestCancelAll_NoSymbol_NullStatusIsError is the same gap via explicit
+// JSON null.
+func TestCancelAll_NoSymbol_NullStatusIsError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(`[{"id":"b-1","status":200},{"id":"b-2","status":null}]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.cancelAll(context.Background(), ""); err == nil {
+		t.Fatal("expected a cancel-all item with status:null to surface as an error, not silent success")
+	}
+}
+
 // TestFlatten_207AllSuccessIsNotAnError confirms flatten also discriminates:
 // an all-success 207 (or plain 200) must still return nil.
 func TestFlatten_207AllSuccessIsNotAnError(t *testing.T) {
@@ -411,6 +447,30 @@ func TestCheckBatchItems_PerItemTypeDriftIsError(t *testing.T) {
 	}
 }
 
+// TestCheckBatchItems_MissingStatusKeyIsError is the fourth reviewer-found
+// gap on this same chain: a per-item object with the `status` key omitted
+// entirely decodes cleanly (json.Unmarshal leaves a plain int at its Go
+// zero value, 0), which is not >= 400 and was previously indistinguishable
+// from a genuine status:200 success. It must now surface as a real error --
+// a missing status means "cannot confirm success," not "assume success."
+func TestCheckBatchItems_MissingStatusKeyIsError(t *testing.T) {
+	body := []byte(`[{"id":"b-1","status":200},{"id":"b-2"}]`)
+	if err := checkBatchItems(body); err == nil {
+		t.Fatal("expected a per-item body with a missing status key to surface as an error, got nil")
+	}
+}
+
+// TestCheckBatchItems_NullStatusIsError is the same gap via explicit JSON
+// null rather than a wholly-absent key: `"status":null` also decodes
+// cleanly into a plain int's zero value and must fail closed rather than
+// pass through as success.
+func TestCheckBatchItems_NullStatusIsError(t *testing.T) {
+	body := []byte(`[{"id":"b-1","status":200},{"id":"b-2","status":null}]`)
+	if err := checkBatchItems(body); err == nil {
+		t.Fatal("expected a per-item body with status:null to surface as an error, got nil")
+	}
+}
+
 // TestFlatten_UndecodableBodyIsError confirms flatten's call site fails
 // closed when the emergency kill-switch's response body is present but
 // undecodable (e.g. truncated), per the task-13 reviewer's finding --
@@ -428,6 +488,42 @@ func TestFlatten_UndecodableBodyIsError(t *testing.T) {
 	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
 	if err := rc.flatten(context.Background()); err == nil {
 		t.Fatal("expected an undecodable flatten batch body to surface as an error, not silent success")
+	}
+}
+
+// TestFlatten_MissingStatusKeyIsError is the fourth reviewer-found gap
+// applied at the flatten call site (eTape's documented emergency
+// kill-switch): a position-close item with the `status` key entirely
+// omitted must fail closed, not be mistaken for a genuine close because it
+// happens to decode cleanly.
+func TestFlatten_MissingStatusKeyIsError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/positions", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(`[{"symbol":"AAPL","status":200},{"symbol":"TSLA"}]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.flatten(context.Background()); err == nil {
+		t.Fatal("expected a flatten item with a missing status key to surface as an error, not silent success")
+	}
+}
+
+// TestFlatten_NullStatusIsError is the same gap via explicit JSON null.
+func TestFlatten_NullStatusIsError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/positions", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(`[{"symbol":"AAPL","status":200},{"symbol":"TSLA","status":null}]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.flatten(context.Background()); err == nil {
+		t.Fatal("expected a flatten item with status:null to surface as an error, not silent success")
 	}
 }
 
