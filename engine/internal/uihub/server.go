@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sync"
 	"sync/atomic"
 
 	"github.com/coder/websocket"
@@ -24,6 +25,7 @@ type Server struct {
 	qry    queryHandler
 	cfg    ServerConfig
 	nextID atomic.Uint64
+	connWG sync.WaitGroup // tracks every accepted conn.run() from accept to teardown
 }
 
 func NewServer(h *Hub, cmd commandHandler, qry queryHandler, cfg ServerConfig) *Server {
@@ -53,7 +55,20 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	id := s.nextID.Add(1)
 	conn := newConn(id, coderSocket{c: c}, s.hub, s.cmd, s.qry, s.cfg.OutBuf)
 	s.hub.Register(conn)
+	s.connWG.Add(1)
+	defer s.connWG.Done()
 	conn.run(r.Context()) // blocks until the socket closes; run() calls hub.Unregister
+}
+
+// Wait blocks until every conn.run() this server has started has returned --
+// i.e. no client's dispatch() (and therefore no SetConfig call reaching the
+// store) can still be in flight. main.go must call this after httpSrv.Shutdown
+// and before st.Close(), since Hub.Run's <-ctx.Done() branch is what actually
+// tells live connections to close (r.Context() is tied to the individual HTTP
+// request, not to the top-level ctx, and http.Server.Shutdown does not wait on
+// hijacked WebSocket connections).
+func (s *Server) Wait() {
+	s.connWG.Wait()
 }
 
 // spaHandler serves files from dir, falling back to index.html for unknown paths.

@@ -203,18 +203,31 @@ func main() {
 
 	// --- ordered shutdown: stop accepting, drain all store writers, then Close ---
 	// Every goroutine that can call a store-writing method (RecordEvent,
-	// AppendExecEvent, ArchiveBar1m/ArchiveDaily) must be joined before
-	// st.Close() runs, since Close() closes the s.writes channel and any
+	// AppendExecEvent, ArchiveBar1m/ArchiveDaily, SetConfig) must be joined
+	// before st.Close() runs, since Close() closes the s.writes channel and any
 	// send on it afterward panics. Sources: pipe() (RecordEvent, joined via
 	// pipeWG), forwardMD() (ArchiveBar1m/ArchiveDaily, joined via forwardWG —
 	// it drains already-buffered core.Updates() after ctx is cancelled, so it
 	// must be waited on even though md.Core.Run stops producing new updates
-	// once pipeWG is drained), and exec.Core.Run (AppendExecEvent, joined via
-	// execDone). brokerWG has no store writes but is joined here too since
-	// broker goroutines feed exec.Core, not the store.
+	// once pipeWG is drained), exec.Core.Run (AppendExecEvent, joined via
+	// execDone), and every uihub connection's dispatch loop (SetConfig via
+	// commandHandler.handle, joined via srv.Wait()). brokerWG has no store
+	// writes but is joined here too since broker goroutines feed exec.Core,
+	// not the store.
+	//
+	// srv.Wait() must run after httpSrv.Shutdown (which only stops accepting
+	// new connections and returns once in-flight *plain* HTTP requests finish
+	// -- it does NOT wait on hijacked WebSocket connections) and before
+	// pipeWG.Wait(): by the time httpSrv.Shutdown returns, ctx has already
+	// been cancelled (we're past <-ctx.Done()), so Hub.Run's own <-ctx.Done()
+	// branch has told (or is telling) every registered connection to close;
+	// srv.Wait() blocks until each connection's conn.run() goroutine has
+	// actually returned, confirming its dispatch loop -- and therefore any
+	// SetConfig call it could make -- is stopped before st.Close() runs.
 	shutCtx, cancelShut := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = httpSrv.Shutdown(shutCtx)
 	cancelShut()
+	srv.Wait()       // every conn.run() returned: no more SetConfig via dispatch
 	pipeWG.Wait()    // feed->core pipe stopped: no more RecordEvent
 	forwardWG.Wait() // forwardMD drained: no more ArchiveBar1m/ArchiveDaily
 	<-execDone       // exec.Core.Run returned: no more AppendExecEvent
