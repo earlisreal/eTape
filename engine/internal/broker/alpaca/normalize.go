@@ -5,34 +5,10 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/exec"
 )
-
-// Adapter is a Task 12 stand-in for the real Alpaca exec.Broker
-// implementation Task 15 assembles (REST client, trade_updates WS client,
-// full wiring — mirroring how Task 10 completed TradeZero's Adapter after
-// Task 7 built this same kind of partial skeleton). It carries only the
-// state normalizeUpdate itself needs:
-//
-//   - seenExecIDs dedups fill/partial_fill events on Alpaca's execution_id
-//     (unlike TradeZero, which dedups on cumulative executed qty — Alpaca's
-//     trade_updates gives a stable per-execution id directly).
-//   - sideByID remembers the domain Side of an order's original submission
-//     (set by SubmitOrder in the Task 15 adapter) so a later fill reports the
-//     side the ORDER was submitted with, rather than re-deriving it from
-//     position_qty at fill time (which normalizeUpdate falls back to when
-//     this adapter never saw the submission — e.g. these unit tests, or a
-//     position opened outside eTape).
-type Adapter struct {
-	venue exec.VenueID
-
-	mu          sync.Mutex
-	seenExecIDs map[string]bool
-	sideByID    map[string]exec.Side
-}
 
 // numString decodes one of Alpaca's numeric trade_updates fields, which are
 // sent as JSON strings (e.g. "qty": "40", "price": "190.48"), into a float64.
