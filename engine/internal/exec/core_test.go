@@ -7,6 +7,7 @@ package exec_test
 
 import (
 	"context"
+	"errors"
 	"math/rand"
 	"path/filepath"
 	"testing"
@@ -17,6 +18,14 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/store"
 )
+
+// failingAppendStore forces every AppendExecEvent call to fail, to verify the
+// append-blocks-submit safety property empirically rather than by inspection.
+type failingAppendStore struct{ exec.EventStore }
+
+func (failingAppendStore) AppendExecEvent(env exec.EventEnvelope, fill *exec.FillRow) (int64, error) {
+	return 0, errors.New("simulated append failure")
+}
 
 func newTestCore(t *testing.T, venues ...exec.VenueID) (*exec.Core, map[exec.VenueID]*sim.Broker, context.CancelFunc) {
 	t.Helper()
@@ -111,5 +120,46 @@ func TestCoreArmSubmitFill(t *testing.T) {
 	}).(exec.PositionUpdate)
 	if pu.Position.Qty != 10 {
 		t.Fatalf("position qty = %v, want 10", pu.Position.Qty)
+	}
+}
+
+// TestCoreAppendFailureBlocksSubmit verifies the append-blocks-submit safety
+// property empirically: when the event store fails to persist OrderSubmitted,
+// handleSubmit must return a blocked ack and must not dispatch the broker POST.
+func TestCoreAppendFailureBlocksSubmit(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
+	realStore, err := store.Open(store.Options{Path: filepath.Join(t.TempDir(), "fail.db"), Clock: clk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = realStore.Close() }()
+	b := sim.New("sim-1", clk)
+	b.SetMark("AAPL", 100)
+	cfg := exec.CoreConfig{
+		Venues: []exec.VenueID{"sim-1"},
+		Gate: exec.GateConfig{
+			Global: exec.GlobalLimits{MaxDayLoss: 1000, MaxSymbolPositionShares: 1000, MaxSymbolPositionValue: 1_000_000},
+			Venue:  map[exec.VenueID]exec.VenueLimits{"sim-1": {MaxOrderValue: 100000, MaxPositionValue: 1_000_000, MaxPositionShares: 1000, MaxOpenOrders: 10}},
+		},
+		Store:   failingAppendStore{EventStore: realStore},
+		Brokers: map[exec.VenueID]exec.Broker{"sim-1": b},
+		Clock:   clk,
+		IDGen:   exec.NewOrderIDGen(clk, rand.New(rand.NewSource(4))),
+	}
+	c := exec.NewCore(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	if err := c.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	go func() { _ = c.Run(ctx) }()
+	c.Do(exec.Arm{})
+	c.Do(exec.Arm{Venue: "sim-1"})
+	ack := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 100})
+	if ack.Accepted {
+		t.Fatalf("submit with a failing append should be blocked, got %+v", ack)
+	}
+	if ack.Reason == "" {
+		t.Fatalf("blocked ack should carry a reason, got %+v", ack)
 	}
 }

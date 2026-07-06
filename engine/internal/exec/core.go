@@ -184,6 +184,13 @@ func (c *Core) Recover(ctx context.Context) error {
 
 // Run is the single writer. It pumps every venue's broker events into the inbox
 // and processes commands, broker events, and marks one at a time until ctx ends.
+//
+// Deliberately no panic recovery here: this plan's architecture treats process
+// crash+restart as the safe recovery path — Recover reconstructs State
+// deterministically from the durable event log plus each venue's broker
+// snapshot on every boot. Catching a panic and continuing would risk running
+// on in-memory state left inconsistent by whatever the panic interrupted
+// mid-mutation, which is a worse failure mode than a visible crash.
 func (c *Core) Run(ctx context.Context) error {
 	for v, b := range c.brokers {
 		go c.pump(ctx, v, b)
@@ -305,7 +312,11 @@ func (c *Core) postSubmit(ctx context.Context, b Broker, req OrderRequest) {
 		return
 	}
 	if _, err := b.SubmitOrder(ctx, req); err != nil {
-		c.bevents <- OrderRejected{V: req.Venue, OID: req.ClientOrderID, Reason: "transport: " + err.Error(), Ts: c.now()}
+		select {
+		case c.bevents <- OrderRejected{V: req.Venue, OID: req.ClientOrderID, Reason: "transport: " + err.Error(), Ts: c.now()}:
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
