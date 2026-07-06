@@ -11,6 +11,7 @@ import { AppShell } from "./chrome/AppShell";
 import { ReconnectOverlay } from "./chrome/ReconnectOverlay";
 import { ThemeProvider } from "./chrome/ThemeProvider";
 import { ToastProvider } from "./chrome/Toast";
+import { OrderConfigProvider } from "./chrome/exec/useOrderConfig";
 import type { TopicName } from "./wire/contract";
 
 export function App({ workspaceName }: { workspaceName: "monitoring" | "trading" }): JSX.Element {
@@ -61,10 +62,12 @@ export function App({ workspaceName }: { workspaceName: "monitoring" | "trading"
   return (
     <ThemeProvider commands={commands}>
       <ToastProvider>
-        <ReconnectOverlay state={state}>
-          <AppShell workspaceName={workspaceName} stores={stores} scheduler={scheduler}
-            workspaceStore={workspaceStore} linkGroups={linkGroups} commands={commands} />
-        </ReconnectOverlay>
+        <OrderConfigProvider commands={commands}>
+          <ReconnectOverlay state={state}>
+            <AppShell workspaceName={workspaceName} stores={stores} scheduler={scheduler}
+              workspaceStore={workspaceStore} linkGroups={linkGroups} commands={commands} />
+          </ReconnectOverlay>
+        </OrderConfigProvider>
       </ToastProvider>
     </ThemeProvider>
   );

@@ -1,5 +1,5 @@
 import type { FC } from "react";
-import type { TopicName } from "../../wire/contract";
+import type { AckMsg, TopicName } from "../../wire/contract";
 import type { PanelConfig } from "../workspace";
 import type { Stores } from "../../data/registry";
 import type { Scheduler } from "../../render/Scheduler";
@@ -19,7 +19,7 @@ export interface PanelProps {
   width: number;
   height: number;
   linkGroups: LinkGroups;
-  commands: { sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown }> };
+  commands: { sendCommand(name: string, args: unknown): Promise<AckMsg> };
   // Persist a panel's own settings (timeframe, indicators, …). AppShell updates the
   // workspace doc's matching panel entry and debounce-saves via WorkspaceStore.
   onConfigChange: (settings: Record<string, unknown>) => void;

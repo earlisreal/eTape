@@ -7,6 +7,7 @@ import { makeStores } from "../../data/registry";
 import { NewsPanel } from "./NewsPanel";
 import type { PanelProps } from "./registry";
 import type { PanelConfig } from "../workspace";
+import type { AckMsg } from "../../wire/contract";
 
 function fakeBus() {
   const subs = new Set<(m: unknown) => void>();
@@ -19,7 +20,7 @@ function renderPanel() {
   const linkGroups = new LinkGroups(fakeBus() as never, () => {});
   const config: PanelConfig = { id: "m-news", panelId: "news", group: "green", settings: {} };
   const props = { config, stores, linkGroups, onConfigChange: vi.fn(), scheduler: {} as never,
-    width: 400, height: 300, commands: { sendCommand: async () => ({ status: "accepted" }) } } as PanelProps;
+    width: 400, height: 300, commands: { sendCommand: async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" }) } } as PanelProps;
   render(<ThemeProvider><NewsPanel {...props} /></ThemeProvider>);
   return { news, linkGroups };
 }

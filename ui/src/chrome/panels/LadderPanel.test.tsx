@@ -7,6 +7,7 @@ import { makeStores } from "../../data/registry";
 import { Scheduler } from "../../render/Scheduler";
 import { browserRaf, type Surface } from "../../render/surface";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
+import type { AckMsg } from "../../wire/contract";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -27,7 +28,7 @@ function renderLadder(settings: Record<string, unknown> = { symbol: "US.AAPL" })
   const utils = render(
     <ThemeProvider>
       <LadderPanel config={config} stores={stores} scheduler={scheduler} width={300} height={480}
-        linkGroups={linkGroups} commands={{ sendCommand: vi.fn(async () => ({ status: "accepted" })) }}
+        linkGroups={linkGroups} commands={{ sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })) }}
         onConfigChange={vi.fn()} />
     </ThemeProvider>,
   );
