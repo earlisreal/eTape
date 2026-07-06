@@ -36,3 +36,42 @@ func TestOrderRequestValidate(t *testing.T) {
 		}
 	}
 }
+
+func TestOrderType_String_Stops(t *testing.T) {
+	cases := map[OrderType]string{
+		TypeMarket:    "MARKET",
+		TypeLimit:     "LIMIT",
+		TypeStop:      "STOP",
+		TypeStopLimit: "STOP_LIMIT",
+	}
+	for ot, want := range cases {
+		if got := ot.String(); got != want {
+			t.Errorf("OrderType(%d).String() = %q, want %q", uint8(ot), got, want)
+		}
+	}
+}
+
+func TestOrderRequest_Validate_Stops(t *testing.T) {
+	base := OrderRequest{Venue: "v", Symbol: "AAPL", Side: SideBuy, Qty: 10}
+	tests := []struct {
+		name    string
+		mutate  func(*OrderRequest)
+		wantErr bool
+	}{
+		{"stop without stop price", func(r *OrderRequest) { r.Type = TypeStop }, true},
+		{"stop ok", func(r *OrderRequest) { r.Type = TypeStop; r.StopPrice = 5 }, false},
+		{"stop-limit missing limit", func(r *OrderRequest) { r.Type = TypeStopLimit; r.StopPrice = 5 }, true},
+		{"stop-limit missing stop", func(r *OrderRequest) { r.Type = TypeStopLimit; r.LimitPrice = 5 }, true},
+		{"stop-limit ok", func(r *OrderRequest) { r.Type = TypeStopLimit; r.StopPrice = 5; r.LimitPrice = 6 }, false},
+		{"limit still requires price", func(r *OrderRequest) { r.Type = TypeLimit }, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := base
+			tc.mutate(&r)
+			if err := r.Validate(); (err != nil) != tc.wantErr {
+				t.Fatalf("Validate() err=%v, wantErr=%v", err, tc.wantErr)
+			}
+		})
+	}
+}

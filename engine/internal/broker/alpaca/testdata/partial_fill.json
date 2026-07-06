@@ -1,0 +1,14 @@
+{
+  "event": "partial_fill",
+  "execution_id": "e-2",
+  "price": "190.60",
+  "qty": "20",
+  "position_qty": "60",
+  "timestamp": "2026-07-06T13:46:00Z",
+  "order": {
+    "id": "b-1", "client_order_id": "ET01J0000000000000000000BB",
+    "symbol": "AAPL", "side": "buy", "order_type": "limit",
+    "qty": "100", "filled_qty": "60", "filled_avg_price": "190.52",
+    "limit_price": "190.50", "status": "partially_filled"
+  }
+}

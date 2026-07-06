@@ -1,0 +1,16 @@
+{
+  "action": "update",
+  "account": "2TZ00001",
+  "userOrderId": "2TZ00001:ET01J000000000000000000001",
+  "symbol": "AAPL",
+  "orderType": "Limit",
+  "side": "Buy",
+  "openClose": "Open",
+  "orderQuantity": 100,
+  "executed": 40,
+  "lastQty": 40,
+  "limitPrice": 190.50,
+  "stopPrice": 0,
+  "priceAvg": 190.48,
+  "orderStatus": "PartiallyFilled"
+}

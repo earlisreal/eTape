@@ -84,6 +84,17 @@ func marketable(side exec.Side, limit, mark float64) bool {
 	}
 }
 
+// stopTriggered reports whether a stop/stop-limit's trigger has been hit.
+// Buy/Cover stops trigger at or above the stop; Sell/Short stops at or below.
+func stopTriggered(side exec.Side, stop, mark float64) bool {
+	switch side {
+	case exec.SideBuy, exec.SideCover:
+		return mark >= stop
+	default: // Sell, Short
+		return mark <= stop
+	}
+}
+
 func (b *Broker) SubmitOrder(_ context.Context, req exec.OrderRequest) (exec.OrderAck, error) {
 	if err := req.Validate(); err != nil {
 		return exec.OrderAck{}, err
@@ -111,16 +122,19 @@ func (b *Broker) SubmitOrder(_ context.Context, req exec.OrderRequest) (exec.Ord
 		}
 		return exec.OrderAck{OrderID: o.ID, Accepted: true, Message: brokerID}, nil
 	}
-	fillPx := req.LimitPrice
-	// A limit order on a symbol with no mark yet cannot be judged marketable
-	// (the zero-value mark would make almost any positive limit look
-	// marketable) — it rests until a SetMark seeds a real price.
-	doFill := req.Type == exec.TypeMarket || (hasMark && marketable(req.Side, req.LimitPrice, mark))
+	// Market orders fill at the mark immediately.
 	if req.Type == exec.TypeMarket {
-		fillPx = mark
+		post = append(post, b.fillLocked(o, mark)...)
+		b.mu.Unlock()
+		for _, e := range post {
+			b.emit(e)
+		}
+		return exec.OrderAck{OrderID: o.ID, Accepted: true, Message: brokerID}, nil
 	}
-	if doFill {
-		post = append(post, b.fillLocked(o, fillPx)...)
+	// Limit / Stop / StopLimit: apply the current mark if we have one; whatever
+	// does not fill stays resting until a later SetMark acts on it.
+	if hasMark {
+		post = append(post, b.actOnMarkLocked(o, mark)...)
 	}
 	b.mu.Unlock()
 	for _, e := range post {
@@ -159,20 +173,46 @@ func (b *Broker) fillLocked(o *exec.Order, px float64) []exec.BrokerEvent {
 	}
 }
 
-// crossRestingLocked fills any resting orders on a symbol that the new mark makes
-// marketable. Caller holds mu.
+// actOnMarkLocked applies a new mark to one resting order and returns the fill
+// events it produces (empty if it stays resting). Caller holds mu.
+func (b *Broker) actOnMarkLocked(o *exec.Order, mark float64) []exec.BrokerEvent {
+	switch o.Type {
+	case exec.TypeStop:
+		if stopTriggered(o.Side, o.StopPrice, mark) {
+			return b.fillLocked(o, mark) // stop-market fills at the mark
+		}
+	case exec.TypeStopLimit:
+		if stopTriggered(o.Side, o.StopPrice, mark) {
+			o.Type = exec.TypeLimit // triggered: becomes a resting limit
+			if marketable(o.Side, o.LimitPrice, mark) {
+				return b.fillLocked(o, o.LimitPrice)
+			}
+		}
+	default: // TypeLimit, TypeMarket(resting shouldn't happen)
+		if marketable(o.Side, o.LimitPrice, mark) {
+			return b.fillLocked(o, o.LimitPrice)
+		}
+	}
+	return nil
+}
+
+// crossRestingLocked applies a new mark to every resting order on a symbol,
+// in deterministic id order. Caller holds mu.
 func (b *Broker) crossRestingLocked(symbol string, mark float64) []exec.BrokerEvent {
 	var ids []string
 	for id, o := range b.orders {
-		if o.Symbol == symbol && marketable(o.Side, o.LimitPrice, mark) {
+		if o.Symbol == symbol {
 			ids = append(ids, id)
 		}
 	}
 	sort.Strings(ids)
 	var out []exec.BrokerEvent
 	for _, id := range ids {
-		o := b.orders[id]
-		out = append(out, b.fillLocked(o, o.LimitPrice)...)
+		o, ok := b.orders[id]
+		if !ok { // filled earlier in this pass
+			continue
+		}
+		out = append(out, b.actOnMarkLocked(o, mark)...)
 	}
 	return out
 }
@@ -202,9 +242,17 @@ func (b *Broker) ReplaceOrder(_ context.Context, orderID string, req exec.Replac
 	o.LeavesQty = req.Qty - o.ExecutedQty
 	o.UpdatedMs = b.now()
 	post := []exec.BrokerEvent{exec.OrderReplaced{V: b.venue, OID: orderID, NewQty: req.Qty, NewLimit: req.LimitPrice, NewStop: req.StopPrice, Ts: b.now()}}
-	// A replace into marketability fills immediately.
-	if mark, ok := b.marks[o.Symbol]; ok && marketable(o.Side, o.LimitPrice, mark) {
-		post = append(post, b.fillLocked(o, o.LimitPrice)...)
+	// Route the post-replace fill decision through actOnMarkLocked (the same
+	// function crossRestingLocked/SubmitOrder use) rather than a raw
+	// marketable(...) check: a bare TypeStop has LimitPrice == 0 (it prices
+	// off StopPrice), so marketable(Sell/Short, 0, mark) is trivially true
+	// for any positive mark and would fill the stop immediately at $0 without
+	// its trigger ever being evaluated; a TypeStopLimit whose LimitPrice
+	// happens to already be marketable would likewise fill without its stop
+	// having triggered. actOnMarkLocked applies the correct Stop/StopLimit
+	// trigger semantics before ever considering marketability.
+	if mark, ok := b.marks[o.Symbol]; ok {
+		post = append(post, b.actOnMarkLocked(o, mark)...)
 	}
 	b.mu.Unlock()
 	for _, e := range post {
@@ -241,6 +289,23 @@ func (b *Broker) CancelAll(_ context.Context, symbol string) error {
 	b.mu.Unlock()
 	for _, id := range ids {
 		b.emit(exec.OrderCanceled{V: b.venue, OID: id, Ts: b.now()})
+	}
+	return nil
+}
+
+// Flatten zeroes every position and emits a reconcile. (Real brokers close via
+// market orders that arrive back as fills; the sim shortcuts to a flat
+// reconcile — sufficient for E2E/practice.)
+func (b *Broker) Flatten(_ context.Context) error {
+	b.mu.Lock()
+	for _, p := range b.pos {
+		p.Qty = 0
+		p.AvgPrice = 0
+	}
+	post := []exec.BrokerEvent{exec.BrokerPositions{V: b.venue, Positions: b.positionsLocked()}}
+	b.mu.Unlock()
+	for _, e := range post {
+		b.emit(e)
 	}
 	return nil
 }

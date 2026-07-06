@@ -1,0 +1,16 @@
+{
+  "action": "update",
+  "accountId": "2TZ00001",
+  "userOrderId": "2TZ00001:ET01J000000000000000000002",
+  "symbol": "TSLA",
+  "orderType": "Limit",
+  "side": "SellShort",
+  "openClose": "Open",
+  "orderQuantity": 50,
+  "executed": 0,
+  "lastQty": 0,
+  "limitPrice": 250.00,
+  "stopPrice": 0,
+  "priceAvg": 0,
+  "status": "New"
+}

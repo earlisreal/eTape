@@ -32,27 +32,38 @@ func signedQty(req OrderRequest) float64 {
 }
 
 // orderValue values an order for the max-order-value / position-value checks:
-// limit orders at their limit price, market orders at the last-trade mark. ok is
-// false when a market order has no mark (cannot be valued → must block).
+//
+//	Limit      -> limit price
+//	StopLimit  -> limit price (it triggers into a limit at that price)
+//	Stop       -> stop price (triggers into a market ~at the stop; always priced)
+//	Market     -> last-trade mark (ok=false when there is no mark -> must block)
 func orderValue(req OrderRequest, marks MarkSource) (float64, bool) {
-	px := req.LimitPrice
-	if req.Type == TypeMarket {
+	switch req.Type {
+	case TypeMarket:
 		m, ok := marks.LastTrade(req.Symbol)
 		if !ok {
 			return 0, false
 		}
-		px = m
+		return req.Qty * m, true
+	case TypeStop:
+		return req.Qty * req.StopPrice, true
+	default: // Limit, StopLimit
+		return req.Qty * req.LimitPrice, true
 	}
-	return req.Qty * px, true
 }
 
-// markOr returns the last-trade mark, falling back to the request price for
-// value caps (a limit order always has a price).
+// markOr returns the last-trade mark for resulting-position valuation, falling
+// back to the order's own price when no mark exists (limit/stop-limit -> limit
+// price; bare stop -> stop price). A market order always has a mark here (the
+// order-value check above already blocked it otherwise).
 func markOr(req OrderRequest, marks MarkSource) float64 {
 	if m, ok := marks.LastTrade(req.Symbol); ok {
 		return m
 	}
-	return req.LimitPrice
+	if req.LimitPrice > 0 {
+		return req.LimitPrice
+	}
+	return req.StopPrice
 }
 
 // Evaluate runs the two-layer gate. Returns (true, "") to allow, or (false,

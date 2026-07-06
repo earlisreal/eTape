@@ -1,0 +1,1 @@
+[{ "route": "SMART", "securityTypes": ["Stock"], "orderTypes": ["Limit","Market","Stop","StopLimit"] }]

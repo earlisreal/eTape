@@ -360,9 +360,7 @@ func (c *Core) handleFlatten(ctx context.Context, cm Flatten) CmdAck {
 		return CmdAck{Accepted: false, Reason: "flatten unsupported on venue"}
 	}
 	go func() {
-		// Flatten is modeled as cancel-all here; real flatten uses the native
-		// position-close primitive (Plan 5, Alpaca DELETE /v2/positions).
-		if err := b.CancelAll(ctx, ""); err != nil {
+		if err := b.Flatten(ctx); err != nil {
 			slog.Warn("exec: flatten failed", "venue", cm.Venue, "err", err)
 		}
 	}()

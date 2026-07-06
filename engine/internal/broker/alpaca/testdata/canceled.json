@@ -1,0 +1,14 @@
+{
+  "event": "canceled",
+  "execution_id": "",
+  "price": "0",
+  "qty": "0",
+  "position_qty": "0",
+  "timestamp": "2026-07-06T13:50:00Z",
+  "order": {
+    "id": "b-3", "client_order_id": "ET01J0000000000000000000DD",
+    "symbol": "TSLA", "side": "sell", "order_type": "limit",
+    "qty": "25", "filled_qty": "0", "filled_avg_price": "0",
+    "limit_price": "250.00", "status": "canceled"
+  }
+}

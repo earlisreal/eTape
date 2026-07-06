@@ -151,3 +151,37 @@ func TestGateDayLossBreachBlocksAfterRearm(t *testing.T) {
 		t.Fatalf("re-arm after day-loss breach should still block, got ok=%v reason=%q", ok, reason)
 	}
 }
+
+func TestGate_ValuesStopAtStopPrice_NoMarkNeeded(t *testing.T) {
+	s := armedState()
+	cfg := GateConfig{Venue: map[VenueID]VenueLimits{"sim-1": {MaxOrderValue: 1000}}}
+	marks := fakeMarks{} // no marks at all
+	// 10 * 90 = 900 <= 1000 -> allowed; a market order here would be blocked ("no mark").
+	ok, reason := Evaluate(s, cfg, OrderRequest{
+		Venue: "sim-1", Symbol: "AAPL", Side: SideSell, Type: TypeStop,
+		Qty: 10, StopPrice: 90, ClientOrderID: "ET-stop",
+	}, marks)
+	if !ok {
+		t.Fatalf("stop order should value at stop price without a mark: %q", reason)
+	}
+	// 20 * 90 = 1800 > 1000 -> blocked on venue value cap.
+	if ok, _ := Evaluate(s, cfg, OrderRequest{
+		Venue: "sim-1", Symbol: "AAPL", Side: SideSell, Type: TypeStop,
+		Qty: 20, StopPrice: 90, ClientOrderID: "ET-stop2",
+	}, marks); ok {
+		t.Fatalf("20*90 should exceed the 1000 venue cap")
+	}
+}
+
+func TestGate_ValuesStopLimitAtLimitPrice(t *testing.T) {
+	s := armedState()
+	cfg := GateConfig{Venue: map[VenueID]VenueLimits{"sim-1": {MaxOrderValue: 1000}}}
+	marks := fakeMarks{}
+	// stop-limit valued at limit (101), 10*101 = 1010 > 1000 -> blocked.
+	if ok, _ := Evaluate(s, cfg, OrderRequest{
+		Venue: "sim-1", Symbol: "AAPL", Side: SideBuy, Type: TypeStopLimit,
+		Qty: 10, StopPrice: 100, LimitPrice: 101, ClientOrderID: "ET-sl",
+	}, marks); ok {
+		t.Fatalf("stop-limit should value at limit price (10*101 > 1000)")
+	}
+}

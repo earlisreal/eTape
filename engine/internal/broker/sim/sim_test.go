@@ -140,6 +140,206 @@ func TestSimMarketOrderFillsAtMark(t *testing.T) {
 	}
 }
 
+// drainAll reads all currently-buffered broker events without blocking. Named
+// distinctly from the existing single-event drain(t, b) helper above, which
+// blocks for exactly one event.
+func drainAll(ch <-chan exec.BrokerEvent) []exec.BrokerEvent {
+	var out []exec.BrokerEvent
+	for {
+		select {
+		case e := <-ch:
+			out = append(out, e)
+		default:
+			return out
+		}
+	}
+}
+
+func filledAt(t *testing.T, evs []exec.BrokerEvent) (exec.OrderFilled, bool) {
+	t.Helper()
+	for _, e := range evs {
+		if f, ok := e.(exec.OrderFilled); ok {
+			return f, true
+		}
+	}
+	return exec.OrderFilled{}, false
+}
+
+func TestSim_Flatten_ZeroesPositions(t *testing.T) {
+	b := newSim(t)
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, b) // OrderAccepted
+	drain(t, b) // OrderFilled
+	drain(t, b) // BrokerPositions (from the fill)
+	if err := b.Flatten(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := drain(t, b).(exec.BrokerPositions); !ok {
+		t.Fatal("Flatten should emit a BrokerPositions reconcile")
+	}
+	_, pos, _, _ := b.Snapshot(context.Background())
+	for _, p := range pos {
+		if p.Qty != 0 {
+			t.Fatalf("Flatten should zero %s, got %v", p.Symbol, p.Qty)
+		}
+	}
+}
+
+func TestSim_BuyStop_TriggersOnMarkAtOrAboveStop(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
+	b := New("v", clk)
+	b.SetMark("AAPL", 95)
+	drainAll(b.Events())
+	_, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
+		Venue: "v", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeStop,
+		Qty: 10, StopPrice: 100, ClientOrderID: "ET-bstop",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := filledAt(t, drainAll(b.Events())); ok {
+		t.Fatal("buy stop must rest while mark (95) < stop (100)")
+	}
+	b.SetMark("AAPL", 101) // crosses the stop
+	f, ok := filledAt(t, drainAll(b.Events()))
+	if !ok {
+		t.Fatal("buy stop must fill once mark reaches the stop")
+	}
+	if f.AvgPrice != 101 {
+		t.Fatalf("stop-market fills at the mark: got %v want 101", f.AvgPrice)
+	}
+}
+
+func TestSim_SellStop_TriggersOnMarkAtOrBelowStop(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
+	b := New("v", clk)
+	b.SetMark("AAPL", 105)
+	drainAll(b.Events())
+	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{
+		Venue: "v", Symbol: "AAPL", Side: exec.SideSell, Type: exec.TypeStop,
+		Qty: 10, StopPrice: 100, ClientOrderID: "ET-sstop",
+	})
+	if _, ok := filledAt(t, drainAll(b.Events())); ok {
+		t.Fatal("sell stop must rest while mark (105) > stop (100)")
+	}
+	b.SetMark("AAPL", 99)
+	if f, ok := filledAt(t, drainAll(b.Events())); !ok || f.AvgPrice != 99 {
+		t.Fatalf("sell stop should fill at mark 99; ok=%v px=%v", ok, f.AvgPrice)
+	}
+}
+
+func TestSim_BuyStopLimit_TriggersThenRestsAsLimit(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
+	b := New("v", clk)
+	b.SetMark("AAPL", 95)
+	drainAll(b.Events())
+	// stop 100, limit 100.5 buy: on trigger it is a limit buy @100.5.
+	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{
+		Venue: "v", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeStopLimit,
+		Qty: 10, StopPrice: 100, LimitPrice: 100.5, ClientOrderID: "ET-bsl",
+	})
+	b.SetMark("AAPL", 102) // triggers (>=100) but 100.5 limit is NOT marketable at 102 -> rests
+	if _, ok := filledAt(t, drainAll(b.Events())); ok {
+		t.Fatal("stop-limit must not fill above its limit")
+	}
+	b.SetMark("AAPL", 100) // now 100.5 >= 100 -> marketable
+	if f, ok := filledAt(t, drainAll(b.Events())); !ok || f.AvgPrice != 100.5 {
+		t.Fatalf("stop-limit should fill at its limit 100.5; ok=%v px=%v", ok, f.AvgPrice)
+	}
+}
+
+// TestSim_ReplaceOrder_StopNotTriggered_DoesNotFillAtZero reproduces the
+// final whole-branch review finding: ReplaceOrder's post-replace fill
+// decision used to call the raw marketable(o.Side, o.LimitPrice, mark) check
+// instead of actOnMarkLocked. A bare TypeStop has LimitPrice == 0 (it prices
+// off StopPrice, not LimitPrice), so marketable(Sell, 0, mark) evaluated as
+// 0 <= mark, which is true for any positive mark -- a resting sell stop that
+// got replaced would fill IMMEDIATELY at price $0, regardless of whether the
+// stop had actually triggered. This asserts a resting stop that has NOT
+// triggered stays resting (and unfilled) across a replace.
+func TestSim_ReplaceOrder_StopNotTriggered_DoesNotFillAtZero(t *testing.T) {
+	b := newSim(t) // seeds AAPL mark = 100
+	_, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
+		Venue: "sim-1", Symbol: "AAPL", Side: exec.SideSell, Type: exec.TypeStop,
+		Qty: 10, StopPrice: 90, ClientOrderID: "ET-stop",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := drain(t, b).(exec.OrderAccepted); !ok {
+		t.Fatal("resting stop (mark 100 > stop 90, not triggered) should emit OrderAccepted only")
+	}
+
+	if err := b.ReplaceOrder(context.Background(), "ET-stop", exec.ReplaceRequest{Qty: 20}); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := drain(t, b).(exec.OrderReplaced)
+	if !ok || r.NewQty != 20 {
+		t.Fatalf("replace event wrong: %+v ok=%v", r, ok)
+	}
+	select {
+	case e := <-b.Events():
+		t.Fatalf("stop order that hasn't triggered must not fill on replace, got %+v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	_, _, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 || orders[0].Qty != 20 || orders[0].Type != exec.TypeStop {
+		t.Fatalf("stop order should remain resting with the new qty and its type: %+v", orders)
+	}
+}
+
+// TestSim_ReplaceOrder_StopLimitNotTriggered_RawMarketableWouldWronglyFill
+// covers the StopLimit half of the same finding: a resting stop-limit whose
+// limit price already happens to be "marketable" against the current mark
+// must still NOT fill on replace if its stop has not actually triggered.
+// The raw marketable(...) check the old code used cannot see the stop at
+// all; only actOnMarkLocked's Stop/StopLimit branch evaluates the trigger
+// before ever considering the limit.
+func TestSim_ReplaceOrder_StopLimitNotTriggered_RawMarketableWouldWronglyFill(t *testing.T) {
+	b := newSim(t) // seeds AAPL mark = 100
+	_, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
+		Venue: "sim-1", Symbol: "AAPL", Side: exec.SideSell, Type: exec.TypeStopLimit,
+		Qty: 10, StopPrice: 40, LimitPrice: 50, ClientOrderID: "ET-sl",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := drain(t, b).(exec.OrderAccepted); !ok {
+		t.Fatal("resting stop-limit (mark 100 > stop 40, not triggered) should emit OrderAccepted only")
+	}
+
+	if err := b.ReplaceOrder(context.Background(), "ET-sl", exec.ReplaceRequest{Qty: 15, LimitPrice: 50}); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := drain(t, b).(exec.OrderReplaced)
+	if !ok || r.NewQty != 15 {
+		t.Fatalf("replace event wrong: %+v ok=%v", r, ok)
+	}
+	// Raw marketable(Sell, limit=50, mark=100) is true (50 <= 100) -- exactly
+	// the buggy shortcut this fix removes -- but the stop (40) has not
+	// actually triggered at mark 100, so the order must stay resting.
+	select {
+	case e := <-b.Events():
+		t.Fatalf("stop-limit whose stop hasn't triggered must not fill just because its limit is marketable, got %+v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	_, _, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 || orders[0].Type != exec.TypeStopLimit {
+		t.Fatalf("stop-limit order should remain resting as StopLimit (not triggered): %+v", orders)
+	}
+}
+
 func TestSimCancelAll(t *testing.T) {
 	b := newSim(t)
 	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, Qty: 1, LimitPrice: 90, ClientOrderID: "ET1"})
