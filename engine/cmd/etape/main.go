@@ -44,6 +44,8 @@ func main() {
 	focus := flag.String("focus", "", "comma-separated symbols to focus (depth + quote)")
 	replayDay := flag.String("replay", "", "replay a recorded day (YYYY-MM-DD) instead of live OpenD")
 	speed := flag.Float64("speed", 0, "replay speed (>0: real-time x speed; <=0: as fast as possible)")
+	dist := flag.String("dist", "", "serve built UI from this dir (overrides [uihub].dist_dir)")
+	replayHold := flag.Bool("replay-hold", false, "in replay, keep serving after the journal is exhausted (E2E)")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -53,6 +55,9 @@ func main() {
 	if err != nil {
 		log.Error("load config", "err", err)
 		os.Exit(1)
+	}
+	if *dist != "" {
+		cfg.UIHub.DistDir = *dist
 	}
 	anchorSecs, err := cfg.MD.AnchorSecs()
 	if err != nil {
@@ -223,7 +228,11 @@ func main() {
 		go func() { _ = fd.Run(ctx) }()
 		pipeWG.Add(1)
 		go pipe(ctx, &pipeWG, fd.Events(), core, nil) // no journal re-recording in replay
-		go func() { pipeWG.Wait(); stop() }()         // self-terminate when the journal is exhausted
+		if *replayHold {
+			log.Info("replay-hold: serving last state until interrupted")
+		} else {
+			go func() { pipeWG.Wait(); stop() }() // self-terminate when the journal is exhausted
+		}
 		log.Info("engine up (replay)", "day", *replayDay, "rows", len(replayRows), "speed", *speed)
 	}
 
