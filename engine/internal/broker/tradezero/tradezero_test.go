@@ -833,6 +833,58 @@ func TestAdapter_Snapshot_PicksHighestReplaceSuffixOnColdStart(t *testing.T) {
 	}
 }
 
+// TestAdapter_Snapshot_ColdStartPrefersCanceledOverHigherSuffixRejected covers
+// the task-reviewer finding on top of the Critical fix above: when a
+// replace's cancel confirms but the resubmit is then semantically rejected
+// (see TestAdapter_ReplaceOrder_ResubmitFailsAfterCancelConfirmed), the old
+// leg is genuinely Canceled and the new "-r1" leg is genuinely Rejected — both
+// terminal (not the Critical bug's live-vs-dead severity), but only the
+// Canceled row is the truth Core.Recover()'s ReconcileOpenOrders should
+// reinstate on a real process restart (tzIDByDomain empty, no memory of which
+// leg is "current"). A pure highest-suffix tie-break would wrongly pick the
+// Rejected "-r1" row just because its suffix is higher. pickColdStartLeg's
+// legTier instead ranks Rejected below any other status (mirroring
+// SubmitOrder's own invariant that a rejected order never becomes a
+// registered leg), so the Canceled row wins regardless of suffix.
+func TestAdapter_Snapshot_ColdStartPrefersCanceledOverHigherSuffixRejected(t *testing.T) {
+	oid := "ET1"
+	newLeg := oid + "-r1"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/api/account/2TZ00001", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) })
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/pnl", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) })
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/positions", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`[]`)) })
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/orders", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[
+			{"clientOrderId":"` + oid + `","symbol":"AAPL","orderStatus":"Canceled","orderQuantity":10},
+			{"clientOrderId":"` + newLeg + `","symbol":"AAPL","orderStatus":"Rejected","orderQuantity":10}
+		]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	// Deliberately do NOT populate tzIDByDomain -- simulating a fresh process
+	// restart with no memory of the replace that produced these two rows.
+	a, err := New(Config{Venue: "tz", AccountID: "2TZ00001", RESTBase: srv.URL, Creds: creds.Pair{KeyID: "K", SecretKey: "S"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, orders, err := a.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 {
+		t.Fatalf("Snapshot returned %d orders for domain id %q, want exactly 1: %+v", len(orders), oid, orders)
+	}
+	if orders[0].ID != oid {
+		t.Fatalf("orders[0].ID = %q, want %q", orders[0].ID, oid)
+	}
+	if orders[0].Status != exec.StatusCanceled {
+		t.Fatalf("orders[0].Status = %v, want StatusCanceled (the truth: the higher-suffix -r1 row is only Rejected, not the current leg)", orders[0].Status)
+	}
+}
+
 // TestAdapter_ReplaceOrder_ResubmitFailsAfterCancelConfirmed covers the path
 // where the old leg's cancel is genuinely confirmed over the Portfolio WS but
 // the subsequent resubmit POST is then semantically rejected by TZ. This

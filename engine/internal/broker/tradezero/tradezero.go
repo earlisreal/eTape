@@ -189,18 +189,29 @@ func New(cfg Config) (*Adapter, error) {
 // For a domain id with multiple rows (real ambiguity), a.tzIDByDomain wins
 // when it has a live record (the common case: same adapter instance, no
 // process restart since the replace happened). Failing that — the exact
-// process-restart case that produces the ambiguity in the first place — the
-// row with the highest "-rN" replace-suffix number is taken as the most
-// recent leg: a purely id-derived, state-free tie-break that still resolves
-// correctly, since replace suffixes are minted in strictly increasing order
-// and never reused (see replaceSeq/ReplaceOrder).
+// process-restart case that produces the ambiguity in the first place —
+// pickColdStartLeg resolves it via legTier (see its doc), falling back to the
+// highest "-rN" replace-suffix number only among rows that tie on tier: a
+// purely id-derived, state-free tie-break that still resolves correctly since
+// replace suffixes are minted in strictly increasing order and never reused
+// (see replaceSeq/ReplaceOrder).
+//
+// The tier check matters for a narrow but real case: ReplaceOrder's resubmit
+// can be semantically rejected AFTER the old leg's cancel already confirmed
+// (see ReplaceOrder's resubmit-failure branch). In-process this is harmless —
+// tzIDByDomain still points at the old (now genuinely Canceled) leg and wins
+// above — but across a process restart, tzIDByDomain is empty, and both rows
+// are terminal (Canceled vs Rejected), so a pure highest-suffix tie-break
+// would otherwise prefer the higher-suffixed Rejected resubmit row over the
+// lower-suffixed but actually-correct Canceled row, corrupting the terminal
+// status Core.Recover() reconciles on restart.
 func (a *Adapter) currentLegRows(orders []exec.Order) map[string]exec.Order {
 	counts := make(map[string]int, len(orders))
 	for _, o := range orders {
 		counts[a.domainID(o.ID)]++
 	}
 	best := make(map[string]exec.Order, len(orders))
-	bestSuffix := make(map[string]int, len(orders))
+	coldStart := make(map[string][]exec.Order)
 	for _, o := range orders {
 		domainOID := a.domainID(o.ID)
 		if counts[domainOID] == 1 {
@@ -213,11 +224,62 @@ func (a *Adapter) currentLegRows(orders []exec.Order) map[string]exec.Order {
 			}
 			continue
 		}
-		if n := replaceSuffixNum(o.ID); n >= bestSuffix[domainOID] {
-			if _, exists := best[domainOID]; !exists || n > bestSuffix[domainOID] {
-				best[domainOID] = o
-				bestSuffix[domainOID] = n
-			}
+		coldStart[domainOID] = append(coldStart[domainOID], o)
+	}
+	for domainOID, rows := range coldStart {
+		best[domainOID] = pickColdStartLeg(rows)
+	}
+	return best
+}
+
+// legTier ranks a row's status for pickColdStartLeg's tie-break, reusing the
+// existing exec.Order.Working() and exec.OrderStatus classification rather
+// than inventing a new one:
+//
+//	2 (highest) — Working()-implying (New/Accepted/PartiallyFilled): a leg
+//	   that can still fill or be canceled must never lose to a dead one.
+//	1 — any other terminal status (Canceled/Filled/Expired): a leg that
+//	   really happened at the broker.
+//	0 (lowest) — Rejected: per SubmitOrder's own invariant, a rejected order
+//	   "never became a live TZ order" and is therefore never written to
+//	   tzIDByDomain in the first place — so a Rejected row must never be
+//	   treated as the current leg when any other row exists for the domain id
+//	   (the exact Canceled-original vs Rejected-resubmit scenario a failed
+//	   ReplaceOrder resubmit produces).
+func legTier(o exec.Order) int {
+	switch {
+	case o.Working():
+		return 2
+	case o.Status == exec.StatusRejected:
+		return 0
+	default:
+		return 1
+	}
+}
+
+// pickColdStartLeg picks the current leg among rows that share one domain
+// order id when a.tzIDByDomain has no record for it (the process-restart
+// case): the row(s) in the highest legTier win, and among those (a genuine
+// tie — same tier, e.g. all terminal-non-Rejected, or the degenerate case of
+// more than one Working() row that TZ's single-live-leg-at-a-time model
+// shouldn't produce but which must not panic here) the highest "-rN" replace-
+// suffix number wins, exactly as before legTier existed.
+func pickColdStartLeg(rows []exec.Order) exec.Order {
+	bestTier := -1
+	for _, o := range rows {
+		if t := legTier(o); t > bestTier {
+			bestTier = t
+		}
+	}
+
+	var best exec.Order
+	bestSuffix := -1
+	for _, o := range rows {
+		if legTier(o) != bestTier {
+			continue
+		}
+		if n := replaceSuffixNum(o.ID); bestSuffix == -1 || n > bestSuffix {
+			best, bestSuffix = o, n
 		}
 	}
 	return best
@@ -479,7 +541,7 @@ func (a *Adapter) Flatten(context.Context) error {
 // endpoint returns every leg submitted today, unfiltered — so a replaced
 // order's dead old leg and live new leg both appear as separate rows that
 // strip to the same domain id. Only the row for the CURRENT leg
-// (isCurrentLegLocked) is kept; the superseded leg is skipped rather than
+// (currentLegRows) is kept; the superseded leg is skipped rather than
 // returned as a second, colliding exec.Order under the same id.
 func (a *Adapter) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {
 	acct, positions, orders, err := a.rest.snapshot(ctx)
