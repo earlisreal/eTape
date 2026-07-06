@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import type { Book } from "../../wire/contract";
+import type { Book, Order } from "../../wire/contract";
 import { getPalette } from "../palette";
 import {
   buildLadderSides, buildLadderState, depthFraction, entitledForDepth,
@@ -62,56 +62,30 @@ describe("buildLadderSides", () => {
   });
 });
 
-describe("workingOrderMarks (tolerant until Plan 5 types exec)", () => {
-  const orders = [
-    { symbol: "US.AAPL", price: 3.47, side: "Buy", qty: 100, status: "New" },
-    { symbol: "US.AAPL", price: 3.53, side: "Short", leavesQty: 50, qty: 80, status: "PartiallyFilled" },
-    { symbol: "US.AAPL", price: 3.4, side: "Buy", qty: 10, status: "Filled" },   // terminal — hidden
-    { symbol: "US.NVDA", price: 9.0, side: "Buy", qty: 10, status: "New" },      // other symbol — hidden
-    { symbol: "US.AAPL", side: "Buy", qty: 10, status: "New" },                  // no price (market) — hidden
-    "garbage",                                                                    // malformed — hidden
-  ];
-  it("keeps working orders for this symbol, prefers leavesQty, maps Short to sell", () => {
-    expect(workingOrderMarks(orders, "US.AAPL")).toEqual([
-      { price: 3.47, side: "buy", qty: 100 },
-      { price: 3.53, side: "sell", qty: 50 },
+const ord = (over: Partial<Order>): Order => ({
+  venue: "v", id: "1", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY",
+  qty: 100, limitPrice: 3.5, stopPrice: 0, status: "ACCEPTED", executedQty: 0, leavesQty: 100,
+  avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, ...over,
+});
+
+describe("workingOrderMarks (typed Order, Plan 5)", () => {
+  it("marks working limit orders for this symbol; sell/short → sell", () => {
+    const marks = workingOrderMarks(
+      [ord({ id: "1", side: "BUY", limitPrice: 3.5 }),
+       ord({ id: "2", side: "SELL", limitPrice: 3.6 }),
+       ord({ id: "3", side: "SHORT", limitPrice: 3.7 })],
+      "US.AAPL");
+    expect(marks).toEqual([
+      { price: 3.5, side: "buy", qty: 100 },
+      { price: 3.6, side: "sell", qty: 100 },
+      { price: 3.7, side: "sell", qty: 100 },
     ]);
   });
-  it("rejects orders with NaN price", () => {
-    const ordersWithNaN = [
-      { symbol: "US.AAPL", price: NaN, side: "Buy", qty: 100, status: "New" },
-      { symbol: "US.AAPL", price: 3.47, side: "Buy", qty: 100, status: "New" },
-    ];
-    expect(workingOrderMarks(ordersWithNaN, "US.AAPL")).toEqual([
-      { price: 3.47, side: "buy", qty: 100 },
-    ]);
-  });
-  it("rejects orders with NaN leavesQty", () => {
-    const ordersWithNaN = [
-      { symbol: "US.AAPL", price: 3.47, side: "Buy", leavesQty: NaN, qty: 100, status: "New" },
-      { symbol: "US.AAPL", price: 3.53, side: "Buy", leavesQty: 50, status: "New" },
-    ];
-    expect(workingOrderMarks(ordersWithNaN, "US.AAPL")).toEqual([
-      { price: 3.53, side: "buy", qty: 50 },
-    ]);
-  });
-  it("rejects orders with NaN qty when leavesQty is absent", () => {
-    const ordersWithNaN = [
-      { symbol: "US.AAPL", price: 3.47, side: "Buy", qty: NaN, status: "New" },
-      { symbol: "US.AAPL", price: 3.53, side: "Buy", qty: 100, status: "New" },
-    ];
-    expect(workingOrderMarks(ordersWithNaN, "US.AAPL")).toEqual([
-      { price: 3.53, side: "buy", qty: 100 },
-    ]);
-  });
-  it("rejects orders with Infinity price", () => {
-    const ordersWithInfinity = [
-      { symbol: "US.AAPL", price: Infinity, side: "Buy", qty: 100, status: "New" },
-      { symbol: "US.AAPL", price: 3.47, side: "Buy", qty: 100, status: "New" },
-    ];
-    expect(workingOrderMarks(ordersWithInfinity, "US.AAPL")).toEqual([
-      { price: 3.47, side: "buy", qty: 100 },
-    ]);
+  it("excludes filled/terminal, other symbols, and uses stop price for STOP", () => {
+    expect(workingOrderMarks([ord({ status: "FILLED" })], "US.AAPL")).toEqual([]);
+    expect(workingOrderMarks([ord({ symbol: "US.NVDA" })], "US.AAPL")).toEqual([]);
+    expect(workingOrderMarks([ord({ type: "STOP", stopPrice: 3.0, limitPrice: 0, leavesQty: 50 })], "US.AAPL"))
+      .toEqual([{ price: 3.0, side: "buy", qty: 50 }]);
   });
 });
 

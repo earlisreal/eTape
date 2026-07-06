@@ -1,8 +1,9 @@
 // Pure paint-state math for the L2 ladder. No DOM, no clocks — nowMs and the
 // palette arrive in the state so painting is deterministic (goldens).
-import type { Book, BookLevel, TickDirection } from "../../wire/contract";
+import type { Book, BookLevel, TickDirection, Order } from "../../wire/contract";
 import type { Palette } from "../palette";
 import { priceDecimals } from "../format";
+import { isWorking, sideIsSell } from "../../wire/orderStatus";
 
 export const LADDER_LEVELS = 10;
 export const FLASH_MS = 400;
@@ -76,27 +77,21 @@ export function buildLadderSides(book: Book | undefined): { asks: LadderRow[]; b
   return { asks, bids };
 }
 
-// Plan 5 owns the typed Order + the real 9-state lifecycle; until then ExecStore
-// rows are unknown and this set is the conservative "still working" projection.
-const WORKING_STATUSES = new Set(["PendingNew", "New", "PartiallyFilled", "Replacing", "PendingCancel"]);
-
 /**
- * Tolerant, display-only projection of ExecStore's untyped order rows: an
- * order marks the ladder iff it names this symbol, carries a positive price
- * and remaining quantity, and is in a working status. Sell/Short → sell.
+ * Display-only projection of working orders onto the ladder: an order marks the
+ * ladder iff it names this symbol, is in a working state, and carries a positive
+ * price at its relevant level (limit price for limit/stop-limit, stop price for
+ * stop) and remaining quantity. Sell/Short → sell.
  */
-export function workingOrderMarks(orders: unknown[], symbol: string): OrderMark[] {
+export function workingOrderMarks(orders: Order[], symbol: string): OrderMark[] {
   const marks: OrderMark[] = [];
   for (const o of orders) {
-    if (typeof o !== "object" || o === null) continue;
-    const r = o as Record<string, unknown>;
-    if (r.symbol !== symbol) continue;
-    if (typeof r.status !== "string" || !WORKING_STATUSES.has(r.status)) continue;
-    if (typeof r.price !== "number" || !Number.isFinite(r.price) || r.price <= 0) continue;
-    const qty = typeof r.leavesQty === "number" ? r.leavesQty : typeof r.qty === "number" ? r.qty : 0;
+    if (o.symbol !== symbol || !isWorking(o.status)) continue;
+    const price = o.type === "STOP" ? o.stopPrice : o.limitPrice;
+    if (!Number.isFinite(price) || price <= 0) continue;
+    const qty = o.leavesQty > 0 ? o.leavesQty : o.qty;
     if (!Number.isFinite(qty) || qty <= 0) continue;
-    const side = typeof r.side === "string" && r.side.toLowerCase().startsWith("s") ? "sell" : "buy";
-    marks.push({ price: r.price, side, qty });
+    marks.push({ price, side: sideIsSell(o.side) ? "sell" : "buy", qty });
   }
   return marks;
 }
@@ -112,7 +107,7 @@ export function flashAlpha(flash: TradeFlash | null, nowMs: number): number {
 export function buildLadderState(args: {
   symbol: string;
   book: Book | undefined;
-  orders: unknown[];
+  orders: Order[];
   flash: TradeFlash | null;
   last: LastTrade | null;
   nowMs: number;
