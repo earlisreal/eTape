@@ -84,7 +84,7 @@ func main() {
 		os.Exit(1)
 	}
 	// NOTE: st.Close() is deferred until AFTER every store-writer goroutine has
-	// stopped (feed pipe + exec.Core) — see the shutdown block below.
+	// stopped (feed pipe + forwardMD + exec.Core) — see the shutdown block below.
 
 	// --- md core ---
 	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs})
@@ -159,7 +159,9 @@ func main() {
 	log.Info("uihub up", "addr", cfg.UIHub.Addr(), "dist", cfg.UIHub.DistDir)
 
 	// --- fan-in: md/exec Updates -> hub; mark bridge md -> exec ---
-	go forwardMD(ctx, core, hub, live, st)
+	var forwardWG sync.WaitGroup
+	forwardWG.Add(1)
+	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, live, st) }()
 	go forwardExec(ctx, execCore, hub)
 	go markBridge(ctx, core, execCore)
 
@@ -200,11 +202,22 @@ func main() {
 	<-ctx.Done()
 
 	// --- ordered shutdown: stop accepting, drain all store writers, then Close ---
+	// Every goroutine that can call a store-writing method (RecordEvent,
+	// AppendExecEvent, ArchiveBar1m/ArchiveDaily) must be joined before
+	// st.Close() runs, since Close() closes the s.writes channel and any
+	// send on it afterward panics. Sources: pipe() (RecordEvent, joined via
+	// pipeWG), forwardMD() (ArchiveBar1m/ArchiveDaily, joined via forwardWG —
+	// it drains already-buffered core.Updates() after ctx is cancelled, so it
+	// must be waited on even though md.Core.Run stops producing new updates
+	// once pipeWG is drained), and exec.Core.Run (AppendExecEvent, joined via
+	// execDone). brokerWG has no store writes but is joined here too since
+	// broker goroutines feed exec.Core, not the store.
 	shutCtx, cancelShut := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = httpSrv.Shutdown(shutCtx)
 	cancelShut()
-	pipeWG.Wait() // feed->core pipe stopped: no more RecordEvent
-	<-execDone    // exec.Core.Run returned: no more AppendExecEvent
+	pipeWG.Wait()    // feed->core pipe stopped: no more RecordEvent
+	forwardWG.Wait() // forwardMD drained: no more ArchiveBar1m/ArchiveDaily
+	<-execDone       // exec.Core.Run returned: no more AppendExecEvent
 	brokerWG.Wait()
 	if err := st.Close(); err != nil {
 		log.Error("close store", "err", err)
