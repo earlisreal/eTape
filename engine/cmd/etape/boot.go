@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
 	"github.com/earlisreal/eTape/engine/internal/broker/sim"
@@ -11,7 +13,10 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/creds"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/feed/opend"
+	getglobalstate "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/getglobalstate"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
+	"google.golang.org/protobuf/proto"
 )
 
 func buildGateConfig(g config.Gate) exec.GateConfig {
@@ -93,4 +98,20 @@ func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock, replay bool
 		}
 	}
 	return out, nil
+}
+
+// moomooProbe measures OpenD round-trip latency with a lightweight Qot_GetGlobalState.
+type moomooProbe struct {
+	c *opend.Client
+}
+
+func (p moomooProbe) ProbeRTT(ctx context.Context) (time.Duration, error) {
+	if p.c == nil {
+		return 0, errors.New("no opend client")
+	}
+	start := time.Now()
+	// UserID is a required (deprecated) proto2 field — a zero C2S{} fails to marshal.
+	_, err := p.c.Request(ctx, opend.ProtoGetGlobalState,
+		&getglobalstate.Request{C2S: &getglobalstate.C2S{UserID: proto.Uint64(0)}})
+	return time.Since(start), err
 }
