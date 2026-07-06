@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTheme } from "./ThemeProvider";
 
 export type ToastLevel = "info" | "success" | "warn" | "danger";
@@ -12,13 +12,29 @@ export function ToastProvider(
 ): JSX.Element {
   const [toasts, setToasts] = useState<Toast[]>([]);
   const seq = useRef(0);
+  const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
 
-  const dismiss = useCallback((id: number) => setToasts((ts) => ts.filter((t) => t.id !== id)), []);
+  const dismiss = useCallback((id: number) => {
+    const handle = timers.current.get(id);
+    if (handle !== undefined) {
+      clearTimeout(handle);
+      timers.current.delete(id);
+    }
+    setToasts((ts) => ts.filter((t) => t.id !== id));
+  }, []);
   const push = useCallback((t: Omit<Toast, "id">) => {
     const id = ++seq.current;   // monotonic per-provider id
     setToasts((ts) => [...ts, { ...t, id }]);
-    if (!t.sticky) setTimeout(() => dismiss(id), autoDismissMs);
+    if (!t.sticky) timers.current.set(id, setTimeout(() => dismiss(id), autoDismissMs));
   }, [autoDismissMs, dismiss]);
+
+  useEffect(() => {
+    const map = timers.current;
+    return () => {
+      map.forEach((handle) => clearTimeout(handle));
+      map.clear();
+    };
+  }, []);
 
   const api = useMemo<ToastApi>(() => ({ push, dismiss }), [push, dismiss]);
   return <Ctx.Provider value={api}><>{children}<ToastHost toasts={toasts} onDismiss={dismiss} /></></Ctx.Provider>;
