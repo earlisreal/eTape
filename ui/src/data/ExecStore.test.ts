@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { ExecStore } from "./ExecStore";
 import type { Order, AccountRow, ExecStatus } from "../wire/contract";
 
@@ -57,5 +57,34 @@ describe("ExecStore", () => {
     s.apply(snap("exec.orders", [order("ET1", { status: "ACCEPTED" }), order("ET2", { status: "FILLED" }), order("ET3", { symbol: "US.NVDA", status: "SUBMITTED" })]));
     expect(s.workingOrdersFor("US.AAPL").map((o) => o.id)).toEqual(["ET1"]);
     expect(s.workingOrdersFor().map((o) => o.id).sort()).toEqual(["ET1", "ET3"]);
+  });
+});
+
+describe("ExecStore.onOrderRejected", () => {
+  it("fires on a delta transition into REJECTED", () => {
+    const s = new ExecStore();
+    const cb = vi.fn();
+    s.onOrderRejected(cb);
+    s.apply({ kind: "delta", topic: "exec.orders", payload: order("o1", { status: "SUBMITTED" }) });
+    s.apply({ kind: "delta", topic: "exec.orders", payload: order("o1", { status: "REJECTED", rejectReason: "no shares" }) });
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cb).toHaveBeenCalledWith(expect.objectContaining({ id: "o1", status: "REJECTED" }));
+  });
+
+  it("does not fire when a REJECTED row seeds via snapshot", () => {
+    const s = new ExecStore();
+    const cb = vi.fn();
+    s.onOrderRejected(cb);
+    s.apply({ kind: "snapshot", topic: "exec.orders", payload: [order("o1", { status: "REJECTED" })] });
+    expect(cb).not.toHaveBeenCalled();
+  });
+
+  it("does not re-fire when an already-REJECTED row is re-sent unchanged (delta)", () => {
+    const s = new ExecStore();
+    const cb = vi.fn();
+    s.onOrderRejected(cb);
+    s.apply({ kind: "delta", topic: "exec.orders", payload: order("o1", { status: "REJECTED" }) }); // no prior row -> fires once
+    s.apply({ kind: "delta", topic: "exec.orders", payload: order("o1", { status: "REJECTED" }) }); // unchanged -> silent
+    expect(cb).toHaveBeenCalledTimes(1);
   });
 });
