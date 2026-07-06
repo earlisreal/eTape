@@ -834,7 +834,7 @@ func TestMapOrderEnumsAndTimestamps(t *testing.T) {
 }
 
 func TestMapQuoteJoinsBidAskAndISOTime(t *testing.T) {
-	q := feed.Quote{Symbol: "US.AAPL", Last: 3.47, TsMs: 1_751_809_860_000} // 2026-07-06T13:31:00Z
+	q := feed.Quote{Symbol: "US.AAPL", Last: 3.47, TsMs: 1_783_344_660_000} // 2026-07-06T13:31:00Z
 	w := mapQuote(q, 3.46, 3.48)
 	if w.Bid != 3.46 || w.Ask != 3.48 || w.Last != 3.47 {
 		t.Fatalf("quote join wrong: %+v", w)
@@ -856,7 +856,7 @@ func TestMapPositionUnrealizedFromMark(t *testing.T) {
 }
 
 func TestMapBarTimeframeAndBucket(t *testing.T) {
-	b := md.Bar{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: 1_751_809_860_000,
+	b := md.Bar{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: 1_783_344_660_000, // 2026-07-06T13:31:00Z
 		O: 1, H: 2, L: 0.5, C: 1.5, V: 1000, InProgress: true}
 	w := mapBar(b)
 	if w.Timeframe != "1m" || w.BucketStart != "2026-07-06T13:31:00.000Z" {
@@ -868,7 +868,7 @@ func TestMapBarTimeframeAndBucket(t *testing.T) {
 }
 
 func TestMapTickDirection(t *testing.T) {
-	w := mapTick(feed.Tick{Symbol: "US.AAPL", Price: 3.47, Volume: 10, Dir: feed.Sell, TsMs: 1_751_809_860_000})
+	w := mapTick(feed.Tick{Symbol: "US.AAPL", Price: 3.47, Volume: 10, Dir: feed.Sell, TsMs: 1_783_344_660_000})
 	if w.Direction != wsmsg.DirSell || w.Size != 10 {
 		t.Fatalf("tick map wrong: %+v", w)
 	}
