@@ -71,7 +71,10 @@ func Evaluate(s *State, cfg GateConfig, req OrderRequest, marks MarkSource) (boo
 		return false, "duplicate order id"
 	}
 
-	vl := cfg.Venue[req.Venue]
+	vl, hasVenueConfig := cfg.Venue[req.Venue]
+	if !hasVenueConfig {
+		return false, "no gate config for venue"
+	}
 
 	// 4a. per-venue max order value
 	val, ok := orderValue(req, marks)

@@ -50,6 +50,16 @@ func TestGateDuplicateID(t *testing.T) {
 	}
 }
 
+func TestGateMissingVenueConfigFailsClosed(t *testing.T) {
+	cfg := baseCfg()
+	delete(cfg.Venue, "sim-1") // simulate a config-wiring gap: venue armed but no gate entry
+	marks := fakeMarks{"AAPL": 100}
+	s := armedState()
+	if ok, reason := Evaluate(s, cfg, buyReq("sim-1", "AAPL", 1, 100, "ET1"), marks); ok || reason != "no gate config for venue" {
+		t.Fatalf("missing venue gate config should fail closed, got ok=%v reason=%q", ok, reason)
+	}
+}
+
 func TestGateMaxOrderValue(t *testing.T) {
 	cfg, marks := baseCfg(), fakeMarks{"AAPL": 100}
 	s := armedState()
