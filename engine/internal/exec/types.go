@@ -41,6 +41,8 @@ type OrderType uint8
 const (
 	TypeMarket OrderType = iota
 	TypeLimit
+	TypeStop
+	TypeStopLimit
 )
 
 func (t OrderType) String() string {
@@ -49,6 +51,10 @@ func (t OrderType) String() string {
 		return "MARKET"
 	case TypeLimit:
 		return "LIMIT"
+	case TypeStop:
+		return "STOP"
+	case TypeStopLimit:
+		return "STOP_LIMIT"
 	default:
 		return fmt.Sprintf("OrderType(%d)", uint8(t))
 	}
@@ -201,8 +207,28 @@ func (r OrderRequest) Validate() error {
 	if r.Qty <= 0 {
 		return fmt.Errorf("exec: order request qty %v must be > 0", r.Qty)
 	}
-	if r.Type == TypeLimit && r.LimitPrice <= 0 {
-		return fmt.Errorf("exec: limit order missing limit price")
+	// Validate is *structural* — it checks that a type's required prices are present,
+	// not that they are directionally coherent (e.g., a buy stop-limit whose limit sits
+	// below its stop). Directional coherence is a UI pre-check (ui/src/chrome/exec/preChecks.ts),
+	// and TradeZero itself does not validate it (an inverted stop-limit "sits unfilled" —
+	// docs/2026-07-03-tradezero-api.md). Keeping the engine's gate structural mirrors
+	// broker behaviour and avoids rejecting an order a broker would accept.
+	switch r.Type {
+	case TypeLimit:
+		if r.LimitPrice <= 0 {
+			return errors.New("exec: limit order missing limit price")
+		}
+	case TypeStop:
+		if r.StopPrice <= 0 {
+			return errors.New("exec: stop order missing stop price")
+		}
+	case TypeStopLimit:
+		if r.StopPrice <= 0 {
+			return errors.New("exec: stop-limit order missing stop price")
+		}
+		if r.LimitPrice <= 0 {
+			return errors.New("exec: stop-limit order missing limit price")
+		}
 	}
 	return nil
 }
