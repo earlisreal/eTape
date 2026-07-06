@@ -141,7 +141,7 @@ func (b *Broker) fillLocked(o *exec.Order, px float64) []exec.BrokerEvent {
 	delete(b.orders, o.ID)
 
 	signed := qty
-	if !(o.Side == exec.SideBuy || o.Side == exec.SideCover) {
+	if o.Side != exec.SideBuy && o.Side != exec.SideCover {
 		signed = -qty
 	}
 	p := b.pos[o.Symbol]

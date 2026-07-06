@@ -160,7 +160,7 @@ func TestVenueDefaultsEmpty(t *testing.T) {
 	if len(cfg.Venues) != 0 {
 		t.Fatalf("default venues should be empty, got %+v", cfg.Venues)
 	}
-	if cfg.Gate.Venue != nil && len(cfg.Gate.Venue) != 0 {
+	if len(cfg.Gate.Venue) != 0 {
 		t.Fatalf("default gate venue map should be empty, got %+v", cfg.Gate.Venue)
 	}
 }
