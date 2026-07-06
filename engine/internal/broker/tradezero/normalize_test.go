@@ -86,3 +86,42 @@ func fills2(evs []exec.BrokerEvent) []exec.OrderFilled {
 	}
 	return out
 }
+
+func TestStatusDomain_PendingCancelIsNonTerminal(t *testing.T) {
+	// PendingCancel is a non-terminal state (TZ: PendingCancel -> Canceled).
+	// statusDomain must return StatusSubmitted, NOT StatusCanceled, so that
+	// normalizeOrder does not fire the terminal-cancel path. If statusDomain
+	// incorrectly returned StatusCanceled, the emulated replace (Task 10)
+	// would resubmit the new leg while the old leg still rests.
+	status := statusDomain("PendingCancel")
+	if status == exec.StatusCanceled {
+		t.Fatal("PendingCancel must NOT map to StatusCanceled")
+	}
+	if status != exec.StatusSubmitted {
+		t.Fatalf("PendingCancel must map to StatusSubmitted, got %v", status)
+	}
+}
+
+func TestNormalizeOrder_PendingCancelDoesNotEmitCancelEvent(t *testing.T) {
+	a := newTestAdapter(t, "tz")
+	o := tzOrder{
+		UserOrderID:   "2TZ00001:ET01J000000000000000000001",
+		Symbol:        "AAPL",
+		Side:          "BUY",
+		OrderQuantity: 100,
+		Executed:      0,
+		LastQty:       0,
+		Status:        "Submitted",
+		OrderStatus:   "PendingCancel", // Non-terminal state
+	}
+	evs := a.normalizeOrder("tz", o)
+
+	// Check that no OrderCanceled event was emitted. If statusDomain incorrectly
+	// returned StatusCanceled, the switch in normalizeOrder would trigger
+	// a.onCanceled(), which would emit cancel events.
+	for _, e := range evs {
+		if _, ok := e.(exec.OrderCanceled); ok {
+			t.Fatalf("PendingCancel order must not emit OrderCanceled event; got %+v", e)
+		}
+	}
+}
