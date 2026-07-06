@@ -20,7 +20,7 @@ Copied verbatim (or tightly paraphrased) from the approved specs and the earlier
 - **Safety rule (standing, hard — CLAUDE.md):** never place/modify/cancel **real** orders. The capstone and all uihub/poller tests run against `broker/sim` + `replay` + `httptest`/in-process fakes only. No test opens a socket to a real broker or to live OpenD. Any live-venue wiring in `main` is exercised only when Earl runs the binary himself against a real config — the plan's automated deliverable is the replay+sim capstone.
 - **Repo is PUBLIC; sensitive-sweep every commit.** No account identifiers, credentials, or `loginUserID`-bearing frames in checked-in fixtures/testdata. Credentials stay in `~/.eJournal/credentials.json` (loaded by `internal/creds`, never logged, never committed).
 - **Timestamps on the wire (from the UI contract, verified):** market-data topics (`md.quote`/`md.book`/`md.tape`/`md.bars`), `sys.events`, and the poller payloads (`scanner.*.refreshedAt`/`at`, `news.item.seen_at`) use **ISO-8601 UTC strings**; execution topics (`exec.orders`/`fills`/`account`) use **epoch-milliseconds numbers** (`tsMs`, `createdMs`, `updatedMs`). Mappers honor this split exactly.
-- **JSON field names are camelCase and load-bearing:** every `wsmsg` struct carries explicit `json:"..."` tags matching the hand-authored `ui/src/wire/contract.ts` field-for-field (`id`, `limitPrice`, `avgFillPrice`, `replacesId`, `createdMs`, `bucketStart`, `changePct`, `floatShares`, `seen_at`, …). tygo is configured to honor these tags so `ui/src/gen/*` is a drop-in replacement for the interim contract.
+- **JSON field names are camelCase and load-bearing:** every `wsmsg` struct carries explicit `json:"..."` tags matching the hand-authored `ui/src/wire/contract.ts` field-for-field (`id`, `limitPrice`, `avgFillPrice`, `replacesId`, `createdMs`, `bucketStart`, `changePct`, `floatShares`, `seen_at`, …). tygo is configured to honor these tags so `ui/src/gen/*` is a field-compatible drop-in for the interim contract (the discriminant literal types `kind`/`status`/`link` get special handling — see Task 4).
 - **Persisted timestamps** are `INTEGER` epoch ms (Plan 3/4 convention), set from `clock.Clock`; poller "seen_at"/RTT stamps come from `clock.Clock`, never `time.Now` directly. (determinism / replay seam)
 - **Boot independence (go-engine-design §Boot sequence):** each stage retries with backoff independently; **a dead OpenD never blocks the kill switch.** `md` and `exec` are independent subsystems that meet only at `uihub` and at the `md.Core.Marks()` → `exec.Core.FeedMark` bridge. uihub must be listening **before** OpenD is dialed (UI shows "connecting" states rather than failing to connect at all).
 - **CI gates (every task ends green):** `cd engine && go build ./... && go vet ./... && go test -race ./... && golangci-lint run`. The `gen-ts` drift check (Task 4) is added to CI and must also be green from Task 4 onward.
@@ -55,7 +55,7 @@ These resolve the gaps the specs left open. Each is repeated at the task where i
 2. **Two cross-cutting joins live in the mirror.** (a) The wire `Quote{bid,ask,last}` — `md`'s `QuoteUpdate` carries `feed.Quote` which has **no** bid/ask (those are on `Book`); the mirror fills `bid`/`ask` from the latest cached top-of-book for the symbol (0 until a book arrives). (b) The wire `ExecStatus{masterArmed, global, venues[]}` aggregate — `exec.Core` only emits per-venue `StatusUpdate`/`AccountUpdate`; the mirror accumulates per-venue `VenueStatus` (merging connected/note from `StatusUpdate`, `venueArmed` from `AccountUpdate`) plus the static per-venue `GateLimitsView` + global limits from config, and republishes the whole `ExecStatus` on any change.
 3. **wsmsg is a pure DTO package (stdlib only); mappers live in `uihub`.** Keeps the tygo source dependency-free and keeps domain→wire conversion (enum-int→string, ms→ISO) next to the hub that uses it.
 4. **Enum + timestamp mapping is explicit.** `exec` uint8 enums (`Side`/`OrderType`/`TIF`/`OrderStatus`) map to the wire's string literals; `md`/feed int64 ms → RFC3339-milli UTC strings on md topics; exec ms passes through as numbers. The UI never sees the display-only `PendingNew`/`Replacing` states — the engine emits only the 9 real `OrderStatus` values.
-5. **Coalescing is per topic class, all in uihub, rates from `[uihub]` config** (spec defaults, "tune after Monday"): `md.quote`/`md.book`/`md.bars` keep-latest-per-key @ 30 Hz; `md.tape` batched-append @ 30 Hz; `md.indicator` keep-latest-last-point @ 30 Hz; `exec.account` @ 4 Hz; `exec.positions` batched @ 100 ms; `exec.orders`/`exec.fills`/`exec.status` event-driven (no rate cap); poller topics event-driven. A pathologically full per-connection queue is dropped and the client is forced to re-snapshot (never back-pressures the engine).
+5. **Coalescing is per topic class, all in uihub, rates from `[uihub]` config** (spec defaults, "tune after Monday"): `md.quote`/`md.book`/`md.bars` keep-latest-per-key @ 30 Hz; `md.tape` batched-append @ 30 Hz; `md.indicator` **event-driven** (low rate — full-series updates sent as `snapshot` frames, single points as `delta` frames; not rate-coalesced, so no points are dropped); `exec.account` @ 4 Hz; `exec.positions` batched @ 100 ms; `exec.orders`/`exec.fills`/`exec.status` event-driven (no rate cap); poller topics event-driven. A pathologically full per-connection queue is dropped and the client is forced to re-snapshot (never back-pressures the engine).
 6. **Commands ride one generic `command`/`ack` path; `QueryFills` rides `query`/`result`.** uihub's per-connection reader maps `CommandMsg.name`+`args` → an `exec.Command` variant (or a config/indicator/focus handler) and returns `AckMsg{status, reason, orderId, value}`. `QueryFills` → `store.QueryFills` → `Fill[]` in a `ResultMsg`; any unknown query still replies `{payload: []}` so the UI promise never hangs.
 7. **News dedup = by URL** (falling back to `symbol|headline`) — resolving the go-engine-design ("story ID") vs news-aggregation-options ("URL/title") disagreement in favor of URL, because `Qot_GetSearchNews` exposes no stable ID. Ordering is by engine-stamped `seen_at`, not the coarse `publish_time`.
 8. **`sys.health` links are feed-scoped in v1:** `ui-engine` (app ping/pong RTT) + `engine-moomoo` (OpenD probe RTT). `engine-tz`/`engine-alpaca` per-venue connectivity is surfaced via `exec.status.venues[].connected`, not duplicated into `sys.health` — the `HealthLink.link` union already contains `engine-tz`, so the mirror emits it only if a TZ venue is configured (else omitted), and does not add new link kinds. (multi-broker design never specifies `sys.health` growth; this keeps it minimal.)
@@ -167,7 +167,7 @@ func TestLoadOverridesUIHubSection(t *testing.T) {
 }
 ```
 
-> Note: `TestLoadOverridesUIHubSection` assumes `Load` unmarshals the TOML **onto a `Default()` value** (so unset keys keep their defaults). Verify the current `Load` does this; the existing `[opend]`/`[feed]` tests will already show the pattern. If `Load` instead returns a zero `Config` on unmarshal, the "OutboundQueue keeps default" assertion documents the required behavior — implement it in Step 3 by unmarshaling into `Default()`.
+> Note: `TestLoadOverridesUIHubSection` relies on `Load` unmarshaling the TOML **onto a `Default()` value** (unset keys keep their defaults). Verified (2026-07-06 pass): the merged `config.Load` does exactly `cfg := Default(); toml.DecodeFile(path, &cfg)` — so this assertion holds as written.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1154,6 +1154,10 @@ export type ClientMessage = SubscribeMsg | UnsubscribeMsg | CommandMsg | QueryMs
 
 (`TopicName` is already produced as `Topic` from the `Topic` const group; UI Plan 6 aliases `TopicName = Topic` when it swaps imports — note this for the UI-side handoff.)
 
+**Discriminant-field fidelity (`kind`/`status`/`link`) — verification-pass finding.** tygo emits a plain Go `string` field as `field: string`, so `SnapshotMsg.kind`, `AckMsg.status`, and `HealthLink.link`/`status` would generate as `string` rather than the literal unions the interim `contract.ts` uses — which weakens the `ServerMessage`/`ClientMessage` discriminated-union narrowing the UI's `WsClient.onMessage` relies on. Resolve as follows:
+- **`status` and `link`/health-`status` (cheap, do it):** in Task 2, declare typed string aliases with const groups — `type AckStatus string` (`"accepted"`/`"blocked"`), `type LinkName string` (`"ui-engine"`/`"engine-moomoo"`/`"engine-tz"`), `type LinkStatus string` (`"ok"`/`"degraded"`/`"down"`) — and type `AckMsg.Status`/`HealthLink.Link`/`HealthLink.Status` with them (small assignment ripples: `ackFromCmd`/`blocked` in `commands.go` and `linkFor` in `health.go` build these with the typed consts or an explicit conversion). tygo then emits literal unions for all three, exactly like `Side`/`OrderType`.
+- **`kind` (envelope discriminant):** a single shared `Kind` type can't carry a different literal per envelope, and per-struct kind types are ugly. Options, pick one at execution: (a) add `exclude_files: ["wsmsg.go"]` to `tygo.yaml` and hand-declare the 10 envelope interfaces (with literal `kind`) + `ServerMessage`/`ClientMessage` in the frontmatter, letting tygo generate only the payload/arg DTOs (move the arg DTOs to `payloads.go` first; verify tygo still resolves cross-file type refs like `Side`); or (b) accept `kind: string` in the generated file and have **UI Plan 6 retain the literal `kind` discriminants** on its side during the contract swap (it already has them in `contract.ts`). Default to (b) unless a strict byte-for-byte `ui/src/gen` is required — the engine's JSON is identical either way; this is a TS-narrowing nicety, not an engine-correctness issue.
+
 - [ ] **Step 5: Wire the drift gate into CI**
 
 Determine the CI entry point: `ls engine/../.github/workflows/ 2>/dev/null` and `ls .github/workflows/`. 
@@ -1186,7 +1190,7 @@ git commit -m "build(engine/uihub): tygo pipeline generating ui/src/gen/wsmsg.ts
 
 **Interfaces:**
 - Consumes: `md` (`Update` union + `Bar`/`Point`), `exec` (`Update` union + `Order`/`Fill`/`Position`/`AccountSnapshot`), `wsmsg`, `session` (`Timeframe`), the Task 3 mappers.
-- Produces (package-private): `type staged struct{ Topic wsmsg.Topic; Key string; Payload any }`; `type venueMeta struct{ ID string; Broker wsmsg.Broker; Gate wsmsg.GateLimitsView }`; `newMirror(venues []venueMeta, global wsmsg.GlobalLimitsView, tapeCap, newsCap, fillsCap, eventsCap int) *mirror`; `(*mirror).applyMD(u md.Update) []staged`; `(*mirror).applyExec(u exec.Update) []staged`; `(*mirror).applyPub(s staged)` (poller/health/sys events); `(*mirror).snapshotFrames(topic wsmsg.Topic) []staged`. The `mirror` is **not** goroutine-safe — the hub loop (Task 7) owns it single-threaded; tests call it directly.
+- Produces (package-private): `type staged struct{ Topic wsmsg.Topic; Key string; Payload any; Snap bool }`; `type venueMeta struct{ ID string; Broker wsmsg.Broker; Gate wsmsg.GateLimitsView }`; `newMirror(venues []venueMeta, global wsmsg.GlobalLimitsView, tapeCap, newsCap, fillsCap, eventsCap int) *mirror`; `(*mirror).applyMD(u md.Update) []staged`; `(*mirror).applyExec(u exec.Update) []staged`; `(*mirror).applyPub(s staged)` (poller/health/sys events); `(*mirror).snapshotFrames(topic wsmsg.Topic) []staged`. The `mirror` is **not** goroutine-safe — the hub loop (Task 7) owns it single-threaded; tests call it directly.
 
 **Design (locked decision #1/#2):** the mirror is the single keep-latest state cache. Every `applyX` updates state **and returns the delta frame(s)** to broadcast. `snapshotFrames` serializes current state for a new subscriber. The two cross-cutting joins live here: (a) `md.quote` bid/ask come from the latest cached top-of-book; (b) `exec.status` is assembled from per-venue `StatusUpdate`/`AccountUpdate` plus static config gate limits.
 
@@ -2908,7 +2912,7 @@ func tifFromWire(t wsmsg.TIF) exec.TIF {
 }
 ```
 
-> **Verify against the UI at execution time:** the `SubscribeIndicator` arg shape (`instanceId`/`symbol`/`timeframe`/`type`/`params`) is inferred — confirm the exact field names `ChartController` sends in `ui/src/render/ChartController.ts` and align. `exec.TypeStop`/`exec.TypeStopLimit` require Plan 5 merged (Task 1 of Plan 5 adds them).
+> **Verified (2026-07-06 pass):** the `SubscribeIndicator` arg shape (`instanceId`/`symbol`/`timeframe`/`type`/`params` with `params: Record<string,number>`) matches exactly what `ui/src/render/chart/ChartController.ts` sends — no change needed. `exec.TypeStop`/`exec.TypeStopLimit` require Plan 5 merged (Task 1 of Plan 5 adds them) — this task will not compile until Plan 5 lands.
 
 - [ ] **Step 4: Run tests to verify they pass** (delete the `TestCommandsUnknownBlocked` stub, add the `TestCommandsUnknown` from the note)
 
@@ -3051,7 +3055,7 @@ func (q *queries) handle(name string, args json.RawMessage) any {
 }
 ```
 
-> `wsmsg.Side(r.Side)` assumes `exec.FillRow.Side` already holds the uppercase token (`"BUY"`/`"SELL"`/`"SHORT"`/`"COVER"`). Confirm in `exec`'s `FillRowOf`/`Side.String()` at execution; if `FillRow.Side` stores something else, add a small `sideStringToWire` normalizer.
+> Verified (2026-07-06 pass): `exec.FillRow.Side` is populated via `Side.String()` (`internal/exec/events.go`), which returns exactly `"BUY"`/`"SELL"`/`"SHORT"`/`"COVER"` — so `wsmsg.Side(r.Side)` is safe as written; no normalizer needed.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -3423,6 +3427,7 @@ package scan
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -3433,6 +3438,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 
+	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
 	rankpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetuspremarketrank"
 	filterpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotstockfilter"
 )
@@ -3591,13 +3597,19 @@ func (p *Poller) fetchRank(ctx context.Context) ([]rankItem, error) {
 		Offset:  proto.Int32(0),
 		Count:   proto.Int32(35),
 	}
-	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSPreMarketRank, req)
+	// OpenD request messages wrap the inner C2S in a required outer Request{C2S:...}
+	// (proto2 required field) — a bare C2S serializes to different bytes and OpenD
+	// rejects it. Confirmed against every merged call site in feed/opend/backfill.go.
+	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSPreMarketRank, &rankpb.Request{C2S: req})
 	if err != nil {
 		return nil, err
 	}
 	var resp rankpb.Response
 	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
 		return nil, err
+	}
+	if resp.GetRetType() != 0 { // surface OpenD-side errors instead of looking like "0 rows"
+		return nil, fmt.Errorf("rank retType=%d: %s", resp.GetRetType(), resp.GetRetMsg())
 	}
 	var out []rankItem
 	for _, d := range resp.GetS2C().GetDataList() {
@@ -3615,19 +3627,21 @@ func (p *Poller) fetchRank(ctx context.Context) ([]rankItem, error) {
 // THOUSANDS on the wire; convert to actual shares here, once).
 func (p *Poller) refreshUniverse(ctx context.Context) {
 	req := &filterpb.C2S{
-		Begin: proto.Int32(0), Num: proto.Int32(200),
+		Begin:  proto.Int32(0),
+		Num:    proto.Int32(200),
+		Market: proto.Int32(int32(qotcommon.QotMarket_QotMarket_US_Security)), // required field (US-only scope)
 		BaseFilterList: []*filterpb.BaseFilter{{
 			FieldName: proto.Int32(int32(filterpb.StockField_StockField_FloatShare)),
 			FilterMin: proto.Float64(0),
 			FilterMax: proto.Float64(p.cfg.MaxFloatShares / 1000.0), // actual -> thousands for the request
 		}},
 	}
-	fr, err := p.r.Request(ctx, opend.ProtoQotStockFilter, req)
+	fr, err := p.r.Request(ctx, opend.ProtoQotStockFilter, &filterpb.Request{C2S: req})
 	if err != nil {
 		return
 	}
 	var resp filterpb.Response
-	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
+	if err := proto.Unmarshal(fr.Body, &resp); err != nil || resp.GetRetType() != 0 {
 		return
 	}
 	uni := map[string]float64{}
@@ -3657,9 +3671,9 @@ func symbolOf(s *qotcommon.Security) string {
 }
 ```
 
-with import `qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"`.
+`qotcommon` is already in the main import block above (used by both `symbolOf` and `refreshUniverse`'s `Market` field).
 
-> **Verify the exact generated pb field/getter names at execution time** — proto2 bindings use pointer fields + `Get*()` getters, and the outer message may be `Response`/`S2C` with `GetS2C()`/`GetDataList()` as shown, but the precise names (`PreMarketChangeRatio` vs `PreMarketChangeRatio`, `StockField_StockField_FloatShare` enum path, the request wrapper `C2S` vs `Request{C2s}`) must be confirmed with `go doc ./internal/feed/opend/pb/qotgetuspremarketrank` and `go doc ./internal/feed/opend/pb/qotstockfilter`. Adjust getter names to match. The **transform (`rankRows`/`newHits`) is the reviewable logic and is fully tested**; `fetchRank`/`refreshUniverse` are thin protobuf glue verified in Step 4 against the real bindings (compile) + the capstone/manual run.
+> **pb names verified against the merged bindings (2026-07-06 verification pass):** the `Request{C2S: ...}` wrapper, the `Market` required field, the `StockField_StockField_FloatShare` enum path, and every response getter (`GetS2C`/`GetDataList`/`GetSecurity`/`GetPreMarketChangeRatio`/`GetPreMarketPrice`/`GetPreMarketVolume`/`GetBaseDataList`/`GetFieldName`/`GetValue`) are confirmed exact. The **transform (`rankRows`/`newHits`) is the reviewable logic and is fully tested**; `fetchRank`/`refreshUniverse` are thin protobuf glue verified against the real bindings (compile) + the capstone/manual run.
 >
 > **Deferred (flag, not built here):** the `Qot_GetSecuritySnapshot` (3203) per-symbol float **fallback** for symbols absent from the universe is intentionally omitted from v1 to bound scope — such symbols simply get `floatShares: null` (the UI renders "unknown", never a fabricated 0). Add the 3203 batch fallback (with the one-bad-code-fails-the-batch split/retry) as a follow-up. Record this in the execution ledger.
 
@@ -3817,12 +3831,12 @@ func (p *Poller) pollSymbol(ctx context.Context, symbol string) {
 		Keyword:  proto.String(symbol),
 		MaxCount: proto.Int32(int32(p.cfg.MaxPerReq)),
 	}
-	fr, err := p.r.Request(ctx, opend.ProtoQotGetSearchNews, req)
+	fr, err := p.r.Request(ctx, opend.ProtoQotGetSearchNews, &newspb.Request{C2S: req})
 	if err != nil {
 		return
 	}
 	var resp newspb.Response
-	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
+	if err := proto.Unmarshal(fr.Body, &resp); err != nil || resp.GetRetType() != 0 {
 		return
 	}
 	raw := make([]searchNews, 0)
@@ -3863,7 +3877,7 @@ func (p *Poller) dedup(items []wsmsg.NewsItem) []wsmsg.NewsItem {
 }
 ```
 
-> **Verify pb names** with `go doc ./internal/feed/opend/pb/qotgetsearchnews` (request `C2S`, response `Response`/`S2C.SearchNewsList`, getters `GetTitle`/`GetSource`/`GetUrl`). `NewsSubType` defaults to ALL if unset — fine for v1. The `symbols func() []string` is supplied by `main` (watchlist ∪ focus).
+> pb names verified (2026-07-06 pass): `newspb.Request{C2S:...}` wrapper, response `Response`/`GetS2C().GetSearchNewsList()`, getters `GetTitle`/`GetSource`/`GetUrl` all exact. `NewsSubType` defaults to ALL if unset — fine for v1. The `symbols func() []string` is supplied by `main` (watchlist ∪ focus).
 
 - [ ] **Step 4: Run tests + build**
 
@@ -4774,14 +4788,16 @@ func (p moomooProbe) ProbeRTT(ctx context.Context) (time.Duration, error) {
 		return 0, errors.New("no opend client")
 	}
 	start := time.Now()
-	_, err := p.c.Request(ctx, opend.ProtoGetGlobalState, &getglobalstate.C2S{})
+	// UserID is a required (deprecated) proto2 field — a zero C2S{} fails to marshal.
+	_, err := p.c.Request(ctx, opend.ProtoGetGlobalState,
+		&getglobalstate.Request{C2S: &getglobalstate.C2S{UserID: proto.Uint64(0)}})
 	return time.Since(start), err
 }
 ```
 
-with imports `getglobalstate "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/getglobalstate"`, `time`, `errors`, `opend`.
+with imports `getglobalstate "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/getglobalstate"`, `google.golang.org/protobuf/proto`, `time`, `errors`, `opend` (added to `boot.go`'s import block).
 
-> **Verify at execution:** (1) the `getglobalstate` pb package path + `C2S{}` shape via `go doc ./internal/feed/opend/pb/...` (the constant `opend.ProtoGetGlobalState` = 1002 exists; the binding path may differ — if `C2S` needs required fields, populate them). (2) `replay.Clock` is a concrete `*replay.Clock` (the `execClk.(*replay.Clock)` assertion holds because replay branch sets it). (3) The `symbols` closure for news should be watchlist ∪ focus — extend it if focus symbols should also be polled. (4) If wiring `moomooProbe` proves fragile, pass `nil` as the prober (engine-moomoo shows "down") — health still emits `sys.health`; note the choice in the ledger.
+> **Verified (2026-07-06 pass):** the `getglobalstate` package path, the `Request{C2S:...}` wrapper, and the required `C2S.UserID` field are all confirmed (a bare `C2S{}` returns `proto: required field ... userID not set` — this fix makes every health probe succeed). Remaining execution notes: (1) `replay.Clock` is a concrete `*replay.Clock` (the `execClk.(*replay.Clock)` assertion holds because the replay branch sets it). (2) The `symbols` closure for news is watchlist-only above — extend to watchlist ∪ focus if focus symbols should also be polled. (3) If wiring `moomooProbe` proves fragile, pass `nil` as the prober (engine-moomoo shows "down") — health still emits `sys.health`; note the choice in the ledger.
 
 - [ ] **Step 2: Build + vet + lint the whole module**
 
@@ -5123,9 +5139,11 @@ git commit -m "test(engine/uihub): capstone E2E — order lifecycle + replay md 
 
 Plan complete and saved to `docs/superpowers/plans/2026-07-06-engine-uihub-pollers-wiring.md`.
 
-**Do not start execution yet.** Two gates first (per the plan-writing routing):
-1. **Plan 5 must be merged to `main`** — this plan's broker factory (Task 14) and command types (`exec.TypeStop`/`TypeStopLimit`, `exec.Broker.Flatten`) depend on it. Branch the Plan 6 worktree from `main` only after Plan 5 lands.
-2. **Run the plan-verification pass after Plan 5 merges** — dispatch `sonnet` agents to materialize each task's code blocks against the merged tree and resolve every "verify at execution" note (proto2 getter names for 3410/3215/3263/1002, the Plan 5 adapter `Config` field names, `sim.Broker.SetMark` fill semantics, `exec.OrderIDGen` reader needs, tygo enum-union output). Fix the plan before executing.
+**Verification pass status (2026-07-06):** three `sonnet` verifiers checked the plan against the merged Plans 1–4 tree — engine API signatures, poller protobuf bindings, and wsmsg↔`contract.ts` parity + cross-task consistency. The Plan-5-independent portion (Tasks 1–13, 15's md/exec/store wiring, 16) is **verified and its findings applied**: every OpenD request now uses the required `Request{C2S:...}` wrapper (was a bare `C2S` — wire-format bug); `qotstockfilter.Market` and `getglobalstate.C2S.UserID` required fields added (the latter fixed a hard marshal failure on every health probe); `RetType` error checks added to pollers; Design Decision #5 reconciled with the code (`md.indicator` is event-driven); the `kind`/`status`/`link` tygo literal-union handling documented in Task 4. Confirmed correct as-written (my own "verify" flags resolved): `config.Load` merges onto `Default()`, `exec.FillRow.Side` = `Side.String()`, `SubscribeIndicator` args, `sim.SetMark`→submit fill ordering, `AccountSnapshot.DayPnL`, all channel directions, and full wsmsg↔contract field/enum/nullability parity.
+
+**Still gated before execution:**
+1. **Plan 5 must merge to `main`** — Task 14's broker factory imports `broker/tradezero`/`broker/alpaca`/`creds`, Tasks 3 & 8 use `exec.TypeStop`/`TypeStopLimit`, and Task 4/15 need `github.com/coder/websocket` (all confirmed absent today). Branch the Plan 6 worktree from `main` only after Plan 5 lands.
+2. **Targeted re-verify of the Plan-5 seam after it merges** — the only unverified slice: the Plan 5 adapter constructor field names (`tradezero.Config`/`alpaca.Config` — `Venue`/`AccountID`/`Creds`/`Clock`/`Env`), `a.Run(ctx)` method shape, `creds.Load`/`creds.File.Get`, and that `exec.TypeStop`/`TypeStopLimit`/`exec.Broker.Flatten` landed with the assumed names. One `sonnet` agent over Tasks 3, 8, 14 against merged Plan 5 suffices; fix Task 14's `go doc` note items and execute.
 
 Two execution options:
 
