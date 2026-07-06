@@ -12,6 +12,7 @@ import { TapePanel } from "./TapePanel";
 import { ScannerPanel } from "./ScannerPanel";
 import { NewsPanel } from "./NewsPanel";
 import { AccountBarPanel } from "./AccountBarPanel";
+import { PositionsPanel } from "./PositionsPanel";
 
 export interface PanelProps {
   config: PanelConfig;
@@ -66,5 +67,9 @@ export const PANELS: Record<string, PanelDef> = {
   "account-bar": {
     component: AccountBarPanel,
     topics: ["exec.account", "exec.status"],
+  },
+  "positions": {
+    component: PositionsPanel,
+    topics: ["exec.positions", "md.quote"],
   },
 };
