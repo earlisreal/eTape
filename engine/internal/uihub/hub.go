@@ -54,6 +54,7 @@ type Hub struct {
 	execCh     chan exec.Update
 	pubCh      chan pub
 	syncCh     chan chan struct{} // test barrier
+	closed     chan struct{}      // closed when Run returns; unblocks stuck senders
 
 	// Run-loop-owned:
 	clients   map[client]map[wsmsg.Topic]bool
@@ -78,6 +79,7 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 		execCh:     make(chan exec.Update, cfg.Buf),
 		pubCh:      make(chan pub, cfg.Buf),
 		syncCh:     make(chan chan struct{}),
+		closed:     make(chan struct{}),
 		clients:    map[client]map[wsmsg.Topic]bool{},
 		pendKeep:   map[string]staged{},
 		tapePend:   map[string][]wsmsg.Tick{},
@@ -86,20 +88,76 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 }
 
 // Public entry points (safe from any goroutine; they only send on channels).
-func (h *Hub) Register(c client)                        { h.register <- c }
-func (h *Hub) Unregister(c client)                      { h.unregister <- c }
-func (h *Hub) Subscribe(c client, t wsmsg.Topic)        { h.subCh <- subReq{c, t} }
-func (h *Hub) Unsubscribe(c client, t wsmsg.Topic)      { h.unsubCh <- subReq{c, t} }
-func (h *Hub) PublishMD(u md.Update)                    { h.mdCh <- u }
-func (h *Hub) PublishExec(u exec.Update)                { h.execCh <- u }
-func (h *Hub) Publish(t wsmsg.Topic, key string, p any) { h.pubCh <- pub{t, key, p} }
+// Each select races the send against h.closed, which Run closes exactly once
+// on the way out, so a call made during or after shutdown returns promptly
+// instead of blocking forever on a channel nobody will ever receive from
+// again.
+func (h *Hub) Register(c client) {
+	select {
+	case h.register <- c:
+	case <-h.closed:
+	}
+}
+
+func (h *Hub) Unregister(c client) {
+	select {
+	case h.unregister <- c:
+	case <-h.closed:
+	}
+}
+
+func (h *Hub) Subscribe(c client, t wsmsg.Topic) {
+	select {
+	case h.subCh <- subReq{c, t}:
+	case <-h.closed:
+	}
+}
+
+func (h *Hub) Unsubscribe(c client, t wsmsg.Topic) {
+	select {
+	case h.unsubCh <- subReq{c, t}:
+	case <-h.closed:
+	}
+}
+
+func (h *Hub) PublishMD(u md.Update) {
+	select {
+	case h.mdCh <- u:
+	case <-h.closed:
+	}
+}
+
+func (h *Hub) PublishExec(u exec.Update) {
+	select {
+	case h.execCh <- u:
+	case <-h.closed:
+	}
+}
+
+func (h *Hub) Publish(t wsmsg.Topic, key string, p any) {
+	select {
+	case h.pubCh <- pub{t, key, p}:
+	case <-h.closed:
+	}
+}
 
 // sync is a test-only synchronous barrier: it blocks until the Run loop has
 // drained and processed every message sent on the hub's channels before this
-// call. It is unexported and used only by hub_test.go's syncHub helper.
-func (h *Hub) sync() { done := make(chan struct{}); h.syncCh <- done; <-done }
+// call. It is unexported and used only by hub_test.go's syncHub helper. It
+// also races against h.closed so a sync() call made after shutdown returns
+// promptly instead of hanging.
+func (h *Hub) sync() {
+	done := make(chan struct{})
+	select {
+	case h.syncCh <- done:
+	case <-h.closed:
+		return
+	}
+	<-done
+}
 
 func (h *Hub) Run(ctx context.Context) error {
+	defer close(h.closed)
 	mdTick := h.clk.NewTicker(h.cfg.MDInterval)
 	acctTick := h.clk.NewTicker(h.cfg.AccountInterval)
 	posTick := h.clk.NewTicker(h.cfg.PositionInterval)
@@ -115,31 +173,19 @@ func (h *Hub) Run(ctx context.Context) error {
 			}
 			return ctx.Err()
 		case c := <-h.register:
-			h.clients[c] = map[wsmsg.Topic]bool{}
+			h.handleRegister(c)
 		case c := <-h.unregister:
-			delete(h.clients, c)
-			c.close()
+			h.handleUnregister(c)
 		case r := <-h.subCh:
-			if subs, ok := h.clients[r.c]; ok {
-				subs[r.topic] = true
-				h.sendSnapshot(r.c, r.topic)
-			}
+			h.handleSub(r)
 		case r := <-h.unsubCh:
-			if subs, ok := h.clients[r.c]; ok {
-				delete(subs, r.topic)
-			}
+			h.handleUnsub(r)
 		case u := <-h.mdCh:
-			for _, s := range h.m.applyMD(u) {
-				h.stageMD(s)
-			}
+			h.handleMD(u)
 		case u := <-h.execCh:
-			for _, s := range h.m.applyExec(u) {
-				h.stageExec(s)
-			}
+			h.handleExec(u)
 		case p := <-h.pubCh:
-			s := staged{Topic: p.topic, Key: p.key, Payload: p.payload}
-			h.m.applyPub(s)
-			h.broadcast(s, false)
+			h.handlePub(p)
 		case <-mdTick.C():
 			h.flushMD()
 		case <-acctTick.C():
@@ -150,9 +196,83 @@ func (h *Hub) Run(ctx context.Context) error {
 				h.posDirty = false
 			}
 		case done := <-h.syncCh:
+			h.drain()
 			close(done)
 		}
 	}
+}
+
+// drain non-blockingly services every message currently queued on the
+// inbound channels, in an arbitrary but exhaustive order, before a pending
+// sync() reply is closed. A channel send happens-before the corresponding
+// receive becomes possible, so by the time a test goroutine has returned
+// from e.g. PublishMD() and gone on to call sync(), its message is already
+// sitting in the buffered channel (or, for the unbuffered register/subCh/
+// etc., already being served by drain's own receive). Draining everything
+// pending at the moment sync()'s send is serviced therefore guarantees
+// "everything published before this sync() call has been applied" even
+// though select would otherwise be free to service syncCh first.
+func (h *Hub) drain() {
+	for {
+		select {
+		case c := <-h.register:
+			h.handleRegister(c)
+		case c := <-h.unregister:
+			h.handleUnregister(c)
+		case r := <-h.subCh:
+			h.handleSub(r)
+		case r := <-h.unsubCh:
+			h.handleUnsub(r)
+		case u := <-h.mdCh:
+			h.handleMD(u)
+		case u := <-h.execCh:
+			h.handleExec(u)
+		case p := <-h.pubCh:
+			h.handlePub(p)
+		default:
+			return
+		}
+	}
+}
+
+func (h *Hub) handleRegister(c client) {
+	h.clients[c] = map[wsmsg.Topic]bool{}
+}
+
+func (h *Hub) handleUnregister(c client) {
+	delete(h.clients, c)
+	c.close()
+}
+
+func (h *Hub) handleSub(r subReq) {
+	if subs, ok := h.clients[r.c]; ok {
+		subs[r.topic] = true
+		h.sendSnapshot(r.c, r.topic)
+	}
+}
+
+func (h *Hub) handleUnsub(r subReq) {
+	if subs, ok := h.clients[r.c]; ok {
+		delete(subs, r.topic)
+	}
+}
+
+func (h *Hub) handleMD(u md.Update) {
+	for _, s := range h.m.applyMD(u) {
+		h.stageMD(s)
+	}
+}
+
+func (h *Hub) handleExec(u exec.Update) {
+	for _, s := range h.m.applyExec(u) {
+		h.stageExec(s)
+	}
+}
+
+func (h *Hub) handlePub(p pub) {
+	s := staged{Topic: p.topic, Key: p.key, Payload: p.payload}
+	h.m.applyPub(s)
+	h.broadcast(s, false)
 }
 
 func (h *Hub) stageMD(s staged) {

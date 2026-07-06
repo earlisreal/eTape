@@ -128,6 +128,82 @@ func TestHubExecOrdersBroadcastImmediately(t *testing.T) {
 	}
 }
 
+// TestHubSyncBarrierOrdering reproduces the sync-ordering gap from review
+// finding 1: PublishMD/PublishExec/Publish enqueue into buffered channels and
+// return immediately, so if sync()'s barrier isn't airtight, Run's select
+// could service the (also-ready) syncCh case before draining an
+// already-queued publish, and a caller's post-sync() assertion would flake.
+// Repeated under -race -count=N this pins the fix (drain-before-close) in
+// place; without it this test is expected to flake under load.
+func TestHubSyncBarrierOrdering(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	c := &fakeClient{nid: 1}
+	h.Register(c)
+	h.Subscribe(c, wsmsg.TopicExecOrders)
+	syncHub(h)
+
+	for i := 0; i < 200; i++ {
+		base := len(c.got())
+		h.PublishExec(exec.OrderUpdate{Order: exec.Order{
+			Venue: "sim", ID: "ETsync", Symbol: "US.AAPL", Status: exec.StatusSubmitted,
+		}})
+		// No sleep, no yield: sync() must itself guarantee the publish above
+		// has already been applied by the time it returns.
+		syncHub(h)
+		frames := c.got()
+		if len(frames) <= base {
+			t.Fatalf("iteration %d: publish immediately before sync() must be visible after it returns; base=%d got=%d", i, base, len(frames))
+		}
+	}
+}
+
+func TestHubPublicMethodsReturnPromptlyAfterShutdown(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() { _ = h.Run(ctx) }()
+
+	c := &fakeClient{nid: 1}
+	h.Register(c)
+	h.Subscribe(c, wsmsg.TopicExecOrders)
+	syncHub(h)
+
+	cancel() // trigger Run's ctx.Done() path, which returns without servicing other channels
+	// give Run a moment to actually observe ctx.Done() and close h.closed
+	<-h.closed
+
+	calls := map[string]func(){
+		"Register":    func() { h.Register(&fakeClient{nid: 2}) },
+		"Unregister":  func() { h.Unregister(c) },
+		"Subscribe":   func() { h.Subscribe(c, wsmsg.TopicQuote) },
+		"Unsubscribe": func() { h.Unsubscribe(c, wsmsg.TopicExecOrders) },
+		"PublishMD":   func() { h.PublishMD(md.QuoteUpdate{Quote: feed.Quote{Symbol: "US.AAPL", Last: 1, TsMs: 1}}) },
+		"PublishExec": func() {
+			h.PublishExec(exec.OrderUpdate{Order: exec.Order{Venue: "sim", ID: "ETshutdown", Status: exec.StatusSubmitted}})
+		},
+		"Publish": func() { h.Publish(wsmsg.TopicQuote, "US.AAPL", map[string]any{}) },
+		"sync":    func() { h.sync() },
+	}
+
+	for name, call := range calls {
+		done := make(chan struct{})
+		go func() {
+			call()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Fatalf("%s did not return within 1s after shutdown; goroutine leaked/blocked", name)
+		}
+	}
+}
+
 func TestHubOverflowClosesClient(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	h := newTestHub(clk)
