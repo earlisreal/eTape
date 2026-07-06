@@ -97,7 +97,7 @@ func (a *Adapter) normalizeOrder(venue exec.VenueID, o tzOrder) []exec.BrokerEve
 	case exec.StatusAccepted:
 		out = append(out, exec.OrderAccepted{V: venue, OID: oid, BrokerOrderID: tzCID, Ts: ts})
 	case exec.StatusCanceled:
-		out = append(out, a.onCanceled(venue, oid, ts)...) // Task 10 hook: swallow-during-replace
+		out = append(out, a.onCanceled(venue, oid, tzCID, ts)...) // Task 10 hook: swallow-during-replace
 	case exec.StatusRejected:
 		out = append(out, exec.OrderRejected{V: venue, OID: oid, Reason: rejectText(o.Text), Ts: ts})
 	case exec.StatusExpired:
