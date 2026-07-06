@@ -22,5 +22,7 @@ run:
 gen-ts:
 	go tool tygo generate
 gen-ts-check: gen-ts
+	git ls-files --error-unmatch -- ../ui/src/gen/wsmsg.ts > /dev/null 2>&1 || \
+	  (echo "wsmsg contract drift: ui/src/gen/wsmsg.ts is not tracked by git" && exit 1)
 	git diff --exit-code -- ../ui/src/gen/wsmsg.ts || \
 	  (echo "wsmsg contract drift: ui/src/gen/wsmsg.ts is stale — run 'make gen-ts' and commit" && exit 1)
