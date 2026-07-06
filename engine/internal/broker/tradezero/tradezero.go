@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"strconv"
 	"sync"
 	"time"
 
@@ -171,6 +172,69 @@ func New(cfg Config) (*Adapter, error) {
 	return a, nil
 }
 
+// currentLegRows reduces a raw REST order-row list to at most one row per
+// domain order id — the CURRENT authoritative leg — discarding any
+// superseded leg from an earlier replace (caller holds a.mu). TZ's GET
+// .../orders endpoint returns the whole "today" order blotter, unfiltered to
+// working orders, so a domain order that was replaced earlier in the session
+// appears as multiple rows (its dead old leg(s) plus its live new leg), all
+// stripping to the same domain id.
+//
+// A domain id with exactly one row in this batch is never ambiguous and is
+// kept as-is regardless of a.tzIDByDomain — this matters right after a
+// process restart, when tzIDByDomain starts out empty but a lone "-rN" row
+// for an already-replaced order is still perfectly valid and must not be
+// discarded for "not matching" a leg the adapter doesn't remember yet.
+//
+// For a domain id with multiple rows (real ambiguity), a.tzIDByDomain wins
+// when it has a live record (the common case: same adapter instance, no
+// process restart since the replace happened). Failing that — the exact
+// process-restart case that produces the ambiguity in the first place — the
+// row with the highest "-rN" replace-suffix number is taken as the most
+// recent leg: a purely id-derived, state-free tie-break that still resolves
+// correctly, since replace suffixes are minted in strictly increasing order
+// and never reused (see replaceSeq/ReplaceOrder).
+func (a *Adapter) currentLegRows(orders []exec.Order) map[string]exec.Order {
+	counts := make(map[string]int, len(orders))
+	for _, o := range orders {
+		counts[a.domainID(o.ID)]++
+	}
+	best := make(map[string]exec.Order, len(orders))
+	bestSuffix := make(map[string]int, len(orders))
+	for _, o := range orders {
+		domainOID := a.domainID(o.ID)
+		if counts[domainOID] == 1 {
+			best[domainOID] = o
+			continue
+		}
+		if current, ok := a.tzIDByDomain[domainOID]; ok {
+			if o.ID == current {
+				best[domainOID] = o
+			}
+			continue
+		}
+		if n := replaceSuffixNum(o.ID); n >= bestSuffix[domainOID] {
+			if _, exists := best[domainOID]; !exists || n > bestSuffix[domainOID] {
+				best[domainOID] = o
+				bestSuffix[domainOID] = n
+			}
+		}
+	}
+	return best
+}
+
+// replaceSuffixNum extracts the N from a "-rN" replace suffix on a TZ
+// client-order-id, or 0 (the original, never-replaced leg's implicit
+// sequence number) if there is none.
+func replaceSuffixNum(tzCID string) int {
+	loc := reReplaceSuffix.FindStringIndex(tzCID)
+	if loc == nil {
+		return 0
+	}
+	n, _ := strconv.Atoi(tzCID[loc[0]+2 : loc[1]]) // skip the "-r" prefix
+	return n
+}
+
 // domainID recovers the stable domain order id from a TZ client-order-id by
 // stripping a trailing "-rN" replace suffix (identity if there is none). This
 // is a pure derivation with no map lookup, so the linkage between a replaced
@@ -266,15 +330,22 @@ func (a *Adapter) SubmitOrder(ctx context.Context, req exec.OrderRequest) (exec.
 		return exec.OrderAck{}, err
 	}
 	ts := a.now()
+
+	if !ok {
+		// TZ rejected the order: it never became a live TZ order, so it must
+		// not be registered as one — a caller mistakenly calling
+		// ReplaceOrder/CancelOrder on this domain id later must fail with
+		// "unknown order", not attempt a REST call against a TZ id that was
+		// never accepted.
+		a.emit(exec.OrderRejected{V: a.venue, OID: req.ClientOrderID, Reason: rejText, Ts: ts})
+		return exec.OrderAck{OrderID: req.ClientOrderID, Accepted: false, Message: rejText}, nil
+	}
+
 	a.mu.Lock()
 	a.tzIDByDomain[req.ClientOrderID] = req.ClientOrderID
 	a.orderReq[req.ClientOrderID] = req
 	a.mu.Unlock()
 
-	if !ok {
-		a.emit(exec.OrderRejected{V: a.venue, OID: req.ClientOrderID, Reason: rejText, Ts: ts})
-		return exec.OrderAck{OrderID: req.ClientOrderID, Accepted: false, Message: rejText}, nil
-	}
 	a.emit(exec.OrderAccepted{V: a.venue, OID: req.ClientOrderID, BrokerOrderID: req.ClientOrderID, Ts: ts})
 	return exec.OrderAck{OrderID: req.ClientOrderID, Accepted: true}, nil
 }
@@ -404,7 +475,12 @@ func (a *Adapter) Flatten(context.Context) error {
 
 // Snapshot fetches the REST-authoritative account/positions/orders view,
 // stamping venue and stripping any "-rN" replace suffix from order ids so a
-// replaced order still reports under its one stable domain id.
+// replaced order still reports under its one stable domain id. TZ's orders
+// endpoint returns every leg submitted today, unfiltered — so a replaced
+// order's dead old leg and live new leg both appear as separate rows that
+// strip to the same domain id. Only the row for the CURRENT leg
+// (isCurrentLegLocked) is kept; the superseded leg is skipped rather than
+// returned as a second, colliding exec.Order under the same id.
 func (a *Adapter) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {
 	acct, positions, orders, err := a.rest.snapshot(ctx)
 	if err != nil {
@@ -414,11 +490,22 @@ func (a *Adapter) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Po
 	for i := range positions {
 		positions[i].Venue = a.venue
 	}
-	for i := range orders {
-		orders[i].Venue = a.venue
-		orders[i].ID = a.domainID(orders[i].ID)
+
+	a.mu.Lock()
+	currentLegs := a.currentLegRows(orders)
+	filtered := make([]exec.Order, 0, len(currentLegs))
+	for _, o := range orders {
+		domainOID := a.domainID(o.ID)
+		if cur, ok := currentLegs[domainOID]; !ok || cur.ID != o.ID {
+			continue // superseded leg from an earlier replace; not a live order
+		}
+		o.Venue = a.venue
+		o.ID = domainOID
+		filtered = append(filtered, o)
 	}
-	return acct, positions, orders, nil
+	a.mu.Unlock()
+
+	return acct, positions, filtered, nil
 }
 
 // Run starts the Portfolio-WS client, which drives connect/reconnect and
@@ -509,9 +596,19 @@ func (a *Adapter) reconcile() {
 	}
 	a.positions = posMap
 
+	currentLegs := a.currentLegRows(orders)
 	var gapEvents []exec.BrokerEvent
 	for _, o := range orders {
 		domainOID := a.domainID(o.ID)
+		if cur, ok := currentLegs[domainOID]; !ok || cur.ID != o.ID {
+			// A superseded leg from an earlier replace (TZ's "today" orders
+			// blotter returns every leg ever submitted today, not just
+			// working ones). Its dead-vs-live status divergence from
+			// lastKnownStatus is expected history, not a real transition —
+			// diffing it here would synthesize a spurious domain event for
+			// an order that is actually still fine under its current leg.
+			continue
+		}
 		prevStatus, seen := a.lastKnownStatus[domainOID]
 		a.lastKnownStatus[domainOID] = o.Status
 		if reconnect && seen && prevStatus != o.Status {
