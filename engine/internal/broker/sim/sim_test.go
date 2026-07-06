@@ -251,6 +251,95 @@ func TestSim_BuyStopLimit_TriggersThenRestsAsLimit(t *testing.T) {
 	}
 }
 
+// TestSim_ReplaceOrder_StopNotTriggered_DoesNotFillAtZero reproduces the
+// final whole-branch review finding: ReplaceOrder's post-replace fill
+// decision used to call the raw marketable(o.Side, o.LimitPrice, mark) check
+// instead of actOnMarkLocked. A bare TypeStop has LimitPrice == 0 (it prices
+// off StopPrice, not LimitPrice), so marketable(Sell, 0, mark) evaluated as
+// 0 <= mark, which is true for any positive mark -- a resting sell stop that
+// got replaced would fill IMMEDIATELY at price $0, regardless of whether the
+// stop had actually triggered. This asserts a resting stop that has NOT
+// triggered stays resting (and unfilled) across a replace.
+func TestSim_ReplaceOrder_StopNotTriggered_DoesNotFillAtZero(t *testing.T) {
+	b := newSim(t) // seeds AAPL mark = 100
+	_, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
+		Venue: "sim-1", Symbol: "AAPL", Side: exec.SideSell, Type: exec.TypeStop,
+		Qty: 10, StopPrice: 90, ClientOrderID: "ET-stop",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := drain(t, b).(exec.OrderAccepted); !ok {
+		t.Fatal("resting stop (mark 100 > stop 90, not triggered) should emit OrderAccepted only")
+	}
+
+	if err := b.ReplaceOrder(context.Background(), "ET-stop", exec.ReplaceRequest{Qty: 20}); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := drain(t, b).(exec.OrderReplaced)
+	if !ok || r.NewQty != 20 {
+		t.Fatalf("replace event wrong: %+v ok=%v", r, ok)
+	}
+	select {
+	case e := <-b.Events():
+		t.Fatalf("stop order that hasn't triggered must not fill on replace, got %+v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	_, _, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 || orders[0].Qty != 20 || orders[0].Type != exec.TypeStop {
+		t.Fatalf("stop order should remain resting with the new qty and its type: %+v", orders)
+	}
+}
+
+// TestSim_ReplaceOrder_StopLimitNotTriggered_RawMarketableWouldWronglyFill
+// covers the StopLimit half of the same finding: a resting stop-limit whose
+// limit price already happens to be "marketable" against the current mark
+// must still NOT fill on replace if its stop has not actually triggered.
+// The raw marketable(...) check the old code used cannot see the stop at
+// all; only actOnMarkLocked's Stop/StopLimit branch evaluates the trigger
+// before ever considering the limit.
+func TestSim_ReplaceOrder_StopLimitNotTriggered_RawMarketableWouldWronglyFill(t *testing.T) {
+	b := newSim(t) // seeds AAPL mark = 100
+	_, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
+		Venue: "sim-1", Symbol: "AAPL", Side: exec.SideSell, Type: exec.TypeStopLimit,
+		Qty: 10, StopPrice: 40, LimitPrice: 50, ClientOrderID: "ET-sl",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := drain(t, b).(exec.OrderAccepted); !ok {
+		t.Fatal("resting stop-limit (mark 100 > stop 40, not triggered) should emit OrderAccepted only")
+	}
+
+	if err := b.ReplaceOrder(context.Background(), "ET-sl", exec.ReplaceRequest{Qty: 15, LimitPrice: 50}); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := drain(t, b).(exec.OrderReplaced)
+	if !ok || r.NewQty != 15 {
+		t.Fatalf("replace event wrong: %+v ok=%v", r, ok)
+	}
+	// Raw marketable(Sell, limit=50, mark=100) is true (50 <= 100) -- exactly
+	// the buggy shortcut this fix removes -- but the stop (40) has not
+	// actually triggered at mark 100, so the order must stay resting.
+	select {
+	case e := <-b.Events():
+		t.Fatalf("stop-limit whose stop hasn't triggered must not fill just because its limit is marketable, got %+v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	_, _, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 || orders[0].Type != exec.TypeStopLimit {
+		t.Fatalf("stop-limit order should remain resting as StopLimit (not triggered): %+v", orders)
+	}
+}
+
 func TestSimCancelAll(t *testing.T) {
 	b := newSim(t)
 	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, Qty: 1, LimitPrice: 90, ClientOrderID: "ET1"})

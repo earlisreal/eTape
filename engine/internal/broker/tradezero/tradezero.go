@@ -673,7 +673,17 @@ func (a *Adapter) reconcile() {
 		}
 		prevStatus, seen := a.lastKnownStatus[domainOID]
 		a.lastKnownStatus[domainOID] = o.Status
-		if reconnect && seen && prevStatus != o.Status {
+		// Fire the catch-up synthesis on EITHER a status transition OR an
+		// executed-quantity increase, independently: an order can gain fills
+		// while disconnected without its overall status changing at all
+		// (e.g. PartiallyFilled -> PartiallyFilled with more executed), and
+		// synthesizeTransitionLocked's own fill check (o.ExecutedQty >
+		// a.seenExecuted[o.ID]) is what actually derives the catch-up fill —
+		// gating this call on a status change alone would skip that check
+		// entirely for a same-status-more-fills gap, and the unconditional
+		// seenExecuted bump below would then permanently dedup those missed
+		// fills away instead of merely holding them until this branch runs.
+		if reconnect && seen && (prevStatus != o.Status || o.ExecutedQty > a.seenExecuted[o.ID]) {
 			gapEvents = append(gapEvents, a.synthesizeTransitionLocked(domainOID, o)...)
 		}
 		if o.ExecutedQty > 0 && o.ExecutedQty > a.seenExecuted[o.ID] {

@@ -242,9 +242,17 @@ func (b *Broker) ReplaceOrder(_ context.Context, orderID string, req exec.Replac
 	o.LeavesQty = req.Qty - o.ExecutedQty
 	o.UpdatedMs = b.now()
 	post := []exec.BrokerEvent{exec.OrderReplaced{V: b.venue, OID: orderID, NewQty: req.Qty, NewLimit: req.LimitPrice, NewStop: req.StopPrice, Ts: b.now()}}
-	// A replace into marketability fills immediately.
-	if mark, ok := b.marks[o.Symbol]; ok && marketable(o.Side, o.LimitPrice, mark) {
-		post = append(post, b.fillLocked(o, o.LimitPrice)...)
+	// Route the post-replace fill decision through actOnMarkLocked (the same
+	// function crossRestingLocked/SubmitOrder use) rather than a raw
+	// marketable(...) check: a bare TypeStop has LimitPrice == 0 (it prices
+	// off StopPrice), so marketable(Sell/Short, 0, mark) is trivially true
+	// for any positive mark and would fill the stop immediately at $0 without
+	// its trigger ever being evaluated; a TypeStopLimit whose LimitPrice
+	// happens to already be marketable would likewise fill without its stop
+	// having triggered. actOnMarkLocked applies the correct Stop/StopLimit
+	// trigger semantics before ever considering marketability.
+	if mark, ok := b.marks[o.Symbol]; ok {
+		post = append(post, b.actOnMarkLocked(o, mark)...)
 	}
 	b.mu.Unlock()
 	for _, e := range post {

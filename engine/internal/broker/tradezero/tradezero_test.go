@@ -656,6 +656,70 @@ func TestAdapter_Reconcile_ReconnectSynthesizesFillAndStreamGap(t *testing.T) {
 	}
 }
 
+// TestAdapter_Reconcile_CatchesUpFillOnUnchangedStatus reproduces the final
+// whole-branch review finding: an order already tracked as PartiallyFilled
+// gains MORE executed quantity while the WS connection is down, but its
+// overall status is still PartiallyFilled on reconnect (no status
+// transition). Before the fix, the fill-catch-up branch was gated on
+// prevStatus != o.Status, so a same-status-more-fills gap synthesized no
+// OrderFilled at all, yet seenExecuted was still bumped unconditionally to
+// the new cumulative executed qty — permanently losing those fills (a later
+// live frame reporting the same cumulative executed would be deduped away as
+// "already seen"). This test asserts the catch-up fill IS synthesized for
+// the delta, and that seenExecuted only advances in step with it.
+func TestAdapter_Reconcile_CatchesUpFillOnUnchangedStatus(t *testing.T) {
+	var ordersBody atomicString
+	ordersBody.set(`[{"clientOrderId":"ET1","symbol":"AAPL","orderStatus":"PartiallyFilled","orderQuantity":10,"executed":4,"priceAvg":100}]`)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/api/account/2TZ00001", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) })
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/pnl", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) })
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/positions", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`[]`)) })
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/orders", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(ordersBody.get()))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	a, err := New(Config{Venue: "tz", AccountID: "2TZ00001", RESTBase: srv.URL, Creds: creds.Pair{KeyID: "K", SecretKey: "S"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.runCtx = context.Background()
+
+	// First connect: seeds state at PartiallyFilled/executed=4, no StreamGap.
+	a.handleConn(true)
+	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.BrokerAccount); return ok })
+	drainNonBlocking(a.Events())
+
+	a.mu.Lock()
+	if got := a.seenExecuted["ET1"]; got != 4 {
+		a.mu.Unlock()
+		t.Fatalf("seenExecuted after first connect = %v, want 4", got)
+	}
+	a.mu.Unlock()
+
+	// More partial fills happen at the broker while disconnected; status is
+	// STILL PartiallyFilled on reconnect -- no status transition at all.
+	ordersBody.set(`[{"clientOrderId":"ET1","symbol":"AAPL","orderStatus":"PartiallyFilled","orderQuantity":10,"executed":7,"priceAvg":100.5}]`)
+	a.handleConn(false)
+	a.handleConn(true)
+
+	fillEv := waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.OrderFilled); return ok })
+	fill := fillEv.(exec.OrderFilled)
+	if fill.F.OrderID != "ET1" || fill.F.Qty != 3 || fill.CumQty != 7 {
+		t.Fatalf("catch-up fill = %+v, want a delta of 3 (7-4) with CumQty 7", fill)
+	}
+	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
+
+	a.mu.Lock()
+	got := a.seenExecuted["ET1"]
+	a.mu.Unlock()
+	if got != 7 {
+		t.Fatalf("seenExecuted after catch-up = %v, want 7 (advanced exactly in step with the emitted fill, not silently past it)", got)
+	}
+}
+
 // drainNonBlocking discards whatever is currently queued without blocking.
 func drainNonBlocking(ch <-chan exec.BrokerEvent) {
 	for {
