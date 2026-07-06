@@ -105,6 +105,41 @@ func TestSimReplaceAndSnapshot(t *testing.T) {
 	}
 }
 
+func TestSimMarketOrderNoMarkRejected(t *testing.T) {
+	b := New("sim-1", clock.NewFake(time.UnixMilli(1000))) // no SetMark call — "MSFT" has no mark
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "MSFT", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
+	ack, err := b.SubmitOrder(context.Background(), req)
+	if err != nil || !ack.Accepted {
+		t.Fatalf("submit: ack=%+v err=%v", ack, err)
+	}
+	if _, ok := drain(t, b).(exec.OrderAccepted); !ok {
+		t.Fatal("first event should be OrderAccepted")
+	}
+	r, ok := drain(t, b).(exec.OrderRejected)
+	if !ok || r.OID != "ET1" {
+		t.Fatalf("market order with no mark should be rejected, got %+v ok=%v", r, ok)
+	}
+}
+
+func TestSimMarketOrderFillsAtMark(t *testing.T) {
+	b := newSim(t) // seeds AAPL mark = 100
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
+	ack, err := b.SubmitOrder(context.Background(), req)
+	if err != nil || !ack.Accepted {
+		t.Fatalf("submit: ack=%+v err=%v", ack, err)
+	}
+	if _, ok := drain(t, b).(exec.OrderAccepted); !ok {
+		t.Fatal("first event should be OrderAccepted")
+	}
+	f, ok := drain(t, b).(exec.OrderFilled)
+	if !ok || f.F.Price != 100 || f.F.Qty != 10 {
+		t.Fatalf("market order should fill at the mark, got %+v ok=%v", f, ok)
+	}
+	if _, ok := drain(t, b).(exec.BrokerPositions); !ok {
+		t.Fatal("fill should be followed by a BrokerPositions snapshot")
+	}
+}
+
 func TestSimCancelAll(t *testing.T) {
 	b := newSim(t)
 	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, Qty: 1, LimitPrice: 90, ClientOrderID: "ET1"})

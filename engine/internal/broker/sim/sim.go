@@ -7,6 +7,7 @@ package sim
 import (
 	"context"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
@@ -161,11 +162,17 @@ func (b *Broker) fillLocked(o *exec.Order, px float64) []exec.BrokerEvent {
 // crossRestingLocked fills any resting orders on a symbol that the new mark makes
 // marketable. Caller holds mu.
 func (b *Broker) crossRestingLocked(symbol string, mark float64) []exec.BrokerEvent {
-	var out []exec.BrokerEvent
-	for _, o := range b.orders {
+	var ids []string
+	for id, o := range b.orders {
 		if o.Symbol == symbol && marketable(o.Side, o.LimitPrice, mark) {
-			out = append(out, b.fillLocked(o, o.LimitPrice)...)
+			ids = append(ids, id)
 		}
+	}
+	sort.Strings(ids)
+	var out []exec.BrokerEvent
+	for _, id := range ids {
+		o := b.orders[id]
+		out = append(out, b.fillLocked(o, o.LimitPrice)...)
 	}
 	return out
 }
@@ -227,6 +234,7 @@ func (b *Broker) CancelAll(_ context.Context, symbol string) error {
 			ids = append(ids, id)
 		}
 	}
+	sort.Strings(ids)
 	for _, id := range ids {
 		delete(b.orders, id)
 	}
