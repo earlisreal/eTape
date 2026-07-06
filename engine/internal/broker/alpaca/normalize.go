@@ -54,7 +54,12 @@ func (n *numString) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
-// auOrder is the "order" object embedded in every trade_updates event.
+// auOrder is the "order" object embedded in every trade_updates event. It
+// doubles (Task 13) as the decode target for the REST order shapes returned
+// by POST/GET /v2/orders and GET /v2/orders:by_client_order_id — Alpaca uses
+// the same field spellings in both the WS embed and the REST order object,
+// unlike TradeZero's REST-vs-Portfolio-WS spelling drift (tzOrder vs
+// tzRestOrder in the tradezero package).
 type auOrder struct {
 	ID             string    `json:"id"`
 	ClientOrderID  string    `json:"client_order_id"`
@@ -65,6 +70,7 @@ type auOrder struct {
 	FilledQty      numString `json:"filled_qty"`
 	FilledAvgPrice numString `json:"filled_avg_price"`
 	LimitPrice     numString `json:"limit_price"`
+	StopPrice      numString `json:"stop_price"`
 	Status         string    `json:"status"`
 }
 
