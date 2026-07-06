@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { FillStore } from "./FillStore";
 import type { Fill } from "../wire/contract";
 
@@ -34,5 +34,34 @@ describe("FillStore", () => {
     const s = new FillStore();
     s.ingest([fill({ orderId: "b", tsMs: 2000 }), fill({ orderId: "a", tsMs: 1000 })]);
     expect(s.forSymbol("US.AAPL").map((m) => m.timeMs)).toEqual([1000, 2000]);
+  });
+});
+
+describe("FillStore.onNewFill", () => {
+  it("fires once per newly-ingested fill and never for deduped re-ingests", () => {
+    const s = new FillStore();
+    const cb = vi.fn();
+    s.onNewFill(cb);
+    s.apply({ kind: "delta", topic: "exec.fills", payload: fill({}) });
+    s.apply({ kind: "delta", topic: "exec.fills", payload: fill({}) }); // identical -> deduped
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(cb.mock.calls[0][0]).toMatchObject({ orderId: expect.any(String) });
+  });
+
+  it("fires for snapshot-merged fills (freshness is the downstream concern)", () => {
+    const s = new FillStore();
+    const cb = vi.fn();
+    s.onNewFill(cb);
+    s.apply({ kind: "snapshot", topic: "exec.fills", payload: [fill({ orderId: "a" }), fill({ orderId: "b" })] });
+    expect(cb).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns an unsubscribe that stops further calls", () => {
+    const s = new FillStore();
+    const cb = vi.fn();
+    const off = s.onNewFill(cb);
+    off();
+    s.apply({ kind: "delta", topic: "exec.fills", payload: fill({}) });
+    expect(cb).not.toHaveBeenCalled();
   });
 });
