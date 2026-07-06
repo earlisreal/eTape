@@ -70,6 +70,15 @@
 </p>
 <div id="events"></div>
 
+<h2>Scanner-hit alert (proposal)</h2>
+<p class="note">
+  Fires when a symbol newly enters the scanner ranking (same trigger as the visual
+  flash). Side-agnostic, and deliberately shaped to never be confused with an order
+  sound — no two-note pairs, no double beeps, no bare clicks. <b>Batch ×3</b> simulates
+  three symbols landing in one refresh through the coalescing gate: one play.
+</p>
+<div id="scanner"></div>
+
 <script>
 'use strict';
 
@@ -300,6 +309,70 @@ const EVENT_SOUNDS = [
   },
 ];
 
+// ---- scanner-hit alert candidates (proposal) ------------------------------
+
+const SCANNER_SOUNDS = [
+  {
+    name: 'Scan 1 — Sonar Ping',
+    desc: 'One long ping with an airy tail and a faint echo — “contact on the scope”.',
+    play(c, out, t) {
+      const o = c.createOscillator();
+      o.type = 'sine';
+      o.frequency.setValueAtTime(980, t);
+      o.frequency.exponentialRampToValueAtTime(920, t + 0.35);
+      const g = env(c, t, 0.35, 0.006, 0.42);
+      o.connect(g).connect(out);
+      o.start(t); o.stop(t + 0.5);
+      tone(c, 'sine', 940, t + 0.22, 0.08, 0.01, 0.28, out);  // echo
+    },
+  },
+  {
+    name: 'Scan 2 — Arpeggio',
+    desc: 'Three quick rising marimba notes — “something new appeared”. Three notes = unmistakable.',
+    play(c, out, t) {
+      const notes = [523.25, 659.25, 783.99];                 // C5 E5 G5
+      notes.forEach((f, i) => {
+        const at = t + i * 0.065;
+        tone(c, 'sine', f, at, 0.4, 0.0015, i === 2 ? 0.22 : 0.13, out);
+        tone(c, 'sine', f * 3.9, at, 0.1, 0.0015, 0.05, out);
+      });
+    },
+  },
+  {
+    name: 'Scan 3 — Chirp',
+    desc: 'A fast bright upward sweep, like a bird chirp. Snappy, 120 ms.',
+    play(c, out, t) {
+      const o = c.createOscillator();
+      o.type = 'triangle';
+      o.frequency.setValueAtTime(600, t);
+      o.frequency.exponentialRampToValueAtTime(1400, t + 0.09);
+      const lp = c.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = 3000;
+      const g = env(c, t, 0.4, 0.004, 0.11);
+      o.connect(lp).connect(g).connect(out);
+      o.start(t); o.stop(t + 0.18);
+    },
+  },
+  {
+    name: 'Scan 4 — High Chime',
+    desc: 'Single bright E6 ding with shimmer — lives in a register no order sound uses.',
+    play(c, out, t) {
+      tone(c, 'sine', 1318.51, t, 0.26, 0.004, 0.3, out);
+      tone(c, 'sine', 1321.5, t, 0.14, 0.004, 0.3, out);      // shimmer beat
+      tone(c, 'sine', 1318.51 * 2.7, t, 0.05, 0.004, 0.1, out);
+    },
+  },
+  {
+    name: 'Scan 5 — Singing Bowl',
+    desc: 'Soft low strike with a 600 ms tail. The calmest — suits quiet pre-market scanning.',
+    play(c, out, t) {
+      tone(c, 'sine', 330, t, 0.4, 0.015, 0.6, out);
+      tone(c, 'sine', 330 * 2.62, t, 0.1, 0.015, 0.35, out);
+      tone(c, 'sine', 330 * 4.4, t, 0.05, 0.015, 0.15, out);
+    },
+  },
+];
+
 // ---- coalescing gate (the logic that would ship) -------------------------
 
 const COALESCE_MS = 200;
@@ -382,6 +455,37 @@ EVENT_SOUNDS.forEach((s) => {
   mkSeq('▼ Sell trade', 'sell', 'sell');
   events.appendChild(card);
 }
+
+const scanner = document.getElementById('scanner');
+SCANNER_SOUNDS.forEach((s, i) => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML =
+    '<div class="info"><div class="name">' + s.name + '</div>' +
+    '<div class="desc">' + s.desc + '</div></div>';
+  const mk = (label, fn) => {
+    const b = document.createElement('button');
+    b.textContent = label;
+    b.className = 'burst';
+    b.addEventListener('click', fn);
+    card.appendChild(b);
+  };
+  const gatedHit = (atMs) => {
+    const key = 'scan:' + i;
+    const last = lastPlay.get(key);
+    if (last !== undefined && atMs - last < COALESCE_MS) return;
+    lastPlay.set(key, atMs);
+    const c = audio();
+    s.play(c, master, c.currentTime + Math.max(0, atMs - performance.now()) / 1000);
+  };
+  mk('Play', () => { lastPlay.clear(); gatedHit(performance.now()); });
+  mk('Batch ×3', () => {
+    lastPlay.clear();
+    const t0 = performance.now();
+    for (const dt of [0, 30, 60]) gatedHit(t0 + dt);
+  });
+  scanner.appendChild(card);
+});
 </script>
 </body>
 </html>
