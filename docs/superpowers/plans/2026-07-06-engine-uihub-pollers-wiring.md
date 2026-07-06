@@ -2234,7 +2234,7 @@ git commit -m "feat(engine/uihub): hub loop, per-class coalescer, snapshot-then-
 - Test: `engine/internal/uihub/conn_test.go`
 
 **Interfaces:**
-- Consumes: `github.com/coder/websocket` (already a module dep via Plan 5), `wsmsg`, the `Hub` (Subscribe/Unsubscribe/Unregister), and two handler interfaces.
+- Consumes: `github.com/coder/websocket` (already in `go.mod` at v1.8.15 via Plan 5, currently `// indirect`; importing it directly here + `go mod tidy` promotes it to a direct dep — no `go get` needed), `wsmsg`, the `Hub` (Subscribe/Unsubscribe/Unregister), and two handler interfaces.
 - Produces: `type commandHandler interface{ handle(name string, args json.RawMessage) wsmsg.AckMsg }`; `type queryHandler interface{ handle(name string, args json.RawMessage) any }`; `type conn struct{...}` implementing `client`; `newConn(id uint64, ws wsSocket, h *Hub, cmd commandHandler, q queryHandler, outBuf int) *conn`; `(*conn).run(ctx)` (starts reader+writer, blocks until either ends); and a small `wsSocket` interface over coder/websocket for test fakes (`Read(ctx) ([]byte, error)`, `Write(ctx, []byte) error`, `Close(code, reason)`).
 
 - [ ] **Step 1: Write the failing test**
@@ -4363,7 +4363,7 @@ func venueMetas(cfg config.Config) []uihub.VenueMeta {
 type venueBroker struct {
 	ID     exec.VenueID
 	Broker exec.Broker
-	Run    func(ctx context.Context) error // nil for sim (no I/O loop)
+	Run    func(ctx context.Context) // nil for sim; adapters' Run(ctx) returns no error (Plan 5)
 }
 
 // buildBrokers constructs one exec.Broker per configured venue. In replay mode
@@ -4410,7 +4410,9 @@ func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock, replay bool
 }
 ```
 
-> Confirm the Plan 5 adapter constructor field names at execution (`tradezero.Config`/`alpaca.Config` — `Venue`/`AccountID`/`Creds`/`Clock`/`Env`) via `go doc ./internal/broker/tradezero` and `go doc ./internal/broker/alpaca`; adjust if Plan 5 named them differently. `a.Run` must match the adapter's `Run(ctx context.Context) error` method (Plan 5 §Task 10/15).
+> **Verified against merged Plan 5 (2026-07-06 seam re-check):** `tradezero.Config{Venue, AccountID, RESTBase, WSURL, Route, Creds, Clock}` and `alpaca.Config{Venue, Env, RESTBase, WSURL, Creds, Clock}` — both `New(Config) (*Adapter, error)` — match exactly; `creds.Load(path) (File, error)`, `creds.DefaultPath()`, `File.Get(key) (Pair, error)`, `Pair{KeyID, SecretKey}` match; `*Adapter` satisfies `exec.Broker` (incl. the merged `Flatten(ctx)`). **One fix applied:** the adapter method is `Run(ctx context.Context)` with **no error return**, so `venueBroker.Run` is `func(context.Context)` (not `func(...) error`) and the Task 15 goroutine calls `run(ctx)` directly — corrected above.
+>
+> **Minor wire edge (dev-only):** `config.Venue.Broker` accepts `"sim"`, but the wire `wsmsg.Broker` union is `tradezero|alpaca|moomoo` (mirrors the UI's `Broker` type). A venue configured `broker = "sim"` emits `broker: "sim"` in `exec.status`, which is outside the UI union (harmless at runtime — TS is structural — but the UI has no chip for it). This only bites if Earl adds a literal `[[venue]]` with `broker = "sim"` for local testing; replay mode does **not** hit it (`venueMetas` reads the *configured* broker, e.g. `"alpaca"`, while `buildBrokers` swaps the *instance* to sim). Leave as-is for v1; if a first-class sim venue is wanted later, add `"sim"` to both the Go `wsmsg.Broker` consts and the UI `Broker` union.
 
 - [ ] **Step 5: Run tests to verify they pass**
 
@@ -4572,7 +4574,7 @@ func main() {
 		venueIDs = append(venueIDs, vb.ID)
 		if vb.Run != nil {
 			brokerWG.Add(1)
-			go func(run func(context.Context) error) { defer brokerWG.Done(); _ = run(ctx) }(vb.Run)
+			go func(run func(context.Context)) { defer brokerWG.Done(); run(ctx) }(vb.Run)
 		}
 	}
 	execCore := exec.NewCore(exec.CoreConfig{
@@ -5141,9 +5143,9 @@ Plan complete and saved to `docs/superpowers/plans/2026-07-06-engine-uihub-polle
 
 **Verification pass status (2026-07-06):** three `sonnet` verifiers checked the plan against the merged Plans 1–4 tree — engine API signatures, poller protobuf bindings, and wsmsg↔`contract.ts` parity + cross-task consistency. The Plan-5-independent portion (Tasks 1–13, 15's md/exec/store wiring, 16) is **verified and its findings applied**: every OpenD request now uses the required `Request{C2S:...}` wrapper (was a bare `C2S` — wire-format bug); `qotstockfilter.Market` and `getglobalstate.C2S.UserID` required fields added (the latter fixed a hard marshal failure on every health probe); `RetType` error checks added to pollers; Design Decision #5 reconciled with the code (`md.indicator` is event-driven); the `kind`/`status`/`link` tygo literal-union handling documented in Task 4. Confirmed correct as-written (my own "verify" flags resolved): `config.Load` merges onto `Default()`, `exec.FillRow.Side` = `Side.String()`, `SubscribeIndicator` args, `sim.SetMark`→submit fill ordering, `AccountSnapshot.DayPnL`, all channel directions, and full wsmsg↔contract field/enum/nullability parity.
 
-**Still gated before execution:**
-1. **Plan 5 must merge to `main`** — Task 14's broker factory imports `broker/tradezero`/`broker/alpaca`/`creds`, Tasks 3 & 8 use `exec.TypeStop`/`TypeStopLimit`, and Task 4/15 need `github.com/coder/websocket` (all confirmed absent today). Branch the Plan 6 worktree from `main` only after Plan 5 lands.
-2. **Targeted re-verify of the Plan-5 seam after it merges** — the only unverified slice: the Plan 5 adapter constructor field names (`tradezero.Config`/`alpaca.Config` — `Venue`/`AccountID`/`Creds`/`Clock`/`Env`), `a.Run(ctx)` method shape, `creds.Load`/`creds.File.Get`, and that `exec.TypeStop`/`TypeStopLimit`/`exec.Broker.Flatten` landed with the assumed names. One `sonnet` agent over Tasks 3, 8, 14 against merged Plan 5 suffices; fix Task 14's `go doc` note items and execute.
+**Plan-5 seam re-verified (2026-07-06) — both gates now cleared.** Plan 5 is merged+pushed to `origin/main` (`c753f05`) with all adapter/creds code present. The seam was re-checked directly against the merged tree: `exec.TypeStop`/`TypeStopLimit` (String→`"STOP"`/`"STOP_LIMIT"`), `exec.Broker.Flatten(ctx)`, all 5 `exec.Update` variants, `creds.Load`/`File.Get`/`Pair`, both adapter `New(Config)(*Adapter,error)` + `Config` field sets, `config.Venue` (unchanged), and the `coder/websocket` v1.8.15 API (`Accept`/`Dial`/`Conn.Read`/`Write`/`Close`/`MessageText`/`StatusCode`/`AcceptOptions.InsecureSkipVerify`) — **all match Plan 6's assumptions.** **One compile bug found and fixed in the plan:** the adapters' `Run(ctx)` returns no error, so `venueBroker.Run` is `func(context.Context)` (was `func(...) error`) — Tasks 14 & 15 corrected.
+
+**Ready to execute.** Branch the Plan 6 worktree fresh from `main`/`origin/main` @ `c753f05` (which has Plans 1–5). The full-module gate (`go build && go vet && go test -race ./... && golangci-lint run && make gen-ts-check`) should be green at each task's end.
 
 Two execution options:
 
