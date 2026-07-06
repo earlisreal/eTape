@@ -38,7 +38,9 @@ export class FillStore extends PaintStore {
       arr.sort((a, b) => a.tsMs - b.tsMs);
       this.bySymbol.set(f.symbol, arr);
       changed = true;
-      for (const cb of this.fillListeners) cb(f); // notify per new fill
+      for (const cb of this.fillListeners) {
+        try { cb(f); } catch { /* a listener must never break fill ingestion */ }
+      }
     }
     if (changed) this.markDirty();
   }

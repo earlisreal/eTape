@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { ToastProvider } from "../Toast";
 import { OrderConfigProvider } from "./useOrderConfig";
@@ -57,8 +57,9 @@ describe("OrderSettingsModal", () => {
     expect(screen.getByText(/max order value/i).textContent).toMatch(/1000/);
     expect(screen.getByText(/max position value/i).textContent).toMatch(/off/i);
   });
-  it("renders the Sounds section", () => {
+  it("renders the Sounds section", async () => {
     wrap();
+    await waitFor(() => expect(soundCommands.sendCommand).toHaveBeenCalledWith("GetConfig", { key: "soundConfig" }));
     expect(screen.getByTestId("sound-fill")).toBeTruthy();
   });
 

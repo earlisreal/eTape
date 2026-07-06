@@ -52,7 +52,9 @@ export class ExecStore extends ReactStore<ExecState> {
         if (m.kind === "snapshot") orders.clear();
         for (const o of list) {
           if (m.kind === "delta" && o.status === "REJECTED" && cur.orders.get(o.id)?.status !== "REJECTED") {
-            for (const cb of this.rejectListeners) cb(o); // transition into REJECTED (never on snapshot)
+            for (const cb of this.rejectListeners) {
+              try { cb(o); } catch { /* a listener must never break order ingestion */ }
+            }
           }
           orders.set(o.id, o); optimistic.delete(o.id); // real event reconciles the optimistic row
         }

@@ -22,9 +22,10 @@ describe("SoundsSection", () => {
     expect(commands.sendCommand).toHaveBeenCalledWith("SetConfig", { key: "soundConfig", value: expect.objectContaining({ fillSound: "marimba" }) });
   });
 
-  it("preview button calls the engine", () => {
+  it("preview button calls the engine", async () => {
     const spy = vi.spyOn(soundEngine, "preview");
-    wrap();
+    const { commands } = wrap();
+    await waitFor(() => expect(commands.sendCommand).toHaveBeenCalledWith("GetConfig", { key: "soundConfig" }));
     fireEvent.click(screen.getByTestId("sound-preview-fill"));
     expect(spy).toHaveBeenCalledWith("fill", expect.any(String));
   });
