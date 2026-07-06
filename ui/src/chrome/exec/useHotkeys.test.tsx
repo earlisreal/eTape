@@ -11,14 +11,14 @@ import type { AckMsg, ExecStatus } from "../../wire/contract";
 
 // Real parameter type — casting a function's own param as `never` fails typecheck.
 function Harness(props: Parameters<typeof useHotkeys>[0]) { useHotkeys(props); return null; }
-const status = (masterArmed: boolean): ExecStatus => ({ masterArmed, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 }, venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, venueArmed: true, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }] });
+const status = (masterArmed: boolean, venueArmed = true): ExecStatus => ({ masterArmed, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 }, venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, venueArmed, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }] });
 
-function setup(masterArmed: boolean) {
+function setup(masterArmed: boolean, venueArmed = true) {
   const stores = makeStores();
   const sent: Array<{ name: string; args: unknown }> = [];
   const commands = { sendCommand: vi.fn(async (n: string, a: unknown): Promise<AckMsg> => { sent.push({ name: n, args: a }); return { kind: "ack", corrId: "c", status: "accepted", orderId: "ETX", value: undefined }; }) };
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
-  stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(masterArmed) });
+  stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(masterArmed, venueArmed) });
   stores.exec.apply({ kind: "snapshot", topic: "exec.account" as never, key: "alpaca-paper", payload: { venue: "alpaca-paper", equity: 100, buyingPower: 100000, availableCash: 100, sodEquity: 100, realized: 0, dayPnl: 0, leverage: 4, tsMs: 1 } });
   stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.4, ask: 3.5, last: 3.45, ts: "" } });
   linkGroups.focus("green", "US.AAPL");
@@ -54,5 +54,16 @@ describe("useHotkeys", () => {
     const { sent } = setup(false);
     await act(async () => { fireEvent.keyDown(window, { key: "k", ctrlKey: true, shiftKey: true }); await Promise.resolve(); });
     expect(sent.some((s) => s.name === "KillSwitch")).toBe(true);
+  });
+  it("blocks a place-hotkey when the document lacks OS focus, even when armed", async () => {
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    const { sent } = setup(true);
+    await act(async () => { fireEvent.keyDown(window, { key: "1", ctrlKey: true }); await Promise.resolve(); });
+    expect(sent.some((s) => s.name === "SubmitOrder")).toBe(false);
+  });
+  it("blocks a place-hotkey when the venue is disarmed, even when master-armed", async () => {
+    const { sent } = setup(true, false);
+    await act(async () => { fireEvent.keyDown(window, { key: "1", ctrlKey: true }); await Promise.resolve(); });
+    expect(sent.some((s) => s.name === "SubmitOrder")).toBe(false);
   });
 });
