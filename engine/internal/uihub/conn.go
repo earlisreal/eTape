@@ -62,7 +62,13 @@ func (c *conn) enqueue(b []byte) bool {
 func (c *conn) close() {
 	c.once.Do(func() {
 		close(c.done)
-		_ = c.ws.Close(1000, "closing")
+		// ws.Close performs a graceful close handshake that can block for
+		// several seconds on an unresponsive peer (it needs the same read
+		// lock our own blocked reader may be holding). Run it off the
+		// caller's goroutine so a client we're forcibly dropping (e.g. via
+		// the Hub's overflow-drop path, which calls close() synchronously
+		// from Hub.Run's single event-loop goroutine) never stalls the Hub.
+		go func() { _ = c.ws.Close(1000, "closing") }()
 	})
 }
 
