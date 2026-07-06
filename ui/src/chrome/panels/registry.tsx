@@ -11,6 +11,7 @@ import { LadderPanel } from "./LadderPanel";
 import { TapePanel } from "./TapePanel";
 import { ScannerPanel } from "./ScannerPanel";
 import { NewsPanel } from "./NewsPanel";
+import { AccountBarPanel } from "./AccountBarPanel";
 
 export interface PanelProps {
   config: PanelConfig;
@@ -27,8 +28,8 @@ export interface PanelProps {
 export interface PanelDef { component: FC<PanelProps>; topics: TopicName[] }
 
 // Plan 1 registered the two stack-proving panels; Plan 2 added the chart panel;
-// Plan 3 added the L2 ladder + time & sales; Plan 4 adds scanner / movers / news
-// below. Plan 5 still owes account-bar / positions / open-orders / order-ticket.
+// Plan 3 added the L2 ladder + time & sales; Plan 4 added scanner / movers / news;
+// Plan 5 adds account-bar below. Plan 5 still owes positions / open-orders / order-ticket.
 export const PANELS: Record<string, PanelDef> = {
   "connection-status": {
     component: ({ stores }) => <ConnectionStatusPanel health={stores.health} />,
@@ -61,5 +62,9 @@ export const PANELS: Record<string, PanelDef> = {
   "news": {
     component: NewsPanel,
     topics: ["news.item"],
+  },
+  "account-bar": {
+    component: AccountBarPanel,
+    topics: ["exec.account", "exec.status"],
   },
 };
