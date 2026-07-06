@@ -180,7 +180,18 @@ func main() {
 	forwardWG.Add(1)
 	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, live, st) }()
 	go forwardExec(ctx, execCore, hub)
-	go markBridge(ctx, core, execCore)
+
+	// In replay every venue is a SimBroker; forward replayed marks into them so
+	// submitted orders fill. Live venues are fed by their own broker connection.
+	var simSinks []markSink
+	if !live {
+		for _, vb := range vbs {
+			if s, ok := vb.Broker.(markSink); ok {
+				simSinks = append(simSinks, s)
+			}
+		}
+	}
+	go markBridge(ctx, core, execCore, simSinks)
 
 	// --- feed (live OpenD or replay) ---
 	var pipeWG sync.WaitGroup
@@ -300,14 +311,25 @@ func forwardExec(ctx context.Context, execCore *exec.Core, hub *uihub.Hub) {
 	}
 }
 
-// markBridge copies md.Core.Marks() -> exec.Core.FeedMark (the single md<->exec seam).
-func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core) {
+// markSink receives last-trade marks. Implemented by *sim.Broker (SetMark);
+// used only in replay so submitted orders fill against the replayed tape.
+type markSink interface {
+	SetMark(symbol string, price float64)
+}
+
+// markBridge copies md.Core.Marks() -> exec.Core.FeedMark (the single md<->exec
+// seam) and, in replay, -> every sim broker's SetMark so a submitted order fills
+// against the replayed marks (live venues get marks from their own broker feed).
+func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks []markSink) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case m := <-core.Marks():
 			execCore.FeedMark(exec.Mark{Symbol: m.Symbol, Price: m.Price, TsMs: m.TsMs})
+			for _, s := range sinks {
+				s.SetMark(m.Symbol, m.Price)
+			}
 		}
 	}
 }
