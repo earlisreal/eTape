@@ -5,6 +5,7 @@ import type { PriceSource } from "./priceSource";
 import type { SizingMode } from "./sizing";
 import { normalizeCombo } from "./hotkeys";
 import { useTheme } from "../ThemeProvider";
+import { SoundsSection } from "../../sound/SoundsSection";
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
@@ -75,6 +76,8 @@ export function OrderSettingsModal(
             <div key={v.venue}>{v.venue}: max order value <b>{cap(v.gate.maxOrderValue)}</b> · max position value <b>{cap(v.gate.maxPositionValue)}</b> · max position shares <b>{cap(v.gate.maxPositionShares)}</b> · max open orders <b>{cap(v.gate.maxOpenOrders)}</b></div>
           ))}
         </div>
+
+        <SoundsSection />
 
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
           <button onClick={onClose} style={inp}>Cancel</button>
