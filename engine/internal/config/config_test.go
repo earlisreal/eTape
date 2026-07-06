@@ -164,3 +164,48 @@ func TestVenueDefaultsEmpty(t *testing.T) {
 		t.Fatalf("default gate venue map should be empty, got %+v", cfg.Gate.Venue)
 	}
 }
+
+func TestDefaultHasUIHubAndPollerSections(t *testing.T) {
+	c := Default()
+	if got := c.UIHub.Addr(); got != "127.0.0.1:8686" {
+		t.Fatalf("UIHub.Addr() = %q, want 127.0.0.1:8686", got)
+	}
+	if c.UIHub.OutboundQueue != 1024 {
+		t.Fatalf("UIHub.OutboundQueue = %d, want 1024", c.UIHub.OutboundQueue)
+	}
+	if c.UIHub.MDRateHz != 30 || c.UIHub.AccountRateHz != 4 || c.UIHub.PositionMs != 100 {
+		t.Fatalf("UIHub rates = %v/%v/%v, want 30/4/100", c.UIHub.MDRateHz, c.UIHub.AccountRateHz, c.UIHub.PositionMs)
+	}
+	if !c.Scan.Enabled || c.Scan.PremarketMs != 2000 || c.Scan.MaxFloatShares != 50_000_000 {
+		t.Fatalf("Scan defaults wrong: %+v", c.Scan)
+	}
+	if !c.News.Enabled || c.News.FocusedMs != 20000 {
+		t.Fatalf("News defaults wrong: %+v", c.News)
+	}
+	if !c.Health.Enabled || c.Health.ProbeMs != 5000 {
+		t.Fatalf("Health defaults wrong: %+v", c.Health)
+	}
+}
+
+func TestLoadOverridesUIHubSection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	toml := "[uihub]\nport = 9000\nmd_rate_hz = 15.0\n\n[scan]\nmin_change_pct = 8.0\n"
+	if err := os.WriteFile(path, []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.UIHub.Port != 9000 || c.UIHub.MDRateHz != 15 {
+		t.Fatalf("override failed: port=%d rate=%v", c.UIHub.Port, c.UIHub.MDRateHz)
+	}
+	// Unset fields in a present section still fall back to Default() (Load merges onto Default()).
+	if c.UIHub.OutboundQueue != 1024 {
+		t.Fatalf("OutboundQueue lost its default: %d", c.UIHub.OutboundQueue)
+	}
+	if c.Scan.MinChangePct != 8 {
+		t.Fatalf("scan override failed: %v", c.Scan.MinChangePct)
+	}
+}

@@ -83,6 +83,46 @@ type Gate struct {
 	Venue  map[string]GateVenue `toml:"venue"`
 }
 
+// UIHub is the [uihub] section: the WS/HTTP server the UI connects to.
+type UIHub struct {
+	Host          string  `toml:"host"`
+	Port          int     `toml:"port"`
+	DistDir       string  `toml:"dist_dir"`        // path to built ui/dist; empty => no static file serving (dev proxies /ws)
+	OutboundQueue int     `toml:"outbound_queue"`  // per-connection outbound buffer depth; overflow => drop + force re-snapshot
+	MDRateHz      float64 `toml:"md_rate_hz"`      // flush rate for md.quote/book/bars/tape/indicator
+	AccountRateHz float64 `toml:"account_rate_hz"` // flush rate for exec.account
+	PositionMs    int     `toml:"position_ms"`     // batch interval for exec.positions
+	TapeSnapshot  int     `toml:"tape_snapshot"`   // recent ticks retained per symbol for the tape snapshot
+}
+
+func (u UIHub) Addr() string { return net.JoinHostPort(u.Host, strconv.Itoa(u.Port)) }
+
+// Scan is the [scan] section: pre-market/RTH rank scanner + low-float universe.
+type Scan struct {
+	Enabled          bool    `toml:"enabled"`
+	PremarketMs      int     `toml:"premarket_ms"`       // rank poll interval before 09:30 ET
+	RTHMs            int     `toml:"rth_ms"`             // rank poll interval during RTH
+	RankPages        int     `toml:"rank_pages"`         // pages of <=35 to pull per rank refresh
+	MinChangePct     float64 `toml:"min_change_pct"`     // client-side gainer threshold (%)
+	MaxFloatShares   float64 `toml:"max_float_shares"`   // float cap in ACTUAL shares (not thousands)
+	MinVolume        int64   `toml:"min_volume"`         // session cumulative volume floor
+	UniverseRefreshH int     `toml:"universe_refresh_h"` // low-float universe refresh interval (hours)
+}
+
+// News is the [news] section: Qot_GetSearchNews polling.
+type News struct {
+	Enabled   bool `toml:"enabled"`
+	FocusedMs int  `toml:"focused_ms"` // poll interval for focused symbols
+	WatchMs   int  `toml:"watch_ms"`   // step interval for the watchlist rotation
+	MaxPerReq int  `toml:"max_per_req"`
+}
+
+// Health is the [health] section: moomoo probe RTT + sys.health/sys.events emission.
+type Health struct {
+	Enabled bool `toml:"enabled"`
+	ProbeMs int  `toml:"probe_ms"` // probe + sys.health emit interval
+}
+
 // Config is the engine's bootstrap configuration.
 type Config struct {
 	OpenD  OpenD   `toml:"opend"`
@@ -91,6 +131,10 @@ type Config struct {
 	Store  Store   `toml:"store"`
 	Venues []Venue `toml:"venue"`
 	Gate   Gate    `toml:"gate"`
+	UIHub  UIHub   `toml:"uihub"`
+	Scan   Scan    `toml:"scan"`
+	News   News    `toml:"news"`
+	Health Health  `toml:"health"`
 }
 
 // Default returns the built-in defaults used when a field or the whole file is absent.
@@ -100,6 +144,16 @@ func Default() Config {
 		Feed:  Feed{ExtendedTime: true, UnsubHysteresisSecs: 300, QuotaSlots: 100},
 		MD:    MD{TapeRing: 65536, SessionAnchor: "09:30"},
 		Store: Store{DBPath: "", RetentionDays: 30, FlushMs: 250},
+		UIHub: UIHub{
+			Host: "127.0.0.1", Port: 8686, DistDir: "",
+			OutboundQueue: 1024, MDRateHz: 30, AccountRateHz: 4, PositionMs: 100, TapeSnapshot: 200,
+		},
+		Scan: Scan{
+			Enabled: true, PremarketMs: 2000, RTHMs: 3000, RankPages: 2,
+			MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000, UniverseRefreshH: 24,
+		},
+		News:   News{Enabled: true, FocusedMs: 20000, WatchMs: 3000, MaxPerReq: 50},
+		Health: Health{Enabled: true, ProbeMs: 5000},
 	}
 }
 

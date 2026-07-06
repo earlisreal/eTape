@@ -1,13 +1,18 @@
-// Command etape is the eTape engine. In this plan it is the market-data +
-// persistence harness: connect OpenD → journal tee → md core, archive finalized
-// bars, and (with --replay) reconstruct a recorded day from the journal. Plan 6
-// replaces main with the full boot sequence (store → uihub → OpenD → exec).
+// Command etape is the eTape engine: the full boot sequence wiring the market-
+// data plane (OpenD -> feed -> md.Core), the execution subsystem (exec.Core +
+// broker venues), and the uihub WebSocket server the UI connects to. With
+// --replay it reconstructs a recorded day against SimBroker over the identical
+// hub/contract (the mode the UI Playwright E2E boots on).
 package main
 
 import (
 	"context"
+	"crypto/rand"
+	"errors"
 	"flag"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -18,22 +23,27 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
+	"github.com/earlisreal/eTape/engine/internal/creds"
+	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
+	"github.com/earlisreal/eTape/engine/internal/health"
 	"github.com/earlisreal/eTape/engine/internal/md"
+	"github.com/earlisreal/eTape/engine/internal/news"
 	"github.com/earlisreal/eTape/engine/internal/replay"
+	"github.com/earlisreal/eTape/engine/internal/scan"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/store"
+	"github.com/earlisreal/eTape/engine/internal/uihub"
 )
 
 func main() {
 	home, _ := os.UserHomeDir()
 	cfgPath := flag.String("config", filepath.Join(home, ".eTape", "config.toml"), "path to config.toml")
-	watch := flag.String("watch", "", "comma-separated symbols to watch (adds to config watchlist)")
-	focus := flag.String("focus", "", "comma-separated symbols to focus (adds depth + quote)")
-	replayDay := flag.String("replay", "", "replay a recorded day (YYYY-MM-DD) instead of connecting to OpenD")
-	speed := flag.Float64("speed", 0, "replay speed factor (>0: real-time x speed; <=0: as fast as possible)")
-	verbose := flag.Bool("v", false, "log quotes/books/tape (noisy)")
+	watch := flag.String("watch", "", "comma-separated symbols to watch")
+	focus := flag.String("focus", "", "comma-separated symbols to focus (depth + quote)")
+	replayDay := flag.String("replay", "", "replay a recorded day (YYYY-MM-DD) instead of live OpenD")
+	speed := flag.Float64("speed", 0, "replay speed (>0: real-time x speed; <=0: as fast as possible)")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -61,118 +71,271 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	live := *replayDay == ""
+	uihubClk := clock.System{}
+	var execClk clock.Clock = clock.System{}
+
+	// --- store ---
 	st, err := store.Open(store.Options{
-		Path:          dbPath,
-		Clock:         clock.System{},
+		Path: dbPath, Clock: clock.System{},
 		FlushInterval: time.Duration(cfg.Store.FlushMs) * time.Millisecond,
 	})
 	if err != nil {
 		log.Error("open store", "err", err)
 		os.Exit(1)
 	}
-	// NOTE: no `defer st.Close()`. The feed pipe writes to the store on a blocking
-	// send, so the store must be closed ONLY after that goroutine has stopped —
-	// otherwise RecordEvent races close(s.writes) (send on closed channel → panic).
-	// We join pipeWG below, then Close explicitly.
+	// NOTE: st.Close() is deferred until AFTER every store-writer goroutine has
+	// stopped (feed pipe + forwardMD + exec.Core) — see the shutdown block below.
 
+	// --- md core ---
 	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs})
 	go func() { _ = core.Run(ctx) }()
-	go drainMarks(ctx, core)
 
-	var pipeWG sync.WaitGroup // tracks the feed→core pipe goroutine(s)
-	live := *replayDay == ""
+	// --- replay clock (execClk) if replaying ---
+	var replayRows []store.JournalRow
+	if !live {
+		replayRows, err = st.ReadJournalDay(*replayDay)
+		if err != nil || len(replayRows) == 0 {
+			log.Error("replay day unavailable", "day", *replayDay, "err", err, "rows", len(replayRows))
+			_ = st.Close()
+			os.Exit(1)
+		}
+		execClk = replay.NewClock(time.UnixMilli(replayRows[0].TsExch))
+	}
+
+	// --- exec subsystem (Recover -> Run) ---
+	var credsFile creds.File
 	if live {
-		if n, err := st.PruneJournal(cfg.Store.RetentionDays); err != nil {
-			log.Warn("prune journal", "err", err)
-		} else if n > 0 {
+		if credsFile, err = creds.Load(creds.DefaultPath()); err != nil {
+			log.Warn("load creds (non-sim venues will fail)", "err", err)
+			credsFile = creds.File{}
+		}
+	}
+	vbs, err := buildBrokers(cfg, credsFile, execClk, !live)
+	if err != nil {
+		log.Error("build brokers", "err", err)
+		_ = st.Close()
+		os.Exit(1)
+	}
+	brokers := map[exec.VenueID]exec.Broker{}
+	venueIDs := make([]exec.VenueID, 0, len(vbs))
+	var brokerWG sync.WaitGroup
+	for _, vb := range vbs {
+		brokers[vb.ID] = vb.Broker
+		venueIDs = append(venueIDs, vb.ID)
+		if vb.Run != nil {
+			brokerWG.Add(1)
+			go func(run func(context.Context)) { defer brokerWG.Done(); run(ctx) }(vb.Run)
+		}
+	}
+	execCore := exec.NewCore(exec.CoreConfig{
+		Venues: venueIDs, Gate: buildGateConfig(cfg.Gate), Store: st,
+		Brokers: brokers, Clock: execClk, IDGen: exec.NewOrderIDGen(execClk, rand.Reader),
+		SysLog: st.AppendSysEvent,
+	})
+	if err := execCore.Recover(ctx); err != nil {
+		log.Warn("exec recover (continuing; reactive reconcile will catch up)", "err", err)
+	}
+	execDone := make(chan struct{})
+	go func() { defer close(execDone); _ = execCore.Run(ctx) }()
+
+	// --- uihub (listening BEFORE OpenD is dialed) ---
+	hub, srv := uihub.New(uihubClk, uihub.Config{
+		Venues: venueMetas(cfg), Global: uihub.GlobalLimits{
+			MaxDayLoss: cfg.Gate.Global.MaxDayLoss, MaxSymbolPositionValue: cfg.Gate.Global.MaxSymbolPositionValue,
+			MaxSymbolPositionShares: cfg.Gate.Global.MaxSymbolPositionShares,
+		},
+		MD: hz(cfg.UIHub.MDRateHz), Account: hz(cfg.UIHub.AccountRateHz),
+		Position: time.Duration(cfg.UIHub.PositionMs) * time.Millisecond,
+		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500,
+		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
+	}, execCore, st, core)
+	go func() { _ = hub.Run(ctx) }()
+	httpSrv := &http.Server{
+		Addr: cfg.UIHub.Addr(), Handler: srv.Handler(), ReadHeaderTimeout: 5 * time.Second,
+		// BaseContext ties every accepted connection's r.Context() to the
+		// top-level shutdown ctx, independently of Hub's own lifecycle. Without
+		// this, a connection accepted (and its conn.run(r.Context()) started)
+		// after Hub.Run has already returned would never be told to close: its
+		// hub.Register call silently no-ops against the already-closed Hub (see
+		// Hub.Register's <-h.closed race), so it never lands in h.clients, and
+		// Hub.Run's <-ctx.Done() teardown loop (which calls c.close() on every
+		// registered client) can never reach it either. That connection's
+		// readLoop would then block forever in ws.Read(r.Context()) waiting on a
+		// client that may never send or disconnect, so srv.Wait() (which has no
+		// timeout) would hang the whole shutdown sequence. Deriving r.Context()
+		// from ctx here unblocks that Read as soon as the top-level ctx is
+		// cancelled, regardless of Hub's state.
+		BaseContext: func(net.Listener) context.Context { return ctx },
+	}
+	go func() {
+		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error("uihub listen", "err", err)
+		}
+	}()
+	log.Info("uihub up", "addr", cfg.UIHub.Addr(), "dist", cfg.UIHub.DistDir)
+
+	// --- fan-in: md/exec Updates -> hub; mark bridge md -> exec ---
+	var forwardWG sync.WaitGroup
+	forwardWG.Add(1)
+	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, live, st) }()
+	go forwardExec(ctx, execCore, hub)
+	go markBridge(ctx, core, execCore)
+
+	// --- feed (live OpenD or replay) ---
+	var pipeWG sync.WaitGroup
+	var client *opend.Client
+	if live {
+		if n, err := st.PruneJournal(cfg.Store.RetentionDays); err == nil && n > 0 {
 			log.Info("pruned journal", "rows", n)
 		}
 		st.AppendSysEvent("boot", "engine up")
-		startLive(ctx, log, st, core, cfg, splitCSV(*watch), splitCSV(*focus), &pipeWG)
-		log.Info("engine up (live)", "opend", cfg.OpenD.Addr(), "anchor", cfg.MD.SessionAnchor, "db", dbPath)
-	}
-	replayOK := true
-	if !live {
-		replayOK = startReplay(ctx, log, st, core, *replayDay, *speed, splitCSV(*focus), &pipeWG, stop)
+		client = opend.New(opend.Options{Addr: cfg.OpenD.Addr(), Clock: clock.System{}})
+		fd := opend.NewOpenDFeed(client, opend.FeedOptions{
+			Budget: cfg.Feed.QuotaSlots, Hysteresis: time.Duration(cfg.Feed.UnsubHysteresisSecs) * time.Second,
+			DisableExtendedTime: !cfg.Feed.ExtendedTime,
+		})
+		go func() { _ = client.Run(ctx) }()
+		go func() { _ = fd.Run(ctx) }()
+		pipeWG.Add(1)
+		go pipe(ctx, &pipeWG, fd.Events(), core, st)
+		for _, s := range append(cfg.Feed.Watchlist, splitCSV(*watch)...) {
+			fd.Ensure(feed.WatchDemand("boot-watch-"+s, s))
+		}
+		for _, s := range splitCSV(*focus) {
+			fd.Ensure(feed.FocusedDemand("boot-focus-"+s, s))
+		}
+		startPollers(ctx, cfg, client, hub, uihubClk, st, hasTZVenue(cfg))
+	} else {
+		sim := execClk.(*replay.Clock)
+		fd := replay.NewFeed(replay.FeedOptions{Rows: replayRows, Sim: sim, Pace: clock.System{}, Speed: *speed})
+		go func() { _ = fd.Run(ctx) }()
+		pipeWG.Add(1)
+		go pipe(ctx, &pipeWG, fd.Events(), core, nil) // no journal re-recording in replay
+		go func() { pipeWG.Wait(); stop() }()         // self-terminate when the journal is exhausted
+		log.Info("engine up (replay)", "day", *replayDay, "rows", len(replayRows), "speed", *speed)
 	}
 
-	// Consume updates until shutdown; tap finalized 1m/daily bars to the archive
-	// (live only — replay must not rewrite the archive it reads from).
-	var archive *store.Store
-	if live {
-		archive = st
-	}
-	drainUpdates(ctx, log, core, archive, *verbose)
+	<-ctx.Done()
 
-	// ctx is done: join the pipe (no more store writes) BEFORE closing the store.
-	pipeWG.Wait()
+	// --- ordered shutdown: stop accepting, drain all store writers, then Close ---
+	// Every goroutine that can call a store-writing method (RecordEvent,
+	// AppendExecEvent, ArchiveBar1m/ArchiveDaily, SetConfig) must be joined
+	// before st.Close() runs, since Close() closes the s.writes channel and any
+	// send on it afterward panics. Sources: pipe() (RecordEvent, joined via
+	// pipeWG), forwardMD() (ArchiveBar1m/ArchiveDaily, joined via forwardWG —
+	// it drains already-buffered core.Updates() after ctx is cancelled, so it
+	// must be waited on even though md.Core.Run stops producing new updates
+	// once pipeWG is drained), exec.Core.Run (AppendExecEvent, joined via
+	// execDone), and every uihub connection's dispatch loop (SetConfig via
+	// commandHandler.handle, joined via srv.Wait()). brokerWG has no store
+	// writes but is joined here too since broker goroutines feed exec.Core,
+	// not the store.
+	//
+	// srv.Wait() must run after httpSrv.Shutdown (which only stops accepting
+	// new connections and returns once in-flight *plain* HTTP requests finish
+	// -- it does NOT wait on hijacked WebSocket connections) and before
+	// pipeWG.Wait(): by the time httpSrv.Shutdown returns, ctx has already
+	// been cancelled (we're past <-ctx.Done()), so Hub.Run's own <-ctx.Done()
+	// branch has told (or is telling) every registered connection to close;
+	// srv.Wait() blocks until each connection's conn.run() goroutine has
+	// actually returned, confirming its dispatch loop -- and therefore any
+	// SetConfig call it could make -- is stopped before st.Close() runs.
+	shutCtx, cancelShut := context.WithTimeout(context.Background(), 5*time.Second)
+	_ = httpSrv.Shutdown(shutCtx)
+	cancelShut()
+	srv.Wait()       // every conn.run() returned: no more SetConfig via dispatch
+	pipeWG.Wait()    // feed->core pipe stopped: no more RecordEvent
+	forwardWG.Wait() // forwardMD drained: no more ArchiveBar1m/ArchiveDaily
+	<-execDone       // exec.Core.Run returned: no more AppendExecEvent
+	brokerWG.Wait()
 	if err := st.Close(); err != nil {
 		log.Error("close store", "err", err)
 	}
 	log.Info("shutdown complete", "droppedUpdates", core.DroppedUpdates(), "droppedJournal", st.DroppedJournalRows())
+}
 
-	if !live && !replayOK {
-		os.Exit(1)
+func hz(rate float64) time.Duration {
+	if rate <= 0 {
+		return 33 * time.Millisecond
+	}
+	return time.Duration(float64(time.Second) / rate)
+}
+
+// forwardMD drains md.Core.Updates(): publishes each to the hub and (live only)
+// archives finalized 1m/daily bars — merging the old drainUpdates archiving with
+// the new hub fan-in.
+func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, live bool, archive *store.Store) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case u := <-core.Updates():
+			hub.PublishMD(u)
+			if !live {
+				continue
+			}
+			if bu, ok := u.(md.BarUpdate); ok && !bu.Bar.InProgress {
+				b := feed.Bar{Symbol: bu.Bar.Symbol, BucketMs: bu.Bar.BucketMs,
+					O: bu.Bar.O, H: bu.Bar.H, L: bu.Bar.L, C: bu.Bar.C, Volume: bu.Bar.V}
+				switch bu.Bar.TF {
+				case session.TF1m:
+					archive.ArchiveBar1m(b)
+				case session.TFDay:
+					archive.ArchiveDaily(b)
+				}
+			}
+		}
 	}
 }
 
-// startLive wires OpenD → journal tee → core and installs demands + indicators.
-func startLive(ctx context.Context, log *slog.Logger, st *store.Store, core *md.Core, cfg config.Config, watch, focus []string, pipeWG *sync.WaitGroup) {
-	client := opend.New(opend.Options{Addr: cfg.OpenD.Addr(), Clock: clock.System{}})
-	fd := opend.NewOpenDFeed(client, opend.FeedOptions{
-		Budget:              cfg.Feed.QuotaSlots,
-		Hysteresis:          time.Duration(cfg.Feed.UnsubHysteresisSecs) * time.Second,
-		DisableExtendedTime: !cfg.Feed.ExtendedTime,
-	})
-	go func() { _ = client.Run(ctx) }()
-	go func() { _ = fd.Run(ctx) }()
-	pipeWG.Add(1)
-	go pipe(ctx, pipeWG, fd.Events(), core, st) // st != nil → journal tee active
-
-	seen := 0
-	for _, s := range append(cfg.Feed.Watchlist, watch...) {
-		fd.Ensure(feed.WatchDemand("boot-watch-"+s, s))
-		seen++
+func forwardExec(ctx context.Context, execCore *exec.Core, hub *uihub.Hub) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case u := <-execCore.Updates():
+			hub.PublishExec(u)
+		}
 	}
-	for _, s := range focus {
-		fd.Ensure(feed.FocusedDemand("boot-focus-"+s, s))
-		seen++
-	}
-	if seen == 0 {
-		log.Warn("no symbols demanded; pass --watch/--focus or set [feed].watchlist")
-	}
-	setupIndicators(core, focus)
 }
 
-// startReplay wires replay.Feed → core (no journal tee) from a recorded day.
-// It returns false if the day couldn't be replayed (no such journal, or empty),
-// in which case main must not block waiting for a run that never started.
-func startReplay(ctx context.Context, log *slog.Logger, st *store.Store, core *md.Core, day string, speed float64, focus []string, pipeWG *sync.WaitGroup, stop context.CancelFunc) bool {
-	rows, err := st.ReadJournalDay(day)
-	if err != nil {
-		log.Error("read journal", "err", err, "day", day)
-		return false
+// markBridge copies md.Core.Marks() -> exec.Core.FeedMark (the single md<->exec seam).
+func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case m := <-core.Marks():
+			execCore.FeedMark(exec.Mark{Symbol: m.Symbol, Price: m.Price, TsMs: m.TsMs})
+		}
 	}
-	if len(rows) == 0 {
-		log.Warn("no journal rows for day", "day", day)
-		return false
+}
+
+func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, hub *uihub.Hub, clk clock.Clock, st *store.Store, hasTZ bool) {
+	symbols := func() []string {
+		out := append([]string(nil), cfg.Feed.Watchlist...)
+		return out
 	}
-	// sim advances to each event's exchange timestamp but has no runtime consumer
-	// yet (md.Core is clock-free by design); correctness is proven by
-	// replay/clock_test.go alone until Plan 4's SimBroker consumes it.
-	sim := replay.NewClock(time.UnixMilli(rows[0].TsExch))
-	fd := replay.NewFeed(replay.FeedOptions{Rows: rows, Sim: sim, Pace: clock.System{}, Speed: speed})
-	go func() { _ = fd.Run(ctx) }()
-	pipeWG.Add(1)
-	go pipe(ctx, pipeWG, fd.Events(), core, nil) // nil journal → no re-recording
-	go func() { pipeWG.Wait(); stop() }()        // self-terminate once the journal is exhausted
-	setupIndicators(core, focus)
-	log.Info("engine up (replay)", "day", day, "rows", len(rows), "speed", speed)
-	return true
+	go func() { _ = scan.New(cfg.Scan, client, hub, clk).Run(ctx) }()
+	go func() { _ = news.New(cfg.News, client, hub, clk, symbols).Run(ctx) }()
+	// health: moomoo probe via the OpenD client; app-ping RTT source is nil in v1
+	// (ui-engine shows down until ping tracking is wired). The health poller's
+	// sys.events are also persisted by main via a store hook if desired.
+	go func() { _ = health.New(cfg.Health, hub, clk, moomooProbe{c: client}, nil, hasTZ).Run(ctx) }()
+	_ = st // reserved: wire health.Event -> st.AppendSysEvent in a later pass
+}
+
+func hasTZVenue(cfg config.Config) bool {
+	for _, v := range cfg.Venues {
+		if v.Broker == "tradezero" {
+			return true
+		}
+	}
+	return false
 }
 
 // pipe forwards feed events into the core, journaling each first when journal != nil.
-// It owns a pipeWG slot so main can join it before closing the store.
 func pipe(ctx context.Context, wg *sync.WaitGroup, in <-chan feed.Event, core *md.Core, journal *store.Store) {
 	defer wg.Done()
 	sys := clock.System{}
@@ -181,84 +344,13 @@ func pipe(ctx context.Context, wg *sync.WaitGroup, in <-chan feed.Event, core *m
 		case <-ctx.Done():
 			return
 		case ev, ok := <-in:
-			if !ok { // replay feed exhausted
+			if !ok {
 				return
 			}
 			if journal != nil {
 				journal.RecordEvent(ev, sys.Now().UnixMilli())
 			}
 			core.Feed(ev)
-		}
-	}
-}
-
-func setupIndicators(core *md.Core, focus []string) {
-	if len(focus) == 0 {
-		return
-	}
-	f := focus[0]
-	core.EnsureIndicator("harness-vwap", md.IndicatorSpec{Symbol: f, TF: session.TF1m, Type: md.IndVWAP})
-	core.EnsureIndicator("harness-ema9", md.IndicatorSpec{Symbol: f, TF: session.TF1m, Type: md.IndEMA,
-		Params: map[string]float64{"period": 9}})
-}
-
-func drainMarks(ctx context.Context, core *md.Core) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-core.Marks():
-		}
-	}
-}
-
-func drainUpdates(ctx context.Context, log *slog.Logger, core *md.Core, archive *store.Store, verbose bool) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case u := <-core.Updates():
-			switch v := u.(type) {
-			case md.BarUpdate:
-				if v.Bar.InProgress {
-					continue
-				}
-				if archive != nil {
-					b := feed.Bar{Symbol: v.Bar.Symbol, BucketMs: v.Bar.BucketMs,
-						O: v.Bar.O, H: v.Bar.H, L: v.Bar.L, C: v.Bar.C, Volume: v.Bar.V}
-					switch v.Bar.TF {
-					case session.TF1m:
-						archive.ArchiveBar1m(b)
-					case session.TFDay:
-						archive.ArchiveDaily(b)
-					}
-				}
-				log.Info("bar", "sym", v.Bar.Symbol, "tf", v.Bar.TF, "bucket", v.Bar.BucketMs,
-					"o", v.Bar.O, "h", v.Bar.H, "l", v.Bar.L, "c", v.Bar.C,
-					"v", v.Bar.V, "delta", v.Bar.BuyV-v.Bar.SellV, "ticks", v.Bar.Ticks, "gap", v.Bar.Gap)
-			case md.IndicatorUpdate:
-				if v.Snapshot {
-					log.Info("indicator snapshot", "id", v.InstanceID, "key", v.SeriesKey, "points", len(v.Points))
-				}
-			case md.MismatchUpdate:
-				log.Warn("1m mismatch", "sym", v.Symbol, "bucket", v.BucketMs, "detail", v.Detail)
-			case md.ConnUpdate:
-				log.Info("feed connection", "up", v.Up)
-			case md.ResyncedUpdate:
-				log.Info("feed resynced")
-			case md.QuoteUpdate:
-				if verbose {
-					log.Info("quote", "sym", v.Quote.Symbol, "last", v.Quote.Last)
-				}
-			case md.BookUpdate:
-				if verbose {
-					log.Info("book", "sym", v.Book.Symbol, "bids", len(v.Book.Bids), "asks", len(v.Book.Asks))
-				}
-			case md.TapeUpdate:
-				if verbose {
-					log.Info("tape", "sym", v.Symbol, "ticks", len(v.Ticks))
-				}
-			}
 		}
 	}
 }
