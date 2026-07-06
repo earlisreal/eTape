@@ -266,6 +266,82 @@ func TestCancelAll_ErrorStatusNeverSilentlyAccepted(t *testing.T) {
 	}
 }
 
+// TestCancelAll_NoSymbol_207PartialFailureIsReported is the critical review
+// finding's regression test: Alpaca answers a partially-failed account-wide
+// cancel-all with HTTP 207 (an outer status < 400) and a per-item array
+// where individual entries carry their own >=400 status. The prior code only
+// checked the outer status and returned nil on any <400 response, silently
+// reporting a clean success even though one order failed to cancel.
+func TestCancelAll_NoSymbol_207PartialFailureIsReported(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(`[{"id":"b-1","status":200},{"id":"b-2","status":500,"body":{"message":"internal error"}}]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.cancelAll(context.Background(), ""); err == nil {
+		t.Fatal("expected a 207 mixed-result cancel-all to surface the failed item as an error")
+	}
+}
+
+// TestCancelAll_NoSymbol_207AllSuccessIsNotAnError confirms the fix
+// discriminates rather than always erroring on 207: an all-success 207 (or
+// plain 200) with every item's own status < 400 must still return nil.
+func TestCancelAll_NoSymbol_207AllSuccessIsNotAnError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(`[{"id":"b-1","status":200},{"id":"b-2","status":200}]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.cancelAll(context.Background(), ""); err != nil {
+		t.Fatalf("expected an all-success 207 to return nil, got %v", err)
+	}
+}
+
+// TestFlatten_207PartialFailureIsReported mirrors the cancel-all case for
+// flatten: flatten is eTape's documented emergency kill-switch, so a
+// partial-failure 207 (some positions closed, some not) must surface as an
+// error rather than a silent nil that could make an operator believe the
+// account is flat during a live incident.
+func TestFlatten_207PartialFailureIsReported(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/positions", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(`[{"symbol":"AAPL","status":200},{"symbol":"TSLA","status":422,"body":{"message":"position not found"}}]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.flatten(context.Background()); err == nil {
+		t.Fatal("expected a 207 mixed-result flatten to surface the failed item as an error")
+	}
+}
+
+// TestFlatten_207AllSuccessIsNotAnError confirms flatten also discriminates:
+// an all-success 207 (or plain 200) must still return nil.
+func TestFlatten_207AllSuccessIsNotAnError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/positions", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusMultiStatus)
+		_, _ = w.Write([]byte(`[{"symbol":"AAPL","status":200},{"symbol":"TSLA","status":200}]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.flatten(context.Background()); err != nil {
+		t.Fatalf("expected an all-success 207 to return nil, got %v", err)
+	}
+}
+
 // TestCancelAll_WithSymbol_ListsThenCancelsEach verifies the symbol-scoped
 // path per the brief: list open orders filtered by symbol, then cancel each
 // individually (Alpaca's cancel-all has no symbol filter of its own).

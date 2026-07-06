@@ -195,11 +195,57 @@ func (rc *restClient) cancelOrder(ctx context.Context, brokerID string) error {
 	return nil
 }
 
+// alpacaBatchItem is one entry in the per-item result array Alpaca returns
+// from its batch DELETE endpoints (account-wide `DELETE /v2/orders` and
+// `DELETE /v2/positions`). These endpoints answer HTTP 207 Multi-Status on a
+// partial batch failure: the OUTER status stays below 400, but each item
+// carries its own status (e.g. `{"id":"...","status":500,"body":{...}}` for
+// orders, `{"symbol":"...","status":422,"body":{...}}` for positions), so a
+// caller that only checks the outer status can silently miss a failed
+// cancel/close.
+type alpacaBatchItem struct {
+	ID     string          `json:"id,omitempty"`
+	Symbol string          `json:"symbol,omitempty"`
+	Status int             `json:"status"`
+	Body   json.RawMessage `json:"body,omitempty"`
+}
+
+// checkBatchItems inspects a batch-DELETE response body (already confirmed
+// to have an outer status < 400) for per-item failures. It decodes the body
+// as a JSON array of alpacaBatchItem and joins an error for every item whose
+// own status is >= 400, mirroring the errors.Join pattern the symbol-scoped
+// cancelAll path already uses per-order. A body that isn't a JSON array (an
+// empty body, or any other shape) is treated as success rather than an
+// error: Alpaca's documented "nothing to cancel/flatten" response for these
+// two endpoints is a plain 200, and this must never invent a false failure
+// out of a shape it doesn't recognize -- only a genuine per-item >=400 status
+// counts.
+func checkBatchItems(body []byte) error {
+	var items []alpacaBatchItem
+	if err := json.Unmarshal(body, &items); err != nil {
+		return nil
+	}
+	var errs []error
+	for _, it := range items {
+		if it.Status >= 400 {
+			label := it.ID
+			if label == "" {
+				label = it.Symbol
+			}
+			errs = append(errs, fmt.Errorf("item %s: status=%d body=%s", label, it.Status, it.Body))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // cancelAll cancels every open order. With no symbol it is a single
 // account-wide `DELETE /v2/orders` (Alpaca's native cancel-all has no
-// symbol filter). With a symbol it lists open orders scoped to that symbol
-// (`GET /v2/orders?status=open&symbols=...`) and cancels each individually,
-// joining any per-order failures rather than stopping at the first one.
+// symbol filter); Alpaca answers this with HTTP 207 on a partial failure, so
+// the per-item array is inspected via checkBatchItems rather than trusting a
+// <400 outer status alone. With a symbol it lists open orders scoped to that
+// symbol (`GET /v2/orders?status=open&symbols=...`) and cancels each
+// individually, joining any per-order failures rather than stopping at the
+// first one.
 func (rc *restClient) cancelAll(ctx context.Context, symbol string) error {
 	if symbol == "" {
 		resp, err := rc.do(ctx, http.MethodDelete, "/v2/orders", nil)
@@ -214,7 +260,7 @@ func (rc *restClient) cancelAll(ctx context.Context, symbol string) error {
 		if resp.StatusCode >= 400 {
 			return apiError(resp.StatusCode, body)
 		}
-		return nil
+		return checkBatchItems(body)
 	}
 
 	q := url.Values{"status": {"open"}, "symbols": {symbol}}
@@ -244,7 +290,11 @@ func (rc *restClient) cancelAll(ctx context.Context, symbol string) error {
 }
 
 // flatten DELETEs every position (`DELETE /v2/positions`) — Alpaca's native
-// flatten-all, which TradeZero has no equivalent for at all.
+// flatten-all, which TradeZero has no equivalent for at all. This is eTape's
+// documented emergency kill-switch, so a partial-failure 207 (some positions
+// closed, some not) must never be reported as a clean nil the way a plain
+// outer-status check would: the per-item array is always inspected via
+// checkBatchItems.
 func (rc *restClient) flatten(ctx context.Context) error {
 	resp, err := rc.do(ctx, http.MethodDelete, "/v2/positions", nil)
 	if err != nil {
@@ -258,7 +308,7 @@ func (rc *restClient) flatten(ctx context.Context) error {
 	if resp.StatusCode >= 400 {
 		return apiError(resp.StatusCode, body)
 	}
-	return nil
+	return checkBatchItems(body)
 }
 
 // alpacaAccount is GET /v2/account's response shape. Every numeric field
