@@ -289,3 +289,71 @@ func TestWS_DeadConnectionReconnectsWithBackoff(t *testing.T) {
 	}
 	t.Fatal("client did not reconnect after the dead connection within the safety bound")
 }
+
+// TestWS_StaleReadTriggersReconnect covers the liveness timer: Alpaca's
+// trade_updates stream has no server ping/pong, so a connection that
+// silently stops delivering frames is only detected by readFrame's deadline
+// (staleTimeout, wrapping c.Read in context.WithTimeout). This is a distinct
+// code path from TestWS_DeadConnectionReconnectsWithBackoff, which triggers
+// via an abrupt close and produces an immediate read error rather than a
+// deadline expiry. The test shortens staleTimeout (default 30s) to keep this
+// fast, and bounds its own wait so a regression that makes the client hang
+// can't hang the test suite forever.
+func TestWS_StaleReadTriggersReconnect(t *testing.T) {
+	srv, dialCount := mockWSServer(func(ctx context.Context, c *websocket.Conn, dialN int) {
+		_, _, _ = c.Read(ctx) // auth
+		_ = c.Write(ctx, websocket.MessageText, []byte(`{"stream":"authorization","data":{"status":"authorized"}}`))
+		_, _, _ = c.Read(ctx) // listen
+		if dialN == 1 {
+			// Go silent past the client's shortened stale timeout instead of
+			// sending anything — no close, no error frame, no more writes.
+			// The client must notice via its own read deadline, since this
+			// protocol has no server ping/pong.
+			<-ctx.Done()
+			return
+		}
+		// Second connection: prove the client reconnected and is talking
+		// normally again, not just retrying the dial in a broken state.
+		_ = c.Write(ctx, websocket.MessageText, []byte(`{"stream":"trade_updates","data":{"event":"new","order":{"client_order_id":"ET-c","symbol":"AAPL","side":"buy","order_type":"limit","qty":"1","status":"new"}}}`))
+		<-ctx.Done()
+	})
+	defer srv.Close()
+	wsURL := "ws" + srv.URL[len("http"):]
+
+	var mu sync.Mutex
+	var connEvents []bool
+	ws := newWSClient(wsURL, "K", "S", clock.System{},
+		func(tradeUpdate) {},
+		func(up bool) { mu.Lock(); connEvents = append(connEvents, up); mu.Unlock() })
+	ws.staleTimeout = 50 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	go ws.run(ctx)
+
+	// Safety bound for this test's own wait: the run() backoff between
+	// sessions starts at 1s (netx.Backoff{Min: time.Second}), so allow
+	// generous headroom above staleTimeout + Min backoff without letting a
+	// genuine hang stall the suite.
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if atomic.LoadInt32(dialCount) >= 2 {
+			mu.Lock()
+			evs := append([]bool(nil), connEvents...)
+			mu.Unlock()
+			sawDisconnect := false
+			for _, up := range evs {
+				if !up {
+					sawDisconnect = true
+					break
+				}
+			}
+			if !sawDisconnect {
+				t.Fatalf("expected onConn(false) after the stale-read timeout, got %v", evs)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("client did not reconnect after the stale-read timeout within the safety bound")
+}

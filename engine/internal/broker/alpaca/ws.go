@@ -33,9 +33,9 @@ type wsClient struct {
 	clk                clock.Clock
 	onUpdate           func(tradeUpdate)
 	onConn             func(up bool)
-	// staleTimeout overrides defaultStaleTimeout; tests set this to a short
-	// duration directly on the returned struct to exercise the stale-read
-	// path without a real 30s wait.
+	// staleTimeout overrides defaultStaleTimeout; TestWS_StaleReadTriggersReconnect
+	// sets this to a short duration directly on the returned struct to
+	// exercise the stale-read path without a real 30s wait.
 	staleTimeout time.Duration
 }
 
