@@ -49,7 +49,19 @@ export function OrderSettingsModal(
               </>
             )}
             <input data-testid={`tmpl-hotkey-${t.id}`} readOnly value={t.hotkey ?? ""} placeholder="press keys"
-              onKeyDown={(e) => { e.preventDefault(); const c = normalizeCombo(e); if (c) patch(t.id, { hotkey: c }); }} style={{ ...inp, width: 110 }} />
+              onKeyDown={(e) => {
+                // Must stop propagation, not just preventDefault: the real hotkey
+                // engine (useHotkeys, mounted globally in AppShell) listens on
+                // `window` in the bubble phase. Without this, a candidate combo
+                // typed here while capturing a binding can also be a *live* combo
+                // (e.g. default Ctrl+Shift+K = KillSwitch, Ctrl+1..4 = place
+                // templates) and fire the real action — this settings screen must
+                // stay inert with zero order-safety authority.
+                e.preventDefault();
+                e.stopPropagation();
+                const c = normalizeCombo(e);
+                if (c) patch(t.id, { hotkey: c });
+              }} style={{ ...inp, width: 110 }} />
             <button onClick={() => removeTemplate(t.id)} style={{ ...inp, color: palette.danger, cursor: "pointer" }}>remove</button>
           </div>
         ))}
