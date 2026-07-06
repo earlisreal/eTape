@@ -18,6 +18,11 @@ type Broker interface {
 	ReplaceOrder(ctx context.Context, orderID string, req ReplaceRequest) error
 	CancelOrder(ctx context.Context, orderID string) error
 	CancelAll(ctx context.Context, symbol string) error
+	// Flatten closes all open positions on the venue via the broker's native
+	// close-all primitive (Alpaca DELETE /v2/positions). Venues whose
+	// Capabilities.FlattenAll is false return an "unsupported" error and the
+	// Core never calls it.
+	Flatten(ctx context.Context) error
 	Snapshot(ctx context.Context) (AccountSnapshot, []Position, []Order, error)
 	Events() <-chan BrokerEvent
 }

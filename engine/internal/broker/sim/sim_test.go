@@ -165,6 +165,29 @@ func filledAt(t *testing.T, evs []exec.BrokerEvent) (exec.OrderFilled, bool) {
 	return exec.OrderFilled{}, false
 }
 
+func TestSim_Flatten_ZeroesPositions(t *testing.T) {
+	b := newSim(t)
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, b) // OrderAccepted
+	drain(t, b) // OrderFilled
+	drain(t, b) // BrokerPositions (from the fill)
+	if err := b.Flatten(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := drain(t, b).(exec.BrokerPositions); !ok {
+		t.Fatal("Flatten should emit a BrokerPositions reconcile")
+	}
+	_, pos, _, _ := b.Snapshot(context.Background())
+	for _, p := range pos {
+		if p.Qty != 0 {
+			t.Fatalf("Flatten should zero %s, got %v", p.Symbol, p.Qty)
+		}
+	}
+}
+
 func TestSim_BuyStop_TriggersOnMarkAtOrAboveStop(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
 	b := New("v", clk)

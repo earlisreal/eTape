@@ -10,6 +10,7 @@ import (
 	"errors"
 	"math/rand"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -161,5 +162,122 @@ func TestCoreAppendFailureBlocksSubmit(t *testing.T) {
 	}
 	if ack.Reason == "" {
 		t.Fatalf("blocked ack should carry a reason, got %+v", ack)
+	}
+}
+
+// capStub is a minimal fake exec.Broker used only to exercise the
+// Capabilities.FlattenAll-gated reject branch of Core.handleFlatten: SimBroker
+// always reports FlattenAll:true, so it can never take that branch. capStub
+// implements every exec.Broker method faithfully (the compiler enforces all
+// of them); only Capabilities and Flatten do anything interesting.
+type capStub struct {
+	flatten bool // value Capabilities().FlattenAll reports
+
+	mu     sync.Mutex
+	called bool
+	ev     chan exec.BrokerEvent
+}
+
+var _ exec.Broker = (*capStub)(nil)
+
+func (c *capStub) Capabilities() exec.Capabilities {
+	return exec.Capabilities{FlattenAll: c.flatten}
+}
+
+func (c *capStub) SubmitOrder(context.Context, exec.OrderRequest) (exec.OrderAck, error) {
+	return exec.OrderAck{}, errors.New("capStub: not implemented")
+}
+
+func (c *capStub) ReplaceOrder(context.Context, string, exec.ReplaceRequest) error {
+	return errors.New("capStub: not implemented")
+}
+
+func (c *capStub) CancelOrder(context.Context, string) error {
+	return errors.New("capStub: not implemented")
+}
+
+func (c *capStub) CancelAll(context.Context, string) error {
+	return errors.New("capStub: not implemented")
+}
+
+func (c *capStub) Snapshot(context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {
+	return exec.AccountSnapshot{}, nil, nil, nil
+}
+
+func (c *capStub) Events() <-chan exec.BrokerEvent { return c.ev }
+
+func (c *capStub) Flatten(context.Context) error {
+	c.mu.Lock()
+	c.called = true
+	c.mu.Unlock()
+	return nil
+}
+
+// flattenCalled polls briefly for Flatten to have been invoked: handleFlatten
+// dispatches it from a goroutine, so the caller can't assume it has already
+// run the instant Do returns.
+func (c *capStub) flattenCalled() bool {
+	deadline := time.Now().Add(time.Second)
+	for {
+		c.mu.Lock()
+		called := c.called
+		c.mu.Unlock()
+		if called {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// buildCoreWith wires a single-venue Core ("v") around cs, a capStub broker,
+// for tests that need to control Capabilities directly rather than through a
+// real sim.Broker (which always reports FlattenAll:true).
+func buildCoreWith(t *testing.T, b *capStub) (*exec.Core, *capStub) {
+	t.Helper()
+	b.ev = make(chan exec.BrokerEvent)
+	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
+	st, err := store.Open(store.Options{Path: filepath.Join(t.TempDir(), "e.db"), Clock: clk})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+	cfg := exec.CoreConfig{
+		Venues: []exec.VenueID{"v"},
+		Gate: exec.GateConfig{
+			Global: exec.GlobalLimits{MaxDayLoss: 1000, MaxSymbolPositionShares: 1000, MaxSymbolPositionValue: 1_000_000},
+			Venue:  map[exec.VenueID]exec.VenueLimits{"v": {MaxOrderValue: 100000, MaxPositionValue: 1_000_000, MaxPositionShares: 1000, MaxOpenOrders: 10}},
+		},
+		Store:   st,
+		Brokers: map[exec.VenueID]exec.Broker{"v": b},
+		Clock:   clk,
+		IDGen:   exec.NewOrderIDGen(clk, rand.New(rand.NewSource(1))),
+	}
+	c := exec.NewCore(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	if err := c.Recover(ctx); err != nil {
+		cancel()
+		t.Fatal(err)
+	}
+	go func() { _ = c.Run(ctx) }()
+	t.Cleanup(cancel)
+	return c, b
+}
+
+func TestCore_Flatten_RequiresFlattenCapability(t *testing.T) {
+	// A venue whose broker advertises FlattenAll=false must reject Flatten.
+	c, _ := buildCoreWith(t, &capStub{flatten: false})
+	if ack := c.Do(exec.Flatten{Venue: "v"}); ack.Accepted {
+		t.Fatal("Flatten must be rejected when FlattenAll is false")
+	}
+	// FlattenAll=true is accepted.
+	c2, b := buildCoreWith(t, &capStub{flatten: true})
+	if ack := c2.Do(exec.Flatten{Venue: "v"}); !ack.Accepted {
+		t.Fatalf("Flatten should be accepted: %q", ack.Reason)
+	}
+	if !b.flattenCalled() {
+		t.Fatal("Core should have invoked Broker.Flatten")
 	}
 }

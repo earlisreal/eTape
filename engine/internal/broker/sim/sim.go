@@ -285,6 +285,23 @@ func (b *Broker) CancelAll(_ context.Context, symbol string) error {
 	return nil
 }
 
+// Flatten zeroes every position and emits a reconcile. (Real brokers close via
+// market orders that arrive back as fills; the sim shortcuts to a flat
+// reconcile — sufficient for E2E/practice.)
+func (b *Broker) Flatten(_ context.Context) error {
+	b.mu.Lock()
+	for _, p := range b.pos {
+		p.Qty = 0
+		p.AvgPrice = 0
+	}
+	post := []exec.BrokerEvent{exec.BrokerPositions{V: b.venue, Positions: b.positionsLocked()}}
+	b.mu.Unlock()
+	for _, e := range post {
+		b.emit(e)
+	}
+	return nil
+}
+
 func (b *Broker) Snapshot(_ context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
