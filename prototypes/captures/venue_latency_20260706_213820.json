@@ -1,0 +1,65 @@
+{
+ "symbol": "NVDA",
+ "timelines": [
+  {
+   "venue": "alpaca",
+   "side": "buy",
+   "cycle": 1,
+   "cold": true,
+   "t_send": 2614.7280829027295,
+   "api_return_ms": 198.4,
+   "ack_ms": 291.0,
+   "fill_ms": null,
+   "order_id": "b73ae4b3-4b29-4a54-b286-f19b18c06595",
+   "fill_price": null
+  },
+  {
+   "venue": "moomoo",
+   "side": "buy",
+   "cycle": 1,
+   "cold": true,
+   "t_send": 28467.842707876116,
+   "api_return_ms": 282.0,
+   "ack_ms": 278.4,
+   "fill_ms": 900.7,
+   "order_id": "FS1CC8C665C0527000",
+   "fill_price": 194.71
+  },
+  {
+   "venue": "moomoo",
+   "side": "sell",
+   "cycle": 1,
+   "cold": false,
+   "t_send": 29939.119541086257,
+   "api_return_ms": 260.2,
+   "ack_ms": 256.5,
+   "fill_ms": 941.6,
+   "order_id": "FS1CC8C66730527000",
+   "fill_price": 194.6735
+  },
+  {
+   "venue": "moomoo",
+   "side": "buy",
+   "cycle": 2,
+   "cold": false,
+   "t_send": 31945.37141593173,
+   "api_return_ms": 272.5,
+   "ack_ms": 269.9,
+   "fill_ms": 961.9,
+   "order_id": "FS1CC8C66925D27000",
+   "fill_price": 194.6119
+  },
+  {
+   "venue": "moomoo",
+   "side": "sell",
+   "cycle": 2,
+   "cold": false,
+   "t_send": 33468.614040873945,
+   "api_return_ms": 269.2,
+   "ack_ms": 266.2,
+   "fill_ms": 897.9,
+   "order_id": "FS1CC8C66AA37A1000",
+   "fill_price": 194.6401
+  }
+ ]
+}

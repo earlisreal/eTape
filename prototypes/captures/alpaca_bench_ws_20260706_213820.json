@@ -1,0 +1,177 @@
+[
+ {
+  "t_ms": 1990.0,
+  "encoding": "json-in-binary",
+  "frame": {
+   "stream": "authorization",
+   "data": {
+    "action": "authenticate",
+    "status": "authorized"
+   }
+  }
+ },
+ {
+  "t_ms": 2179.0,
+  "encoding": "json-in-binary",
+  "frame": {
+   "stream": "listening",
+   "data": {
+    "streams": [
+     "trade_updates"
+    ]
+   }
+  }
+ },
+ {
+  "t_ms": 2822.1,
+  "encoding": "json-in-binary",
+  "frame": {
+   "stream": "trade_updates",
+   "data": {
+    "at": "2026-07-06T13:37:47.525335Z",
+    "event_id": "01KWVTCDG57CNWY0K5Z1KF3XC1",
+    "event": "pending_new",
+    "timestamp": "2026-07-06T13:37:47.525335484Z",
+    "order": {
+     "id": "b73ae4b3-4b29-4a54-b286-f19b18c06595",
+     "client_order_id": "et-bench-buy-1-133747349702",
+     "created_at": "2026-07-06T13:37:47.522280064Z",
+     "updated_at": "2026-07-06T13:37:47.523539374Z",
+     "submitted_at": "2026-07-06T13:37:47.522280064Z",
+     "filled_at": null,
+     "expired_at": null,
+     "cancel_requested_at": null,
+     "canceled_at": null,
+     "failed_at": null,
+     "replaced_at": null,
+     "replaced_by": null,
+     "replaces": null,
+     "asset_id": "4ce9353c-66d1-46c2-898f-fce867ab0247",
+     "symbol": "NVDA",
+     "asset_class": "us_equity",
+     "notional": null,
+     "qty": "1",
+     "filled_qty": "0",
+     "filled_avg_price": null,
+     "order_class": "",
+     "order_type": "limit",
+     "type": "limit",
+     "side": "buy",
+     "position_intent": "buy_to_open",
+     "time_in_force": "day",
+     "limit_price": "195.21",
+     "stop_price": null,
+     "status": "pending_new",
+     "extended_hours": false,
+     "legs": null,
+     "trail_percent": null,
+     "trail_price": null,
+     "hwm": null,
+     "expires_at": "2026-07-06T20:00:00Z"
+    }
+   }
+  }
+ },
+ {
+  "t_ms": 2905.7,
+  "encoding": "json-in-binary",
+  "frame": {
+   "stream": "trade_updates",
+   "data": {
+    "at": "2026-07-06T13:37:47.612797Z",
+    "event_id": "01KWVTCDJW7H93XTWNRD8HS3W8",
+    "event": "new",
+    "timestamp": "2026-07-06T13:37:47.610131741Z",
+    "order": {
+     "id": "b73ae4b3-4b29-4a54-b286-f19b18c06595",
+     "client_order_id": "et-bench-buy-1-133747349702",
+     "created_at": "2026-07-06T13:37:47.522280064Z",
+     "updated_at": "2026-07-06T13:37:47.611057752Z",
+     "submitted_at": "2026-07-06T13:37:47.610132091Z",
+     "filled_at": null,
+     "expired_at": null,
+     "cancel_requested_at": null,
+     "canceled_at": null,
+     "failed_at": null,
+     "replaced_at": null,
+     "replaced_by": null,
+     "replaces": null,
+     "asset_id": "4ce9353c-66d1-46c2-898f-fce867ab0247",
+     "symbol": "NVDA",
+     "asset_class": "us_equity",
+     "notional": null,
+     "qty": "1",
+     "filled_qty": "0",
+     "filled_avg_price": null,
+     "order_class": "",
+     "order_type": "limit",
+     "type": "limit",
+     "side": "buy",
+     "position_intent": "buy_to_open",
+     "time_in_force": "day",
+     "limit_price": "195.21",
+     "stop_price": null,
+     "status": "new",
+     "extended_hours": false,
+     "legs": null,
+     "trail_percent": null,
+     "trail_price": null,
+     "hwm": null,
+     "expires_at": "2026-07-06T20:00:00Z"
+    },
+    "execution_id": "7d37130b-4816-40a6-9be9-6fae00d0bc0a"
+   }
+  }
+ },
+ {
+  "t_ms": 28051.5,
+  "encoding": "json-in-binary",
+  "frame": {
+   "stream": "trade_updates",
+   "data": {
+    "at": "2026-07-06T13:38:12.752811Z",
+    "event_id": "01KWVTD64GSWFQDNCJ74BEJP3H",
+    "event": "canceled",
+    "timestamp": "2026-07-06T13:38:12.750242203Z",
+    "order": {
+     "id": "b73ae4b3-4b29-4a54-b286-f19b18c06595",
+     "client_order_id": "et-bench-buy-1-133747349702",
+     "created_at": "2026-07-06T13:37:47.522280064Z",
+     "updated_at": "2026-07-06T13:38:12.751873903Z",
+     "submitted_at": "2026-07-06T13:37:47.610132091Z",
+     "filled_at": null,
+     "expired_at": null,
+     "cancel_requested_at": "2026-07-06T13:38:12.741199743Z",
+     "canceled_at": "2026-07-06T13:38:12.750242203Z",
+     "failed_at": null,
+     "replaced_at": null,
+     "replaced_by": null,
+     "replaces": null,
+     "asset_id": "4ce9353c-66d1-46c2-898f-fce867ab0247",
+     "symbol": "NVDA",
+     "asset_class": "us_equity",
+     "notional": null,
+     "qty": "1",
+     "filled_qty": "0",
+     "filled_avg_price": null,
+     "order_class": "",
+     "order_type": "limit",
+     "type": "limit",
+     "side": "buy",
+     "position_intent": "buy_to_open",
+     "time_in_force": "day",
+     "limit_price": "195.21",
+     "stop_price": null,
+     "status": "canceled",
+     "extended_hours": false,
+     "legs": null,
+     "trail_percent": null,
+     "trail_price": null,
+     "hwm": null,
+     "expires_at": "2026-07-06T20:00:00Z"
+    },
+    "execution_id": "f0ba5d71-f9c6-4cd8-8ff0-07f282f4fa9b"
+   }
+  }
+ }
+]

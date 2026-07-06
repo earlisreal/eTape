@@ -39,7 +39,12 @@ from zoneinfo import ZoneInfo
 SYMBOL_DEFAULT = 'F'            # cheap, liquid, penny spread
 PRICE_GUARD = 30.0              # abort if last > this (cheap-symbol rule)
 SPREAD_GUARD = 0.02             # abort if (ask-bid)/mid > 2%
-BUY_BUFFER = 0.03               # marketable limit: ask + buffer / bid - buffer
+BUY_BUFFER_MIN = 0.03           # marketable limit: ask + buffer / bid - buffer
+BUY_BUFFER_PCT = 0.002          # 0.2% of price — flat 3¢ is too tight on a $200 mover
+
+
+def buffer(px: float) -> float:
+    return max(BUY_BUFFER_MIN, round(px * BUY_BUFFER_PCT, 2))
 CAPTURE_DIR = Path(__file__).parent / 'captures'
 ET = ZoneInfo('America/New_York')
 ETH_MODE = False                # set by --eth: extended-hours order forms
@@ -254,6 +259,16 @@ class TZVenue:
             self.rest('DELETE', f'/v1/api/accounts/{self.acct}/orders/{coid}')
         return tl, filled
 
+    def sweep_orphans(self):
+        _, _, body = self.rest('GET', f'/v1/api/accounts/{self.acct}/orders')
+        rows = body.get('orders', body if isinstance(body, list) else []) or []
+        for r in rows:
+            coid = r.get('clientOrderId', '')
+            if coid.startswith('ET-BENCH') and r.get('orderStatus') not in (
+                    'Filled', 'Canceled', 'Cancelled', 'Rejected', 'Expired'):
+                print(f'  !! orphaned bench order {coid} ({r.get("orderStatus")}) — cancelling')
+                self.rest('DELETE', f'/v1/api/accounts/{self.acct}/orders/{coid}')
+
     def position_qty(self):
         _, _, body = self.rest('GET', f'/v1/api/accounts/{self.acct}/positions')
         rows = body if isinstance(body, list) else (body.get('positions', []) if isinstance(body, dict) else [])
@@ -385,6 +400,13 @@ class AlpacaVenue:
             self.rest('DELETE', f'/v2/orders/{tl.d["order_id"]}')
         return tl, filled
 
+    def sweep_orphans(self):
+        _, status, rows = self.rest('GET', '/v2/orders?status=open')
+        for r in (rows if isinstance(rows, list) else []):
+            if r.get('client_order_id', '').startswith('et-bench'):
+                print(f'  !! orphaned bench order {r["client_order_id"]} — cancelling')
+                self.rest('DELETE', f'/v2/orders/{r["id"]}')
+
     def position_qty(self):
         _, status, body = self.rest('GET', f'/v2/positions/{self.symbol}')
         if status == 404:
@@ -491,6 +513,19 @@ class MoomooVenue:
                                   trd_env=TrdEnv.REAL, acc_id=self.acc_id)
         return tl, filled
 
+    def sweep_orphans(self):
+        from moomoo import ModifyOrderOp, RET_OK, TrdEnv
+        ret, df = self.ctx.order_list_query(trd_env=TrdEnv.REAL, acc_id=self.acc_id,
+                                            refresh_cache=True)
+        if ret != RET_OK:
+            return
+        for r in df.to_dict('records'):
+            if str(r.get('remark', '')).startswith('ET-BENCH') and \
+               r.get('order_status') in ('SUBMITTED', 'SUBMITTING', 'WAITING_SUBMIT'):
+                print(f'  !! orphaned bench order {r["order_id"]} — cancelling')
+                self.ctx.modify_order(ModifyOrderOp.CANCEL, r['order_id'], 0, 0,
+                                      trd_env=TrdEnv.REAL, acc_id=self.acc_id)
+
     def position_qty(self):
         from moomoo import RET_OK, TrdEnv
         ret, df = self.ctx.position_list_query(code=self.symbol, trd_env=TrdEnv.REAL,
@@ -514,6 +549,7 @@ VENUES = {'tz': TZVenue, 'alpaca': AlpacaVenue, 'moomoo': MoomooVenue}
 def run_venue(venue, cycles, timelines):
     print(f'\n=== {venue.name} ===')
     venue.connect()
+    venue.sweep_orphans()
     start_qty = venue.position_qty()
     if start_qty != 0:
         print(f'  !! pre-existing {venue.symbol if hasattr(venue, "symbol") else ""} '
@@ -521,7 +557,7 @@ def run_venue(venue, cycles, timelines):
         return
     for cycle in range(1, cycles + 1):
         bid, ask, _ = guard_prices(SYMBOL)
-        tl, ok = venue.order('buy', ask + BUY_BUFFER, cycle, cold=(cycle == 1))
+        tl, ok = venue.order('buy', ask + buffer(ask), cycle, cold=(cycle == 1))
         timelines.append(tl.row())
         print(f'  {tl}')
         if not ok:
@@ -529,7 +565,7 @@ def run_venue(venue, cycles, timelines):
             break
         time.sleep(0.5)
         bid, ask, _ = guard_prices(SYMBOL)
-        sell_tl, sell_ok = venue.order('sell', max(bid - BUY_BUFFER, 0.01), cycle, cold=False)
+        sell_tl, sell_ok = venue.order('sell', max(bid - buffer(bid), 0.01), cycle, cold=False)
         timelines.append(sell_tl.row())
         print(f'  {sell_tl}')
         retries = 0
@@ -550,7 +586,7 @@ def run_venue(venue, cycles, timelines):
 
 
 def main():
-    global SYMBOL, ETH_MODE
+    global SYMBOL, ETH_MODE, PRICE_GUARD
     ap = argparse.ArgumentParser()
     ap.add_argument('--venues', default='alpaca')
     ap.add_argument('--symbol', default=SYMBOL_DEFAULT)
@@ -561,9 +597,13 @@ def main():
     ap.add_argument('--eth', action='store_true',
                     help='extended-hours mode: 04:00-20:00 ET window; TZ Day_Plus, '
                          'Alpaca extended_hours, moomoo fill_outside_rth')
+    ap.add_argument('--price-guard', type=float, default=PRICE_GUARD,
+                    help='abort if last > this (default $30; raise only with '
+                         'explicit authorization for a pricier symbol)')
     args = ap.parse_args()
     SYMBOL = args.symbol.upper()
     ETH_MODE = args.eth
+    PRICE_GUARD = args.price_guard
 
     wanted = [v.strip() for v in args.venues.split(',') if v.strip()]
     for v in wanted:

@@ -73,3 +73,21 @@ account is idle (11 pings / 600 s; no app-level frames). Staleness rule for the
 Go adapter: read deadline ~120 s (two missed pings) → reconnect + REST
 re-snapshot. Side-find: subscription name `Account` is rejected
 (`INVALID_DATA`) — valid subscriptions are `Order` and `Position`.
+
+## RTH amendment — cadence spot-check 09:42–09:44 ET (5 symbols)
+
+AAPL/TSLA/NVDA + LHSW/ZCMD for 120 s. RTH revises one pre-market conclusion:
+
+- **The 300 ms book cadence is not a hard floor on hot RTH symbols** — NVDA and
+  AAPL ORDER_BOOK pushed with **14–17 ms median gaps** (p95 still ~300 ms:
+  burst-then-lull, ~7 pushes/s sustained). Small caps stayed at ~292–296 ms
+  median. Pre-market's "hard 300 ms" holds only at lower activity.
+- TICKER at RTH: NVDA **~73 ticks/s** batched ~3.75/push (19.3 pushes/s,
+  50 ms median gap); TSLA 45 ticks/s; AAPL 35 ticks/s. QUOTE 7–9/s on
+  mega-caps; K_1M ~5/s (~200 ms coalescing).
+- Per-topic rates stay below 30 Hz per symbol → **30 Hz UI coalescing default
+  still stands** (per-surface keep-latest absorbs the book bursts).
+- Totals: 5-symbol RTH watchlist = **161 events/s, 225 KiB/s raw JSON**
+  (~2.5–3× the pre-market hot-gapper rate) → RTH journal for a 12-symbol day
+  likely ~400–600 MB/h raw; reinforces that the book payload (75% of bytes)
+  is where the encoding work goes.

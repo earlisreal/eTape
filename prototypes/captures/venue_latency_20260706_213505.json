@@ -1,0 +1,77 @@
+{
+ "symbol": "NVDA",
+ "timelines": [
+  {
+   "venue": "alpaca",
+   "side": "buy",
+   "cycle": 1,
+   "cold": true,
+   "t_send": 2413.7259577400982,
+   "api_return_ms": 201.0,
+   "ack_ms": 212.4,
+   "fill_ms": null,
+   "order_id": "b913928f-c837-4176-a368-4d19c64b6f3b",
+   "fill_price": null
+  },
+  {
+   "venue": "tz",
+   "side": "buy",
+   "cycle": 1,
+   "cold": true,
+   "t_send": 35600.91158282012,
+   "api_return_ms": 300.4,
+   "ack_ms": 362.7,
+   "fill_ms": 362.9,
+   "order_id": "ET-BENCH-buy-1-133434",
+   "fill_price": null
+  },
+  {
+   "venue": "tz",
+   "side": "sell",
+   "cycle": 1,
+   "cold": false,
+   "t_send": 36526.14483283833,
+   "api_return_ms": 308.2,
+   "ack_ms": 338.0,
+   "fill_ms": 439.2,
+   "order_id": "ET-BENCH-sell-1-133435",
+   "fill_price": null
+  },
+  {
+   "venue": "tz",
+   "side": "buy",
+   "cycle": 2,
+   "cold": false,
+   "t_send": 38030.995207838714,
+   "api_return_ms": 284.5,
+   "ack_ms": 332.3,
+   "fill_ms": 333.1,
+   "order_id": "ET-BENCH-buy-2-133436",
+   "fill_price": null
+  },
+  {
+   "venue": "tz",
+   "side": "sell",
+   "cycle": 2,
+   "cold": false,
+   "t_send": 38936.47237494588,
+   "api_return_ms": 294.8,
+   "ack_ms": 328.0,
+   "fill_ms": 328.4,
+   "order_id": "ET-BENCH-sell-2-133437",
+   "fill_price": null
+  },
+  {
+   "venue": "moomoo",
+   "side": "buy",
+   "cycle": 1,
+   "cold": true,
+   "t_send": 40711.59491688013,
+   "api_return_ms": 285.7,
+   "ack_ms": 282.7,
+   "fill_ms": null,
+   "order_id": "FS1CC8C59515527000",
+   "fill_price": null
+  }
+ ]
+}

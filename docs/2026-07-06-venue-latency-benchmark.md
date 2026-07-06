@@ -60,3 +60,35 @@ sweep before committing).
   work on the FUTUSG universal account.
 - **Alpaca:** ack (`new`) push trails the REST response by ~13 ms; paper stream
   again all JSON-in-binary frames.
+
+## RTH re-run — 2026-07-06 09:34–09:40 ET, symbol NVDA (per Earl: "something more volatile")
+
+Same script, RTH order forms (plain Day, no ETH flags), 1-share marketable
+limits on NVDA ~$194.5 (price guard raised via `--price-guard` with explicit
+authorization). Two lessons and one venue anomaly:
+
+| venue | API return | ack push | fill push | fills (buy/sell) |
+|---|---|---|---|---|
+| **TZ live** | 284–308 | 328–363 | **328–439** | 194.48/194.45, 194.30/194.2501 |
+| **moomoo live** | 260–282 | 256–278 (still beats the RPC return) | **898–962** | 194.71/194.6735, 194.6119/194.6401 |
+| **Alpaca paper** | 198 | 291 | *(no fills — see below)* | — |
+
+- **RTH ≈ pre-market on the wire.** Both live venues' API/ack numbers are
+  within noise of the pre-market run; fills likewise (TZ 0.33–0.44 s,
+  moomoo 0.90–0.96 s). Venue infrastructure latency is session-independent.
+- **Marketable-limit buffer lesson:** a flat 3¢ buffer failed on NVDA (1.5 bps
+  — price outran the limit; buys sat unfilled and were cancelled). Fixed to
+  `max(3¢, 0.2% of price)`; moomoo then filled 4/4. The eTape order ticket's
+  "marketable limit" preset should scale with price, not be a fixed offset.
+- **Alpaca paper matching engine stalled during RTH**: buys 39¢ above the ask,
+  then a plain **market order**, sat at `new` for >5 s with `clock.is_open`
+  true (pre-market fills earlier the same day were instant, 0.4–1.0 s).
+  Consequence for Plan 5/6 testing: **do not assume prompt Alpaca paper fills
+  in integration tests** — assert on `new` acks, treat fills as eventual.
+  Live fill quality remains unmeasurable until a live Alpaca account exists.
+- **IOC closed:** accepted during RTH on the standard account (HTTP 200) —
+  the "contact sales"/Elite footnote does not gate IOC submission. (Its
+  instant-cancel semantics couldn't be observed due to the same paper stall.)
+- Bench hardening added en route: pre-run orphan sweep (cancels any resting
+  `ET-BENCH*` orders from an interrupted run — one such orphan was found and
+  cleaned after a user-interrupted start), `--price-guard` flag.

@@ -1,0 +1,193 @@
+{
+ "watchlist": [
+  "US.AAPL",
+  "US.TSLA",
+  "US.NVDA",
+  "US.LHSW",
+  "US.ZCMD"
+ ],
+ "window_s": 120.0,
+ "summary": {
+  "US.AAPL/K_1M": {
+   "pushes_per_s": 4.88,
+   "rows": 586,
+   "bytes_per_s": 1259.7,
+   "gap_ms": {
+    "median": 200.8,
+    "min": 0.8
+   }
+  },
+  "US.AAPL/ORDER_BOOK": {
+   "pushes_per_s": 6.77,
+   "rows": 812,
+   "bytes_per_s": 27107.6,
+   "gap_ms": {
+    "median": 16.6,
+    "min": 0.2
+   }
+  },
+  "US.AAPL/QUOTE": {
+   "pushes_per_s": 7.43,
+   "rows": 892,
+   "bytes_per_s": 11591.1,
+   "gap_ms": {
+    "median": 100.8,
+    "min": 2.6
+   }
+  },
+  "US.AAPL/TICKER": {
+   "pushes_per_s": 14.75,
+   "rows": 4168,
+   "bytes_per_s": 8409.8,
+   "gap_ms": {
+    "median": 52.3,
+    "min": 2.5
+   }
+  },
+  "US.LHSW/K_1M": {
+   "pushes_per_s": 4.61,
+   "rows": 553,
+   "bytes_per_s": 1256.5,
+   "gap_ms": {
+    "median": 201.0,
+    "min": 0.5
+   }
+  },
+  "US.LHSW/ORDER_BOOK": {
+   "pushes_per_s": 5.97,
+   "rows": 716,
+   "bytes_per_s": 23816.8,
+   "gap_ms": {
+    "median": 292.2,
+    "min": 0.2
+   }
+  },
+  "US.LHSW/QUOTE": {
+   "pushes_per_s": 6.35,
+   "rows": 762,
+   "bytes_per_s": 9947.1,
+   "gap_ms": {
+    "median": 120.7,
+    "min": 7.2
+   }
+  },
+  "US.LHSW/TICKER": {
+   "pushes_per_s": 12.57,
+   "rows": 2971,
+   "bytes_per_s": 6454.6,
+   "gap_ms": {
+    "median": 55.0,
+    "min": 1.4
+   }
+  },
+  "US.NVDA/K_1M": {
+   "pushes_per_s": 5.01,
+   "rows": 601,
+   "bytes_per_s": 1304.1,
+   "gap_ms": {
+    "median": 200.8,
+    "min": 1.0
+   }
+  },
+  "US.NVDA/ORDER_BOOK": {
+   "pushes_per_s": 6.97,
+   "rows": 836,
+   "bytes_per_s": 22207.8,
+   "gap_ms": {
+    "median": 13.9,
+    "min": 0.2
+   }
+  },
+  "US.NVDA/QUOTE": {
+   "pushes_per_s": 7.75,
+   "rows": 930,
+   "bytes_per_s": 12090.2,
+   "gap_ms": {
+    "median": 101.3,
+    "min": 3.3
+   }
+  },
+  "US.NVDA/TICKER": {
+   "pushes_per_s": 19.34,
+   "rows": 8707,
+   "bytes_per_s": 17472.9,
+   "gap_ms": {
+    "median": 49.9,
+    "min": 1.1
+   }
+  },
+  "US.TSLA/K_1M": {
+   "pushes_per_s": 4.94,
+   "rows": 593,
+   "bytes_per_s": 1284.5,
+   "gap_ms": {
+    "median": 200.9,
+    "min": 75.2
+   }
+  },
+  "US.TSLA/ORDER_BOOK": {
+   "pushes_per_s": 6.47,
+   "rows": 777,
+   "bytes_per_s": 32129.6,
+   "gap_ms": {
+    "median": 291.4,
+    "min": 0.2
+   }
+  },
+  "US.TSLA/QUOTE": {
+   "pushes_per_s": 8.67,
+   "rows": 1041,
+   "bytes_per_s": 13509.5,
+   "gap_ms": {
+    "median": 97.2,
+    "min": 4.3
+   }
+  },
+  "US.TSLA/TICKER": {
+   "pushes_per_s": 16.43,
+   "rows": 5380,
+   "bytes_per_s": 10833.6,
+   "gap_ms": {
+    "median": 51.5,
+    "min": 1.0
+   }
+  },
+  "US.ZCMD/K_1M": {
+   "pushes_per_s": 3.87,
+   "rows": 464,
+   "bytes_per_s": 979.2,
+   "gap_ms": {
+    "median": 202.3,
+    "min": 72.3
+   }
+  },
+  "US.ZCMD/ORDER_BOOK": {
+   "pushes_per_s": 5.51,
+   "rows": 661,
+   "bytes_per_s": 18194.1,
+   "gap_ms": {
+    "median": 295.6,
+    "min": 0.1
+   }
+  },
+  "US.ZCMD/QUOTE": {
+   "pushes_per_s": 5.06,
+   "rows": 607,
+   "bytes_per_s": 7854.1,
+   "gap_ms": {
+    "median": 173.2,
+    "min": 6.1
+   }
+  },
+  "US.ZCMD/TICKER": {
+   "pushes_per_s": 7.94,
+   "rows": 1471,
+   "bytes_per_s": 2990.9,
+   "gap_ms": {
+    "median": 74.0,
+    "min": 2.4
+   }
+  }
+ },
+ "est_16h_mb": 13288.0
+}
