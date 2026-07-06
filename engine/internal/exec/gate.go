@@ -32,10 +32,11 @@ func signedQty(req OrderRequest) float64 {
 }
 
 // orderValue values an order for the max-order-value / position-value checks:
-//   Limit      -> limit price
-//   StopLimit  -> limit price (it triggers into a limit at that price)
-//   Stop       -> stop price (triggers into a market ~at the stop; always priced)
-//   Market     -> last-trade mark (ok=false when there is no mark -> must block)
+//
+//	Limit      -> limit price
+//	StopLimit  -> limit price (it triggers into a limit at that price)
+//	Stop       -> stop price (triggers into a market ~at the stop; always priced)
+//	Market     -> last-trade mark (ok=false when there is no mark -> must block)
 func orderValue(req OrderRequest, marks MarkSource) (float64, bool) {
 	switch req.Type {
 	case TypeMarket:
