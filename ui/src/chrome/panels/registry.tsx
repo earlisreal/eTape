@@ -14,6 +14,7 @@ import { NewsPanel } from "./NewsPanel";
 import { AccountBarPanel } from "./AccountBarPanel";
 import { PositionsPanel } from "./PositionsPanel";
 import { OpenOrdersPanel } from "./OpenOrdersPanel";
+import { OrderTicketPanel } from "./OrderTicketPanel";
 
 export interface PanelProps {
   config: PanelConfig;
@@ -31,7 +32,7 @@ export interface PanelDef { component: FC<PanelProps>; topics: TopicName[] }
 
 // Plan 1 registered the two stack-proving panels; Plan 2 added the chart panel;
 // Plan 3 added the L2 ladder + time & sales; Plan 4 added scanner / movers / news;
-// Plan 5 adds account-bar, positions, open-orders below. Plan 5 still owes order-ticket.
+// Plan 5 adds account-bar, positions, open-orders, order-ticket below.
 export const PANELS: Record<string, PanelDef> = {
   "connection-status": {
     component: ({ stores }) => <ConnectionStatusPanel health={stores.health} />,
@@ -76,5 +77,9 @@ export const PANELS: Record<string, PanelDef> = {
   "open-orders": {
     component: OpenOrdersPanel,
     topics: ["exec.orders", "exec.status"],
+  },
+  "order-ticket": {
+    component: OrderTicketPanel,
+    topics: ["md.quote", "exec.account", "exec.positions", "exec.status"],
   },
 };
