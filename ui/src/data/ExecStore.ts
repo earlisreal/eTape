@@ -24,7 +24,14 @@ function synthOptimistic(o: OptimisticOrder): Order {
 }
 
 export class ExecStore extends ReactStore<ExecState> {
+  private readonly rejectListeners = new Set<(order: Order) => void>();
+
   constructor() { super({ accounts: new Map(), positions: [], orders: new Map(), optimistic: new Map(), status: null }); }
+
+  onOrderRejected(cb: (order: Order) => void): () => void {
+    this.rejectListeners.add(cb);
+    return () => { this.rejectListeners.delete(cb); };
+  }
 
   apply(m: SnapshotMsg | DeltaMsg): void {
     const cur = this.getSnapshot();
@@ -43,7 +50,14 @@ export class ExecStore extends ReactStore<ExecState> {
         const optimistic = new Map(cur.optimistic);
         const list = m.kind === "snapshot" ? (m.payload as Order[]) : [m.payload as Order];
         if (m.kind === "snapshot") orders.clear();
-        for (const o of list) { orders.set(o.id, o); optimistic.delete(o.id); } // real event reconciles the optimistic row
+        for (const o of list) {
+          if (m.kind === "delta" && o.status === "REJECTED" && cur.orders.get(o.id)?.status !== "REJECTED") {
+            for (const cb of this.rejectListeners) {
+              try { cb(o); } catch { /* a listener must never break order ingestion */ }
+            }
+          }
+          orders.set(o.id, o); optimistic.delete(o.id); // real event reconciles the optimistic row
+        }
         this.set({ ...cur, orders, optimistic });
         return;
       }

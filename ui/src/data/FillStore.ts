@@ -15,6 +15,13 @@ const key = (f: Fill) => `${f.venue}|${f.orderId}|${f.tsMs}|${f.price}|${f.qty}`
 export class FillStore extends PaintStore {
   private readonly bySymbol = new Map<string, Fill[]>();
   private readonly seen = new Set<string>();
+  private readonly fillListeners = new Set<(fill: Fill) => void>();
+
+  /** Fires once per newly-ingested fill (snapshot or delta), after dedup. */
+  onNewFill(cb: (fill: Fill) => void): () => void {
+    this.fillListeners.add(cb);
+    return () => { this.fillListeners.delete(cb); };
+  }
 
   apply(m: SnapshotMsg | DeltaMsg): void {
     this.ingest(m.kind === "snapshot" ? (m.payload as Fill[]) : [m.payload as Fill]);
@@ -31,6 +38,9 @@ export class FillStore extends PaintStore {
       arr.sort((a, b) => a.tsMs - b.tsMs);
       this.bySymbol.set(f.symbol, arr);
       changed = true;
+      for (const cb of this.fillListeners) {
+        try { cb(f); } catch { /* a listener must never break fill ingestion */ }
+      }
     }
     if (changed) this.markDirty();
   }

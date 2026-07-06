@@ -14,7 +14,13 @@ interface ScannerState { sessions: Partial<Record<ScannerSession, ScannerSession
 // explicit force-flash for a symbol already in the current ranking.
 export class ScannerStore extends ReactStore<ScannerState> {
   private readonly seen = new Map<ScannerSession, Set<string>>();
+  private readonly hitListeners = new Set<(symbol: string) => void>();
   constructor() { super({ sessions: {} }); }
+
+  onNewHit(cb: (symbol: string) => void): () => void {
+    this.hitListeners.add(cb);
+    return () => { this.hitListeners.delete(cb); };
+  }
 
   apply(m: SnapshotMsg | DeltaMsg): void {
     const session = (m.key ?? "premarket") as ScannerSession;
@@ -22,13 +28,21 @@ export class ScannerStore extends ReactStore<ScannerState> {
     const { refreshedAt, rows } = m.payload as ScannerRankPayload;
     const seen = this.seenFor(session);
     if (m.kind === "snapshot") seen.clear(); // a (re)snapshot is a fresh baseline: no flash, no stale mute
+    const newHits: string[] = [];
     const view: ScannerRowView[] = rows.map((row) => {
       const isNewHit = m.kind === "delta" && !seen.has(row.symbol);
       const muted = m.kind === "delta" && seen.has(row.symbol);
+      if (isNewHit) newHits.push(row.symbol);
       return { ...row, isNewHit, muted };
     });
     for (const row of rows) seen.add(row.symbol);
     this.setSession(session, { rows: view, refreshedAt });
+    // fired after the map (not inside it) so the row-view build stays a pure transform
+    for (const symbol of newHits) {
+      for (const cb of this.hitListeners) {
+        try { cb(symbol); } catch { /* a listener must never break scanner ingestion */ }
+      }
+    }
   }
 
   view(session: ScannerSession): ScannerSessionView {
@@ -41,6 +55,9 @@ export class ScannerStore extends ReactStore<ScannerState> {
   }
 
   private applyHit(session: ScannerSession, hit: ScanHitPayload): void {
+    for (const cb of this.hitListeners) {
+      try { cb(hit.symbol); } catch { /* a listener must never break scanner ingestion */ }
+    }
     this.seenFor(session).add(hit.symbol);
     const cur = this.getSnapshot().sessions[session];
     if (!cur) return;

@@ -5,23 +5,39 @@
 import type { AckMsg, SubmitOrderArgs, ReplaceOrderArgs, VenueID } from "../../wire/contract";
 import type { ExecStore } from "../../data/ExecStore";
 import type { ToastApi } from "../Toast";
+import type { SoundApi } from "../../sound/SoundEngine";
 
 export interface CommandAdapter { sendCommand(name: string, args: unknown): Promise<AckMsg> }
-export interface OrderCommandsDeps { cmd: CommandAdapter; exec: ExecStore; toast: ToastApi; now: () => number }
+export interface OrderCommandsDeps { cmd: CommandAdapter; exec: ExecStore; toast: ToastApi; now: () => number; sound?: SoundApi }
 
 export class OrderCommands {
   constructor(private readonly d: OrderCommandsDeps) {}
 
   async submit(args: SubmitOrderArgs, flash: string): Promise<void> {
     const ack = await this.d.cmd.sendCommand("SubmitOrder", args);
-    if (ack.status === "blocked") { this.d.toast.push({ level: "danger", text: `Blocked: ${ack.reason ?? "unknown"}` }); return; }
+    if (ack.status === "blocked") {
+      this.d.toast.push({ level: "danger", text: `Blocked: ${ack.reason ?? "unknown"}` });
+      this.d.sound?.orderRejected();
+      return;
+    }
     if (ack.orderId) this.d.exec.addOptimistic({ args, id: ack.orderId, createdMs: this.d.now() });
+    this.d.sound?.orderPlaced(args.side);
     this.d.toast.push({ level: "info", text: flash });
   }
 
-  async cancel(venue: VenueID, orderId: string): Promise<void> { await this.d.cmd.sendCommand("CancelOrder", { venue, orderId }); }
-  async replace(args: ReplaceOrderArgs): Promise<void> { await this.d.cmd.sendCommand("ReplaceOrder", args); }
-  async flatten(venue: VenueID): Promise<void> { await this.d.cmd.sendCommand("Flatten", { venue }); }
+  async cancel(venue: VenueID, orderId: string): Promise<void> {
+    const ack = await this.d.cmd.sendCommand("CancelOrder", { venue, orderId });
+    if (ack.status === "blocked") this.d.sound?.orderRejected();
+  }
+  async replace(args: ReplaceOrderArgs): Promise<void> {
+    const ack = await this.d.cmd.sendCommand("ReplaceOrder", args);
+    if (ack.status === "blocked") this.d.sound?.orderRejected();
+  }
+  async flatten(venue: VenueID): Promise<void> {
+    const ack = await this.d.cmd.sendCommand("Flatten", { venue });
+    if (ack.status === "blocked") this.d.sound?.orderRejected();
+    else this.d.sound?.orderPlaced("SELL"); // risk-off: falling pitch
+  }
 
   async arm(venue?: VenueID): Promise<void> { await this.d.cmd.sendCommand("Arm", venue ? { venue } : {}); }
   async disarm(venue?: VenueID): Promise<void> { await this.d.cmd.sendCommand("Disarm", venue ? { venue } : {}); }
