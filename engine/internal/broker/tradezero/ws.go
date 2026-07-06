@@ -12,12 +12,12 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/clock"
 )
 
-// staleTimeout bounds how long the client waits for any frame (handshake
-// status or data push) before deciding the connection is dead. TZ's
-// Portfolio WS has no server-side ping/pong, so this timer is the only
+// defaultStaleTimeout bounds how long the client waits for any frame
+// (handshake status or data push) before deciding the connection is dead.
+// TZ's Portfolio WS has no server-side ping/pong, so this timer is the only
 // liveness signal — a socket that silently stopped delivering data would
 // otherwise hang the read loop forever.
-const staleTimeout = 30 * time.Second
+const defaultStaleTimeout = 30 * time.Second
 
 // errFailedAuth signals bad credentials. It is the one session error that
 // must never trigger a reconnect: retrying with the same key/secret would
@@ -34,6 +34,10 @@ type wsClient struct {
 	onOrder                       func(tzOrder)
 	onPosition                    func(tzPosition)
 	onConn                        func(up bool)
+	// staleTimeout overrides defaultStaleTimeout; tests set this to a short
+	// duration (e.g. 50ms) directly on the returned struct to exercise the
+	// stale-read reconnect path without a real 30s wait.
+	staleTimeout time.Duration
 }
 
 // newWSClient builds a client for the given Portfolio-WS URL and account. The
@@ -41,14 +45,15 @@ type wsClient struct {
 // each other.
 func newWSClient(url, accountID, keyID, secret string, clk clock.Clock, onOrder func(tzOrder), onPosition func(tzPosition), onConn func(up bool)) *wsClient {
 	return &wsClient{
-		url:        url,
-		accountID:  accountID,
-		keyID:      keyID,
-		secret:     secret,
-		clk:        clk,
-		onOrder:    onOrder,
-		onPosition: onPosition,
-		onConn:     onConn,
+		url:          url,
+		accountID:    accountID,
+		keyID:        keyID,
+		secret:       secret,
+		clk:          clk,
+		onOrder:      onOrder,
+		onPosition:   onPosition,
+		onConn:       onConn,
+		staleTimeout: defaultStaleTimeout,
 	}
 }
 
@@ -82,7 +87,7 @@ func (w *wsClient) session(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	defer c.CloseNow()
+	defer func() { _ = c.CloseNow() }()
 
 	// 1) PENDING_AUTH
 	if err := w.awaitStatus(ctx, c, "PENDING_AUTH"); err != nil {
@@ -159,7 +164,7 @@ func (w *wsClient) awaitStatus(ctx context.Context, c *websocket.Conn, want stri
 // stops delivering anything (no server ping exists on this protocol) is
 // detected and torn down rather than hung on forever.
 func (w *wsClient) readFrame(ctx context.Context, c *websocket.Conn) ([]byte, error) {
-	rctx, cancel := context.WithTimeout(ctx, staleTimeout)
+	rctx, cancel := context.WithTimeout(ctx, w.staleTimeout)
 	defer cancel()
 	_, data, err := c.Read(rctx)
 	if err != nil {
