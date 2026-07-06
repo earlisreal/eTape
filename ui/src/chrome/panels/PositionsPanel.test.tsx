@@ -40,4 +40,21 @@ describe("PositionsPanel", () => {
     expect(args.qty).toBe(300);
     expect(args.venue).toBe("alpaca-paper");
   });
+  it("annotates Flatten with the venue's armed state but keeps it clickable when disarmed", () => {
+    const { props, stores, sent } = mkProps();
+    wrap(props);
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: {
+        masterArmed: true, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
+        venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, venueArmed: false, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }],
+      } });
+      stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.5, ask: 3.51, last: 3.5, ts: "" } });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({ qty: 300 })] });
+    });
+    const btn = screen.getByTestId("flatten-alpaca-paper-US.AAPL") as HTMLButtonElement;
+    expect(btn.getAttribute("data-armed")).toBe("false");
+    expect(btn.disabled).toBe(false);
+    fireEvent.click(btn);
+    expect(sent.some((s) => s.name === "SubmitOrder")).toBe(true);
+  });
 });

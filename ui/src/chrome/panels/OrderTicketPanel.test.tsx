@@ -53,4 +53,23 @@ describe("OrderTicketPanel", () => {
     fireEvent.click(screen.getByTestId("kill"));
     expect(sent.some((s) => s.name === "KillSwitch")).toBe(true);
   });
+  it("shows a DISARMED badge when the active venue is disarmed", async () => {
+    const { props, stores, linkGroups } = mkProps();
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: { ...status(), venues: [{ ...status().venues[0], venueArmed: false }] } });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    expect((await screen.findByTestId("ticket-armed-state")).textContent).toMatch(/DISARMED/i);
+  });
+  it("shows an ARMED badge when master and the active venue are armed, and exposes an order-type testid", async () => {
+    const { props, stores, linkGroups } = mkProps();
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    expect((await screen.findByTestId("ticket-armed-state")).textContent).toBe("ARMED");
+    expect(screen.getByTestId("order-type")).toBeTruthy();
+  });
 });
