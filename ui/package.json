@@ -13,7 +13,9 @@
     "test:golden:update": "UPDATE_GOLDENS=1 vitest run test/golden",
     "lint": "eslint . --ext .ts,.tsx",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
-    "mock-engine": "tsx mock-engine/run.ts"
+    "mock-engine": "tsx mock-engine/run.ts",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "dockview": "^4.0.0",
@@ -22,6 +24,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@testing-library/react": "^16.0.0",
     "@types/node": "^26.1.0",
     "@types/pixelmatch": "^5.2.6",
