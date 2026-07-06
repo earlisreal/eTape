@@ -48,7 +48,7 @@ func TestBuildHealthDownThreshold(t *testing.T) {
 	for _, l := range snap.Links {
 		byLink[string(l.Link)] = l
 	}
-	if byLink["engine-moomoo"].Status != "down" {
-		t.Fatalf("3000ms should be down (not degraded): %+v", byLink["engine-moomoo"])
+	if byLink["ui-engine"].Status != "down" {
+		t.Fatalf("3000ms should be down (not degraded): %+v", byLink["ui-engine"])
 	}
 }
