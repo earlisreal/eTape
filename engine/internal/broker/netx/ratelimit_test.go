@@ -45,9 +45,24 @@ func TestTokenBucket_CapsAtBurst(t *testing.T) {
 
 // TestTokenBucket_TakeBlocksThenSucceeds drains the bucket, starts Take(ctx)
 // in a goroutine (so it must block on clk.After), then advances the fake
-// clock by exactly enough to refill one token and asserts Take returns nil.
-// The select+time.After below only bounds how long this test itself waits
-// for the goroutine to signal completion; it does not drive the bucket.
+// clock in small increments until Take returns and asserts it returns nil.
+//
+// A single Gosched()+Advance() is not enough here: Gosched() does not
+// guarantee the child goroutine has actually reached its internal
+// tb.clk.After(wait) call (which registers a "waker" with the fake clock)
+// before the parent advances the clock. If the parent wins that race, its
+// Advance() finds no registered waker to satisfy, the child then registers
+// one moments later computed against the now-already-advanced clock, and
+// the test hangs until the safety timeout below fires t.Fatal.
+//
+// Instead, poll: each iteration does a tiny real time.Sleep (a guaranteed
+// scheduler preemption point that lets the child goroutine actually run),
+// advances the fake clock by a small increment, and then does a
+// non-blocking check of the result channel. Across the bound below this
+// advances 500*10ms = 5000ms of virtual time in total, comfortably more
+// than the 500ms needed to refill one token at 2/sec, and the repeated
+// real sleeps guarantee the child eventually gets scheduled onto its
+// clk.After(wait) registration before the loop exhausts its budget.
 func TestTokenBucket_TakeBlocksThenSucceeds(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	tb := NewTokenBucket(clk, 2, 1) // 2/sec, burst 1
@@ -57,18 +72,25 @@ func TestTokenBucket_TakeBlocksThenSucceeds(t *testing.T) {
 	// Bucket is empty; Take() must block until refill.
 	done := make(chan error, 1)
 	go func() { done <- tb.Take(context.Background()) }()
-	runtime.Gosched() // give the goroutine a chance to register on clk.After before we advance
 
-	clk.Advance(500 * time.Millisecond) // +1 token at 2/sec
+	const (
+		maxIterations = 500
+		stepAdvance   = 10 * time.Millisecond
+	)
+	for i := 0; i < maxIterations; i++ {
+		time.Sleep(time.Millisecond) // real preemption point for the child goroutine
+		clk.Advance(stepAdvance)
 
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatalf("Take() = %v, want nil", err)
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatalf("Take() = %v, want nil", err)
+			}
+			return
+		default:
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("Take() did not return after clock advanced past refill")
 	}
+	t.Fatalf("Take() did not return after %d poll iterations (%v of virtual time advanced)", maxIterations, maxIterations*stepAdvance)
 }
 
 // TestTokenBucket_TakeReturnsCtxErrOnCancel verifies Take(ctx) returns the
