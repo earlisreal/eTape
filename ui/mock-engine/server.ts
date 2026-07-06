@@ -6,7 +6,12 @@ export interface Fixture {
   reconnectAtMs?: number;
 }
 
-export function startMockEngine(opts: { port: number; fixture: Fixture }): { close: () => Promise<void> } {
+export function startMockEngine(opts: {
+  port: number;
+  fixture: Fixture;
+  onCommand?: (msg: { kind: "command"; corrId?: string; name?: string; args?: unknown }, send: (m: unknown, afterMs?: number) => void) => void;
+  onQuery?: (msg: { kind: "query"; corrId?: string; name?: string; args?: unknown }, send: (m: unknown, afterMs?: number) => void) => void;
+}): { close: () => Promise<void> } {
   const wss = new WebSocketServer({ port: opts.port, path: "/ws" });
   const timers = new Set<ReturnType<typeof setTimeout>>();
   const track = (fn: () => void, ms: number) => {
@@ -18,13 +23,24 @@ export function startMockEngine(opts: { port: number; fixture: Fixture }): { clo
     const live = new Set<string>();
     let dropped = false;
 
+    const send = (m: unknown, afterMs = 0) => {
+      if (afterMs <= 0) { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(m)); return; }
+      track(() => { if (!dropped && ws.readyState === ws.OPEN) ws.send(JSON.stringify(m)); }, afterMs);
+    };
+
     ws.on("message", (raw) => {
-      let msg: { kind?: string; topic?: string; corrId?: string; t?: number };
+      let msg: { kind?: string; topic?: string; corrId?: string; name?: string; args?: unknown; t?: number };
       try { msg = JSON.parse(raw.toString()); } catch { return; }
 
       if (msg.kind === "ping") { ws.send(JSON.stringify({ kind: "pong", t: msg.t })); return; }
+      if (msg.kind === "query") {
+        if (opts.onQuery) opts.onQuery(msg as never, send);
+        else send({ kind: "result", corrId: msg.corrId, payload: [] }); // default: empty result, never a dangling promise
+        return;
+      }
       if (msg.kind === "command") {
-        ws.send(JSON.stringify({ kind: "ack", corrId: msg.corrId, status: "accepted" }));
+        if (opts.onCommand) opts.onCommand(msg as never, send);
+        else ws.send(JSON.stringify({ kind: "ack", corrId: msg.corrId, status: "accepted" }));
         return;
       }
       if (msg.kind === "unsubscribe" && msg.topic) { live.delete(msg.topic); return; }
