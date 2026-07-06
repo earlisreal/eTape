@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveShares, type SizingSpec } from "./sizing";
+import { resolveShares } from "./sizing";
 
 const ctx = { price: 3.5, buyingPower: 10_000, positionQty: 428 };
 
@@ -21,5 +21,14 @@ describe("resolveShares", () => {
   });
   it("guards a zero/negative price (no division blowup)", () => {
     expect(resolveShares({ mode: "Dollar", dollar: 5000 }, { ...ctx, price: 0 })).toBe(0);
+  });
+  it("Dollar → never negative, even with a negative dollar amount", () => {
+    expect(resolveShares({ mode: "Dollar", dollar: -5000 }, ctx)).toBe(0);
+  });
+  it("BuyingPowerPct → never negative, even with a negative pct", () => {
+    expect(resolveShares({ mode: "BuyingPowerPct", pct: -50 }, ctx)).toBe(0);
+  });
+  it("BuyingPowerPct → never negative, even with a negative buyingPower", () => {
+    expect(resolveShares({ mode: "BuyingPowerPct", pct: 50 }, { ...ctx, buyingPower: -10_000 })).toBe(0);
   });
 });

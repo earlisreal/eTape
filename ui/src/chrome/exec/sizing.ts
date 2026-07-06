@@ -14,14 +14,20 @@ export interface SizingContext { price: number; buyingPower: number; positionQty
 export function resolveShares(spec: SizingSpec, ctx: SizingContext): number {
   switch (spec.mode) {
     case "Dollar":
-      return ctx.price > 0 ? Math.floor((spec.dollar ?? 0) / ctx.price) : 0;
+      return ctx.price > 0 ? Math.max(0, Math.floor((spec.dollar ?? 0) / ctx.price)) : 0;
     case "BuyingPowerPct":
-      return ctx.price > 0 ? Math.floor((ctx.buyingPower * (spec.pct ?? 0) / 100) / ctx.price) : 0;
+      return ctx.price > 0
+        ? Math.max(0, Math.floor((ctx.buyingPower * (spec.pct ?? 0) / 100) / ctx.price))
+        : 0;
     case "Shares":
       return Math.max(0, Math.floor(spec.shares ?? 0));
     case "PositionFraction": {
       const held = Math.abs(ctx.positionQty);
       return spec.fraction === "half" ? Math.floor(held / 2) : Math.floor(held);
+    }
+    default: {
+      const _exhaustive: never = spec.mode;
+      throw new Error(`resolveShares: unhandled sizing mode ${_exhaustive}`);
     }
   }
 }
