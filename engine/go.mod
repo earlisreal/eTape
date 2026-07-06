@@ -5,6 +5,7 @@ go 1.26.4
 require github.com/BurntSushi/toml v1.6.0
 
 require (
+	github.com/oklog/ulid/v2 v2.1.1
 	google.golang.org/protobuf v1.36.11
 	modernc.org/sqlite v1.53.0
 )

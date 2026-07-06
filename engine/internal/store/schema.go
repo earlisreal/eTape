@@ -1,8 +1,8 @@
 package store
 
-// schemaSQL is the Plan 3 schema (market-data plane). Plan 4 adds
-// exec_events/fills. All timestamps are epoch milliseconds (INTEGER),
-// matching the domain's TsMs/BucketMs int64 fields.
+// schemaSQL is the Plan 3 schema (market-data plane) plus the Plan 4
+// exec_events/fills tables (execution log). All timestamps are epoch
+// milliseconds (INTEGER), matching the domain's TsMs/BucketMs int64 fields.
 const schemaSQL = `
 CREATE TABLE IF NOT EXISTS journal (
   day     TEXT    NOT NULL,   -- ET trading day, "YYYY-MM-DD"
@@ -34,4 +34,26 @@ CREATE TABLE IF NOT EXISTS sys_events (
   kind   TEXT NOT NULL,
   detail TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS exec_events (
+  seq      INTEGER PRIMARY KEY AUTOINCREMENT,
+  ts       INTEGER NOT NULL,          -- event ts (epoch ms)
+  source   TEXT    NOT NULL,          -- local|ws|rest|reconcile
+  venue    TEXT    NOT NULL,
+  type     TEXT    NOT NULL,          -- event kind, e.g. order_submitted
+  order_id TEXT    NOT NULL,          -- "" for stream_gap
+  payload  TEXT    NOT NULL           -- JSON of the concrete event
+);
+CREATE INDEX IF NOT EXISTS idx_exec_events_ts ON exec_events(ts);
+CREATE TABLE IF NOT EXISTS fills (
+  fill_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+  seq      INTEGER NOT NULL REFERENCES exec_events(seq),
+  order_id TEXT    NOT NULL,
+  symbol   TEXT    NOT NULL,
+  side     TEXT    NOT NULL,
+  qty      REAL    NOT NULL,
+  price    REAL    NOT NULL,
+  ts       INTEGER NOT NULL,
+  venue    TEXT    NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_fills_symbol_ts ON fills(symbol, ts);
 `
