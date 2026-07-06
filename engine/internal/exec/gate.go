@@ -71,6 +71,14 @@ func Evaluate(s *State, cfg GateConfig, req OrderRequest, marks MarkSource) (boo
 		return false, "duplicate order id"
 	}
 
+	// 3.5. global day-loss breach — checked here (not just reactively via
+	// auto-disarm) so a re-arm after breach, or the window before the first
+	// account refresh, cannot bypass it. Auto-disarm (Core.handleBrokerEvent)
+	// remains the reactive layer on top of this authoritative submit-time check.
+	if BreachedDayLoss(s, cfg) {
+		return false, "day-loss breached"
+	}
+
 	vl, hasVenueConfig := cfg.Venue[req.Venue]
 	if !hasVenueConfig {
 		return false, "no gate config for venue"

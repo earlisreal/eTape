@@ -137,3 +137,17 @@ func TestBreachedDayLoss(t *testing.T) {
 		t.Fatal("under cap should not breach")
 	}
 }
+
+func TestGateDayLossBreachBlocksAfterRearm(t *testing.T) {
+	cfg := baseCfg()
+	marks := fakeMarks{"AAPL": 100}
+	s := armedState()
+	s.ReconcileAccount(AccountSnapshot{Venue: "sim-1", DayPnL: -1100}) // breaches MaxDayLoss=1000
+	// Simulate what Core does on breach (auto-disarm), then an explicit
+	// human re-arm with no fresh account update in between.
+	s.SetMasterArmed(false)
+	s.SetMasterArmed(true)
+	if ok, reason := Evaluate(s, cfg, buyReq("sim-1", "AAPL", 1, 100, "ET1"), marks); ok || reason != "day-loss breached" {
+		t.Fatalf("re-arm after day-loss breach should still block, got ok=%v reason=%q", ok, reason)
+	}
+}
