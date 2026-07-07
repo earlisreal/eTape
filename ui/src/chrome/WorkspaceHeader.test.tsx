@@ -49,4 +49,16 @@ describe("normalizeSymbol", () => {
     expect(normalizeSymbol("BRK.B")).toBe("US.BRK.B");
     expect(normalizeSymbol("BF.A")).toBe("US.BF.A");
   });
+
+  it("uppercases a bare lowercase ticker", () => {
+    expect(normalizeSymbol("aapl")).toBe("US.AAPL");
+  });
+
+  it("uppercases an already-qualified lowercase symbol", () => {
+    expect(normalizeSymbol("us.nvda")).toBe("US.NVDA");
+  });
+
+  it("uppercases a lowercase dotted US ticker", () => {
+    expect(normalizeSymbol("brk.b")).toBe("US.BRK.B");
+  });
 });
