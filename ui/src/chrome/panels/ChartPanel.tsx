@@ -37,10 +37,6 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     timeToCoordinate: (ms) => chart.timeScale().timeToCoordinate((Math.floor(ms / 1000)) as unknown as Time),
     priceToCoordinate: (price) => candle?.priceToCoordinate(price) ?? null,
     scrollToRealTime: () => chart.timeScale().scrollToRealTime(),
-    isAtRightEdge: () => {
-      const r = chart.timeScale().scrollPosition();
-      return r >= -1; // at/near the right edge (LWC scrollPosition 0 = latest bar at right)
-    },
     resize: (w, h) => chart.resize(w, h),
     applyOptions: (o) => chart.applyOptions(o as object),
     remove: () => chart.remove(),

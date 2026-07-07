@@ -11,10 +11,8 @@ function fakeSeries(): LwcSeries & { calls: string[] } {
 
 function fakeFacade() {
   const created: Array<{ kind: string; pane: number; series: LwcSeries & { calls: string[] } }> = [];
-  let atRightEdge = true;
-  const facade: ChartApiFacade & { created: typeof created; setRightEdge: (v: boolean) => void; scrolls: number; bands: number } = {
+  const facade: ChartApiFacade & { created: typeof created; scrolls: number; bands: number } = {
     created, scrolls: 0, bands: 0,
-    setRightEdge: (v) => { atRightEdge = v; },
     addSeries: (kind, _o, pane) => { const s = fakeSeries(); created.push({ kind, pane, series: s }); return s; },
     removeSeries: () => {},
     setSessionBands: () => { facade.bands++; },
@@ -22,7 +20,6 @@ function fakeFacade() {
     timeToCoordinate: () => 0,
     priceToCoordinate: () => 0,
     scrollToRealTime: () => { facade.scrolls++; },
-    isAtRightEdge: () => atRightEdge,
     resize: () => {},
     applyOptions: () => {},
     remove: () => {},
@@ -79,7 +76,6 @@ describe("ChartController", () => {
     const bars = [bar("2026-07-06T13:30:00Z", 10, true)];
     const { facade, ctrl } = make(barReaderOf(bars));
     ctrl.sync();
-    facade.setRightEdge(false);
     bars[0] = bar("2026-07-06T13:30:00Z", 10.5, true);
     ctrl.sync();
     expect(facade.scrolls).toBe(0);
