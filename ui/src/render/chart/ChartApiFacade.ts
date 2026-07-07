@@ -16,6 +16,10 @@ export interface ChartApiFacade {
   setFillMarkers(markers: FillMarker[]): void; // forwarded to the diamond series-primitive
   timeToCoordinate(timeMs: number): number | null;
   priceToCoordinate(price: number): number | null;
+  logicalToCoordinate(logical: number): number | null;
+  coordinateToLogical(x: number): number | null;
+  coordinateToPrice(y: number): number | null;
+  setPanZoomEnabled(on: boolean): void;
   scrollToRealTime(): void;
   resize(width: number, height: number): void;
   applyOptions(options: unknown): void;

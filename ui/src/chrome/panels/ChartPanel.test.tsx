@@ -6,10 +6,11 @@ import { ThemeProvider } from "../ThemeProvider";
 // Mock lightweight-charts so the panel test never touches a real canvas.
 const chartApi = {
   addSeries: vi.fn(() => ({ setData: vi.fn(), update: vi.fn(), applyOptions: vi.fn(),
-    attachPrimitive: vi.fn(), priceToCoordinate: vi.fn(() => 0) })),
+    attachPrimitive: vi.fn(), priceToCoordinate: vi.fn(() => 0), coordinateToPrice: vi.fn(() => 0) })),
   removeSeries: vi.fn(),
   panes: vi.fn(() => [{ attachPrimitive: vi.fn() }]),
-  timeScale: vi.fn(() => ({ timeToCoordinate: vi.fn(() => 0), scrollToRealTime: vi.fn(), scrollPosition: vi.fn(() => 0) })),
+  timeScale: vi.fn(() => ({ timeToCoordinate: vi.fn(() => 0), scrollToRealTime: vi.fn(), scrollPosition: vi.fn(() => 0),
+    coordinateToLogical: vi.fn(() => 0), logicalToCoordinate: vi.fn(() => 0) })),
   applyOptions: vi.fn(), resize: vi.fn(), remove: vi.fn(),
 };
 vi.mock("lightweight-charts", () => ({

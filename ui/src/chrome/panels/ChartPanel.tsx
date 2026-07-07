@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { createChart, CandlestickSeries, HistogramSeries, LineSeries, type IChartApi, type ISeriesApi, type Time } from "lightweight-charts";
+import { createChart, CandlestickSeries, HistogramSeries, LineSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type Coordinate } from "lightweight-charts";
 import type { PanelProps } from "./registry";
 import { ChartController } from "../../render/chart/ChartController";
 import type { ChartApiFacade, LwcSeries } from "../../render/chart/ChartApiFacade";
@@ -36,6 +36,10 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     setFillMarkers: (m) => diamonds.setMarkers(m),
     timeToCoordinate: (ms) => chart.timeScale().timeToCoordinate((Math.floor(ms / 1000)) as unknown as Time),
     priceToCoordinate: (price) => candle?.priceToCoordinate(price) ?? null,
+    logicalToCoordinate: (logical) => chart.timeScale().logicalToCoordinate(logical as Logical),
+    coordinateToLogical: (x) => chart.timeScale().coordinateToLogical(x as Coordinate),
+    coordinateToPrice: (y) => candle?.coordinateToPrice(y as Coordinate) ?? null,
+    setPanZoomEnabled: (on) => chart.applyOptions({ handleScroll: on, handleScale: on }),
     scrollToRealTime: () => chart.timeScale().scrollToRealTime(),
     resize: (w, h) => chart.resize(w, h),
     applyOptions: (o) => chart.applyOptions(o as object),
