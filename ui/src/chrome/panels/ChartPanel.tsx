@@ -6,17 +6,22 @@ import type { ChartApiFacade, LwcSeries } from "../../render/chart/ChartApiFacad
 import { DiamondFillPrimitive } from "../../render/chart/diamondPrimitive";
 import { SessionShadingPrimitive } from "../../render/chart/sessionPrimitive";
 import { withDefaultParams, type IndicatorInstance, type IndicatorType } from "../../render/chart/indicatorSeries";
+import { DrawingsPrimitive } from "../../render/chart/drawings/primitive";
+import { DrawingInteraction, type Tool } from "../../render/chart/drawings/interaction";
+import { timeframeToMs } from "../../render/chart/drawings/geometry";
+import type { Timeframe } from "../../render/chart/barBucket";
 import type { Palette } from "../../render/palette";
 import { ChartControls } from "./ChartControls";
 import { useTheme } from "../ThemeProvider";
 
 // Adapts a real LWC v5 IChartApi to the controller's minimal ChartApiFacade.
 function makeFacade(chart: IChartApi, palette: Palette): {
-  facade: ChartApiFacade; setPalette: (p: Palette) => void;
+  facade: ChartApiFacade; setPalette: (p: Palette) => void; drawings: DrawingsPrimitive;
 } {
   let candle: ISeriesApi<"Candlestick"> | null = null;
   const session = new SessionShadingPrimitive(palette);
   const diamonds = new DiamondFillPrimitive(palette);
+  const drawings = new DrawingsPrimitive(palette);
 
   const facade: ChartApiFacade = {
     addSeries: (kind, options, paneIndex) => {
@@ -26,6 +31,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
       if (kind === "candle") {
         candle = s as ISeriesApi<"Candlestick">;
         candle.attachPrimitive(diamonds);
+        candle.attachPrimitive(drawings);
         // Pane primitive on the main pane (index 0) for session shading:
         chart.panes()[0]?.attachPrimitive?.(session);
       }
@@ -45,7 +51,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     applyOptions: (o) => chart.applyOptions(o as object),
     remove: () => chart.remove(),
   };
-  return { facade, setPalette: (p) => { session.setPalette(p); diamonds.setPalette(p); } };
+  return { facade, setPalette: (p) => { session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); }, drawings };
 }
 
 export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange }: PanelProps): JSX.Element {
@@ -64,11 +70,18 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     (config.settings.indicators as IndicatorInstance[]) ?? [],
   );
 
+  const interactionRef = useRef<DrawingInteraction | null>(null);
+  const magnetRef = useRef(true);
+  const tfRef = useRef<string>(timeframe0);
+  const [activeTool, setActiveTool] = useState<Tool>("select");
+  void activeTool; // consumed by the DrawingRail (Task 9); kept live here so setActiveTool has a target
+  useEffect(() => { tfRef.current = timeframe; }, [timeframe]);
+
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
     const chart = createChart(host, { width, height });
-    const { facade, setPalette } = makeFacade(chart, palette);
+    const { facade, setPalette, drawings } = makeFacade(chart, palette);
     setFacadePaletteRef.current = setPalette;
     const controller = new ChartController(facade, palette, { symbol, timeframe: timeframe0 },
       { bars: stores.bars, indicators: stores.indicators, commands });
@@ -79,6 +92,22 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     for (const inst of instances) controller.addIndicator(inst);
 
     let currentSymbol = linkGroups.symbolFor(config.group) ?? symbol;
+
+    const interaction = new DrawingInteraction(
+      host,
+      facade,
+      drawings,
+      stores.drawings,
+      {
+        symbol: () => currentSymbol,
+        bars: () => stores.bars.series(currentSymbol, tfRef.current),
+        timeframeMs: () => timeframeToMs(tfRef.current as Timeframe),
+        magnet: () => magnetRef.current,
+      },
+      { onToolChange: (t) => setActiveTool(t) },
+    );
+    interactionRef.current = interaction;
+
     const backfillFills = (sym: string) => {
       controller.setFills(stores.fills.forSymbol(sym));
       void commands.sendQuery("QueryFills", { symbol: sym, fromMs: 0, toMs: Date.now() })
@@ -88,6 +117,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       currentSymbol = linkGroups.symbolFor(config.group) ?? symbol;
       controller.setSymbol(currentSymbol);
       backfillFills(currentSymbol);
+      stores.drawings.ensureLoaded(currentSymbol);
+      interactionRef.current?.onSymbolChanged();
     };
     applySymbol();
     const offLink = linkGroups.subscribe(applySymbol);
@@ -103,19 +134,30 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     let lastBarsRev = -1;
     let lastIndicatorsRev = -1;
     let lastFillsRev = -1;
+    let lastDrawingsRev = -1;
     const off = scheduler.register({
       id: `chart:${config.id}`,
       isDirty: () => {
         const barsRev = stores.bars.getRev();
         const indicatorsRev = stores.indicators.getRev();
         const fillsRev = stores.fills.getRev();
-        const changed = barsRev !== lastBarsRev || indicatorsRev !== lastIndicatorsRev || fillsRev !== lastFillsRev;
+        const drawingsRev = stores.drawings.getRev();
+        const changed = barsRev !== lastBarsRev || indicatorsRev !== lastIndicatorsRev || fillsRev !== lastFillsRev || drawingsRev !== lastDrawingsRev;
         lastBarsRev = barsRev;
         lastIndicatorsRev = indicatorsRev;
         lastFillsRev = fillsRev;
+        lastDrawingsRev = drawingsRev;
         return changed;
       },
-      paint: () => { controller.sync(); controller.setFills(stores.fills.forSymbol(currentSymbol)); },
+      paint: () => {
+        controller.sync();
+        controller.setFills(stores.fills.forSymbol(currentSymbol));
+        drawings.setDrawings(stores.drawings.forSymbol(currentSymbol));
+        drawings.setBars(
+          stores.bars.series(currentSymbol, tfRef.current).map((b) => Date.parse(b.bucketStart)),
+          timeframeToMs(tfRef.current as Timeframe),
+        );
+      },
     });
 
     const ro = new ResizeObserver((entries) => {
@@ -124,7 +166,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     });
     ro.observe(host);
 
-    return () => { off(); offLink(); ro.disconnect(); controller.dispose(); controllerRef.current = null; };
+    return () => { off(); offLink(); ro.disconnect(); interaction.dispose(); controller.dispose(); controllerRef.current = null; interactionRef.current = null; };
     // Intentionally [config.id] only: symbol/timeframe/indicator/palette changes are
     // handled imperatively via the controller (see the effects/callbacks below) — the
     // chart must never remount on those changes (the canvas keeps its context).

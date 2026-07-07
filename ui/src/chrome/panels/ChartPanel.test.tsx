@@ -24,6 +24,7 @@ import { Scheduler } from "../../render/Scheduler";
 import { browserRaf } from "../../render/surface";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
 import type { AckMsg } from "../../wire/contract";
+import { FakeDrawingBus, FakeDrawingBusHub } from "../../../test/fakes";
 
 // jsdom has no ResizeObserver; ChartPanel's resize wiring only needs observe/disconnect.
 class MockResizeObserver {
@@ -91,5 +92,23 @@ describe("ChartPanel", () => {
     expect(id1).not.toBe(id2);
     expect(id1.startsWith("panel-a:")).toBe(true);
     expect(id2.startsWith("panel-b:")).toBe(true);
+  });
+
+  it("loads persisted drawings for its symbol on mount (ensureLoaded → GetConfig)", async () => {
+    const stores = makeStores();
+    const hub = new FakeDrawingBusHub();
+    const drawCmd = { sendCommand: vi.fn(async () => ({ status: "accepted", value: [] })) };
+    stores.drawings.connect({ commands: drawCmd as never, bus: new FakeDrawingBus(hub), onError: () => {} });
+    renderChart("c1", stores);
+    await Promise.resolve();
+    expect(drawCmd.sendCommand).toHaveBeenCalledWith("GetConfig", { key: "drawings.US.AAPL" });
+  });
+
+  it("shares one drawings store across two panels without crashing", () => {
+    const stores = makeStores();
+    renderChart("panel-a", stores);
+    renderChart("panel-b", stores);
+    stores.drawings.upsert({ id: "d", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 0, price: 1 }], createdMs: 1, updatedMs: 1 });
+    expect(stores.drawings.forSymbol("US.AAPL")).toHaveLength(1);
   });
 });

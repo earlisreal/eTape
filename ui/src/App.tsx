@@ -12,7 +12,25 @@ import { ThemeProvider } from "./chrome/ThemeProvider";
 import { ToastProvider } from "./chrome/Toast";
 import { OrderConfigProvider } from "./chrome/exec/useOrderConfig";
 import { SoundConfigProvider } from "./sound/SoundConfigProvider";
+import { BroadcastChannelDrawingBus } from "./render/chart/drawings/store";
+import type { DrawingStore } from "./render/chart/drawings/store";
+import { useToasts } from "./chrome/Toast";
 import type { TopicName } from "./wire/contract";
+
+function DrawingsSyncBridge(
+  { store, commands }: { store: DrawingStore; commands: { sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown; reason?: string }> } },
+): null {
+  const toast = useToasts();
+  useEffect(() => {
+    const off = store.connect({
+      commands,
+      bus: new BroadcastChannelDrawingBus(),
+      onError: (reason) => toast.push({ level: "danger", text: `Drawings: ${reason}` }),
+    });
+    return off;
+  }, [store, commands, toast]);
+  return null;
+}
 
 export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
   const [state, setState] = useState<ConnState>("connecting");
@@ -64,14 +82,15 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     return () => { window.clearInterval(ping); disposeStores(); scheduler.stop(); client.stop(); };
   }, [client, stores, scheduler]);
 
-  const commands = {
+  const commands = useMemo(() => ({
     sendCommand: (name: string, args: unknown) => client.sendCommand(name, args),
     sendQuery: (name: string, args: unknown) => client.sendQuery(name, args),
-  };
+  }), [client]);
 
   return (
     <ThemeProvider commands={commands}>
       <ToastProvider>
+        <DrawingsSyncBridge store={stores.drawings} commands={commands} />
         <OrderConfigProvider commands={commands}>
           <SoundConfigProvider commands={commands}>
             <ReconnectOverlay state={state}>
