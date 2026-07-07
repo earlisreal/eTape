@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Tick } from "../../wire/contract";
-import { adjustAnchor, buildTapeRows, liveView, type TapeSource, type TapeView } from "./tapeState";
+import { adjustAnchor, BLOCK_THRESHOLD, buildTapeRows, liveView, type TapeSource, type TapeView } from "./tapeState";
 
 function mkTick(i: number, over: Partial<Tick> = {}): Tick {
   return {
@@ -82,6 +82,14 @@ describe("buildTapeRows", () => {
     const { rows, paused } = buildTapeRows(empty, liveView(empty), { symbol: "US.AAPL", minSize: 0, maxRows: 5 });
     expect(rows).toEqual([]);
     expect(paused).toBe(false);
+  });
+
+  it("flags prints >= the block threshold", () => {
+    expect(BLOCK_THRESHOLD).toBe(10_000);
+    const blocky = srcFrom([mkTick(1, { size: 12_500 }), mkTick(2, { size: 400 })]);
+    const { rows } = buildTapeRows(blocky, liveView(blocky), { symbol: "US.AAPL", minSize: 0, maxRows: 10 });
+    // newest first: seq 2 (400 shares) then seq 1 (12,500 shares)
+    expect(rows.map((r) => r.isBlock)).toEqual([false, true]);
   });
 });
 

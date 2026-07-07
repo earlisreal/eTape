@@ -9,13 +9,14 @@ import { paintTape } from "../../src/render/tape/paintTape";
 const W = 260;
 const H = 360; // 20 rows × 18
 
-function mkTick(i: number): Tick {
+function mkTick(i: number, over: Partial<Tick> = {}): Tick {
   return {
     symbol: "US.AAPL",
     price: 3.5 + ((i % 5) - 2) * 0.01,
     size: 50 + ((i * 173) % 950),
     direction: (["BUY", "SELL", "NEUTRAL", "BUY", "SELL", "BUY", "BUY", "SELL", "NEUTRAL", "BUY"] as const)[i % 10],
     ts: new Date(Date.UTC(2026, 6, 6, 13, 30, i * 2)).toISOString(),
+    ...over,
   };
 }
 
@@ -27,25 +28,41 @@ const src: TapeSource = {
   tickBySeq: (s) => (s >= 1 && s <= ticks.length ? ticks[s - 1] : undefined),
 };
 
-describe("paintTape goldens", () => {
+// Same 30-tick stream but the newest print is a block (>= BLOCK_THRESHOLD
+// shares) so its row renders bold.
+const blockTicks = ticks.map((t, i) => (i === ticks.length - 1 ? { ...t, size: 12_500 } : t));
+const blockSrc: TapeSource = {
+  lastSeq: () => blockTicks.length,
+  oldestSeq: () => 1,
+  generation: () => 1,
+  tickBySeq: (s) => (s >= 1 && s <= blockTicks.length ? blockTicks[s - 1] : undefined),
+};
+
+describe("paintTape goldens (full-row color)", () => {
   for (const mode of ["light", "dark"] as const) {
     const palette = getPalette(mode);
 
-    it(`live tape — ${mode}`, () => {
+    it(`live tape — buy/sell/neutral mix — ${mode}`, () => {
       const { rows, paused } = buildTapeRows(src, liveView(src), { symbol: "US.AAPL", minSize: 0, maxRows: 20 });
-      expectGolden(`tape-live-${mode}`, renderScene(W, H, (ctx) =>
+      expectGolden(`tapecolor-live-${mode}`, renderScene(W, H, (ctx) =>
+        paintTape(ctx, { rows, paused, width: W, height: H, palette })));
+    });
+
+    it(`a >= 10k print renders bold — ${mode}`, () => {
+      const { rows, paused } = buildTapeRows(blockSrc, liveView(blockSrc), { symbol: "US.AAPL", minSize: 0, maxRows: 20 });
+      expectGolden(`tapecolor-block-${mode}`, renderScene(W, H, (ctx) =>
         paintTape(ctx, { rows, paused, width: W, height: H, palette })));
     });
 
     it(`min-size-filtered tape — ${mode}`, () => {
       const { rows, paused } = buildTapeRows(src, liveView(src), { symbol: "US.AAPL", minSize: 500, maxRows: 20 });
-      expectGolden(`tape-filtered-${mode}`, renderScene(W, H, (ctx) =>
+      expectGolden(`tapecolor-filtered-${mode}`, renderScene(W, H, (ctx) =>
         paintTape(ctx, { rows, paused, width: W, height: H, palette })));
     });
 
     it(`paused (scrolled back) tape — ${mode}`, () => {
       const { rows, paused } = buildTapeRows(src, { anchorSeq: 24, generation: 1 }, { symbol: "US.AAPL", minSize: 0, maxRows: 20 });
-      expectGolden(`tape-paused-${mode}`, renderScene(W, H, (ctx) =>
+      expectGolden(`tapecolor-paused-${mode}`, renderScene(W, H, (ctx) =>
         paintTape(ctx, { rows, paused, width: W, height: H, palette })));
     });
 
@@ -53,7 +70,7 @@ describe("paintTape goldens", () => {
       // Regression: a paused view whose window has no rows (e.g. a minSize
       // filter excludes every tick at the anchor) must still render the
       // honesty-policy warn strip, not just "no prints yet".
-      expectGolden(`tape-paused-empty-${mode}`, renderScene(W, H, (ctx) =>
+      expectGolden(`tapecolor-paused-empty-${mode}`, renderScene(W, H, (ctx) =>
         paintTape(ctx, { rows: [], paused: true, width: W, height: H, palette })));
     });
   }
