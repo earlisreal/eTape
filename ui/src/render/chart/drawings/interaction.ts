@@ -90,6 +90,18 @@ export class DrawingInteraction {
     this.primitive.requestUpdate();
   }
 
+  hasSelection(): boolean {
+    return this.selectionId !== null;
+  }
+
+  deleteSelection(): void {
+    if (!this.selectionId) return;
+    this.store.remove(this.selectionId);
+    this.selectionId = null;
+    this.primitive.setSelection(null);
+    this.primitive.requestUpdate();
+  }
+
   dispose(): void {
     for (const [t, cb] of this.listeners) this.host.removeEventListener(t, cb);
     this.listeners.length = 0;

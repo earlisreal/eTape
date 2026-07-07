@@ -8,6 +8,7 @@ import { SessionShadingPrimitive } from "../../render/chart/sessionPrimitive";
 import { withDefaultParams, type IndicatorInstance, type IndicatorType } from "../../render/chart/indicatorSeries";
 import { DrawingsPrimitive } from "../../render/chart/drawings/primitive";
 import { DrawingInteraction, type Tool } from "../../render/chart/drawings/interaction";
+import { DrawingRail } from "./DrawingRail";
 import { timeframeToMs } from "../../render/chart/drawings/geometry";
 import type { Timeframe } from "../../render/chart/barBucket";
 import type { Palette } from "../../render/palette";
@@ -74,7 +75,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const magnetRef = useRef(true);
   const tfRef = useRef<string>(timeframe0);
   const [activeTool, setActiveTool] = useState<Tool>("select");
-  void activeTool; // consumed by the DrawingRail (Task 9); kept live here so setActiveTool has a target
+  const [magnet, setMagnet] = useState(true);
+  const [chartSymbol, setChartSymbol] = useState(symbol);
   useEffect(() => { tfRef.current = timeframe; }, [timeframe]);
 
   useEffect(() => {
@@ -119,6 +121,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       backfillFills(currentSymbol);
       stores.drawings.ensureLoaded(currentSymbol);
       interactionRef.current?.onSymbolChanged();
+      setChartSymbol(currentSymbol);
     };
     applySymbol();
     const offLink = linkGroups.subscribe(applySymbol);
@@ -200,7 +203,18 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <ChartControls timeframe={timeframe} instances={instances} palette={palette}
         onTimeframe={changeTimeframe} onAdd={addIndicator} onUpdate={updateIndicator} onRemove={removeIndicator} />
-      <div ref={hostRef} style={{ flex: 1, minHeight: 0, position: "relative" }} />
+      <div ref={hostRef} style={{ flex: 1, minHeight: 0, position: "relative" }}>
+        <DrawingRail
+          activeTool={activeTool}
+          magnet={magnet}
+          symbol={chartSymbol}
+          onSelectTool={(t) => { setActiveTool(t); interactionRef.current?.setTool(t); }}
+          onToggleMagnet={() => { magnetRef.current = !magnetRef.current; setMagnet(magnetRef.current); }}
+          hasSelection={() => interactionRef.current?.hasSelection() ?? false}
+          onDeleteSelection={() => interactionRef.current?.deleteSelection()}
+          onClearAll={() => stores.drawings.clearSymbol(chartSymbol)}
+        />
+      </div>
     </div>
   );
 }

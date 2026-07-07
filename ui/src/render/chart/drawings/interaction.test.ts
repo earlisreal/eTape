@@ -186,4 +186,19 @@ describe("DrawingInteraction", () => {
     fire("keydown", { key: "Escape" });
     expect(f.setPanZoomEnabled).toHaveBeenLastCalledWith(true); // Escape restores pan/zoom for the current tool (measure → unlocked)
   });
+
+  it("exposes selection state and deletes the selection imperatively", () => {
+    const store = new DrawingStore();
+    store.upsert({ id: "x", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 0, price: 100 }], createdMs: 1, updatedMs: 1 });
+    const prim = fakePrimitive();
+    const { host, fire } = fakeHost();
+    const di = new DrawingInteraction(host, fakeFacade(), prim, store, ctx(), { newId });
+    expect(di.hasSelection()).toBe(false);
+    fire("pointerdown", { clientX: 50, clientY: 901 }); // select the hline (y≈900)
+    expect(di.hasSelection()).toBe(true);
+    di.deleteSelection();
+    expect(store.forSymbol("US.AAPL")).toHaveLength(0);
+    expect(di.hasSelection()).toBe(false);
+    expect(prim.setSelection).toHaveBeenLastCalledWith(null);
+  });
 });
