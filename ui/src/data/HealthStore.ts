@@ -18,7 +18,12 @@ export class HealthStore extends ReactStore<HealthState> {
       return;
     }
     if (m.topic === "sys.events") {
-      const incoming = Array.isArray(m.payload) ? (m.payload as SysEvent[]) : [m.payload as SysEvent];
+      // Same zero-value story as sys.health: the engine's nil `events` slice
+      // (before the first event is ever recorded, e.g. every subscriber during
+      // a -replay boot with no sys events) marshals as JSON null. Normalize to
+      // [] rather than wrapping it as a single (null) event.
+      const incoming =
+        m.payload == null ? [] : Array.isArray(m.payload) ? (m.payload as SysEvent[]) : [m.payload as SysEvent];
       const events = [...cur.events, ...incoming];
       this.set({ ...cur, events: events.slice(Math.max(0, events.length - MAX_EVENTS)) });
     }

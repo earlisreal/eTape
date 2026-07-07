@@ -44,4 +44,16 @@ describe("HealthStore", () => {
     const snap = s.getSnapshot();
     expect(snap.links).toEqual([]);
   });
+
+  it("ignores a null sys.events payload (nil Go slice marshaled as JSON null) instead of appending a null entry", () => {
+    const s = new HealthStore();
+    const nullEventsMsg = {
+      kind: "delta",
+      topic: "sys.events",
+      payload: null,
+    } as unknown as DeltaMsg;
+    expect(() => s.apply(nullEventsMsg)).not.toThrow();
+    const snap = s.getSnapshot();
+    expect(snap.events).toEqual([]);
+  });
 });

@@ -34,4 +34,18 @@ describe("ConnectionStatusPanel", () => {
     const table = screen.getByRole("table");
     expect(table.querySelectorAll("tbody tr")).toHaveLength(0);
   });
+
+  it("does not crash on a pre-first-poll null sys.events payload (nil Go slice, zero-value engine snapshot)", () => {
+    const health = new HealthStore();
+    render(<ConnectionStatusPanel health={health} />);
+    expect(() => {
+      act(() => {
+        health.apply({
+          kind: "delta",
+          topic: "sys.events",
+          payload: null,
+        } as unknown as Parameters<typeof health.apply>[0]);
+      });
+    }).not.toThrow();
+  });
 });
