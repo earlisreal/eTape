@@ -12,6 +12,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 //   npm run mock-engine -- ladder-tape        (L2 book + tape + working orders, Plan 3)
 //   npm run mock-engine -- monitoring         (scanner rank/hit + news, Plan 4)
 //   npm run mock-engine -- exec-session       (execution surfaces dev flow, Plan 5)
+//   npm run mock-engine -- session-e2e       (combined candles + book + tape, captured from replay)
 //   FIXTURE=chart-session npm run mock-engine
 const name = process.argv[2] ?? process.env.FIXTURE ?? "session-basic";
 const fixture = JSON.parse(
