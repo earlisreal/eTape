@@ -112,9 +112,13 @@ export class ChartController {
         { color: d.color, priceScaleId: d.paneIndex === 0 && d.kind === "histogram" ? "" : undefined }, d.paneIndex));
     }
     this.indicators.set(resolved.instanceId, { inst: resolved, series });
+    this.subscribeIndicator(resolved);
+  }
+
+  private subscribeIndicator(inst: IndicatorInstance): void {
     void this.deps.commands.sendCommand("SubscribeIndicator", {
-      instanceId: resolved.instanceId, symbol: this.config.symbol, timeframe: this.config.timeframe,
-      type: resolved.type, params: resolved.params,
+      instanceId: inst.instanceId, symbol: this.config.symbol, timeframe: this.config.timeframe,
+      type: inst.type, params: inst.params,
     });
   }
 
@@ -150,12 +154,7 @@ export class ChartController {
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
     // Re-subscribe every live indicator for the new (symbol, timeframe).
-    for (const { inst } of this.indicators.values()) {
-      void this.deps.commands.sendCommand("SubscribeIndicator", {
-        instanceId: inst.instanceId, symbol: this.config.symbol, timeframe: this.config.timeframe,
-        type: inst.type, params: inst.params,
-      });
-    }
+    for (const { inst } of this.indicators.values()) this.subscribeIndicator(inst);
   }
 
   setPalette(p: Palette): void {

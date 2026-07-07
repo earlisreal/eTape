@@ -3,6 +3,7 @@ import { ChartController, type BarReader, type IndicatorReader, type CommandSend
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import { LIGHT } from "../palette";
 import type { Bar } from "../../wire/contract";
+import { withDefaultParams } from "./indicatorSeries";
 
 function fakeSeries(): LwcSeries & { calls: string[] } {
   const calls: string[] = [];
@@ -32,9 +33,13 @@ const bar = (bucketStart: string, c: number, inProgress = false): Bar =>
 
 function barReaderOf(bars: Bar[]): BarReader { return { series: () => bars }; }
 const emptyIndicators: IndicatorReader = { series: () => [] };
-function commandSpy(): CommandSender & { names: string[] } {
+function commandSpy(): CommandSender & { names: string[]; calls: Array<{ name: string; args: unknown }> } {
   const names: string[] = [];
-  return { names, sendCommand: (n) => { names.push(n); return Promise.resolve({ status: "accepted" }); } };
+  const calls: Array<{ name: string; args: unknown }> = [];
+  return {
+    names, calls,
+    sendCommand: (n, a) => { names.push(n); calls.push({ name: n, args: a }); return Promise.resolve({ status: "accepted" }); },
+  };
 }
 
 const make = (reader: BarReader, cmd = commandSpy(), ind: IndicatorReader = emptyIndicators) => {
@@ -90,6 +95,24 @@ describe("ChartController", () => {
     expect(facade.created.some((c) => c.kind === "line")).toBe(true);
     ctrl.removeIndicator("vwap-1");
     expect(cmd.names).toContain("UnsubscribeIndicator");
+  });
+
+  it("addIndicator sends exactly one SubscribeIndicator with the controller's config; reload re-sends for the new symbol/timeframe", () => {
+    const { ctrl, cmd } = make(barReaderOf([]));
+    ctrl.addIndicator({ instanceId: "vwap-1", type: "VWAP", params: {} });
+    const subscribes = cmd.calls.filter((c) => c.name === "SubscribeIndicator");
+    expect(subscribes).toHaveLength(1);
+    expect(subscribes[0].args).toEqual({
+      instanceId: "vwap-1", symbol: "US.AAPL", timeframe: "1m", type: "VWAP", params: withDefaultParams("VWAP", {}),
+    });
+
+    cmd.calls.length = 0;
+    ctrl.setSymbol("US.NVDA");
+    const resubscribes = cmd.calls.filter((c) => c.name === "SubscribeIndicator");
+    expect(resubscribes).toHaveLength(1);
+    expect(resubscribes[0].args).toEqual({
+      instanceId: "vwap-1", symbol: "US.NVDA", timeframe: "1m", type: "VWAP", params: withDefaultParams("VWAP", {}),
+    });
   });
 
   it("updateIndicator: param edit re-subscribes; color-only edit does not", () => {
