@@ -149,8 +149,9 @@ describe("DrawingInteraction", () => {
     const store = new DrawingStore();
     const f = fakeFacade();
     const prim = fakePrimitive();
+    const onToolChange = vi.fn();
     const { host, fire } = fakeHost();
-    const di = new DrawingInteraction(host, f, prim, store, ctx(), { newId });
+    const di = new DrawingInteraction(host, f, prim, store, ctx(), { newId, onToolChange });
     di.setTool("trendline");
     fire("pointerdown", { clientX: 0, clientY: 990 }); // anchor0 pending
     di.onSymbolChanged();
@@ -158,5 +159,31 @@ describe("DrawingInteraction", () => {
     expect(store.forSymbol("US.AAPL")).toHaveLength(0); // placement was reset
     expect(prim.setSelection).toHaveBeenLastCalledWith(null);
     expect(f.setPanZoomEnabled).toHaveBeenLastCalledWith(true);
+    expect(onToolChange).toHaveBeenLastCalledWith("select"); // armed tool reset, not left silently on trendline
+  });
+
+  it("Escape during a body drag restores pan/zoom", () => {
+    const store = new DrawingStore();
+    store.upsert({ id: "x", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 0, price: 100 }], createdMs: 1, updatedMs: 1 });
+    const f = fakeFacade();
+    const { host, fire } = fakeHost();
+    new DrawingInteraction(host, f, fakePrimitive(), store, ctx(), { newId });
+    // hline at price 100 → y = 900. Click near its body (not the handle at x=0,y=900) to start a bodyDrag.
+    fire("pointerdown", { clientX: 50, clientY: 901 });
+    expect(f.setPanZoomEnabled).toHaveBeenLastCalledWith(false); // drag started, pan/zoom locked
+    fire("keydown", { key: "Escape" });
+    expect(f.setPanZoomEnabled).toHaveBeenLastCalledWith(true); // Escape restores pan/zoom even for a drag, not just a placement
+  });
+
+  it("Escape during an active measure gesture restores pan/zoom", () => {
+    const store = new DrawingStore();
+    const f = fakeFacade();
+    const { host, fire } = fakeHost();
+    const di = new DrawingInteraction(host, f, fakePrimitive(), store, ctx(), { newId });
+    di.setTool("measure");
+    fire("pointerdown", { clientX: 0, clientY: 990 }); // starts measuring, locks pan/zoom
+    expect(f.setPanZoomEnabled).toHaveBeenLastCalledWith(false);
+    fire("keydown", { key: "Escape" });
+    expect(f.setPanZoomEnabled).toHaveBeenLastCalledWith(true); // Escape restores pan/zoom for the current tool (measure → unlocked)
   });
 });
