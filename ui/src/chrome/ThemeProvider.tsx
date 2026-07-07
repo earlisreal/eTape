@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { getPalette, type Palette, type ThemeMode } from "../render/palette";
+import { applyPaletteVars } from "./cssVars";
 
 interface Commands { sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown }> }
 interface ThemeCtx { mode: ThemeMode; palette: Palette; setMode(m: ThemeMode): void }
@@ -22,6 +23,13 @@ export function ThemeProvider({ commands, children }: { commands?: Commands; chi
   };
 
   const value = useMemo<ThemeCtx>(() => ({ mode, palette: getPalette(mode), setMode }), [mode]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    applyPaletteVars(root, getPalette(mode));
+    root.dataset.theme = mode;
+  }, [mode]);
+
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
