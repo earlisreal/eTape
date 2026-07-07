@@ -111,6 +111,13 @@ export class DrawingStore extends PaintStore {
         this.dirtySymbols.add(symbol); // retry on the next flush
       }
     }
+    // A failed save must keep retrying on its own debounce tick, not only on
+    // the next user mutation. Reuse scheduleFlush (it no-ops if a timer is
+    // already armed, e.g. a mutation landed while this flush was in-flight).
+    if (this.dirtySymbols.size > 0) {
+      const [symbol] = this.dirtySymbols;
+      this.scheduleFlush(symbol);
+    }
   }
 
   private scheduleFlush(symbol: string): void {

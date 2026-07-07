@@ -194,6 +194,24 @@ describe("DrawingStore sync + persistence", () => {
     expect(cmd.calls.filter((c) => c.name === "SetConfig").length).toBeGreaterThan(before);
   });
 
+  it("self-retries a failed save on its own debounce tick, with no further mutation or manual flush()", async () => {
+    const hub = new FakeDrawingBusHub();
+    const onError = vi.fn();
+    const cmd = fakeCommands({ set: { status: "blocked", reason: "disk full" } });
+    const s = new DrawingStore(0); // debounceMs 0 (real setTimeout)
+    s.connect({ commands: cmd, bus: new FakeDrawingBus(hub), onError });
+    s.upsert(mk("a", "US.AAPL")); // schedules the first debounced flush automatically
+    // Let the debounced flush run on its own (no manual flush() call here).
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    const afterFirst = cmd.calls.filter((c) => c.name === "SetConfig").length;
+    expect(afterFirst).toBeGreaterThan(0);
+    expect(onError).toHaveBeenCalledWith("disk full");
+    // Still no mutation and no manual flush() — the failed save must have
+    // re-armed its own debounce timer to retry automatically.
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(cmd.calls.filter((c) => c.name === "SetConfig").length).toBeGreaterThan(afterFirst);
+  });
+
   it("disconnected upsert still works in-memory and never persists", async () => {
     const s = new DrawingStore(0);
     s.upsert(mk("a", "US.AAPL"));
