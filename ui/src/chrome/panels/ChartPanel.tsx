@@ -160,6 +160,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           stores.bars.series(currentSymbol, tfRef.current).map((b) => Date.parse(b.bucketStart)),
           timeframeToMs(tfRef.current as Timeframe),
         );
+        drawings.requestUpdate();
       },
     });
 
