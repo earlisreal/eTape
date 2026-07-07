@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { DockviewReact, type DockviewReadyEvent } from "dockview";
 import "dockview/dist/styles/dockview.css";
 import { PanelFrame } from "./PanelFrame";
@@ -8,8 +8,10 @@ import type { Stores } from "../data/registry";
 import type { Scheduler } from "../render/Scheduler";
 import type { LinkGroups } from "./linkGroups";
 import type { PanelProps } from "./panels/registry";
-import { WorkspaceHeader } from "./WorkspaceHeader";
+import { TopBar } from "./TopBar";
 import { useTheme } from "./ThemeProvider";
+import { useToasts } from "./Toast";
+import { useOrderCommands } from "./exec/useOrderCommands";
 import { useHotkeys } from "./exec/useHotkeys";
 import { useSoundWiring } from "../sound/useSoundWiring";
 
@@ -25,11 +27,18 @@ interface Props {
 export function AppShell({ workspaceName, stores, scheduler, workspaceStore, linkGroups, commands }: Props): JSX.Element {
   const [ws, setWs] = useState<Workspace | null>(null);
   const { mode } = useTheme();
+  const toast = useToasts();
+  const oc = useOrderCommands(commands, stores.exec, toast);
   useEffect(() => { void workspaceStore.load(workspaceName).then(setWs); }, [workspaceName, workspaceStore]);
   // Mounted once, globally — must run unconditionally, before the loading-state
   // early return below, per the Rules of Hooks.
   useHotkeys({ stores, commands, linkGroups });
   useSoundWiring(stores);
+  // Same exec/armed pattern as AccountBarPanel: subscribe to the exec store so
+  // the top bar's arm chip re-renders on masterArmed flips from any source
+  // (this bar, the account panel, or the engine).
+  useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
+  const armed = stores.exec.status()?.masterArmed ?? false;
   if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
 
   // A stable per-panel onConfigChange updates ws.panels[i].settings then saves.
@@ -78,7 +87,13 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <WorkspaceHeader workspaceName={workspaceName} linkGroups={linkGroups} />
+      <TopBar workspaceName={workspaceName} health={stores.health} armed={armed}
+        onArmToggle={() => (armed ? oc.disarm() : oc.arm())}
+        onAddPanel={() => {}} // TODO(T10): open the add-panel catalog
+        onNewWindow={() => {}} // TODO(T10): open a new browser window/tab onto this workspace
+        onOpenSettings={() => {}} // TODO(T11): open the settings surface
+        onOpenConnection={() => {}} // TODO(T11): open the connection status popover
+      />
       <div style={{ flex: 1, minHeight: 0 }}>
         <DockviewReact components={components} onReady={onReady}
           className={mode === "light" ? "dockview-theme-light" : "dockview-theme-dark"} />
