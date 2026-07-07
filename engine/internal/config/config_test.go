@@ -209,3 +209,27 @@ func TestLoadOverridesUIHubSection(t *testing.T) {
 		t.Fatalf("scan override failed: %v", c.Scan.MinChangePct)
 	}
 }
+
+func TestBackfillDefaultsAndOverride(t *testing.T) {
+	// Defaults when absent.
+	cfg, err := Load(filepath.Join(t.TempDir(), "none.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Backfill.Enabled || cfg.Backfill.IntradayDays != 20 ||
+		cfg.Backfill.DailyYears != 0 || cfg.Backfill.Concurrency != 3 || cfg.Backfill.SeedChunk != 500 {
+		t.Fatalf("backfill defaults = %+v", cfg.Backfill)
+	}
+	// Overrides parse.
+	p := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(p, []byte("[backfill]\nenabled = false\nintraday_days = 5\nconcurrency = 8\nseed_chunk = 250\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Backfill.Enabled || cfg.Backfill.IntradayDays != 5 || cfg.Backfill.Concurrency != 8 || cfg.Backfill.SeedChunk != 250 {
+		t.Fatalf("backfill override = %+v", cfg.Backfill)
+	}
+}

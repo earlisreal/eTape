@@ -123,18 +123,28 @@ type Health struct {
 	ProbeMs int  `toml:"probe_ms"` // probe + sys.health emit interval
 }
 
+// Backfill is the [backfill] section: deep-history warm-start + gap-fill at boot.
+type Backfill struct {
+	Enabled      bool `toml:"enabled"`
+	IntradayDays int  `toml:"intraday_days"` // trading days of 1m history to backfill
+	DailyYears   int  `toml:"daily_years"`   // 0 = all available daily history
+	Concurrency  int  `toml:"concurrency"`   // bounded boot worker pool
+	SeedChunk    int  `toml:"seed_chunk"`    // max bars per Seed* call (drop-on-full guard)
+}
+
 // Config is the engine's bootstrap configuration.
 type Config struct {
-	OpenD  OpenD   `toml:"opend"`
-	Feed   Feed    `toml:"feed"`
-	MD     MD      `toml:"md"`
-	Store  Store   `toml:"store"`
-	Venues []Venue `toml:"venue"`
-	Gate   Gate    `toml:"gate"`
-	UIHub  UIHub   `toml:"uihub"`
-	Scan   Scan    `toml:"scan"`
-	News   News    `toml:"news"`
-	Health Health  `toml:"health"`
+	OpenD    OpenD    `toml:"opend"`
+	Feed     Feed     `toml:"feed"`
+	MD       MD       `toml:"md"`
+	Store    Store    `toml:"store"`
+	Venues   []Venue  `toml:"venue"`
+	Gate     Gate     `toml:"gate"`
+	UIHub    UIHub    `toml:"uihub"`
+	Scan     Scan     `toml:"scan"`
+	News     News     `toml:"news"`
+	Health   Health   `toml:"health"`
+	Backfill Backfill `toml:"backfill"`
 }
 
 // Default returns the built-in defaults used when a field or the whole file is absent.
@@ -152,8 +162,9 @@ func Default() Config {
 			Enabled: true, PremarketMs: 2000, RTHMs: 3000, RankPages: 2,
 			MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000, UniverseRefreshH: 24,
 		},
-		News:   News{Enabled: true, FocusedMs: 20000, WatchMs: 3000, MaxPerReq: 50},
-		Health: Health{Enabled: true, ProbeMs: 5000},
+		News:     News{Enabled: true, FocusedMs: 20000, WatchMs: 3000, MaxPerReq: 50},
+		Health:   Health{Enabled: true, ProbeMs: 5000},
+		Backfill: Backfill{Enabled: true, IntradayDays: 20, DailyYears: 0, Concurrency: 3, SeedChunk: 500},
 	}
 }
 
