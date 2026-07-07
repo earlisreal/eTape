@@ -125,7 +125,7 @@ const TRADING_LAYOUT: SerializedDockview = {
     "t-dom": { id: "t-dom", contentComponent: "t-dom", title: "ladder" },
     "t-tape": { id: "t-tape", contentComponent: "t-tape", title: "tape" },
     "t-ticket": { id: "t-ticket", contentComponent: "t-ticket", title: "order-ticket" },
-    "t-account": { id: "t-account", contentComponent: "t-account", title: "account-bar" },
+    "t-account": { id: "t-account", contentComponent: "t-account", title: "account" },
     "t-orders": { id: "t-orders", contentComponent: "t-orders", title: "open-orders" },
   },
   activeGroup: "t-chart-1m",
