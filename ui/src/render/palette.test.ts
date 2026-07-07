@@ -52,3 +52,30 @@ describe("FONTS", () => {
     expect(FONTS.mono).toContain("IBM Plex Mono");
   });
 });
+
+describe("Daylight Ledger palette", () => {
+  it("light is warm paper with bronze accent and a borderStrong rule", () => {
+    const p = getPalette("light");
+    expect(p.bg).toBe("#FBFAF7");
+    expect(p.surface).toBe("#F2F0EA");
+    expect(p.border).toBe("#DDD9CF");
+    expect(p.borderStrong).toBe("#C9C4B8");
+    expect(p.text).toBe("#171A1E");
+    expect(p.textMuted).toBe("#6A7280");
+    expect(p.up).toBe("#177A58");
+    expect(p.down).toBe("#C2334D");
+    expect(p.accent).toBe("#9A6A1B");
+    expect(p.danger).toBe("#A81E30");
+  });
+  it("keeps every dark token role populated (dark stays first-class)", () => {
+    const d = getPalette("dark");
+    for (const k of Object.keys(getPalette("light")) as (keyof typeof d)[]) {
+      expect(d[k], `dark.${k}`).toBeTruthy();
+    }
+  });
+  it("reserves ok/warn for link-status colours (green/bronze), not a 2nd accent", () => {
+    const p = getPalette("light");
+    expect(p.ok).toBe(p.up);       // link ok == green
+    expect(p.warn).toBe(p.accent); // link degraded == bronze
+  });
+});
