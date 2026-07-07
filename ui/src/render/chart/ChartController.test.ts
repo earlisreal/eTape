@@ -5,13 +5,19 @@ import { LIGHT } from "../palette";
 import type { Bar } from "../../wire/contract";
 import { withDefaultParams } from "./indicatorSeries";
 
-function fakeSeries(): LwcSeries & { calls: string[] } {
+function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[] } {
   const calls: string[] = [];
-  return { calls, setData: () => calls.push("setData"), update: () => calls.push("update"), applyOptions: () => calls.push("applyOptions") };
+  const updates: unknown[] = [];
+  return {
+    calls, updates,
+    setData: () => calls.push("setData"),
+    update: (bar) => { calls.push("update"); updates.push(bar); },
+    applyOptions: () => calls.push("applyOptions"),
+  };
 }
 
 function fakeFacade() {
-  const created: Array<{ kind: string; pane: number; series: LwcSeries & { calls: string[] } }> = [];
+  const created: Array<{ kind: string; pane: number; series: LwcSeries & { calls: string[]; updates: unknown[] } }> = [];
   const facade: ChartApiFacade & { created: typeof created; scrolls: number; bands: number; lastBands: unknown[] } = {
     created, scrolls: 0, bands: 0, lastBands: [],
     addSeries: (kind, _o, pane) => { const s = fakeSeries(); created.push({ kind, pane, series: s }); return s; },
@@ -156,7 +162,10 @@ describe("ChartController", () => {
     points.push({ timeMs: 2_000, value: 2 }); // one new point appended
     ctrl.sync();
     expect(ind.calls.filter((c) => c === "setData")).toHaveLength(1); // no additional full setData
-    expect(ind.calls.filter((c) => c === "update")).toHaveLength(1);  // appended via update()
+    // 2, not 1: the growth loop also re-flushes the previously-last point (index 0,
+    // unchanged here) alongside the genuinely new one, in case it was itself revised
+    // during the same missed window — see the "growth that also revises..." test below.
+    expect(ind.calls.filter((c) => c === "update")).toHaveLength(2);
 
     ctrl.setSymbol("US.NVDA"); // reload — indicatorApplied cleared
     ctrl.sync();
@@ -206,6 +215,28 @@ describe("ChartController", () => {
 
     expect(ind.calls.filter((c) => c === "update")).toHaveLength(1); // revision pushed via update()
     expect(ind.calls.filter((c) => c === "setData")).toHaveLength(1); // not a redundant full setData
+  });
+
+  it("growth that also revises the previously-last point (two deltas in one missed window) re-flushes both", () => {
+    const points: { timeMs: number; value: number }[] = [{ timeMs: 1_000, value: 1 }];
+    const { facade, ctrl } = make(barReaderOf([]), commandSpy(), indicatorReaderOf(points));
+    ctrl.addIndicator({ instanceId: "vwap-1", type: "VWAP", params: {} });
+    const ind = facade.created.find((c) => c.kind === "line")!.series;
+
+    ctrl.sync(); // first application — full setData, applied = 1
+    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(1);
+
+    // Two deltas land on IndicatorStore before the next rAF-coalesced sync:
+    // 1) an upsert revises the first (in-progress-bar) point in place, then
+    // 2) an append adds a new point for the next in-progress bar.
+    points[0] = { timeMs: 1_000, value: 1.5 };
+    points.push({ timeMs: 2_000, value: 2 });
+
+    ctrl.sync();
+
+    const updateValues = ind.updates as { time: number; value: number }[];
+    expect(updateValues).toContainEqual({ time: 1, value: 1.5 }); // revised first point must reach the series
+    expect(updateValues).toContainEqual({ time: 2, value: 2 });   // new second point must also reach the series
   });
 
   it("sync recomputes and sets session bands", () => {

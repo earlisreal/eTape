@@ -100,8 +100,12 @@ export class ChartController {
           // fewer points) — only setData() is safe.
           s.setData(points.map((p) => ({ time: toLwcTimeMs(p.timeMs), value: p.value })));
         } else if (points.length > applied) {
-          // Grew: append only the new tail.
-          for (let i = applied; i < points.length; i++) {
+          // Re-flush from one index before `applied`: that point was `last` as of the
+          // previous applied state and may have been revised (in-progress-bar upsert)
+          // during the same missed rAF-coalesced window that also appended new points —
+          // re-flushing it is harmless/idempotent if unchanged, and necessary if it
+          // did change (mirrors applyBars's identical race-window guard).
+          for (let i = Math.max(0, applied - 1); i < points.length; i++) {
             s.update({ time: toLwcTimeMs(points[i].timeMs), value: points[i].value });
           }
         } else if (last && lastKey !== this.indicatorLastKey.get(d.key)) {
