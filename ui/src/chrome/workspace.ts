@@ -1,5 +1,4 @@
 import type { LinkGroup } from "./linkGroups";
-import { SEED_WORKSPACES } from "../seeds/workspaces";
 
 export interface PanelConfig {
   id: string;
@@ -18,17 +17,19 @@ interface CommandClient {
 }
 
 // Auto-saves the dockview layout + panel configs to the engine's config store
-// (config key `workspace.<name>`), debounced. Loads the saved doc or a seed.
+// (config key `workspace.<name>`), debounced. Loads the saved doc, or a blank
+// workspace when none exists (no seed fallback — seeds are opt-in presets, Task 7/10).
 export class WorkspaceStore {
   private pending: Workspace | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(private readonly client: CommandClient, private readonly debounceMs = 500) {}
 
-  async load(name: "monitoring" | "trading"): Promise<Workspace> {
-    const ack = await this.client.sendCommand("GetConfig", { key: `workspace.${name}` });
+  async load(name: string): Promise<Workspace> {
+    const key = `workspace.${name}`;
+    const ack = await this.client.sendCommand("GetConfig", { key });
     if (ack.status === "accepted" && ack.value) return ack.value as Workspace;
-    return structuredClone(SEED_WORKSPACES[name]);
+    return { name, panels: [], layout: null };
   }
 
   save(ws: Workspace): void {
@@ -47,7 +48,7 @@ export class WorkspaceStore {
     const ws = this.pending;
     this.pending = null;
     this.timer = null;
-    const key = `workspace.${ws.name.toLowerCase()}`;
+    const key = `workspace.${ws.name}`;
     await this.client.sendCommand("SetConfig", { key, value: ws });
   }
 }

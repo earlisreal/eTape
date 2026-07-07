@@ -3,9 +3,9 @@ import { createRoot } from "react-dom/client";
 import "./fonts.css";
 import "./global.css";
 import { App } from "./App";
+import { parseWorkspaceName } from "./chrome/windows";
 
-const params = new URLSearchParams(location.search);
-const workspaceName = params.get("workspace") === "trading" ? "trading" : "monitoring";
+const workspaceName = parseWorkspaceName(location.search);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

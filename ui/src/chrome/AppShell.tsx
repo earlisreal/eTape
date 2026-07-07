@@ -14,7 +14,7 @@ import { useHotkeys } from "./exec/useHotkeys";
 import { useSoundWiring } from "../sound/useSoundWiring";
 
 interface Props {
-  workspaceName: "monitoring" | "trading";
+  workspaceName: string;
   stores: Stores;
   scheduler: Scheduler;
   workspaceStore: WorkspaceStore;
