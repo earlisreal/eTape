@@ -1,6 +1,7 @@
 import type { ISocket } from "../src/wire/WsClient";
 import type { RafLike } from "../src/render/surface";
 import type { LinkBus, LinkMsg } from "../src/chrome/linkGroups";
+import type { DrawingBus, DrawingMsg } from "../src/render/chart/drawings/store";
 
 export class FakeSocket implements ISocket {
   static instances: FakeSocket[] = [];
@@ -48,5 +49,23 @@ export class FakeBus implements LinkBus {
   post(msg: LinkMsg): void { this.hub.broadcast(this, msg); }
   onMessage(cb: (msg: LinkMsg) => void): () => void { this.cb = cb; return () => { this.cb = null; }; }
   deliver(msg: LinkMsg): void { this.cb?.(msg); }
+  close(): void { this.hub.leave(this); }
+}
+
+// Shared in-memory bus simulating BroadcastChannel("etape.drawings") across "windows".
+export class FakeDrawingBusHub {
+  private buses = new Set<FakeDrawingBus>();
+  join(b: FakeDrawingBus): void { this.buses.add(b); }
+  leave(b: FakeDrawingBus): void { this.buses.delete(b); }
+  broadcast(from: FakeDrawingBus, msg: DrawingMsg): void {
+    this.buses.forEach((b) => { if (b !== from) b.deliver(msg); });
+  }
+}
+export class FakeDrawingBus implements DrawingBus {
+  private cb: ((msg: DrawingMsg) => void) | null = null;
+  constructor(private hub: FakeDrawingBusHub) { hub.join(this); }
+  post(msg: DrawingMsg): void { this.hub.broadcast(this, msg); }
+  onMessage(cb: (msg: DrawingMsg) => void): () => void { this.cb = cb; return () => { this.cb = null; }; }
+  deliver(msg: DrawingMsg): void { this.cb?.(msg); }
   close(): void { this.hub.leave(this); }
 }
