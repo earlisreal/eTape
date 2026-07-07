@@ -22,6 +22,7 @@ export class ChartController {
   private volume!: LwcSeries;
   private lastAppliedCount = 0;             // bars applied via setData/update
   private lastAppliedKey = "";              // last bar's bucketStart|close, to detect in-progress change
+  private indicatorApplied = new Map<string, number>(); // per-series point count applied via setData/update
   private backfilled = false;
   private readonly indicators = new Map<string, { inst: IndicatorInstance; series: Map<string, LwcSeries> }>();
 
@@ -90,7 +91,17 @@ export class ChartController {
         // For MACD's multi-series the engine streams each sub-series under its own
         // instanceId suffix; single-series indicators use the base instanceId.
         const points = this.deps.indicators.series(d.key);
-        s.setData(points.map((p) => ({ time: toLwcTimeMs(p.timeMs), value: p.value })));
+        const applied = this.indicatorApplied.get(d.key) ?? 0;
+        if (applied > 0 && points.length >= applied) {
+          // Grew (or unchanged): append only the new tail. resetForReload clears
+          // the map, so after a reload `applied` is 0 and we full-setData below.
+          for (let i = applied; i < points.length; i++) {
+            s.update({ time: toLwcTimeMs(points[i].timeMs), value: points[i].value });
+          }
+        } else {
+          s.setData(points.map((p) => ({ time: toLwcTimeMs(p.timeMs), value: p.value })));
+        }
+        this.indicatorApplied.set(d.key, points.length);
       }
     }
   }
@@ -154,6 +165,7 @@ export class ChartController {
     this.backfilled = false;
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
+    this.indicatorApplied.clear();
     // Re-subscribe every live indicator for the new (symbol, timeframe).
     for (const { inst } of this.indicators.values()) this.subscribeIndicator(inst);
   }

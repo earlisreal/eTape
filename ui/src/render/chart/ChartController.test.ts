@@ -33,6 +33,9 @@ const bar = (bucketStart: string, c: number, inProgress = false): Bar =>
 
 function barReaderOf(bars: Bar[]): BarReader { return { series: () => bars }; }
 const emptyIndicators: IndicatorReader = { series: () => [] };
+function indicatorReaderOf(points: { timeMs: number; value: number }[]): IndicatorReader {
+  return { series: () => points };
+}
 function commandSpy(): CommandSender & { names: string[]; calls: Array<{ name: string; args: unknown }> } {
   const names: string[] = [];
   const calls: Array<{ name: string; args: unknown }> = [];
@@ -138,6 +141,26 @@ describe("ChartController", () => {
     ctrl.sync();
     expect(candle.calls.filter((c) => c === "setData").length).toBe(setDataBefore + 1);
     expect(cmd.names).toContain("SubscribeIndicator"); // re-subscribed for the new symbol
+  });
+
+  it("indicator series: update() fast-path on growth; setSymbol reload forces a full setData again", () => {
+    const points: { timeMs: number; value: number }[] = [{ timeMs: 1_000, value: 1 }];
+    const { facade, ctrl } = make(barReaderOf([bar("2026-07-06T13:30:00Z", 10)]), commandSpy(), indicatorReaderOf(points));
+    ctrl.addIndicator({ instanceId: "vwap-1", type: "VWAP", params: {} });
+    const ind = facade.created.find((c) => c.kind === "line")!.series;
+
+    ctrl.sync(); // first application — full setData
+    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(1);
+    expect(ind.calls).not.toContain("update");
+
+    points.push({ timeMs: 2_000, value: 2 }); // one new point appended
+    ctrl.sync();
+    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(1); // no additional full setData
+    expect(ind.calls.filter((c) => c === "update")).toHaveLength(1);  // appended via update()
+
+    ctrl.setSymbol("US.NVDA"); // reload — indicatorApplied cleared
+    ctrl.sync();
+    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(2); // full setData again post-reload
   });
 
   it("sync recomputes and sets session bands", () => {
