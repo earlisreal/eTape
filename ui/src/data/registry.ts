@@ -9,6 +9,7 @@ import { ExecStore } from "./ExecStore";
 import { ScannerStore } from "./ScannerStore";
 import { NewsStore } from "./NewsStore";
 import { FillStore } from "./FillStore";
+import { DrawingStore } from "../render/chart/drawings/store";
 
 export interface Stores {
   quote: QuoteStore;
@@ -21,6 +22,7 @@ export interface Stores {
   scanner: ScannerStore;
   news: NewsStore;
   fills: FillStore;
+  drawings: DrawingStore;
 }
 
 export function makeStores(): Stores {
@@ -35,6 +37,7 @@ export function makeStores(): Stores {
     scanner: new ScannerStore(),
     news: new NewsStore(),
     fills: new FillStore(),
+    drawings: new DrawingStore(),
   };
 }
 
