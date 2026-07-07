@@ -12,10 +12,10 @@ export function ChartControls({ timeframe, instances, palette, onTimeframe, onAd
   return (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, padding: "3px 6px",
       background: palette.surface, borderBottom: `1px solid ${palette.border}`, color: palette.text, fontSize: 12 }}>
-      <select aria-label="timeframe" value={timeframe} onChange={(e) => onTimeframe(e.target.value)}>
+      <select aria-label="timeframe" className="ctl mono" value={timeframe} onChange={(e) => onTimeframe(e.target.value)}>
         {TFS.map((tf) => <option key={tf} value={tf}>{tf}</option>)}
       </select>
-      <select aria-label="add indicator" value="" onChange={(e) => { if (e.target.value) onAdd(e.target.value as IndicatorType); }}>
+      <select aria-label="add indicator" className="ctl" value="" onChange={(e) => { if (e.target.value) onAdd(e.target.value as IndicatorType); }}>
         <option value="">+ indicator</option>
         {TYPES.map((t) => <option key={t} value={t}>{INDICATOR_CATALOG[t].label}</option>)}
       </select>
@@ -31,8 +31,7 @@ function InstanceChip({ inst, palette, onUpdate, onRemove }: {
   const setParam = (k: string, v: number) => onUpdate({ ...inst, params: { ...inst.params, [k]: v } });
   const setColor = (slot: string, c: string) => onUpdate({ ...inst, colors: { ...inst.colors, [slot]: c } });
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "1px 5px",
-      border: `1px solid ${palette.border}`, borderRadius: 3 }}>
+    <span className="ctl">
       <b style={{ fontWeight: 600 }}>{entry.label}</b>
       {entry.params.map((p) => (
         <label key={p.key} style={{ color: palette.textMuted }}>{p.label[0]}

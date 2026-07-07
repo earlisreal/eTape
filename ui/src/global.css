@@ -60,6 +60,19 @@ body {
   background: rgba(168,30,48,.05); cursor: pointer;
 }
 
+/* Order-ticket side row (Task 21). Selected BUY gets a green outline — the one
+   documented market-direction exception for order tickets, same family as
+   chip-working / connection-status dots above. SELL/SHORT/COVER stay neutral
+   until selected (plain text-toned outline, no color-discipline exception). */
+.side {
+  flex: 1; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11px;
+  font-weight: 600; padding: 4px 6px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--bg); color: var(--text-muted);
+}
+.side:hover { border-color: var(--text-muted); }
+.side-selected { border-color: var(--text); color: var(--text); background: var(--surface); }
+.side-selected-buy { border-color: var(--up); color: var(--up); background: rgba(23,122,88,.08); }
+
 /* Focused panel — bronze ring + tinted header (Task 12 toggles .panel-focused). */
 .panel-focused { outline: 2px solid var(--accent); outline-offset: -2px; }
 .panel-focused .ledger-header { background: rgba(154,106,27,.07); }
