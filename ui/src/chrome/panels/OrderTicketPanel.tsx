@@ -13,7 +13,7 @@ import { resolvePlaceTemplate } from "../exec/resolveTemplate";
 import type { PlaceOrderTemplate } from "../exec/actionTemplate";
 import { sideLabel, bareSymbol, abbrevType } from "../exec/orderStatus";
 import { formatPrice } from "../../render/format";
-import { OrderSettingsModal } from "../exec/OrderSettingsModal";
+import { useOpenSettings } from "../OpenSettingsContext";
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
@@ -24,8 +24,8 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups }: Panel
   const { palette } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
-  const { config: orderCfg, setActiveVenue, save } = useOrderConfig(); // shared context (Task 8)
-  const [showSettings, setShowSettings] = useState(false);
+  const { config: orderCfg, setActiveVenue } = useOrderConfig(); // shared context (Task 8)
+  const openSettings = useOpenSettings(); // unified Settings modal, Orders section (Task 11)
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
 
   const [symbol, setSymbol] = useState<string>(() => linkGroups.symbolFor(config.group) ?? (config.settings.symbol as string) ?? "US.AAPL");
@@ -96,7 +96,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups }: Panel
         <select data-testid="venue" value={venue} onChange={(e) => setActiveVenue(e.target.value)} style={inp}>
           {venues.map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
-        <button data-testid="open-settings" onClick={() => setShowSettings(true)} style={inp}>⚙</button>
+        <button data-testid="open-settings" onClick={() => openSettings?.openOrderSettings()} style={inp}>⚙</button>
       </div>
       <div style={{ display: "flex", gap: 4 }}>
         {quoteBtn("Bid", "bid", quote?.bid, palette.up)}
@@ -133,9 +133,6 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups }: Panel
         <button data-testid="kill" onClick={() => void oc.kill()}
           style={{ flex: 1, background: palette.danger, color: "#fff", border: "2px solid #000", fontWeight: 800, letterSpacing: 1, padding: "6px", cursor: "pointer" }}>KILL</button>
       </div>
-      {showSettings && (
-        <OrderSettingsModal config={orderCfg} status={status} onSave={save} onClose={() => setShowSettings(false)} />
-      )}
     </div>
   );
 }

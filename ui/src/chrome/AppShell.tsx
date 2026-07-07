@@ -12,6 +12,8 @@ import { PRESETS, applyPreset } from "./presets";
 import { TopBar } from "./TopBar";
 import { EmptyState } from "./EmptyState";
 import { Catalog } from "./Catalog";
+import { SettingsModal, type SettingsSection } from "./SettingsModal";
+import { OpenSettingsProvider } from "./OpenSettingsContext";
 import { useTheme } from "./ThemeProvider";
 import { useToasts } from "./Toast";
 import { useOrderCommands } from "./exec/useOrderCommands";
@@ -31,6 +33,10 @@ interface Props {
 export function AppShell({ workspaceName, stores, scheduler, workspaceStore, linkGroups, commands }: Props): JSX.Element {
   const [ws, setWs] = useState<Workspace | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  // Unified Settings modal (Task 11): AppShell owns open/section state; TopBar's
+  // gear opens it to Appearance, the order ticket's gear (via OpenSettingsContext)
+  // opens it straight to Orders & hotkeys.
+  const [settings, setSettings] = useState<{ open: boolean; section: SettingsSection }>({ open: false, section: "appearance" });
   const { mode } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
@@ -60,7 +66,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // the top bar's arm chip re-renders on masterArmed flips from any source
   // (this bar, the account panel, or the engine).
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
-  const armed = stores.exec.status()?.masterArmed ?? false;
+  const execStatus = stores.exec.status();
+  const armed = execStatus?.masterArmed ?? false;
   // Flush any dockview mutations queued by addPanel/applyPresetToWorkspace once
   // dockview's components map has caught up with the latest `ws`.
   useEffect(() => {
@@ -222,29 +229,35 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div style={{ position: "relative" }}>
-        <TopBar workspaceName={workspaceName} health={stores.health} armed={armed}
-          onArmToggle={() => (armed ? oc.disarm() : oc.arm())}
-          onAddPanel={() => setAddOpen((v) => !v)}
-          onNewWindow={onNewWindow}
-          onOpenSettings={() => {}} // TODO(T11): open the settings surface
-          onOpenConnection={onOpenConnection}
-        />
-        {addOpen && (
-          <div className="popover" style={{ top: 40, right: 160, width: 580, maxHeight: "70vh", overflow: "auto" }}>
-            <Catalog onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} />
-          </div>
-        )}
+    <OpenSettingsProvider value={{ openOrderSettings: () => setSettings({ open: true, section: "orders" }) }}>
+      <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+        <div style={{ position: "relative" }}>
+          <TopBar workspaceName={workspaceName} health={stores.health} armed={armed}
+            onArmToggle={() => (armed ? oc.disarm() : oc.arm())}
+            onAddPanel={() => setAddOpen((v) => !v)}
+            onNewWindow={onNewWindow}
+            onOpenSettings={() => setSettings({ open: true, section: "appearance" })}
+            onOpenConnection={onOpenConnection}
+          />
+          {addOpen && (
+            <div className="popover" style={{ top: 40, right: 160, width: 580, maxHeight: "70vh", overflow: "auto" }}>
+              <Catalog onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} />
+            </div>
+          )}
+        </div>
+        <div style={{ flex: 1, minHeight: 0 }}>
+          {ws.panels.length === 0 ? (
+            <EmptyState onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} />
+          ) : (
+            <DockviewReact components={components} onReady={onReady}
+              className={mode === "light" ? "dockview-theme-light" : "dockview-theme-dark"} />
+          )}
+        </div>
+        <SettingsModal open={settings.open} section={settings.section}
+          onSection={(s) => setSettings((v) => ({ ...v, section: s }))}
+          onClose={() => setSettings((v) => ({ ...v, open: false }))}
+          status={execStatus} />
       </div>
-      <div style={{ flex: 1, minHeight: 0 }}>
-        {ws.panels.length === 0 ? (
-          <EmptyState onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} />
-        ) : (
-          <DockviewReact components={components} onReady={onReady}
-            className={mode === "light" ? "dockview-theme-light" : "dockview-theme-dark"} />
-        )}
-      </div>
-    </div>
+    </OpenSettingsProvider>
   );
 }
