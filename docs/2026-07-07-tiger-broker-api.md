@@ -1,10 +1,13 @@
 # eTape — Tiger Brokers OpenAPI Research & moomoo-Alternative Evaluation
 
 **Date:** 2026-07-07 (deep-dive; supersedes the same-day first pass)
-**Status:** Research complete. Evaluated as (a) an **alternative to moomoo for market
-data** and (b) an **execution venue**. Verdict: **plausible on paper for both — the
-docs clear every hard requirement — but gated on opening/funding a Tiger account and
-a short list of empirical checks** (below). No code or venue decision yet.
+**Status:** Research complete + **benchmarked 2026-07-07 → CLOSED (declined on cost).**
+Original research verdict: plausible on paper for both feed and execution, gated on an
+account + empirical checks. Account materialised (demo + live configs) and the checks
+were run — see **"Benchmark outcome & verdict"** below. Bottom line: US real-time data
+is 3–7× moomoo's price, killing the feed case, and execution-only loses Tiger's
+one-account advantage. Tiger is shelved; moomoo stays the feed, TZ/Alpaca/moomoo stay
+the execution venues per the multi-broker spec.
 **Sources:** https://docs-en.itigerup.com/docs/intro — every page serves raw markdown
 at `<url>.md`; https://docs-en.itigerup.com/llms.txt is the full index. Key pages
 mirrored to `/tmp/tiger-docs/` during research (Python/general pages are the
@@ -207,7 +210,54 @@ no IOC/FOK, no client order id, no cancel-all, commissions, undocumented paper f
 realism. Fits the multi-broker spec's adapter model (fills map onto the generic
 event after an order-push join).
 
-## To verify empirically (requires opening a Tiger account + API activation)
+## Benchmark outcome & verdict (2026-07-07 — CLOSED)
+
+Earl supplied demo + live API configs (`~/Documents/tiger_openapi_config_{demo,live}.properties`,
+TBSG license, shared `tiger_id`; demo = 17-digit paper, live = 8-digit Prime, both
+flat). Benchmark harness: `prototypes/tiger_order_latency_bench.py` (self-contained,
+own venv; ack-only mode + auto-upgrade to fill mode if a `us*Quote*` permission
+appears — mirrors `venue_order_latency_bench.py`).
+
+- **Setup / auth: works.** `tigeropen 3.6.0` installs clean on Python 3.13
+  (`cryptography 49.0.0` — the FAQ's 45.x break is gone); RSA-signed auth works on both
+  configs against PROD `openapi.tigerfintech.com`.
+- **Decisive blocker — no US market-data entitlement.** Both accounts hold only
+  `aStockQuoteLv1` (China A-share L1); base tier (`user_level 0`, no plan/addons;
+  subscribe 20 / depth 10 / history 20). US real-time snapshot + depth →
+  `permission denied (US market)`; only free 15-min-delayed US briefs work.
+- **US real-time data is an API-only separate purchase** (app data/subsidy grants the
+  OpenAPI nothing; buy under Tiger app → Market Data Store → **API** tab, or Developer
+  Info page; not asset-gated). **Real pricing: Nasdaq Basic (L1) US$35/mo; Basic +
+  TotalView (L1+L2) US$110/mo** — vs **moomoo US$5/mo L1 + 37 SGD (~US$27) TotalView.**
+  3–7× moomoo → no case for data eTape already gets from a working moomoo LV3 setup.
+- **Order ack-latency (demo/paper, overnight, F, non-marketable resting limits →
+  HELD → cancel, stayed flat): fastest ack path of the four brokers** — place→API
+  return warm 65–74 ms (cold 94), place→order-status-push ack warm 86–87 ms (cold 166).
+  Gatewayless direct-to-TBSG design (no OpenD hop) + SG-server proximity to PH.
+  Caveats: PAPER not live, and **ack ≠ fill** — the headline place→fill number
+  (cf. TZ 0.34 s / moomoo 0.9 s) is UNMEASURED (needs paid US data or moomoo NBBO +
+  RTH). First order-status push is already `HELD` (no separate NEW); overnight US
+  limits accepted via `trading_session_type=OVERNIGHT` + `outside_rth`.
+- **`market_scanner` runs FREE on the base tier and returns real `FloatShare` values**
+  (US total 9,076; 6,278 with float 1–20M) — the one thing moomoo's V1 `Qot_StockFilter`
+  (3203) can't do (set-membership only). `FloatMarketVal`/`CurPrice` return too **when
+  actively filtered** (`is_no_filter=True` display fields come back None). So it *could*
+  supply a daily low-float universe while moomoo stays the feed — but caveats: a real
+  fraction of symbols carry PLACEHOLDER float (exact round 5,000,000 / 20,000,000
+  clusters at the filter bounds); the universe includes ETFs/ETNs/baby-bonds/CEFs
+  (needs a security-type / isOTC filter); prices are present but delayed and the
+  pre-market change fields are deprecated in the SDK, so **live pre-market mover ranking
+  still needs moomoo (or paid Tiger data)**. Weigh against moomoo-native float (snapshot
+  `outstandingShares` = true free float) before standing up a 2nd SDK for a float list.
+
+**Verdict: CLOSED — Tiger declined as both feed and execution venue.** Its USP was
+data + execution + Go SDK in one account; the data dies on cost, and execution-only
+adds commissions (Alpaca $0) + the weakest order semantics of the four (no IOC/FOK, no
+client-order-id, no cancel-all) while losing the one-account draw. Reopen only if US
+API data pricing drops near moomoo's, or if the pre-live checklist's float-universe
+no-op is worth fixing via the (free) scanner above.
+
+## To verify empirically — mostly RESOLVED by the benchmark above (2026-07-07)
 
 1. Tick direction fidelity vs moomoo (aggressor vs tick-rule) on the same symbol,
    same session; and whether NLS tick coverage (incl. `cond`/`partCode` mix) is
