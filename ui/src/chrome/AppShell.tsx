@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview";
-import "dockview/dist/styles/dockview.css";
+import { DockviewReact, themeDark, themeLight, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview";
+// dockview's stylesheet is imported in main.tsx (ahead of global.css) so our
+// theme overrides always win the cascade — see the comment there.
 import { PanelFrame } from "./PanelFrame";
 import type { PanelConfig, Workspace } from "./workspace";
 import { WorkspaceStore } from "./workspace";
@@ -282,7 +283,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             <EmptyState onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} />
           ) : (
             <DockviewReact components={components} onReady={onReady}
-              className={mode === "light" ? "dockview-theme-light" : "dockview-theme-dark"} />
+              theme={mode === "light" ? themeLight : themeDark} />
           )}
         </div>
         <SettingsModal open={settings.open} section={settings.section}
