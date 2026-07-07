@@ -27,10 +27,20 @@ function renderPanel() {
 
 describe("newsDateLabel", () => {
   it("labels today vs older dates", () => {
-    const now = Date.parse("2026-07-07T12:00:00Z");
-    expect(newsDateLabel("2026-07-07T09:00:00Z", now)).toEqual({ label: "today", today: true });
-    expect(newsDateLabel("2026-07-04T08:00:00Z", now).today).toBe(false);
-    expect(newsDateLabel("2026-07-04T08:00:00Z", now).label).toMatch(/Jul\s*4/);
+    // Fixtures are built from LOCAL Date components (not hardcoded UTC ISO strings) so the
+    // resolved calendar day is stable under any machine timezone: constructing a Date from
+    // (year, monthIndex, day, ...) and later reading it back with the local getters (as
+    // newsDateLabel does) always round-trips to the same local day, regardless of the
+    // executing machine's UTC offset. monthIndex is 0-based, so July is 6.
+    const now = new Date(2026, 6, 7, 12, 0, 0).getTime(); // Jul 7, 2026, 12:00 local
+    const todaySeenAt = new Date(2026, 6, 7, 9, 0, 0).toISOString(); // Jul 7, 2026, 09:00 local — same day as `now`
+    const olderDate = new Date(2026, 6, 4, 16, 0, 0); // Jul 4, 2026, 16:00 local — 3 days earlier, well clear of any boundary
+    const olderSeenAt = olderDate.toISOString();
+    const expectedOlderLabel = olderDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+    expect(newsDateLabel(todaySeenAt, now)).toEqual({ label: "today", today: true });
+    expect(newsDateLabel(olderSeenAt, now).today).toBe(false);
+    expect(newsDateLabel(olderSeenAt, now).label).toBe(expectedOlderLabel);
   });
 });
 
