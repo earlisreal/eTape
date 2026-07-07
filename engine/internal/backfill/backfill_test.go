@@ -61,7 +61,7 @@ func TestSeedChunkedSplitsAndPreservesOrder(t *testing.T) {
 
 // fakeFetcher returns canned bars and records call ranges.
 type fakeFetcher struct {
-	daily, m1 []feed.Bar
+	daily, m1  []feed.Bar
 	dErr, mErr error
 	m1Calls    atomic.Int32
 }
@@ -76,8 +76,8 @@ func (f *fakeFetcher) Intraday1m(_ context.Context, _ string, _, _ time.Time) ([
 
 // fakeSeeder records seeded bars per method.
 type fakeSeeder struct {
-	mu           sync.Mutex
-	daily, hist  []feed.Bar
+	mu          sync.Mutex
+	daily, hist []feed.Bar
 }
 
 func (s *fakeSeeder) SeedDaily(_ string, b []feed.Bar) {
@@ -96,8 +96,8 @@ type fakeArchive struct {
 	daily, m1 []feed.Bar
 }
 
-func (a *fakeArchive) ReadDailyBars(_ string) ([]feed.Bar, error)             { return a.daily, nil }
-func (a *fakeArchive) ReadBars1m(_ string, _, _ int64) ([]feed.Bar, error)    { return a.m1, nil }
+func (a *fakeArchive) ReadDailyBars(_ string) ([]feed.Bar, error)          { return a.daily, nil }
+func (a *fakeArchive) ReadBars1m(_ string, _, _ int64) ([]feed.Bar, error) { return a.m1, nil }
 
 func bar(ms int64) feed.Bar { return feed.Bar{Symbol: "US.AAPL", BucketMs: ms, C: 1} }
 
@@ -108,8 +108,8 @@ func TestBackfillWarmStartThenGapFill(t *testing.T) {
 	}
 	seeder := &fakeSeeder{}
 	archive := &fakeArchive{
-		daily: []feed.Bar{bar(0)},   // one warm-start daily bar
-		m1:    []feed.Bar{bar(9)},   // one warm-start 1m bar
+		daily: []feed.Bar{bar(0)}, // one warm-start daily bar
+		m1:    []feed.Bar{bar(9)}, // one warm-start 1m bar
 	}
 	o := New(primary, nil, seeder, archive, clock.NewFake(time.Date(2026, 7, 8, 12, 0, 0, 0, session.Loc())), Config{IntradayDays: 20, SeedChunk: 500})
 	o.Backfill(context.Background(), "US.AAPL")
