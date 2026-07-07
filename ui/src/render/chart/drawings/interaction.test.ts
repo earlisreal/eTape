@@ -201,4 +201,39 @@ describe("DrawingInteraction", () => {
     expect(di.hasSelection()).toBe(false);
     expect(prim.setSelection).toHaveBeenLastCalledWith(null);
   });
+
+  it("ignores a rail-originated pointerdown instead of deselecting", () => {
+    const store = new DrawingStore();
+    store.upsert({ id: "x", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 0, price: 100 }], createdMs: 1, updatedMs: 1 });
+    const prim = fakePrimitive();
+    const { host, fire } = fakeHost();
+    new DrawingInteraction(host, fakeFacade(), prim, store, ctx(), { newId });
+    // hline at price 100 → y = 900. Click near it in select mode (mirrors the
+    // "selects a drawing on click and deletes it with Delete" test above).
+    fire("pointerdown", { clientX: 50, clientY: 901 });
+    expect(prim.setSelection).toHaveBeenLastCalledWith("x");
+    expect(prim.setSelection).toHaveBeenCalledTimes(1);
+
+    // A leaked pointerdown from a rail button (e.g. Trash) at the rail's screen
+    // position — far from the drawing — must NOT run the empty-space deselect.
+    const railTarget = { closest: (sel: string) => (sel === "[data-drawing-rail]" ? {} : null) };
+    fire("pointerdown", { clientX: 10, clientY: 10, target: railTarget as unknown as Element });
+    expect(prim.setSelection).toHaveBeenCalledTimes(1); // no additional call — selection unchanged
+    expect(prim.setSelection).toHaveBeenLastCalledWith("x");
+  });
+
+  it("an armed one-anchor tool ignores a rail-originated pointerdown (no spurious commit)", () => {
+    const store = new DrawingStore();
+    const { host, fire } = fakeHost();
+    const di = new DrawingInteraction(host, fakeFacade(), fakePrimitive(), store, ctx(), { newId });
+    di.setTool("hline");
+
+    const railTarget = { closest: (sel: string) => (sel === "[data-drawing-rail]" ? {} : null) };
+    fire("pointerdown", { clientX: 10, clientY: 10, target: railTarget as unknown as Element });
+    expect(store.forSymbol("US.AAPL")).toHaveLength(0); // no spurious drawing committed
+
+    // the tool is still armed and a real click still places the drawing normally
+    fire("pointerdown", { clientX: 5, clientY: 900 });
+    expect(store.forSymbol("US.AAPL")).toHaveLength(1);
+  });
 });

@@ -41,6 +41,7 @@ export function DrawingRail(props: DrawingRailProps): JSX.Element {
 
   return (
     <div
+      data-drawing-rail="true"
       onPointerDown={(e) => e.stopPropagation()} // rail clicks must not reach the drawing pointer handlers
       style={{
         position: "absolute", left: 4, top: 4, zIndex: 5,

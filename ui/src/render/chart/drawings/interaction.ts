@@ -31,7 +31,7 @@ export interface DrawingContext {
   magnet(): boolean;
 }
 
-type PointerLike = { clientX: number; clientY: number };
+type PointerLike = { clientX: number; clientY: number; target?: EventTarget | null };
 type KeyLike = { key: string; preventDefault?: () => void };
 
 type Gesture =
@@ -155,6 +155,13 @@ export class DrawingInteraction {
 
   // --- pointer handlers ---
   private onPointerDown(e: PointerLike): void {
+    // The drawing rail sits inside `host` as a DOM child; its own stopPropagation()
+    // runs too late to matter (React's delegated dispatch fires after this raw
+    // listener during native bubbling), so guard here on a DOM marker instead.
+    // Duck-typed (rather than `instanceof Element`) so this also works against the
+    // plain-object PointerLike fixtures used in interaction.test.ts (no DOM/jsdom there).
+    const target = e.target as { closest?: (sel: string) => unknown } | null | undefined;
+    if (target && typeof target.closest === "function" && target.closest("[data-drawing-rail]")) return;
     this.host.focus();
     const p = this.pos(e);
     const anchor = this.snap(p);
