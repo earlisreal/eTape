@@ -143,6 +143,44 @@ export function PanelFrame(
     return () => document.removeEventListener("focusin", onFocusIn);
   }, [def?.symbolBearing]);
 
+  // Task 13 fix (review finding, second round: the `focusin` effect above does
+  // NOT cover clicking this panel's own body while it's already the active
+  // panel). Verified against the installed dockview-core
+  // (node_modules/dockview-core/dist/cjs/dockview/components/panel/content.js:37):
+  // `contentContainer.element` — an ANCESTOR of this component's own root div —
+  // has `tabIndex = -1` and is what dockview `.focus()`s to activate a panel.
+  // Nothing this component itself renders (the `hostRef` div, the chart/
+  // ladder/tape canvas inside it) sets a tabIndex. So when a user clicks this
+  // panel's own canvas while it is already the active panel,
+  // `document.activeElement` does not change at all (the click target's
+  // nearest focusable ancestor is already the focused element) — no
+  // `focusin` event fires, and the effect above never runs. Left unfixed,
+  // `tl.editing` (and the document-capture keydown listener that keeps
+  // stopPropagation-ing matching keys because of it) survives indefinitely
+  // until Enter/Escape, right up to eating a real order hotkey — the same
+  // hazard class as the Critical finding this file already fixes for
+  // deactivation, just narrower in scope (confined to the one active panel).
+  //
+  // Fix: a `pointerdown` listener scoped to `hostRef`'s own element (this
+  // panel's BODY — the canvas/chart area — not the `ledger-header` div where
+  // the edit affordance itself renders, which is a sibling subtree, not a
+  // descendant of `hostRef`). This reacts directly to the pointer event
+  // landing in the panel body, independent of whether a `focusin` also
+  // fires, so it doesn't depend on the DOM's actual focus target changing.
+  // Because the header is a separate subtree, a click on the edit affordance
+  // itself (`panel-symbol` / `panel-symbol-hint`) never reaches this
+  // listener, so it can't fight with the keydown-driven editing flow.
+  useEffect(() => {
+    if (!def?.symbolBearing) return;
+    const el = hostRef.current;
+    if (!el) return;
+    const onPointerDown = () => {
+      setTl((prev) => (prev.editing ? { editing: false } : prev));
+    };
+    el.addEventListener("pointerdown", onPointerDown);
+    return () => el.removeEventListener("pointerdown", onPointerDown);
+  }, [def?.symbolBearing]);
+
   // Task 13: type-to-load keydown capture. Deliberately attached to `document`
   // in the CAPTURE phase, not the frame-root DOM node in the (default) bubble
   // phase as the task brief originally sketched — verified against the
@@ -271,7 +309,7 @@ export function PanelFrame(
           ✕
         </button>
       </div>
-      <div ref={hostRef} style={{ flex: 1, minHeight: 0 }}>
+      <div ref={hostRef} data-testid="panel-body" style={{ flex: 1, minHeight: 0 }}>
         <ErrorBoundary label={config.panelId}>
           {Body ? <Body {...props} /> : <div style={{ padding: 12, color: palette.textMuted }}>“{config.panelId}” — coming in a later plan</div>}
         </ErrorBoundary>

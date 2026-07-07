@@ -279,4 +279,62 @@ describe("PanelFrame — type-to-load (Task 13)", () => {
     expect(screen.getByTestId("panel-symbol").textContent).toBe("AAPL");
     document.body.removeChild(other);
   });
+
+  // Review finding (second round, Critical-class): the `focusin`-based cancel
+  // above ONLY fires if document.activeElement actually changes. Verified
+  // against the installed dockview-core that nothing in this component's own
+  // tree (host div, canvas) sets a tabIndex, so clicking this panel's own
+  // body while it's already the active dockview panel moves NO focus at all
+  // (dockview already `.focus()`d an ANCESTOR — contentContainer.element,
+  // tabIndex=-1 — to activate the panel) and fires no `focusin` event. This
+  // test reproduces exactly that: it asserts document.activeElement is
+  // unchanged by the click (proving it is NOT relying on a focusin), then
+  // asserts the edit was cancelled anyway via a real window-bubble-listener
+  // capture check (the same technique the deactivation regression test above
+  // uses). Note the follow-up keydown uses "Backspace", not a printable
+  // character: since the panel stays ACTIVE (unlike the deactivation test),
+  // a printable keystroke legitimately starts a brand-new edit and WOULD be
+  // captured — that's correct behavior, not the bug. "Backspace" is only
+  // ever acted on by the "already editing" branch, so it proves that branch
+  // is not still running against the cancelled edit.
+  it("clicking the panel's own body while it stays active cancels the in-progress edit, even though no focusin fires (regression: pointerdown-scoped cancel, not focus-dependent)", () => {
+    const api = fakePanelApi(true);
+    const { container } = renderFrame({ api, group: null, settings: { symbol: "US.AAPL" } });
+    typeKey("n"); typeKey("v");
+    expect(screen.getByTestId("panel-symbol").textContent).toContain("NV");
+
+    const before = document.activeElement;
+    const body = container.querySelector('[data-testid="panel-body"]') as HTMLElement;
+    expect(body).toBeTruthy();
+    fireEvent.pointerDown(body);
+
+    // Proves this test actually reproduces the "no focusin fires" scenario
+    // the bug depends on, not some other DOM interaction.
+    expect(document.activeElement).toBe(before);
+
+    expect(screen.getByTestId("panel-symbol").textContent).toBe("AAPL");
+    expect(screen.queryByTestId("panel-symbol-hint")).toBeNull();
+
+    const windowSpy = vi.fn();
+    window.addEventListener("keydown", windowSpy);
+    typeKey("Backspace"); // only meaningful in the "already editing" branch — must not still be captured
+    window.removeEventListener("keydown", windowSpy);
+    expect(windowSpy).toHaveBeenCalled(); // NOT stopped — the stale-editing branch must not fire
+  });
+
+  // Review finding (Important, addendum): `commit`'s try/catch around a
+  // rejecting/throwing `focusChecked` promise (a transport-level failure,
+  // distinct from an already-handled `{ ok: false }` "blocked" ack) had no
+  // regression test — verified by inspection only. This exercises the real
+  // reject path end-to-end and confirms it surfaces a toast rather than
+  // becoming a silent unhandled rejection.
+  it("a rejecting/throwing focusChecked promise (transport failure) also surfaces a toast, not a silent unhandled rejection", async () => {
+    const linkGroups = new LinkGroups(fakeBus() as never, () => {});
+    vi.spyOn(linkGroups, "focusChecked").mockRejectedValue(new Error("network down"));
+    const api = fakePanelApi(true);
+    renderFrame({ api, group: "blue", linkGroups });
+    typeKey("n"); typeKey("v"); typeKey("d"); typeKey("a");
+    typeKey("Enter");
+    await screen.findByText(/failed — network down/i);
+  });
 });
