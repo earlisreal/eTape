@@ -24,3 +24,6 @@ docs/tradezero/
 !docs/superpowers/
 !docs/superpowers/**
 .superpowers/
+
+# Git worktree scratch space
+.worktrees/
