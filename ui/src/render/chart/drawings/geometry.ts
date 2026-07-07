@@ -67,18 +67,15 @@ export function extendToEdge(p0: Px, p1: Px, width: number): Px {
   return { x: targetX, y: p0.y + t * dy };
 }
 
-// Magnet: level within tolPx of the cursor with max distance, else null.
-// Tie-break by highest price.
+// Magnet: nearest level whose y is within tolPx of the cursor, else null.
 export function snapToLevels(cursorY: number, levels: readonly { price: number; y: number }[], tolPx: number): number | null {
   let bestPrice: number | null = null;
-  let bestDist = -Infinity;
+  let bestDist = Infinity;
   for (const l of levels) {
     const d = Math.abs(cursorY - l.y);
-    if (d <= tolPx) {
-      if (d > bestDist || (d === bestDist && (bestPrice === null || l.price > bestPrice))) {
-        bestDist = d;
-        bestPrice = l.price;
-      }
+    if (d <= tolPx && d < bestDist) {
+      bestDist = d;
+      bestPrice = l.price;
     }
   }
   return bestPrice;

@@ -62,13 +62,13 @@ describe("extendToEdge", () => {
 describe("snapToLevels", () => {
   const levels = [{ price: 10, y: 100 }, { price: 11, y: 90 }, { price: 12, y: 50 }];
   it("snaps to the nearest level within tolerance", () => {
-    expect(snapToLevels(96, levels, 6)).toBe(11);
+    expect(snapToLevels(96, levels, 6)).toBe(10);
   });
   it("returns null when no level is within tolerance", () => {
     expect(snapToLevels(70, levels, 6)).toBeNull();
   });
   it("prefers the closest when two are within tolerance", () => {
-    expect(snapToLevels(95, levels, 6)).toBe(11); // 90 is 5 away, 100 is 5 away — tie → first-min (11)
+    expect(snapToLevels(95, levels, 6)).toBe(10); // 90 is 5 away, 100 is 5 away — tie → first-encountered wins (10)
   });
 });
 
