@@ -69,10 +69,66 @@ describe("ScannerPanel", () => {
     expect(focus).toHaveBeenCalledWith("green", "US.KO");
   });
 
-  it("editing a threshold persists via onConfigChange", () => {
+  it("has no persistent input row on load; the ⚙ button reveals the filter inputs", () => {
+    renderPanel();
+    expect(screen.queryByLabelText("min change %")).toBeNull();
+    expect(screen.queryByLabelText("float cap")).toBeNull();
+    expect(screen.queryByLabelText("min volume")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /filters/i }));
+    expect(screen.getByLabelText("min change %")).toBeTruthy();
+    expect(screen.getByLabelText("float cap")).toBeTruthy();
+    expect(screen.getByLabelText("min volume")).toBeTruthy();
+  });
+
+  it("the summary line reflects the active thresholds", () => {
+    renderPanel({ settings: { targetGroup: "green", thresholds: { minChangePct: 10, floatCapShares: 20_000_000, minVolume: 100_000 } } });
+    expect(screen.getByText("change ≥ 10% · float ≤ 20M · vol ≥ 100k")).toBeTruthy();
+  });
+
+  it("summary line reads 'no filters' when thresholds are off", () => {
+    renderPanel();
+    expect(screen.getByText("no filters")).toBeTruthy();
+  });
+
+  it("editing a threshold in the popover and clicking Apply persists via onConfigChange", () => {
     const { onConfigChange } = renderPanel();
-    fireEvent.change(screen.getByLabelText(/min change/i), { target: { value: "7" } });
+    fireEvent.click(screen.getByRole("button", { name: /filters/i }));
+    fireEvent.change(screen.getByLabelText("min change %"), { target: { value: "7" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(onConfigChange).toHaveBeenCalledWith(expect.objectContaining({
       thresholds: expect.objectContaining({ minChangePct: 7 }) }));
+  });
+
+  it("Reset defaults clears the draft inputs without persisting until Apply", () => {
+    const { onConfigChange } = renderPanel({ settings: { targetGroup: "green", thresholds: { minChangePct: 10, floatCapShares: null, minVolume: 0 } } });
+    fireEvent.click(screen.getByRole("button", { name: /filters/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset defaults" }));
+    expect((screen.getByLabelText("min change %") as HTMLInputElement).value).toBe("0");
+    expect(onConfigChange).not.toHaveBeenCalled();
+  });
+
+  it("default view sorts by % change descending", () => {
+    const { scanner } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+      payload: { refreshedAt: "t", rows: [
+        { symbol: "US.LOW", changePct: 2, last: 1, floatShares: 1, volume: 1 },
+        { symbol: "US.HIGH", changePct: 40, last: 1, floatShares: 1, volume: 1 },
+      ] } }));
+    const symbols = [...document.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent);
+    expect(symbols).toEqual(["US.HIGH", "US.LOW"]);
+  });
+
+  it("clicking the % header toggles sort direction and persists it via onConfigChange", () => {
+    const { scanner, onConfigChange } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+      payload: { refreshedAt: "t", rows: [
+        { symbol: "US.LOW", changePct: 2, last: 1, floatShares: 1, volume: 1 },
+        { symbol: "US.HIGH", changePct: 40, last: 1, floatShares: 1, volume: 1 },
+      ] } }));
+    fireEvent.click(screen.getByRole("columnheader", { name: /%/ }));
+    expect(onConfigChange).toHaveBeenCalledWith(expect.objectContaining({
+      sort: { col: "changePct", dir: "asc" } }));
+    const symbols = [...document.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent);
+    expect(symbols).toEqual(["US.LOW", "US.HIGH"]);
   });
 });

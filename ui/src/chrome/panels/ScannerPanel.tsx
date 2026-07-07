@@ -5,12 +5,30 @@ import type { LinkGroup } from "../linkGroups";
 import { useTheme } from "../ThemeProvider";
 import { formatTapeTime } from "../../render/format";
 import { formatChangePct, formatCompactShares, msUntilEtMidnight } from "../format";
-import { applyScannerFilters, sortByChangeDesc, type ScannerThresholds } from "./scannerFilter";
+import { applyScannerFilters, formatFilterSummary, type ScannerThresholds } from "./scannerFilter";
+import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
+import type { ScannerRowView } from "../../data/ScannerStore";
 
 const SESSION_LABEL: Record<ScannerSession, string> = {
   premarket: "Pre-market", rth: "RTH movers", afterhours: "After-hours",
 };
 const GROUPS: Exclude<LinkGroup, null>[] = ["red", "green", "blue", "yellow"];
+const DEFAULT_SORT: SortState = { col: "changePct", dir: "desc" };
+const DEFAULT_THRESHOLDS: ScannerThresholds = { minChangePct: 0, floatCapShares: null, minVolume: 0 };
+const COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
+  { col: "sym", label: "Symbol", align: "left" },
+  { col: "changePct", label: "%", align: "right" },
+  { col: "last", label: "Last", align: "right" },
+  { col: "float", label: "Float", align: "right" },
+  { col: "vol", label: "Vol", align: "right" },
+];
+const SORT_ACCESSORS: Record<string, (r: ScannerRowView) => number | string | null> = {
+  sym: (r) => r.symbol,
+  changePct: (r) => r.changePct,
+  last: (r) => r.last,
+  float: (r) => r.floatShares,
+  vol: (r) => r.volume,
+};
 
 function readThresholds(s: Record<string, unknown>): ScannerThresholds {
   const t = (s.thresholds ?? {}) as Partial<ScannerThresholds>;
@@ -21,6 +39,14 @@ function readThresholds(s: Record<string, unknown>): ScannerThresholds {
   };
 }
 
+function readSort(s: Record<string, unknown>): SortState {
+  const raw = s.sort as { col?: unknown; dir?: unknown } | undefined;
+  if (raw && typeof raw.col === "string" && (raw.dir === "asc" || raw.dir === "desc")) {
+    return { col: raw.col, dir: raw.dir };
+  }
+  return DEFAULT_SORT;
+}
+
 export function ScannerPanel(
   { config, stores, linkGroups, onConfigChange, session }: PanelProps & { session: ScannerSession },
 ): JSX.Element {
@@ -28,6 +54,9 @@ export function ScannerPanel(
   const snap = useSyncExternalStore((cb) => stores.scanner.subscribe(cb), () => stores.scanner.getSnapshot());
   const sv = useMemo(() => stores.scanner.view(session), [snap, session, stores.scanner]);
   const [thresholds, setThresholds] = useState<ScannerThresholds>(() => readThresholds(config.settings));
+  const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [draft, setDraft] = useState<ScannerThresholds>(thresholds);
   const targetGroup = ((config.settings.targetGroup as LinkGroup) ?? "green") as Exclude<LinkGroup, null>;
 
   // ET-midnight dedup reset: clear the per-session seen-set so the next session's
@@ -39,13 +68,24 @@ export function ScannerPanel(
     return () => clearTimeout(timer);
   }, [stores.scanner, session]);
 
-  const rows = useMemo(() => sortByChangeDesc(applyScannerFilters(sv.rows, thresholds)), [sv.rows, thresholds]);
+  const rows = useMemo(
+    () => sortRows(applyScannerFilters(sv.rows, thresholds), sort, SORT_ACCESSORS),
+    [sv.rows, thresholds, sort],
+  );
 
-  const updateThreshold = (patch: Partial<ScannerThresholds>) => {
-    const next = { ...thresholds, ...patch };
-    setThresholds(next);
-    onConfigChange({ ...config.settings, thresholds: next });
+  const openFilters = () => { setDraft(thresholds); setFiltersOpen(true); };
+  const applyFilters = () => {
+    setThresholds(draft);
+    onConfigChange({ ...config.settings, thresholds: draft });
+    setFiltersOpen(false);
   };
+  const resetDefaults = () => setDraft(DEFAULT_THRESHOLDS);
+  const clickSort = (col: string) => {
+    const next = toggleSort(sort, col);
+    setSort(next);
+    onConfigChange({ ...config.settings, sort: next });
+  };
+
   const swatch = (g: Exclude<LinkGroup, null>): string =>
     ({ red: palette.linkRed, green: palette.linkGreen, blue: palette.linkBlue, yellow: palette.linkYellow }[g]);
   const header = sv.refreshedAt
@@ -55,8 +95,12 @@ export function ScannerPanel(
   const th = { padding: "2px 8px", position: "sticky" as const, top: 0, background: palette.surface };
   return (
     <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderBottom: `1px solid ${palette.border}` }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderBottom: `1px solid ${palette.border}`, position: "relative" }}>
         <span style={{ fontWeight: 600 }}>{header}</span>
+        <button type="button" className="btn" aria-label="filters" aria-expanded={filtersOpen}
+          onClick={() => (filtersOpen ? setFiltersOpen(false) : openFilters())} style={{ padding: "2px 8px" }}>
+          ⚙ filters
+        </button>
         <span style={{ flex: 1 }} />
         {GROUPS.map((g) => (
           <button key={g} title={`Send clicks to ${g}`} aria-label={`send clicks to ${g}`}
@@ -64,26 +108,43 @@ export function ScannerPanel(
             style={{ width: 14, height: 14, borderRadius: 3, background: swatch(g), padding: 0, cursor: "pointer",
               border: targetGroup === g ? `2px solid ${palette.text}` : `1px solid ${palette.border}` }} />
         ))}
+        {filtersOpen && (
+          <div className="popover" style={{ top: 30, left: 8, width: 220 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              <label>min change % <input aria-label="min change %" type="number" value={draft.minChangePct}
+                onChange={(e) => setDraft({ ...draft, minChangePct: Number(e.target.value) || 0 })} style={{ width: 60 }} /></label>
+              <label>float ≤ <input aria-label="float cap" type="number" value={draft.floatCapShares ?? ""}
+                onChange={(e) => setDraft({ ...draft, floatCapShares: e.target.value === "" ? null : Number(e.target.value) })} style={{ width: 100 }} /></label>
+              <label>vol ≥ <input aria-label="min volume" type="number" value={draft.minVolume}
+                onChange={(e) => setDraft({ ...draft, minVolume: Number(e.target.value) || 0 })} style={{ width: 90 }} /></label>
+              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                <button type="button" className="btn" onClick={resetDefaults}>Reset defaults</button>
+                <button type="button" className="btn btn-primary" onClick={applyFilters}>Apply</button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
-      <div style={{ display: "flex", gap: 10, padding: "4px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>
-        <label>min change % <input aria-label="min change %" type="number" value={thresholds.minChangePct}
-          onChange={(e) => updateThreshold({ minChangePct: Number(e.target.value) || 0 })} style={{ width: 52 }} /></label>
-        <label>float ≤ <input aria-label="float cap" type="number" value={thresholds.floatCapShares ?? ""}
-          onChange={(e) => updateThreshold({ floatCapShares: e.target.value === "" ? null : Number(e.target.value) })} style={{ width: 90 }} /></label>
-        <label>vol ≥ <input aria-label="min volume" type="number" value={thresholds.minVolume}
-          onChange={(e) => updateThreshold({ minVolume: Number(e.target.value) || 0 })} style={{ width: 80 }} /></label>
+      <div className="mono" style={{ padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>
+        {formatFilterSummary(thresholds)}
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ color: palette.textMuted, textAlign: "right" }}>
-            <th style={{ ...th, textAlign: "left" }}>Symbol</th><th style={th}>%</th><th style={th}>Last</th><th style={th}>Float</th><th style={th}>Vol</th>
+            {COLUMNS.map((c) => (
+              <th key={c.col} style={{ ...th, textAlign: c.align, cursor: "pointer" }} onClick={() => clickSort(c.col)}
+                className={`col-head${sort?.col === c.col ? " sort-active" : ""}`}>
+                {c.label} {sortIndicator(sort, c.col)}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((r) => (
             <tr key={r.symbol} onClick={() => linkGroups.focus(targetGroup, r.symbol)}
               style={{ cursor: "pointer", textAlign: "right", opacity: r.muted ? 0.55 : 1,
-                background: r.isNewHit ? palette.accent + "33" : "transparent" }}>
+                background: r.isNewHit ? "rgba(154,106,27,.10)" : "transparent",
+                boxShadow: r.isNewHit ? `inset 2px 0 0 ${palette.accent}` : "none" }}>
               <td style={{ textAlign: "left", padding: "2px 8px" }}>{r.symbol}</td>
               <td style={{ padding: "2px 8px", color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>{formatChangePct(r.changePct)}</td>
               <td style={{ padding: "2px 8px" }}>{r.last === null ? "—" : r.last.toFixed(2)}</td>
