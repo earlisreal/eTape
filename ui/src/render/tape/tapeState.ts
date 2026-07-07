@@ -8,6 +8,7 @@ import type { Palette } from "../palette";
 import { formatPrice, formatSize, formatTapeTime, priceDecimals } from "../format";
 
 export const TAPE_ROW_H = 18;
+export const BLOCK_THRESHOLD = 10_000; // shares; v1.1 fixed (see spec open items)
 
 /** What the tape needs from TapeRing (satisfied structurally; tests use plain fakes). */
 export interface TapeSource {
@@ -28,6 +29,7 @@ export interface TapeRow {
   price: string;
   size: string;
   direction: TickDirection;
+  isBlock: boolean; // raw tick size >= BLOCK_THRESHOLD (computed before formatting)
 }
 
 export interface TapePaintState {
@@ -76,6 +78,7 @@ export function buildTapeRows(
     price: formatPrice(t.price, decimals),
     size: formatSize(t.size),
     direction: t.direction,
+    isBlock: t.size >= BLOCK_THRESHOLD,
   }));
   return { rows, paused: anchorValid };
 }

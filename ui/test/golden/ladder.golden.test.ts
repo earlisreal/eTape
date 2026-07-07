@@ -6,7 +6,7 @@ import { buildLadderState, FLASH_MS } from "../../src/render/ladder/ladderState"
 import { paintLadder } from "../../src/render/ladder/paintLadder";
 
 const W = 300;
-const H = 486; // header 20 + 10×22 + center 26 + 10×22
+const H = 256; // spread 18 + header 18 + 10×22 (two-column layout, Task 14)
 const NOW = 1_000_000; // fixed clock — flash age is NOW - atMs
 
 // Deterministic fixture generators (no Math.random — multiplicative patterns).
@@ -17,6 +17,14 @@ function fullBook(): Book {
     asks: Array.from({ length: 10 }, (_, i) => ({ price: 3.51 + i * 0.01, size: 250 + ((i * 211) % 1100) })),
     ts: "2026-07-06T13:35:00Z",
   };
+}
+
+function bidsOnlyBook(): Book {
+  return { symbol: "US.AAPL", bids: fullBook().bids, asks: [], ts: "2026-07-06T13:35:00Z" };
+}
+
+function asksOnlyBook(): Book {
+  return { symbol: "US.AAPL", bids: [], asks: fullBook().asks, ts: "2026-07-06T13:35:00Z" };
 }
 
 // Order prices must land EXACTLY on generated level prices (marks match with
@@ -32,22 +40,32 @@ const workingOrders: Order[] = [
   ord({ id: "o2", side: "SHORT", limitPrice: 3.53, qty: 80, leavesQty: 50, status: "PARTIALLY_FILLED" }),
 ];
 
-describe("paintLadder goldens", () => {
+describe("paintLadder goldens (two-column layout)", () => {
   for (const mode of ["light", "dark"] as const) {
     const palette = getPalette(mode);
     const base = { orders: [] as Order[], flash: null, last: null, nowMs: NOW, width: W, height: H, palette };
 
-    it(`full book with working-order marks — ${mode}`, () => {
+    it(`full book with working-order marks (both sides) — ${mode}`, () => {
       const s = buildLadderState({
         ...base, symbol: "US.AAPL", book: fullBook(), orders: workingOrders,
         last: { price: 3.51, direction: "BUY" },
       });
-      expectGolden(`ladder-full-${mode}`, renderScene(W, H, (ctx) => paintLadder(ctx, s)));
+      expectGolden(`ladder2col-full-${mode}`, renderScene(W, H, (ctx) => paintLadder(ctx, s)));
+    });
+
+    it(`one-sided book — bids only — ${mode}`, () => {
+      const s = buildLadderState({ ...base, symbol: "US.AAPL", book: bidsOnlyBook() });
+      expectGolden(`ladder2col-bidsonly-${mode}`, renderScene(W, H, (ctx) => paintLadder(ctx, s)));
+    });
+
+    it(`one-sided book — asks only — ${mode}`, () => {
+      const s = buildLadderState({ ...base, symbol: "US.AAPL", book: asksOnlyBook() });
+      expectGolden(`ladder2col-asksonly-${mode}`, renderScene(W, H, (ctx) => paintLadder(ctx, s)));
     });
 
     it(`empty book (waiting for depth) — ${mode}`, () => {
       const s = buildLadderState({ ...base, symbol: "US.AAPL", book: undefined });
-      expectGolden(`ladder-empty-${mode}`, renderScene(W, H, (ctx) => paintLadder(ctx, s)));
+      expectGolden(`ladder2col-empty-${mode}`, renderScene(W, H, (ctx) => paintLadder(ctx, s)));
     });
 
     it(`last-trade flash mid-decay — ${mode}`, () => {
@@ -56,12 +74,12 @@ describe("paintLadder goldens", () => {
         last: { price: 3.51, direction: "BUY" },
         flash: { price: 3.51, direction: "BUY", atMs: NOW - FLASH_MS / 2 }, // alpha 0.5
       });
-      expectGolden(`ladder-flash-${mode}`, renderScene(W, H, (ctx) => paintLadder(ctx, s)));
+      expectGolden(`ladder2col-flash-${mode}`, renderScene(W, H, (ctx) => paintLadder(ctx, s)));
     });
 
     it(`no depth entitlement (non-US) — ${mode}`, () => {
       const s = buildLadderState({ ...base, symbol: "HK.00700", book: undefined });
-      expectGolden(`ladder-noentitle-${mode}`, renderScene(W, H, (ctx) => paintLadder(ctx, s)));
+      expectGolden(`ladder2col-noentitle-${mode}`, renderScene(W, H, (ctx) => paintLadder(ctx, s)));
     });
   }
 });

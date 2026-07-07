@@ -6,6 +6,7 @@ import { ToastProvider } from "../Toast";
 import { OrderConfigProvider } from "../exec/useOrderConfig";
 import { OrderTicketPanel } from "./OrderTicketPanel";
 import { makeStores } from "../../data/registry";
+import { getPalette } from "../../render/palette";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
 import type { AckMsg, ExecStatus, SubmitOrderArgs } from "../../wire/contract";
 import type { PanelProps } from "./registry";
@@ -72,4 +73,35 @@ describe("OrderTicketPanel", () => {
     expect((await screen.findByTestId("ticket-armed-state")).textContent).toBe("ARMED");
     expect(screen.getByTestId("order-type")).toBeTruthy();
   });
+  // Color-discipline regression (final-branch review, Finding 2): armed/disarmed
+  // is UI state, never market-direction green/red — matches AccountPanel's
+  // arm-chip formula (palette.accent when active, palette.textMuted when not).
+  it("colors the armed indicator bronze/muted, never green/red", async () => {
+    const palette = getPalette("light"); // ThemeProvider defaults to light
+    const { props: armedProps, stores: armedStores, linkGroups: armedLinks } = mkProps();
+    act(() => {
+      armedStores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      armedLinks.focus("green", "US.AAPL");
+    });
+    const armedRender = wrap(armedProps);
+    const armedEl = await screen.findByTestId("ticket-armed-state");
+    expect(armedEl.style.color).toBe(hexToRgb(palette.accent));
+    expect(armedEl.style.color).not.toBe(hexToRgb(palette.up));
+    armedRender.unmount();
+
+    const { props: disarmedProps, stores: disarmedStores, linkGroups: disarmedLinks } = mkProps();
+    act(() => {
+      disarmedStores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: { ...status(), venues: [{ ...status().venues[0], venueArmed: false }] } });
+      disarmedLinks.focus("green", "US.AAPL");
+    });
+    wrap(disarmedProps);
+    const disarmedEl = await screen.findByTestId("ticket-armed-state");
+    expect(disarmedEl.style.color).toBe(hexToRgb(palette.textMuted));
+    expect(disarmedEl.style.color).not.toBe(hexToRgb(palette.warn));
+  });
 });
+
+function hexToRgb(hex: string): string {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
+}

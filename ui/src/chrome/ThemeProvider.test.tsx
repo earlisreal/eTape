@@ -34,4 +34,12 @@ describe("ThemeProvider", () => {
     await waitFor(() => expect(screen.getByTestId("mode").textContent).toBe("dark"));
     expect(commands.sendCommand).toHaveBeenCalledWith("SetConfig", { key: "theme", value: "dark" });
   });
+
+  it("mirrors the palette onto :root and sets data-theme", async () => {
+    render(<ThemeProvider><div /></ThemeProvider>);
+    await waitFor(() => {
+      expect(document.documentElement.style.getPropertyValue("--bg")).toBe("#FBFAF7");
+      expect(document.documentElement.dataset.theme).toBe("light");
+    });
+  });
 });

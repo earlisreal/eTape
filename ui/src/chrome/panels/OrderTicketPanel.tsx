@@ -13,7 +13,7 @@ import { resolvePlaceTemplate } from "../exec/resolveTemplate";
 import type { PlaceOrderTemplate } from "../exec/actionTemplate";
 import { sideLabel, bareSymbol, abbrevType } from "../exec/orderStatus";
 import { formatPrice } from "../../render/format";
-import { OrderSettingsModal } from "../exec/OrderSettingsModal";
+import { useOpenSettings } from "../OpenSettingsContext";
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
@@ -24,8 +24,8 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups }: Panel
   const { palette } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
-  const { config: orderCfg, setActiveVenue, save } = useOrderConfig(); // shared context (Task 8)
-  const [showSettings, setShowSettings] = useState(false);
+  const { config: orderCfg, setActiveVenue } = useOrderConfig(); // shared context (Task 8)
+  const openSettings = useOpenSettings(); // unified Settings modal, Orders section (Task 11)
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
 
   const [symbol, setSymbol] = useState<string>(() => linkGroups.symbolFor(config.group) ?? (config.settings.symbol as string) ?? "US.AAPL");
@@ -83,59 +83,66 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups }: Panel
     void oc.submit(r.args, r.flash);
   };
 
-  const inp = { background: palette.bg, color: palette.text, border: `1px solid ${palette.border}`, fontSize: 12, padding: "2px 4px" } as const;
   const quoteBtn = (label: string, testid: string, value: number | undefined, tone: string) => (
-    <button data-testid={testid} onClick={() => value !== undefined && setPrice(String(value))}
-      style={{ ...inp, borderColor: tone, color: tone, cursor: "pointer", flex: 1 }}>{label} {value === undefined ? "—" : formatPrice(value, 2)}</button>
+    <button data-testid={testid} className="ctl mono" onClick={() => value !== undefined && setPrice(String(value))}
+      style={{ justifyContent: "center", borderColor: tone, color: tone, cursor: "pointer", flex: 1 }}>{label} {value === undefined ? "—" : formatPrice(value, 2)}</button>
   );
+  const sideClass = (s: Side) => `side${s !== side ? "" : s === "BUY" ? " side-selected-buy" : " side-selected"}`;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: 8, height: "100%", background: palette.surface, color: palette.text, fontSize: 12, overflow: "auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <strong>{bareSymbol(symbol)}</strong>
-        <select data-testid="venue" value={venue} onChange={(e) => setActiveVenue(e.target.value)} style={inp}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 4 }}>
+        <strong className="serif">{bareSymbol(symbol)}</strong>
+        <select data-testid="venue" className="ctl mono" value={venue} onChange={(e) => setActiveVenue(e.target.value)}>
           {venues.map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
-        <button data-testid="open-settings" onClick={() => setShowSettings(true)} style={inp}>⚙</button>
+        <button data-testid="open-settings" className="btn" onClick={() => openSettings?.openOrderSettings()}>⚙</button>
       </div>
       <div style={{ display: "flex", gap: 4 }}>
         {quoteBtn("Bid", "bid", quote?.bid, palette.up)}
         {quoteBtn("Ask", "ask", quote?.ask, palette.down)}
       </div>
       <div style={{ display: "flex", gap: 4 }}>
-        <select value={side} onChange={(e) => setSide(e.target.value as Side)} style={inp}>{SIDES.map((s) => <option key={s}>{s}</option>)}</select>
-        <select data-testid="order-type" value={type} onChange={(e) => setType(e.target.value as OrderType)} style={inp}>{TYPES.map((t) => <option key={t}>{t}</option>)}</select>
-        <select value={tif} onChange={(e) => setTif(e.target.value as TIF)} style={inp}>{TIFS.map((t) => <option key={t}>{t}</option>)}</select>
+        {SIDES.map((s) => (
+          <button key={s} type="button" className={sideClass(s)} onClick={() => setSide(s)}>{s}</button>
+        ))}
       </div>
-      <label>Price <input data-testid="price" value={price} onChange={(e) => setPrice(e.target.value)} disabled={type === "MARKET"} style={inp} /></label>
-      {(type === "STOP" || type === "STOP_LIMIT") && <label>Stop <input data-testid="stop" value={stop} onChange={(e) => setStop(e.target.value)} style={inp} /></label>}
       <div style={{ display: "flex", gap: 4 }}>
-        <input data-testid="amount" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ ...inp, flex: 1 }} />
-        <select data-testid="mode" value={mode} onChange={(e) => setMode(e.target.value as SizingMode)} style={inp}>{MODES.map((m) => <option key={m}>{m}</option>)}</select>
+        <select data-testid="order-type" className="ctl mono" value={type} onChange={(e) => setType(e.target.value as OrderType)}>{TYPES.map((t) => <option key={t}>{t}</option>)}</select>
+        <select className="ctl mono" value={tif} onChange={(e) => setTif(e.target.value as TIF)}>{TIFS.map((t) => <option key={t}>{t}</option>)}</select>
       </div>
+      <label style={{ display: "flex", alignItems: "center", gap: 4 }}>Price
+        <input data-testid="price" className="ctl mono" value={price} onChange={(e) => setPrice(e.target.value)} disabled={type === "MARKET"} style={{ flex: 1 }} />
+      </label>
+      {(type === "STOP" || type === "STOP_LIMIT") && (
+        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>Stop
+          <input data-testid="stop" className="ctl mono" value={stop} onChange={(e) => setStop(e.target.value)} style={{ flex: 1 }} />
+        </label>
+      )}
+      <div style={{ display: "flex", gap: 4 }}>
+        <input data-testid="amount" className="ctl mono" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ flex: 1 }} />
+        <select data-testid="mode" className="ctl mono" value={mode} onChange={(e) => setMode(e.target.value as SizingMode)}>{MODES.map((m) => <option key={m}>{m}</option>)}</select>
+      </div>
+      {/* Bronze/muted — color-discipline: armed/disarmed is UI state, never
+          market-direction green/red. Matches AccountPanel's arm-chip formula. */}
       <div data-testid="ticket-armed-state" style={{ fontSize: 11, fontWeight: 700, textAlign: "center", padding: "2px 0",
-        color: armed ? palette.up : palette.warn }}>
+        color: armed ? palette.accent : palette.textMuted }}>
         {armed ? "ARMED" : "DISARMED — order will be blocked"}
       </div>
-      <button data-testid="submit" onClick={submitManual} style={{ ...inp, background: palette.accent, color: palette.bg, fontWeight: 700, padding: "6px", cursor: "pointer" }}>
+      <button data-testid="submit" className="btn btn-primary" onClick={submitManual} style={{ fontWeight: 700, padding: "6px" }}>
         Submit {side} {symbol && bareSymbol(symbol)}
       </button>
       {presets.length > 0 && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
           {presets.map((t) => (
-            <button key={t.id} data-testid={`preset-${t.id}`} onClick={() => firePreset(t)}
-              style={{ ...inp, cursor: "pointer" }}>{t.label}</button>
+            <button key={t.id} data-testid={`preset-${t.id}`} className="btn" onClick={() => firePreset(t)}>{t.label}</button>
           ))}
         </div>
       )}
-      <div style={{ display: "flex", gap: 4, marginTop: "auto" }}>
-        <button data-testid="cancel-all" onClick={() => void oc.cancelAll("everything")} style={{ ...inp, flex: 1, borderColor: palette.warn, color: palette.warn, cursor: "pointer" }}>Cancel All</button>
-        <button data-testid="kill" onClick={() => void oc.kill()}
-          style={{ flex: 1, background: palette.danger, color: "#fff", border: "2px solid #000", fontWeight: 800, letterSpacing: 1, padding: "6px", cursor: "pointer" }}>KILL</button>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: "auto" }}>
+        <button data-testid="cancel-all" className="btn" onClick={() => void oc.cancelAll("everything")} style={{ borderColor: palette.warn, color: palette.warn }}>Cancel All</button>
+        <button data-testid="kill" className="kill-switch" onClick={() => void oc.kill()}>KILL</button>
       </div>
-      {showSettings && (
-        <OrderSettingsModal config={orderCfg} status={status} onSave={save} onClose={() => setShowSettings(false)} />
-      )}
     </div>
   );
 }

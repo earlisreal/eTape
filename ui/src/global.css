@@ -1,7 +1,92 @@
-/* Minimal global reset: without an explicit height chain, html/body/#root
-   collapse to content height and dockview's layout gets a 0px content area —
-   every panel renders but is invisible below the header. */
-html, body, #root {
-  height: 100%;
-  margin: 0;
+/* Height chain: without this, dockview's content area collapses to 0px. */
+html, body, #root { height: 100%; margin: 0; }
+
+/* Base typography — Daylight Ledger. Fonts self-hosted in fonts.css; system
+   fallbacks keep layout stable if a font fails to load. */
+body {
+  font-family: "IBM Plex Sans", system-ui, sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  font-size: 12px;
+}
+.mono, .num { font-family: "IBM Plex Mono", ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+.serif { font-family: "IBM Plex Serif", Georgia, serif; }
+
+/* Ledger panel header — the one signature element: serif title over a double rule. */
+.ledger-header {
+  display: flex; align-items: center; gap: 8px; padding: 5px 10px;
+  font-family: "IBM Plex Serif", Georgia, serif; font-size: 12px;
+  background: var(--bg); border-bottom: 3px double var(--border-strong);
+}
+.ledger-title { font-family: "IBM Plex Serif", Georgia, serif; font-weight: 600; }
+.col-head {
+  font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 9.5px;
+  letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted);
+}
+.col-head.sort-active { color: var(--text); font-weight: 600; cursor: pointer; }
+.data-row { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11px; font-variant-numeric: tabular-nums; }
+
+/* Shared controls — replace native <select>/<input>/<button>. */
+.btn {
+  font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11px;
+  padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border-strong);
+  background: var(--bg); color: var(--text); cursor: pointer;
+}
+.btn:hover { border-color: var(--text-muted); }
+.btn-primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+.ctl {
+  display: inline-flex; align-items: center; gap: 4px;
+  border: 1px solid var(--border-strong); border-radius: 4px;
+  background: var(--bg); padding: 2px 7px; font-size: 10.5px;
+}
+.ctl > b, .ctl input { font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500; }
+.popover {
+  position: absolute; z-index: 30; background: var(--bg);
+  border: 1px solid var(--border-strong); border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(23,26,30,.14); padding: 8px;
+}
+
+/* Lifecycle chips (open orders). Green = market direction exception intentionally
+   avoided: WORKING uses green outline per spec; PENDING/REPLACING bronze; REJECTED danger. */
+.chip { font-size: 9px; font-weight: 600; letter-spacing: .05em; padding: 1px 6px; border-radius: 2px; border: 1px solid; display: inline-block; }
+.chip-working { color: var(--up); border-color: var(--up); background: rgba(23,122,88,.07); }
+.chip-pending { color: var(--accent); border-color: var(--accent); background: rgba(154,106,27,.08); }
+.chip-rejected { color: var(--danger); border-color: var(--danger); background: rgba(168,30,48,.06); }
+
+/* Kill switch — deliberately loud. */
+.kill-switch {
+  width: 100%; text-align: center; padding: 6px; border: 2px solid var(--danger);
+  color: var(--danger); font-weight: 800; letter-spacing: .12em; border-radius: 3px;
+  background: rgba(168,30,48,.05); cursor: pointer;
+}
+
+/* Order-ticket side row (Task 21). Selected BUY gets a green outline — the one
+   documented market-direction exception for order tickets, same family as
+   chip-working / connection-status dots above. SELL/SHORT/COVER stay neutral
+   until selected (plain text-toned outline, no color-discipline exception). */
+.side {
+  flex: 1; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11px;
+  font-weight: 600; padding: 4px 6px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--bg); color: var(--text-muted);
+}
+.side:hover { border-color: var(--text-muted); }
+.side-selected { border-color: var(--text); color: var(--text); background: var(--surface); }
+.side-selected-buy { border-color: var(--up); color: var(--up); background: rgba(23,122,88,.08); }
+
+/* Focused panel — bronze ring + tinted header (Task 12 toggles .panel-focused). */
+.panel-focused { outline: 2px solid var(--accent); outline-offset: -2px; }
+.panel-focused .ledger-header { background: rgba(154,106,27,.07); }
+
+/* dockview chrome themed from our tokens (was VS-Code greys). */
+.dockview-theme-light, .dockview-theme-dark {
+  --dv-group-view-background-color: var(--bg);
+  --dv-tabs-and-actions-container-background-color: var(--surface);
+  --dv-activegroup-visiblepanel-tab-background-color: var(--bg);
+  --dv-inactivegroup-visiblepanel-tab-background-color: var(--surface);
+  --dv-tab-divider-color: var(--border);
+  --dv-separator-border: var(--border);
+  --dv-paneview-active-outline-color: var(--accent);
+  --dv-icon-hover-background-color: var(--surface);
+  --dv-activegroup-visiblepanel-tab-color: var(--text);
+  --dv-inactivegroup-visiblepanel-tab-color: var(--text-muted);
 }

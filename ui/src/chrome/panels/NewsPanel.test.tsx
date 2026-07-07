@@ -4,7 +4,7 @@ import { render, screen, act, fireEvent } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { LinkGroups } from "../linkGroups";
 import { makeStores } from "../../data/registry";
-import { NewsPanel } from "./NewsPanel";
+import { NewsPanel, newsDateLabel } from "./NewsPanel";
 import type { PanelProps } from "./registry";
 import type { PanelConfig } from "../workspace";
 import type { AckMsg } from "../../wire/contract";
@@ -25,6 +25,25 @@ function renderPanel() {
   return { news, linkGroups };
 }
 
+describe("newsDateLabel", () => {
+  it("labels today vs older dates", () => {
+    // Fixtures are built from LOCAL Date components (not hardcoded UTC ISO strings) so the
+    // resolved calendar day is stable under any machine timezone: constructing a Date from
+    // (year, monthIndex, day, ...) and later reading it back with the local getters (as
+    // newsDateLabel does) always round-trips to the same local day, regardless of the
+    // executing machine's UTC offset. monthIndex is 0-based, so July is 6.
+    const now = new Date(2026, 6, 7, 12, 0, 0).getTime(); // Jul 7, 2026, 12:00 local
+    const todaySeenAt = new Date(2026, 6, 7, 9, 0, 0).toISOString(); // Jul 7, 2026, 09:00 local — same day as `now`
+    const olderDate = new Date(2026, 6, 4, 16, 0, 0); // Jul 4, 2026, 16:00 local — 3 days earlier, well clear of any boundary
+    const olderSeenAt = olderDate.toISOString();
+    const expectedOlderLabel = olderDate.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+
+    expect(newsDateLabel(todaySeenAt, now)).toEqual({ label: "today", today: true });
+    expect(newsDateLabel(olderSeenAt, now).today).toBe(false);
+    expect(newsDateLabel(olderSeenAt, now).label).toBe(expectedOlderLabel);
+  });
+});
+
 describe("NewsPanel", () => {
   it("shows a reserved halt-banner slot and a no-symbol header before focus", () => {
     renderPanel();
@@ -44,7 +63,9 @@ describe("NewsPanel", () => {
     });
     const links = screen.getAllByRole("link");
     expect(links.map((a) => a.textContent)).toEqual(["Newer AAPL", "Older AAPL"]); // newest first, NVDA excluded
-    expect(screen.getAllByText(/seen/i).length).toBeGreaterThan(0);
+    // meta line is date · seen-time · source, in mono, one per row
+    expect(document.querySelectorAll(".mono").length).toBe(2);
+    expect(screen.getAllByText(/\d{2}:\d{2}:\d{2}/).length).toBeGreaterThan(0);
   });
 
   it("clicking a headline opens its url", () => {

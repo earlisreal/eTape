@@ -1,34 +1,29 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, act } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { ToastProvider } from "../Toast";
 import { OrderConfigProvider } from "./useOrderConfig";
 import { useHotkeys } from "./useHotkeys";
-import { OrderSettingsModal } from "./OrderSettingsModal";
+import { OrderSettingsSection } from "./OrderSettingsModal";
 import { DEFAULT_ORDER_CONFIG } from "./actionTemplate";
 import { makeStores } from "../../data/registry";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
-import { SoundConfigProvider } from "../../sound/SoundConfigProvider";
 import type { AckMsg, ExecStatus } from "../../wire/contract";
 
 const status: ExecStatus = { masterArmed: true, global: { maxDayLoss: 500, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
   venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, venueArmed: true, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 1000, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 5 } }] };
 
-const soundCommands = { sendCommand: vi.fn(async () => ({ kind: "ack", corrId: "c", status: "accepted", value: undefined }) as AckMsg) };
-
-function wrap(onSave = vi.fn(), onClose = vi.fn()) {
+function wrap(onSave = vi.fn()) {
   render(
     <ThemeProvider>
-      <SoundConfigProvider commands={soundCommands as never}>
-        <OrderSettingsModal config={DEFAULT_ORDER_CONFIG} status={status} onSave={onSave} onClose={onClose} />
-      </SoundConfigProvider>
+      <OrderSettingsSection config={DEFAULT_ORDER_CONFIG} status={status} onSave={onSave} />
     </ThemeProvider>,
   );
-  return { onSave, onClose };
+  return { onSave };
 }
 
-describe("OrderSettingsModal", () => {
+describe("OrderSettingsSection", () => {
   it("lists templates and saves an edited label", () => {
     const { onSave } = wrap();
     const label = screen.getByTestId("tmpl-label-buy-5k") as HTMLInputElement;
@@ -57,11 +52,6 @@ describe("OrderSettingsModal", () => {
     expect(screen.getByText(/max order value/i).textContent).toMatch(/1000/);
     expect(screen.getByText(/max position value/i).textContent).toMatch(/off/i);
   });
-  it("renders the Sounds section", async () => {
-    wrap();
-    await waitFor(() => expect(soundCommands.sendCommand).toHaveBeenCalledWith("GetConfig", { key: "soundConfig" }));
-    expect(screen.getByTestId("sound-fill")).toBeTruthy();
-  });
 
   // Regression for a CRITICAL safety finding: the capture input previously called
   // only e.preventDefault(), not e.stopPropagation(). The real hotkey engine
@@ -70,7 +60,7 @@ describe("OrderSettingsModal", () => {
   // combo already bound to a real template (e.g. default Ctrl+Shift+K =
   // KillSwitch) and fire the real action from what must be an inert settings
   // screen. This mounts the real useHotkeys engine (not a fake) alongside the
-  // modal, proving the leak path is actually closed end-to-end.
+  // section, proving the leak path is actually closed end-to-end.
   it("does not leak a captured keydown to the global hotkey engine (KillSwitch stays inert)", async () => {
     const stores = makeStores();
     const sent: Array<{ name: string; args: unknown }> = [];
@@ -85,11 +75,7 @@ describe("OrderSettingsModal", () => {
 
     function Harness() {
       useHotkeys({ stores, commands, linkGroups, group: "green" });
-      return (
-        <SoundConfigProvider commands={soundCommands as never}>
-          <OrderSettingsModal config={DEFAULT_ORDER_CONFIG} status={status} onSave={vi.fn()} onClose={vi.fn()} />
-        </SoundConfigProvider>
-      );
+      return <OrderSettingsSection config={DEFAULT_ORDER_CONFIG} status={status} onSave={vi.fn()} />;
     }
 
     await act(async () => {

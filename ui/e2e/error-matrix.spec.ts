@@ -8,6 +8,16 @@ import { test, expect, type Page } from "@playwright/test";
 // same route re-intercepts and passes through to the real engine.
 type WebSocketRoute = Parameters<Parameters<Page["routeWebSocket"]>[1]>[0];
 
+// Blank-start workspace model (Task 7/10): `?workspace=<name>` always starts
+// empty; reaching a populated layout means clicking a preset card in the
+// empty-state Catalog. Each test below uses its own workspace name so this
+// file's runs stay isolated from smoke.spec.ts and from each other.
+async function gotoAndApplyPreset(page: Page, workspace: string, presetName: "Trading" | "Monitoring"): Promise<void> {
+  await page.goto(`/?workspace=${workspace}`);
+  await expect(page.getByTestId("latency-readout")).toBeVisible({ timeout: 15_000 });
+  await page.getByRole("button", { name: new RegExp(`^${presetName}`) }).click();
+}
+
 test.describe("error-handling matrix", () => {
   test("WS drop shows the reconnect overlay, recovery clears it", async ({ page }) => {
     let current: WebSocketRoute | null = null;
@@ -16,7 +26,7 @@ test.describe("error-handling matrix", () => {
       ws.connectToServer();
     });
 
-    await page.goto("/?workspace=trading");
+    await gotoAndApplyPreset(page, "e2e-err-ws-drop", "Trading");
     await expect(page.getByTestId("acct-equity")).toBeVisible({ timeout: 15_000 });
 
     await current?.close();
@@ -43,7 +53,9 @@ test.describe("error-handling matrix", () => {
     await page.routeWebSocket("**/ws", (ws) => {
       void ws.close({ code: 1006, reason: "e2e: engine unreachable" });
     });
-    await page.goto("/?workspace=trading");
+    // Never reaches the empty-state Catalog (WorkspaceStore.load's GetConfig
+    // never round-trips), so no preset click here — just navigate.
+    await page.goto("/?workspace=e2e-err-unreachable");
     await expect(page.getByText(/reconnect|connecting|disconnected/i).first()).toBeVisible({ timeout: 15_000 });
   });
 
@@ -56,7 +68,7 @@ test.describe("error-handling matrix", () => {
     // MARKET order clears preCheck as MARKET and actually reaches the gate.
     // Wed 2026-07-08T15:00:00Z = 11:00 ET (see smoke.spec.ts for the same pin).
     await page.addInitScript(() => { Date.now = () => 1_783_522_800_000; });
-    await page.goto("/?workspace=trading");
+    await gotoAndApplyPreset(page, "e2e-err-gate-block", "Trading");
     await expect(page.getByTestId("acct-equity")).toBeVisible({ timeout: 15_000 });
 
     // Do NOT arm. MARKET so it clears client pre-checks and reaches the engine gate.

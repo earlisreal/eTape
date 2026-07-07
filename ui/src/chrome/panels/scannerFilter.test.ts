@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { ScannerRow } from "../../wire/contract";
-import { applyScannerFilters, sortByChangeDesc, type ScannerThresholds } from "./scannerFilter";
+import { applyScannerFilters, sortByChangeDesc, formatFilterSummary, type ScannerThresholds } from "./scannerFilter";
 
 const row = (symbol: string, changePct: number | null, floatShares: number | null, volume: number): ScannerRow =>
   ({ symbol, changePct, last: 1, floatShares, volume });
@@ -37,5 +37,14 @@ describe("sortByChangeDesc", () => {
     const out = sortByChangeDesc(input);
     expect(out.map((r) => r.symbol)).toEqual(["C", "A", "B"]);
     expect(input.map((r) => r.symbol)).toEqual(["A", "B", "C"]); // input untouched
+  });
+});
+
+describe("formatFilterSummary", () => {
+  it("formats set fields with human units, omits nulls/zeros", () => {
+    expect(formatFilterSummary({ minChangePct: 10, floatCapShares: 20_000_000, minVolume: 100_000 }))
+      .toBe("change ≥ 10% · float ≤ 20M · vol ≥ 100k");
+    expect(formatFilterSummary({ minChangePct: 5, floatCapShares: null, minVolume: 0 }))
+      .toBe("change ≥ 5%");
   });
 });

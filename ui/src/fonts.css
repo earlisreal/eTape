@@ -1,0 +1,18 @@
+/* Self-hosted IBM Plex — Latin subset, woff2. font-display: swap so a font
+   fetch never blocks first paint; system fallbacks keep layout stable. */
+@font-face { font-family: "IBM Plex Serif"; font-weight: 500; font-style: normal;
+  font-display: swap; src: url("/fonts/IBMPlexSerif-Medium.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Serif"; font-weight: 600; font-style: normal;
+  font-display: swap; src: url("/fonts/IBMPlexSerif-SemiBold.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 400; font-style: normal;
+  font-display: swap; src: url("/fonts/IBMPlexSans-Regular.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 500; font-style: normal;
+  font-display: swap; src: url("/fonts/IBMPlexSans-Medium.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Sans"; font-weight: 600; font-style: normal;
+  font-display: swap; src: url("/fonts/IBMPlexSans-SemiBold.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 400; font-style: normal;
+  font-display: swap; src: url("/fonts/IBMPlexMono-Regular.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 500; font-style: normal;
+  font-display: swap; src: url("/fonts/IBMPlexMono-Medium.woff2") format("woff2"); }
+@font-face { font-family: "IBM Plex Mono"; font-weight: 600; font-style: normal;
+  font-display: swap; src: url("/fonts/IBMPlexMono-SemiBold.woff2") format("woff2"); }

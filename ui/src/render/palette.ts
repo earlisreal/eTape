@@ -8,6 +8,7 @@ export interface Palette {
   bg: string;          // panel + chart background
   surface: string;     // headers, controls
   border: string;      // hairlines
+  borderStrong: string; // double rules, control borders, ladder center divider
   text: string;        // primary text
   textMuted: string;   // secondary text, axis labels
   grid: string;        // chart grid lines
@@ -54,87 +55,41 @@ export interface Palette {
 }
 
 export const LIGHT: Palette = {
-  bg: "#FBFCFD",
-  surface: "#EEF1F4",
-  border: "#DCE1E7",
-  text: "#10151C",
-  textMuted: "#5A6672",
-  grid: "#E8ECF0",
-  crosshair: "#9AA6B2",
-  up: "#17A67C",
-  down: "#E0526E",
-  volUp: "rgba(23,166,124,0.38)",
-  volDown: "rgba(224,82,110,0.38)",
-  buyFill: "#4CC79E",
-  sellFill: "#F58DA1",
-  fillOutline: "#10151C",
-  neutral: "#5F6B78",
-  depthBid: "rgba(23,166,124,0.14)",
-  depthAsk: "rgba(224,82,110,0.12)",
-  flashBuy: "rgba(23,166,124,0.30)",
-  flashSell: "rgba(224,82,110,0.28)",
-  flashNeutral: "rgba(90,102,114,0.22)",
-  orderMark: "#C0872E",
-  sessionPre: "rgba(92,120,160,0.07)",
-  sessionRth: "rgba(0,0,0,0)",
-  sessionPost: "rgba(198,150,64,0.08)",
-  sessionClosed: "rgba(40,50,65,0.05)",
-  indVwap: "#6E56CF",
-  indEma: "#C0872E",
-  indSma: "#3E7CB1",
-  indMacdLine: "#3E7CB1",
-  indMacdSignal: "#E0526E",
-  indMacdHist: "#8A97A6",
-  linkRed: "#DB4C56",
-  linkGreen: "#1FA97F",
-  linkBlue: "#3E7CB1",
-  linkYellow: "#CF9A2B",
-  accent: "#C0872E",
-  ok: "#17A67C",
-  warn: "#C0872E",
-  danger: "#D93A49",
+  bg: "#FBFAF7", surface: "#F2F0EA", border: "#DDD9CF", borderStrong: "#C9C4B8",
+  text: "#171A1E", textMuted: "#6A7280",
+  grid: "#E7E3DA", crosshair: "#B8B2A4",
+  up: "#177A58", down: "#C2334D",
+  volUp: "rgba(23,122,88,0.34)", volDown: "rgba(194,51,77,0.30)",
+  buyFill: "#177A58", sellFill: "#C2334D", fillOutline: "#FBFAF7",
+  neutral: "#6A7280",
+  depthBid: "rgba(23,122,88,0.13)", depthAsk: "rgba(194,51,77,0.11)",
+  flashBuy: "rgba(23,122,88,0.20)", flashSell: "rgba(194,51,77,0.20)", flashNeutral: "rgba(106,114,128,0.16)",
+  orderMark: "#9A6A1B",
+  sessionPre: "rgba(154,106,27,0.05)", sessionRth: "rgba(0,0,0,0)",
+  sessionPost: "rgba(106,114,128,0.06)", sessionClosed: "rgba(106,114,128,0.10)",
+  indVwap: "#9A6A1B", indEma: "#3E7CB1", indSma: "#7A5CA6",
+  indMacdLine: "#3E7CB1", indMacdSignal: "#C2334D", indMacdHist: "rgba(106,114,128,0.5)",
+  linkRed: "#DB4C56", linkGreen: "#1FA97F", linkBlue: "#3E7CB1", linkYellow: "#CF9A2B",
+  accent: "#9A6A1B", ok: "#177A58", warn: "#9A6A1B", danger: "#A81E30",
 };
 
 export const DARK: Palette = {
-  bg: "#0E1116",
-  surface: "#161B22",
-  border: "#262D38",
-  text: "#DCE3EC",
-  textMuted: "#7A8794",
-  grid: "#1C222C",
-  crosshair: "#55616F",
-  up: "#2BB894",
-  down: "#F0647E",
-  volUp: "rgba(43,184,148,0.34)",
-  volDown: "rgba(240,100,126,0.34)",
-  buyFill: "#35C79E",
-  sellFill: "#F98AA3",
-  fillOutline: "#05070A",
-  neutral: "#8B98A5",
-  depthBid: "rgba(43,184,148,0.16)",
-  depthAsk: "rgba(240,100,126,0.14)",
-  flashBuy: "rgba(43,184,148,0.32)",
-  flashSell: "rgba(240,100,126,0.30)",
-  flashNeutral: "rgba(122,135,148,0.25)",
-  orderMark: "#E0A64B",
-  sessionPre: "rgba(120,150,190,0.12)",
-  sessionRth: "rgba(0,0,0,0)",
-  sessionPost: "rgba(200,155,70,0.10)",
-  sessionClosed: "rgba(255,255,255,0.03)",
-  indVwap: "#9A86FF",
-  indEma: "#E0A64B",
-  indSma: "#6BA8D8",
-  indMacdLine: "#6BA8D8",
-  indMacdSignal: "#F0647E",
-  indMacdHist: "#55616F",
-  linkRed: "#F0555F",
-  linkGreen: "#2BB894",
-  linkBlue: "#5AA0D8",
-  linkYellow: "#E0B23E",
-  accent: "#E0A64B",
-  ok: "#2BB894",
-  warn: "#E0A64B",
-  danger: "#F0555F",
+  bg: "#14120E", surface: "#1C1A15", border: "#2E2A22", borderStrong: "#403A2E",
+  text: "#ECE7DB", textMuted: "#9A9385",
+  grid: "#241F18", crosshair: "#5A5347",
+  up: "#35B888", down: "#E5637A",
+  volUp: "rgba(53,184,136,0.34)", volDown: "rgba(229,99,122,0.30)",
+  buyFill: "#35B888", sellFill: "#E5637A", fillOutline: "#14120E",
+  neutral: "#9A9385",
+  depthBid: "rgba(53,184,136,0.16)", depthAsk: "rgba(229,99,122,0.14)",
+  flashBuy: "rgba(53,184,136,0.24)", flashSell: "rgba(229,99,122,0.24)", flashNeutral: "rgba(154,147,133,0.18)",
+  orderMark: "#C79A4B",
+  sessionPre: "rgba(199,154,75,0.07)", sessionRth: "rgba(0,0,0,0)",
+  sessionPost: "rgba(154,147,133,0.07)", sessionClosed: "rgba(154,147,133,0.12)",
+  indVwap: "#C79A4B", indEma: "#6BA6D8", indSma: "#A98BD0",
+  indMacdLine: "#6BA6D8", indMacdSignal: "#E5637A", indMacdHist: "rgba(154,147,133,0.5)",
+  linkRed: "#E5636D", linkGreen: "#35B88F", linkBlue: "#6BA6D8", linkYellow: "#D9AE52",
+  accent: "#C79A4B", ok: "#35B888", warn: "#C79A4B", danger: "#E5455E",
 };
 
 export function getPalette(mode: ThemeMode): Palette {
@@ -143,8 +98,9 @@ export function getPalette(mode: ThemeMode): Palette {
 
 // Type layer — part of the visual identity, kept in the single source of truth.
 // Canvas painters put FONTS.mono in their ctx.font strings; chrome uses the CSS
-// vars set from these in Task 10. Both faces are the IBM Plex super-family.
+// vars set from these in Task 10. All three faces are the IBM Plex super-family.
 export const FONTS = {
+  serif: '"IBM Plex Serif", Georgia, serif',       // panel titles, section labels, wordmark
   mono: '"IBM Plex Mono", ui-monospace, monospace', // data surfaces: tape, ladder, prices, axes
   sans: '"IBM Plex Sans", system-ui, sans-serif',   // chrome: labels, menus, buttons
 } as const;

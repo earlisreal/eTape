@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { PANELS } from "./registry";
-import { SEED_WORKSPACES } from "../../seeds/workspaces";
+import { PANELS, CATALOG, isDevPanel } from "./registry";
 
 describe("panel registry — monitoring surfaces", () => {
   it("registers scanner and movers with the scanner topics", () => {
@@ -11,15 +10,38 @@ describe("panel registry — monitoring surfaces", () => {
   });
 });
 
-describe("seed monitoring — scanner/movers publish target + thresholds", () => {
-  const panels = Object.fromEntries(SEED_WORKSPACES.monitoring.panels.map((p) => [p.id, p]));
-  it("scanner stays display-pinned but targets a group and carries thresholds", () => {
-    expect(panels["m-scanner"].group).toBeNull();
-    expect(panels["m-scanner"].settings.targetGroup).toBe("green");
-    expect(panels["m-scanner"].settings.thresholds).toBeDefined();
+describe("Task 19: merged account panel + back-compat aliases", () => {
+  it("registers the merged account panel with all four exec/quote topics", () => {
+    expect(PANELS["account"]).toBeDefined();
+    expect(PANELS["account"].topics).toEqual(["exec.account", "exec.positions", "exec.status", "md.quote"]);
   });
-  it("movers stays display-pinned and targets a group", () => {
-    expect(panels["m-movers"].group).toBeNull();
-    expect(panels["m-movers"].settings.targetGroup).toBe("green");
+  it("aliases the pre-merge ids to the same merged component for saved-doc back-compat", () => {
+    expect(PANELS["account-bar"].component).toBe(PANELS["account"].component);
+    expect(PANELS["positions"].component).toBe(PANELS["account"].component);
+  });
+  it("omits the retired ids from the Add Panel catalog but keeps only the merged one", () => {
+    const ids = CATALOG.map((c) => c.panelId);
+    expect(ids).toContain("account");
+    expect(ids).not.toContain("account-bar");
+    expect(ids).not.toContain("positions");
+  });
+});
+
+describe("catalog metadata", () => {
+  it("every non-dev panel has title/glyph/description", () => {
+    for (const [id, def] of Object.entries(PANELS)) {
+      if (isDevPanel(id)) continue;
+      expect(def.title, id).toBeTruthy();
+      expect(def.glyph, id).toBeTruthy();
+      expect(def.description, id).toBeTruthy();
+    }
+  });
+  it("CATALOG omits the dev smoke panel and lists chart first", () => {
+    expect(CATALOG.map((c) => c.panelId)).not.toContain("smoke-painter");
+    expect(CATALOG[0].panelId).toBe("chart");
+  });
+  it("marks symbol-bearing panels", () => {
+    expect(PANELS["chart"].symbolBearing).toBe(true);
+    expect(PANELS["scanner"].symbolBearing).toBe(false);
   });
 });

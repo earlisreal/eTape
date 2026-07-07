@@ -1,3 +1,5 @@
+import type { AckMsg } from "../wire/contract";
+
 export type LinkGroup = "red" | "green" | "blue" | "yellow" | null; // null = pinned
 export interface LinkMsg { group: LinkGroup; symbol: string }
 
@@ -26,7 +28,7 @@ export class LinkGroups {
 
   constructor(
     private readonly bus: LinkBus,
-    private readonly onEcho: (group: Exclude<LinkGroup, null>, symbol: string) => void,
+    private readonly onEcho: (group: Exclude<LinkGroup, null>, symbol: string) => Promise<AckMsg> | void,
   ) {
     this.bus.onMessage((msg) => { if (msg.group) this.setLocal(msg.group, msg.symbol); });
   }
@@ -35,6 +37,22 @@ export class LinkGroups {
     this.setLocal(group, symbol);
     this.bus.post({ group, symbol });
     this.onEcho(group, symbol);
+  }
+
+  /**
+   * Validate with the engine BEFORE moving the group; returns `{ ok: false }`
+   * (group left completely unchanged — no partial/half-switched state) on a
+   * rejecting ack. This is the type-to-load commit path for grouped panels;
+   * `focus` above remains the synchronous remote-bus-echo path (its ack, if
+   * any, is intentionally not awaited there).
+   */
+  async focusChecked(group: Exclude<LinkGroup, null>, symbol: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const ackP = this.onEcho(group, symbol);
+    const ack = ackP ? await ackP : { status: "accepted" as const };
+    if (ack.status !== "accepted") return { ok: false, reason: ack.reason ?? "symbol rejected" };
+    this.setLocal(group, symbol);
+    this.bus.post({ group, symbol });
+    return { ok: true };
   }
 
   private setLocal(group: Exclude<LinkGroup, null>, symbol: string): void {
