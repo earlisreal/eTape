@@ -41,9 +41,14 @@ export function AccountBarPanel({ stores, commands }: PanelProps): JSX.Element {
       <div style={{ flex: 1 }} />
       <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "0 8px" }}>
         {(status?.venues ?? []).map((v) => (
-          <span key={v.venue} style={{ display: "flex", gap: 3, alignItems: "center", fontSize: 10, color: palette.textMuted }}>
+          <button key={v.venue} data-testid={`venue-arm-${v.venue}`} data-armed={v.venueArmed}
+            title={`${v.venue}: ${v.connected ? "connected" : "disconnected"} — click to ${v.venueArmed ? "disarm" : "arm"}`}
+            onClick={() => (v.venueArmed ? oc.disarm(v.venue) : oc.arm(v.venue))}
+            style={{ display: "flex", gap: 3, alignItems: "center", fontSize: 10, cursor: "pointer",
+              background: "transparent", border: `1px solid ${v.venueArmed ? palette.up : palette.border}`,
+              borderRadius: 4, padding: "2px 6px", color: v.venueArmed ? palette.up : palette.textMuted }}>
             {dot(v.connected, `${v.venue}: ${v.connected ? "connected" : "disconnected"}`)}{v.venue}{v.venueArmed ? " ●" : " ○"}
-          </span>
+          </button>
         ))}
       </div>
       <button data-testid="arm-toggle" onClick={() => (armed ? oc.disarm() : oc.arm())}

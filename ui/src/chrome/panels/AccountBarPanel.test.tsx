@@ -46,4 +46,49 @@ describe("AccountBarPanel", () => {
     fireEvent.click(screen.getByTestId("arm-toggle"));
     expect(sent.map((s) => s.name)).toContain("Disarm");
   });
+  it("arms a venue when its per-venue control is clicked", () => {
+    const { props, stores, sent } = mkProps();
+    wrap(props);
+    const disarmedVenueStatus: ExecStatus = {
+      masterArmed: false,
+      global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
+      venues: [{ venue: "sim-paper", broker: "alpaca", connected: true, venueArmed: false, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }],
+    };
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: disarmedVenueStatus }));
+    const btn = screen.getByTestId("venue-arm-sim-paper");
+    expect(btn.getAttribute("data-armed")).toBe("false");
+    fireEvent.click(btn);
+    expect(sent).toContainEqual({ name: "Arm", args: { venue: "sim-paper" } });
+  });
+  it("disarms a venue when its per-venue control is clicked while armed", () => {
+    const { props, stores, sent } = mkProps();
+    wrap(props);
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) }));
+    const btn = screen.getByTestId("venue-arm-alpaca-paper");
+    expect(btn.getAttribute("data-armed")).toBe("true");
+    fireEvent.click(btn);
+    expect(sent).toContainEqual({ name: "Disarm", args: { venue: "alpaca-paper" } });
+  });
+  it("clicking one venue's control does not affect another venue's state or dispatch", () => {
+    const { props, stores, sent } = mkProps();
+    wrap(props);
+    const twoVenueStatus: ExecStatus = {
+      masterArmed: false,
+      global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
+      venues: [
+        { venue: "alpaca-paper", broker: "alpaca", connected: true, venueArmed: true, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } },
+        { venue: "tradezero-live", broker: "tradezero", connected: true, venueArmed: false, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } },
+      ],
+    };
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: twoVenueStatus }));
+    const alpacaBtn = screen.getByTestId("venue-arm-alpaca-paper");
+    const tzBtn = screen.getByTestId("venue-arm-tradezero-live");
+    expect(alpacaBtn.getAttribute("data-armed")).toBe("true");
+    expect(tzBtn.getAttribute("data-armed")).toBe("false");
+    fireEvent.click(tzBtn);
+    expect(sent).toContainEqual({ name: "Arm", args: { venue: "tradezero-live" } });
+    expect(sent).not.toContainEqual({ name: "Disarm", args: { venue: "alpaca-paper" } });
+    expect(sent).not.toContainEqual({ name: "Arm", args: { venue: "alpaca-paper" } });
+    expect(alpacaBtn.getAttribute("data-armed")).toBe("true");
+  });
 });

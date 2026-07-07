@@ -16,7 +16,7 @@ const GROUPS: Exclude<LinkGroup, null>[] = ["red", "green", "blue", "yellow"];
 const MARKET_PREFIXES = ["US.", "HK."];
 export function normalizeSymbol(raw: string): string {
   const upper = raw.toUpperCase();
-  return MARKET_PREFIXES.some((p) => upper.startsWith(p)) ? raw : `US.${raw}`;
+  return MARKET_PREFIXES.some((p) => upper.startsWith(p)) ? upper : `US.${upper}`;
 }
 
 // Minimal v1 header: one type-to-focus symbol box per link group + a theme toggle.

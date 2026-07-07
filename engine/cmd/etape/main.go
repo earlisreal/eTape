@@ -44,6 +44,8 @@ func main() {
 	focus := flag.String("focus", "", "comma-separated symbols to focus (depth + quote)")
 	replayDay := flag.String("replay", "", "replay a recorded day (YYYY-MM-DD) instead of live OpenD")
 	speed := flag.Float64("speed", 0, "replay speed (>0: real-time x speed; <=0: as fast as possible)")
+	dist := flag.String("dist", "", "serve built UI from this dir (overrides [uihub].dist_dir)")
+	replayHold := flag.Bool("replay-hold", false, "in replay, keep serving after the journal is exhausted (E2E)")
 	flag.Parse()
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
@@ -53,6 +55,9 @@ func main() {
 	if err != nil {
 		log.Error("load config", "err", err)
 		os.Exit(1)
+	}
+	if *dist != "" {
+		cfg.UIHub.DistDir = *dist
 	}
 	anchorSecs, err := cfg.MD.AnchorSecs()
 	if err != nil {
@@ -180,7 +185,18 @@ func main() {
 	forwardWG.Add(1)
 	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, live, st) }()
 	go forwardExec(ctx, execCore, hub)
-	go markBridge(ctx, core, execCore)
+
+	// In replay every venue is a SimBroker; forward replayed marks into them so
+	// submitted orders fill. Live venues are fed by their own broker connection.
+	var simSinks []markSink
+	if !live {
+		for _, vb := range vbs {
+			if s, ok := vb.Broker.(markSink); ok {
+				simSinks = append(simSinks, s)
+			}
+		}
+	}
+	go markBridge(ctx, core, execCore, simSinks)
 
 	// --- feed (live OpenD or replay) ---
 	var pipeWG sync.WaitGroup
@@ -212,7 +228,11 @@ func main() {
 		go func() { _ = fd.Run(ctx) }()
 		pipeWG.Add(1)
 		go pipe(ctx, &pipeWG, fd.Events(), core, nil) // no journal re-recording in replay
-		go func() { pipeWG.Wait(); stop() }()         // self-terminate when the journal is exhausted
+		if *replayHold {
+			log.Info("replay-hold: serving last state until interrupted")
+		} else {
+			go func() { pipeWG.Wait(); stop() }() // self-terminate when the journal is exhausted
+		}
 		log.Info("engine up (replay)", "day", *replayDay, "rows", len(replayRows), "speed", *speed)
 	}
 
@@ -300,14 +320,25 @@ func forwardExec(ctx context.Context, execCore *exec.Core, hub *uihub.Hub) {
 	}
 }
 
-// markBridge copies md.Core.Marks() -> exec.Core.FeedMark (the single md<->exec seam).
-func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core) {
+// markSink receives last-trade marks. Implemented by *sim.Broker (SetMark);
+// used only in replay so submitted orders fill against the replayed tape.
+type markSink interface {
+	SetMark(symbol string, price float64)
+}
+
+// markBridge copies md.Core.Marks() -> exec.Core.FeedMark (the single md<->exec
+// seam) and, in replay, -> every sim broker's SetMark so a submitted order fills
+// against the replayed marks (live venues get marks from their own broker feed).
+func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks []markSink) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case m := <-core.Marks():
 			execCore.FeedMark(exec.Mark{Symbol: m.Symbol, Price: m.Price, TsMs: m.TsMs})
+			for _, s := range sinks {
+				s.SetMark(m.Symbol, m.Price)
+			}
 		}
 	}
 }

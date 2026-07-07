@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 
 // Default node environment for pure logic; chrome/*.test.tsx opt into jsdom
@@ -8,6 +8,13 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
+    // e2e/**/*.spec.ts are Playwright specs (owned by playwright.config.ts's
+    // testDir) that use @playwright/test's test()/expect, a different
+    // test-registration API than vitest's — vitest's default *.spec.ts glob
+    // would otherwise pick them up and either report bogus "0 test" entries
+    // or crash on Playwright's test.describe(). Keep vitest's own defaults
+    // (node_modules, dist, etc.) alongside the exclusion.
+    exclude: [...configDefaults.exclude, "e2e/**"],
     // node-canvas's native addon isn't safe to load into more than one
     // worker thread per process ("Module did not self-register" once a
     // second file requires it) — jsdom auto-loads it for any real

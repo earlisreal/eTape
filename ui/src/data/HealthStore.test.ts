@@ -32,4 +32,28 @@ describe("HealthStore", () => {
     expect(snap.events).toHaveLength(500);
     expect(snap.events[0].seq).toBe(100); // oldest 100 dropped
   });
+
+  it("normalizes a null links payload (pre-first-poll zero-value snapshot) to an empty array", () => {
+    const s = new HealthStore();
+    const nullLinksSnap = {
+      kind: "snapshot",
+      topic: "sys.health",
+      payload: { links: null },
+    } as unknown as SnapshotMsg;
+    expect(() => s.apply(nullLinksSnap)).not.toThrow();
+    const snap = s.getSnapshot();
+    expect(snap.links).toEqual([]);
+  });
+
+  it("ignores a null sys.events payload (nil Go slice marshaled as JSON null) instead of appending a null entry", () => {
+    const s = new HealthStore();
+    const nullEventsMsg = {
+      kind: "delta",
+      topic: "sys.events",
+      payload: null,
+    } as unknown as DeltaMsg;
+    expect(() => s.apply(nullEventsMsg)).not.toThrow();
+    const snap = s.getSnapshot();
+    expect(snap.events).toEqual([]);
+  });
 });

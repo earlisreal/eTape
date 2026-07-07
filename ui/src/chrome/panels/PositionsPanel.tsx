@@ -15,6 +15,8 @@ export function PositionsPanel({ stores, commands }: PanelProps): JSX.Element {
   const oc = useOrderCommands(commands, stores.exec, toast);
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
   const rows = stores.exec.positions();
+  const status = stores.exec.status();
+  const armedFor = (v: string | null) => !!status?.masterArmed && !!status?.venues.find((x) => x.venue === v)?.venueArmed;
 
   const flatten = (row: PositionRow) => {
     if (row.venue === null) return; // net rows have no single venue to route to (button is hidden anyway)
@@ -50,7 +52,9 @@ export function PositionsPanel({ stores, commands }: PanelProps): JSX.Element {
                 <td>{formatPrice(r.avgPrice, 2)}</td>
                 <td style={{ color: r.unrealizedPnl >= 0 ? palette.up : palette.down }}>{formatPrice(r.unrealizedPnl, 2)}</td>
                 <td>{net ? null : (
-                  <button data-testid={`flatten-${r.venue}-${r.symbol}`} onClick={() => flatten(r)}
+                  <button data-testid={`flatten-${r.venue}-${r.symbol}`} data-armed={armedFor(r.venue)}
+                    title={armedFor(r.venue) ? "Flatten position" : "Venue disarmed — flatten still allowed (exposure-reducing)"}
+                    onClick={() => flatten(r)}
                     style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Flatten</button>
                 )}</td>
               </tr>

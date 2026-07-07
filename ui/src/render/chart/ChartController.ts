@@ -22,6 +22,8 @@ export class ChartController {
   private volume!: LwcSeries;
   private lastAppliedCount = 0;             // bars applied via setData/update
   private lastAppliedKey = "";              // last bar's bucketStart|close, to detect in-progress change
+  private indicatorApplied = new Map<string, number>(); // per-series point count applied via setData/update
+  private indicatorLastKey = new Map<string, string>(); // per-series fingerprint of the last applied point, `${timeMs}|${value}`
   private backfilled = false;
   private readonly indicators = new Map<string, { inst: IndicatorInstance; series: Map<string, LwcSeries> }>();
 
@@ -90,13 +92,36 @@ export class ChartController {
         // For MACD's multi-series the engine streams each sub-series under its own
         // instanceId suffix; single-series indicators use the base instanceId.
         const points = this.deps.indicators.series(d.key);
-        s.setData(points.map((p) => ({ time: toLwcTimeMs(p.timeMs), value: p.value })));
+        const applied = this.indicatorApplied.get(d.key) ?? 0;
+        const last = points[points.length - 1];
+        const lastKey = last ? `${last.timeMs}|${last.value}` : "";
+        if (applied === 0 || points.length < applied) {
+          // First application, or the series shrank (e.g. a full recompute produced
+          // fewer points) — only setData() is safe.
+          s.setData(points.map((p) => ({ time: toLwcTimeMs(p.timeMs), value: p.value })));
+        } else if (points.length > applied) {
+          // Re-flush from one index before `applied`: that point was `last` as of the
+          // previous applied state and may have been revised (in-progress-bar upsert)
+          // during the same missed rAF-coalesced window that also appended new points —
+          // re-flushing it is harmless/idempotent if unchanged, and necessary if it
+          // did change (mirrors applyBars's identical race-window guard).
+          for (let i = Math.max(0, applied - 1); i < points.length; i++) {
+            s.update({ time: toLwcTimeMs(points[i].timeMs), value: points[i].value });
+          }
+        } else if (last && lastKey !== this.indicatorLastKey.get(d.key)) {
+          // Same length, but the last point's value changed in place — the
+          // in-progress-bar revision case (IndicatorStore upserts, doesn't append).
+          s.update({ time: toLwcTimeMs(last.timeMs), value: last.value });
+        }
+        this.indicatorApplied.set(d.key, points.length);
+        this.indicatorLastKey.set(d.key, lastKey);
       }
     }
   }
 
   private applySessions(bars: Bar[]): void {
-    if (bars.length === 0) { this.facade.setSessionBands([]); return; }
+    const intraday = !["D", "W", "M"].includes(this.config.timeframe);
+    if (!intraday || bars.length === 0) { this.facade.setSessionBands([]); return; }
     const from = Date.parse(bars[0].bucketStart);
     const to = Date.parse(bars[bars.length - 1].bucketStart) + 1;
     this.facade.setSessionBands(sessionBands(from, to));
@@ -112,9 +137,13 @@ export class ChartController {
         { color: d.color, priceScaleId: d.paneIndex === 0 && d.kind === "histogram" ? "" : undefined }, d.paneIndex));
     }
     this.indicators.set(resolved.instanceId, { inst: resolved, series });
+    this.subscribeIndicator(resolved);
+  }
+
+  private subscribeIndicator(inst: IndicatorInstance): void {
     void this.deps.commands.sendCommand("SubscribeIndicator", {
-      instanceId: resolved.instanceId, symbol: this.config.symbol, timeframe: this.config.timeframe,
-      type: resolved.type, params: resolved.params,
+      instanceId: inst.instanceId, symbol: this.config.symbol, timeframe: this.config.timeframe,
+      type: inst.type, params: inst.params,
     });
   }
 
@@ -122,6 +151,10 @@ export class ChartController {
     const entry = this.indicators.get(instanceId);
     if (!entry) return;
     for (const s of entry.series.values()) this.facade.removeSeries(s);
+    for (const k of entry.series.keys()) {
+      this.indicatorApplied.delete(k);
+      this.indicatorLastKey.delete(k);
+    }
     this.indicators.delete(instanceId);
     void this.deps.commands.sendCommand("UnsubscribeIndicator", { instanceId });
   }
@@ -149,13 +182,10 @@ export class ChartController {
     this.backfilled = false;
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
+    this.indicatorApplied.clear();
+    this.indicatorLastKey.clear();
     // Re-subscribe every live indicator for the new (symbol, timeframe).
-    for (const { inst } of this.indicators.values()) {
-      void this.deps.commands.sendCommand("SubscribeIndicator", {
-        instanceId: inst.instanceId, symbol: this.config.symbol, timeframe: this.config.timeframe,
-        type: inst.type, params: inst.params,
-      });
-    }
+    for (const { inst } of this.indicators.values()) this.subscribeIndicator(inst);
   }
 
   setPalette(p: Palette): void {

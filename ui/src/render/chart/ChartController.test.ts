@@ -3,26 +3,30 @@ import { ChartController, type BarReader, type IndicatorReader, type CommandSend
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import { LIGHT } from "../palette";
 import type { Bar } from "../../wire/contract";
+import { withDefaultParams } from "./indicatorSeries";
 
-function fakeSeries(): LwcSeries & { calls: string[] } {
+function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[] } {
   const calls: string[] = [];
-  return { calls, setData: () => calls.push("setData"), update: () => calls.push("update"), applyOptions: () => calls.push("applyOptions") };
+  const updates: unknown[] = [];
+  return {
+    calls, updates,
+    setData: () => calls.push("setData"),
+    update: (bar) => { calls.push("update"); updates.push(bar); },
+    applyOptions: () => calls.push("applyOptions"),
+  };
 }
 
 function fakeFacade() {
-  const created: Array<{ kind: string; pane: number; series: LwcSeries & { calls: string[] } }> = [];
-  let atRightEdge = true;
-  const facade: ChartApiFacade & { created: typeof created; setRightEdge: (v: boolean) => void; scrolls: number; bands: number } = {
-    created, scrolls: 0, bands: 0,
-    setRightEdge: (v) => { atRightEdge = v; },
+  const created: Array<{ kind: string; pane: number; series: LwcSeries & { calls: string[]; updates: unknown[] } }> = [];
+  const facade: ChartApiFacade & { created: typeof created; scrolls: number; bands: number; lastBands: unknown[] } = {
+    created, scrolls: 0, bands: 0, lastBands: [],
     addSeries: (kind, _o, pane) => { const s = fakeSeries(); created.push({ kind, pane, series: s }); return s; },
     removeSeries: () => {},
-    setSessionBands: () => { facade.bands++; },
+    setSessionBands: (b) => { facade.bands++; facade.lastBands = b; },
     setFillMarkers: () => {},
     timeToCoordinate: () => 0,
     priceToCoordinate: () => 0,
     scrollToRealTime: () => { facade.scrolls++; },
-    isAtRightEdge: () => atRightEdge,
     resize: () => {},
     applyOptions: () => {},
     remove: () => {},
@@ -35,9 +39,16 @@ const bar = (bucketStart: string, c: number, inProgress = false): Bar =>
 
 function barReaderOf(bars: Bar[]): BarReader { return { series: () => bars }; }
 const emptyIndicators: IndicatorReader = { series: () => [] };
-function commandSpy(): CommandSender & { names: string[] } {
+function indicatorReaderOf(points: { timeMs: number; value: number }[]): IndicatorReader {
+  return { series: () => points };
+}
+function commandSpy(): CommandSender & { names: string[]; calls: Array<{ name: string; args: unknown }> } {
   const names: string[] = [];
-  return { names, sendCommand: (n) => { names.push(n); return Promise.resolve({ status: "accepted" }); } };
+  const calls: Array<{ name: string; args: unknown }> = [];
+  return {
+    names, calls,
+    sendCommand: (n, a) => { names.push(n); calls.push({ name: n, args: a }); return Promise.resolve({ status: "accepted" }); },
+  };
 }
 
 const make = (reader: BarReader, cmd = commandSpy(), ind: IndicatorReader = emptyIndicators) => {
@@ -79,7 +90,6 @@ describe("ChartController", () => {
     const bars = [bar("2026-07-06T13:30:00Z", 10, true)];
     const { facade, ctrl } = make(barReaderOf(bars));
     ctrl.sync();
-    facade.setRightEdge(false);
     bars[0] = bar("2026-07-06T13:30:00Z", 10.5, true);
     ctrl.sync();
     expect(facade.scrolls).toBe(0);
@@ -94,6 +104,24 @@ describe("ChartController", () => {
     expect(facade.created.some((c) => c.kind === "line")).toBe(true);
     ctrl.removeIndicator("vwap-1");
     expect(cmd.names).toContain("UnsubscribeIndicator");
+  });
+
+  it("addIndicator sends exactly one SubscribeIndicator with the controller's config; reload re-sends for the new symbol/timeframe", () => {
+    const { ctrl, cmd } = make(barReaderOf([]));
+    ctrl.addIndicator({ instanceId: "vwap-1", type: "VWAP", params: {} });
+    const subscribes = cmd.calls.filter((c) => c.name === "SubscribeIndicator");
+    expect(subscribes).toHaveLength(1);
+    expect(subscribes[0].args).toEqual({
+      instanceId: "vwap-1", symbol: "US.AAPL", timeframe: "1m", type: "VWAP", params: withDefaultParams("VWAP", {}),
+    });
+
+    cmd.calls.length = 0;
+    ctrl.setSymbol("US.NVDA");
+    const resubscribes = cmd.calls.filter((c) => c.name === "SubscribeIndicator");
+    expect(resubscribes).toHaveLength(1);
+    expect(resubscribes[0].args).toEqual({
+      instanceId: "vwap-1", symbol: "US.NVDA", timeframe: "1m", type: "VWAP", params: withDefaultParams("VWAP", {}),
+    });
   });
 
   it("updateIndicator: param edit re-subscribes; color-only edit does not", () => {
@@ -121,11 +149,116 @@ describe("ChartController", () => {
     expect(cmd.names).toContain("SubscribeIndicator"); // re-subscribed for the new symbol
   });
 
+  it("indicator series: update() fast-path on growth; setSymbol reload forces a full setData again", () => {
+    const points: { timeMs: number; value: number }[] = [{ timeMs: 1_000, value: 1 }];
+    const { facade, ctrl } = make(barReaderOf([bar("2026-07-06T13:30:00Z", 10)]), commandSpy(), indicatorReaderOf(points));
+    ctrl.addIndicator({ instanceId: "vwap-1", type: "VWAP", params: {} });
+    const ind = facade.created.find((c) => c.kind === "line")!.series;
+
+    ctrl.sync(); // first application — full setData
+    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(1);
+    expect(ind.calls).not.toContain("update");
+
+    points.push({ timeMs: 2_000, value: 2 }); // one new point appended
+    ctrl.sync();
+    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(1); // no additional full setData
+    // 2, not 1: the growth loop also re-flushes the previously-last point (index 0,
+    // unchanged here) alongside the genuinely new one, in case it was itself revised
+    // during the same missed window — see the "growth that also revises..." test below.
+    expect(ind.calls.filter((c) => c === "update")).toHaveLength(2);
+
+    ctrl.setSymbol("US.NVDA"); // reload — indicatorApplied cleared
+    ctrl.sync();
+    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(2); // full setData again post-reload
+  });
+
+  it("updateIndicator (param edit) does not reuse the stale applied count against the new re-added series", () => {
+    const points: { timeMs: number; value: number }[] = [
+      { timeMs: 1_000, value: 1 }, { timeMs: 2_000, value: 2 }, { timeMs: 3_000, value: 3 },
+    ];
+    const { facade, ctrl } = make(barReaderOf([]), commandSpy(), indicatorReaderOf(points));
+    ctrl.addIndicator({ instanceId: "ema-1", type: "EMA", params: { period: 9 } });
+    ctrl.sync(); // full setData against the original series; indicatorApplied["ema-1"] = 3
+
+    // Param edit → removeIndicator (old series discarded) + addIndicator (brand-new, empty
+    // series under the SAME key, since key = instanceId for a single-slot indicator like EMA).
+    // The engine recomputes and returns a same-or-greater-length series under that key.
+    points.length = 0;
+    points.push({ timeMs: 1_000, value: 10 }, { timeMs: 2_000, value: 20 }, { timeMs: 3_000, value: 30 });
+    ctrl.updateIndicator({ instanceId: "ema-1", type: "EMA", params: { period: 21 } });
+
+    const lineSeries = facade.created.filter((c) => c.kind === "line");
+    expect(lineSeries).toHaveLength(2); // old series (removed) + new series (re-added)
+    const newSeries = lineSeries[1].series;
+
+    ctrl.sync();
+    // The new series must get the FULL array via setData — not zero calls (stale applied
+    // count equals the new length, so the append loop would run zero iterations) and not
+    // a partial tail-only update().
+    expect(newSeries.calls.filter((c) => c === "setData")).toHaveLength(1);
+    expect(newSeries.calls).not.toContain("update");
+  });
+
+  it("same-length in-progress-bar revision (last point's value changes) is applied via update(), not dropped", () => {
+    const points: { timeMs: number; value: number }[] = [{ timeMs: 1_000, value: 1 }, { timeMs: 2_000, value: 2 }];
+    const { facade, ctrl } = make(barReaderOf([]), commandSpy(), indicatorReaderOf(points));
+    ctrl.addIndicator({ instanceId: "vwap-1", type: "VWAP", params: {} });
+    const ind = facade.created.find((c) => c.kind === "line")!.series;
+
+    ctrl.sync(); // full setData, 2 points
+    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(1);
+
+    // Same length, but IndicatorStore.apply() upserted the last point in place (the
+    // in-progress bar's live value) — timeMs unchanged, value changed.
+    points[1] = { timeMs: 2_000, value: 2.5 };
+    ctrl.sync();
+
+    expect(ind.calls.filter((c) => c === "update")).toHaveLength(1); // revision pushed via update()
+    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(1); // not a redundant full setData
+  });
+
+  it("growth that also revises the previously-last point (two deltas in one missed window) re-flushes both", () => {
+    const points: { timeMs: number; value: number }[] = [{ timeMs: 1_000, value: 1 }];
+    const { facade, ctrl } = make(barReaderOf([]), commandSpy(), indicatorReaderOf(points));
+    ctrl.addIndicator({ instanceId: "vwap-1", type: "VWAP", params: {} });
+    const ind = facade.created.find((c) => c.kind === "line")!.series;
+
+    ctrl.sync(); // first application — full setData, applied = 1
+    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(1);
+
+    // Two deltas land on IndicatorStore before the next rAF-coalesced sync:
+    // 1) an upsert revises the first (in-progress-bar) point in place, then
+    // 2) an append adds a new point for the next in-progress bar.
+    points[0] = { timeMs: 1_000, value: 1.5 };
+    points.push({ timeMs: 2_000, value: 2 });
+
+    ctrl.sync();
+
+    const updateValues = ind.updates as { time: number; value: number }[];
+    expect(updateValues).toContainEqual({ time: 1, value: 1.5 }); // revised first point must reach the series
+    expect(updateValues).toContainEqual({ time: 2, value: 2 });   // new second point must also reach the series
+  });
+
   it("sync recomputes and sets session bands", () => {
     const bars = [bar("2026-07-06T13:30:00Z", 10)];
     const { facade, ctrl } = make(barReaderOf(bars));
     ctrl.sync();
     expect(facade.bands).toBeGreaterThan(0);
+  });
+
+  it("suppresses session bands on Daily but keeps them on intraday timeframes", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
+
+    const facadeD = fakeFacade();
+    const ctrlD = new ChartController(facadeD, LIGHT, { symbol: "US.AAPL", timeframe: "D" },
+      { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+    ctrlD.mount();
+    ctrlD.sync();
+    expect(facadeD.lastBands).toEqual([]);
+
+    const { facade: facade1m, ctrl: ctrl1m } = make(barReaderOf(bars));
+    ctrl1m.sync();
+    expect(facade1m.lastBands.length).toBeGreaterThan(0);
   });
 
   it("sync on a cold (empty) series does not throw or setData", () => {

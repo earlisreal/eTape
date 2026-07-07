@@ -39,6 +39,8 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups }: Panel
   const status = stores.exec.status();
   const venues = status?.venues.map((v) => v.venue) ?? [];
   const venue: VenueID = orderCfg.activeVenue || venues[0] || "";
+  const vStatus = status?.venues.find((v) => v.venue === venue);
+  const armed = (status?.masterArmed ?? false) && (vStatus?.venueArmed ?? false);
 
   const [side, setSide] = useState<Side>("BUY");
   const [type, setType] = useState<OrderType>("LIMIT");
@@ -102,7 +104,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups }: Panel
       </div>
       <div style={{ display: "flex", gap: 4 }}>
         <select value={side} onChange={(e) => setSide(e.target.value as Side)} style={inp}>{SIDES.map((s) => <option key={s}>{s}</option>)}</select>
-        <select value={type} onChange={(e) => setType(e.target.value as OrderType)} style={inp}>{TYPES.map((t) => <option key={t}>{t}</option>)}</select>
+        <select data-testid="order-type" value={type} onChange={(e) => setType(e.target.value as OrderType)} style={inp}>{TYPES.map((t) => <option key={t}>{t}</option>)}</select>
         <select value={tif} onChange={(e) => setTif(e.target.value as TIF)} style={inp}>{TIFS.map((t) => <option key={t}>{t}</option>)}</select>
       </div>
       <label>Price <input data-testid="price" value={price} onChange={(e) => setPrice(e.target.value)} disabled={type === "MARKET"} style={inp} /></label>
@@ -110,6 +112,10 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups }: Panel
       <div style={{ display: "flex", gap: 4 }}>
         <input data-testid="amount" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ ...inp, flex: 1 }} />
         <select data-testid="mode" value={mode} onChange={(e) => setMode(e.target.value as SizingMode)} style={inp}>{MODES.map((m) => <option key={m}>{m}</option>)}</select>
+      </div>
+      <div data-testid="ticket-armed-state" style={{ fontSize: 11, fontWeight: 700, textAlign: "center", padding: "2px 0",
+        color: armed ? palette.up : palette.warn }}>
+        {armed ? "ARMED" : "DISARMED — order will be blocked"}
       </div>
       <button data-testid="submit" onClick={submitManual} style={{ ...inp, background: palette.accent, color: palette.bg, fontWeight: 700, padding: "6px", cursor: "pointer" }}>
         Submit {side} {symbol && bareSymbol(symbol)}

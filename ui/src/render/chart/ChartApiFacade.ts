@@ -17,7 +17,6 @@ export interface ChartApiFacade {
   timeToCoordinate(timeMs: number): number | null;
   priceToCoordinate(price: number): number | null;
   scrollToRealTime(): void;
-  isAtRightEdge(): boolean;
   resize(width: number, height: number): void;
   applyOptions(options: unknown): void;
   remove(): void;
