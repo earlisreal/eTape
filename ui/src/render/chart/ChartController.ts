@@ -96,7 +96,8 @@ export class ChartController {
   }
 
   private applySessions(bars: Bar[]): void {
-    if (bars.length === 0) { this.facade.setSessionBands([]); return; }
+    const intraday = !["D", "W", "M"].includes(this.config.timeframe);
+    if (!intraday || bars.length === 0) { this.facade.setSessionBands([]); return; }
     const from = Date.parse(bars[0].bucketStart);
     const to = Date.parse(bars[bars.length - 1].bucketStart) + 1;
     this.facade.setSessionBands(sessionBands(from, to));

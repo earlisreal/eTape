@@ -12,11 +12,11 @@ function fakeSeries(): LwcSeries & { calls: string[] } {
 
 function fakeFacade() {
   const created: Array<{ kind: string; pane: number; series: LwcSeries & { calls: string[] } }> = [];
-  const facade: ChartApiFacade & { created: typeof created; scrolls: number; bands: number } = {
-    created, scrolls: 0, bands: 0,
+  const facade: ChartApiFacade & { created: typeof created; scrolls: number; bands: number; lastBands: unknown[] } = {
+    created, scrolls: 0, bands: 0, lastBands: [],
     addSeries: (kind, _o, pane) => { const s = fakeSeries(); created.push({ kind, pane, series: s }); return s; },
     removeSeries: () => {},
-    setSessionBands: () => { facade.bands++; },
+    setSessionBands: (b) => { facade.bands++; facade.lastBands = b; },
     setFillMarkers: () => {},
     timeToCoordinate: () => 0,
     priceToCoordinate: () => 0,
@@ -145,6 +145,21 @@ describe("ChartController", () => {
     const { facade, ctrl } = make(barReaderOf(bars));
     ctrl.sync();
     expect(facade.bands).toBeGreaterThan(0);
+  });
+
+  it("suppresses session bands on Daily but keeps them on intraday timeframes", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
+
+    const facadeD = fakeFacade();
+    const ctrlD = new ChartController(facadeD, LIGHT, { symbol: "US.AAPL", timeframe: "D" },
+      { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+    ctrlD.mount();
+    ctrlD.sync();
+    expect(facadeD.lastBands).toEqual([]);
+
+    const { facade: facade1m, ctrl: ctrl1m } = make(barReaderOf(bars));
+    ctrl1m.sync();
+    expect(facade1m.lastBands.length).toBeGreaterThan(0);
   });
 
   it("sync on a cold (empty) series does not throw or setData", () => {
