@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { PANELS } from "./registry";
+import { PANELS, CATALOG, isDevPanel } from "./registry";
 import { SEED_WORKSPACES } from "../../seeds/workspaces";
 
 describe("panel registry — monitoring surfaces", () => {
@@ -21,5 +21,24 @@ describe("seed monitoring — scanner/movers publish target + thresholds", () =>
   it("movers stays display-pinned and targets a group", () => {
     expect(panels["m-movers"].group).toBeNull();
     expect(panels["m-movers"].settings.targetGroup).toBe("green");
+  });
+});
+
+describe("catalog metadata", () => {
+  it("every non-dev panel has title/glyph/description", () => {
+    for (const [id, def] of Object.entries(PANELS)) {
+      if (isDevPanel(id)) continue;
+      expect(def.title, id).toBeTruthy();
+      expect(def.glyph, id).toBeTruthy();
+      expect(def.description, id).toBeTruthy();
+    }
+  });
+  it("CATALOG omits the dev smoke panel and lists chart first", () => {
+    expect(CATALOG.map((c) => c.panelId)).not.toContain("smoke-painter");
+    expect(CATALOG[0].panelId).toBe("chart");
+  });
+  it("marks symbol-bearing panels", () => {
+    expect(PANELS["chart"].symbolBearing).toBe(true);
+    expect(PANELS["scanner"].symbolBearing).toBe(false);
   });
 });
