@@ -18,4 +18,20 @@ describe("ConnectionStatusPanel", () => {
     expect(screen.getAllByText(/12/).length).toBeGreaterThan(0);
     expect(screen.getByText(/engine started/)).toBeTruthy();
   });
+
+  it("does not crash on a pre-first-poll null links payload (zero-value engine snapshot)", () => {
+    const health = new HealthStore();
+    render(<ConnectionStatusPanel health={health} />);
+    expect(() => {
+      act(() => {
+        health.apply({
+          kind: "snapshot",
+          topic: "sys.health",
+          payload: { links: null },
+        } as unknown as Parameters<typeof health.apply>[0]);
+      });
+    }).not.toThrow();
+    const table = screen.getByRole("table");
+    expect(table.querySelectorAll("tbody tr")).toHaveLength(0);
+  });
 });

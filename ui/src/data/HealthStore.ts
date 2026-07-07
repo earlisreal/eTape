@@ -10,7 +10,11 @@ export class HealthStore extends ReactStore<HealthState> {
   apply(m: SnapshotMsg | DeltaMsg): void {
     const cur = this.getSnapshot();
     if (m.topic === "sys.health") {
-      this.set({ ...cur, links: (m.payload as HealthSnapshot).links });
+      // The engine's zero-value HealthSnapshot (before the first health poll,
+      // e.g. every subscriber during a -replay boot) marshals a nil Go slice
+      // as JSON null. Normalize to [] so state.links is always an array.
+      const links = (m.payload as HealthSnapshot).links ?? [];
+      this.set({ ...cur, links });
       return;
     }
     if (m.topic === "sys.events") {
