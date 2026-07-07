@@ -80,6 +80,20 @@ export function PanelFrame(
     return () => d.dispose();
   }, [api]);
 
+  // Task 13 fix (review finding, Critical): cancel any in-progress edit the
+  // moment this panel stops being the active dockview panel. Without this,
+  // `tl.editing` stayed true after deactivation (it was only ever cleared on
+  // Enter/Escape), and the keydown listener's "already editing" branch below
+  // doesn't re-check `active` — so a stale, invisible edit on a now-inactive
+  // panel kept calling stopPropagation() on every matching keydown anywhere
+  // in the document, silently eating real order hotkeys meant for whichever
+  // panel actually was active. Returning the same `prev` reference when there
+  // is nothing to cancel is a deliberate no-op bail-out (React skips the
+  // re-render when a state updater returns the identical object).
+  useEffect(() => {
+    if (!active) setTl((prev) => (prev.editing ? { editing: false } : prev));
+  }, [active]);
+
   useEffect(() => {
     const el = hostRef.current;
     if (!el) return;
@@ -113,6 +127,22 @@ export function PanelFrame(
   const rawSymbol = symbol ?? (config.settings.symbol as string | undefined);
   const effectiveSymbol = rawSymbol ? bareSymbol(rawSymbol) : undefined;
 
+  // Task 13 fix (review finding, Minor but a literal brief requirement):
+  // cancel an in-progress edit on focus loss even when the panel remains the
+  // active dockview panel — e.g. the user clicks into this panel's own body
+  // (a chart/ladder canvas, a button) mid-edit. Type-to-load never focuses a
+  // real DOM node itself (the header span is not focusable), so any
+  // `focusin` while `tl.editing` is true means focus moved away from the
+  // implicit "typing into the header" mode, and the edit should end.
+  useEffect(() => {
+    if (!def?.symbolBearing) return;
+    const onFocusIn = () => {
+      setTl((prev) => (prev.editing ? { editing: false } : prev));
+    };
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
+  }, [def?.symbolBearing]);
+
   // Task 13: type-to-load keydown capture. Deliberately attached to `document`
   // in the CAPTURE phase, not the frame-root DOM node in the (default) bubble
   // phase as the task brief originally sketched — verified against the
@@ -142,15 +172,26 @@ export function PanelFrame(
 
     const commit = async (draft: string) => {
       const sym = normalizeSymbol(draft);
-      if (group !== null) {
-        const r = await linkGroups.focusChecked(group, sym);
-        if (!r.ok) toast.push({ level: "danger", text: `${sym} rejected — ${r.reason}` });
-        // On reject the group is left completely untouched (LinkGroups.focusChecked's
-        // own guarantee) and the header already reverted to the live symbol below —
-        // never a half-switched group.
-        return;
+      try {
+        if (group !== null) {
+          const r = await linkGroups.focusChecked(group, sym);
+          if (!r.ok) toast.push({ level: "danger", text: `${sym} rejected — ${r.reason}` });
+          // On reject the group is left completely untouched (LinkGroups.focusChecked's
+          // own guarantee) and the header already reverted to the live symbol below —
+          // never a half-switched group.
+          return;
+        }
+        onConfigChange({ ...config.settings, symbol: sym });
+      } catch (err) {
+        // Review finding (Important): `commit` is invoked fire-and-forget
+        // (`void commit(...)`) below. A thrown/rejected promise here — e.g. a
+        // transport-level failure in `linkGroups.focusChecked`'s underlying
+        // `sendCommand`, not just an engine-level "blocked" ack — would
+        // otherwise become a silent unhandled rejection: no toast, no
+        // feedback, and the user left unsure whether their symbol change
+        // went through. Surface it the same way a rejected ack is surfaced.
+        toast.push({ level: "danger", text: `${sym} failed — ${err instanceof Error ? err.message : "unexpected error"}` });
       }
-      onConfigChange({ ...config.settings, symbol: sym });
     };
 
     const onKeyDown = (e: KeyboardEvent): void => {

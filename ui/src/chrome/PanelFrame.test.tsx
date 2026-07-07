@@ -235,4 +235,48 @@ describe("PanelFrame — type-to-load (Task 13)", () => {
     window.removeEventListener("keydown", windowSpy);
     expect(windowSpy).toHaveBeenCalled();
   });
+
+  // Review finding (Critical): `tl.editing` used to survive panel deactivation
+  // (only Enter/Escape ever cleared it), and the keydown listener's "already
+  // editing" branch never re-checked `active` — so a stale edit on a
+  // now-inactive panel kept calling stopPropagation() on every matching
+  // keydown anywhere in the document, silently eating real order hotkeys
+  // meant for whichever panel actually was active. This exercises the real
+  // DOM propagation chain (a `window` bubble-phase listener, the same phase
+  // useHotkeys listens in), not just the reducer's internal state.
+  it("deactivating the panel mid-edit cancels the edit and releases keydown capture (regression: stale editing state must not swallow hotkeys)", () => {
+    const api = fakePanelApi(true);
+    renderFrame({ api, group: null, settings: { symbol: "US.AAPL" } });
+    typeKey("n"); typeKey("v");
+    expect(screen.getByTestId("panel-symbol").textContent).toContain("NV");
+
+    act(() => api.setActive(false));
+    // The header should already show the reverted symbol, not the stale
+    // in-progress draft, the instant the panel goes inactive.
+    expect(screen.getByTestId("panel-symbol").textContent).toBe("AAPL");
+
+    const windowSpy = vi.fn();
+    window.addEventListener("keydown", windowSpy);
+    typeKey("d"); // matches the "already editing" key shape this bug would have re-captured
+    window.removeEventListener("keydown", windowSpy);
+    expect(windowSpy).toHaveBeenCalled(); // NOT stopped — the stale-editing branch must not fire
+  });
+
+  // Review finding (Minor, but a literal brief requirement: "Cancel (Esc /
+  // blur / focus loss)"). Type-to-load never focuses a real DOM node itself,
+  // so any focus landing elsewhere while the panel is still active — e.g. the
+  // user clicks into the panel's own body — means the implicit "typing into
+  // the header" mode should end.
+  it("focus moving elsewhere while the panel stays active cancels the in-progress edit", () => {
+    const api = fakePanelApi(true);
+    renderFrame({ api, group: null, settings: { symbol: "US.AAPL" } });
+    typeKey("n"); typeKey("v");
+    expect(screen.getByTestId("panel-symbol").textContent).toContain("NV");
+
+    const other = document.createElement("button");
+    document.body.appendChild(other);
+    act(() => other.focus());
+    expect(screen.getByTestId("panel-symbol").textContent).toBe("AAPL");
+    document.body.removeChild(other);
+  });
 });
