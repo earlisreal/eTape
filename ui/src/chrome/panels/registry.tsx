@@ -3,7 +3,7 @@ import type { AckMsg, TopicName } from "../../wire/contract";
 import type { PanelConfig } from "../workspace";
 import type { Stores } from "../../data/registry";
 import type { Scheduler } from "../../render/Scheduler";
-import type { LinkGroups } from "../linkGroups";
+import type { LinkGroup, LinkGroups } from "../linkGroups";
 import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
 import { SmokePainterPanel } from "./SmokePainterPanel";
 import { ChartPanel } from "./ChartPanel";
@@ -27,6 +27,17 @@ export interface PanelProps {
   // Persist a panel's own settings (timeframe, indicators, …). AppShell updates the
   // workspace doc's matching panel entry and debounce-saves via WorkspaceStore.
   onConfigChange: (settings: Record<string, unknown>) => void;
+  // Task 12: whether this panel is dockview's currently-active panel (drives the
+  // bronze focus ring — .panel-focused) and the group-swatch picker's pick handler
+  // (see GroupPicker). Both live entirely in PanelFrame's own ledger header, not in
+  // any panel body — kept optional here (rather than required) so the many existing
+  // Body-level tests that construct a PanelProps literal directly (ChartPanel,
+  // LadderPanel, TapePanel, NewsPanel, ScannerPanel, AccountBarPanel, PositionsPanel,
+  // OpenOrdersPanel, OrderTicketPanel) don't need touching for a header-only feature;
+  // PanelFrame's own component signature (below) still requires and always supplies
+  // them, since AppShell always has both.
+  active?: boolean;
+  onGroupChange?: (group: LinkGroup) => void;
 }
 export interface PanelDef {
   component: FC<PanelProps>;

@@ -1,12 +1,12 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { DockviewReact, type DockviewApi, type DockviewReadyEvent } from "dockview";
+import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview";
 import "dockview/dist/styles/dockview.css";
 import { PanelFrame } from "./PanelFrame";
 import type { PanelConfig, Workspace } from "./workspace";
 import { WorkspaceStore } from "./workspace";
 import type { Stores } from "../data/registry";
 import type { Scheduler } from "../render/Scheduler";
-import type { LinkGroups } from "./linkGroups";
+import type { LinkGroup, LinkGroups } from "./linkGroups";
 import { PANELS, type PanelProps } from "./panels/registry";
 import { PRESETS, applyPreset } from "./presets";
 import { TopBar } from "./TopBar";
@@ -90,6 +90,23 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     const next = { ...ws, panels: ws.panels.map((p) => (p.id === panelId ? { ...p, settings } : p)) };
     setWs(next);                 // keep local state authoritative for subsequent edits
     workspaceStore.save(next);   // debounced persist (config key workspace.<name>)
+  };
+
+  // Re-links (or pins) a panel: PanelFrame's swatch/GroupPicker calls this on a
+  // pick. Separate from onConfigChange (which only ever replaces `settings`) since
+  // `group` is a sibling field on the same PanelConfig entry, not part of settings.
+  // Reads/writes via wsRef (like removePanel) rather than the `ws` closed over at
+  // render time: the per-panel PanelFrame factory below is captured ONCE by
+  // dockview at panel-creation time and never re-invoked with fresh closures on
+  // later AppShell renders (dockview keeps panel content mounted for its whole
+  // life so canvas surfaces don't remount on focus/drag) — so this handler must
+  // stay correct no matter how stale the `ws` it was originally created against is.
+  const onGroupChange = (panelId: string, group: LinkGroup) => {
+    const current = wsRef.current ?? ws;
+    const next = { ...current, panels: current.panels.map((p) => (p.id === panelId ? { ...p, group } : p)) };
+    wsRef.current = next;
+    setWs(next);
+    workspaceStore.save(next);
   };
 
   // Allocate a fresh panel id and default settings per panel type, add it to
@@ -181,13 +198,22 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   };
 
   // Stable React keys: panels are keyed by config.id so dockview drag/resize
-  // never remounts them (canvas keeps its context).
+  // never remounts them (canvas keeps its context). Each factory is called by
+  // dockview exactly ONCE, at panel-creation time, and the resulting element is
+  // kept mounted (portal'd) for the panel's whole life — dockview does supply
+  // fresh `api`/`containerApi`/`params` props on every re-render of that portal
+  // (see IDockviewPanelProps), so PanelFrame reads its own liveness via
+  // `props.api` (a stable, subscribable object) rather than a boolean baked
+  // into this closure at creation time.
   const components = Object.fromEntries(
     ws.panels.map((p) => [
       p.id,
-      () => <PanelFrame config={p} stores={stores} scheduler={scheduler}
+      (panelProps: IDockviewPanelProps) => <PanelFrame config={p} stores={stores} scheduler={scheduler}
         linkGroups={linkGroups} commands={commands}
-        onConfigChange={(settings) => onConfigChange(p.id, settings)} />,
+        onConfigChange={(settings) => onConfigChange(p.id, settings)}
+        onGroupChange={(group) => onGroupChange(p.id, group)}
+        onClose={() => removePanel(p.id)}
+        api={panelProps.api} />,
     ]),
   );
 
