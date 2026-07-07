@@ -82,8 +82,10 @@ export class DrawingInteraction {
     this.cancelGesture();
     this.selectionId = null;
     this.primitive.setSelection(null);
-    // Unconditional, unlike setTool's applyPanZoomLock(): a symbol switch always hands
-    // pan/zoom back, even if a tool is still armed for the next placement on the new chart.
+    // A symbol switch always reverts to select mode and hands pan/zoom back — a tool
+    // armed for the old chart shouldn't silently start placing on the new one.
+    this.tool = "select";
+    this.onToolChange?.("select");
     this.facade.setPanZoomEnabled(true);
     this.primitive.requestUpdate();
   }
@@ -266,8 +268,9 @@ export class DrawingInteraction {
         this.tool = "select";
         this.onToolChange?.("select");
         this.applyPanZoomLock();
-      } else if (this.gesture.kind === "measuring" || this.primitive) {
-        this.cancelGesture(); // clears a lingering measure box
+      } else {
+        this.cancelGesture(); // clears a lingering measure box or in-progress drag
+        this.applyPanZoomLock();
       }
       this.selectionId = null;
       this.primitive.setSelection(null);
