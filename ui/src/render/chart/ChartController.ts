@@ -23,6 +23,7 @@ export class ChartController {
   private lastAppliedCount = 0;             // bars applied via setData/update
   private lastAppliedKey = "";              // last bar's bucketStart|close, to detect in-progress change
   private indicatorApplied = new Map<string, number>(); // per-series point count applied via setData/update
+  private indicatorLastKey = new Map<string, string>(); // per-series fingerprint of the last applied point, `${timeMs}|${value}`
   private backfilled = false;
   private readonly indicators = new Map<string, { inst: IndicatorInstance; series: Map<string, LwcSeries> }>();
 
@@ -92,16 +93,24 @@ export class ChartController {
         // instanceId suffix; single-series indicators use the base instanceId.
         const points = this.deps.indicators.series(d.key);
         const applied = this.indicatorApplied.get(d.key) ?? 0;
-        if (applied > 0 && points.length >= applied) {
-          // Grew (or unchanged): append only the new tail. resetForReload clears
-          // the map, so after a reload `applied` is 0 and we full-setData below.
+        const last = points[points.length - 1];
+        const lastKey = last ? `${last.timeMs}|${last.value}` : "";
+        if (applied === 0 || points.length < applied) {
+          // First application, or the series shrank (e.g. a full recompute produced
+          // fewer points) — only setData() is safe.
+          s.setData(points.map((p) => ({ time: toLwcTimeMs(p.timeMs), value: p.value })));
+        } else if (points.length > applied) {
+          // Grew: append only the new tail.
           for (let i = applied; i < points.length; i++) {
             s.update({ time: toLwcTimeMs(points[i].timeMs), value: points[i].value });
           }
-        } else {
-          s.setData(points.map((p) => ({ time: toLwcTimeMs(p.timeMs), value: p.value })));
+        } else if (last && lastKey !== this.indicatorLastKey.get(d.key)) {
+          // Same length, but the last point's value changed in place — the
+          // in-progress-bar revision case (IndicatorStore upserts, doesn't append).
+          s.update({ time: toLwcTimeMs(last.timeMs), value: last.value });
         }
         this.indicatorApplied.set(d.key, points.length);
+        this.indicatorLastKey.set(d.key, lastKey);
       }
     }
   }
@@ -138,6 +147,10 @@ export class ChartController {
     const entry = this.indicators.get(instanceId);
     if (!entry) return;
     for (const s of entry.series.values()) this.facade.removeSeries(s);
+    for (const k of entry.series.keys()) {
+      this.indicatorApplied.delete(k);
+      this.indicatorLastKey.delete(k);
+    }
     this.indicators.delete(instanceId);
     void this.deps.commands.sendCommand("UnsubscribeIndicator", { instanceId });
   }
@@ -166,6 +179,7 @@ export class ChartController {
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
     this.indicatorApplied.clear();
+    this.indicatorLastKey.clear();
     // Re-subscribe every live indicator for the new (symbol, timeframe).
     for (const { inst } of this.indicators.values()) this.subscribeIndicator(inst);
   }

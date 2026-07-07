@@ -163,6 +163,51 @@ describe("ChartController", () => {
     expect(ind.calls.filter((c) => c === "setData")).toHaveLength(2); // full setData again post-reload
   });
 
+  it("updateIndicator (param edit) does not reuse the stale applied count against the new re-added series", () => {
+    const points: { timeMs: number; value: number }[] = [
+      { timeMs: 1_000, value: 1 }, { timeMs: 2_000, value: 2 }, { timeMs: 3_000, value: 3 },
+    ];
+    const { facade, ctrl } = make(barReaderOf([]), commandSpy(), indicatorReaderOf(points));
+    ctrl.addIndicator({ instanceId: "ema-1", type: "EMA", params: { period: 9 } });
+    ctrl.sync(); // full setData against the original series; indicatorApplied["ema-1"] = 3
+
+    // Param edit → removeIndicator (old series discarded) + addIndicator (brand-new, empty
+    // series under the SAME key, since key = instanceId for a single-slot indicator like EMA).
+    // The engine recomputes and returns a same-or-greater-length series under that key.
+    points.length = 0;
+    points.push({ timeMs: 1_000, value: 10 }, { timeMs: 2_000, value: 20 }, { timeMs: 3_000, value: 30 });
+    ctrl.updateIndicator({ instanceId: "ema-1", type: "EMA", params: { period: 21 } });
+
+    const lineSeries = facade.created.filter((c) => c.kind === "line");
+    expect(lineSeries).toHaveLength(2); // old series (removed) + new series (re-added)
+    const newSeries = lineSeries[1].series;
+
+    ctrl.sync();
+    // The new series must get the FULL array via setData — not zero calls (stale applied
+    // count equals the new length, so the append loop would run zero iterations) and not
+    // a partial tail-only update().
+    expect(newSeries.calls.filter((c) => c === "setData")).toHaveLength(1);
+    expect(newSeries.calls).not.toContain("update");
+  });
+
+  it("same-length in-progress-bar revision (last point's value changes) is applied via update(), not dropped", () => {
+    const points: { timeMs: number; value: number }[] = [{ timeMs: 1_000, value: 1 }, { timeMs: 2_000, value: 2 }];
+    const { facade, ctrl } = make(barReaderOf([]), commandSpy(), indicatorReaderOf(points));
+    ctrl.addIndicator({ instanceId: "vwap-1", type: "VWAP", params: {} });
+    const ind = facade.created.find((c) => c.kind === "line")!.series;
+
+    ctrl.sync(); // full setData, 2 points
+    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(1);
+
+    // Same length, but IndicatorStore.apply() upserted the last point in place (the
+    // in-progress bar's live value) — timeMs unchanged, value changed.
+    points[1] = { timeMs: 2_000, value: 2.5 };
+    ctrl.sync();
+
+    expect(ind.calls.filter((c) => c === "update")).toHaveLength(1); // revision pushed via update()
+    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(1); // not a redundant full setData
+  });
+
   it("sync recomputes and sets session bands", () => {
     const bars = [bar("2026-07-06T13:30:00Z", 10)];
     const { facade, ctrl } = make(barReaderOf(bars));
