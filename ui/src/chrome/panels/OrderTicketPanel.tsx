@@ -123,8 +123,10 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups }: Panel
         <input data-testid="amount" className="ctl mono" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ flex: 1 }} />
         <select data-testid="mode" className="ctl mono" value={mode} onChange={(e) => setMode(e.target.value as SizingMode)}>{MODES.map((m) => <option key={m}>{m}</option>)}</select>
       </div>
+      {/* Bronze/muted — color-discipline: armed/disarmed is UI state, never
+          market-direction green/red. Matches AccountPanel's arm-chip formula. */}
       <div data-testid="ticket-armed-state" style={{ fontSize: 11, fontWeight: 700, textAlign: "center", padding: "2px 0",
-        color: armed ? palette.up : palette.warn }}>
+        color: armed ? palette.accent : palette.textMuted }}>
         {armed ? "ARMED" : "DISARMED — order will be blocked"}
       </div>
       <button data-testid="submit" className="btn btn-primary" onClick={submitManual} style={{ fontWeight: 700, padding: "6px" }}>
