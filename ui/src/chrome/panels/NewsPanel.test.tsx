@@ -4,7 +4,7 @@ import { render, screen, act, fireEvent } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { LinkGroups } from "../linkGroups";
 import { makeStores } from "../../data/registry";
-import { NewsPanel } from "./NewsPanel";
+import { NewsPanel, newsDateLabel } from "./NewsPanel";
 import type { PanelProps } from "./registry";
 import type { PanelConfig } from "../workspace";
 import type { AckMsg } from "../../wire/contract";
@@ -25,6 +25,15 @@ function renderPanel() {
   return { news, linkGroups };
 }
 
+describe("newsDateLabel", () => {
+  it("labels today vs older dates", () => {
+    const now = Date.parse("2026-07-07T12:00:00Z");
+    expect(newsDateLabel("2026-07-07T09:00:00Z", now)).toEqual({ label: "today", today: true });
+    expect(newsDateLabel("2026-07-04T08:00:00Z", now).today).toBe(false);
+    expect(newsDateLabel("2026-07-04T08:00:00Z", now).label).toMatch(/Jul\s*4/);
+  });
+});
+
 describe("NewsPanel", () => {
   it("shows a reserved halt-banner slot and a no-symbol header before focus", () => {
     renderPanel();
@@ -44,7 +53,9 @@ describe("NewsPanel", () => {
     });
     const links = screen.getAllByRole("link");
     expect(links.map((a) => a.textContent)).toEqual(["Newer AAPL", "Older AAPL"]); // newest first, NVDA excluded
-    expect(screen.getAllByText(/seen/i).length).toBeGreaterThan(0);
+    // meta line is date · seen-time · source, in mono, one per row
+    expect(document.querySelectorAll(".mono").length).toBe(2);
+    expect(screen.getAllByText(/\d{2}:\d{2}:\d{2}/).length).toBeGreaterThan(0);
   });
 
   it("clicking a headline opens its url", () => {
