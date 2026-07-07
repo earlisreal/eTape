@@ -10,6 +10,23 @@ describe("panel registry — monitoring surfaces", () => {
   });
 });
 
+describe("Task 19: merged account panel + back-compat aliases", () => {
+  it("registers the merged account panel with all four exec/quote topics", () => {
+    expect(PANELS["account"]).toBeDefined();
+    expect(PANELS["account"].topics).toEqual(["exec.account", "exec.positions", "exec.status", "md.quote"]);
+  });
+  it("aliases the pre-merge ids to the same merged component for saved-doc back-compat", () => {
+    expect(PANELS["account-bar"].component).toBe(PANELS["account"].component);
+    expect(PANELS["positions"].component).toBe(PANELS["account"].component);
+  });
+  it("omits the retired ids from the Add Panel catalog but keeps only the merged one", () => {
+    const ids = CATALOG.map((c) => c.panelId);
+    expect(ids).toContain("account");
+    expect(ids).not.toContain("account-bar");
+    expect(ids).not.toContain("positions");
+  });
+});
+
 describe("catalog metadata", () => {
   it("every non-dev panel has title/glyph/description", () => {
     for (const [id, def] of Object.entries(PANELS)) {
