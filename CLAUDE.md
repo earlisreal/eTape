@@ -37,10 +37,12 @@ limits, eTape design consequences) + reconstructed OpenAPI spec in `docs/tradeze
 confirmed TradeZero exposes **no market data**, so the moomoo/TradeZero split stands.
 TradeZero API credentials live in `~/.eJournal/credentials.json` (key `tradeZero`:
 `keyId` + `secretKey`). **Verified 2026-07-03: these are LIVE-account keys**
-(`accountType: "Live"`, real funds).
-**Safety rule: never place, modify, or cancel real orders with these keys unless
-Earl explicitly says so in the current conversation.** Read-only endpoints (accounts,
-positions, orders, routes, pnl) are fine for verification.
+(`accountType: "Live"`, real funds). Alpaca live keys added 2026-07-07 (key
+`alpaca-live`, limited-margin account, real funds; paper keys stay under `alpaca`).
+**Safety rule: never place, modify, or cancel real orders with live keys (TradeZero
+or `alpaca-live`) unless Earl explicitly says so in the current conversation.**
+Read-only endpoints (accounts, positions, orders, routes, pnl) are fine for
+verification.
 Design consequence: the engine keeps a broker-agnostic
 execution interface — fills arrive as generic events (symbol, side, qty, price,
 timestamp) consumed by the chart/annotation layer, regardless of broker.
@@ -158,13 +160,14 @@ when implementing the wire protocol.
 
 - **Execution broker — resolved 2026-07-04: multi-broker, all three** (TZ + Alpaca +
   moomoo as configured venues; multi-broker spec). Alpaca research:
-  `docs/2026-07-03-alpaca-api.md` (paper keys verified, key `alpaca`; no live account
-  yet; no L2 depth, so the moomoo DOM stays). Monday's order-latency benchmark is now
-  a **routing input**, not a broker decision — run **three venues in one session**:
-  **TZ live** (paper keygen failed 2026-07-04; Earl authorized live) + Alpaca paper
-  + **moomoo live** (paper can't validate fills; authorized 2026-07-04). Live-leg
-  guardrails: 1-share marketable limits, cheap liquid symbol, long only, flatten
-  immediately, RTH only, moomoo trade unlock done outside eTape first —
+  `docs/2026-07-03-alpaca-api.md` (paper keys `alpaca`; live account funded
+  2026-07-07, keys `alpaca-live`, limited margin; no L2 depth, so the moomoo DOM
+  stays). Order-latency benchmarks DONE — 2026-07-06 three-venue session (TZ live +
+  Alpaca paper + moomoo live) and 2026-07-07 Alpaca-live addendum:
+  `docs/2026-07-06-venue-latency-benchmark.md`. Real fills: **Alpaca ~0.23 s <
+  TZ 0.33–0.44 s < moomoo 0.9–1.0 s**; ack ordering the same. Live-leg
+  guardrails (standing): 1-share marketable limits, cheap liquid symbol, long only,
+  flatten immediately, RTH only, moomoo trade unlock done outside eTape first —
   **re-confirm authorization in the session that runs it** (safety rule above
   still applies).
 

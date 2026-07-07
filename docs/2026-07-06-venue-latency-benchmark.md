@@ -31,7 +31,8 @@ sweep before committing).
 - **Real fill completion (live venues only):** TZ was strikingly fast —
   **0.34–0.43 s** place→fill on every order; moomoo took **0.87–1.04 s**.
   Alpaca's fills are paper-simulated and not comparable; live fill quality
-  stays unknown until a live account exists.
+  stays unknown until a live account exists *(measured 2026-07-07 — see the
+  Alpaca LIVE addendum: ~0.23 s, fastest of the three)*.
 - **Fill prices:** effectively identical across live venues (buys 13.4168 vs
   13.4172, sells both 13.41) — at 1-share scale price improvement is noise.
 - **Cold connects:** Alpaca first request ~580–660 ms (TLS; pool mandatory —
@@ -85,10 +86,64 @@ authorization). Two lessons and one venue anomaly:
   true (pre-market fills earlier the same day were instant, 0.4–1.0 s).
   Consequence for Plan 5/6 testing: **do not assume prompt Alpaca paper fills
   in integration tests** — assert on `new` acks, treat fills as eventual.
-  Live fill quality remains unmeasurable until a live Alpaca account exists.
+  Live fill quality remained unmeasurable until a live account existed —
+  measured 2026-07-07, see the Alpaca LIVE addendum.
 - **IOC closed:** accepted during RTH on the standard account (HTTP 200) —
   the "contact sales"/Elite footnote does not gate IOC submission. (Its
   instant-cancel semantics couldn't be observed due to the same paper stall.)
 - Bench hardening added en route: pre-run orphan sweep (cancels any resting
   `ET-BENCH*` orders from an interrupted run — one such orphan was found and
   cleaned after a user-interrupted start), `--price-guard` flag.
+
+## Alpaca LIVE addendum — 2026-07-07 (09:25–09:35 ET, symbol F)
+
+Live keys added by Earl 2026-07-07 (`~/.eJournal/credentials.json` key
+`alpaca-live`; paper stays under `alpaca`), small starter deposit the same
+morning. Bench gained an `alpaca-live` venue (live base URL + creds key, same
+guardrails). Account facts verified en route: **Alpaca has no retail cash
+accounts** — every account opens as margin; under $2k equity it runs as
+**limited margin** (`multiplier:1`, `shorting_enabled:false`,
+`buying_power == cash`) but **unsettled funds are tradable** (the 09:08 ET
+instant-ACH deposit traded at 09:34). **PDT is fully gone** — FINRA retired it
+2026-06-04 (Alpaca "Intraday Margin Rule": unlimited day trades, deficit-based
+calls only); confirmed `daytrade_count`/`pattern_day_trader` are now absent
+from `/v2/account` (removed 2026-07-06). Day-trade count is no longer a bench
+constraint; buying power per cycle is.
+
+### Place+cancel probe (pre-market 09:25 ET; 3 reps, non-marketable $10 buy limits, 0 fills)
+
+| leg | API return | push |
+|---|---|---|
+| place → `new` | 199–204 | 231–235 |
+| cancel → `canceled` | 194–196 | 229–236 |
+
+Live ≈ paper on the ack path (~230 ms vs paper ~210 ms); the ack push trails
+the RPC return by ~30 ms (opposite of moomoo). Cancels are symmetric with
+places.
+
+### RTH round trip (09:34 ET, 1-share marketable limits)
+
+| leg | API return | ack push | fill push | fill |
+|---|---|---|---|---|
+| buy (cold) | 209 | 239 | **239** | 13.7099 |
+| sell (warm) | 196 | 232 | **232** | 13.7032 |
+
+- **Ack and fill arrive in the same push.** Place→real-fill ≈ **0.23–0.24 s**
+  — **Alpaca live is the fastest venue to actual execution**: Alpaca ~0.23 s <
+  TZ 0.33–0.44 s < moomoo 0.87–1.04 s. Closes the "live fill quality unknown"
+  caveat from 07-06. Both fills price-improved; round-trip cost 0.67¢ at
+  1-share scale, no per-order platform fee (vs moomoo's US$0.99+GST).
+- **Delayed-open lesson (first attempt 09:31):** a marketable buy (13.80 vs
+  13.77 ask) rested `new` for 33 s and was cancelled by the bench timeout —
+  **F's NYSE opening auction was delayed to ~09:33** (only 1–2.5k shares/min
+  of stray off-primary prints until a 77.9k-share opening bar; meanwhile the
+  consolidated NBBO looked normal and IEX quoted 13.08×14.57). Wholesalers
+  hold marketable retail flow until the primary opening print. Consequence for
+  eTape: **fill-timeout / marketable-order logic must not assume marketable ⇒
+  filled**, especially in the minutes after 09:30 — cancel-on-timeout is the
+  correct guardrail, and a "primary hasn't opened yet" state is worth
+  surfacing in the order ticket.
+
+Raw: `prototypes/captures/alpaca_live_place_cancel_20260707_*.json`,
+`venue_latency_20260707_*.json`, `alpaca-live_bench_ws_*.json` — ⚠️ contain
+the live account id; sweep before committing.

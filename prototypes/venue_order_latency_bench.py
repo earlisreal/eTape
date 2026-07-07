@@ -2,9 +2,10 @@
 """Three-venue order-latency benchmark (Monday checklist §3) — routing input.
 
 Venues:
-  tz      TradeZero LIVE   (REST + Portfolio WS)          ⚠️ real money
-  alpaca  Alpaca PAPER     (REST + trade_updates WS)
-  moomoo  moomoo LIVE      (OpenD TCP via Python SDK)     ⚠️ real money
+  tz           TradeZero LIVE   (REST + Portfolio WS)          ⚠️ real money
+  alpaca       Alpaca PAPER     (REST + trade_updates WS)
+  alpaca-live  Alpaca LIVE      (REST + trade_updates WS)      ⚠️ real money
+  moomoo       moomoo LIVE      (OpenD TCP via Python SDK)     ⚠️ real money
 
 Per venue, per cycle: BUY 1 share marketable-limit → ack → fill → SELL 1 share
 marketable-limit → ack → fill. Records place→api-return, place→ack-push,
@@ -285,18 +286,20 @@ class TZVenue:
 
 
 # ======================================================================
-# Alpaca PAPER
+# Alpaca PAPER (subclassed below for the live account)
 # ======================================================================
 class AlpacaVenue:
     name = 'alpaca'
     live = False
     BASE = 'https://paper-api.alpaca.markets'
+    HOST = 'paper-api.alpaca.markets'
+    CRED_KEY = 'alpaca'
 
     def __init__(self, symbol):
         self.symbol = symbol
-        c = creds['alpaca']
+        c = creds[self.CRED_KEY]
         self.rest_conn = KeepAliveREST(
-            'paper-api.alpaca.markets',
+            self.HOST,
             {'APCA-API-KEY-ID': c['keyId'], 'APCA-API-SECRET-KEY': c['secretKey'],
              'Accept': 'application/json', 'Content-Type': 'application/json'})
         self.events = []            # (ms, opcode, parsed_or_raw)
@@ -309,18 +312,19 @@ class AlpacaVenue:
     def connect(self):
         el, status, acct = self.rest('GET', '/v2/account')
         if status != 200:
-            raise RuntimeError(f'alpaca account error: HTTP {status} {acct}')
-        print(f'  alpaca paper account: {acct.get("account_number")} '
-              f'status={acct.get("status")} (GET /account {el:.0f}ms cold)')
+            raise RuntimeError(f'{self.name} account error: HTTP {status} {acct}')
+        print(f'  {self.name} account: {acct.get("account_number")} '
+              f'status={acct.get("status")} bp=${acct.get("buying_power")} '
+              f'(GET /account {el:.0f}ms cold)')
         threading.Thread(target=self._stream, daemon=True).start()
         if not self.stream_ready.wait(20) or self.stream_failed:
-            raise RuntimeError(f'alpaca stream not ready: {self.stream_failed}')
-        print('  alpaca trade_updates listening')
+            raise RuntimeError(f'{self.name} stream not ready: {self.stream_failed}')
+        print(f'  {self.name} trade_updates listening')
 
     def _stream(self):
         import websocket
         from websocket import ABNF
-        c = creds['alpaca']
+        c = creds[self.CRED_KEY]
         try:
             ws = websocket.create_connection(self.BASE.replace('https', 'wss') + '/stream',
                                              timeout=20)
@@ -392,11 +396,11 @@ class AlpacaVenue:
         tl.mark('api_return_ms')
         tl.d['order_id'] = resp.get('id') if isinstance(resp, dict) else None
         if status != 200:
-            print(f'  !! alpaca {side} rejected: HTTP {status} {json.dumps(resp)[:200]}')
+            print(f'  !! {self.name} {side} rejected: HTTP {status} {json.dumps(resp)[:200]}')
             return tl, False
         filled = self._watch(coid, tl)
         if not filled and tl.d['order_id']:
-            print(f'  !! alpaca {side} not filled in 25s — cancelling')
+            print(f'  !! {self.name} {side} not filled in 25s — cancelling')
             self.rest('DELETE', f'/v2/orders/{tl.d["order_id"]}')
         return tl, filled
 
@@ -414,11 +418,26 @@ class AlpacaVenue:
         return float(body.get('qty', 0)) if isinstance(body, dict) else 0.0
 
     def teardown(self):
-        (CAPTURE_DIR / f'alpaca_bench_ws_{datetime.now():%Y%m%d_%H%M%S}.json').write_text(
+        (CAPTURE_DIR / f'{self.name}_bench_ws_{datetime.now():%Y%m%d_%H%M%S}.json').write_text(
             json.dumps([{'t_ms': round(t, 1), 'encoding': e, 'frame': p}
                         for t, e, p in self.events], indent=1, default=str))
         encs = {e for _, e, _ in self.events}
-        print(f'  alpaca frame encodings observed: {encs}')
+        print(f'  {self.name} frame encodings observed: {encs}')
+
+
+# ======================================================================
+# Alpaca LIVE — ⚠️ real money. Limited-margin account (<$2k equity):
+# 1x buying power, no shorting, but unsettled funds are tradable and day
+# trades are unlimited (FINRA retired PDT 2026-06-04 → Intraday Margin
+# Rule). Cycles bounded by --cycles-live; each cycle needs the full share
+# price in buying power.
+# ======================================================================
+class AlpacaLiveVenue(AlpacaVenue):
+    name = 'alpaca-live'
+    live = True
+    BASE = 'https://api.alpaca.markets'
+    HOST = 'api.alpaca.markets'
+    CRED_KEY = 'alpaca-live'
 
 
 # ======================================================================
@@ -543,7 +562,8 @@ class MoomooVenue:
 
 
 # ======================================================================
-VENUES = {'tz': TZVenue, 'alpaca': AlpacaVenue, 'moomoo': MoomooVenue}
+VENUES = {'tz': TZVenue, 'alpaca': AlpacaVenue, 'alpaca-live': AlpacaLiveVenue,
+          'moomoo': MoomooVenue}
 
 
 def run_venue(venue, cycles, timelines):

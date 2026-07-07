@@ -30,15 +30,21 @@ book — see Market Data below, DOM ladder stays on moomoo LV3).
   `multiplier` field: 1/2/4 (4 = 4x intraday, 2x overnight Reg T).
 - **PDT is dead**: FINRA's revised Rule 4210 (intraday margin regime) replaced
   pattern-day-trader rules; Alpaca deprecated PDT fields June 4 2026 and sunsets PDT
-  endpoints July 6 2026. No $25k day-trading floor.
+  endpoints July 6 2026. No $25k day-trading floor. Confirmed 2026-07-07:
+  `daytrade_count`/`pattern_day_trader` are gone from `/v2/account` — the Go
+  structs must not reference them.
 
-### Credentials (verified 2026-07-03)
+### Credentials (verified 2026-07-03; live keys added 2026-07-07)
 
 `~/.eJournal/credentials.json` key `alpaca` (`keyId`/`secretKey`) is a **paper**
 account: `PA3IC96WKTXD`, ACTIVE, $100k equity, multiplier 4, shorting enabled,
-crypto active. The live endpoint rejects these keys (40110000) — **no live Alpaca
-keys/account exist yet**; live onboarding (individuals worldwide) would be needed
-before real orders. Safe default: all development against paper.
+crypto active. The live endpoint rejects these keys (40110000).
+**Live keys live under key `alpaca-live`** (added + verified 2026-07-07):
+ACTIVE, funded with a small starter deposit — **limited margin** (<$2k equity:
+multiplier 1, no shorting, `buying_power == cash`, **unsettled instant-ACH
+funds tradable** — verified by trading a same-morning deposit). ⚠️ Same safety
+rule as the TradeZero live keys: **no real orders without Earl's explicit
+in-conversation go-ahead**. Safe default: all development against paper.
 
 ## Measured latency (2026-07-03, market closed, from Earl's machine)
 
@@ -55,8 +61,10 @@ Warm keep-alive HTTPS request→response (`/v2/clock`, 5-request series):
 - Authenticated paper `/v2/clock` ≈ unauthenticated 401 time → server processing is
   negligible; the wire dominates. Cold TLS setup to Alpaca is ~430 ms → the Go client
   **must keep a warm connection pool** (and consider periodic keepalive requests).
-- Still unmeasured: order `POST → trade_updates ack/fill` on a live session. Extend
-  Monday's TradeZero benchmark script to hit Alpaca paper in the same run.
+- Measured 2026-07-07 on the live account (`2026-07-06-venue-latency-benchmark.md`,
+  Alpaca LIVE addendum): place→ack push ~230 ms, **place→real fill ~0.23 s —
+  fastest of the three venues**; ack and fill arrive in the same
+  `trade_updates` push.
 
 ## REST surface (Trading API, `/v2` unless noted)
 
@@ -221,8 +229,9 @@ client owns reconnect + REST re-snapshot, same as the TZ adapter design.
 6. **Locates**: synchronous and simpler than TZ; ETB shorts are zero-fee zero-step.
 7. **Rate limits**: single 200/min pool — no REST polling loops; WS-first state,
    REST only for reconnect re-snapshot (same architecture as planned for TZ).
-8. **No live account yet**: paper-first development is free; live onboarding is the
-   long pole if Alpaca wins the benchmark.
+8. **Live account open + funded (2026-07-07)**: keys under `alpaca-live`; live
+   fills measured fastest of all venues (~0.23 s place→fill). Paper remains the
+   development default.
 
 ## To verify empirically
 
