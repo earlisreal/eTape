@@ -156,3 +156,16 @@ func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.
 	}
 	seedChunked(o.cfg.SeedChunk, bars, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
 }
+
+// MoomooFetcher adapts a feed.Feed (the live OpenD feed) as the primary
+// HistFetcher: ResDay for daily, Res1m for intraday.
+func MoomooFetcher(fd feed.Feed) HistFetcher { return moomooFetcher{fd: fd} }
+
+type moomooFetcher struct{ fd feed.Feed }
+
+func (m moomooFetcher) DailyBars(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error) {
+	return m.fd.HistoryBars(ctx, symbol, feed.ResDay, from, to)
+}
+func (m moomooFetcher) Intraday1m(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error) {
+	return m.fd.HistoryBars(ctx, symbol, feed.Res1m, from, to)
+}
