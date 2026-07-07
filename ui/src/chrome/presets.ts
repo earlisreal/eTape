@@ -158,8 +158,7 @@ export const PRESETS: Preset[] = [
         { id: "t-dom", panelId: "ladder", group: "blue", settings: { symbol: "US.AAPL" } },
         { id: "t-tape", panelId: "tape", group: "blue", settings: { symbol: "US.AAPL", minSize: 0 } },
         { id: "t-ticket", panelId: "order-ticket", group: "blue", settings: {} },
-        // t-account uses account-bar until Task 19 swaps this panelId to the merged "account"
-        { id: "t-account", panelId: "account-bar", group: null, settings: {} },
+        { id: "t-account", panelId: "account", group: null, settings: {} },
         { id: "t-orders", panelId: "open-orders", group: null, settings: {} },
       ],
       layout: TRADING_LAYOUT,

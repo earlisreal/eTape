@@ -11,8 +11,7 @@ import { LadderPanel } from "./LadderPanel";
 import { TapePanel } from "./TapePanel";
 import { ScannerPanel } from "./ScannerPanel";
 import { NewsPanel } from "./NewsPanel";
-import { AccountBarPanel } from "./AccountBarPanel";
-import { PositionsPanel } from "./PositionsPanel";
+import { AccountPanel } from "./AccountPanel";
 import { OpenOrdersPanel } from "./OpenOrdersPanel";
 import { OrderTicketPanel } from "./OrderTicketPanel";
 
@@ -32,7 +31,7 @@ export interface PanelProps {
   // (see GroupPicker). Both live entirely in PanelFrame's own ledger header, not in
   // any panel body — kept optional here (rather than required) so the many existing
   // Body-level tests that construct a PanelProps literal directly (ChartPanel,
-  // LadderPanel, TapePanel, NewsPanel, ScannerPanel, AccountBarPanel, PositionsPanel,
+  // LadderPanel, TapePanel, NewsPanel, ScannerPanel, AccountPanel,
   // OpenOrdersPanel, OrderTicketPanel) don't need touching for a header-only feature;
   // PanelFrame's own component signature (below) still requires and always supplies
   // them, since AppShell always has both.
@@ -117,20 +116,31 @@ export const PANELS: Record<string, PanelDef> = {
     description: "Headlines for focused symbol",
     symbolBearing: true,
   },
-  "account-bar": {
-    component: AccountBarPanel,
-    topics: ["exec.account", "exec.status"],
+  "account": {
+    component: AccountPanel,
+    topics: ["exec.account", "exec.positions", "exec.status", "md.quote"],
     title: "Account",
     glyph: "Σ",
-    description: "Equity, BP, day P&L, arm",
+    description: "Equity, BP, day P&L, positions, arm",
+    symbolBearing: false,
+  },
+  // Back-compat aliases: a saved workspace doc referencing the pre-Task-19 ids
+  // still resolves to the merged panel (a doc with a lone "positions" panel now
+  // renders the full Account surface — acceptable per the Task 19 plan).
+  "account-bar": {
+    component: AccountPanel,
+    topics: ["exec.account", "exec.positions", "exec.status", "md.quote"],
+    title: "Account",
+    glyph: "Σ",
+    description: "Equity, BP, day P&L, positions, arm",
     symbolBearing: false,
   },
   "positions": {
-    component: PositionsPanel,
-    topics: ["exec.positions", "md.quote"],
-    title: "Positions",
-    glyph: "□",
-    description: "Live P&L, flatten per row",
+    component: AccountPanel,
+    topics: ["exec.account", "exec.positions", "exec.status", "md.quote"],
+    title: "Account",
+    glyph: "Σ",
+    description: "Equity, BP, day P&L, positions, arm",
     symbolBearing: false,
   },
   "open-orders": {
@@ -155,8 +165,10 @@ export const DEV_PANELS = new Set(["smoke-painter"]);
 export const isDevPanel = (panelId: string): boolean => DEV_PANELS.has(panelId);
 
 const CATALOG_ORDER = ["chart", "ladder", "tape", "scanner", "movers", "news",
-  "account-bar", "positions", "open-orders", "order-ticket", "connection-status"];
-// Task 19 replaces "account-bar","positions" here with the single merged "account".
+  "account", "open-orders", "order-ticket", "connection-status"];
+// "account-bar" and "positions" stay registered in PANELS (above) as back-compat
+// aliases for saved workspace docs, but are intentionally absent from the Add
+// Panel catalog — only the merged "account" is offered going forward.
 
 export const CATALOG = CATALOG_ORDER
   .filter((id) => PANELS[id])
