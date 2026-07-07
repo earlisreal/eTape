@@ -143,8 +143,9 @@ export function getPalette(mode: ThemeMode): Palette {
 
 // Type layer — part of the visual identity, kept in the single source of truth.
 // Canvas painters put FONTS.mono in their ctx.font strings; chrome uses the CSS
-// vars set from these in Task 10. Both faces are the IBM Plex super-family.
+// vars set from these in Task 10. All three faces are the IBM Plex super-family.
 export const FONTS = {
+  serif: '"IBM Plex Serif", Georgia, serif',       // panel titles, section labels, wordmark
   mono: '"IBM Plex Mono", ui-monospace, monospace', // data surfaces: tape, ladder, prices, axes
   sans: '"IBM Plex Sans", system-ui, sans-serif',   // chrome: labels, menus, buttons
 } as const;

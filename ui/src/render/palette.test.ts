@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { LIGHT, DARK, getPalette, type Palette } from "./palette";
+import { LIGHT, DARK, getPalette, FONTS, type Palette } from "./palette";
 
 const KEYS: (keyof Palette)[] = [
   "bg", "surface", "border", "text", "textMuted", "grid", "crosshair",
@@ -41,5 +41,14 @@ describe("palette", () => {
         expect(p[k].startsWith("rgba(")).toBe(true);
       }
     }
+  });
+});
+
+describe("FONTS", () => {
+  it("declares serif, sans and mono families with fallbacks", () => {
+    expect(FONTS.serif).toContain("IBM Plex Serif");
+    expect(FONTS.serif).toMatch(/serif$/);
+    expect(FONTS.sans).toContain("IBM Plex Sans");
+    expect(FONTS.mono).toContain("IBM Plex Mono");
   });
 });
