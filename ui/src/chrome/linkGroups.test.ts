@@ -31,4 +31,48 @@ describe("LinkGroups", () => {
     lg.focus("blue", "US.NVDA");
     expect(cb).toHaveBeenCalledTimes(1);
   });
+
+  describe("focusChecked", () => {
+    it("moves the group and broadcasts on an accepting ack", async () => {
+      const hub = new FakeBusHub();
+      const onEcho = vi.fn().mockResolvedValue({ kind: "ack" as const, corrId: "c", status: "accepted" as const });
+      const lg = new LinkGroups(new FakeBus(hub), onEcho);
+      const cb = vi.fn();
+      lg.subscribe(cb);
+      const r = await lg.focusChecked("blue", "US.NVDA");
+      expect(r).toEqual({ ok: true });
+      expect(lg.symbolFor("blue")).toBe("US.NVDA");
+      expect(cb).toHaveBeenCalledTimes(1);
+    });
+
+    it("leaves the group unchanged and returns ok:false on a rejecting ack — never a half-switched group", async () => {
+      const hub = new FakeBusHub();
+      const onEcho = vi.fn().mockResolvedValue({ kind: "ack" as const, corrId: "c", status: "blocked" as const, reason: "unknown symbol" });
+      const lg = new LinkGroups(new FakeBus(hub), onEcho);
+      lg.focus("blue", "US.AAPL"); // pre-existing focus
+      const cb = vi.fn();
+      lg.subscribe(cb);
+      const r = await lg.focusChecked("blue", "US.BOGUS");
+      expect(r).toEqual({ ok: false, reason: "unknown symbol" });
+      expect(lg.symbolFor("blue")).toBe("US.AAPL"); // unchanged
+      expect(cb).not.toHaveBeenCalled(); // no spurious broadcast on reject
+    });
+
+    it("falls back to a generic reason when the ack omits one", async () => {
+      const hub = new FakeBusHub();
+      const onEcho = vi.fn().mockResolvedValue({ kind: "ack" as const, corrId: "c", status: "blocked" as const });
+      const lg = new LinkGroups(new FakeBus(hub), onEcho);
+      const r = await lg.focusChecked("red", "US.BOGUS");
+      expect(r).toEqual({ ok: false, reason: "symbol rejected" });
+    });
+
+    it("treats a void-returning onEcho (no ack promise) as accepted, for callers that don't validate", async () => {
+      const hub = new FakeBusHub();
+      const onEcho = vi.fn(); // returns undefined, like a fire-and-forget echo
+      const lg = new LinkGroups(new FakeBus(hub), onEcho);
+      const r = await lg.focusChecked("yellow", "US.MSFT");
+      expect(r).toEqual({ ok: true });
+      expect(lg.symbolFor("yellow")).toBe("US.MSFT");
+    });
+  });
 });

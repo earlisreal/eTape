@@ -10,6 +10,10 @@ import { useTheme } from "./ThemeProvider";
 import type { Palette } from "../render/palette";
 import { GroupPicker } from "./GroupPicker";
 import { bareSymbol } from "./exec/orderStatus";
+import { normalizeSymbol } from "./symbol";
+import { useToasts } from "./Toast";
+import { modalTracker } from "./modalTracker";
+import { canStartTypeToLoad, reduceTypeToLoad, PRINTABLE_SYMBOL_CHAR, type TypeToLoadState } from "./typeToLoad";
 
 const swatch = (g: LinkGroup, palette: Palette): string =>
   g === null ? "transparent" : { red: palette.linkRed, green: palette.linkGreen, blue: palette.linkBlue, yellow: palette.linkYellow }[g];
@@ -50,6 +54,25 @@ export function PanelFrame(
   const [group, setGroup] = useState<LinkGroup>(config.group);
   const [symbol, setSymbol] = useState<string | undefined>(() => linkGroups.symbolFor(group));
   const { palette } = useTheme();
+  const toast = useToasts();
+
+  // Task 13: type-to-load. `tl` drives the header's edit-affordance render;
+  // `tlRef` mirrors it for the native keydown listener below so that listener
+  // doesn't need to be torn down/rebuilt on every keystroke (it only depends
+  // on active/modalOpen/group, which change far less often than `draft`).
+  const [tl, setTl] = useState<TypeToLoadState>({ editing: false });
+  const tlRef = useRef<TypeToLoadState>(tl);
+  useEffect(() => { tlRef.current = tl; }, [tl]);
+
+  // modalTracker is a module-level singleton, not a prop (see modalTracker.ts):
+  // AppShell's Settings-modal open/close can't reach an already-mounted
+  // PanelFrame as a live prop, same frozen-factory-closure constraint as the
+  // `active`-via-`api` pattern just below.
+  const [modalOpen, setModalOpen] = useState(modalTracker.isOpen());
+  useEffect(() => {
+    setModalOpen(modalTracker.isOpen());
+    return modalTracker.subscribe(() => setModalOpen(modalTracker.isOpen()));
+  }, []);
 
   useEffect(() => {
     setActive(api.isActive);
@@ -90,6 +113,83 @@ export function PanelFrame(
   const rawSymbol = symbol ?? (config.settings.symbol as string | undefined);
   const effectiveSymbol = rawSymbol ? bareSymbol(rawSymbol) : undefined;
 
+  // Task 13: type-to-load keydown capture. Deliberately attached to `document`
+  // in the CAPTURE phase, not the frame-root DOM node in the (default) bubble
+  // phase as the task brief originally sketched — verified against the
+  // installed dockview-core: activating a panel calls
+  // `contentContainer.element.focus()` on an ANCESTOR of this component's own
+  // root div (dockviewGroupPanelModel.js), so a listener scoped to this node's
+  // own subtree would silently miss most real keystrokes (DOM events only
+  // bubble from the focused target up through ITS ancestors, never down into
+  // a sibling/descendant subtree). `document`+capture instead fires for every
+  // keydown regardless of focus target, and — critically for the safety
+  // property below — capture-phase listeners on `document` always run before
+  // ANY bubble-phase listener anywhere, including `window` (capture: root
+  // down to target, target, THEN bubble: target back up to window — the
+  // entire capture phase completes before bubbling starts). That ordering is
+  // fixed by the DOM event-dispatch algorithm, not by listener-registration
+  // order, which matters here because useHotkeys' window-level bubble
+  // listener (src/chrome/exec/useHotkeys.ts) does NOT check
+  // `event.defaultPrevented` and can be mounted before or after any given
+  // panel depending on when it was added to the workspace. Only
+  // `stopPropagation()` — called unconditionally below on every key this
+  // machine captures — reliably keeps a captured keystroke from ever reaching
+  // that window listener, regardless of mount order; `preventDefault()` alone
+  // would not be enough (see useHotkeys.ts / OrderSettingsModal.tsx, which
+  // document this exact hazard for the same reason).
+  useEffect(() => {
+    if (!def?.symbolBearing) return;
+
+    const commit = async (draft: string) => {
+      const sym = normalizeSymbol(draft);
+      if (group !== null) {
+        const r = await linkGroups.focusChecked(group, sym);
+        if (!r.ok) toast.push({ level: "danger", text: `${sym} rejected — ${r.reason}` });
+        // On reject the group is left completely untouched (LinkGroups.focusChecked's
+        // own guarantee) and the header already reverted to the live symbol below —
+        // never a half-switched group.
+        return;
+      }
+      onConfigChange({ ...config.settings, symbol: sym });
+    };
+
+    const onKeyDown = (e: KeyboardEvent): void => {
+      const prev = tlRef.current;
+      const t = document.activeElement;
+      const targetIsFormField = !!t && (
+        t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || (t as HTMLElement).isContentEditable
+      );
+      const noMods = !e.ctrlKey && !e.metaKey && !e.altKey;
+      const isPrintable = PRINTABLE_SYMBOL_CHAR.test(e.key);
+      const ev = { kind: "key" as const, key: e.key, ctrl: e.ctrlKey, meta: e.metaKey, alt: e.altKey };
+
+      if (!prev.editing) {
+        if (!canStartTypeToLoad({ active, symbolBearing: true, targetIsFormField, modalOpen })) return;
+        if (!(noMods && isPrintable)) return; // not a start key — never touch propagation (order hotkeys, etc. stay live)
+        e.preventDefault();
+        e.stopPropagation();
+        setTl(reduceTypeToLoad(prev, ev));
+        return;
+      }
+
+      // Already editing this panel's header: only the keys the state machine
+      // actually acts on are captured; everything else (Tab, arrows, …) is
+      // left alone so it still does whatever it would normally do.
+      if (!(noMods && (isPrintable || e.key === "Backspace" || e.key === "Enter" || e.key === "Escape"))) return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.key === "Enter") {
+        setTl({ editing: false });
+        if (prev.draft.length > 0) void commit(prev.draft); // empty draft on Enter == cancel, not a garbage symbol
+        return;
+      }
+      setTl(reduceTypeToLoad(prev, ev));
+    };
+
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [active, modalOpen, group, def?.symbolBearing, linkGroups, onConfigChange, toast, config.settings]);
+
   const handleGroupPick = (g: LinkGroup) => {
     setGroup(g);
     onGroupChange(g);
@@ -105,13 +205,25 @@ export function PanelFrame(
           <GroupPicker group={group} onPick={handleGroupPick} onClose={() => setShowPicker(false)} />
         )}
         {def?.symbolBearing && (
-          <span className="mono" data-testid="panel-symbol" style={{ fontWeight: 700 }}>
-            {effectiveSymbol ?? "—"}
-          </span>
+          tl.editing ? (
+            <span className="mono symedit" data-testid="panel-symbol"
+              style={{ fontWeight: 700, color: palette.accent, borderBottom: `2px solid ${palette.accent}` }}>
+              {tl.draft}<span aria-hidden="true">▌</span>
+            </span>
+          ) : (
+            <span className="mono" data-testid="panel-symbol" style={{ fontWeight: 700 }}>
+              {effectiveSymbol ?? "—"}
+            </span>
+          )
         )}
         <span className="serif" style={{ fontWeight: def?.symbolBearing ? 400 : 600, color: def?.symbolBearing ? palette.textMuted : palette.text }}>
           {def?.title ?? config.panelId}
         </span>
+        {tl.editing && (
+          <span className="mono" data-testid="panel-symbol-hint" style={{ fontSize: 10, color: palette.textMuted }}>
+            ⏎ load · esc keep {effectiveSymbol ?? "—"}
+          </span>
+        )}
         <span style={{ flex: 1 }} />
         <button type="button" aria-label="close panel" onClick={onClose}
           style={{ border: "none", background: "transparent", color: palette.textMuted, cursor: "pointer", fontSize: 13, padding: "0 2px", lineHeight: 1 }}>

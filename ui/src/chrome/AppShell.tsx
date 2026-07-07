@@ -14,6 +14,7 @@ import { EmptyState } from "./EmptyState";
 import { Catalog } from "./Catalog";
 import { SettingsModal, type SettingsSection } from "./SettingsModal";
 import { OpenSettingsProvider } from "./OpenSettingsContext";
+import { modalTracker } from "./modalTracker";
 import { useTheme } from "./ThemeProvider";
 import { useToasts } from "./Toast";
 import { useOrderCommands } from "./exec/useOrderCommands";
@@ -62,6 +63,11 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // early return below, per the Rules of Hooks.
   useHotkeys({ stores, commands, linkGroups });
   useSoundWiring(stores);
+  // Task 13: mirror Settings-modal open/close into the module-level modalTracker
+  // singleton so every already-mounted PanelFrame (frozen-closure-created, can't
+  // receive this as a live prop — see modalTracker.ts) can suppress type-to-load
+  // capture while the modal has focus.
+  useEffect(() => { modalTracker.setOpen(settings.open); }, [settings.open]);
   // Same exec/armed pattern as AccountBarPanel: subscribe to the exec store so
   // the top bar's arm chip re-renders on masterArmed flips from any source
   // (this bar, the account panel, or the engine).

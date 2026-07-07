@@ -36,9 +36,12 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     const stores = makeStores();
     const scheduler = new Scheduler(browserRaf, (id, err) => console.error("painter crashed", id, err));
     const workspaceStore = new WorkspaceStore(client);
-    const linkGroups = new LinkGroups(new BroadcastChannelBus(), (group, symbol) => {
-      void client.sendCommand("FocusGroup", { group, symbol });
-    });
+    // Task 13: return the ack promise (rather than discarding it with `void`)
+    // so a grouped type-to-load commit can await it via LinkGroups.focusChecked
+    // and revert on a rejecting ack instead of moving the group blind.
+    const linkGroups = new LinkGroups(new BroadcastChannelBus(), (group, symbol) =>
+      client.sendCommand("FocusGroup", { group, symbol }),
+    );
     return { client, stores, scheduler, workspaceStore, linkGroups };
   }, []);
 
