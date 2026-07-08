@@ -21,7 +21,7 @@ describe("resolvePlaceTemplate", () => {
   });
   it("PositionFraction=all resolves from the live position (flatten)", () => {
     const r = resolvePlaceTemplate(
-      tmpl({ side: "SELL", sizing: { mode: "PositionFraction", fraction: "all" } }),
+      tmpl({ side: "SELL", sizing: { mode: "PositionFraction", pct: 100 } }),
       { venue: "alpaca-paper", symbol: "US.AAPL", quote: q, buyingPower: 0, positionQty: 300, nowMs: RTH });
     expect(r.args.qty).toBe(300);
     expect(r.args.side).toBe("SELL");

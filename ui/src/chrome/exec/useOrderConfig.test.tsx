@@ -3,7 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { OrderConfigProvider, useOrderConfig } from "./useOrderConfig";
-import { DEFAULT_ORDER_CONFIG, type OrderConfig } from "./actionTemplate";
+import { DEFAULT_ORDER_CONFIG, normalizeOrderConfig, type OrderConfig } from "./actionTemplate";
 import type { AckMsg } from "../../wire/contract";
 
 function cmds(getValue?: unknown) {
@@ -25,7 +25,7 @@ describe("useOrderConfig", () => {
     const c = cmds(undefined);
     const { result } = renderHook(() => useOrderConfig(), { wrapper: wrapper(c) });
     await waitFor(() => expect(result.current.loaded).toBe(true));
-    expect(result.current.config).toEqual(DEFAULT_ORDER_CONFIG);
+    expect(result.current.config).toEqual(normalizeOrderConfig(DEFAULT_ORDER_CONFIG));
   });
   it("loads a persisted config, and setActiveVenue persists via SetConfig", async () => {
     const persisted: OrderConfig = { templates: [], activeVenue: "alpaca-paper" };
