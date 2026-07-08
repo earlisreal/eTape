@@ -417,4 +417,3 @@ func pipe(ctx context.Context, wg *sync.WaitGroup, in <-chan feed.Event, core *m
 		}
 	}
 }
-
