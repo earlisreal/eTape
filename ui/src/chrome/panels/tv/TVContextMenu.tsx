@@ -15,7 +15,11 @@ export function TVContextMenu({ chrome, x, y, items, onClose }: TVContextMenuPro
   }, [onClose]);
 
   return (
-    <div ref={ref} role="menu" style={{ position: "fixed", left: x, top: y, zIndex: 10001, minWidth: 200,
+    // data-drawing-ui: this menu is a DOM child of the chart host (fixed positioning
+    // doesn't change the bubble path), so without the marker a click on "Clone"/
+    // "Delete" first deselects the drawing via DrawingInteraction's host listener,
+    // and the entry's action then no-ops on a null selection.
+    <div ref={ref} role="menu" data-drawing-ui="true" style={{ position: "fixed", left: x, top: y, zIndex: 10001, minWidth: 200,
       background: chrome.surface, border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius,
       boxShadow: "0 6px 22px rgba(0,0,0,.24)", padding: 4, font: `${TV_GEOM.uiFont}px ${TV_FONT}`, color: chrome.text }}>
       {items.map((it, i) =>

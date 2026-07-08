@@ -8,8 +8,8 @@ import { getTvChrome } from "../../../render/chart/tvTheme";
 afterEach(cleanup);
 const chrome = getTvChrome("light");
 const base = {
-  chrome, symbol: "US.AAPL", timeframe: "1m", chartType: "candle" as const,
-  onSymbolClick: vi.fn(), onTimeframe: vi.fn(), onChartType: vi.fn(),
+  chrome, symbol: "US.AAPL", timeframe: "1m",
+  onSymbolClick: vi.fn(), onTimeframe: vi.fn(),
   onOpenIndicators: vi.fn(), onScreenshot: vi.fn(), onOpenSettings: vi.fn(),
 };
 
@@ -34,10 +34,10 @@ describe("TVToolbar", () => {
     expect(base.onOpenSettings).toHaveBeenCalled();
   });
 
-  it("opens the chart-type menu and picks a type", () => {
-    render(<TVToolbar {...base} />);
-    fireEvent.click(screen.getByRole("button", { name: "chart type" }));
-    fireEvent.click(screen.getByRole("button", { name: "chart type line" }));
-    expect(base.onChartType).toHaveBeenCalledWith("line");
+  it("has no chart-type switcher and no search icon in the symbol button", () => {
+    const { container } = render(<TVToolbar {...base} />);
+    expect(screen.queryByRole("button", { name: "chart type" })).toBeNull();
+    // The magnifier was decorative (the button only focuses the chart) — gone.
+    expect(container.querySelector('button[aria-label="symbol AAPL"] svg')).toBeNull();
   });
 });

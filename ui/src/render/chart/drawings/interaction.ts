@@ -203,13 +203,16 @@ export class DrawingInteraction {
     // Right-click is reserved for the chart's own context menu (Clear drawings /
     // Reset zoom) — never start a placement, selection, or measure gesture from it.
     if (e.button === 2) return;
-    // The drawing rail sits inside `host` as a DOM child; its own stopPropagation()
-    // runs too late to matter (React's delegated dispatch fires after this raw
-    // listener during native bubbling), so guard here on a DOM marker instead.
+    // The drawing chrome (rail, floating style toolbar, context menu) sits inside
+    // `host` as DOM children; their own stopPropagation() runs too late to matter
+    // (React's delegated dispatch fires after this raw listener during native
+    // bubbling), so guard here on a DOM marker instead. Without it, a pointerdown
+    // on e.g. a floating-toolbar button falls through to the blank-canvas branch
+    // below, deselects, and React unmounts the toolbar before its click ever fires.
     // Duck-typed (rather than `instanceof Element`) so this also works against the
     // plain-object PointerLike fixtures used in interaction.test.ts (no DOM/jsdom there).
     const target = e.target as { closest?: (sel: string) => unknown } | null | undefined;
-    if (target && typeof target.closest === "function" && target.closest("[data-drawing-rail]")) return;
+    if (target && typeof target.closest === "function" && target.closest("[data-drawing-ui]")) return;
     this.host.focus();
     const p = this.pos(e);
     const anchor = this.snap(p);

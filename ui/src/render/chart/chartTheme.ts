@@ -33,9 +33,13 @@ export interface HistogramOpts {
   priceLineVisible?: boolean;
 }
 
-// CrosshairMode.Magnet === 1 in LWC — crosshair snaps to the nearest bar
-// vertically while floating horizontally (the wickplot convention).
-const CROSSHAIR_MAGNET = 1;
+// CrosshairMode.Normal === 0 in LWC — the crosshair follows the pointer freely
+// (TradingView's own default). Magnet (1) / MagnetOHLC (3) are NOT usable here:
+// LWC's Magnet considers every visible series on the pane's visible price scales
+// (verified in lightweight-charts.development.mjs, Magnet._internal_align — only
+// overlay-scale series are excluded), so with VWAP/EMA/SMA on the shared right
+// scale the horizontal line snaps to indicator lines, not just the candles.
+const CROSSHAIR_FREE = 0;
 
 // The chart trades in UTCTimestamp seconds (see ChartController's toLwcTime),
 // and Lightweight Charts renders axis/crosshair labels in UTC unless told
@@ -116,7 +120,7 @@ export function chartOptions(p: Palette): DeepChartOptions {
     layout: { background: { type: "solid", color: p.bg }, textColor: p.text },
     grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
     crosshair: {
-      mode: CROSSHAIR_MAGNET,
+      mode: CROSSHAIR_FREE,
       vertLine: { color: p.crosshair },
       horzLine: { color: p.crosshair },
     },
