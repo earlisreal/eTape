@@ -40,6 +40,26 @@ body {
   background: var(--bg); padding: 2px 7px; font-size: 10.5px;
 }
 .ctl > b, .ctl input { font-family: "IBM Plex Mono", ui-monospace, monospace; font-weight: 500; }
+
+/* Numeric fields — strip native browser spinners for a clean, consistent look. */
+input.numfield::-webkit-outer-spin-button,
+input.numfield::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input.numfield { -moz-appearance: textfield; appearance: textfield; }
+
+/* Price/stop stepper: input + vertical ±10¢ buttons inside the .ctl box. */
+.stepper { padding-right: 2px; }
+.stepper > input { flex: 1; min-width: 0; border: none; background: transparent; padding: 0; outline: none; font-size: inherit; color: inherit; }
+.stepper:focus-within { border-color: var(--accent); }
+.stepper-btns { display: flex; flex-direction: column; }
+.stepper-btns button {
+  display: flex; align-items: center; justify-content: center;
+  width: 14px; height: 9px; padding: 0; line-height: 1; font-size: 7px; cursor: pointer;
+  border: 1px solid var(--border-strong); background: var(--bg); color: var(--text-muted);
+}
+.stepper-btns button:hover:not(:disabled) { border-color: var(--text-muted); color: var(--text); }
+.stepper-btns button:first-child { border-radius: 3px 3px 0 0; border-bottom: none; }
+.stepper-btns button:last-child { border-radius: 0 0 3px 3px; }
+.stepper-btns button:disabled { cursor: default; opacity: 0.4; }
 .popover {
   position: absolute; z-index: 30; background: var(--bg);
   border: 1px solid var(--border-strong); border-radius: 6px;

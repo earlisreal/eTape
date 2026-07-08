@@ -12,6 +12,7 @@ import { preCheck, type DraftOrder } from "../exec/preChecks";
 import { sideLabel, bareSymbol, abbrevType } from "../exec/orderStatus";
 import { formatPrice, QUOTE_DECIMALS } from "../../render/format";
 import { useOpenSettings } from "../OpenSettingsContext";
+import { StepperInput } from "./StepperInput";
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
@@ -105,12 +106,12 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
         <select className="ctl mono" value={tif} onChange={(e) => setTif(e.target.value as TIF)} style={ctl}>
           {TIFS.map((t) => <option key={t} value={t}>{t}</option>)}
         </select>
-        <input data-testid="price" className="ctl mono" value={price} onChange={(e) => setPrice(e.target.value)} disabled={type === "MARKET"} placeholder="price" style={ctl} />
-        <input data-testid="stop" className="ctl mono" value={stop} onChange={(e) => setStop(e.target.value)} disabled={!hasStop} placeholder="stop" style={{ ...ctl, opacity: hasStop ? 1 : 0.4 }} />
+        <StepperInput testid="price" value={price} onChange={setPrice} disabled={type === "MARKET"} placeholder="price" style={ctl} />
+        <StepperInput testid="stop" value={stop} onChange={setStop} disabled={!hasStop} placeholder="stop" style={{ ...ctl, opacity: hasStop ? 1 : 0.4 }} />
       </div>
       {/* Strip 3 — qty · mode */}
       <div style={{ display: "flex", gap: 3 }}>
-        <input data-testid="amount" className="ctl mono" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ flex: 1 }} />
+        <input type="number" inputMode="decimal" min={0} data-testid="amount" className="ctl numfield mono" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ flex: 1 }} />
         <select data-testid="mode" className="ctl mono" value={mode} title={mode} onChange={(e) => setMode(e.target.value as SizingMode)} style={{ width: 56 }}>
           {MODES.map((m) => <option key={m} value={m} title={m}>{MODE_LABEL[m]}</option>)}
         </select>

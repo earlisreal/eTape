@@ -81,6 +81,32 @@ describe("OrderTicketPanel", () => {
     fireEvent.change(screen.getByTestId("order-type"), { target: { value: "STOP" } });
     expect((screen.getByTestId("stop") as HTMLInputElement).disabled).toBe(false);
   });
+  it("price stepper nudges by 10 cents and clamps at zero", () => {
+    const { props, stores } = mkProps();
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
+    wrap(props);
+    fireEvent.click(screen.getByTestId("price-up"));
+    expect((screen.getByTestId("price") as HTMLInputElement).value).toBe("0.100");
+    fireEvent.change(screen.getByTestId("price"), { target: { value: "3.5" } });
+    fireEvent.click(screen.getByTestId("price-up"));
+    expect((screen.getByTestId("price") as HTMLInputElement).value).toBe("3.600");
+    fireEvent.click(screen.getByTestId("price-down"));
+    fireEvent.click(screen.getByTestId("price-down"));
+    expect((screen.getByTestId("price") as HTMLInputElement).value).toBe("3.400");
+    fireEvent.change(screen.getByTestId("price"), { target: { value: "0.05" } });
+    fireEvent.click(screen.getByTestId("price-down"));
+    expect((screen.getByTestId("price") as HTMLInputElement).value).toBe("0.000");
+  });
+  it("stop stepper is disabled unless type is STOP/STOP_LIMIT", () => {
+    const { props, stores } = mkProps();
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
+    wrap(props);
+    expect((screen.getByTestId("stop-up") as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByTestId("order-type"), { target: { value: "STOP" } });
+    expect((screen.getByTestId("stop-up") as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(screen.getByTestId("stop-up"));
+    expect((screen.getByTestId("stop") as HTMLInputElement).value).toBe("0.100");
+  });
   it("changing the venue dropdown writes the group's focused venue", () => {
     const { props, stores, linkGroups } = mkProps();
     const twoVenues: ExecStatus = { ...status(), venues: [status().venues[0], { ...status().venues[0], venue: "tradezero" }] };
