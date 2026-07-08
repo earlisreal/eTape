@@ -286,3 +286,26 @@ export interface SetConfigArgs {
   key: string;
   value: unknown;
 }
+/**
+ * EnsureSymbolArgs subscribes a panel's symbol on demand. profile is one of
+ * "watch" | "focused" | "interest". demandId is the UI panel instance id.
+ */
+export interface EnsureSymbolArgs {
+  demandId: string;
+  symbol: string;
+  profile: string;
+}
+/**
+ * ReleaseSymbolArgs drops a panel's on-demand subscription.
+ */
+export interface ReleaseSymbolArgs {
+  demandId: string;
+}
+/**
+ * FocusGroupArgs carries a link-group focus change for engine-side existence
+ * validation (the demand itself arrives from the member panels).
+ */
+export interface FocusGroupArgs {
+  group: string;
+  symbol: string;
+}

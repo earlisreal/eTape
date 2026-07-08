@@ -238,3 +238,23 @@ type SetConfigArgs struct {
 	Key   string          `json:"key"`
 	Value json.RawMessage `json:"value"`
 }
+
+// EnsureSymbolArgs subscribes a panel's symbol on demand. profile is one of
+// "watch" | "focused" | "interest". demandId is the UI panel instance id.
+type EnsureSymbolArgs struct {
+	DemandID string `json:"demandId"`
+	Symbol   string `json:"symbol"`
+	Profile  string `json:"profile"`
+}
+
+// ReleaseSymbolArgs drops a panel's on-demand subscription.
+type ReleaseSymbolArgs struct {
+	DemandID string `json:"demandId"`
+}
+
+// FocusGroupArgs carries a link-group focus change for engine-side existence
+// validation (the demand itself arrives from the member panels).
+type FocusGroupArgs struct {
+	Group  string `json:"group"`
+	Symbol string `json:"symbol"`
+}
