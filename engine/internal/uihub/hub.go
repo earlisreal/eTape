@@ -16,9 +16,14 @@ import (
 )
 
 // client is the hub's view of a connected UI socket (implemented by *conn, Task 7).
+// ck is the outbound coalesce key: "" => the frame is lossless/ordered; a
+// non-empty ck => a latest-wins delta the conn may supersede in place if the
+// client is slow (see outbox). A false return means the lossless lane
+// overflowed its hard cap (a genuinely pathological client); the hub then
+// closes+drops it.
 type client interface {
 	id() uint64
-	enqueue(b []byte) bool // false => outbound queue full; hub closes+drops the client
+	enqueue(b []byte, ck string) bool
 	close()
 }
 
@@ -536,12 +541,13 @@ func (h *Hub) emitUIDrop(clientID uint64, reason string) {
 
 // deliverRaw writes b to every currently-registered client subscribed to
 // topic, closing and forgetting (but not further instrumenting -- see
-// emitUIDrop's doc comment) any whose enqueue fails.
+// emitUIDrop's doc comment) any whose enqueue fails. sys.events (the only
+// topic delivered here) is lossless/ordered, so ck is always "".
 func (h *Hub) deliverRaw(topic wsmsg.Topic, b []byte) {
 	var dead []client
 	for c, subs := range h.clients {
 		if subs[topic] {
-			if !c.enqueue(b) {
+			if !c.enqueue(b, "") {
 				dead = append(dead, c)
 			}
 		}
@@ -612,6 +618,11 @@ func (h *Hub) broadcast(s staged, snap bool) {
 	if err != nil {
 		return
 	}
+	// The frame bytes are identical for every subscribed client, so its
+	// outbound coalesce key is too -- compute it once. "" => lossless/ordered
+	// (every event topic, and every snapshot); non-empty => a latest-wins delta
+	// a slow client may supersede in place instead of overflowing (see outbox).
+	ck := outboundCoalesceKey(s, snap)
 	// Collect every drop from this pass before emitting any ui-drop event
 	// (the reentrancy guard emitUIDrop's doc comment describes): iterating
 	// h.clients to completion first means `dead` is the complete original
@@ -619,7 +630,7 @@ func (h *Hub) broadcast(s staged, snap bool) {
 	var dead []client
 	for c, subs := range h.clients {
 		if subs[s.Topic] {
-			if !c.enqueue(b) {
+			if !c.enqueue(b, ck) {
 				dead = append(dead, c)
 			}
 		}
@@ -637,7 +648,10 @@ func (h *Hub) sendSnapshot(c client, topic wsmsg.Topic) {
 		if err != nil {
 			continue
 		}
-		if !c.enqueue(b) {
+		// Every snapshot is lossless/ordered (ck ""): it is the seed a topic's
+		// client-side store applies later deltas onto, so it must never be
+		// coalesced away or reordered behind a delta.
+		if !c.enqueue(b, "") {
 			delete(h.clients, c)
 			c.close()
 			h.emitUIDrop(c.id(), "outbound queue overflow")

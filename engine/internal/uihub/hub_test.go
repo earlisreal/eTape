@@ -24,7 +24,12 @@ type fakeClient struct {
 }
 
 func (c *fakeClient) id() uint64 { return c.nid }
-func (c *fakeClient) enqueue(b []byte) bool {
+
+// enqueue records the frame regardless of ck: outbound coalescing is the real
+// *conn's outbox job (exercised in conn_test.go via a real conn + blockable
+// socket), not the hub's -- the hub only decides the ck and hands identical
+// bytes to every subscribed client, which is what these hub-level tests assert.
+func (c *fakeClient) enqueue(b []byte, _ string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.full {
@@ -202,6 +207,45 @@ func TestHubPublicMethodsReturnPromptlyAfterShutdown(t *testing.T) {
 		case <-time.After(time.Second):
 			t.Fatalf("%s did not return within 1s after shutdown; goroutine leaked/blocked", name)
 		}
+	}
+}
+
+// TestOutboundCoalesceKeyRouting verifies every topic routes to the correct
+// outbound lane: latest-wins topics get a non-empty coalesce key at the right
+// granularity (per-symbol/venue/session/single-slot), every event topic stays
+// lossless (""), and a snapshot of ANY topic is always lossless.
+func TestOutboundCoalesceKeyRouting(t *testing.T) {
+	tests := []struct {
+		name string
+		s    staged
+		snap bool
+		want string
+	}{
+		{"quote delta -> per symbol", staged{Topic: wsmsg.TopicQuote, Payload: wsmsg.Quote{Symbol: "US.AAPL"}}, false, "d|q|US.AAPL"},
+		{"book delta -> per symbol", staged{Topic: wsmsg.TopicBook, Payload: wsmsg.Book{Symbol: "US.AAPL"}}, false, "d|b|US.AAPL"},
+		{"bar delta -> per symbol+tf+bucket", staged{Topic: wsmsg.TopicBars, Payload: wsmsg.Bar{Symbol: "US.AAPL", Timeframe: "1m", BucketStart: "T0"}}, false, "d|bar|US.AAPL|1m|T0"},
+		{"account delta -> per venue", staged{Topic: wsmsg.TopicExecAccount, Payload: wsmsg.AccountRow{Venue: "alpaca"}}, false, "d|acct|alpaca"},
+		{"positions delta -> single slot", staged{Topic: wsmsg.TopicExecPositions}, false, "d|exec.positions"},
+		{"scanner.rank delta -> per session", staged{Topic: wsmsg.TopicScannerRank, Key: "sess1"}, false, "d|scanner.rank|sess1"},
+		{"sys.health delta -> single slot", staged{Topic: wsmsg.TopicSysHealth}, false, "d|sys.health"},
+		{"tape delta -> lossless", staged{Topic: wsmsg.TopicTape}, false, ""},
+		{"orders delta -> lossless", staged{Topic: wsmsg.TopicExecOrders}, false, ""},
+		{"fills delta -> lossless", staged{Topic: wsmsg.TopicExecFills}, false, ""},
+		{"status delta -> lossless", staged{Topic: wsmsg.TopicExecStatus}, false, ""},
+		{"sys.events delta -> lossless", staged{Topic: wsmsg.TopicSysEvents}, false, ""},
+		{"news delta -> lossless", staged{Topic: wsmsg.TopicNews}, false, ""},
+		{"scanner.hit delta -> lossless", staged{Topic: wsmsg.TopicScannerHit}, false, ""},
+		{"config delta -> lossless", staged{Topic: wsmsg.TopicConfig}, false, ""},
+		{"indicator delta -> lossless", staged{Topic: wsmsg.TopicIndicator}, false, ""},
+		{"snapshot of a coalesceable topic -> lossless", staged{Topic: wsmsg.TopicQuote, Payload: wsmsg.Quote{Symbol: "US.AAPL"}}, true, ""},
+		{"snapshot of scanner.rank -> lossless", staged{Topic: wsmsg.TopicScannerRank, Key: "sess1"}, true, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := outboundCoalesceKey(tt.s, tt.snap); got != tt.want {
+				t.Fatalf("outboundCoalesceKey(%s, snap=%v) = %q, want %q", tt.s.Topic, tt.snap, got, tt.want)
+			}
+		})
 	}
 }
 
