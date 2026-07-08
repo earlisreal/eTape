@@ -41,8 +41,12 @@ func venueMetas(cfg config.Config) []uihub.VenueMeta {
 	out := make([]uihub.VenueMeta, 0, len(cfg.Venues))
 	for _, v := range cfg.Venues {
 		gv := cfg.Gate.Venue[v.ID]
+		note := ""
+		if v.Broker == "moomoo" {
+			note = "execution v1.x"
+		}
 		out = append(out, uihub.VenueMeta{
-			ID: v.ID, Broker: v.Broker,
+			ID: v.ID, Broker: v.Broker, AutoArm: v.AutoArm, Note: note,
 			Gate: uihub.GateLimits{
 				MaxOrderValue: gv.MaxOrderValue, MaxPositionValue: gv.MaxPositionValue,
 				MaxPositionShares: gv.MaxPositionShares, MaxOpenOrders: gv.MaxOpenOrders,
