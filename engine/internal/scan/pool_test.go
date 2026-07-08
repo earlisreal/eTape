@@ -164,3 +164,44 @@ func TestPoolMultipleCapEvictionsAreSorted(t *testing.T) {
 		t.Fatalf("Evicted=%v, want %v (must be sorted despite reverse-order victim selection)", d.Evicted, wantEvicted)
 	}
 }
+
+func TestPoolReAdmitsAcrossDayResetIsEvictedThenAdmitted(t *testing.T) {
+	// Proves the Delta carries a symbol in both Evicted and Admitted when it's
+	// released on day reset but re-admitted in the new day's top-N in the same call.
+	// This is the shape that scan.go.updatePool depends on: Release-before-Ensure
+	// execution order iterates d.Evicted then d.Admitted as two separate loops.
+	p := NewPool()
+	// Pool US.A and US.B before 20:00 ET.
+	p.Update([]string{"US.A", "US.B"}, et(2026, 7, 8, 19, 0))
+	// Cross the 20:00 ET boundary with a new poll that re-ranks US.A in the top-N.
+	d := p.Update([]string{"US.A", "US.C"}, et(2026, 7, 8, 20, 0))
+
+	// US.A must be in Evicted (whole prior pool day released on day reset).
+	if !containsStr(d.Evicted, "US.A") {
+		t.Fatalf("Evicted=%v, want US.A present (old pool day clear)", d.Evicted)
+	}
+	// US.B must be in Evicted (was pooled, not in new top-N).
+	if !containsStr(d.Evicted, "US.B") {
+		t.Fatalf("Evicted=%v, want US.B present (not re-ranked)", d.Evicted)
+	}
+	// US.A must also be in Admitted (re-ranked in new pool day's top-N).
+	if !containsStr(d.Admitted, "US.A") {
+		t.Fatalf("Admitted=%v, want US.A present (new pool day top-N)", d.Admitted)
+	}
+	// US.C must be in Admitted (fresh top-N symbol).
+	if !containsStr(d.Admitted, "US.C") {
+		t.Fatalf("Admitted=%v, want US.C present (fresh top-N symbol)", d.Admitted)
+	}
+	// Final pool must contain both US.A and US.C.
+	// This proves Release-before-Ensure: evict US.A then re-admit US.A => net subscribed.
+	finals := p.Symbols()
+	if !containsStr(finals, "US.A") {
+		t.Fatalf("pool after reset=%v, want US.A (released then re-admitted)", finals)
+	}
+	if !containsStr(finals, "US.C") {
+		t.Fatalf("pool after reset=%v, want US.C (fresh top-N)", finals)
+	}
+	if containsStr(finals, "US.B") {
+		t.Fatalf("pool after reset=%v, US.B must not be present (not re-ranked)", finals)
+	}
+}
