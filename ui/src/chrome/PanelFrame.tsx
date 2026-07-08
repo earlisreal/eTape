@@ -6,6 +6,7 @@ import type { PanelConfig } from "./workspace";
 import type { Stores } from "../data/registry";
 import type { Scheduler } from "../render/Scheduler";
 import type { LinkGroup, LinkGroups } from "./linkGroups";
+import type { DemandRegistry } from "../wire/DemandRegistry";
 import { useTheme } from "./ThemeProvider";
 import type { Palette } from "../render/palette";
 import { GroupPicker } from "./GroupPicker";
@@ -19,9 +20,9 @@ const swatch = (g: LinkGroup, palette: Palette): string =>
   g === null ? "transparent" : { red: palette.linkRed, green: palette.linkGreen, blue: palette.linkBlue, yellow: palette.linkYellow }[g];
 
 export function PanelFrame(
-  { config, stores, scheduler, linkGroups, commands, onConfigChange, onGroupChange, onClose, api }: {
+  { config, stores, scheduler, linkGroups, demandRegistry, commands, onConfigChange, onGroupChange, onClose, api }: {
     config: PanelConfig; stores: Stores; scheduler: Scheduler;
-    linkGroups: LinkGroups; commands: PanelProps["commands"];
+    linkGroups: LinkGroups; demandRegistry: DemandRegistry; commands: PanelProps["commands"];
     onConfigChange: (settings: Record<string, unknown>) => void;
     onGroupChange: (group: LinkGroup) => void;
     onClose: () => void;
@@ -127,6 +128,32 @@ export function PanelFrame(
   const rawSymbol = symbol ?? (config.settings.symbol as string | undefined);
   const effectiveSymbol = rawSymbol ? bareSymbol(rawSymbol) : undefined;
 
+  // On-demand subscription. When this panel declares a demand profile, ask the
+  // engine to subscribe the effective (full, prefixed) symbol. ensure is an
+  // upsert keyed by this panel's id, so a symbol switch swaps the demand with
+  // no explicit release (the old symbol's subs enter the engine's ~5-min
+  // hysteresis window). DemandRegistry dedupes an unchanged symbol, so this
+  // fires no redundant command when the pinned commit path already ensured.
+  useEffect(() => {
+    if (!def?.demand || !rawSymbol) return;
+    demandRegistry.ensure(config.id, rawSymbol, def.demand).then(
+      (ack) => {
+        if (ack.status !== "accepted") {
+          toast.push({ level: "warn", text: `${bareSymbol(rawSymbol)} — ${ack.reason ?? "unavailable"}` });
+        }
+      },
+      (err) => {
+        toast.push({ level: "danger", text: `${bareSymbol(rawSymbol)} failed — ${err instanceof Error ? err.message : "unexpected error"}` });
+      },
+    );
+  }, [def?.demand, rawSymbol, config.id, demandRegistry, toast]);
+
+  // Release exactly once on unmount (not on symbol switch — switches upsert).
+  useEffect(() => {
+    if (!def?.demand) return;
+    return () => demandRegistry.release(config.id);
+  }, [def?.demand, config.id, demandRegistry]);
+
   // Task 13 fix (review finding, Minor but a literal brief requirement):
   // cancel an in-progress edit on focus loss even when the panel remains the
   // active dockview panel — e.g. the user clicks into this panel's own body
@@ -219,6 +246,13 @@ export function PanelFrame(
           // never a half-switched group.
           return;
         }
+        if (def?.demand) {
+          const ack = await demandRegistry.ensure(config.id, sym, def.demand);
+          if (ack.status !== "accepted") {
+            toast.push({ level: "danger", text: `${sym} rejected — ${ack.reason ?? "unknown symbol"}` });
+            return; // leave the prior symbol untouched — no half-loaded pinned panel
+          }
+        }
         onConfigChange({ ...config.settings, symbol: sym });
       } catch (err) {
         // Review finding (Important): `commit` is invoked fire-and-forget
@@ -267,7 +301,7 @@ export function PanelFrame(
 
     document.addEventListener("keydown", onKeyDown, true);
     return () => document.removeEventListener("keydown", onKeyDown, true);
-  }, [active, modalOpen, group, def?.symbolBearing, linkGroups, onConfigChange, toast, config.settings]);
+  }, [active, modalOpen, group, def?.symbolBearing, def?.demand, linkGroups, demandRegistry, onConfigChange, toast, config.id, config.settings]);
 
   const handleGroupPick = (g: LinkGroup) => {
     setGroup(g);

@@ -51,27 +51,33 @@ function fakePanelApi(initial = false) {
 // "news" is symbol-bearing but renders no <canvas> (unlike chart/ladder/tape), so this
 // test stays in vitest's default (threads) pool per vitest.config.ts's poolMatchGlobs
 // comment about node-canvas being unsafe to load into more than one worker.
-function renderFrame(opts: { group?: PanelConfig["group"]; settings?: Record<string, unknown>; onConfigChange?: (s: Record<string, unknown>) => void; onGroupChange?: (g: PanelConfig["group"]) => void; onClose?: () => void; api?: ReturnType<typeof fakePanelApi>; linkGroups?: LinkGroups } = {}) {
+function renderFrame(opts: { panelId?: string; group?: PanelConfig["group"]; settings?: Record<string, unknown>; onConfigChange?: (s: Record<string, unknown>) => void; onGroupChange?: (g: PanelConfig["group"]) => void; onClose?: () => void; api?: ReturnType<typeof fakePanelApi>; linkGroups?: LinkGroups; demandRegistry?: import("../wire/DemandRegistry").DemandRegistry } = {}) {
   const stores = makeStores();
   const linkGroups = opts.linkGroups ?? new LinkGroups(fakeBus() as never, () => {});
+  // inside renderFrame(opts): default a no-op registry so existing tests keep passing.
+  const demandRegistry = (opts.demandRegistry ?? {
+    ensure: () => Promise.resolve({ kind: "ack", corrId: "", status: "accepted" }),
+    release: () => {},
+  }) as unknown as import("../wire/DemandRegistry").DemandRegistry;
+  const panelId = opts.panelId ?? "news";
   // `opts.group === undefined` (not `??`): callers pass `null` explicitly to mean
   // "pinned", and `??` treats `null` as absent too, which would silently coerce a
   // pinned-panel test back to the "green" default.
-  const config: PanelConfig = { id: "m-news", panelId: "news", group: opts.group === undefined ? "green" : opts.group, settings: opts.settings ?? {} };
+  const config: PanelConfig = { id: `m-${panelId}`, panelId, group: opts.group === undefined ? "green" : opts.group, settings: opts.settings ?? {} };
   const onConfigChange = opts.onConfigChange ?? vi.fn();
   const onGroupChange = opts.onGroupChange ?? vi.fn();
   const onClose = opts.onClose ?? vi.fn();
   const api = opts.api ?? fakePanelApi(false);
-  const { container } = render(
+  const { container, unmount } = render(
     <ThemeProvider>
       <ToastProvider>
         <PanelFrame config={config} stores={stores} scheduler={{} as never} linkGroups={linkGroups}
-          commands={commands} onConfigChange={onConfigChange} onGroupChange={onGroupChange}
+          demandRegistry={demandRegistry} commands={commands} onConfigChange={onConfigChange} onGroupChange={onGroupChange}
           onClose={onClose} api={api as never} />
       </ToastProvider>
     </ThemeProvider>,
   );
-  return { container, onConfigChange, onGroupChange, onClose, api, linkGroups };
+  return { container, unmount, onConfigChange, onGroupChange, onClose, api, linkGroups, demandRegistry };
 }
 
 // Fires a real DOM keydown on `document` — the same target PanelFrame's
@@ -336,5 +342,43 @@ describe("PanelFrame — type-to-load (Task 13)", () => {
     typeKey("n"); typeKey("v"); typeKey("d"); typeKey("a");
     typeKey("Enter");
     await screen.findByText(/failed — network down/i);
+  });
+});
+
+describe("PanelFrame — DemandRegistry wiring (Task 10)", () => {
+  it("ensures the effective symbol on mount for a demand panel", async () => {
+    const calls: { m: string; args: any[] }[] = [];
+    const reg = {
+      ensure: (...a: any[]) => { calls.push({ m: "ensure", args: a }); return Promise.resolve({ kind: "ack", corrId: "", status: "accepted" }); },
+      release: (...a: any[]) => { calls.push({ m: "release", args: a }); },
+    } as unknown as import("../wire/DemandRegistry").DemandRegistry;
+    renderFrame({ panelId: "chart", group: null, settings: { symbol: "US.AAPL" }, demandRegistry: reg });
+    await waitFor(() => expect(calls.some((c) => c.m === "ensure")).toBe(true));
+    expect(calls.find((c) => c.m === "ensure")!.args).toEqual(["m-chart", "US.AAPL", "watch"]);
+  });
+
+  it("releases on unmount", () => {
+    const calls: { m: string; args: any[] }[] = [];
+    const reg = {
+      ensure: () => Promise.resolve({ kind: "ack", corrId: "", status: "accepted" }),
+      release: (...a: any[]) => { calls.push({ m: "release", args: a }); },
+    } as unknown as import("../wire/DemandRegistry").DemandRegistry;
+    const { unmount } = renderFrame({ panelId: "chart", group: null, settings: { symbol: "US.AAPL" }, demandRegistry: reg });
+    unmount();
+    expect(calls.some((c) => c.m === "release" && c.args[0] === "m-chart")).toBe(true);
+  });
+
+  it("pinned commit reverts on a blocked ensure ack", async () => {
+    const ensure = vi.fn()
+      .mockResolvedValueOnce({ kind: "ack", corrId: "", status: "accepted" })  // mount ensure (US.AAPL)
+      .mockResolvedValueOnce({ kind: "ack", corrId: "", status: "blocked", reason: "unknown symbol US.ZZZZ" });
+    const reg = { ensure, release: () => {} } as unknown as import("../wire/DemandRegistry").DemandRegistry;
+    const onConfigChange = vi.fn();
+    // api must start active: type-to-load's canStartTypeToLoad() gates on it,
+    // matching every other typeKey-driven test in this file.
+    renderFrame({ panelId: "chart", group: null, settings: { symbol: "US.AAPL" }, demandRegistry: reg, onConfigChange, api: fakePanelApi(true) });
+    typeKey("z"); typeKey("z"); typeKey("z"); typeKey("z"); typeKey("Enter");
+    await waitFor(() => expect(ensure).toHaveBeenCalledWith("m-chart", "US.ZZZZ", "watch"));
+    expect(onConfigChange).not.toHaveBeenCalledWith(expect.objectContaining({ symbol: "US.ZZZZ" }));
   });
 });

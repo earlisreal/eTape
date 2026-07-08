@@ -8,6 +8,7 @@ import { WorkspaceStore } from "./workspace";
 import type { Stores } from "../data/registry";
 import type { Scheduler } from "../render/Scheduler";
 import type { LinkGroup, LinkGroups } from "./linkGroups";
+import type { DemandRegistry } from "../wire/DemandRegistry";
 import { PANELS, type PanelProps } from "./panels/registry";
 import { PRESETS, applyPreset } from "./presets";
 import { TopBar } from "./TopBar";
@@ -29,10 +30,11 @@ interface Props {
   scheduler: Scheduler;
   workspaceStore: WorkspaceStore;
   linkGroups: LinkGroups;
+  demandRegistry: DemandRegistry;
   commands: PanelProps["commands"];
 }
 
-export function AppShell({ workspaceName, stores, scheduler, workspaceStore, linkGroups, commands }: Props): JSX.Element {
+export function AppShell({ workspaceName, stores, scheduler, workspaceStore, linkGroups, demandRegistry, commands }: Props): JSX.Element {
   const [ws, setWs] = useState<Workspace | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   // Unified Settings modal (Task 11): AppShell owns open/section state; TopBar's
@@ -224,7 +226,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     ws.panels.map((p) => [
       p.id,
       (panelProps: IDockviewPanelProps) => <PanelFrame config={p} stores={stores} scheduler={scheduler}
-        linkGroups={linkGroups} commands={commands}
+        linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands}
         onConfigChange={(settings) => onConfigChange(p.id, settings)}
         onGroupChange={(group) => onGroupChange(p.id, group)}
         onClose={() => removePanel(p.id)}
