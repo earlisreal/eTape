@@ -47,7 +47,6 @@ func (p *Pool) Update(ranked []string, now time.Time) Delta {
 		for s := range p.members {
 			d.Evicted = append(d.Evicted, s)
 		}
-		sort.Strings(d.Evicted)
 		p.members = map[string]int64{}
 		p.backfilled = map[string]bool{}
 		p.day = day
@@ -83,6 +82,7 @@ func (p *Pool) Update(ranked []string, now time.Time) Delta {
 			d.Backfill = append(d.Backfill, s)
 		}
 	}
+	sort.Strings(d.Evicted)
 	return d
 }
 

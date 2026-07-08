@@ -126,3 +126,41 @@ func TestPoolReadmitAfterEvictionNoRebackfill(t *testing.T) {
 		t.Fatalf("A must NOT re-backfill within the same pool day: %v", d.Backfill)
 	}
 }
+
+func TestPoolMultipleCapEvictionsAreSorted(t *testing.T) {
+	p := NewPool()
+	base := et(2026, 7, 8, 9, 30)
+	// Fill pool to cap (30) with symbols in a specific order
+	// so that eviction order (oldest-first) is NOT alphabetically sorted.
+	// Use: B00, A00, C00, B01, A01, C01, ... (interleaved by letter)
+	// This gives timestamps: B00->T0, A00->T1, C00->T2, B01->T3, A01->T4, C01->T5, ...
+	symbols := []string{}
+	for i := 0; i < 10; i++ {
+		symbols = append(symbols, fmt.Sprintf("US.B%02d", i))
+		symbols = append(symbols, fmt.Sprintf("US.A%02d", i))
+		symbols = append(symbols, fmt.Sprintf("US.C%02d", i))
+	}
+	// symbols is now [B00, A00, C00, B01, A01, C01, ..., B09, A09, C09]
+	// length = 30
+	// Fill pool by processing each symbol individually (each gets its own timestamp).
+	for i, sym := range symbols {
+		p.Update([]string{sym}, base.Add(time.Duration(i)*time.Minute))
+	}
+	if len(p.Symbols()) != poolCap {
+		t.Fatalf("pool should be full at %d, got %d", poolCap, len(p.Symbols()))
+	}
+	// Now admit 3 new symbols in one Update call, triggering 3 cap-evictions.
+	// Off-board members in oldest-first order: B00 (T0), A00 (T1), C00 (T2)
+	// New symbols: D00, E00, F00
+	// Processing each new symbol (within the same Update call):
+	// - D00 admitted, B00 (oldest off-board) evicted
+	// - E00 admitted, A00 (next oldest) evicted
+	// - F00 admitted, C00 (next oldest) evicted
+	// Eviction order (without the fix): [B00, A00, C00] - NOT sorted
+	// Eviction order (with the fix): [A00, B00, C00] - sorted
+	d := p.Update([]string{"US.D00", "US.E00", "US.F00"}, base.Add(40*time.Minute))
+	wantEvicted := []string{"US.A00", "US.B00", "US.C00"} // sorted ascending
+	if !reflect.DeepEqual(d.Evicted, wantEvicted) {
+		t.Fatalf("Evicted=%v, want %v (must be sorted despite reverse-order victim selection)", d.Evicted, wantEvicted)
+	}
+}
