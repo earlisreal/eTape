@@ -169,8 +169,8 @@ func TestDefaultHasUIHubAndPollerSections(t *testing.T) {
 	if got := c.UIHub.Addr(); got != "127.0.0.1:8686" {
 		t.Fatalf("UIHub.Addr() = %q, want 127.0.0.1:8686", got)
 	}
-	if c.UIHub.OutboundQueue != 1024 {
-		t.Fatalf("UIHub.OutboundQueue = %d, want 1024", c.UIHub.OutboundQueue)
+	if c.UIHub.OutboundQueue != 4096 {
+		t.Fatalf("UIHub.OutboundQueue = %d, want 4096", c.UIHub.OutboundQueue)
 	}
 	if c.UIHub.MDRateHz != 30 || c.UIHub.AccountRateHz != 4 || c.UIHub.PositionMs != 100 {
 		t.Fatalf("UIHub rates = %v/%v/%v, want 30/4/100", c.UIHub.MDRateHz, c.UIHub.AccountRateHz, c.UIHub.PositionMs)
@@ -201,7 +201,7 @@ func TestLoadOverridesUIHubSection(t *testing.T) {
 		t.Fatalf("override failed: port=%d rate=%v", c.UIHub.Port, c.UIHub.MDRateHz)
 	}
 	// Unset fields in a present section still fall back to Default() (Load merges onto Default()).
-	if c.UIHub.OutboundQueue != 1024 {
+	if c.UIHub.OutboundQueue != 4096 {
 		t.Fatalf("OutboundQueue lost its default: %d", c.UIHub.OutboundQueue)
 	}
 	if c.Scan.MinChangePct != 8 {
