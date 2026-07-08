@@ -72,6 +72,7 @@ const (
 	PreMarket
 	RTH
 	PostMarket
+	Overnight
 )
 
 func (p Phase) String() string {
@@ -82,6 +83,8 @@ func (p Phase) String() string {
 		return "rth"
 	case PostMarket:
 		return "post"
+	case Overnight:
+		return "overnight"
 	}
 	return "closed"
 }
@@ -101,6 +104,8 @@ func PhaseAt(t time.Time) Phase {
 		return RTH
 	case s >= 16*3600 && s < 20*3600:
 		return PostMarket
+	case s >= 20*3600 || s < 4*3600:
+		return Overnight
 	}
 	return Closed
 }

@@ -43,21 +43,24 @@ describe("ScannerStore", () => {
     expect(s.view("premarket").rows.find((row) => row.symbol === "A")?.isNewHit).toBe(true);
   });
 
-  it("resetSeen re-flashes everything on the next delta (ET-midnight behavior)", () => {
+  it("resetSeen silently re-baselines; the next delta does not flash carried-over rows", () => {
     const s = new ScannerStore();
     s.apply(rank("snapshot", "premarket", { refreshedAt: "t0", rows: [r("A", 5)] }));
-    s.apply(rank("delta", "premarket", { refreshedAt: "t1", rows: [r("A", 6)] })); // A now seen → muted
+    s.apply(rank("delta", "premarket", { refreshedAt: "t1", rows: [r("A", 6)] }));
     s.resetSeen("premarket");
-    s.apply(rank("delta", "premarket", { refreshedAt: "t2", rows: [r("A", 6)] }));
-    expect(s.view("premarket").rows[0].isNewHit).toBe(true);
+    s.apply(rank("delta", "premarket", { refreshedAt: "t2", rows: [r("A", 6)] })); // empty seen ⇒ silent baseline
+    expect(s.view("premarket").rows[0].isNewHit).toBe(false);
   });
 
-  it("sessions are isolated", () => {
+  it("sessions are isolated (independent seen-sets)", () => {
     const s = new ScannerStore();
     s.apply(rank("snapshot", "premarket", { refreshedAt: "t0", rows: [r("A", 5)] }));
-    s.apply(rank("delta", "rth", { refreshedAt: "t1", rows: [r("A", 2)] })); // A never seen in rth
-    expect(s.view("rth").rows[0].isNewHit).toBe(true);
-    expect(s.view("premarket").rows[0].isNewHit).toBe(false);
+    s.apply(rank("snapshot", "rth", { refreshedAt: "t1", rows: [r("A", 2)] })); // rth baseline (silent)
+    s.apply(rank("delta", "rth", { refreshedAt: "t2", rows: [r("A", 2), r("B", 9)] }));
+    const rth = Object.fromEntries(s.view("rth").rows.map((row) => [row.symbol, row]));
+    expect(rth.B.isNewHit).toBe(true);  // new in rth
+    expect(rth.A.isNewHit).toBe(false); // carried over in rth
+    expect(s.view("premarket").rows[0].isNewHit).toBe(false); // premarket untouched
   });
 
   it("a reconnect re-snapshot is a clean baseline (no flash, no stale mute)", () => {
@@ -80,13 +83,13 @@ const rankMsg = (kind: "snapshot" | "delta", symbols: string[]) => ({
 });
 
 describe("ScannerStore.onNewHit", () => {
-  it("fires for a delta row whose symbol is not yet seen", () => {
+  it("first delta is a silent baseline; genuinely-new later rows fire", () => {
     const s = new ScannerStore();
     const cb = vi.fn();
     s.onNewHit(cb);
-    s.apply(rankMsg("delta", ["AAA"]));            // new -> fires
-    s.apply(rankMsg("delta", ["AAA", "BBB"]));     // AAA seen (silent), BBB new (fires)
-    expect(cb.mock.calls.map((c) => c[0])).toEqual(["AAA", "BBB"]);
+    s.apply(rankMsg("delta", ["AAA"]));        // empty seen ⇒ silent baseline
+    s.apply(rankMsg("delta", ["AAA", "BBB"])); // BBB new ⇒ fires
+    expect(cb.mock.calls.map((c) => c[0])).toEqual(["BBB"]);
   });
 
   it("is silent on snapshots and for already-seen symbols", () => {
@@ -105,5 +108,29 @@ describe("ScannerStore.onNewHit", () => {
     s.apply(rankMsg("snapshot", ["AAA"]));  // AAA now seen, silent
     s.apply({ kind: "delta", topic: "scanner.hit", key: "premarket", payload: { symbol: "AAA", at: "2026-07-06T13:01:00Z" } });
     expect(cb).toHaveBeenCalledWith("AAA");
+  });
+});
+
+describe("ScannerStore.currentView", () => {
+  const iso = (h: number) => `2026-07-08T${String(h).padStart(2, "0")}:00:00.000Z`;
+
+  it("returns null session when no data has arrived", () => {
+    expect(new ScannerStore().currentView()).toEqual({ session: null, rows: [], refreshedAt: null });
+  });
+
+  it("returns the session with the freshest refreshedAt", () => {
+    const s = new ScannerStore();
+    s.apply(rank("snapshot", "premarket", { refreshedAt: iso(8), rows: [r("A", 5)] }));
+    s.apply(rank("snapshot", "rth", { refreshedAt: iso(10), rows: [r("B", 9)] }));
+    expect(s.currentView().session).toBe("rth");
+    expect(s.currentView().rows[0].symbol).toBe("B");
+  });
+
+  it("follows the rollover as a newer session overtakes", () => {
+    const s = new ScannerStore();
+    s.apply(rank("snapshot", "rth", { refreshedAt: iso(10), rows: [r("B", 9)] }));
+    expect(s.currentView().session).toBe("rth");
+    s.apply(rank("snapshot", "afterhours", { refreshedAt: iso(17), rows: [r("C", 4)] }));
+    expect(s.currentView().session).toBe("afterhours");
   });
 });

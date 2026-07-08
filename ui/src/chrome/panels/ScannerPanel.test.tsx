@@ -13,7 +13,7 @@ function fakeBus() {
   return { post: (m: unknown) => subs.forEach((cb) => cb(m)), onMessage: (cb: (m: unknown) => void) => { subs.add(cb); return () => subs.delete(cb); }, close: () => {} };
 }
 
-function renderPanel(over: Partial<PanelConfig> = {}) {
+function renderPanel(over: Partial<PanelConfig> = {}, variant: "scanner" | "movers" = "scanner") {
   const stores = makeStores();
   const scanner = stores.scanner;
   const focus = vi.fn();
@@ -23,8 +23,8 @@ function renderPanel(over: Partial<PanelConfig> = {}) {
   const config: PanelConfig = { id: "m-scanner", panelId: "scanner", group: null,
     settings: { targetGroup: "green" }, ...over };
   const props = { config, stores, linkGroups, onConfigChange, scheduler: {} as never,
-    width: 400, height: 300, commands: { sendCommand: async () => ({ status: "accepted" }) } } as unknown as PanelProps & { session: "premarket" };
-  render(<ThemeProvider><ScannerPanel {...props} session="premarket" /></ThemeProvider>);
+    width: 400, height: 300, commands: { sendCommand: async () => ({ status: "accepted" }) } } as unknown as PanelProps & { variant: "scanner" | "movers" };
+  render(<ThemeProvider><ScannerPanel {...props} variant={variant} /></ThemeProvider>);
   return { scanner, focus, onConfigChange };
 }
 
@@ -33,7 +33,7 @@ describe("ScannerPanel", () => {
     const { scanner } = renderPanel();
     expect(screen.getByText(/waiting/i)).toBeTruthy();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
-      payload: { refreshedAt: "2026-07-06T13:30:00Z", rows: [
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [
         { symbol: "US.KO", changePct: 18.4, last: 62.1, floatShares: 4_300_000_000, volume: 1_250_000 },
         { symbol: "US.WXYZ", changePct: null, last: null, floatShares: 21_000_000, volume: 0 },
       ] } }));
@@ -44,7 +44,7 @@ describe("ScannerPanel", () => {
   it("renders no-print rows as em dash, never 0", () => {
     const { scanner } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
-      payload: { refreshedAt: "t", rows: [{ symbol: "US.WXYZ", changePct: null, last: null, floatShares: null, volume: 0 }] } }));
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.WXYZ", changePct: null, last: null, floatShares: null, volume: 0 }] } }));
     const rowCells = screen.getByText("US.WXYZ").closest("tr")!.querySelectorAll("td");
     expect([...rowCells].map((c) => c.textContent)).toContain("—");
     expect([...rowCells].some((c) => c.textContent === "0%")).toBe(false);
@@ -53,7 +53,7 @@ describe("ScannerPanel", () => {
   it("applies the min-%-change threshold", () => {
     const { scanner } = renderPanel({ settings: { targetGroup: "green", thresholds: { minChangePct: 10, floatCapShares: null, minVolume: 0 } } });
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
-      payload: { refreshedAt: "t", rows: [
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [
         { symbol: "US.KO", changePct: 18.4, last: 1, floatShares: 1, volume: 1 },
         { symbol: "US.LOW", changePct: 2, last: 1, floatShares: 1, volume: 1 },
       ] } }));
@@ -64,7 +64,7 @@ describe("ScannerPanel", () => {
   it("row click publishes focus to the target group", () => {
     const { scanner, focus } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
-      payload: { refreshedAt: "t", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
     fireEvent.click(screen.getByText("US.KO"));
     expect(focus).toHaveBeenCalledWith("green", "US.KO");
   });
@@ -110,7 +110,7 @@ describe("ScannerPanel", () => {
   it("default view sorts by % change descending", () => {
     const { scanner } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
-      payload: { refreshedAt: "t", rows: [
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [
         { symbol: "US.LOW", changePct: 2, last: 1, floatShares: 1, volume: 1 },
         { symbol: "US.HIGH", changePct: 40, last: 1, floatShares: 1, volume: 1 },
       ] } }));
@@ -121,7 +121,7 @@ describe("ScannerPanel", () => {
   it("clicking the % header toggles sort direction and persists it via onConfigChange", () => {
     const { scanner, onConfigChange } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
-      payload: { refreshedAt: "t", rows: [
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [
         { symbol: "US.LOW", changePct: 2, last: 1, floatShares: 1, volume: 1 },
         { symbol: "US.HIGH", changePct: 40, last: 1, floatShares: 1, volume: 1 },
       ] } }));
@@ -130,5 +130,25 @@ describe("ScannerPanel", () => {
       sort: { col: "changePct", dir: "asc" } }));
     const symbols = [...document.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent);
     expect(symbols).toEqual(["US.LOW", "US.HIGH"]);
+  });
+
+  it("movers variant has no filter button and applies no thresholds", () => {
+    const { scanner } = renderPanel(
+      { settings: { targetGroup: "green", thresholds: { minChangePct: 50, floatCapShares: null, minVolume: 0 } } },
+      "movers",
+    );
+    expect(screen.queryByRole("button", { name: /filters/i })).toBeNull();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth",
+      payload: { refreshedAt: "2026-07-08T14:00:00.000Z", rows: [
+        { symbol: "US.LOW", changePct: 2, last: 1, floatShares: 1, volume: 1 }] } }));
+    expect(screen.getByText("US.LOW")).toBeTruthy(); // not filtered out despite minChangePct:50
+  });
+
+  it("follows the live session label", () => {
+    const { scanner } = renderPanel({}, "movers");
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "afterhours",
+      payload: { refreshedAt: "2026-07-08T21:00:00.000Z", rows: [
+        { symbol: "US.AH", changePct: 3, last: 1, floatShares: 1, volume: 1 }] } }));
+    expect(screen.getByText(/after-hours/i)).toBeTruthy();
   });
 });

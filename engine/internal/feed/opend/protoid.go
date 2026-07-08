@@ -29,6 +29,9 @@ const (
 	ProtoQotStockFilter           uint32 = 3215
 	ProtoQotGetSearchNews         uint32 = 3263
 	ProtoQotGetUSPreMarketRank    uint32 = 3410
+	ProtoQotGetUSAfterHoursRank   uint32 = 3411
+	ProtoQotGetUSOvernightRank    uint32 = 3412
+	ProtoQotGetTopMoversRank      uint32 = 3413
 )
 
 // pushProtoIDs are server-initiated update protocols. A frame with one of

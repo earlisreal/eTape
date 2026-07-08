@@ -15,6 +15,6 @@ describe("contract re-exports the generated wire types", () => {
   });
   it("VenueID + ScannerSession stay UI-side string types", () => {
     expectTypeOf<VenueID>().toEqualTypeOf<string>();
-    expectTypeOf<ScannerSession>().toEqualTypeOf<"premarket" | "rth" | "afterhours">();
+    expectTypeOf<ScannerSession>().toEqualTypeOf<"premarket" | "rth" | "afterhours" | "overnight">();
   });
 });

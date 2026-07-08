@@ -16,6 +16,9 @@ import (
 
 	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
 	snappb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsecuritysnapshot"
+	tmrpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgettopmoversrank"
+	ahpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusafterhoursrank"
+	onpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusovernightrank"
 	rankpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetuspremarketrank"
 )
 
@@ -104,10 +107,12 @@ func TestResetIfNewDayClearsFloatCacheAndSeen(t *testing.T) {
 
 func TestNewHitsSeenSet(t *testing.T) {
 	p := &Poller{seen: map[string]map[string]bool{}}
+	// First populated poll for a session is a silent baseline: no hits, seed only.
 	first := p.newHits("premarket", []wsmsg.ScannerRow{{Symbol: "US.A"}, {Symbol: "US.B"}})
-	if len(first) != 2 {
-		t.Fatalf("first pass: both are new hits, got %v", first)
+	if len(first) != 0 {
+		t.Fatalf("first poll is a silent baseline, want 0 hits, got %v", first)
 	}
+	// Genuinely-new symbols after the baseline do fire.
 	second := p.newHits("premarket", []wsmsg.ScannerRow{{Symbol: "US.A"}, {Symbol: "US.C"}})
 	if len(second) != 1 || second[0] != "US.C" {
 		t.Fatalf("second pass: only US.C is new, got %v", second)
@@ -116,10 +121,13 @@ func TestNewHitsSeenSet(t *testing.T) {
 
 // fakeReq implements the scan.requester interface with canned responses.
 type fakeReq struct {
-	rankResp  *rankpb.Response
-	rankErr   error
-	snap      func(codes []string) (*snappb.Response, error)
-	snapCalls int
+	rankResp     *rankpb.Response // 3410 pre-market
+	topMoversRsp *tmrpb.Response  // 3413 RTH
+	afterHrsRsp  *ahpb.Response   // 3411 post-market
+	overnightRsp *onpb.Response   // 3412 overnight
+	rankErr      error
+	snap         func(codes []string) (*snappb.Response, error)
+	snapCalls    int
 }
 
 func (f *fakeReq) Request(_ context.Context, protoID uint32, req proto.Message) (opend.Frame, error) {
@@ -129,6 +137,12 @@ func (f *fakeReq) Request(_ context.Context, protoID uint32, req proto.Message) 
 			return opend.Frame{}, f.rankErr
 		}
 		return frameOf(f.rankResp), nil
+	case opend.ProtoQotGetTopMoversRank:
+		return frameOf(f.topMoversRsp), nil
+	case opend.ProtoQotGetUSAfterHoursRank:
+		return frameOf(f.afterHrsRsp), nil
+	case opend.ProtoQotGetUSOvernightRank:
+		return frameOf(f.overnightRsp), nil
 	case opend.ProtoQotGetSecuritySnapshot:
 		f.snapCalls++
 		var codes []string
@@ -399,19 +413,64 @@ func TestPollOnceEndToEnd(t *testing.T) {
 	if rows[0].FloatShares == nil || *rows[0].FloatShares != 20_000_000 {
 		t.Fatalf("US.LOWF float should be resolved via 3203: %+v", rows[0])
 	}
-	if len(pub.hits) != 1 || pub.hits[0].Symbol != "US.LOWF" {
-		t.Fatalf("want one new hit for US.LOWF: %+v", pub.hits)
+	if len(pub.hits) != 0 {
+		t.Fatalf("first poll is a silent baseline -> no hits: %+v", pub.hits)
 	}
 
-	// Second poll, same board: still a rank publish, but no new hit.
+	// Second poll, same board: still a rank publish, no hits (baseline already seeded).
 	p.pollOnce(context.Background(), p.clk.Now())
 	if len(pub.ranks) != 2 {
 		t.Fatalf("want a second rank publish, got %d", len(pub.ranks))
 	}
-	if len(pub.hits) != 1 {
-		t.Fatalf("US.LOWF already seen -> no new hit on second poll: %+v", pub.hits)
+	if len(pub.hits) != 0 {
+		t.Fatalf("baseline seeded, US.LOWF already seen -> no hits on second poll: %+v", pub.hits)
 	}
 	if fr.snapCalls != 1 {
 		t.Fatalf("float cache should make the second poll issue zero snapshots: snapCalls=%d", fr.snapCalls)
+	}
+}
+
+func TestFetchRankSelectsSessionAPI(t *testing.T) {
+	fr := &fakeReq{
+		topMoversRsp: &tmrpb.Response{RetType: proto.Int32(0), S2C: &tmrpb.S2C{DataList: []*tmrpb.TopMoversRankItem{
+			{Security: usSec("RTHX"), ChangeRatio: proto.Float64(7.5), CurPrice: proto.Float64(3.3), Volume: proto.Int64(11)}}}},
+		afterHrsRsp: &ahpb.Response{RetType: proto.Int32(0), S2C: &ahpb.S2C{DataList: []*ahpb.AfterHoursRankItem{
+			{Security: usSec("AHX"), AfterHoursChangeRatio: proto.Float64(4.2), AfterHoursPrice: proto.Float64(2.2), AfterHoursVolume: proto.Int64(22)}}}},
+		overnightRsp: &onpb.Response{RetType: proto.Int32(0), S2C: &onpb.S2C{DataList: []*onpb.OvernightRankItem{
+			{Security: usSec("ONX"), OvernightChangeRatio: proto.Float64(9.1), OvernightPrice: proto.Float64(1.1), OvernightVolume: proto.Int64(33)}}}},
+		rankResp: rankResp(rankItem{Symbol: "US.PMX", ChangePct: 5.5, Last: 4.4, Volume: 44}),
+	}
+	p := newTestPoller(config.Scan{Enabled: true}, fr, &capturePub{})
+
+	cases := []struct {
+		phase  session.Phase
+		symbol string
+		pct    float64
+	}{
+		{session.RTH, "US.RTHX", 7.5},
+		{session.PostMarket, "US.AHX", 4.2},
+		{session.Overnight, "US.ONX", 9.1},
+		{session.PreMarket, "US.PMX", 5.5},
+		{session.Closed, "US.PMX", 5.5}, // Closed falls back to the pre-market board
+	}
+	for _, c := range cases {
+		items, err := p.fetchRank(context.Background(), c.phase)
+		if err != nil {
+			t.Fatalf("phase %v: %v", c.phase, err)
+		}
+		if len(items) != 1 || items[0].Symbol != c.symbol || items[0].ChangePct != c.pct {
+			t.Fatalf("phase %v: got %+v", c.phase, items)
+		}
+	}
+}
+
+func TestSessionKey(t *testing.T) {
+	for phase, want := range map[session.Phase]string{
+		session.RTH: "rth", session.PostMarket: "afterhours",
+		session.Overnight: "overnight", session.PreMarket: "premarket", session.Closed: "premarket",
+	} {
+		if got := sessionKey(phase); got != want {
+			t.Errorf("sessionKey(%v)=%q want %q", phase, got, want)
+		}
 	}
 }
