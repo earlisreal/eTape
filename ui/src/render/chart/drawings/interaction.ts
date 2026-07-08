@@ -102,6 +102,42 @@ export class DrawingInteraction {
     this.primitive.requestUpdate();
   }
 
+  // --- context-menu / floating-toolbar API (no pointer side effects) ---
+  hitTestAt(p: Px): string | null {
+    const drawings = this.store.forSymbol(this.ctx.symbol());
+    for (let i = drawings.length - 1; i >= 0; i--) {
+      const d = drawings[i];
+      const pts = d.anchors.map((a) => this.project(a));
+      if (hitTest(d.kind, pts, p, this.host.clientWidth)) return d.id;
+    }
+    return null;
+  }
+
+  select(id: string | null): void {
+    this.selectionId = id;
+    this.primitive.setSelection(id);
+    this.primitive.requestUpdate();
+  }
+
+  selectedId(): string | null {
+    return this.selectionId;
+  }
+
+  selectedRect(): { x: number; y: number; w: number; h: number } | null {
+    if (!this.selectionId) return null;
+    const d = this.store.forSymbol(this.ctx.symbol()).find((x) => x.id === this.selectionId);
+    if (!d) return null;
+    const pts = d.anchors.map((a) => this.project(a)).filter((q): q is Px => q !== null);
+    if (pts.length === 0) return null;
+    if (d.kind === "hline" || d.kind === "hray") {
+      const x0 = d.kind === "hray" ? pts[0].x : 0;
+      return { x: x0, y: pts[0].y, w: this.host.clientWidth - x0, h: 0 };
+    }
+    const xs = pts.map((q) => q.x), ys = pts.map((q) => q.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
+  }
+
   dispose(): void {
     for (const [t, cb] of this.listeners) this.host.removeEventListener(t, cb);
     this.listeners.length = 0;
