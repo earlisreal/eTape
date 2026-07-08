@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ChartController, LEFT_PAD_BARS, type BarReader, type IndicatorReader, type CommandSender } from "./ChartController";
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
-import { LIGHT } from "../palette";
+import { LIGHT, DARK } from "../palette";
 import type { Bar } from "../../wire/contract";
 import { withDefaultParams } from "./indicatorSeries";
 import type { Band } from "./sessions";
@@ -573,6 +573,18 @@ describe("ChartController chart settings", () => {
     c.setVolumeVisible(false);
     const vol = facade.created.find((x) => x.kind === "histogram")!.series;
     expect(vol.optionCalls.some((o) => (o as { visible?: boolean }).visible === false)).toBe(true);
+  });
+
+  it("a palette switch after hiding volume does not silently re-show it", () => {
+    // Regression: setPalette() re-applies volumeOptions(p) on every theme switch;
+    // without re-asserting the user's visible:false on top of it, a light/dark
+    // toggle would resurrect a volume series the user had explicitly hidden.
+    const facade = fakeFacade(); const c = mk(facade); c.mount();
+    c.setVolumeVisible(false);
+    const vol = facade.created.find((x) => x.kind === "histogram")!.series;
+    c.setPalette(DARK);
+    const lastOptions = vol.optionCalls.at(-1) as { visible?: boolean };
+    expect(lastOptions.visible).toBe(false);
   });
 
   it("setGrid(false) applies invisible grid options", () => {
