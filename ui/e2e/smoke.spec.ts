@@ -24,7 +24,7 @@ test.describe("trading workspace", () => {
   test("panels mount and the account bar hydrates", async ({ page }) => {
     await gotoAndApplyPreset(page, "e2e-trading", "Trading");
     await expect(page.getByTestId("acct-equity")).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId("submit")).toBeVisible(); // order ticket mounted
+    await expect(page.getByTestId("side-BUY")).toBeVisible(); // order ticket mounted
     await shot(page, "trading-loaded"); // eyeball: charts populated + ladder painted (canvas)
   });
 
@@ -48,7 +48,7 @@ test.describe("trading workspace", () => {
 
     // MARKET order needs no price; default 100 shares of AAPL fills at the mark.
     await page.getByTestId("order-type").selectOption("MARKET");
-    await page.getByTestId("submit").click();
+    await page.getByTestId("side-BUY").click();
 
     await expect(page.getByText("Filled").first()).toBeVisible({ timeout: 10_000 }); // OpenOrders status
     await page.waitForTimeout(500); // let the next rAF paint tick pick up the fill (canvas, not React state)

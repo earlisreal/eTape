@@ -42,10 +42,21 @@ describe("OrderTicketPanel", () => {
     wrap(props);
     fireEvent.change(screen.getByTestId("amount"), { target: { value: "100" } });
     fireEvent.change(screen.getByTestId("price"), { target: { value: "3.5" } });
-    fireEvent.click(screen.getByTestId("submit"));
+    fireEvent.click(screen.getByTestId("side-BUY"));
     await waitFor(() => expect(sent.some((s) => s.name === "SubmitOrder")).toBe(true));
     const args = sent.find((s) => s.name === "SubmitOrder")?.args as SubmitOrderArgs;
     expect(args).toMatchObject({ venue: "alpaca-paper", symbol: "US.AAPL", side: "BUY", qty: 100, limitPrice: 3.5 });
+  });
+  it("clicking SELL submits that side directly, without a separate select step", async () => {
+    const { props, stores, linkGroups, sent } = mkProps();
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.4, ask: 3.5, last: 3.45, ts: "" } }); linkGroups.focus("green", "US.AAPL"); });
+    wrap(props);
+    fireEvent.change(screen.getByTestId("amount"), { target: { value: "50" } });
+    fireEvent.change(screen.getByTestId("price"), { target: { value: "3.4" } });
+    fireEvent.click(screen.getByTestId("side-SELL"));
+    await waitFor(() => expect(sent.some((s) => s.name === "SubmitOrder")).toBe(true));
+    const args = sent.find((s) => s.name === "SubmitOrder")?.args as SubmitOrderArgs;
+    expect(args).toMatchObject({ venue: "alpaca-paper", symbol: "US.AAPL", side: "SELL", qty: 50, limitPrice: 3.4 });
   });
   it("clicking the header bid/ask fills the price input", () => {
     const { props, stores, linkGroups } = mkProps();

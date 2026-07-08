@@ -73,7 +73,7 @@ test.describe("error-handling matrix", () => {
 
     // Do NOT arm. MARKET so it clears client pre-checks and reaches the engine gate.
     await page.getByTestId("order-type").selectOption("MARKET");
-    await page.getByTestId("submit").click();
+    await page.getByTestId("side-BUY").click();
     await expect(page.getByText(/blocked|disarm|master/i).first()).toBeVisible({ timeout: 10_000 });
   });
 
