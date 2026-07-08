@@ -1,5 +1,6 @@
 import type { FC } from "react";
 import type { AckMsg, TopicName } from "../../wire/contract";
+import type { DemandProfile } from "../../wire/DemandRegistry";
 import type { PanelConfig } from "../workspace";
 import type { Stores } from "../../data/registry";
 import type { Scheduler } from "../../render/Scheduler";
@@ -45,6 +46,7 @@ export interface PanelDef {
   glyph: string;
   description: string;
   symbolBearing: boolean;
+  demand?: DemandProfile;
 }
 
 // Plan 1 registered the two stack-proving panels; Plan 2 added the chart panel;
@@ -75,6 +77,7 @@ export const PANELS: Record<string, PanelDef> = {
     glyph: "▁▃▅▇",
     description: "Candles, volume, indicators",
     symbolBearing: true,
+    demand: "watch",
   },
   "ladder": {
     component: LadderPanel,
@@ -83,6 +86,7 @@ export const PANELS: Record<string, PanelDef> = {
     glyph: "≡",
     description: "10-level depth, working orders",
     symbolBearing: true,
+    demand: "focused",
   },
   "tape": {
     component: TapePanel,
@@ -91,6 +95,7 @@ export const PANELS: Record<string, PanelDef> = {
     glyph: "⋮⋮",
     description: "Live prints, buy/sell colored",
     symbolBearing: true,
+    demand: "watch",
   },
   "scanner": {
     component: (p) => <ScannerPanel {...p} session="premarket" />,
@@ -115,6 +120,7 @@ export const PANELS: Record<string, PanelDef> = {
     glyph: "¶",
     description: "Headlines for focused symbol",
     symbolBearing: true,
+    demand: "interest",
   },
   "account": {
     component: AccountPanel,
