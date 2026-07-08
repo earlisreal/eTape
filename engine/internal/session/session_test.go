@@ -68,8 +68,8 @@ func TestPhaseAt(t *testing.T) {
 		{"2026-07-06T13:30:00Z", RTH},        // 09:30 ET
 		{"2026-07-06T19:59:59Z", RTH},        // 15:59:59 ET
 		{"2026-07-06T20:00:00Z", PostMarket}, // 16:00 ET
-		{"2026-07-07T00:00:00Z", Closed},     // 20:00 ET
-		{"2026-07-06T07:59:59Z", Closed},     // 03:59:59 ET
+		{"2026-07-07T00:00:00Z", Overnight},  // 20:00 ET (was Closed)
+		{"2026-07-06T07:59:59Z", Overnight},  // 03:59:59 ET (was Closed)
 		{"2026-07-04T15:00:00Z", Closed},     // Saturday
 		{"2026-07-05T15:00:00Z", Closed},     // Sunday
 		{"2026-01-06T14:30:00Z", RTH},        // EST regime
@@ -78,6 +78,32 @@ func TestPhaseAt(t *testing.T) {
 		if got := PhaseAt(time.UnixMilli(ms(c.ts))); got != c.want {
 			t.Errorf("PhaseAt(%s) = %v, want %v", c.ts, got, c.want)
 		}
+	}
+}
+
+func TestPhaseAtOvernight(t *testing.T) {
+	loc := Loc()
+	et := func(h, m int) time.Time { return time.Date(2026, 7, 8, h, m, 0, 0, loc) } // Wed
+	cases := []struct {
+		name  string
+		t     time.Time
+		phase Phase
+	}{
+		{"post ends 19:59", et(19, 59), PostMarket},
+		{"overnight starts 20:00", et(20, 0), Overnight},
+		{"overnight 23:30", et(23, 30), Overnight},
+		{"overnight 02:00", et(2, 0), Overnight},
+		{"overnight 03:59", et(3, 59), Overnight},
+		{"premarket starts 04:00", et(4, 0), PreMarket},
+		{"weekend stays closed", time.Date(2026, 7, 11, 22, 0, 0, 0, loc), Closed}, // Sat 22:00
+	}
+	for _, c := range cases {
+		if got := PhaseAt(c.t); got != c.phase {
+			t.Errorf("%s: PhaseAt=%v want %v", c.name, got, c.phase)
+		}
+	}
+	if Overnight.String() != "overnight" {
+		t.Errorf("Overnight.String()=%q want %q", Overnight.String(), "overnight")
 	}
 }
 
