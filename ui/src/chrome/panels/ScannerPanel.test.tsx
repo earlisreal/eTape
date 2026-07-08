@@ -21,7 +21,7 @@ function renderPanel(over: Partial<PanelConfig> = {}, variant: "scanner" | "move
   vi.spyOn(linkGroups, "focus").mockImplementation(focus);
   const onConfigChange = vi.fn();
   const config: PanelConfig = { id: "m-scanner", panelId: "scanner", group: null,
-    settings: { targetGroup: "green" }, ...over };
+    settings: {}, ...over };
   const props = { config, stores, linkGroups, onConfigChange, scheduler: {} as never,
     width: 400, height: 300, commands: { sendCommand: async () => ({ status: "accepted" }) } } as unknown as PanelProps & { variant: "scanner" | "movers" };
   render(<ThemeProvider><ScannerPanel {...props} variant={variant} /></ThemeProvider>);
@@ -51,7 +51,7 @@ describe("ScannerPanel", () => {
   });
 
   it("applies the min-%-change threshold", () => {
-    const { scanner } = renderPanel({ settings: { targetGroup: "green", thresholds: { minChangePct: 10, floatCapShares: null, minVolume: 0 } } });
+    const { scanner } = renderPanel({ settings: { thresholds: { minChangePct: 10, floatCapShares: null, minVolume: 0 } } });
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [
         { symbol: "US.KO", changePct: 18.4, last: 1, floatShares: 1, volume: 1 },
@@ -61,8 +61,16 @@ describe("ScannerPanel", () => {
     expect(screen.queryByText("US.LOW")).toBeNull();
   });
 
-  it("row double-click publishes focus to the target group", () => {
-    const { scanner, focus } = renderPanel();
+  it("row double-click publishes focus to the panel's linked group", () => {
+    const { scanner, focus } = renderPanel({ group: "blue" });
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
+    fireEvent.doubleClick(screen.getByText("US.KO"));
+    expect(focus).toHaveBeenCalledWith("blue", "US.KO");
+  });
+
+  it("row double-click falls back to green when the panel is pinned (no linked group)", () => {
+    const { scanner, focus } = renderPanel({ group: null });
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
     fireEvent.doubleClick(screen.getByText("US.KO"));
@@ -91,7 +99,7 @@ describe("ScannerPanel", () => {
   });
 
   it("the summary line reflects the active thresholds", () => {
-    renderPanel({ settings: { targetGroup: "green", thresholds: { minChangePct: 10, floatCapShares: 20_000_000, minVolume: 100_000 } } });
+    renderPanel({ settings: { thresholds: { minChangePct: 10, floatCapShares: 20_000_000, minVolume: 100_000 } } });
     expect(screen.getByText("change ≥ 10% · float ≤ 20M · vol ≥ 100k")).toBeTruthy();
   });
 
@@ -110,7 +118,7 @@ describe("ScannerPanel", () => {
   });
 
   it("Reset defaults clears the draft inputs without persisting until Apply", () => {
-    const { onConfigChange } = renderPanel({ settings: { targetGroup: "green", thresholds: { minChangePct: 10, floatCapShares: null, minVolume: 0 } } });
+    const { onConfigChange } = renderPanel({ settings: { thresholds: { minChangePct: 10, floatCapShares: null, minVolume: 0 } } });
     fireEvent.click(screen.getByRole("button", { name: /filters/i }));
     fireEvent.click(screen.getByRole("button", { name: "Reset defaults" }));
     expect((screen.getByLabelText("min change %") as HTMLInputElement).value).toBe("0");
@@ -144,7 +152,7 @@ describe("ScannerPanel", () => {
 
   it("movers variant has no filter button and applies no thresholds", () => {
     const { scanner } = renderPanel(
-      { settings: { targetGroup: "green", thresholds: { minChangePct: 50, floatCapShares: null, minVolume: 0 } } },
+      { settings: { thresholds: { minChangePct: 50, floatCapShares: null, minVolume: 0 } } },
       "movers",
     );
     expect(screen.queryByRole("button", { name: /filters/i })).toBeNull();

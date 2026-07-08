@@ -124,3 +124,110 @@ func TestHubDemand_NilFeedNoPanic(t *testing.T) {
 		t.Fatalf("nil-feed should still track demands: %v", got)
 	}
 }
+
+// spyBackfill records symbols passed to the injected backfill trigger.
+type spyBackfill struct {
+	mu   sync.Mutex
+	syms []string
+}
+
+func (s *spyBackfill) trigger(sym string) {
+	s.mu.Lock()
+	s.syms = append(s.syms, sym)
+	s.mu.Unlock()
+}
+
+func (s *spyBackfill) snapshot() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.syms...)
+}
+
+func TestHubDemand_WatchAndFocusedTriggerBackfillOnce(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+	h.SetFeed(&spyHubFeed{})
+	bf := &spyBackfill{}
+	h.SetBackfill(bf.trigger)
+	c := &fakeClient{nid: 1}
+	h.Register(c)
+
+	h.EnsureDemand(1, feed.WatchDemand("dyn/1/a", "US.AAPL"))
+	h.EnsureDemand(1, feed.WatchDemand("dyn/1/b", "US.AAPL")) // repeat, different demand id, same symbol
+	h.EnsureDemand(1, demandForTest("dyn/1/c", "US.MSFT"))
+	h.sync()
+
+	got := bf.snapshot()
+	sort.Strings(got)
+	want := []string{"US.AAPL", "US.MSFT"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("backfill triggers = %v, want %v (AAPL must dedup to one spawn)", got, want)
+	}
+}
+
+func TestHubDemand_InterestDoesNotBackfill(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+	h.SetFeed(&spyHubFeed{})
+	bf := &spyBackfill{}
+	h.SetBackfill(bf.trigger)
+	c := &fakeClient{nid: 2}
+	h.Register(c)
+
+	h.EnsureDemand(2, feed.Demand{ID: "dyn/2/a", Symbol: "US.TSLA"}) // interest: no subs
+	h.sync()
+
+	if got := bf.snapshot(); len(got) != 0 {
+		t.Fatalf("interest demand triggered backfill: %v", got)
+	}
+	if got := h.ActiveDemandSymbols(); len(got) != 1 || got[0] != "US.TSLA" {
+		t.Fatalf("interest demand should still be tracked: %v", got)
+	}
+}
+
+func TestHubDemand_NilBackfillNoPanic(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+	sf := &spyHubFeed{}
+	h.SetFeed(sf)
+	c := &fakeClient{nid: 4}
+	h.Register(c)
+
+	h.EnsureDemand(4, feed.WatchDemand("dyn/4/a", "US.AAPL")) // no SetBackfill call
+	h.sync()
+
+	sf.mu.Lock()
+	n := len(sf.ensured)
+	sf.mu.Unlock()
+	if n != 1 {
+		t.Fatalf("feed.Ensure calls = %d, want 1 (demand path must work without a backfill trigger)", n)
+	}
+}
+
+func TestHubDemand_DeadConnNoBackfill(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+	h.SetFeed(&spyHubFeed{})
+	bf := &spyBackfill{}
+	h.SetBackfill(bf.trigger)
+	c := &fakeClient{nid: 5}
+	h.Register(c)
+	h.Unregister(c)
+	h.sync()
+
+	h.EnsureDemand(5, feed.WatchDemand("dyn/5/a", "US.AAPL")) // late ensure for a gone conn
+	h.sync()
+
+	if got := bf.snapshot(); len(got) != 0 {
+		t.Fatalf("dead conn triggered backfill: %v", got)
+	}
+}
+
+// demandForTest builds a focused-like feed.Demand (the extra subs the
+// "focused" profile adds — book+quote — plus WantsHistory set the same way
+// uihub/commands.go's demandForProfile sets it for that profile).
+func demandForTest(id, symbol string) feed.Demand {
+	return feed.Demand{ID: id, Symbol: symbol,
+		Subs:    []feed.SubType{feed.SubQuote, feed.SubTicker, feed.SubKL1m, feed.SubBook},
+		Focused: true, WantsHistory: true}
+}

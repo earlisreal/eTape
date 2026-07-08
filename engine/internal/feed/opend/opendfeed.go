@@ -2,12 +2,14 @@ package opend
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"golang.org/x/sync/singleflight"
 )
 
 // FeedOptions configures the OpenD feed adapter. Zero values get defaults —
@@ -37,6 +39,15 @@ type OpenDFeed struct {
 	fetched     map[string]time.Time // history-quota dedup window (30 days)
 	validated   map[string]struct{}  // process-lifetime positive existence cache
 	decodeFails uint64
+
+	// hbGroup coalesces concurrent HistoryBars calls for the same
+	// symbol+resolution into a single fetch. Deep-backfill can now be
+	// triggered from two independent producers (scanner-pool admission and
+	// UI chart-open demand, see uihub.Hub.handleEnsureDemand) that share no
+	// synchronization with each other; without this, both could race past
+	// the fetched-map check below before either updates it, each spending a
+	// real history-quota slot for what should be one fetch.
+	hbGroup singleflight.Group
 }
 
 type seedJob struct {
@@ -208,28 +219,39 @@ func (f *OpenDFeed) seed(ctx context.Context, symbol string, subs []feed.SubType
 
 // HistoryBars spends history quota; guard new symbols against exhaustion.
 // Symbols fetched within the 30-day dedup window are free re-requests.
+// Concurrent calls for the same symbol+resolution (e.g. scanner-pool
+// admission and a UI chart-open demand racing on the same symbol) coalesce
+// into a single fetch via hbGroup, so quota is spent at most once per
+// distinct request rather than once per caller.
 func (f *OpenDFeed) HistoryBars(ctx context.Context, symbol string, res feed.Resolution, from, to time.Time) ([]feed.Bar, error) {
-	f.mu.Lock()
-	last, ok := f.fetched[symbol]
-	f.mu.Unlock()
-	if !ok || f.clk.Now().Sub(last) > fetchDedupWindow {
-		_, remain, err := f.bf.historyQuota(ctx)
+	key := fmt.Sprintf("%s|%d", symbol, res)
+	v, err, _ := f.hbGroup.Do(key, func() (any, error) {
+		f.mu.Lock()
+		last, ok := f.fetched[symbol]
+		f.mu.Unlock()
+		if !ok || f.clk.Now().Sub(last) > fetchDedupWindow {
+			_, remain, err := f.bf.historyQuota(ctx)
+			if err != nil {
+				return nil, err
+			}
+			if remain == 0 {
+				slog.Warn("history quota exhausted; deep backfill degraded to cache depth", "symbol", symbol)
+				return nil, ErrHistoryQuotaExhausted
+			}
+		}
+		bars, err := f.bf.historyBars(ctx, symbol, res, from, to)
 		if err != nil {
 			return nil, err
 		}
-		if remain == 0 {
-			slog.Warn("history quota exhausted; deep backfill degraded to cache depth", "symbol", symbol)
-			return nil, ErrHistoryQuotaExhausted
-		}
-	}
-	bars, err := f.bf.historyBars(ctx, symbol, res, from, to)
+		f.mu.Lock()
+		f.fetched[symbol] = f.clk.Now()
+		f.mu.Unlock()
+		return bars, nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	f.mu.Lock()
-	f.fetched[symbol] = f.clk.Now()
-	f.mu.Unlock()
-	return bars, nil
+	return v.([]feed.Bar), nil
 }
 
 func (f *OpenDFeed) RecentTicks(ctx context.Context, symbol string, n int) ([]feed.Tick, error) {

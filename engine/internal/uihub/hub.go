@@ -54,6 +54,11 @@ type releaseDemandReq struct {
 // safely with Validate reads in conn goroutines and Ensure/Release in Run.
 type feedBox struct{ f Feed }
 
+// backfillBox mirrors feedBox: SetBackfill is called once at boot from main's
+// goroutine, after the Hub is already running, so the function pointer needs
+// the same atomic-store/atomic-load discipline as the feed reference.
+type backfillBox struct{ fn func(string) }
+
 // Hub is a single-goroutine event loop that owns the mirror, the connected-
 // client set, and per-topic-class coalescing buffers. Every field below the
 // channel declarations is touched only from within Run's goroutine; all other
@@ -77,12 +82,14 @@ type Hub struct {
 	syncCh          chan chan struct{} // test barrier
 	closed          chan struct{}      // closed when Run returns; unblocks stuck senders
 
-	feedSlot atomic.Pointer[feedBox]
+	feedSlot     atomic.Pointer[feedBox]
+	backfillSlot atomic.Pointer[backfillBox]
 
 	// Run-loop-owned:
 	clients    map[client]map[wsmsg.Topic]bool
 	demands    map[uint64]map[string]string // connID -> demandID -> symbol
 	demandLive map[uint64]bool              // connID currently registered
+	backfilled map[string]bool              // symbol -> demand-path backfill already spawned (process lifetime)
 	pendKeep   map[string]staged            // classMDKeep, flushed on md ticker
 	tapePend   map[string][]wsmsg.Tick      // symbol -> accumulated ticks
 	acctPend   map[string]staged            // venue -> latest account frame
@@ -111,6 +118,7 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 		clients:         map[client]map[wsmsg.Topic]bool{},
 		demands:         map[uint64]map[string]string{},
 		demandLive:      map[uint64]bool{},
+		backfilled:      map[string]bool{},
 		pendKeep:        map[string]staged{},
 		tapePend:        map[string][]wsmsg.Tick{},
 		acctPend:        map[string]staged{},
@@ -157,6 +165,19 @@ func (h *Hub) SetFeed(f Feed) { h.feedSlot.Store(&feedBox{f: f}) }
 func (h *Hub) feed() Feed {
 	if b := h.feedSlot.Load(); b != nil {
 		return b.f
+	}
+	return nil
+}
+
+// SetBackfill injects the deep-history backfill trigger (spawns an
+// orch.Backfill goroutine for a symbol) after the hub is running. Safe to
+// call once from boot; nil until then (replay/tests/backfill-disabled never
+// call it, in which case chart-open demands simply skip the deep backfill).
+func (h *Hub) SetBackfill(fn func(string)) { h.backfillSlot.Store(&backfillBox{fn: fn}) }
+
+func (h *Hub) backfill() func(string) {
+	if b := h.backfillSlot.Load(); b != nil {
+		return b.fn
 	}
 	return nil
 }
@@ -352,6 +373,18 @@ func (h *Hub) handleEnsureDemand(r ensureDemandReq) {
 	m[r.d.ID] = r.d.Symbol
 	if f := h.feed(); f != nil {
 		f.Ensure(r.d)
+	}
+	// Deep-backfill (deep intraday + full daily history) any chart-capable
+	// demand exactly once per symbol per process lifetime, so a symbol opened
+	// on a chart gets full daily history even if it was never a scanner-pool
+	// admission. The scan poller runs its own independent, pool-day-scoped
+	// dedup for the same underlying orch.Backfill; the two can each fire once
+	// for the same symbol, but OpenDFeed.HistoryBars coalesces concurrent
+	// same-symbol fetches (singleflight) and the 30-day dedup window covers
+	// sequential ones, so the second call spends no additional history quota.
+	if fn := h.backfill(); fn != nil && r.d.WantsHistory && !h.backfilled[r.d.Symbol] {
+		h.backfilled[r.d.Symbol] = true
+		fn(r.d.Symbol)
 	}
 }
 

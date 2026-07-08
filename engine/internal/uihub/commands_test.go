@@ -185,6 +185,9 @@ func TestEnsureSymbol_AcceptsAndMapsWatch(t *testing.T) {
 	if !reflect.DeepEqual(got.d.Subs, []feed.SubType{feed.SubTicker, feed.SubKL1m}) {
 		t.Fatalf("watch subs = %v", got.d.Subs)
 	}
+	if !got.d.WantsHistory {
+		t.Fatalf("watch must want history (chart-capable, backs the deep-backfill trigger)")
+	}
 }
 
 func TestEnsureSymbol_FocusedUSHasBook(t *testing.T) {
@@ -197,6 +200,9 @@ func TestEnsureSymbol_FocusedUSHasBook(t *testing.T) {
 	}
 	if !reflect.DeepEqual(d.Subs, []feed.SubType{feed.SubQuote, feed.SubTicker, feed.SubKL1m, feed.SubBook}) {
 		t.Fatalf("US focused subs = %v (want quote,ticker,kl1m,book)", d.Subs)
+	}
+	if !d.WantsHistory {
+		t.Fatalf("focused must want history (chart-capable, backs the deep-backfill trigger)")
 	}
 }
 
@@ -216,8 +222,12 @@ func TestEnsureSymbol_InterestNoSubs(t *testing.T) {
 	cd, dem, _ := newCmdWith(t, nil, false)
 	cd.handle(context.Background(), "EnsureSymbol",
 		[]byte(`{"demandId":"p4","symbol":"US.T","profile":"interest"}`), 1)
-	if len(dem.ensured[0].d.Subs) != 0 {
-		t.Fatalf("interest must have no subs, got %v", dem.ensured[0].d.Subs)
+	d := dem.ensured[0].d
+	if len(d.Subs) != 0 {
+		t.Fatalf("interest must have no subs, got %v", d.Subs)
+	}
+	if d.WantsHistory {
+		t.Fatalf("interest must not want history (lightweight news-rotation profile)")
 	}
 }
 

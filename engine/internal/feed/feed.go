@@ -94,17 +94,18 @@ const (
 // Demand is a consumer's declaration of interest. The subscription manager
 // refcounts demands; a symbol's live subscriptions are the union of demands.
 type Demand struct {
-	ID      string
-	Symbol  string
-	Subs    []SubType
-	Focused bool // focused symbols survive LRU eviction under quota pressure
+	ID           string
+	Symbol       string
+	Subs         []SubType
+	Focused      bool // focused symbols survive LRU eviction under quota pressure
+	WantsHistory bool // chart-capable demand: worth a deep-history backfill (see uihub.Hub.handleEnsureDemand)
 }
 
 // WatchDemand is the watchlist profile: tape/10s/1m recording, no depth
 // (2 quota slots).
 func WatchDemand(id, symbol string) Demand {
 	return Demand{ID: id, Symbol: symbol,
-		Subs: []SubType{SubTicker, SubKL1m}}
+		Subs: []SubType{SubTicker, SubKL1m}, WantsHistory: true}
 }
 
 // Resolution selects a history series.

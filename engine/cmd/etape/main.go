@@ -154,7 +154,8 @@ func main() {
 		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500,
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
 	}, execCore, st, core)
-	go func() { _ = hub.Run(ctx) }()
+	hubDone := make(chan struct{})
+	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
 	httpSrv := &http.Server{
 		Addr: cfg.UIHub.Addr(), Handler: srv.Handler(), ReadHeaderTimeout: 5 * time.Second,
 		// BaseContext ties every accepted connection's r.Context() to the
@@ -250,6 +251,7 @@ func main() {
 				}()
 			}
 		}
+		hub.SetBackfill(backfillOne) // chart-open demands also deep-backfill (nil-safe if disabled)
 		startPollers(ctx, cfg, client, fd, hub, uihubClk, st, hasTZVenue(cfg), backfillOne, &scanWG)
 	} else {
 		sim := execClk.(*replay.Clock)
@@ -290,10 +292,27 @@ func main() {
 	// srv.Wait() blocks until each connection's conn.run() goroutine has
 	// actually returned, confirming its dispatch loop -- and therefore any
 	// SetConfig call it could make -- is stopped before st.Close() runs.
+	//
+	// backfillWG.Add(1) now has two producers: the scan poller (pool admission,
+	// joined via scanWG) and Hub.handleEnsureDemand (chart-open demand, via the
+	// backfillOne closure injected with SetBackfill). srv.Wait() only proves
+	// every conn's dispatch loop has returned, not that the Hub goroutine has
+	// finished servicing the ensureDemandCh sends those dispatch loops made on
+	// their way out -- that Add(1) can still be in flight on the Hub goroutine
+	// after srv.Wait() returns. <-hubDone closes that gap: Hub.Run only returns
+	// via its own <-ctx.Done() branch, by which point any ensureDemandCh message
+	// it had already received has finished its handleEnsureDemand call (and
+	// therefore its Add, if any), so no further Add(1) can occur once hubDone
+	// closes. Waiting on it here, before scanWG.Wait()/backfillWG.Wait(), keeps
+	// both Add(1) producers quiesced before the counter is read -- otherwise a
+	// late Add could land after backfillWG.Wait() already observed zero,
+	// spawning an unwaited orch.Backfill that touches the store during/after
+	// st.Close().
 	shutCtx, cancelShut := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = httpSrv.Shutdown(shutCtx)
 	cancelShut()
 	srv.Wait()        // every conn.run() returned: no more SetConfig via dispatch
+	<-hubDone         // hub.Run returned: no more handleEnsureDemand, hence no more backfillWG.Add from chart-open demands
 	scanWG.Wait()     // scan poller stopped: no more backfillWG.Add from pool admissions
 	backfillWG.Wait() // boot backfill workers stopped: no more Seed* into the core
 	pipeWG.Wait()     // feed->core pipe stopped: no more RecordEvent

@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { PanelProps } from "./registry";
 import type { ScannerSession } from "../../wire/contract";
-import type { LinkGroup } from "../linkGroups";
 import { useTheme } from "../ThemeProvider";
 import { formatTapeTime } from "../../render/format";
 import { formatChangePct, formatCompactShares, msUntilEtMidnight } from "../format";
@@ -12,7 +11,6 @@ import type { ScannerRowView } from "../../data/ScannerStore";
 const SESSION_LABEL: Record<ScannerSession, string> = {
   premarket: "Pre-market", rth: "RTH movers", afterhours: "After-hours", overnight: "Overnight",
 };
-const GROUPS: Exclude<LinkGroup, null>[] = ["red", "green", "blue", "yellow"];
 const DEFAULT_SORT: SortState = { col: "changePct", dir: "desc" };
 const DEFAULT_THRESHOLDS: ScannerThresholds = { minChangePct: 0, floatCapShares: null, minVolume: 0 };
 const COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
@@ -61,7 +59,6 @@ export function ScannerPanel(
   // stray single click while scanning the list should never reassign the linked
   // group's live symbol.
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
-  const targetGroup = ((config.settings.targetGroup as LinkGroup) ?? "green") as Exclude<LinkGroup, null>;
 
   // ET-midnight dedup reset: clear the per-session seen-sets so the next session's
   // first prints flash fresh. Re-arms after each fire.
@@ -90,8 +87,6 @@ export function ScannerPanel(
     onConfigChange({ ...config.settings, sort: next });
   };
 
-  const swatch = (g: Exclude<LinkGroup, null>): string =>
-    ({ red: palette.linkRed, green: palette.linkGreen, blue: palette.linkBlue, yellow: palette.linkYellow }[g]);
   const header = cv.refreshedAt
     ? `${SESSION_LABEL[cv.session!]} · updated ${formatTapeTime(cv.refreshedAt)}`
     : "Waiting for scanner data…";
@@ -107,13 +102,6 @@ export function ScannerPanel(
             ⚙ filters
           </button>
         )}
-        <span style={{ flex: 1 }} />
-        {GROUPS.map((g) => (
-          <button key={g} title={`Send clicks to ${g}`} aria-label={`send clicks to ${g}`}
-            onClick={() => onConfigChange({ ...config.settings, targetGroup: g })}
-            style={{ width: 14, height: 14, borderRadius: 3, background: swatch(g), padding: 0, cursor: "pointer",
-              border: targetGroup === g ? `2px solid ${palette.text}` : `1px solid ${palette.border}` }} />
-        ))}
         {variant === "scanner" && filtersOpen && (
           <div className="popover" style={{ top: 30, left: 8, width: 220 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -153,7 +141,7 @@ export function ScannerPanel(
             return (
             <tr key={r.symbol}
               onClick={() => setSelectedSymbol(r.symbol)}
-              onDoubleClick={() => linkGroups.focus(targetGroup, r.symbol)}
+              onDoubleClick={() => linkGroups.focus(config.group ?? "green", r.symbol)}
               style={{ cursor: "pointer", textAlign: "right", opacity: r.muted ? 0.55 : 1, userSelect: "none",
                 background: selected ? "rgba(154,106,27,.16)" : r.isNewHit ? "rgba(154,106,27,.10)" : "transparent",
                 boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : r.isNewHit ? `inset 2px 0 0 ${palette.accent}` : "none" }}>

@@ -3,6 +3,7 @@ package opend
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -136,6 +137,55 @@ func TestHistoryBarsQuotaGuard(t *testing.T) {
 	_, err := f.HistoryBars(ctx, "US.NEW", feed.Res1m, time.UnixMilli(0), time.UnixMilli(1))
 	if !errors.Is(err, ErrHistoryQuotaExhausted) {
 		t.Fatalf("err = %v, want ErrHistoryQuotaExhausted", err)
+	}
+}
+
+// TestHistoryBarsCoalescesConcurrentSameSymbol guards against a real
+// double-quota-spend bug: deep backfill can now be triggered by two
+// independent producers racing on the same symbol (scanner-pool admission
+// and a UI chart-open demand, see uihub.Hub.handleEnsureDemand). Since the
+// fetched-dedup map is only updated *after* a fetch completes, two calls
+// that both arrive before either finishes would, without coalescing, each
+// pass the quota-exhaustion guard and each spend a real history-quota slot
+// for what should be one fetch.
+func TestHistoryBarsCoalescesConcurrentSameSymbol(t *testing.T) {
+	m := newMockOpenD(t)
+	m.setData("US.AAPL", &qotData{bars1m: []*qotcommon.KLine{kl(1782146460, 309.1, 1000)}})
+	cli := liveClient(t, m)
+	f := NewOpenDFeed(cli, FeedOptions{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = f.Run(ctx) }()
+
+	const n = 5
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	bars := make([][]feed.Bar, n)
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func(i int) {
+			defer wg.Done()
+			bars[i], errs[i] = f.HistoryBars(ctx, "US.AAPL", feed.ResDay, time.UnixMilli(0), time.UnixMilli(1))
+		}(i)
+	}
+	wg.Wait()
+
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("call %d: %v", i, err)
+		}
+		if len(bars[i]) != 1 {
+			t.Fatalf("call %d: got %d bars, want 1", i, len(bars[i]))
+		}
+	}
+	var histReqs int
+	for _, fr := range m.snapshotRequests() {
+		if fr.ProtoID == ProtoQotRequestHistoryKL {
+			histReqs++
+		}
+	}
+	if histReqs != 1 {
+		t.Fatalf("history requests sent = %d, want 1 (concurrent same-symbol calls must coalesce)", histReqs)
 	}
 }
 
