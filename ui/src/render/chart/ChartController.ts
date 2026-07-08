@@ -1,7 +1,7 @@
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import type { Palette } from "../palette";
 import type { Bar } from "../../wire/contract";
-import { chartOptions, candleOptions, volumeOptions, VOLUME_SCALE_MARGINS, INDICATOR_LINE_WIDTH, OVERLAY_NO_AUTOSCALE } from "./chartTheme";
+import { chartOptions, candleOptions, volumeOptions, mainSeriesOptions, VOLUME_SCALE_MARGINS, INDICATOR_LINE_WIDTH, OVERLAY_NO_AUTOSCALE, type ChartType } from "./chartTheme";
 import { sessionAt } from "./sessions";
 import type { Band } from "./sessions";
 import { describeIndicator, withDefaultParams, type IndicatorInstance } from "./indicatorSeries";
@@ -35,6 +35,7 @@ export class ChartController {
   private indicatorApplied = new Map<string, number>(); // per-series point count applied via setData/update
   private indicatorLastKey = new Map<string, string>(); // per-series fingerprint of the last applied point, `${timeMs}|${value}`
   private backfilled = false;
+  private chartType: ChartType = "candle";
   private readonly indicators = new Map<string, { inst: IndicatorInstance; series: Map<string, LwcSeries> }>();
 
   constructor(
@@ -88,13 +89,13 @@ export class ChartController {
         return;
       }
       for (let i = from; i < bars.length; i++) {
-        this.candle.update(toCandle(bars[i]));
+        this.candle.update(this.mainPoint(bars[i]));
         this.volume.update(toVolume(bars[i], this.palette));
       }
       this.lastAppliedCount = bars.length;
       this.lastAppliedKey = keyOf(last);
     } else if (lastChanged) {
-      this.candle.update(toCandle(last));
+      this.candle.update(this.mainPoint(last));
       this.volume.update(toVolume(last, this.palette));
       this.lastAppliedKey = keyOf(last);
       // Auto-follow is LWC's default when already at the right edge; never force it
@@ -104,7 +105,7 @@ export class ChartController {
 
   private setAllBars(bars: Bar[]): void {
     const pad = this.leftPad(bars);
-    this.candle.setData([...pad, ...bars.map(toCandle)]);
+    this.candle.setData([...pad, ...bars.map((b) => this.mainPoint(b))]);
     this.volume.setData([...pad, ...bars.map((b) => toVolume(b, this.palette))]);
     this.backfilled = true;
     // lastAppliedCount/lastAppliedKey track the REAL bars only — the incremental
@@ -276,10 +277,29 @@ export class ChartController {
   setPalette(p: Palette): void {
     this.palette = p;
     this.facade.applyOptions(chartOptions(p));
-    this.candle.applyOptions(candleOptions(p));
+    this.candle.applyOptions(mainSeriesOptions(this.chartType, p));
     this.volume.applyOptions(volumeOptions(p));
     for (const { inst, series } of this.indicators.values())
       for (const d of describeIndicator(inst, p)) series.get(d.key)?.applyOptions({ color: d.color });
+  }
+
+  // Main-series data point matched to the active chart type: OHLC for candle/bar,
+  // single close value for line/area (LWC line/area series read `.value`).
+  private mainPoint(b: Bar): object {
+    return this.chartType === "line" || this.chartType === "area"
+      ? { time: toLwcTime(b.bucketStart), value: b.c }
+      : toCandle(b);
+  }
+
+  setChartType(type: ChartType): void {
+    if (type === this.chartType) return;
+    this.chartType = type;
+    this.candle = this.facade.setMainSeries(type, mainSeriesOptions(type, this.palette));
+    // Force a full re-seed of the new series on the next sync().
+    this.backfilled = false;
+    this.lastAppliedCount = 0;
+    this.lastAppliedKey = "";
+    this.liftCandleToTop();
   }
 
   setFills(markers: FillMarker[]): void { this.facade.setFillMarkers(markers); }

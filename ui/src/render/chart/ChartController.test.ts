@@ -482,3 +482,45 @@ describe("ChartController main series + facade capabilities", () => {
     expect(facade.crosshairCb).toBeNull();
   });
 });
+
+describe("ChartController.setChartType", () => {
+  const bars = [bar("2026-07-08T13:30:00Z", 10), bar("2026-07-08T13:31:00Z", 11)];
+
+  it("recreates the main series with the new kind", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount(); c.sync();
+    c.setChartType("line");
+    expect(facade.mainKind).toBe("line");
+  });
+
+  it("feeds line/area main series {time,value}, and candle/bar main series OHLC", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.setChartType("line"); c.sync();
+    const lineMain = facade.created[facade.created.length - 1].series;
+    const lineData = lineMain.setDataCalls[lineMain.setDataCalls.length - 1] as Array<Record<string, unknown>>;
+    const lineReal = lineData.filter((d) => "value" in d);
+    expect(lineReal[0]).toHaveProperty("value", 10);
+    expect(lineReal[0]).not.toHaveProperty("open");
+
+    c.setChartType("candle"); c.sync();
+    const candleMain = facade.created[facade.created.length - 1].series;
+    const candleData = candleMain.setDataCalls[candleMain.setDataCalls.length - 1] as Array<Record<string, unknown>>;
+    const candleReal = candleData.filter((d) => "close" in d);
+    expect(candleReal[0]).toMatchObject({ open: 10, high: 10, low: 10, close: 10 });
+  });
+
+  it("is a no-op when the type is unchanged", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    const before = facade.created.length;
+    c.setChartType("candle");
+    expect(facade.created.length).toBe(before);
+  });
+});
