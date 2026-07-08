@@ -40,11 +40,19 @@ type Archive interface {
 // cannot overflow the 8192-deep updates channel (each 1m bar fans out to ~8
 // updates: 1m + intraday cascade + daily + weekly/monthly); the concurrent
 // forwardMD drains between chunks.
-func seedChunked(chunk int, bars []feed.Bar, seed func([]feed.Bar)) {
+//
+// seed() blocks on a send into md.Core's bounded inbox, which nothing drains
+// once Core.Run has returned (e.g. during shutdown). ctx is checked between
+// chunks so a cancellation stops further seeding promptly instead of risking
+// a block on a full, undrained inbox forever.
+func seedChunked(ctx context.Context, chunk int, bars []feed.Bar, seed func([]feed.Bar)) {
 	if chunk <= 0 {
 		chunk = 500
 	}
 	for i := 0; i < len(bars); i += chunk {
+		if ctx.Err() != nil {
+			return
+		}
 		end := i + chunk
 		if end > len(bars) {
 			end = len(bars)
@@ -113,7 +121,7 @@ func (o *Orchestrator) Run(ctx context.Context, symbols []string) {
 func (o *Orchestrator) Backfill(ctx context.Context, symbol string) {
 	now := o.clk.Now()
 	from1m := intradayFrom(now, o.cfg.IntradayDays)
-	o.warmStart(symbol, from1m, now)
+	o.warmStart(ctx, symbol, from1m, now)
 	o.fillDaily(ctx, symbol, o.dailyFrom(now), now)
 	o.fill1m(ctx, symbol, from1m, now)
 }
@@ -126,16 +134,16 @@ func (o *Orchestrator) dailyFrom(now time.Time) time.Time {
 	return now.AddDate(-o.cfg.DailyYears, 0, 0)
 }
 
-func (o *Orchestrator) warmStart(symbol string, from1m, now time.Time) {
+func (o *Orchestrator) warmStart(ctx context.Context, symbol string, from1m, now time.Time) {
 	if daily, err := o.archive.ReadDailyBars(symbol); err != nil {
 		slog.Warn("backfill: warm-start daily read failed", "symbol", symbol, "err", err)
 	} else if len(daily) > 0 {
-		seedChunked(o.cfg.SeedChunk, daily, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
+		seedChunked(ctx, o.cfg.SeedChunk, daily, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
 	}
 	if m1, err := o.archive.ReadBars1m(symbol, from1m.UnixMilli(), now.UnixMilli()); err != nil {
 		slog.Warn("backfill: warm-start 1m read failed", "symbol", symbol, "err", err)
 	} else if len(m1) > 0 {
-		seedChunked(o.cfg.SeedChunk, m1, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+		seedChunked(ctx, o.cfg.SeedChunk, m1, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
 	}
 }
 
@@ -156,7 +164,7 @@ func (o *Orchestrator) fillDaily(ctx context.Context, symbol string, from, to ti
 			return
 		}
 	}
-	seedChunked(o.cfg.SeedChunk, bars, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
+	seedChunked(ctx, o.cfg.SeedChunk, bars, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
 }
 
 func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.Time) {
@@ -166,7 +174,7 @@ func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.
 		bars = nil
 	}
 	if len(bars) > 0 {
-		seedChunked(o.cfg.SeedChunk, bars, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+		seedChunked(ctx, o.cfg.SeedChunk, bars, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
 	}
 	if o.fallback == nil {
 		return
@@ -187,7 +195,7 @@ func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.
 		return
 	}
 	if len(gap) > 0 {
-		seedChunked(o.cfg.SeedChunk, gap, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+		seedChunked(ctx, o.cfg.SeedChunk, gap, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
 	}
 }
 

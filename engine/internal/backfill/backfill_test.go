@@ -35,7 +35,7 @@ func TestSeedChunkedSplitsAndPreservesOrder(t *testing.T) {
 		bars[i] = feed.Bar{Symbol: "US.AAPL", BucketMs: int64(i)}
 	}
 	var calls [][]feed.Bar
-	seedChunked(500, bars, func(b []feed.Bar) {
+	seedChunked(context.Background(), 500, bars, func(b []feed.Bar) {
 		calls = append(calls, append([]feed.Bar(nil), b...))
 	})
 	if len(calls) != 3 || len(calls[0]) != 500 || len(calls[1]) != 500 || len(calls[2]) != 200 {
@@ -53,9 +53,53 @@ func TestSeedChunkedSplitsAndPreservesOrder(t *testing.T) {
 	}
 	// Empty input => no calls.
 	calls = nil
-	seedChunked(500, nil, func(b []feed.Bar) { calls = append(calls, b) })
+	seedChunked(context.Background(), 500, nil, func(b []feed.Bar) { calls = append(calls, b) })
 	if len(calls) != 0 {
 		t.Fatalf("empty input produced %d calls", len(calls))
+	}
+}
+
+func TestSeedChunkedStopsOnCanceledContext(t *testing.T) {
+	bars := make([]feed.Bar, 1200)
+	for i := range bars {
+		bars[i] = feed.Bar{Symbol: "US.AAPL", BucketMs: int64(i)}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already canceled before seeding starts
+	var calls int
+	seedChunked(ctx, 500, bars, func(b []feed.Bar) { calls++ })
+	if calls != 0 {
+		t.Fatalf("seed calls with a pre-canceled ctx = %d, want 0", calls)
+	}
+}
+
+// cancelAfterNSeeder cancels its context after N chunks have been seeded, so
+// tests can assert seedChunked stops issuing further seed() calls once
+// cancellation is observed mid-run (not just when already canceled up front).
+type cancelAfterNSeeder struct {
+	cancel context.CancelFunc
+	n      int
+	calls  int
+}
+
+func (c *cancelAfterNSeeder) seed(_ []feed.Bar) {
+	c.calls++
+	if c.calls == c.n {
+		c.cancel()
+	}
+}
+
+func TestSeedChunkedStopsAfterMidRunCancellation(t *testing.T) {
+	bars := make([]feed.Bar, 1200) // 3 chunks of 500
+	for i := range bars {
+		bars[i] = feed.Bar{Symbol: "US.AAPL", BucketMs: int64(i)}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s := &cancelAfterNSeeder{cancel: cancel, n: 1}
+	seedChunked(ctx, 500, bars, s.seed)
+	if s.calls != 1 {
+		t.Fatalf("seed calls after mid-run cancellation = %d, want 1 (of 3 possible chunks)", s.calls)
 	}
 }
 
