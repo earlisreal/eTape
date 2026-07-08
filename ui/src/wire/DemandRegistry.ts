@@ -18,6 +18,16 @@ const ACCEPTED: AckMsg = { kind: "ack", corrId: "", status: "accepted" };
 // no coordination).
 export class DemandRegistry {
   private readonly live = new Map<string, { symbol: string; profile: DemandProfile }>();
+  // Per-panel monotonic epoch + in-flight marker, guarding against a
+  // release() racing an ensure() that hasn't resolved yet (panel closed
+  // between mount and the EnsureSymbol round-trip). release() bumps the
+  // epoch so a since-invalidated ensure can't resurrect a `live` entry for a
+  // panel that no longer exists, and consults `pending` (not just `live`) so
+  // it still sends ReleaseSymbol for a demand the engine may already be
+  // processing — otherwise the ack lands, `live` gets a phantom entry, and
+  // reannounce() re-asserts it forever (a permanent quota leak).
+  private readonly epoch = new Map<string, number>();
+  private readonly pending = new Set<string>();
 
   constructor(private readonly client: DemandClient) {
     this.client.onState((s) => {
@@ -31,14 +41,30 @@ export class DemandRegistry {
   async ensure(panelId: string, symbol: string, profile: DemandProfile): Promise<AckMsg> {
     const cur = this.live.get(panelId);
     if (cur && cur.symbol === symbol && cur.profile === profile) return ACCEPTED;
-    const ack = await this.client.sendCommand("EnsureSymbol", { demandId: panelId, symbol, profile });
-    if (ack.status === "accepted") this.live.set(panelId, { symbol, profile });
-    return ack;
+    const myEpoch = (this.epoch.get(panelId) ?? 0) + 1;
+    this.epoch.set(panelId, myEpoch);
+    this.pending.add(panelId);
+    try {
+      const ack = await this.client.sendCommand("EnsureSymbol", { demandId: panelId, symbol, profile });
+      // Only commit to `live` if no release() (or newer ensure()) has bumped
+      // the epoch since this call started — otherwise this ack belongs to a
+      // demand that's since been torn down and must not resurrect it.
+      if (ack.status === "accepted" && this.epoch.get(panelId) === myEpoch) this.live.set(panelId, { symbol, profile });
+      return ack;
+    } finally {
+      // Guard the same way: if a newer ensure() for this panel is still
+      // in-flight, don't clear `pending` out from under it.
+      if (this.epoch.get(panelId) === myEpoch) this.pending.delete(panelId);
+    }
   }
 
   release(panelId: string): void {
-    if (!this.live.has(panelId)) return;
+    const wasLive = this.live.has(panelId);
+    const wasPending = this.pending.has(panelId);
+    if (!wasLive && !wasPending) return; // never ensured at all — genuine no-op
+    this.epoch.set(panelId, (this.epoch.get(panelId) ?? 0) + 1); // invalidate any in-flight ensure
     this.live.delete(panelId);
+    this.pending.delete(panelId);
     void this.client.sendCommand("ReleaseSymbol", { demandId: panelId });
   }
 

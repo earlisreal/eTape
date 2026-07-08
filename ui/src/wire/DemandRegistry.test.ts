@@ -18,6 +18,27 @@ function fakeClient() {
   };
 }
 
+// A client whose sendCommand promise resolution is controlled manually, so
+// tests can interleave a release() in between an ensure() call and the
+// moment its EnsureSymbol ack actually resolves.
+function controlledClient() {
+  const sent: { name: string; args: any }[] = [];
+  let stateCb: ((s: ConnState) => void) | null = null;
+  const resolvers: Array<(ack: AckMsg) => void> = [];
+  return {
+    sent,
+    resolvers,
+    fireState: (s: ConnState) => stateCb?.(s),
+    client: {
+      sendCommand: (name: string, args: unknown) => {
+        sent.push({ name, args });
+        return new Promise<AckMsg>((resolve) => resolvers.push(resolve));
+      },
+      onState: (cb: (s: ConnState) => void) => { stateCb = cb; },
+    },
+  };
+}
+
 describe("DemandRegistry", () => {
   it("ensure sends EnsureSymbol and records on accept", async () => {
     const f = fakeClient();
@@ -64,6 +85,47 @@ describe("DemandRegistry", () => {
     // releasing an unknown panel is a no-op
     reg.release("nope");
     expect(f.sent.length).toBe(2);
+  });
+
+  it("release() before an in-flight ensure() resolves sends ReleaseSymbol exactly once and leaves no phantom live entry", async () => {
+    const f = controlledClient();
+    const reg = new DemandRegistry(f.client);
+
+    // Panel mounts, firing ensure(); the round-trip hasn't resolved yet.
+    const ensurePromise = reg.ensure("p1", "US.AAPL", "watch");
+    expect(f.sent).toEqual([{ name: "EnsureSymbol", args: { demandId: "p1", symbol: "US.AAPL", profile: "watch" } }]);
+
+    // Panel unmounts before the ack arrives.
+    reg.release("p1");
+
+    // Now the in-flight EnsureSymbol ack resolves, accepted.
+    f.resolvers[0]({ kind: "ack", corrId: "", status: "accepted" });
+    await ensurePromise;
+
+    // Exactly one ReleaseSymbol was sent — not zero (the old bug: release()
+    // no-oped because `live` didn't have the panel yet) and not duplicated.
+    const releaseCalls = f.sent.filter((c) => c.name === "ReleaseSymbol");
+    expect(releaseCalls).toEqual([{ name: "ReleaseSymbol", args: { demandId: "p1" } }]);
+
+    // No phantom `live` entry: a subsequent ensure() for the identical
+    // symbol+profile must NOT dedupe (it must re-send), because the panel
+    // is no longer considered live.
+    f.sent.length = 0;
+    const ack2 = reg.ensure("p1", "US.AAPL", "watch");
+    expect(f.sent).toEqual([{ name: "EnsureSymbol", args: { demandId: "p1", symbol: "US.AAPL", profile: "watch" } }]);
+    // resolvers[0] = the original in-flight EnsureSymbol (already resolved above),
+    // resolvers[1] = release()'s fire-and-forget ReleaseSymbol (left unresolved,
+    // nothing awaits it), resolvers[2] = this second ensure()'s EnsureSymbol.
+    f.resolvers[2]({ kind: "ack", corrId: "", status: "accepted" });
+    await ack2;
+
+    // And reannounce (WS reconnect) must not re-assert the phantom demand —
+    // by now p1 is genuinely live again from the re-ensure above, so this
+    // just confirms reannounce reflects the real (single) live entry, not a
+    // leaked duplicate.
+    f.sent.length = 0;
+    f.fireState("open");
+    expect(f.sent).toEqual([{ name: "EnsureSymbol", args: { demandId: "p1", symbol: "US.AAPL", profile: "watch" } }]);
   });
 
   it("re-announces every live demand on reconnect (state=open)", async () => {
