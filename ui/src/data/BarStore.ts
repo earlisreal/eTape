@@ -21,10 +21,23 @@ export class BarStore extends PaintStore {
     const k = this.key(b.symbol, b.timeframe);
     const arr = this.series_.get(k) ?? [];
     const last = arr[arr.length - 1];
-    if (last && last.bucketStart === b.bucketStart) {
+    if (!last || b.bucketStart > last.bucketStart) {
+      arr.push(b); // common case: new bucket at the tail (or first bar ever)
+    } else if (b.bucketStart === last.bucketStart) {
       arr[arr.length - 1] = b; // upsert in place (in-progress update or finalize)
     } else {
-      arr.push(b);             // new bucket
+      // Out-of-order delta (reconnect replay, a late tick belonging to an earlier
+      // bucket): keep the series sorted so a downstream consumer (e.g. the chart
+      // controller feeding Lightweight Charts, which throws on a non-monotonic
+      // time) never sees bucketStart go backwards.
+      const idx = arr.findIndex((x) => x.bucketStart === b.bucketStart);
+      if (idx >= 0) {
+        arr[idx] = b; // late revision to an already-recorded earlier bucket
+      } else {
+        let i = arr.length - 1;
+        while (i >= 0 && arr[i].bucketStart > b.bucketStart) i--;
+        arr.splice(i + 1, 0, b);
+      }
     }
     this.series_.set(k, arr);
     this.markDirty();

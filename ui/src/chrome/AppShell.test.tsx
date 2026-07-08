@@ -97,3 +97,21 @@ describe("AppShell onConfigChange", () => {
     expect(last.panels).toHaveLength(2);
   });
 });
+
+describe("AppShell single-panel tab visibility", () => {
+  // A lone panel's own ledger-header already shows its title, so dockview's own tab
+  // strip above it is redundant chrome — hidden until a second panel joins the group.
+  it("hides the dockview tab strip for a single-panel group and shows it once a second panel joins", async () => {
+    const seed: Workspace = { name: "default", panels: [{ id: "orders-1", panelId: "open-orders", group: null, settings: {} }], layout: null };
+    mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    await waitFor(() => expect(screen.getByText("Symbol")).toBeTruthy());
+
+    const tabStrip = () => document.querySelector(".dv-tabs-and-actions-container") as HTMLElement;
+    expect(tabStrip().style.display).toBe("none");
+
+    fireEvent.click(screen.getByText("+ Add panel"));
+    fireEvent.click(screen.getByText("News"));
+    await waitFor(() => expect(tabStrip().style.display).not.toBe("none"));
+  });
+});

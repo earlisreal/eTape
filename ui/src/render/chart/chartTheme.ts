@@ -7,8 +7,11 @@ export interface DeepChartOptions {
   layout?: { background?: { type: "solid"; color: string }; textColor?: string };
   grid?: { vertLines?: { color: string }; horzLines?: { color: string } };
   crosshair?: { mode?: number; vertLine?: { color: string }; horzLine?: { color: string } };
-  rightPriceScale?: { borderColor: string; scaleMargins?: { top: number; bottom: number } };
-  timeScale?: { borderColor: string; rightOffset: number; secondsVisible: boolean; timeVisible: boolean };
+  rightPriceScale?: { borderColor: string; scaleMargins?: { top: number; bottom: number }; minimumWidth?: number };
+  timeScale?: {
+    borderColor: string; rightOffset: number; secondsVisible: boolean; timeVisible: boolean;
+    fixRightEdge?: boolean; shiftVisibleRangeOnNewBar?: boolean;
+  };
   autoSize?: boolean;
 }
 export interface CandleOpts {
@@ -21,6 +24,8 @@ export interface HistogramOpts {
   priceScaleId: string;
   priceFormat: { type: "volume" };
   color?: string;
+  lastValueVisible?: boolean;
+  priceLineVisible?: boolean;
 }
 
 // CrosshairMode.Magnet === 1 in LWC — crosshair snaps to the nearest bar
@@ -48,8 +53,15 @@ export function chartOptions(p: Palette): DeepChartOptions {
       vertLine: { color: p.crosshair },
       horzLine: { color: p.crosshair },
     },
-    rightPriceScale: { borderColor: p.border, scaleMargins: CANDLE_SCALE_MARGINS },
-    timeScale: { borderColor: p.border, rightOffset: 5, secondsVisible: true, timeVisible: true },
+    // minimumWidth: keeps the right axis column from re-sizing (and shifting the whole
+    // plot area) as tick-label widths change with price digit count.
+    rightPriceScale: { borderColor: p.border, scaleMargins: CANDLE_SCALE_MARGINS, minimumWidth: 64 },
+    timeScale: {
+      borderColor: p.border, rightOffset: 5, secondsVisible: true, timeVisible: true,
+      // fixRightEdge: max forward pan is the latest bar + the rightOffset padding above.
+      // shiftVisibleRangeOnNewBar: once at that edge, new bars auto-scroll into view.
+      fixRightEdge: true, shiftVisibleRangeOnNewBar: true,
+    },
     autoSize: false, // we drive resize via ResizeObserver → controller.resize()
   };
 }
@@ -67,5 +79,9 @@ export function volumeOptions(p: Palette): HistogramOpts {
   void p; // signature parity with chartOptions/candleOptions; volume color is per-bar, not palette-level
   // Overlaid on the main pane, its own invisible scale; per-bar color is set on
   // each data point (up/down) at setData/update time by the controller.
-  return { priceScaleId: "", priceFormat: { type: "volume" } };
+  // lastValueVisible/priceLineVisible: false — the volume overlay is a background
+  // histogram, not a tracked series; its last-value label's width varies with
+  // magnitude (e.g. "1.2M" vs "823.4K") and previously made the shared right axis
+  // column (and so the whole plot area) resize/shift as new bars streamed in.
+  return { priceScaleId: "", priceFormat: { type: "volume" }, lastValueVisible: false, priceLineVisible: false };
 }

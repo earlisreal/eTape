@@ -57,6 +57,10 @@ export function ScannerPanel(
   const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [draft, setDraft] = useState<ScannerThresholds>(thresholds);
+  // Single click only highlights a row; double-click is the "load it" gesture — a
+  // stray single click while scanning the list should never reassign the linked
+  // group's live symbol.
+  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const targetGroup = ((config.settings.targetGroup as LinkGroup) ?? "green") as Exclude<LinkGroup, null>;
 
   // ET-midnight dedup reset: clear the per-session seen-sets so the next session's
@@ -144,18 +148,23 @@ export function ScannerPanel(
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={r.symbol} onClick={() => linkGroups.focus(targetGroup, r.symbol)}
-              style={{ cursor: "pointer", textAlign: "right", opacity: r.muted ? 0.55 : 1,
-                background: r.isNewHit ? "rgba(154,106,27,.10)" : "transparent",
-                boxShadow: r.isNewHit ? `inset 2px 0 0 ${palette.accent}` : "none" }}>
+          {rows.map((r) => {
+            const selected = r.symbol === selectedSymbol;
+            return (
+            <tr key={r.symbol}
+              onClick={() => setSelectedSymbol(r.symbol)}
+              onDoubleClick={() => linkGroups.focus(targetGroup, r.symbol)}
+              style={{ cursor: "pointer", textAlign: "right", opacity: r.muted ? 0.55 : 1, userSelect: "none",
+                background: selected ? "rgba(154,106,27,.16)" : r.isNewHit ? "rgba(154,106,27,.10)" : "transparent",
+                boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : r.isNewHit ? `inset 2px 0 0 ${palette.accent}` : "none" }}>
               <td style={{ textAlign: "left", padding: "2px 8px" }}>{r.symbol}</td>
               <td style={{ padding: "2px 8px", color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>{formatChangePct(r.changePct)}</td>
               <td style={{ padding: "2px 8px" }}>{r.last === null ? "—" : r.last.toFixed(2)}</td>
               <td style={{ padding: "2px 8px" }}>{formatCompactShares(r.floatShares)}</td>
               <td style={{ padding: "2px 8px" }}>{formatCompactShares(r.volume)}</td>
             </tr>
-          ))}
+            );
+          })}
           {rows.length === 0 && cv.refreshedAt && (
             <tr><td colSpan={5} style={{ padding: 12, color: palette.textMuted, textAlign: "center" }}>{variant === "movers" ? "No movers right now." : "No symbols match the current filters."}</td></tr>
           )}

@@ -3,7 +3,11 @@
 import { FONTS } from "../palette";
 import { TAPE_ROW_H, type TapePaintState } from "./tapeState";
 
-const PAD = 6;
+// Shared with TapePanel's column-header strip so the labels stay aligned with
+// where the painter actually draws each column.
+export const TAPE_PAD = 6;
+export const TAPE_PRICE_RIGHT_FRAC = 0.68;
+const PAD = TAPE_PAD;
 
 export function paintTape(ctx: CanvasRenderingContext2D, s: TapePaintState): void {
   const p = s.palette;
@@ -56,7 +60,7 @@ export function paintTape(ctx: CanvasRenderingContext2D, s: TapePaintState): voi
     // price + size at full strength in the direction color
     ctx.fillStyle = dir;
     ctx.textAlign = "right";
-    ctx.fillText(r.price, s.width * 0.68, midY);
+    ctx.fillText(r.price, s.width * TAPE_PRICE_RIGHT_FRAC, midY);
     ctx.fillText(r.size, s.width - PAD, midY);
   }
 }

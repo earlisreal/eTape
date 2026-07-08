@@ -22,8 +22,8 @@ function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[]; setDat
 function fakeFacade() {
   const created: Array<{ kind: string; pane: number; options: unknown; series: ReturnType<typeof fakeSeries> }> = [];
   const scaleMargins: Array<{ id: string; margins: { top: number; bottom: number } }> = [];
-  const facade: ChartApiFacade & { created: typeof created; scrolls: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins } = {
-    created, scrolls: 0, bands: 0, lastBands: [], scaleMargins,
+  const facade: ChartApiFacade & { created: typeof created; scrolls: number; resets: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins } = {
+    created, scrolls: 0, resets: 0, bands: 0, lastBands: [], scaleMargins,
     addSeries: (kind, o, pane) => { const s = fakeSeries(); created.push({ kind, pane, options: o, series: s }); return s; },
     removeSeries: () => {},
     setPriceScaleMargins: (id, margins) => { scaleMargins.push({ id, margins }); },
@@ -36,6 +36,7 @@ function fakeFacade() {
     coordinateToPrice: () => 0,
     setPanZoomEnabled: () => {},
     scrollToRealTime: () => { facade.scrolls++; },
+    resetTimeScale: () => { facade.resets++; },
     resize: () => {},
     applyOptions: () => {},
     remove: () => {},
@@ -121,6 +122,13 @@ describe("ChartController", () => {
     expect(facade.scrolls).toBe(0);
     ctrl.jumpToLive();
     expect(facade.scrolls).toBe(1);
+  });
+
+  it("resetZoom resets the time scale to default spacing + the latest bar", () => {
+    const { facade, ctrl } = make(barReaderOf([]));
+    expect(facade.resets).toBe(0);
+    ctrl.resetZoom();
+    expect(facade.resets).toBe(1);
   });
 
   it("addIndicator subscribes and creates the descriptor series; remove unsubscribes", () => {
@@ -372,5 +380,22 @@ describe("ChartController", () => {
     ctrl.sync();
     const updatesAfter = candle.calls.filter((c) => c === "update").length;
     expect(updatesAfter - updatesBefore).toBe(2); // both the finalized bar AND the new bar are pushed
+  });
+
+  it("falls back to a full setData rebuild instead of an out-of-order update() when the series isn't sorted", () => {
+    // Regression for the 10s-chart freeze: series.update() requires a non-decreasing
+    // time; feeding it a bucket earlier than one already applied used to throw and,
+    // under the old Scheduler, permanently kill this chart's paint surface.
+    const bars = [bar("2026-07-06T13:30:00Z", 10)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // backfill via setData
+    const candle = facade.created[0].series;
+    const setDataBefore = candle.calls.filter((c) => c === "setData").length;
+    // Grew from 1 to 3 bars, but the tail isn't sorted (13:31 comes after 13:32).
+    bars.push(bar("2026-07-06T13:32:00Z", 12));
+    bars.push(bar("2026-07-06T13:31:00Z", 11));
+    ctrl.sync();
+    expect(candle.calls.filter((c) => c === "setData").length).toBe(setDataBefore + 1); // full rebuild
+    expect(candle.setDataCalls.at(-1)).toHaveLength(3);
   });
 });

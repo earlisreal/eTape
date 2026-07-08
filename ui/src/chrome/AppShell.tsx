@@ -234,6 +234,13 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     ]),
   );
 
+  // A pane's tab strip is only useful once there's more than one panel to switch
+  // between — a lone panel's own header (PanelFrame's ledger-header) already shows
+  // its title, so the dockview tab above it is pure redundant chrome.
+  const syncTabVisibility = (api: DockviewApi) => {
+    for (const g of api.groups) g.header.hidden = g.panels.length <= 1;
+  };
+
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
     // Restore a previously saved dockview layout if present; otherwise seed the grid
@@ -256,6 +263,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         });
       });
     }
+    syncTabVisibility(event.api);
     // Keep ws.panels in sync when the user closes a dockview tab directly
     // (previously only the layout was re-saved on removal, leaving the closed
     // panel's config as a zombie entry in the workspace doc).
@@ -268,6 +276,10 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       // drop any panel added/removed since mount from the persisted doc.
       const current = wsRef.current ?? ws;
       workspaceStore.save({ ...current, layout: event.api.toJSON() });
+      // "an aggregation of many events" (dockview's own doc comment) — covers
+      // every panel/group add, remove, and move, so a group's tab strip stays
+      // in sync with its current panel count after any rearrangement.
+      syncTabVisibility(event.api);
     });
   };
 

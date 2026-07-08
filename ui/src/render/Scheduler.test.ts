@@ -45,7 +45,7 @@ describe("Scheduler", () => {
     expect(paintA).toHaveBeenCalledTimes(1); // no longer dirty
   });
 
-  it("unregisters a painter that throws and reports it, others survive", () => {
+  it("unregisters a painter that keeps throwing every frame and reports it, others survive", () => {
     const raf = new FakeRaf();
     const onErr = vi.fn();
     const sched = new Scheduler(raf, onErr);
@@ -53,11 +53,30 @@ describe("Scheduler", () => {
     sched.register(surf("bad", () => true, () => { throw new Error("boom"); }));
     sched.register(surf("good", () => true, good));
     sched.start();
-    raf.tick();
+    for (let i = 0; i < 10; i++) raf.tick(); // MAX_CONSECUTIVE_FAILURES worth of frames
+    expect(onErr).toHaveBeenCalledTimes(10);
     expect(onErr).toHaveBeenCalledWith("bad", expect.any(Error));
-    expect(good).toHaveBeenCalledTimes(1);
+    expect(good).toHaveBeenCalledTimes(10);
     raf.tick();
-    expect(good).toHaveBeenCalledTimes(2); // bad no longer scheduled; good keeps painting
+    expect(good).toHaveBeenCalledTimes(11); // bad no longer scheduled; good keeps painting
+  });
+
+  it("survives a single transient throw and keeps painting on the next dirty frame", () => {
+    const raf = new FakeRaf();
+    const onErr = vi.fn();
+    const sched = new Scheduler(raf, onErr);
+    let shouldThrow = true;
+    const paint = vi.fn(() => {
+      if (shouldThrow) { shouldThrow = false; throw new Error("transient"); }
+    });
+    sched.register(surf("flaky", () => true, paint));
+    sched.start();
+    raf.tick(); // throws once
+    expect(onErr).toHaveBeenCalledTimes(1);
+    raf.tick(); // recovers — still registered, paints successfully
+    expect(paint).toHaveBeenCalledTimes(2);
+    raf.tick(); // a later, unrelated failure starts counting from zero again
+    expect(onErr).toHaveBeenCalledTimes(1);
   });
 
   it("paints all surfaces sharing one store when each tracks its own rev cursor (regression: shared consumeDirty() starved every panel but the first)", () => {

@@ -28,6 +28,24 @@ describe("BarStore", () => {
     expect(s.series("US.AAPL", "1m")[0].c).toBe(3.58);
   });
 
+  it("inserts an out-of-order delta in sorted position instead of appending it out of order", () => {
+    const s = new BarStore();
+    s.apply(delta(bar("09:30", 3.5, false)));
+    s.apply(delta(bar("09:32", 3.7, false)));
+    s.apply(delta(bar("09:31", 3.6, false))); // arrives late, belongs between the two above
+    expect(s.series("US.AAPL", "1m").map((b) => b.bucketStart)).toEqual(["09:30", "09:31", "09:32"]);
+  });
+
+  it("revises an already-recorded earlier bucket in place without duplicating it", () => {
+    const s = new BarStore();
+    s.apply(delta(bar("09:30", 3.5, false)));
+    s.apply(delta(bar("09:31", 3.6, false)));
+    s.apply(delta(bar("09:30", 3.55, false))); // late revision to the now-earlier bucket
+    const series = s.series("US.AAPL", "1m");
+    expect(series).toHaveLength(2);
+    expect(series[0]).toMatchObject({ bucketStart: "09:30", c: 3.55 });
+  });
+
   it("keeps series for different timeframes separate", () => {
     const s = new BarStore();
     s.apply(delta(bar("09:30", 3.5, false)));

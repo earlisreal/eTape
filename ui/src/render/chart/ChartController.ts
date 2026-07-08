@@ -53,11 +53,7 @@ export class ChartController {
   private applyBars(bars: Bar[]): void {
     if (bars.length === 0) return; // cold symbol — panel shows the hint, not an error
     if (!this.backfilled) {
-      this.candle.setData(bars.map(toCandle));
-      this.volume.setData(bars.map((b) => toVolume(b, this.palette)));
-      this.backfilled = true;
-      this.lastAppliedCount = bars.length;
-      this.lastAppliedKey = keyOf(bars[bars.length - 1]);
+      this.setAllBars(bars);
       return;
     }
     const last = bars[bars.length - 1];
@@ -71,7 +67,17 @@ export class ChartController {
       // applied state and may have itself changed (e.g. finalized) during the same
       // missed window that produced the new bars — re-flushing it is harmless/idempotent
       // if unchanged, and necessary if it did change.
-      for (let i = Math.max(0, this.lastAppliedCount - 1); i < bars.length; i++) {
+      const from = Math.max(0, this.lastAppliedCount - 1);
+      if (!isSorted(bars, from)) {
+        // BarStore keeps its series sorted, so this should never fire — but LWC's
+        // series.update() throws on a non-monotonic time, and that throw used to
+        // permanently freeze this chart (Scheduler used to drop a panel on its first
+        // paint error). Rebuilding via setData is always safe, so prefer a full
+        // resync over ever risking that throw.
+        this.setAllBars(bars);
+        return;
+      }
+      for (let i = from; i < bars.length; i++) {
         this.candle.update(toCandle(bars[i]));
         this.volume.update(toVolume(bars[i], this.palette));
       }
@@ -84,6 +90,14 @@ export class ChartController {
       // Auto-follow is LWC's default when already at the right edge; never force it
       // when the user has scrolled back (honesty: don't yank their view).
     }
+  }
+
+  private setAllBars(bars: Bar[]): void {
+    this.candle.setData(bars.map(toCandle));
+    this.volume.setData(bars.map((b) => toVolume(b, this.palette)));
+    this.backfilled = true;
+    this.lastAppliedCount = bars.length;
+    this.lastAppliedKey = keyOf(bars[bars.length - 1]);
   }
 
   private applyIndicators(): void {
@@ -229,6 +243,7 @@ export class ChartController {
   setFills(markers: FillMarker[]): void { this.facade.setFillMarkers(markers); }
   resize(w: number, h: number): void { this.facade.resize(w, h); }
   jumpToLive(): void { this.facade.scrollToRealTime(); }
+  resetZoom(): void { this.facade.resetTimeScale(); }
   dispose(): void {
     for (const id of [...this.indicators.keys()]) this.removeIndicator(id);
     this.facade.remove();
@@ -236,6 +251,15 @@ export class ChartController {
 }
 
 function keyOf(b: Bar): string { return `${b.bucketStart}|${b.c}|${b.h}|${b.l}|${b.v}|${b.inProgress}`; }
+// Whether bars[from..] is non-decreasing by bucketStart — the property update()'s
+// bar-by-bar replay depends on to never hand Lightweight Charts a time that goes
+// backwards relative to what it was already given.
+function isSorted(bars: Bar[], from: number): boolean {
+  for (let i = Math.max(from, 1); i < bars.length; i++) {
+    if (bars[i].bucketStart < bars[i - 1].bucketStart) return false;
+  }
+  return true;
+}
 function toCandle(b: Bar) { return { time: toLwcTime(b.bucketStart), open: b.o, high: b.h, low: b.l, close: b.c }; }
 function toVolume(b: Bar, p: Palette) {
   return { time: toLwcTime(b.bucketStart), value: b.v, color: b.c >= b.o ? p.volUp : p.volDown };

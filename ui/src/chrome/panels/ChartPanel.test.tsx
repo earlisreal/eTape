@@ -4,13 +4,17 @@ import { render, cleanup, fireEvent, within } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 
 // Mock lightweight-charts so the panel test never touches a real canvas.
+// timeScaleApi is a stable object (not a fresh literal per call) so a test can hold
+// a reference to e.g. resetTimeScale and assert it was invoked by the SUT.
+const timeScaleApi = { timeToCoordinate: vi.fn(() => 0), scrollToRealTime: vi.fn(), scrollPosition: vi.fn(() => 0),
+  coordinateToLogical: vi.fn(() => 0), logicalToCoordinate: vi.fn(() => 0), resetTimeScale: vi.fn() };
 const chartApi = {
-  addSeries: vi.fn(() => ({ setData: vi.fn(), update: vi.fn(), applyOptions: vi.fn(),
+  addSeries: vi.fn(() => ({ setData: vi.fn(), update: vi.fn(), applyOptions: vi.fn(), setSeriesOrder: vi.fn(),
     attachPrimitive: vi.fn(), priceToCoordinate: vi.fn(() => 0), coordinateToPrice: vi.fn(() => 0) })),
   removeSeries: vi.fn(),
   panes: vi.fn(() => [{ attachPrimitive: vi.fn() }]),
-  timeScale: vi.fn(() => ({ timeToCoordinate: vi.fn(() => 0), scrollToRealTime: vi.fn(), scrollPosition: vi.fn(() => 0),
-    coordinateToLogical: vi.fn(() => 0), logicalToCoordinate: vi.fn(() => 0) })),
+  priceScale: vi.fn(() => ({ applyOptions: vi.fn() })),
+  timeScale: vi.fn(() => timeScaleApi),
   applyOptions: vi.fn(), resize: vi.fn(), remove: vi.fn(),
 };
 vi.mock("lightweight-charts", () => ({
@@ -110,5 +114,32 @@ describe("ChartPanel", () => {
     renderChart("panel-b", stores);
     stores.drawings.upsert({ id: "d", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 0, price: 1 }], createdMs: 1, updatedMs: 1 });
     expect(stores.drawings.forSymbol("US.AAPL")).toHaveLength(1);
+  });
+
+  it("right-click opens a context menu; Reset zoom calls the chart's resetTimeScale", () => {
+    const { getByTestId, getByText } = renderChart();
+    fireEvent.contextMenu(getByTestId("chart-host"), { clientX: 20, clientY: 30 });
+    fireEvent.click(getByText("Reset zoom"));
+    expect(timeScaleApi.resetTimeScale).toHaveBeenCalledTimes(1);
+  });
+
+  it("right-click menu's Clear all drawings clears this symbol's drawings", () => {
+    const stores = makeStores();
+    stores.drawings.upsert({ id: "d", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 0, price: 1 }], createdMs: 1, updatedMs: 1 });
+    const { getByTestId, getByText } = renderChart("c1", stores);
+    fireEvent.contextMenu(getByTestId("chart-host"), { clientX: 20, clientY: 30 });
+    fireEvent.click(getByText("Clear all drawings"));
+    expect(stores.drawings.forSymbol("US.AAPL")).toHaveLength(0);
+  });
+
+  it("the context menu closes after an action and on mouse-leave", () => {
+    const { getByTestId, getByText, queryByText } = renderChart();
+    fireEvent.contextMenu(getByTestId("chart-host"), { clientX: 20, clientY: 30 });
+    fireEvent.click(getByText("Reset zoom"));
+    expect(queryByText("Reset zoom")).toBeNull();
+
+    fireEvent.contextMenu(getByTestId("chart-host"), { clientX: 20, clientY: 30 });
+    fireEvent.mouseLeave(getByText("Clear all drawings").parentElement!);
+    expect(queryByText("Clear all drawings")).toBeNull();
   });
 });

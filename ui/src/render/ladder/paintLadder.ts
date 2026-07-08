@@ -83,7 +83,7 @@ function drawSide(
 
   // depth bar, grows outward from the divider
   const half = side === "bid" ? mid : w - mid;
-  const barLen = row.cumFraction * half;
+  const barLen = row.sizeFraction * half;
   ctx.fillStyle = side === "bid" ? p.depthBid : p.depthAsk;
   if (side === "bid") ctx.fillRect(mid - barLen, y, barLen, LADDER_ROW_H);
   else ctx.fillRect(mid, y, barLen, LADDER_ROW_H);

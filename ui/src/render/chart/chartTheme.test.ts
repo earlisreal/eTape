@@ -12,6 +12,13 @@ describe("chartTheme", () => {
     expect(o.crosshair?.vertLine?.color).toBe(LIGHT.crosshair);
   });
 
+  it("locks forward pan to the latest bar + padding and keeps a stable price-scale width", () => {
+    const o = chartOptions(LIGHT);
+    expect(o.timeScale?.fixRightEdge).toBe(true);
+    expect(o.timeScale?.shiftVisibleRangeOnNewBar).toBe(true);
+    expect(o.rightPriceScale?.minimumWidth).toBeGreaterThan(0);
+  });
+
   it("candles use up/down palette colors for body, wick and border", () => {
     const c = candleOptions(DARK);
     expect(c.upColor).toBe(DARK.up);
@@ -26,5 +33,11 @@ describe("chartTheme", () => {
     const v = volumeOptions(LIGHT);
     expect(v.priceScaleId).toBe("");
     expect(v.priceFormat?.type).toBe("volume");
+  });
+
+  it("volume histogram hides its last-value label and price line (no axis-width jitter)", () => {
+    const v = volumeOptions(LIGHT);
+    expect(v.lastValueVisible).toBe(false);
+    expect(v.priceLineVisible).toBe(false);
   });
 });

@@ -11,8 +11,7 @@ export const FLASH_MS = 400;
 export interface LadderRow {
   price: number;
   size: number;
-  cum: number;
-  cumFraction: number;
+  sizeFraction: number;
 }
 
 export interface OrderMark {
@@ -60,20 +59,17 @@ export function entitledForDepth(symbol: string): boolean {
 }
 
 function accumulate(levels: BookLevel[]): LadderRow[] {
-  let cum = 0;
-  return levels.slice(0, LADDER_LEVELS).map((l) => {
-    cum += l.size;
-    return { price: l.price, size: l.size, cum, cumFraction: 0 };
-  });
+  return levels.slice(0, LADDER_LEVELS).map((l) => ({ price: l.price, size: l.size, sizeFraction: 0 }));
 }
 
-/** Book sides (best-first, as delivered) → ladder rows with cumulative sums normalized across BOTH sides. */
+/** Book sides (best-first, as delivered) → ladder rows, each bar length proportional to
+ *  that row's own size, normalized against the largest single level across BOTH sides. */
 export function buildLadderSides(book: Book | undefined): { asks: LadderRow[]; bids: LadderRow[] } {
   const asks = accumulate(book?.asks ?? []);
   const bids = accumulate(book?.bids ?? []);
-  const maxCum = Math.max(asks.at(-1)?.cum ?? 0, bids.at(-1)?.cum ?? 0);
-  for (const r of asks) r.cumFraction = depthFraction(r.cum, maxCum);
-  for (const r of bids) r.cumFraction = depthFraction(r.cum, maxCum);
+  const maxSize = Math.max(0, ...asks.map((r) => r.size), ...bids.map((r) => r.size));
+  for (const r of asks) r.sizeFraction = depthFraction(r.size, maxSize);
+  for (const r of bids) r.sizeFraction = depthFraction(r.size, maxSize);
   return { asks, bids };
 }
 
@@ -125,7 +121,7 @@ export function buildLadderState(args: {
     entitled,
     asks,
     bids,
-    decimals: priceDecimals(prices),
+    decimals: Math.min(priceDecimals(prices), 3),
     spread,
     last: args.last,
     flash: args.flash,

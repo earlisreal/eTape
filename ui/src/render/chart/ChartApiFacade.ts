@@ -27,6 +27,7 @@ export interface ChartApiFacade {
   coordinateToPrice(y: number): number | null;
   setPanZoomEnabled(on: boolean): void;
   scrollToRealTime(): void;
+  resetTimeScale(): void; // default bar spacing + scroll to the latest bar
   resize(width: number, height: number): void;
   applyOptions(options: unknown): void;
   remove(): void;

@@ -49,6 +49,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     coordinateToPrice: (y) => candle?.coordinateToPrice(y as Coordinate) ?? null,
     setPanZoomEnabled: (on) => chart.applyOptions({ handleScroll: on, handleScale: on }),
     scrollToRealTime: () => chart.timeScale().scrollToRealTime(),
+    resetTimeScale: () => chart.timeScale().resetTimeScale(),
     resize: (w, h) => chart.resize(w, h),
     applyOptions: (o) => chart.applyOptions(o as object),
     remove: () => chart.remove(),
@@ -88,6 +89,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [magnet, setMagnet] = useState(true);
   const [chartSymbol, setChartSymbol] = useState(symbol);
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   useEffect(() => { tfRef.current = timeframe; }, [timeframe]);
 
   useEffect(() => {
@@ -219,11 +221,18 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     setInstances(next); controllerRef.current?.removeIndicator(id); persist({ indicators: next });
   };
 
+  const menuRow: React.CSSProperties = { padding: "5px 10px", borderRadius: 4, cursor: "pointer", fontSize: 11.5, whiteSpace: "nowrap" };
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <ChartControls timeframe={timeframe} instances={instances} palette={palette}
         onTimeframe={changeTimeframe} onAdd={addIndicator} onUpdate={updateIndicator} onRemove={removeIndicator} />
-      <div ref={hostRef} style={{ flex: 1, minHeight: 0, position: "relative" }}>
+      <div ref={hostRef} data-testid="chart-host" style={{ flex: 1, minHeight: 0, position: "relative" }}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          const rect = hostRef.current!.getBoundingClientRect();
+          setMenu({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+        }}>
         <DrawingRail
           activeTool={activeTool}
           magnet={magnet}
@@ -234,6 +243,16 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           onDeleteSelection={() => interactionRef.current?.deleteSelection()}
           onClearAll={() => stores.drawings.clearSymbol(chartSymbol)}
         />
+        {menu && (
+          <div className="popover" style={{ left: menu.x, top: menu.y, padding: 4 }} onMouseLeave={() => setMenu(null)}>
+            <div role="button" style={menuRow} onClick={() => { stores.drawings.clearSymbol(chartSymbol); setMenu(null); }}>
+              Clear all drawings
+            </div>
+            <div role="button" style={menuRow} onClick={() => { controllerRef.current?.resetZoom(); setMenu(null); }}>
+              Reset zoom
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

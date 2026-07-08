@@ -31,7 +31,7 @@ export interface DrawingContext {
   magnet(): boolean;
 }
 
-type PointerLike = { clientX: number; clientY: number; target?: EventTarget | null };
+type PointerLike = { clientX: number; clientY: number; target?: EventTarget | null; button?: number };
 type KeyLike = { key: string; preventDefault?: () => void };
 
 type Gesture =
@@ -155,6 +155,9 @@ export class DrawingInteraction {
 
   // --- pointer handlers ---
   private onPointerDown(e: PointerLike): void {
+    // Right-click is reserved for the chart's own context menu (Clear drawings /
+    // Reset zoom) — never start a placement, selection, or measure gesture from it.
+    if (e.button === 2) return;
     // The drawing rail sits inside `host` as a DOM child; its own stopPropagation()
     // runs too late to matter (React's delegated dispatch fires after this raw
     // listener during native bubbling), so guard here on a DOM marker instead.

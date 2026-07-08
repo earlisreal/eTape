@@ -13,9 +13,10 @@ import { FONTS } from "../../render/palette";
 import {
   adjustAnchor, buildTapeRows, liveView, TAPE_ROW_H, type TapeView,
 } from "../../render/tape/tapeState";
-import { paintTape } from "../../render/tape/paintTape";
+import { paintTape, TAPE_PAD, TAPE_PRICE_RIGHT_FRAC } from "../../render/tape/paintTape";
 
 const HEADER_H = 26;
+const COLHEAD_H = 16;
 
 export function TapePanel({ config, stores, scheduler, width, height, linkGroups, onConfigChange }: PanelProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -98,7 +99,7 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
           setPaused(false);
         }
         const { width: w, height: h } = sizeRef.current;
-        const canvasH = h - HEADER_H;
+        const canvasH = h - HEADER_H - COLHEAD_H;
         if (!applyCanvasSize(canvas, ctx, w, canvasH, window.devicePixelRatio || 1)) return;
         const { rows, paused: p } = buildTapeRows(stores.tape, viewRef.current, {
           symbol: symbolRef.current,
@@ -156,6 +157,17 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
             ⏸ paused — jump to live
           </button>
         )}
+      </div>
+      <div
+        style={{
+          position: "relative", height: COLHEAD_H, flex: "none",
+          background: palette.surface, borderBottom: `1px solid ${palette.border}`,
+          fontSize: 10, fontFamily: FONTS.mono, color: palette.textMuted, textTransform: "uppercase",
+        }}
+      >
+        <span style={{ position: "absolute", left: TAPE_PAD, top: "50%", transform: "translateY(-50%)" }}>Time</span>
+        <span style={{ position: "absolute", right: `${(1 - TAPE_PRICE_RIGHT_FRAC) * 100}%`, top: "50%", transform: "translateY(-50%)" }}>Price</span>
+        <span style={{ position: "absolute", right: TAPE_PAD, top: "50%", transform: "translateY(-50%)" }}>Size</span>
       </div>
       <canvas ref={canvasRef} style={{ display: "block", flex: 1, minHeight: 0 }} />
     </div>

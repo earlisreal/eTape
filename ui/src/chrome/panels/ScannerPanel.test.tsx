@@ -61,12 +61,22 @@ describe("ScannerPanel", () => {
     expect(screen.queryByText("US.LOW")).toBeNull();
   });
 
-  it("row click publishes focus to the target group", () => {
+  it("row double-click publishes focus to the target group", () => {
+    const { scanner, focus } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
+    fireEvent.doubleClick(screen.getByText("US.KO"));
+    expect(focus).toHaveBeenCalledWith("green", "US.KO");
+  });
+
+  it("a single row click only highlights the row — it never loads the symbol into the group", () => {
     const { scanner, focus } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
     fireEvent.click(screen.getByText("US.KO"));
-    expect(focus).toHaveBeenCalledWith("green", "US.KO");
+    expect(focus).not.toHaveBeenCalled();
+    const row = screen.getByText("US.KO").closest("tr") as HTMLElement;
+    expect(row.style.background).toBe("rgba(154, 106, 27, 0.16)");
   });
 
   it("has no persistent input row on load; the ⚙ button reveals the filter inputs", () => {

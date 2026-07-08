@@ -42,13 +42,11 @@ describe("entitledForDepth", () => {
 });
 
 describe("buildLadderSides", () => {
-  it("accumulates cumulative size per side and normalizes fractions across BOTH sides", () => {
+  it("scales each row's bar to its own size, normalized against the largest level on either side", () => {
     const { asks, bids } = buildLadderSides(book());
-    expect(bids.map((r) => r.cum)).toEqual([300, 800, 1000]); // running sums
-    expect(asks.map((r) => r.cum)).toEqual([400, 500]);
-    // max cum across both sides is 1000 (bid side) — every fraction is /1000
-    expect(bids[2].cumFraction).toBe(1);
-    expect(asks[1].cumFraction).toBe(0.5);
+    // Largest single level across both sides is bids[1] at 500 — every fraction is /500.
+    expect(bids.map((r) => r.sizeFraction)).toEqual([300 / 500, 1, 200 / 500]);
+    expect(asks.map((r) => r.sizeFraction)).toEqual([400 / 500, 100 / 500]);
   });
   it("caps at LADDER_LEVELS per side", () => {
     const levels = Array.from({ length: 15 }, (_, i) => ({ price: 3.49 - i * 0.01, size: 100 }));
