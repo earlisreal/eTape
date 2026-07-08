@@ -41,8 +41,8 @@ test.describe("trading workspace", () => {
     await expect(page.getByTestId("acct-equity")).toBeVisible({ timeout: 15_000 });
 
     // Two-layer gate: arm master, then the venue.
-    await page.getByTestId("arm-toggle").click();
-    await expect(page.getByTestId("arm-toggle")).toHaveText("ARMED");
+    await page.getByTestId("arm-chip").click();
+    await expect(page.getByTestId("arm-chip")).toHaveText("ARMED");
     await page.getByTestId("venue-arm-sim-paper").click();
     await expect(page.getByTestId("venue-arm-sim-paper")).toHaveAttribute("data-armed", "true");
 

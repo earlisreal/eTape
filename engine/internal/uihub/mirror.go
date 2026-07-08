@@ -220,7 +220,9 @@ func (m *mirror) applyExec(u exec.Update) []staged {
 		m.masterArmed = v.MasterArmed
 		if vs := m.venueStatus[string(v.Venue)]; vs != nil {
 			vs.Connected = v.Connected
-			vs.Note = v.Note
+			if v.Note != "" {
+				vs.Note = v.Note
+			}
 		}
 		return []staged{{Topic: wsmsg.TopicExecStatus, Payload: m.execStatus()}}
 	default:
