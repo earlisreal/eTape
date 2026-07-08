@@ -118,3 +118,51 @@ describe("DrawingsPrimitive", () => {
     expect(calls.some((c) => c[0] === "fillText")).toBe(true);
   });
 });
+
+// Captures strokeStyle / lineWidth / dash at each stroke, which recordingCtx() doesn't.
+function styleCtx() {
+  const strokes: { color: string; width: number; dash: number[] }[] = [];
+  let dash: number[] = [];
+  const ctx: any = {
+    beginPath() {}, moveTo() {}, lineTo() {},
+    stroke() { strokes.push({ color: ctx.strokeStyle, width: ctx.lineWidth, dash: [...dash] }); },
+    strokeRect() { strokes.push({ color: ctx.strokeStyle, width: ctx.lineWidth, dash: [...dash] }); },
+    fillRect() {}, fillText() {}, setLineDash(d: number[]) { dash = d; }, save() {}, restore() {},
+    strokeStyle: "", fillStyle: "", lineWidth: 0, font: "", globalAlpha: 1, textBaseline: "",
+  };
+  return { ctx, strokes };
+}
+
+describe("DrawingsPrimitive per-drawing style + hide-all", () => {
+  it("strokes a drawing with its own color, width, and dash", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    p.setDrawings([{ ...hline, color: "#2962FF", width: 3, lineStyle: "dashed" }]);
+    const { ctx, strokes } = styleCtx();
+    draw(p, ctx);
+    expect(strokes[0].color).toBe("#2962FF");
+    expect(strokes[0].width).toBe(3);
+    expect(strokes[0].dash.length).toBeGreaterThan(0);
+  });
+
+  it("falls back to palette text color and default width when unstyled", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    p.setDrawings([hline]);
+    const { ctx, strokes } = styleCtx();
+    draw(p, ctx);
+    expect(strokes[0].color).toBe(LIGHT.text);
+    expect(strokes[0].width).toBe(1);
+    expect(strokes[0].dash).toEqual([]);
+  });
+
+  it("setHideAll(true) skips all committed drawings", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    p.setDrawings([hline]);
+    p.setHideAll(true);
+    const { ctx, strokes } = styleCtx();
+    draw(p, ctx);
+    expect(strokes).toHaveLength(0);
+  });
+});
