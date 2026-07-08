@@ -2,7 +2,7 @@
 // Geometry is refined against TV screenshots during the manual fidelity pass.
 import type { ReactNode } from "react";
 
-function Svg({ size = 16, children }: { size?: number; children: ReactNode }): JSX.Element {
+function Svg({ size = 16, children }: { size?: number | undefined; children: ReactNode }): JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
       stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round"
