@@ -1,6 +1,8 @@
 // Package scan is the pre-market/RTH rank scanner poller. It issues request/
-// response protoIDs (3410 rank, 3215 filter, 3203 snapshot) through the OpenD
-// client — no subscription quota — and publishes scanner.rank/scanner.hit.
+// response protoIDs (3410 rank, 3203 snapshot) through the OpenD client — no
+// subscription quota — and publishes scanner.rank/scanner.hit. Float is
+// resolved on demand for the symbols on the rank board (3203) and cached for
+// the ET day; there is no low-float "universe" (3215 never echoes float).
 package scan
 
 import (
@@ -18,7 +20,6 @@ import (
 
 	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
 	rankpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetuspremarketrank"
-	filterpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotstockfilter"
 )
 
 type Publisher interface {
@@ -38,28 +39,33 @@ type rankItem struct {
 	Volume    int64
 }
 
+// floatEntry is a resolved float-cache entry. bad = definitively unresolvable
+// this ET day (OTC error, zero float, no equity data); absent from the map =
+// unknown (transient — a snapshot merely hasn't succeeded yet).
+type floatEntry struct {
+	shares float64
+	bad    bool
+}
+
 type Poller struct {
-	cfg      config.Scan
-	r        requester
-	pub      Publisher
-	clk      clock.Clock
-	universe map[string]float64         // symbol -> actual float shares
-	seen     map[string]map[string]bool // session -> symbol -> seen
-	seenDay  int64                      // ET day of the current seen-sets
+	cfg     config.Scan
+	r       requester
+	pub     Publisher
+	clk     clock.Clock
+	floats  map[string]floatEntry      // symbol -> resolved float; absent = unknown
+	seen    map[string]map[string]bool // session -> symbol -> seen
+	seenDay int64                      // ET day of the current seen-sets + float cache
 }
 
 func New(cfg config.Scan, r requester, pub Publisher, clk clock.Clock) *Poller {
 	return &Poller{cfg: cfg, r: r, pub: pub, clk: clk,
-		universe: map[string]float64{}, seen: map[string]map[string]bool{}}
+		floats: map[string]floatEntry{}, seen: map[string]map[string]bool{}}
 }
 
 func (p *Poller) Run(ctx context.Context) error {
 	if !p.cfg.Enabled {
 		return nil
 	}
-	p.refreshUniverse(ctx) // best-effort warm-up; logs+continues on error
-	uniTick := p.clk.NewTicker(time.Duration(p.cfg.UniverseRefreshH) * time.Hour)
-	defer uniTick.Stop()
 	// Poll on a short base interval; the effective cadence is session-derived.
 	base := p.clk.NewTicker(time.Duration(p.cfg.PremarketMs) * time.Millisecond)
 	defer base.Stop()
@@ -68,8 +74,6 @@ func (p *Poller) Run(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-uniTick.C():
-			p.refreshUniverse(ctx)
 		case now := <-base.C():
 			interval := p.pollInterval(now)
 			if now.Sub(last) < interval {
@@ -102,10 +106,10 @@ func (p *Poller) sessionOf(now time.Time) string {
 func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 	items, err := p.fetchRank(ctx)
 	if err != nil {
-		return // transient; next tick retries
+		return // transient; next tick retries (logging added in Task 3)
 	}
-	p.resetSeenIfNewDay(now)
-	rows := rankRows(items, p.universe, p.cfg)
+	p.resetIfNewDay(now)
+	rows := rankRows(items, p.floats, p.cfg)
 	sess := p.sessionOf(now)
 	p.pub.Publish(wsmsg.TopicScannerRank, sess, wsmsg.ScannerRankPayload{
 		RefreshedAt: p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
@@ -118,8 +122,13 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 	}
 }
 
-// rankRows is the pure transform: apply float lookup + client-side thresholds.
-func rankRows(items []rankItem, universe map[string]float64, cfg config.Scan) []wsmsg.ScannerRow {
+// rankRows is the pure transform: apply the float cache + client-side
+// thresholds. Three-state float semantics (see the design's decision table):
+//   - known & over cap (cap>0): drop
+//   - known: include, float shown
+//   - bad & cap>0: drop; bad & cap==0: include, float blank
+//   - absent (transient): include, float blank
+func rankRows(items []rankItem, floats map[string]floatEntry, cfg config.Scan) []wsmsg.ScannerRow {
 	out := make([]wsmsg.ScannerRow, 0, len(items))
 	for _, it := range items {
 		if it.ChangePct < cfg.MinChangePct {
@@ -129,12 +138,18 @@ func rankRows(items []rankItem, universe map[string]float64, cfg config.Scan) []
 			continue
 		}
 		var floatPtr *float64
-		if f, ok := universe[it.Symbol]; ok {
-			if cfg.MaxFloatShares > 0 && f > cfg.MaxFloatShares {
-				continue // known float exceeds cap -> reject
+		if e, ok := floats[it.Symbol]; ok {
+			if e.bad {
+				if cfg.MaxFloatShares > 0 {
+					continue // known-bad: drop when float screening is on
+				}
+			} else {
+				if cfg.MaxFloatShares > 0 && e.shares > cfg.MaxFloatShares {
+					continue // known float exceeds the cap
+				}
+				fv := e.shares
+				floatPtr = &fv
 			}
-			fv := f
-			floatPtr = &fv
 		}
 		cp, lp := it.ChangePct, it.Last
 		out = append(out, wsmsg.ScannerRow{
@@ -160,11 +175,15 @@ func (p *Poller) newHits(sess string, rows []wsmsg.ScannerRow) []string {
 	return hits
 }
 
-func (p *Poller) resetSeenIfNewDay(now time.Time) {
+// resetIfNewDay clears the seen-sets AND the float cache on the ET-day
+// boundary, so overnight splits/offerings are re-resolved and bad-marks last
+// at most one ET day.
+func (p *Poller) resetIfNewDay(now time.Time) {
 	day := session.DayMs(now.UnixMilli())
 	if day != p.seenDay {
 		p.seenDay = day
 		p.seen = map[string]map[string]bool{}
+		p.floats = map[string]floatEntry{}
 	}
 }
 
@@ -175,9 +194,9 @@ func (p *Poller) fetchRank(ctx context.Context) ([]rankItem, error) {
 		Offset:  proto.Int32(0),
 		Count:   proto.Int32(35),
 	}
-	// OpenD request messages wrap the inner C2S in a required outer Request{C2S:...}
-	// (proto2 required field) — a bare C2S serializes to different bytes and OpenD
-	// rejects it. Confirmed against every merged call site in feed/opend/backfill.go.
+	// OpenD request messages wrap the inner C2S in a required outer
+	// Request{C2S:...} (proto2 required field) — a bare C2S serializes to
+	// different bytes and OpenD rejects it.
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSPreMarketRank, &rankpb.Request{C2S: req})
 	if err != nil {
 		return nil, err
@@ -199,41 +218,6 @@ func (p *Poller) fetchRank(ctx context.Context) ([]rankItem, error) {
 		})
 	}
 	return out, nil
-}
-
-// refreshUniverse loads the low-float universe via 3215 (FLOAT_SHARE is in
-// THOUSANDS on the wire; convert to actual shares here, once).
-func (p *Poller) refreshUniverse(ctx context.Context) {
-	req := &filterpb.C2S{
-		Begin:  proto.Int32(0),
-		Num:    proto.Int32(200),
-		Market: proto.Int32(int32(qotcommon.QotMarket_QotMarket_US_Security)), // required field (US-only scope)
-		BaseFilterList: []*filterpb.BaseFilter{{
-			FieldName: proto.Int32(int32(filterpb.StockField_StockField_FloatShare)),
-			FilterMin: proto.Float64(0),
-			FilterMax: proto.Float64(p.cfg.MaxFloatShares / 1000.0), // actual -> thousands for the request
-		}},
-	}
-	fr, err := p.r.Request(ctx, opend.ProtoQotStockFilter, &filterpb.Request{C2S: req})
-	if err != nil {
-		return
-	}
-	var resp filterpb.Response
-	if err := proto.Unmarshal(fr.Body, &resp); err != nil || resp.GetRetType() != 0 {
-		return
-	}
-	uni := map[string]float64{}
-	for _, d := range resp.GetS2C().GetDataList() {
-		sym := symbolOf(d.GetSecurity())
-		for _, bd := range d.GetBaseDataList() {
-			if bd.GetFieldName() == int32(filterpb.StockField_StockField_FloatShare) {
-				uni[sym] = bd.GetValue() * 1000.0 // thousands -> actual
-			}
-		}
-	}
-	if len(uni) > 0 {
-		p.universe = uni
-	}
 }
 
 // symbolOf renders a moomoo Security as eTape's "US.<code>" convention.
