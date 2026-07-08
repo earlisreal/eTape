@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useSyncExternalStore } from "react";
+import type { CSSProperties } from "react";
 import type { PanelProps } from "./registry";
 import type { Side, OrderType, TIF, SubmitOrderArgs } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
@@ -18,7 +19,10 @@ const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
 const TIFS: TIF[] = ["DAY", "GTC", "IOC", "FOK"];
 const MODES: SizingMode[] = ["Shares", "Dollar", "BuyingPowerPct", "PositionFraction"];
-const MODE_LABEL: Record<SizingMode, string> = { Shares: "Sh", Dollar: "$", BuyingPowerPct: "BP%", PositionFraction: "Pos" };
+// Full words in the ticket's own dropdowns — abbrevType (orderStatus.ts) stays
+// abbreviated since it's shared with OpenOrdersPanel and the submit-flash toast.
+const TYPE_LABEL: Record<OrderType, string> = { MARKET: "Market", LIMIT: "Limit", STOP: "Stop", STOP_LIMIT: "Stop Limit" };
+const MODE_LABEL: Record<SizingMode, string> = { Shares: "Shares", Dollar: "Dollars", BuyingPowerPct: "Buying Power %", PositionFraction: "Position" };
 
 export function OrderTicketPanel({ config, stores, commands, linkGroups, group: groupProp }: PanelProps): JSX.Element {
   const { palette } = useTheme();
@@ -80,10 +84,21 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
     </span>
   );
   const sideTone = (s: Side) => `side ${s === "BUY" || s === "COVER" ? "side-buy" : "side-sell"}`;
-  const ctl = { flex: 1 } as const;
+  // Labeled-field wrapper: a small uppercase .col-head caption above its control,
+  // wrapped in a real <label> so the caption is associated with the control.
+  const fieldCol = { display: "flex", flexDirection: "column", gap: 2, flex: 1, minWidth: 0 } as const;
+  const field = (label: string, child: JSX.Element, style: CSSProperties = fieldCol) => (
+    <label style={style}>
+      <span className="col-head">{label}</span>
+      {child}
+    </label>
+  );
+  // border-box so width:100% includes the .ctl control's own padding/border —
+  // without it, controls overflow their flex column and overlap the neighbor.
+  const full = { width: "100%", boxSizing: "border-box" } as const;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 3, padding: 6, height: "100%", background: palette.surface, color: palette.text, fontSize: 12, overflow: "auto" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: 6, height: "100%", background: palette.surface, color: palette.text, fontSize: 12, overflow: "auto" }}>
       {/* Strip 1 — header blotter line */}
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
         <strong className="serif" style={{ fontSize: 14 }}>{bareSymbol(symbol)}</strong>
@@ -93,28 +108,43 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
           {priceSpan("ask", quote?.ask, palette.down)}
         </span>
         <div style={{ flex: 1 }} />
-        <select data-testid="venue" className="ctl mono" value={venue} onChange={(e) => selectVenue(e.target.value)}>
-          {venues.map((v) => <option key={v} value={v}>{v}</option>)}
-        </select>
+        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+          <span className="col-head">Venue</span>
+          <select data-testid="venue" className="ctl mono" value={venue} onChange={(e) => selectVenue(e.target.value)}>
+            {venues.map((v) => <option key={v} value={v}>{v}</option>)}
+          </select>
+        </label>
         <button data-testid="open-settings" className="btn" onClick={() => openSettings?.openOrderSettings()}>⚙</button>
       </div>
-      {/* Strip 2 — type · tif · price · stop */}
-      <div style={{ display: "flex", gap: 3 }}>
-        <select data-testid="order-type" className="ctl mono" value={type} onChange={(e) => setType(e.target.value as OrderType)} style={ctl}>
-          {TYPES.map((t) => <option key={t} value={t}>{abbrevType(t)}</option>)}
-        </select>
-        <select className="ctl mono" value={tif} onChange={(e) => setTif(e.target.value as TIF)} style={ctl}>
-          {TIFS.map((t) => <option key={t} value={t}>{t}</option>)}
-        </select>
-        <StepperInput testid="price" value={price} onChange={setPrice} disabled={type === "MARKET"} placeholder="price" style={ctl} />
-        <StepperInput testid="stop" value={stop} onChange={setStop} disabled={!hasStop} placeholder="stop" style={{ ...ctl, opacity: hasStop ? 1 : 0.4 }} />
+      {/* Strip 2 — type · price · stop */}
+      <div style={{ display: "flex", gap: 6 }}>
+        {field("Type", (
+          <select data-testid="order-type" className="ctl mono" value={type} onChange={(e) => setType(e.target.value as OrderType)} style={full}>
+            {TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
+          </select>
+        ))}
+        {field("Price", (
+          <StepperInput testid="price" value={price} onChange={setPrice} disabled={type === "MARKET"} placeholder="price" style={full} />
+        ))}
+        {field("Stop", (
+          <StepperInput testid="stop" value={stop} onChange={setStop} disabled={!hasStop} placeholder="stop" style={{ ...full, opacity: hasStop ? 1 : 0.4 }} />
+        ))}
       </div>
-      {/* Strip 3 — qty · mode */}
-      <div style={{ display: "flex", gap: 3 }}>
-        <input type="number" inputMode="decimal" min={0} data-testid="amount" className="ctl numfield mono" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ flex: 1 }} />
-        <select data-testid="mode" className="ctl mono" value={mode} title={mode} onChange={(e) => setMode(e.target.value as SizingMode)} style={{ width: 56 }}>
-          {MODES.map((m) => <option key={m} value={m} title={m}>{MODE_LABEL[m]}</option>)}
-        </select>
+      {/* Strip 3 — size · size-by · tif, same equal-width columns as strip 2 */}
+      <div style={{ display: "flex", gap: 6 }}>
+        {field("Size", (
+          <input type="number" inputMode="decimal" min={0} data-testid="amount" className="ctl numfield mono" value={amount} onChange={(e) => setAmount(e.target.value)} style={full} />
+        ))}
+        {field("Size by", (
+          <select data-testid="mode" className="ctl mono" value={mode} onChange={(e) => setMode(e.target.value as SizingMode)} style={full}>
+            {MODES.map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
+          </select>
+        ))}
+        {field("TIF", (
+          <select className="ctl mono" value={tif} onChange={(e) => setTif(e.target.value as TIF)} style={full}>
+            {TIFS.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        ))}
       </div>
       {/* Strip 4 — action row: each button submits its side directly */}
       <div style={{ display: "flex", gap: 3 }}>

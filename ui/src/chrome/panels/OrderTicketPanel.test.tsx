@@ -115,4 +115,24 @@ describe("OrderTicketPanel", () => {
     fireEvent.change(screen.getByTestId("venue"), { target: { value: "tradezero" } });
     expect(linkGroups.venueFor("green")).toBe("tradezero");
   });
+  it("shows an on-top label above every field", () => {
+    const { props, stores } = mkProps();
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
+    const { container } = wrap(props);
+    // Scope to .col-head captions — plain getByText can collide with option
+    // text that happens to match a label (e.g. the "Stop" order-type option).
+    const captions = Array.from(container.querySelectorAll(".col-head")).map((el) => el.textContent);
+    for (const label of ["Venue", "Type", "TIF", "Price", "Stop", "Size", "Size by"]) {
+      expect(captions).toContain(label);
+    }
+  });
+  it("spells out order-type and sizing-mode options as full words", () => {
+    const { props, stores } = mkProps();
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
+    wrap(props);
+    const typeOptions = Array.from(screen.getByTestId("order-type").querySelectorAll("option")).map((o) => o.textContent);
+    expect(typeOptions).toEqual(["Limit", "Market", "Stop", "Stop Limit"]);
+    const modeOptions = Array.from(screen.getByTestId("mode").querySelectorAll("option")).map((o) => o.textContent);
+    expect(modeOptions).toEqual(["Shares", "Dollars", "Buying Power %", "Position"]);
+  });
 });
