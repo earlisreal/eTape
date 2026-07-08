@@ -1,7 +1,7 @@
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import type { Palette } from "../palette";
 import type { Bar } from "../../wire/contract";
-import { chartOptions, candleOptions, volumeOptions } from "./chartTheme";
+import { chartOptions, candleOptions, volumeOptions, VOLUME_SCALE_MARGINS } from "./chartTheme";
 import { sessionBands } from "./sessions";
 import { describeIndicator, withDefaultParams, type IndicatorInstance } from "./indicatorSeries";
 import type { FillMarker } from "./diamondMarker";
@@ -38,6 +38,9 @@ export class ChartController {
     this.facade.applyOptions(chartOptions(this.palette));
     this.candle = this.facade.addSeries("candle", candleOptions(this.palette), 0);
     this.volume = this.facade.addSeries("histogram", volumeOptions(this.palette), 0);
+    // Confine the volume overlay to the bottom band of the main pane so it never
+    // overlaps the candles (the candle scale reserves the same band — see chartTheme).
+    this.facade.setPriceScaleMargins("", VOLUME_SCALE_MARGINS);
   }
 
   sync(): void {

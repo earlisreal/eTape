@@ -7,7 +7,7 @@ export interface DeepChartOptions {
   layout?: { background?: { type: "solid"; color: string }; textColor?: string };
   grid?: { vertLines?: { color: string }; horzLines?: { color: string } };
   crosshair?: { mode?: number; vertLine?: { color: string }; horzLine?: { color: string } };
-  rightPriceScale?: { borderColor: string };
+  rightPriceScale?: { borderColor: string; scaleMargins?: { top: number; bottom: number } };
   timeScale?: { borderColor: string; rightOffset: number; secondsVisible: boolean; timeVisible: boolean };
   autoSize?: boolean;
 }
@@ -27,6 +27,14 @@ export interface HistogramOpts {
 // vertically while floating horizontally (the wickplot convention).
 const CROSSHAIR_MAGNET = 1;
 
+// Volume rides an invisible overlay scale confined to the bottom VOLUME_BAND of
+// the main pane; the candle (right) scale reserves that same band at its bottom
+// so the two never overlap. Without these margins LWC's default scaleMargins let
+// the volume histogram autoscale across ~80% of the pane, swallowing the candles.
+export const VOLUME_BAND = 0.25;
+export const CANDLE_SCALE_MARGINS = { top: 0.08, bottom: VOLUME_BAND } as const;
+export const VOLUME_SCALE_MARGINS = { top: 1 - VOLUME_BAND, bottom: 0 } as const;
+
 export function chartOptions(p: Palette): DeepChartOptions {
   return {
     layout: { background: { type: "solid", color: p.bg }, textColor: p.text },
@@ -36,7 +44,7 @@ export function chartOptions(p: Palette): DeepChartOptions {
       vertLine: { color: p.crosshair },
       horzLine: { color: p.crosshair },
     },
-    rightPriceScale: { borderColor: p.border },
+    rightPriceScale: { borderColor: p.border, scaleMargins: CANDLE_SCALE_MARGINS },
     timeScale: { borderColor: p.border, rightOffset: 5, secondsVisible: true, timeVisible: true },
     autoSize: false, // we drive resize via ResizeObserver → controller.resize()
   };

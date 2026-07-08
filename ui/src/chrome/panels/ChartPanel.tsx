@@ -39,6 +39,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
       return s as unknown as LwcSeries;
     },
     removeSeries: (s) => chart.removeSeries(s as unknown as ISeriesApi<"Line">),
+    setPriceScaleMargins: (id, margins) => chart.priceScale(id).applyOptions({ scaleMargins: margins }),
     setSessionBands: (bands) => session.setBands(bands),
     setFillMarkers: (m) => diamonds.setMarkers(m),
     timeToCoordinate: (ms) => chart.timeScale().timeToCoordinate((Math.floor(ms / 1000)) as unknown as Time),

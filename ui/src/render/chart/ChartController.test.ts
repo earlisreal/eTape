@@ -18,10 +18,12 @@ function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[] } {
 
 function fakeFacade() {
   const created: Array<{ kind: string; pane: number; series: LwcSeries & { calls: string[]; updates: unknown[] } }> = [];
-  const facade: ChartApiFacade & { created: typeof created; scrolls: number; bands: number; lastBands: unknown[] } = {
-    created, scrolls: 0, bands: 0, lastBands: [],
+  const scaleMargins: Array<{ id: string; margins: { top: number; bottom: number } }> = [];
+  const facade: ChartApiFacade & { created: typeof created; scrolls: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins } = {
+    created, scrolls: 0, bands: 0, lastBands: [], scaleMargins,
     addSeries: (kind, _o, pane) => { const s = fakeSeries(); created.push({ kind, pane, series: s }); return s; },
     removeSeries: () => {},
+    setPriceScaleMargins: (id, margins) => { scaleMargins.push({ id, margins }); },
     setSessionBands: (b) => { facade.bands++; facade.lastBands = b; },
     setFillMarkers: () => {},
     timeToCoordinate: () => 0,
@@ -66,6 +68,17 @@ describe("ChartController", () => {
   it("mount creates a candle + volume series", () => {
     const { facade } = make(barReaderOf([]));
     expect(facade.created.map((c) => c.kind)).toEqual(["candle", "histogram"]);
+  });
+
+  it("mount confines the volume overlay to a bottom band so it never floods the candles", () => {
+    const { facade } = make(barReaderOf([]));
+    // The volume overlay scale ("") must get top-heavy margins (top ≥ 0.5, bottom 0)
+    // so volume sits in a bottom band. Without this LWC's default margins let volume
+    // autoscale across most of the pane, overlapping the candlesticks.
+    const vol = facade.scaleMargins.find((m) => m.id === "");
+    expect(vol).toBeDefined();
+    expect(vol!.margins.bottom).toBe(0);
+    expect(vol!.margins.top).toBeGreaterThanOrEqual(0.5);
   });
 
   it("first sync with backfill calls setData, not update", () => {

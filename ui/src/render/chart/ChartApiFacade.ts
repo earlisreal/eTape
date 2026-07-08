@@ -12,6 +12,9 @@ export interface LwcSeries {
 export interface ChartApiFacade {
   addSeries(kind: "candle" | "line" | "histogram", options: unknown, paneIndex: number): LwcSeries;
   removeSeries(series: LwcSeries): void;
+  // Configure the margins of a price scale by id ("" is the volume overlay scale).
+  // The right (candle) scale is configured via chart options, not this method.
+  setPriceScaleMargins(priceScaleId: string, margins: { top: number; bottom: number }): void;
   setSessionBands(bands: Band[]): void;  // forwarded to the session pane-primitive
   setFillMarkers(markers: FillMarker[]): void; // forwarded to the diamond series-primitive
   timeToCoordinate(timeMs: number): number | null;
