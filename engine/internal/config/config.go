@@ -97,16 +97,15 @@ type UIHub struct {
 
 func (u UIHub) Addr() string { return net.JoinHostPort(u.Host, strconv.Itoa(u.Port)) }
 
-// Scan is the [scan] section: pre-market/RTH rank scanner + low-float universe.
+// Scan is the [scan] section: pre-market/RTH rank scanner + on-demand float cache.
 type Scan struct {
-	Enabled          bool    `toml:"enabled"`
-	PremarketMs      int     `toml:"premarket_ms"`       // rank poll interval before 09:30 ET
-	RTHMs            int     `toml:"rth_ms"`             // rank poll interval during RTH
-	RankPages        int     `toml:"rank_pages"`         // pages of <=35 to pull per rank refresh
-	MinChangePct     float64 `toml:"min_change_pct"`     // client-side gainer threshold (%)
-	MaxFloatShares   float64 `toml:"max_float_shares"`   // float cap in ACTUAL shares (not thousands)
-	MinVolume        int64   `toml:"min_volume"`         // session cumulative volume floor
-	UniverseRefreshH int     `toml:"universe_refresh_h"` // low-float universe refresh interval (hours)
+	Enabled        bool    `toml:"enabled"`
+	PremarketMs    int     `toml:"premarket_ms"`     // rank poll interval before 09:30 ET
+	RTHMs          int     `toml:"rth_ms"`           // rank poll interval during RTH
+	RankPages      int     `toml:"rank_pages"`       // pages of <=35 to pull per rank refresh
+	MinChangePct   float64 `toml:"min_change_pct"`   // client-side gainer threshold (%)
+	MaxFloatShares float64 `toml:"max_float_shares"` // float cap in ACTUAL shares (not thousands)
+	MinVolume      int64   `toml:"min_volume"`       // session cumulative volume floor
 }
 
 // News is the [news] section: Qot_GetSearchNews polling.
@@ -169,7 +168,7 @@ func Default() Config {
 		},
 		Scan: Scan{
 			Enabled: true, PremarketMs: 2000, RTHMs: 3000, RankPages: 2,
-			MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000, UniverseRefreshH: 24,
+			MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000,
 		},
 		News:     News{Enabled: true, FocusedMs: 20000, WatchMs: 3000, MaxPerReq: 50},
 		Health:   Health{Enabled: true, ProbeMs: 5000},

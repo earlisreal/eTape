@@ -7,25 +7,6 @@ across Plan 6's task reviews and the final whole-branch review — see
 `docs/superpowers/plans/2026-07-06-engine-uihub-pollers-wiring.md` and its
 execution ledger for full detail on each item.
 
-## Blocking for the scanner feature
-
-- [ ] **Float-universe warm-up is a permanent no-op against real OpenD.**
-      moomoo's `Qot_StockFilter` (3215) response never echoes back
-      `FLOAT_SHARE` values even when used as a filter field — confirmed
-      against `docs/2026-07-03-premarket-scanner-api.md` (live-verified
-      2026-07-06). `engine/internal/scan/scan.go`'s `refreshUniverse` will
-      always find zero float values, so `p.universe` stays empty forever and
-      every `ScannerRow.FloatShares` is permanently `nil` — the advertised
-      `MaxFloatShares` low-float screening silently does nothing, with no
-      error surfaced anywhere.
-      **Why:** the plan framed the `Qot_GetSecuritySnapshot` (3203) per-symbol
-      fallback as an optional "nice to have" for symbols merely absent from
-      the universe — that framing was wrong; 3203 (or an equivalent) is the
-      *only* way this poller can ever populate float data.
-      **Fix:** implement the 3203 batch fallback (400-code/request cap,
-      bad-code retry/split since one bad OTC code fails the whole batch,
-      60 req/30s rate limit). Real new scope, not a quick patch.
-
 ## Design decisions needed
 
 - [ ] **`exec.Core.Recover`'s broker `Snapshot` calls run before uihub starts
