@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/md"
@@ -41,16 +42,26 @@ type demandCtl interface {
 	ReleaseDemand(connID uint64, demandID string)
 }
 
+// venueAdmin is the file-only settings seam (satisfied by *venueadmin.Admin).
+// It never touches the running gate/arm state — edits apply at next boot.
+type venueAdmin interface {
+	GetVenueSetup() (file, running config.VenueConfig, credKeys []string, err error)
+	SetVenueSetup(vc config.VenueConfig) error
+	PutCredential(name, keyID, secretKey string) error
+	DeleteCredential(name string) error
+}
+
 type commands struct {
 	ex   execDoer
 	cfg  configStore
 	ind  indicatorCtl
 	dem  demandCtl
+	va   venueAdmin
 	feed func() Feed
 }
 
-func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, feed func() Feed) *commands {
-	return &commands{ex: ex, cfg: cfg, ind: ind, dem: dem, feed: feed}
+func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, va venueAdmin, feed func() Feed) *commands {
+	return &commands{ex: ex, cfg: cfg, ind: ind, dem: dem, va: va, feed: feed}
 }
 
 func blocked(reason string) wsmsg.AckMsg { return wsmsg.AckMsg{Status: "blocked", Reason: reason} }
@@ -190,6 +201,44 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		}
 		// Registers no demand — demands arrive from member panels as they follow.
 		return wsmsg.AckMsg{Status: "accepted"}
+	case "GetVenueSetup":
+		file, running, keys, err := cd.va.GetVenueSetup()
+		if err != nil {
+			return blocked("venue read error")
+		}
+		return wsmsg.AckMsg{Status: "accepted", Value: wsmsg.VenueSetup{
+			File: venueConfigToWire(file), Running: venueConfigToWire(running), CredKeys: keys,
+		}}
+	case "SetVenueSetup":
+		var a wsmsg.SetVenueSetupArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return blocked("bad args")
+		}
+		if err := cd.va.SetVenueSetup(venueConfigFromWire(a.Venues, a.Gate)); err != nil {
+			return blocked(err.Error())
+		}
+		return wsmsg.AckMsg{Status: "accepted"}
+	case "PutCredential":
+		var a wsmsg.PutCredentialArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return blocked("bad args")
+		}
+		if a.Name == "" || a.KeyID == "" || a.SecretKey == "" {
+			return blocked("name, keyId, and secretKey are required")
+		}
+		if err := cd.va.PutCredential(a.Name, a.KeyID, a.SecretKey); err != nil {
+			return blocked(err.Error())
+		}
+		return wsmsg.AckMsg{Status: "accepted"}
+	case "DeleteCredential":
+		var a wsmsg.DeleteCredentialArgs
+		if err := json.Unmarshal(args, &a); err != nil || a.Name == "" {
+			return blocked("bad args")
+		}
+		if err := cd.va.DeleteCredential(a.Name); err != nil {
+			return blocked(err.Error())
+		}
+		return wsmsg.AckMsg{Status: "accepted"}
 	default:
 		return blocked("unknown command: " + name)
 	}
@@ -273,5 +322,43 @@ func tifFromWire(t wsmsg.TIF) exec.TIF {
 		return exec.TIFFOK
 	default:
 		return exec.TIFDay
+	}
+}
+
+func venueToWire(v config.Venue) wsmsg.Venue {
+	return wsmsg.Venue{ID: v.ID, Broker: v.Broker, Env: v.Env, Credentials: v.Credentials, AccountID: v.AccountID, AutoArm: v.AutoArm}
+}
+
+func gateToWire(g config.Gate) wsmsg.Gate {
+	vm := map[string]wsmsg.GateLimitsView{}
+	for id, gv := range g.Venue {
+		vm[id] = wsmsg.GateLimitsView{MaxOrderValue: gv.MaxOrderValue, MaxPositionValue: gv.MaxPositionValue, MaxPositionShares: gv.MaxPositionShares, MaxOpenOrders: gv.MaxOpenOrders}
+	}
+	return wsmsg.Gate{
+		Global: wsmsg.GlobalLimitsView{MaxDayLoss: g.Global.MaxDayLoss, MaxSymbolPositionValue: g.Global.MaxSymbolPositionValue, MaxSymbolPositionShares: g.Global.MaxSymbolPositionShares},
+		Venue:  vm,
+	}
+}
+
+func venueConfigToWire(vc config.VenueConfig) wsmsg.VenueConfig {
+	vs := make([]wsmsg.Venue, 0, len(vc.Venues))
+	for _, v := range vc.Venues {
+		vs = append(vs, venueToWire(v))
+	}
+	return wsmsg.VenueConfig{Venues: vs, Gate: gateToWire(vc.Gate)}
+}
+
+func venueConfigFromWire(venues []wsmsg.Venue, gate wsmsg.Gate) config.VenueConfig {
+	vs := make([]config.Venue, 0, len(venues))
+	for _, v := range venues {
+		vs = append(vs, config.Venue{ID: v.ID, Broker: v.Broker, Env: v.Env, Credentials: v.Credentials, AccountID: v.AccountID, AutoArm: v.AutoArm})
+	}
+	vm := map[string]config.GateVenue{}
+	for id, gv := range gate.Venue {
+		vm[id] = config.GateVenue{MaxOrderValue: gv.MaxOrderValue, MaxPositionValue: gv.MaxPositionValue, MaxPositionShares: gv.MaxPositionShares, MaxOpenOrders: gv.MaxOpenOrders}
+	}
+	return config.VenueConfig{
+		Venues: vs,
+		Gate:   config.Gate{Global: config.GateGlobal{MaxDayLoss: gate.Global.MaxDayLoss, MaxSymbolPositionValue: gate.Global.MaxSymbolPositionValue, MaxSymbolPositionShares: gate.Global.MaxSymbolPositionShares}, Venue: vm},
 	}
 }

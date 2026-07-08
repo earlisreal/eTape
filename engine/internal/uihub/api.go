@@ -73,7 +73,7 @@ type Config struct {
 
 // New builds the mirror, hub, and server from the cores. Caller runs h.Run(ctx)
 // and serves srv.Handler(); uses h.PublishMD/PublishExec/Publish for fan-in.
-func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators) (*Hub, *Server) {
+func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va venueAdmin) (*Hub, *Server) {
 	vms := make([]venueMeta, 0, len(cfg.Venues))
 	for _, v := range cfg.Venues {
 		vms = append(vms, venueMeta{
@@ -93,7 +93,7 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators) (*
 	}
 	m := newMirror(vms, global, cfg.TapeCap, cfg.NewsCap, cfg.FillsCap, cfg.EventsCap)
 	h := NewHub(clk, HubConfig{MDInterval: cfg.MD, AccountInterval: cfg.Account, PositionInterval: cfg.Position, Buf: cfg.Buf}, m)
-	cmd := newCommands(ex, st, ind, h, h.feed)
+	cmd := newCommands(ex, st, ind, h, va, h.feed)
 	qry := newQueries(st)
 	srv := NewServer(h, cmd, qry, ServerConfig{DistDir: cfg.DistDir, OutBuf: cfg.OutBuf})
 	return h, srv

@@ -36,6 +36,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/store"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
+	"github.com/earlisreal/eTape/engine/internal/venueadmin"
 )
 
 func main() {
@@ -145,6 +146,7 @@ func main() {
 	go func() { defer close(execDone); _ = execCore.Run(ctx) }()
 
 	// --- uihub (listening BEFORE OpenD is dialed) ---
+	venueAdm := venueadmin.New(*cfgPath, creds.DefaultPath(), config.VenueConfig{Venues: cfg.Venues, Gate: cfg.Gate})
 	hub, srv := uihub.New(uihubClk, uihub.Config{
 		Venues: venueMetas(cfg), Global: uihub.GlobalLimits{
 			MaxDayLoss: cfg.Gate.Global.MaxDayLoss, MaxSymbolPositionValue: cfg.Gate.Global.MaxSymbolPositionValue,
@@ -154,7 +156,7 @@ func main() {
 		Position: time.Duration(cfg.UIHub.PositionMs) * time.Millisecond,
 		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500,
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
-	}, execCore, st, core)
+	}, execCore, st, core, venueAdm)
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
 	httpSrv := &http.Server{
