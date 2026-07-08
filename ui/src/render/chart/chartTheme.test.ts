@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { LIGHT, DARK } from "../palette";
-import { chartOptions, candleOptions, volumeOptions } from "./chartTheme";
+import { chartOptions, candleOptions, volumeOptions, RIGHT_OFFSET_BARS, clampRightScroll } from "./chartTheme";
 
 describe("chartTheme", () => {
   it("maps palette surfaces onto chart layout + grid", () => {
@@ -22,7 +22,7 @@ describe("chartTheme", () => {
     // fixRightEdge field at all (see chartTheme.ts) so this can't be
     // reintroduced without a compile error.
     expect(o.timeScale?.fixLeftEdge).toBe(true);
-    expect(o.timeScale?.rightOffset).toBe(4);
+    expect(o.timeScale?.rightOffset).toBe(RIGHT_OFFSET_BARS);
     expect(o.timeScale?.shiftVisibleRangeOnNewBar).toBe(true);
     expect(o.rightPriceScale?.minimumWidth).toBeGreaterThan(0);
   });
@@ -61,5 +61,21 @@ describe("chartTheme", () => {
     const v = volumeOptions(LIGHT);
     expect(v.lastValueVisible).toBe(false);
     expect(v.priceLineVisible).toBe(false);
+  });
+});
+
+describe("clampRightScroll", () => {
+  it("does not clamp the resting position (scrollPosition === rightOffset)", () => {
+    expect(clampRightScroll(RIGHT_OFFSET_BARS)).toBeNull();
+  });
+
+  it("snaps back to RIGHT_OFFSET_BARS once panned past the cap", () => {
+    expect(clampRightScroll(RIGHT_OFFSET_BARS + 0.1)).toBe(RIGHT_OFFSET_BARS);
+    expect(clampRightScroll(RIGHT_OFFSET_BARS + 20)).toBe(RIGHT_OFFSET_BARS);
+  });
+
+  it("does not clamp when scrolled left of the cap (into history)", () => {
+    expect(clampRightScroll(0)).toBeNull();
+    expect(clampRightScroll(-5)).toBeNull();
   });
 });

@@ -91,6 +91,20 @@ export const VOLUME_SCALE_MARGINS = { top: 1 - VOLUME_BAND, bottom: 0 } as const
 // default (3px, drawn on top). See ChartController's indicator series creation.
 export const INDICATOR_LINE_WIDTH = 1;
 
+// Max empty bars the user can pan past the latest bar before hitting a wall.
+// Equals rightOffset so the right edge can't be dragged past its resting margin —
+// the symmetric counterpart to fixLeftEdge + LEFT_PAD_BARS on the left. LWC has no
+// native "capped but non-zero" right-edge option (see the timeScale comment below),
+// so ChartPanel enforces it in a subscribeVisibleLogicalRangeChange handler.
+export const RIGHT_OFFSET_BARS = 4;
+
+// Returns the scroll position to snap back to (RIGHT_OFFSET_BARS) when the current
+// one overshoots the cap, or null when it's already within bounds. `scrollPosition`
+// is LWC's distance-from-right-edge-to-latest-bar, measured in bars.
+export function clampRightScroll(scrollPosition: number): number | null {
+  return scrollPosition > RIGHT_OFFSET_BARS ? RIGHT_OFFSET_BARS : null;
+}
+
 export function chartOptions(p: Palette): DeepChartOptions {
   return {
     layout: { background: { type: "solid", color: p.bg }, textColor: p.text },
@@ -105,7 +119,7 @@ export function chartOptions(p: Palette): DeepChartOptions {
     rightPriceScale: { borderColor: p.border, scaleMargins: CANDLE_SCALE_MARGINS, minimumWidth: 64 },
     localization: { timeFormatter },
     timeScale: {
-      borderColor: p.border, rightOffset: 4, secondsVisible: true, timeVisible: true,
+      borderColor: p.border, rightOffset: RIGHT_OFFSET_BARS, secondsVisible: true, timeVisible: true,
       // rightOffset alone (no fixRightEdge): verified against
       // lightweight-charts.development.mjs — TimeScale._private__maxRightOffset()
       // returns the literal constant 0 whenever fixRightEdge is true, REGARDLESS

@@ -7,7 +7,8 @@ import { ThemeProvider } from "../ThemeProvider";
 // timeScaleApi is a stable object (not a fresh literal per call) so a test can hold
 // a reference to e.g. resetTimeScale and assert it was invoked by the SUT.
 const timeScaleApi = { timeToCoordinate: vi.fn(() => 0), scrollToRealTime: vi.fn(), scrollPosition: vi.fn(() => 0),
-  coordinateToLogical: vi.fn(() => 0), logicalToCoordinate: vi.fn(() => 0), resetTimeScale: vi.fn() };
+  coordinateToLogical: vi.fn(() => 0), logicalToCoordinate: vi.fn(() => 0), resetTimeScale: vi.fn(),
+  scrollToPosition: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn() };
 const chartApi = {
   addSeries: vi.fn(() => ({ setData: vi.fn(), update: vi.fn(), applyOptions: vi.fn(), setSeriesOrder: vi.fn(),
     attachPrimitive: vi.fn(), priceToCoordinate: vi.fn(() => 0), coordinateToPrice: vi.fn(() => 0) })),
@@ -70,6 +71,28 @@ describe("ChartPanel", () => {
     const { unmount } = renderChart();
     unmount();
     expect(chartApi.remove).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps rightward panning at RIGHT_OFFSET_BARS by subscribing a visible-range clamp, and unsubscribes on unmount", () => {
+    const { unmount } = renderChart();
+    expect(timeScaleApi.subscribeVisibleLogicalRangeChange).toHaveBeenCalledTimes(1);
+    const clampRight = timeScaleApi.subscribeVisibleLogicalRangeChange.mock.calls[0][0] as () => void;
+
+    // Panned past the cap: snap back to RIGHT_OFFSET_BARS (4), no bar-spacing change.
+    timeScaleApi.scrollPosition.mockReturnValue(20);
+    clampRight();
+    expect(timeScaleApi.scrollToPosition).toHaveBeenCalledWith(4, false);
+
+    // Within bounds (resting position or scrolled into history): no snap.
+    timeScaleApi.scrollToPosition.mockClear();
+    timeScaleApi.scrollPosition.mockReturnValue(4);
+    clampRight();
+    timeScaleApi.scrollPosition.mockReturnValue(-2);
+    clampRight();
+    expect(timeScaleApi.scrollToPosition).not.toHaveBeenCalled();
+
+    unmount();
+    expect(timeScaleApi.unsubscribeVisibleLogicalRangeChange).toHaveBeenCalledWith(clampRight);
   });
 
   it("scopes indicator instanceIds to the panel, so two panels adding the same indicator type don't collide (Finding 2 regression)", () => {

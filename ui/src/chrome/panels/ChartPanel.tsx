@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { createChart, CandlestickSeries, HistogramSeries, LineSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type Coordinate } from "lightweight-charts";
 import type { PanelProps } from "./registry";
 import { ChartController } from "../../render/chart/ChartController";
+import { clampRightScroll } from "../../render/chart/chartTheme";
 import type { ChartApiFacade, LwcSeries } from "../../render/chart/ChartApiFacade";
 import { DiamondFillPrimitive } from "../../render/chart/diamondPrimitive";
 import { SessionShadingPrimitive } from "../../render/chart/sessionPrimitive";
@@ -111,6 +112,18 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const host = hostRef.current;
     if (!host) return;
     const chart = createChart(host, { width, height });
+    // Right-edge pan cap: LWC has no native "capped but non-zero" right-edge option
+    // (fixRightEdge hardcodes the margin to 0 — see chartTheme's rightOffset comment),
+    // so bound it here. scrollPosition() is the distance in bars from the right edge
+    // to the latest bar; snapping it back (without changing bar spacing) preserves
+    // zoom. The re-fired event after scrollToPosition is a no-op second pass since
+    // scrollPosition() then equals the cap.
+    const timeScale = chart.timeScale();
+    const clampRight = () => {
+      const target = clampRightScroll(timeScale.scrollPosition());
+      if (target !== null) timeScale.scrollToPosition(target, false);
+    };
+    timeScale.subscribeVisibleLogicalRangeChange(clampRight);
     const { facade, setPalette, drawings } = makeFacade(chart, palette);
     setFacadePaletteRef.current = setPalette;
     const controller = new ChartController(facade, palette, { symbol, timeframe: timeframe0 },
@@ -202,7 +215,11 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     });
     ro.observe(host);
 
-    return () => { off(); offLink(); ro.disconnect(); interaction.dispose(); controller.dispose(); controllerRef.current = null; interactionRef.current = null; };
+    return () => {
+      off(); offLink(); ro.disconnect();
+      timeScale.unsubscribeVisibleLogicalRangeChange(clampRight);
+      interaction.dispose(); controller.dispose(); controllerRef.current = null; interactionRef.current = null;
+    };
     // Intentionally [config.id] only: symbol/timeframe/indicator/palette changes are
     // handled imperatively via the controller (see the effects/callbacks below) — the
     // chart must never remount on those changes (the canvas keeps its context).
