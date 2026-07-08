@@ -11,15 +11,20 @@ const GRACE_MS = 600;
 export function ReconnectOverlay({ state, children }: { state: ConnState; children: ReactNode }): JSX.Element {
   const { palette } = useTheme();
   const [showOverlay, setShowOverlay] = useState(false);
+  const isOpen = state === "open";
 
+  // Keyed on the open/non-open boundary (not the raw state) so churn between
+  // non-open values (e.g. "reconnecting" -> "connecting" during a retry) does
+  // not reset an in-flight grace timer. Only a genuine return to "open" — or
+  // the initial open->non-open transition — should (re)schedule this effect.
   useEffect(() => {
-    if (state === "open") {
+    if (isOpen) {
       setShowOverlay(false);
       return;
     }
     const handle = setTimeout(() => setShowOverlay(true), GRACE_MS);
     return () => clearTimeout(handle);
-  }, [state]);
+  }, [isOpen]);
 
   return (
     <div style={{ position: "relative", height: "100%" }}>
