@@ -3,6 +3,7 @@ package uihub
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -222,5 +223,129 @@ func TestHubOverflowClosesClient(t *testing.T) {
 	c.mu.Unlock()
 	if !closed {
 		t.Fatal("a client whose queue is always full must be closed and dropped")
+	}
+}
+
+// findUIDropDetail scans frames for a sys.events entry whose Kind is
+// "ui-drop", returning its Detail string (and ok=true) if found. It checks
+// both shapes a sys.events frame can take: a live delta (single SysEvent
+// payload, emitUIDrop's own delivery) and a snapshot taken after the fact
+// (payload is the accumulated []SysEvent, mirror.snapshotFrames' shape) --
+// either is proof the event was recorded and is visible to this client.
+func findUIDropDetail(t *testing.T, frames [][]byte) (string, bool) {
+	t.Helper()
+	for _, fr := range frames {
+		var m struct {
+			Kind    string          `json:"kind"`
+			Topic   string          `json:"topic"`
+			Payload json.RawMessage `json:"payload"`
+		}
+		if err := json.Unmarshal(fr, &m); err != nil || m.Topic != "sys.events" {
+			continue
+		}
+		switch m.Kind {
+		case "delta":
+			var e wsmsg.SysEvent
+			if err := json.Unmarshal(m.Payload, &e); err == nil && e.Kind == "ui-drop" {
+				return e.Detail, true
+			}
+		case "snapshot":
+			var events []wsmsg.SysEvent
+			if err := json.Unmarshal(m.Payload, &events); err == nil {
+				for _, e := range events {
+					if e.Kind == "ui-drop" {
+						return e.Detail, true
+					}
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+// TestHubBroadcastOverflowEmitsUIDropSysEvent is the RED case for Task 1's
+// broadcast() drop path: when enqueue fails for a subscribed client inside
+// broadcast, the hub must still close+drop it (unchanged behavior) AND emit a
+// ui-drop sys.events frame that reaches every other client subscribed to
+// sys.events -- so a live session can confirm drops are happening without
+// needing to reproduce a full-app reconnect first.
+func TestHubBroadcastOverflowEmitsUIDropSysEvent(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	// dead starts healthy so its subscribe-triggered snapshot (exec.orders
+	// always has one, even if empty) succeeds -- only flip it to always-fail
+	// afterward, so the drop this test is isolating is unambiguously
+	// broadcast()'s overflow path, not sendSnapshot()'s (covered separately
+	// by TestHubSendSnapshotOverflowEmitsUIDropSysEvent).
+	dead := &fakeClient{nid: 1}
+	survivor := &fakeClient{nid: 2}
+	h.Register(dead)
+	h.Register(survivor)
+	h.Subscribe(dead, wsmsg.TopicExecOrders)
+	h.Subscribe(survivor, wsmsg.TopicSysEvents)
+	syncHub(h)
+
+	dead.mu.Lock()
+	dead.full = true // every enqueue fails from now on
+	dead.mu.Unlock()
+
+	h.PublishExec(exec.OrderUpdate{Order: exec.Order{Venue: "sim", ID: "ET1", Status: exec.StatusSubmitted}})
+	syncHub(h)
+
+	dead.mu.Lock()
+	closed := dead.closed
+	dead.mu.Unlock()
+	if !closed {
+		t.Fatal("overflowing client must still be closed and dropped (unchanged behavior)")
+	}
+
+	detail, ok := findUIDropDetail(t, survivor.got())
+	if !ok {
+		t.Fatal("expected a ui-drop sys.events delta to reach the surviving subscribed client")
+	}
+	if !strings.Contains(detail, "1") || !strings.Contains(detail, "overflow") {
+		t.Fatalf("expected detail to identify client 1 and an overflow reason, got %q", detail)
+	}
+}
+
+// TestHubSendSnapshotOverflowEmitsUIDropSysEvent is the RED case for Task 1's
+// sendSnapshot() drop path -- distinct code from broadcast(): a client whose
+// very first snapshot frame can't be enqueued must be dropped (unchanged
+// behavior) and also produce a ui-drop sys.events frame for survivors.
+func TestHubSendSnapshotOverflowEmitsUIDropSysEvent(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	survivor := &fakeClient{nid: 1}
+	h.Register(survivor)
+	h.Subscribe(survivor, wsmsg.TopicSysEvents)
+	syncHub(h)
+
+	dead := &fakeClient{nid: 2, full: true} // every enqueue fails, including the snapshot frame
+	h.Register(dead)
+	syncHub(h)
+	h.Subscribe(dead, wsmsg.TopicExecStatus) // exec.status always has an assembled snapshot
+	syncHub(h)
+
+	dead.mu.Lock()
+	closed := dead.closed
+	dead.mu.Unlock()
+	if !closed {
+		t.Fatal("a client whose snapshot enqueue fails must be closed and dropped (unchanged behavior)")
+	}
+
+	detail, ok := findUIDropDetail(t, survivor.got())
+	if !ok {
+		t.Fatal("expected a ui-drop sys.events delta to reach the surviving subscribed client")
+	}
+	if !strings.Contains(detail, "2") || !strings.Contains(detail, "overflow") {
+		t.Fatalf("expected detail to identify client 2 and an overflow reason, got %q", detail)
 	}
 }

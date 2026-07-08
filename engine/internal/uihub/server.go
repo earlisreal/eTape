@@ -10,9 +10,19 @@ import (
 	"path/filepath"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/coder/websocket"
 )
+
+// defaultWriteTimeout bounds a single ws.Write call in production (see
+// conn.go's writeLoop): a peer that can't accept even one already-queued
+// frame within this window is treated as wedged, not merely slow, and the
+// connection is dropped instead of blocking writeLoop indefinitely. Generous
+// on purpose -- this is a last-resort backstop for a genuinely stuck socket,
+// not a latency budget; tests construct conns with a much shorter timeout
+// directly (see conn_test.go).
+const defaultWriteTimeout = 5 * time.Second
 
 type ServerConfig struct {
 	DistDir string // built ui/dist; empty => no static serving (dev proxies /ws)
@@ -53,7 +63,7 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	}
 	c.SetReadLimit(1 << 20) // 1 MiB frame cap
 	id := s.nextID.Add(1)
-	conn := newConn(id, coderSocket{c: c}, s.hub, s.cmd, s.qry, s.cfg.OutBuf)
+	conn := newConn(id, coderSocket{c: c}, s.hub, s.cmd, s.qry, s.cfg.OutBuf, defaultWriteTimeout)
 	// Add(1) before Register: Wait() must count this connection from the
 	// instant it exists, not after it's (possibly unsuccessfully) handed to the
 	// hub -- otherwise a Wait() call landing in the gap between accept and

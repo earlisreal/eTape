@@ -3,6 +3,7 @@ package uihub
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"sort"
 	"sync/atomic"
 	"time"
@@ -49,6 +50,15 @@ type releaseDemandReq struct {
 	demandID string
 }
 
+// dropReport is how a conn's own goroutine (writeLoop, on a write timeout)
+// tells Run a client is being dropped, so the resulting ui-drop sys.events
+// frame is still built and emitted from Run's own single goroutine -- see
+// ReportUIDrop and handleDrop.
+type dropReport struct {
+	id     uint64
+	reason string
+}
+
 // feedBox lets the (single-write, many-read) feed reference live in an
 // atomic.Pointer so SetFeed (called once at boot from main's goroutine) races
 // safely with Validate reads in conn goroutines and Ensure/Release in Run.
@@ -79,6 +89,7 @@ type Hub struct {
 	mdCh            chan md.Update
 	execCh          chan exec.Update
 	pubCh           chan pub
+	dropCh          chan dropReport    // conn goroutines -> Run: write-timeout drop reports
 	syncCh          chan chan struct{} // test barrier
 	closed          chan struct{}      // closed when Run returns; unblocks stuck senders
 
@@ -95,6 +106,12 @@ type Hub struct {
 	acctPend   map[string]staged            // venue -> latest account frame
 	posLatest  staged
 	posDirty   bool
+
+	// sysEventSeq numbers ui-drop sys.events frames the Hub itself emits
+	// (buildSysEvent). It is independent of health.Poller's own seq counter
+	// (a drop is detected inside Hub.Run, not the health poller, and the two
+	// never share state) -- see buildSysEvent's doc comment.
+	sysEventSeq int64
 }
 
 func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
@@ -113,6 +130,7 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 		mdCh:            make(chan md.Update, cfg.Buf),
 		execCh:          make(chan exec.Update, cfg.Buf),
 		pubCh:           make(chan pub, cfg.Buf),
+		dropCh:          make(chan dropReport, cfg.Buf),
 		syncCh:          make(chan chan struct{}),
 		closed:          make(chan struct{}),
 		clients:         map[client]map[wsmsg.Topic]bool{},
@@ -237,6 +255,22 @@ func (h *Hub) Publish(t wsmsg.Topic, key string, p any) {
 	}
 }
 
+// ReportUIDrop lets a conn's own goroutine (writeLoop, on a write timeout)
+// tell the Hub a client is being dropped, so the resulting ui-drop
+// sys.events frame is still built and emitted from Run's own single
+// goroutine -- the same single-writer discipline as every other piece of
+// Run-loop-owned state (h.sysEventSeq, the mirror, h.clients). Unlike
+// emitUIDrop (called directly by broadcast/sendSnapshot, which already run
+// inside Run), this is an ordinary cross-goroutine channel send guarded by
+// h.closed: it is not a self-send from inside Run, so none of Publish's
+// self-send deadlock risk (see emitUIDrop's doc comment) applies here.
+func (h *Hub) ReportUIDrop(id uint64, reason string) {
+	select {
+	case h.dropCh <- dropReport{id: id, reason: reason}:
+	case <-h.closed:
+	}
+}
+
 // sync is a test-only synchronous barrier: it blocks until the Run loop has
 // drained and processed every message sent on the hub's channels before this
 // call. It is unexported and used only by hub_test.go's syncHub helper. It
@@ -288,6 +322,8 @@ func (h *Hub) Run(ctx context.Context) error {
 			h.handleExec(u)
 		case p := <-h.pubCh:
 			h.handlePub(p)
+		case r := <-h.dropCh:
+			h.handleDrop(r)
 		case <-mdTick.C():
 			h.flushMD()
 		case <-acctTick.C():
@@ -335,6 +371,8 @@ func (h *Hub) drain() {
 			h.handleExec(u)
 		case p := <-h.pubCh:
 			h.handlePub(p)
+		case r := <-h.dropCh:
+			h.handleDrop(r)
 		default:
 			return
 		}
@@ -443,6 +481,77 @@ func (h *Hub) handlePub(p pub) {
 	h.broadcast(s, false)
 }
 
+// handleDrop services a dropReport that arrived via dropCh (from a conn's own
+// goroutine, e.g. writeLoop's write-timeout path) by emitting its ui-drop
+// sys.events frame here on Run's own goroutine.
+func (h *Hub) handleDrop(r dropReport) {
+	h.emitUIDrop(r.id, r.reason)
+}
+
+// buildSysEvent returns a staged sys.events value with the next sequence
+// number and current timestamp, in the same shape health.Poller.Event
+// produces (Seq/Ts/Kind/Detail) -- but Hub-owned, since a drop is detected
+// inside Hub.Run itself, not the health poller. h.sysEventSeq is a separate
+// counter from the health poller's own seq field; the two never share state,
+// so their sequence numbers are independent (each only numbers events from
+// its own source).
+func (h *Hub) buildSysEvent(kind, detail string) staged {
+	h.sysEventSeq++
+	return staged{Topic: wsmsg.TopicSysEvents, Payload: wsmsg.SysEvent{
+		Seq: h.sysEventSeq, Ts: h.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+		Kind: kind, Detail: detail,
+	}}
+}
+
+// emitUIDrop applies and delivers a single "ui-drop" sys.events frame naming
+// clientID and reason. It does what handlePub does (apply to the mirror, then
+// deliver to subscribed survivors) but is invoked directly rather than via
+// Publish/pubCh: Publish sends on h.pubCh, which Run itself drains, so a
+// self-send from inside Run (broadcast/sendSnapshot both run on Run's own
+// goroutine) would risk deadlock if pubCh were ever full and Run were blocked
+// trying to send to the very channel only it can drain.
+//
+// Delivery goes through deliverRaw, not broadcast: broadcast is what detects
+// drops and calls emitUIDrop in the first place, so calling it again here
+// would let a chain of always-failing clients recurse indefinitely (client A
+// drops -> emit -> delivering the frame fails for client B -> emit -> ...).
+// deliverRaw silently tears down any client that can't even accept the drop
+// notification instead of feeding it back into another emission. This is the
+// "collect all drops first, emit at most once per broadcast/sendSnapshot call
+// for the batch" reentrancy guard: broadcast/sendSnapshot collect their own
+// (primary) drops before calling emitUIDrop at all, and nothing downstream of
+// emitUIDrop ever calls it again.
+//
+// Must only be called from Run's own goroutine (directly by broadcast/
+// sendSnapshot, or via handleDrop for a channel-reported drop): it touches
+// h.sysEventSeq and the mirror without synchronization, like every other
+// piece of Run-loop-owned state.
+func (h *Hub) emitUIDrop(clientID uint64, reason string) {
+	s := h.buildSysEvent("ui-drop", fmt.Sprintf("dropped UI client %d: %s", clientID, reason))
+	h.m.applyPub(s)
+	if b, err := json.Marshal(wsmsg.DeltaMsg{Kind: "delta", Topic: s.Topic, Key: s.Key, Payload: s.Payload}); err == nil {
+		h.deliverRaw(s.Topic, b)
+	}
+}
+
+// deliverRaw writes b to every currently-registered client subscribed to
+// topic, closing and forgetting (but not further instrumenting -- see
+// emitUIDrop's doc comment) any whose enqueue fails.
+func (h *Hub) deliverRaw(topic wsmsg.Topic, b []byte) {
+	var dead []client
+	for c, subs := range h.clients {
+		if subs[topic] {
+			if !c.enqueue(b) {
+				dead = append(dead, c)
+			}
+		}
+	}
+	for _, c := range dead {
+		delete(h.clients, c)
+		c.close()
+	}
+}
+
 func (h *Hub) stageMD(s staged) {
 	switch classify(s.Topic) {
 	case classTape:
@@ -503,6 +612,10 @@ func (h *Hub) broadcast(s staged, snap bool) {
 	if err != nil {
 		return
 	}
+	// Collect every drop from this pass before emitting any ui-drop event
+	// (the reentrancy guard emitUIDrop's doc comment describes): iterating
+	// h.clients to completion first means `dead` is the complete original
+	// batch, so the emit loop below can't itself add to it.
 	var dead []client
 	for c, subs := range h.clients {
 		if subs[s.Topic] {
@@ -514,6 +627,7 @@ func (h *Hub) broadcast(s staged, snap bool) {
 	for _, c := range dead {
 		delete(h.clients, c)
 		c.close()
+		h.emitUIDrop(c.id(), "outbound queue overflow")
 	}
 }
 
@@ -526,6 +640,7 @@ func (h *Hub) sendSnapshot(c client, topic wsmsg.Topic) {
 		if !c.enqueue(b) {
 			delete(h.clients, c)
 			c.close()
+			h.emitUIDrop(c.id(), "outbound queue overflow")
 			return
 		}
 	}

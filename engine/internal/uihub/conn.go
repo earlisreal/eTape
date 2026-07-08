@@ -3,7 +3,9 @@ package uihub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
@@ -33,13 +35,27 @@ type conn struct {
 	out  chan []byte
 	once sync.Once
 	done chan struct{}
+
+	// writeTimeout bounds a single ws.Write call (see writeLoop). A peer that
+	// can't accept even one already-queued frame within this window is wedged
+	// (not just slow -- "slow" is what the outbound queue itself absorbs), so
+	// the write is aborted and the connection torn down instead of blocking
+	// writeLoop, the connection's single writer goroutine, indefinitely.
+	writeTimeout time.Duration
 }
 
-func newConn(id uint64, ws wsSocket, h *Hub, cmd commandHandler, q queryHandler, outBuf int) *conn {
+func newConn(id uint64, ws wsSocket, h *Hub, cmd commandHandler, q queryHandler, outBuf int, writeTimeout time.Duration) *conn {
 	if outBuf <= 0 {
 		outBuf = 1024
 	}
-	return &conn{nid: id, ws: ws, hub: h, cmd: cmd, qry: q, out: make(chan []byte, outBuf), done: make(chan struct{})}
+	if writeTimeout <= 0 {
+		writeTimeout = 5 * time.Second
+	}
+	return &conn{
+		nid: id, ws: ws, hub: h, cmd: cmd, qry: q,
+		out: make(chan []byte, outBuf), done: make(chan struct{}),
+		writeTimeout: writeTimeout,
+	}
 }
 
 func (c *conn) id() uint64 { return c.nid }
@@ -95,7 +111,21 @@ func (c *conn) writeLoop(ctx context.Context) {
 		case <-c.done:
 			return
 		case b := <-c.out:
-			if err := c.ws.Write(ctx, b); err != nil {
+			wctx, cancel := context.WithTimeout(ctx, c.writeTimeout)
+			err := c.ws.Write(wctx, b)
+			cancel()
+			if err != nil {
+				// Distinguish "this write's own deadline elapsed" (wedged
+				// peer -- ctx derives from the parent, so errors.Is only
+				// matches DeadlineExceeded when writeTimeout, not the parent
+				// ctx's cancellation/shutdown, is what actually fired) from
+				// every other write error (e.g. the peer closed normally):
+				// only the former is the "outbound path failed" case Task 1
+				// makes visible via sys.events -- an ordinary disconnect
+				// isn't a diagnosis-relevant drop.
+				if errors.Is(err, context.DeadlineExceeded) {
+					c.hub.ReportUIDrop(c.nid, "write timeout")
+				}
 				c.close()
 				return
 			}

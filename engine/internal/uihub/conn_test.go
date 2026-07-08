@@ -18,6 +18,7 @@ type fakeSocket struct {
 	mu     sync.Mutex
 	out    [][]byte
 	closed bool
+	block  bool // when true, Write blocks until its ctx is done (simulates a wedged peer)
 }
 
 func newFakeSocket() *fakeSocket { return &fakeSocket{in: make(chan []byte, 16)} }
@@ -33,6 +34,13 @@ func (s *fakeSocket) Read(ctx context.Context) ([]byte, error) {
 	}
 }
 func (s *fakeSocket) Write(ctx context.Context, b []byte) error {
+	s.mu.Lock()
+	block := s.block
+	s.mu.Unlock()
+	if block {
+		<-ctx.Done() // never accepts the frame -- writeLoop's per-write timeout must fire
+		return ctx.Err()
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.out = append(s.out, append([]byte(nil), b...))
@@ -69,7 +77,7 @@ func TestConnPingPong(t *testing.T) {
 	go func() { _ = h.Run(ctx) }()
 
 	sock := newFakeSocket()
-	c := newConn(1, sock, h, &fakeCmd{}, fakeQuery{}, 8)
+	c := newConn(1, sock, h, &fakeCmd{}, fakeQuery{}, 8, time.Second)
 	go c.run(ctx)
 
 	sock.in <- []byte(`{"kind":"ping","t":123}`)
@@ -94,7 +102,7 @@ func TestConnCommandProducesAck(t *testing.T) {
 
 	sock := newFakeSocket()
 	cmd := &fakeCmd{}
-	c := newConn(1, sock, h, cmd, fakeQuery{}, 8)
+	c := newConn(1, sock, h, cmd, fakeQuery{}, 8, time.Second)
 	go c.run(ctx)
 
 	sock.in <- []byte(`{"kind":"command","corrId":"c1","name":"SubmitOrder","args":{}}`)
@@ -122,7 +130,7 @@ func TestConnSubscribeRoutesToHub(t *testing.T) {
 	go func() { _ = h.Run(ctx) }()
 
 	sock := newFakeSocket()
-	c := newConn(1, sock, h, &fakeCmd{}, fakeQuery{}, 8)
+	c := newConn(1, sock, h, &fakeCmd{}, fakeQuery{}, 8, time.Second)
 	h.Register(c)
 	go c.run(ctx)
 	sock.in <- []byte(`{"kind":"subscribe","topic":"exec.status"}`)
@@ -138,6 +146,37 @@ func TestConnSubscribeRoutesToHub(t *testing.T) {
 			}
 		}
 		return false
+	})
+}
+
+// TestConnWriteTimeoutClosesConn is the RED case for Task 1's write-deadline
+// requirement: a socket that never accepts a write (genuinely wedged, not
+// just slow) must not block writeLoop forever -- the per-write timeout must
+// fire and tear the connection down via the existing c.close() path.
+func TestConnWriteTimeoutClosesConn(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	sock := newFakeSocket()
+	sock.block = true // every Write blocks until its ctx is done
+	c := newConn(1, sock, h, &fakeCmd{}, fakeQuery{}, 8, 20*time.Millisecond)
+	h.Register(c)
+	go c.run(ctx)
+
+	if !c.enqueue([]byte(`{"kind":"ping","t":1}`)) {
+		t.Fatal("enqueue should succeed immediately; the queue itself isn't full")
+	}
+
+	waitFor(t, func() bool {
+		select {
+		case <-c.done:
+			return true
+		default:
+			return false
+		}
 	})
 }
 
