@@ -1,7 +1,7 @@
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import type { Palette } from "../palette";
 import type { Bar } from "../../wire/contract";
-import { chartOptions, candleOptions, volumeOptions, VOLUME_SCALE_MARGINS } from "./chartTheme";
+import { chartOptions, candleOptions, volumeOptions, VOLUME_SCALE_MARGINS, INDICATOR_LINE_WIDTH } from "./chartTheme";
 import { sessionBands } from "./sessions";
 import { describeIndicator, withDefaultParams, type IndicatorInstance } from "./indicatorSeries";
 import type { FillMarker } from "./diamondMarker";
@@ -137,10 +137,28 @@ export class ChartController {
     const series = new Map<string, LwcSeries>();
     for (const d of describeIndicator(resolved, this.palette)) {
       series.set(d.key, this.facade.addSeries(d.kind === "histogram" ? "histogram" : "line",
-        { color: d.color, priceScaleId: d.paneIndex === 0 && d.kind === "histogram" ? "" : undefined }, d.paneIndex));
+        {
+          color: d.color,
+          priceScaleId: d.paneIndex === 0 && d.kind === "histogram" ? "" : undefined,
+          // Studies read as reference lines, not standalone series — no chart-spanning
+          // last-value price line (TradingView doesn't draw one for overlay indicators).
+          priceLineVisible: false,
+          ...(d.kind === "line" ? { lineWidth: INDICATOR_LINE_WIDTH } : {}),
+        }, d.paneIndex));
     }
     this.indicators.set(resolved.instanceId, { inst: resolved, series });
     this.subscribeIndicator(resolved);
+    this.liftCandleToTop();
+  }
+
+  // Keep the candle painted over main-pane overlay indicators (VWAP/EMA/SMA).
+  // LWC draws series within a pane by ascending seriesOrder index — the candle
+  // is created first (order 0) and every later indicator would otherwise sit on
+  // top of it. Setting an out-of-range index clamps to the current top slot, and
+  // since removing a series can recalc indices, both addIndicator and
+  // removeIndicator re-assert this.
+  private liftCandleToTop(): void {
+    this.candle.setSeriesOrder(Number.MAX_SAFE_INTEGER);
   }
 
   private subscribeIndicator(inst: IndicatorInstance): void {
@@ -160,6 +178,7 @@ export class ChartController {
     }
     this.indicators.delete(instanceId);
     void this.deps.commands.sendCommand("UnsubscribeIndicator", { instanceId });
+    this.liftCandleToTop();
   }
 
   // Apply an edited instance. A param change re-subscribes (the engine recomputes

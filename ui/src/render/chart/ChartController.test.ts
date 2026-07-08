@@ -5,24 +5,26 @@ import { LIGHT } from "../palette";
 import type { Bar } from "../../wire/contract";
 import { withDefaultParams } from "./indicatorSeries";
 
-function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[]; setDataCalls: unknown[][] } {
+function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[]; setDataCalls: unknown[][]; orderCalls: number[] } {
   const calls: string[] = [];
   const updates: unknown[] = [];
   const setDataCalls: unknown[][] = [];
+  const orderCalls: number[] = [];
   return {
-    calls, updates, setDataCalls,
+    calls, updates, setDataCalls, orderCalls,
     setData: (data) => { calls.push("setData"); setDataCalls.push(data as unknown[]); },
     update: (bar) => { calls.push("update"); updates.push(bar); },
     applyOptions: () => calls.push("applyOptions"),
+    setSeriesOrder: (order) => { calls.push("setSeriesOrder"); orderCalls.push(order); },
   };
 }
 
 function fakeFacade() {
-  const created: Array<{ kind: string; pane: number; series: ReturnType<typeof fakeSeries> }> = [];
+  const created: Array<{ kind: string; pane: number; options: unknown; series: ReturnType<typeof fakeSeries> }> = [];
   const scaleMargins: Array<{ id: string; margins: { top: number; bottom: number } }> = [];
   const facade: ChartApiFacade & { created: typeof created; scrolls: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins } = {
     created, scrolls: 0, bands: 0, lastBands: [], scaleMargins,
-    addSeries: (kind, _o, pane) => { const s = fakeSeries(); created.push({ kind, pane, series: s }); return s; },
+    addSeries: (kind, o, pane) => { const s = fakeSeries(); created.push({ kind, pane, options: o, series: s }); return s; },
     removeSeries: () => {},
     setPriceScaleMargins: (id, margins) => { scaleMargins.push({ id, margins }); },
     setSessionBands: (b) => { facade.bands++; facade.lastBands = b; },
@@ -128,6 +130,27 @@ describe("ChartController", () => {
     expect(facade.created.some((c) => c.kind === "line")).toBe(true);
     ctrl.removeIndicator("vwap-1");
     expect(cmd.names).toContain("UnsubscribeIndicator");
+  });
+
+  it("addIndicator draws thin lines behind the candle, with no per-indicator price line", () => {
+    const { facade, ctrl } = make(barReaderOf([]));
+    ctrl.addIndicator({ instanceId: "vwap-1", type: "VWAP", params: {} });
+    const line = facade.created.find((c) => c.kind === "line");
+    expect(line?.options).toMatchObject({ lineWidth: 1, priceLineVisible: false });
+    // Candle (created[0]) is lifted back to the top draw order after the indicator
+    // is added, so it stays painted over the overlay line.
+    const candle = facade.created[0].series;
+    expect(candle.orderCalls.length).toBeGreaterThan(0);
+    expect(candle.orderCalls.at(-1)).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it("removeIndicator re-lifts the candle above any remaining indicators", () => {
+    const { facade, ctrl } = make(barReaderOf([]));
+    ctrl.addIndicator({ instanceId: "vwap-1", type: "VWAP", params: {} });
+    const candle = facade.created[0].series;
+    const before = candle.orderCalls.length;
+    ctrl.removeIndicator("vwap-1");
+    expect(candle.orderCalls.length).toBeGreaterThan(before);
   });
 
   it("addIndicator sends exactly one SubscribeIndicator with the controller's config; reload re-sends for the new symbol/timeframe", () => {

@@ -35,6 +35,10 @@ export const VOLUME_BAND = 0.25;
 export const CANDLE_SCALE_MARGINS = { top: 0.08, bottom: VOLUME_BAND } as const;
 export const VOLUME_SCALE_MARGINS = { top: 1 - VOLUME_BAND, bottom: 0 } as const;
 
+// TradingView draws studies as thin lines behind the price action, not the LWC
+// default (3px, drawn on top). See ChartController's indicator series creation.
+export const INDICATOR_LINE_WIDTH = 1;
+
 export function chartOptions(p: Palette): DeepChartOptions {
   return {
     layout: { background: { type: "solid", color: p.bg }, textColor: p.text },
