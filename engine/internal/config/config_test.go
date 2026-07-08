@@ -233,3 +233,14 @@ func TestBackfillDefaultsAndOverride(t *testing.T) {
 		t.Fatalf("backfill override = %+v", cfg.Backfill)
 	}
 }
+
+func TestBackfillAlpacaDefaults(t *testing.T) {
+	cfg, err := Load(filepath.Join(t.TempDir(), "none.toml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := cfg.Backfill.Alpaca
+	if !a.Enabled || a.CredsKey != "alpaca" || a.Feed != "iex" {
+		t.Fatalf("alpaca backfill defaults = %+v", a)
+	}
+}
