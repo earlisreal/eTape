@@ -173,8 +173,13 @@ func rankRows(items []rankItem, floats map[string]floatEntry, cfg config.Scan) [
 	return out
 }
 
+// newHits returns symbols to force-flash. A session's first populated poll
+// (empty seen-set) is a silent baseline: seed the set, emit nothing — this
+// avoids a whole-board flash/chime storm at session rollover and daily reset.
+// Genuinely-new symbols on later polls are returned as hits.
 func (p *Poller) newHits(sess string, rows []wsmsg.ScannerRow) []string {
 	s := p.seen[sess]
+	baseline := len(s) == 0
 	if s == nil {
 		s = map[string]bool{}
 		p.seen[sess] = s
@@ -183,7 +188,9 @@ func (p *Poller) newHits(sess string, rows []wsmsg.ScannerRow) []string {
 	for _, r := range rows {
 		if !s[r.Symbol] {
 			s[r.Symbol] = true
-			hits = append(hits, r.Symbol)
+			if !baseline {
+				hits = append(hits, r.Symbol)
+			}
 		}
 	}
 	return hits

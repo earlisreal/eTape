@@ -107,10 +107,12 @@ func TestResetIfNewDayClearsFloatCacheAndSeen(t *testing.T) {
 
 func TestNewHitsSeenSet(t *testing.T) {
 	p := &Poller{seen: map[string]map[string]bool{}}
+	// First populated poll for a session is a silent baseline: no hits, seed only.
 	first := p.newHits("premarket", []wsmsg.ScannerRow{{Symbol: "US.A"}, {Symbol: "US.B"}})
-	if len(first) != 2 {
-		t.Fatalf("first pass: both are new hits, got %v", first)
+	if len(first) != 0 {
+		t.Fatalf("first poll is a silent baseline, want 0 hits, got %v", first)
 	}
+	// Genuinely-new symbols after the baseline do fire.
 	second := p.newHits("premarket", []wsmsg.ScannerRow{{Symbol: "US.A"}, {Symbol: "US.C"}})
 	if len(second) != 1 || second[0] != "US.C" {
 		t.Fatalf("second pass: only US.C is new, got %v", second)
@@ -411,17 +413,17 @@ func TestPollOnceEndToEnd(t *testing.T) {
 	if rows[0].FloatShares == nil || *rows[0].FloatShares != 20_000_000 {
 		t.Fatalf("US.LOWF float should be resolved via 3203: %+v", rows[0])
 	}
-	if len(pub.hits) != 1 || pub.hits[0].Symbol != "US.LOWF" {
-		t.Fatalf("want one new hit for US.LOWF: %+v", pub.hits)
+	if len(pub.hits) != 0 {
+		t.Fatalf("first poll is a silent baseline -> no hits: %+v", pub.hits)
 	}
 
-	// Second poll, same board: still a rank publish, but no new hit.
+	// Second poll, same board: still a rank publish, no hits (baseline already seeded).
 	p.pollOnce(context.Background(), p.clk.Now())
 	if len(pub.ranks) != 2 {
 		t.Fatalf("want a second rank publish, got %d", len(pub.ranks))
 	}
-	if len(pub.hits) != 1 {
-		t.Fatalf("US.LOWF already seen -> no new hit on second poll: %+v", pub.hits)
+	if len(pub.hits) != 0 {
+		t.Fatalf("baseline seeded, US.LOWF already seen -> no hits on second poll: %+v", pub.hits)
 	}
 	if fr.snapCalls != 1 {
 		t.Fatalf("float cache should make the second poll issue zero snapshots: snapCalls=%d", fr.snapCalls)
