@@ -7,9 +7,31 @@ UI. Full design rationale lives in `docs/` and `CLAUDE.md`; this file is the pra
 
 ## Prerequisites
 
-- Go and Node.js toolchains installed.
+- **Go** (≥ 1.26.4, pinned by `engine/go.mod`) and **Node.js** (LTS 22.x) toolchains
+  installed and on `PATH`.
 - For live mode: [moomoo OpenD](https://openapi.moomoo.com/) running locally and logged
   in (default `127.0.0.1:11111`).
+- macOS/Linux use `./run.sh`; Windows uses `run.cmd` (see [Running on Windows](#running-on-windows)).
+  Go, Node.js, and OpenD all ship Windows builds, so the same from-source workflow applies.
+
+### Installing the Go and Node.js toolchains
+
+Download and run the official installers (Windows and macOS both offered there):
+
+- **Go:** https://go.dev/dl/ — on Windows grab the amd64 `.msi`; it adds Go to `PATH`
+  automatically. Latest stable satisfies the `≥ 1.26.4` pin (modern Go auto-fetches the
+  exact toolchain on first build if the installed one is older).
+- **Node.js:** https://nodejs.org/ — take the **LTS** installer, which bundles `npm`.
+  On Windows keep the default "Add to PATH".
+
+After installing, **open a new terminal** (installers don't update already-open shells)
+and confirm:
+
+```
+go version      # >= 1.26.4
+node --version  # 22.x LTS
+npm --version
+```
 
 ## Running
 
@@ -40,9 +62,39 @@ Examples:
 All three modes build the UI first and serve it from the engine at
 `http://127.0.0.1:8686`.
 
+## Running on Windows
+
+`run.cmd` is the Windows equivalent of `run.sh` — **same three modes, same
+arguments**. Just substitute `run.cmd` for `./run.sh`:
+
+```
+run.cmd dev ladder-tape
+run.cmd demo
+run.cmd demo 2026-01-02 0
+run.cmd live
+run.cmd live -watch=AAPL,TSLA -focus=AAPL
+```
+
+`run.cmd` is a thin shim over `run.ps1`; it sets the PowerShell execution policy
+for that one invocation (`-ExecutionPolicy Bypass`), so there's nothing to
+configure first. It targets the built-in Windows PowerShell 5.1 — no extra
+install. Setup on the Windows machine:
+
+1. `git clone` the repo.
+2. Install the Go and Node.js toolchains (ensure both are on `PATH`).
+3. For live mode, install and launch **moomoo OpenD for Windows**, logged in
+   (still `127.0.0.1:11111`), and put your config at
+   `%USERPROFILE%\.eTape\config.toml` (the Windows home dir — same layout as
+   `~/.eTape/` on macOS; see [Configuring live mode](#configuring-live-mode)).
+4. `run.cmd live` (add `-focus=SYM` for the DOM ladder, as on macOS).
+
+Nothing else differs: the engine is pure Go (no cgo) and resolves the home
+directory per-OS, so charts, ladder, and tape behave identically.
+
 ## Configuring live mode
 
-The engine reads `~/.eTape/config.toml` at boot. **A missing file is not an error** —
+The engine reads `~/.eTape/config.toml` at boot (on Windows,
+`%USERPROFILE%\.eTape\config.toml`). **A missing file is not an error** —
 it silently falls back to built-in defaults (see `engine/internal/config/config.go`:
 `Default()`), which have an **empty watchlist and no execution venues**. That means with
 no config file, OpenD is never told to subscribe to anything — the UI will connect fine,
