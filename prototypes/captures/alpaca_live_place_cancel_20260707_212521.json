@@ -1,0 +1,36 @@
+{
+ "symbol": "F",
+ "limit": 10.0,
+ "rows": [
+  {
+   "cycle": 1,
+   "cold": true,
+   "place_api_ms": 204.1,
+   "place_ack_push_ms": 235.1,
+   "cancel_api_ms": 196.4,
+   "cancel_push_ms": 230.4,
+   "cancel_http": 204,
+   "final_status": "canceled"
+  },
+  {
+   "cycle": 2,
+   "cold": false,
+   "place_api_ms": 199.2,
+   "place_ack_push_ms": 231.4,
+   "cancel_api_ms": 195.1,
+   "cancel_push_ms": 229.2,
+   "cancel_http": 204,
+   "final_status": "canceled"
+  },
+  {
+   "cycle": 3,
+   "cold": false,
+   "place_api_ms": 198.7,
+   "place_ack_push_ms": 231.8,
+   "cancel_api_ms": 194.2,
+   "cancel_push_ms": 235.7,
+   "cancel_http": 204,
+   "final_status": "canceled"
+  }
+ ]
+}

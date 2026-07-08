@@ -1,0 +1,17 @@
+{
+ "symbol": "F",
+ "timelines": [
+  {
+   "venue": "alpaca-live",
+   "side": "buy",
+   "cycle": 1,
+   "cold": true,
+   "t_send": 2590.5013331212103,
+   "api_return_ms": 199.1,
+   "ack_ms": 229.5,
+   "fill_ms": null,
+   "order_id": "8b1e5746-7abb-4fde-bb6b-b6a73e9145a8",
+   "fill_price": null
+  }
+ ]
+}

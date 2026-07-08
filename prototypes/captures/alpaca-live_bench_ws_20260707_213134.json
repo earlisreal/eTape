@@ -1,0 +1,126 @@
+[
+ {
+  "t_ms": 1959.2,
+  "encoding": "json-in-binary",
+  "frame": {
+   "stream": "authorization",
+   "data": {
+    "action": "authenticate",
+    "status": "authorized"
+   }
+  }
+ },
+ {
+  "t_ms": 2146.9,
+  "encoding": "json-in-binary",
+  "frame": {
+   "stream": "listening",
+   "data": {
+    "streams": [
+     "trade_updates"
+    ]
+   }
+  }
+ },
+ {
+  "t_ms": 2798.1,
+  "encoding": "json-in-binary",
+  "frame": {
+   "stream": "trade_updates",
+   "data": {
+    "at": "2026-07-07T13:31:08.991115Z",
+    "event_id": "01KWYCCZ9ZC20PCN4PA4PJPD7W",
+    "event": "pending_new",
+    "timestamp": "2026-07-07T13:31:08.991115068Z",
+    "order": {
+     "id": "8b1e5746-7abb-4fde-bb6b-b6a73e9145a8",
+     "client_order_id": "et-bench-buy-1-133108758911",
+     "created_at": "2026-07-07T13:31:08.989500348Z",
+     "updated_at": "2026-07-07T13:31:08.990234048Z",
+     "submitted_at": "2026-07-07T13:31:08.989500348Z",
+     "filled_at": null,
+     "expired_at": null,
+     "cancel_requested_at": null,
+     "canceled_at": null,
+     "failed_at": null,
+     "replaced_at": null,
+     "replaced_by": null,
+     "replaces": null,
+     "asset_id": "1e80b378-a5e3-4727-96bf-9c64fdd4e7e2",
+     "symbol": "F",
+     "asset_class": "us_equity",
+     "notional": null,
+     "qty": "1",
+     "filled_qty": "0",
+     "filled_avg_price": null,
+     "order_class": "",
+     "order_type": "limit",
+     "type": "limit",
+     "side": "buy",
+     "position_intent": "buy_to_open",
+     "time_in_force": "day",
+     "limit_price": "13.8",
+     "stop_price": null,
+     "status": "pending_new",
+     "extended_hours": false,
+     "legs": null,
+     "trail_percent": null,
+     "trail_price": null,
+     "hwm": null,
+     "expires_at": "2026-07-07T20:00:00Z"
+    }
+   }
+  }
+ },
+ {
+  "t_ms": 2820.0,
+  "encoding": "json-in-binary",
+  "frame": {
+   "stream": "trade_updates",
+   "data": {
+    "at": "2026-07-07T13:31:09.012859Z",
+    "event_id": "01KWYCCZAMWHS7R97HARQGB9P9",
+    "event": "new",
+    "timestamp": "2026-07-07T13:31:08.995Z",
+    "order": {
+     "id": "8b1e5746-7abb-4fde-bb6b-b6a73e9145a8",
+     "client_order_id": "et-bench-buy-1-133108758911",
+     "created_at": "2026-07-07T13:31:08.989500348Z",
+     "updated_at": "2026-07-07T13:31:09.011937798Z",
+     "submitted_at": "2026-07-07T13:31:08.991606814Z",
+     "filled_at": null,
+     "expired_at": null,
+     "cancel_requested_at": null,
+     "canceled_at": null,
+     "failed_at": null,
+     "replaced_at": null,
+     "replaced_by": null,
+     "replaces": null,
+     "asset_id": "1e80b378-a5e3-4727-96bf-9c64fdd4e7e2",
+     "symbol": "F",
+     "asset_class": "us_equity",
+     "notional": null,
+     "qty": "1",
+     "filled_qty": "0",
+     "filled_avg_price": null,
+     "order_class": "",
+     "order_type": "limit",
+     "type": "limit",
+     "side": "buy",
+     "position_intent": "buy_to_open",
+     "time_in_force": "day",
+     "limit_price": "13.8",
+     "stop_price": null,
+     "status": "new",
+     "extended_hours": false,
+     "legs": null,
+     "trail_percent": null,
+     "trail_price": null,
+     "hwm": null,
+     "expires_at": "2026-07-07T20:00:00Z"
+    },
+    "execution_id": "8fd68ccf-6b50-43ed-8740-9a24d21be92b"
+   }
+  }
+ }
+]

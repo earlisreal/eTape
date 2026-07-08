@@ -1,0 +1,29 @@
+{
+ "symbol": "F",
+ "timelines": [
+  {
+   "venue": "alpaca-live",
+   "side": "buy",
+   "cycle": 1,
+   "cold": true,
+   "t_send": 2475.4192922264338,
+   "api_return_ms": 208.6,
+   "ack_ms": 239.4,
+   "fill_ms": 239.4,
+   "order_id": "499b1741-c9a0-4330-abc3-a8334a13f553",
+   "fill_price": "13.7099"
+  },
+  {
+   "venue": "alpaca-live",
+   "side": "sell",
+   "cycle": 1,
+   "cold": false,
+   "t_send": 3280.272042378783,
+   "api_return_ms": 196.1,
+   "ack_ms": 231.7,
+   "fill_ms": 231.9,
+   "order_id": "315a07d6-c306-4757-8546-226336f27348",
+   "fill_price": "13.7032"
+  }
+ ]
+}

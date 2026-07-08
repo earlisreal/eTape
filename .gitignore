@@ -27,3 +27,6 @@ docs/tradezero/
 
 # Git worktree scratch space
 .worktrees/
+
+# Playwright MCP browser session artifacts (screenshots, console logs, a11y snapshots)
+.playwright-mcp/
