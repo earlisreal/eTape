@@ -20,5 +20,5 @@ export type TopicName = Topic;
 export type VenueID = string;
 
 // Scanner session travels on the message `key` ("premarket" | "rth" |
-// "afterhours"). A UI-side convention, not a generated wire type.
-export type ScannerSession = "premarket" | "rth" | "afterhours";
+// "afterhours" | "overnight"). A UI-side convention, not a generated wire type.
+export type ScannerSession = "premarket" | "rth" | "afterhours" | "overnight";

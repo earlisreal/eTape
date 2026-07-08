@@ -6,6 +6,7 @@ import type {
 export interface ScannerRowView extends ScannerRow { isNewHit: boolean; muted: boolean }
 export interface ScannerSessionView { rows: ScannerRowView[]; refreshedAt: string | null }
 interface ScannerState { sessions: Partial<Record<ScannerSession, ScannerSessionView>> }
+export interface CurrentScannerView { session: ScannerSession | null; rows: ScannerRowView[]; refreshedAt: string | null }
 
 // Session-parameterized rank store. Rows arrive per session on the message `key`.
 // New-hit flash + midnight-reset dedup are UI-authoritative: a per-session
@@ -27,11 +28,15 @@ export class ScannerStore extends ReactStore<ScannerState> {
     if (m.topic === "scanner.hit") { this.applyHit(session, m.payload as ScanHitPayload); return; }
     const { refreshedAt, rows } = m.payload as ScannerRankPayload;
     const seen = this.seenFor(session);
-    if (m.kind === "snapshot") seen.clear(); // a (re)snapshot is a fresh baseline: no flash, no stale mute
+    if (m.kind === "snapshot") seen.clear(); // a (re)snapshot is a fresh baseline
+    // A delta against an empty seen-set is a session's first board (rollover,
+    // fresh session start, or post-reset): seed it silently so the whole board
+    // does not flash/chime at once. Genuinely-new symbols flash on later deltas.
+    const isBaseline = m.kind === "snapshot" || seen.size === 0;
     const newHits: string[] = [];
     const view: ScannerRowView[] = rows.map((row) => {
-      const isNewHit = m.kind === "delta" && !seen.has(row.symbol);
-      const muted = m.kind === "delta" && seen.has(row.symbol);
+      const isNewHit = !isBaseline && !seen.has(row.symbol);
+      const muted = !isBaseline && seen.has(row.symbol);
       if (isNewHit) newHits.push(row.symbol);
       return { ...row, isNewHit, muted };
     });
@@ -47,6 +52,24 @@ export class ScannerStore extends ReactStore<ScannerState> {
 
   view(session: ScannerSession): ScannerSessionView {
     return this.getSnapshot().sessions[session] ?? { rows: [], refreshedAt: null };
+  }
+
+  // The session view with the freshest refreshedAt — the "live" board the
+  // panels follow. Null session until any data arrives.
+  currentView(): CurrentScannerView {
+    const sessions = this.getSnapshot().sessions;
+    let best: ScannerSession | null = null;
+    let bestT = -Infinity;
+    for (const key of Object.keys(sessions) as ScannerSession[]) {
+      const v = sessions[key];
+      if (!v?.refreshedAt) continue;
+      const t = Date.parse(v.refreshedAt);
+      const ms = Number.isNaN(t) ? -Infinity : t;
+      if (ms > bestT) { bestT = ms; best = key; }
+    }
+    if (!best) return { session: null, rows: [], refreshedAt: null };
+    const v = sessions[best]!;
+    return { session: best, rows: v.rows, refreshedAt: v.refreshedAt };
   }
 
   resetSeen(session?: ScannerSession): void {
