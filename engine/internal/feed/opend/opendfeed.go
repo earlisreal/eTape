@@ -63,11 +63,11 @@ func NewOpenDFeed(cli *Client, opt FeedOptions) *OpenDFeed {
 			Hysteresis:   opt.Hysteresis,
 			ExtendedTime: !opt.DisableExtendedTime,
 		}),
-		bf:      newBackfill(cli),
-		clk:     opt.Clock,
-		events:  make(chan feed.Event, opt.EventBuf),
-		seedq:   make(chan seedJob, 64),
-		fetched: make(map[string]time.Time),
+		bf:        newBackfill(cli),
+		clk:       opt.Clock,
+		events:    make(chan feed.Event, opt.EventBuf),
+		seedq:     make(chan seedJob, 64),
+		fetched:   make(map[string]time.Time),
 		validated: make(map[string]struct{}),
 	}
 }
