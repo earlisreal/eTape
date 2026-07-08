@@ -98,19 +98,19 @@ export const PANELS: Record<string, PanelDef> = {
     demand: "watch",
   },
   "scanner": {
-    component: (p) => <ScannerPanel {...p} session="premarket" />,
+    component: (p) => <ScannerPanel {...p} variant="scanner" />,
     topics: ["scanner.rank", "scanner.hit"],
     title: "Scanner",
     glyph: "%",
-    description: "Pre-market gappers, filters",
+    description: "Live gappers, all sessions, filters",
     symbolBearing: false,
   },
   "movers": {
-    component: (p) => <ScannerPanel {...p} session="rth" />,
+    component: (p) => <ScannerPanel {...p} variant="movers" />,
     topics: ["scanner.rank", "scanner.hit"],
     title: "Movers",
     glyph: "↕",
-    description: "RTH % leaders",
+    description: "Live % leaders, all sessions",
     symbolBearing: false,
   },
   "news": {

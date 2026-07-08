@@ -10,7 +10,7 @@ import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColu
 import type { ScannerRowView } from "../../data/ScannerStore";
 
 const SESSION_LABEL: Record<ScannerSession, string> = {
-  premarket: "Pre-market", rth: "RTH movers", afterhours: "After-hours",
+  premarket: "Pre-market", rth: "RTH movers", afterhours: "After-hours", overnight: "Overnight",
 };
 const GROUPS: Exclude<LinkGroup, null>[] = ["red", "green", "blue", "yellow"];
 const DEFAULT_SORT: SortState = { col: "changePct", dir: "desc" };
@@ -48,29 +48,29 @@ function readSort(s: Record<string, unknown>): SortState {
 }
 
 export function ScannerPanel(
-  { config, stores, linkGroups, onConfigChange, session }: PanelProps & { session: ScannerSession },
+  { config, stores, linkGroups, onConfigChange, variant }: PanelProps & { variant: "scanner" | "movers" },
 ): JSX.Element {
   const { palette } = useTheme();
   const snap = useSyncExternalStore((cb) => stores.scanner.subscribe(cb), () => stores.scanner.getSnapshot());
-  const sv = useMemo(() => stores.scanner.view(session), [snap, session, stores.scanner]);
+  const cv = useMemo(() => stores.scanner.currentView(), [snap, stores.scanner]);
   const [thresholds, setThresholds] = useState<ScannerThresholds>(() => readThresholds(config.settings));
   const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [draft, setDraft] = useState<ScannerThresholds>(thresholds);
   const targetGroup = ((config.settings.targetGroup as LinkGroup) ?? "green") as Exclude<LinkGroup, null>;
 
-  // ET-midnight dedup reset: clear the per-session seen-set so the next session's
+  // ET-midnight dedup reset: clear the per-session seen-sets so the next session's
   // first prints flash fresh. Re-arms after each fire.
   useEffect(() => {
     let timer: ReturnType<typeof setTimeout>;
-    const arm = () => { timer = setTimeout(() => { stores.scanner.resetSeen(session); arm(); }, msUntilEtMidnight(new Date())); };
+    const arm = () => { timer = setTimeout(() => { stores.scanner.resetSeen(); arm(); }, msUntilEtMidnight(new Date())); };
     arm();
     return () => clearTimeout(timer);
-  }, [stores.scanner, session]);
+  }, [stores.scanner]);
 
   const rows = useMemo(
-    () => sortRows(applyScannerFilters(sv.rows, thresholds), sort, SORT_ACCESSORS),
-    [sv.rows, thresholds, sort],
+    () => sortRows(applyScannerFilters(cv.rows, variant === "movers" ? DEFAULT_THRESHOLDS : thresholds), sort, SORT_ACCESSORS),
+    [cv.rows, thresholds, sort, variant],
   );
 
   const openFilters = () => { setDraft(thresholds); setFiltersOpen(true); };
@@ -88,19 +88,21 @@ export function ScannerPanel(
 
   const swatch = (g: Exclude<LinkGroup, null>): string =>
     ({ red: palette.linkRed, green: palette.linkGreen, blue: palette.linkBlue, yellow: palette.linkYellow }[g]);
-  const header = sv.refreshedAt
-    ? `${SESSION_LABEL[session]} · updated ${formatTapeTime(sv.refreshedAt)}`
-    : `Waiting for ${SESSION_LABEL[session].toLowerCase()} data…`;
+  const header = cv.refreshedAt
+    ? `${SESSION_LABEL[cv.session!]} · updated ${formatTapeTime(cv.refreshedAt)}`
+    : "Waiting for scanner data…";
 
   const th = { padding: "2px 8px", position: "sticky" as const, top: 0, background: palette.surface };
   return (
     <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderBottom: `1px solid ${palette.border}`, position: "relative" }}>
         <span style={{ fontWeight: 600 }}>{header}</span>
-        <button type="button" className="btn" aria-label="filters" aria-expanded={filtersOpen}
-          onClick={() => (filtersOpen ? setFiltersOpen(false) : openFilters())} style={{ padding: "2px 8px" }}>
-          ⚙ filters
-        </button>
+        {variant === "scanner" && (
+          <button type="button" className="btn" aria-label="filters" aria-expanded={filtersOpen}
+            onClick={() => (filtersOpen ? setFiltersOpen(false) : openFilters())} style={{ padding: "2px 8px" }}>
+            ⚙ filters
+          </button>
+        )}
         <span style={{ flex: 1 }} />
         {GROUPS.map((g) => (
           <button key={g} title={`Send clicks to ${g}`} aria-label={`send clicks to ${g}`}
@@ -108,7 +110,7 @@ export function ScannerPanel(
             style={{ width: 14, height: 14, borderRadius: 3, background: swatch(g), padding: 0, cursor: "pointer",
               border: targetGroup === g ? `2px solid ${palette.text}` : `1px solid ${palette.border}` }} />
         ))}
-        {filtersOpen && (
+        {variant === "scanner" && filtersOpen && (
           <div className="popover" style={{ top: 30, left: 8, width: 220 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
               <label>min change % <input aria-label="min change %" type="number" value={draft.minChangePct}
@@ -125,9 +127,11 @@ export function ScannerPanel(
           </div>
         )}
       </div>
-      <div className="mono" style={{ padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>
-        {formatFilterSummary(thresholds)}
-      </div>
+      {variant === "scanner" && (
+        <div className="mono" style={{ padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>
+          {formatFilterSummary(thresholds)}
+        </div>
+      )}
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr style={{ color: palette.textMuted, textAlign: "right" }}>
@@ -152,7 +156,7 @@ export function ScannerPanel(
               <td style={{ padding: "2px 8px" }}>{formatCompactShares(r.volume)}</td>
             </tr>
           ))}
-          {rows.length === 0 && sv.refreshedAt && (
+          {rows.length === 0 && cv.refreshedAt && (
             <tr><td colSpan={5} style={{ padding: 12, color: palette.textMuted, textAlign: "center" }}>No symbols match the current filters.</td></tr>
           )}
         </tbody>
