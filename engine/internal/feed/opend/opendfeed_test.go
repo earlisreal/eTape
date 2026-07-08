@@ -214,3 +214,28 @@ func TestReconnectSeedFailureLogsAndContinues(t *testing.T) {
 		}
 	}
 }
+
+func TestValidate_CachesPositive(t *testing.T) {
+	r := &snapRPC{resp: snapshotResp(0, "", 1)}
+	f := &OpenDFeed{bf: newBackfill(r), validated: map[string]struct{}{}}
+	if err := f.Validate(context.Background(), "US.AAPL"); err != nil {
+		t.Fatalf("first call: want nil, got %v", err)
+	}
+	r.err = ErrNotConnected // any later RPC would now fail…
+	if err := f.Validate(context.Background(), "US.AAPL"); err != nil {
+		t.Fatalf("cached call must not RPC: want nil, got %v", err)
+	}
+}
+
+func TestValidate_UnknownNotCached(t *testing.T) {
+	r := &snapRPC{resp: snapshotResp(-1, "Unknown stock. X", 0)}
+	f := &OpenDFeed{bf: newBackfill(r), validated: map[string]struct{}{}}
+	if err := f.Validate(context.Background(), "US.X"); !errors.Is(err, feed.ErrUnknownSymbol) {
+		t.Fatalf("want ErrUnknownSymbol, got %v", err)
+	}
+	// negative must not be cached — a now-valid symbol resolves.
+	r.resp = snapshotResp(0, "", 1)
+	if err := f.Validate(context.Background(), "US.X"); err != nil {
+		t.Fatalf("second call after listing: want nil, got %v", err)
+	}
+}
