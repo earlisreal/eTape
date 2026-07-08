@@ -4,6 +4,7 @@ import type { PositionRow } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
+import { useVenueSelection } from "../exec/venueSelection";
 import { resolvePlaceTemplate } from "../exec/resolveTemplate";
 import type { PlaceOrderTemplate } from "../exec/actionTemplate";
 import { formatPrice, formatSize } from "../../render/format";
@@ -47,20 +48,21 @@ const SORT_ACCESSORS: Record<string, (r: PositionRow) => number | string | null>
 // ---- Stats strip + arm chips (folded from AccountBarPanel) ----
 
 function StatsStrip({
-  stores, oc, palette,
+  stores, oc, palette, venue, venues, selectVenue,
 }: {
   stores: PanelProps["stores"];
   oc: ReturnType<typeof useOrderCommands>;
   palette: ReturnType<typeof useTheme>["palette"];
+  venue: string;
+  venues: string[];
+  selectVenue: (v: string) => void;
 }): JSX.Element {
-  const accounts = stores.exec.accounts();
   const status = stores.exec.status();
-  const sum = (pick: (a: (typeof accounts)[number]) => number) => (accounts.length ? accounts.reduce((s, a) => s + pick(a), 0) : null);
-  const equity = sum((a) => a.equity);
-  const bp = sum((a) => a.buyingPower);
-  const dayPnl = sum((a) => a.dayPnl);
-  const realized = sum((a) => a.realized);
-  const armed = status?.masterArmed ?? false;
+  const account = stores.exec.accounts().find((a) => a.venue === venue);
+  const equity = account?.equity ?? null;
+  const bp = account?.buyingPower ?? null;
+  const dayPnl = account?.dayPnl ?? null;
+  const realized = account?.realized ?? null;
 
   const cell = (label: string, testid: string, value: string, tone?: number) => (
     <div style={{ display: "flex", flexDirection: "column", padding: "2px 10px" }}>
@@ -74,11 +76,16 @@ function StatsStrip({
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
+      <select data-testid="acct-venue" className="ctl mono" value={venue} onChange={(e) => selectVenue(e.target.value)}>
+        {venues.map((v) => <option key={v} value={v}>{v}</option>)}
+      </select>
       {cell("Equity", "acct-equity", money(equity))}
       {cell("Buying Power", "acct-bp", money(bp))}
       {cell("Day P&L", "acct-daypnl", money(dayPnl), dayPnl ?? 0)}
       {cell("Realized", "acct-realized", money(realized), realized ?? 0)}
       <div style={{ flex: 1 }} />
+      {/* Per-venue arm chips stay all-venue (TopBar's arm-chip owns master arm;
+          the old duplicate master ARMED button is removed). */}
       <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "0 8px" }}>
         {(status?.venues ?? []).map((v) => (
           <button key={v.venue} data-testid={`venue-arm-${v.venue}`} data-armed={v.venueArmed}
@@ -93,18 +100,6 @@ function StatsStrip({
           </button>
         ))}
       </div>
-      {/* Bronze/muted arm chip — color-discipline fix (Task 9 review): armed/disarmed
-          is UI state, never market-direction green/red. Matches TopBar's arm-chip
-          formula (Task 9) and the .chip family (Task 3 global.css). */}
-      <button data-testid="arm-toggle" className="btn" onClick={() => (armed ? oc.disarm() : oc.arm())}
-        style={{
-          fontWeight: 600, letterSpacing: ".08em", padding: "4px 12px", borderRadius: 4,
-          color: armed ? palette.accent : palette.textMuted,
-          borderColor: armed ? palette.accent : palette.borderStrong,
-          background: armed ? "rgba(154,106,27,.12)" : "rgba(106,114,128,.12)",
-        }}>
-        {armed ? "ARMED" : "DISARMED"}
-      </button>
     </div>
   );
 }
@@ -112,7 +107,7 @@ function StatsStrip({
 // ---- Positions table (folded from PositionsPanel, now sortable via T16) ----
 
 function PositionsTable({
-  stores, commands, oc, palette, config, onConfigChange,
+  stores, commands, oc, palette, config, onConfigChange, venue,
 }: {
   stores: PanelProps["stores"];
   commands: PanelProps["commands"];
@@ -120,15 +115,16 @@ function PositionsTable({
   palette: ReturnType<typeof useTheme>["palette"];
   config: PanelProps["config"];
   onConfigChange: PanelProps["onConfigChange"];
+  venue: string;
 }): JSX.Element {
   const toast = useToasts();
-  const rows0 = stores.exec.positions();
+  const rows0 = stores.exec.positions().filter((p) => p.venue === venue); // venue-scoped; NET (venue===null) rows drop out
   const status = stores.exec.status();
   const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
   const armedFor = (v: string | null) => !!status?.masterArmed && !!status?.venues.find((x) => x.venue === v)?.venueArmed;
 
   const rows = useMemo(() => sortRows(rows0, sort, SORT_ACCESSORS), [rows0, sort]);
-  const openCount = rows0.filter((r) => r.venue !== null).length;
+  const openCount = rows0.length;
 
   const clickSort = (col: string, sortable: boolean) => {
     if (!sortable) return;
@@ -200,16 +196,18 @@ function PositionsTable({
   );
 }
 
-export function AccountPanel({ config, stores, commands, onConfigChange }: PanelProps): JSX.Element {
+export function AccountPanel({ config, stores, commands, onConfigChange, linkGroups, group: groupProp }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
+  const group = groupProp ?? config.group;
+  const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: palette.bg, color: palette.text, fontFamily: "inherit" }}>
-      <StatsStrip stores={stores} oc={oc} palette={palette} />
-      <PositionsTable stores={stores} commands={commands} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} />
+      <StatsStrip stores={stores} oc={oc} palette={palette} venue={venue} venues={venues} selectVenue={selectVenue} />
+      <PositionsTable stores={stores} commands={commands} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} />
     </div>
   );
 }

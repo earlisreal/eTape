@@ -69,6 +69,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       // symbol otherwise falls back to its AAPL creation-time seed on refresh,
       // because LinkGroups itself is rebuilt empty on every page load).
       linkGroups.hydrate(w.groups ?? {});
+      linkGroups.hydrateVenues(w.linkVenues ?? {});
       setWs(w);
     });
   }, [workspaceName, workspaceStore, linkGroups]);
@@ -116,7 +117,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     return linkGroups.subscribe(() => {
       const current = wsRef.current;
       if (!current) return; // a cross-window bus echo can arrive before the first load resolves
-      const next = { ...current, groups: linkGroups.snapshot() };
+      const next = { ...current, groups: linkGroups.snapshot(), linkVenues: linkGroups.snapshotVenues() };
       wsRef.current = next;
       setWs(next);
       workspaceStore.save(next);

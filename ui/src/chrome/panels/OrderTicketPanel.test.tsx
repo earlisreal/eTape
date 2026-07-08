@@ -6,7 +6,6 @@ import { ToastProvider } from "../Toast";
 import { OrderConfigProvider } from "../exec/useOrderConfig";
 import { OrderTicketPanel } from "./OrderTicketPanel";
 import { makeStores } from "../../data/registry";
-import { getPalette } from "../../render/palette";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
 import type { AckMsg, ExecStatus, SubmitOrderArgs } from "../../wire/contract";
 import type { PanelProps } from "./registry";
@@ -48,60 +47,35 @@ describe("OrderTicketPanel", () => {
     const args = sent.find((s) => s.name === "SubmitOrder")?.args as SubmitOrderArgs;
     expect(args).toMatchObject({ venue: "alpaca-paper", symbol: "US.AAPL", side: "BUY", qty: 100, limitPrice: 3.5 });
   });
-  it("kill switch fires KillSwitch even without arming logic", () => {
-    const { props, sent } = mkProps();
-    wrap(props);
-    fireEvent.click(screen.getByTestId("kill"));
-    expect(sent.some((s) => s.name === "KillSwitch")).toBe(true);
-  });
-  it("shows a DISARMED badge when the active venue is disarmed", async () => {
-    const { props, stores, linkGroups } = mkProps();
-    act(() => {
-      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: { ...status(), venues: [{ ...status().venues[0], venueArmed: false }] } });
-      linkGroups.focus("green", "US.AAPL");
-    });
-    wrap(props);
-    expect((await screen.findByTestId("ticket-armed-state")).textContent).toMatch(/DISARMED/i);
-  });
-  it("shows an ARMED badge when master and the active venue are armed, and exposes an order-type testid", async () => {
+  it("clicking the header bid/ask fills the price input", () => {
     const { props, stores, linkGroups } = mkProps();
     act(() => {
       stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.4, ask: 3.5, last: 3.45, ts: "" } });
       linkGroups.focus("green", "US.AAPL");
     });
     wrap(props);
-    expect((await screen.findByTestId("ticket-armed-state")).textContent).toBe("ARMED");
-    expect(screen.getByTestId("order-type")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("bid"));
+    // QUOTE_DECIMALS is 3 (pinned decimal count for live quote/limit-price
+    // display), so the filled price carries three decimals, not two.
+    expect((screen.getByTestId("price") as HTMLInputElement).value).toBe("3.400");
+    fireEvent.click(screen.getByTestId("ask"));
+    expect((screen.getByTestId("price") as HTMLInputElement).value).toBe("3.500");
   });
-  // Color-discipline regression (final-branch review, Finding 2): armed/disarmed
-  // is UI state, never market-direction green/red — matches AccountPanel's
-  // arm-chip formula (palette.accent when active, palette.textMuted when not).
-  it("colors the armed indicator bronze/muted, never green/red", async () => {
-    const palette = getPalette("light"); // ThemeProvider defaults to light
-    const { props: armedProps, stores: armedStores, linkGroups: armedLinks } = mkProps();
-    act(() => {
-      armedStores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
-      armedLinks.focus("green", "US.AAPL");
-    });
-    const armedRender = wrap(armedProps);
-    const armedEl = await screen.findByTestId("ticket-armed-state");
-    expect(armedEl.style.color).toBe(hexToRgb(palette.accent));
-    expect(armedEl.style.color).not.toBe(hexToRgb(palette.up));
-    armedRender.unmount();
-
-    const { props: disarmedProps, stores: disarmedStores, linkGroups: disarmedLinks } = mkProps();
-    act(() => {
-      disarmedStores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: { ...status(), venues: [{ ...status().venues[0], venueArmed: false }] } });
-      disarmedLinks.focus("green", "US.AAPL");
-    });
-    wrap(disarmedProps);
-    const disarmedEl = await screen.findByTestId("ticket-armed-state");
-    expect(disarmedEl.style.color).toBe(hexToRgb(palette.textMuted));
-    expect(disarmedEl.style.color).not.toBe(hexToRgb(palette.warn));
+  it("renders the stop input always, disabled unless type is STOP/STOP_LIMIT", () => {
+    const { props, stores } = mkProps();
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
+    wrap(props);
+    expect((screen.getByTestId("stop") as HTMLInputElement).disabled).toBe(true); // default LIMIT
+    fireEvent.change(screen.getByTestId("order-type"), { target: { value: "STOP" } });
+    expect((screen.getByTestId("stop") as HTMLInputElement).disabled).toBe(false);
+  });
+  it("changing the venue dropdown writes the group's focused venue", () => {
+    const { props, stores, linkGroups } = mkProps();
+    const twoVenues: ExecStatus = { ...status(), venues: [status().venues[0], { ...status().venues[0], venue: "tradezero" }] };
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: twoVenues }); });
+    wrap(props);
+    fireEvent.change(screen.getByTestId("venue"), { target: { value: "tradezero" } });
+    expect(linkGroups.venueFor("green")).toBe("tradezero");
   });
 });
-
-function hexToRgb(hex: string): string {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
-}

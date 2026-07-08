@@ -153,6 +153,67 @@ func TestMirrorEmptyNewsSnapshotMarshalsToArrayNotNull(t *testing.T) {
 	}
 }
 
+func TestNewMirrorSeedsAutoArmAndNote(t *testing.T) {
+	m := newMirror([]venueMeta{
+		{ID: "alpaca-paper", Broker: wsmsg.BrokerAlpaca, AutoArm: true},
+		{ID: "alpaca-live", Broker: wsmsg.BrokerAlpaca},
+		{ID: "moomoo", Broker: wsmsg.BrokerMoomoo, Note: "execution v1.x"},
+	}, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10)
+
+	st := m.execStatus()
+	if !st.MasterArmed {
+		t.Fatal("master should seed armed when a venue auto-arms")
+	}
+	byID := map[string]wsmsg.VenueStatus{}
+	for _, v := range st.Venues {
+		byID[v.Venue] = v
+	}
+	if !byID["alpaca-paper"].VenueArmed {
+		t.Fatal("alpaca-paper should seed armed")
+	}
+	if byID["alpaca-live"].VenueArmed {
+		t.Fatal("alpaca-live should seed disarmed")
+	}
+	if byID["moomoo"].Connected {
+		t.Fatal("moomoo stub should seed disconnected")
+	}
+	if byID["moomoo"].Note != "execution v1.x" {
+		t.Fatalf("moomoo note wrong: %q", byID["moomoo"].Note)
+	}
+}
+
+func TestMirrorStatusUpdateDoesNotClobberSeededNote(t *testing.T) {
+	m := newMirror([]venueMeta{
+		{ID: "moomoo", Broker: wsmsg.BrokerMoomoo, Note: "execution v1.x"},
+	}, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10)
+
+	// Seeded venue starts disconnected; flip it to connected first so the
+	// later "back to false" transition below actually proves Connected is
+	// being live-updated from the StatusUpdate, not just matching a zero value.
+	m.applyExec(exec.StatusUpdate{Venue: "moomoo", Connected: true, MasterArmed: false})
+	if v := m.execStatus().Venues[0]; !v.Connected || v.Note != "execution v1.x" {
+		t.Fatalf("after Connected:true update: got %+v", v)
+	}
+
+	// exec.Core.emitStatus() sends StatusUpdate with a zero-value Note on every
+	// arm/disarm/kill — this must not wipe the seeded per-venue note, since a
+	// venue's descriptive note is static config, not something the exec engine
+	// dynamically changes.
+	m.applyExec(exec.StatusUpdate{Venue: "moomoo", Connected: false, MasterArmed: false})
+
+	st := m.execStatus()
+	if len(st.Venues) != 1 {
+		t.Fatalf("expected 1 venue, got %d", len(st.Venues))
+	}
+	v := st.Venues[0]
+	if v.Note != "execution v1.x" {
+		t.Fatalf("StatusUpdate with empty Note must not clobber seeded note: got %q", v.Note)
+	}
+	if v.Connected {
+		t.Fatalf("Connected should reflect the incoming StatusUpdate (false), got true — Connected update broken")
+	}
+}
+
 func TestMirrorNewsAndEventsCapBounded(t *testing.T) {
 	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 200, 2, 500, 2)
 	for i := 0; i < 5; i++ {

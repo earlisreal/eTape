@@ -3,9 +3,12 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { ToastProvider } from "../Toast";
+import { OrderConfigProvider } from "../exec/useOrderConfig";
 import { AccountPanel } from "./AccountPanel";
 import { makeStores } from "../../data/registry";
 import { LIGHT } from "../../render/palette";
+import { LinkGroups } from "../linkGroups";
+import { FakeBus, FakeBusHub } from "../../../test/fakes";
 
 // jsdom normalizes inline hex colors to rgb() on the CSSStyleDeclaration.
 const hexToRgb = (hex: string): string => {
@@ -14,8 +17,9 @@ const hexToRgb = (hex: string): string => {
 };
 import type { AckMsg, AccountRow, ExecStatus, PositionRow, SubmitOrderArgs } from "../../wire/contract";
 import type { PanelProps } from "./registry";
+import type { LinkGroup } from "../linkGroups";
 
-function mkProps(over: Partial<PanelProps> = {}) {
+function mkProps(group: LinkGroup = null) {
   const stores = makeStores();
   const sent: Array<{ name: string; args: unknown }> = [];
   const configChanges: Array<Record<string, unknown>> = [];
@@ -23,20 +27,30 @@ function mkProps(over: Partial<PanelProps> = {}) {
     sendCommand: vi.fn(async (name: string, args: unknown): Promise<AckMsg> => { sent.push({ name, args }); return { kind: "ack", corrId: "c", status: "accepted" }; }),
     sendQuery: vi.fn(async () => []),
   };
+  const linkGroups = new LinkGroups(new FakeBus(new FakeBusHub()), () => {});
   const props = {
-    config: { id: "t-account", panelId: "account", group: null, settings: {} },
-    stores, scheduler: {} as never, width: 800, height: 400, linkGroups: {} as never, commands,
+    config: { id: "t-account", panelId: "account", group, settings: {} },
+    stores, scheduler: {} as never, width: 800, height: 400, linkGroups, commands,
     onConfigChange: (s: Record<string, unknown>) => configChanges.push(s),
-    ...over,
   } as PanelProps;
-  return { props, stores, sent, configChanges };
+  return { props, stores, sent, configChanges, linkGroups };
 }
 const acct = (venue: string, o: Partial<AccountRow> = {}): AccountRow => ({ venue, equity: 100, buyingPower: 400, availableCash: 50, sodEquity: 100, realized: 0, dayPnl: 0, leverage: 4, tsMs: 1, ...o });
-const status = (masterArmed: boolean): ExecStatus => ({ masterArmed, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 }, venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, venueArmed: true, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }] });
+const status = (masterArmed: boolean, ...venueIds: string[]): ExecStatus => ({
+  masterArmed, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
+  venues: (venueIds.length ? venueIds : ["alpaca-paper"]).map((venue) => ({
+    venue, broker: "alpaca", connected: true, venueArmed: true, reconcilePending: false,
+    note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 },
+  })),
+});
 const pos = (o: Partial<PositionRow>): PositionRow => ({ venue: "alpaca-paper", symbol: "US.AAPL", qty: 300, avgPrice: 3.4, unrealizedPnl: 30, ...o });
 
 function wrap(props: PanelProps) {
-  return render(<ThemeProvider><ToastProvider><AccountPanel {...props} /></ToastProvider></ThemeProvider>);
+  return render(
+    <ThemeProvider><ToastProvider><OrderConfigProvider commands={props.commands}>
+      <AccountPanel {...props} />
+    </OrderConfigProvider></ToastProvider></ThemeProvider>,
+  );
 }
 
 describe("AccountPanel", () => {
@@ -45,24 +59,6 @@ describe("AccountPanel", () => {
     const { props } = mkProps();
     wrap(props);
     expect(screen.getByTestId("acct-equity").textContent).toBe("—");
-  });
-  it("aggregates day P&L across venues and shows armed state", () => {
-    const { props, stores } = mkProps();
-    wrap(props);
-    act(() => {
-      stores.exec.apply({ kind: "snapshot", topic: "exec.account" as never, key: "alpaca-paper", payload: acct("alpaca-paper", { dayPnl: 12 }) });
-      stores.exec.apply({ kind: "delta", topic: "exec.account" as never, key: "tradezero-live", payload: acct("tradezero-live", { dayPnl: -5 }) });
-      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
-    });
-    expect(screen.getByTestId("acct-daypnl").textContent).toContain("7.00");
-    expect(screen.getByTestId("arm-toggle").textContent).toMatch(/ARMED/i);
-  });
-  it("arm toggle sends Disarm when currently armed", () => {
-    const { props, stores, sent } = mkProps();
-    wrap(props);
-    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) }));
-    fireEvent.click(screen.getByTestId("arm-toggle"));
-    expect(sent.map((s) => s.name)).toContain("Disarm");
   });
   it("arms a venue when its per-venue control is clicked", () => {
     const { props, stores, sent } = mkProps();
@@ -111,17 +107,6 @@ describe("AccountPanel", () => {
   });
 
   // --- color discipline (Task 9 review fix): arm chip is bronze/muted, never green/amber ---
-  it("styles the master arm chip bronze (accent) when armed, muted when disarmed — never up/warn green/amber", () => {
-    const { props, stores } = mkProps();
-    wrap(props);
-    const btn = screen.getByTestId("arm-toggle") as HTMLButtonElement;
-    expect(btn.style.color).not.toBe(hexToRgb(LIGHT.up));
-    expect(btn.style.color).toBe(hexToRgb(LIGHT.textMuted)); // disarmed default
-    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) }));
-    expect(btn.style.color).toBe(hexToRgb(LIGHT.accent));
-    expect(btn.style.color).not.toBe(hexToRgb(LIGHT.up));
-    expect(btn.style.borderColor).toBe(hexToRgb(LIGHT.accent));
-  });
   it("styles per-venue arm chips bronze/muted rather than green/amber", () => {
     const { props, stores } = mkProps();
     wrap(props);
@@ -132,18 +117,44 @@ describe("AccountPanel", () => {
     expect(btn.style.color).not.toBe(hexToRgb(LIGHT.up));
   });
 
-  // --- ported from PositionsPanel.test.tsx ---
-  it("renders per-venue and net rows with colored unrealized P&L", () => {
-    const { props, stores } = mkProps();
+  // --- new: venue dropdown scopes stats/positions (Task 10) ---
+  it("scopes stats to the selected venue", () => {
+    const { props, stores, linkGroups } = mkProps("green");
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false, "alpaca-paper", "alpaca-live") });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.account" as never, key: "alpaca-paper", payload: acct("alpaca-paper", { equity: 99 }) });
+      stores.exec.apply({ kind: "delta", topic: "exec.account" as never, key: "alpaca-live", payload: acct("alpaca-live", { equity: 12 }) });
+      linkGroups.focusVenue("green", "alpaca-live");
+    });
     wrap(props);
-    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({}), pos({ venue: null, unrealizedPnl: 30 })] }));
-    expect(screen.getAllByText("AAPL").length).toBe(2);
-    expect(screen.getByTestId("pos-net").textContent).toMatch(/NET/);
+    expect(screen.getByTestId("acct-equity").textContent).toContain("12.00");
+    fireEvent.change(screen.getByTestId("acct-venue"), { target: { value: "alpaca-paper" } });
+    expect(screen.getByTestId("acct-equity").textContent).toContain("99.00");
   });
+
+  it("filters positions to the selected venue and drops NET rows", () => {
+    const { props, stores, linkGroups } = mkProps("green");
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false, "alpaca-paper", "alpaca-live") });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [
+        pos({ venue: "alpaca-paper", symbol: "US.AAPL" }),
+        pos({ venue: "alpaca-live", symbol: "US.MSFT" }),
+        pos({ venue: null, symbol: "US.AAPL" }), // NET aggregate
+      ] });
+      linkGroups.focusVenue("green", "alpaca-paper");
+    });
+    wrap(props);
+    expect(screen.queryByTestId("pos-net")).toBeNull();
+    expect(screen.getByText("AAPL")).toBeTruthy();
+    expect(screen.queryByText("MSFT")).toBeNull();
+  });
+
+  // --- ported from PositionsPanel.test.tsx ---
   it("flatten on a long row submits a SELL for the full qty (priced from the quote)", () => {
     const { props, stores, sent } = mkProps();
     wrap(props);
     act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
       stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.5, ask: 3.51, last: 3.5, ts: "" } });
       stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({ qty: 300 })] });
     });
@@ -176,14 +187,17 @@ describe("AccountPanel", () => {
   it("defaults to sorting positions by unrealized P&L descending", () => {
     const { props, stores } = mkProps();
     wrap(props);
-    act(() => stores.exec.apply({
-      kind: "snapshot", topic: "exec.positions" as never,
-      payload: [
-        pos({ symbol: "US.AAPL", unrealizedPnl: 5 }),
-        pos({ symbol: "US.MSFT", unrealizedPnl: 50 }),
-        pos({ symbol: "US.TSLA", unrealizedPnl: -10 }),
-      ],
-    }));
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+      stores.exec.apply({
+        kind: "snapshot", topic: "exec.positions" as never,
+        payload: [
+          pos({ symbol: "US.AAPL", unrealizedPnl: 5 }),
+          pos({ symbol: "US.MSFT", unrealizedPnl: 50 }),
+          pos({ symbol: "US.TSLA", unrealizedPnl: -10 }),
+        ],
+      });
+    });
     const rows = screen.getAllByRole("row").slice(1); // drop header row
     expect(rows[0].textContent).toContain("MSFT");
     expect(rows[1].textContent).toContain("AAPL");
@@ -192,13 +206,16 @@ describe("AccountPanel", () => {
   it("clicking the Qty column header sorts by qty and persists the sort via onConfigChange", () => {
     const { props, stores, configChanges } = mkProps();
     wrap(props);
-    act(() => stores.exec.apply({
-      kind: "snapshot", topic: "exec.positions" as never,
-      payload: [
-        pos({ symbol: "US.AAPL", qty: 10, unrealizedPnl: 1 }),
-        pos({ symbol: "US.MSFT", qty: 300, unrealizedPnl: 2 }),
-      ],
-    }));
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+      stores.exec.apply({
+        kind: "snapshot", topic: "exec.positions" as never,
+        payload: [
+          pos({ symbol: "US.AAPL", qty: 10, unrealizedPnl: 1 }),
+          pos({ symbol: "US.MSFT", qty: 300, unrealizedPnl: 2 }),
+        ],
+      });
+    });
     fireEvent.click(screen.getByText("Qty"));
     const rows = screen.getAllByRole("row").slice(1);
     expect(rows[0].textContent).toContain("MSFT"); // desc by qty: 300 before 10

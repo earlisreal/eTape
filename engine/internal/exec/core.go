@@ -93,6 +93,7 @@ type CoreConfig struct {
 	Clock   clock.Clock
 	IDGen   *OrderIDGen
 	SysLog  func(kind, detail string) // optional; store.AppendSysEvent in prod
+	AutoArm map[VenueID]bool          // venues that boot armed (paper); nil/false => disarmed
 }
 
 func NewCore(cfg CoreConfig) *Core {
@@ -100,7 +101,7 @@ func NewCore(cfg CoreConfig) *Core {
 	if sl == nil {
 		sl = func(string, string) {}
 	}
-	return &Core{
+	c := &Core{
 		venues:  cfg.Venues,
 		gate:    cfg.Gate,
 		store:   cfg.Store,
@@ -114,6 +115,22 @@ func NewCore(cfg CoreConfig) *Core {
 		updates: make(chan Update, 4096),
 		state:   NewState(cfg.Venues),
 		marks:   markState{},
+	}
+	// Auto-arm is the ONLY boot path that starts armed; Recover never touches
+	// arm state, so a restart with no auto-arm venue is still fully disarmed.
+	applyBootArm(c.state, cfg.Venues, cfg.AutoArm)
+	return c
+}
+
+// applyBootArm seeds boot arm state: venues flagged auto_arm start armed, and
+// master arms iff at least one venue auto-arms. Live venues (no auto_arm) stay
+// disarmed and keep the deliberate arm click.
+func applyBootArm(s *State, venues []VenueID, autoArm map[VenueID]bool) {
+	for _, v := range venues {
+		if autoArm[v] {
+			s.SetVenueArmed(v, true)
+			s.SetMasterArmed(true)
+		}
 	}
 }
 

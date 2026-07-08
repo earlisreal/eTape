@@ -154,6 +154,38 @@ max_open_orders = 3
 	}
 }
 
+func TestVenueAutoArmParse(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	body := `
+[[venue]]
+id = "alpaca-paper"
+broker = "alpaca"
+env = "paper"
+credentials = "alpaca"
+auto_arm = true
+
+[[venue]]
+id = "alpaca-live"
+broker = "alpaca"
+env = "live"
+credentials = "alpaca-live"
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Venues[0].AutoArm {
+		t.Fatalf("alpaca-paper should have auto_arm=true: %+v", cfg.Venues[0])
+	}
+	if cfg.Venues[1].AutoArm {
+		t.Fatalf("alpaca-live should default auto_arm=false: %+v", cfg.Venues[1])
+	}
+}
+
 func TestVenueDefaultsEmpty(t *testing.T) {
 	cfg := Default()
 	if len(cfg.Venues) != 0 {

@@ -1,4 +1,5 @@
 import type { LinkGroup } from "./linkGroups";
+import type { VenueID } from "../wire/contract";
 
 export interface PanelConfig {
   id: string;
@@ -15,6 +16,9 @@ export interface Workspace {
   // itself is rebuilt in-memory (empty) on every page load. Optional: absent in
   // any workspace doc saved before this field existed.
   groups?: Partial<Record<Exclude<LinkGroup, null>, string>>;
+  // Per-link-group focused venue (LinkGroups.focusedVenues), persisted beside
+  // `groups`. Optional: absent in any workspace doc saved before this field.
+  linkVenues?: Partial<Record<Exclude<LinkGroup, null>, VenueID>>;
 }
 
 interface CommandClient {

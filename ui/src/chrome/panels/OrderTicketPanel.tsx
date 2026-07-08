@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSyncExternalStore } from "react";
 import type { PanelProps } from "./registry";
-import type { Side, OrderType, TIF, SubmitOrderArgs, VenueID } from "../../wire/contract";
+import type { Side, OrderType, TIF, SubmitOrderArgs } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
 import { useOrderConfig } from "../exec/useOrderConfig";
+import { useVenueSelection } from "../exec/venueSelection";
 import { useThrottledQuote } from "../exec/useThrottledQuote";
 import { resolveShares, type SizingMode } from "../exec/sizing";
 import { preCheck, type DraftOrder } from "../exec/preChecks";
@@ -19,18 +20,16 @@ const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
 const TIFS: TIF[] = ["DAY", "GTC", "IOC", "FOK"];
 const MODES: SizingMode[] = ["Shares", "Dollar", "BuyingPowerPct", "PositionFraction"];
+const MODE_LABEL: Record<SizingMode, string> = { Shares: "Sh", Dollar: "$", BuyingPowerPct: "BP%", PositionFraction: "Pos" };
 
 export function OrderTicketPanel({ config, stores, commands, linkGroups, group: groupProp }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
-  const { config: orderCfg, setActiveVenue } = useOrderConfig(); // shared context (Task 8)
-  const openSettings = useOpenSettings(); // unified Settings modal, Orders section (Task 11)
+  const { config: orderCfg } = useOrderConfig(); // presets/templates
+  const openSettings = useOpenSettings();
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
 
-  // config.group is frozen (dockview never re-invokes this panel's factory with a
-  // fresh config after creation); PanelFrame's live `group` prop is what actually
-  // changes on a group re-pick — see registry.ts's PanelProps.group comment.
   const group = groupProp ?? config.group;
   const [symbol, setSymbol] = useState<string>(() => linkGroups.symbolFor(group) ?? (config.settings.symbol as string) ?? "US.AAPL");
   useEffect(() => {
@@ -40,11 +39,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   }, [linkGroups, group, config.settings.symbol]);
 
   const quote = useThrottledQuote(stores.quote, symbol);
-  const status = stores.exec.status();
-  const venues = status?.venues.map((v) => v.venue) ?? [];
-  const venue: VenueID = orderCfg.activeVenue || venues[0] || "";
-  const vStatus = status?.venues.find((v) => v.venue === venue);
-  const armed = (status?.masterArmed ?? false) && (vStatus?.venueArmed ?? false);
+  const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
 
   const [side, setSide] = useState<Side>("BUY");
   const [type, setType] = useState<OrderType>("LIMIT");
@@ -59,6 +54,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const positionQty = stores.exec.positions().filter((p) => p.symbol === symbol && p.venue === venue).reduce((s, p) => s + p.qty, 0);
 
   const presets = useMemo(() => orderCfg.templates.filter((t): t is PlaceOrderTemplate => t.kind === "place"), [orderCfg.templates]);
+  const hasStop = type === "STOP" || type === "STOP_LIMIT";
 
   const submitManual = () => {
     if (venue === "") { toast.push({ level: "danger", text: "No venue configured." }); return; }
@@ -68,7 +64,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
       : mode === "BuyingPowerPct" ? { mode, pct: Number(amount) || 0 }
       : { mode, fraction: "all" as const };
     const qty = resolveShares(spec, { price: px, buyingPower, positionQty });
-    const draft: DraftOrder = { symbol, side, type, tif, qty, limitPrice: type === "MARKET" ? 0 : px, stopPrice: type === "STOP" || type === "STOP_LIMIT" ? Number(stop) || 0 : 0 };
+    const draft: DraftOrder = { symbol, side, type, tif, qty, limitPrice: type === "MARKET" ? 0 : px, stopPrice: hasStop ? Number(stop) || 0 : 0 };
     const pc = preCheck(draft, quote?.last ?? 0, Date.now());
     for (const n of pc.notices) toast.push({ level: "warn", text: n });
     if (!pc.ok) { toast.push({ level: "danger", text: pc.errors.join(" ") }); return; }
@@ -87,66 +83,69 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
     void oc.submit(r.args, r.flash);
   };
 
-  const quoteBtn = (label: string, testid: string, value: number | undefined, tone: string) => (
-    <button data-testid={testid} className="ctl mono" onClick={() => value !== undefined && setPrice(value.toFixed(QUOTE_DECIMALS))}
-      style={{ justifyContent: "center", borderColor: tone, color: tone, cursor: "pointer", flex: 1 }}>{label} {value === undefined ? "—" : formatPrice(value, QUOTE_DECIMALS)}</button>
+  // Clickable inline bid/ask in the header blotter line (replaces the old Bid/Ask
+  // button row). No quote => em dash, click no-ops.
+  const quoteFill = (value: number | undefined) => { if (value !== undefined) setPrice(value.toFixed(QUOTE_DECIMALS)); };
+  const priceSpan = (testid: string, value: number | undefined, tone: string) => (
+    <span data-testid={testid} onClick={() => quoteFill(value)}
+      style={{ color: tone, cursor: value === undefined ? "default" : "pointer" }}>
+      {value === undefined ? "—" : formatPrice(value, QUOTE_DECIMALS)}
+    </span>
   );
   const sideClass = (s: Side) => `side${s !== side ? "" : s === "BUY" ? " side-selected-buy" : " side-selected"}`;
+  const ctl = { flex: 1 } as const;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4, padding: 8, height: "100%", background: palette.surface, color: palette.text, fontSize: 12, overflow: "auto" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 4 }}>
-        <strong className="serif">{bareSymbol(symbol)}</strong>
-        <select data-testid="venue" className="ctl mono" value={venue} onChange={(e) => setActiveVenue(e.target.value)}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 3, padding: 6, height: "100%", background: palette.surface, color: palette.text, fontSize: 12, overflow: "auto" }}>
+      {/* Strip 1 — header blotter line */}
+      <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+        <strong className="serif" style={{ fontSize: 14 }}>{bareSymbol(symbol)}</strong>
+        <span className="mono" style={{ fontSize: 12 }}>
+          {priceSpan("bid", quote?.bid, palette.up)}
+          <span style={{ color: palette.textMuted }}>/</span>
+          {priceSpan("ask", quote?.ask, palette.down)}
+        </span>
+        <div style={{ flex: 1 }} />
+        <select data-testid="venue" className="ctl mono" value={venue} onChange={(e) => selectVenue(e.target.value)}>
           {venues.map((v) => <option key={v} value={v}>{v}</option>)}
         </select>
         <button data-testid="open-settings" className="btn" onClick={() => openSettings?.openOrderSettings()}>⚙</button>
       </div>
-      <div style={{ display: "flex", gap: 4 }}>
-        {quoteBtn("Bid", "bid", quote?.bid, palette.up)}
-        {quoteBtn("Ask", "ask", quote?.ask, palette.down)}
-      </div>
-      <div style={{ display: "flex", gap: 4 }}>
+      {/* Strip 2 — side row */}
+      <div style={{ display: "flex", gap: 3 }}>
         {SIDES.map((s) => (
           <button key={s} type="button" className={sideClass(s)} onClick={() => setSide(s)}>{s}</button>
         ))}
       </div>
-      <div style={{ display: "flex", gap: 4 }}>
-        <select data-testid="order-type" className="ctl mono" value={type} onChange={(e) => setType(e.target.value as OrderType)}>{TYPES.map((t) => <option key={t}>{t}</option>)}</select>
-        <select className="ctl mono" value={tif} onChange={(e) => setTif(e.target.value as TIF)}>{TIFS.map((t) => <option key={t}>{t}</option>)}</select>
+      {/* Strip 3 — type · tif · price · stop */}
+      <div style={{ display: "flex", gap: 3 }}>
+        <select data-testid="order-type" className="ctl mono" value={type} onChange={(e) => setType(e.target.value as OrderType)} style={ctl}>
+          {TYPES.map((t) => <option key={t} value={t}>{abbrevType(t)}</option>)}
+        </select>
+        <select className="ctl mono" value={tif} onChange={(e) => setTif(e.target.value as TIF)} style={ctl}>
+          {TIFS.map((t) => <option key={t} value={t}>{t}</option>)}
+        </select>
+        <input data-testid="price" className="ctl mono" value={price} onChange={(e) => setPrice(e.target.value)} disabled={type === "MARKET"} placeholder="price" style={ctl} />
+        <input data-testid="stop" className="ctl mono" value={stop} onChange={(e) => setStop(e.target.value)} disabled={!hasStop} placeholder="stop" style={{ ...ctl, opacity: hasStop ? 1 : 0.4 }} />
       </div>
-      <label style={{ display: "flex", alignItems: "center", gap: 4 }}>Price
-        <input data-testid="price" className="ctl mono" value={price} onChange={(e) => setPrice(e.target.value)} disabled={type === "MARKET"} style={{ flex: 1 }} />
-      </label>
-      {(type === "STOP" || type === "STOP_LIMIT") && (
-        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>Stop
-          <input data-testid="stop" className="ctl mono" value={stop} onChange={(e) => setStop(e.target.value)} style={{ flex: 1 }} />
-        </label>
-      )}
-      <div style={{ display: "flex", gap: 4 }}>
-        <input data-testid="amount" className="ctl mono" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ flex: 1 }} />
-        <select data-testid="mode" className="ctl mono" value={mode} onChange={(e) => setMode(e.target.value as SizingMode)}>{MODES.map((m) => <option key={m}>{m}</option>)}</select>
+      {/* Strip 4 — qty · mode · submit */}
+      <div style={{ display: "flex", gap: 3 }}>
+        <input data-testid="amount" className="ctl mono" value={amount} onChange={(e) => setAmount(e.target.value)} style={{ width: 64 }} />
+        <select data-testid="mode" className="ctl mono" value={mode} title={mode} onChange={(e) => setMode(e.target.value as SizingMode)} style={{ width: 56 }}>
+          {MODES.map((m) => <option key={m} value={m} title={m}>{MODE_LABEL[m]}</option>)}
+        </select>
+        <button data-testid="submit" className="btn btn-primary" onClick={submitManual} style={{ flex: 1, fontWeight: 700 }}>
+          {side} {bareSymbol(symbol)}
+        </button>
       </div>
-      {/* Bronze/muted — color-discipline: armed/disarmed is UI state, never
-          market-direction green/red. Matches AccountPanel's arm-chip formula. */}
-      <div data-testid="ticket-armed-state" style={{ fontSize: 11, fontWeight: 700, textAlign: "center", padding: "2px 0",
-        color: armed ? palette.accent : palette.textMuted }}>
-        {armed ? "ARMED" : "DISARMED — order will be blocked"}
-      </div>
-      <button data-testid="submit" className="btn btn-primary" onClick={submitManual} style={{ fontWeight: 700, padding: "6px" }}>
-        Submit {side} {symbol && bareSymbol(symbol)}
-      </button>
+      {/* Strip 5 — preset chips (only when presets exist) */}
       {presets.length > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
           {presets.map((t) => (
             <button key={t.id} data-testid={`preset-${t.id}`} className="btn" onClick={() => firePreset(t)}>{t.label}</button>
           ))}
         </div>
       )}
-      <div style={{ display: "flex", flexDirection: "column", gap: 4, marginTop: "auto" }}>
-        <button data-testid="cancel-all" className="btn" onClick={() => void oc.cancelAll("everything")} style={{ borderColor: palette.warn, color: palette.warn }}>Cancel All</button>
-        <button data-testid="kill" className="kill-switch" onClick={() => void oc.kill()}>KILL</button>
-      </div>
     </div>
   );
 }

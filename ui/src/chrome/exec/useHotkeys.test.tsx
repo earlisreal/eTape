@@ -66,4 +66,31 @@ describe("useHotkeys", () => {
     await act(async () => { fireEvent.keyDown(window, { key: "1", ctrlKey: true }); await Promise.resolve(); });
     expect(sent.some((s) => s.name === "SubmitOrder")).toBe(false);
   });
+  it("fires the place hotkey at the group's focused venue, not just the first venue", async () => {
+    const stores = makeStores();
+    const sent: Array<{ name: string; args: unknown }> = [];
+    const commands = { sendCommand: vi.fn(async (n: string, a: unknown): Promise<AckMsg> => { sent.push({ name: n, args: a }); return { kind: "ack", corrId: "c", status: "accepted", orderId: "ETX", value: undefined }; }) };
+    const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
+    const twoArmed: ExecStatus = {
+      masterArmed: true, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
+      venues: [
+        { venue: "alpaca-paper", broker: "alpaca", connected: true, venueArmed: true, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } },
+        { venue: "tradezero", broker: "tradezero", connected: true, venueArmed: true, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } },
+      ],
+    };
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: twoArmed });
+    stores.exec.apply({ kind: "snapshot", topic: "exec.account" as never, key: "tradezero", payload: { venue: "tradezero", equity: 100, buyingPower: 100000, availableCash: 100, sodEquity: 100, realized: 0, dayPnl: 0, leverage: 4, tsMs: 1 } });
+    stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.4, ask: 3.5, last: 3.45, ts: "" } });
+    linkGroups.focus("green", "US.AAPL");
+    linkGroups.focusVenue("green", "tradezero"); // green group's venue is the SECOND one
+    render(
+      <ThemeProvider><ToastProvider><OrderConfigProvider commands={commands}>
+        <Harness stores={stores} commands={commands} linkGroups={linkGroups} group="green" />
+      </OrderConfigProvider></ToastProvider></ThemeProvider>,
+    );
+    await act(async () => { fireEvent.keyDown(window, { key: "1", ctrlKey: true }); await Promise.resolve(); });
+    const submit = sent.find((s) => s.name === "SubmitOrder");
+    expect(submit).toBeTruthy();
+    expect((submit!.args as { venue: string }).venue).toBe("tradezero");
+  });
 });
