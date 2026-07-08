@@ -1,10 +1,13 @@
 package uihub
 
 import (
+	"context"
 	"encoding/json"
+	"reflect"
 	"testing"
 
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/md"
 )
 
@@ -38,8 +41,8 @@ func (s *spyInd) ReleaseIndicator(id string)                    { s.released = i
 
 func TestCommandsSubmitOrderMapsEnums(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true, OrderID: "ET5"}}
-	cd := newCommands(ex, &spyCfg{}, &spyInd{})
-	ack := cd.handle("SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"SHORT","type":"STOP_LIMIT","tif":"GTC","qty":80,"limitPrice":3.55,"stopPrice":3.6}`))
+	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, func() Feed { return nil })
+	ack := cd.handle(context.Background(), "SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"SHORT","type":"STOP_LIMIT","tif":"GTC","qty":80,"limitPrice":3.55,"stopPrice":3.6}`), 0)
 	if ack.Status != "accepted" || ack.OrderID != "ET5" {
 		t.Fatalf("ack wrong: %+v", ack)
 	}
@@ -57,8 +60,8 @@ func TestCommandsSubmitOrderMapsEnums(t *testing.T) {
 
 func TestCommandsBlockedPassesReason(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: false, Reason: "R114 gate: max order value"}}
-	cd := newCommands(ex, &spyCfg{}, &spyInd{})
-	ack := cd.handle("SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"BUY","type":"MARKET","tif":"DAY","qty":1}`))
+	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, func() Feed { return nil })
+	ack := cd.handle(context.Background(), "SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"BUY","type":"MARKET","tif":"DAY","qty":1}`), 0)
 	if ack.Status != "blocked" || ack.Reason != "R114 gate: max order value" {
 		t.Fatalf("blocked reason must pass through verbatim: %+v", ack)
 	}
@@ -66,8 +69,8 @@ func TestCommandsBlockedPassesReason(t *testing.T) {
 
 func TestCommandsKillSwitchAllVenues(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true}}
-	cd := newCommands(ex, &spyCfg{}, &spyInd{})
-	cd.handle("KillSwitch", json.RawMessage(`{}`)) // no venue => all
+	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, func() Feed { return nil })
+	cd.handle(context.Background(), "KillSwitch", json.RawMessage(`{}`), 0) // no venue => all
 	ks, ok := ex.last.(exec.KillSwitch)
 	if !ok || ks.Venue != "" {
 		t.Fatalf("KillSwitch{} => all venues (empty VenueID), got %T %+v", ex.last, ex.last)
@@ -76,8 +79,8 @@ func TestCommandsKillSwitchAllVenues(t *testing.T) {
 
 func TestCommandsArmMaster(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true}}
-	cd := newCommands(ex, &spyCfg{}, &spyInd{})
-	cd.handle("Arm", json.RawMessage(`{}`))
+	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, func() Feed { return nil })
+	cd.handle(context.Background(), "Arm", json.RawMessage(`{}`), 0)
 	if _, ok := ex.last.(exec.Arm); !ok {
 		t.Fatalf("expected exec.Arm, got %T", ex.last)
 	}
@@ -85,8 +88,8 @@ func TestCommandsArmMaster(t *testing.T) {
 
 func TestCommandsGetSetConfig(t *testing.T) {
 	cfg := &spyCfg{values: map[string]string{"theme": `"dark"`}}
-	cd := newCommands(&spyExec{}, cfg, &spyInd{})
-	get := cd.handle("GetConfig", json.RawMessage(`{"key":"theme"}`))
+	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, func() Feed { return nil })
+	get := cd.handle(context.Background(), "GetConfig", json.RawMessage(`{"key":"theme"}`), 0)
 	if get.Status != "accepted" {
 		t.Fatalf("GetConfig should accept: %+v", get)
 	}
@@ -94,7 +97,7 @@ func TestCommandsGetSetConfig(t *testing.T) {
 	if !ok || string(raw) != `"dark"` {
 		t.Fatalf("GetConfig must return stored JSON value verbatim: %v", get.Value)
 	}
-	set := cd.handle("SetConfig", json.RawMessage(`{"key":"theme","value":"light"}`))
+	set := cd.handle(context.Background(), "SetConfig", json.RawMessage(`{"key":"theme","value":"light"}`), 0)
 	if set.Status != "accepted" || cfg.got["theme"] != `"light"` {
 		t.Fatalf("SetConfig must persist raw JSON value: %+v / %v", set, cfg.got)
 	}
@@ -102,21 +105,180 @@ func TestCommandsGetSetConfig(t *testing.T) {
 
 func TestCommandsIndicatorLifecycle(t *testing.T) {
 	ind := &spyInd{}
-	cd := newCommands(&spyExec{}, &spyCfg{}, ind)
-	cd.handle("SubscribeIndicator", json.RawMessage(`{"instanceId":"i1","symbol":"US.AAPL","timeframe":"1m","type":"VWAP","params":{}}`))
+	cd := newCommands(&spyExec{}, &spyCfg{}, ind, &spyDemandCtl{}, func() Feed { return nil })
+	cd.handle(context.Background(), "SubscribeIndicator", json.RawMessage(`{"instanceId":"i1","symbol":"US.AAPL","timeframe":"1m","type":"VWAP","params":{}}`), 0)
 	if ind.ensured != "i1" {
 		t.Fatalf("SubscribeIndicator should EnsureIndicator, got %q", ind.ensured)
 	}
-	cd.handle("UnsubscribeIndicator", json.RawMessage(`{"instanceId":"i1"}`))
+	cd.handle(context.Background(), "UnsubscribeIndicator", json.RawMessage(`{"instanceId":"i1"}`), 0)
 	if ind.released != "i1" {
 		t.Fatalf("UnsubscribeIndicator should ReleaseIndicator, got %q", ind.released)
 	}
 }
 
 func TestCommandsUnknown(t *testing.T) {
-	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{})
-	ack := cd.handle("Nope", json.RawMessage(`{}`))
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, func() Feed { return nil })
+	ack := cd.handle(context.Background(), "Nope", json.RawMessage(`{}`), 0)
 	if ack.Status != "blocked" {
 		t.Fatalf("unknown command must block, got %+v", ack)
+	}
+}
+
+type spyCmdFeed struct{ err error }
+
+func (s *spyCmdFeed) Validate(context.Context, string) error { return s.err }
+func (s *spyCmdFeed) Ensure(feed.Demand)                     {}
+func (s *spyCmdFeed) Release(string)                         {}
+
+type spyDemandCtl struct {
+	ensured []struct {
+		conn uint64
+		d    feed.Demand
+	}
+	released []struct {
+		conn uint64
+		id   string
+	}
+}
+
+func (s *spyDemandCtl) EnsureDemand(conn uint64, d feed.Demand) {
+	s.ensured = append(s.ensured, struct {
+		conn uint64
+		d    feed.Demand
+	}{conn, d})
+}
+func (s *spyDemandCtl) ReleaseDemand(conn uint64, id string) {
+	s.released = append(s.released, struct {
+		conn uint64
+		id   string
+	}{conn, id})
+}
+
+func newCmdWith(t *testing.T, feedErr error, feedNil bool) (*commands, *spyDemandCtl, *spyCmdFeed) {
+	t.Helper()
+	dem := &spyDemandCtl{}
+	sf := &spyCmdFeed{err: feedErr}
+	getter := func() Feed { return sf }
+	if feedNil {
+		getter = func() Feed { return nil }
+	}
+	return newCommands(nil, nil, nil, dem, getter), dem, sf
+}
+
+func TestEnsureSymbol_AcceptsAndMapsWatch(t *testing.T) {
+	cd, dem, _ := newCmdWith(t, nil, false)
+	ack := cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"p1","symbol":"US.AAPL","profile":"watch"}`), 7)
+	if ack.Status != "accepted" {
+		t.Fatalf("status = %q reason=%q", ack.Status, ack.Reason)
+	}
+	if len(dem.ensured) != 1 {
+		t.Fatalf("EnsureDemand calls = %d", len(dem.ensured))
+	}
+	got := dem.ensured[0]
+	if got.conn != 7 || got.d.ID != "dyn/7/p1" || got.d.Symbol != "US.AAPL" {
+		t.Fatalf("demand = %+v", got)
+	}
+	if got.d.Focused {
+		t.Fatalf("watch must not be focused")
+	}
+	if !reflect.DeepEqual(got.d.Subs, []feed.SubType{feed.SubTicker, feed.SubKL1m}) {
+		t.Fatalf("watch subs = %v", got.d.Subs)
+	}
+}
+
+func TestEnsureSymbol_FocusedUSHasBook(t *testing.T) {
+	cd, dem, _ := newCmdWith(t, nil, false)
+	cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"p2","symbol":"US.NVDA","profile":"focused"}`), 1)
+	d := dem.ensured[0].d
+	if !d.Focused {
+		t.Fatal("focused flag missing")
+	}
+	if !reflect.DeepEqual(d.Subs, []feed.SubType{feed.SubQuote, feed.SubTicker, feed.SubKL1m, feed.SubBook}) {
+		t.Fatalf("US focused subs = %v (want quote,ticker,kl1m,book)", d.Subs)
+	}
+}
+
+func TestEnsureSymbol_FocusedHKNoBook(t *testing.T) {
+	cd, dem, _ := newCmdWith(t, nil, false)
+	cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"p3","symbol":"HK.00700","profile":"focused"}`), 1)
+	d := dem.ensured[0].d
+	for _, s := range d.Subs {
+		if s == feed.SubBook {
+			t.Fatal("HK focused must NOT include SubBook (LV1 entitlement)")
+		}
+	}
+}
+
+func TestEnsureSymbol_InterestNoSubs(t *testing.T) {
+	cd, dem, _ := newCmdWith(t, nil, false)
+	cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"p4","symbol":"US.T","profile":"interest"}`), 1)
+	if len(dem.ensured[0].d.Subs) != 0 {
+		t.Fatalf("interest must have no subs, got %v", dem.ensured[0].d.Subs)
+	}
+}
+
+func TestEnsureSymbol_RejectsBadMarket(t *testing.T) {
+	cd, dem, _ := newCmdWith(t, nil, false)
+	ack := cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"p5","symbol":"XX.FOO","profile":"watch"}`), 1)
+	if ack.Status != "blocked" || len(dem.ensured) != 0 {
+		t.Fatalf("want blocked+no-ensure, got %q ensured=%d", ack.Status, len(dem.ensured))
+	}
+}
+
+func TestEnsureSymbol_UnknownSymbolReverts(t *testing.T) {
+	cd, dem, _ := newCmdWith(t, feed.ErrUnknownSymbol, false)
+	ack := cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"p6","symbol":"US.ZZZZQQ","profile":"watch"}`), 1)
+	if ack.Status != "blocked" || len(dem.ensured) != 0 {
+		t.Fatalf("unknown symbol must block and not ensure: %q ensured=%d", ack.Status, len(dem.ensured))
+	}
+	if ack.Reason == "" {
+		t.Fatal("expected a reason mentioning the symbol")
+	}
+}
+
+func TestEnsureSymbol_FeedUnavailableBlocks(t *testing.T) {
+	cd, _, _ := newCmdWith(t, feed.ErrFeedUnavailable, false)
+	ack := cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"p7","symbol":"US.AAPL","profile":"watch"}`), 1)
+	if ack.Status != "blocked" {
+		t.Fatalf("want blocked, got %q", ack.Status)
+	}
+}
+
+func TestEnsureSymbol_NilFeedAcceptsNoProbe(t *testing.T) {
+	cd, dem, _ := newCmdWith(t, nil, true) // feed getter returns nil (replay)
+	ack := cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"p8","symbol":"US.AAPL","profile":"watch"}`), 1)
+	if ack.Status != "accepted" || len(dem.ensured) != 1 {
+		t.Fatalf("replay must accept and still track: %q ensured=%d", ack.Status, len(dem.ensured))
+	}
+}
+
+func TestReleaseSymbol_NamespacedAlwaysAccepted(t *testing.T) {
+	cd, dem, _ := newCmdWith(t, nil, false)
+	ack := cd.handle(context.Background(), "ReleaseSymbol", []byte(`{"demandId":"p1"}`), 7)
+	if ack.Status != "accepted" {
+		t.Fatalf("release status = %q", ack.Status)
+	}
+	if len(dem.released) != 1 || dem.released[0].conn != 7 || dem.released[0].id != "dyn/7/p1" {
+		t.Fatalf("release = %+v", dem.released)
+	}
+}
+
+func TestFocusGroup_ProbesAndAcks(t *testing.T) {
+	cd, _, _ := newCmdWith(t, nil, false)
+	ack := cd.handle(context.Background(), "FocusGroup", []byte(`{"group":"blue","symbol":"US.AAPL"}`), 1)
+	if ack.Status != "accepted" {
+		t.Fatalf("focus ack = %q", ack.Status)
+	}
+	cd2, _, _ := newCmdWith(t, feed.ErrUnknownSymbol, false)
+	if ack := cd2.handle(context.Background(), "FocusGroup", []byte(`{"group":"blue","symbol":"US.ZZZZQQ"}`), 1); ack.Status != "blocked" {
+		t.Fatalf("bad focus symbol must block, got %q", ack.Status)
 	}
 }

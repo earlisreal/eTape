@@ -3,10 +3,13 @@ package uihub
 import (
 	"context"
 	"encoding/json"
+	"sort"
+	"sync/atomic"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
@@ -36,6 +39,21 @@ type pub struct {
 	payload any
 }
 
+type ensureDemandReq struct {
+	connID uint64
+	d      feed.Demand
+}
+
+type releaseDemandReq struct {
+	connID   uint64
+	demandID string
+}
+
+// feedBox lets the (single-write, many-read) feed reference live in an
+// atomic.Pointer so SetFeed (called once at boot from main's goroutine) races
+// safely with Validate reads in conn goroutines and Ensure/Release in Run.
+type feedBox struct{ f Feed }
+
 // Hub is a single-goroutine event loop that owns the mirror, the connected-
 // client set, and per-topic-class coalescing buffers. Every field below the
 // channel declarations is touched only from within Run's goroutine; all other
@@ -46,23 +64,30 @@ type Hub struct {
 	cfg HubConfig
 	m   *mirror
 
-	register   chan client
-	unregister chan client
-	subCh      chan subReq
-	unsubCh    chan subReq
-	mdCh       chan md.Update
-	execCh     chan exec.Update
-	pubCh      chan pub
-	syncCh     chan chan struct{} // test barrier
-	closed     chan struct{}      // closed when Run returns; unblocks stuck senders
+	register        chan client
+	unregister      chan client
+	subCh           chan subReq
+	unsubCh         chan subReq
+	ensureDemandCh  chan ensureDemandReq
+	releaseDemandCh chan releaseDemandReq
+	demandSnapCh    chan chan []string
+	mdCh            chan md.Update
+	execCh          chan exec.Update
+	pubCh           chan pub
+	syncCh          chan chan struct{} // test barrier
+	closed          chan struct{}      // closed when Run returns; unblocks stuck senders
+
+	feedSlot atomic.Pointer[feedBox]
 
 	// Run-loop-owned:
-	clients   map[client]map[wsmsg.Topic]bool
-	pendKeep  map[string]staged       // classMDKeep, flushed on md ticker
-	tapePend  map[string][]wsmsg.Tick // symbol -> accumulated ticks
-	acctPend  map[string]staged       // venue -> latest account frame
-	posLatest staged
-	posDirty  bool
+	clients    map[client]map[wsmsg.Topic]bool
+	demands    map[uint64]map[string]string // connID -> demandID -> symbol
+	demandLive map[uint64]bool              // connID currently registered
+	pendKeep   map[string]staged            // classMDKeep, flushed on md ticker
+	tapePend   map[string][]wsmsg.Tick      // symbol -> accumulated ticks
+	acctPend   map[string]staged            // venue -> latest account frame
+	posLatest  staged
+	posDirty   bool
 }
 
 func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
@@ -71,19 +96,24 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 	}
 	return &Hub{
 		clk: clk, cfg: cfg, m: m,
-		register:   make(chan client),
-		unregister: make(chan client),
-		subCh:      make(chan subReq),
-		unsubCh:    make(chan subReq),
-		mdCh:       make(chan md.Update, cfg.Buf),
-		execCh:     make(chan exec.Update, cfg.Buf),
-		pubCh:      make(chan pub, cfg.Buf),
-		syncCh:     make(chan chan struct{}),
-		closed:     make(chan struct{}),
-		clients:    map[client]map[wsmsg.Topic]bool{},
-		pendKeep:   map[string]staged{},
-		tapePend:   map[string][]wsmsg.Tick{},
-		acctPend:   map[string]staged{},
+		register:        make(chan client),
+		unregister:      make(chan client),
+		subCh:           make(chan subReq),
+		unsubCh:         make(chan subReq),
+		ensureDemandCh:  make(chan ensureDemandReq),
+		releaseDemandCh: make(chan releaseDemandReq),
+		demandSnapCh:    make(chan chan []string),
+		mdCh:            make(chan md.Update, cfg.Buf),
+		execCh:          make(chan exec.Update, cfg.Buf),
+		pubCh:           make(chan pub, cfg.Buf),
+		syncCh:          make(chan chan struct{}),
+		closed:          make(chan struct{}),
+		clients:         map[client]map[wsmsg.Topic]bool{},
+		demands:         map[uint64]map[string]string{},
+		demandLive:      map[uint64]bool{},
+		pendKeep:        map[string]staged{},
+		tapePend:        map[string][]wsmsg.Tick{},
+		acctPend:        map[string]staged{},
 	}
 }
 
@@ -117,6 +147,51 @@ func (h *Hub) Unsubscribe(c client, t wsmsg.Topic) {
 	select {
 	case h.unsubCh <- subReq{c, t}:
 	case <-h.closed:
+	}
+}
+
+// SetFeed injects the market-data control surface after the hub is running.
+// Safe to call once from boot; nil until then (replay/tests never call it).
+func (h *Hub) SetFeed(f Feed) { h.feedSlot.Store(&feedBox{f: f}) }
+
+func (h *Hub) feed() Feed {
+	if b := h.feedSlot.Load(); b != nil {
+		return b.f
+	}
+	return nil
+}
+
+// EnsureDemand records a connection's demand and subscribes it (Run-loop side).
+func (h *Hub) EnsureDemand(connID uint64, d feed.Demand) {
+	select {
+	case h.ensureDemandCh <- ensureDemandReq{connID: connID, d: d}:
+	case <-h.closed:
+	}
+}
+
+// ReleaseDemand forgets a connection's demand and unsubscribes it.
+func (h *Hub) ReleaseDemand(connID uint64, demandID string) {
+	select {
+	case h.releaseDemandCh <- releaseDemandReq{connID: connID, demandID: demandID}:
+	case <-h.closed:
+	}
+}
+
+// ActiveDemandSymbols snapshots the deduped, sorted set of symbols under live
+// demand across all connections (including interest demands with no subs).
+// Used by the news poller to compose its rotation set.
+func (h *Hub) ActiveDemandSymbols() []string {
+	reply := make(chan []string, 1)
+	select {
+	case h.demandSnapCh <- reply:
+	case <-h.closed:
+		return nil
+	}
+	select {
+	case out := <-reply:
+		return out
+	case <-h.closed:
+		return nil
 	}
 }
 
@@ -180,6 +255,12 @@ func (h *Hub) Run(ctx context.Context) error {
 			h.handleSub(r)
 		case r := <-h.unsubCh:
 			h.handleUnsub(r)
+		case r := <-h.ensureDemandCh:
+			h.handleEnsureDemand(r)
+		case r := <-h.releaseDemandCh:
+			h.handleReleaseDemand(r)
+		case reply := <-h.demandSnapCh:
+			h.handleDemandSnapshot(reply)
 		case u := <-h.mdCh:
 			h.handleMD(u)
 		case u := <-h.execCh:
@@ -223,6 +304,10 @@ func (h *Hub) drain() {
 			h.handleSub(r)
 		case r := <-h.unsubCh:
 			h.handleUnsub(r)
+		case r := <-h.ensureDemandCh:
+			h.handleEnsureDemand(r)
+		case r := <-h.releaseDemandCh:
+			h.handleReleaseDemand(r)
 		case u := <-h.mdCh:
 			h.handleMD(u)
 		case u := <-h.execCh:
@@ -237,11 +322,61 @@ func (h *Hub) drain() {
 
 func (h *Hub) handleRegister(c client) {
 	h.clients[c] = map[wsmsg.Topic]bool{}
+	h.demandLive[c.id()] = true
 }
 
 func (h *Hub) handleUnregister(c client) {
+	id := c.id()
+	if m := h.demands[id]; m != nil {
+		if f := h.feed(); f != nil {
+			for did := range m {
+				f.Release(did)
+			}
+		}
+		delete(h.demands, id)
+	}
+	delete(h.demandLive, id)
 	delete(h.clients, c)
 	c.close()
+}
+
+func (h *Hub) handleEnsureDemand(r ensureDemandReq) {
+	if !h.demandLive[r.connID] {
+		return // conn already gone; drop so it can never leak quota
+	}
+	m := h.demands[r.connID]
+	if m == nil {
+		m = map[string]string{}
+		h.demands[r.connID] = m
+	}
+	m[r.d.ID] = r.d.Symbol
+	if f := h.feed(); f != nil {
+		f.Ensure(r.d)
+	}
+}
+
+func (h *Hub) handleReleaseDemand(r releaseDemandReq) {
+	if m := h.demands[r.connID]; m != nil {
+		delete(m, r.demandID)
+	}
+	if f := h.feed(); f != nil {
+		f.Release(r.demandID)
+	}
+}
+
+func (h *Hub) handleDemandSnapshot(reply chan []string) {
+	set := map[string]struct{}{}
+	for _, m := range h.demands {
+		for _, sym := range m {
+			set[sym] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(set))
+	for s := range set {
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	reply <- out
 }
 
 func (h *Hub) handleSub(r subReq) {

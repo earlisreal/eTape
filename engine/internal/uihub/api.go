@@ -1,10 +1,12 @@
 package uihub
 
 import (
+	"context"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
@@ -25,6 +27,16 @@ type Stores interface {
 type Indicators interface {
 	EnsureIndicator(id string, spec md.IndicatorSpec)
 	ReleaseIndicator(id string)
+}
+
+// Feed is the market-data control surface uihub needs for on-demand symbol
+// subscription (satisfied by *opend.OpenDFeed). It is injected after
+// construction via Hub.SetFeed because the OpenD feed is created only after
+// the hub is already listening; replay/tests leave it nil.
+type Feed interface {
+	Validate(ctx context.Context, symbol string) error
+	Ensure(d feed.Demand)
+	Release(id string)
 }
 
 type GateLimits struct {
@@ -77,7 +89,7 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators) (*
 	}
 	m := newMirror(vms, global, cfg.TapeCap, cfg.NewsCap, cfg.FillsCap, cfg.EventsCap)
 	h := NewHub(clk, HubConfig{MDInterval: cfg.MD, AccountInterval: cfg.Account, PositionInterval: cfg.Position, Buf: cfg.Buf}, m)
-	cmd := newCommands(ex, st, ind)
+	cmd := newCommands(ex, st, ind, h, h.feed)
 	qry := newQueries(st)
 	srv := NewServer(h, cmd, qry, ServerConfig{DistDir: cfg.DistDir, OutBuf: cfg.OutBuf})
 	return h, srv

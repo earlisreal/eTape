@@ -5,9 +5,14 @@
 package uihub
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
 
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
@@ -27,14 +32,25 @@ type indicatorCtl interface {
 	ReleaseIndicator(id string)
 }
 
-type commands struct {
-	ex  execDoer
-	cfg configStore
-	ind indicatorCtl
+// demandCtl is the hub surface the on-demand-subscription commands drive
+// (satisfied by *Hub). EnsureDemand/ReleaseDemand are Run-loop-side; the
+// blocking existence probe is done here in the conn goroutine via the feed
+// getter before recording, so it never stalls the hub loop.
+type demandCtl interface {
+	EnsureDemand(connID uint64, d feed.Demand)
+	ReleaseDemand(connID uint64, demandID string)
 }
 
-func newCommands(ex execDoer, cfg configStore, ind indicatorCtl) *commands {
-	return &commands{ex: ex, cfg: cfg, ind: ind}
+type commands struct {
+	ex   execDoer
+	cfg  configStore
+	ind  indicatorCtl
+	dem  demandCtl
+	feed func() Feed
+}
+
+func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, feed func() Feed) *commands {
+	return &commands{ex: ex, cfg: cfg, ind: ind, dem: dem, feed: feed}
 }
 
 func blocked(reason string) wsmsg.AckMsg { return wsmsg.AckMsg{Status: "blocked", Reason: reason} }
@@ -47,7 +63,7 @@ func ackFromCmd(a exec.CmdAck) wsmsg.AckMsg {
 	return wsmsg.AckMsg{Status: status, Reason: a.Reason, OrderID: a.OrderID}
 }
 
-func (cd *commands) handle(name string, args json.RawMessage) wsmsg.AckMsg {
+func (cd *commands) handle(ctx context.Context, name string, args json.RawMessage, connID uint64) wsmsg.AckMsg {
 	switch name {
 	case "SubmitOrder":
 		var a wsmsg.SubmitOrderArgs
@@ -137,11 +153,87 @@ func (cd *commands) handle(name string, args json.RawMessage) wsmsg.AckMsg {
 		}
 		cd.ind.ReleaseIndicator(a.InstanceID)
 		return wsmsg.AckMsg{Status: "accepted"}
+	case "EnsureSymbol":
+		var a wsmsg.EnsureSymbolArgs
+		if err := json.Unmarshal(args, &a); err != nil || a.DemandID == "" {
+			return blocked("bad args")
+		}
+		if !supportedMarket(a.Symbol) {
+			return blocked("unsupported market")
+		}
+		if reason := cd.probe(ctx, a.Symbol); reason != "" {
+			return blocked(reason)
+		}
+		d, ok := demandForProfile(fmt.Sprintf("dyn/%d/%s", connID, a.DemandID), a.Symbol, a.Profile)
+		if !ok {
+			return blocked("bad profile")
+		}
+		cd.dem.EnsureDemand(connID, d)
+		return wsmsg.AckMsg{Status: "accepted"}
+	case "ReleaseSymbol":
+		var a wsmsg.ReleaseSymbolArgs
+		if err := json.Unmarshal(args, &a); err != nil || a.DemandID == "" {
+			return blocked("bad args")
+		}
+		cd.dem.ReleaseDemand(connID, fmt.Sprintf("dyn/%d/%s", connID, a.DemandID))
+		return wsmsg.AckMsg{Status: "accepted"}
 	case "FocusGroup":
-		// Link-group focus is UI-local (BroadcastChannel); the engine acks and no-ops.
+		var a wsmsg.FocusGroupArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return blocked("bad args")
+		}
+		if !supportedMarket(a.Symbol) {
+			return blocked("unsupported market")
+		}
+		if reason := cd.probe(ctx, a.Symbol); reason != "" {
+			return blocked(reason)
+		}
+		// Registers no demand — demands arrive from member panels as they follow.
 		return wsmsg.AckMsg{Status: "accepted"}
 	default:
 		return blocked("unknown command: " + name)
+	}
+}
+
+// probe validates a symbol exists; returns "" to accept, else a block reason.
+// Skipped when the feed is nil (replay/tests) so those paths accept.
+func (cd *commands) probe(ctx context.Context, symbol string) string {
+	f := cd.feed()
+	if f == nil {
+		return ""
+	}
+	err := f.Validate(ctx, symbol)
+	switch {
+	case err == nil:
+		return ""
+	case errors.Is(err, feed.ErrUnknownSymbol):
+		return "unknown symbol " + symbol
+	default:
+		return "feed unavailable"
+	}
+}
+
+func supportedMarket(sym string) bool {
+	return strings.HasPrefix(sym, "US.") || strings.HasPrefix(sym, "HK.")
+}
+
+// demandForProfile builds the feed.Demand for a profile. focused adds SubBook
+// only for US symbols (HK is LV1: a book sub retries forever). Returns ok=false
+// for an unknown profile.
+func demandForProfile(id, symbol, profile string) (feed.Demand, bool) {
+	switch profile {
+	case "watch":
+		return feed.WatchDemand(id, symbol), true
+	case "focused":
+		subs := []feed.SubType{feed.SubQuote, feed.SubTicker, feed.SubKL1m}
+		if strings.HasPrefix(symbol, "US.") {
+			subs = append(subs, feed.SubBook)
+		}
+		return feed.Demand{ID: id, Symbol: symbol, Subs: subs, Focused: true}, true
+	case "interest":
+		return feed.Demand{ID: id, Symbol: symbol}, true
+	default:
+		return feed.Demand{}, false
 	}
 }
 
