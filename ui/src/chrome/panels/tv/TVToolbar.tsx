@@ -32,7 +32,7 @@ export function TVToolbar({ chrome, symbol, timeframe, chartType, onSymbolClick,
   return (
     <div style={{ height: TV_GEOM.toolbarH, display: "flex", alignItems: "center", gap: 2, padding: "0 6px",
       borderBottom: `1px solid ${chrome.border}`, background: chrome.surface, color: chrome.text,
-      font: `${TV_GEOM.uiFont}px ${TV_FONT}` }}>
+      font: `${TV_GEOM.uiFont}px ${TV_FONT}`, fontVariantNumeric: "tabular-nums" }}>
       <button aria-label={`symbol ${bare}`} onClick={onSymbolClick}
         style={{ ...iconBtn, width: "auto", gap: 6, padding: "0 8px", fontWeight: 700 }}>
         {bare} <IconSearch size={14} />
@@ -58,7 +58,7 @@ export function TVToolbar({ chrome, symbol, timeframe, chartType, onSymbolClick,
             {TYPE_META.map((t) => (
               <button key={t.type} aria-label={`chart type ${t.type}`} onClick={() => { onChartType(t.type); setTypeOpen(false); }}
                 style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "6px 8px", background: "transparent",
-                  border: "none", borderRadius: 4, color: t.type === chartType ? chrome.accent : chrome.text, cursor: "pointer" }}>
+                  border: "none", borderRadius: TV_GEOM.radius, color: t.type === chartType ? chrome.accent : chrome.text, cursor: "pointer" }}>
                 <t.Icon size={16} /> {t.label}
               </button>
             ))}
