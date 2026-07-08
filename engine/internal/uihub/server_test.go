@@ -16,6 +16,7 @@ import (
 	"github.com/coder/websocket"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
@@ -36,6 +37,11 @@ type indNoop struct{}
 func (indNoop) EnsureIndicator(string, md.IndicatorSpec) {}
 func (indNoop) ReleaseIndicator(string)                  {}
 
+type noopDemand struct{}
+
+func (noopDemand) EnsureDemand(uint64, feed.Demand) {}
+func (noopDemand) ReleaseDemand(uint64, string)     {}
+
 func TestServerWSSubscribeSnapshot(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	// Build a hub with a mirror via the exported constructor path used by main.
@@ -46,7 +52,7 @@ func TestServerWSSubscribeSnapshot(t *testing.T) {
 	go func() { _ = h.Run(ctx) }()
 
 	srv := uihub.NewServer(h,
-		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}),
+		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}, noopDemand{}, func() uihub.Feed { return nil }),
 		uihub.NewQueriesForTest(fillsNoop{}),
 		uihub.ServerConfig{OutBuf: 32})
 	ts := httptest.NewServer(srv.Handler())
@@ -120,7 +126,7 @@ func TestServerOverflowDropDoesNotStallHub(t *testing.T) {
 	go func() { _ = h.Run(ctx) }()
 
 	srv := uihub.NewServer(h,
-		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}),
+		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}, noopDemand{}, func() uihub.Feed { return nil }),
 		uihub.NewQueriesForTest(fillsNoop{}),
 		uihub.ServerConfig{OutBuf: 2}) // tiny outbound queue: a handful of updates overflow it
 
@@ -202,7 +208,7 @@ func TestServerStaticFileServing(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	h, _ := uihub.NewHubForTest(clk)
 	srv := uihub.NewServer(h,
-		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}),
+		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}, noopDemand{}, func() uihub.Feed { return nil }),
 		uihub.NewQueriesForTest(fillsNoop{}),
 		uihub.ServerConfig{DistDir: dir, OutBuf: 32})
 	ts := httptest.NewServer(srv.Handler())
@@ -281,7 +287,7 @@ func TestServerWaitBlocksUntilConnectionDrains(t *testing.T) {
 
 	sc := &slowConfig{started: make(chan struct{}), release: make(chan struct{})}
 	srv := uihub.NewServer(h,
-		uihub.NewCommandsForTest(doerNoop{}, sc, indNoop{}),
+		uihub.NewCommandsForTest(doerNoop{}, sc, indNoop{}, noopDemand{}, func() uihub.Feed { return nil }),
 		uihub.NewQueriesForTest(fillsNoop{}),
 		uihub.ServerConfig{OutBuf: 32})
 	ts := httptest.NewServer(srv.Handler())
@@ -412,7 +418,7 @@ func TestServerWaitBoundedByBaseContextAfterHubExit(t *testing.T) {
 	}
 
 	srv := uihub.NewServer(h,
-		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}),
+		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}, noopDemand{}, func() uihub.Feed { return nil }),
 		uihub.NewQueriesForTest(fillsNoop{}),
 		uihub.ServerConfig{OutBuf: 32})
 

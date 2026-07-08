@@ -52,7 +52,7 @@ func (s *fakeSocket) writes() [][]byte {
 
 type fakeCmd struct{ last string }
 
-func (f *fakeCmd) handle(name string, _ json.RawMessage) wsmsg.AckMsg {
+func (f *fakeCmd) handle(_ context.Context, name string, _ json.RawMessage, _ uint64) wsmsg.AckMsg {
 	f.last = name
 	return wsmsg.AckMsg{Kind: "ack", Status: "accepted", OrderID: "ET9"}
 }

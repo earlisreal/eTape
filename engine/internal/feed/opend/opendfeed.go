@@ -35,6 +35,7 @@ type OpenDFeed struct {
 
 	mu          sync.Mutex
 	fetched     map[string]time.Time // history-quota dedup window (30 days)
+	validated   map[string]struct{}  // process-lifetime positive existence cache
 	decodeFails uint64
 }
 
@@ -62,11 +63,12 @@ func NewOpenDFeed(cli *Client, opt FeedOptions) *OpenDFeed {
 			Hysteresis:   opt.Hysteresis,
 			ExtendedTime: !opt.DisableExtendedTime,
 		}),
-		bf:      newBackfill(cli),
-		clk:     opt.Clock,
-		events:  make(chan feed.Event, opt.EventBuf),
-		seedq:   make(chan seedJob, 64),
-		fetched: make(map[string]time.Time),
+		bf:        newBackfill(cli),
+		clk:       opt.Clock,
+		events:    make(chan feed.Event, opt.EventBuf),
+		seedq:     make(chan seedJob, 64),
+		fetched:   make(map[string]time.Time),
+		validated: make(map[string]struct{}),
 	}
 }
 
@@ -244,6 +246,29 @@ func (f *OpenDFeed) BookSnapshot(ctx context.Context, symbol string) (feed.Book,
 
 func (f *OpenDFeed) QuoteSnapshot(ctx context.Context, symbol string) (feed.Quote, error) {
 	return f.bf.quoteSnapshot(ctx, symbol)
+}
+
+// Validate confirms a symbol exists before the UI commits a panel load. It is
+// subscription-free and quota-free (Qot_GetSecuritySnapshot). Positive results
+// are cached for the process lifetime; negatives are not (an intraday listing
+// must not be locked out). Returns feed.ErrUnknownSymbol or
+// feed.ErrFeedUnavailable on failure.
+func (f *OpenDFeed) Validate(ctx context.Context, symbol string) error {
+	f.mu.Lock()
+	_, ok := f.validated[symbol]
+	f.mu.Unlock()
+	if ok {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	if err := f.bf.securityExists(ctx, symbol); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	f.validated[symbol] = struct{}{}
+	f.mu.Unlock()
+	return nil
 }
 
 var _ feed.Feed = (*OpenDFeed)(nil)

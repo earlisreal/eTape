@@ -5,6 +5,7 @@ import { AppShell } from "./AppShell";
 import { WorkspaceStore, type Workspace } from "./workspace";
 import { makeStores } from "../data/registry";
 import { LinkGroups, BroadcastChannelBus } from "./linkGroups";
+import { DemandRegistry } from "../wire/DemandRegistry";
 import { Scheduler } from "../render/Scheduler";
 import { browserRaf } from "../render/surface";
 import { ThemeProvider } from "./ThemeProvider";
@@ -33,6 +34,7 @@ function mount(seed: Workspace) {
     sendCommand: vi.fn(async () => ({ kind: "ack" as const, corrId: "c", status: "accepted" as const, value: undefined })),
     sendQuery: vi.fn(async () => []),
   };
+  const demandRegistry = new DemandRegistry({ sendCommand: commands.sendCommand, onState: () => {} });
   const saved: Workspace[] = [];
   const client = {
     sendCommand: vi.fn(async (name: string, args: unknown) => {
@@ -46,7 +48,7 @@ function mount(seed: Workspace) {
   render(
     <ThemeProvider><ToastProvider><OrderConfigProvider commands={commands}>
       <AppShell workspaceName="default" stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
-        linkGroups={linkGroups} commands={commands} />
+        linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} />
     </OrderConfigProvider></ToastProvider></ThemeProvider>,
   );
   return { saved, workspaceStore };

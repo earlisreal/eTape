@@ -214,6 +214,7 @@ func main() {
 			Budget: cfg.Feed.QuotaSlots, Hysteresis: time.Duration(cfg.Feed.UnsubHysteresisSecs) * time.Second,
 			DisableExtendedTime: !cfg.Feed.ExtendedTime,
 		})
+		hub.SetFeed(fd) // enables on-demand EnsureSymbol/ReleaseSymbol + FocusGroup probe
 		go func() { _ = client.Run(ctx) }()
 		go func() { _ = fd.Run(ctx) }()
 		pipeWG.Add(1)
@@ -256,7 +257,7 @@ func main() {
 				log.Info("boot backfill complete", "symbols", len(symbols))
 			}()
 		}
-		startPollers(ctx, cfg, client, hub, uihubClk, st, hasTZVenue(cfg))
+		startPollers(ctx, cfg, client, hub, uihubClk, st, hasTZVenue(cfg), splitCSV(*watch), splitCSV(*focus))
 	} else {
 		sim := execClk.(*replay.Clock)
 		fd := replay.NewFeed(replay.FeedOptions{Rows: replayRows, Sim: sim, Pace: clock.System{}, Speed: *speed})
@@ -379,10 +380,9 @@ func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks [
 	}
 }
 
-func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, hub *uihub.Hub, clk clock.Clock, st *store.Store, hasTZ bool) {
+func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, hub *uihub.Hub, clk clock.Clock, st *store.Store, hasTZ bool, watchCSV, focusCSV []string) {
 	symbols := func() []string {
-		out := append([]string(nil), cfg.Feed.Watchlist...)
-		return out
+		return newsSymbols(cfg.Feed.Watchlist, watchCSV, focusCSV, hub.ActiveDemandSymbols)
 	}
 	go func() { _ = scan.New(cfg.Scan, client, hub, clk).Run(ctx) }()
 	go func() { _ = news.New(cfg.News, client, hub, clk, symbols).Run(ctx) }()

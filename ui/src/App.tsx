@@ -4,6 +4,7 @@ import { browserRaf } from "./render/surface";
 import { Scheduler } from "./render/Scheduler";
 import { makeStores, connectStores } from "./data/registry";
 import { BroadcastChannelBus, LinkGroups } from "./chrome/linkGroups";
+import { DemandRegistry } from "./wire/DemandRegistry";
 import { WorkspaceStore } from "./chrome/workspace";
 import { PANELS } from "./chrome/panels/registry";
 import { AppShell } from "./chrome/AppShell";
@@ -35,7 +36,7 @@ function DrawingsSyncBridge(
 export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
   const [state, setState] = useState<ConnState>("connecting");
 
-  const { client, stores, scheduler, workspaceStore, linkGroups } = useMemo(() => {
+  const { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry } = useMemo(() => {
     const client = new WsClient({
       url: `ws://${location.host}/ws`,
       socketFactory: (url) => {
@@ -60,7 +61,8 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     const linkGroups = new LinkGroups(new BroadcastChannelBus(), (group, symbol) =>
       client.sendCommand("FocusGroup", { group, symbol }),
     );
-    return { client, stores, scheduler, workspaceStore, linkGroups };
+    const demandRegistry = new DemandRegistry(client);
+    return { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry };
   }, []);
 
   useEffect(() => {
@@ -95,7 +97,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
           <SoundConfigProvider commands={commands}>
             <ReconnectOverlay state={state}>
               <AppShell workspaceName={workspaceName} stores={stores} scheduler={scheduler}
-                workspaceStore={workspaceStore} linkGroups={linkGroups} commands={commands} />
+                workspaceStore={workspaceStore} linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} />
             </ReconnectOverlay>
           </SoundConfigProvider>
         </OrderConfigProvider>

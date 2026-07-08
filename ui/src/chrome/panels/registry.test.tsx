@@ -45,3 +45,15 @@ describe("catalog metadata", () => {
     expect(PANELS["scanner"].symbolBearing).toBe(false);
   });
 });
+
+describe("panel demand profiles", () => {
+  it("maps chart/tape to watch, ladder to focused, news to interest", () => {
+    expect(PANELS.chart.demand).toBe("watch");
+    expect(PANELS.tape.demand).toBe("watch");
+    expect(PANELS.ladder.demand).toBe("focused");
+    expect(PANELS.news.demand).toBe("interest");
+  });
+  it("leaves non-symbol panels without a demand profile", () => {
+    expect(PANELS.scanner?.demand).toBeUndefined();
+  });
+});
