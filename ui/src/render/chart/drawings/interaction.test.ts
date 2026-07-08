@@ -216,7 +216,7 @@ describe("DrawingInteraction", () => {
 
     // A leaked pointerdown from a rail button (e.g. Trash) at the rail's screen
     // position — far from the drawing — must NOT run the empty-space deselect.
-    const railTarget = { closest: (sel: string) => (sel === "[data-drawing-rail]" ? {} : null) };
+    const railTarget = { closest: (sel: string) => (sel === "[data-drawing-ui]" ? {} : null) };
     fire("pointerdown", { clientX: 10, clientY: 10, target: railTarget as unknown as Element });
     expect(prim.setSelection).toHaveBeenCalledTimes(1); // no additional call — selection unchanged
     expect(prim.setSelection).toHaveBeenLastCalledWith("x");
@@ -228,7 +228,7 @@ describe("DrawingInteraction", () => {
     const di = new DrawingInteraction(host, fakeFacade(), fakePrimitive(), store, ctx(), { newId });
     di.setTool("hline");
 
-    const railTarget = { closest: (sel: string) => (sel === "[data-drawing-rail]" ? {} : null) };
+    const railTarget = { closest: (sel: string) => (sel === "[data-drawing-ui]" ? {} : null) };
     fire("pointerdown", { clientX: 10, clientY: 10, target: railTarget as unknown as Element });
     expect(store.forSymbol("US.AAPL")).toHaveLength(0); // no spurious drawing committed
 

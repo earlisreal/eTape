@@ -202,7 +202,9 @@ export class ChartController {
           // last-value price line (TradingView doesn't draw one for overlay indicators).
           priceLineVisible: false,
           visible: !(resolved.hidden ?? false),
-          ...(d.kind === "line" ? { lineWidth: d.width, lineStyle: LWC_LINE_STYLE[d.lineStyle] } : {}),
+          // No crosshair dot riding the study lines (TV doesn't draw one for
+          // overlay indicators; the crosshair itself is free-moving — chartTheme).
+          ...(d.kind === "line" ? { lineWidth: d.width, lineStyle: LWC_LINE_STYLE[d.lineStyle], crosshairMarkerVisible: false } : {}),
           // Main-pane overlay lines (EMA/SMA/VWAP) share the candle price scale but
           // must never expand its autoscale range — see OVERLAY_NO_AUTOSCALE. MACD's
           // sub-pane lines (paneIndex 1) are excluded: they must autoscale their own pane.

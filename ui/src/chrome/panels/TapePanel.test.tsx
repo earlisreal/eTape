@@ -53,7 +53,9 @@ describe("TapePanel", () => {
   it("persists the min-size filter through onConfigChange", () => {
     const { onConfigChange } = renderTape();
     fireEvent.change(screen.getByLabelText(/min size/i), { target: { value: "250" } });
-    expect(onConfigChange).toHaveBeenCalledWith({ symbol: "US.AAPL", minSize: 250 });
+    // Patch-only: AppShell merges patches, so the panel sends just the key it
+    // changed (a full-settings rewrite from frozen config clobbered siblings).
+    expect(onConfigChange).toHaveBeenCalledWith({ minSize: 250 });
   });
 
   it("wheel-up pauses (pill appears); jump to live resumes", () => {

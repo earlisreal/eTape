@@ -3,7 +3,7 @@ import { useState } from "react";
 import { TVDialog } from "./TVDialog";
 import { INDICATOR_CATALOG, withDefaultParams, type IndicatorInstance, type SeriesDescriptor, type SlotStyle } from "../../../render/chart/indicatorSeries";
 import { LINE_STYLE_NAMES, type LineStyleName } from "../../../render/chart/lineStyle";
-import { TV_FONT, TV_GEOM, type TvChrome } from "../../../render/chart/tvTheme";
+import { TV_FONT, TV_GEOM, TV_SWATCHES, type TvChrome } from "../../../render/chart/tvTheme";
 
 export interface IndicatorSettingsDialogProps {
   chrome: TvChrome; instance: IndicatorInstance; resolved: SeriesDescriptor[];
@@ -31,10 +31,12 @@ export function IndicatorSettingsDialog({ chrome, instance, resolved, onClose, o
     background: chrome.bg, border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, color: chrome.text,
     padding: "4px 6px", font: `${TV_GEOM.uiFont}px ${TV_FONT}`,
   } as const;
-  const swatch = {
-    width: 28, height: 22, padding: 0, border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius,
-    background: "transparent", cursor: "pointer",
-  } as const;
+  // Preset swatch buttons (no native color wheel): same TV_SWATCHES palette the
+  // drawing floating toolbar uses, so both style editors offer identical colors.
+  const swatchBtn = (c: string, active: boolean) => ({
+    width: 20, height: 20, padding: 0, borderRadius: TV_GEOM.radius, background: c, cursor: "pointer",
+    border: active ? `2px solid ${chrome.accent}` : `1px solid ${chrome.border}`,
+  } as const);
 
   const body = tab === "Inputs" ? (
     <div style={{ fontVariantNumeric: "tabular-nums" }}>
@@ -59,8 +61,15 @@ export function IndicatorSettingsDialog({ chrome, instance, resolved, onClose, o
             <div style={{ color: chrome.muted, marginBottom: 4 }}>{s.slot}</div>
             <div style={rowStyle}>
               <span>Color</span>
-              <input aria-label={`${s.slot} color`} type="color" style={swatch} value={color}
-                onChange={(e) => setStyle(s.slot, { color: e.target.value })} />
+              <div role="group" aria-label={`${s.slot} color`} style={{ display: "flex", gap: 4 }}>
+                {TV_SWATCHES.map((c) => {
+                  const active = c.toUpperCase() === color.toUpperCase();
+                  return (
+                    <button key={c} aria-label={`${s.slot} color ${c}`} aria-pressed={active}
+                      onClick={() => setStyle(s.slot, { color: c })} style={swatchBtn(c, active)} />
+                  );
+                })}
+              </div>
             </div>
             <div style={rowStyle}>
               <span>Width</span>

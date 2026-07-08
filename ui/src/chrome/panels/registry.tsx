@@ -24,9 +24,12 @@ export interface PanelProps {
   height: number;
   linkGroups: LinkGroups;
   commands: { sendCommand(name: string, args: unknown): Promise<AckMsg>; sendQuery(name: string, args: unknown): Promise<unknown> };
-  // Persist a panel's own settings (timeframe, indicators, …). AppShell updates the
+  // Persist a PATCH of this panel's settings (send only the keys being changed —
+  // e.g. { timeframe } or { indicators }). AppShell merges the patch into the
   // workspace doc's matching panel entry and debounce-saves via WorkspaceStore.
-  onConfigChange: (settings: Record<string, unknown>) => void;
+  // Never spread config.settings into the patch: config is frozen at panel
+  // creation, so a full rewrite reverts every setting persisted since mount.
+  onConfigChange: (patch: Record<string, unknown>) => void;
   // Task 12: whether this panel is dockview's currently-active panel (drives the
   // bronze focus ring — .panel-focused) and the group-swatch picker's pick handler
   // (see GroupPicker). Both live entirely in PanelFrame's own ledger header, not in

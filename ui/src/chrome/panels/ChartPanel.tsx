@@ -17,7 +17,7 @@ import type { Drawing } from "../../render/chart/drawings/model";
 import type { LineStyleName } from "../../render/chart/lineStyle";
 import { getTvPalette, getTvChrome } from "../../render/chart/tvTheme";
 import { TVToolbar } from "./tv/TVToolbar";
-import { TVDrawingRail } from "./tv/TVDrawingRail";
+import { TVDrawingRail, type RailPos } from "./tv/TVDrawingRail";
 import { TVContextMenu, type MenuEntry } from "./tv/TVContextMenu";
 import { TVLegend, type TVLegendHandle } from "./tv/TVLegend";
 import { TVFloatingToolbar } from "./tv/TVFloatingToolbar";
@@ -107,6 +107,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const timeframe0 = (config.settings.timeframe as string) ?? "1m";
   const chartType0 = (config.settings.chartType as ChartType) ?? "candle";
   const hideAll0 = (config.settings.hideAllDrawings as boolean) ?? false;
+  const railPos0 = (config.settings.drawingRailPos as RailPos | undefined) ?? null;
   const chartSettings0: ChartSettings = { ...DEFAULT_CHART_SETTINGS, ...((config.settings.chartSettings as Partial<ChartSettings>) ?? {}) };
   // config.group is frozen (dockview captures this panel's factory once, at
   // creation, and never re-invokes it with a fresh config on a later group
@@ -139,7 +140,9 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const [magnet, setMagnet] = useState(true);
   const [chartSymbol, setChartSymbol] = useState(symbol);
   const [menu, setMenu] = useState<{ x: number; y: number; drawingId: string | null } | null>(null);
-  const [chartType, setChartType] = useState<ChartType>(chartType0);
+  // The top-bar chart-type switcher was removed (candles-only trading UI); the
+  // persisted setting is still honored at mount so old workspaces keep rendering.
+  const chartType = chartType0;
   const [hideAll, setHideAll] = useState(hideAll0);
   const [chartSettings, setChartSettings] = useState<ChartSettings>(chartSettings0);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -337,31 +340,41 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   useEffect(() => { paletteRef.current = palette; }, [palette]);
 
   // ---- config mutations: drive the controller imperatively, then persist ----
-  const persist = (patch: Record<string, unknown>) =>
-    onConfigChange({ ...config.settings, timeframe, indicators: instances, chartType, hideAllDrawings: hideAll, chartSettings, ...patch });
+  // Patch-only: AppShell merges patches into the stored settings, so each write
+  // carries just the keys it changes. Re-asserting the other keys from render
+  // state here would clobber newer values with stale closures (this `config` is
+  // frozen at panel creation — dockview never re-invokes the factory).
+  const persist = (patch: Record<string, unknown>) => onConfigChange(patch);
 
   const changeTimeframe = (tf: string) => {
     setTf(tf); controllerRef.current?.setTimeframe(tf); forceRepaintRef.current = true; persist({ timeframe: tf });
   };
+  // Every mutation goes through instancesRef (updated synchronously here, not
+  // just by the post-render effect below): two mutations in the same tick would
+  // otherwise both read this render's stale `instances` closure and the second
+  // would silently drop the first (observed live as an indicator whose series
+  // the controller drew but whose legend row/persisted entry vanished).
+  const setInstancesNow = (next: IndicatorInstance[]) => {
+    instancesRef.current = next;
+    setInstances(next);
+    persist({ indicators: next });
+  };
   const addIndicator = (type: IndicatorType) => {
     const inst: IndicatorInstance = { instanceId: `${config.id}:${type}-${idSeq.current++}`, type, params: withDefaultParams(type) };
-    const next = [...instances, inst];
-    setInstances(next); controllerRef.current?.addIndicator(inst); persist({ indicators: next });
+    controllerRef.current?.addIndicator(inst);
+    setInstancesNow([...instancesRef.current, inst]);
   };
   const updateIndicator = (inst: IndicatorInstance) => {
-    const next = instances.map((i) => (i.instanceId === inst.instanceId ? inst : i));
-    setInstances(next); controllerRef.current?.updateIndicator(inst); persist({ indicators: next });
+    controllerRef.current?.updateIndicator(inst);
+    setInstancesNow(instancesRef.current.map((i) => (i.instanceId === inst.instanceId ? inst : i)));
   };
   const removeIndicator = (id: string) => {
-    const next = instances.filter((i) => i.instanceId !== id);
-    setInstances(next); controllerRef.current?.removeIndicator(id); persist({ indicators: next });
+    controllerRef.current?.removeIndicator(id);
+    setInstancesNow(instancesRef.current.filter((i) => i.instanceId !== id));
   };
   const toggleIndicatorHidden = (id: string) => {
-    const inst = instances.find((i) => i.instanceId === id);
+    const inst = instancesRef.current.find((i) => i.instanceId === id);
     if (inst) updateIndicator({ ...inst, hidden: !inst.hidden });
-  };
-  const onChangeChartType = (t: ChartType) => {
-    setChartType(t); controllerRef.current?.setChartType(t); forceRepaintRef.current = true; persist({ chartType: t });
   };
   const toggleHideAll = () => {
     const next = !hideAll; setHideAll(next); drawingsPrimRef.current?.setHideAll(next);
@@ -447,9 +460,9 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: chrome.bg }}>
-      <TVToolbar chrome={chrome} symbol={chartSymbol} timeframe={timeframe} chartType={chartType}
+      <TVToolbar chrome={chrome} symbol={chartSymbol} timeframe={timeframe}
         onSymbolClick={() => hostRef.current?.focus()}
-        onTimeframe={changeTimeframe} onChartType={onChangeChartType}
+        onTimeframe={changeTimeframe}
         onOpenIndicators={() => setPickerOpen(true)} onScreenshot={onScreenshot} onOpenSettings={() => setChartSettingsOpen(true)} />
       <div ref={hostRef} data-testid="chart-host" tabIndex={0} style={{ flex: 1, minHeight: 0, position: "relative" }}
         onContextMenu={onContextMenu}>
@@ -459,7 +472,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           onToggleHideAll={toggleHideAll}
           hasSelection={() => interactionRef.current?.hasSelection() ?? false}
           onDeleteSelection={() => interactionRef.current?.deleteSelection()}
-          onClearAll={() => stores.drawings.clearSymbol(chartSymbol)} />
+          onClearAll={() => stores.drawings.clearSymbol(chartSymbol)}
+          initialPos={railPos0} onPosChange={(p) => persist({ drawingRailPos: p })} />
         <TVLegend chrome={chrome} symbol={chartSymbol} timeframe={timeframe} instances={instances} paneOffsets={paneOffsets}
           onToggleHidden={toggleIndicatorHidden} onEditIndicator={setSettingsInstanceId} onRemoveIndicator={removeIndicator}
           legendRef={legendRef} />

@@ -159,6 +159,98 @@ func TestIndicatorLifecycleThroughCore(t *testing.T) {
 	}
 }
 
+// TestEnsureExistingIdAdoptsNewSpec is the "VWAP not showing" regression: the
+// UI re-subscribes the SAME instanceId with a new (symbol, tf) on every chart
+// symbol/timeframe switch (ChartController.resetForReload). ensure() used to
+// ignore the new spec, leaving the instance computing the old symbol forever —
+// its line then sat in the old symbol's price domain, invisible on the new
+// chart's scale.
+func TestEnsureExistingIdAdoptsNewSpec(t *testing.T) {
+	c, drain := runCore(t)
+	mk := func(sym string, i int, cl float64) feed.Bar {
+		return feed.Bar{Symbol: sym, BucketMs: t0Ms + int64(i)*60_000, O: cl, H: cl + 1, L: cl - 1, C: cl, Volume: 500}
+	}
+	// Two symbols in different price domains; bucket i+1's arrival finalizes i.
+	for i := 0; i < 4; i++ {
+		c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{mk("US.AAPL", i, 190+float64(i))}})
+		c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{mk("US.NVDA", i, 140+float64(i))}})
+	}
+	c.EnsureIndicator("vwap-1", IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: IndVWAP})
+	drain()
+
+	// The chart switches to NVDA and re-subscribes the same instanceId.
+	c.EnsureIndicator("vwap-1", IndicatorSpec{Symbol: "US.NVDA", TF: session.TF1m, Type: IndVWAP})
+	var lastSnap IndicatorUpdate
+	countVwap := func(us []Update) (n int) {
+		for _, u := range us {
+			if iu, ok := u.(IndicatorUpdate); ok && iu.InstanceID == "vwap-1" {
+				n++
+				if iu.Snapshot {
+					lastSnap = iu
+				}
+			}
+		}
+		return
+	}
+	countVwap(drain())
+	if len(lastSnap.Points) == 0 {
+		t.Fatal("no snapshot after re-ensure with a new symbol")
+	}
+	// Typical price == close for these bars, equal volumes: NVDA VWAP after the
+	// three finalized bars is (140+141+142)/3 = 141. The stale-AAPL value was 191.
+	got := lastSnap.Points[len(lastSnap.Points)-1].Value
+	if math.Abs(got-141) > 1e-9 {
+		t.Fatalf("last snapshot point = %g, want 141 (NVDA domain); stale-spec value would be 191", got)
+	}
+
+	// Forward streaming must now follow NVDA (delta on its forming bar) and
+	// have stopped following AAPL.
+	before := countVwap(drain())
+	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{mk("US.NVDA", 3, 144)}})
+	afterNvda := countVwap(drain())
+	if afterNvda == before {
+		t.Fatal("no delta streamed for the new symbol's forming bar")
+	}
+	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{mk("US.AAPL", 3, 195)}})
+	if got := countVwap(drain()); got != afterNvda {
+		t.Fatalf("old symbol still streaming after respec: %d -> %d updates", afterNvda, got)
+	}
+}
+
+// TestParamEditAfterRefInflation covers the UI's param-edit path
+// (updateIndicator = Unsubscribe then Subscribe with the SAME instanceId): once
+// a symbol switch has inflated refs past 1, the release no longer frees the id,
+// so the re-subscribe hits ensure()'s existing-id branch — which must adopt the
+// new params rather than silently keeping the old ones.
+func TestParamEditAfterRefInflation(t *testing.T) {
+	c, drain := runCore(t)
+	for i := 0; i < 5; i++ {
+		c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(i, 10+float64(i), 11+float64(i), 9+float64(i), 10+float64(i), 100)}})
+	}
+	spec := func(period float64) IndicatorSpec {
+		return IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: IndSMA, Params: map[string]float64{"period": period}}
+	}
+	c.EnsureIndicator("sma-1", spec(2))
+	c.EnsureIndicator("sma-1", spec(2)) // symbol-switch resubscribe: refs -> 2
+	c.ReleaseIndicator("sma-1")         // param edit: remove...
+	c.EnsureIndicator("sma-1", spec(4)) // ...then re-add, same id, new period
+	var lastSnap IndicatorUpdate
+	for _, u := range drain() {
+		if iu, ok := u.(IndicatorUpdate); ok && iu.InstanceID == "sma-1" && iu.Snapshot {
+			lastSnap = iu
+		}
+	}
+	if len(lastSnap.Points) == 0 {
+		t.Fatal("no snapshot after param re-ensure")
+	}
+	// Finalized closes are 10,11,12,13 (bucket 4 still forming). SMA(4) over
+	// them = 11.5; a stale SMA(2) would end at 12.5.
+	got := lastSnap.Points[len(lastSnap.Points)-1].Value
+	if math.Abs(got-11.5) > 1e-9 {
+		t.Fatalf("last snapshot point = %g, want SMA(4)=11.5; stale SMA(2) would be 12.5", got)
+	}
+}
+
 func TestMACDSlotKeys(t *testing.T) {
 	c, drain := runCore(t)
 	for i := 0; i < 12; i++ {

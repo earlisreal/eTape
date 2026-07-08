@@ -20,8 +20,10 @@ export const IconLine = ({ size }: P) => <Svg size={size}><path d="M4 16l5-5 4 3
 export const IconArea = ({ size }: P) => <Svg size={size}><path d="M4 16l5-5 4 3 7-8" /><path d="M4 16l5-5 4 3 7-8V20H4z" fill="currentColor" opacity="0.15" stroke="none" /></Svg>;
 export const IconIndicators = ({ size }: P) => <Svg size={size}><path d="M4 12h3l2 6 3-14 2 8h6" /></Svg>;
 export const IconCamera = ({ size }: P) => <Svg size={size}><path d="M4 8h3l2-2h6l2 2h3v11H4z" /><circle cx="12" cy="13" r="3.2" /></Svg>;
-export const IconGear = ({ size }: P) => <Svg size={size}><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2" /></Svg>;
-export const IconCursor = ({ size }: P) => <Svg size={size}><path d="M6 4l12 8-5 1 3 6-3 1-3-6-4 3z" /></Svg>;
+// A toothed cog (not spokes radiating from a circle — that silhouette reads as a
+// sun, i.e. a light/dark toggle, which this button is not).
+export const IconGear = ({ size }: P) => <Svg size={size}><circle cx="12" cy="12" r="3" /><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" /></Svg>;
+export const IconGrip = ({ size }: P) => <Svg size={size}>{[6, 12, 18].flatMap((y) => [9, 15].map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.3" fill="currentColor" stroke="none" />))}</Svg>;
 export const IconTrend = ({ size }: P) => <Svg size={size}><path d="M4 19L20 5" /><circle cx="5" cy="18" r="1.6" /><circle cx="19" cy="6" r="1.6" /></Svg>;
 export const IconRay = ({ size }: P) => <Svg size={size}><path d="M4 19L20 5" /><circle cx="5" cy="18" r="1.6" /><path d="M20 5l-3 1M20 5l-1 3" /></Svg>;
 export const IconHLine = ({ size }: P) => <Svg size={size}><path d="M3 12h18" /><circle cx="12" cy="12" r="1.6" /></Svg>;

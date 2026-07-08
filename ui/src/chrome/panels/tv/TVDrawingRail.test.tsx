@@ -14,19 +14,51 @@ const base = {
 };
 
 describe("TVDrawingRail", () => {
-  it("has the data-drawing-rail opt-out marker", () => {
+  it("has the data-drawing-ui opt-out marker", () => {
     const { container } = render(<TVDrawingRail {...base} />);
-    expect(container.querySelector("[data-drawing-rail]")).toBeTruthy();
+    expect(container.querySelector("[data-drawing-ui]")).toBeTruthy();
   });
 
-  it("selects cursor, rect, measure", () => {
+  it("has no cursor button; rect and measure arm their tools", () => {
     render(<TVDrawingRail {...base} />);
-    fireEvent.click(screen.getByLabelText("cursor"));
+    expect(screen.queryByLabelText("cursor")).toBeNull();
     fireEvent.click(screen.getByLabelText("rectangle"));
     fireEvent.click(screen.getByLabelText("measure"));
-    expect(base.onSelectTool).toHaveBeenCalledWith("select");
     expect(base.onSelectTool).toHaveBeenCalledWith("rect");
     expect(base.onSelectTool).toHaveBeenCalledWith("measure");
+  });
+
+  it("re-clicking the armed tool toggles back to select", () => {
+    render(<TVDrawingRail {...base} activeTool="rect" />);
+    fireEvent.click(screen.getByLabelText("rectangle"));
+    expect(base.onSelectTool).toHaveBeenCalledWith("select");
+  });
+
+  it("lays out horizontally and drags via the grip, reporting one position on release", () => {
+    const onPosChange = vi.fn();
+    const { container } = render(<TVDrawingRail {...base} onPosChange={onPosChange} />);
+    const rail = container.querySelector("[data-drawing-ui]") as HTMLDivElement;
+    expect(rail.style.flexDirection).toBe("row");
+    const grip = screen.getByLabelText("move toolbar");
+    // jsdom has no layout (all rects are zeros), so the drag clamps to 0,0 —
+    // the contract under test is down → move → single report on release.
+    // MouseEvent-typed dispatches: jsdom has no PointerEvent constructor, and
+    // fireEvent.pointerDown's fallback drops clientX/clientY entirely. The
+    // move/up land on the window listeners the grip's pointerdown installs.
+    fireEvent(grip, new MouseEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 50 }));
+    fireEvent(grip, new MouseEvent("pointermove", { bubbles: true, clientX: 140, clientY: 90 }));
+    expect(onPosChange).not.toHaveBeenCalled();
+    fireEvent(grip, new MouseEvent("pointerup", { bubbles: true }));
+    expect(onPosChange).toHaveBeenCalledTimes(1);
+    expect(onPosChange).toHaveBeenCalledWith({ x: 0, y: 0 });
+    expect(rail.style.left).toBe("0px");
+  });
+
+  it("seeds its position from initialPos", () => {
+    const { container } = render(<TVDrawingRail {...base} initialPos={{ x: 33, y: 44 }} />);
+    const rail = container.querySelector("[data-drawing-ui]") as HTMLDivElement;
+    expect(rail.style.left).toBe("33px");
+    expect(rail.style.top).toBe("44px");
   });
 
   it("group button selects the last line tool; flyout picks another", () => {

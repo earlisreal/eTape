@@ -125,16 +125,22 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   }, [linkGroups, workspaceStore]);
   if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
 
-  // A stable per-panel onConfigChange updates ws.panels[i].settings then saves.
+  // A stable per-panel onConfigChange MERGES a settings patch into
+  // ws.panels[i].settings then saves. Merge, not replace: the panels below and
+  // PanelFrame all hold config captured once by dockview at panel-creation time,
+  // so a caller that re-sent full settings could only rebuild them from that
+  // frozen snapshot — a type-to-load symbol commit used to wipe every setting
+  // persisted since mount that way (indicators, timeframe, chart settings).
+  // Callers therefore send only the keys they're changing.
   // Reads/writes via wsRef (like onGroupChange/removePanel below) rather than the
   // `ws` closed over at render time: the per-panel PanelFrame factory is captured
   // ONCE by dockview at panel-creation time and never re-invoked with a fresh
   // closure later, so a panel created before a subsequent panel was added would
   // otherwise persist a `ws` missing that later panel — silently dropping it from
   // both React state and the saved workspace doc (Finding 1, final-branch review).
-  const onConfigChange = (panelId: string, settings: Record<string, unknown>) => {
+  const onConfigChange = (panelId: string, patch: Record<string, unknown>) => {
     const current = wsRef.current ?? ws;
-    const next = { ...current, panels: current.panels.map((p) => (p.id === panelId ? { ...p, settings } : p)) };
+    const next = { ...current, panels: current.panels.map((p) => (p.id === panelId ? { ...p, settings: { ...p.settings, ...patch } } : p)) };
     wsRef.current = next;
     setWs(next);                 // keep local state authoritative for subsequent edits
     workspaceStore.save(next);   // debounced persist (config key workspace.<name>)

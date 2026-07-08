@@ -198,6 +198,28 @@ describe("ChartPanel", () => {
     expect(widthBtn(1).style.fontWeight).toBe("500");
   });
 
+  it("a pointerdown on the floating toolbar doesn't deselect, so its buttons still fire (drawing-options regression)", () => {
+    const stores = makeStores();
+    stores.drawings.upsert({ id: "d1", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 0, price: 1 }],
+      color: "#089981", width: 1, lineStyle: "solid", createdMs: 1, updatedMs: 1 });
+    const { getByTestId, getByRole, queryByRole } = renderChart("c1", stores);
+
+    // Select the drawing (same (0,0) hit-test trick as the Finding 1 test above).
+    fireEvent.contextMenu(getByTestId("chart-host"), { clientX: 0, clientY: 0 });
+    const del = getByRole("button", { name: "delete drawing" });
+
+    // The real-world button press: a NATIVE pointerdown that bubbles from the
+    // toolbar to the chart host, where DrawingInteraction's raw listener runs
+    // before any React handler. clientX/Y far from the drawing's (0,0) projection
+    // so, without the data-drawing-ui guard, it takes the blank-canvas deselect
+    // branch and unmounts the toolbar before the click can fire.
+    fireEvent(del, new MouseEvent("pointerdown", { bubbles: true, clientX: 500, clientY: 500 }));
+    expect(queryByRole("button", { name: "delete drawing" })).toBeTruthy(); // still mounted
+
+    fireEvent.click(getByRole("button", { name: "delete drawing" }));
+    expect(stores.drawings.forSymbol("US.AAPL")).toHaveLength(0); // the action actually ran
+  });
+
   it("the context menu closes after an action and on Escape", () => {
     const { getByTestId, getByRole, queryByRole } = renderChart();
     fireEvent.contextMenu(getByTestId("chart-host"), { clientX: 20, clientY: 30 });

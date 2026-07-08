@@ -27,17 +27,28 @@ describe("IndicatorSettingsDialog", () => {
     expect(onApply).toHaveBeenCalledWith(expect.objectContaining({ instanceId: "e1", params: { period: 21 } }));
   });
 
-  it("edits per-slot style on the Style tab and applies it", () => {
+  it("edits per-slot style on the Style tab via preset swatches and applies it", () => {
     const onApply = vi.fn();
     render(<IndicatorSettingsDialog chrome={chrome} instance={ema} resolved={resolved} onClose={() => {}} onApply={onApply} />);
     fireEvent.click(screen.getByRole("tab", { name: "Style" }));
-    fireEvent.change(screen.getByLabelText("line color"), { target: { value: "#123456" } });
+    fireEvent.click(screen.getByLabelText("line color #F23645"));
     fireEvent.change(screen.getByLabelText("line width"), { target: { value: "3" } });
     fireEvent.change(screen.getByLabelText("line style"), { target: { value: "dashed" } });
     fireEvent.click(screen.getByRole("button", { name: "Ok" }));
     expect(onApply).toHaveBeenCalledWith(expect.objectContaining({
-      styles: { line: { color: "#123456", width: 3, lineStyle: "dashed" } },
+      styles: { line: { color: "#F23645", width: 3, lineStyle: "dashed" } },
     }));
+  });
+
+  it("offers preset swatches only — no native color-wheel input", () => {
+    const { container } = render(<IndicatorSettingsDialog chrome={chrome} instance={ema} resolved={resolved} onClose={() => {}} onApply={() => {}} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Style" }));
+    expect(container.querySelector('input[type="color"]')).toBeNull();
+    // Picking a preset highlights it (the palette default #3E7CB1 isn't a preset,
+    // so nothing is pressed until the user picks one).
+    expect(screen.queryByLabelText("line color #3E7CB1")).toBeNull();
+    fireEvent.click(screen.getByLabelText("line color #7E57C2"));
+    expect(screen.getByLabelText("line color #7E57C2").getAttribute("aria-pressed")).toBe("true");
   });
 
   it("Defaults resets params and clears styles", () => {

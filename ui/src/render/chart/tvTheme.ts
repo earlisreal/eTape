@@ -138,6 +138,10 @@ export function getTvChrome(mode: ThemeMode): TvChrome {
   return mode === "dark" ? CHROME_DARK : CHROME_LIGHT;
 }
 
+// Preset color swatches shared by every style editor in the TV chrome (drawing
+// floating toolbar, indicator settings dialog) — one palette, no color wheel.
+export const TV_SWATCHES = ["#2962FF", "#089981", "#F23645", "#FF6D00", "#7E57C2", "#787B86", "#131722", "#FFFFFF"] as const;
+
 export const TV_FONT = `-apple-system, "Trebuchet MS", Roboto, Ubuntu, sans-serif`;
 
 export const TV_GEOM = {

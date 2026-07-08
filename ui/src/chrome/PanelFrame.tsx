@@ -253,7 +253,11 @@ export function PanelFrame(
             return; // leave the prior symbol untouched — no half-loaded pinned panel
           }
         }
-        onConfigChange({ ...config.settings, symbol: sym });
+        // Patch, not a full-settings rewrite: `config.settings` here is frozen
+        // at panel creation (dockview never re-invokes the factory), so spreading
+        // it reverted every setting the panel persisted since mount — a symbol
+        // commit used to silently wipe a chart's indicators, timeframe, etc.
+        onConfigChange({ symbol: sym });
       } catch (err) {
         // Review finding (Important): `commit` is invoked fire-and-forget
         // (`void commit(...)`) below. A thrown/rejected promise here — e.g. a
