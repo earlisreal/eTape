@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { render, screen, act } from "@testing-library/react";
 import { HealthStore } from "../data/HealthStore";
 import { ConnectionStatusPanel } from "./panels/ConnectionStatusPanel";
@@ -80,5 +80,27 @@ describe("ConnectionStatusPanel", () => {
         } as unknown as Parameters<typeof health.apply>[0]);
       });
     }).not.toThrow();
+  });
+
+  it("renders both events when the Hub's sysEventSeq and health.Poller's seq collide (same seq, different kind)", () => {
+    // The two counters are independent (Hub-owned ui-drop events vs.
+    // health.Poller's own events), so seq alone can't disambiguate them.
+    // Regression coverage for the React duplicate-key risk this produces.
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const health = new HealthStore();
+    wrap(health);
+    act(() => {
+      health.apply({ kind: "delta", topic: "sys.events",
+        payload: { seq: 1, ts: "t1", kind: "boot", detail: "engine started" } });
+      health.apply({ kind: "delta", topic: "sys.events",
+        payload: { seq: 1, ts: "t2", kind: "ui-drop", detail: "dropped UI client 3: write timeout" } });
+    });
+    expect(screen.getByText(/engine started/)).toBeTruthy();
+    expect(screen.getByText(/dropped UI client 3: write timeout/)).toBeTruthy();
+    const keyWarning = consoleError.mock.calls.some((args) =>
+      args.some((a) => typeof a === "string" && a.includes("two children with the same key")),
+    );
+    expect(keyWarning).toBe(false);
+    consoleError.mockRestore();
   });
 });

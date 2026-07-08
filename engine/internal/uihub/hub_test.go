@@ -351,7 +351,7 @@ func TestHubBroadcastOverflowEmitsUIDropSysEvent(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a ui-drop sys.events delta to reach the surviving subscribed client")
 	}
-	if !strings.Contains(detail, "1") || !strings.Contains(detail, "overflow") {
+	if !strings.Contains(detail, "dropped UI client 1:") || !strings.Contains(detail, "overflow") {
 		t.Fatalf("expected detail to identify client 1 and an overflow reason, got %q", detail)
 	}
 }
@@ -389,7 +389,52 @@ func TestHubSendSnapshotOverflowEmitsUIDropSysEvent(t *testing.T) {
 	if !ok {
 		t.Fatal("expected a ui-drop sys.events delta to reach the surviving subscribed client")
 	}
-	if !strings.Contains(detail, "2") || !strings.Contains(detail, "overflow") {
+	if !strings.Contains(detail, "dropped UI client 2:") || !strings.Contains(detail, "overflow") {
 		t.Fatalf("expected detail to identify client 2 and an overflow reason, got %q", detail)
+	}
+}
+
+// TestHubWriteTimeoutDropEmitsUIDropSysEvent is the end-to-end case for the
+// write-timeout drop path: conn_test.go's TestConnWriteTimeoutClosesConn
+// already pins that a wedged peer's write times out and tears the conn down,
+// but only asserts the conn closes -- not that the Hub actually turns it into
+// a ui-drop sys.events frame for survivors. Unlike the overflow paths above
+// (broadcast/sendSnapshot call emitUIDrop directly, from Run's own
+// goroutine), a write timeout is detected in the conn's own writeLoop
+// goroutine and crosses into Run via ReportUIDrop -> dropCh -> handleDrop --
+// a genuinely different path that needs its own coverage. This drives a real
+// conn through an actual write timeout and asserts a survivor subscribed to
+// sys.events receives the resulting frame.
+func TestHubWriteTimeoutDropEmitsUIDropSysEvent(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	survivor := &fakeClient{nid: 2}
+	h.Register(survivor)
+	h.Subscribe(survivor, wsmsg.TopicSysEvents)
+	syncHub(h)
+
+	sock := newFakeSocket()
+	sock.block = true // every Write blocks until its ctx is done -- a wedged peer
+	wedged := newConn(1, sock, h, &fakeCmd{}, fakeQuery{}, 8, 20*time.Millisecond)
+	h.Register(wedged)
+	go wedged.run(ctx)
+
+	if !wedged.enqueue([]byte(`{"kind":"ping","t":1}`), "") {
+		t.Fatal("enqueue should succeed immediately; the queue itself isn't full")
+	}
+
+	waitFor(t, func() bool { return connDone(wedged) })
+	syncHub(h) // barrier: ReportUIDrop's dropCh send is drained and handleDrop applied
+
+	detail, ok := findUIDropDetail(t, survivor.got())
+	if !ok {
+		t.Fatal("expected a ui-drop sys.events delta to reach the surviving subscribed client")
+	}
+	if !strings.Contains(detail, "dropped UI client 1:") || !strings.Contains(detail, "write timeout") {
+		t.Fatalf("expected detail to identify client 1 and a write-timeout reason, got %q", detail)
 	}
 }
