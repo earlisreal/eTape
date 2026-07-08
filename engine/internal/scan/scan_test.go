@@ -3,6 +3,8 @@ package scan
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"sort"
 	"testing"
 	"time"
 
@@ -10,6 +12,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
@@ -258,7 +261,7 @@ func rankResp(items ...rankItem) *rankpb.Response {
 }
 
 func newTestPoller(cfg config.Scan, fr *fakeReq, pub *capturePub) *Poller {
-	return New(cfg, fr, pub, clock.NewFake(time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)))
+	return New(cfg, fr, pub, clock.NewFake(time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)), nil, nil)
 }
 
 func TestResolveFloatsClassifiesKnownAndBad(t *testing.T) {
@@ -472,5 +475,89 @@ func TestSessionKey(t *testing.T) {
 		if got := sessionKey(phase); got != want {
 			t.Errorf("sessionKey(%v)=%q want %q", phase, got, want)
 		}
+	}
+}
+
+// spyFeed records Ensure/Release calls for pool-delta assertions.
+type spyFeed struct {
+	ensured  []feed.Demand
+	released []string
+}
+
+func (s *spyFeed) Ensure(d feed.Demand) { s.ensured = append(s.ensured, d) }
+func (s *spyFeed) Release(id string)    { s.released = append(s.released, id) }
+
+func rows(syms ...string) []wsmsg.ScannerRow {
+	out := make([]wsmsg.ScannerRow, len(syms))
+	for i, s := range syms {
+		out[i] = wsmsg.ScannerRow{Symbol: s}
+	}
+	return out
+}
+
+func TestUpdatePoolEnsuresWatchDemandsAndBackfills(t *testing.T) {
+	sf := &spyFeed{}
+	var backfilled []string
+	clk := clock.NewFake(et(2026, 7, 8, 14, 0)) // RTH, well inside a pool day
+	p := New(config.Scan{}, &fakeReq{}, &capturePub{}, clk, sf, func(s string) { backfilled = append(backfilled, s) })
+
+	p.updatePool(clk.Now(), rows("US.A", "US.B"))
+
+	if len(sf.ensured) != 2 {
+		t.Fatalf("want 2 Ensure calls, got %+v", sf.ensured)
+	}
+	if sf.ensured[0].ID != "scan:US.A" || sf.ensured[0].Symbol != "US.A" {
+		t.Fatalf("Ensure[0]=%+v, want id scan:US.A", sf.ensured[0])
+	}
+	if len(sf.ensured[0].Subs) != 2 || sf.ensured[0].Focused {
+		t.Fatalf("pool must use the 2-slot non-focused watch shape: %+v", sf.ensured[0])
+	}
+	if !reflect.DeepEqual(backfilled, []string{"US.A", "US.B"}) {
+		t.Fatalf("backfilled=%v, want [US.A US.B]", backfilled)
+	}
+	if !reflect.DeepEqual(p.PoolSymbols(), []string{"US.A", "US.B"}) {
+		t.Fatalf("PoolSymbols()=%v, want [US.A US.B]", p.PoolSymbols())
+	}
+}
+
+func TestUpdatePoolReleasesOnDayReset(t *testing.T) {
+	sf := &spyFeed{}
+	clk := clock.NewFake(et(2026, 7, 8, 19, 0))
+	p := New(config.Scan{}, &fakeReq{}, &capturePub{}, clk, sf, nil) // nil backfill tolerated
+
+	p.updatePool(et(2026, 7, 8, 19, 0), rows("US.A", "US.B")) // pool day D
+	p.updatePool(et(2026, 7, 8, 20, 0), rows("US.C"))         // crosses 20:00 ET -> day D+1
+
+	sort.Strings(sf.released)
+	if !reflect.DeepEqual(sf.released, []string{"scan:US.A", "scan:US.B"}) {
+		t.Fatalf("released=%v, want [scan:US.A scan:US.B]", sf.released)
+	}
+}
+
+func TestUpdatePoolNilFeedInert(t *testing.T) {
+	clk := clock.NewFake(et(2026, 7, 8, 14, 0))
+	p := New(config.Scan{}, &fakeReq{}, &capturePub{}, clk, nil, nil)
+	p.updatePool(clk.Now(), rows("US.A")) // must not panic
+	if p.PoolSymbols() != nil {
+		t.Fatalf("nil feed must disable the pool: PoolSymbols()=%v", p.PoolSymbols())
+	}
+}
+
+func TestPollOnceDrivesPool(t *testing.T) {
+	fr := &fakeReq{
+		rankResp: rankResp(rankItem{Symbol: "US.LOWF", ChangePct: 12.5, Last: 4.2, Volume: 300_000}),
+		snap: func(codes []string) (*snappb.Response, error) {
+			return snapResp(snap("LOWF", 20_000_000, true)), nil
+		},
+	}
+	sf := &spyFeed{}
+	clk := clock.NewFake(et(2026, 7, 8, 8, 0)) // pre-market
+	p := New(config.Scan{Enabled: true, MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000},
+		fr, &capturePub{}, clk, sf, nil)
+
+	p.pollOnce(context.Background(), clk.Now())
+
+	if len(sf.ensured) != 1 || sf.ensured[0].ID != "scan:US.LOWF" {
+		t.Fatalf("pollOnce should Ensure the filtered top row via the pool: %+v", sf.ensured)
 	}
 }

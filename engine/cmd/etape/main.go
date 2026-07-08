@@ -203,6 +203,7 @@ func main() {
 	// --- feed (live OpenD or replay) ---
 	var pipeWG sync.WaitGroup
 	var backfillWG sync.WaitGroup
+	var scanWG sync.WaitGroup
 	var client *opend.Client
 	if live {
 		if n, err := st.PruneJournal(cfg.Store.RetentionDays); err == nil && n > 0 {
@@ -219,6 +220,7 @@ func main() {
 		go func() { _ = fd.Run(ctx) }()
 		pipeWG.Add(1)
 		go pipe(ctx, &pipeWG, fd.Events(), core, st)
+		var backfillOne func(string)
 		for _, s := range append(cfg.Feed.Watchlist, splitCSV(*watch)...) {
 			fd.Ensure(feed.WatchDemand("boot-watch-"+s, s))
 		}
@@ -249,6 +251,13 @@ func main() {
 					SeedChunk:    cfg.Backfill.SeedChunk,
 				},
 			)
+			backfillOne = func(sym string) {
+				backfillWG.Add(1)
+				go func() {
+					defer backfillWG.Done()
+					orch.Backfill(ctx, sym)
+				}()
+			}
 			symbols := backfillSymbols(cfg, *watch, *focus)
 			backfillWG.Add(1)
 			go func() {
@@ -257,7 +266,7 @@ func main() {
 				log.Info("boot backfill complete", "symbols", len(symbols))
 			}()
 		}
-		startPollers(ctx, cfg, client, hub, uihubClk, st, hasTZVenue(cfg), splitCSV(*watch), splitCSV(*focus))
+		startPollers(ctx, cfg, client, fd, hub, uihubClk, st, hasTZVenue(cfg), splitCSV(*watch), splitCSV(*focus), backfillOne, &scanWG)
 	} else {
 		sim := execClk.(*replay.Clock)
 		fd := replay.NewFeed(replay.FeedOptions{Rows: replayRows, Sim: sim, Pace: clock.System{}, Speed: *speed})
@@ -301,6 +310,7 @@ func main() {
 	_ = httpSrv.Shutdown(shutCtx)
 	cancelShut()
 	srv.Wait()        // every conn.run() returned: no more SetConfig via dispatch
+	scanWG.Wait()     // scan poller stopped: no more backfillWG.Add from pool admissions
 	backfillWG.Wait() // boot backfill workers stopped: no more Seed* into the core
 	pipeWG.Wait()     // feed->core pipe stopped: no more RecordEvent
 	forwardWG.Wait()  // forwardMD drained: no more ArchiveBar1m/ArchiveDaily
@@ -380,11 +390,13 @@ func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks [
 	}
 }
 
-func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, hub *uihub.Hub, clk clock.Clock, st *store.Store, hasTZ bool, watchCSV, focusCSV []string) {
+func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, fd *opend.OpenDFeed, hub *uihub.Hub, clk clock.Clock, st *store.Store, hasTZ bool, watchCSV, focusCSV []string, backfillOne func(string), scanWG *sync.WaitGroup) {
+	scanPoller := scan.New(cfg.Scan, client, hub, clk, fd, backfillOne)
 	symbols := func() []string {
 		return newsSymbols(cfg.Feed.Watchlist, watchCSV, focusCSV, hub.ActiveDemandSymbols)
 	}
-	go func() { _ = scan.New(cfg.Scan, client, hub, clk).Run(ctx) }()
+	scanWG.Add(1)
+	go func() { defer scanWG.Done(); _ = scanPoller.Run(ctx) }()
 	go func() { _ = news.New(cfg.News, client, hub, clk, symbols).Run(ctx) }()
 	// health: moomoo probe via the OpenD client; app-ping RTT source is nil in v1
 	// (ui-engine shows down until ping tracking is wired). The health poller's
