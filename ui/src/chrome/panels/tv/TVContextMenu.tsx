@@ -24,7 +24,7 @@ export function TVContextMenu({ chrome, x, y, items, onClose }: TVContextMenuPro
         ) : (
           <button key={it.label} role="button" aria-label={it.label} onClick={() => { it.onClick(); onClose(); }}
             style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", textAlign: "left", padding: "6px 10px",
-              background: "transparent", border: "none", borderRadius: 4, cursor: "pointer",
+              background: "transparent", border: "none", borderRadius: TV_GEOM.radius, cursor: "pointer",
               color: it.danger ? chrome.down : chrome.text }}
             onMouseEnter={(e) => (e.currentTarget.style.background = chrome.hover)}
             onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
