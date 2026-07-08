@@ -157,7 +157,7 @@ export function ScannerPanel(
             </tr>
           ))}
           {rows.length === 0 && cv.refreshedAt && (
-            <tr><td colSpan={5} style={{ padding: 12, color: palette.textMuted, textAlign: "center" }}>No symbols match the current filters.</td></tr>
+            <tr><td colSpan={5} style={{ padding: 12, color: palette.textMuted, textAlign: "center" }}>{variant === "movers" ? "No movers right now." : "No symbols match the current filters."}</td></tr>
           )}
         </tbody>
       </table>

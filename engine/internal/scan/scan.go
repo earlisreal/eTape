@@ -224,8 +224,6 @@ func (p *Poller) fetchRank(ctx context.Context, phase session.Phase) ([]rankItem
 	}
 }
 
-// gainersC2SArgs are the shared pre-market/after-hours/overnight request args
-// (Market is only required by the RTH TopMovers API, set separately there).
 func (p *Poller) fetchPreMarket(ctx context.Context) ([]rankItem, error) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSPreMarketRank,
 		&rankpb.Request{C2S: &rankpb.C2S{SortDir: proto.Int32(0), Offset: proto.Int32(0), Count: proto.Int32(35)}})
