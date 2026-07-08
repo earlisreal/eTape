@@ -3,6 +3,7 @@ package uihub
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -23,7 +24,12 @@ type fakeClient struct {
 }
 
 func (c *fakeClient) id() uint64 { return c.nid }
-func (c *fakeClient) enqueue(b []byte) bool {
+
+// enqueue records the frame regardless of ck: outbound coalescing is the real
+// *conn's outbox job (exercised in conn_test.go via a real conn + blockable
+// socket), not the hub's -- the hub only decides the ck and hands identical
+// bytes to every subscribed client, which is what these hub-level tests assert.
+func (c *fakeClient) enqueue(b []byte, _ string) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.full {
@@ -204,6 +210,45 @@ func TestHubPublicMethodsReturnPromptlyAfterShutdown(t *testing.T) {
 	}
 }
 
+// TestOutboundCoalesceKeyRouting verifies every topic routes to the correct
+// outbound lane: latest-wins topics get a non-empty coalesce key at the right
+// granularity (per-symbol/venue/session/single-slot), every event topic stays
+// lossless (""), and a snapshot of ANY topic is always lossless.
+func TestOutboundCoalesceKeyRouting(t *testing.T) {
+	tests := []struct {
+		name string
+		s    staged
+		snap bool
+		want string
+	}{
+		{"quote delta -> per symbol", staged{Topic: wsmsg.TopicQuote, Payload: wsmsg.Quote{Symbol: "US.AAPL"}}, false, "d|q|US.AAPL"},
+		{"book delta -> per symbol", staged{Topic: wsmsg.TopicBook, Payload: wsmsg.Book{Symbol: "US.AAPL"}}, false, "d|b|US.AAPL"},
+		{"bar delta -> per symbol+tf+bucket", staged{Topic: wsmsg.TopicBars, Payload: wsmsg.Bar{Symbol: "US.AAPL", Timeframe: "1m", BucketStart: "T0"}}, false, "d|bar|US.AAPL|1m|T0"},
+		{"account delta -> per venue", staged{Topic: wsmsg.TopicExecAccount, Payload: wsmsg.AccountRow{Venue: "alpaca"}}, false, "d|acct|alpaca"},
+		{"positions delta -> single slot", staged{Topic: wsmsg.TopicExecPositions}, false, "d|exec.positions"},
+		{"scanner.rank delta -> per session", staged{Topic: wsmsg.TopicScannerRank, Key: "sess1"}, false, "d|scanner.rank|sess1"},
+		{"sys.health delta -> single slot", staged{Topic: wsmsg.TopicSysHealth}, false, "d|sys.health"},
+		{"tape delta -> lossless", staged{Topic: wsmsg.TopicTape}, false, ""},
+		{"orders delta -> lossless", staged{Topic: wsmsg.TopicExecOrders}, false, ""},
+		{"fills delta -> lossless", staged{Topic: wsmsg.TopicExecFills}, false, ""},
+		{"status delta -> lossless", staged{Topic: wsmsg.TopicExecStatus}, false, ""},
+		{"sys.events delta -> lossless", staged{Topic: wsmsg.TopicSysEvents}, false, ""},
+		{"news delta -> lossless", staged{Topic: wsmsg.TopicNews}, false, ""},
+		{"scanner.hit delta -> lossless", staged{Topic: wsmsg.TopicScannerHit}, false, ""},
+		{"config delta -> lossless", staged{Topic: wsmsg.TopicConfig}, false, ""},
+		{"indicator delta -> lossless", staged{Topic: wsmsg.TopicIndicator}, false, ""},
+		{"snapshot of a coalesceable topic -> lossless", staged{Topic: wsmsg.TopicQuote, Payload: wsmsg.Quote{Symbol: "US.AAPL"}}, true, ""},
+		{"snapshot of scanner.rank -> lossless", staged{Topic: wsmsg.TopicScannerRank, Key: "sess1"}, true, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := outboundCoalesceKey(tt.s, tt.snap); got != tt.want {
+				t.Fatalf("outboundCoalesceKey(%s, snap=%v) = %q, want %q", tt.s.Topic, tt.snap, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHubOverflowClosesClient(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	h := newTestHub(clk)
@@ -222,5 +267,174 @@ func TestHubOverflowClosesClient(t *testing.T) {
 	c.mu.Unlock()
 	if !closed {
 		t.Fatal("a client whose queue is always full must be closed and dropped")
+	}
+}
+
+// findUIDropDetail scans frames for a sys.events entry whose Kind is
+// "ui-drop", returning its Detail string (and ok=true) if found. It checks
+// both shapes a sys.events frame can take: a live delta (single SysEvent
+// payload, emitUIDrop's own delivery) and a snapshot taken after the fact
+// (payload is the accumulated []SysEvent, mirror.snapshotFrames' shape) --
+// either is proof the event was recorded and is visible to this client.
+func findUIDropDetail(t *testing.T, frames [][]byte) (string, bool) {
+	t.Helper()
+	for _, fr := range frames {
+		var m struct {
+			Kind    string          `json:"kind"`
+			Topic   string          `json:"topic"`
+			Payload json.RawMessage `json:"payload"`
+		}
+		if err := json.Unmarshal(fr, &m); err != nil || m.Topic != "sys.events" {
+			continue
+		}
+		switch m.Kind {
+		case "delta":
+			var e wsmsg.SysEvent
+			if err := json.Unmarshal(m.Payload, &e); err == nil && e.Kind == "ui-drop" {
+				return e.Detail, true
+			}
+		case "snapshot":
+			var events []wsmsg.SysEvent
+			if err := json.Unmarshal(m.Payload, &events); err == nil {
+				for _, e := range events {
+					if e.Kind == "ui-drop" {
+						return e.Detail, true
+					}
+				}
+			}
+		}
+	}
+	return "", false
+}
+
+// TestHubBroadcastOverflowEmitsUIDropSysEvent is the RED case for Task 1's
+// broadcast() drop path: when enqueue fails for a subscribed client inside
+// broadcast, the hub must still close+drop it (unchanged behavior) AND emit a
+// ui-drop sys.events frame that reaches every other client subscribed to
+// sys.events -- so a live session can confirm drops are happening without
+// needing to reproduce a full-app reconnect first.
+func TestHubBroadcastOverflowEmitsUIDropSysEvent(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	// dead starts healthy so its subscribe-triggered snapshot (exec.orders
+	// always has one, even if empty) succeeds -- only flip it to always-fail
+	// afterward, so the drop this test is isolating is unambiguously
+	// broadcast()'s overflow path, not sendSnapshot()'s (covered separately
+	// by TestHubSendSnapshotOverflowEmitsUIDropSysEvent).
+	dead := &fakeClient{nid: 1}
+	survivor := &fakeClient{nid: 2}
+	h.Register(dead)
+	h.Register(survivor)
+	h.Subscribe(dead, wsmsg.TopicExecOrders)
+	h.Subscribe(survivor, wsmsg.TopicSysEvents)
+	syncHub(h)
+
+	dead.mu.Lock()
+	dead.full = true // every enqueue fails from now on
+	dead.mu.Unlock()
+
+	h.PublishExec(exec.OrderUpdate{Order: exec.Order{Venue: "sim", ID: "ET1", Status: exec.StatusSubmitted}})
+	syncHub(h)
+
+	dead.mu.Lock()
+	closed := dead.closed
+	dead.mu.Unlock()
+	if !closed {
+		t.Fatal("overflowing client must still be closed and dropped (unchanged behavior)")
+	}
+
+	detail, ok := findUIDropDetail(t, survivor.got())
+	if !ok {
+		t.Fatal("expected a ui-drop sys.events delta to reach the surviving subscribed client")
+	}
+	if !strings.Contains(detail, "dropped UI client 1:") || !strings.Contains(detail, "overflow") {
+		t.Fatalf("expected detail to identify client 1 and an overflow reason, got %q", detail)
+	}
+}
+
+// TestHubSendSnapshotOverflowEmitsUIDropSysEvent is the RED case for Task 1's
+// sendSnapshot() drop path -- distinct code from broadcast(): a client whose
+// very first snapshot frame can't be enqueued must be dropped (unchanged
+// behavior) and also produce a ui-drop sys.events frame for survivors.
+func TestHubSendSnapshotOverflowEmitsUIDropSysEvent(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	survivor := &fakeClient{nid: 1}
+	h.Register(survivor)
+	h.Subscribe(survivor, wsmsg.TopicSysEvents)
+	syncHub(h)
+
+	dead := &fakeClient{nid: 2, full: true} // every enqueue fails, including the snapshot frame
+	h.Register(dead)
+	syncHub(h)
+	h.Subscribe(dead, wsmsg.TopicExecStatus) // exec.status always has an assembled snapshot
+	syncHub(h)
+
+	dead.mu.Lock()
+	closed := dead.closed
+	dead.mu.Unlock()
+	if !closed {
+		t.Fatal("a client whose snapshot enqueue fails must be closed and dropped (unchanged behavior)")
+	}
+
+	detail, ok := findUIDropDetail(t, survivor.got())
+	if !ok {
+		t.Fatal("expected a ui-drop sys.events delta to reach the surviving subscribed client")
+	}
+	if !strings.Contains(detail, "dropped UI client 2:") || !strings.Contains(detail, "overflow") {
+		t.Fatalf("expected detail to identify client 2 and an overflow reason, got %q", detail)
+	}
+}
+
+// TestHubWriteTimeoutDropEmitsUIDropSysEvent is the end-to-end case for the
+// write-timeout drop path: conn_test.go's TestConnWriteTimeoutClosesConn
+// already pins that a wedged peer's write times out and tears the conn down,
+// but only asserts the conn closes -- not that the Hub actually turns it into
+// a ui-drop sys.events frame for survivors. Unlike the overflow paths above
+// (broadcast/sendSnapshot call emitUIDrop directly, from Run's own
+// goroutine), a write timeout is detected in the conn's own writeLoop
+// goroutine and crosses into Run via ReportUIDrop -> dropCh -> handleDrop --
+// a genuinely different path that needs its own coverage. This drives a real
+// conn through an actual write timeout and asserts a survivor subscribed to
+// sys.events receives the resulting frame.
+func TestHubWriteTimeoutDropEmitsUIDropSysEvent(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	survivor := &fakeClient{nid: 2}
+	h.Register(survivor)
+	h.Subscribe(survivor, wsmsg.TopicSysEvents)
+	syncHub(h)
+
+	sock := newFakeSocket()
+	sock.block = true // every Write blocks until its ctx is done -- a wedged peer
+	wedged := newConn(1, sock, h, &fakeCmd{}, fakeQuery{}, 8, 20*time.Millisecond)
+	h.Register(wedged)
+	go wedged.run(ctx)
+
+	if !wedged.enqueue([]byte(`{"kind":"ping","t":1}`), "") {
+		t.Fatal("enqueue should succeed immediately; the queue itself isn't full")
+	}
+
+	waitFor(t, func() bool { return connDone(wedged) })
+	syncHub(h) // barrier: ReportUIDrop's dropCh send is drained and handleDrop applied
+
+	detail, ok := findUIDropDetail(t, survivor.got())
+	if !ok {
+		t.Fatal("expected a ui-drop sys.events delta to reach the surviving subscribed client")
+	}
+	if !strings.Contains(detail, "dropped UI client 1:") || !strings.Contains(detail, "write timeout") {
+		t.Fatalf("expected detail to identify client 1 and a write-timeout reason, got %q", detail)
 	}
 }

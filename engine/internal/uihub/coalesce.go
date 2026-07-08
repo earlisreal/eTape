@@ -43,3 +43,51 @@ func classify(topic wsmsg.Topic) coalesceClass {
 		return classImmediate // indicator, orders, fills, status, scanner.*, news, sys.*
 	}
 }
+
+// outboundCoalesceKey decides, per staged frame, whether a *specific slow
+// client* may shed this frame by superseding an older queued value of the same
+// key ("" => never; non-empty => coalesce under that key). It is the per-conn
+// outbound counterpart to classify()/dedupOf, and the two axes are orthogonal:
+// classify controls *when the Hub broadcasts* (ingest-side batching, shared by
+// all clients); outboundCoalesceKey controls *what a single client's outbox
+// does if that one client can't keep up*. A topic can therefore be
+// classImmediate for ingest (broadcast the instant it changes) yet still be
+// coalesceable outbound (scanner.rank, sys.health below) -- an immediate
+// broadcast and a slow client's shedding are independent concerns.
+func outboundCoalesceKey(s staged, snap bool) string {
+	// Every snapshot, of every topic, is lossless -- it seeds a topic's
+	// client-side store, so superseding or reordering it behind a delta would
+	// leave the client applying deltas onto a missing/stale base.
+	if snap {
+		return ""
+	}
+	switch s.Topic {
+	// Latest-wins market data: a slow client only needs the newest value per
+	// symbol (quote/book), per (symbol,timeframe,bucket) bar, or per venue
+	// (account). Reuse dedupOf -- the same key granularity the ingest side
+	// keep-latest coalesces on -- namespaced with a "d|" prefix so an outbound
+	// key can never collide with anything else.
+	case wsmsg.TopicQuote, wsmsg.TopicBook, wsmsg.TopicBars, wsmsg.TopicExecAccount:
+		return "d|" + dedupOf(s)
+	// Positions is a single full-replace slot (the whole position table each
+	// time), so one fixed key coalesces it.
+	case wsmsg.TopicExecPositions:
+		return "d|exec.positions"
+	// scanner.rank is a full ranked-table replace per scan session; a slow
+	// client only needs the newest ranking, so coalesce per session key. (See
+	// the orthogonality note above: classify puts this in classImmediate, but
+	// that only governs broadcast timing, not per-client shedding.)
+	case wsmsg.TopicScannerRank:
+		return "d|scanner.rank|" + s.Key
+	// sys.health is a single full-replace snapshot of every link's latency; one
+	// fixed key coalesces it. (Same orthogonality note as scanner.rank.)
+	case wsmsg.TopicSysHealth:
+		return "d|sys.health"
+	default:
+		// Lossless/ordered event lane: md.tape, exec.orders/fills/status,
+		// sys.events, news.item, scanner.hit, config, md.indicator. These are
+		// never dropped by load-shedding -- only a hard-cap overflow drops them
+		// (and the whole connection with them).
+		return ""
+	}
+}

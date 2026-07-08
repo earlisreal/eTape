@@ -88,7 +88,7 @@ type UIHub struct {
 	Host          string  `toml:"host"`
 	Port          int     `toml:"port"`
 	DistDir       string  `toml:"dist_dir"`        // path to built ui/dist; empty => no static file serving (dev proxies /ws)
-	OutboundQueue int     `toml:"outbound_queue"`  // per-connection outbound buffer depth; overflow => drop + force re-snapshot
+	OutboundQueue int     `toml:"outbound_queue"`  // per-connection outbound buffer depth; lossless lane overflow => drop + force re-snapshot; latest-wins topics (quotes, book, bars, account, positions, scanner rank, health) coalesce instead
 	MDRateHz      float64 `toml:"md_rate_hz"`      // flush rate for md.quote/book/bars/tape/indicator
 	AccountRateHz float64 `toml:"account_rate_hz"` // flush rate for exec.account
 	PositionMs    int     `toml:"position_ms"`     // batch interval for exec.positions
@@ -164,7 +164,7 @@ func Default() Config {
 		Store: Store{DBPath: "", RetentionDays: 30, FlushMs: 250},
 		UIHub: UIHub{
 			Host: "127.0.0.1", Port: 8686, DistDir: "",
-			OutboundQueue: 1024, MDRateHz: 30, AccountRateHz: 4, PositionMs: 100, TapeSnapshot: 200,
+			OutboundQueue: 4096, MDRateHz: 30, AccountRateHz: 4, PositionMs: 100, TapeSnapshot: 200,
 		},
 		Scan: Scan{
 			Enabled: true, PremarketMs: 2000, RTHMs: 3000, RankPages: 2,
