@@ -25,9 +25,11 @@ function fakeFacade() {
   const created: Array<{ kind: string; pane: number; options: unknown; series: ReturnType<typeof fakeSeries> }> = [];
   const scaleMargins: Array<{ id: string; margins: { top: number; bottom: number } }> = [];
   const facade: ChartApiFacade & { created: typeof created; scrolls: number; resets: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins }
-    & { mainKind: string; screenshots: number; crosshairCb: ((l: number | null) => void) | null } = {
+    & { mainKind: string; screenshots: number; crosshairCb: ((l: number | null) => void) | null }
+    & { watermark: string | null; lastOptions: unknown } = {
     created, scrolls: 0, resets: 0, bands: 0, lastBands: [], scaleMargins,
     mainKind: "", screenshots: 0, crosshairCb: null,
+    watermark: null, lastOptions: null,
     setMainSeries: (kind, o) => { const s = fakeSeries(); created.push({ kind, pane: 0, options: o, series: s }); facade.mainKind = kind; return s; },
     takeScreenshot: () => { facade.screenshots++; return {} as unknown as HTMLCanvasElement; },
     subscribeCrosshairMove: (cb) => { facade.crosshairCb = cb; return () => { facade.crosshairCb = null; }; },
@@ -46,7 +48,8 @@ function fakeFacade() {
     scrollToRealTime: () => { facade.scrolls++; },
     resetTimeScale: () => { facade.resets++; },
     resize: () => {},
-    applyOptions: () => {},
+    applyOptions: (o) => { facade.lastOptions = o; },
+    setWatermark: (t) => { facade.watermark = t; },
     remove: () => {},
   };
   return facade;
@@ -550,5 +553,39 @@ describe("ChartController indicator hidden + style", () => {
     expect(subsAfter).toBe(subsBefore); // no re-subscribe on a hidden toggle
     const emaSeries = facade.created.find((x) => (x.options as { color?: string }).color === LIGHT.indEma)!.series;
     expect(emaSeries.optionCalls.some((o) => (o as { visible?: boolean }).visible === false)).toBe(true);
+  });
+});
+
+describe("ChartController chart settings", () => {
+  const bars = [bar("2026-07-08T13:30:00Z", 10)];
+  const mk = (facade: ReturnType<typeof fakeFacade>) =>
+    new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+
+  it("setShowSessions(false) clears session bands on the next sync", () => {
+    const facade = fakeFacade(); const c = mk(facade); c.mount();
+    c.setShowSessions(false); c.sync();
+    expect(facade.lastBands).toEqual([]);
+  });
+
+  it("setVolumeVisible(false) hides the volume series", () => {
+    const facade = fakeFacade(); const c = mk(facade); c.mount();
+    c.setVolumeVisible(false);
+    const vol = facade.created.find((x) => x.kind === "histogram")!.series;
+    expect(vol.optionCalls.some((o) => (o as { visible?: boolean }).visible === false)).toBe(true);
+  });
+
+  it("setGrid(false) applies invisible grid options", () => {
+    const facade = fakeFacade(); const c = mk(facade); c.mount();
+    c.setGrid(false);
+    expect(JSON.stringify(facade.lastOptions)).toContain('"visible":false');
+  });
+
+  it("setWatermark toggles the facade watermark to the bare symbol / null", () => {
+    const facade = fakeFacade(); const c = mk(facade); c.mount();
+    c.setWatermark(true);
+    expect(facade.watermark).toBe("AAPL");
+    c.setWatermark(false);
+    expect(facade.watermark).toBeNull();
   });
 });

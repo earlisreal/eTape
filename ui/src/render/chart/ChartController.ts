@@ -37,6 +37,10 @@ export class ChartController {
   private indicatorLastKey = new Map<string, string>(); // per-series fingerprint of the last applied point, `${timeMs}|${value}`
   private backfilled = false;
   private chartType: ChartType = "candle";
+  private showSessions = true;
+  private gridVisible = true;
+  private volumeVisible = true;
+  private watermarkOn = false;
   private readonly indicators = new Map<string, { inst: IndicatorInstance; series: Map<string, LwcSeries> }>();
 
   constructor(
@@ -180,7 +184,7 @@ export class ChartController {
   // every edge a real bar time on every timeframe.
   private applySessions(bars: Bar[]): void {
     const intraday = !["D", "W", "M"].includes(this.config.timeframe);
-    if (!intraday || bars.length === 0) { this.facade.setSessionBands([]); return; }
+    if (!intraday || bars.length === 0 || !this.showSessions) { this.facade.setSessionBands([]); return; }
     this.facade.setSessionBands(bandsFromBars(bars));
   }
 
@@ -281,15 +285,17 @@ export class ChartController {
     this.facade.setSessionBands([]);
     // Re-subscribe every live indicator for the new (symbol, timeframe).
     for (const { inst } of this.indicators.values()) this.subscribeIndicator(inst);
+    if (this.watermarkOn) this.facade.setWatermark(bareSymbol(this.config.symbol));
   }
 
   setPalette(p: Palette): void {
     this.palette = p;
     this.facade.applyOptions(chartOptions(p));
     this.candle.applyOptions(mainSeriesOptions(this.chartType, p));
-    this.volume.applyOptions(volumeOptions(p));
+    this.volume.applyOptions({ ...volumeOptions(p), visible: this.volumeVisible });
     for (const { inst, series } of this.indicators.values())
       for (const d of describeIndicator(inst, p)) series.get(d.key)?.applyOptions({ color: d.color });
+    this.applyGrid();
   }
 
   // Main-series data point matched to the active chart type: OHLC for candle/bar,
@@ -312,6 +318,15 @@ export class ChartController {
   }
 
   setFills(markers: FillMarker[]): void { this.facade.setFillMarkers(markers); }
+  setShowSessions(on: boolean): void { this.showSessions = on; }
+  setGrid(on: boolean): void { this.gridVisible = on; this.applyGrid(); }
+  setVolumeVisible(on: boolean): void { this.volumeVisible = on; this.volume.applyOptions({ visible: on }); }
+  setWatermark(on: boolean): void { this.watermarkOn = on; this.facade.setWatermark(on ? bareSymbol(this.config.symbol) : null); }
+
+  private applyGrid(): void {
+    this.facade.applyOptions({ grid: { vertLines: { visible: this.gridVisible }, horzLines: { visible: this.gridVisible } } });
+  }
+
   resize(w: number, h: number): void { this.facade.resize(w, h); }
   jumpToLive(): void { this.facade.scrollToRealTime(); }
   resetZoom(): void { this.facade.resetTimeScale(); }
@@ -322,6 +337,7 @@ export class ChartController {
 }
 
 function keyOf(b: Bar): string { return `${b.bucketStart}|${b.c}|${b.h}|${b.l}|${b.v}|${b.inProgress}`; }
+function bareSymbol(s: string): string { return s.replace(/^US\./, ""); }
 // Whether bars[from..] is non-decreasing by bucketStart — the property update()'s
 // bar-by-bar replay depends on to never hand Lightweight Charts a time that goes
 // backwards relative to what it was already given.

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { createChart, CandlestickSeries, BarSeries, HistogramSeries, LineSeries, AreaSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type Coordinate } from "lightweight-charts";
+import { createChart, createTextWatermark, CandlestickSeries, BarSeries, HistogramSeries, LineSeries, AreaSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type Coordinate } from "lightweight-charts";
 import type { PanelProps } from "./registry";
 import { ChartController } from "../../render/chart/ChartController";
 import { clampRightScroll } from "../../render/chart/chartTheme";
@@ -22,6 +22,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
 } {
   let main: ISeriesApi<"Candlestick" | "Bar" | "Line" | "Area"> | null = null;
   let sessionAttached = false;
+  let watermark: { detach: () => void } | null = null;
   const session = new SessionShadingPrimitive(palette);
   const diamonds = new DiamondFillPrimitive(palette);
   const drawings = new DrawingsPrimitive(palette);
@@ -64,6 +65,14 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     resetTimeScale: () => chart.timeScale().resetTimeScale(),
     resize: (w, h) => chart.resize(w, h),
     applyOptions: (o) => chart.applyOptions(o as object),
+    setWatermark: (text) => {
+      if (watermark) { watermark.detach(); watermark = null; }
+      if (text) {
+        const pane = chart.panes()[0];
+        if (pane) watermark = createTextWatermark(pane, { horzAlign: "center", vertAlign: "center",
+          lines: [{ text, color: "rgba(120,123,134,.18)", fontSize: 48, fontStyle: "bold" }] });
+      }
+    },
     takeScreenshot: () => chart.takeScreenshot(),
     subscribeCrosshairMove: (cb) => {
       const handler = (param: { logical?: number }) => cb(typeof param.logical === "number" ? param.logical : null);

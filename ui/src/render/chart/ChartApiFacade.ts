@@ -37,6 +37,7 @@ export interface ChartApiFacade {
   resetTimeScale(): void; // default bar spacing + scroll to the latest bar
   resize(width: number, height: number): void;
   applyOptions(options: unknown): void;
+  setWatermark(text: string | null): void; // symbol watermark on the main pane (null clears)
   // TV chrome additions:
   takeScreenshot(): HTMLCanvasElement;               // PNG export (camera button)
   subscribeCrosshairMove(cb: (logical: number | null) => void): () => void; // legend value tracking

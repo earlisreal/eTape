@@ -23,6 +23,7 @@ const chartApi = {
 };
 vi.mock("lightweight-charts", () => ({
   createChart: vi.fn(() => chartApi),
+  createTextWatermark: vi.fn(() => ({ detach: vi.fn(), applyOptions: vi.fn() })),
   CandlestickSeries: "Candlestick", HistogramSeries: "Histogram", LineSeries: "Line",
   BarSeries: "Bar", AreaSeries: "Area", CrosshairMode: { Magnet: 1 },
 }));
