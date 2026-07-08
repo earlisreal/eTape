@@ -354,16 +354,24 @@ func (m *subManager) qotSub(ctx context.Context, symbols []string, subs []feed.S
 	for _, s := range subs {
 		subTypes = append(subTypes, pbSubType(s))
 	}
-	// RegPushRehabTypeList is deliberately unset — the official Python SDK
-	// never sets it either (quote_query.py pack_sub_or_unsub_req, verified
-	// 2026-07-05) and K_1M pushes flow fine (2026-07-03 benchmark).
+	// RegPushRehabTypeList: only effective for registered K-line-type pushes
+	// (K_1M here); every other subscription type ignores it. Left unset, moomoo
+	// defaults registered K-line push to forward-adjusted, which diverges from
+	// the raw tick/quote scale on a reverse-split symbol (see historyBars' rehab
+	// comment) — set it explicitly to unadjusted so live K_1M pushes match the
+	// rest of the intraday pipeline. Deviates from the official Python SDK,
+	// which never sets this field (quote_query.py pack_sub_or_unsub_req,
+	// verified 2026-07-05) and so silently rides the forward-adjusted default;
+	// K_1M pushes were confirmed still flowing with this field set (2026-07-03
+	// benchmark covered the unset case only — re-verify against live OpenD).
 	req := &qotsub.Request{C2S: &qotsub.C2S{
-		SecurityList:     secs,
-		SubTypeList:      subTypes,
-		IsSubOrUnSub:     proto.Bool(subscribe),
-		IsRegOrUnRegPush: proto.Bool(subscribe),
-		IsFirstPush:      proto.Bool(subscribe),
-		ExtendedTime:     proto.Bool(m.opt.ExtendedTime),
+		SecurityList:         secs,
+		SubTypeList:          subTypes,
+		IsSubOrUnSub:         proto.Bool(subscribe),
+		IsRegOrUnRegPush:     proto.Bool(subscribe),
+		IsFirstPush:          proto.Bool(subscribe),
+		ExtendedTime:         proto.Bool(m.opt.ExtendedTime),
+		RegPushRehabTypeList: []int32{int32(qotcommon.RehabType_RehabType_None)},
 	}}
 	f, err := m.rpc.Request(ctx, ProtoQotSub, req)
 	if err != nil {

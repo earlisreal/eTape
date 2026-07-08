@@ -55,11 +55,13 @@ func New(base, keyID, secret, feedName string, clk clock.Clock) *Client {
 }
 
 func (c *Client) DailyBars(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error) {
-	return c.bars(ctx, symbol, "1Day", from, to)
+	return c.bars(ctx, symbol, "1Day", "all", from, to)
 }
 
+// Intraday1m requests "raw" (unadjusted) bars — see the adjustment comment on
+// bars() for why intraday and daily diverge here.
 func (c *Client) Intraday1m(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error) {
-	return c.bars(ctx, symbol, "1Min", from, to)
+	return c.bars(ctx, symbol, "1Min", "raw", from, to)
 }
 
 type barJSON struct {
@@ -79,7 +81,15 @@ type barsResp struct {
 // bars pages through /v2/stocks/{sym}/bars, mapping each UTC bar-start to an
 // epoch-ms bucket start. The symbol keeps its US. prefix on the returned bars
 // (the rest of eTape keys by that string) but is stripped for the URL path.
-func (c *Client) bars(ctx context.Context, symbol, timeframe string, from, to time.Time) ([]feed.Bar, error) {
+//
+// adjustment: DailyBars passes "all" (split + dividend, closest to moomoo
+// forward-rehab) — daily stays adjusted for continuous official prices.
+// Intraday1m passes "raw" (unadjusted) so 1m/cascaded 5m/15m/etc. history
+// matches the raw scale of the live tick/quote feed; forward adjustment on
+// intraday would scale pre-split bars up by the split ratio, corrupting
+// anything computed over a window straddling a reverse split (moomoo mirrors
+// this split — see opend/backfill.go's historyBars).
+func (c *Client) bars(ctx context.Context, symbol, timeframe, adjustment string, from, to time.Time) ([]feed.Bar, error) {
 	sym := strings.TrimPrefix(symbol, "US.")
 	var out []feed.Bar
 	pageToken := ""
@@ -88,7 +98,7 @@ func (c *Client) bars(ctx context.Context, symbol, timeframe string, from, to ti
 		q.Set("timeframe", timeframe)
 		q.Set("start", from.UTC().Format(time.RFC3339))
 		q.Set("end", to.UTC().Format(time.RFC3339))
-		q.Set("adjustment", "all") // split + dividend, closest to moomoo forward-rehab
+		q.Set("adjustment", adjustment)
 		q.Set("feed", c.feed)
 		q.Set("limit", "10000")
 		if pageToken != "" {

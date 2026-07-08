@@ -16,8 +16,16 @@ import (
 )
 
 // HistFetcher pulls history from one source. Bars are ascending, bucket-START
-// keyed, and price-adjusted (moomoo forward-rehab / Alpaca adjustment=all). A
-// source that has no data for the range returns (nil, nil).
+// keyed. DailyBars is price-adjusted (moomoo forward-rehab / Alpaca
+// adjustment=all) for continuous official prices across splits/dividends.
+// Intraday1m (1m, and everything cascaded from it: 5m/15m/30m/60m) is
+// unadjusted (moomoo RehabType_None / Alpaca adjustment=raw) so it matches
+// the raw scale of the live tick/quote feed — forward-adjusting intraday
+// history scales pre-split bars up by the cumulative split ratio, which for a
+// heavily reverse-split symbol diverges from the live price by orders of
+// magnitude and corrupts anything computed over that window (e.g. an EMA
+// straddling the split). A source that has no data for the range returns
+// (nil, nil).
 type HistFetcher interface {
 	DailyBars(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error)
 	Intraday1m(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error)

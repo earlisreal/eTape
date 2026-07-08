@@ -29,7 +29,9 @@ func TestIntraday1mParsesStripsPrefixAndMapsTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotPath != "/v2/stocks/AAPL/bars" || gotTF != "1Min" || gotAdj != "all" || gotFeed != "iex" {
+	// Intraday requests unadjusted bars so they match the raw scale of the live
+	// tick/quote feed — daily alone stays "all"-adjusted (see bars()'s comment).
+	if gotPath != "/v2/stocks/AAPL/bars" || gotTF != "1Min" || gotAdj != "raw" || gotFeed != "iex" {
 		t.Fatalf("request = path %q tf %q adj %q feed %q", gotPath, gotTF, gotAdj, gotFeed)
 	}
 	if len(bars) != 1 {
@@ -43,8 +45,10 @@ func TestIntraday1mParsesStripsPrefixAndMapsTime(t *testing.T) {
 }
 
 func TestBarsPaginateViaNextPageToken(t *testing.T) {
+	var gotAdj string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v2/stocks/AAPL/bars", func(w http.ResponseWriter, r *http.Request) {
+		gotAdj = r.URL.Query().Get("adjustment")
 		if r.URL.Query().Get("page_token") == "" {
 			_, _ = w.Write([]byte(`{"bars":[{"t":"2026-07-07T13:30:00Z","o":1,"h":1,"l":1,"c":1,"v":1}],"next_page_token":"PAGE2"}`))
 			return
@@ -58,6 +62,11 @@ func TestBarsPaginateViaNextPageToken(t *testing.T) {
 	bars, err := c.DailyBars(context.Background(), "US.AAPL", time.UnixMilli(0), time.UnixMilli(1<<40))
 	if err != nil {
 		t.Fatal(err)
+	}
+	// Daily stays adjustment=all (split + dividend) — only Intraday1m drops it,
+	// see TestIntraday1mParsesStripsPrefixAndMapsTime.
+	if gotAdj != "all" {
+		t.Fatalf("DailyBars adjustment = %q, want all", gotAdj)
 	}
 	if len(bars) != 2 || bars[0].C != 1 || bars[1].C != 2 {
 		t.Fatalf("paginated bars = %+v", bars)

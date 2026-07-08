@@ -58,7 +58,9 @@ func (b *backfill) cachedBars1m(ctx context.Context, symbol string, n int) ([]fe
 		return nil, err
 	}
 	req := &qotgetkl.Request{C2S: &qotgetkl.C2S{
-		RehabType: proto.Int32(int32(qotcommon.RehabType_RehabType_Forward)),
+		// Unadjusted: this path is 1m-only and must match the raw tick/quote scale
+		// the rest of the intraday pipeline uses (see historyBars below).
+		RehabType: proto.Int32(int32(qotcommon.RehabType_RehabType_None)),
 		KlType:    proto.Int32(int32(qotcommon.KLType_KLType_1Min)),
 		Security:  sec,
 		ReqNum:    proto.Int32(clampRows(n)),
@@ -179,15 +181,26 @@ func (b *backfill) quoteSnapshot(ctx context.Context, symbol string) (feed.Quote
 // in ET with seconds; ResDay uses bare dates. The quota *guard* lives in
 // Task 8 (OpenDFeed.HistoryBars), which needs the fetched-symbols memory;
 // this method always issues the call.
+//
+// Rehab type differs by resolution: daily stays forward-adjusted (official
+// auction prices, continuous across splits/dividends — CLAUDE.md). Intraday
+// (1m, and everything cascaded from it: 5m/15m/30m/60m) is unadjusted, to
+// match the raw scale of the live tick/quote feed and the 10s tick-derived
+// bars. Forward adjustment on intraday history scales pre-split bars up by
+// the cumulative split ratio, which for a heavily reverse-split symbol can
+// diverge from the live price by orders of magnitude and corrupt anything
+// computed over that window (e.g. EMA 200 straddling the split).
 func (b *backfill) historyBars(ctx context.Context, symbol string, res feed.Resolution, from, to time.Time) ([]feed.Bar, error) {
 	sec, err := parseSymbol(symbol)
 	if err != nil {
 		return nil, err
 	}
 	klType, timeFmt := int32(qotcommon.KLType_KLType_Day), "2006-01-02"
+	rehab := qotcommon.RehabType_RehabType_Forward
 	extended := false
 	if res == feed.Res1m {
 		klType, timeFmt = int32(qotcommon.KLType_KLType_1Min), "2006-01-02 15:04:05"
+		rehab = qotcommon.RehabType_RehabType_None
 		extended = true
 	}
 	var (
@@ -196,7 +209,7 @@ func (b *backfill) historyBars(ctx context.Context, symbol string, res feed.Reso
 	)
 	for page := 0; page < maxHistoryPages; page++ {
 		c2s := &qotrequesthistorykl.C2S{
-			RehabType:   proto.Int32(int32(qotcommon.RehabType_RehabType_Forward)),
+			RehabType:   proto.Int32(int32(rehab)),
 			KlType:      proto.Int32(klType),
 			Security:    sec,
 			BeginTime:   proto.String(from.In(session.Loc()).Format(timeFmt)),

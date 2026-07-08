@@ -91,6 +91,12 @@ export const VOLUME_SCALE_MARGINS = { top: 1 - VOLUME_BAND, bottom: 0 } as const
 // default (3px, drawn on top). See ChartController's indicator series creation.
 export const INDICATOR_LINE_WIDTH = 1;
 
+// Overlay studies (EMA/SMA/VWAP) must never expand the candle price scale — a
+// far-off value (e.g. an EMA over reverse-split-adjusted history) would otherwise
+// crush the candles. Returning a null price range excludes the series from the
+// shared right scale's autoscale; the candles keep driving it and the line clips.
+export const OVERLAY_NO_AUTOSCALE = () => ({ priceRange: null });
+
 // Max empty bars the user can pan past the latest bar before hitting a wall.
 // Equals rightOffset so the right edge can't be dragged past its resting margin —
 // the symmetric counterpart to fixLeftEdge + LEFT_PAD_BARS on the left. LWC has no

@@ -152,8 +152,11 @@ func TestHistoryBarsPaginates(t *testing.T) {
 	if !histReqs[0].GetExtendedTime() {
 		t.Fatal("Res1m history must set ExtendedTime")
 	}
-	if got := qotcommon.RehabType(histReqs[0].GetRehabType()); got != qotcommon.RehabType_RehabType_Forward {
-		t.Fatalf("RehabType = %v, want Forward", got)
+	// Intraday (1m) history is unadjusted so it matches the raw tick/quote scale —
+	// forward adjustment would scale pre-split bars up by the split ratio, corrupting
+	// anything computed over a window straddling a reverse split (e.g. EMA 200).
+	if got := qotcommon.RehabType(histReqs[0].GetRehabType()); got != qotcommon.RehabType_RehabType_None {
+		t.Fatalf("RehabType = %v, want None (unadjusted)", got)
 	}
 }
 
@@ -188,6 +191,11 @@ func TestHistoryBarsDayResolutionSkipsExtendedTime(t *testing.T) {
 	}
 	if _, err := time.Parse("2006-01-02", histReqs[0].GetBeginTime()); err != nil {
 		t.Fatalf("BeginTime %q not in bare-date format: %v", histReqs[0].GetBeginTime(), err)
+	}
+	// Daily stays forward-adjusted (official auction prices, continuous across
+	// splits/dividends) — only intraday drops rehab, see TestHistoryBarsPaginates.
+	if got := qotcommon.RehabType(histReqs[0].GetRehabType()); got != qotcommon.RehabType_RehabType_Forward {
+		t.Fatalf("RehabType = %v, want Forward", got)
 	}
 }
 

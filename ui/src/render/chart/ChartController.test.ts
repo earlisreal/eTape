@@ -153,6 +153,27 @@ describe("ChartController", () => {
     expect(candle.orderCalls.at(-1)).toBe(Number.MAX_SAFE_INTEGER);
   });
 
+  it("main-pane overlay lines (EMA/SMA/VWAP) opt out of the candle scale's autoscale", () => {
+    // A far-off indicator value (e.g. an EMA computed over reverse-split-adjusted
+    // history) must never expand the candle price scale and crush the candles.
+    const { facade, ctrl } = make(barReaderOf([]));
+    ctrl.addIndicator({ instanceId: "ema-1", type: "EMA", params: { period: 200 } });
+    const line = facade.created.find((c) => c.kind === "line");
+    const options = line?.options as { autoscaleInfoProvider?: () => { priceRange: unknown } };
+    expect(options.autoscaleInfoProvider).toBeTypeOf("function");
+    expect(options.autoscaleInfoProvider!()).toEqual({ priceRange: null });
+  });
+
+  it("MACD's sub-pane lines keep autoscaling their own pane (no priceRange override)", () => {
+    const { facade, ctrl } = make(barReaderOf([]));
+    ctrl.addIndicator({ instanceId: "macd-1", type: "MACD", params: { fast: 12, slow: 26, signal: 9 } });
+    const subpaneLines = facade.created.filter((c) => c.kind === "line" && c.pane === 1);
+    expect(subpaneLines.length).toBeGreaterThan(0);
+    for (const c of subpaneLines) {
+      expect((c.options as { autoscaleInfoProvider?: unknown }).autoscaleInfoProvider).toBeUndefined();
+    }
+  });
+
   it("removeIndicator re-lifts the candle above any remaining indicators", () => {
     const { facade, ctrl } = make(barReaderOf([]));
     ctrl.addIndicator({ instanceId: "vwap-1", type: "VWAP", params: {} });

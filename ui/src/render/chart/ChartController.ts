@@ -1,7 +1,7 @@
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import type { Palette } from "../palette";
 import type { Bar } from "../../wire/contract";
-import { chartOptions, candleOptions, volumeOptions, VOLUME_SCALE_MARGINS, INDICATOR_LINE_WIDTH } from "./chartTheme";
+import { chartOptions, candleOptions, volumeOptions, VOLUME_SCALE_MARGINS, INDICATOR_LINE_WIDTH, OVERLAY_NO_AUTOSCALE } from "./chartTheme";
 import { sessionAt } from "./sessions";
 import type { Band } from "./sessions";
 import { describeIndicator, withDefaultParams, type IndicatorInstance } from "./indicatorSeries";
@@ -196,6 +196,10 @@ export class ChartController {
           // last-value price line (TradingView doesn't draw one for overlay indicators).
           priceLineVisible: false,
           ...(d.kind === "line" ? { lineWidth: INDICATOR_LINE_WIDTH } : {}),
+          // Main-pane overlay lines (EMA/SMA/VWAP) share the candle price scale but
+          // must never expand its autoscale range — see OVERLAY_NO_AUTOSCALE. MACD's
+          // sub-pane lines (paneIndex 1) are excluded: they must autoscale their own pane.
+          ...(d.kind === "line" && d.paneIndex === 0 ? { autoscaleInfoProvider: OVERLAY_NO_AUTOSCALE } : {}),
         }, d.paneIndex));
     }
     this.indicators.set(resolved.instanceId, { inst: resolved, series });
