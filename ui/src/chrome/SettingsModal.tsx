@@ -1,17 +1,16 @@
 import { AppearanceSection } from "./AppearanceSection";
-import { OrderSettingsSection } from "./exec/OrderSettingsModal";
+import { OrderSettingsSection } from "./exec/OrderSettingsSection";
 import { SoundsSection } from "../sound/SoundsSection";
 import { useOrderConfig } from "./exec/useOrderConfig";
 import { useTheme } from "./ThemeProvider";
-import type { ExecStatus } from "../wire/contract";
 
 export type SettingsSection = "appearance" | "orders" | "sounds";
 const NAV: { id: SettingsSection; label: string }[] = [
   { id: "appearance", label: "Appearance" }, { id: "orders", label: "Orders & hotkeys" }, { id: "sounds", label: "Sounds" },
 ];
 
-export function SettingsModal({ open, section, onSection, onClose, status }:
-  { open: boolean; section: SettingsSection; onSection: (s: SettingsSection) => void; onClose: () => void; status?: ExecStatus | null }): JSX.Element | null {
+export function SettingsModal({ open, section, onSection, onClose }:
+  { open: boolean; section: SettingsSection; onSection: (s: SettingsSection) => void; onClose: () => void }): JSX.Element | null {
   const { palette } = useTheme();
   const oc = useOrderConfig();
   if (!open) return null;
@@ -29,7 +28,7 @@ export function SettingsModal({ open, section, onSection, onClose, status }:
         </nav>
         <section style={{ padding: 16 }}>
           {section === "appearance" && <AppearanceSection />}
-          {section === "orders" && <OrderSettingsSection config={oc.config} status={status ?? null} onSave={oc.save} />}
+          {section === "orders" && <OrderSettingsSection config={oc.config} onSave={oc.save} />}
           {section === "sounds" && <SoundsSection />}
         </section>
       </div>
