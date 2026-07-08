@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { DrawingsPrimitive } from "./primitive";
 import { LIGHT } from "../../palette";
 import type { Drawing } from "./model";
+import { DEFAULT_DRAWING_WIDTH, DEFAULT_LINE_STYLE } from "./model";
+import { LINE_DASH } from "../lineStyle";
 
 // Records the 2D-context ops the renderer issues, without a real canvas.
 function recordingCtx() {
@@ -164,5 +166,31 @@ describe("DrawingsPrimitive per-drawing style + hide-all", () => {
     const { ctx, strokes } = styleCtx();
     draw(p, ctx);
     expect(strokes).toHaveLength(0);
+  });
+
+  it("setHideAll(true) still renders the active placement ghost", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    p.setDrawings([hline]);
+    p.setHideAll(true);
+    p.setTransient({ ghost: { kind: "trendline", anchors: [{ timeMs: 0, price: 20 }, { timeMs: 60_000, price: 10 }] } });
+    const { ctx, strokes } = styleCtx();
+    draw(p, ctx);
+    // Only the ghost's stroke should fire: the committed hline stays hidden behind hideAll,
+    // while the in-progress placement preview renders unconditionally.
+    expect(strokes).toHaveLength(1);
+    expect(strokes[0].color).toBe(LIGHT.accent);
+    expect(strokes[0].dash).toEqual([4, 3]);
+  });
+
+  it("applies a partial style override (color only) and falls back to defaults for width/lineStyle", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    p.setDrawings([{ ...hline, color: "#2962FF" }]);
+    const { ctx, strokes } = styleCtx();
+    draw(p, ctx);
+    expect(strokes[0].color).toBe("#2962FF");
+    expect(strokes[0].width).toBe(DEFAULT_DRAWING_WIDTH);
+    expect(strokes[0].dash).toEqual(LINE_DASH[DEFAULT_LINE_STYLE]);
   });
 });
