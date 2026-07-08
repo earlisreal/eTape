@@ -1,10 +1,11 @@
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import type { Palette } from "../palette";
 import type { Bar } from "../../wire/contract";
-import { chartOptions, candleOptions, volumeOptions, mainSeriesOptions, VOLUME_SCALE_MARGINS, INDICATOR_LINE_WIDTH, OVERLAY_NO_AUTOSCALE, type ChartType } from "./chartTheme";
+import { chartOptions, candleOptions, volumeOptions, mainSeriesOptions, VOLUME_SCALE_MARGINS, OVERLAY_NO_AUTOSCALE, type ChartType } from "./chartTheme";
 import { sessionAt } from "./sessions";
 import type { Band } from "./sessions";
 import { describeIndicator, withDefaultParams, type IndicatorInstance } from "./indicatorSeries";
+import { LWC_LINE_STYLE } from "./lineStyle";
 import type { FillMarker } from "./diamondMarker";
 import { timeframeToMs } from "./drawings/geometry";
 import type { Timeframe } from "./barBucket";
@@ -196,7 +197,8 @@ export class ChartController {
           // Studies read as reference lines, not standalone series — no chart-spanning
           // last-value price line (TradingView doesn't draw one for overlay indicators).
           priceLineVisible: false,
-          ...(d.kind === "line" ? { lineWidth: INDICATOR_LINE_WIDTH } : {}),
+          visible: !(resolved.hidden ?? false),
+          ...(d.kind === "line" ? { lineWidth: d.width, lineStyle: LWC_LINE_STYLE[d.lineStyle] } : {}),
           // Main-pane overlay lines (EMA/SMA/VWAP) share the candle price scale but
           // must never expand its autoscale range — see OVERLAY_NO_AUTOSCALE. MACD's
           // sub-pane lines (paneIndex 1) are excluded: they must autoscale their own pane.
@@ -239,8 +241,8 @@ export class ChartController {
   }
 
   // Apply an edited instance. A param change re-subscribes (the engine recomputes
-  // the series); a color-only change just re-applies each slot's color in place —
-  // no re-subscribe, so the line doesn't blink.
+  // the series); a style-only change (color/width/lineStyle/hidden) just re-applies
+  // each slot's options in place — no re-subscribe, so the line doesn't blink.
   updateIndicator(inst: IndicatorInstance): void {
     const existing = this.indicators.get(inst.instanceId);
     if (!existing) { this.addIndicator(inst); return; }
@@ -250,8 +252,15 @@ export class ChartController {
       this.addIndicator(next);
       return;
     }
-    existing.inst = next; // colors only
-    for (const d of describeIndicator(next, this.palette)) existing.series.get(d.key)?.applyOptions({ color: d.color });
+    existing.inst = next; // params unchanged → style/visibility only, applied in place (no re-subscribe)
+    const hidden = next.hidden ?? false;
+    for (const d of describeIndicator(next, this.palette)) {
+      existing.series.get(d.key)?.applyOptions({
+        color: d.color,
+        visible: !hidden,
+        ...(d.kind === "line" ? { lineWidth: d.width, lineStyle: LWC_LINE_STYLE[d.lineStyle] } : {}),
+      });
+    }
   }
 
   setSymbol(symbol: string): void { this.config = { ...this.config, symbol }; this.resetForReload(); }

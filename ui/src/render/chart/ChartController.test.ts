@@ -6,16 +6,17 @@ import type { Bar } from "../../wire/contract";
 import { withDefaultParams } from "./indicatorSeries";
 import type { Band } from "./sessions";
 
-function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[]; setDataCalls: unknown[][]; orderCalls: number[] } {
+function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[]; setDataCalls: unknown[][]; orderCalls: number[]; optionCalls: unknown[] } {
   const calls: string[] = [];
   const updates: unknown[] = [];
   const setDataCalls: unknown[][] = [];
   const orderCalls: number[] = [];
+  const optionCalls: unknown[] = [];
   return {
-    calls, updates, setDataCalls, orderCalls,
+    calls, updates, setDataCalls, orderCalls, optionCalls,
     setData: (data) => { calls.push("setData"); setDataCalls.push(data as unknown[]); },
     update: (bar) => { calls.push("update"); updates.push(bar); },
-    applyOptions: () => calls.push("applyOptions"),
+    applyOptions: (o) => { calls.push("applyOptions"); optionCalls.push(o); },
     setSeriesOrder: (order) => { calls.push("setSeriesOrder"); orderCalls.push(order); },
   };
 }
@@ -522,5 +523,32 @@ describe("ChartController.setChartType", () => {
     const before = facade.created.length;
     c.setChartType("candle");
     expect(facade.created.length).toBe(before);
+  });
+});
+
+describe("ChartController indicator hidden + style", () => {
+  it("creates a hidden indicator series with visible:false", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.addIndicator({ instanceId: "e1", type: "EMA", params: { period: 9 }, hidden: true });
+    const emaSeries = facade.created.find((x) => (x.options as { color?: string }).color === LIGHT.indEma);
+    expect((emaSeries!.options as { visible?: boolean }).visible).toBe(false);
+  });
+
+  it("toggling hidden applies visible in place without re-subscribing", () => {
+    const facade = fakeFacade();
+    const cmd = commandSpy();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: cmd });
+    c.mount();
+    c.addIndicator({ instanceId: "e1", type: "EMA", params: { period: 9 } });
+    const subsBefore = cmd.names.filter((n) => n === "SubscribeIndicator").length;
+    c.updateIndicator({ instanceId: "e1", type: "EMA", params: { period: 9 }, hidden: true });
+    const subsAfter = cmd.names.filter((n) => n === "SubscribeIndicator").length;
+    expect(subsAfter).toBe(subsBefore); // no re-subscribe on a hidden toggle
+    const emaSeries = facade.created.find((x) => (x.options as { color?: string }).color === LIGHT.indEma)!.series;
+    expect(emaSeries.optionCalls.some((o) => (o as { visible?: boolean }).visible === false)).toBe(true);
   });
 });
