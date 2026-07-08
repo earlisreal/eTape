@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, cleanup, fireEvent, within, screen } from "@testing-library/react";
+import { render, cleanup, fireEvent, within, screen, act } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 
 // Mock lightweight-charts so the panel test never touches a real canvas.
@@ -158,6 +158,44 @@ describe("ChartPanel", () => {
     fireEvent.contextMenu(getByTestId("chart-host"), { clientX: 20, clientY: 30 });
     fireEvent.click(getByRole("button", { name: "Remove all drawings" }));
     expect(stores.drawings.forSymbol("US.AAPL")).toHaveLength(0);
+  });
+
+  it("floating toolbar's own controls reflect a style edit made through the toolbar itself (Finding 1 regression)", () => {
+    const stores = makeStores();
+    // hline with a single anchor at (timeMs:0, price:1) — with every coordinate
+    // mock in this file returning 0, its projected point is always (0,0), so a
+    // right-click at (0,0) hit-tests it, mirroring the existing right-click
+    // selection tests above (they use (20,30), which deliberately misses).
+    stores.drawings.upsert({ id: "d1", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 0, price: 1 }],
+      color: "#089981", width: 1, lineStyle: "solid", createdMs: 1, updatedMs: 1 });
+    const { getByTestId, getByRole } = renderChart("c1", stores);
+
+    fireEvent.contextMenu(getByTestId("chart-host"), { clientX: 0, clientY: 0 });
+    const widthBtn = (w: number) => getByRole("button", { name: `width ${w}` }) as HTMLButtonElement;
+
+    // Floating toolbar renders, showing the drawing's initial width as active.
+    expect(widthBtn(1).style.fontWeight).toBe("700");
+    expect(widthBtn(3).style.fontWeight).toBe("500");
+
+    // Edit width via the toolbar's own control — this patches the store but (like
+    // production, where the fix is a same-render memoization guard rather than an
+    // immediate call) does not by itself update React state; it takes the next
+    // reconciliation pass to pick up the change.
+    fireEvent.click(widthBtn(3));
+
+    // Simulate the next unrelated repaint reaching refreshSelection — reuses the
+    // same clampRight hook the "caps rightward panning" test above captures
+    // (ChartPanel calls refreshSelRef.current?.() from it unconditionally). Before
+    // the fix, refreshSelection's equality guard only compared id/rect — since
+    // editing width doesn't move the drawing's anchors, rect is unchanged, so it
+    // returned the stale `prev` object and this assertion would still see width 1.
+    // Wrapped in act() (unlike fireEvent, a direct function call doesn't get one
+    // automatically) so the resulting setSelection is flushed before we assert.
+    const clampRight = timeScaleApi.subscribeVisibleLogicalRangeChange.mock.calls[0][0] as () => void;
+    act(() => { clampRight(); });
+
+    expect(widthBtn(3).style.fontWeight).toBe("700");
+    expect(widthBtn(1).style.fontWeight).toBe("500");
   });
 
   it("the context menu closes after an action and on Escape", () => {

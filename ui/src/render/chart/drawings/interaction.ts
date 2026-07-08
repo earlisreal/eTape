@@ -49,6 +49,7 @@ export class DrawingInteraction {
   private selectionId: string | null = null;
   private readonly newId: () => string;
   private readonly onToolChange: ((t: Tool) => void) | undefined;
+  private readonly onSelectionChange: (() => void) | undefined;
   private readonly listeners: [string, (e: any) => void][] = [];
 
   constructor(
@@ -57,10 +58,11 @@ export class DrawingInteraction {
     private readonly primitive: DrawingsPrimitiveHandle,
     private readonly store: DrawingStore,
     private readonly ctx: DrawingContext,
-    opts?: { newId?: () => string; onToolChange?: (t: Tool) => void },
+    opts?: { newId?: () => string; onToolChange?: (t: Tool) => void; onSelectionChange?: () => void },
   ) {
     this.newId = opts?.newId ?? (() => crypto.randomUUID());
     this.onToolChange = opts?.onToolChange;
+    this.onSelectionChange = opts?.onSelectionChange;
     host.tabIndex = host.tabIndex >= 0 ? host.tabIndex : 0;
     host.style.outline = "none";
     const on = (t: string, cb: (e: any) => void) => { host.addEventListener(t, cb); this.listeners.push([t, cb]); };
@@ -73,15 +75,14 @@ export class DrawingInteraction {
   setTool(tool: Tool): void {
     this.cancelGesture();
     this.tool = tool;
-    if (tool !== "select") { this.selectionId = null; this.primitive.setSelection(null); }
+    if (tool !== "select") { this.setSelectionId(null); }
     this.applyPanZoomLock();
     this.primitive.requestUpdate();
   }
 
   onSymbolChanged(): void {
     this.cancelGesture();
-    this.selectionId = null;
-    this.primitive.setSelection(null);
+    this.setSelectionId(null);
     // A symbol switch always reverts to select mode and hands pan/zoom back — a tool
     // armed for the old chart shouldn't silently start placing on the new one.
     this.tool = "select";
@@ -97,8 +98,7 @@ export class DrawingInteraction {
   deleteSelection(): void {
     if (!this.selectionId) return;
     this.store.remove(this.selectionId);
-    this.selectionId = null;
-    this.primitive.setSelection(null);
+    this.setSelectionId(null);
     this.primitive.requestUpdate();
   }
 
@@ -114,8 +114,7 @@ export class DrawingInteraction {
   }
 
   select(id: string | null): void {
-    this.selectionId = id;
-    this.primitive.setSelection(id);
+    this.setSelectionId(id);
     this.primitive.requestUpdate();
   }
 
@@ -142,6 +141,16 @@ export class DrawingInteraction {
     for (const [t, cb] of this.listeners) this.host.removeEventListener(t, cb);
     this.listeners.length = 0;
     this.facade.setPanZoomEnabled(true);
+  }
+
+  // Every mutation of selectionId (explicit select() and every internal deselect
+  // path — blank-canvas click, Escape, delete, tool arm, symbol switch) funnels
+  // through here so React can be notified synchronously instead of waiting for
+  // the next poll (paint loop / visible-range clamp / context-menu handler).
+  private setSelectionId(id: string | null): void {
+    this.selectionId = id;
+    this.primitive.setSelection(id);
+    this.onSelectionChange?.();
   }
 
   // --- pan/zoom lock: armed tools lock the whole time; select/measure only during a drag ---
@@ -223,8 +232,7 @@ export class DrawingInteraction {
       const pts = d.anchors.map((a) => this.project(a));
       const hit = hitTest(d.kind, pts, p, this.host.clientWidth);
       if (!hit) continue;
-      this.selectionId = d.id;
-      this.primitive.setSelection(d.id);
+      this.setSelectionId(d.id);
       this.facade.setPanZoomEnabled(false);
       if (hit.type === "handle") {
         this.gesture = { kind: "handleDrag", id: d.id, index: hit.index };
@@ -237,8 +245,7 @@ export class DrawingInteraction {
       return;
     }
     // empty space → deselect (pan/zoom stays enabled so LWC pans)
-    this.selectionId = null;
-    this.primitive.setSelection(null);
+    this.setSelectionId(null);
     this.primitive.requestUpdate();
   }
 
@@ -330,16 +337,14 @@ export class DrawingInteraction {
         this.cancelGesture(); // clears a lingering measure box or in-progress drag
         this.applyPanZoomLock();
       }
-      this.selectionId = null;
-      this.primitive.setSelection(null);
+      this.setSelectionId(null);
       this.primitive.requestUpdate();
       return;
     }
     if ((e.key === "Delete" || e.key === "Backspace") && this.selectionId) {
       e.preventDefault?.();
       this.store.remove(this.selectionId);
-      this.selectionId = null;
-      this.primitive.setSelection(null);
+      this.setSelectionId(null);
       this.primitive.requestUpdate();
     }
   }

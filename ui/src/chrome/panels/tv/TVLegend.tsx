@@ -1,6 +1,6 @@
 // ui/src/chrome/panels/tv/TVLegend.tsx
 import { useEffect, useRef, useState } from "react";
-import { TV_FONT, type TvChrome } from "../../../render/chart/tvTheme";
+import { TV_FONT, TV_GEOM, type TvChrome } from "../../../render/chart/tvTheme";
 import { INDICATOR_CATALOG, type IndicatorInstance } from "../../../render/chart/indicatorSeries";
 import type { LegendView } from "./legendView";
 import { IconEye, IconEyeOff, IconGear, IconClose } from "./tvIcons";
@@ -100,7 +100,7 @@ export function TVLegend({ chrome, symbol, timeframe, instances, paneOffsets, on
   );
 
   function legendBox(top: number): React.CSSProperties {
-    return { position: "absolute", top: top + 6, left: 8, zIndex: 5, pointerEvents: "none", font: `12px ${TV_FONT}`,
+    return { position: "absolute", top: top + 6, left: 8, zIndex: 5, pointerEvents: "none", font: `${TV_GEOM.uiFont}px ${TV_FONT}`,
       color: chrome.text, display: "flex", flexDirection: "column", gap: 2 };
   }
 }

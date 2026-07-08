@@ -215,7 +215,16 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         timeframeMs: () => timeframeToMs(tfRef.current as Timeframe),
         magnet: () => magnetRef.current,
       },
-      { onToolChange: (t) => setActiveTool(t) },
+      {
+        onToolChange: (t) => setActiveTool(t),
+        // Ref-indirected (not `refreshSelection` captured directly): this callback
+        // is bound once, in the [config.id]-only mount effect, while refreshSelection
+        // is redefined every render (it closes over chartSymbol/palette). Reading
+        // through refreshSelRef — the same indirection the paint loop and clampRight
+        // already use — always calls the current render's version instead of the
+        // stale one captured at mount time.
+        onSelectionChange: () => refreshSelRef.current?.(),
+      },
     );
     interactionRef.current = interaction;
 
@@ -394,9 +403,18 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const rect = di!.selectedRect();
     const d = stores.drawings.forSymbol(chartSymbol).find((x) => x.id === id);
     if (!rect || !d) { setSelection((prev) => (prev ? null : prev)); return; }
+    const color = d.color ?? palette.text;
+    const width = d.width ?? 1;
+    const lineStyle = (d.lineStyle ?? "solid") as LineStyleName;
+    // Compare style fields too, not just id/rect — moving a drawing's anchors isn't
+    // the only way it changes: editing color/width/lineStyle via the floating
+    // toolbar leaves rect untouched, and returning the stale `prev` object here
+    // (a plain `setSelection(prev)` no-op) left the toolbar's own controls frozen
+    // on the pre-edit values even though the canvas repainted correctly.
     setSelection((prev) => (prev && prev.id === id && prev.rect.x === rect.x && prev.rect.y === rect.y && prev.rect.w === rect.w && prev.rect.h === rect.h
+      && prev.color === color && prev.width === width && prev.lineStyle === lineStyle
       ? prev
-      : { id, rect, color: d.color ?? palette.text, width: d.width ?? 1, lineStyle: (d.lineStyle ?? "solid") as LineStyleName }));
+      : { id, rect, color, width, lineStyle }));
   };
   useEffect(() => { refreshSelRef.current = refreshSelection; });
 

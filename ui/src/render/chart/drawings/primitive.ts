@@ -88,7 +88,10 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
           const color = selected ? this.palette.accent : (d.color ?? this.palette.text);
           const lineWidth = selected ? Math.max(2, d.width ?? DEFAULT_DRAWING_WIDTH) : (d.width ?? DEFAULT_DRAWING_WIDTH);
           this.strokeShape(ctx, d.kind, d.anchors, hr, vr, width, color, lineWidth);
-          if (selected) this.handles(ctx, d.anchors, hr, vr);
+          // Handles are always solid squares, regardless of the drawing's own line
+          // style — reset the dash pattern the shape stroke above may have set
+          // (dashed/dotted) before drawing them.
+          if (selected) { ctx.setLineDash([]); this.handles(ctx, d.anchors, hr, vr); }
         }
         ctx.setLineDash([]);
       }
