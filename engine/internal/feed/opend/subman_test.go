@@ -254,3 +254,12 @@ func TestQotSubNonZeroRetTypeLeavesStateUnchangedAndRetries(t *testing.T) {
 		t.Fatalf("Slots after retry = %d, want 2", got)
 	}
 }
+
+func TestEnsureEmptySubsUsesNoQuota(t *testing.T) {
+	m, _, _ := newTestManager(t, 100)
+	m.Ensure(feed.Demand{ID: "dyn/1/interest", Symbol: "US.AAPL"}) // no Subs
+	want, _ := m.desired(100)
+	if len(want) != 0 {
+		t.Fatalf("empty-subs demand consumed %d slot(s), want 0", len(want))
+	}
+}
