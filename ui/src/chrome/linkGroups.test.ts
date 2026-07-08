@@ -107,4 +107,35 @@ describe("LinkGroups", () => {
       expect(lg.symbolFor("green")).toBeUndefined();
     });
   });
+
+  describe("venue focus", () => {
+    it("focusVenue updates local state and posts to the bus without an engine echo", () => {
+      const onEcho = vi.fn();
+      const lg = new LinkGroups(new FakeBus(new FakeBusHub()), onEcho);
+      lg.focusVenue("green", "alpaca-paper");
+      expect(lg.venueFor("green")).toBe("alpaca-paper");
+      expect(onEcho).not.toHaveBeenCalled(); // venue is UI-only state — never validated server-side
+    });
+
+    it("venueFor returns undefined for the pinned (null) group", () => {
+      const lg = new LinkGroups(new FakeBus(new FakeBusHub()), () => {});
+      expect(lg.venueFor(null)).toBeUndefined();
+    });
+
+    it("propagates a venue-only message across windows without touching symbol", () => {
+      const hub = new FakeBusHub();
+      const a = new LinkGroups(new FakeBus(hub), () => {});
+      const b = new LinkGroups(new FakeBus(hub), () => {});
+      a.focus("green", "US.AAPL");
+      b.focusVenue("green", "tradezero");
+      expect(a.venueFor("green")).toBe("tradezero"); // venue crossed the bus
+      expect(a.symbolFor("green")).toBe("US.AAPL");   // symbol untouched by the venue message
+    });
+
+    it("hydrateVenues/snapshotVenues round-trip and skip falsy entries", () => {
+      const lg = new LinkGroups(new FakeBus(new FakeBusHub()), () => {});
+      lg.hydrateVenues({ green: "alpaca-paper", red: "" as never });
+      expect(lg.snapshotVenues()).toEqual({ green: "alpaca-paper" });
+    });
+  });
 });
