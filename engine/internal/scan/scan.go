@@ -1,6 +1,7 @@
 // Package scan is the pre-market/RTH rank scanner poller. It issues request/
-// response protoIDs (3410 rank, 3203 snapshot) through the OpenD client — no
-// subscription quota — and publishes scanner.rank/scanner.hit. Float is
+// response protoIDs (3410/3413/3411/3412 per-session rank, 3203 snapshot)
+// through the OpenD client — no subscription quota — and publishes
+// scanner.rank/scanner.hit. Float is
 // resolved on demand for the symbols on the rank board (3203) and cached for
 // the ET day; there is no low-float "universe" (3215 never echoes float).
 package scan
@@ -22,6 +23,9 @@ import (
 
 	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
 	snappb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsecuritysnapshot"
+	tmrpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgettopmoversrank"
+	ahpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusafterhoursrank"
+	onpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusovernightrank"
 	rankpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetuspremarketrank"
 )
 
@@ -95,19 +99,24 @@ func (p *Poller) pollInterval(now time.Time) time.Duration {
 	return time.Duration(p.cfg.PremarketMs) * time.Millisecond
 }
 
-func (p *Poller) sessionOf(now time.Time) string {
-	switch session.PhaseAt(now) {
+// sessionKey maps a session phase to the scanner.rank message key. Closed
+// (weekends/holidays) reuses the pre-market board.
+func sessionKey(phase session.Phase) string {
+	switch phase {
 	case session.RTH:
 		return "rth"
 	case session.PostMarket:
 		return "afterhours"
+	case session.Overnight:
+		return "overnight"
 	default:
 		return "premarket"
 	}
 }
 
 func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
-	items, err := p.fetchRank(ctx)
+	phase := session.PhaseAt(now)
+	items, err := p.fetchRank(ctx, phase)
 	if err != nil {
 		slog.Warn("scan: rank fetch failed", "err", err)
 		return // transient; next tick retries
@@ -115,7 +124,7 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 	p.resetIfNewDay(now)
 	p.resolveFloats(ctx, items) // populate the float cache before filtering
 	rows := rankRows(items, p.floats, p.cfg)
-	sess := p.sessionOf(now)
+	sess := sessionKey(phase)
 	p.pub.Publish(wsmsg.TopicScannerRank, sess, wsmsg.ScannerRankPayload{
 		RefreshedAt: p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
 		Rows:        rows,
@@ -192,17 +201,27 @@ func (p *Poller) resetIfNewDay(now time.Time) {
 	}
 }
 
-// fetchRank issues 3410 and normalizes the response to []rankItem.
-func (p *Poller) fetchRank(ctx context.Context) ([]rankItem, error) {
-	req := &rankpb.C2S{
-		SortDir: proto.Int32(0), // descending = gainers
-		Offset:  proto.Int32(0),
-		Count:   proto.Int32(35),
+// fetchRank issues the rank request for the given session phase and normalizes
+// the response to []rankItem (gainers-only, SortDir descending). Each session
+// uses its native change ratio (spec: "vs most-recent close").
+func (p *Poller) fetchRank(ctx context.Context, phase session.Phase) ([]rankItem, error) {
+	switch phase {
+	case session.RTH:
+		return p.fetchTopMovers(ctx)
+	case session.PostMarket:
+		return p.fetchAfterHours(ctx)
+	case session.Overnight:
+		return p.fetchOvernight(ctx)
+	default: // PreMarket + Closed
+		return p.fetchPreMarket(ctx)
 	}
-	// OpenD request messages wrap the inner C2S in a required outer
-	// Request{C2S:...} (proto2 required field) — a bare C2S serializes to
-	// different bytes and OpenD rejects it.
-	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSPreMarketRank, &rankpb.Request{C2S: req})
+}
+
+// gainersC2SArgs are the shared pre-market/after-hours/overnight request args
+// (Market is only required by the RTH TopMovers API, set separately there).
+func (p *Poller) fetchPreMarket(ctx context.Context) ([]rankItem, error) {
+	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSPreMarketRank,
+		&rankpb.Request{C2S: &rankpb.C2S{SortDir: proto.Int32(0), Offset: proto.Int32(0), Count: proto.Int32(35)}})
 	if err != nil {
 		return nil, err
 	}
@@ -210,17 +229,78 @@ func (p *Poller) fetchRank(ctx context.Context) ([]rankItem, error) {
 	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
 		return nil, err
 	}
-	if resp.GetRetType() != 0 { // surface OpenD-side errors instead of looking like "0 rows"
-		return nil, fmt.Errorf("rank retType=%d: %s", resp.GetRetType(), resp.GetRetMsg())
+	if resp.GetRetType() != 0 {
+		return nil, fmt.Errorf("premarket rank retType=%d: %s", resp.GetRetType(), resp.GetRetMsg())
 	}
 	var out []rankItem
 	for _, d := range resp.GetS2C().GetDataList() {
-		out = append(out, rankItem{
-			Symbol:    symbolOf(d.GetSecurity()),
-			ChangePct: d.GetPreMarketChangeRatio(),
-			Last:      d.GetPreMarketPrice(),
-			Volume:    d.GetPreMarketVolume(),
-		})
+		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()),
+			ChangePct: d.GetPreMarketChangeRatio(), Last: d.GetPreMarketPrice(), Volume: d.GetPreMarketVolume()})
+	}
+	return out, nil
+}
+
+func (p *Poller) fetchTopMovers(ctx context.Context) ([]rankItem, error) {
+	fr, err := p.r.Request(ctx, opend.ProtoQotGetTopMoversRank,
+		&tmrpb.Request{C2S: &tmrpb.C2S{
+			Market:  proto.Int32(int32(qotcommon.QotMarket_QotMarket_US_Security)), // required field
+			SortDir: proto.Int32(0), Offset: proto.Int32(0), Count: proto.Int32(35)}})
+	if err != nil {
+		return nil, err
+	}
+	var resp tmrpb.Response
+	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
+		return nil, err
+	}
+	if resp.GetRetType() != 0 {
+		return nil, fmt.Errorf("topmovers rank retType=%d: %s", resp.GetRetType(), resp.GetRetMsg())
+	}
+	var out []rankItem
+	for _, d := range resp.GetS2C().GetDataList() {
+		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()),
+			ChangePct: d.GetChangeRatio(), Last: d.GetCurPrice(), Volume: d.GetVolume()})
+	}
+	return out, nil
+}
+
+func (p *Poller) fetchAfterHours(ctx context.Context) ([]rankItem, error) {
+	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSAfterHoursRank,
+		&ahpb.Request{C2S: &ahpb.C2S{SortDir: proto.Int32(0), Offset: proto.Int32(0), Count: proto.Int32(35)}})
+	if err != nil {
+		return nil, err
+	}
+	var resp ahpb.Response
+	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
+		return nil, err
+	}
+	if resp.GetRetType() != 0 {
+		return nil, fmt.Errorf("afterhours rank retType=%d: %s", resp.GetRetType(), resp.GetRetMsg())
+	}
+	var out []rankItem
+	for _, d := range resp.GetS2C().GetDataList() {
+		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()),
+			ChangePct: d.GetAfterHoursChangeRatio(), Last: d.GetAfterHoursPrice(), Volume: d.GetAfterHoursVolume()})
+	}
+	return out, nil
+}
+
+func (p *Poller) fetchOvernight(ctx context.Context) ([]rankItem, error) {
+	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSOvernightRank,
+		&onpb.Request{C2S: &onpb.C2S{SortDir: proto.Int32(0), Offset: proto.Int32(0), Count: proto.Int32(35)}})
+	if err != nil {
+		return nil, err
+	}
+	var resp onpb.Response
+	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
+		return nil, err
+	}
+	if resp.GetRetType() != 0 {
+		return nil, fmt.Errorf("overnight rank retType=%d: %s", resp.GetRetType(), resp.GetRetMsg())
+	}
+	var out []rankItem
+	for _, d := range resp.GetS2C().GetDataList() {
+		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()),
+			ChangePct: d.GetOvernightChangeRatio(), Last: d.GetOvernightPrice(), Volume: d.GetOvernightVolume()})
 	}
 	return out, nil
 }
