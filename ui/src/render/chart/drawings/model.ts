@@ -1,5 +1,8 @@
 // Drawing data model + load-time validation. Pure — no LWC, no DOM.
 
+import type { LineStyleName } from "../lineStyle";
+import { LINE_STYLE_NAMES } from "../lineStyle";
+
 export type DrawingKind = "hline" | "hray" | "trendline" | "ray" | "rect";
 
 export interface Anchor {
@@ -14,7 +17,14 @@ export interface Drawing {
   anchors: Anchor[]; // hline/hray: 1, trendline/ray/rect: 2
   createdMs: number;
   updatedMs: number;
+  // Optional per-drawing style overrides (TV floating toolbar). Absent = palette default.
+  color?: string;
+  width?: number;
+  lineStyle?: LineStyleName;
 }
+
+export const DEFAULT_DRAWING_WIDTH = 1;
+export const DEFAULT_LINE_STYLE: LineStyleName = "solid";
 
 const KINDS: ReadonlySet<string> = new Set<DrawingKind>(["hline", "hray", "trendline", "ray", "rect"]);
 
@@ -31,6 +41,13 @@ function isAnchor(x: unknown): x is Anchor {
     && isFiniteNumber((x as Anchor).timeMs) && isFiniteNumber((x as Anchor).price);
 }
 
+function isValidStyle(d: Record<string, unknown>): boolean {
+  if (d.color !== undefined && typeof d.color !== "string") return false;
+  if (d.width !== undefined && !isFiniteNumber(d.width)) return false;
+  if (d.lineStyle !== undefined && !LINE_STYLE_NAMES.includes(d.lineStyle as LineStyleName)) return false;
+  return true;
+}
+
 export function isValidDrawing(x: unknown): x is Drawing {
   if (typeof x !== "object" || x === null) return false;
   const d = x as Record<string, unknown>;
@@ -39,7 +56,7 @@ export function isValidDrawing(x: unknown): x is Drawing {
   if (!isFiniteNumber(d.createdMs) || !isFiniteNumber(d.updatedMs)) return false;
   if (!Array.isArray(d.anchors)) return false;
   if (d.anchors.length !== anchorCount(d.kind as DrawingKind)) return false;
-  return d.anchors.every(isAnchor);
+  return d.anchors.every(isAnchor) && isValidStyle(d);
 }
 
 // Load-time gate: drops malformed entries so a corrupt config never crashes a chart.

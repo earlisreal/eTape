@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { anchorCount, isValidDrawing, validateDrawings, type Drawing } from "./model";
+import { DEFAULT_DRAWING_WIDTH, DEFAULT_LINE_STYLE } from "./model";
 
 const hline: Drawing = { id: "a", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 1000, price: 10 }], createdMs: 1, updatedMs: 1 };
 const rect: Drawing = { id: "b", symbol: "US.AAPL", kind: "rect", anchors: [{ timeMs: 1000, price: 10 }, { timeMs: 2000, price: 20 }], createdMs: 1, updatedMs: 1 };
@@ -50,5 +51,29 @@ describe("validateDrawings", () => {
     validateDrawings([hline, rect]);
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe("drawing style fields", () => {
+  const base = { id: "a", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 0, price: 10 }], createdMs: 1, updatedMs: 1 };
+
+  it("accepts valid optional style fields", () => {
+    const d = { ...base, color: "#2962FF", width: 3, lineStyle: "dashed" };
+    expect(validateDrawings([d])).toHaveLength(1);
+  });
+
+  it("loads a drawing with no style fields (back-compat)", () => {
+    expect(validateDrawings([base])).toHaveLength(1);
+  });
+
+  it("drops a drawing whose style field has the wrong type", () => {
+    expect(validateDrawings([{ ...base, width: "thick" }])).toHaveLength(0);
+    expect(validateDrawings([{ ...base, lineStyle: "zigzag" }])).toHaveLength(0);
+    expect(validateDrawings([{ ...base, color: 42 }])).toHaveLength(0);
+  });
+
+  it("exposes defaults", () => {
+    expect(DEFAULT_DRAWING_WIDTH).toBe(1);
+    expect(DEFAULT_LINE_STYLE).toBe("solid");
   });
 });
