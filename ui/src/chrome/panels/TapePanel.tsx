@@ -18,13 +18,17 @@ import { paintTape, TAPE_PAD, TAPE_PRICE_RIGHT_FRAC } from "../../render/tape/pa
 const HEADER_H = 26;
 const COLHEAD_H = 16;
 
-export function TapePanel({ config, stores, scheduler, width, height, linkGroups, onConfigChange }: PanelProps): JSX.Element {
+export function TapePanel({ config, stores, scheduler, width, height, linkGroups, onConfigChange, group: groupProp }: PanelProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const { palette } = useTheme();
   const [paused, setPaused] = useState(false);
   const [minSize, setMinSize] = useState<number>(
     typeof config.settings.minSize === "number" ? config.settings.minSize : 0,
   );
+  // config.group is frozen (dockview never re-invokes this panel's factory with a
+  // fresh config after creation); PanelFrame's live `group` prop is what actually
+  // changes on a group re-pick — see registry.ts's PanelProps.group comment.
+  const group = groupProp ?? config.group;
 
   const paletteRef = useRef(palette);
   paletteRef.current = palette;
@@ -36,6 +40,7 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
   const remainderRef = useRef(0);
   const symbolRef = useRef("");
   const forceRef = useRef(0);
+  const groupRef = useRef(group);
   useEffect(() => {
     forceRef.current++;
   }, [width, height, palette, minSize]);
@@ -47,6 +52,21 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
     forceRef.current++;
   };
 
+  // This panel's own group was reassigned (as opposed to the group's focused
+  // symbol changing, which linkGroups.subscribe below already handles). Guard
+  // is a no-op on mount (groupRef seeds to the same initial `group`).
+  useEffect(() => {
+    if (groupRef.current !== group) {
+      groupRef.current = group;
+      const seedSymbol = typeof config.settings.symbol === "string" ? config.settings.symbol : "US.AAPL";
+      const next = linkGroups.symbolFor(groupRef.current) ?? seedSymbol;
+      if (next !== symbolRef.current) {
+        symbolRef.current = next;
+        jumpToLive();
+      }
+    }
+  }, [group]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -54,9 +74,9 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
     if (!ctx) return;
 
     const seedSymbol = typeof config.settings.symbol === "string" ? config.settings.symbol : "US.AAPL";
-    symbolRef.current = linkGroups.symbolFor(config.group) ?? seedSymbol;
+    symbolRef.current = linkGroups.symbolFor(groupRef.current) ?? seedSymbol;
     const offLink = linkGroups.subscribe(() => {
-      const next = linkGroups.symbolFor(config.group) ?? seedSymbol;
+      const next = linkGroups.symbolFor(groupRef.current) ?? seedSymbol;
       if (next !== symbolRef.current) {
         symbolRef.current = next;
         jumpToLive();

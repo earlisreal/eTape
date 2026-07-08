@@ -28,6 +28,13 @@ export function formatPrice(price: number, decimals: number): string {
   return price.toFixed(decimals);
 }
 
+/**
+ * Fixed decimal count for live quote/limit-price display (ladder bid/ask, order
+ * ticket, tape prints): a value-derived count (priceDecimals) flickers as ticks
+ * cross a sub-penny boundary, so these surfaces pin to 3 instead.
+ */
+export const QUOTE_DECIMALS = 3;
+
 /** Integer share sizes with thousands separators: 12345 → "12,345". */
 export function formatSize(size: number): string {
   return Math.round(size).toLocaleString("en-US");

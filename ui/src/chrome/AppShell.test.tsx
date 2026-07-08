@@ -51,7 +51,7 @@ function mount(seed: Workspace) {
         linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} />
     </OrderConfigProvider></ToastProvider></ThemeProvider>,
   );
-  return { saved, workspaceStore };
+  return { saved, workspaceStore, linkGroups };
 }
 
 describe("AppShell onConfigChange", () => {
@@ -113,5 +113,38 @@ describe("AppShell single-panel tab visibility", () => {
     fireEvent.click(screen.getByText("+ Add panel"));
     fireEvent.click(screen.getByText("News"));
     await waitFor(() => expect(tabStrip().style.display).not.toBe("none"));
+  });
+});
+
+describe("AppShell group-symbol persistence (Bug 5: refresh resetting a grouped symbol to AAPL)", () => {
+  // LinkGroups itself is rebuilt empty on every page load (App.tsx's useMemo);
+  // without hydrating it from the saved workspace doc BEFORE panels mount, a
+  // grouped panel's very first render would fall back to its own creation-time
+  // settings.symbol seed (AAPL) instead of the group's actual last-focused symbol.
+  it("hydrates LinkGroups from the saved workspace's groups map before panels mount", async () => {
+    const seed: Workspace = {
+      name: "default",
+      panels: [{ id: "n1", panelId: "news", group: "green", settings: {} }],
+      layout: null,
+      groups: { green: "US.NVDA" },
+    };
+    mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    await waitFor(() => expect(screen.getByTestId("panel-symbol").textContent).toBe("NVDA"));
+  });
+
+  it("persists a group's focused-symbol change into the workspace doc", async () => {
+    const seed: Workspace = {
+      name: "default",
+      panels: [{ id: "n1", panelId: "news", group: "green", settings: {} }],
+      layout: null,
+    };
+    const { saved, linkGroups } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    await waitFor(() => expect(screen.getByTestId("panel-symbol")).toBeTruthy());
+
+    act(() => { linkGroups.focus("green", "US.NVDA"); });
+
+    await waitFor(() => expect(saved.some((w) => w.groups?.green === "US.NVDA")).toBe(true));
   });
 });

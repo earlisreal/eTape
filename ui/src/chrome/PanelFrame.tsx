@@ -117,7 +117,7 @@ export function PanelFrame(
   const def = PANELS[config.panelId];
   const Body = def?.component;
   const props: PanelProps = { config, stores, scheduler, width: size.width, height: size.height,
-    linkGroups, commands, onConfigChange, active, onGroupChange };
+    linkGroups, commands, onConfigChange, active, onGroupChange, group };
 
   const pinned = group === null;
   // Effective symbol shown in the header: this group's shared symbol if linked,

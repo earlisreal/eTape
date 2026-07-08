@@ -15,8 +15,24 @@ describe("chartTheme", () => {
   it("locks forward pan to the latest bar + padding and keeps a stable price-scale width", () => {
     const o = chartOptions(LIGHT);
     expect(o.timeScale?.fixRightEdge).toBe(true);
+    expect(o.timeScale?.fixLeftEdge).toBe(true);
+    expect(o.timeScale?.rightOffset).toBe(4);
     expect(o.timeScale?.shiftVisibleRangeOnNewBar).toBe(true);
     expect(o.rightPriceScale?.minimumWidth).toBeGreaterThan(0);
+  });
+
+  it("formats axis tick marks and the crosshair time in US/Eastern, not UTC", () => {
+    const o = chartOptions(LIGHT);
+    // 2026-07-06T13:30:00Z is 09:30 ET (EDT, UTC-4) — the RTH open.
+    const rthOpenUtcSecs = Date.parse("2026-07-06T13:30:00Z") / 1000;
+    expect(o.timeScale?.tickMarkFormatter?.(rthOpenUtcSecs, 3, "en-US")).toBe("09:30");
+    expect(o.timeScale?.tickMarkFormatter?.(rthOpenUtcSecs, 4, "en-US")).toBe("09:30:00");
+    expect(o.localization?.timeFormatter?.(rthOpenUtcSecs)).toContain("09:30:00");
+  });
+
+  it("tickMarkFormatter degrades to the default (null) for a non-numeric time", () => {
+    const o = chartOptions(LIGHT);
+    expect(o.timeScale?.tickMarkFormatter?.("2026-07-06" as unknown as number, 2, "en-US")).toBeNull();
   });
 
   it("candles use up/down palette colors for body, wick and border", () => {

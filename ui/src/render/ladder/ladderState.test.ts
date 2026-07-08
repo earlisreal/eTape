@@ -101,10 +101,10 @@ describe("flashAlpha", () => {
 describe("buildLadderState", () => {
   const palette = getPalette("light");
   const base = { symbol: "US.AAPL", book: book(), orders: [], flash: null, last: null, nowMs: 0, width: 300, height: 486, palette };
-  it("derives spread and a uniform decimal count from all visible prices", () => {
+  it("derives spread from all visible prices; decimals are fixed at 3 (no flicker as sub-penny ticks arrive)", () => {
     const s = buildLadderState(base);
     expect(s.spread).toBeCloseTo(0.02, 9);
-    expect(s.decimals).toBe(2);
+    expect(s.decimals).toBe(3);
   });
   it("has null spread when a side is empty", () => {
     const s = buildLadderState({ ...base, book: book({ asks: [] }) });

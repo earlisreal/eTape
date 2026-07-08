@@ -2,7 +2,7 @@
 // palette arrive in the state so painting is deterministic (goldens).
 import type { Book, BookLevel, TickDirection, Order } from "../../wire/contract";
 import type { Palette } from "../palette";
-import { priceDecimals } from "../format";
+import { QUOTE_DECIMALS } from "../format";
 import { isWorking, sideIsSell } from "../../wire/orderStatus";
 
 export const LADDER_LEVELS = 10;
@@ -113,15 +113,13 @@ export function buildLadderState(args: {
 }): LadderPaintState {
   const entitled = entitledForDepth(args.symbol);
   const { asks, bids } = buildLadderSides(entitled ? args.book : undefined);
-  const prices = [...asks, ...bids].map((r) => r.price);
-  if (args.last) prices.push(args.last.price);
   const spread = asks.length > 0 && bids.length > 0 ? asks[0].price - bids[0].price : null;
   return {
     symbol: args.symbol,
     entitled,
     asks,
     bids,
-    decimals: Math.min(priceDecimals(prices), 3),
+    decimals: QUOTE_DECIMALS,
     spread,
     last: args.last,
     flash: args.flash,

@@ -12,14 +12,18 @@ export function newsDateLabel(seenAtISO: string, nowMs: number): { label: string
   return { label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), today: false };
 }
 
-export function NewsPanel({ config, stores, linkGroups }: PanelProps): JSX.Element {
+export function NewsPanel({ config, stores, linkGroups, group: groupProp }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   const snap = useSyncExternalStore((cb) => stores.news.subscribe(cb), () => stores.news.getSnapshot());
-  const [symbol, setSymbol] = useState<string | undefined>(() => linkGroups.symbolFor(config.group));
+  // config.group is frozen (dockview never re-invokes this panel's factory with a
+  // fresh config after creation); PanelFrame's live `group` prop is what actually
+  // changes on a group re-pick — see registry.ts's PanelProps.group comment.
+  const group = groupProp ?? config.group;
+  const [symbol, setSymbol] = useState<string | undefined>(() => linkGroups.symbolFor(group));
   useEffect(() => {
-    setSymbol(linkGroups.symbolFor(config.group));
-    return linkGroups.subscribe(() => setSymbol(linkGroups.symbolFor(config.group)));
-  }, [linkGroups, config.group]);
+    setSymbol(linkGroups.symbolFor(group));
+    return linkGroups.subscribe(() => setSymbol(linkGroups.symbolFor(group)));
+  }, [linkGroups, group]);
   const items = useMemo(() => (symbol ? stores.news.itemsFor(symbol) : []), [snap, symbol, stores.news]);
 
   return (

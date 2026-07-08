@@ -61,7 +61,17 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // workspace without capturing a stale closure over `ws`.
   const wsRef = useRef<Workspace | null>(null);
   wsRef.current = ws;
-  useEffect(() => { void workspaceStore.load(workspaceName).then(setWs); }, [workspaceName, workspaceStore]);
+  useEffect(() => {
+    void workspaceStore.load(workspaceName).then((w) => {
+      // Hydrate LinkGroups' per-group focused symbol BEFORE setWs: panels read
+      // linkGroups.symbolFor(group) on their very first mount, and mounting
+      // starts as soon as `ws` goes non-null below (Bug 5 — a grouped panel's
+      // symbol otherwise falls back to its AAPL creation-time seed on refresh,
+      // because LinkGroups itself is rebuilt empty on every page load).
+      linkGroups.hydrate(w.groups ?? {});
+      setWs(w);
+    });
+  }, [workspaceName, workspaceStore, linkGroups]);
   // Mounted once, globally — must run unconditionally, before the loading-state
   // early return below, per the Rules of Hooks.
   useHotkeys({ stores, commands, linkGroups });
@@ -92,6 +102,26 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   useEffect(() => {
     if (!ws || ws.panels.length === 0) apiRef.current = null;
   }, [ws]);
+  // Persist the per-group focused symbol into the workspace doc on every
+  // change (Bug 5 — see the load effect above for why LinkGroups itself can't
+  // survive a refresh on its own). Must call setWs, not just mutate wsRef:
+  // wsRef.current is unconditionally overwritten with `ws` on every render
+  // (the assignment right after wsRef's declaration above), so a write that
+  // only touched wsRef would be silently reverted by the very next render
+  // before it ever reached React state — and every OTHER wsRef-based saver
+  // (onConfigChange/onGroupChange/onDidLayoutChange below) spreads
+  // wsRef.current, so once `groups` lives in `ws` state those saves preserve
+  // it automatically.
+  useEffect(() => {
+    return linkGroups.subscribe(() => {
+      const current = wsRef.current;
+      if (!current) return; // a cross-window bus echo can arrive before the first load resolves
+      const next = { ...current, groups: linkGroups.snapshot() };
+      wsRef.current = next;
+      setWs(next);
+      workspaceStore.save(next);
+    });
+  }, [linkGroups, workspaceStore]);
   if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
 
   // A stable per-panel onConfigChange updates ws.panels[i].settings then saves.

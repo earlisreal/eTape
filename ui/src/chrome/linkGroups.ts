@@ -65,4 +65,24 @@ export class LinkGroups {
   }
 
   subscribe(cb: () => void): () => void { this.subs.add(cb); return () => this.subs.delete(cb); }
+
+  /**
+   * Seed the focused map from a persisted workspace doc (AppShell load, before
+   * any panel mounts and reads symbolFor) — deliberately silent: no bus post,
+   * no engine echo, no subscriber notification. This is a page-load restore of
+   * state the engine already agreed to earlier, not a new focus decision, so it
+   * must not re-validate with the engine, re-broadcast to other windows, or
+   * trigger the persistence subscriber that would otherwise immediately
+   * re-save (and race) the very doc it was just read from.
+   */
+  hydrate(map: Partial<Record<Exclude<LinkGroup, null>, string>>): void {
+    for (const [group, symbol] of Object.entries(map) as [Exclude<LinkGroup, null>, string][]) {
+      if (symbol) this.focused.set(group, symbol);
+    }
+  }
+
+  /** Plain-object snapshot of the focused map, for persisting into the workspace doc. */
+  snapshot(): Partial<Record<Exclude<LinkGroup, null>, string>> {
+    return Object.fromEntries(this.focused);
+  }
 }

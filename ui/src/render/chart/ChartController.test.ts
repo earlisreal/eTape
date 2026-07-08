@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { ChartController, type BarReader, type IndicatorReader, type CommandSender } from "./ChartController";
+import { ChartController, LEFT_PAD_BARS, type BarReader, type IndicatorReader, type CommandSender } from "./ChartController";
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import { LIGHT } from "../palette";
 import type { Bar } from "../../wire/contract";
 import { withDefaultParams } from "./indicatorSeries";
+import type { Band } from "./sessions";
 
 function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[]; setDataCalls: unknown[][]; orderCalls: number[] } {
   const calls: string[] = [];
@@ -221,7 +222,9 @@ describe("ChartController", () => {
     ctrl.sync(); // backfill Daily
     const candle = facade.created[0].series;
     const volume = facade.created[1].series;
-    expect(candle.setDataCalls.at(-1)).toHaveLength(2);
+    // 2 real bars + LEFT_PAD_BARS leading whitespace points (Bug 4: farthest-left
+    // pan leaves empty margin before the earliest real bar, mirroring rightOffset).
+    expect(candle.setDataCalls.at(-1)).toHaveLength(2 + LEFT_PAD_BARS);
 
     ctrl.setTimeframe("1m"); // 1m series is currently empty
     // resetForReload() must clear immediately — before any sync() call —
@@ -345,6 +348,34 @@ describe("ChartController", () => {
     expect(facade1m.lastBands.length).toBeGreaterThan(0);
   });
 
+  it("shades pre-market even when the session boundary isn't an exact bar time (60m regression)", () => {
+    // 60m buckets anchor at 09:30 ET, so pre-market buckets fall at 03:30/04:30/… —
+    // 04:00 (the wall-clock PRE boundary) is never an exact 60m bar time. Resolving
+    // band edges against that wall-clock boundary (the old sessionBands(from,to))
+    // made LWC's timeToCoordinate return null for a time no bar has, silently
+    // dropping the whole band — this is the "60m shows no pre-market shading" bug.
+    // Bands must instead resolve on the bars' own bucket times.
+    const bars = [
+      bar("2026-07-06T08:30:00Z", 10), // 04:30 ET — a pre-market 60m bucket
+      bar("2026-07-06T13:30:00Z", 11), // 09:30 ET — the RTH-open 60m bucket
+    ];
+    const facade = fakeFacade();
+    const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "60m" },
+      { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+    ctrl.mount();
+    ctrl.sync();
+    const bands = facade.lastBands as Band[];
+    const pre = bands.find((b) => b.session === "pre");
+    expect(pre).toBeDefined();
+    // The band's start is the bar's own time (an exact bar → timeToCoordinate never
+    // returns null), not the 04:00 ET wall-clock boundary the bar doesn't sit on.
+    expect(pre!.startMs).toBe(Date.parse("2026-07-06T08:30:00Z"));
+    expect(pre!.endMs).toBe(Date.parse("2026-07-06T13:30:00Z"));
+    const rth = bands.find((b) => b.session === "rth");
+    expect(rth).toBeDefined();
+    expect(rth!.startMs).toBe(Date.parse("2026-07-06T13:30:00Z"));
+  });
+
   it("sync on a cold (empty) series does not throw or setData", () => {
     const { facade, ctrl } = make(barReaderOf([]));
     expect(() => ctrl.sync()).not.toThrow();
@@ -396,6 +427,6 @@ describe("ChartController", () => {
     bars.push(bar("2026-07-06T13:31:00Z", 11));
     ctrl.sync();
     expect(candle.calls.filter((c) => c === "setData").length).toBe(setDataBefore + 1); // full rebuild
-    expect(candle.setDataCalls.at(-1)).toHaveLength(3);
+    expect(candle.setDataCalls.at(-1)).toHaveLength(3 + LEFT_PAD_BARS); // + leading whitespace pad
   });
 });

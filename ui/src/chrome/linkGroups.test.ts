@@ -75,4 +75,36 @@ describe("LinkGroups", () => {
       expect(lg.symbolFor("yellow")).toBe("US.MSFT");
     });
   });
+
+  describe("hydrate/snapshot (Bug 5: restore the per-group focus a page refresh would otherwise lose)", () => {
+    it("hydrate seeds the focused map; snapshot returns it as a plain object", () => {
+      const hub = new FakeBusHub();
+      const lg = new LinkGroups(new FakeBus(hub), () => {});
+      lg.hydrate({ green: "US.TSLA", blue: "US.NVDA" });
+      expect(lg.symbolFor("green")).toBe("US.TSLA");
+      expect(lg.symbolFor("blue")).toBe("US.NVDA");
+      expect(lg.symbolFor("red")).toBeUndefined();
+      expect(lg.snapshot()).toEqual({ green: "US.TSLA", blue: "US.NVDA" });
+    });
+
+    it("hydrate does not broadcast to other windows, echo to the engine, or notify subscribers", () => {
+      const hub = new FakeBusHub();
+      const onEcho = vi.fn();
+      const lg = new LinkGroups(new FakeBus(hub), onEcho);
+      const other = new LinkGroups(new FakeBus(hub), () => {}); // a second "window"
+      const cb = vi.fn();
+      lg.subscribe(cb);
+      lg.hydrate({ green: "US.TSLA" });
+      expect(onEcho).not.toHaveBeenCalled();
+      expect(cb).not.toHaveBeenCalled();
+      expect(other.symbolFor("green")).toBeUndefined(); // no cross-window post either
+    });
+
+    it("hydrate skips falsy symbol entries", () => {
+      const hub = new FakeBusHub();
+      const lg = new LinkGroups(new FakeBus(hub), () => {});
+      lg.hydrate({ green: "" });
+      expect(lg.symbolFor("green")).toBeUndefined();
+    });
+  });
 });

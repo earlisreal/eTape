@@ -57,7 +57,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
   return { facade, setPalette: (p) => { session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); }, drawings };
 }
 
-export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange }: PanelProps): JSX.Element {
+export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange, group: groupProp }: PanelProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<ChartController | null>(null);
   const setFacadePaletteRef = useRef<((p: Palette) => void) | null>(null);
@@ -65,6 +65,12 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const { palette } = useTheme();
   const symbol = (config.settings.symbol as string) ?? "US.AAPL";
   const timeframe0 = (config.settings.timeframe as string) ?? "1m";
+  // config.group is frozen (dockview captures this panel's factory once, at
+  // creation, and never re-invokes it with a fresh config on a later group
+  // re-pick — see PanelFrame's `group` prop comment). PanelFrame threads its own
+  // live `group` state through as a prop; fall back to config.group so tests
+  // that construct PanelProps directly (no `group` prop) keep working.
+  const group = groupProp ?? config.group;
 
   // Config surfaces (timeframe + indicators) ARE low-rate chrome, so React state is
   // fine here (the hard rule is about market data, not per-chart config).
@@ -92,6 +98,15 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   useEffect(() => { tfRef.current = timeframe; }, [timeframe]);
 
+  // The mount effect below is [config.id]-only (the chart/canvas must never
+  // remount on a symbol/group/timeframe change — see that effect's closing
+  // comment), so it captures `group` at mount time. groupRef lets the reactive
+  // effect further down (which DOES see live `group` changes) tell the
+  // already-mounted closure "the group was reassigned, re-resolve the symbol" —
+  // applySymbolRef is that closure's own applySymbol, captured once it's created.
+  const groupRef = useRef(group);
+  const applySymbolRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
@@ -106,7 +121,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     // Restore persisted indicator instances (colors + params) saved with the workspace.
     for (const inst of instances) controller.addIndicator(inst);
 
-    let currentSymbol = linkGroups.symbolFor(config.group) ?? symbol;
+    let currentSymbol = linkGroups.symbolFor(groupRef.current) ?? symbol;
 
     const interaction = new DrawingInteraction(
       host,
@@ -129,7 +144,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         .then((payload) => { stores.fills.ingest((payload as Parameters<typeof stores.fills.ingest>[0]) ?? []); });
     };
     const applySymbol = () => {
-      currentSymbol = linkGroups.symbolFor(config.group) ?? symbol;
+      currentSymbol = linkGroups.symbolFor(groupRef.current) ?? symbol;
       controller.setSymbol(currentSymbol);
       backfillFills(currentSymbol);
       stores.drawings.ensureLoaded(currentSymbol);
@@ -137,6 +152,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       setChartSymbol(currentSymbol);
       forceRepaintRef.current = true;
     };
+    applySymbolRef.current = applySymbol;
     applySymbol();
     const offLink = linkGroups.subscribe(applySymbol);
 
@@ -191,6 +207,20 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     // handled imperatively via the controller (see the effects/callbacks below) — the
     // chart must never remount on those changes (the canvas keeps its context).
   }, [config.id]);
+
+  // Group re-assignment (Bug: switching this chart's color group updated the
+  // header but left the candles on the previous group's symbol). The mount
+  // effect above only reacts to a group's *focused symbol* changing
+  // (linkGroups.subscribe(applySymbol)); re-picking THIS panel's group calls
+  // neither that subscription nor anything else the mount effect depends on. The
+  // guard is a no-op on mount (groupRef seeds to the same initial `group`) and
+  // only fires applySymbol again when the group actually changes afterward.
+  useEffect(() => {
+    if (groupRef.current !== group) {
+      groupRef.current = group;
+      applySymbolRef.current?.();
+    }
+  }, [group]);
 
   // Theme switch: re-apply palette to chart, series and the custom primitives.
   useEffect(() => {

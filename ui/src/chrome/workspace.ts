@@ -10,6 +10,11 @@ export interface Workspace {
   name: string;
   panels: PanelConfig[];
   layout: unknown; // dockview serialized layout JSON
+  // Per-link-group focused symbol (LinkGroups.focused), persisted so a refresh
+  // doesn't lose "which symbol is this group currently following" — LinkGroups
+  // itself is rebuilt in-memory (empty) on every page load. Optional: absent in
+  // any workspace doc saved before this field existed.
+  groups?: Partial<Record<Exclude<LinkGroup, null>, string>>;
 }
 
 interface CommandClient {

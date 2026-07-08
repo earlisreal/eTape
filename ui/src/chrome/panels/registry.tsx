@@ -38,6 +38,15 @@ export interface PanelProps {
   // them, since AppShell always has both.
   active?: boolean;
   onGroupChange?: (group: LinkGroup) => void;
+  // The panel's CURRENT link group, live (unlike config.group, which is frozen —
+  // dockview captures each panel's factory once at creation and never re-invokes
+  // it with a fresh `config` on later re-assignment). PanelFrame keeps its own
+  // local `group` state (updated by the GroupPicker) and threads it through here
+  // so a symbol-bearing panel body can react to a group re-pick and re-follow the
+  // new group's symbol, not just the group it was created with. Optional (like
+  // active/onGroupChange above) so Body-level tests constructing a PanelProps
+  // literal directly don't need touching; panel bodies fall back to config.group.
+  group?: LinkGroup;
 }
 export interface PanelDef {
   component: FC<PanelProps>;

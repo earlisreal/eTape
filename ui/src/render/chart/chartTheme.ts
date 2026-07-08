@@ -8,9 +8,11 @@ export interface DeepChartOptions {
   grid?: { vertLines?: { color: string }; horzLines?: { color: string } };
   crosshair?: { mode?: number; vertLine?: { color: string }; horzLine?: { color: string } };
   rightPriceScale?: { borderColor: string; scaleMargins?: { top: number; bottom: number }; minimumWidth?: number };
+  localization?: { timeFormatter?: (time: number) => string };
   timeScale?: {
     borderColor: string; rightOffset: number; secondsVisible: boolean; timeVisible: boolean;
-    fixRightEdge?: boolean; shiftVisibleRangeOnNewBar?: boolean;
+    fixRightEdge?: boolean; fixLeftEdge?: boolean; shiftVisibleRangeOnNewBar?: boolean;
+    tickMarkFormatter?: (time: number, tickMarkType: number, locale: string) => string | null;
   };
   autoSize?: boolean;
 }
@@ -31,6 +33,48 @@ export interface HistogramOpts {
 // CrosshairMode.Magnet === 1 in LWC — crosshair snaps to the nearest bar
 // vertically while floating horizontally (the wickplot convention).
 const CROSSHAIR_MAGNET = 1;
+
+// The chart trades in UTCTimestamp seconds (see ChartController's toLwcTime),
+// and Lightweight Charts renders axis/crosshair labels in UTC unless told
+// otherwise. eTape is US-equities-only (CLAUDE.md), so every label — axis tick
+// marks and the crosshair time — must read US/Eastern instead. Intl formatters
+// are built once at module scope (not per tick) and reuse the America/New_York
+// idiom already established in render/format.ts / barBucket.ts.
+const ET_ZONE = "America/New_York";
+const ET_TICK = {
+  year: new Intl.DateTimeFormat("en-US", { timeZone: ET_ZONE, year: "numeric" }),
+  month: new Intl.DateTimeFormat("en-US", { timeZone: ET_ZONE, month: "short" }),
+  day: new Intl.DateTimeFormat("en-US", { timeZone: ET_ZONE, month: "short", day: "numeric" }),
+  time: new Intl.DateTimeFormat("en-US", { timeZone: ET_ZONE, hour12: false, hour: "2-digit", minute: "2-digit" }),
+  timeWithSeconds: new Intl.DateTimeFormat("en-US", {
+    timeZone: ET_ZONE, hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }),
+};
+const ET_CROSSHAIR = new Intl.DateTimeFormat("en-US", {
+  timeZone: ET_ZONE, hour12: false, month: "short", day: "numeric",
+  hour: "2-digit", minute: "2-digit", second: "2-digit",
+});
+
+// TickMarkType (LWC v5): Year=0, Month=1, DayOfMonth=2, Time=3, TimeWithSeconds=4.
+// `time` is always a UTCTimestamp (seconds) for our data (every timeframe, incl.
+// D/W/M, goes through toLwcTime/toLwcTimeMs) — guard defensively anyway so an
+// unexpected shape falls back to LWC's own default formatter (`null`) instead
+// of throwing mid-paint.
+function tickMarkFormatter(time: number, tickMarkType: number): string | null {
+  if (typeof time !== "number") return null;
+  const ms = time * 1000;
+  switch (tickMarkType) {
+    case 0: return ET_TICK.year.format(ms);
+    case 1: return ET_TICK.month.format(ms);
+    case 2: return ET_TICK.day.format(ms);
+    case 3: return ET_TICK.time.format(ms);
+    case 4: return ET_TICK.timeWithSeconds.format(ms);
+    default: return null;
+  }
+}
+function timeFormatter(time: number): string {
+  return typeof time === "number" ? ET_CROSSHAIR.format(time * 1000) : String(time);
+}
 
 // Volume rides an invisible overlay scale confined to the bottom VOLUME_BAND of
 // the main pane; the candle (right) scale reserves that same band at its bottom
@@ -56,11 +100,17 @@ export function chartOptions(p: Palette): DeepChartOptions {
     // minimumWidth: keeps the right axis column from re-sizing (and shifting the whole
     // plot area) as tick-label widths change with price digit count.
     rightPriceScale: { borderColor: p.border, scaleMargins: CANDLE_SCALE_MARGINS, minimumWidth: 64 },
+    localization: { timeFormatter },
     timeScale: {
-      borderColor: p.border, rightOffset: 5, secondsVisible: true, timeVisible: true,
+      borderColor: p.border, rightOffset: 4, secondsVisible: true, timeVisible: true,
       // fixRightEdge: max forward pan is the latest bar + the rightOffset padding above.
-      // shiftVisibleRangeOnNewBar: once at that edge, new bars auto-scroll into view.
-      fixRightEdge: true, shiftVisibleRangeOnNewBar: true,
+      // fixLeftEdge: max backward pan is the first data point — paired with the
+      // LEFT_PAD_BARS whitespace ChartController prepends ahead of the earliest
+      // real bar, this leaves the same empty-bar margin on both edges (LWC has no
+      // native left-offset option, only rightOffset).
+      // shiftVisibleRangeOnNewBar: once at the right edge, new bars auto-scroll into view.
+      fixRightEdge: true, fixLeftEdge: true, shiftVisibleRangeOnNewBar: true,
+      tickMarkFormatter,
     },
     autoSize: false, // we drive resize via ResizeObserver → controller.resize()
   };

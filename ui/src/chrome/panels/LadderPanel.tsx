@@ -9,9 +9,13 @@ import { applyCanvasSize } from "../../render/canvas";
 import { buildLadderState, flashAlpha, type LastTrade, type TradeFlash } from "../../render/ladder/ladderState";
 import { paintLadder } from "../../render/ladder/paintLadder";
 
-export function LadderPanel({ config, stores, scheduler, width, height, linkGroups }: PanelProps): JSX.Element {
+export function LadderPanel({ config, stores, scheduler, width, height, linkGroups, group: groupProp }: PanelProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const { palette } = useTheme();
+  // config.group is frozen (dockview never re-invokes this panel's factory with a
+  // fresh config after creation); PanelFrame's live `group` prop is what actually
+  // changes on a group re-pick — see registry.ts's PanelProps.group comment.
+  const group = groupProp ?? config.group;
 
   // Refs bridge React-world changes (size, theme) into the paint loop without
   // remounting the surface; forceRef bumps mark the surface dirty.
@@ -24,6 +28,13 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
     forceRef.current++;
   }, [width, height, palette]);
 
+  // groupRef/reseedForGroupRef bridge a later group re-pick into the mount
+  // effect's own closure (which is [config.id]-only — the canvas must never
+  // remount on a symbol/group change): the reactive effect below sees live
+  // `group` changes and calls back into the mount effect's own re-seed logic.
+  const groupRef = useRef(group);
+  const reseedForGroupRef = useRef<(() => void) | null>(null);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -31,7 +42,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
     if (!ctx) return;
 
     const seedSymbol = typeof config.settings.symbol === "string" ? config.settings.symbol : "US.AAPL";
-    let symbol = linkGroups.symbolFor(config.group) ?? seedSymbol;
+    let symbol = linkGroups.symbolFor(groupRef.current) ?? seedSymbol;
     let last: LastTrade | null = null;
     let flash: TradeFlash | null = null;
     let tapeGen = stores.tape.generation();
@@ -51,15 +62,17 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
     };
     seedLast();
 
-    const offLink = linkGroups.subscribe(() => {
-      const next = linkGroups.symbolFor(config.group) ?? seedSymbol;
+    const reseedForGroup = () => {
+      const next = linkGroups.symbolFor(groupRef.current) ?? seedSymbol;
       if (next !== symbol) {
         symbol = next;
         flash = null;
         seedLast();
         forceRef.current++;
       }
-    });
+    };
+    reseedForGroupRef.current = reseedForGroup;
+    const offLink = linkGroups.subscribe(reseedForGroup);
 
     const offExec = stores.exec.subscribe(() => { forceRef.current++; });
 
@@ -117,6 +130,16 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
       offExec();
     };
   }, [config.id]);
+
+  // This panel's own group was reassigned (as opposed to the group's focused
+  // symbol changing, which linkGroups.subscribe above already handles). Guard
+  // is a no-op on mount (groupRef seeds to the same initial `group`).
+  useEffect(() => {
+    if (groupRef.current !== group) {
+      groupRef.current = group;
+      reseedForGroupRef.current?.();
+    }
+  }, [group]);
 
   return <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%" }} />;
 }

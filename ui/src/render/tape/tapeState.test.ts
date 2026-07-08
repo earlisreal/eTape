@@ -71,10 +71,10 @@ describe("buildTapeRows", () => {
     expect(rows[0].seq).toBe(src.lastSeq());
   });
 
-  it("formats rows: ET time, uniform decimals, grouped sizes", () => {
+  it("formats rows: ET time, fixed 3-decimal price, grouped sizes", () => {
     const one = srcFrom([mkTick(1, { price: 3.5, size: 1428, ts: "2026-07-06T13:30:05Z" })]);
     const { rows } = buildTapeRows(one, liveView(one), { symbol: "US.AAPL", minSize: 0, maxRows: 1 });
-    expect(rows[0]).toMatchObject({ time: "09:30:05", price: "3.50", size: "1,428" });
+    expect(rows[0]).toMatchObject({ time: "09:30:05", price: "3.500", size: "1,428" });
   });
 
   it("is empty (not crashing) on an empty ring", () => {

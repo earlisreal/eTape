@@ -12,7 +12,7 @@ import { preCheck, type DraftOrder } from "../exec/preChecks";
 import { resolvePlaceTemplate } from "../exec/resolveTemplate";
 import type { PlaceOrderTemplate } from "../exec/actionTemplate";
 import { sideLabel, bareSymbol, abbrevType } from "../exec/orderStatus";
-import { formatPrice } from "../../render/format";
+import { formatPrice, QUOTE_DECIMALS } from "../../render/format";
 import { useOpenSettings } from "../OpenSettingsContext";
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
@@ -20,7 +20,7 @@ const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
 const TIFS: TIF[] = ["DAY", "GTC", "IOC", "FOK"];
 const MODES: SizingMode[] = ["Shares", "Dollar", "BuyingPowerPct", "PositionFraction"];
 
-export function OrderTicketPanel({ config, stores, commands, linkGroups }: PanelProps): JSX.Element {
+export function OrderTicketPanel({ config, stores, commands, linkGroups, group: groupProp }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
@@ -28,12 +28,16 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups }: Panel
   const openSettings = useOpenSettings(); // unified Settings modal, Orders section (Task 11)
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
 
-  const [symbol, setSymbol] = useState<string>(() => linkGroups.symbolFor(config.group) ?? (config.settings.symbol as string) ?? "US.AAPL");
+  // config.group is frozen (dockview never re-invokes this panel's factory with a
+  // fresh config after creation); PanelFrame's live `group` prop is what actually
+  // changes on a group re-pick — see registry.ts's PanelProps.group comment.
+  const group = groupProp ?? config.group;
+  const [symbol, setSymbol] = useState<string>(() => linkGroups.symbolFor(group) ?? (config.settings.symbol as string) ?? "US.AAPL");
   useEffect(() => {
-    const apply = () => setSymbol(linkGroups.symbolFor(config.group) ?? (config.settings.symbol as string) ?? "US.AAPL");
+    const apply = () => setSymbol(linkGroups.symbolFor(group) ?? (config.settings.symbol as string) ?? "US.AAPL");
     apply();
     return linkGroups.subscribe(apply);
-  }, [linkGroups, config.group, config.settings.symbol]);
+  }, [linkGroups, group, config.settings.symbol]);
 
   const quote = useThrottledQuote(stores.quote, symbol);
   const status = stores.exec.status();
@@ -70,7 +74,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups }: Panel
     if (!pc.ok) { toast.push({ level: "danger", text: pc.errors.join(" ") }); return; }
     const o = pc.order;
     const args: SubmitOrderArgs = { venue, symbol, side: o.side, type: o.type, tif: o.tif, qty: o.qty, limitPrice: o.limitPrice, stopPrice: o.stopPrice };
-    const tail = o.type === "MARKET" ? "MKT" : `${o.limitPrice.toFixed(2)} ${abbrevType(o.type)}`;
+    const tail = o.type === "MARKET" ? "MKT" : `${o.limitPrice.toFixed(QUOTE_DECIMALS)} ${abbrevType(o.type)}`;
     const flash = `${sideLabel(o.side)} ${o.qty.toLocaleString("en-US")} ${bareSymbol(symbol)} @ ${tail}`;
     void oc.submit(args, flash);
   };
@@ -84,8 +88,8 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups }: Panel
   };
 
   const quoteBtn = (label: string, testid: string, value: number | undefined, tone: string) => (
-    <button data-testid={testid} className="ctl mono" onClick={() => value !== undefined && setPrice(String(value))}
-      style={{ justifyContent: "center", borderColor: tone, color: tone, cursor: "pointer", flex: 1 }}>{label} {value === undefined ? "—" : formatPrice(value, 2)}</button>
+    <button data-testid={testid} className="ctl mono" onClick={() => value !== undefined && setPrice(value.toFixed(QUOTE_DECIMALS))}
+      style={{ justifyContent: "center", borderColor: tone, color: tone, cursor: "pointer", flex: 1 }}>{label} {value === undefined ? "—" : formatPrice(value, QUOTE_DECIMALS)}</button>
   );
   const sideClass = (s: Side) => `side${s !== side ? "" : s === "BUY" ? " side-selected-buy" : " side-selected"}`;
 

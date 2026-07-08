@@ -2,9 +2,12 @@ import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import type { Palette } from "../palette";
 import type { Bar } from "../../wire/contract";
 import { chartOptions, candleOptions, volumeOptions, VOLUME_SCALE_MARGINS, INDICATOR_LINE_WIDTH } from "./chartTheme";
-import { sessionBands } from "./sessions";
+import { sessionAt } from "./sessions";
+import type { Band } from "./sessions";
 import { describeIndicator, withDefaultParams, type IndicatorInstance } from "./indicatorSeries";
 import type { FillMarker } from "./diamondMarker";
+import { timeframeToMs } from "./drawings/geometry";
+import type { Timeframe } from "./barBucket";
 
 export interface BarReader { series(symbol: string, timeframe: string): Bar[] }
 export interface IndicatorReader { series(instanceId: string): { timeMs: number; value: number }[] }
@@ -16,6 +19,13 @@ interface Deps { bars: BarReader; indicators: IndicatorReader; commands: Command
 // LWC wants seconds (UTCTimestamp); our bucketStart is an ISO string.
 const toLwcTime = (bucketStart: string): number => Math.floor(Date.parse(bucketStart) / 1000);
 const toLwcTimeMs = (ms: number): number => Math.floor(ms / 1000);
+
+// Empty bars of whitespace kept past both edges of the loaded data: to the right
+// via LWC's native `rightOffset` (chartTheme), and to the left by prepending this
+// many WhitespaceData points ahead of the earliest real bar (LWC has no left-offset
+// option) paired with `fixLeftEdge` so the farthest-left pan stops there. Exported
+// so tests can assert against it instead of a repeated magic number.
+export const LEFT_PAD_BARS = 4;
 
 export class ChartController {
   private candle!: LwcSeries;
@@ -93,11 +103,30 @@ export class ChartController {
   }
 
   private setAllBars(bars: Bar[]): void {
-    this.candle.setData(bars.map(toCandle));
-    this.volume.setData(bars.map((b) => toVolume(b, this.palette)));
+    const pad = this.leftPad(bars);
+    this.candle.setData([...pad, ...bars.map(toCandle)]);
+    this.volume.setData([...pad, ...bars.map((b) => toVolume(b, this.palette))]);
     this.backfilled = true;
+    // lastAppliedCount/lastAppliedKey track the REAL bars only — the incremental
+    // applyBars path above indexes into `bars` (the BarReader's series), which
+    // never includes this padding.
     this.lastAppliedCount = bars.length;
     this.lastAppliedKey = keyOf(bars[bars.length - 1]);
+  }
+
+  // LEFT_PAD_BARS WhitespaceData points (time-only, no OHLC — valid for both the
+  // candle and volume series in LWC v5) placed before the earliest real bar, so
+  // with fixLeftEdge the farthest-left pan leaves the same empty margin the right
+  // edge already gets from rightOffset. Span is derived from the loaded bars
+  // (self-adjusts to the active timeframe); falls back to the nominal timeframe
+  // span when fewer than 2 bars are loaded (can't derive a step from one point).
+  private leftPad(bars: Bar[]): { time: number }[] {
+    const t0 = toLwcTime(bars[0].bucketStart);
+    const spanMs = bars.length > 1
+      ? Date.parse(bars[1].bucketStart) - Date.parse(bars[0].bucketStart)
+      : timeframeToMs(this.config.timeframe as Timeframe);
+    const spanSec = Math.max(1, Math.floor(spanMs / 1000));
+    return Array.from({ length: LEFT_PAD_BARS }, (_, i) => ({ time: t0 - (LEFT_PAD_BARS - i) * spanSec }));
   }
 
   private applyIndicators(): void {
@@ -136,12 +165,21 @@ export class ChartController {
     }
   }
 
+  // Bands are built from the loaded bars' own bucketStart times, not fixed
+  // wall-clock session boundaries (sessions.ts's sessionBands): the session
+  // primitive resolves each band edge via LWC's timeToCoordinate, which returns
+  // null unless the edge is an EXACT bar time. Wall-clock boundaries (04:00,
+  // 09:30, 16:00, 20:00 ET) only land on a real bar when the timeframe's bucket
+  // grid happens to include them — true for 10s/1m (midnight-anchored) and
+  // 5m/15m/30m (09:30-anchored, still an exact multiple of 04:00), but NEVER
+  // true for 60m (09:30-anchored: pre-market buckets fall at 03:30/04:30/…, so
+  // 04:00 is never a bucket start) — that mismatch silently dropped the whole
+  // band, leaving 60m unshaded. Deriving edges from the bars themselves makes
+  // every edge a real bar time on every timeframe.
   private applySessions(bars: Bar[]): void {
     const intraday = !["D", "W", "M"].includes(this.config.timeframe);
     if (!intraday || bars.length === 0) { this.facade.setSessionBands([]); return; }
-    const from = Date.parse(bars[0].bucketStart);
-    const to = Date.parse(bars[bars.length - 1].bucketStart) + 1;
-    this.facade.setSessionBands(sessionBands(from, to));
+    this.facade.setSessionBands(bandsFromBars(bars));
   }
 
   addIndicator(inst: IndicatorInstance): void {
@@ -263,4 +301,25 @@ function isSorted(bars: Bar[], from: number): boolean {
 function toCandle(b: Bar) { return { time: toLwcTime(b.bucketStart), open: b.o, high: b.h, low: b.l, close: b.c }; }
 function toVolume(b: Bar, p: Palette) {
   return { time: toLwcTime(b.bucketStart), value: b.v, color: b.c >= b.o ? p.volUp : p.volDown };
+}
+
+// One band per contiguous run of same-session bars, with every edge pinned to a
+// real bar's bucketStart (see the applySessions comment above for why: the
+// session primitive drops a band whose edge doesn't land on an exact bar time).
+// The final band's end is the LAST bar's own time, not lastBar+span — extending
+// past the last bar would reintroduce the same null-coordinate problem this
+// function exists to avoid.
+function bandsFromBars(bars: Bar[]): Band[] {
+  const bands: Band[] = [];
+  for (const b of bars) {
+    const startMs = Date.parse(b.bucketStart);
+    const session = sessionAt(startMs);
+    const cur = bands[bands.length - 1];
+    if (cur && cur.session === session) continue; // still inside the same run
+    if (cur) cur.endMs = startMs; // close the previous run at this bar
+    bands.push({ startMs, endMs: startMs, session });
+  }
+  const last = bands[bands.length - 1];
+  if (last) last.endMs = Date.parse(bars[bars.length - 1].bucketStart);
+  return bands;
 }
