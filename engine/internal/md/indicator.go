@@ -7,6 +7,7 @@ package md
 
 import (
 	"log/slog"
+	"maps"
 
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
@@ -67,6 +68,16 @@ func newIndicatorSet() *indicatorSet {
 func (s *indicatorSet) ensure(c *Core, id string, spec IndicatorSpec) {
 	if in, ok := s.byID[id]; ok {
 		in.refs++
+		if !specEqual(in.spec, spec) {
+			// The UI re-subscribes the SAME instanceId with a new spec on every
+			// symbol/timeframe switch (ChartController.resetForReload) and on a
+			// param edit (updateIndicator's remove-then-add). Ignoring the new
+			// spec left the instance computing the OLD (symbol, tf, params)
+			// forever — the chart then draws a line in the old symbol's price
+			// domain, off every visible scale ("VWAP not showing").
+			s.respec(c, in, spec)
+			return
+		}
 		s.emitSnapshots(c, in) // the new subscriber needs the series
 		return
 	}
@@ -80,6 +91,38 @@ func (s *indicatorSet) ensure(c *Core, id string, spec IndicatorSpec) {
 	s.byID[id] = in
 	key := symTF{symbol: spec.Symbol, tf: spec.TF}
 	s.bySymTF[key] = append(s.bySymTF[key], in)
+	s.reseed(c, in)
+}
+
+func specEqual(a, b IndicatorSpec) bool {
+	return a.Symbol == b.Symbol && a.TF == b.TF && a.Type == b.Type && maps.Equal(a.Params, b.Params)
+}
+
+// respec moves a live instance onto a new spec: validate the new calc first
+// (an invalid re-spec must not destroy a working instance), re-bucket the
+// symTF index, then rebuild from the new spec's finalized history and
+// re-snapshot every slot.
+func (s *indicatorSet) respec(c *Core, in *instance, spec IndicatorSpec) {
+	if _, err := newCalc(spec); err != nil {
+		slog.Warn("indicator respec rejected", "id", in.id, "type", spec.Type, "err", err)
+		return
+	}
+	oldKey := symTF{symbol: in.spec.Symbol, tf: in.spec.TF}
+	newKey := symTF{symbol: spec.Symbol, tf: spec.TF}
+	if oldKey != newKey {
+		list := s.bySymTF[oldKey]
+		for i, x := range list {
+			if x == in {
+				s.bySymTF[oldKey] = append(list[:i], list[i+1:]...)
+				break
+			}
+		}
+		if len(s.bySymTF[oldKey]) == 0 {
+			delete(s.bySymTF, oldKey)
+		}
+		s.bySymTF[newKey] = append(s.bySymTF[newKey], in)
+	}
+	in.spec = spec
 	s.reseed(c, in)
 }
 
