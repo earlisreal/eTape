@@ -27,7 +27,13 @@ export class NewsStore extends ReactStore<NewsState> {
       .sort((a, b) => b.seen_at.localeCompare(a.seen_at)); // ISO strings sort chronologically
   }
 
-  private asArray(p: unknown): NewsItem[] { return Array.isArray(p) ? (p as NewsItem[]) : [p as NewsItem]; }
+  // Coerce a payload to an item array, dropping null/non-object entries. An empty
+  // news snapshot arrives as `payload: null` (a nil Go slice marshals to JSON null),
+  // and a malformed message could carry null entries — neither must reach keyOf().
+  private asArray(p: unknown): NewsItem[] {
+    const raw = Array.isArray(p) ? p : p == null ? [] : [p];
+    return raw.filter((it): it is NewsItem => it != null && typeof it === "object");
+  }
   private keyOf(it: NewsItem): string { return it.url || `${it.symbol}|${it.headline}|${it.seen_at}`; }
   private dedupe(items: NewsItem[]): NewsItem[] {
     const out: NewsItem[] = [];

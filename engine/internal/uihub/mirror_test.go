@@ -1,6 +1,7 @@
 package uihub
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/earlisreal/eTape/engine/internal/exec"
@@ -131,6 +132,24 @@ func TestMirrorApplyPubNewsHealthEvents(t *testing.T) {
 	rankFrames := m.snapshotFrames(wsmsg.TopicScannerRank)
 	if len(rankFrames) != 1 || rankFrames[0].Key != "am" {
 		t.Fatalf("expected scanner rank recorded under key 'am', got %+v", rankFrames)
+	}
+}
+
+func TestMirrorEmptyNewsSnapshotMarshalsToArrayNotNull(t *testing.T) {
+	m := testMirror()
+	// A brand-new subscriber gets a news snapshot before any news exists. The
+	// payload must serialize to a JSON array `[]`, not `null` — a nil Go slice
+	// marshals to null, which crashes the UI NewsStore's dedup (reading .url of null).
+	frames := m.snapshotFrames(wsmsg.TopicNews)
+	if len(frames) != 1 {
+		t.Fatalf("expected exactly one news snapshot frame, got %d", len(frames))
+	}
+	b, err := json.Marshal(frames[0].Payload)
+	if err != nil {
+		t.Fatalf("marshal news payload: %v", err)
+	}
+	if string(b) != "[]" {
+		t.Fatalf("empty news snapshot must marshal to []: got %s", b)
 	}
 }
 

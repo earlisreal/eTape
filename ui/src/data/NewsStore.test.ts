@@ -36,4 +36,19 @@ describe("NewsStore", () => {
     s.apply(snap([item("US.AAPL", "u1", "t1")])); // reconnect re-snapshot
     expect(s.itemsFor("US.AAPL").map((i) => i.url)).toEqual(["u1"]);
   });
+
+  it("tolerates a null payload without throwing (empty snapshot serializes to JSON null)", () => {
+    const s = new NewsStore();
+    // The engine sends `payload: null` for an empty news snapshot (a nil Go slice
+    // marshals to null). apply() must treat it as "no items", not crash in keyOf.
+    expect(() => s.apply({ kind: "snapshot", topic: "news.item", payload: null } as unknown as SnapshotMsg)).not.toThrow();
+    expect(() => s.apply({ kind: "delta", topic: "news.item", payload: null } as unknown as DeltaMsg)).not.toThrow();
+    expect(s.itemsFor("US.AAPL")).toEqual([]);
+  });
+
+  it("skips null / non-object entries inside a payload array", () => {
+    const s = new NewsStore();
+    s.apply(snap([item("US.AAPL", "u1", "t1"), null as unknown as NewsItem, item("US.AAPL", "u2", "t2")]));
+    expect(s.itemsFor("US.AAPL").map((i) => i.url)).toEqual(["u2", "u1"]);
+  });
 });

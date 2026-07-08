@@ -312,7 +312,10 @@ func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
 			out = append(out, staged{Topic: topic, Key: sess, Payload: m.rank[sess]})
 		}
 	case wsmsg.TopicNews:
-		out = append(out, staged{Topic: topic, Payload: append([]wsmsg.NewsItem(nil), m.news...)})
+		// make (not append-to-nil) so an empty news list marshals to `[]`, not
+		// `null` — a null payload crashes the UI NewsStore's dedup.
+		news := make([]wsmsg.NewsItem, 0, len(m.news))
+		out = append(out, staged{Topic: topic, Payload: append(news, m.news...)})
 	case wsmsg.TopicExecAccount:
 		for _, v := range m.venueOrder {
 			if a, ok := m.accounts[v]; ok {
