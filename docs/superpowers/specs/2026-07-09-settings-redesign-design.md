@@ -13,7 +13,8 @@ Three goals, decided in one design pass:
    four sections) and the Orders & hotkeys section becomes a dense **hotkey grid**
    with a **keycap cheat-sheet strip** — every template parameter editable,
    including the two that today have no input at all: price offset and sizing
-   amount.
+   amount. The Sounds section gains explicit per-event enable toggles (the
+   direct ask: a discoverable way to disable the scanner sound).
 2. The template model grows two capabilities: **offset unit `$` or `%`** (percent
    scales with price — the marketable-limit lesson from the venue benchmarks) and
    **arbitrary position-percent sizing** (replacing the hardcoded `all | half`).
@@ -52,8 +53,8 @@ section). The shell grows from 680px / 3 tabs to **920 × min(640px, 85vh)** wit
   one new visual primitive is the **keycap chip** (see §2), derived from existing
   tokens (`surface` fill, `borderStrong` border, mono face, 1px bottom shadow in
   `borderStrong` for the key-cap read).
-- Appearance and Sounds section *content* is unchanged — restyled only as far as
-  the shared shell/typography implies.
+- Appearance section *content* is unchanged — restyled only as far as the shared
+  shell/typography implies. Sounds gets per-event toggles (§3).
 - Targeted cleanup: `exec/OrderSettingsModal.tsx` has not been a modal since the
   Task-11 unification — rename file to `exec/OrderSettingsSection.tsx` (test file
   follows).
@@ -109,7 +110,7 @@ Cancel Last     Cancel Last ▾ ──────(manage action spans)───
 - **Reset to defaults**: restores `DEFAULT_TEMPLATES` into the draft after an
   inline confirm (two-click: "Reset to defaults" → "Confirm reset"). Still needs
   Save to persist.
-- The read-only gate-limits block moves to the Venues section (§4), where those
+- The read-only gate-limits block moves to the Venues section (§5), where those
   values become editable.
 - Save semantics unchanged: one `SetConfig` of the whole `orderConfig` blob;
   `OrderConfigProvider` remains the single source both the hotkey engine and the
@@ -117,7 +118,35 @@ Cancel Last     Cancel Last ▾ ──────(manage action spans)───
 - Preserved `data-testid`s: `tmpl-label-*`, `tmpl-hotkey-*`, `add-template`
   (now the menu trigger), `save`.
 
-## 3. Template model & resolution changes
+## 3. Sounds section: per-event enable toggles
+
+Today "off" exists only as the first `<option>` buried inside each sound-picker
+dropdown — functional (`SoundEngine.scannerHit()` already early-returns on
+`"off"`) but undiscoverable. Every event row gets an explicit enable checkbox;
+the dropdown picks *which* sound, the checkbox decides *whether* it plays:
+
+```
+[✓] Enable sounds                       (master, unchanged)
+[✓] Fill        [Two-Tone ▾]    ▶
+[✓] Placement click
+[✓] Reject      [Alert Beeps ▾] ▶
+[ ] Scanner     [Arpeggio ▾]    ▶       ← unchecked = scanner silent
+    Volume  ──────●────
+```
+
+- **Persisted schema unchanged**: unchecked ⇔ the existing `"off"` value
+  (`scannerSound: "off"` etc.). No `sanitizeSoundConfig` or `SoundEngine`
+  changes.
+- Unchecking remembers the last-picked sound in component state so re-checking
+  restores it (falls back to the event's default when there is none). Dropdown
+  and preview button disable while unchecked. The `off` `<option>` disappears
+  from the dropdowns (sanitize still accepts persisted `"off"`).
+- `placeClick` is already a boolean and simply adopts the same row treatment.
+- Preserved `data-testid`s: `sound-enabled`, `sound-fill`, `sound-reject`,
+  `sound-scanner`, `sound-place`, `sound-volume`, the preview buttons. New:
+  `sound-fill-on`, `sound-reject-on`, `sound-scanner-on`.
+
+## 4. Template model & resolution changes
 
 `ui/src/chrome/exec/actionTemplate.ts`, `sizing.ts`, `priceSource.ts`:
 
@@ -140,7 +169,7 @@ Cancel Last     Cancel Last ▾ ──────(manage action spans)───
   `{ mode, pct: Number(amount) || 0 }` like the other modes — the amount input
   is percent of position, 100 = flatten — consistent with the grid.
 
-## 4. Venues & credentials section (new, `chrome/exec/VenuesSection.tsx`)
+## 5. Venues & credentials section (new, `chrome/exec/VenuesSection.tsx`)
 
 Three blocks, top to bottom:
 
@@ -186,7 +215,7 @@ alpaca-live   used by: —                    replace   delete
 - Field-level validation errors from the engine ack render inline under the
   offending block; transport errors use the existing toast.
 
-## 5. Engine: four new commands
+## 6. Engine: four new commands
 
 New `wsmsg` args/result structs in `engine/internal/uihub/wsmsg`, TS types
 regenerated via tygo (`make gen-ts`; drift-gated by `make gen-ts-check`).
@@ -245,7 +274,7 @@ keys can be lost.)
 - Secrets are never logged (existing `creds` package rule), never included in
   any ack/result, and never readable back over the WS.
 
-## 6. Safety invariants
+## 7. Safety invariants
 
 - **No runtime order authority is added.** Nothing in settings arms a venue,
   places, or cancels; venue/gate/credential edits are file-only and take effect
@@ -258,7 +287,7 @@ keys can be lost.)
   trade-off), write-only thereafter; UI state holding them is cleared on save.
 - The engine never writes either file except through the validated commands.
 
-## 7. Testing
+## 8. Testing
 
 **UI (vitest):**
 - Grid: every place-row field editable and round-trips through Save (offset
@@ -273,6 +302,9 @@ keys can be lost.)
 - Venues: LIVE badge + disabled auto-arm on env=live; delete-credential blocked
   while referenced; credential inputs cleared after save and never rendered
   back; restart banner iff file ≠ running.
+- Sounds: unchecking Scanner saves `scannerSound: "off"` (and `scannerHit()`
+  plays nothing); re-checking restores the previously selected sound; dropdown +
+  preview disabled while unchecked; same behavior for Fill/Reject toggles.
 - SettingsModal: four nav sections route correctly.
 
 **Engine (go test):**
@@ -291,7 +323,7 @@ amount, save, fire its hotkey against the replay engine, assert the flash/order
 qty reflects the new amount. Venues: section renders, add-venue validation error
 surfaces inline (no engine restart in E2E).
 
-## 8. Out of scope
+## 9. Out of scope
 
 - Hot-applying venue changes at runtime (adapter spin-up/teardown) — restart
   remains the boundary.
