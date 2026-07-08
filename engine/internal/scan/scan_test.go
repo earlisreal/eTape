@@ -368,3 +368,50 @@ func TestResolveFloatsSteadyStateNoRequests(t *testing.T) {
 		t.Fatalf("second resolve should issue no new requests: %d -> %d", first, fr.snapCalls)
 	}
 }
+
+func TestPollOnceEndToEnd(t *testing.T) {
+	fr := &fakeReq{
+		rankResp: rankResp(
+			rankItem{Symbol: "US.LOWF", ChangePct: 12, Last: 4, Volume: 300_000},  // passes
+			rankItem{Symbol: "US.BIGF", ChangePct: 20, Last: 8, Volume: 900_000},  // over float cap
+			rankItem{Symbol: "US.THIN", ChangePct: 30, Last: 1, Volume: 5_000},    // under volume floor
+		),
+		snap: func(codes []string) (*snappb.Response, error) {
+			return snapResp(
+				snap("LOWF", 20_000_000, true),
+				snap("BIGF", 500_000_000, true),
+				snap("THIN", 1_000_000, true),
+			), nil
+		},
+	}
+	pub := &capturePub{}
+	p := newTestPoller(config.Scan{Enabled: true, MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000}, fr, pub)
+
+	p.pollOnce(context.Background(), p.clk.Now())
+
+	if len(pub.ranks) != 1 {
+		t.Fatalf("want exactly one rank publish, got %d", len(pub.ranks))
+	}
+	rows := pub.ranks[0].Rows
+	if len(rows) != 1 || rows[0].Symbol != "US.LOWF" {
+		t.Fatalf("only US.LOWF should survive (BIGF over cap, THIN under volume): %+v", rows)
+	}
+	if rows[0].FloatShares == nil || *rows[0].FloatShares != 20_000_000 {
+		t.Fatalf("US.LOWF float should be resolved via 3203: %+v", rows[0])
+	}
+	if len(pub.hits) != 1 || pub.hits[0].Symbol != "US.LOWF" {
+		t.Fatalf("want one new hit for US.LOWF: %+v", pub.hits)
+	}
+
+	// Second poll, same board: still a rank publish, but no new hit.
+	p.pollOnce(context.Background(), p.clk.Now())
+	if len(pub.ranks) != 2 {
+		t.Fatalf("want a second rank publish, got %d", len(pub.ranks))
+	}
+	if len(pub.hits) != 1 {
+		t.Fatalf("US.LOWF already seen -> no new hit on second poll: %+v", pub.hits)
+	}
+	if fr.snapCalls != 1 {
+		t.Fatalf("float cache should make the second poll issue zero snapshots: snapCalls=%d", fr.snapCalls)
+	}
+}
