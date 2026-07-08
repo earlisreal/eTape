@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { createChart, CandlestickSeries, HistogramSeries, LineSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type Coordinate } from "lightweight-charts";
+import { createChart, CandlestickSeries, BarSeries, HistogramSeries, LineSeries, AreaSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type Coordinate } from "lightweight-charts";
 import type { PanelProps } from "./registry";
 import { ChartController } from "../../render/chart/ChartController";
 import { clampRightScroll } from "../../render/chart/chartTheme";
@@ -20,23 +20,34 @@ import { useTheme } from "../ThemeProvider";
 function makeFacade(chart: IChartApi, palette: Palette): {
   facade: ChartApiFacade; setPalette: (p: Palette) => void; drawings: DrawingsPrimitive;
 } {
-  let candle: ISeriesApi<"Candlestick"> | null = null;
+  let main: ISeriesApi<"Candlestick" | "Bar" | "Line" | "Area"> | null = null;
+  let sessionAttached = false;
   const session = new SessionShadingPrimitive(palette);
   const diamonds = new DiamondFillPrimitive(palette);
   const drawings = new DrawingsPrimitive(palette);
 
   const facade: ChartApiFacade = {
+    setMainSeries: (kind, options) => {
+      if (main) chart.removeSeries(main);
+      // Per-branch addSeries calls (NOT a hoisted `ctor` variable): LWC v5's addSeries
+      // is generic on the concrete SeriesDefinition, so the constructor must appear at
+      // the call site to type-check — the same reason the pre-existing addSeries below
+      // uses a per-branch ternary.
+      const s = kind === "candle" ? chart.addSeries(CandlestickSeries, options as object, 0)
+        : kind === "bar" ? chart.addSeries(BarSeries, options as object, 0)
+        : kind === "line" ? chart.addSeries(LineSeries, options as object, 0)
+        : chart.addSeries(AreaSeries, options as object, 0);
+      main = s as ISeriesApi<"Candlestick">;
+      // The diamond + drawings series-primitives ride the main price series so
+      // they survive a chart-type swap; the session pane-primitive attaches once.
+      main.attachPrimitive(diamonds);
+      main.attachPrimitive(drawings);
+      if (!sessionAttached) { chart.panes()[0]?.attachPrimitive?.(session); sessionAttached = true; }
+      return s as unknown as LwcSeries;
+    },
     addSeries: (kind, options, paneIndex) => {
-      const s = kind === "candle" ? chart.addSeries(CandlestickSeries, options as object, paneIndex)
-        : kind === "line" ? chart.addSeries(LineSeries, options as object, paneIndex)
+      const s = kind === "line" ? chart.addSeries(LineSeries, options as object, paneIndex)
         : chart.addSeries(HistogramSeries, options as object, paneIndex);
-      if (kind === "candle") {
-        candle = s as ISeriesApi<"Candlestick">;
-        candle.attachPrimitive(diamonds);
-        candle.attachPrimitive(drawings);
-        // Pane primitive on the main pane (index 0) for session shading:
-        chart.panes()[0]?.attachPrimitive?.(session);
-      }
       return s as unknown as LwcSeries;
     },
     removeSeries: (s) => chart.removeSeries(s as unknown as ISeriesApi<"Line">),
@@ -44,15 +55,22 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     setSessionBands: (bands) => session.setBands(bands),
     setFillMarkers: (m) => diamonds.setMarkers(m),
     timeToCoordinate: (ms) => chart.timeScale().timeToCoordinate((Math.floor(ms / 1000)) as unknown as Time),
-    priceToCoordinate: (price) => candle?.priceToCoordinate(price) ?? null,
+    priceToCoordinate: (price) => main?.priceToCoordinate(price) ?? null,
     logicalToCoordinate: (logical) => chart.timeScale().logicalToCoordinate(logical as Logical),
     coordinateToLogical: (x) => chart.timeScale().coordinateToLogical(x as Coordinate),
-    coordinateToPrice: (y) => candle?.coordinateToPrice(y as Coordinate) ?? null,
+    coordinateToPrice: (y) => main?.coordinateToPrice(y as Coordinate) ?? null,
     setPanZoomEnabled: (on) => chart.applyOptions({ handleScroll: on, handleScale: on }),
     scrollToRealTime: () => chart.timeScale().scrollToRealTime(),
     resetTimeScale: () => chart.timeScale().resetTimeScale(),
     resize: (w, h) => chart.resize(w, h),
     applyOptions: (o) => chart.applyOptions(o as object),
+    takeScreenshot: () => chart.takeScreenshot(),
+    subscribeCrosshairMove: (cb) => {
+      const handler = (param: { logical?: number }) => cb(typeof param.logical === "number" ? param.logical : null);
+      chart.subscribeCrosshairMove(handler);
+      return () => chart.unsubscribeCrosshairMove(handler);
+    },
+    paneHeights: () => chart.panes().map((pn) => pn.getHeight()),
     remove: () => chart.remove(),
   };
   return { facade, setPalette: (p) => { session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); }, drawings };

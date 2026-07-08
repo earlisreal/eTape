@@ -13,14 +13,18 @@ const chartApi = {
   addSeries: vi.fn(() => ({ setData: vi.fn(), update: vi.fn(), applyOptions: vi.fn(), setSeriesOrder: vi.fn(),
     attachPrimitive: vi.fn(), priceToCoordinate: vi.fn(() => 0), coordinateToPrice: vi.fn(() => 0) })),
   removeSeries: vi.fn(),
-  panes: vi.fn(() => [{ attachPrimitive: vi.fn() }]),
+  panes: vi.fn(() => [{ attachPrimitive: vi.fn(), getHeight: vi.fn(() => 400) }]),
   priceScale: vi.fn(() => ({ applyOptions: vi.fn() })),
   timeScale: vi.fn(() => timeScaleApi),
   applyOptions: vi.fn(), resize: vi.fn(), remove: vi.fn(),
+  takeScreenshot: vi.fn(() => document.createElement("canvas")),
+  subscribeCrosshairMove: vi.fn(),
+  unsubscribeCrosshairMove: vi.fn(),
 };
 vi.mock("lightweight-charts", () => ({
   createChart: vi.fn(() => chartApi),
-  CandlestickSeries: "Candlestick", HistogramSeries: "Histogram", LineSeries: "Line", CrosshairMode: { Magnet: 1 },
+  CandlestickSeries: "Candlestick", HistogramSeries: "Histogram", LineSeries: "Line",
+  BarSeries: "Bar", AreaSeries: "Area", CrosshairMode: { Magnet: 1 },
 }));
 
 import { ChartPanel } from "./ChartPanel";

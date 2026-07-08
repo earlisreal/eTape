@@ -23,8 +23,14 @@ function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[]; setDat
 function fakeFacade() {
   const created: Array<{ kind: string; pane: number; options: unknown; series: ReturnType<typeof fakeSeries> }> = [];
   const scaleMargins: Array<{ id: string; margins: { top: number; bottom: number } }> = [];
-  const facade: ChartApiFacade & { created: typeof created; scrolls: number; resets: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins } = {
+  const facade: ChartApiFacade & { created: typeof created; scrolls: number; resets: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins }
+    & { mainKind: string; screenshots: number; crosshairCb: ((l: number | null) => void) | null } = {
     created, scrolls: 0, resets: 0, bands: 0, lastBands: [], scaleMargins,
+    mainKind: "", screenshots: 0, crosshairCb: null,
+    setMainSeries: (kind, o) => { const s = fakeSeries(); created.push({ kind, pane: 0, options: o, series: s }); facade.mainKind = kind; return s; },
+    takeScreenshot: () => { facade.screenshots++; return {} as unknown as HTMLCanvasElement; },
+    subscribeCrosshairMove: (cb) => { facade.crosshairCb = cb; return () => { facade.crosshairCb = null; }; },
+    paneHeights: () => [400, 120],
     addSeries: (kind, o, pane) => { const s = fakeSeries(); created.push({ kind, pane, options: o, series: s }); return s; },
     removeSeries: () => {},
     setPriceScaleMargins: (id, margins) => { scaleMargins.push({ id, margins }); },
@@ -449,5 +455,30 @@ describe("ChartController", () => {
     ctrl.sync();
     expect(candle.calls.filter((c) => c === "setData").length).toBe(setDataBefore + 1); // full rebuild
     expect(candle.setDataCalls.at(-1)).toHaveLength(3 + LEFT_PAD_BARS); // + leading whitespace pad
+  });
+});
+
+describe("ChartController main series + facade capabilities", () => {
+  it("mount creates the main series via setMainSeries (kind 'candle') and the volume via addSeries", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    expect(facade.mainKind).toBe("candle");
+    // created[0] is the main (candle), created[1] is the volume histogram
+    expect(facade.created[0].kind).toBe("candle");
+    expect(facade.created[1].kind).toBe("histogram");
+  });
+
+  it("exposes screenshot, crosshair subscription, and pane heights", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    expect(facade.paneHeights()).toEqual([400, 120]);
+    const dispose = facade.subscribeCrosshairMove(() => {});
+    expect(facade.crosshairCb).toBeTypeOf("function");
+    dispose();
+    expect(facade.crosshairCb).toBeNull();
   });
 });

@@ -46,7 +46,7 @@ export class ChartController {
 
   mount(): void {
     this.facade.applyOptions(chartOptions(this.palette));
-    this.candle = this.facade.addSeries("candle", candleOptions(this.palette), 0);
+    this.candle = this.facade.setMainSeries("candle", candleOptions(this.palette));
     this.volume = this.facade.addSeries("histogram", volumeOptions(this.palette), 0);
     // Confine the volume overlay to the bottom band of the main pane so it never
     // overlaps the candles (the candle scale reserves the same band — see chartTheme).
