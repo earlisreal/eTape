@@ -8,6 +8,7 @@ import { useOrderConfig } from "./useOrderConfig";
 import { normalizeCombo, matchTemplate } from "./hotkeys";
 import { resolvePlaceTemplate } from "./resolveTemplate";
 import type { PlaceOrderTemplate, ManagementTemplate } from "./actionTemplate";
+import { resolveVenue } from "./venueSelection";
 
 interface Cmd { sendCommand(name: string, args: unknown): Promise<AckMsg> }
 
@@ -23,7 +24,7 @@ export function useHotkeys(opts: { stores: Stores; commands: Cmd; linkGroups: Li
       if (!t) return;
       e.preventDefault();
       const status = stores.exec.status();
-      const venue = config.activeVenue || status?.venues[0]?.venue || "";
+      const venue = resolveVenue(group, linkGroups, config.activeVenue, status);
       const symbol = linkGroups.symbolFor(group) ?? "";
 
       if (t.kind === "place") {
