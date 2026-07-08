@@ -146,3 +146,81 @@ func TestRunBoundedPoolCoversEverySymbol(t *testing.T) {
 		t.Fatalf("Intraday1m called %d times, want 3 (one per symbol)", got)
 	}
 }
+
+// splitFetcher lets a test give the primary and fallback different data and
+// record what range the fallback was asked for.
+type recordFallback struct {
+	m1        []feed.Bar
+	daily     []feed.Bar
+	m1From    atomic.Int64
+	m1To      atomic.Int64
+	m1Calls   atomic.Int32
+	dailyCall atomic.Int32
+}
+
+func (r *recordFallback) DailyBars(_ context.Context, _ string, _, _ time.Time) ([]feed.Bar, error) {
+	r.dailyCall.Add(1)
+	return r.daily, nil
+}
+func (r *recordFallback) Intraday1m(_ context.Context, _ string, from, to time.Time) ([]feed.Bar, error) {
+	r.m1Calls.Add(1)
+	r.m1From.Store(from.UnixMilli())
+	r.m1To.Store(to.UnixMilli())
+	return r.m1, nil
+}
+
+func TestFallbackFillsShallowGap(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, session.Loc())
+	from := intradayFrom(now, 20)
+	// Primary returns only recent bars: oldest is 5 days after `from` — a wide gap.
+	oldestMs := from.UnixMilli() + 5*24*3600*1000
+	primary := &fakeFetcher{m1: []feed.Bar{bar(oldestMs), bar(oldestMs + 60000)}}
+	fb := &recordFallback{m1: []feed.Bar{bar(from.UnixMilli())}}
+	seeder := &fakeSeeder{}
+	o := New(primary, fb, seeder, &fakeArchive{}, clock.NewFake(now), Config{IntradayDays: 20, SeedChunk: 500})
+	o.Backfill(context.Background(), "US.AAPL")
+
+	if fb.m1Calls.Load() != 1 {
+		t.Fatalf("fallback 1m calls = %d, want 1", fb.m1Calls.Load())
+	}
+	// Fallback asked for [from, oldest).
+	if fb.m1From.Load() != from.UnixMilli() || fb.m1To.Load() != oldestMs {
+		t.Fatalf("fallback range = [%d,%d), want [%d,%d)", fb.m1From.Load(), fb.m1To.Load(), from.UnixMilli(), oldestMs)
+	}
+	// Seeded = primary(2) + fallback(1).
+	if len(seeder.hist) != 3 {
+		t.Fatalf("1m seeded = %d, want 3", len(seeder.hist))
+	}
+}
+
+func TestFallbackSkippedWhenPrimaryDeepEnough(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, session.Loc())
+	from := intradayFrom(now, 20)
+	// Primary's oldest is right at `from` — full depth, no gap.
+	primary := &fakeFetcher{m1: []feed.Bar{bar(from.UnixMilli()), bar(from.UnixMilli() + 60000)}}
+	fb := &recordFallback{m1: []feed.Bar{bar(0)}}
+	o := New(primary, fb, &fakeSeeder{}, &fakeArchive{}, clock.NewFake(now), Config{IntradayDays: 20, SeedChunk: 500})
+	o.Backfill(context.Background(), "US.AAPL")
+	if fb.m1Calls.Load() != 0 {
+		t.Fatalf("fallback called %d times, want 0 (primary deep enough)", fb.m1Calls.Load())
+	}
+}
+
+func TestFallbackFillsWholeWindowOnPrimaryError(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, session.Loc())
+	from := intradayFrom(now, 20)
+	primary := &fakeFetcher{mErr: context.DeadlineExceeded, dErr: context.DeadlineExceeded}
+	fb := &recordFallback{m1: []feed.Bar{bar(from.UnixMilli())}, daily: []feed.Bar{bar(1), bar(2)}}
+	seeder := &fakeSeeder{}
+	o := New(primary, fb, seeder, &fakeArchive{}, clock.NewFake(now), Config{IntradayDays: 20, SeedChunk: 500})
+	o.Backfill(context.Background(), "US.AAPL")
+
+	// 1m: fallback asked for the whole [from, now] window.
+	if fb.m1Calls.Load() != 1 || fb.m1From.Load() != from.UnixMilli() || fb.m1To.Load() != now.UnixMilli() {
+		t.Fatalf("fallback 1m range = [%d,%d) calls=%d", fb.m1From.Load(), fb.m1To.Load(), fb.m1Calls.Load())
+	}
+	// Daily: primary errored, fallback daily used (2 bars).
+	if fb.dailyCall.Load() != 1 || len(seeder.daily) != 2 {
+		t.Fatalf("daily fallback calls=%d seeded=%d", fb.dailyCall.Load(), len(seeder.daily))
+	}
+}

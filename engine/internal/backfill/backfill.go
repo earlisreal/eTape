@@ -139,11 +139,22 @@ func (o *Orchestrator) warmStart(symbol string, from1m, now time.Time) {
 	}
 }
 
+// gapThresholdMs ignores sub-day gaps between the requested `from` and the
+// primary's oldest bar — those are just weekend/holiday edges, not a real
+// depth shortfall, and must not trigger a fallback fetch every boot.
+const gapThresholdMs = 24 * 3600 * 1000
+
 func (o *Orchestrator) fillDaily(ctx context.Context, symbol string, from, to time.Time) {
 	bars, err := o.primary.DailyBars(ctx, symbol, from, to)
 	if err != nil {
 		slog.Warn("backfill: primary daily failed", "symbol", symbol, "err", err)
-		return
+		if o.fallback == nil {
+			return
+		}
+		if bars, err = o.fallback.DailyBars(ctx, symbol, from, to); err != nil {
+			slog.Warn("backfill: fallback daily failed", "symbol", symbol, "err", err)
+			return
+		}
 	}
 	seedChunked(o.cfg.SeedChunk, bars, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
 }
@@ -152,9 +163,32 @@ func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.
 	bars, err := o.primary.Intraday1m(ctx, symbol, from, to)
 	if err != nil {
 		slog.Warn("backfill: primary 1m failed", "symbol", symbol, "err", err)
+		bars = nil
+	}
+	if len(bars) > 0 {
+		seedChunked(o.cfg.SeedChunk, bars, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+	}
+	if o.fallback == nil {
 		return
 	}
-	seedChunked(o.cfg.SeedChunk, bars, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+	// Fallback fills only the older gap [from, gapTo). If the primary succeeded
+	// and its oldest bar is within a day of `from`, the window is covered.
+	gapTo := to
+	if len(bars) > 0 {
+		oldestMs := bars[0].BucketMs
+		if oldestMs-from.UnixMilli() < gapThresholdMs {
+			return
+		}
+		gapTo = time.UnixMilli(oldestMs)
+	}
+	gap, err := o.fallback.Intraday1m(ctx, symbol, from, gapTo)
+	if err != nil {
+		slog.Warn("backfill: fallback 1m failed", "symbol", symbol, "err", err)
+		return
+	}
+	if len(gap) > 0 {
+		seedChunked(o.cfg.SeedChunk, gap, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+	}
 }
 
 // MoomooFetcher adapts a feed.Feed (the live OpenD feed) as the primary

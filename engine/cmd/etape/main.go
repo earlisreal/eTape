@@ -29,6 +29,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
 	"github.com/earlisreal/eTape/engine/internal/health"
+	histalpaca "github.com/earlisreal/eTape/engine/internal/hist/alpaca"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/news"
 	"github.com/earlisreal/eTape/engine/internal/replay"
@@ -224,9 +225,17 @@ func main() {
 			fd.Ensure(feed.FocusedDemand("boot-focus-"+s, s))
 		}
 		if cfg.Backfill.Enabled {
+			var fallback backfill.HistFetcher
+			if cfg.Backfill.Alpaca.Enabled {
+				if p, err := credsFile.Get(cfg.Backfill.Alpaca.CredsKey); err == nil {
+					fallback = histalpaca.New("", p.KeyID, p.SecretKey, cfg.Backfill.Alpaca.Feed, clock.System{})
+				} else {
+					log.Warn("backfill: alpaca fallback disabled (no creds)", "key", cfg.Backfill.Alpaca.CredsKey, "err", err)
+				}
+			}
 			orch := backfill.New(
 				backfill.MoomooFetcher(fd),
-				nil, // Alpaca fallback wired in Phase 2
+				fallback,
 				core,
 				st,
 				clock.System{},
