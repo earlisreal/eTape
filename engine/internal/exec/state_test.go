@@ -125,3 +125,25 @@ func TestApplyCancelExpireNoOpOnAlreadyTerminal(t *testing.T) {
 		t.Fatalf("Expired against an already-Canceled order should be a no-op, got %+v", o)
 	}
 }
+
+func TestApplyBootArm(t *testing.T) {
+	s := NewState([]VenueID{"paper", "live"})
+	applyBootArm(s, []VenueID{"paper", "live"}, map[VenueID]bool{"paper": true})
+	if !s.MasterArmed {
+		t.Fatal("master should arm when at least one venue auto-arms")
+	}
+	if !s.Venue("paper").Armed {
+		t.Fatal("paper venue should boot armed")
+	}
+	if s.Venue("live").Armed {
+		t.Fatal("live venue should boot disarmed")
+	}
+}
+
+func TestApplyBootArmNoneStaysDisarmed(t *testing.T) {
+	s := NewState([]VenueID{"live"})
+	applyBootArm(s, []VenueID{"live"}, nil)
+	if s.MasterArmed || s.Venue("live").Armed {
+		t.Fatal("with no auto-arm venue, boot must stay fully disarmed")
+	}
+}
