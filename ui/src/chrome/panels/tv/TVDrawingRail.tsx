@@ -54,7 +54,7 @@ export function TVDrawingRail({ chrome, activeTool, magnet, hideAll, symbol, onS
             {LINE_TOOLS.map((l) => (
               <button key={l.tool} aria-label={`select ${l.tool}`} onClick={() => pickLine(l.tool)}
                 style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "6px 8px", background: "transparent",
-                  border: "none", borderRadius: 4, color: chrome.text, cursor: "pointer" }}>
+                  border: "none", borderRadius: TV_GEOM.radius, color: chrome.text, cursor: "pointer" }}>
                 <l.Icon size={16} /> {l.label}
               </button>
             ))}
@@ -76,8 +76,8 @@ export function TVDrawingRail({ chrome, activeTool, magnet, hideAll, symbol, onS
             border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, boxShadow: "0 6px 20px rgba(0,0,0,.2)", padding: 10, width: 200 }}>
             <div style={{ marginBottom: 8 }}>Clear all drawings for {bare}?</div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button onClick={() => setConfirm(false)} style={{ padding: "4px 10px", background: "transparent", border: `1px solid ${chrome.border}`, borderRadius: 6, color: chrome.text, cursor: "pointer" }}>Cancel</button>
-              <button onClick={() => { setConfirm(false); onClearAll(); }} style={{ padding: "4px 10px", background: chrome.down, border: "none", borderRadius: 6, color: "#fff", cursor: "pointer" }}>Clear</button>
+              <button onClick={() => setConfirm(false)} style={{ padding: "4px 10px", background: "transparent", border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, color: chrome.text, cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => { setConfirm(false); onClearAll(); }} style={{ padding: "4px 10px", background: chrome.down, border: "none", borderRadius: TV_GEOM.radius, color: "#fff", cursor: "pointer" }}>Clear</button>
             </div>
           </div>
         )}
