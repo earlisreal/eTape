@@ -147,7 +147,7 @@ func TestRunBoundedPoolCoversEverySymbol(t *testing.T) {
 	}
 }
 
-// splitFetcher lets a test give the primary and fallback different data and
+// recordFallback lets a test give the primary and fallback different data and
 // record what range the fallback was asked for.
 type recordFallback struct {
 	m1        []feed.Bar
