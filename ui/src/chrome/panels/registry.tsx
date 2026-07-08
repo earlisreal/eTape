@@ -171,7 +171,7 @@ export const PANELS: Record<string, PanelDef> = {
     topics: ["md.quote", "exec.account", "exec.positions", "exec.status"],
     title: "Order Ticket",
     glyph: "$",
-    description: "Presets, sizing, kill switch",
+    description: "Compact entry, presets, sizing",
     symbolBearing: false,
   },
 };
