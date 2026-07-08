@@ -16,7 +16,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -42,8 +41,6 @@ import (
 func main() {
 	home, _ := os.UserHomeDir()
 	cfgPath := flag.String("config", filepath.Join(home, ".eTape", "config.toml"), "path to config.toml")
-	watch := flag.String("watch", "", "comma-separated symbols to watch")
-	focus := flag.String("focus", "", "comma-separated symbols to focus (depth + quote)")
 	replayDay := flag.String("replay", "", "replay a recorded day (YYYY-MM-DD) instead of live OpenD")
 	speed := flag.Float64("speed", 0, "replay speed (>0: real-time x speed; <=0: as fast as possible)")
 	dist := flag.String("dist", "", "serve built UI from this dir (overrides [uihub].dist_dir)")
@@ -221,12 +218,6 @@ func main() {
 		pipeWG.Add(1)
 		go pipe(ctx, &pipeWG, fd.Events(), core, st)
 		var backfillOne func(string)
-		for _, s := range append(cfg.Feed.Watchlist, splitCSV(*watch)...) {
-			fd.Ensure(feed.WatchDemand("boot-watch-"+s, s))
-		}
-		for _, s := range splitCSV(*focus) {
-			fd.Ensure(feed.FocusedDemand("boot-focus-"+s, s))
-		}
 		if cfg.Backfill.Enabled {
 			var fallback backfill.HistFetcher
 			if cfg.Backfill.Alpaca.Enabled {
@@ -427,16 +418,3 @@ func pipe(ctx context.Context, wg *sync.WaitGroup, in <-chan feed.Event, core *m
 	}
 }
 
-func splitCSV(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	out := parts[:0]
-	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}

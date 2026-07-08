@@ -45,7 +45,6 @@ func TestFeedAndMDSectionsWithDefaults(t *testing.T) {
 	path := filepath.Join(dir, "config.toml")
 	content := `
 [feed]
-watchlist = ["US.AAPL", "US.TSLA"]
 quota_slots = 300
 
 [md]
@@ -58,7 +57,7 @@ session_anchor = "09:00"
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(cfg.Feed.Watchlist) != 2 || cfg.Feed.QuotaSlots != 300 {
+	if cfg.Feed.QuotaSlots != 300 {
 		t.Fatalf("feed = %+v", cfg.Feed)
 	}
 	if !cfg.Feed.ExtendedTime || cfg.Feed.UnsubHysteresisSecs != 300 {

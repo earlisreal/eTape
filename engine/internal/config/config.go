@@ -25,10 +25,9 @@ func (o OpenD) Addr() string { return net.JoinHostPort(o.Host, strconv.Itoa(o.Po
 
 // Feed configures the market-data feed adapter.
 type Feed struct {
-	Watchlist           []string `toml:"watchlist"`
-	ExtendedTime        bool     `toml:"extended_time"`
-	UnsubHysteresisSecs int      `toml:"unsub_hysteresis_secs"`
-	QuotaSlots          int      `toml:"quota_slots"`
+	ExtendedTime        bool `toml:"extended_time"`
+	UnsubHysteresisSecs int  `toml:"unsub_hysteresis_secs"`
+	QuotaSlots          int  `toml:"quota_slots"`
 }
 
 // MD configures the market-data core.
