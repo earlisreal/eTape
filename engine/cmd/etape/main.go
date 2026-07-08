@@ -266,7 +266,7 @@ func main() {
 				log.Info("boot backfill complete", "symbols", len(symbols))
 			}()
 		}
-		startPollers(ctx, cfg, client, fd, hub, uihubClk, st, hasTZVenue(cfg), splitCSV(*watch), splitCSV(*focus), backfillOne, &scanWG)
+		startPollers(ctx, cfg, client, fd, hub, uihubClk, st, hasTZVenue(cfg), backfillOne, &scanWG)
 	} else {
 		sim := execClk.(*replay.Clock)
 		fd := replay.NewFeed(replay.FeedOptions{Rows: replayRows, Sim: sim, Pace: clock.System{}, Speed: *speed})
@@ -390,10 +390,10 @@ func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks [
 	}
 }
 
-func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, fd *opend.OpenDFeed, hub *uihub.Hub, clk clock.Clock, st *store.Store, hasTZ bool, watchCSV, focusCSV []string, backfillOne func(string), scanWG *sync.WaitGroup) {
+func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, fd *opend.OpenDFeed, hub *uihub.Hub, clk clock.Clock, st *store.Store, hasTZ bool, backfillOne func(string), scanWG *sync.WaitGroup) {
 	scanPoller := scan.New(cfg.Scan, client, hub, clk, fd, backfillOne)
 	symbols := func() []string {
-		return newsSymbols(cfg.Feed.Watchlist, watchCSV, focusCSV, hub.ActiveDemandSymbols)
+		return newsSymbols(scanPoller.PoolSymbols(), hub.ActiveDemandSymbols())
 	}
 	scanWG.Add(1)
 	go func() { defer scanWG.Done(); _ = scanPoller.Run(ctx) }()
