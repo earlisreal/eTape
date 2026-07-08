@@ -1,6 +1,6 @@
 import type { Palette } from "../palette";
 
-export type IndicatorType = "VWAP" | "EMA" | "SMA" | "MACD" | "VOLUME" | "DELTA";
+export type IndicatorType = "VWAP" | "EMA" | "SMA" | "MACD" | "VOLUME";
 
 // A per-chart indicator instance. `params` and `colors` are the customizable state,
 // persisted with the workspace (Task 9). `colors` is keyed by slot; unset slots use
@@ -34,7 +34,6 @@ export const INDICATOR_CATALOG: Record<IndicatorType, CatalogEntry> = {
   EMA:    { type: "EMA",    label: "EMA",        params: [{ key: "period", label: "Period", default: 9,  min: 1, max: 400 }], slots: [{ slot: "line", kind: "line", paneIndex: MAIN, paletteKey: "indEma" }] },
   SMA:    { type: "SMA",    label: "SMA",        params: [{ key: "period", label: "Period", default: 20, min: 1, max: 400 }], slots: [{ slot: "line", kind: "line", paneIndex: MAIN, paletteKey: "indSma" }] },
   VOLUME: { type: "VOLUME", label: "Volume",     params: [], slots: [{ slot: "hist", kind: "histogram", paneIndex: MAIN, paletteKey: "indMacdHist" }] },
-  DELTA:  { type: "DELTA",  label: "Buy/Sell Δ", params: [], slots: [{ slot: "hist", kind: "histogram", paneIndex: MAIN, paletteKey: "indMacdHist" }] },
   MACD:   { type: "MACD",   label: "MACD",
             params: [
               { key: "fast",   label: "Fast",   default: 12, min: 1, max: 200 },

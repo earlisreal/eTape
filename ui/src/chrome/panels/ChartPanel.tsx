@@ -5,7 +5,7 @@ import { ChartController } from "../../render/chart/ChartController";
 import type { ChartApiFacade, LwcSeries } from "../../render/chart/ChartApiFacade";
 import { DiamondFillPrimitive } from "../../render/chart/diamondPrimitive";
 import { SessionShadingPrimitive } from "../../render/chart/sessionPrimitive";
-import { withDefaultParams, type IndicatorInstance, type IndicatorType } from "../../render/chart/indicatorSeries";
+import { INDICATOR_CATALOG, withDefaultParams, type IndicatorInstance, type IndicatorType } from "../../render/chart/indicatorSeries";
 import { DrawingsPrimitive } from "../../render/chart/drawings/primitive";
 import { DrawingInteraction, type Tool } from "../../render/chart/drawings/interaction";
 import { DrawingRail } from "./DrawingRail";
@@ -68,13 +68,23 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // Config surfaces (timeframe + indicators) ARE low-rate chrome, so React state is
   // fine here (the hard rule is about market data, not per-chart config).
   const [timeframe, setTf] = useState(timeframe0);
+  // Drop any persisted instance whose type no longer exists in the catalog
+  // (e.g. a workspace saved before the DELTA indicator was retired) — an
+  // unknown type would otherwise crash describeIndicator/withDefaultParams.
   const [instances, setInstances] = useState<IndicatorInstance[]>(
-    (config.settings.indicators as IndicatorInstance[]) ?? [],
+    ((config.settings.indicators as IndicatorInstance[]) ?? []).filter(
+      (i) => INDICATOR_CATALOG[i.type as IndicatorType] !== undefined,
+    ),
   );
 
   const interactionRef = useRef<DrawingInteraction | null>(null);
   const magnetRef = useRef(true);
   const tfRef = useRef<string>(timeframe0);
+  // Timeframe/symbol switches clear the controller's series synchronously but
+  // bump no store revision, so the scheduler's revision-based isDirty() would
+  // otherwise never repaint them until an unrelated bar delta happens to
+  // arrive. This flag forces exactly one repaint on the next scheduled frame.
+  const forceRepaintRef = useRef(false);
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [magnet, setMagnet] = useState(true);
   const [chartSymbol, setChartSymbol] = useState(symbol);
@@ -123,6 +133,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       stores.drawings.ensureLoaded(currentSymbol);
       interactionRef.current?.onSymbolChanged();
       setChartSymbol(currentSymbol);
+      forceRepaintRef.current = true;
     };
     applySymbol();
     const offLink = linkGroups.subscribe(applySymbol);
@@ -146,11 +157,13 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         const indicatorsRev = stores.indicators.getRev();
         const fillsRev = stores.fills.getRev();
         const drawingsRev = stores.drawings.getRev();
-        const changed = barsRev !== lastBarsRev || indicatorsRev !== lastIndicatorsRev || fillsRev !== lastFillsRev || drawingsRev !== lastDrawingsRev;
+        const changed = barsRev !== lastBarsRev || indicatorsRev !== lastIndicatorsRev || fillsRev !== lastFillsRev || drawingsRev !== lastDrawingsRev
+          || forceRepaintRef.current;
         lastBarsRev = barsRev;
         lastIndicatorsRev = indicatorsRev;
         lastFillsRev = fillsRev;
         lastDrawingsRev = drawingsRev;
+        forceRepaintRef.current = false;
         return changed;
       },
       paint: () => {
@@ -186,7 +199,12 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // ---- config mutations: drive the controller imperatively, then persist ----
   const persist = (patch: Record<string, unknown>) => onConfigChange({ ...config.settings, timeframe, indicators: instances, ...patch });
 
-  const changeTimeframe = (tf: string) => { setTf(tf); controllerRef.current?.setTimeframe(tf); persist({ timeframe: tf }); };
+  const changeTimeframe = (tf: string) => {
+    setTf(tf);
+    controllerRef.current?.setTimeframe(tf);
+    forceRepaintRef.current = true;
+    persist({ timeframe: tf });
+  };
   const addIndicator = (type: IndicatorType) => {
     const inst: IndicatorInstance = { instanceId: `${config.id}:${type}-${idSeq.current++}`, type, params: withDefaultParams(type) };
     const next = [...instances, inst];

@@ -5,7 +5,7 @@
 // not emit: TopicName (alias of the generated `Topic`), VenueID, and
 // ScannerSession.
 //
-// md.indicator keying: single-series indicators (VWAP/EMA/SMA/VOLUME/DELTA)
+// md.indicator keying: single-series indicators (VWAP/EMA/SMA/VOLUME)
 // stream under the bare instanceId as the message `key`; MACD streams each slot
 // under `${instanceId}#${slot}` (macd/signal/hist). See render/chart/
 // indicatorSeries.ts's describeIndicator for slot names.

@@ -70,7 +70,7 @@ type Mark struct {
 
 // Bar is the md-side bar: raw OHLCV plus tick-derived delta fields and
 // display state. BuyV/SellV/Ticks are zero when no tick data covers the bar
-// (e.g. deep-history backfill) — the DELTA indicator reads 0 there, honestly.
+// (e.g. deep-history backfill) — consumers see 0 there, honestly.
 type Bar struct {
 	Symbol     string
 	TF         session.Timeframe

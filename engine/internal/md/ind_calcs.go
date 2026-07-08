@@ -74,13 +74,11 @@ func newCalc(spec IndicatorSpec) (calc, error) {
 		return &macdCalc{fast: newEMAState(fast), slow: newEMAState(slow), sig: newEMAState(sig)}, nil
 	case IndVolume:
 		return statelessCalc(func(b Bar) float64 { return float64(b.V) }), nil
-	case IndDelta:
-		return statelessCalc(func(b Bar) float64 { return float64(b.BuyV - b.SellV) }), nil
 	}
 	return nil, fmt.Errorf("md: unknown indicator type %q", spec.Type)
 }
 
-// ---- stateless (VOLUME, DELTA) ----
+// ---- stateless (VOLUME) ----
 
 type statelessCalc func(Bar) float64
 

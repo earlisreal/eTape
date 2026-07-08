@@ -24,9 +24,8 @@ describe("describeIndicator", () => {
     }
   });
 
-  it("routes VOLUME/DELTA to histograms on the main pane", () => {
+  it("routes VOLUME to a histogram on the main pane", () => {
     expect(describeIndicator({ instanceId: "vol", type: "VOLUME", params: {} }, LIGHT)[0].kind).toBe("histogram");
-    expect(describeIndicator({ instanceId: "d", type: "DELTA", params: {} }, LIGHT)[0].kind).toBe("histogram");
   });
 
   it("MACD yields three slots in the sub-pane (1), each palette-defaulted and #slot-keyed", () => {

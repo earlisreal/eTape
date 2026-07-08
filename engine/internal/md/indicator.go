@@ -20,7 +20,6 @@ const (
 	IndSMA    IndicatorType = "SMA"
 	IndMACD   IndicatorType = "MACD"
 	IndVolume IndicatorType = "VOLUME"
-	IndDelta  IndicatorType = "DELTA"
 )
 
 // IndicatorSpec identifies what an instance computes.

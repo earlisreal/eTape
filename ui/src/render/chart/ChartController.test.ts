@@ -5,19 +5,20 @@ import { LIGHT } from "../palette";
 import type { Bar } from "../../wire/contract";
 import { withDefaultParams } from "./indicatorSeries";
 
-function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[] } {
+function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[]; setDataCalls: unknown[][] } {
   const calls: string[] = [];
   const updates: unknown[] = [];
+  const setDataCalls: unknown[][] = [];
   return {
-    calls, updates,
-    setData: () => calls.push("setData"),
+    calls, updates, setDataCalls,
+    setData: (data) => { calls.push("setData"); setDataCalls.push(data as unknown[]); },
     update: (bar) => { calls.push("update"); updates.push(bar); },
     applyOptions: () => calls.push("applyOptions"),
   };
 }
 
 function fakeFacade() {
-  const created: Array<{ kind: string; pane: number; series: LwcSeries & { calls: string[]; updates: unknown[] } }> = [];
+  const created: Array<{ kind: string; pane: number; series: ReturnType<typeof fakeSeries> }> = [];
   const scaleMargins: Array<{ id: string; margins: { top: number; bottom: number } }> = [];
   const facade: ChartApiFacade & { created: typeof created; scrolls: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins } = {
     created, scrolls: 0, bands: 0, lastBands: [], scaleMargins,
@@ -44,6 +45,12 @@ const bar = (bucketStart: string, c: number, inProgress = false): Bar =>
   ({ symbol: "US.AAPL", timeframe: "1m", bucketStart, o: c, h: c, l: c, c, v: 100, inProgress });
 
 function barReaderOf(bars: Bar[]): BarReader { return { series: () => bars }; }
+// A timeframe-aware reader — needed to simulate a switch onto a timeframe
+// whose series is empty/not-yet-arrived while another timeframe is populated
+// (e.g. Daily seeded independently of a cold 1m symbol).
+function barReaderByTf(byTf: Record<string, Bar[]>): BarReader {
+  return { series: (_symbol, tf) => byTf[tf] ?? [] };
+}
 const emptyIndicators: IndicatorReader = { series: () => [] };
 function indicatorReaderOf(points: { timeMs: number; value: number }[]): IndicatorReader {
   return { series: () => points };
@@ -162,8 +169,37 @@ describe("ChartController", () => {
     cmd.names.length = 0;
     ctrl.setSymbol("US.NVDA");
     ctrl.sync();
-    expect(candle.calls.filter((c) => c === "setData").length).toBe(setDataBefore + 1);
+    // +2, not +1: setSymbol's resetForReload() clears the stale series with an
+    // immediate setData([]) (so the old symbol's candles never linger on
+    // screen), then the following sync() backfills the new symbol with a
+    // second setData call.
+    expect(candle.calls.filter((c) => c === "setData").length).toBe(setDataBefore + 2);
     expect(cmd.names).toContain("SubscribeIndicator"); // re-subscribed for the new symbol
+  });
+
+  it("switching timeframe to a not-yet-populated series clears the stale candles instead of freezing them", () => {
+    // Regression test: Daily -> 1m used to leave the Daily candles on screen
+    // when the 1m series was still empty (Daily can be seeded independently
+    // of 1m, so this is the common case, not an edge case).
+    const dailyBars = [bar("2026-07-05T00:00:00Z", 9), bar("2026-07-06T00:00:00Z", 10)];
+    const reader = barReaderByTf({ D: dailyBars, "1m": [] });
+    const facade = fakeFacade();
+    const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "D" },
+      { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
+    ctrl.mount();
+    ctrl.sync(); // backfill Daily
+    const candle = facade.created[0].series;
+    const volume = facade.created[1].series;
+    expect(candle.setDataCalls.at(-1)).toHaveLength(2);
+
+    ctrl.setTimeframe("1m"); // 1m series is currently empty
+    // resetForReload() must clear immediately — before any sync() call —
+    // so the Daily candles never remain frozen on screen.
+    expect(candle.setDataCalls.at(-1)).toEqual([]);
+    expect(volume.setDataCalls.at(-1)).toEqual([]);
+
+    ctrl.sync(); // 1m is empty; applyBars early-returns and must not resurrect Daily's bars
+    expect(candle.setDataCalls.at(-1)).toEqual([]);
   });
 
   it("indicator series: update() fast-path on growth; setSymbol reload forces a full setData again", () => {

@@ -73,7 +73,7 @@ func TestStreamingEqualsBatchRecompute(t *testing.T) {
 		{Type: IndVWAP}, {Type: IndSMA, Params: map[string]float64{"period": 5}},
 		{Type: IndEMA, Params: map[string]float64{"period": 4}},
 		{Type: IndMACD, Params: map[string]float64{"fast": 3, "slow": 6, "signal": 3}},
-		{Type: IndVolume}, {Type: IndDelta},
+		{Type: IndVolume},
 	}
 	rng := rand.New(rand.NewSource(7))
 	var bars []Bar

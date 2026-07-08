@@ -187,6 +187,13 @@ export class ChartController {
     this.lastAppliedKey = "";
     this.indicatorApplied.clear();
     this.indicatorLastKey.clear();
+    // Wipe the previous (symbol, timeframe)'s bars immediately — otherwise a
+    // switch to a series that's empty or slow to arrive (e.g. Daily -> a cold
+    // 1m symbol) leaves the old timeframe's candles frozen on screen forever
+    // (applyBars early-returns on an empty series, so it would never clear them).
+    this.candle.setData([]);
+    this.volume.setData([]);
+    this.facade.setSessionBands([]);
     // Re-subscribe every live indicator for the new (symbol, timeframe).
     for (const { inst } of this.indicators.values()) this.subscribeIndicator(inst);
   }
