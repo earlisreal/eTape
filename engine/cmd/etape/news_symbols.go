@@ -2,10 +2,10 @@ package main
 
 import "sort"
 
-// newsSymbols composes the news poller's rotation set: config watchlist ∪ CLI
-// --watch/--focus ∪ live UI demands (interest demands included), deduped and
-// sorted. demand may be nil (no hub). Empty strings are dropped.
-func newsSymbols(watchlist, watchCSV, focusCSV []string, demand func() []string) []string {
+// newsSymbols composes the news poller's rotation set: current scanner-pool
+// members ∪ live UI demands (interest demands included), deduped and sorted.
+// Empty strings are dropped.
+func newsSymbols(pool, liveDemands []string) []string {
 	set := map[string]struct{}{}
 	add := func(ss []string) {
 		for _, s := range ss {
@@ -14,12 +14,8 @@ func newsSymbols(watchlist, watchCSV, focusCSV []string, demand func() []string)
 			}
 		}
 	}
-	add(watchlist)
-	add(watchCSV)
-	add(focusCSV)
-	if demand != nil {
-		add(demand())
-	}
+	add(pool)
+	add(liveDemands)
 	out := make([]string, 0, len(set))
 	for s := range set {
 		out = append(out, s)

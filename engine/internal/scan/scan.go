@@ -11,12 +11,14 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/proto"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
@@ -37,6 +39,13 @@ type requester interface {
 	Request(ctx context.Context, protoID uint32, req proto.Message) (opend.Frame, error)
 }
 
+// demandFeed is the subscription-control surface the pool drives. Satisfied by
+// *opend.OpenDFeed. A nil demandFeed disables the pool (tests/replay).
+type demandFeed interface {
+	Ensure(d feed.Demand)
+	Release(id string)
+}
+
 // rankItem is the poller-internal normalized form of one rank row (decoupled
 // from the pb type so the transform is unit-testable without protobuf).
 type rankItem struct {
@@ -55,17 +64,21 @@ type floatEntry struct {
 }
 
 type Poller struct {
-	cfg     config.Scan
-	r       requester
-	pub     Publisher
-	clk     clock.Clock
-	floats  map[string]floatEntry      // symbol -> resolved float; absent = unknown
-	seen    map[string]map[string]bool // session -> symbol -> seen
-	seenDay int64                      // ET day of the current seen-sets + float cache
+	cfg      config.Scan
+	r        requester
+	pub      Publisher
+	clk      clock.Clock
+	feed     demandFeed   // nil => pool disabled
+	backfill func(string) // async per-symbol deep-history seed; nil => no backfill
+	pool     *Pool
+	poolSyms atomic.Pointer[[]string]   // lock-free snapshot for the news set
+	floats   map[string]floatEntry      // symbol -> resolved float; absent = unknown
+	seen     map[string]map[string]bool // session -> symbol -> seen
+	seenDay  int64                      // ET day of the current seen-sets + float cache
 }
 
-func New(cfg config.Scan, r requester, pub Publisher, clk clock.Clock) *Poller {
-	return &Poller{cfg: cfg, r: r, pub: pub, clk: clk,
+func New(cfg config.Scan, r requester, pub Publisher, clk clock.Clock, feed demandFeed, backfill func(string)) *Poller {
+	return &Poller{cfg: cfg, r: r, pub: pub, clk: clk, feed: feed, backfill: backfill, pool: NewPool(),
 		floats: map[string]floatEntry{}, seen: map[string]map[string]bool{}}
 }
 
@@ -124,6 +137,7 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 	p.resetIfNewDay(now)
 	p.resolveFloats(ctx, items) // populate the float cache before filtering
 	rows := rankRows(items, p.floats, p.cfg)
+	p.updatePool(now, rows)
 	sess := sessionKey(phase)
 	p.pub.Publish(wsmsg.TopicScannerRank, sess, wsmsg.ScannerRankPayload{
 		RefreshedAt: p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
@@ -134,6 +148,47 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 			Symbol: sym, At: p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
 		})
 	}
+}
+
+func scanDemandID(symbol string) string { return "scan:" + symbol }
+
+// updatePool feeds the filtered top rows to the pool and executes the returned
+// delta: Release evicted symbols, Ensure admitted symbols at watch tier, and
+// trigger an async deep-history backfill on first admission. Release runs before
+// Ensure so a symbol re-admitted on a pool-day reset ends up subscribed. A nil
+// feed disables the pool entirely (tests/replay).
+func (p *Poller) updatePool(now time.Time, rows []wsmsg.ScannerRow) {
+	if p.feed == nil {
+		return
+	}
+	syms := make([]string, len(rows))
+	for i, r := range rows {
+		syms[i] = r.Symbol
+	}
+	d := p.pool.Update(syms, now)
+	for _, s := range d.Evicted {
+		p.feed.Release(scanDemandID(s))
+	}
+	for _, s := range d.Admitted {
+		p.feed.Ensure(feed.WatchDemand(scanDemandID(s), s))
+	}
+	if p.backfill != nil {
+		for _, s := range d.Backfill {
+			p.backfill(s)
+		}
+	}
+	snap := p.pool.Symbols()
+	p.poolSyms.Store(&snap)
+}
+
+// PoolSymbols returns a snapshot of the current pool members (sorted), or nil
+// before the first poll / when the pool is disabled. Safe to call from another
+// goroutine (the news poller).
+func (p *Poller) PoolSymbols() []string {
+	if s := p.poolSyms.Load(); s != nil {
+		return *s
+	}
+	return nil
 }
 
 // rankRows is the pure transform: apply the float cache + client-side

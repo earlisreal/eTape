@@ -16,7 +16,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -42,8 +41,6 @@ import (
 func main() {
 	home, _ := os.UserHomeDir()
 	cfgPath := flag.String("config", filepath.Join(home, ".eTape", "config.toml"), "path to config.toml")
-	watch := flag.String("watch", "", "comma-separated symbols to watch")
-	focus := flag.String("focus", "", "comma-separated symbols to focus (depth + quote)")
 	replayDay := flag.String("replay", "", "replay a recorded day (YYYY-MM-DD) instead of live OpenD")
 	speed := flag.Float64("speed", 0, "replay speed (>0: real-time x speed; <=0: as fast as possible)")
 	dist := flag.String("dist", "", "serve built UI from this dir (overrides [uihub].dist_dir)")
@@ -203,6 +200,7 @@ func main() {
 	// --- feed (live OpenD or replay) ---
 	var pipeWG sync.WaitGroup
 	var backfillWG sync.WaitGroup
+	var scanWG sync.WaitGroup
 	var client *opend.Client
 	if live {
 		if n, err := st.PruneJournal(cfg.Store.RetentionDays); err == nil && n > 0 {
@@ -219,12 +217,7 @@ func main() {
 		go func() { _ = fd.Run(ctx) }()
 		pipeWG.Add(1)
 		go pipe(ctx, &pipeWG, fd.Events(), core, st)
-		for _, s := range append(cfg.Feed.Watchlist, splitCSV(*watch)...) {
-			fd.Ensure(feed.WatchDemand("boot-watch-"+s, s))
-		}
-		for _, s := range splitCSV(*focus) {
-			fd.Ensure(feed.FocusedDemand("boot-focus-"+s, s))
-		}
+		var backfillOne func(string)
 		if cfg.Backfill.Enabled {
 			var fallback backfill.HistFetcher
 			if cfg.Backfill.Alpaca.Enabled {
@@ -249,15 +242,15 @@ func main() {
 					SeedChunk:    cfg.Backfill.SeedChunk,
 				},
 			)
-			symbols := backfillSymbols(cfg, *watch, *focus)
-			backfillWG.Add(1)
-			go func() {
-				defer backfillWG.Done()
-				orch.Run(ctx, symbols)
-				log.Info("boot backfill complete", "symbols", len(symbols))
-			}()
+			backfillOne = func(sym string) {
+				backfillWG.Add(1)
+				go func() {
+					defer backfillWG.Done()
+					orch.Backfill(ctx, sym)
+				}()
+			}
 		}
-		startPollers(ctx, cfg, client, hub, uihubClk, st, hasTZVenue(cfg), splitCSV(*watch), splitCSV(*focus))
+		startPollers(ctx, cfg, client, fd, hub, uihubClk, st, hasTZVenue(cfg), backfillOne, &scanWG)
 	} else {
 		sim := execClk.(*replay.Clock)
 		fd := replay.NewFeed(replay.FeedOptions{Rows: replayRows, Sim: sim, Pace: clock.System{}, Speed: *speed})
@@ -301,6 +294,7 @@ func main() {
 	_ = httpSrv.Shutdown(shutCtx)
 	cancelShut()
 	srv.Wait()        // every conn.run() returned: no more SetConfig via dispatch
+	scanWG.Wait()     // scan poller stopped: no more backfillWG.Add from pool admissions
 	backfillWG.Wait() // boot backfill workers stopped: no more Seed* into the core
 	pipeWG.Wait()     // feed->core pipe stopped: no more RecordEvent
 	forwardWG.Wait()  // forwardMD drained: no more ArchiveBar1m/ArchiveDaily
@@ -380,11 +374,13 @@ func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks [
 	}
 }
 
-func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, hub *uihub.Hub, clk clock.Clock, st *store.Store, hasTZ bool, watchCSV, focusCSV []string) {
+func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, fd *opend.OpenDFeed, hub *uihub.Hub, clk clock.Clock, st *store.Store, hasTZ bool, backfillOne func(string), scanWG *sync.WaitGroup) {
+	scanPoller := scan.New(cfg.Scan, client, hub, clk, fd, backfillOne)
 	symbols := func() []string {
-		return newsSymbols(cfg.Feed.Watchlist, watchCSV, focusCSV, hub.ActiveDemandSymbols)
+		return newsSymbols(scanPoller.PoolSymbols(), hub.ActiveDemandSymbols())
 	}
-	go func() { _ = scan.New(cfg.Scan, client, hub, clk).Run(ctx) }()
+	scanWG.Add(1)
+	go func() { defer scanWG.Done(); _ = scanPoller.Run(ctx) }()
 	go func() { _ = news.New(cfg.News, client, hub, clk, symbols).Run(ctx) }()
 	// health: moomoo probe via the OpenD client; app-ping RTT source is nil in v1
 	// (ui-engine shows down until ping tracking is wired). The health poller's
@@ -420,41 +416,4 @@ func pipe(ctx context.Context, wg *sync.WaitGroup, in <-chan feed.Event, core *m
 			core.Feed(ev)
 		}
 	}
-}
-
-// backfillSymbols is the de-duplicated union of the watchlist and the --watch/
-// --focus flags — the same set the feed subscribes at boot.
-func backfillSymbols(cfg config.Config, watch, focus string) []string {
-	seen := map[string]bool{}
-	var out []string
-	add := func(s string) {
-		if s != "" && !seen[s] {
-			seen[s] = true
-			out = append(out, s)
-		}
-	}
-	for _, s := range cfg.Feed.Watchlist {
-		add(s)
-	}
-	for _, s := range splitCSV(watch) {
-		add(s)
-	}
-	for _, s := range splitCSV(focus) {
-		add(s)
-	}
-	return out
-}
-
-func splitCSV(s string) []string {
-	if s == "" {
-		return nil
-	}
-	parts := strings.Split(s, ",")
-	out := parts[:0]
-	for _, p := range parts {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
 }

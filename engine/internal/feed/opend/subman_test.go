@@ -167,7 +167,8 @@ func TestBudgetStarvesLRUNonFocused(t *testing.T) {
 	m, _, clk := newTestManager(t, 5)             // room for one watch(2) + one focused(4)? no: 5 slots
 	m.Ensure(feed.WatchDemand("w-old", "US.OLD")) // 2 slots, oldest
 	clk.Advance(time.Second)
-	m.Ensure(feed.FocusedDemand("f", "US.FOC")) // 4 slots, focused
+	m.Ensure(feed.Demand{ID: "f", Symbol: "US.FOC", Focused: true,
+		Subs: []feed.SubType{feed.SubQuote, feed.SubBook, feed.SubTicker, feed.SubKL1m}}) // 4 slots, focused
 	m.pass(context.Background())
 	// Focused first (4 slots), then LRU: OLD needs 2 > remaining 1 → starved.
 	if got := m.Slots(); got != 4 {
@@ -188,7 +189,8 @@ func TestBudgetStarvesLRUNonFocused(t *testing.T) {
 func TestResubscribeAllReissuesActiveSet(t *testing.T) {
 	m, rpc, _ := newTestManager(t, 100)
 	m.Ensure(feed.WatchDemand("w", "US.AAPL"))
-	m.Ensure(feed.FocusedDemand("f", "US.TSLA"))
+	m.Ensure(feed.Demand{ID: "f", Symbol: "US.TSLA", Focused: true,
+		Subs: []feed.SubType{feed.SubQuote, feed.SubBook, feed.SubTicker, feed.SubKL1m}})
 	m.pass(context.Background())
 	before := len(rpc.snapshot())
 	if err := m.ResubscribeAll(context.Background()); err != nil {

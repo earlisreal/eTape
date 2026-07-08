@@ -11,10 +11,6 @@ func TestDirectionString(t *testing.T) {
 }
 
 func TestDemandProfiles(t *testing.T) {
-	f := FocusedDemand("chart-1", "US.AAPL")
-	if !f.Focused || len(f.Subs) != 4 {
-		t.Fatalf("focused profile = %+v, want 4 subs, Focused", f)
-	}
 	w := WatchDemand("watch-AAPL", "US.AAPL")
 	if w.Focused || len(w.Subs) != 2 {
 		t.Fatalf("watch profile = %+v, want 2 subs, not Focused", w)

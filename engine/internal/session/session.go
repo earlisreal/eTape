@@ -125,6 +125,22 @@ func dayMidnightMs(tsMs int64) int64 {
 // DayMs returns the D bucket (ET wall-midnight) containing tsMs.
 func DayMs(tsMs int64) int64 { return dayMidnightMs(tsMs) }
 
+// PoolDay returns a stable integer key identifying the 20:00-ET-anchored
+// trading day containing t: the pool day runs 20:00 ET -> 20:00 ET, so one
+// overnight -> pre-market -> RTH -> after-hours cycle shares a key. The key is
+// the Unix second of the anchoring 20:00 ET instant. Used by the scanner's
+// subscription pool to sticky-subscribe a mover for the whole trading cycle
+// and reset at 20:00 ET.
+func PoolDay(t time.Time) int64 {
+	et := t.In(Loc())
+	y, m, d := et.Date()
+	anchor := time.Date(y, m, d, 20, 0, 0, 0, Loc())
+	if et.Before(anchor) {
+		anchor = anchor.AddDate(0, 0, -1)
+	}
+	return anchor.Unix()
+}
+
 func floorDiv(a, b int64) int64 {
 	q := a / b
 	if a%b != 0 && (a < 0) != (b < 0) {

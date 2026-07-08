@@ -112,3 +112,33 @@ func TestDayMs(t *testing.T) {
 		t.Fatalf("DayMs = %d, want %d", got, want)
 	}
 }
+
+func TestPoolDay(t *testing.T) {
+	et := func(y int, mo time.Month, d, h, mi int) time.Time {
+		return time.Date(y, mo, d, h, mi, 0, 0, Loc())
+	}
+	// The pool day anchored at 2026-07-07 20:00 ET spans 2026-07-07 20:00 ET
+	// through 2026-07-08 20:00 ET (overnight -> pre-market -> RTH -> after-hours).
+	anchor := PoolDay(et(2026, 7, 7, 20, 0))
+	sameDay := []time.Time{
+		et(2026, 7, 7, 20, 0),  // boundary start (overnight)
+		et(2026, 7, 7, 23, 0),  // overnight, same calendar date
+		et(2026, 7, 8, 3, 0),   // overnight, next calendar date
+		et(2026, 7, 8, 9, 30),  // RTH open
+		et(2026, 7, 8, 16, 0),  // RTH close
+		et(2026, 7, 8, 19, 59), // last minute before the next boundary
+	}
+	for _, ts := range sameDay {
+		if got := PoolDay(ts); got != anchor {
+			t.Fatalf("PoolDay(%s)=%d, want %d (same pool day)", ts, got, anchor)
+		}
+	}
+	// 20:00 ET on 2026-07-08 opens a NEW pool day.
+	if next := PoolDay(et(2026, 7, 8, 20, 0)); next == anchor {
+		t.Fatalf("PoolDay must roll over at 20:00 ET: got %d == %d", next, anchor)
+	}
+	// 19:59 vs 20:00 on the same date are different pool days.
+	if PoolDay(et(2026, 7, 8, 19, 59)) == PoolDay(et(2026, 7, 8, 20, 0)) {
+		t.Fatalf("PoolDay must differ across the 20:00 ET boundary")
+	}
+}

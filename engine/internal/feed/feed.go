@@ -100,13 +100,6 @@ type Demand struct {
 	Focused bool // focused symbols survive LRU eviction under quota pressure
 }
 
-// FocusedDemand is the focused-symbol profile: full depth + tape + bars
-// (4 quota slots).
-func FocusedDemand(id, symbol string) Demand {
-	return Demand{ID: id, Symbol: symbol, Focused: true,
-		Subs: []SubType{SubQuote, SubBook, SubTicker, SubKL1m}}
-}
-
 // WatchDemand is the watchlist profile: tape/10s/1m recording, no depth
 // (2 quota slots).
 func WatchDemand(id, symbol string) Demand {
