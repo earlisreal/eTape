@@ -12,9 +12,15 @@ describe("chartTheme", () => {
     expect(o.crosshair?.vertLine?.color).toBe(LIGHT.crosshair);
   });
 
-  it("locks forward pan to the latest bar + padding and keeps a stable price-scale width", () => {
+  it("pads the right edge via rightOffset, locks the left edge, and keeps a stable price-scale width", () => {
     const o = chartOptions(LIGHT);
-    expect(o.timeScale?.fixRightEdge).toBe(true);
+    // Regression guard: LWC's TimeScale hardcodes the max right offset to the
+    // literal constant 0 whenever fixRightEdge is true, REGARDLESS of
+    // rightOffset — so the two together always collapse to zero right-edge
+    // padding (verified against lightweight-charts.development.mjs's
+    // _private__maxRightOffset()). DeepChartOptions.timeScale has no
+    // fixRightEdge field at all (see chartTheme.ts) so this can't be
+    // reintroduced without a compile error.
     expect(o.timeScale?.fixLeftEdge).toBe(true);
     expect(o.timeScale?.rightOffset).toBe(4);
     expect(o.timeScale?.shiftVisibleRangeOnNewBar).toBe(true);

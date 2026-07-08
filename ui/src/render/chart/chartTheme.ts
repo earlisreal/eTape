@@ -11,7 +11,10 @@ export interface DeepChartOptions {
   localization?: { timeFormatter?: (time: number) => string };
   timeScale?: {
     borderColor: string; rightOffset: number; secondsVisible: boolean; timeVisible: boolean;
-    fixRightEdge?: boolean; fixLeftEdge?: boolean; shiftVisibleRangeOnNewBar?: boolean;
+    // fixRightEdge deliberately omitted from this surface — see chartOptions()'s
+    // comment: LWC hardcodes the max right offset to 0 whenever it's set,
+    // clamping any positive rightOffset back to 0.
+    fixLeftEdge?: boolean; shiftVisibleRangeOnNewBar?: boolean;
     tickMarkFormatter?: (time: number, tickMarkType: number, locale: string) => string | null;
   };
   autoSize?: boolean;
@@ -103,13 +106,24 @@ export function chartOptions(p: Palette): DeepChartOptions {
     localization: { timeFormatter },
     timeScale: {
       borderColor: p.border, rightOffset: 4, secondsVisible: true, timeVisible: true,
-      // fixRightEdge: max forward pan is the latest bar + the rightOffset padding above.
-      // fixLeftEdge: max backward pan is the first data point — paired with the
-      // LEFT_PAD_BARS whitespace ChartController prepends ahead of the earliest
-      // real bar, this leaves the same empty-bar margin on both edges (LWC has no
-      // native left-offset option, only rightOffset).
+      // rightOffset alone (no fixRightEdge): verified against
+      // lightweight-charts.development.mjs — TimeScale._private__maxRightOffset()
+      // returns the literal constant 0 whenever fixRightEdge is true, REGARDLESS
+      // of rightOffset's value. That clamp runs on every _correctOffset() call
+      // (initial load, scrollToRealTime, resetTimeScale, every resize), so
+      // fixRightEdge+rightOffset together always collapse to zero padding — the
+      // 4-bar right margin never actually appeared with fixRightEdge set. Leaving
+      // it unset (default false) lets rightOffset's margin take effect; the
+      // tradeoff is the user can scroll further right into blank future space
+      // (LWC has no "capped but non-zero" right-edge mode).
+      // fixLeftEdge: max backward pan is the first data point. This one DOES work
+      // as intended — unlike maxRightOffset, TimeScale._private__minRightOffset()
+      // derives its cap from the first data point's actual index rather than a
+      // hardcoded constant — so prepending LEFT_PAD_BARS whitespace ahead of the
+      // earliest real bar (ChartController.setAllBars) correctly shifts this cap
+      // to leave that same empty-bar margin on the left.
       // shiftVisibleRangeOnNewBar: once at the right edge, new bars auto-scroll into view.
-      fixRightEdge: true, fixLeftEdge: true, shiftVisibleRangeOnNewBar: true,
+      fixLeftEdge: true, shiftVisibleRangeOnNewBar: true,
       tickMarkFormatter,
     },
     autoSize: false, // we drive resize via ResizeObserver → controller.resize()
