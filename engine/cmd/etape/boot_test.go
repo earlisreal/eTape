@@ -1,11 +1,13 @@
 package main
 
 import (
+	"context"
 	"testing"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/creds"
+	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
 )
 
@@ -45,12 +47,42 @@ func TestBuildBrokersReplayIsAllSim(t *testing.T) {
 	}
 }
 
-func TestBuildBrokersMoomooAndUnknownError(t *testing.T) {
-	if _, err := buildBrokers(config.Config{Venues: []config.Venue{{ID: "mm", Broker: "moomoo"}}}, creds.File{}, clock.System{}, false); err == nil {
-		t.Fatal("moomoo venue must error (deferred to v1.x)")
+func TestBuildBrokersMoomooRegistersStub(t *testing.T) {
+	cfg := config.Config{Venues: []config.Venue{{ID: "moomoo", Broker: "moomoo"}}}
+	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, false)
+	if err != nil {
+		t.Fatalf("moomoo venue should register a stub, not error: %v", err)
 	}
-	if _, err := buildBrokers(config.Config{Venues: []config.Venue{{ID: "x", Broker: "bogus"}}}, creds.File{}, clock.System{}, false); err == nil {
+	if len(vbs) != 1 || vbs[0].ID != "moomoo" {
+		t.Fatalf("expected one moomoo venue, got %+v", vbs)
+	}
+	if vbs[0].Run != nil {
+		t.Fatal("stub venue has no Run loop")
+	}
+	if _, err := vbs[0].Broker.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "moomoo"}); err == nil {
+		t.Fatal("moomoo stub must reject submits")
+	}
+}
+
+func TestBuildBrokersUnknownErrors(t *testing.T) {
+	cfg := config.Config{Venues: []config.Venue{{ID: "x", Broker: "nope"}}}
+	if _, err := buildBrokers(cfg, creds.File{}, clock.System{}, false); err == nil {
 		t.Fatal("unknown broker must error")
+	}
+}
+
+func TestAutoArmVenues(t *testing.T) {
+	cfg := config.Config{Venues: []config.Venue{
+		{ID: "alpaca-paper", Broker: "alpaca", AutoArm: true},
+		{ID: "alpaca-live", Broker: "alpaca"},
+		{ID: "moomoo", Broker: "moomoo", AutoArm: true},
+	}}
+	got := autoArmVenues(cfg)
+	if !got["alpaca-paper"] || !got["moomoo"] {
+		t.Fatalf("auto-arm venues missing: %+v", got)
+	}
+	if got["alpaca-live"] {
+		t.Fatalf("live venue must not auto-arm: %+v", got)
 	}
 }
 

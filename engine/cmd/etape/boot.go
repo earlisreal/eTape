@@ -8,6 +8,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
 	"github.com/earlisreal/eTape/engine/internal/broker/sim"
+	"github.com/earlisreal/eTape/engine/internal/broker/stub"
 	"github.com/earlisreal/eTape/engine/internal/broker/tradezero"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
@@ -47,6 +48,19 @@ func venueMetas(cfg config.Config) []uihub.VenueMeta {
 				MaxPositionShares: gv.MaxPositionShares, MaxOpenOrders: gv.MaxOpenOrders,
 			},
 		})
+	}
+	return out
+}
+
+// autoArmVenues maps venue id -> true for venues configured with auto_arm.
+// Paper venues boot armed; live venues (absent here) keep the manual arm click.
+// Built from config regardless of replay, so replay mode auto-arms identically.
+func autoArmVenues(cfg config.Config) map[exec.VenueID]bool {
+	out := make(map[exec.VenueID]bool, len(cfg.Venues))
+	for _, v := range cfg.Venues {
+		if v.AutoArm {
+			out[exec.VenueID(v.ID)] = true
+		}
 	}
 	return out
 }
@@ -92,7 +106,10 @@ func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock, replay bool
 			}
 			out = append(out, venueBroker{ID: id, Broker: a, Run: a.Run})
 		case "moomoo":
-			return nil, fmt.Errorf("venue %s: moomoo trading venue is deferred to v1.x", v.ID)
+			// Stub venue: registers, never connects, rejects order placement.
+			// The real moomoo trading adapter is execution v1.x; only this
+			// case changes then. (Replay short-circuits to sim above.)
+			out = append(out, venueBroker{ID: id, Broker: stub.New()})
 		default:
 			return nil, fmt.Errorf("venue %s: unknown broker %q", v.ID, v.Broker)
 		}
