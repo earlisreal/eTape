@@ -21,6 +21,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/backfill"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/creds"
@@ -28,6 +29,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
 	"github.com/earlisreal/eTape/engine/internal/health"
+	histalpaca "github.com/earlisreal/eTape/engine/internal/hist/alpaca"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/news"
 	"github.com/earlisreal/eTape/engine/internal/replay"
@@ -200,6 +202,7 @@ func main() {
 
 	// --- feed (live OpenD or replay) ---
 	var pipeWG sync.WaitGroup
+	var backfillWG sync.WaitGroup
 	var client *opend.Client
 	if live {
 		if n, err := st.PruneJournal(cfg.Store.RetentionDays); err == nil && n > 0 {
@@ -220,6 +223,38 @@ func main() {
 		}
 		for _, s := range splitCSV(*focus) {
 			fd.Ensure(feed.FocusedDemand("boot-focus-"+s, s))
+		}
+		if cfg.Backfill.Enabled {
+			var fallback backfill.HistFetcher
+			if cfg.Backfill.Alpaca.Enabled {
+				if cfg.Backfill.Alpaca.CredsKey == "alpaca-live" {
+					log.Warn("backfill: refusing alpaca-live creds for read-only historical fallback", "key", cfg.Backfill.Alpaca.CredsKey)
+				} else if p, err := credsFile.Get(cfg.Backfill.Alpaca.CredsKey); err == nil {
+					fallback = histalpaca.New("", p.KeyID, p.SecretKey, cfg.Backfill.Alpaca.Feed, clock.System{})
+				} else {
+					log.Warn("backfill: alpaca fallback disabled (no creds)", "key", cfg.Backfill.Alpaca.CredsKey, "err", err)
+				}
+			}
+			orch := backfill.New(
+				backfill.MoomooFetcher(fd),
+				fallback,
+				core,
+				st,
+				clock.System{},
+				backfill.Config{
+					IntradayDays: cfg.Backfill.IntradayDays,
+					DailyYears:   cfg.Backfill.DailyYears,
+					Concurrency:  cfg.Backfill.Concurrency,
+					SeedChunk:    cfg.Backfill.SeedChunk,
+				},
+			)
+			symbols := backfillSymbols(cfg, *watch, *focus)
+			backfillWG.Add(1)
+			go func() {
+				defer backfillWG.Done()
+				orch.Run(ctx, symbols)
+				log.Info("boot backfill complete", "symbols", len(symbols))
+			}()
 		}
 		startPollers(ctx, cfg, client, hub, uihubClk, st, hasTZVenue(cfg))
 	} else {
@@ -264,10 +299,11 @@ func main() {
 	shutCtx, cancelShut := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = httpSrv.Shutdown(shutCtx)
 	cancelShut()
-	srv.Wait()       // every conn.run() returned: no more SetConfig via dispatch
-	pipeWG.Wait()    // feed->core pipe stopped: no more RecordEvent
-	forwardWG.Wait() // forwardMD drained: no more ArchiveBar1m/ArchiveDaily
-	<-execDone       // exec.Core.Run returned: no more AppendExecEvent
+	srv.Wait()        // every conn.run() returned: no more SetConfig via dispatch
+	backfillWG.Wait() // boot backfill workers stopped: no more Seed* into the core
+	pipeWG.Wait()     // feed->core pipe stopped: no more RecordEvent
+	forwardWG.Wait()  // forwardMD drained: no more ArchiveBar1m/ArchiveDaily
+	<-execDone        // exec.Core.Run returned: no more AppendExecEvent
 	brokerWG.Wait()
 	if err := st.Close(); err != nil {
 		log.Error("close store", "err", err)
@@ -384,6 +420,29 @@ func pipe(ctx context.Context, wg *sync.WaitGroup, in <-chan feed.Event, core *m
 			core.Feed(ev)
 		}
 	}
+}
+
+// backfillSymbols is the de-duplicated union of the watchlist and the --watch/
+// --focus flags — the same set the feed subscribes at boot.
+func backfillSymbols(cfg config.Config, watch, focus string) []string {
+	seen := map[string]bool{}
+	var out []string
+	add := func(s string) {
+		if s != "" && !seen[s] {
+			seen[s] = true
+			out = append(out, s)
+		}
+	}
+	for _, s := range cfg.Feed.Watchlist {
+		add(s)
+	}
+	for _, s := range splitCSV(watch) {
+		add(s)
+	}
+	for _, s := range splitCSV(focus) {
+		add(s)
+	}
+	return out
 }
 
 func splitCSV(s string) []string {
