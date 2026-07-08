@@ -258,13 +258,6 @@ func main() {
 					orch.Backfill(ctx, sym)
 				}()
 			}
-			symbols := backfillSymbols(cfg, *watch, *focus)
-			backfillWG.Add(1)
-			go func() {
-				defer backfillWG.Done()
-				orch.Run(ctx, symbols)
-				log.Info("boot backfill complete", "symbols", len(symbols))
-			}()
 		}
 		startPollers(ctx, cfg, client, fd, hub, uihubClk, st, hasTZVenue(cfg), backfillOne, &scanWG)
 	} else {
@@ -432,29 +425,6 @@ func pipe(ctx context.Context, wg *sync.WaitGroup, in <-chan feed.Event, core *m
 			core.Feed(ev)
 		}
 	}
-}
-
-// backfillSymbols is the de-duplicated union of the watchlist and the --watch/
-// --focus flags — the same set the feed subscribes at boot.
-func backfillSymbols(cfg config.Config, watch, focus string) []string {
-	seen := map[string]bool{}
-	var out []string
-	add := func(s string) {
-		if s != "" && !seen[s] {
-			seen[s] = true
-			out = append(out, s)
-		}
-	}
-	for _, s := range cfg.Feed.Watchlist {
-		add(s)
-	}
-	for _, s := range splitCSV(watch) {
-		add(s)
-	}
-	for _, s := range splitCSV(focus) {
-		add(s)
-	}
-	return out
 }
 
 func splitCSV(s string) []string {
