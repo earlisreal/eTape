@@ -108,6 +108,26 @@ describe("OrderSettingsSection", () => {
     expect(saved.templates).toEqual(normalizeOrderConfig(DEFAULT_ORDER_CONFIG).templates);
   });
 
+  it("disables save on a duplicate hotkey binding and re-enables it once unbound", () => {
+    wrap();
+    // duplicate binding disables save (plain DOM property — jest-dom is not installed)
+    const save = () => screen.getByTestId("save") as HTMLButtonElement;
+    expect(save().disabled).toBe(false);
+    fireEvent.keyDown(screen.getByTestId("tmpl-hotkey-buy-25pct"), { key: "1", ctrlKey: true });
+    expect(save().disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("tmpl-unbind-buy-25pct"));
+    expect(save().disabled).toBe(false);
+  });
+
+  it("renders the cheat-sheet strip with bound template labels and reflects a live label edit", () => {
+    wrap();
+    const sheet = screen.getByTestId("cheat-sheet");
+    expect(sheet.textContent).toContain("Buy $5k");
+    fireEvent.change(screen.getByTestId("tmpl-label-buy-5k"), { target: { value: "Big buy" } });
+    expect(sheet.textContent).toContain("Big buy");
+    expect(sheet.textContent).not.toContain("Buy $5k");
+  });
+
   // Regression for a CRITICAL safety finding: the capture input previously called
   // only e.preventDefault(), not e.stopPropagation(). The real hotkey engine
   // (useHotkeys) listens for keydown on `window` in the bubble phase, so a

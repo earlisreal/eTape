@@ -13,10 +13,7 @@ import {
   type OrderConfig, type PlaceOrderTemplate,
 } from "./actionTemplate";
 import { normalizeCombo } from "./hotkeys";
-// Note: Keycap (this task's other deliverable) isn't rendered in this file yet —
-// per the plan, Task 8 wires it into the KEY column with duplicate-hotkey
-// highlighting (`danger={isDup(t) || ...}`). Importing it here unused would fail
-// noUnusedLocals.
+import { Keycap } from "./Keycap";
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
@@ -66,6 +63,13 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
   const addPlace = () => setTemplates((ts) => [...ts, { kind: "place", id: uid("tmpl"), label: "New", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, priceOffsetUnit: "$", sizing: { mode: "Shares", shares: 100 } } as PlaceOrderTemplate]);
   const addManage = () => setTemplates((ts) => [...ts, { kind: "manage", id: uid("mng"), label: "New action", action: "CancelLast" }]);
   const doReset = () => { setTemplates(normalizeOrderConfig({ ...config, templates: DEFAULT_TEMPLATES.map((t) => ({ ...t })) }).templates); setConfirmReset(false); };
+  const places = templates.filter((t): t is PlaceOrderTemplate => t.kind === "place");
+
+  const combos = templates.map((t) => t.hotkey ?? "").filter((c) => c !== "");
+  const dupes = new Set(combos.filter((c, i) => combos.indexOf(c) !== i));
+  const isDup = (t: ActionTemplate) => !!t.hotkey && dupes.has(t.hotkey);
+  const hasConflict = dupes.size > 0;
+  const manages = templates.filter((t) => t.kind === "manage");
 
   const inp = { background: palette.bg, color: palette.text, border: `1px solid ${palette.border}`, fontSize: 12, padding: "1px 4px", width: "100%", boxSizing: "border-box" } as const;
   const cell = { display: "grid", gridTemplateColumns: COLS, gap: 4, alignItems: "center", padding: "3px 0", borderTop: `1px solid ${palette.border}` } as const;
@@ -73,6 +77,21 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
 
   return (
     <div style={{ color: palette.text }}>
+      <div data-testid="cheat-sheet" style={{ border: `1px solid ${palette.border}`, borderRadius: 4, padding: "6px 8px", marginBottom: 10 }}>
+        <div style={{ color: palette.textMuted, fontSize: 10, letterSpacing: 0.4, marginBottom: 4 }}>CHEAT SHEET</div>
+        {[{ label: "Place", rows: places }, { label: "Manage", rows: manages }].map((grp) => (
+          <div key={grp.label} style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 2 }}>
+            <span style={{ width: 52, color: palette.textMuted }}>{grp.label}</span>
+            {grp.rows.filter((t) => t.hotkey).map((t) => (
+              <span key={t.id} style={{ display: "inline-flex", gap: 5, alignItems: "center" }}>
+                <Keycap combo={t.hotkey as string} danger={isDup(t) || (t.kind === "manage" && t.action === "KillSwitch")} />
+                <span style={{ color: isDup(t) ? palette.danger : palette.text }}>{t.label}</span>
+              </span>
+            ))}
+          </div>
+        ))}
+      </div>
+
       <div style={head}>
         <span>LABEL</span><span>SIDE</span><span>TYPE</span><span>TIF</span><span>PRICE</span><span>OFFSET</span><span>SIZE</span><span>KEY</span><span />
       </div>
@@ -120,9 +139,10 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
                 const c = normalizeCombo(e);
                 if (c) patch(t.id, { hotkey: c });
               }}
-              style={{ ...inp, width: 96 }}
+              style={{ ...inp, width: 96, borderColor: isDup(t) ? palette.danger : palette.border }}
             />
             {t.hotkey ? <button data-testid={`tmpl-unbind-${t.id}`} title="unbind" onClick={() => patch(t.id, { hotkey: "" })} style={{ ...inp, width: 22, cursor: "pointer", color: palette.textMuted }}>×</button> : null}
+            {isDup(t) ? <span style={{ color: palette.danger, fontSize: 10 }}>dup</span> : null}
           </span>
           <button title="remove" onClick={() => removeTemplate(t.id)} style={{ ...inp, width: 22, color: palette.danger, cursor: "pointer" }}>×</button>
         </div>
@@ -142,7 +162,7 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
-        <button data-testid="save" onClick={() => onSave({ ...config, templates })} style={{ ...inp, width: "auto", background: palette.accent, color: palette.bg, fontWeight: 700, cursor: "pointer" }}>Save</button>
+        <button data-testid="save" disabled={hasConflict} onClick={() => onSave({ ...config, templates })} style={{ ...inp, width: "auto", background: hasConflict ? palette.border : palette.accent, color: palette.bg, fontWeight: 700, cursor: hasConflict ? "not-allowed" : "pointer" }}>Save</button>
       </div>
     </div>
   );

@@ -18,7 +18,8 @@ export function Keycap({ combo, danger }: { combo: string; danger?: boolean }): 
       {keys.map((k, i) => (
         <kbd key={i} className="mono" style={{
           fontSize: 11, lineHeight: "14px", padding: "1px 5px", background: palette.surface,
-          color, border: `1px solid ${border}`, borderBottomWidth: 2, borderRadius: 3,
+          color, borderTop: `1px solid ${border}`, borderLeft: `1px solid ${border}`,
+          borderRight: `1px solid ${border}`, borderBottom: `2px solid ${border}`, borderRadius: 3,
         }}>{KEY_LABEL[k] ?? k}</kbd>
       ))}
     </span>
