@@ -96,6 +96,31 @@ describe("AppShell onConfigChange", () => {
     expect(panelIds).toContain("news");
     expect(last.panels).toHaveLength(2);
   });
+
+  // Regression for the settings-clobber bug: onConfigChange now MERGES a patch
+  // into the stored settings. Panels/PanelFrame only ever see the config frozen
+  // at their creation, so under the old replace semantics any write (e.g. a
+  // type-to-load symbol commit spreading frozen settings) wiped every sibling
+  // key persisted since mount — a chart's indicators silently vanished from the
+  // workspace after a symbol change.
+  it("merges a settings patch without dropping sibling keys", async () => {
+    const seed: Workspace = {
+      name: "default",
+      panels: [{ id: "orders-1", panelId: "open-orders", group: null, settings: { keepMe: "precious" } }],
+      layout: null,
+    };
+    const { saved } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    await waitFor(() => expect(screen.getByText("Symbol")).toBeTruthy());
+
+    // Sort-by-symbol persists via onConfigChange with a `{ sort }` patch.
+    fireEvent.click(screen.getByText("Symbol"));
+
+    await waitFor(() => expect(saved.length).toBeGreaterThan(0));
+    const settings = saved[saved.length - 1].panels[0].settings;
+    expect(settings.keepMe).toBe("precious"); // sibling key survives the patch
+    expect(settings.sort).toBeTruthy();       // and the patch itself landed
+  });
 });
 
 describe("AppShell single-panel tab visibility", () => {

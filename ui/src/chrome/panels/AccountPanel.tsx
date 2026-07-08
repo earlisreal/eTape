@@ -130,7 +130,7 @@ function PositionsTable({
     if (!sortable) return;
     const next = toggleSort(sort, col);
     setSort(next);
-    onConfigChange({ ...config.settings, sort: next });
+    onConfigChange({ sort: next });
   };
 
   const flatten = (row: PositionRow) => {

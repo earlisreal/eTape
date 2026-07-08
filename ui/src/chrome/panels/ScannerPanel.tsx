@@ -77,14 +77,14 @@ export function ScannerPanel(
   const openFilters = () => { setDraft(thresholds); setFiltersOpen(true); };
   const applyFilters = () => {
     setThresholds(draft);
-    onConfigChange({ ...config.settings, thresholds: draft });
+    onConfigChange({ thresholds: draft });
     setFiltersOpen(false);
   };
   const resetDefaults = () => setDraft(DEFAULT_THRESHOLDS);
   const clickSort = (col: string) => {
     const next = toggleSort(sort, col);
     setSort(next);
-    onConfigChange({ ...config.settings, sort: next });
+    onConfigChange({ sort: next });
   };
 
   const header = cv.refreshedAt

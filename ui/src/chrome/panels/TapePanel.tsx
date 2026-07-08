@@ -165,7 +165,7 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
             onChange={(e) => {
               const v = Math.max(0, Number(e.target.value) || 0);
               setMinSize(v);
-              onConfigChange({ ...config.settings, minSize: v });
+              onConfigChange({ minSize: v });
             }}
           />
         </label>
