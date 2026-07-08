@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from "vitest";
 import { DrawingsPrimitive } from "./primitive";
 import { LIGHT } from "../../palette";
 import type { Drawing } from "./model";
+import { DEFAULT_DRAWING_WIDTH, DEFAULT_LINE_STYLE } from "./model";
+import { LINE_DASH } from "../lineStyle";
 
 // Records the 2D-context ops the renderer issues, without a real canvas.
 function recordingCtx() {
@@ -116,5 +118,79 @@ describe("DrawingsPrimitive", () => {
     const { ctx, calls } = recordingCtx();
     draw(p, ctx);
     expect(calls.some((c) => c[0] === "fillText")).toBe(true);
+  });
+});
+
+// Captures strokeStyle / lineWidth / dash at each stroke, which recordingCtx() doesn't.
+function styleCtx() {
+  const strokes: { color: string; width: number; dash: number[] }[] = [];
+  let dash: number[] = [];
+  const ctx: any = {
+    beginPath() {}, moveTo() {}, lineTo() {},
+    stroke() { strokes.push({ color: ctx.strokeStyle, width: ctx.lineWidth, dash: [...dash] }); },
+    strokeRect() { strokes.push({ color: ctx.strokeStyle, width: ctx.lineWidth, dash: [...dash] }); },
+    fillRect() {}, fillText() {}, setLineDash(d: number[]) { dash = d; }, save() {}, restore() {},
+    strokeStyle: "", fillStyle: "", lineWidth: 0, font: "", globalAlpha: 1, textBaseline: "",
+  };
+  return { ctx, strokes };
+}
+
+describe("DrawingsPrimitive per-drawing style + hide-all", () => {
+  it("strokes a drawing with its own color, width, and dash", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    p.setDrawings([{ ...hline, color: "#2962FF", width: 3, lineStyle: "dashed" }]);
+    const { ctx, strokes } = styleCtx();
+    draw(p, ctx);
+    expect(strokes[0].color).toBe("#2962FF");
+    expect(strokes[0].width).toBe(3);
+    expect(strokes[0].dash.length).toBeGreaterThan(0);
+  });
+
+  it("falls back to palette text color and default width when unstyled", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    p.setDrawings([hline]);
+    const { ctx, strokes } = styleCtx();
+    draw(p, ctx);
+    expect(strokes[0].color).toBe(LIGHT.text);
+    expect(strokes[0].width).toBe(1);
+    expect(strokes[0].dash).toEqual([]);
+  });
+
+  it("setHideAll(true) skips all committed drawings", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    p.setDrawings([hline]);
+    p.setHideAll(true);
+    const { ctx, strokes } = styleCtx();
+    draw(p, ctx);
+    expect(strokes).toHaveLength(0);
+  });
+
+  it("setHideAll(true) still renders the active placement ghost", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    p.setDrawings([hline]);
+    p.setHideAll(true);
+    p.setTransient({ ghost: { kind: "trendline", anchors: [{ timeMs: 0, price: 20 }, { timeMs: 60_000, price: 10 }] } });
+    const { ctx, strokes } = styleCtx();
+    draw(p, ctx);
+    // Only the ghost's stroke should fire: the committed hline stays hidden behind hideAll,
+    // while the in-progress placement preview renders unconditionally.
+    expect(strokes).toHaveLength(1);
+    expect(strokes[0].color).toBe(LIGHT.accent);
+    expect(strokes[0].dash).toEqual([4, 3]);
+  });
+
+  it("applies a partial style override (color only) and falls back to defaults for width/lineStyle", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    p.setDrawings([{ ...hline, color: "#2962FF" }]);
+    const { ctx, strokes } = styleCtx();
+    draw(p, ctx);
+    expect(strokes[0].color).toBe("#2962FF");
+    expect(strokes[0].width).toBe(DEFAULT_DRAWING_WIDTH);
+    expect(strokes[0].dash).toEqual(LINE_DASH[DEFAULT_LINE_STYLE]);
   });
 });

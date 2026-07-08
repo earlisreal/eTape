@@ -10,10 +10,17 @@ export interface LwcSeries {
   setSeriesOrder(order: number): void;
 }
 
+export type MainKind = "candle" | "bar" | "line" | "area";
+
 // The minimal slice of Lightweight Charts v5 the controller drives. ChartPanel
 // implements this over a real IChartApi; ChartController.test.ts implements a fake.
 export interface ChartApiFacade {
-  addSeries(kind: "candle" | "line" | "histogram", options: unknown, paneIndex: number): LwcSeries;
+  // The main price series (candle/bar/line/area). Recreated in place on a
+  // chart-type change; always carries the diamond + drawings primitives and is the
+  // series used for price<->coordinate conversion.
+  setMainSeries(kind: MainKind, options: unknown): LwcSeries;
+  // Indicator + volume series only (never the main series — no primitives attached).
+  addSeries(kind: "line" | "histogram", options: unknown, paneIndex: number): LwcSeries;
   removeSeries(series: LwcSeries): void;
   // Configure the margins of a price scale by id ("" is the volume overlay scale).
   // The right (candle) scale is configured via chart options, not this method.
@@ -30,5 +37,10 @@ export interface ChartApiFacade {
   resetTimeScale(): void; // default bar spacing + scroll to the latest bar
   resize(width: number, height: number): void;
   applyOptions(options: unknown): void;
+  setWatermark(text: string | null): void; // symbol watermark on the main pane (null clears)
+  // TV chrome additions:
+  takeScreenshot(): HTMLCanvasElement;               // PNG export (camera button)
+  subscribeCrosshairMove(cb: (logical: number | null) => void): () => void; // legend value tracking
+  paneHeights(): number[];                            // legend per-pane vertical offsets
   remove(): void;
 }

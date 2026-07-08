@@ -1,10 +1,11 @@
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import type { Palette } from "../palette";
 import type { Bar } from "../../wire/contract";
-import { chartOptions, candleOptions, volumeOptions, VOLUME_SCALE_MARGINS, INDICATOR_LINE_WIDTH, OVERLAY_NO_AUTOSCALE } from "./chartTheme";
+import { chartOptions, candleOptions, volumeOptions, mainSeriesOptions, VOLUME_SCALE_MARGINS, OVERLAY_NO_AUTOSCALE, type ChartType } from "./chartTheme";
 import { sessionAt } from "./sessions";
 import type { Band } from "./sessions";
 import { describeIndicator, withDefaultParams, type IndicatorInstance } from "./indicatorSeries";
+import { LWC_LINE_STYLE } from "./lineStyle";
 import type { FillMarker } from "./diamondMarker";
 import { timeframeToMs } from "./drawings/geometry";
 import type { Timeframe } from "./barBucket";
@@ -35,6 +36,11 @@ export class ChartController {
   private indicatorApplied = new Map<string, number>(); // per-series point count applied via setData/update
   private indicatorLastKey = new Map<string, string>(); // per-series fingerprint of the last applied point, `${timeMs}|${value}`
   private backfilled = false;
+  private chartType: ChartType = "candle";
+  private showSessions = true;
+  private gridVisible = true;
+  private volumeVisible = true;
+  private watermarkOn = false;
   private readonly indicators = new Map<string, { inst: IndicatorInstance; series: Map<string, LwcSeries> }>();
 
   constructor(
@@ -46,7 +52,7 @@ export class ChartController {
 
   mount(): void {
     this.facade.applyOptions(chartOptions(this.palette));
-    this.candle = this.facade.addSeries("candle", candleOptions(this.palette), 0);
+    this.candle = this.facade.setMainSeries("candle", candleOptions(this.palette));
     this.volume = this.facade.addSeries("histogram", volumeOptions(this.palette), 0);
     // Confine the volume overlay to the bottom band of the main pane so it never
     // overlaps the candles (the candle scale reserves the same band — see chartTheme).
@@ -88,13 +94,13 @@ export class ChartController {
         return;
       }
       for (let i = from; i < bars.length; i++) {
-        this.candle.update(toCandle(bars[i]));
+        this.candle.update(this.mainPoint(bars[i]));
         this.volume.update(toVolume(bars[i], this.palette));
       }
       this.lastAppliedCount = bars.length;
       this.lastAppliedKey = keyOf(last);
     } else if (lastChanged) {
-      this.candle.update(toCandle(last));
+      this.candle.update(this.mainPoint(last));
       this.volume.update(toVolume(last, this.palette));
       this.lastAppliedKey = keyOf(last);
       // Auto-follow is LWC's default when already at the right edge; never force it
@@ -104,7 +110,7 @@ export class ChartController {
 
   private setAllBars(bars: Bar[]): void {
     const pad = this.leftPad(bars);
-    this.candle.setData([...pad, ...bars.map(toCandle)]);
+    this.candle.setData([...pad, ...bars.map((b) => this.mainPoint(b))]);
     this.volume.setData([...pad, ...bars.map((b) => toVolume(b, this.palette))]);
     this.backfilled = true;
     // lastAppliedCount/lastAppliedKey track the REAL bars only — the incremental
@@ -178,7 +184,7 @@ export class ChartController {
   // every edge a real bar time on every timeframe.
   private applySessions(bars: Bar[]): void {
     const intraday = !["D", "W", "M"].includes(this.config.timeframe);
-    if (!intraday || bars.length === 0) { this.facade.setSessionBands([]); return; }
+    if (!intraday || bars.length === 0 || !this.showSessions) { this.facade.setSessionBands([]); return; }
     this.facade.setSessionBands(bandsFromBars(bars));
   }
 
@@ -195,7 +201,8 @@ export class ChartController {
           // Studies read as reference lines, not standalone series — no chart-spanning
           // last-value price line (TradingView doesn't draw one for overlay indicators).
           priceLineVisible: false,
-          ...(d.kind === "line" ? { lineWidth: INDICATOR_LINE_WIDTH } : {}),
+          visible: !(resolved.hidden ?? false),
+          ...(d.kind === "line" ? { lineWidth: d.width, lineStyle: LWC_LINE_STYLE[d.lineStyle] } : {}),
           // Main-pane overlay lines (EMA/SMA/VWAP) share the candle price scale but
           // must never expand its autoscale range — see OVERLAY_NO_AUTOSCALE. MACD's
           // sub-pane lines (paneIndex 1) are excluded: they must autoscale their own pane.
@@ -238,8 +245,8 @@ export class ChartController {
   }
 
   // Apply an edited instance. A param change re-subscribes (the engine recomputes
-  // the series); a color-only change just re-applies each slot's color in place —
-  // no re-subscribe, so the line doesn't blink.
+  // the series); a style-only change (color/width/lineStyle/hidden) just re-applies
+  // each slot's options in place — no re-subscribe, so the line doesn't blink.
   updateIndicator(inst: IndicatorInstance): void {
     const existing = this.indicators.get(inst.instanceId);
     if (!existing) { this.addIndicator(inst); return; }
@@ -249,8 +256,15 @@ export class ChartController {
       this.addIndicator(next);
       return;
     }
-    existing.inst = next; // colors only
-    for (const d of describeIndicator(next, this.palette)) existing.series.get(d.key)?.applyOptions({ color: d.color });
+    existing.inst = next; // params unchanged → style/visibility only, applied in place (no re-subscribe)
+    const hidden = next.hidden ?? false;
+    for (const d of describeIndicator(next, this.palette)) {
+      existing.series.get(d.key)?.applyOptions({
+        color: d.color,
+        visible: !hidden,
+        ...(d.kind === "line" ? { lineWidth: d.width, lineStyle: LWC_LINE_STYLE[d.lineStyle] } : {}),
+      });
+    }
   }
 
   setSymbol(symbol: string): void { this.config = { ...this.config, symbol }; this.resetForReload(); }
@@ -271,18 +285,48 @@ export class ChartController {
     this.facade.setSessionBands([]);
     // Re-subscribe every live indicator for the new (symbol, timeframe).
     for (const { inst } of this.indicators.values()) this.subscribeIndicator(inst);
+    if (this.watermarkOn) this.facade.setWatermark(bareSymbol(this.config.symbol));
   }
 
   setPalette(p: Palette): void {
     this.palette = p;
     this.facade.applyOptions(chartOptions(p));
-    this.candle.applyOptions(candleOptions(p));
-    this.volume.applyOptions(volumeOptions(p));
+    this.candle.applyOptions(mainSeriesOptions(this.chartType, p));
+    this.volume.applyOptions({ ...volumeOptions(p), visible: this.volumeVisible });
     for (const { inst, series } of this.indicators.values())
       for (const d of describeIndicator(inst, p)) series.get(d.key)?.applyOptions({ color: d.color });
+    this.applyGrid();
+  }
+
+  // Main-series data point matched to the active chart type: OHLC for candle/bar,
+  // single close value for line/area (LWC line/area series read `.value`).
+  private mainPoint(b: Bar): object {
+    return this.chartType === "line" || this.chartType === "area"
+      ? { time: toLwcTime(b.bucketStart), value: b.c }
+      : toCandle(b);
+  }
+
+  setChartType(type: ChartType): void {
+    if (type === this.chartType) return;
+    this.chartType = type;
+    this.candle = this.facade.setMainSeries(type, mainSeriesOptions(type, this.palette));
+    // Force a full re-seed of the new series on the next sync().
+    this.backfilled = false;
+    this.lastAppliedCount = 0;
+    this.lastAppliedKey = "";
+    this.liftCandleToTop();
   }
 
   setFills(markers: FillMarker[]): void { this.facade.setFillMarkers(markers); }
+  setShowSessions(on: boolean): void { this.showSessions = on; }
+  setGrid(on: boolean): void { this.gridVisible = on; this.applyGrid(); }
+  setVolumeVisible(on: boolean): void { this.volumeVisible = on; this.volume.applyOptions({ visible: on }); }
+  setWatermark(on: boolean): void { this.watermarkOn = on; this.facade.setWatermark(on ? bareSymbol(this.config.symbol) : null); }
+
+  private applyGrid(): void {
+    this.facade.applyOptions({ grid: { vertLines: { visible: this.gridVisible }, horzLines: { visible: this.gridVisible } } });
+  }
+
   resize(w: number, h: number): void { this.facade.resize(w, h); }
   jumpToLive(): void { this.facade.scrollToRealTime(); }
   resetZoom(): void { this.facade.resetTimeScale(); }
@@ -293,6 +337,7 @@ export class ChartController {
 }
 
 function keyOf(b: Bar): string { return `${b.bucketStart}|${b.c}|${b.h}|${b.l}|${b.v}|${b.inProgress}`; }
+function bareSymbol(s: string): string { return s.replace(/^US\./, ""); }
 // Whether bars[from..] is non-decreasing by bucketStart — the property update()'s
 // bar-by-bar replay depends on to never hand Lightweight Charts a time that goes
 // backwards relative to what it was already given.

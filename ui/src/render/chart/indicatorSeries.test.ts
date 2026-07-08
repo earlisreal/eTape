@@ -44,3 +44,34 @@ describe("describeIndicator", () => {
     expect(macd.find((d) => d.slot === "macd")!.color).toBe(LIGHT.indMacdLine); // others stay palette-default
   });
 });
+
+// NOTE: `describeIndicator`, `withDefaultParams`, `INDICATOR_CATALOG`, and `LIGHT` are
+// ALREADY imported at the top of this file — do NOT re-import them (a duplicate binding
+// is a parse-time SyntaxError). Just append this describe block.
+
+describe("describeIndicator style resolution", () => {
+  it("resolves width/lineStyle from styles, falling back to defaults", () => {
+    const d = describeIndicator({ instanceId: "e1", type: "EMA", params: { period: 9 } }, LIGHT);
+    expect(d[0].width).toBeTypeOf("number");
+    expect(d[0].lineStyle).toBe("solid");
+    expect(d[0].color).toBe(LIGHT.indEma);
+  });
+
+  it("applies per-slot style overrides", () => {
+    const d = describeIndicator(
+      { instanceId: "e1", type: "EMA", params: { period: 9 }, styles: { line: { color: "#123456", width: 4, lineStyle: "dashed" } } },
+      LIGHT,
+    );
+    expect(d[0].color).toBe("#123456");
+    expect(d[0].width).toBe(4);
+    expect(d[0].lineStyle).toBe("dashed");
+  });
+
+  it("styles override legacy colors", () => {
+    const d = describeIndicator(
+      { instanceId: "e1", type: "EMA", params: { period: 9 }, colors: { line: "#aaaaaa" }, styles: { line: { color: "#bbbbbb" } } },
+      LIGHT,
+    );
+    expect(d[0].color).toBe("#bbbbbb");
+  });
+});

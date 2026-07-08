@@ -159,6 +159,23 @@ export function candleOptions(p: Palette): CandleOpts {
   };
 }
 
+export type ChartType = "candle" | "bar" | "line" | "area";
+
+// Options for the main price series, per chart type. Candle/bar carry OHLC colors;
+// line/area are single-value. Area gradient is TV's default green wash.
+export function mainSeriesOptions(t: ChartType, p: Palette): object {
+  switch (t) {
+    case "candle":
+      return candleOptions(p);
+    case "bar":
+      return { upColor: p.up, downColor: p.down, openVisible: true, thinBars: false };
+    case "line":
+      return { color: p.up, lineWidth: 2, priceLineVisible: true, lastValueVisible: true };
+    case "area":
+      return { lineColor: p.up, topColor: "rgba(8,153,129,.28)", bottomColor: "rgba(8,153,129,0)", lineWidth: 2 };
+  }
+}
+
 export function volumeOptions(p: Palette): HistogramOpts {
   void p; // signature parity with chartOptions/candleOptions; volume color is per-bar, not palette-level
   // Overlaid on the main pane, its own invisible scale; per-bar color is set on

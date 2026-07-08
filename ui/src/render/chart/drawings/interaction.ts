@@ -49,6 +49,7 @@ export class DrawingInteraction {
   private selectionId: string | null = null;
   private readonly newId: () => string;
   private readonly onToolChange: ((t: Tool) => void) | undefined;
+  private readonly onSelectionChange: (() => void) | undefined;
   private readonly listeners: [string, (e: any) => void][] = [];
 
   constructor(
@@ -57,10 +58,11 @@ export class DrawingInteraction {
     private readonly primitive: DrawingsPrimitiveHandle,
     private readonly store: DrawingStore,
     private readonly ctx: DrawingContext,
-    opts?: { newId?: () => string; onToolChange?: (t: Tool) => void },
+    opts?: { newId?: () => string; onToolChange?: (t: Tool) => void; onSelectionChange?: () => void },
   ) {
     this.newId = opts?.newId ?? (() => crypto.randomUUID());
     this.onToolChange = opts?.onToolChange;
+    this.onSelectionChange = opts?.onSelectionChange;
     host.tabIndex = host.tabIndex >= 0 ? host.tabIndex : 0;
     host.style.outline = "none";
     const on = (t: string, cb: (e: any) => void) => { host.addEventListener(t, cb); this.listeners.push([t, cb]); };
@@ -73,15 +75,14 @@ export class DrawingInteraction {
   setTool(tool: Tool): void {
     this.cancelGesture();
     this.tool = tool;
-    if (tool !== "select") { this.selectionId = null; this.primitive.setSelection(null); }
+    if (tool !== "select") { this.setSelectionId(null); }
     this.applyPanZoomLock();
     this.primitive.requestUpdate();
   }
 
   onSymbolChanged(): void {
     this.cancelGesture();
-    this.selectionId = null;
-    this.primitive.setSelection(null);
+    this.setSelectionId(null);
     // A symbol switch always reverts to select mode and hands pan/zoom back — a tool
     // armed for the old chart shouldn't silently start placing on the new one.
     this.tool = "select";
@@ -97,15 +98,59 @@ export class DrawingInteraction {
   deleteSelection(): void {
     if (!this.selectionId) return;
     this.store.remove(this.selectionId);
-    this.selectionId = null;
-    this.primitive.setSelection(null);
+    this.setSelectionId(null);
     this.primitive.requestUpdate();
+  }
+
+  // --- context-menu / floating-toolbar API (no pointer side effects) ---
+  hitTestAt(p: Px): string | null {
+    const drawings = this.store.forSymbol(this.ctx.symbol());
+    for (let i = drawings.length - 1; i >= 0; i--) {
+      const d = drawings[i];
+      const pts = d.anchors.map((a) => this.project(a));
+      if (hitTest(d.kind, pts, p, this.host.clientWidth)) return d.id;
+    }
+    return null;
+  }
+
+  select(id: string | null): void {
+    this.setSelectionId(id);
+    this.primitive.requestUpdate();
+  }
+
+  selectedId(): string | null {
+    return this.selectionId;
+  }
+
+  selectedRect(): { x: number; y: number; w: number; h: number } | null {
+    if (!this.selectionId) return null;
+    const d = this.store.forSymbol(this.ctx.symbol()).find((x) => x.id === this.selectionId);
+    if (!d) return null;
+    const pts = d.anchors.map((a) => this.project(a)).filter((q): q is Px => q !== null);
+    if (pts.length === 0) return null;
+    if (d.kind === "hline" || d.kind === "hray") {
+      const x0 = d.kind === "hray" ? pts[0].x : 0;
+      return { x: x0, y: pts[0].y, w: this.host.clientWidth - x0, h: 0 };
+    }
+    const xs = pts.map((q) => q.x), ys = pts.map((q) => q.y);
+    const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+    return { x: minX, y: minY, w: maxX - minX, h: maxY - minY };
   }
 
   dispose(): void {
     for (const [t, cb] of this.listeners) this.host.removeEventListener(t, cb);
     this.listeners.length = 0;
     this.facade.setPanZoomEnabled(true);
+  }
+
+  // Every mutation of selectionId (explicit select() and every internal deselect
+  // path — blank-canvas click, Escape, delete, tool arm, symbol switch) funnels
+  // through here so React can be notified synchronously instead of waiting for
+  // the next poll (paint loop / visible-range clamp / context-menu handler).
+  private setSelectionId(id: string | null): void {
+    this.selectionId = id;
+    this.primitive.setSelection(id);
+    this.onSelectionChange?.();
   }
 
   // --- pan/zoom lock: armed tools lock the whole time; select/measure only during a drag ---
@@ -187,8 +232,7 @@ export class DrawingInteraction {
       const pts = d.anchors.map((a) => this.project(a));
       const hit = hitTest(d.kind, pts, p, this.host.clientWidth);
       if (!hit) continue;
-      this.selectionId = d.id;
-      this.primitive.setSelection(d.id);
+      this.setSelectionId(d.id);
       this.facade.setPanZoomEnabled(false);
       if (hit.type === "handle") {
         this.gesture = { kind: "handleDrag", id: d.id, index: hit.index };
@@ -201,8 +245,7 @@ export class DrawingInteraction {
       return;
     }
     // empty space → deselect (pan/zoom stays enabled so LWC pans)
-    this.selectionId = null;
-    this.primitive.setSelection(null);
+    this.setSelectionId(null);
     this.primitive.requestUpdate();
   }
 
@@ -294,16 +337,14 @@ export class DrawingInteraction {
         this.cancelGesture(); // clears a lingering measure box or in-progress drag
         this.applyPanZoomLock();
       }
-      this.selectionId = null;
-      this.primitive.setSelection(null);
+      this.setSelectionId(null);
       this.primitive.requestUpdate();
       return;
     }
     if ((e.key === "Delete" || e.key === "Backspace") && this.selectionId) {
       e.preventDefault?.();
       this.store.remove(this.selectionId);
-      this.selectionId = null;
-      this.primitive.setSelection(null);
+      this.setSelectionId(null);
       this.primitive.requestUpdate();
     }
   }

@@ -1,4 +1,6 @@
 import type { Palette } from "../palette";
+import type { LineStyleName } from "./lineStyle";
+import { INDICATOR_LINE_WIDTH } from "./chartTheme";
 
 export type IndicatorType = "VWAP" | "EMA" | "SMA" | "MACD" | "VOLUME";
 
@@ -10,7 +12,11 @@ export interface IndicatorInstance {
   type: IndicatorType;
   params: Record<string, number>;
   colors?: Record<string, string>;
+  styles?: Record<string, SlotStyle>; // per-slot style overrides (color/width/lineStyle)
+  hidden?: boolean;                    // legend 👁 toggle — mapped to LWC series `visible`
 }
+
+export interface SlotStyle { color?: string; width?: number; lineStyle?: LineStyleName }
 
 export interface ParamSpec { key: string; label: string; default: number; min: number; max: number }
 export interface SlotSpec { slot: string; kind: "line" | "histogram"; paneIndex: number; paletteKey: keyof Palette }
@@ -22,6 +28,8 @@ export interface SeriesDescriptor {
   kind: "line" | "histogram";
   paneIndex: number;   // 0 = main pane, 1 = MACD sub-pane
   color: string;       // resolved: inst.colors?.[slot] ?? palette[slot's default key]
+  width: number;           // resolved: styles[slot].width ?? INDICATOR_LINE_WIDTH
+  lineStyle: LineStyleName; // resolved: styles[slot].lineStyle ?? "solid"
 }
 
 const MAIN = 0, SUBPANE = 1;
@@ -57,11 +65,16 @@ export function withDefaultParams(type: IndicatorType, params: Record<string, nu
 export function describeIndicator(inst: IndicatorInstance, p: Palette): SeriesDescriptor[] {
   const entry = INDICATOR_CATALOG[inst.type];
   const single = entry.slots.length === 1;
-  return entry.slots.map((s) => ({
-    key: single ? inst.instanceId : `${inst.instanceId}#${s.slot}`,
-    slot: s.slot,
-    kind: s.kind,
-    paneIndex: s.paneIndex,
-    color: inst.colors?.[s.slot] ?? p[s.paletteKey],
-  }));
+  return entry.slots.map((s) => {
+    const style = inst.styles?.[s.slot];
+    return {
+      key: single ? inst.instanceId : `${inst.instanceId}#${s.slot}`,
+      slot: s.slot,
+      kind: s.kind,
+      paneIndex: s.paneIndex,
+      color: style?.color ?? inst.colors?.[s.slot] ?? p[s.paletteKey],
+      width: style?.width ?? INDICATOR_LINE_WIDTH,
+      lineStyle: style?.lineStyle ?? "solid",
+    };
+  });
 }

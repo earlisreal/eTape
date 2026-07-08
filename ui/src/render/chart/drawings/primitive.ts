@@ -5,6 +5,8 @@ import type {
 import type { Palette } from "../../palette";
 import type { Anchor, Drawing, DrawingKind } from "./model";
 import { extendToEdge, timeToLogical } from "./geometry";
+import { LINE_DASH } from "../lineStyle";
+import { DEFAULT_DRAWING_WIDTH, DEFAULT_LINE_STYLE } from "./model";
 
 // Repo convention: derive the draw target structurally instead of importing
 // fancy-canvas's CanvasRenderingTarget2D directly.
@@ -32,6 +34,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
   private timeframeMs = 60_000;
   private selectionId: string | null = null;
   private transient: Transient | null = null;
+  private hideAll = false;
 
   constructor(private palette: Palette) {}
 
@@ -52,6 +55,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
   setBars(barsMs: readonly number[], timeframeMs: number): void { this.barsMs = barsMs; this.timeframeMs = timeframeMs; }
   setSelection(id: string | null): void { this.selectionId = id; }
   setTransient(t: Transient | null): void { this.transient = t; }
+  setHideAll(hidden: boolean): void { this.hideAll = hidden; }
 
   paneViews(): readonly IPrimitivePaneView[] {
     const draw = (target: DrawTarget) => this.draw(target);
@@ -77,11 +81,19 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
   private draw(target: DrawTarget): void {
     target.useBitmapCoordinateSpace(({ context: ctx, bitmapSize, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
       const width = bitmapSize.width;
-      ctx.setLineDash([]);
-      for (const d of this.drawings) {
-        const selected = d.id === this.selectionId;
-        this.strokeShape(ctx, d.kind, d.anchors, hr, vr, width, selected ? this.palette.accent : this.palette.text, selected ? 2 : 1);
-        if (selected) this.handles(ctx, d.anchors, hr, vr);
+      if (!this.hideAll) {
+        for (const d of this.drawings) {
+          const selected = d.id === this.selectionId;
+          ctx.setLineDash(LINE_DASH[d.lineStyle ?? DEFAULT_LINE_STYLE]);
+          const color = selected ? this.palette.accent : (d.color ?? this.palette.text);
+          const lineWidth = selected ? Math.max(2, d.width ?? DEFAULT_DRAWING_WIDTH) : (d.width ?? DEFAULT_DRAWING_WIDTH);
+          this.strokeShape(ctx, d.kind, d.anchors, hr, vr, width, color, lineWidth);
+          // Handles are always solid squares, regardless of the drawing's own line
+          // style — reset the dash pattern the shape stroke above may have set
+          // (dashed/dotted) before drawing them.
+          if (selected) { ctx.setLineDash([]); this.handles(ctx, d.anchors, hr, vr); }
+        }
+        ctx.setLineDash([]);
       }
       if (this.transient?.ghost) {
         ctx.setLineDash([4, 3]);

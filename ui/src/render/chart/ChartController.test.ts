@@ -1,21 +1,22 @@
 import { describe, it, expect } from "vitest";
 import { ChartController, LEFT_PAD_BARS, type BarReader, type IndicatorReader, type CommandSender } from "./ChartController";
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
-import { LIGHT } from "../palette";
+import { LIGHT, DARK } from "../palette";
 import type { Bar } from "../../wire/contract";
 import { withDefaultParams } from "./indicatorSeries";
 import type { Band } from "./sessions";
 
-function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[]; setDataCalls: unknown[][]; orderCalls: number[] } {
+function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[]; setDataCalls: unknown[][]; orderCalls: number[]; optionCalls: unknown[] } {
   const calls: string[] = [];
   const updates: unknown[] = [];
   const setDataCalls: unknown[][] = [];
   const orderCalls: number[] = [];
+  const optionCalls: unknown[] = [];
   return {
-    calls, updates, setDataCalls, orderCalls,
+    calls, updates, setDataCalls, orderCalls, optionCalls,
     setData: (data) => { calls.push("setData"); setDataCalls.push(data as unknown[]); },
     update: (bar) => { calls.push("update"); updates.push(bar); },
-    applyOptions: () => calls.push("applyOptions"),
+    applyOptions: (o) => { calls.push("applyOptions"); optionCalls.push(o); },
     setSeriesOrder: (order) => { calls.push("setSeriesOrder"); orderCalls.push(order); },
   };
 }
@@ -23,8 +24,16 @@ function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[]; setDat
 function fakeFacade() {
   const created: Array<{ kind: string; pane: number; options: unknown; series: ReturnType<typeof fakeSeries> }> = [];
   const scaleMargins: Array<{ id: string; margins: { top: number; bottom: number } }> = [];
-  const facade: ChartApiFacade & { created: typeof created; scrolls: number; resets: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins } = {
+  const facade: ChartApiFacade & { created: typeof created; scrolls: number; resets: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins }
+    & { mainKind: string; screenshots: number; crosshairCb: ((l: number | null) => void) | null }
+    & { watermark: string | null; lastOptions: unknown } = {
     created, scrolls: 0, resets: 0, bands: 0, lastBands: [], scaleMargins,
+    mainKind: "", screenshots: 0, crosshairCb: null,
+    watermark: null, lastOptions: null,
+    setMainSeries: (kind, o) => { const s = fakeSeries(); created.push({ kind, pane: 0, options: o, series: s }); facade.mainKind = kind; return s; },
+    takeScreenshot: () => { facade.screenshots++; return {} as unknown as HTMLCanvasElement; },
+    subscribeCrosshairMove: (cb) => { facade.crosshairCb = cb; return () => { facade.crosshairCb = null; }; },
+    paneHeights: () => [400, 120],
     addSeries: (kind, o, pane) => { const s = fakeSeries(); created.push({ kind, pane, options: o, series: s }); return s; },
     removeSeries: () => {},
     setPriceScaleMargins: (id, margins) => { scaleMargins.push({ id, margins }); },
@@ -39,7 +48,8 @@ function fakeFacade() {
     scrollToRealTime: () => { facade.scrolls++; },
     resetTimeScale: () => { facade.resets++; },
     resize: () => {},
-    applyOptions: () => {},
+    applyOptions: (o) => { facade.lastOptions = o; },
+    setWatermark: (t) => { facade.watermark = t; },
     remove: () => {},
   };
   return facade;
@@ -449,5 +459,145 @@ describe("ChartController", () => {
     ctrl.sync();
     expect(candle.calls.filter((c) => c === "setData").length).toBe(setDataBefore + 1); // full rebuild
     expect(candle.setDataCalls.at(-1)).toHaveLength(3 + LEFT_PAD_BARS); // + leading whitespace pad
+  });
+});
+
+describe("ChartController main series + facade capabilities", () => {
+  it("mount creates the main series via setMainSeries (kind 'candle') and the volume via addSeries", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    expect(facade.mainKind).toBe("candle");
+    // created[0] is the main (candle), created[1] is the volume histogram
+    expect(facade.created[0].kind).toBe("candle");
+    expect(facade.created[1].kind).toBe("histogram");
+  });
+
+  it("exposes screenshot, crosshair subscription, and pane heights", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    expect(facade.paneHeights()).toEqual([400, 120]);
+    const dispose = facade.subscribeCrosshairMove(() => {});
+    expect(facade.crosshairCb).toBeTypeOf("function");
+    dispose();
+    expect(facade.crosshairCb).toBeNull();
+  });
+});
+
+describe("ChartController.setChartType", () => {
+  const bars = [bar("2026-07-08T13:30:00Z", 10), bar("2026-07-08T13:31:00Z", 11)];
+
+  it("recreates the main series with the new kind", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount(); c.sync();
+    c.setChartType("line");
+    expect(facade.mainKind).toBe("line");
+  });
+
+  it("feeds line/area main series {time,value}, and candle/bar main series OHLC", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.setChartType("line"); c.sync();
+    const lineMain = facade.created[facade.created.length - 1].series;
+    const lineData = lineMain.setDataCalls[lineMain.setDataCalls.length - 1] as Array<Record<string, unknown>>;
+    const lineReal = lineData.filter((d) => "value" in d);
+    expect(lineReal[0]).toHaveProperty("value", 10);
+    expect(lineReal[0]).not.toHaveProperty("open");
+
+    c.setChartType("candle"); c.sync();
+    const candleMain = facade.created[facade.created.length - 1].series;
+    const candleData = candleMain.setDataCalls[candleMain.setDataCalls.length - 1] as Array<Record<string, unknown>>;
+    const candleReal = candleData.filter((d) => "close" in d);
+    expect(candleReal[0]).toMatchObject({ open: 10, high: 10, low: 10, close: 10 });
+  });
+
+  it("is a no-op when the type is unchanged", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    const before = facade.created.length;
+    c.setChartType("candle");
+    expect(facade.created.length).toBe(before);
+  });
+});
+
+describe("ChartController indicator hidden + style", () => {
+  it("creates a hidden indicator series with visible:false", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.addIndicator({ instanceId: "e1", type: "EMA", params: { period: 9 }, hidden: true });
+    const emaSeries = facade.created.find((x) => (x.options as { color?: string }).color === LIGHT.indEma);
+    expect((emaSeries!.options as { visible?: boolean }).visible).toBe(false);
+  });
+
+  it("toggling hidden applies visible in place without re-subscribing", () => {
+    const facade = fakeFacade();
+    const cmd = commandSpy();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: cmd });
+    c.mount();
+    c.addIndicator({ instanceId: "e1", type: "EMA", params: { period: 9 } });
+    const subsBefore = cmd.names.filter((n) => n === "SubscribeIndicator").length;
+    c.updateIndicator({ instanceId: "e1", type: "EMA", params: { period: 9 }, hidden: true });
+    const subsAfter = cmd.names.filter((n) => n === "SubscribeIndicator").length;
+    expect(subsAfter).toBe(subsBefore); // no re-subscribe on a hidden toggle
+    const emaSeries = facade.created.find((x) => (x.options as { color?: string }).color === LIGHT.indEma)!.series;
+    expect(emaSeries.optionCalls.some((o) => (o as { visible?: boolean }).visible === false)).toBe(true);
+  });
+});
+
+describe("ChartController chart settings", () => {
+  const bars = [bar("2026-07-08T13:30:00Z", 10)];
+  const mk = (facade: ReturnType<typeof fakeFacade>) =>
+    new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+
+  it("setShowSessions(false) clears session bands on the next sync", () => {
+    const facade = fakeFacade(); const c = mk(facade); c.mount();
+    c.setShowSessions(false); c.sync();
+    expect(facade.lastBands).toEqual([]);
+  });
+
+  it("setVolumeVisible(false) hides the volume series", () => {
+    const facade = fakeFacade(); const c = mk(facade); c.mount();
+    c.setVolumeVisible(false);
+    const vol = facade.created.find((x) => x.kind === "histogram")!.series;
+    expect(vol.optionCalls.some((o) => (o as { visible?: boolean }).visible === false)).toBe(true);
+  });
+
+  it("a palette switch after hiding volume does not silently re-show it", () => {
+    // Regression: setPalette() re-applies volumeOptions(p) on every theme switch;
+    // without re-asserting the user's visible:false on top of it, a light/dark
+    // toggle would resurrect a volume series the user had explicitly hidden.
+    const facade = fakeFacade(); const c = mk(facade); c.mount();
+    c.setVolumeVisible(false);
+    const vol = facade.created.find((x) => x.kind === "histogram")!.series;
+    c.setPalette(DARK);
+    const lastOptions = vol.optionCalls.at(-1) as { visible?: boolean };
+    expect(lastOptions.visible).toBe(false);
+  });
+
+  it("setGrid(false) applies invisible grid options", () => {
+    const facade = fakeFacade(); const c = mk(facade); c.mount();
+    c.setGrid(false);
+    expect(JSON.stringify(facade.lastOptions)).toContain('"visible":false');
+  });
+
+  it("setWatermark toggles the facade watermark to the bare symbol / null", () => {
+    const facade = fakeFacade(); const c = mk(facade); c.mount();
+    c.setWatermark(true);
+    expect(facade.watermark).toBe("AAPL");
+    c.setWatermark(false);
+    expect(facade.watermark).toBeNull();
   });
 });

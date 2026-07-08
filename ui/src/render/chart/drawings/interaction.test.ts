@@ -237,3 +237,44 @@ describe("DrawingInteraction", () => {
     expect(store.forSymbol("US.AAPL")).toHaveLength(1);
   });
 });
+
+describe("DrawingInteraction context-menu/selection API", () => {
+  const mkHost = () => ({
+    addEventListener: () => {}, removeEventListener: () => {},
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 300 }),
+    focus: () => {}, clientWidth: 400, tabIndex: 0, style: { outline: "" },
+  });
+  const mkFacade = () => ({
+    logicalToCoordinate: (lg: number) => lg * 10,
+    coordinateToLogical: (x: number) => x / 10,
+    coordinateToPrice: (y: number) => 1000 - y,
+    priceToCoordinate: (p: number) => 1000 - p,
+    setPanZoomEnabled: () => {},
+  });
+  const mkPrim = () => ({ setSelection: vi.fn(), setTransient: vi.fn(), requestUpdate: vi.fn() });
+  const mkCtx = () => ({ symbol: () => "US.AAPL", bars: () => [], timeframeMs: () => 60_000, magnet: () => false });
+
+  const seedHline = (store: DrawingStore) =>
+    store.upsert({ id: "h1", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 0, price: 10 }], createdMs: 1, updatedMs: 1 });
+
+  it("hitTestAt returns the drawing id at the point, null elsewhere", () => {
+    const store = new DrawingStore();
+    seedHline(store);
+    const di = new DrawingInteraction(mkHost() as any, mkFacade() as any, mkPrim() as any, store, mkCtx() as any);
+    // hline at price 10 → y = 1000-10 = 990, spans full width
+    expect(di.hitTestAt({ x: 200, y: 990 })).toBe("h1");
+    expect(di.hitTestAt({ x: 200, y: 500 })).toBeNull();
+  });
+
+  it("select / selectedId / selectedRect", () => {
+    const store = new DrawingStore();
+    seedHline(store);
+    const prim = mkPrim();
+    const di = new DrawingInteraction(mkHost() as any, mkFacade() as any, prim as any, store, mkCtx() as any);
+    di.select("h1");
+    expect(di.selectedId()).toBe("h1");
+    expect(prim.setSelection).toHaveBeenCalledWith("h1");
+    const rect = di.selectedRect();
+    expect(rect).toEqual({ x: 0, y: 990, w: 400, h: 0 }); // hline spans full width at y=990
+  });
+});
