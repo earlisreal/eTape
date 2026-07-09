@@ -145,7 +145,6 @@ export const TV_SWATCHES = ["#2962FF", "#089981", "#F23645", "#FF6D00", "#7E57C2
 export const TV_FONT = `-apple-system, "Trebuchet MS", Roboto, Ubuntu, sans-serif`;
 
 export const TV_GEOM = {
-  toolbarH: 38,
   iconBtn: 28,
   radius: 6,
   separator: 1,

@@ -54,7 +54,6 @@ describe("tvTheme font + geometry", () => {
     expect(TV_FONT).not.toContain("Plex");
   });
   it("uses TV geometry", () => {
-    expect(TV_GEOM.toolbarH).toBe(38);
     expect(TV_GEOM.iconBtn).toBe(28);
     expect(TV_GEOM.radius).toBe(6);
   });

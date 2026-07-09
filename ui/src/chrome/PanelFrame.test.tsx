@@ -1,12 +1,16 @@
 // @vitest-environment jsdom
+import { useContext } from "react";
+import { createPortal } from "react-dom";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
+import { render, screen, within, fireEvent, act, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "./ThemeProvider";
 import { ToastProvider } from "./Toast";
 import { LinkGroups } from "./linkGroups";
 import { modalTracker } from "./modalTracker";
 import { makeStores } from "../data/registry";
 import { PanelFrame } from "./PanelFrame";
+import { PANELS } from "./panels/registry";
+import { PanelHeaderSlotContext } from "./panels/headerSlot";
 import type { PanelConfig } from "./workspace";
 import type { AckMsg } from "../wire/contract";
 
@@ -380,5 +384,48 @@ describe("PanelFrame — DemandRegistry wiring (Task 10)", () => {
     typeKey("z"); typeKey("z"); typeKey("z"); typeKey("z"); typeKey("Enter");
     await waitFor(() => expect(ensure).toHaveBeenCalledWith("m-chart", "US.ZZZZ", "watch"));
     expect(onConfigChange).not.toHaveBeenCalledWith(expect.objectContaining({ symbol: "US.ZZZZ" }));
+  });
+});
+
+// A minimal stand-in for ChartPanel that reads PanelHeaderSlotContext directly — the
+// real ChartPanel needs a working scheduler + a mocked lightweight-charts to mount at
+// all (see ChartPanel.test.tsx's own setup), neither of which this file provides;
+// `renderFrame`'s `scheduler: {} as never` stub makes the real component throw and get
+// swallowed by ErrorBoundary, which would silently discard whatever it rendered
+// (including a portaled header) before any assertion ran. This probe isolates exactly
+// the contract PanelFrame promises a headerControls panel: what PanelHeaderSlotContext
+// resolves to, and (once it's the live slot element) that content portaled into it
+// actually lands inside PanelFrame's OWN ledger header, not inside the panel body.
+function HeaderSlotProbe(): JSX.Element | null {
+  const slot = useContext(PanelHeaderSlotContext);
+  if (slot === undefined) return <div data-testid="probe">inline-fallback</div>;
+  if (slot === null) return null; // provider present, slot div not yet mounted
+  return createPortal(<div data-testid="probe">portaled</div>, slot);
+}
+
+describe("PanelFrame — headerControls slot (chart panel)", () => {
+  it("suppresses its own title and portals a headerControls panel's controls into the ledger header, not the panel body", () => {
+    const realChartDef = PANELS["chart"];
+    PANELS["chart"] = { ...realChartDef, component: HeaderSlotProbe };
+    try {
+      const { container } = renderFrame({ panelId: "chart", group: null, settings: { symbol: "US.AAPL" } });
+      // The symbol already identifies a headerControls panel — no separate title text.
+      expect(within(container).queryByText("Chart")).toBeNull();
+      const probe = within(container).getByTestId("probe");
+      expect(probe.textContent).toBe("portaled");
+      const header = container.querySelector(".ledger-header");
+      const body = container.querySelector('[data-testid="panel-body"]');
+      expect(header?.contains(probe)).toBe(true);
+      expect(body?.contains(probe)).toBe(false);
+    } finally {
+      PANELS["chart"] = realChartDef; // PANELS is a module-level singleton — restore for every later test/file
+    }
+  });
+
+  it("falls back to rendering inline when no PanelHeaderSlotContext provider is above it", () => {
+    // Mirrors how ChartPanel.test.tsx renders ChartPanel directly (no PanelFrame) —
+    // reproduced here via the real context default instead of a second render helper.
+    const { container } = render(<PanelHeaderSlotContext.Provider value={undefined}><HeaderSlotProbe /></PanelHeaderSlotContext.Provider>);
+    expect(within(container).getByTestId("probe").textContent).toBe("inline-fallback");
   });
 });
