@@ -40,10 +40,10 @@ describe("ChartHeaderControls", () => {
     expect(trigger.getAttribute("aria-expanded")).toBe("false");
     fireEvent.click(trigger);
     expect(trigger.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByPlaceholderText("Search")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "add EMA" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "add EMA" }));
     expect(base.onAddIndicator).toHaveBeenCalledWith("EMA");
-    expect(screen.queryByPlaceholderText("Search")).toBeNull();
+    expect(screen.queryByRole("button", { name: "add EMA" })).toBeNull();
   });
 
   it("has no symbol button — the ledger header it portals into already shows the symbol", () => {

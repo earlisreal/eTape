@@ -15,14 +15,6 @@ describe("IndicatorPickerPopover", () => {
     }
   });
 
-  it("filters by search text (case-insensitive)", () => {
-    render(<IndicatorPickerPopover palette={LIGHT} anchor={null} onClose={() => {}} onAdd={() => {}} />);
-    fireEvent.change(screen.getByPlaceholderText("Search"), { target: { value: "ma" } });
-    expect(screen.queryByRole("button", { name: "add EMA" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "add SMA" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "add VWAP" })).toBeNull();
-  });
-
   it("adds and closes on row click", () => {
     const onAdd = vi.fn(); const onClose = vi.fn();
     render(<IndicatorPickerPopover palette={LIGHT} anchor={null} onClose={onClose} onAdd={onAdd} />);

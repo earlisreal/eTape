@@ -19,10 +19,8 @@ const WIDTH = 200;
 // same reason TVContextMenu portals/fixed-positions instead of nesting.
 export function IndicatorPickerPopover({ palette, anchor, onClose, onAdd }: IndicatorPickerPopoverProps): JSX.Element | null {
   const ref = useRef<HTMLDivElement | null>(null);
-  const [q, setQ] = useState("");
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const entries = useMemo(() => Object.values(INDICATOR_CATALOG), []);
-  const filtered = entries.filter((e) => e.label.toLowerCase().includes(q.trim().toLowerCase()));
 
   useLayoutEffect(() => {
     if (!anchor) { setPos(null); return; }
@@ -55,11 +53,8 @@ export function IndicatorPickerPopover({ palette, anchor, onClose, onAdd }: Indi
       background: palette.bg, color: palette.text, fontFamily: '"IBM Plex Sans", system-ui, sans-serif',
       fontVariantNumeric: "tabular-nums",
     }}>
-      <input placeholder="Search" value={q} onChange={(e) => setQ(e.target.value)} autoFocus
-        style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", marginBottom: 8, background: palette.bg,
-          border: `1px solid ${palette.border}`, borderRadius: 4, color: palette.text }} />
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        {filtered.map((e) => (
+        {entries.map((e) => (
           <button key={e.type} aria-label={`add ${e.label}`} onClick={() => { onAdd(e.type); onClose(); }}
             style={{ textAlign: "left", padding: "8px 10px", background: "transparent", border: "none", borderRadius: 4,
               color: palette.text, cursor: "pointer" }}
@@ -68,7 +63,6 @@ export function IndicatorPickerPopover({ palette, anchor, onClose, onAdd }: Indi
             {e.label}
           </button>
         ))}
-        {filtered.length === 0 && <div style={{ color: palette.textMuted, padding: "8px 10px" }}>No matches</div>}
       </div>
     </div>,
     document.body,
