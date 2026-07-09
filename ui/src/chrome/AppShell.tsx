@@ -341,7 +341,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         </div>
         <SettingsModal open={settings.open} section={settings.section}
           onSection={(s) => setSettings((v) => ({ ...v, section: s }))}
-          onClose={() => setSettings((v) => ({ ...v, open: false }))} />
+          onClose={() => setSettings((v) => ({ ...v, open: false }))}
+          commands={commands} />
       </div>
     </OpenSettingsProvider>
   );
