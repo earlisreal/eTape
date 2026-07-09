@@ -104,7 +104,7 @@ func (b *Broker) SubmitOrder(_ context.Context, req exec.OrderRequest) (exec.Ord
 	brokerID := fmt.Sprintf("SIM-%d", b.bseq)
 	o := &exec.Order{
 		Venue: b.venue, ID: req.ClientOrderID, Symbol: req.Symbol, Side: req.Side,
-		Type: req.Type, TIF: req.TIF, Qty: req.Qty, LimitPrice: req.LimitPrice,
+		Type: req.Type, TIF: req.TIF, Session: req.Session, Qty: req.Qty, LimitPrice: req.LimitPrice,
 		StopPrice: req.StopPrice, Status: exec.StatusAccepted, LeavesQty: req.Qty,
 		CreatedMs: b.now(), UpdatedMs: b.now(),
 	}

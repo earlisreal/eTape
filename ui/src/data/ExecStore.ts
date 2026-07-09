@@ -16,7 +16,7 @@ interface ExecState {
 function synthOptimistic(o: OptimisticOrder): Order {
   const a = o.args;
   return {
-    venue: a.venue, id: o.id, symbol: a.symbol, side: a.side, type: a.type, tif: a.tif,
+    venue: a.venue, id: o.id, symbol: a.symbol, side: a.side, type: a.type, tif: a.tif, session: a.session,
     qty: a.qty, limitPrice: a.limitPrice, stopPrice: a.stopPrice,
     status: "SUBMITTED", executedQty: 0, leavesQty: a.qty, avgFillPrice: 0,
     rejectReason: "", replacesId: "", createdMs: o.createdMs, updatedMs: o.createdMs,

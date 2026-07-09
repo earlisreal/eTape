@@ -60,6 +60,19 @@ func tifToWire(t exec.TIF) wsmsg.TIF {
 	}
 }
 
+func sessionToWire(s exec.OrderSession) wsmsg.OrderSession {
+	switch s {
+	case exec.SessionRTH:
+		return wsmsg.SessionRTH
+	case exec.SessionExtended:
+		return wsmsg.SessionExtended
+	case exec.SessionOvernight:
+		return wsmsg.SessionOvernight
+	default:
+		return wsmsg.SessionAuto
+	}
+}
+
 func statusToWire(s exec.OrderStatus) wsmsg.OrderStatus {
 	switch s {
 	case exec.StatusSubmitted:
@@ -100,7 +113,8 @@ func mapOrder(o exec.Order) wsmsg.Order {
 	return wsmsg.Order{
 		Venue: string(o.Venue), ID: o.ID, Symbol: o.Symbol,
 		Side: sideToWire(o.Side), Type: orderTypeToWire(o.Type), TIF: tifToWire(o.TIF),
-		Qty: o.Qty, LimitPrice: o.LimitPrice, StopPrice: o.StopPrice,
+		Session: sessionToWire(o.Session),
+		Qty:     o.Qty, LimitPrice: o.LimitPrice, StopPrice: o.StopPrice,
 		Status: statusToWire(o.Status), ExecutedQty: o.ExecutedQty, LeavesQty: o.LeavesQty,
 		AvgFillPrice: o.AvgFillPrice, RejectReason: o.RejectReason, ReplacesID: o.ReplacesID,
 		CreatedMs: o.CreatedMs, UpdatedMs: o.UpdatedMs,

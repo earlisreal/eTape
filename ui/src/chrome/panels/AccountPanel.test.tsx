@@ -165,7 +165,7 @@ describe("AccountPanel", () => {
   // --- Task 7: OrdersTable always visible, tab body (Positions/Trade History), resize handle ---
   describe("restructured layout (Task 7)", () => {
     const order = (o: Partial<Order> = {}): Order => ({
-      venue: "alpaca-paper", id: "o1", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY",
+      venue: "alpaca-paper", id: "o1", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO",
       qty: 100, limitPrice: 3.5, stopPrice: 0, status: "SUBMITTED", executedQty: 0, leavesQty: 100,
       avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1000, updatedMs: 1000, ...o,
     });
@@ -311,7 +311,7 @@ describe("AccountPanel", () => {
   // filtered out.
   describe("orders section (ported from OpenOrdersPanel)", () => {
     const order = (id: string, o: Partial<Order> = {}): Order => ({
-      venue: "alpaca-paper", id, symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY",
+      venue: "alpaca-paper", id, symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO",
       qty: 10, limitPrice: 3.5, stopPrice: 0, status: "ACCEPTED", executedQty: 0, leavesQty: 10,
       avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, ...o,
     });
@@ -325,7 +325,7 @@ describe("AccountPanel", () => {
       wrap(props);
       act(() => {
         stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
-        stores.exec.addOptimistic({ args: { venue: "alpaca-paper", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", qty: 10, limitPrice: 3.5, stopPrice: 0 }, id: "ET9", createdMs: 100 });
+        stores.exec.addOptimistic({ args: { venue: "alpaca-paper", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO", qty: 10, limitPrice: 3.5, stopPrice: 0 }, id: "ET9", createdMs: 100 });
       });
       const chip = screen.getByText("Pending");
       expect(chip.className).toContain("chip-pending");

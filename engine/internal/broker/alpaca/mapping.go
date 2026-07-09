@@ -67,6 +67,18 @@ func isExtendedHours(clk clock.Clock) bool {
 	}
 }
 
+// extendedHoursFor resolves whether Alpaca's extended_hours flag should be set
+// for req's explicit session choice: exec.ExtendedHoursFor (shared with
+// TradeZero — see its mapping.go) applied to Alpaca's own clock-derived AUTO
+// resolution. Alpaca has one flag for all non-RTH sessions (its Blue Ocean
+// ATS overnight window shares the flag with pre/post-market). An explicit
+// OVERNIGHT only reaches an adapter whose Capabilities().OvernightSession is
+// true (Core.handleSubmit gates it), so this never sets extended_hours=true
+// for an overnight order on a venue that can't work it.
+func extendedHoursFor(s exec.OrderSession, clk clock.Clock) bool {
+	return exec.ExtendedHoursFor(s, isExtendedHours(clk))
+}
+
 // roundPrice applies Alpaca's sub-penny rule: >= $1 -> 2 dp, < $1 -> 4 dp.
 func roundPrice(p float64) float64 {
 	if p >= 1 {

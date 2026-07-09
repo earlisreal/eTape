@@ -18,6 +18,7 @@ type SubmitOrder struct {
 	Side       Side
 	Type       OrderType
 	TIF        TIF
+	Session    OrderSession
 	Qty        float64
 	LimitPrice float64
 	StopPrice  float64
@@ -332,7 +333,8 @@ func (c *Core) handleCmd(ctx context.Context, cmd Command) CmdAck {
 func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 	req := OrderRequest{
 		Venue: cm.Venue, Symbol: cm.Symbol, Side: cm.Side, Type: cm.Type, TIF: cm.TIF,
-		Qty: cm.Qty, LimitPrice: cm.LimitPrice, StopPrice: cm.StopPrice,
+		Session: cm.Session,
+		Qty:     cm.Qty, LimitPrice: cm.LimitPrice, StopPrice: cm.StopPrice,
 		ClientOrderID: c.idgen.Next(),
 	}
 	if err := req.Validate(); err != nil {
@@ -345,16 +347,29 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 		}
 		return CmdAck{Accepted: false, Reason: reason, OrderID: req.ClientOrderID}
 	}
+	b := c.brokers[req.Venue]
+	// An explicit Overnight session requires the venue's broker to support it
+	// natively (Alpaca's Blue Ocean ATS); TradeZero/sim do not. Block here rather
+	// than let the adapter silently fall back to a different session than the
+	// trader chose. Auto/RTH/Extended never hit this — only an explicit
+	// Overnight choice can be capability-blocked.
+	if req.Session == SessionOvernight && (b == nil || !b.Capabilities().OvernightSession) {
+		reason := "venue does not support overnight session"
+		ev := OrderBlocked{V: req.Venue, OID: req.ClientOrderID, Req: req, Reason: reason, Ts: c.now()}
+		if err := c.appendAndFold(ev, SrcLocal); err != nil {
+			slog.Error("exec: append OrderBlocked failed", "err", err)
+		}
+		return CmdAck{Accepted: false, Reason: reason, OrderID: req.ClientOrderID}
+	}
 	// Append OrderSubmitted BEFORE the POST (crash-recovery rule). Append failure
 	// blocks submission.
 	o := Order{Venue: req.Venue, ID: req.ClientOrderID, Symbol: req.Symbol, Side: req.Side,
-		Type: req.Type, TIF: req.TIF, Qty: req.Qty, LimitPrice: req.LimitPrice,
+		Type: req.Type, TIF: req.TIF, Session: req.Session, Qty: req.Qty, LimitPrice: req.LimitPrice,
 		StopPrice: req.StopPrice, Status: StatusSubmitted, LeavesQty: req.Qty,
 		CreatedMs: c.now(), UpdatedMs: c.now()}
 	if err := c.appendAndFold(OrderSubmitted{Order: o}, SrcLocal); err != nil {
 		return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: req.ClientOrderID}
 	}
-	b := c.brokers[req.Venue]
 	go c.postSubmit(ctx, b, req)
 	return CmdAck{Accepted: true, OrderID: req.ClientOrderID}
 }

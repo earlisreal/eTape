@@ -126,7 +126,7 @@ func (rc *restClient) submitOrder(ctx context.Context, req exec.OrderRequest, cl
 	// extended_hours is only valid for limit day/gtc orders (Alpaca rejects it
 	// on market/stop/stop-limit orders); omit the key otherwise so it defaults
 	// to Alpaca's false rather than risk a rejection.
-	if req.Type == exec.TypeLimit && (req.TIF == exec.TIFDay || req.TIF == exec.TIFGTC) && isExtendedHours(rc.clk) {
+	if req.Type == exec.TypeLimit && (req.TIF == exec.TIFDay || req.TIF == exec.TIFGTC) && extendedHoursFor(req.Session, rc.clk) {
 		payload["extended_hours"] = true
 	}
 	buf, err := json.Marshal(payload)

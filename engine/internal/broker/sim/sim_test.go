@@ -83,6 +83,26 @@ func TestSimSetMarkCrossesRestingOrder(t *testing.T) {
 	_ = drain(t, b) // BrokerPositions
 }
 
+// TestSimSubmitOrder_CarriesSessionIntoInternalOrder guards against a
+// dropped-field regression: the internal *exec.Order sim tracks for its own
+// bookkeeping (returned verbatim by Snapshot) must carry Session forward from
+// the request, same as Core's own OrderSubmitted Order.
+func TestSimSubmitOrder_CarriesSessionIntoInternalOrder(t *testing.T) {
+	b := newSim(t)
+	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{
+		Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit,
+		Session: exec.SessionExtended, Qty: 10, LimitPrice: 90, ClientOrderID: "ET1",
+	})
+	_ = drain(t, b) // OrderAccepted
+	_, _, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 || orders[0].Session != exec.SessionExtended {
+		t.Fatalf("snapshot order dropped Session: %+v", orders)
+	}
+}
+
 func TestSimReplaceAndSnapshot(t *testing.T) {
 	b := newSim(t)
 	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, Qty: 10, LimitPrice: 90, ClientOrderID: "ET1"})

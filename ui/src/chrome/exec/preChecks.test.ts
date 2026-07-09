@@ -5,7 +5,7 @@ import { preCheck, type DraftOrder } from "./preChecks";
 const RTH = Date.parse("2026-07-06T14:00:00Z");
 const PRE = Date.parse("2026-07-06T08:00:00Z");
 const draft = (o: Partial<DraftOrder>): DraftOrder =>
-  ({ symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", qty: 10, limitPrice: 3.5, stopPrice: 0, ...o });
+  ({ symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO", qty: 10, limitPrice: 3.5, stopPrice: 0, ...o });
 
 describe("preCheck", () => {
   it("blocks non-positive quantity", () => {
@@ -27,6 +27,29 @@ describe("preCheck", () => {
     const r = preCheck(draft({ type: "MARKET", limitPrice: 0 }), 3.44, RTH);
     expect(r.order.type).toBe("MARKET");
     expect(r.notices).toHaveLength(0);
+  });
+  // The Market coercion is a broker-safety net keyed on the ACTUAL clock
+  // (TZ hard-rejects a naked Market order outside real RTH with R78) — it
+  // must apply regardless of which session the trader explicitly chose,
+  // since a chosen session only affects a Limit order's wire TIF/
+  // extended_hours flag downstream, never a Market order's eligibility to
+  // submit right now.
+  it("still coerces Market outside RTH even when the trader explicitly chose RTH", () => {
+    const r = preCheck(draft({ type: "MARKET", limitPrice: 0, session: "RTH" }), 3.44, PRE);
+    expect(r.order.type).toBe("LIMIT");
+    expect(r.order.limitPrice).toBeCloseTo(3.44);
+    expect(r.notices.join(" ")).toMatch(/coerced to Limit/);
+  });
+  it("leaves Market alone during actual RTH even when the trader explicitly chose EXTENDED/OVERNIGHT", () => {
+    for (const session of ["EXTENDED", "OVERNIGHT"] as const) {
+      const r = preCheck(draft({ type: "MARKET", limitPrice: 0, session }), 3.44, RTH);
+      expect(r.order.type).toBe("MARKET");
+      expect(r.notices).toHaveLength(0);
+    }
+  });
+  it("passes the chosen session through unchanged (never overwritten by the coercion)", () => {
+    const r = preCheck(draft({ type: "MARKET", limitPrice: 0, session: "OVERNIGHT" }), 3.44, PRE);
+    expect(r.order.session).toBe("OVERNIGHT");
   });
   it("rejects an inverted buy stop-limit (limit below stop)", () => {
     const r = preCheck(draft({ type: "STOP_LIMIT", side: "BUY", stopPrice: 3.6, limitPrice: 3.5 }), 3.5, RTH);

@@ -2,6 +2,7 @@ package tradezero
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -225,6 +226,47 @@ func TestSubmit_HTTPErrorStatus_NeverSilentlyAccepted(t *testing.T) {
 			}
 			if accepted {
 				t.Fatalf("HTTP %d must never be silently treated as accepted", tc.status)
+			}
+		})
+	}
+}
+
+// TestSubmit_ExplicitSession_OverridesClock covers the trader's explicit
+// session choice taking priority over the clock-inferred (SessionAuto)
+// default: RTH forces the base "Day" TIF even during a pre-market clock, and
+// Extended forces "Day_Plus" even during an RTH clock.
+func TestSubmit_ExplicitSession_OverridesClock(t *testing.T) {
+	preMarket := time.Date(2026, 7, 6, 8, 0, 0, 0, mustET(t))
+	rth := time.Date(2026, 7, 6, 10, 0, 0, 0, mustET(t))
+	for _, tc := range []struct {
+		name    string
+		t       time.Time
+		session exec.OrderSession
+		want    string
+	}{
+		{"RTH override during pre-market clock", preMarket, exec.SessionRTH, "Day"},
+		{"Extended override during RTH clock", rth, exec.SessionExtended, "Day_Plus"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			var gotBody map[string]any
+			mux.HandleFunc("/v1/api/accounts/2TZ00001/order", func(w http.ResponseWriter, r *http.Request) {
+				b, _ := io.ReadAll(r.Body)
+				_ = json.Unmarshal(b, &gotBody)
+				serveFile(t, "order_accept.json")(w, r)
+			})
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+
+			rc := newRESTClient(srv.URL, "2TZ00001", "K", "S", clock.NewFake(tc.t))
+			if _, _, err := rc.submitOrder(context.Background(), exec.OrderRequest{
+				Venue: "tz", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay,
+				Session: tc.session, Qty: 10, LimitPrice: 100, ClientOrderID: "ET-sess",
+			}, "ET-sess", "SMART"); err != nil {
+				t.Fatalf("submit returned err: %v", err)
+			}
+			if gotBody["timeInForce"] != tc.want {
+				t.Fatalf("timeInForce = %v, want %q", gotBody["timeInForce"], tc.want)
 			}
 		})
 	}

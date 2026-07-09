@@ -102,6 +102,53 @@ func (t TIF) String() string {
 	}
 }
 
+// OrderSession is the trader's explicit session choice for an order, replacing
+// pure clock inference. SessionAuto (the zero value, so a legacy/absent value
+// decodes safely) resolves to the current session via the server clock at
+// adapter time — i.e. today's behavior. RTH/Extended/Overnight are explicit
+// overrides. Only a venue whose Capabilities.OvernightSession is true (Alpaca's
+// Blue Ocean ATS) can take an explicit Overnight order; the gate blocks it
+// elsewhere (see handleSubmit in core.go).
+type OrderSession uint8
+
+const (
+	SessionAuto OrderSession = iota
+	SessionRTH
+	SessionExtended
+	SessionOvernight
+)
+
+func (s OrderSession) String() string {
+	switch s {
+	case SessionRTH:
+		return "RTH"
+	case SessionExtended:
+		return "EXTENDED"
+	case SessionOvernight:
+		return "OVERNIGHT"
+	default:
+		return "AUTO"
+	}
+}
+
+// ExtendedHoursFor resolves whether extended-hours order handling should
+// apply for session s, given autoResult — the caller's own clock-derived
+// resolution for SessionAuto (each broker defines "extended" slightly
+// differently: TradeZero has no Overnight phase, Alpaca does via Blue Ocean
+// ATS). RTH always resolves false; Extended/Overnight always resolve true;
+// Auto (and any unrecognized value) defers to autoResult. Shared by the
+// Alpaca and TradeZero adapters so this override policy lives in one place.
+func ExtendedHoursFor(s OrderSession, autoResult bool) bool {
+	switch s {
+	case SessionRTH:
+		return false
+	case SessionExtended, SessionOvernight:
+		return true
+	default:
+		return autoResult
+	}
+}
+
 type OrderStatus uint8
 
 const (
@@ -150,6 +197,7 @@ type Order struct {
 	Side         Side
 	Type         OrderType
 	TIF          TIF
+	Session      OrderSession
 	Qty          float64
 	LimitPrice   float64
 	StopPrice    float64
@@ -207,6 +255,7 @@ type OrderRequest struct {
 	Side          Side
 	Type          OrderType
 	TIF           TIF
+	Session       OrderSession
 	Qty           float64
 	LimitPrice    float64
 	StopPrice     float64

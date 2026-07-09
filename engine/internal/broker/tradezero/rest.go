@@ -93,7 +93,7 @@ func (rc *restClient) submitOrder(ctx context.Context, req exec.OrderRequest, tz
 		"symbol":        req.Symbol,
 		"orderQuantity": int(req.Qty),
 		"orderType":     ot,
-		"timeInForce":   tifWire(req.TIF, isExtendedHours(rc.clk), req.Type),
+		"timeInForce":   tifWire(req.TIF, extendedHoursFor(req.Session, rc.clk), req.Type),
 		"securityType":  "Stock",
 		"side":          side,
 		"openClose":     openClose,

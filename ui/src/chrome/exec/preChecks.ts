@@ -2,11 +2,21 @@
 //   qty > 0; stop/stop-limit price coherence (TZ does not validate — inverted
 //   stop-limits sit unfilled); Market outside RTH auto-coerced to Limit-at-last
 //   + a visible notice (avoids TZ R78). Pure; nowMs decides the ET session.
-import type { OrderType, Side, TIF } from "../../wire/contract";
+//
+// This coercion is keyed on the ACTUAL clock (sessionAt(nowMs)), never on
+// order.session: it exists purely to stop a naked Market order from reaching
+// a broker while the market genuinely isn't open for regular trading (TZ
+// hard-rejects one with R78), which is a broker-safety concern independent
+// of which session the trader picked for TIF/extended_hours purposes. The
+// engine-side session override (exec.ExtendedHoursFor) already only applies
+// to Limit/StopLimit orders — Market orders ignore session entirely on the
+// wire — so gating this coercion on order.session would let an explicit RTH
+// choice skip the safety net while the market is actually closed.
+import type { OrderType, Side, TIF, OrderSession } from "../../wire/contract";
 import { sessionAt } from "../../render/chart/sessions";
 
 export interface DraftOrder {
-  symbol: string; side: Side; type: OrderType; tif: TIF;
+  symbol: string; side: Side; type: OrderType; tif: TIF; session: OrderSession;
   qty: number; limitPrice: number; stopPrice: number;
 }
 export interface PreCheckResult {

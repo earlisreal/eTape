@@ -6,7 +6,7 @@ const snap = (topic: string, payload: unknown, key?: string) => ({ kind: "snapsh
 const delta = (topic: string, payload: unknown, key?: string) => ({ kind: "delta" as const, topic: topic as never, ...(key !== undefined ? { key } : {}), payload });
 
 const order = (id: string, over: Partial<Order> = {}): Order => ({
-  venue: "alpaca-paper", id, symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY",
+  venue: "alpaca-paper", id, symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO",
   qty: 10, limitPrice: 3.5, stopPrice: 0, status: "ACCEPTED", executedQty: 0, leavesQty: 10,
   avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, ...over,
 });
@@ -45,7 +45,7 @@ describe("ExecStore", () => {
   });
   it("optimistic row appears then reconciles when the real order event lands", () => {
     const s = new ExecStore();
-    s.addOptimistic({ args: { venue: "alpaca-paper", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", qty: 10, limitPrice: 3.5, stopPrice: 0 }, id: "ET9", createdMs: 100 });
+    s.addOptimistic({ args: { venue: "alpaca-paper", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO", qty: 10, limitPrice: 3.5, stopPrice: 0 }, id: "ET9", createdMs: 100 });
     expect(s.orders()).toHaveLength(1);
     expect(s.orders()[0].optimistic).toBe(true);
     s.apply(delta("exec.orders", order("ET9", { status: "SUBMITTED" }), "ET9"));

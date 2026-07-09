@@ -31,7 +31,7 @@ function asksOnlyBook(): Book {
 // ===): 3.49 - 2*0.01 === 3.47 and 3.51 + 2*0.01 === 3.53 hold in IEEE-754 —
 // re-verify exact equality if you change the fixture's step or order prices.
 const ord = (o: Partial<Order>): Order => ({
-  venue: "alpaca-paper", id: "x", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY",
+  venue: "alpaca-paper", id: "x", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO",
   qty: 100, limitPrice: 0, stopPrice: 0, status: "ACCEPTED", executedQty: 0, leavesQty: 0,
   avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 0, updatedMs: 0, ...o,
 });

@@ -39,4 +39,12 @@ describe("resolvePlaceTemplate", () => {
     expect(r.args.limitPrice).toBe(0);
     expect(r.flash).toContain("MKT");
   });
+  it("threads the template's session into the submitted args", () => {
+    const r = resolvePlaceTemplate(tmpl({ session: "EXTENDED" }), { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, positionQty: 0, nowMs: RTH });
+    expect(r.args.session).toBe("EXTENDED");
+  });
+  it("defaults a template with no session to AUTO", () => {
+    const r = resolvePlaceTemplate(tmpl(), { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, positionQty: 0, nowMs: RTH });
+    expect(r.args.session).toBe("AUTO");
+  });
 });

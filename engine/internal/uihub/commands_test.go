@@ -46,7 +46,7 @@ func (s *spyInd) ReleaseIndicator(id string)                    { s.released = i
 func TestCommandsSubmitOrderMapsEnums(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true, OrderID: "ET5"}}
 	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil })
-	ack := cd.handle(context.Background(), "SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"SHORT","type":"STOP_LIMIT","tif":"GTC","qty":80,"limitPrice":3.55,"stopPrice":3.6}`), 0)
+	ack := cd.handle(context.Background(), "SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"SHORT","type":"STOP_LIMIT","tif":"GTC","session":"EXTENDED","qty":80,"limitPrice":3.55,"stopPrice":3.6}`), 0)
 	if ack.Status != "accepted" || ack.OrderID != "ET5" {
 		t.Fatalf("ack wrong: %+v", ack)
 	}
@@ -54,11 +54,25 @@ func TestCommandsSubmitOrderMapsEnums(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected exec.SubmitOrder, got %T", ex.last)
 	}
-	if so.Side != exec.SideShort || so.Type != exec.TypeStopLimit || so.TIF != exec.TIFGTC {
+	if so.Side != exec.SideShort || so.Type != exec.TypeStopLimit || so.TIF != exec.TIFGTC || so.Session != exec.SessionExtended {
 		t.Fatalf("enum parse wrong: %+v", so)
 	}
 	if so.Qty != 80 || so.LimitPrice != 3.55 || so.StopPrice != 3.6 || string(so.Venue) != "sim" {
 		t.Fatalf("field copy wrong: %+v", so)
+	}
+}
+
+// TestCommandsSubmitOrderSessionDefaultsToAuto covers a legacy/absent `session`
+// key on the wire (an older client, or a client that never sends it) — it must
+// decode to SessionAuto, preserving today's clock-inferred submit behavior
+// rather than failing closed to some other session.
+func TestCommandsSubmitOrderSessionDefaultsToAuto(t *testing.T) {
+	ex := &spyExec{ack: exec.CmdAck{Accepted: true, OrderID: "ET6"}}
+	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil })
+	cd.handle(context.Background(), "SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"BUY","type":"LIMIT","tif":"DAY","qty":10,"limitPrice":5}`), 0)
+	so, ok := ex.last.(exec.SubmitOrder)
+	if !ok || so.Session != exec.SessionAuto {
+		t.Fatalf("absent session must default to SessionAuto, got %T %+v", ex.last, ex.last)
 	}
 }
 

@@ -10,7 +10,7 @@ import (
 func TestOrderJSONFieldNames(t *testing.T) {
 	o := wsmsg.Order{
 		Venue: "sim", ID: "ET1", Symbol: "US.AAPL",
-		Side: wsmsg.SideBuy, Type: wsmsg.OrderLimit, TIF: wsmsg.TIFDay,
+		Side: wsmsg.SideBuy, Type: wsmsg.OrderLimit, TIF: wsmsg.TIFDay, Session: wsmsg.SessionExtended,
 		Qty: 100, LimitPrice: 3.47, Status: wsmsg.StatusSubmitted,
 		LeavesQty: 100, ReplacesID: "", CreatedMs: 1_700_000_000_000, UpdatedMs: 1_700_000_000_000,
 	}
@@ -20,15 +20,15 @@ func TestOrderJSONFieldNames(t *testing.T) {
 	}
 	var m map[string]any
 	_ = json.Unmarshal(b, &m)
-	for _, k := range []string{"venue", "id", "symbol", "side", "type", "tif", "qty",
+	for _, k := range []string{"venue", "id", "symbol", "side", "type", "tif", "session", "qty",
 		"limitPrice", "stopPrice", "status", "executedQty", "leavesQty", "avgFillPrice",
 		"rejectReason", "replacesId", "createdMs", "updatedMs"} {
 		if _, ok := m[k]; !ok {
 			t.Errorf("Order JSON missing key %q; got %v", k, m)
 		}
 	}
-	if m["side"] != "BUY" || m["type"] != "LIMIT" || m["status"] != "SUBMITTED" {
-		t.Errorf("enum strings wrong: side=%v type=%v status=%v", m["side"], m["type"], m["status"])
+	if m["side"] != "BUY" || m["type"] != "LIMIT" || m["status"] != "SUBMITTED" || m["session"] != "EXTENDED" {
+		t.Errorf("enum strings wrong: side=%v type=%v status=%v session=%v", m["side"], m["type"], m["status"], m["session"])
 	}
 }
 

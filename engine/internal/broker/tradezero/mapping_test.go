@@ -75,6 +75,29 @@ func TestIsExtendedHours(t *testing.T) {
 	}
 }
 
+// TestExtendedHoursFor_ExplicitSessionOverridesClock covers the trader's
+// explicit session choice taking priority over the clock-inferred
+// (SessionAuto) default: RTH forces the base TIF path even during a
+// pre-market clock, Extended forces the _Plus path even during an RTH clock,
+// and Auto falls back to isExtendedHours (today's behavior) either way.
+func TestExtendedHoursFor_ExplicitSessionOverridesClock(t *testing.T) {
+	preMarket := clock.NewFake(time.Date(2026, 7, 6, 8, 0, 0, 0, mustET(t)))
+	rth := clock.NewFake(time.Date(2026, 7, 6, 10, 0, 0, 0, mustET(t)))
+
+	if got := extendedHoursFor(exec.SessionRTH, preMarket); got {
+		t.Fatal("explicit RTH during pre-market clock must resolve to false")
+	}
+	if got := extendedHoursFor(exec.SessionExtended, rth); !got {
+		t.Fatal("explicit Extended during RTH clock must resolve to true")
+	}
+	if got := extendedHoursFor(exec.SessionAuto, preMarket); !got {
+		t.Fatal("Auto during pre-market clock must defer to isExtendedHours (true)")
+	}
+	if got := extendedHoursFor(exec.SessionAuto, rth); got {
+		t.Fatal("Auto during RTH clock must defer to isExtendedHours (false)")
+	}
+}
+
 func mustET(t *testing.T) *time.Location {
 	t.Helper()
 	loc, err := time.LoadLocation("America/New_York")

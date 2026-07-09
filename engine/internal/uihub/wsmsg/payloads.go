@@ -53,23 +53,24 @@ type IndicatorPoint struct {
 // ---- execution payloads (timestamps are epoch-ms numbers) ----
 
 type Order struct {
-	Venue        string      `json:"venue"`
-	ID           string      `json:"id"`
-	Symbol       string      `json:"symbol"`
-	Side         Side        `json:"side"`
-	Type         OrderType   `json:"type"`
-	TIF          TIF         `json:"tif"`
-	Qty          float64     `json:"qty"`
-	LimitPrice   float64     `json:"limitPrice"`
-	StopPrice    float64     `json:"stopPrice"`
-	Status       OrderStatus `json:"status"`
-	ExecutedQty  float64     `json:"executedQty"`
-	LeavesQty    float64     `json:"leavesQty"`
-	AvgFillPrice float64     `json:"avgFillPrice"`
-	RejectReason string      `json:"rejectReason"`
-	ReplacesID   string      `json:"replacesId"`
-	CreatedMs    int64       `json:"createdMs"`
-	UpdatedMs    int64       `json:"updatedMs"`
+	Venue        string       `json:"venue"`
+	ID           string       `json:"id"`
+	Symbol       string       `json:"symbol"`
+	Side         Side         `json:"side"`
+	Type         OrderType    `json:"type"`
+	TIF          TIF          `json:"tif"`
+	Session      OrderSession `json:"session"`
+	Qty          float64      `json:"qty"`
+	LimitPrice   float64      `json:"limitPrice"`
+	StopPrice    float64      `json:"stopPrice"`
+	Status       OrderStatus  `json:"status"`
+	ExecutedQty  float64      `json:"executedQty"`
+	LeavesQty    float64      `json:"leavesQty"`
+	AvgFillPrice float64      `json:"avgFillPrice"`
+	RejectReason string       `json:"rejectReason"`
+	ReplacesID   string       `json:"replacesId"`
+	CreatedMs    int64        `json:"createdMs"`
+	UpdatedMs    int64        `json:"updatedMs"`
 }
 
 type Fill struct {
@@ -203,14 +204,15 @@ type SysEvent struct {
 // generate them while wsmsg.go itself is excluded — see tygo.yaml) ----
 
 type SubmitOrderArgs struct {
-	Venue      string    `json:"venue"`
-	Symbol     string    `json:"symbol"`
-	Side       Side      `json:"side"`
-	Type       OrderType `json:"type"`
-	TIF        TIF       `json:"tif"`
-	Qty        float64   `json:"qty"`
-	LimitPrice float64   `json:"limitPrice"`
-	StopPrice  float64   `json:"stopPrice"`
+	Venue      string       `json:"venue"`
+	Symbol     string       `json:"symbol"`
+	Side       Side         `json:"side"`
+	Type       OrderType    `json:"type"`
+	TIF        TIF          `json:"tif"`
+	Session    OrderSession `json:"session"`
+	Qty        float64      `json:"qty"`
+	LimitPrice float64      `json:"limitPrice"`
+	StopPrice  float64      `json:"stopPrice"`
 }
 
 type CancelOrderArgs struct {

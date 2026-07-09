@@ -3,7 +3,7 @@ import { displayStatus, isWorking, isTerminal, STATUS_LABEL, sideIsSell, bareSym
 import type { Order } from "../../wire/contract";
 
 const base: Order = {
-  venue: "alpaca-paper", id: "ET1", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY",
+  venue: "alpaca-paper", id: "ET1", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO",
   qty: 10, limitPrice: 3.5, stopPrice: 0, status: "ACCEPTED", executedQty: 0, leavesQty: 10,
   avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1000, updatedMs: 1000,
 };

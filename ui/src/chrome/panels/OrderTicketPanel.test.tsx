@@ -45,7 +45,19 @@ describe("OrderTicketPanel", () => {
     fireEvent.click(screen.getByTestId("side-BUY"));
     await waitFor(() => expect(sent.some((s) => s.name === "SubmitOrder")).toBe(true));
     const args = sent.find((s) => s.name === "SubmitOrder")?.args as SubmitOrderArgs;
-    expect(args).toMatchObject({ venue: "alpaca-paper", symbol: "US.AAPL", side: "BUY", qty: 100, limitPrice: 3.5 });
+    expect(args).toMatchObject({ venue: "alpaca-paper", symbol: "US.AAPL", side: "BUY", session: "AUTO", qty: 100, limitPrice: 3.5 });
+  });
+  it("picking a Session carries it through to the submitted SubmitOrder", async () => {
+    const { props, stores, linkGroups, sent } = mkProps();
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.4, ask: 3.5, last: 3.45, ts: "" } }); linkGroups.focus("green", "US.AAPL"); });
+    wrap(props);
+    fireEvent.change(screen.getByTestId("amount"), { target: { value: "100" } });
+    fireEvent.change(screen.getByTestId("price"), { target: { value: "3.5" } });
+    fireEvent.change(screen.getByTestId("session"), { target: { value: "EXTENDED" } });
+    fireEvent.click(screen.getByTestId("side-BUY"));
+    await waitFor(() => expect(sent.some((s) => s.name === "SubmitOrder")).toBe(true));
+    const args = sent.find((s) => s.name === "SubmitOrder")?.args as SubmitOrderArgs;
+    expect(args).toMatchObject({ side: "BUY", session: "EXTENDED" });
   });
   it("clicking SELL submits that side directly, without a separate select step", async () => {
     const { props, stores, linkGroups, sent } = mkProps();
@@ -142,7 +154,7 @@ describe("OrderTicketPanel", () => {
     // into PanelFrame's title bar when mounted under a frame), where the
     // select's own value is self-evident without a label.
     const captions = Array.from(container.querySelectorAll(".col-head")).map((el) => el.textContent);
-    for (const label of ["Type", "TIF", "Price", "Stop", "Size", "Size by"]) {
+    for (const label of ["Type", "TIF", "Session", "Price", "Stop", "Size", "Size by"]) {
       expect(captions).toContain(label);
     }
   });
@@ -154,5 +166,13 @@ describe("OrderTicketPanel", () => {
     expect(typeOptions).toEqual(["Limit", "Market", "Stop", "Stop Limit"]);
     const modeOptions = Array.from(screen.getByTestId("mode").querySelectorAll("option")).map((o) => o.textContent);
     expect(modeOptions).toEqual(["Shares", "Dollars", "Buying Power %", "Position"]);
+  });
+  it("defaults Session to Auto and lists all four options", () => {
+    const { props, stores } = mkProps();
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
+    wrap(props);
+    expect((screen.getByTestId("session") as HTMLSelectElement).value).toBe("AUTO");
+    const sessionOptions = Array.from(screen.getByTestId("session").querySelectorAll("option")).map((o) => o.textContent);
+    expect(sessionOptions).toEqual(["Auto", "Regular", "Extended", "Overnight"]);
   });
 });

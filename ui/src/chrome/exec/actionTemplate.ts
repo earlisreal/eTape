@@ -1,7 +1,7 @@
 // Action templates: one saved recipe, two triggers (a hotkey binding and a ticket
 // preset button), edited in one settings screen and stored engine-side under the
 // config key `orderConfig`. (ui-design §Order entry & hotkeys.)
-import type { Side, OrderType, TIF, VenueID } from "../../wire/contract";
+import type { Side, OrderType, TIF, OrderSession, VenueID } from "../../wire/contract";
 import type { SizingSpec } from "./sizing";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 
@@ -9,6 +9,7 @@ export interface PlaceOrderTemplate {
   kind: "place";
   id: string; label: string;
   side: Side; type: OrderType; tif: TIF;
+  session?: OrderSession;   // absent => "AUTO" (every persisted config is already valid)
   priceSource: PriceSource; priceOffset: number;
   priceOffsetUnit?: PriceOffsetUnit;   // absent => "$" (every persisted config is already valid)
   sizing: SizingSpec;
@@ -36,15 +37,17 @@ export const DEFAULT_ORDER_CONFIG: OrderConfig = { templates: DEFAULT_TEMPLATES,
 
 // normalizeOrderConfig is the single migration point applied where a config
 // enters the app (OrderConfigProvider on load, and to DEFAULT_ORDER_CONFIG).
-// It converts legacy PositionFraction `fraction` to `pct` and defaults a
-// missing price-offset unit to "$". Idempotent; manage templates pass through.
+// It converts legacy PositionFraction `fraction` to `pct`, defaults a missing
+// price-offset unit to "$", and defaults a missing session to "AUTO" (a
+// config saved before this feature landed keeps today's clock-inferred
+// submit behavior). Idempotent; manage templates pass through.
 function normalizeTemplate(t: ActionTemplate): ActionTemplate {
   if (t.kind !== "place") return t;
   let sizing = t.sizing;
   if (sizing.mode === "PositionFraction" && sizing.pct === undefined) {
     sizing = { ...sizing, pct: sizing.fraction === "half" ? 50 : 100 };
   }
-  return { ...t, priceOffsetUnit: t.priceOffsetUnit ?? "$", sizing };
+  return { ...t, priceOffsetUnit: t.priceOffsetUnit ?? "$", session: t.session ?? "AUTO", sizing };
 }
 
 export function normalizeOrderConfig(config: OrderConfig): OrderConfig {

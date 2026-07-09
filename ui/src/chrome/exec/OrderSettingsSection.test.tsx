@@ -191,6 +191,18 @@ describe("OrderSettingsSection", () => {
     const saved = onSave.mock.calls[0][0];
     expect(saved.templates.length).toBe(DEFAULT_ORDER_CONFIG.templates.length + 1);
     expect(saved.templates[saved.templates.length - 1].kind).toBe("place");
+    expect(saved.templates[saved.templates.length - 1].session).toBe("AUTO");
+  });
+
+  it("edits a template's session and round-trips it on save", () => {
+    const { onSave } = wrap();
+    // buy-5k starts at the default session ("AUTO" — normalizeOrderConfig
+    // fills it in for DEFAULT_TEMPLATES, which don't set it explicitly).
+    expect((screen.getByLabelText("session-buy-5k") as HTMLSelectElement).value).toBe("AUTO");
+    fireEvent.change(screen.getByLabelText("session-buy-5k"), { target: { value: "OVERNIGHT" } });
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").session).toBe("OVERNIGHT");
   });
 
   it("add-manage creates a manage-kind template", () => {

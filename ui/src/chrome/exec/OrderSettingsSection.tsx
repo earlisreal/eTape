@@ -16,7 +16,7 @@ import { useState, type CSSProperties } from "react";
 import { useTheme } from "../ThemeProvider";
 import { FONTS, type Palette } from "../../render/palette";
 import { HoverButton } from "../controls/HoverButton";
-import type { Side, OrderType, TIF } from "../../wire/contract";
+import type { Side, OrderType, TIF, OrderSession } from "../../wire/contract";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 import type { SizingSpec, SizingMode } from "./sizing";
 import {
@@ -30,6 +30,8 @@ import { StepField } from "./StepField";
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
 const TIFS: TIF[] = ["DAY", "GTC", "IOC", "FOK"];
+const SESSIONS: OrderSession[] = ["AUTO", "RTH", "EXTENDED", "OVERNIGHT"];
+const SESSION_LABEL: Record<OrderSession, string> = { AUTO: "Auto", RTH: "Regular", EXTENDED: "Extended", OVERNIGHT: "Overnight" };
 const SOURCES: PriceSource[] = ["Bid", "Ask", "Last", "Mid"];
 const MODES: SizingMode[] = ["Dollar", "BuyingPowerPct", "Shares", "PositionFraction"];
 const MODE_LABEL: Record<SizingMode, string> = { Dollar: "Dollar", BuyingPowerPct: "BP %", Shares: "Shares", PositionFraction: "Pos %" };
@@ -175,6 +177,12 @@ function TemplateCard({ t, palette, dup, rawEdits, setRawEdit, clearRawEdit, pat
                 {TIFS.map((x) => <option key={x}>{x}</option>)}
               </select>
             </div>
+            <div style={fieldGroup}>
+              <span style={fieldLabel}>Session</span>
+              <select aria-label={`session-${t.id}`} className="field" value={t.session ?? "AUTO"} onChange={(e) => patch(t.id, { session: e.target.value as OrderSession })} style={{ width: 92 }}>
+                {SESSIONS.map((s) => <option key={s} value={s}>{SESSION_LABEL[s]}</option>)}
+              </select>
+            </div>
           </div>
 
           <div style={fieldRow}>
@@ -288,7 +296,7 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
     clearRawEdit(`${id}:size`);
   };
   const uid = (p: string) => `${p}-${templates.length + 1}-${Math.max(0, ...templates.map((_, i) => i)) + 1}`;
-  const addPlace = () => setTemplates((ts) => [...ts, { kind: "place", id: uid("tmpl"), label: "New", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, priceOffsetUnit: "$", sizing: { mode: "Shares", shares: 100 } } as PlaceOrderTemplate]);
+  const addPlace = () => setTemplates((ts) => [...ts, { kind: "place", id: uid("tmpl"), label: "New", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO", priceSource: "Ask", priceOffset: 0, priceOffsetUnit: "$", sizing: { mode: "Shares", shares: 100 } } as PlaceOrderTemplate]);
   const addManage = () => setTemplates((ts) => [...ts, { kind: "manage", id: uid("mng"), label: "New action", action: "CancelLast" }]);
   // Reset replaces every template wholesale, so any live rawEdits entry —
   // even for an id that still exists after reset (default ids are fixed

@@ -48,4 +48,20 @@ describe("normalizeOrderConfig", () => {
     const raw: OrderConfig = { activeVenue: "", templates: [{ kind: "manage", id: "k", label: "KILL", action: "KillSwitch", hotkey: "Ctrl+Shift+K" }] as OrderConfig["templates"] };
     expect(normalizeOrderConfig(raw).templates[0]).toEqual(raw.templates[0]);
   });
+  it("defaults a missing session to AUTO (a config saved before this feature keeps today's behavior)", () => {
+    const raw: OrderConfig = {
+      activeVenue: "",
+      templates: [{ kind: "place", id: "a", label: "A", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, sizing: { mode: "Shares", shares: 100 } }] as OrderConfig["templates"],
+    };
+    const out = normalizeOrderConfig(raw);
+    expect(out.templates[0].kind === "place" && out.templates[0].session).toBe("AUTO");
+  });
+  it("leaves an explicit session untouched", () => {
+    const raw: OrderConfig = {
+      activeVenue: "",
+      templates: [{ kind: "place", id: "a", label: "A", side: "BUY", type: "LIMIT", tif: "DAY", session: "OVERNIGHT", priceSource: "Ask", priceOffset: 0, sizing: { mode: "Shares", shares: 100 } }] as OrderConfig["templates"],
+    };
+    const out = normalizeOrderConfig(raw);
+    expect(out.templates[0].kind === "place" && out.templates[0].session).toBe("OVERNIGHT");
+  });
 });

@@ -84,7 +84,8 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		return ackFromCmd(cd.ex.Do(exec.SubmitOrder{
 			Venue: exec.VenueID(a.Venue), Symbol: a.Symbol,
 			Side: sideFromWire(a.Side), Type: orderTypeFromWire(a.Type), TIF: tifFromWire(a.TIF),
-			Qty: a.Qty, LimitPrice: a.LimitPrice, StopPrice: a.StopPrice,
+			Session: sessionFromWire(a.Session),
+			Qty:     a.Qty, LimitPrice: a.LimitPrice, StopPrice: a.StopPrice,
 		}))
 	case "CancelOrder":
 		var a wsmsg.CancelOrderArgs
@@ -324,6 +325,22 @@ func tifFromWire(t wsmsg.TIF) exec.TIF {
 		return exec.TIFFOK
 	default:
 		return exec.TIFDay
+	}
+}
+
+// sessionFromWire defaults an absent/unrecognized value to SessionAuto — the
+// safe, clock-inferred behavior — so a legacy client that never sends
+// `session` (or a stale one) keeps today's submit behavior unchanged.
+func sessionFromWire(s wsmsg.OrderSession) exec.OrderSession {
+	switch s {
+	case wsmsg.SessionRTH:
+		return exec.SessionRTH
+	case wsmsg.SessionExtended:
+		return exec.SessionExtended
+	case wsmsg.SessionOvernight:
+		return exec.SessionOvernight
+	default:
+		return exec.SessionAuto
 	}
 }
 

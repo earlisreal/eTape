@@ -93,3 +93,15 @@ func isExtendedHours(clk clock.Clock) bool {
 		return false
 	}
 }
+
+// extendedHoursFor resolves whether TZ's _Plus TIF variants should be used
+// for req's explicit session choice: exec.ExtendedHoursFor (shared with
+// Alpaca — see its mapping.go) applied to TZ's own clock-derived AUTO
+// resolution. OVERNIGHT cannot actually reach TZ — its
+// Capabilities().OvernightSession is false, so Core.handleSubmit blocks an
+// explicit Overnight order before any adapter call — but exec.ExtendedHoursFor
+// maps it to the extended path defensively rather than silently reverting to
+// plain RTH TIF if that gate is ever bypassed.
+func extendedHoursFor(s exec.OrderSession, clk clock.Clock) bool {
+	return exec.ExtendedHoursFor(s, isExtendedHours(clk))
+}

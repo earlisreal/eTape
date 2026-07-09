@@ -210,6 +210,48 @@ func TestSubmit_ExtendedHours_MarketDoesNotSetFlag(t *testing.T) {
 	}
 }
 
+// TestSubmit_ExplicitSession_OverridesClock covers the trader's explicit
+// session choice taking priority over the clock-inferred (SessionAuto)
+// default: RTH forces extended_hours off even during a pre-market clock, and
+// Extended forces it on even during an RTH clock.
+func TestSubmit_ExplicitSession_OverridesClock(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		t       time.Time
+		session exec.OrderSession
+		want    bool // extended_hours expected value; false means "absent"
+	}{
+		{"RTH override during pre-market clock", etTime(8, 0), exec.SessionRTH, false},
+		{"Extended override during RTH clock", etTime(10, 0), exec.SessionExtended, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			var gotBody map[string]any
+			mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, r *http.Request) {
+				_ = jsonDecode(t, r, &gotBody)
+				_, _ = w.Write([]byte(`{"id":"b-1","client_order_id":"ET-1","symbol":"AAPL","side":"buy","order_type":"limit","qty":"1","filled_qty":"0","status":"new"}`))
+			})
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+
+			rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(tc.t))
+			if _, err := rc.submitOrder(context.Background(), exec.OrderRequest{
+				Venue: "alpaca", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay,
+				Session: tc.session, Qty: 1, LimitPrice: 100,
+			}, "ET-1"); err != nil {
+				t.Fatal(err)
+			}
+			got, has := gotBody["extended_hours"]
+			if tc.want && got != true {
+				t.Fatalf("extended_hours = %v (has=%v), want true", got, has)
+			}
+			if !tc.want && has {
+				t.Fatalf("extended_hours must be absent, got %v", got)
+			}
+		})
+	}
+}
+
 // TestSubmit_HTTPErrorStatus_NeverSilentlyAccepted is the critical
 // fail-closed property called out in the task brief, mirroring TradeZero's
 // equivalent test: a non-200 status with a body that does NOT match the

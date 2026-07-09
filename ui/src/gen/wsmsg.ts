@@ -20,6 +20,7 @@ export type Topic =
 export type Side = "BUY" | "SELL" | "SHORT" | "COVER";
 export type OrderType = "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT";
 export type TIF = "DAY" | "GTC" | "IOC" | "FOK";
+export type OrderSession = "AUTO" | "RTH" | "EXTENDED" | "OVERNIGHT";
 export type OrderStatus =
   | "SUBMITTED" | "ACCEPTED" | "PARTIALLY_FILLED" | "FILLED"
   | "CANCELED" | "REJECTED" | "EXPIRED" | "BLOCKED" | "REPLACED";
@@ -136,6 +137,7 @@ export interface Order {
   side: Side;
   type: OrderType;
   tif: TIF;
+  session: OrderSession;
   qty: number /* float64 */;
   limitPrice: number /* float64 */;
   stopPrice: number /* float64 */;
@@ -265,6 +267,7 @@ export interface SubmitOrderArgs {
   side: Side;
   type: OrderType;
   tif: TIF;
+  session: OrderSession;
   qty: number /* float64 */;
   limitPrice: number /* float64 */;
   stopPrice: number /* float64 */;

@@ -3,7 +3,7 @@ import { useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties } from "react";
 import type { PanelProps } from "./registry";
-import type { Side, OrderType, TIF, SubmitOrderArgs } from "../../wire/contract";
+import type { Side, OrderType, TIF, OrderSession, SubmitOrderArgs } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
@@ -21,11 +21,16 @@ import { IconGear } from "./tv/tvIcons";
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
 const TIFS: TIF[] = ["DAY", "GTC", "IOC", "FOK"];
+const SESSIONS: OrderSession[] = ["AUTO", "RTH", "EXTENDED", "OVERNIGHT"];
 const MODES: SizingMode[] = ["Shares", "Dollar", "BuyingPowerPct", "PositionFraction"];
 // Full words in the ticket's own dropdowns — abbrevType (orderStatus.ts) stays
 // abbreviated since it's shared with OpenOrdersPanel and the submit-flash toast.
 const TYPE_LABEL: Record<OrderType, string> = { MARKET: "Market", LIMIT: "Limit", STOP: "Stop", STOP_LIMIT: "Stop Limit" };
 const MODE_LABEL: Record<SizingMode, string> = { Shares: "Shares", Dollar: "Dollars", BuyingPowerPct: "Buying Power %", PositionFraction: "Position" };
+// AUTO resolves session-dependent behavior (extended_hours flags, TIF
+// coercion) from the server clock at submit time — today's behavior, kept as
+// the default so nothing changes until the trader picks an explicit session.
+const SESSION_LABEL: Record<OrderSession, string> = { AUTO: "Auto", RTH: "Regular", EXTENDED: "Extended", OVERNIGHT: "Overnight" };
 
 export function OrderTicketPanel({ config, stores, commands, linkGroups, group: groupProp }: PanelProps): JSX.Element {
   const { palette } = useTheme();
@@ -53,6 +58,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
 
   const [type, setType] = useState<OrderType>("LIMIT");
   const [tif, setTif] = useState<TIF>("DAY");
+  const [session, setSession] = useState<OrderSession>("AUTO");
   const [mode, setMode] = useState<SizingMode>("Shares");
   const [amount, setAmount] = useState("100");
   const [price, setPrice] = useState("");
@@ -72,12 +78,12 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
       : mode === "BuyingPowerPct" ? { mode, pct: Number(amount) || 0 }
       : { mode, pct: Number(amount) || 0 };
     const qty = resolveShares(spec, { price: px, buyingPower, positionQty });
-    const draft: DraftOrder = { symbol, side, type, tif, qty, limitPrice: type === "MARKET" ? 0 : px, stopPrice: hasStop ? Number(stop) || 0 : 0 };
+    const draft: DraftOrder = { symbol, side, type, tif, session, qty, limitPrice: type === "MARKET" ? 0 : px, stopPrice: hasStop ? Number(stop) || 0 : 0 };
     const pc = preCheck(draft, quote?.last ?? 0, Date.now());
     for (const n of pc.notices) toast.push({ level: "warn", text: n });
     if (!pc.ok) { toast.push({ level: "danger", text: pc.errors.join(" ") }); return; }
     const o = pc.order;
-    const args: SubmitOrderArgs = { venue, symbol, side: o.side, type: o.type, tif: o.tif, qty: o.qty, limitPrice: o.limitPrice, stopPrice: o.stopPrice };
+    const args: SubmitOrderArgs = { venue, symbol, side: o.side, type: o.type, tif: o.tif, session: o.session, qty: o.qty, limitPrice: o.limitPrice, stopPrice: o.stopPrice };
     const tail = o.type === "MARKET" ? "MKT" : `${o.limitPrice.toFixed(QUOTE_DECIMALS)} ${abbrevType(o.type)}`;
     const flash = `${sideLabel(o.side)} ${o.qty.toLocaleString("en-US")} ${bareSymbol(symbol)} @ ${tail}`;
     void oc.submit(args, flash);
@@ -161,6 +167,11 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
         {field("TIF", (
           <select className="ctl mono" value={tif} onChange={(e) => setTif(e.target.value as TIF)} style={full}>
             {TIFS.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+        ))}
+        {field("Session", (
+          <select data-testid="session" className="ctl mono" value={session} onChange={(e) => setSession(e.target.value as OrderSession)} style={full}>
+            {SESSIONS.map((s) => <option key={s} value={s}>{SESSION_LABEL[s]}</option>)}
           </select>
         ))}
       </div>

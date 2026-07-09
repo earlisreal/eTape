@@ -57,6 +57,7 @@ packages:
       export type Side = "BUY" | "SELL" | "SHORT" | "COVER";
       export type OrderType = "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT";
       export type TIF = "DAY" | "GTC" | "IOC" | "FOK";
+      export type OrderSession = "AUTO" | "RTH" | "EXTENDED" | "OVERNIGHT";
       export type OrderStatus =
         | "SUBMITTED" | "ACCEPTED" | "PARTIALLY_FILLED" | "FILLED"
         | "CANCELED" | "REJECTED" | "EXPIRED" | "BLOCKED" | "REPLACED";

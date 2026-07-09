@@ -52,13 +52,20 @@ func TestApplyPartialThenFill(t *testing.T) {
 
 func TestApplyBlockedAndCancel(t *testing.T) {
 	s := NewState([]VenueID{"sim-1"})
-	s.Apply(OrderBlocked{V: "sim-1", OID: "ETb", Req: OrderRequest{Venue: "sim-1", Symbol: "AAPL", ClientOrderID: "ETb"}, Reason: "master disarmed", Ts: 1000})
+	s.Apply(OrderBlocked{V: "sim-1", OID: "ETb", Req: OrderRequest{Venue: "sim-1", Symbol: "AAPL", ClientOrderID: "ETb", Session: SessionOvernight}, Reason: "venue does not support overnight session", Ts: 1000})
 	// Blocked orders are recorded (duplicate-ID defense) but terminal + not working.
 	if _, ok := s.OrderVenue("ETb"); !ok {
 		t.Fatal("blocked order not indexed")
 	}
 	if o := s.Venue("sim-1").Orders["ETb"]; o.Status != StatusBlocked || o.Working() {
 		t.Fatalf("blocked order: %+v", o)
+	}
+	// The blocked order's Session must carry through from the request — the
+	// whole point of the overnight-capability gate is to surface *which*
+	// session was rejected; a dropped field here would show "AUTO" for what
+	// was actually an explicit Overnight rejection.
+	if o := s.Venue("sim-1").Orders["ETb"]; o.Session != SessionOvernight {
+		t.Fatalf("blocked order dropped Session: %+v", o)
 	}
 	s.Apply(submitEv("sim-1", "ET1", "AAPL", SideBuy, 10, 100, 1001))
 	s.Apply(OrderCanceled{V: "sim-1", OID: "ET1", Ts: 1002})

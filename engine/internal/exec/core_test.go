@@ -171,6 +171,7 @@ func TestCoreAppendFailureBlocksSubmit(t *testing.T) {
 type capStub struct {
 	flatten      bool // value Capabilities().FlattenAll reports
 	resetBalance bool // value Capabilities().ResetBalance reports
+	overnight    bool // value Capabilities().OvernightSession reports
 
 	mu          sync.Mutex
 	called      bool
@@ -182,7 +183,7 @@ type capStub struct {
 var _ exec.Broker = (*capStub)(nil)
 
 func (c *capStub) Capabilities() exec.Capabilities {
-	return exec.Capabilities{FlattenAll: c.flatten, ResetBalance: c.resetBalance}
+	return exec.Capabilities{FlattenAll: c.flatten, ResetBalance: c.resetBalance, OvernightSession: c.overnight}
 }
 
 func (c *capStub) SubmitOrder(context.Context, exec.OrderRequest) (exec.OrderAck, error) {
@@ -594,5 +595,67 @@ func TestCore_ResetBalance_UnknownVenue(t *testing.T) {
 	c, _ := buildCoreWith(t, &capStub{resetBalance: true}, nil)
 	if ack := c.Do(exec.ResetBalance{Venue: "ghost"}); ack.Accepted {
 		t.Fatal("ResetBalance on an unknown venue must be rejected")
+	}
+}
+
+// TestCore_SubmitOrder_ExplicitOvernight_BlockedWithoutCapability covers the
+// gate this feature adds in handleSubmit: an EXPLICIT Overnight session must
+// be rejected on a venue whose broker doesn't support it, rather than being
+// silently placed under a different session than the trader chose.
+// SimBroker (used by newTestCore) always reports OvernightSession:false — the
+// same real-world constraint as TradeZero.
+func TestCore_SubmitOrder_ExplicitOvernight_BlockedWithoutCapability(t *testing.T) {
+	c, _, _ := newTestCore(t, "sim-1")
+	c.Do(exec.Arm{})
+	c.Do(exec.Arm{Venue: "sim-1"})
+	ack := c.Do(exec.SubmitOrder{
+		Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay,
+		Session: exec.SessionOvernight, Qty: 10, LimitPrice: 100,
+	})
+	if ack.Accepted || ack.Reason != "venue does not support overnight session" {
+		t.Fatalf("explicit Overnight on a venue without the capability must block, got %+v", ack)
+	}
+	u := waitFor(t, c, func(u exec.Update) bool { _, ok := u.(exec.OrderUpdate); return ok })
+	if u.(exec.OrderUpdate).Order.Status != exec.StatusBlocked {
+		t.Fatalf("expected blocked order update, got %+v", u)
+	}
+}
+
+// TestCore_SubmitOrder_ExplicitOvernight_AcceptedWithCapability is the other
+// side of the same gate: a venue whose broker DOES report
+// OvernightSession:true (Alpaca's Blue Ocean ATS, in production) must accept
+// an explicit Overnight order.
+func TestCore_SubmitOrder_ExplicitOvernight_AcceptedWithCapability(t *testing.T) {
+	c, _ := buildCoreWith(t, &capStub{overnight: true}, nil)
+	c.Do(exec.Arm{})
+	c.Do(exec.Arm{Venue: "v"})
+	ack := c.Do(exec.SubmitOrder{
+		Venue: "v", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay,
+		Session: exec.SessionOvernight, Qty: 10, LimitPrice: 100,
+	})
+	if !ack.Accepted {
+		t.Fatalf("explicit Overnight on a venue with the capability must be accepted, got %+v", ack)
+	}
+}
+
+// Auto/RTH/Extended must never hit the overnight-capability gate, even on a
+// venue without the capability — only an explicit Overnight choice can be
+// capability-blocked.
+func TestCore_SubmitOrder_NonOvernightSessions_NeverCapabilityBlocked(t *testing.T) {
+	c, _, _ := newTestCore(t, "sim-1")
+	c.Do(exec.Arm{})
+	c.Do(exec.Arm{Venue: "sim-1"})
+	for _, s := range []exec.OrderSession{exec.SessionAuto, exec.SessionRTH, exec.SessionExtended} {
+		ack := c.Do(exec.SubmitOrder{
+			Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay,
+			Session: s, Qty: 10, LimitPrice: 100,
+		})
+		if !ack.Accepted {
+			t.Fatalf("session %v must not be capability-blocked, got %+v", s, ack)
+		}
+		// Drain this order's fill/position updates so they don't leak into the
+		// next iteration's waitFor-free assertions above.
+		waitFor(t, c, func(u exec.Update) bool { _, ok := u.(exec.FillUpdate); return ok })
+		waitFor(t, c, func(u exec.Update) bool { _, ok := u.(exec.PositionUpdate); return ok })
 	}
 }

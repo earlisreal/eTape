@@ -22,9 +22,9 @@ function fakes(ack: Partial<AckMsg> = {}) {
   const oc = new OrderCommands({ cmd, exec, toast: toast as never, now: () => 100 });
   return { sent, cmd, exec, pushed, oc };
 }
-const args: SubmitOrderArgs = { venue: "alpaca-paper", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", qty: 10, limitPrice: 3.5, stopPrice: 0 };
+const args: SubmitOrderArgs = { venue: "alpaca-paper", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO", qty: 10, limitPrice: 3.5, stopPrice: 0 };
 const snap = (payload: Order[]) => ({ kind: "snapshot" as const, topic: "exec.orders" as never, payload });
-const order = (id: string, over: Partial<Order> = {}): Order => ({ venue: "alpaca-paper", id, symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", qty: 10, limitPrice: 3.5, stopPrice: 0, status: "ACCEPTED", executedQty: 0, leavesQty: 10, avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, ...over });
+const order = (id: string, over: Partial<Order> = {}): Order => ({ venue: "alpaca-paper", id, symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO", qty: 10, limitPrice: 3.5, stopPrice: 0, status: "ACCEPTED", executedQty: 0, leavesQty: 10, avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, ...over });
 
 describe("OrderCommands", () => {
   it("submit accepted → registers optimistic row + info flash", async () => {
@@ -82,12 +82,12 @@ describe("OrderCommands sound triggers", () => {
     const sound = soundSpy();
     const okCmd: CommandAdapter = { sendCommand: vi.fn(async () => ({ kind: "ack", corrId: "c", status: "accepted", orderId: "x" }) as AckMsg) };
     const oc = new OrderCommands({ cmd: okCmd, exec: { addOptimistic: vi.fn() } as never, toast: { push: vi.fn() } as never, now: () => 0, sound });
-    await oc.submit({ venue: "alpaca-paper", symbol: "US.AAPL", side: "SELL", type: "LIMIT", tif: "DAY", qty: 1, limitPrice: 1, stopPrice: 0 }, "flash");
+    await oc.submit({ venue: "alpaca-paper", symbol: "US.AAPL", side: "SELL", type: "LIMIT", tif: "DAY", session: "AUTO", qty: 1, limitPrice: 1, stopPrice: 0 }, "flash");
     expect(sound.placed).toEqual(["SELL"]);
 
     const blockCmd: CommandAdapter = { sendCommand: vi.fn(async () => ({ kind: "ack", corrId: "c", status: "blocked", reason: "disarmed" }) as AckMsg) };
     const oc2 = new OrderCommands({ cmd: blockCmd, exec: {} as never, toast: { push: vi.fn() } as never, now: () => 0, sound });
-    await oc2.submit({ venue: "alpaca-paper", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", qty: 1, limitPrice: 1, stopPrice: 0 }, "flash");
+    await oc2.submit({ venue: "alpaca-paper", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO", qty: 1, limitPrice: 1, stopPrice: 0 }, "flash");
     expect(sound.rejected).toBe(1);
   });
 

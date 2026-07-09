@@ -67,7 +67,7 @@ func (s *State) Apply(ev Event) {
 		// Recorded for the duplicate-ID defense; terminal, never working.
 		vs := s.Venue(e.V)
 		vs.Orders[e.OID] = Order{Venue: e.V, ID: e.OID, Symbol: e.Req.Symbol, Side: e.Req.Side,
-			Type: e.Req.Type, TIF: e.Req.TIF, Qty: e.Req.Qty, LimitPrice: e.Req.LimitPrice,
+			Type: e.Req.Type, TIF: e.Req.TIF, Session: e.Req.Session, Qty: e.Req.Qty, LimitPrice: e.Req.LimitPrice,
 			StopPrice: e.Req.StopPrice, Status: StatusBlocked, RejectReason: e.Reason,
 			CreatedMs: e.Ts, UpdatedMs: e.Ts}
 		s.orderIndex[e.OID] = e.V

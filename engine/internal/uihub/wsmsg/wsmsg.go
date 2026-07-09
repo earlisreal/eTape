@@ -69,6 +69,16 @@ const (
 	TIFFOK TIF = "FOK"
 )
 
+// OrderSession mirrors exec.OrderSession on the wire.
+type OrderSession string
+
+const (
+	SessionAuto      OrderSession = "AUTO"
+	SessionRTH       OrderSession = "RTH"
+	SessionExtended  OrderSession = "EXTENDED"
+	SessionOvernight OrderSession = "OVERNIGHT"
+)
+
 type OrderStatus string
 
 const (
