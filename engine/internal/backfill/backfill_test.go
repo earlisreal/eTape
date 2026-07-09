@@ -80,21 +80,33 @@ func (f *fakeFetcher) Intraday1m(_ context.Context, _ string, _, _ time.Time) ([
 	return f.m1, f.mErr
 }
 
-// fakeSeeder records seeded bars per method.
+// fakeSeeder records seeded bars/ticks per method, plus an ordered call-tag
+// log so tests can assert relative ordering across methods (e.g.
+// SeedSessionTicks before SeedDaily/SeedHistory1m).
 type fakeSeeder struct {
 	mu          sync.Mutex
 	daily, hist []feed.Bar
+	ticks       []feed.Tick
+	calls       []string
 }
 
+func (s *fakeSeeder) SeedSessionTicks(_ string, t []feed.Tick) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ticks = append(s.ticks, t...)
+	s.calls = append(s.calls, "ticks")
+}
 func (s *fakeSeeder) SeedDaily(_ string, b []feed.Bar) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.daily = append(s.daily, b...)
+	s.calls = append(s.calls, "daily")
 }
 func (s *fakeSeeder) SeedHistory1m(_ string, b []feed.Bar) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.hist = append(s.hist, b...)
+	s.calls = append(s.calls, "hist")
 }
 
 // fakeArchive returns canned warm-start bars and records what gets archived
@@ -104,12 +116,17 @@ func (s *fakeSeeder) SeedHistory1m(_ string, b []feed.Bar) {
 type fakeArchive struct {
 	mu            sync.Mutex
 	daily, m1     []feed.Bar
+	ticks         []feed.Tick
+	ticksErr      error
 	archivedDaily []feed.Bar
 	archived1m    []feed.Bar
 }
 
 func (a *fakeArchive) ReadDailyBars(_ string) ([]feed.Bar, error)          { return a.daily, nil }
 func (a *fakeArchive) ReadBars1m(_ string, _, _ int64) ([]feed.Bar, error) { return a.m1, nil }
+func (a *fakeArchive) ReadJournalTicks(_ string, _ int64) ([]feed.Tick, error) {
+	return a.ticks, a.ticksErr
+}
 func (a *fakeArchive) ArchiveBar1m(b feed.Bar) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -122,6 +139,86 @@ func (a *fakeArchive) ArchiveDaily(b feed.Bar) {
 }
 
 func bar(ms int64) feed.Bar { return feed.Bar{Symbol: "US.AAPL", BucketMs: ms, C: 1} }
+
+func tick(tsMs int64) feed.Tick { return feed.Tick{Symbol: "US.AAPL", TsMs: tsMs, Price: 1} }
+
+func TestWarmStartSeedsSessionTicksFromJournal(t *testing.T) {
+	seeder := &fakeSeeder{}
+	archive := &fakeArchive{ticks: []feed.Tick{tick(1), tick(2)}}
+	o := New(&fakeFetcher{}, nil, seeder, archive, clock.NewFake(time.Now()), Config{IntradayDays: 20})
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, session.Loc())
+	o.warmStart(context.Background(), "US.AAPL", now.AddDate(0, 0, -20), now)
+
+	if len(seeder.ticks) != 2 || seeder.ticks[0].TsMs != 1 || seeder.ticks[1].TsMs != 2 {
+		t.Fatalf("session ticks seeded = %+v, want the 2 ticks ReadJournalTicks returned", seeder.ticks)
+	}
+}
+
+func TestWarmStartSeedsSessionTicksBeforeDailyAnd1m(t *testing.T) {
+	seeder := &fakeSeeder{}
+	archive := &fakeArchive{
+		ticks: []feed.Tick{tick(1)},
+		daily: []feed.Bar{bar(1)},
+		m1:    []feed.Bar{bar(2)},
+	}
+	o := New(&fakeFetcher{}, nil, seeder, archive, clock.NewFake(time.Now()), Config{IntradayDays: 20})
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, session.Loc())
+	o.warmStart(context.Background(), "US.AAPL", now.AddDate(0, 0, -20), now)
+
+	if len(seeder.calls) < 3 || seeder.calls[0] != "ticks" {
+		t.Fatalf("call order = %v, want session-ticks seed first", seeder.calls)
+	}
+}
+
+func TestWarmStartNoTicksSkipsSeedSessionTicks(t *testing.T) {
+	seeder := &fakeSeeder{}
+	archive := &fakeArchive{} // ReadJournalTicks returns (nil, nil) -- cold symbol
+	o := New(&fakeFetcher{}, nil, seeder, archive, clock.NewFake(time.Now()), Config{IntradayDays: 20})
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, session.Loc())
+	o.warmStart(context.Background(), "US.AAPL", now.AddDate(0, 0, -20), now)
+
+	if len(seeder.ticks) != 0 {
+		t.Fatalf("session ticks seeded = %+v, want none", seeder.ticks)
+	}
+	for _, c := range seeder.calls {
+		if c == "ticks" {
+			t.Fatalf("SeedSessionTicks called despite no journaled ticks, calls=%v", seeder.calls)
+		}
+	}
+}
+
+func TestWarmStartTickReadErrorContinuesToDailyAnd1m(t *testing.T) {
+	seeder := &fakeSeeder{}
+	archive := &fakeArchive{
+		ticksErr: context.DeadlineExceeded,
+		daily:    []feed.Bar{bar(1)},
+		m1:       []feed.Bar{bar(2)},
+	}
+	o := New(&fakeFetcher{}, nil, seeder, archive, clock.NewFake(time.Now()), Config{IntradayDays: 20})
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, session.Loc())
+	o.warmStart(context.Background(), "US.AAPL", now.AddDate(0, 0, -20), now)
+
+	if len(seeder.daily) != 1 || len(seeder.hist) != 1 {
+		t.Fatalf("daily=%d hist=%d, want 1 and 1 -- a tick-read failure must not abort warm-start", len(seeder.daily), len(seeder.hist))
+	}
+	if len(seeder.ticks) != 0 {
+		t.Fatalf("session ticks seeded despite read error: %+v", seeder.ticks)
+	}
+}
+
+func TestWarmStartSkipsSessionTicksOnCanceledContext(t *testing.T) {
+	seeder := &fakeSeeder{}
+	archive := &fakeArchive{ticks: []feed.Tick{tick(1)}}
+	o := New(&fakeFetcher{}, nil, seeder, archive, clock.NewFake(time.Now()), Config{IntradayDays: 20})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already canceled before warmStart runs
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, session.Loc())
+	o.warmStart(ctx, "US.AAPL", now.AddDate(0, 0, -20), now)
+
+	if len(seeder.ticks) != 0 {
+		t.Fatalf("session ticks seeded on canceled ctx = %+v, want none", seeder.ticks)
+	}
+}
 
 func TestBackfillWarmStartThenGapFill(t *testing.T) {
 	primary := &fakeFetcher{
