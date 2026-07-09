@@ -52,7 +52,7 @@ func TestServerWSSubscribeSnapshot(t *testing.T) {
 	go func() { _ = h.Run(ctx) }()
 
 	srv := uihub.NewServer(h,
-		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}, noopDemand{}, nil, func() uihub.Feed { return nil }),
+		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}, noopDemand{}, nil, func() uihub.Feed { return nil }, nil),
 		uihub.NewQueriesForTest(fillsNoop{}),
 		uihub.ServerConfig{OutBuf: 32})
 	ts := httptest.NewServer(srv.Handler())
@@ -126,7 +126,7 @@ func TestServerOverflowDropDoesNotStallHub(t *testing.T) {
 	go func() { _ = h.Run(ctx) }()
 
 	srv := uihub.NewServer(h,
-		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}, noopDemand{}, nil, func() uihub.Feed { return nil }),
+		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}, noopDemand{}, nil, func() uihub.Feed { return nil }, nil),
 		uihub.NewQueriesForTest(fillsNoop{}),
 		uihub.ServerConfig{OutBuf: 2}) // tiny outbound queue: a handful of updates overflow it
 
@@ -208,7 +208,7 @@ func TestServerStaticFileServing(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	h, _ := uihub.NewHubForTest(clk)
 	srv := uihub.NewServer(h,
-		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}, noopDemand{}, nil, func() uihub.Feed { return nil }),
+		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}, noopDemand{}, nil, func() uihub.Feed { return nil }, nil),
 		uihub.NewQueriesForTest(fillsNoop{}),
 		uihub.ServerConfig{DistDir: dir, OutBuf: 32})
 	ts := httptest.NewServer(srv.Handler())
@@ -287,7 +287,7 @@ func TestServerWaitBlocksUntilConnectionDrains(t *testing.T) {
 
 	sc := &slowConfig{started: make(chan struct{}), release: make(chan struct{})}
 	srv := uihub.NewServer(h,
-		uihub.NewCommandsForTest(doerNoop{}, sc, indNoop{}, noopDemand{}, nil, func() uihub.Feed { return nil }),
+		uihub.NewCommandsForTest(doerNoop{}, sc, indNoop{}, noopDemand{}, nil, func() uihub.Feed { return nil }, nil),
 		uihub.NewQueriesForTest(fillsNoop{}),
 		uihub.ServerConfig{OutBuf: 32})
 	ts := httptest.NewServer(srv.Handler())
@@ -418,7 +418,7 @@ func TestServerWaitBoundedByBaseContextAfterHubExit(t *testing.T) {
 	}
 
 	srv := uihub.NewServer(h,
-		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}, noopDemand{}, nil, func() uihub.Feed { return nil }),
+		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}, noopDemand{}, nil, func() uihub.Feed { return nil }, nil),
 		uihub.NewQueriesForTest(fillsNoop{}),
 		uihub.ServerConfig{OutBuf: 32})
 

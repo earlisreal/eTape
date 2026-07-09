@@ -977,3 +977,35 @@ func TestProbeRTT_Error(t *testing.T) {
 		t.Fatal("ProbeRTT should surface a >=400 response as an error")
 	}
 }
+
+// TestVerifyCredentials_ReturnsPromptly_NoAdapterNoGoroutine is the one
+// network-free property VerifyCredentials can be checked against without a
+// RESTBase override (VerifyCredentials, unlike Config, takes no base-URL
+// override — see the task brief): it must be a bare, synchronous REST call
+// that returns as soon as the context is done, not something that first
+// builds an *Adapter/wsClient or spins up a goroutine that could outlive or
+// ignore the context. An already-canceled context makes restClient.do fail
+// on the very first HTTP round trip (verified: net/http's RoundTripper
+// checks ctx.Err() before dialing, so this never actually reaches the
+// network) -- the select below is a hard backstop in case that assumption
+// ever stops holding in some environment, so this test fails loudly instead
+// of hanging the suite.
+func TestVerifyCredentials_ReturnsPromptly_NoAdapterNoGoroutine(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := VerifyCredentials(ctx, "paper", creds.Pair{KeyID: "K", SecretKey: "S"}, clock.NewFake(time.UnixMilli(0)))
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected a canceled context to surface as an error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("VerifyCredentials did not return promptly on a canceled context")
+	}
+}

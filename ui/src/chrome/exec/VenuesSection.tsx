@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
-import type { AckMsg, Venue, Gate, GateLimitsView, VenueConfig, VenueSetup } from "../../wire/contract";
+import type { AckMsg, Venue, Gate, GateLimitsView, VenueConfig, VenueSetup, TestConnectionResult, TestAccount } from "../../wire/contract";
 
 interface Commands { sendCommand(name: string, args: unknown): Promise<AckMsg>; }
 
@@ -26,6 +26,11 @@ const ENVS = ["paper", "live"];
 const BROKER_LABEL: Record<string, string> = { tradezero: "TradeZero", alpaca: "Alpaca", moomoo: "moomoo", sim: "Simulated" };
 const VENUE_ID_RE = /^[a-z0-9-]+$/;
 const CRED_REQUIRED_BROKERS = new Set(["tradezero", "alpaca"]);
+// Brokers whose Test-connection probe can auto-detect env (and, for
+// tradezero, the account id) — so their manual env/account-id inputs are
+// replaced by a read-only detected display, and Save requires a passing Test
+// before a freshly-typed (or never-yet-saved) key can be trusted.
+const TESTABLE_BROKERS = new Set(["tradezero", "alpaca"]);
 const GATE_CAPS = ["maxOrderValue", "maxPositionValue", "maxPositionShares", "maxOpenOrders"] as const;
 const GLOBAL_CAPS = ["maxDayLoss", "maxSymbolPositionValue", "maxSymbolPositionShares"] as const;
 
@@ -35,6 +40,8 @@ const zeroCaps = (): GateLimitsView => ({ maxOrderValue: 0, maxPositionValue: 0,
 
 interface SecretDraft { keyId: string; secret: string }
 interface VenueIssues { id?: string; account?: string; cred?: string }
+type TestStatus = "idle" | "testing" | "ok" | "fail";
+interface TestState { status: TestStatus; message?: string; accounts?: TestAccount[] }
 
 export function VenuesSection({ commands }: { commands: Commands }): JSX.Element {
   const { palette } = useTheme();
@@ -58,6 +65,12 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
   // Save time (see saveVenues).
   const [rowKeys, setRowKeys] = useState<string[]>([]);
   const [capsByRow, setCapsByRow] = useState<Record<string, GateLimitsView>>({});
+  // Test-connection outcome per row, keyed by the same stable rowKeys as
+  // capsByRow (not by v.id, which is editable, nor v.credentials, since a
+  // credential-name mint could in principle change too) — an absent entry
+  // reads the same as "idle". Cleared back to absent whenever the input it
+  // tested (secret or broker) changes, so a stale "verified" never persists.
+  const [testState, setTestState] = useState<Record<string, TestState>>({});
 
   const refresh = useCallback(() => {
     void commands.sendCommand("GetVenueSetup", {}).then((ack) => {
@@ -85,7 +98,7 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
   const validation = useMemo<VenueIssues[]>(() => {
     const idCounts = new Map<string, number>();
     draft.venues.forEach((v) => idCounts.set(v.id, (idCounts.get(v.id) ?? 0) + 1));
-    return draft.venues.map((v) => {
+    return draft.venues.map((v, i) => {
       const issues: VenueIssues = {};
       if (!v.id) issues.id = "id is required";
       else if (!VENUE_ID_RE.test(v.id)) issues.id = "id must be lowercase letters, digits, and -";
@@ -94,6 +107,7 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
       const typed = secretDrafts[v.credentials];
       const typedKeyId = !!typed?.keyId;
       const typedSecret = !!typed?.secret;
+      const keySetForRow = v.credentials !== "" && (setup?.credKeys ?? []).includes(v.credentials);
       if (typedKeyId !== typedSecret) {
         issues.cred = "enter both key id and secret, or neither";
       } else if (CRED_REQUIRED_BROKERS.has(v.broker)) {
@@ -101,30 +115,61 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
         // sentinel ever reaching here unminted — setBroker() is the primary
         // fix (mints a name the moment credentials become required), this
         // is defense in depth so an empty name can never look "satisfied".
-        const satisfied = (v.credentials !== "" && (setup?.credKeys ?? []).includes(v.credentials)) || (typedKeyId && typedSecret);
+        const satisfied = keySetForRow || (typedKeyId && typedSecret);
         if (!satisfied) issues.cred = `${BROKER_LABEL[v.broker] ?? v.broker} requires a credential key`;
+      }
+
+      // A testable broker (tradezero/alpaca) additionally requires a passing
+      // Test connection before Save, UNLESS the venue is already fully
+      // configured from a prior save (key on file, env+accountId present)
+      // AND nothing about its credential was just retyped this session — a
+      // pure risk-limit edit on an unchanged, already-verified venue must not
+      // be forced through a fresh probe.
+      if (TESTABLE_BROKERS.has(v.broker)) {
+        const rowKey = rowKeys[i];
+        const tested = testState[rowKey]?.status === "ok";
+        const typedNewKeys = typedKeyId && typedSecret;
+        const preexistingComplete = keySetForRow && !!v.env && (v.broker !== "tradezero" || !!v.accountId);
+        const verified = tested || (preexistingComplete && !typedNewKeys);
+        if (!verified) issues.cred = issues.cred ?? "test connection before saving";
       }
 
       if (v.broker === "tradezero" && !v.accountId) issues.account = "account id is required for TradeZero";
       return issues;
     });
-  }, [draft.venues, secretDrafts, setup]);
+  }, [draft.venues, secretDrafts, setup, rowKeys, testState]);
   const hasErrors = validation.some((i) => Object.keys(i).length > 0);
 
   const patchVenue = (i: number, over: Partial<Venue>) =>
     setDraft((d) => ({ ...d, venues: d.venues.map((v, j) => (j === i ? { ...v, ...over } : v)) }));
   const setEnv = (i: number, env: string) => patchVenue(i, { env });
+  // A Test result is only meaningful for the exact broker/credential it was
+  // run against — invalidate a row's result back to absent/idle whenever
+  // either changes (called from setBroker and setSecretField below).
+  const clearTestState = (rowKey: string | undefined) => {
+    if (!rowKey) return;
+    setTestState((s) => {
+      if (!(rowKey in s)) return s;
+      const next = { ...s };
+      delete next[rowKey];
+      return next;
+    });
+  };
   // Broker switch: a venue can arrive from the engine with credentials: ""
   // (the sim sentinel), then have its broker switched to one that needs a
   // credential. Mint a name right here — the same way addVenue() mints one
   // for brand-new rows — so credentials is never still "" once the
   // CREDENTIALS group appears. Never mint over an existing non-empty name
   // (that would orphan the credential it already points at).
-  const setBroker = (i: number, broker: string) =>
+  const setBroker = (i: number, broker: string) => {
     patchVenue(i, {
       broker,
       credentials: broker !== "sim" && !draft.venues[i].credentials ? mintCredName() : draft.venues[i].credentials,
     });
+    // A Test result from the previous broker is meaningless once the broker
+    // itself changes — invalidate it back to absent/idle.
+    clearTestState(rowKeys[i]);
+  };
   const addVenue = () => {
     const key = crypto.randomUUID();
     setRowKeys((k) => [...k, key]);
@@ -152,8 +197,14 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
       return next;
     });
   };
-  const setSecretField = (credName: string, field: "keyId" | "secret", value: string) =>
+  const setSecretField = (credName: string, field: "keyId" | "secret", value: string) => {
     setSecretDrafts((d) => ({ ...d, [credName]: { keyId: d[credName]?.keyId ?? "", secret: d[credName]?.secret ?? "", [field]: value } }));
+    // A Test result was for the credential as it stood before this edit —
+    // once the key id or secret changes, that result must not silently keep
+    // reading as "verified".
+    const idx = draft.venues.findIndex((v) => v.credentials === credName);
+    if (idx >= 0) clearTestState(rowKeys[idx]);
+  };
 
   const saveVenues = async () => {
     if (hasErrors) return; // Save is disabled in this state, but guard anyway
@@ -219,6 +270,37 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
     }
   };
 
+  // Read-only probe against the real broker (settings header comment's
+  // FILE-ONLY rule still holds — this never places an order and never writes
+  // config; a successful result only patches the in-memory draft's env/
+  // accountId, which still requires Save to persist).
+  const testConnection = async (i: number) => {
+    const v = draft.venues[i];
+    const rowKey = rowKeys[i];
+    setTestState((s) => ({ ...s, [rowKey]: { status: "testing" } }));
+    const typed = secretDrafts[v.credentials] ?? { keyId: "", secret: "" };
+    try {
+      const ack = await commands.sendCommand("TestConnection", {
+        broker: v.broker, env: v.env, credentials: v.credentials,
+        keyId: typed.keyId, secretKey: typed.secret, accountId: v.accountId,
+      });
+      const r = ack.value as TestConnectionResult | undefined;
+      if (ack.status === "accepted" && r?.ok) {
+        patchVenue(i, { env: r.env || v.env, accountId: r.accountId || v.accountId });
+        const message = `Connected · ${(r.env || v.env).toUpperCase()}${r.accountId ? " · " + r.accountId : ""}`;
+        setTestState((s) => ({ ...s, [rowKey]: { status: "ok", message, accounts: r.accounts } }));
+        toast.push({ level: "success", text: message });
+      } else {
+        const message = r?.message || ack.reason || "Test failed";
+        setTestState((s) => ({ ...s, [rowKey]: { status: "fail", message } }));
+        toast.push({ level: "danger", text: message });
+      }
+    } catch {
+      setTestState((s) => ({ ...s, [rowKey]: { status: "fail", message: "Test failed (transport)." } }));
+      toast.push({ level: "danger", text: "Test failed (transport)." });
+    }
+  };
+
   const field = { className: "field" } as const; // spread onto native inputs/selects for shared look
   const groupLabel = { marginBottom: 4 } as const;
   const fieldWrap = { display: "flex", flexDirection: "column", gap: 2, fontSize: 10.5, color: palette.textMuted } as const;
@@ -248,6 +330,9 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
         const typed = secretDrafts[v.credentials] ?? { keyId: "", secret: "" };
         const removing = removeConfirmIdx === i;
         const resetting = resetConfirmIdx === i;
+        const testable = TESTABLE_BROKERS.has(v.broker);
+        const test = testState[rowKeys[i]];
+        const showManualEnvAccount = !testable; // tradezero/alpaca auto-detect instead
 
         return (
           <div key={i} className="venue-card" style={{
@@ -310,18 +395,51 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
                       {BROKERS.map((b) => <option key={b} value={b}>{BROKER_LABEL[b]}</option>)}
                     </select>
                   </label>
-                  <label style={fieldWrap}>
-                    env
-                    <select {...field} data-testid={`venue-env-${i}`} value={v.env}
-                      onChange={(e) => setEnv(i, e.target.value)} style={{ width: 80 }}>
-                      {ENVS.map((x) => <option key={x} value={x}>{x}</option>)}
-                    </select>
-                  </label>
-                  <label style={fieldWrap}>
-                    account id
-                    <input {...field} data-testid={`venue-account-${i}`} value={v.accountId}
-                      onChange={(e) => patchVenue(i, { accountId: e.target.value })} placeholder="account id" style={{ width: 110 }} />
-                  </label>
+                  {showManualEnvAccount ? (
+                    <label style={fieldWrap}>
+                      env
+                      <select {...field} data-testid={`venue-env-${i}`} value={v.env}
+                        onChange={(e) => setEnv(i, e.target.value)} style={{ width: 80 }}>
+                        {ENVS.map((x) => <option key={x} value={x}>{x}</option>)}
+                      </select>
+                    </label>
+                  ) : (
+                    <label style={fieldWrap}>
+                      env
+                      <span className={`chip ${isLive ? "chip-live" : ""}`} data-testid={`venue-env-detected-${i}`}
+                        style={!isLive ? { color: palette.textMuted } : undefined}>
+                        {v.env ? v.env.toUpperCase() : "—"}
+                      </span>
+                    </label>
+                  )}
+                  {showManualEnvAccount && (
+                    <label style={fieldWrap}>
+                      account id
+                      <input {...field} data-testid={`venue-account-${i}`} value={v.accountId}
+                        onChange={(e) => patchVenue(i, { accountId: e.target.value })} placeholder="account id" style={{ width: 110 }} />
+                    </label>
+                  )}
+                  {v.broker === "tradezero" && (
+                    test?.accounts && test.accounts.length > 1 ? (
+                      <label style={fieldWrap}>
+                        account id
+                        <select {...field} data-testid={`venue-account-select-${i}`} value={v.accountId}
+                          onChange={(e) => patchVenue(i, { accountId: e.target.value })} style={{ width: 160 }}>
+                          <option value="">select account</option>
+                          {test.accounts.map((a) => (
+                            <option key={a.accountId} value={a.accountId}>{a.accountId} · {a.accountType}</option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <label style={fieldWrap}>
+                        account id
+                        <span className="mono" data-testid={`venue-account-detected-${i}`} style={{ padding: "2px 0" }}>
+                          {v.accountId || "—"}
+                        </span>
+                      </label>
+                    )
+                  )}
                   {showStartingBalance && (
                     <label style={fieldWrap}>
                       starting balance
@@ -356,8 +474,20 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
                     <span className={`chip ${keySet ? "chip-set" : ""}`} style={!keySet ? { color: palette.textMuted } : undefined}>
                       {keySet ? "key set" : "no key"}
                     </span>
+                    {testable && (
+                      <button data-testid={`venue-test-${i}`} className="btn"
+                        disabled={test?.status === "testing"} onClick={() => void testConnection(i)}>
+                        {test?.status === "testing" ? "Testing…" : "Test connection"}
+                      </button>
+                    )}
                   </div>
                   <div style={{ color: palette.textMuted, fontSize: 10, marginTop: 4 }}>leave blank to keep the existing key</div>
+                  {testable && test?.message && (
+                    <div data-testid={`venue-test-result-${i}`}
+                      style={{ ...issueText, color: test.status === "ok" ? palette.ok : palette.danger }}>
+                      {test.status === "ok" ? "✓ " : "✗ "}{test.message}
+                    </div>
+                  )}
                   {issue.cred && <div style={issueText}>{issue.cred}</div>}
                 </div>
               )}

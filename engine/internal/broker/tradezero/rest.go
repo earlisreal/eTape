@@ -324,6 +324,7 @@ func (rc *restClient) cancelAll(ctx context.Context, symbol string) error {
 
 type tzAccount struct {
 	AccountID     string  `json:"accountId"`
+	AccountType   string  `json:"accountType"`
 	Equity        float64 `json:"equity"`
 	BuyingPower   float64 `json:"buyingPower"`
 	AvailableCash float64 `json:"availableCash"`
@@ -349,6 +350,41 @@ func decodeAccountDetails(b []byte, accountID string) (tzAccount, bool) {
 		return single, true
 	}
 	return tzAccount{}, false
+}
+
+// listAccounts fetches every account visible to this key pair via the
+// list-all endpoint GET /v1/api/accounts — no account id in the path, unlike
+// every other method in this file (rc.accountID is expected to be "" for a
+// restClient built solely to call this method; see FetchAccounts in
+// tradezero.go). This is what lets a caller discover an account id (and its
+// accountType, i.e. paper vs live) before one has been typed in.
+//
+// Unlike decodeAccountDetails (which also has to tolerate the single-account
+// endpoint's bare-object fallback shape), the list endpoint's documented
+// shape is unambiguously a bare JSON array, so this decodes straight into
+// []tzAccount rather than routing through decodeAccountDetails. Per
+// docs/2026-07-03-tradezero-api.md, TZ can return HTTP 200 with an empty
+// array (the "platform asleep" state) even for valid keys — that decodes to
+// a non-nil, zero-length slice with no error, not something a caller must
+// special-case beyond checking len().
+func (rc *restClient) listAccounts(ctx context.Context) ([]tzAccount, error) {
+	resp, err := rc.do(ctx, http.MethodGet, "/v1/api/accounts", nil, rc.bAcct)
+	if err != nil {
+		return nil, fmt.Errorf("tradezero: list accounts transport: %w", err)
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("tradezero: read accounts body: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("tradezero: list accounts status=%d body=%s", resp.StatusCode, b)
+	}
+	var accounts []tzAccount
+	if err := json.Unmarshal(b, &accounts); err != nil {
+		return nil, fmt.Errorf("tradezero: decode accounts: %w", err)
+	}
+	return accounts, nil
 }
 
 type tzPnl struct {

@@ -354,3 +354,40 @@ type PutCredentialArgs struct {
 type DeleteCredentialArgs struct {
 	Name string `json:"name"`
 }
+
+// ---- test-connection probe (settings "Venues & credentials" Test button) ----
+
+// TestConnectionArgs carries the (possibly not-yet-saved) credential under
+// test. KeyID/SecretKey are the typed-but-unsaved values from the UI form
+// when non-empty; when both are empty the engine falls back to the saved
+// credential named by Credentials.
+type TestConnectionArgs struct {
+	Broker      string `json:"broker"`
+	Env         string `json:"env"`
+	Credentials string `json:"credentials"`
+	KeyID       string `json:"keyId"`
+	SecretKey   string `json:"secretKey"`
+	AccountID   string `json:"accountId"`
+}
+
+// TestAccount is one candidate account a probe discovered (TradeZero can
+// return more than one; the UI offers a picker when len(Accounts) > 1).
+type TestAccount struct {
+	AccountID   string `json:"accountId"`
+	AccountType string `json:"accountType"`
+	Env         string `json:"env"`
+}
+
+// TestConnectionResult is the TestConnection command's AckMsg.Value payload.
+// OK is the auth outcome (distinct from AckMsg.Status, which is the
+// transport-level accepted/blocked outcome — a malformed-args request is
+// "blocked" at the transport level; a bad API key is a transport-level
+// "accepted" ack carrying OK:false here).
+type TestConnectionResult struct {
+	OK          bool          `json:"ok"`
+	Env         string        `json:"env"`
+	AccountID   string        `json:"accountId"`
+	AccountType string        `json:"accountType"`
+	Message     string        `json:"message"`
+	Accounts    []TestAccount `json:"accounts"`
+}

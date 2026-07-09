@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/exec"
@@ -17,6 +18,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
+	"github.com/earlisreal/eTape/engine/internal/venueprobe"
 )
 
 type execDoer interface {
@@ -51,17 +53,29 @@ type venueAdmin interface {
 	DeleteCredential(name string) error
 }
 
-type commands struct {
-	ex   execDoer
-	cfg  configStore
-	ind  indicatorCtl
-	dem  demandCtl
-	va   venueAdmin
-	feed func() Feed
+// venueTester is the read-only credential-probe seam (satisfied by
+// *venueprobe.Prober). Every implementation must be side-effect-free
+// against the broker (GET-only) — see the plan's Global Constraints.
+type venueTester interface {
+	TestConnection(ctx context.Context, broker, env, credName, keyID, secretKey, accountID string) venueprobe.Result
 }
 
-func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, va venueAdmin, feed func() Feed) *commands {
-	return &commands{ex: ex, cfg: cfg, ind: ind, dem: dem, va: va, feed: feed}
+// commands.tester holds the venueTester dependency; it is named "tester"
+// rather than "probe" because *commands already has an unrelated probe
+// method (symbol-existence validation for EnsureSymbol/FocusGroup) — a
+// field and a method can't share a name on the same type.
+type commands struct {
+	ex     execDoer
+	cfg    configStore
+	ind    indicatorCtl
+	dem    demandCtl
+	va     venueAdmin
+	feed   func() Feed
+	tester venueTester
+}
+
+func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, va venueAdmin, feed func() Feed, tester venueTester) *commands {
+	return &commands{ex: ex, cfg: cfg, ind: ind, dem: dem, va: va, feed: feed, tester: tester}
 }
 
 func blocked(reason string) wsmsg.AckMsg { return wsmsg.AckMsg{Status: "blocked", Reason: reason} }
@@ -242,6 +256,15 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked(err.Error())
 		}
 		return wsmsg.AckMsg{Status: "accepted"}
+	case "TestConnection":
+		var a wsmsg.TestConnectionArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return blocked("bad args")
+		}
+		pctx, cancel := context.WithTimeout(ctx, 8*time.Second)
+		defer cancel()
+		r := cd.tester.TestConnection(pctx, a.Broker, a.Env, a.Credentials, a.KeyID, a.SecretKey, a.AccountID)
+		return wsmsg.AckMsg{Status: "accepted", Value: resultToWire(r)}
 	default:
 		return blocked("unknown command: " + name)
 	}
@@ -368,6 +391,19 @@ func venueConfigToWire(vc config.VenueConfig) wsmsg.VenueConfig {
 		vs = append(vs, venueToWire(v))
 	}
 	return wsmsg.VenueConfig{Venues: vs, Gate: gateToWire(vc.Gate)}
+}
+
+// resultToWire converts a venueprobe.Result into the TestConnection command's
+// AckMsg.Value payload.
+func resultToWire(r venueprobe.Result) wsmsg.TestConnectionResult {
+	accts := make([]wsmsg.TestAccount, 0, len(r.Accounts))
+	for _, a := range r.Accounts {
+		accts = append(accts, wsmsg.TestAccount{AccountID: a.AccountID, AccountType: a.AccountType, Env: a.Env})
+	}
+	return wsmsg.TestConnectionResult{
+		OK: r.OK, Env: r.Env, AccountID: r.AccountID, AccountType: r.AccountType,
+		Message: r.Message, Accounts: accts,
+	}
 }
 
 func venueConfigFromWire(venues []wsmsg.Venue, gate wsmsg.Gate) config.VenueConfig {
