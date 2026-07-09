@@ -3,6 +3,7 @@ package creds_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/earlisreal/eTape/engine/internal/creds"
@@ -30,5 +31,13 @@ func TestLoadAndGet(t *testing.T) {
 func TestLoad_MissingFileErrors(t *testing.T) {
 	if _, err := creds.Load(filepath.Join(t.TempDir(), "absent.json")); err == nil {
 		t.Fatal("missing credentials file should error")
+	}
+}
+
+func TestDefaultPath_UnderDotETape(t *testing.T) {
+	got := creds.DefaultPath()
+	want := filepath.Join(".eTape", "credentials.json")
+	if !strings.HasSuffix(got, want) {
+		t.Fatalf("DefaultPath() = %q, want suffix %q", got, want)
 	}
 }

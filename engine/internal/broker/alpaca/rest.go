@@ -357,7 +357,7 @@ func (rc *restClient) flatten(ctx context.Context) error {
 // is Alpaca's documented Account field name for prior-close equity (per
 // Alpaca's public Trading API reference — NOT independently re-verified
 // against a live paper /v2/account response in this task; the sandbox
-// denied reading ~/.eJournal/credentials.json to do so, see task-13-report.md
+// denied reading ~/.eTape/credentials.json to do so, see task-13-report.md
 // concerns). DayPnL = equity - last_equity.
 type alpacaAccount struct {
 	Equity      numString `json:"equity"`

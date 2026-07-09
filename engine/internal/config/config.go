@@ -60,7 +60,7 @@ type Venue struct {
 	ID          string `toml:"id"`          // slug used in events, topics, commands, gate config
 	Broker      string `toml:"broker"`      // tradezero | alpaca | moomoo | sim
 	Env         string `toml:"env"`         // paper | live
-	Credentials string `toml:"credentials"` // key into ~/.eJournal/credentials.json
+	Credentials string `toml:"credentials"` // key into ~/.eTape/credentials.json
 	AccountID   string `toml:"account_id"`  // broker-specific (TZ accountId, moomoo accID)
 	AutoArm     bool   `toml:"auto_arm"`    // boot this venue armed (paper); live venues keep the manual arm click
 }

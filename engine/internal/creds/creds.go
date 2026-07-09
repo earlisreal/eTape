@@ -1,6 +1,6 @@
 // Package creds reads eTape's broker credentials from
-// ~/.eJournal/credentials.json (shared with eJournal). Values are secrets:
-// never log them, never commit them.
+// ~/.eTape/credentials.json. Values are secrets: never log them, never
+// commit them.
 package creds
 
 import (
@@ -21,13 +21,13 @@ type Pair struct {
 
 type File map[string]Pair
 
-// DefaultPath is ~/.eJournal/credentials.json.
+// DefaultPath is ~/.eTape/credentials.json.
 func DefaultPath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "credentials.json"
 	}
-	return filepath.Join(home, ".eJournal", "credentials.json")
+	return filepath.Join(home, ".eTape", "credentials.json")
 }
 
 // Load reads and parses the credentials file. A missing file IS an error here
@@ -76,12 +76,16 @@ func writeRaw(path string, m map[string]json.RawMessage) error {
 	if err != nil {
 		return fmt.Errorf("creds: marshal: %w", err)
 	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return fmt.Errorf("creds: mkdir %s: %w", filepath.Dir(path), err)
+	}
 	return atomicfile.Write(path, b, 0o600)
 }
 
 // Put upserts one credential entry, preserving every sibling entry
-// byte-for-byte (the file is shared with eJournal). The file is created 0600 if
-// absent. Secrets are never logged.
+// byte-for-byte (harmless, and guards against unknown fields written by a
+// future version of eTape itself). The file is created 0600 if absent.
+// Secrets are never logged.
 func Put(path, name, keyID, secretKey string) error {
 	m, err := readRaw(path)
 	if err != nil {

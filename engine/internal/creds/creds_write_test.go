@@ -10,8 +10,9 @@ import (
 func TestPutPreservesSiblingsByteForByte(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "credentials.json")
-	// A sibling entry eTape doesn't own, with an extra unknown field.
-	seed := `{"eJournalThing":{"keyId":"K","secretKey":"S","futureField":42}}`
+	// A sibling entry Put doesn't touch, with an extra unknown field —
+	// proves the raw-map round-trip preserves entries byte-for-byte.
+	seed := `{"otherAppEntry":{"keyId":"K","secretKey":"S","futureField":42}}`
 	if err := os.WriteFile(p, []byte(seed), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -23,8 +24,8 @@ func TestPutPreservesSiblingsByteForByte(t *testing.T) {
 	if err := json.Unmarshal(b, &raw); err != nil {
 		t.Fatal(err)
 	}
-	if string(raw["eJournalThing"]) != `{"keyId":"K","secretKey":"S","futureField":42}` {
-		t.Fatalf("sibling mutated: %s", raw["eJournalThing"])
+	if string(raw["otherAppEntry"]) != `{"keyId":"K","secretKey":"S","futureField":42}` {
+		t.Fatalf("sibling mutated: %s", raw["otherAppEntry"])
 	}
 	got, _ := Load(p)
 	if p := got["alpaca"]; p.KeyID != "AK" || p.SecretKey != "AS" {
@@ -56,6 +57,24 @@ func TestPutCreatesMissingFile(t *testing.T) {
 		t.Fatalf("Put on missing file: %v", err)
 	}
 	got, _ := Load(p)
+	if got["alpaca"].KeyID != "AK" {
+		t.Fatalf("not created: %+v", got)
+	}
+}
+
+// TestPutCreatesMissingParentDir pins the writeRaw MkdirAll: the first Put
+// for a fresh install must succeed even when the parent directory (e.g.
+// ~/.eTape) doesn't exist yet, not just the file.
+func TestPutCreatesMissingParentDir(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "nested", "does-not-exist-yet", "credentials.json")
+	if err := Put(p, "alpaca", "AK", "AS"); err != nil {
+		t.Fatalf("Put with missing parent dir: %v", err)
+	}
+	got, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load after Put: %v", err)
+	}
 	if got["alpaca"].KeyID != "AK" {
 		t.Fatalf("not created: %+v", got)
 	}
