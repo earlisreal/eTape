@@ -17,7 +17,8 @@ const chart = (id: string, symbol: string, timeframe: string, group: PanelConfig
 // headlessly in a jsdom vitest environment via `createDockview` + `addPanel`,
 // then hand-tuned for the mockup proportions and round-tripped through a
 // fresh `DockviewApi.fromJSON` to confirm it doesn't throw and that
-// `toJSON().panels` keys are unchanged — see task-7-report.md for detail).
+// `toJSON().panels` keys are unchanged — see `presets.dockview.test.ts`, added
+// in the Trade History plan's Task 10, for the actual round-trip check).
 //
 // Grid shape (matches docs mockups presets.html): outer horizontal split
 // [chart wall, right rail] sized 2:1; chart wall is a 2x2 (two horizontal
@@ -83,7 +84,7 @@ const MONITORING_LAYOUT: SerializedDockview = {
 // (order ticket is naturally compact, approximated here as a slightly
 // smaller fixed weight since dockview's serialized grid sizes are plain
 // numbers — there's no literal "auto" in the schema).
-const TRADING_LAYOUT: SerializedDockview = {
+export const TRADING_LAYOUT: SerializedDockview = {
   grid: {
     root: {
       type: "branch",
