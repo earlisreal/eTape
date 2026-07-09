@@ -2,8 +2,11 @@ package alpaca
 
 import (
 	"testing"
+	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
 func TestOrderTypeWire(t *testing.T) {
@@ -52,6 +55,34 @@ func TestTifWire(t *testing.T) {
 	}
 	if got, _ := tifWire(exec.TIFGTC); got != "gtc" {
 		t.Fatalf("gtc -> %q", got)
+	}
+}
+
+// TestIsExtendedHours covers Alpaca's three-way extended-hours definition —
+// pre-market, post-market, AND overnight (unlike TradeZero's isExtendedHours,
+// which excludes overnight since TZ has no overnight session).
+func TestIsExtendedHours(t *testing.T) {
+	et := func(hour, min int) time.Time {
+		return time.Date(2026, 7, 6, hour, min, 0, 0, session.Loc()) // Monday
+	}
+	cases := []struct {
+		name string
+		t    time.Time
+		want bool
+	}{
+		{"pre-market 08:00 ET", et(8, 0), true},
+		{"post-market 18:00 ET", et(18, 0), true},
+		{"overnight 22:00 ET", et(22, 0), true},
+		{"overnight 02:00 ET", et(2, 0), true},
+		{"RTH 10:00 ET", et(10, 0), false},
+		{"weekend", time.Date(2026, 7, 4, 10, 0, 0, 0, session.Loc()), false}, // Saturday
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isExtendedHours(clock.NewFake(tc.t)); got != tc.want {
+				t.Errorf("isExtendedHours(%v) = %v, want %v", tc.t, got, tc.want)
+			}
+		})
 	}
 }
 

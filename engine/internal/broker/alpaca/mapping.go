@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"math"
 
+	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
 func orderTypeWire(t exec.OrderType) (string, error) {
@@ -48,6 +50,20 @@ func tifWire(t exec.TIF) (string, error) {
 		return "", fmt.Errorf("alpaca: TIF %v is accepted by Alpaca only during market hours; submit during RTH", t)
 	default:
 		return "", fmt.Errorf("alpaca: unsupported TIF %v", t)
+	}
+}
+
+// isExtendedHours reports whether clk's current time falls outside RTH on
+// Alpaca's terms. Unlike TradeZero's equivalent (tradezero/mapping.go), this
+// includes Overnight: Alpaca uniquely supports the 20:00-04:00 ET Blue Ocean
+// ATS session (Capabilities().OvernightSession is true) and requires the same
+// extended_hours flag for overnight limit orders as for pre/post-market ones.
+func isExtendedHours(clk clock.Clock) bool {
+	switch session.PhaseAt(clk.Now()) {
+	case session.PreMarket, session.PostMarket, session.Overnight:
+		return true
+	default:
+		return false
 	}
 }
 

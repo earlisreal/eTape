@@ -10,7 +10,13 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/session"
 )
+
+// etTime builds a weekday ET time for extended-hours tests below.
+func etTime(hour, min int) time.Time {
+	return time.Date(2026, 7, 6, hour, min, 0, 0, session.Loc()) // Monday
+}
 
 // TestSubmit_StructuredError is the brief's Step 1 test: a 422 with Alpaca's
 // documented {code,message} error body must surface as a Go error, never be
@@ -67,7 +73,9 @@ func TestSubmit_Accept(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	// Pinned to RTH (10:00 ET) so this test's assertions stay focused on the
+	// non-session-dependent fields; extended_hours behavior has its own tests.
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(etTime(10, 0)))
 	brokerID, err := rc.submitOrder(context.Background(), exec.OrderRequest{
 		Venue: "alpaca", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 190.5049,
 	}, "ET-2")
@@ -82,6 +90,92 @@ func TestSubmit_Accept(t *testing.T) {
 	}
 	if gotBody["client_order_id"] != "ET-2" {
 		t.Fatalf("client_order_id = %v", gotBody["client_order_id"])
+	}
+	if _, has := gotBody["extended_hours"]; has {
+		t.Fatalf("RTH order must not set extended_hours: %v", gotBody["extended_hours"])
+	}
+}
+
+// TestSubmit_ExtendedHours_LimitOutsideRTH_SetsFlag covers the three sessions
+// where Alpaca requires extended_hours=true to work a day/gtc limit order
+// immediately instead of queuing it for the next RTH open: pre-market,
+// post-market, and (uniquely to Alpaca, via Blue Ocean ATS) overnight.
+func TestSubmit_ExtendedHours_LimitOutsideRTH_SetsFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		t    time.Time
+	}{
+		{"pre-market", etTime(8, 0)},
+		{"post-market", etTime(18, 0)},
+		{"overnight", etTime(22, 0)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			var gotBody map[string]any
+			mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, r *http.Request) {
+				_ = jsonDecode(t, r, &gotBody)
+				_, _ = w.Write([]byte(`{"id":"b-1","client_order_id":"ET-1","symbol":"AAPL","side":"buy","order_type":"limit","qty":"1","filled_qty":"0","status":"new"}`))
+			})
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+
+			rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(tc.t))
+			if _, err := rc.submitOrder(context.Background(), exec.OrderRequest{
+				Venue: "alpaca", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 1, LimitPrice: 100,
+			}, "ET-1"); err != nil {
+				t.Fatal(err)
+			}
+			if gotBody["extended_hours"] != true {
+				t.Fatalf("extended_hours = %v, want true", gotBody["extended_hours"])
+			}
+		})
+	}
+}
+
+// TestSubmit_RTH_LimitDoesNotSetFlag confirms the flag is omitted (Alpaca
+// defaults it to false) once the session is back in RTH.
+func TestSubmit_RTH_LimitDoesNotSetFlag(t *testing.T) {
+	mux := http.NewServeMux()
+	var gotBody map[string]any
+	mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, r *http.Request) {
+		_ = jsonDecode(t, r, &gotBody)
+		_, _ = w.Write([]byte(`{"id":"b-1","client_order_id":"ET-1","symbol":"AAPL","side":"buy","order_type":"limit","qty":"1","filled_qty":"0","status":"new"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(etTime(10, 0)))
+	if _, err := rc.submitOrder(context.Background(), exec.OrderRequest{
+		Venue: "alpaca", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 1, LimitPrice: 100,
+	}, "ET-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := gotBody["extended_hours"]; has {
+		t.Fatalf("RTH order must not set extended_hours: %v", gotBody["extended_hours"])
+	}
+}
+
+// TestSubmit_ExtendedHours_MarketDoesNotSetFlag guards the order-type gate:
+// Alpaca rejects extended_hours on market orders, so it must never be set
+// even during pre/post/overnight sessions.
+func TestSubmit_ExtendedHours_MarketDoesNotSetFlag(t *testing.T) {
+	mux := http.NewServeMux()
+	var gotBody map[string]any
+	mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, r *http.Request) {
+		_ = jsonDecode(t, r, &gotBody)
+		_, _ = w.Write([]byte(`{"id":"b-1","client_order_id":"ET-1","symbol":"AAPL","side":"buy","order_type":"market","qty":"1","filled_qty":"0","status":"new"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(etTime(8, 0)))
+	if _, err := rc.submitOrder(context.Background(), exec.OrderRequest{
+		Venue: "alpaca", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, TIF: exec.TIFDay, Qty: 1,
+	}, "ET-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, has := gotBody["extended_hours"]; has {
+		t.Fatalf("market order must never set extended_hours: %v", gotBody["extended_hours"])
 	}
 }
 

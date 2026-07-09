@@ -90,6 +90,12 @@ func apiError(status int, body []byte) error {
 // event (Task 12's normalizeUpdate keys off it). limit_price/stop_price are
 // only sent for the order types that need them, rounded via Task 11's
 // roundPrice (Alpaca rejects sub-penny increments with a structured 422).
+// extended_hours is set for day/gtc limit orders submitted while rc.clk reads
+// pre-market, post-market, or overnight (isExtendedHours) — Alpaca requires
+// the flag to work the order immediately in those sessions rather than
+// queuing it for the next RTH open; it is omitted (defaulting to false) for
+// every other order type/session combination since Alpaca rejects the flag
+// on market/stop/stop-limit orders.
 //
 // A >=400 response is ALWAYS an error — parsed via apiError — and this
 // never falls through to a default-accept on a response it can't parse: a
@@ -116,6 +122,12 @@ func (rc *restClient) submitOrder(ctx context.Context, req exec.OrderRequest, cl
 	}
 	if req.Type == exec.TypeStop || req.Type == exec.TypeStopLimit {
 		payload["stop_price"] = roundPrice(req.StopPrice)
+	}
+	// extended_hours is only valid for limit day/gtc orders (Alpaca rejects it
+	// on market/stop/stop-limit orders); omit the key otherwise so it defaults
+	// to Alpaca's false rather than risk a rejection.
+	if req.Type == exec.TypeLimit && (req.TIF == exec.TIFDay || req.TIF == exec.TIFGTC) && isExtendedHours(rc.clk) {
+		payload["extended_hours"] = true
 	}
 	buf, err := json.Marshal(payload)
 	if err != nil {
