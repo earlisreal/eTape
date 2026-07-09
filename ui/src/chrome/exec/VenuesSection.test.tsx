@@ -83,6 +83,31 @@ describe("VenuesSection", () => {
     expect(screen.queryByTestId("venue-cred-keyid-2")).toBeNull();   // sim
   });
 
+  it("mints a real credential name when an existing sim venue (credentials: \"\") switches broker to alpaca, so PutCredential is never saved under an empty name", async () => {
+    const withSim: VenueSetup = baseSetup({
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false }] },
+    });
+    const commands = makeCommands([withSim, withSim]);
+    wrap(commands);
+    const i = 2;
+    await waitFor(() => expect(screen.getByTestId(`venue-id-${i}`)).toBeTruthy());
+    expect(screen.queryByTestId(`venue-cred-keyid-${i}`)).toBeNull(); // sim: no CREDENTIALS group yet
+
+    fireEvent.change(screen.getByTestId(`venue-broker-${i}`), { target: { value: "alpaca" } });
+    await waitFor(() => expect(screen.getByTestId(`venue-cred-keyid-${i}`)).toBeTruthy());
+
+    fireEvent.change(screen.getByTestId(`venue-cred-keyid-${i}`), { target: { value: "new-id" } });
+    fireEvent.change(screen.getByTestId(`venue-cred-secret-${i}`), { target: { value: "new-secret" } });
+    expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByTestId("save-venues"));
+    await waitFor(() => expect(commands.sent.some((s) => s.name === "SetVenueSetup")).toBe(true));
+
+    const put = commands.sent.find((s) => s.name === "PutCredential" && (s.args as { keyId?: string }).keyId === "new-id");
+    expect(put).toBeTruthy();
+    expect((put!.args as { name: string }).name).not.toBe("");
+  });
+
   it("hides the restart banner when file == running, and shows it after a save whose re-fetch reports drift", async () => {
     const drifted: VenueSetup = baseSetup({
       file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false }] },

@@ -76,7 +76,11 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
       if (typedKeyId !== typedSecret) {
         issues.cred = "enter both key id and secret, or neither";
       } else if (CRED_REQUIRED_BROKERS.has(v.broker)) {
-        const satisfied = (setup?.credKeys ?? []).includes(v.credentials) || (typedKeyId && typedSecret);
+        // v.credentials !== "" guards against the sim empty-credentials
+        // sentinel ever reaching here unminted — setBroker() is the primary
+        // fix (mints a name the moment credentials become required), this
+        // is defense in depth so an empty name can never look "satisfied".
+        const satisfied = (v.credentials !== "" && (setup?.credKeys ?? []).includes(v.credentials)) || (typedKeyId && typedSecret);
         if (!satisfied) issues.cred = `${BROKER_LABEL[v.broker] ?? v.broker} requires a credential key`;
       }
 
@@ -90,6 +94,17 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
     setDraft((d) => ({ ...d, venues: d.venues.map((v, j) => (j === i ? { ...v, ...over } : v)) }));
   const setEnv = (i: number, env: string) =>
     patchVenue(i, { env, autoArm: env === "live" ? false : draft.venues[i].autoArm });
+  // Broker switch: a venue can arrive from the engine with credentials: ""
+  // (the sim sentinel), then have its broker switched to one that needs a
+  // credential. Mint a name right here — the same way addVenue() mints one
+  // for brand-new rows — so credentials is never still "" once the
+  // CREDENTIALS group appears. Never mint over an existing non-empty name
+  // (that would orphan the credential it already points at).
+  const setBroker = (i: number, broker: string) =>
+    patchVenue(i, {
+      broker,
+      credentials: broker !== "sim" && !draft.venues[i].credentials ? mintCredName() : draft.venues[i].credentials,
+    });
   const addVenue = () => setDraft((d) => ({
     ...d,
     venues: [...d.venues, { id: "", broker: "sim", env: "paper", credentials: mintCredName(), accountId: "", autoArm: false }],
@@ -212,7 +227,7 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
                   <label style={fieldWrap}>
                     broker
                     <select {...field} data-testid={`venue-broker-${i}`} value={v.broker}
-                      onChange={(e) => patchVenue(i, { broker: e.target.value })} style={{ width: 100 }}>
+                      onChange={(e) => setBroker(i, e.target.value)} style={{ width: 100 }}>
                       {BROKERS.map((b) => <option key={b} value={b}>{BROKER_LABEL[b]}</option>)}
                     </select>
                   </label>
