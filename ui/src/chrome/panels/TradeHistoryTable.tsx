@@ -101,7 +101,7 @@ export function TradeHistoryTable({
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.seq} style={{ textAlign: "right", borderTop: `1px solid ${palette.border}` }}>
+              <tr key={r.seq} data-testid={`trade-${r.seq}`} style={{ textAlign: "right", borderTop: `1px solid ${palette.border}` }}>
                 <td style={{ textAlign: "left", padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
                 <td style={{ color: palette.textMuted }}>{r.venue}</td>
                 <td>{formatSize(r.qty)}</td>
