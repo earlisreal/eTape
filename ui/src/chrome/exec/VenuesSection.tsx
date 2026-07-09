@@ -111,11 +111,20 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
   // engine's ValidateVenueConfig on save; saveVenues's reconcile step is the
   // second line of defense for orphans left by any other path, e.g. a
   // hand-edited config).
+  // Collision guard: if the new id already belongs to a *different* venue
+  // (even transiently, mid-edit, before the "id must be unique" validation
+  // blocks Save), skip the migration entirely rather than merging into that
+  // venue's existing entry — an unconditional overwrite would silently
+  // clobber the other venue's caps with this venue's carried ones. Leaving
+  // gate.venue untouched here is safe: the unique-id validation already
+  // surfaces an error to the user in this state, and saveVenues's save-time
+  // reconcile remains the final correctness backstop regardless.
   const setVenueId = (i: number, id: string) =>
     setDraft((d) => {
       const oldId = d.venues[i].id;
       const venues = d.venues.map((v, j) => (j === i ? { ...v, id } : v));
       if (!oldId || oldId === id || !(oldId in d.gate.venue)) return { ...d, venues };
+      if (d.venues.some((v, j) => j !== i && v.id === id)) return { ...d, venues };
       const { [oldId]: carried, ...restVenue } = d.gate.venue;
       return { ...d, venues, gate: { ...d.gate, venue: { ...restVenue, [id]: carried } } };
     });

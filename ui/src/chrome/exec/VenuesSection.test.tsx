@@ -255,6 +255,58 @@ describe("VenuesSection", () => {
     expect(gate.venue["alpaca-paper"]).toBeUndefined();
   });
 
+  it("does not clobber another venue's gate.venue caps when a rename collides with that venue's current id", async () => {
+    const withCaps: VenueSetup = baseSetup({
+      file: {
+        ...runningConfig,
+        gate: {
+          ...runningConfig.gate,
+          venue: {
+            "alpaca-paper": { maxOrderValue: 5000, maxPositionValue: 20000, maxPositionShares: 100, maxOpenOrders: 3 },
+            "tradezero-live": { maxOrderValue: 1000, maxPositionValue: 4000, maxPositionShares: 50, maxOpenOrders: 1 },
+          },
+        },
+      },
+    });
+    const commands = makeCommands([withCaps, withCaps]);
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("venue-id-0")).toBeTruthy());
+
+    // Rename venue 0 (alpaca-paper, caps 5000/20000/100/3) to collide with
+    // venue 1's current id (tradezero-live, caps 1000/4000/50/1) — the exact
+    // transient state the reviewer flagged, reachable before the "id must be
+    // unique" validation blocks Save.
+    fireEvent.change(screen.getByTestId("venue-id-0"), { target: { value: "tradezero-live" } });
+    expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true); // dup id blocks Save
+
+    // Both cards now share the id "tradezero-live" and read their risk caps
+    // off that one gate.venue key. If the rename had clobbered it with venue
+    // 0's carried caps (the bug), both would now show 5000 instead of 1000.
+    // They must still show venue 1's original value, proving no clobber.
+    const maxOrderInputs = screen.getAllByLabelText("maxOrderValue") as HTMLInputElement[];
+    expect(maxOrderInputs[0].value).toBe("1000");
+    expect(maxOrderInputs[1].value).toBe("1000");
+
+    // Resolve the collision the "normal" way — give venue 1 a fresh, genuinely
+    // free id (its own uncontested rename, not a second edit to venue 0).
+    // This carries venue 1's caps to the new id and frees the "tradezero-live"
+    // key.
+    fireEvent.change(screen.getByTestId("venue-id-1"), { target: { value: "tradezero-live-2" } });
+    expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByTestId("save-venues"));
+    await waitFor(() => expect(commands.sent.some((s) => s.name === "SetVenueSetup")).toBe(true));
+
+    const gate = (commands.sent.find((s) => s.name === "SetVenueSetup")!.args as { gate: Gate }).gate;
+    // Venue 1's caps made it through intact, under its own new id.
+    expect(gate.venue["tradezero-live-2"]).toEqual({ maxOrderValue: 1000, maxPositionValue: 4000, maxPositionShares: 50, maxOpenOrders: 1 });
+    // Venue 0 never inherited venue 1's caps (no swap): the skipped migration
+    // left venue 0's caps unreachable under its stale "alpaca-paper" key, so
+    // the already-approved save-time reconcile defaults it to all-zero
+    // rather than either venue inheriting the other's limits.
+    expect(gate.venue["tradezero-live"]).toEqual({ maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 });
+  });
+
   it("does not crash adding a venue on a fresh install where the engine reports credKeys: null", async () => {
     const emptyConfig: VenueConfig = { venues: [], gate: { global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 }, venue: {} } };
     const freshInstall = { file: emptyConfig, running: emptyConfig, credKeys: null } as unknown as VenueSetup;
