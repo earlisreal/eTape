@@ -105,8 +105,8 @@ func TestMirrorExecStatusAggregate(t *testing.T) {
 	m := testMirror()
 	m.applyExec(exec.StatusUpdate{Venue: "sim", Connected: true, MasterArmed: false, Note: "up"})
 	d := m.applyExec(exec.AccountUpdate{
-		Account:    exec.AccountSnapshot{Venue: "sim", Equity: 100000, DayPnL: -50, TsMs: 5},
-		VenueArmed: true, MasterArmed: true,
+		Account:     exec.AccountSnapshot{Venue: "sim", Equity: 100000, DayPnL: -50, TsMs: 5},
+		MasterArmed: true,
 	})
 	// AccountUpdate produces both an exec.account delta and an exec.status delta.
 	var accountSeen, statusSeen bool
@@ -116,7 +116,7 @@ func TestMirrorExecStatusAggregate(t *testing.T) {
 			accountSeen = true
 		case wsmsg.TopicExecStatus:
 			st := s.Payload.(wsmsg.ExecStatus)
-			if !st.MasterArmed || len(st.Venues) != 1 || !st.Venues[0].VenueArmed || !st.Venues[0].Connected {
+			if !st.MasterArmed || len(st.Venues) != 1 || !st.Venues[0].Connected {
 				t.Fatalf("exec.status aggregate wrong: %+v", st)
 			}
 			if st.Global.MaxDayLoss != 500 || st.Venues[0].Gate.MaxOrderValue != 1000 {
@@ -296,26 +296,20 @@ func TestMirrorEmptyNewsSnapshotMarshalsToArrayNotNull(t *testing.T) {
 	}
 }
 
-func TestNewMirrorSeedsAutoArmAndNote(t *testing.T) {
+func TestNewMirrorSeedsDisarmedAndNote(t *testing.T) {
 	m := newMirror([]venueMeta{
-		{ID: "alpaca-paper", Broker: wsmsg.BrokerAlpaca, AutoArm: true},
+		{ID: "alpaca-paper", Broker: wsmsg.BrokerAlpaca},
 		{ID: "alpaca-live", Broker: wsmsg.BrokerAlpaca},
 		{ID: "moomoo", Broker: wsmsg.BrokerMoomoo, Note: "execution v1.x"},
 	}, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10)
 
 	st := m.execStatus()
-	if !st.MasterArmed {
-		t.Fatal("master should seed armed when a venue auto-arms")
+	if st.MasterArmed {
+		t.Fatal("master should always seed disarmed — no more auto-arm boot path")
 	}
 	byID := map[string]wsmsg.VenueStatus{}
 	for _, v := range st.Venues {
 		byID[v.Venue] = v
-	}
-	if !byID["alpaca-paper"].VenueArmed {
-		t.Fatal("alpaca-paper should seed armed")
-	}
-	if byID["alpaca-live"].VenueArmed {
-		t.Fatal("alpaca-live should seed disarmed")
 	}
 	if byID["moomoo"].Connected {
 		t.Fatal("moomoo stub should seed disconnected")

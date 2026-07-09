@@ -22,11 +22,10 @@ type staged struct {
 
 // venueMeta is the static per-venue config the mirror needs to assemble exec.status.
 type venueMeta struct {
-	ID      string
-	Broker  wsmsg.Broker
-	AutoArm bool
-	Note    string
-	Gate    wsmsg.GateLimitsView
+	ID     string
+	Broker wsmsg.Broker
+	Note   string
+	Gate   wsmsg.GateLimitsView
 }
 
 type mirror struct {
@@ -81,12 +80,9 @@ func newMirror(venues []venueMeta, global wsmsg.GlobalLimitsView, tapeCap, newsC
 	for _, v := range venues {
 		m.venueStatus[v.ID] = &wsmsg.VenueStatus{
 			Venue: v.ID, Broker: v.Broker, Gate: v.Gate,
-			VenueArmed: v.AutoArm, Note: v.Note,
+			Note: v.Note,
 		}
 		m.venueOrder = append(m.venueOrder, v.ID)
-		if v.AutoArm {
-			m.masterArmed = true
-		}
 	}
 	return m
 }
@@ -234,9 +230,6 @@ func (m *mirror) applyExec(u exec.Update) []staged {
 		a := mapAccount(v.Account)
 		m.accounts[a.Venue] = a
 		m.masterArmed = v.MasterArmed
-		if vs := m.venueStatus[a.Venue]; vs != nil {
-			vs.VenueArmed = v.VenueArmed
-		}
 		return []staged{
 			{Topic: wsmsg.TopicExecAccount, Key: a.Venue, Payload: a},
 			{Topic: wsmsg.TopicExecStatus, Payload: m.execStatus()},

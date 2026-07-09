@@ -210,7 +210,6 @@ export interface VenueStatus {
   venue: string;
   broker: Broker;
   connected: boolean;
-  venueArmed: boolean;
   reconcilePending: boolean;
   note: string;
   lastReconcileMs: number | null;
@@ -287,8 +286,12 @@ export interface FlattenArgs {
 export interface KillSwitchArgs {
   venue?: string; // omitted/empty => all venues
 }
+/**
+ * ArmArgs is intentionally empty: Arm/Disarm are master-only commands with no
+ * arguments. Kept as a named type so the command dispatch has something to
+ * unmarshal into (and tygo has a stable type to regenerate).
+ */
 export interface ArmArgs {
-  venue?: string; // omitted/empty => master
 }
 export interface QueryFillsArgs {
   symbol: string;
@@ -334,7 +337,6 @@ export interface Venue {
   env: string;
   credentials: string;
   accountId: string;
-  autoArm: boolean;
 }
 /**
  * Gate mirrors config.Gate; reuses the existing limit-view shapes.

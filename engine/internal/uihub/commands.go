@@ -112,13 +112,9 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		_ = json.Unmarshal(args, &a) // empty ok => all venues
 		return ackFromCmd(cd.ex.Do(exec.KillSwitch{Venue: exec.VenueID(a.Venue)}))
 	case "Arm":
-		var a wsmsg.ArmArgs
-		_ = json.Unmarshal(args, &a)
-		return ackFromCmd(cd.ex.Do(exec.Arm{Venue: exec.VenueID(a.Venue)}))
+		return ackFromCmd(cd.ex.Do(exec.Arm{}))
 	case "Disarm":
-		var a wsmsg.ArmArgs
-		_ = json.Unmarshal(args, &a)
-		return ackFromCmd(cd.ex.Do(exec.Disarm{Venue: exec.VenueID(a.Venue)}))
+		return ackFromCmd(cd.ex.Do(exec.Disarm{}))
 	case "GetConfig":
 		var a wsmsg.GetConfigArgs
 		if err := json.Unmarshal(args, &a); err != nil {
@@ -326,7 +322,7 @@ func tifFromWire(t wsmsg.TIF) exec.TIF {
 }
 
 func venueToWire(v config.Venue) wsmsg.Venue {
-	return wsmsg.Venue{ID: v.ID, Broker: v.Broker, Env: v.Env, Credentials: v.Credentials, AccountID: v.AccountID, AutoArm: v.AutoArm}
+	return wsmsg.Venue{ID: v.ID, Broker: v.Broker, Env: v.Env, Credentials: v.Credentials, AccountID: v.AccountID}
 }
 
 func gateToWire(g config.Gate) wsmsg.Gate {
@@ -351,7 +347,7 @@ func venueConfigToWire(vc config.VenueConfig) wsmsg.VenueConfig {
 func venueConfigFromWire(venues []wsmsg.Venue, gate wsmsg.Gate) config.VenueConfig {
 	vs := make([]config.Venue, 0, len(venues))
 	for _, v := range venues {
-		vs = append(vs, config.Venue{ID: v.ID, Broker: v.Broker, Env: v.Env, Credentials: v.Credentials, AccountID: v.AccountID, AutoArm: v.AutoArm})
+		vs = append(vs, config.Venue{ID: v.ID, Broker: v.Broker, Env: v.Env, Credentials: v.Credentials, AccountID: v.AccountID})
 	}
 	vm := map[string]config.GateVenue{}
 	for id, gv := range gate.Venue {

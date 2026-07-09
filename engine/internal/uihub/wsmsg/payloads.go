@@ -136,7 +136,6 @@ type VenueStatus struct {
 	Venue            string         `json:"venue"`
 	Broker           Broker         `json:"broker"`
 	Connected        bool           `json:"connected"`
-	VenueArmed       bool           `json:"venueArmed"`
 	ReconcilePending bool           `json:"reconcilePending"`
 	Note             string         `json:"note"`
 	LastReconcileMs  *int64         `json:"lastReconcileMs" tstype:"number | null,required"`
@@ -235,9 +234,10 @@ type KillSwitchArgs struct {
 	Venue string `json:"venue,omitempty"` // omitted/empty => all venues
 }
 
-type ArmArgs struct {
-	Venue string `json:"venue,omitempty"` // omitted/empty => master
-}
+// ArmArgs is intentionally empty: Arm/Disarm are master-only commands with no
+// arguments. Kept as a named type so the command dispatch has something to
+// unmarshal into (and tygo has a stable type to regenerate).
+type ArmArgs struct{}
 
 type QueryFillsArgs struct {
 	Symbol string `json:"symbol"`
@@ -283,7 +283,6 @@ type Venue struct {
 	Env         string `json:"env"`
 	Credentials string `json:"credentials"`
 	AccountID   string `json:"accountId"`
-	AutoArm     bool   `json:"autoArm"`
 }
 
 // Gate mirrors config.Gate; reuses the existing limit-view shapes.

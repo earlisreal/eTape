@@ -53,11 +53,10 @@ type GlobalLimits struct {
 }
 
 type VenueMeta struct {
-	ID      string
-	Broker  string
-	AutoArm bool   // boot this venue armed (paper); reflected in the initial exec.status
-	Note    string // e.g. "execution v1.x" for the moomoo stub
-	Gate    GateLimits
+	ID     string
+	Broker string
+	Note   string // e.g. "execution v1.x" for the moomoo stub
+	Gate   GateLimits
 }
 
 type Config struct {
@@ -77,10 +76,9 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	vms := make([]venueMeta, 0, len(cfg.Venues))
 	for _, v := range cfg.Venues {
 		vms = append(vms, venueMeta{
-			ID:      v.ID,
-			Broker:  wsmsg.Broker(v.Broker),
-			AutoArm: v.AutoArm,
-			Note:    v.Note,
+			ID:     v.ID,
+			Broker: wsmsg.Broker(v.Broker),
+			Note:   v.Note,
 			Gate: wsmsg.GateLimitsView{
 				MaxOrderValue: v.Gate.MaxOrderValue, MaxPositionValue: v.Gate.MaxPositionValue,
 				MaxPositionShares: v.Gate.MaxPositionShares, MaxOpenOrders: v.Gate.MaxOpenOrders,

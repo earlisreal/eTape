@@ -105,9 +105,8 @@ func TestE2EExecLifecycleOverWS(t *testing.T) {
 	c := dialWS(t, ctx, url, wsmsg.TopicExecOrders, wsmsg.TopicExecStatus)
 	defer c.Close(websocket.StatusNormalClosure, "")
 
-	// arm master + venue so the gate lets orders through
+	// arm master so the gate lets orders through
 	sendCommand(t, ctx, c, "Arm", map[string]any{})
-	sendCommand(t, ctx, c, "Arm", map[string]any{"venue": "sim"})
 
 	// Give the sim a mark so a market order is marketable at the broker level,
 	// AND feed exec.Core's own mark table directly: the gate's order-value

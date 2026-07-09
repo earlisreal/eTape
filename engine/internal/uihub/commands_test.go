@@ -331,7 +331,7 @@ func TestGetVenueSetupResultHasNoSecrets(t *testing.T) {
 }
 
 func TestSetVenueSetupBlocksOnError(t *testing.T) {
-	va := &spyVenueAdmin{setErr: errors.New("venue \"x\": env \"live\" cannot auto-arm")}
+	va := &spyVenueAdmin{setErr: errors.New("venue \"x\": env \"demo\" must be paper or live")}
 	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil })
 	ack := cd.handle(context.Background(), "SetVenueSetup", json.RawMessage(`{"venues":[],"gate":{"global":{},"venue":{}}}`), 0)
 	if ack.Status != "blocked" || ack.Reason == "" {
