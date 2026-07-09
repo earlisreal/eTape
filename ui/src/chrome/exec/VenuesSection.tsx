@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
-import type { AckMsg, Venue, Gate, VenueConfig, VenueSetup } from "../../wire/contract";
+import type { AckMsg, Venue, Gate, GateLimitsView, VenueConfig, VenueSetup } from "../../wire/contract";
 
 interface Commands { sendCommand(name: string, args: unknown): Promise<AckMsg>; }
 
@@ -26,6 +26,7 @@ const GLOBAL_CAPS = ["maxDayLoss", "maxSymbolPositionValue", "maxSymbolPositionS
 
 const emptyGate = (): Gate => ({ global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 }, venue: {} });
 const mintCredName = () => `key-${crypto.randomUUID().slice(0, 8)}`;
+const zeroCaps = (): GateLimitsView => ({ maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 });
 
 interface SecretDraft { keyId: string; secret: string }
 interface VenueIssues { id?: string; account?: string; cred?: string }
@@ -40,6 +41,17 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
   // (stable across id renames) — never populated from a refresh.
   const [secretDrafts, setSecretDrafts] = useState<Record<string, SecretDraft>>({});
   const [removeConfirmIdx, setRemoveConfirmIdx] = useState<number | null>(null);
+  // Stable per-row identity for risk-limit caps, independent of the venue's
+  // mutable `id` field. gate.venue is keyed by id on the wire, but tracking
+  // caps live-keyed-by-id during editing let two rows transiently share an
+  // id mid-rename (before the uniqueness validation blocks Save) — two
+  // review rounds each found a real caps-corruption bug in an id-keyed
+  // migration scheme. Keying caps by a synthetic per-row id sidesteps the
+  // whole class: renaming a venue's `id` field never touches its caps: they
+  // are only ever projected into the wire's id-keyed Gate.venue shape at
+  // Save time (see saveVenues).
+  const [rowKeys, setRowKeys] = useState<string[]>([]);
+  const [capsByRow, setCapsByRow] = useState<Record<string, GateLimitsView>>({});
 
   const refresh = useCallback(() => {
     void commands.sendCommand("GetVenueSetup", {}).then((ack) => {
@@ -47,6 +59,9 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
         const s = ack.value as VenueSetup;
         setSetup(s);
         setDraft({ venues: s.file.venues.map((v) => ({ ...v })), gate: { global: { ...s.file.gate.global }, venue: { ...s.file.gate.venue } } });
+        const keys = s.file.venues.map(() => crypto.randomUUID());
+        setRowKeys(keys);
+        setCapsByRow(Object.fromEntries(s.file.venues.map((v, i) => [keys[i], s.file.gate.venue[v.id] ?? zeroCaps()])));
       }
     }).catch(() => toast.push({ level: "danger", text: "Could not load venue setup." }));
   }, [commands, toast]);
@@ -105,36 +120,26 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
       broker,
       credentials: broker !== "sim" && !draft.venues[i].credentials ? mintCredName() : draft.venues[i].credentials,
     });
-  // Id edit: migrate any gate.venue entry from the old id to the new one in
-  // the same update, so risk caps set before a rename stay attached to the
-  // venue instead of becoming an orphan under the stale id (orphans fail the
-  // engine's ValidateVenueConfig on save; saveVenues's reconcile step is the
-  // second line of defense for orphans left by any other path, e.g. a
-  // hand-edited config).
-  // Collision guard: if the new id already belongs to a *different* venue
-  // (even transiently, mid-edit, before the "id must be unique" validation
-  // blocks Save), skip the migration entirely rather than merging into that
-  // venue's existing entry — an unconditional overwrite would silently
-  // clobber the other venue's caps with this venue's carried ones. Leaving
-  // gate.venue untouched here is safe: the unique-id validation already
-  // surfaces an error to the user in this state, and saveVenues's save-time
-  // reconcile remains the final correctness backstop regardless.
-  const setVenueId = (i: number, id: string) =>
-    setDraft((d) => {
-      const oldId = d.venues[i].id;
-      const venues = d.venues.map((v, j) => (j === i ? { ...v, id } : v));
-      if (!oldId || oldId === id || !(oldId in d.gate.venue)) return { ...d, venues };
-      if (d.venues.some((v, j) => j !== i && v.id === id)) return { ...d, venues };
-      const { [oldId]: carried, ...restVenue } = d.gate.venue;
-      return { ...d, venues, gate: { ...d.gate, venue: { ...restVenue, [id]: carried } } };
-    });
-  const addVenue = () => setDraft((d) => ({
-    ...d,
-    venues: [...d.venues, { id: "", broker: "sim", env: "paper", credentials: mintCredName(), accountId: "", autoArm: false }],
-  }));
+  const addVenue = () => {
+    const key = crypto.randomUUID();
+    setRowKeys((k) => [...k, key]);
+    setCapsByRow((c) => ({ ...c, [key]: zeroCaps() }));
+    setDraft((d) => ({
+      ...d,
+      venues: [...d.venues, { id: "", broker: "sim", env: "paper", credentials: mintCredName(), accountId: "", autoArm: false }],
+    }));
+  };
   const removeVenue = (i: number) => {
     const gone = draft.venues[i];
+    const goneKey = rowKeys[i];
     setDraft((d) => ({ ...d, venues: d.venues.filter((_, j) => j !== i) }));
+    setRowKeys((k) => k.filter((_, j) => j !== i));
+    if (goneKey) setCapsByRow((c) => {
+      if (!(goneKey in c)) return c;
+      const next = { ...c };
+      delete next[goneKey];
+      return next;
+    });
     if (gone) setSecretDrafts((d) => {
       if (!(gone.credentials in d)) return d;
       const next = { ...d };
@@ -159,19 +164,18 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
         if (ack.status !== "accepted") { setErr(ack.reason || "rejected"); return; }
       }
 
-      // 2. Reconcile gate.venue against the current venue ids before sending:
-      //    carry over existing caps, default a missing/new venue to all-zero
-      //    (0 = cap off), and drop entries whose id no longer matches a venue
-      //    (a rename orphan). This guarantees every venue gets a gate entry —
-      //    so the engine's fail-closed guard (no entry => block) never fires
-      //    on a UI-created venue — and rename never gets rejected by the
-      //    engine's ValidateVenueConfig for referencing a stale id.
+      // 2. Project capsByRow (the live editing source of truth, keyed by each
+      //    row's stable synthetic key — never touched by id edits) into the
+      //    wire's id-keyed Gate.venue shape, using each venue's *current* id.
+      //    This guarantees every venue gets a gate entry — so the engine's
+      //    fail-closed guard (no entry => block) never fires on a UI-created
+      //    venue — and a rename always carries its row's caps to the new id,
+      //    since the row/caps association was never id-based to begin with.
       const venueGate: Gate["venue"] = {};
-      for (const v of draft.venues) {
-        if (!v.id) continue; // empty id is already blocked by validation
-        venueGate[v.id] = draft.gate.venue[v.id] ??
-          { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 };
-      }
+      draft.venues.forEach((v, i) => {
+        if (!v.id) return; // empty id is already blocked by validation
+        venueGate[v.id] = capsByRow[rowKeys[i]] ?? zeroCaps();
+      });
       const gate: Gate = { global: draft.gate.global, venue: venueGate };
       const setAck = await commands.sendCommand("SetVenueSetup", { venues: draft.venues, gate });
       if (setAck.status !== "accepted") { setErr(setAck.reason || "rejected"); return; }
@@ -258,7 +262,7 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
                   <label style={fieldWrap}>
                     id
                     <input {...field} className="field mono" data-testid={`venue-id-${i}`} value={v.id}
-                      onChange={(e) => setVenueId(i, e.target.value)} placeholder="venue-id" style={{ width: 130 }} />
+                      onChange={(e) => patchVenue(i, { id: e.target.value })} placeholder="venue-id" style={{ width: 130 }} />
                   </label>
                   <label style={fieldWrap}>
                     broker
@@ -316,11 +320,11 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
                   {GATE_CAPS.map((cap) => (
                     <label key={cap} style={fieldWrap}>
                       {cap}
-                      <input {...field} className="field mono" value={String(draft.gate.venue[v.id]?.[cap] ?? 0)}
-                        onChange={(e) => setDraft((d) => {
-                          const cur = d.gate.venue[v.id] ?? { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 };
-                          return { ...d, gate: { ...d.gate, venue: { ...d.gate.venue, [v.id]: { ...cur, [cap]: Number(e.target.value) || 0 } } } };
-                        })}
+                      <input {...field} className="field mono" value={String(capsByRow[rowKeys[i]]?.[cap] ?? 0)}
+                        onChange={(e) => {
+                          const key = rowKeys[i];
+                          setCapsByRow((c) => ({ ...c, [key]: { ...(c[key] ?? zeroCaps()), [cap]: Number(e.target.value) || 0 } }));
+                        }}
                         style={{ width: 72 }} />
                     </label>
                   ))}
