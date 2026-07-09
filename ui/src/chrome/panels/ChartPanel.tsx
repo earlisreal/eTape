@@ -74,6 +74,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     setPanZoomEnabled: (on) => chart.applyOptions({ handleScroll: on, handleScale: on }),
     scrollToRealTime: () => chart.timeScale().scrollToRealTime(),
     resetTimeScale: () => chart.timeScale().resetTimeScale(),
+    resetPriceScale: () => chart.priceScale("right").applyOptions({ autoScale: true }),
     resize: (w, h) => chart.resize(w, h),
     applyOptions: (o) => chart.applyOptions(o as object),
     setWatermark: (text) => {

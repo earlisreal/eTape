@@ -35,6 +35,7 @@ export interface ChartApiFacade {
   setPanZoomEnabled(on: boolean): void;
   scrollToRealTime(): void;
   resetTimeScale(): void; // default bar spacing + scroll to the latest bar
+  resetPriceScale(): void; // re-enable the right price scale's autoScale (undo a manual vertical drag)
   resize(width: number, height: number): void;
   applyOptions(options: unknown): void;
   setWatermark(text: string | null): void; // symbol watermark on the main pane (null clears)

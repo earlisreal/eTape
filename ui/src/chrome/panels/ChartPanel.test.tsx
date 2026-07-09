@@ -9,12 +9,15 @@ import { ThemeProvider } from "../ThemeProvider";
 const timeScaleApi = { timeToCoordinate: vi.fn(() => 0), scrollToRealTime: vi.fn(), scrollPosition: vi.fn(() => 0),
   coordinateToLogical: vi.fn(() => 0), logicalToCoordinate: vi.fn(() => 0), resetTimeScale: vi.fn(),
   scrollToPosition: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn() };
+// priceScaleApi is a stable object (not a fresh literal per call) so a test can hold
+// a reference to applyOptions and assert it was invoked by the SUT (mirrors timeScaleApi above).
+const priceScaleApi = { applyOptions: vi.fn() };
 const chartApi = {
   addSeries: vi.fn(() => ({ setData: vi.fn(), update: vi.fn(), applyOptions: vi.fn(), setSeriesOrder: vi.fn(),
     attachPrimitive: vi.fn(), priceToCoordinate: vi.fn(() => 0), coordinateToPrice: vi.fn(() => 0) })),
   removeSeries: vi.fn(),
   panes: vi.fn(() => [{ attachPrimitive: vi.fn(), getHeight: vi.fn(() => 400) }]),
-  priceScale: vi.fn(() => ({ applyOptions: vi.fn() })),
+  priceScale: vi.fn(() => priceScaleApi),
   timeScale: vi.fn(() => timeScaleApi),
   applyOptions: vi.fn(), resize: vi.fn(), remove: vi.fn(),
   takeScreenshot: vi.fn(() => document.createElement("canvas")),
@@ -144,11 +147,12 @@ describe("ChartPanel", () => {
     expect(stores.drawings.forSymbol("US.AAPL")).toHaveLength(1);
   });
 
-  it("right-click opens a context menu; Reset chart view calls the chart's resetTimeScale", () => {
+  it("right-click opens a context menu; Reset chart view calls the chart's resetTimeScale and re-enables price autoScale", () => {
     const { getByTestId, getByRole } = renderChart();
     fireEvent.contextMenu(getByTestId("chart-host"), { clientX: 20, clientY: 30 });
     fireEvent.click(getByRole("button", { name: "Reset chart view" }));
     expect(timeScaleApi.resetTimeScale).toHaveBeenCalledTimes(1);
+    expect(priceScaleApi.applyOptions).toHaveBeenCalledWith({ autoScale: true });
   });
 
   it("right-click menu's Remove all drawings clears this symbol's drawings", () => {

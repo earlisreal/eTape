@@ -331,7 +331,7 @@ export class ChartController {
 
   resize(w: number, h: number): void { this.facade.resize(w, h); }
   jumpToLive(): void { this.facade.scrollToRealTime(); }
-  resetZoom(): void { this.facade.resetTimeScale(); }
+  resetZoom(): void { this.facade.resetTimeScale(); this.facade.resetPriceScale(); }
   dispose(): void {
     for (const id of [...this.indicators.keys()]) this.removeIndicator(id);
     this.facade.remove();

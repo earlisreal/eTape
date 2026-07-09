@@ -24,10 +24,10 @@ function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[]; setDat
 function fakeFacade() {
   const created: Array<{ kind: string; pane: number; options: unknown; series: ReturnType<typeof fakeSeries> }> = [];
   const scaleMargins: Array<{ id: string; margins: { top: number; bottom: number } }> = [];
-  const facade: ChartApiFacade & { created: typeof created; scrolls: number; resets: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins }
+  const facade: ChartApiFacade & { created: typeof created; scrolls: number; resets: number; priceResets: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins }
     & { mainKind: string; screenshots: number; crosshairCb: ((l: number | null) => void) | null }
     & { watermark: string | null; lastOptions: unknown } = {
-    created, scrolls: 0, resets: 0, bands: 0, lastBands: [], scaleMargins,
+    created, scrolls: 0, resets: 0, priceResets: 0, bands: 0, lastBands: [], scaleMargins,
     mainKind: "", screenshots: 0, crosshairCb: null,
     watermark: null, lastOptions: null,
     setMainSeries: (kind, o) => { const s = fakeSeries(); created.push({ kind, pane: 0, options: o, series: s }); facade.mainKind = kind; return s; },
@@ -47,6 +47,7 @@ function fakeFacade() {
     setPanZoomEnabled: () => {},
     scrollToRealTime: () => { facade.scrolls++; },
     resetTimeScale: () => { facade.resets++; },
+    resetPriceScale: () => { facade.priceResets++; },
     resize: () => {},
     applyOptions: (o) => { facade.lastOptions = o; },
     setWatermark: (t) => { facade.watermark = t; },
@@ -135,11 +136,13 @@ describe("ChartController", () => {
     expect(facade.scrolls).toBe(1);
   });
 
-  it("resetZoom resets the time scale to default spacing + the latest bar", () => {
+  it("resetZoom resets the time scale to default spacing + the latest bar, and re-enables price autoScale", () => {
     const { facade, ctrl } = make(barReaderOf([]));
     expect(facade.resets).toBe(0);
+    expect(facade.priceResets).toBe(0);
     ctrl.resetZoom();
     expect(facade.resets).toBe(1);
+    expect(facade.priceResets).toBe(1);
   });
 
   it("addIndicator subscribes and creates the descriptor series; remove unsubscribes", () => {
