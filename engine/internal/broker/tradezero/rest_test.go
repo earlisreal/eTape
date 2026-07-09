@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
+	"github.com/earlisreal/eTape/engine/internal/creds"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 )
 
@@ -479,6 +480,129 @@ func TestFetchRoutes_WrappedShape(t *testing.T) {
 	}
 	if got := rc.pickRoute("Stock"); got != "SIM" {
 		t.Fatalf("pickRoute(Stock) = %q, want SIM (no SMART route exists, falls back)", got)
+	}
+}
+
+// TestListAccounts_ParsesAccountTypeAndID covers the happy path FetchAccounts
+// (tradezero.go) relies on: the list-all endpoint's bare-array response
+// decodes into tzAccount rows carrying both accountId and accountType, so a
+// caller can auto-fill env + account id without the user typing either.
+func TestListAccounts_ParsesAccountTypeAndID(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/api/accounts", serveFile(t, "accounts.json"))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "", "K", "S", clock.NewFake(time.UnixMilli(0)))
+	accounts, err := rc.listAccounts(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts) != 1 {
+		t.Fatalf("accounts = %+v, want 1 row", accounts)
+	}
+	if accounts[0].AccountID != "2TZ00001" || accounts[0].AccountType != "Live" {
+		t.Fatalf("account = %+v, want accountId=2TZ00001 accountType=Live", accounts[0])
+	}
+}
+
+// TestListAccounts_EmptyArray_ReturnsEmptySliceNoError covers TradeZero's
+// documented "platform asleep" shape (docs/2026-07-03-tradezero-api.md):
+// GET /v1/api/accounts can return HTTP 200 with an empty array even for
+// valid keys. This must not be an error, and must not return a nil slice
+// that would behave differently from an empty one under len() == 0 checks.
+func TestListAccounts_EmptyArray_ReturnsEmptySliceNoError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/api/accounts", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`[]`)) })
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "", "K", "S", clock.NewFake(time.UnixMilli(0)))
+	accounts, err := rc.listAccounts(context.Background())
+	if err != nil {
+		t.Fatalf("empty accounts array must not be an error: %v", err)
+	}
+	if accounts == nil {
+		t.Fatal("expected a non-nil empty slice, got nil")
+	}
+	if len(accounts) != 0 {
+		t.Fatalf("accounts = %+v, want empty", accounts)
+	}
+}
+
+// TestListAccounts_ErrorStatus covers the "wrong/expired key" half: a >=400
+// response is a real error, never a silent empty-success.
+func TestListAccounts_ErrorStatus(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/api/accounts", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"message":"invalid API key"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "", "K", "S", clock.NewFake(time.UnixMilli(0)))
+	accounts, err := rc.listAccounts(context.Background())
+	if err == nil {
+		t.Fatalf("expected a 401 to surface as an error, got accounts=%+v", accounts)
+	}
+	if accounts != nil {
+		t.Fatalf("a 401 must never return non-nil accounts, got %+v", accounts)
+	}
+}
+
+// TestListAccounts_NoAccountIDInPath asserts listAccounts never puts an
+// account id in the request path — the whole point of the list-all endpoint
+// is that it needs none. A stray "/v1/api/accounts/" (empty segment) or any
+// other path would 404 against the mux below, which only registers the bare
+// "/v1/api/accounts".
+func TestListAccounts_NoAccountIDInPath(t *testing.T) {
+	mux := http.NewServeMux()
+	var gotPath string
+	mux.HandleFunc("/v1/api/accounts", func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_, _ = w.Write([]byte(`[]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "", "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if _, err := rc.listAccounts(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/v1/api/accounts" {
+		t.Fatalf("path = %q, want /v1/api/accounts", gotPath)
+	}
+}
+
+// TestFetchAccounts_ReturnsPromptly_NoAdapterNoGoroutine is the one
+// network-free property FetchAccounts (tradezero.go) can be checked against
+// without a RESTBase override: like Alpaca's VerifyCredentials, its mandated
+// signature (ctx, cr, clk — no base-URL parameter) always targets TZ's real
+// production host, so it genuinely cannot be pointed at an httptest server
+// here; listAccounts above already covers the actual HTTP decode/error
+// behavior directly against a mock server. What this test guards is that
+// FetchAccounts is a bare, synchronous REST call — never going through New
+// (which would panic/error over the missing AccountID this call
+// deliberately omits) and never leaking a goroutine that ignores ctx — by
+// checking it returns promptly on an already-canceled context.
+func TestFetchAccounts_ReturnsPromptly_NoAdapterNoGoroutine(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := FetchAccounts(ctx, creds.Pair{KeyID: "K", SecretKey: "S"}, clock.NewFake(time.UnixMilli(0)))
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected a canceled context to surface as an error")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("FetchAccounts did not return promptly on a canceled context")
 	}
 }
 

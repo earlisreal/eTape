@@ -177,6 +177,45 @@ func New(cfg Config) (*Adapter, error) {
 	return a, nil
 }
 
+// AccountInfo is one row of FetchAccounts' result: an account id TZ knows
+// about for the probed key pair, and the environment (AccountType, e.g.
+// "Live"/"Paper" as TZ reports it) it belongs to — the two things eTape
+// today requires the user to type by hand when configuring a TradeZero
+// venue (see Config.AccountID above).
+type AccountInfo struct {
+	AccountID   string
+	AccountType string
+}
+
+// FetchAccounts issues a single read-only GET /v1/api/accounts and returns
+// every account visible to cr, so a caller (a later venueprobe package) can
+// auto-fill both the account id and its env instead of making the user type
+// them. The same host serves both paper and live TZ accounts, so unlike
+// Alpaca's VerifyCredentials there is no per-env base URL to pick between —
+// one call surfaces everything.
+//
+// Deliberately NOT built on New: it constructs a bare restClient directly
+// and calls listAccounts — never an *Adapter, never a wsClient, and no
+// goroutine is started. The accounts-list endpoint takes no account id in
+// its path (every other TZ REST call does), so the restClient here is built
+// with accountID "" — unlike New, this never requires or validates a
+// non-empty account id, since discovering one is the whole point.
+func FetchAccounts(ctx context.Context, cr creds.Pair, clk clock.Clock) ([]AccountInfo, error) {
+	if clk == nil {
+		clk = clock.System{}
+	}
+	rc := newRESTClient(defaultRESTBase, "", cr.KeyID, cr.SecretKey, clk)
+	rows, err := rc.listAccounts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	infos := make([]AccountInfo, 0, len(rows))
+	for _, r := range rows {
+		infos = append(infos, AccountInfo{AccountID: r.AccountID, AccountType: r.AccountType})
+	}
+	return infos, nil
+}
+
 // currentLegRows reduces a raw REST order-row list to at most one row per
 // domain order id — the CURRENT authoritative leg — discarding any
 // superseded leg from an earlier replace (caller holds a.mu). TZ's GET
