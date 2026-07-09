@@ -289,6 +289,142 @@ func TestMonthlyDerivedFromDaily(t *testing.T) {
 	}
 }
 
+// TestSeedSessionTicksBuildsSnapshotWithoutFlood verifies that
+// SeedSessionTicks rebuilds a correct TF10s series from a batch of persisted
+// ticks while emitting only the final BarSnapshot — zero per-tick BarUpdates
+// for TF10s (the flood-prevention proof for a session-ticks reconstruction).
+func TestSeedSessionTicksBuildsSnapshotWithoutFlood(t *testing.T) {
+	c, drain := runCore(t)
+	ticks := []feed.Tick{
+		tick(1, 0, 100, 10, feed.Buy),
+		tick(2, 3_000, 101, 5, feed.Sell),
+		tick(3, 12_000, 102, 7, feed.Buy),  // new 10s bucket -> finalizes bucket 0
+		tick(4, 25_000, 103, 3, feed.Sell), // new 10s bucket -> finalizes bucket 10s
+	}
+	c.SeedSessionTicks("US.AAPL", ticks)
+	us := drain()
+
+	if flood := collectBars(us, session.TF10s); len(flood) != 0 {
+		t.Fatalf("SeedSessionTicks emitted %d per-bar TF10s BarUpdate(s), want 0: %+v", len(flood), flood)
+	}
+	tens := snapshotBars(us, "US.AAPL", session.TF10s)
+	if len(tens) != 3 {
+		t.Fatalf("TF10s snapshot bars = %d, want 3: %+v", len(tens), tens)
+	}
+	b0, b1, b2 := tens[0], tens[1], tens[2]
+	if b0.BucketMs != t0Ms || b0.O != 100 || b0.H != 101 || b0.L != 100 || b0.C != 101 ||
+		b0.V != 15 || b0.BuyV != 10 || b0.SellV != 5 || b0.Ticks != 2 || b0.InProgress {
+		t.Fatalf("bucket0 = %+v, want finalized O100/H101/L100/C101/V15/Buy10/Sell5/Ticks2", b0)
+	}
+	if b1.BucketMs != t0Ms+10_000 || b1.O != 102 || b1.C != 102 || b1.V != 7 || b1.BuyV != 7 || b1.InProgress {
+		t.Fatalf("bucket10s = %+v, want finalized O102/C102/V7/Buy7", b1)
+	}
+	if b2.BucketMs != t0Ms+20_000 || b2.O != 103 || b2.V != 3 || b2.SellV != 3 || !b2.InProgress {
+		t.Fatalf("bucket20s = %+v, want in-progress O103/V3/Sell3", b2)
+	}
+}
+
+// TestSeedSessionTicksDedupsBySeq verifies a journal seed+push overlap (a
+// duplicate seq within the seeded batch) is counted only once, exactly like
+// the live dedup in applyTicks.
+func TestSeedSessionTicksDedupsBySeq(t *testing.T) {
+	c, drain := runCore(t)
+	ticks := []feed.Tick{
+		tick(1, 0, 100, 10, feed.Buy),
+		tick(2, 3_000, 101, 5, feed.Sell),
+		tick(2, 3_000, 101, 5, feed.Sell), // duplicate seq
+		tick(3, 12_000, 102, 7, feed.Buy), // finalizes bucket 0
+	}
+	c.SeedSessionTicks("US.AAPL", ticks)
+	tens := snapshotBars(drain(), "US.AAPL", session.TF10s)
+	if len(tens) != 2 {
+		t.Fatalf("TF10s snapshot bars = %d, want 2: %+v", len(tens), tens)
+	}
+	if b0 := tens[0]; b0.V != 15 || b0.Ticks != 2 {
+		t.Fatalf("bucket0 = %+v, want V=15 Ticks=2 (duplicate seq=2 counted once)", b0)
+	}
+}
+
+// TestSeedSessionTicksThenLiveContinues verifies seed-then-live continuity:
+// seeding seq 1-5 then feeding live seq 3-8 through the normal Core.Feed path
+// (3-5 deduped away as seed/push overlap) must land on exactly the same final
+// TF10s state as aggregating seq 1-8 once in a single SeedSessionTicks call.
+func TestSeedSessionTicksThenLiveContinues(t *testing.T) {
+	dirs := []feed.Direction{feed.Buy, feed.Sell, feed.Buy, feed.Sell, feed.Buy, feed.Sell, feed.Buy, feed.Sell}
+	all := make([]feed.Tick, 8)
+	for i := 0; i < 8; i++ {
+		// One tick per 10s bucket: seq i+1, bucket t0Ms+i*10s.
+		all[i] = tick(int64(i+1), int64(i)*10_000, 100+float64(i), int64(10+i), dirs[i])
+	}
+
+	// Reference: aggregate all 8 ticks once via a single seed call.
+	ref, refDrain := runCore(t)
+	ref.SeedSessionTicks("US.AAPL", all)
+	refBars := snapshotBars(refDrain(), "US.AAPL", session.TF10s)
+	if len(refBars) != 8 {
+		t.Fatalf("reference TF10s bars = %d, want 8: %+v", len(refBars), refBars)
+	}
+
+	// Actual: seed seq 1-5, then feed seq 3-8 live (3-5 must dedup away).
+	c, drain := runCore(t)
+	c.SeedSessionTicks("US.AAPL", all[:5])
+	seedBars := snapshotBars(drain(), "US.AAPL", session.TF10s)
+	c.Feed(feed.TicksEvent{Ticks: all[2:8]})
+	liveBars := collectBars(drain(), session.TF10s)
+
+	got := make(map[int64]Bar, len(seedBars))
+	for _, b := range seedBars {
+		got[b.BucketMs] = b
+	}
+	for _, b := range liveBars {
+		got[b.BucketMs] = b // last write per bucket wins, matching series.upsert
+	}
+	if len(got) != len(refBars) {
+		t.Fatalf("final TF10s bucket count = %d, want %d", len(got), len(refBars))
+	}
+	for _, want := range refBars {
+		have, ok := got[want.BucketMs]
+		if !ok || have != want {
+			t.Fatalf("bucket %d = %+v, want %+v (seed-then-live must equal a single seq 1-8 pass)", want.BucketMs, have, want)
+		}
+	}
+}
+
+// TestSeedSessionTicksSuppressesMismatchDuringSeeding verifies that shadow-1m
+// finalization inside a session-ticks seed does not fire MismatchUpdate even
+// when it disagrees with an already-present authoritative 1m bar — a restart
+// reconstruction must not re-litigate a divergence that live validation
+// already had (or will have) its say on.
+func TestSeedSessionTicksSuppressesMismatchDuringSeeding(t *testing.T) {
+	c, drain := runCore(t)
+	// Authoritative, finalized 1m bar for bucket 0 that will disagree with
+	// what the tick-derived shadow computes below (O/C/V all differ).
+	c.SeedHistory1m("US.AAPL", []feed.Bar{bar1m(0, 100, 100.9, 100, 100.9, 500)})
+	_ = drain()
+
+	ticks := []feed.Tick{
+		tick(1, 1_000, 105, 50, feed.Buy),  // shadow 1m bucket 0: O=C=105, V=50
+		tick(2, 61_000, 106, 10, feed.Buy), // next 1m bucket -> finalizes shadow bucket 0
+	}
+	c.SeedSessionTicks("US.AAPL", ticks)
+	for _, u := range drain() {
+		if mu, ok := u.(MismatchUpdate); ok {
+			t.Fatalf("MismatchUpdate emitted during seeding: %+v", mu)
+		}
+	}
+}
+
+// TestSeedSessionTicksEmptyIsNoOp verifies nil and empty tick batches produce
+// no emitted updates and do not panic.
+func TestSeedSessionTicksEmptyIsNoOp(t *testing.T) {
+	c, drain := runCore(t)
+	c.SeedSessionTicks("US.AAPL", nil)
+	c.SeedSessionTicks("US.AAPL", []feed.Tick{})
+	if us := drain(); len(us) != 0 {
+		t.Fatalf("empty SeedSessionTicks emitted %d update(s), want 0: %+v", len(us), us)
+	}
+}
+
 // TestFinalizedBarsAccessor verifies the indicator-seeding accessor returns
 // only finalized bars for a timeframe. Uses a non-running Core so the engine
 // is driven entirely on this goroutine (no Run goroutine to race with).

@@ -35,12 +35,17 @@ type seedHistory1mMsg struct {
 	symbol string
 	bars   []feed.Bar
 }
+type seedSessionTicksMsg struct {
+	symbol string
+	ticks  []feed.Tick
+}
 
 func (eventMsg) isInMsg()            {}
 func (ensureIndicatorMsg) isInMsg()  {}
 func (releaseIndicatorMsg) isInMsg() {}
 func (seedDailyMsg) isInMsg()        {}
 func (seedHistory1mMsg) isInMsg()    {}
+func (seedSessionTicksMsg) isInMsg() {}
 
 // Core is the single-writer market-data state machine.
 type Core struct {
@@ -111,6 +116,15 @@ func (c *Core) SeedHistory1m(symbol string, bars []feed.Bar) {
 	c.inbox <- seedHistory1mMsg{symbol: symbol, bars: bars}
 }
 
+// SeedSessionTicks reconstructs a symbol's tick-derived bars (10s + shadow
+// 1m) from a batch of persisted ticks (e.g. the journal, after a restart)
+// without touching the tape ring and without emitting TapeUpdate/Mark — a
+// reconstruction must not replay tape/mark side effects or push a stale
+// last-trade price into execution.
+func (c *Core) SeedSessionTicks(symbol string, ticks []feed.Tick) {
+	c.inbox <- seedSessionTicksMsg{symbol: symbol, ticks: ticks}
+}
+
 // Run is the single writer. It returns when ctx is done.
 func (c *Core) Run(ctx context.Context) error {
 	for {
@@ -164,6 +178,8 @@ func (c *Core) apply(m inMsg) {
 		c.bars.seedDaily(c, msg.symbol, msg.bars) // Task 11
 	case seedHistory1mMsg:
 		c.bars.seedHistory1m(c, msg.symbol, msg.bars)
+	case seedSessionTicksMsg:
+		c.seedSessionTicks(msg.symbol, msg.ticks)
 	}
 }
 
@@ -187,15 +203,11 @@ func (c *Core) applyEvent(ev feed.Event) {
 	}
 }
 
-// applyTicks dedups by (day, seq), appends to the tape, drives tick-derived
-// bars, and emits one TapeUpdate + one Mark per accepted batch.
-func (c *Core) applyTicks(e feed.TicksEvent) {
-	if len(e.Ticks) == 0 {
-		return
-	}
-	symbol := e.Ticks[0].Symbol
-	accepted := make([]feed.Tick, 0, len(e.Ticks))
-	for _, t := range e.Ticks {
+// dedupTicks applies the (day, seq) high-water dedup, advancing lastSeq/lastDay,
+// and returns the accepted ticks. Shared by applyTicks and seedSessionTicks.
+func (c *Core) dedupTicks(symbol string, ticks []feed.Tick) []feed.Tick {
+	accepted := make([]feed.Tick, 0, len(ticks))
+	for _, t := range ticks {
 		day := session.DayMs(t.TsMs)
 		if day != c.lastDay[t.Symbol] {
 			c.lastDay[t.Symbol] = day
@@ -207,6 +219,17 @@ func (c *Core) applyTicks(e feed.TicksEvent) {
 		c.lastSeq[t.Symbol] = t.Seq
 		accepted = append(accepted, t)
 	}
+	return accepted
+}
+
+// applyTicks dedups by (day, seq), appends to the tape, drives tick-derived
+// bars, and emits one TapeUpdate + one Mark per accepted batch.
+func (c *Core) applyTicks(e feed.TicksEvent) {
+	if len(e.Ticks) == 0 {
+		return
+	}
+	symbol := e.Ticks[0].Symbol
+	accepted := c.dedupTicks(symbol, e.Ticks)
 	if len(accepted) == 0 {
 		return
 	}
@@ -222,4 +245,24 @@ func (c *Core) applyTicks(e feed.TicksEvent) {
 	c.emit(TapeUpdate{Symbol: symbol, Ticks: accepted})
 	last := accepted[len(accepted)-1]
 	c.mark(Mark{Symbol: last.Symbol, Price: last.Price, TsMs: last.TsMs})
+}
+
+// seedSessionTicks reconstructs tick-derived bars from a batch of persisted
+// ticks (see SeedSessionTicks) — dedup only, no tape append, no TapeUpdate,
+// no Mark. Bar emission is suppressed for the whole batch (c.seeding), then
+// one BarSnapshot per touched timeframe replaces it, matching the
+// seedHistory1m/seedDaily pattern.
+func (c *Core) seedSessionTicks(symbol string, ticks []feed.Tick) {
+	if len(ticks) == 0 {
+		return
+	}
+	accepted := c.dedupTicks(symbol, ticks) // same dedup as live
+	if len(accepted) == 0 {
+		return
+	}
+	c.seeding = true
+	c.bars.applyTicks(c, accepted) // agg10 + shadow; barOut suppressed
+	c.seeding = false
+	c.bars.emitTickSeedSnapshots(c, symbol) // one BarSnapshot per touched TF
+	c.inds.reseedSymbol(c, symbol)          // same as seedHistory1m
 }
