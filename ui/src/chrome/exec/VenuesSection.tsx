@@ -1,7 +1,12 @@
 // Venues & credentials editor. Edits are FILE-ONLY: SetVenueSetup rewrites
 // config.toml and PutCredential/DeleteCredential rewrite credentials.json;
 // nothing here arms a venue or changes the running gate — changes apply at the
-// next engine restart (hence the restart banner).
+// next engine restart (hence the restart banner). ONE deliberate exception:
+// "Reset balance" on a sim venue sends a live ResetBalance command straight to
+// the running exec.Core (the same channel Flatten/Arm elsewhere use) rather
+// than writing config — funding/resetting a sim account is inherently a live
+// action, not a file edit, and the button only ever appears for a venue
+// that's already running as broker "sim".
 //
 // Credentials model: ONE opaque key per venue (no more shared/named credential
 // picker). addVenue() mints a stable, user-invisible `key-<uuid8>` name into
@@ -40,6 +45,7 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
   // (stable across id renames) — never populated from a refresh.
   const [secretDrafts, setSecretDrafts] = useState<Record<string, SecretDraft>>({});
   const [removeConfirmIdx, setRemoveConfirmIdx] = useState<number | null>(null);
+  const [resetConfirmIdx, setResetConfirmIdx] = useState<number | null>(null);
 
   const refresh = useCallback(() => {
     void commands.sendCommand("GetVenueSetup", {}).then((ack) => {
@@ -107,7 +113,7 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
     });
   const addVenue = () => setDraft((d) => ({
     ...d,
-    venues: [...d.venues, { id: "", broker: "sim", env: "paper", credentials: mintCredName(), accountId: "", autoArm: false }],
+    venues: [...d.venues, { id: "", broker: "sim", env: "paper", credentials: mintCredName(), accountId: "", autoArm: false, startingBalance: 100000 }],
   }));
   const removeVenue = (i: number) => {
     const gone = draft.venues[i];
@@ -160,6 +166,20 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
     }
   };
 
+  // Live command, not a file edit — see the header comment's exception note.
+  const resetBalance = async (v: Venue) => {
+    try {
+      const ack = await commands.sendCommand("ResetBalance", { venue: v.id });
+      if (ack.status !== "accepted") {
+        toast.push({ level: "danger", text: ack.reason || "rejected" });
+        return;
+      }
+      toast.push({ level: "info", text: `${v.id} reset to $${v.startingBalance.toLocaleString()}` });
+    } catch {
+      toast.push({ level: "danger", text: "Reset failed (transport)." });
+    }
+  };
+
   const field = { className: "field" } as const; // spread onto native inputs/selects for shared look
   const groupLabel = { marginBottom: 4 } as const;
   const fieldWrap = { display: "flex", flexDirection: "column", gap: 2, fontSize: 10.5, color: palette.textMuted } as const;
@@ -182,10 +202,13 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
       {draft.venues.map((v, i) => {
         const isLive = v.env === "live";
         const showCreds = v.broker !== "sim";
+        const showStartingBalance = v.broker === "sim";
+        const canReset = v.broker === "sim" && (setup?.running.venues ?? []).some((rv) => rv.id === v.id && rv.broker === "sim");
         const keySet = !!(setup?.credKeys ?? []).includes(v.credentials);
         const issue = validation[i];
         const typed = secretDrafts[v.credentials] ?? { keyId: "", secret: "" };
         const removing = removeConfirmIdx === i;
+        const resetting = resetConfirmIdx === i;
 
         return (
           <div key={i} className="venue-card" style={{
@@ -203,6 +226,23 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
                 {v.env.toUpperCase()}
               </span>
               <span style={{ flex: 1 }} />
+              {canReset && (
+                <>
+                  {resetting && (
+                    <span style={{ fontSize: 11, color: palette.accent, marginRight: 4 }}>
+                      Reset to ${v.startingBalance.toLocaleString()}?
+                    </span>
+                  )}
+                  <button
+                    data-testid={`venue-reset-${i}`}
+                    className="btn"
+                    onClick={() => (resetting ? (void resetBalance(v), setResetConfirmIdx(null)) : setResetConfirmIdx(i))}
+                  >
+                    {resetting ? "Confirm reset" : "Reset balance"}
+                  </button>
+                  {resetting && <button className="btn" onClick={() => setResetConfirmIdx(null)}>Cancel</button>}
+                </>
+              )}
               {removing && <span style={{ fontSize: 11, color: palette.danger, marginRight: 4 }}>Remove {v.id || "this venue"}?</span>}
               <button
                 data-testid={`venue-remove-${i}`}
@@ -243,6 +283,15 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
                     <input {...field} data-testid={`venue-account-${i}`} value={v.accountId}
                       onChange={(e) => patchVenue(i, { accountId: e.target.value })} placeholder="account id" style={{ width: 110 }} />
                   </label>
+                  {showStartingBalance && (
+                    <label style={fieldWrap}>
+                      starting balance
+                      <input {...field} className="field mono" type="number" data-testid={`venue-startingbalance-${i}`}
+                        value={String(v.startingBalance ?? 0)}
+                        onChange={(e) => patchVenue(i, { startingBalance: Number(e.target.value) || 0 })}
+                        style={{ width: 100 }} />
+                    </label>
+                  )}
                 </div>
                 {(issue.id || issue.account) && (
                   <div style={issueText}>{[issue.id, issue.account].filter(Boolean).join(" · ")}</div>

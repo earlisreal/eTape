@@ -340,6 +340,69 @@ func TestSim_ReplaceOrder_StopLimitNotTriggered_RawMarketableWouldWronglyFill(t 
 	}
 }
 
+func TestSim_ResetBalance_CancelsFlattensAndSetsAccount(t *testing.T) {
+	b := newSim(t)
+	// A resting order that should be canceled.
+	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "MSFT", Side: exec.SideBuy, Type: exec.TypeLimit, Qty: 5, LimitPrice: 90, ClientOrderID: "ET1"})
+	drain(t, b) // OrderAccepted (rests: mark unset for MSFT, but limit path always accepts+rests without a mark)
+
+	// A filled position that should be flattened.
+	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET2"})
+	drain(t, b) // OrderAccepted
+	drain(t, b) // OrderFilled
+	drain(t, b) // BrokerPositions (from the fill)
+
+	if err := b.ResetBalance(context.Background(), 50_000); err != nil {
+		t.Fatal(err)
+	}
+
+	evs := drainAll(b.Events())
+	var sawCancel, sawPositions, sawAccount bool
+	for _, e := range evs {
+		switch ev := e.(type) {
+		case exec.OrderCanceled:
+			if ev.OID != "ET1" {
+				t.Fatalf("unexpected cancel: %+v", ev)
+			}
+			sawCancel = true
+		case exec.BrokerPositions:
+			sawPositions = true
+		case exec.BrokerAccount:
+			sawAccount = true
+			a := ev.Account
+			if a.Equity != 50_000 || a.BuyingPower != 50_000 || a.AvailableCash != 50_000 || a.SodEquity != 50_000 {
+				t.Fatalf("account not reset to starting cash: %+v", a)
+			}
+			if a.Realized != 0 || a.DayPnL != 0 {
+				t.Fatalf("realized/day-pnl should reset to zero: %+v", a)
+			}
+		}
+	}
+	if !sawCancel || !sawPositions || !sawAccount {
+		t.Fatalf("expected cancel+positions+account events, got %+v", evs)
+	}
+
+	_, pos, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 0 {
+		t.Fatalf("expected no resting orders after reset, got %+v", orders)
+	}
+	for _, p := range pos {
+		if p.Qty != 0 {
+			t.Fatalf("expected flat positions after reset, got %+v", p)
+		}
+	}
+}
+
+func TestSim_ResetBalance_AdvertisedCapability(t *testing.T) {
+	b := newSim(t)
+	if !b.Capabilities().ResetBalance {
+		t.Fatal("SimBroker should advertise ResetBalance capability")
+	}
+}
+
 func TestSimCancelAll(t *testing.T) {
 	b := newSim(t)
 	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, Qty: 1, LimitPrice: 90, ClientOrderID: "ET1"})

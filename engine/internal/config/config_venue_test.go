@@ -29,16 +29,17 @@ func TestValidateVenueConfigAccepts(t *testing.T) {
 func TestValidateVenueConfigRejects(t *testing.T) {
 	keys := []string{"alpaca", "tradeZero"}
 	cases := map[string]func(vc *VenueConfig){
-		"empty id":            func(vc *VenueConfig) { vc.Venues[0].ID = "" },
-		"bad id chars":        func(vc *VenueConfig) { vc.Venues[0].ID = "Alpaca_Paper" },
-		"duplicate id":        func(vc *VenueConfig) { vc.Venues[1].ID = "alpaca-paper" },
-		"bad broker":          func(vc *VenueConfig) { vc.Venues[0].Broker = "etrade" },
-		"bad env":             func(vc *VenueConfig) { vc.Venues[0].Env = "demo" },
-		"live auto-arm":       func(vc *VenueConfig) { vc.Venues[1].AutoArm = true },
-		"missing cred key":    func(vc *VenueConfig) { vc.Venues[0].Credentials = "nope" },
-		"tz missing account":  func(vc *VenueConfig) { vc.Venues[1].AccountID = "" },
-		"negative gate cap":   func(vc *VenueConfig) { vc.Gate.Global.MaxDayLoss = -1 },
-		"gate key unknown id": func(vc *VenueConfig) { vc.Gate.Venue["ghost"] = GateVenue{} },
+		"empty id":                  func(vc *VenueConfig) { vc.Venues[0].ID = "" },
+		"bad id chars":              func(vc *VenueConfig) { vc.Venues[0].ID = "Alpaca_Paper" },
+		"duplicate id":              func(vc *VenueConfig) { vc.Venues[1].ID = "alpaca-paper" },
+		"bad broker":                func(vc *VenueConfig) { vc.Venues[0].Broker = "etrade" },
+		"bad env":                   func(vc *VenueConfig) { vc.Venues[0].Env = "demo" },
+		"live auto-arm":             func(vc *VenueConfig) { vc.Venues[1].AutoArm = true },
+		"missing cred key":          func(vc *VenueConfig) { vc.Venues[0].Credentials = "nope" },
+		"tz missing account":        func(vc *VenueConfig) { vc.Venues[1].AccountID = "" },
+		"negative gate cap":         func(vc *VenueConfig) { vc.Gate.Global.MaxDayLoss = -1 },
+		"gate key unknown id":       func(vc *VenueConfig) { vc.Gate.Venue["ghost"] = GateVenue{} },
+		"negative starting balance": func(vc *VenueConfig) { vc.Venues[2].StartingBalance = -1 },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -48,6 +49,22 @@ func TestValidateVenueConfigRejects(t *testing.T) {
 				t.Fatalf("expected rejection for %q", name)
 			}
 		})
+	}
+}
+
+func TestEffectiveStartingBalanceDefaultsWhenUnsetOrZero(t *testing.T) {
+	for _, sb := range []float64{0, -5} {
+		v := Venue{ID: "sim", Broker: "sim", StartingBalance: sb}
+		if got := v.EffectiveStartingBalance(); got != DefaultSimStartingBalance {
+			t.Fatalf("StartingBalance=%v: got %v, want default %v", sb, got, DefaultSimStartingBalance)
+		}
+	}
+}
+
+func TestEffectiveStartingBalanceHonorsPositiveValue(t *testing.T) {
+	v := Venue{ID: "sim", Broker: "sim", StartingBalance: 25_000}
+	if got := v.EffectiveStartingBalance(); got != 25_000 {
+		t.Fatalf("got %v, want 25000", got)
 	}
 }
 

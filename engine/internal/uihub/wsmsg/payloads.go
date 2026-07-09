@@ -231,6 +231,10 @@ type FlattenArgs struct {
 	Venue string `json:"venue"`
 }
 
+type ResetBalanceArgs struct {
+	Venue string `json:"venue"`
+}
+
 type KillSwitchArgs struct {
 	Venue string `json:"venue,omitempty"` // omitted/empty => all venues
 }
@@ -278,12 +282,13 @@ type FocusGroupArgs struct {
 
 // Venue mirrors config.Venue (no secret material — Credentials is a key NAME).
 type Venue struct {
-	ID          string `json:"id"`
-	Broker      string `json:"broker"`
-	Env         string `json:"env"`
-	Credentials string `json:"credentials"`
-	AccountID   string `json:"accountId"`
-	AutoArm     bool   `json:"autoArm"`
+	ID              string  `json:"id"`
+	Broker          string  `json:"broker"`
+	Env             string  `json:"env"`
+	Credentials     string  `json:"credentials"`
+	AccountID       string  `json:"accountId"`
+	AutoArm         bool    `json:"autoArm"`
+	StartingBalance float64 `json:"startingBalance"` // sim only; <=0 => engine default
 }
 
 // Gate mirrors config.Gate; reuses the existing limit-view shapes.

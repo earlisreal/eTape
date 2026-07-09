@@ -12,6 +12,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/md"
+	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
 
 type spyExec struct {
@@ -86,6 +87,28 @@ func TestCommandsArmMaster(t *testing.T) {
 	cd.handle(context.Background(), "Arm", json.RawMessage(`{}`), 0)
 	if _, ok := ex.last.(exec.Arm); !ok {
 		t.Fatalf("expected exec.Arm, got %T", ex.last)
+	}
+}
+
+func TestCommandsResetBalanceDispatch(t *testing.T) {
+	ex := &spyExec{ack: exec.CmdAck{Accepted: true}}
+	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil })
+	cd.handle(context.Background(), "ResetBalance", json.RawMessage(`{"venue":"sim-1"}`), 0)
+	rb, ok := ex.last.(exec.ResetBalance)
+	if !ok || rb.Venue != "sim-1" {
+		t.Fatalf("expected exec.ResetBalance{Venue: sim-1}, got %T %+v", ex.last, ex.last)
+	}
+}
+
+func TestVenueWireRoundTripsStartingBalance(t *testing.T) {
+	v := config.Venue{ID: "sim-1", Broker: "sim", Env: "paper", StartingBalance: 25_000}
+	wire := venueToWire(v)
+	if wire.StartingBalance != 25_000 {
+		t.Fatalf("venueToWire dropped StartingBalance: %+v", wire)
+	}
+	back := venueConfigFromWire([]wsmsg.Venue{wire}, wsmsg.Gate{Venue: map[string]wsmsg.GateLimitsView{}})
+	if back.Venues[0].StartingBalance != 25_000 {
+		t.Fatalf("venueConfigFromWire dropped StartingBalance: %+v", back.Venues[0])
 	}
 }
 

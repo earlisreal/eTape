@@ -44,7 +44,7 @@ func New(venue exec.VenueID, clk clock.Clock) *Broker {
 }
 
 func (b *Broker) Capabilities() exec.Capabilities {
-	return exec.Capabilities{NativeReplace: true, FlattenAll: true, OvernightSession: false}
+	return exec.Capabilities{NativeReplace: true, FlattenAll: true, OvernightSession: false, ResetBalance: true}
 }
 
 func (b *Broker) Events() <-chan exec.BrokerEvent { return b.ev }
@@ -307,6 +307,27 @@ func (b *Broker) Flatten(_ context.Context) error {
 	for _, e := range post {
 		b.emit(e)
 	}
+	return nil
+}
+
+// ResetBalance cancels every resting order, flattens all positions, and
+// reseeds the account snapshot to startingCash — composed from the existing
+// CancelAll/Flatten/SetAccount primitives rather than duplicating their
+// locking/event logic. CancelAll's OrderCanceled events are persisted (real
+// cancel history); Flatten's BrokerPositions and SetAccount's BrokerAccount
+// are transient reconciles, same as a manual Flatten click, so neither the
+// exec-event journal nor Trade History is touched by a reset.
+func (b *Broker) ResetBalance(ctx context.Context, startingCash float64) error {
+	if err := b.CancelAll(ctx, ""); err != nil {
+		return err
+	}
+	if err := b.Flatten(ctx); err != nil {
+		return err
+	}
+	b.SetAccount(exec.AccountSnapshot{
+		Equity: startingCash, BuyingPower: startingCash,
+		AvailableCash: startingCash, SodEquity: startingCash,
+	})
 	return nil
 }
 

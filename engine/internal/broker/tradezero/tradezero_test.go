@@ -388,11 +388,14 @@ func TestAdapter_Capabilities_And_FlattenUnsupported(t *testing.T) {
 		t.Fatal(err)
 	}
 	caps := a.Capabilities()
-	if caps.NativeReplace || caps.FlattenAll || caps.OvernightSession {
+	if caps.NativeReplace || caps.FlattenAll || caps.OvernightSession || caps.ResetBalance {
 		t.Fatalf("capabilities = %+v, want all false", caps)
 	}
 	if err := a.Flatten(context.Background()); err == nil {
 		t.Fatal("Flatten must return an unsupported error (Capabilities.FlattenAll is false)")
+	}
+	if err := a.ResetBalance(context.Background(), 100_000); err == nil {
+		t.Fatal("ResetBalance must return an unsupported error (Capabilities.ResetBalance is false)")
 	}
 }
 

@@ -87,6 +87,24 @@ func TestAutoArmVenues(t *testing.T) {
 	}
 }
 
+func TestStartingBalances(t *testing.T) {
+	cfg := config.Config{Venues: []config.Venue{
+		{ID: "sim-1", Broker: "sim", StartingBalance: 25_000},
+		{ID: "sim-2", Broker: "sim"},                                 // unset => default
+		{ID: "alpaca-paper", Broker: "alpaca", StartingBalance: 999}, // non-sim: ignored
+	}}
+	got := startingBalances(cfg)
+	if got["sim-1"] != 25_000 {
+		t.Fatalf("sim-1 starting balance = %v, want 25000", got["sim-1"])
+	}
+	if got["sim-2"] != config.DefaultSimStartingBalance {
+		t.Fatalf("sim-2 starting balance = %v, want default %v", got["sim-2"], config.DefaultSimStartingBalance)
+	}
+	if _, ok := got["alpaca-paper"]; ok {
+		t.Fatal("non-sim venues must not appear in the starting-balance map")
+	}
+}
+
 func TestBuildBrokersLiveSim(t *testing.T) {
 	vbs, err := buildBrokers(config.Config{Venues: []config.Venue{{ID: "sim", Broker: "sim"}}}, creds.File{}, clock.System{}, false)
 	if err != nil || len(vbs) != 1 || vbs[0].Run != nil {

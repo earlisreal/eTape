@@ -20,6 +20,7 @@ package alpaca
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -29,6 +30,11 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/creds"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 )
+
+// errResetBalanceUnsupported is returned by ResetBalance: a real Alpaca
+// account can't be reset. Capabilities().ResetBalance is false so exec.Core
+// is not expected to call it in practice — defense in depth.
+var errResetBalanceUnsupported = errors.New("alpaca: reset balance unsupported")
 
 // defaultPaperRESTBase, defaultLiveRESTBase, defaultPaperWSURL, and
 // defaultLiveWSURL are Alpaca's documented production endpoints
@@ -338,6 +344,13 @@ func (a *Adapter) CancelAll(ctx context.Context, symbol string) error {
 // (Capabilities().FlattenAll is true here, false there).
 func (a *Adapter) Flatten(ctx context.Context) error {
 	return a.rest.flatten(ctx)
+}
+
+// ResetBalance is unsupported: a real Alpaca account can't be reset.
+// Capabilities().ResetBalance is false so exec.Core never calls this in
+// practice.
+func (a *Adapter) ResetBalance(context.Context, float64) error {
+	return errResetBalanceUnsupported
 }
 
 // Snapshot fetches the REST-authoritative account/positions/open-orders view

@@ -284,6 +284,9 @@ export interface ReplaceOrderArgs {
 export interface FlattenArgs {
   venue: string;
 }
+export interface ResetBalanceArgs {
+  venue: string;
+}
 export interface KillSwitchArgs {
   venue?: string; // omitted/empty => all venues
 }
@@ -335,6 +338,7 @@ export interface Venue {
   credentials: string;
   accountId: string;
   autoArm: boolean;
+  startingBalance: number /* float64 */; // sim only; <=0 => engine default
 }
 /**
  * Gate mirrors config.Gate; reuses the existing limit-view shapes.

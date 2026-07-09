@@ -8,6 +8,7 @@ type Capabilities struct {
 	NativeReplace    bool // Alpaca PATCH, moomoo ModifyOrder-Normal; TZ false
 	FlattenAll       bool // Alpaca DELETE /v2/positions only
 	OvernightSession bool // Alpaca (Blue Ocean), moomoo (OVERNIGHT); TZ false
+	ResetBalance     bool // sim only — a real venue's account can't be reset
 }
 
 // Broker is the per-venue adapter contract. One instance per configured venue;
@@ -23,6 +24,10 @@ type Broker interface {
 	// Capabilities.FlattenAll is false return an "unsupported" error and the
 	// Core never calls it.
 	Flatten(ctx context.Context) error
+	// ResetBalance cancels resting orders, flattens positions, and reseeds the
+	// account snapshot to startingCash. Venues whose Capabilities.ResetBalance
+	// is false return an "unsupported" error and the Core never calls it.
+	ResetBalance(ctx context.Context, startingCash float64) error
 	Snapshot(ctx context.Context) (AccountSnapshot, []Position, []Order, error)
 	Events() <-chan BrokerEvent
 }

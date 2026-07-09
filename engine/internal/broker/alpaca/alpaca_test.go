@@ -399,6 +399,12 @@ func TestAdapter_Capabilities(t *testing.T) {
 	if !c.OvernightSession {
 		t.Fatalf("caps.OvernightSession = false, want true (Blue Ocean ATS)")
 	}
+	if c.ResetBalance {
+		t.Fatalf("caps.ResetBalance = true, want false (a real account can't be reset)")
+	}
+	if err := a.ResetBalance(context.Background(), 100_000); err == nil {
+		t.Fatal("ResetBalance must return an unsupported error (Capabilities.ResetBalance is false)")
+	}
 }
 
 func TestAdapter_New_RequiresVenue(t *testing.T) {

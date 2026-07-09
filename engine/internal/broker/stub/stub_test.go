@@ -31,6 +31,16 @@ func TestStubCancelFlattenAreNoops(t *testing.T) {
 	}
 }
 
+func TestStubRejectsResetBalance(t *testing.T) {
+	b := stub.New()
+	if err := b.ResetBalance(context.Background(), 100_000); err == nil {
+		t.Fatal("stub venue must reject ResetBalance (not an exposure-reducing no-op)")
+	}
+	if b.Capabilities().ResetBalance {
+		t.Fatal("stub venue must not advertise ResetBalance capability")
+	}
+}
+
 func TestStubEventsChannelIsClosed(t *testing.T) {
 	b := stub.New()
 	if _, ok := <-b.Events(); ok {

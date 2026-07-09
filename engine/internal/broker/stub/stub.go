@@ -44,6 +44,11 @@ func (b *Broker) CancelOrder(context.Context, string) error { return nil }
 func (b *Broker) CancelAll(context.Context, string) error   { return nil }
 func (b *Broker) Flatten(context.Context) error             { return nil }
 
+// ResetBalance errors, unlike the exposure-reducing no-ops above: fabricating
+// account funds is never gated-safe to no-op, and moomoo trading isn't wired
+// up yet regardless.
+func (b *Broker) ResetBalance(context.Context, float64) error { return errUnavailable }
+
 // Snapshot errors so exec.Recover logs "not available" and creates no account
 // row — the Account panel then shows "—" for this venue rather than a fake $0.
 func (b *Broker) Snapshot(context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {

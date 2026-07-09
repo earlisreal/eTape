@@ -8,8 +8,8 @@ import type { AckMsg, VenueConfig, VenueSetup } from "../../wire/contract";
 
 const runningConfig: VenueConfig = {
   venues: [
-    { id: "alpaca-paper", broker: "alpaca", env: "paper", credentials: "alpaca", accountId: "PA123", autoArm: true },
-    { id: "tradezero-live", broker: "tradezero", env: "live", credentials: "tradeZero", accountId: "TZ456", autoArm: false },
+    { id: "alpaca-paper", broker: "alpaca", env: "paper", credentials: "alpaca", accountId: "PA123", autoArm: true, startingBalance: 0 },
+    { id: "tradezero-live", broker: "tradezero", env: "live", credentials: "tradeZero", accountId: "TZ456", autoArm: false, startingBalance: 0 },
   ],
   gate: {
     global: { maxDayLoss: 500, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
@@ -72,7 +72,7 @@ describe("VenuesSection", () => {
 
   it("hides the CREDENTIALS group for a sim venue but shows it for tradezero/alpaca/moomoo", async () => {
     const withSim: VenueSetup = baseSetup({
-      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false }] },
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false, startingBalance: 0 }] },
     });
     const commands = makeCommands([withSim]);
     wrap(commands);
@@ -85,7 +85,7 @@ describe("VenuesSection", () => {
 
   it("mints a real credential name when an existing sim venue (credentials: \"\") switches broker to alpaca, so PutCredential is never saved under an empty name", async () => {
     const withSim: VenueSetup = baseSetup({
-      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false }] },
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false, startingBalance: 0 }] },
     });
     const commands = makeCommands([withSim, withSim]);
     wrap(commands);
@@ -110,7 +110,7 @@ describe("VenuesSection", () => {
 
   it("hides the restart banner when file == running, and shows it after a save whose re-fetch reports drift", async () => {
     const drifted: VenueSetup = baseSetup({
-      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false }] },
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false, startingBalance: 0 }] },
     });
     const commands = makeCommands([baseSetup(), drifted]);
     wrap(commands);
@@ -226,6 +226,86 @@ describe("VenuesSection", () => {
 
     await waitFor(() => expect(screen.getByTestId("venue-id-0")).toBeTruthy());
     expect(screen.getByTestId("venue-broker-0")).toBeTruthy();
+  });
+
+  it("shows the starting-balance field only for sim venues, prefilled from the wire value; addVenue() defaults new sim rows to 100000", async () => {
+    const withSim: VenueSetup = baseSetup({
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false, startingBalance: 25000 }] },
+    });
+    const commands = makeCommands([withSim]);
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("venue-id-2")).toBeTruthy());
+
+    expect(screen.queryByTestId("venue-startingbalance-0")).toBeNull(); // alpaca
+    expect(screen.queryByTestId("venue-startingbalance-1")).toBeNull(); // tradezero
+    expect((screen.getByTestId("venue-startingbalance-2") as HTMLInputElement).value).toBe("25000");
+
+    fireEvent.click(screen.getByTestId("add-venue"));
+    const i = 3;
+    await waitFor(() => expect(screen.getByTestId(`venue-id-${i}`)).toBeTruthy());
+    expect((screen.getByTestId(`venue-startingbalance-${i}`) as HTMLInputElement).value).toBe("100000");
+  });
+
+  it("shows Reset balance for a sim venue that's actually running, but not for alpaca/tradezero", async () => {
+    const simVenue = { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false, startingBalance: 50000 };
+    const withRunningSim: VenueSetup = baseSetup({
+      file: { ...runningConfig, venues: [...runningConfig.venues, simVenue] },
+      running: { ...runningConfig, venues: [...runningConfig.venues, simVenue] },
+    });
+    const commands = makeCommands([withRunningSim]);
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("venue-id-2")).toBeTruthy());
+    expect(screen.getByTestId("venue-reset-2")).toBeTruthy();
+    expect(screen.queryByTestId("venue-reset-0")).toBeNull(); // alpaca
+    expect(screen.queryByTestId("venue-reset-1")).toBeNull(); // tradezero
+  });
+
+  it("hides Reset balance for a sim venue that only exists in the draft, not yet running", async () => {
+    const simVenue = { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false, startingBalance: 50000 };
+    const draftOnlySim: VenueSetup = baseSetup({
+      file: { ...runningConfig, venues: [...runningConfig.venues, simVenue] },
+      // running unchanged: sim-1 isn't booted yet, just drafted
+    });
+    const commands = makeCommands([draftOnlySim]);
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("venue-id-2")).toBeTruthy());
+    expect(screen.queryByTestId("venue-reset-2")).toBeNull();
+  });
+
+  it("two-click confirm sends ResetBalance for the right venue and toasts success", async () => {
+    const simVenue = { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false, startingBalance: 50000 };
+    const withRunningSim: VenueSetup = baseSetup({
+      file: { ...runningConfig, venues: [...runningConfig.venues, simVenue] },
+      running: { ...runningConfig, venues: [...runningConfig.venues, simVenue] },
+    });
+    const commands = makeCommands([withRunningSim]);
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("venue-reset-2")).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId("venue-reset-2"));
+    expect(commands.sent.some((s) => s.name === "ResetBalance")).toBe(false); // first click only arms confirm
+
+    fireEvent.click(screen.getByTestId("venue-reset-2"));
+    await waitFor(() => expect(commands.sent.some((s) => s.name === "ResetBalance")).toBe(true));
+    expect(commands.sent.find((s) => s.name === "ResetBalance")?.args).toEqual({ venue: "sim-1" });
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("sim-1"));
+  });
+
+  it("toasts the rejection reason when ResetBalance is blocked", async () => {
+    const simVenue = { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false, startingBalance: 50000 };
+    const withRunningSim: VenueSetup = baseSetup({
+      file: { ...runningConfig, venues: [...runningConfig.venues, simVenue] },
+      running: { ...runningConfig, venues: [...runningConfig.venues, simVenue] },
+    });
+    const commands = makeCommands([withRunningSim], {
+      ResetBalance: { kind: "ack", corrId: "c", status: "blocked", reason: "reset balance unsupported on venue" },
+    });
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("venue-reset-2")).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId("venue-reset-2"));
+    fireEvent.click(screen.getByTestId("venue-reset-2"));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("reset balance unsupported"));
   });
 
   describe("client-side validation disables Save", () => {

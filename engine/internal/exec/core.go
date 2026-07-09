@@ -38,6 +38,11 @@ type KillSwitch struct{ Venue VenueID }
 type Arm struct{ Venue VenueID }
 type Disarm struct{ Venue VenueID }
 
+// ResetBalance is sim-only: cancels resting orders, flattens positions, and
+// reseeds the account to the venue's configured starting balance (Core's
+// booted CoreConfig.StartingBalance, never a value from the command itself).
+type ResetBalance struct{ Venue VenueID }
+
 func (SubmitOrder) isCommand()  {}
 func (CancelOrder) isCommand()  {}
 func (ReplaceOrder) isCommand() {}
@@ -45,6 +50,7 @@ func (Flatten) isCommand()      {}
 func (KillSwitch) isCommand()   {}
 func (Arm) isCommand()          {}
 func (Disarm) isCommand()       {}
+func (ResetBalance) isCommand() {}
 
 // CmdAck is the synchronous accepted|blocked ack; order outcomes arrive later as
 // Updates.
@@ -66,13 +72,14 @@ func (m markState) LastTrade(sym string) (float64, bool) { v, ok := m[sym]; retu
 
 // Core is the single-writer execution coordinator.
 type Core struct {
-	venues  []VenueID
-	gate    GateConfig
-	store   EventStore
-	brokers map[VenueID]Broker
-	clk     clock.Clock
-	idgen   *OrderIDGen
-	syslog  func(kind, detail string)
+	venues          []VenueID
+	gate            GateConfig
+	store           EventStore
+	brokers         map[VenueID]Broker
+	clk             clock.Clock
+	idgen           *OrderIDGen
+	syslog          func(kind, detail string)
+	startingBalance map[VenueID]float64
 
 	cmds    chan cmdReq
 	bevents chan BrokerEvent
@@ -96,6 +103,9 @@ type CoreConfig struct {
 	IDGen   *OrderIDGen
 	SysLog  func(kind, detail string) // optional; store.AppendSysEvent in prod
 	AutoArm map[VenueID]bool          // venues that boot armed (paper); nil/false => disarmed
+	// StartingBalance is the sim-only per-venue amount ResetBalance reseeds the
+	// account to; baked in at boot, never read fresh from a command.
+	StartingBalance map[VenueID]float64
 }
 
 func NewCore(cfg CoreConfig) *Core {
@@ -104,20 +114,21 @@ func NewCore(cfg CoreConfig) *Core {
 		sl = func(string, string) {}
 	}
 	c := &Core{
-		venues:  cfg.Venues,
-		gate:    cfg.Gate,
-		store:   cfg.Store,
-		brokers: cfg.Brokers,
-		clk:     cfg.Clock,
-		idgen:   cfg.IDGen,
-		syslog:  sl,
-		cmds:    make(chan cmdReq),
-		bevents: make(chan BrokerEvent, 1024),
-		markCh:  make(chan Mark, 256),
-		updates: make(chan Update, 4096),
-		state:   NewState(cfg.Venues),
-		marks:   markState{},
-		trades:  NewRoundTripAggregator(),
+		venues:          cfg.Venues,
+		gate:            cfg.Gate,
+		store:           cfg.Store,
+		brokers:         cfg.Brokers,
+		clk:             cfg.Clock,
+		idgen:           cfg.IDGen,
+		syslog:          sl,
+		startingBalance: cfg.StartingBalance,
+		cmds:            make(chan cmdReq),
+		bevents:         make(chan BrokerEvent, 1024),
+		markCh:          make(chan Mark, 256),
+		updates:         make(chan Update, 4096),
+		state:           NewState(cfg.Venues),
+		marks:           markState{},
+		trades:          NewRoundTripAggregator(),
 	}
 	// Auto-arm is the ONLY boot path that starts armed; Recover never touches
 	// arm state, so a restart with no auto-arm venue is still fully disarmed.
@@ -319,6 +330,8 @@ func (c *Core) handleCmd(ctx context.Context, cmd Command) CmdAck {
 		return c.handleReplace(ctx, cm)
 	case Flatten:
 		return c.handleFlatten(ctx, cm)
+	case ResetBalance:
+		return c.handleResetBalance(ctx, cm)
 	case KillSwitch:
 		return c.handleKill(ctx, cm)
 	case Arm:
@@ -417,6 +430,23 @@ func (c *Core) handleFlatten(ctx context.Context, cm Flatten) CmdAck {
 	go func() {
 		if err := b.Flatten(ctx); err != nil {
 			slog.Warn("exec: flatten failed", "venue", cm.Venue, "err", err)
+		}
+	}()
+	return CmdAck{Accepted: true}
+}
+
+func (c *Core) handleResetBalance(ctx context.Context, cm ResetBalance) CmdAck {
+	b := c.brokers[cm.Venue]
+	if b == nil {
+		return CmdAck{Accepted: false, Reason: "unknown venue"}
+	}
+	if !b.Capabilities().ResetBalance {
+		return CmdAck{Accepted: false, Reason: "reset balance unsupported on venue"}
+	}
+	amount := c.startingBalance[cm.Venue]
+	go func() {
+		if err := b.ResetBalance(ctx, amount); err != nil {
+			slog.Warn("exec: reset balance failed", "venue", cm.Venue, "err", err)
 		}
 	}()
 	return CmdAck{Accepted: true}
