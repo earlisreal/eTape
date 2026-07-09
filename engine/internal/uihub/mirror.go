@@ -49,6 +49,7 @@ type mirror struct {
 	positions   map[string]exec.Position    // key "venue|symbol"; mapped w/ mark on read
 	orders      map[string]wsmsg.Order      // key orderID
 	fills       []wsmsg.Fill                // bounded recent
+	trades      []wsmsg.ClosedTradeRow      // bounded recent
 	venueStatus map[string]*wsmsg.VenueStatus
 	masterArmed bool
 
@@ -56,11 +57,11 @@ type mirror struct {
 	health wsmsg.HealthSnapshot
 	events []wsmsg.SysEvent // bounded recent
 
-	tapeCap, newsCap, fillsCap, eventsCap int
-	venueOrder                            []string // stable venue order for exec.status
+	tapeCap, newsCap, fillsCap, eventsCap, tradesCap int
+	venueOrder                                       []string // stable venue order for exec.status
 }
 
-func newMirror(venues []venueMeta, global wsmsg.GlobalLimitsView, tapeCap, newsCap, fillsCap, eventsCap int) *mirror {
+func newMirror(venues []venueMeta, global wsmsg.GlobalLimitsView, tapeCap, newsCap, fillsCap, eventsCap, tradesCap int) *mirror {
 	m := &mirror{
 		global:      global,
 		quotes:      map[string]wsmsg.Quote{},
@@ -75,6 +76,7 @@ func newMirror(venues []venueMeta, global wsmsg.GlobalLimitsView, tapeCap, newsC
 		orders:      map[string]wsmsg.Order{},
 		venueStatus: map[string]*wsmsg.VenueStatus{},
 		tapeCap:     tapeCap, newsCap: newsCap, fillsCap: fillsCap, eventsCap: eventsCap,
+		tradesCap: tradesCap,
 	}
 	for _, v := range venues {
 		m.venueStatus[v.ID] = &wsmsg.VenueStatus{
@@ -218,6 +220,13 @@ func (m *mirror) applyExec(u exec.Update) []staged {
 			m.fills = m.fills[len(m.fills)-m.fillsCap:]
 		}
 		return []staged{{Topic: wsmsg.TopicExecFills, Payload: w}}
+	case exec.TradeUpdate:
+		w := mapClosedTrade(v.Trade)
+		m.trades = append(m.trades, w)
+		if len(m.trades) > m.tradesCap {
+			m.trades = m.trades[len(m.trades)-m.tradesCap:]
+		}
+		return []staged{{Topic: wsmsg.TopicExecTrades, Payload: w}}
 	case exec.PositionUpdate:
 		m.positions[string(v.Position.Venue)+"|"+v.Position.Symbol] = v.Position
 		return []staged{{Topic: wsmsg.TopicExecPositions, Payload: m.positionsPayload()}}
@@ -354,6 +363,9 @@ func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
 		out = append(out, staged{Topic: topic, Payload: m.ordersPayload()})
 	case wsmsg.TopicExecFills:
 		out = append(out, staged{Topic: topic, Payload: append([]wsmsg.Fill(nil), m.fills...)})
+	case wsmsg.TopicExecTrades:
+		trades := make([]wsmsg.ClosedTradeRow, 0, len(m.trades))
+		out = append(out, staged{Topic: topic, Payload: append(trades, m.trades...)})
 	case wsmsg.TopicExecStatus:
 		out = append(out, staged{Topic: topic, Payload: m.execStatus()})
 	case wsmsg.TopicSysHealth:

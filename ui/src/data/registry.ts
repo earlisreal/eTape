@@ -9,6 +9,7 @@ import { ExecStore } from "./ExecStore";
 import { ScannerStore } from "./ScannerStore";
 import { NewsStore } from "./NewsStore";
 import { FillStore } from "./FillStore";
+import { TradeStore } from "./TradeStore";
 import { DrawingStore } from "../render/chart/drawings/store";
 import { DrawingToolStyleStore } from "../render/chart/drawings/toolStyles";
 
@@ -23,6 +24,7 @@ export interface Stores {
   scanner: ScannerStore;
   news: NewsStore;
   fills: FillStore;
+  trades: TradeStore;
   drawings: DrawingStore;
   drawingToolStyles: DrawingToolStyleStore;
 }
@@ -39,6 +41,7 @@ export function makeStores(): Stores {
     scanner: new ScannerStore(),
     news: new NewsStore(),
     fills: new FillStore(),
+    trades: new TradeStore(),
     drawings: new DrawingStore(),
     drawingToolStyles: new DrawingToolStyleStore(),
   };
@@ -59,6 +62,7 @@ export function routeToStore(stores: Stores, m: SnapshotMsg | DeltaMsg): void {
     case "exec.orders":
     case "exec.status": stores.exec.apply(m); return;
     case "exec.fills": stores.fills.apply(m); return;
+    case "exec.trades": stores.trades.apply(m); return;
     case "sys.health":
     case "sys.events": stores.health.apply(m); return;
     case "config": return; // handled by workspace.ts, not a store

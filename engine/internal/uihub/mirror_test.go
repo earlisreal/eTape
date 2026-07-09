@@ -15,7 +15,7 @@ func testMirror() *mirror {
 	return newMirror(
 		[]venueMeta{{ID: "sim", Broker: wsmsg.BrokerAlpaca, Gate: wsmsg.GateLimitsView{MaxOrderValue: 1000}}},
 		wsmsg.GlobalLimitsView{MaxDayLoss: 500},
-		200, 200, 500, 500,
+		200, 200, 500, 500, 500,
 	)
 }
 
@@ -157,6 +157,100 @@ func TestMirrorOrdersSnapshotIsArray(t *testing.T) {
 	}
 }
 
+// TestMirrorTradeUpdateProducesExpectedDelta verifies exec.TradeUpdate (the
+// event that silently fell into applyExec's default:nil branch before this
+// task) now maps to a wsmsg.ClosedTradeRow and stages it on exec.trades —
+// this is the case that actually makes the round-trip feature reach the wire.
+func TestMirrorTradeUpdateProducesExpectedDelta(t *testing.T) {
+	m := testMirror()
+	trade := exec.ClosedTrade{
+		Venue: "sim", Symbol: "US.AAPL", IsLong: true, Qty: 100,
+		EntryPrice: 3.50, ExitPrice: 3.75, Realized: 25,
+		OpenMs: 1000, CloseMs: 2000, Seq: 1,
+	}
+	d := m.applyExec(exec.TradeUpdate{Trade: trade})
+	if len(d) != 1 || d[0].Topic != wsmsg.TopicExecTrades {
+		t.Fatalf("expected one exec.trades delta, got %+v", d)
+	}
+	row, ok := d[0].Payload.(wsmsg.ClosedTradeRow)
+	if !ok {
+		t.Fatalf("expected wsmsg.ClosedTradeRow payload, got %T", d[0].Payload)
+	}
+	want := wsmsg.ClosedTradeRow{
+		Venue: "sim", Symbol: "US.AAPL", IsLong: true, Qty: 100,
+		EntryPrice: 3.50, ExitPrice: 3.75, Realized: 25,
+		OpenMs: 1000, CloseMs: 2000, Seq: 1,
+	}
+	if row != want {
+		t.Fatalf("mapClosedTrade mismatch: got %+v, want %+v", row, want)
+	}
+	if len(m.trades) != 1 || m.trades[0] != want {
+		t.Fatalf("mirror.trades not recorded: %+v", m.trades)
+	}
+}
+
+// TestMirrorTradesCapBounded verifies m.trades trims at tradesCap the same
+// way m.fills trims at fillsCap (oldest dropped, most recent retained).
+func TestMirrorTradesCapBounded(t *testing.T) {
+	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 200, 200, 500, 500, 2)
+	for i := int64(0); i < 5; i++ {
+		m.applyExec(exec.TradeUpdate{Trade: exec.ClosedTrade{
+			Venue: "sim", Symbol: "US.AAPL", Seq: i,
+		}})
+	}
+	if len(m.trades) != 2 {
+		t.Fatalf("expected trades ring capped at 2, got %d", len(m.trades))
+	}
+	if m.trades[0].Seq != 3 || m.trades[1].Seq != 4 {
+		t.Fatalf("expected the 2 most recent trades retained in order, got %+v", m.trades)
+	}
+}
+
+// TestMirrorEmptyTradesSnapshotMarshalsToArrayNotNull verifies a brand-new
+// subscriber's exec.trades snapshot, taken before any trade has closed,
+// serializes to a JSON array `[]` rather than `null` -- snapshotFrames must
+// use the make-then-append pattern (like TopicNews), not fills' append-to-nil
+// pattern, which would marshal an empty slice to null and break a UI store
+// that reads .length/.map on the payload.
+func TestMirrorEmptyTradesSnapshotMarshalsToArrayNotNull(t *testing.T) {
+	m := testMirror()
+	frames := m.snapshotFrames(wsmsg.TopicExecTrades)
+	if len(frames) != 1 {
+		t.Fatalf("expected exactly one trades snapshot frame, got %d", len(frames))
+	}
+	b, err := json.Marshal(frames[0].Payload)
+	if err != nil {
+		t.Fatalf("marshal trades payload: %v", err)
+	}
+	if string(b) != "[]" {
+		t.Fatalf("empty trades snapshot must marshal to []: got %s", b)
+	}
+}
+
+// TestMirrorTradesSnapshotInsertionOrder verifies snapshotFrames(exec.trades)
+// with N recorded trades returns them all, in insertion order.
+func TestMirrorTradesSnapshotInsertionOrder(t *testing.T) {
+	m := testMirror()
+	for i := int64(0); i < 3; i++ {
+		m.applyExec(exec.TradeUpdate{Trade: exec.ClosedTrade{
+			Venue: "sim", Symbol: "US.AAPL", Seq: i,
+		}})
+	}
+	frames := m.snapshotFrames(wsmsg.TopicExecTrades)
+	if len(frames) != 1 {
+		t.Fatalf("expected one trades snapshot frame, got %d", len(frames))
+	}
+	rows := frames[0].Payload.([]wsmsg.ClosedTradeRow)
+	if len(rows) != 3 {
+		t.Fatalf("expected 3 trades, got %d: %+v", len(rows), rows)
+	}
+	for i, r := range rows {
+		if r.Seq != int64(i) {
+			t.Fatalf("expected insertion order 0,1,2 by Seq, got %+v", rows)
+		}
+	}
+}
+
 func TestMirrorApplyPubNewsHealthEvents(t *testing.T) {
 	m := testMirror()
 	m.applyPub(staged{Topic: wsmsg.TopicNews, Payload: wsmsg.NewsItem{Symbol: "US.AAPL", Headline: "one"}})
@@ -207,7 +301,7 @@ func TestNewMirrorSeedsAutoArmAndNote(t *testing.T) {
 		{ID: "alpaca-paper", Broker: wsmsg.BrokerAlpaca, AutoArm: true},
 		{ID: "alpaca-live", Broker: wsmsg.BrokerAlpaca},
 		{ID: "moomoo", Broker: wsmsg.BrokerMoomoo, Note: "execution v1.x"},
-	}, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10)
+	}, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10)
 
 	st := m.execStatus()
 	if !st.MasterArmed {
@@ -234,7 +328,7 @@ func TestNewMirrorSeedsAutoArmAndNote(t *testing.T) {
 func TestMirrorStatusUpdateDoesNotClobberSeededNote(t *testing.T) {
 	m := newMirror([]venueMeta{
 		{ID: "moomoo", Broker: wsmsg.BrokerMoomoo, Note: "execution v1.x"},
-	}, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10)
+	}, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10)
 
 	// Seeded venue starts disconnected; flip it to connected first so the
 	// later "back to false" transition below actually proves Connected is
@@ -264,7 +358,7 @@ func TestMirrorStatusUpdateDoesNotClobberSeededNote(t *testing.T) {
 }
 
 func TestMirrorNewsAndEventsCapBounded(t *testing.T) {
-	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 200, 2, 500, 2)
+	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 200, 2, 500, 2, 2)
 	for i := 0; i < 5; i++ {
 		m.applyPub(staged{Topic: wsmsg.TopicNews, Payload: wsmsg.NewsItem{Headline: string(rune('a' + i))}})
 		m.applyPub(staged{Topic: wsmsg.TopicSysEvents, Payload: wsmsg.SysEvent{Seq: int64(i)}})

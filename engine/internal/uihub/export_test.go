@@ -12,7 +12,7 @@ import (
 // that need a real Hub for server.go tests can construct one without reaching
 // into unexported fields.
 func NewHubForTest(clk clock.Clock) (*Hub, *mirror) {
-	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 200, 200, 500, 500)
+	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 200, 200, 500, 500, 500)
 	h := NewHub(clk, HubConfig{
 		MDInterval: 20 * time.Millisecond, AccountInterval: 250 * time.Millisecond,
 		PositionInterval: 100 * time.Millisecond, Buf: 256,

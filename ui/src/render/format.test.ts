@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { axisDecimals, priceDecimals, formatPrice, formatSize, formatTapeTime } from "./format";
+import { axisDecimals, priceDecimals, formatPrice, formatSize, formatTapeTime, formatClock, formatDuration } from "./format";
 
 describe("axisDecimals (wickplot CandlestickChartMath port)", () => {
   it.each([
@@ -45,5 +45,26 @@ describe("formatPrice / formatSize", () => {
 describe("formatTapeTime", () => {
   it("renders the exchange timestamp as ET wall clock", () => {
     expect(formatTapeTime("2026-07-06T13:30:05Z")).toBe("09:30:05"); // EDT = UTC-4
+  });
+});
+
+describe("formatClock", () => {
+  it("renders an epoch-ms timestamp as ET wall clock", () => {
+    expect(formatClock(Date.parse("2026-07-06T13:30:05Z"))).toBe("09:30:05"); // EDT = UTC-4
+  });
+});
+
+describe("formatDuration", () => {
+  it("renders hours+minutes once >= 1h", () => {
+    expect(formatDuration(3840000)).toBe("1h 04m"); // 64 min
+  });
+  it("renders minutes+seconds below 1h, zero-padded", () => {
+    expect(formatDuration(192000)).toBe("03m 12s"); // 3 min 12 s
+  });
+  it("floors negative/garbage input at 0", () => {
+    expect(formatDuration(-500)).toBe("00m 00s");
+  });
+  it("rounds sub-second dust", () => {
+    expect(formatDuration(59999)).toBe("01m 00s"); // 59.999s rounds to 60s -> 1m 0s
   });
 });

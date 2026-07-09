@@ -36,6 +36,24 @@ func (s Side) String() string {
 	}
 }
 
+// sideFromString is the inverse of Side.String(): it parses exactly the four
+// uppercase strings that method produces. Anything else reports ok=false —
+// a corrupt/unexpected fills row should be skippable, not fatal.
+func sideFromString(s string) (Side, bool) {
+	switch s {
+	case "BUY":
+		return SideBuy, true
+	case "SELL":
+		return SideSell, true
+	case "SHORT":
+		return SideShort, true
+	case "COVER":
+		return SideCover, true
+	default:
+		return 0, false
+	}
+}
+
 type OrderType uint8
 
 const (

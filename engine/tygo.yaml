@@ -49,7 +49,7 @@ packages:
         | "md.quote" | "md.book" | "md.tape" | "md.bars" | "md.indicator"
         | "scanner.rank" | "scanner.hit"
         | "news.item"
-        | "exec.account" | "exec.positions" | "exec.orders" | "exec.fills" | "exec.status"
+        | "exec.account" | "exec.positions" | "exec.orders" | "exec.fills" | "exec.status" | "exec.trades"
         | "sys.health" | "sys.events"
         | "config";
 

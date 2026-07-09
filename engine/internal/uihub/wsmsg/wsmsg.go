@@ -25,6 +25,7 @@ const (
 	TopicExecOrders    Topic = "exec.orders"
 	TopicExecFills     Topic = "exec.fills"
 	TopicExecStatus    Topic = "exec.status"
+	TopicExecTrades    Topic = "exec.trades"
 
 	TopicSysHealth Topic = "sys.health"
 	TopicSysEvents Topic = "sys.events"
@@ -36,7 +37,7 @@ var AllTopics = map[Topic]bool{
 	TopicQuote: true, TopicBook: true, TopicTape: true, TopicBars: true, TopicIndicator: true,
 	TopicScannerRank: true, TopicScannerHit: true, TopicNews: true,
 	TopicExecAccount: true, TopicExecPositions: true, TopicExecOrders: true,
-	TopicExecFills: true, TopicExecStatus: true,
+	TopicExecFills: true, TopicExecStatus: true, TopicExecTrades: true,
 	TopicSysHealth: true, TopicSysEvents: true, TopicConfig: true,
 }
 

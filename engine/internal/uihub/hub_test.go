@@ -57,7 +57,7 @@ func decodeKindTopic(t *testing.T, b []byte) (kind string, topic string) {
 }
 
 func newTestHub(clk clock.Clock) *Hub {
-	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 200, 200, 500, 500)
+	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 200, 200, 500, 500, 500)
 	return NewHub(clk, HubConfig{
 		MDInterval: 33 * time.Millisecond, AccountInterval: 250 * time.Millisecond,
 		PositionInterval: 100 * time.Millisecond, Buf: 64,

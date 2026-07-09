@@ -17,7 +17,8 @@ const chart = (id: string, symbol: string, timeframe: string, group: PanelConfig
 // headlessly in a jsdom vitest environment via `createDockview` + `addPanel`,
 // then hand-tuned for the mockup proportions and round-tripped through a
 // fresh `DockviewApi.fromJSON` to confirm it doesn't throw and that
-// `toJSON().panels` keys are unchanged — see task-7-report.md for detail).
+// `toJSON().panels` keys are unchanged — see `presets.dockview.test.ts`, added
+// in the Trade History plan's Task 10, for the actual round-trip check).
 //
 // Grid shape (matches docs mockups presets.html): outer horizontal split
 // [chart wall, right rail] sized 2:1; chart wall is a 2x2 (two horizontal
@@ -83,7 +84,7 @@ const MONITORING_LAYOUT: SerializedDockview = {
 // (order ticket is naturally compact, approximated here as a slightly
 // smaller fixed weight since dockview's serialized grid sizes are plain
 // numbers — there's no literal "auto" in the schema).
-const TRADING_LAYOUT: SerializedDockview = {
+export const TRADING_LAYOUT: SerializedDockview = {
   grid: {
     root: {
       type: "branch",
@@ -109,8 +110,7 @@ const TRADING_LAYOUT: SerializedDockview = {
           size: 448,
           data: [
             { type: "leaf", size: 258, data: { id: "t-ticket", views: ["t-ticket"], activeView: "t-ticket" } },
-            { type: "leaf", size: 321, data: { id: "t-account", views: ["t-account"], activeView: "t-account" } },
-            { type: "leaf", size: 321, data: { id: "t-orders", views: ["t-orders"], activeView: "t-orders" } },
+            { type: "leaf", size: 642, data: { id: "t-account", views: ["t-account"], activeView: "t-account" } },
           ],
         },
       ],
@@ -126,7 +126,6 @@ const TRADING_LAYOUT: SerializedDockview = {
     "t-tape": { id: "t-tape", contentComponent: "t-tape", title: "tape" },
     "t-ticket": { id: "t-ticket", contentComponent: "t-ticket", title: "order-ticket" },
     "t-account": { id: "t-account", contentComponent: "t-account", title: "account" },
-    "t-orders": { id: "t-orders", contentComponent: "t-orders", title: "open-orders" },
   },
   activeGroup: "t-chart-1m",
 } as SerializedDockview;
@@ -159,7 +158,6 @@ export const PRESETS: Preset[] = [
         { id: "t-tape", panelId: "tape", group: "blue", settings: { symbol: "US.AAPL", minSize: 0 } },
         { id: "t-ticket", panelId: "order-ticket", group: "blue", settings: {} },
         { id: "t-account", panelId: "account", group: null, settings: {} },
-        { id: "t-orders", panelId: "open-orders", group: null, settings: {} },
       ],
       layout: TRADING_LAYOUT,
     }),

@@ -74,7 +74,7 @@ func (fakeQuery) handle(_ string, _ json.RawMessage) any { return []wsmsg.Fill{}
 
 func TestConnPingPong(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
-	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10))
+	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = h.Run(ctx) }()
@@ -98,7 +98,7 @@ func TestConnPingPong(t *testing.T) {
 
 func TestConnCommandProducesAck(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
-	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10))
+	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = h.Run(ctx) }()
@@ -126,7 +126,7 @@ func TestConnCommandProducesAck(t *testing.T) {
 
 func TestConnSubscribeRoutesToHub(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
-	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10)
+	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10)
 	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, m)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -158,7 +158,7 @@ func TestConnSubscribeRoutesToHub(t *testing.T) {
 // fire and tear the connection down via the existing c.close() path.
 func TestConnWriteTimeoutClosesConn(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
-	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10))
+	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = h.Run(ctx) }()
@@ -271,7 +271,7 @@ func connDone(c *conn) bool {
 // (the writer goroutine) through a blockable socket -- not a call sequence.
 func TestConnOutboxCoalescesWhileBlocked(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
-	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10))
+	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = h.Run(ctx) }()
@@ -334,7 +334,7 @@ func TestConnOutboxCoalescesWhileBlocked(t *testing.T) {
 // false into a ui-drop sys.events frame; see hub_test.go's Task 1 coverage.)
 func TestConnOutboxHardCapOverflowDropsConn(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
-	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10))
+	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = h.Run(ctx) }()
@@ -380,7 +380,7 @@ func TestConnOutboxHardCapOverflowDropsConn(t *testing.T) {
 // of them, so the client seeds its store before applying deltas onto it.
 func TestConnOutboxSnapshotPrecedesLaterDeltas(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
-	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10))
+	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = h.Run(ctx) }()

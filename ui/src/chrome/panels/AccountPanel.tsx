@@ -8,8 +8,10 @@ import { useVenueSelection } from "../exec/venueSelection";
 import { resolvePlaceTemplate } from "../exec/resolveTemplate";
 import type { PlaceOrderTemplate } from "../exec/actionTemplate";
 import { formatPrice, formatSize } from "../../render/format";
-import { bareSymbol } from "../exec/orderStatus";
+import { displayStatus, STATUS_LABEL, sideLabel, bareSymbol, abbrevType, isWorking, type DisplayStatus } from "../exec/orderStatus";
 import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
+import type { OrderView } from "../../data/ExecStore";
+import { TradeHistoryTable } from "./TradeHistoryTable";
 
 // Task 19 merges the old AccountBarPanel (stats strip + master/per-venue arm
 // chips) and PositionsPanel (sortable positions table, Flatten) into one
@@ -22,7 +24,7 @@ const money = (n: number | null): string => (n === null ? "—" : (n < 0 ? "−$
 const DEFAULT_SORT: SortState = { col: "unrealizedPnl", dir: "desc" };
 
 function readSort(s: Record<string, unknown>): SortState {
-  const raw = s.sort as { col?: unknown; dir?: unknown } | undefined;
+  const raw = s.posSort as { col?: unknown; dir?: unknown } | undefined;
   if (raw && typeof raw.col === "string" && (raw.dir === "asc" || raw.dir === "desc")) {
     return { col: raw.col, dir: raw.dir };
   }
@@ -44,6 +46,121 @@ const SORT_ACCESSORS: Record<string, (r: PositionRow) => number | string | null>
   avgPrice: (r) => r.avgPrice,
   unrealizedPnl: (r) => r.unrealizedPnl,
 };
+
+// ---- Orders table (folded from OpenOrdersPanel; now always-visible, venue-scoped) ----
+
+type ChipVariant = "working" | "pending" | "rejected";
+function chipVariant(ds: DisplayStatus): ChipVariant | null {
+  if (ds === "SUBMITTED" || ds === "ACCEPTED" || ds === "PARTIALLY_FILLED") return "working";
+  if (ds === "PendingNew" || ds === "Replacing") return "pending";
+  if (ds === "REJECTED" || ds === "BLOCKED") return "rejected";
+  return null;
+}
+
+const ORDERS_DEFAULT_SORT: SortState = { col: "createdMs", dir: "desc" };
+const ORDERS_COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
+  { col: "symbol", label: "Symbol", align: "left" },
+  { col: "side", label: "Side", align: "left" },
+  { col: "qty", label: "Qty@Px", align: "right" },
+  { col: "state", label: "State", align: "left" },
+];
+const ORDERS_SORT_ACCESSORS: Record<string, (r: OrderView) => number | string | null> = {
+  symbol: (r) => r.order.symbol,
+  side: (r) => r.order.side,
+  qty: (r) => (r.order.leavesQty > 0 ? r.order.leavesQty : r.order.qty),
+  state: (r) => STATUS_LABEL[displayStatus(r.order, r.optimistic)],
+  createdMs: (r) => r.order.createdMs,
+};
+
+function readOrdersSort(s: Record<string, unknown>): SortState {
+  const raw = s.ordersSort as { col?: unknown; dir?: unknown } | undefined;
+  if (raw && typeof raw.col === "string" && (raw.dir === "asc" || raw.dir === "desc")) {
+    return { col: raw.col, dir: raw.dir };
+  }
+  return ORDERS_DEFAULT_SORT;
+}
+
+function OrdersTable({
+  stores, oc, palette, config, onConfigChange, venue, height,
+}: {
+  stores: PanelProps["stores"];
+  oc: ReturnType<typeof useOrderCommands>;
+  palette: ReturnType<typeof useTheme>["palette"];
+  config: PanelProps["config"];
+  onConfigChange: PanelProps["onConfigChange"];
+  venue: string;
+  height: number;
+}): JSX.Element {
+  const [sort, setSort] = useState<SortState>(() => readOrdersSort(config.settings));
+
+  const views = sortRows(stores.exec.orders().filter((v) => v.order.venue === venue), sort, ORDERS_SORT_ACCESSORS);
+  const reconciling = (stores.exec.status()?.venues ?? []).some((v) => v.reconcilePending);
+
+  const clickSort = (col: string) => {
+    const next = toggleSort(sort, col);
+    setSort(next);
+    onConfigChange({ ordersSort: next });
+  };
+
+  const th = { padding: "2px 8px" };
+  return (
+    <div data-testid="orders-table" style={{ height, flexShrink: 0, overflow: "hidden", display: "flex", flexDirection: "column", background: palette.bg, color: palette.text, fontSize: 12 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
+        <span style={{ fontWeight: 600 }}>Open Orders ({views.length})</span>
+        <button data-testid="cancel-all" onClick={() => void oc.cancelAll("everything")}
+          style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.warn}`, background: "transparent", color: palette.warn, cursor: "pointer" }}>Cancel All</button>
+        {reconciling && (
+          <span data-testid="reconcile-badge" className="chip chip-pending" style={{ marginLeft: "auto" }}>
+            stream gap — reconciled, verify
+          </span>
+        )}
+      </div>
+      <div style={{ flex: 1, overflow: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+          <thead>
+            <tr style={{ color: palette.textMuted }}>
+              {ORDERS_COLUMNS.map((c) => (
+                <th key={c.col} style={{ ...th, textAlign: c.align, cursor: "pointer" }} onClick={() => clickSort(c.col)}
+                  className={`col-head${sort?.col === c.col ? " sort-active" : ""}`}>
+                  {c.label} {sortIndicator(sort, c.col)}
+                </th>
+              ))}
+              <th style={th} />
+              <th style={th} />
+              <th style={th} />
+            </tr>
+          </thead>
+          <tbody>
+            {views.map(({ order, optimistic }) => {
+              const ds = displayStatus(order, optimistic);
+              const variant = chipVariant(ds);
+              const working = !optimistic && isWorking(order.status);
+              const priceStr = order.type === "MARKET" ? "MKT" : formatPrice(order.type === "STOP" ? order.stopPrice : order.limitPrice, 2);
+              return (
+                <tr key={order.id} style={{ borderTop: `1px solid ${palette.border}` }}>
+                  <td style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
+                  <td style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
+                  <td style={{ textAlign: "right" }}>{formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)} @ {priceStr} {abbrevType(order.type)}</td>
+                  <td>{variant ? (
+                    <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
+                  ) : (
+                    <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>
+                  )}</td>
+                  <td style={{ color: palette.danger, fontSize: 10 }}>{order.rejectReason}</td>
+                  <td style={{ color: palette.textMuted, fontSize: 10 }}>{order.venue}</td>
+                  <td>{(working || optimistic) ? (
+                    <button data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
+                      style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</button>
+                  ) : null}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
 
 // ---- Stats strip + arm chips (folded from AccountBarPanel) ----
 
@@ -130,7 +247,7 @@ function PositionsTable({
     if (!sortable) return;
     const next = toggleSort(sort, col);
     setSort(next);
-    onConfigChange({ sort: next });
+    onConfigChange({ posSort: next });
   };
 
   const flatten = (row: PositionRow) => {
@@ -196,7 +313,9 @@ function PositionsTable({
   );
 }
 
-export function AccountPanel({ config, stores, commands, onConfigChange, linkGroups, group: groupProp }: PanelProps): JSX.Element {
+type Tab = "positions" | "history";
+
+export function AccountPanel({ config, stores, commands, onConfigChange, linkGroups, group: groupProp, height }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
@@ -204,10 +323,63 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   const group = groupProp ?? config.group;
   const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
 
+  const [ordersHeight, setOrdersHeight] = useState<number>(() => {
+    const raw = config.settings.ordersHeight;
+    return typeof raw === "number" && raw >= 80 ? raw : 200;
+  });
+  const [activeTab, setActiveTab] = useState<Tab>(() => (config.settings.tab === "history" ? "history" : "positions"));
+
+  // Pinned per the reference implementation (task brief): `finalHeight` is a
+  // plain closure-captured variable, not React state, so `onUp` always reads
+  // the LATEST drag value regardless of React's state-update batching timing.
+  // Reading `ordersHeight` (the state var) inside `onUp` instead would close
+  // over the value from mousedown-time, not the live value — a stale-closure
+  // bug. Persisting once on mouseup (not on every mousemove) is the debounce.
+  const startResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startY = e.clientY;
+    const startHeight = ordersHeight;
+    let finalHeight = startHeight;
+    const onMove = (ev: MouseEvent) => {
+      finalHeight = Math.max(80, Math.min(height - 120, startHeight + (ev.clientY - startY)));
+      setOrdersHeight(finalHeight);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      onConfigChange({ ordersHeight: finalHeight });
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const selectTab = (t: Tab) => { setActiveTab(t); onConfigChange({ tab: t }); };
+
+  const positionsCount = stores.exec.positions().filter((p) => p.venue === venue).length;
+
+  const tabBtn = (label: string, active: boolean, onClick: () => void) => (
+    <button onClick={onClick} style={{
+      fontSize: 12, padding: "4px 10px", background: "transparent", border: "none",
+      borderBottom: active ? `2px solid ${palette.accent}` : "2px solid transparent",
+      color: active ? palette.text : palette.textMuted, cursor: "pointer",
+    }}>{label}</button>
+  );
+
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: palette.bg, color: palette.text, fontFamily: "inherit" }}>
       <StatsStrip stores={stores} oc={oc} palette={palette} venue={venue} venues={venues} selectVenue={selectVenue} />
-      <PositionsTable stores={stores} commands={commands} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} />
+      <OrdersTable stores={stores} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} height={ordersHeight} />
+      <div data-testid="orders-resize-handle" onMouseDown={startResize}
+        style={{ height: 4, cursor: "row-resize", background: palette.border, flexShrink: 0 }} />
+      <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", borderBottom: `1px solid ${palette.border}`, background: palette.surface }}>
+          {tabBtn(`Positions (${positionsCount})`, activeTab === "positions", () => selectTab("positions"))}
+          {tabBtn("Trade History", activeTab === "history", () => selectTab("history"))}
+        </div>
+        {activeTab === "positions"
+          ? <PositionsTable stores={stores} commands={commands} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} />
+          : <TradeHistoryTable stores={stores} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} />}
+      </div>
     </div>
   );
 }

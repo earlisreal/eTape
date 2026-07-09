@@ -70,8 +70,11 @@ type MarkSource interface {
 // EventStore is the persistence seam. Implemented by *store.Store (Task 5).
 // AppendExecEvent is synchronous and error-returning: append failure blocks the
 // order. ReadExecEventsSince returns events with TsMs >= fromMs, ordered by seq
-// (the boot-replay input).
+// (the boot-replay input). QueryFillsSince returns fills across all
+// venues/symbols with TsMs >= fromMs, ordered by (ts, seq) — the Trade History
+// boot-seed input (Core.seedTrades).
 type EventStore interface {
 	AppendExecEvent(env EventEnvelope, fill *FillRow) (seq int64, err error)
 	ReadExecEventsSince(fromMs int64) ([]EventEnvelope, error)
+	QueryFillsSince(ctx context.Context, fromMs int64) ([]FillRow, error)
 }
