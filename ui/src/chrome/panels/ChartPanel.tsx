@@ -227,6 +227,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         // already use — always calls the current render's version instead of the
         // stale one captured at mount time.
         onSelectionChange: () => refreshSelRef.current?.(),
+        styleForKind: (k) => stores.drawingToolStyles.styleFor(k),
       },
     );
     interactionRef.current = interaction;
@@ -400,6 +401,9 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const id = interactionRef.current?.selectedId(); if (!id) return;
     const d = stores.drawings.forSymbol(chartSymbol).find((x) => x.id === id); if (!d) return;
     stores.drawings.upsert({ ...d, ...patch, updatedMs: Date.now() });
+    // Remember this edit as the tool's new default so the NEXT drawing of the
+    // same kind starts with it, instead of only affecting the drawing just edited.
+    stores.drawingToolStyles.remember(d.kind, patch);
     forceRepaintRef.current = true;
   };
   const cloneSelected = () => {

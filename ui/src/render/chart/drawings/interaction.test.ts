@@ -84,6 +84,50 @@ describe("DrawingInteraction", () => {
     expect(drawn[0].anchors).toHaveLength(2);
   });
 
+  it("requires two clicks for an extended line, same as trendline", () => {
+    const store = new DrawingStore();
+    const prim = fakePrimitive();
+    const { host, fire } = fakeHost();
+    const di = new DrawingInteraction(host, fakeFacade(), prim, store, ctx(), { newId });
+    di.setTool("extendedline");
+    fire("pointerdown", { clientX: 0, clientY: 990 });
+    expect(store.forSymbol("US.AAPL")).toHaveLength(0); // not committed yet
+    fire("pointermove", { clientX: 10, clientY: 980 });
+    expect(prim.setTransient).toHaveBeenCalled(); // ghost shown
+    fire("pointerdown", { clientX: 10, clientY: 980 });
+    const drawn = store.forSymbol("US.AAPL");
+    expect(drawn).toHaveLength(1);
+    expect(drawn[0].kind).toBe("extendedline");
+    expect(drawn[0].anchors).toHaveLength(2);
+  });
+
+  it("seeds a new drawing's style from styleForKind, keyed by the tool just committed", () => {
+    const store = new DrawingStore();
+    const { host, fire } = fakeHost();
+    const styleForKind = vi.fn((k: string) => (k === "hline" ? { color: "#FF6D00", width: 3, lineStyle: "dashed" as const } : {}));
+    const di = new DrawingInteraction(host, fakeFacade(), fakePrimitive(), store, ctx(), { newId, styleForKind });
+    di.setTool("hline");
+    fire("pointerdown", { clientX: 5, clientY: 900 });
+    const drawn = store.forSymbol("US.AAPL");
+    expect(drawn).toHaveLength(1);
+    expect(drawn[0].color).toBe("#FF6D00");
+    expect(drawn[0].width).toBe(3);
+    expect(drawn[0].lineStyle).toBe("dashed");
+    expect(styleForKind).toHaveBeenCalledWith("hline");
+  });
+
+  it("without styleForKind, a new drawing has no style fields (palette default)", () => {
+    const store = new DrawingStore();
+    const { host, fire } = fakeHost();
+    const di = new DrawingInteraction(host, fakeFacade(), fakePrimitive(), store, ctx(), { newId });
+    di.setTool("hline");
+    fire("pointerdown", { clientX: 5, clientY: 900 });
+    const drawn = store.forSymbol("US.AAPL")[0];
+    expect(drawn.color).toBeUndefined();
+    expect(drawn.width).toBeUndefined();
+    expect(drawn.lineStyle).toBeUndefined();
+  });
+
   it("Esc cancels an in-progress placement and reverts to select", () => {
     const store = new DrawingStore();
     const prim = fakePrimitive();

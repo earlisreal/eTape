@@ -82,16 +82,20 @@ describe("hitTest", () => {
     expect(hitTest("hline", [{ x: 9999, y: 52 }], cursor, 400)).toEqual({ type: "body" });
     expect(hitTest("hline", [{ x: 9999, y: 80 }], cursor, 400)).toBeNull();
   });
-  it("hits an hray body only to the right of its anchor", () => {
-    expect(hitTest("hray", [{ x: 40, y: 51 }], cursor, 400)).toEqual({ type: "body" });
-    expect(hitTest("hray", [{ x: 80, y: 51 }], cursor, 400)).toBeNull();
-  });
   it("hits a trendline body near the segment", () => {
     expect(hitTest("trendline", [{ x: 0, y: 48 }, { x: 100, y: 48 }], cursor, 400)).toEqual({ type: "body" });
   });
-  it("hits a ray body along its rightward extension", () => {
-    // ray from (0,0) through (10,10): at x=50 the ray is at y=50
-    expect(hitTest("ray", [{ x: 0, y: 0 }, { x: 10, y: 10 }], cursor, 400)).toEqual({ type: "body" });
+  it("hits an extendedline body along its forward extension", () => {
+    // line through (0,0) and (10,10): at x=50 the line is at y=50
+    expect(hitTest("extendedline", [{ x: 0, y: 0 }, { x: 10, y: 10 }], cursor, 400)).toEqual({ type: "body" });
+  });
+  it("hits an extendedline body along its backward extension too (unlike a ray)", () => {
+    // same line through (0,0) and (10,10), extended backward: at x=-50,y=-50 relative
+    // to the anchors — probe a point on the backward half instead, e.g. (-40,-40)
+    // clamped into the 400-wide pane: extendToEdge(p1,p0,400) backward endpoint is (0,0)
+    // itself here (dx>0 from p1 back to p0 hits x=0 exactly), so probe just past it
+    // using a shifted line: anchors (200,200) and (210,210) — backward hits x=0,y=0.
+    expect(hitTest("extendedline", [{ x: 200, y: 200 }, { x: 210, y: 210 }], { x: 5, y: 5 }, 400)).toEqual({ type: "body" });
   });
   it("hits a rect body near an edge but not the interior", () => {
     const pts = [{ x: 0, y: 0 }, { x: 100, y: 100 }];

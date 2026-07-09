@@ -3,7 +3,7 @@
 import type { LineStyleName } from "../lineStyle";
 import { LINE_STYLE_NAMES } from "../lineStyle";
 
-export type DrawingKind = "hline" | "hray" | "trendline" | "ray" | "rect";
+export type DrawingKind = "hline" | "trendline" | "extendedline" | "rect";
 
 export interface Anchor {
   timeMs: number; // epoch ms (a bar's time on the chart it was drawn)
@@ -14,7 +14,7 @@ export interface Drawing {
   id: string;       // crypto.randomUUID()
   symbol: string;   // "US.AAPL"
   kind: DrawingKind;
-  anchors: Anchor[]; // hline/hray: 1, trendline/ray/rect: 2
+  anchors: Anchor[]; // hline: 1, trendline/extendedline/rect: 2
   createdMs: number;
   updatedMs: number;
   // Optional per-drawing style overrides (TV floating toolbar). Absent = palette default.
@@ -26,10 +26,10 @@ export interface Drawing {
 export const DEFAULT_DRAWING_WIDTH = 1;
 export const DEFAULT_LINE_STYLE: LineStyleName = "solid";
 
-const KINDS: ReadonlySet<string> = new Set<DrawingKind>(["hline", "hray", "trendline", "ray", "rect"]);
+const KINDS: ReadonlySet<string> = new Set<DrawingKind>(["hline", "trendline", "extendedline", "rect"]);
 
 export function anchorCount(kind: DrawingKind): 1 | 2 {
-  return kind === "hline" || kind === "hray" ? 1 : 2;
+  return kind === "hline" ? 1 : 2;
 }
 
 function isFiniteNumber(x: unknown): x is number {
@@ -41,7 +41,9 @@ function isAnchor(x: unknown): x is Anchor {
     && isFiniteNumber((x as Anchor).timeMs) && isFiniteNumber((x as Anchor).price);
 }
 
-function isValidStyle(d: Record<string, unknown>): boolean {
+// Exported for reuse by DrawingToolStyleStore (toolStyles.ts), which validates
+// the same three optional fields on a remembered per-tool style loaded from config.
+export function isValidDrawingStyle(d: Record<string, unknown>): boolean {
   if (d.color !== undefined && typeof d.color !== "string") return false;
   if (d.width !== undefined && !isFiniteNumber(d.width)) return false;
   if (d.lineStyle !== undefined && !LINE_STYLE_NAMES.includes(d.lineStyle as LineStyleName)) return false;
@@ -56,7 +58,7 @@ export function isValidDrawing(x: unknown): x is Drawing {
   if (!isFiniteNumber(d.createdMs) || !isFiniteNumber(d.updatedMs)) return false;
   if (!Array.isArray(d.anchors)) return false;
   if (d.anchors.length !== anchorCount(d.kind as DrawingKind)) return false;
-  return d.anchors.every(isAnchor) && isValidStyle(d);
+  return d.anchors.every(isAnchor) && isValidDrawingStyle(d);
 }
 
 // Load-time gate: drops malformed entries so a corrupt config never crashes a chart.

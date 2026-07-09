@@ -6,11 +6,10 @@ const hline: Drawing = { id: "a", symbol: "US.AAPL", kind: "hline", anchors: [{ 
 const rect: Drawing = { id: "b", symbol: "US.AAPL", kind: "rect", anchors: [{ timeMs: 1000, price: 10 }, { timeMs: 2000, price: 20 }], createdMs: 1, updatedMs: 1 };
 
 describe("anchorCount", () => {
-  it("is 1 for hline/hray and 2 for trendline/ray/rect", () => {
+  it("is 1 for hline and 2 for trendline/extendedline/rect", () => {
     expect(anchorCount("hline")).toBe(1);
-    expect(anchorCount("hray")).toBe(1);
     expect(anchorCount("trendline")).toBe(2);
-    expect(anchorCount("ray")).toBe(2);
+    expect(anchorCount("extendedline")).toBe(2);
     expect(anchorCount("rect")).toBe(2);
   });
 });
@@ -30,6 +29,13 @@ describe("isValidDrawing", () => {
     expect(isValidDrawing({ ...hline, id: 5 })).toBe(false);
     expect(isValidDrawing(null)).toBe(false);
     expect(isValidDrawing("x")).toBe(false);
+  });
+  it("rejects retired ray/hray kinds (dropped on load after their removal)", () => {
+    expect(isValidDrawing({ ...rect, kind: "ray" })).toBe(false);
+    expect(isValidDrawing({ ...hline, kind: "hray" })).toBe(false);
+  });
+  it("accepts extendedline as a 2-anchor kind", () => {
+    expect(isValidDrawing({ ...rect, kind: "extendedline" })).toBe(true);
   });
 });
 

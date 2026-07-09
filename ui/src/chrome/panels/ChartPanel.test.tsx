@@ -198,6 +198,19 @@ describe("ChartPanel", () => {
     expect(widthBtn(1).style.fontWeight).toBe("500");
   });
 
+  it("editing a drawing's style via the floating toolbar remembers it as the tool's new default", () => {
+    const stores = makeStores();
+    stores.drawings.upsert({ id: "d1", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 0, price: 1 }],
+      color: "#089981", width: 1, lineStyle: "solid", createdMs: 1, updatedMs: 1 });
+    const remember = vi.spyOn(stores.drawingToolStyles, "remember");
+    const { getByTestId, getByRole } = renderChart("c1", stores);
+
+    fireEvent.contextMenu(getByTestId("chart-host"), { clientX: 0, clientY: 0 });
+    fireEvent.click(getByRole("button", { name: "width 3" }));
+
+    expect(remember).toHaveBeenCalledWith("hline", { width: 3 });
+  });
+
   it("a pointerdown on the floating toolbar doesn't deselect, so its buttons still fire (drawing-options regression)", () => {
     const stores = makeStores();
     stores.drawings.upsert({ id: "d1", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 0, price: 1 }],

@@ -110,11 +110,15 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
     const p0 = this.pt(anchors[0], hr, vr);
     if (!p0) return;
     if (kind === "hline") { this.line(ctx, 0, p0.y, width, p0.y); return; }
-    if (kind === "hray") { this.line(ctx, p0.x, p0.y, width, p0.y); return; }
     const p1 = anchors[1] ? this.pt(anchors[1], hr, vr) : null;
     if (!p1) return;
     if (kind === "trendline") { this.line(ctx, p0.x, p0.y, p1.x, p1.y); return; }
-    if (kind === "ray") { const far = extendToEdge(p0, p1, width); this.line(ctx, p0.x, p0.y, far.x, far.y); return; }
+    if (kind === "extendedline") {
+      const fwd = extendToEdge(p0, p1, width);
+      const back = extendToEdge(p1, p0, width);
+      this.line(ctx, back.x, back.y, fwd.x, fwd.y);
+      return;
+    }
     if (kind === "rect") { ctx.strokeRect(Math.min(p0.x, p1.x), Math.min(p0.y, p1.y), Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y)); }
   }
 

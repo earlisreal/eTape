@@ -15,6 +15,7 @@ import { OrderConfigProvider } from "./chrome/exec/useOrderConfig";
 import { SoundConfigProvider } from "./sound/SoundConfigProvider";
 import { BroadcastChannelDrawingBus } from "./render/chart/drawings/store";
 import type { DrawingStore } from "./render/chart/drawings/store";
+import type { DrawingToolStyleStore } from "./render/chart/drawings/toolStyles";
 import { useToasts } from "./chrome/Toast";
 import type { TopicName } from "./wire/contract";
 
@@ -30,6 +31,13 @@ function DrawingsSyncBridge(
     });
     return off;
   }, [store, commands, toast]);
+  return null;
+}
+
+function DrawingToolStylesSyncBridge(
+  { store, commands }: { store: DrawingToolStyleStore; commands: { sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown; reason?: string }> } },
+): null {
+  useEffect(() => store.connect({ commands }), [store, commands]);
   return null;
 }
 
@@ -93,6 +101,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     <ThemeProvider commands={commands}>
       <ToastProvider>
         <DrawingsSyncBridge store={stores.drawings} commands={commands} />
+        <DrawingToolStylesSyncBridge store={stores.drawingToolStyles} commands={commands} />
         <OrderConfigProvider commands={commands}>
           <SoundConfigProvider commands={commands}>
             <ReconnectOverlay state={state}>

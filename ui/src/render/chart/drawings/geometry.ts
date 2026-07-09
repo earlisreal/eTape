@@ -94,17 +94,16 @@ export function hitTest(kind: DrawingKind, pts: readonly (Px | null)[], cursor: 
   switch (kind) {
     case "hline":
       return Math.abs(cursor.y - p0.y) <= seg ? { type: "body" } : null;
-    case "hray":
-      return Math.abs(cursor.y - p0.y) <= seg && cursor.x >= p0.x - seg ? { type: "body" } : null;
     case "trendline": {
       const p1 = pts[1];
       return p1 && distToSegment(cursor.x, cursor.y, p0.x, p0.y, p1.x, p1.y) <= seg ? { type: "body" } : null;
     }
-    case "ray": {
+    case "extendedline": {
       const p1 = pts[1];
       if (!p1) return null;
-      const far = extendToEdge(p0, p1, width);
-      return distToSegment(cursor.x, cursor.y, p0.x, p0.y, far.x, far.y) <= seg ? { type: "body" } : null;
+      const fwd = extendToEdge(p0, p1, width);
+      const back = extendToEdge(p1, p0, width);
+      return distToSegment(cursor.x, cursor.y, back.x, back.y, fwd.x, fwd.y) <= seg ? { type: "body" } : null;
     }
     case "rect": {
       const p1 = pts[1];

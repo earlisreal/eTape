@@ -12,15 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { TV_FONT, TV_GEOM, type TvChrome } from "../../../render/chart/tvTheme";
 import type { Tool } from "../../../render/chart/drawings/interaction";
-import { IconGrip, IconTrend, IconRay, IconHLine, IconHRay, IconRect, IconMeasure, IconMagnet, IconEye, IconEyeOff, IconTrash, IconCornerArrow } from "./tvIcons";
-
-type LineTool = "trendline" | "ray" | "hline" | "hray";
-const LINE_TOOLS: { tool: LineTool; label: string; Icon: (p: { size?: number }) => JSX.Element }[] = [
-  { tool: "trendline", label: "Trend line", Icon: IconTrend },
-  { tool: "ray", label: "Ray", Icon: IconRay },
-  { tool: "hline", label: "Horizontal line", Icon: IconHLine },
-  { tool: "hray", label: "Horizontal ray", Icon: IconHRay },
-];
+import { IconGrip, IconTrend, IconHLine, IconExtended, IconRect, IconMeasure, IconMagnet, IconEye, IconEyeOff, IconTrash } from "./tvIcons";
 
 export interface RailPos { x: number; y: number }
 
@@ -34,8 +26,6 @@ export interface TVDrawingRailProps {
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
 export function TVDrawingRail({ chrome, activeTool, magnet, hideAll, symbol, onSelectTool, onToggleMagnet, onToggleHideAll, hasSelection, onDeleteSelection, onClearAll, initialPos, onPosChange }: TVDrawingRailProps): JSX.Element {
-  const [lastLine, setLastLine] = useState<LineTool>("trendline");
-  const [flyout, setFlyout] = useState(false);
   const [confirm, setConfirm] = useState(false);
   const [pos, setPos] = useState<RailPos | null>(initialPos ?? null);
   const railRef = useRef<HTMLDivElement | null>(null);
@@ -46,14 +36,11 @@ export function TVDrawingRail({ chrome, activeTool, magnet, hideAll, symbol, onS
   const btn = (active: boolean): CSSProperties => ({ width: TV_GEOM.iconBtn, height: TV_GEOM.iconBtn, display: "grid",
     placeItems: "center", background: active ? chrome.hover : "transparent", border: "none", borderRadius: TV_GEOM.radius,
     color: active ? chrome.accent : chrome.text, cursor: "pointer" });
-  const ActiveLine = LINE_TOOLS.find((l) => l.tool === lastLine)!.Icon;
-  const lineActive = (["trendline", "ray", "hline", "hray"] as Tool[]).includes(activeTool);
   // Popovers hang below the horizontal bar (they used to fly out to the right of
   // the old vertical rail).
   const popover: CSSProperties = { position: "absolute", left: 0, top: TV_GEOM.iconBtn + 6, zIndex: 20, background: chrome.surface,
     border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, boxShadow: "0 6px 20px rgba(0,0,0,.2)", padding: 4 };
 
-  const pickLine = (t: LineTool) => { setLastLine(t); setFlyout(false); onSelectTool(t); };
   // Re-click of the armed tool disarms back to select — the only affordance for
   // it now that the explicit cursor button is gone.
   const toggleTool = (t: Tool, active: boolean) => onSelectTool(active ? "select" : t);
@@ -113,26 +100,9 @@ export function TVDrawingRail({ chrome, activeTool, magnet, hideAll, symbol, onS
         <IconGrip size={14} />
       </div>
 
-      <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-        <button aria-label={`line tool ${lastLine}`} style={btn(lineActive)} onClick={() => toggleTool(lastLine, lineActive)}><ActiveLine size={16} /></button>
-        <button aria-label="line tools" onClick={() => setFlyout((v) => !v)}
-          style={{ position: "absolute", right: -1, bottom: -1, width: 12, height: 12, display: "grid", placeItems: "center",
-            background: "transparent", border: "none", color: chrome.muted, cursor: "pointer" }}>
-          <IconCornerArrow size={10} />
-        </button>
-        {flyout && (
-          <div style={{ ...popover, minWidth: 150 }}>
-            {LINE_TOOLS.map((l) => (
-              <button key={l.tool} aria-label={`select ${l.tool}`} onClick={() => pickLine(l.tool)}
-                style={{ display: "flex", alignItems: "center", gap: 8, width: "100%", padding: "6px 8px", background: "transparent",
-                  border: "none", borderRadius: TV_GEOM.radius, color: chrome.text, cursor: "pointer" }}>
-                <l.Icon size={16} /> {l.label}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-
+      <button aria-label="trend line" style={btn(activeTool === "trendline")} onClick={() => toggleTool("trendline", activeTool === "trendline")}><IconTrend size={16} /></button>
+      <button aria-label="horizontal line" style={btn(activeTool === "hline")} onClick={() => toggleTool("hline", activeTool === "hline")}><IconHLine size={16} /></button>
+      <button aria-label="extended line" style={btn(activeTool === "extendedline")} onClick={() => toggleTool("extendedline", activeTool === "extendedline")}><IconExtended size={16} /></button>
       <button aria-label="rectangle" style={btn(activeTool === "rect")} onClick={() => toggleTool("rect", activeTool === "rect")}><IconRect size={16} /></button>
       <button aria-label="measure" style={btn(activeTool === "measure")} onClick={() => toggleTool("measure", activeTool === "measure")}><IconMeasure size={16} /></button>
       <div style={{ width: 1, height: 20, background: chrome.border, margin: "0 2px" }} />

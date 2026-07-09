@@ -4,7 +4,7 @@ import type { DrawingStore } from "./store";
 import type { DrawingsPrimitiveHandle } from "./primitive";
 import { hitTest, snapToLevels, timeToLogical, type Px } from "./geometry";
 
-export type Tool = "select" | "hline" | "hray" | "trendline" | "ray" | "rect" | "measure";
+export type Tool = "select" | "hline" | "trendline" | "extendedline" | "rect" | "measure";
 
 export interface DrawingFacade {
   logicalToCoordinate(logical: number): number | null;
@@ -50,6 +50,7 @@ export class DrawingInteraction {
   private readonly newId: () => string;
   private readonly onToolChange: ((t: Tool) => void) | undefined;
   private readonly onSelectionChange: (() => void) | undefined;
+  private readonly styleForKind: ((k: DrawingKind) => Pick<Drawing, "color" | "width" | "lineStyle">) | undefined;
   private readonly listeners: [string, (e: any) => void][] = [];
 
   constructor(
@@ -58,11 +59,15 @@ export class DrawingInteraction {
     private readonly primitive: DrawingsPrimitiveHandle,
     private readonly store: DrawingStore,
     private readonly ctx: DrawingContext,
-    opts?: { newId?: () => string; onToolChange?: (t: Tool) => void; onSelectionChange?: () => void },
+    opts?: {
+      newId?: () => string; onToolChange?: (t: Tool) => void; onSelectionChange?: () => void;
+      styleForKind?: (k: DrawingKind) => Pick<Drawing, "color" | "width" | "lineStyle">;
+    },
   ) {
     this.newId = opts?.newId ?? (() => crypto.randomUUID());
     this.onToolChange = opts?.onToolChange;
     this.onSelectionChange = opts?.onSelectionChange;
+    this.styleForKind = opts?.styleForKind;
     host.tabIndex = host.tabIndex >= 0 ? host.tabIndex : 0;
     host.style.outline = "none";
     const on = (t: string, cb: (e: any) => void) => { host.addEventListener(t, cb); this.listeners.push([t, cb]); };
@@ -128,9 +133,8 @@ export class DrawingInteraction {
     if (!d) return null;
     const pts = d.anchors.map((a) => this.project(a)).filter((q): q is Px => q !== null);
     if (pts.length === 0) return null;
-    if (d.kind === "hline" || d.kind === "hray") {
-      const x0 = d.kind === "hray" ? pts[0].x : 0;
-      return { x: x0, y: pts[0].y, w: this.host.clientWidth - x0, h: 0 };
+    if (d.kind === "hline") {
+      return { x: 0, y: pts[0].y, w: this.host.clientWidth, h: 0 };
     }
     const xs = pts.map((q) => q.x), ys = pts.map((q) => q.y);
     const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
@@ -269,7 +273,8 @@ export class DrawingInteraction {
 
   private commit(kind: DrawingKind, anchors: Anchor[]): void {
     const now = Date.now();
-    const d: Drawing = { id: this.newId(), symbol: this.ctx.symbol(), kind, anchors, createdMs: now, updatedMs: now };
+    const style = this.styleForKind?.(kind) ?? {};
+    const d: Drawing = { id: this.newId(), symbol: this.ctx.symbol(), kind, anchors, createdMs: now, updatedMs: now, ...style };
     this.store.upsert(d);
     this.cancelGesture();
     // revert to select (TradingView behavior)

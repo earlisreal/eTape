@@ -61,13 +61,28 @@ describe("TVDrawingRail", () => {
     expect(rail.style.top).toBe("44px");
   });
 
-  it("group button selects the last line tool; flyout picks another", () => {
+  it("has no flyout — trend line, horizontal line, and extended line are flat buttons", () => {
     render(<TVDrawingRail {...base} />);
-    fireEvent.click(screen.getByLabelText(/line tool /));       // default trendline
+    expect(screen.queryByLabelText("line tools")).toBeNull();
+    expect(screen.queryByLabelText(/^select /)).toBeNull();
+    fireEvent.click(screen.getByLabelText("trend line"));
     expect(base.onSelectTool).toHaveBeenCalledWith("trendline");
-    fireEvent.click(screen.getByLabelText("line tools"));        // open flyout
-    fireEvent.click(screen.getByLabelText("select ray"));
-    expect(base.onSelectTool).toHaveBeenCalledWith("ray");
+    fireEvent.click(screen.getByLabelText("horizontal line"));
+    expect(base.onSelectTool).toHaveBeenCalledWith("hline");
+    fireEvent.click(screen.getByLabelText("extended line"));
+    expect(base.onSelectTool).toHaveBeenCalledWith("extendedline");
+  });
+
+  it("ray and horizontal ray tools no longer exist on the rail", () => {
+    render(<TVDrawingRail {...base} />);
+    expect(screen.queryByLabelText("ray")).toBeNull();
+    expect(screen.queryByLabelText("horizontal ray")).toBeNull();
+  });
+
+  it("re-clicking an armed line tool toggles back to select", () => {
+    render(<TVDrawingRail {...base} activeTool="extendedline" />);
+    fireEvent.click(screen.getByLabelText("extended line"));
+    expect(base.onSelectTool).toHaveBeenCalledWith("select");
   });
 
   it("toggles magnet and hide-all", () => {

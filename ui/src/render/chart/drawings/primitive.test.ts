@@ -100,6 +100,23 @@ describe("DrawingsPrimitive", () => {
     expect(calls).toContainEqual(["strokeRect", 0, 980, 10, 10]);
   });
 
+  it("draws an extendedline through both anchors to the pane edge in both directions", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    // Anchors deliberately away from x=0/x=width so both extensions are visibly
+    // past the anchors, not degenerate with an edge (unlike x=0-anchored hline tests).
+    // t=15000 -> logical 0.25 -> x=2.5, price 20 -> y=980.
+    // t=45000 -> logical 0.75 -> x=7.5, price 10 -> y=990.
+    const line: Drawing = { id: "e", symbol: "US.AAPL", kind: "extendedline", anchors: [{ timeMs: 15_000, price: 20 }, { timeMs: 45_000, price: 10 }], createdMs: 1, updatedMs: 1 };
+    p.setDrawings([line]);
+    const { ctx, calls } = recordingCtx();
+    draw(p, ctx);
+    // Backward extension (past the first anchor, toward x=0): y=975.
+    expect(calls).toContainEqual(["moveTo", 0, 975]);
+    // Forward extension (past the second anchor, toward x=400/width): y=1775.
+    expect(calls).toContainEqual(["lineTo", 400, 1775]);
+  });
+
   it("draws a placement ghost from the transient state", () => {
     const p = new DrawingsPrimitive(LIGHT);
     attach(p);

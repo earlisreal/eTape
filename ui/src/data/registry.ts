@@ -10,6 +10,7 @@ import { ScannerStore } from "./ScannerStore";
 import { NewsStore } from "./NewsStore";
 import { FillStore } from "./FillStore";
 import { DrawingStore } from "../render/chart/drawings/store";
+import { DrawingToolStyleStore } from "../render/chart/drawings/toolStyles";
 
 export interface Stores {
   quote: QuoteStore;
@@ -23,6 +24,7 @@ export interface Stores {
   news: NewsStore;
   fills: FillStore;
   drawings: DrawingStore;
+  drawingToolStyles: DrawingToolStyleStore;
 }
 
 export function makeStores(): Stores {
@@ -38,6 +40,7 @@ export function makeStores(): Stores {
     news: new NewsStore(),
     fills: new FillStore(),
     drawings: new DrawingStore(),
+    drawingToolStyles: new DrawingToolStyleStore(),
   };
 }
 
