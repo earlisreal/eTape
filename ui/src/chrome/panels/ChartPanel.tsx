@@ -139,7 +139,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [magnet, setMagnet] = useState(true);
   const [chartSymbol, setChartSymbol] = useState(symbol);
-  const [menu, setMenu] = useState<{ x: number; y: number; drawingId: string | null } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; clientX: number; clientY: number; drawingId: string | null } | null>(null);
   // The top-bar chart-type switcher was removed (candles-only trading UI); the
   // persisted setting is still honored at mount so old workspaces keep rendering.
   const chartType = chartType0;
@@ -438,10 +438,13 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const onContextMenu = (e: React.MouseEvent) => {
     e.preventDefault();
     const r = hostRef.current!.getBoundingClientRect();
+    // x/y are host-local (for hit-testing + coordinateToPrice below); clientX/clientY
+    // are viewport-relative, which is what the menu's `position: fixed` needs — mixing
+    // these up puts the menu on the wrong chart when charts aren't at the viewport origin.
     const x = e.clientX - r.left, y = e.clientY - r.top;
     const drawingId = interactionRef.current?.hitTestAt({ x, y }) ?? null;
     if (drawingId) { interactionRef.current?.select(drawingId); refreshSelection(); }
-    setMenu({ x, y, drawingId });
+    setMenu({ x, y, clientX: e.clientX, clientY: e.clientY, drawingId });
   };
   const buildMenuItems = (m: { x: number; y: number; drawingId: string | null }): MenuEntry[] => {
     const items: MenuEntry[] = [];
@@ -486,7 +489,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
             onColor={(c) => patchSelected({ color: c })} onWidth={(w) => patchSelected({ width: w })} onLineStyle={(s) => patchSelected({ lineStyle: s })}
             onClone={cloneSelected} onDelete={() => interactionRef.current?.deleteSelection()} />
         )}
-        {menu && <TVContextMenu chrome={chrome} x={menu.x} y={menu.y} items={buildMenuItems(menu)} onClose={() => setMenu(null)} />}
+        {menu && <TVContextMenu chrome={chrome} x={menu.clientX} y={menu.clientY} items={buildMenuItems(menu)} onClose={() => setMenu(null)} />}
       </div>
       {pickerOpen && <IndicatorPickerDialog chrome={chrome} onClose={() => setPickerOpen(false)} onAdd={addIndicator} />}
       {settingsInstanceId && (() => {

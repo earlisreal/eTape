@@ -160,6 +160,26 @@ describe("ChartPanel", () => {
     expect(stores.drawings.forSymbol("US.AAPL")).toHaveLength(0);
   });
 
+  it("positions the context menu at viewport coordinates, not host-relative (wrong-chart-in-group regression)", () => {
+    const { getByTestId, getByRole } = renderChart();
+    const host = getByTestId("chart-host");
+    // Simulate this chart being tiled away from the viewport origin, as it would be
+    // as the 2nd/3rd chart in a linked group. jsdom's default getBoundingClientRect
+    // returns all zeros, which is exactly why the pre-fix bug was invisible to every
+    // other right-click test in this file (host-relative == viewport-relative at (0,0)).
+    host.getBoundingClientRect = () => ({ left: 100, top: 50, right: 500, bottom: 350,
+      width: 400, height: 300, x: 100, y: 50, toJSON: () => {} }) as DOMRect;
+
+    fireEvent.contextMenu(host, { clientX: 120, clientY: 80 });
+
+    const menu = getByRole("menu");
+    // Before the fix, TVContextMenu (position: fixed, viewport-relative) was fed the
+    // host-relative offset (20, 30) instead of the click's viewport coords (120, 80) —
+    // dropping the menu near the viewport origin, i.e. over a different chart.
+    expect(menu.style.left).toBe("120px");
+    expect(menu.style.top).toBe("80px");
+  });
+
   it("floating toolbar's own controls reflect a style edit made through the toolbar itself (Finding 1 regression)", () => {
     const stores = makeStores();
     // hline with a single anchor at (timeMs:0, price:1) — with every coordinate
