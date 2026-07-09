@@ -21,8 +21,8 @@ func NewHubForTest(clk clock.Clock) (*Hub, *mirror) {
 }
 
 // NewCommandsForTest exposes newCommands to external test packages.
-func NewCommandsForTest(ex execDoer, c configStore, i indicatorCtl, d demandCtl, va venueAdmin, f func() Feed) commandHandler {
-	return newCommands(ex, c, i, d, va, f)
+func NewCommandsForTest(ex execDoer, c configStore, i indicatorCtl, d demandCtl, va venueAdmin, f func() Feed, vt venueTester) commandHandler {
+	return newCommands(ex, c, i, d, va, f, vt)
 }
 
 // NewQueriesForTest exposes newQueries to external test packages.

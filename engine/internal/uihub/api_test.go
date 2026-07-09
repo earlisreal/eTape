@@ -33,7 +33,7 @@ func TestUIHubNewBuildsRunnableHubAndServer(t *testing.T) {
 		Global: uihub.GlobalLimits{MaxDayLoss: 500},
 		MD:     20 * time.Millisecond, Account: 250 * time.Millisecond, Position: 100 * time.Millisecond,
 		Buf: 128, TapeCap: 100, NewsCap: 100, FillsCap: 100, EventsCap: 100, OutBuf: 64,
-	}, apiExec{}, apiStores{}, apiInd{}, nil)
+	}, apiExec{}, apiStores{}, apiInd{}, nil, nil)
 	if h == nil || srv == nil {
 		t.Fatal("New must return a hub and server")
 	}

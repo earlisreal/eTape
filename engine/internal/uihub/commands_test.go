@@ -13,6 +13,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
+	"github.com/earlisreal/eTape/engine/internal/venueprobe"
 )
 
 type spyExec struct {
@@ -45,7 +46,7 @@ func (s *spyInd) ReleaseIndicator(id string)                    { s.released = i
 
 func TestCommandsSubmitOrderMapsEnums(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true, OrderID: "ET5"}}
-	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil })
+	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
 	ack := cd.handle(context.Background(), "SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"SHORT","type":"STOP_LIMIT","tif":"GTC","qty":80,"limitPrice":3.55,"stopPrice":3.6}`), 0)
 	if ack.Status != "accepted" || ack.OrderID != "ET5" {
 		t.Fatalf("ack wrong: %+v", ack)
@@ -64,7 +65,7 @@ func TestCommandsSubmitOrderMapsEnums(t *testing.T) {
 
 func TestCommandsBlockedPassesReason(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: false, Reason: "R114 gate: max order value"}}
-	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil })
+	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
 	ack := cd.handle(context.Background(), "SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"BUY","type":"MARKET","tif":"DAY","qty":1}`), 0)
 	if ack.Status != "blocked" || ack.Reason != "R114 gate: max order value" {
 		t.Fatalf("blocked reason must pass through verbatim: %+v", ack)
@@ -73,7 +74,7 @@ func TestCommandsBlockedPassesReason(t *testing.T) {
 
 func TestCommandsKillSwitchAllVenues(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true}}
-	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil })
+	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
 	cd.handle(context.Background(), "KillSwitch", json.RawMessage(`{}`), 0) // no venue => all
 	ks, ok := ex.last.(exec.KillSwitch)
 	if !ok || ks.Venue != "" {
@@ -83,7 +84,7 @@ func TestCommandsKillSwitchAllVenues(t *testing.T) {
 
 func TestCommandsArmMaster(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true}}
-	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil })
+	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
 	cd.handle(context.Background(), "Arm", json.RawMessage(`{}`), 0)
 	if _, ok := ex.last.(exec.Arm); !ok {
 		t.Fatalf("expected exec.Arm, got %T", ex.last)
@@ -92,7 +93,7 @@ func TestCommandsArmMaster(t *testing.T) {
 
 func TestCommandsResetBalanceDispatch(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true}}
-	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil })
+	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
 	cd.handle(context.Background(), "ResetBalance", json.RawMessage(`{"venue":"sim-1"}`), 0)
 	rb, ok := ex.last.(exec.ResetBalance)
 	if !ok || rb.Venue != "sim-1" {
@@ -114,7 +115,7 @@ func TestVenueWireRoundTripsStartingBalance(t *testing.T) {
 
 func TestCommandsGetSetConfig(t *testing.T) {
 	cfg := &spyCfg{values: map[string]string{"theme": `"dark"`}}
-	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil })
+	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
 	get := cd.handle(context.Background(), "GetConfig", json.RawMessage(`{"key":"theme"}`), 0)
 	if get.Status != "accepted" {
 		t.Fatalf("GetConfig should accept: %+v", get)
@@ -131,7 +132,7 @@ func TestCommandsGetSetConfig(t *testing.T) {
 
 func TestCommandsIndicatorLifecycle(t *testing.T) {
 	ind := &spyInd{}
-	cd := newCommands(&spyExec{}, &spyCfg{}, ind, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil })
+	cd := newCommands(&spyExec{}, &spyCfg{}, ind, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
 	cd.handle(context.Background(), "SubscribeIndicator", json.RawMessage(`{"instanceId":"i1","symbol":"US.AAPL","timeframe":"1m","type":"VWAP","params":{}}`), 0)
 	if ind.ensured != "i1" {
 		t.Fatalf("SubscribeIndicator should EnsureIndicator, got %q", ind.ensured)
@@ -143,7 +144,7 @@ func TestCommandsIndicatorLifecycle(t *testing.T) {
 }
 
 func TestCommandsUnknown(t *testing.T) {
-	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil })
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
 	ack := cd.handle(context.Background(), "Nope", json.RawMessage(`{}`), 0)
 	if ack.Status != "blocked" {
 		t.Fatalf("unknown command must block, got %+v", ack)
@@ -188,7 +189,7 @@ func newCmdWith(t *testing.T, feedErr error, feedNil bool) (*commands, *spyDeman
 	if feedNil {
 		getter = func() Feed { return nil }
 	}
-	return newCommands(nil, nil, nil, dem, &spyVenueAdmin{}, getter), dem, sf
+	return newCommands(nil, nil, nil, dem, &spyVenueAdmin{}, getter, &spyVenueTester{}), dem, sf
 }
 
 func TestEnsureSymbol_AcceptsAndMapsWatch(t *testing.T) {
@@ -342,7 +343,7 @@ func (s *spyVenueAdmin) DeleteCredential(string) error { return s.delErr }
 
 func TestGetVenueSetupResultHasNoSecrets(t *testing.T) {
 	va := &spyVenueAdmin{}
-	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil })
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil }, &spyVenueTester{})
 	ack := cd.handle(context.Background(), "GetVenueSetup", json.RawMessage(`{}`), 0)
 	if ack.Status != "accepted" {
 		t.Fatalf("status %v", ack.Status)
@@ -355,7 +356,7 @@ func TestGetVenueSetupResultHasNoSecrets(t *testing.T) {
 
 func TestSetVenueSetupBlocksOnError(t *testing.T) {
 	va := &spyVenueAdmin{setErr: errors.New("venue \"x\": env \"demo\" must be paper or live")}
-	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil })
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil }, &spyVenueTester{})
 	ack := cd.handle(context.Background(), "SetVenueSetup", json.RawMessage(`{"venues":[],"gate":{"global":{},"venue":{}}}`), 0)
 	if ack.Status != "blocked" || ack.Reason == "" {
 		t.Fatalf("want blocked with reason, got %+v", ack)
@@ -364,9 +365,84 @@ func TestSetVenueSetupBlocksOnError(t *testing.T) {
 
 func TestPutCredentialRequiresAllFields(t *testing.T) {
 	va := &spyVenueAdmin{}
-	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil })
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil }, &spyVenueTester{})
 	ack := cd.handle(context.Background(), "PutCredential", json.RawMessage(`{"name":"a","keyId":"","secretKey":"s"}`), 0)
 	if ack.Status != "blocked" || va.putCalled {
 		t.Fatalf("empty keyId must block before calling admin: %+v", ack)
+	}
+}
+
+// spyVenueTester is the venueTester test double: it records whether it was
+// called and with what args, and returns a caller-configured Result.
+type spyVenueTester struct {
+	result                                             venueprobe.Result
+	called                                             bool
+	broker, env, credName, keyID, secretKey, accountID string
+}
+
+func (s *spyVenueTester) TestConnection(_ context.Context, broker, env, credName, keyID, secretKey, accountID string) venueprobe.Result {
+	s.called = true
+	s.broker, s.env, s.credName, s.keyID, s.secretKey, s.accountID = broker, env, credName, keyID, secretKey, accountID
+	return s.result
+}
+
+func TestTestConnectionBadArgsBlocksWithoutCallingProbe(t *testing.T) {
+	vt := &spyVenueTester{}
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, vt)
+	ack := cd.handle(context.Background(), "TestConnection", json.RawMessage(`not json`), 0)
+	if ack.Status != "blocked" || ack.Reason != "bad args" {
+		t.Fatalf("want blocked/\"bad args\", got %+v", ack)
+	}
+	if vt.called {
+		t.Fatal("malformed args must never reach the probe")
+	}
+}
+
+func TestTestConnectionAcceptsAndConvertsResult(t *testing.T) {
+	vt := &spyVenueTester{result: venueprobe.Result{
+		OK: true, Env: "live", AccountID: "2TZ1", AccountType: "Live", Message: "",
+		Accounts: []venueprobe.Account{{AccountID: "2TZ2", AccountType: "Paper", Env: "paper"}},
+	}}
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, vt)
+	args := `{"broker":"tradezero","env":"live","credentials":"my-cred","keyId":"key-123","secretKey":"secret-456","accountId":"acct-789"}`
+	ack := cd.handle(context.Background(), "TestConnection", json.RawMessage(args), 0)
+
+	if ack.Status != "accepted" {
+		t.Fatalf("want accepted, got %+v", ack)
+	}
+	if !vt.called {
+		t.Fatal("valid args must reach the probe")
+	}
+	if vt.broker != "tradezero" || vt.env != "live" || vt.credName != "my-cred" ||
+		vt.keyID != "key-123" || vt.secretKey != "secret-456" || vt.accountID != "acct-789" {
+		t.Fatalf("probe args wrong: %+v", vt)
+	}
+
+	res, ok := ack.Value.(wsmsg.TestConnectionResult)
+	if !ok {
+		t.Fatalf("ack.Value must be wsmsg.TestConnectionResult, got %T", ack.Value)
+	}
+	if !res.OK || res.Env != "live" || res.AccountID != "2TZ1" || res.AccountType != "Live" || res.Message != "" {
+		t.Fatalf("top-level fields not carried through: %+v", res)
+	}
+	if len(res.Accounts) != 1 {
+		t.Fatalf("want 1 account, got %d: %+v", len(res.Accounts), res.Accounts)
+	}
+	acct := res.Accounts[0]
+	if acct.AccountID != "2TZ2" || acct.AccountType != "Paper" || acct.Env != "paper" {
+		t.Fatalf("nested account fields wrong: %+v", acct)
+	}
+}
+
+func TestTestConnectionOKFalseStillAccepted(t *testing.T) {
+	vt := &spyVenueTester{result: venueprobe.Result{OK: false, Message: "bad key"}}
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, vt)
+	ack := cd.handle(context.Background(), "TestConnection", json.RawMessage(`{"broker":"alpaca","env":"paper"}`), 0)
+	if ack.Status != "accepted" {
+		t.Fatalf("a transport-successful probe with OK:false must still be accepted, got %+v", ack)
+	}
+	res, ok := ack.Value.(wsmsg.TestConnectionResult)
+	if !ok || res.OK || res.Message != "bad key" {
+		t.Fatalf("result must carry OK:false through: %+v (%T)", ack.Value, ack.Value)
 	}
 }
