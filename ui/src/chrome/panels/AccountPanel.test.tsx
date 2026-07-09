@@ -85,6 +85,22 @@ describe("AccountPanel", () => {
     expect(screen.queryByText("MSFT")).toBeNull();
   });
 
+  it("drops flat (0-qty) positions from the table and its count", () => {
+    const { props, stores, linkGroups } = mkProps("green");
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false, "alpaca-paper") });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [
+        pos({ venue: "alpaca-paper", symbol: "US.AAPL" }),
+        pos({ venue: "alpaca-paper", symbol: "US.MSFT", qty: 0 }),
+      ] });
+      linkGroups.focusVenue("green", "alpaca-paper");
+    });
+    wrap(props);
+    expect(screen.getByText("AAPL")).toBeTruthy();
+    expect(screen.queryByText("MSFT")).toBeNull();
+    expect(screen.getByText("Positions (1)")).toBeTruthy();
+  });
+
   // --- ported from PositionsPanel.test.tsx ---
   it("flatten on a long row submits a SELL for the full qty (priced from the quote)", () => {
     const { props, stores, sent } = mkProps();
@@ -365,10 +381,21 @@ describe("AccountPanel", () => {
       wrap(props);
       act(() => {
         stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
-        stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: [order("ET1", { status: "FILLED" })] });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: [order("ET1", { status: "CANCELED" })] });
       });
-      const filled = screen.getByText("Filled");
-      expect(filled.className).not.toContain("chip");
+      const canceled = screen.getByText("Canceled");
+      expect(canceled.className).not.toContain("chip");
+    });
+
+    it("drops FILLED orders from the Open Orders table", () => {
+      const { props, stores } = mkProps();
+      wrap(props);
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: [order("ET1", { status: "FILLED" }), order("ET2", { status: "ACCEPTED" })] });
+      });
+      expect(screen.getByText("Open Orders (1)")).toBeTruthy();
+      expect(screen.queryByText("Filled")).toBeNull();
     });
 
     it("cancel on a working row sends CancelOrder; Cancel All cancels every working order", () => {

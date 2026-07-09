@@ -96,7 +96,7 @@ function OrdersTable({
 }): JSX.Element {
   const [sort, setSort] = useState<SortState>(() => readOrdersSort(config.settings));
 
-  const views = sortRows(stores.exec.orders().filter((v) => v.order.venue === venue), sort, ORDERS_SORT_ACCESSORS);
+  const views = sortRows(stores.exec.orders().filter((v) => v.order.venue === venue && v.order.status !== "FILLED"), sort, ORDERS_SORT_ACCESSORS);
   const reconciling = (stores.exec.status()?.venues ?? []).some((v) => v.reconcilePending);
 
   const clickSort = (col: string) => {
@@ -214,7 +214,7 @@ function PositionsTable({
   venue: string;
 }): JSX.Element {
   const toast = useToasts();
-  const rows0 = stores.exec.positions().filter((p) => p.venue === venue); // venue-scoped; NET (venue===null) rows drop out
+  const rows0 = stores.exec.positions().filter((p) => p.venue === venue && p.qty !== 0); // venue-scoped; NET (venue===null) rows drop out
   const status = stores.exec.status();
   const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
   const masterArmed = !!status?.masterArmed;
@@ -344,7 +344,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
 
   const selectTab = (t: Tab) => { setActiveTab(t); onConfigChange({ tab: t }); };
 
-  const positionsCount = stores.exec.positions().filter((p) => p.venue === venue).length;
+  const positionsCount = stores.exec.positions().filter((p) => p.venue === venue && p.qty !== 0).length;
 
   const tabBtn = (label: string, active: boolean, onClick: () => void) => (
     <button onClick={onClick} style={{
