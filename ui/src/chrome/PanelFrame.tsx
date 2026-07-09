@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { DockviewPanelApi } from "dockview";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { PANELS, type PanelProps } from "./panels/registry";
+import { PanelHeaderSlotContext } from "./panels/headerSlot";
 import type { PanelConfig } from "./workspace";
 import type { Stores } from "../data/registry";
 import type { Scheduler } from "../render/Scheduler";
@@ -47,6 +48,10 @@ export function PanelFrame(
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [showPicker, setShowPicker] = useState(false);
   const [active, setActive] = useState(api.isActive);
+  // Portal target for a headerControls panel's own controls (see headerSlot.ts).
+  // A ref callback (not useRef) so the state — and therefore the context value
+  // PanelHeaderSlotContext.Provider passes down — updates once the slot div mounts.
+  const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
   // Local group state, seeded from config.group at mount: config itself is
   // frozen inside the same per-panel factory closure described above, so
   // re-picking a group here needs its own mutable state for the swatch/symbol
@@ -333,15 +338,22 @@ export function PanelFrame(
             </span>
           )
         )}
-        <span className="serif" style={{ fontWeight: def?.symbolBearing ? 400 : 600, color: def?.symbolBearing ? palette.textMuted : palette.text }}>
-          {def?.title ?? config.panelId}
-        </span>
+        {!def?.headerControls && (
+          <span className="serif" style={{ fontWeight: def?.symbolBearing ? 400 : 600, color: def?.symbolBearing ? palette.textMuted : palette.text }}>
+            {def?.title ?? config.panelId}
+          </span>
+        )}
         {tl.editing && (
           <span className="mono" data-testid="panel-symbol-hint" style={{ fontSize: 10, color: palette.textMuted }}>
             ⏎ load · esc keep {effectiveSymbol ?? "—"}
           </span>
         )}
-        <span style={{ flex: 1 }} />
+        {def?.headerControls ? (
+          <div ref={setHeaderSlot} data-testid="panel-header-slot" style={{ flex: 1, minWidth: 0, display: "flex",
+            alignItems: "center", gap: 2, overflow: "hidden", fontFamily: '"IBM Plex Sans", system-ui, sans-serif' }} />
+        ) : (
+          <span style={{ flex: 1 }} />
+        )}
         <button type="button" aria-label="close panel" onClick={onClose}
           style={{ border: "none", background: "transparent", color: palette.textMuted, cursor: "pointer", fontSize: 13, padding: "0 2px", lineHeight: 1 }}>
           ✕
@@ -349,7 +361,9 @@ export function PanelFrame(
       </div>
       <div ref={hostRef} data-testid="panel-body" style={{ flex: 1, minHeight: 0 }}>
         <ErrorBoundary label={config.panelId}>
-          {Body ? <Body {...props} /> : <div style={{ padding: 12, color: palette.textMuted }}>“{config.panelId}” — coming in a later plan</div>}
+          <PanelHeaderSlotContext.Provider value={def?.headerControls ? headerSlot : undefined}>
+            {Body ? <Body {...props} /> : <div style={{ padding: 12, color: palette.textMuted }}>“{config.panelId}” — coming in a later plan</div>}
+          </PanelHeaderSlotContext.Provider>
         </ErrorBoundary>
       </div>
     </div>

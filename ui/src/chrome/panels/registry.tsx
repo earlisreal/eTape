@@ -59,6 +59,11 @@ export interface PanelDef {
   description: string;
   symbolBearing: boolean;
   demand?: DemandProfile;
+  // This panel's body portals its own controls into PanelFrame's ledger-header slot
+  // (see headerSlot.ts) instead of rendering a second control strip in its body.
+  // PanelFrame uses this to open the slot and to suppress its own title text (the
+  // panel's controls already make its identity obvious without a "Chart" label).
+  headerControls?: boolean;
 }
 
 // Plan 1 registered the two stack-proving panels; Plan 2 added the chart panel;
@@ -90,6 +95,7 @@ export const PANELS: Record<string, PanelDef> = {
     description: "Candles, volume, indicators",
     symbolBearing: true,
     demand: "watch",
+    headerControls: true,
   },
   "ladder": {
     component: LadderPanel,
