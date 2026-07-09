@@ -1,7 +1,10 @@
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import type { Palette } from "../palette";
 import type { Bar } from "../../wire/contract";
-import { chartOptions, candleOptions, volumeOptions, mainSeriesOptions, VOLUME_SCALE_MARGINS, OVERLAY_NO_AUTOSCALE, type ChartType } from "./chartTheme";
+import {
+  chartOptions, candleOptions, volumeOptions, mainSeriesOptions, VOLUME_SCALE_MARGINS,
+  boundedOverlayAutoscale, OVERLAY_AUTOSCALE_FACTOR, type ChartType, type PriceRange,
+} from "./chartTheme";
 import { sessionAt } from "./sessions";
 import type { Band } from "./sessions";
 import { describeIndicator, withDefaultParams, type IndicatorInstance } from "./indicatorSeries";
@@ -40,6 +43,11 @@ export class ChartController {
   private indicatorApplied = new Map<string, number>(); // per-series point count applied via setData/update
   private indicatorLastKey = new Map<string, string>(); // per-series fingerprint of the last applied point, `${timeMs}|${value}`
   private backfilled = false;
+  // Live [low, high] across all currently-applied bars — the reference range
+  // main-pane overlay lines (EMA/SMA/VWAP) are bounded against (chartTheme's
+  // boundedOverlayAutoscale). Recomputed on every applyBars call; cleared on
+  // symbol/timeframe switch so a stale range never bounds the new series.
+  private candleRange: PriceRange | null = null;
   private chartType: ChartType = "candle";
   private showSessions = true;
   private gridVisible = true;
@@ -75,6 +83,7 @@ export class ChartController {
 
   private applyBars(bars: Bar[]): void {
     if (bars.length === 0) return; // cold symbol — panel shows the hint, not an error
+    this.candleRange = candleRangeOf(bars);
     if (!this.backfilled) {
       this.setAllBars(bars);
       return;
@@ -215,10 +224,14 @@ export class ChartController {
           // No crosshair dot riding the study lines (TV doesn't draw one for
           // overlay indicators; the crosshair itself is free-moving — chartTheme).
           ...(d.kind === "line" ? { lineWidth: d.width, lineStyle: LWC_LINE_STYLE[d.lineStyle], crosshairMarkerVisible: false } : {}),
-          // Main-pane overlay lines (EMA/SMA/VWAP) share the candle price scale but
-          // must never expand its autoscale range — see OVERLAY_NO_AUTOSCALE. MACD's
-          // sub-pane lines (paneIndex 1) are excluded: they must autoscale their own pane.
-          ...(d.kind === "line" && d.paneIndex === 0 ? { autoscaleInfoProvider: OVERLAY_NO_AUTOSCALE } : {}),
+          // Main-pane overlay lines (EMA/SMA/VWAP) share the candle price scale, bounded
+          // to OVERLAY_AUTOSCALE_FACTORx the live candle range (chartTheme's
+          // boundedOverlayAutoscale) so a far-off value stays visible without crushing
+          // the candles. MACD's sub-pane lines (paneIndex 1) are excluded: they must
+          // autoscale their own pane.
+          ...(d.kind === "line" && d.paneIndex === 0
+            ? { autoscaleInfoProvider: boundedOverlayAutoscale(() => this.candleRange, OVERLAY_AUTOSCALE_FACTOR) }
+            : {}),
         }, d.paneIndex));
     }
     this.indicators.set(resolved.instanceId, { inst: resolved, series });
@@ -287,6 +300,7 @@ export class ChartController {
     this.backfilled = false;
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
+    this.candleRange = null;
     this.indicatorApplied.clear();
     this.indicatorLastKey.clear();
     // Wipe the previous (symbol, timeframe)'s bars immediately — otherwise a
@@ -391,6 +405,17 @@ function isSorted(bars: Bar[], from: number): boolean {
   return true;
 }
 function toCandle(b: Bar) { return { time: toLwcTime(b.bucketStart), open: b.o, high: b.h, low: b.l, close: b.c }; }
+// [low, high] across every currently-applied bar — the reference range overlay
+// lines are bounded against. A plain scan: bar counts here (a few thousand at
+// most) make this negligible next to the rest of applyBars' per-sync work.
+function candleRangeOf(bars: Bar[]): PriceRange {
+  let minValue = Infinity, maxValue = -Infinity;
+  for (const b of bars) {
+    if (b.l < minValue) minValue = b.l;
+    if (b.h > maxValue) maxValue = b.h;
+  }
+  return { minValue, maxValue };
+}
 function toVolume(b: Bar, p: Palette) {
   return { time: toLwcTime(b.bucketStart), value: b.v, color: b.c >= b.o ? p.volUp : p.volDown };
 }

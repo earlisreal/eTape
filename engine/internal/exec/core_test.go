@@ -169,17 +169,20 @@ func TestCoreAppendFailureBlocksSubmit(t *testing.T) {
 // implements every exec.Broker method faithfully (the compiler enforces all
 // of them); only Capabilities and Flatten do anything interesting.
 type capStub struct {
-	flatten bool // value Capabilities().FlattenAll reports
+	flatten      bool // value Capabilities().FlattenAll reports
+	resetBalance bool // value Capabilities().ResetBalance reports
 
-	mu     sync.Mutex
-	called bool
-	ev     chan exec.BrokerEvent
+	mu          sync.Mutex
+	called      bool
+	resetCalled bool
+	resetAmount float64
+	ev          chan exec.BrokerEvent
 }
 
 var _ exec.Broker = (*capStub)(nil)
 
 func (c *capStub) Capabilities() exec.Capabilities {
-	return exec.Capabilities{FlattenAll: c.flatten}
+	return exec.Capabilities{FlattenAll: c.flatten, ResetBalance: c.resetBalance}
 }
 
 func (c *capStub) SubmitOrder(context.Context, exec.OrderRequest) (exec.OrderAck, error) {
@@ -211,6 +214,14 @@ func (c *capStub) Flatten(context.Context) error {
 	return nil
 }
 
+func (c *capStub) ResetBalance(_ context.Context, amount float64) error {
+	c.mu.Lock()
+	c.resetCalled = true
+	c.resetAmount = amount
+	c.mu.Unlock()
+	return nil
+}
+
 // flattenCalled polls briefly for Flatten to have been invoked: handleFlatten
 // dispatches it from a goroutine, so the caller can't assume it has already
 // run the instant Do returns.
@@ -230,10 +241,29 @@ func (c *capStub) flattenCalled() bool {
 	}
 }
 
+// resetBalanceCalled polls briefly for ResetBalance to have been invoked:
+// handleResetBalance dispatches it from a goroutine, same as flattenCalled.
+func (c *capStub) resetBalanceCalled() bool {
+	deadline := time.Now().Add(time.Second)
+	for {
+		c.mu.Lock()
+		called := c.resetCalled
+		c.mu.Unlock()
+		if called {
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // buildCoreWith wires a single-venue Core ("v") around cs, a capStub broker,
 // for tests that need to control Capabilities directly rather than through a
-// real sim.Broker (which always reports FlattenAll:true).
-func buildCoreWith(t *testing.T, b *capStub) (*exec.Core, *capStub) {
+// real sim.Broker (which always reports FlattenAll:true). startingBalance may
+// be nil (tests that don't exercise ResetBalance amounts).
+func buildCoreWith(t *testing.T, b *capStub, startingBalance map[exec.VenueID]float64) (*exec.Core, *capStub) {
 	t.Helper()
 	b.ev = make(chan exec.BrokerEvent)
 	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
@@ -248,10 +278,11 @@ func buildCoreWith(t *testing.T, b *capStub) (*exec.Core, *capStub) {
 			Global: exec.GlobalLimits{MaxDayLoss: 1000, MaxSymbolPositionShares: 1000, MaxSymbolPositionValue: 1_000_000},
 			Venue:  map[exec.VenueID]exec.VenueLimits{"v": {MaxOrderValue: 100000, MaxPositionValue: 1_000_000, MaxPositionShares: 1000, MaxOpenOrders: 10}},
 		},
-		Store:   st,
-		Brokers: map[exec.VenueID]exec.Broker{"v": b},
-		Clock:   clk,
-		IDGen:   exec.NewOrderIDGen(clk, rand.New(rand.NewSource(1))),
+		Store:           st,
+		Brokers:         map[exec.VenueID]exec.Broker{"v": b},
+		Clock:           clk,
+		IDGen:           exec.NewOrderIDGen(clk, rand.New(rand.NewSource(1))),
+		StartingBalance: startingBalance,
 	}
 	c := exec.NewCore(cfg)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -525,16 +556,43 @@ func TestCoreSeedTradesLogsUnparseableSide(t *testing.T) {
 
 func TestCore_Flatten_RequiresFlattenCapability(t *testing.T) {
 	// A venue whose broker advertises FlattenAll=false must reject Flatten.
-	c, _ := buildCoreWith(t, &capStub{flatten: false})
+	c, _ := buildCoreWith(t, &capStub{flatten: false}, nil)
 	if ack := c.Do(exec.Flatten{Venue: "v"}); ack.Accepted {
 		t.Fatal("Flatten must be rejected when FlattenAll is false")
 	}
 	// FlattenAll=true is accepted.
-	c2, b := buildCoreWith(t, &capStub{flatten: true})
+	c2, b := buildCoreWith(t, &capStub{flatten: true}, nil)
 	if ack := c2.Do(exec.Flatten{Venue: "v"}); !ack.Accepted {
 		t.Fatalf("Flatten should be accepted: %q", ack.Reason)
 	}
 	if !b.flattenCalled() {
 		t.Fatal("Core should have invoked Broker.Flatten")
+	}
+}
+
+func TestCore_ResetBalance_RequiresResetBalanceCapability(t *testing.T) {
+	// A venue whose broker advertises ResetBalance=false must reject it.
+	c, _ := buildCoreWith(t, &capStub{resetBalance: false}, nil)
+	if ack := c.Do(exec.ResetBalance{Venue: "v"}); ack.Accepted {
+		t.Fatal("ResetBalance must be rejected when ResetBalance capability is false")
+	}
+	// ResetBalance=true is accepted, and Core passes the venue's configured
+	// starting balance (baked in at boot), not a value from the command.
+	c2, b := buildCoreWith(t, &capStub{resetBalance: true}, map[exec.VenueID]float64{"v": 50_000})
+	if ack := c2.Do(exec.ResetBalance{Venue: "v"}); !ack.Accepted {
+		t.Fatalf("ResetBalance should be accepted: %q", ack.Reason)
+	}
+	if !b.resetBalanceCalled() {
+		t.Fatal("Core should have invoked Broker.ResetBalance")
+	}
+	if b.resetAmount != 50_000 {
+		t.Fatalf("Core should pass the venue's configured starting balance, got %v", b.resetAmount)
+	}
+}
+
+func TestCore_ResetBalance_UnknownVenue(t *testing.T) {
+	c, _ := buildCoreWith(t, &capStub{resetBalance: true}, nil)
+	if ack := c.Do(exec.ResetBalance{Venue: "ghost"}); ack.Accepted {
+		t.Fatal("ResetBalance on an unknown venue must be rejected")
 	}
 }

@@ -152,6 +152,7 @@ export const PANELS: Record<string, PanelDef> = {
     glyph: "Σ",
     description: "Equity, BP, day P&L, positions, arm",
     symbolBearing: false,
+    headerActions: true,
   },
   // Back-compat aliases: a saved workspace doc referencing the pre-Task-19 ids
   // (account-bar, positions) or the pre-Task-8 standalone open-orders id still
@@ -167,6 +168,7 @@ export const PANELS: Record<string, PanelDef> = {
     glyph: "Σ",
     description: "Equity, BP, day P&L, positions, arm",
     symbolBearing: false,
+    headerActions: true,
   },
   "positions": {
     component: AccountPanel,
@@ -175,6 +177,7 @@ export const PANELS: Record<string, PanelDef> = {
     glyph: "Σ",
     description: "Equity, BP, day P&L, positions, arm",
     symbolBearing: false,
+    headerActions: true,
   },
   "open-orders": {
     component: AccountPanel,
@@ -183,6 +186,7 @@ export const PANELS: Record<string, PanelDef> = {
     glyph: "◷",
     description: "Lifecycle, cancel, cancel-all",
     symbolBearing: false,
+    headerActions: true,
   },
   "order-ticket": {
     component: OrderTicketPanel,
@@ -191,6 +195,7 @@ export const PANELS: Record<string, PanelDef> = {
     glyph: "$",
     description: "Compact entry, presets, sizing",
     symbolBearing: false,
+    headerActions: true,
   },
 };
 

@@ -170,15 +170,34 @@ describe("ChartController", () => {
     expect(candle.orderCalls.at(-1)).toBe(Number.MAX_SAFE_INTEGER);
   });
 
-  it("main-pane overlay lines (EMA/SMA/VWAP) opt out of the candle scale's autoscale", () => {
-    // A far-off indicator value (e.g. an EMA computed over reverse-split-adjusted
-    // history) must never expand the candle price scale and crush the candles.
+  it("main-pane overlay lines (EMA/SMA/VWAP) exclude themselves from autoscale before any candle range is known", () => {
     const { facade, ctrl } = make(barReaderOf([]));
     ctrl.addIndicator({ instanceId: "ema-1", type: "EMA", params: { period: 200 } });
     const line = facade.created.find((c) => c.kind === "line");
-    const options = line?.options as { autoscaleInfoProvider?: () => { priceRange: unknown } };
+    const options = line?.options as { autoscaleInfoProvider?: (base: () => unknown) => { priceRange: unknown } };
     expect(options.autoscaleInfoProvider).toBeTypeOf("function");
-    expect(options.autoscaleInfoProvider!()).toEqual({ priceRange: null });
+    expect(options.autoscaleInfoProvider!(() => ({ priceRange: { minValue: 12, maxValue: 18 } })))
+      .toEqual({ priceRange: null });
+  });
+
+  it("main-pane overlay lines bound their autoscale to a multiple of the live candle range", () => {
+    // A far-off indicator value (e.g. a 200-period MA computed over reverse-split-
+    // adjusted history, where price has since fallen several multiples) must not
+    // silently vanish (the old always-excluded behavior), but also must not be free
+    // to crush the candles down to a sliver — it's capped at OVERLAY_AUTOSCALE_FACTORx
+    // the candles' own [low, high] span.
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 20)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // establishes the live candle range: [10, 20]
+    ctrl.addIndicator({ instanceId: "ema-1", type: "EMA", params: { period: 200 } });
+    const line = facade.created.find((c) => c.kind === "line");
+    const options = line?.options as { autoscaleInfoProvider?: (base: () => unknown) => { priceRange: unknown } };
+    // Wildly far off -> clipped to factor(3)x the candle span: [10-20, 20+20] = [-10, 40].
+    expect(options.autoscaleInfoProvider!(() => ({ priceRange: { minValue: -1000, maxValue: 1000 } })))
+      .toEqual({ priceRange: { minValue: -10, maxValue: 40 } });
+    // Already within the candle range -> passes through unclamped.
+    expect(options.autoscaleInfoProvider!(() => ({ priceRange: { minValue: 12, maxValue: 18 } })))
+      .toEqual({ priceRange: { minValue: 12, maxValue: 18 } });
   });
 
   it("MACD's sub-pane lines keep autoscaling their own pane (no priceRange override)", () => {

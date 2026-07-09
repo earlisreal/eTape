@@ -95,11 +95,36 @@ export const VOLUME_SCALE_MARGINS = { top: 1 - VOLUME_BAND, bottom: 0 } as const
 // default (3px, drawn on top). See ChartController's indicator series creation.
 export const INDICATOR_LINE_WIDTH = 1;
 
-// Overlay studies (EMA/SMA/VWAP) must never expand the candle price scale — a
-// far-off value (e.g. an EMA over reverse-split-adjusted history) would otherwise
-// crush the candles. Returning a null price range excludes the series from the
-// shared right scale's autoscale; the candles keep driving it and the line clips.
-export const OVERLAY_NO_AUTOSCALE = () => ({ priceRange: null });
+export interface PriceRange { minValue: number; maxValue: number }
+
+// Overlay studies (EMA/SMA/VWAP) sharing the candle price scale must never be
+// allowed to crush the candles down to a sliver — a far-off value (e.g. a
+// long-period MA over reverse-split-adjusted history, where price has since
+// moved several multiples) would otherwise dominate the shared scale.
+// Excluding overlays from autoscale entirely avoids that, but makes the line
+// invisible whenever it's off the candles' own range — common on eTape's
+// low-float/reverse-split-heavy movers, where a 200-period MA is routinely
+// several multiples away from the current price. Bound the expansion instead:
+// the scale may stretch up to `factor`x the candles' own [low, high] span to
+// fit the overlay, clipping anything further out than that.
+export const OVERLAY_AUTOSCALE_FACTOR = 3;
+
+export function boundedOverlayAutoscale(
+  getCandleRange: () => PriceRange | null,
+  factor: number,
+): (base: () => { priceRange: PriceRange | null } | null) => { priceRange: PriceRange | null } {
+  return (base) => {
+    const info = base();
+    const candle = getCandleRange();
+    if (!info?.priceRange || !candle) return { priceRange: null };
+    const span = candle.maxValue - candle.minValue;
+    if (span <= 0) return { priceRange: null };
+    const pad = (factor - 1) * span;
+    const minValue = Math.max(info.priceRange.minValue, candle.minValue - pad);
+    const maxValue = Math.min(info.priceRange.maxValue, candle.maxValue + pad);
+    return minValue <= maxValue ? { priceRange: { minValue, maxValue } } : { priceRange: null };
+  };
+}
 
 // Max empty bars the user can pan past the latest bar before hitting a wall.
 // Equals rightOffset so the right edge can't be dragged past its resting margin —

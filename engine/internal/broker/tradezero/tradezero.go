@@ -33,6 +33,11 @@ const defaultReplaceCancelTimeout = 3 * time.Second
 // in practice — this is defense in depth, not a path any config exercises.
 var errUnsupported = errors.New("tradezero: flatten unsupported")
 
+// errResetBalanceUnsupported is returned by ResetBalance: a real TZ account
+// can't be reset. Capabilities().ResetBalance is false so exec.Core is not
+// expected to call it in practice — defense in depth, like errUnsupported.
+var errResetBalanceUnsupported = errors.New("tradezero: reset balance unsupported")
+
 // reReplaceSuffix matches the "-rN" suffix the emulated-replace path (below)
 // appends to a resubmitted leg's TZ client-order-id.
 var reReplaceSuffix = regexp.MustCompile(`-r\d+$`)
@@ -533,6 +538,12 @@ func (a *Adapter) CancelAll(ctx context.Context, symbol string) error {
 // exists as defense in depth against a future caller that doesn't check.
 func (a *Adapter) Flatten(context.Context) error {
 	return errUnsupported
+}
+
+// ResetBalance is unsupported: a real account can't be reset. Capabilities()
+// reports ResetBalance:false so exec.Core never calls this in practice.
+func (a *Adapter) ResetBalance(context.Context, float64) error {
+	return errResetBalanceUnsupported
 }
 
 // Snapshot fetches the REST-authoritative account/positions/orders view,

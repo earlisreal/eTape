@@ -107,6 +107,12 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked("bad args")
 		}
 		return ackFromCmd(cd.ex.Do(exec.Flatten{Venue: exec.VenueID(a.Venue)}))
+	case "ResetBalance":
+		var a wsmsg.ResetBalanceArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return blocked("bad args")
+		}
+		return ackFromCmd(cd.ex.Do(exec.ResetBalance{Venue: exec.VenueID(a.Venue)}))
 	case "KillSwitch":
 		var a wsmsg.KillSwitchArgs
 		_ = json.Unmarshal(args, &a) // empty ok => all venues
@@ -322,7 +328,10 @@ func tifFromWire(t wsmsg.TIF) exec.TIF {
 }
 
 func venueToWire(v config.Venue) wsmsg.Venue {
-	return wsmsg.Venue{ID: v.ID, Broker: v.Broker, Env: v.Env, Credentials: v.Credentials, AccountID: v.AccountID}
+	return wsmsg.Venue{
+		ID: v.ID, Broker: v.Broker, Env: v.Env, Credentials: v.Credentials, AccountID: v.AccountID,
+		StartingBalance: v.StartingBalance,
+	}
 }
 
 func gateToWire(g config.Gate) wsmsg.Gate {
@@ -347,7 +356,10 @@ func venueConfigToWire(vc config.VenueConfig) wsmsg.VenueConfig {
 func venueConfigFromWire(venues []wsmsg.Venue, gate wsmsg.Gate) config.VenueConfig {
 	vs := make([]config.Venue, 0, len(venues))
 	for _, v := range venues {
-		vs = append(vs, config.Venue{ID: v.ID, Broker: v.Broker, Env: v.Env, Credentials: v.Credentials, AccountID: v.AccountID})
+		vs = append(vs, config.Venue{
+			ID: v.ID, Broker: v.Broker, Env: v.Env, Credentials: v.Credentials, AccountID: v.AccountID,
+			StartingBalance: v.StartingBalance,
+		})
 	}
 	vm := map[string]config.GateVenue{}
 	for id, gv := range gate.Venue {

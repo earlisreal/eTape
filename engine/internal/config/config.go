@@ -57,11 +57,25 @@ type Store struct {
 
 // Venue is one configured execution venue.  ->  [[venue]]
 type Venue struct {
-	ID          string `toml:"id"`          // slug used in events, topics, commands, gate config
-	Broker      string `toml:"broker"`      // tradezero | alpaca | moomoo | sim
-	Env         string `toml:"env"`         // paper | live
-	Credentials string `toml:"credentials"` // key into ~/.eTape/credentials.json
-	AccountID   string `toml:"account_id"`  // broker-specific (TZ accountId, moomoo accID)
+	ID              string  `toml:"id"`               // slug used in events, topics, commands, gate config
+	Broker          string  `toml:"broker"`           // tradezero | alpaca | moomoo | sim
+	Env             string  `toml:"env"`              // paper | live
+	Credentials     string  `toml:"credentials"`      // key into ~/.eTape/credentials.json
+	AccountID       string  `toml:"account_id"`       // broker-specific (TZ accountId, moomoo accID)
+	StartingBalance float64 `toml:"starting_balance"` // sim only; <=0 => DefaultSimStartingBalance
+}
+
+// DefaultSimStartingBalance is what a sim venue is funded with when
+// starting_balance is absent or <= 0.
+const DefaultSimStartingBalance = 100_000.0
+
+// EffectiveStartingBalance resolves the configured starting balance, applying
+// DefaultSimStartingBalance when unset/non-positive.
+func (v Venue) EffectiveStartingBalance() float64 {
+	if v.StartingBalance <= 0 {
+		return DefaultSimStartingBalance
+	}
+	return v.StartingBalance
 }
 
 // GateGlobal caps aggregate risk across all venues.  ->  [gate.global]
@@ -245,6 +259,9 @@ func ValidateVenueConfig(vc VenueConfig, credKeys []string) error {
 		}
 		if v.Broker == "tradezero" && v.AccountID == "" {
 			return fmt.Errorf("venue %q: tradezero requires account_id", v.ID)
+		}
+		if v.StartingBalance < 0 {
+			return fmt.Errorf("venue %q: starting_balance must be >= 0 (0 = default)", v.ID)
 		}
 	}
 	g := vc.Gate.Global

@@ -56,6 +56,19 @@ func venueMetas(cfg config.Config) []uihub.VenueMeta {
 	return out
 }
 
+// startingBalances maps venue id -> the resolved starting balance for every
+// sim venue (config.Venue.EffectiveStartingBalance, defaulting when unset).
+// Non-sim venues are omitted; ResetBalance is structurally unsupported there.
+func startingBalances(cfg config.Config) map[exec.VenueID]float64 {
+	out := map[exec.VenueID]float64{}
+	for _, v := range cfg.Venues {
+		if v.Broker == "sim" {
+			out[exec.VenueID(v.ID)] = v.EffectiveStartingBalance()
+		}
+	}
+	return out
+}
+
 type venueBroker struct {
 	ID     exec.VenueID
 	Broker exec.Broker

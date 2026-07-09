@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
 import { useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import type { CSSProperties } from "react";
 import type { PanelProps } from "./registry";
 import type { Side, OrderType, TIF, SubmitOrderArgs } from "../../wire/contract";
@@ -14,6 +15,8 @@ import { sideLabel, bareSymbol, abbrevType } from "../exec/orderStatus";
 import { formatPrice, QUOTE_DECIMALS } from "../../render/format";
 import { useOpenSettings } from "../OpenSettingsContext";
 import { StepperInput } from "./StepperInput";
+import { PanelHeaderActionsSlotContext } from "./headerSlot";
+import { IconGear } from "./tv/tvIcons";
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
@@ -29,6 +32,12 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
   const openSettings = useOpenSettings();
+  // Portaled into PanelFrame's ledger-header actions slot, beside the close
+  // button (see headerSlot.ts's PanelHeaderActionsSlotContext) — same pattern
+  // as TapePanel's settings gear. undefined (no frame above, e.g. a body-level
+  // test) falls back to rendering inline; null (frame present, slot div not
+  // yet mounted) renders nothing for that tick.
+  const actionsSlot = useContext(PanelHeaderActionsSlotContext);
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
 
   const group = groupProp ?? config.group;
@@ -97,8 +106,25 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   // without it, controls overflow their flex column and overlap the neighbor.
   const full = { width: "100%", boxSizing: "border-box" } as const;
 
+  // Header row: venue select then settings gear, in that order so the gear
+  // lands immediately left of PanelFrame's close button — same layout as
+  // TapePanel's lone header gear, extended with the venue picker.
+  const headerActions = (
+    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <select data-testid="venue" className="ctl mono" value={venue} onChange={(e) => selectVenue(e.target.value)}>
+        {venues.map((v) => <option key={v} value={v}>{v}</option>)}
+      </select>
+      <button type="button" data-testid="open-settings" aria-label="order settings"
+        onClick={() => openSettings?.openOrderSettings()}
+        style={{ display: "inline-flex", border: "none", background: "transparent", color: palette.textMuted, cursor: "pointer", padding: 3 }}>
+        <IconGear size={13} />
+      </button>
+    </div>
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: 6, height: "100%", background: palette.surface, color: palette.text, fontSize: 12, overflow: "auto" }}>
+      {actionsSlot === undefined ? headerActions : actionsSlot ? createPortal(headerActions, actionsSlot) : null}
       {/* Strip 1 — header blotter line */}
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
         <strong className="serif" style={{ fontSize: 14 }}>{bareSymbol(symbol)}</strong>
@@ -107,14 +133,6 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
           <span style={{ color: palette.textMuted }}>/</span>
           {priceSpan("ask", quote?.ask, palette.down)}
         </span>
-        <div style={{ flex: 1 }} />
-        <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-          <span className="col-head">Venue</span>
-          <select data-testid="venue" className="ctl mono" value={venue} onChange={(e) => selectVenue(e.target.value)}>
-            {venues.map((v) => <option key={v} value={v}>{v}</option>)}
-          </select>
-        </label>
-        <button data-testid="open-settings" className="btn" onClick={() => openSettings?.openOrderSettings()}>⚙</button>
       </div>
       {/* Strip 2 — type · price · stop */}
       <div style={{ display: "flex", gap: 6 }}>
