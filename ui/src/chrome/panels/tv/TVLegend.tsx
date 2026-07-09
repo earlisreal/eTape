@@ -4,6 +4,7 @@ import { TV_FONT, TV_GEOM, type TvChrome } from "../../../render/chart/tvTheme";
 import { INDICATOR_CATALOG, type IndicatorInstance } from "../../../render/chart/indicatorSeries";
 import type { LegendView } from "./legendView";
 import { IconEye, IconEyeOff, IconGear, IconClose } from "./tvIcons";
+import { HoverButton } from "../../controls/HoverButton";
 
 export interface TVLegendHandle { update(view: LegendView): void }
 export interface TVLegendProps {
@@ -66,11 +67,14 @@ export function TVLegend({ chrome, symbol, timeframe, instances, paneOffsets, on
         {descs.map((s, idx) => <span key={s.slot} data-testid={`legend-ind-${inst.instanceId}-${idx}`} ref={setCell(`ind-${inst.instanceId}-${idx}`)} />)}
         {hovered === inst.instanceId && (
           <span style={{ display: "inline-flex", gap: 2 }}>
-            <button aria-label={`hide ${inst.instanceId}`} onClick={() => onToggleHidden(inst.instanceId)} style={ctrlBtn(chrome)}>
+            <HoverButton aria-label={`hide ${inst.instanceId}`} onClick={() => onToggleHidden(inst.instanceId)}
+              style={ctrlBtn(chrome)} hoverStyle={{ background: chrome.hover, color: chrome.text }}>
               {inst.hidden ? <IconEyeOff size={13} /> : <IconEye size={13} />}
-            </button>
-            <button aria-label={`settings ${inst.instanceId}`} onClick={() => onEditIndicator(inst.instanceId)} style={ctrlBtn(chrome)}><IconGear size={13} /></button>
-            <button aria-label={`remove ${inst.instanceId}`} onClick={() => onRemoveIndicator(inst.instanceId)} style={ctrlBtn(chrome)}><IconClose size={13} /></button>
+            </HoverButton>
+            <HoverButton aria-label={`settings ${inst.instanceId}`} onClick={() => onEditIndicator(inst.instanceId)}
+              style={ctrlBtn(chrome)} hoverStyle={{ background: chrome.hover, color: chrome.text }}><IconGear size={13} /></HoverButton>
+            <HoverButton aria-label={`remove ${inst.instanceId}`} onClick={() => onRemoveIndicator(inst.instanceId)}
+              style={ctrlBtn(chrome)} hoverStyle={{ background: chrome.hover, color: chrome.text }}><IconClose size={13} /></HoverButton>
           </span>
         )}
       </div>

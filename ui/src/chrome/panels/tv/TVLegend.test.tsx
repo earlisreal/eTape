@@ -11,6 +11,14 @@ afterEach(cleanup);
 const chrome = getTvChrome("light");
 const ema: IndicatorInstance = { instanceId: "e1", type: "EMA", params: { period: 9 } };
 
+// jsdom/cssstyle normalizes hex assignments to rgb() on readback; run every
+// expected color through the same normalization so we're not hardcoding it.
+const cssColor = (hex: string): string => {
+  const div = document.createElement("div");
+  div.style.color = hex;
+  return div.style.color;
+};
+
 function Harness({ onToggle, hRef }: { onToggle: (id: string) => void; hRef: MutableRefObject<TVLegendHandle | null> }) {
   // hRef already has the exact shape TVLegend's legendRef prop expects
   // ({ current: TVLegendHandle | null }), so pass it straight through —
@@ -40,5 +48,26 @@ describe("TVLegend", () => {
     fireEvent.mouseEnter(screen.getByTestId("legend-row-e1"));
     fireEvent.click(screen.getByLabelText("hide e1"));
     expect(onToggle).toHaveBeenCalledWith("e1");
+  });
+
+  it("hovering a legend control button shows the chrome.hover/chrome.text overlay", () => {
+    const hRef: { current: TVLegendHandle | null } = { current: null };
+    render(<Harness onToggle={() => {}} hRef={hRef} />);
+    fireEvent.mouseEnter(screen.getByTestId("legend-row-e1"));
+    const hideBtn = screen.getByLabelText("hide e1") as HTMLButtonElement;
+    const gearBtn = screen.getByLabelText("settings e1") as HTMLButtonElement;
+    const closeBtn = screen.getByLabelText("remove e1") as HTMLButtonElement;
+
+    expect(hideBtn.style.background).toBe("transparent");
+
+    // Note: don't fireEvent.mouseLeave the button here — with no relatedTarget,
+    // RTL's mouseleave is treated as leaving the whole subtree, which also
+    // fires the row's own onMouseLeave and unmounts these buttons (existing
+    // row-level reveal behavior, out of scope for this button-level check).
+    for (const btn of [hideBtn, gearBtn, closeBtn]) {
+      fireEvent.mouseEnter(btn);
+      expect(btn.style.background).toBe(cssColor(chrome.hover));
+      expect(btn.style.color).toBe(cssColor(chrome.text));
+    }
   });
 });

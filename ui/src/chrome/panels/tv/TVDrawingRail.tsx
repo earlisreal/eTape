@@ -13,6 +13,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { TV_FONT, TV_GEOM, type TvChrome } from "../../../render/chart/tvTheme";
 import type { Tool } from "../../../render/chart/drawings/interaction";
 import { IconGrip, IconTrend, IconHLine, IconExtended, IconRect, IconMeasure, IconEye, IconEyeOff, IconTrash } from "./tvIcons";
+import { HoverButton } from "../../controls/HoverButton";
 
 export interface RailPos { x: number; y: number }
 
@@ -35,7 +36,13 @@ export function TVDrawingRail({ chrome, activeTool, hideAll, symbol, onSelectToo
 
   const btn = (active: boolean): CSSProperties => ({ width: TV_GEOM.iconBtn, height: TV_GEOM.iconBtn, display: "grid",
     placeItems: "center", background: active ? chrome.hover : "transparent", border: "none", borderRadius: TV_GEOM.radius,
-    color: active ? chrome.accent : chrome.text, cursor: "pointer" });
+    color: active ? chrome.accent : chrome.text, cursor: "pointer",
+    boxShadow: active ? `inset 0 0 0 1px ${chrome.accent}` : "none" });
+  // Active tool hovers to a no-visual-op relative to its own active look (ring +
+  // accent persist via the base `style` above); inactive tools get the plain
+  // grey/text overlay. Never leave hoverStyle undefined — HoverButton's default
+  // overlay is the *app* palette, which is wrong for the TV island.
+  const toolHover = (active: boolean): CSSProperties => ({ background: chrome.hover, color: active ? chrome.accent : chrome.text });
   // Popovers hang below the horizontal bar (they used to fly out to the right of
   // the old vertical rail).
   const popover: CSSProperties = { position: "absolute", left: 0, top: TV_GEOM.iconBtn + 6, zIndex: 20, background: chrome.surface,
@@ -100,23 +107,30 @@ export function TVDrawingRail({ chrome, activeTool, hideAll, symbol, onSelectToo
         <IconGrip size={14} />
       </div>
 
-      <button aria-label="trend line" style={btn(activeTool === "trendline")} onClick={() => toggleTool("trendline", activeTool === "trendline")}><IconTrend size={16} /></button>
-      <button aria-label="horizontal line" style={btn(activeTool === "hline")} onClick={() => toggleTool("hline", activeTool === "hline")}><IconHLine size={16} /></button>
-      <button aria-label="extended line" style={btn(activeTool === "extendedline")} onClick={() => toggleTool("extendedline", activeTool === "extendedline")}><IconExtended size={16} /></button>
-      <button aria-label="rectangle" style={btn(activeTool === "rect")} onClick={() => toggleTool("rect", activeTool === "rect")}><IconRect size={16} /></button>
-      <button aria-label="measure" style={btn(activeTool === "measure")} onClick={() => toggleTool("measure", activeTool === "measure")}><IconMeasure size={16} /></button>
+      <HoverButton aria-label="trend line" style={btn(activeTool === "trendline")} hoverStyle={toolHover(activeTool === "trendline")}
+        onClick={() => toggleTool("trendline", activeTool === "trendline")}><IconTrend size={16} /></HoverButton>
+      <HoverButton aria-label="horizontal line" style={btn(activeTool === "hline")} hoverStyle={toolHover(activeTool === "hline")}
+        onClick={() => toggleTool("hline", activeTool === "hline")}><IconHLine size={16} /></HoverButton>
+      <HoverButton aria-label="extended line" style={btn(activeTool === "extendedline")} hoverStyle={toolHover(activeTool === "extendedline")}
+        onClick={() => toggleTool("extendedline", activeTool === "extendedline")}><IconExtended size={16} /></HoverButton>
+      <HoverButton aria-label="rectangle" style={btn(activeTool === "rect")} hoverStyle={toolHover(activeTool === "rect")}
+        onClick={() => toggleTool("rect", activeTool === "rect")}><IconRect size={16} /></HoverButton>
+      <HoverButton aria-label="measure" style={btn(activeTool === "measure")} hoverStyle={toolHover(activeTool === "measure")}
+        onClick={() => toggleTool("measure", activeTool === "measure")}><IconMeasure size={16} /></HoverButton>
       <div style={{ width: 1, height: 20, background: chrome.border, margin: "0 2px" }} />
-      <button aria-label="hide all drawings" aria-pressed={hideAll} style={btn(hideAll)} onClick={onToggleHideAll}>
+      <HoverButton aria-label="hide all drawings" aria-pressed={hideAll} style={btn(hideAll)} hoverStyle={toolHover(hideAll)} onClick={onToggleHideAll}>
         {hideAll ? <IconEyeOff size={16} /> : <IconEye size={16} />}
-      </button>
+      </HoverButton>
       <div style={{ position: "relative" }}>
-        <button aria-label="delete" style={btn(false)} onClick={onTrash}><IconTrash size={16} /></button>
+        <HoverButton aria-label="delete" style={btn(false)} hoverStyle={toolHover(false)} onClick={onTrash}><IconTrash size={16} /></HoverButton>
         {confirm && (
           <div role="dialog" style={{ ...popover, left: "auto", right: 0, padding: 10, width: 200 }}>
             <div style={{ marginBottom: 8 }}>Clear all drawings for {bare}?</div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <button onClick={() => setConfirm(false)} style={{ padding: "4px 10px", background: "transparent", border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, color: chrome.text, cursor: "pointer" }}>Cancel</button>
-              <button onClick={() => { setConfirm(false); onClearAll(); }} style={{ padding: "4px 10px", background: chrome.down, border: "none", borderRadius: TV_GEOM.radius, color: "#fff", cursor: "pointer" }}>Clear</button>
+              <HoverButton onClick={() => setConfirm(false)} hoverStyle={{ background: chrome.hover, color: chrome.text }}
+                style={{ padding: "4px 10px", background: "transparent", border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, color: chrome.text, cursor: "pointer" }}>Cancel</HoverButton>
+              <HoverButton onClick={() => { setConfirm(false); onClearAll(); }} hoverStyle={{ background: chrome.hover, color: chrome.text }}
+                style={{ padding: "4px 10px", background: chrome.down, border: "none", borderRadius: TV_GEOM.radius, color: "#fff", cursor: "pointer" }}>Clear</HoverButton>
             </div>
           </div>
         )}

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { TV_FONT, TV_GEOM, TV_SWATCHES, type TvChrome } from "../../../render/chart/tvTheme";
 import { LINE_STYLE_NAMES, type LineStyleName } from "../../../render/chart/lineStyle";
 import { IconClone, IconTrash } from "./tvIcons";
+import { HoverButton } from "../../controls/HoverButton";
 
 export interface TVFloatingToolbarProps {
   chrome: TvChrome; rect: { x: number; y: number; w: number; h: number };
@@ -19,6 +20,10 @@ export function TVFloatingToolbar({ chrome, rect, color, width, lineStyle, onCol
   // lockstep with the rest of the TV chrome (pill, swatch, popover, buttons all share
   // one token).
   const iconBtn = { width: 24, height: 24, display: "grid", placeItems: "center", background: "transparent", border: "none", borderRadius: TV_GEOM.radius, color: chrome.text, cursor: "pointer" } as const;
+  const iconHover = { background: chrome.hover, color: chrome.text };
+  // Swatches' background IS the color they represent — hover must not swap it
+  // out, so use an inset ring instead of the standard background/color overlay.
+  const swatchHover = { boxShadow: `inset 0 0 0 2px ${chrome.hover}` };
 
   return (
     // data-drawing-ui: tells DrawingInteraction's raw pointerdown listener on the
@@ -28,28 +33,28 @@ export function TVFloatingToolbar({ chrome, rect, color, width, lineStyle, onCol
       zIndex: 8, display: "flex", alignItems: "center", gap: 4, padding: "4px 6px", background: chrome.surface,
       border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, boxShadow: "0 4px 16px rgba(0,0,0,.22)", font: `${TV_GEOM.uiFont}px ${TV_FONT}`, fontVariantNumeric: "tabular-nums" }}>
       <div style={{ position: "relative" }}>
-        <button aria-label="color" onClick={() => setPalette((v) => !v)}
+        <HoverButton aria-label="color" onClick={() => setPalette((v) => !v)} hoverStyle={swatchHover}
           style={{ width: 20, height: 20, borderRadius: TV_GEOM.radius, border: `1px solid ${chrome.border}`, background: color, cursor: "pointer" }} />
         {palette && (
           <div style={{ position: "absolute", top: 26, left: 0, zIndex: 20, display: "grid", gridTemplateColumns: "repeat(4, 20px)", gap: 4,
             padding: 6, background: chrome.surface, border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, boxShadow: "0 6px 20px rgba(0,0,0,.2)" }}>
             {TV_SWATCHES.map((c) => (
-              <button key={c} aria-label={`color ${c}`} onClick={() => { onColor(c); setPalette(false); }}
+              <HoverButton key={c} aria-label={`color ${c}`} onClick={() => { onColor(c); setPalette(false); }} hoverStyle={swatchHover}
                 style={{ width: 20, height: 20, borderRadius: TV_GEOM.radius, border: `1px solid ${chrome.border}`, background: c, cursor: "pointer" }} />
             ))}
           </div>
         )}
       </div>
       {[1, 2, 3, 4].map((w) => (
-        <button key={w} aria-label={`width ${w}`} onClick={() => onWidth(w)}
-          style={{ ...iconBtn, width: 22, color: w === width ? chrome.accent : chrome.text, fontWeight: w === width ? 700 : 500 }}>{w}</button>
+        <HoverButton key={w} aria-label={`width ${w}`} onClick={() => onWidth(w)} hoverStyle={iconHover}
+          style={{ ...iconBtn, width: 22, color: w === width ? chrome.accent : chrome.text, fontWeight: w === width ? 700 : 500 }}>{w}</HoverButton>
       ))}
       <select aria-label="line style" value={lineStyle} onChange={(e) => onLineStyle(e.target.value as LineStyleName)}
         style={{ background: chrome.bg, border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, color: chrome.text, padding: "2px 4px" }}>
         {LINE_STYLE_NAMES.map((n) => <option key={n} value={n}>{n}</option>)}
       </select>
-      <button aria-label="clone" onClick={onClone} style={iconBtn}><IconClone size={15} /></button>
-      <button aria-label="delete drawing" onClick={onDelete} style={iconBtn}><IconTrash size={15} /></button>
+      <HoverButton aria-label="clone" onClick={onClone} style={iconBtn} hoverStyle={iconHover}><IconClone size={15} /></HoverButton>
+      <HoverButton aria-label="delete drawing" onClick={onDelete} style={iconBtn} hoverStyle={iconHover}><IconTrash size={15} /></HoverButton>
     </div>
   );
 }
