@@ -100,6 +100,14 @@ input.numfield { -moz-appearance: textfield; appearance: textfield; }
   .venue-remove-btn { transition: none; }
 }
 
+/* First-run venue-setup prompt (Task 3, venues/creds redesign) — fade-in only,
+   no translate, per the design note; disabled under prefers-reduced-motion. */
+@keyframes venue-setup-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.venue-setup-prompt { animation: venue-setup-fade-in 160ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .venue-setup-prompt { animation: none; }
+}
+
 /* Kill switch — deliberately loud. */
 .kill-switch {
   width: 100%; text-align: center; padding: 6px; border: 2px solid var(--danger);
