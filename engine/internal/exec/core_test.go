@@ -266,6 +266,104 @@ func buildCoreWith(t *testing.T, b *capStub) (*exec.Core, *capStub) {
 	return c, b
 }
 
+// drainUntilOrderFilled reads Updates until it sees an OrderUpdate for
+// orderID with Status Filled, returning every Update observed along the way
+// (including that OrderUpdate). emitForEvent pushes FillUpdate, then any
+// TradeUpdate(s), then OrderUpdate for the same fill event in that exact
+// sequence on Core's single-writer updates channel, so collecting through
+// the OrderUpdate is guaranteed to capture any TradeUpdate the fill produced.
+func drainUntilOrderFilled(t *testing.T, c *exec.Core, orderID string) []exec.Update {
+	t.Helper()
+	var seen []exec.Update
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case u := <-c.Updates():
+			seen = append(seen, u)
+			if ou, ok := u.(exec.OrderUpdate); ok && ou.Order.ID == orderID && ou.Order.Status == exec.StatusFilled {
+				return seen
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for order fill")
+			return nil
+		}
+	}
+}
+
+// TestCoreEmitsTradeUpdateOnRoundTripClose exercises the emitForEvent wiring
+// (not RoundTripAggregator.Apply directly, which Task 1 already covers): a
+// live BUY fill opens a position, no TradeUpdate follows; the SELL fill that
+// closes it back to flat must produce exactly one TradeUpdate carrying the
+// realized round trip.
+func TestCoreEmitsTradeUpdateOnRoundTripClose(t *testing.T) {
+	c, _, _ := newTestCore(t, "sim-1")
+	if ack := c.Do(exec.Arm{}); !ack.Accepted { // master
+		t.Fatalf("master arm: %+v", ack)
+	}
+	if ack := c.Do(exec.Arm{Venue: "sim-1"}); !ack.Accepted {
+		t.Fatalf("venue arm: %+v", ack)
+	}
+
+	buyAck := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 100})
+	if !buyAck.Accepted {
+		t.Fatalf("buy submit: %+v", buyAck)
+	}
+	opening := drainUntilOrderFilled(t, c, buyAck.OrderID)
+	for _, u := range opening {
+		if _, ok := u.(exec.TradeUpdate); ok {
+			t.Fatalf("opening fill from flat must not close a trade, got %+v", u)
+		}
+	}
+
+	sellAck := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideSell, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 100})
+	if !sellAck.Accepted {
+		t.Fatalf("sell submit: %+v", sellAck)
+	}
+	closing := drainUntilOrderFilled(t, c, sellAck.OrderID)
+	var trades []exec.ClosedTrade
+	for _, u := range closing {
+		if tu, ok := u.(exec.TradeUpdate); ok {
+			trades = append(trades, tu.Trade)
+		}
+	}
+	if len(trades) != 1 {
+		t.Fatalf("expected exactly one TradeUpdate on full close, got %d: %+v", len(trades), trades)
+	}
+	tr := trades[0]
+	if !tr.IsLong || tr.Qty != 10 || tr.EntryPrice != 100 || tr.ExitPrice != 100 || tr.Realized != 0 {
+		t.Fatalf("closed trade wrong: %+v", tr)
+	}
+}
+
+// TestCoreNoTradeUpdateOnPartialClose verifies a fill that only partially
+// unwinds a position (trip stays open) does not emit a TradeUpdate.
+func TestCoreNoTradeUpdateOnPartialClose(t *testing.T) {
+	c, _, _ := newTestCore(t, "sim-1")
+	if ack := c.Do(exec.Arm{}); !ack.Accepted { // master
+		t.Fatalf("master arm: %+v", ack)
+	}
+	if ack := c.Do(exec.Arm{Venue: "sim-1"}); !ack.Accepted {
+		t.Fatalf("venue arm: %+v", ack)
+	}
+
+	buyAck := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 100})
+	if !buyAck.Accepted {
+		t.Fatalf("buy submit: %+v", buyAck)
+	}
+	drainUntilOrderFilled(t, c, buyAck.OrderID)
+
+	sellAck := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideSell, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 5, LimitPrice: 100})
+	if !sellAck.Accepted {
+		t.Fatalf("sell submit: %+v", sellAck)
+	}
+	partial := drainUntilOrderFilled(t, c, sellAck.OrderID)
+	for _, u := range partial {
+		if tu, ok := u.(exec.TradeUpdate); ok {
+			t.Fatalf("partial close must not emit a TradeUpdate, got %+v", tu)
+		}
+	}
+}
+
 func TestCore_Flatten_RequiresFlattenCapability(t *testing.T) {
 	// A venue whose broker advertises FlattenAll=false must reject Flatten.
 	c, _ := buildCoreWith(t, &capStub{flatten: false})

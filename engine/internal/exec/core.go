@@ -82,6 +82,8 @@ type Core struct {
 
 	state *State
 	marks markState
+
+	trades *RoundTripAggregator
 }
 
 // CoreConfig configures NewCore.
@@ -115,6 +117,7 @@ func NewCore(cfg CoreConfig) *Core {
 		updates: make(chan Update, 4096),
 		state:   NewState(cfg.Venues),
 		marks:   markState{},
+		trades:  NewRoundTripAggregator(),
 	}
 	// Auto-arm is the ONLY boot path that starts armed; Recover never touches
 	// arm state, so a restart with no auto-arm venue is still fully disarmed.
@@ -263,6 +266,9 @@ func (c *Core) appendAndFold(ev Event, src Source) error {
 func (c *Core) emitForEvent(ev Event) {
 	if f, ok := ev.(OrderFilled); ok {
 		c.emit(FillUpdate{Fill: f.F})
+		for _, t := range c.trades.Apply(f.F.Venue, f.F.Symbol, f.F.Side, f.F.Qty, f.F.Price, f.F.TsMs) {
+			c.emit(TradeUpdate{Trade: t})
+		}
 	}
 	if v, ok := c.state.OrderVenue(ev.OrderID()); ok {
 		if o, ok := c.state.Venue(v).Orders[ev.OrderID()]; ok {

@@ -18,9 +18,11 @@ type StatusUpdate struct {
 	MasterArmed bool
 	Note        string
 }
+type TradeUpdate struct{ Trade ClosedTrade }
 
 func (OrderUpdate) isExecUpdate()    {}
 func (FillUpdate) isExecUpdate()     {}
 func (AccountUpdate) isExecUpdate()  {}
 func (PositionUpdate) isExecUpdate() {}
 func (StatusUpdate) isExecUpdate()   {}
+func (TradeUpdate) isExecUpdate()    {}
