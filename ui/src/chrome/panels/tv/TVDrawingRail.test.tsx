@@ -8,8 +8,8 @@ import { getTvChrome } from "../../../render/chart/tvTheme";
 afterEach(cleanup);
 const chrome = getTvChrome("light");
 const base = {
-  chrome, activeTool: "select" as const, magnet: true, hideAll: false, symbol: "US.AAPL",
-  onSelectTool: vi.fn(), onToggleMagnet: vi.fn(), onToggleHideAll: vi.fn(),
+  chrome, activeTool: "select" as const, hideAll: false, symbol: "US.AAPL",
+  onSelectTool: vi.fn(), onToggleHideAll: vi.fn(),
   hasSelection: () => false, onDeleteSelection: vi.fn(), onClearAll: vi.fn(),
 };
 
@@ -85,13 +85,10 @@ describe("TVDrawingRail", () => {
     expect(base.onSelectTool).toHaveBeenCalledWith("select");
   });
 
-  it("toggles magnet and hide-all", () => {
+  it("toggles hide-all", () => {
     render(<TVDrawingRail {...base} />);
-    fireEvent.click(screen.getByLabelText("magnet"));
     fireEvent.click(screen.getByLabelText("hide all drawings"));
-    expect(base.onToggleMagnet).toHaveBeenCalled();
     expect(base.onToggleHideAll).toHaveBeenCalled();
-    expect(screen.getByLabelText("magnet").getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByLabelText("hide all drawings").getAttribute("aria-pressed")).toBe("false");
   });
 

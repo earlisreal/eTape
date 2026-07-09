@@ -2,7 +2,7 @@ import type { Bar } from "../../../gen/wsmsg";
 import { anchorCount, type Anchor, type Drawing, type DrawingKind } from "./model";
 import type { DrawingStore } from "./store";
 import type { DrawingsPrimitiveHandle } from "./primitive";
-import { hitTest, snapToLevels, timeToLogical, type Px } from "./geometry";
+import { hitTest, timeToLogical, type Px } from "./geometry";
 
 export type Tool = "select" | "hline" | "trendline" | "extendedline" | "rect" | "measure";
 
@@ -28,7 +28,6 @@ export interface DrawingContext {
   symbol(): string;
   bars(): readonly Bar[];
   timeframeMs(): number;
-  magnet(): boolean;
 }
 
 type PointerLike = { clientX: number; clientY: number; target?: EventTarget | null; button?: number };
@@ -40,8 +39,6 @@ type Gesture =
   | { kind: "measuring"; from: Anchor }
   | { kind: "handleDrag"; id: string; index: number }
   | { kind: "bodyDrag"; id: string; downLogical: number; downPrice: number; orig: Anchor[] };
-
-const MAGNET_PX = 6;
 
 export class DrawingInteraction {
   private tool: Tool = "select";
@@ -183,16 +180,7 @@ export class DrawingInteraction {
     if (logical === null) return null;
     const idx = Math.max(0, Math.min(bars.length - 1, Math.round(logical)));
     const timeMs = Date.parse(bars[idx].bucketStart);
-    const raw = this.facade.coordinateToPrice(p.y);
-    let price = raw ?? 0;
-    if (this.ctx.magnet() && raw !== null) {
-      const b = bars[idx];
-      const levels = [b.o, b.h, b.l, b.c]
-        .map((pr) => ({ price: pr, y: this.facade.priceToCoordinate(pr) }))
-        .filter((l): l is { price: number; y: number } => l.y !== null);
-      const snapped = snapToLevels(p.y, levels, MAGNET_PX);
-      if (snapped !== null) price = snapped;
-    }
+    const price = this.facade.coordinateToPrice(p.y) ?? 0;
     return { timeMs, price };
   }
   private project(a: Anchor): Px | null {

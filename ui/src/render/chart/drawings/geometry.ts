@@ -67,20 +67,6 @@ export function extendToEdge(p0: Px, p1: Px, width: number): Px {
   return { x: targetX, y: p0.y + t * dy };
 }
 
-// Magnet: nearest level whose y is within tolPx of the cursor, else null.
-export function snapToLevels(cursorY: number, levels: readonly { price: number; y: number }[], tolPx: number): number | null {
-  let bestPrice: number | null = null;
-  let bestDist = Infinity;
-  for (const l of levels) {
-    const d = Math.abs(cursorY - l.y);
-    if (d <= tolPx && d < bestDist) {
-      bestDist = d;
-      bestPrice = l.price;
-    }
-  }
-  return bestPrice;
-}
-
 // Pixel-space hit test. `pts` are the projected pixel positions of the drawing's
 // anchors (null = off-screen). Handles win over the body. `width` is the pane
 // width for horizontal/ray extension.

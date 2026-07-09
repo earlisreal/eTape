@@ -12,20 +12,20 @@ import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent } from "react";
 import { TV_FONT, TV_GEOM, type TvChrome } from "../../../render/chart/tvTheme";
 import type { Tool } from "../../../render/chart/drawings/interaction";
-import { IconGrip, IconTrend, IconHLine, IconExtended, IconRect, IconMeasure, IconMagnet, IconEye, IconEyeOff, IconTrash } from "./tvIcons";
+import { IconGrip, IconTrend, IconHLine, IconExtended, IconRect, IconMeasure, IconEye, IconEyeOff, IconTrash } from "./tvIcons";
 
 export interface RailPos { x: number; y: number }
 
 export interface TVDrawingRailProps {
-  chrome: TvChrome; activeTool: Tool; magnet: boolean; hideAll: boolean; symbol: string;
-  onSelectTool: (t: Tool) => void; onToggleMagnet: () => void; onToggleHideAll: () => void;
+  chrome: TvChrome; activeTool: Tool; hideAll: boolean; symbol: string;
+  onSelectTool: (t: Tool) => void; onToggleHideAll: () => void;
   hasSelection: () => boolean; onDeleteSelection: () => void; onClearAll: () => void;
   initialPos?: RailPos | null; onPosChange?: (p: RailPos) => void;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
-export function TVDrawingRail({ chrome, activeTool, magnet, hideAll, symbol, onSelectTool, onToggleMagnet, onToggleHideAll, hasSelection, onDeleteSelection, onClearAll, initialPos, onPosChange }: TVDrawingRailProps): JSX.Element {
+export function TVDrawingRail({ chrome, activeTool, hideAll, symbol, onSelectTool, onToggleHideAll, hasSelection, onDeleteSelection, onClearAll, initialPos, onPosChange }: TVDrawingRailProps): JSX.Element {
   const [confirm, setConfirm] = useState(false);
   const [pos, setPos] = useState<RailPos | null>(initialPos ?? null);
   const railRef = useRef<HTMLDivElement | null>(null);
@@ -106,7 +106,6 @@ export function TVDrawingRail({ chrome, activeTool, magnet, hideAll, symbol, onS
       <button aria-label="rectangle" style={btn(activeTool === "rect")} onClick={() => toggleTool("rect", activeTool === "rect")}><IconRect size={16} /></button>
       <button aria-label="measure" style={btn(activeTool === "measure")} onClick={() => toggleTool("measure", activeTool === "measure")}><IconMeasure size={16} /></button>
       <div style={{ width: 1, height: 20, background: chrome.border, margin: "0 2px" }} />
-      <button aria-label="magnet" aria-pressed={magnet} style={btn(magnet)} onClick={onToggleMagnet}><IconMagnet size={16} /></button>
       <button aria-label="hide all drawings" aria-pressed={hideAll} style={btn(hideAll)} onClick={onToggleHideAll}>
         {hideAll ? <IconEyeOff size={16} /> : <IconEye size={16} />}
       </button>

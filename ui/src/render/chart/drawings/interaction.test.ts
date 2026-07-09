@@ -35,8 +35,8 @@ function fakeHost() {
   };
   return { host, fire: (t: string, e: any) => handlers.get(t)?.(e) };
 }
-function ctx(magnet = false) {
-  return { symbol: () => "US.AAPL", bars: () => bars, timeframeMs: () => 60_000, magnet: () => magnet };
+function ctx() {
+  return { symbol: () => "US.AAPL", bars: () => bars, timeframeMs: () => 60_000 };
 }
 
 let ids = 0;
@@ -165,17 +165,6 @@ describe("DrawingInteraction", () => {
     expect(prim.setSelection).toHaveBeenLastCalledWith(null);
   });
 
-  it("magnet snaps the placed price to the hovered bar's OHLC when enabled", () => {
-    const store = new DrawingStore();
-    const { host, fire } = fakeHost();
-    const di = new DrawingInteraction(host, fakeFacade(), fakePrimitive(), store, ctx(true), { newId });
-    di.setTool("hline");
-    // bar0 high=20 → y=980. Click at y=979 (1px away, within 6px, strictly nearer than
-    // any other OHLC level of this bar) → snaps to 20.
-    fire("pointerdown", { clientX: 0, clientY: 979 });
-    expect(store.forSymbol("US.AAPL")[0].anchors[0].price).toBe(20);
-  });
-
   it("measure shows a transient box and never persists a drawing", () => {
     const store = new DrawingStore();
     const prim = fakePrimitive();
@@ -296,7 +285,7 @@ describe("DrawingInteraction context-menu/selection API", () => {
     setPanZoomEnabled: () => {},
   });
   const mkPrim = () => ({ setSelection: vi.fn(), setTransient: vi.fn(), requestUpdate: vi.fn() });
-  const mkCtx = () => ({ symbol: () => "US.AAPL", bars: () => [], timeframeMs: () => 60_000, magnet: () => false });
+  const mkCtx = () => ({ symbol: () => "US.AAPL", bars: () => [], timeframeMs: () => 60_000 });
 
   const seedHline = (store: DrawingStore) =>
     store.upsert({ id: "h1", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 0, price: 10 }], createdMs: 1, updatedMs: 1 });

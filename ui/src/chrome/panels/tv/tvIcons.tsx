@@ -31,7 +31,6 @@ export const IconHLine = ({ size }: P) => <Svg size={size}><path d="M3 12h18" />
 export const IconExtended = ({ size }: P) => <Svg size={size}><path d="M4 19L20 5" /><path d="M4 19l3-1M4 19l1-3" /><path d="M20 5l-3 1M20 5l-1 3" /></Svg>;
 export const IconRect = ({ size }: P) => <Svg size={size}><rect x="4" y="6" width="16" height="12" rx="1" /></Svg>;
 export const IconMeasure = ({ size }: P) => <Svg size={size}><path d="M12 4v16M12 4l-3 3M12 4l3 3M12 20l-3-3M12 20l3-3" /></Svg>;
-export const IconMagnet = ({ size }: P) => <Svg size={size}><path d="M6 4v7a6 6 0 0012 0V4h-4v7a2 2 0 01-4 0V4z" /></Svg>;
 export const IconEye = ({ size }: P) => <Svg size={size}><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z" /><circle cx="12" cy="12" r="2.5" /></Svg>;
 export const IconEyeOff = ({ size }: P) => <Svg size={size}><path d="M2 12s3.5-6 10-6c2 0 3.7.6 5.2 1.4M22 12s-3.5 6-10 6c-2 0-3.7-.6-5.2-1.4" /><path d="M4 4l16 16" /></Svg>;
 export const IconTrash = ({ size }: P) => <Svg size={size}><path d="M5 7h14M9 7V5h6v2M6 7l1 13h10l1-13" /></Svg>;

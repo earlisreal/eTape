@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { timeframeToMs, timeToLogical, distToSegment, extendToEdge, snapToLevels, hitTest } from "./geometry";
+import { timeframeToMs, timeToLogical, distToSegment, extendToEdge, hitTest } from "./geometry";
 
 describe("timeframeToMs", () => {
   it("maps intraday timeframes to milliseconds", () => {
@@ -56,19 +56,6 @@ describe("extendToEdge", () => {
   });
   it("extends a leftward ray to the left edge (x=0)", () => {
     expect(extendToEdge({ x: 20, y: 20 }, { x: 10, y: 10 }, 100)).toEqual({ x: 0, y: 0 });
-  });
-});
-
-describe("snapToLevels", () => {
-  const levels = [{ price: 10, y: 100 }, { price: 11, y: 90 }, { price: 12, y: 50 }];
-  it("snaps to the nearest level within tolerance", () => {
-    expect(snapToLevels(96, levels, 6)).toBe(10);
-  });
-  it("returns null when no level is within tolerance", () => {
-    expect(snapToLevels(70, levels, 6)).toBeNull();
-  });
-  it("prefers the closest when two are within tolerance", () => {
-    expect(snapToLevels(95, levels, 6)).toBe(10); // 90 is 5 away, 100 is 5 away — tie → first-encountered wins (10)
   });
 });
 

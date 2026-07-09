@@ -136,7 +136,6 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   );
 
   const interactionRef = useRef<DrawingInteraction | null>(null);
-  const magnetRef = useRef(true);
   const tfRef = useRef<string>(timeframe0);
   // Timeframe/symbol switches clear the controller's series synchronously but
   // bump no store revision, so the scheduler's revision-based isDirty() would
@@ -144,7 +143,6 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // arrive. This flag forces exactly one repaint on the next scheduled frame.
   const forceRepaintRef = useRef(false);
   const [activeTool, setActiveTool] = useState<Tool>("select");
-  const [magnet, setMagnet] = useState(true);
   const [chartSymbol, setChartSymbol] = useState(symbol);
   const [menu, setMenu] = useState<{ x: number; y: number; clientX: number; clientY: number; drawingId: string | null } | null>(null);
   // The top-bar chart-type switcher was removed (candles-only trading UI); the
@@ -222,7 +220,6 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         symbol: () => currentSymbol,
         bars: () => stores.bars.series(currentSymbol, tfRef.current),
         timeframeMs: () => timeframeToMs(tfRef.current as Timeframe),
-        magnet: () => magnetRef.current,
       },
       {
         onToolChange: (t) => setActiveTool(t),
@@ -487,9 +484,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       {headerSlot === undefined ? headerControls : headerSlot ? createPortal(headerControls, headerSlot) : null}
       <div ref={hostRef} data-testid="chart-host" tabIndex={0} style={{ flex: 1, minHeight: 0, position: "relative" }}
         onContextMenu={onContextMenu}>
-        <TVDrawingRail chrome={chrome} activeTool={activeTool} magnet={magnet} hideAll={hideAll} symbol={chartSymbol}
+        <TVDrawingRail chrome={chrome} activeTool={activeTool} hideAll={hideAll} symbol={chartSymbol}
           onSelectTool={(t) => { setActiveTool(t); interactionRef.current?.setTool(t); }}
-          onToggleMagnet={() => { magnetRef.current = !magnetRef.current; setMagnet(magnetRef.current); }}
           onToggleHideAll={toggleHideAll}
           hasSelection={() => interactionRef.current?.hasSelection() ?? false}
           onDeleteSelection={() => interactionRef.current?.deleteSelection()}
