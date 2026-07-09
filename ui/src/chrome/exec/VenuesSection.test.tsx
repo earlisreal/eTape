@@ -4,7 +4,14 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { ToastProvider } from "../Toast";
 import { VenuesSection } from "./VenuesSection";
-import type { AckMsg, Gate, VenueConfig, VenueSetup } from "../../wire/contract";
+import type { AckMsg, Gate, VenueConfig, VenueSetup, TestConnectionResult } from "../../wire/contract";
+
+function okResult(overrides: Partial<TestConnectionResult> = {}): TestConnectionResult {
+  return { ok: true, env: "paper", accountId: "PA999", accountType: "cash", message: "ok", accounts: [], ...overrides };
+}
+function testAck(value: TestConnectionResult): AckMsg {
+  return { kind: "ack", corrId: "c", status: "accepted", value };
+}
 
 const runningConfig: VenueConfig = {
   venues: [
@@ -79,7 +86,7 @@ describe("VenuesSection", () => {
     const withSim: VenueSetup = baseSetup({
       file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0 }] },
     });
-    const commands = makeCommands([withSim, withSim]);
+    const commands = makeCommands([withSim, withSim], { TestConnection: testAck(okResult()) });
     wrap(commands);
     const i = 2;
     await waitFor(() => expect(screen.getByTestId(`venue-id-${i}`)).toBeTruthy());
@@ -90,7 +97,12 @@ describe("VenuesSection", () => {
 
     fireEvent.change(screen.getByTestId(`venue-cred-keyid-${i}`), { target: { value: "new-id" } });
     fireEvent.change(screen.getByTestId(`venue-cred-secret-${i}`), { target: { value: "new-secret" } });
-    expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(false);
+    // A freshly-typed key on a testable broker (alpaca) still requires a
+    // passing Test connection before Save is enabled.
+    expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByTestId(`venue-test-${i}`));
+    await waitFor(() => expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(false));
 
     fireEvent.click(screen.getByTestId("save-venues"));
     await waitFor(() => expect(commands.sent.some((s) => s.name === "SetVenueSetup")).toBe(true));
@@ -115,12 +127,14 @@ describe("VenuesSection", () => {
   });
 
   it("save order: typing a venue's key+secret fires PutCredential (named after that venue's credentials key), then SetVenueSetup", async () => {
-    const commands = makeCommands([baseSetup(), baseSetup()]);
+    const commands = makeCommands([baseSetup(), baseSetup()], { TestConnection: testAck(okResult()) });
     wrap(commands);
     await waitFor(() => expect(screen.getByTestId("venue-cred-keyid-0")).toBeTruthy());
 
     fireEvent.change(screen.getByTestId("venue-cred-keyid-0"), { target: { value: "AKIA-new-id" } });
     fireEvent.change(screen.getByTestId("venue-cred-secret-0"), { target: { value: "super-secret-value" } });
+    fireEvent.click(screen.getByTestId("venue-test-0"));
+    await waitFor(() => expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(false));
 
     fireEvent.click(screen.getByTestId("save-venues"));
     await waitFor(() => expect(commands.sent.some((s) => s.name === "SetVenueSetup")).toBe(true));
@@ -134,12 +148,17 @@ describe("VenuesSection", () => {
   });
 
   it("bails before SetVenueSetup and surfaces the reason when PutCredential is rejected", async () => {
-    const commands = makeCommands([baseSetup()], { PutCredential: { kind: "ack", corrId: "c", status: "blocked", reason: "bad key format" } });
+    const commands = makeCommands([baseSetup()], {
+      PutCredential: { kind: "ack", corrId: "c", status: "blocked", reason: "bad key format" },
+      TestConnection: testAck(okResult()),
+    });
     wrap(commands);
     await waitFor(() => expect(screen.getByTestId("venue-cred-keyid-0")).toBeTruthy());
 
     fireEvent.change(screen.getByTestId("venue-cred-keyid-0"), { target: { value: "x" } });
     fireEvent.change(screen.getByTestId("venue-cred-secret-0"), { target: { value: "y" } });
+    fireEvent.click(screen.getByTestId("venue-test-0"));
+    await waitFor(() => expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByTestId("save-venues"));
 
     await waitFor(() => expect(screen.getByTestId("venues-error").textContent).toBe("bad key format"));
@@ -178,7 +197,7 @@ describe("VenuesSection", () => {
   });
 
   it("clears the masked credential inputs after a save and never renders them pre-filled from a refresh", async () => {
-    const commands = makeCommands([baseSetup(), baseSetup()]);
+    const commands = makeCommands([baseSetup(), baseSetup()], { TestConnection: testAck(okResult()) });
     wrap(commands);
     await waitFor(() => expect(screen.getByTestId("venue-cred-keyid-0")).toBeTruthy());
 
@@ -188,6 +207,9 @@ describe("VenuesSection", () => {
     fireEvent.change(secret, { target: { value: "super-secret-value" } });
     expect(keyId.value).toBe("AKIA-secret-id");
     expect(secret.value).toBe("super-secret-value");
+
+    fireEvent.click(screen.getByTestId("venue-test-0"));
+    await waitFor(() => expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(false));
 
     fireEvent.click(screen.getByTestId("save-venues"));
     await waitFor(() => expect(commands.sent.some((s) => s.name === "PutCredential")).toBe(true));
@@ -452,8 +474,8 @@ describe("VenuesSection", () => {
       expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true);
     });
 
-    it("blocks a new alpaca venue with no credential key set or typed", async () => {
-      const commands = makeCommands([baseSetup()]);
+    it("blocks a new alpaca venue with no credential key set or typed, and still blocks after typing keys until a Test connection succeeds", async () => {
+      const commands = makeCommands([baseSetup()], { TestConnection: testAck(okResult()) });
       wrap(commands);
       await waitFor(() => expect(screen.getByTestId("add-venue")).toBeTruthy());
 
@@ -463,10 +485,15 @@ describe("VenuesSection", () => {
       fireEvent.change(screen.getByTestId(`venue-broker-${i}`), { target: { value: "alpaca" } });
       expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true);
 
-      // typing both key id and secret this session satisfies the rule
+      // Typing both key id and secret satisfies the "a credential key exists"
+      // rule, but alpaca is a TESTABLE_BROKERS entry — a freshly-typed key
+      // still requires a passing Test connection before Save unblocks.
       fireEvent.change(screen.getByTestId(`venue-cred-keyid-${i}`), { target: { value: "id" } });
       fireEvent.change(screen.getByTestId(`venue-cred-secret-${i}`), { target: { value: "secret" } });
-      expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(false);
+      expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true);
+
+      fireEvent.click(screen.getByTestId(`venue-test-${i}`));
+      await waitFor(() => expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(false));
     });
 
     it("blocks on a partially-entered key (key id typed, secret blank)", async () => {
@@ -478,12 +505,175 @@ describe("VenuesSection", () => {
       expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true);
     });
 
-    it("blocks a tradezero venue with an empty account id", async () => {
-      const commands = makeCommands([baseSetup()]);
+    it("blocks a tradezero venue with an empty account id, even after a successful Test whose result omits one", async () => {
+      // tradezero's account id is now auto-detected (no manual input to blank
+      // out directly) — the equivalent real-world case is a fresh tradezero
+      // venue whose probe result comes back ok but without an account id;
+      // the "account id is required for TradeZero" rule must still block.
+      const commands = makeCommands([baseSetup()], {
+        TestConnection: testAck({ ok: true, env: "live", accountId: "", accountType: "", message: "connected", accounts: [] }),
+      });
       wrap(commands);
-      await waitFor(() => expect(screen.getByTestId("venue-account-1")).toBeTruthy());
+      await waitFor(() => expect(screen.getByTestId("add-venue")).toBeTruthy());
 
-      fireEvent.change(screen.getByTestId("venue-account-1"), { target: { value: "" } });
+      fireEvent.click(screen.getByTestId("add-venue"));
+      const i = 2;
+      fireEvent.change(screen.getByTestId(`venue-id-${i}`), { target: { value: "tz-2" } });
+      fireEvent.change(screen.getByTestId(`venue-broker-${i}`), { target: { value: "tradezero" } });
+      fireEvent.change(screen.getByTestId(`venue-cred-keyid-${i}`), { target: { value: "id" } });
+      fireEvent.change(screen.getByTestId(`venue-cred-secret-${i}`), { target: { value: "secret" } });
+
+      fireEvent.click(screen.getByTestId(`venue-test-${i}`));
+      await waitFor(() => expect(screen.getByTestId(`venue-test-result-${i}`)).toBeTruthy());
+
+      expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true);
+    });
+  });
+
+  describe("Test connection", () => {
+    it("a successful Test on a tradezero venue fills the read-only env/account-id display and enables Save; Save is disabled before Test", async () => {
+      const commands = makeCommands([baseSetup()], {
+        TestConnection: testAck({ ok: true, env: "live", accountId: "2TZ001", accountType: "margin", message: "connected", accounts: [] }),
+      });
+      wrap(commands);
+      const i = 1; // tradezero-live
+      await waitFor(() => expect(screen.getByTestId(`venue-cred-keyid-${i}`)).toBeTruthy());
+
+      // tradezero is a testable broker: no manual env select / account-id
+      // input, just the auto-detected read-only display.
+      expect(screen.queryByTestId(`venue-env-${i}`)).toBeNull();
+      expect(screen.queryByTestId(`venue-account-${i}`)).toBeNull();
+      expect(screen.getByTestId(`venue-account-detected-${i}`).textContent).toBe("TZ456"); // pre-existing value
+
+      fireEvent.change(screen.getByTestId(`venue-cred-keyid-${i}`), { target: { value: "new-key" } });
+      fireEvent.change(screen.getByTestId(`venue-cred-secret-${i}`), { target: { value: "new-secret" } });
+      expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true);
+
+      fireEvent.click(screen.getByTestId(`venue-test-${i}`));
+      expect((screen.getByTestId(`venue-test-${i}`) as HTMLButtonElement).disabled).toBe(true); // testing state
+
+      await waitFor(() => expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(false));
+      expect(screen.getByTestId(`venue-env-detected-${i}`).textContent).toBe("LIVE");
+      expect(screen.getByTestId(`venue-account-detected-${i}`).textContent).toBe("2TZ001");
+      // On success the UI builds its own env/accountId summary rather than
+      // echoing the probe's raw message.
+      expect(screen.getByTestId(`venue-test-result-${i}`).textContent).toBe("✓ Connected · LIVE · 2TZ001");
+    });
+
+    it("a TestConnectionResult with more than one account renders a picker; selecting an account sets accountId", async () => {
+      const result: TestConnectionResult = {
+        ok: true, env: "live", accountId: "", accountType: "", message: "connected",
+        accounts: [
+          { accountId: "2TZ001", accountType: "margin", env: "live" },
+          { accountId: "2TZ002", accountType: "cash", env: "live" },
+        ],
+      };
+      const commands = makeCommands([baseSetup()], { TestConnection: testAck(result) });
+      wrap(commands);
+      const i = 1;
+      await waitFor(() => expect(screen.getByTestId(`venue-cred-keyid-${i}`)).toBeTruthy());
+      fireEvent.change(screen.getByTestId(`venue-cred-keyid-${i}`), { target: { value: "k" } });
+      fireEvent.change(screen.getByTestId(`venue-cred-secret-${i}`), { target: { value: "s" } });
+      fireEvent.click(screen.getByTestId(`venue-test-${i}`));
+
+      await waitFor(() => expect(screen.getByTestId(`venue-account-select-${i}`)).toBeTruthy());
+      expect(screen.queryByTestId(`venue-account-detected-${i}`)).toBeNull(); // picker replaces the plain-text display
+
+      fireEvent.change(screen.getByTestId(`venue-account-select-${i}`), { target: { value: "2TZ002" } });
+      expect((screen.getByTestId(`venue-account-select-${i}`) as HTMLSelectElement).value).toBe("2TZ002");
+    });
+
+    it("a failing Test result (ok:false) shows the failure message and leaves Save disabled", async () => {
+      const commands = makeCommands([baseSetup()], {
+        TestConnection: testAck({ ok: false, env: "", accountId: "", accountType: "", message: "invalid API key", accounts: [] }),
+      });
+      wrap(commands);
+      const i = 1;
+      await waitFor(() => expect(screen.getByTestId(`venue-cred-keyid-${i}`)).toBeTruthy());
+      fireEvent.change(screen.getByTestId(`venue-cred-keyid-${i}`), { target: { value: "bad" } });
+      fireEvent.change(screen.getByTestId(`venue-cred-secret-${i}`), { target: { value: "worse" } });
+
+      fireEvent.click(screen.getByTestId(`venue-test-${i}`));
+      await waitFor(() => expect(screen.getByTestId(`venue-test-result-${i}`).textContent).toContain("invalid API key"));
+      expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("a rejected/thrown TestConnection is treated as a failure, same as an ok:false result", async () => {
+      const commands = makeCommands([baseSetup()], {
+        TestConnection: { kind: "ack", corrId: "c", status: "blocked", reason: "malformed args" },
+      });
+      wrap(commands);
+      const i = 1;
+      await waitFor(() => expect(screen.getByTestId(`venue-cred-keyid-${i}`)).toBeTruthy());
+      fireEvent.change(screen.getByTestId(`venue-cred-keyid-${i}`), { target: { value: "k" } });
+      fireEvent.change(screen.getByTestId(`venue-cred-secret-${i}`), { target: { value: "s" } });
+
+      fireEvent.click(screen.getByTestId(`venue-test-${i}`));
+      await waitFor(() => expect(screen.getByTestId(`venue-test-result-${i}`).textContent).toContain("malformed args"));
+      expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("the manual env/account-id inputs are absent for tradezero/alpaca rows and present for moomoo/sim rows", async () => {
+      const withMoomooAndSim: VenueSetup = baseSetup({
+        file: {
+          ...runningConfig,
+          venues: [
+            ...runningConfig.venues,
+            { id: "moomoo-1", broker: "moomoo", env: "paper", credentials: "moomoo", accountId: "MM1", startingBalance: 0 },
+            { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0 },
+          ],
+        },
+        credKeys: ["alpaca", "tradeZero", "moomoo"],
+      });
+      const commands = makeCommands([withMoomooAndSim]);
+      wrap(commands);
+      await waitFor(() => expect(screen.getByTestId("venue-id-3")).toBeTruthy());
+
+      expect(screen.queryByTestId("venue-env-0")).toBeNull();       // alpaca
+      expect(screen.queryByTestId("venue-account-0")).toBeNull();   // alpaca (no account id at all)
+      expect(screen.queryByTestId("venue-env-1")).toBeNull();       // tradezero
+      expect(screen.queryByTestId("venue-account-1")).toBeNull();   // tradezero (manual input gone)
+      expect(screen.getByTestId("venue-account-detected-1")).toBeTruthy(); // tradezero read-only display
+
+      expect(screen.getByTestId("venue-env-2")).toBeTruthy();       // moomoo
+      expect(screen.getByTestId("venue-account-2")).toBeTruthy();   // moomoo
+      expect(screen.getByTestId("venue-env-3")).toBeTruthy();       // sim
+      expect(screen.getByTestId("venue-account-3")).toBeTruthy();   // sim
+    });
+
+    it("editing an already-verified row's secret resets its test status; Save becomes disabled again without a fresh Test", async () => {
+      const commands = makeCommands([baseSetup()], {
+        TestConnection: testAck({ ok: true, env: "live", accountId: "2TZ001", accountType: "margin", message: "connected", accounts: [] }),
+      });
+      wrap(commands);
+      const i = 1;
+      await waitFor(() => expect(screen.getByTestId(`venue-cred-keyid-${i}`)).toBeTruthy());
+      fireEvent.change(screen.getByTestId(`venue-cred-keyid-${i}`), { target: { value: "k" } });
+      fireEvent.change(screen.getByTestId(`venue-cred-secret-${i}`), { target: { value: "s" } });
+      fireEvent.click(screen.getByTestId(`venue-test-${i}`));
+      await waitFor(() => expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(false));
+
+      fireEvent.change(screen.getByTestId(`venue-cred-secret-${i}`), { target: { value: "s-changed" } });
+      expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true);
+    });
+
+    it("switching a row's broker invalidates a prior Test result for that row", async () => {
+      const commands = makeCommands([baseSetup()], {
+        TestConnection: testAck({ ok: true, env: "live", accountId: "2TZ001", accountType: "margin", message: "connected", accounts: [] }),
+      });
+      wrap(commands);
+      const i = 1;
+      await waitFor(() => expect(screen.getByTestId(`venue-cred-keyid-${i}`)).toBeTruthy());
+      fireEvent.change(screen.getByTestId(`venue-cred-keyid-${i}`), { target: { value: "k" } });
+      fireEvent.change(screen.getByTestId(`venue-cred-secret-${i}`), { target: { value: "s" } });
+      fireEvent.click(screen.getByTestId(`venue-test-${i}`));
+      await waitFor(() => expect(screen.getByTestId(`venue-test-result-${i}`)).toBeTruthy());
+
+      // Switch away and back — a prior "ok" result for a different broker
+      // selection must not still read as verified for the new selection.
+      fireEvent.change(screen.getByTestId(`venue-broker-${i}`), { target: { value: "moomoo" } });
+      fireEvent.change(screen.getByTestId(`venue-broker-${i}`), { target: { value: "tradezero" } });
+      expect(screen.queryByTestId(`venue-test-result-${i}`)).toBeNull();
       expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true);
     });
   });
