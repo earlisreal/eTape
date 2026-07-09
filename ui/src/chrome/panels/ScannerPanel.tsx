@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { PanelProps } from "./registry";
 import type { ScannerSession } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
+import { FONTS } from "../../render/palette";
 import { formatTapeTime } from "../../render/format";
 import { formatChangePct, formatCompactShares, msUntilEtMidnight } from "../format";
 import { applyScannerFilters, formatFilterSummary, type ScannerThresholds } from "./scannerFilter";
@@ -93,6 +94,9 @@ export function ScannerPanel(
     : "Waiting for scanner data…";
 
   const th = { padding: "2px 8px", position: "sticky" as const, top: 0, background: palette.surface };
+  // Data-surface treatment (matches tape/ladder): mono, tabular figures, ticker as the row anchor.
+  const symCell = { textAlign: "left" as const, padding: "2px 8px", fontFamily: FONTS.mono, fontWeight: 600 };
+  const numCell = { padding: "2px 8px", fontFamily: FONTS.mono, fontWeight: 500, fontVariantNumeric: "tabular-nums" as const };
   return (
     <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderBottom: `1px solid ${palette.border}`, position: "relative" }}>
@@ -150,11 +154,11 @@ export function ScannerPanel(
                   : hoveredSymbol === r.symbol ? "rgba(154,106,27,.06)" : "transparent",
                 boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : r.isNewHit ? `inset 2px 0 0 ${palette.accent}` : "none",
                 transition: "background 120ms ease" }}>
-              <td style={{ textAlign: "left", padding: "2px 8px" }}>{r.symbol}</td>
-              <td style={{ padding: "2px 8px", color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>{formatChangePct(r.changePct)}</td>
-              <td style={{ padding: "2px 8px" }}>{r.last === null ? "—" : r.last.toFixed(2)}</td>
-              <td style={{ padding: "2px 8px" }}>{formatCompactShares(r.floatShares)}</td>
-              <td style={{ padding: "2px 8px" }}>{formatCompactShares(r.volume)}</td>
+              <td style={symCell}>{r.symbol}</td>
+              <td style={{ ...numCell, color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>{formatChangePct(r.changePct)}</td>
+              <td style={numCell}>{r.last === null ? "—" : r.last.toFixed(2)}</td>
+              <td style={numCell}>{formatCompactShares(r.floatShares)}</td>
+              <td style={numCell}>{formatCompactShares(r.volume)}</td>
             </tr>
             );
           })}
