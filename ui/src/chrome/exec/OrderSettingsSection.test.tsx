@@ -55,6 +55,52 @@ describe("OrderSettingsSection", () => {
     expect(tmpl.priceOffsetUnit).toBe("%");
   });
 
+  // Regression: both numeric cells are fully-controlled inputs whose displayed
+  // value is re-derived from the numeric model on every render. A raw
+  // fireEvent.change with the complete final string (as in the round-trip
+  // test above) always coerces cleanly and never exposed this — only a
+  // character-by-character sequence does, because an in-progress value like
+  // "0." parses to a valid (non-NaN) 0 and previously got written straight
+  // back into the model, so the very next render clobbered the trailing "."
+  // the user had just typed, before they could type the next digit.
+  it("allows typing a decimal offset value keystroke-by-keystroke without collapsing the trailing digits", () => {
+    const { onSave } = wrap();
+    const offset = screen.getByLabelText("offset-buy-5k") as HTMLInputElement;
+    fireEvent.change(offset, { target: { value: "0" } });
+    expect(offset.value).toBe("0");
+    fireEvent.change(offset, { target: { value: "0." } });
+    expect(offset.value).toBe("0.");
+    fireEvent.change(offset, { target: { value: "0.0" } });
+    expect(offset.value).toBe("0.0");
+    fireEvent.change(offset, { target: { value: "0.05" } });
+    expect(offset.value).toBe("0.05");
+    fireEvent.blur(offset);
+    expect(offset.value).toBe("0.05");
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").priceOffset).toBe(0.05);
+  });
+
+  it("allows typing a decimal size-value keystroke-by-keystroke without collapsing the trailing digits", () => {
+    const { onSave } = wrap();
+    // sell-half starts as PositionFraction/50 — the %-unit case where
+    // fractional offsets/sizes are the common case.
+    const sizeValue = screen.getByLabelText("size-value-sell-half") as HTMLInputElement;
+    fireEvent.change(sizeValue, { target: { value: "5" } });
+    expect(sizeValue.value).toBe("5");
+    fireEvent.change(sizeValue, { target: { value: "50" } });
+    expect(sizeValue.value).toBe("50");
+    fireEvent.change(sizeValue, { target: { value: "50." } });
+    expect(sizeValue.value).toBe("50.");
+    fireEvent.change(sizeValue, { target: { value: "50.5" } });
+    expect(sizeValue.value).toBe("50.5");
+    fireEvent.blur(sizeValue);
+    expect(sizeValue.value).toBe("50.5");
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "sell-half").sizing).toEqual({ mode: "PositionFraction", pct: 50.5 });
+  });
+
   it("switches sizing mode then edits the sizing amount, round-tripping both on save", () => {
     const { onSave } = wrap();
     // buy-5k starts as Dollar/5000; switch to PositionFraction (defaults pct to 100)...

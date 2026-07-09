@@ -32,8 +32,7 @@ function sizingValue(s: SizingSpec): string {
     case "PositionFraction": return String(s.pct ?? 0);
   }
 }
-function setSizingValue(s: SizingSpec, v: string): SizingSpec {
-  const n = Number(v) || 0;
+function setSizingValue(s: SizingSpec, n: number): SizingSpec {
   switch (s.mode) {
     case "Dollar": return { mode: "Dollar", dollar: n };
     case "Shares": return { mode: "Shares", shares: n };
@@ -55,6 +54,21 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
   const [templates, setTemplates] = useState<ActionTemplate[]>(() => config.templates.map((t) => ({ ...t })));
   const [addOpen, setAddOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
+  // Offset and size-value are fully-controlled numeric fields whose display
+  // is re-derived from the numeric model every render. Without this, typing
+  // "0" then "." commits Number("0.") -> 0 back into the model and the next
+  // render clobbers the trailing "." before the next digit can be typed, so
+  // fractional values (e.g. 0.05) can never be entered keystroke-by-keystroke.
+  // Track the in-progress raw text per cell (keyed by `${templateId}:field`)
+  // and only fall back to the derived numeric string once editing ends.
+  const [rawEdits, setRawEdits] = useState<Record<string, string>>({});
+  const setRawEdit = (key: string, v: string) => setRawEdits((r) => ({ ...r, [key]: v }));
+  const clearRawEdit = (key: string) => setRawEdits((r) => {
+    if (!(key in r)) return r;
+    const next = { ...r };
+    delete next[key];
+    return next;
+  });
 
   const patch = (id: string, over: Partial<ActionTemplate>) =>
     setTemplates((ts) => ts.map((t) => (t.id === id ? ({ ...t, ...over } as ActionTemplate) : t)));
@@ -106,7 +120,18 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
               <select value={t.tif} onChange={(e) => patch(t.id, { tif: e.target.value as TIF })} style={inp}>{TIFS.map((x) => <option key={x}>{x}</option>)}</select>
               <select value={t.priceSource} onChange={(e) => patch(t.id, { priceSource: e.target.value as PriceSource })} style={inp}>{SOURCES.map((x) => <option key={x}>{x}</option>)}</select>
               <span style={{ display: "flex", gap: 3 }}>
-                <input aria-label={`offset-${t.id}`} value={String(t.priceOffset)} onChange={(e) => patch(t.id, { priceOffset: Number(e.target.value) || 0 })} style={{ ...inp, width: 62 }} />
+                <input
+                  aria-label={`offset-${t.id}`}
+                  value={rawEdits[`${t.id}:offset`] ?? String(t.priceOffset)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setRawEdit(`${t.id}:offset`, v);
+                    const n = Number(v);
+                    if (!Number.isNaN(n)) patch(t.id, { priceOffset: n });
+                  }}
+                  onBlur={() => clearRawEdit(`${t.id}:offset`)}
+                  style={{ ...inp, width: 62 }}
+                />
                 <select aria-label={`offset-unit-${t.id}`} value={t.priceOffsetUnit ?? "$"} onChange={(e) => patch(t.id, { priceOffsetUnit: e.target.value as PriceOffsetUnit })} style={{ ...inp, width: 46 }}>
                   <option value="$">$</option><option value="%">%</option>
                 </select>
@@ -115,7 +140,18 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
                 <select aria-label={`size-mode-${t.id}`} value={t.sizing.mode} onChange={(e) => patch(t.id, { sizing: modeToSpec(e.target.value as SizingMode) })} style={{ ...inp, width: 84 }}>
                   {MODES.map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
                 </select>
-                <input aria-label={`size-value-${t.id}`} value={sizingValue(t.sizing)} onChange={(e) => patch(t.id, { sizing: setSizingValue(t.sizing, e.target.value) })} style={{ ...inp, width: 60 }} />
+                <input
+                  aria-label={`size-value-${t.id}`}
+                  value={rawEdits[`${t.id}:size`] ?? sizingValue(t.sizing)}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setRawEdit(`${t.id}:size`, v);
+                    const n = Number(v);
+                    if (!Number.isNaN(n)) patch(t.id, { sizing: setSizingValue(t.sizing, n) });
+                  }}
+                  onBlur={() => clearRawEdit(`${t.id}:size`)}
+                  style={{ ...inp, width: 60 }}
+                />
               </span>
             </>
           ) : (
