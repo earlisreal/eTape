@@ -129,7 +129,7 @@ export function ScannerPanel(
           <tr style={{ color: palette.textMuted, textAlign: "right" }}>
             {COLUMNS.map((c) => (
               <th key={c.col} style={{ ...th, textAlign: c.align, cursor: "pointer" }} onClick={() => clickSort(c.col)}
-                className={`col-head${sort?.col === c.col ? " sort-active" : ""}`}>
+                className={`col-head sortable${sort?.col === c.col ? " sort-active" : ""}`}>
                 {c.label} {sortIndicator(sort, c.col)}
               </th>
             ))}

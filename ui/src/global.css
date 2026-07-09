@@ -24,6 +24,8 @@ body {
   letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted);
 }
 .col-head.sort-active { color: var(--text); font-weight: 600; cursor: pointer; }
+.col-head.sortable { cursor: pointer; }
+.col-head.sortable:hover { color: var(--text); transition: color 120ms ease; }
 .data-row { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11px; font-variant-numeric: tabular-nums; }
 
 /* Shared controls — replace native <select>/<input>/<button>. */
@@ -31,8 +33,9 @@ body {
   font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11px;
   padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border-strong);
   background: var(--bg); color: var(--text); cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
-.btn:hover { border-color: var(--text-muted); }
+.btn:hover { border-color: var(--text-muted); background: var(--surface); }
 .btn-primary { background: var(--text); color: var(--bg); border-color: var(--text); }
 .ctl {
   display: inline-flex; align-items: center; gap: 4px;
@@ -55,8 +58,9 @@ input.numfield { -moz-appearance: textfield; appearance: textfield; }
   display: flex; align-items: center; justify-content: center;
   width: 14px; height: 9px; padding: 0; line-height: 1; font-size: 7px; cursor: pointer;
   border: 1px solid var(--border-strong); background: var(--bg); color: var(--text-muted);
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
-.stepper-btns button:hover:not(:disabled) { border-color: var(--text-muted); color: var(--text); }
+.stepper-btns button:hover:not(:disabled) { border-color: var(--text-muted); color: var(--text); background: var(--surface); }
 .stepper-btns button:first-child { border-radius: 3px 3px 0 0; border-bottom: none; }
 .stepper-btns button:last-child { border-radius: 0 0 3px 3px; }
 .stepper-btns button:disabled { cursor: default; opacity: 0.4; }
@@ -88,8 +92,10 @@ input.numfield { -moz-appearance: textfield; appearance: textfield; }
   flex: 1; font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11px;
   font-weight: 600; padding: 4px 6px; border-radius: 4px; cursor: pointer;
   border: 1px solid var(--border-strong); background: var(--bg); color: var(--text-muted);
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 .side:hover { border-color: var(--text-muted); }
+.side:hover:not(.side-buy):not(.side-sell) { background: var(--surface); }
 .side-buy { border-color: var(--up); color: var(--up); background: rgba(23,122,88,.08); }
 .side-sell { border-color: var(--down); color: var(--down); background: rgba(194,51,77,.08); }
 
