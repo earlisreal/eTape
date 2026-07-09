@@ -11,6 +11,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
+	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 
 	newspb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsearchnews"
@@ -27,9 +28,12 @@ type requester interface {
 // searchNews is the poller-internal normalized item (decouples the transform
 // from the pb type for testing).
 type searchNews struct {
-	Title  string
-	Source string
-	URL    string
+	Title       string
+	Source      string
+	URL         string
+	NewsSubType int32
+	PublishTime string
+	ViewCount   int64
 }
 
 type Poller struct {
@@ -83,7 +87,10 @@ func (p *Poller) pollSymbol(ctx context.Context, symbol string) {
 	}
 	raw := make([]searchNews, 0)
 	for _, n := range resp.GetS2C().GetSearchNewsList() {
-		raw = append(raw, searchNews{Title: n.GetTitle(), Source: n.GetSource(), URL: n.GetUrl()})
+		raw = append(raw, searchNews{
+			Title: n.GetTitle(), Source: n.GetSource(), URL: n.GetUrl(),
+			NewsSubType: n.GetNewsSubType(), PublishTime: n.GetPublishTime(), ViewCount: n.GetViewCount(),
+		})
 	}
 	seenAt := p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
 	fresh := p.dedup(normalize(raw, symbol, seenAt))
@@ -97,9 +104,38 @@ func normalize(raw []searchNews, symbol, seenAt string) []wsmsg.NewsItem {
 	for _, n := range raw {
 		out = append(out, wsmsg.NewsItem{
 			Symbol: symbol, Headline: n.Title, Source: n.Source, URL: n.URL, SeenAt: seenAt,
+			PublishedAt: parsePublishTime(n.PublishTime), ViewCount: n.ViewCount, Type: mapNewsType(n.NewsSubType),
 		})
 	}
 	return out
+}
+
+// mapNewsType maps moomoo's NewsSubType enum (0=ALL, 1=NEWS, 2=NOTICE,
+// 3=RATING) to the wire "type" values. Both the ALL/0 catch-all and any
+// unrecognized/future subtype fall back to "news" — the most common
+// category — rather than an empty string, so the UI never has to render a
+// blank type badge.
+func mapNewsType(subType int32) string {
+	switch subType {
+	case 2:
+		return "notice"
+	case 3:
+		return "rating"
+	default:
+		return "news"
+	}
+}
+
+// parsePublishTime parses moomoo's bare "yyyy-MM-dd HH:mm:ss" PublishTime
+// string (no timezone; always ET) and returns it as a UTC ISO-8601 string
+// in the same format pollSymbol uses for SeenAt. On parse failure (empty or
+// malformed input) it returns "" — callers fall back to SeenAt.
+func parsePublishTime(pt string) string {
+	t, err := time.ParseInLocation("2006-01-02 15:04:05", pt, session.Loc())
+	if err != nil {
+		return ""
+	}
+	return t.UTC().Format("2006-01-02T15:04:05.000Z07:00")
 }
 
 func (p *Poller) dedup(items []wsmsg.NewsItem) []wsmsg.NewsItem {

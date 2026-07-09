@@ -40,7 +40,7 @@ func classify(topic wsmsg.Topic) coalesceClass {
 	case wsmsg.TopicExecPositions:
 		return classPositions
 	default:
-		return classImmediate // indicator, orders, fills, status, scanner.*, news, sys.*, trades
+		return classImmediate // indicator, orders, fills, status, scanner.*, stock.detail, news, sys.*, trades
 	}
 }
 
@@ -79,6 +79,11 @@ func outboundCoalesceKey(s staged, snap bool) string {
 	// that only governs broadcast timing, not per-client shedding.)
 	case wsmsg.TopicScannerRank:
 		return "d|scanner.rank|" + s.Key
+	// stock.detail is a latest-value-per-symbol replace (fundamentals refresh
+	// periodically); a slow client only needs the newest value per symbol, so
+	// coalesce per symbol key. (Same orthogonality note as scanner.rank.)
+	case wsmsg.TopicStockDetail:
+		return "d|stock.detail|" + s.Key
 	// sys.health is a single full-replace snapshot of every link's latency; one
 	// fixed key coalesces it. (Same orthogonality note as scanner.rank.)
 	case wsmsg.TopicSysHealth:

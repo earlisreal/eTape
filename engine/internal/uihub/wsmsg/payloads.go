@@ -169,12 +169,40 @@ type ScanHitPayload struct {
 	At     string `json:"at"`
 }
 
+// StockDetailPayload is the snapshot for the stock.detail topic: fundamentals
+// for the Stock Info panel. Nullable numerics follow the ScannerRow
+// convention (`*float64` + tstype) — null means moomoo hasn't returned a
+// value for that field yet (e.g. no snapshot fetched, or the field is
+// genuinely absent for this instrument type).
+type StockDetailPayload struct {
+	Symbol            string   `json:"symbol"`
+	Name              string   `json:"name"`
+	Industry          string   `json:"industry"`
+	Price             *float64 `json:"price" tstype:"number | null,required"`
+	LastClose         *float64 `json:"lastClose" tstype:"number | null,required"`
+	ChangePct         *float64 `json:"changePct" tstype:"number | null,required"`
+	MarketCap         *float64 `json:"marketCap" tstype:"number | null,required"`         // moomoo IssuedMarketVal
+	FloatMarketCap    *float64 `json:"floatMarketCap" tstype:"number | null,required"`    // moomoo OutstandingMarketVal
+	SharesOutstanding *float64 `json:"sharesOutstanding" tstype:"number | null,required"` // moomoo IssuedShares, raw share count
+	FloatShares       *float64 `json:"floatShares" tstype:"number | null,required"`       // moomoo OutstandingShares, raw share count
+	Pe                *float64 `json:"pe" tstype:"number | null,required"`                // moomoo PeRate
+	PeTTM             *float64 `json:"peTTM" tstype:"number | null,required"`             // moomoo PeTTMRate
+	Eps               *float64 `json:"eps" tstype:"number | null,required"`               // moomoo EarningsPershare
+	High52            *float64 `json:"high52" tstype:"number | null,required"`
+	Low52             *float64 `json:"low52" tstype:"number | null,required"`
+	Volume            int64    `json:"volume"` // 0 is legitimate
+	RefreshedAt       string   `json:"refreshedAt"`
+}
+
 type NewsItem struct {
-	Symbol   string `json:"symbol"`
-	Headline string `json:"headline"`
-	Source   string `json:"source"`
-	URL      string `json:"url"`
-	SeenAt   string `json:"seen_at"`
+	Symbol      string `json:"symbol"`
+	Headline    string `json:"headline"`
+	Source      string `json:"source"`
+	URL         string `json:"url"`
+	SeenAt      string `json:"seen_at"`
+	PublishedAt string `json:"published_at"`
+	ViewCount   int64  `json:"view_count"`
+	Type        string `json:"type"` // "news" | "notice" | "rating"
 }
 
 // LinkName and LinkStatus (HealthLink's typed enums) live in wsmsg.go

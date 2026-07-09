@@ -275,6 +275,7 @@ func TestOutboundCoalesceKeyRouting(t *testing.T) {
 		{"account delta -> per venue", staged{Topic: wsmsg.TopicExecAccount, Payload: wsmsg.AccountRow{Venue: "alpaca"}}, false, "d|acct|alpaca"},
 		{"positions delta -> single slot", staged{Topic: wsmsg.TopicExecPositions}, false, "d|exec.positions"},
 		{"scanner.rank delta -> per session", staged{Topic: wsmsg.TopicScannerRank, Key: "sess1"}, false, "d|scanner.rank|sess1"},
+		{"stock.detail delta -> per symbol", staged{Topic: wsmsg.TopicStockDetail, Key: "US.AAPL"}, false, "d|stock.detail|US.AAPL"},
 		{"sys.health delta -> single slot", staged{Topic: wsmsg.TopicSysHealth}, false, "d|sys.health"},
 		{"tape delta -> lossless", staged{Topic: wsmsg.TopicTape}, false, ""},
 		{"orders delta -> lossless", staged{Topic: wsmsg.TopicExecOrders}, false, ""},
@@ -287,6 +288,7 @@ func TestOutboundCoalesceKeyRouting(t *testing.T) {
 		{"indicator delta -> lossless", staged{Topic: wsmsg.TopicIndicator}, false, ""},
 		{"snapshot of a coalesceable topic -> lossless", staged{Topic: wsmsg.TopicQuote, Payload: wsmsg.Quote{Symbol: "US.AAPL"}}, true, ""},
 		{"snapshot of scanner.rank -> lossless", staged{Topic: wsmsg.TopicScannerRank, Key: "sess1"}, true, ""},
+		{"snapshot of stock.detail -> lossless", staged{Topic: wsmsg.TopicStockDetail, Key: "US.AAPL"}, true, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

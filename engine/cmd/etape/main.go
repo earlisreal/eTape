@@ -35,6 +35,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/replay"
 	"github.com/earlisreal/eTape/engine/internal/scan"
 	"github.com/earlisreal/eTape/engine/internal/session"
+	"github.com/earlisreal/eTape/engine/internal/stockinfo"
 	"github.com/earlisreal/eTape/engine/internal/store"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
 	"github.com/earlisreal/eTape/engine/internal/venueadmin"
@@ -442,6 +443,7 @@ func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, 
 	scanWG.Add(1)
 	go func() { defer scanWG.Done(); _ = scanPoller.Run(ctx) }()
 	go func() { _ = news.New(cfg.News, client, hub, clk, symbols).Run(ctx) }()
+	go func() { _ = stockinfo.New(cfg.StockInfo, client, hub, clk, symbols).Run(ctx) }()
 	// health: moomoo probe via the OpenD client; app-ping RTT source is nil in v1
 	// (ui-engine shows down until ping tracking is wired). alpacaProbe is the
 	// first configured Alpaca adapter (nil if none), giving the engine-alpaca

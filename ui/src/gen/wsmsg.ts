@@ -12,6 +12,7 @@ export type Topic =
   | "md.quote" | "md.book" | "md.tape" | "md.bars" | "md.indicator"
   | "scanner.rank" | "scanner.hit"
   | "news.item"
+  | "stock.detail"
   | "exec.account" | "exec.positions" | "exec.orders" | "exec.fills" | "exec.status" | "exec.trades"
   | "sys.health" | "sys.events"
   | "config";
@@ -237,12 +238,41 @@ export interface ScanHitPayload {
   symbol: string;
   at: string;
 }
+/**
+ * StockDetailPayload is the snapshot for the stock.detail topic: fundamentals
+ * for the Stock Info panel. Nullable numerics follow the ScannerRow
+ * convention (`*float64` + tstype) — null means moomoo hasn't returned a
+ * value for that field yet (e.g. no snapshot fetched, or the field is
+ * genuinely absent for this instrument type).
+ */
+export interface StockDetailPayload {
+  symbol: string;
+  name: string;
+  industry: string;
+  price: number | null;
+  lastClose: number | null;
+  changePct: number | null;
+  marketCap: number | null; // moomoo IssuedMarketVal
+  floatMarketCap: number | null; // moomoo OutstandingMarketVal
+  sharesOutstanding: number | null; // moomoo IssuedShares, raw share count
+  floatShares: number | null; // moomoo OutstandingShares, raw share count
+  pe: number | null; // moomoo PeRate
+  peTTM: number | null; // moomoo PeTTMRate
+  eps: number | null; // moomoo EarningsPershare
+  high52: number | null;
+  low52: number | null;
+  volume: number /* int64 */; // 0 is legitimate
+  refreshedAt: string;
+}
 export interface NewsItem {
   symbol: string;
   headline: string;
   source: string;
   url: string;
   seen_at: string;
+  published_at: string;
+  view_count: number /* int64 */;
+  type: string; // "news" | "notice" | "rating"
 }
 export interface HealthLink {
   link: LinkName;

@@ -59,7 +59,7 @@ test.describe("monitoring workspace", () => {
     await gotoAndApplyPreset(page, "e2e-monitoring", "Monitoring");
     // Charts are canvas; assert a deterministic empty-state text + screenshot.
     // Matches ScannerPanel.tsx ("No symbols match the current filters.") /
-    // NewsPanel.tsx ("News · no symbol focused").
+    // StockInfoPanel.tsx ("Stock Info · no symbol focused").
     await expect(page.getByText(/no symbols match|no symbol focused/i).first()).toBeVisible({ timeout: 15_000 });
     await page.screenshot({ path: "e2e/.artifacts/monitoring-loaded.png", fullPage: true });
   });

@@ -19,6 +19,7 @@ const (
 	TopicScannerRank Topic = "scanner.rank"
 	TopicScannerHit  Topic = "scanner.hit"
 	TopicNews        Topic = "news.item"
+	TopicStockDetail Topic = "stock.detail"
 
 	TopicExecAccount   Topic = "exec.account"
 	TopicExecPositions Topic = "exec.positions"
@@ -35,7 +36,7 @@ const (
 // AllTopics is the set a client may subscribe to (server-side allow-list).
 var AllTopics = map[Topic]bool{
 	TopicQuote: true, TopicBook: true, TopicTape: true, TopicBars: true, TopicIndicator: true,
-	TopicScannerRank: true, TopicScannerHit: true, TopicNews: true,
+	TopicScannerRank: true, TopicScannerHit: true, TopicNews: true, TopicStockDetail: true,
 	TopicExecAccount: true, TopicExecPositions: true, TopicExecOrders: true,
 	TopicExecFills: true, TopicExecStatus: true, TopicExecTrades: true,
 	TopicSysHealth: true, TopicSysEvents: true, TopicConfig: true,

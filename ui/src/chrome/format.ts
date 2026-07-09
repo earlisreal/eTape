@@ -12,10 +12,12 @@ export function formatChangePct(pct: number | null): string {
 }
 
 /** Compact share/volume count: 2_100_000 → "2.1M", 950_000 → "950K",
- *  3_200_000_000 → "3.2B", 640 → "640". null (unknown) → "—"; 0 → "0". */
+ *  3_200_000_000 → "3.2B", 3_210_000_000_000 → "3.21T", 640 → "640".
+ *  null (unknown) → "—"; 0 → "0". */
 export function formatCompactShares(n: number | null): string {
   if (n === null || Number.isNaN(n)) return "—";
   const abs = Math.abs(n);
+  if (abs >= 1e12) return `${(n / 1e12).toFixed(2)}T`;
   if (abs >= 1e9) return `${(n / 1e9).toFixed(1)}B`;
   if (abs >= 1e6) return `${(n / 1e6).toFixed(1)}M`;
   if (abs >= 1e3) return `${(n / 1e3).toFixed(0)}K`;
