@@ -310,8 +310,12 @@ func (s *spyVenueAdmin) GetVenueSetup() (config.VenueConfig, config.VenueConfig,
 		[]string{"alpaca"}, nil
 }
 func (s *spyVenueAdmin) SetVenueSetup(config.VenueConfig) error { s.setCalled = true; return s.setErr }
-func (s *spyVenueAdmin) PutCredential(_, _, sec string) error   { s.putCalled = true; s.lastPutSec = sec; return nil }
-func (s *spyVenueAdmin) DeleteCredential(string) error          { return s.delErr }
+func (s *spyVenueAdmin) PutCredential(_, _, sec string) error {
+	s.putCalled = true
+	s.lastPutSec = sec
+	return nil
+}
+func (s *spyVenueAdmin) DeleteCredential(string) error { return s.delErr }
 
 func TestGetVenueSetupResultHasNoSecrets(t *testing.T) {
 	va := &spyVenueAdmin{}
