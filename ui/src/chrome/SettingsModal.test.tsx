@@ -49,6 +49,13 @@ describe("SettingsModal", () => {
 
     const panel = (container.firstChild as HTMLElement).firstChild as HTMLElement;
     expect(panel.style.width).toBe("920px");
+    // Fixed-size modal: constant height regardless of active section, and no
+    // maxHeight left over from the old shrink-wrap-to-content behavior.
+    expect(panel.style.height).toBe("min(640px, 85vh)");
+    expect(panel.style.maxHeight).toBe("");
+    // Only the content pane scrolls — the nav stays pinned.
+    const content = panel.children[1] as HTMLElement;
+    expect(content.style.overflow).toBe("auto");
 
     fireEvent.click(screen.getByRole("button", { name: /venues & creds/i }));
     await waitFor(() => expect(commands.sendCommand).toHaveBeenCalledWith("GetVenueSetup", {}));

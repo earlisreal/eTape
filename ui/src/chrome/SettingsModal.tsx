@@ -21,7 +21,7 @@ export function SettingsModal({ open, section, onSection, onClose, commands }:
   if (!open) return null;
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000 }}>
-      <div onClick={(e) => e.stopPropagation()} style={{ background: palette.surface, border: `1px solid ${palette.borderStrong}`, borderRadius: 6, width: 920, maxHeight: "min(640px, 85vh)", overflow: "auto", display: "grid", gridTemplateColumns: "180px 1fr" }}>
+      <div onClick={(e) => e.stopPropagation()} style={{ background: palette.surface, border: `1px solid ${palette.borderStrong}`, borderRadius: 6, width: 920, height: "min(640px, 85vh)", display: "grid", gridTemplateColumns: "180px 1fr" }}>
         <nav style={{ borderRight: `1px solid ${palette.border}`, padding: 12 }}>
           <div className="serif" style={{ fontWeight: 600, marginBottom: 10 }}>Settings</div>
           {NAV.map((n) => (
@@ -33,7 +33,7 @@ export function SettingsModal({ open, section, onSection, onClose, commands }:
             </button>
           ))}
         </nav>
-        <section style={{ padding: 16 }}>
+        <section style={{ padding: 16, overflow: "auto", minHeight: 0 }}>
           {section === "appearance" && <AppearanceSection />}
           {section === "orders" && <OrderSettingsSection config={oc.config} onSave={oc.save} />}
           {section === "venues" && <VenuesSection commands={commands} />}
