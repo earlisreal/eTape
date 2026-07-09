@@ -44,6 +44,76 @@ describe("OrderSettingsSection", () => {
     expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").hotkey).toBe("Ctrl+Alt+7");
   });
 
+  it("nudges the offset up by 0.05 via the stepper button", () => {
+    const { onSave } = wrap();
+    fireEvent.click(screen.getByTestId("offset-buy-5k-up"));
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").priceOffset).toBe(0.05);
+  });
+
+  it("nudges the offset below zero via the stepper button (negative offsets allowed)", () => {
+    const { onSave } = wrap();
+    fireEvent.click(screen.getByTestId("offset-buy-5k-down"));
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").priceOffset).toBe(-0.05);
+  });
+
+  it("nudges the size value per sizing mode (Dollar steps by 100)", () => {
+    const { onSave } = wrap();
+    // buy-5k starts Dollar/5000.
+    fireEvent.click(screen.getByTestId("size-value-buy-5k-up"));
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").sizing).toEqual({ mode: "Dollar", dollar: 5100 });
+  });
+
+  it("caps Buying-power % sizing at 100 when nudged up repeatedly past the cap", () => {
+    const { onSave } = wrap();
+    // buy-25pct starts BuyingPowerPct/25; 80 clicks of +1 would reach 105 uncapped.
+    const up = screen.getByTestId("size-value-buy-25pct-up");
+    for (let i = 0; i < 80; i++) fireEvent.click(up);
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "buy-25pct").sizing).toEqual({ mode: "BuyingPowerPct", pct: 100 });
+  });
+
+  it("caps a typed Position % sizing value at 100 on blur, but shows the raw typed text while editing", () => {
+    const { onSave } = wrap();
+    // sell-half starts PositionFraction/50.
+    const sizeValue = screen.getByLabelText("size-value-sell-half") as HTMLInputElement;
+    fireEvent.change(sizeValue, { target: { value: "150" } });
+    expect(sizeValue.value).toBe("150");
+    fireEvent.blur(sizeValue);
+    expect(sizeValue.value).toBe("100");
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "sell-half").sizing).toEqual({ mode: "PositionFraction", pct: 100 });
+  });
+
+  it("shares sizing floors a nudge to a whole share (no upper cap)", () => {
+    const { onSave } = wrap();
+    fireEvent.change(screen.getByLabelText("size-mode-buy-5k"), { target: { value: "Shares" } });
+    fireEvent.click(screen.getByTestId("size-value-buy-5k-up")); // 100 default -> 101
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").sizing).toEqual({ mode: "Shares", shares: 101 });
+  });
+
+  // Regression: e.key for Shift+1 is the shifted glyph "!" (what the browser
+  // actually produced), not the digit — normalizeCombo must prefer e.code
+  // ("Digit1") so the captured combo reads "Shift+1", not "Shift+!".
+  it("captures Shift+1 as \"Shift+1\", not \"Shift+!\"", () => {
+    const { onSave } = wrap();
+    const cap = screen.getByTestId("tmpl-hotkey-buy-5k") as HTMLInputElement;
+    fireEvent.keyDown(cap, { key: "!", code: "Digit1", shiftKey: true });
+    expect(cap.value).toBe("Shift+1");
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").hotkey).toBe("Shift+1");
+  });
+
   it("edits price offset value and unit and round-trips both on save", () => {
     const { onSave } = wrap();
     fireEvent.change(screen.getByLabelText("offset-buy-5k"), { target: { value: "0.05" } });

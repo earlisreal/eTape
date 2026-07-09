@@ -1,10 +1,20 @@
 // Task 11 history: this was OrderSettingsModal (a standalone overlay). Since the
 // settings unification it is a plain section body embedded in SettingsModal's
-// "Orders & hotkeys" tab. This revision makes every template parameter editable
-// — including price offset (value + $/%) and sizing amount, which had no input
-// before — and lets management templates be created.
-import { useState } from "react";
+// "Orders & hotkeys" tab. This revision (production redesign) replaces the dense
+// grid table with a card-per-template editor: every template parameter is still
+// editable — including price offset (value + $/%, now with a ±0.05 stepper) and
+// sizing amount (now with a mode-aware stepper, clamped to 100 for the two
+// percent-based sizing modes) — and management templates can still be created.
+//
+// Cards render in `templates` array order (not grouped by kind) so that
+// getAllByTitle("remove") stays in insertion order — addPlace/addManage always
+// append to the end of the array, and a card-layout regrouped by kind would
+// reorder a newly-added card ahead of the other kind's trailing cards, breaking
+// the "last remove button = most recently added template" invariant the
+// stale-raw-edit-on-reused-id regression test relies on.
+import { useState, type CSSProperties } from "react";
 import { useTheme } from "../ThemeProvider";
+import { FONTS, type Palette } from "../../render/palette";
 import type { Side, OrderType, TIF } from "../../wire/contract";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 import type { SizingSpec, SizingMode } from "./sizing";
@@ -14,6 +24,7 @@ import {
 } from "./actionTemplate";
 import { normalizeCombo } from "./hotkeys";
 import { Keycap } from "./Keycap";
+import { StepField } from "./StepField";
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
@@ -22,7 +33,23 @@ const SOURCES: PriceSource[] = ["Bid", "Ask", "Last", "Mid"];
 const MODES: SizingMode[] = ["Dollar", "BuyingPowerPct", "Shares", "PositionFraction"];
 const MODE_LABEL: Record<SizingMode, string> = { Dollar: "Dollar", BuyingPowerPct: "BP %", Shares: "Shares", PositionFraction: "Pos %" };
 const MANAGE_ACTIONS: ManagementAction[] = ["CancelLast", "CancelAllFocused", "CancelAllEverything", "KillSwitch"];
-const COLS = "110px 68px 78px 58px 62px 118px 150px 130px 26px";
+
+const OFFSET_STEP = 0.05;
+const SIZE_STEP: Record<SizingMode, number> = { Dollar: 100, BuyingPowerPct: 1, Shares: 1, PositionFraction: 1 };
+// Only the two percent-based modes have a natural ceiling (100% of buying
+// power / position can't be exceeded); Dollar and Shares are unbounded above.
+const SIZE_MAX: Partial<Record<SizingMode, number>> = { BuyingPowerPct: 100, PositionFraction: 100 };
+const isPercentMode = (m: SizingMode): boolean => m === "BuyingPowerPct" || m === "PositionFraction";
+
+// Rounds away float drift from repeated ±0.05 additions (e.g. 0.05+0.05 can
+// land on 0.09999999999999999 in double precision).
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+function clampNum(n: number, min: number, max?: number): number {
+  const v = Math.max(min, n);
+  return max === undefined ? v : Math.min(max, v);
+}
 
 function sizingValue(s: SizingSpec): string {
   switch (s.mode) {
@@ -32,13 +59,19 @@ function sizingValue(s: SizingSpec): string {
     case "PositionFraction": return String(s.pct ?? 0);
   }
 }
+// Every commit path — typed or nudged — runs through here, so the 100% cap on
+// Buying-power % / Position % sizing holds no matter how the value was entered.
 function setSizingValue(s: SizingSpec, n: number): SizingSpec {
+  const max = SIZE_MAX[s.mode];
   switch (s.mode) {
-    case "Dollar": return { mode: "Dollar", dollar: n };
-    case "Shares": return { mode: "Shares", shares: n };
-    case "BuyingPowerPct": return { mode: "BuyingPowerPct", pct: n };
-    case "PositionFraction": return { mode: "PositionFraction", pct: n };
+    case "Dollar": return { mode: "Dollar", dollar: clampNum(n, 0, max) };
+    case "Shares": return { mode: "Shares", shares: Math.floor(clampNum(n, 0, max)) };
+    case "BuyingPowerPct": return { mode: "BuyingPowerPct", pct: clampNum(n, 0, max) };
+    case "PositionFraction": return { mode: "PositionFraction", pct: clampNum(n, 0, max) };
   }
+}
+function nudgeSizing(s: SizingSpec, dir: 1 | -1): SizingSpec {
+  return setSizingValue(s, Number(sizingValue(s)) + dir * SIZE_STEP[s.mode]);
 }
 function modeToSpec(mode: SizingMode): SizingSpec {
   switch (mode) {
@@ -47,6 +80,175 @@ function modeToSpec(mode: SizingMode): SizingSpec {
     case "BuyingPowerPct": return { mode, pct: 25 };
     case "PositionFraction": return { mode, pct: 100 };
   }
+}
+
+function iconBtn(palette: Palette, color: string): CSSProperties {
+  return {
+    width: 22, height: 22, display: "inline-flex", alignItems: "center", justifyContent: "center",
+    background: palette.bg, border: `1px solid ${palette.border}`, borderRadius: 4,
+    cursor: "pointer", fontSize: 13, lineHeight: 1, color,
+  };
+}
+
+interface TemplateCardProps {
+  t: ActionTemplate;
+  palette: Palette;
+  dup: boolean;
+  rawEdits: Record<string, string>;
+  setRawEdit: (key: string, v: string) => void;
+  clearRawEdit: (key: string) => void;
+  patch: (id: string, over: Partial<ActionTemplate>) => void;
+  onRemove: (id: string) => void;
+}
+
+// Module-scope (not nested in OrderSettingsSection) so its identity is stable
+// across renders — a component defined inside another component's body gets a
+// fresh type every render, forcing React to unmount+remount every card (and
+// drop input focus) on each keystroke.
+function TemplateCard({ t, palette, dup, rawEdits, setRawEdit, clearRawEdit, patch, onRemove }: TemplateCardProps): JSX.Element {
+  const card: CSSProperties = { border: `1px solid ${palette.border}`, borderRadius: 6, background: palette.surface, padding: "8px 10px 10px", marginBottom: 8 };
+  const eyebrow: CSSProperties = { fontSize: 9.5, letterSpacing: "0.08em", textTransform: "uppercase", color: palette.textMuted, marginBottom: 4 };
+  const headerRow: CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 };
+  const labelInput: CSSProperties = { fontFamily: FONTS.serif, fontSize: 13, fontWeight: 600, minWidth: 140, background: "transparent" };
+  const fieldRow: CSSProperties = { display: "flex", gap: 10, marginTop: 8, flexWrap: "wrap" };
+  const fieldGroup: CSSProperties = { display: "flex", flexDirection: "column", gap: 2 };
+  const fieldLabel: CSSProperties = { fontSize: 9.5, letterSpacing: "0.06em", textTransform: "uppercase", color: palette.textMuted };
+  const hotkeyBox: CSSProperties = {
+    fontFamily: FONTS.mono, fontSize: 12, width: 108, textAlign: "center", padding: "3px 6px",
+    borderRadius: 4, border: `1px solid ${dup ? palette.danger : palette.border}`, background: palette.bg, color: palette.text,
+  };
+
+  return (
+    <div style={card} data-testid={`tmpl-card-${t.id}`}>
+      <div style={eyebrow}>{t.kind === "place" ? "Place order" : "Management"}</div>
+      <div style={headerRow}>
+        <input
+          className="field" data-testid={`tmpl-label-${t.id}`} value={t.label}
+          onChange={(e) => patch(t.id, { label: e.target.value })} style={labelInput}
+        />
+        <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
+          <input
+            data-testid={`tmpl-hotkey-${t.id}`} readOnly value={t.hotkey ?? ""} placeholder="press keys"
+            onKeyDown={(e) => {
+              // Must stop propagation, not just preventDefault: the real hotkey
+              // engine (useHotkeys, mounted globally in AppShell) listens on
+              // `window` in the bubble phase. Without this, a candidate combo
+              // typed here while capturing a binding can also be a *live* combo
+              // (e.g. default Ctrl+Shift+K = KillSwitch, Ctrl+1..4 = place
+              // templates) and fire the real action — this settings screen must
+              // stay inert with zero order-safety authority.
+              e.preventDefault();
+              e.stopPropagation();
+              const c = normalizeCombo(e);
+              if (c) patch(t.id, { hotkey: c });
+            }}
+            style={hotkeyBox}
+          />
+          {t.hotkey ? (
+            <button data-testid={`tmpl-unbind-${t.id}`} title="unbind" aria-label={`Unbind hotkey for ${t.label}`}
+              onClick={() => patch(t.id, { hotkey: "" })} style={iconBtn(palette, palette.textMuted)}>×</button>
+          ) : null}
+          {dup ? <span style={{ color: palette.danger, fontSize: 10 }}>dup</span> : null}
+          <button title="remove" aria-label={`Remove ${t.label}`} onClick={() => onRemove(t.id)} style={iconBtn(palette, palette.danger)}>×</button>
+        </div>
+      </div>
+
+      {t.kind === "place" ? (
+        <>
+          <div style={fieldRow}>
+            <div style={fieldGroup}>
+              <span style={fieldLabel}>Side</span>
+              <select aria-label={`side-${t.id}`} className="field" value={t.side} onChange={(e) => patch(t.id, { side: e.target.value as Side })} style={{ width: 92 }}>
+                {SIDES.map((s) => <option key={s}>{s}</option>)}
+              </select>
+            </div>
+            <div style={fieldGroup}>
+              <span style={fieldLabel}>Type</span>
+              <select aria-label={`type-${t.id}`} className="field" value={t.type} onChange={(e) => patch(t.id, { type: e.target.value as OrderType })} style={{ width: 108 }}>
+                {TYPES.map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </div>
+            <div style={fieldGroup}>
+              <span style={fieldLabel}>TIF</span>
+              <select aria-label={`tif-${t.id}`} className="field" value={t.tif} onChange={(e) => patch(t.id, { tif: e.target.value as TIF })} style={{ width: 80 }}>
+                {TIFS.map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </div>
+          </div>
+
+          <div style={fieldRow}>
+            <div style={fieldGroup}>
+              <span style={fieldLabel}>Price</span>
+              <select aria-label={`price-source-${t.id}`} className="field" value={t.priceSource} onChange={(e) => patch(t.id, { priceSource: e.target.value as PriceSource })} style={{ width: 84 }}>
+                {SOURCES.map((x) => <option key={x}>{x}</option>)}
+              </select>
+            </div>
+            <div style={fieldGroup}>
+              <span style={fieldLabel}>Offset</span>
+              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <StepField
+                  ariaLabel={`offset-${t.id}`}
+                  testid={`offset-${t.id}`}
+                  value={rawEdits[`${t.id}:offset`] ?? String(t.priceOffset)}
+                  onType={(v) => {
+                    setRawEdit(`${t.id}:offset`, v);
+                    const n = Number(v);
+                    if (!Number.isNaN(n)) patch(t.id, { priceOffset: n });
+                  }}
+                  onStep={(dir) => {
+                    patch(t.id, { priceOffset: round2(t.priceOffset + dir * OFFSET_STEP) });
+                    clearRawEdit(`${t.id}:offset`);
+                  }}
+                  onBlur={() => clearRawEdit(`${t.id}:offset`)}
+                  style={{ width: 92 }}
+                />
+                <select aria-label={`offset-unit-${t.id}`} className="field" value={t.priceOffsetUnit ?? "$"} onChange={(e) => patch(t.id, { priceOffsetUnit: e.target.value as PriceOffsetUnit })} style={{ width: 44 }}>
+                  <option value="$">$</option><option value="%">%</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div style={fieldRow}>
+            <div style={fieldGroup}>
+              <span style={fieldLabel}>Size</span>
+              <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                <select aria-label={`size-mode-${t.id}`} className="field" value={t.sizing.mode} onChange={(e) => patch(t.id, { sizing: modeToSpec(e.target.value as SizingMode) })} style={{ width: 96 }}>
+                  {MODES.map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
+                </select>
+                <StepField
+                  ariaLabel={`size-value-${t.id}`}
+                  testid={`size-value-${t.id}`}
+                  value={rawEdits[`${t.id}:size`] ?? sizingValue(t.sizing)}
+                  onType={(v) => {
+                    setRawEdit(`${t.id}:size`, v);
+                    const n = Number(v);
+                    if (!Number.isNaN(n)) patch(t.id, { sizing: setSizingValue(t.sizing, n) });
+                  }}
+                  onStep={(dir) => {
+                    patch(t.id, { sizing: nudgeSizing(t.sizing, dir) });
+                    clearRawEdit(`${t.id}:size`);
+                  }}
+                  onBlur={() => clearRawEdit(`${t.id}:size`)}
+                  style={{ width: 84 }}
+                />
+                {isPercentMode(t.sizing.mode) ? <span style={{ fontSize: 10, color: palette.textMuted }}>max 100</span> : null}
+              </div>
+            </div>
+          </div>
+        </>
+      ) : (
+        <div style={fieldRow}>
+          <div style={fieldGroup}>
+            <span style={fieldLabel}>Action</span>
+            <select aria-label={`action-${t.id}`} className="field" value={t.action} onChange={(e) => patch(t.id, { action: e.target.value as ManagementAction })} style={{ width: 200 }}>
+              {MANAGE_ACTIONS.map((a) => <option key={a}>{a}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; onSave: (next: OrderConfig) => void }): JSX.Element {
@@ -101,9 +303,8 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
   const hasConflict = dupes.size > 0;
   const manages = templates.filter((t) => t.kind === "manage");
 
-  const inp = { background: palette.bg, color: palette.text, border: `1px solid ${palette.border}`, fontSize: 12, padding: "1px 4px", width: "100%", boxSizing: "border-box" } as const;
-  const cell = { display: "grid", gridTemplateColumns: COLS, gap: 4, alignItems: "center", padding: "3px 0", borderTop: `1px solid ${palette.border}` } as const;
-  const head = { ...cell, color: palette.textMuted, fontSize: 10, letterSpacing: 0.4 };
+  const sectionLabel: CSSProperties = { color: palette.textMuted, fontSize: 10, letterSpacing: 0.4, margin: "2px 0 6px" };
+  const actionBtn: CSSProperties = { fontFamily: FONTS.sans };
 
   return (
     <div style={{ color: palette.text }}>
@@ -122,99 +323,40 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
         ))}
       </div>
 
-      <div style={head}>
-        <span>LABEL</span><span>SIDE</span><span>TYPE</span><span>TIF</span><span>PRICE</span><span>OFFSET</span><span>SIZE</span><span>KEY</span><span />
-      </div>
-
+      <div style={sectionLabel}>TEMPLATES</div>
       {templates.map((t) => (
-        <div key={t.id} style={cell}>
-          <input data-testid={`tmpl-label-${t.id}`} value={t.label} onChange={(e) => patch(t.id, { label: e.target.value })} style={inp} />
-          {t.kind === "place" ? (
-            <>
-              <select value={t.side} onChange={(e) => patch(t.id, { side: e.target.value as Side })} style={inp}>{SIDES.map((s) => <option key={s}>{s}</option>)}</select>
-              <select value={t.type} onChange={(e) => patch(t.id, { type: e.target.value as OrderType })} style={inp}>{TYPES.map((x) => <option key={x}>{x}</option>)}</select>
-              <select value={t.tif} onChange={(e) => patch(t.id, { tif: e.target.value as TIF })} style={inp}>{TIFS.map((x) => <option key={x}>{x}</option>)}</select>
-              <select value={t.priceSource} onChange={(e) => patch(t.id, { priceSource: e.target.value as PriceSource })} style={inp}>{SOURCES.map((x) => <option key={x}>{x}</option>)}</select>
-              <span style={{ display: "flex", gap: 3 }}>
-                <input
-                  aria-label={`offset-${t.id}`}
-                  value={rawEdits[`${t.id}:offset`] ?? String(t.priceOffset)}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setRawEdit(`${t.id}:offset`, v);
-                    const n = Number(v);
-                    if (!Number.isNaN(n)) patch(t.id, { priceOffset: n });
-                  }}
-                  onBlur={() => clearRawEdit(`${t.id}:offset`)}
-                  style={{ ...inp, width: 62 }}
-                />
-                <select aria-label={`offset-unit-${t.id}`} value={t.priceOffsetUnit ?? "$"} onChange={(e) => patch(t.id, { priceOffsetUnit: e.target.value as PriceOffsetUnit })} style={{ ...inp, width: 46 }}>
-                  <option value="$">$</option><option value="%">%</option>
-                </select>
-              </span>
-              <span style={{ display: "flex", gap: 3 }}>
-                <select aria-label={`size-mode-${t.id}`} value={t.sizing.mode} onChange={(e) => patch(t.id, { sizing: modeToSpec(e.target.value as SizingMode) })} style={{ ...inp, width: 84 }}>
-                  {MODES.map((m) => <option key={m} value={m}>{MODE_LABEL[m]}</option>)}
-                </select>
-                <input
-                  aria-label={`size-value-${t.id}`}
-                  value={rawEdits[`${t.id}:size`] ?? sizingValue(t.sizing)}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setRawEdit(`${t.id}:size`, v);
-                    const n = Number(v);
-                    if (!Number.isNaN(n)) patch(t.id, { sizing: setSizingValue(t.sizing, n) });
-                  }}
-                  onBlur={() => clearRawEdit(`${t.id}:size`)}
-                  style={{ ...inp, width: 60 }}
-                />
-              </span>
-            </>
-          ) : (
-            <select aria-label={`action-${t.id}`} value={t.action} onChange={(e) => patch(t.id, { action: e.target.value as ManagementAction })} style={{ ...inp, gridColumn: "2 / 8" }}>
-              {MANAGE_ACTIONS.map((a) => <option key={a}>{a}</option>)}
-            </select>
-          )}
-          <span style={{ display: "flex", gap: 3, alignItems: "center" }}>
-            <input
-              data-testid={`tmpl-hotkey-${t.id}`} readOnly value={t.hotkey ?? ""} placeholder="press keys"
-              onKeyDown={(e) => {
-                // Must stop propagation, not just preventDefault: the real hotkey
-                // engine (useHotkeys, mounted globally in AppShell) listens on
-                // `window` in the bubble phase. Without this, a candidate combo
-                // typed here while capturing a binding can also be a *live* combo
-                // (e.g. default Ctrl+Shift+K = KillSwitch, Ctrl+1..4 = place
-                // templates) and fire the real action — this settings screen must
-                // stay inert with zero order-safety authority.
-                e.preventDefault();
-                e.stopPropagation();
-                const c = normalizeCombo(e);
-                if (c) patch(t.id, { hotkey: c });
-              }}
-              style={{ ...inp, width: 96, borderColor: isDup(t) ? palette.danger : palette.border }}
-            />
-            {t.hotkey ? <button data-testid={`tmpl-unbind-${t.id}`} title="unbind" onClick={() => patch(t.id, { hotkey: "" })} style={{ ...inp, width: 22, cursor: "pointer", color: palette.textMuted }}>×</button> : null}
-            {isDup(t) ? <span style={{ color: palette.danger, fontSize: 10 }}>dup</span> : null}
-          </span>
-          <button title="remove" onClick={() => removeTemplate(t.id)} style={{ ...inp, width: 22, color: palette.danger, cursor: "pointer" }}>×</button>
-        </div>
+        <TemplateCard
+          key={t.id} t={t} palette={palette} dup={isDup(t)}
+          rawEdits={rawEdits} setRawEdit={setRawEdit} clearRawEdit={clearRawEdit}
+          patch={patch} onRemove={removeTemplate}
+        />
       ))}
 
       <div style={{ display: "flex", gap: 6, marginTop: 10, alignItems: "center", position: "relative" }}>
-        <button data-testid="add-template" onClick={() => setAddOpen((v) => !v)} style={{ ...inp, width: "auto", cursor: "pointer" }}>+ Add ▾</button>
+        <button className="btn" data-testid="add-template" onClick={() => setAddOpen((v) => !v)} style={actionBtn}>+ Add ▾</button>
         {addOpen && (
           <>
-            <button data-testid="add-place" onClick={() => { addPlace(); setAddOpen(false); }} style={{ ...inp, width: "auto", cursor: "pointer" }}>Order template</button>
-            <button data-testid="add-manage" onClick={() => { addManage(); setAddOpen(false); }} style={{ ...inp, width: "auto", cursor: "pointer" }}>Management action</button>
+            <button className="btn" data-testid="add-place" onClick={() => { addPlace(); setAddOpen(false); }} style={actionBtn}>Order template</button>
+            <button className="btn" data-testid="add-manage" onClick={() => { addManage(); setAddOpen(false); }} style={actionBtn}>Management action</button>
           </>
         )}
         {confirmReset
-          ? <button data-testid="reset-confirm" onClick={doReset} style={{ ...inp, width: "auto", color: palette.danger, cursor: "pointer" }}>Confirm reset</button>
-          : <button data-testid="reset-defaults" onClick={() => setConfirmReset(true)} style={{ ...inp, width: "auto", cursor: "pointer" }}>Reset to defaults</button>}
+          ? <button className="btn" data-testid="reset-confirm" onClick={doReset} style={{ ...actionBtn, color: palette.danger, borderColor: palette.danger }}>Confirm reset</button>
+          : <button className="btn" data-testid="reset-defaults" onClick={() => setConfirmReset(true)} style={actionBtn}>Reset to defaults</button>}
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
-        <button data-testid="save" disabled={hasConflict} onClick={() => onSave({ ...config, templates })} style={{ ...inp, width: "auto", background: hasConflict ? palette.border : palette.accent, color: palette.bg, fontWeight: 700, cursor: hasConflict ? "not-allowed" : "pointer" }}>Save</button>
+        <button
+          className="btn" data-testid="save" disabled={hasConflict} onClick={() => onSave({ ...config, templates })}
+          style={{
+            ...actionBtn, fontWeight: 700, cursor: hasConflict ? "not-allowed" : "pointer",
+            background: hasConflict ? palette.border : palette.accent,
+            borderColor: hasConflict ? palette.border : palette.accent,
+            color: palette.bg,
+          }}
+        >
+          Save
+        </button>
       </div>
     </div>
   );
