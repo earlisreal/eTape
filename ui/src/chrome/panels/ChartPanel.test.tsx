@@ -43,7 +43,8 @@ import { makeStores } from "../../data/registry";
 import { Scheduler } from "../../render/Scheduler";
 import { browserRaf, type Surface } from "../../render/surface";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
-import type { AckMsg } from "../../wire/contract";
+import type { AckMsg, Bar, DeltaMsg } from "../../wire/contract";
+import { DEFAULT_CHART_SETTINGS } from "./tv/ChartSettingsDialog";
 import { FakeDrawingBus, FakeDrawingBusHub } from "../../../test/fakes";
 
 // jsdom has no ResizeObserver; ChartPanel's resize wiring only needs observe/disconnect.
@@ -56,7 +57,7 @@ vi.stubGlobal("ResizeObserver", MockResizeObserver);
 
 beforeEach(() => { vi.clearAllMocks(); cleanup(); });
 
-function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sharedScheduler?: Scheduler) {
+function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sharedScheduler?: Scheduler, settingsOverride?: Record<string, unknown>) {
   const stores = sharedStores ?? makeStores();
   const scheduler = sharedScheduler ?? new Scheduler(browserRaf, () => {});
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
@@ -64,7 +65,7 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sh
     sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })),
     sendQuery: vi.fn(async () => []),
   };
-  const config = { id, panelId: "chart", group: "green" as const, settings: { symbol: "US.AAPL", timeframe: "1m" } };
+  const config = { id, panelId: "chart", group: "green" as const, settings: { symbol: "US.AAPL", timeframe: "1m", ...settingsOverride } };
   const onConfigChange = vi.fn();
   const utils = render(
     <ThemeProvider>
@@ -73,6 +74,27 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sh
     </ThemeProvider>,
   );
   return { ...utils, stores, onConfigChange, scheduler };
+}
+
+// Pushes a bar into the shared BarStore, the same delta shape the engine sends
+// for a live bar (see BarStore.test.ts's own `bar`/`delta` helpers). Defaults to
+// an in-progress bar; set inProgress to false to push a closed bar.
+function pushLiveBar(stores: ReturnType<typeof makeStores>, symbol: string, timeframe: string, o: number, c: number, inProgress = true): void {
+  const bar: Bar = { symbol, timeframe, bucketStart: "2026-07-09T13:31:00.000Z", o, h: Math.max(o, c) + 0.1, l: Math.min(o, c) - 0.1, c, v: 100, inProgress };
+  const msg: DeltaMsg = { kind: "delta", topic: "md.bars", key: `${symbol}:${timeframe}`, payload: bar };
+  stores.bars.apply(msg);
+}
+
+// Mounts ChartPanel with a scheduler.register spy that captures the registered
+// Surface, mirroring the "repositions the MACD legend" test above — lets a test
+// call paint() directly instead of racing the scheduler's own rAF loop.
+function renderChartCapturingSurface(settingsOverride?: Record<string, unknown>) {
+  const stores = makeStores();
+  const scheduler = new Scheduler(browserRaf, () => {});
+  let surface: Surface | undefined;
+  vi.spyOn(scheduler, "register").mockImplementation((s: Surface) => { surface = s; return vi.fn(); });
+  const utils = renderChart("c1", stores, scheduler, settingsOverride);
+  return { ...utils, stores, getSurface: () => surface! };
 }
 
 describe("ChartPanel", () => {
@@ -356,5 +378,35 @@ describe("ChartPanel", () => {
       paneApis[0].getHeight.mockReturnValue(400); // restore defaults for later tests in this file
       paneApis[1].getHeight.mockReturnValue(120);
     }
+  });
+
+  it("renders the bar-close-timer badge for an in-progress bar on an intraday timeframe when the setting is on", () => {
+    const { stores, getSurface, getByTestId } = renderChartCapturingSurface();
+    pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5);
+    act(() => { getSurface().paint(); });
+    expect(getByTestId("bar-close-timer")).toBeTruthy();
+  });
+
+  it("does not render the badge when chartSettings.barCloseTimer is off, even with an in-progress bar", () => {
+    const { stores, getSurface, queryByTestId } = renderChartCapturingSurface({
+      chartSettings: { ...DEFAULT_CHART_SETTINGS, barCloseTimer: false },
+    });
+    pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5);
+    act(() => { getSurface().paint(); });
+    expect(queryByTestId("bar-close-timer")).toBeNull();
+  });
+
+  it("does not render the badge on a D/W/M timeframe, even with an in-progress bar and the setting on", () => {
+    const { stores, getSurface, queryByTestId } = renderChartCapturingSurface({ timeframe: "D" });
+    pushLiveBar(stores, "US.AAPL", "D", 100, 100.5);
+    act(() => { getSurface().paint(); });
+    expect(queryByTestId("bar-close-timer")).toBeNull();
+  });
+
+  it("does not render the badge when the bar is closed, even with the setting on and an intraday timeframe", () => {
+    const { stores, getSurface, queryByTestId } = renderChartCapturingSurface();
+    pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5, false);
+    act(() => { getSurface().paint(); });
+    expect(queryByTestId("bar-close-timer")).toBeNull();
   });
 });

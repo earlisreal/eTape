@@ -12,6 +12,7 @@ import { DrawingsPrimitive } from "../../render/chart/drawings/primitive";
 import { DrawingInteraction, type Tool } from "../../render/chart/drawings/interaction";
 import { timeframeToMs } from "../../render/chart/drawings/geometry";
 import type { Timeframe } from "../../render/chart/barBucket";
+import { isIntradayTimeframe } from "../../render/chart/barClose";
 import type { Palette } from "../../render/palette";
 import { useTheme } from "../ThemeProvider";
 import type { Drawing } from "../../render/chart/drawings/model";
@@ -26,6 +27,7 @@ import { TVFloatingToolbar } from "./tv/TVFloatingToolbar";
 import { IndicatorSettingsDialog } from "./tv/IndicatorSettingsDialog";
 import { ChartSettingsDialog, DEFAULT_CHART_SETTINGS, type ChartSettings } from "./tv/ChartSettingsDialog";
 import { computeLegendView } from "./tv/legendView";
+import { BarCloseTimer } from "./tv/BarCloseTimer";
 
 // Adapts a real LWC v5 IChartApi to the controller's minimal ChartApiFacade.
 function makeFacade(chart: IChartApi, palette: Palette): {
@@ -157,6 +159,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const [chartSettingsOpen, setChartSettingsOpen] = useState(false);
   const [paneOffsets, setPaneOffsets] = useState<number[]>([0]);
   const [rightAxisWidth, setRightAxisWidth] = useState(0);
+  // Position (+ direction) of LWC's built-in last-price tag on the main series,
+  // used only to anchor BarCloseTimer directly beneath it — null while there's no
+  // in-progress bar (nothing live to point the tag at) or off-screen.
+  const [lastPriceTag, setLastPriceTag] = useState<{ y: number; up: boolean } | null>(null);
   const [selection, setSelection] = useState<{ id: string; rect: { x: number; y: number; w: number; h: number }; color: string; width: number; lineStyle: LineStyleName } | null>(null);
 
   const legendRef = useRef<TVLegendHandle | null>(null);
@@ -324,6 +330,14 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         setPaneOffsets((prev) => (prev.length === offs.length && prev.every((v, i) => v === offs[i]) ? prev : offs));
         const axisW = facade.priceScaleWidth();
         setRightAxisWidth((prev) => (prev === axisW ? prev : axisW));
+        // BarCloseTimer anchors directly beneath LWC's own last-price tag, which only
+        // exists while the current bucket's bar is still in progress — no live bar,
+        // no tag, so the badge stays hidden (see the JSX gate below).
+        const live = stores.bars.inProgressBar(currentSymbol, tfRef.current);
+        const y = live ? facade.priceToCoordinate(live.c) : null;
+        const next = live && y != null ? { y, up: live.c >= live.o } : null;
+        setLastPriceTag((prev) =>
+          prev === next || (prev && next && prev.y === next.y && prev.up === next.up) ? prev : next);
       },
     });
 
@@ -550,6 +564,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           onToggleHidden={toggleIndicatorHidden} onEditIndicator={setSettingsInstanceId} onRemoveIndicator={removeIndicator}
           onClosePane={closePane} onToggleCollapsePane={togglePaneCollapsed}
           legendRef={legendRef} />
+        {chartSettings.barCloseTimer && isIntradayTimeframe(timeframe as Timeframe) && lastPriceTag && rightAxisWidth > 0 && (
+          <BarCloseTimer chrome={chrome} timeframe={timeframe} lastPriceY={lastPriceTag.y}
+            rightAxisWidth={rightAxisWidth} paneBottom={paneOffsets[1] ?? height} up={lastPriceTag.up} />
+        )}
         {selection && (
           <TVFloatingToolbar chrome={chrome} rect={selection.rect} color={selection.color} width={selection.width} lineStyle={selection.lineStyle}
             onColor={(c) => patchSelected({ color: c })} onWidth={(w) => patchSelected({ width: w })} onLineStyle={(s) => patchSelected({ lineStyle: s })}
