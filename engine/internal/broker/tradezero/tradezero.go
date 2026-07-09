@@ -621,8 +621,9 @@ func (a *Adapter) handlePosition(p tzPosition) {
 	if p.Side == "Short" {
 		qty = -qty
 	}
+	symbol := domainSymbol(p.Symbol)
 	a.mu.Lock()
-	a.positions[p.Symbol] = exec.Position{Venue: a.venue, Symbol: p.Symbol, Qty: qty, AvgPrice: p.PriceAvg}
+	a.positions[symbol] = exec.Position{Venue: a.venue, Symbol: symbol, Qty: qty, AvgPrice: p.PriceAvg}
 	snapshot := make([]exec.Position, 0, len(a.positions))
 	for _, pos := range a.positions {
 		snapshot = append(snapshot, pos)

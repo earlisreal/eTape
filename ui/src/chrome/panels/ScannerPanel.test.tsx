@@ -37,15 +37,25 @@ describe("ScannerPanel", () => {
         { symbol: "US.KO", changePct: 18.4, last: 62.1, floatShares: 4_300_000_000, volume: 1_250_000 },
         { symbol: "US.WXYZ", changePct: null, last: null, floatShares: 21_000_000, volume: 0 },
       ] } }));
-    expect(screen.getByText("US.KO")).toBeTruthy();
+    expect(screen.getByText("KO")).toBeTruthy();
     expect(screen.getByText("+18.4%")).toBeTruthy();
+  });
+
+  it("renders the symbol column without the US. market prefix", () => {
+    const { scanner } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [
+        { symbol: "US.KO", changePct: 18.4, last: 62.1, floatShares: 4_300_000_000, volume: 1_250_000 },
+      ] } }));
+    expect(screen.queryByText("US.KO")).toBeNull();
+    expect(screen.getByText("KO")).toBeTruthy();
   });
 
   it("renders no-print rows as em dash, never 0", () => {
     const { scanner } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.WXYZ", changePct: null, last: null, floatShares: null, volume: 0 }] } }));
-    const rowCells = screen.getByText("US.WXYZ").closest("tr")!.querySelectorAll("td");
+    const rowCells = screen.getByText("WXYZ").closest("tr")!.querySelectorAll("td");
     expect([...rowCells].map((c) => c.textContent)).toContain("—");
     expect([...rowCells].some((c) => c.textContent === "0%")).toBe(false);
   });
@@ -57,15 +67,15 @@ describe("ScannerPanel", () => {
         { symbol: "US.KO", changePct: 18.4, last: 1, floatShares: 1, volume: 1 },
         { symbol: "US.LOW", changePct: 2, last: 1, floatShares: 1, volume: 1 },
       ] } }));
-    expect(screen.queryByText("US.KO")).toBeTruthy();
-    expect(screen.queryByText("US.LOW")).toBeNull();
+    expect(screen.queryByText("KO")).toBeTruthy();
+    expect(screen.queryByText("LOW")).toBeNull();
   });
 
   it("row double-click publishes focus to the panel's linked group", () => {
     const { scanner, focus } = renderPanel({ group: "blue" });
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
-    fireEvent.doubleClick(screen.getByText("US.KO"));
+    fireEvent.doubleClick(screen.getByText("KO"));
     expect(focus).toHaveBeenCalledWith("blue", "US.KO");
   });
 
@@ -73,7 +83,7 @@ describe("ScannerPanel", () => {
     const { scanner, focus } = renderPanel({ group: null });
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
-    fireEvent.doubleClick(screen.getByText("US.KO"));
+    fireEvent.doubleClick(screen.getByText("KO"));
     expect(focus).toHaveBeenCalledWith("green", "US.KO");
   });
 
@@ -81,9 +91,9 @@ describe("ScannerPanel", () => {
     const { scanner, focus } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
-    fireEvent.click(screen.getByText("US.KO"));
+    fireEvent.click(screen.getByText("KO"));
     expect(focus).not.toHaveBeenCalled();
-    const row = screen.getByText("US.KO").closest("tr") as HTMLElement;
+    const row = screen.getByText("KO").closest("tr") as HTMLElement;
     expect(row.style.background).toBe("rgba(154, 106, 27, 0.16)");
   });
 
@@ -91,7 +101,7 @@ describe("ScannerPanel", () => {
     const { scanner } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
-    const row = screen.getByText("US.KO").closest("tr") as HTMLElement;
+    const row = screen.getByText("KO").closest("tr") as HTMLElement;
     expect(row.style.background).toBe("transparent");
     fireEvent.mouseEnter(row);
     expect(row.style.background).toBe("rgba(154, 106, 27, 0.06)");
@@ -103,7 +113,7 @@ describe("ScannerPanel", () => {
     const { scanner } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
-    const row = screen.getByText("US.KO").closest("tr") as HTMLElement;
+    const row = screen.getByText("KO").closest("tr") as HTMLElement;
     fireEvent.click(row);
     expect(row.style.background).toBe("rgba(154, 106, 27, 0.16)");
     fireEvent.mouseEnter(row);
@@ -119,7 +129,7 @@ describe("ScannerPanel", () => {
         { symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 },
         { symbol: "US.NEW", changePct: 9, last: 1, floatShares: 1, volume: 1 },
       ] } }));
-    const row = screen.getByText("US.NEW").closest("tr") as HTMLElement;
+    const row = screen.getByText("NEW").closest("tr") as HTMLElement;
     const newHitBackground = row.style.background;
     expect(newHitBackground).not.toBe("transparent");
     expect(newHitBackground).not.toBe("rgba(154, 106, 27, 0.06)");
@@ -173,7 +183,7 @@ describe("ScannerPanel", () => {
         { symbol: "US.HIGH", changePct: 40, last: 1, floatShares: 1, volume: 1 },
       ] } }));
     const symbols = [...document.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent);
-    expect(symbols).toEqual(["US.HIGH", "US.LOW"]);
+    expect(symbols).toEqual(["HIGH", "LOW"]);
   });
 
   it("clicking the % header toggles sort direction and persists it via onConfigChange", () => {
@@ -187,7 +197,7 @@ describe("ScannerPanel", () => {
     expect(onConfigChange).toHaveBeenCalledWith(expect.objectContaining({
       sort: { col: "changePct", dir: "asc" } }));
     const symbols = [...document.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent);
-    expect(symbols).toEqual(["US.LOW", "US.HIGH"]);
+    expect(symbols).toEqual(["LOW", "HIGH"]);
   });
 
   it("movers variant has no filter button and applies no thresholds", () => {
@@ -199,7 +209,7 @@ describe("ScannerPanel", () => {
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth",
       payload: { refreshedAt: "2026-07-08T14:00:00.000Z", rows: [
         { symbol: "US.LOW", changePct: 2, last: 1, floatShares: 1, volume: 1 }] } }));
-    expect(screen.getByText("US.LOW")).toBeTruthy(); // not filtered out despite minChangePct:50
+    expect(screen.getByText("LOW")).toBeTruthy(); // not filtered out despite minChangePct:50
   });
 
   it("follows the live session label", () => {

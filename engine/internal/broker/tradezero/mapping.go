@@ -2,11 +2,27 @@ package tradezero
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
+
+// wireSymbol strips eTape's "US." market-prefix convention so outbound
+// requests carry the bare ticker TradeZero's API expects (e.g. "AAPL", not
+// "US.AAPL").
+func wireSymbol(symbol string) string {
+	return strings.TrimPrefix(symbol, "US.")
+}
+
+// domainSymbol re-adds the "US." prefix to a bare ticker TradeZero's API
+// returns, so it matches the domain convention the rest of eTape keys
+// Order/Position/Fill.Symbol by. TradeZero is a US-only venue (CLAUDE.md), so
+// this is always correct.
+func domainSymbol(symbol string) string {
+	return "US." + symbol
+}
 
 func orderTypeWire(t exec.OrderType) (string, error) {
 	switch t {

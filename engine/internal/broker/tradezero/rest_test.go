@@ -295,7 +295,7 @@ func TestSnapshot_ParsesAccountsPositions(t *testing.T) {
 	if acct.Equity != 100000 || acct.BuyingPower != 200000 || acct.SodEquity != 99000 || acct.Leverage != 2 {
 		t.Fatalf("account details not parsed: %+v", acct)
 	}
-	if len(pos) != 1 || pos[0].Qty != 100 || pos[0].Symbol != "AAPL" {
+	if len(pos) != 1 || pos[0].Qty != 100 || pos[0].Symbol != "US.AAPL" {
 		t.Fatalf("positions = %+v", pos)
 	}
 	if len(orders) != 0 {
@@ -541,5 +541,86 @@ func TestDo_SetsAuthHeaders(t *testing.T) {
 	}
 	if gotKeyID != "the-key-id" || gotSecret != "the-secret" {
 		t.Fatalf("auth headers = %q / %q", gotKeyID, gotSecret)
+	}
+}
+
+// TestSubmitOrder_StripsUSPrefixFromSymbol mirrors the Alpaca fix: eTape's
+// domain Symbol always carries the "US." prefix, but TradeZero's asset
+// symbols never do. submitOrder must strip it before the request reaches TZ.
+func TestSubmitOrder_StripsUSPrefixFromSymbol(t *testing.T) {
+	var body map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/order", func(w http.ResponseWriter, r *http.Request) {
+		b, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := json.Unmarshal(b, &body); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"orderStatus":"New","userOrderId":"2TZ00001:ET-x"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "2TZ00001", "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if _, _, err := rc.submitOrder(context.Background(), exec.OrderRequest{
+		Venue: "tz", Symbol: "US.AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, TIF: exec.TIFDay, Qty: 10,
+		ClientOrderID: "ET-x",
+	}, "ET-x", "SMART"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := body["symbol"].(string); got != "AAPL" {
+		t.Fatalf("symbol sent to TradeZero = %q, want %q (US. prefix must be stripped)", got, "AAPL")
+	}
+}
+
+// TestCancelAll_WithSymbol_StripsUSPrefix mirrors the submit-side fix for the
+// symbol-scoped cancel-all query.
+func TestCancelAll_WithSymbol_StripsUSPrefix(t *testing.T) {
+	mux := http.NewServeMux()
+	var gotSymbol string
+	mux.HandleFunc("/v1/api/accounts/orders", func(w http.ResponseWriter, r *http.Request) {
+		gotSymbol = r.URL.Query().Get("symbol")
+		_, _ = w.Write([]byte(`{"message":"ok"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "2TZ00001", "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.cancelAll(context.Background(), "US.AAPL"); err != nil {
+		t.Fatal(err)
+	}
+	if gotSymbol != "AAPL" {
+		t.Fatalf("symbol query sent to TradeZero = %q, want %q", gotSymbol, "AAPL")
+	}
+}
+
+// TestSnapshot_AddsUSPrefixToPositionAndOrderSymbols proves the inbound half:
+// TZ's REST responses carry bare symbols, but every domain Position/Order
+// eTape keys state by must carry the "US." prefix.
+func TestSnapshot_AddsUSPrefixToPositionAndOrderSymbols(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/api/account/2TZ00001", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) })
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/pnl", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) })
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/positions", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"symbol":"AAPL","side":"Long","shares":10,"priceAvg":100}]`))
+	})
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/orders", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"clientOrderId":"ET1","symbol":"AAPL","orderStatus":"New","orderQuantity":10}]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "2TZ00001", "K", "S", clock.NewFake(time.UnixMilli(0)))
+	_, positions, orders, err := rc.snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(positions) != 1 || positions[0].Symbol != "US.AAPL" {
+		t.Fatalf("position symbol = %+v, want US.AAPL", positions)
+	}
+	if len(orders) != 1 || orders[0].Symbol != "US.AAPL" {
+		t.Fatalf("order symbol = %+v, want US.AAPL", orders)
 	}
 }

@@ -72,12 +72,16 @@ func TestNormalizeUpdate_FillDedupOnExecutionID(t *testing.T) {
 	if f.F.Qty != 40 || f.AvgPrice != 190.48 || f.CumQty != 40 || f.F.OrderID != "ET01J0000000000000000000BB" {
 		t.Fatalf("fill = %+v", f)
 	}
+	// the wire's bare "AAPL" must be re-prefixed to the domain "US.AAPL" convention.
+	if f.F.Symbol != "US.AAPL" {
+		t.Fatalf("fill symbol = %q, want US.AAPL", f.F.Symbol)
+	}
 	// same execution_id again -> no duplicate fill
 	if len(fills(a.normalizeUpdate("alpaca", tu))) != 0 {
 		t.Fatal("duplicate execution_id re-emitted a fill")
 	}
 	// a BrokerPositions with position_qty=40 accompanies the fill
-	if !hasPosition(evs, "AAPL", 40) {
+	if !hasPosition(evs, "US.AAPL", 40) {
 		t.Fatal("expected BrokerPositions position_qty=40")
 	}
 }
@@ -93,7 +97,7 @@ func TestNormalizeUpdate_PartialFillDistinctExecutionID(t *testing.T) {
 	if f.F.Qty != 20 || f.AvgPrice != 190.52 || f.CumQty != 60 {
 		t.Fatalf("fill = %+v", f)
 	}
-	if !hasPosition(evs, "AAPL", 60) {
+	if !hasPosition(evs, "US.AAPL", 60) {
 		t.Fatal("expected BrokerPositions position_qty=60")
 	}
 }
@@ -174,6 +178,23 @@ func TestNormalizeUpdate_RareEventsIgnored(t *testing.T) {
 		if evs := a.normalizeUpdate("alpaca", tu); len(evs) != 0 {
 			t.Fatalf("event %q: want 0 domain events, got %d: %+v", ev, len(evs), evs)
 		}
+	}
+}
+
+// TestNormalizeUpdate_Fill_AddsUSPrefixToSymbol proves trade_updates fill
+// events (which carry Alpaca's bare symbol, e.g. "AAPL") get tagged with
+// eTape's domain "US." prefix on both the Fill and the accompanying
+// BrokerPositions — the same inbound half of the fix rest_test.go covers for
+// the REST snapshot path.
+func TestNormalizeUpdate_Fill_AddsUSPrefixToSymbol(t *testing.T) {
+	a := newTestAdapter(t, "alpaca")
+	tu := loadUpdate(t, "fill.json")
+	evs := a.normalizeUpdate("alpaca", tu)
+	if len(fills(evs)) != 1 || fills(evs)[0].F.Symbol != "US.AAPL" {
+		t.Fatalf("fill symbol = %+v, want US.AAPL", fills(evs))
+	}
+	if !hasPosition(evs, "US.AAPL", 40) {
+		t.Fatalf("expected BrokerPositions symbol US.AAPL, got %+v", positions(evs))
 	}
 }
 

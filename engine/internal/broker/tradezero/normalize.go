@@ -86,7 +86,7 @@ func (a *Adapter) normalizeOrder(venue exec.VenueID, o tzOrder) []exec.BrokerEve
 	if newFill {
 		out = append(out, exec.OrderFilled{
 			F: exec.Fill{
-				Venue: venue, OrderID: oid, Symbol: o.Symbol,
+				Venue: venue, OrderID: oid, Symbol: domainSymbol(o.Symbol),
 				Side: sideDomain(o.Side, o.OpenClose), Qty: o.LastQty, Price: o.PriceAvg, TsMs: ts,
 			},
 			CumQty: o.Executed, LeavesQty: o.OrderQuantity - o.Executed, AvgPrice: o.PriceAvg,

@@ -68,6 +68,18 @@ func TestNormalizeOrder_PartialFillEmitsOneFill(t *testing.T) {
 	}
 }
 
+// TestNormalizeOrder_Fill_AddsUSPrefixToSymbol proves a Portfolio-WS fill
+// (which carries TZ's bare symbol, e.g. "AAPL") gets tagged with eTape's
+// domain "US." prefix, matching the REST snapshot path's fix in rest_test.go.
+func TestNormalizeOrder_Fill_AddsUSPrefixToSymbol(t *testing.T) {
+	a := newTestAdapter(t, "tz")
+	evs := a.normalizeOrder("tz", loadOrder(t, "order_partial_fill.json"))
+	fs := fills2(evs)
+	if len(fs) != 1 || fs[0].F.Symbol != "US.AAPL" {
+		t.Fatalf("fill symbol = %+v, want US.AAPL", fs)
+	}
+}
+
 func TestNormalizeOrder_ShortUnenriched(t *testing.T) {
 	a := newTestAdapter(t, "tz")
 	o := loadOrder(t, "order_short_new.json")

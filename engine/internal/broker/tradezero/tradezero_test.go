@@ -578,7 +578,7 @@ func TestAdapter_HandlePosition_EmitsFullSignedSnapshot(t *testing.T) {
 	a.handlePosition(tzPosition{Symbol: "AAPL", Side: "Long", Shares: 10, PriceAvg: 100})
 	ev := waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.BrokerPositions); return ok })
 	bp := ev.(exec.BrokerPositions)
-	if len(bp.Positions) != 1 || bp.Positions[0].Qty != 10 || bp.Positions[0].Venue != "tz" {
+	if len(bp.Positions) != 1 || bp.Positions[0].Qty != 10 || bp.Positions[0].Venue != "tz" || bp.Positions[0].Symbol != "US.AAPL" {
 		t.Fatalf("positions after first push = %+v", bp.Positions)
 	}
 
@@ -590,12 +590,31 @@ func TestAdapter_HandlePosition_EmitsFullSignedSnapshot(t *testing.T) {
 	bp = ev.(exec.BrokerPositions)
 	var gme *exec.Position
 	for i := range bp.Positions {
-		if bp.Positions[i].Symbol == "GME" {
+		if bp.Positions[i].Symbol == "US.GME" {
 			gme = &bp.Positions[i]
 		}
 	}
 	if gme == nil || gme.Qty != -50 {
-		t.Fatalf("short position must carry a negative Qty: %+v", bp.Positions)
+		t.Fatalf("short position must carry a negative Qty, keyed by the domain-prefixed symbol: %+v", bp.Positions)
+	}
+}
+
+// TestAdapter_HandlePosition_AddsUSPrefixToSymbol proves the Portfolio-WS
+// position push (TZ's bare symbol, e.g. "GME") is tagged with eTape's domain
+// "US." prefix, both as the BrokerPositions Symbol field and as the internal
+// map key — otherwise a second push for the same symbol would fail to
+// dedup/replace the first (keyed by the untagged symbol) and reconcile()'s
+// domain-symbol-keyed lookups would never find it.
+func TestAdapter_HandlePosition_AddsUSPrefixToSymbol(t *testing.T) {
+	a, err := New(Config{Venue: "tz", AccountID: "2TZ00001", Creds: creds.Pair{KeyID: "K", SecretKey: "S"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.handlePosition(tzPosition{Symbol: "GME", Side: "Short", Shares: 50, PriceAvg: 20.5})
+	ev := waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.BrokerPositions); return ok })
+	bp := ev.(exec.BrokerPositions)
+	if len(bp.Positions) != 1 || bp.Positions[0].Symbol != "US.GME" {
+		t.Fatalf("position symbol = %+v, want US.GME", bp.Positions)
 	}
 }
 

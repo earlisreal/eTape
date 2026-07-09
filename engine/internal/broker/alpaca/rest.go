@@ -110,7 +110,7 @@ func (rc *restClient) submitOrder(ctx context.Context, req exec.OrderRequest, cl
 		return "", err
 	}
 	payload := map[string]any{
-		"symbol":          req.Symbol,
+		"symbol":          wireSymbol(req.Symbol),
 		"qty":             req.Qty,
 		"side":            sideWire(req.Side),
 		"type":            ot,
@@ -321,6 +321,7 @@ func checkBatchItems(body []byte) error {
 // individually, joining any per-order failures rather than stopping at the
 // first one.
 func (rc *restClient) cancelAll(ctx context.Context, symbol string) error {
+	symbol = wireSymbol(symbol)
 	if symbol == "" {
 		resp, err := rc.do(ctx, http.MethodDelete, "/v2/orders", nil)
 		if err != nil {
@@ -479,7 +480,7 @@ func restOrderSideDomain(wireSide string) exec.Side {
 func (o auOrder) domain() exec.Order {
 	return exec.Order{
 		ID:           o.ClientOrderID,
-		Symbol:       o.Symbol,
+		Symbol:       domainSymbol(o.Symbol),
 		Side:         restOrderSideDomain(o.Side),
 		Type:         orderTypeDomain(o.OrderType),
 		Qty:          float64(o.Qty),
@@ -543,7 +544,7 @@ func (rc *restClient) snapshot(ctx context.Context) (exec.AccountSnapshot, []exe
 	}
 	positions := make([]exec.Position, 0, len(aps))
 	for _, p := range aps {
-		positions = append(positions, exec.Position{Symbol: p.Symbol, Qty: positionQtyDomain(p), AvgPrice: float64(p.AvgEntryPrice)})
+		positions = append(positions, exec.Position{Symbol: domainSymbol(p.Symbol), Qty: positionQtyDomain(p), AvgPrice: float64(p.AvgEntryPrice)})
 	}
 
 	ordResp, err := rc.do(ctx, http.MethodGet, "/v2/orders?status=open", nil)

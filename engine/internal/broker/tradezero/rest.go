@@ -90,7 +90,7 @@ func (rc *restClient) submitOrder(ctx context.Context, req exec.OrderRequest, tz
 	}
 	side, openClose := sideWire(req.Side)
 	payload := map[string]any{
-		"symbol":        req.Symbol,
+		"symbol":        wireSymbol(req.Symbol),
 		"orderQuantity": int(req.Qty),
 		"orderType":     ot,
 		"timeInForce":   tifWire(req.TIF, extendedHoursFor(req.Session, rc.clk), req.Type),
@@ -193,7 +193,7 @@ func (o tzRestOrder) status() string {
 func (o tzRestOrder) domain() exec.Order {
 	return exec.Order{
 		ID:           o.ClientOrderID,
-		Symbol:       o.Symbol,
+		Symbol:       domainSymbol(o.Symbol),
 		Side:         sideDomain(o.Side, o.OpenClose),
 		Qty:          o.OrderQuantity,
 		LimitPrice:   o.LimitPrice,
@@ -297,6 +297,7 @@ func (rc *restClient) cancelAll(ctx context.Context, symbol string) error {
 	if err := rc.bCanAll.Take(ctx); err != nil {
 		return err
 	}
+	symbol = wireSymbol(symbol)
 	path := "/v1/api/accounts/orders"
 	if symbol != "" {
 		path += "?" + url.Values{"symbol": {symbol}}.Encode()
@@ -434,7 +435,7 @@ func (rc *restClient) snapshot(ctx context.Context) (exec.AccountSnapshot, []exe
 		if p.Side == "Short" {
 			qty = -qty
 		}
-		positions = append(positions, exec.Position{Symbol: p.Symbol, Qty: qty, AvgPrice: p.PriceAvg})
+		positions = append(positions, exec.Position{Symbol: domainSymbol(p.Symbol), Qty: qty, AvgPrice: p.PriceAvg})
 	}
 
 	tzOrders, err := rc.listOrders(ctx)

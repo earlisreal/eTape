@@ -133,7 +133,7 @@ func (a *Adapter) normalizeUpdate(venue exec.VenueID, tu tradeUpdate) []exec.Bro
 		return []exec.BrokerEvent{
 			exec.OrderFilled{
 				F: exec.Fill{
-					Venue: venue, OrderID: oid, Symbol: tu.Order.Symbol,
+					Venue: venue, OrderID: oid, Symbol: domainSymbol(tu.Order.Symbol),
 					Side: side, Qty: float64(tu.Qty), Price: float64(tu.Price), TsMs: ts,
 				},
 				CumQty:    float64(tu.Order.FilledQty),
@@ -143,7 +143,7 @@ func (a *Adapter) normalizeUpdate(venue exec.VenueID, tu tradeUpdate) []exec.Bro
 			exec.BrokerPositions{
 				V: venue,
 				Positions: []exec.Position{
-					{Venue: venue, Symbol: tu.Order.Symbol, Qty: float64(tu.PositionQty)},
+					{Venue: venue, Symbol: domainSymbol(tu.Order.Symbol), Qty: float64(tu.PositionQty)},
 				},
 			},
 		}

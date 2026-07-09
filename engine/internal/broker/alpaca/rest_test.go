@@ -127,6 +127,30 @@ func TestSubmit_Accept(t *testing.T) {
 	}
 }
 
+// TestSubmit_StripsUSPrefixFromSymbol proves the domain's "US.AAPL" convention
+// never leaks onto the wire: Alpaca's API rejects a "US."-prefixed symbol as
+// unknown, so the outbound payload must carry the bare ticker.
+func TestSubmit_StripsUSPrefixFromSymbol(t *testing.T) {
+	mux := http.NewServeMux()
+	var gotBody map[string]any
+	mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, r *http.Request) {
+		_ = jsonDecode(t, r, &gotBody)
+		_, _ = w.Write([]byte(`{"id":"b-1","client_order_id":"ET-1","symbol":"AAPL","side":"buy","order_type":"market","qty":"1","filled_qty":"0","status":"new"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(etTime(10, 0)))
+	if _, err := rc.submitOrder(context.Background(), exec.OrderRequest{
+		Venue: "alpaca", Symbol: "US.AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, TIF: exec.TIFDay, Qty: 1,
+	}, "ET-1"); err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["symbol"] != "AAPL" {
+		t.Fatalf("symbol = %v, want bare AAPL (not US.AAPL)", gotBody["symbol"])
+	}
+}
+
 // TestSubmit_ExtendedHours_LimitOutsideRTH_SetsFlag covers the three sessions
 // where Alpaca requires extended_hours=true to work a day/gtc limit order
 // immediately instead of queuing it for the next RTH open: pre-market,
@@ -975,4 +999,86 @@ func jsonDecode(t *testing.T, r *http.Request, v *map[string]any) error {
 	t.Helper()
 	dec := json.NewDecoder(r.Body)
 	return dec.Decode(v)
+}
+
+// TestSubmitOrder_StripsUSPrefixFromSymbol reproduces a real live rejection
+// (docs: "asset \"US.VRAX\" not found") — eTape's domain Symbol always carries
+// the "US." prefix (the moomoo-derived convention used throughout the engine
+// and UI), but Alpaca's asset symbols never do. submitOrder must strip it
+// before the request ever reaches Alpaca's API.
+func TestSubmitOrder_StripsUSPrefixFromSymbol(t *testing.T) {
+	var body map[string]any
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, r *http.Request) {
+		if err := jsonDecode(t, r, &body); err != nil {
+			t.Fatal(err)
+		}
+		_, _ = w.Write([]byte(`{"id":"b-1"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if _, err := rc.submitOrder(context.Background(), exec.OrderRequest{
+		Venue: "alpaca", Symbol: "US.AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, TIF: exec.TIFDay, Qty: 1, ClientOrderID: "ET-x",
+	}, "ET-x"); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := body["symbol"].(string); got != "AAPL" {
+		t.Fatalf("symbol sent to Alpaca = %q, want %q (US. prefix must be stripped)", got, "AAPL")
+	}
+}
+
+// TestCancelAll_WithSymbol_StripsUSPrefix mirrors the submit-side fix for the
+// symbol-scoped cancel-all path, which also sends the symbol straight to
+// Alpaca's /v2/orders?symbols= query.
+func TestCancelAll_WithSymbol_StripsUSPrefix(t *testing.T) {
+	var gotSymbols string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, r *http.Request) {
+		gotSymbols = r.URL.Query().Get("symbols")
+		_, _ = w.Write([]byte(`[]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.cancelAll(context.Background(), "US.AAPL"); err != nil {
+		t.Fatal(err)
+	}
+	if gotSymbols != "AAPL" {
+		t.Fatalf("symbols filter sent to Alpaca = %q, want %q", gotSymbols, "AAPL")
+	}
+}
+
+// TestSnapshot_AddsUSPrefixToPositionAndOrderSymbols proves the inbound half
+// of the same fix: Alpaca's REST responses carry bare symbols, but every
+// domain Position/Order eTape keys state by must carry the "US." prefix to
+// match the rest of the engine (positions/orders would otherwise never
+// reconcile against gate/state lookups keyed by the domain symbol).
+func TestSnapshot_AddsUSPrefixToPositionAndOrderSymbols(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/account", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"equity":"100","last_equity":"100","buying_power":"100","cash":"100","multiplier":"1"}`))
+	})
+	mux.HandleFunc("/v2/positions", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"symbol":"AAPL","qty":"10","side":"long","avg_entry_price":"190"}]`))
+	})
+	mux.HandleFunc("/v2/orders", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"id":"b-1","client_order_id":"ET-1","symbol":"AAPL","side":"buy","order_type":"limit","status":"new"}]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	_, positions, orders, err := rc.snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(positions) != 1 || positions[0].Symbol != "US.AAPL" {
+		t.Fatalf("position symbol = %+v, want US.AAPL", positions)
+	}
+	if len(orders) != 1 || orders[0].Symbol != "US.AAPL" {
+		t.Fatalf("order symbol = %+v, want US.AAPL", orders)
+	}
 }

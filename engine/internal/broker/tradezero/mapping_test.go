@@ -8,6 +8,29 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/exec"
 )
 
+// TestWireSymbol_StripsUSPrefix covers the BRK.B gotcha: a US ticker can
+// itself contain a dot, so stripping must match the literal "US." prefix,
+// not trim on the first dot found anywhere in the string.
+func TestWireSymbol_StripsUSPrefix(t *testing.T) {
+	cases := map[string]string{
+		"US.AAPL": "AAPL", "US.BRK.B": "BRK.B", "AAPL": "AAPL",
+	}
+	for in, want := range cases {
+		if got := wireSymbol(in); got != want {
+			t.Errorf("wireSymbol(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestDomainSymbol_AddsUSPrefix(t *testing.T) {
+	if got := domainSymbol("AAPL"); got != "US.AAPL" {
+		t.Fatalf("domainSymbol(AAPL) = %q, want US.AAPL", got)
+	}
+	if got := domainSymbol("BRK.B"); got != "US.BRK.B" {
+		t.Fatalf("domainSymbol(BRK.B) = %q, want US.BRK.B", got)
+	}
+}
+
 func TestOrderTypeWire(t *testing.T) {
 	cases := map[exec.OrderType]string{
 		exec.TypeMarket: "Market", exec.TypeLimit: "Limit",
