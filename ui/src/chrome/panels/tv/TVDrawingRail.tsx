@@ -129,7 +129,13 @@ export function TVDrawingRail({ chrome, activeTool, hideAll, symbol, onSelectToo
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
               <HoverButton onClick={() => setConfirm(false)} hoverStyle={{ background: chrome.hover, color: chrome.text }}
                 style={{ padding: "4px 10px", background: "transparent", border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, color: chrome.text, cursor: "pointer" }}>Cancel</HoverButton>
-              <HoverButton onClick={() => { setConfirm(false); onClearAll(); }} hoverStyle={{ background: chrome.hover, color: chrome.text }}
+              <HoverButton onClick={() => { setConfirm(false); onClearAll(); }}
+                // Danger button — flattening to chrome.hover/chrome.text right
+                // before a destructive click would erase the danger signal, so
+                // hover keeps the red background/white text and adds a ring
+                // instead of washing to neutral (same ring technique as the
+                // swatch/active-tool hovers elsewhere in this file/TVFloatingToolbar).
+                hoverStyle={{ background: chrome.down, color: "#fff", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.5)" }}
                 style={{ padding: "4px 10px", background: chrome.down, border: "none", borderRadius: TV_GEOM.radius, color: "#fff", cursor: "pointer" }}>Clear</HoverButton>
             </div>
           </div>

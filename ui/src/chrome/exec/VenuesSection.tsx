@@ -144,7 +144,12 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
-        <HoverButton data-testid="save-venues" onClick={saveVenues} style={{ ...inp, background: palette.accent, color: palette.bg, fontWeight: 700, cursor: "pointer" }}>Save venues & limits</HoverButton>
+        <HoverButton data-testid="save-venues" onClick={saveVenues}
+          style={{ ...inp, background: palette.accent, color: palette.bg, fontWeight: 700, cursor: "pointer" }}
+          // Accent CTA — same principle as .btn-primary's hover fix in
+          // global.css: keep the accent background/color and add a ring
+          // rather than washing to the default neutral overlay.
+          hoverStyle={{ background: palette.accent, color: palette.bg, boxShadow: `inset 0 0 0 1px ${palette.bg}` }}>Save venues & limits</HoverButton>
       </div>
     </div>
   );

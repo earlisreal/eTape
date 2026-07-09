@@ -215,7 +215,14 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
-        <HoverButton data-testid="save" disabled={hasConflict} onClick={() => onSave({ ...config, templates })} style={{ ...inp, width: "auto", background: hasConflict ? palette.border : palette.accent, color: palette.bg, fontWeight: 700, cursor: hasConflict ? "not-allowed" : "pointer" }}>Save</HoverButton>
+        <HoverButton data-testid="save" disabled={hasConflict} onClick={() => onSave({ ...config, templates })}
+          style={{ ...inp, width: "auto", background: hasConflict ? palette.border : palette.accent, color: palette.bg, fontWeight: 700, cursor: hasConflict ? "not-allowed" : "pointer" }}
+          // Accent CTA — same principle as .btn-primary's hover fix in
+          // global.css: keep the accent background/color and add a ring
+          // rather than washing to the default neutral overlay. disabled
+          // (hasConflict) never applies hoverStyle (HoverButton gates on
+          // !disabled), so the grey disabled look is untouched.
+          hoverStyle={{ background: palette.accent, color: palette.bg, boxShadow: `inset 0 0 0 1px ${palette.bg}` }}>Save</HoverButton>
       </div>
     </div>
   );
