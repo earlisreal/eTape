@@ -10,6 +10,7 @@ import (
 	"errors"
 	"math/rand"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -484,6 +485,50 @@ func TestCoreSeedTradesAbortsCleanlyOnCtxCancel(t *testing.T) {
 	select {
 	case u := <-c.Updates():
 		t.Fatalf("expected no TradeUpdate when seedTrades aborts on ctx-cancel, got %+v", u)
+	default:
+	}
+}
+
+// TestCoreSeedTradesLogsUnparseableSide covers the should-never-happen skip
+// path in seedTrades: a fill whose Side string doesn't parse (data
+// corruption, since Side strings are only ever written by the engine's own
+// Side.String()) must still be skipped, but must no longer vanish silently —
+// it must surface via c.syslog with enough detail (the raw Side value plus
+// symbol/venue) to diagnose. Without this, a skipped opening fill makes a
+// later closing fill look like it opens a position from flat, producing a
+// plausible-but-wrong closed trade with zero diagnostic trail (whole-branch
+// review finding).
+func TestCoreSeedTradesLogsUnparseableSide(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
+	fs := &fakeEventStore{fills: []exec.FillRow{
+		{OrderID: "o1", Symbol: "AAPL", Side: "GARBAGE", Qty: 10, Price: 100, TsMs: clk.Now().UnixMilli(), Venue: "sim-1"},
+	}}
+	var kinds, details []string
+	cfg := exec.CoreConfig{
+		Venues: []exec.VenueID{"sim-1"},
+		Store:  fs,
+		Clock:  clk,
+		SysLog: func(kind, detail string) {
+			kinds = append(kinds, kind)
+			details = append(details, detail)
+		},
+	}
+	c := exec.NewCore(cfg)
+	if err := c.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	found := false
+	for i, k := range kinds {
+		if k == "exec.recover" && strings.Contains(details[i], "GARBAGE") && strings.Contains(details[i], "AAPL") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a syslog call with kind=exec.recover naming the unparseable Side and symbol, got kinds=%v details=%v", kinds, details)
+	}
+	select {
+	case u := <-c.Updates():
+		t.Fatalf("expected no TradeUpdate for an unparseable-Side fill, got %+v", u)
 	default:
 	}
 }

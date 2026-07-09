@@ -225,6 +225,7 @@ func (c *Core) seedTrades(ctx context.Context) {
 	for _, f := range fills {
 		side, ok := sideFromString(f.Side)
 		if !ok {
+			c.syslog("exec.recover", "seed trades: unparseable Side "+f.Side+" for "+f.Symbol+"@"+string(f.Venue))
 			continue
 		}
 		for _, t := range c.trades.Apply(VenueID(f.Venue), f.Symbol, side, f.Qty, f.Price, f.TsMs) {
