@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { createChart, createTextWatermark, CandlestickSeries, BarSeries, HistogramSeries, LineSeries, AreaSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type Coordinate } from "lightweight-charts";
 import type { PanelProps } from "./registry";
 import { ChartController } from "../../render/chart/ChartController";
@@ -16,7 +17,8 @@ import { useTheme } from "../ThemeProvider";
 import type { Drawing } from "../../render/chart/drawings/model";
 import type { LineStyleName } from "../../render/chart/lineStyle";
 import { getTvPalette, getTvChrome } from "../../render/chart/tvTheme";
-import { TVToolbar } from "./tv/TVToolbar";
+import { PanelHeaderSlotContext } from "./headerSlot";
+import { ChartHeaderControls } from "./tv/ChartHeaderControls";
 import { TVDrawingRail, type RailPos } from "./tv/TVDrawingRail";
 import { TVContextMenu, type MenuEntry } from "./tv/TVContextMenu";
 import { TVLegend, type TVLegendHandle } from "./tv/TVLegend";
@@ -100,9 +102,14 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const controllerRef = useRef<ChartController | null>(null);
   const setFacadePaletteRef = useRef<((p: Palette) => void) | null>(null);
   const idSeq = useRef(0);
-  const { mode } = useTheme();
+  // appPalette is the app-wide Daylight-Ledger palette (same one PanelFrame/TopBar
+  // use) — for ChartHeaderControls, which portals into the ledger header and must
+  // match its chrome. `palette` below stays the TV-faithful canvas palette the chart
+  // itself (candles, primitives, ChartController) has always used.
+  const { mode, palette: appPalette } = useTheme();
   const palette = getTvPalette(mode);
   const chrome = getTvChrome(mode);
+  const headerSlot = useContext(PanelHeaderSlotContext);
   const symbol = (config.settings.symbol as string) ?? "US.AAPL";
   const timeframe0 = (config.settings.timeframe as string) ?? "1m";
   const chartType0 = (config.settings.chartType as ChartType) ?? "candle";
@@ -465,12 +472,20 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     return items;
   };
 
+  // Timeframe/indicators/screenshot/settings render in PanelFrame's ledger-header
+  // slot (portalled) instead of a second strip in this body — see headerSlot.ts.
+  // headerSlot === undefined means no PanelFrame above (e.g. a body-level test
+  // rendering ChartPanel directly): fall back to rendering inline so the controls
+  // still exist in this panel's own subtree. headerSlot === null means the slot
+  // provider is mounted but its DOM node hasn't attached yet — render nothing for
+  // that one tick rather than flash the controls inline first.
+  const headerControls = <ChartHeaderControls palette={appPalette} timeframe={timeframe}
+    onTimeframe={changeTimeframe} onOpenIndicators={() => setPickerOpen(true)}
+    onScreenshot={onScreenshot} onOpenSettings={() => setChartSettingsOpen(true)} />;
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: chrome.bg }}>
-      <TVToolbar chrome={chrome} symbol={chartSymbol} timeframe={timeframe}
-        onSymbolClick={() => hostRef.current?.focus()}
-        onTimeframe={changeTimeframe}
-        onOpenIndicators={() => setPickerOpen(true)} onScreenshot={onScreenshot} onOpenSettings={() => setChartSettingsOpen(true)} />
+      {headerSlot === undefined ? headerControls : headerSlot ? createPortal(headerControls, headerSlot) : null}
       <div ref={hostRef} data-testid="chart-host" tabIndex={0} style={{ flex: 1, minHeight: 0, position: "relative" }}
         onContextMenu={onContextMenu}>
         <TVDrawingRail chrome={chrome} activeTool={activeTool} magnet={magnet} hideAll={hideAll} symbol={chartSymbol}

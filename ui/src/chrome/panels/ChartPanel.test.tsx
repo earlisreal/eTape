@@ -265,7 +265,7 @@ describe("ChartPanel", () => {
     expect(queryByRole("button", { name: "Remove all drawings" })).toBeNull();
   });
 
-  it("renders the TV toolbar and persists a timeframe change", () => {
+  it("renders the chart header controls and persists a timeframe change", () => {
     const { getByRole, onConfigChange } = renderChart();
     fireEvent.click(getByRole("button", { name: "timeframe 5m" }));
     expect(onConfigChange).toHaveBeenCalledWith(expect.objectContaining({ timeframe: "5m" }));

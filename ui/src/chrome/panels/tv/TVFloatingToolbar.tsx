@@ -14,9 +14,10 @@ export interface TVFloatingToolbarProps {
 export function TVFloatingToolbar({ chrome, rect, color, width, lineStyle, onColor, onWidth, onLineStyle, onClone, onDelete }: TVFloatingToolbarProps): JSX.Element {
   const [palette, setPalette] = useState(false);
   // The width control (1-4) carries numeral content — tabular-nums keeps digits from
-  // jittering, matching the convention set in TVToolbar/IndicatorSettingsDialog. Radius
-  // uses the shared TV_GEOM token so every rounded surface here stays in lockstep with
-  // the rest of the TV chrome (pill, swatch, popover, buttons all share one token).
+  // jittering, matching the convention set in ChartHeaderControls/IndicatorSettingsDialog.
+  // Radius uses the shared TV_GEOM token so every rounded surface here stays in
+  // lockstep with the rest of the TV chrome (pill, swatch, popover, buttons all share
+  // one token).
   const iconBtn = { width: 24, height: 24, display: "grid", placeItems: "center", background: "transparent", border: "none", borderRadius: TV_GEOM.radius, color: chrome.text, cursor: "pointer" } as const;
 
   return (
