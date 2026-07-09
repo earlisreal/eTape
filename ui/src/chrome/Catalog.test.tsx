@@ -26,4 +26,24 @@ describe("Catalog", () => {
     fireEvent.click(screen.getByText("Monitoring"));
     expect(onApplyPreset).toHaveBeenCalledWith("monitoring");
   });
+
+  it("hovering a one-by-one panel row shows the hover tint, cleared on mouse-leave", () => {
+    render(<ThemeProvider><Catalog onAddPanel={() => {}} onApplyPreset={() => {}} /></ThemeProvider>);
+    const row = screen.getByText("Chart").closest('[role="button"]') as HTMLElement;
+    expect(row.style.background).toBe("transparent");
+    fireEvent.mouseEnter(row);
+    expect(row.style.background).toBe("rgba(154, 106, 27, 0.06)");
+    fireEvent.mouseLeave(row);
+    expect(row.style.background).toBe("transparent");
+  });
+
+  it("hovering one panel row does not affect another row's background", () => {
+    render(<ThemeProvider><Catalog onAddPanel={() => {}} onApplyPreset={() => {}} /></ThemeProvider>);
+    const chartRow = screen.getByText("Chart").closest('[role="button"]') as HTMLElement;
+    const otherRow = chartRow.parentElement!.querySelectorAll('[role="button"]')[1] as HTMLElement;
+    expect(otherRow).not.toBe(chartRow);
+    fireEvent.mouseEnter(chartRow);
+    expect(chartRow.style.background).toBe("rgba(154, 106, 27, 0.06)");
+    expect(otherRow.style.background).toBe("transparent");
+  });
 });

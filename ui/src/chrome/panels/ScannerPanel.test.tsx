@@ -87,6 +87,46 @@ describe("ScannerPanel", () => {
     expect(row.style.background).toBe("rgba(154, 106, 27, 0.16)");
   });
 
+  it("hovering a non-selected, non-new-hit row shows the hover tint, cleared on mouse-leave", () => {
+    const { scanner } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
+    const row = screen.getByText("US.KO").closest("tr") as HTMLElement;
+    expect(row.style.background).toBe("transparent");
+    fireEvent.mouseEnter(row);
+    expect(row.style.background).toBe("rgba(154, 106, 27, 0.06)");
+    fireEvent.mouseLeave(row);
+    expect(row.style.background).toBe("transparent");
+  });
+
+  it("hovering a selected row leaves the selection background unchanged", () => {
+    const { scanner } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
+    const row = screen.getByText("US.KO").closest("tr") as HTMLElement;
+    fireEvent.click(row);
+    expect(row.style.background).toBe("rgba(154, 106, 27, 0.16)");
+    fireEvent.mouseEnter(row);
+    expect(row.style.background).toBe("rgba(154, 106, 27, 0.16)");
+  });
+
+  it("hovering a new-hit row leaves the flash background unchanged", () => {
+    const { scanner } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
+    act(() => scanner.apply({ kind: "delta", topic: "scanner.rank", key: "premarket",
+      payload: { refreshedAt: "2026-07-08T13:00:05.000Z", rows: [
+        { symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 },
+        { symbol: "US.NEW", changePct: 9, last: 1, floatShares: 1, volume: 1 },
+      ] } }));
+    const row = screen.getByText("US.NEW").closest("tr") as HTMLElement;
+    const newHitBackground = row.style.background;
+    expect(newHitBackground).not.toBe("transparent");
+    expect(newHitBackground).not.toBe("rgba(154, 106, 27, 0.06)");
+    fireEvent.mouseEnter(row);
+    expect(row.style.background).toBe(newHitBackground);
+  });
+
   it("has no persistent input row on load; the ⚙ button reveals the filter inputs", () => {
     renderPanel();
     expect(screen.queryByLabelText("min change %")).toBeNull();

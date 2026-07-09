@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { CATALOG, isDevPanel, PANELS } from "./panels/registry";
 import { PRESETS } from "./presets";
 import { useTheme } from "./ThemeProvider";
@@ -24,6 +25,7 @@ function Thumb({ kind }: { kind: "monitoring" | "trading" }): JSX.Element {
 // when running under `import.meta.env.DEV` — never in a production build.
 export function Catalog({ onAddPanel, onApplyPreset }: { onAddPanel: (id: string) => void; onApplyPreset: (id: string) => void }): JSX.Element {
   const { palette } = useTheme();
+  const [hoveredPanelId, setHoveredPanelId] = useState<string | null>(null);
   const panels = CATALOG.concat(import.meta.env.DEV && !CATALOG.some((c) => isDevPanel(c.panelId))
     ? [{ panelId: "smoke-painter", title: PANELS["smoke-painter"].title, glyph: PANELS["smoke-painter"].glyph, description: PANELS["smoke-painter"].description }]
     : []);
@@ -44,7 +46,10 @@ export function Catalog({ onAddPanel, onApplyPreset }: { onAddPanel: (id: string
         <div className="col-head serif" style={{ borderBottom: `3px double ${palette.borderStrong}`, paddingBottom: 5, marginBottom: 12 }}>Or add panels one by one</div>
         {panels.map((c) => (
           <div key={c.panelId} role="button" tabIndex={0} onClick={() => onAddPanel(c.panelId)}
-            style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "7px 2px", borderBottom: `1px solid ${palette.border}`, cursor: "pointer" }}>
+            onMouseEnter={() => setHoveredPanelId(c.panelId)}
+            onMouseLeave={() => setHoveredPanelId((h) => (h === c.panelId ? null : h))}
+            style={{ display: "flex", alignItems: "baseline", gap: 10, padding: "7px 2px", borderBottom: `1px solid ${palette.border}`, cursor: "pointer",
+              background: hoveredPanelId === c.panelId ? "rgba(154,106,27,.06)" : "transparent", transition: "background 120ms ease" }}>
             <span className="mono" style={{ color: palette.up, width: 24 }}>{c.glyph}</span>
             <span style={{ fontWeight: 600, width: 110 }}>{c.title}</span>
             <span style={{ color: palette.textMuted, fontSize: 10.5 }}>{c.description}</span>
