@@ -133,6 +133,14 @@ type News struct {
 	MaxPerReq int  `toml:"max_per_req"`
 }
 
+// StockInfo is the [stockinfo] section: Qot_GetSecuritySnapshot (3203) fundamentals
+// + Qot_GetOwnerPlate (3207) industry lookup for the focused-symbol Stock Info panel.
+type StockInfo struct {
+	Enabled   bool `toml:"enabled"`
+	RefreshMs int  `toml:"refresh_ms"`  // snapshot+industry refresh interval
+	MaxPerReq int  `toml:"max_per_req"` // codes per 3203/3207 request (snapshot caps at 400)
+}
+
 // Health is the [health] section: moomoo probe RTT + sys.health/sys.events emission.
 type Health struct {
 	Enabled bool `toml:"enabled"`
@@ -159,17 +167,18 @@ type BackfillAlpaca struct {
 
 // Config is the engine's bootstrap configuration.
 type Config struct {
-	OpenD    OpenD    `toml:"opend"`
-	Feed     Feed     `toml:"feed"`
-	MD       MD       `toml:"md"`
-	Store    Store    `toml:"store"`
-	Venues   []Venue  `toml:"venue"`
-	Gate     Gate     `toml:"gate"`
-	UIHub    UIHub    `toml:"uihub"`
-	Scan     Scan     `toml:"scan"`
-	News     News     `toml:"news"`
-	Health   Health   `toml:"health"`
-	Backfill Backfill `toml:"backfill"`
+	OpenD     OpenD     `toml:"opend"`
+	Feed      Feed      `toml:"feed"`
+	MD        MD        `toml:"md"`
+	Store     Store     `toml:"store"`
+	Venues    []Venue   `toml:"venue"`
+	Gate      Gate      `toml:"gate"`
+	UIHub     UIHub     `toml:"uihub"`
+	Scan      Scan      `toml:"scan"`
+	News      News      `toml:"news"`
+	StockInfo StockInfo `toml:"stockinfo"`
+	Health    Health    `toml:"health"`
+	Backfill  Backfill  `toml:"backfill"`
 }
 
 // Default returns the built-in defaults used when a field or the whole file is absent.
@@ -187,8 +196,9 @@ func Default() Config {
 			Enabled: true, PremarketMs: 2000, RTHMs: 3000, RankPages: 2,
 			MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000,
 		},
-		News:   News{Enabled: true, FocusedMs: 20000, WatchMs: 3000, MaxPerReq: 50},
-		Health: Health{Enabled: true, ProbeMs: 5000},
+		News:      News{Enabled: true, FocusedMs: 20000, WatchMs: 3000, MaxPerReq: 50},
+		StockInfo: StockInfo{Enabled: true, RefreshMs: 15000, MaxPerReq: 400},
+		Health:    Health{Enabled: true, ProbeMs: 5000},
 		Backfill: Backfill{Enabled: true, IntradayDays: 20, DailyYears: 0, Concurrency: 3, SeedChunk: 500,
 			Alpaca: BackfillAlpaca{Enabled: true, CredsKey: "alpaca", Feed: "iex"},
 		},
