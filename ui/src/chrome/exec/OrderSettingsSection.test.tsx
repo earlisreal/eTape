@@ -142,6 +142,71 @@ describe("OrderSettingsSection", () => {
     expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").hotkey).toBe("");
   });
 
+  // Regression: uid() is deterministic in templates.length alone, so once the
+  // array returns to a prior length (add-then-remove), the next add reuses
+  // the exact same id. removeTemplate must drop that id's rawEdits entries,
+  // or a still-in-progress (unblurred) edit on the removed row leaks onto
+  // whichever new row is assigned the reused id — a WYSIWYG desync where the
+  // input shows stale typed text but the saved model holds the real value.
+  it("clears a stale raw-edit override when a template is removed and its id is reused", () => {
+    const { onSave } = wrap();
+
+    // DEFAULT_TEMPLATES has 7 entries (indices 0..6), so the first add
+    // deterministically mints id "tmpl-8-7".
+    fireEvent.click(screen.getByTestId("add-template"));
+    fireEvent.click(screen.getByTestId("add-place"));
+    const firstOffset = screen.getByLabelText("offset-tmpl-8-7") as HTMLInputElement;
+    expect(firstOffset.value).toBe("0");
+
+    // Start editing but never blur — mirrors a stray click removing the row
+    // (e.g. Safari, where a non-text button click doesn't blur a sibling
+    // input first) that leaves rawEdits["tmpl-8-7:offset"] live.
+    fireEvent.change(firstOffset, { target: { value: "0." } });
+    expect(firstOffset.value).toBe("0.");
+
+    // Remove the row via its own "x" button without blurring the input first.
+    const removeButtons = screen.getAllByTitle("remove");
+    fireEvent.click(removeButtons[removeButtons.length - 1]);
+
+    // Adding again reuses the exact same id, since templates.length is back
+    // to 7.
+    fireEvent.click(screen.getByTestId("add-template"));
+    fireEvent.click(screen.getByTestId("add-place"));
+    const reusedOffset = screen.getByLabelText("offset-tmpl-8-7") as HTMLInputElement;
+
+    // Must show the new row's own default (0), not the "0." leftover from
+    // the removed row that happened to reuse the same id.
+    expect(reusedOffset.value).toBe("0");
+
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "tmpl-8-7").priceOffset).toBe(0);
+  });
+
+  // Reset replaces every template wholesale, so any in-progress raw edit for
+  // an id that happens to survive the reset (default ids are fixed strings)
+  // must not persist and misdisplay across the reset.
+  it("clears a stale raw-edit override across reset-to-defaults", () => {
+    const { onSave } = wrap();
+    const offset = screen.getByLabelText("offset-buy-5k") as HTMLInputElement;
+
+    // In-progress edit, never blurred.
+    fireEvent.change(offset, { target: { value: "1." } });
+    expect(offset.value).toBe("1.");
+
+    fireEvent.click(screen.getByTestId("reset-defaults"));
+    fireEvent.click(screen.getByTestId("reset-confirm"));
+
+    // buy-5k's default priceOffset is 0 — the display must snap back to it,
+    // not keep showing the pre-reset in-progress "1." text.
+    const afterReset = screen.getByLabelText("offset-buy-5k") as HTMLInputElement;
+    expect(afterReset.value).toBe("0");
+
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").priceOffset).toBe(0);
+  });
+
   it("reset-defaults then reset-confirm restores DEFAULT_TEMPLATES", () => {
     const { onSave } = wrap();
     // Mutate first, to prove the reset actually discards the edit rather than

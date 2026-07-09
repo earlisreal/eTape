@@ -72,11 +72,27 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
 
   const patch = (id: string, over: Partial<ActionTemplate>) =>
     setTemplates((ts) => ts.map((t) => (t.id === id ? ({ ...t, ...over } as ActionTemplate) : t)));
-  const removeTemplate = (id: string) => setTemplates((ts) => ts.filter((t) => t.id !== id));
+  // Removing a row must also drop its rawEdits entries. uid() below is
+  // deterministic in templates.length alone, so an add-then-remove that
+  // returns the array to a prior length reuses the exact same id on the
+  // next add. Without this cleanup, a still-in-progress (unblurred) edit on
+  // the removed row would leak onto whichever new row is later assigned the
+  // reused id — the input would show stale typed text while the saved model
+  // holds the real, correct value.
+  const removeTemplate = (id: string) => {
+    setTemplates((ts) => ts.filter((t) => t.id !== id));
+    clearRawEdit(`${id}:offset`);
+    clearRawEdit(`${id}:size`);
+  };
   const uid = (p: string) => `${p}-${templates.length + 1}-${Math.max(0, ...templates.map((_, i) => i)) + 1}`;
   const addPlace = () => setTemplates((ts) => [...ts, { kind: "place", id: uid("tmpl"), label: "New", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, priceOffsetUnit: "$", sizing: { mode: "Shares", shares: 100 } } as PlaceOrderTemplate]);
   const addManage = () => setTemplates((ts) => [...ts, { kind: "manage", id: uid("mng"), label: "New action", action: "CancelLast" }]);
-  const doReset = () => { setTemplates(normalizeOrderConfig({ ...config, templates: DEFAULT_TEMPLATES.map((t) => ({ ...t })) }).templates); setConfirmReset(false); };
+  // Reset replaces every template wholesale, so any live rawEdits entry —
+  // even for an id that still exists after reset (default ids are fixed
+  // strings, not uid()-generated) — must not survive it; otherwise the
+  // display would keep showing pre-reset in-progress typed text instead of
+  // snapping to the restored default value.
+  const doReset = () => { setTemplates(normalizeOrderConfig({ ...config, templates: DEFAULT_TEMPLATES.map((t) => ({ ...t })) }).templates); setRawEdits({}); setConfirmReset(false); };
   const places = templates.filter((t): t is PlaceOrderTemplate => t.kind === "place");
 
   const combos = templates.map((t) => t.hotkey ?? "").filter((c) => c !== "");
