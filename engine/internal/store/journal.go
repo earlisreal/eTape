@@ -114,6 +114,35 @@ func (s *Store) ReadJournalDay(day string) ([]JournalRow, error) {
 	return out, rows.Err()
 }
 
+// ReadJournalTicks returns one symbol's tick prints for the ET day containing
+// tsMs, flattened and in journal (arrival) order — the same order the live
+// pipe applied them, which the 10s watermark depends on. Seq overlaps
+// (seed vs push) are preserved; de-dup is the caller's job (md.Core), exactly
+// as the live and replay apply paths do it.
+func (s *Store) ReadJournalTicks(symbol string, tsMs int64) ([]feed.Tick, error) {
+	day := dayKey(tsMs)
+	rows, err := s.db.Query(
+		`SELECT payload FROM journal WHERE day=? AND symbol=? AND kind=? ORDER BY seq`,
+		day, symbol, kindTicks)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []feed.Tick
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		ev, err := decodePayload(kindTicks, []byte(payload))
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ev.(feed.TicksEvent).Ticks...)
+	}
+	return out, rows.Err()
+}
+
 // JournalDays returns the distinct recorded days, ascending.
 func (s *Store) JournalDays() ([]string, error) {
 	rows, err := s.db.Query("SELECT DISTINCT day FROM journal ORDER BY day")
