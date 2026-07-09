@@ -50,12 +50,33 @@ describe("TapePanel", () => {
     expect(off).toHaveBeenCalledTimes(1);
   });
 
-  it("persists the min-size filter through onConfigChange", () => {
+  it("has no inline min-size input in the body (moved to the settings dialog)", () => {
+    renderTape();
+    expect(screen.queryByLabelText(/min size/i)).toBeNull();
+  });
+
+  it("persists the min-size filter through the settings dialog's onConfigChange", () => {
     const { onConfigChange } = renderTape();
-    fireEvent.change(screen.getByLabelText(/min size/i), { target: { value: "250" } });
+    fireEvent.click(screen.getByLabelText("tape settings"));
+    fireEvent.change(screen.getByLabelText("minimum trade size"), { target: { value: "250" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
     // Patch-only: AppShell merges patches, so the panel sends just the key it
     // changed (a full-settings rewrite from frozen config clobbered siblings).
     expect(onConfigChange).toHaveBeenCalledWith({ minSize: 250 });
+  });
+
+  it("shows an active-filter dot on the gear once minSize is applied above 0, and clears it back at 0", () => {
+    renderTape();
+    expect(screen.queryByTestId("tape-minsize-active")).toBeNull();
+    fireEvent.click(screen.getByLabelText("tape settings"));
+    fireEvent.change(screen.getByLabelText("minimum trade size"), { target: { value: "250" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+    expect(screen.getByTestId("tape-minsize-active")).toBeTruthy();
+
+    fireEvent.click(screen.getByLabelText("tape settings"));
+    fireEvent.click(screen.getByRole("button", { name: "Defaults" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+    expect(screen.queryByTestId("tape-minsize-active")).toBeNull();
   });
 
   it("wheel-up pauses (pill appears); jump to live resumes", () => {

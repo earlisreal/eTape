@@ -64,6 +64,11 @@ export interface PanelDef {
   // PanelFrame uses this to open the slot and to suppress its own title text (the
   // panel's controls already make its identity obvious without a "Chart" label).
   headerControls?: boolean;
+  // This panel's body portals a single small action (e.g. a settings gear) into
+  // PanelFrame's ledger-header actions slot, immediately left of the close button
+  // (see headerSlot.ts's PanelHeaderActionsSlotContext). Unlike headerControls,
+  // this does NOT suppress the panel's title — it's for one icon, not a toolbar.
+  headerActions?: boolean;
 }
 
 // Plan 1 registered the two stack-proving panels; Plan 2 added the chart panel;
@@ -114,6 +119,7 @@ export const PANELS: Record<string, PanelDef> = {
     description: "Live prints, buy/sell colored",
     symbolBearing: true,
     demand: "watch",
+    headerActions: true,
   },
   "scanner": {
     component: (p) => <ScannerPanel {...p} variant="scanner" />,

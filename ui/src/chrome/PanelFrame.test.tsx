@@ -10,7 +10,7 @@ import { modalTracker } from "./modalTracker";
 import { makeStores } from "../data/registry";
 import { PanelFrame } from "./PanelFrame";
 import { PANELS } from "./panels/registry";
-import { PanelHeaderSlotContext } from "./panels/headerSlot";
+import { PanelHeaderSlotContext, PanelHeaderActionsSlotContext } from "./panels/headerSlot";
 import type { PanelConfig } from "./workspace";
 import type { AckMsg } from "../wire/contract";
 
@@ -427,5 +427,49 @@ describe("PanelFrame — headerControls slot (chart panel)", () => {
     // reproduced here via the real context default instead of a second render helper.
     const { container } = render(<PanelHeaderSlotContext.Provider value={undefined}><HeaderSlotProbe /></PanelHeaderSlotContext.Provider>);
     expect(within(container).getByTestId("probe").textContent).toBe("inline-fallback");
+  });
+});
+
+// Same probe technique as HeaderSlotProbe above, for the narrower headerActions
+// slot (a single icon button beside the close button — currently the tape panel's
+// settings gear). Substituting the real component avoids needing a working
+// scheduler/canvas to mount TapePanel, same rationale as the chart probe above.
+function ActionsSlotProbe(): JSX.Element | null {
+  const slot = useContext(PanelHeaderActionsSlotContext);
+  if (slot === undefined) return <div data-testid="actions-probe">inline-fallback</div>;
+  if (slot === null) return null; // provider present, slot div not yet mounted
+  return createPortal(<div data-testid="actions-probe">portaled</div>, slot);
+}
+
+describe("PanelFrame — headerActions slot (tape panel)", () => {
+  it("portals a headerActions panel's action into the ledger header, immediately before the close button, without suppressing the title", () => {
+    const realTapeDef = PANELS["tape"];
+    PANELS["tape"] = { ...realTapeDef, component: ActionsSlotProbe };
+    try {
+      const { container } = renderFrame({ panelId: "tape", group: null, settings: { symbol: "US.AAPL" } });
+      expect(within(container).getByText("Time & Sales")).toBeTruthy(); // title still shown, unlike headerControls
+      const probe = within(container).getByTestId("actions-probe");
+      expect(probe.textContent).toBe("portaled");
+      const header = container.querySelector(".ledger-header");
+      const body = container.querySelector('[data-testid="panel-body"]');
+      expect(header?.contains(probe)).toBe(true);
+      expect(body?.contains(probe)).toBe(false);
+      // Immediately before the close button, not just somewhere in the header.
+      const closeBtn = screen.getByLabelText("close panel");
+      const actionsSlotEl = container.querySelector('[data-testid="panel-header-actions"]');
+      expect(actionsSlotEl?.nextElementSibling).toBe(closeBtn);
+    } finally {
+      PANELS["tape"] = realTapeDef; // PANELS is a module-level singleton — restore for every later test/file
+    }
+  });
+
+  it("falls back to rendering inline when no PanelHeaderActionsSlotContext provider is above it", () => {
+    const { container } = render(<PanelHeaderActionsSlotContext.Provider value={undefined}><ActionsSlotProbe /></PanelHeaderActionsSlotContext.Provider>);
+    expect(within(container).getByTestId("actions-probe").textContent).toBe("inline-fallback");
+  });
+
+  it("does not render the actions slot for a panel without headerActions", () => {
+    renderFrame({ panelId: "news" });
+    expect(screen.queryByTestId("panel-header-actions")).toBeNull();
   });
 });

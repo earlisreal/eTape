@@ -1,15 +1,22 @@
-// Time & sales panel: canvas tape over the shared TapeRing. The min-size input
+// Time & sales panel: canvas tape over the shared TapeRing. The min-size setting
 // and paused pill are low-rate user-event React state (allowed); tick flow
 // itself never touches React. Wheel scrolling pauses; the anchor is a
 // (seq, generation) pair so a reconnect re-sync honestly drops the pause —
 // and so does an anchor that simply ages out of the retained ring while
-// paused (Task 7's buildTapeRows eviction fix).
-import { useEffect, useRef, useState } from "react";
+// paused (Task 7's buildTapeRows eviction fix). The min-size input lives in a
+// settings dialog reached via a header gear (portaled into PanelFrame's ledger
+// header, beside the close button) rather than an inline control in the body.
+import { useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { PanelProps } from "./registry";
 import { useTheme } from "../ThemeProvider";
 import { applyCanvasSize } from "../../render/canvas";
 import { scrollAccumulate } from "../../render/scroll";
 import { FONTS } from "../../render/palette";
+import { getTvChrome } from "../../render/chart/tvTheme";
+import { PanelHeaderActionsSlotContext } from "./headerSlot";
+import { IconGear } from "./tv/tvIcons";
+import { TapeSettingsDialog } from "./TapeSettingsDialog";
 import {
   adjustAnchor, buildTapeRows, liveView, TAPE_ROW_H, type TapeView,
 } from "../../render/tape/tapeState";
@@ -20,11 +27,16 @@ const COLHEAD_H = 16;
 
 export function TapePanel({ config, stores, scheduler, width, height, linkGroups, onConfigChange, group: groupProp }: PanelProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const { palette } = useTheme();
+  const { palette, mode } = useTheme();
   const [paused, setPaused] = useState(false);
   const [minSize, setMinSize] = useState<number>(
     typeof config.settings.minSize === "number" ? config.settings.minSize : 0,
   );
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // undefined: no PanelFrame above (body-level test) — render the gear inline.
+  // null: PanelFrame is present but its actions-slot div hasn't mounted yet.
+  // HTMLElement: the live portal target beside the close button.
+  const actionsSlot = useContext(PanelHeaderActionsSlotContext);
   // config.group is frozen (dockview never re-invokes this panel's factory with a
   // fresh config after creation); PanelFrame's live `group` prop is what actually
   // changes on a group re-pick — see registry.ts's PanelProps.group comment.
@@ -36,6 +48,10 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
   sizeRef.current = { width, height };
   const minSizeRef = useRef(minSize);
   minSizeRef.current = minSize;
+  // The header strip (this ref's consumer, in the paint callback below) only
+  // renders — and only takes up canvas height — while paused.
+  const pausedRef = useRef(paused);
+  pausedRef.current = paused;
   const viewRef = useRef<TapeView>({ anchorSeq: null, generation: 0 });
   const remainderRef = useRef(0);
   const symbolRef = useRef("");
@@ -43,7 +59,7 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
   const groupRef = useRef(group);
   useEffect(() => {
     forceRef.current++;
-  }, [width, height, palette, minSize]);
+  }, [width, height, palette, minSize, paused]);
 
   const jumpToLive = (): void => {
     viewRef.current = liveView(stores.tape);
@@ -117,9 +133,16 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
         if (viewRef.current.anchorSeq !== null && viewRef.current.generation !== stores.tape.generation()) {
           viewRef.current = liveView(stores.tape);
           setPaused(false);
+          // Sync the ref immediately: canvasH (right below) reads pausedRef, and
+          // setPaused's re-render (which would otherwise update it) hasn't
+          // happened yet — without this, this same paint call sizes the canvas
+          // for a header strip that's already gone, a one-frame height snap.
+          pausedRef.current = false;
         }
         const { width: w, height: h } = sizeRef.current;
-        const canvasH = h - HEADER_H - COLHEAD_H;
+        // Header strip only renders while paused (see the JSX below) — give its
+        // 26px back to the canvas the rest of the time.
+        const canvasH = h - (pausedRef.current ? HEADER_H : 0) - COLHEAD_H;
         if (!applyCanvasSize(canvas, ctx, w, canvasH, window.devicePixelRatio || 1)) return;
         const { rows, paused: p } = buildTapeRows(stores.tape, viewRef.current, {
           symbol: symbolRef.current,
@@ -137,6 +160,7 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
         if (!p && viewRef.current.anchorSeq !== null) {
           viewRef.current = liveView(stores.tape);
           setPaused(false);
+          pausedRef.current = false; // same reasoning as the reconnect branch above
         }
         paintTape(ctx, { rows, paused: p, width: w, height: canvasH, palette: paletteRef.current });
       },
@@ -149,35 +173,45 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
     };
   }, [config.id]);
 
+  // Portaled into PanelFrame's ledger-header actions slot, beside the close
+  // button (see headerSlot.ts's PanelHeaderActionsSlotContext). undefined (no
+  // frame above, e.g. a body-level test) falls back to rendering inline; null
+  // (frame present, slot div not yet mounted) renders nothing for that tick.
+  const gearBtn = (
+    <button type="button" aria-label="tape settings" onClick={() => setSettingsOpen(true)}
+      title={minSize > 0 ? `min size ${minSize}` : undefined}
+      style={{ position: "relative", display: "inline-flex", border: "none", background: "transparent",
+        color: palette.textMuted, cursor: "pointer", padding: 3 }}>
+      <IconGear size={13} />
+      {/* The old inline input always showed its value; the gear alone doesn't —
+          this dot is the at-a-glance "a filter is active" cue the title
+          attribute (hover-only) can't provide. */}
+      {minSize > 0 && (
+        <span aria-hidden="true" data-testid="tape-minsize-active"
+          style={{ position: "absolute", top: 1, right: 1, width: 5, height: 5, borderRadius: "50%", background: palette.accent }} />
+      )}
+    </button>
+  );
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div
-        style={{
-          display: "flex", alignItems: "center", gap: 8, height: HEADER_H, padding: "0 6px",
-          background: palette.surface, borderBottom: `1px solid ${palette.border}`,
-          fontSize: 11, fontFamily: FONTS.sans, color: palette.textMuted, flex: "none",
-        }}
-      >
-        <label>
-          min size{" "}
-          <input
-            type="number" min={0} value={minSize} style={{ width: 64 }}
-            onChange={(e) => {
-              const v = Math.max(0, Number(e.target.value) || 0);
-              setMinSize(v);
-              onConfigChange({ minSize: v });
-            }}
-          />
-        </label>
-        {paused && (
+      {actionsSlot === undefined ? gearBtn : actionsSlot ? createPortal(gearBtn, actionsSlot) : null}
+      {paused && (
+        <div
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "flex-end", height: HEADER_H, padding: "0 6px",
+            background: palette.surface, borderBottom: `1px solid ${palette.border}`,
+            fontSize: 11, fontFamily: FONTS.sans, color: palette.textMuted, flex: "none",
+          }}
+        >
           <button
             onClick={jumpToLive}
-            style={{ marginLeft: "auto", color: palette.warn, background: "none", border: "none", cursor: "pointer", fontSize: 11 }}
+            style={{ color: palette.warn, background: "none", border: "none", cursor: "pointer", fontSize: 11 }}
           >
             ⏸ paused — jump to live
           </button>
-        )}
-      </div>
+        </div>
+      )}
       <div
         style={{
           position: "relative", height: COLHEAD_H, flex: "none",
@@ -190,6 +224,11 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
         <span style={{ position: "absolute", right: TAPE_PAD, top: "50%", transform: "translateY(-50%)" }}>Size</span>
       </div>
       <canvas ref={canvasRef} style={{ display: "block", flex: 1, minHeight: 0 }} />
+      {settingsOpen && (
+        <TapeSettingsDialog chrome={getTvChrome(mode)} minSize={minSize}
+          onClose={() => setSettingsOpen(false)}
+          onApply={(v) => { setMinSize(v); onConfigChange({ minSize: v }); }} />
+      )}
     </div>
   );
 }

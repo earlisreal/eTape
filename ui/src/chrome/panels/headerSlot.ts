@@ -15,3 +15,11 @@ import { createContext } from "react";
 //    in on the next render once the ref fires. Avoids a flash of inline-then-ported.
 //  - HTMLElement: the live portal target inside PanelFrame's ledger header.
 export const PanelHeaderSlotContext = createContext<HTMLElement | null | undefined>(undefined);
+
+// A second, narrower slot: a small actions area in the ledger header, immediately
+// left of the close button. For a panel that wants a single header-level action
+// (e.g. a settings gear) without opting into the full headerControls toolbar slot
+// above — that slot suppresses the panel's title and takes over the whole flex:1
+// region, which is more than a lone icon button needs. Same three-state contract
+// as PanelHeaderSlotContext (undefined/null/HTMLElement — see the comment above).
+export const PanelHeaderActionsSlotContext = createContext<HTMLElement | null | undefined>(undefined);
