@@ -227,7 +227,13 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Configure venues" }));
 
     expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+    // The nav button alone doesn't prove which section is active — SettingsModal
+    // renders all 4 nav entries unconditionally regardless of the current
+    // section. Assert on VenuesSection's own "Venues" heading (distinct from
+    // e.g. AppearanceSection's "Theme" heading) to prove the click actually
+    // routed to the Venues section, not just opened the modal on some other one.
     expect(screen.getByRole("button", { name: /venues & creds/i })).toBeTruthy();
+    expect(screen.getByText("Venues")).toBeTruthy();
   });
 
   it("dismissing without ticking the checkbox hides it for the session but does not persist to localStorage", async () => {
@@ -243,6 +249,27 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
     // Re-publishing the same empty-venues status must not re-show it THIS session.
     publishStatus(stores, []);
     expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+  });
+
+  it("dismissing without ticking the checkbox lets the prompt reappear on a fresh mount (simulated reload)", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, []);
+    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "I'll do it later" }));
+    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+    expect(localStorage.getItem(VENUE_SETUP_HIDDEN_KEY)).toBeNull();
+
+    cleanup(); // unmount this AppShell instance — simulates a fresh app launch
+
+    const { stores: stores2 } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores2, []);
+    // Untracked dismissal must NOT persist across launches — venues are still
+    // empty, so the prompt is the non-negotiable half of the contract: it has
+    // to come back.
+    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
   });
 
   it("ticking 'don't show again' + dismissing persists the flag so a fresh mount with the same status stays hidden", async () => {
