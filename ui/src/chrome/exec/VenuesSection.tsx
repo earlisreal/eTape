@@ -182,7 +182,7 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
       {draft.venues.map((v, i) => {
         const isLive = v.env === "live";
         const showCreds = v.broker !== "sim";
-        const keySet = !!setup?.credKeys.includes(v.credentials);
+        const keySet = !!(setup?.credKeys ?? []).includes(v.credentials);
         const issue = validation[i];
         const typed = secretDrafts[v.credentials] ?? { keyId: "", secret: "" };
         const removing = removeConfirmIdx === i;

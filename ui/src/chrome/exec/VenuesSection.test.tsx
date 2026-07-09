@@ -215,6 +215,19 @@ describe("VenuesSection", () => {
     expect(screen.getByTestId("venues-error").textContent).toBe(reason);
   });
 
+  it("does not crash adding a venue on a fresh install where the engine reports credKeys: null", async () => {
+    const emptyConfig: VenueConfig = { venues: [], gate: { global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 }, venue: {} } };
+    const freshInstall = { file: emptyConfig, running: emptyConfig, credKeys: null } as unknown as VenueSetup;
+    const commands = makeCommands([freshInstall]);
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("add-venue")).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId("add-venue"));
+
+    await waitFor(() => expect(screen.getByTestId("venue-id-0")).toBeTruthy());
+    expect(screen.getByTestId("venue-broker-0")).toBeTruthy();
+  });
+
   describe("client-side validation disables Save", () => {
     it("blocks on a duplicate venue id", async () => {
       const commands = makeCommands([baseSetup()]);
