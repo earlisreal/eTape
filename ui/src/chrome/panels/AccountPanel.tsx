@@ -16,11 +16,11 @@ import type { OrderView } from "../../data/ExecStore";
 import { TradeHistoryTable } from "./TradeHistoryTable";
 import { PanelHeaderActionsSlotContext } from "./headerSlot";
 
-// Task 19 merges the old AccountBarPanel (stats strip + master/per-venue arm
-// chips) and PositionsPanel (sortable positions table, Flatten) into one
-// Account panel. Connection-link status dots stay in the top bar (Task 9) —
-// this panel keeps only the per-venue "connected" health dot inside its own
-// arm chip (a legitimate ok/danger health signal, distinct from arm state).
+// Task 19 merges the old AccountBarPanel (stats strip) and PositionsPanel
+// (sortable positions table, Flatten) into one Account panel. Per-venue arm
+// chips were later removed entirely (see StatsStrip below) — arming is
+// master-only now, owned by TopBar's arm chip. Connection-link status dots
+// stay in the top bar (Task 9).
 
 const money = (n: number | null): string => (n === null ? "—" : (n < 0 ? "−$" : "$") + formatPrice(Math.abs(n), 2));
 
