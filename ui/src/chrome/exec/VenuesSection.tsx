@@ -6,6 +6,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
+import { HoverButton } from "../controls/HoverButton";
 import type { AckMsg, Venue, Gate, VenueConfig, VenueSetup } from "../../wire/contract";
 
 interface Commands { sendCommand(name: string, args: unknown): Promise<AckMsg>; }
@@ -80,7 +81,7 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <div style={{ fontWeight: 700 }}>Venues</div>
-        <button data-testid="add-venue" onClick={addVenue} style={{ ...inp, cursor: "pointer" }}>+ Add venue</button>
+        <HoverButton data-testid="add-venue" onClick={addVenue} style={{ ...inp, cursor: "pointer" }}>+ Add venue</HoverButton>
       </div>
 
       {draft.venues.map((v, i) => (
@@ -98,7 +99,7 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
               <input data-testid={`venue-autoarm-${i}`} type="checkbox" disabled={v.env === "live"} checked={v.autoArm} onChange={(e) => patchVenue(i, { autoArm: e.target.checked })} />
               auto-arm
             </label>
-            <button data-testid={`venue-remove-${i}`} onClick={() => removeVenue(i)} style={{ ...inp, color: palette.danger, cursor: "pointer" }}>remove</button>
+            <HoverButton data-testid={`venue-remove-${i}`} onClick={() => removeVenue(i)} style={{ ...inp, color: palette.danger, cursor: "pointer" }}>remove</HoverButton>
           </div>
           <div style={{ display: "flex", gap: 8, marginTop: 3 }}>
             {(["maxOrderValue", "maxPositionValue", "maxPositionShares", "maxOpenOrders"] as const).map((cap) => (
@@ -131,7 +132,7 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
           <div key={k} style={{ display: "flex", gap: 10, alignItems: "center", borderTop: `1px solid ${palette.border}`, padding: "3px 0" }}>
             <span className="mono" style={{ width: 140 }}>{k}</span>
             <span style={{ color: palette.textMuted, flex: 1 }}>used by: {refs.length ? refs.join(", ") : "—"}</span>
-            <button data-testid={`credential-delete-${k}`} disabled={refs.length > 0} onClick={() => delCred(k)} style={{ ...inp, color: palette.danger, cursor: refs.length ? "not-allowed" : "pointer" }}>delete</button>
+            <HoverButton data-testid={`credential-delete-${k}`} disabled={refs.length > 0} onClick={() => delCred(k)} style={{ ...inp, color: palette.danger, cursor: refs.length ? "not-allowed" : "pointer" }}>delete</HoverButton>
           </div>
         );
       })}
@@ -139,11 +140,11 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
         <input data-testid="cred-name" value={credName} onChange={(e) => setCredName(e.target.value)} placeholder="name" style={{ ...inp, width: 120 }} />
         <input data-testid="cred-keyid" value={credKeyId} onChange={(e) => setCredKeyId(e.target.value)} placeholder="key id" type="password" style={{ ...inp, width: 140 }} />
         <input data-testid="cred-secret" value={credSecret} onChange={(e) => setCredSecret(e.target.value)} placeholder="secret key" type="password" style={{ ...inp, width: 180 }} />
-        <button data-testid="cred-save" onClick={putCred} style={{ ...inp, cursor: "pointer" }}>Add / replace key</button>
+        <HoverButton data-testid="cred-save" onClick={putCred} style={{ ...inp, cursor: "pointer" }}>Add / replace key</HoverButton>
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 14 }}>
-        <button data-testid="save-venues" onClick={saveVenues} style={{ ...inp, background: palette.accent, color: palette.bg, fontWeight: 700, cursor: "pointer" }}>Save venues & limits</button>
+        <HoverButton data-testid="save-venues" onClick={saveVenues} style={{ ...inp, background: palette.accent, color: palette.bg, fontWeight: 700, cursor: "pointer" }}>Save venues & limits</HoverButton>
       </div>
     </div>
   );

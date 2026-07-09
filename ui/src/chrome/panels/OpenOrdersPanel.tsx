@@ -1,5 +1,6 @@
 import { useState, useSyncExternalStore } from "react";
 import type { PanelProps } from "./registry";
+import { HoverButton } from "../controls/HoverButton";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
@@ -65,8 +66,8 @@ export function OpenOrdersPanel({ config, stores, commands, onConfigChange }: Pa
     <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
         <span style={{ fontWeight: 600 }}>Open Orders</span>
-        <button data-testid="cancel-all" onClick={() => void oc.cancelAll("everything")}
-          style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.warn}`, background: "transparent", color: palette.warn, cursor: "pointer" }}>Cancel All</button>
+        <HoverButton data-testid="cancel-all" onClick={() => void oc.cancelAll("everything")}
+          style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.warn}`, background: "transparent", color: palette.warn, cursor: "pointer" }}>Cancel All</HoverButton>
         {reconciling && (
           <span data-testid="reconcile-badge" className="chip chip-pending" style={{ marginLeft: "auto" }}>
             stream gap — reconciled, verify
@@ -106,8 +107,8 @@ export function OpenOrdersPanel({ config, stores, commands, onConfigChange }: Pa
                 <td style={{ color: palette.danger, fontSize: 10 }}>{order.rejectReason}</td>
                 <td style={{ color: palette.textMuted, fontSize: 10 }}>{order.venue}</td>
                 <td>{(working || optimistic) ? (
-                  <button data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
-                    style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</button>
+                  <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
+                    style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</HoverButton>
                 ) : null}</td>
               </tr>
             );

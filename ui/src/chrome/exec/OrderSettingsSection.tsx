@@ -5,6 +5,7 @@
 // before — and lets management templates be created.
 import { useState } from "react";
 import { useTheme } from "../ThemeProvider";
+import { HoverButton } from "../controls/HoverButton";
 import type { Side, OrderType, TIF } from "../../wire/contract";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 import type { SizingSpec, SizingMode } from "./sizing";
@@ -193,28 +194,28 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
               }}
               style={{ ...inp, width: 96, borderColor: isDup(t) ? palette.danger : palette.border }}
             />
-            {t.hotkey ? <button data-testid={`tmpl-unbind-${t.id}`} title="unbind" onClick={() => patch(t.id, { hotkey: "" })} style={{ ...inp, width: 22, cursor: "pointer", color: palette.textMuted }}>×</button> : null}
+            {t.hotkey ? <HoverButton data-testid={`tmpl-unbind-${t.id}`} title="unbind" onClick={() => patch(t.id, { hotkey: "" })} style={{ ...inp, width: 22, cursor: "pointer", color: palette.textMuted }}>×</HoverButton> : null}
             {isDup(t) ? <span style={{ color: palette.danger, fontSize: 10 }}>dup</span> : null}
           </span>
-          <button title="remove" onClick={() => removeTemplate(t.id)} style={{ ...inp, width: 22, color: palette.danger, cursor: "pointer" }}>×</button>
+          <HoverButton title="remove" onClick={() => removeTemplate(t.id)} style={{ ...inp, width: 22, color: palette.danger, cursor: "pointer" }}>×</HoverButton>
         </div>
       ))}
 
       <div style={{ display: "flex", gap: 6, marginTop: 10, alignItems: "center", position: "relative" }}>
-        <button data-testid="add-template" onClick={() => setAddOpen((v) => !v)} style={{ ...inp, width: "auto", cursor: "pointer" }}>+ Add ▾</button>
+        <HoverButton data-testid="add-template" onClick={() => setAddOpen((v) => !v)} style={{ ...inp, width: "auto", cursor: "pointer" }}>+ Add ▾</HoverButton>
         {addOpen && (
           <>
-            <button data-testid="add-place" onClick={() => { addPlace(); setAddOpen(false); }} style={{ ...inp, width: "auto", cursor: "pointer" }}>Order template</button>
-            <button data-testid="add-manage" onClick={() => { addManage(); setAddOpen(false); }} style={{ ...inp, width: "auto", cursor: "pointer" }}>Management action</button>
+            <HoverButton data-testid="add-place" onClick={() => { addPlace(); setAddOpen(false); }} style={{ ...inp, width: "auto", cursor: "pointer" }}>Order template</HoverButton>
+            <HoverButton data-testid="add-manage" onClick={() => { addManage(); setAddOpen(false); }} style={{ ...inp, width: "auto", cursor: "pointer" }}>Management action</HoverButton>
           </>
         )}
         {confirmReset
-          ? <button data-testid="reset-confirm" onClick={doReset} style={{ ...inp, width: "auto", color: palette.danger, cursor: "pointer" }}>Confirm reset</button>
-          : <button data-testid="reset-defaults" onClick={() => setConfirmReset(true)} style={{ ...inp, width: "auto", cursor: "pointer" }}>Reset to defaults</button>}
+          ? <HoverButton data-testid="reset-confirm" onClick={doReset} style={{ ...inp, width: "auto", color: palette.danger, cursor: "pointer" }}>Confirm reset</HoverButton>
+          : <HoverButton data-testid="reset-defaults" onClick={() => setConfirmReset(true)} style={{ ...inp, width: "auto", cursor: "pointer" }}>Reset to defaults</HoverButton>}
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
-        <button data-testid="save" disabled={hasConflict} onClick={() => onSave({ ...config, templates })} style={{ ...inp, width: "auto", background: hasConflict ? palette.border : palette.accent, color: palette.bg, fontWeight: 700, cursor: hasConflict ? "not-allowed" : "pointer" }}>Save</button>
+        <HoverButton data-testid="save" disabled={hasConflict} onClick={() => onSave({ ...config, templates })} style={{ ...inp, width: "auto", background: hasConflict ? palette.border : palette.accent, color: palette.bg, fontWeight: 700, cursor: hasConflict ? "not-allowed" : "pointer" }}>Save</HoverButton>
       </div>
     </div>
   );

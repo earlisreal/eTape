@@ -4,6 +4,7 @@ import type { Palette } from "../../../render/palette";
 import type { IndicatorType } from "../../../render/chart/indicatorSeries";
 import { IconIndicators, IconCamera, IconGear } from "./tvIcons";
 import { IndicatorPickerPopover } from "./IndicatorPickerPopover";
+import { HoverButton } from "../../controls/HoverButton";
 
 export const TIMEFRAMES = ["10s", "1m", "5m", "15m", "30m", "60m", "D", "W", "M"] as const;
 
@@ -36,24 +37,27 @@ export function ChartHeaderControls(
       {TIMEFRAMES.map((tf) => {
         const on = tf === timeframe;
         return (
-          <button key={tf} type="button" aria-label={`timeframe ${tf}`} aria-pressed={on} onClick={() => onTimeframe(tf)}
-            style={{ ...btn, fontWeight: on ? 700 : 500, color: on ? palette.accent : palette.textMuted }}>
+          <HoverButton key={tf} type="button" aria-label={`timeframe ${tf}`} aria-pressed={on} onClick={() => onTimeframe(tf)}
+            style={{ ...btn, fontWeight: on ? 700 : 500, color: on ? palette.accent : palette.textMuted }}
+            hoverStyle={{ background: palette.surface, color: on ? palette.accent : palette.text }}>
             {tf}
-          </button>
+          </HoverButton>
         );
       })}
       {sep}
-      <button ref={indicatorsBtnRef} type="button" aria-label="indicators" aria-haspopup="menu" aria-expanded={pickerOpen}
-        onClick={() => setPickerOpen((v) => !v)} style={btn}>
+      <HoverButton ref={indicatorsBtnRef} type="button" aria-label="indicators" aria-haspopup="menu" aria-expanded={pickerOpen}
+        onClick={() => setPickerOpen((v) => !v)} style={btn} hoverStyle={{ background: palette.surface, color: palette.text }}>
         <IconIndicators size={13} /> Indicators
-      </button>
+      </HoverButton>
       {pickerOpen && (
         <IndicatorPickerPopover palette={palette} anchor={indicatorsBtnRef.current} onClose={() => setPickerOpen(false)}
           onAdd={(t) => { onAddIndicator(t); setPickerOpen(false); }} />
       )}
       <span style={{ flex: 1 }} />
-      <button type="button" aria-label="screenshot" onClick={onScreenshot} style={iconBtn}><IconCamera size={14} /></button>
-      <button type="button" aria-label="chart settings" onClick={onOpenSettings} style={iconBtn}><IconGear size={14} /></button>
+      <HoverButton type="button" aria-label="screenshot" onClick={onScreenshot} style={iconBtn}
+        hoverStyle={{ background: palette.surface, color: palette.text }}><IconCamera size={14} /></HoverButton>
+      <HoverButton type="button" aria-label="chart settings" onClick={onOpenSettings} style={iconBtn}
+        hoverStyle={{ background: palette.surface, color: palette.text }}><IconGear size={14} /></HoverButton>
     </div>
   );
 }

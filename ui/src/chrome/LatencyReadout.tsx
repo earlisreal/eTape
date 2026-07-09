@@ -3,6 +3,7 @@ import type { HealthStore } from "../data/HealthStore";
 import type { HealthLink, LinkName, LinkStatus } from "../wire/contract";
 import { useTheme } from "./ThemeProvider";
 import type { Palette } from "../render/palette";
+import { HoverButton } from "./controls/HoverButton";
 
 const LABEL: Record<LinkName, string> = { "ui-engine": "eng", "engine-moomoo": "moo", "engine-tz": "tz" };
 const ORDER: LinkName[] = ["ui-engine", "engine-moomoo", "engine-tz"];
@@ -13,7 +14,7 @@ export function LatencyReadout({ health, onOpen }: { health: HealthStore; onOpen
   const state = useSyncExternalStore(health.subscribe.bind(health), health.getSnapshot.bind(health));
   const byName = new Map<LinkName, HealthLink>(state.links.map((l) => [l.link, l]));
   return (
-    <button
+    <HoverButton
       data-testid="latency-readout"
       className="ctl mono"
       onClick={onOpen}
@@ -47,6 +48,6 @@ export function LatencyReadout({ health, onOpen }: { health: HealthStore; onOpen
         );
       })}
       <span style={{ color: palette.textMuted, fontSize: 9 }}>ms</span>
-    </button>
+    </HoverButton>
   );
 }

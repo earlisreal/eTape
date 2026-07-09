@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { DockviewPanelApi } from "dockview";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { HoverButton } from "./controls/HoverButton";
 import { PANELS, type PanelProps } from "./panels/registry";
 import { PanelHeaderSlotContext } from "./panels/headerSlot";
 import type { PanelConfig } from "./workspace";
@@ -320,9 +321,10 @@ export function PanelFrame(
   return (
     <div className={active ? "panel-focused" : undefined} style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       <div className="ledger-header" style={{ position: "relative" }}>
-        <button type="button" aria-label="link group" onClick={() => setShowPicker((v) => !v)}
+        <HoverButton type="button" aria-label="link group" onClick={() => setShowPicker((v) => !v)}
           style={{ width: 12, height: 12, padding: 0, border: pinned ? `1.5px solid ${palette.textMuted}` : "1px solid transparent",
-            borderRadius: 2, background: swatch(group, palette), cursor: "pointer", flex: "0 0 auto" }} />
+            borderRadius: 2, background: swatch(group, palette), cursor: "pointer", flex: "0 0 auto" }}
+          hoverStyle={{ boxShadow: "inset 0 0 0 2px var(--text-muted)" }} />
         {showPicker && (
           <GroupPicker group={group} onPick={handleGroupPick} onClose={() => setShowPicker(false)} />
         )}
@@ -354,10 +356,10 @@ export function PanelFrame(
         ) : (
           <span style={{ flex: 1 }} />
         )}
-        <button type="button" aria-label="close panel" onClick={onClose}
+        <HoverButton type="button" aria-label="close panel" onClick={onClose}
           style={{ border: "none", background: "transparent", color: palette.textMuted, cursor: "pointer", fontSize: 13, padding: "0 2px", lineHeight: 1 }}>
           ✕
-        </button>
+        </HoverButton>
       </div>
       <div ref={hostRef} data-testid="panel-body" style={{ flex: 1, minHeight: 0 }}>
         <ErrorBoundary label={config.panelId}>

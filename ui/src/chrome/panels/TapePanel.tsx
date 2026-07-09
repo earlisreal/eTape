@@ -7,6 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PanelProps } from "./registry";
 import { useTheme } from "../ThemeProvider";
+import { HoverButton } from "../controls/HoverButton";
 import { applyCanvasSize } from "../../render/canvas";
 import { scrollAccumulate } from "../../render/scroll";
 import { FONTS } from "../../render/palette";
@@ -170,12 +171,12 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
           />
         </label>
         {paused && (
-          <button
+          <HoverButton
             onClick={jumpToLive}
             style={{ marginLeft: "auto", color: palette.warn, background: "none", border: "none", cursor: "pointer", fontSize: 11 }}
           >
             ⏸ paused — jump to live
-          </button>
+          </HoverButton>
         )}
       </div>
       <div
