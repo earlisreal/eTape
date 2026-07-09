@@ -94,7 +94,7 @@ function typeKey(key: string, mods: Partial<{ ctrlKey: boolean; metaKey: boolean
 describe("PanelFrame", () => {
   it("renders the ledger header with the panel title and a symbol slot for symbol-bearing panels", () => {
     renderFrame();
-    expect(screen.getByText("News")).toBeTruthy();
+    expect(screen.getByText("Stock Info")).toBeTruthy();
     expect(screen.getByTestId("panel-symbol")).toBeTruthy();
   });
 

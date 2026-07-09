@@ -116,7 +116,7 @@ export function PanelFrame(
   }, []);
 
   // Keep the header's symbol live as the group's shared focus changes (same
-  // subscribe pattern as NewsPanel) — this is what makes "a grouped panel
+  // subscribe pattern as StockInfoPanel) — this is what makes "a grouped panel
   // follows its group's symbol" actually true rather than a one-time snapshot.
   useEffect(() => {
     setSymbol(linkGroups.symbolFor(group));

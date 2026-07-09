@@ -75,10 +75,10 @@ describe("AppShell onConfigChange", () => {
     // AppShell's React state AFTER the open-orders PanelFrame factory (and the
     // onConfigChange closure baked into it) was already created.
     fireEvent.click(screen.getByText("+ Add panel"));
-    fireEvent.click(screen.getByText("News"));
+    fireEvent.click(screen.getByText("Stock Info"));
 
-    // The News panel landed as a second tab in the same dockview group and is now
-    // the active one — switch back to the open-orders tab (dockview only mounts
+    // The Stock Info panel landed as a second tab in the same dockview group and is
+    // now the active one — switch back to the open-orders tab (dockview only mounts
     // the active tab's content) before touching its sort header. dockview's tab
     // activates on `pointerdown`, not `click`.
     act(() => clickTab(screen.getByText("open-orders")));
@@ -91,8 +91,9 @@ describe("AppShell onConfigChange", () => {
     await waitFor(() => expect(saved.length).toBeGreaterThan(0));
     const last = saved[saved.length - 1];
     const panelIds = last.panels.map((p) => p.panelId);
-    // Both the original open-orders panel AND the just-added News panel must
-    // survive the save — the bug silently dropped the latter.
+    // Both the original open-orders panel AND the just-added Stock Info panel
+    // (registry key "news", unchanged) must survive the save — the bug silently
+    // dropped the latter.
     expect(panelIds).toContain("open-orders");
     expect(panelIds).toContain("news");
     expect(last.panels).toHaveLength(2);
@@ -139,7 +140,7 @@ describe("AppShell single-panel tab visibility", () => {
     expect(tabStrip().style.display).toBe("none");
 
     fireEvent.click(screen.getByText("+ Add panel"));
-    fireEvent.click(screen.getByText("News"));
+    fireEvent.click(screen.getByText("Stock Info"));
     await waitFor(() => expect(tabStrip().style.display).not.toBe("none"));
   });
 });

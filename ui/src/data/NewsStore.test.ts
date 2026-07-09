@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { NewsStore } from "./NewsStore";
 import type { NewsItem, SnapshotMsg, DeltaMsg } from "../wire/contract";
 
-const item = (symbol: string, url: string, seen_at: string, headline = "h"): NewsItem =>
-  ({ symbol, headline, source: "src", url, seen_at });
+const item = (symbol: string, url: string, seen_at: string, headline = "h", published_at = ""): NewsItem =>
+  ({ symbol, headline, source: "src", url, seen_at, published_at, view_count: 0, type: "news" });
 const snap = (payload: NewsItem[]) => ({ kind: "snapshot", topic: "news.item", payload } as SnapshotMsg);
 const delta = (payload: NewsItem | NewsItem[]) => ({ kind: "delta", topic: "news.item", payload } as DeltaMsg);
 
@@ -20,6 +20,18 @@ describe("NewsStore", () => {
     s.apply(delta(item("US.AAPL", "u2", "t2")));
     s.apply(delta([item("US.AAPL", "u2", "t2"), item("US.AAPL", "u3", "t3")])); // u2 dup
     expect(s.itemsFor("US.AAPL").map((i) => i.url)).toEqual(["u3", "u2", "u1"]); // newest seen_at first
+  });
+
+  it("sorts by the effective timestamp, preferring published_at over seen_at when they differ", () => {
+    const s = new NewsStore();
+    s.apply(snap([
+      // u1's seen_at (engine fetch time) is later than u2's, but u1's real
+      // published_at is earlier — the sort must prefer published_at and put
+      // u2 first once both effective timestamps are compared.
+      item("US.AAPL", "u1", "t9-seen-late", "h1", "t1-published-early"),
+      item("US.AAPL", "u2", "t2-seen", "h2", "t5-published-late"),
+    ]));
+    expect(s.itemsFor("US.AAPL").map((i) => i.url)).toEqual(["u2", "u1"]);
   });
 
   it("itemsFor filters by symbol", () => {

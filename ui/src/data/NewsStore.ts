@@ -5,7 +5,9 @@ interface NewsState { items: NewsItem[] }
 
 // Broker-agnostic news feed. Snapshot replaces (and rebuilds the dedup set);
 // delta appends one item or an array. Dedup by url (fallback: symbol|headline|
-// seen_at). itemsFor(symbol) returns that symbol's items newest-first by seen_at.
+// seen_at). itemsFor(symbol) returns that symbol's items newest-first by the
+// effective timestamp (published_at when moomoo supplied a parseable publish
+// time, falling back to seen_at — the engine's fetch time — otherwise).
 export class NewsStore extends ReactStore<NewsState> {
   private readonly seenKeys = new Set<string>();
   constructor(private readonly cap = 500) { super({ items: [] }); }
@@ -24,7 +26,9 @@ export class NewsStore extends ReactStore<NewsState> {
   itemsFor(symbol: string): NewsItem[] {
     return this.getSnapshot().items
       .filter((it) => it.symbol === symbol)
-      .sort((a, b) => b.seen_at.localeCompare(a.seen_at)); // ISO strings sort chronologically
+      // ISO strings sort chronologically; prefer the real publish time, falling
+      // back to the engine's fetch time when moomoo couldn't supply one.
+      .sort((a, b) => (b.published_at || b.seen_at).localeCompare(a.published_at || a.seen_at));
   }
 
   // Coerce a payload to an item array, dropping null/non-object entries. An empty

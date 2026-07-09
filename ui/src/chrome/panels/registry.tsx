@@ -11,7 +11,7 @@ import { ChartPanel } from "./ChartPanel";
 import { LadderPanel } from "./LadderPanel";
 import { TapePanel } from "./TapePanel";
 import { ScannerPanel } from "./ScannerPanel";
-import { NewsPanel } from "./NewsPanel";
+import { StockInfoPanel } from "./StockInfoPanel";
 import { AccountPanel } from "./AccountPanel";
 import { OrderTicketPanel } from "./OrderTicketPanel";
 
@@ -34,7 +34,7 @@ export interface PanelProps {
   // (see GroupPicker). Both live entirely in PanelFrame's own ledger header, not in
   // any panel body — kept optional here (rather than required) so the many existing
   // Body-level tests that construct a PanelProps literal directly (ChartPanel,
-  // LadderPanel, TapePanel, NewsPanel, ScannerPanel, AccountPanel,
+  // LadderPanel, TapePanel, StockInfoPanel, ScannerPanel, AccountPanel,
   // OpenOrdersPanel, OrderTicketPanel) don't need touching for a header-only feature;
   // PanelFrame's own component signature (below) still requires and always supplies
   // them, since AppShell always has both.
@@ -137,11 +137,11 @@ export const PANELS: Record<string, PanelDef> = {
     symbolBearing: false,
   },
   "news": {
-    component: NewsPanel,
-    topics: ["news.item"],
-    title: "News",
+    component: StockInfoPanel,
+    topics: ["news.item", "stock.detail"],
+    title: "Stock Info",
     glyph: "¶",
-    description: "Headlines for focused symbol",
+    description: "Fundamentals + news for focused symbol",
     symbolBearing: true,
     demand: "interest",
   },
