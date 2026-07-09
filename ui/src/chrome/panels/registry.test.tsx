@@ -47,6 +47,12 @@ describe("Task 8: open-orders folds into the merged account panel", () => {
   });
 });
 
+describe("chart panel subscribes to fills", () => {
+  it("includes exec.fills so live buy/sell fill markers reach the chart", () => {
+    expect(PANELS["chart"].topics).toEqual(["md.bars", "md.indicator", "exec.fills"]);
+  });
+});
+
 describe("catalog metadata", () => {
   it("every non-dev panel has title/glyph/description", () => {
     for (const [id, def] of Object.entries(PANELS)) {

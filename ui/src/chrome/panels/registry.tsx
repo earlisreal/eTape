@@ -93,7 +93,7 @@ export const PANELS: Record<string, PanelDef> = {
   },
   "chart": {
     component: ChartPanel,
-    topics: ["md.bars", "md.indicator"],
+    topics: ["md.bars", "md.indicator", "exec.fills"],
     title: "Chart",
     glyph: "▁▃▅▇",
     description: "Candles, volume, indicators",
