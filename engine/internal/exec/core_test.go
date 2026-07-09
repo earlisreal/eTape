@@ -104,9 +104,6 @@ func TestCoreArmSubmitFill(t *testing.T) {
 	if ack := c.Do(exec.Arm{}); !ack.Accepted { // master
 		t.Fatalf("master arm: %+v", ack)
 	}
-	if ack := c.Do(exec.Arm{Venue: "sim-1"}); !ack.Accepted {
-		t.Fatalf("venue arm: %+v", ack)
-	}
 	ack := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 100})
 	if !ack.Accepted {
 		t.Fatalf("armed submit should be accepted, got %+v", ack)
@@ -157,7 +154,6 @@ func TestCoreAppendFailureBlocksSubmit(t *testing.T) {
 	}
 	go func() { _ = c.Run(ctx) }()
 	c.Do(exec.Arm{})
-	c.Do(exec.Arm{Venue: "sim-1"})
 	ack := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 100})
 	if ack.Accepted {
 		t.Fatalf("submit with a failing append should be blocked, got %+v", ack)
@@ -302,9 +298,6 @@ func TestCoreEmitsTradeUpdateOnRoundTripClose(t *testing.T) {
 	if ack := c.Do(exec.Arm{}); !ack.Accepted { // master
 		t.Fatalf("master arm: %+v", ack)
 	}
-	if ack := c.Do(exec.Arm{Venue: "sim-1"}); !ack.Accepted {
-		t.Fatalf("venue arm: %+v", ack)
-	}
 
 	buyAck := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 100})
 	if !buyAck.Accepted {
@@ -343,9 +336,6 @@ func TestCoreNoTradeUpdateOnPartialClose(t *testing.T) {
 	c, _, _ := newTestCore(t, "sim-1")
 	if ack := c.Do(exec.Arm{}); !ack.Accepted { // master
 		t.Fatalf("master arm: %+v", ack)
-	}
-	if ack := c.Do(exec.Arm{Venue: "sim-1"}); !ack.Accepted {
-		t.Fatalf("venue arm: %+v", ack)
 	}
 
 	buyAck := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 100})

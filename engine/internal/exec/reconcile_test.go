@@ -24,16 +24,18 @@ func TestArming(t *testing.T) {
 	if s.IsArmed("sim-1") {
 		t.Fatal("boot should be disarmed")
 	}
-	s.SetVenueArmed("sim-1", true)
-	if s.IsArmed("sim-1") {
-		t.Fatal("venue armed but master off → not armed")
+	if s.IsArmed("sim-unregistered") {
+		t.Fatal("an unregistered venue should never report armed, even with master on")
 	}
 	s.SetMasterArmed(true)
 	if !s.IsArmed("sim-1") {
-		t.Fatal("master+venue on → armed")
+		t.Fatal("master on + registered venue → armed")
 	}
-	if s.IsArmed("sim-2") {
-		t.Fatal("sim-2 venue still off")
+	if !s.IsArmed("sim-2") {
+		t.Fatal("master arm covers every registered venue, not just sim-1")
+	}
+	if s.IsArmed("sim-unregistered") {
+		t.Fatal("master on but venue never registered → still not armed")
 	}
 }
 

@@ -23,15 +23,13 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/store"
 )
 
-// armBoth arms both the master switch and the given venue. Not already defined
-// in core_test.go, so it lives here.
-func armBoth(t *testing.T, c *exec.Core, v exec.VenueID) {
+// armBoth arms the master switch (the only arm switch there is now). The name
+// and the unused venue parameter are kept so every call site below (which
+// still names the venue it's about to submit to) doesn't need touching.
+func armBoth(t *testing.T, c *exec.Core, _ exec.VenueID) {
 	t.Helper()
 	if ack := c.Do(exec.Arm{}); !ack.Accepted {
 		t.Fatalf("master arm: %+v", ack)
-	}
-	if ack := c.Do(exec.Arm{Venue: v}); !ack.Accepted {
-		t.Fatalf("venue arm: %+v", ack)
 	}
 }
 
@@ -170,7 +168,7 @@ func TestCoreBootRecoveryReplaysLog(t *testing.T) {
 		t.Fatalf("recovered fills = %d, want 1", len(stateB.Venue("sim-1").Fills))
 	}
 	// Boot is always disarmed regardless of the log.
-	if stateB.MasterArmed || stateB.Venue("sim-1").Armed {
+	if stateB.MasterArmed {
 		t.Fatal("recovered state should boot disarmed")
 	}
 }

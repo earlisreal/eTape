@@ -8,7 +8,6 @@ type OrderUpdate struct{ Order Order }
 type FillUpdate struct{ Fill Fill }
 type AccountUpdate struct {
 	Account     AccountSnapshot
-	VenueArmed  bool
 	MasterArmed bool
 }
 type PositionUpdate struct{ Position Position }

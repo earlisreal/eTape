@@ -29,16 +29,15 @@ func (s *State) ReconcileOpenOrders(v VenueID, orders []Order) {
 	}
 }
 
-// SetMasterArmed / SetVenueArmed flip the two-layer switches. Not persisted —
-// boot is always disarmed.
+// SetMasterArmed flips the master switch. Not persisted — boot is always
+// disarmed.
 func (s *State) SetMasterArmed(on bool) { s.MasterArmed = on }
 
-func (s *State) SetVenueArmed(v VenueID, on bool) { s.Venue(v).Armed = on }
-
-// IsArmed reports whether trading on a venue is permitted: master AND venue.
+// IsArmed reports whether trading on a venue is permitted: master armed AND
+// the venue is registered.
 func (s *State) IsArmed(v VenueID) bool {
-	vs, ok := s.Venues[v]
-	return s.MasterArmed && ok && vs.Armed
+	_, ok := s.Venues[v]
+	return s.MasterArmed && ok
 }
 
 // VenuePositionShares is the signed share position for a symbol on one venue.

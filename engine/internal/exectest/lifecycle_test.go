@@ -465,7 +465,6 @@ func TestLifecycle_LimitReplaceCancelKill_ThroughCore(t *testing.T) {
 	go func() { _ = c.Run(ctx) }()
 
 	c.Do(exec.Arm{})
-	c.Do(exec.Arm{Venue: "alpaca"})
 
 	// far-from-market limit on Alpaca (mock keeps it working)
 	ack := c.Do(exec.SubmitOrder{Venue: "alpaca", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 1})

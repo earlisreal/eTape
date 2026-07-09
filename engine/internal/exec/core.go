@@ -35,8 +35,8 @@ type ReplaceOrder struct {
 }
 type Flatten struct{ Venue VenueID }
 type KillSwitch struct{ Venue VenueID }
-type Arm struct{ Venue VenueID }
-type Disarm struct{ Venue VenueID }
+type Arm struct{}
+type Disarm struct{}
 
 func (SubmitOrder) isCommand()  {}
 func (CancelOrder) isCommand()  {}
@@ -95,7 +95,6 @@ type CoreConfig struct {
 	Clock   clock.Clock
 	IDGen   *OrderIDGen
 	SysLog  func(kind, detail string) // optional; store.AppendSysEvent in prod
-	AutoArm map[VenueID]bool          // venues that boot armed (paper); nil/false => disarmed
 }
 
 func NewCore(cfg CoreConfig) *Core {
@@ -119,22 +118,9 @@ func NewCore(cfg CoreConfig) *Core {
 		marks:   markState{},
 		trades:  NewRoundTripAggregator(),
 	}
-	// Auto-arm is the ONLY boot path that starts armed; Recover never touches
-	// arm state, so a restart with no auto-arm venue is still fully disarmed.
-	applyBootArm(c.state, cfg.Venues, cfg.AutoArm)
+	// Master always boots disarmed — Recover never touches arm state, so a
+	// restart is fully disarmed until a deliberate arm click.
 	return c
-}
-
-// applyBootArm seeds boot arm state: venues flagged auto_arm start armed, and
-// master arms iff at least one venue auto-arms. Live venues (no auto_arm) stay
-// disarmed and keep the deliberate arm click.
-func applyBootArm(s *State, venues []VenueID, autoArm map[VenueID]bool) {
-	for _, v := range venues {
-		if autoArm[v] {
-			s.SetVenueArmed(v, true)
-			s.SetMasterArmed(true)
-		}
-	}
 }
 
 func (c *Core) Updates() <-chan Update { return c.updates }
@@ -322,9 +308,9 @@ func (c *Core) handleCmd(ctx context.Context, cmd Command) CmdAck {
 	case KillSwitch:
 		return c.handleKill(ctx, cm)
 	case Arm:
-		return c.handleArm(cm.Venue, true)
+		return c.handleArm(true)
 	case Disarm:
-		return c.handleArm(cm.Venue, false)
+		return c.handleArm(false)
 	default:
 		return CmdAck{Accepted: false, Reason: "unknown command"}
 	}
@@ -427,7 +413,6 @@ func (c *Core) handleKill(ctx context.Context, cm KillSwitch) CmdAck {
 	targets := c.venues
 	if cm.Venue != "" {
 		targets = []VenueID{cm.Venue}
-		c.state.SetVenueArmed(cm.Venue, false)
 	} else {
 		c.state.SetMasterArmed(false)
 	}
@@ -447,18 +432,11 @@ func (c *Core) handleKill(ctx context.Context, cm KillSwitch) CmdAck {
 	return CmdAck{Accepted: true}
 }
 
-func (c *Core) handleArm(v VenueID, on bool) CmdAck {
-	if v == "" {
-		c.state.SetMasterArmed(on)
-	} else {
-		if _, ok := c.state.Venues[v]; !ok {
-			return CmdAck{Accepted: false, Reason: "unknown venue"}
-		}
-		c.state.SetVenueArmed(v, on)
-	}
+func (c *Core) handleArm(on bool) CmdAck {
+	c.state.SetMasterArmed(on)
 	c.emitStatus()
 	for _, vv := range c.venues {
-		c.emit(AccountUpdate{Account: c.state.Venue(vv).Account, VenueArmed: c.state.Venue(vv).Armed, MasterArmed: c.state.MasterArmed})
+		c.emit(AccountUpdate{Account: c.state.Venue(vv).Account, MasterArmed: c.state.MasterArmed})
 	}
 	return CmdAck{Accepted: true}
 }
@@ -482,8 +460,7 @@ func (c *Core) handleBrokerEvent(_ context.Context, be BrokerEvent) {
 			c.syslog("exec.autodisarm", "day-loss breach: master disarmed")
 			c.emitStatus()
 		}
-		vs := c.state.Venue(e.Account.Venue)
-		c.emit(AccountUpdate{Account: e.Account, VenueArmed: vs.Armed, MasterArmed: c.state.MasterArmed})
+		c.emit(AccountUpdate{Account: e.Account, MasterArmed: c.state.MasterArmed})
 	case BrokerPositions:
 		c.state.ReconcilePositions(e.V, e.Positions)
 		for _, p := range e.Positions {

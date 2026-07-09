@@ -1,10 +1,9 @@
 package exec
 
 // VenueState is one venue's execution state. Orders + Fills are event-sourced
-// (this file); Positions + Account are broker-reconciled (reconcile.go). Armed is
-// set by arming commands (reconcile.go); boot is always false.
+// (this file); Positions + Account are broker-reconciled (reconcile.go). Arming
+// is master-only now (State.MasterArmed) — no per-venue arm switch.
 type VenueState struct {
-	Armed     bool
 	Orders    map[string]Order
 	Fills     []Fill
 	Positions map[string]Position

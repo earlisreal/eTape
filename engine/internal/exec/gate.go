@@ -73,9 +73,9 @@ func Evaluate(s *State, cfg GateConfig, req OrderRequest, marks MarkSource) (boo
 	if !s.MasterArmed {
 		return false, "master disarmed"
 	}
-	// 2. venue armed
-	if vs, ok := s.Venues[req.Venue]; !ok || !vs.Armed {
-		return false, "venue disarmed"
+	// 2. venue registered
+	if _, ok := s.Venues[req.Venue]; !ok {
+		return false, "unknown venue"
 	}
 	// 3. duplicate ID (global — one event log)
 	if _, dup := s.orderIndex[req.ClientOrderID]; dup {

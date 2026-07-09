@@ -68,8 +68,6 @@ func TestCapstoneAggregateGateBlocksCrossVenue(t *testing.T) {
 	}
 	go func() { _ = c.Run(ctx) }()
 	c.Do(exec.Arm{})
-	c.Do(exec.Arm{Venue: "sim-1"})
-	c.Do(exec.Arm{Venue: "sim-2"})
 	// Buy-fill 150 on sim-1 and 80 on sim-2 (marks=100, limits=100 → marketable).
 	a1 := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 150, LimitPrice: 100})
 	a2 := c.Do(exec.SubmitOrder{Venue: "sim-2", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 80, LimitPrice: 100})
@@ -91,7 +89,11 @@ func TestCapstoneAggregateGateBlocksCrossVenue(t *testing.T) {
 	}
 }
 
-func TestCapstoneMasterVsVenueArming(t *testing.T) {
+// TestCapstoneMasterArmingCoversEveryVenue verifies the master-only arm model:
+// with the master off, submits to every registered venue block ("master
+// disarmed"); one master arm click then unblocks ALL of them at once — there
+// is no separate per-venue switch left to flip.
+func TestCapstoneMasterArmingCoversEveryVenue(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
 	st, _ := store.Open(store.Options{Path: filepath.Join(t.TempDir(), "arm.db"), Clock: clk})
 	defer func() { _ = st.Close() }()
@@ -102,20 +104,31 @@ func TestCapstoneMasterVsVenueArming(t *testing.T) {
 	defer cancel()
 	_ = c.Recover(ctx)
 	go func() { _ = c.Run(ctx) }()
-	c.Do(exec.Arm{})               // master on
-	c.Do(exec.Arm{Venue: "sim-1"}) // sim-1 on, sim-2 off
-	ack := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 1, LimitPrice: 100})
-	if !ack.Accepted {
-		t.Fatalf("sim-1 should accept: %+v", ack)
+
+	// Master off: both venues block.
+	if ack := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 1, LimitPrice: 100}); ack.Accepted || ack.Reason != "master disarmed" {
+		t.Fatalf("sim-1 disarmed should block: %+v", ack)
 	}
-	// This order is marketable (mark=limit=100) and fills asynchronously via
-	// the broker->pump->Run pipeline; wait for that to land before the test
-	// returns, otherwise the deferred cancel()+st.Close() can race with Run
-	// still appending the fill to the store.
-	waitFor(t, c, func(u exec.Update) bool { f, ok := u.(exec.FillUpdate); return ok && f.Fill.OrderID == ack.OrderID })
-	if ack := c.Do(exec.SubmitOrder{Venue: "sim-2", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 1, LimitPrice: 100}); ack.Accepted || ack.Reason != "venue disarmed" {
+	if ack := c.Do(exec.SubmitOrder{Venue: "sim-2", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 1, LimitPrice: 100}); ack.Accepted || ack.Reason != "master disarmed" {
 		t.Fatalf("sim-2 disarmed should block: %+v", ack)
 	}
+
+	c.Do(exec.Arm{}) // one click arms every registered venue
+
+	ack1 := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 1, LimitPrice: 100})
+	if !ack1.Accepted {
+		t.Fatalf("sim-1 should accept once master is armed: %+v", ack1)
+	}
+	ack2 := c.Do(exec.SubmitOrder{Venue: "sim-2", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 1, LimitPrice: 100})
+	if !ack2.Accepted {
+		t.Fatalf("sim-2 should accept once master is armed: %+v", ack2)
+	}
+	// Both orders are marketable (mark=limit=100) and fill asynchronously via
+	// the broker->pump->Run pipeline; wait for both fills before the test
+	// returns, otherwise the deferred cancel()+st.Close() can race with Run
+	// still appending fills to the store.
+	waitFor(t, c, func(u exec.Update) bool { f, ok := u.(exec.FillUpdate); return ok && f.Fill.OrderID == ack1.OrderID })
+	waitFor(t, c, func(u exec.Update) bool { f, ok := u.(exec.FillUpdate); return ok && f.Fill.OrderID == ack2.OrderID })
 }
 
 func TestCapstoneDayLossAutoDisarm(t *testing.T) {
@@ -130,8 +143,6 @@ func TestCapstoneDayLossAutoDisarm(t *testing.T) {
 	_ = c.Recover(ctx)
 	go func() { _ = c.Run(ctx) }()
 	c.Do(exec.Arm{})
-	c.Do(exec.Arm{Venue: "sim-1"})
-	c.Do(exec.Arm{Venue: "sim-2"})
 	// Push day P&Ls summing past -1000 → auto-disarm.
 	sims["sim-1"].SetAccount(exec.AccountSnapshot{Venue: "sim-1", DayPnL: -600})
 	sims["sim-2"].SetAccount(exec.AccountSnapshot{Venue: "sim-2", DayPnL: -500})
@@ -168,8 +179,6 @@ func TestCapstoneReplayLogEqualsState(t *testing.T) {
 	_ = c.Recover(ctx)
 	go func() { _ = c.Run(ctx); close(done) }()
 	c.Do(exec.Arm{})
-	c.Do(exec.Arm{Venue: "sim-1"})
-	c.Do(exec.Arm{Venue: "sim-2"})
 
 	// Drive a mixed session: two fills on sim-1, a rest+cancel on sim-2, one fill on sim-2.
 	f1 := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 100})

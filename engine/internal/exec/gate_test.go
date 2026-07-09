@@ -19,8 +19,6 @@ func baseCfg() GateConfig {
 func armedState() *State {
 	s := NewState([]VenueID{"sim-1", "sim-2"})
 	s.SetMasterArmed(true)
-	s.SetVenueArmed("sim-1", true)
-	s.SetVenueArmed("sim-2", true)
 	return s
 }
 
@@ -28,16 +26,16 @@ func buyReq(v VenueID, sym string, qty, limit float64, id string) OrderRequest {
 	return OrderRequest{Venue: v, Symbol: sym, Side: SideBuy, Type: TypeLimit, TIF: TIFDay, Qty: qty, LimitPrice: limit, ClientOrderID: id}
 }
 
-func TestGateMasterAndVenueArm(t *testing.T) {
+func TestGateMasterArmAndUnknownVenue(t *testing.T) {
 	cfg := baseCfg()
 	marks := fakeMarks{"AAPL": 100}
 	s := NewState([]VenueID{"sim-1"}) // disarmed
-	if ok, reason := Evaluate(s, cfg, buyReq("sim-1", "AAPL", 10, 100, "ET1"), marks); ok || reason == "" {
+	if ok, reason := Evaluate(s, cfg, buyReq("sim-1", "AAPL", 10, 100, "ET1"), marks); ok || reason != "master disarmed" {
 		t.Fatalf("disarmed master should block, got ok=%v reason=%q", ok, reason)
 	}
-	s.SetMasterArmed(true) // venue still off
-	if ok, _ := Evaluate(s, cfg, buyReq("sim-1", "AAPL", 10, 100, "ET1"), marks); ok {
-		t.Fatal("venue disarmed should block")
+	s.SetMasterArmed(true) // master on, but the venue below was never registered
+	if ok, reason := Evaluate(s, cfg, buyReq("sim-unregistered", "AAPL", 10, 100, "ET1"), marks); ok || reason != "unknown venue" {
+		t.Fatalf("unregistered venue should block, got ok=%v reason=%q", ok, reason)
 	}
 }
 
@@ -52,7 +50,7 @@ func TestGateDuplicateID(t *testing.T) {
 
 func TestGateMissingVenueConfigFailsClosed(t *testing.T) {
 	cfg := baseCfg()
-	delete(cfg.Venue, "sim-1") // simulate a config-wiring gap: venue armed but no gate entry
+	delete(cfg.Venue, "sim-1") // simulate a config-wiring gap: venue registered but no gate entry
 	marks := fakeMarks{"AAPL": 100}
 	s := armedState()
 	if ok, reason := Evaluate(s, cfg, buyReq("sim-1", "AAPL", 1, 100, "ET1"), marks); ok || reason != "no gate config for venue" {
