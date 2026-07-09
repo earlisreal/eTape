@@ -11,9 +11,11 @@ describe("panel registry — monitoring surfaces", () => {
 });
 
 describe("Task 19: merged account panel + back-compat aliases", () => {
-  it("registers the merged account panel with all four exec/quote topics", () => {
+  it("registers the merged account panel with all six exec/quote topics", () => {
     expect(PANELS["account"]).toBeDefined();
-    expect(PANELS["account"].topics).toEqual(["exec.account", "exec.positions", "exec.status", "md.quote"]);
+    expect(PANELS["account"].topics).toEqual([
+      "exec.account", "exec.positions", "exec.orders", "exec.trades", "exec.status", "md.quote",
+    ]);
   });
   it("aliases the pre-merge ids to the same merged component for saved-doc back-compat", () => {
     expect(PANELS["account-bar"].component).toBe(PANELS["account"].component);
@@ -24,6 +26,24 @@ describe("Task 19: merged account panel + back-compat aliases", () => {
     expect(ids).toContain("account");
     expect(ids).not.toContain("account-bar");
     expect(ids).not.toContain("positions");
+  });
+});
+
+describe("Task 8: open-orders folds into the merged account panel", () => {
+  it("aliases open-orders to the same merged component for saved-doc back-compat", () => {
+    expect(PANELS["open-orders"].component).toBe(PANELS["account"].component);
+  });
+  it("omits open-orders from the Add Panel catalog", () => {
+    const ids = CATALOG.map((c) => c.panelId);
+    expect(ids).not.toContain("open-orders");
+  });
+  it("gives all four account aliases the identical topics array, including exec.orders and exec.trades", () => {
+    const expected = [
+      "exec.account", "exec.positions", "exec.orders", "exec.trades", "exec.status", "md.quote",
+    ];
+    for (const id of ["account", "account-bar", "positions", "open-orders"]) {
+      expect(PANELS[id].topics, id).toEqual(expected);
+    }
   });
 });
 

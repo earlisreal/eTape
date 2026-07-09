@@ -13,7 +13,6 @@ import { TapePanel } from "./TapePanel";
 import { ScannerPanel } from "./ScannerPanel";
 import { NewsPanel } from "./NewsPanel";
 import { AccountPanel } from "./AccountPanel";
-import { OpenOrdersPanel } from "./OpenOrdersPanel";
 import { OrderTicketPanel } from "./OrderTicketPanel";
 
 export interface PanelProps {
@@ -142,18 +141,22 @@ export const PANELS: Record<string, PanelDef> = {
   },
   "account": {
     component: AccountPanel,
-    topics: ["exec.account", "exec.positions", "exec.status", "md.quote"],
+    topics: ["exec.account", "exec.positions", "exec.orders", "exec.trades", "exec.status", "md.quote"],
     title: "Account",
     glyph: "Σ",
     description: "Equity, BP, day P&L, positions, arm",
     symbolBearing: false,
   },
   // Back-compat aliases: a saved workspace doc referencing the pre-Task-19 ids
-  // still resolves to the merged panel (a doc with a lone "positions" panel now
-  // renders the full Account surface — acceptable per the Task 19 plan).
+  // (account-bar, positions) or the pre-Task-8 standalone open-orders id still
+  // resolves to the merged panel (a doc with a lone "positions" or "open-orders"
+  // panel now renders the full Account surface — acceptable per the Task 19 plan
+  // and extended by Task 8 when open-orders folded into it). All four entries
+  // below share the identical topics array so orders/trades data reaches the
+  // merged panel regardless of which legacy id a saved doc references.
   "account-bar": {
     component: AccountPanel,
-    topics: ["exec.account", "exec.positions", "exec.status", "md.quote"],
+    topics: ["exec.account", "exec.positions", "exec.orders", "exec.trades", "exec.status", "md.quote"],
     title: "Account",
     glyph: "Σ",
     description: "Equity, BP, day P&L, positions, arm",
@@ -161,15 +164,15 @@ export const PANELS: Record<string, PanelDef> = {
   },
   "positions": {
     component: AccountPanel,
-    topics: ["exec.account", "exec.positions", "exec.status", "md.quote"],
+    topics: ["exec.account", "exec.positions", "exec.orders", "exec.trades", "exec.status", "md.quote"],
     title: "Account",
     glyph: "Σ",
     description: "Equity, BP, day P&L, positions, arm",
     symbolBearing: false,
   },
   "open-orders": {
-    component: OpenOrdersPanel,
-    topics: ["exec.orders", "exec.status"],
+    component: AccountPanel,
+    topics: ["exec.account", "exec.positions", "exec.orders", "exec.trades", "exec.status", "md.quote"],
     title: "Open Orders",
     glyph: "◷",
     description: "Lifecycle, cancel, cancel-all",
@@ -189,10 +192,13 @@ export const DEV_PANELS = new Set(["smoke-painter"]);
 export const isDevPanel = (panelId: string): boolean => DEV_PANELS.has(panelId);
 
 const CATALOG_ORDER = ["chart", "ladder", "tape", "scanner", "movers", "news",
-  "account", "open-orders", "order-ticket", "connection-status"];
-// "account-bar" and "positions" stay registered in PANELS (above) as back-compat
-// aliases for saved workspace docs, but are intentionally absent from the Add
-// Panel catalog — only the merged "account" is offered going forward.
+  "account", "order-ticket", "connection-status"];
+// "account-bar", "positions", and (as of Task 8) "open-orders" all stay
+// registered in PANELS (above) as back-compat aliases for saved workspace docs,
+// but are intentionally absent from the Add Panel catalog — only the merged
+// "account" is offered going forward. There is deliberately no standalone
+// "trade-history" catalog entry either: Trade History is a tab inside the
+// merged Account panel (Task 7), not a separate dockview panel.
 
 export const CATALOG = CATALOG_ORDER
   .filter((id) => PANELS[id])
