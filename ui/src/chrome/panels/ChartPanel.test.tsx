@@ -76,10 +76,11 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sh
   return { ...utils, stores, onConfigChange, scheduler };
 }
 
-// Pushes an in-progress bar into the shared BarStore, the same delta shape the
-// engine sends for a live bar (see BarStore.test.ts's own `bar`/`delta` helpers).
-function pushLiveBar(stores: ReturnType<typeof makeStores>, symbol: string, timeframe: string, o: number, c: number): void {
-  const bar: Bar = { symbol, timeframe, bucketStart: "2026-07-09T13:31:00.000Z", o, h: Math.max(o, c) + 0.1, l: Math.min(o, c) - 0.1, c, v: 100, inProgress: true };
+// Pushes a bar into the shared BarStore, the same delta shape the engine sends
+// for a live bar (see BarStore.test.ts's own `bar`/`delta` helpers). Defaults to
+// an in-progress bar; set inProgress to false to push a closed bar.
+function pushLiveBar(stores: ReturnType<typeof makeStores>, symbol: string, timeframe: string, o: number, c: number, inProgress = true): void {
+  const bar: Bar = { symbol, timeframe, bucketStart: "2026-07-09T13:31:00.000Z", o, h: Math.max(o, c) + 0.1, l: Math.min(o, c) - 0.1, c, v: 100, inProgress };
   const msg: DeltaMsg = { kind: "delta", topic: "md.bars", key: `${symbol}:${timeframe}`, payload: bar };
   stores.bars.apply(msg);
 }
@@ -398,6 +399,13 @@ describe("ChartPanel", () => {
   it("does not render the badge on a D/W/M timeframe, even with an in-progress bar and the setting on", () => {
     const { stores, getSurface, queryByTestId } = renderChartCapturingSurface({ timeframe: "D" });
     pushLiveBar(stores, "US.AAPL", "D", 100, 100.5);
+    act(() => { getSurface().paint(); });
+    expect(queryByTestId("bar-close-timer")).toBeNull();
+  });
+
+  it("does not render the badge when the bar is closed, even with the setting on and an intraday timeframe", () => {
+    const { stores, getSurface, queryByTestId } = renderChartCapturingSurface();
+    pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5, false);
     act(() => { getSurface().paint(); });
     expect(queryByTestId("bar-close-timer")).toBeNull();
   });
