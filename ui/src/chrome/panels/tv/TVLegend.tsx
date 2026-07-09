@@ -3,12 +3,14 @@ import { useEffect, useRef, useState } from "react";
 import { TV_FONT, TV_GEOM, type TvChrome } from "../../../render/chart/tvTheme";
 import { INDICATOR_CATALOG, type IndicatorInstance } from "../../../render/chart/indicatorSeries";
 import type { LegendView } from "./legendView";
-import { IconEye, IconEyeOff, IconGear, IconClose } from "./tvIcons";
+import { IconEye, IconEyeOff, IconGear, IconClose, IconChevronDown } from "./tvIcons";
 
 export interface TVLegendHandle { update(view: LegendView): void }
 export interface TVLegendProps {
   chrome: TvChrome; symbol: string; timeframe: string; instances: IndicatorInstance[]; paneOffsets: number[];
+  rightAxisWidth: number;
   onToggleHidden: (id: string) => void; onEditIndicator: (id: string) => void; onRemoveIndicator: (id: string) => void;
+  onClosePane: (paneIndex: number) => void; onToggleCollapsePane: (paneIndex: number) => void;
   legendRef: React.MutableRefObject<TVLegendHandle | null>;
 }
 
@@ -21,7 +23,7 @@ const fmtVol = (n: number | null): string => {
   return `${n}`;
 };
 
-export function TVLegend({ chrome, symbol, timeframe, instances, paneOffsets, onToggleHidden, onEditIndicator, onRemoveIndicator, legendRef }: TVLegendProps): JSX.Element {
+export function TVLegend({ chrome, symbol, timeframe, instances, paneOffsets, rightAxisWidth, onToggleHidden, onEditIndicator, onRemoveIndicator, onClosePane, onToggleCollapsePane, legendRef }: TVLegendProps): JSX.Element {
   const cells = useRef(new Map<string, HTMLElement>());
   const [hovered, setHovered] = useState<string | null>(null);
   const bare = symbol.replace(/^US\./, "");
@@ -91,17 +93,37 @@ export function TVLegend({ chrome, symbol, timeframe, instances, paneOffsets, on
         <div style={{ display: "flex", gap: 6 }}><span style={{ color: chrome.muted }}>Vol</span>{val("vol", chrome.muted)}</div>
         {overlayInstances.map(indicatorRow)}
       </div>
-      {panes.map((pane) => (
-        <div key={pane} style={legendBox(paneOffsets[pane] ?? 0)}>
-          {paneInstances(pane).map(indicatorRow)}
-        </div>
-      ))}
+      {panes.map((pane) => {
+        const collapsed = paneInstances(pane).some((i) => i.collapsed);
+        return (
+          <div key={pane}>
+            <div style={legendBox(paneOffsets[pane] ?? 0)}>
+              {paneInstances(pane).map(indicatorRow)}
+            </div>
+            <div style={paneControlBox(paneOffsets[pane] ?? 0)}>
+              <button aria-label={collapsed ? `expand pane ${pane}` : `collapse pane ${pane}`}
+                onClick={() => onToggleCollapsePane(pane)} style={ctrlBtn(chrome)}>
+                <span style={{ display: "inline-flex", transform: collapsed ? "rotate(180deg)" : undefined }}>
+                  <IconChevronDown size={13} />
+                </span>
+              </button>
+              <button aria-label={`close pane ${pane}`} onClick={() => onClosePane(pane)} style={ctrlBtn(chrome)}>
+                <IconClose size={13} />
+              </button>
+            </div>
+          </div>
+        );
+      })}
     </>
   );
 
   function legendBox(top: number): React.CSSProperties {
     return { position: "absolute", top: top + 6, left: 8, zIndex: 5, pointerEvents: "none", font: `${TV_GEOM.uiFont}px ${TV_FONT}`,
       color: chrome.text, display: "flex", flexDirection: "column", gap: 2 };
+  }
+
+  function paneControlBox(top: number): React.CSSProperties {
+    return { position: "absolute", top: top + 6, right: rightAxisWidth + 6, zIndex: 6, display: "flex", gap: 2, pointerEvents: "auto" };
   }
 }
 

@@ -24,16 +24,20 @@ function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[]; setDat
 function fakeFacade() {
   const created: Array<{ kind: string; pane: number; options: unknown; series: ReturnType<typeof fakeSeries> }> = [];
   const scaleMargins: Array<{ id: string; margins: { top: number; bottom: number } }> = [];
+  const stretchFactors = new Map<number, number>();
   const facade: ChartApiFacade & { created: typeof created; scrolls: number; resets: number; priceResets: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins }
     & { mainKind: string; screenshots: number; crosshairCb: ((l: number | null) => void) | null }
-    & { watermark: string | null; lastOptions: unknown } = {
+    & { watermark: string | null; lastOptions: unknown; stretchFactors: typeof stretchFactors } = {
     created, scrolls: 0, resets: 0, priceResets: 0, bands: 0, lastBands: [], scaleMargins,
     mainKind: "", screenshots: 0, crosshairCb: null,
-    watermark: null, lastOptions: null,
+    watermark: null, lastOptions: null, stretchFactors,
     setMainSeries: (kind, o) => { const s = fakeSeries(); created.push({ kind, pane: 0, options: o, series: s }); facade.mainKind = kind; return s; },
     takeScreenshot: () => { facade.screenshots++; return {} as unknown as HTMLCanvasElement; },
     subscribeCrosshairMove: (cb) => { facade.crosshairCb = cb; return () => { facade.crosshairCb = null; }; },
     paneHeights: () => [400, 120],
+    paneStretchFactor: (i) => stretchFactors.get(i) ?? 1,
+    setPaneStretchFactor: (i, f) => { stretchFactors.set(i, f); },
+    priceScaleWidth: () => 60,
     addSeries: (kind, o, pane) => { const s = fakeSeries(); created.push({ kind, pane, options: o, series: s }); return s; },
     removeSeries: () => {},
     setPriceScaleMargins: (id, margins) => { scaleMargins.push({ id, margins }); },
@@ -556,6 +560,74 @@ describe("ChartController indicator hidden + style", () => {
     expect(subsAfter).toBe(subsBefore); // no re-subscribe on a hidden toggle
     const emaSeries = facade.created.find((x) => (x.options as { color?: string }).color === LIGHT.indEma)!.series;
     expect(emaSeries.optionCalls.some((o) => (o as { visible?: boolean }).visible === false)).toBe(true);
+  });
+
+  it("every indicator series is created with lastValueVisible:false (no price-axis highlight)", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.addIndicator({ instanceId: "e1", type: "EMA", params: { period: 9 } });
+    c.addIndicator({ instanceId: "m1", type: "MACD", params: withDefaultParams("MACD") });
+    // Every series but the candle (created via setMainSeries, kind "candle") is either
+    // the always-on volume overlay or an indicator — both must suppress the axis label.
+    const nonCandle = facade.created.filter((x) => x.kind !== "candle");
+    expect(nonCandle.length).toBeGreaterThan(0);
+    for (const s of nonCandle) {
+      expect((s.options as { lastValueVisible?: boolean }).lastValueVisible).toBe(false);
+    }
+  });
+
+  it("MACD's histogram slot can be hidden independently via styles.hist.hidden, at creation", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.addIndicator({ instanceId: "m1", type: "MACD", params: withDefaultParams("MACD"), styles: { hist: { hidden: true } } });
+    const hist = facade.created.find((x) => (x.options as { color?: string }).color === LIGHT.indMacdHist)!;
+    const macdLine = facade.created.find((x) => (x.options as { color?: string }).color === LIGHT.indMacdLine)!;
+    expect((hist.options as { visible?: boolean }).visible).toBe(false);
+    expect((macdLine.options as { visible?: boolean }).visible).toBe(true);
+  });
+
+  it("MACD's histogram slot can be hidden independently via styles.hist.hidden, applied in place on update", () => {
+    const facade = fakeFacade();
+    const cmd = commandSpy();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: cmd });
+    c.mount();
+    const params = withDefaultParams("MACD");
+    c.addIndicator({ instanceId: "m1", type: "MACD", params });
+    const subsBefore = cmd.names.filter((n) => n === "SubscribeIndicator").length;
+    c.updateIndicator({ instanceId: "m1", type: "MACD", params, styles: { hist: { hidden: true } } });
+    expect(cmd.names.filter((n) => n === "SubscribeIndicator").length).toBe(subsBefore); // style-only, no re-subscribe
+    const hist = facade.created.find((x) => (x.options as { color?: string }).color === LIGHT.indMacdHist)!.series;
+    const macdLine = facade.created.find((x) => (x.options as { color?: string }).color === LIGHT.indMacdLine)!.series;
+    expect(hist.optionCalls.some((o) => (o as { visible?: boolean }).visible === false)).toBe(true);
+    expect(macdLine.optionCalls.every((o) => (o as { visible?: boolean }).visible !== false)).toBe(true);
+  });
+});
+
+describe("ChartController.setPaneCollapsed", () => {
+  it("collapses a pane to the small stretch floor, and expand restores the prior factor", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    facade.stretchFactors.set(1, 2.5); // pane already resized by the user before collapsing
+    c.setPaneCollapsed(1, true);
+    expect(facade.stretchFactors.get(1)).toBeLessThan(0.5);
+    c.setPaneCollapsed(1, false);
+    expect(facade.stretchFactors.get(1)).toBe(2.5);
+  });
+
+  it("expanding a pane that was never collapsed falls back to the LWC default factor of 1", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.setPaneCollapsed(1, false);
+    expect(facade.stretchFactors.get(1)).toBe(1);
   });
 });
 

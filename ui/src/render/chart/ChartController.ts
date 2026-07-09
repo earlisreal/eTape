@@ -28,6 +28,10 @@ const toLwcTimeMs = (ms: number): number => Math.floor(ms / 1000);
 // so tests can assert against it instead of a repeated magic number.
 export const LEFT_PAD_BARS = 4;
 
+// Stretch factor a "collapsed" sub-pane (e.g. MACD) is pinned to — small enough to
+// read as a thin strip but non-zero so LWC never treats the pane as empty/removable.
+export const COLLAPSED_STRETCH = 0.06;
+
 export class ChartController {
   private candle!: LwcSeries;
   private volume!: LwcSeries;
@@ -42,6 +46,9 @@ export class ChartController {
   private volumeVisible = true;
   private watermarkOn = false;
   private readonly indicators = new Map<string, { inst: IndicatorInstance; series: Map<string, LwcSeries> }>();
+  // Stretch factor a collapsed pane had before collapsing, so expanding restores it
+  // instead of resetting to LWC's default of 1 (which would undo a manual resize).
+  private readonly expandedStretchFactor = new Map<number, number>();
 
   constructor(
     private facade: ChartApiFacade,
@@ -201,7 +208,10 @@ export class ChartController {
           // Studies read as reference lines, not standalone series — no chart-spanning
           // last-value price line (TradingView doesn't draw one for overlay indicators).
           priceLineVisible: false,
-          visible: !(resolved.hidden ?? false),
+          // No highlighted last-value box on the price axis either — only the candle
+          // (the main series, set up separately via candleOptions) keeps that.
+          lastValueVisible: false,
+          visible: !(resolved.hidden ?? false) && !d.hidden,
           // No crosshair dot riding the study lines (TV doesn't draw one for
           // overlay indicators; the crosshair itself is free-moving — chartTheme).
           ...(d.kind === "line" ? { lineWidth: d.width, lineStyle: LWC_LINE_STYLE[d.lineStyle], crosshairMarkerVisible: false } : {}),
@@ -263,7 +273,7 @@ export class ChartController {
     for (const d of describeIndicator(next, this.palette)) {
       existing.series.get(d.key)?.applyOptions({
         color: d.color,
-        visible: !hidden,
+        visible: !hidden && !d.hidden,
         ...(d.kind === "line" ? { lineWidth: d.width, lineStyle: LWC_LINE_STYLE[d.lineStyle] } : {}),
       });
     }
@@ -327,6 +337,20 @@ export class ChartController {
 
   private applyGrid(): void {
     this.facade.applyOptions({ grid: { vertLines: { visible: this.gridVisible }, horzLines: { visible: this.gridVisible } } });
+  }
+
+  // Collapse a sub-pane (e.g. MACD) to a thin strip, or restore its prior size.
+  // Collapsing remembers the current stretch factor only if it's not already at/below
+  // the collapsed floor, so repeated collapse calls don't overwrite the remembered
+  // expanded size with the collapsed one.
+  setPaneCollapsed(paneIndex: number, collapsed: boolean): void {
+    if (collapsed) {
+      const cur = this.facade.paneStretchFactor(paneIndex);
+      if (cur > COLLAPSED_STRETCH) this.expandedStretchFactor.set(paneIndex, cur);
+      this.facade.setPaneStretchFactor(paneIndex, COLLAPSED_STRETCH);
+    } else {
+      this.facade.setPaneStretchFactor(paneIndex, this.expandedStretchFactor.get(paneIndex) ?? 1);
+    }
   }
 
   resize(w: number, h: number): void { this.facade.resize(w, h); }

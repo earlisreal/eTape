@@ -92,6 +92,9 @@ function makeFacade(chart: IChartApi, palette: Palette): {
       return () => chart.unsubscribeCrosshairMove(handler);
     },
     paneHeights: () => chart.panes().map((pn) => pn.getHeight()),
+    paneStretchFactor: (i) => chart.panes()[i]?.getStretchFactor() ?? 1,
+    setPaneStretchFactor: (i, f) => chart.panes()[i]?.setStretchFactor(f),
+    priceScaleWidth: () => chart.priceScale("right").width(),
     remove: () => chart.remove(),
   };
   return { facade, setPalette: (p) => { session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); }, drawings };
@@ -153,6 +156,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const [settingsInstanceId, setSettingsInstanceId] = useState<string | null>(null);
   const [chartSettingsOpen, setChartSettingsOpen] = useState(false);
   const [paneOffsets, setPaneOffsets] = useState<number[]>([0]);
+  const [rightAxisWidth, setRightAxisWidth] = useState(0);
   const [selection, setSelection] = useState<{ id: string; rect: { x: number; y: number; w: number; h: number }; color: string; width: number; lineStyle: LineStyleName } | null>(null);
 
   const legendRef = useRef<TVLegendHandle | null>(null);
@@ -202,6 +206,11 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
 
     // Restore persisted indicator instances (colors + params) saved with the workspace.
     for (const inst of instances) controller.addIndicator(inst);
+    // Restore any pane collapsed at persist time — the pane exists synchronously
+    // once its series are added above, so this can run right after the loop.
+    for (const inst of instances) {
+      if (inst.collapsed) controller.setPaneCollapsed(INDICATOR_CATALOG[inst.type].slots[0].paneIndex, true);
+    }
     if (chartType !== "candle") controller.setChartType(chartType);
     controller.setShowSessions(chartSettings.sessionShading);
     controller.setGrid(chartSettings.grid);
@@ -301,6 +310,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         const heights = facade.paneHeights();
         const offs = heights.map((_, i) => heights.slice(0, i).reduce((a, b) => a + b, 0));
         setPaneOffsets((prev) => (prev.length === offs.length && prev.every((v, i) => v === offs[i]) ? prev : offs));
+        const axisW = facade.priceScaleWidth();
+        setRightAxisWidth((prev) => (prev === axisW ? prev : axisW));
       },
     });
 
@@ -379,6 +390,37 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const toggleIndicatorHidden = (id: string) => {
     const inst = instancesRef.current.find((i) => i.instanceId === id);
     if (inst) updateIndicator({ ...inst, hidden: !inst.hidden });
+  };
+  const instancesInPane = (paneIndex: number) =>
+    instancesRef.current.filter((i) => INDICATOR_CATALOG[i.type].slots[0].paneIndex === paneIndex);
+  // LWC settles a pane-height change (setStretchFactor, or a series/pane removal)
+  // on its OWN next animation frame — one tick after ours. A single forced repaint
+  // here reads facade.paneHeights() before that lands, so paneOffsets/rightAxisWidth
+  // (and the legend + pane-control cluster positioned from them) capture the
+  // pre-change height and stay stuck there until some unrelated event happens to
+  // repaint again. Force a second repaint one frame later so they settle onto the
+  // post-resize values instead of drifting permanently out of alignment with the
+  // pane they label (verified live: without this, collapse/expand/close visibly
+  // desyncs the button cluster from the pane boundary).
+  const forceRepaintNextFrame = () => {
+    forceRepaintRef.current = true;
+    requestAnimationFrame(() => { forceRepaintRef.current = true; });
+  };
+  // Pane-header "X": removes every indicator living in that sub-pane (in practice
+  // just MACD — it's the only indicator type with a sub-pane of its own). The LWC
+  // pane itself auto-removes once its last series is gone (removeIndicator below).
+  const closePane = (paneIndex: number) => {
+    for (const inst of instancesInPane(paneIndex)) removeIndicator(inst.instanceId);
+    forceRepaintNextFrame();
+  };
+  const togglePaneCollapsed = (paneIndex: number) => {
+    const inPane = instancesInPane(paneIndex);
+    if (inPane.length === 0) return;
+    const next = !(inPane[0].collapsed ?? false);
+    controllerRef.current?.setPaneCollapsed(paneIndex, next);
+    setInstancesNow(instancesRef.current.map((i) =>
+      INDICATOR_CATALOG[i.type].slots[0].paneIndex === paneIndex ? { ...i, collapsed: next } : i));
+    forceRepaintNextFrame();
   };
   const toggleHideAll = () => {
     const next = !hideAll; setHideAll(next); drawingsPrimRef.current?.setHideAll(next);
@@ -492,7 +534,9 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           onClearAll={() => stores.drawings.clearSymbol(chartSymbol)}
           initialPos={railPos0} onPosChange={(p) => persist({ drawingRailPos: p })} />
         <TVLegend chrome={chrome} symbol={chartSymbol} timeframe={timeframe} instances={instances} paneOffsets={paneOffsets}
+          rightAxisWidth={rightAxisWidth}
           onToggleHidden={toggleIndicatorHidden} onEditIndicator={setSettingsInstanceId} onRemoveIndicator={removeIndicator}
+          onClosePane={closePane} onToggleCollapsePane={togglePaneCollapsed}
           legendRef={legendRef} />
         {selection && (
           <TVFloatingToolbar chrome={chrome} rect={selection.rect} color={selection.color} width={selection.width} lineStyle={selection.lineStyle}

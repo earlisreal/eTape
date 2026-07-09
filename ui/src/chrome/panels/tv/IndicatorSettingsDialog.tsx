@@ -56,9 +56,15 @@ export function IndicatorSettingsDialog({ chrome, instance, resolved, onClose, o
         const color = styles[s.slot]?.color ?? cur?.color ?? chrome.accent;
         const width = styles[s.slot]?.width ?? cur?.width ?? 1;
         const ls = styles[s.slot]?.lineStyle ?? cur?.lineStyle ?? "solid";
+        const visible = !(styles[s.slot]?.hidden ?? cur?.hidden ?? false);
         return (
           <div key={s.slot} style={{ borderBottom: `1px solid ${chrome.border}`, paddingBottom: 6, marginBottom: 6 }}>
             <div style={{ color: chrome.muted, marginBottom: 4 }}>{s.slot}</div>
+            <div style={rowStyle}>
+              <span>Show</span>
+              <input aria-label={`${s.slot} visible`} type="checkbox" checked={visible}
+                onChange={(e) => setStyle(s.slot, { hidden: !e.target.checked })} />
+            </div>
             <div style={rowStyle}>
               <span>Color</span>
               <div role="group" aria-label={`${s.slot} color`} style={{ display: "flex", gap: 4 }}>

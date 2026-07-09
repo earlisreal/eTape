@@ -11,12 +11,19 @@ const timeScaleApi = { timeToCoordinate: vi.fn(() => 0), scrollToRealTime: vi.fn
   scrollToPosition: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn() };
 // priceScaleApi is a stable object (not a fresh literal per call) so a test can hold
 // a reference to applyOptions and assert it was invoked by the SUT (mirrors timeScaleApi above).
-const priceScaleApi = { applyOptions: vi.fn() };
+const priceScaleApi = { applyOptions: vi.fn(), width: vi.fn(() => 60) };
+// paneApis is a stable array (not a fresh literal per `panes()` call) so setPaneStretchFactor
+// calls made through one `panes()` read are visible to a later `panes()` read in the same
+// test — mirrors why timeScaleApi/priceScaleApi above are hoisted instead of inlined.
+const paneApis = [
+  { attachPrimitive: vi.fn(), getHeight: vi.fn(() => 400), getStretchFactor: vi.fn(() => 1), setStretchFactor: vi.fn() },
+  { attachPrimitive: vi.fn(), getHeight: vi.fn(() => 120), getStretchFactor: vi.fn(() => 1), setStretchFactor: vi.fn() },
+];
 const chartApi = {
   addSeries: vi.fn(() => ({ setData: vi.fn(), update: vi.fn(), applyOptions: vi.fn(), setSeriesOrder: vi.fn(),
     attachPrimitive: vi.fn(), priceToCoordinate: vi.fn(() => 0), coordinateToPrice: vi.fn(() => 0) })),
   removeSeries: vi.fn(),
-  panes: vi.fn(() => [{ attachPrimitive: vi.fn(), getHeight: vi.fn(() => 400) }]),
+  panes: vi.fn(() => paneApis),
   priceScale: vi.fn(() => priceScaleApi),
   timeScale: vi.fn(() => timeScaleApi),
   applyOptions: vi.fn(), resize: vi.fn(), remove: vi.fn(),
@@ -288,5 +295,35 @@ describe("ChartPanel", () => {
     expect(onConfigChange).toHaveBeenCalledWith(expect.objectContaining({
       indicators: expect.arrayContaining([expect.objectContaining({ type: "EMA" })]),
     }));
+  });
+
+  it("MACD sub-pane's close button removes all 3 of its series and persists the removal", () => {
+    const { getByRole, onConfigChange } = renderChart();
+    fireEvent.click(getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add MACD" }));
+    expect(onConfigChange).toHaveBeenCalledWith(expect.objectContaining({
+      indicators: expect.arrayContaining([expect.objectContaining({ type: "MACD" })]),
+    }));
+
+    chartApi.removeSeries.mockClear();
+    fireEvent.click(getByRole("button", { name: "close pane 1" }));
+    expect(chartApi.removeSeries).toHaveBeenCalledTimes(3); // macd, signal, hist
+    expect(onConfigChange).toHaveBeenLastCalledWith(expect.objectContaining({ indicators: [] }));
+    expect(screen.queryByRole("button", { name: "close pane 1" })).toBeNull(); // pane gone from the legend
+  });
+
+  it("MACD sub-pane's collapse button shrinks the pane's stretch factor; clicking again restores it", () => {
+    const { getByRole } = renderChart();
+    fireEvent.click(getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add MACD" }));
+
+    fireEvent.click(getByRole("button", { name: "collapse pane 1" }));
+    expect(paneApis[1].setStretchFactor).toHaveBeenCalledTimes(1);
+    expect(paneApis[1].setStretchFactor.mock.calls[0][0]).toBeLessThan(0.5);
+    expect(getByRole("button", { name: "expand pane 1" })).toBeTruthy();
+
+    fireEvent.click(getByRole("button", { name: "expand pane 1" }));
+    expect(paneApis[1].setStretchFactor).toHaveBeenLastCalledWith(1); // restores the pre-collapse factor (mock's default)
+    expect(getByRole("button", { name: "collapse pane 1" })).toBeTruthy();
   });
 });

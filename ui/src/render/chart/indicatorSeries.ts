@@ -12,11 +12,12 @@ export interface IndicatorInstance {
   type: IndicatorType;
   params: Record<string, number>;
   colors?: Record<string, string>;
-  styles?: Record<string, SlotStyle>; // per-slot style overrides (color/width/lineStyle)
+  styles?: Record<string, SlotStyle>; // per-slot style overrides (color/width/lineStyle/hidden)
   hidden?: boolean;                    // legend 👁 toggle — mapped to LWC series `visible`
+  collapsed?: boolean;                 // sub-pane collapsed to a thin strip (e.g. MACD's pane)
 }
 
-export interface SlotStyle { color?: string; width?: number; lineStyle?: LineStyleName }
+export interface SlotStyle { color?: string; width?: number; lineStyle?: LineStyleName; hidden?: boolean }
 
 export interface ParamSpec { key: string; label: string; default: number; min: number; max: number }
 export interface SlotSpec { slot: string; kind: "line" | "histogram"; paneIndex: number; paletteKey: keyof Palette }
@@ -30,6 +31,7 @@ export interface SeriesDescriptor {
   color: string;       // resolved: inst.colors?.[slot] ?? palette[slot's default key]
   width: number;           // resolved: styles[slot].width ?? INDICATOR_LINE_WIDTH
   lineStyle: LineStyleName; // resolved: styles[slot].lineStyle ?? "solid"
+  hidden: boolean;          // resolved: styles[slot].hidden ?? false — per-slot visibility (e.g. MACD histogram)
 }
 
 const MAIN = 0, SUBPANE = 1;
@@ -75,6 +77,7 @@ export function describeIndicator(inst: IndicatorInstance, p: Palette): SeriesDe
       color: style?.color ?? inst.colors?.[s.slot] ?? p[s.paletteKey],
       width: style?.width ?? INDICATOR_LINE_WIDTH,
       lineStyle: style?.lineStyle ?? "solid",
+      hidden: style?.hidden ?? false,
     };
   });
 }

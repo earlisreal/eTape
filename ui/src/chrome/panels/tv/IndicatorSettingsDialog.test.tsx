@@ -11,6 +11,8 @@ afterEach(cleanup);
 const chrome = getTvChrome("light");
 const ema: IndicatorInstance = { instanceId: "e1", type: "EMA", params: { period: 9 } };
 const resolved = describeIndicator(ema, LIGHT);
+const macd: IndicatorInstance = { instanceId: "m1", type: "MACD", params: { fast: 12, slow: 26, signal: 9 } };
+const macdResolved = describeIndicator(macd, LIGHT);
 
 describe("IndicatorSettingsDialog", () => {
   it("shows an Inputs tab with a number input per param", () => {
@@ -56,5 +58,24 @@ describe("IndicatorSettingsDialog", () => {
     render(<IndicatorSettingsDialog chrome={chrome} instance={{ ...ema, params: { period: 50 } }} resolved={resolved} onClose={() => {}} onApply={onApply} />);
     fireEvent.click(screen.getByRole("button", { name: "Defaults" }));
     expect((screen.getByLabelText("Period") as HTMLInputElement).value).toBe("9");
+  });
+
+  it("Style tab shows a per-slot Show checkbox, checked by default; unchecking MACD's histogram persists styles.hist.hidden", () => {
+    const onApply = vi.fn();
+    render(<IndicatorSettingsDialog chrome={chrome} instance={macd} resolved={macdResolved} onClose={() => {}} onApply={onApply} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Style" }));
+    const histShow = screen.getByLabelText("hist visible") as HTMLInputElement;
+    expect(histShow.checked).toBe(true);
+    // The other two slots stay untouched (still visible) — this is a per-slot toggle.
+    expect((screen.getByLabelText("macd visible") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByLabelText("signal visible") as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.click(histShow);
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+    expect(onApply).toHaveBeenCalledWith(expect.objectContaining({
+      styles: expect.objectContaining({ hist: expect.objectContaining({ hidden: true }) }),
+    }));
+    const applied = onApply.mock.calls[0][0] as IndicatorInstance;
+    expect(applied.styles?.macd?.hidden).toBeUndefined();
   });
 });

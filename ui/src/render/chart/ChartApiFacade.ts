@@ -43,5 +43,8 @@ export interface ChartApiFacade {
   takeScreenshot(): HTMLCanvasElement;               // PNG export (camera button)
   subscribeCrosshairMove(cb: (logical: number | null) => void): () => void; // legend value tracking
   paneHeights(): number[];                            // legend per-pane vertical offsets
+  paneStretchFactor(paneIndex: number): number;       // relative pane size (LWC default 1) — collapse/expand
+  setPaneStretchFactor(paneIndex: number, factor: number): void;
+  priceScaleWidth(): number;                          // right-axis width — insets per-pane header controls
   remove(): void;
 }
