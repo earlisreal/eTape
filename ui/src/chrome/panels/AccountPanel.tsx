@@ -1,4 +1,5 @@
-import { useMemo, useState, useSyncExternalStore } from "react";
+import { useContext, useMemo, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import type { PanelProps } from "./registry";
 import { HoverButton } from "../controls/HoverButton";
 import type { PositionRow } from "../../wire/contract";
@@ -13,6 +14,7 @@ import { displayStatus, STATUS_LABEL, sideLabel, bareSymbol, abbrevType, isWorki
 import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
 import type { OrderView } from "../../data/ExecStore";
 import { TradeHistoryTable } from "./TradeHistoryTable";
+import { PanelHeaderActionsSlotContext } from "./headerSlot";
 
 // Task 19 merges the old AccountBarPanel (stats strip + master/per-venue arm
 // chips) and PositionsPanel (sortable positions table, Flatten) into one
@@ -166,14 +168,12 @@ function OrdersTable({
 // ---- Stats strip + arm chips (folded from AccountBarPanel) ----
 
 function StatsStrip({
-  stores, oc, palette, venue, venues, selectVenue,
+  stores, oc, palette, venue,
 }: {
   stores: PanelProps["stores"];
   oc: ReturnType<typeof useOrderCommands>;
   palette: ReturnType<typeof useTheme>["palette"];
   venue: string;
-  venues: string[];
-  selectVenue: (v: string) => void;
 }): JSX.Element {
   const status = stores.exec.status();
   const account = stores.exec.accounts().find((a) => a.venue === venue);
@@ -194,9 +194,6 @@ function StatsStrip({
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
-      <select data-testid="acct-venue" className="ctl mono" value={venue} onChange={(e) => selectVenue(e.target.value)}>
-        {venues.map((v) => <option key={v} value={v}>{v}</option>)}
-      </select>
       {cell("Equity", "acct-equity", money(equity))}
       {cell("Buying Power", "acct-bp", money(bp))}
       {cell("Day P&L", "acct-daypnl", money(dayPnl), dayPnl ?? 0)}
@@ -323,6 +320,16 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
   const group = groupProp ?? config.group;
   const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
+  // Portaled into PanelFrame's ledger-header actions slot, beside the close
+  // button (see headerSlot.ts's PanelHeaderActionsSlotContext). undefined (no
+  // frame above, e.g. a body-level test) falls back to rendering inline; null
+  // (frame present, slot div not yet mounted) renders nothing for that tick.
+  const actionsSlot = useContext(PanelHeaderActionsSlotContext);
+  const venueSelect = (
+    <select data-testid="acct-venue" className="ctl mono" value={venue} onChange={(e) => selectVenue(e.target.value)}>
+      {venues.map((v) => <option key={v} value={v}>{v}</option>)}
+    </select>
+  );
 
   const [ordersHeight, setOrdersHeight] = useState<number>(() => {
     const raw = config.settings.ordersHeight;
@@ -368,7 +375,8 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: palette.bg, color: palette.text, fontFamily: "inherit" }}>
-      <StatsStrip stores={stores} oc={oc} palette={palette} venue={venue} venues={venues} selectVenue={selectVenue} />
+      {actionsSlot === undefined ? venueSelect : actionsSlot ? createPortal(venueSelect, actionsSlot) : null}
+      <StatsStrip stores={stores} oc={oc} palette={palette} venue={venue} />
       <OrdersTable stores={stores} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} height={ordersHeight} />
       <div data-testid="orders-resize-handle" onMouseDown={startResize}
         style={{ height: 4, cursor: "row-resize", background: palette.border, flexShrink: 0 }} />

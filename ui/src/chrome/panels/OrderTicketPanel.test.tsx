@@ -138,8 +138,11 @@ describe("OrderTicketPanel", () => {
     const { container } = wrap(props);
     // Scope to .col-head captions — plain getByText can collide with option
     // text that happens to match a label (e.g. the "Stop" order-type option).
+    // Venue has no caption: it now lives in the header actions row (portaled
+    // into PanelFrame's title bar when mounted under a frame), where the
+    // select's own value is self-evident without a label.
     const captions = Array.from(container.querySelectorAll(".col-head")).map((el) => el.textContent);
-    for (const label of ["Venue", "Type", "TIF", "Price", "Stop", "Size", "Size by"]) {
+    for (const label of ["Type", "TIF", "Price", "Stop", "Size", "Size by"]) {
       expect(captions).toContain(label);
     }
   });
