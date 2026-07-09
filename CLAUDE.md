@@ -35,8 +35,14 @@ TradeZero API fully researched 2026-07-03 —
 `docs/2026-07-03-tradezero-api.md` (REST + WebSocket, order model, locates, rate
 limits, eTape design consequences) + reconstructed OpenAPI spec in `docs/tradezero/`;
 confirmed TradeZero exposes **no market data**, so the moomoo/TradeZero split stands.
-TradeZero API credentials live in `~/.eJournal/credentials.json` (key `tradeZero`:
-`keyId` + `secretKey`). **Verified 2026-07-03: these are LIVE-account keys**
+TradeZero API credentials live in `~/.eTape/credentials.json` (key `tradeZero`:
+`keyId` + `secretKey`) — eTape owns this file (alongside `~/.eTape/config.toml`); it
+is **no longer shared with eJournal** (decided 2026-07-09, reversing the
+settings-redesign spec's §6 choice to share `~/.eJournal/credentials.json`). The
+store started **empty** when this change landed, so Earl's existing live TradeZero
+and `alpaca-live` keys are **not** automatically available — they must be re-entered
+through the Venues & credentials settings UI before those venues will boot.
+**Verified 2026-07-03 (of the eJournal-era keys): these are LIVE-account keys**
 (`accountType: "Live"`, real funds). Alpaca live keys added 2026-07-07 (key
 `alpaca-live`, limited-margin account, real funds; paper keys stay under `alpaca`).
 **Safety rule: never place, modify, or cancel real orders with live keys (TradeZero

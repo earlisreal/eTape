@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, waitFor, fireEvent, act, cleanup } from "@testing-library/react";
 import { AppShell } from "./AppShell";
 import { WorkspaceStore, type Workspace } from "./workspace";
 import { makeStores } from "../data/registry";
@@ -11,6 +11,7 @@ import { browserRaf } from "../render/surface";
 import { ThemeProvider } from "./ThemeProvider";
 import { ToastProvider } from "./Toast";
 import { OrderConfigProvider } from "./exec/useOrderConfig";
+import type { ExecStatus, VenueStatus } from "../wire/contract";
 
 // dockview's DockviewComponent constructor watches its container via a real
 // ResizeObserver on mount, which jsdom doesn't implement.
@@ -51,7 +52,7 @@ function mount(seed: Workspace) {
         linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} />
     </OrderConfigProvider></ToastProvider></ThemeProvider>,
   );
-  return { saved, workspaceStore, linkGroups };
+  return { saved, workspaceStore, linkGroups, stores };
 }
 
 describe("AppShell onConfigChange", () => {
@@ -171,5 +172,121 @@ describe("AppShell group-symbol persistence (Bug 5: refresh resetting a grouped 
     act(() => { linkGroups.focus("green", "US.NVDA"); });
 
     await waitFor(() => expect(saved.some((w) => w.groups?.green === "US.NVDA")).toBe(true));
+  });
+});
+
+describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
+  const VENUE_SETUP_HIDDEN_KEY = "etape.venueSetupHidden";
+  const seed: Workspace = { name: "default", panels: [], layout: null };
+
+  const emptyGate = { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 };
+  const venueStatus = (id: string): VenueStatus => ({
+    venue: id, broker: "alpaca", connected: true, venueArmed: false, reconcilePending: false,
+    note: "", lastReconcileMs: null, gate: emptyGate,
+  });
+  const status = (venues: VenueStatus[]): ExecStatus => ({
+    masterArmed: false,
+    global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
+    venues,
+  });
+  const publishStatus = (stores: ReturnType<typeof mount>["stores"], venues: VenueStatus[]) => {
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: status(venues) }));
+  };
+
+  beforeEach(() => { localStorage.removeItem(VENUE_SETUP_HIDDEN_KEY); });
+  afterEach(() => { localStorage.removeItem(VENUE_SETUP_HIDDEN_KEY); });
+
+  it("does not show before the first exec.status snapshot arrives (no flash during connect)", async () => {
+    mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+  });
+
+  it("shows once exec.status arrives with zero venues", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, []);
+    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+  });
+
+  it("does not show once a venue is configured", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, [venueStatus("alpaca-paper")]);
+    // Give any (absent) render a chance, then assert it never appeared.
+    await waitFor(() => expect(stores.exec.status()?.venues.length).toBe(1));
+    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+  });
+
+  it("clicking 'Configure venues' opens Settings on the Venues & creds section and closes the prompt", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, []);
+    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Configure venues" }));
+
+    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+    // The nav button alone doesn't prove which section is active — SettingsModal
+    // renders all 4 nav entries unconditionally regardless of the current
+    // section. Assert on VenuesSection's own "Venues" heading (distinct from
+    // e.g. AppearanceSection's "Theme" heading) to prove the click actually
+    // routed to the Venues section, not just opened the modal on some other one.
+    expect(screen.getByRole("button", { name: /venues & creds/i })).toBeTruthy();
+    expect(screen.getByText("Venues")).toBeTruthy();
+  });
+
+  it("dismissing without ticking the checkbox hides it for the session but does not persist to localStorage", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, []);
+    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "I'll do it later" }));
+    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+    expect(localStorage.getItem(VENUE_SETUP_HIDDEN_KEY)).toBeNull();
+
+    // Re-publishing the same empty-venues status must not re-show it THIS session.
+    publishStatus(stores, []);
+    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+  });
+
+  it("dismissing without ticking the checkbox lets the prompt reappear on a fresh mount (simulated reload)", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, []);
+    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "I'll do it later" }));
+    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+    expect(localStorage.getItem(VENUE_SETUP_HIDDEN_KEY)).toBeNull();
+
+    cleanup(); // unmount this AppShell instance — simulates a fresh app launch
+
+    const { stores: stores2 } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores2, []);
+    // Untracked dismissal must NOT persist across launches — venues are still
+    // empty, so the prompt is the non-negotiable half of the contract: it has
+    // to come back.
+    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+  });
+
+  it("ticking 'don't show again' + dismissing persists the flag so a fresh mount with the same status stays hidden", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, []);
+    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("checkbox"));
+    fireEvent.click(screen.getByRole("button", { name: "I'll do it later" }));
+    expect(localStorage.getItem(VENUE_SETUP_HIDDEN_KEY)).toBe("1");
+
+    cleanup(); // unmount this AppShell instance — simulates a fresh app launch
+
+    const { stores: stores2 } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores2, []);
+    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
   });
 });

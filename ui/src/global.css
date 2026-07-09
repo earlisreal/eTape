@@ -72,6 +72,41 @@ input.numfield { -moz-appearance: textfield; appearance: textfield; }
 .chip-working { color: var(--up); border-color: var(--up); background: rgba(23,122,88,.07); }
 .chip-pending { color: var(--accent); border-color: var(--accent); background: rgba(154,106,27,.08); }
 .chip-rejected { color: var(--danger); border-color: var(--danger); background: rgba(168,30,48,.06); }
+/* Bronze "set" status (VenuesSection credential chip, any future UI-state chip)
+   and the LIVE-venue badge (danger — one of the three sanctioned uses of the
+   danger color: LIVE badges/headers, kill switch, rejects). */
+.chip-set { color: var(--accent); border-color: var(--accent); background: rgba(154,106,27,.08); }
+.chip-live { color: var(--danger); border-color: var(--danger); background: rgba(168,30,48,.06); }
+/* Tinted header for a LIVE venue's card (same wash as .chip-live's background,
+   applied to a wider area) — venue-card header row, VenuesSection. */
+.venue-card-header-live { background: rgba(168,30,48,.06); }
+
+/* Settings-form field (VenuesSection card inputs/selects): generous padding +
+   a visible bronze focus ring, per the Daylight Ledger "bronze = all UI state" rule. */
+.field {
+  font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 12px;
+  padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border);
+  background: var(--bg); color: var(--text); box-sizing: border-box;
+}
+.field:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
+
+/* Per-venue card mount animation + remove-button state transition — both
+   respect prefers-reduced-motion. */
+@keyframes venue-card-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
+.venue-card { animation: venue-card-in 160ms ease-out; }
+.venue-remove-btn { transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease; }
+@media (prefers-reduced-motion: reduce) {
+  .venue-card { animation: none; }
+  .venue-remove-btn { transition: none; }
+}
+
+/* First-run venue-setup prompt (Task 3, venues/creds redesign) — fade-in only,
+   no translate, per the design note; disabled under prefers-reduced-motion. */
+@keyframes venue-setup-fade-in { from { opacity: 0; } to { opacity: 1; } }
+.venue-setup-prompt { animation: venue-setup-fade-in 160ms ease-out; }
+@media (prefers-reduced-motion: reduce) {
+  .venue-setup-prompt { animation: none; }
+}
 
 /* Kill switch — deliberately loud. */
 .kill-switch {

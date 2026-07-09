@@ -15,6 +15,7 @@ import { TopBar } from "./TopBar";
 import { EmptyState } from "./EmptyState";
 import { Catalog } from "./Catalog";
 import { SettingsModal, type SettingsSection } from "./SettingsModal";
+import { VenueSetupPrompt } from "./VenueSetupPrompt";
 import { OpenSettingsProvider } from "./OpenSettingsContext";
 import { modalTracker } from "./modalTracker";
 import { useTheme } from "./ThemeProvider";
@@ -23,6 +24,17 @@ import { useOrderCommands } from "./exec/useOrderCommands";
 import { useHotkeys } from "./exec/useHotkeys";
 import { useSoundWiring } from "../sound/useSoundWiring";
 import { nextWindowName } from "./windows";
+
+// Task 3: permanent "don't show again" flag for the first-run venue-setup
+// prompt, set only when the user ticks the checkbox on either action.
+const VENUE_SETUP_HIDDEN_KEY = "etape.venueSetupHidden";
+function readVenueSetupHidden(): boolean {
+  try {
+    return localStorage.getItem(VENUE_SETUP_HIDDEN_KEY) === "1";
+  } catch {
+    return false; // a blocked/unavailable localStorage shouldn't suppress the prompt
+  }
+}
 
 interface Props {
   workspaceName: string;
@@ -41,6 +53,12 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // gear opens it to Appearance, the order ticket's gear (via OpenSettingsContext)
   // opens it straight to Orders & hotkeys.
   const [settings, setSettings] = useState<{ open: boolean; section: SettingsSection }>({ open: false, section: "appearance" });
+  // Task 3 (venues/creds redesign): first-run venue-setup prompt. Separate from
+  // the `etape.venueSetupHidden` localStorage flag below — this only silences
+  // the prompt for the REST OF THIS SESSION after either action, so it doesn't
+  // re-flash on every re-render while venues are still empty; the localStorage
+  // flag (only set when "don't show again" is ticked) is what survives reload.
+  const [venueSetupSessionDismissed, setVenueSetupSessionDismissed] = useState(false);
   const { mode } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
@@ -94,6 +112,22 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
   const execStatus = stores.exec.status();
   const armed = execStatus?.masterArmed ?? false;
+  // Task 3: show the first-run venue-setup prompt once the first exec.status
+  // snapshot has arrived (execStatus !== null — gates the connect-window flash)
+  // and only while no venue is configured, the user hasn't dismissed it THIS
+  // session, and hasn't permanently silenced it via the checkbox.
+  const showVenueSetup = execStatus !== null && execStatus.venues.length === 0
+    && !venueSetupSessionDismissed && !readVenueSetupHidden();
+  const dismissVenueSetup = (dontShowAgain: boolean) => {
+    if (dontShowAgain) {
+      try { localStorage.setItem(VENUE_SETUP_HIDDEN_KEY, "1"); } catch { /* best-effort only */ }
+    }
+    setVenueSetupSessionDismissed(true);
+  };
+  const configureVenueSetup = (dontShowAgain: boolean) => {
+    dismissVenueSetup(dontShowAgain);
+    setSettings({ open: true, section: "venues" });
+  };
   // Flush any dockview mutations queued by addPanel/applyPresetToWorkspace once
   // dockview's components map has caught up with the latest `ws`.
   useEffect(() => {
@@ -355,6 +389,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           onSection={(s) => setSettings((v) => ({ ...v, section: s }))}
           onClose={() => setSettings((v) => ({ ...v, open: false }))}
           commands={commands} />
+        {showVenueSetup && <VenueSetupPrompt onConfigure={configureVenueSetup} onDismiss={dismissVenueSetup} />}
       </div>
     </OpenSettingsProvider>
   );
