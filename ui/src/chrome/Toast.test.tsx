@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, act } from "@testing-library/react";
+import { render, screen, act, fireEvent } from "@testing-library/react";
 import { ThemeProvider } from "./ThemeProvider";
 import { ToastProvider, useToasts } from "./Toast";
 
@@ -62,6 +62,24 @@ describe("Toast", () => {
     expect(clearSpy).toHaveBeenCalled();
     expect(vi.getTimerCount()).toBe(0);
     clearSpy.mockRestore();
+    vi.useRealTimers();
+  });
+  // Regression/coverage: the alert row's hover feedback is a direct DOM
+  // mutation (ev.currentTarget.style.background) in ToastHost, not React
+  // state — untested until now. Uses `sticky` so the row can't auto-dismiss
+  // out from under the assertions.
+  it("mutates the alert row's background directly on hover, then restores it on mouseleave", () => {
+    vi.useFakeTimers();
+    const { api } = setup();
+    act(() => api().push({ level: "danger", text: "hover-target", sticky: true }));
+    const row = screen.getByRole("alert");
+    const restBackground = row.style.background;
+
+    fireEvent.mouseEnter(row);
+    expect(row.style.background).not.toBe(restBackground);
+
+    fireEvent.mouseLeave(row);
+    expect(row.style.background).toBe(restBackground);
     vi.useRealTimers();
   });
 });

@@ -24,8 +24,8 @@ body {
   letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted);
 }
 .col-head.sort-active { color: var(--text); font-weight: 600; cursor: pointer; }
-.col-head.sortable { cursor: pointer; }
-.col-head.sortable:hover { color: var(--text); transition: color 120ms ease; }
+.col-head.sortable { cursor: pointer; transition: color 120ms ease; }
+.col-head.sortable:hover { color: var(--text); }
 .data-row { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11px; font-variant-numeric: tabular-nums; }
 
 /* Shared controls — replace native <select>/<input>/<button>. */

@@ -82,7 +82,7 @@ describe("TVFloatingToolbar", () => {
     }
   });
 
-  it("selected width button keeps its accent/bold styling under hover", () => {
+  it("selected width button keeps its bold weight under hover; accent color intentionally flattens like other buttons", () => {
     render(<TVFloatingToolbar {...base} width={2} />);
     const widthBtn = screen.getByLabelText("width 2") as HTMLButtonElement;
     expect(widthBtn.style.fontWeight).toBe("700");
