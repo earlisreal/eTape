@@ -99,41 +99,68 @@ func (p *Poller) fetchTick(ctx context.Context) {
 
 // fetchSnapshots issues one Qot_GetSecuritySnapshot request per MaxPerReq
 // chunk of syms and returns symbol -> Snapshot for whatever the response
-// contained. A transport error or whole-batch application failure
-// (RetType != 0) is logged and that chunk is skipped for this tick — no
-// binary-split retry (unlike scan.go); a periodic fundamentals refresh can
-// simply retry the whole chunk on the next tick.
+// contained. A transport error or decode error is chunk-wide and unrelated
+// to any single symbol's data, so it is logged and that chunk is skipped for
+// this tick (retried whole on the next tick). A whole-batch application
+// failure (RetType != 0) is isolated via the same binary-split retry as
+// scan.go's snapshotBatch (see snapshotChunk): one bad/unentitled code no
+// longer blanks out every other symbol that happened to share its chunk. A
+// symbol isolated down to size 1 that still fails simply gets no entry in
+// out this tick — fetchSnapshots has no cache (fundamentals refresh every
+// tick by design), so there is nothing to "give up" on; it is retried fresh
+// next tick like any other missing symbol.
 func (p *Poller) fetchSnapshots(ctx context.Context, syms []string) map[string]*snappb.Snapshot {
 	out := make(map[string]*snappb.Snapshot, len(syms))
 	for _, ch := range chunk(syms, p.maxPerReq()) {
-		fr, err := p.r.Request(ctx, opend.ProtoQotGetSecuritySnapshot,
-			&snappb.Request{C2S: &snappb.C2S{SecurityList: securitiesFor(ch)}})
-		if err != nil {
-			slog.Warn("stockinfo: snapshot transport failed", "err", err, "n", len(ch))
-			continue
-		}
-		var resp snappb.Response
-		if err := proto.Unmarshal(fr.Body, &resp); err != nil {
-			slog.Warn("stockinfo: snapshot decode failed", "err", err)
-			continue
-		}
-		if resp.GetRetType() != 0 {
-			slog.Warn("stockinfo: snapshot batch failed", "retMsg", resp.GetRetMsg(), "n", len(ch))
-			continue
-		}
-		for _, sn := range resp.GetS2C().GetSnapshotList() {
-			out[symbolOf(sn.GetBasic().GetSecurity())] = sn
-		}
+		p.snapshotChunk(ctx, ch, out)
 	}
 	return out
 }
 
+// snapshotChunk resolves one chunk of syms via a single 3203 request, adding
+// each returned Snapshot to out. On a whole-batch RetType != 0 failure (the
+// "one bad code fails the batch" case — e.g. an OTC code without quote
+// rights) it recurses with a binary split instead of dropping the whole
+// chunk, exactly like scan.go's snapshotBatch: split at the midpoint, retry
+// each half, and keep splitting until either a half succeeds or is narrowed
+// to the single offending symbol.
+func (p *Poller) snapshotChunk(ctx context.Context, ch []string, out map[string]*snappb.Snapshot) {
+	fr, err := p.r.Request(ctx, opend.ProtoQotGetSecuritySnapshot,
+		&snappb.Request{C2S: &snappb.C2S{SecurityList: securitiesFor(ch)}})
+	if err != nil {
+		slog.Warn("stockinfo: snapshot transport failed", "err", err, "n", len(ch))
+		return
+	}
+	var resp snappb.Response
+	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
+		slog.Warn("stockinfo: snapshot decode failed", "err", err)
+		return
+	}
+	if resp.GetRetType() != 0 {
+		if len(ch) == 1 {
+			slog.Info("stockinfo: snapshot unresolvable this tick", "symbol", ch[0], "reason", resp.GetRetMsg())
+			return
+		}
+		mid := len(ch) / 2
+		p.snapshotChunk(ctx, ch[:mid], out)
+		p.snapshotChunk(ctx, ch[mid:], out)
+		return
+	}
+	for _, sn := range resp.GetS2C().GetSnapshotList() {
+		out[symbolOf(sn.GetBasic().GetSecurity())] = sn
+	}
+}
+
 // resolveIndustries fetches Qot_GetOwnerPlate for symbols not yet in the
 // industry cache and records the result — caching "" when a symbol has no
-// industry plate (or was omitted from an otherwise-successful response) so
-// it is never re-requested for the life of the process. A transport error or
-// whole-batch application failure is logged and left uncached, so it is
-// retried on the next tick.
+// industry plate (or was omitted from an otherwise-successful response), or
+// when it is isolated down to a single symbol that still fails on its own
+// (see ownerPlateChunk) — so it is never re-requested for the life of the
+// process. A transport error or decode error is chunk-wide and left
+// uncached, so it is retried on the next tick. A whole-batch application
+// failure (RetType != 0) is isolated via the same binary-split retry as
+// fetchSnapshots/scan.go's snapshotBatch, so one bad/unentitled code no
+// longer leaves every other symbol in its chunk permanently unresolved.
 func (p *Poller) resolveIndustries(ctx context.Context, syms []string) {
 	var missing []string
 	for _, s := range syms {
@@ -142,31 +169,52 @@ func (p *Poller) resolveIndustries(ctx context.Context, syms []string) {
 		}
 	}
 	for _, ch := range chunk(missing, p.maxPerReq()) {
-		fr, err := p.r.Request(ctx, opend.ProtoQotGetOwnerPlate,
-			&ownerplatepb.Request{C2S: &ownerplatepb.C2S{SecurityList: securitiesFor(ch)}})
-		if err != nil {
-			slog.Warn("stockinfo: owner-plate transport failed", "err", err, "n", len(ch))
-			continue
+		p.ownerPlateChunk(ctx, ch)
+	}
+}
+
+// ownerPlateChunk resolves one chunk of syms via a single 3207 request,
+// caching each returned industry (or "" when a symbol succeeded but had no
+// row in the response). On a whole-batch RetType != 0 failure it recurses
+// with a binary split, same shape as snapshotChunk. Once the split narrows
+// the failure down to exactly one symbol that still fails alone, the
+// ambiguity that justifies leaving a batch uncached is gone — that symbol is
+// definitively the bad one, so unlike the top-level "whole-batch failure
+// stays uncached" rule, it is cached as "" here and never retried again,
+// converging to the same steady state as a symbol that resolves successfully
+// with no industry.
+func (p *Poller) ownerPlateChunk(ctx context.Context, ch []string) {
+	fr, err := p.r.Request(ctx, opend.ProtoQotGetOwnerPlate,
+		&ownerplatepb.Request{C2S: &ownerplatepb.C2S{SecurityList: securitiesFor(ch)}})
+	if err != nil {
+		slog.Warn("stockinfo: owner-plate transport failed", "err", err, "n", len(ch))
+		return
+	}
+	var resp ownerplatepb.Response
+	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
+		slog.Warn("stockinfo: owner-plate decode failed", "err", err)
+		return
+	}
+	if resp.GetRetType() != 0 {
+		if len(ch) == 1 {
+			p.industry[ch[0]] = ""
+			slog.Info("stockinfo: owner-plate unresolvable, caching absent industry", "symbol", ch[0], "reason", resp.GetRetMsg())
+			return
 		}
-		var resp ownerplatepb.Response
-		if err := proto.Unmarshal(fr.Body, &resp); err != nil {
-			slog.Warn("stockinfo: owner-plate decode failed", "err", err)
-			continue
-		}
-		if resp.GetRetType() != 0 {
-			slog.Warn("stockinfo: owner-plate batch failed", "retMsg", resp.GetRetMsg(), "n", len(ch))
-			continue
-		}
-		got := make(map[string]bool, len(ch))
-		for _, op := range resp.GetS2C().GetOwnerPlateList() {
-			sym := symbolOf(op.GetSecurity())
-			got[sym] = true
-			p.industry[sym] = industryFromPlates(op.GetPlateInfoList())
-		}
-		for _, s := range ch {
-			if !got[s] {
-				p.industry[s] = "" // succeeded but no row for this symbol: cache absent
-			}
+		mid := len(ch) / 2
+		p.ownerPlateChunk(ctx, ch[:mid])
+		p.ownerPlateChunk(ctx, ch[mid:])
+		return
+	}
+	got := make(map[string]bool, len(ch))
+	for _, op := range resp.GetS2C().GetOwnerPlateList() {
+		sym := symbolOf(op.GetSecurity())
+		got[sym] = true
+		p.industry[sym] = industryFromPlates(op.GetPlateInfoList())
+	}
+	for _, s := range ch {
+		if !got[s] {
+			p.industry[s] = "" // succeeded but no row for this symbol: cache absent
 		}
 	}
 }

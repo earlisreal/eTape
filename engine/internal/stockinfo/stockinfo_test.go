@@ -159,25 +159,58 @@ func TestIndustryFromPlatesNoIndustryReturnsEmpty(t *testing.T) {
 // ---- fake requester / publisher for Run()-level tests ----
 
 // fakeRequester dispatches canned responses by protoID and counts calls per
-// protoID so tests can assert cache behavior (e.g. no 3207 call on a cache hit).
+// protoID so tests can assert cache behavior (e.g. no 3207 call on a cache
+// hit). snapshotFn/ownerPlateFn, when set, take priority over the static
+// snapshot/ownerPlate fields and are handed the bare moomoo codes (e.g.
+// "AAPL", not "US.AAPL") present in that specific request, so a test can
+// simulate "this code poisons the whole batch, these others succeed" —
+// exercising the binary-split isolation path. snapshotCodeCalls/
+// ownerPlateCodeCalls record the codes requested on every call, in order,
+// so a test can assert a specific code was (or was not) re-requested.
 type fakeRequester struct {
-	snapshot   *snappb.Response
-	ownerPlate *ownerplatepb.Response
-	calls      map[uint32]int
+	snapshot            *snappb.Response
+	ownerPlate          *ownerplatepb.Response
+	snapshotFn          func(codes []string) *snappb.Response
+	ownerPlateFn        func(codes []string) *ownerplatepb.Response
+	calls               map[uint32]int
+	snapshotCodeCalls   [][]string
+	ownerPlateCodeCalls [][]string
 }
 
 func newFakeRequester() *fakeRequester {
 	return &fakeRequester{calls: map[uint32]int{}}
 }
 
+// codesFromSecurityList extracts the bare moomoo codes from a SecurityList,
+// shared by both protocols since they take the same []*qotcommon.Security shape.
+func codesFromSecurityList(secs []*qotcommon.Security) []string {
+	out := make([]string, 0, len(secs))
+	for _, s := range secs {
+		out = append(out, s.GetCode())
+	}
+	return out
+}
+
 func (f *fakeRequester) Request(ctx context.Context, protoID uint32, req proto.Message) (opend.Frame, error) {
 	f.calls[protoID]++
 	switch protoID {
 	case opend.ProtoQotGetSecuritySnapshot:
-		b, _ := proto.Marshal(f.snapshot)
+		codes := codesFromSecurityList(req.(*snappb.Request).GetC2S().GetSecurityList())
+		f.snapshotCodeCalls = append(f.snapshotCodeCalls, codes)
+		resp := f.snapshot
+		if f.snapshotFn != nil {
+			resp = f.snapshotFn(codes)
+		}
+		b, _ := proto.Marshal(resp)
 		return opend.Frame{ProtoID: protoID, Body: b}, nil
 	case opend.ProtoQotGetOwnerPlate:
-		b, _ := proto.Marshal(f.ownerPlate)
+		codes := codesFromSecurityList(req.(*ownerplatepb.Request).GetC2S().GetSecurityList())
+		f.ownerPlateCodeCalls = append(f.ownerPlateCodeCalls, codes)
+		resp := f.ownerPlate
+		if f.ownerPlateFn != nil {
+			resp = f.ownerPlateFn(codes)
+		}
+		b, _ := proto.Marshal(resp)
 		return opend.Frame{ProtoID: protoID, Body: b}, nil
 	default:
 		return opend.Frame{}, nil
@@ -404,6 +437,144 @@ func TestFetchTickCachesEmptyIndustryToAvoidRerequest(t *testing.T) {
 		if payload.Industry != "" {
 			t.Fatalf("expected cached-absent industry to render as empty string: %+v", payload)
 		}
+	}
+}
+
+// batchOrPoison returns a snapshot response builder for use as
+// fakeRequester.snapshotFn: any request containing poisonCode fails the
+// whole batch (RetType != 0), simulating moomoo's documented "one bad code
+// fails the batch" behavior for 3203; any other request succeeds with real
+// snapshot data for every code present.
+func batchOrPoison(poisonCode string) func(codes []string) *snappb.Response {
+	return func(codes []string) *snappb.Response {
+		for _, c := range codes {
+			if c == poisonCode {
+				return &snappb.Response{RetType: proto.Int32(-1), RetMsg: proto.String("no quote rights: " + poisonCode)}
+			}
+		}
+		list := make([]*snappb.Snapshot, 0, len(codes))
+		for _, c := range codes {
+			list = append(list, snapshotFor(c, true))
+		}
+		return &snappb.Response{RetType: proto.Int32(0), S2C: &snappb.S2C{SnapshotList: list}}
+	}
+}
+
+// ownerPlateBatchOrPoison is batchOrPoison's 3207 counterpart: any request
+// containing poisonCode fails the whole batch; any other request succeeds
+// with a resolved industry for every code present.
+func ownerPlateBatchOrPoison(poisonCode string) func(codes []string) *ownerplatepb.Response {
+	return func(codes []string) *ownerplatepb.Response {
+		for _, c := range codes {
+			if c == poisonCode {
+				return &ownerplatepb.Response{RetType: proto.Int32(-1), RetMsg: proto.String("no quote rights: " + poisonCode)}
+			}
+		}
+		list := make([]*ownerplatepb.SecurityOwnerPlate, 0, len(codes))
+		for _, c := range codes {
+			list = append(list, &ownerplatepb.SecurityOwnerPlate{
+				Security:      sec(c),
+				PlateInfoList: []*qotcommon.PlateInfo{plateInfo(c+" Industry", qotcommon.PlateSetType_PlateSetType_Industry)},
+			})
+		}
+		return &ownerplatepb.Response{RetType: proto.Int32(0), S2C: &ownerplatepb.S2C{OwnerPlateList: list}}
+	}
+}
+
+// codeCallCount counts how many recorded per-call code lists mention code.
+func codeCallCount(callLists [][]string, code string) int {
+	n := 0
+	for _, codes := range callLists {
+		for _, c := range codes {
+			if c == code {
+				n++
+			}
+		}
+	}
+	return n
+}
+
+func TestFetchSnapshotsIsolatesBadSymbolViaBinarySplit(t *testing.T) {
+	syms := []string{"US.AAA", "US.BBB", "US.CCC"}
+	fr := newFakeRequester()
+	fr.snapshotFn = batchOrPoison("BBB")
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()), func() []string { return syms })
+
+	out := p.fetchSnapshots(context.Background(), syms)
+
+	if _, ok := out["US.AAA"]; !ok {
+		t.Fatalf("US.AAA should have been resolved despite US.BBB poisoning the initial batch: %+v", out)
+	}
+	if _, ok := out["US.CCC"]; !ok {
+		t.Fatalf("US.CCC should have been resolved despite US.BBB poisoning the initial batch: %+v", out)
+	}
+	if _, ok := out["US.BBB"]; ok {
+		t.Fatalf("US.BBB should not appear in the result once isolated as the unresolvable symbol: %+v", out)
+	}
+}
+
+func TestResolveIndustriesIsolatesBadSymbolAndCachesEmptyOnPersistentFailure(t *testing.T) {
+	syms := []string{"US.AAA", "US.BBB", "US.CCC"}
+	fr := newFakeRequester()
+	fr.ownerPlateFn = ownerPlateBatchOrPoison("BBB")
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()), func() []string { return syms })
+
+	p.resolveIndustries(context.Background(), syms)
+
+	if got := p.industry["US.AAA"]; got != "AAA Industry" {
+		t.Fatalf("US.AAA should resolve its real industry despite US.BBB poisoning the initial batch, got %q", got)
+	}
+	if got := p.industry["US.CCC"]; got != "CCC Industry" {
+		t.Fatalf("US.CCC should resolve its real industry despite US.BBB poisoning the initial batch, got %q", got)
+	}
+	got, ok := p.industry["US.BBB"]
+	if !ok {
+		t.Fatalf("US.BBB should be cached (as absent) once isolated as the persistently-failing symbol, got no entry at all")
+	}
+	if got != "" {
+		t.Fatalf("US.BBB should cache as empty-industry once isolated alone, got %q", got)
+	}
+
+	bbbCallsBefore := codeCallCount(fr.ownerPlateCodeCalls, "BBB")
+	totalCallsBefore := fr.calls[opend.ProtoQotGetOwnerPlate]
+
+	// Second tick: all three symbols (including the isolated BBB) are now
+	// cached, so resolveIndustries should issue zero further 3207 requests —
+	// proving BBB converged to a steady state instead of being retried
+	// forever every tick.
+	p.resolveIndustries(context.Background(), syms)
+
+	if got := fr.calls[opend.ProtoQotGetOwnerPlate]; got != totalCallsBefore {
+		t.Fatalf("second resolveIndustries call should issue zero further owner-plate requests (all cached), total went from %d to %d", totalCallsBefore, got)
+	}
+	if got := codeCallCount(fr.ownerPlateCodeCalls, "BBB"); got != bbbCallsBefore {
+		t.Fatalf("US.BBB should not be re-requested after being cached empty, call count went from %d to %d", bbbCallsBefore, got)
+	}
+}
+
+func TestFetchTickPublishesGoodSymbolsWhenOneSnapshotBatchIsPoisoned(t *testing.T) {
+	syms := []string{"US.AAA", "US.BBB", "US.CCC"}
+	fr := newFakeRequester()
+	fr.snapshotFn = batchOrPoison("BBB")
+	fr.ownerPlateFn = ownerPlateBatchOrPoison("BBB")
+	pub := &fakePublisher{}
+	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms })
+
+	p.fetchTick(context.Background())
+
+	if len(pub.calls) != 2 {
+		t.Fatalf("want 2 publishes (US.AAA, US.CCC; US.BBB isolated-unresolvable), got %d: %+v", len(pub.calls), pub.calls)
+	}
+	seen := map[string]bool{}
+	for _, c := range pub.calls {
+		seen[c.key] = true
+	}
+	if !seen["US.AAA"] || !seen["US.CCC"] {
+		t.Fatalf("expected US.AAA and US.CCC published despite US.BBB poisoning the batch, got %+v", pub.calls)
+	}
+	if seen["US.BBB"] {
+		t.Fatalf("US.BBB should not be published this tick, got %+v", pub.calls)
 	}
 }
 
