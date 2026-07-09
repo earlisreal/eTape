@@ -3,6 +3,7 @@ package opend
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,11 +18,15 @@ import (
 // fakeRPC records Qot_Sub calls and answers success by default. Tests that
 // exercise the failure path (rule 4) set failNext/retType to make the next
 // call(s) fail with a transport error or a non-zero RetType respectively.
+// failSyms (quarantine tests) fails only calls whose SecurityList contains
+// one of the named bare codes — modeling a real batch where only some
+// symbols (e.g. OTC codes) are rejected.
 type fakeRPC struct {
 	mu       sync.Mutex
 	calls    []*qotsub.C2S
-	failNext int   // remaining calls to fail with a transport error
-	retType  int32 // non-zero RetType to return instead of success
+	failNext int             // remaining calls to fail with a transport error
+	retType  int32           // non-zero RetType to return instead of success
+	failSyms map[string]bool // bare codes (no "US." prefix) that force retType!=0
 }
 
 func (f *fakeRPC) Request(_ context.Context, protoID uint32, req proto.Message) (Frame, error) {
@@ -29,12 +34,18 @@ func (f *fakeRPC) Request(_ context.Context, protoID uint32, req proto.Message) 
 		panic("subManager must only send Qot_Sub")
 	}
 	f.mu.Lock()
-	f.calls = append(f.calls, proto.Clone(req.(*qotsub.Request)).(*qotsub.Request).GetC2S())
+	c2s := proto.Clone(req.(*qotsub.Request)).(*qotsub.Request).GetC2S()
+	f.calls = append(f.calls, c2s)
 	failNow := f.failNext > 0
 	if failNow {
 		f.failNext--
 	}
 	retType := f.retType
+	for _, sec := range c2s.GetSecurityList() {
+		if f.failSyms[sec.GetCode()] && retType == 0 {
+			retType = 1
+		}
+	}
 	f.mu.Unlock()
 	if failNow {
 		return Frame{}, errors.New("fake rpc transport error")
@@ -47,6 +58,15 @@ func (f *fakeRPC) snapshot() []*qotsub.C2S {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]*qotsub.C2S(nil), f.calls...)
+}
+
+func (f *fakeRPC) setFailSyms(syms ...string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.failSyms = make(map[string]bool, len(syms))
+	for _, s := range syms {
+		f.failSyms[strings.TrimPrefix(s, "US.")] = true
+	}
 }
 
 // pump runs one synchronous worker pass (test seam — see step 3).
@@ -263,5 +283,112 @@ func TestEnsureEmptySubsUsesNoQuota(t *testing.T) {
 	want, _ := m.desired(100)
 	if len(want) != 0 {
 		t.Fatalf("empty-subs demand consumed %d slot(s), want 0", len(want))
+	}
+}
+
+// TestSubscribeBinarySplitIsolatesBadSymbolAndQuarantinesAfterThreshold
+// covers the two real defects this fixes: batch poisoning (one hard-failing
+// symbol in a Qot_Sub batch must not block its batch-mates from
+// subscribing) and no-give-up (a symbol that keeps hard-failing must stop
+// being retried every pass once it crosses subQuarantineThreshold).
+func TestSubscribeBinarySplitIsolatesBadSymbolAndQuarantinesAfterThreshold(t *testing.T) {
+	m, rpc, _ := newTestManager(t, 100)
+	rpc.setFailSyms("BAD") // e.g. an OTC code with no quote entitlement
+
+	for _, sym := range []string{"US.AAA", "US.BBB", "US.BAD", "US.CCC"} {
+		m.Ensure(feed.WatchDemand(sym, sym))
+	}
+	m.pass(context.Background()) // pass 1: all four batched together (same subtype set)
+
+	act := m.ActiveSymbols()
+	for _, sym := range []string{"US.AAA", "US.BBB", "US.CCC"} {
+		if len(act[sym]) != 2 {
+			t.Fatalf("ActiveSymbols[%s] = %v, want 2 subs active despite BAD sharing the batch", sym, act[sym])
+		}
+	}
+	if len(act["US.BAD"]) != 0 {
+		t.Fatalf("ActiveSymbols[US.BAD] = %v, want none (still failing)", act["US.BAD"])
+	}
+	if q := m.Quarantined(); len(q) != 0 {
+		t.Fatalf("Quarantined = %v after 1 failure, want none (below threshold)", q)
+	}
+
+	// subQuarantineThreshold-1 more isolated failures cross the threshold.
+	for i := 1; i < subQuarantineThreshold; i++ {
+		m.pass(context.Background())
+	}
+	if q := m.Quarantined(); len(q) != 1 || q[0] != "US.BAD" {
+		t.Fatalf("Quarantined = %v, want [US.BAD]", q)
+	}
+
+	// Once quarantined, BAD must stop generating Qot_Sub calls entirely —
+	// this is the fix for the once-per-second WARN spam.
+	callsAtQuarantine := len(rpc.snapshot())
+	m.pass(context.Background())
+	m.pass(context.Background())
+	if n := len(rpc.snapshot()); n != callsAtQuarantine {
+		t.Fatalf("Qot_Sub calls after quarantine = %d, want %d (BAD no longer retried)", n, callsAtQuarantine)
+	}
+}
+
+// TestSubscribeTransientBizFailureRecoversBeforeQuarantine guards the
+// threshold: a business rejection that clears before reaching
+// subQuarantineThreshold consecutive failures must retry-and-recover, not
+// quarantine — a one-off rejection (rate limit, momentary entitlement
+// hiccup) must not be treated as permanent.
+func TestSubscribeTransientBizFailureRecoversBeforeQuarantine(t *testing.T) {
+	m, rpc, _ := newTestManager(t, 100)
+	rpc.setFailSyms("FLAKY")
+
+	m.Ensure(feed.WatchDemand("w", "US.FLAKY"))
+	for i := 0; i < subQuarantineThreshold-1; i++ {
+		m.pass(context.Background())
+	}
+	if got := m.Slots(); got != 0 {
+		t.Fatalf("Slots = %d, want 0 (still failing)", got)
+	}
+	if q := m.Quarantined(); len(q) != 0 {
+		t.Fatalf("Quarantined = %v, want none (below threshold)", q)
+	}
+
+	rpc.setFailSyms() // recovers before hitting the threshold
+	m.pass(context.Background())
+	if got := m.Slots(); got != 2 {
+		t.Fatalf("Slots after recovery = %d, want 2", got)
+	}
+	if q := m.Quarantined(); len(q) != 0 {
+		t.Fatalf("Quarantined after recovery = %v, want none", q)
+	}
+}
+
+// TestResubscribeAllClearsQuarantine covers the reconnect boundary: a
+// quarantined symbol gets exactly one fresh retry after ResubscribeAll,
+// since a reconnect is a clean session boundary (entitlements may have
+// changed, or the failure may have been server-side).
+func TestResubscribeAllClearsQuarantine(t *testing.T) {
+	m, rpc, _ := newTestManager(t, 100)
+	rpc.setFailSyms("BAD")
+	m.Ensure(feed.WatchDemand("w", "US.BAD"))
+	for i := 0; i < subQuarantineThreshold; i++ {
+		m.pass(context.Background())
+	}
+	if q := m.Quarantined(); len(q) != 1 || q[0] != "US.BAD" {
+		t.Fatalf("Quarantined = %v, want [US.BAD]", q)
+	}
+
+	rpc.setFailSyms() // e.g. entitlement recovered server-side
+	if err := m.ResubscribeAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if q := m.Quarantined(); len(q) != 0 {
+		t.Fatalf("Quarantined after ResubscribeAll = %v, want none", q)
+	}
+
+	// BAD was never active, so ResubscribeAll (which only reissues
+	// m.active) doesn't resubscribe it directly — but clearing quarantine
+	// means the next pass retries it.
+	m.pass(context.Background())
+	if got := m.Slots(); got != 2 {
+		t.Fatalf("Slots after retry post-reconnect = %d, want 2", got)
 	}
 }

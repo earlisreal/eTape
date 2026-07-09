@@ -1,9 +1,11 @@
 // Package scan is the pre-market/RTH rank scanner poller. It issues request/
-// response protoIDs (3410/3413/3411/3412 per-session rank, 3203 snapshot)
-// through the OpenD client — no subscription quota — and publishes
-// scanner.rank/scanner.hit. Float is
-// resolved on demand for the symbols on the rank board (3203) and cached for
-// the ET day; there is no low-float "universe" (3215 never echoes float).
+// response protoIDs (3410/3413/3411/3412 per-session rank, 3202 static info,
+// 3203 snapshot) through the OpenD client — no subscription quota — and
+// publishes scanner.rank/scanner.hit. Exchange type is resolved on demand
+// (3202) to drop OTC/Pink codes before they rank (moomoo's US quote
+// entitlement doesn't cover OTC — subscribing one fails at Qot_Sub). Float
+// is resolved on demand for the surviving symbols (3203) and cached for the
+// ET day; there is no low-float "universe" (3215 never echoes float).
 package scan
 
 import (
@@ -25,6 +27,7 @@ import (
 
 	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
 	snappb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsecuritysnapshot"
+	staticpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetstaticinfo"
 	tmrpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgettopmoversrank"
 	ahpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusafterhoursrank"
 	onpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusovernightrank"
@@ -73,13 +76,14 @@ type Poller struct {
 	pool     *Pool
 	poolSyms atomic.Pointer[[]string]   // lock-free snapshot for the news set
 	floats   map[string]floatEntry      // symbol -> resolved float; absent = unknown
+	otc      map[string]bool            // symbol -> resolved exchange type (true = OTC/Pink); absent = unknown
 	seen     map[string]map[string]bool // session -> symbol -> seen
 	seenDay  int64                      // ET day of the current seen-sets + float cache
 }
 
 func New(cfg config.Scan, r requester, pub Publisher, clk clock.Clock, feed demandFeed, backfill func(string)) *Poller {
 	return &Poller{cfg: cfg, r: r, pub: pub, clk: clk, feed: feed, backfill: backfill, pool: NewPool(),
-		floats: map[string]floatEntry{}, seen: map[string]map[string]bool{}}
+		floats: map[string]floatEntry{}, otc: map[string]bool{}, seen: map[string]map[string]bool{}}
 }
 
 func (p *Poller) Run(ctx context.Context) error {
@@ -135,6 +139,8 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 		return // transient; next tick retries
 	}
 	p.resetIfNewDay(now)
+	p.resolveExch(ctx, items) // populate the exchange-type cache before dropping OTC
+	items = dropOTC(items, p.otc)
 	p.resolveFloats(ctx, items) // populate the float cache before filtering
 	rows := rankRows(items, p.floats, p.cfg)
 	p.updatePool(now, rows)
@@ -189,6 +195,22 @@ func (p *Poller) PoolSymbols() []string {
 		return *s
 	}
 	return nil
+}
+
+// dropOTC is the pure transform: drop items confirmed OTC/Pink (otc[sym] ==
+// true). Anything else — resolved not-OTC, or still unresolved (transient
+// transport error or budget-exhausted; retried next poll) — is kept, not
+// dropped. If an actual OTC code ever slips through unflagged, subman's
+// quarantine is the backstop.
+func dropOTC(items []rankItem, otc map[string]bool) []rankItem {
+	out := make([]rankItem, 0, len(items))
+	for _, it := range items {
+		if otc[it.Symbol] {
+			continue
+		}
+		out = append(out, it)
+	}
+	return out
 }
 
 // rankRows is the pure transform: apply the float cache + client-side
@@ -251,15 +273,16 @@ func (p *Poller) newHits(sess string, rows []wsmsg.ScannerRow) []string {
 	return hits
 }
 
-// resetIfNewDay clears the seen-sets AND the float cache on the ET-day
-// boundary, so overnight splits/offerings are re-resolved and bad-marks last
-// at most one ET day.
+// resetIfNewDay clears the seen-sets AND the float/exchange-type caches on
+// the ET-day boundary, so overnight splits/offerings/re-listings are
+// re-resolved and bad-marks last at most one ET day.
 func (p *Poller) resetIfNewDay(now time.Time) {
 	day := session.DayMs(now.UnixMilli())
 	if day != p.seenDay {
 		p.seenDay = day
 		p.seen = map[string]map[string]bool{}
 		p.floats = map[string]floatEntry{}
+		p.otc = map[string]bool{}
 	}
 }
 
@@ -363,6 +386,107 @@ func (p *Poller) fetchOvernight(ctx context.Context) ([]rankItem, error) {
 			ChangePct: d.GetOvernightChangeRatio(), Last: d.GetOvernightPrice(), Volume: d.GetOvernightVolume()})
 	}
 	return out, nil
+}
+
+const (
+	// maxStaticInfoReqs/staticInfoChunkSize mirror the 3203 budget below.
+	// 3202's own rate limit isn't documented in
+	// .claude/skills/moomooapi/docs/API_LIMITS.md — re-verify against live
+	// OpenD; these are a conservative starting assumption, not a measured
+	// limit.
+	maxStaticInfoReqs   = 8   // per-poll 3202 request budget (backstop for the empty-cache day-reset case)
+	staticInfoChunkSize = 400 // assumed 3202 codes-per-request cap
+)
+
+// resolveExch resolves exchange type (3202) for rank symbols not already in
+// the otc cache, so dropOTC can drop confirmed OTC/Pink codes before they
+// rank or consume a 3203 float call. Bounded to maxStaticInfoReqs requests
+// per poll; symbols left unresolved stay absent and are retried on the next
+// poll. Steady state is zero requests (board symbols persist cached
+// poll-to-poll).
+func (p *Poller) resolveExch(ctx context.Context, items []rankItem) {
+	var missing []string
+	for _, it := range items {
+		if _, ok := p.otc[it.Symbol]; !ok {
+			missing = append(missing, it.Symbol)
+		}
+	}
+	reqs := 0
+	for start := 0; start < len(missing); start += staticInfoChunkSize {
+		end := start + staticInfoChunkSize
+		if end > len(missing) {
+			end = len(missing)
+		}
+		p.staticInfoBatch(ctx, missing[start:end], &reqs)
+	}
+}
+
+// staticInfoBatch resolves one batch of symbols via a single 3202 request,
+// recursing with a binary split when OpenD errors the whole batch — the same
+// "one bad code fails the batch" isolation as snapshotBatch. *reqs tracks the
+// per-poll request budget across chunks and recursion.
+func (p *Poller) staticInfoBatch(ctx context.Context, syms []string, reqs *int) {
+	if len(syms) == 0 {
+		return
+	}
+	if *reqs >= maxStaticInfoReqs {
+		return // budget exhausted; leave the rest unresolved for the next poll
+	}
+	*reqs++
+
+	secs := make([]*qotcommon.Security, 0, len(syms))
+	for _, s := range syms {
+		secs = append(secs, &qotcommon.Security{
+			Market: proto.Int32(int32(qotcommon.QotMarket_QotMarket_US_Security)),
+			Code:   proto.String(codeOf(s)),
+		})
+	}
+	fr, err := p.r.Request(ctx, opend.ProtoQotGetStaticInfo,
+		&staticpb.Request{C2S: &staticpb.C2S{SecurityList: secs}})
+	if err != nil {
+		// Transport/context error: leave symbols unresolved; the next poll retries.
+		slog.Warn("scan: static info transport failed", "err", err, "n", len(syms))
+		return
+	}
+	var resp staticpb.Response
+	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
+		slog.Warn("scan: static info decode failed", "err", err)
+		return
+	}
+	if resp.GetRetType() != 0 {
+		// Application error — the whole batch failed. Isolate the offending
+		// code by binary split; a code that fails in isolation is cached
+		// not-OTC (never assumed OTC — the error may be unrelated), so it
+		// stays visible to the scanner but, matching snapshotBatch's bad-mark
+		// convention, isn't re-requested every poll (steady state stays zero
+		// requests). dropOTC's absent-symbol case and subman's quarantine
+		// remain the backstop if it's actually OTC.
+		if len(syms) == 1 {
+			p.otc[syms[0]] = false
+			slog.Info("scan: exchange type unresolvable", "symbol", syms[0], "reason", resp.GetRetMsg())
+			return
+		}
+		mid := len(syms) / 2
+		p.staticInfoBatch(ctx, syms[:mid], reqs)
+		p.staticInfoBatch(ctx, syms[mid:], reqs)
+		return
+	}
+	// Success: record each returned security's exchange type. Anything
+	// requested-but-omitted from the response is cached not-OTC for the same
+	// reason (avoid re-requesting a code OpenD won't ever answer for).
+	got := make(map[string]bool, len(syms))
+	for _, info := range resp.GetS2C().GetStaticInfoList() {
+		basic := info.GetBasic()
+		sym := symbolOf(basic.GetSecurity())
+		got[sym] = true
+		p.otc[sym] = basic.GetExchType() == int32(qotcommon.ExchType_ExchType_US_Pink)
+	}
+	for _, s := range syms {
+		if !got[s] {
+			p.otc[s] = false
+			slog.Info("scan: exchange type unresolvable", "symbol", s, "reason", "omitted from static info response")
+		}
+	}
 }
 
 const (

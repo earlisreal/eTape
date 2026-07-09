@@ -25,6 +25,7 @@ const (
 
 	ProtoQotRequestHistoryKL      uint32 = 3103
 	ProtoQotRequestHistoryKLQuota uint32 = 3104
+	ProtoQotGetStaticInfo         uint32 = 3202
 	ProtoQotGetSecuritySnapshot   uint32 = 3203
 	ProtoQotGetOwnerPlate         uint32 = 3207
 	ProtoQotStockFilter           uint32 = 3215

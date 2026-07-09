@@ -19,6 +19,7 @@ import (
 
 	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
 	snappb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsecuritysnapshot"
+	staticpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetstaticinfo"
 	tmrpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgettopmoversrank"
 	ahpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusafterhoursrank"
 	onpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusovernightrank"
@@ -93,15 +94,36 @@ func TestRankRowsThreeStateFloat(t *testing.T) {
 	}
 }
 
+func TestDropOTC(t *testing.T) {
+	otc := map[string]bool{"US.PINK": true, "US.LISTED": false}
+	items := []rankItem{
+		{Symbol: "US.PINK"},   // confirmed OTC: dropped
+		{Symbol: "US.LISTED"}, // confirmed listed: kept
+		{Symbol: "US.NEW"},    // unresolved (absent): kept, not assumed OTC
+	}
+	out := dropOTC(items, otc)
+	var syms []string
+	for _, it := range out {
+		syms = append(syms, it.Symbol)
+	}
+	if !reflect.DeepEqual(syms, []string{"US.LISTED", "US.NEW"}) {
+		t.Fatalf("dropOTC = %v, want [US.LISTED US.NEW] (only confirmed OTC dropped)", syms)
+	}
+}
+
 func TestResetIfNewDayClearsFloatCacheAndSeen(t *testing.T) {
 	p := &Poller{
 		floats:  map[string]floatEntry{"US.A": {shares: 1}},
+		otc:     map[string]bool{"US.A": false},
 		seen:    map[string]map[string]bool{"premarket": {"US.A": true}},
 		seenDay: session.DayMs(time.Date(2026, 7, 7, 12, 0, 0, 0, time.UTC).UnixMilli()),
 	}
 	p.resetIfNewDay(time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)) // different ET day
 	if len(p.floats) != 0 {
 		t.Fatalf("float cache should clear on new day: %+v", p.floats)
+	}
+	if len(p.otc) != 0 {
+		t.Fatalf("exchange-type cache should clear on new day: %+v", p.otc)
 	}
 	if len(p.seen) != 0 {
 		t.Fatalf("seen-sets should clear on new day: %+v", p.seen)
@@ -131,6 +153,10 @@ type fakeReq struct {
 	rankErr      error
 	snap         func(codes []string) (*snappb.Response, error)
 	snapCalls    int
+	// staticInfo answers 3202 (exchange type). nil => every code resolves as
+	// listed (empty response), matching tests that don't care about OTC.
+	staticInfo  func(codes []string) (*staticpb.Response, error)
+	staticCalls int
 }
 
 func (f *fakeReq) Request(_ context.Context, protoID uint32, req proto.Message) (opend.Frame, error) {
@@ -146,6 +172,20 @@ func (f *fakeReq) Request(_ context.Context, protoID uint32, req proto.Message) 
 		return frameOf(f.afterHrsRsp), nil
 	case opend.ProtoQotGetUSOvernightRank:
 		return frameOf(f.overnightRsp), nil
+	case opend.ProtoQotGetStaticInfo:
+		f.staticCalls++
+		if f.staticInfo == nil {
+			return frameOf(&staticpb.Response{RetType: proto.Int32(0), S2C: &staticpb.S2C{}}), nil
+		}
+		var codes []string
+		for _, s := range req.(*staticpb.Request).GetC2S().GetSecurityList() {
+			codes = append(codes, s.GetCode())
+		}
+		resp, err := f.staticInfo(codes)
+		if err != nil {
+			return opend.Frame{}, err
+		}
+		return frameOf(resp), nil
 	case opend.ProtoQotGetSecuritySnapshot:
 		f.snapCalls++
 		var codes []string
@@ -245,6 +285,32 @@ func snapResp(snaps ...*snappb.Snapshot) *snappb.Response {
 
 func snapErrResp(msg string) *snappb.Response {
 	return &snappb.Response{RetType: proto.Int32(1), RetMsg: proto.String(msg)}
+}
+
+// staticBasic fills every required SecurityStaticBasic field (dummy values);
+// exchType is the field under test (ExchType_ExchType_US_Pink = OTC).
+func staticBasic(code string, exchType int32) *qotcommon.SecurityStaticBasic {
+	return &qotcommon.SecurityStaticBasic{
+		Security: usSec(code),
+		Id:       proto.Int64(1),
+		LotSize:  proto.Int32(1),
+		SecType:  proto.Int32(int32(qotcommon.SecurityType_SecurityType_Eqty)),
+		Name:     proto.String(code),
+		ListTime: proto.String("2020-01-01"),
+		ExchType: proto.Int32(exchType),
+	}
+}
+
+func staticInfoOf(code string, exchType int32) *qotcommon.SecurityStaticInfo {
+	return &qotcommon.SecurityStaticInfo{Basic: staticBasic(code, exchType)}
+}
+
+func staticInfoResp(infos ...*qotcommon.SecurityStaticInfo) *staticpb.Response {
+	return &staticpb.Response{RetType: proto.Int32(0), S2C: &staticpb.S2C{StaticInfoList: infos}}
+}
+
+func staticErrResp(msg string) *staticpb.Response {
+	return &staticpb.Response{RetType: proto.Int32(1), RetMsg: proto.String(msg)}
 }
 
 func rankResp(items ...rankItem) *rankpb.Response {
@@ -386,12 +452,138 @@ func TestResolveFloatsSteadyStateNoRequests(t *testing.T) {
 	}
 }
 
+func TestResolveExchClassifiesListedAndOTC(t *testing.T) {
+	fr := &fakeReq{staticInfo: func(codes []string) (*staticpb.Response, error) {
+		return staticInfoResp(
+			staticInfoOf("LISTED", int32(qotcommon.ExchType_ExchType_US_Nasdaq)),
+			staticInfoOf("PINK", int32(qotcommon.ExchType_ExchType_US_Pink)),
+		), nil
+	}}
+	p := newTestPoller(config.Scan{}, fr, &capturePub{})
+	items := []rankItem{{Symbol: "US.LISTED"}, {Symbol: "US.PINK"}, {Symbol: "US.OMIT"}}
+	p.resolveExch(context.Background(), items)
+	if p.otc["US.LISTED"] {
+		t.Fatalf("US.LISTED should resolve as not-OTC: %+v", p.otc)
+	}
+	if !p.otc["US.PINK"] {
+		t.Fatalf("US.PINK should resolve as OTC: %+v", p.otc)
+	}
+	if v, ok := p.otc["US.OMIT"]; !ok || v {
+		t.Fatalf("US.OMIT was omitted from the response and must be cached not-OTC (never re-requested): ok=%v v=%v", ok, v)
+	}
+}
+
+func TestResolveExchTransportErrorLeavesAbsent(t *testing.T) {
+	fr := &fakeReq{staticInfo: func(codes []string) (*staticpb.Response, error) {
+		return nil, fmt.Errorf("dial tcp: connection refused")
+	}}
+	p := newTestPoller(config.Scan{}, fr, &capturePub{})
+	p.resolveExch(context.Background(), []rankItem{{Symbol: "US.A"}})
+	if _, ok := p.otc["US.A"]; ok {
+		t.Fatalf("transport error must leave the symbol unresolved, not cached")
+	}
+}
+
+func TestResolveExchSplitRetryIsolatesBadCode(t *testing.T) {
+	// Any batch containing BAD errors as a whole until BAD is alone; BAD's own
+	// isolated error must cache it not-OTC (never assumed OTC), same
+	// conservative default snapshotBatch uses for its bad-mark.
+	fr := &fakeReq{staticInfo: func(codes []string) (*staticpb.Response, error) {
+		for _, c := range codes {
+			if c == "BAD" {
+				return staticErrResp("no permission"), nil
+			}
+		}
+		var infos []*qotcommon.SecurityStaticInfo
+		for _, c := range codes {
+			infos = append(infos, staticInfoOf(c, int32(qotcommon.ExchType_ExchType_US_Nasdaq)))
+		}
+		return staticInfoResp(infos...), nil
+	}}
+	p := newTestPoller(config.Scan{}, fr, &capturePub{})
+	items := []rankItem{{Symbol: "US.A"}, {Symbol: "US.B"}, {Symbol: "US.BAD"}, {Symbol: "US.C"}}
+	p.resolveExch(context.Background(), items)
+	for _, s := range []string{"US.A", "US.B", "US.C", "US.BAD"} {
+		if v, ok := p.otc[s]; !ok || v {
+			t.Fatalf("%s should resolve as not-OTC (cached false): ok=%v v=%v", s, ok, v)
+		}
+	}
+}
+
+// TestResolveExchIsolatedFailureCachedNoRepeatedRequests guards the fix for
+// staticInfoBatch's isolated-failure/omission caching: a code that keeps
+// failing 3202 in isolation must be cached (steady state stays zero
+// requests), not re-queried every poll — mirroring resolveFloats'
+// established bad-mark convention.
+func TestResolveExchIsolatedFailureCachedNoRepeatedRequests(t *testing.T) {
+	fr := &fakeReq{staticInfo: func(codes []string) (*staticpb.Response, error) {
+		for _, c := range codes {
+			if c == "BAD" {
+				return staticErrResp("no permission"), nil
+			}
+		}
+		return staticInfoResp(staticInfoOf("A", int32(qotcommon.ExchType_ExchType_US_Nasdaq))), nil
+	}}
+	p := newTestPoller(config.Scan{}, fr, &capturePub{})
+	items := []rankItem{{Symbol: "US.A"}, {Symbol: "US.BAD"}}
+	p.resolveExch(context.Background(), items)
+	first := fr.staticCalls
+	if first == 0 {
+		t.Fatalf("first resolve should have issued at least one request")
+	}
+	p.resolveExch(context.Background(), items) // both cached now, including BAD
+	if fr.staticCalls != first {
+		t.Fatalf("second resolve should issue no new requests: %d -> %d", first, fr.staticCalls)
+	}
+}
+
+// TestPollOnceDropsOTCBeforeFloatResolveAndPool covers the end-to-end wiring:
+// an OTC/Pink symbol on the rank board is resolved via 3202, dropped before
+// it ever reaches the 3203 float call, rankRows, or the pool/subscription
+// feed — it never appears in the published rows and never gets Ensure'd.
+func TestPollOnceDropsOTCBeforeFloatResolveAndPool(t *testing.T) {
+	fr := &fakeReq{
+		rankResp: rankResp(
+			rankItem{Symbol: "US.LOWF", ChangePct: 12, Last: 4, Volume: 300_000}, // listed, passes
+			rankItem{Symbol: "US.OTC1", ChangePct: 20, Last: 1, Volume: 400_000}, // OTC, would otherwise pass
+		),
+		staticInfo: func(codes []string) (*staticpb.Response, error) {
+			return staticInfoResp(
+				staticInfoOf("LOWF", int32(qotcommon.ExchType_ExchType_US_Nasdaq)),
+				staticInfoOf("OTC1", int32(qotcommon.ExchType_ExchType_US_Pink)),
+			), nil
+		},
+		snap: func(codes []string) (*snappb.Response, error) {
+			for _, c := range codes {
+				if c == "OTC1" {
+					t.Fatalf("OTC1 must be dropped before the 3203 float call, got codes=%v", codes)
+				}
+			}
+			return snapResp(snap("LOWF", 20_000_000, true)), nil
+		},
+	}
+	sf := &spyFeed{}
+	pub := &capturePub{}
+	p := New(config.Scan{Enabled: true, MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000},
+		fr, pub, clock.NewFake(time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)), sf, nil)
+
+	p.pollOnce(context.Background(), p.clk.Now())
+
+	rows := pub.ranks[0].Rows
+	if len(rows) != 1 || rows[0].Symbol != "US.LOWF" {
+		t.Fatalf("only US.LOWF should survive (OTC1 dropped): %+v", rows)
+	}
+	if len(sf.ensured) != 1 || sf.ensured[0].ID != "scan:US.LOWF" {
+		t.Fatalf("only US.LOWF should be Ensure'd into the pool: %+v", sf.ensured)
+	}
+}
+
 func TestPollOnceEndToEnd(t *testing.T) {
 	fr := &fakeReq{
 		rankResp: rankResp(
-			rankItem{Symbol: "US.LOWF", ChangePct: 12, Last: 4, Volume: 300_000},  // passes
-			rankItem{Symbol: "US.BIGF", ChangePct: 20, Last: 8, Volume: 900_000},  // over float cap
-			rankItem{Symbol: "US.THIN", ChangePct: 30, Last: 1, Volume: 5_000},    // under volume floor
+			rankItem{Symbol: "US.LOWF", ChangePct: 12, Last: 4, Volume: 300_000}, // passes
+			rankItem{Symbol: "US.BIGF", ChangePct: 20, Last: 8, Volume: 900_000}, // over float cap
+			rankItem{Symbol: "US.THIN", ChangePct: 30, Last: 1, Volume: 5_000},   // under volume floor
 		),
 		snap: func(codes []string) (*snappb.Response, error) {
 			return snapResp(

@@ -2,6 +2,7 @@ package opend
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -44,6 +45,28 @@ type subOptions struct {
 	ExtendedTime bool          // default true (US pre/post)
 }
 
+// subQuarantineThreshold is the number of consecutive hard (business-level)
+// Qot_Sub rejections a subKey must accumulate before it is quarantined. A
+// single rejection can be a transient server-side condition (quota, momentary
+// entitlement hiccup) and must still retry-and-recover; a symbol that keeps
+// failing this many passes in a row (e.g. an OTC/Pink code with no quote
+// entitlement) is permanently unsubscribable and must stop being retried.
+const subQuarantineThreshold = 3
+
+// subBizError marks a Qot_Sub rejection that came back as a well-formed
+// response with a non-zero RetType (a moomoo business-level rejection, e.g.
+// "US OTC market quote is not available for X"), as opposed to a transport
+// or decode failure. Only business errors count toward quarantine — a
+// transport hiccup is genuinely transient and must keep retrying every pass.
+type subBizError struct {
+	retType int32
+	msg     string
+}
+
+func (e *subBizError) Error() string {
+	return fmt.Sprintf("qot_sub retType=%d msg=%q", e.retType, e.msg)
+}
+
 type subKey struct {
 	Symbol string
 	Sub    feed.SubType
@@ -69,11 +92,13 @@ type subManager struct {
 	clk clock.Clock
 	opt subOptions
 
-	mu      sync.Mutex
-	demands map[string]*demandState
-	active  map[subKey]*subState
-	starved map[string]bool
-	kick    chan struct{}
+	mu         sync.Mutex
+	demands    map[string]*demandState
+	active     map[subKey]*subState
+	starved    map[string]bool
+	quarantine map[subKey]bool // hard-failed keys excluded from desired(); cleared on reconnect
+	subFail    map[subKey]int  // consecutive business-error count, toward subQuarantineThreshold
+	kick       chan struct{}
 }
 
 func newSubManager(r rpc, clk clock.Clock, o subOptions) *subManager {
@@ -88,10 +113,12 @@ func newSubManager(r rpc, clk clock.Clock, o subOptions) *subManager {
 	}
 	return &subManager{
 		rpc: r, clk: clk, opt: o,
-		demands: make(map[string]*demandState),
-		active:  make(map[subKey]*subState),
-		starved: make(map[string]bool),
-		kick:    make(chan struct{}, 1),
+		demands:    make(map[string]*demandState),
+		active:     make(map[subKey]*subState),
+		starved:    make(map[string]bool),
+		quarantine: make(map[subKey]bool),
+		subFail:    make(map[subKey]int),
+		kick:       make(chan struct{}, 1),
 	}
 }
 
@@ -149,6 +176,9 @@ func (m *subManager) desired(capSlots int) (map[subKey]bool, []string) {
 			bySym[ds.d.Symbol] = sd
 		}
 		for _, s := range ds.d.Subs {
+			if m.quarantine[subKey{Symbol: ds.d.Symbol, Sub: s}] {
+				continue // hard-failed: excluded from the target set (and its budget slot)
+			}
 			sd.subs[s] = true
 		}
 		sd.focused = sd.focused || ds.d.Focused
@@ -278,15 +308,7 @@ func (m *subManager) pass(ctx context.Context) {
 	m.mu.Unlock()
 
 	for _, group := range groupBySubTypeSet(adds) {
-		if err := m.qotSub(ctx, group.symbols, group.subs, true); err != nil {
-			slog.Warn("subscribe failed; will retry next pass", "symbols", group.symbols, "err", err)
-			continue
-		}
-		m.mu.Lock()
-		for _, k := range group.keys {
-			m.active[k] = &subState{subscribedAt: now}
-		}
-		m.mu.Unlock()
+		m.trySubscribe(ctx, group.symbols, group.subs, now)
 	}
 	for _, group := range groupBySubTypeSet(removes) {
 		if err := m.qotSub(ctx, group.symbols, group.subs, false); err != nil {
@@ -298,6 +320,63 @@ func (m *subManager) pass(ctx context.Context) {
 			delete(m.active, k)
 		}
 		m.mu.Unlock()
+	}
+}
+
+// trySubscribe issues Qot_Sub for symbols (all sharing subs, the subtype
+// set). On a business rejection (subBizError) it binary-splits the batch to
+// isolate the offending symbol(s) — mirroring scan.go's snapshotBatch "one
+// bad code fails the batch" idiom — so good symbols in the same batch still
+// subscribe on this same pass instead of waiting on the bad one. A symbol
+// isolated to a single-element batch that keeps failing accrues subFail;
+// once it reaches subQuarantineThreshold it is quarantined (excluded from
+// desired(), so it stops being retried) and logged once. A transport/decode
+// error is treated as transient: no split, no count, just retry next pass.
+func (m *subManager) trySubscribe(ctx context.Context, symbols []string, subs []feed.SubType, now time.Time) {
+	if len(symbols) == 0 {
+		return
+	}
+	err := m.qotSub(ctx, symbols, subs, true)
+	if err == nil {
+		m.mu.Lock()
+		for _, s := range symbols {
+			for _, sub := range subs {
+				k := subKey{Symbol: s, Sub: sub}
+				m.active[k] = &subState{subscribedAt: now}
+				delete(m.subFail, k)
+			}
+		}
+		m.mu.Unlock()
+		return
+	}
+
+	var biz *subBizError
+	if !errors.As(err, &biz) {
+		slog.Warn("subscribe failed; will retry next pass", "symbols", symbols, "err", err)
+		return
+	}
+	if len(symbols) > 1 {
+		mid := len(symbols) / 2
+		m.trySubscribe(ctx, symbols[:mid], subs, now)
+		m.trySubscribe(ctx, symbols[mid:], subs, now)
+		return
+	}
+
+	// Isolated to one symbol: count the hard failure toward quarantine.
+	sym := symbols[0]
+	m.mu.Lock()
+	quarantined := false
+	for _, sub := range subs {
+		k := subKey{Symbol: sym, Sub: sub}
+		m.subFail[k]++
+		if m.subFail[k] >= subQuarantineThreshold {
+			m.quarantine[k] = true
+			quarantined = true
+		}
+	}
+	m.mu.Unlock()
+	if quarantined {
+		slog.Warn("subscribe permanently failing; quarantined until reconnect", "symbol", sym, "err", err)
 	}
 }
 
@@ -382,19 +461,24 @@ func (m *subManager) qotSub(ctx context.Context, symbols []string, subs []feed.S
 		return fmt.Errorf("qot_sub decode: %w", err)
 	}
 	if resp.GetRetType() != 0 {
-		return fmt.Errorf("qot_sub retType=%d msg=%q", resp.GetRetType(), resp.GetRetMsg())
+		return &subBizError{retType: resp.GetRetType(), msg: resp.GetRetMsg()}
 	}
 	return nil
 }
 
-// ResubscribeAll reissues the full active set (reconnect path) and refreshes
-// subscribedAt so MinHold restarts on the new session.
+// ResubscribeAll reissues the full active set (reconnect path), refreshes
+// subscribedAt so MinHold restarts on the new session, and clears the
+// quarantine: a reconnect is a clean session boundary (entitlements may
+// differ, or the failure may have been server-side), so every previously
+// hard-failed symbol gets exactly one fresh retry on the next pass.
 func (m *subManager) ResubscribeAll(ctx context.Context) error {
 	m.mu.Lock()
 	keys := make([]subKey, 0, len(m.active))
 	for k := range m.active {
 		keys = append(keys, k)
 	}
+	m.quarantine = make(map[subKey]bool)
+	m.subFail = make(map[subKey]int)
 	m.mu.Unlock()
 	now := m.clk.Now()
 	for _, group := range groupBySubTypeSet(keys) {
@@ -436,6 +520,23 @@ func (m *subManager) Starved() []string {
 	defer m.mu.Unlock()
 	out := make([]string, 0, len(m.starved))
 	for s := range m.starved {
+		out = append(out, s)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Quarantined returns the symbols with at least one hard-failed (permanently
+// rejected) subscription key, deduplicated across subtypes.
+func (m *subManager) Quarantined() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	seen := make(map[string]bool, len(m.quarantine))
+	for k := range m.quarantine {
+		seen[k.Symbol] = true
+	}
+	out := make([]string, 0, len(seen))
+	for s := range seen {
 		out = append(out, s)
 	}
 	sort.Strings(out)
