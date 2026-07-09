@@ -7,6 +7,11 @@ import { sideIsSell } from "../wire/orderStatus";
 // identical to render's FillMarker, so ChartController.setFills accepts it.
 export interface FillPoint { timeMs: number; price: number; side: "buy" | "sell" }
 
+// The richer per-fill shape the chart needs to bucket-and-aggregate fills by
+// order (render/chart/fillAggregate.ts's FillSlice) — same reason as FillPoint
+// above: declared structurally so data/ never imports render/.
+export interface FillSlice { venue: string; orderId: string; timeMs: number; price: number; qty: number; side: "buy" | "sell" }
+
 // Fills are append-only events (not a replaceable snapshot): a reconnect
 // re-snapshot MERGES + dedupes rather than wiping backfilled history. Bucketed by
 // symbol; forSymbol() maps to the chart's fill-marker shape.
@@ -45,7 +50,17 @@ export class FillStore extends PaintStore {
     if (changed) this.markDirty();
   }
 
+  // Superseded by forSymbolFills (which carries venue/orderId/qty for chart-side
+  // bucketing + per-order aggregation); kept only as a thin FillPoint projection
+  // in case something needs the plain point shape.
   forSymbol(symbol: string): FillPoint[] {
-    return (this.bySymbol.get(symbol) ?? []).map((f) => ({ timeMs: f.tsMs, price: f.price, side: sideIsSell(f.side) ? "sell" : "buy" }));
+    return this.forSymbolFills(symbol).map(({ timeMs, price, side }) => ({ timeMs, price, side }));
+  }
+
+  forSymbolFills(symbol: string): FillSlice[] {
+    return (this.bySymbol.get(symbol) ?? []).map((f) => ({
+      venue: f.venue, orderId: f.orderId, timeMs: f.tsMs, price: f.price, qty: f.qty,
+      side: sideIsSell(f.side) ? "sell" : "buy",
+    }));
   }
 }

@@ -37,6 +37,22 @@ describe("FillStore", () => {
   });
 });
 
+describe("FillStore.forSymbolFills", () => {
+  it("carries venue/orderId/qty alongside timeMs/price/side (needed for chart-side bucketing + per-order aggregation)", () => {
+    const s = new FillStore();
+    s.ingest([fill({ venue: "alpaca-paper", orderId: "ET1", qty: 7, price: 3.5, tsMs: 1000, side: "BUY" })]);
+    expect(s.forSymbolFills("US.AAPL")).toEqual([
+      { venue: "alpaca-paper", orderId: "ET1", timeMs: 1000, price: 3.5, qty: 7, side: "buy" },
+    ]);
+  });
+
+  it("forSymbol stays a plain-point projection of forSymbolFills", () => {
+    const s = new FillStore();
+    s.ingest([fill({ venue: "sim", orderId: "ET9", qty: 3, price: 12, tsMs: 5000, side: "SELL" })]);
+    expect(s.forSymbol("US.AAPL")).toEqual([{ timeMs: 5000, price: 12, side: "sell" }]);
+  });
+});
+
 describe("FillStore.onNewFill", () => {
   it("fires once per newly-ingested fill and never for deduped re-ingests", () => {
     const s = new FillStore();

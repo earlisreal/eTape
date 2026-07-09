@@ -12,6 +12,7 @@ import { DrawingsPrimitive } from "../../render/chart/drawings/primitive";
 import { DrawingInteraction, type Tool } from "../../render/chart/drawings/interaction";
 import { timeframeToMs } from "../../render/chart/drawings/geometry";
 import type { Timeframe } from "../../render/chart/barBucket";
+import { aggregateFillMarkers } from "../../render/chart/fillAggregate";
 import { isIntradayTimeframe } from "../../render/chart/barClose";
 import { formatPrice } from "../../render/format";
 import type { Palette } from "../../render/palette";
@@ -252,7 +253,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     interactionRef.current = interaction;
 
     const backfillFills = (sym: string) => {
-      controller.setFills(stores.fills.forSymbol(sym));
+      controller.setFills(aggregateFillMarkers(stores.fills.forSymbolFills(sym), tfRef.current as Timeframe));
       void commands.sendQuery("QueryFills", { symbol: sym, fromMs: 0, toMs: Date.now() })
         .then((payload) => { stores.fills.ingest((payload as Parameters<typeof stores.fills.ingest>[0]) ?? []); });
     };
@@ -317,7 +318,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       },
       paint: () => {
         controller.sync();
-        controller.setFills(stores.fills.forSymbol(currentSymbol));
+        controller.setFills(aggregateFillMarkers(stores.fills.forSymbolFills(currentSymbol), tfRef.current as Timeframe));
         drawings.setDrawings(stores.drawings.forSymbol(currentSymbol));
         drawings.setBars(
           stores.bars.series(currentSymbol, tfRef.current).map((b) => Date.parse(b.bucketStart)),
