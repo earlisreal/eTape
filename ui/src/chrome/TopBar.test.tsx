@@ -31,4 +31,8 @@ describe("TopBar", () => {
     render(<ThemeProvider><TopBar {...base} /></ThemeProvider>);
     expect(screen.queryByLabelText(/focus green/i)).toBeNull();
   });
+  it("renders the ET session clock in the center", () => {
+    render(<ThemeProvider><TopBar {...base} /></ThemeProvider>);
+    expect(screen.getByTestId("session-clock")).toBeTruthy();
+  });
 });
