@@ -375,3 +375,41 @@ export interface PutCredentialArgs {
 export interface DeleteCredentialArgs {
   name: string;
 }
+/**
+ * TestConnectionArgs carries the (possibly not-yet-saved) credential under
+ * test. KeyID/SecretKey are the typed-but-unsaved values from the UI form
+ * when non-empty; when both are empty the engine falls back to the saved
+ * credential named by Credentials.
+ */
+export interface TestConnectionArgs {
+  broker: string;
+  env: string;
+  credentials: string;
+  keyId: string;
+  secretKey: string;
+  accountId: string;
+}
+/**
+ * TestAccount is one candidate account a probe discovered (TradeZero can
+ * return more than one; the UI offers a picker when len(Accounts) > 1).
+ */
+export interface TestAccount {
+  accountId: string;
+  accountType: string;
+  env: string;
+}
+/**
+ * TestConnectionResult is the TestConnection command's AckMsg.Value payload.
+ * OK is the auth outcome (distinct from AckMsg.Status, which is the
+ * transport-level accepted/blocked outcome — a malformed-args request is
+ * "blocked" at the transport level; a bad API key is a transport-level
+ * "accepted" ack carrying OK:false here).
+ */
+export interface TestConnectionResult {
+  ok: boolean;
+  env: string;
+  accountId: string;
+  accountType: string;
+  message: string;
+  accounts: TestAccount[];
+}
