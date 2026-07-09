@@ -126,6 +126,22 @@ func (m *mirror) applyMD(u md.Update) []staged {
 		m.upsertBar(wb)
 		m.marks[wb.Symbol] = wb.C
 		return []staged{{Topic: wsmsg.TopicBars, Payload: wb}}
+	case md.BarSnapshot:
+		// The lossless replacement for a history seed's per-bar BarUpdates
+		// (see md.BarSnapshot's doc comment): replace the whole series in one
+		// shot instead of len(v.Bars) individual O(n) upsertBar scans, and
+		// broadcast it as a snapshot (see Hub.stageMD's Snap fast-path) so it
+		// can never be coalesced away like a keep-latest bars delta.
+		if len(v.Bars) == 0 {
+			return nil
+		}
+		out := make([]wsmsg.Bar, len(v.Bars))
+		for i, b := range v.Bars {
+			out[i] = mapBar(b)
+		}
+		m.bars[barKey(v.Symbol, string(v.TF))] = out
+		m.marks[v.Symbol] = out[len(out)-1].C
+		return []staged{{Topic: wsmsg.TopicBars, Payload: out, Snap: true}}
 	case md.IndicatorUpdate:
 		return m.applyIndicator(v)
 	default:

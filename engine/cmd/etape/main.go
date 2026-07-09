@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"flag"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -203,12 +204,15 @@ func main() {
 	var pipeWG sync.WaitGroup
 	var backfillWG sync.WaitGroup
 	var scanWG sync.WaitGroup
+	var dropWG sync.WaitGroup
 	var client *opend.Client
 	if live {
 		if n, err := st.PruneJournal(cfg.Store.RetentionDays); err == nil && n > 0 {
 			log.Info("pruned journal", "rows", n)
 		}
 		st.AppendSysEvent("boot", "engine up")
+		dropWG.Add(1)
+		go watchDroppedUpdates(ctx, &dropWG, core, st)
 		client = opend.New(opend.Options{Addr: cfg.OpenD.Addr(), Clock: clock.System{}})
 		fd := opend.NewOpenDFeed(client, opend.FeedOptions{
 			Budget: cfg.Feed.QuotaSlots, Hysteresis: time.Duration(cfg.Feed.UnsubHysteresisSecs) * time.Second,
@@ -272,17 +276,21 @@ func main() {
 
 	// --- ordered shutdown: stop accepting, drain all store writers, then Close ---
 	// Every goroutine that can call a store-writing method (RecordEvent,
-	// AppendExecEvent, ArchiveBar1m/ArchiveDaily, SetConfig) must be joined
-	// before st.Close() runs, since Close() closes the s.writes channel and any
-	// send on it afterward panics. Sources: pipe() (RecordEvent, joined via
-	// pipeWG), forwardMD() (ArchiveBar1m/ArchiveDaily, joined via forwardWG —
-	// it drains already-buffered core.Updates() after ctx is cancelled, so it
-	// must be waited on even though md.Core.Run stops producing new updates
-	// once pipeWG is drained), exec.Core.Run (AppendExecEvent, joined via
-	// execDone), and every uihub connection's dispatch loop (SetConfig via
-	// commandHandler.handle, joined via srv.Wait()). brokerWG has no store
-	// writes but is joined here too since broker goroutines feed exec.Core,
-	// not the store.
+	// AppendExecEvent, ArchiveBar1m/ArchiveDaily, AppendSysEvent, SetConfig)
+	// must be joined before st.Close() runs, since Close() closes the
+	// s.writes channel and any send on it afterward panics. Sources: pipe()
+	// (RecordEvent, joined via pipeWG), forwardMD() (ArchiveBar1m/
+	// ArchiveDaily, joined via forwardWG — it drains already-buffered
+	// core.Updates() after ctx is cancelled, so it must be waited on even
+	// though md.Core.Run stops producing new updates once pipeWG is
+	// drained), backfill's orch.Backfill goroutines (ArchiveBar1m/
+	// ArchiveDaily for freshly-fetched history, joined via backfillWG),
+	// watchDroppedUpdates (AppendSysEvent, joined via dropWG — depends only
+	// on ctx, so it can be waited anywhere after <-ctx.Done()), exec.Core.Run
+	// (AppendExecEvent, joined via execDone), and every uihub connection's
+	// dispatch loop (SetConfig via commandHandler.handle, joined via
+	// srv.Wait()). brokerWG has no store writes but is joined here too since
+	// broker goroutines feed exec.Core, not the store.
 	//
 	// srv.Wait() must run after httpSrv.Shutdown (which only stops accepting
 	// new connections and returns once in-flight *plain* HTTP requests finish
@@ -318,12 +326,42 @@ func main() {
 	backfillWG.Wait() // boot backfill workers stopped: no more Seed* into the core
 	pipeWG.Wait()     // feed->core pipe stopped: no more RecordEvent
 	forwardWG.Wait()  // forwardMD drained: no more ArchiveBar1m/ArchiveDaily
+	dropWG.Wait()     // dropped-updates watcher stopped: no more AppendSysEvent from it
 	<-execDone        // exec.Core.Run returned: no more AppendExecEvent
 	brokerWG.Wait()
 	if err := st.Close(); err != nil {
 		log.Error("close store", "err", err)
 	}
 	log.Info("shutdown complete", "droppedUpdates", core.DroppedUpdates(), "droppedJournal", st.DroppedJournalRows())
+}
+
+// dropWatchInterval controls how often watchDroppedUpdates samples
+// core.DroppedUpdates() for a live sys.events trail: a drop should surface
+// during the session it happens in, not only in the shutdown log line.
+const dropWatchInterval = 5 * time.Second
+
+// watchDroppedUpdates polls core.DroppedUpdates() and appends a "md-drop"
+// sys.events row whenever it increases, so an md.Core updates-channel
+// overflow (see Core.emit) is visible on the sys.events topic live instead
+// of only in the "shutdown complete" log line. It is a store-writing
+// goroutine (AppendSysEvent) and must be joined via wg before st.Close() --
+// see the shutdown-ordering comment in main().
+func watchDroppedUpdates(ctx context.Context, wg *sync.WaitGroup, core *md.Core, st *store.Store) {
+	defer wg.Done()
+	t := time.NewTicker(dropWatchInterval)
+	defer t.Stop()
+	var last uint64
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if cur := core.DroppedUpdates(); cur > last {
+				st.AppendSysEvent("md-drop", fmt.Sprintf("dropped %d md update(s) since last check (total %d)", cur-last, cur))
+				last = cur
+			}
+		}
+	}
 }
 
 func hz(rate float64) time.Duration {

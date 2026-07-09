@@ -1,8 +1,11 @@
 // Package backfill wires eTape's deep-history path: at boot it warm-starts each
 // fed symbol from the SQLite bar archives, then gap-fills from moomoo (daily
 // full depth + intraday 1m) with an optional Alpaca 1m-depth fallback, seeding
-// md.Core in bounded chunks so the per-bar BarUpdate fan-out never overflows
-// the core's drop-on-full updates channel.
+// md.Core with each batch in one call. md.Core itself absorbs an entire
+// history batch as one BarSnapshot per timeframe rather than one BarUpdate
+// per bar, so the per-bar fan-out that used to require chunking (see the
+// removed seedChunked) can no longer overflow its drop-on-full updates
+// channel.
 package backfill
 
 import (
@@ -37,36 +40,31 @@ type Seeder interface {
 	SeedHistory1m(symbol string, bars []feed.Bar)
 }
 
-// Archive is the quota-free local warm-start source. Implemented by *store.Store.
+// Archive is the local warm-start + persistence source. Implemented by
+// *store.Store. ArchiveBar1m/ArchiveDaily persist freshly-fetched (non
+// warm-start) history: md.Core's history seed no longer emits a per-bar
+// BarUpdate for forwardMD to archive (see the BarSnapshot fan-out fix in
+// package md), so a fresh fetch must be archived here at the source instead.
+// Warm-started bars (read from this same archive by warmStart) are not
+// re-archived -- ArchiveBar1m/ArchiveDaily is idempotent (INSERT OR REPLACE)
+// regardless, but there is nothing new to persist.
 type Archive interface {
 	ReadDailyBars(symbol string) ([]feed.Bar, error)
 	ReadBars1m(symbol string, fromMs, toMs int64) ([]feed.Bar, error)
+	ArchiveBar1m(b feed.Bar)
+	ArchiveDaily(b feed.Bar)
 }
 
-// seedChunked calls seed with successive ≤chunk slices of bars, preserving
-// order. Chunking bounds a single md.Core apply's emitted-update count so it
-// cannot overflow the 8192-deep updates channel (each 1m bar fans out to ~8
-// updates: 1m + intraday cascade + daily + weekly/monthly); the concurrent
-// forwardMD drains between chunks.
-//
-// seed() blocks on a send into md.Core's bounded inbox, which nothing drains
-// once Core.Run has returned (e.g. during shutdown). ctx is checked between
-// chunks so a cancellation stops further seeding promptly instead of risking
-// a block on a full, undrained inbox forever.
-func seedChunked(ctx context.Context, chunk int, bars []feed.Bar, seed func([]feed.Bar)) {
-	if chunk <= 0 {
-		chunk = 500
+// seedUnlessCanceled calls seed(bars) unless ctx is already done or bars is
+// empty -- the same shutdown guard seedChunked used to apply per chunk:
+// md.Core's inbox is bounded and blocking, and nothing drains it once
+// Core.Run has returned (e.g. during shutdown), so a cancelled ctx must skip
+// the send rather than risk blocking on a full, undrained inbox forever.
+func seedUnlessCanceled(ctx context.Context, bars []feed.Bar, seed func([]feed.Bar)) {
+	if ctx.Err() != nil || len(bars) == 0 {
+		return
 	}
-	for i := 0; i < len(bars); i += chunk {
-		if ctx.Err() != nil {
-			return
-		}
-		end := i + chunk
-		if end > len(bars) {
-			end = len(bars)
-		}
-		seed(bars[i:end])
-	}
+	seed(bars)
 }
 
 // Config sizes the orchestrator. Zero fields get defaults in New.
@@ -74,7 +72,14 @@ type Config struct {
 	IntradayDays int
 	DailyYears   int
 	Concurrency  int
-	SeedChunk    int
+	// SeedChunk is vestigial: it bounded seedChunked's per-call emitted-update
+	// count, a mitigation for the per-bar BarUpdate fan-out that overflowed
+	// md.Core's updates channel on a deep seed. Now that a seed emits one
+	// BarSnapshot per timeframe regardless of batch size (see package md),
+	// there is no longer a batch to chunk. Left in place (rather than removed)
+	// to avoid an unrecognized-key break for any existing config.toml that
+	// still sets seed_chunk.
+	SeedChunk int
 }
 
 // Orchestrator runs the per-symbol backfill sequence. primary is moomoo;
@@ -94,9 +99,6 @@ func New(primary, fallback HistFetcher, seeder Seeder, archive Archive, clk cloc
 	}
 	if cfg.Concurrency <= 0 {
 		cfg.Concurrency = 3
-	}
-	if cfg.SeedChunk <= 0 {
-		cfg.SeedChunk = 500
 	}
 	return &Orchestrator{primary: primary, fallback: fallback, seeder: seeder, archive: archive, clk: clk, cfg: cfg}
 }
@@ -142,16 +144,34 @@ func (o *Orchestrator) dailyFrom(now time.Time) time.Time {
 	return now.AddDate(-o.cfg.DailyYears, 0, 0)
 }
 
+// warmStart seeds from the local archive only -- it does not re-archive what
+// it just read back out of the same archive.
 func (o *Orchestrator) warmStart(ctx context.Context, symbol string, from1m, now time.Time) {
 	if daily, err := o.archive.ReadDailyBars(symbol); err != nil {
 		slog.Warn("backfill: warm-start daily read failed", "symbol", symbol, "err", err)
-	} else if len(daily) > 0 {
-		seedChunked(ctx, o.cfg.SeedChunk, daily, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
+	} else {
+		seedUnlessCanceled(ctx, daily, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
 	}
 	if m1, err := o.archive.ReadBars1m(symbol, from1m.UnixMilli(), now.UnixMilli()); err != nil {
 		slog.Warn("backfill: warm-start 1m read failed", "symbol", symbol, "err", err)
-	} else if len(m1) > 0 {
-		seedChunked(ctx, o.cfg.SeedChunk, m1, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+	} else {
+		seedUnlessCanceled(ctx, m1, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+	}
+}
+
+// archive1m persists freshly-fetched (non warm-start) 1m bars so they survive
+// a future restart's warm-start read -- see the Archive interface's doc
+// comment for why this can no longer ride the per-bar BarUpdate emit path.
+func (o *Orchestrator) archive1m(bars []feed.Bar) {
+	for _, b := range bars {
+		o.archive.ArchiveBar1m(b)
+	}
+}
+
+// archiveDailyBars is archive1m's daily-bar counterpart.
+func (o *Orchestrator) archiveDailyBars(bars []feed.Bar) {
+	for _, b := range bars {
+		o.archive.ArchiveDaily(b)
 	}
 }
 
@@ -172,7 +192,8 @@ func (o *Orchestrator) fillDaily(ctx context.Context, symbol string, from, to ti
 			return
 		}
 	}
-	seedChunked(ctx, o.cfg.SeedChunk, bars, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
+	o.archiveDailyBars(bars)
+	seedUnlessCanceled(ctx, bars, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
 }
 
 func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.Time) {
@@ -182,7 +203,8 @@ func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.
 		bars = nil
 	}
 	if len(bars) > 0 {
-		seedChunked(ctx, o.cfg.SeedChunk, bars, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+		o.archive1m(bars)
+		seedUnlessCanceled(ctx, bars, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
 	}
 	if o.fallback == nil {
 		return
@@ -203,7 +225,8 @@ func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.
 		return
 	}
 	if len(gap) > 0 {
-		seedChunked(ctx, o.cfg.SeedChunk, gap, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+		o.archive1m(gap)
+		seedUnlessCanceled(ctx, gap, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
 	}
 }
 

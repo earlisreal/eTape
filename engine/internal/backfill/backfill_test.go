@@ -29,77 +29,39 @@ func TestIntradayFromSkipsWeekends(t *testing.T) {
 	}
 }
 
-func TestSeedChunkedSplitsAndPreservesOrder(t *testing.T) {
+func TestSeedUnlessCanceledCallsSeedOnce(t *testing.T) {
 	bars := make([]feed.Bar, 1200)
 	for i := range bars {
 		bars[i] = feed.Bar{Symbol: "US.AAPL", BucketMs: int64(i)}
 	}
 	var calls [][]feed.Bar
-	seedChunked(context.Background(), 500, bars, func(b []feed.Bar) {
+	seedUnlessCanceled(context.Background(), bars, func(b []feed.Bar) {
 		calls = append(calls, append([]feed.Bar(nil), b...))
 	})
-	if len(calls) != 3 || len(calls[0]) != 500 || len(calls[1]) != 500 || len(calls[2]) != 200 {
-		t.Fatalf("chunk sizes = %d,%d,%d (want 500,500,200)", len(calls[0]), len(calls[1]), len(calls[2]))
+	if len(calls) != 1 || len(calls[0]) != 1200 {
+		t.Fatalf("calls = %d (sizes %v), want exactly 1 call of 1200", len(calls), calls)
 	}
-	// Order preserved end-to-end.
-	var flat []feed.Bar
-	for _, c := range calls {
-		flat = append(flat, c...)
-	}
-	for i := range flat {
-		if flat[i].BucketMs != int64(i) {
-			t.Fatalf("order broken at %d: %d", i, flat[i].BucketMs)
+	for i := range calls[0] {
+		if calls[0][i].BucketMs != int64(i) {
+			t.Fatalf("order broken at %d: %d", i, calls[0][i].BucketMs)
 		}
 	}
-	// Empty input => no calls.
+	// Empty input => no call.
 	calls = nil
-	seedChunked(context.Background(), 500, nil, func(b []feed.Bar) { calls = append(calls, b) })
+	seedUnlessCanceled(context.Background(), nil, func(b []feed.Bar) { calls = append(calls, b) })
 	if len(calls) != 0 {
 		t.Fatalf("empty input produced %d calls", len(calls))
 	}
 }
 
-func TestSeedChunkedStopsOnCanceledContext(t *testing.T) {
-	bars := make([]feed.Bar, 1200)
-	for i := range bars {
-		bars[i] = feed.Bar{Symbol: "US.AAPL", BucketMs: int64(i)}
-	}
+func TestSeedUnlessCanceledSkipsOnCanceledContext(t *testing.T) {
+	bars := []feed.Bar{{Symbol: "US.AAPL", BucketMs: 0}}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // already canceled before seeding starts
 	var calls int
-	seedChunked(ctx, 500, bars, func(b []feed.Bar) { calls++ })
+	seedUnlessCanceled(ctx, bars, func(b []feed.Bar) { calls++ })
 	if calls != 0 {
 		t.Fatalf("seed calls with a pre-canceled ctx = %d, want 0", calls)
-	}
-}
-
-// cancelAfterNSeeder cancels its context after N chunks have been seeded, so
-// tests can assert seedChunked stops issuing further seed() calls once
-// cancellation is observed mid-run (not just when already canceled up front).
-type cancelAfterNSeeder struct {
-	cancel context.CancelFunc
-	n      int
-	calls  int
-}
-
-func (c *cancelAfterNSeeder) seed(_ []feed.Bar) {
-	c.calls++
-	if c.calls == c.n {
-		c.cancel()
-	}
-}
-
-func TestSeedChunkedStopsAfterMidRunCancellation(t *testing.T) {
-	bars := make([]feed.Bar, 1200) // 3 chunks of 500
-	for i := range bars {
-		bars[i] = feed.Bar{Symbol: "US.AAPL", BucketMs: int64(i)}
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	s := &cancelAfterNSeeder{cancel: cancel, n: 1}
-	seedChunked(ctx, 500, bars, s.seed)
-	if s.calls != 1 {
-		t.Fatalf("seed calls after mid-run cancellation = %d, want 1 (of 3 possible chunks)", s.calls)
 	}
 }
 
@@ -135,13 +97,29 @@ func (s *fakeSeeder) SeedHistory1m(_ string, b []feed.Bar) {
 	s.hist = append(s.hist, b...)
 }
 
-// fakeArchive returns canned warm-start bars.
+// fakeArchive returns canned warm-start bars and records what gets archived
+// (ArchiveBar1m/ArchiveDaily), so tests can assert freshly-fetched history is
+// persisted at the source now that it no longer rides the per-bar BarUpdate
+// emit path (see the Archive interface's doc comment in backfill.go).
 type fakeArchive struct {
-	daily, m1 []feed.Bar
+	mu            sync.Mutex
+	daily, m1     []feed.Bar
+	archivedDaily []feed.Bar
+	archived1m    []feed.Bar
 }
 
 func (a *fakeArchive) ReadDailyBars(_ string) ([]feed.Bar, error)          { return a.daily, nil }
 func (a *fakeArchive) ReadBars1m(_ string, _, _ int64) ([]feed.Bar, error) { return a.m1, nil }
+func (a *fakeArchive) ArchiveBar1m(b feed.Bar) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.archived1m = append(a.archived1m, b)
+}
+func (a *fakeArchive) ArchiveDaily(b feed.Bar) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.archivedDaily = append(a.archivedDaily, b)
+}
 
 func bar(ms int64) feed.Bar { return feed.Bar{Symbol: "US.AAPL", BucketMs: ms, C: 1} }
 
@@ -165,6 +143,31 @@ func TestBackfillWarmStartThenGapFill(t *testing.T) {
 	// 1m: warm-start(1) + moomoo(3) = 4 seeded.
 	if len(seeder.hist) != 4 {
 		t.Fatalf("1m seeded = %d, want 4", len(seeder.hist))
+	}
+}
+
+// TestBackfillArchivesFreshFetchNotWarmStart verifies the source-side
+// archiving added alongside the BarSnapshot fix: freshly-fetched (primary)
+// history is persisted via Archive*, while warm-start bars (already read
+// FROM that same archive) are not redundantly re-archived.
+func TestBackfillArchivesFreshFetchNotWarmStart(t *testing.T) {
+	primary := &fakeFetcher{
+		daily: []feed.Bar{bar(1), bar(2)},
+		m1:    []feed.Bar{bar(10), bar(11)},
+	}
+	seeder := &fakeSeeder{}
+	archive := &fakeArchive{
+		daily: []feed.Bar{bar(0)}, // warm-start only
+		m1:    []feed.Bar{bar(9)}, // warm-start only
+	}
+	o := New(primary, nil, seeder, archive, clock.NewFake(time.Date(2026, 7, 8, 12, 0, 0, 0, session.Loc())), Config{IntradayDays: 20})
+	o.Backfill(context.Background(), "US.AAPL")
+
+	if len(archive.archivedDaily) != 2 || archive.archivedDaily[0].BucketMs != 1 || archive.archivedDaily[1].BucketMs != 2 {
+		t.Fatalf("archived daily = %+v, want the 2 fresh-fetch bars only", archive.archivedDaily)
+	}
+	if len(archive.archived1m) != 2 || archive.archived1m[0].BucketMs != 10 || archive.archived1m[1].BucketMs != 11 {
+		t.Fatalf("archived 1m = %+v, want the 2 fresh-fetch bars only", archive.archived1m)
 	}
 }
 

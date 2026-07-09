@@ -568,6 +568,17 @@ func (h *Hub) stageMD(s staged) {
 		}
 		h.tapePend[sym] = append(h.tapePend[sym], ticks...)
 	case classMDKeep:
+		if s.Snap {
+			// A bars full-series snapshot (history-seed replacement, see
+			// mirror.applyMD's md.BarSnapshot case): broadcast now, on the
+			// lossless/ordered lane (outboundCoalesceKey short-circuits to ""
+			// for any Snap frame) -- coalescing it into pendKeep like an
+			// ordinary keep-latest quote/book/bar delta would let a later
+			// dedup-keyed write silently replace it before the next md tick
+			// flushes, dropping the whole seeded series.
+			h.broadcast(s, true)
+			return
+		}
 		h.pendKeep[dedupOf(s)] = s
 	default: // indicator: immediate; Snap decides snapshot vs delta
 		h.broadcast(s, s.Snap)

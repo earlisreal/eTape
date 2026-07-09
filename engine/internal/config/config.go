@@ -128,7 +128,7 @@ type Backfill struct {
 	IntradayDays int            `toml:"intraday_days"` // trading days of 1m history to backfill
 	DailyYears   int            `toml:"daily_years"`   // 0 = all available daily history
 	Concurrency  int            `toml:"concurrency"`   // bounded boot worker pool
-	SeedChunk    int            `toml:"seed_chunk"`    // max bars per Seed* call (drop-on-full guard)
+	SeedChunk    int            `toml:"seed_chunk"`    // vestigial: no longer read (see backfill.Config.SeedChunk); kept so an existing config.toml's seed_chunk key doesn't need editing
 	Alpaca       BackfillAlpaca `toml:"alpaca"`
 }
 

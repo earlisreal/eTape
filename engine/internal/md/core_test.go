@@ -159,6 +159,75 @@ func TestDroppedUpdatesIncrementsWhenFull(t *testing.T) {
 	}
 }
 
+// TestSeedHistory1mLossless is the regression test for the "only a few 1m
+// bars render" bug: seeding a full multi-day history (finalized bars,
+// cascading to 5m/15m/30m/60m/daily/weekly/monthly, ~8 emits/bar pre-fix)
+// with NO concurrent drain must not overflow the 8192-deep updates channel.
+// Before the fix (per-bar BarUpdate emission during the seed loop), this
+// flooded the channel and DroppedUpdates() went non-zero — the seeded
+// history bars were silently lost and never reached the mirror/UI. After the
+// fix (one BarSnapshot per touched timeframe), the whole seed costs a
+// handful of emits, well under the channel capacity.
+func TestSeedHistory1mLossless(t *testing.T) {
+	c := New(Config{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = c.Run(ctx) }()
+
+	const n = 20000
+	bars := make([]feed.Bar, n)
+	for i := range bars {
+		bars[i] = bar1m(i, 100, 101, 99, 100.5, 100)
+	}
+	c.SeedHistory1m("US.AAPL", bars)
+
+	// Give the seed apply time to finish without draining Updates() at all —
+	// exactly what a slow/absent-yet consumer during a deep backfill looks
+	// like.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if d := c.DroppedUpdates(); d != 0 {
+		t.Fatalf("seed dropped %d update(s) (history delivery is lossy)", d)
+	}
+}
+
+// TestSeedHistory1mEmitsCompleteSnapshot verifies the seed's lossless
+// replacement: draining after a seed yields exactly one BarSnapshot for the
+// seeded timeframe, carrying every seeded bar in order (not per-bar
+// BarUpdates, and not a partial/truncated series).
+func TestSeedHistory1mEmitsCompleteSnapshot(t *testing.T) {
+	c, drain := runCore(t)
+	const n = 500
+	bars := make([]feed.Bar, n)
+	for i := range bars {
+		bars[i] = bar1m(i, 100, 101, 99, 100.5, 100)
+	}
+	c.SeedHistory1m("US.AAPL", bars)
+
+	var snaps []BarSnapshot
+	for _, u := range drain() {
+		if bs, ok := u.(BarSnapshot); ok && bs.Symbol == "US.AAPL" && bs.TF == session.TF1m {
+			snaps = append(snaps, bs)
+		}
+		if _, ok := u.(BarUpdate); ok {
+			t.Fatalf("seed emitted a per-bar BarUpdate instead of a snapshot: %+v", u)
+		}
+	}
+	if len(snaps) != 1 {
+		t.Fatalf("BarSnapshot count for US.AAPL/1m = %d, want 1", len(snaps))
+	}
+	if got := len(snaps[0].Bars); got != n {
+		t.Fatalf("snapshot bars = %d, want %d (lossless)", got, n)
+	}
+	for i, b := range snaps[0].Bars {
+		if b.BucketMs != t0Ms+int64(i)*60_000 {
+			t.Fatalf("snapshot bar %d out of order: %+v", i, b)
+		}
+	}
+}
+
 // TestSeedDailyAndSeedHistory1mDoNotPanic exercises the SeedDaily/
 // SeedHistory1m mutators end-to-end through the inbox — Task 11 will give
 // them real behavior, but Task 9 must wire the plumbing without panicking
