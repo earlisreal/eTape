@@ -9,9 +9,9 @@ import (
 func validVC() VenueConfig {
 	return VenueConfig{
 		Venues: []Venue{
-			{ID: "alpaca-paper", Broker: "alpaca", Env: "paper", Credentials: "alpaca", AccountID: "", AutoArm: true},
-			{ID: "tz-live", Broker: "tradezero", Env: "live", Credentials: "tradeZero", AccountID: "TZ123", AutoArm: false},
-			{ID: "sim", Broker: "sim", Env: "paper", AutoArm: true},
+			{ID: "alpaca-paper", Broker: "alpaca", Env: "paper", Credentials: "alpaca", AccountID: ""},
+			{ID: "tz-live", Broker: "tradezero", Env: "live", Credentials: "tradeZero", AccountID: "TZ123"},
+			{ID: "sim", Broker: "sim", Env: "paper"},
 		},
 		Gate: Gate{
 			Global: GateGlobal{MaxDayLoss: 1000},
@@ -34,7 +34,6 @@ func TestValidateVenueConfigRejects(t *testing.T) {
 		"duplicate id":        func(vc *VenueConfig) { vc.Venues[1].ID = "alpaca-paper" },
 		"bad broker":          func(vc *VenueConfig) { vc.Venues[0].Broker = "etrade" },
 		"bad env":             func(vc *VenueConfig) { vc.Venues[0].Env = "demo" },
-		"live auto-arm":       func(vc *VenueConfig) { vc.Venues[1].AutoArm = true },
 		"missing cred key":    func(vc *VenueConfig) { vc.Venues[0].Credentials = "nope" },
 		"tz missing account":  func(vc *VenueConfig) { vc.Venues[1].AccountID = "" },
 		"negative gate cap":   func(vc *VenueConfig) { vc.Gate.Global.MaxDayLoss = -1 },

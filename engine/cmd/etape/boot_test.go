@@ -72,21 +72,6 @@ func TestBuildBrokersUnknownErrors(t *testing.T) {
 	}
 }
 
-func TestAutoArmVenues(t *testing.T) {
-	cfg := config.Config{Venues: []config.Venue{
-		{ID: "alpaca-paper", Broker: "alpaca", AutoArm: true},
-		{ID: "alpaca-live", Broker: "alpaca"},
-		{ID: "moomoo", Broker: "moomoo", AutoArm: true},
-	}}
-	got := autoArmVenues(cfg)
-	if !got["alpaca-paper"] || !got["moomoo"] {
-		t.Fatalf("auto-arm venues missing: %+v", got)
-	}
-	if got["alpaca-live"] {
-		t.Fatalf("live venue must not auto-arm: %+v", got)
-	}
-}
-
 func TestBuildBrokersLiveSim(t *testing.T) {
 	vbs, err := buildBrokers(config.Config{Venues: []config.Venue{{ID: "sim", Broker: "sim"}}}, creds.File{}, clock.System{}, false)
 	if err != nil || len(vbs) != 1 || vbs[0].Run != nil {

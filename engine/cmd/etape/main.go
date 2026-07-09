@@ -137,8 +137,7 @@ func main() {
 	execCore := exec.NewCore(exec.CoreConfig{
 		Venues: venueIDs, Gate: buildGateConfig(cfg.Gate), Store: st,
 		Brokers: brokers, Clock: execClk, IDGen: exec.NewOrderIDGen(execClk, rand.Reader),
-		SysLog:  st.AppendSysEvent,
-		AutoArm: autoArmVenues(cfg),
+		SysLog: st.AppendSysEvent,
 	})
 	if err := execCore.Recover(ctx); err != nil {
 		log.Warn("exec recover (continuing; reactive reconcile will catch up)", "err", err)

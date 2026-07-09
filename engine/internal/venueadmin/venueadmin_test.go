@@ -15,14 +15,14 @@ func setup(t *testing.T) (*Admin, string, string) {
 	credsPath := filepath.Join(dir, "credentials.json")
 	_ = os.WriteFile(cfgPath, []byte("[md]\nsession_anchor = \"09:30\"\n"), 0o644)
 	_ = os.WriteFile(credsPath, []byte(`{"alpaca":{"keyId":"K","secretKey":"S"}}`), 0o600)
-	booted := config.VenueConfig{Venues: []config.Venue{{ID: "boot", Broker: "sim", Env: "paper", AutoArm: true}}}
+	booted := config.VenueConfig{Venues: []config.Venue{{ID: "boot", Broker: "sim", Env: "paper"}}}
 	return New(cfgPath, credsPath, booted), cfgPath, credsPath
 }
 
 func TestSetVenueSetupValidatesBeforeWriting(t *testing.T) {
 	a, cfgPath, _ := setup(t)
-	// live + auto_arm must be rejected AND leave the file untouched.
-	bad := config.VenueConfig{Venues: []config.Venue{{ID: "x", Broker: "sim", Env: "live", AutoArm: true}}}
+	// a bad env must be rejected AND leave the file untouched.
+	bad := config.VenueConfig{Venues: []config.Venue{{ID: "x", Broker: "sim", Env: "demo"}}}
 	if err := a.SetVenueSetup(bad); err == nil {
 		t.Fatal("expected validation error")
 	}
@@ -34,7 +34,7 @@ func TestSetVenueSetupValidatesBeforeWriting(t *testing.T) {
 
 func TestSetVenueSetupWritesValid(t *testing.T) {
 	a, cfgPath, _ := setup(t)
-	vc := config.VenueConfig{Venues: []config.Venue{{ID: "alpaca-paper", Broker: "alpaca", Env: "paper", Credentials: "alpaca", AutoArm: true}}}
+	vc := config.VenueConfig{Venues: []config.Venue{{ID: "alpaca-paper", Broker: "alpaca", Env: "paper", Credentials: "alpaca"}}}
 	if err := a.SetVenueSetup(vc); err != nil {
 		t.Fatalf("SetVenueSetup: %v", err)
 	}

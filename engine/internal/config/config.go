@@ -62,7 +62,6 @@ type Venue struct {
 	Env         string `toml:"env"`         // paper | live
 	Credentials string `toml:"credentials"` // key into ~/.eTape/credentials.json
 	AccountID   string `toml:"account_id"`  // broker-specific (TZ accountId, moomoo accID)
-	AutoArm     bool   `toml:"auto_arm"`    // boot this venue armed (paper); live venues keep the manual arm click
 }
 
 // GateGlobal caps aggregate risk across all venues.  ->  [gate.global]
@@ -238,9 +237,6 @@ func ValidateVenueConfig(vc VenueConfig, credKeys []string) error {
 		}
 		if v.Env != "paper" && v.Env != "live" {
 			return fmt.Errorf("venue %q: env %q must be paper or live", v.ID, v.Env)
-		}
-		if v.Env == "live" && v.AutoArm {
-			return fmt.Errorf("venue %q: live venues cannot auto-arm", v.ID)
 		}
 		if v.Broker == "tradezero" || v.Broker == "alpaca" {
 			if !keys[v.Credentials] {
