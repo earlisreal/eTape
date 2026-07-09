@@ -8,6 +8,7 @@ import { HealthStore } from "./HealthStore";
 import { ExecStore } from "./ExecStore";
 import { ScannerStore } from "./ScannerStore";
 import { NewsStore } from "./NewsStore";
+import { StockDetailStore } from "./StockDetailStore";
 import { FillStore } from "./FillStore";
 import { TradeStore } from "./TradeStore";
 import { DrawingStore } from "../render/chart/drawings/store";
@@ -23,6 +24,7 @@ export interface Stores {
   exec: ExecStore;
   scanner: ScannerStore;
   news: NewsStore;
+  stockDetail: StockDetailStore;
   fills: FillStore;
   trades: TradeStore;
   drawings: DrawingStore;
@@ -40,6 +42,7 @@ export function makeStores(): Stores {
     exec: new ExecStore(),
     scanner: new ScannerStore(),
     news: new NewsStore(),
+    stockDetail: new StockDetailStore(),
     fills: new FillStore(),
     trades: new TradeStore(),
     drawings: new DrawingStore(),
@@ -57,6 +60,7 @@ export function routeToStore(stores: Stores, m: SnapshotMsg | DeltaMsg): void {
     case "scanner.rank":
     case "scanner.hit": stores.scanner.apply(m); return;
     case "news.item": stores.news.apply(m); return;
+    case "stock.detail": stores.stockDetail.apply(m); return;
     case "exec.account":
     case "exec.positions":
     case "exec.orders":
