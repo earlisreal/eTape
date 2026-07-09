@@ -1,6 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { LIGHT, DARK } from "../palette";
-import { chartOptions, candleOptions, volumeOptions, RIGHT_OFFSET_BARS, clampRightScroll } from "./chartTheme";
+import {
+  chartOptions, candleOptions, volumeOptions, RIGHT_OFFSET_BARS, clampRightScroll,
+  boundedOverlayAutoscale, OVERLAY_AUTOSCALE_FACTOR,
+} from "./chartTheme";
 
 describe("chartTheme", () => {
   it("maps palette surfaces onto chart layout + grid", () => {
@@ -61,6 +64,41 @@ describe("chartTheme", () => {
     const v = volumeOptions(LIGHT);
     expect(v.lastValueVisible).toBe(false);
     expect(v.priceLineVisible).toBe(false);
+  });
+});
+
+describe("boundedOverlayAutoscale", () => {
+  const candleRange = { minValue: 10, maxValue: 20 }; // span 10
+
+  it("passes the overlay's own range through unclamped when it's within the bound", () => {
+    const provider = boundedOverlayAutoscale(() => candleRange, OVERLAY_AUTOSCALE_FACTOR);
+    const result = provider(() => ({ priceRange: { minValue: 12, maxValue: 18 } }));
+    expect(result).toEqual({ priceRange: { minValue: 12, maxValue: 18 } });
+  });
+
+  it("clips the overlay's range to factor-x the candle span once it's far off", () => {
+    // factor 3 -> pad = (3-1)*span = 20 -> bound [10-20, 20+20] = [-10, 40].
+    const provider = boundedOverlayAutoscale(() => candleRange, 3);
+    const result = provider(() => ({ priceRange: { minValue: -1000, maxValue: 1000 } }));
+    expect(result).toEqual({ priceRange: { minValue: -10, maxValue: 40 } });
+  });
+
+  it("excludes the overlay entirely when no candle range is known yet", () => {
+    const provider = boundedOverlayAutoscale(() => null, OVERLAY_AUTOSCALE_FACTOR);
+    const result = provider(() => ({ priceRange: { minValue: 12, maxValue: 18 } }));
+    expect(result).toEqual({ priceRange: null });
+  });
+
+  it("excludes the overlay when it has no data of its own", () => {
+    const provider = boundedOverlayAutoscale(() => candleRange, OVERLAY_AUTOSCALE_FACTOR);
+    const result = provider(() => null);
+    expect(result).toEqual({ priceRange: null });
+  });
+
+  it("excludes the overlay when the candle range is degenerate (zero span)", () => {
+    const provider = boundedOverlayAutoscale(() => ({ minValue: 10, maxValue: 10 }), OVERLAY_AUTOSCALE_FACTOR);
+    const result = provider(() => ({ priceRange: { minValue: 5, maxValue: 15 } }));
+    expect(result).toEqual({ priceRange: null });
   });
 });
 
