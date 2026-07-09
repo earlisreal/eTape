@@ -57,6 +57,11 @@ export class ChartController {
   private gridVisible = true;
   private volumeVisible = true;
   private watermarkOn = false;
+  // Suppressed while ChartPanel is showing its own merged price+countdown badge
+  // (BarCloseTimer) so LWC's built-in tag doesn't double up behind it; restored
+  // whenever the main series is recreated (setChartType) or restyled (setPalette),
+  // since mainSeriesOptions() doesn't know about this override.
+  private lastValueVisible = true;
   private readonly indicators = new Map<string, { inst: IndicatorInstance; series: Map<string, LwcSeries> }>();
   // Stretch factor a collapsed pane had before collapsing, so expanding restores it
   // instead of resetting to LWC's default of 1 (which would undo a manual resize).
@@ -342,6 +347,7 @@ export class ChartController {
     this.palette = p;
     this.facade.applyOptions(chartOptions(p));
     this.candle.applyOptions(mainSeriesOptions(this.chartType, p));
+    this.candle.applyOptions({ lastValueVisible: this.lastValueVisible });
     this.volume.applyOptions({ ...volumeOptions(p), visible: this.volumeVisible });
     for (const { inst, series } of this.indicators.values())
       for (const d of describeIndicator(inst, p)) series.get(d.key)?.applyOptions({ color: d.color });
@@ -360,6 +366,7 @@ export class ChartController {
     if (type === this.chartType) return;
     this.chartType = type;
     this.candle = this.facade.setMainSeries(type, mainSeriesOptions(type, this.palette));
+    this.candle.applyOptions({ lastValueVisible: this.lastValueVisible });
     // Force a full re-seed of the new series on the next sync().
     this.backfilled = false;
     this.lastAppliedCount = 0;
@@ -371,6 +378,7 @@ export class ChartController {
   setShowSessions(on: boolean): void { this.showSessions = on; }
   setGrid(on: boolean): void { this.gridVisible = on; this.applyGrid(); }
   setVolumeVisible(on: boolean): void { this.volumeVisible = on; this.volume.applyOptions({ visible: on }); }
+  setLastValueVisible(on: boolean): void { this.lastValueVisible = on; this.candle.applyOptions({ lastValueVisible: on }); }
   setWatermark(on: boolean): void { this.watermarkOn = on; this.facade.setWatermark(on ? bareSymbol(this.config.symbol) : null); }
 
   private applyGrid(): void {

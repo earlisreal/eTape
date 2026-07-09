@@ -7,20 +7,20 @@ import type { Timeframe } from "../../../render/chart/barBucket";
 export interface BarCloseTimerProps {
   chrome: TvChrome;
   timeframe: string;
+  price: string;
   lastPriceY: number;
   rightAxisWidth: number;
   paneBottom: number;
   up: boolean;
 }
 
-// Gap below LWC's built-in last-price tag (tag itself is ~18-20px tall at
-// axisFont size) so the badge reads as sitting directly underneath it, not
-// floating separately in the axis column.
-const LABEL_OFFSET = 20;
-// Approximate rendered height of the pill (font line + vertical padding) —
-// used only to keep the clamp math simple; doesn't need to be exact since it
-// just biases the badge a few px earlier than a hard overflow.
-const BADGE_HEIGHT = 18;
+// Rendered line height of each row (price + countdown) at the font sizes below —
+// used for both the price row's vertical centering and the pill's total height.
+const ROW_HEIGHT = 15;
+const PRICE_FONT = 12;
+// Vertical padding above the price row and below the countdown row.
+const PAD_V = 2;
+const PILL_HEIGHT = PAD_V * 2 + ROW_HEIGHT * 2;
 
 // A 1Hz React projection of the wall clock, local to this component — same
 // idiom as SessionClock's useEtClock. Interval (not rAF) keeps this
@@ -35,15 +35,21 @@ function useNowTick(): number {
   return now;
 }
 
-// TradingView-style "time to bar close" badge, positioned directly below LWC's
-// built-in last-price tag in the price-axis column. Plain position:absolute DOM
-// over the canvas (same overlay layer as TVLegend) — pointerEvents:none so it
-// never steals clicks/drag from the interactive chart underneath.
-export function BarCloseTimer({ chrome, timeframe, lastPriceY, rightAxisWidth, paneBottom, up }: BarCloseTimerProps): JSX.Element {
+// TradingView-style merged price+countdown badge: a single pill in the price-axis
+// column showing the live price on top and the time-to-bar-close beneath it, with
+// no seam between the two rows. This REPLACES LWC's own last-value tag while it's
+// visible (ChartPanel calls ChartController.setLastValueVisible(false) for the
+// duration) — the price row's vertical center lines up with lastPriceY, the same
+// coordinate LWC's tag would have centered on, so LWC's dotted price line (still
+// drawn — only the tag is suppressed) meets the badge exactly where the price row
+// sits. Plain position:absolute DOM over the canvas (same overlay layer as
+// TVLegend) — pointerEvents:none so it never steals clicks/drag from the
+// interactive chart underneath.
+export function BarCloseTimer({ chrome, timeframe, price, lastPriceY, rightAxisWidth, paneBottom, up }: BarCloseTimerProps): JSX.Element {
   const now = useNowTick();
   const text = formatCountdown(remainingToBarCloseMs(timeframe as Timeframe, now));
   const tint = up ? chrome.up : chrome.down;
-  const top = Math.min(lastPriceY + LABEL_OFFSET, paneBottom - BADGE_HEIGHT);
+  const top = Math.min(lastPriceY - PAD_V - ROW_HEIGHT / 2, paneBottom - PILL_HEIGHT);
 
   return (
     <div
@@ -56,15 +62,19 @@ export function BarCloseTimer({ chrome, timeframe, lastPriceY, rightAxisWidth, p
         zIndex: 5,
         pointerEvents: "none",
         textAlign: "center",
-        font: `600 ${TV_GEOM.axisFont}px ${TV_FONT}`,
         fontVariantNumeric: "tabular-nums",
         background: tint,
         color: "#FFFFFF",
         borderRadius: TV_GEOM.radius,
-        padding: "1px 0",
+        padding: `${PAD_V}px 0`,
       }}
     >
-      {text}
+      <div data-testid="bar-close-timer-price" style={{ font: `700 ${PRICE_FONT}px ${TV_FONT}`, lineHeight: `${ROW_HEIGHT}px` }}>
+        {price}
+      </div>
+      <div data-testid="bar-close-timer-countdown" style={{ font: `600 ${TV_GEOM.axisFont}px ${TV_FONT}`, lineHeight: `${ROW_HEIGHT}px` }}>
+        {text}
+      </div>
     </div>
   );
 }
