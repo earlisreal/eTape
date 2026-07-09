@@ -104,7 +104,7 @@ function OrdersTable({
 
   const th = { padding: "2px 8px" };
   return (
-    <div style={{ height, flexShrink: 0, overflow: "hidden", display: "flex", flexDirection: "column", background: palette.bg, color: palette.text, fontSize: 12 }}>
+    <div data-testid="orders-table" style={{ height, flexShrink: 0, overflow: "hidden", display: "flex", flexDirection: "column", background: palette.bg, color: palette.text, fontSize: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
         <span style={{ fontWeight: 600 }}>Open Orders ({views.length})</span>
         <button data-testid="cancel-all" onClick={() => void oc.cancelAll("everything")}
