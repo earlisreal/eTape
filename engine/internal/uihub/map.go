@@ -114,6 +114,14 @@ func mapFill(f exec.Fill) wsmsg.Fill {
 	}
 }
 
+func mapClosedTrade(t exec.ClosedTrade) wsmsg.ClosedTradeRow {
+	return wsmsg.ClosedTradeRow{
+		Venue: string(t.Venue), Symbol: t.Symbol, IsLong: t.IsLong,
+		Qty: t.Qty, EntryPrice: t.EntryPrice, ExitPrice: t.ExitPrice, Realized: t.Realized,
+		OpenMs: t.OpenMs, CloseMs: t.CloseMs, Seq: t.Seq,
+	}
+}
+
 // mapPosition maps a venue-scoped position. mark is the latest last-trade price
 // (0 if unknown); UnrealizedPnl = (mark - AvgPrice) * Qty with Qty signed.
 func mapPosition(p exec.Position, mark float64) wsmsg.PositionRow {

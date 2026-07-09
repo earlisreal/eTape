@@ -12,7 +12,7 @@ export type Topic =
   | "md.quote" | "md.book" | "md.tape" | "md.bars" | "md.indicator"
   | "scanner.rank" | "scanner.hit"
   | "news.item"
-  | "exec.account" | "exec.positions" | "exec.orders" | "exec.fills" | "exec.status"
+  | "exec.account" | "exec.positions" | "exec.orders" | "exec.fills" | "exec.status" | "exec.trades"
   | "sys.health" | "sys.events"
   | "config";
 
@@ -156,6 +156,22 @@ export interface Fill {
   qty: number /* float64 */;
   price: number /* float64 */;
   tsMs: number /* int64 */;
+}
+/**
+ * ClosedTradeRow is one completed round trip: a position that opened from flat
+ * and returned to flat, with weighted-average entry/exit and net realized P&L.
+ */
+export interface ClosedTradeRow {
+  venue: string;
+  symbol: string;
+  isLong: boolean;
+  qty: number /* float64 */;
+  entryPrice: number /* float64 */;
+  exitPrice: number /* float64 */;
+  realized: number /* float64 */;
+  openMs: number /* int64 */;
+  closeMs: number /* int64 */;
+  seq: number /* int64 */;
 }
 /**
  * PositionRow.Venue is a pointer so a cross-venue net row serializes venue:null.

@@ -82,6 +82,21 @@ type Fill struct {
 	TsMs    int64   `json:"tsMs"`
 }
 
+// ClosedTradeRow is one completed round trip: a position that opened from flat
+// and returned to flat, with weighted-average entry/exit and net realized P&L.
+type ClosedTradeRow struct {
+	Venue      string  `json:"venue"`
+	Symbol     string  `json:"symbol"`
+	IsLong     bool    `json:"isLong"`
+	Qty        float64 `json:"qty"`
+	EntryPrice float64 `json:"entryPrice"`
+	ExitPrice  float64 `json:"exitPrice"`
+	Realized   float64 `json:"realized"`
+	OpenMs     int64   `json:"openMs"`
+	CloseMs    int64   `json:"closeMs"`
+	Seq        int64   `json:"seq"`
+}
+
 // PositionRow.Venue is a pointer so a cross-venue net row serializes venue:null.
 // tstype forces tygo to emit a literal `| null` union instead of `venue?:`.
 type PositionRow struct {

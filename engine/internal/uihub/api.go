@@ -61,14 +61,14 @@ type VenueMeta struct {
 }
 
 type Config struct {
-	Venues                []VenueMeta
-	Global                GlobalLimits
-	MD, Account, Position time.Duration
-	Buf                   int
-	TapeCap, NewsCap      int
-	FillsCap, EventsCap   int
-	OutBuf                int
-	DistDir               string
+	Venues                         []VenueMeta
+	Global                         GlobalLimits
+	MD, Account, Position          time.Duration
+	Buf                            int
+	TapeCap, NewsCap               int
+	FillsCap, EventsCap, TradesCap int
+	OutBuf                         int
+	DistDir                        string
 }
 
 // New builds the mirror, hub, and server from the cores. Caller runs h.Run(ctx)
@@ -91,7 +91,7 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 		MaxDayLoss: cfg.Global.MaxDayLoss, MaxSymbolPositionValue: cfg.Global.MaxSymbolPositionValue,
 		MaxSymbolPositionShares: cfg.Global.MaxSymbolPositionShares,
 	}
-	m := newMirror(vms, global, cfg.TapeCap, cfg.NewsCap, cfg.FillsCap, cfg.EventsCap)
+	m := newMirror(vms, global, cfg.TapeCap, cfg.NewsCap, cfg.FillsCap, cfg.EventsCap, cfg.TradesCap)
 	h := NewHub(clk, HubConfig{MDInterval: cfg.MD, AccountInterval: cfg.Account, PositionInterval: cfg.Position, Buf: cfg.Buf}, m)
 	cmd := newCommands(ex, st, ind, h, va, h.feed)
 	qry := newQueries(st)

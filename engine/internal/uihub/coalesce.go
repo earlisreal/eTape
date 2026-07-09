@@ -40,7 +40,7 @@ func classify(topic wsmsg.Topic) coalesceClass {
 	case wsmsg.TopicExecPositions:
 		return classPositions
 	default:
-		return classImmediate // indicator, orders, fills, status, scanner.*, news, sys.*
+		return classImmediate // indicator, orders, fills, status, scanner.*, news, sys.*, trades
 	}
 }
 
@@ -84,7 +84,7 @@ func outboundCoalesceKey(s staged, snap bool) string {
 	case wsmsg.TopicSysHealth:
 		return "d|sys.health"
 	default:
-		// Lossless/ordered event lane: md.tape, exec.orders/fills/status,
+		// Lossless/ordered event lane: md.tape, exec.orders/fills/status/trades,
 		// sys.events, news.item, scanner.hit, config, md.indicator. These are
 		// never dropped by load-shedding -- only a hard-cap overflow drops them
 		// (and the whole connection with them).

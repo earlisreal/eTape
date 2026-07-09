@@ -155,7 +155,7 @@ func main() {
 		},
 		MD: hz(cfg.UIHub.MDRateHz), Account: hz(cfg.UIHub.AccountRateHz),
 		Position: time.Duration(cfg.UIHub.PositionMs) * time.Millisecond,
-		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500,
+		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500, TradesCap: 1000,
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
 	}, execCore, st, core, venueAdm)
 	hubDone := make(chan struct{})
