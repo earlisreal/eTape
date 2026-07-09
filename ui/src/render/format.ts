@@ -44,3 +44,20 @@ export function formatSize(size: number): string {
 export function formatTapeTime(ts: string): string {
   return new Date(ts).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
 }
+
+/** Epoch-ms timestamp → ET wall-clock HH:MM:SS, for exec surfaces whose timestamps are
+ * numbers (unlike formatTapeTime's ISO-string tape timestamps). */
+export function formatClock(ms: number): string {
+  return new Date(ms).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });
+}
+
+/** Duration in ms → a compact human string: hours+minutes once >= 1h ("1h 04m"),
+ * minutes+seconds below that ("03m 12s"), zero-padded. */
+export function formatDuration(ms: number): string {
+  const totalSec = Math.max(0, Math.round(ms / 1000));
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  const pad2 = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${h}h ${pad2(m)}m` : `${pad2(m)}m ${pad2(s)}s`;
+}
