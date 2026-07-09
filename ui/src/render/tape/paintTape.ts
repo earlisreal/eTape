@@ -4,9 +4,9 @@ import { FONTS } from "../palette";
 import { TAPE_ROW_H, type TapePaintState } from "./tapeState";
 
 // Shared with TapePanel's column-header strip so the labels stay aligned with
-// where the painter actually draws each column.
+// where the painter actually draws each column. Column order: Price, Size, Time.
 export const TAPE_PAD = 6;
-export const TAPE_PRICE_RIGHT_FRAC = 0.68;
+export const TAPE_SIZE_RIGHT_FRAC = 0.68;
 const PAD = TAPE_PAD;
 
 export function paintTape(ctx: CanvasRenderingContext2D, s: TapePaintState): void {
@@ -49,18 +49,20 @@ export function paintTape(ctx: CanvasRenderingContext2D, s: TapePaintState): voi
     // node-canvas fallback and defeat the pixel goldens.
     ctx.font = `${r.isBlock ? "600 " : ""}11px ${FONTS.mono}`;
 
-    // timestamp dimmed within the row's own direction color (not a separate
-    // muted color — it should read as a quieter shade of the same print)
-    ctx.globalAlpha = 0.65;
+    // price at full strength, left-aligned (leftmost column)
     ctx.fillStyle = dir;
     ctx.textAlign = "left";
-    ctx.fillText(r.time, PAD, midY);
-    ctx.globalAlpha = 1;
+    ctx.fillText(r.price, PAD, midY);
 
-    // price + size at full strength in the direction color
-    ctx.fillStyle = dir;
+    // size at full strength, right-aligned at the mid boundary
     ctx.textAlign = "right";
-    ctx.fillText(r.price, s.width * TAPE_PRICE_RIGHT_FRAC, midY);
-    ctx.fillText(r.size, s.width - PAD, midY);
+    ctx.fillText(r.size, s.width * TAPE_SIZE_RIGHT_FRAC, midY);
+
+    // timestamp dimmed within the row's own direction color (not a separate
+    // muted color — it should read as a quieter shade of the same print),
+    // right-aligned (rightmost column)
+    ctx.globalAlpha = 0.65;
+    ctx.fillText(r.time, s.width - PAD, midY);
+    ctx.globalAlpha = 1;
   }
 }

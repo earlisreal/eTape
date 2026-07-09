@@ -21,7 +21,7 @@ import { TapeSettingsDialog } from "./TapeSettingsDialog";
 import {
   adjustAnchor, buildTapeRows, liveView, TAPE_ROW_H, type TapeView,
 } from "../../render/tape/tapeState";
-import { paintTape, TAPE_PAD, TAPE_PRICE_RIGHT_FRAC } from "../../render/tape/paintTape";
+import { paintTape, TAPE_PAD, TAPE_SIZE_RIGHT_FRAC } from "../../render/tape/paintTape";
 
 const HEADER_H = 26;
 const COLHEAD_H = 16;
@@ -220,9 +220,9 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
           fontSize: 10, fontFamily: FONTS.mono, color: palette.textMuted, textTransform: "uppercase",
         }}
       >
-        <span style={{ position: "absolute", left: TAPE_PAD, top: "50%", transform: "translateY(-50%)" }}>Time</span>
-        <span style={{ position: "absolute", right: `${(1 - TAPE_PRICE_RIGHT_FRAC) * 100}%`, top: "50%", transform: "translateY(-50%)" }}>Price</span>
-        <span style={{ position: "absolute", right: TAPE_PAD, top: "50%", transform: "translateY(-50%)" }}>Size</span>
+        <span style={{ position: "absolute", left: TAPE_PAD, top: "50%", transform: "translateY(-50%)" }}>Price</span>
+        <span style={{ position: "absolute", right: `${(1 - TAPE_SIZE_RIGHT_FRAC) * 100}%`, top: "50%", transform: "translateY(-50%)" }}>Size</span>
+        <span style={{ position: "absolute", right: TAPE_PAD, top: "50%", transform: "translateY(-50%)" }}>Time</span>
       </div>
       <canvas ref={canvasRef} style={{ display: "block", flex: 1, minHeight: 0 }} />
       {settingsOpen && (
