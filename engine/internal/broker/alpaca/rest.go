@@ -239,6 +239,56 @@ func (rc *restClient) ping(ctx context.Context) error {
 	return nil
 }
 
+// alpacaAccountID is a minimal GET /v2/account decode scoped to
+// verifyAccount only — deliberately separate from alpacaAccount (which has
+// no id field at all: snapshot's equity/buying-power/day-P&L fields have
+// never needed one). account_number is Alpaca's documented Account field for
+// a human-readable account identifier (consistent with alpacaAccount's own
+// doc comment, which already notes its fields are per Alpaca's public
+// Trading API reference); status is decoded for parity with the documented
+// Account object but is currently unused by verifyAccount.
+type alpacaAccountID struct {
+	AccountNumber string `json:"account_number"`
+	Status        string `json:"status"`
+}
+
+// verifyAccount issues a read-only GET /v2/account and returns the account
+// number. Its only purpose is verifying that a credential authenticates and
+// surfacing a human-readable account id for display — it must never be used
+// to drive order logic (see alpacaAccount/snapshot for the account shape
+// order logic actually depends on).
+//
+// A >=400 response is a real error via apiError, deliberately: this is
+// exactly how VerifyCredentials (alpaca.go) discriminates a paper key from a
+// live key, since a key only authenticates against its own environment's
+// base URL (the wrong env's key gets a 401/403 here; the right one gets
+// 200). A 200 whose body doesn't decode, or decodes but carries no
+// account_number, is also an error rather than a default-accept — mirroring
+// submitOrder's "200 but no order id" check — so this can never silently
+// report success with an empty account number.
+func (rc *restClient) verifyAccount(ctx context.Context) (string, error) {
+	resp, err := rc.do(ctx, http.MethodGet, "/v2/account", nil)
+	if err != nil {
+		return "", fmt.Errorf("alpaca: verify account transport: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("alpaca: read verify account response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return "", apiError(resp.StatusCode, body)
+	}
+	var aid alpacaAccountID
+	if err := json.Unmarshal(body, &aid); err != nil {
+		return "", fmt.Errorf("alpaca: decode verify account response: %w", err)
+	}
+	if aid.AccountNumber == "" {
+		return "", fmt.Errorf("alpaca: verify account response missing account_number: %s", body)
+	}
+	return aid.AccountNumber, nil
+}
+
 // alpacaBatchItem is one entry in the per-item result array Alpaca returns
 // from its batch DELETE endpoints (account-wide `DELETE /v2/orders` and
 // `DELETE /v2/positions`). These endpoints answer HTTP 207 Multi-Status on a

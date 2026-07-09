@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,6 +92,102 @@ func TestPing_StructuredError(t *testing.T) {
 	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
 	if err := rc.ping(context.Background()); err == nil {
 		t.Fatal("500 must surface as an error, not a false-reachable nil")
+	}
+}
+
+// TestVerifyAccount_Success verifies a 200 GET /v2/account decodes the
+// account number — the happy path VerifyCredentials (alpaca.go) relies on to
+// report a credential that authenticates in the tested environment.
+func TestVerifyAccount_Success(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/account", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"account_number":"PA3XXXXXX","status":"ACTIVE"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	acctNum, err := rc.verifyAccount(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acctNum != "PA3XXXXXX" {
+		t.Fatalf("account number = %q, want %q", acctNum, "PA3XXXXXX")
+	}
+}
+
+// TestVerifyAccount_ErrorStatus is the paper-vs-live discriminator's failure
+// half (see VerifyCredentials in alpaca.go): a 401/403 -- the wrong
+// environment's key hitting this base URL -- must surface as a real error
+// via apiError, carrying useful detail, never a false success.
+func TestVerifyAccount_ErrorStatus(t *testing.T) {
+	for _, status := range []int{http.StatusUnauthorized, http.StatusForbidden} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/v2/account", func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(status)
+				_, _ = w.Write([]byte(`{"code":40110000,"message":"invalid credentials"}`))
+			})
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+
+			rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+			acctNum, err := rc.verifyAccount(context.Background())
+			if err == nil {
+				t.Fatalf("expected a %d to surface as an error, got acctNum=%q", status, acctNum)
+			}
+			if !strings.Contains(err.Error(), "invalid credentials") {
+				t.Fatalf("error should carry the structured apiError message, got: %v", err)
+			}
+			if acctNum != "" {
+				t.Fatalf("a %d must never return a non-empty account number, got %q", status, acctNum)
+			}
+		})
+	}
+}
+
+// TestVerifyAccount_MalformedBody_NeverSilentSuccess is the fail-closed
+// property called out explicitly in the task brief: a 200 status whose body
+// doesn't even parse as JSON must be a decode error, never a silent success
+// reporting an empty account number.
+func TestVerifyAccount_MalformedBody_NeverSilentSuccess(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/account", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{not valid json`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	acctNum, err := rc.verifyAccount(context.Background())
+	if err == nil {
+		t.Fatalf("expected a malformed 200 body to be a decode error, got acctNum=%q", acctNum)
+	}
+	if acctNum != "" {
+		t.Fatalf("malformed body must never report a non-empty account number, got %q", acctNum)
+	}
+}
+
+// TestVerifyAccount_200MissingAccountNumber_NeverSilentSuccess guards the
+// other half of "never a silent success": syntactically valid JSON that
+// simply omits account_number (an API shape drift, or a differently-shaped
+// object) must not be treated as a zero-value success, mirroring
+// submitOrder's existing "200 but no order id in the body" check.
+func TestVerifyAccount_200MissingAccountNumber_NeverSilentSuccess(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/account", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"status":"ACTIVE"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	acctNum, err := rc.verifyAccount(context.Background())
+	if err == nil {
+		t.Fatalf("expected a 200 missing account_number to be an error, got acctNum=%q", acctNum)
+	}
+	if acctNum != "" {
+		t.Fatalf("must never return a non-empty account number here, got %q", acctNum)
 	}
 }
 

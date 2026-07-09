@@ -181,6 +181,32 @@ func New(cfg Config) (*Adapter, error) {
 	return a, nil
 }
 
+// VerifyCredentials issues a single read-only GET /v2/account against the
+// base URL selected for env, using the exact same paper/live selection New
+// uses above (live := env == "live", defaultPaperRESTBase/
+// defaultLiveRESTBase) so a caller probing both environments hits the
+// identical base URLs New would have used. It returns the account number on
+// success.
+//
+// Deliberately NOT built on New: it constructs a bare restClient directly
+// and calls verifyAccount — never an *Adapter, never a wsClient, and no
+// goroutine is started. This is a bare, synchronous, one-shot REST call, not
+// a broker adapter. A >=400 response (the wrong environment's key) is a real
+// error via verifyAccount/apiError, which is exactly how a caller
+// (venueprobe) is meant to distinguish a paper key from a live key: try both
+// base URLs, whichever authenticates is the detected env.
+func VerifyCredentials(ctx context.Context, env string, cr creds.Pair, clk clock.Clock) (string, error) {
+	base := defaultPaperRESTBase
+	if env == "live" {
+		base = defaultLiveRESTBase
+	}
+	if clk == nil {
+		clk = clock.System{}
+	}
+	rc := newRESTClient(base, cr.KeyID, cr.SecretKey, clk)
+	return rc.verifyAccount(ctx)
+}
+
 // now returns the current time in epoch milliseconds via the injected clock.
 func (a *Adapter) now() int64 {
 	if a.clk == nil {
