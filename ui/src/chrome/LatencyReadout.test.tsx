@@ -31,4 +31,23 @@ describe("LatencyReadout", () => {
     fireEvent.click(screen.getByTestId("latency-readout"));
     expect(onOpen).toHaveBeenCalled();
   });
+  it("shows the alp label when engine-alpaca is present in the snapshot", () => {
+    const s = storeWith([
+      { link: "ui-engine", ms: 0.5, min: 0.2, avg: 0.4, max: 1, status: "ok" },
+      { link: "engine-moomoo", ms: 4.2, min: 3, avg: 4, max: 6, status: "ok" },
+      { link: "engine-alpaca", ms: 210, min: 180, avg: 200, max: 240, status: "ok" },
+    ]);
+    render(<ThemeProvider><LatencyReadout health={s} onOpen={() => {}} /></ThemeProvider>);
+    expect(screen.getByText("alp")).toBeTruthy();
+    expect(screen.getByTestId("lat-alp").textContent).toContain("210");
+  });
+  it("omits a link's label entirely when it is absent from the snapshot (not shown as down)", () => {
+    const s = storeWith([
+      { link: "ui-engine", ms: 0.5, min: 0.2, avg: 0.4, max: 1, status: "ok" },
+      { link: "engine-moomoo", ms: 4.2, min: 3, avg: 4, max: 6, status: "ok" },
+    ]);
+    render(<ThemeProvider><LatencyReadout health={s} onOpen={() => {}} /></ThemeProvider>);
+    expect(screen.queryByText("tz")).toBeNull();
+    expect(screen.queryByText("alp")).toBeNull();
+  });
 });

@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/creds"
@@ -174,5 +175,48 @@ func TestBuildBrokersLiveTradezeroAndAlpacaBindRun(t *testing.T) {
 	// Verify second broker (alpaca) has Run bound.
 	if vbs[1].ID != "al" || vbs[1].Broker == nil || vbs[1].Run == nil {
 		t.Fatalf("alpaca broker not properly constructed: ID=%s, Broker=%v, Run=nil", vbs[1].ID, vbs[1].Broker)
+	}
+}
+
+// TestFirstAlpacaProberFindsAlpacaAdapter verifies firstAlpacaProber picks out
+// the Alpaca adapter (which implements ProbeRTT) from a mixed venue list, for
+// wiring into health.New's alpaca-link probe.
+func TestFirstAlpacaProberFindsAlpacaAdapter(t *testing.T) {
+	cr := creds.File{
+		"tz_creds": {KeyID: "tzkey", SecretKey: "tzsecret"},
+		"al_creds": {KeyID: "alkey", SecretKey: "alsecret"},
+	}
+	cfg := config.Config{Venues: []config.Venue{
+		{ID: "tz", Broker: "tradezero", Credentials: "tz_creds", AccountID: "acct1"},
+		{ID: "al", Broker: "alpaca", Credentials: "al_creds", Env: "paper"},
+	}}
+	vbs, err := buildBrokers(cfg, cr, clock.System{}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	p := firstAlpacaProber(vbs)
+	if p == nil {
+		t.Fatal("expected a non-nil prober when an alpaca venue is configured")
+	}
+	if _, ok := p.(*alpaca.Adapter); !ok {
+		t.Fatalf("expected the alpaca.Adapter itself, got %T", p)
+	}
+}
+
+// TestFirstAlpacaProberNilWithoutAlpaca verifies no alpaca venue configured
+// means no prober — the engine-alpaca link must not appear at all (not just
+// down) when nothing exists to probe.
+func TestFirstAlpacaProberNilWithoutAlpaca(t *testing.T) {
+	cr := creds.File{"tz_creds": {KeyID: "tzkey", SecretKey: "tzsecret"}}
+	cfg := config.Config{Venues: []config.Venue{
+		{ID: "tz", Broker: "tradezero", Credentials: "tz_creds", AccountID: "acct1"},
+		{ID: "sim", Broker: "sim"},
+	}}
+	vbs, err := buildBrokers(cfg, cr, clock.System{}, false)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if p := firstAlpacaProber(vbs); p != nil {
+		t.Fatalf("expected nil prober with no alpaca venue, got %T", p)
 	}
 }

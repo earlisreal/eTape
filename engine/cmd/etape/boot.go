@@ -121,6 +121,34 @@ func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock, replay bool
 	return out, nil
 }
 
+// rttProber is health.New's unexported prober interface, restated here so
+// this package can select an rttProber out of the built brokers without
+// importing health's internals. alpaca.Adapter.ProbeRTT satisfies it.
+type rttProber interface {
+	ProbeRTT(ctx context.Context) (time.Duration, error)
+}
+
+// firstAlpacaProber returns the first configured Alpaca adapter's ProbeRTT,
+// for wiring the engine-alpaca health link. Only *alpaca.Adapter implements
+// rttProber among the possible venueBroker.Broker types (sim/tradezero/
+// stub/alpaca), so a type-assert cleanly picks it out; nil (no alpaca venue
+// configured, or replay mode where every venue is sim) means the
+// engine-alpaca link is omitted entirely rather than shown down — see
+// buildHealth's hasAlpaca gate.
+//
+// A venue list with BOTH a paper and a live Alpaca venue only gets one
+// link's worth of latency; this picks the first in config order. Per-venue
+// latency (keyed by venue id) is a deferred generalization if that split
+// ever matters day to day.
+func firstAlpacaProber(vbs []venueBroker) rttProber {
+	for _, vb := range vbs {
+		if p, ok := vb.Broker.(rttProber); ok {
+			return p
+		}
+	}
+	return nil
+}
+
 // moomooProbe measures OpenD round-trip latency with a lightweight Qot_GetGlobalState.
 type moomooProbe struct {
 	c *opend.Client

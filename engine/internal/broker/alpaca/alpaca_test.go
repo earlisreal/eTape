@@ -927,3 +927,47 @@ func TestAdapter_Reconcile_MissingOrderStillMidReplaceIsRetriedNotDropped(t *tes
 		t.Fatalf("orderByClientID called %d times after second reconnect, want 2 (still working, must be retried)", lookupCount)
 	}
 }
+
+// TestProbeRTT_Success verifies ProbeRTT times a successful GET /v2/clock
+// round trip and returns a non-negative duration with no error — the
+// health-poller happy path (mirrors moomooProbe.ProbeRTT's contract).
+func TestProbeRTT_Success(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/clock", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"is_open":true}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	a, err := New(Config{Venue: "alpaca", RESTBase: srv.URL, Creds: creds.Pair{KeyID: "K", SecretKey: "S"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rtt, err := a.ProbeRTT(context.Background())
+	if err != nil {
+		t.Fatalf("ProbeRTT should succeed: %v", err)
+	}
+	if rtt < 0 {
+		t.Fatalf("RTT must be non-negative, got %v", rtt)
+	}
+}
+
+// TestProbeRTT_Error verifies a failed probe (Alpaca down/erroring) surfaces
+// as an error rather than a fake zero-latency success — the health poller's
+// buildHealth relies on this to mark the link down.
+func TestProbeRTT_Error(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/clock", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(500)
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	a, err := New(Config{Venue: "alpaca", RESTBase: srv.URL, Creds: creds.Pair{KeyID: "K", SecretKey: "S"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.ProbeRTT(context.Background()); err == nil {
+		t.Fatal("ProbeRTT should surface a >=400 response as an error")
+	}
+}

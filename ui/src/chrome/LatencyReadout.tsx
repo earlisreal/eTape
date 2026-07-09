@@ -4,8 +4,13 @@ import type { HealthLink, LinkName, LinkStatus } from "../wire/contract";
 import { useTheme } from "./ThemeProvider";
 import type { Palette } from "../render/palette";
 
-const LABEL: Record<LinkName, string> = { "ui-engine": "eng", "engine-moomoo": "moo", "engine-tz": "tz" };
-const ORDER: LinkName[] = ["ui-engine", "engine-moomoo", "engine-tz"];
+const LABEL: Record<LinkName, string> = {
+  "ui-engine": "eng",
+  "engine-moomoo": "moo",
+  "engine-tz": "tz",
+  "engine-alpaca": "alp",
+};
+const ORDER: LinkName[] = ["ui-engine", "engine-moomoo", "engine-tz", "engine-alpaca"];
 const dotColor = (s: LinkStatus, p: Palette): string => (s === "ok" ? p.ok : s === "degraded" ? p.warn : p.danger);
 
 export function LatencyReadout({ health, onOpen }: { health: HealthStore; onOpen: () => void }): JSX.Element {
@@ -20,8 +25,8 @@ export function LatencyReadout({ health, onOpen }: { health: HealthStore; onOpen
       title="Connection status"
       style={{ gap: 10, cursor: "pointer" }}
     >
-      {ORDER.map((name) => {
-        const l = byName.get(name);
+      {ORDER.filter((name) => byName.has(name)).map((name) => {
+        const l = byName.get(name)!;
         return (
           <span
             key={name}
@@ -33,7 +38,7 @@ export function LatencyReadout({ health, onOpen }: { health: HealthStore; onOpen
                 width: 7,
                 height: 7,
                 borderRadius: "50%",
-                background: l ? dotColor(l.status, palette) : palette.border,
+                background: dotColor(l.status, palette),
               }}
             />
             <span
@@ -42,7 +47,7 @@ export function LatencyReadout({ health, onOpen }: { health: HealthStore; onOpen
             >
               {LABEL[name]}
             </span>
-            <span>{l && l.ms !== null ? l.ms : "—"}</span>
+            <span>{l.ms !== null ? l.ms : "—"}</span>
           </span>
         );
       })}

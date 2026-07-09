@@ -63,6 +63,37 @@ func TestAccount_DayPnLFromEquityDelta(t *testing.T) {
 	}
 }
 
+// TestPing_Success verifies ping treats a normal GET /v2/clock 200 as
+// reachable — the happy path for the RTT probe (Adapter.ProbeRTT).
+func TestPing_Success(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/clock", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"timestamp":"2026-07-09T09:30:00Z","is_open":true,"next_open":"","next_close":""}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.ping(context.Background()); err != nil {
+		t.Fatalf("ping should succeed on 200: %v", err)
+	}
+}
+
+// TestPing_StructuredError verifies a >=400 response surfaces as a real
+// error rather than a false "reachable" nil.
+func TestPing_StructuredError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/clock", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(500)
+		_, _ = w.Write([]byte(`{"code":50000000,"message":"internal error"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if err := rc.ping(context.Background()); err == nil {
+		t.Fatal("500 must surface as an error, not a false-reachable nil")
+	}
+}
+
 func TestSubmit_Accept(t *testing.T) {
 	mux := http.NewServeMux()
 	var gotBody map[string]any

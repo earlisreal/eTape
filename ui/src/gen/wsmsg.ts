@@ -26,7 +26,7 @@ export type OrderStatus =
 export type TickDirection = "BUY" | "SELL" | "NEUTRAL";
 export type Broker = "tradezero" | "alpaca" | "moomoo";
 export type AckStatus = "accepted" | "blocked";
-export type LinkName = "ui-engine" | "engine-moomoo" | "engine-tz";
+export type LinkName = "ui-engine" | "engine-moomoo" | "engine-tz" | "engine-alpaca";
 export type LinkStatus = "ok" | "degraded" | "down";
 
 // ---- envelope frames (wsmsg.go's *Msg structs) ----

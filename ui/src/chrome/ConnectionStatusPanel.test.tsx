@@ -37,6 +37,17 @@ describe("ConnectionStatusPanel", () => {
     expect(dot.style.color).toBe(toRgb(getPalette("light").ok));
   });
 
+  it("renders an engine-alpaca row when Alpaca is configured", () => {
+    const health = new HealthStore();
+    wrap(health);
+    act(() => {
+      health.apply({ kind: "snapshot", topic: "sys.health",
+        payload: { links: [{ link: "engine-alpaca", ms: 210, min: 180, avg: 200, max: 240, status: "ok" }] } });
+    });
+    expect(screen.getByText(/engine-alpaca/)).toBeTruthy();
+    expect(screen.getAllByText(/210/).length).toBeGreaterThan(0);
+  });
+
   it("colors a degraded link with the warn palette color and a down link with danger", () => {
     const health = new HealthStore();
     wrap(health);

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/creds"
@@ -189,6 +190,20 @@ func (a *Adapter) now() int64 {
 func (a *Adapter) emit(e exec.BrokerEvent) { a.events <- e }
 
 func (a *Adapter) Events() <-chan exec.BrokerEvent { return a.events }
+
+// ProbeRTT times a lightweight read-only GET /v2/clock round trip, giving
+// eTape's health poller a reachability RTT for Alpaca — the same role
+// moomooProbe.ProbeRTT (boot.go) plays for the moomoo OpenD link. This is
+// deliberately a control-plane reachability probe, not an order ack/fill
+// latency measurement (which only exists by placing real orders; see
+// docs/2026-07-06-venue-latency-benchmark.md for that one-off measurement).
+// Wall-clock time.Now() is used (not the injected clock) to match
+// moomooProbe's convention, since a fake clock would make RTT meaningless.
+func (a *Adapter) ProbeRTT(ctx context.Context) (time.Duration, error) {
+	start := time.Now()
+	err := a.rest.ping(ctx)
+	return time.Since(start), err
+}
 
 // Capabilities reports Alpaca's native replace, native flatten-all, and
 // overnight (Blue Ocean ATS) session support — all true, unlike TradeZero's

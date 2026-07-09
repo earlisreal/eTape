@@ -118,6 +118,7 @@ const (
 	LinkUIEngine     LinkName = "ui-engine"
 	LinkEngineMoomoo LinkName = "engine-moomoo"
 	LinkEngineTZ     LinkName = "engine-tz"
+	LinkEngineAlpaca LinkName = "engine-alpaca"
 )
 
 // LinkStatus is HealthLink.Status's typed enum.

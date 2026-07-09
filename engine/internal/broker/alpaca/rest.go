@@ -218,6 +218,27 @@ func (rc *restClient) cancelOrder(ctx context.Context, brokerID string) error {
 	return nil
 }
 
+// ping issues a lightweight read-only GET /v2/clock, used only to measure
+// Alpaca REST reachability/RTT (Adapter.ProbeRTT below mirrors moomooProbe's
+// Qot_GetGlobalState round trip). The response body is never decoded — only
+// the round trip and status matter here — but a >=400 status still surfaces
+// as a real error via apiError, never a false "reachable" nil.
+func (rc *restClient) ping(ctx context.Context) error {
+	resp, err := rc.do(ctx, http.MethodGet, "/v2/clock", nil)
+	if err != nil {
+		return fmt.Errorf("alpaca: ping transport: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("alpaca: read ping response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return apiError(resp.StatusCode, body)
+	}
+	return nil
+}
+
 // alpacaBatchItem is one entry in the per-item result array Alpaca returns
 // from its batch DELETE endpoints (account-wide `DELETE /v2/orders` and
 // `DELETE /v2/positions`). These endpoints answer HTTP 207 Multi-Status on a
