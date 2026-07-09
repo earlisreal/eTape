@@ -42,6 +42,10 @@ export class ChartController {
   private lastAppliedKey = "";              // last bar's bucketStart|close, to detect in-progress change
   private indicatorApplied = new Map<string, number>(); // per-series point count applied via setData/update
   private indicatorLastKey = new Map<string, string>(); // per-series fingerprint of the last applied point, `${timeMs}|${value}`
+  // per-series timeMs of the point at index (applied-1) as of the last apply — an
+  // identity check independent of value, so a same-point value revision (branch 3
+  // below) doesn't look like a generation swap. See applyIndicators.
+  private indicatorLastAppliedTimeMs = new Map<string, number>();
   private backfilled = false;
   // Live [low, high] across all currently-applied bars — the reference range
   // main-pane overlay lines (EMA/SMA/VWAP) are bounded against (chartTheme's
@@ -163,9 +167,24 @@ export class ChartController {
         const applied = this.indicatorApplied.get(d.key) ?? 0;
         const last = points[points.length - 1];
         const lastKey = last ? `${last.timeMs}|${last.value}` : "";
-        if (applied === 0 || points.length < applied) {
-          // First application, or the series shrank (e.g. a full recompute produced
-          // fewer points) — only setData() is safe.
+        // The store is keyed purely by instanceId, not (instanceId, symbol, timeframe)
+        // — a rapid re-subscribe (e.g. clicking 1m/5m repeatedly) can land a snapshot
+        // for a whole different bucket grid while `applied` still reflects the
+        // previous timeframe's count. A same-or-greater length is then just a
+        // coincidence, not a real continuation, so verify the point already sitting
+        // at index (applied-1) is still THAT point (by time, ignoring value so an
+        // in-progress revision doesn't trip this) before trusting update()'s
+        // append-in-place. LWC's update() throws ("Cannot update oldest data") on a
+        // time that goes backwards relative to what it already has — and a painter
+        // that throws MAX_CONSECUTIVE_FAILURES times in a row (Scheduler) gets its
+        // whole chart torn down, not just this series, which is why a rapid-switch
+        // session used to eventually lose the candles too.
+        const continues = applied > 0 && points.length >= applied
+          && points[applied - 1]?.timeMs === this.indicatorLastAppliedTimeMs.get(d.key);
+        if (applied === 0 || points.length < applied || !continues) {
+          // First application, the series shrank (e.g. a full recompute produced
+          // fewer points), or the store handed back a different generation —
+          // only setData() is safe.
           s.setData(points.map((p) => ({ time: toLwcTimeMs(p.timeMs), value: p.value })));
         } else if (points.length > applied) {
           // Re-flush from one index before `applied`: that point was `last` as of the
@@ -183,6 +202,8 @@ export class ChartController {
         }
         this.indicatorApplied.set(d.key, points.length);
         this.indicatorLastKey.set(d.key, lastKey);
+        if (last) this.indicatorLastAppliedTimeMs.set(d.key, last.timeMs);
+        else this.indicatorLastAppliedTimeMs.delete(d.key);
       }
     }
   }
@@ -263,6 +284,7 @@ export class ChartController {
     for (const k of entry.series.keys()) {
       this.indicatorApplied.delete(k);
       this.indicatorLastKey.delete(k);
+      this.indicatorLastAppliedTimeMs.delete(k);
     }
     this.indicators.delete(instanceId);
     void this.deps.commands.sendCommand("UnsubscribeIndicator", { instanceId });
@@ -303,6 +325,7 @@ export class ChartController {
     this.candleRange = null;
     this.indicatorApplied.clear();
     this.indicatorLastKey.clear();
+    this.indicatorLastAppliedTimeMs.clear();
     // Wipe the previous (symbol, timeframe)'s bars immediately — otherwise a
     // switch to a series that's empty or slow to arrive (e.g. Daily -> a cold
     // 1m symbol) leaves the old timeframe's candles frozen on screen forever

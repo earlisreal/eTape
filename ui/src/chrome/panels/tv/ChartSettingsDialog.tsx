@@ -3,8 +3,8 @@ import { useState } from "react";
 import { TVDialog } from "./TVDialog";
 import type { TvChrome } from "../../../render/chart/tvTheme";
 
-export interface ChartSettings { sessionShading: boolean; grid: boolean; volume: boolean; watermark: boolean }
-export const DEFAULT_CHART_SETTINGS: ChartSettings = { sessionShading: true, grid: true, volume: true, watermark: false };
+export interface ChartSettings { sessionShading: boolean; grid: boolean; volume: boolean; watermark: boolean; barCloseTimer: boolean }
+export const DEFAULT_CHART_SETTINGS: ChartSettings = { sessionShading: true, grid: true, volume: true, watermark: false, barCloseTimer: true };
 
 export interface ChartSettingsDialogProps { chrome: TvChrome; settings: ChartSettings; onClose: () => void; onApply: (s: ChartSettings) => void }
 
@@ -13,6 +13,7 @@ const TOGGLES: { key: keyof ChartSettings; label: string }[] = [
   { key: "grid", label: "grid" },
   { key: "volume", label: "volume" },
   { key: "watermark", label: "symbol watermark" },
+  { key: "barCloseTimer", label: "bar-close timer" },
 ];
 
 export function ChartSettingsDialog({ chrome, settings, onClose, onApply }: ChartSettingsDialogProps): JSX.Element {

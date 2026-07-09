@@ -74,6 +74,13 @@ const emptyIndicators: IndicatorReader = { series: () => [] };
 function indicatorReaderOf(points: { timeMs: number; value: number }[]): IndicatorReader {
   return { series: () => points };
 }
+// A reader whose series() result can be swapped between sync() calls — simulates
+// IndicatorStore handing back a fresh generation (e.g. a snapshot for a different
+// timeframe) mid-session, the way a rapid re-subscribe race does.
+function mutableIndicatorReader(initial: { timeMs: number; value: number }[]): IndicatorReader & { set: (pts: { timeMs: number; value: number }[]) => void } {
+  let points = initial;
+  return { series: () => points, set: (next) => { points = next; } };
+}
 function commandSpy(): CommandSender & { names: string[]; calls: Array<{ name: string; args: unknown }> } {
   const names: string[] = [];
   const calls: Array<{ name: string; args: unknown }> = [];
@@ -314,6 +321,37 @@ describe("ChartController", () => {
     ctrl.setSymbol("US.NVDA"); // reload — indicatorApplied cleared
     ctrl.sync();
     expect(ind.calls.filter((c) => c === "setData")).toHaveLength(2); // full setData again post-reload
+  });
+
+  it("falls back to setData when the store hands back a different generation under the same series (rapid timeframe-switch race)", () => {
+    // IndicatorStore is keyed purely by instanceId — a rapid re-subscribe (e.g.
+    // clicking 1m/5m/1m/5m) can land a snapshot for a different bucket grid onto
+    // the SAME instanceId, without an intervening resetForReload (that only runs
+    // synchronously on the click; the mismatched snapshot arrives later, async).
+    // A same-or-greater length must not be trusted as a real continuation — else
+    // update() gets called with a time that goes backwards relative to what's
+    // already on the LWC series, which throws ("Cannot update oldest data") and,
+    // after enough repeats, tears down the whole chart (Scheduler).
+    const ind = mutableIndicatorReader([{ timeMs: 1_000, value: 1 }, { timeMs: 2_000, value: 2 }]);
+    const { facade, ctrl } = make(barReaderOf([bar("2026-07-06T13:30:00Z", 10)]), commandSpy(), ind);
+    ctrl.addIndicator({ instanceId: "vwap-1", type: "VWAP", params: {} });
+    const line = facade.created.find((c) => c.kind === "line")!.series;
+
+    ctrl.sync(); // first application — full setData, applied = 2
+    expect(line.calls.filter((c) => c === "setData")).toHaveLength(1);
+
+    // A different generation lands: same length as before, but a disjoint,
+    // earlier time range (e.g. a 1m snapshot after a 5m one).
+    ind.set([{ timeMs: 100, value: 9 }, { timeMs: 200, value: 8 }]);
+    ctrl.sync();
+    expect(line.calls.filter((c) => c === "setData")).toHaveLength(2); // fell back, not update()
+    expect(line.calls).not.toContain("update");
+
+    // And again with a longer array — length growth alone must not be trusted either.
+    ind.set([{ timeMs: 50, value: 5 }, { timeMs: 150, value: 6 }, { timeMs: 250, value: 7 }]);
+    ctrl.sync();
+    expect(line.calls.filter((c) => c === "setData")).toHaveLength(3);
+    expect(line.calls).not.toContain("update");
   });
 
   it("updateIndicator (param edit) does not reuse the stale applied count against the new re-added series", () => {
