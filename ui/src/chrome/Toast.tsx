@@ -53,6 +53,8 @@ function ToastHost({ toasts, onDismiss }: { toasts: Toast[]; onDismiss: (id: num
     <div style={{ position: "fixed", right: 12, bottom: 12, display: "flex", flexDirection: "column", gap: 6, zIndex: 9999, maxWidth: 380 }}>
       {toasts.map((t) => (
         <div key={t.id} role="alert" onClick={() => onDismiss(t.id)}
+          onMouseEnter={(ev) => (ev.currentTarget.style.background = palette.border)}
+          onMouseLeave={(ev) => (ev.currentTarget.style.background = palette.surface)}
           style={{ background: palette.surface, border: `1px solid ${color(t.level)}`, borderLeft: `4px solid ${color(t.level)}`,
             color: palette.text, padding: "6px 10px", fontSize: 12, borderRadius: 4, cursor: "pointer", boxShadow: "0 2px 8px rgba(0,0,0,.25)" }}>
           {t.text}
