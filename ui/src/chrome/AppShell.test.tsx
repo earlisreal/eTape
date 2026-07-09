@@ -68,7 +68,7 @@ describe("AppShell onConfigChange", () => {
     // Wait for the initial (pre-existing) panel's content to actually mount inside
     // dockview's portal target before doing anything else.
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
-    await waitFor(() => expect(screen.getByText("Symbol")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText("Symbol")[0]).toBeTruthy());
 
     // Add a second panel via the "+ Add panel" popover — this changes `ws` in
     // AppShell's React state AFTER the open-orders PanelFrame factory (and the
@@ -81,11 +81,11 @@ describe("AppShell onConfigChange", () => {
     // the active tab's content) before touching its sort header. dockview's tab
     // activates on `pointerdown`, not `click`.
     act(() => clickTab(screen.getByText("open-orders")));
-    await waitFor(() => expect(screen.getByText("Symbol")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText("Symbol")[0]).toBeTruthy());
 
     // Trigger the pre-existing open-orders panel's onConfigChange path (sort-by
     // symbol persists via onConfigChange — see OpenOrdersPanel/AccountPanel).
-    fireEvent.click(screen.getByText("Symbol"));
+    fireEvent.click(screen.getAllByText("Symbol")[0]);
 
     await waitFor(() => expect(saved.length).toBeGreaterThan(0));
     const last = saved[saved.length - 1];
@@ -111,15 +111,17 @@ describe("AppShell onConfigChange", () => {
     };
     const { saved } = mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
-    await waitFor(() => expect(screen.getByText("Symbol")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText("Symbol")[0]).toBeTruthy());
 
-    // Sort-by-symbol persists via onConfigChange with a `{ sort }` patch.
-    fireEvent.click(screen.getByText("Symbol"));
+    // Sort-by-symbol on the Orders table (index 0 — it renders first, ahead of
+    // the Positions/Trade-History tabs, both of which also have a "Symbol"
+    // column) persists via onConfigChange with an `{ ordersSort }` patch.
+    fireEvent.click(screen.getAllByText("Symbol")[0]);
 
     await waitFor(() => expect(saved.length).toBeGreaterThan(0));
     const settings = saved[saved.length - 1].panels[0].settings;
-    expect(settings.keepMe).toBe("precious"); // sibling key survives the patch
-    expect(settings.sort).toBeTruthy();       // and the patch itself landed
+    expect(settings.keepMe).toBe("precious");   // sibling key survives the patch
+    expect(settings.ordersSort).toBeTruthy();   // and the patch itself landed
   });
 });
 
@@ -130,7 +132,7 @@ describe("AppShell single-panel tab visibility", () => {
     const seed: Workspace = { name: "default", panels: [{ id: "orders-1", panelId: "open-orders", group: null, settings: {} }], layout: null };
     mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
-    await waitFor(() => expect(screen.getByText("Symbol")).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText("Symbol")[0]).toBeTruthy());
 
     const tabStrip = () => document.querySelector(".dv-tabs-and-actions-container") as HTMLElement;
     expect(tabStrip().style.display).toBe("none");
