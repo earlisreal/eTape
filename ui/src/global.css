@@ -35,8 +35,10 @@ body {
   background: var(--bg); color: var(--text); cursor: pointer;
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
-.btn:hover { border-color: var(--text-muted); background: var(--surface); }
+.btn:hover { border-color: var(--text-muted); }
+.btn:hover:not(.btn-primary) { background: var(--surface); }
 .btn-primary { background: var(--text); color: var(--bg); border-color: var(--text); }
+.btn-primary:hover { border-color: var(--accent); }
 .ctl {
   display: inline-flex; align-items: center; gap: 4px;
   border: 1px solid var(--border-strong); border-radius: 4px;
