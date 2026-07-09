@@ -23,17 +23,18 @@ type pingSource interface {
 }
 
 type Poller struct {
-	cfg   config.Health
-	pub   Publisher
-	clk   clock.Clock
-	probe prober
-	pings pingSource
-	hasTZ bool
-	seq   int64
+	cfg    config.Health
+	pub    Publisher
+	clk    clock.Clock
+	probe  prober
+	alpaca prober // nil when no Alpaca venue is configured; mirrors probe's nil-skip
+	pings  pingSource
+	hasTZ  bool
+	seq    int64
 }
 
-func New(cfg config.Health, pub Publisher, clk clock.Clock, probe prober, pings pingSource, hasTZ bool) *Poller {
-	return &Poller{cfg: cfg, pub: pub, clk: clk, probe: probe, pings: pings, hasTZ: hasTZ}
+func New(cfg config.Health, pub Publisher, clk clock.Clock, probe prober, pings pingSource, hasTZ bool, alpaca prober) *Poller {
+	return &Poller{cfg: cfg, pub: pub, clk: clk, probe: probe, pings: pings, hasTZ: hasTZ, alpaca: alpaca}
 }
 
 func (p *Poller) Run(ctx context.Context) error {
@@ -59,7 +60,13 @@ func (p *Poller) Run(ctx context.Context) error {
 					ui = &d
 				}
 			}
-			p.pub.Publish(wsmsg.TopicSysHealth, "", buildHealth(ui, mo, p.hasTZ))
+			var al *time.Duration
+			if p.alpaca != nil {
+				if d, err := p.alpaca.ProbeRTT(ctx); err == nil {
+					al = &d
+				}
+			}
+			p.pub.Publish(wsmsg.TopicSysHealth, "", buildHealth(ui, mo, al, p.hasTZ, p.alpaca != nil))
 		}
 	}
 }
@@ -73,13 +80,16 @@ func (p *Poller) Event(kind, detail string) {
 	})
 }
 
-func buildHealth(uiRTT, moomooRTT *time.Duration, hasTZ bool) wsmsg.HealthSnapshot {
+func buildHealth(uiRTT, moomooRTT, alpacaRTT *time.Duration, hasTZ, hasAlpaca bool) wsmsg.HealthSnapshot {
 	links := []wsmsg.HealthLink{
 		linkFor("ui-engine", uiRTT),
 		linkFor("engine-moomoo", moomooRTT),
 	}
 	if hasTZ {
 		links = append(links, linkFor("engine-tz", nil)) // TZ RTT surfaced later from exec; down until wired
+	}
+	if hasAlpaca {
+		links = append(links, linkFor("engine-alpaca", alpacaRTT))
 	}
 	return wsmsg.HealthSnapshot{Links: links}
 }

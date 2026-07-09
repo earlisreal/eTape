@@ -259,7 +259,7 @@ func main() {
 			}
 		}
 		hub.SetBackfill(backfillOne) // chart-open demands also deep-backfill (nil-safe if disabled)
-		startPollers(ctx, cfg, client, fd, hub, uihubClk, st, hasTZVenue(cfg), backfillOne, &scanWG)
+		startPollers(ctx, cfg, client, fd, hub, uihubClk, st, hasTZVenue(cfg), firstAlpacaProber(vbs), backfillOne, &scanWG)
 	} else {
 		sim := execClk.(*replay.Clock)
 		fd := replay.NewFeed(replay.FeedOptions{Rows: replayRows, Sim: sim, Pace: clock.System{}, Speed: *speed})
@@ -434,7 +434,7 @@ func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks [
 	}
 }
 
-func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, fd *opend.OpenDFeed, hub *uihub.Hub, clk clock.Clock, st *store.Store, hasTZ bool, backfillOne func(string), scanWG *sync.WaitGroup) {
+func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, fd *opend.OpenDFeed, hub *uihub.Hub, clk clock.Clock, st *store.Store, hasTZ bool, alpacaProbe rttProber, backfillOne func(string), scanWG *sync.WaitGroup) {
 	scanPoller := scan.New(cfg.Scan, client, hub, clk, fd, backfillOne)
 	symbols := func() []string {
 		return newsSymbols(scanPoller.PoolSymbols(), hub.ActiveDemandSymbols())
@@ -443,9 +443,13 @@ func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, 
 	go func() { defer scanWG.Done(); _ = scanPoller.Run(ctx) }()
 	go func() { _ = news.New(cfg.News, client, hub, clk, symbols).Run(ctx) }()
 	// health: moomoo probe via the OpenD client; app-ping RTT source is nil in v1
-	// (ui-engine shows down until ping tracking is wired). The health poller's
+	// (ui-engine shows down until ping tracking is wired). alpacaProbe is the
+	// first configured Alpaca adapter (nil if none), giving the engine-alpaca
+	// link the same reachability-RTT treatment as moomoo. The health poller's
 	// sys.events are also persisted by main via a store hook if desired.
-	go func() { _ = health.New(cfg.Health, hub, clk, moomooProbe{c: client}, nil, hasTZ).Run(ctx) }()
+	go func() {
+		_ = health.New(cfg.Health, hub, clk, moomooProbe{c: client}, nil, hasTZ, alpacaProbe).Run(ctx)
+	}()
 	_ = st // reserved: wire health.Event -> st.AppendSysEvent in a later pass
 }
 
