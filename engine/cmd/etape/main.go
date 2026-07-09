@@ -191,17 +191,13 @@ func main() {
 	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, live, st) }()
 	go forwardExec(ctx, execCore, hub)
 
-	// In replay every venue is a SimBroker; forward replayed marks into them so
-	// submitted orders fill. Live venues are fed by their own broker connection.
-	var simSinks []markSink
-	if !live {
-		for _, vb := range vbs {
-			if s, ok := vb.Broker.(markSink); ok {
-				simSinks = append(simSinks, s)
-			}
-		}
-	}
-	go markBridge(ctx, core, execCore, simSinks)
+	// Forward marks into every sim broker so submitted orders fill: in replay
+	// every venue is forced to SimBroker, and in live mode a venue explicitly
+	// configured with Broker: "sim" (a practice venue) is one too. Non-sim
+	// live venues (tradezero/alpaca/moomoo) are fed by their own broker
+	// connection and don't implement markSink, so the type-assertion in
+	// simSinksOf alone selects the right set in either mode.
+	go markBridge(ctx, core, execCore, simSinksOf(vbs))
 
 	// --- feed (live OpenD or replay) ---
 	var pipeWG sync.WaitGroup
@@ -412,15 +408,31 @@ func forwardExec(ctx context.Context, execCore *exec.Core, hub *uihub.Hub) {
 	}
 }
 
-// markSink receives last-trade marks. Implemented by *sim.Broker (SetMark);
-// used only in replay so submitted orders fill against the replayed tape.
+// markSink receives last-trade marks. Implemented by *sim.Broker (SetMark) —
+// every replay venue, plus any live venue explicitly configured as Broker:
+// "sim" — so a submitted order fills against the fed marks.
 type markSink interface {
 	SetMark(symbol string, price float64)
 }
 
+// simSinksOf returns every configured broker that is a markSink. No live/
+// replay branch is needed: buildBrokers forces every venue to sim.Broker in
+// replay, and only venues configured with Broker: "sim" are sim.Broker in
+// live mode, so the type-assertion alone selects the correct set either way.
+func simSinksOf(vbs []venueBroker) []markSink {
+	var sinks []markSink
+	for _, vb := range vbs {
+		if s, ok := vb.Broker.(markSink); ok {
+			sinks = append(sinks, s)
+		}
+	}
+	return sinks
+}
+
 // markBridge copies md.Core.Marks() -> exec.Core.FeedMark (the single md<->exec
-// seam) and, in replay, -> every sim broker's SetMark so a submitted order fills
-// against the replayed marks (live venues get marks from their own broker feed).
+// seam) and -> every sim broker's SetMark (sinks) so a submitted order fills
+// against the fed marks. Non-sim live venues get marks from their own broker
+// feed instead and are excluded from sinks by simSinksOf.
 func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks []markSink) {
 	for {
 		select {
