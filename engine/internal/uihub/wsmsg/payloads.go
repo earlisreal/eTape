@@ -258,3 +258,50 @@ type FocusGroupArgs struct {
 	Group  string `json:"group"`
 	Symbol string `json:"symbol"`
 }
+
+// ---- venue & credentials config DTOs (settings "Venues & credentials") ----
+
+// Venue mirrors config.Venue (no secret material — Credentials is a key NAME).
+type Venue struct {
+	ID          string `json:"id"`
+	Broker      string `json:"broker"`
+	Env         string `json:"env"`
+	Credentials string `json:"credentials"`
+	AccountID   string `json:"accountId"`
+	AutoArm     bool   `json:"autoArm"`
+}
+
+// Gate mirrors config.Gate; reuses the existing limit-view shapes.
+type Gate struct {
+	Global GlobalLimitsView          `json:"global"`
+	Venue  map[string]GateLimitsView `json:"venue"`
+}
+
+type VenueConfig struct {
+	Venues []Venue `json:"venues"`
+	Gate   Gate    `json:"gate"`
+}
+
+// VenueSetup is the GetVenueSetup result. file = parsed from config.toml,
+// running = what the engine booted with; the restart banner shows when they
+// differ. credKeys = credential NAMES only.
+type VenueSetup struct {
+	File     VenueConfig `json:"file"`
+	Running  VenueConfig `json:"running"`
+	CredKeys []string    `json:"credKeys"`
+}
+
+type SetVenueSetupArgs struct {
+	Venues []Venue `json:"venues"`
+	Gate   Gate    `json:"gate"`
+}
+
+type PutCredentialArgs struct {
+	Name      string `json:"name"`
+	KeyID     string `json:"keyId"`
+	SecretKey string `json:"secretKey"`
+}
+
+type DeleteCredentialArgs struct {
+	Name string `json:"name"`
+}

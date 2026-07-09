@@ -58,6 +58,23 @@ describe("OrderTicketPanel", () => {
     const args = sent.find((s) => s.name === "SubmitOrder")?.args as SubmitOrderArgs;
     expect(args).toMatchObject({ venue: "alpaca-paper", symbol: "US.AAPL", side: "SELL", qty: 50, limitPrice: 3.4 });
   });
+  it("Pos mode sizes off the amount as a percent of the held position", async () => {
+    const { props, stores, linkGroups, sent } = mkProps();
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [{ venue: "alpaca-paper", symbol: "US.AAPL", qty: 200, avgPrice: 3.4, unrealizedPnl: 0 }] });
+      stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.4, ask: 3.5, last: 3.45, ts: "" } });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    fireEvent.change(screen.getByTestId("mode"), { target: { value: "PositionFraction" } });
+    fireEvent.change(screen.getByTestId("amount"), { target: { value: "50" } });
+    fireEvent.change(screen.getByTestId("price"), { target: { value: "3.4" } });
+    fireEvent.click(screen.getByTestId("side-SELL"));
+    await waitFor(() => expect(sent.some((s) => s.name === "SubmitOrder")).toBe(true));
+    const args = sent.find((s) => s.name === "SubmitOrder")?.args as SubmitOrderArgs;
+    expect(args.qty).toBe(100);
+  });
   it("clicking the header bid/ask fills the price input", () => {
     const { props, stores, linkGroups } = mkProps();
     act(() => {

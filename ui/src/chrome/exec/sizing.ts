@@ -23,7 +23,7 @@ export function resolveShares(spec: SizingSpec, ctx: SizingContext): number {
       return Math.max(0, Math.floor(spec.shares ?? 0));
     case "PositionFraction": {
       const held = Math.abs(ctx.positionQty);
-      return spec.fraction === "half" ? Math.floor(held / 2) : Math.floor(held);
+      return Math.max(0, Math.floor((held * (spec.pct ?? 0)) / 100));
     }
     default: {
       const _exhaustive: never = spec.mode;

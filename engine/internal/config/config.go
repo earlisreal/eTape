@@ -8,10 +8,13 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/BurntSushi/toml"
+	"github.com/earlisreal/eTape/engine/internal/atomicfile"
 )
 
 // OpenD locates the local OpenD gateway.
@@ -170,8 +173,8 @@ func Default() Config {
 			Enabled: true, PremarketMs: 2000, RTHMs: 3000, RankPages: 2,
 			MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000,
 		},
-		News:     News{Enabled: true, FocusedMs: 20000, WatchMs: 3000, MaxPerReq: 50},
-		Health:   Health{Enabled: true, ProbeMs: 5000},
+		News:   News{Enabled: true, FocusedMs: 20000, WatchMs: 3000, MaxPerReq: 50},
+		Health: Health{Enabled: true, ProbeMs: 5000},
 		Backfill: Backfill{Enabled: true, IntradayDays: 20, DailyYears: 0, Concurrency: 3, SeedChunk: 500,
 			Alpaca: BackfillAlpaca{Enabled: true, CredsKey: "alpaca", Feed: "iex"},
 		},
@@ -189,4 +192,107 @@ func Load(path string) (Config, error) {
 		return Config{}, fmt.Errorf("config %s: %w", path, err)
 	}
 	return cfg, nil
+}
+
+// VenueConfig is the file-writable subset of Config the settings UI edits.
+type VenueConfig struct {
+	Venues []Venue
+	Gate   Gate
+}
+
+var venueIDRe = regexp.MustCompile(`^[a-z0-9-]+$`)
+
+var validBrokers = map[string]bool{"tradezero": true, "alpaca": true, "moomoo": true, "sim": true}
+
+// ReadVenueConfig parses the TOML file fresh and returns its venue+gate subset.
+// A missing file yields the defaults (not an error), matching boot semantics.
+func ReadVenueConfig(path string) (VenueConfig, error) {
+	c, err := Load(path)
+	if err != nil {
+		return VenueConfig{}, err
+	}
+	return VenueConfig{Venues: c.Venues, Gate: c.Gate}, nil
+}
+
+// ValidateVenueConfig enforces the settings-UI write rules. credKeys is the set
+// of credential names currently present in credentials.json. It returns a
+// field-naming error on the first violation and writes nothing.
+func ValidateVenueConfig(vc VenueConfig, credKeys []string) error {
+	keys := map[string]bool{}
+	for _, k := range credKeys {
+		keys[k] = true
+	}
+	seen := map[string]bool{}
+	ids := map[string]bool{}
+	for _, v := range vc.Venues {
+		if v.ID == "" || !venueIDRe.MatchString(v.ID) {
+			return fmt.Errorf("venue id %q: must be non-empty and match [a-z0-9-]", v.ID)
+		}
+		if seen[v.ID] {
+			return fmt.Errorf("venue id %q: duplicate", v.ID)
+		}
+		seen[v.ID] = true
+		ids[v.ID] = true
+		if !validBrokers[v.Broker] {
+			return fmt.Errorf("venue %q: broker %q must be one of tradezero, alpaca, moomoo, sim", v.ID, v.Broker)
+		}
+		if v.Env != "paper" && v.Env != "live" {
+			return fmt.Errorf("venue %q: env %q must be paper or live", v.ID, v.Env)
+		}
+		if v.Env == "live" && v.AutoArm {
+			return fmt.Errorf("venue %q: live venues cannot auto-arm", v.ID)
+		}
+		if v.Broker == "tradezero" || v.Broker == "alpaca" {
+			if !keys[v.Credentials] {
+				return fmt.Errorf("venue %q: credentials %q names no existing key", v.ID, v.Credentials)
+			}
+		}
+		if v.Broker == "tradezero" && v.AccountID == "" {
+			return fmt.Errorf("venue %q: tradezero requires account_id", v.ID)
+		}
+	}
+	g := vc.Gate.Global
+	if g.MaxDayLoss < 0 || g.MaxSymbolPositionValue < 0 || g.MaxSymbolPositionShares < 0 {
+		return fmt.Errorf("gate.global: caps must be >= 0 (0 = off)")
+	}
+	for id, gv := range vc.Gate.Venue {
+		if !ids[id] {
+			return fmt.Errorf("gate.venue.%s: no venue with that id", id)
+		}
+		if gv.MaxOrderValue < 0 || gv.MaxPositionValue < 0 || gv.MaxPositionShares < 0 || gv.MaxOpenOrders < 0 {
+			return fmt.Errorf("gate.venue.%s: caps must be >= 0 (0 = off)", id)
+		}
+	}
+	return nil
+}
+
+// WriteVenueConfig re-reads path into a full Config, replaces its Venues and
+// Gate, and re-encodes the whole file atomically. On the FIRST UI-driven write
+// it copies the original file to path+".bak" (only if that .bak is absent), so
+// the hand-written original — comments and all — is preserved forever.
+// Decode→encode loses comments/ordering and any keys unknown to Config; that is
+// the accepted trade-off (Config is the engine's entire config surface).
+func WriteVenueConfig(path string, vc VenueConfig) error {
+	if orig, err := os.ReadFile(path); err == nil {
+		bak := path + ".bak"
+		if _, statErr := os.Stat(bak); errors.Is(statErr, os.ErrNotExist) {
+			if err := atomicfile.Write(bak, orig, 0o644); err != nil {
+				return fmt.Errorf("config: write .bak: %w", err)
+			}
+		}
+	}
+	c, err := Load(path)
+	if err != nil {
+		return err
+	}
+	c.Venues = vc.Venues
+	c.Gate = vc.Gate
+	var buf strings.Builder
+	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
+		return fmt.Errorf("config: encode: %w", err)
+	}
+	if err := atomicfile.Write(path, []byte(buf.String()), 0o644); err != nil {
+		return fmt.Errorf("config: write: %w", err)
+	}
+	return nil
 }

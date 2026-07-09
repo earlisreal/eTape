@@ -61,7 +61,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
     const spec = mode === "Shares" ? { mode, shares: Number(amount) || 0 }
       : mode === "Dollar" ? { mode, dollar: Number(amount) || 0 }
       : mode === "BuyingPowerPct" ? { mode, pct: Number(amount) || 0 }
-      : { mode, fraction: "all" as const };
+      : { mode, pct: Number(amount) || 0 };
     const qty = resolveShares(spec, { price: px, buyingPower, positionQty });
     const draft: DraftOrder = { symbol, side, type, tif, qty, limitPrice: type === "MARKET" ? 0 : px, stopPrice: hasStop ? Number(stop) || 0 : 0 };
     const pc = preCheck(draft, quote?.last ?? 0, Date.now());

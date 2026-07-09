@@ -6,7 +6,7 @@
 // a stale config after an edit made through the settings modal.
 import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from "react";
 import type { AckMsg, VenueID } from "../../wire/contract";
-import { DEFAULT_ORDER_CONFIG, ORDER_CONFIG_KEY, type OrderConfig } from "./actionTemplate";
+import { DEFAULT_ORDER_CONFIG, ORDER_CONFIG_KEY, normalizeOrderConfig, type OrderConfig } from "./actionTemplate";
 
 interface Cmd { sendCommand(name: string, args: unknown): Promise<AckMsg> }
 export interface OrderConfigApi { config: OrderConfig; loaded: boolean; save(next: OrderConfig): void; setActiveVenue(v: VenueID): void }
@@ -14,14 +14,14 @@ export interface OrderConfigApi { config: OrderConfig; loaded: boolean; save(nex
 const Ctx = createContext<OrderConfigApi | null>(null);
 
 export function OrderConfigProvider({ commands, children }: { commands: Cmd; children: ReactNode }): JSX.Element {
-  const [config, setConfig] = useState<OrderConfig>(DEFAULT_ORDER_CONFIG);
+  const [config, setConfig] = useState<OrderConfig>(() => normalizeOrderConfig(DEFAULT_ORDER_CONFIG));
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     let live = true;
     void commands.sendCommand("GetConfig", { key: ORDER_CONFIG_KEY }).then((ack) => {
       if (!live) return;
-      if (ack.status === "accepted" && ack.value && typeof ack.value === "object") setConfig(ack.value as OrderConfig);
+      if (ack.status === "accepted" && ack.value && typeof ack.value === "object") setConfig(normalizeOrderConfig(ack.value as OrderConfig));
       setLoaded(true);
     });
     return () => { live = false; };

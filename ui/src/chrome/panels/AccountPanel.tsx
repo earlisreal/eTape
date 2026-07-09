@@ -142,7 +142,7 @@ function PositionsTable({
     const t: PlaceOrderTemplate = {
       kind: "place", id: "flatten", label: "Flatten", side: long ? "SELL" : "COVER",
       type: "MARKET", tif: "DAY", priceSource: long ? "Bid" : "Ask", priceOffset: 0,
-      sizing: { mode: "PositionFraction", fraction: "all" },
+      sizing: { mode: "PositionFraction", pct: 100 },
     };
     const r = resolvePlaceTemplate(t, { venue, symbol: row.symbol, quote, buyingPower: 0, positionQty: row.qty, nowMs: Date.now() });
     if (!r.preCheck.ok) { toast.push({ level: "danger", text: r.preCheck.errors.join(" ") }); return; }

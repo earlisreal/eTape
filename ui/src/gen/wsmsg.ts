@@ -309,3 +309,47 @@ export interface FocusGroupArgs {
   group: string;
   symbol: string;
 }
+/**
+ * Venue mirrors config.Venue (no secret material — Credentials is a key NAME).
+ */
+export interface Venue {
+  id: string;
+  broker: string;
+  env: string;
+  credentials: string;
+  accountId: string;
+  autoArm: boolean;
+}
+/**
+ * Gate mirrors config.Gate; reuses the existing limit-view shapes.
+ */
+export interface Gate {
+  global: GlobalLimitsView;
+  venue: { [key: string]: GateLimitsView};
+}
+export interface VenueConfig {
+  venues: Venue[];
+  gate: Gate;
+}
+/**
+ * VenueSetup is the GetVenueSetup result. file = parsed from config.toml,
+ * running = what the engine booted with; the restart banner shows when they
+ * differ. credKeys = credential NAMES only.
+ */
+export interface VenueSetup {
+  file: VenueConfig;
+  running: VenueConfig;
+  credKeys: string[];
+}
+export interface SetVenueSetupArgs {
+  venues: Venue[];
+  gate: Gate;
+}
+export interface PutCredentialArgs {
+  name: string;
+  keyId: string;
+  secretKey: string;
+}
+export interface DeleteCredentialArgs {
+  name: string;
+}

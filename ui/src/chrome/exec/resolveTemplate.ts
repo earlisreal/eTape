@@ -15,7 +15,7 @@ export interface ResolveContext {
 export interface ResolvedPlace { args: SubmitOrderArgs; flash: string; preCheck: PreCheckResult }
 
 export function resolvePlaceTemplate(t: PlaceOrderTemplate, ctx: ResolveContext): ResolvedPlace {
-  const price = resolvePrice(t.priceSource, t.priceOffset, ctx.quote);
+  const price = resolvePrice(t.priceSource, t.priceOffset, t.priceOffsetUnit, ctx.quote);
   const qty = resolveShares(t.sizing, { price, buyingPower: ctx.buyingPower, positionQty: ctx.positionQty });
   const draft: DraftOrder = {
     symbol: ctx.symbol, side: t.side, type: t.type, tif: t.tif, qty,

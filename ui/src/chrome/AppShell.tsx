@@ -74,8 +74,14 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     });
   }, [workspaceName, workspaceStore, linkGroups]);
   // Mounted once, globally — must run unconditionally, before the loading-state
-  // early return below, per the Rules of Hooks.
-  useHotkeys({ stores, commands, linkGroups });
+  // early return below, per the Rules of Hooks. group: "blue" (not useHotkeys'
+  // own "green" default) — found via the Task 12 E2E smoke spec: no preset in
+  // presets.ts ever puts an order ticket/DOM/tape in a "green" group (Monitoring
+  // has no execution surface at all; Trading's t-ticket/t-dom/t-tape/charts are
+  // all "blue"), so the unqualified default silently resolved to an empty
+  // symbol/venue and every place-order hotkey (Ctrl+1..4) no-opped with a "no
+  // venue/quote for hotkey" toast in the shipped Trading preset.
+  useHotkeys({ stores, commands, linkGroups, group: "blue" });
   useSoundWiring(stores);
   // Task 13: mirror Settings-modal open/close into the module-level modalTracker
   // singleton so every already-mounted PanelFrame (frozen-closure-created, can't
@@ -348,7 +354,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         <SettingsModal open={settings.open} section={settings.section}
           onSection={(s) => setSettings((v) => ({ ...v, section: s }))}
           onClose={() => setSettings((v) => ({ ...v, open: false }))}
-          status={execStatus} />
+          commands={commands} />
       </div>
     </OpenSettingsProvider>
   );

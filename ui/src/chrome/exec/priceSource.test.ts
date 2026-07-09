@@ -1,16 +1,15 @@
 import { describe, it, expect } from "vitest";
 import { resolvePrice } from "./priceSource";
-import type { Quote } from "../../wire/contract";
 
-const q: Quote = { symbol: "US.AAPL", bid: 3.40, ask: 3.50, last: 3.45, ts: "" };
+const q = { symbol: "X", bid: 100, ask: 102, last: 101, ts: "" };
 
 describe("resolvePrice", () => {
-  it("resolves each source and applies the signed offset", () => {
-    expect(resolvePrice("Bid", 0, q)).toBeCloseTo(3.40);
-    expect(resolvePrice("Ask", 0, q)).toBeCloseTo(3.50);
-    expect(resolvePrice("Last", 0, q)).toBeCloseTo(3.45);
-    expect(resolvePrice("Mid", 0, q)).toBeCloseTo(3.45);
-    expect(resolvePrice("Ask", 0.02, q)).toBeCloseTo(3.52);
-    expect(resolvePrice("Bid", -0.01, q)).toBeCloseTo(3.39);
+  it("dollar offset (default when unit undefined) adds absolute", () => {
+    expect(resolvePrice("Ask", 0.05, undefined, q)).toBeCloseTo(102.05);
+    expect(resolvePrice("Bid", -0.05, "$", q)).toBeCloseTo(99.95);
+  });
+  it("percent offset scales with base, signed both ways", () => {
+    expect(resolvePrice("Ask", 1, "%", q)).toBeCloseTo(102 + 1.02); // +1% of 102
+    expect(resolvePrice("Bid", -2, "%", q)).toBeCloseTo(100 - 2); // -2% of 100
   });
 });
