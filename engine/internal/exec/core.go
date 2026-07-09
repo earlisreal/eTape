@@ -199,7 +199,38 @@ func (c *Core) Recover(ctx context.Context) error {
 		c.state.ReconcilePositions(v, pos)
 		c.state.ReconcileOpenOrders(v, orders)
 	}
+	c.seedTrades(ctx)
 	return nil
+}
+
+// seedTrades rebuilds today's closed round-trips from persisted fills, so a
+// restart doesn't lose Trade History for the current trading day (round trips
+// themselves are derived, not persisted — only the underlying fills are).
+// Scoped to the 20:00-ET pool day (session.PoolDay), NOT the ET-midnight
+// boundary Recover's event replay above uses for orders — those are
+// deliberately different windows. LIMITATION: a position opened before the
+// 20:00-ET roll and closed today is misattributed (its opening fills fall
+// outside this window) — acceptable for an intraday tool; a documented
+// follow-up, not fixed here.
+func (c *Core) seedTrades(ctx context.Context) {
+	if ctx.Err() != nil {
+		return
+	}
+	fromMs := session.PoolDay(c.clk.Now()) * 1000
+	fills, err := c.store.QueryFillsSince(ctx, fromMs)
+	if err != nil {
+		c.syslog("exec.recover", "seed trades: "+err.Error())
+		return
+	}
+	for _, f := range fills {
+		side, ok := sideFromString(f.Side)
+		if !ok {
+			continue
+		}
+		for _, t := range c.trades.Apply(VenueID(f.Venue), f.Symbol, side, f.Qty, f.Price, f.TsMs) {
+			c.emit(TradeUpdate{Trade: t})
+		}
+	}
 }
 
 // Run is the single writer. It pumps every venue's broker events into the inbox

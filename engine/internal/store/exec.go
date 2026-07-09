@@ -1,6 +1,8 @@
 package store
 
 import (
+	"context"
+
 	"github.com/earlisreal/eTape/engine/internal/exec"
 )
 
@@ -99,6 +101,31 @@ func (s *Store) QueryFills(symbol string, fromMs, toMs int64) ([]exec.FillRow, e
 	rows, err := s.db.Query(
 		`SELECT order_id, symbol, side, qty, price, ts, venue
          FROM fills WHERE symbol = ? AND ts >= ? AND ts < ? ORDER BY ts`, symbol, fromMs, toMs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []exec.FillRow
+	for rows.Next() {
+		var f exec.FillRow
+		if err := rows.Scan(&f.OrderID, &f.Symbol, &f.Side, &f.Qty, &f.Price, &f.TsMs, &f.Venue); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
+
+// QueryFillsSince returns fills across ALL venues/symbols with ts >= fromMs,
+// ordered by (ts, seq) — the Trade History boot-seed input
+// (Core.seedTrades), which needs every symbol at once rather than QueryFills'
+// single-symbol scope. It is a "since" query with no upper bound (unlike
+// QueryFills' closed [fromMs, toMs) range), and is ctx-aware via
+// QueryContext so a canceled boot doesn't hang on slow I/O.
+func (s *Store) QueryFillsSince(ctx context.Context, fromMs int64) ([]exec.FillRow, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT order_id, symbol, side, qty, price, ts, venue
+         FROM fills WHERE ts >= ? ORDER BY ts, seq`, fromMs)
 	if err != nil {
 		return nil, err
 	}
