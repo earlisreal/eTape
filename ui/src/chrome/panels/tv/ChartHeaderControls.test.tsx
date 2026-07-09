@@ -8,7 +8,7 @@ import { LIGHT } from "../../../render/palette";
 afterEach(cleanup);
 const base = {
   palette: LIGHT, timeframe: "1m",
-  onTimeframe: vi.fn(), onOpenIndicators: vi.fn(), onScreenshot: vi.fn(), onOpenSettings: vi.fn(),
+  onTimeframe: vi.fn(), onAddIndicator: vi.fn(), onScreenshot: vi.fn(), onOpenSettings: vi.fn(),
 };
 
 describe("ChartHeaderControls", () => {
@@ -24,16 +24,26 @@ describe("ChartHeaderControls", () => {
     expect(active.style.color).not.toBe(inactive.style.color);
   });
 
-  it("fires callbacks for timeframe, indicators, screenshot, settings", () => {
+  it("fires callbacks for timeframe, screenshot, settings", () => {
     render(<ChartHeaderControls {...base} />);
     fireEvent.click(screen.getByRole("button", { name: "timeframe 5m" }));
-    fireEvent.click(screen.getByRole("button", { name: "indicators" }));
     fireEvent.click(screen.getByRole("button", { name: "screenshot" }));
     fireEvent.click(screen.getByRole("button", { name: "chart settings" }));
     expect(base.onTimeframe).toHaveBeenCalledWith("5m");
-    expect(base.onOpenIndicators).toHaveBeenCalled();
     expect(base.onScreenshot).toHaveBeenCalled();
     expect(base.onOpenSettings).toHaveBeenCalled();
+  });
+
+  it("opens an indicator dropdown on click, and picking an entry adds it and closes the dropdown", () => {
+    render(<ChartHeaderControls {...base} />);
+    const trigger = screen.getByRole("button", { name: "indicators" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByPlaceholderText("Search")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "add EMA" }));
+    expect(base.onAddIndicator).toHaveBeenCalledWith("EMA");
+    expect(screen.queryByPlaceholderText("Search")).toBeNull();
   });
 
   it("has no symbol button — the ledger header it portals into already shows the symbol", () => {

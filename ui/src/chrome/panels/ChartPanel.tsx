@@ -23,7 +23,6 @@ import { TVDrawingRail, type RailPos } from "./tv/TVDrawingRail";
 import { TVContextMenu, type MenuEntry } from "./tv/TVContextMenu";
 import { TVLegend, type TVLegendHandle } from "./tv/TVLegend";
 import { TVFloatingToolbar } from "./tv/TVFloatingToolbar";
-import { IndicatorPickerDialog } from "./tv/IndicatorPickerDialog";
 import { IndicatorSettingsDialog } from "./tv/IndicatorSettingsDialog";
 import { ChartSettingsDialog, DEFAULT_CHART_SETTINGS, type ChartSettings } from "./tv/ChartSettingsDialog";
 import { computeLegendView } from "./tv/legendView";
@@ -152,7 +151,6 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const chartType = chartType0;
   const [hideAll, setHideAll] = useState(hideAll0);
   const [chartSettings, setChartSettings] = useState<ChartSettings>(chartSettings0);
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [settingsInstanceId, setSettingsInstanceId] = useState<string | null>(null);
   const [chartSettingsOpen, setChartSettingsOpen] = useState(false);
   const [paneOffsets, setPaneOffsets] = useState<number[]>([0]);
@@ -480,7 +478,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // provider is mounted but its DOM node hasn't attached yet — render nothing for
   // that one tick rather than flash the controls inline first.
   const headerControls = <ChartHeaderControls palette={appPalette} timeframe={timeframe}
-    onTimeframe={changeTimeframe} onOpenIndicators={() => setPickerOpen(true)}
+    onTimeframe={changeTimeframe} onAddIndicator={addIndicator}
     onScreenshot={onScreenshot} onOpenSettings={() => setChartSettingsOpen(true)} />;
 
   return (
@@ -506,7 +504,6 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         )}
         {menu && <TVContextMenu chrome={chrome} x={menu.clientX} y={menu.clientY} items={buildMenuItems(menu)} onClose={() => setMenu(null)} />}
       </div>
-      {pickerOpen && <IndicatorPickerDialog chrome={chrome} onClose={() => setPickerOpen(false)} onAdd={addIndicator} />}
       {settingsInstanceId && (() => {
         const inst = instances.find((i) => i.instanceId === settingsInstanceId);
         if (!inst) return null;
