@@ -25,12 +25,55 @@ func TestDedupByURL(t *testing.T) {
 }
 
 func TestNormalizeStampsSeenAt(t *testing.T) {
-	items := normalize([]searchNews{{Title: "PR drops", Source: "Newswire", URL: "http://x/9"}}, "US.AAPL", "2026-07-06T13:31:00.000Z")
+	items := normalize([]searchNews{{
+		Title: "PR drops", Source: "Newswire", URL: "http://x/9",
+		NewsSubType: 2, PublishTime: "2026-07-06 09:31:00", ViewCount: 42,
+	}}, "US.AAPL", "2026-07-06T13:31:00.000Z")
 	if len(items) != 1 {
 		t.Fatalf("want 1 item, got %d", len(items))
 	}
 	it := items[0]
 	if it.Symbol != "US.AAPL" || it.Headline != "PR drops" || it.Source != "Newswire" || it.URL != "http://x/9" || it.SeenAt != "2026-07-06T13:31:00.000Z" {
 		t.Fatalf("normalize wrong: %+v", it)
+	}
+	if wantPublished := parsePublishTime("2026-07-06 09:31:00"); it.PublishedAt != wantPublished {
+		t.Fatalf("PublishedAt = %q, want %q", it.PublishedAt, wantPublished)
+	}
+	if it.ViewCount != 42 {
+		t.Fatalf("ViewCount = %d, want 42", it.ViewCount)
+	}
+	if wantType := mapNewsType(2); it.Type != wantType {
+		t.Fatalf("Type = %q, want %q", it.Type, wantType)
+	}
+}
+
+func TestMapNewsType(t *testing.T) {
+	cases := []struct {
+		subType int32
+		want    string
+	}{
+		{0, "news"},   // ALL -> falls back to the most common category
+		{1, "news"},   // NEWS
+		{2, "notice"}, // NOTICE
+		{3, "rating"}, // RATING
+		{99, "news"},  // unknown -> falls back to the most common category
+	}
+	for _, c := range cases {
+		if got := mapNewsType(c.subType); got != c.want {
+			t.Fatalf("mapNewsType(%d) = %q, want %q", c.subType, got, c.want)
+		}
+	}
+}
+
+func TestParsePublishTime(t *testing.T) {
+	// 2026-07-06 is EDT (UTC-4) in America/New_York.
+	if got, want := parsePublishTime("2026-07-06 09:31:00"), "2026-07-06T13:31:00.000Z"; got != want {
+		t.Fatalf("parsePublishTime(valid) = %q, want %q", got, want)
+	}
+	if got := parsePublishTime(""); got != "" {
+		t.Fatalf("parsePublishTime(empty) = %q, want \"\"", got)
+	}
+	if got := parsePublishTime("not-a-time"); got != "" {
+		t.Fatalf("parsePublishTime(malformed) = %q, want \"\"", got)
 	}
 }
