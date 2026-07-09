@@ -23,6 +23,9 @@ describe("formatCompactShares", () => {
     expect(formatCompactShares(3_200_000_000)).toBe("3.2B");
     expect(formatCompactShares(640)).toBe("640");
   });
+  it("compacts trillion-scale values (market cap) at two decimals", () => {
+    expect(formatCompactShares(3_210_000_000_000)).toBe("3.21T");
+  });
   it("null (unknown) is em dash, but 0 is a real 0", () => {
     expect(formatCompactShares(null)).toBe("—");
     expect(formatCompactShares(0)).toBe("0");

@@ -63,6 +63,12 @@ describe("StockInfoPanel", () => {
     expect(screen.getByText(/stock info · no symbol focused/i)).toBeTruthy();
   });
 
+  it("shows nothing below the header — no Hot only checkbox, no news area — when no symbol is focused", () => {
+    renderPanel();
+    expect(screen.queryByRole("checkbox", { name: /hot only/i })).toBeNull();
+    expect(screen.queryByText(/no news for/i)).toBeNull();
+  });
+
   it("follows the group's focused symbol and lists its news newest-first", () => {
     const { news, linkGroups } = renderPanel();
     act(() => {
@@ -133,12 +139,23 @@ describe("StockInfoPanel fundamentals section", () => {
     expect(document.body.textContent).not.toContain("▼");
   });
 
-  it("formats market cap, float cap, shares out, and float with a compact magnitude suffix", () => {
+  it("shows a neutral, arrow-less percent (not a false up-signal) when changePct is exactly 0", () => {
+    const { stockDetail, linkGroups } = renderPanel();
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.GOOG", { changePct: 0 })));
+      linkGroups.focus("green", "US.GOOG");
+    });
+    expect(document.body.textContent).toContain("0.00%");
+    expect(document.body.textContent).not.toContain("▲");
+    expect(document.body.textContent).not.toContain("▼");
+  });
+
+  it("formats market cap, float cap, shares out, float, and volume with a compact magnitude suffix", () => {
     const { stockDetail, linkGroups } = renderPanel();
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.MSFT", {
         marketCap: 3_210_000_000_000, floatMarketCap: 1_500_000_000,
-        sharesOutstanding: 22_700_000, floatShares: 900_000,
+        sharesOutstanding: 22_700_000, floatShares: 900_000, volume: 1_000,
       })));
       linkGroups.focus("green", "US.MSFT");
     });
@@ -146,15 +163,17 @@ describe("StockInfoPanel fundamentals section", () => {
     expect(screen.getByText("1.5B")).toBeTruthy();
     expect(screen.getByText("22.7M")).toBeTruthy();
     expect(screen.getByText("900K")).toBeTruthy();
+    expect(screen.getByText("Volume")).toBeTruthy();
+    expect(screen.getByText("1K")).toBeTruthy();
   });
 
-  it("renders the combined P/E · TTM and 52-week range cells", () => {
+  it("renders the combined P/E · TTM cell at 2 decimals (a unitless ratio, not a price) and the 52-week range at QUOTE_DECIMALS", () => {
     const { stockDetail, linkGroups } = renderPanel();
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.MSFT", { pe: 20, peTTM: 21, low52: 5, high52: 15 })));
       linkGroups.focus("green", "US.MSFT");
     });
-    expect(document.body.textContent).toContain("20.000 · 21.000");
+    expect(document.body.textContent).toContain("20.00 · 21.00");
     expect(document.body.textContent).toContain("5.000–15.000");
   });
 
@@ -197,8 +216,9 @@ describe("StockInfoPanel news list enhancements", () => {
     expect(screen.getByText("[NEWS]")).toBeTruthy();
   });
 
-  it("the Hot only control is a real, accessible checkbox", () => {
-    renderPanel();
+  it("the Hot only control is a real, accessible checkbox once a symbol is focused", () => {
+    const { linkGroups } = renderPanel();
+    act(() => linkGroups.focus("green", "US.AAPL"));
     const checkbox = screen.getByRole("checkbox", { name: /hot only/i });
     expect((checkbox as HTMLInputElement).type).toBe("checkbox");
     expect((checkbox as HTMLInputElement).checked).toBe(false);

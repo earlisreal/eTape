@@ -40,11 +40,6 @@ export function formatSize(size: number): string {
   return Math.round(size).toLocaleString("en-US");
 }
 
-/** Compact large numbers with a magnitude suffix: 3_210_000_000_000 → "3.21T", 22_700_000 → "22.7M". Used for market cap / shares outstanding, where full digit counts are unreadable. */
-export function formatCompact(n: number): string {
-  return new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 2 }).format(n);
-}
-
 /** Exchange timestamp (ISO string) → ET wall-clock HH:MM:SS for tape rows. */
 export function formatTapeTime(ts: string): string {
   return new Date(ts).toLocaleTimeString("en-US", { hour12: false, timeZone: "America/New_York" });

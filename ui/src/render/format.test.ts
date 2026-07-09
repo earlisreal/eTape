@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { axisDecimals, priceDecimals, formatPrice, formatSize, formatCompact, formatTapeTime, formatClock, formatDuration } from "./format";
+import { axisDecimals, priceDecimals, formatPrice, formatSize, formatTapeTime, formatClock, formatDuration } from "./format";
 
 describe("axisDecimals (wickplot CandlestickChartMath port)", () => {
   it.each([
@@ -39,21 +39,6 @@ describe("formatPrice / formatSize", () => {
   });
   it("groups thousands", () => {
     expect(formatSize(12345)).toBe("12,345");
-  });
-});
-
-describe("formatCompact", () => {
-  it("renders a trillion-scale value", () => {
-    expect(formatCompact(3_210_000_000_000)).toBe("3.21T");
-  });
-  it("renders a billion-scale value", () => {
-    expect(formatCompact(1_500_000_000)).toBe("1.5B");
-  });
-  it("renders a million-scale value", () => {
-    expect(formatCompact(22_700_000)).toBe("22.7M");
-  });
-  it("renders zero as a bare 0", () => {
-    expect(formatCompact(0)).toBe("0");
   });
 });
 

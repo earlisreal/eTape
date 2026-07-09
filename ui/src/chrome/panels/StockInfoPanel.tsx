@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { PanelProps } from "./registry";
 import { useTheme } from "../ThemeProvider";
-import { formatTapeTime, formatPrice, formatCompact, QUOTE_DECIMALS } from "../../render/format";
+import { formatTapeTime, formatPrice, QUOTE_DECIMALS } from "../../render/format";
+import { formatCompactShares } from "../format";
 import type { Palette } from "../../render/palette";
 
 // Tunable: view-count floor for the "Hot only" news filter. A UI-only heuristic
@@ -37,7 +38,7 @@ function typeBadge(type: string, palette: Palette): JSX.Element {
 function fmtCompactOrDash(value: number | null, palette: Palette): JSX.Element {
   return value == null
     ? <span className="mono" style={{ color: palette.textMuted }}>—</span>
-    : <span className="mono" style={{ color: palette.text }}>{formatCompact(value)}</span>;
+    : <span className="mono" style={{ color: palette.text }}>{formatCompactShares(value)}</span>;
 }
 
 function fmtDecimalOrDash(value: number | null, palette: Palette): JSX.Element {
@@ -52,14 +53,18 @@ function textOrDash(value: string, palette: Palette): JSX.Element {
     : <span className="mono" style={{ color: palette.textMuted }}>—</span>;
 }
 
+// P/E is a unitless ratio, not a price — 2 decimals (not QUOTE_DECIMALS' 3) reads
+// less oddly dense (20.00, not 20.000).
+const PE_DECIMALS = 2;
+
 /** Combined "P/E · TTM" cell — each side dashes independently if null, so a missing TTM
  * figure doesn't blank out a known trailing P/E (or vice versa). */
 function peCell(pe: number | null, peTTM: number | null, palette: Palette): JSX.Element {
   return (
     <span className="mono">
-      {pe == null ? <span style={{ color: palette.textMuted }}>—</span> : <span style={{ color: palette.text }}>{formatPrice(pe, QUOTE_DECIMALS)}</span>}
+      {pe == null ? <span style={{ color: palette.textMuted }}>—</span> : <span style={{ color: palette.text }}>{formatPrice(pe, PE_DECIMALS)}</span>}
       <span style={{ color: palette.textMuted }}> · </span>
-      {peTTM == null ? <span style={{ color: palette.textMuted }}>—</span> : <span style={{ color: palette.text }}>{formatPrice(peTTM, QUOTE_DECIMALS)}</span>}
+      {peTTM == null ? <span style={{ color: palette.textMuted }}>—</span> : <span style={{ color: palette.text }}>{formatPrice(peTTM, PE_DECIMALS)}</span>}
     </span>
   );
 }
@@ -126,9 +131,11 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp }:
               )}
               {detail.changePct == null ? (
                 <span className="mono" style={{ color: palette.textMuted }}>—</span>
+              ) : detail.changePct === 0 ? (
+                <span className="mono" style={{ color: palette.textMuted }}>{detail.changePct.toFixed(2)}%</span>
               ) : (
-                <span className="mono" style={{ color: detail.changePct >= 0 ? palette.ok : palette.danger }}>
-                  {detail.changePct >= 0 ? "▲" : "▼"} {Math.abs(detail.changePct).toFixed(2)}%
+                <span className="mono" style={{ color: detail.changePct > 0 ? palette.ok : palette.danger }}>
+                  {detail.changePct > 0 ? "▲" : "▼"} {Math.abs(detail.changePct).toFixed(2)}%
                 </span>
               )}
             </div>
@@ -153,41 +160,48 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp }:
               {fmtDecimalOrDash(detail.eps, palette)}
               <span style={{ color: palette.textMuted }}>52wk</span>
               {rangeCell(detail.low52, detail.high52, palette)}
+
+              <span style={{ color: palette.textMuted }}>Volume</span>
+              {fmtCompactOrDash(detail.volume, palette)}
             </div>
           </>
         )
       )}
       {symbol && <div style={{ borderBottom: `1px solid ${palette.borderStrong}` }} />}
 
-      <div style={{ background: palette.surface, display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", borderBottom: `1px solid ${palette.border}` }}>
-        <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: hotOnly ? palette.text : palette.textMuted }}>
-          <input type="checkbox" checked={hotOnly} onChange={(e) => setHotOnly(e.target.checked)} style={{ width: 12, height: 12 }} />
-          Hot only
-        </label>
-      </div>
-
-      {symbol && items.length === 0 && (
-        <div style={{ padding: 12, color: palette.textMuted }}>No news for {symbol}.</div>
-      )}
-      {visibleItems.map((it, i) => {
-        const effectiveTs = it.published_at || it.seen_at;
-        const { label, today } = newsDateLabel(effectiveTs, Date.now());
-        return (
-          <div key={it.url || `${it.headline}-${i}`}
-            style={{
-              padding: "6px 8px", borderBottom: `1px solid ${palette.border}`,
-              ...(today ? { background: "rgba(154,106,27,.08)", boxShadow: "inset 2px 0 0 var(--accent)" } : {}),
-            }}>
-            {typeBadge(it.type, palette)}
-            <a href={it.url} onClick={(e) => { e.preventDefault(); window.open(it.url, "_blank", "noopener,noreferrer"); }}
-              style={{ color: palette.accent, textDecoration: "none", cursor: "pointer" }}>{it.headline}</a>
-            <div className="mono" style={{ marginTop: 2 }}>
-              <span style={{ color: today ? palette.accent : palette.textMuted }}>{label}</span>
-              <span style={{ color: palette.textMuted }}> · {formatTapeTime(effectiveTs)} · {it.source}</span>
-            </div>
+      {symbol && (
+        <>
+          <div style={{ background: palette.surface, display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", borderBottom: `1px solid ${palette.border}` }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: hotOnly ? palette.text : palette.textMuted }}>
+              <input type="checkbox" checked={hotOnly} onChange={(e) => setHotOnly(e.target.checked)} style={{ width: 12, height: 12 }} />
+              Hot only
+            </label>
           </div>
-        );
-      })}
+
+          {items.length === 0 && (
+            <div style={{ padding: 12, color: palette.textMuted }}>No news for {symbol}.</div>
+          )}
+          {visibleItems.map((it, i) => {
+            const effectiveTs = it.published_at || it.seen_at;
+            const { label, today } = newsDateLabel(effectiveTs, Date.now());
+            return (
+              <div key={it.url || `${it.headline}-${i}`}
+                style={{
+                  padding: "6px 8px", borderBottom: `1px solid ${palette.border}`,
+                  ...(today ? { background: "rgba(154,106,27,.08)", boxShadow: "inset 2px 0 0 var(--accent)" } : {}),
+                }}>
+                {typeBadge(it.type, palette)}
+                <a href={it.url} onClick={(e) => { e.preventDefault(); window.open(it.url, "_blank", "noopener,noreferrer"); }}
+                  style={{ color: palette.accent, textDecoration: "none", cursor: "pointer" }}>{it.headline}</a>
+                <div className="mono" style={{ marginTop: 2 }}>
+                  <span style={{ color: today ? palette.accent : palette.textMuted }}>{label}</span>
+                  <span style={{ color: palette.textMuted }}> · {formatTapeTime(effectiveTs)} · {it.source}</span>
+                </div>
+              </div>
+            );
+          })}
+        </>
+      )}
     </div>
   );
 }
