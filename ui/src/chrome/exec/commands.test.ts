@@ -34,11 +34,27 @@ describe("OrderCommands", () => {
     expect(exec.orders().find((v) => v.order.id === "ET7")?.optimistic).toBe(true);
     expect(pushed).toContainEqual({ level: "info", text: "BUY 10 AAPL @ 3.50 LMT" });
   });
-  it("submit blocked → danger toast with verbatim reason, no optimistic row", async () => {
+  it("submit blocked → danger toast names the venue, verbatim reason when unmapped, no optimistic row", async () => {
     const { exec, pushed, oc } = fakes({ status: "blocked", reason: "venue disarmed" });
     await oc.submit(args, "flash");
     expect(exec.orders()).toHaveLength(0);
-    expect(pushed).toContainEqual({ level: "danger", text: "Blocked: venue disarmed" });
+    expect(pushed).toContainEqual({ level: "danger", text: "Blocked (alpaca-paper): venue disarmed" });
+  });
+  it("submit blocked with 'no gate config for venue' → toast names the venue and humanizes the reason", async () => {
+    const { pushed, oc } = fakes({ status: "blocked", reason: "no gate config for venue" });
+    await oc.submit(args, "flash");
+    expect(pushed).toContainEqual({
+      level: "danger",
+      text: "Blocked (alpaca-paper): no risk limits configured — set them in Settings › Venues",
+    });
+  });
+  it("submit blocked with 'master disarmed' → toast names the venue and humanizes the reason", async () => {
+    const { pushed, oc } = fakes({ status: "blocked", reason: "master disarmed" });
+    await oc.submit(args, "flash");
+    expect(pushed).toContainEqual({
+      level: "danger",
+      text: "Blocked (alpaca-paper): master arm is OFF — arm it in the top bar",
+    });
   });
   it("cancel / arm / disarm / kill send the right command + args", async () => {
     const { sent, oc } = fakes();

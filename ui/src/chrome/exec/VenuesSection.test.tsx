@@ -4,7 +4,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { ToastProvider } from "../Toast";
 import { VenuesSection } from "./VenuesSection";
-import type { AckMsg, VenueConfig, VenueSetup } from "../../wire/contract";
+import type { AckMsg, Gate, VenueConfig, VenueSetup } from "../../wire/contract";
 
 const runningConfig: VenueConfig = {
   venues: [
@@ -213,6 +213,46 @@ describe("VenuesSection", () => {
     fireEvent.click(screen.getByTestId("save-venues"));
     await waitFor(() => expect(screen.getByTestId("venues-error")).toBeTruthy());
     expect(screen.getByTestId("venues-error").textContent).toBe(reason);
+  });
+
+  it("reconciles gate.venue on save: a venue added and saved without touching risk limits gets an all-zero gate entry", async () => {
+    const commands = makeCommands([baseSetup(), baseSetup()]);
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("add-venue")).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId("add-venue"));
+    const i = 2;
+    fireEvent.change(screen.getByTestId(`venue-id-${i}`), { target: { value: "sim-2" } });
+    expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.click(screen.getByTestId("save-venues"));
+    await waitFor(() => expect(commands.sent.some((s) => s.name === "SetVenueSetup")).toBe(true));
+
+    const gate = (commands.sent.find((s) => s.name === "SetVenueSetup")!.args as { gate: Gate }).gate;
+    expect(gate.venue["sim-2"]).toEqual({ maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 });
+  });
+
+  it("reconciles gate.venue on save: renaming a venue with non-zero caps carries them to the new id, dropping the old-id entry", async () => {
+    const withCaps: VenueSetup = baseSetup({
+      file: {
+        ...runningConfig,
+        gate: {
+          ...runningConfig.gate,
+          venue: { "alpaca-paper": { maxOrderValue: 5000, maxPositionValue: 20000, maxPositionShares: 100, maxOpenOrders: 3 } },
+        },
+      },
+    });
+    const commands = makeCommands([withCaps, withCaps]);
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("venue-id-0")).toBeTruthy());
+
+    fireEvent.change(screen.getByTestId("venue-id-0"), { target: { value: "alpaca-paper-2" } });
+    fireEvent.click(screen.getByTestId("save-venues"));
+    await waitFor(() => expect(commands.sent.some((s) => s.name === "SetVenueSetup")).toBe(true));
+
+    const gate = (commands.sent.find((s) => s.name === "SetVenueSetup")!.args as { gate: Gate }).gate;
+    expect(gate.venue["alpaca-paper-2"]).toEqual({ maxOrderValue: 5000, maxPositionValue: 20000, maxPositionShares: 100, maxOpenOrders: 3 });
+    expect(gate.venue["alpaca-paper"]).toBeUndefined();
   });
 
   it("does not crash adding a venue on a fresh install where the engine reports credKeys: null", async () => {

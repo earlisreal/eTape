@@ -10,13 +10,22 @@ import type { SoundApi } from "../../sound/SoundEngine";
 export interface CommandAdapter { sendCommand(name: string, args: unknown): Promise<AckMsg> }
 export interface OrderCommandsDeps { cmd: CommandAdapter; exec: ExecStore; toast: ToastApi; now: () => number; sound?: SoundApi }
 
+// Humanizes the engine's raw gate.Evaluate/exec.Core block reasons for the
+// blocked-order toast. Reasons not listed here (most of them — the gate has
+// many caps) fall back to the verbatim ack.reason.
+const REASON_TEXT: Record<string, string> = {
+  "no gate config for venue": "no risk limits configured — set them in Settings › Venues",
+  "master disarmed": "master arm is OFF — arm it in the top bar",
+};
+
 export class OrderCommands {
   constructor(private readonly d: OrderCommandsDeps) {}
 
   async submit(args: SubmitOrderArgs, flash: string): Promise<void> {
     const ack = await this.d.cmd.sendCommand("SubmitOrder", args);
     if (ack.status === "blocked") {
-      this.d.toast.push({ level: "danger", text: `Blocked: ${ack.reason ?? "unknown"}` });
+      const reason = REASON_TEXT[ack.reason ?? ""] ?? ack.reason ?? "unknown";
+      this.d.toast.push({ level: "danger", text: `Blocked (${args.venue}): ${reason}` });
       this.d.sound?.orderRejected();
       return;
     }

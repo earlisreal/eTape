@@ -105,6 +105,20 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
       broker,
       credentials: broker !== "sim" && !draft.venues[i].credentials ? mintCredName() : draft.venues[i].credentials,
     });
+  // Id edit: migrate any gate.venue entry from the old id to the new one in
+  // the same update, so risk caps set before a rename stay attached to the
+  // venue instead of becoming an orphan under the stale id (orphans fail the
+  // engine's ValidateVenueConfig on save; saveVenues's reconcile step is the
+  // second line of defense for orphans left by any other path, e.g. a
+  // hand-edited config).
+  const setVenueId = (i: number, id: string) =>
+    setDraft((d) => {
+      const oldId = d.venues[i].id;
+      const venues = d.venues.map((v, j) => (j === i ? { ...v, id } : v));
+      if (!oldId || oldId === id || !(oldId in d.gate.venue)) return { ...d, venues };
+      const { [oldId]: carried, ...restVenue } = d.gate.venue;
+      return { ...d, venues, gate: { ...d.gate, venue: { ...restVenue, [id]: carried } } };
+    });
   const addVenue = () => setDraft((d) => ({
     ...d,
     venues: [...d.venues, { id: "", broker: "sim", env: "paper", credentials: mintCredName(), accountId: "", autoArm: false }],
@@ -136,8 +150,21 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
         if (ack.status !== "accepted") { setErr(ack.reason || "rejected"); return; }
       }
 
-      // 2. Write the venue/gate draft itself.
-      const setAck = await commands.sendCommand("SetVenueSetup", { venues: draft.venues, gate: draft.gate });
+      // 2. Reconcile gate.venue against the current venue ids before sending:
+      //    carry over existing caps, default a missing/new venue to all-zero
+      //    (0 = cap off), and drop entries whose id no longer matches a venue
+      //    (a rename orphan). This guarantees every venue gets a gate entry —
+      //    so the engine's fail-closed guard (no entry => block) never fires
+      //    on a UI-created venue — and rename never gets rejected by the
+      //    engine's ValidateVenueConfig for referencing a stale id.
+      const venueGate: Gate["venue"] = {};
+      for (const v of draft.venues) {
+        if (!v.id) continue; // empty id is already blocked by validation
+        venueGate[v.id] = draft.gate.venue[v.id] ??
+          { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 };
+      }
+      const gate: Gate = { global: draft.gate.global, venue: venueGate };
+      const setAck = await commands.sendCommand("SetVenueSetup", { venues: draft.venues, gate });
       if (setAck.status !== "accepted") { setErr(setAck.reason || "rejected"); return; }
 
       // 3. Best-effort cleanup: credential names that belonged to venues in the
@@ -222,7 +249,7 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
                   <label style={fieldWrap}>
                     id
                     <input {...field} className="field mono" data-testid={`venue-id-${i}`} value={v.id}
-                      onChange={(e) => patchVenue(i, { id: e.target.value })} placeholder="venue-id" style={{ width: 130 }} />
+                      onChange={(e) => setVenueId(i, e.target.value)} placeholder="venue-id" style={{ width: 130 }} />
                   </label>
                   <label style={fieldWrap}>
                     broker
