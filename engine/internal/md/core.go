@@ -58,6 +58,14 @@ type Core struct {
 	lastDay map[string]int64 // ET day of lastSeq (sequences restart daily)
 	bars    *barEngine       // Task 11
 	inds    *indicatorSet    // Task 12
+
+	// seeding is true only while barEngine.seedHistory1m/seedDaily are
+	// looping over a history batch. It suppresses barOut's per-bar fan-out
+	// (BarUpdate + indicator recompute) so a deep seed emits a handful of
+	// BarSnapshots instead of thousands of per-bar updates that would
+	// overflow the updates channel. Touched only inside Run's goroutine, like
+	// every other field above.
+	seeding bool
 }
 
 // New builds a Core; Run must be started before Feed is called.
@@ -124,7 +132,15 @@ func (c *Core) emit(u Update) {
 }
 
 // barOut is the single door for bar emissions: update stream + indicators.
+// While c.seeding is true (inside seedHistory1m/seedDaily), it is a no-op:
+// the seed path still mutates series state via upsert before calling barOut,
+// so suppressing the emit here never changes computed state -- only what
+// gets published. The seed functions emit one BarSnapshot per timeframe (and
+// one indicator reseed per attached instance) after their loop instead.
 func (c *Core) barOut(b Bar) {
+	if c.seeding {
+		return
+	}
 	c.emit(BarUpdate{Bar: b})
 	c.inds.onBar(c, b)
 }

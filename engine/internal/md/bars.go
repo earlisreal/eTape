@@ -254,15 +254,35 @@ func (e *barEngine) fillDelta(sb *symbolBars, b *Bar) {
 	}
 }
 
+// seedHist1mTFs are the timeframes seedHistory1m can touch (1m itself, its
+// intraday cascade, and everything deriveDaily/deriveWM fold up to) — the
+// full set snapshotted once the seed loop finishes.
+var seedHist1mTFs = []session.Timeframe{
+	session.TF1m, session.TF5m, session.TF15m, session.TF30m, session.TF60m,
+	session.TFDay, session.TFWeek, session.TFMonth,
+}
+
+// seedDailyTFs are the timeframes seedDaily can touch.
+var seedDailyTFs = []session.Timeframe{session.TFDay, session.TFWeek, session.TFMonth}
+
 // seedHistory1m inserts deep-history 1m bars (all finalized) without
 // disturbing the live forming bar, then re-derives everything once per bar.
+// Per-bar emission is suppressed for the whole batch (c.seeding): a deep seed
+// can span tens of thousands of bars once cascaded, which would overflow
+// Core's drop-on-full updates channel if emitted per-bar. One BarSnapshot per
+// touched timeframe, plus one indicator reseed per attached instance, is
+// emitted instead once the batch is fully applied.
 func (e *barEngine) seedHistory1m(c *Core, symbol string, bars []feed.Bar) {
+	if len(bars) == 0 {
+		return
+	}
 	sb := e.sym(symbol)
 	oneM := sb.series[session.TF1m]
 	forming := int64(-1)
 	if lb := oneM.last(); lb != nil && lb.InProgress {
 		forming = lb.BucketMs
 	}
+	c.seeding = true
 	for _, raw := range bars {
 		if raw.BucketMs == forming {
 			continue // the live stream owns the forming bar
@@ -277,6 +297,21 @@ func (e *barEngine) seedHistory1m(c *Core, symbol string, bars []feed.Bar) {
 			e.cascade(c, sb, nb.BucketMs)
 			e.deriveDaily(c, sb, nb.BucketMs)
 		}
+	}
+	c.seeding = false
+	e.emitSeedSnapshots(c, sb, seedHist1mTFs)
+	c.inds.reseedSymbol(c, symbol)
+}
+
+// emitSeedSnapshots emits one BarSnapshot per non-empty timeframe in tfs, the
+// lossless replacement for seedHistory1m/seedDaily's per-bar emissions.
+func (e *barEngine) emitSeedSnapshots(c *Core, sb *symbolBars, tfs []session.Timeframe) {
+	for _, tf := range tfs {
+		s := sb.series[tf]
+		if len(s.bars) == 0 {
+			continue
+		}
+		c.emit(BarSnapshot{Symbol: sb.symbol, TF: tf, Bars: append([]Bar(nil), s.bars...)})
 	}
 }
 
@@ -319,8 +354,15 @@ func (e *barEngine) deriveDaily(c *Core, sb *symbolBars, m int64) {
 }
 
 // seedDaily upserts official (auction-priced, forward-adjusted) daily bars.
+// Like seedHistory1m, per-bar emission is suppressed for the whole batch;
+// one BarSnapshot per touched timeframe (+ one indicator reseed per attached
+// instance) replaces it once the batch is applied.
 func (e *barEngine) seedDaily(c *Core, symbol string, bars []feed.Bar) {
+	if len(bars) == 0 {
+		return
+	}
 	sb := e.sym(symbol)
+	c.seeding = true
 	for _, raw := range bars {
 		nb := Bar{
 			Symbol: symbol, TF: session.TFDay, BucketMs: raw.BucketMs,
@@ -332,6 +374,9 @@ func (e *barEngine) seedDaily(c *Core, symbol string, bars []feed.Bar) {
 			e.deriveWM(c, sb, raw.BucketMs)
 		}
 	}
+	c.seeding = false
+	e.emitSeedSnapshots(c, sb, seedDailyTFs)
+	c.inds.reseedSymbol(c, symbol)
 }
 
 // deriveWM recomputes the weekly and monthly bars containing day.

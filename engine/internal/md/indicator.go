@@ -126,6 +126,22 @@ func (s *indicatorSet) respec(c *Core, in *instance, spec IndicatorSpec) {
 	s.reseed(c, in)
 }
 
+// reseedSymbol rebuilds and re-snapshots every instance attached to symbol
+// (across all its timeframes), regardless of which one changed. Called once
+// after a history seed (seedHistory1m/seedDaily) instead of letting onBar's
+// per-bar "default: reseed" branch (below) fire once per seeded bar, which
+// would cost each instance an O(n) rebuild for every one of n seeded bars.
+func (s *indicatorSet) reseedSymbol(c *Core, symbol string) {
+	for k, list := range s.bySymTF {
+		if k.symbol != symbol {
+			continue
+		}
+		for _, in := range list {
+			s.reseed(c, in)
+		}
+	}
+}
+
 // reseed rebuilds an instance from finalized history and emits snapshots.
 func (s *indicatorSet) reseed(c *Core, in *instance) {
 	ca, err := newCalc(in.spec)

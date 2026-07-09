@@ -24,6 +24,19 @@ type TapeUpdate struct {
 // BarUpdate carries one bar (in-progress or closed) for any timeframe.
 type BarUpdate struct{ Bar Bar }
 
+// BarSnapshot carries a full, ordered series for one (symbol, timeframe): the
+// lossless replacement emitted once after a history seed (SeedHistory1m/
+// SeedDaily), instead of one BarUpdate per seeded bar. A history seed can
+// touch tens of thousands of bars once cascaded across timeframes, which
+// would overflow Core's drop-on-full updates channel if emitted per-bar (see
+// Core.barOut) -- collapsing it to one message per timeframe fixes the
+// overflow at the source.
+type BarSnapshot struct {
+	Symbol string
+	TF     session.Timeframe
+	Bars   []Bar
+}
+
 // IndicatorUpdate carries either a full snapshot or a single incremental
 // point for one indicator instance/slot.
 type IndicatorUpdate struct {
@@ -50,6 +63,7 @@ func (QuoteUpdate) isUpdate()     {}
 func (BookUpdate) isUpdate()      {}
 func (TapeUpdate) isUpdate()      {}
 func (BarUpdate) isUpdate()       {}
+func (BarSnapshot) isUpdate()     {}
 func (IndicatorUpdate) isUpdate() {}
 func (MismatchUpdate) isUpdate()  {}
 func (ConnUpdate) isUpdate()      {}

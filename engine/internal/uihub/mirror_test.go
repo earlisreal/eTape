@@ -52,6 +52,55 @@ func TestMirrorBarsSeriesUpsertAndSnapshot(t *testing.T) {
 	}
 }
 
+// TestMirrorBarSnapshotFullReplace verifies md.BarSnapshot (the lossless
+// history-seed replacement for per-bar BarUpdate emission) fully replaces the
+// series in one shot -- including overwriting a stale bucket left by an
+// earlier per-bar delta -- rather than upserting into it.
+func TestMirrorBarSnapshotFullReplace(t *testing.T) {
+	m := testMirror()
+	m.applyMD(md.BarUpdate{Bar: md.Bar{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: 60_000, C: 1, InProgress: true}})
+	seed := []md.Bar{
+		{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: 60_000, C: 2},
+		{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: 120_000, C: 3},
+		{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: 180_000, C: 4},
+	}
+	d := m.applyMD(md.BarSnapshot{Symbol: "US.AAPL", TF: session.TF1m, Bars: seed})
+	if len(d) != 1 || d[0].Topic != wsmsg.TopicBars || !d[0].Snap {
+		t.Fatalf("expected one Snap-flagged bars staged frame, got %+v", d)
+	}
+	payload := d[0].Payload.([]wsmsg.Bar)
+	if len(payload) != 3 {
+		t.Fatalf("staged snapshot payload = %d bars, want 3", len(payload))
+	}
+	frames := m.snapshotFrames(wsmsg.TopicBars)
+	if len(frames) != 1 {
+		t.Fatalf("expected one bars snapshot frame (one series), got %d", len(frames))
+	}
+	series := frames[0].Payload.([]wsmsg.Bar)
+	if len(series) != 3 {
+		t.Fatalf("BarSnapshot did not fully replace the series: %d bars, want 3", len(series))
+	}
+	if series[0].C != 2 {
+		t.Fatalf("BarSnapshot did not overwrite the stale bucket: %+v", series[0])
+	}
+}
+
+// TestMirrorBarSnapshotEmptyIsNoop verifies an empty BarSnapshot (e.g. a
+// timeframe seedHistory1m touched but is still empty) produces no frame and
+// leaves any existing series untouched.
+func TestMirrorBarSnapshotEmptyIsNoop(t *testing.T) {
+	m := testMirror()
+	m.applyMD(md.BarUpdate{Bar: md.Bar{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: 60_000, C: 1}})
+	d := m.applyMD(md.BarSnapshot{Symbol: "US.AAPL", TF: session.TF1m, Bars: nil})
+	if d != nil {
+		t.Fatalf("empty BarSnapshot produced a staged frame: %+v", d)
+	}
+	series := m.bars[barKey("US.AAPL", string(session.TF1m))]
+	if len(series) != 1 {
+		t.Fatalf("empty BarSnapshot touched the existing series: %+v", series)
+	}
+}
+
 func TestMirrorExecStatusAggregate(t *testing.T) {
 	m := testMirror()
 	m.applyExec(exec.StatusUpdate{Venue: "sim", Connected: true, MasterArmed: false, Note: "up"})

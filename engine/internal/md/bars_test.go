@@ -22,6 +22,18 @@ func collectBars(us []Update, tf session.Timeframe) []Bar {
 	return out
 }
 
+// snapshotBars returns the Bars of the last BarSnapshot for (symbol, tf) in
+// us (a seedHistory1m/seedDaily emission), or nil if none was emitted.
+func snapshotBars(us []Update, symbol string, tf session.Timeframe) []Bar {
+	var out []Bar
+	for _, u := range us {
+		if bs, ok := u.(BarSnapshot); ok && bs.Symbol == symbol && bs.TF == tf {
+			out = bs.Bars
+		}
+	}
+	return out
+}
+
 func TestAuth1mWatermarkFinalizes(t *testing.T) {
 	c, drain := runCore(t)
 	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(0, 100, 101, 99, 100.5, 1000)}})
@@ -125,10 +137,10 @@ func TestDerivedDailyAndOfficialReplacement(t *testing.T) {
 	}
 	day := session.BucketStartMs(t0Ms, session.TFDay)
 	c.SeedDaily("US.AAPL", []feed.Bar{{Symbol: "US.AAPL", BucketMs: day, O: 99.8, H: 101.2, L: 98.9, C: 100.7, Volume: 5_000_000}})
-	dailies = collectBars(drain(), session.TFDay)
-	official := dailies[len(dailies)-1]
-	if official.InProgress || official.O != 99.8 || official.V != 5_000_000 {
-		t.Fatalf("official daily = %+v", official)
+	official := snapshotBars(drain(), "US.AAPL", session.TFDay)
+	last := official[len(official)-1]
+	if last.InProgress || last.O != 99.8 || last.V != 5_000_000 {
+		t.Fatalf("official daily = %+v", last)
 	}
 	// Scope the next assertion to updates emitted AFTER the official seed:
 	// runCore's drain() accumulates all history, so the pre-seed derived
@@ -151,7 +163,7 @@ func TestWeeklyDerivedFromDaily(t *testing.T) {
 		{Symbol: "US.AAPL", BucketMs: mon, O: 100, H: 105, L: 99, C: 104, Volume: 1000},
 		{Symbol: "US.AAPL", BucketMs: mon + 86_400_000, O: 104, H: 107, L: 103, C: 106, Volume: 1200},
 	})
-	weeks := collectBars(drain(), session.TFWeek)
+	weeks := snapshotBars(drain(), "US.AAPL", session.TFWeek)
 	w := weeks[len(weeks)-1]
 	if w.O != 100 || w.H != 107 || w.C != 106 || w.V != 2200 {
 		t.Fatalf("weekly = %+v", w)
@@ -222,16 +234,16 @@ func TestSeedHistory1mFinalizedAndCascades(t *testing.T) {
 	}
 	c.SeedHistory1m("US.AAPL", bars)
 	us := drain()
-	oneM := collectBars(us, session.TF1m)
+	oneM := snapshotBars(us, "US.AAPL", session.TF1m)
 	if len(oneM) != 5 {
-		t.Fatalf("history 1m bars = %d, want 5", len(oneM))
+		t.Fatalf("history 1m snapshot bars = %d, want 5", len(oneM))
 	}
 	for _, b := range oneM {
 		if b.InProgress {
 			t.Fatalf("history 1m bar must be finalized: %+v", b)
 		}
 	}
-	fives := collectBars(us, session.TF5m)
+	fives := snapshotBars(us, "US.AAPL", session.TF5m)
 	if len(fives) == 0 {
 		t.Fatal("history seed did not cascade to 5m")
 	}
@@ -251,7 +263,7 @@ func TestSeedHistory1mPreservesFormingBar(t *testing.T) {
 	// History re-seed that includes the same forming bucket with different
 	// values must be ignored for the forming bucket.
 	c.SeedHistory1m("US.AAPL", []feed.Bar{bar1m(0, 1, 2, 0.5, 1.5, 42)})
-	oneM := collectBars(drain(), session.TF1m)
+	oneM := snapshotBars(drain(), "US.AAPL", session.TF1m)
 	for _, b := range oneM {
 		if b.BucketMs == t0Ms && (b.O != 100 || b.V != 1000) {
 			t.Fatalf("history seed clobbered the live forming bar: %+v", b)
@@ -267,7 +279,7 @@ func TestMonthlyDerivedFromDaily(t *testing.T) {
 		{Symbol: "US.AAPL", BucketMs: mon, O: 100, H: 105, L: 99, C: 104, Volume: 1000},
 		{Symbol: "US.AAPL", BucketMs: mon + 86_400_000, O: 104, H: 107, L: 103, C: 106, Volume: 1200},
 	})
-	months := collectBars(drain(), session.TFMonth)
+	months := snapshotBars(drain(), "US.AAPL", session.TFMonth)
 	m := months[len(months)-1]
 	if m.O != 100 || m.H != 107 || m.C != 106 || m.V != 2200 {
 		t.Fatalf("monthly = %+v", m)

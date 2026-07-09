@@ -12,6 +12,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/md"
+	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
 
@@ -106,6 +107,53 @@ func TestHubSubscribeSendsSnapshotThenCoalescedDelta(t *testing.T) {
 	k, tp = decodeKindTopic(t, after[len(after)-1])
 	if k != "delta" || tp != "md.quote" {
 		t.Fatalf("last frame should be md.quote delta, got %s/%s", k, tp)
+	}
+}
+
+// TestHubBarSnapshotBroadcastsImmediatelyNotCoalesced verifies a bars
+// full-series snapshot (the history-seed replacement) bypasses classMDKeep's
+// normal keep-latest coalescing (which would otherwise wait for the next md
+// tick, and could be superseded before it ever fires) and reaches the client
+// whole, in one frame -- the "slow consumer never sees the seed" regression
+// this fix targets.
+func TestHubBarSnapshotBroadcastsImmediatelyNotCoalesced(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	c := &fakeClient{nid: 1}
+	h.Register(c)
+	h.Subscribe(c, wsmsg.TopicBars)
+	syncHub(h)
+	before := len(c.got())
+
+	const n = 500
+	bars := make([]md.Bar, n)
+	for i := range bars {
+		bars[i] = md.Bar{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: int64(i) * 60_000, C: float64(i)}
+	}
+	h.PublishMD(md.BarSnapshot{Symbol: "US.AAPL", TF: session.TF1m, Bars: bars})
+	syncHub(h) // no mdTick.Advance: a coalesced delta would NOT appear yet
+
+	after := c.got()
+	if len(after) != before+1 {
+		t.Fatalf("bars snapshot did not broadcast immediately: before=%d after=%d", before, len(after))
+	}
+	frame := after[len(after)-1]
+	k, tp := decodeKindTopic(t, frame)
+	if k != "snapshot" || tp != "md.bars" {
+		t.Fatalf("expected an immediate md.bars snapshot frame, got %s/%s", k, tp)
+	}
+	var payload struct {
+		Payload []wsmsg.Bar `json:"payload"`
+	}
+	if err := json.Unmarshal(frame, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.Payload) != n {
+		t.Fatalf("snapshot payload bars = %d, want %d (lossless)", len(payload.Payload), n)
 	}
 }
 
