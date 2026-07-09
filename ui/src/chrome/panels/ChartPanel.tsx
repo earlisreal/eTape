@@ -280,6 +280,16 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     let lastIndicatorsRev = -1;
     let lastFillsRev = -1;
     let lastDrawingsRev = -1;
+    // Dragging a pane separator (e.g. resizing the MACD sub-pane by hand) changes
+    // pane heights inside LWC directly — it bumps no store revision and moves no
+    // crosshair, so none of the revision checks above ever see it. Without this
+    // fingerprint, isDirty() stays false, paint() never runs, and the legend +
+    // pane-control button cluster (positioned from paneOffsets/rightAxisWidth,
+    // recomputed only in paint() below) stay pinned at their pre-drag coordinates.
+    // Comparing a cheap join of heights + axis width catches any pane-geometry
+    // change — drag, collapse, close — self-correcting every frame during a
+    // continuous drag.
+    let lastPaneSig = "";
     const off = scheduler.register({
       id: `chart:${config.id}`,
       isDirty: () => {
@@ -287,12 +297,14 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         const indicatorsRev = stores.indicators.getRev();
         const fillsRev = stores.fills.getRev();
         const drawingsRev = stores.drawings.getRev();
+        const paneSig = `${facade.paneHeights().join(",")}|${facade.priceScaleWidth()}`;
         const changed = barsRev !== lastBarsRev || indicatorsRev !== lastIndicatorsRev || fillsRev !== lastFillsRev || drawingsRev !== lastDrawingsRev
-          || forceRepaintRef.current;
+          || paneSig !== lastPaneSig || forceRepaintRef.current;
         lastBarsRev = barsRev;
         lastIndicatorsRev = indicatorsRev;
         lastFillsRev = fillsRev;
         lastDrawingsRev = drawingsRev;
+        lastPaneSig = paneSig;
         forceRepaintRef.current = false;
         return changed;
       },

@@ -46,6 +46,10 @@ export function TVLegend({ chrome, symbol, timeframe, instances, paneOffsets, ri
         write("vol", fmtVol(v.volume), chrome.muted);
         for (const row of v.indicators) {
           row.values.forEach((val, idx) => write(`ind-${row.instanceId}-${idx}`, fmtPrice(val), row.colors[idx]));
+          // Always write (even blank) so a stale OPEN/CLOSE doesn't linger once the
+          // signal goes back to null (e.g. scrubbed to a bar with a missing value).
+          write(`sig-${row.instanceId}`, row.signal === "open" ? "OPEN" : row.signal === "close" ? "CLOSE" : "",
+            row.signal === "open" ? chrome.up : row.signal === "close" ? chrome.down : undefined);
         }
       },
     };
@@ -66,6 +70,9 @@ export function TVLegend({ chrome, symbol, timeframe, instances, paneOffsets, ri
         style={{ display: "flex", alignItems: "center", gap: 6, pointerEvents: "auto" }}>
         <span style={{ color: chrome.muted }}>{legendLabel(inst)}</span>
         {descs.map((s, idx) => <span key={s.slot} data-testid={`legend-ind-${inst.instanceId}-${idx}`} ref={setCell(`ind-${inst.instanceId}-${idx}`)} />)}
+        {inst.type === "MACD" && (
+          <span data-testid={`legend-sig-${inst.instanceId}`} ref={setCell(`sig-${inst.instanceId}`)} style={{ fontWeight: 600 }} />
+        )}
         {hovered === inst.instanceId && (
           <span style={{ display: "inline-flex", gap: 2 }}>
             <button aria-label={`hide ${inst.instanceId}`} onClick={() => onToggleHidden(inst.instanceId)} style={ctrlBtn(chrome)}>

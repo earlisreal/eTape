@@ -69,4 +69,25 @@ describe("TVLegend", () => {
     render(<Harness onToggle={() => {}} hRef={hRef} instances={[ema]} />);
     expect(screen.queryByLabelText(/close pane|collapse pane|expand pane/)).toBeNull();
   });
+
+  it("writes an OPEN/CLOSE signal badge for a MACD row, tinted up/down", () => {
+    const hRef: { current: TVLegendHandle | null } = { current: null };
+    render(<Harness onToggle={() => {}} hRef={hRef} instances={[macd]} />);
+    hRef.current!.update({ o: 10, h: 12, l: 9.5, c: 11.5, changePct: 1.2, up: true, volume: null,
+      indicators: [{ instanceId: "m1", label: "MACD 12 26 9", paneIndex: 1, values: [0.5, 0.3, 0.2],
+        colors: [chrome.accent, chrome.accent, chrome.accent], signal: "open" }] });
+    const badge = screen.getByTestId("legend-sig-m1");
+    expect(badge.textContent).toBe("OPEN");
+    // jsdom normalizes a hex color style to rgb(...); build the expected value the
+    // same way the DOM would, rather than comparing raw hex to normalized rgb.
+    const probe = document.createElement("span");
+    probe.style.color = chrome.up;
+    expect(badge.style.color).toBe(probe.style.color);
+  });
+
+  it("does not render a signal badge cell for a non-MACD indicator", () => {
+    const hRef: { current: TVLegendHandle | null } = { current: null };
+    render(<Harness onToggle={() => {}} hRef={hRef} instances={[ema]} />);
+    expect(screen.queryByTestId("legend-sig-e1")).toBeNull();
+  });
 });

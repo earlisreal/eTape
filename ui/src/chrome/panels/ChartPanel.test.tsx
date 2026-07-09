@@ -41,7 +41,7 @@ vi.mock("lightweight-charts", () => ({
 import { ChartPanel } from "./ChartPanel";
 import { makeStores } from "../../data/registry";
 import { Scheduler } from "../../render/Scheduler";
-import { browserRaf } from "../../render/surface";
+import { browserRaf, type Surface } from "../../render/surface";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
 import type { AckMsg } from "../../wire/contract";
 import { FakeDrawingBus, FakeDrawingBusHub } from "../../../test/fakes";
@@ -56,9 +56,9 @@ vi.stubGlobal("ResizeObserver", MockResizeObserver);
 
 beforeEach(() => { vi.clearAllMocks(); cleanup(); });
 
-function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>) {
+function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sharedScheduler?: Scheduler) {
   const stores = sharedStores ?? makeStores();
-  const scheduler = new Scheduler(browserRaf, () => {});
+  const scheduler = sharedScheduler ?? new Scheduler(browserRaf, () => {});
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
   const commands = {
     sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })),
@@ -72,7 +72,7 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>) {
         linkGroups={linkGroups} commands={commands} onConfigChange={onConfigChange} />
     </ThemeProvider>,
   );
-  return { ...utils, stores, onConfigChange };
+  return { ...utils, stores, onConfigChange, scheduler };
 }
 
 describe("ChartPanel", () => {
@@ -325,5 +325,36 @@ describe("ChartPanel", () => {
     fireEvent.click(getByRole("button", { name: "expand pane 1" }));
     expect(paneApis[1].setStretchFactor).toHaveBeenLastCalledWith(1); // restores the pre-collapse factor (mock's default)
     expect(getByRole("button", { name: "collapse pane 1" })).toBeTruthy();
+  });
+
+  it("repositions the MACD legend + pane-control buttons after a manual pane-separator drag, even though no store revision changed", () => {
+    // Regression: dragging the pane divider changes LWC's internal pane heights
+    // directly — no bar/indicator/fill/drawing revision bumps and no crosshair
+    // move — so isDirty() must independently notice a pane-geometry change,
+    // otherwise paint() never runs and paneOffsets (which the legend + button
+    // cluster are positioned from) stays stuck at its pre-drag value.
+    const scheduler = new Scheduler(browserRaf, () => {});
+    let surface: Surface | undefined;
+    vi.spyOn(scheduler, "register").mockImplementation((s: Surface) => { surface = s; return vi.fn(); });
+    const { getByRole } = renderChart("c1", undefined, scheduler);
+    fireEvent.click(getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add MACD" }));
+
+    surface!.isDirty(); // baseline the store-rev + pane-geometry cursors (mirrors the Ladder/Tape pattern)
+
+    // Simulate a manual drag: main pane shrinks, MACD sub-pane grows — heights change,
+    // nothing else does.
+    paneApis[0].getHeight.mockReturnValue(350);
+    paneApis[1].getHeight.mockReturnValue(170);
+    try {
+      expect(surface!.isDirty()).toBe(true); // the pane-geometry fingerprint alone must trip dirty
+      act(() => { surface!.paint(); });
+
+      const controlBox = getByRole("button", { name: "close pane 1" }).parentElement as HTMLElement;
+      expect(controlBox.style.top).toBe("356px"); // paneOffsets[1] (= new heights[0], 350) + 6
+    } finally {
+      paneApis[0].getHeight.mockReturnValue(400); // restore defaults for later tests in this file
+      paneApis[1].getHeight.mockReturnValue(120);
+    }
   });
 });

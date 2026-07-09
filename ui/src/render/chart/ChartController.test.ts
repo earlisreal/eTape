@@ -629,6 +629,66 @@ describe("ChartController.setPaneCollapsed", () => {
     c.setPaneCollapsed(1, false);
     expect(facade.stretchFactors.get(1)).toBe(1);
   });
+
+  it("collapsing a pane hides every series in it (only the legend stays visible); expanding restores visibility", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.addIndicator({ instanceId: "m1", type: "MACD", params: withDefaultParams("MACD") });
+    const macdSeries = facade.created.filter((x) => x.pane === 1).map((x) => x.series);
+    expect(macdSeries.length).toBe(3); // macd, signal, hist
+
+    c.setPaneCollapsed(1, true);
+    for (const s of macdSeries) expect(s.optionCalls.at(-1)).toMatchObject({ visible: false });
+
+    c.setPaneCollapsed(1, false);
+    for (const s of macdSeries) expect(s.optionCalls.at(-1)).toMatchObject({ visible: true });
+  });
+
+  it("collapsing a pane does not affect series in other panes", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.addIndicator({ instanceId: "e1", type: "EMA", params: { period: 9 } }); // main pane (0)
+    const emaSeries = facade.created.find((x) => x.pane === 0 && x.kind === "line")!.series;
+    c.setPaneCollapsed(1, true);
+    expect(emaSeries.optionCalls.some((o) => (o as { visible?: boolean }).visible === false)).toBe(false);
+  });
+
+  it("expanding a collapsed pane respects a per-slot hidden style — a hidden histogram stays hidden", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.addIndicator({ instanceId: "m1", type: "MACD", params: withDefaultParams("MACD"), styles: { hist: { hidden: true } } });
+    const hist = facade.created.find((x) => (x.options as { color?: string }).color === LIGHT.indMacdHist)!.series;
+    const macdLine = facade.created.find((x) => (x.options as { color?: string }).color === LIGHT.indMacdLine)!.series;
+
+    c.setPaneCollapsed(1, true);
+    c.setPaneCollapsed(1, false);
+
+    expect(hist.optionCalls.at(-1)).toMatchObject({ visible: false }); // stays hidden — per-slot hidden survives collapse/expand
+    expect(macdLine.optionCalls.at(-1)).toMatchObject({ visible: true });
+  });
+
+  it("a param edit made while collapsed re-creates the series still hidden (collapsed state survives re-subscribe)", () => {
+    // Mirrors real usage: IndicatorSettingsDialog.onApply spreads the current
+    // instance (which carries `collapsed`, kept in sync by ChartPanel's React
+    // state) and only overrides params/styles — so the edited instance handed to
+    // updateIndicator always carries the live collapsed flag.
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.addIndicator({ instanceId: "m1", type: "MACD", params: withDefaultParams("MACD") });
+    c.setPaneCollapsed(1, true);
+    c.updateIndicator({ instanceId: "m1", type: "MACD", params: { fast: 10, slow: 20, signal: 5 }, collapsed: true }); // param change → re-add
+    const newMacdSeries = facade.created.filter((x) => x.pane === 1 && (x.options as { color?: string }).color === LIGHT.indMacdLine);
+    expect(newMacdSeries.length).toBeGreaterThan(0);
+    expect((newMacdSeries.at(-1)!.options as { visible?: boolean }).visible).toBe(false);
+  });
 });
 
 describe("ChartController chart settings", () => {

@@ -211,7 +211,7 @@ export class ChartController {
           // No highlighted last-value box on the price axis either — only the candle
           // (the main series, set up separately via candleOptions) keeps that.
           lastValueVisible: false,
-          visible: !(resolved.hidden ?? false) && !d.hidden,
+          visible: !(resolved.hidden ?? false) && !d.hidden && !(resolved.collapsed ?? false),
           // No crosshair dot riding the study lines (TV doesn't draw one for
           // overlay indicators; the crosshair itself is free-moving — chartTheme).
           ...(d.kind === "line" ? { lineWidth: d.width, lineStyle: LWC_LINE_STYLE[d.lineStyle], crosshairMarkerVisible: false } : {}),
@@ -270,10 +270,11 @@ export class ChartController {
     }
     existing.inst = next; // params unchanged → style/visibility only, applied in place (no re-subscribe)
     const hidden = next.hidden ?? false;
+    const collapsed = next.collapsed ?? false;
     for (const d of describeIndicator(next, this.palette)) {
       existing.series.get(d.key)?.applyOptions({
         color: d.color,
-        visible: !hidden && !d.hidden,
+        visible: !hidden && !d.hidden && !collapsed,
         ...(d.kind === "line" ? { lineWidth: d.width, lineStyle: LWC_LINE_STYLE[d.lineStyle] } : {}),
       });
     }
@@ -343,6 +344,12 @@ export class ChartController {
   // Collapsing remembers the current stretch factor only if it's not already at/below
   // the collapsed floor, so repeated collapse calls don't overwrite the remembered
   // expanded size with the collapsed one.
+  //
+  // Collapsing also hides every series living in that pane — only the (DOM, separate)
+  // legend stays visible, per the "collapse should hide the drawing" behavior — and
+  // restores each series to its normal (hidden/per-slot-hidden-aware) visibility on
+  // expand. `entry.inst.collapsed` is kept in sync so a later updateIndicator (e.g. a
+  // style-only edit made while collapsed) doesn't accidentally re-show it.
   setPaneCollapsed(paneIndex: number, collapsed: boolean): void {
     if (collapsed) {
       const cur = this.facade.paneStretchFactor(paneIndex);
@@ -350,6 +357,16 @@ export class ChartController {
       this.facade.setPaneStretchFactor(paneIndex, COLLAPSED_STRETCH);
     } else {
       this.facade.setPaneStretchFactor(paneIndex, this.expandedStretchFactor.get(paneIndex) ?? 1);
+    }
+    for (const entry of this.indicators.values()) {
+      let inPane = false;
+      for (const d of describeIndicator(entry.inst, this.palette)) {
+        if (d.paneIndex !== paneIndex) continue;
+        inPane = true;
+        const hidden = entry.inst.hidden ?? false;
+        entry.series.get(d.key)?.applyOptions({ visible: !hidden && !d.hidden && !collapsed });
+      }
+      if (inPane) entry.inst = { ...entry.inst, collapsed };
     }
   }
 

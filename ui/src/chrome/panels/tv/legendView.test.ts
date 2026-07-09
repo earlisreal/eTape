@@ -39,4 +39,33 @@ describe("computeLegendView", () => {
     expect(v.c).toBeNull();
     expect(v.indicators[0].values).toEqual([null]);
   });
+
+  it("MACD: signal is 'open' when the fast (macd) line is at/above the slow (signal) line", () => {
+    const reader: IndicatorReader = {
+      series: (k) => (k === "m1#macd" ? [{ timeMs: Date.parse("2026-07-08T13:31:00Z"), value: 0.5 }]
+        : k === "m1#signal" ? [{ timeMs: Date.parse("2026-07-08T13:31:00Z"), value: 0.3 }] : []),
+    };
+    const v = computeLegendView(bars, reader, [{ instanceId: "m1", type: "MACD", params: { fast: 12, slow: 26, signal: 9 } }], LIGHT, null);
+    expect(v.indicators[0].signal).toBe("open");
+  });
+
+  it("MACD: signal is 'close' when the fast (macd) line is below the slow (signal) line", () => {
+    const reader: IndicatorReader = {
+      series: (k) => (k === "m1#macd" ? [{ timeMs: Date.parse("2026-07-08T13:31:00Z"), value: 0.2 }]
+        : k === "m1#signal" ? [{ timeMs: Date.parse("2026-07-08T13:31:00Z"), value: 0.3 }] : []),
+    };
+    const v = computeLegendView(bars, reader, [{ instanceId: "m1", type: "MACD", params: { fast: 12, slow: 26, signal: 9 } }], LIGHT, null);
+    expect(v.indicators[0].signal).toBe("close");
+  });
+
+  it("MACD: signal is null when a value is missing (cold series)", () => {
+    const v = computeLegendView(bars, emptyReader, [{ instanceId: "m1", type: "MACD", params: { fast: 12, slow: 26, signal: 9 } }], LIGHT, null);
+    expect(v.indicators[0].signal).toBeNull();
+  });
+
+  it("non-MACD rows never get a signal", () => {
+    const reader: IndicatorReader = { series: (k) => (k === "e1" ? [{ timeMs: Date.parse("2026-07-08T13:31:00Z"), value: 10.7 }] : []) };
+    const v = computeLegendView(bars, reader, [{ instanceId: "e1", type: "EMA", params: { period: 9 } }], LIGHT, null);
+    expect(v.indicators[0].signal).toBeNull();
+  });
 });
