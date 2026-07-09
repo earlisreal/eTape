@@ -59,6 +59,7 @@ export function ScannerPanel(
   // stray single click while scanning the list should never reassign the linked
   // group's live symbol.
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
+  const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
 
   // ET-midnight dedup reset: clear the per-session seen-sets so the next session's
   // first prints flash fresh. Re-arms after each fire.
@@ -129,7 +130,7 @@ export function ScannerPanel(
           <tr style={{ color: palette.textMuted, textAlign: "right" }}>
             {COLUMNS.map((c) => (
               <th key={c.col} style={{ ...th, textAlign: c.align, cursor: "pointer" }} onClick={() => clickSort(c.col)}
-                className={`col-head${sort?.col === c.col ? " sort-active" : ""}`}>
+                className={`col-head sortable${sort?.col === c.col ? " sort-active" : ""}`}>
                 {c.label} {sortIndicator(sort, c.col)}
               </th>
             ))}
@@ -142,9 +143,13 @@ export function ScannerPanel(
             <tr key={r.symbol}
               onClick={() => setSelectedSymbol(r.symbol)}
               onDoubleClick={() => linkGroups.focus(config.group ?? "green", r.symbol)}
+              onMouseEnter={() => setHoveredSymbol(r.symbol)}
+              onMouseLeave={() => setHoveredSymbol((h) => (h === r.symbol ? null : h))}
               style={{ cursor: "pointer", textAlign: "right", opacity: r.muted ? 0.55 : 1, userSelect: "none",
-                background: selected ? "rgba(154,106,27,.16)" : r.isNewHit ? "rgba(154,106,27,.10)" : "transparent",
-                boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : r.isNewHit ? `inset 2px 0 0 ${palette.accent}` : "none" }}>
+                background: selected ? "rgba(154,106,27,.16)" : r.isNewHit ? "rgba(154,106,27,.10)"
+                  : hoveredSymbol === r.symbol ? "rgba(154,106,27,.06)" : "transparent",
+                boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : r.isNewHit ? `inset 2px 0 0 ${palette.accent}` : "none",
+                transition: "background 120ms ease" }}>
               <td style={{ textAlign: "left", padding: "2px 8px" }}>{r.symbol}</td>
               <td style={{ padding: "2px 8px", color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>{formatChangePct(r.changePct)}</td>
               <td style={{ padding: "2px 8px" }}>{r.last === null ? "—" : r.last.toFixed(2)}</td>

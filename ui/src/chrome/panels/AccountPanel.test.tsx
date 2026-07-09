@@ -106,6 +106,23 @@ describe("AccountPanel", () => {
     expect(alpacaBtn.getAttribute("data-armed")).toBe("true");
   });
 
+  // --- Task 4: HoverButton default overlay on the arm chip, dynamic armed color preserved base-style ---
+  it("hovering an arm chip applies the default hover overlay without losing its armed styling on mouseleave", () => {
+    const { props, stores } = mkProps();
+    wrap(props);
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) }));
+    const btn = screen.getByTestId("venue-arm-alpaca-paper") as HTMLButtonElement;
+    expect(btn.style.background).toBe("transparent");
+
+    fireEvent.mouseEnter(btn);
+    expect(btn.style.background).toBe("var(--surface)");
+    expect(btn.style.color).toBe("var(--text)");
+
+    fireEvent.mouseLeave(btn);
+    expect(btn.style.background).toBe("transparent");
+    expect(btn.style.color).toBe(hexToRgb(LIGHT.accent)); // armed color restored, not stuck on the overlay
+  });
+
   // --- color discipline (Task 9 review fix): arm chip is bronze/muted, never green/amber ---
   it("styles per-venue arm chips bronze/muted rather than green/amber", () => {
     const { props, stores } = mkProps();

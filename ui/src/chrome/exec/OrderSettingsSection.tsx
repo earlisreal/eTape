@@ -15,6 +15,7 @@
 import { useState, type CSSProperties } from "react";
 import { useTheme } from "../ThemeProvider";
 import { FONTS, type Palette } from "../../render/palette";
+import { HoverButton } from "../controls/HoverButton";
 import type { Side, OrderType, TIF } from "../../wire/contract";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 import type { SizingSpec, SizingMode } from "./sizing";
@@ -145,11 +146,11 @@ function TemplateCard({ t, palette, dup, rawEdits, setRawEdit, clearRawEdit, pat
             style={hotkeyBox}
           />
           {t.hotkey ? (
-            <button data-testid={`tmpl-unbind-${t.id}`} title="unbind" aria-label={`Unbind hotkey for ${t.label}`}
-              onClick={() => patch(t.id, { hotkey: "" })} style={iconBtn(palette, palette.textMuted)}>×</button>
+            <HoverButton data-testid={`tmpl-unbind-${t.id}`} title="unbind" aria-label={`Unbind hotkey for ${t.label}`}
+              onClick={() => patch(t.id, { hotkey: "" })} style={iconBtn(palette, palette.textMuted)}>×</HoverButton>
           ) : null}
           {dup ? <span style={{ color: palette.danger, fontSize: 10 }}>dup</span> : null}
-          <button title="remove" aria-label={`Remove ${t.label}`} onClick={() => onRemove(t.id)} style={iconBtn(palette, palette.danger)}>×</button>
+          <HoverButton title="remove" aria-label={`Remove ${t.label}`} onClick={() => onRemove(t.id)} style={iconBtn(palette, palette.danger)}>×</HoverButton>
         </div>
       </div>
 
@@ -346,7 +347,7 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
-        <button
+        <HoverButton
           className="btn" data-testid="save" disabled={hasConflict} onClick={() => onSave({ ...config, templates })}
           style={{
             ...actionBtn, fontWeight: 700, cursor: hasConflict ? "not-allowed" : "pointer",
@@ -354,9 +355,15 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
             borderColor: hasConflict ? palette.border : palette.accent,
             color: palette.bg,
           }}
+          // Accent CTA — same principle as .btn-primary's hover fix in
+          // global.css: keep the accent background/color and add a ring
+          // rather than washing to the default neutral overlay. disabled
+          // (hasConflict) never applies hoverStyle (HoverButton gates on
+          // !disabled), so the grey disabled look is untouched.
+          hoverStyle={{ background: palette.accent, color: palette.bg, boxShadow: `inset 0 0 0 1px ${palette.bg}` }}
         >
           Save
-        </button>
+        </HoverButton>
       </div>
     </div>
   );

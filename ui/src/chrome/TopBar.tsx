@@ -2,6 +2,7 @@ import { LatencyReadout } from "./LatencyReadout";
 import { SessionClock } from "./SessionClock";
 import type { HealthStore } from "../data/HealthStore";
 import { useTheme } from "./ThemeProvider";
+import { HoverButton } from "./controls/HoverButton";
 
 export interface TopBarProps {
   workspaceName: string;
@@ -34,13 +35,20 @@ export function TopBar(p: TopBarProps): JSX.Element {
         <button className="btn" onClick={p.onAddPanel}>+ Add panel</button>
         <button className="btn" onClick={p.onNewWindow}>⧉ New window</button>
         <button className="btn" aria-label="Settings" onClick={p.onOpenSettings}>⚙ Settings</button>
-        <button data-testid="arm-chip" className="btn" onClick={p.onArmToggle}
+        <HoverButton data-testid="arm-chip" className="btn" onClick={p.onArmToggle}
           style={{ fontWeight: 600, letterSpacing: ".08em",
             color: p.armed ? palette.accent : palette.textMuted,
             borderColor: p.armed ? palette.accent : palette.borderStrong,
-            background: p.armed ? "rgba(154,106,27,.12)" : "rgba(106,114,128,.12)" }}>
+            background: p.armed ? "rgba(154,106,27,.12)" : "rgba(106,114,128,.12)" }}
+          // The chip's color/border/background ARE the armed/disarmed state
+          // indicator (className="btn" sets an inline background too, which
+          // permanently defeats global.css's .btn:hover rules — see HoverButton's
+          // own doc comment). Rather than washing to the default neutral overlay,
+          // hover adds an inset ring in the SAME state color so armed reads
+          // brighter/armed and disarmed reads brighter/disarmed, never neutral.
+          hoverStyle={{ boxShadow: `inset 0 0 0 1px ${p.armed ? palette.accent : palette.borderStrong}` }}>
           {p.armed ? "ARMED" : "DISARMED"}
-        </button>
+        </HoverButton>
       </div>
     </div>
   );

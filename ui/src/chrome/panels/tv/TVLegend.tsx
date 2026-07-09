@@ -4,6 +4,7 @@ import { TV_FONT, TV_GEOM, type TvChrome } from "../../../render/chart/tvTheme";
 import { INDICATOR_CATALOG, type IndicatorInstance } from "../../../render/chart/indicatorSeries";
 import type { LegendView } from "./legendView";
 import { IconEye, IconEyeOff, IconGear, IconClose, IconChevronDown } from "./tvIcons";
+import { HoverButton } from "../../controls/HoverButton";
 
 export interface TVLegendHandle { update(view: LegendView): void }
 export interface TVLegendProps {
@@ -75,11 +76,14 @@ export function TVLegend({ chrome, symbol, timeframe, instances, paneOffsets, ri
         )}
         {hovered === inst.instanceId && (
           <span style={{ display: "inline-flex", gap: 2 }}>
-            <button aria-label={`hide ${inst.instanceId}`} onClick={() => onToggleHidden(inst.instanceId)} style={ctrlBtn(chrome)}>
+            <HoverButton aria-label={`hide ${inst.instanceId}`} onClick={() => onToggleHidden(inst.instanceId)}
+              style={ctrlBtn(chrome)} hoverStyle={{ background: chrome.hover, color: chrome.text }}>
               {inst.hidden ? <IconEyeOff size={13} /> : <IconEye size={13} />}
-            </button>
-            <button aria-label={`settings ${inst.instanceId}`} onClick={() => onEditIndicator(inst.instanceId)} style={ctrlBtn(chrome)}><IconGear size={13} /></button>
-            <button aria-label={`remove ${inst.instanceId}`} onClick={() => onRemoveIndicator(inst.instanceId)} style={ctrlBtn(chrome)}><IconClose size={13} /></button>
+            </HoverButton>
+            <HoverButton aria-label={`settings ${inst.instanceId}`} onClick={() => onEditIndicator(inst.instanceId)}
+              style={ctrlBtn(chrome)} hoverStyle={{ background: chrome.hover, color: chrome.text }}><IconGear size={13} /></HoverButton>
+            <HoverButton aria-label={`remove ${inst.instanceId}`} onClick={() => onRemoveIndicator(inst.instanceId)}
+              style={ctrlBtn(chrome)} hoverStyle={{ background: chrome.hover, color: chrome.text }}><IconClose size={13} /></HoverButton>
           </span>
         )}
       </div>
@@ -108,15 +112,17 @@ export function TVLegend({ chrome, symbol, timeframe, instances, paneOffsets, ri
               {paneInstances(pane).map(indicatorRow)}
             </div>
             <div style={paneControlBox(paneOffsets[pane] ?? 0)}>
-              <button aria-label={collapsed ? `expand pane ${pane}` : `collapse pane ${pane}`}
-                onClick={() => onToggleCollapsePane(pane)} style={ctrlBtn(chrome)}>
+              <HoverButton aria-label={collapsed ? `expand pane ${pane}` : `collapse pane ${pane}`}
+                onClick={() => onToggleCollapsePane(pane)} style={ctrlBtn(chrome)}
+                hoverStyle={{ background: chrome.hover, color: chrome.text }}>
                 <span style={{ display: "inline-flex", transform: collapsed ? "rotate(180deg)" : undefined }}>
                   <IconChevronDown size={13} />
                 </span>
-              </button>
-              <button aria-label={`close pane ${pane}`} onClick={() => onClosePane(pane)} style={ctrlBtn(chrome)}>
+              </HoverButton>
+              <HoverButton aria-label={`close pane ${pane}`} onClick={() => onClosePane(pane)} style={ctrlBtn(chrome)}
+                hoverStyle={{ background: chrome.hover, color: chrome.text }}>
                 <IconClose size={13} />
-              </button>
+              </HoverButton>
             </div>
           </div>
         );

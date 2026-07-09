@@ -128,6 +128,38 @@ describe("PanelFrame", () => {
     fireEvent.click(screen.getByLabelText("close panel"));
     expect(onClose).toHaveBeenCalled();
   });
+
+  // Task 4: close button uses HoverButton's default overlay (var(--surface)/var(--text)).
+  it("hovering the close button applies the default surface/text overlay", () => {
+    renderFrame();
+    const btn = screen.getByLabelText("close panel") as HTMLButtonElement;
+    expect(btn.style.background).toBe("transparent");
+    fireEvent.mouseEnter(btn);
+    expect(btn.style.background).toBe("var(--surface)");
+    expect(btn.style.color).toBe("var(--text)");
+    fireEvent.mouseLeave(btn);
+    expect(btn.style.background).toBe("transparent");
+  });
+
+  // Task 4: the swatch's background IS the group color, so hover must use a ring
+  // (not a background swap), and the existing border (pinned vs. grouped) must
+  // survive hover untouched.
+  it("hovering the link-group swatch shows a ring, not a background swap, and preserves its border", () => {
+    renderFrame({ group: "red" }); // grouped (not pinned) — real swatch color, "1px solid transparent" border
+    const btn = screen.getByLabelText("link group") as HTMLButtonElement;
+    const bgBefore = btn.style.background;
+    const borderBefore = btn.style.border;
+    expect(bgBefore).not.toBe("transparent"); // real group color, not the pinned/no-group case
+    expect(borderBefore).toBe("1px solid transparent");
+
+    fireEvent.mouseEnter(btn);
+    expect(btn.style.background).toBe(bgBefore);
+    expect(btn.style.border).toBe(borderBefore);
+    expect(btn.style.boxShadow).toBe("inset 0 0 0 2px var(--text-muted)");
+
+    fireEvent.mouseLeave(btn);
+    expect(btn.style.boxShadow).toBe("");
+  });
 });
 
 describe("PanelFrame — type-to-load (Task 13)", () => {

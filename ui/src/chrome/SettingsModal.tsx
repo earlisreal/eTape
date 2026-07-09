@@ -4,6 +4,7 @@ import { VenuesSection } from "./exec/VenuesSection";
 import { SoundsSection } from "../sound/SoundsSection";
 import { useOrderConfig } from "./exec/useOrderConfig";
 import { useTheme } from "./ThemeProvider";
+import { HoverButton } from "./controls/HoverButton";
 import type { AckMsg } from "../wire/contract";
 
 export type SettingsSection = "appearance" | "orders" | "venues" | "sounds";
@@ -25,12 +26,22 @@ export function SettingsModal({ open, section, onSection, onClose, commands }:
         <nav style={{ borderRight: `1px solid ${palette.border}`, padding: 12 }}>
           <div className="serif" style={{ fontWeight: 600, marginBottom: 10 }}>Settings</div>
           {NAV.map((n) => (
-            <button key={n.id} className="btn" aria-label={n.label} onClick={() => onSection(n.id)}
+            <HoverButton key={n.id} className="btn" aria-label={n.label} onClick={() => onSection(n.id)}
               style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 4, background: "transparent",
                 borderColor: "transparent", borderLeft: `3px solid ${section === n.id ? palette.accent : "transparent"}`,
-                color: section === n.id ? palette.text : palette.textMuted, paddingLeft: 8 }}>
+                color: section === n.id ? palette.text : palette.textMuted, paddingLeft: 8 }}
+              // className="btn" sets an inline background too, which permanently
+              // defeats global.css's .btn:hover rules (see HoverButton's own doc
+              // comment). The active tab's own resting color already IS the
+              // "highlighted" reading, so hover just promotes the muted/inactive
+              // tab to the same text color — same technique as
+              // ChartHeaderControls' timeframe hover (active keeps its own
+              // resting color, inactive brightens toward it). The border-left
+              // accent stripe (untouched here, preserved from base style) stays
+              // the true active/inactive differentiator, so it never washes out.
+              hoverStyle={{ background: palette.surface, color: palette.text }}>
               {n.label}
-            </button>
+            </HoverButton>
           ))}
         </nav>
         <section style={{ padding: 16, overflow: "auto", minHeight: 0 }}>

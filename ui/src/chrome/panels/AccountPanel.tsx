@@ -1,5 +1,6 @@
 import { useMemo, useState, useSyncExternalStore } from "react";
 import type { PanelProps } from "./registry";
+import { HoverButton } from "../controls/HoverButton";
 import type { PositionRow } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
@@ -107,8 +108,8 @@ function OrdersTable({
     <div data-testid="orders-table" style={{ height, flexShrink: 0, overflow: "hidden", display: "flex", flexDirection: "column", background: palette.bg, color: palette.text, fontSize: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
         <span style={{ fontWeight: 600 }}>Open Orders ({views.length})</span>
-        <button data-testid="cancel-all" onClick={() => void oc.cancelAll("everything")}
-          style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.warn}`, background: "transparent", color: palette.warn, cursor: "pointer" }}>Cancel All</button>
+        <HoverButton data-testid="cancel-all" onClick={() => void oc.cancelAll("everything")}
+          style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.warn}`, background: "transparent", color: palette.warn, cursor: "pointer" }}>Cancel All</HoverButton>
         {reconciling && (
           <span data-testid="reconcile-badge" className="chip chip-pending" style={{ marginLeft: "auto" }}>
             stream gap — reconciled, verify
@@ -149,8 +150,8 @@ function OrdersTable({
                   <td style={{ color: palette.danger, fontSize: 10 }}>{order.rejectReason}</td>
                   <td style={{ color: palette.textMuted, fontSize: 10 }}>{order.venue}</td>
                   <td>{(working || optimistic) ? (
-                    <button data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
-                      style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</button>
+                    <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
+                      style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</HoverButton>
                   ) : null}</td>
                 </tr>
               );
@@ -205,7 +206,7 @@ function StatsStrip({
           the old duplicate master ARMED button is removed). */}
       <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "0 8px" }}>
         {(status?.venues ?? []).map((v) => (
-          <button key={v.venue} data-testid={`venue-arm-${v.venue}`} data-armed={v.venueArmed}
+          <HoverButton key={v.venue} data-testid={`venue-arm-${v.venue}`} data-armed={v.venueArmed}
             title={`${v.venue}: ${v.connected ? "connected" : "disconnected"} — click to ${v.venueArmed ? "disarm" : "arm"}`}
             onClick={() => (v.venueArmed ? oc.disarm(v.venue) : oc.arm(v.venue))}
             style={{
@@ -214,7 +215,7 @@ function StatsStrip({
               borderRadius: 4, padding: "2px 6px", color: v.venueArmed ? palette.accent : palette.textMuted,
             }}>
             {dot(v.connected, `${v.venue}: ${v.connected ? "connected" : "disconnected"}`)}{v.venue}{v.venueArmed ? " ●" : " ○"}
-          </button>
+          </HoverButton>
         ))}
       </div>
     </div>
@@ -298,10 +299,10 @@ function PositionsTable({
                   <td>{formatPrice(r.avgPrice, 2)}</td>
                   <td style={{ color: r.unrealizedPnl >= 0 ? palette.up : palette.down }}>{formatPrice(r.unrealizedPnl, 2)}</td>
                   <td>{net ? null : (
-                    <button data-testid={`flatten-${r.venue}-${r.symbol}`} data-armed={armedFor(r.venue)}
+                    <HoverButton data-testid={`flatten-${r.venue}-${r.symbol}`} data-armed={armedFor(r.venue)}
                       title={armedFor(r.venue) ? "Flatten position" : "Venue disarmed — flatten still allowed (exposure-reducing)"}
                       onClick={() => flatten(r)}
-                      style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Flatten</button>
+                      style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Flatten</HoverButton>
                   )}</td>
                 </tr>
               );

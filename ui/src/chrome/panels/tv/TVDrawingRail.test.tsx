@@ -7,6 +7,15 @@ import { getTvChrome } from "../../../render/chart/tvTheme";
 
 afterEach(cleanup);
 const chrome = getTvChrome("light");
+
+// jsdom/cssstyle normalizes hex assignments to rgb() on readback; run every
+// expected color through the same normalization so we're not hardcoding it.
+const cssColor = (hex: string): string => {
+  const div = document.createElement("div");
+  div.style.color = hex;
+  return div.style.color;
+};
+
 const base = {
   chrome, activeTool: "select" as const, hideAll: false, symbol: "US.AAPL",
   onSelectTool: vi.fn(), onToggleHideAll: vi.fn(),
@@ -103,5 +112,61 @@ describe("TVDrawingRail", () => {
     fireEvent.click(screen.getByLabelText("delete"));
     fireEvent.click(screen.getByRole("button", { name: "Clear" }));
     expect(base.onClearAll).toHaveBeenCalled();
+  });
+
+  it("active tool keeps its accent ring regardless of hover; inactive tool shows the plain hover overlay", () => {
+    render(<TVDrawingRail {...base} activeTool="rect" />);
+    const rectBtn = screen.getByLabelText("rectangle") as HTMLButtonElement;
+    const measureBtn = screen.getByLabelText("measure") as HTMLButtonElement;
+
+    // active, unhovered: accent ring + accent text on the hover-grey bg
+    expect(rectBtn.style.boxShadow).toBe(`inset 0 0 0 1px ${chrome.accent}`);
+    expect(rectBtn.style.background).toBe(cssColor(chrome.hover));
+    expect(rectBtn.style.color).toBe(cssColor(chrome.accent));
+
+    // hovering the armed tool is a no-visual-op relative to its own active look
+    fireEvent.mouseEnter(rectBtn);
+    expect(rectBtn.style.boxShadow).toBe(`inset 0 0 0 1px ${chrome.accent}`);
+    expect(rectBtn.style.background).toBe(cssColor(chrome.hover));
+    expect(rectBtn.style.color).toBe(cssColor(chrome.accent));
+    fireEvent.mouseLeave(rectBtn);
+
+    // inactive tool: no ring, transparent until hovered, then the plain grey/text overlay
+    expect(measureBtn.style.boxShadow).toBe("none");
+    expect(measureBtn.style.background).toBe("transparent");
+    fireEvent.mouseEnter(measureBtn);
+    expect(measureBtn.style.boxShadow).toBe("none");
+    expect(measureBtn.style.background).toBe(cssColor(chrome.hover));
+    expect(measureBtn.style.color).toBe(cssColor(chrome.text));
+    fireEvent.mouseLeave(measureBtn);
+    expect(measureBtn.style.background).toBe("transparent");
+  });
+
+  it("Cancel confirm button shows the plain hover overlay (genuinely neutral)", () => {
+    render(<TVDrawingRail {...base} hasSelection={() => false} />);
+    fireEvent.click(screen.getByLabelText("delete"));
+    const cancelBtn = screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement;
+
+    fireEvent.mouseEnter(cancelBtn);
+    expect(cancelBtn.style.background).toBe(cssColor(chrome.hover));
+    expect(cancelBtn.style.color).toBe(cssColor(chrome.text));
+  });
+
+  it("Clear confirm button keeps its danger color under hover (ring, not a flat wash)", () => {
+    render(<TVDrawingRail {...base} hasSelection={() => false} />);
+    fireEvent.click(screen.getByLabelText("delete"));
+    const clearBtn = screen.getByRole("button", { name: "Clear" }) as HTMLButtonElement;
+    const bgBefore = clearBtn.style.background;
+    expect(bgBefore).toBe(cssColor(chrome.down));
+    expect(clearBtn.style.color).toBe(cssColor("#fff"));
+
+    fireEvent.mouseEnter(clearBtn);
+    expect(clearBtn.style.background).toBe(bgBefore);
+    expect(clearBtn.style.color).toBe(cssColor("#fff"));
+    expect(clearBtn.style.boxShadow).toBe("inset 0 0 0 1px rgba(255,255,255,.5)");
+
+    fireEvent.mouseLeave(clearBtn);
+    expect(clearBtn.style.background).toBe(bgBefore);
+    expect(clearBtn.style.boxShadow).toBe("");
   });
 });
