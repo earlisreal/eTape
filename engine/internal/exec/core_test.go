@@ -607,7 +607,6 @@ func TestCore_ResetBalance_UnknownVenue(t *testing.T) {
 func TestCore_SubmitOrder_ExplicitOvernight_BlockedWithoutCapability(t *testing.T) {
 	c, _, _ := newTestCore(t, "sim-1")
 	c.Do(exec.Arm{})
-	c.Do(exec.Arm{Venue: "sim-1"})
 	ack := c.Do(exec.SubmitOrder{
 		Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay,
 		Session: exec.SessionOvernight, Qty: 10, LimitPrice: 100,
@@ -628,7 +627,6 @@ func TestCore_SubmitOrder_ExplicitOvernight_BlockedWithoutCapability(t *testing.
 func TestCore_SubmitOrder_ExplicitOvernight_AcceptedWithCapability(t *testing.T) {
 	c, _ := buildCoreWith(t, &capStub{overnight: true}, nil)
 	c.Do(exec.Arm{})
-	c.Do(exec.Arm{Venue: "v"})
 	ack := c.Do(exec.SubmitOrder{
 		Venue: "v", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay,
 		Session: exec.SessionOvernight, Qty: 10, LimitPrice: 100,
@@ -644,7 +642,6 @@ func TestCore_SubmitOrder_ExplicitOvernight_AcceptedWithCapability(t *testing.T)
 func TestCore_SubmitOrder_NonOvernightSessions_NeverCapabilityBlocked(t *testing.T) {
 	c, _, _ := newTestCore(t, "sim-1")
 	c.Do(exec.Arm{})
-	c.Do(exec.Arm{Venue: "sim-1"})
 	for _, s := range []exec.OrderSession{exec.SessionAuto, exec.SessionRTH, exec.SessionExtended} {
 		ack := c.Do(exec.SubmitOrder{
 			Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay,
