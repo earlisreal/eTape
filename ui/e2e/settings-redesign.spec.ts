@@ -43,14 +43,11 @@ test.describe("settings redesign", () => {
     await page.keyboard.press("Enter");
     await expect(domHeader.getByTestId("panel-symbol")).toHaveText("AAPL", { timeout: 10_000 });
 
-    // Two-layer gate: arm master, then the sim-paper venue (same as smoke.spec's
-    // paper-fill test) — the hotkey engine (useHotkeys.ts) refuses to fire while
-    // disarmed. This never touches a live venue: sim-paper is the replay harness's
-    // simulated broker, seeded by e2e/serve.sh.
+    // Arm the master switch (same as smoke.spec's paper-fill test) — the hotkey
+    // engine (useHotkeys.ts) refuses to fire while disarmed. Per-venue arm was
+    // removed; master arm + the risk-limit gate are the only checks now.
     await page.getByTestId("arm-chip").click();
     await expect(page.getByTestId("arm-chip")).toHaveText("ARMED");
-    await page.getByTestId("venue-arm-sim-paper").click();
-    await expect(page.getByTestId("venue-arm-sim-paper")).toHaveAttribute("data-armed", "true");
 
     // The default "Buy $5k" template (id "buy-5k", hotkey Ctrl+1) prices off the
     // live Ask with zero offset (DEFAULT_TEMPLATES in actionTemplate.ts), so the
@@ -99,8 +96,6 @@ test.describe("settings redesign", () => {
     await page.getByTestId("reset-confirm").click();
     await page.getByTestId("save").click();
     await page.mouse.click(5, 5);
-    await page.getByTestId("venue-arm-sim-paper").click();
-    await expect(page.getByTestId("venue-arm-sim-paper")).toHaveAttribute("data-armed", "false");
     await page.getByTestId("arm-chip").click();
     await expect(page.getByTestId("arm-chip")).toHaveText("DISARMED");
   });

@@ -28,7 +28,7 @@ export function useHotkeys(opts: { stores: Stores; commands: Cmd; linkGroups: Li
       const symbol = linkGroups.symbolFor(group) ?? "";
 
       if (t.kind === "place") {
-        const armed = !!status?.masterArmed && !!status.venues.find((v) => v.venue === venue)?.venueArmed;
+        const armed = !!status?.masterArmed;
         if (!document.hasFocus()) return;
         if (!armed) { toast.push({ level: "warn", text: "disarmed — hotkey blocked" }); return; }
         const quote = stores.quote.get(symbol);

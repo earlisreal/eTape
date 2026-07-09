@@ -13,11 +13,11 @@ import { test, expect, type Page, type Locator } from "@playwright/test";
 //      to avoid inheriting any position/order state from those runs (NVDA and
 //      AAPL are the only two symbols genjournal writes into the synthetic
 //      replay day, so NVDA is the only alternative available).
-//   2. smoke.spec.ts's paper-order test arms both the master chip and the
-//      sim-paper venue and never disarms; settings-redesign.spec.ts's own arm
-//      test ends by disarming both. Whichever ran most recently determines
-//      the arm state this file inherits — never assume either state; check
-//      first (see ensureArmed below).
+//   2. smoke.spec.ts's paper-order test arms the master chip and never
+//      disarms; settings-redesign.spec.ts's own arm test ends by disarming
+//      it. Whichever ran most recently determines the arm state this file
+//      inherits — never assume either state; check first (see ensureArmed
+//      below).
 //
 // -replay-hold means the engine keeps serving the LAST replayed mark forever
 // once the synthetic day finishes, so by the time this file runs the mark has
@@ -86,21 +86,16 @@ async function gotoAndApplyPreset(page: Page, workspace: string, presetName: "Tr
   await page.getByRole("button", { name: new RegExp(`^${presetName}`) }).click();
 }
 
-// Defensive two-layer arm check (do NOT blindly click — an earlier spec file
-// in the same shared-engine run may have already armed either layer; the arm
-// chip/venue-arm button both TOGGLE, so an unconditional click could disarm
-// an already-armed control instead of arming it).
+// Defensive arm check (do NOT blindly click — an earlier spec file in the
+// same shared-engine run may have already armed the master switch; the arm
+// chip TOGGLES, so an unconditional click could disarm an already-armed
+// control instead of arming it).
 async function ensureArmed(page: Page): Promise<void> {
   const armChip = page.getByTestId("arm-chip");
   await expect(armChip).toBeVisible({ timeout: 15_000 });
   if ((await armChip.innerText()).trim() !== "ARMED") {
     await armChip.click();
     await expect(armChip).toHaveText("ARMED");
-  }
-  const venueArm = page.getByTestId("venue-arm-sim-paper");
-  if ((await venueArm.getAttribute("data-armed")) !== "true") {
-    await venueArm.click();
-    await expect(venueArm).toHaveAttribute("data-armed", "true");
   }
 }
 

@@ -163,19 +163,19 @@ function OrdersTable({
   );
 }
 
-// ---- Stats strip + arm chips (folded from AccountBarPanel) ----
+// ---- Stats strip (folded from AccountBarPanel) ----
+// Per-venue arm chips were removed (master arm + risk-limit gate now cover
+// this — TopBar's arm-chip owns the single master arm switch).
 
 function StatsStrip({
-  stores, oc, palette, venue, venues, selectVenue,
+  stores, palette, venue, venues, selectVenue,
 }: {
   stores: PanelProps["stores"];
-  oc: ReturnType<typeof useOrderCommands>;
   palette: ReturnType<typeof useTheme>["palette"];
   venue: string;
   venues: string[];
   selectVenue: (v: string) => void;
 }): JSX.Element {
-  const status = stores.exec.status();
   const account = stores.exec.accounts().find((a) => a.venue === venue);
   const equity = account?.equity ?? null;
   const bp = account?.buyingPower ?? null;
@@ -188,9 +188,6 @@ function StatsStrip({
       <span data-testid={testid} className="mono" style={{ fontSize: 13, color: tone === undefined ? palette.text : tone >= 0 ? palette.up : palette.down }}>{value}</span>
     </div>
   );
-  const dot = (ok: boolean, title: string) => (
-    <span title={title} style={{ width: 8, height: 8, borderRadius: 8, background: ok ? palette.ok : palette.danger, display: "inline-block" }} />
-  );
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
@@ -202,22 +199,6 @@ function StatsStrip({
       {cell("Day P&L", "acct-daypnl", money(dayPnl), dayPnl ?? 0)}
       {cell("Realized", "acct-realized", money(realized), realized ?? 0)}
       <div style={{ flex: 1 }} />
-      {/* Per-venue arm chips stay all-venue (TopBar's arm-chip owns master arm;
-          the old duplicate master ARMED button is removed). */}
-      <div style={{ display: "flex", gap: 6, alignItems: "center", padding: "0 8px" }}>
-        {(status?.venues ?? []).map((v) => (
-          <HoverButton key={v.venue} data-testid={`venue-arm-${v.venue}`} data-armed={v.venueArmed}
-            title={`${v.venue}: ${v.connected ? "connected" : "disconnected"} — click to ${v.venueArmed ? "disarm" : "arm"}`}
-            onClick={() => (v.venueArmed ? oc.disarm(v.venue) : oc.arm(v.venue))}
-            style={{
-              display: "flex", gap: 3, alignItems: "center", fontSize: 10, cursor: "pointer",
-              background: "transparent", border: `1px solid ${v.venueArmed ? palette.accent : palette.borderStrong}`,
-              borderRadius: 4, padding: "2px 6px", color: v.venueArmed ? palette.accent : palette.textMuted,
-            }}>
-            {dot(v.connected, `${v.venue}: ${v.connected ? "connected" : "disconnected"}`)}{v.venue}{v.venueArmed ? " ●" : " ○"}
-          </HoverButton>
-        ))}
-      </div>
     </div>
   );
 }
@@ -239,7 +220,7 @@ function PositionsTable({
   const rows0 = stores.exec.positions().filter((p) => p.venue === venue); // venue-scoped; NET (venue===null) rows drop out
   const status = stores.exec.status();
   const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
-  const armedFor = (v: string | null) => !!status?.masterArmed && !!status?.venues.find((x) => x.venue === v)?.venueArmed;
+  const masterArmed = !!status?.masterArmed;
 
   const rows = useMemo(() => sortRows(rows0, sort, SORT_ACCESSORS), [rows0, sort]);
   const openCount = rows0.length;
@@ -299,8 +280,8 @@ function PositionsTable({
                   <td>{formatPrice(r.avgPrice, 2)}</td>
                   <td style={{ color: r.unrealizedPnl >= 0 ? palette.up : palette.down }}>{formatPrice(r.unrealizedPnl, 2)}</td>
                   <td>{net ? null : (
-                    <HoverButton data-testid={`flatten-${r.venue}-${r.symbol}`} data-armed={armedFor(r.venue)}
-                      title={armedFor(r.venue) ? "Flatten position" : "Venue disarmed — flatten still allowed (exposure-reducing)"}
+                    <HoverButton data-testid={`flatten-${r.venue}-${r.symbol}`} data-armed={masterArmed}
+                      title={masterArmed ? "Flatten position" : "Master disarmed — flatten still allowed (exposure-reducing)"}
                       onClick={() => flatten(r)}
                       style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Flatten</HoverButton>
                   )}</td>
@@ -368,7 +349,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: palette.bg, color: palette.text, fontFamily: "inherit" }}>
-      <StatsStrip stores={stores} oc={oc} palette={palette} venue={venue} venues={venues} selectVenue={selectVenue} />
+      <StatsStrip stores={stores} palette={palette} venue={venue} venues={venues} selectVenue={selectVenue} />
       <OrdersTable stores={stores} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} height={ordersHeight} />
       <div data-testid="orders-resize-handle" onMouseDown={startResize}
         style={{ height: 4, cursor: "row-resize", background: palette.border, flexShrink: 0 }} />

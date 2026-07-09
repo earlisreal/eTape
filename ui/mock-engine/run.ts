@@ -33,7 +33,7 @@ const execStatus = () => ({
   payload: {
     masterArmed: armed,
     global: { maxDayLoss: 500, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
-    venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, venueArmed: armed, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 1000, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 5 } }],
+    venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 1000, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 5 } }],
   },
 });
 

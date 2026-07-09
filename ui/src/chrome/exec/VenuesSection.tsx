@@ -107,8 +107,7 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
 
   const patchVenue = (i: number, over: Partial<Venue>) =>
     setDraft((d) => ({ ...d, venues: d.venues.map((v, j) => (j === i ? { ...v, ...over } : v)) }));
-  const setEnv = (i: number, env: string) =>
-    patchVenue(i, { env, autoArm: env === "live" ? false : draft.venues[i].autoArm });
+  const setEnv = (i: number, env: string) => patchVenue(i, { env });
   // Broker switch: a venue can arrive from the engine with credentials: ""
   // (the sim sentinel), then have its broker switched to one that needs a
   // credential. Mint a name right here — the same way addVenue() mints one
@@ -126,7 +125,7 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
     setCapsByRow((c) => ({ ...c, [key]: zeroCaps() }));
     setDraft((d) => ({
       ...d,
-      venues: [...d.venues, { id: "", broker: "sim", env: "paper", credentials: mintCredName(), accountId: "", autoArm: false }],
+      venues: [...d.venues, { id: "", broker: "sim", env: "paper", credentials: mintCredName(), accountId: "" }],
     }));
   };
   const removeVenue = (i: number) => {
@@ -328,11 +327,6 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
                         style={{ width: 72 }} />
                     </label>
                   ))}
-                  <label style={{ ...fieldWrap, flexDirection: "row", alignItems: "center", gap: 4, opacity: isLive ? 0.6 : 1 }}>
-                    <input data-testid={`venue-autoarm-${i}`} type="checkbox" disabled={isLive}
-                      checked={isLive ? false : v.autoArm} onChange={(e) => patchVenue(i, { autoArm: e.target.checked })} />
-                    auto-arm
-                  </label>
                 </div>
               </div>
             </div>

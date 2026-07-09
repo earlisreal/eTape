@@ -6,15 +6,8 @@ import { ToastProvider } from "../Toast";
 import { OrderConfigProvider } from "../exec/useOrderConfig";
 import { AccountPanel } from "./AccountPanel";
 import { makeStores } from "../../data/registry";
-import { LIGHT } from "../../render/palette";
 import { LinkGroups } from "../linkGroups";
 import { FakeBus, FakeBusHub } from "../../../test/fakes";
-
-// jsdom normalizes inline hex colors to rgb() on the CSSStyleDeclaration.
-const hexToRgb = (hex: string): string => {
-  const n = parseInt(hex.slice(1), 16);
-  return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
-};
 import type { AckMsg, AccountRow, ClosedTradeRow, ExecStatus, Order, PositionRow, SubmitOrderArgs } from "../../wire/contract";
 import type { PanelProps } from "./registry";
 import type { LinkGroup } from "../linkGroups";
@@ -39,7 +32,7 @@ const acct = (venue: string, o: Partial<AccountRow> = {}): AccountRow => ({ venu
 const status = (masterArmed: boolean, ...venueIds: string[]): ExecStatus => ({
   masterArmed, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
   venues: (venueIds.length ? venueIds : ["alpaca-paper"]).map((venue) => ({
-    venue, broker: "alpaca", connected: true, venueArmed: true, reconcilePending: false,
+    venue, broker: "alpaca", connected: true, reconcilePending: false,
     note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 },
   })),
 });
@@ -60,80 +53,6 @@ describe("AccountPanel", () => {
     wrap(props);
     expect(screen.getByTestId("acct-equity").textContent).toBe("—");
   });
-  it("arms a venue when its per-venue control is clicked", () => {
-    const { props, stores, sent } = mkProps();
-    wrap(props);
-    const disarmedVenueStatus: ExecStatus = {
-      masterArmed: false,
-      global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
-      venues: [{ venue: "sim-paper", broker: "alpaca", connected: true, venueArmed: false, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }],
-    };
-    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: disarmedVenueStatus }));
-    const btn = screen.getByTestId("venue-arm-sim-paper");
-    expect(btn.getAttribute("data-armed")).toBe("false");
-    fireEvent.click(btn);
-    expect(sent).toContainEqual({ name: "Arm", args: { venue: "sim-paper" } });
-  });
-  it("disarms a venue when its per-venue control is clicked while armed", () => {
-    const { props, stores, sent } = mkProps();
-    wrap(props);
-    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) }));
-    const btn = screen.getByTestId("venue-arm-alpaca-paper");
-    expect(btn.getAttribute("data-armed")).toBe("true");
-    fireEvent.click(btn);
-    expect(sent).toContainEqual({ name: "Disarm", args: { venue: "alpaca-paper" } });
-  });
-  it("clicking one venue's control does not affect another venue's state or dispatch", () => {
-    const { props, stores, sent } = mkProps();
-    wrap(props);
-    const twoVenueStatus: ExecStatus = {
-      masterArmed: false,
-      global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
-      venues: [
-        { venue: "alpaca-paper", broker: "alpaca", connected: true, venueArmed: true, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } },
-        { venue: "tradezero-live", broker: "tradezero", connected: true, venueArmed: false, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } },
-      ],
-    };
-    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: twoVenueStatus }));
-    const alpacaBtn = screen.getByTestId("venue-arm-alpaca-paper");
-    const tzBtn = screen.getByTestId("venue-arm-tradezero-live");
-    expect(alpacaBtn.getAttribute("data-armed")).toBe("true");
-    expect(tzBtn.getAttribute("data-armed")).toBe("false");
-    fireEvent.click(tzBtn);
-    expect(sent).toContainEqual({ name: "Arm", args: { venue: "tradezero-live" } });
-    expect(sent).not.toContainEqual({ name: "Disarm", args: { venue: "alpaca-paper" } });
-    expect(sent).not.toContainEqual({ name: "Arm", args: { venue: "alpaca-paper" } });
-    expect(alpacaBtn.getAttribute("data-armed")).toBe("true");
-  });
-
-  // --- Task 4: HoverButton default overlay on the arm chip, dynamic armed color preserved base-style ---
-  it("hovering an arm chip applies the default hover overlay without losing its armed styling on mouseleave", () => {
-    const { props, stores } = mkProps();
-    wrap(props);
-    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) }));
-    const btn = screen.getByTestId("venue-arm-alpaca-paper") as HTMLButtonElement;
-    expect(btn.style.background).toBe("transparent");
-
-    fireEvent.mouseEnter(btn);
-    expect(btn.style.background).toBe("var(--surface)");
-    expect(btn.style.color).toBe("var(--text)");
-
-    fireEvent.mouseLeave(btn);
-    expect(btn.style.background).toBe("transparent");
-    expect(btn.style.color).toBe(hexToRgb(LIGHT.accent)); // armed color restored, not stuck on the overlay
-  });
-
-  // --- color discipline (Task 9 review fix): arm chip is bronze/muted, never green/amber ---
-  it("styles per-venue arm chips bronze/muted rather than green/amber", () => {
-    const { props, stores } = mkProps();
-    wrap(props);
-    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) }));
-    const btn = screen.getByTestId("venue-arm-alpaca-paper") as HTMLButtonElement;
-    expect(btn.getAttribute("data-armed")).toBe("true");
-    expect(btn.style.color).toBe(hexToRgb(LIGHT.accent));
-    expect(btn.style.color).not.toBe(hexToRgb(LIGHT.up));
-  });
-
   // --- new: venue dropdown scopes stats/positions (Task 10) ---
   it("scopes stats to the selected venue", () => {
     const { props, stores, linkGroups } = mkProps("green");
@@ -182,13 +101,13 @@ describe("AccountPanel", () => {
     expect(args.qty).toBe(300);
     expect(args.venue).toBe("alpaca-paper");
   });
-  it("annotates Flatten with the venue's armed state but keeps it clickable when disarmed", () => {
+  it("annotates Flatten with master's armed state but keeps it clickable when disarmed", () => {
     const { props, stores, sent } = mkProps();
     wrap(props);
     act(() => {
       stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: {
-        masterArmed: true, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
-        venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, venueArmed: false, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }],
+        masterArmed: false, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
+        venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }],
       } });
       stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.5, ask: 3.51, last: 3.5, ts: "" } });
       stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({ qty: 300 })] });
@@ -398,7 +317,7 @@ describe("AccountPanel", () => {
     });
     const statusReconciling = (): ExecStatus => ({
       masterArmed: true, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
-      venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, venueArmed: true, reconcilePending: true, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }],
+      venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: true, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }],
     });
 
     it("shows an optimistic order as a Pending chip (bronze .chip-pending)", () => {

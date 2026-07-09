@@ -59,11 +59,11 @@ describe("OrderCommands", () => {
   it("cancel / arm / disarm / kill send the right command + args", async () => {
     const { sent, oc } = fakes();
     await oc.cancel("alpaca-paper", "ET7");
-    await oc.arm(); await oc.disarm("alpaca-paper"); await oc.kill();
+    await oc.arm(); await oc.disarm(); await oc.kill();
     expect(sent.map((s) => s.name)).toEqual(["CancelOrder", "Arm", "Disarm", "KillSwitch"]);
     expect(sent[0].args).toEqual({ venue: "alpaca-paper", orderId: "ET7" });
-    expect(sent[1].args).toEqual({});                       // Arm master (no venue)
-    expect(sent[2].args).toEqual({ venue: "alpaca-paper" });
+    expect(sent[1].args).toEqual({});                       // Arm master-only
+    expect(sent[2].args).toEqual({});                       // Disarm master-only
     expect(sent[3].args).toEqual({});                       // KillSwitch all
   });
   it("cancelLast cancels the newest working order; cancelAll(focused) cancels only that symbol's working orders", async () => {

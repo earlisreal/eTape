@@ -5254,7 +5254,6 @@
             "venue": "sim-paper",
             "broker": "sim",
             "connected": false,
-            "venueArmed": false,
             "reconcilePending": false,
             "note": "",
             "lastReconcileMs": null,

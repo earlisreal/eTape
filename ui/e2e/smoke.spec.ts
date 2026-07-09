@@ -40,11 +40,9 @@ test.describe("trading workspace", () => {
     await gotoAndApplyPreset(page, "e2e-trading-order", "Trading");
     await expect(page.getByTestId("acct-equity")).toBeVisible({ timeout: 15_000 });
 
-    // Two-layer gate: arm master, then the venue.
+    // Arm the master switch — the only arm gate now (per-venue arm removed).
     await page.getByTestId("arm-chip").click();
     await expect(page.getByTestId("arm-chip")).toHaveText("ARMED");
-    await page.getByTestId("venue-arm-sim-paper").click();
-    await expect(page.getByTestId("venue-arm-sim-paper")).toHaveAttribute("data-armed", "true");
 
     // MARKET order needs no price; default 100 shares of AAPL fills at the mark.
     await page.getByTestId("order-type").selectOption("MARKET");

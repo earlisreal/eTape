@@ -8,8 +8,8 @@ import type { AckMsg, Gate, VenueConfig, VenueSetup } from "../../wire/contract"
 
 const runningConfig: VenueConfig = {
   venues: [
-    { id: "alpaca-paper", broker: "alpaca", env: "paper", credentials: "alpaca", accountId: "PA123", autoArm: true },
-    { id: "tradezero-live", broker: "tradezero", env: "live", credentials: "tradeZero", accountId: "TZ456", autoArm: false },
+    { id: "alpaca-paper", broker: "alpaca", env: "paper", credentials: "alpaca", accountId: "PA123" },
+    { id: "tradezero-live", broker: "tradezero", env: "live", credentials: "tradeZero", accountId: "TZ456" },
   ],
   gate: {
     global: { maxDayLoss: 500, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
@@ -53,26 +53,18 @@ function wrap(commands: { sendCommand: (name: string, args: unknown) => Promise<
 }
 
 describe("VenuesSection", () => {
-  it("shows a LIVE badge on a live venue and disables (and forces off) its auto-arm toggle", async () => {
+  it("shows a LIVE badge on a live venue", async () => {
     const commands = makeCommands([baseSetup()]);
     wrap(commands);
     await waitFor(() => expect(screen.getByTestId("venue-id-1")).toBeTruthy());
 
     const liveHeader = screen.getByTestId("venue-remove-1").parentElement!;
     expect(liveHeader.textContent).toContain("LIVE");
-    const liveAutoArm = screen.getByTestId("venue-autoarm-1") as HTMLInputElement;
-    expect(liveAutoArm.disabled).toBe(true);
-    expect(liveAutoArm.checked).toBe(false);
-
-    // the paper venue's toggle stays enabled and reflects its stored value
-    const paperAutoArm = screen.getByTestId("venue-autoarm-0") as HTMLInputElement;
-    expect(paperAutoArm.disabled).toBe(false);
-    expect(paperAutoArm.checked).toBe(true);
   });
 
   it("hides the CREDENTIALS group for a sim venue but shows it for tradezero/alpaca/moomoo", async () => {
     const withSim: VenueSetup = baseSetup({
-      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false }] },
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "" }] },
     });
     const commands = makeCommands([withSim]);
     wrap(commands);
@@ -85,7 +77,7 @@ describe("VenuesSection", () => {
 
   it("mints a real credential name when an existing sim venue (credentials: \"\") switches broker to alpaca, so PutCredential is never saved under an empty name", async () => {
     const withSim: VenueSetup = baseSetup({
-      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false }] },
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "" }] },
     });
     const commands = makeCommands([withSim, withSim]);
     wrap(commands);
@@ -110,7 +102,7 @@ describe("VenuesSection", () => {
 
   it("hides the restart banner when file == running, and shows it after a save whose re-fetch reports drift", async () => {
     const drifted: VenueSetup = baseSetup({
-      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", autoArm: false }] },
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "" }] },
     });
     const commands = makeCommands([baseSetup(), drifted]);
     wrap(commands);
@@ -205,7 +197,7 @@ describe("VenuesSection", () => {
   });
 
   it("renders a blocked SetVenueSetup ack's reason inline", async () => {
-    const reason = 'venue "tradezero-live": live venues cannot auto-arm';
+    const reason = 'venue "tradezero-live": account id is required for TradeZero';
     const commands = makeCommands([baseSetup()], { SetVenueSetup: { kind: "ack", corrId: "c", status: "blocked", reason } });
     wrap(commands);
     await waitFor(() => expect(screen.getByTestId("save-venues")).toBeTruthy());

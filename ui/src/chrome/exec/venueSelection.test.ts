@@ -7,8 +7,7 @@ const status = (...ids: string[]): ExecStatus => ({
   masterArmed: false,
   global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
   venues: ids.map((venue) => ({
-    venue, broker: "alpaca" as never, connected: true, venueArmed: false,
-    reconcilePending: false, note: "", lastReconcileMs: null,
+    venue, broker: "alpaca" as never, connected: true, reconcilePending: false, note: "", lastReconcileMs: null,
     gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 },
   })),
 });

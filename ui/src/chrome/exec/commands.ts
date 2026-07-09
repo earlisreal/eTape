@@ -48,8 +48,8 @@ export class OrderCommands {
     else this.d.sound?.orderPlaced("SELL"); // risk-off: falling pitch
   }
 
-  async arm(venue?: VenueID): Promise<void> { await this.d.cmd.sendCommand("Arm", venue ? { venue } : {}); }
-  async disarm(venue?: VenueID): Promise<void> { await this.d.cmd.sendCommand("Disarm", venue ? { venue } : {}); }
+  async arm(): Promise<void> { await this.d.cmd.sendCommand("Arm", {}); }
+  async disarm(): Promise<void> { await this.d.cmd.sendCommand("Disarm", {}); }
   async kill(venue?: VenueID): Promise<void> { await this.d.cmd.sendCommand("KillSwitch", venue ? { venue } : {}); }
 
   async cancelLast(symbol?: string): Promise<void> {

@@ -183,7 +183,7 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
 
   const emptyGate = { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 };
   const venueStatus = (id: string): VenueStatus => ({
-    venue: id, broker: "alpaca", connected: true, venueArmed: false, reconcilePending: false,
+    venue: id, broker: "alpaca", connected: true, reconcilePending: false,
     note: "", lastReconcileMs: null, gate: emptyGate,
   });
   const status = (venues: VenueStatus[]): ExecStatus => ({
