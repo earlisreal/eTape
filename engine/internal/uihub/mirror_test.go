@@ -278,6 +278,36 @@ func TestMirrorApplyPubNewsHealthEvents(t *testing.T) {
 	}
 }
 
+// TestMirrorApplyPubStockDetailPerSymbolOverwrite verifies applyPub +
+// snapshotFrames(stock.detail) keeps a latest-value-per-symbol map (like
+// scanner.rank), not an accumulating list (like news): publishing a second
+// payload for the same symbol must replace, not append, and snapshotFrames
+// must return exactly one frame per distinct symbol in stable sorted-key order.
+func TestMirrorApplyPubStockDetailPerSymbolOverwrite(t *testing.T) {
+	m := testMirror()
+	m.applyPub(staged{Topic: wsmsg.TopicStockDetail, Key: "US.AAPL", Payload: wsmsg.StockDetailPayload{Symbol: "US.AAPL", Name: "Apple"}})
+	m.applyPub(staged{Topic: wsmsg.TopicStockDetail, Key: "US.TSLA", Payload: wsmsg.StockDetailPayload{Symbol: "US.TSLA", Name: "Tesla"}})
+	// Overwrite US.AAPL with different field values -- must replace, not accumulate.
+	price := 190.5
+	m.applyPub(staged{Topic: wsmsg.TopicStockDetail, Key: "US.AAPL", Payload: wsmsg.StockDetailPayload{Symbol: "US.AAPL", Name: "Apple Inc.", Price: &price}})
+
+	frames := m.snapshotFrames(wsmsg.TopicStockDetail)
+	if len(frames) != 2 {
+		t.Fatalf("expected 2 stock.detail frames (one per symbol, overwrite replaced not appended), got %d: %+v", len(frames), frames)
+	}
+	if frames[0].Key != "US.AAPL" || frames[1].Key != "US.TSLA" {
+		t.Fatalf("expected stable sorted-key order US.AAPL before US.TSLA, got keys %q, %q", frames[0].Key, frames[1].Key)
+	}
+	aapl := frames[0].Payload.(wsmsg.StockDetailPayload)
+	if aapl.Name != "Apple Inc." || aapl.Price == nil || *aapl.Price != 190.5 {
+		t.Fatalf("expected overwritten US.AAPL detail (latest values), got %+v", aapl)
+	}
+	tsla := frames[1].Payload.(wsmsg.StockDetailPayload)
+	if tsla.Name != "Tesla" {
+		t.Fatalf("expected US.TSLA detail unchanged, got %+v", tsla)
+	}
+}
+
 func TestMirrorEmptyNewsSnapshotMarshalsToArrayNotNull(t *testing.T) {
 	m := testMirror()
 	// A brand-new subscriber gets a news snapshot before any news exists. The

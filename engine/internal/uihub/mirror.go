@@ -41,8 +41,9 @@ type mirror struct {
 	marks      map[string]float64                // last price per symbol (pnl + display)
 
 	// scanner / news
-	rank map[string]wsmsg.ScannerRankPayload // key session
-	news []wsmsg.NewsItem                    // bounded recent
+	rank   map[string]wsmsg.ScannerRankPayload // key session
+	detail map[string]wsmsg.StockDetailPayload // key symbol
+	news   []wsmsg.NewsItem                    // bounded recent
 
 	// execution
 	accounts    map[string]wsmsg.AccountRow // key venue
@@ -71,6 +72,7 @@ func newMirror(venues []venueMeta, global wsmsg.GlobalLimitsView, tapeCap, newsC
 		indicators:  map[string][]wsmsg.IndicatorPoint{},
 		marks:       map[string]float64{},
 		rank:        map[string]wsmsg.ScannerRankPayload{},
+		detail:      map[string]wsmsg.StockDetailPayload{},
 		accounts:    map[string]wsmsg.AccountRow{},
 		positions:   map[string]exec.Position{},
 		orders:      map[string]wsmsg.Order{},
@@ -280,6 +282,8 @@ func (m *mirror) applyPub(s staged) {
 	switch s.Topic {
 	case wsmsg.TopicScannerRank:
 		m.rank[s.Key] = s.Payload.(wsmsg.ScannerRankPayload)
+	case wsmsg.TopicStockDetail:
+		m.detail[s.Key] = s.Payload.(wsmsg.StockDetailPayload)
 	case wsmsg.TopicNews:
 		switch p := s.Payload.(type) {
 		case wsmsg.NewsItem:
@@ -345,6 +349,10 @@ func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
 	case wsmsg.TopicScannerRank:
 		for _, sess := range sortedKeysOf(m.rank) {
 			out = append(out, staged{Topic: topic, Key: sess, Payload: m.rank[sess]})
+		}
+	case wsmsg.TopicStockDetail:
+		for _, sym := range sortedKeysOf(m.detail) {
+			out = append(out, staged{Topic: topic, Key: sym, Payload: m.detail[sym]})
 		}
 	case wsmsg.TopicNews:
 		// make (not append-to-nil) so an empty news list marshals to `[]`, not
