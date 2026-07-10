@@ -324,13 +324,20 @@ func (b *Broker) attemptBookFillLocked(o *exec.Order, book feed.Book) []exec.Bro
 
 // actOnMarkLocked applies a new mark to one resting order: it evaluates
 // Stop/StopLimit triggers (still keyed off the last-trade mark, per
-// stopTriggered — unchanged) and, for anything now marketable, prices the
-// fill off the CURRENT BOOK via attemptBookFillLocked rather than the mark
-// itself — book-walk pricing replaced mark-based marketable() pricing in
-// Task 2. A triggered Stop converts to TypeMarket and a triggered StopLimit
-// converts to TypeLimit (unchanged conversion pattern) so both, along with
-// an already-plain Limit/Market order, fall through to the same uncapped/
-// capped book walk. Returns the fill events produced (empty if it stays
+// stopTriggered — unchanged) and, only for a stop that JUST triggered on
+// this mark, prices the resulting fill off the CURRENT BOOK via
+// attemptBookFillLocked rather than the mark itself — book-walk pricing
+// replaced mark-based marketable() pricing in Task 2. A triggered Stop
+// converts to TypeMarket and a triggered StopLimit converts to TypeLimit
+// (unchanged conversion pattern), and only THEN reaches the book walk.
+// A plain Market/Limit order — one that was never a stop — must NOT be
+// re-priced here at all: SetMark/crossRestingLocked fires far more often
+// than SetBook in real feeds, and re-attempting attemptBookFillLocked
+// against a book that hasn't changed since a previous fill would consume
+// the same displayed depth twice (bounded by LeavesQty, so not an
+// overfill, but a phantom fill off stale liquidity). The book itself
+// (SetBook/crossRestingOnBookLocked) is the sole crossing trigger for
+// plain orders. Returns the fill events produced (empty if it stays
 // resting — including the "triggered but no book yet" case: a triggered
 // stop is not a special case for SubmitOrder's rest-until-book rule).
 // Caller holds mu.
@@ -346,6 +353,10 @@ func (b *Broker) actOnMarkLocked(o *exec.Order, mark float64) []exec.BrokerEvent
 			return nil
 		}
 		o.Type = exec.TypeLimit // triggered: becomes a resting limit
+	default:
+		// A plain (never-was-a-stop) Market/Limit order: marks never
+		// re-price it, only the book does.
+		return nil
 	}
 	return b.attemptBookFillLocked(o, b.books[o.Symbol])
 }
@@ -425,17 +436,27 @@ func (b *Broker) ReplaceOrder(_ context.Context, orderID string, req exec.Replac
 	o.LeavesQty = req.Qty - o.ExecutedQty
 	o.UpdatedMs = b.now()
 	post := []exec.BrokerEvent{exec.OrderReplaced{V: b.venue, OID: orderID, NewQty: req.Qty, NewLimit: req.LimitPrice, NewStop: req.StopPrice, Ts: b.now()}}
-	// Route the post-replace fill decision through actOnMarkLocked (the same
-	// function crossRestingLocked/SubmitOrder use) rather than a raw
-	// marketable(...) check: a bare TypeStop has LimitPrice == 0 (it prices
-	// off StopPrice), so marketable(Sell/Short, 0, mark) is trivially true
-	// for any positive mark and would fill the stop immediately at $0 without
-	// its trigger ever being evaluated; a TypeStopLimit whose LimitPrice
-	// happens to already be marketable would likewise fill without its stop
-	// having triggered. actOnMarkLocked applies the correct Stop/StopLimit
-	// trigger semantics before ever considering marketability.
-	if mark, ok := b.marks[o.Symbol]; ok {
-		post = append(post, b.actOnMarkLocked(o, mark)...)
+	// Route the post-replace fill decision by order type, since
+	// actOnMarkLocked no longer falls through for plain orders (it now only
+	// ever prices a Stop/StopLimit that triggers on this call):
+	//   - Stop/StopLimit: still needs the mark to evaluate its trigger (a
+	//     bare TypeStop has LimitPrice == 0 -- it prices off StopPrice --
+	//     so a raw marketable(...) check would fill it immediately at $0
+	//     without the trigger ever being evaluated; actOnMarkLocked applies
+	//     the correct trigger semantics first). Gated on a mark existing,
+	//     same as before.
+	//   - Market/Limit: was never a stop, so there is no trigger to
+	//     evaluate -- go straight to the book via attemptBookFillLocked,
+	//     the same primitive SetBook's crossing sweep uses. Deliberately
+	//     NOT gated on a mark existing: a symbol with a book but no mark
+	//     yet should still be able to re-cross a replaced limit order.
+	switch o.Type {
+	case exec.TypeStop, exec.TypeStopLimit:
+		if mark, ok := b.marks[o.Symbol]; ok {
+			post = append(post, b.actOnMarkLocked(o, mark)...)
+		}
+	default:
+		post = append(post, b.attemptBookFillLocked(o, b.books[o.Symbol])...)
 	}
 	b.mu.Unlock()
 	for _, e := range post {

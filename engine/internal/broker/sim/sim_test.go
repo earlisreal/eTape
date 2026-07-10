@@ -266,6 +266,47 @@ func TestSimPartialFillRestsThenCompletesOnLaterSetBook(t *testing.T) {
 	}
 }
 
+// TestSimSetMarkDoesNotRefillPartiallyFilledOrderOffStaleBook is a regression
+// guard for the actOnMarkLocked fall-through bug: a plain (never-was-a-stop)
+// resting Market/Limit order that has already partially filled off the book
+// must NOT be re-priced against that same stale book snapshot just because a
+// new SetMark tick arrived with no accompanying SetBook. Only a genuinely
+// new SetBook may consume more of the displayed depth.
+func TestSimSetMarkDoesNotRefillPartiallyFilledOrderOffStaleBook(t *testing.T) {
+	b := newSim(t) // seeds AAPL mark = 100
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 4}}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	_ = drain(t, b) // OrderAccepted
+	f, ok := drain(t, b).(exec.OrderFilled)
+	if !ok || f.F.Qty != 4 || f.LeavesQty != 6 {
+		t.Fatalf("expected partial fill of 4, leaving 6, got %+v ok=%v", f, ok)
+	}
+	_ = drain(t, b) // BrokerPositions
+
+	// A mark tick arrives with no new SetBook. The order must not touch the
+	// already-consumed 4-share depth again.
+	b.SetMark("AAPL", 100)
+	select {
+	case e := <-b.Events():
+		t.Fatalf("SetMark alone must not re-fill a plain resting order off a stale book, got %+v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	_, positions, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 || orders[0].LeavesQty != 6 || orders[0].Status != exec.StatusPartiallyFilled {
+		t.Fatalf("order should remain partially filled at LeavesQty 6, got %+v", orders)
+	}
+	if len(positions) != 1 || positions[0].Qty != 4 {
+		t.Fatalf("position should still reflect only the original 4-share fill, got %+v", positions)
+	}
+}
+
 func TestSimNonMarketableRestsThenCancel(t *testing.T) {
 	b := newSim(t)
 	// Buy limit 90 with mark 100 → not marketable → rests.
