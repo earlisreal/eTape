@@ -1,4 +1,5 @@
-import type { SnapshotMsg, DeltaMsg, TopicName } from "../wire/contract";
+import type { SnapshotMsg, DeltaMsg, TopicName, Tick } from "../wire/contract";
+import { perf } from "../perf/PerfMonitor";
 import { QuoteStore } from "./QuoteStore";
 import { BookStore } from "./BookStore";
 import { TapeRing } from "./TapeRing";
@@ -54,7 +55,10 @@ export function routeToStore(stores: Stores, m: SnapshotMsg | DeltaMsg): void {
   switch (m.topic) {
     case "md.quote": stores.quote.apply(m); return;
     case "md.book": stores.book.apply(m); return;
-    case "md.tape": stores.tape.apply(m); return;
+    case "md.tape":
+      perf.countTicks((m.payload as Tick[]).length); // no-op while perf is disabled (the default)
+      stores.tape.apply(m);
+      return;
     case "md.bars": stores.bars.apply(m); return;
     case "md.indicator": stores.indicators.apply(m); return;
     case "scanner.rank":

@@ -48,7 +48,7 @@ export function buildTapeRows(
   src: TapeSource,
   view: TapeView,
   opts: { symbol: string; minSize: number; maxRows: number },
-): { rows: TapeRow[]; paused: boolean } {
+): { rows: TapeRow[]; paused: boolean; scanned: number } {
   const last = src.lastSeq();
   // An anchor is only meaningful if it is still within the retained window:
   // same generation, not ahead of the newest tick, and not aged out below the
@@ -64,7 +64,13 @@ export function buildTapeRows(
   const start = Math.max(anchorValid ? (view.anchorSeq as number) : last, src.oldestSeq());
   const raw: Tick[] = [];
   const seqs: number[] = [];
+  // scanned = loop iterations, i.e. ring slots visited regardless of whether
+  // they matched opts.symbol/minSize. Temporary perf stat (Task 0): once the
+  // ring is scoped per-symbol (Tasks 1-4), this should shrink toward
+  // rows.length and this field goes away.
+  let scanned = 0;
   for (let s = start; s >= src.oldestSeq() && raw.length < opts.maxRows; s--) {
+    scanned++;
     const t = src.tickBySeq(s);
     if (!t || t.symbol !== opts.symbol) continue;
     if (t.size < opts.minSize) continue;
@@ -79,7 +85,7 @@ export function buildTapeRows(
     direction: t.direction,
     isBlock: t.size >= BLOCK_THRESHOLD,
   }));
-  return { rows, paused: anchorValid };
+  return { rows, paused: anchorValid, scanned };
 }
 
 /**

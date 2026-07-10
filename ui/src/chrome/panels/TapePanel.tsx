@@ -22,6 +22,7 @@ import {
   adjustAnchor, buildTapeRows, liveView, TAPE_ROW_H, type TapeView,
 } from "../../render/tape/tapeState";
 import { paintTape, TAPE_PAD, TAPE_SIZE_RIGHT_FRAC } from "../../render/tape/paintTape";
+import { perf } from "../../perf/PerfMonitor";
 
 const HEADER_H = 26;
 const COLHEAD_H = 16;
@@ -63,7 +64,7 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
   }, [width, height, palette, minSize, paused]);
 
   const jumpToLive = (): void => {
-    viewRef.current = liveView(stores.tape);
+    viewRef.current = liveView(stores.tape.source(symbolRef.current));
     remainderRef.current = 0;
     setPaused(false);
     forceRef.current++;
@@ -108,7 +109,7 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
       remainderRef.current = acc.remainder;
       if (acc.rows === 0) return;
       // wheel up (deltaY < 0) → negative rows → older; wheel down → toward live
-      viewRef.current = adjustAnchor(stores.tape, viewRef.current, acc.rows, {
+      viewRef.current = adjustAnchor(stores.tape.source(symbolRef.current), viewRef.current, acc.rows, {
         symbol: symbolRef.current,
         minSize: minSizeRef.current,
       });
@@ -122,7 +123,7 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
     const off = scheduler.register({
       id: `tape:${config.id}`,
       isDirty: () => {
-        const rev = stores.tape.getRev();
+        const rev = stores.tape.getRev(symbolRef.current);
         const changed = rev !== lastTapeRev || forceRef.current !== lastForce;
         lastTapeRev = rev;
         lastForce = forceRef.current;
@@ -131,8 +132,8 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
       paint: () => {
         // reconnect rebuilt the ring while paused → the anchor is meaningless;
         // resume live and drop the pill (once per reconnect — low-rate setState)
-        if (viewRef.current.anchorSeq !== null && viewRef.current.generation !== stores.tape.generation()) {
-          viewRef.current = liveView(stores.tape);
+        if (viewRef.current.anchorSeq !== null && viewRef.current.generation !== stores.tape.generation(symbolRef.current)) {
+          viewRef.current = liveView(stores.tape.source(symbolRef.current));
           setPaused(false);
           // Sync the ref immediately: canvasH (right below) reads pausedRef, and
           // setPaused's re-render (which would otherwise update it) hasn't
@@ -145,11 +146,14 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
         // 26px back to the canvas the rest of the time.
         const canvasH = h - (pausedRef.current ? HEADER_H : 0) - COLHEAD_H;
         if (!applyCanvasSize(canvas, ctx, w, canvasH, window.devicePixelRatio || 1)) return;
-        const { rows, paused: p } = buildTapeRows(stores.tape, viewRef.current, {
+        const { rows, paused: p, scanned } = buildTapeRows(stores.tape.source(symbolRef.current), viewRef.current, {
           symbol: symbolRef.current,
           minSize: minSizeRef.current,
           maxRows: Math.ceil(canvasH / TAPE_ROW_H) + 1,
         });
+        // Guard here, not just inside recordScan: skipping the call avoids
+        // building the template-literal id on every paint while disabled.
+        if (perf.enabled) perf.recordScan(`tape:${config.id}`, scanned);
         // The anchor can also age out of the retained ring without any reconnect
         // (a long pause + enough delta volume to overrun the ring's capacity) —
         // buildTapeRows already falls back to a live-equivalent window in that
@@ -159,7 +163,7 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
         // mount) — mutating viewRef here also makes the check self-clearing so
         // this only fires once per eviction, not every subsequent paint tick.
         if (!p && viewRef.current.anchorSeq !== null) {
-          viewRef.current = liveView(stores.tape);
+          viewRef.current = liveView(stores.tape.source(symbolRef.current));
           setPaused(false);
           pausedRef.current = false; // same reasoning as the reconnect branch above
         }

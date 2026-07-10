@@ -2,6 +2,7 @@ import type {
   AckMsg, ClientMessage, DeltaMsg, ServerMessage, SnapshotMsg, TopicName,
 } from "./contract";
 import { decodeServerMessage, encodeClientMessage } from "./codec";
+import { perf } from "../perf/PerfMonitor";
 
 export interface ISocket {
   send(data: string): void;
@@ -122,6 +123,7 @@ export class WsClient {
     switch (msg.kind) {
       case "snapshot":
       case "delta": {
+        perf.countMessage(msg.topic); // no-op while perf is disabled (the default)
         const set = this.handlers.get(msg.topic);
         set?.forEach((h) => h(msg));
         return;

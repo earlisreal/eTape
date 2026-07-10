@@ -19,6 +19,8 @@ import type { DrawingToolStyleStore } from "./render/chart/drawings/toolStyles";
 import { useToasts } from "./chrome/Toast";
 import type { HealthLink, LinkStatus, TopicName } from "./wire/contract";
 import { connectEventToasts } from "./data/quotaToasts";
+import { perf, initPerfFromQuery } from "./perf/PerfMonitor";
+import { PerfHud } from "./perf/PerfHud";
 
 function EventToastBridge({ client }: { client: WsClient }): null {
   const toast = useToasts();
@@ -71,6 +73,25 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
   // whatever value `state` held at effect-creation time (a stale-closure bug
   // that has recurred in this codebase's AppShell.tsx before).
   const stateRef = useRef<ConnState>("connecting");
+
+  // Task 0 (perf HUD): `?perf=1` is read exactly once via this lazy
+  // useState initializer (React guarantees it runs a single time per mount,
+  // even under StrictMode's dev double-invoke). perf.enable() is what
+  // actually turns on instrumentation everywhere else (Scheduler, WsClient,
+  // registry, TapePanel) — perfOn only decides whether <PerfHud/> mounts.
+  const [perfOn, setPerfOn] = useState<boolean>(() => {
+    initPerfFromQuery(location.search);
+    return perf.enabled;
+  });
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (!e.ctrlKey || !e.altKey || e.key.toLowerCase() !== "p") return;
+      if (perf.enabled) perf.disable(); else perf.enable();
+      setPerfOn(perf.enabled);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   const { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry } = useMemo(() => {
     const client = new WsClient({
@@ -139,6 +160,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
   return (
     <ThemeProvider commands={commands}>
       <ToastProvider>
+        {perfOn && <PerfHud />}
         <EventToastBridge client={client} />
         <DrawingsSyncBridge store={stores.drawings} commands={commands} />
         <DrawingToolStylesSyncBridge store={stores.drawingToolStyles} commands={commands} />

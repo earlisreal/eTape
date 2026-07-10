@@ -1,4 +1,5 @@
 import type { RafLike, Surface } from "./surface";
+import { perf as defaultPerf, type PerfMonitor } from "../perf/PerfMonitor";
 
 // A single throw (e.g. a transient out-of-order data point reaching a chart
 // library that validates strictly) shouldn't permanently kill a panel — only a
@@ -17,9 +18,15 @@ export class Scheduler {
   private running = false;
   private frame: number | null = null;
 
+  // perf defaults to the shared singleton so every real Scheduler instance
+  // reports into the same PerfMonitor without callers threading it through;
+  // tests that construct `new Scheduler(fakeRaf, onErr)` get the singleton
+  // too, which is a no-op while disabled (the default), so this is invisible
+  // to Scheduler.test.ts.
   constructor(
     private readonly raf: RafLike,
     private readonly onPainterError: (id: string, err: unknown) => void,
+    private readonly perf: PerfMonitor = defaultPerf,
   ) {}
 
   register(s: Surface): () => void {
@@ -48,10 +55,18 @@ export class Scheduler {
   }
 
   private paintFrame(): void {
+    this.perf.frameTick(); // no-op while perf is disabled (the default)
     for (const s of [...this.surfaces.values()]) {
       if (!s.isDirty()) continue;
+      // Reading `perf.enabled` (a plain boolean field) and branching on it
+      // here — rather than always calling performance.now() and letting
+      // recordPaint() decide — is what keeps the disabled path allocation-
+      // and clock-read-free: `start` is just `0` when off.
+      const timed = this.perf.enabled;
+      const start = timed ? performance.now() : 0;
       try {
         s.paint();
+        if (timed) this.perf.recordPaint(s.id, performance.now() - start);
         this.failures.delete(s.id);
       } catch (err) {
         const count = (this.failures.get(s.id) ?? 0) + 1;
