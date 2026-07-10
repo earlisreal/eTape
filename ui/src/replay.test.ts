@@ -35,7 +35,8 @@ describe("store replay invariant", () => {
       payload: [{ symbol: "US.AAPL", price: 2, size: 1, direction: "SELL", ts: "t2" }] });
     routeToStore(stores, { kind: "snapshot", topic: "md.tape", key: "US.AAPL",
       payload: [{ symbol: "US.AAPL", price: 9, size: 1, direction: "BUY", ts: "t9" }] });
-    expect(stores.tape.size()).toBe(1);
-    expect(stores.tape.latest(1)[0].price).toBe(9);
+    const src = stores.tape.source("US.AAPL");
+    expect(src.lastSeq()).toBe(1);
+    expect(src.tickBySeq(1)?.price).toBe(9);
   });
 });
