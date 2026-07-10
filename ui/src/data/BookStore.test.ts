@@ -21,4 +21,25 @@ describe("BookStore", () => {
     expect(s.get("US.AAPL")?.asks[0]).toEqual({ price: 3.5, size: 10 });
     expect(s.isDirty()).toBe(true);
   });
+
+  it("bumps only the applied symbol's own revision", () => {
+    const s = new BookStore();
+    expect(s.getRev("US.AAPL")).toBe(0);
+    expect(s.getRev("US.NVDA")).toBe(0);
+
+    s.apply(book([[3.49, 100]], [[3.51, 200]]));
+    expect(s.getRev("US.AAPL")).toBe(1);
+    expect(s.getRev("US.NVDA")).toBe(0);
+
+    s.apply({ ...book([[3.48, 50]], [[3.5, 10]]) });
+    expect(s.getRev("US.AAPL")).toBe(2);
+    expect(s.getRev("US.NVDA")).toBe(0);
+  });
+
+  it("falls back to the global PaintStore revision when no symbol is given", () => {
+    const s = new BookStore();
+    expect(s.getRev()).toBe(0);
+    s.apply(book([[3.49, 100]], [[3.51, 200]]));
+    expect(s.getRev()).toBe(1);
+  });
 });
