@@ -32,7 +32,7 @@ func buildMultiCore(t *testing.T, st *store.Store, clk clock.Clock, global exec.
 	sims := map[exec.VenueID]*sim.Broker{}
 	for _, v := range venues {
 		b := sim.New(v, clk, 100_000)
-		b.SetMark("AAPL", 100)
+		seedMarketableBook(b, "AAPL", 100)
 		brokers[v] = b
 		sims[v] = b
 	}
@@ -183,10 +183,10 @@ func TestCapstoneReplayLogEqualsState(t *testing.T) {
 	// Drive a mixed session: two fills on sim-1, a rest+cancel on sim-2, one fill on sim-2.
 	f1 := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 100})
 	waitFor(t, c, func(u exec.Update) bool { f, ok := u.(exec.FillUpdate); return ok && f.Fill.OrderID == f1.OrderID })
-	// MSFT has no mark yet — SimBroker rests a limit order on an unmarked
-	// symbol rather than guessing marketability off a zero-value mark. Seed one
-	// so this second sim-1 fill actually happens.
-	sims["sim-1"].SetMark("MSFT", 100)
+	// MSFT has no mark/book yet — SimBroker rests a limit order on an unpriced
+	// symbol rather than guessing marketability. Seed both so this second
+	// sim-1 fill actually happens.
+	seedMarketableBook(sims["sim-1"], "MSFT", 100)
 	f2 := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "MSFT", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 5, LimitPrice: 100})
 	waitFor(t, c, func(u exec.Update) bool { f, ok := u.(exec.FillUpdate); return ok && f.Fill.OrderID == f2.OrderID })
 	sims["sim-2"].SetMark("AAPL", 100)

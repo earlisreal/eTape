@@ -2,6 +2,7 @@ package sim
 
 import (
 	"context"
+	"math"
 	"testing"
 	"time"
 
@@ -53,8 +54,104 @@ func TestSimSetBookStoresSnapshot(t *testing.T) {
 	}
 }
 
+// --- fillAgainstBook: pure book-walk pricing, no broker/mutex machinery ---
+
+func TestFillAgainstBook_MarketSweepsMultipleLevelsWeightedAverage(t *testing.T) {
+	o := &exec.Order{Side: exec.SideBuy, Type: exec.TypeMarket, LeavesQty: 250}
+	book := feed.Book{
+		Asks: []feed.BookLevel{
+			{Price: 100.0, Volume: 100},
+			{Price: 100.1, Volume: 100},
+			{Price: 100.2, Volume: 100},
+		},
+	}
+	qty, px := fillAgainstBook(o, book)
+	if qty != 250 {
+		t.Fatalf("qty = %v, want 250 (full sweep across 3 levels)", qty)
+	}
+	want := (100*100.0 + 100*100.1 + 50*100.2) / 250
+	if math.Abs(px-want) > 1e-9 {
+		t.Fatalf("avgPrice = %v, want %v", px, want)
+	}
+}
+
+func TestFillAgainstBook_LimitStopsAtFirstLevelViolatingCap(t *testing.T) {
+	o := &exec.Order{Side: exec.SideBuy, Type: exec.TypeLimit, LimitPrice: 100.1, LeavesQty: 250}
+	book := feed.Book{
+		Asks: []feed.BookLevel{
+			{Price: 100.0, Volume: 100},
+			{Price: 100.1, Volume: 100},
+			{Price: 100.2, Volume: 100}, // violates the 100.1 cap; walk stops before this level
+		},
+	}
+	qty, px := fillAgainstBook(o, book)
+	if qty != 200 {
+		t.Fatalf("qty = %v, want 200 (depth exhausted at the cap, not the full 250)", qty)
+	}
+	want := (100*100.0 + 100*100.1) / 200
+	if math.Abs(px-want) > 1e-9 {
+		t.Fatalf("avgPrice = %v, want %v", px, want)
+	}
+}
+
+func TestFillAgainstBook_SellConsumesBidsDescending(t *testing.T) {
+	o := &exec.Order{Side: exec.SideSell, Type: exec.TypeMarket, LeavesQty: 30}
+	book := feed.Book{
+		Bids: []feed.BookLevel{
+			{Price: 99.5, Volume: 20},
+			{Price: 99.4, Volume: 50},
+		},
+	}
+	qty, px := fillAgainstBook(o, book)
+	if qty != 30 {
+		t.Fatalf("qty = %v, want 30", qty)
+	}
+	want := (20*99.5 + 10*99.4) / 30
+	if math.Abs(px-want) > 1e-9 {
+		t.Fatalf("avgPrice = %v, want %v", px, want)
+	}
+}
+
+func TestFillAgainstBook_SellLimitCapsAtBidFloor(t *testing.T) {
+	o := &exec.Order{Side: exec.SideSell, Type: exec.TypeLimit, LimitPrice: 99.45, LeavesQty: 30}
+	book := feed.Book{
+		Bids: []feed.BookLevel{
+			{Price: 99.5, Volume: 20},
+			{Price: 99.4, Volume: 50}, // below the 99.45 floor; walk stops before this level
+		},
+	}
+	qty, px := fillAgainstBook(o, book)
+	if qty != 20 || px != 99.5 {
+		t.Fatalf("qty=%v px=%v, want 20,99.5", qty, px)
+	}
+}
+
+func TestFillAgainstBook_EmptyBookReturnsZero(t *testing.T) {
+	o := &exec.Order{Side: exec.SideBuy, Type: exec.TypeMarket, LeavesQty: 10}
+	qty, px := fillAgainstBook(o, feed.Book{})
+	if qty != 0 || px != 0 {
+		t.Fatalf("qty=%v px=%v, want 0,0 for an empty book", qty, px)
+	}
+}
+
+func TestFillAgainstBook_ResumesFromLeavesQtyNotOriginalQty(t *testing.T) {
+	// A previously-partially-filled order (Qty 100, already executed 60) must
+	// only ask the book for its LeavesQty (40), not the original Qty.
+	o := &exec.Order{Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 100, ExecutedQty: 60, LeavesQty: 40}
+	book := feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 1000}}}
+	qty, px := fillAgainstBook(o, book)
+	if qty != 40 || px != 100 {
+		t.Fatalf("qty=%v px=%v, want 40,100", qty, px)
+	}
+}
+
+// TestSimMarketableLimitFills is the basic sanity case: a marketable limit
+// order fills against a book whose best level sits exactly at the entered
+// limit. (The distinct price-improvement case — limit priced through the
+// ask — is TestSimMarketableBuyLimitFillsAtAsk_PriceImprovement below.)
 func TestSimMarketableLimitFills(t *testing.T) {
 	b := newSim(t)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
 	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, Qty: 10, LimitPrice: 100, ClientOrderID: "ET1"}
 	ack, err := b.SubmitOrder(context.Background(), req)
 	if err != nil || !ack.Accepted {
@@ -69,6 +166,103 @@ func TestSimMarketableLimitFills(t *testing.T) {
 	}
 	if _, ok := drain(t, b).(exec.BrokerPositions); !ok {
 		t.Fatal("fill should be followed by a BrokerPositions snapshot")
+	}
+}
+
+// TestSimMarketableBuyLimitFillsAtAsk_PriceImprovement: a buy limit priced
+// above the ask fills AT the ask (price improvement), not at the entered
+// limit — book-walk pricing replaced "fill at the limit price" in Task 2.
+func TestSimMarketableBuyLimitFillsAtAsk_PriceImprovement(t *testing.T) {
+	b := newSim(t)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100.5, Volume: 50}}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, Qty: 10, LimitPrice: 102, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	_ = drain(t, b) // OrderAccepted
+	f, ok := drain(t, b).(exec.OrderFilled)
+	if !ok || f.F.Price != 100.5 || f.F.Qty != 10 {
+		t.Fatalf("buy limit above the ask should fill AT the ask (100.5), got %+v ok=%v", f, ok)
+	}
+}
+
+// Symmetric case: a sell limit priced below the bid fills AT the bid.
+func TestSimMarketableSellLimitFillsAtBid_PriceImprovement(t *testing.T) {
+	b := newSim(t)
+	b.SetBook("AAPL", feed.Book{Bids: []feed.BookLevel{{Price: 99.5, Volume: 50}}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideSell, Type: exec.TypeLimit, Qty: 10, LimitPrice: 98, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	_ = drain(t, b) // OrderAccepted
+	f, ok := drain(t, b).(exec.OrderFilled)
+	if !ok || f.F.Price != 99.5 || f.F.Qty != 10 {
+		t.Fatalf("sell limit below the bid should fill AT the bid (99.5), got %+v ok=%v", f, ok)
+	}
+}
+
+// TestSimOrderFillsAcrossMultipleBookLevels is the end-to-end (SubmitOrder,
+// not the direct fillAgainstBook unit test above) confirmation that an
+// order sized larger than the top level's Volume fills across multiple
+// levels at the correct size-weighted average price.
+func TestSimOrderFillsAcrossMultipleBookLevels(t *testing.T) {
+	b := newSim(t)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{
+		{Price: 100.0, Volume: 5},
+		{Price: 100.1, Volume: 5},
+	}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	_ = drain(t, b) // OrderAccepted
+	f, ok := drain(t, b).(exec.OrderFilled)
+	want := (5*100.0 + 5*100.1) / 10
+	if !ok || f.F.Qty != 10 || math.Abs(f.F.Price-want) > 1e-9 || f.LeavesQty != 0 {
+		t.Fatalf("expected full 10-share fill at weighted avg %v, got %+v ok=%v", want, f, ok)
+	}
+}
+
+// TestSimPartialFillRestsThenCompletesOnLaterSetBook covers depth thinner
+// than the order's qty: the first attempt partially fills and the order
+// keeps resting (not deleted); a follow-up SetBook with more depth fills
+// the remainder and the order disappears from working orders.
+func TestSimPartialFillRestsThenCompletesOnLaterSetBook(t *testing.T) {
+	b := newSim(t)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 4}}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	_ = drain(t, b) // OrderAccepted
+	f, ok := drain(t, b).(exec.OrderFilled)
+	if !ok || f.F.Qty != 4 || f.CumQty != 4 || f.LeavesQty != 6 {
+		t.Fatalf("expected partial fill of 4, leaving 6, got %+v ok=%v", f, ok)
+	}
+	_ = drain(t, b) // BrokerPositions
+
+	_, _, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 || orders[0].Status != exec.StatusPartiallyFilled || orders[0].LeavesQty != 6 {
+		t.Fatalf("partially-filled order should still be working: %+v", orders)
+	}
+
+	// More depth arrives — the remainder fills and the order stops working.
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100.2, Volume: 100}}})
+	f2, ok := drain(t, b).(exec.OrderFilled)
+	if !ok || f2.F.Qty != 6 || f2.CumQty != 10 || f2.LeavesQty != 0 || f2.F.Price != 100.2 {
+		t.Fatalf("expected the remaining 6 to fill at 100.2, got %+v ok=%v", f2, ok)
+	}
+	_ = drain(t, b) // BrokerPositions
+
+	_, _, orders, err = b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 0 {
+		t.Fatalf("fully-filled order should no longer be working: %+v", orders)
 	}
 }
 
@@ -94,15 +288,43 @@ func TestSimNonMarketableRestsThenCancel(t *testing.T) {
 	}
 }
 
-func TestSimSetMarkCrossesRestingOrder(t *testing.T) {
+// TestSimSetMarkAloneDoesNotCrossRestingLimit_NoBook is a regression guard
+// for the Task 2 pricing-model switch: Limit fills are now book-priced, so
+// moving the mark through a resting limit's price no longer fills it by
+// itself (the old behavior) when there is no book at all.
+func TestSimSetMarkAloneDoesNotCrossRestingLimit_NoBook(t *testing.T) {
 	b := newSim(t)
 	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, Qty: 10, LimitPrice: 95, ClientOrderID: "ET1"}
 	_, _ = b.SubmitOrder(context.Background(), req)
 	_ = drain(t, b)       // OrderAccepted
-	b.SetMark("AAPL", 94) // mark drops to/through 95 → buy limit 95 now marketable
+	b.SetMark("AAPL", 94) // would have crossed a mark-priced limit; no book exists, so it must not fill
+	select {
+	case e := <-b.Events():
+		t.Fatalf("resting limit with no book must not fill on a mark move alone, got %+v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+	_, _, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 {
+		t.Fatalf("order should still be resting: %+v", orders)
+	}
+}
+
+// TestSimSetBookCrossesRestingLimitOrder is SetBook's crossing analog of the
+// old SetMark-crossing test: a resting limit order that never had a book at
+// submit time fills once a crossing book arrives via SetBook.
+func TestSimSetBookCrossesRestingLimitOrder(t *testing.T) {
+	b := newSim(t)
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, Qty: 10, LimitPrice: 95, ClientOrderID: "ET1"}
+	_, _ = b.SubmitOrder(context.Background(), req)
+	_ = drain(t, b) // OrderAccepted
+
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 94.8, Volume: 50}}})
 	f, ok := drain(t, b).(exec.OrderFilled)
-	if !ok || f.F.Price != 95 {
-		t.Fatalf("crossing should fill at limit 95, got %+v ok=%v", f, ok)
+	if !ok || f.F.Price != 94.8 {
+		t.Fatalf("SetBook should cross the resting limit at the ask 94.8, got %+v ok=%v", f, ok)
 	}
 	_ = drain(t, b) // BrokerPositions
 }
@@ -149,6 +371,29 @@ func TestSimReplaceAndSnapshot(t *testing.T) {
 	}
 }
 
+// TestSimReplaceOrder_RepricedLimitCrossesCurrentBook confirms ReplaceOrder
+// still re-evaluates against the book via the same actOnMarkLocked path
+// SubmitOrder/crossRestingLocked use — a limit whose new (replaced) price
+// now crosses the standing book fills immediately on replace, at the book
+// price (not the newly-entered limit).
+func TestSimReplaceOrder_RepricedLimitCrossesCurrentBook(t *testing.T) {
+	b := newSim(t) // seeds AAPL mark = 100 (replace's fill-attempt gate)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100.5, Volume: 50}}})
+	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, Qty: 10, LimitPrice: 90, ClientOrderID: "ET1"})
+	_ = drain(t, b) // OrderAccepted (90 doesn't cross the 100.5 ask)
+
+	if err := b.ReplaceOrder(context.Background(), "ET1", exec.ReplaceRequest{Qty: 10, LimitPrice: 101}); err != nil {
+		t.Fatal(err)
+	}
+	if r, ok := drain(t, b).(exec.OrderReplaced); !ok || r.NewLimit != 101 {
+		t.Fatalf("replace event wrong: %+v ok=%v", r, ok)
+	}
+	f, ok := drain(t, b).(exec.OrderFilled)
+	if !ok || f.F.Price != 100.5 || f.F.Qty != 10 {
+		t.Fatalf("replace should cross the book at the ask (100.5), got %+v ok=%v", f, ok)
+	}
+}
+
 // TestNew_SeedsAccountFromStartingCash guards against the boot-balance
 // regression: New used to always zero-value acct, so a freshly booted engine
 // (Core.Recover -> Broker.Snapshot) showed $0 equity/buying power regardless
@@ -165,8 +410,13 @@ func TestNew_SeedsAccountFromStartingCash(t *testing.T) {
 	}
 }
 
-func TestSimMarketOrderNoMarkRejected(t *testing.T) {
-	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000) // no SetMark call — "MSFT" has no mark
+// TestSimMarketOrderNoBookRestsThenFillsOnSetBook replaces the old "no mark
+// -> reject" behavior: Task 2 removed that rejection entirely. A market
+// order with no book yet for its symbol is Accepted and rests (same as a
+// non-marketable limit) — not rejected, not filled — until a real book
+// arrives.
+func TestSimMarketOrderNoBookRestsThenFillsOnSetBook(t *testing.T) {
+	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000) // no SetMark/SetBook — "MSFT" has neither
 	req := exec.OrderRequest{Venue: "sim-1", Symbol: "MSFT", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
 	ack, err := b.SubmitOrder(context.Background(), req)
 	if err != nil || !ack.Accepted {
@@ -175,14 +425,31 @@ func TestSimMarketOrderNoMarkRejected(t *testing.T) {
 	if _, ok := drain(t, b).(exec.OrderAccepted); !ok {
 		t.Fatal("first event should be OrderAccepted")
 	}
-	r, ok := drain(t, b).(exec.OrderRejected)
-	if !ok || r.OID != "ET1" {
-		t.Fatalf("market order with no mark should be rejected, got %+v ok=%v", r, ok)
+	select {
+	case e := <-b.Events():
+		t.Fatalf("market order with no book must not reject or fill, got %+v", e)
+	case <-time.After(100 * time.Millisecond):
+	}
+	_, _, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 || orders[0].Status != exec.StatusAccepted {
+		t.Fatalf("market order should still be working while no book exists: %+v", orders)
+	}
+
+	b.SetBook("MSFT", feed.Book{Asks: []feed.BookLevel{{Price: 50, Volume: 20}}})
+	f, ok := drain(t, b).(exec.OrderFilled)
+	if !ok || f.F.Price != 50 || f.F.Qty != 10 || f.LeavesQty != 0 {
+		t.Fatalf("first SetBook should fill the resting market order, got %+v ok=%v", f, ok)
 	}
 }
 
-func TestSimMarketOrderFillsAtMark(t *testing.T) {
-	b := newSim(t) // seeds AAPL mark = 100
+// TestSimMarketOrderFillsAgainstBook confirms a market order prices off the
+// book (not a flat "mark"), even when a mark also exists for the symbol.
+func TestSimMarketOrderFillsAgainstBook(t *testing.T) {
+	b := newSim(t) // seeds AAPL mark = 100 (irrelevant to pricing now)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100.25, Volume: 50}}})
 	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
 	ack, err := b.SubmitOrder(context.Background(), req)
 	if err != nil || !ack.Accepted {
@@ -192,11 +459,102 @@ func TestSimMarketOrderFillsAtMark(t *testing.T) {
 		t.Fatal("first event should be OrderAccepted")
 	}
 	f, ok := drain(t, b).(exec.OrderFilled)
-	if !ok || f.F.Price != 100 || f.F.Qty != 10 {
-		t.Fatalf("market order should fill at the mark, got %+v ok=%v", f, ok)
+	if !ok || f.F.Price != 100.25 || f.F.Qty != 10 {
+		t.Fatalf("market order should fill at the book ask (100.25), not the mark (100), got %+v ok=%v", f, ok)
 	}
 	if _, ok := drain(t, b).(exec.BrokerPositions); !ok {
 		t.Fatal("fill should be followed by a BrokerPositions snapshot")
+	}
+}
+
+// --- TIF: IOC and FOK only govern the first fill attempt on submit ---
+
+// TestSimTIFIOC_PartialFillCancelsRemainder: depth thinner than qty fills
+// what it can immediately, then IOC cancels the remainder instead of
+// resting it.
+func TestSimTIFIOC_PartialFillCancelsRemainder(t *testing.T) {
+	b := newSim(t)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 4}}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, TIF: exec.TIFIOC, Qty: 10, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	_ = drain(t, b) // OrderAccepted
+	f, ok := drain(t, b).(exec.OrderFilled)
+	if !ok || f.F.Qty != 4 || f.LeavesQty != 6 {
+		t.Fatalf("IOC should still fill the immediately-available 4, got %+v ok=%v", f, ok)
+	}
+	_ = drain(t, b) // BrokerPositions
+	c, ok := drain(t, b).(exec.OrderCanceled)
+	if !ok || c.OID != "ET1" {
+		t.Fatalf("IOC should cancel the unfilled remainder instead of resting it, got %+v ok=%v", c, ok)
+	}
+	_, _, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 0 {
+		t.Fatalf("IOC order must not be left working after the cancel: %+v", orders)
+	}
+}
+
+// TestSimTIFIOC_NoBookCancelsImmediately: IOC never rests, even if nothing
+// crossed at all.
+func TestSimTIFIOC_NoBookCancelsImmediately(t *testing.T) {
+	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000)
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "MSFT", Side: exec.SideBuy, Type: exec.TypeMarket, TIF: exec.TIFIOC, Qty: 10, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	_ = drain(t, b) // OrderAccepted
+	c, ok := drain(t, b).(exec.OrderCanceled)
+	if !ok || c.OID != "ET1" {
+		t.Fatalf("IOC with no book should cancel immediately (never rest), got %+v ok=%v", c, ok)
+	}
+}
+
+// TestSimTIFFOK_CannotFillCompletely_RejectsWithNoFill: FOK is all-or-none —
+// if the book can't fill the whole order right now, nothing fills at all and
+// the order is rejected, leaving orders/positions untouched.
+func TestSimTIFFOK_CannotFillCompletely_RejectsWithNoFill(t *testing.T) {
+	b := newSim(t)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 4}}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, TIF: exec.TIFFOK, Qty: 10, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	_ = drain(t, b) // OrderAccepted
+	r, ok := drain(t, b).(exec.OrderRejected)
+	if !ok || r.OID != "ET1" {
+		t.Fatalf("FOK unable to fill completely should reject with no fill, got %+v ok=%v", r, ok)
+	}
+	_, pos, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 0 {
+		t.Fatalf("rejected FOK order must not remain working: %+v", orders)
+	}
+	for _, p := range pos {
+		if p.Qty != 0 {
+			t.Fatalf("rejected FOK order must not affect positions: %+v", pos)
+		}
+	}
+}
+
+// TestSimTIFFOK_FullyFillableFillsNormally: FOK that CAN fill completely
+// against the current book fills exactly like a Day/GTC order would.
+func TestSimTIFFOK_FullyFillableFillsNormally(t *testing.T) {
+	b := newSim(t)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, TIF: exec.TIFFOK, Qty: 10, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	_ = drain(t, b) // OrderAccepted
+	f, ok := drain(t, b).(exec.OrderFilled)
+	if !ok || f.F.Qty != 10 || f.LeavesQty != 0 {
+		t.Fatalf("fully-fillable FOK should fill normally, got %+v ok=%v", f, ok)
 	}
 }
 
@@ -227,6 +585,7 @@ func filledAt(t *testing.T, evs []exec.BrokerEvent) (exec.OrderFilled, bool) {
 
 func TestSim_Flatten_ZeroesPositions(t *testing.T) {
 	b := newSim(t)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
 	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
 	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
 		t.Fatal(err)
@@ -248,10 +607,16 @@ func TestSim_Flatten_ZeroesPositions(t *testing.T) {
 	}
 }
 
+// TestSim_BuyStop_TriggersOnMarkAtOrAboveStop covers point 5/7 of the Task 2
+// brief: a stop's trigger still keys off the last-trade mark (SetMark), but
+// once triggered it prices off the book, not the mark — the ask (101.25) is
+// deliberately different from the triggering mark (101) so a test that
+// asserted "fills at the mark" would fail here.
 func TestSim_BuyStop_TriggersOnMarkAtOrAboveStop(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
 	b := New("v", clk, 100_000)
 	b.SetMark("AAPL", 95)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 101.25, Volume: 50}}})
 	drainAll(b.Events())
 	_, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
 		Venue: "v", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeStop,
@@ -263,13 +628,48 @@ func TestSim_BuyStop_TriggersOnMarkAtOrAboveStop(t *testing.T) {
 	if _, ok := filledAt(t, drainAll(b.Events())); ok {
 		t.Fatal("buy stop must rest while mark (95) < stop (100)")
 	}
-	b.SetMark("AAPL", 101) // crosses the stop
+	b.SetMark("AAPL", 101) // crosses the stop -- triggers off the mark
 	f, ok := filledAt(t, drainAll(b.Events()))
 	if !ok {
 		t.Fatal("buy stop must fill once mark reaches the stop")
 	}
-	if f.AvgPrice != 101 {
-		t.Fatalf("stop-market fills at the mark: got %v want 101", f.AvgPrice)
+	if f.AvgPrice != 101.25 {
+		t.Fatalf("triggered stop-market prices off the book (101.25), not the mark: got %v", f.AvgPrice)
+	}
+}
+
+// TestSim_BuyStop_TriggersButRestsWithNoBook: the trigger check itself never
+// needs a book (it only compares mark to StopPrice), but once triggered the
+// converted market order still follows "rest until book" like any other
+// marketable order — a triggered stop is not a special case for that rule.
+func TestSim_BuyStop_TriggersButRestsWithNoBook(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
+	b := New("v", clk, 100_000)
+	b.SetMark("AAPL", 95)
+	drainAll(b.Events())
+	_, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
+		Venue: "v", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeStop,
+		Qty: 10, StopPrice: 100, ClientOrderID: "ET-bstop2",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	drainAll(b.Events())
+	b.SetMark("AAPL", 101) // triggers, but there is still no book for AAPL
+	if _, ok := filledAt(t, drainAll(b.Events())); ok {
+		t.Fatal("a triggered stop with no book must rest, not fill")
+	}
+	_, _, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 {
+		t.Fatalf("triggered-but-unpriced stop should still be working: %+v", orders)
+	}
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 102, Volume: 50}}})
+	f, ok := filledAt(t, drainAll(b.Events()))
+	if !ok || f.AvgPrice != 102 {
+		t.Fatalf("first SetBook after trigger should fill the resting order at the ask, got ok=%v px=%v", ok, f.AvgPrice)
 	}
 }
 
@@ -277,6 +677,7 @@ func TestSim_SellStop_TriggersOnMarkAtOrBelowStop(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
 	b := New("v", clk, 100_000)
 	b.SetMark("AAPL", 105)
+	b.SetBook("AAPL", feed.Book{Bids: []feed.BookLevel{{Price: 98.75, Volume: 50}}})
 	drainAll(b.Events())
 	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{
 		Venue: "v", Symbol: "AAPL", Side: exec.SideSell, Type: exec.TypeStop,
@@ -286,28 +687,33 @@ func TestSim_SellStop_TriggersOnMarkAtOrBelowStop(t *testing.T) {
 		t.Fatal("sell stop must rest while mark (105) > stop (100)")
 	}
 	b.SetMark("AAPL", 99)
-	if f, ok := filledAt(t, drainAll(b.Events())); !ok || f.AvgPrice != 99 {
-		t.Fatalf("sell stop should fill at mark 99; ok=%v px=%v", ok, f.AvgPrice)
+	if f, ok := filledAt(t, drainAll(b.Events())); !ok || f.AvgPrice != 98.75 {
+		t.Fatalf("sell stop prices off the book bid (98.75), not the mark (99); ok=%v px=%v", ok, f.AvgPrice)
 	}
 }
 
+// TestSim_BuyStopLimit_TriggersThenRestsAsLimit: the trigger is still a mark
+// comparison (StopPrice vs mark), but once triggered its marketability is a
+// BOOK comparison (LimitPrice vs the ask) — a further mark move no longer
+// changes anything; only a book update can fill it.
 func TestSim_BuyStopLimit_TriggersThenRestsAsLimit(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
 	b := New("v", clk, 100_000)
 	b.SetMark("AAPL", 95)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 102, Volume: 50}}})
 	drainAll(b.Events())
 	// stop 100, limit 100.5 buy: on trigger it is a limit buy @100.5.
 	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{
 		Venue: "v", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeStopLimit,
 		Qty: 10, StopPrice: 100, LimitPrice: 100.5, ClientOrderID: "ET-bsl",
 	})
-	b.SetMark("AAPL", 102) // triggers (>=100) but 100.5 limit is NOT marketable at 102 -> rests
+	b.SetMark("AAPL", 102) // triggers (>=100), but the book ask (102) is above the 100.5 limit -> rests
 	if _, ok := filledAt(t, drainAll(b.Events())); ok {
 		t.Fatal("stop-limit must not fill above its limit")
 	}
-	b.SetMark("AAPL", 100) // now 100.5 >= 100 -> marketable
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100.5, Volume: 50}}}) // ask now at the limit
 	if f, ok := filledAt(t, drainAll(b.Events())); !ok || f.AvgPrice != 100.5 {
-		t.Fatalf("stop-limit should fill at its limit 100.5; ok=%v px=%v", ok, f.AvgPrice)
+		t.Fatalf("stop-limit should fill at its limit 100.5 once the book crosses it; ok=%v px=%v", ok, f.AvgPrice)
 	}
 }
 
@@ -402,9 +808,10 @@ func TestSim_ReplaceOrder_StopLimitNotTriggered_RawMarketableWouldWronglyFill(t 
 
 func TestSim_ResetBalance_CancelsFlattensAndSetsAccount(t *testing.T) {
 	b := newSim(t)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
 	// A resting order that should be canceled.
 	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "MSFT", Side: exec.SideBuy, Type: exec.TypeLimit, Qty: 5, LimitPrice: 90, ClientOrderID: "ET1"})
-	drain(t, b) // OrderAccepted (rests: mark unset for MSFT, but limit path always accepts+rests without a mark)
+	drain(t, b) // OrderAccepted (rests: no book for MSFT, so nothing crosses)
 
 	// A filled position that should be flattened.
 	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET2"})

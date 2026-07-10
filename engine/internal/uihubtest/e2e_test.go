@@ -114,8 +114,15 @@ func TestE2EExecLifecycleOverWS(t *testing.T) {
 	// populated via Core.FeedMark — in production that's the markBridge
 	// goroutine copying md.Core.Marks() into execCore.FeedMark (see
 	// cmd/etape/main.go). This test has no live md feed for US.AAPL, so it
-	// feeds the mark directly, exactly like markBridge would.
+	// feeds the mark directly, exactly like markBridge would. Sim fills are
+	// book-priced (Task 2), so the market order below also needs a book —
+	// SetMark alone no longer fills it.
 	simBroker.SetMark("US.AAPL", 3.50)
+	simBroker.SetBook("US.AAPL", feed.Book{
+		Symbol: "US.AAPL",
+		Bids:   []feed.BookLevel{{Price: 3.50, Volume: 1_000_000}},
+		Asks:   []feed.BookLevel{{Price: 3.50, Volume: 1_000_000}},
+	})
 	execCore.FeedMark(exec.Mark{Symbol: "US.AAPL", Price: 3.50, TsMs: clk.Now().UnixMilli()})
 	corr := sendCommand(t, ctx, c, "SubmitOrder", map[string]any{
 		"venue": "sim", "symbol": "US.AAPL", "side": "BUY", "type": "MARKET", "tif": "DAY", "qty": 10,

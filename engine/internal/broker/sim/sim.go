@@ -1,11 +1,17 @@
 // Package sim is a deterministic in-memory exec.Broker used for tests, replay,
-// and (v1.5) practice mode. It fills market and marketable-limit orders
-// immediately and rests non-marketable limits until canceled, replaced, or
-// crossed by a later SetMark. It also tracks each symbol's latest L2 book
-// snapshot (SetBook), fed the same way as marks; the book is stored only for
-// now — Task 2 makes resting orders re-evaluate against it, so crossing
-// still runs entirely off SetMark until then. It imports exec, never the
-// reverse.
+// and (v1.5) practice mode. Fill PRICING is book-walk based (fillAgainstBook):
+// a market or marketable-limit order consumes price levels on the opposite
+// side of its L2 book (SetBook), size-weighted across every level consumed,
+// honoring a limit price as a per-level cap; an order with too little depth
+// partially fills and rests until a later SetBook completes it. Fill
+// TRIGGERING is still keyed off the last-trade mark (SetMark) for Stop/
+// StopLimit orders only — stopTriggered decides *whether/when* a stop
+// converts to a marketable order; fillAgainstBook then decides *at what
+// price* it fills, exactly like any other Market/Limit order. A market or
+// marketable-limit order with no book yet for its symbol does not reject —
+// it rests (same as a non-marketable limit) until a real book arrives; there
+// is no "reject for lack of a mark/book" case left in this broker. It
+// imports exec, never the reverse.
 package sim
 
 import (
@@ -27,7 +33,7 @@ type Broker struct {
 
 	mu     sync.Mutex
 	marks  map[string]float64
-	books  map[string]feed.Book   // latest L2 snapshot per symbol (Task 2 consumes it)
+	books  map[string]feed.Book   // latest L2 snapshot per symbol; fillAgainstBook prices fills off it
 	orders map[string]*exec.Order // resting (working) orders
 	pos    map[string]*exec.Position
 	acct   exec.AccountSnapshot
@@ -75,13 +81,17 @@ func (b *Broker) SetMark(symbol string, price float64) {
 	}
 }
 
-// SetBook stores a symbol's latest L2 snapshot. Task 2 makes resting
-// orders re-evaluate against it; for now this only updates the stored
-// book (no crossing side effects yet — SetMark still owns crossing).
+// SetBook stores a symbol's latest L2 snapshot and crosses any resting
+// Market/Limit orders it now prices fillable — the book-side analog of
+// SetMark's mark-triggered crossing.
 func (b *Broker) SetBook(symbol string, book feed.Book) {
 	b.mu.Lock()
 	b.books[symbol] = book
+	crossed := b.crossRestingOnBookLocked(symbol, book)
 	b.mu.Unlock()
+	for _, ev := range crossed {
+		b.emit(ev)
+	}
 }
 
 // SetAccount overwrites the venue account and emits a BrokerAccount reconcile
@@ -96,13 +106,68 @@ func (b *Broker) SetAccount(a exec.AccountSnapshot) {
 
 func (b *Broker) now() int64 { return b.clk.Now().UnixMilli() }
 
-func marketable(side exec.Side, limit, mark float64) bool {
+// marketable reports whether price satisfies limit's directional cap for
+// side: buy/cover can pay up to limit (price <= limit), sell/short can give
+// up down to limit (price >= limit). Originally the whole "is this resting
+// order fillable against the mark" check; Task 2 replaced that role with
+// book-walk pricing (fillAgainstBook), but the same directional comparison
+// is exactly what a per-level price cap needs, so fillAgainstBook reuses it
+// with price = the book level under consideration instead of the mark.
+func marketable(side exec.Side, limit, price float64) bool {
 	switch side {
 	case exec.SideBuy, exec.SideCover:
-		return limit >= mark
+		return limit >= price
 	default: // Sell, Short
-		return limit <= mark
+		return limit <= price
 	}
+}
+
+// fillAgainstBook attempts to fill (or partially fill) o against book,
+// consuming price levels on the opposite side of o's side (best-first, per
+// feed.Book's contract), honoring o's limit (if any) as a per-level price
+// cap. It is a pure pricing function: it reads o's Side/Type/LimitPrice/
+// LeavesQty but never mutates o or any broker state — the caller applies
+// the result (see fillLocked). Returns the qty filled and the
+// size-weighted average fill price across every level consumed; qty is 0
+// if nothing crossed (e.g. no book yet, or the very first level already
+// violates the limit cap).
+//
+// TypeMarket sweeps levels uncapped until LeavesQty is satisfied or the
+// side is exhausted. TypeLimit consumes a level only while it satisfies
+// marketable(o.Side, o.LimitPrice, level.Price), stopping at the first
+// level that would cross the limit (since the book is best-first, every
+// level after that is worse). TypeStop/TypeStopLimit are never priced
+// here directly: stopTriggered (keyed off the last-trade mark) gates
+// whether/when they convert to TypeMarket/TypeLimit *before* reaching this
+// function — see actOnMarkLocked.
+func fillAgainstBook(o *exec.Order, book feed.Book) (filledQty, avgPrice float64) {
+	levels := book.Asks
+	if o.Side == exec.SideSell || o.Side == exec.SideShort {
+		levels = book.Bids
+	}
+	capped := o.Type == exec.TypeLimit
+
+	remaining := o.LeavesQty
+	var sumPxQty, sumQty float64
+	for _, lvl := range levels {
+		if remaining <= 0 {
+			break
+		}
+		if capped && !marketable(o.Side, o.LimitPrice, lvl.Price) {
+			break // this level (and every level past it) violates the cap
+		}
+		take := remaining
+		if v := float64(lvl.Volume); v < take {
+			take = v
+		}
+		sumPxQty += take * lvl.Price
+		sumQty += take
+		remaining -= take
+	}
+	if sumQty == 0 {
+		return 0, 0
+	}
+	return sumQty, sumPxQty / sumQty
 }
 
 // stopTriggered reports whether a stop/stop-limit's trigger has been hit.
@@ -133,29 +198,24 @@ func (b *Broker) SubmitOrder(_ context.Context, req exec.OrderRequest) (exec.Ord
 	mark, hasMark := b.marks[req.Symbol]
 	var post []exec.BrokerEvent
 	post = append(post, exec.OrderAccepted{V: b.venue, OID: o.ID, BrokerOrderID: brokerID, Ts: b.now()})
-	// Market orders need a mark; without one they are rejected (mirrors gate).
-	if req.Type == exec.TypeMarket && !hasMark {
-		delete(b.orders, o.ID)
-		post = append(post, exec.OrderRejected{V: b.venue, OID: o.ID, Reason: "sim: no mark for market order", Ts: b.now()})
-		b.mu.Unlock()
-		for _, e := range post {
-			b.emit(e)
+
+	switch o.Type {
+	case exec.TypeMarket, exec.TypeLimit:
+		// Book-priced from the moment of submission. There is no longer a
+		// "market order + no mark -> reject" case: a market or
+		// marketable-limit order with no book yet for its symbol simply
+		// rests (fillAgainstBook against an empty/missing book returns 0),
+		// exactly like a non-marketable limit always has — it fills
+		// (fully or partially) the first time SetBook delivers a real book.
+		post = append(post, b.attemptInitialFillLocked(o)...)
+	default: // TypeStop, TypeStopLimit
+		// Trigger evaluation only, keyed off the mark (unchanged); whatever
+		// doesn't trigger+fill stays resting until a later SetMark/SetBook
+		// acts on it. TIF IOC/FOK deliberately do not apply on this branch
+		// — see attemptInitialFillLocked's doc comment for why.
+		if hasMark {
+			post = append(post, b.actOnMarkLocked(o, mark)...)
 		}
-		return exec.OrderAck{OrderID: o.ID, Accepted: true, Message: brokerID}, nil
-	}
-	// Market orders fill at the mark immediately.
-	if req.Type == exec.TypeMarket {
-		post = append(post, b.fillLocked(o, mark)...)
-		b.mu.Unlock()
-		for _, e := range post {
-			b.emit(e)
-		}
-		return exec.OrderAck{OrderID: o.ID, Accepted: true, Message: brokerID}, nil
-	}
-	// Limit / Stop / StopLimit: apply the current mark if we have one; whatever
-	// does not fill stays resting until a later SetMark acts on it.
-	if hasMark {
-		post = append(post, b.actOnMarkLocked(o, mark)...)
 	}
 	b.mu.Unlock()
 	for _, e := range post {
@@ -164,16 +224,68 @@ func (b *Broker) SubmitOrder(_ context.Context, req exec.OrderRequest) (exec.Ord
 	return exec.OrderAck{OrderID: o.ID, Accepted: true, Message: brokerID}, nil
 }
 
-// fillLocked fully fills a resting order at price px, updates position + account,
-// and returns the events to emit (OrderFilled + BrokerPositions). Caller holds mu.
-func (b *Broker) fillLocked(o *exec.Order, px float64) []exec.BrokerEvent {
-	qty := o.LeavesQty
-	o.ExecutedQty = o.Qty
-	o.LeavesQty = 0
-	o.AvgFillPrice = px
-	o.Status = exec.StatusFilled
+// attemptInitialFillLocked handles a freshly-submitted Market or Limit
+// order's first — and, for IOC/FOK, only — fill attempt against the current
+// book. It is deliberately distinct from attemptBookFillLocked: TIF governs
+// only what happens to whatever is left over after this ONE attempt, and
+// only here at submission time. SetBook's later crossing pass
+// (crossRestingOnBookLocked) never re-applies TIF, so a resting IOC/FOK
+// order should never exist after this function returns — it either fully
+// filled, partially-filled-then-had-the-rest-canceled (IOC), or was
+// rejected outright with no fill at all (FOK, which must never partially
+// fill). Stop/StopLimit orders don't route through here at submission
+// (SubmitOrder sends them to actOnMarkLocked instead): their "first attempt"
+// is a trigger check that may not even fire yet, and applying IOC/FOK to an
+// untriggered stop would trivially cancel/reject every stop+IOC/FOK
+// combination on submission, which cannot be the intent — that combo is out
+// of this task's scope. Caller holds mu.
+func (b *Broker) attemptInitialFillLocked(o *exec.Order) []exec.BrokerEvent {
+	book := b.books[o.Symbol]
+	qty, px := fillAgainstBook(o, book) // pure: does not mutate o or book state
+
+	if o.TIF == exec.TIFFOK && qty < o.LeavesQty {
+		// All-or-none: fillAgainstBook hasn't mutated anything, so rejecting
+		// here is a clean no-op on the order/position state.
+		delete(b.orders, o.ID)
+		return []exec.BrokerEvent{exec.OrderRejected{V: b.venue, OID: o.ID, Reason: "sim: FOK could not fill completely", Ts: b.now()}}
+	}
+
+	var out []exec.BrokerEvent
+	if qty > 0 {
+		out = append(out, b.fillLocked(o, qty, px)...)
+	}
+	if o.TIF == exec.TIFIOC && o.LeavesQty > 0 {
+		// IOC never rests, even if nothing crossed at all: cancel whatever
+		// this one attempt didn't fill instead of leaving it working.
+		delete(b.orders, o.ID)
+		out = append(out, exec.OrderCanceled{V: b.venue, OID: o.ID, Ts: b.now()})
+	}
+	return out
+}
+
+// fillLocked fills exactly qty of a resting order at price px, updates the
+// order's cumulative fill state and position, and returns the events to
+// emit (OrderFilled + BrokerPositions). qty may be less than o.LeavesQty (a
+// partial fill): the order is only deleted from b.orders and marked Filled
+// once LeavesQty reaches 0; otherwise it is marked PartiallyFilled and stays
+// resting so a later fill attempt (from another SetBook, etc.) can complete
+// it. Caller holds mu.
+func (b *Broker) fillLocked(o *exec.Order, qty, px float64) []exec.BrokerEvent {
+	// AvgFillPrice is a running size-weighted average across every fill this
+	// order has received so far, not just this one — an order can now fill
+	// in multiple partial installments as the book changes.
+	prevQty := o.ExecutedQty
+	o.AvgFillPrice = (o.AvgFillPrice*prevQty + px*qty) / (prevQty + qty)
+	o.ExecutedQty += qty
+	o.LeavesQty -= qty
 	o.UpdatedMs = b.now()
-	delete(b.orders, o.ID)
+	if o.LeavesQty <= 0 {
+		o.LeavesQty = 0
+		o.Status = exec.StatusFilled
+		delete(b.orders, o.ID)
+	} else {
+		o.Status = exec.StatusPartiallyFilled
+	}
 
 	signed := qty
 	if o.Side != exec.SideBuy && o.Side != exec.SideCover {
@@ -185,36 +297,57 @@ func (b *Broker) fillLocked(o *exec.Order, px float64) []exec.BrokerEvent {
 		b.pos[o.Symbol] = p
 	}
 	p.Qty += signed
-	p.AvgPrice = px // simplistic: last fill price (v1.5 does weighted avg)
+	p.AvgPrice = px // simplistic: last fill price (Task 3 replaces with weighted avg + cash/equity impact)
 
 	fill := exec.Fill{Venue: b.venue, OrderID: o.ID, Symbol: o.Symbol, Side: o.Side, Qty: qty, Price: px, TsMs: b.now()}
 	return []exec.BrokerEvent{
-		exec.OrderFilled{F: fill, CumQty: o.ExecutedQty, LeavesQty: 0, AvgPrice: px},
+		exec.OrderFilled{F: fill, CumQty: o.ExecutedQty, LeavesQty: o.LeavesQty, AvgPrice: o.AvgFillPrice},
 		exec.BrokerPositions{V: b.venue, Positions: b.positionsLocked()},
 	}
 }
 
-// actOnMarkLocked applies a new mark to one resting order and returns the fill
-// events it produces (empty if it stays resting). Caller holds mu.
+// attemptBookFillLocked prices a resting order against book via
+// fillAgainstBook and, if anything crossed, applies the fill through
+// fillLocked. It is the shared "fill against the current book, no TIF"
+// primitive used by actOnMarkLocked (once a Stop/StopLimit triggers and
+// converts) and crossRestingOnBookLocked (SetBook's sweep) — unlike
+// attemptInitialFillLocked, it never cancels/rejects a leftover: IOC/FOK
+// only ever apply to the initial submit-time attempt. Returns nil if
+// nothing crossed (order stays resting untouched). Caller holds mu.
+func (b *Broker) attemptBookFillLocked(o *exec.Order, book feed.Book) []exec.BrokerEvent {
+	qty, px := fillAgainstBook(o, book)
+	if qty <= 0 {
+		return nil
+	}
+	return b.fillLocked(o, qty, px)
+}
+
+// actOnMarkLocked applies a new mark to one resting order: it evaluates
+// Stop/StopLimit triggers (still keyed off the last-trade mark, per
+// stopTriggered — unchanged) and, for anything now marketable, prices the
+// fill off the CURRENT BOOK via attemptBookFillLocked rather than the mark
+// itself — book-walk pricing replaced mark-based marketable() pricing in
+// Task 2. A triggered Stop converts to TypeMarket and a triggered StopLimit
+// converts to TypeLimit (unchanged conversion pattern) so both, along with
+// an already-plain Limit/Market order, fall through to the same uncapped/
+// capped book walk. Returns the fill events produced (empty if it stays
+// resting — including the "triggered but no book yet" case: a triggered
+// stop is not a special case for SubmitOrder's rest-until-book rule).
+// Caller holds mu.
 func (b *Broker) actOnMarkLocked(o *exec.Order, mark float64) []exec.BrokerEvent {
 	switch o.Type {
 	case exec.TypeStop:
-		if stopTriggered(o.Side, o.StopPrice, mark) {
-			return b.fillLocked(o, mark) // stop-market fills at the mark
+		if !stopTriggered(o.Side, o.StopPrice, mark) {
+			return nil
 		}
+		o.Type = exec.TypeMarket // triggered: becomes a plain marketable order
 	case exec.TypeStopLimit:
-		if stopTriggered(o.Side, o.StopPrice, mark) {
-			o.Type = exec.TypeLimit // triggered: becomes a resting limit
-			if marketable(o.Side, o.LimitPrice, mark) {
-				return b.fillLocked(o, o.LimitPrice)
-			}
+		if !stopTriggered(o.Side, o.StopPrice, mark) {
+			return nil
 		}
-	default: // TypeLimit, TypeMarket(resting shouldn't happen)
-		if marketable(o.Side, o.LimitPrice, mark) {
-			return b.fillLocked(o, o.LimitPrice)
-		}
+		o.Type = exec.TypeLimit // triggered: becomes a resting limit
 	}
-	return nil
+	return b.attemptBookFillLocked(o, b.books[o.Symbol])
 }
 
 // crossRestingLocked applies a new mark to every resting order on a symbol,
@@ -234,6 +367,35 @@ func (b *Broker) crossRestingLocked(symbol string, mark float64) []exec.BrokerEv
 			continue
 		}
 		out = append(out, b.actOnMarkLocked(o, mark)...)
+	}
+	return out
+}
+
+// crossRestingOnBookLocked applies a new book snapshot to every resting
+// order on that symbol, in deterministic id order — SetBook's analog of
+// crossRestingLocked. It only ever attempts Market/Limit orders: a resting
+// Stop/StopLimit that has not yet triggered is deliberately skipped here,
+// since fillAgainstBook has no concept of a stop trigger — calling it
+// directly on an untriggered bare Stop (LimitPrice == 0) would treat it as
+// an uncapped marketable order and fill it immediately, ignoring its
+// trigger entirely. A Stop/StopLimit that HAS already triggered has, by
+// then, been converted to TypeMarket/TypeLimit by actOnMarkLocked, so it is
+// swept here like any other resting order. Caller holds mu.
+func (b *Broker) crossRestingOnBookLocked(symbol string, book feed.Book) []exec.BrokerEvent {
+	var ids []string
+	for id, o := range b.orders {
+		if o.Symbol == symbol && (o.Type == exec.TypeMarket || o.Type == exec.TypeLimit) {
+			ids = append(ids, id)
+		}
+	}
+	sort.Strings(ids)
+	var out []exec.BrokerEvent
+	for _, id := range ids {
+		o, ok := b.orders[id]
+		if !ok { // filled earlier in this pass
+			continue
+		}
+		out = append(out, b.attemptBookFillLocked(o, book)...)
 	}
 	return out
 }
