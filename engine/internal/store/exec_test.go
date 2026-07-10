@@ -114,3 +114,52 @@ func TestQueryFillsSinceAllSymbolsOrderedSinceBoundary(t *testing.T) {
 		t.Fatalf("second fill wrong: %+v", got[1])
 	}
 }
+
+// TestExportFillsByVenueAndRange exercises ExportFills' two distinguishing
+// properties versus QueryFills/QueryFillsSince: it is scoped to ONE venue,
+// and it is a closed [fromMs, toMs) range (not "since"), and it carries
+// fill_id (the PK) for the exporter's externalId.
+func TestExportFillsByVenueAndRange(t *testing.T) {
+	s := openTestStore(t)
+	mk := func(ts int64, oid, venue string) exec.EventEnvelope {
+		return exec.EventEnvelope{TsMs: ts, Source: "ws", Venue: venue, OrderID: oid, Kind: "order_filled", Payload: []byte(`{}`)}
+	}
+	fill := func(oid, symbol, venue string, ts int64) *exec.FillRow {
+		return &exec.FillRow{OrderID: oid, Symbol: symbol, Side: "BUY", Qty: 1, Price: 10, TsMs: ts, Venue: venue}
+	}
+	// Other venue: excluded regardless of ts.
+	if _, err := s.AppendExecEvent(mk(2000, "other-venue", "sim-2"), fill("other-venue", "MSFT", "sim-2", 2000)); err != nil {
+		t.Fatal(err)
+	}
+	// Same venue, before the range: excluded.
+	if _, err := s.AppendExecEvent(mk(999, "before", "sim-1"), fill("before", "AAPL", "sim-1", 999)); err != nil {
+		t.Fatal(err)
+	}
+	// Same venue, in range (out of insertion order): included, ascending by ts.
+	if _, err := s.AppendExecEvent(mk(2000, "second", "sim-1"), fill("second", "AAPL", "sim-1", 2000)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AppendExecEvent(mk(1000, "first", "sim-1"), fill("first", "AAPL", "sim-1", 1000)); err != nil {
+		t.Fatal(err)
+	}
+	// Same venue, AT the upper bound: excluded (toMs is exclusive).
+	if _, err := s.AppendExecEvent(mk(3000, "at-upper", "sim-1"), fill("at-upper", "AAPL", "sim-1", 3000)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.ExportFills(context.Background(), "sim-1", 1000, 3000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 fills, got %d: %+v", len(got), got)
+	}
+	if got[0].TsMs != 1000 || got[1].TsMs != 2000 {
+		t.Fatalf("expected ts order [1000,2000], got [%d,%d]", got[0].TsMs, got[1].TsMs)
+	}
+	if got[0].Venue != "sim-1" || got[1].Venue != "sim-1" {
+		t.Fatalf("venue filter leaked: %+v", got)
+	}
+	if got[0].FillID == 0 || got[1].FillID == 0 || got[0].FillID == got[1].FillID {
+		t.Fatalf("expected distinct nonzero fill_id PKs, got %d and %d", got[0].FillID, got[1].FillID)
+	}
+}

@@ -140,3 +140,27 @@ func (s *Store) QueryFillsSince(ctx context.Context, fromMs int64) ([]exec.FillR
 	}
 	return out, rows.Err()
 }
+
+// ExportFills returns fills for one venue in [fromMs, toMs), ascending by
+// (ts, fill_id) — the trade-export input. Unlike QueryFills (single-symbol)
+// and QueryFillsSince (all-venues, no upper bound, no fill_id), it is
+// venue-scoped, range-bounded, and carries fill_id so the exporter can mint
+// stable externalIds. ctx-aware so a slow/canceled export doesn't hang.
+func (s *Store) ExportFills(ctx context.Context, venue string, fromMs, toMs int64) ([]exec.ExportFillRow, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT fill_id, symbol, side, qty, price, ts, venue
+         FROM fills WHERE venue = ? AND ts >= ? AND ts < ? ORDER BY ts, fill_id`, venue, fromMs, toMs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []exec.ExportFillRow
+	for rows.Next() {
+		var f exec.ExportFillRow
+		if err := rows.Scan(&f.FillID, &f.Symbol, &f.Side, &f.Qty, &f.Price, &f.TsMs, &f.Venue); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}

@@ -335,3 +335,17 @@ type FillRow struct {
 	TsMs    int64
 	Venue   string
 }
+
+// ExportFillRow is a fills row enriched with its table PK (fill_id), the
+// stable key the trade exporter mints externalIds from. Separate from
+// FillRow (which has no PK) so the export path is the only reader of
+// fill_id.
+type ExportFillRow struct {
+	FillID int64
+	Symbol string
+	Side   string
+	Qty    float64
+	Price  float64
+	TsMs   int64
+	Venue  string
+}
