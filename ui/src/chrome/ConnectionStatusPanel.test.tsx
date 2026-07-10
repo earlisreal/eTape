@@ -114,4 +114,20 @@ describe("ConnectionStatusPanel", () => {
     expect(keyWarning).toBe(false);
     consoleError.mockRestore();
   });
+
+  it("renders quota rows with state-colored dots", () => {
+    const health = new HealthStore();
+    const { container } = wrap(health);
+    act(() => {
+      health.apply({ kind: "snapshot", topic: "sys.health",
+        payload: { links: [], quota: { subUsed: 62, subRemain: 38, subOwn: 47, subForeign: 15,
+          histUsed: 41, histRemain: 59, state: "foreign", histState: "ok" } } });
+    });
+    expect(screen.getByText(/Sub quota/)).toBeTruthy();
+    expect(screen.getByText(/others 15/)).toBeTruthy();
+    // sub dot amber (foreign), hist dot green (ok)
+    const dots = container.querySelectorAll("[data-quota-dot]");
+    expect((dots[0] as HTMLElement).style.color).toBe(toRgb(getPalette("light").warn));
+    expect((dots[1] as HTMLElement).style.color).toBe(toRgb(getPalette("light").ok));
+  });
 });

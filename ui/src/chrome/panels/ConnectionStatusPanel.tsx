@@ -6,6 +6,11 @@ import type { Palette } from "../../render/palette";
 const dotColor = (status: string, palette: Palette) =>
   status === "ok" ? palette.ok : status === "degraded" ? palette.warn : palette.danger;
 
+const quotaDot = (state: string, palette: Palette) =>
+  state === "exhausted" ? palette.danger
+  : state === "low" || state === "foreign" ? palette.warn
+  : palette.ok;
+
 export function ConnectionStatusPanel({ health }: { health: HealthStore }): JSX.Element {
   const { palette } = useTheme();
   const state = useSyncExternalStore((cb) => health.subscribe(cb), () => health.getSnapshot());
@@ -31,6 +36,24 @@ export function ConnectionStatusPanel({ health }: { health: HealthStore }): JSX.
           ))}
         </tbody>
       </table>
+      {state.quota && (
+        <div style={{ marginTop: 10, borderTop: `1px solid ${palette.border}`, paddingTop: 6 }}>
+          <div className="data-row" style={{ display: "flex", justifyContent: "space-between", padding: "2px 8px" }}>
+            <span>
+              <span data-quota-dot style={{ color: quotaDot(state.quota.state, palette) }}>●</span> Sub quota
+            </span>
+            <span>{state.quota.subUsed}/{state.quota.subUsed + state.quota.subRemain} used</span>
+            <span style={{ opacity: 0.7 }}>this eTape {state.quota.subOwn} · others {state.quota.subForeign}</span>
+          </div>
+          <div className="data-row" style={{ display: "flex", justifyContent: "space-between", padding: "2px 8px" }}>
+            <span>
+              <span data-quota-dot style={{ color: quotaDot(state.quota.histState, palette) }}>●</span> History
+            </span>
+            <span>{state.quota.histUsed}/{state.quota.histUsed + state.quota.histRemain} used</span>
+            <span />
+          </div>
+        </div>
+      )}
       <div style={{ marginTop: 10, borderTop: `1px solid ${palette.border}`, paddingTop: 6 }}>
         {state.events.slice(-50).reverse().map((e, i) => (
           // seq is per-source (Hub-owned sysEventSeq vs health.Poller's own

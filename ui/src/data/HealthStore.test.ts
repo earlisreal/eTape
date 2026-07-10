@@ -124,4 +124,13 @@ describe("HealthStore", () => {
     const snap = s.getSnapshot();
     expect(snap.links).toEqual([{ link: "ui-engine", ms: null, min: null, avg: null, max: null, status: "down" }]);
   });
+
+  it("stores the quota snapshot from sys.health", () => {
+    const s = new HealthStore();
+    s.apply({ kind: "snapshot", topic: "sys.health",
+      payload: { links: [], quota: { subUsed: 62, subRemain: 38, subOwn: 47, subForeign: 15,
+        histUsed: 41, histRemain: 59, state: "foreign", histState: "ok" } } });
+    expect(s.getSnapshot().quota?.subForeign).toBe(15);
+    expect(s.getSnapshot().quota?.state).toBe("foreign");
+  });
 });
