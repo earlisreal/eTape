@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ChartController, LEFT_PAD_BARS, type BarReader, type IndicatorReader, type CommandSender } from "./ChartController";
+import { ChartController, LEFT_PAD_BARS, type BarReader, type IndicatorController, type CommandSender } from "./ChartController";
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import { LIGHT, DARK } from "../palette";
 import type { Bar } from "../../wire/contract";
@@ -70,16 +70,17 @@ function barReaderOf(bars: Bar[]): BarReader { return { series: () => bars }; }
 function barReaderByTf(byTf: Record<string, Bar[]>): BarReader {
   return { series: (_symbol, tf) => byTf[tf] ?? [] };
 }
-const emptyIndicators: IndicatorReader = { series: () => [] };
-function indicatorReaderOf(points: { timeMs: number; value: number }[]): IndicatorReader {
-  return { series: () => points };
+const emptyIndicators: IndicatorController = { series: () => [], reset: () => {} };
+function indicatorReaderOf(points: { timeMs: number; value: number }[]): IndicatorController {
+  return { series: () => points, reset: () => {} };
 }
 // A reader whose series() result can be swapped between sync() calls — simulates
 // IndicatorStore handing back a fresh generation (e.g. a snapshot for a different
-// timeframe) mid-session, the way a rapid re-subscribe race does.
-function mutableIndicatorReader(initial: { timeMs: number; value: number }[]): IndicatorReader & { set: (pts: { timeMs: number; value: number }[]) => void } {
+// timeframe) mid-session, the way a rapid re-subscribe race does. reset() mirrors
+// IndicatorStore.reset: drops the points, so a post-reset sync() can't redraw them.
+function mutableIndicatorReader(initial: { timeMs: number; value: number }[]): IndicatorController & { set: (pts: { timeMs: number; value: number }[]) => void } {
   let points = initial;
-  return { series: () => points, set: (next) => { points = next; } };
+  return { series: () => points, set: (next) => { points = next; }, reset: () => { points = []; } };
 }
 function commandSpy(): CommandSender & { names: string[]; calls: Array<{ name: string; args: unknown }> } {
   const names: string[] = [];
@@ -90,7 +91,7 @@ function commandSpy(): CommandSender & { names: string[]; calls: Array<{ name: s
   };
 }
 
-const make = (reader: BarReader, cmd = commandSpy(), ind: IndicatorReader = emptyIndicators) => {
+const make = (reader: BarReader, cmd = commandSpy(), ind: IndicatorController = emptyIndicators) => {
   const facade = fakeFacade();
   const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" }, { bars: reader, indicators: ind, commands: cmd });
   ctrl.mount();
@@ -319,8 +320,46 @@ describe("ChartController", () => {
     expect(ind.calls.filter((c) => c === "update")).toHaveLength(2);
 
     ctrl.setSymbol("US.NVDA"); // reload — indicatorApplied cleared
+    // +2, not +1 (mirrors the candle series in the "setSymbol re-backfills" test
+    // above): resetForReload() clears the stale points with an immediate
+    // setData([]) — and resets the shared store entry, see the dedicated test
+    // below — then the following sync() backfills the new symbol with a second
+    // setData call.
+    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(2);
     ctrl.sync();
-    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(2); // full setData again post-reload
+    expect(ind.calls.filter((c) => c === "setData")).toHaveLength(3); // full setData again post-reload
+  });
+
+  it("setSymbol clears the previous symbol's indicator points from the shared store, not just the LWC series", () => {
+    // Regression test: resetForReload used to clear the candle/volume series but
+    // leave each indicator's LWC series AND its IndicatorStore entry (keyed by
+    // instanceId, not symbol) holding the OLD symbol's points. Those stale,
+    // differently-priced points stayed drawn until a fresh snapshot arrived, and
+    // dragged the shared price scale down (0-based autoscale + a down-spike) the
+    // next time the user reset the view / jumped to the latest bar — fixed by a
+    // browser refresh only because that fully rebuilds the series from scratch.
+    const store = mutableIndicatorReader([{ timeMs: 1_000, value: 5 }, { timeMs: 2_000, value: 6 }]);
+    const { facade, ctrl } = make(barReaderOf([bar("2026-07-06T13:30:00Z", 10)]), commandSpy(), store);
+    ctrl.addIndicator({ instanceId: "vwap-1", type: "VWAP", params: {} });
+    ctrl.sync(); // draws the old symbol's points
+    const ind = facade.created.find((c) => c.kind === "line")!.series;
+    expect(ind.setDataCalls.at(-1)).toEqual([
+      { time: 1, value: 5 },
+      { time: 2, value: 6 },
+    ]);
+
+    ctrl.setSymbol("US.NVDA");
+    // resetForReload must clear immediately — before any sync() — same as the
+    // candle/volume series, so the old symbol's line never lingers on screen.
+    expect(ind.setDataCalls.at(-1)).toEqual([]);
+
+    // The store itself must also be reset (not just the LWC series): if the new
+    // symbol's snapshot happens to land with the same length and last timestamp
+    // as the old one — routine when switching symbols on the same 1m grid mid-
+    // session — applyIndicators' `continues` guard would otherwise treat it as a
+    // continuation and only update() the last point, stranding the rest as the
+    // old symbol's stale values.
+    expect(store.series("vwap-1")).toEqual([]);
   });
 
   it("falls back to setData when the store hands back a different generation under the same series (rapid timeframe-switch race)", () => {

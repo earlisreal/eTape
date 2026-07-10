@@ -60,4 +60,20 @@ describe("IndicatorStore", () => {
     ]); // unaffected by the sibling-slot delta
     expect(s.series("macd-1#hist")).toEqual([{ timeMs: 1000, value: 0.1 }]); // unaffected
   });
+
+  it("reset drops a series' points and marks dirty, without touching other instances", () => {
+    // Exercised by ChartController.resetForReload on symbol/timeframe switch —
+    // the store is keyed purely by instanceId, not (instanceId, symbol, timeframe),
+    // so without an explicit reset the previous symbol's points would keep being
+    // served under the same instanceId until the new symbol's snapshot arrives.
+    const s = new IndicatorStore();
+    s.apply(snap("vwap-1", [{ timeMs: 1000, value: 10 }]));
+    s.apply(snap("ema-9", [{ timeMs: 1000, value: 5 }]));
+    s.consumeDirty();
+
+    s.reset("vwap-1");
+    expect(s.series("vwap-1")).toEqual([]);
+    expect(s.series("ema-9")).toEqual([{ timeMs: 1000, value: 5 }]); // untouched
+    expect(s.consumeDirty()).toBe(true);
+  });
 });

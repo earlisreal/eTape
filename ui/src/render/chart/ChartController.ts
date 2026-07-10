@@ -15,10 +15,15 @@ import type { Timeframe } from "./barBucket";
 
 export interface BarReader { series(symbol: string, timeframe: string): Bar[] }
 export interface IndicatorReader { series(instanceId: string): { timeMs: number; value: number }[] }
+// IndicatorReader plus the ability to drop a series — resetForReload uses this to
+// wipe the previous symbol's points instead of leaving them stranded in the shared
+// store (see resetForReload). Kept separate from IndicatorReader so read-only
+// consumers (e.g. legendView) aren't forced to implement reset().
+export interface IndicatorController extends IndicatorReader { reset(instanceId: string): void }
 export interface CommandSender { sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown }> }
 
 export interface ChartConfig { symbol: string; timeframe: string }
-interface Deps { bars: BarReader; indicators: IndicatorReader; commands: CommandSender }
+interface Deps { bars: BarReader; indicators: IndicatorController; commands: CommandSender }
 
 // LWC wants seconds (UTCTimestamp); our bucketStart is an ISO string.
 const toLwcTime = (bucketStart: string): number => Math.floor(Date.parse(bucketStart) / 1000);
@@ -338,6 +343,20 @@ export class ChartController {
     this.candle.setData([]);
     this.volume.setData([]);
     this.facade.setSessionBands([]);
+    // Wipe the previous symbol's overlay/study data too. Otherwise each indicator's
+    // LWC series AND its shared-store entry (keyed by instanceId, not symbol) keep the
+    // OLD symbol's points drawn until the engine's fresh snapshot arrives — a stale,
+    // differently-priced VWAP/EMA/SMA line then drags the shared price scale down on
+    // the next reset-view / jump-to-live (down-spike + 0-based autoscale). Clearing
+    // both also keeps indicatorApplied at 0 (already cleared above) so the incoming
+    // snapshot takes the clean setData() branch instead of applyIndicators' continues()
+    // last-point-only update.
+    for (const { series } of this.indicators.values()) {
+      for (const [key, s] of series) {
+        this.deps.indicators.reset(key);
+        s.setData([]);
+      }
+    }
     // Re-subscribe every live indicator for the new (symbol, timeframe).
     for (const { inst } of this.indicators.values()) this.subscribeIndicator(inst);
     if (this.watermarkOn) this.facade.setWatermark(bareSymbol(this.config.symbol));

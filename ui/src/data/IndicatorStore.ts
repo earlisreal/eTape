@@ -29,4 +29,11 @@ export class IndicatorStore extends PaintStore {
   series(instanceId: string): IndicatorPoint[] {
     return this.byInstance.get(instanceId) ?? [];
   }
+
+  // Drop a series' points — called on symbol/timeframe switch so the previous
+  // symbol's data doesn't linger under the new one until its snapshot arrives.
+  reset(instanceId: string): void {
+    this.byInstance.delete(instanceId);
+    this.markDirty();
+  }
 }
