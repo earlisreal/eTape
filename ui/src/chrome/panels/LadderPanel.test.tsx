@@ -68,4 +68,35 @@ describe("LadderPanel", () => {
       payload: [{ symbol: "US.AAPL", price: 3.49, side: "Buy", qty: 100, status: "New" }] });
     expect(surface().isDirty()).toBe(true);
   });
+
+  it("isDirty reacts only to its own pinned symbol's book/tape revisions, not another symbol's (the per-symbol scoping this migration exists to add)", () => {
+    const { stores, surface } = renderLadder(); // pinned to US.AAPL via settings.symbol
+    surface().isDirty(); // baseline the rev cursors
+
+    // A different symbol's book delta must NOT dirty a panel pinned to US.AAPL —
+    // this is the actual bug this task fixes (isDirty used to read a global rev).
+    stores.book.apply({
+      kind: "snapshot", topic: "md.book",
+      payload: { symbol: "US.NVDA", bids: [{ price: 400, size: 10 }], asks: [{ price: 401, size: 10 }], ts: "t" },
+    });
+    expect(surface().isDirty()).toBe(false);
+
+    // Nor must a different symbol's tape delta.
+    stores.tape.apply({ kind: "delta", topic: "md.tape",
+      payload: [{ symbol: "US.NVDA", price: 400.5, size: 50, direction: "BUY", ts: "t" }] });
+    expect(surface().isDirty()).toBe(false);
+
+    // The pinned symbol's own book delta must dirty it.
+    stores.book.apply({
+      kind: "snapshot", topic: "md.book",
+      payload: { symbol: "US.AAPL", bids: [{ price: 3.49, size: 300 }], asks: [{ price: 3.51, size: 400 }], ts: "t" },
+    });
+    expect(surface().isDirty()).toBe(true);
+    surface().isDirty(); // consume, re-baseline
+
+    // The pinned symbol's own tape delta must also dirty it.
+    stores.tape.apply({ kind: "delta", topic: "md.tape",
+      payload: [{ symbol: "US.AAPL", price: 3.5, size: 100, direction: "SELL", ts: "t" }] });
+    expect(surface().isDirty()).toBe(true);
+  });
 });
