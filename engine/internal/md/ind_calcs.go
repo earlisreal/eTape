@@ -196,6 +196,23 @@ func (e *emaCalc) points(b Bar) []slotPoint {
 	return []slotPoint{{slot: "line", value: v, ok: ok}}
 }
 
+// EMA is a one-shot EMA over a plain slice of closes, for callers that want a
+// single scalar (e.g. a per-symbol EMA-200 on daily closes) rather than a
+// streaming chart series. It reuses emaState's fold so the seeding (SMA of
+// the first `period` closes) and alpha (2/(period+1)) exactly match the
+// chart's EMA. ok is false when closes has fewer than period entries — the
+// seed never completed, so val is meaningless.
+func EMA(closes []float64, period int) (val float64, ok bool) {
+	if len(closes) < period {
+		return 0, false
+	}
+	s := newEMAState(period)
+	for _, c := range closes {
+		s.fold(c)
+	}
+	return s.val, true
+}
+
 // ---- MACD (fast/slow EMAs of close; signal EMA of the macd line) ----
 
 type macdCalc struct {

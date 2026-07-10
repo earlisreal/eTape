@@ -249,6 +249,7 @@ export interface StockDetailPayload {
   symbol: string;
   name: string;
   industry: string;
+  exchange: string; // NASDAQ/NYSE/AMEX/OTC via moomoo ExchType; "" = unresolved/unknown
   price: number | null;
   lastClose: number | null;
   changePct: number | null;
@@ -261,6 +262,7 @@ export interface StockDetailPayload {
   eps: number | null; // moomoo EarningsPershare
   high52: number | null;
   low52: number | null;
+  ema200: number | null; // 200-day EMA of daily closes; nil until 200 daily bars are backfilled
   volume: number /* int64 */; // 0 is legitimate
   refreshedAt: string;
 }

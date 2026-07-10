@@ -8,6 +8,7 @@ import { StockInfoPanel, newsDateLabel } from "./StockInfoPanel";
 import type { PanelProps } from "./registry";
 import type { PanelConfig } from "../workspace";
 import type { AckMsg, NewsItem, StockDetailPayload, SnapshotMsg } from "../../wire/contract";
+import { formatPrice, QUOTE_DECIMALS } from "../../render/format";
 
 function fakeBus() {
   const subs = new Set<(m: unknown) => void>();
@@ -30,9 +31,9 @@ const newsItem = (symbol: string, url: string, seen_at: string, overrides: Parti
   ({ symbol, headline: "h", source: "R", url, seen_at, published_at: "", view_count: 0, type: "news", ...overrides });
 
 const detailPayload = (symbol: string, overrides: Partial<StockDetailPayload> = {}): StockDetailPayload => ({
-  symbol, name: `${symbol} Inc`, industry: "Tech", price: 10, lastClose: 9.5, changePct: 5.2,
+  symbol, name: `${symbol} Inc`, industry: "Tech", exchange: "NASDAQ", price: 10, lastClose: 9.5, changePct: 5.2,
   marketCap: 3_210_000_000_000, floatMarketCap: 900_000_000, sharesOutstanding: 22_700_000, floatShares: 20_000_000,
-  pe: 20, peTTM: 21, eps: 0.5, high52: 15, low52: 5, volume: 1000, refreshedAt: "t1",
+  pe: 20, peTTM: 21, eps: 0.5, high52: 15, low52: 5, ema200: 145.5, volume: 1000, refreshedAt: "t1",
   ...overrides,
 });
 const detailSnap = (p: unknown) => ({ kind: "snapshot", topic: "stock.detail", payload: p } as SnapshotMsg);
@@ -57,10 +58,10 @@ describe("newsDateLabel", () => {
 });
 
 describe("StockInfoPanel", () => {
-  it("shows a reserved halt-banner slot and a no-symbol header before focus", () => {
+  it("shows a reserved halt-banner slot and a no-symbol hint before focus", () => {
     renderPanel();
     expect(screen.getByTestId("halt-slot")).toBeTruthy();
-    expect(screen.getByText(/stock info · no symbol focused/i)).toBeTruthy();
+    expect(screen.getByText(/no symbol focused/i)).toBeTruthy();
   });
 
   it("shows nothing below the header — no Hot only checkbox, no news area — when no symbol is focused", () => {
@@ -150,41 +151,75 @@ describe("StockInfoPanel fundamentals section", () => {
     expect(document.body.textContent).not.toContain("▼");
   });
 
-  it("formats market cap, float cap, shares out, float, and volume with a compact magnitude suffix", () => {
+  it("formats market cap, free float cap, free float, and volume with a compact magnitude suffix", () => {
     const { stockDetail, linkGroups } = renderPanel();
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.MSFT", {
         marketCap: 3_210_000_000_000, floatMarketCap: 1_500_000_000,
-        sharesOutstanding: 22_700_000, floatShares: 900_000, volume: 1_000,
+        floatShares: 900_000, volume: 1_000,
       })));
       linkGroups.focus("green", "US.MSFT");
     });
     expect(screen.getByText("3.21T")).toBeTruthy();
     expect(screen.getByText("1.5B")).toBeTruthy();
-    expect(screen.getByText("22.7M")).toBeTruthy();
     expect(screen.getByText("900K")).toBeTruthy();
     expect(screen.getByText("Volume")).toBeTruthy();
     expect(screen.getByText("1K")).toBeTruthy();
   });
 
-  it("renders the combined P/E · TTM cell at 2 decimals (a unitless ratio, not a price) and the 52-week range at QUOTE_DECIMALS", () => {
+  it("renders the 52-week range at QUOTE_DECIMALS", () => {
     const { stockDetail, linkGroups } = renderPanel();
     act(() => {
-      stockDetail.apply(detailSnap(detailPayload("US.MSFT", { pe: 20, peTTM: 21, low52: 5, high52: 15 })));
+      stockDetail.apply(detailSnap(detailPayload("US.MSFT", { low52: 5, high52: 15 })));
       linkGroups.focus("green", "US.MSFT");
     });
-    expect(document.body.textContent).toContain("20.00 · 21.00");
     expect(document.body.textContent).toContain("5.000–15.000");
   });
 
-  it("renders a bare dash (not N/A) for a null numeric field, and for empty industry/name", () => {
+  it("renders the renamed Free Float / Free float cap labels, and no longer renders Float, Shares out, P/E · TTM, or EPS", () => {
     const { stockDetail, linkGroups } = renderPanel();
     act(() => {
-      stockDetail.apply(detailSnap(detailPayload("US.MSFT", { eps: null, industry: "" })));
+      stockDetail.apply(detailSnap(detailPayload("US.MSFT")));
+      linkGroups.focus("green", "US.MSFT");
+    });
+    expect(screen.getByText("Free Float")).toBeTruthy();
+    expect(screen.getByText("Free float cap")).toBeTruthy();
+    expect(screen.queryByText(/^Float$/)).toBeNull();
+    expect(screen.queryByText(/^Float cap$/)).toBeNull();
+    expect(screen.queryByText(/shares out/i)).toBeNull();
+    expect(screen.queryByText(/P\/E/i)).toBeNull();
+    expect(screen.queryByText(/^EPS$/)).toBeNull();
+  });
+
+  it("renders Exchange and EMA 200 cells with their values", () => {
+    const { stockDetail, linkGroups } = renderPanel();
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.MSFT", { exchange: "NASDAQ", ema200: 145.5 })));
+      linkGroups.focus("green", "US.MSFT");
+    });
+    expect(screen.getByText("Exchange")).toBeTruthy();
+    expect(screen.getByText("NASDAQ")).toBeTruthy();
+    expect(screen.getByText("EMA 200")).toBeTruthy();
+    expect(document.body.textContent).toContain(formatPrice(145.5, QUOTE_DECIMALS));
+  });
+
+  it("renders a bare dash (not N/A) for empty exchange/industry and a null EMA 200", () => {
+    const { stockDetail, linkGroups } = renderPanel();
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.MSFT", { exchange: "", industry: "", ema200: null })));
       linkGroups.focus("green", "US.MSFT");
     });
     expect(screen.queryByText(/N\/A/i)).toBeNull();
-    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2); // eps + industry
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3); // exchange + industry + ema200
+  });
+
+  it("does not render an in-body 'Stock Info' header line once a symbol is focused (the dockview tab already shows it)", () => {
+    const { stockDetail, linkGroups } = renderPanel();
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.MSFT")));
+      linkGroups.focus("green", "US.MSFT");
+    });
+    expect(screen.queryByText(/stock info/i)).toBeNull();
   });
 });
 

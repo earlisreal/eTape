@@ -10,12 +10,15 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
+	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 
 	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
 	ownerplatepb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetownerplate"
 	snappb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsecuritysnapshot"
+	staticpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetstaticinfo"
 )
 
 // ---- pure transform tests ----
@@ -160,21 +163,25 @@ func TestIndustryFromPlatesNoIndustryReturnsEmpty(t *testing.T) {
 
 // fakeRequester dispatches canned responses by protoID and counts calls per
 // protoID so tests can assert cache behavior (e.g. no 3207 call on a cache
-// hit). snapshotFn/ownerPlateFn, when set, take priority over the static
-// snapshot/ownerPlate fields and are handed the bare moomoo codes (e.g.
-// "AAPL", not "US.AAPL") present in that specific request, so a test can
-// simulate "this code poisons the whole batch, these others succeed" —
-// exercising the binary-split isolation path. snapshotCodeCalls/
-// ownerPlateCodeCalls record the codes requested on every call, in order,
-// so a test can assert a specific code was (or was not) re-requested.
+// hit). snapshotFn/ownerPlateFn/staticInfoFn, when set, take priority over
+// the static snapshot/ownerPlate/staticInfo fields and are handed the bare
+// moomoo codes (e.g. "AAPL", not "US.AAPL") present in that specific
+// request, so a test can simulate "this code poisons the whole batch, these
+// others succeed" — exercising the binary-split isolation path.
+// snapshotCodeCalls/ownerPlateCodeCalls/staticInfoCodeCalls record the codes
+// requested on every call, in order, so a test can assert a specific code
+// was (or was not) re-requested.
 type fakeRequester struct {
 	snapshot            *snappb.Response
 	ownerPlate          *ownerplatepb.Response
+	staticInfo          *staticpb.Response
 	snapshotFn          func(codes []string) *snappb.Response
 	ownerPlateFn        func(codes []string) *ownerplatepb.Response
+	staticInfoFn        func(codes []string) *staticpb.Response
 	calls               map[uint32]int
 	snapshotCodeCalls   [][]string
 	ownerPlateCodeCalls [][]string
+	staticInfoCodeCalls [][]string
 }
 
 func newFakeRequester() *fakeRequester {
@@ -212,9 +219,52 @@ func (f *fakeRequester) Request(ctx context.Context, protoID uint32, req proto.M
 		}
 		b, _ := proto.Marshal(resp)
 		return opend.Frame{ProtoID: protoID, Body: b}, nil
+	case opend.ProtoQotGetStaticInfo:
+		codes := codesFromSecurityList(req.(*staticpb.Request).GetC2S().GetSecurityList())
+		f.staticInfoCodeCalls = append(f.staticInfoCodeCalls, codes)
+		resp := f.staticInfo
+		if f.staticInfoFn != nil {
+			resp = f.staticInfoFn(codes)
+		}
+		b, _ := proto.Marshal(resp)
+		return opend.Frame{ProtoID: protoID, Body: b}, nil
 	default:
 		return opend.Frame{}, nil
 	}
+}
+
+// fakeBars is a dailyBarReader test double. barsFor, when set, overrides the
+// static bars map for a given symbol; err, when set, is returned for every
+// symbol (simulating a store-read failure). readCalls counts ReadDailyBars
+// calls per symbol so a test can assert the once-per-day cache is honored.
+type fakeBars struct {
+	bars      map[string][]feed.Bar
+	err       error
+	readCalls map[string]int
+}
+
+func newFakeBars() *fakeBars {
+	return &fakeBars{bars: map[string][]feed.Bar{}, readCalls: map[string]int{}}
+}
+
+func (f *fakeBars) ReadDailyBars(symbol string) ([]feed.Bar, error) {
+	if f.readCalls != nil {
+		f.readCalls[symbol]++
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.bars[symbol], nil
+}
+
+// closesBars builds n daily bars with the given closes (index 0 = oldest),
+// enough to exercise md.EMA's period gate.
+func closesBars(symbol string, closes ...float64) []feed.Bar {
+	out := make([]feed.Bar, len(closes))
+	for i, c := range closes {
+		out[i] = feed.Bar{Symbol: symbol, BucketMs: int64(i) * 86400_000, C: c}
+	}
+	return out
 }
 
 // fakePublisher records every Publish call. Guarded by a mutex because
@@ -292,6 +342,19 @@ func plateInfo(name string, plateType qotcommon.PlateSetType) *qotcommon.PlateIn
 	}
 }
 
+// staticInfoFor builds a SecurityStaticInfo with every proto2 `req` field on
+// SecurityStaticBasic populated (mirrors snapshotFor's required-ness
+// convention) plus the ExchType this test cares about.
+func staticInfoFor(code string, exchType qotcommon.ExchType) *qotcommon.SecurityStaticInfo {
+	return &qotcommon.SecurityStaticInfo{
+		Basic: &qotcommon.SecurityStaticBasic{
+			Security: sec(code), Id: proto.Int64(1), LotSize: proto.Int32(100),
+			SecType: proto.Int32(0), Name: proto.String(code + " Inc."),
+			ListTime: proto.String("1980-01-01"), ExchType: proto.Int32(int32(exchType)),
+		},
+	}
+}
+
 // ---- Run() / fetchTick integration tests ----
 
 func TestFetchTickPublishesOnePayloadPerSymbolKeyedBySymbol(t *testing.T) {
@@ -315,9 +378,16 @@ func TestFetchTickPublishesOnePayloadPerSymbolKeyedBySymbol(t *testing.T) {
 			}},
 		}},
 	}
+	fr.staticInfo = &staticpb.Response{
+		RetType: proto.Int32(0),
+		S2C: &staticpb.S2C{StaticInfoList: []*qotcommon.SecurityStaticInfo{
+			staticInfoFor("AAPL", qotcommon.ExchType_ExchType_US_Nasdaq),
+			staticInfoFor("TSLA", qotcommon.ExchType_ExchType_US_Nasdaq),
+		}},
+	}
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms })
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars())
 
 	p.fetchTick(context.Background())
 
@@ -351,9 +421,10 @@ func TestFetchTickETFGateNilsEquityFieldsButStillPublishes(t *testing.T) {
 		S2C:     &snappb.S2C{SnapshotList: []*snappb.Snapshot{snapshotFor("SPY", false)}},
 	}
 	fr.ownerPlate = &ownerplatepb.Response{RetType: proto.Int32(0), S2C: &ownerplatepb.S2C{}}
+	fr.staticInfo = &staticpb.Response{RetType: proto.Int32(0), S2C: &staticpb.S2C{}}
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms })
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars())
 
 	p.fetchTick(context.Background())
 
@@ -387,7 +458,7 @@ func TestFetchTickIndustryCachedAcrossTicksNoRepeatOwnerPlateRequest(t *testing.
 	}
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms })
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars())
 
 	p.fetchTick(context.Background())
 	if fr.calls[opend.ProtoQotGetOwnerPlate] != 1 {
@@ -422,9 +493,10 @@ func TestFetchTickCachesEmptyIndustryToAvoidRerequest(t *testing.T) {
 	}
 	// Owner-plate succeeds but returns no row for this symbol at all.
 	fr.ownerPlate = &ownerplatepb.Response{RetType: proto.Int32(0), S2C: &ownerplatepb.S2C{}}
+	fr.staticInfo = &staticpb.Response{RetType: proto.Int32(0), S2C: &staticpb.S2C{}}
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms })
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars())
 
 	p.fetchTick(context.Background())
 	p.fetchTick(context.Background())
@@ -498,7 +570,7 @@ func TestFetchSnapshotsIsolatesBadSymbolViaBinarySplit(t *testing.T) {
 	syms := []string{"US.AAA", "US.BBB", "US.CCC"}
 	fr := newFakeRequester()
 	fr.snapshotFn = batchOrPoison("BBB")
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()), func() []string { return syms })
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()), func() []string { return syms }, newFakeBars())
 
 	out := p.fetchSnapshots(context.Background(), syms)
 
@@ -517,7 +589,7 @@ func TestResolveIndustriesIsolatesBadSymbolAndCachesEmptyOnPersistentFailure(t *
 	syms := []string{"US.AAA", "US.BBB", "US.CCC"}
 	fr := newFakeRequester()
 	fr.ownerPlateFn = ownerPlateBatchOrPoison("BBB")
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()), func() []string { return syms })
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()), func() []string { return syms }, newFakeBars())
 
 	p.resolveIndustries(context.Background(), syms)
 
@@ -559,7 +631,7 @@ func TestFetchTickPublishesGoodSymbolsWhenOneSnapshotBatchIsPoisoned(t *testing.
 	fr.ownerPlateFn = ownerPlateBatchOrPoison("BBB")
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms })
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars())
 
 	p.fetchTick(context.Background())
 
@@ -582,7 +654,7 @@ func TestFetchTickSkipsWhenSymbolsEmpty(t *testing.T) {
 	fr := newFakeRequester()
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return nil })
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return nil }, newFakeBars())
 
 	p.fetchTick(context.Background())
 
@@ -607,8 +679,9 @@ func TestRunTicksAndStopsOnContextCancel(t *testing.T) {
 		S2C:     &snappb.S2C{SnapshotList: []*snappb.Snapshot{snapshotFor("AAPL", true)}},
 	}
 	fr.ownerPlate = &ownerplatepb.Response{RetType: proto.Int32(0), S2C: &ownerplatepb.S2C{}}
+	fr.staticInfo = &staticpb.Response{RetType: proto.Int32(0), S2C: &staticpb.S2C{}}
 	pub := &fakePublisher{}
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 5, MaxPerReq: 400}, fr, pub, clock.System{}, func() []string { return syms })
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 5, MaxPerReq: 400}, fr, pub, clock.System{}, func() []string { return syms }, newFakeBars())
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -638,7 +711,7 @@ func TestRunDisabledReturnsImmediately(t *testing.T) {
 	fr := newFakeRequester()
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: false, RefreshMs: 1000}, fr, pub, clk, func() []string { return []string{"US.AAPL"} })
+	p := New(config.StockInfo{Enabled: false, RefreshMs: 1000}, fr, pub, clk, func() []string { return []string{"US.AAPL"} }, newFakeBars())
 
 	done := make(chan error, 1)
 	go func() { done <- p.Run(context.Background()) }()
@@ -680,5 +753,237 @@ func TestCodeOfAndSymbolOf(t *testing.T) {
 	}
 	if got := symbolOf(nil); got != "" {
 		t.Fatalf("symbolOf(nil) should be empty, got %q", got)
+	}
+}
+
+// ---- exchLabel (pure) ----
+
+func TestExchLabelMapsKnownUSVenues(t *testing.T) {
+	cases := []struct {
+		t    qotcommon.ExchType
+		want string
+	}{
+		{qotcommon.ExchType_ExchType_US_NYSE, "NYSE"},
+		{qotcommon.ExchType_ExchType_US_Nasdaq, "NASDAQ"},
+		{qotcommon.ExchType_ExchType_US_AMEX, "AMEX"},
+		{qotcommon.ExchType_ExchType_US_Pink, "OTC"},
+		{qotcommon.ExchType_ExchType_US_Option, ""}, // not a US equity venue this panel names
+		{0, ""}, // unset/unknown
+	}
+	for _, c := range cases {
+		if got := exchLabel(int32(c.t)); got != c.want {
+			t.Fatalf("exchLabel(%v) = %q, want %q", c.t, got, c.want)
+		}
+	}
+}
+
+// ---- resolveExchanges / staticInfoChunk ----
+
+// staticInfoBatchOrPoison is batchOrPoison's 3202 counterpart: any request
+// containing poisonCode fails the whole batch; any other request succeeds
+// with a resolved NASDAQ exchange for every code present.
+func staticInfoBatchOrPoison(poisonCode string) func(codes []string) *staticpb.Response {
+	return func(codes []string) *staticpb.Response {
+		for _, c := range codes {
+			if c == poisonCode {
+				return &staticpb.Response{RetType: proto.Int32(-1), RetMsg: proto.String("no static info: " + poisonCode)}
+			}
+		}
+		list := make([]*qotcommon.SecurityStaticInfo, 0, len(codes))
+		for _, c := range codes {
+			list = append(list, staticInfoFor(c, qotcommon.ExchType_ExchType_US_Nasdaq))
+		}
+		return &staticpb.Response{RetType: proto.Int32(0), S2C: &staticpb.S2C{StaticInfoList: list}}
+	}
+}
+
+func TestFetchTickSetsExchangeFromStaticInfo(t *testing.T) {
+	syms := []string{"US.AAPL", "US.KO"}
+	fr := newFakeRequester()
+	fr.snapshot = &snappb.Response{
+		RetType: proto.Int32(0),
+		S2C: &snappb.S2C{SnapshotList: []*snappb.Snapshot{
+			snapshotFor("AAPL", true),
+			snapshotFor("KO", true),
+		}},
+	}
+	fr.ownerPlate = &ownerplatepb.Response{RetType: proto.Int32(0), S2C: &ownerplatepb.S2C{}}
+	fr.staticInfo = &staticpb.Response{
+		RetType: proto.Int32(0),
+		S2C: &staticpb.S2C{StaticInfoList: []*qotcommon.SecurityStaticInfo{
+			staticInfoFor("AAPL", qotcommon.ExchType_ExchType_US_Nasdaq),
+			staticInfoFor("KO", qotcommon.ExchType_ExchType_US_NYSE),
+		}},
+	}
+	pub := &fakePublisher{}
+	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars())
+
+	p.fetchTick(context.Background())
+
+	got := map[string]string{}
+	for _, c := range pub.calls {
+		got[c.key] = c.payload.(wsmsg.StockDetailPayload).Exchange
+	}
+	if got["US.AAPL"] != "NASDAQ" {
+		t.Fatalf("US.AAPL exchange = %q, want NASDAQ", got["US.AAPL"])
+	}
+	if got["US.KO"] != "NYSE" {
+		t.Fatalf("US.KO exchange = %q, want NYSE", got["US.KO"])
+	}
+}
+
+func TestFetchTickExchangeCachedAcrossTicksNoRepeatStaticInfoRequest(t *testing.T) {
+	syms := []string{"US.AAPL"}
+	fr := newFakeRequester()
+	fr.snapshot = &snappb.Response{
+		RetType: proto.Int32(0),
+		S2C:     &snappb.S2C{SnapshotList: []*snappb.Snapshot{snapshotFor("AAPL", true)}},
+	}
+	fr.ownerPlate = &ownerplatepb.Response{RetType: proto.Int32(0), S2C: &ownerplatepb.S2C{}}
+	fr.staticInfo = &staticpb.Response{
+		RetType: proto.Int32(0),
+		S2C: &staticpb.S2C{StaticInfoList: []*qotcommon.SecurityStaticInfo{
+			staticInfoFor("AAPL", qotcommon.ExchType_ExchType_US_Nasdaq),
+		}},
+	}
+	pub := &fakePublisher{}
+	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars())
+
+	p.fetchTick(context.Background())
+	if fr.calls[opend.ProtoQotGetStaticInfo] != 1 {
+		t.Fatalf("first tick should issue exactly 1 static-info request, got %d", fr.calls[opend.ProtoQotGetStaticInfo])
+	}
+
+	p.fetchTick(context.Background())
+	if fr.calls[opend.ProtoQotGetStaticInfo] != 1 {
+		t.Fatalf("second tick should issue zero additional static-info requests (cached), got total %d", fr.calls[opend.ProtoQotGetStaticInfo])
+	}
+	payload := pub.calls[1].payload.(wsmsg.StockDetailPayload)
+	if payload.Exchange != "NASDAQ" {
+		t.Fatalf("second-tick payload should still carry the cached exchange: %+v", payload)
+	}
+}
+
+func TestResolveExchangesIsolatesBadSymbolAndCachesEmptyOnPersistentFailure(t *testing.T) {
+	syms := []string{"US.AAA", "US.BBB", "US.CCC"}
+	fr := newFakeRequester()
+	fr.staticInfoFn = staticInfoBatchOrPoison("BBB")
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()), func() []string { return syms }, newFakeBars())
+
+	p.resolveExchanges(context.Background(), syms)
+
+	if got := p.exch["US.AAA"]; got != "NASDAQ" {
+		t.Fatalf("US.AAA should resolve its real exchange despite US.BBB poisoning the initial batch, got %q", got)
+	}
+	if got := p.exch["US.CCC"]; got != "NASDAQ" {
+		t.Fatalf("US.CCC should resolve its real exchange despite US.BBB poisoning the initial batch, got %q", got)
+	}
+	got, ok := p.exch["US.BBB"]
+	if !ok {
+		t.Fatalf("US.BBB should be cached (as absent) once isolated as the persistently-failing symbol, got no entry at all")
+	}
+	if got != "" {
+		t.Fatalf("US.BBB should cache as empty-exchange once isolated alone, got %q", got)
+	}
+
+	totalCallsBefore := fr.calls[opend.ProtoQotGetStaticInfo]
+	p.resolveExchanges(context.Background(), syms)
+	if got := fr.calls[opend.ProtoQotGetStaticInfo]; got != totalCallsBefore {
+		t.Fatalf("second resolveExchanges call should issue zero further static-info requests (all cached), total went from %d to %d", totalCallsBefore, got)
+	}
+}
+
+// ---- ema200For ----
+
+func TestEma200ForReturnsNilWhenFewerThanPeriodBars(t *testing.T) {
+	bars := newFakeBars()
+	closes := make([]float64, ema200Period-1)
+	for i := range closes {
+		closes[i] = 100 + float64(i)
+	}
+	bars.bars["US.IPO"] = closesBars("US.IPO", closes...)
+	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000}, newFakeRequester(), &fakePublisher{}, clk, func() []string { return nil }, bars)
+
+	if got := p.ema200For("US.IPO"); got != nil {
+		t.Fatalf("want nil EMA-200 with only %d bars, got %v", len(closes), *got)
+	}
+}
+
+func TestEma200ForMatchesMdEMAWhenEnoughBars(t *testing.T) {
+	bars := newFakeBars()
+	closes := make([]float64, ema200Period+10)
+	for i := range closes {
+		closes[i] = 100 + float64(i%7) // some variation, not monotonic
+	}
+	bars.bars["US.AAPL"] = closesBars("US.AAPL", closes...)
+	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000}, newFakeRequester(), &fakePublisher{}, clk, func() []string { return nil }, bars)
+
+	want, ok := md.EMA(closes, ema200Period)
+	if !ok {
+		t.Fatalf("md.EMA should have succeeded with %d closes", len(closes))
+	}
+	got := p.ema200For("US.AAPL")
+	if got == nil || *got != want {
+		t.Fatalf("ema200For = %v, want %v", got, want)
+	}
+}
+
+func TestEma200ForCachedPerDayNoRepeatReadDailyBars(t *testing.T) {
+	bars := newFakeBars()
+	closes := make([]float64, ema200Period)
+	for i := range closes {
+		closes[i] = 100 + float64(i)
+	}
+	bars.bars["US.AAPL"] = closesBars("US.AAPL", closes...)
+	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000}, newFakeRequester(), &fakePublisher{}, clk, func() []string { return nil }, bars)
+
+	p.ema200For("US.AAPL")
+	if bars.readCalls["US.AAPL"] != 1 {
+		t.Fatalf("first call should read the archive once, got %d reads", bars.readCalls["US.AAPL"])
+	}
+
+	clk.Advance(time.Hour) // same UTC day
+	p.ema200For("US.AAPL")
+	if bars.readCalls["US.AAPL"] != 1 {
+		t.Fatalf("same-day call should be served from cache, got %d reads", bars.readCalls["US.AAPL"])
+	}
+
+	clk.Advance(24 * time.Hour) // crosses into the next UTC day
+	p.ema200For("US.AAPL")
+	if bars.readCalls["US.AAPL"] != 2 {
+		t.Fatalf("next-day call should re-read the archive, got %d reads", bars.readCalls["US.AAPL"])
+	}
+}
+
+func TestFetchTickSetsEma200Field(t *testing.T) {
+	syms := []string{"US.AAPL"}
+	fr := newFakeRequester()
+	fr.snapshot = &snappb.Response{
+		RetType: proto.Int32(0),
+		S2C:     &snappb.S2C{SnapshotList: []*snappb.Snapshot{snapshotFor("AAPL", true)}},
+	}
+	fr.ownerPlate = &ownerplatepb.Response{RetType: proto.Int32(0), S2C: &ownerplatepb.S2C{}}
+	fr.staticInfo = &staticpb.Response{RetType: proto.Int32(0), S2C: &staticpb.S2C{}}
+	bars := newFakeBars()
+	closes := make([]float64, ema200Period)
+	for i := range closes {
+		closes[i] = 100 + float64(i)
+	}
+	bars.bars["US.AAPL"] = closesBars("US.AAPL", closes...)
+	pub := &fakePublisher{}
+	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, bars)
+
+	p.fetchTick(context.Background())
+
+	want, _ := md.EMA(closes, ema200Period)
+	payload := pub.calls[0].payload.(wsmsg.StockDetailPayload)
+	if payload.Ema200 == nil || *payload.Ema200 != want {
+		t.Fatalf("payload.Ema200 = %v, want %v", payload.Ema200, want)
 	}
 }

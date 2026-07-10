@@ -400,3 +400,48 @@ func TestBackfillRewritesPastTriggersReseed(t *testing.T) {
 		t.Fatalf("re-snapshot after rewrite = %+v, want 1 point with value 550", lastSnap)
 	}
 }
+
+// ---- EMA (one-shot, non-streaming) ----
+
+func TestEMAFewerThanPeriodClosesNotOk(t *testing.T) {
+	if _, ok := EMA([]float64{1, 2}, 3); ok {
+		t.Fatal("want ok=false with fewer closes than period")
+	}
+}
+
+func TestEMAExactlyPeriodClosesIsSMAOfWindow(t *testing.T) {
+	closes := []float64{10, 20, 30}
+	got, ok := EMA(closes, 3)
+	if !ok {
+		t.Fatal("want ok=true when len(closes) == period")
+	}
+	want := (10.0 + 20.0 + 30.0) / 3
+	if math.Abs(got-want) > 1e-9 {
+		t.Fatalf("EMA = %v, want %v (SMA of the full window)", got, want)
+	}
+}
+
+// TestEMAMatchesStreamingFold checks EMA against the same closes/period/want
+// as TestEMAMatchesReference above, confirming the one-shot helper produces
+// the streaming calc's final value (13, the last point in that test).
+func TestEMAMatchesStreamingFold(t *testing.T) {
+	got, ok := EMA([]float64{10, 11, 12, 13, 14}, 3)
+	if !ok {
+		t.Fatal("want ok=true")
+	}
+	if math.Abs(got-13) > 1e-9 {
+		t.Fatalf("EMA = %v, want 13 (matches emaCalc's final folded value)", got)
+	}
+}
+
+func TestEMAKnownSequenceFixedExpectedValue(t *testing.T) {
+	// period 4, alpha = 2/5 = .4: seed SMA(1,2,3,4)=2.5;
+	// fold 5: .4*5+.6*2.5=3.5; fold 6: .4*6+.6*3.5=4.5.
+	got, ok := EMA([]float64{1, 2, 3, 4, 5, 6}, 4)
+	if !ok {
+		t.Fatal("want ok=true")
+	}
+	if math.Abs(got-4.5) > 1e-9 {
+		t.Fatalf("EMA = %v, want 4.5", got)
+	}
+}

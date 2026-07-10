@@ -597,7 +597,7 @@ func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, 
 	scanWG.Add(1)
 	go func() { defer scanWG.Done(); _ = scanPoller.Run(ctx) }()
 	go func() { _ = news.New(cfg.News, client, hub, clk, symbols).Run(ctx) }()
-	go func() { _ = stockinfo.New(cfg.StockInfo, client, hub, clk, symbols).Run(ctx) }()
+	go func() { _ = stockinfo.New(cfg.StockInfo, client, hub, clk, symbols, st).Run(ctx) }()
 	// health: moomoo probe via the OpenD client; app-ping RTT source is nil in v1
 	// (ui-engine shows down until ping tracking is wired). alpacaProbe is the
 	// first configured Alpaca adapter (nil if none), giving the engine-alpaca
@@ -606,7 +606,6 @@ func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, 
 	go func() {
 		_ = health.New(cfg.Health, hub, clk, moomooProbe{c: client}, nil, hasTZ, alpacaProbe).Run(ctx)
 	}()
-	_ = st // reserved: wire health.Event -> st.AppendSysEvent in a later pass
 }
 
 func hasTZVenue(cfg config.Config) bool {

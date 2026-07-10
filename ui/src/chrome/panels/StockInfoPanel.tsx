@@ -53,23 +53,8 @@ function textOrDash(value: string, palette: Palette): JSX.Element {
     : <span className="mono" style={{ color: palette.textMuted }}>—</span>;
 }
 
-// P/E is a unitless ratio, not a price — 2 decimals (not QUOTE_DECIMALS' 3) reads
-// less oddly dense (20.00, not 20.000).
-const PE_DECIMALS = 2;
-
-/** Combined "P/E · TTM" cell — each side dashes independently if null, so a missing TTM
- * figure doesn't blank out a known trailing P/E (or vice versa). */
-function peCell(pe: number | null, peTTM: number | null, palette: Palette): JSX.Element {
-  return (
-    <span className="mono">
-      {pe == null ? <span style={{ color: palette.textMuted }}>—</span> : <span style={{ color: palette.text }}>{formatPrice(pe, PE_DECIMALS)}</span>}
-      <span style={{ color: palette.textMuted }}> · </span>
-      {peTTM == null ? <span style={{ color: palette.textMuted }}>—</span> : <span style={{ color: palette.text }}>{formatPrice(peTTM, PE_DECIMALS)}</span>}
-    </span>
-  );
-}
-
-/** Combined "52wk low–high" cell, same independent-dash treatment as peCell. */
+/** Combined "52wk low–high" cell — each side dashes independently if null, so a missing
+ * high doesn't blank out a known low (or vice versa). */
 function rangeCell(low: number | null, high: number | null, palette: Palette): JSX.Element {
   return (
     <span className="mono">
@@ -111,9 +96,12 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp }:
     <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
       {/* Reserved slot for high-salience halt banners (v2 feed) — empty in v1. */}
       <div data-testid="halt-slot" />
-      <div style={{ padding: "6px 8px", fontWeight: 600, borderBottom: `1px solid ${palette.border}` }}>
-        {symbol ? `Stock Info · ${symbol}` : "Stock Info · no symbol focused"}
-      </div>
+      {/* The dockview tab already reads "Stock Info" — this in-body line only
+       * fills the empty-state gap when no symbol is focused, so it doesn't
+       * repeat the tab title once a symbol (and the name/price row below) is showing. */}
+      {!symbol && (
+        <div style={{ padding: "6px 8px", color: palette.textMuted }}>No symbol focused</div>
+      )}
 
       {symbol && (
         detail === undefined ? (
@@ -143,26 +131,23 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp }:
             <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto 1fr", gap: "2px 8px", fontSize: 11, padding: "4px 8px" }}>
               <span style={{ color: palette.textMuted }}>Mkt cap</span>
               {fmtCompactOrDash(detail.marketCap, palette)}
-              <span style={{ color: palette.textMuted }}>Float cap</span>
+              <span style={{ color: palette.textMuted }}>Free float cap</span>
               {fmtCompactOrDash(detail.floatMarketCap, palette)}
 
-              <span style={{ color: palette.textMuted }}>Shares out</span>
-              {fmtCompactOrDash(detail.sharesOutstanding, palette)}
-              <span style={{ color: palette.textMuted }}>Float</span>
+              <span style={{ color: palette.textMuted }}>Free Float</span>
               {fmtCompactOrDash(detail.floatShares, palette)}
+              <span style={{ color: palette.textMuted }}>Exchange</span>
+              {textOrDash(detail.exchange, palette)}
 
               <span style={{ color: palette.textMuted }}>Industry</span>
               {textOrDash(detail.industry, palette)}
-              <span style={{ color: palette.textMuted }}>P/E · TTM</span>
-              {peCell(detail.pe, detail.peTTM, palette)}
-
-              <span style={{ color: palette.textMuted }}>EPS</span>
-              {fmtDecimalOrDash(detail.eps, palette)}
               <span style={{ color: palette.textMuted }}>52wk</span>
               {rangeCell(detail.low52, detail.high52, palette)}
 
               <span style={{ color: palette.textMuted }}>Volume</span>
               {fmtCompactOrDash(detail.volume, palette)}
+              <span style={{ color: palette.textMuted }}>EMA 200</span>
+              {fmtDecimalOrDash(detail.ema200, palette)}
             </div>
           </>
         )

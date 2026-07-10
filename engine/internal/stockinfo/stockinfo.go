@@ -1,19 +1,20 @@
 // Package stockinfo is the poll-only stock-fundamentals + industry fetcher
-// for the focused-symbol Stock Info panel. It combines two request/response
-// moomoo protocols — Qot_GetSecuritySnapshot (3203: price, market cap,
-// float, PE, EPS, 52-week range) and Qot_GetOwnerPlate (3207: industry/
-// sector plate lookup) — and publishes one wsmsg.StockDetailPayload per
-// symbol per tick.
+// for the focused-symbol Stock Info panel. It combines three request/
+// response moomoo protocols — Qot_GetSecuritySnapshot (3203: price, market
+// cap, float, PE, EPS, 52-week range), Qot_GetOwnerPlate (3207: industry/
+// sector plate lookup), and Qot_GetStaticInfo (3202: listing exchange) —
+// plus a locally-computed 200-day EMA from the daily bar archive, and
+// publishes one wsmsg.StockDetailPayload per symbol per tick.
 //
 // Rate-limit note: one 3203 request per RefreshMs tick per MaxPerReq-sized
-// chunk of symbols (fundamentals refresh every tick, no caching); 3207
-// fires only for symbols not yet in the industry cache, so in steady state
-// it is issued at most once per symbol for the life of the process. Like
-// scan.go and news.go, no explicit rate limiter is implemented here — tick
-// cadence plus the industry cache keep both protocols well under moomoo's
-// documented limits (60 req/30s for 3203; 3207's limit isn't documented
-// anywhere in this repo, but the once-per-symbol cache makes any reasonable
-// limit a non-issue).
+// chunk of symbols (fundamentals refresh every tick, no caching); 3207 and
+// 3202 fire only for symbols not yet in their respective caches, so in
+// steady state each is issued at most once per symbol for the life of the
+// process. Like scan.go and news.go, no explicit rate limiter is
+// implemented here — tick cadence plus the caches keep all protocols well
+// under moomoo's documented limits (60 req/30s for 3203; 3207/3202's limits
+// aren't documented anywhere in this repo, but the once-per-symbol caches
+// make any reasonable limit a non-issue).
 package stockinfo
 
 import (
@@ -26,13 +27,19 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
+	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 
 	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
 	ownerplatepb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetownerplate"
 	snappb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsecuritysnapshot"
+	staticpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetstaticinfo"
 )
+
+// ema200Period is the fixed window for the Stock Info panel's EMA-200 field.
+const ema200Period = 200
 
 type Publisher interface {
 	Publish(topic wsmsg.Topic, key string, payload any)
@@ -42,20 +49,43 @@ type requester interface {
 	Request(ctx context.Context, protoID uint32, req proto.Message) (opend.Frame, error)
 }
 
+// dailyBarReader is the narrow slice of store.Store the EMA-200 computation
+// needs — just enough to read a symbol's daily close history, without
+// coupling this package to the whole store API.
+type dailyBarReader interface {
+	ReadDailyBars(symbol string) ([]feed.Bar, error)
+}
+
+// ema200Entry is the once-per-day cache entry for a symbol's EMA-200: day is
+// the UTC calendar day (YYYY-MM-DD) it was computed on, val is nil when
+// fewer than ema200Period daily bars were available that day.
+type ema200Entry struct {
+	day string
+	val *float64
+}
+
 // Poller ticks on cfg.RefreshMs, refetching fundamentals for every symbol in
-// symbols() every tick and industry for symbols not yet cached. industry is
-// only ever touched from the Run goroutine, so it needs no mutex.
+// symbols() every tick, industry/exchange for symbols not yet cached, and
+// EMA-200 at most once per UTC day per symbol (it reads the daily bar
+// archive, which only advances once per session). industry, exch, and ema
+// are only ever touched from the Run goroutine, so none needs a mutex.
 type Poller struct {
 	cfg      config.StockInfo
 	r        requester
 	pub      Publisher
 	clk      clock.Clock
-	symbols  func() []string   // focused + watchlist symbols to refresh
-	industry map[string]string // symbol -> resolved industry name; "" = known-absent
+	bars     dailyBarReader
+	symbols  func() []string        // focused + watchlist symbols to refresh
+	industry map[string]string      // symbol -> resolved industry name; "" = known-absent
+	exch     map[string]string      // symbol -> resolved exchange label; "" = known-absent/unresolvable
+	ema      map[string]ema200Entry // symbol -> last-computed EMA-200, day-stamped
 }
 
-func New(cfg config.StockInfo, r requester, pub Publisher, clk clock.Clock, symbols func() []string) *Poller {
-	return &Poller{cfg: cfg, r: r, pub: pub, clk: clk, symbols: symbols, industry: map[string]string{}}
+func New(cfg config.StockInfo, r requester, pub Publisher, clk clock.Clock, symbols func() []string, bars dailyBarReader) *Poller {
+	return &Poller{
+		cfg: cfg, r: r, pub: pub, clk: clk, bars: bars, symbols: symbols,
+		industry: map[string]string{}, exch: map[string]string{}, ema: map[string]ema200Entry{},
+	}
 }
 
 func (p *Poller) Run(ctx context.Context) error {
@@ -74,10 +104,10 @@ func (p *Poller) Run(ctx context.Context) error {
 	}
 }
 
-// fetchTick performs the two-step fetch (snapshot fundamentals for every
-// requested symbol, industry lookup only for symbols not yet cached) and
-// publishes one wsmsg.StockDetailPayload per symbol that a snapshot was
-// returned for.
+// fetchTick performs the fundamentals fetch (snapshot for every requested
+// symbol, industry/exchange lookups only for symbols not yet cached, EMA-200
+// at most once per UTC day per symbol) and publishes one
+// wsmsg.StockDetailPayload per symbol that a snapshot was returned for.
 func (p *Poller) fetchTick(ctx context.Context) {
 	syms := p.symbols()
 	if len(syms) == 0 {
@@ -86,6 +116,7 @@ func (p *Poller) fetchTick(ctx context.Context) {
 	refreshedAt := p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
 	snapshots := p.fetchSnapshots(ctx, syms)
 	p.resolveIndustries(ctx, syms)
+	p.resolveExchanges(ctx, syms)
 	for _, sym := range syms {
 		snap, ok := snapshots[sym]
 		if !ok {
@@ -93,6 +124,8 @@ func (p *Poller) fetchTick(ctx context.Context) {
 		}
 		payload := snapshotToPayload(snap.GetBasic(), snap.GetEquityExData(), p.industry[sym], refreshedAt)
 		payload.Symbol = sym
+		payload.Exchange = p.exch[sym]
+		payload.Ema200 = p.ema200For(sym)
 		p.pub.Publish(wsmsg.TopicStockDetail, sym, payload)
 	}
 }
@@ -217,6 +250,111 @@ func (p *Poller) ownerPlateChunk(ctx context.Context, ch []string) {
 			p.industry[s] = "" // succeeded but no row for this symbol: cache absent
 		}
 	}
+}
+
+// resolveExchanges fetches Qot_GetStaticInfo for symbols not yet in the
+// exchange cache and records the result — caching "" when a symbol's
+// listing exchange can't be determined (unresolvable in isolation, or
+// omitted from an otherwise-successful response) — so it is never
+// re-requested for the life of the process. Same shape as
+// resolveIndustries/ownerPlateChunk (a transport/decode error is chunk-wide
+// and left uncached, retried next tick; a whole-batch RetType != 0 failure
+// is isolated via binary split).
+func (p *Poller) resolveExchanges(ctx context.Context, syms []string) {
+	var missing []string
+	for _, s := range syms {
+		if _, ok := p.exch[s]; !ok {
+			missing = append(missing, s)
+		}
+	}
+	for _, ch := range chunk(missing, p.maxPerReq()) {
+		p.staticInfoChunk(ctx, ch)
+	}
+}
+
+// staticInfoChunk resolves one chunk of syms via a single 3202 request,
+// caching each returned symbol's exchange label (or "" when a symbol
+// succeeded but had no row in the response). On a whole-batch RetType != 0
+// failure it recurses with a binary split, same shape as ownerPlateChunk.
+func (p *Poller) staticInfoChunk(ctx context.Context, ch []string) {
+	fr, err := p.r.Request(ctx, opend.ProtoQotGetStaticInfo,
+		&staticpb.Request{C2S: &staticpb.C2S{SecurityList: securitiesFor(ch)}})
+	if err != nil {
+		slog.Warn("stockinfo: static-info transport failed", "err", err, "n", len(ch))
+		return
+	}
+	var resp staticpb.Response
+	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
+		slog.Warn("stockinfo: static-info decode failed", "err", err)
+		return
+	}
+	if resp.GetRetType() != 0 {
+		if len(ch) == 1 {
+			p.exch[ch[0]] = ""
+			slog.Info("stockinfo: static-info unresolvable, caching absent exchange", "symbol", ch[0], "reason", resp.GetRetMsg())
+			return
+		}
+		mid := len(ch) / 2
+		p.staticInfoChunk(ctx, ch[:mid])
+		p.staticInfoChunk(ctx, ch[mid:])
+		return
+	}
+	got := make(map[string]bool, len(ch))
+	for _, info := range resp.GetS2C().GetStaticInfoList() {
+		basic := info.GetBasic()
+		sym := symbolOf(basic.GetSecurity())
+		got[sym] = true
+		p.exch[sym] = exchLabel(basic.GetExchType())
+	}
+	for _, s := range ch {
+		if !got[s] {
+			p.exch[s] = "" // succeeded but no row for this symbol: cache absent
+		}
+	}
+}
+
+// exchLabel maps a moomoo qotcommon.ExchType value to the label the Stock
+// Info panel displays. Only the four US equity venues are named; anything
+// else (options/futures venues, or a zero/unset value from a non-equity
+// instrument) is unknown to this panel and dashes in the UI.
+func exchLabel(t int32) string {
+	switch qotcommon.ExchType(t) {
+	case qotcommon.ExchType_ExchType_US_NYSE:
+		return "NYSE"
+	case qotcommon.ExchType_ExchType_US_Nasdaq:
+		return "NASDAQ"
+	case qotcommon.ExchType_ExchType_US_AMEX:
+		return "AMEX"
+	case qotcommon.ExchType_ExchType_US_Pink:
+		return "OTC"
+	default:
+		return ""
+	}
+}
+
+// ema200For returns sym's 200-day EMA over daily closes, computed at most
+// once per UTC calendar day (the daily bar archive only advances once per
+// session, so recomputing every RefreshMs tick would just re-read the same
+// rows from SQLite for no new information). Returns nil when fewer than
+// ema200Period daily bars are archived for sym (e.g. a recent IPO) or when
+// the archive read fails.
+func (p *Poller) ema200For(sym string) *float64 {
+	today := p.clk.Now().UTC().Format("2006-01-02")
+	if e, ok := p.ema[sym]; ok && e.day == today {
+		return e.val
+	}
+	var val *float64
+	if bars, err := p.bars.ReadDailyBars(sym); err == nil {
+		closes := make([]float64, len(bars))
+		for i, b := range bars {
+			closes[i] = b.C
+		}
+		if v, ok := md.EMA(closes, ema200Period); ok {
+			val = &v
+		}
+	}
+	p.ema[sym] = ema200Entry{day: today, val: val}
+	return val
 }
 
 func (p *Poller) maxPerReq() int {

@@ -178,6 +178,7 @@ type StockDetailPayload struct {
 	Symbol            string   `json:"symbol"`
 	Name              string   `json:"name"`
 	Industry          string   `json:"industry"`
+	Exchange          string   `json:"exchange"` // NASDAQ/NYSE/AMEX/OTC via moomoo ExchType; "" = unresolved/unknown
 	Price             *float64 `json:"price" tstype:"number | null,required"`
 	LastClose         *float64 `json:"lastClose" tstype:"number | null,required"`
 	ChangePct         *float64 `json:"changePct" tstype:"number | null,required"`
@@ -190,6 +191,7 @@ type StockDetailPayload struct {
 	Eps               *float64 `json:"eps" tstype:"number | null,required"`               // moomoo EarningsPershare
 	High52            *float64 `json:"high52" tstype:"number | null,required"`
 	Low52             *float64 `json:"low52" tstype:"number | null,required"`
+	Ema200            *float64 `json:"ema200" tstype:"number | null,required"` // 200-day EMA of daily closes; nil until 200 daily bars are backfilled
 	Volume            int64    `json:"volume"` // 0 is legitimate
 	RefreshedAt       string   `json:"refreshedAt"`
 }
