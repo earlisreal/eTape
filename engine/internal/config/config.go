@@ -159,10 +159,11 @@ type Health struct {
 type Backfill struct {
 	Enabled      bool           `toml:"enabled"`
 	IntradayDays int            `toml:"intraday_days"` // trading days of 1m history to backfill
-	DailyYears   int            `toml:"daily_years"`   // 0 = all available daily history
+	DailyYears   int            `toml:"daily_years"`   // 0 = since the 2016-01-01 provider floor; >0 = max(now−daily_years, 2016-01-01)
 	Concurrency  int            `toml:"concurrency"`   // bounded boot worker pool
 	SeedChunk    int            `toml:"seed_chunk"`    // vestigial: no longer read (see backfill.Config.SeedChunk); kept so an existing config.toml's seed_chunk key doesn't need editing
 	Alpaca       BackfillAlpaca `toml:"alpaca"`
+	Yahoo        BackfillYahoo  `toml:"yahoo"`
 }
 
 // BackfillAlpaca is the [backfill.alpaca] section: the optional 1m-depth
@@ -177,6 +178,13 @@ type BackfillAlpaca struct {
 	Enabled  bool   `toml:"enabled"`
 	CredsKey string `toml:"creds_key"` // "" => resolve from a configured non-live alpaca venue
 	Feed     string `toml:"feed"`      // "iex" (free) | "sip"
+}
+
+// BackfillYahoo is the [backfill.yahoo] section: the zero-config daily-history
+// fallback (no credentials). A kill switch for when Yahoo's unofficial
+// endpoint misbehaves.
+type BackfillYahoo struct {
+	Enabled bool `toml:"enabled"`
 }
 
 // Config is the engine's bootstrap configuration.
@@ -215,7 +223,8 @@ func Default() Config {
 		StockInfo: StockInfo{Enabled: true, RefreshMs: 15000, MaxPerReq: 400},
 		Health:    Health{Enabled: true, ProbeMs: 5000},
 		Backfill: Backfill{Enabled: true, IntradayDays: 20, DailyYears: 0, Concurrency: 3, SeedChunk: 500,
-			Alpaca: BackfillAlpaca{Enabled: true, CredsKey: "", Feed: "iex"},
+			Alpaca: BackfillAlpaca{Enabled: true, CredsKey: "", Feed: "sip"},
+			Yahoo:  BackfillYahoo{Enabled: true},
 		},
 	}
 }
