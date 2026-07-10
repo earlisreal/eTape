@@ -42,6 +42,11 @@ describe("tvTheme palettes", () => {
     expect(TV_DARK.buyFill).toBe("rgba(165,214,167,.8)");
     expect(TV_DARK.sellFill).toBe("rgba(244,143,177,.8)");
   });
+
+  it("uses a distinct blue for short-sale fill diamonds, same in both themes", () => {
+    expect(TV_LIGHT.shortFill).toBe("rgba(33,150,243,.8)");
+    expect(TV_DARK.shortFill).toBe("rgba(33,150,243,.8)");
+  });
 });
 
 describe("tvTheme chrome tokens", () => {

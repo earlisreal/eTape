@@ -31,6 +31,7 @@ describe("diamond geometry (ported from earlisreal-lightweight-charts 069fa855)"
   it("maps side to the palette fill color", () => {
     expect(fillColor("buy", LIGHT)).toBe(LIGHT.buyFill);
     expect(fillColor("sell", LIGHT)).toBe(LIGHT.sellFill);
+    expect(fillColor("short", LIGHT)).toBe(LIGHT.shortFill);
   });
 });
 

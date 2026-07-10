@@ -39,6 +39,20 @@ describe("aggregateFillMarkers", () => {
     expect(out.map((m) => m.side).sort()).toEqual(["buy", "sell"]);
   });
 
+  it("keeps a short in the same bar as a distinct third marker, not merged with buy/sell", () => {
+    const bar = at("2026-07-06T13:31:00Z");
+    const out = aggregateFillMarkers(
+      [
+        slice({ orderId: "ET1", side: "buy", timeMs: bar + 1000 }),
+        slice({ orderId: "ET2", side: "sell", timeMs: bar + 2000 }),
+        slice({ orderId: "ET3", side: "short", timeMs: bar + 3000 }),
+      ],
+      "1m",
+    );
+    expect(out).toHaveLength(3);
+    expect(out.map((m) => m.side).sort()).toEqual(["buy", "sell", "short"]);
+  });
+
   it("keeps two different orders in the same bar/side as two distinct markers (no cross-order merge)", () => {
     const bar = at("2026-07-06T13:31:00Z");
     const out = aggregateFillMarkers(

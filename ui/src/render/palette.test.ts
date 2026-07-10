@@ -4,7 +4,7 @@ import { LIGHT, DARK, getPalette, FONTS, type Palette } from "./palette";
 const KEYS: (keyof Palette)[] = [
   "bg", "surface", "border", "text", "textMuted", "grid", "crosshair",
   "up", "down", "volUp", "volDown",
-  "buyFill", "sellFill", "fillOutline",
+  "buyFill", "sellFill", "shortFill", "fillOutline",
   "sessionPre", "sessionRth", "sessionPost", "sessionClosed",
   "indVwap", "indEma", "indSma", "indMacdLine", "indMacdSignal", "indMacdHist",
   "linkRed", "linkGreen", "linkBlue", "linkYellow",

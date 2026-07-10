@@ -3,7 +3,7 @@
 // the primitive (diamondPrimitive.ts) stays a thin LWC adapter.
 import type { Palette } from "../palette";
 
-export interface FillMarker { timeMs: number; price: number; side: "buy" | "sell" }
+export interface FillMarker { timeMs: number; price: number; side: "buy" | "sell" | "short" }
 
 // Minimal 2D-context surface the path routine needs (so it is testable with a fake).
 export interface PathCtx {
@@ -37,6 +37,6 @@ export function hitTestDiamond(cx: number, cy: number, size: number, x: number, 
   return Math.abs(cx - x) + Math.abs(cy - y) <= halfSize; // Manhattan ball = rotated square
 }
 
-export function fillColor(side: "buy" | "sell", p: Palette): string {
-  return side === "buy" ? p.buyFill : p.sellFill;
+export function fillColor(side: "buy" | "sell" | "short", p: Palette): string {
+  return side === "short" ? p.shortFill : side === "buy" ? p.buyFill : p.sellFill;
 }

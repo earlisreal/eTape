@@ -10,7 +10,7 @@ export interface FillSlice {
   timeMs: number;
   price: number;
   qty: number;
-  side: "buy" | "sell";
+  side: "buy" | "sell" | "short";
 }
 
 // Root cause of "marker sometimes missing": LWC's timeToCoordinate returns null
@@ -25,7 +25,7 @@ export interface FillSlice {
 // a broker reports; not the market VWAP indicator). A different order, or the
 // same order's opposite side, never merges with this group.
 export function aggregateFillMarkers(fills: FillSlice[], tf: Timeframe): FillMarker[] {
-  const groups = new Map<string, { timeMs: number; side: "buy" | "sell"; notional: number; qty: number }>();
+  const groups = new Map<string, { timeMs: number; side: "buy" | "sell" | "short"; notional: number; qty: number }>();
   for (const f of fills) {
     const bucket = bucketStartMs(f.timeMs, tf);
     const k = `${f.venue}|${f.orderId}|${bucket}|${f.side}`;

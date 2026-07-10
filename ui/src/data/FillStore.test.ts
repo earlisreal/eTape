@@ -14,11 +14,11 @@ describe("FillStore", () => {
     expect(s.forSymbol("US.NVDA")).toEqual([{ timeMs: 1100, price: 9, side: "sell" }]);
     expect(s.forSymbol("US.TSLA")).toEqual([]);
   });
-  it("SHORT/COVER map to sell/buy", () => {
+  it("SHORT maps to its own \"short\" side, COVER maps to buy", () => {
     const s = new FillStore();
     s.apply(delta(fill({ side: "SHORT", orderId: "ET2" })));
     s.apply(delta(fill({ side: "COVER", orderId: "ET3", tsMs: 1200 })));
-    expect(s.forSymbol("US.AAPL").map((m) => m.side)).toEqual(["sell", "buy"]);
+    expect(s.forSymbol("US.AAPL").map((m) => m.side)).toEqual(["short", "buy"]);
   });
   it("append-only, deduped by identity (a re-snapshot never doubles or wipes)", () => {
     const s = new FillStore();
