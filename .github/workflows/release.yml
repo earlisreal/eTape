@@ -1,0 +1,75 @@
+name: Release
+
+# Push a version tag (git tag v1.0.0 && git push origin v1.0.0) to build the
+# Windows .exe and macOS arm64 binary and publish a GitHub Release with them
+# attached. Both targets cross-compile with CGO disabled, so one Linux runner
+# builds both. Can also run manually (workflow_dispatch) to produce artifacts
+# without publishing a release.
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write # required to create/update the GitHub Release
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags needed so `git describe` stamps buildinfo.Version
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: engine/go.mod
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm ci
+
+      # Builds the UI once (embed-ui prereq) then cross-compiles both binaries
+      # into repo-root dist/ (etape-windows-amd64.exe, etape-darwin-arm64).
+      - name: Build release binaries
+        run: make -C engine release-windows release-macos
+
+      - name: Stage release artifacts
+        run: |
+          set -euo pipefail
+          ver="${{ github.ref_name }}"
+          mkdir -p staging/win
+          cp dist/etape-windows-amd64.exe staging/win/etape.exe
+          cp README-FIRST.txt etape-demo.cmd staging/win/
+          (cd staging/win && zip -r "../../eTape-${ver}-windows-amd64.zip" .)
+          chmod +x dist/etape-darwin-arm64
+          tar -C dist -czf "eTape-${ver}-macos-arm64.tar.gz" etape-darwin-arm64
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: etape-release
+          path: |
+            eTape-*-windows-amd64.zip
+            eTape-*-macos-arm64.tar.gz
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            eTape-*-windows-amd64.zip
+            eTape-*-macos-arm64.tar.gz

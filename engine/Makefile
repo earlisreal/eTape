@@ -1,16 +1,16 @@
 # Toolchain (record exact versions used):
 #   go 1.26.4, protoc 35.1 (libprotoc), protoc-gen-go v1.36.11, golangci-lint 2.12.2
 #
-# No CI workflow file exists in this repo yet (checked .github/workflows/ during
-# Plan 6 Task 4 — absent); `gen-ts-check` below is the authoritative drift gate
-# and must pass before merge.
+# .github/workflows/release.yml builds release-windows/release-macos on tag push;
+# no PR/push CI workflow exists yet, so `gen-ts-check` below is the authoritative
+# drift gate and must pass before merge (run it manually).
 #
 # VERSION feeds -ldflags -X into internal/buildinfo.Version for release builds
 # (see release-windows/release-macos below). Falls back to "dev" when git
 # metadata is unavailable (e.g. a source tarball with no .git directory).
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build test lint vet proto vendor-proto run gen-ts gen-ts-check release-windows release-macos
+.PHONY: build test lint vet proto vendor-proto run gen-ts gen-ts-check release-windows release-macos embed-ui
 build:
 	go build ./...
 test:
@@ -44,15 +44,16 @@ gen-ts-check: gen-ts
 # suppresses the console window for the tray build (run_tray.go, tags=tray) --
 # the tray build tag alone only swaps main()'s behavior, it doesn't touch the
 # PE header.
-release-windows:
+# UI build + embed copy, shared by both release targets (built once per `make` run).
+embed-ui:
 	cd ../ui && npm run build
 	rm -rf internal/webui/dist && cp -r ../ui/dist internal/webui/dist
+
+release-windows: embed-ui
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags "embed_ui tray" \
 	  -ldflags "-s -w -H=windowsgui -X github.com/earlisreal/eTape/engine/internal/buildinfo.Version=$(VERSION)" \
 	  -o ../dist/etape-windows-amd64.exe ./cmd/etape
-release-macos:
-	cd ../ui && npm run build
-	rm -rf internal/webui/dist && cp -r ../ui/dist internal/webui/dist
+release-macos: embed-ui
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -tags embed_ui \
 	  -ldflags "-s -w -X github.com/earlisreal/eTape/engine/internal/buildinfo.Version=$(VERSION)" \
 	  -o ../dist/etape-darwin-arm64 ./cmd/etape
