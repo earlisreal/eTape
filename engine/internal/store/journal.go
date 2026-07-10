@@ -20,7 +20,9 @@ func (s *Store) RecordEvent(ev feed.Event, recvMs int64) {
 	s.writes <- recordOp{s: s, ev: ev, recvMs: recvMs}
 }
 
-// DroppedJournalRows counts rows dropped because their payload failed to encode.
+// DroppedJournalRows counts rows dropped because their payload failed to
+// encode, or because seq assignment/commit could not place them (see commit()
+// in store.go: refused-to-seed and persistent-collision drops).
 func (s *Store) DroppedJournalRows() uint64 { return s.dropped.Load() }
 
 type recordOp struct {
@@ -29,7 +31,12 @@ type recordOp struct {
 	recvMs int64
 }
 
-// render runs in the writer goroutine only, so touching s.daySeq is race-free.
+// render runs in the writer goroutine only. It does NOT assign seq: seq is
+// baked into args[1] at commit time (see commit() in store.go) so a
+// (day,seq) collision can be corrected in place — by the time render() ran,
+// the seq it could compute here might already be stale by the time the batch
+// actually commits. journalDay tags this pendingWrite so commit() knows which
+// rows need a seq assigned/retried.
 func (o recordOp) render() []pendingWrite {
 	payload, err := encodePayload(o.ev)
 	if err != nil {
@@ -38,39 +45,67 @@ func (o recordOp) render() []pendingWrite {
 		return nil
 	}
 	day := dayKey(o.recvMs)
-	seq := o.s.nextSeq(day)
 	seed := 0
 	if eventSeed(o.ev) {
 		seed = 1
 	}
 	return []pendingWrite{{
 		query: journalInsertSQL,
-		args: []any{day, seq, eventExchTs(o.ev, o.recvMs), o.recvMs,
+		// args[1] (seq) is a placeholder; commit() overwrites it before Exec.
+		args: []any{day, int64(0), eventExchTs(o.ev, o.recvMs), o.recvMs,
 			eventSymbol(o.ev), eventKind(o.ev), seed, string(payload)},
+		journalDay: day,
 	}}
 }
 
-// nextSeq returns the next per-day seq, seeding from the DB max on first use of
-// a day (so restarts mid-day continue rather than collide). Writer goroutine only.
-func (s *Store) nextSeq(day string) int64 {
-	seq, ok := s.daySeq[day]
-	if !ok {
-		seq = s.maxSeq(day)
+// assignSeq returns the next per-day seq, seeding from the DB max on first use
+// of a day (so restarts mid-day continue rather than collide). On a maxSeq
+// query error it refuses to seed (returns the error) rather than caching a
+// wrong value — a transient failure must not poison the day's counter at 0,
+// which would collide with every already-journaled row. Writer goroutine
+// only (called from commit()).
+func (s *Store) assignSeq(day string) (seq int64, err error) {
+	if cached, have := s.daySeq[day]; have {
+		seq = cached + 1
+		s.daySeq[day] = seq
+		return seq, nil
 	}
-	seq++
+	m, err := s.maxSeq(day)
+	if err != nil {
+		return 0, err
+	}
+	seq = m + 1
 	s.daySeq[day] = seq
-	return seq
+	return seq, nil
 }
 
-func (s *Store) maxSeq(day string) int64 {
+// reseedDay re-reads the DB max for day and resets the cached counter to it,
+// returning max+1. Used by commit() to recover from a (day,seq) collision —
+// whatever poisoned or raced the cached counter, a fresh MAX(seq) is always a
+// safe floor to mint above. Returns the query error rather than guessing.
+func (s *Store) reseedDay(day string) (seq int64, err error) {
+	m, err := s.maxSeq(day)
+	if err != nil {
+		return 0, err
+	}
+	seq = m + 1
+	s.daySeq[day] = seq
+	return seq, nil
+}
+
+// maxSeq returns the highest committed seq for day, or an error if the query
+// itself failed (busy/IO/corruption) — callers must not treat that as "0",
+// which would look identical to a genuinely empty day and re-mint colliding
+// low seqs on top of already-journaled rows.
+func (s *Store) maxSeq(day string) (int64, error) {
 	var m sql.NullInt64 // not `max`: avoid shadowing the builtin (predeclared linter)
 	if err := s.db.QueryRow("SELECT MAX(seq) FROM journal WHERE day=?", day).Scan(&m); err != nil && !errors.Is(err, sql.ErrNoRows) {
-		slog.Error("store: maxSeq query", "err", err, "day", day)
+		return 0, err
 	}
 	if m.Valid {
-		return m.Int64
+		return m.Int64, nil
 	}
-	return 0
+	return 0, nil
 }
 
 // JournalRow is one decoded journal entry.

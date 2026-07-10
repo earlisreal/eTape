@@ -215,6 +215,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 		return 1
 	}
 	defer releaseLock()
+	log.Info("single-instance lock acquired", "lock", dbPath+".lock")
 
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
@@ -224,6 +225,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 	var execClk clock.Clock = clock.System{}
 
 	// --- store ---
+	log.Info("store opening", "db", dbPath)
 	st, err := store.Open(store.Options{
 		Path: dbPath, Clock: clock.System{},
 		FlushInterval: time.Duration(cfg.Store.FlushMs) * time.Millisecond,
