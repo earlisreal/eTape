@@ -9,6 +9,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/md"
 )
 
 type spyHubFeed struct {
@@ -125,15 +126,20 @@ func TestHubDemand_NilFeedNoPanic(t *testing.T) {
 	}
 }
 
-// spyBackfill records symbols passed to the injected backfill trigger.
+// spyBackfill records symbols passed to the injected backfill trigger and
+// lets a test report any attempt's outcome on its own schedule (via report/
+// reportLast), mirroring the real hubBackfill closure in main.go, which
+// reports success/failure asynchronously once orch.Backfill returns.
 type spyBackfill struct {
-	mu   sync.Mutex
-	syms []string
+	mu    sync.Mutex
+	syms  []string
+	dones []func(ok bool)
 }
 
-func (s *spyBackfill) trigger(sym string) {
+func (s *spyBackfill) trigger(sym string, done func(ok bool)) {
 	s.mu.Lock()
 	s.syms = append(s.syms, sym)
+	s.dones = append(s.dones, done)
 	s.mu.Unlock()
 }
 
@@ -141,6 +147,23 @@ func (s *spyBackfill) snapshot() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]string(nil), s.syms...)
+}
+
+// report invokes the done callback recorded for the idx'th trigger (0-based,
+// in trigger order) with ok, as if that spawned backfill had just finished.
+func (s *spyBackfill) report(idx int, ok bool) {
+	s.mu.Lock()
+	done := s.dones[idx]
+	s.mu.Unlock()
+	done(ok)
+}
+
+// reportLast is report for the most recently recorded trigger.
+func (s *spyBackfill) reportLast(ok bool) {
+	s.mu.Lock()
+	idx := len(s.dones) - 1
+	s.mu.Unlock()
+	s.report(idx, ok)
 }
 
 func TestHubDemand_WatchAndFocusedTriggerBackfillOnce(t *testing.T) {
@@ -221,6 +244,119 @@ func TestHubDemand_DeadConnNoBackfill(t *testing.T) {
 	if got := bf.snapshot(); len(got) != 0 {
 		t.Fatalf("dead conn triggered backfill: %v", got)
 	}
+}
+
+// TestHubDemand_BackfillInflightDedup pins that two demands for the same
+// symbol arriving before the first spawn's outcome is reported spawn exactly
+// one backfill -- backfillInflight, not just backfilled, must gate the spawn.
+func TestHubDemand_BackfillInflightDedup(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+	h.SetFeed(&spyHubFeed{})
+	bf := &spyBackfill{}
+	h.SetBackfill(bf.trigger)
+	c := &fakeClient{nid: 1}
+	h.Register(c)
+
+	h.EnsureDemand(1, feed.WatchDemand("dyn/1/a", "US.AAPL"))
+	h.EnsureDemand(1, feed.WatchDemand("dyn/1/b", "US.AAPL")) // same symbol, still in flight
+	h.sync()
+
+	if got := bf.snapshot(); len(got) != 1 {
+		t.Fatalf("triggers while first spawn is in flight = %v, want exactly 1 spawn", got)
+	}
+}
+
+// TestHubDemand_BackfillFailureAllowsRetry is the regression test for the
+// reported bug: a symbol whose daily backfill fails (e.g. OpenD was down)
+// must not be marked backfilled forever -- a later demand for the same
+// symbol must retry it. Once an attempt succeeds, backfilled sticks and a
+// further demand must NOT re-spawn.
+func TestHubDemand_BackfillFailureAllowsRetry(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+	h.SetFeed(&spyHubFeed{})
+	bf := &spyBackfill{}
+	h.SetBackfill(bf.trigger)
+	c := &fakeClient{nid: 1}
+	h.Register(c)
+
+	h.EnsureDemand(1, feed.WatchDemand("dyn/1/a", "US.AAPL"))
+	h.sync()
+	if got := bf.snapshot(); len(got) != 1 {
+		t.Fatalf("first ensure triggers = %v, want 1", got)
+	}
+
+	bf.reportLast(false) // simulate an OpenD-down daily-fetch failure
+	h.sync()
+
+	h.EnsureDemand(1, feed.WatchDemand("dyn/1/b", "US.AAPL")) // same symbol, new demand id
+	h.sync()
+	if got := bf.snapshot(); len(got) != 2 {
+		t.Fatalf("after a failed attempt, a later demand must retry: triggers = %v, want 2", got)
+	}
+
+	bf.reportLast(true) // now it succeeds
+	h.sync()
+
+	h.EnsureDemand(1, feed.WatchDemand("dyn/1/c", "US.AAPL"))
+	h.sync()
+	if got := bf.snapshot(); len(got) != 2 {
+		t.Fatalf("after a successful attempt, a later demand must NOT retry: triggers = %v, want 2", got)
+	}
+}
+
+// TestHubResyncRearmsOnlyUnbackfilledChartSymbols is the other half of the
+// regression test: an OpenD reconnect (md.ResyncedUpdate) must re-arm chart
+// symbols whose daily backfill previously failed, must leave already-
+// succeeded chart symbols alone, and must never touch interest-only demands
+// (no chart, WantsHistory=false) -- matching InterestDoesNotBackfill above.
+func TestHubResyncRearmsOnlyUnbackfilledChartSymbols(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+	h.SetFeed(&spyHubFeed{})
+	bf := &spyBackfill{}
+	h.SetBackfill(bf.trigger)
+	c := &fakeClient{nid: 1}
+	h.Register(c)
+
+	h.EnsureDemand(1, feed.WatchDemand("dyn/1/a", "US.AAPL"))        // chart; will fail
+	h.EnsureDemand(1, feed.Demand{ID: "dyn/1/b", Symbol: "US.TSLA"}) // interest only, no history
+	h.EnsureDemand(1, demandForTest("dyn/1/c", "US.MSFT"))           // chart; will succeed
+	h.sync()
+
+	got := bf.snapshot()
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, []string{"US.AAPL", "US.MSFT"}) {
+		t.Fatalf("initial triggers = %v, want AAPL+MSFT only (TSLA is interest-only)", got)
+	}
+
+	bf.report(0, false) // AAPL's attempt failed (OpenD was down)
+	bf.report(1, true)  // MSFT's attempt succeeded
+	h.sync()
+
+	h.PublishMD(md.ResyncedUpdate{}) // OpenD reconnected + resubscribed
+	h.sync()
+
+	got = bf.snapshot()
+	if len(got) != 3 || got[2] != "US.AAPL" {
+		t.Fatalf("resync must re-arm only the still-unbackfilled chart symbol: triggers = %v, want a 3rd AAPL retry", got)
+	}
+}
+
+// TestHubResyncNoopWithoutBackfill confirms a resync with no backfill fn
+// injected (replay / backfill-disabled) never panics.
+func TestHubResyncNoopWithoutBackfill(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+	h.SetFeed(&spyHubFeed{})
+	c := &fakeClient{nid: 1}
+	h.Register(c)
+	h.EnsureDemand(1, feed.WatchDemand("dyn/1/a", "US.AAPL")) // no SetBackfill call
+	h.sync()
+
+	h.PublishMD(md.ResyncedUpdate{})
+	h.sync() // must not panic
 }
 
 // demandForTest builds a focused-like feed.Demand (the extra subs the

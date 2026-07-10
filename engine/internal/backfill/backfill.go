@@ -123,7 +123,7 @@ func (o *Orchestrator) Run(ctx context.Context, symbols []string) {
 		go func(sym string) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			o.Backfill(ctx, sym)
+			_ = o.Backfill(ctx, sym) // per-symbol daily-fetch outcome is logged inside fillDaily; Run has no caller to report it to
 		}(s)
 	}
 	wg.Wait()
@@ -131,13 +131,16 @@ func (o *Orchestrator) Run(ctx context.Context, symbols []string) {
 
 // Backfill runs warm-start → daily gap-fill → 1m gap-fill for one symbol.
 // Every step is best-effort: a failure is logged and the next step still runs,
-// so a single dead source never blanks the chart.
-func (o *Orchestrator) Backfill(ctx context.Context, symbol string) {
+// so a single dead source never blanks the chart. The daily-fetch outcome is
+// returned (nil on success) so a caller can decide whether to retry -- e.g.
+// the uihub re-arms a failed daily backfill once OpenD reconnects.
+func (o *Orchestrator) Backfill(ctx context.Context, symbol string) error {
 	now := o.clk.Now()
 	from1m := intradayFrom(now, o.cfg.IntradayDays)
 	o.warmStart(ctx, symbol, from1m, now)
-	o.fillDaily(ctx, symbol, o.dailyFrom(now), now)
+	dailyErr := o.fillDaily(ctx, symbol, o.dailyFrom(now), now)
 	o.fill1m(ctx, symbol, from1m, now)
+	return dailyErr
 }
 
 // dailyFrom is DailyYears ago, or the epoch (all available) when DailyYears==0.
@@ -193,20 +196,24 @@ func (o *Orchestrator) archiveDailyBars(bars []feed.Bar) {
 // depth shortfall, and must not trigger a fallback fetch every boot.
 const gapThresholdMs = 24 * 3600 * 1000
 
-func (o *Orchestrator) fillDaily(ctx context.Context, symbol string, from, to time.Time) {
+// fillDaily returns the daily-fetch outcome: nil once either source seeded
+// bars, otherwise the last error encountered (primary, or fallback's if a
+// fallback is configured and also failed).
+func (o *Orchestrator) fillDaily(ctx context.Context, symbol string, from, to time.Time) error {
 	bars, err := o.primary.DailyBars(ctx, symbol, from, to)
 	if err != nil {
 		slog.Warn("backfill: primary daily failed", "symbol", symbol, "err", err)
 		if o.fallback == nil {
-			return
+			return err
 		}
 		if bars, err = o.fallback.DailyBars(ctx, symbol, from, to); err != nil {
 			slog.Warn("backfill: fallback daily failed", "symbol", symbol, "err", err)
-			return
+			return err
 		}
 	}
 	o.archiveDailyBars(bars)
 	seedUnlessCanceled(ctx, bars, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
+	return nil
 }
 
 func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.Time) {

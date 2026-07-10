@@ -231,7 +231,7 @@ func TestBackfillWarmStartThenGapFill(t *testing.T) {
 		m1:    []feed.Bar{bar(9)}, // one warm-start 1m bar
 	}
 	o := New(primary, nil, seeder, archive, clock.NewFake(time.Date(2026, 7, 8, 12, 0, 0, 0, session.Loc())), Config{IntradayDays: 20, SeedChunk: 500})
-	o.Backfill(context.Background(), "US.AAPL")
+	_ = o.Backfill(context.Background(), "US.AAPL")
 
 	// Daily: warm-start(1) + moomoo(2) = 3 seeded.
 	if len(seeder.daily) != 3 {
@@ -258,7 +258,7 @@ func TestBackfillArchivesFreshFetchNotWarmStart(t *testing.T) {
 		m1:    []feed.Bar{bar(9)}, // warm-start only
 	}
 	o := New(primary, nil, seeder, archive, clock.NewFake(time.Date(2026, 7, 8, 12, 0, 0, 0, session.Loc())), Config{IntradayDays: 20})
-	o.Backfill(context.Background(), "US.AAPL")
+	_ = o.Backfill(context.Background(), "US.AAPL")
 
 	if len(archive.archivedDaily) != 2 || archive.archivedDaily[0].BucketMs != 1 || archive.archivedDaily[1].BucketMs != 2 {
 		t.Fatalf("archived daily = %+v, want the 2 fresh-fetch bars only", archive.archivedDaily)
@@ -272,13 +272,61 @@ func TestBackfillPrimaryDailyErrorIsNonFatal(t *testing.T) {
 	primary := &fakeFetcher{dErr: context.DeadlineExceeded, m1: []feed.Bar{bar(10)}}
 	seeder := &fakeSeeder{}
 	o := New(primary, nil, seeder, &fakeArchive{}, clock.NewFake(time.Now()), Config{IntradayDays: 20, SeedChunk: 500})
-	o.Backfill(context.Background(), "US.AAPL") // must not panic
+	_ = o.Backfill(context.Background(), "US.AAPL") // must not panic
 	if len(seeder.daily) != 0 {
 		t.Fatalf("daily seeded on error = %d, want 0", len(seeder.daily))
 	}
 	if len(seeder.hist) != 1 {
 		t.Fatalf("1m still seeded = %d, want 1", len(seeder.hist))
 	}
+}
+
+// TestBackfillReturnsDailyError pins the outcome Backfill reports back to a
+// caller (the uihub uses this to decide whether a symbol's daily backfill
+// must be retried): nil once daily bars were seeded from either source,
+// otherwise the last error hit trying.
+func TestBackfillReturnsDailyError(t *testing.T) {
+	t.Run("primary fails, no fallback -> error, 1m still runs", func(t *testing.T) {
+		primary := &fakeFetcher{dErr: context.DeadlineExceeded, m1: []feed.Bar{bar(10)}}
+		seeder := &fakeSeeder{}
+		o := New(primary, nil, seeder, &fakeArchive{}, clock.NewFake(time.Now()), Config{IntradayDays: 20, SeedChunk: 500})
+		err := o.Backfill(context.Background(), "US.AAPL")
+		if err == nil {
+			t.Fatal("Backfill err = nil, want the primary daily error")
+		}
+		if primary.m1Calls.Load() != 1 {
+			t.Fatalf("m1Calls = %d, want 1 -- fill1m must still run despite the daily error", primary.m1Calls.Load())
+		}
+	})
+
+	t.Run("primary fails, fallback fails -> error", func(t *testing.T) {
+		primary := &fakeFetcher{dErr: context.DeadlineExceeded}
+		fallback := &fakeFetcher{dErr: context.DeadlineExceeded}
+		seeder := &fakeSeeder{}
+		o := New(primary, fallback, seeder, &fakeArchive{}, clock.NewFake(time.Now()), Config{IntradayDays: 20})
+		if err := o.Backfill(context.Background(), "US.AAPL"); err == nil {
+			t.Fatal("Backfill err = nil, want the fallback daily error")
+		}
+	})
+
+	t.Run("primary fails, fallback succeeds -> nil", func(t *testing.T) {
+		primary := &fakeFetcher{dErr: context.DeadlineExceeded}
+		fallback := &fakeFetcher{daily: []feed.Bar{bar(1)}}
+		seeder := &fakeSeeder{}
+		o := New(primary, fallback, seeder, &fakeArchive{}, clock.NewFake(time.Now()), Config{IntradayDays: 20})
+		if err := o.Backfill(context.Background(), "US.AAPL"); err != nil {
+			t.Fatalf("Backfill err = %v, want nil (fallback seeded daily bars)", err)
+		}
+	})
+
+	t.Run("primary succeeds -> nil", func(t *testing.T) {
+		primary := &fakeFetcher{daily: []feed.Bar{bar(1)}}
+		seeder := &fakeSeeder{}
+		o := New(primary, nil, seeder, &fakeArchive{}, clock.NewFake(time.Now()), Config{IntradayDays: 20})
+		if err := o.Backfill(context.Background(), "US.AAPL"); err != nil {
+			t.Fatalf("Backfill err = %v, want nil", err)
+		}
+	})
 }
 
 func TestRunBoundedPoolCoversEverySymbol(t *testing.T) {
@@ -322,7 +370,7 @@ func TestFallbackFillsShallowGap(t *testing.T) {
 	fb := &recordFallback{m1: []feed.Bar{bar(from.UnixMilli())}}
 	seeder := &fakeSeeder{}
 	o := New(primary, fb, seeder, &fakeArchive{}, clock.NewFake(now), Config{IntradayDays: 20, SeedChunk: 500})
-	o.Backfill(context.Background(), "US.AAPL")
+	_ = o.Backfill(context.Background(), "US.AAPL")
 
 	if fb.m1Calls.Load() != 1 {
 		t.Fatalf("fallback 1m calls = %d, want 1", fb.m1Calls.Load())
@@ -344,7 +392,7 @@ func TestFallbackSkippedWhenPrimaryDeepEnough(t *testing.T) {
 	primary := &fakeFetcher{m1: []feed.Bar{bar(from.UnixMilli()), bar(from.UnixMilli() + 60000)}}
 	fb := &recordFallback{m1: []feed.Bar{bar(0)}}
 	o := New(primary, fb, &fakeSeeder{}, &fakeArchive{}, clock.NewFake(now), Config{IntradayDays: 20, SeedChunk: 500})
-	o.Backfill(context.Background(), "US.AAPL")
+	_ = o.Backfill(context.Background(), "US.AAPL")
 	if fb.m1Calls.Load() != 0 {
 		t.Fatalf("fallback called %d times, want 0 (primary deep enough)", fb.m1Calls.Load())
 	}
@@ -357,7 +405,7 @@ func TestFallbackFillsWholeWindowOnPrimaryError(t *testing.T) {
 	fb := &recordFallback{m1: []feed.Bar{bar(from.UnixMilli())}, daily: []feed.Bar{bar(1), bar(2)}}
 	seeder := &fakeSeeder{}
 	o := New(primary, fb, seeder, &fakeArchive{}, clock.NewFake(now), Config{IntradayDays: 20, SeedChunk: 500})
-	o.Backfill(context.Background(), "US.AAPL")
+	_ = o.Backfill(context.Background(), "US.AAPL")
 
 	// 1m: fallback asked for the whole [from, now] window.
 	if fb.m1Calls.Load() != 1 || fb.m1From.Load() != from.UnixMilli() || fb.m1To.Load() != now.UnixMilli() {

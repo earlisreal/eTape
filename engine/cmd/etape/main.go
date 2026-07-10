@@ -302,7 +302,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 		go func() { _ = fd.Run(ctx) }()
 		pipeWG.Add(1)
 		go pipe(ctx, &pipeWG, fd.Events(), core, st)
-		var backfillOne func(string)
+		var hubBackfill func(sym string, done func(ok bool))
 		if cfg.Backfill.Enabled {
 			var fallback backfill.HistFetcher
 			if cfg.Backfill.Alpaca.Enabled {
@@ -328,15 +328,30 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 					SeedChunk:    cfg.Backfill.SeedChunk,
 				},
 			)
-			backfillOne = func(sym string) {
+			// hubBackfill spawns orch.Backfill and reports the daily-fetch
+			// outcome back via done, so the hub knows whether to mark the
+			// symbol backfilled or leave it retryable (see
+			// Hub.handleBackfillDone / Hub.rearmBackfill). The scan poller
+			// (backfillOne below) doesn't need the retry signal -- it has its
+			// own independent, pool-day-scoped dedup -- so it reuses this
+			// same closure with a nil done rather than spawning its own copy
+			// of the Add/goroutine/Done boilerplate.
+			hubBackfill = func(sym string, done func(ok bool)) {
 				backfillWG.Add(1)
 				go func() {
 					defer backfillWG.Done()
-					orch.Backfill(ctx, sym)
+					err := orch.Backfill(ctx, sym)
+					if done != nil {
+						done(err == nil)
+					}
 				}()
 			}
 		}
-		hub.SetBackfill(backfillOne) // chart-open demands also deep-backfill (nil-safe if disabled)
+		var backfillOne func(string)
+		if hubBackfill != nil {
+			backfillOne = func(sym string) { hubBackfill(sym, nil) }
+		}
+		hub.SetBackfill(hubBackfill) // chart-open demands also deep-backfill (nil-safe if disabled)
 		startPollers(ctx, cfg, client, fd, hub, uihubClk, st, hasTZVenue(cfg), firstAlpacaProber(vbs), backfillOne, &scanWG)
 	} else {
 		sim := execClk.(*replay.Clock)
@@ -383,14 +398,16 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 	// SetConfig call it could make -- is stopped before st.Close() runs.
 	//
 	// backfillWG.Add(1) now has two producers: the scan poller (pool admission,
-	// joined via scanWG) and Hub.handleEnsureDemand (chart-open demand, via the
-	// backfillOne closure injected with SetBackfill). srv.Wait() only proves
+	// joined via scanWG) and the Hub goroutine, via the hubBackfill closure
+	// injected with SetBackfill -- called from both Hub.handleEnsureDemand
+	// (chart-open demand) and Hub.rearmBackfill (OpenD-reconnect re-arm,
+	// triggered from handleMD on an md.ResyncedUpdate). srv.Wait() only proves
 	// every conn's dispatch loop has returned, not that the Hub goroutine has
-	// finished servicing the ensureDemandCh sends those dispatch loops made on
-	// their way out -- that Add(1) can still be in flight on the Hub goroutine
-	// after srv.Wait() returns. <-hubDone closes that gap: Hub.Run only returns
-	// via its own <-ctx.Done() branch, by which point any ensureDemandCh message
-	// it had already received has finished its handleEnsureDemand call (and
+	// finished servicing the ensureDemandCh/mdCh sends already made on their
+	// way out -- that Add(1) can still be in flight on the Hub goroutine after
+	// srv.Wait() returns. <-hubDone closes that gap: Hub.Run only returns via
+	// its own <-ctx.Done() branch, by which point any ensureDemandCh/mdCh
+	// message it had already received has finished its handler call (and
 	// therefore its Add, if any), so no further Add(1) can occur once hubDone
 	// closes. Waiting on it here, before scanWG.Wait()/backfillWG.Wait(), keeps
 	// both Add(1) producers quiesced before the counter is read -- otherwise a

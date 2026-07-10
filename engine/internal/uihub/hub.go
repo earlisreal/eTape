@@ -64,6 +64,23 @@ type dropReport struct {
 	reason string
 }
 
+// backfillResult is how a spawned orch.Backfill goroutine reports its daily-
+// fetch outcome back to Run's own goroutine, so backfilled/backfillInflight
+// (Run-loop-owned) are only ever touched from Run -- see reportBackfill and
+// handleBackfillDone.
+type backfillResult struct {
+	sym string
+	ok  bool
+}
+
+// demandInfo is what the hub tracks per (connID, demandID): the symbol, and
+// whether the demand is chart-capable (WantsHistory) so a reconnect re-arm
+// (rearmBackfill) can tell a chart demand from a watchlist "interest" one.
+type demandInfo struct {
+	symbol       string
+	wantsHistory bool
+}
+
 // feedBox lets the (single-write, many-read) feed reference live in an
 // atomic.Pointer so SetFeed (called once at boot from main's goroutine) races
 // safely with Validate reads in conn goroutines and Ensure/Release in Run.
@@ -71,8 +88,13 @@ type feedBox struct{ f Feed }
 
 // backfillBox mirrors feedBox: SetBackfill is called once at boot from main's
 // goroutine, after the Hub is already running, so the function pointer needs
-// the same atomic-store/atomic-load discipline as the feed reference.
-type backfillBox struct{ fn func(string) }
+// the same atomic-store/atomic-load discipline as the feed reference. The
+// injected fn spawns the deep/daily backfill for sym and must call done(ok)
+// exactly once when it finishes (ok=false on a failed daily fetch) via
+// reportBackfill, so Run can decide whether the symbol needs a retry.
+type backfillBox struct {
+	fn func(sym string, done func(ok bool))
+}
 
 // Hub is a single-goroutine event loop that owns the mirror, the connected-
 // client set, and per-topic-class coalescing buffers. Every field below the
@@ -94,23 +116,25 @@ type Hub struct {
 	mdCh            chan md.Update
 	execCh          chan exec.Update
 	pubCh           chan pub
-	dropCh          chan dropReport    // conn goroutines -> Run: write-timeout drop reports
-	syncCh          chan chan struct{} // test barrier
-	closed          chan struct{}      // closed when Run returns; unblocks stuck senders
+	dropCh          chan dropReport     // conn goroutines -> Run: write-timeout drop reports
+	backfillDoneCh  chan backfillResult // backfill goroutines -> Run: daily-fetch outcome
+	syncCh          chan chan struct{}  // test barrier
+	closed          chan struct{}       // closed when Run returns; unblocks stuck senders
 
 	feedSlot     atomic.Pointer[feedBox]
 	backfillSlot atomic.Pointer[backfillBox]
 
 	// Run-loop-owned:
-	clients    map[client]map[wsmsg.Topic]bool
-	demands    map[uint64]map[string]string // connID -> demandID -> symbol
-	demandLive map[uint64]bool              // connID currently registered
-	backfilled map[string]bool              // symbol -> demand-path backfill already spawned (process lifetime)
-	pendKeep   map[string]staged            // classMDKeep, flushed on md ticker
-	tapePend   map[string][]wsmsg.Tick      // symbol -> accumulated ticks
-	acctPend   map[string]staged            // venue -> latest account frame
-	posLatest  staged
-	posDirty   bool
+	clients          map[client]map[wsmsg.Topic]bool
+	demands          map[uint64]map[string]demandInfo // connID -> demandID -> demandInfo
+	demandLive       map[uint64]bool                  // connID currently registered
+	backfilled       map[string]bool                  // symbol -> daily backfill has succeeded (process lifetime)
+	backfillInflight map[string]bool                  // symbol -> a backfill spawn is currently running
+	pendKeep         map[string]staged                // classMDKeep, flushed on md ticker
+	tapePend         map[string][]wsmsg.Tick          // symbol -> accumulated ticks
+	acctPend         map[string]staged                // venue -> latest account frame
+	posLatest        staged
+	posDirty         bool
 
 	// sysEventSeq numbers ui-drop sys.events frames the Hub itself emits
 	// (buildSysEvent). It is independent of health.Poller's own seq counter
@@ -125,26 +149,28 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 	}
 	return &Hub{
 		clk: clk, cfg: cfg, m: m,
-		register:        make(chan client),
-		unregister:      make(chan client),
-		subCh:           make(chan subReq),
-		unsubCh:         make(chan subReq),
-		ensureDemandCh:  make(chan ensureDemandReq),
-		releaseDemandCh: make(chan releaseDemandReq),
-		demandSnapCh:    make(chan chan []string),
-		mdCh:            make(chan md.Update, cfg.Buf),
-		execCh:          make(chan exec.Update, cfg.Buf),
-		pubCh:           make(chan pub, cfg.Buf),
-		dropCh:          make(chan dropReport, cfg.Buf),
-		syncCh:          make(chan chan struct{}),
-		closed:          make(chan struct{}),
-		clients:         map[client]map[wsmsg.Topic]bool{},
-		demands:         map[uint64]map[string]string{},
-		demandLive:      map[uint64]bool{},
-		backfilled:      map[string]bool{},
-		pendKeep:        map[string]staged{},
-		tapePend:        map[string][]wsmsg.Tick{},
-		acctPend:        map[string]staged{},
+		register:         make(chan client),
+		unregister:       make(chan client),
+		subCh:            make(chan subReq),
+		unsubCh:          make(chan subReq),
+		ensureDemandCh:   make(chan ensureDemandReq),
+		releaseDemandCh:  make(chan releaseDemandReq),
+		demandSnapCh:     make(chan chan []string),
+		mdCh:             make(chan md.Update, cfg.Buf),
+		execCh:           make(chan exec.Update, cfg.Buf),
+		pubCh:            make(chan pub, cfg.Buf),
+		dropCh:           make(chan dropReport, cfg.Buf),
+		backfillDoneCh:   make(chan backfillResult, cfg.Buf),
+		syncCh:           make(chan chan struct{}),
+		closed:           make(chan struct{}),
+		clients:          map[client]map[wsmsg.Topic]bool{},
+		demands:          map[uint64]map[string]demandInfo{},
+		demandLive:       map[uint64]bool{},
+		backfilled:       map[string]bool{},
+		backfillInflight: map[string]bool{},
+		pendKeep:         map[string]staged{},
+		tapePend:         map[string][]wsmsg.Tick{},
+		acctPend:         map[string]staged{},
 	}
 }
 
@@ -193,16 +219,30 @@ func (h *Hub) feed() Feed {
 }
 
 // SetBackfill injects the deep-history backfill trigger (spawns an
-// orch.Backfill goroutine for a symbol) after the hub is running. Safe to
-// call once from boot; nil until then (replay/tests/backfill-disabled never
-// call it, in which case chart-open demands simply skip the deep backfill).
-func (h *Hub) SetBackfill(fn func(string)) { h.backfillSlot.Store(&backfillBox{fn: fn}) }
+// orch.Backfill goroutine for a symbol, reporting its daily-fetch outcome via
+// done) after the hub is running. Safe to call once from boot; nil until then
+// (replay/tests/backfill-disabled never call it, in which case chart-open
+// demands simply skip the deep backfill).
+func (h *Hub) SetBackfill(fn func(sym string, done func(ok bool))) {
+	h.backfillSlot.Store(&backfillBox{fn: fn})
+}
 
-func (h *Hub) backfill() func(string) {
+func (h *Hub) backfill() func(sym string, done func(ok bool)) {
 	if b := h.backfillSlot.Load(); b != nil {
 		return b.fn
 	}
 	return nil
+}
+
+// reportBackfill lets a spawned orch.Backfill goroutine report its daily-
+// fetch outcome back to Run's own goroutine -- the same cross-goroutine
+// channel-send pattern as ReportUIDrop, so backfilled/backfillInflight stay
+// Run-loop-owned (see handleBackfillDone).
+func (h *Hub) reportBackfill(sym string, ok bool) {
+	select {
+	case h.backfillDoneCh <- backfillResult{sym: sym, ok: ok}:
+	case <-h.closed:
+	}
 }
 
 // EnsureDemand records a connection's demand and subscribes it (Run-loop side).
@@ -329,6 +369,8 @@ func (h *Hub) Run(ctx context.Context) error {
 			h.handlePub(p)
 		case r := <-h.dropCh:
 			h.handleDrop(r)
+		case r := <-h.backfillDoneCh:
+			h.handleBackfillDone(r)
 		case <-mdTick.C():
 			h.flushMD()
 		case <-acctTick.C():
@@ -378,6 +420,8 @@ func (h *Hub) drain() {
 			h.handlePub(p)
 		case r := <-h.dropCh:
 			h.handleDrop(r)
+		case r := <-h.backfillDoneCh:
+			h.handleBackfillDone(r)
 		default:
 			return
 		}
@@ -410,24 +454,93 @@ func (h *Hub) handleEnsureDemand(r ensureDemandReq) {
 	}
 	m := h.demands[r.connID]
 	if m == nil {
-		m = map[string]string{}
+		m = map[string]demandInfo{}
 		h.demands[r.connID] = m
 	}
-	m[r.d.ID] = r.d.Symbol
+	m[r.d.ID] = demandInfo{symbol: r.d.Symbol, wantsHistory: r.d.WantsHistory}
 	if f := h.feed(); f != nil {
 		f.Ensure(r.d)
 	}
 	// Deep-backfill (deep intraday + full daily history) any chart-capable
-	// demand exactly once per symbol per process lifetime, so a symbol opened
-	// on a chart gets full daily history even if it was never a scanner-pool
-	// admission. The scan poller runs its own independent, pool-day-scoped
-	// dedup for the same underlying orch.Backfill; the two can each fire once
-	// for the same symbol, but OpenDFeed.HistoryBars coalesces concurrent
-	// same-symbol fetches (singleflight) and the 30-day dedup window covers
-	// sequential ones, so the second call spends no additional history quota.
-	if fn := h.backfill(); fn != nil && r.d.WantsHistory && !h.backfilled[r.d.Symbol] {
-		h.backfilled[r.d.Symbol] = true
-		fn(r.d.Symbol)
+	// demand whose daily fetch hasn't yet succeeded, so a symbol opened on a
+	// chart gets full daily history even if it was never a scanner-pool
+	// admission. backfilled is set only once the daily fetch actually
+	// succeeds (handleBackfillDone) -- a failed attempt (e.g. OpenD was down)
+	// leaves it unset so a later demand, or the reconnect re-arm below
+	// (rearmBackfill), retries it. backfillInflight prevents spawning a
+	// second goroutine for a symbol still being backfilled. The scan poller
+	// runs its own independent, pool-day-scoped dedup for the same underlying
+	// orch.Backfill; the two can each fire once for the same symbol, but
+	// OpenDFeed.HistoryBars coalesces concurrent same-symbol fetches
+	// (singleflight) and the 30-day dedup window covers sequential ones, so
+	// a second call spends no additional history quota.
+	h.triggerBackfill(r.d.Symbol, r.d.WantsHistory)
+}
+
+// triggerBackfill spawns the injected backfill fn for sym if it is a chart-
+// capable (wantsHistory) demand whose daily fetch hasn't already succeeded
+// and isn't already in flight. Called from handleEnsureDemand (a fresh
+// demand) and rearmBackfill (an OpenD reconnect re-arm) -- always from Run's
+// own goroutine, so backfilled/backfillInflight need no extra locking.
+func (h *Hub) triggerBackfill(sym string, wantsHistory bool) {
+	fn := h.backfill()
+	if fn == nil || !wantsHistory || h.backfilled[sym] || h.backfillInflight[sym] {
+		return
+	}
+	h.backfillInflight[sym] = true
+	fn(sym, func(ok bool) { h.reportBackfill(sym, ok) })
+}
+
+// handleBackfillDone applies a backfill goroutine's reported outcome
+// (reportBackfill) on Run's own goroutine: backfilled is set only on
+// success, so a failed attempt stays retryable (a later chart-open demand or
+// OpenD-reconnect re-arm will try again).
+func (h *Hub) handleBackfillDone(r backfillResult) {
+	delete(h.backfillInflight, r.sym)
+	if r.ok {
+		h.backfilled[r.sym] = true
+	}
+}
+
+// forEachDemand calls fn once for every currently-tracked demandInfo across
+// all connections. It does not dedup by symbol -- a symbol can appear more
+// than once (e.g. an interest-only watchlist demand and a chart demand for
+// the same symbol under different demand IDs); callers that need a unique
+// symbol set do their own dedup (see handleDemandSnapshot, rearmBackfill).
+func (h *Hub) forEachDemand(fn func(demandInfo)) {
+	for _, m := range h.demands {
+		for _, info := range m {
+			fn(info)
+		}
+	}
+}
+
+// rearmBackfill re-triggers the deep/daily backfill for every symbol
+// currently under a chart-capable (wantsHistory) demand that hasn't
+// succeeded yet. Called from handleMD on the md.ResyncedUpdate transition --
+// i.e. once OpenD reconnects and resubscribes -- so a symbol whose backfill
+// failed while OpenD was down (or never fired because the app opened before
+// OpenD did) gets a fresh attempt without requiring a UI refresh.
+//
+// Symbols are collected into a set by ORing wantsHistory across every demand
+// for that symbol, not by picking whichever demandInfo a map iteration
+// visits first: a symbol can carry both an interest-only demand
+// (wantsHistory=false, e.g. a watchlist row) and a chart demand
+// (wantsHistory=true) at the same time under different demand IDs, and Go's
+// randomized map iteration order must never decide whether the chart demand
+// gets re-armed.
+func (h *Hub) rearmBackfill() {
+	if h.backfill() == nil {
+		return // no backfill trigger injected (replay / backfill disabled)
+	}
+	chartSymbols := map[string]struct{}{}
+	h.forEachDemand(func(info demandInfo) {
+		if info.wantsHistory {
+			chartSymbols[info.symbol] = struct{}{}
+		}
+	})
+	for sym := range chartSymbols {
+		h.triggerBackfill(sym, true)
 	}
 }
 
@@ -442,11 +555,7 @@ func (h *Hub) handleReleaseDemand(r releaseDemandReq) {
 
 func (h *Hub) handleDemandSnapshot(reply chan []string) {
 	set := map[string]struct{}{}
-	for _, m := range h.demands {
-		for _, sym := range m {
-			set[sym] = struct{}{}
-		}
-	}
+	h.forEachDemand(func(info demandInfo) { set[info.symbol] = struct{}{} })
 	out := make([]string, 0, len(set))
 	for s := range set {
 		out = append(out, s)
@@ -471,6 +580,14 @@ func (h *Hub) handleUnsub(r subReq) {
 func (h *Hub) handleMD(u md.Update) {
 	for _, s := range h.m.applyMD(u) {
 		h.stageMD(s)
+	}
+	// md.ResyncedUpdate fires once per OpenD reconnect cycle, only after
+	// ResubscribeAll succeeds (see opend.OpenDFeed's stateLoop) -- it is
+	// naturally edge-triggered (not per keepalive), so re-arming here needs
+	// no extra debounce. See rearmBackfill's doc comment for why this is the
+	// fix for daily bars not appearing until a reconnect + refresh.
+	if _, ok := u.(md.ResyncedUpdate); ok {
+		h.rearmBackfill()
 	}
 }
 
