@@ -357,6 +357,8 @@ type Venue struct {
 	Credentials     string  `json:"credentials"`
 	AccountID       string  `json:"accountId"`
 	StartingBalance float64 `json:"startingBalance"` // sim only; <=0 => engine default
+	SlippageBps     float64 `json:"slippageBps"`     // sim only; <=0 => off
+	FillLatencyMs   int     `json:"fillLatencyMs"`   // sim only; <=0 => off
 }
 
 // Gate mirrors config.Gate; reuses the existing limit-view shapes.

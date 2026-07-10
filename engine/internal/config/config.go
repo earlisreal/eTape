@@ -70,6 +70,8 @@ type Venue struct {
 	Credentials     string  `toml:"credentials"`      // key into ~/.eTape/credentials.json
 	AccountID       string  `toml:"account_id"`       // broker-specific (TZ accountId, moomoo accID)
 	StartingBalance float64 `toml:"starting_balance"` // sim only; <=0 => DefaultSimStartingBalance
+	SlippageBps     float64 `toml:"slippage_bps"`     // sim only; extra adverse bps applied to marketable fills; <=0 => off
+	FillLatencyMs   int     `toml:"fill_latency_ms"`  // sim only; submit->fill delay, event-time gated; <=0 => off
 }
 
 // DefaultSimStartingBalance is what a sim venue is funded with when
@@ -286,6 +288,12 @@ func ValidateVenueConfig(vc VenueConfig, credKeys []string) error {
 		}
 		if v.StartingBalance < 0 {
 			return fmt.Errorf("venue %q: starting_balance must be >= 0 (0 = default)", v.ID)
+		}
+		if v.SlippageBps < 0 {
+			return fmt.Errorf("venue %q: slippage_bps must be >= 0 (0 = off)", v.ID)
+		}
+		if v.FillLatencyMs < 0 {
+			return fmt.Errorf("venue %q: fill_latency_ms must be >= 0 (0 = off)", v.ID)
 		}
 	}
 	g := vc.Gate.Global

@@ -11,7 +11,7 @@ func validVC() VenueConfig {
 		Venues: []Venue{
 			{ID: "alpaca-paper", Broker: "alpaca", Env: "paper", Credentials: "alpaca", AccountID: ""},
 			{ID: "tz-live", Broker: "tradezero", Env: "live", Credentials: "tradeZero", AccountID: "TZ123"},
-			{ID: "sim", Broker: "sim", Env: "paper"},
+			{ID: "sim", Broker: "sim", Env: "paper", SlippageBps: 7.5, FillLatencyMs: 250},
 		},
 		Gate: Gate{
 			Global: GateGlobal{MaxDayLoss: 1000},
@@ -39,6 +39,8 @@ func TestValidateVenueConfigRejects(t *testing.T) {
 		"negative gate cap":         func(vc *VenueConfig) { vc.Gate.Global.MaxDayLoss = -1 },
 		"gate key unknown id":       func(vc *VenueConfig) { vc.Gate.Venue["ghost"] = GateVenue{} },
 		"negative starting balance": func(vc *VenueConfig) { vc.Venues[2].StartingBalance = -1 },
+		"negative slippage bps":     func(vc *VenueConfig) { vc.Venues[2].SlippageBps = -1 },
+		"negative fill latency ms":  func(vc *VenueConfig) { vc.Venues[2].FillLatencyMs = -1 },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -57,6 +59,22 @@ func TestEffectiveStartingBalanceDefaultsWhenUnsetOrZero(t *testing.T) {
 		if got := v.EffectiveStartingBalance(); got != DefaultSimStartingBalance {
 			t.Fatalf("StartingBalance=%v: got %v, want default %v", sb, got, DefaultSimStartingBalance)
 		}
+	}
+}
+
+func TestValidateVenueConfigAcceptsPositiveSlippageBps(t *testing.T) {
+	vc := validVC()
+	vc.Venues[2].SlippageBps = 5
+	if err := ValidateVenueConfig(vc, []string{"alpaca", "tradeZero"}); err != nil {
+		t.Fatalf("positive slippage_bps rejected: %v", err)
+	}
+}
+
+func TestValidateVenueConfigAcceptsPositiveFillLatencyMs(t *testing.T) {
+	vc := validVC()
+	vc.Venues[2].FillLatencyMs = 250
+	if err := ValidateVenueConfig(vc, []string{"alpaca", "tradeZero"}); err != nil {
+		t.Fatalf("positive fill_latency_ms rejected: %v", err)
 	}
 }
 
@@ -102,6 +120,13 @@ env = "paper"
 	}
 	if len(got.Venues) != 3 || got.Venues[1].ID != "tz-live" || got.Venues[1].AccountID != "TZ123" {
 		t.Fatalf("venues not round-tripped: %+v", got.Venues)
+	}
+	// The sim realism knobs (Task 4/5) round-trip through the TOML struct
+	// tags exactly like StartingBalance — this is the layer BELOW the
+	// uihub wire-mapping bug (venueToWire/venueConfigFromWire), which is
+	// covered separately in internal/uihub/commands_test.go.
+	if got.Venues[2].SlippageBps != 7.5 || got.Venues[2].FillLatencyMs != 250 {
+		t.Fatalf("sim realism knobs not round-tripped: %+v", got.Venues[2])
 	}
 	if got.Gate.Venue["alpaca-paper"].MaxOrderValue != 5000 {
 		t.Fatalf("gate not round-tripped: %+v", got.Gate)

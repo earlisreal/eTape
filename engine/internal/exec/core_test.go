@@ -18,9 +18,26 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/broker/sim"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/store"
 )
+
+// seedMarketableBook seeds symbol's last-trade mark AND a matching L2 book
+// (bid == ask == price, ample volume on both sides) on b. Task 2 made
+// sim.Broker fill Market/marketable-Limit orders off the book, not the mark
+// — every exec-package test below that expects an order to fill immediately
+// at a known price needs a crossing book at that price now, not just a mark.
+// Shared by core_test.go, core_lifecycle_test.go, and capstone_test.go
+// (all package exec_test).
+func seedMarketableBook(b *sim.Broker, symbol string, price float64) {
+	b.SetMark(symbol, price)
+	b.SetBook(symbol, feed.Book{
+		Symbol: symbol,
+		Bids:   []feed.BookLevel{{Price: price, Volume: 1_000_000}},
+		Asks:   []feed.BookLevel{{Price: price, Volume: 1_000_000}},
+	})
+}
 
 // failingAppendStore forces every AppendExecEvent call to fail, to verify the
 // append-blocks-submit safety property empirically rather than by inspection.
@@ -41,8 +58,8 @@ func newTestCore(t *testing.T, venues ...exec.VenueID) (*exec.Core, map[exec.Ven
 	brokers := map[exec.VenueID]exec.Broker{}
 	sims := map[exec.VenueID]*sim.Broker{}
 	for _, v := range venues {
-		b := sim.New(v, clk, 100_000)
-		b.SetMark("AAPL", 100)
+		b := sim.New(v, clk, 100_000, sim.Options{})
+		seedMarketableBook(b, "AAPL", 100)
 		brokers[v] = b
 		sims[v] = b
 	}
@@ -133,7 +150,7 @@ func TestCoreAppendFailureBlocksSubmit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = realStore.Close() }()
-	b := sim.New("sim-1", clk, 100_000)
+	b := sim.New("sim-1", clk, 100_000, sim.Options{})
 	b.SetMark("AAPL", 100)
 	cfg := exec.CoreConfig{
 		Venues: []exec.VenueID{"sim-1"},

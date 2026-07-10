@@ -5,12 +5,14 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/creds"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
 )
 
@@ -125,6 +127,104 @@ func TestBuildBrokersSimSeedsConfiguredStartingBalance(t *testing.T) {
 			if acct.Equity != want[vb.ID] {
 				t.Fatalf("replay=%v: %s equity = %v, want %v", replay, vb.ID, acct.Equity, want[vb.ID])
 			}
+		}
+	}
+}
+
+// TestBuildBrokersSimAppliesConfiguredSlippage is Task 4's boot-wiring guard,
+// the SlippageBps analog of TestBuildBrokersSimSeedsConfiguredStartingBalance
+// above: a venue's configured slippage_bps must actually reach the
+// constructed sim broker via sim.Options, not just default to off. Verified
+// indirectly through a fill's price (Broker exposes no slippage getter), for
+// both the "sim" broker branch and the replay-forces-sim branch.
+func TestBuildBrokersSimAppliesConfiguredSlippage(t *testing.T) {
+	cfg := config.Config{Venues: []config.Venue{{ID: "sim", Broker: "sim", SlippageBps: 100}}} // 1%
+	for _, replay := range []bool{false, true} {
+		vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, replay)
+		if err != nil {
+			t.Fatalf("replay=%v: %v", replay, err)
+		}
+		b := vbs[0].Broker
+		sink, ok := b.(simSink)
+		if !ok {
+			t.Fatalf("replay=%v: sim broker should implement simSink (SetBook)", replay)
+		}
+		sink.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+		if _, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
+			Venue: "sim", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1",
+		}); err != nil {
+			t.Fatalf("replay=%v: submit: %v", replay, err)
+		}
+		var filled bool
+	drain:
+		for {
+			select {
+			case ev := <-b.Events():
+				if f, ok := ev.(exec.OrderFilled); ok {
+					filled = true
+					if f.F.Price <= 100 {
+						t.Fatalf("replay=%v: fill price %v should reflect the configured 100bps slippage (must be > raw ask 100)", replay, f.F.Price)
+					}
+				}
+			case <-time.After(100 * time.Millisecond):
+				break drain
+			}
+		}
+		if !filled {
+			t.Fatalf("replay=%v: expected a fill", replay)
+		}
+	}
+}
+
+// TestBuildBrokersSimAppliesConfiguredFillLatency is Task 5's boot-wiring
+// guard, the FillLatencyMs analog of TestBuildBrokersSimAppliesConfiguredSlippage
+// above: a venue's configured fill_latency_ms must actually reach the
+// constructed sim broker via sim.Options, not just default to off. Uses a
+// fake clock (clock.NewFake, advanced explicitly) rather than a wall-clock
+// sleep to prove the fill is genuinely deferred by event time, for both the
+// "sim" broker branch and the replay-forces-sim branch.
+func TestBuildBrokersSimAppliesConfiguredFillLatency(t *testing.T) {
+	cfg := config.Config{Venues: []config.Venue{{ID: "sim", Broker: "sim", FillLatencyMs: 500}}}
+	for _, replay := range []bool{false, true} {
+		clk := clock.NewFake(time.UnixMilli(1000))
+		vbs, err := buildBrokers(cfg, creds.File{}, clk, replay)
+		if err != nil {
+			t.Fatalf("replay=%v: %v", replay, err)
+		}
+		b := vbs[0].Broker
+		sink, ok := b.(simSink)
+		if !ok {
+			t.Fatalf("replay=%v: sim broker should implement simSink (SetBook)", replay)
+		}
+		sink.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+		if _, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
+			Venue: "sim", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1",
+		}); err != nil {
+			t.Fatalf("replay=%v: submit: %v", replay, err)
+		}
+		select {
+		case ev := <-b.Events():
+			if _, ok := ev.(exec.OrderAccepted); !ok {
+				t.Fatalf("replay=%v: expected only OrderAccepted before the latency deadline, got %+v", replay, ev)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("replay=%v: timed out waiting for OrderAccepted", replay)
+		}
+		select {
+		case ev := <-b.Events():
+			t.Fatalf("replay=%v: order should not fill before its 500ms eligibility deadline, got %+v", replay, ev)
+		case <-time.After(50 * time.Millisecond):
+		}
+
+		clk.Advance(500 * time.Millisecond)
+		sink.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+		select {
+		case ev := <-b.Events():
+			if f, ok := ev.(exec.OrderFilled); !ok || f.F.Qty != 10 {
+				t.Fatalf("replay=%v: expected a full fill once eligible, got %+v", replay, ev)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("replay=%v: timed out waiting for the deferred fill", replay)
 		}
 	}
 }

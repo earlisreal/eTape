@@ -122,8 +122,8 @@ func TestCoreBootRecoveryReplaysLog(t *testing.T) {
 	defer func() { _ = st.Close() }()
 
 	mkCore := func() (*exec.Core, *sim.Broker) {
-		b := sim.New("sim-1", clk, 100_000)
-		b.SetMark("AAPL", 100)
+		b := sim.New("sim-1", clk, 100_000, sim.Options{})
+		seedMarketableBook(b, "AAPL", 100)
 		cfg := exec.CoreConfig{
 			Venues: []exec.VenueID{"sim-1"},
 			Gate: exec.GateConfig{
