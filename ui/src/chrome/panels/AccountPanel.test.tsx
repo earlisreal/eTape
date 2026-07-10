@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, act, fireEvent } from "@testing-library/react";
+import { render, screen, act, fireEvent, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { ToastProvider } from "../Toast";
 import { OrderConfigProvider } from "../exec/useOrderConfig";
@@ -472,6 +472,37 @@ describe("AccountPanel", () => {
       const symbols = [...screen.getByTestId("orders-table").querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent);
       expect(symbols).toEqual(["AAPL", "MSFT", "TSLA"]);
       expect(screen.getAllByRole("columnheader", { name: /Symbol/ })[0].className).toContain("sort-active");
+    });
+  });
+
+  describe("Export trades (Task 7 wiring)", () => {
+    beforeEach(() => {
+      (URL as unknown as { createObjectURL: (b: Blob) => string }).createObjectURL = vi.fn(() => "blob:mock");
+      (URL as unknown as { revokeObjectURL: (u: string) => void }).revokeObjectURL = vi.fn();
+    });
+
+    it("opens the Export popover from the header and downloads for the panel's selected venue", async () => {
+      const { props, stores, linkGroups } = mkProps("green");
+      const calls: Array<{ name: string; args: unknown }> = [];
+      props.commands.sendQuery = vi.fn(async (name: string, args: unknown) => {
+        calls.push({ name, args });
+        return { csv: "datetime,symbol,action,price,shares,fees,externalId\n2026-07-10T09:31:05,NVDA,BUY,120.5,100,0,etape:alpaca-paper:1\n", count: 1 };
+      });
+      const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false, "alpaca-paper") });
+        linkGroups.focusVenue("green", "alpaca-paper");
+      });
+      wrap(props);
+
+      expect(screen.queryByTestId("export-download")).toBeNull(); // popover closed by default
+      fireEvent.click(screen.getByTestId("acct-export"));
+      expect(screen.getByTestId("export-download")).toBeTruthy(); // popover opened
+
+      fireEvent.click(screen.getByTestId("export-download"));
+      await waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(1));
+      expect(calls).toEqual([{ name: "ExportFills", args: { venue: "alpaca-paper", preset: "all", from: "", to: "" } }]);
+      clickSpy.mockRestore();
     });
   });
 });

@@ -1,4 +1,4 @@
-import { useContext, useMemo, useState, useSyncExternalStore } from "react";
+import { useContext, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { PanelProps } from "./registry";
 import { HoverButton } from "../controls/HoverButton";
@@ -15,6 +15,7 @@ import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColu
 import type { OrderView } from "../../data/ExecStore";
 import { TradeHistoryTable } from "./TradeHistoryTable";
 import { PanelHeaderActionsSlotContext } from "./headerSlot";
+import { ExportTradesPopover } from "./ExportTradesPopover";
 
 // Task 19 merges the old AccountBarPanel (stats strip) and PositionsPanel
 // (sortable positions table, Flatten) into one Account panel. Per-venue arm
@@ -306,10 +307,25 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   // frame above, e.g. a body-level test) falls back to rendering inline; null
   // (frame present, slot div not yet mounted) renders nothing for that tick.
   const actionsSlot = useContext(PanelHeaderActionsSlotContext);
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportBtnRef = useRef<HTMLButtonElement | null>(null);
   const venueSelect = (
     <select data-testid="acct-venue" className="ctl mono" value={venue} onChange={(e) => selectVenue(e.target.value)}>
       {venues.map((v) => <option key={v} value={v}>{v}</option>)}
     </select>
+  );
+  const headerActions = (
+    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+      {venueSelect}
+      <HoverButton ref={exportBtnRef} data-testid="acct-export" className="ctl mono" aria-haspopup="menu" aria-expanded={exportOpen}
+        onClick={() => setExportOpen((v) => !v)} style={{ background: "transparent" }}>
+        Export
+      </HoverButton>
+      {exportOpen && (
+        <ExportTradesPopover palette={palette} anchor={exportBtnRef.current} venue={venue} commands={commands} toast={toast}
+          onClose={() => setExportOpen(false)} />
+      )}
+    </div>
   );
 
   const [ordersHeight, setOrdersHeight] = useState<number>(() => {
@@ -356,7 +372,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
 
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: palette.bg, color: palette.text, fontFamily: "inherit" }}>
-      {actionsSlot === undefined ? venueSelect : actionsSlot ? createPortal(venueSelect, actionsSlot) : null}
+      {actionsSlot === undefined ? headerActions : actionsSlot ? createPortal(headerActions, actionsSlot) : null}
       <StatsStrip stores={stores} palette={palette} venue={venue} />
       <OrdersTable stores={stores} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} height={ordersHeight} />
       <div data-testid="orders-resize-handle" onMouseDown={startResize}
