@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { ChartController, LEFT_PAD_BARS, type BarReader, type IndicatorController, type CommandSender } from "./ChartController";
+import {
+  ChartController, LEFT_PAD_BARS, bandsFromBars, candleRangeOf,
+  type BarReader, type IndicatorController, type CommandSender,
+} from "./ChartController";
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import { LIGHT, DARK } from "../palette";
+import { OVERLAY_AUTOSCALE_FACTOR } from "./chartTheme";
 import type { Bar } from "../../wire/contract";
 import { withDefaultParams } from "./indicatorSeries";
 import type { Band } from "./sessions";
@@ -62,6 +66,11 @@ function fakeFacade() {
 
 const bar = (bucketStart: string, c: number, inProgress = false): Bar =>
   ({ symbol: "US.AAPL", timeframe: "1m", bucketStart, o: c, h: c, l: c, c, v: 100, inProgress });
+// `bar()` always sets h=l=c — fine for most tests, but the candleRange/closedRange
+// tests below need independent high/low values (e.g. a spike whose high moves
+// without its close moving), hence this separate constructor.
+const barHL = (bucketStart: string, h: number, l: number, c: number, inProgress = false): Bar =>
+  ({ symbol: "US.AAPL", timeframe: "1m", bucketStart, o: c, h, l, c, v: 100, inProgress });
 
 function barReaderOf(bars: Bar[]): BarReader { return { series: () => bars }; }
 // A timeframe-aware reader — needed to simulate a switch onto a timeframe
@@ -879,5 +888,239 @@ describe("ChartController chart settings", () => {
     expect(facade.watermark).toBe("AAPL");
     c.setWatermark(false);
     expect(facade.watermark).toBeNull();
+  });
+});
+
+// Task 3: applyBars/refreshBarCaches per-call memoization. bandsFromBars/
+// candleRangeOf (exported by ChartController.ts purely for this purpose) are the
+// from-scratch reference every equivalence assertion below compares against —
+// production code no longer calls either.
+describe("ChartController bar-cache memoization (barsMs/bandsCache/candleRange)", () => {
+  // Reads back the controller's live candleRange indirectly via an EMA overlay's
+  // autoscaleInfoProvider (the only public surface candleRange feeds): an extreme
+  // input priceRange fully clips to [candleMin - pad, candleMax + pad], so passing
+  // the EXPECTED [minValue, maxValue] through the same formula and asserting exact
+  // equality pins down candleRange without needing a test-only getter.
+  function attachRangeProbe(facade: ReturnType<typeof fakeFacade>, ctrl: ChartController) {
+    ctrl.addIndicator({ instanceId: "range-probe", type: "EMA", params: { period: 200 } });
+    const line = facade.created.find((c) => c.kind === "line" && c.options && (c.options as { autoscaleInfoProvider?: unknown }).autoscaleInfoProvider);
+    const options = line!.options as { autoscaleInfoProvider: (base: () => unknown) => { priceRange: { minValue: number; maxValue: number } | null } };
+    const read = () => options.autoscaleInfoProvider(() => ({ priceRange: { minValue: -1e9, maxValue: 1e9 } })).priceRange!;
+    const expectRange = (minValue: number, maxValue: number) => {
+      const span = maxValue - minValue;
+      const pad = (OVERLAY_AUTOSCALE_FACTOR - 1) * span;
+      expect(read()).toEqual({ minValue: minValue - pad, maxValue: maxValue + pad });
+    };
+    return { expectRange };
+  }
+
+  it("barsMs() mirrors bars.map(Date.parse), index-aligned, across reset/append/tailUpdate/none; barsCached() tracks bars.length throughout", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
+    const { ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // reset
+    expect(ctrl.barsMs()).toEqual(bars.map((b) => Date.parse(b.bucketStart)));
+    expect(ctrl.barsCached()).toBe(bars.length);
+
+    bars.push(bar("2026-07-06T13:32:00Z", 12)); // appended
+    ctrl.sync();
+    expect(ctrl.barsMs()).toEqual(bars.map((b) => Date.parse(b.bucketStart)));
+    expect(ctrl.barsCached()).toBe(bars.length);
+
+    bars[bars.length - 1] = bar("2026-07-06T13:32:00Z", 12.5, true); // tailUpdated, same bucketStart
+    ctrl.sync();
+    expect(ctrl.barsMs()).toEqual(bars.map((b) => Date.parse(b.bucketStart)));
+    expect(ctrl.barsCached()).toBe(bars.length);
+
+    ctrl.sync(); // none — nothing changed at all
+    expect(ctrl.barsMs()).toEqual(bars.map((b) => Date.parse(b.bucketStart)));
+    expect(ctrl.barsCached()).toBe(bars.length);
+  });
+
+  it("candleRange tracks a live last-bar revision (spike then retreat) exactly, never stuck at a stale peak", () => {
+    const bars = [
+      barHL("2026-07-06T13:30:00Z", 10, 9, 10, false), // closed
+      barHL("2026-07-06T13:31:00Z", 11, 10, 11, true), // live/last
+    ];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // reset: closedRange = [9,10] (bar0 only); candleRange = combine -> [9,11]
+    const { expectRange } = attachRangeProbe(facade, ctrl);
+    expectRange(9, 11);
+
+    // Spike: the live bar's high jumps to 20 (still in-progress, same bucketStart).
+    bars[1] = barHL("2026-07-06T13:31:00Z", 20, 10, 15, true);
+    ctrl.sync(); // tailUpdated — closedRange untouched; candleRange = combine([9,10], l=10,h=20)
+    expectRange(9, 20);
+
+    // Retreat: the SAME bar's high falls back to 13, still in-progress.
+    bars[1] = barHL("2026-07-06T13:31:00Z", 13, 10, 12, true);
+    ctrl.sync(); // tailUpdated again — must reflect 13, NOT stay stuck at the earlier spike (20).
+    expectRange(9, 13);
+  });
+
+  it("closedRange folds exactly the newly-closed bar(s) on each single-bar growth step — no gaps, no stale exclusion", () => {
+    // Regression target: an off-by-one in `appendedFrom` (e.g. using lastAppliedCount
+    // instead of lastAppliedCount-1) would permanently skip folding the bar that was
+    // "last" as of the previous apply, once a later bar supersedes it as last — this
+    // test fails immediately if that happens, because bar1's extreme [20,30] would
+    // never enter closedRange and candleRange would stay wrong even once bar1 is no
+    // longer the live bar.
+    const bars = [barHL("2026-07-06T13:30:00Z", 10, 5, 8, true)]; // single live bar, [l,h]=[5,10]
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // reset: closedRange = candleRangeOf([]) = {Infinity,-Infinity}; candleRange = [5,10]
+    const { expectRange } = attachRangeProbe(facade, ctrl);
+    expectRange(5, 10);
+
+    // Grow by exactly one bar: bar0 [5,10] is now closed (no longer last) and must
+    // fold into closedRange for the first time; bar1 [20,30] becomes the live last.
+    bars.push(barHL("2026-07-06T13:31:00Z", 30, 20, 25, true));
+    ctrl.sync();
+    expectRange(5, 30); // bar0 via closedRange, bar1 via the fresh combine — nothing missing
+
+    // Grow by one more, deliberately narrow bar: bar1 [20,30] is now closed and must
+    // fold in turn. If it were skipped, this would regress to [5,10] here.
+    bars.push(barHL("2026-07-06T13:32:00Z", 6, 5.5, 6, true));
+    ctrl.sync();
+    expectRange(5, 30);
+  });
+
+  it("front-growth backfill replace (deep-history prepend) fully rebuilds barsMs/bandsCache/candleRange, not just the LWC series", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // shallow cache-seed backfill
+
+    bars.unshift(bar("2026-07-06T13:28:00Z", 8), bar("2026-07-06T13:29:00Z", 9)); // older bars prepended
+    ctrl.sync(); // RESET path #2 (anchor mismatch)
+
+    expect(ctrl.barsMs()).toEqual(bars.map((b) => Date.parse(b.bucketStart)));
+    expect(facade.lastBands).toEqual(bandsFromBars(bars));
+  });
+
+  it("unsorted-tail defensive fallback (RESET path #3) also fully rebuilds barsMs/bandsCache", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // backfill
+
+    bars.push(bar("2026-07-06T13:32:00Z", 12));
+    bars.push(bar("2026-07-06T13:31:00Z", 11)); // tail out of order
+    ctrl.sync();
+
+    expect(ctrl.barsMs()).toEqual(bars.map((b) => Date.parse(b.bucketStart)));
+    expect(facade.lastBands).toEqual(bandsFromBars(bars));
+  });
+
+  it("a same-window revise+append (both changes landing before a single sync()) still keeps every cache exact", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10, true)]; // in-progress
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // backfill
+
+    // Mirrors the existing "growth that also finalizes the previously-last bar"
+    // candle-series test — both mutations land before the NEXT sync(), not one
+    // sync() per mutation.
+    bars[0] = bar("2026-07-06T13:30:00Z", 10.5, false);
+    bars.push(bar("2026-07-06T13:31:00Z", 11, true));
+    ctrl.sync();
+
+    expect(ctrl.barsMs()).toEqual(bars.map((b) => Date.parse(b.bucketStart)));
+    expect(facade.lastBands).toEqual(bandsFromBars(bars));
+  });
+
+  it("a redundant sync() with no changes at all (\"none\" path) leaves every cache byte-identical", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11, true)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync();
+    const msBefore = ctrl.barsMs();
+    const bandsBefore = facade.lastBands;
+    ctrl.sync(); // "none" — bars unchanged
+    expect(ctrl.barsMs()).toEqual(msBefore);
+    expect(facade.lastBands).toEqual(bandsBefore);
+  });
+
+  it("bandsCache stays exact across the 2026-03-08 spring-forward transition (Friday post -> weekend -> Monday RTH)", () => {
+    // Task 4's sessions.ts note: dayEndMs can be imprecise by up to +-1h on the
+    // transition Sunday itself, proven harmless there because classify() returns
+    // "closed" for weekend unconditionally. This test proves the CONSUMPTION of
+    // that API (this controller's daySeg-rebuild-trigger + incremental bandsCache)
+    // doesn't introduce a new bug on top of it, by streaming bars one at a time
+    // across the boundary and comparing against the from-scratch reference.
+    const planned = [
+      bar("2026-03-06T21:00:00Z", 10), // Fri 16:00 EST
+      bar("2026-03-06T23:30:00Z", 11), // Fri 18:30 EST
+      bar("2026-03-08T05:00:00Z", 12), // Sun 00:00 EST — weekend
+      bar("2026-03-08T10:00:00Z", 13), // Sun 06:00 EDT, after the 2am->3am jump — weekend
+      bar("2026-03-08T20:00:00Z", 14), // Sun 16:00 EDT — weekend
+      bar("2026-03-09T12:00:00Z", 15), // Mon 08:00 EDT
+      bar("2026-03-09T13:30:00Z", 16), // Mon 09:30 EDT
+      bar("2026-03-09T20:00:00Z", 17), // Mon 16:00 EDT
+    ];
+    const applied: Bar[] = [];
+    const { facade, ctrl } = make(barReaderOf(applied));
+    for (const b of planned) { applied.push(b); ctrl.sync(); }
+
+    expect(facade.lastBands).toEqual(bandsFromBars(applied));
+    expect(ctrl.barsMs()).toEqual(applied.map((b) => Date.parse(b.bucketStart)));
+  });
+
+  it("bandsCache stays exact across the 2026-11-01 fall-back transition (Friday post -> weekend -> Monday RTH)", () => {
+    const planned = [
+      bar("2026-10-30T20:00:00Z", 10), // Fri 16:00 EDT
+      bar("2026-10-30T23:30:00Z", 11), // Fri 19:30 EDT
+      bar("2026-11-01T04:00:00Z", 12), // Sun 00:00 EDT — weekend
+      bar("2026-11-01T06:00:00Z", 13), // Sun 01:00 EST, the repeated hour — weekend
+      bar("2026-11-01T20:00:00Z", 14), // Sun 15:00 EST — weekend
+      bar("2026-11-02T12:00:00Z", 15), // Mon 07:00 EST
+      bar("2026-11-02T14:30:00Z", 16), // Mon 09:30 EST
+    ];
+    const applied: Bar[] = [];
+    const { facade, ctrl } = make(barReaderOf(applied));
+    for (const b of planned) { applied.push(b); ctrl.sync(); }
+
+    expect(facade.lastBands).toEqual(bandsFromBars(applied));
+    expect(ctrl.barsMs()).toEqual(applied.map((b) => Date.parse(b.bucketStart)));
+  });
+
+  it("streaming vs from-scratch: bandsCache/barsMsCache/candleRange all match a from-scratch recompute across a long varied reset/append/tailUpdate/none sequence", () => {
+    // Two consecutive weekdays, 5-minute bars from 04:00 to just before 20:00 ET
+    // (pre/rth/post all represented, several transitions per day), streamed a few
+    // bars at a time with interleaved in-progress-bar revisions and no-op syncs —
+    // as close to the real rAF-coalesced streaming pattern as a unit test gets.
+    const STEP_MIN = 5;
+    const SPAN_MIN = 16 * 60; // 04:00-20:00 ET
+    const genDay = (dayStartUtcMs: number, base: number): Bar[] => {
+      const out: Bar[] = [];
+      for (let i = 0; i < SPAN_MIN / STEP_MIN; i++) {
+        const t = new Date(dayStartUtcMs + i * STEP_MIN * 60_000).toISOString();
+        out.push(bar(t, base + i * 0.01));
+      }
+      return out;
+    };
+    const day1 = Date.parse("2026-07-06T08:00:00Z"); // Mon 04:00 EDT
+    const day2 = Date.parse("2026-07-07T08:00:00Z"); // Tue 04:00 EDT
+    const full = [...genDay(day1, 10), ...genDay(day2, 50)];
+
+    const applied: Bar[] = [];
+    const { facade, ctrl } = make(barReaderOf(applied));
+
+    let i = 0, step = 0;
+    while (i < full.length) {
+      if (applied.length > 0 && step % 4 === 1) {
+        // Revise the current last bar in place (own sync()) before growing again —
+        // an in-progress tick landing in its own rAF tick.
+        const lastIdx = applied.length - 1;
+        applied[lastIdx] = bar(applied[lastIdx].bucketStart, applied[lastIdx].c + 0.001, true);
+        ctrl.sync(); // tailUpdated
+      }
+      if (step % 5 === 3) ctrl.sync(); // "none" — a redundant coalesced tick, nothing changed
+      const chunk = 1 + (step % 3); // vary 1..3 new bars per growth step
+      for (let k = 0; k < chunk && i < full.length; k++, i++) applied.push(full[i]);
+      ctrl.sync(); // "reset" (first call only) or "appended"
+      step++;
+    }
+
+    expect(ctrl.barsMs()).toEqual(applied.map((b) => Date.parse(b.bucketStart)));
+    expect(facade.lastBands).toEqual(bandsFromBars(applied));
+
+    const range = candleRangeOf(applied);
+    const { expectRange } = attachRangeProbe(facade, ctrl);
+    expectRange(range.minValue, range.maxValue);
   });
 });
