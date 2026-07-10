@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { reduceTypeToLoad, canStartTypeToLoad, type TypeToLoadState } from "./typeToLoad";
 
 const idle: TypeToLoadState = { editing: false };
-const key = (k: string, mod: Partial<{ ctrl: boolean; meta: boolean; alt: boolean }> = {}) =>
-  ({ kind: "key" as const, key: k, ctrl: false, meta: false, alt: false, ...mod });
+const key = (k: string, mod: Partial<{ ctrl: boolean; shift: boolean; meta: boolean; alt: boolean }> = {}) =>
+  ({ kind: "key" as const, key: k, ctrl: false, shift: false, meta: false, alt: false, ...mod });
 
 describe("canStartTypeToLoad", () => {
   it("requires active + symbol-bearing, no form field, no modal", () => {
@@ -25,6 +25,12 @@ describe("reduceTypeToLoad", () => {
     expect(reduceTypeToLoad(idle, key("n", { ctrl: true }))).toEqual(idle);
     expect(reduceTypeToLoad(idle, key("n", { meta: true }))).toEqual(idle);
     expect(reduceTypeToLoad(idle, key("n", { alt: true }))).toEqual(idle);
+  });
+  // Shift+<char> is a hotkey attempt (e.g. Shift+1, Shift+Z), not typing — must
+  // not start the symbol draft so the keystroke bubbles to useHotkeys.
+  it("does not start with Shift held, even though the key itself is a symbol char", () => {
+    expect(reduceTypeToLoad(idle, key("Z", { shift: true }))).toEqual(idle);
+    expect(reduceTypeToLoad(idle, key("1", { shift: true }))).toEqual(idle);
   });
   it("ignores non-printables when idle", () => {
     expect(reduceTypeToLoad(idle, key("Enter"))).toEqual(idle);
@@ -51,5 +57,8 @@ describe("reduceTypeToLoad", () => {
   });
   it("does not append with a modifier held while editing", () => {
     expect(reduceTypeToLoad({ editing: true, draft: "NV" }, key("d", { ctrl: true }))).toEqual({ editing: true, draft: "NV" });
+  });
+  it("does not append with Shift held while editing", () => {
+    expect(reduceTypeToLoad({ editing: true, draft: "NV" }, key("A", { shift: true }))).toEqual({ editing: true, draft: "NV" });
   });
 });

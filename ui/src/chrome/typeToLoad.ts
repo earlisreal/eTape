@@ -5,7 +5,7 @@
 // listener placement, preventDefault/stopPropagation, rendering the draft).
 export type TypeToLoadState = { editing: false } | { editing: true; draft: string };
 export type TypeToLoadEvent =
-  | { kind: "key"; key: string; ctrl: boolean; meta: boolean; alt: boolean }
+  | { kind: "key"; key: string; ctrl: boolean; shift: boolean; meta: boolean; alt: boolean }
   | { kind: "commit" }
   | { kind: "cancel" };
 
@@ -28,7 +28,10 @@ export function reduceTypeToLoad(state: TypeToLoadState, ev: TypeToLoadEvent): T
   if (ev.kind === "cancel") return { editing: false };
   if (ev.kind === "commit") return { editing: false };
   // ev.kind === "key"
-  if (ev.ctrl || ev.meta || ev.alt) return state; // never capture with a modifier (order hotkeys unaffected)
+  // Never capture with a modifier held — Shift included, so Shift+<key> hotkeys
+  // (e.g. Shift+1, Shift+Z) reach the order-hotkey engine instead of being typed
+  // into the symbol draft.
+  if (ev.ctrl || ev.shift || ev.meta || ev.alt) return state;
   if (!state.editing) {
     return PRINTABLE_SYMBOL_CHAR.test(ev.key) ? { editing: true, draft: ev.key.toUpperCase() } : state;
   }

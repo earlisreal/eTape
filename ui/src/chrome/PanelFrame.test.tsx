@@ -87,7 +87,7 @@ function renderFrame(opts: { panelId?: string; group?: PanelConfig["group"]; set
 // Fires a real DOM keydown on `document` — the same target PanelFrame's
 // type-to-load listener is registered on (document, capture phase; see the
 // Task 13 comment in PanelFrame.tsx for why frame-root/window were rejected).
-function typeKey(key: string, mods: Partial<{ ctrlKey: boolean; metaKey: boolean; altKey: boolean }> = {}) {
+function typeKey(key: string, mods: Partial<{ ctrlKey: boolean; shiftKey: boolean; metaKey: boolean; altKey: boolean }> = {}) {
   fireEvent.keyDown(document, { key, ...mods });
 }
 
@@ -239,6 +239,17 @@ describe("PanelFrame — type-to-load (Task 13)", () => {
     expect(screen.getByTestId("panel-symbol").textContent).toBe("AAPL");
   });
 
+  // Regression: Shift+<symbol char> (e.g. Shift+1, Shift+Z) used to be captured
+  // as symbol search because the modifier gate only checked ctrl/meta/alt. It
+  // must be treated the same as any other modifier combo — a hotkey attempt,
+  // not typing.
+  it("Shift+<symbol char> never starts editing (Shift is a hotkey modifier, not typing)", () => {
+    const api = fakePanelApi(true);
+    renderFrame({ api, group: null, settings: { symbol: "US.AAPL" } });
+    typeKey("Z", { shiftKey: true });
+    expect(screen.getByTestId("panel-symbol").textContent).toBe("AAPL");
+  });
+
   it("does not start editing when a real form field has focus", () => {
     const input = document.createElement("input");
     document.body.appendChild(input);
@@ -274,6 +285,19 @@ describe("PanelFrame — type-to-load (Task 13)", () => {
     const windowSpy = vi.fn();
     window.addEventListener("keydown", windowSpy);
     typeKey("ArrowUp");
+    window.removeEventListener("keydown", windowSpy);
+    expect(windowSpy).toHaveBeenCalled();
+  });
+
+  // Regression: this is the property the Shift+digit hotkey fix depends on —
+  // a modifier combo must reach useHotkeys' window bubble-phase listener, not
+  // be stopPropagation()'d by type-to-load the way a captured plain key is.
+  it("does not stop propagation for a Shift+<symbol char> combo, so it can still reach a window-level hotkey listener", () => {
+    const api = fakePanelApi(true);
+    renderFrame({ api, group: null, settings: { symbol: "US.AAPL" } });
+    const windowSpy = vi.fn();
+    window.addEventListener("keydown", windowSpy);
+    typeKey("Z", { shiftKey: true });
     window.removeEventListener("keydown", windowSpy);
     expect(windowSpy).toHaveBeenCalled();
   });

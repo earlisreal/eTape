@@ -285,9 +285,13 @@ export function PanelFrame(
       const targetIsFormField = !!t && (
         t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.tagName === "SELECT" || (t as HTMLElement).isContentEditable
       );
-      const noMods = !e.ctrlKey && !e.metaKey && !e.altKey;
+      // Shift included alongside Ctrl/Alt/Meta: a modifier combo is a hotkey
+      // attempt, not typing — Shift+1/Shift+Z etc. must reach useHotkeys
+      // instead of being swallowed into the symbol draft (see hotkeys.ts,
+      // which resolves Shift+digit via e.code).
+      const noMods = !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey;
       const isPrintable = PRINTABLE_SYMBOL_CHAR.test(e.key);
-      const ev = { kind: "key" as const, key: e.key, ctrl: e.ctrlKey, meta: e.metaKey, alt: e.altKey };
+      const ev = { kind: "key" as const, key: e.key, ctrl: e.ctrlKey, shift: e.shiftKey, meta: e.metaKey, alt: e.altKey };
 
       if (!prev.editing) {
         if (!canStartTypeToLoad({ active, symbolBearing: true, targetIsFormField, modalOpen })) return;
