@@ -16,10 +16,8 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/backfill"
@@ -46,12 +44,6 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
 )
 
-func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	os.Exit(boot(ctx))
-}
-
 // boot runs the full engine boot sequence -- flags, config, store/md-core/
 // exec-core/uihub construction, feed startup (live OpenD or replay), and the
 // ordered shutdown once ctx is cancelled -- and returns the process exit
@@ -60,7 +52,13 @@ func main() {
 // it directly with a signal-derived context of its own; main itself stays a
 // thin wrapper so os.Exit (which must run from main, never from inside a
 // deferred call) sees boot's return value.
-func boot(ctx context.Context) int {
+//
+// onListening, if non-nil, is called with the uihub listening address (e.g.
+// "127.0.0.1:8686") right after the server starts accepting connections. The
+// default (!tray) entrypoint has no use for it and passes nil; the tray
+// entrypoint uses it to learn the address for its "Open eTape" menu action
+// without duplicating any config-resolution logic.
+func boot(ctx context.Context, onListening func(addr string)) int {
 	home, _ := os.UserHomeDir()
 	cfgPath := flag.String("config", filepath.Join(home, ".eTape", "config.toml"), "path to config.toml")
 	replayDay := flag.String("replay", "", "replay a recorded day (YYYY-MM-DD) instead of live OpenD")
@@ -256,6 +254,9 @@ func boot(ctx context.Context) int {
 		}
 	}()
 	log.Info("uihub up", "addr", cfg.UIHub.Addr(), "dist", cfg.UIHub.DistDir)
+	if onListening != nil {
+		onListening(cfg.UIHub.Addr())
+	}
 	if !*noOpen {
 		go func() {
 			if err := openbrowser.Open("http://" + cfg.UIHub.Addr()); err != nil {

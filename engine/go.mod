@@ -5,6 +5,7 @@ go 1.26.4
 require github.com/BurntSushi/toml v1.6.0
 
 require (
+	fyne.io/systray v1.12.2
 	github.com/coder/websocket v1.8.15
 	github.com/oklog/ulid/v2 v2.1.1
 	golang.org/x/sync v0.20.0
@@ -15,6 +16,7 @@ require (
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/fatih/structtag v1.2.0 // indirect
+	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gzuidhof/tygo v0.2.21 // indirect
 	github.com/inconshreveable/mousetrap v1.0.0 // indirect
