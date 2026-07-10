@@ -96,15 +96,33 @@ describe("TapePanel", () => {
     expect(() => surface().paint()).not.toThrow();
   });
 
-  it("reports buildTapeRows's scanned count to the shared perf singleton, keyed by the surface id", () => {
+  it("reports buildTapeRows's scanned count to the shared perf singleton, keyed by the surface id, while perf is enabled", () => {
     const { stores, surface } = renderTape();
     stores.tape.apply({ kind: "snapshot", topic: "md.tape",
       payload: Array.from({ length: 10 }, (_, i) => mkTick(i)) });
     const spy = vi.spyOn(perf, "recordScan");
+    perf.enabled = true;
+    try {
+      act(() => {
+        surface().paint();
+      });
+      expect(spy).toHaveBeenCalledWith("tape:t-tape", expect.any(Number));
+    } finally {
+      perf.enabled = false; // restore the shared singleton's default for other tests
+      spy.mockRestore();
+    }
+  });
+
+  it("does not call perf.recordScan when perf is disabled (the guard this fix adds — avoids the id template-literal allocation on every hot-path paint)", () => {
+    const { stores, surface } = renderTape();
+    stores.tape.apply({ kind: "snapshot", topic: "md.tape",
+      payload: Array.from({ length: 10 }, (_, i) => mkTick(i)) });
+    expect(perf.enabled).toBe(false); // sanity: shared singleton's default state
+    const spy = vi.spyOn(perf, "recordScan");
     act(() => {
       surface().paint();
     });
-    expect(spy).toHaveBeenCalledWith("tape:t-tape", expect.any(Number));
+    expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
   });
 

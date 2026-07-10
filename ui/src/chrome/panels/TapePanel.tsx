@@ -151,7 +151,9 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
           minSize: minSizeRef.current,
           maxRows: Math.ceil(canvasH / TAPE_ROW_H) + 1,
         });
-        perf.recordScan(`tape:${config.id}`, scanned); // no-op while perf is disabled (the default)
+        // Guard here, not just inside recordScan: skipping the call avoids
+        // building the template-literal id on every paint while disabled.
+        if (perf.enabled) perf.recordScan(`tape:${config.id}`, scanned);
         // The anchor can also age out of the retained ring without any reconnect
         // (a long pause + enough delta volume to overrun the ring's capacity) —
         // buildTapeRows already falls back to a live-equivalent window in that
