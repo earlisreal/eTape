@@ -16,8 +16,8 @@ beforeEach(() => {
   cleanup();
 });
 
-function mkTick(i: number): Tick {
-  return { symbol: "US.AAPL", price: 3.5, size: 100 + i, direction: "BUY", ts: "2026-07-06T13:30:00Z" };
+function mkTick(i: number, symbol = "US.AAPL"): Tick {
+  return { symbol, price: 3.5, size: 100 + i, direction: "BUY", ts: "2026-07-06T13:30:00Z" };
 }
 
 function renderTape() {
@@ -129,24 +129,48 @@ describe("TapePanel", () => {
   it("drops the paused pill once the anchor ages out of the retained ring (Task 7 eviction fix, mirrored at the panel level)", () => {
     // Same regression as tapeState.test.ts's "an anchor that aged out of the retained
     // ring renders live (eviction honesty)" — but here we drive it through the real
-    // TapeRing (capacity 65536) and assert the panel's own paused-pill state, not just
-    // buildTapeRows's return value. A long pause + a burst large enough to overrun the
-    // ring's capacity evicts the anchored row without touching generation (no reconnect).
+    // per-symbol TapeRing (capacity ~4096 for US.AAPL's own ring, post-Task-1) and
+    // assert the panel's own paused-pill state, not just buildTapeRows's return value.
+    // A long pause + a burst large enough to overrun THIS symbol's ring evicts the
+    // anchored row without touching generation (no reconnect). The burst is the same
+    // symbol (US.AAPL) as the pinned panel — bursting a different symbol would land in
+    // a different symbol's ring entirely and never touch this one, which is the point
+    // of the per-symbol split (see TapeRing.ts), not a way to test eviction of it.
     const { stores, canvas, surface } = renderTape();
     stores.tape.apply({ kind: "snapshot", topic: "md.tape",
       payload: Array.from({ length: 30 }, (_, i) => mkTick(i)) });
     fireEvent.wheel(canvas, { deltaY: -54 }); // pauses 3 rows back (anchorSeq 27)
     expect(screen.getByText(/jump to live/i)).toBeTruthy();
 
-    // Burst past the ring's capacity so the anchored seq (27) is overwritten — same
-    // generation throughout (delta, not snapshot), so this exercises the eviction path
-    // distinct from the already-covered reconnect/generation-mismatch branch.
+    // Burst past US.AAPL's own ring capacity (~4096) so the anchored seq (27) is
+    // overwritten — same generation throughout (delta, not snapshot), so this
+    // exercises the eviction path distinct from the already-covered
+    // reconnect/generation-mismatch branch.
     stores.tape.apply({ kind: "delta", topic: "md.tape",
-      payload: Array.from({ length: 65600 }, (_, i) => mkTick(1000 + i)) });
+      payload: Array.from({ length: 4200 }, (_, i) => mkTick(1000 + i)) });
 
     act(() => {
       surface().paint();
     });
     expect(screen.queryByText(/jump to live/i)).toBeNull();
+  });
+
+  it("isDirty reacts only to its own pinned symbol's tape revision, not another symbol's (the per-symbol scoping this migration exists to add)", () => {
+    const { stores, surface } = renderTape(); // pinned to US.AAPL via config.settings.symbol
+    // Prime the surface's internal isDirty cursor: mount bumps forceRef once (the
+    // width/height/palette/minSize/paused effect always fires after first render),
+    // so the very first isDirty() call would read as dirty regardless of tape
+    // activity. Consume that baseline so the assertions below are purely about
+    // tape revisions from here on.
+    surface().isDirty();
+
+    // A different symbol's tape delta must NOT dirty a panel pinned to US.AAPL —
+    // this is the actual bug this task fixes (isDirty used to read a global rev).
+    stores.tape.apply({ kind: "delta", topic: "md.tape", payload: [mkTick(1, "US.NVDA")] });
+    expect(surface().isDirty()).toBe(false);
+
+    // The pinned symbol's own tape delta must dirty it.
+    stores.tape.apply({ kind: "delta", topic: "md.tape", payload: [mkTick(2)] });
+    expect(surface().isDirty()).toBe(true);
   });
 });
