@@ -12,9 +12,9 @@ import type { Palette } from "../palette";
 type DrawTarget = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 
 // Draws buy/sell diamond fills anchored to (time, price) as a solid fill (no outline —
-// palette.buyFill/sellFill are deep enough shades to read against a matching-color
-// candle on their own). Culling is implicit — LWC returns null coordinates for
-// off-screen times/prices and we skip them.
+// palette.buyFill/sellFill are hues distinct from the up/down candle colors, so they
+// read against a matching-color candle on their own). Culling is implicit — LWC returns
+// null coordinates for off-screen times/prices and we skip them.
 export class DiamondFillPrimitive implements ISeriesPrimitive<Time> {
   private markers: FillMarker[] = [];
   private series: ISeriesApi<"Candlestick"> | null = null;

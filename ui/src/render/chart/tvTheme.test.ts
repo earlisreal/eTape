@@ -35,6 +35,13 @@ describe("tvTheme palettes", () => {
     expect(getTvPalette("light")).toBe(TV_LIGHT);
     expect(getTvPalette("dark")).toBe(TV_DARK);
   });
+
+  it("uses distinct pastel fill-diamond colors, not the low-alpha candle hue", () => {
+    expect(TV_LIGHT.buyFill).toBe("rgba(165,214,167,.8)");
+    expect(TV_LIGHT.sellFill).toBe("rgba(244,143,177,.8)");
+    expect(TV_DARK.buyFill).toBe("rgba(165,214,167,.8)");
+    expect(TV_DARK.sellFill).toBe("rgba(244,143,177,.8)");
+  });
 });
 
 describe("tvTheme chrome tokens", () => {
