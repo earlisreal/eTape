@@ -1,6 +1,8 @@
 package uihub
 
 import (
+	"io/fs"
+	"net/http"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
@@ -27,3 +29,8 @@ func NewCommandsForTest(ex execDoer, c configStore, i indicatorCtl, d demandCtl,
 
 // NewQueriesForTest exposes newQueries to external test packages.
 func NewQueriesForTest(f fillsQuerier, clk clock.Clock) queryHandler { return newQueries(f, clk) }
+
+// SpaHandlerForTest exposes spaHandler to external test packages so they can
+// verify the generalized fs.FS-backed SPA fallback directly (e.g. over an
+// in-memory testing/fstest.MapFS), independent of ServerConfig.DistDir.
+func (s *Server) SpaHandlerForTest(fsys fs.FS) http.Handler { return s.spaHandler(fsys) }

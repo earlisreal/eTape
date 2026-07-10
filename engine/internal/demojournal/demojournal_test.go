@@ -1,4 +1,4 @@
-package main
+package demojournal
 
 import (
 	"path/filepath"
@@ -13,8 +13,8 @@ func TestGenerateWritesReplayableDay(t *testing.T) {
 	db := filepath.Join(t.TempDir(), "gen.db")
 	const day = "2026-01-02"
 
-	if err := generate(db, day); err != nil {
-		t.Fatalf("generate: %v", err)
+	if err := Generate(db, day); err != nil {
+		t.Fatalf("Generate: %v", err)
 	}
 
 	st, err := store.Open(store.Options{Path: db, Clock: clock.System{}})

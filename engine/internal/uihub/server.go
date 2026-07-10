@@ -5,14 +5,17 @@ package uihub
 
 import (
 	"context"
+	"io/fs"
 	"net/http"
 	"os"
-	"path/filepath"
+	"path"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/earlisreal/eTape/engine/internal/webui"
 )
 
 // defaultWriteTimeout bounds a single ws.Write call in production (see
@@ -49,7 +52,13 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", s.serveWS)
 	if s.cfg.DistDir != "" {
-		mux.Handle("/", s.spaHandler(s.cfg.DistDir))
+		// dev/-dist override: serve the on-disk directory exactly as before.
+		mux.Handle("/", s.spaHandler(os.DirFS(s.cfg.DistDir)))
+	} else if fsys, ok := webui.Dist(); ok {
+		// Release (embed_ui) build with no override: serve the UI baked into
+		// the binary. The default build's webui.Dist() always returns
+		// (nil, false), so "/" stays unrouted exactly as today.
+		mux.Handle("/", s.spaHandler(fsys))
 	}
 	return mux
 }
@@ -86,17 +95,22 @@ func (s *Server) Wait() {
 	s.connWG.Wait()
 }
 
-// spaHandler serves files from dir, falling back to index.html for unknown paths.
-func (s *Server) spaHandler(dir string) http.Handler {
-	fs := http.FileServer(http.Dir(dir))
-	index := filepath.Join(dir, "index.html")
+// spaHandler serves files from fsys, falling back to index.html for unknown
+// paths. fsys is either os.DirFS(DistDir) (dev/-dist override) or the
+// embedded webui.Dist() filesystem (release build) -- both are plain
+// fs.FS values, so the fallback logic is identical either way.
+func (s *Server) spaHandler(fsys fs.FS) http.Handler {
+	fileServer := http.FileServer(http.FS(fsys))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := filepath.Join(dir, filepath.Clean(r.URL.Path))
-		if info, err := os.Stat(p); err == nil && !info.IsDir() {
-			fs.ServeHTTP(w, r)
+		p := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if p == "" {
+			p = "."
+		}
+		if info, err := fs.Stat(fsys, p); err == nil && !info.IsDir() {
+			fileServer.ServeHTTP(w, r)
 			return
 		}
-		http.ServeFile(w, r, index)
+		http.ServeFileFS(w, r, fsys, "index.html")
 	})
 }
 
