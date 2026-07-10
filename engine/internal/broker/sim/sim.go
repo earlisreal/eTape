@@ -766,14 +766,45 @@ func (b *Broker) CancelAll(_ context.Context, symbol string) error {
 
 // Flatten zeroes every position and emits a reconcile. (Real brokers close via
 // market orders that arrive back as fills; the sim shortcuts to a flat
-// reconcile — sufficient for E2E/practice.)
+// reconcile — sufficient for E2E/practice.) Unlike a real close-out order,
+// this never touches the book/mark-crossing machinery, but it still must
+// realize the same P&L and cash effect a real closing fill would have
+// produced — otherwise the very next SetMark/SetBook recomputes Equity from
+// AvailableCash with zero positions and manufactures a phantom gain/loss
+// that never happened, while Realized silently stays behind. So each open
+// position is closed here using the exact fillLocked conventions: the
+// symbol's last-trade mark if one exists, else the position's own AvgPrice
+// (same "no mark yet" fallback recomputeAccountLocked already documents);
+// longSign for the realized-P&L sign; cashSign for the cash sign, keyed off
+// the SIDE that economically closes the position (closing a long is a sell,
+// closing a short is a cover) rather than the position's raw Qty sign.
 func (b *Broker) Flatten(_ context.Context) error {
 	b.mu.Lock()
 	for _, p := range b.pos {
+		if p.Qty == 0 {
+			continue
+		}
+		closePrice, ok := b.marks[p.Symbol]
+		if !ok {
+			closePrice = p.AvgPrice
+		}
+		longSign := 1.0
+		closeSide := exec.SideSell
+		if p.Qty < 0 {
+			longSign = -1.0
+			closeSide = exec.SideCover
+		}
+		qty := math.Abs(p.Qty)
+		b.acct.Realized += (closePrice - p.AvgPrice) * qty * longSign
+		b.acct.AvailableCash += cashSign(closeSide) * qty * closePrice
 		p.Qty = 0
 		p.AvgPrice = 0
 	}
-	post := []exec.BrokerEvent{exec.BrokerPositions{V: b.venue, Positions: b.positionsLocked()}}
+	b.recomputeAccountLocked()
+	post := []exec.BrokerEvent{
+		exec.BrokerPositions{V: b.venue, Positions: b.positionsLocked()},
+		exec.BrokerAccount{Account: b.acct},
+	}
 	b.mu.Unlock()
 	for _, e := range post {
 		b.emit(e)

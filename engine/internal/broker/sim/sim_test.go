@@ -731,14 +731,92 @@ func TestSim_Flatten_ZeroesPositions(t *testing.T) {
 	if err := b.Flatten(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := drain(t, b).(exec.BrokerPositions); !ok {
-		t.Fatal("Flatten should emit a BrokerPositions reconcile")
+	evs := drainAll(b.Events())
+	var sawPositions bool
+	for _, e := range evs {
+		if _, ok := e.(exec.BrokerPositions); ok {
+			sawPositions = true
+		}
+	}
+	if !sawPositions {
+		t.Fatalf("Flatten should emit a BrokerPositions reconcile, got %+v", evs)
 	}
 	_, pos, _, _ := b.Snapshot(context.Background())
 	for _, p := range pos {
 		if p.Qty != 0 {
 			t.Fatalf("Flatten should zero %s, got %v", p.Symbol, p.Qty)
 		}
+	}
+}
+
+// TestSim_Flatten_RealizesPnLAndEmitsAccount is the regression test for the
+// final-review finding that Flatten zeroed positions but never realized
+// P&L, adjusted AvailableCash, or emitted a BrokerAccount reconcile -- so the
+// very next SetMark/SetBook would recompute Equity from AvailableCash alone
+// (now with zero positions) and produce a phantom PnL swing that never
+// actually happened, while Realized stayed stuck at 0.
+//
+// Worked example: buy 10 AAPL @ 100 (cash 100,000 -> 99,000; position 10 @
+// avg 100). Mark moves to 110 (unrealized +100 already reflected in
+// mark-to-market Equity = 99,000 + 10*110 = 100,100). Flatten at that mark
+// must be economically equivalent to selling 10 @ 110 via a real order:
+// Realized += (110-100)*10 = +100, AvailableCash += 10*110 = +1,100 (99,000
+// -> 100,100), and post-flatten Equity (cash only, no positions) must equal
+// the pre-flatten mark-to-market Equity (100,100) -- flattening must not
+// create or destroy value, only convert unrealized into realized+cash.
+func TestSim_Flatten_RealizesPnLAndEmitsAccount(t *testing.T) {
+	b := newSim(t) // seeds AAPL mark = 100, starting cash 100,000
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	drainAll(b.Events()) // OrderAccepted, OrderFilled, BrokerPositions, BrokerAccount (from the fill)
+
+	b.SetMark("AAPL", 110) // unrealized mark-to-market move; Equity should now read 100,100
+	drainAll(b.Events())
+
+	acctBefore, _, _, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acctBefore.Equity != 100_100 {
+		t.Fatalf("sanity check: pre-flatten mark-to-market equity should be 100100, got %v", acctBefore.Equity)
+	}
+
+	if err := b.Flatten(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	evs := drainAll(b.Events())
+	var sawPositions bool
+	var acct exec.AccountSnapshot
+	var sawAccount bool
+	for _, e := range evs {
+		switch ev := e.(type) {
+		case exec.BrokerPositions:
+			sawPositions = true
+		case exec.BrokerAccount:
+			sawAccount = true
+			acct = ev.Account
+		}
+	}
+	if !sawPositions {
+		t.Fatalf("Flatten should still emit a BrokerPositions reconcile, got %+v", evs)
+	}
+	if !sawAccount {
+		t.Fatalf("Flatten should emit a BrokerAccount reconcile realizing the closed P&L, got %+v", evs)
+	}
+	if acct.Realized != 100 {
+		t.Fatalf("Flatten should realize the mark-to-market gain (100), got Realized=%v", acct.Realized)
+	}
+	if acct.AvailableCash != 100_100 {
+		t.Fatalf("Flatten should credit cash for closing the long at the mark (99000+1100=100100), got %v", acct.AvailableCash)
+	}
+	if acct.Equity != 100_100 {
+		t.Fatalf("post-flatten Equity must equal pre-flatten mark-to-market Equity (100100): got %v", acct.Equity)
+	}
+	if acct.DayPnL != 100 {
+		t.Fatalf("DayPnL must equal the realized gain now that Realized moved (100): got %v", acct.DayPnL)
 	}
 }
 
@@ -961,6 +1039,7 @@ func TestSim_ResetBalance_CancelsFlattensAndSetsAccount(t *testing.T) {
 
 	evs := drainAll(b.Events())
 	var sawCancel, sawPositions, sawAccount bool
+	var lastAccount exec.AccountSnapshot
 	for _, e := range evs {
 		switch ev := e.(type) {
 		case exec.OrderCanceled:
@@ -971,18 +1050,25 @@ func TestSim_ResetBalance_CancelsFlattensAndSetsAccount(t *testing.T) {
 		case exec.BrokerPositions:
 			sawPositions = true
 		case exec.BrokerAccount:
+			// ResetBalance composes CancelAll+Flatten+SetAccount: Flatten now
+			// (correctly, per the realized-P&L fix) emits its OWN intermediate
+			// BrokerAccount reconcile reflecting the closed position, before
+			// SetAccount's reseed overwrites it. Only the LAST BrokerAccount
+			// event -- the one SetAccount actually emits -- is the end state a
+			// reset promises; intermediate ones are expected and are not
+			// asserted against the reseeded values here.
 			sawAccount = true
-			a := ev.Account
-			if a.Equity != 50_000 || a.BuyingPower != 50_000 || a.AvailableCash != 50_000 || a.SodEquity != 50_000 {
-				t.Fatalf("account not reset to starting cash: %+v", a)
-			}
-			if a.Realized != 0 || a.DayPnL != 0 {
-				t.Fatalf("realized/day-pnl should reset to zero: %+v", a)
-			}
+			lastAccount = ev.Account
 		}
 	}
 	if !sawCancel || !sawPositions || !sawAccount {
 		t.Fatalf("expected cancel+positions+account events, got %+v", evs)
+	}
+	if lastAccount.Equity != 50_000 || lastAccount.BuyingPower != 50_000 || lastAccount.AvailableCash != 50_000 || lastAccount.SodEquity != 50_000 {
+		t.Fatalf("account not reset to starting cash: %+v", lastAccount)
+	}
+	if lastAccount.Realized != 0 || lastAccount.DayPnL != 0 {
+		t.Fatalf("realized/day-pnl should reset to zero: %+v", lastAccount)
 	}
 
 	_, pos, orders, err := b.Snapshot(context.Background())
