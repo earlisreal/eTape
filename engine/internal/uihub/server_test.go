@@ -3,6 +3,7 @@ package uihub_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/coder/websocket"
@@ -234,6 +236,62 @@ func TestServerStaticFileServing(t *testing.T) {
 	defer resp2.Body.Close()
 	if resp2.StatusCode != 200 {
 		t.Fatalf("SPA fallback should serve index.html for /trading, got %d", resp2.StatusCode)
+	}
+}
+
+// TestSpaHandlerServesFromFS is a regression test for the generalized
+// spaHandler (Task 2: it now serves from an fs.FS -- either os.DirFS(DistDir)
+// or the embedded webui.Dist() filesystem -- instead of a raw directory
+// path). It exercises that logic over a real in-memory fs.FS
+// (testing/fstest.MapFS), independent of any on-disk directory, to prove the
+// "serve the file if it exists, else fall back to index.html" behavior still
+// holds for any fs.FS, not just os.DirFS.
+func TestSpaHandlerServesFromFS(t *testing.T) {
+	fsys := fstest.MapFS{
+		"index.html": &fstest.MapFile{Data: []byte("<html>etape</html>")},
+		"app.js":     &fstest.MapFile{Data: []byte("console.log('hi')")},
+	}
+	clk := clock.NewFake(time.UnixMilli(0))
+	h, _ := uihub.NewHubForTest(clk)
+	srv := uihub.NewServer(h,
+		uihub.NewCommandsForTest(doerNoop{}, cfgNoop{}, indNoop{}, noopDemand{}, nil, func() uihub.Feed { return nil }, nil),
+		uihub.NewQueriesForTest(fillsNoop{}, clk),
+		uihub.ServerConfig{OutBuf: 32})
+
+	ts := httptest.NewServer(srv.SpaHandlerForTest(fsys))
+	defer ts.Close()
+
+	// A file that exists in fsys is served as-is.
+	resp, err := http.Get(ts.URL + "/app.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 || string(body) != "console.log('hi')" {
+		t.Fatalf("expected app.js contents, got status %d body %q", resp.StatusCode, body)
+	}
+
+	// An unknown path falls back to index.html (SPA client-side routing).
+	resp2, err := http.Get(ts.URL + "/trading")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp2.Body.Close()
+	body2, _ := io.ReadAll(resp2.Body)
+	if resp2.StatusCode != 200 || string(body2) != "<html>etape</html>" {
+		t.Fatalf("expected index.html fallback, got status %d body %q", resp2.StatusCode, body2)
+	}
+
+	// The root path also serves index.html.
+	resp3, err := http.Get(ts.URL + "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp3.Body.Close()
+	body3, _ := io.ReadAll(resp3.Body)
+	if resp3.StatusCode != 200 || string(body3) != "<html>etape</html>" {
+		t.Fatalf("expected index.html at root, got status %d body %q", resp3.StatusCode, body3)
 	}
 }
 
