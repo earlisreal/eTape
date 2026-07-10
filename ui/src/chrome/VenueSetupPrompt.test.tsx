@@ -10,6 +10,7 @@ describe("VenueSetupPrompt", () => {
     render(<AppProviders><VenueSetupPrompt onConfigure={() => {}} onDismiss={() => {}} /></AppProviders>);
     expect(screen.getByText("Set up a venue to trade")).toBeTruthy();
     expect(screen.getByText(/place orders/i)).toBeTruthy();
+    expect(screen.getByText(/deeper 1-minute chart history/i)).toBeTruthy();
     for (const b of ["TradeZero", "Alpaca", "moomoo", "Sim"]) expect(screen.getByText(b)).toBeTruthy();
   });
 

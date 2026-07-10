@@ -293,3 +293,124 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
     expect(screen.queryByText("Set up a venue to trade")).toBeNull();
   });
 });
+
+describe("AppShell Alpaca-1m-history hint banner", () => {
+  const ALPACA_HINT_HIDDEN_KEY = "etape.alpacaHintHidden";
+  const seed: Workspace = { name: "default", panels: [], layout: null };
+
+  const emptyGate = { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 };
+  const venueStatus = (id: string, broker: VenueStatus["broker"]): VenueStatus => ({
+    venue: id, broker, connected: true, reconcilePending: false,
+    note: "", lastReconcileMs: null, gate: emptyGate,
+  });
+  const status = (venues: VenueStatus[]): ExecStatus => ({
+    masterArmed: false,
+    global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
+    venues,
+  });
+  const publishStatus = (stores: ReturnType<typeof mount>["stores"], venues: VenueStatus[]) => {
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: status(venues) }));
+  };
+
+  beforeEach(() => { localStorage.removeItem(ALPACA_HINT_HIDDEN_KEY); });
+  afterEach(() => { localStorage.removeItem(ALPACA_HINT_HIDDEN_KEY); });
+
+  it("does not show before the first exec.status snapshot arrives", async () => {
+    mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
+  });
+
+  it("does not show at zero venues (the venue-setup prompt covers that case instead)", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, []);
+    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+    expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
+  });
+
+  it("shows once a non-Alpaca venue is configured", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, [venueStatus("tz-1", "tradezero")]);
+    await waitFor(() => expect(screen.getByTestId("alpaca-backfill-banner")).toBeTruthy());
+  });
+
+  it("does not show once an Alpaca venue is configured", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, [venueStatus("alpaca-paper", "alpaca")]);
+    await waitFor(() => expect(stores.exec.status()?.venues.length).toBe(1));
+    expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
+  });
+
+  it("does not show once an Alpaca venue joins a mix of other venues", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, [venueStatus("tz-1", "tradezero"), venueStatus("alpaca-paper", "alpaca")]);
+    await waitFor(() => expect(stores.exec.status()?.venues.length).toBe(2));
+    expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
+  });
+
+  it("clicking 'Set up Alpaca' opens Settings on the Venues & creds section and closes the banner", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, [venueStatus("tz-1", "tradezero")]);
+    await waitFor(() => expect(screen.getByTestId("alpaca-backfill-banner")).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId("alpaca-banner-setup"));
+
+    expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
+    expect(screen.getByText("Venues")).toBeTruthy();
+  });
+
+  it("dismissing hides it for the session but does not persist to localStorage", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, [venueStatus("tz-1", "tradezero")]);
+    await waitFor(() => expect(screen.getByTestId("alpaca-backfill-banner")).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId("alpaca-banner-dismiss"));
+    expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
+    expect(localStorage.getItem(ALPACA_HINT_HIDDEN_KEY)).toBe("1");
+  });
+
+  it("staying dismissed persists across a fresh mount (simulated reload)", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, [venueStatus("tz-1", "tradezero")]);
+    await waitFor(() => expect(screen.getByTestId("alpaca-backfill-banner")).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId("alpaca-banner-dismiss"));
+    expect(localStorage.getItem(ALPACA_HINT_HIDDEN_KEY)).toBe("1");
+
+    cleanup(); // unmount this AppShell instance — simulates a fresh app launch
+
+    const { stores: stores2 } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores2, [venueStatus("tz-1", "tradezero")]);
+    expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
+  });
+
+  it("is hidden when the engine WS is not open, even with a non-Alpaca venue configured", async () => {
+    const stores = makeStores();
+    const scheduler = new Scheduler(browserRaf, () => {});
+    const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
+    const commands = {
+      sendCommand: vi.fn(async () => ({ kind: "ack" as const, corrId: "c", status: "accepted" as const, value: undefined })),
+      sendQuery: vi.fn(async () => []),
+    };
+    const demandRegistry = new DemandRegistry({ sendCommand: commands.sendCommand, onState: () => {} });
+    const client = { sendCommand: vi.fn(async () => ({ status: "accepted" as const, value: seed })) };
+    const workspaceStore = new WorkspaceStore(client, 1);
+    render(
+      <ThemeProvider><ToastProvider><OrderConfigProvider commands={commands}>
+        <AppShell workspaceName="default" stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
+          linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} engineState="reconnecting" />
+      </OrderConfigProvider></ToastProvider></ThemeProvider>,
+    );
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, [venueStatus("tz-1", "tradezero")]);
+    expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
+  });
+});

@@ -42,7 +42,8 @@ export function VenueSetupPrompt({ onConfigure, onDismiss }: {
         </div>
         <p style={{ fontSize: 12, color: palette.textMuted, lineHeight: 1.5, margin: "0 0 14px" }}>
           Charts and the tape work without a venue. To place orders, add one — a broker, an
-          environment, and its API keys.
+          environment, and its API keys. A paper Alpaca venue also unlocks deeper 1-minute
+          chart history (~20 days, quota-free) instead of moomoo's limited fallback.
         </p>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
           {BROKER_CHIPS.map((b) => <span key={b} className="chip chip-set">{b}</span>)}

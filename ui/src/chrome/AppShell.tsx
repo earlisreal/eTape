@@ -14,6 +14,7 @@ import { PANELS, type PanelProps } from "./panels/registry";
 import { PRESETS, applyPreset } from "./presets";
 import { TopBar } from "./TopBar";
 import { FeedStatusBanner } from "./FeedStatusBanner";
+import { AlpacaBackfillBanner } from "./AlpacaBackfillBanner";
 import { EmptyState } from "./EmptyState";
 import { Catalog } from "./Catalog";
 import { SettingsModal, type SettingsSection } from "./SettingsModal";
@@ -35,6 +36,19 @@ function readVenueSetupHidden(): boolean {
     return localStorage.getItem(VENUE_SETUP_HIDDEN_KEY) === "1";
   } catch {
     return false; // a blocked/unavailable localStorage shouldn't suppress the prompt
+  }
+}
+
+// Permanent "don't show again" flag for the Alpaca-1m-history hint banner,
+// set only when the user clicks its dismiss (✕) button. Separate key from
+// the venue-setup prompt above — the two are mutually exclusive (this only
+// shows once at least one non-Alpaca venue exists) but independently silenced.
+const ALPACA_HINT_HIDDEN_KEY = "etape.alpacaHintHidden";
+function readAlpacaHintHidden(): boolean {
+  try {
+    return localStorage.getItem(ALPACA_HINT_HIDDEN_KEY) === "1";
+  } catch {
+    return false; // a blocked/unavailable localStorage shouldn't suppress the hint
   }
 }
 
@@ -62,6 +76,10 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // re-flash on every re-render while venues are still empty; the localStorage
   // flag (only set when "don't show again" is ticked) is what survives reload.
   const [venueSetupSessionDismissed, setVenueSetupSessionDismissed] = useState(false);
+  // Alpaca-1m-history hint banner: session-only dismiss, mirroring the
+  // venue-setup prompt's pattern above (see readAlpacaHintHidden for the
+  // permanent flag).
+  const [alpacaHintSessionDismissed, setAlpacaHintSessionDismissed] = useState(false);
   const { mode } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
@@ -130,6 +148,27 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const configureVenueSetup = (dontShowAgain: boolean) => {
     dismissVenueSetup(dontShowAgain);
     setSettings({ open: true, section: "venues" });
+  };
+  // Alpaca-1m-history hint: shown once at least one venue is configured (so
+  // it never doubles up with the venue-setup prompt above, which only fires
+  // at zero venues) but none of them is Alpaca — the deep-1m backfill chain
+  // then falls back to moomoo's quota-guarded history fetch instead of the
+  // quota-free Alpaca SIP path (see AlpacaBackfillBanner.tsx for the detail).
+  const hasAlpaca = execStatus?.venues.some((v) => v.broker === "alpaca") ?? false;
+  const showAlpacaHint = engineState === "open" && execStatus !== null
+    && execStatus.venues.length > 0 && !hasAlpaca
+    && !alpacaHintSessionDismissed && !readAlpacaHintHidden();
+  const openAlpacaSetup = () => {
+    // Session-dismiss only, not the permanent flag — venue edits only apply
+    // on the engine's next boot (see VenuesSection's restart banner), so
+    // hasAlpaca won't flip until then; session-dismiss just stops the nag
+    // for the rest of this run instead of falsely marking it "handled".
+    setAlpacaHintSessionDismissed(true);
+    setSettings({ open: true, section: "venues" });
+  };
+  const dismissAlpacaHint = () => {
+    try { localStorage.setItem(ALPACA_HINT_HIDDEN_KEY, "1"); } catch { /* best-effort only */ }
+    setAlpacaHintSessionDismissed(true);
   };
   // Flush any dockview mutations queued by addPanel/applyPresetToWorkspace once
   // dockview's components map has caught up with the latest `ws`.
@@ -381,6 +420,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           )}
         </div>
         <FeedStatusBanner health={stores.health} engineState={engineState} onOpenConnection={onOpenConnection} />
+        {showAlpacaHint && <AlpacaBackfillBanner onSetup={openAlpacaSetup} onDismiss={dismissAlpacaHint} />}
         <div style={{ flex: 1, minHeight: 0 }}>
           {ws.panels.length === 0 ? (
             <EmptyState onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} />
