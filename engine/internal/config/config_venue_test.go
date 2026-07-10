@@ -11,7 +11,7 @@ func validVC() VenueConfig {
 		Venues: []Venue{
 			{ID: "alpaca-paper", Broker: "alpaca", Env: "paper", Credentials: "alpaca", AccountID: ""},
 			{ID: "tz-live", Broker: "tradezero", Env: "live", Credentials: "tradeZero", AccountID: "TZ123"},
-			{ID: "sim", Broker: "sim", Env: "paper"},
+			{ID: "sim", Broker: "sim", Env: "paper", SlippageBps: 7.5, FillLatencyMs: 250},
 		},
 		Gate: Gate{
 			Global: GateGlobal{MaxDayLoss: 1000},
@@ -120,6 +120,13 @@ env = "paper"
 	}
 	if len(got.Venues) != 3 || got.Venues[1].ID != "tz-live" || got.Venues[1].AccountID != "TZ123" {
 		t.Fatalf("venues not round-tripped: %+v", got.Venues)
+	}
+	// The sim realism knobs (Task 4/5) round-trip through the TOML struct
+	// tags exactly like StartingBalance — this is the layer BELOW the
+	// uihub wire-mapping bug (venueToWire/venueConfigFromWire), which is
+	// covered separately in internal/uihub/commands_test.go.
+	if got.Venues[2].SlippageBps != 7.5 || got.Venues[2].FillLatencyMs != 250 {
+		t.Fatalf("sim realism knobs not round-tripped: %+v", got.Venues[2])
 	}
 	if got.Gate.Venue["alpaca-paper"].MaxOrderValue != 5000 {
 		t.Fatalf("gate not round-tripped: %+v", got.Gate)

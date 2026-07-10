@@ -127,6 +127,32 @@ func TestVenueWireRoundTripsStartingBalance(t *testing.T) {
 	}
 }
 
+// TestVenueWireRoundTripsSlippageAndFillLatency is the regression test for
+// the final-review finding that venueToWire/venueConfigFromWire (and the
+// wsmsg.Venue wire struct itself) never learned about the two sim realism
+// knobs added alongside StartingBalance: config.Venue.SlippageBps and
+// config.Venue.FillLatencyMs. Without carrying them through the wire struct,
+// any settings-UI save (venueConfigFromWire -> venueadmin.SetVenueSetup ->
+// config.WriteVenueConfig) silently zeroes fields a user hand-set directly
+// in config.toml, even when the save was for an unrelated venue field.
+func TestVenueWireRoundTripsSlippageAndFillLatency(t *testing.T) {
+	v := config.Venue{ID: "sim-1", Broker: "sim", Env: "paper", SlippageBps: 7.5, FillLatencyMs: 250}
+	wire := venueToWire(v)
+	if wire.SlippageBps != 7.5 {
+		t.Fatalf("venueToWire dropped SlippageBps: %+v", wire)
+	}
+	if wire.FillLatencyMs != 250 {
+		t.Fatalf("venueToWire dropped FillLatencyMs: %+v", wire)
+	}
+	back := venueConfigFromWire([]wsmsg.Venue{wire}, wsmsg.Gate{Venue: map[string]wsmsg.GateLimitsView{}})
+	if back.Venues[0].SlippageBps != 7.5 {
+		t.Fatalf("venueConfigFromWire dropped SlippageBps: %+v", back.Venues[0])
+	}
+	if back.Venues[0].FillLatencyMs != 250 {
+		t.Fatalf("venueConfigFromWire dropped FillLatencyMs: %+v", back.Venues[0])
+	}
+}
+
 func TestCommandsGetSetConfig(t *testing.T) {
 	cfg := &spyCfg{values: map[string]string{"theme": `"dark"`}}
 	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})

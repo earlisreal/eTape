@@ -371,6 +371,8 @@ func venueToWire(v config.Venue) wsmsg.Venue {
 	return wsmsg.Venue{
 		ID: v.ID, Broker: v.Broker, Env: v.Env, Credentials: v.Credentials, AccountID: v.AccountID,
 		StartingBalance: v.StartingBalance,
+		SlippageBps:     v.SlippageBps,
+		FillLatencyMs:   v.FillLatencyMs,
 	}
 }
 
@@ -412,6 +414,8 @@ func venueConfigFromWire(venues []wsmsg.Venue, gate wsmsg.Gate) config.VenueConf
 		vs = append(vs, config.Venue{
 			ID: v.ID, Broker: v.Broker, Env: v.Env, Credentials: v.Credentials, AccountID: v.AccountID,
 			StartingBalance: v.StartingBalance,
+			SlippageBps:     v.SlippageBps,
+			FillLatencyMs:   v.FillLatencyMs,
 		})
 	}
 	vm := map[string]config.GateVenue{}
