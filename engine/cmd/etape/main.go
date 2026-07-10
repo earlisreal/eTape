@@ -44,6 +44,17 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
 )
 
+// openLogFile opens path for appending, creating both the file and its
+// parent directory if missing. Logging is set up before config load (and
+// thus before the store's own db-dir MkdirAll further down in boot), so the
+// default log path's ~/.eTape directory may not exist yet.
+func openLogFile(path string) (*os.File, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+}
+
 // boot runs the full engine boot sequence -- flags, config, store/md-core/
 // exec-core/uihub construction, feed startup (live OpenD or replay), and the
 // ordered shutdown once ctx is cancelled -- and returns the process exit
@@ -69,22 +80,54 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 	demoDay := flag.String("demo-day", "2026-01-02", "ET day to stamp when -demo is set")
 	demoSpeed := flag.Float64("demo-speed", 1, "replay speed when -demo is set (0 = as fast as possible)")
 	noOpen := flag.Bool("no-open", false, "do not auto-open the default browser to the UI")
-	logPath := flag.String("log", "", "also write logs to this file, in addition to stderr")
+	logPath := flag.String("log", "", "also write logs to this file")
 	flag.Parse()
 
-	var out io.Writer = os.Stderr
+	// Destination policy: logToStderr and defaultLogPath are supplied by
+	// logdest_tray.go / logdest_default.go (chosen by the "tray" build tag).
+	// The tray (windowsgui) build has no usable stderr, so it falls back to
+	// a file under ~/.eTape when -log isn't given; the console build has a
+	// real stderr and stays opt-in, exactly as before this split existed.
+	logDest := *logPath
+	explicitLog := logDest != ""
+	if logDest == "" {
+		logDest = defaultLogPath()
+	}
+
+	var writers []io.Writer
+	if logToStderr {
+		writers = append(writers, os.Stderr)
+	}
 	var logFile *os.File
-	if *logPath != "" {
-		f, err := os.OpenFile(*logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if logDest != "" {
+		f, err := openLogFile(logDest)
 		if err != nil {
-			slog.New(slog.NewTextHandler(os.Stderr, nil)).Error("open log file", "path", *logPath, "err", err)
-			return 1
+			errLog := slog.New(slog.NewTextHandler(os.Stderr, nil))
+			if explicitLog {
+				// The user asked for this exact file; fail loudly.
+				errLog.Error("open log file", "path", logDest, "err", err)
+				return 1
+			}
+			// The default path is best-effort: a logging hiccup must not
+			// stop the engine from booting.
+			errLog.Warn("open default log file, continuing without it", "path", logDest, "err", err)
+		} else {
+			logFile = f
+			writers = append(writers, f)
 		}
-		logFile = f
-		out = io.MultiWriter(os.Stderr, f)
 	}
 	if logFile != nil {
 		defer logFile.Close()
+	}
+
+	var out io.Writer
+	switch len(writers) {
+	case 0:
+		out = io.Discard
+	case 1:
+		out = writers[0]
+	default:
+		out = io.MultiWriter(writers...)
 	}
 
 	log := slog.New(slog.NewTextHandler(out, nil))
