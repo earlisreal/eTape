@@ -107,6 +107,9 @@ func TestInitConnectStoresConnID(t *testing.T) {
 	if c.ConnID() != 0xABCDEF {
 		t.Fatalf("connID = %#x, want 0xABCDEF", c.ConnID())
 	}
+	if c.ServerVer() != 900 {
+		t.Fatalf("serverVer = %d, want 900", c.ServerVer())
+	}
 	if c.kaInt != 10*time.Second {
 		t.Fatalf("keepAlive interval = %v, want 10s", c.kaInt)
 	}

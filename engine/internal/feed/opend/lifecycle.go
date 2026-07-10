@@ -3,6 +3,7 @@ package opend
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -32,7 +33,8 @@ func (c *Client) initConnect(ctx context.Context) error {
 		return fmt.Errorf("initconnect failed: retType=%d msg=%q", resp.GetRetType(), resp.GetRetMsg())
 	}
 	s2c := resp.GetS2C()
-	c.setConnInfo(s2c.GetConnID(), time.Duration(s2c.GetKeepAliveInterval())*time.Second)
+	c.setConnInfo(s2c.GetConnID(), s2c.GetServerVer(), time.Duration(s2c.GetKeepAliveInterval())*time.Second)
+	slog.Info("opend connected", "serverVer", s2c.GetServerVer(), "connID", s2c.GetConnID())
 	return nil
 }
 

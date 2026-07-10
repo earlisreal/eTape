@@ -50,11 +50,12 @@ type Client struct {
 	opt Options
 	clk clock.Clock
 
-	mu     sync.Mutex
-	conn   net.Conn // current live conn; nil when down
-	connID uint64
-	kaInt  time.Duration
-	sendMu sync.Mutex
+	mu        sync.Mutex
+	conn      net.Conn // current live conn; nil when down
+	connID    uint64
+	serverVer int32
+	kaInt     time.Duration
+	sendMu    sync.Mutex
 
 	serial  serialGen
 	pending *pending
@@ -107,6 +108,14 @@ func (c *Client) ConnID() uint64 {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.connID
+}
+
+// ServerVer returns the OpenD server version reported at the last successful
+// InitConnect (0 until InitConnect succeeds).
+func (c *Client) ServerVer() int32 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.serverVer
 }
 
 // Request sends req as protoID and waits for the correlated response.
@@ -218,13 +227,15 @@ func (c *Client) clearConn() {
 	c.mu.Lock()
 	c.conn = nil
 	c.connID = 0
+	c.serverVer = 0
 	c.mu.Unlock()
 	c.pending.failAll()
 }
 
-func (c *Client) setConnInfo(connID uint64, kaInterval time.Duration) {
+func (c *Client) setConnInfo(connID uint64, serverVer int32, kaInterval time.Duration) {
 	c.mu.Lock()
 	c.connID = connID
+	c.serverVer = serverVer
 	c.kaInt = kaInterval
 	c.mu.Unlock()
 }
