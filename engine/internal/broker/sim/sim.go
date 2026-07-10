@@ -26,11 +26,25 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/feed"
 )
 
+// Options configures optional fill-realism knobs on a Broker. The zero value
+// turns every knob off, so New(venue, clk, startingCash, Options{}) behaves
+// identically to the 3-arg-only broker that predates Task 4 — this and every
+// later realism knob (Task 5: fill latency) is added as a new Options field
+// rather than growing New's positional parameter list further.
+type Options struct {
+	// SlippageBps is extra adverse bps applied to every book level
+	// fillAgainstBook consumes, modeling queue position/hidden liquidity
+	// beyond the visible touch; <=0 => off. Mirrors config.Venue.SlippageBps's
+	// doc-comment style.
+	SlippageBps float64
+}
+
 // Broker is a single-venue simulated broker.
 type Broker struct {
-	venue exec.VenueID
-	clk   clock.Clock
-	ev    chan exec.BrokerEvent
+	venue       exec.VenueID
+	clk         clock.Clock
+	slippageBps float64 // Task 4: see Options.SlippageBps
+	ev          chan exec.BrokerEvent
 
 	mu     sync.Mutex
 	marks  map[string]float64
@@ -45,16 +59,19 @@ var _ exec.Broker = (*Broker)(nil)
 
 // New builds a SimBroker for a venue, funded with startingCash — the same
 // seeding ResetBalance performs, so a fresh boot and a manual reset leave the
-// account in an identical state instead of boot defaulting to all-zero.
-func New(venue exec.VenueID, clk clock.Clock, startingCash float64) *Broker {
+// account in an identical state instead of boot defaulting to all-zero. opts
+// carries optional realism knobs (Task 4: SlippageBps); pass Options{} for
+// the pre-Task-4 defaults.
+func New(venue exec.VenueID, clk clock.Clock, startingCash float64, opts Options) *Broker {
 	return &Broker{
-		venue:  venue,
-		clk:    clk,
-		ev:     make(chan exec.BrokerEvent, 256),
-		marks:  map[string]float64{},
-		books:  map[string]feed.Book{},
-		orders: map[string]*exec.Order{},
-		pos:    map[string]*exec.Position{},
+		venue:       venue,
+		clk:         clk,
+		slippageBps: opts.SlippageBps,
+		ev:          make(chan exec.BrokerEvent, 256),
+		marks:       map[string]float64{},
+		books:       map[string]feed.Book{},
+		orders:      map[string]*exec.Order{},
+		pos:         map[string]*exec.Position{},
 		acct: exec.AccountSnapshot{
 			Venue: venue, Equity: startingCash, BuyingPower: startingCash,
 			AvailableCash: startingCash, SodEquity: startingCash,
@@ -199,7 +216,19 @@ func marketable(side exec.Side, limit, price float64) bool {
 // here directly: stopTriggered (keyed off the last-trade mark) gates
 // whether/when they convert to TypeMarket/TypeLimit *before* reaching this
 // function — see actOnMarkLocked.
-func fillAgainstBook(o *exec.Order, book feed.Book) (filledQty, avgPrice float64) {
+//
+// slippageBps (Task 4) applies extra adverse cost to each level BEFORE the
+// cap decision and the size-weighted average, not as a flat scale of the
+// final average afterward: this matters because it can make a level that
+// would satisfy the raw limit cap actually violate it once its worse,
+// slipped price is considered — a limit order must never execute worse than
+// its limit, so the walk has to stop there rather than filling more at a
+// price a naive "raw walk, then scale the average" implementation would
+// wrongly allow. v1 applies it to every fill fillAgainstBook produces (not
+// only a genuinely-aggressor-crossing one — e.g. a resting limit later
+// crossed by an improving book pays it too); see the Task 4 report for that
+// scope call.
+func fillAgainstBook(o *exec.Order, book feed.Book, slippageBps float64) (filledQty, avgPrice float64) {
 	levels := book.Asks
 	if o.Side == exec.SideSell || o.Side == exec.SideShort {
 		levels = book.Bids
@@ -212,14 +241,15 @@ func fillAgainstBook(o *exec.Order, book feed.Book) (filledQty, avgPrice float64
 		if remaining <= 0 {
 			break
 		}
-		if capped && !marketable(o.Side, o.LimitPrice, lvl.Price) {
+		px := slippedPrice(o.Side, lvl.Price, slippageBps)
+		if capped && !marketable(o.Side, o.LimitPrice, px) {
 			break // this level (and every level past it) violates the cap
 		}
 		take := remaining
 		if v := float64(lvl.Volume); v < take {
 			take = v
 		}
-		sumPxQty += take * lvl.Price
+		sumPxQty += take * px
 		sumQty += take
 		remaining -= take
 	}
@@ -227,6 +257,23 @@ func fillAgainstBook(o *exec.Order, book feed.Book) (filledQty, avgPrice float64
 		return 0, 0
 	}
 	return sumQty, sumPxQty / sumQty
+}
+
+// slippedPrice adjusts one consumed book level's price by slippageBps of
+// extra adverse cost (Task 4): buy/cover pays more, sell/short receives
+// less. slippageBps <= 0 returns price unchanged, so a zero-value Options
+// reproduces the pre-Task-4 fillAgainstBook exactly.
+func slippedPrice(side exec.Side, price, slippageBps float64) float64 {
+	if slippageBps <= 0 {
+		return price
+	}
+	rate := slippageBps / 10_000
+	switch side {
+	case exec.SideBuy, exec.SideCover:
+		return price * (1 + rate)
+	default: // Sell, Short
+		return price * (1 - rate)
+	}
 }
 
 // stopTriggered reports whether a stop/stop-limit's trigger has been hit.
@@ -300,7 +347,7 @@ func (b *Broker) SubmitOrder(_ context.Context, req exec.OrderRequest) (exec.Ord
 // of this task's scope. Caller holds mu.
 func (b *Broker) attemptInitialFillLocked(o *exec.Order) []exec.BrokerEvent {
 	book := b.books[o.Symbol]
-	qty, px := fillAgainstBook(o, book) // pure: does not mutate o or book state
+	qty, px := fillAgainstBook(o, book, b.slippageBps) // pure: does not mutate o or book state
 
 	if o.TIF == exec.TIFFOK && qty < o.LeavesQty {
 		// All-or-none: fillAgainstBook hasn't mutated anything, so rejecting
@@ -425,7 +472,7 @@ func cashSign(side exec.Side) float64 {
 // only ever apply to the initial submit-time attempt. Returns nil if
 // nothing crossed (order stays resting untouched). Caller holds mu.
 func (b *Broker) attemptBookFillLocked(o *exec.Order, book feed.Book) []exec.BrokerEvent {
-	qty, px := fillAgainstBook(o, book)
+	qty, px := fillAgainstBook(o, book, b.slippageBps)
 	if qty <= 0 {
 		return nil
 	}

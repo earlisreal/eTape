@@ -13,7 +13,16 @@ import (
 
 func newSim(t *testing.T) *Broker {
 	t.Helper()
-	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000)
+	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000, Options{})
+	b.SetMark("AAPL", 100)
+	return b
+}
+
+// newSimWithSlippage is newSim's Task 4 counterpart: a broker configured with
+// a non-zero SlippageBps, for tests exercising the adverse-price knob.
+func newSimWithSlippage(t *testing.T, bps float64) *Broker {
+	t.Helper()
+	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000, Options{SlippageBps: bps})
 	b.SetMark("AAPL", 100)
 	return b
 }
@@ -65,7 +74,7 @@ func TestFillAgainstBook_MarketSweepsMultipleLevelsWeightedAverage(t *testing.T)
 			{Price: 100.2, Volume: 100},
 		},
 	}
-	qty, px := fillAgainstBook(o, book)
+	qty, px := fillAgainstBook(o, book, 0)
 	if qty != 250 {
 		t.Fatalf("qty = %v, want 250 (full sweep across 3 levels)", qty)
 	}
@@ -84,7 +93,7 @@ func TestFillAgainstBook_LimitStopsAtFirstLevelViolatingCap(t *testing.T) {
 			{Price: 100.2, Volume: 100}, // violates the 100.1 cap; walk stops before this level
 		},
 	}
-	qty, px := fillAgainstBook(o, book)
+	qty, px := fillAgainstBook(o, book, 0)
 	if qty != 200 {
 		t.Fatalf("qty = %v, want 200 (depth exhausted at the cap, not the full 250)", qty)
 	}
@@ -102,7 +111,7 @@ func TestFillAgainstBook_SellConsumesBidsDescending(t *testing.T) {
 			{Price: 99.4, Volume: 50},
 		},
 	}
-	qty, px := fillAgainstBook(o, book)
+	qty, px := fillAgainstBook(o, book, 0)
 	if qty != 30 {
 		t.Fatalf("qty = %v, want 30", qty)
 	}
@@ -120,7 +129,7 @@ func TestFillAgainstBook_SellLimitCapsAtBidFloor(t *testing.T) {
 			{Price: 99.4, Volume: 50}, // below the 99.45 floor; walk stops before this level
 		},
 	}
-	qty, px := fillAgainstBook(o, book)
+	qty, px := fillAgainstBook(o, book, 0)
 	if qty != 20 || px != 99.5 {
 		t.Fatalf("qty=%v px=%v, want 20,99.5", qty, px)
 	}
@@ -128,7 +137,7 @@ func TestFillAgainstBook_SellLimitCapsAtBidFloor(t *testing.T) {
 
 func TestFillAgainstBook_EmptyBookReturnsZero(t *testing.T) {
 	o := &exec.Order{Side: exec.SideBuy, Type: exec.TypeMarket, LeavesQty: 10}
-	qty, px := fillAgainstBook(o, feed.Book{})
+	qty, px := fillAgainstBook(o, feed.Book{}, 0)
 	if qty != 0 || px != 0 {
 		t.Fatalf("qty=%v px=%v, want 0,0 for an empty book", qty, px)
 	}
@@ -139,9 +148,90 @@ func TestFillAgainstBook_ResumesFromLeavesQtyNotOriginalQty(t *testing.T) {
 	// only ask the book for its LeavesQty (40), not the original Qty.
 	o := &exec.Order{Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 100, ExecutedQty: 60, LeavesQty: 40}
 	book := feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 1000}}}
-	qty, px := fillAgainstBook(o, book)
+	qty, px := fillAgainstBook(o, book, 0)
 	if qty != 40 || px != 100 {
 		t.Fatalf("qty=%v px=%v, want 40,100", qty, px)
+	}
+}
+
+// --- Task 4: slippageBps, the adverse-price knob ---
+
+// TestFillAgainstBook_SlippageAdjustsBuyPriceAboveRawAsk: a buy fills
+// strictly above the raw ask by the expected per-level amount.
+func TestFillAgainstBook_SlippageAdjustsBuyPriceAboveRawAsk(t *testing.T) {
+	o := &exec.Order{Side: exec.SideBuy, Type: exec.TypeMarket, LeavesQty: 10}
+	book := feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}}
+	qty, px := fillAgainstBook(o, book, 50) // 50 bps = 0.5%
+	want := 100 * 1.005
+	if qty != 10 || math.Abs(px-want) > 1e-9 {
+		t.Fatalf("qty=%v px=%v, want 10,%v (strictly above the raw ask of 100)", qty, px, want)
+	}
+	if px <= 100 {
+		t.Fatalf("px=%v must be strictly above the raw ask 100", px)
+	}
+}
+
+// TestFillAgainstBook_SlippageAdjustsSellPriceBelowRawBid is the symmetric
+// sell-side case: fills strictly below the raw bid.
+func TestFillAgainstBook_SlippageAdjustsSellPriceBelowRawBid(t *testing.T) {
+	o := &exec.Order{Side: exec.SideSell, Type: exec.TypeMarket, LeavesQty: 10}
+	book := feed.Book{Bids: []feed.BookLevel{{Price: 100, Volume: 50}}}
+	qty, px := fillAgainstBook(o, book, 50)
+	want := 100 * 0.995
+	if qty != 10 || math.Abs(px-want) > 1e-9 {
+		t.Fatalf("qty=%v px=%v, want 10,%v (strictly below the raw bid of 100)", qty, px, want)
+	}
+	if px >= 100 {
+		t.Fatalf("px=%v must be strictly below the raw bid 100", px)
+	}
+}
+
+// TestFillAgainstBook_ZeroSlippageMatchesTask2Baseline is the explicit
+// slippageBps=0 regression check: re-runs the Task 2 multi-level
+// weighted-average case and asserts the exact same numbers, confirming the
+// new parameter is a true no-op at its zero value.
+func TestFillAgainstBook_ZeroSlippageMatchesTask2Baseline(t *testing.T) {
+	o := &exec.Order{Side: exec.SideBuy, Type: exec.TypeMarket, LeavesQty: 250}
+	book := feed.Book{
+		Asks: []feed.BookLevel{
+			{Price: 100.0, Volume: 100},
+			{Price: 100.1, Volume: 100},
+			{Price: 100.2, Volume: 100},
+		},
+	}
+	qty, px := fillAgainstBook(o, book, 0)
+	if qty != 250 {
+		t.Fatalf("qty = %v, want 250", qty)
+	}
+	want := (100*100.0 + 100*100.1 + 50*100.2) / 250
+	if math.Abs(px-want) > 1e-9 {
+		t.Fatalf("avgPrice = %v, want %v (unchanged from Task 2 with slippage off)", px, want)
+	}
+}
+
+// TestFillAgainstBook_SlippageAppliedPerLevelNotToFinalAverage is the key
+// discriminator between "apply slippage per level, before the cap decision"
+// (correct) and "walk the raw book, then flatly scale the final average by
+// slippage" (wrong): the second level's raw price (100.90) satisfies the
+// limit cap (101.00) on its own, but its SLIPPED price (with 50bps adverse)
+// does not -- a limit order must never actually execute worse than its
+// limit, so the walk must stop after level 1, filling only 5 shares, not the
+// full 10 a raw-then-scale implementation would wrongly fill.
+func TestFillAgainstBook_SlippageAppliedPerLevelNotToFinalAverage(t *testing.T) {
+	o := &exec.Order{Side: exec.SideBuy, Type: exec.TypeLimit, LimitPrice: 101.00, LeavesQty: 10}
+	book := feed.Book{
+		Asks: []feed.BookLevel{
+			{Price: 100.00, Volume: 5}, // slipped: 100.00*1.005 = 100.50 -- within the 101.00 cap
+			{Price: 100.90, Volume: 5}, // slipped: 100.90*1.005 = 101.4045 -- violates the cap
+		},
+	}
+	qty, px := fillAgainstBook(o, book, 50)
+	if qty != 5 {
+		t.Fatalf("qty = %v, want 5 (only level 1 -- slippage pushed level 2 past the limit)", qty)
+	}
+	want := 100.00 * 1.005
+	if math.Abs(px-want) > 1e-9 {
+		t.Fatalf("avgPrice = %v, want %v", px, want)
 	}
 }
 
@@ -443,7 +533,7 @@ func TestSimReplaceOrder_RepricedLimitCrossesCurrentBook(t *testing.T) {
 // of the configured starting_balance, and only a manual "Reset balance" click
 // ever funded the account.
 func TestNew_SeedsAccountFromStartingCash(t *testing.T) {
-	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 75_000)
+	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 75_000, Options{})
 	acct, _, _, err := b.Snapshot(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -459,7 +549,7 @@ func TestNew_SeedsAccountFromStartingCash(t *testing.T) {
 // non-marketable limit) — not rejected, not filled — until a real book
 // arrives.
 func TestSimMarketOrderNoBookRestsThenFillsOnSetBook(t *testing.T) {
-	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000) // no SetMark/SetBook — "MSFT" has neither
+	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000, Options{}) // no SetMark/SetBook — "MSFT" has neither
 	req := exec.OrderRequest{Venue: "sim-1", Symbol: "MSFT", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
 	ack, err := b.SubmitOrder(context.Background(), req)
 	if err != nil || !ack.Accepted {
@@ -545,7 +635,7 @@ func TestSimTIFIOC_PartialFillCancelsRemainder(t *testing.T) {
 // TestSimTIFIOC_NoBookCancelsImmediately: IOC never rests, even if nothing
 // crossed at all.
 func TestSimTIFIOC_NoBookCancelsImmediately(t *testing.T) {
-	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000)
+	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000, Options{})
 	req := exec.OrderRequest{Venue: "sim-1", Symbol: "MSFT", Side: exec.SideBuy, Type: exec.TypeMarket, TIF: exec.TIFIOC, Qty: 10, ClientOrderID: "ET1"}
 	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
 		t.Fatal(err)
@@ -659,7 +749,7 @@ func TestSim_Flatten_ZeroesPositions(t *testing.T) {
 // asserted "fills at the mark" would fail here.
 func TestSim_BuyStop_TriggersOnMarkAtOrAboveStop(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
-	b := New("v", clk, 100_000)
+	b := New("v", clk, 100_000, Options{})
 	b.SetMark("AAPL", 95)
 	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 101.25, Volume: 50}}})
 	drainAll(b.Events())
@@ -689,7 +779,7 @@ func TestSim_BuyStop_TriggersOnMarkAtOrAboveStop(t *testing.T) {
 // marketable order — a triggered stop is not a special case for that rule.
 func TestSim_BuyStop_TriggersButRestsWithNoBook(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
-	b := New("v", clk, 100_000)
+	b := New("v", clk, 100_000, Options{})
 	b.SetMark("AAPL", 95)
 	drainAll(b.Events())
 	_, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
@@ -720,7 +810,7 @@ func TestSim_BuyStop_TriggersButRestsWithNoBook(t *testing.T) {
 
 func TestSim_SellStop_TriggersOnMarkAtOrBelowStop(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
-	b := New("v", clk, 100_000)
+	b := New("v", clk, 100_000, Options{})
 	b.SetMark("AAPL", 105)
 	b.SetBook("AAPL", feed.Book{Bids: []feed.BookLevel{{Price: 98.75, Volume: 50}}})
 	drainAll(b.Events())
@@ -743,7 +833,7 @@ func TestSim_SellStop_TriggersOnMarkAtOrBelowStop(t *testing.T) {
 // changes anything; only a book update can fill it.
 func TestSim_BuyStopLimit_TriggersThenRestsAsLimit(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
-	b := New("v", clk, 100_000)
+	b := New("v", clk, 100_000, Options{})
 	b.SetMark("AAPL", 95)
 	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 102, Volume: 50}}})
 	drainAll(b.Events())
@@ -1137,7 +1227,7 @@ func TestSimFill_FlipThroughFlatRealizesThenOpensOpposite(t *testing.T) {
 // has never had a mark (SetMark never called) must still contribute to
 // Equity via its position's AvgPrice, not read as a silent zero.
 func TestSimFill_PositionWithNoMarkFallsBackToAvgPriceForEquity(t *testing.T) {
-	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000) // no SetMark for TSLA anywhere
+	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000, Options{}) // no SetMark for TSLA anywhere
 	b.SetBook("TSLA", feed.Book{Asks: []feed.BookLevel{{Price: 200, Volume: 50}}})
 	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "TSLA", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 5, ClientOrderID: "ET1"})
 	evs := drainAll(b.Events())
@@ -1149,5 +1239,64 @@ func TestSimFill_PositionWithNoMarkFallsBackToAvgPriceForEquity(t *testing.T) {
 	wantContribution := 5 * 200.0
 	if gotContribution != wantContribution {
 		t.Fatalf("position MTM contribution = %v, want %v -- Equity must fall back to qty*AvgPrice when no mark exists, not read as zero", gotContribution, wantContribution)
+	}
+}
+
+// --- Task 4: end-to-end SubmitOrder/New coverage for SlippageBps ---
+
+// TestSim_ZeroSlippageOptions_MatchesPreTask4Behavior is the broker-level
+// regression check: a Broker built with the zero-value Options{} (as every
+// pre-Task-4 call site now passes) reproduces the exact price-improvement
+// numbers Task 2 established, byte-for-byte.
+func TestSim_ZeroSlippageOptions_MatchesPreTask4Behavior(t *testing.T) {
+	b := newSim(t) // Options{} -- slippage off
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100.5, Volume: 50}}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, Qty: 10, LimitPrice: 102, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	_ = drain(t, b) // OrderAccepted
+	f, ok := drain(t, b).(exec.OrderFilled)
+	if !ok || f.F.Price != 100.5 || f.F.Qty != 10 {
+		t.Fatalf("slippage off should fill AT the ask (100.5), exactly as before Task 4, got %+v ok=%v", f, ok)
+	}
+}
+
+// TestSim_SlippageBps_BuyMarketFillsAboveAsk is the SubmitOrder-level
+// end-to-end confirmation of the pure fillAgainstBook slippage tests above.
+func TestSim_SlippageBps_BuyMarketFillsAboveAsk(t *testing.T) {
+	b := newSimWithSlippage(t, 25) // 25 bps = 0.25%
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	_ = drain(t, b) // OrderAccepted
+	f, ok := drain(t, b).(exec.OrderFilled)
+	want := 100 * 1.0025
+	if !ok || math.Abs(f.F.Price-want) > 1e-9 {
+		t.Fatalf("buy fill = %+v ok=%v, want price %v (strictly above the raw ask 100)", f, ok, want)
+	}
+	if f.F.Price <= 100 {
+		t.Fatalf("fill price %v must be strictly above the raw ask 100", f.F.Price)
+	}
+}
+
+// TestSim_SlippageBps_SellMarketFillsBelowBid is the symmetric sell case.
+func TestSim_SlippageBps_SellMarketFillsBelowBid(t *testing.T) {
+	b := newSimWithSlippage(t, 25)
+	b.SetBook("AAPL", feed.Book{Bids: []feed.BookLevel{{Price: 100, Volume: 50}}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideSell, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	_ = drain(t, b) // OrderAccepted
+	f, ok := drain(t, b).(exec.OrderFilled)
+	want := 100 * 0.9975
+	if !ok || math.Abs(f.F.Price-want) > 1e-9 {
+		t.Fatalf("sell fill = %+v ok=%v, want price %v (strictly below the raw bid 100)", f, ok, want)
+	}
+	if f.F.Price >= 100 {
+		t.Fatalf("fill price %v must be strictly below the raw bid 100", f.F.Price)
 	}
 }

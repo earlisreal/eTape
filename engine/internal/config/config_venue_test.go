@@ -39,6 +39,7 @@ func TestValidateVenueConfigRejects(t *testing.T) {
 		"negative gate cap":         func(vc *VenueConfig) { vc.Gate.Global.MaxDayLoss = -1 },
 		"gate key unknown id":       func(vc *VenueConfig) { vc.Gate.Venue["ghost"] = GateVenue{} },
 		"negative starting balance": func(vc *VenueConfig) { vc.Venues[2].StartingBalance = -1 },
+		"negative slippage bps":     func(vc *VenueConfig) { vc.Venues[2].SlippageBps = -1 },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -57,6 +58,14 @@ func TestEffectiveStartingBalanceDefaultsWhenUnsetOrZero(t *testing.T) {
 		if got := v.EffectiveStartingBalance(); got != DefaultSimStartingBalance {
 			t.Fatalf("StartingBalance=%v: got %v, want default %v", sb, got, DefaultSimStartingBalance)
 		}
+	}
+}
+
+func TestValidateVenueConfigAcceptsPositiveSlippageBps(t *testing.T) {
+	vc := validVC()
+	vc.Venues[2].SlippageBps = 5
+	if err := ValidateVenueConfig(vc, []string{"alpaca", "tradeZero"}); err != nil {
+		t.Fatalf("positive slippage_bps rejected: %v", err)
 	}
 }
 

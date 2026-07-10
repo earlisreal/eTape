@@ -71,7 +71,7 @@ func TestE2EExecLifecycleOverWS(t *testing.T) {
 	st := openStore(t)
 	clk := clock.System{}
 
-	simBroker := sim.New("sim", clk, 100_000)
+	simBroker := sim.New("sim", clk, 100_000, sim.Options{})
 	mdCore := md.New(md.Config{TapeRing: 1024, AnchorSecs: 34200})
 	go func() { _ = mdCore.Run(ctx) }()
 
