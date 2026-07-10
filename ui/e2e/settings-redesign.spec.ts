@@ -49,12 +49,28 @@ test.describe("settings redesign", () => {
     await page.getByTestId("arm-chip").click();
     await expect(page.getByTestId("arm-chip")).toHaveText("ARMED");
 
-    // The default "Buy $5k" template (id "buy-5k", hotkey Ctrl+1) prices off the
-    // live Ask with zero offset (DEFAULT_TEMPLATES in actionTemplate.ts), so the
-    // fired qty is floor(dollarAmount / ask). Read the ticket's own ask readout
-    // (OrderTicketPanel's `ask` testid) to compute the expected qty independently
-    // of this test rather than guessing a price — replay runs with -speed 0
-    // -replay-hold, so the quote is static for the whole suite.
+    // eTape ships with NO default order templates/hotkeys (DEFAULT_TEMPLATES in
+    // actionTemplate.ts is empty) — build one from scratch: a Dollar/$5000 Buy
+    // at live Ask with zero offset, bound to Ctrl+1. On an empty template list
+    // uid() deterministically mints "tmpl-1-1" for the first add.
+    await page.getByTestId("open-settings").click();
+    await page.getByTestId("add-template").click();
+    await page.getByTestId("add-place").click();
+    await page.getByLabel("size-mode-tmpl-1-1").selectOption("Dollar");
+    await page.getByLabel("size-value-tmpl-1-1").fill("5000");
+    await page.getByTestId("tmpl-hotkey-tmpl-1-1").click();
+    await page.keyboard.press("Control+1");
+    await expect(page.getByTestId("tmpl-hotkey-tmpl-1-1")).toHaveValue("Ctrl+1");
+    await page.getByTestId("save").click();
+    await page.mouse.click(5, 5); // click the modal backdrop to close (SettingsModal has no Escape handler)
+
+    // addPlace's own defaults (side BUY, type LIMIT, tif DAY, priceSource Ask,
+    // priceOffset 0 — see OrderSettingsSection.tsx) already match the old
+    // "Buy $5k" template, so the fired qty is floor(dollarAmount / ask). Read
+    // the ticket's own ask readout (OrderTicketPanel's `ask` testid) to compute
+    // the expected qty independently of this test rather than guessing a price
+    // — replay runs with -speed 0 -replay-hold, so the quote is static for the
+    // whole suite.
     const askLocator = page.getByTestId("ask");
     await expect(askLocator).not.toHaveText("—", { timeout: 15_000 });
     const ask = Number(await askLocator.innerText());
@@ -64,7 +80,7 @@ test.describe("settings redesign", () => {
     const qtyAt7k = Math.floor(7000 / ask);
     expect(qtyAt7k).not.toBe(qtyAt5k); // sanity: the edit below must actually move the fired size
 
-    // Fire the untouched default binding and capture its flash toast (pushed by
+    // Fire the newly-bound template and capture its flash toast (pushed by
     // OrderCommands.submit in commands.ts, rendered as a role="alert" Toast).
     await page.locator("body").click(); // ensure document focus; useHotkeys bails if !document.hasFocus()
     await page.keyboard.press("Control+1");
@@ -74,7 +90,7 @@ test.describe("settings redesign", () => {
     // (OpenSettingsContext.openOrderSettings) jumps straight to the "Orders &
     // hotkeys" settings section — no need to navigate the modal's nav tabs.
     await page.getByTestId("open-settings").click();
-    await page.getByLabel("size-value-buy-5k").fill("7000");
+    await page.getByLabel("size-value-tmpl-1-1").fill("7000");
     await page.getByTestId("save").click();
     await page.mouse.click(5, 5); // click the modal backdrop to close (SettingsModal has no Escape handler)
 
@@ -87,10 +103,12 @@ test.describe("settings redesign", () => {
 
     // Cleanup: the orderConfig key and arm state are engine-side (shared across
     // every spec file in one `npm run e2e` run, since webServer boots ONE engine
-    // for the whole invocation). Restore both so smoke.spec.ts's arm test (which
-    // expects to transition disarmed -> ARMED) and any hotkey-dependent test
-    // that runs after this file aren't left holding a mutated template or an
-    // already-armed gate.
+    // for the whole invocation). reset-defaults now restores the blank baseline
+    // (no default templates/hotkeys) — the tmpl-1-1 template built above must
+    // not survive into later specs. Restore both this and arm state so
+    // smoke.spec.ts's arm test (which expects to transition disarmed -> ARMED)
+    // and any hotkey-dependent test that runs after this file aren't left
+    // holding a stray template or an already-armed gate.
     await page.getByTestId("open-settings").click();
     await page.getByTestId("reset-defaults").click();
     await page.getByTestId("reset-confirm").click();

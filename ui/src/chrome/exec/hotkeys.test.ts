@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { normalizeCombo, matchTemplate } from "./hotkeys";
-import { DEFAULT_TEMPLATES } from "./actionTemplate";
+import type { ActionTemplate } from "./actionTemplate";
+
+// Local fixture — DEFAULT_TEMPLATES ships empty (eTape has no default
+// hotkeys), so matchTemplate's own matching behavior is exercised here
+// against a stand-in template set instead.
+const SAMPLE_TEMPLATES: ActionTemplate[] = [
+  { kind: "place", id: "buy-5k", label: "Buy $5k", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, sizing: { mode: "Dollar", dollar: 5000 }, hotkey: "Ctrl+1" },
+  { kind: "manage", id: "kill", label: "KILL", action: "KillSwitch", hotkey: "Ctrl+Shift+K" },
+];
 
 describe("hotkey matcher", () => {
   it("normalizes modifiers into a canonical combo string", () => {
@@ -28,8 +36,8 @@ describe("hotkey matcher", () => {
     expect(normalizeCombo({ ctrlKey: true, shiftKey: false, altKey: false, metaKey: false, key: "5" })).toBe("Ctrl+5");
   });
   it("matches a template by its hotkey field", () => {
-    expect(matchTemplate(DEFAULT_TEMPLATES, "Ctrl+1")?.id).toBe("buy-5k");
-    expect(matchTemplate(DEFAULT_TEMPLATES, "Ctrl+Shift+K")?.id).toBe("kill");
-    expect(matchTemplate(DEFAULT_TEMPLATES, "Ctrl+9")).toBeUndefined();
+    expect(matchTemplate(SAMPLE_TEMPLATES, "Ctrl+1")?.id).toBe("buy-5k");
+    expect(matchTemplate(SAMPLE_TEMPLATES, "Ctrl+Shift+K")?.id).toBe("kill");
+    expect(matchTemplate(SAMPLE_TEMPLATES, "Ctrl+9")).toBeUndefined();
   });
 });

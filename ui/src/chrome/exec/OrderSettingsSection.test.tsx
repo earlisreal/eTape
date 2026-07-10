@@ -6,7 +6,7 @@ import { ToastProvider } from "../Toast";
 import { OrderConfigProvider } from "./useOrderConfig";
 import { useHotkeys } from "./useHotkeys";
 import { OrderSettingsSection } from "./OrderSettingsSection";
-import { DEFAULT_ORDER_CONFIG, normalizeOrderConfig } from "./actionTemplate";
+import { DEFAULT_ORDER_CONFIG, normalizeOrderConfig, type OrderConfig } from "./actionTemplate";
 import { makeStores } from "../../data/registry";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
 import type { AckMsg, ExecStatus } from "../../wire/contract";
@@ -16,10 +16,28 @@ import type { AckMsg, ExecStatus } from "../../wire/contract";
 const status: ExecStatus = { masterArmed: true, global: { maxDayLoss: 500, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
   venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 1000, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 5 } }] };
 
+// This suite exercises the editor's behavior (labels, hotkeys, sizing,
+// add/remove, reset), not eTape's actual defaults — DEFAULT_ORDER_CONFIG now
+// ships blank (no default templates/hotkeys), so seed a local fixture that
+// mirrors the *former* seeded set to keep every existing `buy-5k` / `sell-half`
+// / uid-math selector meaningful.
+const SAMPLE_ORDER_CONFIG: OrderConfig = {
+  activeVenue: "",
+  templates: [
+    { kind: "place", id: "buy-5k", label: "Buy $5k", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, sizing: { mode: "Dollar", dollar: 5000 }, hotkey: "Ctrl+1" },
+    { kind: "place", id: "buy-25pct", label: "Buy 25% BP", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, sizing: { mode: "BuyingPowerPct", pct: 25 }, hotkey: "Ctrl+2" },
+    { kind: "place", id: "sell-half", label: "Sell ½", side: "SELL", type: "LIMIT", tif: "DAY", priceSource: "Bid", priceOffset: 0, sizing: { mode: "PositionFraction", pct: 50 }, hotkey: "Ctrl+3" },
+    { kind: "place", id: "flatten", label: "Flatten", side: "SELL", type: "LIMIT", tif: "DAY", priceSource: "Bid", priceOffset: 0, sizing: { mode: "PositionFraction", pct: 100 }, hotkey: "Ctrl+4" },
+    { kind: "manage", id: "cancel-last", label: "Cancel Last", action: "CancelLast", hotkey: "Ctrl+Backspace" },
+    { kind: "manage", id: "cancel-all", label: "Cancel All (focused)", action: "CancelAllFocused", hotkey: "Ctrl+Shift+Backspace" },
+    { kind: "manage", id: "kill", label: "KILL", action: "KillSwitch", hotkey: "Ctrl+Shift+K" },
+  ],
+};
+
 function wrap(onSave = vi.fn()) {
   render(
     <ThemeProvider>
-      <OrderSettingsSection config={DEFAULT_ORDER_CONFIG} onSave={onSave} />
+      <OrderSettingsSection config={SAMPLE_ORDER_CONFIG} onSave={onSave} />
     </ThemeProvider>,
   );
   return { onSave };
@@ -189,7 +207,7 @@ describe("OrderSettingsSection", () => {
     fireEvent.click(screen.getByTestId("add-place"));
     fireEvent.click(screen.getByTestId("save"));
     const saved = onSave.mock.calls[0][0];
-    expect(saved.templates.length).toBe(DEFAULT_ORDER_CONFIG.templates.length + 1);
+    expect(saved.templates.length).toBe(SAMPLE_ORDER_CONFIG.templates.length + 1);
     expect(saved.templates[saved.templates.length - 1].kind).toBe("place");
     expect(saved.templates[saved.templates.length - 1].session).toBe("AUTO");
   });
@@ -197,7 +215,7 @@ describe("OrderSettingsSection", () => {
   it("edits a template's session and round-trips it on save", () => {
     const { onSave } = wrap();
     // buy-5k starts at the default session ("AUTO" — normalizeOrderConfig
-    // fills it in for DEFAULT_TEMPLATES, which don't set it explicitly).
+    // fills it in for SAMPLE_ORDER_CONFIG, which doesn't set it explicitly).
     expect((screen.getByLabelText("session-buy-5k") as HTMLSelectElement).value).toBe("AUTO");
     fireEvent.change(screen.getByLabelText("session-buy-5k"), { target: { value: "OVERNIGHT" } });
     fireEvent.click(screen.getByTestId("save"));
@@ -211,7 +229,7 @@ describe("OrderSettingsSection", () => {
     fireEvent.click(screen.getByTestId("add-manage"));
     fireEvent.click(screen.getByTestId("save"));
     const saved = onSave.mock.calls[0][0];
-    expect(saved.templates.length).toBe(DEFAULT_ORDER_CONFIG.templates.length + 1);
+    expect(saved.templates.length).toBe(SAMPLE_ORDER_CONFIG.templates.length + 1);
     expect(saved.templates[saved.templates.length - 1].kind).toBe("manage");
   });
 
@@ -233,7 +251,7 @@ describe("OrderSettingsSection", () => {
   it("clears a stale raw-edit override when a template is removed and its id is reused", () => {
     const { onSave } = wrap();
 
-    // DEFAULT_TEMPLATES has 7 entries (indices 0..6), so the first add
+    // SAMPLE_ORDER_CONFIG has 7 entries (indices 0..6), so the first add
     // deterministically mints id "tmpl-8-7".
     fireEvent.click(screen.getByTestId("add-template"));
     fireEvent.click(screen.getByTestId("add-place"));
@@ -265,9 +283,10 @@ describe("OrderSettingsSection", () => {
     expect(saved.templates.find((t: { id: string }) => t.id === "tmpl-8-7").priceOffset).toBe(0);
   });
 
-  // Reset replaces every template wholesale, so any in-progress raw edit for
-  // an id that happens to survive the reset (default ids are fixed strings)
-  // must not persist and misdisplay across the reset.
+  // Reset replaces every template wholesale (eTape ships with NO default
+  // templates/hotkeys, so reset-to-defaults clears the list entirely) — an
+  // in-progress raw edit for a row that gets wiped by the reset must not
+  // leak into whatever renders afterward.
   it("clears a stale raw-edit override across reset-to-defaults", () => {
     const { onSave } = wrap();
     const offset = screen.getByLabelText("offset-buy-5k") as HTMLInputElement;
@@ -279,17 +298,16 @@ describe("OrderSettingsSection", () => {
     fireEvent.click(screen.getByTestId("reset-defaults"));
     fireEvent.click(screen.getByTestId("reset-confirm"));
 
-    // buy-5k's default priceOffset is 0 — the display must snap back to it,
-    // not keep showing the pre-reset in-progress "1." text.
-    const afterReset = screen.getByLabelText("offset-buy-5k") as HTMLInputElement;
-    expect(afterReset.value).toBe("0");
+    // The default set is empty, so buy-5k's card (and its in-progress "1."
+    // edit) is gone entirely rather than snapping back to some value.
+    expect(screen.queryByTestId("tmpl-card-buy-5k")).toBeNull();
 
     fireEvent.click(screen.getByTestId("save"));
     const saved = onSave.mock.calls[0][0];
-    expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").priceOffset).toBe(0);
+    expect(saved.templates).toEqual([]);
   });
 
-  it("reset-defaults then reset-confirm restores DEFAULT_TEMPLATES", () => {
+  it("reset-defaults then reset-confirm clears every template (defaults are blank)", () => {
     const { onSave } = wrap();
     // Mutate first, to prove the reset actually discards the edit rather than
     // happening to already match defaults.
@@ -335,6 +353,13 @@ describe("OrderSettingsSection", () => {
     const commands = {
       sendCommand: vi.fn(async (n: string, a: unknown): Promise<AckMsg> => {
         sent.push({ name: n, args: a });
+        // DEFAULT_ORDER_CONFIG now ships blank, so seed the shared
+        // OrderConfigProvider context with SAMPLE_ORDER_CONFIG on its
+        // GetConfig read — the real hotkey engine below (useHotkeys) reads
+        // config from that shared context, not from OrderSettingsSection's
+        // own `config` prop, and this test's whole premise is that
+        // Ctrl+Shift+K is a genuinely live KillSwitch binding for it to leak.
+        if (n === "GetConfig") return { kind: "ack", corrId: "c", status: "accepted", value: SAMPLE_ORDER_CONFIG };
         return { kind: "ack", corrId: "c", status: "accepted", orderId: "ETX", value: undefined };
       }),
     };
@@ -343,7 +368,7 @@ describe("OrderSettingsSection", () => {
 
     function Harness() {
       useHotkeys({ stores, commands, linkGroups, group: "green" });
-      return <OrderSettingsSection config={DEFAULT_ORDER_CONFIG} onSave={vi.fn()} />;
+      return <OrderSettingsSection config={SAMPLE_ORDER_CONFIG} onSave={vi.fn()} />;
     }
 
     await act(async () => {
