@@ -37,4 +37,22 @@ describe("connectEventToasts", () => {
     expect(push).toHaveBeenNthCalledWith(1, { level: "warn", text: "8 subscription slots remaining account-wide" });
     expect(push).toHaveBeenNthCalledWith(2, { level: "danger", text: "subscription quota exhausted account-wide" });
   });
+
+  it("does not double-toast an event delivered via snapshot then redelivered via delta", () => {
+    const c = makeClient();
+    const push = vi.fn();
+    connectEventToasts(c as never, { push, dismiss: vi.fn() });
+
+    // snapshot replay (e.g. on reconnect) includes a warn event already seen live
+    c.emit({ kind: "snapshot", topic: "sys.events",
+      payload: [{ seq: 1, ts: "t1", kind: "quota", detail: "old", level: "warn" }] });
+    expect(push).not.toHaveBeenCalled();
+
+    // same event redelivered via delta (identical kind/seq/ts) must be deduped
+    // against the snapshot-seen key, not just against prior deltas
+    c.emit({ kind: "delta", topic: "sys.events",
+      payload: { seq: 1, ts: "t1", kind: "quota", detail: "old", level: "warn" } });
+
+    expect(push).not.toHaveBeenCalled();
+  });
 });
