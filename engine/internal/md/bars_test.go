@@ -425,6 +425,33 @@ func TestSeedSessionTicksEmptyIsNoOp(t *testing.T) {
 	}
 }
 
+// TestSeedSessionTicksExcludesTapeAndMark guards the branch's most
+// safety-critical invariant: a restart reconstruction from journaled ticks
+// must never touch the tape ring or push a stale last-trade price into
+// execution. SeedSessionTicks must emit zero TapeUpdate and push zero Mark,
+// even for a non-empty, multi-bucket batch that would trigger both on the
+// live Core.Feed path.
+func TestSeedSessionTicksExcludesTapeAndMark(t *testing.T) {
+	c, drain := runCore(t)
+	ticks := []feed.Tick{
+		tick(1, 0, 100, 10, feed.Buy),
+		tick(2, 3_000, 101, 5, feed.Sell),
+		tick(3, 12_000, 102, 7, feed.Buy),  // new 10s bucket -> finalizes bucket 0
+		tick(4, 25_000, 103, 3, feed.Sell), // new 10s bucket -> finalizes bucket 10s
+	}
+	c.SeedSessionTicks("US.AAPL", ticks)
+	for _, u := range drain() {
+		if tu, ok := u.(TapeUpdate); ok {
+			t.Fatalf("SeedSessionTicks emitted a TapeUpdate: %+v", tu)
+		}
+	}
+	select {
+	case m := <-c.Marks():
+		t.Fatalf("Mark leaked during SeedSessionTicks: %+v", m)
+	default:
+	}
+}
+
 // TestFinalizedBarsAccessor verifies the indicator-seeding accessor returns
 // only finalized bars for a timeframe. Uses a non-running Core so the engine
 // is driven entirely on this goroutine (no Run goroutine to race with).
