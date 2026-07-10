@@ -91,6 +91,23 @@ describe("buildTapeRows", () => {
     // newest first: seq 2 (400 shares) then seq 1 (12,500 shares)
     expect(rows.map((r) => r.isBlock)).toEqual([false, true]);
   });
+
+  // Task 0 (perf HUD): scanned is an additive field on the return value —
+  // every existing call site destructures {rows, paused} and stays correct
+  // (it just ignores the extra field). scanned counts ring slots visited,
+  // not rows kept, so it also reflects work spent on non-matching ticks.
+  it("scanned counts every ring slot visited, including symbol/size misses that don't become rows", () => {
+    const mixed = srcFrom([mkTick(1), mkTick(2, { symbol: "US.NVDA" }), mkTick(3)]);
+    const { rows, scanned } = buildTapeRows(mixed, liveView(mixed), { symbol: "US.AAPL", minSize: 0, maxRows: 10 });
+    expect(rows).toHaveLength(2); // seq 3 and seq 1 kept; seq 2 (NVDA) filtered out
+    expect(scanned).toBe(3); // but all 3 ring slots were visited to find them
+  });
+
+  it("scanned stops growing once maxRows caps the row count, mirroring the loop's own exit condition", () => {
+    const { rows, scanned } = buildTapeRows(src, liveView(src), { symbol: "US.AAPL", minSize: 0, maxRows: 5 });
+    expect(rows).toHaveLength(5);
+    expect(scanned).toBe(5); // no filtering in play here, so scanned === rows kept
+  });
 });
 
 describe("adjustAnchor", () => {

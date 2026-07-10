@@ -1,6 +1,7 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import { WsClient } from "./WsClient";
 import { FakeSocket } from "../../test/fakes";
+import { perf } from "../perf/PerfMonitor";
 
 function makeClient() {
   const timers: Array<() => void> = [];
@@ -119,5 +120,18 @@ describe("WsClient", () => {
     const sent = FakeSocket.last().sent.map((s) => JSON.parse(s));
     expect(sent.some((m) => m.kind === "command" && m.name === "GetConfig")).toBe(true);
     void p; // promise stays pending until an ack arrives — not awaited here
+  });
+
+  it("reports each snapshot/delta frame's topic to the shared perf singleton on the hot decode path", () => {
+    const { client } = makeClient();
+    client.start();
+    FakeSocket.last().open();
+    client.subscribe("md.tape", () => {});
+    const spy = vi.spyOn(perf, "countMessage");
+    FakeSocket.last().emit(JSON.stringify({ kind: "snapshot", topic: "md.tape", payload: [] }));
+    FakeSocket.last().emit(JSON.stringify({ kind: "delta", topic: "md.tape", payload: [] }));
+    expect(spy).toHaveBeenNthCalledWith(1, "md.tape");
+    expect(spy).toHaveBeenNthCalledWith(2, "md.tape");
+    spy.mockRestore();
   });
 });

@@ -22,6 +22,7 @@ import {
   adjustAnchor, buildTapeRows, liveView, TAPE_ROW_H, type TapeView,
 } from "../../render/tape/tapeState";
 import { paintTape, TAPE_PAD, TAPE_SIZE_RIGHT_FRAC } from "../../render/tape/paintTape";
+import { perf } from "../../perf/PerfMonitor";
 
 const HEADER_H = 26;
 const COLHEAD_H = 16;
@@ -145,11 +146,12 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
         // 26px back to the canvas the rest of the time.
         const canvasH = h - (pausedRef.current ? HEADER_H : 0) - COLHEAD_H;
         if (!applyCanvasSize(canvas, ctx, w, canvasH, window.devicePixelRatio || 1)) return;
-        const { rows, paused: p } = buildTapeRows(stores.tape, viewRef.current, {
+        const { rows, paused: p, scanned } = buildTapeRows(stores.tape, viewRef.current, {
           symbol: symbolRef.current,
           minSize: minSizeRef.current,
           maxRows: Math.ceil(canvasH / TAPE_ROW_H) + 1,
         });
+        perf.recordScan(`tape:${config.id}`, scanned); // no-op while perf is disabled (the default)
         // The anchor can also age out of the retained ring without any reconnect
         // (a long pause + enough delta volume to overrun the ring's capacity) —
         // buildTapeRows already falls back to a live-equivalent window in that

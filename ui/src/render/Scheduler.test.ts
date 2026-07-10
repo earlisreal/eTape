@@ -4,6 +4,7 @@ import { FakeRaf } from "../../test/fakes";
 import type { Surface } from "./surface";
 import { BarStore } from "../data/BarStore";
 import type { SnapshotMsg } from "../wire/contract";
+import { PerfMonitor } from "../perf/PerfMonitor";
 
 function surf(id: string, dirty: () => boolean, paint: () => void): Surface {
   return { id, isDirty: dirty, paint };
@@ -119,5 +120,26 @@ describe("Scheduler", () => {
     sched.stop();
     raf.tick();
     expect(paint).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports nothing into an injected PerfMonitor while it's disabled, and paint timing + frame interval once enabled", () => {
+    const raf = new FakeRaf();
+    const perfMon = new PerfMonitor(() => 0); // fixed clock — interval math stays deterministic
+    const sched = new Scheduler(raf, () => {}, perfMon);
+    sched.register(surf("a", () => true, () => {}));
+    sched.start();
+
+    raf.tick(); // perfMon.enabled is false (the default) — must be a complete no-op
+    expect(perfMon.snapshot()).toEqual({
+      enabled: false, paint: {}, scan: {},
+      frame: { intervalMs: null, droppedFrames: 0 }, wsMsgsPerSec: 0, ticksPerSec: 0,
+    });
+
+    perfMon.enable();
+    raf.tick(); // first frame after enabling: no prior frame to diff against yet
+    raf.tick(); // second frame: interval now computable
+    const snap = perfMon.snapshot();
+    expect(snap.paint.a).toBeDefined();
+    expect(snap.frame.intervalMs).toBe(0); // fixed clock — same instant every tick
   });
 });

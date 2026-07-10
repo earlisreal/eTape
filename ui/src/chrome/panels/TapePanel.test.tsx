@@ -9,6 +9,7 @@ import { Scheduler } from "../../render/Scheduler";
 import { browserRaf, type Surface } from "../../render/surface";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
 import type { Tick, AckMsg } from "../../wire/contract";
+import { perf } from "../../perf/PerfMonitor";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -93,6 +94,18 @@ describe("TapePanel", () => {
   it("paints without throwing on an empty ring", () => {
     const { surface } = renderTape();
     expect(() => surface().paint()).not.toThrow();
+  });
+
+  it("reports buildTapeRows's scanned count to the shared perf singleton, keyed by the surface id", () => {
+    const { stores, surface } = renderTape();
+    stores.tape.apply({ kind: "snapshot", topic: "md.tape",
+      payload: Array.from({ length: 10 }, (_, i) => mkTick(i)) });
+    const spy = vi.spyOn(perf, "recordScan");
+    act(() => {
+      surface().paint();
+    });
+    expect(spy).toHaveBeenCalledWith("tape:t-tape", expect.any(Number));
+    spy.mockRestore();
   });
 
   it("drops the paused pill once the anchor ages out of the retained ring (Task 7 eviction fix, mirrored at the panel level)", () => {
