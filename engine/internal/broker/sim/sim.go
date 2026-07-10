@@ -17,6 +17,7 @@ package sim
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"sync"
 
@@ -75,6 +76,7 @@ func (b *Broker) SetMark(symbol string, price float64) {
 	b.mu.Lock()
 	b.marks[symbol] = price
 	crossed := b.crossRestingLocked(symbol, price)
+	crossed = append(crossed, b.markToMarketLocked()...)
 	b.mu.Unlock()
 	for _, ev := range crossed {
 		b.emit(ev)
@@ -88,10 +90,67 @@ func (b *Broker) SetBook(symbol string, book feed.Book) {
 	b.mu.Lock()
 	b.books[symbol] = book
 	crossed := b.crossRestingOnBookLocked(symbol, book)
+	crossed = append(crossed, b.markToMarketLocked()...)
 	b.mu.Unlock()
 	for _, ev := range crossed {
 		b.emit(ev)
 	}
+}
+
+// markToMarketLocked recomputes the account snapshot from the current marks
+// and returns a BrokerAccount event IF Equity actually moved as a result —
+// e.g. a SetMark on a symbol the account holds. It is deliberately a no-op
+// emit (not a no-op recompute) when nothing changed: recomputeAccountLocked
+// still runs unconditionally (matching the brief's "recomputed after every
+// SetMark/SetBook"), but comparing before/after Equity avoids spamming a
+// BrokerAccount frame on every tick of a symbol the account doesn't hold, or
+// a repeated mark that doesn't move the number.
+//
+// prevEquity is captured AFTER the caller's crossing pass (crossRestingLocked
+// / crossRestingOnBookLocked), not before SetMark/SetBook started: if that
+// crossing pass produced a fill, fillLocked already recomputed the account
+// and returned its own BrokerAccount reflecting the fill's impact. Comparing
+// against the pre-crossing Equity would make this function re-emit an
+// identical duplicate of that frame; comparing against the post-crossing
+// Equity means this only fires for a genuinely additional change (the
+// mark-to-market effect of the new mark itself), never a repeat. Caller
+// holds mu.
+func (b *Broker) markToMarketLocked() []exec.BrokerEvent {
+	prevEquity := b.acct.Equity
+	b.recomputeAccountLocked()
+	if len(b.pos) == 0 || b.acct.Equity == prevEquity {
+		return nil
+	}
+	return []exec.BrokerEvent{exec.BrokerAccount{Account: b.acct}}
+}
+
+// recomputeAccountLocked derives Equity/BuyingPower/DayPnL from the current
+// AvailableCash, open positions, and last-trade marks. It deliberately never
+// touches AvailableCash, Realized, or SodEquity: those have their own
+// dedicated update paths (fillLocked's cash debit/credit and realized-P&L
+// accumulation; SodEquity is set once at boot/reset by New/ResetBalance and
+// must stay fixed for the rest of the session no matter how many times this
+// runs). Caller holds mu.
+func (b *Broker) recomputeAccountLocked() {
+	equity := b.acct.AvailableCash
+	for _, p := range b.pos {
+		mark, ok := b.marks[p.Symbol]
+		if !ok {
+			// No trade has printed for this symbol yet (e.g. a position
+			// opened before any tick arrived) -- fall back to the position's
+			// own average cost so it still contributes to equity instead of
+			// silently reading as zero until the first tick shows up.
+			mark = p.AvgPrice
+		}
+		equity += p.Qty * mark
+	}
+	b.acct.Equity = equity
+	// v1: no margin/leverage multiple -- buying power is just available
+	// cash. v1.5 should scale this by the account's Leverage once margin
+	// rules are modeled.
+	b.acct.BuyingPower = b.acct.AvailableCash
+	b.acct.DayPnL = equity - b.acct.SodEquity
+	b.acct.TsMs = b.now()
 }
 
 // SetAccount overwrites the venue account and emits a BrokerAccount reconcile
@@ -263,13 +322,17 @@ func (b *Broker) attemptInitialFillLocked(o *exec.Order) []exec.BrokerEvent {
 	return out
 }
 
-// fillLocked fills exactly qty of a resting order at price px, updates the
-// order's cumulative fill state and position, and returns the events to
-// emit (OrderFilled + BrokerPositions). qty may be less than o.LeavesQty (a
-// partial fill): the order is only deleted from b.orders and marked Filled
-// once LeavesQty reaches 0; otherwise it is marked PartiallyFilled and stays
-// resting so a later fill attempt (from another SetBook, etc.) can complete
-// it. Caller holds mu.
+// fillLocked fills exactly qty of a resting order at price px: it updates
+// the order's cumulative fill state, the position (weighted-average cost on
+// an add/open, realized P&L on a reduce/close/flip), and the account's cash
+// and mark-to-market snapshot, then returns the events to emit (OrderFilled
+// + BrokerPositions + BrokerAccount) — every fill in this broker, partial or
+// full, from any caller, flows through here, so this is the one place fill
+// accounting lives. qty may be less than o.LeavesQty (a partial fill): the
+// order is only deleted from b.orders and marked Filled once LeavesQty
+// reaches 0; otherwise it is marked PartiallyFilled and stays resting so a
+// later fill attempt (from another SetBook, etc.) can complete it. Caller
+// holds mu.
 func (b *Broker) fillLocked(o *exec.Order, qty, px float64) []exec.BrokerEvent {
 	// AvgFillPrice is a running size-weighted average across every fill this
 	// order has received so far, not just this one — an order can now fill
@@ -296,14 +359,61 @@ func (b *Broker) fillLocked(o *exec.Order, qty, px float64) []exec.BrokerEvent {
 		p = &exec.Position{Venue: b.venue, Symbol: o.Symbol}
 		b.pos[o.Symbol] = p
 	}
-	p.Qty += signed
-	p.AvgPrice = px // simplistic: last fill price (Task 3 replaces with weighted avg + cash/equity impact)
+
+	prevPosQty := p.Qty
+	if prevPosQty == 0 || (prevPosQty > 0) == (signed > 0) {
+		// Adds to (or opens) a position: fold this fill into a size-weighted
+		// average cost across the old and new shares.
+		newAbs := math.Abs(prevPosQty) + qty
+		p.AvgPrice = (math.Abs(prevPosQty)*p.AvgPrice + qty*px) / newAbs
+		p.Qty = prevPosQty + signed
+	} else {
+		// Reduces, closes, or flips through flat: the closed portion
+		// realizes P&L against the position's existing AvgPrice. longSign
+		// flips the sign of (px - AvgPrice) so closing a long profits when
+		// px > AvgPrice and closing a short profits when px < AvgPrice.
+		longSign := 1.0
+		if prevPosQty < 0 {
+			longSign = -1.0
+		}
+		closedQty := math.Min(qty, math.Abs(prevPosQty))
+		b.acct.Realized += (px - p.AvgPrice) * closedQty * longSign
+		p.Qty = prevPosQty + signed
+		if remainder := qty - closedQty; remainder > 0 {
+			// Flip through flat: the excess beyond what closed the old
+			// position opens a brand-new position on the other side, priced
+			// at this fill -- there is nothing left of the old position to
+			// average against.
+			p.AvgPrice = px
+		}
+		// A pure reduce/close (remainder == 0, including the exact-flatten
+		// case) leaves AvgPrice untouched: it only ever changes on the
+		// add/open branch above, never while shrinking a position.
+	}
+
+	// Cash: buy/cover pay, sell/short receive -- same sign convention as
+	// exec/roundtrip.go's cashSign (unexported there, and that package must
+	// not import back into sim, so it's duplicated here rather than shared).
+	b.acct.AvailableCash += cashSign(o.Side) * qty * px
+	b.recomputeAccountLocked()
 
 	fill := exec.Fill{Venue: b.venue, OrderID: o.ID, Symbol: o.Symbol, Side: o.Side, Qty: qty, Price: px, TsMs: b.now()}
 	return []exec.BrokerEvent{
 		exec.OrderFilled{F: fill, CumQty: o.ExecutedQty, LeavesQty: o.LeavesQty, AvgPrice: o.AvgFillPrice},
 		exec.BrokerPositions{V: b.venue, Positions: b.positionsLocked()},
+		exec.BrokerAccount{Account: b.acct},
 	}
+}
+
+// cashSign is the fill's contribution sign to available cash: SELL/SHORT
+// receive cash (+1), BUY/COVER pay cash (-1) -- the same convention as
+// exec/roundtrip.go's (unexported) cashSign, duplicated here rather than
+// imported since sim must not reach into exec's unexported helpers.
+func cashSign(side exec.Side) float64 {
+	if side == exec.SideSell || side == exec.SideShort {
+		return 1
+	}
+	return -1
 }
 
 // attemptBookFillLocked prices a resting order against book via

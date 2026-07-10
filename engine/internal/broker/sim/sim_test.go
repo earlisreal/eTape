@@ -240,6 +240,7 @@ func TestSimPartialFillRestsThenCompletesOnLaterSetBook(t *testing.T) {
 		t.Fatalf("expected partial fill of 4, leaving 6, got %+v ok=%v", f, ok)
 	}
 	_ = drain(t, b) // BrokerPositions
+	_ = drain(t, b) // BrokerAccount
 
 	_, _, orders, err := b.Snapshot(context.Background())
 	if err != nil {
@@ -285,6 +286,7 @@ func TestSimSetMarkDoesNotRefillPartiallyFilledOrderOffStaleBook(t *testing.T) {
 		t.Fatalf("expected partial fill of 4, leaving 6, got %+v ok=%v", f, ok)
 	}
 	_ = drain(t, b) // BrokerPositions
+	_ = drain(t, b) // BrokerAccount
 
 	// A mark tick arrives with no new SetBook. The order must not touch the
 	// already-consumed 4-share depth again.
@@ -526,6 +528,7 @@ func TestSimTIFIOC_PartialFillCancelsRemainder(t *testing.T) {
 		t.Fatalf("IOC should still fill the immediately-available 4, got %+v ok=%v", f, ok)
 	}
 	_ = drain(t, b) // BrokerPositions
+	_ = drain(t, b) // BrokerAccount
 	c, ok := drain(t, b).(exec.OrderCanceled)
 	if !ok || c.OID != "ET1" {
 		t.Fatalf("IOC should cancel the unfilled remainder instead of resting it, got %+v ok=%v", c, ok)
@@ -634,6 +637,7 @@ func TestSim_Flatten_ZeroesPositions(t *testing.T) {
 	drain(t, b) // OrderAccepted
 	drain(t, b) // OrderFilled
 	drain(t, b) // BrokerPositions (from the fill)
+	drain(t, b) // BrokerAccount (from the fill)
 	if err := b.Flatten(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -859,6 +863,7 @@ func TestSim_ResetBalance_CancelsFlattensAndSetsAccount(t *testing.T) {
 	drain(t, b) // OrderAccepted
 	drain(t, b) // OrderFilled
 	drain(t, b) // BrokerPositions (from the fill)
+	drain(t, b) // BrokerAccount (from the fill)
 
 	if err := b.ResetBalance(context.Background(), 50_000); err != nil {
 		t.Fatal(err)
@@ -924,5 +929,225 @@ func TestSimCancelAll(t *testing.T) {
 	got[drain(t, b).(exec.OrderCanceled).OID] = true
 	if !got["ET1"] || !got["ET2"] {
 		t.Fatalf("cancel-all should cancel both, got %v", got)
+	}
+}
+
+// --- Task 3: cash, weighted-average positions, realized/unrealized P&L ---
+
+// lastAccountEvent scans (rather than requiring a specific position) for the
+// most recent exec.BrokerAccount in evs, since a fill's cash/position/account
+// bookkeeping can be interleaved with other events (OrderFilled,
+// BrokerPositions) whose exact count isn't this helper's concern.
+func lastAccountEvent(evs []exec.BrokerEvent) (exec.BrokerAccount, bool) {
+	var out exec.BrokerAccount
+	found := false
+	for _, e := range evs {
+		if a, ok := e.(exec.BrokerAccount); ok {
+			out, found = a, true
+		}
+	}
+	return out, found
+}
+
+// TestSimFill_DebitsCashAndEmitsAccount covers the basic cash-on-fill case: a
+// buy pays cash (AvailableCash drops by qty*fillPrice) and the fill is
+// followed by a BrokerAccount event carrying the updated numbers.
+func TestSimFill_DebitsCashAndEmitsAccount(t *testing.T) {
+	b := newSim(t) // AAPL mark 100, starting cash 100_000
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	evs := drainAll(b.Events())
+	acctEv, ok := lastAccountEvent(evs)
+	if !ok {
+		t.Fatalf("expected a BrokerAccount event after the fill, got %+v", evs)
+	}
+	wantCash := 100_000.0 - 10*100
+	if acctEv.Account.AvailableCash != wantCash {
+		t.Fatalf("AvailableCash = %v, want %v", acctEv.Account.AvailableCash, wantCash)
+	}
+	// Bought at the same price as the standing mark: cash spent equals the
+	// new position's mark-to-market value, so equity is unchanged from
+	// starting cash -- exactly what a real fill at cost should do.
+	if acctEv.Account.Equity != 100_000 {
+		t.Fatalf("Equity = %v, want 100000 (fill at cost shouldn't move equity)", acctEv.Account.Equity)
+	}
+	acct, _, _, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acct.AvailableCash != wantCash {
+		t.Fatalf("Snapshot AvailableCash = %v, want %v", acct.AvailableCash, wantCash)
+	}
+}
+
+// TestSimSetMark_UpdatesEquityWithoutTouchingCash: while holding a position,
+// moving the mark changes Equity (mark-to-market) but must never touch
+// AvailableCash -- only a fill moves cash.
+func TestSimSetMark_UpdatesEquityWithoutTouchingCash(t *testing.T) {
+	b := newSim(t)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"})
+	drainAll(b.Events())
+
+	acct, _, _, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cashAfterFill := acct.AvailableCash
+
+	b.SetMark("AAPL", 110)
+	evs := drainAll(b.Events())
+	acctEv, ok := lastAccountEvent(evs)
+	if !ok {
+		t.Fatalf("expected a BrokerAccount event when the mark moves for a held symbol, got %+v", evs)
+	}
+	if acctEv.Account.AvailableCash != cashAfterFill {
+		t.Fatalf("AvailableCash changed on a mark move alone: got %v, want %v", acctEv.Account.AvailableCash, cashAfterFill)
+	}
+	wantEquity := cashAfterFill + 10*110
+	if acctEv.Account.Equity != wantEquity {
+		t.Fatalf("Equity = %v, want %v (cash + qty*newMark)", acctEv.Account.Equity, wantEquity)
+	}
+
+	b.SetMark("AAPL", 90)
+	evs = drainAll(b.Events())
+	acctEv, ok = lastAccountEvent(evs)
+	if !ok {
+		t.Fatalf("expected a BrokerAccount event on the down move too, got %+v", evs)
+	}
+	wantEquity = cashAfterFill + 10*90
+	if acctEv.Account.Equity != wantEquity {
+		t.Fatalf("Equity = %v, want %v after the down move", acctEv.Account.Equity, wantEquity)
+	}
+}
+
+// TestSimFill_ClosingProfitableLongRealizesPnL: selling a profitable long to
+// flat realizes the correct P&L, DayPnL reflects it, and the position
+// flattens exactly to zero.
+func TestSimFill_ClosingProfitableLongRealizesPnL(t *testing.T) {
+	b := newSim(t)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"})
+	drainAll(b.Events())
+
+	b.SetBook("AAPL", feed.Book{Bids: []feed.BookLevel{{Price: 110, Volume: 50}}})
+	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideSell, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET2"})
+	evs := drainAll(b.Events())
+	acctEv, ok := lastAccountEvent(evs)
+	if !ok {
+		t.Fatalf("expected a BrokerAccount event after the closing fill, got %+v", evs)
+	}
+	if acctEv.Account.Realized != 100 {
+		t.Fatalf("Realized = %v, want 100 ((110-100)*10)", acctEv.Account.Realized)
+	}
+	wantEquity := 100_000.0 + 100 // starting cash + realized profit, flat position
+	if acctEv.Account.Equity != wantEquity {
+		t.Fatalf("Equity = %v, want %v", acctEv.Account.Equity, wantEquity)
+	}
+	if acctEv.Account.DayPnL != 100 {
+		t.Fatalf("DayPnL = %v, want 100", acctEv.Account.DayPnL)
+	}
+
+	_, pos, _, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range pos {
+		if p.Symbol == "AAPL" && p.Qty != 0 {
+			t.Fatalf("AAPL position should be flat after closing the whole long, got %+v", p)
+		}
+	}
+}
+
+// TestSimFill_AddingToPositionWeightsAveragePrice: scaling into an existing
+// long at a different price produces a size-weighted average cost, not the
+// latest fill price.
+func TestSimFill_AddingToPositionWeightsAveragePrice(t *testing.T) {
+	b := newSim(t)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"})
+	drainAll(b.Events())
+
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 110, Volume: 50}}})
+	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET2"})
+	drainAll(b.Events())
+
+	_, pos, _, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p exec.Position
+	for _, pp := range pos {
+		if pp.Symbol == "AAPL" {
+			p = pp
+		}
+	}
+	if p.Qty != 20 {
+		t.Fatalf("Qty = %v, want 20", p.Qty)
+	}
+	want := (10*100.0 + 10*110.0) / 20
+	if math.Abs(p.AvgPrice-want) > 1e-9 {
+		t.Fatalf("AvgPrice = %v, want %v (size-weighted average, not the latest fill price 110)", p.AvgPrice, want)
+	}
+}
+
+// TestSimFill_FlipThroughFlatRealizesThenOpensOpposite: selling more than a
+// long position holds realizes P&L on the closed portion, then opens a new
+// short with the excess at the fill price as its AvgPrice.
+func TestSimFill_FlipThroughFlatRealizesThenOpensOpposite(t *testing.T) {
+	b := newSim(t)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"})
+	drainAll(b.Events())
+
+	b.SetBook("AAPL", feed.Book{Bids: []feed.BookLevel{{Price: 120, Volume: 50}}})
+	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideSell, Type: exec.TypeMarket, Qty: 15, ClientOrderID: "ET2"})
+	evs := drainAll(b.Events())
+	acctEv, ok := lastAccountEvent(evs)
+	if !ok {
+		t.Fatalf("expected a BrokerAccount event after the flip, got %+v", evs)
+	}
+	wantRealized := (120.0 - 100.0) * 10
+	if acctEv.Account.Realized != wantRealized {
+		t.Fatalf("Realized = %v, want %v (only the 10 closed shares realize)", acctEv.Account.Realized, wantRealized)
+	}
+
+	_, pos, _, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p exec.Position
+	for _, pp := range pos {
+		if pp.Symbol == "AAPL" {
+			p = pp
+		}
+	}
+	if p.Qty != -5 {
+		t.Fatalf("Qty = %v, want -5 (short the 5-share excess)", p.Qty)
+	}
+	if p.AvgPrice != 120 {
+		t.Fatalf("AvgPrice = %v, want 120 (the flip's fill price, not blended with the old long's cost)", p.AvgPrice)
+	}
+}
+
+// TestSimFill_PositionWithNoMarkFallsBackToAvgPriceForEquity: a symbol that
+// has never had a mark (SetMark never called) must still contribute to
+// Equity via its position's AvgPrice, not read as a silent zero.
+func TestSimFill_PositionWithNoMarkFallsBackToAvgPriceForEquity(t *testing.T) {
+	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000) // no SetMark for TSLA anywhere
+	b.SetBook("TSLA", feed.Book{Asks: []feed.BookLevel{{Price: 200, Volume: 50}}})
+	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim-1", Symbol: "TSLA", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 5, ClientOrderID: "ET1"})
+	evs := drainAll(b.Events())
+	acctEv, ok := lastAccountEvent(evs)
+	if !ok {
+		t.Fatalf("expected a BrokerAccount event after the fill, got %+v", evs)
+	}
+	gotContribution := acctEv.Account.Equity - acctEv.Account.AvailableCash
+	wantContribution := 5 * 200.0
+	if gotContribution != wantContribution {
+		t.Fatalf("position MTM contribution = %v, want %v -- Equity must fall back to qty*AvgPrice when no mark exists, not read as zero", gotContribution, wantContribution)
 	}
 }
