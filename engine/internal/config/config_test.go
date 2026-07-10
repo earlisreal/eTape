@@ -239,7 +239,7 @@ func TestBackfillAlpacaDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := cfg.Backfill.Alpaca
-	if !a.Enabled || a.CredsKey != "alpaca" || a.Feed != "iex" {
+	if !a.Enabled || a.CredsKey != "" || a.Feed != "iex" {
 		t.Fatalf("alpaca backfill defaults = %+v", a)
 	}
 }

@@ -175,9 +175,50 @@ func (f *OpenDFeed) seedWorker(ctx context.Context) {
 	}
 }
 
+// seedRetryAttempts and seedRetryDelay bound seed's retry-on-error window.
+// Ensure fires the KL_1Min subscribe and enqueues the seed job with no
+// ordering between them, so a seed's Qot_GetKL can reach OpenD before the
+// subscribe acks — OpenD rejects that with "please subscribe to KL_1Min data
+// first." Even after the ack, the real-time cache can briefly lack data (a
+// second, narrower race window). A few short retries ride out both without
+// requiring a subManager API change to gate the seed on the ack.
+const (
+	seedRetryAttempts = 5
+	seedRetryDelay    = 300 * time.Millisecond
+)
+
+// seedRetry calls fn until it succeeds or seedRetryAttempts is exhausted,
+// waiting seedRetryDelay (via clk, so tests drive it with a fake clock)
+// between tries. It aborts immediately on ctx.Done() rather than waiting out
+// the remaining attempts.
+func seedRetry[T any](ctx context.Context, clk clock.Clock, fn func() (T, error)) (T, error) {
+	var (
+		v   T
+		err error
+	)
+	for attempt := 0; attempt < seedRetryAttempts; attempt++ {
+		v, err = fn()
+		if err == nil {
+			return v, nil
+		}
+		if attempt == seedRetryAttempts-1 {
+			return v, err
+		}
+		select {
+		case <-clk.After(seedRetryDelay):
+		case <-ctx.Done():
+			return v, ctx.Err()
+		}
+	}
+	return v, err
+}
+
 // seed replays OpenD's local caches as Seed events, per subtype, in a fixed
-// order (bars, ticks, book, quote). Failures log and continue — a partial
-// seed beats none, and the md core's dedup makes overlap harmless.
+// order (bars, ticks, book, quote). Each read goes through seedRetry: it's a
+// quota-free real-time-cache lookup that can lose the subscribe-ack race (see
+// seedRetryAttempts above). Failures that survive every retry log and
+// continue — a partial seed beats none, and the md core's dedup makes
+// overlap harmless.
 func (f *OpenDFeed) seed(ctx context.Context, symbol string, subs []feed.SubType) {
 	has := func(want feed.SubType) bool {
 		for _, s := range subs {
@@ -188,28 +229,40 @@ func (f *OpenDFeed) seed(ctx context.Context, symbol string, subs []feed.SubType
 		return false
 	}
 	if has(feed.SubKL1m) {
-		if bars, err := f.bf.cachedBars1m(ctx, symbol, maxAPIRows); err != nil {
+		bars, err := seedRetry(ctx, f.clk, func() ([]feed.Bar, error) {
+			return f.bf.cachedBars1m(ctx, symbol, maxAPIRows)
+		})
+		if err != nil {
 			slog.Warn("seed bars1m failed", "symbol", symbol, "err", err)
 		} else if len(bars) > 0 {
 			f.emit(ctx, feed.Bars1mEvent{Bars: bars, Seed: true})
 		}
 	}
 	if has(feed.SubTicker) {
-		if ticks, err := f.bf.recentTicks(ctx, symbol, maxAPIRows); err != nil {
+		ticks, err := seedRetry(ctx, f.clk, func() ([]feed.Tick, error) {
+			return f.bf.recentTicks(ctx, symbol, maxAPIRows)
+		})
+		if err != nil {
 			slog.Warn("seed ticks failed", "symbol", symbol, "err", err)
 		} else if len(ticks) > 0 {
 			f.emit(ctx, feed.TicksEvent{Ticks: ticks, Seed: true})
 		}
 	}
 	if has(feed.SubBook) {
-		if book, err := f.bf.bookSnapshot(ctx, symbol); err != nil {
+		book, err := seedRetry(ctx, f.clk, func() (feed.Book, error) {
+			return f.bf.bookSnapshot(ctx, symbol)
+		})
+		if err != nil {
 			slog.Warn("seed book failed", "symbol", symbol, "err", err)
 		} else {
 			f.emit(ctx, feed.BookEvent{Book: book, Seed: true})
 		}
 	}
 	if has(feed.SubQuote) {
-		if q, err := f.bf.quoteSnapshot(ctx, symbol); err != nil {
+		q, err := seedRetry(ctx, f.clk, func() (feed.Quote, error) {
+			return f.bf.quoteSnapshot(ctx, symbol)
+		})
+		if err != nil {
 			slog.Warn("seed quote failed", "symbol", symbol, "err", err)
 		} else {
 			f.emit(ctx, feed.QuoteEvent{Quote: q, Seed: true})

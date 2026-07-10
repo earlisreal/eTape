@@ -228,10 +228,11 @@ func main() {
 		if cfg.Backfill.Enabled {
 			var fallback backfill.HistFetcher
 			if cfg.Backfill.Alpaca.Enabled {
-				if cfg.Backfill.Alpaca.CredsKey == "alpaca-live" {
-					log.Warn("backfill: refusing alpaca-live creds for read-only historical fallback", "key", cfg.Backfill.Alpaca.CredsKey)
-				} else if p, err := credsFile.Get(cfg.Backfill.Alpaca.CredsKey); err == nil {
+				if p, label, err := resolveBackfillAlpacaCreds(cfg, credsFile); err == nil {
 					fallback = histalpaca.New("", p.KeyID, p.SecretKey, cfg.Backfill.Alpaca.Feed, clock.System{})
+					log.Info("backfill: alpaca fallback resolved", "from", label)
+				} else if errors.Is(err, errAlpacaLiveCreds) {
+					log.Warn("backfill: refusing alpaca-live creds for read-only historical fallback", "key", cfg.Backfill.Alpaca.CredsKey)
 				} else {
 					log.Warn("backfill: alpaca fallback disabled (no creds)", "key", cfg.Backfill.Alpaca.CredsKey, "err", err)
 				}

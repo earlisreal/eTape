@@ -3,14 +3,17 @@ package opend
 import (
 	"context"
 	"errors"
+	"net"
 	"sync"
 	"testing"
 	"time"
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
+	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetkl"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotupdateticker"
 )
 
@@ -68,6 +71,82 @@ func TestEnsureSubscribesAndSeeds(t *testing.T) {
 	})
 	if ev, ok := nextEvent(t, f.Events()).(feed.TicksEvent); !ok || ev.Seed || ev.Ticks[0].Seq != 2 {
 		t.Fatalf("push event = %#v, want live TicksEvent seq=2", ev)
+	}
+}
+
+// TestSeedRetriesTransientGetKLFailure covers the race Ensure's doc comment
+// describes: the KL_1Min subscribe and the seed job fire with no ordering
+// between them, so the seed's Qot_GetKL can reach OpenD before the subscribe
+// acks and get rejected ("please subscribe to KL_1Min data first."). The mock
+// fails the first Qot_GetKL for the symbol, then succeeds; seed must retry
+// and still emit the seeded Bars1mEvent.
+//
+// The retry sleeps via clk.After, and that call happens inside the
+// seedWorker goroutine at some point after Ensure returns — the test
+// goroutine cannot know exactly when. A single upfront clk.Advance races
+// that registration (mirrors internal/broker/netx/ratelimit_test.go's
+// TestTokenBucket_TakeBlocksThenSucceeds), so instead this polls: a tiny real
+// sleep to give the retry goroutine a scheduling point, then a small fake
+// advance, repeated until the seeded event lands.
+func TestSeedRetriesTransientGetKLFailure(t *testing.T) {
+	m := newMockOpenD(t)
+	m.setData("US.AAPL", &qotData{bars1m: []*qotcommon.KLine{kl(1782146460, 309.1, 1000)}})
+
+	var mu sync.Mutex
+	klCalls := 0
+	m.handler = func(mm *mockOpenD, conn net.Conn, f Frame) {
+		if f.ProtoID == ProtoQotGetKL {
+			mu.Lock()
+			klCalls++
+			first := klCalls == 1
+			mu.Unlock()
+			if first {
+				mm.reply(conn, f, &qotgetkl.Response{
+					RetType: proto.Int32(-1),
+					RetMsg:  proto.String("Before calling the Get Real-time Candlestick interface, please subscribe to KL_1Min data first."),
+				})
+				return
+			}
+		}
+		mm.defaultHandler(mm, conn, f)
+	}
+
+	cli := liveClient(t, m)
+	clk := clock.NewFake(time.Unix(1_782_000_000, 0))
+	f := NewOpenDFeed(cli, FeedOptions{Clock: clk})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = f.Run(ctx) }()
+
+	f.Ensure(feed.Demand{ID: "d", Symbol: "US.AAPL", Subs: []feed.SubType{feed.SubKL1m}})
+
+	const (
+		maxIterations = 500
+		stepAdvance   = 10 * time.Millisecond
+	)
+	var ev feed.Event
+	for i := 0; i < maxIterations; i++ {
+		time.Sleep(time.Millisecond) // real preemption point for the seedWorker goroutine
+		clk.Advance(stepAdvance)
+		select {
+		case ev = <-f.Events():
+		default:
+			continue
+		}
+		break
+	}
+	if ev == nil {
+		t.Fatalf("no seed event after %d poll iterations (%v of virtual time advanced)", maxIterations, maxIterations*stepAdvance)
+	}
+	bars, ok := ev.(feed.Bars1mEvent)
+	if !ok || !bars.Seed || len(bars.Bars) != 1 {
+		t.Fatalf("event = %#v, want seed Bars1mEvent after retry", ev)
+	}
+	mu.Lock()
+	n := klCalls
+	mu.Unlock()
+	if n < 2 {
+		t.Fatalf("Qot_GetKL calls = %d, want >= 2 (must retry after the first failure)", n)
 	}
 }
 

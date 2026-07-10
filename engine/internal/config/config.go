@@ -157,11 +157,17 @@ type Backfill struct {
 }
 
 // BackfillAlpaca is the [backfill.alpaca] section: the optional 1m-depth
-// fallback source. Uses the PAPER creds key (free data; live keys untouched).
+// fallback source. Uses PAPER creds only (free data; live keys untouched).
+// CredsKey is an explicit override naming a credentials.json entry; the
+// default "" means auto-resolution against the configured Alpaca venues
+// instead (see resolveBackfillAlpacaCreds in cmd/etape) — a standalone key
+// literal would otherwise drift out of sync with the credentials-store
+// redesign, which regenerates key names on every Venues-UI edit. Either path
+// refuses an "alpaca-live" key/venue outright.
 type BackfillAlpaca struct {
 	Enabled  bool   `toml:"enabled"`
-	CredsKey string `toml:"creds_key"`
-	Feed     string `toml:"feed"` // "iex" (free) | "sip"
+	CredsKey string `toml:"creds_key"` // "" => resolve from a configured non-live alpaca venue
+	Feed     string `toml:"feed"`      // "iex" (free) | "sip"
 }
 
 // Config is the engine's bootstrap configuration.
@@ -199,7 +205,7 @@ func Default() Config {
 		StockInfo: StockInfo{Enabled: true, RefreshMs: 15000, MaxPerReq: 400},
 		Health:    Health{Enabled: true, ProbeMs: 5000},
 		Backfill: Backfill{Enabled: true, IntradayDays: 20, DailyYears: 0, Concurrency: 3, SeedChunk: 500,
-			Alpaca: BackfillAlpaca{Enabled: true, CredsKey: "alpaca", Feed: "iex"},
+			Alpaca: BackfillAlpaca{Enabled: true, CredsKey: "", Feed: "iex"},
 		},
 	}
 }
