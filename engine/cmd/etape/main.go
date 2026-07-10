@@ -37,6 +37,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/replay"
 	"github.com/earlisreal/eTape/engine/internal/scan"
 	"github.com/earlisreal/eTape/engine/internal/session"
+	"github.com/earlisreal/eTape/engine/internal/singleinstance"
 	"github.com/earlisreal/eTape/engine/internal/stockinfo"
 	"github.com/earlisreal/eTape/engine/internal/store"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
@@ -186,6 +187,32 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 		log.Error("make db dir", "err", err)
 		return 1
 	}
+
+	// --- single-instance guard ---
+	// Keyed on dbPath so a second launch pointed at the same store is
+	// blocked before it touches the shared DB (per-process journal seq
+	// counters -> duplicate-PK inserts), the shared moomoo OpenD
+	// subscription/history quota (each engine assumes it owns the whole
+	// pool), or the uihub port. -demo gets a unique temp dbPath (above), so
+	// it always acquires its own lock and never collides with a live
+	// instance. The lock is OS-held: it releases automatically even on a
+	// crash, so there is no stale-lock cleanup to do.
+	releaseLock, err := singleinstance.Acquire(dbPath + ".lock")
+	if errors.Is(err, singleinstance.ErrAlreadyRunning) {
+		log.Info("eTape is already running; opening it instead", "addr", cfg.UIHub.Addr())
+		if !*noOpen {
+			// Best-effort: reaches the already-running instance's UI. If it
+			// fails (no browser handler, etc.) there's nothing more useful
+			// to do than exit -- the other instance is already up.
+			_ = openbrowser.Open("http://" + cfg.UIHub.Addr())
+		}
+		return 0
+	}
+	if err != nil {
+		log.Error("single-instance lock", "err", err)
+		return 1
+	}
+	defer releaseLock()
 
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
