@@ -132,6 +132,74 @@ func TestReadJournalDayRoundTrips(t *testing.T) {
 	}
 }
 
+func TestReadJournalTicksFiltersBySymbolKindAndDay(t *testing.T) {
+	s := open(t)
+	aTicks := feed.TicksEvent{Ticks: []feed.Tick{
+		{Symbol: "US.AAPL", Seq: 1, TsMs: recvBase, Price: 100.0, Volume: 10, Dir: feed.Buy},
+		{Symbol: "US.AAPL", Seq: 2, TsMs: recvBase + 1000, Price: 100.5, Volume: 20, Dir: feed.Sell},
+	}}
+	bTicks := feed.TicksEvent{Ticks: []feed.Tick{
+		{Symbol: "US.MSFT", Seq: 1, TsMs: recvBase, Price: 400.0, Volume: 5, Dir: feed.Buy},
+	}}
+	quote := feed.QuoteEvent{Quote: feed.Quote{Symbol: "US.AAPL", TsMs: recvBase, Last: 100.5}}
+
+	s.RecordEvent(aTicks, recvBase)
+	s.RecordEvent(bTicks, recvBase+1)
+	s.RecordEvent(quote, recvBase+2)
+	s.Flush()
+
+	got, err := s.ReadJournalTicks("US.AAPL", recvBase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := aTicks.Ticks
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ReadJournalTicks = %#v, want %#v", got, want)
+	}
+}
+
+func TestReadJournalTicksEmptyWhenNoneRecorded(t *testing.T) {
+	s := open(t)
+	s.RecordEvent(feed.ConnUpEvent{}, recvBase)
+	s.Flush()
+
+	got, err := s.ReadJournalTicks("US.AAPL", recvBase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != nil {
+		t.Fatalf("ReadJournalTicks = %#v, want nil", got)
+	}
+}
+
+// TestReadJournalTicksPreservesSeqOverlap documents that de-dup across
+// journaled batches (e.g. a seed batch followed by a live push covering some
+// of the same tick seqs) is NOT this method's job — both copies come back,
+// in journaled order.
+func TestReadJournalTicksPreservesSeqOverlap(t *testing.T) {
+	s := open(t)
+	seed := feed.TicksEvent{Seed: true, Ticks: []feed.Tick{
+		{Symbol: "US.AAPL", Seq: 1, TsMs: recvBase, Price: 100.0, Volume: 10, Dir: feed.Buy},
+		{Symbol: "US.AAPL", Seq: 2, TsMs: recvBase + 1000, Price: 100.5, Volume: 20, Dir: feed.Sell},
+	}}
+	live := feed.TicksEvent{Ticks: []feed.Tick{
+		{Symbol: "US.AAPL", Seq: 2, TsMs: recvBase + 1000, Price: 100.5, Volume: 20, Dir: feed.Sell},
+		{Symbol: "US.AAPL", Seq: 3, TsMs: recvBase + 2000, Price: 101.0, Volume: 15, Dir: feed.Buy},
+	}}
+	s.RecordEvent(seed, recvBase)
+	s.RecordEvent(live, recvBase+1)
+	s.Flush()
+
+	got, err := s.ReadJournalTicks("US.AAPL", recvBase)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := append(append([]feed.Tick{}, seed.Ticks...), live.Ticks...)
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ReadJournalTicks = %#v, want %#v", got, want)
+	}
+}
+
 func TestJournalDaysDistinct(t *testing.T) {
 	s := open(t)
 	// One event on 2026-07-06, one a day later (recvBase + 24h).

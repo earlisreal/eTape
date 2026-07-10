@@ -303,6 +303,28 @@ func (e *barEngine) seedHistory1m(c *Core, symbol string, bars []feed.Bar) {
 	c.inds.reseedSymbol(c, symbol)
 }
 
+// seedTicksTFs are the timeframes a session-ticks seed can touch: agg10
+// populates TF10s directly, and the shadow 1m aggregator's finalized bars
+// merge their delta into an existing authoritative TF1m bar (mergeShadowDelta)
+// which in turn cascades to TF5m-TF60m. A bare tick seed with no authoritative
+// 1m bars yet only ever touches TF10s, but list the full intraday set anyway:
+// emitSeedSnapshots' empty-series skip makes the extra entries free, and this
+// keeps the result correct if an authoritative 1m seed lands before the tick
+// seed (out of the recommended order), letting mergeShadowDelta's cascade
+// reach 5m-60m within this same seeding window.
+var seedTicksTFs = []session.Timeframe{
+	session.TF10s, session.TF1m, session.TF5m, session.TF15m, session.TF30m, session.TF60m,
+}
+
+// emitTickSeedSnapshots emits the seedTicksTFs snapshot set for symbol, the
+// SeedSessionTicks counterpart to seedHistory1m/seedDaily's emitSeedSnapshots
+// call.
+func (e *barEngine) emitTickSeedSnapshots(c *Core, symbol string) {
+	if sb := e.symbols[symbol]; sb != nil {
+		e.emitSeedSnapshots(c, sb, seedTicksTFs)
+	}
+}
+
 // emitSeedSnapshots emits one BarSnapshot per non-empty timeframe in tfs, the
 // lossless replacement for seedHistory1m/seedDaily's per-bar emissions.
 func (e *barEngine) emitSeedSnapshots(c *Core, sb *symbolBars, tfs []session.Timeframe) {
@@ -424,6 +446,9 @@ func foldBars(symbol string, tf session.Timeframe, bucket int64, members []Bar) 
 // validate compares finalized authoritative vs shadow 1m for one bucket,
 // once. Divergence is an alarm (MismatchUpdate), never a blocker.
 func (e *barEngine) validate(c *Core, sb *symbolBars, bucketMs int64) {
+	if c.seeding {
+		return
+	}
 	if sb.compared[bucketMs] {
 		return
 	}
