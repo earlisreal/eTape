@@ -45,12 +45,15 @@ function DrawingToolStylesSyncBridge(
 // state and last ping RTT. The engine's own sys.health always reports
 // "ui-engine" as a permanently-down stub (v1), so this is the only source of
 // truth for that link — see HealthStore.setUiEngine. "down" here specifically
-// means "no live connection" (state !== "open"); a slow-but-alive connection
-// is "degraded", capped there even at very high RTT, never "down".
-function makeEngineLink(state: ConnState, rtt: number | null): HealthLink {
+// means "no live connection" (state !== "open"); whenever the socket is open,
+// status is "ok" or "degraded" — NEVER "down", even if no pong has arrived yet
+// (rtt === null, e.g. the ~2s window right after page load before the first
+// ping-interval tick completes a round trip). A slow-but-alive connection is
+// likewise capped at "degraded", never "down".
+export function makeEngineLink(state: ConnState, rtt: number | null): HealthLink {
   if (state !== "open") return { link: "ui-engine", ms: null, min: null, avg: null, max: null, status: "down" };
   const ms = rtt === null ? null : Math.round(rtt);
-  const status: LinkStatus = ms === null ? "down" : ms < 500 ? "ok" : ms < 2000 ? "degraded" : "degraded";
+  const status: LinkStatus = ms !== null && ms < 500 ? "ok" : "degraded";
   return { link: "ui-engine", ms, min: null, avg: null, max: null, status };
 }
 
