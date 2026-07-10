@@ -53,6 +53,7 @@ type Core struct {
 	inbox   chan inMsg
 	updates chan Update
 	marks   chan Mark
+	bookOut chan feed.Book
 	dropped atomic.Uint64
 
 	// Domain state — touched ONLY inside Run's goroutine.
@@ -86,6 +87,7 @@ func New(cfg Config) *Core {
 		inbox:   make(chan inMsg, 1024),
 		updates: make(chan Update, 8192),
 		marks:   make(chan Mark, 1024),
+		bookOut: make(chan feed.Book, 1024),
 		books:   newBookStore(),
 		quotes:  newQuoteStore(),
 		tapes:   make(map[string]*ring),
@@ -96,9 +98,10 @@ func New(cfg Config) *Core {
 	}
 }
 
-func (c *Core) Updates() <-chan Update { return c.updates }
-func (c *Core) Marks() <-chan Mark     { return c.marks }
-func (c *Core) DroppedUpdates() uint64 { return c.dropped.Load() }
+func (c *Core) Updates() <-chan Update  { return c.updates }
+func (c *Core) Marks() <-chan Mark      { return c.marks }
+func (c *Core) Books() <-chan feed.Book { return c.bookOut }
+func (c *Core) DroppedUpdates() uint64  { return c.dropped.Load() }
 
 // Feed enqueues a feed event. Blocking by design: the inbox is deep and the
 // apply path is allocation-light, so sustained blocking means the core is
@@ -166,6 +169,13 @@ func (c *Core) mark(m Mark) {
 	}
 }
 
+func (c *Core) emitBook(b feed.Book) {
+	select {
+	case c.bookOut <- b:
+	default: // keep-latest downstream; dropping a stale book is safe
+	}
+}
+
 func (c *Core) apply(m inMsg) {
 	switch msg := m.(type) {
 	case eventMsg:
@@ -190,7 +200,9 @@ func (c *Core) applyEvent(ev feed.Event) {
 	case feed.QuoteEvent:
 		c.emit(QuoteUpdate{Quote: c.quotes.set(e.Quote)})
 	case feed.BookEvent:
-		c.emit(BookUpdate{Book: c.books.set(e.Book)})
+		stored := c.books.set(e.Book)
+		c.emit(BookUpdate{Book: stored})
+		c.emitBook(stored)
 	case feed.Bars1mEvent:
 		c.bars.apply1m(c, e.Bars) // Task 11
 	case feed.ConnUpEvent:

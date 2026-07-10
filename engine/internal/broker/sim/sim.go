@@ -1,7 +1,11 @@
 // Package sim is a deterministic in-memory exec.Broker used for tests, replay,
 // and (v1.5) practice mode. It fills market and marketable-limit orders
 // immediately and rests non-marketable limits until canceled, replaced, or
-// crossed by a later SetMark. It imports exec, never the reverse.
+// crossed by a later SetMark. It also tracks each symbol's latest L2 book
+// snapshot (SetBook), fed the same way as marks; the book is stored only for
+// now — Task 2 makes resting orders re-evaluate against it, so crossing
+// still runs entirely off SetMark until then. It imports exec, never the
+// reverse.
 package sim
 
 import (
@@ -12,6 +16,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 )
 
 // Broker is a single-venue simulated broker.
@@ -22,6 +27,7 @@ type Broker struct {
 
 	mu     sync.Mutex
 	marks  map[string]float64
+	books  map[string]feed.Book   // latest L2 snapshot per symbol (Task 2 consumes it)
 	orders map[string]*exec.Order // resting (working) orders
 	pos    map[string]*exec.Position
 	acct   exec.AccountSnapshot
@@ -39,6 +45,7 @@ func New(venue exec.VenueID, clk clock.Clock, startingCash float64) *Broker {
 		clk:    clk,
 		ev:     make(chan exec.BrokerEvent, 256),
 		marks:  map[string]float64{},
+		books:  map[string]feed.Book{},
 		orders: map[string]*exec.Order{},
 		pos:    map[string]*exec.Position{},
 		acct: exec.AccountSnapshot{
@@ -66,6 +73,15 @@ func (b *Broker) SetMark(symbol string, price float64) {
 	for _, ev := range crossed {
 		b.emit(ev)
 	}
+}
+
+// SetBook stores a symbol's latest L2 snapshot. Task 2 makes resting
+// orders re-evaluate against it; for now this only updates the stored
+// book (no crossing side effects yet — SetMark still owns crossing).
+func (b *Broker) SetBook(symbol string, book feed.Book) {
+	b.mu.Lock()
+	b.books[symbol] = book
+	b.mu.Unlock()
 }
 
 // SetAccount overwrites the venue account and emits a BrokerAccount reconcile

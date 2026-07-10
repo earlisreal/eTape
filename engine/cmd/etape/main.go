@@ -271,11 +271,11 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, live, st) }()
 	go forwardExec(ctx, execCore, hub)
 
-	// Forward marks into every sim broker so submitted orders fill: in replay
-	// every venue is forced to SimBroker, and in live mode a venue explicitly
-	// configured with Broker: "sim" (a practice venue) is one too. Non-sim
-	// live venues (tradezero/alpaca/moomoo) are fed by their own broker
-	// connection and don't implement markSink, so the type-assertion in
+	// Forward marks + books into every sim broker so submitted orders fill: in
+	// replay every venue is forced to SimBroker, and in live mode a venue
+	// explicitly configured with Broker: "sim" (a practice venue) is one too.
+	// Non-sim live venues (tradezero/alpaca/moomoo) are fed by their own
+	// broker connection and don't implement simSink, so the type-assertion in
 	// simSinksOf alone selects the right set in either mode.
 	go markBridge(ctx, core, execCore, simSinksOf(vbs))
 
@@ -490,21 +490,24 @@ func forwardExec(ctx context.Context, execCore *exec.Core, hub *uihub.Hub) {
 	}
 }
 
-// markSink receives last-trade marks. Implemented by *sim.Broker (SetMark) —
-// every replay venue, plus any live venue explicitly configured as Broker:
-// "sim" — so a submitted order fills against the fed marks.
-type markSink interface {
+// simSink receives last-trade marks and L2 book snapshots. Implemented by
+// *sim.Broker (SetMark/SetBook) — every replay venue, plus any live venue
+// explicitly configured as Broker: "sim" — so a submitted order fills
+// against the fed marks and (from Task 2 onward) prices against the fed
+// book. Named simSink rather than markSink now that it carries both.
+type simSink interface {
 	SetMark(symbol string, price float64)
+	SetBook(symbol string, book feed.Book)
 }
 
-// simSinksOf returns every configured broker that is a markSink. No live/
+// simSinksOf returns every configured broker that is a simSink. No live/
 // replay branch is needed: buildBrokers forces every venue to sim.Broker in
 // replay, and only venues configured with Broker: "sim" are sim.Broker in
 // live mode, so the type-assertion alone selects the correct set either way.
-func simSinksOf(vbs []venueBroker) []markSink {
-	var sinks []markSink
+func simSinksOf(vbs []venueBroker) []simSink {
+	var sinks []simSink
 	for _, vb := range vbs {
-		if s, ok := vb.Broker.(markSink); ok {
+		if s, ok := vb.Broker.(simSink); ok {
 			sinks = append(sinks, s)
 		}
 	}
@@ -513,9 +516,12 @@ func simSinksOf(vbs []venueBroker) []markSink {
 
 // markBridge copies md.Core.Marks() -> exec.Core.FeedMark (the single md<->exec
 // seam) and -> every sim broker's SetMark (sinks) so a submitted order fills
-// against the fed marks. Non-sim live venues get marks from their own broker
-// feed instead and are excluded from sinks by simSinksOf.
-func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks []markSink) {
+// against the fed marks; it also copies md.Core.Books() -> every sim broker's
+// SetBook so those brokers track the latest L2 snapshot per symbol (stored
+// only as of Task 1 — Task 2 makes fills price off it). Non-sim live venues
+// get marks/books from their own broker feed instead and are excluded from
+// sinks by simSinksOf.
+func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks []simSink) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -524,6 +530,10 @@ func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks [
 			execCore.FeedMark(exec.Mark{Symbol: m.Symbol, Price: m.Price, TsMs: m.TsMs})
 			for _, s := range sinks {
 				s.SetMark(m.Symbol, m.Price)
+			}
+		case bk := <-core.Books():
+			for _, s := range sinks {
+				s.SetBook(bk.Symbol, bk)
 			}
 		}
 	}

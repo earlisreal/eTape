@@ -7,6 +7,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 )
 
 func newSim(t *testing.T) *Broker {
@@ -26,6 +27,29 @@ func drain(t *testing.T, b *Broker) exec.BrokerEvent {
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for broker event")
 		return nil
+	}
+}
+
+// TestSimSetBookStoresSnapshot is a whitebox storage check (package sim):
+// SetBook must just record the latest book per symbol. Task 2 adds the
+// behavioral (fill-pricing) tests; this task only wires and stores it.
+func TestSimSetBookStoresSnapshot(t *testing.T) {
+	b := newSim(t)
+	book := feed.Book{
+		Symbol: "AAPL", TsMs: 1234,
+		Bids: []feed.BookLevel{{Price: 99.5, Volume: 100}},
+		Asks: []feed.BookLevel{{Price: 100.5, Volume: 150}},
+	}
+	b.SetBook("AAPL", book)
+
+	got, ok := b.books["AAPL"]
+	if !ok {
+		t.Fatal("SetBook did not store a book for AAPL")
+	}
+	if got.Symbol != book.Symbol || got.TsMs != book.TsMs ||
+		len(got.Bids) != 1 || got.Bids[0].Price != 99.5 ||
+		len(got.Asks) != 1 || got.Asks[0].Price != 100.5 {
+		t.Fatalf("stored book = %+v, want %+v", got, book)
 	}
 }
 
