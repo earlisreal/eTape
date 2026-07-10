@@ -1124,3 +1124,41 @@ describe("ChartController bar-cache memoization (barsMs/bandsCache/candleRange)"
     expectRange(range.minValue, range.maxValue);
   });
 });
+
+describe("ChartController.lastSyncDaySegmentBuilds (Task 6 diagnostic probe)", () => {
+  // Proves the counter genuinely reflects "did this sync() do the expensive Intl
+  // work" rather than a constant: >= 1 on the reset that does the first-ever
+  // backfill (necessarily builds a day segment from nothing), 0 on same-day
+  // tailUpdated/none syncs (the cached segment already covers every bar), and
+  // >= 1 again once an appended bar's bucketStart falls outside the cached
+  // segment's [dayStartMs, dayEndMs) window.
+  it("is >= 1 on the reset sync, 0 on a same-day tailUpdated/none sync, and >= 1 again once an appended sync crosses into a new calendar day", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10, true)]; // Mon 09:30 EDT, in-progress
+    const { ctrl } = make(barReaderOf(bars));
+
+    ctrl.sync(); // reset — first-ever backfill, no cached segment exists yet
+    expect(ctrl.lastSyncDaySegmentBuilds()).toBeGreaterThanOrEqual(1);
+
+    bars[0] = bar("2026-07-06T13:30:00Z", 10.5, true); // tailUpdated — same bucketStart, revised close
+    ctrl.sync();
+    expect(ctrl.lastSyncDaySegmentBuilds()).toBe(0);
+
+    ctrl.sync(); // none — nothing changed at all
+    expect(ctrl.lastSyncDaySegmentBuilds()).toBe(0);
+
+    bars.push(bar("2026-07-07T13:30:00Z", 11, true)); // appended, next calendar day (Tue 09:30 EDT)
+    ctrl.sync();
+    expect(ctrl.lastSyncDaySegmentBuilds()).toBeGreaterThanOrEqual(1);
+  });
+
+  it("stays 0 on an appended sync whose new bar falls within the already-cached day segment (cache hit, not just a fresh-reset artifact)", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10, true)];
+    const { ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // reset
+    expect(ctrl.lastSyncDaySegmentBuilds()).toBeGreaterThanOrEqual(1);
+
+    bars.push(bar("2026-07-06T13:31:00Z", 11, true)); // same calendar day
+    ctrl.sync(); // appended
+    expect(ctrl.lastSyncDaySegmentBuilds()).toBe(0);
+  });
+});

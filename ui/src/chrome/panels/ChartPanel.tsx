@@ -30,6 +30,7 @@ import { IndicatorSettingsDialog } from "./tv/IndicatorSettingsDialog";
 import { ChartSettingsDialog, DEFAULT_CHART_SETTINGS, type ChartSettings } from "./tv/ChartSettingsDialog";
 import { computeLegendView } from "./tv/legendView";
 import { BarCloseTimer } from "./tv/BarCloseTimer";
+import { perf } from "../../perf/PerfMonitor";
 
 // Adapts a real LWC v5 IChartApi to the controller's minimal ChartApiFacade.
 function makeFacade(chart: IChartApi, palette: Palette): {
@@ -359,6 +360,12 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       },
       paint: () => {
         controller.sync();
+        // Diagnostic-only (Task 6): how many times this sync() actually paid the
+        // Intl.DateTimeFormat cost (buildDaySegment) versus hitting the cached day
+        // segment. Guard here, not just inside recordScan: skipping the call avoids
+        // building the `chart:${config.id}` template-literal id on every hot-path
+        // paint while disabled (mirrors TapePanel.tsx's identical recordScan guard).
+        if (perf.enabled) perf.recordScan(`chart:${config.id}`, controller.lastSyncDaySegmentBuilds());
         controller.setFills(aggregateFillMarkers(stores.fills.forSymbolFills(currentSymbol), tfRef.current as Timeframe));
         drawings.setDrawings(stores.drawings.forSymbol(currentSymbol));
         drawings.setBars(controller.barsMs(), timeframeToMs(tfRef.current as Timeframe));

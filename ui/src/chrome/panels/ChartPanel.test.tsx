@@ -46,6 +46,7 @@ import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
 import type { AckMsg, Bar, DeltaMsg } from "../../wire/contract";
 import { DEFAULT_CHART_SETTINGS } from "./tv/ChartSettingsDialog";
 import { FakeDrawingBus, FakeDrawingBusHub } from "../../../test/fakes";
+import { perf } from "../../perf/PerfMonitor";
 
 // jsdom has no ResizeObserver; ChartPanel's resize wiring only needs observe/disconnect.
 class MockResizeObserver {
@@ -456,5 +457,29 @@ describe("ChartPanel", () => {
     // chart's active instances) must NOT dirty it.
     stores.indicators.apply({ kind: "delta", topic: "md.indicator", key: "other-panel:EMA-0", payload: { timeMs: Date.now(), value: 1 } });
     expect(getSurface().isDirty()).toBe(false);
+  });
+
+  it("does not call perf.recordScan when perf is disabled (mirrors TapePanel's guard — avoids the `chart:${config.id}` template-literal allocation on every hot-path paint)", () => {
+    const { stores, getSurface } = renderChartCapturingSurface();
+    pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5);
+    expect(perf.enabled).toBe(false); // sanity: shared singleton's default state
+    const spy = vi.spyOn(perf, "recordScan");
+    act(() => { getSurface().paint(); });
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("reports controller.lastSyncDaySegmentBuilds() to the shared perf singleton, keyed by the chart:<id> surface id, while perf is enabled (Task 6 diagnostic probe)", () => {
+    const { stores, getSurface } = renderChartCapturingSurface();
+    pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5);
+    const spy = vi.spyOn(perf, "recordScan");
+    perf.enabled = true;
+    try {
+      act(() => { getSurface().paint(); });
+      expect(spy).toHaveBeenCalledWith("chart:c1", expect.any(Number));
+    } finally {
+      perf.enabled = false; // restore the shared singleton's default for other tests
+      spy.mockRestore();
+    }
   });
 });

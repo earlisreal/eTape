@@ -95,6 +95,16 @@ export class ChartController {
   // The one calendar ET day whose boundaries are currently cached (sessions.ts).
   // Rebuilt (one Intl call) only when a bar's ms falls outside its window.
   private daySeg: DaySegment | null = null;
+  // Count of buildDaySegment (Intl.DateTimeFormat) calls made during the MOST
+  // RECENT sync() — reset to 0 at the top of every sync(), incremented in
+  // extendBandsFrom whenever the day-segment cache misses. Temporary diagnostic
+  // probe (Task 6 of the UI perf plan): lets a real device confirm the cache
+  // above is actually amortizing the Intl cost (near-0 in steady state) rather
+  // than trusting that by inference. Unconditional, no perf.enabled gate here —
+  // incrementing an int is negligible even when nobody reads it; the gate
+  // belongs at the read/report site (ChartPanel.tsx), mirroring buildTapeRows'
+  // always-returned `scanned` count.
+  private daySegmentBuildsThisSync = 0;
   private chartType: ChartType = "candle";
   private showSessions = true;
   private gridVisible = true;
@@ -127,6 +137,7 @@ export class ChartController {
   }
 
   sync(): void {
+    this.daySegmentBuildsThisSync = 0;
     const bars = this.deps.bars.series(this.config.symbol, this.config.timeframe);
     this.applyBars(bars);
     this.refreshBarCaches(bars);
@@ -225,6 +236,14 @@ export class ChartController {
   // those all key off lastBarsOp/appendedFrom instead).
   barsCached(): number { return this.cachedBarCount; }
 
+  // Diagnostic-only (Task 6): how many times buildDaySegment's Intl call
+  // actually ran during the most recent sync() — ~0 in steady state once the
+  // day-segment cache above is being hit, versus roughly one per bar before it
+  // existed. Read by ChartPanel, itself guarded behind perf.enabled, and
+  // reported to the shared PerfMonitor singleton so a live re-measurement can
+  // prove the fix rather than infer it from paint duration alone.
+  lastSyncDaySegmentBuilds(): number { return this.daySegmentBuildsThisSync; }
+
   // Refreshes barsMsCache/bandsCache/closedRange (and, from those, candleRange)
   // to match `bars` exactly, sharing lastBarsOp/appendedFrom (just set by
   // applyBars, above) so every cache advances from the SAME notion of "what's
@@ -287,6 +306,7 @@ export class ChartController {
       const ms = this.barsMsCache[i];
       if (!this.daySeg || ms < this.daySeg.dayStartMs || ms >= this.daySeg.dayEndMs) {
         this.daySeg = buildDaySegment(ms);
+        this.daySegmentBuildsThisSync++;
       }
       const session = classify(ms, this.daySeg);
       const cur = this.bandsCache[this.bandsCache.length - 1];
