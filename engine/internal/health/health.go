@@ -22,6 +22,12 @@ type pingSource interface {
 	LastPingRTT() (time.Duration, bool)
 }
 
+// QuotaSource supplies the latest account-quota snapshot for embedding in
+// sys.health. Satisfied by *quota.Poller; nil when the quota poller is absent.
+type QuotaSource interface {
+	Latest() (wsmsg.QuotaInfo, bool)
+}
+
 type Poller struct {
 	cfg    config.Health
 	pub    Publisher
@@ -30,11 +36,12 @@ type Poller struct {
 	alpaca prober // nil when no Alpaca venue is configured; mirrors probe's nil-skip
 	pings  pingSource
 	hasTZ  bool
+	quota  QuotaSource
 	seq    int64
 }
 
-func New(cfg config.Health, pub Publisher, clk clock.Clock, probe prober, pings pingSource, hasTZ bool, alpaca prober) *Poller {
-	return &Poller{cfg: cfg, pub: pub, clk: clk, probe: probe, pings: pings, hasTZ: hasTZ, alpaca: alpaca}
+func New(cfg config.Health, pub Publisher, clk clock.Clock, probe prober, pings pingSource, hasTZ bool, alpaca prober, quota QuotaSource) *Poller {
+	return &Poller{cfg: cfg, pub: pub, clk: clk, probe: probe, pings: pings, hasTZ: hasTZ, alpaca: alpaca, quota: quota}
 }
 
 func (p *Poller) Run(ctx context.Context) error {
@@ -66,7 +73,13 @@ func (p *Poller) Run(ctx context.Context) error {
 					al = &d
 				}
 			}
-			p.pub.Publish(wsmsg.TopicSysHealth, "", buildHealth(ui, mo, al, p.hasTZ, p.alpaca != nil))
+			var q *wsmsg.QuotaInfo
+			if p.quota != nil {
+				if qi, ok := p.quota.Latest(); ok {
+					q = &qi
+				}
+			}
+			p.pub.Publish(wsmsg.TopicSysHealth, "", buildHealth(ui, mo, al, p.hasTZ, p.alpaca != nil, q))
 		}
 	}
 }
@@ -80,7 +93,7 @@ func (p *Poller) Event(kind, detail string) {
 	})
 }
 
-func buildHealth(uiRTT, moomooRTT, alpacaRTT *time.Duration, hasTZ, hasAlpaca bool) wsmsg.HealthSnapshot {
+func buildHealth(uiRTT, moomooRTT, alpacaRTT *time.Duration, hasTZ, hasAlpaca bool, quota *wsmsg.QuotaInfo) wsmsg.HealthSnapshot {
 	links := []wsmsg.HealthLink{
 		linkFor("ui-engine", uiRTT),
 		linkFor("engine-moomoo", moomooRTT),
@@ -91,7 +104,7 @@ func buildHealth(uiRTT, moomooRTT, alpacaRTT *time.Duration, hasTZ, hasAlpaca bo
 	if hasAlpaca {
 		links = append(links, linkFor("engine-alpaca", alpacaRTT))
 	}
-	return wsmsg.HealthSnapshot{Links: links}
+	return wsmsg.HealthSnapshot{Links: links, Quota: quota}
 }
 
 func linkFor(name string, rtt *time.Duration) wsmsg.HealthLink {
