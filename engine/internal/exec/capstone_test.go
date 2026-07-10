@@ -31,7 +31,7 @@ func buildMultiCore(t *testing.T, st *store.Store, clk clock.Clock, global exec.
 	brokers := map[exec.VenueID]exec.Broker{}
 	sims := map[exec.VenueID]*sim.Broker{}
 	for _, v := range venues {
-		b := sim.New(v, clk)
+		b := sim.New(v, clk, 100_000)
 		b.SetMark("AAPL", 100)
 		brokers[v] = b
 		sims[v] = b

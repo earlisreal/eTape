@@ -41,7 +41,7 @@ func newTestCore(t *testing.T, venues ...exec.VenueID) (*exec.Core, map[exec.Ven
 	brokers := map[exec.VenueID]exec.Broker{}
 	sims := map[exec.VenueID]*sim.Broker{}
 	for _, v := range venues {
-		b := sim.New(v, clk)
+		b := sim.New(v, clk, 100_000)
 		b.SetMark("AAPL", 100)
 		brokers[v] = b
 		sims[v] = b
@@ -133,7 +133,7 @@ func TestCoreAppendFailureBlocksSubmit(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = realStore.Close() }()
-	b := sim.New("sim-1", clk)
+	b := sim.New("sim-1", clk, 100_000)
 	b.SetMark("AAPL", 100)
 	cfg := exec.CoreConfig{
 		Venues: []exec.VenueID{"sim-1"},

@@ -76,7 +76,7 @@ func TestMarkBridgeForwardsToSinks(t *testing.T) {
 // must pick it up either way — there is no live/replay distinction to make;
 // the type-assertion alone identifies sim brokers correctly in both modes.
 func TestSimSinksOfSelectsLiveSimVenue(t *testing.T) {
-	simBroker := sim.New("simulator", clock.System{})
+	simBroker := sim.New("simulator", clock.System{}, 100_000)
 	vbs := []venueBroker{
 		{ID: "simulator", Broker: simBroker},
 		{ID: "alpaca-paper", Broker: stub.New()},

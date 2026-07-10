@@ -30,8 +30,10 @@ type Broker struct {
 
 var _ exec.Broker = (*Broker)(nil)
 
-// New builds a SimBroker for a venue.
-func New(venue exec.VenueID, clk clock.Clock) *Broker {
+// New builds a SimBroker for a venue, funded with startingCash — the same
+// seeding ResetBalance performs, so a fresh boot and a manual reset leave the
+// account in an identical state instead of boot defaulting to all-zero.
+func New(venue exec.VenueID, clk clock.Clock, startingCash float64) *Broker {
 	return &Broker{
 		venue:  venue,
 		clk:    clk,
@@ -39,7 +41,10 @@ func New(venue exec.VenueID, clk clock.Clock) *Broker {
 		marks:  map[string]float64{},
 		orders: map[string]*exec.Order{},
 		pos:    map[string]*exec.Position{},
-		acct:   exec.AccountSnapshot{Venue: venue},
+		acct: exec.AccountSnapshot{
+			Venue: venue, Equity: startingCash, BuyingPower: startingCash,
+			AvailableCash: startingCash, SodEquity: startingCash,
+		},
 	}
 }
 

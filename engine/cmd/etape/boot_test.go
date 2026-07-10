@@ -97,6 +97,36 @@ func TestBuildBrokersLiveSim(t *testing.T) {
 	}
 }
 
+// TestBuildBrokersSimSeedsConfiguredStartingBalance guards against the
+// boot-balance regression: buildBrokers used to construct every sim broker
+// unfunded (New took no starting cash), so a fresh boot always reconciled
+// $0 equity/buying power into Core.State regardless of starting_balance —
+// only the separate, manually-triggered ResetBalance command ever funded the
+// account. Covers both an explicit config value and the unset/default case,
+// and both the "sim" broker branch and the replay-forces-sim branch.
+func TestBuildBrokersSimSeedsConfiguredStartingBalance(t *testing.T) {
+	cfg := config.Config{Venues: []config.Venue{
+		{ID: "sim-1", Broker: "sim", StartingBalance: 25_000},
+		{ID: "sim-2", Broker: "sim"}, // unset => default
+	}}
+	for _, replay := range []bool{false, true} {
+		vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, replay)
+		if err != nil {
+			t.Fatalf("replay=%v: %v", replay, err)
+		}
+		want := map[exec.VenueID]float64{"sim-1": 25_000, "sim-2": config.DefaultSimStartingBalance}
+		for _, vb := range vbs {
+			acct, _, _, err := vb.Broker.Snapshot(context.Background())
+			if err != nil {
+				t.Fatalf("replay=%v: snapshot %s: %v", replay, vb.ID, err)
+			}
+			if acct.Equity != want[vb.ID] {
+				t.Fatalf("replay=%v: %s equity = %v, want %v", replay, vb.ID, acct.Equity, want[vb.ID])
+			}
+		}
+	}
+}
+
 func TestVenueMetasMapsConfiguredBrokerAndGate(t *testing.T) {
 	cfg := config.Config{
 		Venues: []config.Venue{{ID: "sim", Broker: "alpaca"}},

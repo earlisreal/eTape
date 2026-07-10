@@ -11,7 +11,7 @@ import (
 
 func newSim(t *testing.T) *Broker {
 	t.Helper()
-	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)))
+	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000)
 	b.SetMark("AAPL", 100)
 	return b
 }
@@ -125,8 +125,24 @@ func TestSimReplaceAndSnapshot(t *testing.T) {
 	}
 }
 
+// TestNew_SeedsAccountFromStartingCash guards against the boot-balance
+// regression: New used to always zero-value acct, so a freshly booted engine
+// (Core.Recover -> Broker.Snapshot) showed $0 equity/buying power regardless
+// of the configured starting_balance, and only a manual "Reset balance" click
+// ever funded the account.
+func TestNew_SeedsAccountFromStartingCash(t *testing.T) {
+	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 75_000)
+	acct, _, _, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if acct.Equity != 75_000 || acct.BuyingPower != 75_000 || acct.AvailableCash != 75_000 || acct.SodEquity != 75_000 {
+		t.Fatalf("New should seed the account with startingCash, got %+v", acct)
+	}
+}
+
 func TestSimMarketOrderNoMarkRejected(t *testing.T) {
-	b := New("sim-1", clock.NewFake(time.UnixMilli(1000))) // no SetMark call — "MSFT" has no mark
+	b := New("sim-1", clock.NewFake(time.UnixMilli(1000)), 100_000) // no SetMark call — "MSFT" has no mark
 	req := exec.OrderRequest{Venue: "sim-1", Symbol: "MSFT", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
 	ack, err := b.SubmitOrder(context.Background(), req)
 	if err != nil || !ack.Accepted {
@@ -210,7 +226,7 @@ func TestSim_Flatten_ZeroesPositions(t *testing.T) {
 
 func TestSim_BuyStop_TriggersOnMarkAtOrAboveStop(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
-	b := New("v", clk)
+	b := New("v", clk, 100_000)
 	b.SetMark("AAPL", 95)
 	drainAll(b.Events())
 	_, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
@@ -235,7 +251,7 @@ func TestSim_BuyStop_TriggersOnMarkAtOrAboveStop(t *testing.T) {
 
 func TestSim_SellStop_TriggersOnMarkAtOrBelowStop(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
-	b := New("v", clk)
+	b := New("v", clk, 100_000)
 	b.SetMark("AAPL", 105)
 	drainAll(b.Events())
 	_, _ = b.SubmitOrder(context.Background(), exec.OrderRequest{
@@ -253,7 +269,7 @@ func TestSim_SellStop_TriggersOnMarkAtOrBelowStop(t *testing.T) {
 
 func TestSim_BuyStopLimit_TriggersThenRestsAsLimit(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
-	b := New("v", clk)
+	b := New("v", clk, 100_000)
 	b.SetMark("AAPL", 95)
 	drainAll(b.Events())
 	// stop 100, limit 100.5 buy: on trigger it is a limit buy @100.5.
