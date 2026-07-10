@@ -197,10 +197,26 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     // zoom. The re-fired event after scrollToPosition is a no-op second pass since
     // scrollPosition() then equals the cap.
     const timeScale = chart.timeScale();
+    // subscribeVisibleLogicalRangeChange fires synchronously from LWC's native
+    // pan/zoom/wheel handling -- at input-device polling rate (125-1000Hz),
+    // not the rAF-gated Scheduler this panel otherwise paints through (see
+    // the register() call below). clampRightScroll+scrollToPosition must run
+    // synchronously (it's the actual scroll clamp), but refreshSelection --
+    // which, when a drawing is selected, re-projects its anchors via a full
+    // O(bars) Date.parse scan (DrawingInteraction.selectedRect -> project ->
+    // barsMs) -- doesn't need to run more than once per frame. Deferring it
+    // (and dropping duplicate frames already pending) fixed chart-pan lag
+    // that a monitor 200Hz->60Hz change did NOT fix, confirming the cost was
+    // per-native-event, not per-refresh.
+    let selectionFrame: number | null = null;
+    const scheduleRefreshSelection = () => {
+      if (selectionFrame !== null) return;
+      selectionFrame = requestAnimationFrame(() => { selectionFrame = null; refreshSelRef.current?.(); });
+    };
     const clampRight = () => {
       const target = clampRightScroll(timeScale.scrollPosition());
       if (target !== null) timeScale.scrollToPosition(target, false);
-      refreshSelRef.current?.();
+      scheduleRefreshSelection();
     };
     timeScale.subscribeVisibleLogicalRangeChange(clampRight);
     const { facade, setPalette, drawings } = makeFacade(chart, palette);
@@ -274,7 +290,18 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       const bars = stores.bars.series(currentSymbol, tfRef.current);
       legendRef.current?.update(computeLegendView(bars, stores.indicators, instancesRef.current, paletteRef.current, crosshairLogicalRef.current));
     };
-    const offCrosshair = facade.subscribeCrosshairMove((logical) => { crosshairLogicalRef.current = logical; updateLegend(); });
+    // subscribeCrosshairMove has the same unthrottled-input-rate shape as
+    // subscribeVisibleLogicalRangeChange above: it fires on every native
+    // pointermove, and updateLegend does an O(indicators x bars) scan
+    // (computeLegendView -> valueAt) plus per-indicator DOM writes. Recording
+    // the crosshair position is cheap and stays synchronous; the expensive
+    // recompute is deferred to once per frame, same rAF-batching pattern.
+    let legendFrame: number | null = null;
+    const offCrosshair = facade.subscribeCrosshairMove((logical) => {
+      crosshairLogicalRef.current = logical;
+      if (legendFrame !== null) return;
+      legendFrame = requestAnimationFrame(() => { legendFrame = null; updateLegend(); });
+    });
 
     // Each chart panel tracks its own last-seen revision per store, rather than
     // consuming a shared boolean flag — BarStore/IndicatorStore are shared across
@@ -352,6 +379,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     return () => {
       off(); offLink(); offCrosshair(); ro.disconnect();
       timeScale.unsubscribeVisibleLogicalRangeChange(clampRight);
+      // Cancel any rAF-batched legend/selection recompute still pending from
+      // the schedulers above so it doesn't fire after this chart unmounts.
+      if (legendFrame !== null) cancelAnimationFrame(legendFrame);
+      if (selectionFrame !== null) cancelAnimationFrame(selectionFrame);
       interaction.dispose(); controller.dispose(); controllerRef.current = null; interactionRef.current = null;
     };
     // Intentionally [config.id] only: symbol/timeframe/indicator/palette changes are

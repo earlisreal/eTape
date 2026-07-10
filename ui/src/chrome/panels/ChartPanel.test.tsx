@@ -55,6 +55,17 @@ class MockResizeObserver {
 }
 vi.stubGlobal("ResizeObserver", MockResizeObserver);
 
+// jsdom's requestAnimationFrame is a real (timer-based) async callback.
+// ChartPanel batches its crosshair/pan handlers' expensive recompute to a
+// single rAF (see subscribeCrosshairMove/subscribeVisibleLogicalRangeChange
+// wiring in ChartPanel.tsx) so a test that invokes those handlers directly
+// and asserts synchronously (this file's established pattern — see
+// renderChartCapturingSurface's paint()-instead-of-racing-the-scheduler
+// comment) needs the deferred callback to run immediately rather than racing
+// a real timer.
+vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 0; });
+vi.stubGlobal("cancelAnimationFrame", () => {});
+
 beforeEach(() => { vi.clearAllMocks(); cleanup(); });
 
 function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sharedScheduler?: Scheduler, settingsOverride?: Record<string, unknown>) {
