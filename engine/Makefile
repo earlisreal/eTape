@@ -10,7 +10,7 @@
 # metadata is unavailable (e.g. a source tarball with no .git directory).
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build test lint vet proto vendor-proto run gen-ts gen-ts-check release-windows release-macos embed-ui
+.PHONY: build test lint vet proto vendor-proto run gen-ts gen-ts-check release-windows release-macos embed-ui windows-icon
 build:
 	go build ./...
 test:
@@ -49,7 +49,24 @@ embed-ui:
 	cd ../ui && npm run build
 	rm -rf internal/webui/dist && cp -r ../ui/dist internal/webui/dist
 
-release-windows: embed-ui
+# Generates the Windows PE icon resource from assets/etape.ico +
+# versioninfo.json. The _windows_amd64 filename suffix is Go's own build-file
+# naming convention, so `go build` links it into GOOS=windows/GOARCH=amd64
+# builds only -- release-macos never sees it, and it's gitignored (generated,
+# not committed).
+#
+# -arm=false is required despite targeting amd64: goversioninfo's -arm flag
+# also defaults to true, and its arch-selection logic checks IsARM before
+# Is64Bit -- so -64 alone silently produces an arm64 resource instead of
+# amd64 (verified 2026-07-10: without -arm=false the .syso's COFF machine
+# field is 0xaa64/arm64, not 0x8664/amd64).
+windows-icon:
+	go run github.com/josephspurrier/goversioninfo/cmd/goversioninfo@v1.7.0 \
+	  -64 -arm=false -icon cmd/etape/assets/etape.ico \
+	  -o cmd/etape/etape_windows_amd64.syso \
+	  cmd/etape/versioninfo.json
+
+release-windows: embed-ui windows-icon
 	GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -tags "embed_ui tray" \
 	  -ldflags "-s -w -H=windowsgui -X github.com/earlisreal/eTape/engine/internal/buildinfo.Version=$(VERSION)" \
 	  -o ../dist/etape-windows-amd64.exe ./cmd/etape

@@ -1,0 +1,13 @@
+{
+  "name": "eTape",
+  "short_name": "eTape",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#FBFAF7",
+  "background_color": "#FBFAF7",
+  "icons": [
+    { "src": "/icon-192.png", "type": "image/png", "sizes": "192x192" },
+    { "src": "/icon-512.png", "type": "image/png", "sizes": "512x512" },
+    { "src": "/favicon.svg", "type": "image/svg+xml", "sizes": "any" }
+  ]
+}
