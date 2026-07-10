@@ -368,3 +368,19 @@ func TestValidate_UnknownNotCached(t *testing.T) {
 		t.Fatalf("second call after listing: want nil, got %v", err)
 	}
 }
+
+func TestTail1mReturnsCachedBars(t *testing.T) {
+	m := newMockOpenD(t)
+	m.setData("US.AAPL", &qotData{bars1m: []*qotcommon.KLine{
+		kl(1782146460, 309.1, 1000), // end-labeled: bucket = timestamp − 60 s
+		kl(1782146520, 309.2, 1100),
+	}})
+	fd := NewOpenDFeed(liveClient(t, m), FeedOptions{})
+	bars, err := fd.Tail1m(context.Background(), "US.AAPL")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bars) != 2 || bars[0].BucketMs != 1782146460_000-60_000 {
+		t.Fatalf("Tail1m bars = %+v", bars)
+	}
+}

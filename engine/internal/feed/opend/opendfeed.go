@@ -315,6 +315,14 @@ func (f *OpenDFeed) CachedBars1m(ctx context.Context, symbol string, n int) ([]f
 	return f.bf.cachedBars1m(ctx, symbol, n)
 }
 
+// Tail1m returns the quota-free recent 1m window (≤1,000 bars) from moomoo's
+// Qot_GetKL cache. It requires an active K_1M subscription; OpenD rejects the
+// read otherwise, surfacing as an error the backfill orchestrator treats as
+// "skip the tail step". Implements backfill.TailFetcher.
+func (f *OpenDFeed) Tail1m(ctx context.Context, symbol string) ([]feed.Bar, error) {
+	return f.bf.cachedBars1m(ctx, symbol, maxAPIRows)
+}
+
 func (f *OpenDFeed) BookSnapshot(ctx context.Context, symbol string) (feed.Book, error) {
 	return f.bf.bookSnapshot(ctx, symbol)
 }
