@@ -34,6 +34,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/news"
 	"github.com/earlisreal/eTape/engine/internal/openbrowser"
+	"github.com/earlisreal/eTape/engine/internal/quota"
 	"github.com/earlisreal/eTape/engine/internal/replay"
 	"github.com/earlisreal/eTape/engine/internal/scan"
 	"github.com/earlisreal/eTape/engine/internal/session"
@@ -630,8 +631,13 @@ func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, 
 	// first configured Alpaca adapter (nil if none), giving the engine-alpaca
 	// link the same reachability-RTT treatment as moomoo. The health poller's
 	// sys.events are also persisted by main via a store hook if desired.
+	quotaPoller := quota.New(quota.Config{
+		SubWarnHeadroom: cfg.Feed.QuotaWarnHeadroom,
+		HistWarnRemain:  cfg.Feed.HistQuotaWarnRemain,
+	}, client, hub, clk)
+	go func() { _ = quotaPoller.Run(ctx) }()
 	go func() {
-		_ = health.New(cfg.Health, hub, clk, moomooProbe{c: client}, nil, hasTZ, alpacaProbe).Run(ctx)
+		_ = health.New(cfg.Health, hub, clk, moomooProbe{c: client}, nil, hasTZ, alpacaProbe, quotaPoller).Run(ctx)
 	}()
 }
 

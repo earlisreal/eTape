@@ -219,8 +219,25 @@ type HealthLink struct {
 	Status LinkStatus `json:"status"`
 }
 
+// QuotaInfo is the account-wide moomoo quota snapshot embedded in
+// HealthSnapshot when the quota poller has a reading. State is one of
+// "ok"|"foreign"|"low"|"exhausted"; HistState is "ok"|"low" (see
+// internal/quota). subForeign is subscription slots used by *other* OpenD
+// clients on the same account (contention).
+type QuotaInfo struct {
+	SubUsed    int    `json:"subUsed"`
+	SubRemain  int    `json:"subRemain"`
+	SubOwn     int    `json:"subOwn"`
+	SubForeign int    `json:"subForeign"`
+	HistUsed   int    `json:"histUsed"`
+	HistRemain int    `json:"histRemain"`
+	State      string `json:"state"`
+	HistState  string `json:"histState"`
+}
+
 type HealthSnapshot struct {
 	Links []HealthLink `json:"links"`
+	Quota *QuotaInfo   `json:"quota,omitempty"`
 }
 
 type SysEvent struct {
@@ -228,6 +245,9 @@ type SysEvent struct {
 	Ts     string `json:"ts"`
 	Kind   string `json:"kind"`
 	Detail string `json:"detail"`
+	// Level is "info"|"warn"|"danger"; empty/absent = info. Warn/danger drive
+	// UI toasts (see ui/src/data/quotaToasts.ts). Existing events omit it.
+	Level string `json:"level,omitempty"`
 }
 
 // ---- command / query argument DTOs (moved from wsmsg.go so tygo can still

@@ -243,3 +243,13 @@ func TestBackfillAlpacaDefaults(t *testing.T) {
 		t.Fatalf("alpaca backfill defaults = %+v", a)
 	}
 }
+
+func TestFeedQuotaWarnDefaults(t *testing.T) {
+	c := Default()
+	if c.Feed.QuotaWarnHeadroom != 12 {
+		t.Fatalf("QuotaWarnHeadroom default = %d, want 12", c.Feed.QuotaWarnHeadroom)
+	}
+	if c.Feed.HistQuotaWarnRemain != 10 {
+		t.Fatalf("HistQuotaWarnRemain default = %d, want 10", c.Feed.HistQuotaWarnRemain)
+	}
+}

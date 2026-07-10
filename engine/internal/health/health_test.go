@@ -10,7 +10,7 @@ import (
 func TestBuildHealthStatuses(t *testing.T) {
 	ok := 20 * time.Millisecond
 	slow := 800 * time.Millisecond
-	snap := buildHealth(&ok, &slow, nil, true, false)
+	snap := buildHealth(&ok, &slow, nil, true, false, nil)
 	byLink := map[string]wsmsg.HealthLink{}
 	for _, l := range snap.Links {
 		byLink[string(l.Link)] = l
@@ -27,7 +27,7 @@ func TestBuildHealthStatuses(t *testing.T) {
 }
 
 func TestBuildHealthDownWhenNil(t *testing.T) {
-	snap := buildHealth(nil, nil, nil, false, false)
+	snap := buildHealth(nil, nil, nil, false, false, nil)
 	byLink := map[string]wsmsg.HealthLink{}
 	for _, l := range snap.Links {
 		byLink[string(l.Link)] = l
@@ -43,7 +43,7 @@ func TestBuildHealthDownWhenNil(t *testing.T) {
 func TestBuildHealthDownThreshold(t *testing.T) {
 	// Verify that >= 2000ms is "down", not "degraded" (order matters)
 	down := 3000 * time.Millisecond
-	snap := buildHealth(&down, nil, nil, false, false)
+	snap := buildHealth(&down, nil, nil, false, false, nil)
 	byLink := map[string]wsmsg.HealthLink{}
 	for _, l := range snap.Links {
 		byLink[string(l.Link)] = l
@@ -55,7 +55,7 @@ func TestBuildHealthDownThreshold(t *testing.T) {
 
 func TestBuildHealthAlpacaPresentWhenConfigured(t *testing.T) {
 	fast := 50 * time.Millisecond
-	snap := buildHealth(nil, nil, &fast, false, true)
+	snap := buildHealth(nil, nil, &fast, false, true, nil)
 	byLink := map[string]wsmsg.HealthLink{}
 	for _, l := range snap.Links {
 		byLink[string(l.Link)] = l
@@ -70,7 +70,7 @@ func TestBuildHealthAlpacaPresentWhenConfigured(t *testing.T) {
 }
 
 func TestBuildHealthAlpacaAbsentWhenNotConfigured(t *testing.T) {
-	snap := buildHealth(nil, nil, nil, false, false)
+	snap := buildHealth(nil, nil, nil, false, false, nil)
 	for _, l := range snap.Links {
 		if l.Link == "engine-alpaca" {
 			t.Fatal("engine-alpaca must be absent when hasAlpaca=false")
@@ -79,7 +79,7 @@ func TestBuildHealthAlpacaAbsentWhenNotConfigured(t *testing.T) {
 }
 
 func TestBuildHealthAlpacaDownWhenProbeFails(t *testing.T) {
-	snap := buildHealth(nil, nil, nil, false, true)
+	snap := buildHealth(nil, nil, nil, false, true, nil)
 	byLink := map[string]wsmsg.HealthLink{}
 	for _, l := range snap.Links {
 		byLink[string(l.Link)] = l
@@ -90,5 +90,16 @@ func TestBuildHealthAlpacaDownWhenProbeFails(t *testing.T) {
 	}
 	if l.Status != "down" || l.Ms != nil {
 		t.Fatalf("nil alpaca RTT => down with null ms: %+v", l)
+	}
+}
+
+func TestBuildHealthEmbedsQuota(t *testing.T) {
+	if snap := buildHealth(nil, nil, nil, false, false, nil); snap.Quota != nil {
+		t.Fatalf("nil quota => no Quota field: %+v", snap)
+	}
+	q := &wsmsg.QuotaInfo{State: "foreign", SubForeign: 15}
+	snap := buildHealth(nil, nil, nil, false, false, q)
+	if snap.Quota == nil || snap.Quota.State != "foreign" {
+		t.Fatalf("quota must be embedded: %+v", snap.Quota)
 	}
 }

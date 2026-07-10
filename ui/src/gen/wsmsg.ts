@@ -284,14 +284,37 @@ export interface HealthLink {
   max: number | null;
   status: LinkStatus;
 }
+/**
+ * QuotaInfo is the account-wide moomoo quota snapshot embedded in
+ * HealthSnapshot when the quota poller has a reading. State is one of
+ * "ok"|"foreign"|"low"|"exhausted"; HistState is "ok"|"low" (see
+ * internal/quota). subForeign is subscription slots used by *other* OpenD
+ * clients on the same account (contention).
+ */
+export interface QuotaInfo {
+  subUsed: number /* int */;
+  subRemain: number /* int */;
+  subOwn: number /* int */;
+  subForeign: number /* int */;
+  histUsed: number /* int */;
+  histRemain: number /* int */;
+  state: string;
+  histState: string;
+}
 export interface HealthSnapshot {
   links: HealthLink[];
+  quota?: QuotaInfo;
 }
 export interface SysEvent {
   seq: number /* int64 */;
   ts: string;
   kind: string;
   detail: string;
+  /**
+   * Level is "info"|"warn"|"danger"; empty/absent = info. Warn/danger drive
+   * UI toasts (see ui/src/data/quotaToasts.ts). Existing events omit it.
+   */
+  level?: string;
 }
 export interface SubmitOrderArgs {
   venue: string;

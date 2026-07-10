@@ -18,6 +18,13 @@ import type { DrawingStore } from "./render/chart/drawings/store";
 import type { DrawingToolStyleStore } from "./render/chart/drawings/toolStyles";
 import { useToasts } from "./chrome/Toast";
 import type { HealthLink, LinkStatus, TopicName } from "./wire/contract";
+import { connectEventToasts } from "./data/quotaToasts";
+
+function EventToastBridge({ client }: { client: WsClient }): null {
+  const toast = useToasts();
+  useEffect(() => connectEventToasts(client, toast), [client, toast]);
+  return null;
+}
 
 function DrawingsSyncBridge(
   { store, commands }: { store: DrawingStore; commands: { sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown; reason?: string }> } },
@@ -132,6 +139,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
   return (
     <ThemeProvider commands={commands}>
       <ToastProvider>
+        <EventToastBridge client={client} />
         <DrawingsSyncBridge store={stores.drawings} commands={commands} />
         <DrawingToolStylesSyncBridge store={stores.drawingToolStyles} commands={commands} />
         <OrderConfigProvider commands={commands}>

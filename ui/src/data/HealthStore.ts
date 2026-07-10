@@ -1,12 +1,15 @@
 import { ReactStore } from "./store";
-import type { HealthLink, HealthSnapshot, SysEvent, SnapshotMsg, DeltaMsg } from "../wire/contract";
+import type { HealthLink, HealthSnapshot, SysEvent, QuotaInfo, SnapshotMsg, DeltaMsg } from "../wire/contract";
 
-interface HealthState { links: HealthLink[]; events: SysEvent[] }
+interface HealthState { links: HealthLink[]; events: SysEvent[]; quota?: QuotaInfo }
 const MAX_EVENTS = 500;
 
 export class HealthStore extends ReactStore<HealthState> {
   // The engine's last sys.health snapshot, verbatim (null-normalized).
   private engineLinks: HealthLink[] = [];
+  // The engine's last quota snapshot (undefined until the quota poller has a
+  // reading). No UI-side override concept — it passes straight through.
+  private engineQuota: QuotaInfo | undefined = undefined;
   // The UI's own override for the "ui-engine" link (its WebSocket ping RTT,
   // set by App.tsx) — null until the UI has computed one. The engine's
   // sys.health always reports "ui-engine" as down (a permanent v1 stub on
@@ -22,7 +25,9 @@ export class HealthStore extends ReactStore<HealthState> {
       // The engine's zero-value HealthSnapshot (before the first health poll,
       // e.g. every subscriber during a -replay boot) marshals a nil Go slice
       // as JSON null. Normalize to [] so state.links is always an array.
-      this.engineLinks = (m.payload as HealthSnapshot).links ?? [];
+      const snap = m.payload as HealthSnapshot;
+      this.engineLinks = snap.links ?? [];
+      this.engineQuota = snap.quota ?? this.engineQuota; // keep prior value if a frame omits it
       this.recompute();
       return;
     }
@@ -62,6 +67,9 @@ export class HealthStore extends ReactStore<HealthState> {
         ? engine.map((l) => (l.link === "ui-engine" ? override : l))
         : [override, ...engine];
     }
-    this.set({ links, events: cur.events });
+    // exactOptionalPropertyTypes forbids assigning `quota: undefined` outright
+    // (the optional key must be omitted, not present-with-undefined), so spread
+    // it in only when the engine has ever reported a quota reading.
+    this.set({ links, events: cur.events, ...(this.engineQuota === undefined ? {} : { quota: this.engineQuota }) });
   }
 }
