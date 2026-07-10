@@ -56,4 +56,72 @@ describe("HealthStore", () => {
     const snap = s.getSnapshot();
     expect(snap.events).toEqual([]);
   });
+
+  it("setUiEngine overrides the ui-engine entry reported down by the engine", () => {
+    const s = new HealthStore();
+    s.apply({
+      kind: "snapshot",
+      topic: "sys.health",
+      payload: { links: [{ link: "ui-engine", ms: null, min: null, avg: null, max: null, status: "down" }] },
+    });
+    s.setUiEngine({ link: "ui-engine", ms: 5, min: 3, avg: 4, max: 6, status: "ok" });
+    const snap = s.getSnapshot();
+    expect(snap.links).toEqual([{ link: "ui-engine", ms: 5, min: 3, avg: 4, max: 6, status: "ok" }]);
+  });
+
+  it("inserts a ui-engine entry when the engine's snapshot omits that link entirely", () => {
+    const s = new HealthStore();
+    s.apply({
+      kind: "snapshot",
+      topic: "sys.health",
+      payload: { links: [{ link: "engine-moomoo", ms: 10, min: 8, avg: 9, max: 12, status: "ok" }] },
+    });
+    s.setUiEngine({ link: "ui-engine", ms: 2, min: 1, avg: 2, max: 3, status: "ok" });
+    const snap = s.getSnapshot();
+    expect(snap.links[0]).toEqual({ link: "ui-engine", ms: 2, min: 1, avg: 2, max: 3, status: "ok" });
+    expect(snap.links.map((l) => l.link)).toEqual(["ui-engine", "engine-moomoo"]);
+  });
+
+  it("keeps the uiEngine override across a later sys.health snapshot, while other links update", () => {
+    const s = new HealthStore();
+    s.apply({
+      kind: "snapshot",
+      topic: "sys.health",
+      payload: {
+        links: [
+          { link: "ui-engine", ms: null, min: null, avg: null, max: null, status: "down" },
+          { link: "engine-moomoo", ms: 10, min: 8, avg: 9, max: 12, status: "ok" },
+        ],
+      },
+    });
+    s.setUiEngine({ link: "ui-engine", ms: 5, min: 3, avg: 4, max: 6, status: "ok" });
+    s.apply({
+      kind: "delta",
+      topic: "sys.health",
+      payload: {
+        links: [
+          { link: "ui-engine", ms: null, min: null, avg: null, max: null, status: "down" },
+          { link: "engine-moomoo", ms: 20, min: 15, avg: 18, max: 25, status: "degraded" },
+        ],
+      },
+    });
+    const snap = s.getSnapshot();
+    expect(snap.links).toEqual([
+      { link: "ui-engine", ms: 5, min: 3, avg: 4, max: 6, status: "ok" },
+      { link: "engine-moomoo", ms: 20, min: 15, avg: 18, max: 25, status: "degraded" },
+    ]);
+  });
+
+  it("setUiEngine(null) falls back to whatever the engine's snapshot reports", () => {
+    const s = new HealthStore();
+    s.apply({
+      kind: "snapshot",
+      topic: "sys.health",
+      payload: { links: [{ link: "ui-engine", ms: null, min: null, avg: null, max: null, status: "down" }] },
+    });
+    s.setUiEngine({ link: "ui-engine", ms: 5, min: 3, avg: 4, max: 6, status: "ok" });
+    s.setUiEngine(null);
+    const snap = s.getSnapshot();
+    expect(snap.links).toEqual([{ link: "ui-engine", ms: null, min: null, avg: null, max: null, status: "down" }]);
+  });
 });

@@ -49,7 +49,7 @@ function mount(seed: Workspace) {
   render(
     <ThemeProvider><ToastProvider><OrderConfigProvider commands={commands}>
       <AppShell workspaceName="default" stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
-        linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} />
+        linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} engineState="open" />
     </OrderConfigProvider></ToastProvider></ThemeProvider>,
   );
   return { saved, workspaceStore, linkGroups, stores };
