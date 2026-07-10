@@ -31,6 +31,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
 	"github.com/earlisreal/eTape/engine/internal/health"
 	histalpaca "github.com/earlisreal/eTape/engine/internal/hist/alpaca"
+	histyahoo "github.com/earlisreal/eTape/engine/internal/hist/yahoo"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/news"
 	"github.com/earlisreal/eTape/engine/internal/openbrowser"
@@ -375,20 +376,34 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 		go pipe(ctx, &pipeWG, fd.Events(), core, st)
 		var hubBackfill func(sym string, done func(ok bool))
 		if cfg.Backfill.Enabled {
-			var fallback backfill.HistFetcher
+			var alpacaSrc *histalpaca.Client
 			if cfg.Backfill.Alpaca.Enabled {
 				if p, label, err := resolveBackfillAlpacaCreds(cfg, credsFile); err == nil {
-					fallback = histalpaca.New("", p.KeyID, p.SecretKey, cfg.Backfill.Alpaca.Feed, clock.System{})
-					log.Info("backfill: alpaca fallback resolved", "from", label)
+					alpacaSrc = histalpaca.New("", p.KeyID, p.SecretKey, cfg.Backfill.Alpaca.Feed, clock.System{})
+					log.Info("backfill: alpaca provider resolved", "from", label, "feed", cfg.Backfill.Alpaca.Feed)
 				} else if errors.Is(err, errAlpacaLiveCreds) {
-					log.Warn("backfill: refusing alpaca-live creds for read-only historical fallback", "key", cfg.Backfill.Alpaca.CredsKey)
+					log.Warn("backfill: refusing alpaca-live creds for read-only historical provider", "key", cfg.Backfill.Alpaca.CredsKey)
 				} else {
-					log.Warn("backfill: alpaca fallback disabled (no creds)", "key", cfg.Backfill.Alpaca.CredsKey, "err", err)
+					log.Warn("backfill: alpaca provider disabled (no creds)", "key", cfg.Backfill.Alpaca.CredsKey, "err", err)
 				}
 			}
+			moomoo := backfill.MoomooFetcher(fd)
+			var dailyChain, intradayChain []backfill.Source
+			if alpacaSrc != nil {
+				dailyChain = append(dailyChain, backfill.Source{Name: "alpaca", HistFetcher: alpacaSrc})
+				intradayChain = append(intradayChain, backfill.Source{Name: "alpaca", HistFetcher: alpacaSrc})
+			}
+			if cfg.Backfill.Yahoo.Enabled {
+				dailyChain = append(dailyChain, backfill.Source{Name: "yahoo", HistFetcher: histyahoo.New("", clock.System{})})
+			}
+			// moomoo request_history_kline is the quota-guarded last resort in both chains.
+			dailyChain = append(dailyChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
+			intradayChain = append(intradayChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
+
 			orch := backfill.New(
-				backfill.MoomooFetcher(fd),
-				fallback,
+				dailyChain,
+				intradayChain,
+				fd, // TailFetcher: OpenDFeed.Tail1m (quota-free Qot_GetKL)
 				core,
 				st,
 				clock.System{},
