@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -99,5 +100,104 @@ func TestResolveExportRangeCustomErrors(t *testing.T) {
 func TestResolveExportRangeUnknownPreset(t *testing.T) {
 	if _, _, err := ResolveExportRange("bogus", "", "", time.Now()); err == nil {
 		t.Error("expected error for unknown preset")
+	}
+}
+
+func TestBuildFillsCSVSideMapping(t *testing.T) {
+	cases := []struct{ side, wantAction string }{
+		{"BUY", "BUY"}, {"COVER", "BUY"}, {"SELL", "SELL"}, {"SHORT", "SELL"},
+	}
+	for _, c := range cases {
+		rows := []ExportFillRow{{FillID: 1, Symbol: "US.AAPL", Side: c.side, Qty: 10, Price: 100, TsMs: ms("2026-07-08T14:00:00Z"), Venue: "sim"}}
+		got, err := BuildFillsCSV(rows)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.side, err)
+		}
+		lines := strings.Split(strings.TrimRight(got, "\n"), "\n")
+		if len(lines) != 2 {
+			t.Fatalf("%s: expected header + 1 row, got %d lines: %q", c.side, len(lines), got)
+		}
+		fields := strings.Split(lines[1], ",")
+		if fields[2] != c.wantAction {
+			t.Errorf("%s: action = %q, want %q", c.side, fields[2], c.wantAction)
+		}
+	}
+}
+
+func TestBuildFillsCSVExactFixture(t *testing.T) {
+	rows := []ExportFillRow{
+		{FillID: 12, Symbol: "US.NVDA", Side: "BUY", Qty: 100, Price: 120.5, TsMs: ms("2026-07-10T13:31:05Z"), Venue: "sim"},
+		{FillID: 19, Symbol: "US.NVDA", Side: "SELL", Qty: 100, Price: 121.25, TsMs: ms("2026-07-10T13:44:02Z"), Venue: "sim"},
+	}
+	got, err := BuildFillsCSV(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "datetime,symbol,action,price,shares,fees,externalId\n" +
+		"2026-07-10T09:31:05,NVDA,BUY,120.5,100,0,etape:sim:12\n" +
+		"2026-07-10T09:44:02,NVDA,SELL,121.25,100,0,etape:sim:19\n"
+	if got != want {
+		t.Fatalf("CSV mismatch:\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+func TestBuildFillsCSVDatetimeAcrossDST(t *testing.T) {
+	cases := []struct {
+		name, tsIso, wantLocal string
+	}{
+		{"EST (winter)", "2026-01-15T14:30:00Z", "2026-01-15T09:30:00"}, // UTC-5
+		{"EDT (summer)", "2026-07-15T14:30:00Z", "2026-07-15T10:30:00"}, // UTC-4
+	}
+	for _, c := range cases {
+		rows := []ExportFillRow{{FillID: 1, Symbol: "US.AAPL", Side: "BUY", Qty: 1, Price: 1, TsMs: ms(c.tsIso), Venue: "sim"}}
+		got, err := BuildFillsCSV(rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fields := strings.Split(strings.Split(strings.TrimRight(got, "\n"), "\n")[1], ",")
+		if fields[0] != c.wantLocal {
+			t.Errorf("%s: datetime = %q, want %q", c.name, fields[0], c.wantLocal)
+		}
+	}
+}
+
+func TestBuildFillsCSVSymbolStrip(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"US.AAPL", "AAPL"},
+		{"US.BRK.B", "BRK.B"},
+	}
+	for _, c := range cases {
+		rows := []ExportFillRow{{FillID: 1, Symbol: c.in, Side: "BUY", Qty: 1, Price: 1, TsMs: ms("2026-07-08T14:00:00Z"), Venue: "sim"}}
+		got, err := BuildFillsCSV(rows)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fields := strings.Split(strings.Split(strings.TrimRight(got, "\n"), "\n")[1], ",")
+		if fields[1] != c.want {
+			t.Errorf("%s: symbol = %q, want %q", c.in, fields[1], c.want)
+		}
+	}
+}
+
+func TestBuildFillsCSVEmptyIsHeaderOnly(t *testing.T) {
+	got, err := BuildFillsCSV(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "datetime,symbol,action,price,shares,fees,externalId\n"; got != want {
+		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestBuildFillsCSVQuotesFieldsContainingCommas(t *testing.T) {
+	// Contrived: no real symbol contains a comma, but this proves
+	// encoding/csv's quoting kicks in instead of producing a corrupt row.
+	rows := []ExportFillRow{{FillID: 1, Symbol: "US.A,B", Side: "BUY", Qty: 1, Price: 1, TsMs: ms("2026-07-08T14:00:00Z"), Venue: "sim"}}
+	got, err := BuildFillsCSV(rows)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, `"A,B"`) {
+		t.Fatalf("expected the comma-containing symbol to be quoted, got %q", got)
 	}
 }

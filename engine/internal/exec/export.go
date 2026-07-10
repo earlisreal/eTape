@@ -1,7 +1,10 @@
 package exec
 
 import (
+	"encoding/csv"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/session"
@@ -51,4 +54,49 @@ func resolveCustomRange(from, to string) (fromMs, toMs int64, err error) {
 	// the NEXT day's ET midnight (AddDate is DST-safe — time.Time normalizes
 	// the wall clock across the transition, see TestResolveExportRangeCustomAcrossDST).
 	return fromDay.UnixMilli(), toDay.AddDate(0, 0, 1).UnixMilli(), nil
+}
+
+// exportHeader is the eJournal Generic-importer column order (indices 0-5)
+// plus externalId appended at index 6 — see the CSV contract in
+// docs/superpowers/specs/2026-07-10-export-trades-ejournal-design.md.
+var exportHeader = []string{"datetime", "symbol", "action", "price", "shares", "fees", "externalId"}
+
+// BuildFillsCSV renders export rows as the eJournal CSV contract. Header row
+// always emitted; empty input yields a header-only document. Times are
+// America/New_York wall-clock, ISO local (no zone), seconds precision.
+func BuildFillsCSV(rows []ExportFillRow) (string, error) {
+	var b strings.Builder
+	w := csv.NewWriter(&b)
+	if err := w.Write(exportHeader); err != nil {
+		return "", err
+	}
+	loc := session.Loc()
+	for _, r := range rows {
+		rec := []string{
+			time.UnixMilli(r.TsMs).In(loc).Format("2006-01-02T15:04:05"),
+			strings.TrimPrefix(r.Symbol, "US."),
+			exportAction(r.Side),
+			strconv.FormatFloat(r.Price, 'f', -1, 64),
+			strconv.FormatFloat(r.Qty, 'f', -1, 64),
+			"0",
+			"etape:" + r.Venue + ":" + strconv.FormatInt(r.FillID, 10),
+		}
+		if err := w.Write(rec); err != nil {
+			return "", err
+		}
+	}
+	w.Flush()
+	return b.String(), w.Error()
+}
+
+// exportAction folds the four exec sides into eJournal's BUY/SELL: BUY and
+// COVER (opening/adding to a long, or covering a short) => BUY; SELL and
+// SHORT => SELL.
+func exportAction(side string) string {
+	switch side {
+	case "BUY", "COVER":
+		return "BUY"
+	default:
+		return "SELL"
+	}
 }
