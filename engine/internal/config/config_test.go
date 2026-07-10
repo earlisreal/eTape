@@ -239,7 +239,7 @@ func TestBackfillAlpacaDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 	a := cfg.Backfill.Alpaca
-	if !a.Enabled || a.CredsKey != "" || a.Feed != "iex" {
+	if !a.Enabled || a.CredsKey != "" || a.Feed != "sip" {
 		t.Fatalf("alpaca backfill defaults = %+v", a)
 	}
 }
@@ -251,5 +251,32 @@ func TestFeedQuotaWarnDefaults(t *testing.T) {
 	}
 	if c.Feed.HistQuotaWarnRemain != 10 {
 		t.Fatalf("HistQuotaWarnRemain default = %d, want 10", c.Feed.HistQuotaWarnRemain)
+	}
+}
+
+func TestBackfillDefaultsAndYahooKillSwitch(t *testing.T) {
+	d := Default()
+	if d.Backfill.Alpaca.Feed != "sip" {
+		t.Fatalf("default alpaca feed = %q, want sip", d.Backfill.Alpaca.Feed)
+	}
+	if !d.Backfill.Yahoo.Enabled {
+		t.Fatalf("default yahoo enabled = false, want true")
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte("[backfill.yahoo]\nenabled = false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.Backfill.Yahoo.Enabled {
+		t.Fatalf("yahoo.enabled = true after kill switch, want false")
+	}
+	// Alpaca feed default survives a file that doesn't mention it.
+	if c.Backfill.Alpaca.Feed != "sip" {
+		t.Fatalf("alpaca feed = %q after partial file, want sip default preserved", c.Backfill.Alpaca.Feed)
 	}
 }

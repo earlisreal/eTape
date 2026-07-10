@@ -38,13 +38,14 @@ type Client struct {
 }
 
 // New builds a Client. base defaults to the production data host; feedName
-// defaults to "iex" (the free tier). Tests pass a mock server URL.
+// defaults to "sip" (free tier serves SIP historical bars). Tests pass a mock
+// server URL.
 func New(base, keyID, secret, feedName string, clk clock.Clock) *Client {
 	if base == "" {
 		base = defaultDataBase
 	}
 	if feedName == "" {
-		feedName = "iex"
+		feedName = "sip"
 	}
 	return &Client{
 		base: base, keyID: keyID, secret: secret, feed: feedName,
@@ -58,10 +59,31 @@ func (c *Client) DailyBars(ctx context.Context, symbol string, from, to time.Tim
 	return c.bars(ctx, symbol, "1Day", "all", from, to)
 }
 
-// Intraday1m requests "raw" (unadjusted) bars — see the adjustment comment on
-// bars() for why intraday and daily diverge here.
+// recentSIPClampBuffer backs off the 1m window end when Alpaca returns a 403
+// for too-recent SIP data. The free SIP feed's 15-minute recency rule is
+// normally enforced by silent server-side clamping (HTTP 200, last bar at
+// now−16m), but this defensive retry covers a return to the old 403 behavior.
+const recentSIPClampBuffer = 16 * time.Minute
+
+// Intraday1m requests "raw" (unadjusted) bars up to `to` and accepts the
+// server clamp. On a 403 mentioning recent SIP data it retries once with
+// end = now−16m — see the adjustment comment on bars() for raw-vs-all.
 func (c *Client) Intraday1m(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error) {
-	return c.bars(ctx, symbol, "1Min", "raw", from, to)
+	bars, err := c.bars(ctx, symbol, "1Min", "raw", from, to)
+	if err != nil && isRecentSIPForbidden(err) {
+		clampedTo := c.clk.Now().Add(-recentSIPClampBuffer)
+		if clampedTo.After(from) {
+			return c.bars(ctx, symbol, "1Min", "raw", from, clampedTo)
+		}
+	}
+	return bars, err
+}
+
+// isRecentSIPForbidden reports whether err is Alpaca's 403 for requesting SIP
+// data inside the free-tier 15-minute recency window.
+func isRecentSIPForbidden(err error) bool {
+	s := strings.ToLower(err.Error())
+	return strings.Contains(s, "status=403") && (strings.Contains(s, "recent") || strings.Contains(s, "subscription"))
 }
 
 type barJSON struct {

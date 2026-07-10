@@ -1,7 +1,8 @@
 // Package backfill wires eTape's deep-history path: at boot it warm-starts each
-// fed symbol from the SQLite bar archives, then gap-fills from moomoo (daily
-// full depth + intraday 1m) with an optional Alpaca 1m-depth fallback, seeding
-// md.Core with each batch in one call. md.Core itself absorbs an entire
+// fed symbol from the SQLite bar archives, then walks ordered provider chains
+// (daily = [alpaca?, yahoo?, moomoo-last-resort], intraday 1m = [alpaca?,
+// moomoo-last-resort]) plus a quota-free moomoo 1m tail, seeding md.Core with
+// each batch in one call. md.Core itself absorbs an entire
 // history batch as one BarSnapshot per timeframe rather than one BarUpdate
 // per bar, so the per-bar fan-out that used to require chunking (see the
 // removed seedChunked) can no longer overflow its drop-on-full updates
@@ -32,6 +33,21 @@ import (
 type HistFetcher interface {
 	DailyBars(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error)
 	Intraday1m(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error)
+}
+
+// Source pairs a HistFetcher with a short label naming which provider served,
+// for logging. The orchestrator walks a chain of Sources in order.
+type Source struct {
+	Name string
+	HistFetcher
+}
+
+// TailFetcher pulls the quota-free recent 1m window (moomoo Qot_GetKL, ≤1,000
+// bars) for a symbol with an active K_1M subscription. Implemented by
+// *opend.OpenDFeed; nil in replay/demo (no OpenD), where the tail step is
+// skipped.
+type TailFetcher interface {
+	Tail1m(ctx context.Context, symbol string) ([]feed.Bar, error)
 }
 
 // Seeder receives backfilled bars. Implemented by *md.Core.
@@ -86,25 +102,28 @@ type Config struct {
 	SeedChunk int
 }
 
-// Orchestrator runs the per-symbol backfill sequence. primary is moomoo;
-// fallback (Alpaca) is optional and may be nil.
+// Orchestrator runs the per-symbol backfill sequence over ordered provider
+// chains: daily = [alpaca?, yahoo?, moomoo-last-resort], intraday (1m deep) =
+// [alpaca?, moomoo-last-resort], plus the moomoo quota-free 1m tail. In normal
+// operation the moomoo entries never fire, so historical quota spend is ~0.
 type Orchestrator struct {
-	primary  HistFetcher
-	fallback HistFetcher
+	daily    []Source
+	intraday []Source
+	tail     TailFetcher
 	seeder   Seeder
 	archive  Archive
 	clk      clock.Clock
 	cfg      Config
 }
 
-func New(primary, fallback HistFetcher, seeder Seeder, archive Archive, clk clock.Clock, cfg Config) *Orchestrator {
+func New(daily, intraday []Source, tail TailFetcher, seeder Seeder, archive Archive, clk clock.Clock, cfg Config) *Orchestrator {
 	if cfg.IntradayDays <= 0 {
 		cfg.IntradayDays = 20
 	}
 	if cfg.Concurrency <= 0 {
 		cfg.Concurrency = 3
 	}
-	return &Orchestrator{primary: primary, fallback: fallback, seeder: seeder, archive: archive, clk: clk, cfg: cfg}
+	return &Orchestrator{daily: daily, intraday: intraday, tail: tail, seeder: seeder, archive: archive, clk: clk, cfg: cfg}
 }
 
 // Run backfills every symbol through a bounded worker pool, honoring ctx.
@@ -129,26 +148,40 @@ func (o *Orchestrator) Run(ctx context.Context, symbols []string) {
 	wg.Wait()
 }
 
-// Backfill runs warm-start → daily gap-fill → 1m gap-fill for one symbol.
-// Every step is best-effort: a failure is logged and the next step still runs,
-// so a single dead source never blanks the chart. The daily-fetch outcome is
-// returned (nil on success) so a caller can decide whether to retry -- e.g.
-// the uihub re-arms a failed daily backfill once OpenD reconnects.
+// Backfill runs warm-start → quota-free tail seed → deep 1m (trimmed so the
+// tail wins overlaps) → daily, for one symbol. Every step is best-effort: a
+// failure is logged and later steps still run. The tail seeds first so a cold
+// symbol's chart is interactive in <1 s; daily runs last so its (up to ~3 s)
+// latency never delays the intraday chart. Returns the daily-fetch outcome
+// (nil once any daily provider served) so a caller can re-arm on failure (the
+// uihub retries a failed daily backfill once OpenD reconnects).
 func (o *Orchestrator) Backfill(ctx context.Context, symbol string) error {
 	now := o.clk.Now()
 	from1m := intradayFrom(now, o.cfg.IntradayDays)
 	o.warmStart(ctx, symbol, from1m, now)
-	dailyErr := o.fillDaily(ctx, symbol, o.dailyFrom(now), now)
-	o.fill1m(ctx, symbol, from1m, now)
-	return dailyErr
+	tailOldestMs, tailOK := o.tail1m(ctx, symbol)
+	o.fill1m(ctx, symbol, from1m, now, tailOldestMs, tailOK)
+	return o.fillDaily(ctx, symbol, o.dailyFrom(now), now)
 }
 
-// dailyFrom is DailyYears ago, or the epoch (all available) when DailyYears==0.
+// dailyFloor is the earliest daily-history start requested. Alpaca's free tier
+// hard-floors at 2016-01-04; Yahoo goes deeper, but the extra depth is below
+// the indicator-relevance threshold (spec's indicator-depth rationale: only a
+// monthly 200-period indicator wants more, an accepted casualty). Clamping
+// here keeps depth consistent regardless of which provider served.
+var dailyFloor = time.Date(2016, 1, 1, 0, 0, 0, 0, time.UTC)
+
+// dailyFrom is DailyYears ago clamped to dailyFloor, or dailyFloor when
+// DailyYears<=0.
 func (o *Orchestrator) dailyFrom(now time.Time) time.Time {
 	if o.cfg.DailyYears <= 0 {
-		return time.Unix(0, 0)
+		return dailyFloor
 	}
-	return now.AddDate(-o.cfg.DailyYears, 0, 0)
+	from := now.AddDate(-o.cfg.DailyYears, 0, 0)
+	if from.Before(dailyFloor) {
+		return dailyFloor
+	}
+	return from
 }
 
 // warmStart seeds from the local archive/journal only -- it does not
@@ -191,63 +224,104 @@ func (o *Orchestrator) archiveDailyBars(bars []feed.Bar) {
 	}
 }
 
-// gapThresholdMs ignores sub-day gaps between the requested `from` and the
-// primary's oldest bar — those are just weekend/holiday edges, not a real
-// depth shortfall, and must not trigger a fallback fetch every boot.
-const gapThresholdMs = 24 * 3600 * 1000
-
-// fillDaily returns the daily-fetch outcome: nil once either source seeded
-// bars, otherwise the last error encountered (primary, or fallback's if a
-// fallback is configured and also failed).
-func (o *Orchestrator) fillDaily(ctx context.Context, symbol string, from, to time.Time) error {
-	bars, err := o.primary.DailyBars(ctx, symbol, from, to)
+// tail1m fetches the quota-free ≤1,000-bar recent 1m window, archives + seeds
+// it, and returns the oldest bar's BucketMs so fill1m can trim the deep set to
+// strictly-older bars (moomoo wins overlaps). ok is false when the tail is
+// unavailable (no OpenD, not subscribed, empty, or error) — fill1m then uses
+// the deep set untrimmed.
+func (o *Orchestrator) tail1m(ctx context.Context, symbol string) (oldestMs int64, ok bool) {
+	if o.tail == nil {
+		return 0, false
+	}
+	bars, err := o.tail.Tail1m(ctx, symbol)
 	if err != nil {
-		slog.Warn("backfill: primary daily failed", "symbol", symbol, "err", err)
-		if o.fallback == nil {
-			return err
+		slog.Warn("backfill: tail 1m failed", "symbol", symbol, "err", err)
+		return 0, false
+	}
+	if len(bars) == 0 {
+		return 0, false
+	}
+	o.archive1m(bars)
+	seedUnlessCanceled(ctx, bars, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+	return bars[0].BucketMs, true // ascending → [0] is oldest
+}
+
+// fill1m walks the 1m chain for the deep window, trims to bars strictly older
+// than the tail's oldest bar (when a tail seeded), then archives + seeds.
+func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.Time, tailOldestMs int64, tailOK bool) {
+	bars, served, err := walkChain(ctx, symbol, from, to, o.intraday, intraday1m)
+	if len(bars) == 0 {
+		if err != nil {
+			slog.Warn("backfill: deep 1m unavailable", "symbol", symbol, "err", err)
 		}
-		if bars, err = o.fallback.DailyBars(ctx, symbol, from, to); err != nil {
-			slog.Warn("backfill: fallback daily failed", "symbol", symbol, "err", err)
-			return err
-		}
+		return
+	}
+	if tailOK {
+		bars = trimOlderThan(bars, tailOldestMs)
+	}
+	if len(bars) == 0 {
+		return
+	}
+	o.archive1m(bars)
+	seedUnlessCanceled(ctx, bars, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+	slog.Info("backfill: deep 1m served", "symbol", symbol, "provider", served, "bars", len(bars))
+}
+
+// fillDaily walks the daily chain and seeds the first non-empty result. It
+// returns nil once any provider served (even with zero bars — no data is not a
+// failure), otherwise the last error, so the uihub knows whether to re-arm.
+func (o *Orchestrator) fillDaily(ctx context.Context, symbol string, from, to time.Time) error {
+	bars, served, err := walkChain(ctx, symbol, from, to, o.daily, dailyBars)
+	if len(bars) == 0 {
+		return err
 	}
 	o.archiveDailyBars(bars)
 	seedUnlessCanceled(ctx, bars, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
+	slog.Info("backfill: daily served", "symbol", symbol, "provider", served, "bars", len(bars))
 	return nil
 }
 
-func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.Time) {
-	bars, err := o.primary.Intraday1m(ctx, symbol, from, to)
-	if err != nil {
-		slog.Warn("backfill: primary 1m failed", "symbol", symbol, "err", err)
-		bars = nil
-	}
-	if len(bars) > 0 {
-		o.archive1m(bars)
-		seedUnlessCanceled(ctx, bars, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
-	}
-	if o.fallback == nil {
-		return
-	}
-	// Fallback fills only the older gap [from, gapTo). If the primary succeeded
-	// and its oldest bar is within a day of `from`, the window is covered.
-	gapTo := to
-	if len(bars) > 0 {
-		oldestMs := bars[0].BucketMs
-		if oldestMs-from.UnixMilli() < gapThresholdMs {
-			return
+// fetchFunc selects DailyBars or Intraday1m off a Source for walkChain.
+type fetchFunc func(Source) func(context.Context, string, time.Time, time.Time) ([]feed.Bar, error)
+
+func dailyBars(s Source) func(context.Context, string, time.Time, time.Time) ([]feed.Bar, error) {
+	return s.DailyBars
+}
+func intraday1m(s Source) func(context.Context, string, time.Time, time.Time) ([]feed.Bar, error) {
+	return s.Intraday1m
+}
+
+// walkChain tries each source in order, returning the first non-empty result
+// and the serving source's name. A source error is logged and the walk
+// advances; an empty (nil, nil) result also advances. If every source errored,
+// the last error is returned (bars nil); if every source returned empty with
+// no error, (nil, "", nil).
+func walkChain(ctx context.Context, symbol string, from, to time.Time, chain []Source, pick fetchFunc) ([]feed.Bar, string, error) {
+	var lastErr error
+	for _, s := range chain {
+		bars, err := pick(s)(ctx, symbol, from, to)
+		if err != nil {
+			slog.Warn("backfill: provider failed", "symbol", symbol, "provider", s.Name, "err", err)
+			lastErr = err
+			continue
 		}
-		gapTo = time.UnixMilli(oldestMs)
+		if len(bars) > 0 {
+			return bars, s.Name, nil
+		}
 	}
-	gap, err := o.fallback.Intraday1m(ctx, symbol, from, gapTo)
-	if err != nil {
-		slog.Warn("backfill: fallback 1m failed", "symbol", symbol, "err", err)
-		return
+	return nil, "", lastErr
+}
+
+// trimOlderThan returns the ascending prefix of bars with BucketMs strictly
+// less than tsMs (the tail's oldest bar), so the deep 1m set never overwrites a
+// moomoo tail bar within a run.
+func trimOlderThan(bars []feed.Bar, tsMs int64) []feed.Bar {
+	for i, b := range bars {
+		if b.BucketMs >= tsMs {
+			return bars[:i]
+		}
 	}
-	if len(gap) > 0 {
-		o.archive1m(gap)
-		seedUnlessCanceled(ctx, gap, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
-	}
+	return bars
 }
 
 // MoomooFetcher adapts a feed.Feed (the live OpenD feed) as the primary
