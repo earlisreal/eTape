@@ -83,12 +83,12 @@ func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock, replay bool
 	for _, v := range cfg.Venues {
 		id := exec.VenueID(v.ID)
 		if replay {
-			out = append(out, venueBroker{ID: id, Broker: sim.New(id, clk, v.EffectiveStartingBalance(), sim.Options{SlippageBps: v.SlippageBps})})
+			out = append(out, venueBroker{ID: id, Broker: sim.New(id, clk, v.EffectiveStartingBalance(), sim.Options{SlippageBps: v.SlippageBps, FillLatencyMs: v.FillLatencyMs})})
 			continue
 		}
 		switch v.Broker {
 		case "sim":
-			out = append(out, venueBroker{ID: id, Broker: sim.New(id, clk, v.EffectiveStartingBalance(), sim.Options{SlippageBps: v.SlippageBps})})
+			out = append(out, venueBroker{ID: id, Broker: sim.New(id, clk, v.EffectiveStartingBalance(), sim.Options{SlippageBps: v.SlippageBps, FillLatencyMs: v.FillLatencyMs})})
 		case "tradezero":
 			pair, err := cr.Get(v.Credentials)
 			if err != nil {

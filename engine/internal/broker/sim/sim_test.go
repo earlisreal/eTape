@@ -1300,3 +1300,320 @@ func TestSim_SlippageBps_SellMarketFillsBelowBid(t *testing.T) {
 		t.Fatalf("fill price %v must be strictly below the raw bid 100", f.F.Price)
 	}
 }
+
+// --- Task 5: configurable submit->fill latency, event-time gated ---
+//
+// All of these tests use clock.NewFake directly (not the newSim/newSimWithSlippage
+// helpers, which hardcode Options{}) and drive time only via clk.Advance, never
+// time.Sleep, so eligibility crossing is deterministic and reproducible.
+
+// TestSim_FillLatencyMs_ZeroOrNegativeMatchesImmediateBehavior is the
+// regression guard: fillLatencyMs<=0 must reproduce Task 4's immediate
+// first-attempt behavior exactly, and must never populate eligibleMs at all
+// (the zero-knob fast path is a genuine no-op, not "eligible with a
+// deadline of now").
+func TestSim_FillLatencyMs_ZeroOrNegativeMatchesImmediateBehavior(t *testing.T) {
+	for _, lat := range []int{0, -50} {
+		clk := clock.NewFake(time.UnixMilli(1000))
+		b := New("sim-1", clk, 100_000, Options{FillLatencyMs: lat})
+		b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+		req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
+		if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := drain(t, b).(exec.OrderAccepted); !ok {
+			t.Fatalf("fillLatencyMs=%d: expected OrderAccepted first", lat)
+		}
+		f, ok := drain(t, b).(exec.OrderFilled)
+		if !ok || f.F.Qty != 10 {
+			t.Fatalf("fillLatencyMs=%d should fill immediately (Task 4 behavior), got %+v ok=%v", lat, f, ok)
+		}
+		if len(b.eligibleMs) != 0 {
+			t.Fatalf("fillLatencyMs=%d should never populate eligibleMs, got %v", lat, b.eligibleMs)
+		}
+	}
+}
+
+// TestSim_FillLatencyMs_SubmitDefersFirstAttemptUntilEligibleSetBook is the
+// brief's primary case: an order submitted against an ALREADY marketable
+// book must not fill at submission when fillLatencyMs>0. It only fills once
+// a later SetBook call lands at or after the eligibility deadline. Re-feeding
+// the identical, already-seen book before the deadline (and confirming no
+// fill results) also proves the blocked attempt never partially consumed the
+// displayed depth -- there is nothing "stale" for the eventual real attempt
+// to double-count.
+func TestSim_FillLatencyMs_SubmitDefersFirstAttemptUntilEligibleSetBook(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(1000))
+	b := New("sim-1", clk, 100_000, Options{FillLatencyMs: 500})
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := drain(t, b).(exec.OrderAccepted); !ok {
+		t.Fatal("expected OrderAccepted")
+	}
+	select {
+	case e := <-b.Events():
+		t.Fatalf("order must not fill before its eligibility deadline, got %+v", e)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// Advance less than the latency and re-feed the SAME book: still blocked.
+	clk.Advance(400 * time.Millisecond)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+	select {
+	case e := <-b.Events():
+		t.Fatalf("400ms < 500ms latency: order must still not fill, got %+v", e)
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	// Advance past the latency: the next SetBook fills it, at that book's
+	// (fresh) price, and with the full original depth still available.
+	clk.Advance(200 * time.Millisecond) // total 600ms >= 500ms
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 101, Volume: 50}}})
+	f, ok := drain(t, b).(exec.OrderFilled)
+	if !ok || f.F.Qty != 10 || f.F.Price != 101 {
+		t.Fatalf("expected a full 10-share fill at 101 once eligible, got %+v ok=%v", f, ok)
+	}
+}
+
+// TestSim_FillLatencyMs_DeferredStopTriggerFillsOnlyAfterEligible covers the
+// mark-based stop-trigger path: a Stop still triggers (converts type) off
+// the mark immediately -- the trigger comparison itself is not latency-gated
+// -- but the resulting book-fill attempt is, exactly like a plain order's.
+func TestSim_FillLatencyMs_DeferredStopTriggerFillsOnlyAfterEligible(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(1000))
+	b := New("v", clk, 100_000, Options{FillLatencyMs: 300})
+	b.SetMark("AAPL", 95)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 101, Volume: 50}}})
+	drainAll(b.Events())
+	if _, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
+		Venue: "v", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeStop,
+		Qty: 10, StopPrice: 100, ClientOrderID: "ET-latstop",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	drainAll(b.Events()) // OrderAccepted
+
+	// Trigger the stop well within the 300ms latency window.
+	b.SetMark("AAPL", 101)
+	if _, ok := filledAt(t, drainAll(b.Events())); ok {
+		t.Fatal("triggered stop must not fill before its eligibility deadline elapses")
+	}
+	_, _, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 || orders[0].Type != exec.TypeMarket {
+		t.Fatalf("stop should convert to Market on trigger even though its fill is deferred: %+v", orders)
+	}
+
+	// Still before the deadline: a fresh book arrives -- still no fill.
+	clk.Advance(200 * time.Millisecond)
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 101, Volume: 50}}})
+	if _, ok := filledAt(t, drainAll(b.Events())); ok {
+		t.Fatal("only 200ms of the 300ms window has elapsed; must still not fill")
+	}
+
+	// Past the deadline: the next SetBook fills it.
+	clk.Advance(200 * time.Millisecond) // total 400ms >= 300ms
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 101.5, Volume: 50}}})
+	f, ok := filledAt(t, drainAll(b.Events()))
+	if !ok || f.F.Price != 101.5 {
+		t.Fatalf("expected a fill once eligible, got ok=%v f=%+v", ok, f)
+	}
+}
+
+// TestSim_FillLatencyMs_IOCFirstEligibleAttemptAppliesTIF documents the
+// subtle Task 2/Task 5 interaction: IOC's "first attempt" is redefined as
+// the first ELIGIBLE attempt. When latency defers the submit-time attempt
+// entirely (no fillAgainstBook call happens at all -- see the OrderAccepted-
+// only assertion below), the order simply rests; TIF only actually applies
+// once a later SetBook call clears the eligibility deadline, at which point
+// it behaves exactly as an immediate IOC submit always has (fill what's
+// available, cancel the remainder).
+func TestSim_FillLatencyMs_IOCFirstEligibleAttemptAppliesTIF(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(1000))
+	b := New("sim-1", clk, 100_000, Options{FillLatencyMs: 500})
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 4}}})
+	req := exec.OrderRequest{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, TIF: exec.TIFIOC, Qty: 10, ClientOrderID: "ET-ioclat"}
+	if _, err := b.SubmitOrder(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
+	// Submit-time attempt is deferred entirely: only OrderAccepted, no
+	// fill/cancel yet -- proving IOC did NOT evaluate at literal submit time.
+	evs := drainAll(b.Events())
+	if len(evs) != 1 {
+		t.Fatalf("expected only OrderAccepted while latency blocks the first attempt, got %+v", evs)
+	}
+	if _, ok := evs[0].(exec.OrderAccepted); !ok {
+		t.Fatalf("expected OrderAccepted, got %+v", evs[0])
+	}
+	_, _, orders, err := b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 {
+		t.Fatalf("IOC order must still be resting while its latency window is open: %+v", orders)
+	}
+
+	clk.Advance(500 * time.Millisecond)
+	// Same depth as before: the blocked attempt never consumed anything.
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 4}}})
+	evs = drainAll(b.Events())
+	f, ok := filledAt(t, evs)
+	if !ok || f.F.Qty != 4 {
+		t.Fatalf("IOC's first eligible attempt should fill the available 4, got %+v", f)
+	}
+	var canceled bool
+	for _, e := range evs {
+		if c, ok := e.(exec.OrderCanceled); ok && c.OID == "ET-ioclat" {
+			canceled = true
+		}
+	}
+	if !canceled {
+		t.Fatal("IOC's first eligible attempt should cancel the unfilled remainder")
+	}
+	_, _, orders, err = b.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 0 {
+		t.Fatalf("IOC order must not remain working after its first eligible attempt: %+v", orders)
+	}
+	if len(b.eligibleMs) != 0 {
+		t.Fatalf("eligibleMs leaked after IOC's cancel-remainder resolution: %v", b.eligibleMs)
+	}
+}
+
+// TestSim_FillLatencyMs_EligibleMsCleanupDoesNotLeak checks the brief's
+// bookkeeping requirement directly (whitebox, package sim): eligibleMs must
+// hold exactly one entry while an order is resting under an open latency
+// window, and zero once that order leaves b.orders by any of full fill,
+// cancel, or FOK reject.
+func TestSim_FillLatencyMs_EligibleMsCleanupDoesNotLeak(t *testing.T) {
+	t.Run("full fill", func(t *testing.T) {
+		clk := clock.NewFake(time.UnixMilli(1000))
+		b := New("sim-1", clk, 100_000, Options{FillLatencyMs: 100})
+		b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+		if _, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
+			Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		drainAll(b.Events())
+		if len(b.eligibleMs) != 1 {
+			t.Fatalf("expected 1 tracked eligibility entry while resting, got %d (%v)", len(b.eligibleMs), b.eligibleMs)
+		}
+		clk.Advance(100 * time.Millisecond)
+		b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+		drainAll(b.Events())
+		if len(b.eligibleMs) != 0 {
+			t.Fatalf("eligibleMs leaked after full fill: %v", b.eligibleMs)
+		}
+	})
+
+	t.Run("canceled", func(t *testing.T) {
+		clk := clock.NewFake(time.UnixMilli(1000))
+		b := New("sim-1", clk, 100_000, Options{FillLatencyMs: 100})
+		if _, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
+			Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, LimitPrice: 90, Qty: 10, ClientOrderID: "ET1",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		drainAll(b.Events())
+		if len(b.eligibleMs) != 1 {
+			t.Fatalf("expected 1 tracked eligibility entry while resting, got %d (%v)", len(b.eligibleMs), b.eligibleMs)
+		}
+		if err := b.CancelOrder(context.Background(), "ET1"); err != nil {
+			t.Fatal(err)
+		}
+		if len(b.eligibleMs) != 0 {
+			t.Fatalf("eligibleMs leaked after cancel: %v", b.eligibleMs)
+		}
+	})
+
+	t.Run("FOK rejected", func(t *testing.T) {
+		clk := clock.NewFake(time.UnixMilli(1000))
+		b := New("sim-1", clk, 100_000, Options{FillLatencyMs: 100})
+		b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 4}}})
+		if _, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
+			Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, TIF: exec.TIFFOK, Qty: 10, ClientOrderID: "ET1",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		drainAll(b.Events())
+		clk.Advance(100 * time.Millisecond)
+		b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 4}}})
+		evs := drainAll(b.Events())
+		var rejected bool
+		for _, e := range evs {
+			if r, ok := e.(exec.OrderRejected); ok && r.OID == "ET1" {
+				rejected = true
+			}
+		}
+		if !rejected {
+			t.Fatalf("expected an OrderRejected once eligible against insufficient depth, got %+v", evs)
+		}
+		if len(b.eligibleMs) != 0 {
+			t.Fatalf("eligibleMs leaked after FOK reject: %v", b.eligibleMs)
+		}
+	})
+
+	t.Run("CancelAll", func(t *testing.T) {
+		clk := clock.NewFake(time.UnixMilli(1000))
+		b := New("sim-1", clk, 100_000, Options{FillLatencyMs: 100})
+		if _, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
+			Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, LimitPrice: 90, Qty: 10, ClientOrderID: "ET1",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		drainAll(b.Events())
+		if err := b.CancelAll(context.Background(), ""); err != nil {
+			t.Fatal(err)
+		}
+		if len(b.eligibleMs) != 0 {
+			t.Fatalf("eligibleMs leaked after CancelAll: %v", b.eligibleMs)
+		}
+	})
+}
+
+// TestSim_FillLatencyMs_ReplaceOrderStillGatedByOriginalDeadline confirms
+// ReplaceOrder's post-replace re-evaluation (which shares attemptBookFillLocked
+// with every other crossing path) is subject to the SAME eligibility deadline
+// set at original submission -- replacing an order does not reset or bypass
+// its latency window.
+func TestSim_FillLatencyMs_ReplaceOrderStillGatedByOriginalDeadline(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(1000))
+	b := New("sim-1", clk, 100_000, Options{FillLatencyMs: 500})
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100.5, Volume: 50}}})
+	if _, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
+		Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, Qty: 10, LimitPrice: 90, ClientOrderID: "ET1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	drainAll(b.Events()) // OrderAccepted (90 doesn't cross the 100.5 ask anyway)
+
+	// Replace well within the 500ms window: the new limit crosses the book,
+	// but the order is still not eligible, so it must not fill on replace.
+	clk.Advance(100 * time.Millisecond)
+	if err := b.ReplaceOrder(context.Background(), "ET1", exec.ReplaceRequest{Qty: 10, LimitPrice: 101}); err != nil {
+		t.Fatal(err)
+	}
+	evs := drainAll(b.Events())
+	if len(evs) != 1 {
+		t.Fatalf("expected only OrderReplaced before the eligibility deadline, got %+v", evs)
+	}
+	if _, ok := evs[0].(exec.OrderReplaced); !ok {
+		t.Fatalf("expected OrderReplaced, got %+v", evs[0])
+	}
+
+	// Past the deadline: a later SetBook now fills the replaced order.
+	clk.Advance(500 * time.Millisecond) // total 600ms >= 500ms
+	b.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100.5, Volume: 50}}})
+	f, ok := filledAt(t, drainAll(b.Events()))
+	if !ok || f.F.Price != 100.5 || f.F.Qty != 10 {
+		t.Fatalf("expected the replaced order to fill once eligible, got ok=%v f=%+v", ok, f)
+	}
+}

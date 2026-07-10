@@ -10,7 +10,11 @@
 // price* it fills, exactly like any other Market/Limit order. A market or
 // marketable-limit order with no book yet for its symbol does not reject —
 // it rests (same as a non-marketable limit) until a real book arrives; there
-// is no "reject for lack of a mark/book" case left in this broker. It
+// is no "reject for lack of a mark/book" case left in this broker. Fill
+// TIMING can be additionally delayed by Options.FillLatencyMs (Task 5): a
+// submit->fill delay implemented as deterministic EVENT-time gating (an
+// order isn't considered for fillAgainstBook until b.now() clears its
+// eligibility deadline), never a wall-clock timer — see eligibleLocked. It
 // imports exec, never the reverse.
 package sim
 
@@ -37,22 +41,39 @@ type Options struct {
 	// beyond the visible touch; <=0 => off. Mirrors config.Venue.SlippageBps's
 	// doc-comment style.
 	SlippageBps float64
+
+	// FillLatencyMs (Task 5) is a submit->fill delay modeling round-trip time
+	// to a venue: an order is not considered for fillAgainstBook at all until
+	// b.now() has advanced at least this many ms past its submission time.
+	// It is deterministic EVENT-time gating, not a wall-clock timer — see
+	// Broker.eligibleLocked. <=0 => off (immediate first-attempt eligibility,
+	// exactly Task 2's/Task 4's behavior). Mirrors config.Venue.FillLatencyMs.
+	FillLatencyMs int
 }
 
 // Broker is a single-venue simulated broker.
 type Broker struct {
-	venue       exec.VenueID
-	clk         clock.Clock
-	slippageBps float64 // Task 4: see Options.SlippageBps
-	ev          chan exec.BrokerEvent
+	venue         exec.VenueID
+	clk           clock.Clock
+	slippageBps   float64 // Task 4: see Options.SlippageBps
+	fillLatencyMs int64   // Task 5: see Options.FillLatencyMs (ms, matching b.now()'s unit)
+	ev            chan exec.BrokerEvent
 
 	mu     sync.Mutex
 	marks  map[string]float64
 	books  map[string]feed.Book   // latest L2 snapshot per symbol; fillAgainstBook prices fills off it
 	orders map[string]*exec.Order // resting (working) orders
-	pos    map[string]*exec.Position
-	acct   exec.AccountSnapshot
-	bseq   int64 // broker order-id counter
+	// eligibleMs (Task 5) tracks, per order ID, the earliest b.now() at which
+	// that order may be considered for fillAgainstBook — exec.Order itself
+	// has no spare field for this, so it is tracked sim-side in this parallel
+	// map. Only populated when fillLatencyMs>0 (see markEligibilityLocked);
+	// entries are removed the moment an order leaves b.orders (see
+	// clearEligibilityLocked and its call sites) so the map never grows
+	// unbounded and never answers for an order ID that no longer exists.
+	eligibleMs map[string]int64
+	pos        map[string]*exec.Position
+	acct       exec.AccountSnapshot
+	bseq       int64 // broker order-id counter
 }
 
 var _ exec.Broker = (*Broker)(nil)
@@ -64,14 +85,16 @@ var _ exec.Broker = (*Broker)(nil)
 // the pre-Task-4 defaults.
 func New(venue exec.VenueID, clk clock.Clock, startingCash float64, opts Options) *Broker {
 	return &Broker{
-		venue:       venue,
-		clk:         clk,
-		slippageBps: opts.SlippageBps,
-		ev:          make(chan exec.BrokerEvent, 256),
-		marks:       map[string]float64{},
-		books:       map[string]feed.Book{},
-		orders:      map[string]*exec.Order{},
-		pos:         map[string]*exec.Position{},
+		venue:         venue,
+		clk:           clk,
+		slippageBps:   opts.SlippageBps,
+		fillLatencyMs: int64(opts.FillLatencyMs),
+		ev:            make(chan exec.BrokerEvent, 256),
+		marks:         map[string]float64{},
+		books:         map[string]feed.Book{},
+		orders:        map[string]*exec.Order{},
+		eligibleMs:    map[string]int64{},
+		pos:           map[string]*exec.Position{},
 		acct: exec.AccountSnapshot{
 			Venue: venue, Equity: startingCash, BuyingPower: startingCash,
 			AvailableCash: startingCash, SodEquity: startingCash,
@@ -181,6 +204,49 @@ func (b *Broker) SetAccount(a exec.AccountSnapshot) {
 }
 
 func (b *Broker) now() int64 { return b.clk.Now().UnixMilli() }
+
+// markEligibilityLocked records o's Task-5 fill-latency deadline at the
+// moment it starts resting in b.orders: submitMs + fillLatencyMs. It
+// deliberately does NOT write an entry at all when fillLatencyMs<=0 (rather
+// than writing submitMs+0), so eligibleLocked's "not gated" fast path is a
+// genuine map-lookup miss — the zero-knob case never touches eligibleMs,
+// which is how the regression requirement (byte-for-byte Task 4 behavior)
+// holds. Every order gets this call regardless of type (Market/Limit/Stop/
+// StopLimit alike): the delay models venue round-trip time for the ORDER
+// itself, not "time since a stop trigger", so a stop that triggers later
+// still owes the same deadline measured from its own submission. Caller
+// holds mu.
+func (b *Broker) markEligibilityLocked(o *exec.Order, submitMs int64) {
+	if b.fillLatencyMs <= 0 {
+		return
+	}
+	b.eligibleMs[o.ID] = submitMs + b.fillLatencyMs
+}
+
+// eligibleLocked reports whether o may be considered for fillAgainstBook as
+// of eventMs. Absence from eligibleMs reads as eligible: that covers both
+// fillLatencyMs<=0 (never populated) and an order that has already left
+// b.orders (nothing left to gate) — either way there is no deadline to
+// enforce. Time in this broker only ever moves forward (b.clk is either the
+// real system clock or, in tests/replay, a clock.Fake advanced monotonically
+// via Advance/AdvanceTo), so once this returns true for an order it stays
+// true for the rest of that order's life; the entry is removed only when the
+// order itself is removed (clearEligibilityLocked), not when it first
+// becomes eligible. Caller holds mu.
+func (b *Broker) eligibleLocked(o *exec.Order, eventMs int64) bool {
+	deadline, gated := b.eligibleMs[o.ID]
+	return !gated || eventMs >= deadline
+}
+
+// clearEligibilityLocked removes o's latency bookkeeping. Every code path
+// that deletes an order from b.orders (full fill, FOK reject, IOC
+// cancel-remainder, CancelOrder, CancelAll) has a matching call here, so
+// eligibleMs never leaks an entry for an order that no longer exists. A
+// no-op map-delete on an absent key when fillLatencyMs<=0 ever left nothing
+// to clean up. Caller holds mu.
+func (b *Broker) clearEligibilityLocked(id string) {
+	delete(b.eligibleMs, id)
+}
 
 // marketable reports whether price satisfies limit's directional cap for
 // side: buy/cover can pay up to limit (price <= limit), sell/short can give
@@ -301,6 +367,10 @@ func (b *Broker) SubmitOrder(_ context.Context, req exec.OrderRequest) (exec.Ord
 		CreatedMs: b.now(), UpdatedMs: b.now(),
 	}
 	b.orders[o.ID] = o
+	// Task 5: every order (regardless of type) is stamped with its
+	// submit->fill eligibility deadline before anything attempts to fill it
+	// — a no-op when fillLatencyMs<=0 (see markEligibilityLocked).
+	b.markEligibilityLocked(o, o.CreatedMs)
 	mark, hasMark := b.marks[req.Symbol]
 	var post []exec.BrokerEvent
 	post = append(post, exec.OrderAccepted{V: b.venue, OID: o.ID, BrokerOrderID: brokerID, Ts: b.now()})
@@ -313,12 +383,18 @@ func (b *Broker) SubmitOrder(_ context.Context, req exec.OrderRequest) (exec.Ord
 		// rests (fillAgainstBook against an empty/missing book returns 0),
 		// exactly like a non-marketable limit always has — it fills
 		// (fully or partially) the first time SetBook delivers a real book.
-		post = append(post, b.attemptInitialFillLocked(o)...)
+		// attemptBookFillLocked itself enforces the Task 5 eligibility gate
+		// (o.CreatedMs == b.now() here, so fillLatencyMs>0 always blocks this
+		// very first call — see its doc comment for why that's correct and
+		// how TIF still ends up applying to whatever attempt DOES end up
+		// being first).
+		post = append(post, b.attemptBookFillLocked(o, b.books[o.Symbol])...)
 	default: // TypeStop, TypeStopLimit
 		// Trigger evaluation only, keyed off the mark (unchanged); whatever
 		// doesn't trigger+fill stays resting until a later SetMark/SetBook
-		// acts on it. TIF IOC/FOK deliberately do not apply on this branch
-		// — see attemptInitialFillLocked's doc comment for why.
+		// acts on it. The trigger comparison itself is never latency-gated
+		// — only the book-fill attempt a trigger leads to is (inside
+		// actOnMarkLocked -> attemptBookFillLocked).
 		if hasMark {
 			post = append(post, b.actOnMarkLocked(o, mark)...)
 		}
@@ -328,45 +404,6 @@ func (b *Broker) SubmitOrder(_ context.Context, req exec.OrderRequest) (exec.Ord
 		b.emit(e)
 	}
 	return exec.OrderAck{OrderID: o.ID, Accepted: true, Message: brokerID}, nil
-}
-
-// attemptInitialFillLocked handles a freshly-submitted Market or Limit
-// order's first — and, for IOC/FOK, only — fill attempt against the current
-// book. It is deliberately distinct from attemptBookFillLocked: TIF governs
-// only what happens to whatever is left over after this ONE attempt, and
-// only here at submission time. SetBook's later crossing pass
-// (crossRestingOnBookLocked) never re-applies TIF, so a resting IOC/FOK
-// order should never exist after this function returns — it either fully
-// filled, partially-filled-then-had-the-rest-canceled (IOC), or was
-// rejected outright with no fill at all (FOK, which must never partially
-// fill). Stop/StopLimit orders don't route through here at submission
-// (SubmitOrder sends them to actOnMarkLocked instead): their "first attempt"
-// is a trigger check that may not even fire yet, and applying IOC/FOK to an
-// untriggered stop would trivially cancel/reject every stop+IOC/FOK
-// combination on submission, which cannot be the intent — that combo is out
-// of this task's scope. Caller holds mu.
-func (b *Broker) attemptInitialFillLocked(o *exec.Order) []exec.BrokerEvent {
-	book := b.books[o.Symbol]
-	qty, px := fillAgainstBook(o, book, b.slippageBps) // pure: does not mutate o or book state
-
-	if o.TIF == exec.TIFFOK && qty < o.LeavesQty {
-		// All-or-none: fillAgainstBook hasn't mutated anything, so rejecting
-		// here is a clean no-op on the order/position state.
-		delete(b.orders, o.ID)
-		return []exec.BrokerEvent{exec.OrderRejected{V: b.venue, OID: o.ID, Reason: "sim: FOK could not fill completely", Ts: b.now()}}
-	}
-
-	var out []exec.BrokerEvent
-	if qty > 0 {
-		out = append(out, b.fillLocked(o, qty, px)...)
-	}
-	if o.TIF == exec.TIFIOC && o.LeavesQty > 0 {
-		// IOC never rests, even if nothing crossed at all: cancel whatever
-		// this one attempt didn't fill instead of leaving it working.
-		delete(b.orders, o.ID)
-		out = append(out, exec.OrderCanceled{V: b.venue, OID: o.ID, Ts: b.now()})
-	}
-	return out
 }
 
 // fillLocked fills exactly qty of a resting order at price px: it updates
@@ -393,6 +430,7 @@ func (b *Broker) fillLocked(o *exec.Order, qty, px float64) []exec.BrokerEvent {
 		o.LeavesQty = 0
 		o.Status = exec.StatusFilled
 		delete(b.orders, o.ID)
+		b.clearEligibilityLocked(o.ID) // Task 5: no longer resting, nothing left to gate
 	} else {
 		o.Status = exec.StatusPartiallyFilled
 	}
@@ -463,20 +501,73 @@ func cashSign(side exec.Side) float64 {
 	return -1
 }
 
-// attemptBookFillLocked prices a resting order against book via
-// fillAgainstBook and, if anything crossed, applies the fill through
-// fillLocked. It is the shared "fill against the current book, no TIF"
-// primitive used by actOnMarkLocked (once a Stop/StopLimit triggers and
-// converts) and crossRestingOnBookLocked (SetBook's sweep) — unlike
-// attemptInitialFillLocked, it never cancels/rejects a leftover: IOC/FOK
-// only ever apply to the initial submit-time attempt. Returns nil if
-// nothing crossed (order stays resting untouched). Caller holds mu.
+// attemptBookFillLocked is the SHARED "consider this order against a book"
+// primitive for every caller: SubmitOrder's own first attempt (Market/Limit,
+// called directly), the stop-trigger conversion branch in actOnMarkLocked,
+// crossRestingOnBookLocked's SetBook sweep, and ReplaceOrder's Market/Limit
+// branch. Prior to Task 5 there were two separate functions here
+// (attemptInitialFillLocked applied TIF and only ran once at submission;
+// this one never applied TIF and ran on every later re-evaluation) because
+// IOC/FOK were guaranteed to resolve — fill, partial-then-cancel, or reject —
+// at that single submit-time call, so a resting IOC/FOK order could never
+// reach a later caller. Task 5 breaks that guarantee: fillLatencyMs>0 can
+// defer a submit-time attempt into doing nothing at all (see the gate
+// below), leaving an IOC/FOK order genuinely resting until a LATER call —
+// through any of the paths above — becomes its first real evaluation. So
+// this single function now owns both concerns:
+//
+//  1. The Task 5 eligibility gate: if o is not yet eligible (see
+//     eligibleLocked), return nil immediately WITHOUT calling
+//     fillAgainstBook at all. This is what "the order simply rests until a
+//     later SetBook/SetMark event crosses the threshold" means in code —
+//     no state changes, no partial consumption of the book, nothing to undo
+//     later. Because b.now() only moves forward, once this gate opens for an
+//     order it never closes again for that same order.
+//  2. TIF, applied unconditionally on every eligible call: this is safe for
+//     every caller. A GTC/Day order (o.TIF is neither IOC nor FOK) never hits
+//     either TIF branch below, so repeated eligible calls behave exactly as
+//     attemptBookFillLocked always has (partial fills accumulate across
+//     multiple SetBook events). An IOC/FOK order, once it reaches an
+//     eligible call, is ALWAYS removed from b.orders by the end of it (full
+//     fill, partial-fill-then-cancel-remainder, or reject-with-no-fill) —
+//     so it can never reach this function a second time and never gets TIF
+//     misapplied to an already-resolved order. This is precisely the "TIF's
+//     first attempt is the first ELIGIBLE attempt" rule the plan calls for,
+//     with no new state machine: eligibility + "IOC/FOK always terminate on
+//     their one evaluation" together are enough.
+//
+// Returns nil if the order isn't eligible yet, or is eligible but nothing in
+// the book crossed it (order stays resting untouched either way). Caller
+// holds mu.
 func (b *Broker) attemptBookFillLocked(o *exec.Order, book feed.Book) []exec.BrokerEvent {
-	qty, px := fillAgainstBook(o, book, b.slippageBps)
-	if qty <= 0 {
+	if !b.eligibleLocked(o, b.now()) {
 		return nil
 	}
-	return b.fillLocked(o, qty, px)
+	qty, px := fillAgainstBook(o, book, b.slippageBps) // pure: does not mutate o or book state
+
+	if o.TIF == exec.TIFFOK && qty < o.LeavesQty {
+		// All-or-none: fillAgainstBook hasn't mutated anything, so rejecting
+		// here is a clean no-op on the order/position state.
+		delete(b.orders, o.ID)
+		b.clearEligibilityLocked(o.ID)
+		return []exec.BrokerEvent{exec.OrderRejected{V: b.venue, OID: o.ID, Reason: "sim: FOK could not fill completely", Ts: b.now()}}
+	}
+
+	var out []exec.BrokerEvent
+	if qty > 0 {
+		out = append(out, b.fillLocked(o, qty, px)...)
+	}
+	if o.TIF == exec.TIFIOC && o.LeavesQty > 0 {
+		// IOC never rests, even if nothing crossed at all: cancel whatever
+		// this one (eligible) attempt didn't fill instead of leaving it
+		// working. o may already be gone from b.orders (fillLocked deleted
+		// it) if that fill happened to be complete -- LeavesQty>0 guards
+		// against canceling a just-fully-filled order.
+		delete(b.orders, o.ID)
+		b.clearEligibilityLocked(o.ID)
+		out = append(out, exec.OrderCanceled{V: b.venue, OID: o.ID, Ts: b.now()})
+	}
+	return out
 }
 
 // actOnMarkLocked applies a new mark to one resting order: it evaluates
@@ -498,6 +589,15 @@ func (b *Broker) attemptBookFillLocked(o *exec.Order, book feed.Book) []exec.Bro
 // resting — including the "triggered but no book yet" case: a triggered
 // stop is not a special case for SubmitOrder's rest-until-book rule).
 // Caller holds mu.
+//
+// Task 5: the stopTriggered comparison above is NEVER latency-gated — a stop
+// converts from Stop/StopLimit to Market/Limit purely off the mark, on
+// schedule, regardless of fillLatencyMs. Only the attemptBookFillLocked call
+// below is gated: if the order's eligibility deadline (set at its ORIGINAL
+// submission, not at trigger time) hasn't elapsed yet, it returns nil and
+// the now-converted order simply rests until a later SetBook/SetMark call
+// clears the gate — the exact same "rest until book" behavior a triggered
+// stop with no book at all already has.
 func (b *Broker) actOnMarkLocked(o *exec.Order, mark float64) []exec.BrokerEvent {
 	switch o.Type {
 	case exec.TypeStop:
@@ -607,6 +707,14 @@ func (b *Broker) ReplaceOrder(_ context.Context, orderID string, req exec.Replac
 	//     the same primitive SetBook's crossing sweep uses. Deliberately
 	//     NOT gated on a mark existing: a symbol with a book but no mark
 	//     yet should still be able to re-cross a replaced limit order.
+	//
+	// Task 5: both branches route through attemptBookFillLocked (directly, or
+	// via actOnMarkLocked), so both are subject to the SAME fill-latency
+	// eligibility deadline set at o's ORIGINAL SubmitOrder call -- replacing
+	// an order does not reset or grant a fresh latency window. If that
+	// deadline hasn't elapsed yet, this replace's fill attempt is a no-op
+	// (order rests with its new qty/price) exactly like any other blocked
+	// attempt, and a later SetBook/SetMark can still complete it once eligible.
 	switch o.Type {
 	case exec.TypeStop, exec.TypeStopLimit:
 		if mark, ok := b.marks[o.Symbol]; ok {
@@ -630,6 +738,7 @@ func (b *Broker) CancelOrder(_ context.Context, orderID string) error {
 		return fmt.Errorf("sim: cancel: order %s not working", orderID)
 	}
 	delete(b.orders, orderID)
+	b.clearEligibilityLocked(orderID)
 	b.mu.Unlock()
 	b.emit(exec.OrderCanceled{V: b.venue, OID: orderID, Ts: b.now()})
 	return nil
@@ -646,6 +755,7 @@ func (b *Broker) CancelAll(_ context.Context, symbol string) error {
 	sort.Strings(ids)
 	for _, id := range ids {
 		delete(b.orders, id)
+		b.clearEligibilityLocked(id)
 	}
 	b.mu.Unlock()
 	for _, id := range ids {

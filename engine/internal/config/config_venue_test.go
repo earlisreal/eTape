@@ -40,6 +40,7 @@ func TestValidateVenueConfigRejects(t *testing.T) {
 		"gate key unknown id":       func(vc *VenueConfig) { vc.Gate.Venue["ghost"] = GateVenue{} },
 		"negative starting balance": func(vc *VenueConfig) { vc.Venues[2].StartingBalance = -1 },
 		"negative slippage bps":     func(vc *VenueConfig) { vc.Venues[2].SlippageBps = -1 },
+		"negative fill latency ms":  func(vc *VenueConfig) { vc.Venues[2].FillLatencyMs = -1 },
 	}
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -66,6 +67,14 @@ func TestValidateVenueConfigAcceptsPositiveSlippageBps(t *testing.T) {
 	vc.Venues[2].SlippageBps = 5
 	if err := ValidateVenueConfig(vc, []string{"alpaca", "tradeZero"}); err != nil {
 		t.Fatalf("positive slippage_bps rejected: %v", err)
+	}
+}
+
+func TestValidateVenueConfigAcceptsPositiveFillLatencyMs(t *testing.T) {
+	vc := validVC()
+	vc.Venues[2].FillLatencyMs = 250
+	if err := ValidateVenueConfig(vc, []string{"alpaca", "tradeZero"}); err != nil {
+		t.Fatalf("positive fill_latency_ms rejected: %v", err)
 	}
 }
 
