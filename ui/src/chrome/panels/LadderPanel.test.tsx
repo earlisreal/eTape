@@ -99,4 +99,58 @@ describe("LadderPanel", () => {
       payload: [{ symbol: "US.AAPL", price: 3.5, size: 100, direction: "SELL", ts: "t" }] });
     expect(surface().isDirty()).toBe(true);
   });
+
+  // Regression guard for reseedForGroup's `tapeGen = stores.tape.generation(symbol)`
+  // line (LadderPanel.tsx). Without it, tapeGen stays pinned to the OLD symbol's
+  // generation after a group re-pick, so paint()'s reconnect-detection branch
+  // (`if (tapeGen !== stores.tape.generation(symbol))`) misfires for the new
+  // symbol on its very first live tick — re-seeding as if THAT tick were history
+  // instead of flashing it as a live print. Distinguishing observable: the
+  // reconnect branch's own `seedLast()` call consumes the just-applied tick's seq
+  // as the new baseline, so the normal tick-walk loop below it sees no new ticks
+  // to flash — `flash` stays null and the flash-driven isDirty() persistence
+  // (`flashAlpha(flash, now) > 0`) never kicks in, even though `last` still looks
+  // correct. `last` alone can't tell correct from buggy here; only the flash can.
+  it("refreshes tapeGen to the new symbol on a group switch, so the new symbol's first live tick flashes normally instead of misfiring the reconnect re-seed", () => {
+    const { stores, surface, linkGroups } = renderLadder(); // pinned to US.AAPL via settings.symbol
+    surface().isDirty(); // baseline the rev cursors
+
+    // Give the OLD symbol (US.AAPL) a non-zero generation via a genuine reconnect
+    // (a snapshot frame), and let the panel catch up to it via a real paint() —
+    // this is legitimate, correct behavior, and it's what makes the OLD symbol's
+    // tapeGen non-zero so a later "stuck at the old value" bug is observable
+    // (both symbols defaulting to generation 0 would hide the bug).
+    stores.tape.apply({
+      kind: "snapshot", topic: "md.tape",
+      payload: [{ symbol: "US.AAPL", price: 190, size: 10, direction: "BUY", ts: "t1" }],
+    });
+    expect(surface().isDirty()).toBe(true);
+    expect(() => surface().paint()).not.toThrow();
+    expect(surface().isDirty()).toBe(false); // quiescent again: no lingering flash/dirty state
+
+    // Group re-pick: switch the panel from US.AAPL to US.NVDA, a symbol that has
+    // never been snapshotted (generation 0) — the scenario reseedForGroup must
+    // handle by refreshing tapeGen to the new symbol's own generation.
+    linkGroups.focus("green", "US.NVDA");
+    expect(surface().isDirty()).toBe(true); // reseed force-bumped the surface
+
+    // A genuine live tick for the NEW symbol, exactly like a real print arriving
+    // right after the switch — this is what a correctly-reseeded tapeGen must
+    // treat as a normal update, not a stale-reconnect misfire.
+    stores.tape.apply({
+      kind: "delta", topic: "md.tape",
+      payload: [{ symbol: "US.NVDA", price: 401.25, size: 50, direction: "SELL", ts: "t2" }],
+    });
+    expect(surface().isDirty()).toBe(true);
+    expect(() => surface().paint()).not.toThrow();
+
+    // The critical assertion: a correctly-reseeded tapeGen matches US.NVDA's
+    // (unchanged) generation, so paint() takes the normal tick-walk path and sets
+    // a fresh flash for the new tick — isDirty() reports true purely from that
+    // flash's decay window, with no other store revision having changed since
+    // the previous isDirty() call. A stale tapeGen (bug reintroduced) instead
+    // trips the reconnect branch, whose own seedLast() call swallows the tick's
+    // seq before the tick-walk loop can flash it, leaving isDirty() false here.
+    expect(surface().isDirty()).toBe(true);
+  });
 });
