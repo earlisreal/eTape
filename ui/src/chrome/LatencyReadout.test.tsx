@@ -50,4 +50,25 @@ describe("LatencyReadout", () => {
     expect(screen.queryByText("tz")).toBeNull();
     expect(screen.queryByText("alp")).toBeNull();
   });
+  it("shows 'offline' text for a down engine-moomoo link", () => {
+    const s = storeWith([
+      { link: "engine-moomoo", ms: null, min: null, avg: null, max: null, status: "down" },
+    ]);
+    render(<ThemeProvider><LatencyReadout health={s} onOpen={() => {}} /></ThemeProvider>);
+    expect(screen.getByTestId("lat-moo").textContent).toContain("offline");
+  });
+  it("shows '—' for a down engine-tz link (exclusion test)", () => {
+    const s = storeWith([
+      { link: "engine-tz", ms: null, min: null, avg: null, max: null, status: "down" },
+    ]);
+    render(<ThemeProvider><LatencyReadout health={s} onOpen={() => {}} /></ThemeProvider>);
+    expect(screen.getByTestId("lat-tz").textContent).toContain("—");
+  });
+  it("shows 'offline' text for a down ui-engine link", () => {
+    const s = storeWith([
+      { link: "ui-engine", ms: null, min: null, avg: null, max: null, status: "down" },
+    ]);
+    render(<ThemeProvider><LatencyReadout health={s} onOpen={() => {}} /></ThemeProvider>);
+    expect(screen.getByTestId("lat-eng").textContent).toContain("offline");
+  });
 });

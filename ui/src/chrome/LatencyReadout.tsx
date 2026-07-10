@@ -48,7 +48,9 @@ export function LatencyReadout({ health, onOpen }: { health: HealthStore; onOpen
             >
               {LABEL[name]}
             </span>
-            <span>{l.ms !== null ? l.ms : "—"}</span>
+            <span style={l.status === "down" && name !== "engine-tz" ? { color: palette.danger } : undefined}>
+              {l.status === "down" && name !== "engine-tz" ? "offline" : l.ms !== null ? l.ms : "—"}
+            </span>
           </span>
         );
       })}
