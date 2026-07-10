@@ -279,6 +279,23 @@ type QueryFillsArgs struct {
 	ToMs   int64  `json:"toMs"`
 }
 
+// ExportFillsArgs selects one venue's fills for the trade-export CSV.
+// Preset is one of "today"|"week"|"month"|"all"|"custom"; From/To are
+// "YYYY-MM-DD" ET calendar dates, used only when Preset is "custom".
+type ExportFillsArgs struct {
+	Venue  string `json:"venue"`
+	Preset string `json:"preset"`
+	From   string `json:"from,omitempty"`
+	To     string `json:"to,omitempty"`
+}
+
+// ExportFillsResult carries the generated CSV (engine is the content source
+// of truth) plus a row count for a UI empty-state/toast check.
+type ExportFillsResult struct {
+	CSV   string `json:"csv"`
+	Count int    `json:"count"`
+}
+
 type GetConfigArgs struct {
 	Key string `json:"key"`
 }

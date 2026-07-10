@@ -334,6 +334,25 @@ export interface QueryFillsArgs {
   fromMs: number /* int64 */;
   toMs: number /* int64 */;
 }
+/**
+ * ExportFillsArgs selects one venue's fills for the trade-export CSV.
+ * Preset is one of "today"|"week"|"month"|"all"|"custom"; From/To are
+ * "YYYY-MM-DD" ET calendar dates, used only when Preset is "custom".
+ */
+export interface ExportFillsArgs {
+  venue: string;
+  preset: string;
+  from?: string;
+  to?: string;
+}
+/**
+ * ExportFillsResult carries the generated CSV (engine is the content source
+ * of truth) plus a row count for a UI empty-state/toast check.
+ */
+export interface ExportFillsResult {
+  csv: string;
+  count: number /* int */;
+}
 export interface GetConfigArgs {
   key: string;
 }
