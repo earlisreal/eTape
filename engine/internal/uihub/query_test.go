@@ -119,3 +119,12 @@ func TestExportFillsEmptyOnStoreError(t *testing.T) {
 		t.Fatalf("store error must yield empty ExportFillsResult; marshaled to %s", b)
 	}
 }
+
+func TestExportFillsInvalidCustomRangeReturnsEmptyResult(t *testing.T) {
+	q := newQueries(&spyFills{}, clock.NewFake(time.Now()))
+	out := q.handle("ExportFills", json.RawMessage(`{"venue":"sim","preset":"custom","from":"2026-07-10","to":"2026-07-01"}`))
+	b, _ := json.Marshal(out)
+	if string(b) != `{"csv":"","count":0}` {
+		t.Fatalf("invalid custom range (from after to) must yield empty ExportFillsResult; marshaled to %s", b)
+	}
+}

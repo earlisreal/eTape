@@ -78,6 +78,24 @@ describe("ExportTradesPopover", () => {
     clickSpy.mockRestore();
   });
 
+  it("disables Download and shows an inline message when From is after To", async () => {
+    const sendQuery = vi.fn(async () => ({ csv: "h\n", count: 1 }));
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    wrap({ sendQuery });
+
+    fireEvent.change(screen.getByTestId("export-preset"), { target: { value: "custom" } });
+    fireEvent.change(screen.getByTestId("export-from"), { target: { value: "2026-07-10" } });
+    fireEvent.change(screen.getByTestId("export-to"), { target: { value: "2026-07-01" } });
+
+    expect((screen.getByTestId("export-download") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/From must be on or before To/)).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId("export-download"));
+    expect(sendQuery).not.toHaveBeenCalled();
+    expect(clickSpy).not.toHaveBeenCalled();
+    clickSpy.mockRestore();
+  });
+
   it("shows a danger toast when the export query rejects, and does not close", async () => {
     const sendQuery = vi.fn(async () => { throw new Error("ws disconnected"); });
     const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});

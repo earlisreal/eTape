@@ -39,6 +39,7 @@ export function ExportTradesPopover(
   const [preset, setPreset] = useState<Preset>("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const rangeInvalid = preset === "custom" && !!from && !!to && from > to;
 
   useLayoutEffect(() => {
     if (!anchor) { setPos(null); return; }
@@ -107,10 +108,11 @@ export function ExportTradesPopover(
             <label style={labelStyle}>To
               <input data-testid="export-to" type="date" value={to} onChange={(e) => setTo(e.target.value)} style={{ ...inputStyle, marginTop: 2 }} />
             </label>
+            {rangeInvalid && <span style={{ fontSize: 11, color: palette.danger }}>From must be on or before To</span>}
           </>
         )}
         <HoverButton data-testid="export-download" onClick={download}
-          disabled={preset === "custom" && (!from || !to)}
+          disabled={preset === "custom" && (!from || !to || rangeInvalid)}
           style={{ marginTop: 4, padding: "5px 8px", border: `1px solid ${palette.border}`, borderRadius: 4, background: "transparent", color: palette.text, cursor: "pointer", fontSize: 12 }}
           hoverStyle={{ background: palette.surface }}>
           Download CSV
