@@ -11,6 +11,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -22,9 +23,11 @@ import (
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/backfill"
+	"github.com/earlisreal/eTape/engine/internal/buildinfo"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/creds"
+	"github.com/earlisreal/eTape/engine/internal/demojournal"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
@@ -32,6 +35,7 @@ import (
 	histalpaca "github.com/earlisreal/eTape/engine/internal/hist/alpaca"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/news"
+	"github.com/earlisreal/eTape/engine/internal/openbrowser"
 	"github.com/earlisreal/eTape/engine/internal/replay"
 	"github.com/earlisreal/eTape/engine/internal/scan"
 	"github.com/earlisreal/eTape/engine/internal/session"
@@ -43,21 +47,87 @@ import (
 )
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	os.Exit(boot(ctx))
+}
+
+// boot runs the full engine boot sequence -- flags, config, store/md-core/
+// exec-core/uihub construction, feed startup (live OpenD or replay), and the
+// ordered shutdown once ctx is cancelled -- and returns the process exit
+// code. It is a plain top-level function (not a closure or method) taking
+// only a context, so a later entrypoint (e.g. a system-tray build) can call
+// it directly with a signal-derived context of its own; main itself stays a
+// thin wrapper so os.Exit (which must run from main, never from inside a
+// deferred call) sees boot's return value.
+func boot(ctx context.Context) int {
 	home, _ := os.UserHomeDir()
 	cfgPath := flag.String("config", filepath.Join(home, ".eTape", "config.toml"), "path to config.toml")
 	replayDay := flag.String("replay", "", "replay a recorded day (YYYY-MM-DD) instead of live OpenD")
 	speed := flag.Float64("speed", 0, "replay speed (>0: real-time x speed; <=0: as fast as possible)")
 	dist := flag.String("dist", "", "serve built UI from this dir (overrides [uihub].dist_dir)")
 	replayHold := flag.Bool("replay-hold", false, "in replay, keep serving after the journal is exhausted (E2E)")
+	demo := flag.Bool("demo", false, "run a self-contained synthetic replay day, no OpenD/broker required")
+	demoDay := flag.String("demo-day", "2026-01-02", "ET day to stamp when -demo is set")
+	demoSpeed := flag.Float64("demo-speed", 1, "replay speed when -demo is set (0 = as fast as possible)")
+	noOpen := flag.Bool("no-open", false, "do not auto-open the default browser to the UI")
+	logPath := flag.String("log", "", "also write logs to this file, in addition to stderr")
 	flag.Parse()
 
-	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
-	slog.SetDefault(log)
+	var out io.Writer = os.Stderr
+	var logFile *os.File
+	if *logPath != "" {
+		f, err := os.OpenFile(*logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			slog.New(slog.NewTextHandler(os.Stderr, nil)).Error("open log file", "path", *logPath, "err", err)
+			return 1
+		}
+		logFile = f
+		out = io.MultiWriter(os.Stderr, f)
+	}
+	if logFile != nil {
+		defer logFile.Close()
+	}
 
-	cfg, err := config.Load(*cfgPath)
-	if err != nil {
-		log.Error("load config", "err", err)
-		os.Exit(1)
+	log := slog.New(slog.NewTextHandler(out, nil))
+	slog.SetDefault(log)
+	log.Info("etape starting", "version", buildinfo.Version)
+
+	if *demo && *replayDay != "" {
+		log.Error("parse flags", "err", errors.New("-demo and -replay are mutually exclusive"))
+		return 1
+	}
+
+	var cfg config.Config
+	if *demo {
+		cfg = config.Default()
+		cfg.Venues = append(cfg.Venues, config.Venue{ID: "sim-paper", Broker: "sim", Env: "paper"})
+		cfg.Gate.Global = config.GateGlobal{
+			MaxDayLoss: 100000, MaxSymbolPositionValue: 100000, MaxSymbolPositionShares: 100000,
+		}
+		cfg.Gate.Venue = map[string]config.GateVenue{
+			"sim-paper": {MaxOrderValue: 100000, MaxPositionValue: 100000, MaxPositionShares: 100000, MaxOpenOrders: 50},
+		}
+		demoDir, err := os.MkdirTemp("", "etape-demo-*")
+		if err != nil {
+			log.Error("create demo temp dir", "err", err)
+			return 1
+		}
+		cfg.Store.DBPath = filepath.Join(demoDir, "demo.db")
+		if err := demojournal.Generate(cfg.Store.DBPath, *demoDay); err != nil {
+			log.Error("generate demo journal", "err", err)
+			return 1
+		}
+		*replayDay = *demoDay
+		*replayHold = true
+		*speed = *demoSpeed
+	} else {
+		var err error
+		cfg, err = config.Load(*cfgPath)
+		if err != nil {
+			log.Error("load config", "err", err)
+			return 1
+		}
 	}
 	if *dist != "" {
 		cfg.UIHub.DistDir = *dist
@@ -65,7 +135,7 @@ func main() {
 	anchorSecs, err := cfg.MD.AnchorSecs()
 	if err != nil {
 		log.Error("bad session_anchor", "err", err)
-		os.Exit(1)
+		return 1
 	}
 	dbPath := cfg.Store.DBPath
 	if dbPath == "" {
@@ -73,10 +143,10 @@ func main() {
 	}
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		log.Error("make db dir", "err", err)
-		os.Exit(1)
+		return 1
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 
 	live := *replayDay == ""
@@ -90,7 +160,7 @@ func main() {
 	})
 	if err != nil {
 		log.Error("open store", "err", err)
-		os.Exit(1)
+		return 1
 	}
 	// NOTE: st.Close() is deferred until AFTER every store-writer goroutine has
 	// stopped (feed pipe + forwardMD + exec.Core) — see the shutdown block below.
@@ -106,7 +176,7 @@ func main() {
 		if err != nil || len(replayRows) == 0 {
 			log.Error("replay day unavailable", "day", *replayDay, "err", err, "rows", len(replayRows))
 			_ = st.Close()
-			os.Exit(1)
+			return 1
 		}
 		execClk = replay.NewClock(time.UnixMilli(replayRows[0].TsExch))
 	}
@@ -123,7 +193,7 @@ func main() {
 	if err != nil {
 		log.Error("build brokers", "err", err)
 		_ = st.Close()
-		os.Exit(1)
+		return 1
 	}
 	brokers := map[exec.VenueID]exec.Broker{}
 	venueIDs := make([]exec.VenueID, 0, len(vbs))
@@ -186,6 +256,13 @@ func main() {
 		}
 	}()
 	log.Info("uihub up", "addr", cfg.UIHub.Addr(), "dist", cfg.UIHub.DistDir)
+	if !*noOpen {
+		go func() {
+			if err := openbrowser.Open("http://" + cfg.UIHub.Addr()); err != nil {
+				log.Warn("open browser", "err", err)
+			}
+		}()
+	}
 
 	// --- fan-in: md/exec Updates -> hub; mark bridge md -> exec ---
 	var forwardWG sync.WaitGroup
@@ -335,6 +412,7 @@ func main() {
 		log.Error("close store", "err", err)
 	}
 	log.Info("shutdown complete", "droppedUpdates", core.DroppedUpdates(), "droppedJournal", st.DroppedJournalRows())
+	return 0
 }
 
 // dropWatchInterval controls how often watchDroppedUpdates samples
