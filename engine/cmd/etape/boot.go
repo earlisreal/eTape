@@ -149,6 +149,57 @@ func firstAlpacaProber(vbs []venueBroker) rttProber {
 	return nil
 }
 
+// errAlpacaLiveCreds is returned by resolveBackfillAlpacaCreds when the
+// explicit backfill.alpaca.creds_key names the live Alpaca key. Read-only
+// historical backfill has no business touching a real-money credential, and
+// this refusal never falls through to auto-resolving a different (paper)
+// alpaca venue — an operator who explicitly names alpaca-live gets the
+// refusal, not a silent substitution.
+var errAlpacaLiveCreds = errors.New("refusing alpaca-live creds for read-only historical fallback")
+
+// resolveBackfillAlpacaCreds resolves the Alpaca credential pair used by the
+// deep-history backfill's optional 1m fallback (config.BackfillAlpaca). The
+// credentials-store redesign hands out random key names on every Venues-UI
+// edit (e.g. "key-a48b723d"), so a standalone creds_key literal in
+// config.toml drifts out of sync with what's actually stored; this resolves
+// against the configured Alpaca venues instead (mirroring firstAlpacaProber's
+// "scan venues for alpaca" pattern), which the UI keeps in sync by
+// construction.
+//
+// Resolution order:
+//  1. cfg.Backfill.Alpaca.CredsKey, if non-empty: errAlpacaLiveCreds if it
+//     names "alpaca-live" (never used for read-only backfill; this refusal
+//     does NOT fall through to step 2); otherwise resolved via cr.Get and
+//     returned if that succeeds. An unresolvable non-live key falls through
+//     to step 2 (self-heals a stale/renamed key).
+//  2. The first cfg.Venues entry with Broker == "alpaca" and Env != "live"
+//     whose Credentials resolve via cr.Get. A live Alpaca venue is never
+//     selected here.
+//  3. An error if nothing above resolved.
+//
+// The returned label names what was used (the creds key, or the venue id
+// plus its creds key) for logging only — never the secret pair itself.
+func resolveBackfillAlpacaCreds(cfg config.Config, cr creds.File) (creds.Pair, string, error) {
+	key := cfg.Backfill.Alpaca.CredsKey
+	if key != "" {
+		if key == "alpaca-live" {
+			return creds.Pair{}, "", fmt.Errorf("%w (key %q)", errAlpacaLiveCreds, key)
+		}
+		if p, err := cr.Get(key); err == nil {
+			return p, key, nil
+		}
+	}
+	for _, v := range cfg.Venues {
+		if v.Broker != "alpaca" || v.Env == "live" {
+			continue
+		}
+		if p, err := cr.Get(v.Credentials); err == nil {
+			return p, fmt.Sprintf("venue %s (%s)", v.ID, v.Credentials), nil
+		}
+	}
+	return creds.Pair{}, "", fmt.Errorf("no resolvable alpaca creds for backfill fallback (creds_key %q, no usable non-live alpaca venue)", key)
+}
+
 // moomooProbe measures OpenD round-trip latency with a lightweight Qot_GetGlobalState.
 type moomooProbe struct {
 	c *opend.Client

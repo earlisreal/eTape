@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
@@ -251,5 +253,105 @@ func TestFirstAlpacaProberNilWithoutAlpaca(t *testing.T) {
 	}
 	if p := firstAlpacaProber(vbs); p != nil {
 		t.Fatalf("expected nil prober with no alpaca venue, got %T", p)
+	}
+}
+
+// TestResolveBackfillAlpacaCredsExplicitKeyWins verifies an explicit, resolvable
+// backfill.alpaca.creds_key is used as-is, even when a configured alpaca venue
+// (with different credentials) would also resolve — the explicit override
+// wins over venue auto-resolution.
+func TestResolveBackfillAlpacaCredsExplicitKeyWins(t *testing.T) {
+	cr := creds.File{
+		"explicit-key": {KeyID: "EK", SecretKey: "ES"},
+		"key-a48b723d": {KeyID: "VK", SecretKey: "VS"},
+	}
+	cfg := config.Config{
+		Backfill: config.Backfill{Alpaca: config.BackfillAlpaca{CredsKey: "explicit-key"}},
+		Venues:   []config.Venue{{ID: "alpaca-paper", Broker: "alpaca", Env: "paper", Credentials: "key-a48b723d"}},
+	}
+	p, label, err := resolveBackfillAlpacaCreds(cfg, cr)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if p.KeyID != "EK" || p.SecretKey != "ES" {
+		t.Fatalf("expected explicit creds pair, got %+v", p)
+	}
+	if !strings.Contains(label, "explicit-key") {
+		t.Fatalf("label = %q, want it to mention the explicit key", label)
+	}
+}
+
+// TestResolveBackfillAlpacaCredsStaleKeyFallsBackToVenue verifies a stale or
+// empty creds_key (the credentials-store redesign regenerates key names, so a
+// literal like "alpaca" can drift out of sync) falls through to the first
+// non-live alpaca venue whose credentials do resolve — the production bug
+// this task fixes.
+func TestResolveBackfillAlpacaCredsStaleKeyFallsBackToVenue(t *testing.T) {
+	cr := creds.File{"key-a48b723d": {KeyID: "VK", SecretKey: "VS"}}
+	for _, staleKey := range []string{"alpaca", ""} {
+		cfg := config.Config{
+			Backfill: config.Backfill{Alpaca: config.BackfillAlpaca{CredsKey: staleKey}},
+			Venues: []config.Venue{
+				{ID: "alpaca-paper", Broker: "alpaca", Env: "paper", Credentials: "key-a48b723d"},
+			},
+		}
+		p, label, err := resolveBackfillAlpacaCreds(cfg, cr)
+		if err != nil {
+			t.Fatalf("creds_key=%q: unexpected error: %v", staleKey, err)
+		}
+		if p.KeyID != "VK" || p.SecretKey != "VS" {
+			t.Fatalf("creds_key=%q: expected venue creds pair, got %+v", staleKey, p)
+		}
+		if !strings.Contains(label, "alpaca-paper") {
+			t.Fatalf("creds_key=%q: label = %q, want it to mention the resolved venue", staleKey, label)
+		}
+	}
+}
+
+// TestResolveBackfillAlpacaCredsRefusesAlpacaLive verifies an explicit
+// creds_key of "alpaca-live" is refused outright (preserving the existing
+// live-key guard) and does NOT fall through to auto-resolving a different,
+// non-live alpaca venue — explicitly naming the live key must never result in
+// a silent substitution.
+func TestResolveBackfillAlpacaCredsRefusesAlpacaLive(t *testing.T) {
+	cr := creds.File{
+		"alpaca-live":  {KeyID: "LK", SecretKey: "LS"},
+		"key-a48b723d": {KeyID: "VK", SecretKey: "VS"},
+	}
+	cfg := config.Config{
+		Backfill: config.Backfill{Alpaca: config.BackfillAlpaca{CredsKey: "alpaca-live"}},
+		Venues: []config.Venue{
+			{ID: "alpaca-paper", Broker: "alpaca", Env: "paper", Credentials: "key-a48b723d"},
+		},
+	}
+	_, _, err := resolveBackfillAlpacaCreds(cfg, cr)
+	if err == nil {
+		t.Fatal("expected an error refusing the alpaca-live creds key")
+	}
+	if !errors.Is(err, errAlpacaLiveCreds) {
+		t.Fatalf("expected errAlpacaLiveCreds sentinel, got %v", err)
+	}
+}
+
+// TestResolveBackfillAlpacaCredsErrorsWhenOnlyLiveVenue verifies that when no
+// explicit creds_key is set and every configured alpaca venue is live, the
+// helper errors rather than ever selecting a live venue's credentials for the
+// read-only backfill fallback.
+func TestResolveBackfillAlpacaCredsErrorsWhenOnlyLiveVenue(t *testing.T) {
+	cr := creds.File{"live-creds": {KeyID: "LK", SecretKey: "LS"}}
+	cfg := config.Config{
+		Venues: []config.Venue{{ID: "alpaca-live-venue", Broker: "alpaca", Env: "live", Credentials: "live-creds"}},
+	}
+	if _, _, err := resolveBackfillAlpacaCreds(cfg, cr); err == nil {
+		t.Fatal("expected an error when only a live alpaca venue is configured")
+	}
+}
+
+// TestResolveBackfillAlpacaCredsErrorsWhenNothingResolves verifies the no-op
+// case: no explicit key, no alpaca venues at all.
+func TestResolveBackfillAlpacaCredsErrorsWhenNothingResolves(t *testing.T) {
+	cfg := config.Config{Venues: []config.Venue{{ID: "tz", Broker: "tradezero", Credentials: "tz_creds"}}}
+	if _, _, err := resolveBackfillAlpacaCreds(cfg, creds.File{}); err == nil {
+		t.Fatal("expected an error when nothing resolves")
 	}
 }
