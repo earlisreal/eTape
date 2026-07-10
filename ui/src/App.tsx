@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { WsClient, type ConnState, type ISocket } from "./wire/WsClient";
 import { browserRaf } from "./render/surface";
 import { Scheduler } from "./render/Scheduler";
@@ -17,7 +17,7 @@ import { BroadcastChannelDrawingBus } from "./render/chart/drawings/store";
 import type { DrawingStore } from "./render/chart/drawings/store";
 import type { DrawingToolStyleStore } from "./render/chart/drawings/toolStyles";
 import { useToasts } from "./chrome/Toast";
-import type { TopicName } from "./wire/contract";
+import type { HealthLink, LinkStatus, TopicName } from "./wire/contract";
 
 function DrawingsSyncBridge(
   { store, commands }: { store: DrawingStore; commands: { sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown; reason?: string }> } },
@@ -41,8 +41,26 @@ function DrawingToolStylesSyncBridge(
   return null;
 }
 
+// Computes the UI's own "ui-engine" health link from the WebSocket's connection
+// state and last ping RTT. The engine's own sys.health always reports
+// "ui-engine" as a permanently-down stub (v1), so this is the only source of
+// truth for that link — see HealthStore.setUiEngine. "down" here specifically
+// means "no live connection" (state !== "open"); a slow-but-alive connection
+// is "degraded", capped there even at very high RTT, never "down".
+function makeEngineLink(state: ConnState, rtt: number | null): HealthLink {
+  if (state !== "open") return { link: "ui-engine", ms: null, min: null, avg: null, max: null, status: "down" };
+  const ms = rtt === null ? null : Math.round(rtt);
+  const status: LinkStatus = ms === null ? "down" : ms < 500 ? "ok" : ms < 2000 ? "degraded" : "degraded";
+  return { link: "ui-engine", ms, min: null, avg: null, max: null, status };
+}
+
 export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
   const [state, setState] = useState<ConnState>("connecting");
+  // Read by the ping-interval callback below, which is created once inside the
+  // mount effect and must not read `state` directly — that would close over
+  // whatever value `state` held at effect-creation time (a stale-closure bug
+  // that has recurred in this codebase's AppShell.tsx before).
+  const stateRef = useRef<ConnState>("connecting");
 
   const { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry } = useMemo(() => {
     const client = new WsClient({
@@ -74,7 +92,11 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
   }, []);
 
   useEffect(() => {
-    client.onState(setState);
+    client.onState((s) => {
+      stateRef.current = s;
+      setState(s);
+      stores.health.setUiEngine(makeEngineLink(s, client.rttMs()));
+    });
     client.start();
     scheduler.start();
     // A workspace now starts blank and any catalog panel can be added to it later
@@ -88,7 +110,14 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
       def.topics.forEach((t) => topics.add(t));
     }
     const disposeStores = connectStores(client, stores, [...topics]);
-    const ping = window.setInterval(() => client.sendPing(), 2000);
+    const ping = window.setInterval(() => {
+      client.sendPing();
+      // Refresh the ui-engine link's latency number every tick while
+      // connected. Reads stateRef.current (NOT the `state` closure variable)
+      // — this callback is created once, here, and only the ref reflects the
+      // live connection state.
+      stores.health.setUiEngine(makeEngineLink(stateRef.current, client.rttMs()));
+    }, 2000);
     return () => { window.clearInterval(ping); disposeStores(); scheduler.stop(); client.stop(); };
   }, [client, stores, scheduler]);
 
@@ -106,7 +135,8 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
           <SoundConfigProvider commands={commands}>
             <ReconnectOverlay state={state}>
               <AppShell workspaceName={workspaceName} stores={stores} scheduler={scheduler}
-                workspaceStore={workspaceStore} linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} />
+                workspaceStore={workspaceStore} linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands}
+                engineState={state} />
             </ReconnectOverlay>
           </SoundConfigProvider>
         </OrderConfigProvider>

@@ -9,9 +9,11 @@ import type { Stores } from "../data/registry";
 import type { Scheduler } from "../render/Scheduler";
 import type { LinkGroup, LinkGroups } from "./linkGroups";
 import type { DemandRegistry } from "../wire/DemandRegistry";
+import type { ConnState } from "../wire/WsClient";
 import { PANELS, type PanelProps } from "./panels/registry";
 import { PRESETS, applyPreset } from "./presets";
 import { TopBar } from "./TopBar";
+import { FeedStatusBanner } from "./FeedStatusBanner";
 import { EmptyState } from "./EmptyState";
 import { Catalog } from "./Catalog";
 import { SettingsModal, type SettingsSection } from "./SettingsModal";
@@ -44,9 +46,10 @@ interface Props {
   linkGroups: LinkGroups;
   demandRegistry: DemandRegistry;
   commands: PanelProps["commands"];
+  engineState: ConnState;
 }
 
-export function AppShell({ workspaceName, stores, scheduler, workspaceStore, linkGroups, demandRegistry, commands }: Props): JSX.Element {
+export function AppShell({ workspaceName, stores, scheduler, workspaceStore, linkGroups, demandRegistry, commands, engineState }: Props): JSX.Element {
   const [ws, setWs] = useState<Workspace | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   // Unified Settings modal (Task 11): AppShell owns open/section state; TopBar's
@@ -377,6 +380,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             </div>
           )}
         </div>
+        <FeedStatusBanner health={stores.health} engineState={engineState} onOpenConnection={onOpenConnection} />
         <div style={{ flex: 1, minHeight: 0 }}>
           {ws.panels.length === 0 ? (
             <EmptyState onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} />
