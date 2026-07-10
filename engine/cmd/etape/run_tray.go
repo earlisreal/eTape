@@ -13,7 +13,6 @@ import (
 	"context"
 	_ "embed"
 	"log/slog"
-	"os"
 	"sync"
 
 	"fyne.io/systray"
@@ -62,6 +61,13 @@ func onReady() {
 	// build.
 	ctx, cancel := context.WithCancel(context.Background())
 
+	// This goroutine is the sole owner of systray.Quit(): it only tears down
+	// the tray after boot has actually returned, whether that's because Quit
+	// (below) cancelled ctx and boot ran its ordered shutdown, boot
+	// self-terminated on its own (non-`-replay-hold` replay mode), or boot
+	// failed outright. That keeps shutdown to exactly one path, so the
+	// process never exits mid-shutdown and never leaves a ghost tray icon
+	// behind on a failure exit.
 	go func() {
 		code := boot(ctx, captureAddr)
 		if code != 0 {
@@ -72,8 +78,8 @@ func onReady() {
 			// mechanism from Task 3" boot itself uses. There's nothing
 			// meaningful left to show in a tray with no engine behind it.
 			slog.Default().Error("boot failed", "code", code)
-			os.Exit(code)
 		}
+		systray.Quit()
 	}()
 
 	go func() {
@@ -90,15 +96,15 @@ func onReady() {
 				}
 			case <-quit.ClickedCh:
 				cancel()
-				systray.Quit()
 				return
 			}
 		}
 	}()
 }
 
-// onExit runs after systray.Quit() tears down the tray. boot's own shutdown
-// sequence (triggered by cancel(), above) already blocks until every
-// goroutine is joined and the store is closed before boot returns, so there
-// is nothing left to do here.
+// onExit runs after systray.Quit() tears down the tray. systray.Quit() is
+// only ever called from the boot goroutine above, after boot(ctx,
+// captureAddr) has returned -- so boot's own shutdown sequence has already
+// blocked until every goroutine is joined and the store is closed by the
+// time onExit runs. There is nothing left to do here.
 func onExit() {}
