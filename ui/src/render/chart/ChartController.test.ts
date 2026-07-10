@@ -547,6 +547,55 @@ describe("ChartController", () => {
     expect(updatesAfter - updatesBefore).toBe(2); // both the finalized bar AND the new bar are pushed
   });
 
+  it("falls back to a full setData rebuild when deep-history backfill prepends older 1m bars", () => {
+    // Regression for the "fresh engine run: incomplete 1m bars" report. On a cold
+    // engine, the shallow live cache-seed lands first (setAllBars, backfilled=true),
+    // then the async deep-history backfill's BarSnapshot REPLACES the BarStore series
+    // with a much longer one that grew at the FRONT (older bars prepended), not the
+    // tail. The old code kept replaying update() from `lastAppliedCount - 1`, which
+    // after a front-growth is a different, older bar than LWC already has — this must
+    // instead fall back to a full rebuild so the prepended history actually renders.
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // shallow cache-seed backfill
+    const candle = facade.created[0].series;
+    const setDataBefore = candle.calls.filter((c) => c === "setData").length;
+    const updatesBefore = candle.calls.filter((c) => c === "update").length;
+
+    // Deep-history snapshot lands: two OLDER bars prepended ahead of the shallow window.
+    bars.unshift(bar("2026-07-06T13:28:00Z", 8), bar("2026-07-06T13:29:00Z", 9));
+    ctrl.sync();
+
+    expect(candle.calls.filter((c) => c === "setData").length).toBe(setDataBefore + 1);
+    expect(candle.calls.filter((c) => c === "update").length).toBe(updatesBefore); // no update() replay
+    expect(candle.setDataCalls.at(-1)).toHaveLength(4 + LEFT_PAD_BARS);
+  });
+
+  it("falls back to a full setData rebuild when the official daily series replaces a single derived bar", () => {
+    // The "no daily bars" half of the same report: before the deep backfill's
+    // SeedDaily lands, the engine may hand the chart a single derived in-progress
+    // daily bar. When the official multi-day series arrives it replaces that one bar
+    // with a longer series whose earliest day sits before it — a front-growth, same
+    // failure mode as the 1m case above, just on the Daily timeframe.
+    const derived = [bar("2026-07-06T00:00:00Z", 10)];
+    const reader = barReaderByTf({ D: derived });
+    const facade = fakeFacade();
+    const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "D" },
+      { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
+    ctrl.mount();
+    ctrl.sync(); // derived in-progress daily bar only
+    const candle = facade.created[0].series;
+    const setDataBefore = candle.calls.filter((c) => c === "setData").length;
+
+    // Official daily backfill lands: earlier days prepended ahead of the derived bar.
+    const official = [bar("2026-07-04T00:00:00Z", 8), bar("2026-07-05T00:00:00Z", 9), bar("2026-07-06T00:00:00Z", 10)];
+    reader.series = () => official;
+    ctrl.sync();
+
+    expect(candle.calls.filter((c) => c === "setData").length).toBe(setDataBefore + 1);
+    expect(candle.setDataCalls.at(-1)).toHaveLength(3 + LEFT_PAD_BARS);
+  });
+
   it("falls back to a full setData rebuild instead of an out-of-order update() when the series isn't sorted", () => {
     // Regression for the 10s-chart freeze: series.update() requires a non-decreasing
     // time; feeding it a bucket earlier than one already applied used to throw and,

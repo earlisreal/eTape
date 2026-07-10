@@ -45,6 +45,12 @@ export class ChartController {
   private volume!: LwcSeries;
   private lastAppliedCount = 0;             // bars applied via setData/update
   private lastAppliedKey = "";              // last bar's bucketStart|close, to detect in-progress change
+  // bucketStart of the bar at index (lastAppliedCount-1) as of the last apply — an
+  // anchor-identity check independent of value, so applyBars can tell a real tail
+  // extension from a store snapshot that grew the series at the FRONT (deep-history
+  // backfill prepending bars, or a daily series replacing a single derived bar).
+  // See applyBars.
+  private lastTailBucket = "";
   private indicatorApplied = new Map<string, number>(); // per-series point count applied via setData/update
   private indicatorLastKey = new Map<string, string>(); // per-series fingerprint of the last applied point, `${timeMs}|${value}`
   // per-series timeMs of the point at index (applied-1) as of the last apply — an
@@ -102,6 +108,19 @@ export class ChartController {
       this.setAllBars(bars);
       return;
     }
+    // The incremental branches below assume the drawn candles are a PREFIX of `bars`
+    // that only extends at the tail. A BarStore snapshot replace — the deep-history
+    // backfill landing after the shallow live seed prepends ~20 days of 1m bars; the
+    // official daily series replacing the single derived in-progress day — grows the
+    // series at the FRONT, so the bar now at the anchor index is a different, older
+    // bar. Replaying update() from there hands LWC a time older than it holds
+    // ("Cannot update oldest data") and never draws the prepended history. Rebuild
+    // wholesale instead. Mirrors applyIndicators' `continues` guard.
+    const anchor = bars[this.lastAppliedCount - 1];
+    if (!anchor || anchor.bucketStart !== this.lastTailBucket) {
+      this.setAllBars(bars);
+      return;
+    }
     const last = bars[bars.length - 1];
     const grew = bars.length > this.lastAppliedCount;
     const lastChanged = keyOf(last) !== this.lastAppliedKey;
@@ -129,10 +148,12 @@ export class ChartController {
       }
       this.lastAppliedCount = bars.length;
       this.lastAppliedKey = keyOf(last);
+      this.lastTailBucket = last.bucketStart;
     } else if (lastChanged) {
       this.candle.update(this.mainPoint(last));
       this.volume.update(toVolume(last, this.palette));
       this.lastAppliedKey = keyOf(last);
+      this.lastTailBucket = last.bucketStart;
       // Auto-follow is LWC's default when already at the right edge; never force it
       // when the user has scrolled back (honesty: don't yank their view).
     }
@@ -143,11 +164,12 @@ export class ChartController {
     this.candle.setData([...pad, ...bars.map((b) => this.mainPoint(b))]);
     this.volume.setData([...pad, ...bars.map((b) => toVolume(b, this.palette))]);
     this.backfilled = true;
-    // lastAppliedCount/lastAppliedKey track the REAL bars only — the incremental
-    // applyBars path above indexes into `bars` (the BarReader's series), which
-    // never includes this padding.
+    // lastAppliedCount/lastAppliedKey/lastTailBucket track the REAL bars only — the
+    // incremental applyBars path above indexes into `bars` (the BarReader's series),
+    // which never includes this padding.
     this.lastAppliedCount = bars.length;
     this.lastAppliedKey = keyOf(bars[bars.length - 1]);
+    this.lastTailBucket = bars[bars.length - 1].bucketStart;
   }
 
   // LEFT_PAD_BARS WhitespaceData points (time-only, no OHLC — valid for both the
@@ -332,6 +354,7 @@ export class ChartController {
     this.backfilled = false;
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
+    this.lastTailBucket = "";
     this.candleRange = null;
     this.indicatorApplied.clear();
     this.indicatorLastKey.clear();
@@ -390,6 +413,7 @@ export class ChartController {
     this.backfilled = false;
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
+    this.lastTailBucket = "";
     this.liftCandleToTop();
   }
 
