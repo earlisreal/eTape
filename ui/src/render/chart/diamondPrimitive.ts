@@ -11,9 +11,10 @@ import type { Palette } from "../palette";
 // depending on the transitive package directly).
 type DrawTarget = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 
-// Draws buy/sell diamond fills anchored to (time, price), with a thin dark outline
-// (v3.7.1 borderWidth pattern: stroke after fill). Culling is implicit — LWC returns
-// null coordinates for off-screen times/prices and we skip them.
+// Draws buy/sell diamond fills anchored to (time, price) as a solid fill (no outline —
+// palette.buyFill/sellFill are deep enough shades to read against a matching-color
+// candle on their own). Culling is implicit — LWC returns null coordinates for
+// off-screen times/prices and we skip them.
 export class DiamondFillPrimitive implements ISeriesPrimitive<Time> {
   private markers: FillMarker[] = [];
   private series: ISeriesApi<"Candlestick"> | null = null;
@@ -40,9 +41,6 @@ export class DiamondFillPrimitive implements ISeriesPrimitive<Time> {
           ctx.fillStyle = fillColor(m.side, this.palette);
           drawDiamondPath(ctx, px, py, ph);
           ctx.fill();
-          ctx.lineWidth = Math.max(1, hr);       // borderWidth pattern
-          ctx.strokeStyle = this.palette.fillOutline;
-          ctx.stroke();
         }
       });
     };

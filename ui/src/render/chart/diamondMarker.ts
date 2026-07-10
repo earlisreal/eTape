@@ -1,6 +1,5 @@
 // Ported from ~/Projects/earlisreal-lightweight-charts @ 069fa855
-// (drawDiamond / hitTestDiamond, Manhattan hit test, 0.8 size factor) + the
-// v3.7.1 borderWidth pattern (a25e7dc0: stroke the path after fill). Kept pure so
+// (drawDiamond / hitTestDiamond, Manhattan hit test, 0.8 size factor). Kept pure so
 // the primitive (diamondPrimitive.ts) stays a thin LWC adapter.
 import type { Palette } from "../palette";
 

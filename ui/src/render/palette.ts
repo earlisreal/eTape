@@ -19,9 +19,9 @@ export interface Palette {
   volUp: string;       // up-bar volume (rgba, semi-transparent)
   volDown: string;     // down-bar volume (rgba, semi-transparent)
   // fills-on-chart (diamond markers)
-  buyFill: string;     // buy diamond fill (soft green)
-  sellFill: string;    // sell diamond fill (soft pink)
-  fillOutline: string; // thin dark outline on both
+  buyFill: string;     // buy diamond fill — deeper than `up` so it reads with no outline
+  sellFill: string;    // sell diamond fill — deeper than `down` so it reads with no outline
+  fillOutline: string; // unused by the diamond marker (no outline drawn); kept for tvTheme parity
   // ladder / tape (Plan 3)
   neutral: string;      // NEUTRAL tick prints + last-trade text with no direction
   depthBid: string;     // ladder cumulative depth bar fill, bid side (rgba, low alpha)
@@ -60,7 +60,7 @@ export const LIGHT: Palette = {
   grid: "#E7E3DA", crosshair: "#B8B2A4",
   up: "#177A58", down: "#C2334D",
   volUp: "rgba(23,122,88,0.34)", volDown: "rgba(194,51,77,0.30)",
-  buyFill: "#177A58", sellFill: "#C2334D", fillOutline: "#FBFAF7",
+  buyFill: "#0E5A3F", sellFill: "#931E37", fillOutline: "#FBFAF7",
   neutral: "#6A7280",
   depthBid: "rgba(23,122,88,0.13)", depthAsk: "rgba(194,51,77,0.11)",
   flashBuy: "rgba(23,122,88,0.20)", flashSell: "rgba(194,51,77,0.20)", flashNeutral: "rgba(106,114,128,0.16)",
@@ -79,7 +79,7 @@ export const DARK: Palette = {
   grid: "#241F18", crosshair: "#5A5347",
   up: "#35B888", down: "#E5637A",
   volUp: "rgba(53,184,136,0.34)", volDown: "rgba(229,99,122,0.30)",
-  buyFill: "#35B888", sellFill: "#E5637A", fillOutline: "#14120E",
+  buyFill: "#1B8A61", sellFill: "#C23E56", fillOutline: "#14120E",
   neutral: "#9A9385",
   depthBid: "rgba(53,184,136,0.16)", depthAsk: "rgba(229,99,122,0.14)",
   flashBuy: "rgba(53,184,136,0.24)", flashSell: "rgba(229,99,122,0.24)", flashNeutral: "rgba(154,147,133,0.18)",
