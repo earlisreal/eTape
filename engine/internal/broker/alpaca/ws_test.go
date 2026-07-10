@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 )
 
@@ -290,25 +291,28 @@ func TestWS_DeadConnectionReconnectsWithBackoff(t *testing.T) {
 	t.Fatal("client did not reconnect after the dead connection within the safety bound")
 }
 
-// TestWS_StaleReadTriggersReconnect covers the liveness timer: Alpaca's
+// TestWS_PingTimeoutTriggersReconnect covers the liveness timer: Alpaca's
 // trade_updates stream has no server ping/pong, so a connection that
-// silently stops delivering frames is only detected by readFrame's deadline
-// (staleTimeout, wrapping c.Read in context.WithTimeout). This is a distinct
-// code path from TestWS_DeadConnectionReconnectsWithBackoff, which triggers
-// via an abrupt close and produces an immediate read error rather than a
-// deadline expiry. The test shortens staleTimeout (default 30s) to keep this
-// fast, and bounds its own wait so a regression that makes the client hang
-// can't hang the test suite forever.
-func TestWS_StaleReadTriggersReconnect(t *testing.T) {
+// silently stops delivering frames — and stops reading entirely, so it can
+// never auto-pong — is only detected by the pinger goroutine failing to get
+// a pong back within pongTimeout. This is a distinct code path from
+// TestWS_DeadConnectionReconnectsWithBackoff, which triggers via an abrupt
+// close and produces an immediate read error rather than a ping timeout.
+// The test shortens pingInterval/pongTimeout to keep this fast, and bounds
+// its own wait so a regression that makes the client hang can't hang the
+// test suite forever.
+func TestWS_PingTimeoutTriggersReconnect(t *testing.T) {
 	srv, dialCount := mockWSServer(func(ctx context.Context, c *websocket.Conn, dialN int) {
 		_, _, _ = c.Read(ctx) // auth
 		_ = c.Write(ctx, websocket.MessageText, []byte(`{"stream":"authorization","data":{"status":"authorized"}}`))
 		_, _, _ = c.Read(ctx) // listen
 		if dialN == 1 {
-			// Go silent past the client's shortened stale timeout instead of
-			// sending anything — no close, no error frame, no more writes.
-			// The client must notice via its own read deadline, since this
-			// protocol has no server ping/pong.
+			// Go silent past the client's shortened pong timeout instead of
+			// sending anything — no close, no error frame, no more writes,
+			// and (unlike TestWS_IdleButAlivePingsSucceed) no more reads
+			// either, so the client's pings are never acknowledged: a
+			// coder/websocket pong is only ever consumed by the peer's own
+			// Read machinery, and this peer stops calling Read here.
 			<-ctx.Done()
 			return
 		}
@@ -325,7 +329,8 @@ func TestWS_StaleReadTriggersReconnect(t *testing.T) {
 	ws := newWSClient(wsURL, "K", "S", clock.System{},
 		func(tradeUpdate) {},
 		func(up bool) { mu.Lock(); connEvents = append(connEvents, up); mu.Unlock() })
-	ws.staleTimeout = 50 * time.Millisecond
+	ws.pingInterval = 50 * time.Millisecond
+	ws.pongTimeout = 50 * time.Millisecond
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -333,8 +338,8 @@ func TestWS_StaleReadTriggersReconnect(t *testing.T) {
 
 	// Safety bound for this test's own wait: the run() backoff between
 	// sessions starts at 1s (netx.Backoff{Min: time.Second}), so allow
-	// generous headroom above staleTimeout + Min backoff without letting a
-	// genuine hang stall the suite.
+	// generous headroom above pingInterval+pongTimeout + Min backoff without
+	// letting a genuine hang stall the suite.
 	deadline := time.Now().Add(8 * time.Second)
 	for time.Now().Before(deadline) {
 		if atomic.LoadInt32(dialCount) >= 2 {
@@ -349,11 +354,129 @@ func TestWS_StaleReadTriggersReconnect(t *testing.T) {
 				}
 			}
 			if !sawDisconnect {
-				t.Fatalf("expected onConn(false) after the stale-read timeout, got %v", evs)
+				t.Fatalf("expected onConn(false) after the ping timeout, got %v", evs)
 			}
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatal("client did not reconnect after the stale-read timeout within the safety bound")
+	t.Fatal("client did not reconnect after the ping timeout within the safety bound")
+}
+
+// TestWS_IdleButAlivePingsSucceed is the actual regression test for this
+// task. Alpaca's trade_updates stream sends nothing at all whenever the
+// account is idle (no order activity) — the normal case, not a failure —
+// and before this fix, readFrame wrapped *every* Read in a fresh
+// staleTimeout deadline, so any idle gap longer than that deadline
+// reconnected the session regardless of whether the socket was actually
+// healthy. Here the mock keeps its own Read loop running the whole time (so
+// the library auto-pongs every ping it receives) but never writes a single
+// data frame, for a window spanning many pingInterval cycles. A client that
+// still judged liveness by "did Read get a frame recently" would reconnect
+// repeatedly during this window; the fixed client, judging liveness by
+// ping/pong instead, must not reconnect at all.
+func TestWS_IdleButAlivePingsSucceed(t *testing.T) {
+	srv, dialCount := mockWSServer(func(ctx context.Context, c *websocket.Conn, dialN int) {
+		_, _, _ = c.Read(ctx) // auth
+		_ = c.Write(ctx, websocket.MessageText, []byte(`{"stream":"authorization","data":{"status":"authorized"}}`))
+		_, _, _ = c.Read(ctx) // listen
+		// Block on a single Read for the life of the connection: any ping
+		// the client sends arrives while this call is pending and gets
+		// auto-ponged by the library's read machinery internally (control
+		// frames don't make Read return), but no data frame is ever written
+		// back, so this call only returns when ctx ends. Note a *short*
+		// per-call read deadline here would be self-defeating: coder/websocket
+		// closes the connection on any error from any method, "context
+		// expirations as well" included (see (*Conn).Read's doc comment) —
+		// exactly the false-positive-staleness bug this task fixes on the
+		// client side, so the mock must not reintroduce it on the server side.
+		_, _, _ = c.Read(ctx)
+	})
+	defer srv.Close()
+	wsURL := "ws" + srv.URL[len("http"):]
+
+	var mu sync.Mutex
+	var connEvents []bool
+	ws := newWSClient(wsURL, "K", "S", clock.System{},
+		func(tradeUpdate) {},
+		func(up bool) { mu.Lock(); connEvents = append(connEvents, up); mu.Unlock() })
+	ws.pingInterval = 30 * time.Millisecond
+	ws.pongTimeout = 200 * time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	go ws.run(ctx)
+
+	// This window comfortably spans well over a dozen pingInterval cycles
+	// of pure silence — old code's default 30s staleTimeout is gone, but
+	// what matters is the shape: many idle cycles with zero data frames,
+	// which is exactly what used to fire the old per-read deadline.
+	time.Sleep(500 * time.Millisecond)
+
+	if n := atomic.LoadInt32(dialCount); n != 1 {
+		t.Fatalf("dial count = %d, want exactly 1 (idle-but-alive must not trigger a reconnect)", n)
+	}
+	mu.Lock()
+	evs := append([]bool(nil), connEvents...)
+	mu.Unlock()
+	if len(evs) == 0 {
+		t.Fatal("client never reported connected")
+	}
+	for _, up := range evs {
+		if !up {
+			t.Fatalf("expected no disconnect while idle-but-alive, got connEvents=%v", evs)
+		}
+	}
+}
+
+// TestResetBackoffIfHealthy_LongSessionResets is the backoff-reset
+// regression test: a session that lasted at least bo.Max was a genuinely
+// healthy, actively-pinged connection (not a connect-then-drop loop), so
+// the next reconnect delay must go back to Min instead of continuing to
+// climb. This exercises resetBackoffIfHealthy directly against the same
+// netx.Backoff run() uses, rather than driving a real WS session end to end
+// on a wall clock — asserting an exact reconnect delay via real timing
+// would be flaky (scheduling noise is comparable to the delays involved),
+// whereas netx.Backoff.Next() is deterministic immediately after Reset():
+// cur starts at 0, so the first Next() call after a reset returns exactly
+// Min with no jitter at all (see netx.Backoff.Next()'s span<=0 case).
+func TestResetBackoffIfHealthy_LongSessionResets(t *testing.T) {
+	bo := netx.Backoff{Min: 10 * time.Millisecond, Max: 100 * time.Millisecond}
+	// Simulate a prior flapping period: two quick failures already climbed
+	// the backoff away from Min.
+	bo.Next()
+	bo.Next()
+	if got := bo.Next(); got == bo.Min {
+		t.Fatalf("test setup: expected backoff to have climbed past Min before the reset check, got %v", got)
+	}
+
+	resetBackoffIfHealthy(&bo, 150*time.Millisecond) // >= Max: healthy long session
+
+	if got := bo.Next(); got != bo.Min {
+		t.Fatalf("post-reset backoff = %v, want exactly Min (%v)", got, bo.Min)
+	}
+}
+
+// TestResetBackoffIfHealthy_ShortSessionKeepsClimbing proves the duration
+// threshold is real: a session shorter than bo.Max (still flapping) must
+// not reset, so backoff keeps climbing across a genuine reconnect storm
+// instead of a single healthy blip masking it. If resetBackoffIfHealthy
+// ignored the threshold and always reset, Next() here would return exactly
+// bo.Min deterministically (100% of the time, per the same span<=0 case
+// above) instead of a full-jittered value strictly inside (Min, 2*Min) —
+// so the boundary checks below reliably catch an "always resets" bug rather
+// than depending on a coincidental timing race.
+func TestResetBackoffIfHealthy_ShortSessionKeepsClimbing(t *testing.T) {
+	bo := netx.Backoff{Min: 10 * time.Millisecond, Max: 100 * time.Millisecond}
+	bo.Next() // cur = Min
+
+	resetBackoffIfHealthy(&bo, 5*time.Millisecond) // < Max: still flapping
+
+	got := bo.Next()
+	if got <= bo.Min {
+		t.Fatalf("backoff after short (unhealthy) session = %v, want > Min (%v) -- looks reset when it should still be climbing", got, bo.Min)
+	}
+	if got >= 2*bo.Min {
+		t.Fatalf("backoff after short session = %v, want < 2*Min (%v)", got, 2*bo.Min)
+	}
 }
