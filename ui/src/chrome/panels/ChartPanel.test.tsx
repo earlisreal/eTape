@@ -420,4 +420,41 @@ describe("ChartPanel", () => {
     act(() => { getSurface().paint(); });
     expect(queryByTestId("bar-close-timer")).toBeNull();
   });
+
+  it("isDirty reacts only to its own pinned symbol's bar revision and its own indicator instances' revisions — not a foreign symbol's bar delta or an unrelated instance's update (per-key scoping regression)", () => {
+    const { getByRole, stores, getSurface, onConfigChange } = renderChartCapturingSurface(); // pinned to US.AAPL/1m via config.settings
+
+    // Add 2 indicator instances (the picker auto-closes after each add — see
+    // ChartHeaderControls — so reopen it before the second add).
+    fireEvent.click(getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add EMA" }));
+    fireEvent.click(getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add VWAP" }));
+
+    // Recover this chart's own EMA instanceId from the persisted config patch
+    // (mirrors the "scopes indicator instanceIds" test above).
+    type Persisted = { indicators: { instanceId: string; type: string }[] };
+    const persisted = (onConfigChange.mock.calls.at(-1)![0] as Persisted).indicators;
+    const emaId = persisted.find((i) => i.type === "EMA")!.instanceId;
+
+    getSurface().isDirty(); // baseline: consume the mount + indicator-add dirty state
+
+    // A different symbol's bar delta must NOT dirty a chart pinned to US.AAPL —
+    // this is the actual bug this task fixes (isDirty used to read global revs).
+    pushLiveBar(stores, "US.NVDA", "1m", 100, 100.5);
+    expect(getSurface().isDirty()).toBe(false);
+
+    // The pinned symbol's own bar delta must dirty it.
+    pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5);
+    expect(getSurface().isDirty()).toBe(true);
+
+    // An update to one of this chart's OWN indicator instances must dirty it.
+    stores.indicators.apply({ kind: "delta", topic: "md.indicator", key: emaId, payload: { timeMs: Date.now(), value: 1 } });
+    expect(getSurface().isDirty()).toBe(true);
+
+    // An update to an unrelated indicator instance's key (not one of this
+    // chart's active instances) must NOT dirty it.
+    stores.indicators.apply({ kind: "delta", topic: "md.indicator", key: "other-panel:EMA-0", payload: { timeMs: Date.now(), value: 1 } });
+    expect(getSurface().isDirty()).toBe(false);
+  });
 });

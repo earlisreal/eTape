@@ -69,3 +69,64 @@ describe("computeLegendView", () => {
     expect(v.indicators[0].signal).toBeNull();
   });
 });
+
+// valueAt's linear scan was replaced with a binary search (points are sorted
+// ascending by timeMs — IndicatorStore's snapshot-sort + append-in-order
+// behavior guarantees this). These tests exercise valueAt indirectly through
+// computeLegendView (matching this file's own convention — valueAt itself is
+// not exported), using a 4-bar series so `logical` can select a target time
+// distinct from every point's own bucket, and pin down every boundary case
+// the old linear scan handled: before the first point, strictly between two
+// points, exactly on a point, after the last point, and an empty series.
+describe("computeLegendView valueAt (binary search)", () => {
+  const b4 = [
+    bar("2026-07-08T13:29:00Z", 1, 1),
+    bar("2026-07-08T13:30:00Z", 1, 1),
+    bar("2026-07-08T13:31:00Z", 1, 1),
+    bar("2026-07-08T13:32:00Z", 1, 1),
+  ];
+
+  it("target before the first point returns null", () => {
+    const reader: IndicatorReader = { series: () => [{ timeMs: Date.parse("2026-07-08T13:30:00Z"), value: 5 }] };
+    // logical 0 -> bar0 @ :29, strictly before the only point @ :30.
+    const v = computeLegendView(b4, reader, [{ instanceId: "e1", type: "EMA", params: { period: 9 } }], LIGHT, 0);
+    expect(v.indicators[0].values).toEqual([null]);
+  });
+
+  it("target strictly between two points returns the earlier point's value", () => {
+    const reader: IndicatorReader = {
+      series: () => [
+        { timeMs: Date.parse("2026-07-08T13:29:00Z"), value: 1 },
+        { timeMs: Date.parse("2026-07-08T13:32:00Z"), value: 2 },
+      ],
+    };
+    // logical 2 -> bar2 @ :31, strictly between the two points @ :29 and :32.
+    const v = computeLegendView(b4, reader, [{ instanceId: "e1", type: "EMA", params: { period: 9 } }], LIGHT, 2);
+    expect(v.indicators[0].values).toEqual([1]);
+  });
+
+  it("target exactly on a point's timeMs returns that point's value", () => {
+    const reader: IndicatorReader = {
+      series: () => [
+        { timeMs: Date.parse("2026-07-08T13:29:00Z"), value: 1 },
+        { timeMs: Date.parse("2026-07-08T13:30:00Z"), value: 2 },
+        { timeMs: Date.parse("2026-07-08T13:31:00Z"), value: 3 },
+      ],
+    };
+    // logical 2 -> bar2 @ :31, exactly the 3rd point's timeMs.
+    const v = computeLegendView(b4, reader, [{ instanceId: "e1", type: "EMA", params: { period: 9 } }], LIGHT, 2);
+    expect(v.indicators[0].values).toEqual([3]);
+  });
+
+  it("target after the last point returns the last point's value", () => {
+    const reader: IndicatorReader = { series: () => [{ timeMs: Date.parse("2026-07-08T13:29:00Z"), value: 1 }] };
+    // logical 3 -> bar3 @ :32, after the only point @ :29.
+    const v = computeLegendView(b4, reader, [{ instanceId: "e1", type: "EMA", params: { period: 9 } }], LIGHT, 3);
+    expect(v.indicators[0].values).toEqual([1]);
+  });
+
+  it("an empty points array returns null", () => {
+    const v = computeLegendView(b4, emptyReader, [{ instanceId: "e1", type: "EMA", params: { period: 9 } }], LIGHT, 0);
+    expect(v.indicators[0].values).toEqual([null]);
+  });
+});

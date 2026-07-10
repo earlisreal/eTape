@@ -16,10 +16,17 @@ export interface LegendView {
   volume: number | null; indicators: LegendIndicatorRow[];
 }
 
+// points is sorted ascending by timeMs (IndicatorStore's snapshot-sort +
+// append-in-order behavior guarantees this) — binary search for the rightmost
+// index whose timeMs <= ms, i.e. the value still in effect at `ms`. Returns
+// null when no point qualifies (ms is before every point, or points is empty).
 function valueAt(points: { timeMs: number; value: number }[], ms: number): number | null {
-  let val: number | null = null;
-  for (const p of points) { if (p.timeMs <= ms) val = p.value; else break; }
-  return val;
+  let lo = 0, hi = points.length - 1, ans = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid].timeMs <= ms) { ans = mid; lo = mid + 1; } else hi = mid - 1;
+  }
+  return ans === -1 ? null : points[ans].value;
 }
 
 function labelOf(inst: IndicatorInstance): string {
