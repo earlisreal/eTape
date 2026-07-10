@@ -88,3 +88,55 @@ func TestBarsErrorStatusSurfaces(t *testing.T) {
 		t.Fatalf("want a 403 error, got %v", err)
 	}
 }
+
+func TestNewDefaultsToSIP(t *testing.T) {
+	var gotFeed string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/stocks/AAPL/bars", func(w http.ResponseWriter, r *http.Request) {
+		gotFeed = r.URL.Query().Get("feed")
+		_, _ = w.Write([]byte(`{"bars":[],"next_page_token":null}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := New(srv.URL, "K", "S", "", clock.NewFake(time.UnixMilli(0))) // empty feed => default
+	if _, err := c.DailyBars(context.Background(), "US.AAPL", time.UnixMilli(0), time.UnixMilli(1<<40)); err != nil {
+		t.Fatal(err)
+	}
+	if gotFeed != "sip" {
+		t.Fatalf("default feed = %q, want sip", gotFeed)
+	}
+}
+
+func TestIntraday1mRetriesOnRecentSIP403(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	var calls int
+	var secondEnd string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/stocks/AAPL/bars", func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(403)
+			_, _ = w.Write([]byte(`{"message":"subscription does not permit querying recent SIP data"}`))
+			return
+		}
+		secondEnd = r.URL.Query().Get("end")
+		_, _ = w.Write([]byte(`{"bars":[{"t":"2026-07-08T15:00:00Z","o":1,"h":1,"l":1,"c":1,"v":1}],"next_page_token":null}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := New(srv.URL, "K", "S", "sip", clock.NewFake(now))
+	bars, err := c.Intraday1m(context.Background(), "US.AAPL", time.UnixMilli(0), now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("err = %v, want the clamped retry to succeed", err)
+	}
+	if calls != 2 || len(bars) != 1 {
+		t.Fatalf("calls = %d bars = %d, want 2 and 1", calls, len(bars))
+	}
+	// Retry clamps end to now−16m = 2026-07-08T11:44:00Z.
+	wantEnd := now.Add(-16 * time.Minute).UTC().Format(time.RFC3339)
+	if secondEnd != wantEnd {
+		t.Fatalf("retry end = %q, want %q", secondEnd, wantEnd)
+	}
+}
