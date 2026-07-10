@@ -78,6 +78,20 @@ describe("ExportTradesPopover", () => {
     clickSpy.mockRestore();
   });
 
+  it("shows a danger toast when the export query rejects, and does not close", async () => {
+    const sendQuery = vi.fn(async () => { throw new Error("ws disconnected"); });
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const onClose = vi.fn();
+    wrap({ sendQuery }, onClose);
+
+    fireEvent.click(screen.getByTestId("export-download"));
+
+    await waitFor(() => expect(screen.getByText(/Export failed/)).toBeTruthy());
+    expect(clickSpy).not.toHaveBeenCalled();
+    expect(onClose).not.toHaveBeenCalled();
+    clickSpy.mockRestore();
+  });
+
   it("closes on Escape without downloading", () => {
     const sendQuery = vi.fn(async () => ({ csv: "h\n", count: 1 }));
     const onClose = vi.fn();

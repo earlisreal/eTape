@@ -80,6 +80,8 @@ export function ExportTradesPopover(
       a.click();
       URL.revokeObjectURL(url);
       onClose();
+    }).catch((err: unknown) => {
+      toast.push({ level: "danger", text: `Export failed: ${err instanceof Error ? err.message : String(err)}` });
     });
   };
 
