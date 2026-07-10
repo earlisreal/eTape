@@ -26,4 +26,4 @@ func NewCommandsForTest(ex execDoer, c configStore, i indicatorCtl, d demandCtl,
 }
 
 // NewQueriesForTest exposes newQueries to external test packages.
-func NewQueriesForTest(f fillsQuerier) queryHandler { return newQueries(f) }
+func NewQueriesForTest(f fillsQuerier, clk clock.Clock) queryHandler { return newQueries(f, clk) }

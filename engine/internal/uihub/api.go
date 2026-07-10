@@ -21,6 +21,7 @@ type Stores interface {
 	GetConfig(key string) (string, bool, error)
 	SetConfig(key, value string)
 	QueryFills(symbol string, fromMs, toMs int64) ([]exec.FillRow, error)
+	ExportFills(ctx context.Context, venue string, fromMs, toMs int64) ([]exec.ExportFillRow, error)
 }
 
 // Indicators is the md.Core surface uihub needs (satisfied by *md.Core).
@@ -92,7 +93,7 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	m := newMirror(vms, global, cfg.TapeCap, cfg.NewsCap, cfg.FillsCap, cfg.EventsCap, cfg.TradesCap)
 	h := NewHub(clk, HubConfig{MDInterval: cfg.MD, AccountInterval: cfg.Account, PositionInterval: cfg.Position, Buf: cfg.Buf}, m)
 	cmd := newCommands(ex, st, ind, h, va, h.feed, vt)
-	qry := newQueries(st)
+	qry := newQueries(st, clk)
 	srv := NewServer(h, cmd, qry, ServerConfig{DistDir: cfg.DistDir, OutBuf: cfg.OutBuf})
 	return h, srv
 }

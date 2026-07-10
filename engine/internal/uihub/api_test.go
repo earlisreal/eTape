@@ -21,6 +21,10 @@ func (apiStores) GetConfig(string) (string, bool, error)                  { retu
 func (apiStores) SetConfig(string, string)                                {}
 func (apiStores) QueryFills(string, int64, int64) ([]exec.FillRow, error) { return nil, nil }
 
+func (apiStores) ExportFills(context.Context, string, int64, int64) ([]exec.ExportFillRow, error) {
+	return nil, nil
+}
+
 type apiInd struct{}
 
 func (apiInd) EnsureIndicator(string, md.IndicatorSpec) {}
