@@ -1276,3 +1276,45 @@ describe("ChartController.lastSyncDaySegmentBuilds (Task 6 diagnostic probe)", (
     expect(ctrl.lastSyncDaySegmentBuilds()).toBe(0);
   });
 });
+
+describe("ChartController viewport preservation around front-growth rebuilds (Task 10)", () => {
+  // LWC's setData preserves the viewport's LOGICAL index range, not its TIME
+  // range. A front-growth rebuild (deep-history prepend, or the official-daily-
+  // replaces-derived-bar case) shifts every existing bar's logical index, so
+  // without this fix a scrolled-back viewport would silently teleport to a
+  // different time window every time older bars land.
+  const sec = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+
+  it("restores the visible time range after a front-growth rebuild (scrolled back)", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // shallow cache-seed backfill (cold setAllBars; no prior visibleRange to restore)
+
+    // Simulate the user having scrolled back: an interior window whose `to` sits
+    // strictly before the newest (tail) bar's time.
+    const scrolledBack = { from: sec("2026-07-06T13:29:00Z"), to: sec("2026-07-06T13:30:00Z") };
+    facade.visibleRange = scrolledBack;
+
+    // Deep-history snapshot lands: two OLDER bars prepended ahead of the shallow
+    // window — the front-growth anchor-mismatch path (applyBars), routing back
+    // into setAllBars.
+    bars.unshift(bar("2026-07-06T13:28:00Z", 8), bar("2026-07-06T13:29:00Z", 9));
+    ctrl.sync();
+
+    expect(facade.setVisibleRangeCalls).toEqual([scrolledBack]);
+  });
+
+  it("does NOT restore when parked at the right edge (newest bar visible)", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // shallow cache-seed backfill
+
+    // Parked at the live edge: `to` is at (>=) the newest (tail) bar's time.
+    facade.visibleRange = { from: sec("2026-07-06T13:30:00Z"), to: sec("2026-07-06T13:31:00Z") };
+
+    bars.unshift(bar("2026-07-06T13:28:00Z", 8), bar("2026-07-06T13:29:00Z", 9));
+    ctrl.sync();
+
+    expect(facade.setVisibleRangeCalls).toEqual([]);
+  });
+});
