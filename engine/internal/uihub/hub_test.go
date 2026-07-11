@@ -157,6 +157,113 @@ func TestHubBarSnapshotBroadcastsImmediatelyNotCoalesced(t *testing.T) {
 	}
 }
 
+// TestHubBarPrependBroadcastsImmediatelyAndSurvivesFollowingKeepLatestWrite
+// guards the coalescing bypass a BarPrepend batch relies on (see stageMD's
+// classMDKeep Batch branch): staging a BarPrepend-derived staged{Batch: true}
+// frame must broadcast it right away, on the lossless lane, WITHOUT it ever
+// landing in h.pendKeep -- unlike an ordinary keep-latest bars delta. If a
+// naive implementation instead routed a Batch frame through the same
+// h.pendKeep[dedupOf(s)] = s path as ordinary deltas, a following single-bar
+// md.bars delta staged before the next md tick could sit in (or, worse,
+// collide with and replace) the same pending slot, silently dropping the
+// whole prepended older-history chunk before it ever reached a client -- the
+// exact regression this test pins against. It also exercises the outbound-
+// coalesce half of the same guarantee directly: outboundCoalesceKey must
+// return "" for a Batch frame, so even a slow client's per-connection outbox
+// can't shed it.
+func TestHubBarPrependBroadcastsImmediatelyAndSurvivesFollowingKeepLatestWrite(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	c := &fakeClient{nid: 1}
+	h.Register(c)
+	h.Subscribe(c, wsmsg.TopicBars)
+	syncHub(h)
+	before := len(c.got())
+
+	// The pan-triggered older-history chunk: bars strictly older than
+	// anything already cached (mirrors SeedOlder1m's BarPrepend shape).
+	older := []md.Bar{
+		{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: 1_000_000},
+		{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: 1_060_000},
+	}
+	h.PublishMD(md.BarPrepend{Symbol: "US.AAPL", TF: session.TF1m, Bars: older})
+	syncHub(h) // no mdTick.Advance: a coalesced delta would NOT appear yet
+
+	afterBatch := c.got()
+	if len(afterBatch) != before+1 {
+		t.Fatalf("BarPrepend batch did not broadcast immediately: before=%d after=%d", before, len(afterBatch))
+	}
+	batchFrame := afterBatch[len(afterBatch)-1]
+	k, tp := decodeKindTopic(t, batchFrame)
+	if k != "delta" || tp != "md.bars" {
+		t.Fatalf("expected an immediate md.bars delta for the batch, got %s/%s", k, tp)
+	}
+	var batchPayload struct {
+		Payload []wsmsg.Bar `json:"payload"`
+	}
+	if err := json.Unmarshal(batchFrame, &batchPayload); err != nil {
+		t.Fatal(err)
+	}
+	if len(batchPayload.Payload) != len(older) {
+		t.Fatalf("batch payload bars = %d, want %d (lossless)", len(batchPayload.Payload), len(older))
+	}
+
+	// The batch must never have touched pendKeep -- it broadcasts on the
+	// lossless lane instead of the classMDKeep keep-latest path, so there is
+	// nothing left there for a later delta to collide with.
+	if len(h.pendKeep) != 0 {
+		t.Fatalf("BarPrepend batch must bypass pendKeep entirely, found %d pending entries", len(h.pendKeep))
+	}
+
+	// Stage an ordinary single-bar delta for the same (symbol, timeframe)
+	// region the batch just prepended into -- the naive-implementation risk
+	// this constraint exists to prevent: routing the batch through the same
+	// h.pendKeep[dedupOf(s)] = s path as this delta would let this write
+	// silently replace/lose the batch before the next flush ever happens.
+	h.PublishMD(md.BarUpdate{Bar: md.Bar{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: 1_060_000, C: 42}})
+	syncHub(h)
+
+	// Still no mdTick advance: the ordinary delta is a classMDKeep frame, so
+	// it must now be sitting in pendKeep -- not yet broadcast, and the batch
+	// frame already delivered above must be untouched.
+	stillOnlyBatch := c.got()
+	if len(stillOnlyBatch) != before+1 {
+		t.Fatalf("ordinary single-bar delta broadcast before the md tick fired: before=%d got=%d", before+1, len(stillOnlyBatch))
+	}
+	if len(h.pendKeep) != 1 {
+		t.Fatalf("ordinary single-bar delta should be pending exactly once, got %d entries", len(h.pendKeep))
+	}
+
+	// Fire the md ticker: only the pending single-bar delta flushes. The
+	// batch frame delivered earlier must still be there, byte-identical --
+	// proof the two writes never collided or clobbered each other.
+	clk.Advance(33 * time.Millisecond)
+	syncHub(h)
+
+	final := c.got()
+	if len(final) != before+2 {
+		t.Fatalf("expected exactly one more frame (the flushed single-bar delta): before=%d got=%d", before+2, len(final))
+	}
+	if string(final[before]) != string(batchFrame) {
+		t.Fatalf("batch frame was mutated/overwritten by the later keep-latest write:\nwant %s\ngot  %s", batchFrame, final[before])
+	}
+	k, tp = decodeKindTopic(t, final[len(final)-1])
+	if k != "delta" || tp != "md.bars" {
+		t.Fatalf("expected the flushed single-bar delta to be a md.bars delta, got %s/%s", k, tp)
+	}
+
+	// Bonus unit-level check of the same guarantee: a slow client's outbox
+	// can't shed the batch frame either -- it is never coalesceable outbound.
+	batchStaged := staged{Topic: wsmsg.TopicBars, Payload: []wsmsg.Bar{{Symbol: "US.AAPL"}}, Batch: true}
+	if ck := outboundCoalesceKey(batchStaged, false); ck != "" {
+		t.Fatalf("outboundCoalesceKey for a Batch frame = %q, want \"\" (lossless/never-shed)", ck)
+	}
+}
+
 func TestHubExecOrdersBroadcastImmediately(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	h := newTestHub(clk)
