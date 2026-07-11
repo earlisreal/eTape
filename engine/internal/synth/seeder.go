@@ -7,17 +7,16 @@
 // per-call dtMs to maxStepDtMs (5 minutes) specifically to bound the
 // *live* path's price-noise/tick-volume blast radius for the rare case of a
 // real-world gap (a suspended process resuming). That clamp is wrong for
-// this file's job: the seeder's day/minute-granularity strides are
-// intentionally large (a full day, or a full minute), and clamping them to
-// 5 minutes would silently truncate a "day" of simulated history down to 5
-// minutes repeated over and over. So Seed and its helpers call the
-// lower-level, unclamped stepPrice/genTicks (Tasks 2/4) directly, never
-// StepTo/stepSymbol, and drive them at whatever granularity each pass below
-// needs.
+// this file's job: the seeder's strides are driven at whatever granularity
+// each pass below needs (a minute for the fine pass, a minute-scale
+// sub-step for the coarse pass - see seedDailyHistory's doc comment for why
+// "one stepPrice call per day" turned out not to be viable at all,
+// regardless of the clamp), and clamping them to 5 minutes would corrupt
+// that. So Seed and its helpers call the lower-level, unclamped
+// stepPrice/genTicks (Tasks 2/4) directly, never StepTo/stepSymbol.
 package synth
 
 import (
-	"math"
 	"math/rand"
 	"time"
 
@@ -26,15 +25,15 @@ import (
 )
 
 // seedHistoryDays is the length of the coarse, daily-granularity backdrop
-// (step 1): a single stepPrice call per calendar day, no ticks. seedTrailingDays
-// is the length of the fine, minute-granularity window (step 2) immediately
-// preceding "now": real stepPrice+genTicks calls at 1-minute strides, so the
-// most recent history is tick-accurate rather than a coarse approximation.
-// The two passes are back-to-back, non-overlapping windows (coarse covers
-// everything strictly older than seedTrailingDays ago; fine covers the last
-// seedTrailingDays plus however much of "today" has elapsed) - each
-// calendar day gets exactly one daily bar, from exactly one pass, so no
-// ArchiveDaily call is ever repeated for the same bucket.
+// (step 1): stepPrice sub-stepped at seedDaySubstepMs granularity, no ticks.
+// seedTrailingDays is the length of the fine, minute-granularity window
+// (step 2) immediately preceding "now": real stepPrice+genTicks calls at
+// 1-minute strides, so the most recent history is tick-accurate rather than
+// a coarse approximation. The two passes are back-to-back, non-overlapping
+// windows (coarse covers everything strictly older than seedTrailingDays
+// ago; fine covers the last seedTrailingDays plus however much of "today"
+// has elapsed) - each calendar day gets exactly one daily bar, from exactly
+// one pass, so no ArchiveDaily call is ever repeated for the same bucket.
 const (
 	seedHistoryDays  = 365
 	seedTrailingDays = 3
@@ -49,6 +48,12 @@ const (
 	seedRTHSecs      = 6.5 * 3600
 	seedAvgPrintSize = 150.0
 )
+
+// seedDaySubstepMs is seedDailyHistory's stepPrice stride - see that
+// function's doc comment for why a single whole-day call turned out not to
+// be viable at all (independent of the reversion formula's shape) and why
+// this specific granularity was chosen over a coarser one.
+const seedDaySubstepMs = barMs
 
 // SeedStore is the store surface Seed writes warm history through -
 // satisfied by *store.Store (ArchiveDaily/ArchiveBar1m: store/bars.go;
@@ -76,8 +81,9 @@ type SeedStore interface {
 // back into another exported Generator method that would double-lock.
 //
 // Passes (see the brief):
-//  1. ~1y of daily bars per symbol, coarse day-granularity, ending just
-//     before the fine window starts.
+//  1. ~1y of daily bars per symbol, coarse day-granularity (each day itself
+//     sub-stepped at minute granularity - see seedDailyHistory), ending
+//     just before the fine window starts.
 //  2. The trailing ~seedTrailingDays days plus however much of "today" has
 //     elapsed, at real minute/tick granularity - continuing the exact same
 //     price/book state pass 1 left off at - emitting closed 1m bars and
@@ -122,15 +128,49 @@ func (g *Generator) Seed(st SeedStore, nowMs int64) {
 
 // seedDailyHistory walks rt's price model one calendar day at a time from
 // fromMs to toMs (both exact ET-midnight boundaries), archiving one daily
-// bar per day. Each day is exactly one unclamped stepPrice call spanning the
-// whole day (intentionally not chunked into smaller steps - see this file's
-// header comment) - runners' elevated Parabolic/Flush transition weights
-// (price.go's transMatrix) make an occasional day's single draw land in one
-// of those regimes, which is what gives runners their "occasional prior
-// spike day" character with no extra special-casing needed here. Since
-// there is no genTicks pass at this granularity, High/Low/Volume/Turnover
-// are synthesized (seedDayRange/seedDayVolume) rather than derived from
-// prints.
+// bar per day, tracked from a real sub-day stepPrice walk rather than a
+// single whole-day call.
+//
+// History: the original design (Task 9) called stepPrice exactly once per
+// day, with dtMs spanning the whole day (~86,400,000ms). That turned out to
+// be unfixable at the call-site level of "just pick a better reversion
+// formula": price.go's reversion term (whatever its shape) is a per-second
+// rate calibrated for the live path's small, frequent steps, where regime
+// transitions, drift, and noise accumulate stochastically over thousands of
+// ticks. A single call spanning a whole day forces exactly one regime draw
+// (DwellLeftMs, capped at 120s/15s-for-Flush, is always deeply negative
+// after subtracting a day's dtMs) to be treated as if it had persisted,
+// uninterrupted, for the entire day. Under the original linear-Euler
+// reversion this overshot wildly (the bug Task 9 originally reported);
+// under the corrected exponential-decay reversion (stable for any dtSec) it
+// instead converges Mid smoothly and completely to Anchor within that one
+// call - decay = exp(-reversion(reg)*86400) underflows to ~0 for every
+// regime, so every day's Close silently became Anchor regardless of what
+// drift/noise/regime happened that day, erasing runners' "occasional prior
+// spike day" character entirely (a different failure mode, same root cause:
+// evaluating this model at a granularity it was never calibrated for).
+//
+// The fix is a calling-pattern fix, not a price.go fix: sub-step each day at
+// seedDaySubstepMs (1 minute, i.e. barMs) granularity, tracking Open (first
+// sub-step's starting Mid)/High/Low (running max/min of Mid across every
+// sub-step)/Close (last sub-step's ending Mid) for real, instead of
+// leaping straight from one day's Close to the next. seedDaySubstepMs was
+// chosen empirically, not from the "stays well below saturation for every
+// regime" framing (that's unreachable: Quiet's reversion rate is fast
+// enough - decay < 0.005 by 60s - that even a 1-minute stride already
+// nearly-fully converges it, and getting Quiet's decay to a "meaningful"
+// residual would need sub-10s strides, ~365x more calls for no real
+// benefit: correctly, "quiet" IS supposed to hug Anchor closely). What
+// actually matters for spike-day character is the *slow*-reverting
+// regimes runners spend real time in (Trend: 0.01/s; Parabolic/Flush,
+// 0.005/s - the regimes elevated drift/lambda already make "spikes"): at
+// 60s, their decay is 0.55/0.74 respectively - a real, visible residual
+// that a coarser stride (e.g. 15-60 minutes) loses almost entirely (decay
+// 0.011 down to ~0 even for Parabolic/Flush by 15 minutes) - reproducing
+// this same bug at a coarser scale. 1-minute substeps keep that signal
+// while staying cheap (no genTicks at this granularity - see
+// seedDayVolume): see task-9-report.md's "Fix round" section for the
+// decay-by-stride table and the empirical spike-day verification.
 func (g *Generator) seedDailyHistory(rt *symRuntime, fromMs, toMs int64, st SeedStore) {
 	loc := session.Loc()
 	cur := time.UnixMilli(fromMs).In(loc)
@@ -143,10 +183,23 @@ func (g *Generator) seedDailyHistory(rt *symRuntime, fromMs, toMs int64, st Seed
 		dayEndMs := next.UnixMilli()
 
 		open := ps.Mid
-		stepPrice(g.rng, rt.spec, ps, dayEndMs, dayEndMs-dayStartMs)
+		hi, lo := open, open
+		for sub := dayStartMs; sub < dayEndMs; {
+			subNext := sub + seedDaySubstepMs
+			if subNext > dayEndMs {
+				subNext = dayEndMs
+			}
+			stepPrice(g.rng, rt.spec, ps, subNext, subNext-sub)
+			if ps.Mid > hi {
+				hi = ps.Mid
+			}
+			if ps.Mid < lo {
+				lo = ps.Mid
+			}
+			sub = subNext
+		}
 		closePx := ps.Mid
 
-		hi, lo := seedDayRange(g.rng, open, closePx, rt.spec.Vol)
 		vol, turn := seedDayVolume(g.rng, rt.spec, (hi+lo)/2)
 
 		bar := feed.Bar{
@@ -165,29 +218,6 @@ func (g *Generator) seedDailyHistory(rt *symRuntime, fromMs, toMs int64, st Seed
 
 		cur = next
 	}
-}
-
-// seedDayRange synthesizes a plausible daily High/Low around a day's
-// open/close (there is no intraday walk to derive real extrema from at this
-// granularity): High/Low always bracket both Open and Close by construction,
-// widened by a random fraction of the day's own O-C move (or, if the day
-// happened to close flat, a small fraction of vol-scaled price) so the bar
-// doesn't look like a suspiciously flat wick-less line on a chart.
-func seedDayRange(rng *rand.Rand, open, closePx, vol float64) (hi, lo float64) {
-	hi = math.Max(open, closePx)
-	lo = math.Min(open, closePx)
-
-	spread := hi - lo
-	if spread <= 0 {
-		spread = hi * vol / 100
-	}
-	extra := spread * between(rng, 0.1, 0.6)
-	hi += extra * rng.Float64()
-	lo -= extra * rng.Float64()
-	if lo < priceFloor {
-		lo = priceFloor
-	}
-	return hi, lo
 }
 
 // seedDayVolume synthesizes a plausible daily Volume/Turnover from spec's

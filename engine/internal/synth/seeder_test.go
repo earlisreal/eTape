@@ -76,11 +76,15 @@ func TestSeed_WithinBudget(t *testing.T) {
 		// the Go team's own documented guidance) is exactly the kind of
 		// thing this budget isn't meant to police - it's a real-build boot
 		// latency guard, not a claim that holds under -race too. Measured
-		// locally at ~1.2s normally vs ~8.1s under -race for this exact
-		// scenario, so widen rather than skip: still catches a genuine
-		// regression (e.g. an accidental O(n^2)) that -race would otherwise
-		// mask under a much larger fixed allowance.
-		budget *= 5
+		// locally (post fix-round, with seedDailyHistory's sub-day stepPrice
+		// chunking): ~2.0s normally vs ~14.5s under -race for this exact
+		// scenario - a ~7.2x ratio, consistent with the original
+		// (pre-fix-round) ~1.2s/~8.1s measurement's ~6.75x. 8x gives
+		// consistent headroom above both measured ratios rather than sitting
+		// right on top of one of them (a 5x multiplier, tried first, passed
+		// but left only ~1s of margin against the actual ~7.2x ratio - too
+		// close to a CPU-noise-driven flake on a slower/busier machine).
+		budget *= 8
 	}
 	if d := time.Since(start); d > budget {
 		t.Errorf("seed took %v, budget %v", d, budget)
@@ -107,8 +111,9 @@ func raceEnabled() bool {
 // TestSeed_DailyBarsSane checks every archived daily bar (not just the 1m
 // sample the brief's own test covers) has self-consistent OHLC and positive
 // volume, across every symbol - the coarse day-granularity pass (step 1)
-// synthesizes High/Low itself (no genTicks at that granularity), so this is
-// the only test exercising that synthesis directly.
+// tracks High/Low from a real sub-day stepPrice walk and synthesizes
+// Volume/Turnover (no genTicks at that granularity - see seedDailyHistory
+// and seedDayVolume), so this is the only test exercising that directly.
 func TestSeed_DailyBarsSane(t *testing.T) {
 	nowMs := int64(1_700_000_000_000)
 	g := New(4, fixedClockAt(nowMs))
@@ -128,6 +133,130 @@ func TestSeed_DailyBarsSane(t *testing.T) {
 	}
 }
 
+// TestSeed_DeterministicAcrossRuns re-runs Seed with the same seed/nowMs
+// twice and checks the archived output is byte-identical. This fix round
+// changed seedDailyHistory to sub-step each day instead of one call - still
+// drawing from the single shared g.rng in a fixed, seed-determined sequence
+// of calls, so determinism must hold exactly as it did before the fix
+// (mirrors generator_test.go's TestGenerator_Deterministic_ByteIdentical,
+// but through the whole Seed pipeline: coarse dailies, fine 1m/tick pass,
+// and the journaled tick count).
+func TestSeed_DeterministicAcrossRuns(t *testing.T) {
+	nowMs := int64(1_700_000_000_000)
+	run := func() *capStore {
+		g := New(9, fixedClockAt(nowMs))
+		st := &capStore{}
+		g.Seed(st, nowMs)
+		return st
+	}
+	a, b := run(), run()
+
+	if len(a.daily) != len(b.daily) {
+		t.Fatalf("daily bar count differs: %d vs %d", len(a.daily), len(b.daily))
+	}
+	for i := range a.daily {
+		if a.daily[i] != b.daily[i] {
+			t.Fatalf("daily bar %d differs: %+v vs %+v", i, a.daily[i], b.daily[i])
+		}
+	}
+	if len(a.m1) != len(b.m1) {
+		t.Fatalf("1m bar count differs: %d vs %d", len(a.m1), len(b.m1))
+	}
+	for i := range a.m1 {
+		if a.m1[i] != b.m1[i] {
+			t.Fatalf("1m bar %d differs: %+v vs %+v", i, a.m1[i], b.m1[i])
+		}
+	}
+	if a.ticks != b.ticks {
+		t.Fatalf("journaled tick count differs: %d vs %d", a.ticks, b.ticks)
+	}
+	if a.flushed != b.flushed {
+		t.Fatalf("flushed differs: %v vs %v", a.flushed, b.flushed)
+	}
+}
+
+// TestSeedDailyHistory_RunnerSpikeDayCharacter is the regression test for
+// the fix-round bug: seedDailyHistory's original single-call-per-day design,
+// once price.go's reversion term was corrected to exponential decay,
+// collapsed every day's Close to that day's Anchor regardless of what
+// drift/noise/regime happened that day (decay = exp(-reversion(reg)*86400)
+// underflows to ~0 for every regime at day-scale dtSec) - silently erasing
+// the plan's required "runners get occasional prior spike days" character
+// (docs/superpowers/plans/2026-07-11-demo-synthetic-data-plan.md:848) with a
+// near-flat line bounded only by Anchor's own tiny fixed per-substep wander.
+//
+// This asserts real, non-trivial day-over-day Close variance for runner
+// symbols specifically - the plan doesn't make this claim for large/mid
+// caps, which are expected to hug their Anchor closely (seedDailyHistory's
+// doc comment explains why: their dominant Quiet/Chop regimes are
+// fast-reverting at any practical sub-step size, which is correct/intended,
+// not a bug). A stdev-of-%-change threshold, not an exact-value check,
+// since the day-to-day walk is randomized per seed: a flat-lined walk (the
+// regression) sits at ~0.02-0.1% (Anchor's own wander only); every
+// seed/runner combination sampled while diagnosing this fix measured stdev
+// in the hundreds-to-millions-of-percent range (see task-9-report.md's "Fix
+// round" section), so 1% is a conservative floor that cleanly separates
+// "flat-lined" from "not" without being anywhere near either regime's
+// actual value.
+func TestSeedDailyHistory_RunnerSpikeDayCharacter(t *testing.T) {
+	nowMs := int64(1_700_000_000_000)
+	checked := 0
+	for _, seed := range []int64{9, 18} {
+		g := New(seed, fixedClockAt(nowMs))
+		st := &capStore{}
+		g.Seed(st, nowMs)
+
+		for _, code := range g.Symbols() {
+			if g.syms[code].spec.Pers != PersRunner {
+				continue
+			}
+			var closes []float64
+			for _, b := range st.daily {
+				if b.Symbol == code {
+					closes = append(closes, b.C)
+				}
+			}
+			if len(closes) < 30 {
+				t.Fatalf("seed=%d %s: too few daily bars to test variance: %d", seed, code, len(closes))
+			}
+			stdev := pctChangeStdev(closes)
+			if stdev < 1.0 {
+				t.Errorf("seed=%d %s: day-over-day Close %% change stdev = %.4f%%, want > 1%% (spike-day character looks flat-lined)", seed, code, stdev)
+			}
+			checked++
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no runner symbols checked - test isn't exercising anything")
+	}
+}
+
+// pctChangeStdev returns the standard deviation of closes' consecutive
+// percent changes.
+func pctChangeStdev(closes []float64) float64 {
+	var changes []float64
+	for i := 1; i < len(closes); i++ {
+		if closes[i-1] == 0 {
+			continue
+		}
+		changes = append(changes, (closes[i]-closes[i-1])/closes[i-1]*100)
+	}
+	if len(changes) == 0 {
+		return 0
+	}
+	mean := 0.0
+	for _, c := range changes {
+		mean += c
+	}
+	mean /= float64(len(changes))
+	var variance float64
+	for _, c := range changes {
+		variance += (c - mean) * (c - mean)
+	}
+	variance /= float64(len(changes))
+	return math.Sqrt(variance)
+}
+
 // TestSeed_LeavesGeneratorAtNowMsWithNoSeam checks the "no seam" contract
 // called out in the brief: after Seed, the generator's clock bookkeeping
 // (lastStepMs/curDay) reflects nowMs exactly, nothing is left queued for the
@@ -138,15 +267,23 @@ func TestSeed_DailyBarsSane(t *testing.T) {
 // state.
 //
 // This deliberately does NOT assert a tight bound on how much Mid is allowed
-// to move in those first few live steps: the coarse day-granularity pass
-// (step 1) intentionally drives stepPrice with a full day's dtMs per call
-// per seeder.go's header comment, and empirically that can leave a symbol's
-// Mid pinned at the price floor with Anchor still at its normal scale for a
-// stretch - a real, if dramatic, consequence of the model's own
-// (brief-directed) day-scale behavior, not a bug in the seed/live stitch.
-// Continuing to climb from the floor toward Anchor over the next several
-// live steps is the mathematically correct continuation of that state, not
-// a seam.
+// to move in those first few live steps. Originally (Task 9) this was
+// relaxed because the single-call-per-day coarse pass could pin Mid at the
+// price floor with Anchor still at its normal scale; that specific mechanism
+// is gone now that seedDailyHistory sub-steps each day (see its doc comment
+// for the fix-round history). But a *different*, granularity-independent
+// mechanism can still produce the same kind of extreme value: stepPrice's
+// `Mid *= 1+(drift+noise)/100` line has no cap on the multiplicative factor,
+// so a sufficiently extreme rng.NormFloat64() draw (rare per call, but
+// non-negligible over the ~1.6M+ stepPrice calls one Seed run makes) can
+// still send Mid to the price floor or to an extreme multiple of Anchor in
+// a single step - reproduced empirically at both 60s and 30-minute
+// sub-step granularities while diagnosing this fix round (see
+// task-9-report.md's "Fix round" section), so it isn't something this
+// file's sub-step choice controls. Continuing from wherever that leaves Mid
+// is still the mathematically correct continuation of that state, not a
+// seam - hence checking finite/positive/well-formed rather than a tight
+// bound.
 func TestSeed_LeavesGeneratorAtNowMsWithNoSeam(t *testing.T) {
 	nowMs := int64(1_700_000_000_000)
 	g := New(9, fixedClockAt(nowMs))
