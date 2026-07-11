@@ -89,6 +89,14 @@ describe("BackupSection", () => {
     vi.restoreAllMocks();
   });
 
+  it("shows the multi-window scope note (layout is per-window, hotkeys are global but not live)", () => {
+    setup();
+    const note = screen.getByTestId("scope-note").textContent ?? "";
+    expect(note).toContain("applies only to this window");
+    expect(note).toContain("Hotkeys are shared across all");
+    expect(note).toContain("won't see an import until it reloads");
+  });
+
   describe("export block", () => {
     it("disables Download JSON only when both checkboxes are unchecked", () => {
       setup();

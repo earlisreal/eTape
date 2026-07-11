@@ -129,6 +129,10 @@ export function BackupSection(
 
   return (
     <div style={{ color: palette.text }}>
+      <div style={{ ...noteStyle, marginBottom: 14 }} data-testid="scope-note">
+        Layout export/import applies only to this window. Hotkeys are shared across all
+        windows, but an already-open window won&apos;t see an import until it reloads.
+      </div>
       <div className="col-head serif" style={headStyle}>Export</div>
       <label style={rowStyle}>
         <input type="checkbox" aria-label="Layout" data-testid="export-layout" checked={exportLayout} onChange={(e) => setExportLayout(e.target.checked)} /> Layout
