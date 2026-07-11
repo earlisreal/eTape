@@ -20,7 +20,7 @@ import type { Side, OrderType, TIF, OrderSession } from "../../wire/contract";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 import type { SizingSpec, SizingMode } from "./sizing";
 import {
-  DEFAULT_TEMPLATES, normalizeOrderConfig, type ActionTemplate, type ManagementAction,
+  DEFAULT_TEMPLATES, normalizeOrderConfig, type ActionTemplate, type DeckColor, type ManagementAction,
   type OrderConfig, type PlaceOrderTemplate,
 } from "./actionTemplate";
 import { normalizeCombo } from "./hotkeys";
@@ -93,22 +93,57 @@ function iconBtn(palette: Palette, color: string): CSSProperties {
   };
 }
 
+// Deck color swatches (4b): tint a palette hex token into a translucent
+// background so the swatch stays legible in both themes without inventing a
+// new color system — every swatch's color still traces back to a real
+// palette token (up/down/accent/textMuted/danger), never a hardcoded hex.
+function tint(hex: string, alpha: number): string {
+  const h = hex.replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+const DECK_COLORS: DeckColor[] = ["auto", "green", "red", "bronze", "neutral", "danger"];
+
+// The selected swatch gets an outer ring (boxShadow) — a concrete, testable
+// visual signal distinct from the swatch's own border, so selection state
+// can be asserted independent of color.
+function swatchStyle(palette: Palette, color: DeckColor, selected: boolean): CSSProperties {
+  const base: CSSProperties = {
+    width: 16, height: 16, borderRadius: 4, cursor: "pointer", padding: 0,
+    boxShadow: selected ? `0 0 0 2px ${palette.text}` : "none",
+  };
+  switch (color) {
+    case "auto": return { ...base, background: "transparent", border: `1px dashed ${palette.textMuted}` };
+    case "green": return { ...base, background: tint(palette.up, 0.28), border: `1px solid ${palette.up}` };
+    case "red": return { ...base, background: tint(palette.down, 0.28), border: `1px solid ${palette.down}` };
+    case "bronze": return { ...base, background: tint(palette.accent, 0.28), border: `1px solid ${palette.accent}` };
+    case "neutral": return { ...base, background: tint(palette.textMuted, 0.28), border: `1px solid ${palette.textMuted}` };
+    case "danger": return { ...base, background: tint(palette.danger, 0.28), border: `1px solid ${palette.danger}` };
+  }
+}
+
 interface TemplateCardProps {
   t: ActionTemplate;
   palette: Palette;
   dup: boolean;
+  isFirst: boolean;
+  isLast: boolean;
   rawEdits: Record<string, string>;
   setRawEdit: (key: string, v: string) => void;
   clearRawEdit: (key: string) => void;
   patch: (id: string, over: Partial<ActionTemplate>) => void;
   onRemove: (id: string) => void;
+  onMove: (id: string, dir: -1 | 1) => void;
 }
 
 // Module-scope (not nested in OrderSettingsSection) so its identity is stable
 // across renders — a component defined inside another component's body gets a
 // fresh type every render, forcing React to unmount+remount every card (and
 // drop input focus) on each keystroke.
-function TemplateCard({ t, palette, dup, rawEdits, setRawEdit, clearRawEdit, patch, onRemove }: TemplateCardProps): JSX.Element {
+function TemplateCard({ t, palette, dup, isFirst, isLast, rawEdits, setRawEdit, clearRawEdit, patch, onRemove, onMove }: TemplateCardProps): JSX.Element {
   const card: CSSProperties = { border: `1px solid ${palette.border}`, borderRadius: 6, background: palette.surface, padding: "8px 10px 10px", marginBottom: 8 };
   const eyebrow: CSSProperties = { fontSize: 9.5, letterSpacing: "0.08em", textTransform: "uppercase", color: palette.textMuted, marginBottom: 4 };
   const headerRow: CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 };
@@ -152,6 +187,16 @@ function TemplateCard({ t, palette, dup, rawEdits, setRawEdit, clearRawEdit, pat
               onClick={() => patch(t.id, { hotkey: "" })} style={iconBtn(palette, palette.textMuted)}>×</HoverButton>
           ) : null}
           {dup ? <span style={{ color: palette.danger, fontSize: 10 }}>dup</span> : null}
+          <HoverButton
+            data-testid={`tmpl-move-up-${t.id}`} title="move up" aria-label={`Move ${t.label} up`}
+            disabled={isFirst} onClick={() => onMove(t.id, -1)}
+            style={{ ...iconBtn(palette, palette.textMuted), opacity: isFirst ? 0.35 : 1, cursor: isFirst ? "not-allowed" : "pointer" }}
+          >▲</HoverButton>
+          <HoverButton
+            data-testid={`tmpl-move-down-${t.id}`} title="move down" aria-label={`Move ${t.label} down`}
+            disabled={isLast} onClick={() => onMove(t.id, 1)}
+            style={{ ...iconBtn(palette, palette.textMuted), opacity: isLast ? 0.35 : 1, cursor: isLast ? "not-allowed" : "pointer" }}
+          >▼</HoverButton>
           <HoverButton title="remove" aria-label={`Remove ${t.label}`} onClick={() => onRemove(t.id)} style={iconBtn(palette, palette.danger)}>×</HoverButton>
         </div>
       </div>
@@ -256,6 +301,28 @@ function TemplateCard({ t, palette, dup, rawEdits, setRawEdit, clearRawEdit, pat
           </div>
         </div>
       )}
+
+      <div style={fieldRow}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: palette.text }}>
+          <input
+            type="checkbox" data-testid={`tmpl-deck-toggle-${t.id}`} aria-label={`deck-${t.id}`}
+            checked={!!t.deck} onChange={(e) => patch(t.id, { deck: e.target.checked })}
+          />
+          Show as button
+        </label>
+        {t.deck ? (
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            {DECK_COLORS.map((c) => (
+              <button
+                key={c} type="button" data-testid={`tmpl-deck-color-${t.id}-${c}`}
+                title={c} aria-label={`deck-color-${t.id}-${c}`}
+                onClick={() => patch(t.id, { deckColor: c })}
+                style={swatchStyle(palette, c, (t.deckColor ?? "auto") === c)}
+              />
+            ))}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -295,6 +362,18 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
     clearRawEdit(`${id}:offset`);
     clearRawEdit(`${id}:size`);
   };
+  // Reorder (4a): swap two adjacent templates by id. Bounds-checked so the
+  // move buttons are simple no-ops (never throw) if somehow clicked past the
+  // array edge; the header row disables them there anyway.
+  const moveTemplate = (id: string, dir: -1 | 1) =>
+    setTemplates((ts) => {
+      const i = ts.findIndex((t) => t.id === id);
+      const j = i + dir;
+      if (i < 0 || j < 0 || j >= ts.length) return ts;
+      const next = ts.slice();
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
   const uid = (p: string) => `${p}-${templates.length + 1}-${Math.max(0, ...templates.map((_, i) => i)) + 1}`;
   const addPlace = () => setTemplates((ts) => [...ts, { kind: "place", id: uid("tmpl"), label: "New", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO", priceSource: "Ask", priceOffset: 0, priceOffsetUnit: "$", sizing: { mode: "Shares", shares: 100 } } as PlaceOrderTemplate]);
   const addManage = () => setTemplates((ts) => [...ts, { kind: "manage", id: uid("mng"), label: "New action", action: "CancelLast" }]);
@@ -333,11 +412,12 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
       </div>
 
       <div style={sectionLabel}>TEMPLATES</div>
-      {templates.map((t) => (
+      {templates.map((t, i) => (
         <TemplateCard
           key={t.id} t={t} palette={palette} dup={isDup(t)}
+          isFirst={i === 0} isLast={i === templates.length - 1}
           rawEdits={rawEdits} setRawEdit={setRawEdit} clearRawEdit={clearRawEdit}
-          patch={patch} onRemove={removeTemplate}
+          patch={patch} onRemove={removeTemplate} onMove={moveTemplate}
         />
       ))}
 
