@@ -53,6 +53,15 @@ const numRegimes = 7
 // the freeze duration once a halt engages.
 const haltWindowMs = 5 * 60_000
 
+// maxStepChange is the hard ceiling on the magnitude of a single stepPrice
+// call's fractional drift+noise change to Mid, regardless of dtSec, regime,
+// or Vol. It exists to bound the rare-but-real case where an extreme
+// rng.NormFloat64() draw, or a large dtSec (day-scale coarse history
+// seeding), would otherwise send Mid to the price floor or an implausible
+// multiple of Anchor in one call. ±50% is generous relative to normal
+// small-dtSec live-path steps, which almost never approach it.
+const maxStepChange = 0.5
+
 // pricePoint is one sample in a priceState's rolling halt-detection window.
 type pricePoint struct {
 	tsMs int64
@@ -112,7 +121,13 @@ func stepPrice(rng *rand.Rand, spec SymbolSpec, ps *priceState, nowMs, dtMs int6
 	dtSec := float64(dtMs) / 1000
 	drift := driftBps(ps.Reg) * spec.Vol
 	noise := rng.NormFloat64() * spec.Vol * math.Sqrt(dtSec)
-	ps.Mid *= 1 + (drift+noise)/100
+	change := (drift + noise) / 100
+	if change > maxStepChange {
+		change = maxStepChange
+	} else if change < -maxStepChange {
+		change = -maxStepChange
+	}
+	ps.Mid *= 1 + change
 
 	// Exponential (not linear-Euler) mean-reversion: stable for any dtSec.
 	// For small dtSec, exp(-rate*dtSec) ~= 1-rate*dtSec, so this matches the

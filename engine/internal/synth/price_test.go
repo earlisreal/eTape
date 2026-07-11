@@ -124,3 +124,56 @@ func TestStepPrice_DayScaleReversionConverges(t *testing.T) {
 		}
 	}
 }
+
+// TestStepPrice_ExtremeDrawCapped is a regression test for a second bug
+// surfaced by Task 9's history seeder: noise scales with sqrt(dtSec), so on
+// a sufficiently extreme rng.NormFloat64() draw (more likely at large dtSec,
+// but possible at any dtSec) the uncapped drift+noise fractional change
+// could send Mid to the $0.01 price floor or to an implausible multiple of
+// its prior value in a single stepPrice call. Independent measurement
+// across 200 real Seed() runs found this in 27% of symbol-runs and on every
+// single boot (200/200) before the maxStepChange cap was added — see the
+// "Fix round 2" section of task-2-report.md for the before/after frequency
+// sweep against the real Generator/Seed() pipeline (the authoritative
+// verification; this test only proves the cap's own arithmetic).
+//
+// Rather than searching for a "magic" seed whose natural rng.NormFloat64()
+// draw happens to be extreme (checked empirically: a 500-seed x 5-dtMs-scale
+// sweep with a natural draw never got close to the cap boundary, because
+// Fix Round 1's exponential reversion already neutralizes most large-dtSec
+// blowups on its own — the two fixes are complementary, not redundant, and
+// this test needs to isolate the cap specifically), this test forces the
+// pre-clamp magnitude to be extreme deterministically by using an
+// unrealistically large spec.Vol (noise scales linearly with Vol, so a huge
+// Vol guarantees |drift+noise|/100 dwarfs maxStepChange for essentially any
+// rng draw). That isolates exactly what maxStepChange is responsible for:
+// given an arbitrarily large pre-clamp change, Mid must still land within
+// before*[1-maxStepChange, 1+maxStepChange] (plus trivial cent-rounding
+// slack) — the same convex-combination argument as
+// TestStepPrice_DayScaleReversionConverges shows the later mean-reversion
+// step can only pull the result closer to Anchor, never push it further
+// outside that range.
+func TestStepPrice_ExtremeDrawCapped(t *testing.T) {
+	const before = 100.0
+	dtScales := []int64{200, 60_000, 30 * 60_000, 86_400_000, 365 * 86_400_000}
+	lo := before*(1-maxStepChange) - 0.01
+	hi := before*(1+maxStepChange) + 0.01
+
+	for seed := int64(0); seed < 50; seed++ {
+		for _, dtMs := range dtScales {
+			rng := rand.New(rand.NewSource(seed))
+			s := spec(PersLargeCap)
+			s.Vol = 1000 // deliberately absurd: forces an uncapped blowup regardless of rng draw
+			ps := newPriceState(s)
+			ps.Mid = before
+			ps.Anchor = before
+
+			stepPrice(rng, s, ps, dtMs, dtMs)
+
+			if ps.Mid < lo || ps.Mid > hi {
+				t.Fatalf("seed=%d dtMs=%d: Mid=%.4f outside capped range [%.4f, %.4f]",
+					seed, dtMs, ps.Mid, lo, hi)
+			}
+		}
+	}
+}
