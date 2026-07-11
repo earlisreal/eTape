@@ -228,7 +228,7 @@ func (a *Adapter) ReplaceOrder(ctx context.Context, domainOID string, req exec.R
 	}
 	newQty := req.Qty
 	if newQty <= 0 {
-		ord, found, err := a.tc.orderByRemark(ctx, domainOID, false)
+		ord, found, err := a.tc.orderByRemark(ctx, domainOID, true)
 		if err != nil {
 			return fmt.Errorf("moomoo: replace: resolve current qty: %w", err)
 		}
