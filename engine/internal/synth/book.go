@@ -211,7 +211,7 @@ func (b *bookState) replenish(rng *rand.Rand, spec SymbolSpec, mid float64) {
 		plantRoundWall(rng, spec, &b.bids, &b.asks)
 	}
 
-	b.fixCrossed()
+	b.fixCrossed(rng, spec)
 }
 
 // topUp extends side (already best-first, sorted, may be short after a
@@ -278,13 +278,25 @@ func plantRoundWall(rng *rand.Rand, spec SymbolSpec, bids, asks *[]level) {
 }
 
 // fixCrossed nudges the touch apart by a cent if a deep sweep left the book
-// crossed or locked (bestBid >= bestAsk).
-func (b *bookState) fixCrossed() {
+// crossed or locked (bestBid >= bestAsk). A plain single-cent nudge to
+// asks[0] can itself overtake asks[1] (e.g. when bids has drifted up close
+// to where asks[1] used to sit), which would silently break the ask side's
+// ascending-sort invariant -- reproduced by TestGenerator_
+// StatisticalSanityAcrossSeedsAndPersonalities's full-ladder sweep. When the
+// nudge would do that, rebuild the whole ask side fresh above the new bid
+// (buildLevels always produces a correctly sorted ladder) instead of
+// patching one level in place.
+func (b *bookState) fixCrossed(rng *rand.Rand, spec SymbolSpec) {
 	if len(b.bids) == 0 || len(b.asks) == 0 {
 		return
 	}
 	if b.bids[0].Price >= b.asks[0].Price {
-		b.asks[0].Price = round2(b.bids[0].Price + 0.01)
+		newTouch := round2(b.bids[0].Price + 0.01)
+		if len(b.asks) > 1 && newTouch >= b.asks[1].Price {
+			b.asks = buildLevels(rng, spec, newTouch, true)
+			return
+		}
+		b.asks[0].Price = newTouch
 	}
 }
 

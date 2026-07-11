@@ -160,3 +160,30 @@ func TestBook_ReplenishRecentersDriftedTouch(t *testing.T) {
 		}
 	}
 }
+
+// TestBook_FixCrossedPreservesAskSortOrder is a regression test for a bug
+// TestGenerator_StatisticalSanityAcrossSeedsAndPersonalities's full-ladder
+// sweep caught ("asks not ascending"): fixCrossed's plain one-cent nudge to
+// asks[0] (round2(bids[0].Price+0.01)) can itself land at or past
+// asks[1].Price, silently breaking the ask side's ascending-sort invariant.
+// Constructs the exact crossed scenario directly (bypassing consume/
+// replenish's normal randomness) so this targets fixCrossed's own logic,
+// not a statistical chance of hitting it.
+func TestBook_FixCrossedPreservesAskSortOrder(t *testing.T) {
+	rng := rand.New(rand.NewSource(1))
+	s := spec(PersLargeCap)
+	b := &bookState{
+		bids: []level{{Price: 10.02, Size: 100, Orders: 1}, {Price: 9.99, Size: 100, Orders: 1}},
+		// A naive nudge would set asks[0] = round2(10.02+0.01) = 10.03,
+		// strictly past the existing asks[1] (10.02) -- the bug this test
+		// targets.
+		asks: []level{{Price: 10.00, Size: 100, Orders: 1}, {Price: 10.02, Size: 100, Orders: 1}, {Price: 10.05, Size: 100, Orders: 1}},
+	}
+
+	b.fixCrossed(rng, s)
+
+	assertBookInvariants(t, b)
+	if b.bids[0].Price >= b.asks[0].Price {
+		t.Fatalf("still crossed after fixCrossed: bid=%.4f ask=%.4f", b.bids[0].Price, b.asks[0].Price)
+	}
+}

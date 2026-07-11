@@ -135,7 +135,14 @@ func TestGenerator_StatisticalSanityAcrossSeedsAndPersonalities(t *testing.T) {
 						t.Fatalf("%s: Mid went non-positive/non-finite at t=%dms: %v", code, now, mid)
 					}
 
-					// (b)/(b') book integrity + spread envelope.
+					// (b)/(b') book integrity + spread envelope. assertBookInvariants
+					// (book_test.go) additionally covers full-ladder sortedness and
+					// per-level positive sizes, which the touch-only checks below
+					// don't reach -- e.g. fixCrossed (book.go) patches only
+					// asks[0].Price on a detected cross, without checking it
+					// against asks[1].Price, a plausible path to breaking ascending
+					// sortedness this 6-seed x 24h sweep is well-positioned to catch.
+					assertBookInvariants(t, rt.book)
 					bid, ask := rt.book.best()
 					if bid <= 0 || ask <= 0 {
 						t.Fatalf("%s: non-positive touch at t=%dms: bid=%v ask=%v", code, now, bid, ask)
