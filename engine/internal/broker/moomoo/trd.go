@@ -502,7 +502,20 @@ func orderDomain(o *trdcommon.Order) exec.Order {
 // corresponds to the other two -- a later architectural decision (out of
 // this task's scope) decides how moomoo's day-loss gets computed from
 // eTape's own ledger instead, rather than this function guessing/fabricating
-// a mapping. AvgPrice uses AverageCostPrice per
+// a mapping.
+//
+// IMPORTANT -- MaxDayLoss circuit breaker gap: because AccountSnapshot.DayPnL
+// is always 0 here (Trd_GetFunds has no day-P&L field, and no ledger-derived
+// alternative has been built), exec.Core's global MaxDayLoss circuit breaker
+// (gate.go's BreachedDayLoss, which sums every venue's DayPnL via state.go)
+// does NOT see moomoo's contribution to the day's aggregate loss. Do NOT
+// live-arm a moomoo venue as your PRIMARY or ONLY venue without either
+// (a) building a ledger-derived day-loss computation for moomoo, or
+// (b) explicitly accepting that MaxDayLoss provides no protection for
+// moomoo-originated losses. See docs/2026-07-04-moomoo-trading-api.md's
+// status section for the tracked, unresolved state of this gap.
+//
+// AvgPrice uses AverageCostPrice per
 // docs/2026-07-04-moomoo-trading-api.md's guidance (never CostPrice/
 // DilutedCostPrice, which are documented diluted/stale) -- if unset on a
 // paper account, falling through to zero is the accepted degraded paper

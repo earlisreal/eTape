@@ -188,7 +188,12 @@ when implementing the wire protocol.
   guardrails (standing): 1-share marketable limits, cheap liquid symbol, long only,
   flatten immediately, RTH only, moomoo trade unlock done outside eTape first —
   **re-confirm authorization in the session that runs it** (safety rule above
-  still applies).
+  still applies). **Known unresolved gap (flagged 2026-07-11 final review):**
+  moomoo's `AccountSnapshot.DayPnL` is always 0 (`Trd_GetFunds` has no
+  day-P&L field, no ledger-derived alternative built yet) — the global
+  `MaxDayLoss` circuit breaker does not see moomoo losses; do not live-arm
+  moomoo as the primary/only venue until this is addressed. Details:
+  `docs/2026-07-04-moomoo-trading-api.md`.
 
 Closed by the three approved designs (2026-07-03): OpenD client = raw TCP + Go
 protobuf (engine design); market-data storage = always-on SQLite feed journal +

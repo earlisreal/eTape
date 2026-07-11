@@ -12,7 +12,12 @@ the hand-crafted Task 4 fixture (Task 7) — see
 `engine/scripts/capture_golden_frames.py`'s `capture_trd_paper`/`--trd-paper`
 and `engine/internal/broker/moomoo/testdata/golden/`. Authorized live
 validation (real fills, since paper still can't produce them) is Task 8,
-gated on Earl's go-ahead and not yet run.
+gated on Earl's go-ahead and not yet run. **Open gap, flagged in final review
+(2026-07-11), unresolved:** `trdClient.snapshot` (`engine/internal/broker/moomoo/trd.go`)
+still leaves `AccountSnapshot.DayPnL` at 0 — see the "Day-P&L in `Trd_GetFunds`"
+bullet below — so `exec.Core`'s global `MaxDayLoss` circuit breaker never sees
+moomoo's contribution to the day's aggregate loss. Do not live-arm moomoo as
+your primary or only venue until this is either built or explicitly accepted.
 **Sources:** official docs `https://openapi.moomoo.com/moomoo-api-doc/en/trade/…` +
 installed Python SDK 10.8.6808 (`moomoo/common/pb/Trd_*.proto`, `moomoo/trade/*.py`,
 `moomoo/common/constant.py:72–94`) + project skill docs
@@ -214,7 +219,14 @@ raw: `prototypes/captures/moomoo_paper_side_checks_*.json`):
   blocks are present (`us_cash`, `usd_assets`, `usd_net_cash_power`, …) and
   `currency=USD` converts the whole view. **Gate rule 5 (global day-loss) must be
   computed from eTape's own fill/position ledger** (or position-level P&L), not
-  from the funds call.
+  from the funds call. **STILL UNBUILT as of 2026-07-11** (moomoo-broker-exec
+  final review): `trdClient.snapshot` ships with `DayPnL` hardcoded to 0 (see
+  the comment on `snapshot` in `engine/internal/broker/moomoo/trd.go`), which
+  means `gate.go`'s `BreachedDayLoss`/`MaxDayLoss` is silently blind to
+  moomoo-originated losses today. This is a real gap, deliberately deferred as
+  its own future feature (ledger-derived day-loss for moomoo) rather than
+  patched in as part of the initial adapter — **do not live-arm moomoo as the
+  primary or only venue** until it's built or the gap is explicitly accepted.
 - ✅ **US paper margin account DOES deliver order pushes**: SUBMITTING + SUBMITTED
   arrived 0.3–0.9 s after `place_order` returned (2/2 orders). Polling stays as
   fallback only. `place_order` RTT on paper: 118–133 ms.
