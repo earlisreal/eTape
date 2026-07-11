@@ -134,6 +134,21 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
           PRACTICE
         </span>
       )}
+      {/* sys.session is snapshot-only (set once at engine boot, re-delivered on
+          every resubscribe, never pushed as a delta) — SessionStore seeds to
+          "pending" until the first snapshot lands so a reload during
+          replay/demo never renders a confident "live" posture. This ghost
+          chip is the ticket's honest placeholder for that sub-frame window:
+          outline (not filled), muted (not bold) — the visual opposite of
+          PRACTICE's alarm treatment, on purpose. */}
+      {sessionMode.mode === "pending" && (
+        <span data-testid="session-pending-badge" title="Session mode not yet confirmed" style={{
+          padding: "1px 6px", borderRadius: 3, border: `1px solid ${palette.border}`, color: palette.textMuted,
+          fontWeight: 400, fontSize: 10, letterSpacing: 0,
+        }}>
+          ···
+        </span>
+      )}
       <select data-testid="venue" className="ctl mono" value={venue} onChange={(e) => selectVenue(e.target.value)}>
         {venues.map((v) => <option key={v} value={v}>{v}</option>)}
       </select>

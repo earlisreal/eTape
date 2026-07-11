@@ -148,9 +148,16 @@ describe("OrderTicketPanel", () => {
     const { props, stores } = mkProps();
     act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
     wrap(props);
+    // Before any sys.session snapshot, SessionStore is "pending" — a muted
+    // placeholder shows, never the confident PRACTICE badge.
     expect(screen.queryByTestId("practice-badge")).toBeNull();
+    expect(screen.getByTestId("session-pending-badge")).toBeTruthy();
+    act(() => { stores.session.apply({ kind: "snapshot", topic: "sys.session" as never, payload: { mode: "live" } }); });
+    expect(screen.queryByTestId("practice-badge")).toBeNull();
+    expect(screen.queryByTestId("session-pending-badge")).toBeNull();
     act(() => { stores.session.apply({ kind: "snapshot", topic: "sys.session" as never, payload: { mode: "replay", day: "2026-07-06", speed: 4 } }); });
     expect(screen.getByTestId("practice-badge").textContent).toBe("PRACTICE");
+    expect(screen.queryByTestId("session-pending-badge")).toBeNull();
   });
   it("changing the venue dropdown writes the group's focused venue", () => {
     const { props, stores, linkGroups } = mkProps();

@@ -31,6 +31,10 @@ export function ReplayBanner({ session, engineState, onGoLive }: {
     if (sawDropRef.current) setReturning(false); // banner clears itself once sys.session reports "live" again
   }, [engineState, returning]);
 
+  // Also covers mode: "pending" (pre-first-snapshot) — intentionally no
+  // banner while unconfirmed; flashing REPLAY on the common live-reload case
+  // would be worse than the sub-frame it's guarding against. The order
+  // ticket's pending badge (OrderTicketPanel.tsx) is the visible half of this.
   if (s.mode !== "replay") return null;
   const speed = s.speed && s.speed > 0 ? `${s.speed}×` : "max";
   return (
