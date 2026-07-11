@@ -256,6 +256,57 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// NOTE: st.Close() is deferred until AFTER every store-writer goroutine has
 	// stopped (feed pipe + forwardMD + exec.Core) — see the shutdown block below.
 
+	// relaunchAckFlushDelay mirrors uihub's own restartAckFlushDelay (package-
+	// private, so not importable from here): give the "accepted" ack time to
+	// reach the client before ctx cancellation starts tearing down the connection.
+	const relaunchAckFlushDelay = 200 * time.Millisecond
+
+	// base carries the launch flags a mode-switch relaunch must preserve
+	// (see childArgs, Task 1) -- built once here so both closures share it.
+	base := baseFlags{ConfigPath: *cfgPath, DistDir: *dist, LogPath: *logPath}
+
+	// startReplay/goLive are wired into uihub.New below and invoked from the
+	// command-dispatch goroutine on "StartReplay"/"GoLive". Both validate
+	// synchronously and return an error for a blocked ack before scheduling
+	// any delayed side effect, matching requestRestart's ack-then-relaunch
+	// pattern above (relaunchAckFlushDelay lets the ack flush first).
+	startReplay := func(day string, speed float64) error {
+		if *demo {
+			return fmt.Errorf("replay switching is unavailable in demo mode")
+		}
+		days, err := st.JournalDays()
+		if err != nil {
+			return fmt.Errorf("list recorded days: %w", err)
+		}
+		found := false
+		for _, d := range days {
+			if d == day {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("no recorded day %q", day)
+		}
+		argv := childArgs(base, replayMode{Live: false, Day: day, Speed: speed})
+		time.AfterFunc(relaunchAckFlushDelay, func() {
+			nextArgsPtr.Store(&argv)
+			requestRestart()
+		})
+		return nil
+	}
+	goLive := func() error {
+		if *demo {
+			return fmt.Errorf("replay switching is unavailable in demo mode")
+		}
+		argv := childArgs(base, replayMode{Live: true})
+		time.AfterFunc(relaunchAckFlushDelay, func() {
+			nextArgsPtr.Store(&argv)
+			requestRestart()
+		})
+		return nil
+	}
+
 	// --- md core ---
 	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs})
 	go func() { _ = core.Run(ctx) }()
@@ -321,7 +372,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		Position: time.Duration(cfg.UIHub.PositionMs) * time.Millisecond,
 		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500, TradesCap: 1000,
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
-	}, execCore, st, core, venueAdm, venueProbe, requestRestart)
+	}, execCore, st, core, venueAdm, venueProbe, requestRestart, startReplay, goLive)
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
 	httpSrv := &http.Server{

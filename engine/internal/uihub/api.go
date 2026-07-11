@@ -78,7 +78,7 @@ type Config struct {
 // once boot's ordered shutdown drain finishes (see cmd/etape/main.go). Set on
 // the commands struct post-construction (not threaded through newCommands)
 // so commands_test.go's many call sites stay unaffected.
-func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va venueAdmin, vt venueTester, requestRestart func()) (*Hub, *Server) {
+func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va venueAdmin, vt venueTester, requestRestart func(), startReplay func(day string, speed float64) error, goLive func() error) (*Hub, *Server) {
 	vms := make([]venueMeta, 0, len(cfg.Venues))
 	for _, v := range cfg.Venues {
 		vms = append(vms, venueMeta{
@@ -99,6 +99,8 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	h := NewHub(clk, HubConfig{MDInterval: cfg.MD, AccountInterval: cfg.Account, PositionInterval: cfg.Position, Buf: cfg.Buf}, m)
 	cmd := newCommands(ex, st, ind, h, va, h.feed, vt)
 	cmd.restart = requestRestart
+	cmd.startReplay = startReplay
+	cmd.goLive = goLive
 	qry := newQueries(st, clk)
 	srv := NewServer(h, cmd, qry, ServerConfig{DistDir: cfg.DistDir, OutBuf: cfg.OutBuf})
 	return h, srv
