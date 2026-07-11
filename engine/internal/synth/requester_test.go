@@ -17,6 +17,8 @@ import (
 	snappb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsecuritysnapshot"
 	staticpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetstaticinfo"
 	tmrpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgettopmoversrank"
+	ahpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusafterhoursrank"
+	onpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusovernightrank"
 	rankpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetuspremarketrank"
 
 	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
@@ -131,6 +133,96 @@ func TestRequester_TopMoversRank_MatchesGeneratorRankRows(t *testing.T) {
 		}
 		if got := row.GetVolume(); got != want.Volume {
 			t.Errorf("%s: Volume = %v, want %v", code, got, want.Volume)
+		}
+	}
+}
+
+// TestRequester_AfterHoursRank_MatchesGeneratorRankRows cross-checks 3411
+// against scan.go's fetchAfterHours getter chain (scan.go:363-365):
+// d.GetSecurity(), d.GetAfterHoursChangeRatio(), d.GetAfterHoursPrice(),
+// d.GetAfterHoursVolume().
+func TestRequester_AfterHoursRank_MatchesGeneratorRankRows(t *testing.T) {
+	g := newSteppedGenerator(12)
+	r := NewRequester(g)
+	fr, err := r.Request(context.Background(), opend.ProtoQotGetUSAfterHoursRank, &ahpb.Request{})
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	var resp ahpb.Response
+	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.GetRetType() != 0 {
+		t.Fatalf("retType %d", resp.GetRetType())
+	}
+
+	uni := map[string]RankRow{}
+	for _, rr := range g.RankRows() {
+		uni[rr.Code] = rr
+	}
+	rows := resp.GetS2C().GetDataList()
+	if len(rows) != len(uni) {
+		t.Fatalf("got %d rows, want %d", len(rows), len(uni))
+	}
+	for _, row := range rows {
+		code := codeFromRankRow(row.GetSecurity())
+		want, ok := uni[code]
+		if !ok {
+			t.Fatalf("row for non-universe code %q", code)
+		}
+		if got := row.GetAfterHoursChangeRatio(); got != want.PctChange {
+			t.Errorf("%s: AfterHoursChangeRatio = %v, want %v", code, got, want.PctChange)
+		}
+		if got := row.GetAfterHoursPrice(); got != want.Last {
+			t.Errorf("%s: AfterHoursPrice = %v, want %v", code, got, want.Last)
+		}
+		if got := row.GetAfterHoursVolume(); got != want.Volume {
+			t.Errorf("%s: AfterHoursVolume = %v, want %v", code, got, want.Volume)
+		}
+	}
+}
+
+// TestRequester_OvernightRank_MatchesGeneratorRankRows cross-checks 3412
+// against scan.go's fetchOvernight getter chain (scan.go:384-386):
+// d.GetSecurity(), d.GetOvernightChangeRatio(), d.GetOvernightPrice(),
+// d.GetOvernightVolume().
+func TestRequester_OvernightRank_MatchesGeneratorRankRows(t *testing.T) {
+	g := newSteppedGenerator(13)
+	r := NewRequester(g)
+	fr, err := r.Request(context.Background(), opend.ProtoQotGetUSOvernightRank, &onpb.Request{})
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	var resp onpb.Response
+	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.GetRetType() != 0 {
+		t.Fatalf("retType %d", resp.GetRetType())
+	}
+
+	uni := map[string]RankRow{}
+	for _, rr := range g.RankRows() {
+		uni[rr.Code] = rr
+	}
+	rows := resp.GetS2C().GetDataList()
+	if len(rows) != len(uni) {
+		t.Fatalf("got %d rows, want %d", len(rows), len(uni))
+	}
+	for _, row := range rows {
+		code := codeFromRankRow(row.GetSecurity())
+		want, ok := uni[code]
+		if !ok {
+			t.Fatalf("row for non-universe code %q", code)
+		}
+		if got := row.GetOvernightChangeRatio(); got != want.PctChange {
+			t.Errorf("%s: OvernightChangeRatio = %v, want %v", code, got, want.PctChange)
+		}
+		if got := row.GetOvernightPrice(); got != want.Last {
+			t.Errorf("%s: OvernightPrice = %v, want %v", code, got, want.Last)
+		}
+		if got := row.GetOvernightVolume(); got != want.Volume {
+			t.Errorf("%s: OvernightVolume = %v, want %v", code, got, want.Volume)
 		}
 	}
 }
