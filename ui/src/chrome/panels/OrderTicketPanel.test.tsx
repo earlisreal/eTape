@@ -144,6 +144,14 @@ describe("OrderTicketPanel", () => {
     fireEvent.click(screen.getByTestId("stop-up"));
     expect((screen.getByTestId("stop") as HTMLInputElement).value).toBe("0.100");
   });
+  it("shows a PRACTICE badge in the header only during replay (safety signal)", () => {
+    const { props, stores } = mkProps();
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
+    wrap(props);
+    expect(screen.queryByTestId("practice-badge")).toBeNull();
+    act(() => { stores.session.apply({ kind: "snapshot", topic: "sys.session" as never, payload: { mode: "replay", day: "2026-07-06", speed: 4 } }); });
+    expect(screen.getByTestId("practice-badge").textContent).toBe("PRACTICE");
+  });
   it("changing the venue dropdown writes the group's focused venue", () => {
     const { props, stores, linkGroups } = mkProps();
     const twoVenues: ExecStatus = { ...status(), venues: [status().venues[0], { ...status().venues[0], venue: "tradezero" }] };
