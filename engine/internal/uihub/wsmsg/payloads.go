@@ -347,6 +347,20 @@ type FocusGroupArgs struct {
 	Symbol string `json:"symbol"`
 }
 
+// LoadOlderBarsArgs is the args for the LoadOlderBars command. Daily=true
+// requests the one-shot pre-2016 daily fetch; false deepens the intraday 1m
+// series by one chunk.
+type LoadOlderBarsArgs struct {
+	Symbol string `json:"symbol"`
+	Daily  bool   `json:"daily"`
+}
+
+// LoadOlderResult is the deferred-ack Value for LoadOlderBars.
+type LoadOlderResult struct {
+	Added     int  `json:"added"`
+	Exhausted bool `json:"exhausted"`
+}
+
 // ---- venue & credentials config DTOs (settings "Venues & credentials") ----
 
 // Venue mirrors config.Venue (no secret material — Credentials is a key NAME).

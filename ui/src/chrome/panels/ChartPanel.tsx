@@ -14,6 +14,7 @@ import { timeframeToMs } from "../../render/chart/drawings/geometry";
 import type { Timeframe } from "../../render/chart/barBucket";
 import { aggregateFillMarkers } from "../../render/chart/fillAggregate";
 import { isIntradayTimeframe } from "../../render/chart/barClose";
+import { OlderHistoryController } from "../../render/chart/olderHistory";
 import { formatPrice } from "../../render/format";
 import type { Palette } from "../../render/palette";
 import { useTheme } from "../ThemeProvider";
@@ -80,6 +81,12 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     scrollToRealTime: () => chart.timeScale().scrollToRealTime(),
     resetTimeScale: () => chart.timeScale().resetTimeScale(),
     resetPriceScale: () => chart.priceScale("right").applyOptions({ autoScale: true }),
+    getVisibleRange: () => {
+      const r = chart.timeScale().getVisibleRange();
+      return r ? { from: r.from as unknown as number, to: r.to as unknown as number } : null;
+    },
+    setVisibleRange: (range) =>
+      chart.timeScale().setVisibleRange({ from: range.from as unknown as Time, to: range.to as unknown as Time }),
     resize: (w, h) => chart.resize(w, h),
     applyOptions: (o) => chart.applyOptions(o as object),
     setWatermark: (text) => {
@@ -217,10 +224,22 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       if (selectionFrame !== null) return;
       selectionFrame = requestAnimationFrame(() => { selectionFrame = null; refreshSelRef.current?.(); });
     };
+    // currentSymbol (declared below, as a reassigned `let`) is read by `load`
+    // via closure so every LoadOlderBars request names whatever symbol is
+    // CURRENT at call time, not the symbol at mount time — applySymbol
+    // reassigns it on every link-group change.
+    const olderHistory = new OlderHistoryController({
+      load: (daily) => commands.sendCommand("LoadOlderBars", { symbol: currentSymbol, daily }),
+      now: () => Date.now(),
+    });
     const clampRight = (range: LogicalRange | null) => {
       const visibleBars = range ? range.to - range.from : RIGHT_OFFSET_BARS;
       const target = clampRightScroll(timeScale.scrollPosition(), visibleBars);
       if (target !== null) timeScale.scrollToPosition(target, false);
+      olderHistory.maybeTrigger(
+        range ? { from: range.from, to: range.to } : null,
+        isIntradayTimeframe(tfRef.current as Timeframe),
+      );
       scheduleRefreshSelection();
     };
     timeScale.subscribeVisibleLogicalRangeChange(clampRight);
@@ -280,6 +299,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     };
     const applySymbol = () => {
       currentSymbol = linkGroups.symbolFor(groupRef.current) ?? symbol;
+      olderHistory.reset();
       controller.setSymbol(currentSymbol);
       backfillFills(currentSymbol);
       stores.drawings.ensureLoaded(currentSymbol);
@@ -401,6 +421,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     return () => {
       off(); offLink(); offCrosshair(); ro.disconnect();
       timeScale.unsubscribeVisibleLogicalRangeChange(clampRight);
+      olderHistory.reset();
       // Cancel any rAF-batched legend/selection recompute still pending from
       // the schedulers above so it doesn't fire after this chart unmounts.
       if (legendFrame !== null) cancelAnimationFrame(legendFrame);

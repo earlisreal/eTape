@@ -55,6 +55,14 @@ type releaseDemandReq struct {
 	demandID string
 }
 
+// loadOlderReq is a pan-triggered deeper-history request marshaled onto
+// Run's goroutine (see Hub.LoadOlder's doc comment for why).
+type loadOlderReq struct {
+	symbol string
+	daily  bool
+	done   func(added int, exhausted bool, err error)
+}
+
 // dropReport is how a conn's own goroutine (writeLoop, on a write timeout)
 // tells Run a client is being dropped, so the resulting ui-drop sys.events
 // frame is still built and emitted from Run's own single goroutine -- see
@@ -96,6 +104,12 @@ type backfillBox struct {
 	fn func(sym string, done func(ok bool))
 }
 
+// loadOlderBox mirrors backfillBox/feedBox: SetLoadOlder is called once at
+// boot from main's goroutine, after the Hub is already running.
+type loadOlderBox struct {
+	fn func(sym string, daily bool, done func(added int, exhausted bool, err error))
+}
+
 // Hub is a single-goroutine event loop that owns the mirror, the connected-
 // client set, and per-topic-class coalescing buffers. Every field below the
 // channel declarations is touched only from within Run's goroutine; all other
@@ -112,6 +126,7 @@ type Hub struct {
 	unsubCh         chan subReq
 	ensureDemandCh  chan ensureDemandReq
 	releaseDemandCh chan releaseDemandReq
+	loadOlderCh     chan loadOlderReq
 	demandSnapCh    chan chan []string
 	mdCh            chan md.Update
 	execCh          chan exec.Update
@@ -121,8 +136,9 @@ type Hub struct {
 	syncCh          chan chan struct{}  // test barrier
 	closed          chan struct{}       // closed when Run returns; unblocks stuck senders
 
-	feedSlot     atomic.Pointer[feedBox]
-	backfillSlot atomic.Pointer[backfillBox]
+	feedSlot      atomic.Pointer[feedBox]
+	backfillSlot  atomic.Pointer[backfillBox]
+	loadOlderSlot atomic.Pointer[loadOlderBox]
 
 	// Run-loop-owned:
 	clients          map[client]map[wsmsg.Topic]bool
@@ -155,6 +171,7 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 		unsubCh:          make(chan subReq),
 		ensureDemandCh:   make(chan ensureDemandReq),
 		releaseDemandCh:  make(chan releaseDemandReq),
+		loadOlderCh:      make(chan loadOlderReq),
 		demandSnapCh:     make(chan chan []string),
 		mdCh:             make(chan md.Update, cfg.Buf),
 		execCh:           make(chan exec.Update, cfg.Buf),
@@ -234,6 +251,21 @@ func (h *Hub) backfill() func(sym string, done func(ok bool)) {
 	return nil
 }
 
+// SetLoadOlder injects the pan-triggered deeper-history fetch trigger after
+// the hub is running. Safe to call once from boot; nil until then (replay
+// without a fallback orchestrator, or tests, never call it) — LoadOlder then
+// acks exhausted with no fetch attempted.
+func (h *Hub) SetLoadOlder(fn func(sym string, daily bool, done func(added int, exhausted bool, err error))) {
+	h.loadOlderSlot.Store(&loadOlderBox{fn: fn})
+}
+
+func (h *Hub) loadOlderFn() func(sym string, daily bool, done func(added int, exhausted bool, err error)) {
+	if b := h.loadOlderSlot.Load(); b != nil {
+		return b.fn
+	}
+	return nil
+}
+
 // reportBackfill lets a spawned orch.Backfill goroutine report its daily-
 // fetch outcome back to Run's own goroutine -- the same cross-goroutine
 // channel-send pattern as ReportUIDrop, so backfilled/backfillInflight stay
@@ -258,6 +290,19 @@ func (h *Hub) ReleaseDemand(connID uint64, demandID string) {
 	select {
 	case h.releaseDemandCh <- releaseDemandReq{connID: connID, demandID: demandID}:
 	case <-h.closed:
+	}
+}
+
+// LoadOlder marshals a pan-triggered deeper-history request onto Run's
+// goroutine so the injected fetcher's backfillWG.Add (if any) always executes
+// there — the same safety property triggerBackfill relies on for its own
+// WaitGroup, needed here because commands.handle runs on a per-connection
+// goroutine, not Run's.
+func (h *Hub) LoadOlder(symbol string, daily bool, done func(added int, exhausted bool, err error)) {
+	select {
+	case h.loadOlderCh <- loadOlderReq{symbol: symbol, daily: daily, done: done}:
+	case <-h.closed:
+		done(0, true, nil)
 	}
 }
 
@@ -359,6 +404,8 @@ func (h *Hub) Run(ctx context.Context) error {
 			h.handleEnsureDemand(r)
 		case r := <-h.releaseDemandCh:
 			h.handleReleaseDemand(r)
+		case r := <-h.loadOlderCh:
+			h.handleLoadOlder(r)
 		case reply := <-h.demandSnapCh:
 			h.handleDemandSnapshot(reply)
 		case u := <-h.mdCh:
@@ -412,6 +459,8 @@ func (h *Hub) drain() {
 			h.handleEnsureDemand(r)
 		case r := <-h.releaseDemandCh:
 			h.handleReleaseDemand(r)
+		case r := <-h.loadOlderCh:
+			h.handleLoadOlder(r)
 		case u := <-h.mdCh:
 			h.handleMD(u)
 		case u := <-h.execCh:
@@ -489,6 +538,18 @@ func (h *Hub) triggerBackfill(sym string, wantsHistory bool) {
 	}
 	h.backfillInflight[sym] = true
 	fn(sym, func(ok bool) { h.reportBackfill(sym, ok) })
+}
+
+// handleLoadOlder runs on Run's own goroutine, so the injected fn's
+// backfillWG.Add (main.go's loadOlderFn) is race-safe against the shutdown
+// sequence's backfillWG.Wait(), exactly like triggerBackfill's fn.
+func (h *Hub) handleLoadOlder(r loadOlderReq) {
+	fn := h.loadOlderFn()
+	if fn == nil {
+		r.done(0, true, nil) // no fetch surface injected — nothing older to serve
+		return
+	}
+	fn(r.symbol, r.daily, r.done)
 }
 
 // handleBackfillDone applies a backfill goroutine's reported outcome
@@ -694,6 +755,12 @@ func (h *Hub) stageMD(s staged) {
 			// dedup-keyed write silently replace it before the next md tick
 			// flushes, dropping the whole seeded series.
 			h.broadcast(s, true)
+			return
+		}
+		if s.Batch {
+			// Batch prepend: broadcast now as a delta on the lossless lane.
+			// Keep-latest coalescing would let a later single-bar delta drop it.
+			h.broadcast(s, false)
 			return
 		}
 		h.pendKeep[dedupOf(s)] = s

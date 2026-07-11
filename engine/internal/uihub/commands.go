@@ -42,6 +42,7 @@ type indicatorCtl interface {
 type demandCtl interface {
 	EnsureDemand(connID uint64, d feed.Demand)
 	ReleaseDemand(connID uint64, demandID string)
+	LoadOlder(symbol string, daily bool, done func(added int, exhausted bool, err error))
 }
 
 // venueAdmin is the file-only settings seam (satisfied by *venueadmin.Admin).
@@ -88,74 +89,74 @@ func ackFromCmd(a exec.CmdAck) wsmsg.AckMsg {
 	return wsmsg.AckMsg{Status: status, Reason: a.Reason, OrderID: a.OrderID}
 }
 
-func (cd *commands) handle(ctx context.Context, name string, args json.RawMessage, connID uint64) wsmsg.AckMsg {
+func (cd *commands) handle(ctx context.Context, name string, args json.RawMessage, connID uint64, reply func(wsmsg.AckMsg)) (wsmsg.AckMsg, bool) {
 	switch name {
 	case "SubmitOrder":
 		var a wsmsg.SubmitOrderArgs
 		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
 		return ackFromCmd(cd.ex.Do(exec.SubmitOrder{
 			Venue: exec.VenueID(a.Venue), Symbol: a.Symbol,
 			Side: sideFromWire(a.Side), Type: orderTypeFromWire(a.Type), TIF: tifFromWire(a.TIF),
 			Session: sessionFromWire(a.Session),
 			Qty:     a.Qty, LimitPrice: a.LimitPrice, StopPrice: a.StopPrice,
-		}))
+		})), false
 	case "CancelOrder":
 		var a wsmsg.CancelOrderArgs
 		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
-		return ackFromCmd(cd.ex.Do(exec.CancelOrder{Venue: exec.VenueID(a.Venue), OrderID: a.OrderID}))
+		return ackFromCmd(cd.ex.Do(exec.CancelOrder{Venue: exec.VenueID(a.Venue), OrderID: a.OrderID})), false
 	case "ReplaceOrder":
 		var a wsmsg.ReplaceOrderArgs
 		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
 		return ackFromCmd(cd.ex.Do(exec.ReplaceOrder{
 			Venue: exec.VenueID(a.Venue), OrderID: a.OrderID,
 			Qty: a.Qty, LimitPrice: a.LimitPrice, StopPrice: a.StopPrice,
-		}))
+		})), false
 	case "Flatten":
 		var a wsmsg.FlattenArgs
 		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
-		return ackFromCmd(cd.ex.Do(exec.Flatten{Venue: exec.VenueID(a.Venue)}))
+		return ackFromCmd(cd.ex.Do(exec.Flatten{Venue: exec.VenueID(a.Venue)})), false
 	case "ResetBalance":
 		var a wsmsg.ResetBalanceArgs
 		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
-		return ackFromCmd(cd.ex.Do(exec.ResetBalance{Venue: exec.VenueID(a.Venue)}))
+		return ackFromCmd(cd.ex.Do(exec.ResetBalance{Venue: exec.VenueID(a.Venue)})), false
 	case "KillSwitch":
 		var a wsmsg.KillSwitchArgs
 		_ = json.Unmarshal(args, &a) // empty ok => all venues
-		return ackFromCmd(cd.ex.Do(exec.KillSwitch{Venue: exec.VenueID(a.Venue)}))
+		return ackFromCmd(cd.ex.Do(exec.KillSwitch{Venue: exec.VenueID(a.Venue)})), false
 	case "Arm":
-		return ackFromCmd(cd.ex.Do(exec.Arm{}))
+		return ackFromCmd(cd.ex.Do(exec.Arm{})), false
 	case "Disarm":
-		return ackFromCmd(cd.ex.Do(exec.Disarm{}))
+		return ackFromCmd(cd.ex.Do(exec.Disarm{})), false
 	case "GetConfig":
 		var a wsmsg.GetConfigArgs
 		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
 		v, ok, err := cd.cfg.GetConfig(a.Key)
 		if err != nil {
-			return blocked("config read error")
+			return blocked("config read error"), false
 		}
 		if !ok {
-			return wsmsg.AckMsg{Status: "accepted"} // absent key => accepted with no value
+			return wsmsg.AckMsg{Status: "accepted"}, false // absent key => accepted with no value
 		}
-		return wsmsg.AckMsg{Status: "accepted", Value: json.RawMessage(v)}
+		return wsmsg.AckMsg{Status: "accepted", Value: json.RawMessage(v)}, false
 	case "SetConfig":
 		var a wsmsg.SetConfigArgs
 		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
 		cd.cfg.SetConfig(a.Key, string(a.Value))
-		return wsmsg.AckMsg{Status: "accepted"}
+		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "SubscribeIndicator":
 		var a struct {
 			InstanceID string             `json:"instanceId"`
@@ -165,108 +166,121 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			Params     map[string]float64 `json:"params"`
 		}
 		if err := json.Unmarshal(args, &a); err != nil || a.InstanceID == "" {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
 		cd.ind.EnsureIndicator(a.InstanceID, md.IndicatorSpec{
 			Symbol: a.Symbol, TF: session.Timeframe(a.Timeframe),
 			Type: md.IndicatorType(a.Type), Params: a.Params,
 		})
-		return wsmsg.AckMsg{Status: "accepted"}
+		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "UnsubscribeIndicator":
 		var a struct {
 			InstanceID string `json:"instanceId"`
 		}
 		if err := json.Unmarshal(args, &a); err != nil || a.InstanceID == "" {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
 		cd.ind.ReleaseIndicator(a.InstanceID)
-		return wsmsg.AckMsg{Status: "accepted"}
+		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "EnsureSymbol":
 		var a wsmsg.EnsureSymbolArgs
 		if err := json.Unmarshal(args, &a); err != nil || a.DemandID == "" {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
 		if !supportedMarket(a.Symbol) {
-			return blocked("unsupported market")
+			return blocked("unsupported market"), false
 		}
 		if reason := cd.probe(ctx, a.Symbol); reason != "" {
-			return blocked(reason)
+			return blocked(reason), false
 		}
 		d, ok := demandForProfile(fmt.Sprintf("dyn/%d/%s", connID, a.DemandID), a.Symbol, a.Profile)
 		if !ok {
-			return blocked("bad profile")
+			return blocked("bad profile"), false
 		}
 		cd.dem.EnsureDemand(connID, d)
-		return wsmsg.AckMsg{Status: "accepted"}
+		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "ReleaseSymbol":
 		var a wsmsg.ReleaseSymbolArgs
 		if err := json.Unmarshal(args, &a); err != nil || a.DemandID == "" {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
 		cd.dem.ReleaseDemand(connID, fmt.Sprintf("dyn/%d/%s", connID, a.DemandID))
-		return wsmsg.AckMsg{Status: "accepted"}
+		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "FocusGroup":
 		var a wsmsg.FocusGroupArgs
 		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
 		if !supportedMarket(a.Symbol) {
-			return blocked("unsupported market")
+			return blocked("unsupported market"), false
 		}
 		if reason := cd.probe(ctx, a.Symbol); reason != "" {
-			return blocked(reason)
+			return blocked(reason), false
 		}
 		// Registers no demand — demands arrive from member panels as they follow.
-		return wsmsg.AckMsg{Status: "accepted"}
+		return wsmsg.AckMsg{Status: "accepted"}, false
+	case "LoadOlderBars":
+		var a wsmsg.LoadOlderBarsArgs
+		if err := json.Unmarshal(args, &a); err != nil || a.Symbol == "" {
+			return blocked("bad args"), false
+		}
+		cd.dem.LoadOlder(a.Symbol, a.Daily, func(added int, exhausted bool, err error) {
+			if err != nil {
+				reply(wsmsg.AckMsg{Status: "blocked", Reason: err.Error()})
+				return
+			}
+			reply(wsmsg.AckMsg{Status: "accepted", Value: wsmsg.LoadOlderResult{Added: added, Exhausted: exhausted}})
+		})
+		return wsmsg.AckMsg{}, true // deferred
 	case "GetVenueSetup":
 		file, running, keys, err := cd.va.GetVenueSetup()
 		if err != nil {
-			return blocked("venue read error")
+			return blocked("venue read error"), false
 		}
 		return wsmsg.AckMsg{Status: "accepted", Value: wsmsg.VenueSetup{
 			File: venueConfigToWire(file), Running: venueConfigToWire(running), CredKeys: keys,
-		}}
+		}}, false
 	case "SetVenueSetup":
 		var a wsmsg.SetVenueSetupArgs
 		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
 		if err := cd.va.SetVenueSetup(venueConfigFromWire(a.Venues, a.Gate)); err != nil {
-			return blocked(err.Error())
+			return blocked(err.Error()), false
 		}
-		return wsmsg.AckMsg{Status: "accepted"}
+		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "PutCredential":
 		var a wsmsg.PutCredentialArgs
 		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
 		if a.Name == "" || a.KeyID == "" || a.SecretKey == "" {
-			return blocked("name, keyId, and secretKey are required")
+			return blocked("name, keyId, and secretKey are required"), false
 		}
 		if err := cd.va.PutCredential(a.Name, a.KeyID, a.SecretKey); err != nil {
-			return blocked(err.Error())
+			return blocked(err.Error()), false
 		}
-		return wsmsg.AckMsg{Status: "accepted"}
+		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "DeleteCredential":
 		var a wsmsg.DeleteCredentialArgs
 		if err := json.Unmarshal(args, &a); err != nil || a.Name == "" {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
 		if err := cd.va.DeleteCredential(a.Name); err != nil {
-			return blocked(err.Error())
+			return blocked(err.Error()), false
 		}
-		return wsmsg.AckMsg{Status: "accepted"}
+		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "TestConnection":
 		var a wsmsg.TestConnectionArgs
 		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args")
+			return blocked("bad args"), false
 		}
 		pctx, cancel := context.WithTimeout(ctx, 8*time.Second)
 		defer cancel()
 		r := cd.tester.TestConnection(pctx, a.Broker, a.Env, a.Credentials, a.KeyID, a.SecretKey, a.AccountID)
-		return wsmsg.AckMsg{Status: "accepted", Value: resultToWire(r)}
+		return wsmsg.AckMsg{Status: "accepted", Value: resultToWire(r)}, false
 	default:
-		return blocked("unknown command: " + name)
+		return blocked("unknown command: " + name), false
 	}
 }
 

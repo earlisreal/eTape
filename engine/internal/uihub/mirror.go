@@ -18,6 +18,7 @@ type staged struct {
 	Key     string
 	Payload any
 	Snap    bool
+	Batch   bool // a bars batch-prepend delta: broadcast immediately, lossless, never coalesced
 }
 
 // venueMeta is the static per-venue config the mirror needs to assemble exec.status.
@@ -142,6 +143,21 @@ func (m *mirror) applyMD(u md.Update) []staged {
 		m.bars[barKey(v.Symbol, string(v.TF))] = out
 		m.marks[v.Symbol] = out[len(out)-1].C
 		return []staged{{Topic: wsmsg.TopicBars, Payload: out, Snap: true}}
+	case md.BarPrepend:
+		// SeedOlder1m's pan-triggered deepening chunk: bars are ascending and
+		// strictly older than the cached run's head, so front-insert rather than
+		// upsertBar's scan-and-append (which assumes newer-or-equal bars).
+		if len(v.Bars) == 0 {
+			return nil
+		}
+		out := make([]wsmsg.Bar, len(v.Bars))
+		for i, b := range v.Bars {
+			out[i] = mapBar(b)
+		}
+		k := barKey(v.Symbol, string(v.TF))
+		// out is ascending and strictly older than the cached run's head.
+		m.bars[k] = append(out, m.bars[k]...)
+		return []staged{{Topic: wsmsg.TopicBars, Payload: out, Batch: true}}
 	case md.IndicatorUpdate:
 		return m.applyIndicator(v)
 	default:

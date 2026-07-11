@@ -220,9 +220,24 @@ export class ChartController {
   }
 
   private setAllBars(bars: Bar[]): void {
+    // Captured BEFORE setData: LWC's setData preserves the viewport's LOGICAL
+    // index range, not its TIME range. A front-growth rebuild (deep-history
+    // prepend, or the official-daily-replaces-derived-bar case) shifts every
+    // existing bar's logical index, so without restoring below, a user scrolled
+    // back would have their viewport silently teleport to a different time
+    // window on every prepend.
+    const before = this.facade.getVisibleRange();
     const pad = this.leftPad(bars);
     this.candle.setData([...pad, ...bars.map((b) => this.mainPoint(b))]);
     this.volume.setData([...pad, ...bars.map((b) => toVolume(b, this.palette))]);
+    // Restore the pre-rebuild time window — unless the user was parked at the
+    // right/live edge, where LWC's own follow-live behavior is already correct
+    // and must not be overridden into a stale range.
+    if (before && bars.length > 0) {
+      const newestSec = toLwcTime(bars[bars.length - 1].bucketStart);
+      const atRightEdge = before.to >= newestSec;
+      if (!atRightEdge) this.facade.setVisibleRange(before);
+    }
     this.backfilled = true;
     // lastAppliedCount/lastAppliedKey/lastTailBucket track the REAL bars only — the
     // incremental applyBars path above indexes into `bars` (the BarReader's series),

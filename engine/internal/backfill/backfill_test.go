@@ -85,6 +85,7 @@ func (t *fakeTail) Tail1m(_ context.Context, _ string) ([]feed.Bar, error) {
 type fakeSeeder struct {
 	mu          sync.Mutex
 	daily, hist []feed.Bar
+	older       []feed.Bar
 	ticks       []feed.Tick
 	calls       []string
 }
@@ -107,6 +108,12 @@ func (s *fakeSeeder) SeedHistory1m(_ string, b []feed.Bar) {
 	s.hist = append(s.hist, b...)
 	s.calls = append(s.calls, "hist")
 }
+func (s *fakeSeeder) SeedOlder1m(_ string, b []feed.Bar) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.older = append(s.older, b...)
+	s.calls = append(s.calls, "older")
+}
 
 type fakeArchive struct {
 	mu            sync.Mutex
@@ -117,8 +124,21 @@ type fakeArchive struct {
 	archived1m    []feed.Bar
 }
 
-func (a *fakeArchive) ReadDailyBars(_ string) ([]feed.Bar, error)          { return a.daily, nil }
-func (a *fakeArchive) ReadBars1m(_ string, _, _ int64) ([]feed.Bar, error) { return a.m1, nil }
+func (a *fakeArchive) ReadDailyBars(_ string) ([]feed.Bar, error) { return a.daily, nil }
+
+// ReadBars1m filters a.m1 by [fromMs, toMs], matching the real
+// store.Store.ReadBars1m's ts >= fromMs AND ts <= toMs scan -- callers that
+// stash a fixture with timestamps outside a query's actual window must not
+// see it echoed back regardless of range.
+func (a *fakeArchive) ReadBars1m(_ string, fromMs, toMs int64) ([]feed.Bar, error) {
+	var out []feed.Bar
+	for _, b := range a.m1 {
+		if b.BucketMs >= fromMs && b.BucketMs <= toMs {
+			out = append(out, b)
+		}
+	}
+	return out, nil
+}
 func (a *fakeArchive) ReadJournalTicks(_ string, _ int64) ([]feed.Tick, error) {
 	return a.ticks, a.ticksErr
 }
@@ -151,7 +171,7 @@ func fixedNow() time.Time { return time.Date(2026, 7, 8, 12, 0, 0, 0, session.Lo
 
 func TestWarmStartSeedsSessionTicksBeforeDailyAnd1m(t *testing.T) {
 	seeder := &fakeSeeder{}
-	archive := &fakeArchive{ticks: []feed.Tick{tick(1)}, daily: []feed.Bar{bar(1)}, m1: []feed.Bar{bar(2)}}
+	archive := &fakeArchive{ticks: []feed.Tick{tick(1)}, daily: []feed.Bar{bar(1)}, m1: []feed.Bar{bar(fixedNow().UnixMilli())}}
 	o := New(nil, nil, nil, seeder, archive, clock.NewFake(fixedNow()), Config{IntradayDays: 20})
 	o.warmStart(context.Background(), "US.AAPL", fixedNow().AddDate(0, 0, -20), fixedNow())
 	if len(seeder.calls) < 3 || seeder.calls[0] != "ticks" {
@@ -161,7 +181,7 @@ func TestWarmStartSeedsSessionTicksBeforeDailyAnd1m(t *testing.T) {
 
 func TestWarmStartTickReadErrorContinues(t *testing.T) {
 	seeder := &fakeSeeder{}
-	archive := &fakeArchive{ticksErr: context.DeadlineExceeded, daily: []feed.Bar{bar(1)}, m1: []feed.Bar{bar(2)}}
+	archive := &fakeArchive{ticksErr: context.DeadlineExceeded, daily: []feed.Bar{bar(1)}, m1: []feed.Bar{bar(fixedNow().UnixMilli())}}
 	o := New(nil, nil, nil, seeder, archive, clock.NewFake(fixedNow()), Config{IntradayDays: 20})
 	o.warmStart(context.Background(), "US.AAPL", fixedNow().AddDate(0, 0, -20), fixedNow())
 	if len(seeder.daily) != 1 || len(seeder.hist) != 1 {

@@ -265,6 +265,14 @@ var seedHist1mTFs = []session.Timeframe{
 // seedDailyTFs are the timeframes seedDaily can touch.
 var seedDailyTFs = []session.Timeframe{session.TFDay, session.TFWeek, session.TFMonth}
 
+// seedOlder1mTFs are the intraday timeframes deepened by an older-1m chunk.
+// Daily/week/month are excluded: older 1m always lands inside the official-
+// daily-covered range (>=2016), where deriveDaily no-ops on dailyOfficial
+// buckets, so no D/W/M bar mutates.
+var seedOlder1mTFs = []session.Timeframe{
+	session.TF1m, session.TF5m, session.TF15m, session.TF30m, session.TF60m,
+}
+
 // seedHistory1m inserts deep-history 1m bars (all finalized) without
 // disturbing the live forming bar, then re-derives everything once per bar.
 // Per-bar emission is suppressed for the whole batch (c.seeding): a deep seed
@@ -300,6 +308,72 @@ func (e *barEngine) seedHistory1m(c *Core, symbol string, bars []feed.Bar) {
 	}
 	c.seeding = false
 	e.emitSeedSnapshots(c, sb, seedHist1mTFs)
+	c.inds.reseedSymbol(c, symbol)
+}
+
+// seedOlder1m upserts a strictly-older 1m chunk, cascades to 5m/15m/30m/60m,
+// and emits one BarPrepend per intraday TF carrying ONLY the newly-added older
+// bars (constant per-chunk wire cost). Per-bar emission is suppressed for the
+// whole batch (c.seeding); indicators reseed once at the end.
+//
+// "Newly added" = bars older than each TF's previous earliest bucket. Chunks
+// are whole trading days and intraday buckets are session-anchored (never span
+// days), so the previously-earliest 5m-60m bucket cannot be mutated by an older
+// chunk — the strict "< prevOldest" filter captures exactly the new bars.
+func (e *barEngine) seedOlder1m(c *Core, symbol string, bars []feed.Bar) {
+	if len(bars) == 0 {
+		return
+	}
+	sb := e.sym(symbol)
+	oneM := sb.series[session.TF1m]
+
+	// Capture each intraday TF's earliest bucket before seeding.
+	prevOldest := make(map[session.Timeframe]int64, len(seedOlder1mTFs))
+	for _, tf := range seedOlder1mTFs {
+		s := sb.series[tf]
+		if len(s.bars) > 0 {
+			prevOldest[tf] = s.bars[0].BucketMs
+		} else {
+			prevOldest[tf] = math.MaxInt64
+		}
+	}
+
+	forming := int64(-1)
+	if lb := oneM.last(); lb != nil && lb.InProgress {
+		forming = lb.BucketMs
+	}
+	c.seeding = true
+	for _, raw := range bars {
+		if raw.BucketMs == forming {
+			continue
+		}
+		nb := Bar{
+			Symbol: symbol, TF: session.TF1m, BucketMs: raw.BucketMs,
+			O: raw.O, H: raw.H, L: raw.L, C: raw.C, V: raw.Volume,
+		}
+		e.fillDelta(sb, &nb)
+		if oneM.upsert(nb) {
+			c.barOut(nb) // suppressed while seeding
+			e.cascade(c, sb, nb.BucketMs)
+			e.deriveDaily(c, sb, nb.BucketMs) // no-ops on dailyOfficial buckets
+		}
+	}
+	c.seeding = false
+
+	// Emit the new-older prefix per intraday TF (series ascending → prefix < prevOldest).
+	for _, tf := range seedOlder1mTFs {
+		s := sb.series[tf]
+		var newer []Bar
+		for _, b := range s.bars {
+			if b.BucketMs >= prevOldest[tf] {
+				break
+			}
+			newer = append(newer, b)
+		}
+		if len(newer) > 0 {
+			c.emit(BarPrepend{Symbol: symbol, TF: tf, Bars: newer})
+		}
+	}
 	c.inds.reseedSymbol(c, symbol)
 }
 

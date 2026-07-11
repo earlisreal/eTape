@@ -397,3 +397,33 @@ func TestMirrorNewsAndEventsCapBounded(t *testing.T) {
 		t.Fatalf("expected most recent event retained, got %+v", m.events)
 	}
 }
+
+// TestMirrorBarPrependFrontInsertsAndStagesBatch verifies md.BarPrepend
+// front-inserts into the mirror's per-key bar cache (keeping it ascending)
+// and stages a Batch (not Snap) delta frame for immediate broadcast.
+func TestMirrorBarPrependFrontInsertsAndStagesBatch(t *testing.T) {
+	m := testMirror() // reuse the existing helper in mirror_test.go (newMirror takes 7 args)
+	// Seed a snapshot so the cache has an existing (newer) run.
+	m.applyMD(md.BarSnapshot{Symbol: "US.AAPL", TF: "1m", Bars: []md.Bar{
+		{Symbol: "US.AAPL", TF: "1m", BucketMs: 2_000_000},
+		{Symbol: "US.AAPL", TF: "1m", BucketMs: 2_060_000},
+	}})
+
+	out := m.applyMD(md.BarPrepend{Symbol: "US.AAPL", TF: "1m", Bars: []md.Bar{
+		{Symbol: "US.AAPL", TF: "1m", BucketMs: 1_000_000},
+		{Symbol: "US.AAPL", TF: "1m", BucketMs: 1_060_000},
+	}})
+
+	if len(out) != 1 || !out[0].Batch || out[0].Snap {
+		t.Fatalf("want one Batch (non-Snap) staged frame, got %+v", out)
+	}
+	payload, ok := out[0].Payload.([]wsmsg.Bar)
+	if !ok || len(payload) != 2 {
+		t.Fatalf("want 2-bar batch payload, got %+v", out[0].Payload)
+	}
+	// Cache must now be ascending with the prepended bars at the front.
+	cached := m.bars[barKey("US.AAPL", "1m")]
+	if len(cached) != 4 || cached[0].BucketStart != isoMs(1_000_000) {
+		t.Fatalf("front-insert failed: %+v", cached)
+	}
+}

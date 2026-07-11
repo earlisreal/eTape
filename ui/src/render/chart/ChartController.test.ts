@@ -29,12 +29,15 @@ function fakeFacade() {
   const created: Array<{ kind: string; pane: number; options: unknown; series: ReturnType<typeof fakeSeries> }> = [];
   const scaleMargins: Array<{ id: string; margins: { top: number; bottom: number } }> = [];
   const stretchFactors = new Map<number, number>();
+  const setVisibleRangeCalls: Array<{ from: number; to: number }> = [];
   const facade: ChartApiFacade & { created: typeof created; scrolls: number; resets: number; priceResets: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins }
     & { mainKind: string; screenshots: number; crosshairCb: ((l: number | null) => void) | null }
-    & { watermark: string | null; lastOptions: unknown; stretchFactors: typeof stretchFactors } = {
+    & { watermark: string | null; lastOptions: unknown; stretchFactors: typeof stretchFactors }
+    & { visibleRange: { from: number; to: number } | null; setVisibleRangeCalls: typeof setVisibleRangeCalls } = {
     created, scrolls: 0, resets: 0, priceResets: 0, bands: 0, lastBands: [], scaleMargins,
     mainKind: "", screenshots: 0, crosshairCb: null,
     watermark: null, lastOptions: null, stretchFactors,
+    visibleRange: null, setVisibleRangeCalls,
     setMainSeries: (kind, o) => { const s = fakeSeries(); created.push({ kind, pane: 0, options: o, series: s }); facade.mainKind = kind; return s; },
     takeScreenshot: () => { facade.screenshots++; return {} as unknown as HTMLCanvasElement; },
     subscribeCrosshairMove: (cb) => { facade.crosshairCb = cb; return () => { facade.crosshairCb = null; }; },
@@ -56,6 +59,8 @@ function fakeFacade() {
     scrollToRealTime: () => { facade.scrolls++; },
     resetTimeScale: () => { facade.resets++; },
     resetPriceScale: () => { facade.priceResets++; },
+    getVisibleRange: () => facade.visibleRange,
+    setVisibleRange: (r) => { setVisibleRangeCalls.push(r); facade.visibleRange = r; },
     resize: () => {},
     applyOptions: (o) => { facade.lastOptions = o; },
     setWatermark: (t) => { facade.watermark = t; },
@@ -1269,5 +1274,47 @@ describe("ChartController.lastSyncDaySegmentBuilds (Task 6 diagnostic probe)", (
     bars.push(bar("2026-07-06T13:31:00Z", 11, true)); // same calendar day
     ctrl.sync(); // appended
     expect(ctrl.lastSyncDaySegmentBuilds()).toBe(0);
+  });
+});
+
+describe("ChartController viewport preservation around front-growth rebuilds (Task 10)", () => {
+  // LWC's setData preserves the viewport's LOGICAL index range, not its TIME
+  // range. A front-growth rebuild (deep-history prepend, or the official-daily-
+  // replaces-derived-bar case) shifts every existing bar's logical index, so
+  // without this fix a scrolled-back viewport would silently teleport to a
+  // different time window every time older bars land.
+  const sec = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+
+  it("restores the visible time range after a front-growth rebuild (scrolled back)", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // shallow cache-seed backfill (cold setAllBars; no prior visibleRange to restore)
+
+    // Simulate the user having scrolled back: an interior window whose `to` sits
+    // strictly before the newest (tail) bar's time.
+    const scrolledBack = { from: sec("2026-07-06T13:29:00Z"), to: sec("2026-07-06T13:30:00Z") };
+    facade.visibleRange = scrolledBack;
+
+    // Deep-history snapshot lands: two OLDER bars prepended ahead of the shallow
+    // window — the front-growth anchor-mismatch path (applyBars), routing back
+    // into setAllBars.
+    bars.unshift(bar("2026-07-06T13:28:00Z", 8), bar("2026-07-06T13:29:00Z", 9));
+    ctrl.sync();
+
+    expect(facade.setVisibleRangeCalls).toEqual([scrolledBack]);
+  });
+
+  it("does NOT restore when parked at the right edge (newest bar visible)", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // shallow cache-seed backfill
+
+    // Parked at the live edge: `to` is at (>=) the newest (tail) bar's time.
+    facade.visibleRange = { from: sec("2026-07-06T13:30:00Z"), to: sec("2026-07-06T13:31:00Z") };
+
+    bars.unshift(bar("2026-07-06T13:28:00Z", 8), bar("2026-07-06T13:29:00Z", 9));
+    ctrl.sync();
+
+    expect(facade.setVisibleRangeCalls).toEqual([]);
   });
 });

@@ -356,6 +356,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 	// --- feed (live OpenD or replay) ---
 	var pipeWG sync.WaitGroup
 	var backfillWG sync.WaitGroup
+	var orch *backfill.Orchestrator
 	var scanWG sync.WaitGroup
 	var dropWG sync.WaitGroup
 	var client *opend.Client
@@ -402,7 +403,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 			dailyChain = append(dailyChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
 			intradayChain = append(intradayChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
 
-			orch := backfill.New(
+			orch = backfill.New(
 				dailyChain,
 				intradayChain,
 				fd, // TailFetcher: OpenDFeed.Tail1m (quota-free Qot_GetKL)
@@ -455,6 +456,33 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 		log.Info("engine up (replay)", "day", *replayDay, "rows", len(replayRows), "speed", *speed)
 	}
 
+	if orch == nil && st != nil {
+		// No live backfill chains were built (replay, or cfg.Backfill.Enabled ==
+		// false) — a chain-less orchestrator still serves archive-first
+		// LoadOlder/LoadOlderDaily and acks exhausted past the archive, per the
+		// spec's "no special casing beyond a nil-chain check." walkChain over a
+		// nil chain returns (nil,"",nil), so LoadOlder degrades cleanly.
+		orch = backfill.New(nil, nil, nil, core, st, clock.System{}, backfill.Config{IntradayDays: cfg.Backfill.IntradayDays})
+	}
+	loadOlderFn := func(sym string, daily bool, done func(added int, exhausted bool, err error)) {
+		if orch == nil { // st itself was nil — should not happen in practice
+			done(0, true, nil)
+			return
+		}
+		backfillWG.Add(1)
+		go func() {
+			defer backfillWG.Done()
+			if daily {
+				added, exhausted, err := orch.LoadOlderDaily(ctx, sym)
+				done(added, exhausted, err)
+				return
+			}
+			added, exhausted, err := orch.LoadOlder(ctx, sym)
+			done(added, exhausted, err)
+		}()
+	}
+	hub.SetLoadOlder(loadOlderFn)
+
 	<-ctx.Done()
 
 	// --- ordered shutdown: stop accepting, drain all store writers, then Close ---
@@ -485,28 +513,35 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 	// actually returned, confirming its dispatch loop -- and therefore any
 	// SetConfig call it could make -- is stopped before st.Close() runs.
 	//
-	// backfillWG.Add(1) now has two producers: the scan poller (pool admission,
-	// joined via scanWG) and the Hub goroutine, via the hubBackfill closure
-	// injected with SetBackfill -- called from both Hub.handleEnsureDemand
-	// (chart-open demand) and Hub.rearmBackfill (OpenD-reconnect re-arm,
-	// triggered from handleMD on an md.ResyncedUpdate). srv.Wait() only proves
+	// backfillWG.Add(1) now has three producers: the scan poller (pool
+	// admission, joined via scanWG); the Hub goroutine via the hubBackfill
+	// closure injected with SetBackfill -- called from both
+	// Hub.handleEnsureDemand (chart-open demand) and Hub.rearmBackfill
+	// (OpenD-reconnect re-arm, triggered from handleMD on an
+	// md.ResyncedUpdate); and the Hub goroutine again via the loadOlderFn
+	// closure injected with SetLoadOlder -- called from Hub.handleLoadOlder,
+	// itself reachable only via loadOlderCh (the LoadOlderBars command,
+	// routed through Hub.LoadOlder from a conn's dispatch goroutine
+	// specifically so its Add(1) executes on the Hub goroutine, not the conn
+	// goroutine -- see Hub.LoadOlder's doc comment). srv.Wait() only proves
 	// every conn's dispatch loop has returned, not that the Hub goroutine has
-	// finished servicing the ensureDemandCh/mdCh sends already made on their
-	// way out -- that Add(1) can still be in flight on the Hub goroutine after
-	// srv.Wait() returns. <-hubDone closes that gap: Hub.Run only returns via
-	// its own <-ctx.Done() branch, by which point any ensureDemandCh/mdCh
-	// message it had already received has finished its handler call (and
-	// therefore its Add, if any), so no further Add(1) can occur once hubDone
-	// closes. Waiting on it here, before scanWG.Wait()/backfillWG.Wait(), keeps
-	// both Add(1) producers quiesced before the counter is read -- otherwise a
-	// late Add could land after backfillWG.Wait() already observed zero,
-	// spawning an unwaited orch.Backfill that touches the store during/after
-	// st.Close().
+	// finished servicing the ensureDemandCh/mdCh/loadOlderCh sends already
+	// made on their way out -- that Add(1) can still be in flight on the Hub
+	// goroutine after srv.Wait() returns. <-hubDone closes that gap: Hub.Run
+	// only returns via its own <-ctx.Done() branch, by which point any
+	// ensureDemandCh/mdCh/loadOlderCh message it had already received has
+	// finished its handler call (and therefore its Add, if any), so no
+	// further Add(1) can occur once hubDone closes. Waiting on it here,
+	// before scanWG.Wait()/backfillWG.Wait(), keeps all three Add(1)
+	// producers quiesced before the counter is read -- otherwise a late Add
+	// could land after backfillWG.Wait() already observed zero, spawning an
+	// unwaited orch.Backfill/LoadOlder/LoadOlderDaily goroutine that touches
+	// the store during/after st.Close().
 	shutCtx, cancelShut := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = httpSrv.Shutdown(shutCtx)
 	cancelShut()
 	srv.Wait()        // every conn.run() returned: no more SetConfig via dispatch
-	<-hubDone         // hub.Run returned: no more handleEnsureDemand, hence no more backfillWG.Add from chart-open demands
+	<-hubDone         // hub.Run returned: no more handleEnsureDemand/handleLoadOlder, hence no more backfillWG.Add from chart-open demands or LoadOlderBars
 	scanWG.Wait()     // scan poller stopped: no more backfillWG.Add from pool admissions
 	backfillWG.Wait() // boot backfill workers stopped: no more Seed* into the core
 	pipeWG.Wait()     // feed->core pipe stopped: no more RecordEvent

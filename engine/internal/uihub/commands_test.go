@@ -16,6 +16,18 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
 )
 
+// mustJSON marshals v to a json.RawMessage, failing the test on error. Used
+// by tests that build handle's args from a typed wsmsg struct rather than a
+// hand-written JSON literal.
+func mustJSON(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return b
+}
+
 type spyExec struct {
 	last exec.Command
 	ack  exec.CmdAck
@@ -47,7 +59,7 @@ func (s *spyInd) ReleaseIndicator(id string)                    { s.released = i
 func TestCommandsSubmitOrderMapsEnums(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true, OrderID: "ET5"}}
 	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
-	ack := cd.handle(context.Background(), "SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"SHORT","type":"STOP_LIMIT","tif":"GTC","session":"EXTENDED","qty":80,"limitPrice":3.55,"stopPrice":3.6}`), 0)
+	ack, _ := cd.handle(context.Background(), "SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"SHORT","type":"STOP_LIMIT","tif":"GTC","session":"EXTENDED","qty":80,"limitPrice":3.55,"stopPrice":3.6}`), 0, func(wsmsg.AckMsg) {})
 	if ack.Status != "accepted" || ack.OrderID != "ET5" {
 		t.Fatalf("ack wrong: %+v", ack)
 	}
@@ -70,7 +82,7 @@ func TestCommandsSubmitOrderMapsEnums(t *testing.T) {
 func TestCommandsSubmitOrderSessionDefaultsToAuto(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true, OrderID: "ET6"}}
 	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
-	cd.handle(context.Background(), "SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"BUY","type":"LIMIT","tif":"DAY","qty":10,"limitPrice":5}`), 0)
+	cd.handle(context.Background(), "SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"BUY","type":"LIMIT","tif":"DAY","qty":10,"limitPrice":5}`), 0, func(wsmsg.AckMsg) {})
 	so, ok := ex.last.(exec.SubmitOrder)
 	if !ok || so.Session != exec.SessionAuto {
 		t.Fatalf("absent session must default to SessionAuto, got %T %+v", ex.last, ex.last)
@@ -80,7 +92,7 @@ func TestCommandsSubmitOrderSessionDefaultsToAuto(t *testing.T) {
 func TestCommandsBlockedPassesReason(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: false, Reason: "R114 gate: max order value"}}
 	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
-	ack := cd.handle(context.Background(), "SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"BUY","type":"MARKET","tif":"DAY","qty":1}`), 0)
+	ack, _ := cd.handle(context.Background(), "SubmitOrder", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","side":"BUY","type":"MARKET","tif":"DAY","qty":1}`), 0, func(wsmsg.AckMsg) {})
 	if ack.Status != "blocked" || ack.Reason != "R114 gate: max order value" {
 		t.Fatalf("blocked reason must pass through verbatim: %+v", ack)
 	}
@@ -89,7 +101,7 @@ func TestCommandsBlockedPassesReason(t *testing.T) {
 func TestCommandsKillSwitchAllVenues(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true}}
 	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
-	cd.handle(context.Background(), "KillSwitch", json.RawMessage(`{}`), 0) // no venue => all
+	cd.handle(context.Background(), "KillSwitch", json.RawMessage(`{}`), 0, func(wsmsg.AckMsg) {}) // no venue => all
 	ks, ok := ex.last.(exec.KillSwitch)
 	if !ok || ks.Venue != "" {
 		t.Fatalf("KillSwitch{} => all venues (empty VenueID), got %T %+v", ex.last, ex.last)
@@ -99,7 +111,7 @@ func TestCommandsKillSwitchAllVenues(t *testing.T) {
 func TestCommandsArmMaster(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true}}
 	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
-	cd.handle(context.Background(), "Arm", json.RawMessage(`{}`), 0)
+	cd.handle(context.Background(), "Arm", json.RawMessage(`{}`), 0, func(wsmsg.AckMsg) {})
 	if _, ok := ex.last.(exec.Arm); !ok {
 		t.Fatalf("expected exec.Arm, got %T", ex.last)
 	}
@@ -108,7 +120,7 @@ func TestCommandsArmMaster(t *testing.T) {
 func TestCommandsResetBalanceDispatch(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true}}
 	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
-	cd.handle(context.Background(), "ResetBalance", json.RawMessage(`{"venue":"sim-1"}`), 0)
+	cd.handle(context.Background(), "ResetBalance", json.RawMessage(`{"venue":"sim-1"}`), 0, func(wsmsg.AckMsg) {})
 	rb, ok := ex.last.(exec.ResetBalance)
 	if !ok || rb.Venue != "sim-1" {
 		t.Fatalf("expected exec.ResetBalance{Venue: sim-1}, got %T %+v", ex.last, ex.last)
@@ -156,7 +168,7 @@ func TestVenueWireRoundTripsSlippageAndFillLatency(t *testing.T) {
 func TestCommandsGetSetConfig(t *testing.T) {
 	cfg := &spyCfg{values: map[string]string{"theme": `"dark"`}}
 	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
-	get := cd.handle(context.Background(), "GetConfig", json.RawMessage(`{"key":"theme"}`), 0)
+	get, _ := cd.handle(context.Background(), "GetConfig", json.RawMessage(`{"key":"theme"}`), 0, func(wsmsg.AckMsg) {})
 	if get.Status != "accepted" {
 		t.Fatalf("GetConfig should accept: %+v", get)
 	}
@@ -164,7 +176,7 @@ func TestCommandsGetSetConfig(t *testing.T) {
 	if !ok || string(raw) != `"dark"` {
 		t.Fatalf("GetConfig must return stored JSON value verbatim: %v", get.Value)
 	}
-	set := cd.handle(context.Background(), "SetConfig", json.RawMessage(`{"key":"theme","value":"light"}`), 0)
+	set, _ := cd.handle(context.Background(), "SetConfig", json.RawMessage(`{"key":"theme","value":"light"}`), 0, func(wsmsg.AckMsg) {})
 	if set.Status != "accepted" || cfg.got["theme"] != `"light"` {
 		t.Fatalf("SetConfig must persist raw JSON value: %+v / %v", set, cfg.got)
 	}
@@ -173,19 +185,72 @@ func TestCommandsGetSetConfig(t *testing.T) {
 func TestCommandsIndicatorLifecycle(t *testing.T) {
 	ind := &spyInd{}
 	cd := newCommands(&spyExec{}, &spyCfg{}, ind, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
-	cd.handle(context.Background(), "SubscribeIndicator", json.RawMessage(`{"instanceId":"i1","symbol":"US.AAPL","timeframe":"1m","type":"VWAP","params":{}}`), 0)
+	cd.handle(context.Background(), "SubscribeIndicator", json.RawMessage(`{"instanceId":"i1","symbol":"US.AAPL","timeframe":"1m","type":"VWAP","params":{}}`), 0, func(wsmsg.AckMsg) {})
 	if ind.ensured != "i1" {
 		t.Fatalf("SubscribeIndicator should EnsureIndicator, got %q", ind.ensured)
 	}
-	cd.handle(context.Background(), "UnsubscribeIndicator", json.RawMessage(`{"instanceId":"i1"}`), 0)
+	cd.handle(context.Background(), "UnsubscribeIndicator", json.RawMessage(`{"instanceId":"i1"}`), 0, func(wsmsg.AckMsg) {})
 	if ind.released != "i1" {
 		t.Fatalf("UnsubscribeIndicator should ReleaseIndicator, got %q", ind.released)
 	}
 }
 
+// TestCommandsAllReturnNonDeferred is the regression test for Task 6's
+// mechanical sweep across handle's ~49 return sites: every existing command
+// name (plus the unknown/default branch) must still report deferred=false
+// and its usual ack status now that handle's signature grew a reply callback
+// and a second (bool) return value. reply is also asserted unused -- no
+// existing command is deferred yet; Task 7's LoadOlderBars will be the first
+// real caller of the callback.
+func TestCommandsAllReturnNonDeferred(t *testing.T) {
+	tests := []struct {
+		name       string
+		args       string
+		wantStatus wsmsg.AckStatus
+	}{
+		{"SubmitOrder", `{"venue":"sim","symbol":"US.AAPL","side":"BUY","type":"MARKET","tif":"DAY","qty":1}`, wsmsg.AckAccepted},
+		{"CancelOrder", `{"venue":"sim","orderId":"o1"}`, wsmsg.AckAccepted},
+		{"ReplaceOrder", `{"venue":"sim","orderId":"o1","qty":1}`, wsmsg.AckAccepted},
+		{"Flatten", `{"venue":"sim"}`, wsmsg.AckAccepted},
+		{"ResetBalance", `{"venue":"sim"}`, wsmsg.AckAccepted},
+		{"KillSwitch", `{}`, wsmsg.AckAccepted},
+		{"Arm", `{}`, wsmsg.AckAccepted},
+		{"Disarm", `{}`, wsmsg.AckAccepted},
+		{"GetConfig", `{"key":"theme"}`, wsmsg.AckAccepted},
+		{"SetConfig", `{"key":"theme","value":"light"}`, wsmsg.AckAccepted},
+		{"SubscribeIndicator", `{"instanceId":"i1","symbol":"US.AAPL","timeframe":"1m","type":"VWAP","params":{}}`, wsmsg.AckAccepted},
+		{"UnsubscribeIndicator", `{"instanceId":"i1"}`, wsmsg.AckAccepted},
+		{"EnsureSymbol", `{"demandId":"p1","symbol":"US.AAPL","profile":"watch"}`, wsmsg.AckAccepted},
+		{"ReleaseSymbol", `{"demandId":"p1"}`, wsmsg.AckAccepted},
+		{"FocusGroup", `{"group":"blue","symbol":"US.AAPL"}`, wsmsg.AckAccepted},
+		{"GetVenueSetup", `{}`, wsmsg.AckAccepted},
+		{"SetVenueSetup", `{"venues":[],"gate":{"global":{},"venue":{}}}`, wsmsg.AckAccepted},
+		{"PutCredential", `{"name":"a","keyId":"k","secretKey":"s"}`, wsmsg.AckAccepted},
+		{"DeleteCredential", `{"name":"a"}`, wsmsg.AckAccepted},
+		{"TestConnection", `{"broker":"alpaca","env":"paper"}`, wsmsg.AckAccepted},
+		{"Nope", `{}`, wsmsg.AckBlocked}, // unknown command => default branch
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ex := &spyExec{ack: exec.CmdAck{Accepted: true, OrderID: "ET1"}}
+			cfg := &spyCfg{values: map[string]string{"theme": `"dark"`}}
+			cd := newCommands(ex, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+			ack, deferred := cd.handle(context.Background(), tc.name, json.RawMessage(tc.args), 1, func(wsmsg.AckMsg) {
+				t.Fatalf("%s: reply callback invoked, but no existing command is deferred", tc.name)
+			})
+			if deferred {
+				t.Fatalf("%s: deferred = true, want false (mechanical sweep must not change any existing command's synchronous behavior)", tc.name)
+			}
+			if ack.Status != tc.wantStatus {
+				t.Fatalf("%s: status = %q, want %q (reason=%q)", tc.name, ack.Status, tc.wantStatus, ack.Reason)
+			}
+		})
+	}
+}
+
 func TestCommandsUnknown(t *testing.T) {
 	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
-	ack := cd.handle(context.Background(), "Nope", json.RawMessage(`{}`), 0)
+	ack, _ := cd.handle(context.Background(), "Nope", json.RawMessage(`{}`), 0, func(wsmsg.AckMsg) {})
 	if ack.Status != "blocked" {
 		t.Fatalf("unknown command must block, got %+v", ack)
 	}
@@ -206,6 +271,7 @@ type spyDemandCtl struct {
 		conn uint64
 		id   string
 	}
+	loadOlderFn func(symbol string, daily bool, done func(added int, exhausted bool, err error))
 }
 
 func (s *spyDemandCtl) EnsureDemand(conn uint64, d feed.Demand) {
@@ -221,6 +287,14 @@ func (s *spyDemandCtl) ReleaseDemand(conn uint64, id string) {
 	}{conn, id})
 }
 
+func (s *spyDemandCtl) LoadOlder(symbol string, daily bool, done func(added int, exhausted bool, err error)) {
+	if s.loadOlderFn != nil {
+		s.loadOlderFn(symbol, daily, done)
+		return
+	}
+	done(0, true, nil) // default stub: nothing to fetch (mirrors the Hub's nil-slot fallback)
+}
+
 func newCmdWith(t *testing.T, feedErr error, feedNil bool) (*commands, *spyDemandCtl, *spyCmdFeed) {
 	t.Helper()
 	dem := &spyDemandCtl{}
@@ -232,10 +306,73 @@ func newCmdWith(t *testing.T, feedErr error, feedNil bool) (*commands, *spyDeman
 	return newCommands(nil, nil, nil, dem, &spyVenueAdmin{}, getter, &spyVenueTester{}), dem, sf
 }
 
+// TestLoadOlderBarsDeferredAckAccepted is Task 7's first real exercise of the
+// deferred-ack contract commands.handle grew in Task 6: LoadOlderBars must
+// return deferred=true immediately (no synchronous ack) and only invoke the
+// reply callback once demandCtl.LoadOlder's done callback fires -- here,
+// asynchronously, mirroring how the real Hub path calls done from its own
+// goroutine after the injected fetcher returns.
+func TestLoadOlderBarsDeferredAckAccepted(t *testing.T) {
+	cd, dem, _ := newCmdWith(t, nil, false)
+	dem.loadOlderFn = func(_ string, _ bool, done func(added int, exhausted bool, err error)) {
+		go done(19000, false, nil) // async, as the real Hub path is
+	}
+	var got wsmsg.AckMsg
+	done := make(chan struct{})
+	ack, deferred := cd.handle(context.Background(), "LoadOlderBars", mustJSON(t, wsmsg.LoadOlderBarsArgs{Symbol: "US.AAPL"}), 1,
+		func(a wsmsg.AckMsg) { got = a; close(done) })
+	if !deferred {
+		t.Fatalf("want deferred=true, got ack=%+v", ack)
+	}
+	<-done
+	if got.Status != "accepted" {
+		t.Fatalf("want accepted, got %+v", got)
+	}
+	v, ok := got.Value.(wsmsg.LoadOlderResult)
+	if !ok || v.Added != 19000 || v.Exhausted {
+		t.Fatalf("want LoadOlderResult{19000,false}, got %+v", got.Value)
+	}
+}
+
+// TestLoadOlderBarsErrorBlocks covers demandCtl.LoadOlder reporting an error
+// (e.g. no backfill watermark yet, or every provider in the chain failed):
+// the deferred ack must still land, with status "blocked" and a reason.
+func TestLoadOlderBarsErrorBlocks(t *testing.T) {
+	cd, dem, _ := newCmdWith(t, nil, false)
+	dem.loadOlderFn = func(_ string, _ bool, done func(added int, exhausted bool, err error)) {
+		done(0, false, errors.New("no watermark"))
+	}
+	var got wsmsg.AckMsg
+	_, deferred := cd.handle(context.Background(), "LoadOlderBars", mustJSON(t, wsmsg.LoadOlderBarsArgs{Symbol: "US.AAPL"}), 1,
+		func(a wsmsg.AckMsg) { got = a })
+	if !deferred || got.Status != "blocked" || got.Reason == "" {
+		t.Fatalf("want deferred blocked ack with a reason, got deferred=%v ack=%+v", deferred, got)
+	}
+}
+
+// TestLoadOlderBarsNoFetchSurfaceExhausted models the Hub's loadOlderSlot
+// never having been set (replay, or backfill disabled with no fallback
+// orchestrator): spyDemandCtl's default stub (dem.loadOlderFn left nil) calls
+// done(0, true, nil), and the command must still deliver a deferred accepted
+// ack reporting Exhausted, not hang or block.
+func TestLoadOlderBarsNoFetchSurfaceExhausted(t *testing.T) {
+	cd, _, _ := newCmdWith(t, nil, false)
+	var got wsmsg.AckMsg
+	_, deferred := cd.handle(context.Background(), "LoadOlderBars", mustJSON(t, wsmsg.LoadOlderBarsArgs{Symbol: "US.AAPL"}), 1,
+		func(a wsmsg.AckMsg) { got = a })
+	if !deferred || got.Status != "accepted" {
+		t.Fatalf("want deferred accepted ack, got deferred=%v ack=%+v", deferred, got)
+	}
+	v, ok := got.Value.(wsmsg.LoadOlderResult)
+	if !ok || !v.Exhausted {
+		t.Fatalf("want Exhausted=true, got %+v", got.Value)
+	}
+}
+
 func TestEnsureSymbol_AcceptsAndMapsWatch(t *testing.T) {
 	cd, dem, _ := newCmdWith(t, nil, false)
-	ack := cd.handle(context.Background(), "EnsureSymbol",
-		[]byte(`{"demandId":"p1","symbol":"US.AAPL","profile":"watch"}`), 7)
+	ack, _ := cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"p1","symbol":"US.AAPL","profile":"watch"}`), 7, func(wsmsg.AckMsg) {})
 	if ack.Status != "accepted" {
 		t.Fatalf("status = %q reason=%q", ack.Status, ack.Reason)
 	}
@@ -260,7 +397,7 @@ func TestEnsureSymbol_AcceptsAndMapsWatch(t *testing.T) {
 func TestEnsureSymbol_FocusedUSHasBook(t *testing.T) {
 	cd, dem, _ := newCmdWith(t, nil, false)
 	cd.handle(context.Background(), "EnsureSymbol",
-		[]byte(`{"demandId":"p2","symbol":"US.NVDA","profile":"focused"}`), 1)
+		[]byte(`{"demandId":"p2","symbol":"US.NVDA","profile":"focused"}`), 1, func(wsmsg.AckMsg) {})
 	d := dem.ensured[0].d
 	if !d.Focused {
 		t.Fatal("focused flag missing")
@@ -276,7 +413,7 @@ func TestEnsureSymbol_FocusedUSHasBook(t *testing.T) {
 func TestEnsureSymbol_FocusedHKNoBook(t *testing.T) {
 	cd, dem, _ := newCmdWith(t, nil, false)
 	cd.handle(context.Background(), "EnsureSymbol",
-		[]byte(`{"demandId":"p3","symbol":"HK.00700","profile":"focused"}`), 1)
+		[]byte(`{"demandId":"p3","symbol":"HK.00700","profile":"focused"}`), 1, func(wsmsg.AckMsg) {})
 	d := dem.ensured[0].d
 	for _, s := range d.Subs {
 		if s == feed.SubBook {
@@ -288,7 +425,7 @@ func TestEnsureSymbol_FocusedHKNoBook(t *testing.T) {
 func TestEnsureSymbol_InterestNoSubs(t *testing.T) {
 	cd, dem, _ := newCmdWith(t, nil, false)
 	cd.handle(context.Background(), "EnsureSymbol",
-		[]byte(`{"demandId":"p4","symbol":"US.T","profile":"interest"}`), 1)
+		[]byte(`{"demandId":"p4","symbol":"US.T","profile":"interest"}`), 1, func(wsmsg.AckMsg) {})
 	d := dem.ensured[0].d
 	if len(d.Subs) != 0 {
 		t.Fatalf("interest must have no subs, got %v", d.Subs)
@@ -300,8 +437,8 @@ func TestEnsureSymbol_InterestNoSubs(t *testing.T) {
 
 func TestEnsureSymbol_RejectsBadMarket(t *testing.T) {
 	cd, dem, _ := newCmdWith(t, nil, false)
-	ack := cd.handle(context.Background(), "EnsureSymbol",
-		[]byte(`{"demandId":"p5","symbol":"XX.FOO","profile":"watch"}`), 1)
+	ack, _ := cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"p5","symbol":"XX.FOO","profile":"watch"}`), 1, func(wsmsg.AckMsg) {})
 	if ack.Status != "blocked" || len(dem.ensured) != 0 {
 		t.Fatalf("want blocked+no-ensure, got %q ensured=%d", ack.Status, len(dem.ensured))
 	}
@@ -309,8 +446,8 @@ func TestEnsureSymbol_RejectsBadMarket(t *testing.T) {
 
 func TestEnsureSymbol_UnknownSymbolReverts(t *testing.T) {
 	cd, dem, _ := newCmdWith(t, feed.ErrUnknownSymbol, false)
-	ack := cd.handle(context.Background(), "EnsureSymbol",
-		[]byte(`{"demandId":"p6","symbol":"US.ZZZZQQ","profile":"watch"}`), 1)
+	ack, _ := cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"p6","symbol":"US.ZZZZQQ","profile":"watch"}`), 1, func(wsmsg.AckMsg) {})
 	if ack.Status != "blocked" || len(dem.ensured) != 0 {
 		t.Fatalf("unknown symbol must block and not ensure: %q ensured=%d", ack.Status, len(dem.ensured))
 	}
@@ -321,8 +458,8 @@ func TestEnsureSymbol_UnknownSymbolReverts(t *testing.T) {
 
 func TestEnsureSymbol_FeedUnavailableBlocks(t *testing.T) {
 	cd, _, _ := newCmdWith(t, feed.ErrFeedUnavailable, false)
-	ack := cd.handle(context.Background(), "EnsureSymbol",
-		[]byte(`{"demandId":"p7","symbol":"US.AAPL","profile":"watch"}`), 1)
+	ack, _ := cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"p7","symbol":"US.AAPL","profile":"watch"}`), 1, func(wsmsg.AckMsg) {})
 	if ack.Status != "blocked" {
 		t.Fatalf("want blocked, got %q", ack.Status)
 	}
@@ -330,8 +467,8 @@ func TestEnsureSymbol_FeedUnavailableBlocks(t *testing.T) {
 
 func TestEnsureSymbol_NilFeedAcceptsNoProbe(t *testing.T) {
 	cd, dem, _ := newCmdWith(t, nil, true) // feed getter returns nil (replay)
-	ack := cd.handle(context.Background(), "EnsureSymbol",
-		[]byte(`{"demandId":"p8","symbol":"US.AAPL","profile":"watch"}`), 1)
+	ack, _ := cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"p8","symbol":"US.AAPL","profile":"watch"}`), 1, func(wsmsg.AckMsg) {})
 	if ack.Status != "accepted" || len(dem.ensured) != 1 {
 		t.Fatalf("replay must accept and still track: %q ensured=%d", ack.Status, len(dem.ensured))
 	}
@@ -339,7 +476,7 @@ func TestEnsureSymbol_NilFeedAcceptsNoProbe(t *testing.T) {
 
 func TestReleaseSymbol_NamespacedAlwaysAccepted(t *testing.T) {
 	cd, dem, _ := newCmdWith(t, nil, false)
-	ack := cd.handle(context.Background(), "ReleaseSymbol", []byte(`{"demandId":"p1"}`), 7)
+	ack, _ := cd.handle(context.Background(), "ReleaseSymbol", []byte(`{"demandId":"p1"}`), 7, func(wsmsg.AckMsg) {})
 	if ack.Status != "accepted" {
 		t.Fatalf("release status = %q", ack.Status)
 	}
@@ -350,12 +487,12 @@ func TestReleaseSymbol_NamespacedAlwaysAccepted(t *testing.T) {
 
 func TestFocusGroup_ProbesAndAcks(t *testing.T) {
 	cd, _, _ := newCmdWith(t, nil, false)
-	ack := cd.handle(context.Background(), "FocusGroup", []byte(`{"group":"blue","symbol":"US.AAPL"}`), 1)
+	ack, _ := cd.handle(context.Background(), "FocusGroup", []byte(`{"group":"blue","symbol":"US.AAPL"}`), 1, func(wsmsg.AckMsg) {})
 	if ack.Status != "accepted" {
 		t.Fatalf("focus ack = %q", ack.Status)
 	}
 	cd2, _, _ := newCmdWith(t, feed.ErrUnknownSymbol, false)
-	if ack := cd2.handle(context.Background(), "FocusGroup", []byte(`{"group":"blue","symbol":"US.ZZZZQQ"}`), 1); ack.Status != "blocked" {
+	if ack, _ := cd2.handle(context.Background(), "FocusGroup", []byte(`{"group":"blue","symbol":"US.ZZZZQQ"}`), 1, func(wsmsg.AckMsg) {}); ack.Status != "blocked" {
 		t.Fatalf("bad focus symbol must block, got %q", ack.Status)
 	}
 }
@@ -384,7 +521,7 @@ func (s *spyVenueAdmin) DeleteCredential(string) error { return s.delErr }
 func TestGetVenueSetupResultHasNoSecrets(t *testing.T) {
 	va := &spyVenueAdmin{}
 	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil }, &spyVenueTester{})
-	ack := cd.handle(context.Background(), "GetVenueSetup", json.RawMessage(`{}`), 0)
+	ack, _ := cd.handle(context.Background(), "GetVenueSetup", json.RawMessage(`{}`), 0, func(wsmsg.AckMsg) {})
 	if ack.Status != "accepted" {
 		t.Fatalf("status %v", ack.Status)
 	}
@@ -397,7 +534,7 @@ func TestGetVenueSetupResultHasNoSecrets(t *testing.T) {
 func TestSetVenueSetupBlocksOnError(t *testing.T) {
 	va := &spyVenueAdmin{setErr: errors.New("venue \"x\": env \"demo\" must be paper or live")}
 	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil }, &spyVenueTester{})
-	ack := cd.handle(context.Background(), "SetVenueSetup", json.RawMessage(`{"venues":[],"gate":{"global":{},"venue":{}}}`), 0)
+	ack, _ := cd.handle(context.Background(), "SetVenueSetup", json.RawMessage(`{"venues":[],"gate":{"global":{},"venue":{}}}`), 0, func(wsmsg.AckMsg) {})
 	if ack.Status != "blocked" || ack.Reason == "" {
 		t.Fatalf("want blocked with reason, got %+v", ack)
 	}
@@ -406,7 +543,7 @@ func TestSetVenueSetupBlocksOnError(t *testing.T) {
 func TestPutCredentialRequiresAllFields(t *testing.T) {
 	va := &spyVenueAdmin{}
 	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil }, &spyVenueTester{})
-	ack := cd.handle(context.Background(), "PutCredential", json.RawMessage(`{"name":"a","keyId":"","secretKey":"s"}`), 0)
+	ack, _ := cd.handle(context.Background(), "PutCredential", json.RawMessage(`{"name":"a","keyId":"","secretKey":"s"}`), 0, func(wsmsg.AckMsg) {})
 	if ack.Status != "blocked" || va.putCalled {
 		t.Fatalf("empty keyId must block before calling admin: %+v", ack)
 	}
@@ -429,7 +566,7 @@ func (s *spyVenueTester) TestConnection(_ context.Context, broker, env, credName
 func TestTestConnectionBadArgsBlocksWithoutCallingProbe(t *testing.T) {
 	vt := &spyVenueTester{}
 	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, vt)
-	ack := cd.handle(context.Background(), "TestConnection", json.RawMessage(`not json`), 0)
+	ack, _ := cd.handle(context.Background(), "TestConnection", json.RawMessage(`not json`), 0, func(wsmsg.AckMsg) {})
 	if ack.Status != "blocked" || ack.Reason != "bad args" {
 		t.Fatalf("want blocked/\"bad args\", got %+v", ack)
 	}
@@ -445,7 +582,7 @@ func TestTestConnectionAcceptsAndConvertsResult(t *testing.T) {
 	}}
 	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, vt)
 	args := `{"broker":"tradezero","env":"live","credentials":"my-cred","keyId":"key-123","secretKey":"secret-456","accountId":"acct-789"}`
-	ack := cd.handle(context.Background(), "TestConnection", json.RawMessage(args), 0)
+	ack, _ := cd.handle(context.Background(), "TestConnection", json.RawMessage(args), 0, func(wsmsg.AckMsg) {})
 
 	if ack.Status != "accepted" {
 		t.Fatalf("want accepted, got %+v", ack)
@@ -477,7 +614,7 @@ func TestTestConnectionAcceptsAndConvertsResult(t *testing.T) {
 func TestTestConnectionOKFalseStillAccepted(t *testing.T) {
 	vt := &spyVenueTester{result: venueprobe.Result{OK: false, Message: "bad key"}}
 	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, vt)
-	ack := cd.handle(context.Background(), "TestConnection", json.RawMessage(`{"broker":"alpaca","env":"paper"}`), 0)
+	ack, _ := cd.handle(context.Background(), "TestConnection", json.RawMessage(`{"broker":"alpaca","env":"paper"}`), 0, func(wsmsg.AckMsg) {})
 	if ack.Status != "accepted" {
 		t.Fatalf("a transport-successful probe with OK:false must still be accepted, got %+v", ack)
 	}
