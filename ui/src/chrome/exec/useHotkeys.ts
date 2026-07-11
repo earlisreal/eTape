@@ -6,8 +6,7 @@ import { useToasts } from "../Toast";
 import { useOrderCommands } from "./useOrderCommands";
 import { useOrderConfig } from "./useOrderConfig";
 import { normalizeCombo, matchTemplate } from "./hotkeys";
-import { resolvePlaceTemplate } from "./resolveTemplate";
-import type { PlaceOrderTemplate, ManagementTemplate } from "./actionTemplate";
+import { fireTemplate } from "./fireTemplate";
 import { resolveVenue } from "./venueSelection";
 
 interface Cmd { sendCommand(name: string, args: unknown): Promise<AckMsg> }
@@ -27,28 +26,20 @@ export function useHotkeys(opts: { stores: Stores; commands: Cmd; linkGroups: Li
       const venue = resolveVenue(group, linkGroups, config.activeVenue, status);
       const symbol = linkGroups.symbolFor(group) ?? "";
 
-      if (t.kind === "place") {
-        const armed = !!status?.masterArmed;
-        if (!document.hasFocus()) return;
-        if (!armed) { toast.push({ level: "warn", text: "disarmed — hotkey blocked" }); return; }
-        const quote = stores.quote.get(symbol);
-        if (!quote || venue === "") { toast.push({ level: "danger", text: "no venue/quote for hotkey" }); return; }
-        const account = stores.exec.accounts().find((a) => a.venue === venue);
-        const positionQty = stores.exec.positions().filter((p) => p.symbol === symbol && p.venue === venue).reduce((s, p) => s + p.qty, 0);
-        const r = resolvePlaceTemplate(t as PlaceOrderTemplate, { venue, symbol, quote, buyingPower: account?.buyingPower ?? 0, positionQty, nowMs: Date.now() });
-        for (const n of r.preCheck.notices) toast.push({ level: "warn", text: n });
-        if (!r.preCheck.ok) { toast.push({ level: "danger", text: r.preCheck.errors.join(" ") }); return; }
-        void oc.submit(r.args, r.flash);
-        return;
-      }
+      // Keyboard-specific: place orders require OS window focus (never gated
+      // for management templates — closing exposure is never gated on focus
+      // either). This guard is intentionally NOT part of fireTemplate, since
+      // the deck (a later task) fires from an already-focused click.
+      if (t.kind === "place" && !document.hasFocus()) return;
 
-      // management — fires regardless of armed state (closing exposure is never gated)
-      switch ((t as ManagementTemplate).action) {
-        case "CancelLast": void oc.cancelLast(symbol || undefined); break;
-        case "CancelAllFocused": void oc.cancelAll("focused", symbol || undefined); break;
-        case "CancelAllEverything": void oc.cancelAll("everything"); break;
-        case "KillSwitch": void oc.kill(); toast.push({ level: "warn", text: "KILL — cancel-all + disarm" }); break;
-      }
+      const quote = stores.quote.get(symbol);
+      const account = stores.exec.accounts().find((a) => a.venue === venue);
+      const positionQty = stores.exec.positions().filter((p) => p.symbol === symbol && p.venue === venue).reduce((s, p) => s + p.qty, 0);
+      fireTemplate(
+        t,
+        { venue, symbol, quote, buyingPower: account?.buyingPower ?? 0, positionQty, armed: !!status?.masterArmed, nowMs: Date.now() },
+        oc, toast, { gateArm: true },
+      );
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
