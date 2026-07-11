@@ -37,6 +37,16 @@ type BarSnapshot struct {
 	Bars   []Bar
 }
 
+// BarPrepend carries ONLY the newly-added older bars for one (symbol,
+// timeframe). SeedOlder1m emits it instead of a full BarSnapshot so the wire
+// cost per pan chunk stays constant regardless of accumulated depth. Bars are
+// ascending and strictly older than the client's current earliest bar.
+type BarPrepend struct {
+	Symbol string
+	TF     session.Timeframe
+	Bars   []Bar
+}
+
 // IndicatorUpdate carries either a full snapshot or a single incremental
 // point for one indicator instance/slot.
 type IndicatorUpdate struct {
@@ -64,6 +74,7 @@ func (BookUpdate) isUpdate()      {}
 func (TapeUpdate) isUpdate()      {}
 func (BarUpdate) isUpdate()       {}
 func (BarSnapshot) isUpdate()     {}
+func (BarPrepend) isUpdate()      {}
 func (IndicatorUpdate) isUpdate() {}
 func (MismatchUpdate) isUpdate()  {}
 func (ConnUpdate) isUpdate()      {}
