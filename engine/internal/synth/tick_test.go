@@ -12,6 +12,7 @@ func TestGenTicks_ExecuteAtTouchAndTurnover(t *testing.T) {
 	s := spec(PersLargeCap)
 	ps := newPriceState(s)
 	ps.Reg = RegTrendUp
+	ps.Mid, ps.Anchor = 100, 100 // keep price state consistent with the book's center below
 	b := newBook(rng, s, 100)
 	var sess sessionAgg
 	ticks := genTicks(rng, s, ps, b, &sess, s.Code, 0, 10_000, 1)

@@ -1,6 +1,7 @@
 package synth
 
 import (
+	"math"
 	"math/rand"
 	"sort"
 	"testing"
@@ -113,4 +114,49 @@ func TestBook_ConsumeDeepSweepSynthesizesLevels(t *testing.T) {
 		t.Fatal("asks emptied by deep-sweep consume")
 	}
 	assertBookInvariants(t, b)
+}
+
+// TestBook_ReplenishRecentersDriftedTouch is a regression test for the real
+// mechanism behind 100% of Seed() boots hitting an implausible price (worst
+// observed: $5.28 open -> $76,970.17 close, 14,578x) despite two rounds of
+// (correct, but irrelevant) fixes to price.go's Mid/Anchor mechanics: a
+// direct trace showed Mid staying sane near its true scale the entire time,
+// while the BOOK's touch drifted arbitrarily far away and stayed there —
+// bestBid pinned at $0.01, bestAsk at $19.32, for 60+ consecutive ticks,
+// while Mid sat at $5.41.
+//
+// Root cause: topUp only rebuilds a side from mid when that side is
+// COMPLETELY EMPTY (len(side)==0). consume's extendSide guarantees a side
+// is never left empty (a separate, correct fix from an earlier task), so
+// once a deep sweep has pushed the touch away from mid even once, topUp's
+// rebuild-from-mid branch can never fire again — it only ever extends
+// OUTWARD from the existing (stale) touch, walking further from mid with
+// every subsequent sweep in the same direction. Nothing in the live path
+// (stepSymbol) or the fine-pass seeder (seedIntraday) ever calls
+// rebuildAround to recenter mid-run — that only happens once, at book
+// construction and at day rollovers.
+//
+// Reproduces by repeatedly sweeping one side and calling replenish (exactly
+// the consume-then-replenish sequence genTicks performs after every trade),
+// with mid held fixed throughout, and asserting the touch never drifts more
+// than a small multiple of the spread away from mid.
+func TestBook_ReplenishRecentersDriftedTouch(t *testing.T) {
+	rng := rand.New(rand.NewSource(7))
+	s := spec(PersRunner)
+	mid := 5.43
+	b := newBook(rng, s, mid)
+
+	for i := 0; i < 200; i++ {
+		qty := b.asks[0].Size + 1 // sweep past the touch every time
+		b.consume(feed.Buy, qty)
+		b.replenish(rng, s, mid)
+		assertBookInvariants(t, b)
+
+		bestBid, bestAsk := b.best()
+		maxDrift := mid * maxTouchDriftPct
+		if math.Abs(bestBid-mid) > maxDrift || math.Abs(bestAsk-mid) > maxDrift {
+			t.Fatalf("iter=%d: touch drifted too far from mid=%.4f: bestBid=%.4f bestAsk=%.4f (max drift %.4f)",
+				i, mid, bestBid, bestAsk, maxDrift)
+		}
+	}
 }

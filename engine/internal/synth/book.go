@@ -17,6 +17,16 @@ const bookDepth = 10
 // roundLot is used to derive a level's synthetic order count from its size.
 const roundLot = 100
 
+// maxTouchDriftPct bounds how far a side's touch may sit from where it
+// belongs relative to the current mid (as a fraction of mid) before
+// replenish treats it as stale and rebuilds that side fresh, rather than
+// extending it further outward via topUp. Without this, a sequence of
+// same-direction sweeps can walk the touch arbitrarily far from mid with
+// nothing to pull it back (topUp only adds depth, never repositions;
+// rebuildAround — the only mechanism that does reposition — is never
+// called mid-run on the live or fine-pass-seeding paths).
+const maxTouchDriftPct = 0.10
+
 // level is one price level of one side of the simulated book. bids are
 // ordered high->low, asks low->high (best/touch first on both sides).
 type level struct {
@@ -170,9 +180,31 @@ func extendSide(side *[]level, dir feed.Direction, lastPrice float64) {
 // re-asserts best-first ordering and a non-crossed touch.
 func (b *bookState) replenish(rng *rand.Rand, spec SymbolSpec, mid float64) {
 	halfSpread := math.Max(0.01, float64(spec.Spread.MinCents)/100)
+	bidAnchor := round2(mid - halfSpread)
+	askAnchor := round2(mid + halfSpread)
 
-	b.bids = topUp(rng, spec, b.bids, round2(mid-halfSpread), true)
-	b.asks = topUp(rng, spec, b.asks, round2(mid+halfSpread), false)
+	// topUp only ever ADDS depth beyond a side's existing worst level — it
+	// never repositions an existing touch. consume's extendSide guarantees
+	// a side is never left empty, so once a deep sweep has pushed the
+	// touch away from mid, topUp's "side is empty, rebuild from anchor"
+	// branch can never fire again: it just keeps extending outward from
+	// the stale touch, drifting further from mid with every subsequent
+	// sweep in the same direction, since nothing else in the live
+	// (stepSymbol) or fine-pass-seeding (seedIntraday) path ever calls
+	// rebuildAround mid-run (that only happens at construction and day
+	// rollovers). If the touch has drifted more than maxTouchDriftPct of
+	// mid away from where it belongs, treat that side as effectively
+	// stale and rebuild it fresh near mid instead of extending it further.
+	if len(b.bids) == 0 || math.Abs(b.bids[0].Price-bidAnchor) > mid*maxTouchDriftPct {
+		b.bids = buildLevels(rng, spec, bidAnchor, false)
+	} else {
+		b.bids = topUp(rng, spec, b.bids, bidAnchor, true)
+	}
+	if len(b.asks) == 0 || math.Abs(b.asks[0].Price-askAnchor) > mid*maxTouchDriftPct {
+		b.asks = buildLevels(rng, spec, askAnchor, true)
+	} else {
+		b.asks = topUp(rng, spec, b.asks, askAnchor, false)
+	}
 
 	// occasionally plant a round-number wall on whichever side it falls on
 	if rng.Float64() < 0.1 {
