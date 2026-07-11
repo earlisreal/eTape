@@ -150,67 +150,11 @@ func main() {
 		panic(err)
 	}
 
-	// ---- Trd_UpdateOrder (2208) ----
-	orderFile, err := os.Create(filepath.Join(outDir, "trd_update_order.jsonl"))
-	if err != nil {
-		panic(err)
-	}
-	defer orderFile.Close()
-
-	serial := uint32(100)
-	next := func() uint32 { serial++; return serial }
-
-	// OrderA: Submitted (wire) -> domain Accepted (event #1).
-	oA := baseOrder(orderIDA, remarkA, "AAPL", "Apple Inc.", 100, 150.25, "2026-07-11 09:31:05")
-	oA.OrderStatus = proto.Int32(int32(trdcommon.OrderStatus_OrderStatus_Submitted))
-	oA.UpdateTimestamp = proto.Float64(1783928465.0)
-	writeFrame(orderFile, opend.ProtoTrdUpdateOrder, next(), orderResp(oA))
-
-	// OrderA: TimeOut -- must produce no event and must NOT clobber the
-	// last CONFIRMED status (Accepted, from the frame above).
-	oATimeout := baseOrder(orderIDA, remarkA, "AAPL", "Apple Inc.", 100, 150.25, "2026-07-11 09:31:05")
-	oATimeout.OrderStatus = proto.Int32(int32(trdcommon.OrderStatus_OrderStatus_TimeOut))
-	oATimeout.UpdateTimestamp = proto.Float64(1783928466.0)
-	writeFrame(orderFile, opend.ProtoTrdUpdateOrder, next(), orderResp(oATimeout))
-
-	// OrderA: Submitted again (wire) -> domain Accepted again -- same status
-	// as before the TimeOut frame, so this must produce NO event. If the
-	// TimeOut frame had incorrectly clobbered lastKnownStatus, this would
-	// wrongly look like a fresh transition and emit a second OrderAccepted.
-	oAResubmit := baseOrder(orderIDA, remarkA, "AAPL", "Apple Inc.", 100, 150.25, "2026-07-11 09:31:05")
-	oAResubmit.OrderStatus = proto.Int32(int32(trdcommon.OrderStatus_OrderStatus_Submitted))
-	oAResubmit.UpdateTimestamp = proto.Float64(1783928467.0)
-	writeFrame(orderFile, opend.ProtoTrdUpdateOrder, next(), orderResp(oAResubmit))
-
-	// OrderA: Filled_Part (domain PartiallyFilled) -- a genuine NEW status
-	// transition that must still produce NO event: 2208 never signals
-	// Filled/PartiallyFilled, that is exclusively 2218's job.
-	oAPartial := baseOrder(orderIDA, remarkA, "AAPL", "Apple Inc.", 100, 150.25, "2026-07-11 09:31:05")
-	oAPartial.OrderStatus = proto.Int32(int32(trdcommon.OrderStatus_OrderStatus_Filled_Part))
-	oAPartial.FillQty = proto.Float64(40)
-	oAPartial.FillAvgPrice = proto.Float64(150.10)
-	oAPartial.UpdateTimestamp = proto.Float64(1783928470.0)
-	writeFrame(orderFile, opend.ProtoTrdUpdateOrder, next(), orderResp(oAPartial))
-
-	// OrderB: Submitted -> Accepted (event), then Cancelled_All -> Canceled (event).
-	oB := baseOrder(orderIDB, remarkB, "MSFT", "Microsoft Corp.", 50, 310.00, "2026-07-11 09:32:10")
-	oB.OrderStatus = proto.Int32(int32(trdcommon.OrderStatus_OrderStatus_Submitted))
-	oB.UpdateTimestamp = proto.Float64(1783928530.0)
-	writeFrame(orderFile, opend.ProtoTrdUpdateOrder, next(), orderResp(oB))
-
-	oBCancel := baseOrder(orderIDB, remarkB, "MSFT", "Microsoft Corp.", 50, 310.00, "2026-07-11 09:32:10")
-	oBCancel.OrderStatus = proto.Int32(int32(trdcommon.OrderStatus_OrderStatus_Cancelled_All))
-	oBCancel.UpdateTimestamp = proto.Float64(1783928540.0)
-	writeFrame(orderFile, opend.ProtoTrdUpdateOrder, next(), orderResp(oBCancel))
-
-	// OrderC: straight to SubmitFailed -> domain Rejected (event, with LastErrMsg).
-	oC := baseOrder(orderIDC, remarkC, "TSLA", "Tesla Inc.", 20, 250.00, "2026-07-11 09:33:00")
-	oC.OrderStatus = proto.Int32(int32(trdcommon.OrderStatus_OrderStatus_SubmitFailed))
-	oC.LastErrMsg = proto.String("Insufficient buying power")
-	oC.UpdateTimestamp = proto.Float64(1783928580.0)
-	writeFrame(orderFile, opend.ProtoTrdUpdateOrder, next(), orderResp(oC))
-
 	// ---- Trd_UpdateOrderFill (2218) ----
+	// (This section runs FIRST, ahead of the disabled Trd_UpdateOrder block
+	// below, so that block's guard -- an unconditional panic -- can be this
+	// function's last statement without leaving any of this legitimately-
+	// still-generated code unreachable after it.)
 	fillFile, err := os.Create(filepath.Join(outDir, "trd_update_orderfill.jsonl"))
 	if err != nil {
 		panic(err)
@@ -237,8 +181,9 @@ func main() {
 		}
 	}
 
-	// OrderA fill #1: 40 @ 150.10. OrderA's total Qty (100, from the order
-	// pushes above) makes LeavesQty = 60 after this fill.
+	// OrderA fill #1: 40 @ 150.10. OrderA's total Qty (100, from
+	// testdata/gen's historical order pushes -- see the disabled block
+	// below) makes LeavesQty = 60 after this fill.
 	fill1 := baseFill(orderIDA, 990001001, "AAPL", "Apple Inc.", 40, 150.10, "2026-07-11 09:31:20")
 	fill1.CreateTimestamp = proto.Float64(1783928480.0)
 	writeFrame(fillFile, opend.ProtoTrdUpdateOrderFill, nextFill(), fillResp(fill1))
@@ -259,6 +204,22 @@ func main() {
 	fillUnknown.CreateTimestamp = proto.Float64(1783928640.0)
 	writeFrame(fillFile, opend.ProtoTrdUpdateOrderFill, nextFill(), fillResp(fillUnknown))
 
-	fmt.Println("wrote", filepath.Join(outDir, "trd_update_order.jsonl"))
 	fmt.Println("wrote", filepath.Join(outDir, "trd_update_orderfill.jsonl"))
+
+	// ---- Trd_UpdateOrder (2208) ----
+	// DISABLED (final review, Minor hygiene fix): trd_update_order.jsonl is
+	// now Task 7's REAL captured paper-trading fixture (see the package doc
+	// comment above), and TestPushDecoder_OrderPushGoldenFrames asserts on
+	// exactly those 3 real frames. This generator must never regenerate/
+	// overwrite that file with synthetic data again -- a manual re-run used
+	// to silently clobber the real capture and break that test. The
+	// baseOrder/orderResp helpers above are kept, deliberately unused, purely
+	// as documentation of how the original Task 4 synthetic fixture was
+	// constructed (the exact frame narrative is spelled out in the package
+	// doc comment); TestPushDecoder_OrderPushEdgeCases (normalize_test.go)
+	// covers the same scenarios today via its own hcOrderPush helper. Do not
+	// remove this guard and re-wire a write to trd_update_order.jsonl -- and
+	// keep this panic as this function's LAST statement (nothing may follow
+	// it in this block, or that code becomes unreachable).
+	panic("gen: writing trd_update_order.jsonl is disabled -- that file is now Task 7's real captured fixture; see the comment above this panic")
 }
