@@ -462,7 +462,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           commands={commands}
           getWorkspace={() => wsRef.current ?? ws}
           onImportWorkspace={onImportWorkspace}
-          toast={toast} />
+          toast={toast}
+          engineState={engineState} />
         {showVenueSetup && <VenueSetupPrompt onConfigure={configureVenueSetup} onDismiss={dismissVenueSetup} />}
       </div>
     </OpenSettingsProvider>

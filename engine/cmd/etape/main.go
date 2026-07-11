@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/backfill"
@@ -72,7 +73,7 @@ func openLogFile(path string) (*os.File, error) {
 // default (!tray) entrypoint has no use for it and passes nil; the tray
 // entrypoint uses it to learn the address for its "Open eTape" menu action
 // without duplicating any config-resolution logic.
-func boot(ctx context.Context, onListening func(addr string)) int {
+func boot(ctx context.Context, onListening func(addr string)) (code int, restart bool) {
 	home, _ := os.UserHomeDir()
 	cfgPath := flag.String("config", filepath.Join(home, ".eTape", "config.toml"), "path to config.toml")
 	replayDay := flag.String("replay", "", "replay a recorded day (YYYY-MM-DD) instead of live OpenD")
@@ -109,7 +110,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 			if explicitLog {
 				// The user asked for this exact file; fail loudly.
 				errLog.Error("open log file", "path", logDest, "err", err)
-				return 1
+				return 1, false
 			}
 			// The default path is best-effort: a logging hiccup must not
 			// stop the engine from booting.
@@ -139,7 +140,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 
 	if *demo && *replayDay != "" {
 		log.Error("parse flags", "err", errors.New("-demo and -replay are mutually exclusive"))
-		return 1
+		return 1, false
 	}
 
 	var cfg config.Config
@@ -155,12 +156,12 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 		demoDir, err := os.MkdirTemp("", "etape-demo-*")
 		if err != nil {
 			log.Error("create demo temp dir", "err", err)
-			return 1
+			return 1, false
 		}
 		cfg.Store.DBPath = filepath.Join(demoDir, "demo.db")
 		if err := demojournal.Generate(cfg.Store.DBPath, *demoDay); err != nil {
 			log.Error("generate demo journal", "err", err)
-			return 1
+			return 1, false
 		}
 		*replayDay = *demoDay
 		*replayHold = true
@@ -170,7 +171,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 		cfg, err = config.Load(*cfgPath)
 		if err != nil {
 			log.Error("load config", "err", err)
-			return 1
+			return 1, false
 		}
 	}
 	if *dist != "" {
@@ -179,7 +180,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 	anchorSecs, err := cfg.MD.AnchorSecs()
 	if err != nil {
 		log.Error("bad session_anchor", "err", err)
-		return 1
+		return 1, false
 	}
 	dbPath := cfg.Store.DBPath
 	if dbPath == "" {
@@ -187,7 +188,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 	}
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		log.Error("make db dir", "err", err)
-		return 1
+		return 1, false
 	}
 
 	// --- single-instance guard ---
@@ -208,17 +209,27 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 			// to do than exit -- the other instance is already up.
 			_ = openbrowser.Open("http://" + cfg.UIHub.Addr())
 		}
-		return 0
+		return 0, false
 	}
 	if err != nil {
 		log.Error("single-instance lock", "err", err)
-		return 1
+		return 1, false
 	}
 	defer releaseLock()
 	log.Info("single-instance lock acquired", "lock", dbPath+".lock")
 
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
+
+	// restartRequested/requestRestart back the "RestartEngine" WS command
+	// (uihub/commands.go): a client triggers requestRestart, which flags the
+	// restart and cancels ctx via stop -- reusing the exact ordered shutdown
+	// drain below. boot's named `restart` return value picks up the flag
+	// after the drain completes, so the caller (run_default.go/run_tray.go)
+	// only relaunches once every deferred cleanup (releaseLock, st.Close,
+	// etc.) has actually run.
+	var restartRequested atomic.Bool
+	requestRestart := func() { restartRequested.Store(true); stop() }
 
 	live := *replayDay == ""
 	uihubClk := clock.System{}
@@ -232,7 +243,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 	})
 	if err != nil {
 		log.Error("open store", "err", err)
-		return 1
+		return 1, false
 	}
 	// NOTE: st.Close() is deferred until AFTER every store-writer goroutine has
 	// stopped (feed pipe + forwardMD + exec.Core) — see the shutdown block below.
@@ -248,7 +259,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 		if err != nil || len(replayRows) == 0 {
 			log.Error("replay day unavailable", "day", *replayDay, "err", err, "rows", len(replayRows))
 			_ = st.Close()
-			return 1
+			return 1, false
 		}
 		execClk = replay.NewClock(time.UnixMilli(replayRows[0].TsExch))
 	}
@@ -265,7 +276,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 	if err != nil {
 		log.Error("build brokers", "err", err)
 		_ = st.Close()
-		return 1
+		return 1, false
 	}
 	brokers := map[exec.VenueID]exec.Broker{}
 	venueIDs := make([]exec.VenueID, 0, len(vbs))
@@ -302,7 +313,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 		Position: time.Duration(cfg.UIHub.PositionMs) * time.Millisecond,
 		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500, TradesCap: 1000,
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
-	}, execCore, st, core, venueAdm, venueProbe)
+	}, execCore, st, core, venueAdm, venueProbe, requestRestart)
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
 	httpSrv := &http.Server{
@@ -553,7 +564,7 @@ func boot(ctx context.Context, onListening func(addr string)) int {
 		log.Error("close store", "err", err)
 	}
 	log.Info("shutdown complete", "droppedUpdates", core.DroppedUpdates(), "droppedJournal", st.DroppedJournalRows())
-	return 0
+	return 0, restartRequested.Load()
 }
 
 // dropWatchInterval controls how often watchDroppedUpdates samples

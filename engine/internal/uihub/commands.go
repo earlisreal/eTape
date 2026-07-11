@@ -73,11 +73,23 @@ type commands struct {
 	va     venueAdmin
 	feed   func() Feed
 	tester venueTester
+	// restart is set post-construction by uihub.New (not passed through
+	// newCommands, to avoid touching every commands_test.go call site) — see
+	// the "RestartEngine" case below. Nil in tests that don't set it, hence
+	// the nil guard there.
+	restart func()
 }
 
 func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, va venueAdmin, feed func() Feed, tester venueTester) *commands {
 	return &commands{ex: ex, cfg: cfg, ind: ind, dem: dem, va: va, feed: feed, tester: tester}
 }
+
+// restartAckFlushDelay defers the actual restart trigger past the moment
+// this handler returns its "accepted" ack, so the ack has time to be
+// written to the WS connection before boot's shutdown drain cancels the
+// conn's context (which would otherwise make the write a no-op — see
+// conn.go's write path).
+const restartAckFlushDelay = 200 * time.Millisecond
 
 func blocked(reason string) wsmsg.AckMsg { return wsmsg.AckMsg{Status: "blocked", Reason: reason} }
 
@@ -279,6 +291,12 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		defer cancel()
 		r := cd.tester.TestConnection(pctx, a.Broker, a.Env, a.Credentials, a.KeyID, a.SecretKey, a.AccountID)
 		return wsmsg.AckMsg{Status: "accepted", Value: resultToWire(r)}, false
+	case "RestartEngine":
+		if cd.restart == nil {
+			return blocked("restart not supported"), false
+		}
+		time.AfterFunc(restartAckFlushDelay, cd.restart)
+		return wsmsg.AckMsg{Status: "accepted"}, false
 	default:
 		return blocked("unknown command: " + name), false
 	}

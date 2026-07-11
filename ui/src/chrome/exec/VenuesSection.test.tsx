@@ -49,11 +49,11 @@ function makeCommands(setupSequence: VenueSetup[], acks: Partial<Record<string, 
   return { sendCommand, sent };
 }
 
-function wrap(commands: { sendCommand: (name: string, args: unknown) => Promise<AckMsg> }) {
+function wrap(commands: { sendCommand: (name: string, args: unknown) => Promise<AckMsg> }, engineState?: "connecting" | "open" | "reconnecting") {
   return render(
     <ThemeProvider>
       <ToastProvider>
-        <VenuesSection commands={commands} />
+        <VenuesSection commands={commands} engineState={engineState} />
       </ToastProvider>
     </ThemeProvider>,
   );
@@ -124,6 +124,71 @@ describe("VenuesSection", () => {
 
     fireEvent.click(screen.getByTestId("save-venues"));
     await waitFor(() => expect(screen.getByTestId("restart-banner")).toBeTruthy());
+  });
+
+  it("restart button requires a second click to confirm, and Cancel backs out without sending RestartEngine", async () => {
+    const drifted: VenueSetup = baseSetup({
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0 }] },
+    });
+    const commands = makeCommands([drifted]);
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("restart-banner")).toBeTruthy());
+
+    const restartBtn = () => screen.getByTestId("restart-engine") as HTMLButtonElement;
+    expect(restartBtn().textContent).toBe("Restart now");
+
+    fireEvent.click(restartBtn());
+    expect(restartBtn().textContent).toBe("Confirm restart");
+    expect(commands.sent.some((s) => s.name === "RestartEngine")).toBe(false);
+
+    fireEvent.click(screen.getByText("Cancel"));
+    expect(restartBtn().textContent).toBe("Restart now");
+    expect(commands.sent.some((s) => s.name === "RestartEngine")).toBe(false);
+  });
+
+  it("sends RestartEngine only after confirming, and disables the button while restarting", async () => {
+    const drifted: VenueSetup = baseSetup({
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0 }] },
+    });
+    const commands = makeCommands([drifted]);
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("restart-banner")).toBeTruthy());
+
+    const restartBtn = () => screen.getByTestId("restart-engine") as HTMLButtonElement;
+    fireEvent.click(restartBtn()); // -> "Confirm restart"
+    fireEvent.click(restartBtn()); // -> sends RestartEngine
+
+    await waitFor(() => expect(commands.sent.some((s) => s.name === "RestartEngine")).toBe(true));
+    await waitFor(() => expect(restartBtn().disabled).toBe(true));
+    expect(restartBtn().textContent).toBe("Restarting…");
+  });
+
+  it("clears the restart banner once the engine drops and reconnects, without any user action", async () => {
+    const drifted: VenueSetup = baseSetup({
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0 }] },
+    });
+    // First GetVenueSetup (initial mount) reports drift; the second (fired by
+    // the reconnect effect's refresh()) reports the new engine already
+    // running the saved file -- simulating a real post-restart refetch.
+    const commands = makeCommands([drifted, baseSetup()]);
+    const { rerender } = wrap(commands, "open");
+    await waitFor(() => expect(screen.getByTestId("restart-banner")).toBeTruthy());
+
+    const restartBtn = () => screen.getByTestId("restart-engine") as HTMLButtonElement;
+    fireEvent.click(restartBtn());
+    fireEvent.click(restartBtn());
+    await waitFor(() => expect(restartBtn().disabled).toBe(true));
+
+    // Simulate WsClient's own auto-reconnect cycle: the engine restarts
+    // (socket drops, then comes back) without any user action here.
+    rerender(
+      <ThemeProvider><ToastProvider><VenuesSection commands={commands} engineState="reconnecting" /></ToastProvider></ThemeProvider>,
+    );
+    rerender(
+      <ThemeProvider><ToastProvider><VenuesSection commands={commands} engineState="open" /></ToastProvider></ThemeProvider>,
+    );
+
+    await waitFor(() => expect(screen.queryByTestId("restart-banner")).toBeNull());
   });
 
   it("save order: typing a venue's key+secret fires PutCredential (named after that venue's credentials key), then SetVenueSetup", async () => {

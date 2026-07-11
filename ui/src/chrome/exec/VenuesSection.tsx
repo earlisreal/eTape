@@ -14,10 +14,11 @@
 // orphaning happens on rename. Typed Key ID/Secret are write-only, tracked in
 // local state keyed by that same opaque name (never seeded from `setup` —
 // the engine never sends secrets back), sent once on Save, then cleared.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import type { AckMsg, Venue, Gate, GateLimitsView, VenueConfig, VenueSetup, TestConnectionResult, TestAccount } from "../../wire/contract";
+import type { ConnState } from "../../wire/WsClient";
 
 interface Commands { sendCommand(name: string, args: unknown): Promise<AckMsg>; }
 
@@ -43,7 +44,7 @@ interface VenueIssues { id?: string; account?: string; cred?: string }
 type TestStatus = "idle" | "testing" | "ok" | "fail";
 interface TestState { status: TestStatus; message?: string; accounts?: TestAccount[] }
 
-export function VenuesSection({ commands }: { commands: Commands }): JSX.Element {
+export function VenuesSection({ commands, engineState }: { commands: Commands; engineState?: ConnState | undefined }): JSX.Element {
   const { palette } = useTheme();
   const toast = useToasts();
   const [setup, setSetup] = useState<VenueSetup | null>(null);
@@ -54,6 +55,8 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
   const [secretDrafts, setSecretDrafts] = useState<Record<string, SecretDraft>>({});
   const [removeConfirmIdx, setRemoveConfirmIdx] = useState<number | null>(null);
   const [resetConfirmIdx, setResetConfirmIdx] = useState<number | null>(null);
+  const [restartConfirm, setRestartConfirm] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   // Stable per-row identity for risk-limit caps, independent of the venue's
   // mutable `id` field. gate.venue is keyed by id on the wire, but tracking
   // caps live-keyed-by-id during editing let two rows transiently share an
@@ -90,6 +93,34 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
     () => setup !== null && JSON.stringify(setup.file) !== JSON.stringify(setup.running),
     [setup],
   );
+
+  // While a restart is in flight, engineState cycles open -> reconnecting ->
+  // open as the engine drops and comes back (WsClient's own auto-reconnect;
+  // no ws plumbing needed here). engineState is still "open" the instant
+  // restarting flips true (the socket hasn't dropped yet — the ack arrives
+  // before the engine's shutdown drain even starts), so this must wait for
+  // an actual drop before treating a later "open" as "back". sawDropRef
+  // tracks that: true only once engineState has been seen non-open during
+  // this restart. On the "back to open" edge it refetches venue setup so
+  // restartNeeded flips false and the banner clears itself once the new
+  // engine reports running === file, instead of leaving a stale
+  // "Restarting…" button forever.
+  const sawDropRef = useRef(false);
+  useEffect(() => {
+    if (!restarting) {
+      sawDropRef.current = false;
+      return;
+    }
+    if (engineState !== "open") {
+      sawDropRef.current = true;
+      return;
+    }
+    if (sawDropRef.current) {
+      setRestarting(false);
+      setRestartConfirm(false);
+      refresh();
+    }
+  }, [engineState, restarting, refresh]);
 
   // Client-side mirror of the engine's SetVenueSetup validation (settings
   // redesign design §6) — surfaced pre-save so users see errors before a
@@ -270,6 +301,28 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
     }
   };
 
+  // Live command (RestartEngine), not a file edit. The engine acks
+  // "accepted" ~200ms before it actually cancels its context and starts
+  // shutting down (see commands.go's restartAckFlushDelay), so this await
+  // resolves cleanly before the socket ever drops -- no fire-and-forget
+  // hack needed. Leaves `restarting` true on success; the reconnect effect
+  // above clears it once the engine is back and running === file.
+  const restartEngine = async () => {
+    setRestarting(true);
+    try {
+      const ack = await commands.sendCommand("RestartEngine", {});
+      if (ack.status !== "accepted") {
+        toast.push({ level: "danger", text: ack.reason || "Restart rejected" });
+        setRestarting(false);
+        setRestartConfirm(false);
+      }
+    } catch {
+      toast.push({ level: "danger", text: "Restart failed (transport)." });
+      setRestarting(false);
+      setRestartConfirm(false);
+    }
+  };
+
   // Read-only probe against the real broker (settings header comment's
   // FILE-ONLY rule still holds — this never places an order and never writes
   // config; a successful result only patches the in-memory draft's env/
@@ -309,8 +362,24 @@ export function VenuesSection({ commands }: { commands: Commands }): JSX.Element
   return (
     <div style={{ color: palette.text }}>
       {restartNeeded && (
-        <div data-testid="restart-banner" style={{ background: palette.bg, border: `1px solid ${palette.accent}`, color: palette.accent, padding: "8px 12px", borderRadius: 4, marginBottom: 12, fontSize: 12 }}>
-          ⚠ Engine restart required — saved venue config differs from the running engine.
+        <div data-testid="restart-banner" style={{ background: palette.bg, border: `1px solid ${palette.accent}`, color: palette.accent, padding: "8px 12px", borderRadius: 4, marginBottom: 12, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <span>⚠ Engine restart required — saved venue config differs from the running engine.</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
+            {restartConfirm && !restarting && (
+              <span style={{ fontSize: 11 }}>Restart now? This briefly interrupts live data.</span>
+            )}
+            <button
+              data-testid="restart-engine"
+              className="btn"
+              disabled={restarting}
+              onClick={() => (restartConfirm ? void restartEngine() : setRestartConfirm(true))}
+            >
+              {restarting ? "Restarting…" : restartConfirm ? "Confirm restart" : "Restart now"}
+            </button>
+            {restartConfirm && !restarting && (
+              <button className="btn" onClick={() => setRestartConfirm(false)}>Cancel</button>
+            )}
+          </span>
         </div>
       )}
       {err && <div data-testid="venues-error" style={{ color: palette.danger, marginBottom: 8, fontSize: 12 }}>{err}</div>}

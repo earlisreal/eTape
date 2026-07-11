@@ -9,6 +9,7 @@ import { HoverButton } from "./controls/HoverButton";
 import type { AckMsg } from "../wire/contract";
 import type { ToastApi } from "./Toast";
 import type { Workspace } from "./workspace";
+import type { ConnState } from "../wire/WsClient";
 
 export type SettingsSection = "appearance" | "orders" | "venues" | "sounds" | "backup";
 const NAV: { id: SettingsSection; label: string }[] = [
@@ -19,11 +20,19 @@ const NAV: { id: SettingsSection; label: string }[] = [
   { id: "backup", label: "Import & export" },
 ];
 
-export function SettingsModal({ open, section, onSection, onClose, commands, getWorkspace, onImportWorkspace, toast }:
+export function SettingsModal({ open, section, onSection, onClose, commands, getWorkspace, onImportWorkspace, toast, engineState }:
   {
     open: boolean; section: SettingsSection; onSection: (s: SettingsSection) => void; onClose: () => void;
     commands: { sendCommand(name: string, args: unknown): Promise<AckMsg> };
     getWorkspace: () => Workspace; onImportWorkspace: (ws: Workspace) => void; toast: ToastApi;
+    // Optional (not required, unlike FeedStatusBanner's engineState) so
+    // existing tests that render SettingsModal without it keep compiling;
+    // `| undefined` is required alongside the `?` because tsconfig's
+    // exactOptionalPropertyTypes otherwise rejects explicitly passing
+    // `engineState={engineState}` when the caller's own value is
+    // `ConnState | undefined` (AppShell's engineState is always defined in
+    // practice, but its static type here is whatever this prop declares).
+    engineState?: ConnState | undefined;
   }): JSX.Element | null {
   const { palette } = useTheme();
   const oc = useOrderConfig();
@@ -56,7 +65,7 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
         <section style={{ padding: 16, overflow: "auto", minHeight: 0, background: palette.bg }}>
           {section === "appearance" && <AppearanceSection />}
           {section === "orders" && <OrderSettingsSection config={oc.config} onSave={oc.save} />}
-          {section === "venues" && <VenuesSection commands={commands} />}
+          {section === "venues" && <VenuesSection commands={commands} engineState={engineState} />}
           {section === "sounds" && <SoundsSection />}
           {section === "backup" && <BackupSection getWorkspace={getWorkspace} onImportWorkspace={onImportWorkspace} orderConfig={oc.config} onImportOrderConfig={oc.save} toast={toast} />}
         </section>

@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,5 +16,14 @@ import (
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	os.Exit(boot(ctx, nil))
+	code, restart := boot(ctx, nil)
+	if restart {
+		// On Unix relaunch() execs and never returns on success, so this
+		// branch is only reached on failure. On Windows it spawns a new
+		// process and returns, and os.Exit(code) below retires this one.
+		if err := relaunch(); err != nil {
+			slog.Default().Error("relaunch failed", "err", err)
+		}
+	}
+	os.Exit(code)
 }

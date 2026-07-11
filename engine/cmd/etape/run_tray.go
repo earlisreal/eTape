@@ -69,7 +69,7 @@ func onReady() {
 	// process never exits mid-shutdown and never leaves a ghost tray icon
 	// behind on a failure exit.
 	go func() {
-		code := boot(ctx, captureAddr)
+		code, restart := boot(ctx, captureAddr)
 		if code != 0 {
 			// boot() already called slog.SetDefault with a handler writing
 			// to stderr (and the -log file, if one was given) before
@@ -78,6 +78,18 @@ func onReady() {
 			// mechanism from Task 3" boot itself uses. There's nothing
 			// meaningful left to show in a tray with no engine behind it.
 			slog.Default().Error("boot failed", "code", code)
+		}
+		if restart {
+			// Spawn the replacement process BEFORE systray.Quit() below --
+			// boot has already returned here, so its deferred cleanup
+			// (releaseLock, st.Close, ...) has already released the
+			// single-instance lock and uihub port the new process needs.
+			// Ordering it before Quit avoids a window where this process
+			// could exit before the new one is spawned; the brief two-icon
+			// overlap while the new tray starts up is an accepted tradeoff.
+			if err := relaunch(); err != nil {
+				slog.Default().Error("relaunch failed", "err", err)
+			}
 		}
 		systray.Quit()
 	}()

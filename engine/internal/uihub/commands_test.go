@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/exec"
@@ -124,6 +125,48 @@ func TestCommandsResetBalanceDispatch(t *testing.T) {
 	rb, ok := ex.last.(exec.ResetBalance)
 	if !ok || rb.Venue != "sim-1" {
 		t.Fatalf("expected exec.ResetBalance{Venue: sim-1}, got %T %+v", ex.last, ex.last)
+	}
+}
+
+// TestCommandsRestartEngineBlockedWithNoHandler covers a commands value built
+// via newCommands (restart left nil, as every other test in this file does) --
+// the same shape uihub sees before api.New sets cmd.restart, and the shape any
+// test double that never wires a restart handler will have.
+func TestCommandsRestartEngineBlockedWithNoHandler(t *testing.T) {
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	ack, deferred := cd.handle(context.Background(), "RestartEngine", json.RawMessage(`{}`), 0, func(wsmsg.AckMsg) {})
+	if deferred {
+		t.Fatal("RestartEngine must not be deferred")
+	}
+	if ack.Status != wsmsg.AckBlocked {
+		t.Fatalf("RestartEngine with no handler: status = %q, want blocked", ack.Status)
+	}
+}
+
+// TestCommandsRestartEngineAcksThenTriggers covers the real api.New wiring
+// shape: cd.restart set post-construction (see api.go). The ack must come
+// back accepted and non-deferred immediately; the actual restart trigger
+// (cd.restart) fires only after restartAckFlushDelay, giving the ack time to
+// reach the client before the caller cancels ctx.
+func TestCommandsRestartEngineAcksThenTriggers(t *testing.T) {
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	triggered := make(chan struct{})
+	cd.restart = func() { close(triggered) }
+
+	ack, deferred := cd.handle(context.Background(), "RestartEngine", json.RawMessage(`{}`), 0, func(wsmsg.AckMsg) {
+		t.Fatal("RestartEngine's own ack must be synchronous, not delivered via reply")
+	})
+	if deferred {
+		t.Fatal("RestartEngine must not be deferred")
+	}
+	if ack.Status != wsmsg.AckAccepted {
+		t.Fatalf("RestartEngine: status = %q, want accepted", ack.Status)
+	}
+
+	select {
+	case <-triggered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("restart handler was never invoked")
 	}
 }
 
