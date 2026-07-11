@@ -499,6 +499,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		go func() { _ = fd.Run(ctx) }()
 		pipeWG.Add(1)
 		go pipe(ctx, &pipeWG, fd.Events(), core, st)
+		go runSealScheduler(ctx, st, clock.System{}, log)
 		var hubBackfill func(sym string, done func(ok bool))
 		if cfg.Backfill.Enabled {
 			var alpacaSrc *histalpaca.Client

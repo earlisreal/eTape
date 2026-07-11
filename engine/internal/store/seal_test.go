@@ -299,6 +299,24 @@ func TestSealCrashLeavesDayRaw(t *testing.T) {
 	}
 }
 
+func TestRequestSealSealsThroughWriter(t *testing.T) {
+	s := openAtClock(t, afterDay(t)) // today = 2026-07-08
+	for i := 0; i < 3; i++ {
+		s.RecordEvent(feed.ConnUpEvent{}, recvBase+int64(i)) // 2026-07-06
+	}
+	s.Flush()
+
+	s.RequestSeal()
+	s.Flush() // FIFO barrier: sealOp is processed before this flushReq completes
+
+	if rawCount(t, s, "2026-07-06") != 0 {
+		t.Fatal("raw rows survived RequestSeal")
+	}
+	if chunkCount(t, s, "2026-07-06") == 0 {
+		t.Fatal("RequestSeal wrote no chunks")
+	}
+}
+
 func TestPruneDeletesChunksAndRaw(t *testing.T) {
 	now := time.Date(2026, 7, 6, 12, 0, 0, 0, mustLoc(t)) // retention 2d keeps 07-05,07-06
 	s := openAtClock(t, now)

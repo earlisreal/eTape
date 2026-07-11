@@ -67,6 +67,12 @@ type flushReq struct{ done chan struct{} }
 
 func (flushReq) render() []pendingWrite { return nil }
 
+// sealOp asks the writer goroutine to seal completed days between batches,
+// serializing the seal with normal writes. Enqueued by RequestSeal.
+type sealOp struct{ s *Store }
+
+func (sealOp) render() []pendingWrite { return nil }
+
 // Options configures Open.
 type Options struct {
 	Path          string
@@ -117,6 +123,14 @@ func (s *Store) Flush() {
 	<-done
 }
 
+// RequestSeal enqueues a seal of completed days onto the writer goroutine, where
+// it runs serialized with normal writes. Unlike SealJournalDays (boot-only-safe,
+// called directly), this is safe during live operation — the writer runs the
+// seal for you. Fires from the 00:30-ET day-roll scheduler, when US markets are
+// closed and the write queue is effectively idle. Blocks only if the queue is
+// full.
+func (s *Store) RequestSeal() { s.writes <- sealOp{s: s} }
+
 // Close stops the writer (final-flushing buffered writes) and closes the DB.
 // Idempotent: safe to call more than once (e.g. an explicit Close plus a
 // t.Cleanup). Callers must ensure no producer still calls RecordEvent/Archive*/
@@ -160,6 +174,15 @@ func (s *Store) writer(flush time.Duration) {
 			case execAppendOp:
 				commit() // flush any pending batch first, then the sync exec tx
 				v.done <- s.commitExecAppend(v)
+				continue
+			case sealOp:
+				commit() // flush any pending batch first
+				if sum, err := v.s.SealJournalDays(); err != nil {
+					slog.Error("store: day-roll seal", "err", err)
+				} else if sum.Days > 0 || sum.Failed > 0 {
+					slog.Info("store: day-roll sealed", "days", sum.Days, "chunks", sum.Chunks,
+						"rows", sum.Rows, "failed", sum.Failed)
+				}
 				continue
 			}
 			buf = append(buf, op.render()...)
