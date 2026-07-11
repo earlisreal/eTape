@@ -6,6 +6,7 @@ import { TapeRing } from "./TapeRing";
 import { BarStore } from "./BarStore";
 import { IndicatorStore } from "./IndicatorStore";
 import { HealthStore } from "./HealthStore";
+import { SessionStore } from "./SessionStore";
 import { ExecStore } from "./ExecStore";
 import { ScannerStore } from "./ScannerStore";
 import { NewsStore } from "./NewsStore";
@@ -22,6 +23,7 @@ export interface Stores {
   bars: BarStore;
   indicators: IndicatorStore;
   health: HealthStore;
+  session: SessionStore;
   exec: ExecStore;
   scanner: ScannerStore;
   news: NewsStore;
@@ -40,6 +42,7 @@ export function makeStores(): Stores {
     bars: new BarStore(),
     indicators: new IndicatorStore(),
     health: new HealthStore(),
+    session: new SessionStore(),
     exec: new ExecStore(),
     scanner: new ScannerStore(),
     news: new NewsStore(),
@@ -73,6 +76,7 @@ export function routeToStore(stores: Stores, m: SnapshotMsg | DeltaMsg): void {
     case "exec.trades": stores.trades.apply(m); return;
     case "sys.health":
     case "sys.events": stores.health.apply(m); return;
+    case "sys.session": stores.session.apply(m); return;
     case "config": return; // handled by workspace.ts, not a store
   }
 }
