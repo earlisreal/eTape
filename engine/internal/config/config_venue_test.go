@@ -29,13 +29,19 @@ func TestValidateVenueConfigAccepts(t *testing.T) {
 func TestValidateVenueConfigRejects(t *testing.T) {
 	keys := []string{"alpaca", "tradeZero"}
 	cases := map[string]func(vc *VenueConfig){
-		"empty id":                  func(vc *VenueConfig) { vc.Venues[0].ID = "" },
-		"bad id chars":              func(vc *VenueConfig) { vc.Venues[0].ID = "Alpaca_Paper" },
-		"duplicate id":              func(vc *VenueConfig) { vc.Venues[1].ID = "alpaca-paper" },
-		"bad broker":                func(vc *VenueConfig) { vc.Venues[0].Broker = "etrade" },
-		"bad env":                   func(vc *VenueConfig) { vc.Venues[0].Env = "demo" },
-		"missing cred key":          func(vc *VenueConfig) { vc.Venues[0].Credentials = "nope" },
-		"tz missing account":        func(vc *VenueConfig) { vc.Venues[1].AccountID = "" },
+		"empty id":           func(vc *VenueConfig) { vc.Venues[0].ID = "" },
+		"bad id chars":       func(vc *VenueConfig) { vc.Venues[0].ID = "Alpaca_Paper" },
+		"duplicate id":       func(vc *VenueConfig) { vc.Venues[1].ID = "alpaca-paper" },
+		"bad broker":         func(vc *VenueConfig) { vc.Venues[0].Broker = "etrade" },
+		"bad env":            func(vc *VenueConfig) { vc.Venues[0].Env = "demo" },
+		"missing cred key":   func(vc *VenueConfig) { vc.Venues[0].Credentials = "nope" },
+		"tz missing account": func(vc *VenueConfig) { vc.Venues[1].AccountID = "" },
+		"moomoo missing account": func(vc *VenueConfig) {
+			vc.Venues = append(vc.Venues, Venue{ID: "moomoo-live", Broker: "moomoo", Env: "live", AccountID: ""})
+		},
+		"moomoo non-numeric account": func(vc *VenueConfig) {
+			vc.Venues = append(vc.Venues, Venue{ID: "moomoo-live", Broker: "moomoo", Env: "live", AccountID: "not-a-number"})
+		},
 		"negative gate cap":         func(vc *VenueConfig) { vc.Gate.Global.MaxDayLoss = -1 },
 		"gate key unknown id":       func(vc *VenueConfig) { vc.Gate.Venue["ghost"] = GateVenue{} },
 		"negative starting balance": func(vc *VenueConfig) { vc.Venues[2].StartingBalance = -1 },
@@ -59,6 +65,19 @@ func TestEffectiveStartingBalanceDefaultsWhenUnsetOrZero(t *testing.T) {
 		if got := v.EffectiveStartingBalance(); got != DefaultSimStartingBalance {
 			t.Fatalf("StartingBalance=%v: got %v, want default %v", sb, got, DefaultSimStartingBalance)
 		}
+	}
+}
+
+// TestValidateVenueConfigAcceptsMoomooNumericAccountID covers the moomoo
+// account_id branch added alongside the tradezero one (ValidateVenueConfig):
+// a moomoo venue whose account_id parses as a numeric string must pass,
+// mirroring the tradezero "tz missing account" reject-case coverage above
+// with the accept-side moomoo case.
+func TestValidateVenueConfigAcceptsMoomooNumericAccountID(t *testing.T) {
+	vc := validVC()
+	vc.Venues = append(vc.Venues, Venue{ID: "moomoo-live", Broker: "moomoo", Env: "live", AccountID: "12345678"})
+	if err := ValidateVenueConfig(vc, []string{"alpaca", "tradeZero"}); err != nil {
+		t.Fatalf("valid moomoo venue rejected: %v", err)
 	}
 }
 

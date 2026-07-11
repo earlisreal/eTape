@@ -160,6 +160,18 @@ func (m *mockTrdOpenD) closeConns() {
 	}
 }
 
+// connCount returns the number of TCP connections currently tracked by this
+// mock server. Tests use it as a cheap "dial count" proxy when closeConns()
+// is never called in between: VerifyAccount's contract is to dial exactly
+// once and tear the connection down before returning, so N back-to-back
+// calls (with no intervening closeConns()) should grow connCount by exactly
+// N, with no extra (leaked reconnect) accepts in between.
+func (m *mockTrdOpenD) connCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.conns)
+}
+
 // requestsFor returns a mu-guarded copy of every received frame matching
 // protoID, in arrival order.
 func (m *mockTrdOpenD) requestsFor(protoID uint32) []opend.Frame {

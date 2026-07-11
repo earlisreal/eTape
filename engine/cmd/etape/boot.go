@@ -132,9 +132,15 @@ type rttProber interface {
 }
 
 // firstAlpacaProber returns the first configured Alpaca adapter's ProbeRTT,
-// for wiring the engine-alpaca health link. Only *alpaca.Adapter implements
-// rttProber among the possible venueBroker.Broker types (sim/tradezero/
-// stub/alpaca), so a type-assert cleanly picks it out; nil (no alpaca venue
+// for wiring the engine-alpaca health link. This asserts against the
+// CONCRETE *alpaca.Adapter type rather than the generic rttProber
+// interface: both *alpaca.Adapter and *moomoo.Adapter implement ProbeRTT
+// (and so both satisfy rttProber), so an interface-only assertion would
+// pick whichever venue happens to come first in config order regardless of
+// broker — a config with moomoo listed before alpaca would silently
+// mislabel moomoo's OpenD latency as the Alpaca health link. Asserting the
+// concrete type keeps this function alpaca-specific no matter which other
+// broker types pick up rttProber in the future. nil (no alpaca venue
 // configured, or replay mode where every venue is sim) means the
 // engine-alpaca link is omitted entirely rather than shown down — see
 // buildHealth's hasAlpaca gate.
@@ -145,7 +151,7 @@ type rttProber interface {
 // ever matters day to day.
 func firstAlpacaProber(vbs []venueBroker) rttProber {
 	for _, vb := range vbs {
-		if p, ok := vb.Broker.(rttProber); ok {
+		if p, ok := vb.Broker.(*alpaca.Adapter); ok {
 			return p
 		}
 	}
