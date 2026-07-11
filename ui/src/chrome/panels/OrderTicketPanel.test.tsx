@@ -9,11 +9,19 @@ import { makeStores } from "../../data/registry";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
 import type { AckMsg, ExecStatus, SubmitOrderArgs } from "../../wire/contract";
 import type { PanelProps } from "./registry";
+import type { OrderConfig } from "../exec/actionTemplate";
 
-function mkProps() {
+// orderConfig, when passed, is served back as the OrderConfigProvider's
+// GetConfig read — lets deck-wiring tests seed a deck-enabled template
+// without touching the default (deck-less) behavior every other test here relies on.
+function mkProps(orderConfig?: OrderConfig) {
   const stores = makeStores();
   const sent: Array<{ name: string; args: unknown }> = [];
-  const commands = { sendCommand: vi.fn(async (name: string, args: unknown): Promise<AckMsg> => { sent.push({ name, args }); return { kind: "ack", corrId: "c", status: "accepted", orderId: "ETX", value: undefined }; }), sendQuery: vi.fn(async () => []) };
+  const commands = { sendCommand: vi.fn(async (name: string, args: unknown): Promise<AckMsg> => {
+    sent.push({ name, args });
+    if (name === "GetConfig" && orderConfig) return { kind: "ack", corrId: "c", status: "accepted", value: orderConfig };
+    return { kind: "ack", corrId: "c", status: "accepted", orderId: "ETX", value: undefined };
+  }), sendQuery: vi.fn(async () => []) };
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
   const props = { config: { id: "t-ticket", panelId: "order-ticket", group: "green", settings: {} }, stores, scheduler: {} as never, width: 320, height: 400, linkGroups, commands, onConfigChange: () => {} } as PanelProps;
   return { props, stores, sent, linkGroups };
@@ -174,5 +182,38 @@ describe("OrderTicketPanel", () => {
     expect((screen.getByTestId("session") as HTMLSelectElement).value).toBe("AUTO");
     const sessionOptions = Array.from(screen.getByTestId("session").querySelectorAll("option")).map((o) => o.textContent);
     expect(sessionOptions).toEqual(["Auto", "Regular", "Extended", "Overnight"]);
+  });
+  // Deck-wiring coverage (Task 3): unlike HotkeyDeck.test.tsx — which passes
+  // venue/quote/etc. directly as props to a bare <HotkeyDeck> and mocks `oc`
+  // — this exercises the real integration seam: the panel's own
+  // venue/symbol/quote/positionQty derivation (lines ~56-69) flowing into
+  // HotkeyDeck as props, and a click reaching the real OrderCommands.submit
+  // → commands.sendCommand("SubmitOrder", ...) chain, not a mock.
+  it("shows the deck's empty-state hint by default (no deck templates configured)", () => {
+    const { props, stores } = mkProps();
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
+    wrap(props);
+    expect(screen.getByTestId("deck-empty")).toBeTruthy();
+  });
+  it("renders a configured deck button under Strip 4 and fires it through the panel's own derived venue/quote", async () => {
+    const deckConfig: OrderConfig = {
+      activeVenue: "", templates: [{
+        kind: "place", id: "buy1", label: "Buy 1", side: "BUY", type: "LIMIT", tif: "DAY",
+        priceSource: "Ask", priceOffset: 0, sizing: { mode: "Shares", shares: 25 }, deck: true,
+      }],
+    };
+    const { props, stores, linkGroups, sent } = mkProps(deckConfig);
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.4, ask: 3.5, last: 3.45, ts: "" } });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    await waitFor(() => expect(screen.getByTestId("deck-buy1")).toBeTruthy());
+    expect(screen.queryByTestId("deck-empty")).toBeNull();
+    fireEvent.click(screen.getByTestId("deck-buy1"));
+    await waitFor(() => expect(sent.some((s) => s.name === "SubmitOrder")).toBe(true));
+    const args = sent.find((s) => s.name === "SubmitOrder")?.args as SubmitOrderArgs;
+    expect(args).toMatchObject({ venue: "alpaca-paper", symbol: "US.AAPL", side: "BUY", qty: 25, limitPrice: 3.5 });
   });
 });

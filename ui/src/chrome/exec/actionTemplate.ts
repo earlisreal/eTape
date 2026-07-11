@@ -5,6 +5,8 @@ import type { Side, OrderType, TIF, OrderSession, VenueID } from "../../wire/con
 import type { SizingSpec } from "./sizing";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 
+export type DeckColor = "auto" | "green" | "red" | "bronze" | "neutral" | "danger";
+
 export interface PlaceOrderTemplate {
   kind: "place";
   id: string; label: string;
@@ -14,9 +16,11 @@ export interface PlaceOrderTemplate {
   priceOffsetUnit?: PriceOffsetUnit;   // absent => "$" (every persisted config is already valid)
   sizing: SizingSpec;
   hotkey?: string;   // normalized combo, e.g. "Ctrl+1" (see hotkeys.ts)
+  deck?: boolean;   // absent => hotkey-only, not shown in deck
+  deckColor?: DeckColor;   // absent => "auto"
 }
 export type ManagementAction = "CancelLast" | "CancelAllFocused" | "CancelAllEverything" | "KillSwitch";
-export interface ManagementTemplate { kind: "manage"; id: string; label: string; action: ManagementAction; hotkey?: string }
+export interface ManagementTemplate { kind: "manage"; id: string; label: string; action: ManagementAction; hotkey?: string; deck?: boolean; deckColor?: DeckColor }
 export type ActionTemplate = PlaceOrderTemplate | ManagementTemplate;
 
 // The whole editable order-entry config; persisted as one blob (fewer round-trips).

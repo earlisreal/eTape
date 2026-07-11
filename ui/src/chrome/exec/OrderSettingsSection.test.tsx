@@ -393,4 +393,87 @@ describe("OrderSettingsSection", () => {
     // ...but the real KillSwitch command must NOT have fired on the global engine.
     expect(sent.some((s) => s.name === "KillSwitch")).toBe(false);
   });
+
+  // Task 4b: the deck toggle patches `deck` and it survives Save.
+  it("toggles the deck checkbox on and off, and it round-trips on save", () => {
+    const { onSave } = wrap();
+    const toggle = screen.getByTestId("tmpl-deck-toggle-buy-5k") as HTMLInputElement;
+    expect(toggle.checked).toBe(false);
+    fireEvent.click(toggle);
+    expect(toggle.checked).toBe(true);
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").deck).toBe(true);
+  });
+
+  // Applies to management templates too (e.g. KillSwitch is a valid deck button).
+  it("shows the deck toggle on a management card as well", () => {
+    const { onSave } = wrap();
+    fireEvent.click(screen.getByTestId("tmpl-deck-toggle-kill"));
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "kill").deck).toBe(true);
+  });
+
+  // Task 4b: color swatches only appear once the deck toggle is on, clicking
+  // one sets deckColor, and it survives Save.
+  it("sets deckColor via a swatch click once the deck toggle is on, and it round-trips on save", () => {
+    const { onSave } = wrap();
+    expect(screen.queryByTestId("tmpl-deck-color-buy-5k-green")).toBeNull();
+    fireEvent.click(screen.getByTestId("tmpl-deck-toggle-buy-5k"));
+    fireEvent.click(screen.getByTestId("tmpl-deck-color-buy-5k-green"));
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").deckColor).toBe("green");
+  });
+
+  // The selected swatch must be visually distinguished (boxShadow ring) so a
+  // test can assert selection state, not just click behavior.
+  it("visually marks the selected swatch with a boxShadow ring, moving the ring on click", () => {
+    wrap();
+    fireEvent.click(screen.getByTestId("tmpl-deck-toggle-buy-5k"));
+    // Default deckColor is absent -> "auto" is the selected swatch.
+    const auto = screen.getByTestId("tmpl-deck-color-buy-5k-auto") as HTMLButtonElement;
+    const green = screen.getByTestId("tmpl-deck-color-buy-5k-green") as HTMLButtonElement;
+    expect(auto.style.boxShadow).not.toBe("none");
+    expect(green.style.boxShadow).toBe("none");
+    fireEvent.click(green);
+    expect(green.style.boxShadow).not.toBe("none");
+    expect(auto.style.boxShadow).toBe("none");
+  });
+
+  // Task 4a: reorder swaps two templates and the swap is reflected on save.
+  it("moves a template down and its neighbor up, swapping their array positions on save", () => {
+    const { onSave } = wrap();
+    // buy-5k (index 0) and buy-25pct (index 1) are adjacent.
+    fireEvent.click(screen.getByTestId("tmpl-move-down-buy-5k"));
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates[0].id).toBe("buy-25pct");
+    expect(saved.templates[1].id).toBe("buy-5k");
+  });
+
+  it("moves a template up, swapping it with its predecessor on save", () => {
+    const { onSave } = wrap();
+    fireEvent.click(screen.getByTestId("tmpl-move-up-buy-25pct"));
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates[0].id).toBe("buy-25pct");
+    expect(saved.templates[1].id).toBe("buy-5k");
+  });
+
+  // Bounds: the first template's move-up and the last template's move-down
+  // are disabled (assert the `disabled` attribute, not click-then-no-op).
+  it("disables move-up on the first template and move-down on the last template", () => {
+    wrap();
+    // SAMPLE_ORDER_CONFIG order: buy-5k (first) ... kill (last).
+    const firstUp = screen.getByTestId("tmpl-move-up-buy-5k") as HTMLButtonElement;
+    const firstDown = screen.getByTestId("tmpl-move-down-buy-5k") as HTMLButtonElement;
+    const lastUp = screen.getByTestId("tmpl-move-up-kill") as HTMLButtonElement;
+    const lastDown = screen.getByTestId("tmpl-move-down-kill") as HTMLButtonElement;
+    expect(firstUp.disabled).toBe(true);
+    expect(firstDown.disabled).toBe(false);
+    expect(lastUp.disabled).toBe(false);
+    expect(lastDown.disabled).toBe(true);
+  });
 });
