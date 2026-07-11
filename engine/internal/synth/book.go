@@ -17,15 +17,32 @@ const bookDepth = 10
 // roundLot is used to derive a level's synthetic order count from its size.
 const roundLot = 100
 
-// maxTouchDriftPct bounds how far a side's touch may sit from where it
-// belongs relative to the current mid (as a fraction of mid) before
-// replenish treats it as stale and rebuilds that side fresh, rather than
-// extending it further outward via topUp. Without this, a sequence of
-// same-direction sweeps can walk the touch arbitrarily far from mid with
-// nothing to pull it back (topUp only adds depth, never repositions;
-// rebuildAround — the only mechanism that does reposition — is never
-// called mid-run on the live or fine-pass-seeding paths).
-const maxTouchDriftPct = 0.10
+// maxTouchDriftMult bounds how far a side's touch may sit from where it
+// belongs relative to the current mid before replenish treats it as stale
+// and rebuilds that side fresh, rather than extending it further outward via
+// topUp. Without this, a sequence of same-direction sweeps can walk the
+// touch arbitrarily far from mid with nothing to pull it back (topUp only
+// adds depth, never repositions; rebuildAround — the only mechanism that
+// does reposition — is never called mid-run on the live or
+// fine-pass-seeding paths).
+//
+// The threshold is derived from the symbol's own SpreadProfile
+// (MaxCents*FlushMult, its documented "occasional flush" ceiling) rather
+// than a flat fraction of mid: mid-relative thresholds are dollars for
+// anything over a few dollars, while SpreadProfile's bounds are cents —
+// using mid*pct let a large/mid-cap's touch drift 100-1000x past its
+// documented spread before anything corrected it (found by Task 11's
+// statistical sweep; every personality's SpreadProfile already encodes how
+// wide that symbol's spread should normally get, so tying the correction
+// threshold to it directly keeps runners' naturally wider tolerance and
+// large-caps' naturally tight one, rather than one flat rule for both).
+const maxTouchDriftMult = 3.0
+
+// maxTouchDrift returns the dollar drift threshold for spec, per
+// maxTouchDriftMult's doc comment.
+func maxTouchDrift(spec SymbolSpec) float64 {
+	return float64(spec.Spread.MaxCents) * spec.Spread.FlushMult * maxTouchDriftMult / 100
+}
 
 // level is one price level of one side of the simulated book. bids are
 // ordered high->low, asks low->high (best/touch first on both sides).
@@ -51,20 +68,28 @@ func newBook(rng *rand.Rand, spec SymbolSpec, mid float64) *bookState {
 	return b
 }
 
-// rebuildAround re-centers b on mid, discarding the previous ladder and
-// drawing bookDepth fresh levels per side. halfSpread widens by
-// spec.Spread.FlushMult when flush is set (a volatility-flush moment).
-func (b *bookState) rebuildAround(rng *rand.Rand, spec SymbolSpec, mid float64, flush bool) {
-	halfSpread := math.Max(0.01, float64(spec.Spread.MinCents)/100)
+// halfSpread returns spec's normal (non-flush) half-spread in dollars, the
+// shared reference both rebuildAround and replenish anchor each side's
+// touch to. When flush is set (a volatility-flush moment), it widens by
+// spec.Spread.FlushMult.
+func halfSpread(spec SymbolSpec, flush bool) float64 {
+	hs := math.Max(0.01, float64(spec.Spread.MinCents)/100)
 	if flush {
-		halfSpread *= spec.Spread.FlushMult
+		hs *= spec.Spread.FlushMult
 	}
+	return hs
+}
 
-	bestBid := round2(mid - halfSpread)
+// rebuildAround re-centers b on mid, discarding the previous ladder and
+// drawing bookDepth fresh levels per side.
+func (b *bookState) rebuildAround(rng *rand.Rand, spec SymbolSpec, mid float64, flush bool) {
+	hs := halfSpread(spec, flush)
+
+	bestBid := round2(mid - hs)
 	if bestBid < priceFloor {
 		bestBid = priceFloor
 	}
-	bestAsk := round2(mid + halfSpread)
+	bestAsk := round2(mid + hs)
 	if bestAsk < bestBid+0.01 {
 		bestAsk = bestBid + 0.01
 	}
@@ -179,9 +204,9 @@ func extendSide(side *[]level, dir feed.Direction, lastPrice float64) {
 // occasionally planting a larger wall at the nearest round number, and
 // re-asserts best-first ordering and a non-crossed touch.
 func (b *bookState) replenish(rng *rand.Rand, spec SymbolSpec, mid float64) {
-	halfSpread := math.Max(0.01, float64(spec.Spread.MinCents)/100)
-	bidAnchor := round2(mid - halfSpread)
-	askAnchor := round2(mid + halfSpread)
+	hs := halfSpread(spec, false)
+	bidAnchor := round2(mid - hs)
+	askAnchor := round2(mid + hs)
 
 	// topUp only ever ADDS depth beyond a side's existing worst level — it
 	// never repositions an existing touch. consume's extendSide guarantees
@@ -192,15 +217,16 @@ func (b *bookState) replenish(rng *rand.Rand, spec SymbolSpec, mid float64) {
 	// sweep in the same direction, since nothing else in the live
 	// (stepSymbol) or fine-pass-seeding (seedIntraday) path ever calls
 	// rebuildAround mid-run (that only happens at construction and day
-	// rollovers). If the touch has drifted more than maxTouchDriftPct of
-	// mid away from where it belongs, treat that side as effectively
-	// stale and rebuild it fresh near mid instead of extending it further.
-	if len(b.bids) == 0 || math.Abs(b.bids[0].Price-bidAnchor) > mid*maxTouchDriftPct {
+	// rollovers). If the touch has drifted more than maxTouchDrift away
+	// from where it belongs, treat that side as effectively stale and
+	// rebuild it fresh near mid instead of extending it further.
+	driftCeiling := maxTouchDrift(spec)
+	if len(b.bids) == 0 || math.Abs(b.bids[0].Price-bidAnchor) > driftCeiling {
 		b.bids = buildLevels(rng, spec, bidAnchor, false)
 	} else {
 		b.bids = topUp(rng, spec, b.bids, bidAnchor, true)
 	}
-	if len(b.asks) == 0 || math.Abs(b.asks[0].Price-askAnchor) > mid*maxTouchDriftPct {
+	if len(b.asks) == 0 || math.Abs(b.asks[0].Price-askAnchor) > driftCeiling {
 		b.asks = buildLevels(rng, spec, askAnchor, true)
 	} else {
 		b.asks = topUp(rng, spec, b.asks, askAnchor, false)

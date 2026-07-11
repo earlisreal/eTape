@@ -153,7 +153,12 @@ func TestBook_ReplenishRecentersDriftedTouch(t *testing.T) {
 		assertBookInvariants(t, b)
 
 		bestBid, bestAsk := b.best()
-		maxDrift := mid * maxTouchDriftPct
+		// The rebuild threshold in replenish compares the touch against its
+		// own anchor (mid +/- halfSpread), not against mid directly, so the
+		// true bound on distance-from-mid is halfSpread+maxTouchDrift (plus a
+		// tiny epsilon: the exact worst case can land precisely at that bound
+		// before the next replenish call rebuilds it).
+		maxDrift := halfSpread(s, false) + maxTouchDrift(s) + 1e-9
 		if math.Abs(bestBid-mid) > maxDrift || math.Abs(bestAsk-mid) > maxDrift {
 			t.Fatalf("iter=%d: touch drifted too far from mid=%.4f: bestBid=%.4f bestAsk=%.4f (max drift %.4f)",
 				i, mid, bestBid, bestAsk, maxDrift)
@@ -185,5 +190,48 @@ func TestBook_FixCrossedPreservesAskSortOrder(t *testing.T) {
 	assertBookInvariants(t, b)
 	if b.bids[0].Price >= b.asks[0].Price {
 		t.Fatalf("still crossed after fixCrossed: bid=%.4f ask=%.4f", b.bids[0].Price, b.asks[0].Price)
+	}
+}
+
+// TestBook_ReplenishRespectsSpreadProfile is a regression test for a real
+// product defect Task 11's statistical sanity sweep found: SpreadProfile's
+// documented bound (spread normally within [MinCents,MaxCents], "occasionally
+// flushing out" to MaxCents*FlushMult) was not actually enforced anywhere in
+// the steady-state (post-construction) book model. replenish's only
+// correction mechanism was a flat 10%-of-mid drift threshold -- for anything
+// over a few dollars, that's dollars, not cents, so a symbol's spread could
+// (and empirically, typically did) run 100-1000x over its documented bound.
+// Sweeps consume+replenish for a large-cap symbol (the tightest documented
+// profile, MinCents:1/MaxCents:2/FlushMult:1.5) and asserts the spread stays
+// within a generous multiple of the profile's own flush-widened ceiling --
+// not the exact ceiling itself (a single-tick spike immediately after a
+// rebuild-triggering sweep is expected and fine), but nowhere near the old
+// 100-1000x reality.
+func TestBook_ReplenishRespectsSpreadProfile(t *testing.T) {
+	rng := rand.New(rand.NewSource(11))
+	s := spec(PersLargeCap)
+	mid := 100.0
+	b := newBook(rng, s, mid)
+
+	flushCeilingDollars := float64(s.Spread.MaxCents) * s.Spread.FlushMult / 100
+	// Generous margin over the documented ceiling -- this is a defect fix,
+	// not a claim the model hits the exact documented bound at all times.
+	const marginMult = 10.0
+	maxAllowedSpread := flushCeilingDollars * marginMult
+
+	for i := 0; i < 500; i++ {
+		if i%2 == 0 {
+			b.consume(feed.Buy, b.asks[0].Size+1)
+		} else {
+			b.consume(feed.Sell, b.bids[0].Size+1)
+		}
+		b.replenish(rng, s, mid)
+		assertBookInvariants(t, b)
+
+		bid, ask := b.best()
+		if spread := ask - bid; spread > maxAllowedSpread {
+			t.Fatalf("iter=%d: spread %.4f exceeds %.1fx the documented flush ceiling %.4f (bid=%.4f ask=%.4f)",
+				i, spread, marginMult, flushCeilingDollars, bid, ask)
+		}
 	}
 }

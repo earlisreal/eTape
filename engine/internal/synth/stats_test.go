@@ -52,22 +52,15 @@ const (
 	statsSweepSteps  = 24 * 60 // 24h of 1-minute strides
 )
 
-// spreadRatioCeiling bounds the OBSERVED (ask-bid)/mid ratio sampled every
-// stride across every symbol/seed in this sweep. It is deliberately NOT
-// SpreadProfile.MaxCents*FlushMult/mid (universe.go's own documented
-// intent for a "normal" spread, a few cents): empirical measurement (see this
-// file's header comment) shows the live book's touch commonly drifts to
-// within a few percent of book.go's maxTouchDriftPct (10% of mid) BEFORE
-// replenish's staleness check rebuilds it -- and, since bid/ask drift is
-// checked independently per side against a mid-anchored reference, the two
-// sides can drift in opposite directions at once, so the worst-case
-// observed spread approaches 2*maxTouchDriftPct of mid, not maxTouchDriftPct
-// itself. A 10-seed x 24h empirical sweep during this task's investigation
-// never exceeded ~0.214; 0.30 keeps a comfortable margin above that while
-// still being a real ceiling (it would catch, e.g., topUp's stale-rebuild
-// path being accidentally disabled, which would let drift grow unbounded
-// over a long enough run instead of self-correcting within this envelope).
-const spreadRatioCeiling = 0.30
+// The spread ceiling this sweep asserts is computed per-symbol from
+// book.go's own maxTouchDrift/halfSpread (2*maxTouchDrift + halfSpread,
+// the exact worst case both sides drifting to their own rebuild ceiling at
+// once), not a single flat ratio -- see the per-stride check below. An
+// earlier version of this file asserted a flat spread/mid ratio against a
+// mid-relative maxTouchDriftPct; that mechanism was replaced (this same
+// commit) because it let a large/mid-cap's spread run 100-1000x over its
+// documented SpreadProfile before anything corrected it, found by an early
+// version of exactly this sweep.
 
 // largeCapDriftLo/Hi mirror TestStepPrice_BoundedDriftOverHours' own band
 // (price_test.go) for the reasons that test's doc comment gives (mean
@@ -155,9 +148,22 @@ func TestGenerator_StatisticalSanityAcrossSeedsAndPersonalities(t *testing.T) {
 						t.Fatalf("%s: spread %.2fc below MinCents=%d at t=%dms (bid=%v ask=%v)",
 							code, spreadCents, rt.spec.Spread.MinCents, now, bid, ask)
 					}
-					if ratio := (ask - bid) / mid; ratio > spreadRatioCeiling {
-						t.Fatalf("%s: spread/mid ratio %.4f exceeds ceiling %.2f at t=%dms (bid=%v ask=%v mid=%v)",
-							code, ratio, spreadRatioCeiling, now, bid, ask, mid)
+					// Per-symbol ceiling, tied directly to the fixed mechanism
+					// (book.go's maxTouchDrift) rather than a single flat ratio: a
+					// flat mid-relative ratio can't hold across personalities at once
+					// (a cheap runner's dollar-based drift ceiling is a much larger
+					// fraction of its own low mid than a $500 large cap's is of its
+					// mid), but each symbol's own worst-case spread is exactly
+					// bounded by both sides drifting to their own ceiling at once
+					// plus the base spread.
+					// +1e-9: the exact worst case can land precisely at maxSpread
+					// (bid/ask each exactly at their own drift ceiling before the
+					// next replenish call rebuilds them), so a bare `>` risks a
+					// floating-point-epsilon false failure right at the boundary.
+					maxSpread := 2*halfSpread(rt.spec, false) + 2*maxTouchDrift(rt.spec) + 1e-9
+					if spread := ask - bid; spread > maxSpread {
+						t.Fatalf("%s: spread %.4f exceeds derived ceiling %.4f (2*maxTouchDrift+halfSpread) at t=%dms (bid=%v ask=%v mid=%v)",
+							code, spread, maxSpread, now, bid, ask, mid)
 					}
 
 					// (c) accumulate ticks for the intensity check below.
