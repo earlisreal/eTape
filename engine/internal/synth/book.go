@@ -130,6 +130,16 @@ func (b *bookState) consume(dir feed.Direction, qty int64) (execPrice float64, f
 		}
 	}
 
+	// Postcondition: never leave the touched side empty. The loop above
+	// only extends when it finds the side empty *before* taking from it;
+	// if the very last unit of qty happens to exactly drain the side's
+	// last remaining level, the loop exits with remaining == 0 without
+	// ever re-checking — leaving *side at length 0. Guard against that
+	// here unconditionally, regardless of how the loop above exited.
+	if len(*side) == 0 {
+		extendSide(side, dir, lastPrice)
+	}
+
 	if filled == 0 {
 		return 0, 0
 	}
@@ -200,33 +210,37 @@ func topUp(rng *rand.Rand, spec SymbolSpec, side []level, anchor float64, desc b
 	return side
 }
 
-// plantRoundWall finds the round-number price ($ or $0.50) nearest the
-// current touch and, if it falls within the existing ladder on either side,
-// boosts that level's size to simulate a resting institutional order.
+// plantRoundWall finds the round-number price ($ or $0.50) nearest each
+// side's own touch and, if it falls within that side's existing ladder,
+// boosts that level's size to simulate a resting institutional order. bids
+// and asks are checked against their own round-number target — under a wide
+// (e.g. flushed) spread the two touches can straddle a $0.50 boundary
+// asymmetrically, so a single shared target computed from one side's touch
+// would misplace the other side's wall.
 func plantRoundWall(rng *rand.Rand, spec SymbolSpec, bids, asks *[]level) {
-	if len(*bids) == 0 {
-		return
-	}
-	touch := (*bids)[0].Price
-	round := math.Round(touch*2) / 2 // nearest $0.50
-
 	wallSize := int64(spec.BookMeanSize * between(rng, 3, 6))
 	if wallSize < 1 {
 		wallSize = 1
 	}
 
-	for i := range *bids {
-		if math.Abs((*bids)[i].Price-round) < 0.005 {
-			(*bids)[i].Size += wallSize
-			(*bids)[i].Orders = ordersFor((*bids)[i].Size)
-			return
+	if len(*bids) > 0 {
+		round := math.Round((*bids)[0].Price*2) / 2 // nearest $0.50
+		for i := range *bids {
+			if math.Abs((*bids)[i].Price-round) < 0.005 {
+				(*bids)[i].Size += wallSize
+				(*bids)[i].Orders = ordersFor((*bids)[i].Size)
+				return
+			}
 		}
 	}
-	for i := range *asks {
-		if math.Abs((*asks)[i].Price-round) < 0.005 {
-			(*asks)[i].Size += wallSize
-			(*asks)[i].Orders = ordersFor((*asks)[i].Size)
-			return
+	if len(*asks) > 0 {
+		round := math.Round((*asks)[0].Price*2) / 2 // nearest $0.50
+		for i := range *asks {
+			if math.Abs((*asks)[i].Price-round) < 0.005 {
+				(*asks)[i].Size += wallSize
+				(*asks)[i].Orders = ordersFor((*asks)[i].Size)
+				return
+			}
 		}
 	}
 }
