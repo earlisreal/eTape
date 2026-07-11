@@ -336,3 +336,44 @@ func TestVacuumIfNeeded(t *testing.T) {
 		t.Fatal("vacuum ran on a tiny DB; freelist should be under threshold")
 	}
 }
+
+func TestBootMaintenanceSequence(t *testing.T) {
+	s := openAtClock(t, afterDay(t)) // today = 2026-07-08
+	// A past day (07-06) and "today" (07-08) both have raw rows.
+	for i, ev := range sampleEvents() {
+		s.RecordEvent(ev, recvBase+int64(i)) // 2026-07-06
+	}
+	todayMs := time.Date(2026, 7, 8, 10, 0, 0, 0, mustLoc(t)).UnixMilli()
+	s.RecordEvent(feed.ConnUpEvent{}, todayMs)
+	s.Flush()
+
+	// main.go order: prune (retention huge → no-op) → seal → flush → vacuum.
+	if _, err := s.PruneJournal(3650); err != nil {
+		t.Fatal(err)
+	}
+	sum, err := s.SealJournalDays()
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Flush()
+	if _, err := s.VacuumIfNeeded(); err != nil {
+		t.Fatal(err)
+	}
+
+	if sum.Days != 1 {
+		t.Fatalf("sealed %d days, want 1 (07-06 only)", sum.Days)
+	}
+	if rawCount(t, s, "2026-07-06") != 0 || chunkCount(t, s, "2026-07-06") == 0 {
+		t.Fatal("past day 2026-07-06 not sealed")
+	}
+	if chunkCount(t, s, "2026-07-08") != 0 || rawCount(t, s, "2026-07-08") != 1 {
+		t.Fatal("today 2026-07-08 must stay raw")
+	}
+	// Both days still fully readable.
+	if rows, _ := s.ReadJournalDay("2026-07-06"); len(rows) != len(sampleEvents()) {
+		t.Fatalf("07-06 read back %d rows, want %d", len(rows), len(sampleEvents()))
+	}
+	if rows, _ := s.ReadJournalDay("2026-07-08"); len(rows) != 1 {
+		t.Fatalf("07-08 read back %d rows, want 1", len(rows))
+	}
+}

@@ -469,6 +469,23 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		if n, err := st.PruneJournal(cfg.Store.RetentionDays); err == nil && n > 0 {
 			log.Info("pruned journal", "rows", n)
 		}
+		if sum, err := st.SealJournalDays(); err != nil {
+			log.Error("seal journal", "err", err)
+			st.AppendSysEvent("retention", fmt.Sprintf("journal seal error: %v", err))
+		} else if sum.Days > 0 || sum.Failed > 0 {
+			log.Info("sealed journal", "days", sum.Days, "chunks", sum.Chunks, "rows", sum.Rows,
+				"failed", sum.Failed, "mbBefore", sum.BytesBefore>>20, "mbAfter", sum.BytesAfter>>20)
+			st.AppendSysEvent("retention", fmt.Sprintf(
+				"sealed %d day(s): %d rows → %d chunks (%d MB → %d MB); %d day(s) left raw",
+				sum.Days, sum.Rows, sum.Chunks, sum.BytesBefore>>20, sum.BytesAfter>>20, sum.Failed))
+		}
+		st.Flush() // drain queued sys_events so no writer tx races the VACUUM
+		if vac, err := st.VacuumIfNeeded(); err != nil {
+			log.Error("vacuum journal db", "err", err)
+		} else if vac {
+			log.Info("vacuumed journal db")
+			st.AppendSysEvent("retention", "vacuumed journal db (reclaimed free pages)")
+		}
 		st.AppendSysEvent("boot", "engine up")
 		dropWG.Add(1)
 		go watchDroppedUpdates(ctx, &dropWG, core, st)
