@@ -85,6 +85,7 @@ func (t *fakeTail) Tail1m(_ context.Context, _ string) ([]feed.Bar, error) {
 type fakeSeeder struct {
 	mu          sync.Mutex
 	daily, hist []feed.Bar
+	older       []feed.Bar
 	ticks       []feed.Tick
 	calls       []string
 }
@@ -106,6 +107,12 @@ func (s *fakeSeeder) SeedHistory1m(_ string, b []feed.Bar) {
 	defer s.mu.Unlock()
 	s.hist = append(s.hist, b...)
 	s.calls = append(s.calls, "hist")
+}
+func (s *fakeSeeder) SeedOlder1m(_ string, b []feed.Bar) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.older = append(s.older, b...)
+	s.calls = append(s.calls, "older")
 }
 
 type fakeArchive struct {
