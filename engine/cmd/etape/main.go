@@ -167,6 +167,20 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		*replayHold = true
 		*speed = *demoSpeed
 	} else {
+		// First run of a live boot with no config.toml: seed one so a fresh
+		// install comes up with a ready-to-use paper sim practice venue
+		// instead of zero configured venues. Gated to live only
+		// (*replayDay == "") -- -demo (above) has its own injected sim venue
+		// and its own temp config, and an explicit -replay forces every venue
+		// to sim regardless, so neither needs (or should trigger) a write to
+		// the real ~/.eTape/config.toml.
+		if *replayDay == "" {
+			if seeded, serr := config.SeedDefaultIfMissing(*cfgPath); serr != nil {
+				log.Warn("seed first-run config (continuing with empty venues)", "path", *cfgPath, "err", serr)
+			} else if seeded {
+				log.Info("first run: seeded config with a paper sim practice venue", "path", *cfgPath)
+			}
+		}
 		var err error
 		cfg, err = config.Load(*cfgPath)
 		if err != nil {

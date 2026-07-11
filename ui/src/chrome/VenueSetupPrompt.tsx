@@ -1,15 +1,17 @@
-// First-run nudge shown once no venue is configured yet (Task 3, venues/creds
-// redesign). AppShell owns the show/hide decision (execStatus.venues.length,
-// the "don't show again" localStorage flag, and the current-session dismiss
-// flag) — this component is a dumb, controlled prompt: it only renders its own
-// checkbox state and reports that state back on either action. Always mounted
-// only while AppShell wants it shown (no internal `open` prop), same lifetime
-// contract as TVDialog.
+// First-run nudge shown while no REAL (non-sim) broker venue is configured
+// (Task 3, venues/creds redesign; re-keyed off "no real venue" once a paper
+// sim practice venue started auto-seeding on first run — see
+// config.SeedDefaultIfMissing). AppShell owns the show/hide decision
+// (execStatus.venues, the "don't show again" localStorage flag, and the
+// current-session dismiss flag) — this component is a dumb, controlled
+// prompt: it only renders its own checkbox state and reports that state back
+// on either action. Always mounted only while AppShell wants it shown (no
+// internal `open` prop), same lifetime contract as TVDialog.
 import { useEffect, useState } from "react";
 import { useTheme } from "./ThemeProvider";
 import { modalTracker } from "./modalTracker";
 
-const BROKER_CHIPS = ["TradeZero", "Alpaca", "moomoo", "Sim"];
+const BROKER_CHIPS = ["TradeZero", "Alpaca", "moomoo"];
 
 export function VenueSetupPrompt({ onConfigure, onDismiss }: {
   onConfigure: (dontShowAgain: boolean) => void;
@@ -35,15 +37,16 @@ export function VenueSetupPrompt({ onConfigure, onDismiss }: {
   return (
     <div onClick={() => onDismiss(dontShowAgain)}
       style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000 }}>
-      <div onClick={(e) => e.stopPropagation()} className="venue-setup-prompt" role="dialog" aria-modal="true" aria-label="Set up a venue to trade"
+      <div onClick={(e) => e.stopPropagation()} className="venue-setup-prompt" role="dialog" aria-modal="true" aria-label="Add a broker to trade live"
         style={{ background: palette.surface, border: `1px solid ${palette.borderStrong}`, borderRadius: 6, width: 460, padding: 20, boxSizing: "border-box" }}>
         <div className="serif" style={{ fontSize: 16, fontWeight: 600, color: palette.text, marginBottom: 8 }}>
-          Set up a venue to trade
+          Add a broker to trade live
         </div>
         <p style={{ fontSize: 12, color: palette.textMuted, lineHeight: 1.5, margin: "0 0 14px" }}>
-          Charts and the tape work without a venue. To place orders, add one — a broker, an
-          environment, and its API keys. A paper Alpaca venue also unlocks deeper 1-minute
-          chart history (~20 days, quota-free) instead of moomoo's limited fallback.
+          You already have a paper Sim practice venue, so you can place orders right away.
+          To trade real money, add a broker — an environment and its API keys. A paper Alpaca
+          venue also unlocks deeper 1-minute chart history (~20 days, quota-free) instead of
+          moomoo's limited fallback.
         </p>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
           {BROKER_CHIPS.map((b) => <span key={b} className="chip chip-set">{b}</span>)}

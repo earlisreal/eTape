@@ -108,6 +108,7 @@ const (
 	BrokerTradeZero Broker = "tradezero"
 	BrokerAlpaca    Broker = "alpaca"
 	BrokerMoomoo    Broker = "moomoo"
+	BrokerSim       Broker = "sim" // practice venue: demo's injected venue, and any live-configured Broker:"sim" venue
 )
 
 // AckStatus is AckMsg.Status's typed enum (kept narrow so tygo emits a

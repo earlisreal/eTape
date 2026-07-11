@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -349,4 +350,39 @@ func WriteVenueConfig(path string, vc VenueConfig) error {
 		return fmt.Errorf("config: write: %w", err)
 	}
 	return nil
+}
+
+// DefaultVenueConfig is the first-run venue seed: one paper "sim" practice
+// venue funded with DefaultSimStartingBalance and no gate caps (matching the
+// settings UI's "add venue" default). Kept here so the seed content lives next
+// to the Venue schema and stays unit-testable.
+func DefaultVenueConfig() VenueConfig {
+	return VenueConfig{
+		Venues: []Venue{{
+			ID: "sim-paper", Broker: "sim", Env: "paper",
+			StartingBalance: DefaultSimStartingBalance, // explicit so file + UI both show 100000
+		}},
+	}
+}
+
+// SeedDefaultIfMissing writes DefaultVenueConfig() to path when no config file
+// exists yet (first run), so a fresh install comes up with a ready-to-use sim
+// practice venue instead of zero configured venues. It is a no-op when the
+// file already exists — an existing config, even one the user deliberately
+// emptied of venues, is never touched.
+func SeedDefaultIfMissing(path string) (seeded bool, err error) {
+	if _, statErr := os.Stat(path); statErr == nil {
+		return false, nil
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return false, statErr
+	}
+	// ~/.eTape may not exist yet this early in boot (the db-dir MkdirAll in
+	// main runs later), so create the parent dir ourselves.
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return false, err
+	}
+	if err := WriteVenueConfig(path, DefaultVenueConfig()); err != nil {
+		return false, err
+	}
+	return true, nil
 }

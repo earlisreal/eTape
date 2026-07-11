@@ -133,11 +133,18 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
   const execStatus = stores.exec.status();
   const armed = execStatus?.masterArmed ?? false;
+  // A paper "sim" venue is auto-seeded on first run (engine-side config seed),
+  // so "no venues configured" is no longer the right signal for either nudge
+  // below — a fresh install already has one. Both are re-keyed off "no REAL
+  // (non-sim) broker venue" instead, so a new user is still nudged toward
+  // live trading until they add TradeZero/Alpaca/moomoo.
+  const hasRealVenue = execStatus?.venues.some((v) => v.broker !== "sim") ?? false;
   // Task 3: show the first-run venue-setup prompt once the first exec.status
   // snapshot has arrived (execStatus !== null — gates the connect-window flash)
-  // and only while no venue is configured, the user hasn't dismissed it THIS
-  // session, and hasn't permanently silenced it via the checkbox.
-  const showVenueSetup = execStatus !== null && execStatus.venues.length === 0
+  // and only while no real broker venue is configured, the user hasn't
+  // dismissed it THIS session, and hasn't permanently silenced it via the
+  // checkbox.
+  const showVenueSetup = execStatus !== null && !hasRealVenue
     && !venueSetupSessionDismissed && !readVenueSetupHidden();
   const dismissVenueSetup = (dontShowAgain: boolean) => {
     if (dontShowAgain) {
@@ -149,14 +156,15 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     dismissVenueSetup(dontShowAgain);
     setSettings({ open: true, section: "venues" });
   };
-  // Alpaca-1m-history hint: shown once at least one venue is configured (so
-  // it never doubles up with the venue-setup prompt above, which only fires
-  // at zero venues) but none of them is Alpaca — the deep-1m backfill chain
-  // then falls back to moomoo's quota-guarded history fetch instead of the
-  // quota-free Alpaca SIP path (see AlpacaBackfillBanner.tsx for the detail).
+  // Alpaca-1m-history hint: shown once at least one REAL broker venue is
+  // configured (so it never doubles up with the venue-setup prompt above,
+  // which covers the sim-only/no-venue case) but none of them is Alpaca — the
+  // deep-1m backfill chain then falls back to moomoo's quota-guarded history
+  // fetch instead of the quota-free Alpaca SIP path (see
+  // AlpacaBackfillBanner.tsx for the detail).
   const hasAlpaca = execStatus?.venues.some((v) => v.broker === "alpaca") ?? false;
   const showAlpacaHint = engineState === "open" && execStatus !== null
-    && execStatus.venues.length > 0 && !hasAlpaca
+    && hasRealVenue && !hasAlpaca
     && !alpacaHintSessionDismissed && !readAlpacaHintHidden();
   const openAlpacaSetup = () => {
     // Session-dismiss only, not the permanent flag — venue edits only apply

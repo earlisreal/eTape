@@ -26,7 +26,7 @@ export type OrderStatus =
   | "SUBMITTED" | "ACCEPTED" | "PARTIALLY_FILLED" | "FILLED"
   | "CANCELED" | "REJECTED" | "EXPIRED" | "BLOCKED" | "REPLACED";
 export type TickDirection = "BUY" | "SELL" | "NEUTRAL";
-export type Broker = "tradezero" | "alpaca" | "moomoo";
+export type Broker = "tradezero" | "alpaca" | "moomoo" | "sim";
 export type AckStatus = "accepted" | "blocked";
 export type LinkName = "ui-engine" | "engine-moomoo" | "engine-tz" | "engine-alpaca";
 export type LinkStatus = "ok" | "degraded" | "down";

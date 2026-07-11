@@ -8,10 +8,10 @@ import { AppProviders } from "../test/providers";
 describe("VenueSetupPrompt", () => {
   it("renders the heading, lede, and broker chips", () => {
     render(<AppProviders><VenueSetupPrompt onConfigure={() => {}} onDismiss={() => {}} /></AppProviders>);
-    expect(screen.getByText("Set up a venue to trade")).toBeTruthy();
+    expect(screen.getByText("Add a broker to trade live")).toBeTruthy();
     expect(screen.getByText(/place orders/i)).toBeTruthy();
     expect(screen.getByText(/deeper 1-minute chart history/i)).toBeTruthy();
-    for (const b of ["TradeZero", "Alpaca", "moomoo", "Sim"]) expect(screen.getByText(b)).toBeTruthy();
+    for (const b of ["TradeZero", "Alpaca", "moomoo"]) expect(screen.getByText(b)).toBeTruthy();
   });
 
   it("fires onConfigure(false) when 'Configure venues' is clicked without ticking the checkbox", () => {
@@ -49,7 +49,7 @@ describe("VenueSetupPrompt", () => {
     const { container } = render(<AppProviders><VenueSetupPrompt onConfigure={() => {}} onDismiss={onDismiss} /></AppProviders>);
     // Click inside the card body (not on a button) must NOT dismiss — the card's
     // own onClick stopPropagation stops the scrim's handler from firing.
-    fireEvent.click(screen.getByText("Set up a venue to trade"));
+    fireEvent.click(screen.getByText("Add a broker to trade live"));
     expect(onDismiss).not.toHaveBeenCalled();
     const scrim = container.firstChild as HTMLElement;
     fireEvent.click(scrim);

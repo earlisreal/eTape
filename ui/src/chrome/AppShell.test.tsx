@@ -183,8 +183,8 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
   const seed: Workspace = { name: "default", panels: [], layout: null };
 
   const emptyGate = { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 };
-  const venueStatus = (id: string): VenueStatus => ({
-    venue: id, broker: "alpaca", connected: true, reconcilePending: false,
+  const venueStatus = (id: string, broker: VenueStatus["broker"] = "alpaca"): VenueStatus => ({
+    venue: id, broker, connected: true, reconcilePending: false,
     note: "", lastReconcileMs: null, gate: emptyGate,
   });
   const status = (venues: VenueStatus[]): ExecStatus => ({
@@ -202,34 +202,51 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
   it("does not show before the first exec.status snapshot arrives (no flash during connect)", async () => {
     mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
-    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+    expect(screen.queryByText("Add a broker to trade live")).toBeNull();
   });
 
   it("shows once exec.status arrives with zero venues", async () => {
     const { stores } = mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     publishStatus(stores, []);
-    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Add a broker to trade live")).toBeTruthy());
   });
 
-  it("does not show once a venue is configured", async () => {
+  it("still shows when only the auto-seeded sim practice venue is configured", async () => {
+    // First run auto-seeds a paper "sim" venue (config.SeedDefaultIfMissing) --
+    // that's not a real broker, so the nudge toward live trading must persist.
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, [venueStatus("sim-paper", "sim")]);
+    await waitFor(() => expect(screen.getByText("Add a broker to trade live")).toBeTruthy());
+  });
+
+  it("does not show once a real (non-sim) venue is configured", async () => {
     const { stores } = mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     publishStatus(stores, [venueStatus("alpaca-paper")]);
     // Give any (absent) render a chance, then assert it never appeared.
     await waitFor(() => expect(stores.exec.status()?.venues.length).toBe(1));
-    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+    expect(screen.queryByText("Add a broker to trade live")).toBeNull();
+  });
+
+  it("does not show once a real venue joins the auto-seeded sim venue", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, [venueStatus("sim-paper", "sim"), venueStatus("alpaca-paper", "alpaca")]);
+    await waitFor(() => expect(stores.exec.status()?.venues.length).toBe(2));
+    expect(screen.queryByText("Add a broker to trade live")).toBeNull();
   });
 
   it("clicking 'Configure venues' opens Settings on the Venues & creds section and closes the prompt", async () => {
     const { stores } = mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     publishStatus(stores, []);
-    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Add a broker to trade live")).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: "Configure venues" }));
 
-    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+    expect(screen.queryByText("Add a broker to trade live")).toBeNull();
     // The nav button alone doesn't prove which section is active — SettingsModal
     // renders all 4 nav entries unconditionally regardless of the current
     // section. Assert on VenuesSection's own "Venues" heading (distinct from
@@ -243,25 +260,25 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
     const { stores } = mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     publishStatus(stores, []);
-    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Add a broker to trade live")).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: "I'll do it later" }));
-    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+    expect(screen.queryByText("Add a broker to trade live")).toBeNull();
     expect(localStorage.getItem(VENUE_SETUP_HIDDEN_KEY)).toBeNull();
 
     // Re-publishing the same empty-venues status must not re-show it THIS session.
     publishStatus(stores, []);
-    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+    expect(screen.queryByText("Add a broker to trade live")).toBeNull();
   });
 
   it("dismissing without ticking the checkbox lets the prompt reappear on a fresh mount (simulated reload)", async () => {
     const { stores } = mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     publishStatus(stores, []);
-    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Add a broker to trade live")).toBeTruthy());
 
     fireEvent.click(screen.getByRole("button", { name: "I'll do it later" }));
-    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+    expect(screen.queryByText("Add a broker to trade live")).toBeNull();
     expect(localStorage.getItem(VENUE_SETUP_HIDDEN_KEY)).toBeNull();
 
     cleanup(); // unmount this AppShell instance — simulates a fresh app launch
@@ -272,14 +289,14 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
     // Untracked dismissal must NOT persist across launches — venues are still
     // empty, so the prompt is the non-negotiable half of the contract: it has
     // to come back.
-    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Add a broker to trade live")).toBeTruthy());
   });
 
   it("ticking 'don't show again' + dismissing persists the flag so a fresh mount with the same status stays hidden", async () => {
     const { stores } = mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     publishStatus(stores, []);
-    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Add a broker to trade live")).toBeTruthy());
 
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(screen.getByRole("button", { name: "I'll do it later" }));
@@ -290,7 +307,7 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
     const { stores: stores2 } = mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     publishStatus(stores2, []);
-    expect(screen.queryByText("Set up a venue to trade")).toBeNull();
+    expect(screen.queryByText("Add a broker to trade live")).toBeNull();
   });
 });
 
@@ -325,7 +342,18 @@ describe("AppShell Alpaca-1m-history hint banner", () => {
     const { stores } = mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     publishStatus(stores, []);
-    await waitFor(() => expect(screen.getByText("Set up a venue to trade")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("Add a broker to trade live")).toBeTruthy());
+    expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
+  });
+
+  it("does not show at sim-only (the venue-setup prompt covers that case instead)", async () => {
+    // The auto-seeded first-run sim venue is not a "real" venue for this
+    // banner's purposes -- it must not double up with the venue-setup prompt,
+    // which is the one nudging a sim-only user toward a real broker.
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, [venueStatus("sim-paper", "sim")]);
+    await waitFor(() => expect(screen.getByText("Add a broker to trade live")).toBeTruthy());
     expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
   });
 

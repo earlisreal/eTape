@@ -280,3 +280,99 @@ func TestBackfillDefaultsAndYahooKillSwitch(t *testing.T) {
 		t.Fatalf("alpaca feed = %q after partial file, want sip default preserved", c.Backfill.Alpaca.Feed)
 	}
 }
+
+func TestDefaultVenueConfigIsOnePaperSimVenue(t *testing.T) {
+	vc := DefaultVenueConfig()
+	if len(vc.Venues) != 1 {
+		t.Fatalf("DefaultVenueConfig venues = %+v, want exactly 1", vc.Venues)
+	}
+	v := vc.Venues[0]
+	if v.ID != "sim-paper" || v.Broker != "sim" || v.Env != "paper" {
+		t.Fatalf("DefaultVenueConfig venue = %+v, want sim-paper/sim/paper", v)
+	}
+	if v.StartingBalance != DefaultSimStartingBalance {
+		t.Fatalf("DefaultVenueConfig starting balance = %v, want %v", v.StartingBalance, DefaultSimStartingBalance)
+	}
+	if err := ValidateVenueConfig(vc, nil); err != nil {
+		t.Fatalf("DefaultVenueConfig fails validation (nil credKeys): %v", err)
+	}
+}
+
+func TestSeedDefaultIfMissingWritesOnFirstRun(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "config.toml") // parent dir doesn't exist yet
+	seeded, err := SeedDefaultIfMissing(path)
+	if err != nil {
+		t.Fatalf("SeedDefaultIfMissing: %v", err)
+	}
+	if !seeded {
+		t.Fatal("SeedDefaultIfMissing: want seeded=true on first run")
+	}
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("config file not created: %v", statErr)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load seeded config: %v", err)
+	}
+	if len(cfg.Venues) != 1 || cfg.Venues[0].ID != "sim-paper" || cfg.Venues[0].Broker != "sim" {
+		t.Fatalf("seeded venues = %+v, want one sim-paper sim venue", cfg.Venues)
+	}
+	if cfg.Venues[0].EffectiveStartingBalance() != DefaultSimStartingBalance {
+		t.Fatalf("seeded starting balance = %v, want %v", cfg.Venues[0].EffectiveStartingBalance(), DefaultSimStartingBalance)
+	}
+}
+
+func TestSeedDefaultIfMissingNoOpWhenFileExists(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+
+	seeded, err := SeedDefaultIfMissing(path)
+	if err != nil || !seeded {
+		t.Fatalf("first seed: seeded=%v err=%v, want true, nil", seeded, err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	seeded, err = SeedDefaultIfMissing(path)
+	if err != nil {
+		t.Fatalf("second seed: %v", err)
+	}
+	if seeded {
+		t.Fatal("second seed: want seeded=false once the file already exists")
+	}
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(before) != string(after) {
+		t.Fatal("SeedDefaultIfMissing modified an already-existing file")
+	}
+}
+
+func TestSeedDefaultIfMissingNeverTouchesDeliberatelyEmptyVenues(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.toml")
+	// A user (or a prior boot) wrote a config file with zero venues -- e.g.
+	// they removed the seeded sim venue via the settings UI. That deliberate
+	// choice must survive future boots, not be silently re-seeded.
+	if err := os.WriteFile(path, []byte("[opend]\nhost = \"127.0.0.1\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	seeded, err := SeedDefaultIfMissing(path)
+	if err != nil {
+		t.Fatalf("SeedDefaultIfMissing: %v", err)
+	}
+	if seeded {
+		t.Fatal("want seeded=false for an already-existing file with zero venues")
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.Venues) != 0 {
+		t.Fatalf("venues = %+v, want left untouched (empty)", cfg.Venues)
+	}
+}
