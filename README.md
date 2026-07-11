@@ -90,20 +90,55 @@ and the broker of your choice for execution, and everything else is free and ope
 
 ## How it works
 
-```
-                     ┌─────────────────────────────────────────────┐
- moomoo OpenD ─────▶ │             eTape engine (Go)               │
- (market data,       │ order books · 10s/1m bar building · tape    │
-  localhost TCP)     │ scanner · news · indicators · risk gate     │
-                     │ SQLite journal · broker adapters            │
-                     └───────────────────┬─────────────────────────┘
-                                         │ WebSocket + JSON (127.0.0.1:8686)
-                     ┌───────────────────▼─────────────────────────┐
-                     │           eTape UI (React + TS)             │
-                     │ canvas chart · DOM ladder · tape · panels   │
-                     └─────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    MOOSRV(["moomoo servers"])
 
- Execution venues: built-in simulator · Alpaca (paper/live) · TradeZero · moomoo (planned)
+    subgraph MACHINE["Your machine — everything runs locally"]
+        OPEND["moomoo OpenD — local gateway<br/>127.0.0.1:11111"]
+
+        subgraph ENGINE["eTape engine — Go"]
+            FEED["feed client<br/>native TCP + protobuf"]
+            MD["market-data core<br/>order books · 10s bars from ticks<br/>1m → 5m/15m/60m bars · indicators"]
+            CTX["scanner · top movers<br/>news · stock info"]
+            DB[("SQLite journal<br/>quotes · ticks · books · bars")]
+            REPLAY["replay<br/>demo mode · E2E"]
+            HUB["UI hub<br/>serves the UI + WebSocket"]
+            GATE["two-layer risk gate<br/>global + per-venue caps · arm switch"]
+
+            subgraph VENUES["broker adapters"]
+                SIM["built-in simulator<br/>fills off the live book"]
+                ALP["Alpaca"]
+                TZ["TradeZero"]
+                MOOX["moomoo<br/>(planned)"]
+            end
+        end
+
+        subgraph UI["eTape UI — React + TypeScript"]
+            CANVAS["canvas surfaces — zero React state<br/>chart · L2 DOM ladder · time & sales"]
+            PANELS["panels<br/>scanner · order ticket · hotkeys<br/>positions · settings"]
+        end
+    end
+
+    ALPAPI(["Alpaca API"])
+    TZAPI(["TradeZero API"])
+
+    MOOSRV --> OPEND
+    OPEND -->|"quotes · ticks · depth<br/>K-lines"| FEED
+    FEED --> MD
+    MD --> CTX
+    MD --> DB
+    DB --> REPLAY
+    REPLAY -.->|"replay any recorded day"| MD
+    MD --> HUB
+    CTX --> HUB
+    HUB <-->|"WebSocket + JSON<br/>127.0.0.1:8686"| CANVAS
+    HUB <--> PANELS
+    HUB -->|"orders"| GATE
+    GATE --> VENUES
+    VENUES -->|"fills → chart markers"| HUB
+    ALP <--> ALPAPI
+    TZ <--> TZAPI
 ```
 
 The engine speaks OpenD's wire protocol natively in Go (no Python SDK required),
