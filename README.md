@@ -13,6 +13,7 @@ Real-time charts · Level 2 DOM ladder · Time & Sales · Pre-market scanner · 
 ![Platforms](https://img.shields.io/badge/runs%20on-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-555)
 ![Local first](https://img.shields.io/badge/local--first-your%20machine%2C%20your%20keys-2ea44f)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/earlisreal/eTape)](https://github.com/earlisreal/eTape/releases/latest)
 
 <!-- SCREENSHOT: drag your screenshot into the GitHub README editor (or any issue
      comment) to upload it, then replace the URL below with the generated
@@ -110,10 +111,28 @@ builds books/bars/indicators, journals everything to SQLite, and serves the UI o
 localhost WebSocket. TypeScript types for the wire contract are generated from the Go
 structs, so the two sides can't silently drift.
 
-## Quick start — demo mode, no accounts needed
+## Download
 
-Prerequisites: [Go](https://go.dev/dl/) ≥ 1.26 and [Node.js](https://nodejs.org/)
-22 LTS on your `PATH`.
+**[⬇ Download the latest release](https://github.com/earlisreal/eTape/releases/latest)** —
+a prebuilt, self-contained binary with the UI embedded. Single file, no installer,
+no Go or Node toolchain required.
+
+| Platform | Artifact | Run it |
+|---|---|---|
+| Windows (x64) | `eTape-<version>-windows-amd64.zip` | Unzip, then double-click `etape-demo.cmd` to try the demo — or run `etape.exe` for live mode. `README-FIRST.txt` inside covers the details. |
+| macOS (Apple Silicon) | `eTape-<version>-macos-arm64.tar.gz` | `tar xzf` it, then `./etape-darwin-arm64 -demo` — or run it without the flag for live mode. |
+
+The binaries aren't code-signed (personal-use release, no certificate), so expect a
+one-time warning on first launch: Windows SmartScreen says "unrecognized app" —
+click **More info → Run anyway**; macOS Gatekeeper blocks it — right-click →
+**Open** (or `xattr -d com.apple.quarantine etape-darwin-arm64`).
+
+Prefer building from source? The quick start below has you covered.
+
+## Quick start from source
+
+Demo mode, no accounts needed. Prerequisites: [Go](https://go.dev/dl/) ≥ 1.26 and
+[Node.js](https://nodejs.org/) 22 LTS on your `PATH`.
 
 ```bash
 git clone https://github.com/earlisreal/eTape.git
@@ -230,7 +249,8 @@ cd engine && make release-windows
 which produces `dist/etape-windows-amd64.exe` — a single binary with the UI embedded
 and a system-tray icon, no console window, no installer. `make release-macos` does the
 same for macOS (arm64). The engine is pure Go (no cgo), so cross-compiling from any OS
-just works.
+just works. Prebuilt binaries for both platforms are attached to the
+[latest release](https://github.com/earlisreal/eTape/releases/latest).
 
 ## Development
 
