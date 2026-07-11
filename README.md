@@ -95,50 +95,17 @@ flowchart TB
     MOOSRV(["moomoo servers"])
 
     subgraph MACHINE["Your machine — everything runs locally"]
-        OPEND["moomoo OpenD — local gateway<br/>127.0.0.1:11111"]
-
-        subgraph ENGINE["eTape engine — Go"]
-            FEED["feed client<br/>native TCP + protobuf"]
-            MD["market-data core<br/>order books · 10s bars from ticks<br/>1m → 5m/15m/60m bars · indicators"]
-            CTX["scanner · top movers<br/>news · stock info"]
-            DB[("SQLite journal<br/>quotes · ticks · books · bars")]
-            REPLAY["replay<br/>demo mode · E2E"]
-            HUB["UI hub<br/>serves the UI + WebSocket"]
-            GATE["two-layer risk gate<br/>global + per-venue caps · arm switch"]
-
-            subgraph VENUES["broker adapters"]
-                SIM["built-in simulator<br/>fills off the live book"]
-                ALP["Alpaca"]
-                TZ["TradeZero"]
-                MOOX["moomoo<br/>(planned)"]
-            end
-        end
-
-        subgraph UI["eTape UI — React + TypeScript"]
-            CANVAS["canvas surfaces — zero React state<br/>chart · L2 DOM ladder · time & sales"]
-            PANELS["panels<br/>scanner · order ticket · hotkeys<br/>positions · settings"]
-        end
+        OPEND["moomoo OpenD — local gateway"]
+        ENGINE["eTape engine — Go<br/>order books · bars · indicators · scanner<br/>SQLite journal & replay · risk gate<br/>broker adapters · built-in simulator"]
+        UI["eTape UI — React + TypeScript<br/>chart · L2 DOM ladder · time & sales<br/>order ticket · hotkeys · panels"]
     end
 
-    ALPAPI(["Alpaca API"])
-    TZAPI(["TradeZero API"])
+    BROKERS(["broker APIs<br/>Alpaca · TradeZero"])
 
     MOOSRV --> OPEND
-    OPEND -->|"quotes · ticks · depth<br/>K-lines"| FEED
-    FEED --> MD
-    MD --> CTX
-    MD --> DB
-    DB --> REPLAY
-    REPLAY -.->|"replay any recorded day"| MD
-    MD --> HUB
-    CTX --> HUB
-    HUB <-->|"WebSocket + JSON<br/>127.0.0.1:8686"| CANVAS
-    HUB <--> PANELS
-    HUB -->|"orders"| GATE
-    GATE --> VENUES
-    VENUES -->|"fills → chart markers"| HUB
-    ALP <--> ALPAPI
-    TZ <--> TZAPI
+    OPEND -->|"quotes · ticks · depth"| ENGINE
+    ENGINE <-->|"WebSocket + JSON<br/>127.0.0.1:8686"| UI
+    ENGINE <-->|"orders · fills"| BROKERS
 ```
 
 The engine speaks OpenD's wire protocol natively in Go (no Python SDK required),
