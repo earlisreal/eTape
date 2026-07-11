@@ -21,9 +21,9 @@ Usage: run.cmd <mode> [options]     (or: powershell -File run.ps1 <mode> [option
 Modes:
   live               Build the UI, then run the real engine against
                      %USERPROFILE%\.eTape\config.toml (live OpenD feed + real
-                     venues). Requires OpenD already running and unlocked. Extra
+                     venues). Requires OpenD already running and logged in. Extra
                      args are passed through to the engine, e.g.:
-                       run.cmd live -watch=AAPL,TSLA -focus=AAPL
+                       run.cmd live -no-open -log C:\temp\etape.log
 
   demo [DAY] [SPEED] Build the UI, generate a synthetic replay day, and run
                      the engine against it. No OpenD or broker required.
@@ -36,7 +36,6 @@ Modes:
 
 Examples:
   run.cmd live
-  run.cmd live -watch=AAPL,TSLA
   run.cmd demo
   run.cmd demo 2026-01-02 0
   run.cmd dev ladder-tape
@@ -54,7 +53,7 @@ function Build-UI {
     }
 }
 
-# Parse args WITHOUT a param() block so engine flags like -focus=AAPL pass
+# Parse args WITHOUT a param() block so engine flags like -log=... pass
 # through verbatim (PowerShell parameter binding would try to interpret them).
 $Mode = ''
 $Rest = @()

@@ -16,9 +16,9 @@ Usage: ./run.sh <mode> [options]
 Modes:
   live               Build the UI, then run the real engine against
                      ~/.eTape/config.toml (live OpenD feed + real venues).
-                     Requires OpenD already running and unlocked. Extra
+                     Requires OpenD already running and logged in. Extra
                      args are passed through to the engine, e.g.:
-                       ./run.sh live -watch=AAPL,TSLA -focus=AAPL
+                       ./run.sh live -no-open -log /tmp/etape.log
 
   demo [DAY] [SPEED] Build the UI, generate a synthetic replay day, and run
                      the engine against it. No OpenD or broker required.
@@ -31,7 +31,6 @@ Modes:
 
 Examples:
   ./run.sh live
-  ./run.sh live -watch=AAPL,TSLA
   ./run.sh demo
   ./run.sh demo 2026-01-02 0
   ./run.sh dev ladder-tape
