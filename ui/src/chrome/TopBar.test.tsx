@@ -8,7 +8,7 @@ import { ThemeProvider } from "./ThemeProvider";
 const base = {
   workspaceName: "main", health: new HealthStore(), armed: false,
   onArmToggle: vi.fn(), onAddPanel: vi.fn(), onNewWindow: vi.fn(),
-  onOpenSettings: vi.fn(), onOpenConnection: vi.fn(),
+  onOpenSettings: vi.fn(), onOpenConnection: vi.fn(), onOpenReplay: vi.fn(),
 };
 
 describe("TopBar", () => {
@@ -18,6 +18,7 @@ describe("TopBar", () => {
     expect(screen.getByText("· main")).toBeTruthy();
     expect(screen.getByRole("button", { name: /add panel/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /new window/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /practice/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /settings/i })).toBeTruthy();
   });
   it("arm chip reflects state and toggles", () => {
