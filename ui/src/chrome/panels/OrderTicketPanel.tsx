@@ -8,6 +8,7 @@ import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
 import { useVenueSelection } from "../exec/venueSelection";
+import { useOrderConfig } from "../exec/useOrderConfig";
 import { useThrottledQuote } from "../exec/useThrottledQuote";
 import { resolveShares, type SizingMode } from "../exec/sizing";
 import { preCheck, type DraftOrder } from "../exec/preChecks";
@@ -55,6 +56,8 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
 
   const quote = useThrottledQuote(stores.quote, symbol);
   const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
+  const { config: orderConfig } = useOrderConfig();
+  const extBufferPct = orderConfig.extHoursMarketBufferPct ?? 1;
 
   const [type, setType] = useState<OrderType>("LIMIT");
   const [tif, setTif] = useState<TIF>("DAY");
@@ -79,7 +82,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
       : { mode, pct: Number(amount) || 0 };
     const qty = resolveShares(spec, { price: px, buyingPower, positionQty });
     const draft: DraftOrder = { symbol, side, type, tif, session, qty, limitPrice: type === "MARKET" ? 0 : px, stopPrice: hasStop ? Number(stop) || 0 : 0 };
-    const pc = preCheck(draft, quote?.last ?? 0, Date.now());
+    const pc = preCheck(draft, quote ?? { bid: 0, ask: 0, last: 0 }, Date.now(), extBufferPct);
     for (const n of pc.notices) toast.push({ level: "warn", text: n });
     if (!pc.ok) { toast.push({ level: "danger", text: pc.errors.join(" ") }); return; }
     const o = pc.order;

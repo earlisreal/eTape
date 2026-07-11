@@ -35,7 +35,11 @@ export function useHotkeys(opts: { stores: Stores; commands: Cmd; linkGroups: Li
         if (!quote || venue === "") { toast.push({ level: "danger", text: "no venue/quote for hotkey" }); return; }
         const account = stores.exec.accounts().find((a) => a.venue === venue);
         const positionQty = stores.exec.positions().filter((p) => p.symbol === symbol && p.venue === venue).reduce((s, p) => s + p.qty, 0);
-        const r = resolvePlaceTemplate(t as PlaceOrderTemplate, { venue, symbol, quote, buyingPower: account?.buyingPower ?? 0, positionQty, nowMs: Date.now() });
+        const r = resolvePlaceTemplate(t as PlaceOrderTemplate, {
+          venue, symbol, quote,
+          buyingPower: account?.buyingPower ?? 0, positionQty, nowMs: Date.now(),
+          extHoursMarketBufferPct: config.extHoursMarketBufferPct ?? 1,
+        });
         for (const n of r.preCheck.notices) toast.push({ level: "warn", text: n });
         if (!r.preCheck.ok) { toast.push({ level: "danger", text: r.preCheck.errors.join(" ") }); return; }
         void oc.submit(r.args, r.flash);
