@@ -1,0 +1,30 @@
+{
+  "app": "eTape",
+  "kind": "settings-export",
+  "version": 1,
+  "exportedAt": "2026-07-10T12:00:00.000Z",
+  "layout": {
+    "name": "export-source",
+    "panels": [
+      { "id": "imp-movers", "panelId": "movers", "group": null, "settings": {} }
+    ],
+    "layout": {
+      "grid": {
+        "root": {
+          "type": "branch",
+          "data": [
+            { "type": "leaf", "data": { "id": "1", "views": ["imp-movers"], "activeView": "imp-movers" }, "size": 900 }
+          ],
+          "size": 1600
+        },
+        "height": 900,
+        "width": 1600,
+        "orientation": "HORIZONTAL"
+      },
+      "panels": {
+        "imp-movers": { "id": "imp-movers", "contentComponent": "imp-movers", "title": "Movers" }
+      },
+      "activeGroup": "1"
+    }
+  }
+}

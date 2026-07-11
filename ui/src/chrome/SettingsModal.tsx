@@ -2,21 +2,29 @@ import { AppearanceSection } from "./AppearanceSection";
 import { OrderSettingsSection } from "./exec/OrderSettingsSection";
 import { VenuesSection } from "./exec/VenuesSection";
 import { SoundsSection } from "../sound/SoundsSection";
+import { BackupSection } from "./BackupSection";
 import { useOrderConfig } from "./exec/useOrderConfig";
 import { useTheme } from "./ThemeProvider";
 import { HoverButton } from "./controls/HoverButton";
 import type { AckMsg } from "../wire/contract";
+import type { ToastApi } from "./Toast";
+import type { Workspace } from "./workspace";
 
-export type SettingsSection = "appearance" | "orders" | "venues" | "sounds";
+export type SettingsSection = "appearance" | "orders" | "venues" | "sounds" | "backup";
 const NAV: { id: SettingsSection; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "orders", label: "Orders & hotkeys" },
   { id: "venues", label: "Venues & creds" },
   { id: "sounds", label: "Sounds" },
+  { id: "backup", label: "Import & export" },
 ];
 
-export function SettingsModal({ open, section, onSection, onClose, commands }:
-  { open: boolean; section: SettingsSection; onSection: (s: SettingsSection) => void; onClose: () => void; commands: { sendCommand(name: string, args: unknown): Promise<AckMsg> } }): JSX.Element | null {
+export function SettingsModal({ open, section, onSection, onClose, commands, getWorkspace, onImportWorkspace, toast }:
+  {
+    open: boolean; section: SettingsSection; onSection: (s: SettingsSection) => void; onClose: () => void;
+    commands: { sendCommand(name: string, args: unknown): Promise<AckMsg> };
+    getWorkspace: () => Workspace; onImportWorkspace: (ws: Workspace) => void; toast: ToastApi;
+  }): JSX.Element | null {
   const { palette } = useTheme();
   const oc = useOrderConfig();
   if (!open) return null;
@@ -50,6 +58,7 @@ export function SettingsModal({ open, section, onSection, onClose, commands }:
           {section === "orders" && <OrderSettingsSection config={oc.config} onSave={oc.save} />}
           {section === "venues" && <VenuesSection commands={commands} />}
           {section === "sounds" && <SoundsSection />}
+          {section === "backup" && <BackupSection getWorkspace={getWorkspace} onImportWorkspace={onImportWorkspace} orderConfig={oc.config} onImportOrderConfig={oc.save} toast={toast} />}
         </section>
       </div>
     </div>

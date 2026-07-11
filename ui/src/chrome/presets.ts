@@ -1,5 +1,5 @@
 import type { PanelConfig } from "./workspace";
-import type { DockviewApi, SerializedDockview } from "dockview";
+import type { SerializedDockview } from "dockview";
 
 export interface Preset {
   id: string;
@@ -163,10 +163,3 @@ export const PRESETS: Preset[] = [
     }),
   },
 ];
-
-/** Replace the current dockview layout with the preset's. Caller writes ws.panels/layout first. */
-export function applyPreset(api: DockviewApi, preset: Preset): void {
-  const { layout } = preset.build();
-  api.clear();
-  api.fromJSON(layout);
-}

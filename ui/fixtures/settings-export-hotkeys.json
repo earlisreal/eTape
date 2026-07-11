@@ -1,0 +1,24 @@
+{
+  "app": "eTape",
+  "kind": "settings-export",
+  "version": 1,
+  "exportedAt": "2026-07-10T12:00:00.000Z",
+  "hotkeys": {
+    "templates": [
+      {
+        "kind": "place",
+        "id": "fixture-imported-buy",
+        "label": "Imported Buy",
+        "side": "BUY",
+        "type": "LIMIT",
+        "tif": "DAY",
+        "session": "AUTO",
+        "priceSource": "Ask",
+        "priceOffset": 0,
+        "priceOffsetUnit": "$",
+        "sizing": { "mode": "Shares", "shares": 100 },
+        "hotkey": "Ctrl+9"
+      }
+    ]
+  }
+}
