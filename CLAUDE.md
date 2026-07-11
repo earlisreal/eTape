@@ -13,6 +13,20 @@ multi-broker execution
 (`docs/superpowers/specs/2026-07-04-multi-broker-execution-design.md` — revises the
 execution spec: venues, two-layer gate, TZ + Alpaca v1, moomoo v1.x).
 
+## Workflow conventions
+
+- **Auto-commit + push approved specs and plans.** When a design spec or an
+  implementation plan is approved, commit the artifact and push it — automatically,
+  in the same turn. Don't leave it as an unpushed local commit, and don't wait to be
+  asked to push.
+  - Specs live in `docs/superpowers/specs/` → commit as `docs(specs): <description>`.
+  - Plans live in `docs/superpowers/plans/` → commit as
+    `docs(plans): add <feature> implementation plan`.
+  - This covers committing the *artifact* once it's approved — it does **not** mean
+    auto-starting the next phase (still don't jump from an approved spec into writing
+    a plan unprompted).
+  - The repo is public, so run the usual sensitive-content sweep before pushing.
+
 ## Stack (decided)
 
 - **Engine:** Go — feed parsing, book building, indicators, order logic
