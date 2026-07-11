@@ -201,7 +201,15 @@ pipeline the CPU-bound zstd encoding across days; nothing here forecloses it.
    synthetic write→seal cycles, recording `page_count`/`freelist_count` per
    phase. **Pass: page_count plateaus within 1.1× of the cycle-1 high-water
    mark. Fail ⇒ pivot to the `VACUUM INTO` + swap fallback.**
-   *Result: PENDING — to be recorded here before implementation.*
+   *Result (2026-07-12): **PASS — hypothesis confirmed.** Mass seal (5.0 M
+   rows, 5.4 GB → 227 MB, 34 s) then five full-day cycles (2.31 M rows /
+   ~2.3 GB written per cycle, sealed to ~107 MB each): `page_count` held at
+   **7.58 GB, exactly flat (1.0×), across all five cycles** — zero file
+   growth. The freelist oscillated precisely as designed: ~2.2–2.6 GB after
+   each write phase (raw day consumed the freed pages), ~4.4–4.9 GB after
+   each seal, drifting down ~110 MB/cycle as chunk inserts consumed it too.
+   Seal of a full day: 15–19 s, matching prior measurement. modernc.org/sqlite
+   reuses freed pages under large zstd-blob churn; no backstop concern.*
 2. Unit tests: `SizeStats`, `Vacuum`, backstop trigger and advisory hint with
    shrunk package vars.
 3. Wiring tests: `-vacuum` happy path on a temp DB (seals + prunes + vacuums,
