@@ -132,7 +132,7 @@ input.numfield { -moz-appearance: textfield; appearance: textfield; }
   transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
 }
 .side:hover { border-color: var(--text-muted); }
-.side:hover:not(.side-buy):not(.side-sell) { background: var(--surface); }
+.side:hover:not(.side-buy):not(.side-sell):not(.side-bronze):not(.side-danger) { background: var(--surface); }
 .side-buy { border-color: var(--up); color: var(--up); background: rgba(23,122,88,.08); }
 .side-sell { border-color: var(--down); color: var(--down); background: rgba(194,51,77,.08); }
 
