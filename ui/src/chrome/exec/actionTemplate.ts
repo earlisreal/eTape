@@ -20,7 +20,11 @@ export interface ManagementTemplate { kind: "manage"; id: string; label: string;
 export type ActionTemplate = PlaceOrderTemplate | ManagementTemplate;
 
 // The whole editable order-entry config; persisted as one blob (fewer round-trips).
-export interface OrderConfig { templates: ActionTemplate[]; activeVenue: VenueID }
+export interface OrderConfig {
+  templates: ActionTemplate[];
+  activeVenue: VenueID;
+  extHoursMarketBufferPct?: number;   // absent => 1.0; clamped [0.1, 10] in normalizeOrderConfig
+}
 export const ORDER_CONFIG_KEY = "orderConfig";
 
 // Intentionally empty: eTape ships with NO default order templates or hotkeys.
@@ -33,9 +37,10 @@ export const DEFAULT_ORDER_CONFIG: OrderConfig = { templates: DEFAULT_TEMPLATES,
 // normalizeOrderConfig is the single migration point applied where a config
 // enters the app (OrderConfigProvider on load, and to DEFAULT_ORDER_CONFIG).
 // It converts legacy PositionFraction `fraction` to `pct`, defaults a missing
-// price-offset unit to "$", and defaults a missing session to "AUTO" (a
+// price-offset unit to "$", defaults a missing session to "AUTO" (a
 // config saved before this feature landed keeps today's clock-inferred
-// submit behavior). Idempotent; manage templates pass through.
+// submit behavior), and defaults a missing `extHoursMarketBufferPct` to 1.0
+// (clamped [0.1, 10]). Idempotent; manage templates pass through.
 function normalizeTemplate(t: ActionTemplate): ActionTemplate {
   if (t.kind !== "place") return t;
   let sizing = t.sizing;
@@ -46,5 +51,7 @@ function normalizeTemplate(t: ActionTemplate): ActionTemplate {
 }
 
 export function normalizeOrderConfig(config: OrderConfig): OrderConfig {
-  return { ...config, templates: config.templates.map(normalizeTemplate) };
+  const raw = config.extHoursMarketBufferPct;
+  const extHoursMarketBufferPct = raw === undefined || Number.isNaN(raw) ? 1.0 : Math.min(10, Math.max(0.1, raw));
+  return { ...config, extHoursMarketBufferPct, templates: config.templates.map(normalizeTemplate) };
 }

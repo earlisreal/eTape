@@ -55,4 +55,15 @@ describe("normalizeOrderConfig", () => {
     const out = normalizeOrderConfig(raw);
     expect(out.templates[0].kind === "place" && out.templates[0].session).toBe("OVERNIGHT");
   });
+  it("defaults a missing extHoursMarketBufferPct to 1.0", () => {
+    const raw: OrderConfig = { activeVenue: "", templates: [] };
+    expect(normalizeOrderConfig(raw).extHoursMarketBufferPct).toBe(1.0);
+  });
+  it("clamps extHoursMarketBufferPct to [0.1, 10]", () => {
+    expect(normalizeOrderConfig({ activeVenue: "", templates: [], extHoursMarketBufferPct: 0 }).extHoursMarketBufferPct).toBe(0.1);
+    expect(normalizeOrderConfig({ activeVenue: "", templates: [], extHoursMarketBufferPct: 50 }).extHoursMarketBufferPct).toBe(10);
+  });
+  it("preserves an in-range extHoursMarketBufferPct", () => {
+    expect(normalizeOrderConfig({ activeVenue: "", templates: [], extHoursMarketBufferPct: 2.5 }).extHoursMarketBufferPct).toBe(2.5);
+  });
 });
