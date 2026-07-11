@@ -65,3 +65,40 @@ func decodeChunk(dec *zstd.Decoder, body []byte) ([]chunkRow, error) {
 	}
 	return out, nil
 }
+
+// readSealedRows returns a day's sealed rows in chunk_no (hence seq) order,
+// decoding each row's payload to a feed.Event.
+func readSealedRows(q rowQuerier, day string) ([]JournalRow, error) {
+	rows, err := q.Query(`SELECT body FROM journal_chunks WHERE day=? ORDER BY chunk_no`, day)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	dec, err := zstd.NewReader(nil)
+	if err != nil {
+		return nil, err
+	}
+	defer dec.Close()
+	var out []JournalRow
+	for rows.Next() {
+		var body []byte
+		if err := rows.Scan(&body); err != nil {
+			return nil, err
+		}
+		crs, err := decodeChunk(dec, body)
+		if err != nil {
+			return nil, err
+		}
+		for _, cr := range crs {
+			ev, err := decodePayload(cr.Kind, []byte(cr.Payload))
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, JournalRow{
+				Seq: cr.Seq, TsExch: cr.TsExch, TsRecv: cr.TsRecv, Day: day,
+				Symbol: cr.Symbol, Kind: cr.Kind, Seed: cr.Seed != 0, Event: ev,
+			})
+		}
+	}
+	return out, rows.Err()
+}
