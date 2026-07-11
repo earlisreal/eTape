@@ -73,7 +73,7 @@ func openLogFile(path string) (*os.File, error) {
 // default (!tray) entrypoint has no use for it and passes nil; the tray
 // entrypoint uses it to learn the address for its "Open eTape" menu action
 // without duplicating any config-resolution logic.
-func boot(ctx context.Context, onListening func(addr string)) (code int, restart bool) {
+func boot(ctx context.Context, onListening func(addr string)) (code int, restart bool, nextArgs []string) {
 	home, _ := os.UserHomeDir()
 	cfgPath := flag.String("config", filepath.Join(home, ".eTape", "config.toml"), "path to config.toml")
 	replayDay := flag.String("replay", "", "replay a recorded day (YYYY-MM-DD) instead of live OpenD")
@@ -110,7 +110,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			if explicitLog {
 				// The user asked for this exact file; fail loudly.
 				errLog.Error("open log file", "path", logDest, "err", err)
-				return 1, false
+				return 1, false, nil
 			}
 			// The default path is best-effort: a logging hiccup must not
 			// stop the engine from booting.
@@ -140,7 +140,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 
 	if *demo && *replayDay != "" {
 		log.Error("parse flags", "err", errors.New("-demo and -replay are mutually exclusive"))
-		return 1, false
+		return 1, false, nil
 	}
 
 	var cfg config.Config
@@ -156,12 +156,12 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		demoDir, err := os.MkdirTemp("", "etape-demo-*")
 		if err != nil {
 			log.Error("create demo temp dir", "err", err)
-			return 1, false
+			return 1, false, nil
 		}
 		cfg.Store.DBPath = filepath.Join(demoDir, "demo.db")
 		if err := demojournal.Generate(cfg.Store.DBPath, *demoDay); err != nil {
 			log.Error("generate demo journal", "err", err)
-			return 1, false
+			return 1, false, nil
 		}
 		*replayDay = *demoDay
 		*replayHold = true
@@ -185,7 +185,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		cfg, err = config.Load(*cfgPath)
 		if err != nil {
 			log.Error("load config", "err", err)
-			return 1, false
+			return 1, false, nil
 		}
 	}
 	if *dist != "" {
@@ -194,7 +194,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	anchorSecs, err := cfg.MD.AnchorSecs()
 	if err != nil {
 		log.Error("bad session_anchor", "err", err)
-		return 1, false
+		return 1, false, nil
 	}
 	dbPath := cfg.Store.DBPath
 	if dbPath == "" {
@@ -202,7 +202,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0o755); err != nil {
 		log.Error("make db dir", "err", err)
-		return 1, false
+		return 1, false, nil
 	}
 
 	// --- single-instance guard ---
@@ -223,11 +223,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			// to do than exit -- the other instance is already up.
 			_ = openbrowser.Open("http://" + cfg.UIHub.Addr())
 		}
-		return 0, false
+		return 0, false, nil
 	}
 	if err != nil {
 		log.Error("single-instance lock", "err", err)
-		return 1, false
+		return 1, false, nil
 	}
 	defer releaseLock()
 	log.Info("single-instance lock acquired", "lock", dbPath+".lock")
@@ -245,6 +245,14 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	var restartRequested atomic.Bool
 	requestRestart := func() { restartRequested.Store(true); stop() }
 
+	// nextArgs carries a mode-switch relaunch's flag list from the
+	// startReplay/goLive closures (built below, passed into uihub.New) to
+	// boot's final return. atomic.Pointer because it's written from the
+	// command-dispatch goroutine (via time.AfterFunc, same as
+	// requestRestart) and read here after <-ctx.Done() on the boot
+	// goroutine -- nil means "plain RestartEngine: reuse os.Args".
+	var nextArgsPtr atomic.Pointer[[]string]
+
 	live := *replayDay == ""
 	uihubClk := clock.System{}
 	var execClk clock.Clock = clock.System{}
@@ -257,10 +265,61 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	})
 	if err != nil {
 		log.Error("open store", "err", err)
-		return 1, false
+		return 1, false, nil
 	}
 	// NOTE: st.Close() is deferred until AFTER every store-writer goroutine has
 	// stopped (feed pipe + forwardMD + exec.Core) — see the shutdown block below.
+
+	// relaunchAckFlushDelay mirrors uihub's own restartAckFlushDelay (package-
+	// private, so not importable from here): give the "accepted" ack time to
+	// reach the client before ctx cancellation starts tearing down the connection.
+	const relaunchAckFlushDelay = 200 * time.Millisecond
+
+	// base carries the launch flags a mode-switch relaunch must preserve
+	// (see childArgs, Task 1) -- built once here so both closures share it.
+	base := baseFlags{ConfigPath: *cfgPath, DistDir: *dist, LogPath: *logPath}
+
+	// startReplay/goLive are wired into uihub.New below and invoked from the
+	// command-dispatch goroutine on "StartReplay"/"GoLive". Both validate
+	// synchronously and return an error for a blocked ack before scheduling
+	// any delayed side effect, matching requestRestart's ack-then-relaunch
+	// pattern above (relaunchAckFlushDelay lets the ack flush first).
+	startReplay := func(day string, speed float64) error {
+		if *demo {
+			return fmt.Errorf("replay switching is unavailable in demo mode")
+		}
+		days, err := st.JournalDays()
+		if err != nil {
+			return fmt.Errorf("list recorded days: %w", err)
+		}
+		found := false
+		for _, d := range days {
+			if d == day {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return fmt.Errorf("no recorded day %q", day)
+		}
+		argv := childArgs(base, replayMode{Live: false, Day: day, Speed: speed})
+		time.AfterFunc(relaunchAckFlushDelay, func() {
+			nextArgsPtr.Store(&argv)
+			requestRestart()
+		})
+		return nil
+	}
+	goLive := func() error {
+		if *demo {
+			return fmt.Errorf("replay switching is unavailable in demo mode")
+		}
+		argv := childArgs(base, replayMode{Live: true})
+		time.AfterFunc(relaunchAckFlushDelay, func() {
+			nextArgsPtr.Store(&argv)
+			requestRestart()
+		})
+		return nil
+	}
 
 	// --- md core ---
 	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs})
@@ -273,7 +332,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		if err != nil || len(replayRows) == 0 {
 			log.Error("replay day unavailable", "day", *replayDay, "err", err, "rows", len(replayRows))
 			_ = st.Close()
-			return 1, false
+			return 1, false, nil
 		}
 		execClk = replay.NewClock(time.UnixMilli(replayRows[0].TsExch))
 	}
@@ -290,7 +349,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	if err != nil {
 		log.Error("build brokers", "err", err)
 		_ = st.Close()
-		return 1, false
+		return 1, false, nil
 	}
 	brokers := map[exec.VenueID]exec.Broker{}
 	venueIDs := make([]exec.VenueID, 0, len(vbs))
@@ -327,7 +386,14 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		Position: time.Duration(cfg.UIHub.PositionMs) * time.Millisecond,
 		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500, TradesCap: 1000,
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
-	}, execCore, st, core, venueAdm, venueProbe, requestRestart)
+		Mode: func() string {
+			if live {
+				return "live"
+			}
+			return "replay"
+		}(),
+		ReplayDay: *replayDay, ReplaySpeed: *speed,
+	}, execCore, st, core, venueAdm, venueProbe, requestRestart, startReplay, goLive)
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
 	httpSrv := &http.Server{
@@ -578,7 +644,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		log.Error("close store", "err", err)
 	}
 	log.Info("shutdown complete", "droppedUpdates", core.DroppedUpdates(), "droppedJournal", st.DroppedJournalRows())
-	return 0, restartRequested.Load()
+	var na []string
+	if p := nextArgsPtr.Load(); p != nil {
+		na = *p
+	}
+	return 0, restartRequested.Load(), na
 }
 
 // dropWatchInterval controls how often watchDroppedUpdates samples

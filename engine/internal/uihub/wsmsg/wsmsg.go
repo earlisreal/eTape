@@ -28,9 +28,10 @@ const (
 	TopicExecStatus    Topic = "exec.status"
 	TopicExecTrades    Topic = "exec.trades"
 
-	TopicSysHealth Topic = "sys.health"
-	TopicSysEvents Topic = "sys.events"
-	TopicConfig    Topic = "config"
+	TopicSysHealth  Topic = "sys.health"
+	TopicSysSession Topic = "sys.session"
+	TopicSysEvents  Topic = "sys.events"
+	TopicConfig     Topic = "config"
 )
 
 // AllTopics is the set a client may subscribe to (server-side allow-list).
@@ -39,7 +40,7 @@ var AllTopics = map[Topic]bool{
 	TopicScannerRank: true, TopicScannerHit: true, TopicNews: true, TopicStockDetail: true,
 	TopicExecAccount: true, TopicExecPositions: true, TopicExecOrders: true,
 	TopicExecFills: true, TopicExecStatus: true, TopicExecTrades: true,
-	TopicSysHealth: true, TopicSysEvents: true, TopicConfig: true,
+	TopicSysHealth: true, TopicSysSession: true, TopicSysEvents: true, TopicConfig: true,
 }
 
 // Wire enum types (string literals matching ui/src/wire/contract.ts).

@@ -15,8 +15,8 @@ function testAck(value: TestConnectionResult): AckMsg {
 
 const runningConfig: VenueConfig = {
   venues: [
-    { id: "alpaca-paper", broker: "alpaca", env: "paper", credentials: "alpaca", accountId: "PA123", startingBalance: 0 },
-    { id: "tradezero-live", broker: "tradezero", env: "live", credentials: "tradeZero", accountId: "TZ456", startingBalance: 0 },
+    { id: "alpaca-paper", broker: "alpaca", env: "paper", credentials: "alpaca", accountId: "PA123", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 },
+    { id: "tradezero-live", broker: "tradezero", env: "live", credentials: "tradeZero", accountId: "TZ456", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 },
   ],
   gate: {
     global: { maxDayLoss: 500, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
@@ -71,7 +71,7 @@ describe("VenuesSection", () => {
 
   it("hides the CREDENTIALS group for a sim venue but shows it for tradezero/alpaca/moomoo", async () => {
     const withSim: VenueSetup = baseSetup({
-      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0 }] },
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 }] },
     });
     const commands = makeCommands([withSim]);
     wrap(commands);
@@ -84,7 +84,7 @@ describe("VenuesSection", () => {
 
   it("mints a real credential name when an existing sim venue (credentials: \"\") switches broker to alpaca, so PutCredential is never saved under an empty name", async () => {
     const withSim: VenueSetup = baseSetup({
-      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0 }] },
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 }] },
     });
     const commands = makeCommands([withSim, withSim], { TestConnection: testAck(okResult()) });
     wrap(commands);
@@ -114,7 +114,7 @@ describe("VenuesSection", () => {
 
   it("hides the restart banner when file == running, and shows it after a save whose re-fetch reports drift", async () => {
     const drifted: VenueSetup = baseSetup({
-      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0 }] },
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 }] },
     });
     const commands = makeCommands([baseSetup(), drifted]);
     wrap(commands);
@@ -128,7 +128,7 @@ describe("VenuesSection", () => {
 
   it("restart button requires a second click to confirm, and Cancel backs out without sending RestartEngine", async () => {
     const drifted: VenueSetup = baseSetup({
-      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0 }] },
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 }] },
     });
     const commands = makeCommands([drifted]);
     wrap(commands);
@@ -148,7 +148,7 @@ describe("VenuesSection", () => {
 
   it("sends RestartEngine only after confirming, and disables the button while restarting", async () => {
     const drifted: VenueSetup = baseSetup({
-      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0 }] },
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 }] },
     });
     const commands = makeCommands([drifted]);
     wrap(commands);
@@ -165,7 +165,7 @@ describe("VenuesSection", () => {
 
   it("clears the restart banner once the engine drops and reconnects, without any user action", async () => {
     const drifted: VenueSetup = baseSetup({
-      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0 }] },
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 }] },
     });
     // First GetVenueSetup (initial mount) reports drift; the second (fired by
     // the reconnect effect's refresh()) reports the new engine already
@@ -441,7 +441,7 @@ describe("VenuesSection", () => {
 
   it("shows the starting-balance field only for sim venues, prefilled from the wire value; addVenue() defaults new sim rows to 100000", async () => {
     const withSim: VenueSetup = baseSetup({
-      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 25000 }] },
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 25000, slippageBps: 0, fillLatencyMs: 0 }] },
     });
     const commands = makeCommands([withSim]);
     wrap(commands);
@@ -458,7 +458,7 @@ describe("VenuesSection", () => {
   });
 
   it("shows Reset balance for a sim venue that's actually running, but not for alpaca/tradezero", async () => {
-    const simVenue = { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 50000 };
+    const simVenue = { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 50000, slippageBps: 0, fillLatencyMs: 0 };
     const withRunningSim: VenueSetup = baseSetup({
       file: { ...runningConfig, venues: [...runningConfig.venues, simVenue] },
       running: { ...runningConfig, venues: [...runningConfig.venues, simVenue] },
@@ -472,7 +472,7 @@ describe("VenuesSection", () => {
   });
 
   it("hides Reset balance for a sim venue that only exists in the draft, not yet running", async () => {
-    const simVenue = { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 50000 };
+    const simVenue = { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 50000, slippageBps: 0, fillLatencyMs: 0 };
     const draftOnlySim: VenueSetup = baseSetup({
       file: { ...runningConfig, venues: [...runningConfig.venues, simVenue] },
       // running unchanged: sim-1 isn't booted yet, just drafted
@@ -484,7 +484,7 @@ describe("VenuesSection", () => {
   });
 
   it("two-click confirm sends ResetBalance for the right venue and toasts success", async () => {
-    const simVenue = { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 50000 };
+    const simVenue = { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 50000, slippageBps: 0, fillLatencyMs: 0 };
     const withRunningSim: VenueSetup = baseSetup({
       file: { ...runningConfig, venues: [...runningConfig.venues, simVenue] },
       running: { ...runningConfig, venues: [...runningConfig.venues, simVenue] },
@@ -503,7 +503,7 @@ describe("VenuesSection", () => {
   });
 
   it("toasts the rejection reason when ResetBalance is blocked", async () => {
-    const simVenue = { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 50000 };
+    const simVenue = { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 50000, slippageBps: 0, fillLatencyMs: 0 };
     const withRunningSim: VenueSetup = baseSetup({
       file: { ...runningConfig, venues: [...runningConfig.venues, simVenue] },
       running: { ...runningConfig, venues: [...runningConfig.venues, simVenue] },
@@ -684,8 +684,8 @@ describe("VenuesSection", () => {
           ...runningConfig,
           venues: [
             ...runningConfig.venues,
-            { id: "moomoo-1", broker: "moomoo", env: "paper", credentials: "moomoo", accountId: "MM1", startingBalance: 0 },
-            { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0 },
+            { id: "moomoo-1", broker: "moomoo", env: "paper", credentials: "moomoo", accountId: "MM1", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 },
+            { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 },
           ],
         },
         credKeys: ["alpaca", "tradeZero", "moomoo"],

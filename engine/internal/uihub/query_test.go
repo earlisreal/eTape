@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -34,9 +35,13 @@ func (s *spyFills) ExportFills(_ context.Context, venue string, fromMs, toMs int
 	return s.exportRowsMulti, s.exportErr
 }
 
+type emptyJournal struct{}
+
+func (e *emptyJournal) JournalDays() ([]string, error) { return []string{}, nil }
+
 func TestQueryFillsReturnsFills(t *testing.T) {
 	f := &spyFills{rows: []exec.FillRow{{OrderID: "ET1", Symbol: "US.AAPL", Side: "BUY", Qty: 100, Price: 3.47, TsMs: 5, Venue: "sim"}}}
-	q := newQueries(f, clock.NewFake(time.Now()))
+	q := newQueries(f, &emptyJournal{}, clock.NewFake(time.Now()))
 	out := q.handle("QueryFills", json.RawMessage(`{"symbol":"US.AAPL","fromMs":0,"toMs":9}`))
 	fills, ok := out.([]wsmsg.Fill)
 	if !ok || len(fills) != 1 {
@@ -48,7 +53,7 @@ func TestQueryFillsReturnsFills(t *testing.T) {
 }
 
 func TestQueryFillsEmptyOnError(t *testing.T) {
-	q := newQueries(&spyFills{err: errors.New("boom")}, clock.NewFake(time.Now()))
+	q := newQueries(&spyFills{err: errors.New("boom")}, &emptyJournal{}, clock.NewFake(time.Now()))
 	out := q.handle("QueryFills", json.RawMessage(`{"symbol":"X","fromMs":0,"toMs":1}`))
 	// must marshal to "[]", not null, so the UI promise resolves to []
 	b, _ := json.Marshal(out)
@@ -58,7 +63,7 @@ func TestQueryFillsEmptyOnError(t *testing.T) {
 }
 
 func TestQueryFillsMalformedArgsReturnsEmptySlice(t *testing.T) {
-	q := newQueries(&spyFills{}, clock.NewFake(time.Now()))
+	q := newQueries(&spyFills{}, &emptyJournal{}, clock.NewFake(time.Now()))
 	out := q.handle("QueryFills", json.RawMessage(`invalid-json`))
 	// malformed args must marshal to "[]", not null, so the UI promise resolves to []
 	b, _ := json.Marshal(out)
@@ -68,7 +73,7 @@ func TestQueryFillsMalformedArgsReturnsEmptySlice(t *testing.T) {
 }
 
 func TestQueryUnknownReturnsEmptySlice(t *testing.T) {
-	q := newQueries(&spyFills{}, clock.NewFake(time.Now()))
+	q := newQueries(&spyFills{}, &emptyJournal{}, clock.NewFake(time.Now()))
 	out := q.handle("Nope", json.RawMessage(`{}`))
 	// must be a non-nil, JSON-marshals-to-[] value so the UI promise resolves to []
 	b, _ := json.Marshal(out)
@@ -82,7 +87,7 @@ func TestExportFillsReturnsCSV(t *testing.T) {
 		{FillID: 12, Symbol: "US.NVDA", Side: "BUY", Qty: 100, Price: 120.5, TsMs: 1789000000000, Venue: "sim"},
 	}}
 	clk := clock.NewFake(time.UnixMilli(1789000000000))
-	q := newQueries(f, clk)
+	q := newQueries(f, &emptyJournal{}, clk)
 	out := q.handle("ExportFills", json.RawMessage(`{"venue":"sim","preset":"all"}`))
 	res, ok := out.(wsmsg.ExportFillsResult)
 	if !ok {
@@ -103,7 +108,7 @@ func TestExportFillsReturnsCSV(t *testing.T) {
 }
 
 func TestExportFillsMalformedArgsReturnsEmptyResult(t *testing.T) {
-	q := newQueries(&spyFills{}, clock.NewFake(time.Now()))
+	q := newQueries(&spyFills{}, &emptyJournal{}, clock.NewFake(time.Now()))
 	out := q.handle("ExportFills", json.RawMessage(`invalid-json`))
 	b, _ := json.Marshal(out)
 	if string(b) != `{"csv":"","count":0}` {
@@ -112,7 +117,7 @@ func TestExportFillsMalformedArgsReturnsEmptyResult(t *testing.T) {
 }
 
 func TestExportFillsEmptyOnStoreError(t *testing.T) {
-	q := newQueries(&spyFills{exportErr: errors.New("boom")}, clock.NewFake(time.Now()))
+	q := newQueries(&spyFills{exportErr: errors.New("boom")}, &emptyJournal{}, clock.NewFake(time.Now()))
 	out := q.handle("ExportFills", json.RawMessage(`{"venue":"sim","preset":"all"}`))
 	b, _ := json.Marshal(out)
 	if string(b) != `{"csv":"","count":0}` {
@@ -121,10 +126,22 @@ func TestExportFillsEmptyOnStoreError(t *testing.T) {
 }
 
 func TestExportFillsInvalidCustomRangeReturnsEmptyResult(t *testing.T) {
-	q := newQueries(&spyFills{}, clock.NewFake(time.Now()))
+	q := newQueries(&spyFills{}, &emptyJournal{}, clock.NewFake(time.Now()))
 	out := q.handle("ExportFills", json.RawMessage(`{"venue":"sim","preset":"custom","from":"2026-07-10","to":"2026-07-01"}`))
 	b, _ := json.Marshal(out)
 	if string(b) != `{"csv":"","count":0}` {
 		t.Fatalf("invalid custom range (from after to) must yield empty ExportFillsResult; marshaled to %s", b)
+	}
+}
+
+type spyJournal struct{ days []string }
+
+func (s *spyJournal) JournalDays() ([]string, error) { return s.days, nil }
+
+func TestListReplayDays(t *testing.T) {
+	q := newQueries(nil, &spyJournal{days: []string{"2026-07-06", "2026-07-05"}}, clock.System{})
+	got := q.handle("ListReplayDays", json.RawMessage(`{}`))
+	if !reflect.DeepEqual(got, []string{"2026-07-06", "2026-07-05"}) {
+		t.Fatalf("got %#v", got)
 	}
 }

@@ -13,6 +13,7 @@ export interface TopBarProps {
   onNewWindow: () => void;
   onOpenSettings: () => void;
   onOpenConnection: () => void;
+  onOpenReplay: () => void;
 }
 
 // Daylight Ledger top bar: eTape wordmark + workspace name + connection latency on the
@@ -34,6 +35,7 @@ export function TopBar(p: TopBarProps): JSX.Element {
       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, minWidth: 0 }}>
         <button className="btn" onClick={p.onAddPanel}>+ Add panel</button>
         <button className="btn" onClick={p.onNewWindow}>⧉ New window</button>
+        <button className="btn" aria-label="Practice" onClick={p.onOpenReplay}>▶ Practice</button>
         <button className="btn" aria-label="Settings" onClick={p.onOpenSettings}>⚙ Settings</button>
         <HoverButton data-testid="arm-chip" className="btn" onClick={p.onArmToggle}
           style={{ fontWeight: 600, letterSpacing: ".08em",

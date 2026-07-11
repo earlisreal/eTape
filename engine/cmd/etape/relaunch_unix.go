@@ -18,14 +18,23 @@ import (
 // syscall.Exec keeps the same PID, which matters under `go run`: the compiled
 // temp binary stays on disk for the life of the process, and a same-PID exec
 // stays under the original `go run` supervision (a spawned child process
-// would not). os.Args is reused as-is so CLI flags survive the restart
-// unchanged (flag.Parse runs again inside the re-exec'd boot).
+// would not). flag.Parse runs again inside the re-exec'd boot.
+//
+// argv is the flag list to boot with; nil means "reuse os.Args unchanged"
+// (the existing RestartEngine case: same flags, changed config file on
+// disk) so CLI flags survive the restart unchanged. Non-nil (a mode-switch
+// relaunch) rebuilds argv as [exe, argv...] so the child sees a clean,
+// correct os.Args regardless of how this process was originally invoked.
 //
 // Never returns on success -- the process image is replaced.
-func relaunch() error {
+func relaunch(argv []string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	return syscall.Exec(exe, os.Args, os.Environ())
+	next := os.Args
+	if argv != nil {
+		next = append([]string{exe}, argv...)
+	}
+	return syscall.Exec(exe, next, os.Environ())
 }

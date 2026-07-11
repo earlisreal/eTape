@@ -14,16 +14,19 @@ import { PANELS, type PanelProps } from "./panels/registry";
 import { PRESETS } from "./presets";
 import { TopBar } from "./TopBar";
 import { FeedStatusBanner } from "./FeedStatusBanner";
+import { ReplayBanner } from "./ReplayBanner";
 import { AlpacaBackfillBanner } from "./AlpacaBackfillBanner";
 import { EmptyState } from "./EmptyState";
 import { Catalog } from "./Catalog";
 import { SettingsModal, type SettingsSection } from "./SettingsModal";
+import { ReplayLauncherModal } from "./ReplayLauncherModal";
 import { VenueSetupPrompt } from "./VenueSetupPrompt";
 import { OpenSettingsProvider } from "./OpenSettingsContext";
 import { modalTracker } from "./modalTracker";
 import { useTheme } from "./ThemeProvider";
 import { useToasts } from "./Toast";
 import { useOrderCommands } from "./exec/useOrderCommands";
+import { useReplayCommands } from "./exec/useReplayCommands";
 import { useHotkeys } from "./exec/useHotkeys";
 import { useSoundWiring } from "../sound/useSoundWiring";
 import { nextWindowName } from "./windows";
@@ -70,6 +73,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // gear opens it to Appearance, the order ticket's gear (via OpenSettingsContext)
   // opens it straight to Orders & hotkeys.
   const [settings, setSettings] = useState<{ open: boolean; section: SettingsSection }>({ open: false, section: "appearance" });
+  // Task 9: replay launcher modal, opened from TopBar's "Practice" button.
+  const [replayOpen, setReplayOpen] = useState(false);
   // Task 3 (venues/creds redesign): first-run venue-setup prompt. Separate from
   // the `etape.venueSetupHidden` localStorage flag below — this only silences
   // the prompt for the REST OF THIS SESSION after either action, so it doesn't
@@ -83,6 +88,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const { mode } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
+  const rc = useReplayCommands(commands);
   // DockviewApi is only available once dockview mounts (i.e. once the workspace
   // has at least one panel — see the empty-state switch below); null otherwise.
   const apiRef = useRef<DockviewApi | null>(null);
@@ -447,6 +453,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             onNewWindow={onNewWindow}
             onOpenSettings={() => setSettings({ open: true, section: "appearance" })}
             onOpenConnection={onOpenConnection}
+            onOpenReplay={() => setReplayOpen(true)}
           />
           {addOpen && (
             <div className="popover" style={{ top: 40, right: 160, width: 580, maxHeight: "70vh", overflow: "auto" }}>
@@ -454,6 +461,10 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             </div>
           )}
         </div>
+        <ReplayBanner session={stores.session} engineState={engineState} onGoLive={async () => {
+          const ack = await rc.goLive();
+          if (ack.status !== "accepted") throw new Error(ack.reason || "Return to live rejected");
+        }} />
         <FeedStatusBanner health={stores.health} engineState={engineState} onOpenConnection={onOpenConnection} />
         {showAlpacaHint && <AlpacaBackfillBanner onSetup={openAlpacaSetup} onDismiss={dismissAlpacaHint} />}
         <div style={{ flex: 1, minHeight: 0 }}>
@@ -472,6 +483,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           onImportWorkspace={onImportWorkspace}
           toast={toast}
           engineState={engineState} />
+        <ReplayLauncherModal open={replayOpen} onClose={() => setReplayOpen(false)} commands={commands} />
         {showVenueSetup && <VenueSetupPrompt onConfigure={configureVenueSetup} onDismiss={dismissVenueSetup} />}
       </div>
     </OpenSettingsProvider>

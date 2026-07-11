@@ -28,7 +28,7 @@ func NewCommandsForTest(ex execDoer, c configStore, i indicatorCtl, d demandCtl,
 }
 
 // NewQueriesForTest exposes newQueries to external test packages.
-func NewQueriesForTest(f fillsQuerier, clk clock.Clock) queryHandler { return newQueries(f, clk) }
+func NewQueriesForTest(f fillsQuerier, clk clock.Clock) queryHandler { return newQueries(f, &emptyJournal{}, clk) }
 
 // SpaHandlerForTest exposes spaHandler to external test packages so they can
 // verify the generalized fs.FS-backed SPA fallback directly (e.g. over an

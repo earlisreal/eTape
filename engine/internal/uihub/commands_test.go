@@ -666,3 +666,58 @@ func TestTestConnectionOKFalseStillAccepted(t *testing.T) {
 		t.Fatalf("result must carry OK:false through: %+v (%T)", ack.Value, ack.Value)
 	}
 }
+
+func TestCommandsStartReplayBlockedWithNoHandler(t *testing.T) {
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	ack, deferred := cd.handle(context.Background(), "StartReplay", mustJSON(t, wsmsg.StartReplayArgs{Day: "2026-07-06"}), 0, func(wsmsg.AckMsg) {})
+	if deferred {
+		t.Fatal("StartReplay must not be deferred")
+	}
+	if ack.Status != wsmsg.AckBlocked {
+		t.Fatalf("StartReplay with no handler: status = %q, want blocked", ack.Status)
+	}
+}
+
+func TestCommandsStartReplayRejectsNegativeSpeed(t *testing.T) {
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	cd.startReplay = func(string, float64) error { t.Fatal("handler must not run for invalid args"); return nil }
+	ack, _ := cd.handle(context.Background(), "StartReplay", mustJSON(t, wsmsg.StartReplayArgs{Day: "x", Speed: -1}), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckBlocked {
+		t.Fatalf("want blocked for negative speed, got %+v", ack)
+	}
+}
+
+func TestCommandsStartReplayDispatchesAndAcks(t *testing.T) {
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	var gotDay string
+	var gotSpeed float64
+	cd.startReplay = func(day string, speed float64) error { gotDay, gotSpeed = day, speed; return nil }
+	ack, deferred := cd.handle(context.Background(), "StartReplay", mustJSON(t, wsmsg.StartReplayArgs{Day: "2026-07-06", Speed: 4}), 0, func(wsmsg.AckMsg) {
+		t.Fatal("StartReplay's ack must be synchronous, not delivered via reply")
+	})
+	if deferred || ack.Status != wsmsg.AckAccepted {
+		t.Fatalf("want accepted/non-deferred, got %+v deferred=%v", ack, deferred)
+	}
+	if gotDay != "2026-07-06" || gotSpeed != 4 {
+		t.Fatalf("handler got day=%q speed=%v", gotDay, gotSpeed)
+	}
+}
+
+func TestCommandsStartReplayBlockedOnHandlerError(t *testing.T) {
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	cd.startReplay = func(string, float64) error { return errors.New(`no recorded day "x"`) }
+	ack, _ := cd.handle(context.Background(), "StartReplay", mustJSON(t, wsmsg.StartReplayArgs{Day: "x"}), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckBlocked {
+		t.Fatalf("want blocked, got %+v", ack)
+	}
+}
+
+func TestCommandsGoLiveDispatchesAndAcks(t *testing.T) {
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	hit := false
+	cd.goLive = func() error { hit = true; return nil }
+	ack, _ := cd.handle(context.Background(), "GoLive", mustJSON(t, wsmsg.GoLiveArgs{}), 0, func(wsmsg.AckMsg) {})
+	if !hit || ack.Status != wsmsg.AckAccepted {
+		t.Fatalf("GoLive not dispatched: hit=%v ack=%+v", hit, ack)
+	}
+}

@@ -25,6 +25,8 @@ func (apiStores) ExportFills(context.Context, string, int64, int64) ([]exec.Expo
 	return nil, nil
 }
 
+func (apiStores) JournalDays() ([]string, error) { return nil, nil }
+
 type apiInd struct{}
 
 func (apiInd) EnsureIndicator(string, md.IndicatorSpec) {}
@@ -37,7 +39,7 @@ func TestUIHubNewBuildsRunnableHubAndServer(t *testing.T) {
 		Global: uihub.GlobalLimits{MaxDayLoss: 500},
 		MD:     20 * time.Millisecond, Account: 250 * time.Millisecond, Position: 100 * time.Millisecond,
 		Buf: 128, TapeCap: 100, NewsCap: 100, FillsCap: 100, EventsCap: 100, OutBuf: 64,
-	}, apiExec{}, apiStores{}, apiInd{}, nil, nil, nil)
+	}, apiExec{}, apiStores{}, apiInd{}, nil, nil, nil, nil, nil)
 	if h == nil || srv == nil {
 		t.Fatal("New must return a hub and server")
 	}

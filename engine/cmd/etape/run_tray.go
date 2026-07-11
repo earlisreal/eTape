@@ -69,7 +69,7 @@ func onReady() {
 	// process never exits mid-shutdown and never leaves a ghost tray icon
 	// behind on a failure exit.
 	go func() {
-		code, restart := boot(ctx, captureAddr)
+		code, restart, nextArgs := boot(ctx, captureAddr)
 		if code != 0 {
 			// boot() already called slog.SetDefault with a handler writing
 			// to stderr (and the -log file, if one was given) before
@@ -87,7 +87,7 @@ func onReady() {
 			// Ordering it before Quit avoids a window where this process
 			// could exit before the new one is spawned; the brief two-icon
 			// overlap while the new tray starts up is an accepted tradeoff.
-			if err := relaunch(); err != nil {
+			if err := relaunch(nextArgs); err != nil {
 				slog.Default().Error("relaunch failed", "err", err)
 			}
 		}

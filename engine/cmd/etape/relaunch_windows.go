@@ -18,12 +18,22 @@ import "os"
 // Files is left with three nil entries (no inherited stdin/stdout/stderr) so
 // this is safe to call from the windowsgui (tray) build, which has no console
 // handles to inherit in the first place.
-func relaunch() error {
+//
+// argv is the flag list to boot with; nil means "reuse os.Args unchanged"
+// (the existing RestartEngine case: same flags, changed config file on
+// disk). Non-nil (a mode-switch relaunch) rebuilds argv as [exe, argv...]
+// so the child sees a clean, correct os.Args regardless of how this
+// process was originally invoked.
+func relaunch(argv []string) error {
 	exe, err := os.Executable()
 	if err != nil {
 		return err
 	}
-	proc, err := os.StartProcess(exe, os.Args, &os.ProcAttr{
+	next := os.Args
+	if argv != nil {
+		next = append([]string{exe}, argv...)
+	}
+	proc, err := os.StartProcess(exe, next, &os.ProcAttr{
 		Env:   os.Environ(),
 		Files: []*os.File{nil, nil, nil},
 	})

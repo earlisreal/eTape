@@ -240,6 +240,14 @@ type HealthSnapshot struct {
 	Quota *QuotaInfo   `json:"quota,omitempty"`
 }
 
+// SessionSnapshot is the static sys.session topic: which mode the engine
+// booted in. Mode is "live" or "replay"; Day/Speed populated only in replay.
+type SessionSnapshot struct {
+	Mode  string  `json:"mode"`
+	Day   string  `json:"day,omitempty"`
+	Speed float64 `json:"speed,omitempty"`
+}
+
 type SysEvent struct {
 	Seq    int64  `json:"seq"`
 	Ts     string `json:"ts"`
@@ -446,3 +454,16 @@ type TestConnectionResult struct {
 	Message     string        `json:"message"`
 	Accounts    []TestAccount `json:"accounts"`
 }
+
+// ---- replay control (settings/toolbar StartReplay/GoLive commands) ----
+
+// StartReplayArgs selects the recorded day and playback speed for the
+// StartReplay command. Day is a "YYYY-MM-DD" calendar date; Speed is a
+// playback multiplier (0 = as-fast-as-possible, per Task 4's closure).
+type StartReplayArgs struct {
+	Day   string  `json:"day"`
+	Speed float64 `json:"speed"`
+}
+
+// GoLiveArgs is intentionally empty (kept as a named type for tygo stability).
+type GoLiveArgs struct{}
