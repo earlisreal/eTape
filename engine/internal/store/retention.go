@@ -58,7 +58,7 @@ func (s *Store) VacuumIfNeeded() (bool, error) {
 	if err := s.db.QueryRow("PRAGMA page_size").Scan(&pageSize); err != nil {
 		return false, err
 	}
-	if freeCount*pageSize < vacuumFreelistThreshold {
+	if freeCount*pageSize <= vacuumFreelistThreshold {
 		return false, nil
 	}
 	if _, err := s.db.Exec("VACUUM"); err != nil {
