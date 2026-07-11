@@ -121,8 +121,30 @@ type JournalRow struct {
 }
 
 // ReadJournalDay returns a day's events in seq order, decoded to feed.Events.
+// It merges sealed chunks (older, compressed) with any raw rows for the day
+// (normally only today). Both reads run in one transaction so a concurrent
+// per-day seal (which inserts chunks and deletes raw rows atomically) can never
+// produce a torn read that drops or duplicates the day.
 func (s *Store) ReadJournalDay(day string) ([]JournalRow, error) {
-	rows, err := s.db.Query(
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }() // read-only tx: rollback just releases it
+	sealed, err := readSealedRows(tx, day)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := readRawDay(tx, day)
+	if err != nil {
+		return nil, err
+	}
+	return append(sealed, raw...), nil
+}
+
+// readRawDay returns the raw (unsealed) journal rows for a day, seq-ordered.
+func readRawDay(q rowQuerier, day string) ([]JournalRow, error) {
+	rows, err := q.Query(
 		`SELECT seq, ts_exch, ts_recv, symbol, kind, seed, payload
 		 FROM journal WHERE day=? ORDER BY seq`, day)
 	if err != nil {
@@ -154,6 +176,10 @@ func (s *Store) ReadJournalDay(day string) ([]JournalRow, error) {
 // pipe applied them, which the 10s watermark depends on. Seq overlaps
 // (seed vs push) are preserved; de-dup is the caller's job (md.Core), exactly
 // as the live and replay apply paths do it.
+//
+// This reads the raw `journal` table only (never `journal_chunks`): its sole
+// caller is today's tick backfill, and the current ET day is never sealed, so
+// today's ticks are always raw. Do not call it for a past day.
 func (s *Store) ReadJournalTicks(symbol string, tsMs int64) ([]feed.Tick, error) {
 	day := dayKey(tsMs)
 	rows, err := s.db.Query(
@@ -180,7 +206,8 @@ func (s *Store) ReadJournalTicks(symbol string, tsMs int64) ([]feed.Tick, error)
 
 // JournalDays returns the distinct recorded days, ascending.
 func (s *Store) JournalDays() ([]string, error) {
-	rows, err := s.db.Query("SELECT DISTINCT day FROM journal ORDER BY day")
+	rows, err := s.db.Query(
+		"SELECT day FROM journal UNION SELECT day FROM journal_chunks ORDER BY day")
 	if err != nil {
 		return nil, err
 	}

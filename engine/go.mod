@@ -7,6 +7,7 @@ require github.com/BurntSushi/toml v1.6.0
 require (
 	fyne.io/systray v1.12.2
 	github.com/coder/websocket v1.8.15
+	github.com/klauspost/compress v1.19.0
 	github.com/oklog/ulid/v2 v2.1.1
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.44.0
