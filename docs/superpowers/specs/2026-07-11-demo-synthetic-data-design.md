@@ -102,12 +102,19 @@ with these substitutions:
 
 ## Generator model
 
-### Universe — 12 fictional symbols
+### Universe — 12 symbols drawn from a fictional name pool
 
-Fictional tickers, `US.`-prefixed so the `supportedMarket` gate passes (e.g.
-`US.VLCN`, `US.MERI`, `US.QNTM`). Never real tickers: real symbols with fake
-prices are misleading, and fictional names make "this is synthetic"
-unmistakable — the same safety logic as the REPLAY banner.
+A fixed pool of ~20 fictional tickers, `US.`-prefixed so the `supportedMarket`
+gate passes (e.g. `US.VLCN`, `US.MERI`, `US.QNTM`). Never real tickers: real
+symbols with fake prices are misleading, and fictional names make "this is
+synthetic" unmistakable — the same safety logic as the REPLAY banner.
+
+**Per-run assignment:** each launch, the seeded PRNG draws 12 names from the
+pool and assigns the personalities below. Which symbol is the runner differs
+every launch, so spotting it on the movers board is part of the practice drill
+— not something you learn by name. All parametrics (open price, float, gap
+size, volatility, book depth) are likewise drawn per run from the personality's
+ranges; the same `-demo-seed` reproduces the identical universe and day.
 
 | Personality | Count | Traits |
 |---|---|---|
@@ -264,8 +271,8 @@ long-lived schema, unbounded growth — for continuity the demo doesn't need.
 
 ## Out of scope
 
-- config.toml exposure of the universe (hardcoded personalities; `-demo-seed`
-  is the only knob).
+- config.toml exposure of the universe (hardcoded name pool + personality
+  templates; `-demo-seed` is the only knob).
 - Session-hours realism curves (open/close volume U-shape).
 - Multi-day runner storylines beyond prevClose continuity.
 - Corporate actions, splits, dividends; halts on non-runners.
