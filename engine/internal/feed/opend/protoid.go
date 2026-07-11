@@ -42,6 +42,20 @@ const (
 	// resolve-miss fallback.
 	ProtoTrdUpdateOrder     uint32 = 2208 // push
 	ProtoTrdUpdateOrderFill uint32 = 2218 // push
+
+	// Trade request/response protocols (2xxx range). Ordinary request/response
+	// IDs -- unlike ProtoTrdUpdateOrder/ProtoTrdUpdateOrderFill above, these are
+	// never server-initiated, so they are NOT added to pushProtoIDs. Used by the
+	// moomoo package's trdClient (internal/broker/moomoo/trd.go) over a
+	// trade-only opend.Client connection; the feed connection never sends these
+	// (trade-incapability rule).
+	ProtoTrdGetAccList      uint32 = 2001
+	ProtoTrdSubAccPush      uint32 = 2008
+	ProtoTrdGetFunds        uint32 = 2101
+	ProtoTrdGetPositionList uint32 = 2102
+	ProtoTrdGetOrderList    uint32 = 2201
+	ProtoTrdPlaceOrder      uint32 = 2202
+	ProtoTrdModifyOrder     uint32 = 2205
 )
 
 // pushProtoIDs are server-initiated update protocols. A frame with one of
