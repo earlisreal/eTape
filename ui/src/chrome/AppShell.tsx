@@ -449,7 +449,10 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             </div>
           )}
         </div>
-        <ReplayBanner session={stores.session} engineState={engineState} onGoLive={async () => { await rc.goLive(); }} />
+        <ReplayBanner session={stores.session} engineState={engineState} onGoLive={async () => {
+          const ack = await rc.goLive();
+          if (ack.status !== "accepted") throw new Error(ack.reason || "Return to live rejected");
+        }} />
         <FeedStatusBanner health={stores.health} engineState={engineState} onOpenConnection={onOpenConnection} />
         {showAlpacaHint && <AlpacaBackfillBanner onSetup={openAlpacaSetup} onDismiss={dismissAlpacaHint} />}
         <div style={{ flex: 1, minHeight: 0 }}>

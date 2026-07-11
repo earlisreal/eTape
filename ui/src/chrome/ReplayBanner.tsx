@@ -39,7 +39,10 @@ export function ReplayBanner({ session, engineState, onGoLive }: {
       padding: "4px 12px", background: palette.warn, color: "#fff", fontWeight: 600,
     }}>
       <span>REPLAY — {s.day} @ {speed} · practice orders only</span>
-      <button data-testid="return-to-live" disabled={returning} onClick={() => { setReturning(true); void onGoLive(); }}
+      <button data-testid="return-to-live" disabled={returning} onClick={() => {
+        setReturning(true);
+        onGoLive().catch(() => setReturning(false));
+      }}
         style={{ padding: "2px 10px", borderRadius: 4, border: "1px solid #fff", background: "transparent", color: "#fff", cursor: "pointer" }}>
         {returning ? "Returning to live…" : "Return to live"}
       </button>
