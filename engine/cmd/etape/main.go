@@ -464,6 +464,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	var orch *backfill.Orchestrator
 	var scanWG sync.WaitGroup
 	var dropWG sync.WaitGroup
+	var sealSchedWG sync.WaitGroup
 	var client *opend.Client
 	if live {
 		if n, err := st.PruneJournal(cfg.Store.RetentionDays); err == nil && n > 0 {
@@ -499,7 +500,8 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		go func() { _ = fd.Run(ctx) }()
 		pipeWG.Add(1)
 		go pipe(ctx, &pipeWG, fd.Events(), core, st)
-		go runSealScheduler(ctx, st, clock.System{}, log)
+		sealSchedWG.Add(1)
+		go runSealScheduler(ctx, &sealSchedWG, st, clock.System{}, log)
 		var hubBackfill func(sym string, done func(ok bool))
 		if cfg.Backfill.Enabled {
 			var alpacaSrc *histalpaca.Client
@@ -620,7 +622,9 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// drained), backfill's orch.Backfill goroutines (ArchiveBar1m/
 	// ArchiveDaily for freshly-fetched history, joined via backfillWG),
 	// watchDroppedUpdates (AppendSysEvent, joined via dropWG — depends only
-	// on ctx, so it can be waited anywhere after <-ctx.Done()), exec.Core.Run
+	// on ctx, so it can be waited anywhere after <-ctx.Done()),
+	// runSealScheduler (RequestSeal, joined via sealSchedWG — also depends
+	// only on ctx, same reasoning as dropWG), exec.Core.Run
 	// (AppendExecEvent, joined via execDone), and every uihub connection's
 	// dispatch loop (SetConfig via commandHandler.handle, joined via
 	// srv.Wait()). brokerWG has no store writes but is joined here too since
@@ -663,14 +667,15 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	shutCtx, cancelShut := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = httpSrv.Shutdown(shutCtx)
 	cancelShut()
-	srv.Wait()        // every conn.run() returned: no more SetConfig via dispatch
-	<-hubDone         // hub.Run returned: no more handleEnsureDemand/handleLoadOlder, hence no more backfillWG.Add from chart-open demands or LoadOlderBars
-	scanWG.Wait()     // scan poller stopped: no more backfillWG.Add from pool admissions
-	backfillWG.Wait() // boot backfill workers stopped: no more Seed* into the core
-	pipeWG.Wait()     // feed->core pipe stopped: no more RecordEvent
-	forwardWG.Wait()  // forwardMD drained: no more ArchiveBar1m/ArchiveDaily
-	dropWG.Wait()     // dropped-updates watcher stopped: no more AppendSysEvent from it
-	<-execDone        // exec.Core.Run returned: no more AppendExecEvent
+	srv.Wait()         // every conn.run() returned: no more SetConfig via dispatch
+	<-hubDone          // hub.Run returned: no more handleEnsureDemand/handleLoadOlder, hence no more backfillWG.Add from chart-open demands or LoadOlderBars
+	scanWG.Wait()      // scan poller stopped: no more backfillWG.Add from pool admissions
+	backfillWG.Wait()  // boot backfill workers stopped: no more Seed* into the core
+	pipeWG.Wait()      // feed->core pipe stopped: no more RecordEvent
+	forwardWG.Wait()   // forwardMD drained: no more ArchiveBar1m/ArchiveDaily
+	dropWG.Wait()      // dropped-updates watcher stopped: no more AppendSysEvent from it
+	sealSchedWG.Wait() // day-roll seal scheduler stopped: no more RequestSeal from it
+	<-execDone         // exec.Core.Run returned: no more AppendExecEvent
 	brokerWG.Wait()
 	if err := st.Close(); err != nil {
 		log.Error("close store", "err", err)

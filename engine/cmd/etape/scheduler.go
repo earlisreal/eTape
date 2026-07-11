@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
@@ -31,8 +32,11 @@ func nextSealFire(now time.Time) time.Time {
 
 // runSealScheduler enqueues a journal seal onto the store's writer goroutine at
 // each 00:30 ET boundary, so an engine left running past midnight compresses the
-// prior day without a restart. Returns when ctx is cancelled.
-func runSealScheduler(ctx context.Context, st *store.Store, clk clock.Clock, log *slog.Logger) {
+// prior day without a restart. Returns when ctx is cancelled. It is a
+// store-writing goroutine (RequestSeal) and must be joined via wg before
+// st.Close() -- see the shutdown-ordering comment in main().
+func runSealScheduler(ctx context.Context, wg *sync.WaitGroup, st *store.Store, clk clock.Clock, log *slog.Logger) {
+	defer wg.Done()
 	for {
 		wait := nextSealFire(clk.Now()).Sub(clk.Now())
 		select {
