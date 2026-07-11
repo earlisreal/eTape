@@ -389,3 +389,43 @@ func TestGenerator_ConcurrentAccessNoRace(t *testing.T) {
 	}
 	<-writerDone
 }
+
+// TestKickRunnerGap_AnchorNeverNonPositiveOrExtreme is a regression test for
+// a bug found via Task 9's history seeder: runner GapPct is drawn from
+// [40,80] (universe.go), so kickRunnerGap's unclamped
+// mag := between(rng, GapPct*0.5, GapPct*1.5) could reach 120 in magnitude;
+// once negated (50% of draws), mag < -100 made the resulting Anchor
+// negative and permanently unrecoverable (repro'd at seed=18 US.DRGO
+// Anchor=-293.84, seed=26 US.CRUX Anchor=-997.06, seed=52 US.DRGO
+// Anchor=-1334.03). maxGapMag clamps mag to +/-90 before it's applied.
+// Sweeps many seeds directly against kickRunnerGap (not just via a full
+// Seed()/StepTo() run) so this test targets the exact mechanism, not a
+// downstream symptom.
+func TestKickRunnerGap_AnchorNeverNonPositiveOrExtreme(t *testing.T) {
+	for seed := int64(0); seed < 500; seed++ {
+		g := New(seed, clock.NewFake(timeMs(0)))
+		for _, code := range g.Symbols() {
+			rt := g.syms[code]
+			if rt.spec.Pers != PersRunner {
+				continue
+			}
+			prevClose := rt.prevClose
+			g.kickRunnerGap(rt, 0)
+
+			if rt.price.Anchor <= 0 {
+				t.Fatalf("seed=%d %s: kickRunnerGap produced non-positive Anchor=%.4f (prevClose=%.4f)",
+					seed, code, rt.price.Anchor, prevClose)
+			}
+			const centTolerance = 0.011 // rounding slack between mag's clamp and the final round2
+			lo := round2(prevClose*(1-maxGapMag/100)) - centTolerance
+			hi := round2(prevClose*(1+maxGapMag/100)) + centTolerance
+			if rt.price.Anchor < lo || rt.price.Anchor > hi {
+				t.Fatalf("seed=%d %s: Anchor=%.4f outside clamped range [%.4f, %.4f] (prevClose=%.4f)",
+					seed, code, rt.price.Anchor, lo, hi, prevClose)
+			}
+			if rt.price.Mid != rt.price.Anchor && (rt.price.Mid <= 0) {
+				t.Fatalf("seed=%d %s: Mid non-positive after kickRunnerGap: %.4f", seed, code, rt.price.Mid)
+			}
+		}
+	}
+}

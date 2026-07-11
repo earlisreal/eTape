@@ -281,18 +281,34 @@ func (g *Generator) rolloverSymbol(rt *symRuntime, fromMs, nowMs int64) {
 	rt.dirtyQuote = true
 }
 
+// maxGapMag bounds kickRunnerGap's overnight percentage move to a sane
+// range. Runner GapPct is drawn from [40,80] (universe.go), so the raw
+// mag := between(rng, GapPct*0.5, GapPct*1.5) can reach 120 in magnitude;
+// once negated, mag < -100 would make the new Anchor non-positive and
+// permanently unrecoverable (Anchor's own subsequent per-step perturbation
+// is sign-preserving), and even mag near -100 pins Mid at the price floor
+// for the rest of the run. Clamping to +/-maxGapMag keeps every overnight
+// gap a real, bounded move in either direction.
+const maxGapMag = 90.0
+
 // kickRunnerGap redraws a fresh overnight gap for a runner symbol: the new
 // day's anchor/mid move by a random +/- percentage (scaled off the same
-// GapPct magnitude DrawUniverse used for the original opening gap) relative
-// to the just-set prevClose, and the regime's dwell timer is forced to
-// expire immediately. It then calls stepPrice with dtMs=0 purely so Task 2's
-// own transition-matrix machinery (not reimplemented here) picks the day's
-// opening regime — a real "kick" via the existing regime-draw mechanism,
-// rather than this file hand-rolling a second one.
+// GapPct magnitude DrawUniverse used for the original opening gap, clamped
+// to +/-maxGapMag) relative to the just-set prevClose, and the regime's
+// dwell timer is forced to expire immediately. It then calls stepPrice with
+// dtMs=0 purely so Task 2's own transition-matrix machinery (not
+// reimplemented here) picks the day's opening regime — a real "kick" via
+// the existing regime-draw mechanism, rather than this file hand-rolling a
+// second one.
 func (g *Generator) kickRunnerGap(rt *symRuntime, nowMs int64) {
 	mag := between(g.rng, rt.spec.GapPct*0.5, rt.spec.GapPct*1.5)
 	if g.rng.Float64() < 0.5 {
 		mag = -mag
+	}
+	if mag > maxGapMag {
+		mag = maxGapMag
+	} else if mag < -maxGapMag {
+		mag = -maxGapMag
 	}
 	rt.price.Anchor = round2(rt.prevClose * (1 + mag/100))
 	rt.price.Mid = rt.price.Anchor
