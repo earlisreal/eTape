@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
 	"github.com/earlisreal/eTape/engine/internal/broker/sim"
-	"github.com/earlisreal/eTape/engine/internal/broker/stub"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
@@ -136,9 +136,17 @@ func TestMarkBridgeForwardsBooksToSinks(t *testing.T) {
 // the type-assertion alone identifies sim brokers correctly in both modes.
 func TestSimSinksOfSelectsLiveSimVenue(t *testing.T) {
 	simBroker := sim.New("simulator", clock.System{}, 100_000, sim.Options{})
+	// alpacaBroker is a non-sim exec.Broker double: constructing it does no
+	// network I/O (that only happens once Run is called, which this test
+	// never does), and it deliberately implements neither SetMark nor
+	// SetBook, so simSinksOf must skip it.
+	alpacaBroker, err := alpaca.New(alpaca.Config{Venue: "alpaca-paper", Clock: clock.System{}})
+	if err != nil {
+		t.Fatalf("alpaca.New: %v", err)
+	}
 	vbs := []venueBroker{
 		{ID: "simulator", Broker: simBroker},
-		{ID: "alpaca-paper", Broker: stub.New()},
+		{ID: "alpaca-paper", Broker: alpacaBroker},
 	}
 
 	sinks := simSinksOf(vbs)

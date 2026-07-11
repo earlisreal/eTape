@@ -104,6 +104,7 @@ flowchart TB
 
     MOOSRV --> OPEND
     OPEND -->|"quotes · ticks · depth"| ENGINE
+    ENGINE <-->|"orders · fills (moomoo)"| OPEND
     ENGINE <-->|"WebSocket + JSON<br/>127.0.0.1:8686"| UI
     ENGINE <-->|"orders · fills"| BROKERS
 ```
@@ -189,7 +190,7 @@ Notes:
 | **Built-in simulator** (`sim`) | paper | ✅ Realistic fills: book-walk pricing, partials, slippage & latency models |
 | **Alpaca** | paper + live | ✅ Fully supported (REST + streaming) |
 | **TradeZero** | live | ✅ Fully supported (REST + WebSocket) |
-| **moomoo** | — | 🔜 Planned as a third execution venue |
+| **moomoo** | paper + live | ✅ Fully supported (native OpenD trade connection) |
 
 Execution is **off by default** — with no venues configured, every order is blocked.
 The easiest way to add one is in-app: **Settings → Venues** lets you add a venue,
@@ -197,7 +198,10 @@ enter API credentials, and test the connection; it writes the config for you (wi
 automatic backup of your previous `config.toml`).
 
 Credentials are stored locally in `~/.eTape/credentials.json` and are only ever sent
-to the broker they belong to.
+to the broker they belong to. moomoo is the exception — it has no API key/secret at
+all; it authenticates over the same local OpenD connection as market data, keyed by
+account ID, and trade unlock happens once per OpenD restart in the OpenD GUI itself
+(never inside eTape).
 
 Before any order reaches a broker it must pass the **two-layer risk gate** — global
 caps (max day loss, per-symbol position value/shares) and per-venue caps (max order
@@ -278,7 +282,6 @@ The Go structs are the single source of truth for the engine↔UI protocol —
 
 ## Roadmap
 
-- moomoo as a third execution venue
 - Interactive practice mode: trade any recorded day against the simulator on replay
 - Desktop packaging (Wails)
 - Smarter extended-hours order handling

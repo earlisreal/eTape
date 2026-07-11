@@ -34,6 +34,28 @@ const (
 	ProtoQotGetUSAfterHoursRank   uint32 = 3411
 	ProtoQotGetUSOvernightRank    uint32 = 3412
 	ProtoQotGetTopMoversRank      uint32 = 3413
+
+	// Trade push protocols (2xxx range). The feed connection never sends Trd_* protos,
+	// but the shared pushProtoIDs map is consulted by any opend.Client reader loop
+	// (including the future trade-only connection). These need to be registered so
+	// the trade client's reader reliably routes them to Pushes() instead of the
+	// resolve-miss fallback.
+	ProtoTrdUpdateOrder     uint32 = 2208 // push
+	ProtoTrdUpdateOrderFill uint32 = 2218 // push
+
+	// Trade request/response protocols (2xxx range). Ordinary request/response
+	// IDs -- unlike ProtoTrdUpdateOrder/ProtoTrdUpdateOrderFill above, these are
+	// never server-initiated, so they are NOT added to pushProtoIDs. Used by the
+	// moomoo package's trdClient (internal/broker/moomoo/trd.go) over a
+	// trade-only opend.Client connection; the feed connection never sends these
+	// (trade-incapability rule).
+	ProtoTrdGetAccList      uint32 = 2001
+	ProtoTrdSubAccPush      uint32 = 2008
+	ProtoTrdGetFunds        uint32 = 2101
+	ProtoTrdGetPositionList uint32 = 2102
+	ProtoTrdGetOrderList    uint32 = 2201
+	ProtoTrdPlaceOrder      uint32 = 2202
+	ProtoTrdModifyOrder     uint32 = 2205
 )
 
 // pushProtoIDs are server-initiated update protocols. A frame with one of
@@ -46,6 +68,11 @@ var pushProtoIDs = map[uint32]struct{}{
 	ProtoQotUpdateRT:        {},
 	ProtoQotUpdateTicker:    {},
 	ProtoQotUpdateOrderBook: {},
+
+	// Trade pushes (2xxx range): included here so the trade client's reader loop
+	// (which uses the same opend.Client and pushProtoIDs map) reliably routes them.
+	ProtoTrdUpdateOrder:     {},
+	ProtoTrdUpdateOrderFill: {},
 }
 
 // IsPushProtoID reports whether protoID is a known push protocol.

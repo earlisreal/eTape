@@ -2,25 +2,30 @@
 // for eTape's Venues & credentials settings UI. Given a broker name, an env,
 // and either typed-but-unsaved credentials or the name of a saved one, it
 // calls the already-built read-only helpers in broker/alpaca
-// (VerifyCredentials) and broker/tradezero (FetchAccounts) and normalizes
-// whatever they return into one Result shape the UI can render, regardless
-// of which broker was probed.
+// (VerifyCredentials), broker/tradezero (FetchAccounts), and broker/moomoo
+// (VerifyAccount) and normalizes whatever they return into one Result shape
+// the UI can render, regardless of which broker was probed. moomoo has no
+// key/secret to verify — it dials the local OpenD gateway directly and
+// validates the configured account id instead.
 //
-// This package does no HTTP itself — every probe is a call to a Task 1/2
-// read-only helper — and applies no timeout of its own beyond honoring the
-// ctx its caller passes in; a single budget for the whole TestConnection
-// call is the caller's job (a later uihub command handler), not this
-// package's.
+// This package does no HTTP/TCP itself — every probe is a call to a broker
+// package's own read-only helper — and applies no timeout of its own beyond
+// honoring the ctx its caller passes in; a single budget for the whole
+// TestConnection call is the caller's job (a later uihub command handler),
+// not this package's.
 package venueprobe
 
 import (
 	"context"
+	"strconv"
 	"strings"
 
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
+	"github.com/earlisreal/eTape/engine/internal/broker/moomoo"
 	"github.com/earlisreal/eTape/engine/internal/broker/tradezero"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/creds"
+	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/trdcommon"
 )
 
 // Account is one candidate account a probe discovered. TradeZero can return
@@ -47,34 +52,42 @@ type Result struct {
 // tzFetchAccounts fakes injected so no probe ever makes a real network call.
 type Prober struct {
 	credsPath string
+	// openDAddr is the local OpenD gateway's host:port — a fixed,
+	// process-wide value (like credsPath), used only by the moomoo probe.
+	openDAddr string
 	clk       clock.Clock
 
-	// alpacaVerify and tzFetchAccounts are injectable seams for tests (no
-	// network); New wires them to the real broker helpers below.
+	// alpacaVerify, tzFetchAccounts, and moomooVerify are injectable seams
+	// for tests (no network); New wires them to the real broker helpers
+	// below.
 	alpacaVerify    func(ctx context.Context, env string, cr creds.Pair, clk clock.Clock) (string, error)
 	tzFetchAccounts func(ctx context.Context, cr creds.Pair, clk clock.Clock) ([]tradezero.AccountInfo, error)
+	moomooVerify    func(ctx context.Context, addr string, accountID uint64, env string, clk clock.Clock) (*trdcommon.TrdAcc, error)
 }
 
-// New builds a Prober wired to the real alpaca/tradezero read-only helpers.
-func New(credsPath string, clk clock.Clock) *Prober {
+// New builds a Prober wired to the real alpaca/tradezero/moomoo read-only
+// helpers. openDAddr is the local OpenD gateway address (config.OpenD.Addr())
+// the moomoo probe dials.
+func New(credsPath, openDAddr string, clk clock.Clock) *Prober {
 	return &Prober{
 		credsPath:       credsPath,
+		openDAddr:       openDAddr,
 		clk:             clk,
 		alpacaVerify:    alpaca.VerifyCredentials,
 		tzFetchAccounts: tradezero.FetchAccounts,
+		moomooVerify:    moomoo.VerifyAccount,
 	}
 }
 
 // TestConnection probes broker with a single read-only call and reports the
-// outcome. accountID is accepted for parity with the wire args but unused by
-// any probe today: Alpaca needs no account id, and TradeZero's probe lists
-// every account visible to the key rather than targeting one.
+// outcome. accountID is accepted for parity with the wire args but only
+// moomoo's probe uses it today: Alpaca needs no account id, and TradeZero's
+// probe lists every account visible to the key rather than targeting one.
 //
-// moomoo and any unrecognized broker name are rejected before credentials
-// are even looked at — neither one ever calls a broker helper, so there is
-// nothing for a missing/typed credential to gate; requiring a saved
-// credential just to learn "not supported" would be a needless and
-// confusing failure mode for those two cases.
+// moomoo has no key/secret to verify, so its case skips resolveCreds
+// entirely and goes straight to testMoomoo, which dials OpenD directly and
+// validates accountID. Only a truly unrecognized broker name is rejected
+// before anything is looked at, with the generic "not supported" message.
 func (p *Prober) TestConnection(ctx context.Context, broker, env, credName, keyID, secretKey, accountID string) Result {
 	switch broker {
 	case "alpaca":
@@ -90,7 +103,7 @@ func (p *Prober) TestConnection(ctx context.Context, broker, env, credName, keyI
 		}
 		return p.testTradeZero(ctx, cr)
 	case "moomoo":
-		return Result{OK: false, Message: "connection testing is not supported for moomoo"}
+		return p.testMoomoo(ctx, env, accountID)
 	default:
 		return Result{OK: false, Message: "connection testing is not supported for " + broker}
 	}
@@ -183,4 +196,24 @@ func tzEnv(accountType string) string {
 		return "paper"
 	}
 	return "live"
+}
+
+// testMoomoo probes a moomoo venue by dialing OpenD directly and validating
+// the configured account id — unlike alpaca/tradezero, there is no
+// key/secret to verify; accountID (already required by config validation,
+// but re-checked defensively here since a probe can be called with
+// not-yet-saved settings-UI input) is the only credential-like input.
+func (p *Prober) testMoomoo(ctx context.Context, env, accountID string) Result {
+	if accountID == "" {
+		return Result{OK: false, Message: "account_id is required for moomoo"}
+	}
+	accID, err := strconv.ParseUint(accountID, 10, 64)
+	if err != nil {
+		return Result{OK: false, Message: "account_id must be numeric"}
+	}
+	_, err = p.moomooVerify(ctx, p.openDAddr, accID, env, p.clk)
+	if err != nil {
+		return Result{OK: false, Message: err.Error()}
+	}
+	return Result{OK: true, Env: env, AccountID: accountID}
 }

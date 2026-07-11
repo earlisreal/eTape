@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
+	"github.com/earlisreal/eTape/engine/internal/broker/moomoo"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/creds"
@@ -52,20 +53,42 @@ func TestBuildBrokersReplayIsAllSim(t *testing.T) {
 	}
 }
 
-func TestBuildBrokersMoomooRegistersStub(t *testing.T) {
-	cfg := config.Config{Venues: []config.Venue{{ID: "moomoo", Broker: "moomoo"}}}
+// TestBuildBrokersMoomooConstructsAdapter verifies a moomoo venue with a
+// valid numeric account_id builds a real *moomoo.Adapter with Run bound —
+// the stub venue (reject-all, no Run) this replaces is gone; moomoo is no
+// longer deferred to v1.x.
+func TestBuildBrokersMoomooConstructsAdapter(t *testing.T) {
+	cfg := config.Config{
+		OpenD:  config.OpenD{Host: "127.0.0.1", Port: 11111},
+		Venues: []config.Venue{{ID: "moomoo", Broker: "moomoo", AccountID: "123456", Env: "paper"}},
+	}
 	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, false)
 	if err != nil {
-		t.Fatalf("moomoo venue should register a stub, not error: %v", err)
+		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(vbs) != 1 || vbs[0].ID != "moomoo" {
 		t.Fatalf("expected one moomoo venue, got %+v", vbs)
 	}
-	if vbs[0].Run != nil {
-		t.Fatal("stub venue has no Run loop")
+	if vbs[0].Run == nil {
+		t.Fatal("moomoo adapter must bind Run")
 	}
-	if _, err := vbs[0].Broker.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "moomoo"}); err == nil {
-		t.Fatal("moomoo stub must reject submits")
+	if _, ok := vbs[0].Broker.(*moomoo.Adapter); !ok {
+		t.Fatalf("expected *moomoo.Adapter, got %T", vbs[0].Broker)
+	}
+}
+
+// TestBuildBrokersMoomooNonNumericAccountIDErrors verifies buildBrokers
+// defensively re-validates account_id at boot time (ValidateVenueConfig
+// already rejects a non-numeric account_id when the settings UI writes
+// config.toml, but a hand-edited file can skip that path entirely).
+func TestBuildBrokersMoomooNonNumericAccountIDErrors(t *testing.T) {
+	cfg := config.Config{Venues: []config.Venue{{ID: "moomoo", Broker: "moomoo", AccountID: "not-a-number"}}}
+	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, false)
+	if err == nil {
+		t.Fatal("expected error for non-numeric moomoo account_id")
+	}
+	if len(vbs) != 0 {
+		t.Fatalf("expected empty broker slice on error, got %d", len(vbs))
 	}
 }
 

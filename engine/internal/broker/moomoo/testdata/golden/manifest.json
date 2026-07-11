@@ -1,0 +1,17 @@
+{
+  "trd_capture": {
+    "sdk_version": "10.08.6808",
+    "captured_at": "2026-07-11T06:29:52.828112+00:00",
+    "market": "US",
+    "symbol": "US.F",
+    "trd_env": "SIMULATE",
+    "files": {
+      "trd_subaccpush.jsonl": 2,
+      "trd_placeorder.jsonl": 2,
+      "trd_modifyorder.jsonl": 2,
+      "trd_update_order.jsonl": 3
+    },
+    "redaction": "header.accID (and Trd_SubAccPush accIDList entries) replaced with placeholder 28881234 -- same value as testdata/gen/main.go's genAccID -- via protobuf re-parse + field-set + SerializeToString + frame rebuild (bodyLen/SHA1 recomputed), never a raw byte patch. Verified by re-parsing the rebuilt frame/body before writing. Trd_GetAccList (2001) responses (which carry the full multi-account list, including a REAL account on this OpenD login) were captured in memory only and are never written to a fixture file.",
+    "note": "Task 7 trade surface: Trd_SubAccPush(2008)/Trd_PlaceOrder(2202)/Trd_ModifyOrder(2205, used here for cancel)/Trd_UpdateOrder(2208) captured from one real tiny (1 share) far-from-market SIMULATE limit order's full lifecycle (place -> Accepted push(es) -> cancel -> Canceled push). Supersedes testdata/gen/main.go's hand-crafted trd_update_order.jsonl with a real OpenD capture."
+  }
+}

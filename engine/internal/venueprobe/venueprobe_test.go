@@ -12,6 +12,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/broker/tradezero"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/creds"
+	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/trdcommon"
 )
 
 // failAlpaca returns an alpacaVerify fake that fails the test if invoked —
@@ -27,6 +28,14 @@ func failAlpaca(t *testing.T) func(context.Context, string, creds.Pair, clock.Cl
 func failTZ(t *testing.T) func(context.Context, creds.Pair, clock.Clock) ([]tradezero.AccountInfo, error) {
 	return func(context.Context, creds.Pair, clock.Clock) ([]tradezero.AccountInfo, error) {
 		t.Fatal("tzFetchAccounts should not have been called")
+		return nil, nil
+	}
+}
+
+// failMoomoo returns a moomooVerify fake that fails the test if invoked.
+func failMoomoo(t *testing.T) func(context.Context, string, uint64, string, clock.Clock) (*trdcommon.TrdAcc, error) {
+	return func(context.Context, string, uint64, string, clock.Clock) (*trdcommon.TrdAcc, error) {
+		t.Fatal("moomooVerify should not have been called")
 		return nil, nil
 	}
 }
@@ -300,22 +309,84 @@ func TestTestConnection_TradeZero_FetchError(t *testing.T) {
 	}
 }
 
-// ---- moomoo / unrecognized broker ----
+// ---- moomoo ----
 
-func TestTestConnection_Moomoo_NotSupported(t *testing.T) {
+func TestTestConnection_Moomoo_Success(t *testing.T) {
+	var gotAddr, gotEnv string
+	var gotAccID uint64
+	p := &Prober{
+		clk:             fakeClock(),
+		openDAddr:       "127.0.0.1:11111",
+		alpacaVerify:    failAlpaca(t),
+		tzFetchAccounts: failTZ(t),
+		moomooVerify: func(_ context.Context, addr string, accID uint64, env string, _ clock.Clock) (*trdcommon.TrdAcc, error) {
+			gotAddr, gotAccID, gotEnv = addr, accID, env
+			return &trdcommon.TrdAcc{}, nil
+		},
+	}
+
+	res := p.TestConnection(context.Background(), "moomoo", "paper", "", "", "", "123456")
+
+	want := Result{OK: true, Env: "paper", AccountID: "123456"}
+	if !reflect.DeepEqual(res, want) {
+		t.Fatalf("res = %+v, want %+v", res, want)
+	}
+	if gotAddr != "127.0.0.1:11111" || gotAccID != 123456 || gotEnv != "paper" {
+		t.Fatalf("moomooVerify received addr=%q accID=%d env=%q, want addr=127.0.0.1:11111 accID=123456 env=paper", gotAddr, gotAccID, gotEnv)
+	}
+}
+
+func TestTestConnection_Moomoo_EmptyAccountID(t *testing.T) {
 	p := &Prober{
 		clk:             fakeClock(),
 		alpacaVerify:    failAlpaca(t),
 		tzFetchAccounts: failTZ(t),
+		moomooVerify:    failMoomoo(t),
 	}
 
-	res := p.TestConnection(context.Background(), "moomoo", "", "", "", "", "")
+	res := p.TestConnection(context.Background(), "moomoo", "paper", "", "", "", "")
 
-	want := Result{OK: false, Message: "connection testing is not supported for moomoo"}
+	want := Result{OK: false, Message: "account_id is required for moomoo"}
 	if !reflect.DeepEqual(res, want) {
 		t.Fatalf("res = %+v, want %+v", res, want)
 	}
 }
+
+func TestTestConnection_Moomoo_NonNumericAccountID(t *testing.T) {
+	p := &Prober{
+		clk:             fakeClock(),
+		alpacaVerify:    failAlpaca(t),
+		tzFetchAccounts: failTZ(t),
+		moomooVerify:    failMoomoo(t),
+	}
+
+	res := p.TestConnection(context.Background(), "moomoo", "paper", "", "", "", "not-a-number")
+
+	want := Result{OK: false, Message: "account_id must be numeric"}
+	if !reflect.DeepEqual(res, want) {
+		t.Fatalf("res = %+v, want %+v", res, want)
+	}
+}
+
+func TestTestConnection_Moomoo_VerifyError(t *testing.T) {
+	p := &Prober{
+		clk:             fakeClock(),
+		alpacaVerify:    failAlpaca(t),
+		tzFetchAccounts: failTZ(t),
+		moomooVerify: func(context.Context, string, uint64, string, clock.Clock) (*trdcommon.TrdAcc, error) {
+			return nil, errors.New("moomoo: accID 123456 is disabled (accStatus=Disabled)")
+		},
+	}
+
+	res := p.TestConnection(context.Background(), "moomoo", "paper", "", "", "", "123456")
+
+	want := Result{OK: false, Message: "moomoo: accID 123456 is disabled (accStatus=Disabled)"}
+	if !reflect.DeepEqual(res, want) {
+		t.Fatalf("res = %+v, want %+v", res, want)
+	}
+}
+
+// ---- unrecognized broker ----
 
 func TestTestConnection_UnrecognizedBroker_NotSupported(t *testing.T) {
 	p := &Prober{
@@ -335,11 +406,14 @@ func TestTestConnection_UnrecognizedBroker_NotSupported(t *testing.T) {
 // ---- New ----
 
 func TestNew_WiresRealHelpers(t *testing.T) {
-	p := New("/tmp/does-not-matter.json", clock.System{})
-	if p.alpacaVerify == nil || p.tzFetchAccounts == nil {
-		t.Fatal("New must wire both broker helpers")
+	p := New("/tmp/does-not-matter.json", "127.0.0.1:11111", clock.System{})
+	if p.alpacaVerify == nil || p.tzFetchAccounts == nil || p.moomooVerify == nil {
+		t.Fatal("New must wire all three broker helpers")
 	}
 	if p.credsPath != "/tmp/does-not-matter.json" {
 		t.Fatalf("credsPath = %q, want /tmp/does-not-matter.json", p.credsPath)
+	}
+	if p.openDAddr != "127.0.0.1:11111" {
+		t.Fatalf("openDAddr = %q, want 127.0.0.1:11111", p.openDAddr)
 	}
 }

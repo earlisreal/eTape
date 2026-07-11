@@ -317,7 +317,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 
 	// --- uihub (listening BEFORE OpenD is dialed) ---
 	venueAdm := venueadmin.New(*cfgPath, creds.DefaultPath(), config.VenueConfig{Venues: cfg.Venues, Gate: cfg.Gate})
-	venueProbe := venueprobe.New(creds.DefaultPath(), uihubClk)
+	venueProbe := venueprobe.New(creds.DefaultPath(), cfg.OpenD.Addr(), uihubClk)
 	hub, srv := uihub.New(uihubClk, uihub.Config{
 		Venues: venueMetas(cfg), Global: uihub.GlobalLimits{
 			MaxDayLoss: cfg.Gate.Global.MaxDayLoss, MaxSymbolPositionValue: cfg.Gate.Global.MaxSymbolPositionValue,
