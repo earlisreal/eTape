@@ -291,15 +291,24 @@ func (g *Generator) rolloverSymbol(rt *symRuntime, fromMs, nowMs int64) {
 // gap a real, bounded move in either direction.
 const maxGapMag = 90.0
 
+// anchorFloor mirrors stepPrice's own Mid floor (price.go). Clamping mag
+// alone is not sufficient: if prevClose has already decayed near the price
+// floor (e.g. after several bad prior days), round2(prevClose*(1-maxGapMag/
+// 100)) can round to exactly 0.00 -- and once Anchor is 0, its own
+// subsequent multiplicative perturbation (Anchor *= 1+Z*0.0002) leaves it
+// permanently pinned at 0 forever, reproducing the same "stuck" failure
+// class maxGapMag exists to prevent, just via a different path.
+const anchorFloor = 0.01
+
 // kickRunnerGap redraws a fresh overnight gap for a runner symbol: the new
 // day's anchor/mid move by a random +/- percentage (scaled off the same
 // GapPct magnitude DrawUniverse used for the original opening gap, clamped
-// to +/-maxGapMag) relative to the just-set prevClose, and the regime's
-// dwell timer is forced to expire immediately. It then calls stepPrice with
-// dtMs=0 purely so Task 2's own transition-matrix machinery (not
-// reimplemented here) picks the day's opening regime — a real "kick" via
-// the existing regime-draw mechanism, rather than this file hand-rolling a
-// second one.
+// to +/-maxGapMag and floored at anchorFloor) relative to the just-set
+// prevClose, and the regime's dwell timer is forced to expire immediately.
+// It then calls stepPrice with dtMs=0 purely so Task 2's own
+// transition-matrix machinery (not reimplemented here) picks the day's
+// opening regime — a real "kick" via the existing regime-draw mechanism,
+// rather than this file hand-rolling a second one.
 func (g *Generator) kickRunnerGap(rt *symRuntime, nowMs int64) {
 	mag := between(g.rng, rt.spec.GapPct*0.5, rt.spec.GapPct*1.5)
 	if g.rng.Float64() < 0.5 {
@@ -316,6 +325,12 @@ func (g *Generator) kickRunnerGap(rt *symRuntime, nowMs int64) {
 	rt.price.win = rt.price.win[:0]
 	rt.price.DwellLeftMs = 0
 	stepPrice(g.rng, rt.spec, rt.price, nowMs, 0)
+	// Floor applied last: stepPrice's own Anchor *= 1+Z*0.0002 perturbation
+	// (price.go) runs after the assignment above and has no floor of its
+	// own, so flooring before this call would not survive it.
+	if rt.price.Anchor < anchorFloor {
+		rt.price.Anchor = anchorFloor
+	}
 }
 
 // Drain returns a coalesced batch of feed.Events for everything that changed

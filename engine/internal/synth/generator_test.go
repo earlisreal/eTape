@@ -401,6 +401,11 @@ func TestGenerator_ConcurrentAccessNoRace(t *testing.T) {
 // Sweeps many seeds directly against kickRunnerGap (not just via a full
 // Seed()/StepTo() run) so this test targets the exact mechanism, not a
 // downstream symptom.
+//
+// Scoped to a freshly-drawn universe's prevClose (always > $1, per
+// universe.go), not a degraded low-price state reached after several
+// rollovers — see TestKickRunnerGap_AnchorFloorAfterLowPrevClose for that
+// case.
 func TestKickRunnerGap_AnchorNeverNonPositiveOrExtreme(t *testing.T) {
 	for seed := int64(0); seed < 500; seed++ {
 		g := New(seed, clock.NewFake(timeMs(0)))
@@ -425,6 +430,43 @@ func TestKickRunnerGap_AnchorNeverNonPositiveOrExtreme(t *testing.T) {
 			}
 			if rt.price.Mid != rt.price.Anchor && (rt.price.Mid <= 0) {
 				t.Fatalf("seed=%d %s: Mid non-positive after kickRunnerGap: %.4f", seed, code, rt.price.Mid)
+			}
+		}
+	}
+}
+
+// TestKickRunnerGap_AnchorFloorAfterLowPrevClose is a regression test for a
+// residual instance of the same "permanently stuck" failure class that
+// maxGapMag alone doesn't close: if prevClose has already decayed near
+// stepPrice's own $0.01 Mid floor (e.g. after several bad prior days for a
+// runner), a max-negative clamped draw (mag=-90, factor 0.10) can round to
+// exactly $0.00 -- and once Anchor is 0, its own subsequent multiplicative
+// perturbation (Anchor *= 1+Z*0.0002) leaves it pinned at 0 forever.
+// anchorFloor closes this by flooring Anchor the same way stepPrice floors
+// Mid. Directly forces a low prevClose (bypassing DrawUniverse's always->$1
+// range) to exercise the path TestKickRunnerGap_AnchorNeverNonPositiveOrExtreme
+// cannot reach from a fresh universe.
+func TestKickRunnerGap_AnchorFloorAfterLowPrevClose(t *testing.T) {
+	for seed := int64(0); seed < 500; seed++ {
+		g := New(seed, clock.NewFake(timeMs(0)))
+		for _, code := range g.Symbols() {
+			rt := g.syms[code]
+			if rt.spec.Pers != PersRunner {
+				continue
+			}
+			rt.prevClose = 0.01 // at stepPrice's own Mid floor
+			g.kickRunnerGap(rt, 0)
+
+			if rt.price.Anchor < anchorFloor {
+				t.Fatalf("seed=%d %s: Anchor=%.4f below anchorFloor=%.2f after kickRunnerGap from a low prevClose",
+					seed, code, rt.price.Anchor, anchorFloor)
+			}
+			// Confirm the floor is actually load-bearing (i.e. a later
+			// perturbation can't drag Anchor back to exactly 0 from here):
+			// a positive floor value survives any finite multiplicative
+			// perturbation, unlike 0 which is a permanent fixed point.
+			if rt.price.Anchor == 0 {
+				t.Fatalf("seed=%d %s: Anchor is exactly 0 -- permanently stuck fixed point", seed, code)
 			}
 		}
 	}
