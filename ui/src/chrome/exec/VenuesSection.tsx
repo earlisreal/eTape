@@ -207,7 +207,10 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
     setCapsByRow((c) => ({ ...c, [key]: zeroCaps() }));
     setDraft((d) => ({
       ...d,
-      venues: [...d.venues, { id: "", broker: "sim", env: "paper", credentials: mintCredName(), accountId: "", startingBalance: 100000 }],
+      venues: [
+        ...d.venues,
+        { id: "", broker: "sim", env: "paper", credentials: mintCredName(), accountId: "", startingBalance: 100000, slippageBps: 0, fillLatencyMs: 0 },
+      ],
     }));
   };
   const removeVenue = (i: number) => {
