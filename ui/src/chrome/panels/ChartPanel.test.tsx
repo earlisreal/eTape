@@ -46,6 +46,7 @@ import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
 import type { AckMsg, Bar, DeltaMsg } from "../../wire/contract";
 import { DEFAULT_CHART_SETTINGS } from "./tv/ChartSettingsDialog";
 import { FakeDrawingBus, FakeDrawingBusHub } from "../../../test/fakes";
+import { perf } from "../../perf/PerfMonitor";
 
 // jsdom has no ResizeObserver; ChartPanel's resize wiring only needs observe/disconnect.
 class MockResizeObserver {
@@ -437,5 +438,92 @@ describe("ChartPanel", () => {
     pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5, false);
     act(() => { getSurface().paint(); });
     expect(queryByTestId("bar-close-timer")).toBeNull();
+  });
+
+  it("isDirty reacts only to its own pinned symbol's bar revision and its own indicator instances' revisions — not a foreign symbol's bar delta or an unrelated instance's update (per-key scoping regression)", () => {
+    const { getByRole, stores, getSurface, onConfigChange } = renderChartCapturingSurface(); // pinned to US.AAPL/1m via config.settings
+
+    // Add 2 indicator instances (the picker auto-closes after each add — see
+    // ChartHeaderControls — so reopen it before the second add).
+    fireEvent.click(getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add EMA" }));
+    fireEvent.click(getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add VWAP" }));
+
+    // Recover this chart's own EMA instanceId from the persisted config patch
+    // (mirrors the "scopes indicator instanceIds" test above).
+    type Persisted = { indicators: { instanceId: string; type: string }[] };
+    const persisted = (onConfigChange.mock.calls.at(-1)![0] as Persisted).indicators;
+    const emaId = persisted.find((i) => i.type === "EMA")!.instanceId;
+
+    getSurface().isDirty(); // baseline: consume the mount + indicator-add dirty state
+
+    // A different symbol's bar delta must NOT dirty a chart pinned to US.AAPL —
+    // this is the actual bug this task fixes (isDirty used to read global revs).
+    pushLiveBar(stores, "US.NVDA", "1m", 100, 100.5);
+    expect(getSurface().isDirty()).toBe(false);
+
+    // The pinned symbol's own bar delta must dirty it.
+    pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5);
+    expect(getSurface().isDirty()).toBe(true);
+
+    // An update to one of this chart's OWN indicator instances must dirty it.
+    stores.indicators.apply({ kind: "delta", topic: "md.indicator", key: emaId, payload: { timeMs: Date.now(), value: 1 } });
+    expect(getSurface().isDirty()).toBe(true);
+
+    // An update to an unrelated indicator instance's key (not one of this
+    // chart's active instances) must NOT dirty it.
+    stores.indicators.apply({ kind: "delta", topic: "md.indicator", key: "other-panel:EMA-0", payload: { timeMs: Date.now(), value: 1 } });
+    expect(getSurface().isDirty()).toBe(false);
+  });
+
+  it("isDirty tracks MACD's multi-slot sub-keys, not just the base instanceId (multi-slot indicator regression)", () => {
+    // The headline "isDirty reacts only to its own pinned symbol" test above only
+    // exercises EMA/VWAP — both single-slot indicators whose describeIndicator()
+    // key IS the base instanceId. MACD is the multi-slot case: describeIndicator
+    // produces 3 keys — the base instanceId plus `${instanceId}#signal` and
+    // `${instanceId}#hist` (see indicatorSeries.ts's describeIndicator: entry.slots
+    // has length 3 for MACD, so `single` is false and every slot's key is
+    // `${inst.instanceId}#${s.slot}`). A delta keyed to one of the SUFFIXED
+    // sub-keys — not the base id — must still dirty this chart, proving isDirty()'s
+    // sum-over-active-keys loop genuinely iterates every slot describeIndicator
+    // returns for the instance, not just its base id.
+    const { getByRole, stores, getSurface, onConfigChange } = renderChartCapturingSurface();
+
+    fireEvent.click(getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add MACD" }));
+
+    type Persisted = { indicators: { instanceId: string; type: string }[] };
+    const persisted = (onConfigChange.mock.calls.at(-1)![0] as Persisted).indicators;
+    const macdId = persisted.find((i) => i.type === "MACD")!.instanceId;
+
+    getSurface().isDirty(); // baseline: consume the mount + indicator-add dirty state
+
+    stores.indicators.apply({ kind: "delta", topic: "md.indicator", key: `${macdId}#signal`, payload: { timeMs: Date.now(), value: 1 } });
+    expect(getSurface().isDirty()).toBe(true);
+  });
+
+  it("does not call perf.recordScan when perf is disabled (mirrors TapePanel's guard — avoids the `chart:${config.id}` template-literal allocation on every hot-path paint)", () => {
+    const { stores, getSurface } = renderChartCapturingSurface();
+    pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5);
+    expect(perf.enabled).toBe(false); // sanity: shared singleton's default state
+    const spy = vi.spyOn(perf, "recordScan");
+    act(() => { getSurface().paint(); });
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it("reports controller.lastSyncDaySegmentBuilds() to the shared perf singleton, keyed by the chart:<id> surface id, while perf is enabled (Task 6 diagnostic probe)", () => {
+    const { stores, getSurface } = renderChartCapturingSurface();
+    pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5);
+    const spy = vi.spyOn(perf, "recordScan");
+    perf.enabled = true;
+    try {
+      act(() => { getSurface().paint(); });
+      expect(spy).toHaveBeenCalledWith("chart:c1", expect.any(Number));
+    } finally {
+      perf.enabled = false; // restore the shared singleton's default for other tests
+      spy.mockRestore();
+    }
   });
 });

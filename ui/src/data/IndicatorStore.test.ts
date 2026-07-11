@@ -76,4 +76,38 @@ describe("IndicatorStore", () => {
     expect(s.series("ema-9")).toEqual([{ timeMs: 1000, value: 5 }]); // untouched
     expect(s.consumeDirty()).toBe(true);
   });
+
+  it("bumps only the applied instance's own revision", () => {
+    const s = new IndicatorStore();
+    expect(s.getRev("ind-1")).toBe(0);
+    expect(s.getRev("ind-2")).toBe(0);
+
+    s.apply(snap("ind-1", [{ timeMs: 1000, value: 10 }]));
+    expect(s.getRev("ind-1")).toBe(1);
+    expect(s.getRev("ind-2")).toBe(0); // untouched by ind-1's apply
+
+    s.apply(delta("ind-1", { timeMs: 2000, value: 11 }));
+    expect(s.getRev("ind-1")).toBe(2);
+    expect(s.getRev("ind-2")).toBe(0);
+  });
+
+  it("bumps the instance's revision on reset even though the data is deleted", () => {
+    // A symbol/timeframe switch calls reset() to wipe a stale series; the panel
+    // consuming this rev must see that disappearance as a change too, not just
+    // new/updated points arriving.
+    const s = new IndicatorStore();
+    s.apply(snap("ind-1", [{ timeMs: 1000, value: 10 }]));
+    expect(s.getRev("ind-1")).toBe(1);
+
+    s.reset("ind-1");
+    expect(s.getRev("ind-1")).toBe(2);
+    expect(s.series("ind-1")).toEqual([]);
+  });
+
+  it("falls back to the global PaintStore revision when instanceId is omitted", () => {
+    const s = new IndicatorStore();
+    expect(s.getRev()).toBe(0);
+    s.apply(snap("ind-1", [{ timeMs: 1000, value: 10 }]));
+    expect(s.getRev()).toBe(1);
+  });
 });

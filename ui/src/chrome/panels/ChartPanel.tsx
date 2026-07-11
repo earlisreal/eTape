@@ -30,6 +30,7 @@ import { IndicatorSettingsDialog } from "./tv/IndicatorSettingsDialog";
 import { ChartSettingsDialog, DEFAULT_CHART_SETTINGS, type ChartSettings } from "./tv/ChartSettingsDialog";
 import { computeLegendView } from "./tv/legendView";
 import { BarCloseTimer } from "./tv/BarCloseTimer";
+import { perf } from "../../perf/PerfMonitor";
 
 // Adapts a real LWC v5 IChartApi to the controller's minimal ChartApiFacade.
 function makeFacade(chart: IChartApi, palette: Palette): {
@@ -332,8 +333,22 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const off = scheduler.register({
       id: `chart:${config.id}`,
       isDirty: () => {
-        const barsRev = stores.bars.getRev();
-        const indicatorsRev = stores.indicators.getRev();
+        const barsRev = stores.bars.getRev(currentSymbol, tfRef.current);
+        // Recomputed fresh every call (not cached via the `[instances]` effect
+        // below): instancesRef.current is kept synchronously authoritative by
+        // setInstancesNow specifically to avoid a same-tick double-mutation bug
+        // (see its own comment), but the `[instances]` effect that would refresh
+        // a cached key list only runs later, on React's next commit — a window
+        // where a cache could read stale. isDirty() already runs unconditionally
+        // every rAF tick for every registered surface (Scheduler.paintFrame), and
+        // describeIndicator() per instance is a small, non-O(bars) allocation
+        // (a handful of slots across typically 0-7 instances), so recomputing
+        // here instead of caching sidesteps the staleness question entirely at
+        // no meaningful cost.
+        let indicatorsRev = 0;
+        for (const inst of instancesRef.current) {
+          for (const d of describeIndicator(inst, paletteRef.current)) indicatorsRev += stores.indicators.getRev(d.key);
+        }
         const fillsRev = stores.fills.getRev();
         const drawingsRev = stores.drawings.getRev();
         const paneSig = `${facade.paneHeights().join(",")}|${facade.priceScaleWidth()}`;
@@ -349,12 +364,15 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       },
       paint: () => {
         controller.sync();
+        // Diagnostic-only (Task 6): how many times this sync() actually paid the
+        // Intl.DateTimeFormat cost (buildDaySegment) versus hitting the cached day
+        // segment. Guard here, not just inside recordScan: skipping the call avoids
+        // building the `chart:${config.id}` template-literal id on every hot-path
+        // paint while disabled (mirrors TapePanel.tsx's identical recordScan guard).
+        if (perf.enabled) perf.recordScan(`chart:${config.id}`, controller.lastSyncDaySegmentBuilds());
         controller.setFills(aggregateFillMarkers(stores.fills.forSymbolFills(currentSymbol), tfRef.current as Timeframe));
         drawings.setDrawings(stores.drawings.forSymbol(currentSymbol));
-        drawings.setBars(
-          stores.bars.series(currentSymbol, tfRef.current).map((b) => Date.parse(b.bucketStart)),
-          timeframeToMs(tfRef.current as Timeframe),
-        );
+        drawings.setBars(controller.barsMs(), timeframeToMs(tfRef.current as Timeframe));
         drawings.requestUpdate();
         updateLegend();
         refreshSelRef.current?.();

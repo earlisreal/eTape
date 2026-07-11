@@ -7,13 +7,24 @@ import type { Bar, SnapshotMsg, DeltaMsg } from "../wire/contract";
 // symbols may hold a partial past its wall-clock end — never a "closed" bar.
 export class BarStore extends PaintStore {
   private readonly series_ = new Map<string, Bar[]>();
+  // Bumped per (symbol, timeframe) on every apply() for that key — backs the
+  // key-scoped getRev(symbol, timeframe) overload below. The base PaintStore's
+  // own rev counter (bumped via markDirty()) still backs the no-arg getRev()
+  // global fallback, unchanged.
+  private readonly revs = new Map<string, number>();
 
   private key(symbol: string, timeframe: string): string { return `${symbol}:${timeframe}`; }
+
+  private bumpRev(k: string): void { this.revs.set(k, (this.revs.get(k) ?? 0) + 1); }
 
   apply(m: SnapshotMsg | DeltaMsg): void {
     if (m.kind === "snapshot") {
       const bars = (m.payload as Bar[]).slice().sort((a, b) => a.bucketStart.localeCompare(b.bucketStart));
-      if (bars.length > 0) this.series_.set(this.key(bars[0].symbol, bars[0].timeframe), bars);
+      if (bars.length > 0) {
+        const k = this.key(bars[0].symbol, bars[0].timeframe);
+        this.series_.set(k, bars);
+        this.bumpRev(k);
+      }
       this.markDirty();
       return;
     }
@@ -40,6 +51,7 @@ export class BarStore extends PaintStore {
       }
     }
     this.series_.set(k, arr);
+    this.bumpRev(k);
     this.markDirty();
   }
 
@@ -51,5 +63,16 @@ export class BarStore extends PaintStore {
     const arr = this.series_.get(this.key(symbol, timeframe));
     const last = arr?.[arr.length - 1];
     return last?.inProgress ? last : undefined;
+  }
+
+  /**
+   * Per-(symbol, timeframe) revision when both are given (starts at 0,
+   * increments by 1 on each apply() for that key). Omitting either falls
+   * back to the existing global PaintStore revision — back-compat for
+   * callers not yet migrated to key-scoped reads.
+   */
+  getRev(symbol?: string, timeframe?: string): number {
+    if (symbol === undefined || timeframe === undefined) return super.getRev();
+    return this.revs.get(this.key(symbol, timeframe)) ?? 0;
   }
 }

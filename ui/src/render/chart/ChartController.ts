@@ -5,8 +5,8 @@ import {
   chartOptions, candleOptions, volumeOptions, mainSeriesOptions, VOLUME_SCALE_MARGINS,
   boundedOverlayAutoscale, OVERLAY_AUTOSCALE_FACTOR, type ChartType, type PriceRange,
 } from "./chartTheme";
-import { sessionAt } from "./sessions";
-import type { Band } from "./sessions";
+import { sessionAt, buildDaySegment, classify } from "./sessions";
+import type { Band, DaySegment } from "./sessions";
 import { describeIndicator, withDefaultParams, type IndicatorInstance } from "./indicatorSeries";
 import { LWC_LINE_STYLE } from "./lineStyle";
 import type { FillMarker } from "./diamondMarker";
@@ -63,6 +63,60 @@ export class ChartController {
   // boundedOverlayAutoscale). Recomputed on every applyBars call; cleared on
   // symbol/timeframe switch so a stale range never bounds the new series.
   private candleRange: PriceRange | null = null;
+  // --- Per-call memoization (Task 3) -----------------------------------
+  // applyBars' outcome for the bars it was just given — set exclusively inside
+  // applyBars/setAllBars, read by refreshBarCaches (called right after applyBars
+  // in sync()) so the cache-refresh logic can share the same reset/appended/
+  // tailUpdated/none classification instead of re-deriving it.
+  private lastBarsOp: "reset" | "appended" | "tailUpdated" | "none" = "reset";
+  // The index the `grew` branch of applyBars replayed update() from (== the OLD
+  // lastAppliedCount-1, captured before that field is advanced) — reused verbatim
+  // by refreshBarCaches so the cache fold starts from the exact same bar the LWC
+  // replay did, never a second, independently-computed index.
+  private appendedFrom = 0;
+  // Min/max across bars[0 .. n-2] ONLY — i.e. every bar except the current last
+  // one, which may still be live/in-progress. Maintained incrementally (full
+  // rescan on "reset", folded forward on "appended", untouched on "tailUpdated"/
+  // "none" since the live last bar is excluded either way). candleRange (above)
+  // is recombined with the CURRENT last bar's own l/h fresh on every sync() call
+  // — see refreshBarCaches — so a same-bar revision (e.g. a spike that later
+  // retreats) is always reflected exactly, never stuck at a stale peak.
+  private closedRange: PriceRange | null = null;
+  // Date.parse(bucketStart) for every bar in the currently-applied series,
+  // index-aligned with it. Exposed read-only via barsMs() so other call sites
+  // (e.g. the drawings primitive) can reuse it instead of re-parsing.
+  private barsMsCache: number[] = [];
+  // Same content bandsFromBars(bars) would produce, maintained incrementally.
+  private bandsCache: Band[] = [];
+  // True whenever bandsCache is NOT guaranteed to reflect the full currently-
+  // loaded `bars` — i.e. it needs a from-scratch rebuild (extendBandsFrom(0, …))
+  // before it can next be trusted, rather than an incremental extend. Set on
+  // every "reset" (a different series may now be loaded) and on every sync where
+  // sessions are inactive (see refreshBands — bandsCache maintenance is paused
+  // while unused, per Finding 1's perf gate, so it can't be assumed valid once
+  // reactivated). Cleared only right after a full rebuild. Starts true: nothing
+  // has been built yet. See refreshBands for how this makes toggling session
+  // shading back on (or switching back to an intraday timeframe), without an
+  // intervening symbol/timeframe reset, still produce correct bands instead of
+  // a stale/empty cache from before shading was turned off.
+  private bandsCacheDirty = true;
+  // bars.length as of the last refreshBarCaches call — purely a bookkeeping
+  // cursor (kept in sync with lastAppliedCount); not itself consulted for any
+  // branch decision, which all live on lastBarsOp/appendedFrom above.
+  private cachedBarCount = 0;
+  // The one calendar ET day whose boundaries are currently cached (sessions.ts).
+  // Rebuilt (one Intl call) only when a bar's ms falls outside its window.
+  private daySeg: DaySegment | null = null;
+  // Count of buildDaySegment (Intl.DateTimeFormat) calls made during the MOST
+  // RECENT sync() — reset to 0 at the top of every sync(), incremented in
+  // extendBandsFrom whenever the day-segment cache misses. Temporary diagnostic
+  // probe (Task 6 of the UI perf plan): lets a real device confirm the cache
+  // above is actually amortizing the Intl cost (near-0 in steady state) rather
+  // than trusting that by inference. Unconditional, no perf.enabled gate here —
+  // incrementing an int is negligible even when nobody reads it; the gate
+  // belongs at the read/report site (ChartPanel.tsx), mirroring buildTapeRows'
+  // always-returned `scanned` count.
+  private daySegmentBuildsThisSync = 0;
   private chartType: ChartType = "candle";
   private showSessions = true;
   private gridVisible = true;
@@ -95,15 +149,16 @@ export class ChartController {
   }
 
   sync(): void {
+    this.daySegmentBuildsThisSync = 0;
     const bars = this.deps.bars.series(this.config.symbol, this.config.timeframe);
     this.applyBars(bars);
+    this.refreshBarCaches(bars);
     this.applyIndicators();
     this.applySessions(bars);
   }
 
   private applyBars(bars: Bar[]): void {
     if (bars.length === 0) return; // cold symbol — panel shows the hint, not an error
-    this.candleRange = candleRangeOf(bars);
     if (!this.backfilled) {
       this.setAllBars(bars);
       return;
@@ -149,6 +204,8 @@ export class ChartController {
       this.lastAppliedCount = bars.length;
       this.lastAppliedKey = keyOf(last);
       this.lastTailBucket = last.bucketStart;
+      this.lastBarsOp = "appended";
+      this.appendedFrom = from;
     } else if (lastChanged) {
       this.candle.update(this.mainPoint(last));
       this.volume.update(toVolume(last, this.palette));
@@ -156,6 +213,9 @@ export class ChartController {
       this.lastTailBucket = last.bucketStart;
       // Auto-follow is LWC's default when already at the right edge; never force it
       // when the user has scrolled back (honesty: don't yank their view).
+      this.lastBarsOp = "tailUpdated";
+    } else {
+      this.lastBarsOp = "none";
     }
   }
 
@@ -170,6 +230,170 @@ export class ChartController {
     this.lastAppliedCount = bars.length;
     this.lastAppliedKey = keyOf(bars[bars.length - 1]);
     this.lastTailBucket = bars[bars.length - 1].bucketStart;
+    // Single source of truth for the "reset" outcome: setAllBars is the only
+    // thing all 3 reset call sites in applyBars share, so marking it here (rather
+    // than once per call site) can't drift out of sync with a future 4th site.
+    this.lastBarsOp = "reset";
+  }
+
+  // Read-only mirror of barsMsCache — Date.parse(bucketStart) for every currently-
+  // applied bar, index-aligned with the BarReader's series. Lets other call sites
+  // (e.g. the drawings primitive) reuse the maintained cache instead of running
+  // their own O(bars) .map(Date.parse) on every paint.
+  barsMs(): readonly number[] { return this.barsMsCache; }
+
+  // bars.length as of the last refreshBarCaches call — a bookkeeping cursor kept
+  // in sync with lastAppliedCount, exposed so tests can assert the caches never
+  // silently fall behind the applied series (no branch decision consults it —
+  // those all key off lastBarsOp/appendedFrom instead).
+  barsCached(): number { return this.cachedBarCount; }
+
+  // Diagnostic-only (Task 6): how many times buildDaySegment's Intl call
+  // actually ran during the most recent sync() — ~0 in steady state once the
+  // day-segment cache above is being hit, versus roughly one per bar before it
+  // existed. Read by ChartPanel, itself guarded behind perf.enabled, and
+  // reported to the shared PerfMonitor singleton so a live re-measurement can
+  // prove the fix rather than infer it from paint duration alone.
+  lastSyncDaySegmentBuilds(): number { return this.daySegmentBuildsThisSync; }
+
+  // Refreshes barsMsCache/bandsCache/closedRange (and, from those, candleRange)
+  // to match `bars` exactly, sharing lastBarsOp/appendedFrom (just set by
+  // applyBars, above) so every cache advances from the SAME notion of "what's
+  // new" as the LWC replay did — never a second, independently-computed cursor.
+  //
+  // Contract (holds after this returns, for every reset/appended/tailUpdated/none
+  // sequence): barsMsCache deep-equals bars.map(b => Date.parse(b.bucketStart));
+  // closedRange equals candleRangeOf(bars.slice(0, -1)); bandsCache deep-equals
+  // bandsFromBars(bars) -- but ONLY while sessions are active (see refreshBands'
+  // gate, Finding 1). barsMsCache/closedRange (hence candleRange) stay
+  // unconditional regardless — drawings projection and overlay-indicator
+  // autoscale need them on every timeframe, not just when shading is on. See
+  // ChartController.test.ts's equivalence tests.
+  private refreshBarCaches(bars: Bar[]): void {
+    if (bars.length === 0) return; // nothing to cache; resetForReload already cleared everything
+    switch (this.lastBarsOp) {
+      case "reset":
+        this.barsMsCache = bars.map((b) => Date.parse(b.bucketStart));
+        this.closedRange = candleRangeOf(bars.slice(0, -1));
+        // A reset may have loaded an entirely different series (new symbol/
+        // timeframe, or a front-growth rebuild) — whatever bandsCache/dirty
+        // state carried over from before is meaningless against it. Force
+        // refreshBands to do a full from-scratch rebuild below, unconditionally
+        // (not just when the PREVIOUS state happened to be dirty already).
+        this.bandsCacheDirty = true;
+        break;
+      case "appended": {
+        const from = this.appendedFrom;
+        // Re-parse from `from` (not just the genuinely-new tail): the bar at
+        // `from` was `last` as of the previous apply and may have itself changed
+        // (e.g. finalized) during the same missed window that produced the new
+        // bars — mirrors applyBars' own re-flush-from-`from` rationale. bucketStart
+        // is immutable per bar identity, so this re-parse is a no-op value-wise
+        // when unchanged, and necessary when the bar object was swapped for a
+        // revised one anyway (harmless either way).
+        for (let i = from; i < bars.length; i++) {
+          const ms = Date.parse(bars[i].bucketStart);
+          if (i < this.barsMsCache.length) this.barsMsCache[i] = ms;
+          else this.barsMsCache.push(ms);
+        }
+        this.foldClosedRangeFrom(from, bars);
+        break;
+      }
+      case "tailUpdated":
+      case "none":
+        // Every existing bar's bucketStart (hence its ms and session) is
+        // unchanged; closedRange excludes the live last bar so a tail-only
+        // revision never invalidates it either — nothing to refresh.
+        break;
+    }
+    this.refreshBands(bars);
+    this.cachedBarCount = bars.length;
+    // candleRange = closedRange (everything but the last bar) folded with the
+    // CURRENT last bar's own l/h, read fresh every call — so an in-progress bar
+    // that spikes then retreats is always reflected exactly, never stuck at
+    // whatever its highest-seen high was on some earlier call.
+    const last = bars[bars.length - 1];
+    this.candleRange = combine(this.closedRange, last.l, last.h);
+  }
+
+  // Builds/extends bandsCache — but ONLY when applySessions will actually read
+  // it (same gate it uses: an intraday timeframe with session shading on). On a
+  // Daily chart with years of history, or an intraday chart with shading
+  // manually switched off, applySessions immediately discards bandsCache in
+  // favor of an empty array — so maintaining it on every reset/appended sync
+  // (each bar potentially costing an Intl.DateTimeFormat call via
+  // buildDaySegment) was pure waste. Finding 1 of the follow-up review.
+  //
+  // bandsCacheDirty tracks whether the cache is trustworthy for a full-history
+  // read: set on every "reset" (a different series may now be loaded) and
+  // whenever sessions are inactive (maintenance is paused while unused, so a
+  // stale/short cache from before deactivation can't be assumed valid once
+  // reactivated). Consulted here, not just written: whenever sessions ARE
+  // active and the cache is dirty, this rebuilds from scratch over the FULL
+  // `bars` regardless of lastBarsOp — covering "reset" (needs a full rebuild
+  // anyway) AND, crucially, session shading (or the timeframe) having just been
+  // switched back on with no bar change at all (lastBarsOp "tailUpdated"/"none")
+  // — the toggle-back-on scenario this gate must not regress. Only once the
+  // cache is known-fresh does an "appended" sync fall back to the cheaper
+  // incremental extend.
+  private refreshBands(bars: Bar[]): void {
+    const sessionsActive = !["D", "W", "M"].includes(this.config.timeframe) && this.showSessions;
+    if (!sessionsActive) { this.bandsCacheDirty = true; return; }
+    if (this.bandsCacheDirty) {
+      this.daySeg = null;
+      this.bandsCache = [];
+      this.extendBandsFrom(0, bars);
+      this.bandsCacheDirty = false;
+      return;
+    }
+    if (this.lastBarsOp === "appended") this.extendBandsFrom(this.appendedFrom, bars);
+    // tailUpdated/none: every existing bar's bucketStart (hence its session) is
+    // unchanged — nothing to extend.
+  }
+
+  // Extends bandsCache (assumed to already correctly cover bars[0 .. from-1], or
+  // to be empty when from === 0) through bars[from .. bars.length-1]. Mirrors
+  // bandsFromBars' exact run-detection/edge semantics — see its comment — one
+  // bar at a time using the already-parsed barsMsCache instead of re-parsing.
+  private extendBandsFrom(from: number, bars: Bar[]): void {
+    for (let i = from; i < bars.length; i++) {
+      const ms = this.barsMsCache[i];
+      if (!this.daySeg || ms < this.daySeg.dayStartMs || ms >= this.daySeg.dayEndMs) {
+        this.daySeg = buildDaySegment(ms);
+        this.daySegmentBuildsThisSync++;
+      }
+      const session = classify(ms, this.daySeg);
+      const cur = this.bandsCache[this.bandsCache.length - 1];
+      if (!cur || cur.session !== session) {
+        if (cur) cur.endMs = ms; // close the previous run at this bar
+        this.bandsCache.push({ startMs: ms, endMs: ms, session });
+      }
+      // else: still inside the same run — nothing to record per-bar, only run
+      // boundaries are stored (mirrors bandsFromBars' `continue`).
+    }
+    // The final band's end is the LAST bar's own time, not lastBar+span (see
+    // bandsFromBars) — reasserted every call so a same-session bar that merely
+    // extends the current run still advances the open band's end.
+    if (bars.length > 0) {
+      const lastBand = this.bandsCache[this.bandsCache.length - 1];
+      if (lastBand) lastBand.endMs = this.barsMsCache[bars.length - 1];
+    }
+  }
+
+  // Folds bars[from .. bars.length-2] (i.e. every bar in that span EXCEPT the
+  // current last one, which is live/in-progress and excluded from closedRange by
+  // definition) into closedRange. `from` is applyBars' own appendedFrom, so this
+  // always includes the previously-last bar — which may have just finalized in
+  // the same missed window that also appended new bars, and so may be entering
+  // closedRange for the first time here.
+  private foldClosedRangeFrom(from: number, bars: Bar[]): void {
+    const base = this.closedRange ?? { minValue: Infinity, maxValue: -Infinity };
+    let { minValue, maxValue } = base;
+    for (let i = from; i <= bars.length - 2; i++) {
+      if (bars[i].l < minValue) minValue = bars[i].l;
+      if (bars[i].h > maxValue) maxValue = bars[i].h;
+    }
+    this.closedRange = { minValue, maxValue };
   }
 
   // LEFT_PAD_BARS WhitespaceData points (time-only, no OHLC — valid for both the
@@ -254,7 +478,12 @@ export class ChartController {
   private applySessions(bars: Bar[]): void {
     const intraday = !["D", "W", "M"].includes(this.config.timeframe);
     if (!intraday || bars.length === 0 || !this.showSessions) { this.facade.setSessionBands([]); return; }
-    this.facade.setSessionBands(bandsFromBars(bars));
+    // bandsCache is refreshed (by refreshBarCaches, from sync()) to always match
+    // what bandsFromBars(bars) would produce from scratch — see the equivalence
+    // tests in ChartController.test.ts. bandsFromBars itself is kept below,
+    // unused by production code now, as the from-scratch reference those tests
+    // compare against.
+    this.facade.setSessionBands(this.bandsCache);
   }
 
   addIndicator(inst: IndicatorInstance): void {
@@ -356,6 +585,13 @@ export class ChartController {
     this.lastAppliedKey = "";
     this.lastTailBucket = "";
     this.candleRange = null;
+    this.closedRange = null;
+    this.barsMsCache = [];
+    this.bandsCache = [];
+    this.cachedBarCount = 0;
+    this.daySeg = null;
+    this.lastBarsOp = "reset";
+    this.appendedFrom = 0;
     this.indicatorApplied.clear();
     this.indicatorLastKey.clear();
     this.indicatorLastAppliedTimeMs.clear();
@@ -414,6 +650,13 @@ export class ChartController {
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
     this.lastTailBucket = "";
+    this.closedRange = null;
+    this.barsMsCache = [];
+    this.bandsCache = [];
+    this.cachedBarCount = 0;
+    this.daySeg = null;
+    this.lastBarsOp = "reset";
+    this.appendedFrom = 0;
     this.liftCandleToTop();
   }
 
@@ -482,13 +725,25 @@ function toCandle(b: Bar) { return { time: toLwcTime(b.bucketStart), open: b.o, 
 // [low, high] across every currently-applied bar — the reference range overlay
 // lines are bounded against. A plain scan: bar counts here (a few thousand at
 // most) make this negligible next to the rest of applyBars' per-sync work.
-function candleRangeOf(bars: Bar[]): PriceRange {
+// Exported (unused by production code — refreshBarCaches maintains candleRange
+// incrementally instead) purely as the from-scratch reference ChartController.
+// test.ts's equivalence tests assert `closedRange`/`candleRange` against.
+export function candleRangeOf(bars: Bar[]): PriceRange {
   let minValue = Infinity, maxValue = -Infinity;
   for (const b of bars) {
     if (b.l < minValue) minValue = b.l;
     if (b.h > maxValue) maxValue = b.h;
   }
   return { minValue, maxValue };
+}
+// Folds one more bar's [l, h] into a PriceRange (or the identity range when
+// `range` is null) — the O(1) step refreshBarCaches uses to combine closedRange
+// with the CURRENT last bar's own l/h on every sync() call.
+function combine(range: PriceRange | null, l: number, h: number): PriceRange {
+  return {
+    minValue: Math.min(range?.minValue ?? Infinity, l),
+    maxValue: Math.max(range?.maxValue ?? -Infinity, h),
+  };
 }
 function toVolume(b: Bar, p: Palette) {
   return { time: toLwcTime(b.bucketStart), value: b.v, color: b.c >= b.o ? p.volUp : p.volDown };
@@ -500,7 +755,10 @@ function toVolume(b: Bar, p: Palette) {
 // The final band's end is the LAST bar's own time, not lastBar+span — extending
 // past the last bar would reintroduce the same null-coordinate problem this
 // function exists to avoid.
-function bandsFromBars(bars: Bar[]): Band[] {
+// Exported (unused by production code — applySessions reads the incrementally-
+// maintained bandsCache instead) purely as the from-scratch reference
+// ChartController.test.ts's equivalence tests assert bandsCache against.
+export function bandsFromBars(bars: Bar[]): Band[] {
   const bands: Band[] = [];
   for (const b of bars) {
     const startMs = Date.parse(b.bucketStart);

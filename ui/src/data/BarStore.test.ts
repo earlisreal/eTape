@@ -54,4 +54,34 @@ describe("BarStore", () => {
     expect(s.series("US.AAPL", "1m")).toHaveLength(1);
     expect(s.series("US.AAPL", "10s")).toHaveLength(1);
   });
+
+  it("bumps only the applied (symbol, timeframe) key's own revision", () => {
+    const s = new BarStore();
+    expect(s.getRev("US.AAPL", "1m")).toBe(0);
+    expect(s.getRev("US.NVDA", "1m")).toBe(0);
+
+    s.apply(delta(bar("09:30", 3.5, false)));
+    expect(s.getRev("US.AAPL", "1m")).toBe(1);
+    expect(s.getRev("US.NVDA", "1m")).toBe(0);
+
+    s.apply(delta(bar("09:31", 3.6, false)));
+    expect(s.getRev("US.AAPL", "1m")).toBe(2);
+    expect(s.getRev("US.NVDA", "1m")).toBe(0);
+  });
+
+  it("bumps the per-key revision from a non-empty snapshot but not from an empty one", () => {
+    const s = new BarStore();
+    s.apply(snap([]));
+    expect(s.getRev("US.AAPL", "1m")).toBe(0);
+
+    s.apply(snap([bar("09:30", 3.5, false)]));
+    expect(s.getRev("US.AAPL", "1m")).toBe(1);
+  });
+
+  it("falls back to the global PaintStore revision when symbol/timeframe are omitted", () => {
+    const s = new BarStore();
+    expect(s.getRev()).toBe(0);
+    s.apply(delta(bar("09:30", 3.5, false)));
+    expect(s.getRev()).toBe(1);
+  });
 });
