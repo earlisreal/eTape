@@ -32,14 +32,14 @@ execution spec: venues, two-layer gate, TZ + Alpaca v1, moomoo v1.x).
   checkout inline. Earl runs many parallel sessions against shared checkouts, so
   worktree isolation is the safe default. Trivial one-offs (a typo, a single-line
   fix) may stay inline, and Earl can always override per task.
-- **Auto-merge the worktree branch back to `main` when clean.** At the end of such
-  work, if verification passes (tests/build green —
-  `superpowers:verification-before-completion`) and there are no unresolved review
-  problems or merge conflicts, merge the branch back into local `main` automatically,
-  in the same turn, without waiting to be asked
-  (`superpowers:finishing-a-development-branch`). If anything is wrong, stop and
-  surface it instead of merging. As with the auto-commit rule above, **pushing stays
-  a separate, explicit step** — auto-merge is local only.
+- **At the end of worktree work, ask before merging.** At the end of such work, if
+  verification passes (tests/build green — `superpowers:verification-before-completion`)
+  and there are no unresolved review problems or merge conflicts, ask Earl whether he
+  wants to merge the branch into local `main` and clean up the worktree
+  (`superpowers:finishing-a-development-branch`) — do not merge automatically. If
+  anything is wrong, stop and surface it instead of offering to merge. As with the
+  auto-commit rule above, **pushing stays a separate, explicit step** — merge and
+  worktree cleanup are local only.
 
 ## Stack (decided)
 
