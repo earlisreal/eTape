@@ -145,12 +145,18 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // (non-sim) broker venue" instead, so a new user is still nudged toward
   // live trading until they add TradeZero/Alpaca/moomoo.
   const hasRealVenue = execStatus?.venues.some((v) => v.broker !== "sim") ?? false;
+  const sessionMode = useSyncExternalStore((cb) => stores.session.subscribe(cb), () => stores.session.getSnapshot());
   // Task 3: show the first-run venue-setup prompt once the first exec.status
   // snapshot has arrived (execStatus !== null — gates the connect-window flash)
   // and only while no real broker venue is configured, the user hasn't
   // dismissed it THIS session, and hasn't permanently silenced it via the
-  // checkbox.
-  const showVenueSetup = execStatus !== null && !hasRealVenue
+  // checkbox. Also suppressed during a confirmed replay/demo session
+  // (sessionMode.mode === "replay") — nudging toward configuring a broker "to
+  // trade live" makes no sense mid-replay, and venue edits need an engine
+  // restart anyway, which would kill the session. "pending" (mode unconfirmed
+  // yet) intentionally still allows it through, same as the prior unconditional
+  // "live" default — this only needs to suppress the case we're SURE is replay.
+  const showVenueSetup = execStatus !== null && !hasRealVenue && sessionMode.mode !== "replay"
     && !venueSetupSessionDismissed && !readVenueSetupHidden();
   const dismissVenueSetup = (dontShowAgain: boolean) => {
     if (dontShowAgain) {

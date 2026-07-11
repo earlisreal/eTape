@@ -221,6 +221,19 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
     await waitFor(() => expect(screen.getByText("Add a broker to trade live")).toBeTruthy());
   });
 
+  it("does not show during a confirmed replay/demo session, even with no real venue", async () => {
+    // Nudging toward configuring a broker "to trade live" makes no sense
+    // mid-replay — venue edits need an engine restart anyway, which would
+    // kill the session. Regression: this modal blocked e2e/replay-launcher's
+    // later assertions because it showed unconditionally off "no real venue".
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    act(() => stores.session.apply({ kind: "snapshot", topic: "sys.session", payload: { mode: "replay", day: "2026-01-02", speed: 0 } }));
+    publishStatus(stores, []);
+    await waitFor(() => expect(stores.exec.status()?.venues.length).toBe(0));
+    expect(screen.queryByText("Add a broker to trade live")).toBeNull();
+  });
+
   it("does not show once a real (non-sim) venue is configured", async () => {
     const { stores } = mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
