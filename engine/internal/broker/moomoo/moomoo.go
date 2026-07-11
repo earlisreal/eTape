@@ -30,6 +30,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
+	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/trdcommon"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/trdupdateorder"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/trdupdateorderfill"
 )
@@ -106,6 +107,39 @@ func New(cfg Config) (*Adapter, error) {
 		events:          make(chan exec.BrokerEvent, 256), // mirrors alpaca/tradezero buffer convention
 		orderIDByDomain: map[string]uint64{},
 	}, nil
+}
+
+// VerifyAccount is venueprobe's read-only "test connection" helper for
+// moomoo: a bare, synchronous, one-shot dial to OpenD's trade protocols,
+// deliberately NOT built on Adapter/New/Run -- no long-lived connection, no
+// push-consume loop, no Run goroutine kept alive after this returns. Mirrors
+// alpaca.VerifyCredentials' exact role for its own broker (see
+// alpaca/alpaca.go). Dials addr, waits for the InitConnect handshake via a
+// throwaway *opend.Client, then calls Trd_GetAccList and returns the
+// validated account (or the specific validation/dial/timeout error) -- never
+// leaving a lingering goroutine or open TCP connection after it returns,
+// success or failure.
+func VerifyAccount(ctx context.Context, addr string, accountID uint64, env string, clk clock.Clock) (*trdcommon.TrdAcc, error) {
+	pctx, cancel := context.WithCancel(ctx)
+	defer cancel() // always tears down the throwaway connection/goroutine before returning
+
+	if clk == nil {
+		clk = clock.System{}
+	}
+	client := opend.New(opend.Options{Addr: addr, ClientID: "etape-trade-probe", Clock: clk})
+	go client.Run(pctx)
+
+	select {
+	case st, ok := <-client.State():
+		if !ok || st != opend.ConnUp {
+			return nil, fmt.Errorf("moomoo: probe: connection failed")
+		}
+	case <-pctx.Done():
+		return nil, pctx.Err()
+	}
+
+	tc := newTrdClient(client, accountID, env, clk)
+	return tc.getAccList(ctx)
 }
 
 // now returns the current time in epoch milliseconds via the injected clock.

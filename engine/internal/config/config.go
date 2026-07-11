@@ -295,6 +295,14 @@ func ValidateVenueConfig(vc VenueConfig, credKeys []string) error {
 		if v.Broker == "tradezero" && v.AccountID == "" {
 			return fmt.Errorf("venue %q: tradezero requires account_id", v.ID)
 		}
+		if v.Broker == "moomoo" {
+			if v.AccountID == "" {
+				return fmt.Errorf("venue %q: moomoo requires account_id", v.ID)
+			}
+			if _, err := strconv.ParseUint(v.AccountID, 10, 64); err != nil {
+				return fmt.Errorf("venue %q: moomoo account_id must be numeric: %w", v.ID, err)
+			}
+		}
 		if v.StartingBalance < 0 {
 			return fmt.Errorf("venue %q: starting_balance must be >= 0 (0 = default)", v.ID)
 		}

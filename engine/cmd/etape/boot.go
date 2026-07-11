@@ -4,11 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
+	"github.com/earlisreal/eTape/engine/internal/broker/moomoo"
 	"github.com/earlisreal/eTape/engine/internal/broker/sim"
-	"github.com/earlisreal/eTape/engine/internal/broker/stub"
 	"github.com/earlisreal/eTape/engine/internal/broker/tradezero"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
@@ -42,9 +43,6 @@ func venueMetas(cfg config.Config) []uihub.VenueMeta {
 	for _, v := range cfg.Venues {
 		gv := cfg.Gate.Venue[v.ID]
 		note := ""
-		if v.Broker == "moomoo" {
-			note = "execution v1.x"
-		}
 		out = append(out, uihub.VenueMeta{
 			ID: v.ID, Broker: v.Broker, Note: note,
 			Gate: uihub.GateLimits{
@@ -77,7 +75,7 @@ type venueBroker struct {
 
 // buildBrokers constructs one exec.Broker per configured venue. In replay mode
 // every venue is a SimBroker (a recorded day has no live broker). In live mode it
-// dispatches on Venue.Broker; moomoo is deferred to v1.x (error).
+// dispatches on Venue.Broker.
 func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock, replay bool) ([]venueBroker, error) {
 	out := make([]venueBroker, 0, len(cfg.Venues))
 	for _, v := range cfg.Venues {
@@ -110,10 +108,15 @@ func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock, replay bool
 			}
 			out = append(out, venueBroker{ID: id, Broker: a, Run: a.Run})
 		case "moomoo":
-			// Stub venue: registers, never connects, rejects order placement.
-			// The real moomoo trading adapter is execution v1.x; only this
-			// case changes then. (Replay short-circuits to sim above.)
-			out = append(out, venueBroker{ID: id, Broker: stub.New()})
+			accID, err := strconv.ParseUint(v.AccountID, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("venue %s: %w", v.ID, err)
+			}
+			a, err := moomoo.New(moomoo.Config{Venue: id, AccountID: accID, Env: v.Env, Addr: cfg.OpenD.Addr(), Clock: clk})
+			if err != nil {
+				return nil, fmt.Errorf("venue %s: %w", v.ID, err)
+			}
+			out = append(out, venueBroker{ID: id, Broker: a, Run: a.Run})
 		default:
 			return nil, fmt.Errorf("venue %s: unknown broker %q", v.ID, v.Broker)
 		}
