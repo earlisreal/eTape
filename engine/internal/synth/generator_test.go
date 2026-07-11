@@ -147,10 +147,18 @@ func TestGenerator_BigJumpDoesNotCorruptState(t *testing.T) {
 	g.StepTo(start + 200)
 	g.Drain(start + 200)
 
+	preMid := map[string]float64{}
+	for _, code := range g.Symbols() {
+		preMid[code] = g.syms[code].price.Mid
+	}
+
 	// 30h: comfortably crosses at least one ET-midnight boundary (proving
 	// the multi-day-gap collapse-to-one-rollover path, not just "no time
 	// passed") without the Poisson tick volume of a multi-day jump making
-	// this test slow.
+	// this test slow. Verified this scenario does cross exactly one
+	// rollover (2023-11-14 -> 2023-11-15) and leaves every symbol's session
+	// freshly reset (hasOpen=false) right after, which is exactly the state
+	// that used to make QuoteOf/Drain report an all-zero quote.
 	future := start + 30*3600*1000 + 12345
 	g.StepTo(future)
 	g.Drain(future)
@@ -160,8 +168,15 @@ func TestGenerator_BigJumpDoesNotCorruptState(t *testing.T) {
 		if !ok {
 			t.Fatalf("missing quote for %s", code)
 		}
-		if q.Last < 0 || q.PrevClose <= 0 {
+		if q.Last <= 0 || q.PrevClose <= 0 {
 			t.Fatalf("%s: bad quote after big jump: %+v", code, q)
+		}
+		if q.Last != q.PrevClose {
+			// This scenario crosses a rollover and generates no further
+			// trades afterward, so QuoteOf must be reporting the
+			// hasOpen=false prevClose fallback exactly, not a stale/zeroed
+			// session value.
+			t.Errorf("%s: Last=%v want == PrevClose=%v immediately after the jump's rollover", code, q.Last, q.PrevClose)
 		}
 		b, ok := g.BookOf(code)
 		if !ok || len(b.Bids) == 0 || len(b.Asks) == 0 {
@@ -169,6 +184,17 @@ func TestGenerator_BigJumpDoesNotCorruptState(t *testing.T) {
 		}
 		if b.Bids[0].Price >= b.Asks[0].Price {
 			t.Fatalf("%s: crossed book after big jump: bid=%v ask=%v", code, b.Bids[0].Price, b.Asks[0].Price)
+		}
+
+		// Loose integration-level sanity band: legitimate behavior here is
+		// at most a runner's overnight-gap kick (up to ~120%, i.e. ~2.2x)
+		// plus a small clamped-dtMs noise contribution on top - nowhere
+		// close to this band. The unclamped bug (fixed in this same round)
+		// produced single-step ratios from ~0.0002x to ~950x for this exact
+		// scenario's seed, which this band catches with huge margin.
+		post := g.syms[code].price.Mid
+		if post > preMid[code]*10 || post < preMid[code]/10 {
+			t.Errorf("%s: Mid moved from %.4f to %.4f (%.2fx) across the big-jump step, want within [1/10x, 10x]", code, preMid[code], post, post/preMid[code])
 		}
 	}
 
@@ -179,6 +205,73 @@ func TestGenerator_BigJumpDoesNotCorruptState(t *testing.T) {
 		now += 200
 		g.StepTo(now)
 		g.Drain(now)
+	}
+}
+
+// TestGenerator_StepSymbolClampsLargeDtMs directly unit-tests stepSymbol's
+// dtMs clamp (bypassing StepTo/rollover entirely, so the assertion isn't
+// confounded by kickRunnerGap's intentionally larger overnight-gap moves):
+// a single call spanning a real 30h gap must not feed stepPrice/genTicks an
+// unclamped dtMs. Before the fix, this exact scenario (seed=3) produced
+// single-step Mid ratios from ~0.0002x to ~950x; the clamp bounds every
+// symbol to a small, realistic multiple of its pre-call price.
+func TestGenerator_StepSymbolClampsLargeDtMs(t *testing.T) {
+	g := New(3, clock.NewFake(timeMs(1_700_000_000_000)))
+	for _, code := range g.Symbols() {
+		rt := g.syms[code]
+		pre := rt.price.Mid
+
+		g.stepSymbol(rt, 0, 30*3600*1000) // 30h in one call, no intermediate steps
+
+		post := rt.price.Mid
+		if post <= 0 {
+			t.Fatalf("%s: non-positive Mid after one large-dtMs step: %v", code, post)
+		}
+		if post > pre*2 || post < pre/2 {
+			t.Errorf("%s: Mid moved from %.4f to %.4f (%.4fx) in a single 30h-dtMs step, want within [0.5x, 2x] - dtMs clamp not bounding the price-noise blast radius", code, pre, post, post/pre)
+		}
+	}
+}
+
+// TestGenerator_QuoteFallsBackToPrevCloseRightAfterRollover steps the clock
+// across a real ET-midnight boundary in small (200ms) increments - the
+// normal live-loop cadence, not a big jump - and checks that the instant a
+// rollover fires, QuoteOf reports Last == PrevClose (not the zeroed sess the
+// bug used to leak) for every symbol, since no trade has printed in the new
+// session yet.
+func TestGenerator_QuoteFallsBackToPrevCloseRightAfterRollover(t *testing.T) {
+	start := time.Date(2023, 11, 13, 23, 59, 0, 0, time.FixedZone("EST", -5*3600)).UnixMilli()
+	g := New(11, clock.NewFake(timeMs(start)))
+
+	now := start
+	rolled := false
+	for i := 0; i < 400 && !rolled; i++ { // 80s, enough to cross ET midnight
+		now += 200
+		g.StepTo(now)
+		g.Drain(now)
+		rolled = g.curDay != etDay(start)
+	}
+	if !rolled {
+		t.Fatal("expected a rollover to occur")
+	}
+
+	for _, code := range g.Symbols() {
+		if g.syms[code].sess.hasOpen {
+			// Vanishingly unlikely at seed=11 (a trade would have to print
+			// in the same sub-200ms instant the rollover fires), but if it
+			// ever does happen this isn't the state the bug affects.
+			continue
+		}
+		q, ok := g.QuoteOf(code)
+		if !ok {
+			t.Fatalf("%s: missing quote", code)
+		}
+		if q.Last == 0 {
+			t.Errorf("%s: QuoteOf.Last == 0 immediately after rollover, want prevClose fallback", code)
+		}
+		if q.Last != q.PrevClose {
+			t.Errorf("%s: QuoteOf.Last = %v, want == PrevClose %v immediately after rollover (no trade yet)", code, q.Last, q.PrevClose)
+		}
 	}
 }
 

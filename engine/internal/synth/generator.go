@@ -36,6 +36,21 @@ const (
 // anything older on every call.
 const tickRingMs = 2 * 60 * 60 * 1000
 
+// maxStepDtMs bounds the price-noise/tick-volume "blast radius" of a single
+// stepSymbol call, regardless of how large the real gap between StepTo calls
+// is (e.g. the host process was suspended for hours/days and resumed).
+// stepPrice's noise term scales with sqrt(dtSec), so an unclamped dtMs lets
+// one random draw move Mid by many multiples of its pre-gap value in a
+// single step (verified empirically: an unclamped 30h dtMs produced
+// 20x-950x single-step swings, and some symbols collapsed to the price
+// floor) - unrelated to any regime/gap logic, and genTicks' single-regime-
+// per-call Poisson draw over the same huge window can also generate a
+// correspondingly enormous tick batch while mu is held. Clamping to a few
+// minutes keeps both bounded; multi-day catch-up fidelity for the skipped
+// span isn't required (see ET-midnight rollover, which still fires
+// correctly off the real, unclamped nowMs/fromMs regardless of this clamp).
+const maxStepDtMs = 5 * 60 * 1000
+
 // symRuntime is the generator's complete per-symbol mutable state.
 //
 // Beyond the fields the task brief names explicitly, two bookkeeping fields
@@ -166,16 +181,26 @@ func (g *Generator) StepTo(nowMs int64) {
 	}
 }
 
-// stepSymbol advances rt's price walk over [fromMs, nowMs) and generates the
-// window's ticks, folding each into rt's bar/session aggregates, the ~2h
-// tick ring, and the per-drain pending buffers. A no-op beyond the price step
-// if no ticks printed (halted symbol, or just an unlucky quiet window) -
-// nothing else changed, so book/quote stay clean.
+// stepSymbol advances rt's price walk and generates ticks over a window
+// ending at nowMs, folding each into rt's bar/session aggregates, the ~2h
+// tick ring, and the per-drain pending buffers. The simulated window is
+// [fromMs, nowMs) clamped to at most maxStepDtMs: if the real gap since the
+// last step is larger (e.g. a suspended process resuming), only the last
+// maxStepDtMs of it is actually simulated, bounding both stepPrice's noise
+// term and genTicks' Poisson tick volume for this one call - the skipped
+// portion of a very large gap is simply not simulated, which is an accepted
+// trade-off (see maxStepDtMs's doc comment), not a correctness gap. A no-op
+// beyond the price step if no ticks printed (halted symbol, or just an
+// unlucky quiet window) - nothing else changed, so book/quote stay clean.
 func (g *Generator) stepSymbol(rt *symRuntime, fromMs, nowMs int64) {
-	dtMs := nowMs - fromMs
+	simFromMs := fromMs
+	if nowMs-simFromMs > maxStepDtMs {
+		simFromMs = nowMs - maxStepDtMs
+	}
+	dtMs := nowMs - simFromMs
 	stepPrice(g.rng, rt.spec, rt.price, nowMs, dtMs)
 
-	ticks := genTicks(g.rng, rt.spec, rt.price, rt.book, &rt.sess, rt.spec.Code, fromMs, nowMs, rt.lastSeq+1)
+	ticks := genTicks(g.rng, rt.spec, rt.price, rt.book, &rt.sess, rt.spec.Code, simFromMs, nowMs, rt.lastSeq+1)
 	if len(ticks) == 0 {
 		return
 	}
@@ -311,7 +336,8 @@ func (g *Generator) Drain(nowMs int64) []feed.Event {
 		}
 
 		if rt.dirtyQuote && nowMs-rt.lastQuoteMs >= quoteThrottleMs {
-			events = append(events, feed.QuoteEvent{Quote: buildQuote(code, &rt.sess, rt.prevClose, nowMs)})
+			qs := quoteSess(&rt.sess, rt.prevClose)
+			events = append(events, feed.QuoteEvent{Quote: buildQuote(code, &qs, rt.prevClose, nowMs)})
 			rt.dirtyQuote = false
 			rt.lastQuoteMs = nowMs
 		}
@@ -363,7 +389,22 @@ func (g *Generator) QuoteOf(code string) (feed.Quote, bool) {
 	if !ok {
 		return feed.Quote{}, false
 	}
-	return buildQuote(code, &rt.sess, rt.prevClose, g.lastStepMs), true
+	qs := quoteSess(&rt.sess, rt.prevClose)
+	return buildQuote(code, &qs, rt.prevClose, g.lastStepMs), true
+}
+
+// quoteSess returns sess as-is if any trade has printed yet (hasOpen), or
+// otherwise a synthetic all-prevClose session (Open=High=Low=Last=prevClose,
+// Vol=Turnover=0). Without this, buildQuote would read straight off a
+// freshly-reset sess and report an all-zero Last/OHLC for the entire gap
+// between an ET-midnight rollover (which unconditionally resets sess) and
+// the new day's first print - mirroring the same hasOpen fallback RankRows
+// already applies for its own Last/PctChange fields.
+func quoteSess(sess *sessionAgg, prevClose float64) sessionAgg {
+	if sess.hasOpen {
+		return *sess
+	}
+	return sessionAgg{Open: prevClose, High: prevClose, Low: prevClose, Last: prevClose, hasOpen: true}
 }
 
 // RecentTicks returns up to the last n ticks in code's ~2h ring, oldest
