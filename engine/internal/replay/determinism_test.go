@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/replay"
@@ -132,6 +133,73 @@ func TestReplayJournalMatchesLive(t *testing.T) {
 	for i := range live {
 		if !reflect.DeepEqual(live[i], replayed[i]) {
 			t.Fatalf("update %d differs:\n live: %#v\nrepl: %#v", i, live[i], replayed[i])
+		}
+	}
+}
+
+func TestReplaySealedJournalMatchesLive(t *testing.T) {
+	evs := scriptEvents()
+
+	// Live baseline: feed the scripted events straight into a fresh core.
+	live := collect(t, func(feedOne func(feed.Event)) {
+		for _, ev := range evs {
+			feedOne(ev)
+		}
+	})
+
+	// Sealed round-trip: record → SEAL → read (from chunks) → replay → fresh core.
+	replayed := collect(t, func(feedOne func(feed.Event)) {
+		// Clock two days after capBase so 2026-07-06 is strictly in the past (sealable).
+		s, err := store.Open(store.Options{
+			Path:  t.TempDir() + "/cap.db",
+			Clock: clock.NewFake(time.UnixMilli(capBase + 2*86_400_000)),
+		})
+		if err != nil {
+			t.Fatalf("open store: %v", err)
+		}
+		defer s.Close()
+		for i, ev := range evs {
+			s.RecordEvent(ev, capBase+int64(i))
+		}
+		s.Flush()
+
+		sum, err := s.SealJournalDays()
+		if err != nil {
+			t.Fatalf("seal: %v", err)
+		}
+		if sum.Days != 1 || sum.Rows != int64(len(evs)) {
+			t.Fatalf("seal summary = %+v, want Days=1 Rows=%d", sum, len(evs))
+		}
+
+		rows, err := s.ReadJournalDay("2026-07-06") // served from chunks now
+		if err != nil {
+			t.Fatalf("read journal: %v", err)
+		}
+		if len(rows) != len(evs) {
+			t.Fatalf("journal rows = %d, want %d", len(rows), len(evs))
+		}
+		for i := range rows {
+			if !reflect.DeepEqual(rows[i].Event, evs[i]) {
+				t.Fatalf("row %d event mismatch:\n in: %#v\nout: %#v", i, evs[i], rows[i].Event)
+			}
+		}
+
+		sim := replay.NewClock(time.UnixMilli(rows[0].TsExch))
+		rf := replay.NewFeed(replay.FeedOptions{Rows: rows, Sim: sim, Speed: 0})
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go func() { _ = rf.Run(ctx) }()
+		for ev := range rf.Events() {
+			feedOne(ev)
+		}
+	})
+
+	if len(live) != len(replayed) {
+		t.Fatalf("update counts differ: live %d vs sealed-replay %d", len(live), len(replayed))
+	}
+	for i := range live {
+		if !reflect.DeepEqual(live[i], replayed[i]) {
+			t.Fatalf("update %d differs after sealing:\n live: %#v\nrepl: %#v", i, live[i], replayed[i])
 		}
 	}
 }
