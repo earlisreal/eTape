@@ -28,6 +28,10 @@ export class BarStore extends PaintStore {
       this.markDirty();
       return;
     }
+    if (Array.isArray(m.payload)) {
+      this.prependBatch(m.payload as Bar[]);
+      return;
+    }
     const b = m.payload as Bar;
     const k = this.key(b.symbol, b.timeframe);
     const arr = this.series_.get(k) ?? [];
@@ -74,5 +78,22 @@ export class BarStore extends PaintStore {
   getRev(symbol?: string, timeframe?: string): number {
     if (symbol === undefined || timeframe === undefined) return super.getRev();
     return this.revs.get(this.key(symbol, timeframe)) ?? 0;
+  }
+
+  // prependBatch inserts a strictly-older, ascending run at the FRONT of a
+  // series (the deep-history BarPrepend delta). Bars not strictly older than the
+  // current earliest are dropped (idempotent against reconnect re-snapshots).
+  private prependBatch(older: Bar[]): void {
+    if (older.length === 0) return;
+    const first = older[0];
+    const k = this.key(first.symbol, first.timeframe);
+    const arr = this.series_.get(k) ?? [];
+    const earliest = arr[0]?.bucketStart;
+    const fresh = earliest === undefined ? older : older.filter((b) => b.bucketStart < earliest);
+    if (fresh.length === 0) return;
+    fresh.sort((a, b) => (a.bucketStart < b.bucketStart ? -1 : a.bucketStart > b.bucketStart ? 1 : 0));
+    this.series_.set(k, [...fresh, ...arr]);
+    this.bumpRev(k);
+    this.markDirty();
   }
 }

@@ -85,3 +85,33 @@ describe("BarStore", () => {
     expect(s.getRev()).toBe(1);
   });
 });
+
+describe("BarStore batch prepend", () => {
+  const batchBar = (bucketStart: string): Record<string, unknown> => ({
+    symbol: "US.AAPL", timeframe: "1m", bucketStart, o: 1, h: 1, l: 1, c: 1, v: 1, inProgress: false,
+  });
+
+  it("unshifts a strictly-older batch and bumps rev", () => {
+    const s = new BarStore();
+    s.apply({ kind: "snapshot", topic: "md.bars", payload: [batchBar("2024-01-02T10:00:00Z"), batchBar("2024-01-02T10:01:00Z")] } as never);
+    const rev0 = s.getRev("US.AAPL", "1m");
+
+    s.apply({ kind: "delta", topic: "md.bars", payload: [batchBar("2024-01-01T10:00:00Z"), batchBar("2024-01-01T10:01:00Z")] } as never);
+
+    const series = s.series("US.AAPL", "1m");
+    expect(series.map((b) => b.bucketStart)).toEqual([
+      "2024-01-01T10:00:00Z", "2024-01-01T10:01:00Z",
+      "2024-01-02T10:00:00Z", "2024-01-02T10:01:00Z",
+    ]);
+    expect(s.getRev("US.AAPL", "1m")).toBeGreaterThan(rev0);
+  });
+
+  it("ignores non-older bars in a batch (no duplicates)", () => {
+    const s = new BarStore();
+    s.apply({ kind: "snapshot", topic: "md.bars", payload: [batchBar("2024-01-02T10:00:00Z")] } as never);
+    s.apply({ kind: "delta", topic: "md.bars", payload: [batchBar("2024-01-02T10:00:00Z"), batchBar("2024-01-01T10:00:00Z")] } as never);
+    expect(s.series("US.AAPL", "1m").map((b) => b.bucketStart)).toEqual([
+      "2024-01-01T10:00:00Z", "2024-01-02T10:00:00Z",
+    ]);
+  });
+});
