@@ -470,6 +470,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		if n, err := st.PruneJournal(cfg.Store.RetentionDays); err == nil && n > 0 {
 			log.Info("pruned journal", "rows", n)
 		}
+		st.Flush() // drain the queued prune sys_event so it doesn't race the seal's write transaction
 		if sum, err := st.SealJournalDays(); err != nil {
 			log.Error("seal journal", "err", err)
 			st.AppendSysEvent("retention", fmt.Sprintf("journal seal error: %v", err))
