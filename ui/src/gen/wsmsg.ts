@@ -14,7 +14,7 @@ export type Topic =
   | "news.item"
   | "stock.detail"
   | "exec.account" | "exec.positions" | "exec.orders" | "exec.fills" | "exec.status" | "exec.trades"
-  | "sys.health" | "sys.events"
+  | "sys.health" | "sys.session" | "sys.events"
   | "config";
 
 // ---- wire enums (mirrors wsmsg.go's typed string consts) ----
@@ -305,6 +305,15 @@ export interface HealthSnapshot {
   links: HealthLink[];
   quota?: QuotaInfo;
 }
+/**
+ * SessionSnapshot is the static sys.session topic: which mode the engine
+ * booted in. Mode is "live" or "replay"; Day/Speed populated only in replay.
+ */
+export interface SessionSnapshot {
+  mode: string;
+  day?: string;
+  speed?: number /* float64 */;
+}
 export interface SysEvent {
   seq: number /* int64 */;
   ts: string;
@@ -507,4 +516,18 @@ export interface TestConnectionResult {
   accountType: string;
   message: string;
   accounts: TestAccount[];
+}
+/**
+ * StartReplayArgs selects the recorded day and playback speed for the
+ * StartReplay command. Day is a "YYYY-MM-DD" calendar date; Speed is a
+ * playback multiplier (0 = as-fast-as-possible, per Task 4's closure).
+ */
+export interface StartReplayArgs {
+  day: string;
+  speed: number /* float64 */;
+}
+/**
+ * GoLiveArgs is intentionally empty (kept as a named type for tygo stability).
+ */
+export interface GoLiveArgs {
 }

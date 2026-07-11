@@ -240,6 +240,14 @@ type HealthSnapshot struct {
 	Quota *QuotaInfo   `json:"quota,omitempty"`
 }
 
+// SessionSnapshot is the static sys.session topic: which mode the engine
+// booted in. Mode is "live" or "replay"; Day/Speed populated only in replay.
+type SessionSnapshot struct {
+	Mode  string  `json:"mode"`
+	Day   string  `json:"day,omitempty"`
+	Speed float64 `json:"speed,omitempty"`
+}
+
 type SysEvent struct {
 	Seq    int64  `json:"seq"`
 	Ts     string `json:"ts"`

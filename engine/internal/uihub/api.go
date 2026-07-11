@@ -69,6 +69,9 @@ type Config struct {
 	FillsCap, EventsCap, TradesCap int
 	OutBuf                         int
 	DistDir                        string
+	Mode                           string // "live" | "replay"
+	ReplayDay                      string
+	ReplaySpeed                    float64
 }
 
 // New builds the mirror, hub, and server from the cores. Caller runs h.Run(ctx)
@@ -96,6 +99,7 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 		MaxSymbolPositionShares: cfg.Global.MaxSymbolPositionShares,
 	}
 	m := newMirror(vms, global, cfg.TapeCap, cfg.NewsCap, cfg.FillsCap, cfg.EventsCap, cfg.TradesCap)
+	m.session = wsmsg.SessionSnapshot{Mode: cfg.Mode, Day: cfg.ReplayDay, Speed: cfg.ReplaySpeed}
 	h := NewHub(clk, HubConfig{MDInterval: cfg.MD, AccountInterval: cfg.Account, PositionInterval: cfg.Position, Buf: cfg.Buf}, m)
 	cmd := newCommands(ex, st, ind, h, va, h.feed, vt)
 	cmd.restart = requestRestart

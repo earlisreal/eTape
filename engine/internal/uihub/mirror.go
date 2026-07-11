@@ -55,8 +55,9 @@ type mirror struct {
 	masterArmed bool
 
 	// system
-	health wsmsg.HealthSnapshot
-	events []wsmsg.SysEvent // bounded recent
+	health  wsmsg.HealthSnapshot
+	session wsmsg.SessionSnapshot
+	events  []wsmsg.SysEvent // bounded recent
 
 	tapeCap, newsCap, fillsCap, eventsCap, tradesCap int
 	venueOrder                                       []string // stable venue order for exec.status
@@ -387,6 +388,8 @@ func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
 		out = append(out, staged{Topic: topic, Payload: m.execStatus()})
 	case wsmsg.TopicSysHealth:
 		out = append(out, staged{Topic: topic, Payload: m.health})
+	case wsmsg.TopicSysSession:
+		out = append(out, staged{Topic: topic, Payload: m.session})
 	case wsmsg.TopicSysEvents:
 		out = append(out, staged{Topic: topic, Payload: append([]wsmsg.SysEvent(nil), m.events...)})
 	}
