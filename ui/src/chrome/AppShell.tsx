@@ -11,7 +11,7 @@ import type { LinkGroup, LinkGroups } from "./linkGroups";
 import type { DemandRegistry } from "../wire/DemandRegistry";
 import type { ConnState } from "../wire/WsClient";
 import { PANELS, type PanelProps } from "./panels/registry";
-import { PRESETS, applyPreset } from "./presets";
+import { PRESETS } from "./presets";
 import { TopBar } from "./TopBar";
 import { FeedStatusBanner } from "./FeedStatusBanner";
 import { EmptyState } from "./EmptyState";
@@ -69,7 +69,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // has at least one panel — see the empty-state switch below); null otherwise.
   const apiRef = useRef<DockviewApi | null>(null);
   // Dockview mutations that need a NEW panel id already present in dockview's
-  // `components` map (api.addPanel, applyPreset's api.fromJSON) must not run
+  // `components` map (api.addPanel, applyWorkspace's api.fromJSON) must not run
   // synchronously in the same tick as the setWs() that adds the id — dockview's
   // React binding only refreshes its internal `createComponent` closure in a
   // child useEffect that fires after commit, so an immediate call resolves
@@ -244,25 +244,52 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     apiRef.current?.getPanel(id)?.api.close();
   };
 
+  // Replace the whole workspace doc with `next` (a preset's panels+layout, or
+  // an imported workspace) and re-render dockview to match. Confirms first
+  // if `opts.confirm` is given (omit it when the caller already confirmed —
+  // e.g. BackupSection's own window.confirm before onImportWorkspace — so we
+  // don't double-prompt). Hydrates LinkGroups from `next` BEFORE setWs, same
+  // ordering as the load effect above and for the same reason: panels read
+  // linkGroups.symbolFor(group) on their very first mount, so a group whose
+  // focused symbol isn't hydrated yet would fall back to its AAPL
+  // creation-time seed. Same pendingRef deferral as addPanel: if dockview is
+  // already mounted, api.fromJSON needs the new panel ids present in the
+  // components map first.
+  const applyWorkspace = (next: Workspace, opts?: { confirm?: string }) => {
+    if (opts?.confirm && !window.confirm(opts.confirm)) return;
+    linkGroups.hydrate(next.groups ?? {});
+    linkGroups.hydrateVenues(next.linkVenues ?? {});
+    setWs(next);
+    wsRef.current = next;
+    workspaceStore.save(next);
+    if (apiRef.current) {
+      pendingRef.current.push((api) => {
+        api.clear();
+        api.fromJSON(next.layout as Parameters<typeof api.fromJSON>[0]);
+      });
+    }
+  };
+
   // Replace the workspace with a preset's panels + layout. Confirms first if
-  // the workspace isn't already empty. Same pendingRef deferral as addPanel:
-  // if dockview is already mounted, applyPreset's api.fromJSON needs the new
-  // panel ids present in the components map first.
+  // the workspace isn't already empty. The `wsRef.current === next` check
+  // below (reference, not deep, equality — `next` is a fresh object every
+  // call) is how we tell whether applyWorkspace actually applied `next` vs.
+  // bailed out on a cancelled confirm, so the "Add panel" popover only
+  // closes on an actual replace, same as before this was extracted.
   const applyPresetToWorkspace = (presetId: string) => {
     const preset = PRESETS.find((p) => p.id === presetId);
     if (!preset) return;
     const current = wsRef.current ?? ws;
-    if (current.panels.length > 0 && !window.confirm("Replace the current layout with this preset?")) return;
     const { panels, layout } = preset.build();
     const next = { ...current, panels, layout };
-    wsRef.current = next;
-    setWs(next);
-    workspaceStore.save(next);
-    if (apiRef.current) {
-      pendingRef.current.push((api) => applyPreset(api, preset));
-    }
-    setAddOpen(false);
+    applyWorkspace(next, current.panels.length > 0 ? { confirm: "Replace the current layout with this preset?" } : undefined);
+    if (wsRef.current === next) setAddOpen(false);
   };
+
+  // Import & export (Task 3): BackupSection already ran its own
+  // window.confirm before calling this, so no confirm string here — a
+  // second confirm would double-prompt the user.
+  const onImportWorkspace = (w: Workspace) => applyWorkspace(w);
 
   // "Connection" in the latency readout: focus the existing connection-status
   // panel if the workspace already has one, otherwise add it.
@@ -392,7 +419,10 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         <SettingsModal open={settings.open} section={settings.section}
           onSection={(s) => setSettings((v) => ({ ...v, section: s }))}
           onClose={() => setSettings((v) => ({ ...v, open: false }))}
-          commands={commands} />
+          commands={commands}
+          getWorkspace={() => wsRef.current ?? ws}
+          onImportWorkspace={onImportWorkspace}
+          toast={toast} />
         {showVenueSetup && <VenueSetupPrompt onConfigure={configureVenueSetup} onDismiss={dismissVenueSetup} />}
       </div>
     </OpenSettingsProvider>
