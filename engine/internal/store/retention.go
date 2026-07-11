@@ -30,6 +30,39 @@ func (s *Store) PruneJournal(retentionDays int) (int64, error) {
 	if err != nil {
 		return 0, err
 	}
-	s.AppendSysEvent("retention", fmt.Sprintf("pruned %d journal rows before %s (retention %dd)", n, cutoffDay, retentionDays))
+	cres, err := s.db.Exec("DELETE FROM journal_chunks WHERE day < ?", cutoffDay)
+	if err != nil {
+		return 0, err
+	}
+	nc, _ := cres.RowsAffected()
+	s.AppendSysEvent("retention", fmt.Sprintf(
+		"pruned %d journal rows + %d sealed chunks before %s (retention %dd)", n, nc, cutoffDay, retentionDays))
 	return n, nil
+}
+
+// vacuumFreelistThreshold: reclaim disk when free pages exceed ~64 MB. Prune
+// and seal delete large row spans but SQLite keeps the freed pages in the file;
+// VACUUM is the only thing that returns them to the OS.
+const vacuumFreelistThreshold = 64 << 20
+
+// VacuumIfNeeded runs VACUUM when the freelist exceeds vacuumFreelistThreshold,
+// reporting whether it ran. Like PruneJournal, it touches s.db directly and is
+// a boot-time-only maintenance op: call it before the feed producer starts and
+// after Flush() has drained queued writes, so no writer transaction races the
+// VACUUM (which needs exclusive access).
+func (s *Store) VacuumIfNeeded() (bool, error) {
+	var freeCount, pageSize int64
+	if err := s.db.QueryRow("PRAGMA freelist_count").Scan(&freeCount); err != nil {
+		return false, err
+	}
+	if err := s.db.QueryRow("PRAGMA page_size").Scan(&pageSize); err != nil {
+		return false, err
+	}
+	if freeCount*pageSize < vacuumFreelistThreshold {
+		return false, nil
+	}
+	if _, err := s.db.Exec("VACUUM"); err != nil {
+		return false, err
+	}
+	return true, nil
 }

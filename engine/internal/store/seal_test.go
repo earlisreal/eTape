@@ -298,3 +298,41 @@ func TestSealCrashLeavesDayRaw(t *testing.T) {
 		t.Fatalf("partial chunks persisted: %d, want 0", chunkCount(t, s, "2026-07-06"))
 	}
 }
+
+func TestPruneDeletesChunksAndRaw(t *testing.T) {
+	now := time.Date(2026, 7, 6, 12, 0, 0, 0, mustLoc(t)) // retention 2d keeps 07-05,07-06
+	s := openAtClock(t, now)
+	// Old day 2026-07-01 exists ONLY as a chunk (already sealed); must be pruned.
+	insertChunk(t, s, "2026-07-01", 0, []chunkRow{
+		{Seq: 1, TsExch: 1, TsRecv: 1, Symbol: "", Kind: "conn_up", Seed: 0, Payload: `{}`},
+	})
+	dayMs := func(y, m, d int) int64 {
+		return time.Date(y, time.Month(m), d, 10, 0, 0, 0, mustLoc(t)).UnixMilli()
+	}
+	s.RecordEvent(feed.ConnUpEvent{}, dayMs(2026, 7, 5)) // kept
+	s.RecordEvent(feed.ConnUpEvent{}, dayMs(2026, 7, 6)) // kept
+	s.Flush()
+
+	if _, err := s.PruneJournal(2); err != nil {
+		t.Fatal(err)
+	}
+	if chunkCount(t, s, "2026-07-01") != 0 {
+		t.Fatal("old sealed chunk survived prune")
+	}
+	days, _ := s.JournalDays()
+	if len(days) != 2 || days[0] != "2026-07-05" || days[1] != "2026-07-06" {
+		t.Fatalf("remaining days = %v, want [2026-07-05 2026-07-06]", days)
+	}
+}
+
+func TestVacuumIfNeeded(t *testing.T) {
+	s := open(t)
+	// Small DB → freelist below threshold → no vacuum, no error.
+	ran, err := s.VacuumIfNeeded()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ran {
+		t.Fatal("vacuum ran on a tiny DB; freelist should be under threshold")
+	}
+}
