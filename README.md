@@ -18,7 +18,7 @@ Real-time charts · Level 2 DOM ladder · Time & Sales · Pre-market scanner · 
 <!-- SCREENSHOT: drag your screenshot into the GitHub README editor (or any issue
      comment) to upload it, then replace the URL below with the generated
      https://github.com/user-attachments/assets/... link. -->
-![eTape workspace — chart, DOM ladder, and time & sales](https://github.com/user-attachments/assets/REPLACE-WITH-UPLOADED-ASSET-URL)
+![eTape workspace — chart, DOM ladder, and time & sales](https://github.com/user-attachments/assets/1ef4bdf8-caa1-43ac-815f-d61805766bb8)
 
 </div>
 
