@@ -65,7 +65,7 @@ function rangeCell(low: number | null, high: number | null, palette: Palette): J
   );
 }
 
-export function StockInfoPanel({ config, stores, linkGroups, group: groupProp }: PanelProps): JSX.Element {
+export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, onConfigChange }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   const snap = useSyncExternalStore((cb) => stores.news.subscribe(cb), () => stores.news.getSnapshot());
   const detailSnap = useSyncExternalStore((cb) => stores.stockDetail.subscribe(cb), () => stores.stockDetail.getSnapshot());
@@ -79,6 +79,15 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp }:
     return linkGroups.subscribe(() => setSymbol(linkGroups.symbolFor(group)));
   }, [linkGroups, group]);
   const [hotOnly, setHotOnly] = useState(false);
+  // Default collapsed: a compact one-line summary (name · industry · float · EMA200,
+  // no price/change) so the news list starts higher. Persisted per panel like
+  // ChartPanel's timeframe/indicators — patch only this key, never spread config.settings.
+  const [detailsCollapsed, setDetailsCollapsed] = useState<boolean>(() => (config.settings.detailsCollapsed as boolean) ?? true);
+  const toggleDetails = () => {
+    const next = !detailsCollapsed;
+    setDetailsCollapsed(next);
+    onConfigChange({ detailsCollapsed: next });
+  };
 
   const items = useMemo(() => (symbol ? stores.news.itemsFor(symbol) : []), [snap, symbol, stores.news]);
   // Derived from `items`, never mutates it — something else may reasonably
@@ -108,47 +117,73 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp }:
           <div style={{ padding: 12, color: palette.textMuted }}>No fundamentals yet for {symbol}.</div>
         ) : (
           <>
-            <div style={{ padding: "6px 8px", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-              <span style={{ fontWeight: 600, color: detail.name ? palette.text : palette.textMuted }}>
-                {detail.name || "—"}
-              </span>
-              {detail.price == null ? (
-                <span className="mono" style={{ color: palette.textMuted }}>—</span>
-              ) : (
-                <span className="mono">{formatPrice(detail.price, QUOTE_DECIMALS)}</span>
-              )}
-              {detail.changePct == null ? (
-                <span className="mono" style={{ color: palette.textMuted }}>—</span>
-              ) : detail.changePct === 0 ? (
-                <span className="mono" style={{ color: palette.textMuted }}>{detail.changePct.toFixed(2)}%</span>
-              ) : (
-                <span className="mono" style={{ color: detail.changePct > 0 ? palette.ok : palette.danger }}>
-                  {detail.changePct > 0 ? "▲" : "▼"} {Math.abs(detail.changePct).toFixed(2)}%
+            {detailsCollapsed ? (
+              <div style={{ padding: "6px 8px", display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                <span style={{ fontWeight: 600, color: detail.name ? palette.text : palette.textMuted }}>
+                  {detail.name || "—"}
                 </span>
-              )}
-            </div>
-            <div style={{ borderBottom: `1px solid ${palette.border}` }} />
-            <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto 1fr", gap: "2px 8px", fontSize: 11, padding: "4px 8px" }}>
-              <span style={{ color: palette.textMuted }}>Mkt cap</span>
-              {fmtCompactOrDash(detail.marketCap, palette)}
-              <span style={{ color: palette.textMuted }}>Free float cap</span>
-              {fmtCompactOrDash(detail.floatMarketCap, palette)}
+                <span style={{ color: palette.textMuted }}>·</span>
+                {textOrDash(detail.industry, palette)}
+                <span style={{ color: palette.textMuted }}>·</span>
+                <span style={{ color: palette.textMuted }}>Flt</span>
+                {fmtCompactOrDash(detail.floatShares, palette)}
+                <span style={{ color: palette.textMuted }}>·</span>
+                <span style={{ color: palette.textMuted }}>EMA200</span>
+                {fmtDecimalOrDash(detail.ema200, palette)}
+                <button type="button" onClick={toggleDetails} aria-expanded={false} aria-label="Toggle fundamentals"
+                  style={{ marginLeft: "auto", background: "transparent", border: "none", padding: 0, cursor: "pointer", color: palette.textMuted, fontSize: 11 }}>
+                  ▸
+                </button>
+              </div>
+            ) : (
+              <>
+                <div style={{ padding: "6px 8px", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                  <span style={{ fontWeight: 600, color: detail.name ? palette.text : palette.textMuted }}>
+                    {detail.name || "—"}
+                  </span>
+                  {detail.price == null ? (
+                    <span className="mono" style={{ color: palette.textMuted }}>—</span>
+                  ) : (
+                    <span className="mono">{formatPrice(detail.price, QUOTE_DECIMALS)}</span>
+                  )}
+                  {detail.changePct == null ? (
+                    <span className="mono" style={{ color: palette.textMuted }}>—</span>
+                  ) : detail.changePct === 0 ? (
+                    <span className="mono" style={{ color: palette.textMuted }}>{detail.changePct.toFixed(2)}%</span>
+                  ) : (
+                    <span className="mono" style={{ color: detail.changePct > 0 ? palette.ok : palette.danger }}>
+                      {detail.changePct > 0 ? "▲" : "▼"} {Math.abs(detail.changePct).toFixed(2)}%
+                    </span>
+                  )}
+                  <button type="button" onClick={toggleDetails} aria-expanded={true} aria-label="Toggle fundamentals"
+                    style={{ marginLeft: "auto", background: "transparent", border: "none", padding: 0, cursor: "pointer", color: palette.textMuted, fontSize: 11 }}>
+                    ▾
+                  </button>
+                </div>
+                <div style={{ borderBottom: `1px solid ${palette.border}` }} />
+                <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto 1fr", gap: "2px 8px", fontSize: 11, padding: "4px 8px" }}>
+                  <span style={{ color: palette.textMuted }}>Mkt cap</span>
+                  {fmtCompactOrDash(detail.marketCap, palette)}
+                  <span style={{ color: palette.textMuted }}>Free float cap</span>
+                  {fmtCompactOrDash(detail.floatMarketCap, palette)}
 
-              <span style={{ color: palette.textMuted }}>Free Float</span>
-              {fmtCompactOrDash(detail.floatShares, palette)}
-              <span style={{ color: palette.textMuted }}>Exchange</span>
-              {textOrDash(detail.exchange, palette)}
+                  <span style={{ color: palette.textMuted }}>Free Float</span>
+                  {fmtCompactOrDash(detail.floatShares, palette)}
+                  <span style={{ color: palette.textMuted }}>Exchange</span>
+                  {textOrDash(detail.exchange, palette)}
 
-              <span style={{ color: palette.textMuted }}>Industry</span>
-              {textOrDash(detail.industry, palette)}
-              <span style={{ color: palette.textMuted }}>52wk</span>
-              {rangeCell(detail.low52, detail.high52, palette)}
+                  <span style={{ color: palette.textMuted }}>Industry</span>
+                  {textOrDash(detail.industry, palette)}
+                  <span style={{ color: palette.textMuted }}>52wk</span>
+                  {rangeCell(detail.low52, detail.high52, palette)}
 
-              <span style={{ color: palette.textMuted }}>Volume</span>
-              {fmtCompactOrDash(detail.volume, palette)}
-              <span style={{ color: palette.textMuted }}>EMA 200</span>
-              {fmtDecimalOrDash(detail.ema200, palette)}
-            </div>
+                  <span style={{ color: palette.textMuted }}>Volume</span>
+                  {fmtCompactOrDash(detail.volume, palette)}
+                  <span style={{ color: palette.textMuted }}>EMA 200</span>
+                  {fmtDecimalOrDash(detail.ema200, palette)}
+                </div>
+              </>
+            )}
           </>
         )
       )}

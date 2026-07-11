@@ -15,16 +15,17 @@ function fakeBus() {
   return { post: (m: unknown) => subs.forEach((cb) => cb(m)), onMessage: (cb: (m: unknown) => void) => { subs.add(cb); return () => subs.delete(cb); }, close: () => {} };
 }
 
-function renderPanel() {
+function renderPanel(opts?: { settings?: Record<string, unknown> }) {
   const stores = makeStores();
   const news = stores.news;
   const stockDetail = stores.stockDetail;
   const linkGroups = new LinkGroups(fakeBus() as never, () => {});
-  const config: PanelConfig = { id: "m-news", panelId: "news", group: "green", settings: {} };
-  const props = { config, stores, linkGroups, onConfigChange: vi.fn(), scheduler: {} as never,
+  const onConfigChange = vi.fn();
+  const config: PanelConfig = { id: "m-news", panelId: "news", group: "green", settings: opts?.settings ?? {} };
+  const props = { config, stores, linkGroups, onConfigChange, scheduler: {} as never,
     width: 400, height: 300, commands: { sendCommand: async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" }), sendQuery: async () => [] } } as PanelProps;
   render(<ThemeProvider><StockInfoPanel {...props} /></ThemeProvider>);
-  return { news, stockDetail, linkGroups };
+  return { news, stockDetail, linkGroups, onConfigChange };
 }
 
 const newsItem = (symbol: string, url: string, seen_at: string, overrides: Partial<NewsItem> = {}): NewsItem =>
@@ -111,8 +112,11 @@ describe("StockInfoPanel fundamentals section", () => {
     expect(screen.getByText(/no fundamentals yet for US.TSLA/i)).toBeTruthy();
   });
 
+  // These tests exercise the full fundamentals grid + price/change row, which since
+  // the details-collapse feature only render when expanded — mount pre-expanded via
+  // settings so they keep testing that (unchanged) content, not the new collapsed default.
   it("renders the company name, price, and an up-glyph colored change for a positive changePct", () => {
-    const { stockDetail, linkGroups } = renderPanel();
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.AAPL", { changePct: 5.2 })));
       linkGroups.focus("green", "US.AAPL");
@@ -122,7 +126,7 @@ describe("StockInfoPanel fundamentals section", () => {
   });
 
   it("renders a down-glyph colored change for a negative changePct", () => {
-    const { stockDetail, linkGroups } = renderPanel();
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.NVDA", { changePct: -2.1 })));
       linkGroups.focus("green", "US.NVDA");
@@ -131,7 +135,7 @@ describe("StockInfoPanel fundamentals section", () => {
   });
 
   it("shows a bare dash with no glyph when changePct is null", () => {
-    const { stockDetail, linkGroups } = renderPanel();
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.MSFT", { changePct: null })));
       linkGroups.focus("green", "US.MSFT");
@@ -141,7 +145,7 @@ describe("StockInfoPanel fundamentals section", () => {
   });
 
   it("shows a neutral, arrow-less percent (not a false up-signal) when changePct is exactly 0", () => {
-    const { stockDetail, linkGroups } = renderPanel();
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.GOOG", { changePct: 0 })));
       linkGroups.focus("green", "US.GOOG");
@@ -152,7 +156,7 @@ describe("StockInfoPanel fundamentals section", () => {
   });
 
   it("formats market cap, free float cap, free float, and volume with a compact magnitude suffix", () => {
-    const { stockDetail, linkGroups } = renderPanel();
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.MSFT", {
         marketCap: 3_210_000_000_000, floatMarketCap: 1_500_000_000,
@@ -168,7 +172,7 @@ describe("StockInfoPanel fundamentals section", () => {
   });
 
   it("renders the 52-week range at QUOTE_DECIMALS", () => {
-    const { stockDetail, linkGroups } = renderPanel();
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.MSFT", { low52: 5, high52: 15 })));
       linkGroups.focus("green", "US.MSFT");
@@ -177,7 +181,7 @@ describe("StockInfoPanel fundamentals section", () => {
   });
 
   it("renders the renamed Free Float / Free float cap labels, and no longer renders Float, Shares out, P/E · TTM, or EPS", () => {
-    const { stockDetail, linkGroups } = renderPanel();
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.MSFT")));
       linkGroups.focus("green", "US.MSFT");
@@ -192,7 +196,7 @@ describe("StockInfoPanel fundamentals section", () => {
   });
 
   it("renders Exchange and EMA 200 cells with their values", () => {
-    const { stockDetail, linkGroups } = renderPanel();
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.MSFT", { exchange: "NASDAQ", ema200: 145.5 })));
       linkGroups.focus("green", "US.MSFT");
@@ -204,7 +208,7 @@ describe("StockInfoPanel fundamentals section", () => {
   });
 
   it("renders a bare dash (not N/A) for empty exchange/industry and a null EMA 200", () => {
-    const { stockDetail, linkGroups } = renderPanel();
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.MSFT", { exchange: "", industry: "", ema200: null })));
       linkGroups.focus("green", "US.MSFT");
@@ -214,12 +218,70 @@ describe("StockInfoPanel fundamentals section", () => {
   });
 
   it("does not render an in-body 'Stock Info' header line once a symbol is focused (the dockview tab already shows it)", () => {
-    const { stockDetail, linkGroups } = renderPanel();
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.MSFT")));
       linkGroups.focus("green", "US.MSFT");
     });
     expect(screen.queryByText(/stock info/i)).toBeNull();
+  });
+});
+
+describe("StockInfoPanel details collapse (compact-by-default)", () => {
+  it("defaults to a single collapsed row (name · industry · Flt · EMA200) with no price/change and no grid", () => {
+    const { stockDetail, linkGroups } = renderPanel();
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.AAPL", {
+        industry: "Technology", floatShares: 15_000_000_000, ema200: 198.3, changePct: 5.2,
+      })));
+      linkGroups.focus("green", "US.AAPL");
+    });
+    expect(screen.getByText("US.AAPL Inc")).toBeTruthy();
+    expect(screen.getByText("Technology")).toBeTruthy();
+    expect(screen.getByText("15.0B")).toBeTruthy();
+    expect(document.body.textContent).toContain(formatPrice(198.3, QUOTE_DECIMALS));
+    // Grid-only labels absent when collapsed:
+    expect(screen.queryByText("Mkt cap")).toBeNull();
+    expect(screen.queryByText("Exchange")).toBeNull();
+    expect(screen.queryByText("52wk")).toBeNull();
+    expect(screen.queryByText("Volume")).toBeNull();
+    // No price/change treatment when collapsed:
+    expect(document.body.textContent).not.toContain("▲");
+    expect(document.body.textContent).not.toContain("▼");
+  });
+
+  it("expanding via the caret reveals the full grid and price/change row, and persists the choice", () => {
+    const { stockDetail, linkGroups, onConfigChange } = renderPanel();
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.AAPL", { changePct: 5.2 })));
+      linkGroups.focus("green", "US.AAPL");
+    });
+    fireEvent.click(screen.getByRole("button", { name: /toggle fundamentals/i }));
+
+    expect(screen.getByText("Mkt cap")).toBeTruthy();
+    expect(screen.getByText("Exchange")).toBeTruthy();
+    expect(screen.getByText("Volume")).toBeTruthy();
+    expect(document.body.textContent).toContain("▲ 5.20%");
+    expect(onConfigChange).toHaveBeenCalledWith({ detailsCollapsed: false });
+  });
+
+  it("mounting with a persisted detailsCollapsed: false renders expanded without any interaction", () => {
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.MSFT")));
+      linkGroups.focus("green", "US.MSFT");
+    });
+    expect(screen.getByText("Mkt cap")).toBeTruthy();
+  });
+
+  it("collapsed row shows a bare dash (not N/A) for empty industry, null free float, and null EMA 200", () => {
+    const { stockDetail, linkGroups } = renderPanel();
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.MSFT", { industry: "", floatShares: null, ema200: null })));
+      linkGroups.focus("green", "US.MSFT");
+    });
+    expect(screen.queryByText(/N\/A/i)).toBeNull();
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3); // industry + float + ema200
   });
 });
 
