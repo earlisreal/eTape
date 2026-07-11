@@ -25,6 +25,21 @@ execution spec: venues, two-layer gate, TZ + Alpaca v1, moomoo v1.x).
     auto-starting the next phase (still don't jump from an approved spec into writing
     a plan unprompted), and it does **not** mean pushing — pushing stays a separate,
     explicit step.
+- **Default to subagent-driven execution in a worktree.** When executing an approved
+  implementation plan (or a batch of independent tasks) and Earl hasn't said how,
+  default to `superpowers:subagent-driven-development` with the work running in an
+  isolated git worktree (`superpowers:using-git-worktrees`) — don't edit the main
+  checkout inline. Earl runs many parallel sessions against shared checkouts, so
+  worktree isolation is the safe default. Trivial one-offs (a typo, a single-line
+  fix) may stay inline, and Earl can always override per task.
+- **Auto-merge the worktree branch back to `main` when clean.** At the end of such
+  work, if verification passes (tests/build green —
+  `superpowers:verification-before-completion`) and there are no unresolved review
+  problems or merge conflicts, merge the branch back into local `main` automatically,
+  in the same turn, without waiting to be asked
+  (`superpowers:finishing-a-development-branch`). If anything is wrong, stop and
+  surface it instead of merging. As with the auto-commit rule above, **pushing stays
+  a separate, explicit step** — auto-merge is local only.
 
 ## Stack (decided)
 
