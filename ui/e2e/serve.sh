@@ -23,7 +23,7 @@ cat > "$CFG" <<EOF
 db_path = "$DB"
 [uihub]
 host = "127.0.0.1"
-port = 8686
+port = ${ETAPE_UIHUB_PORT:-8686}
 [[venue]]
 id = "sim-paper"
 broker = "sim"
@@ -41,4 +41,4 @@ EOF
 
 echo "e2e: booting engine (replay $DAY, hold)" >&2
 cd "$ENGINE_DIR"
-exec go run ./cmd/etape -config "$CFG" -replay "$DAY" -speed 0 -replay-hold -dist "$UI_DIR/dist"
+exec go run ./cmd/etape -config "$CFG" -replay "$DAY" -speed 0 -replay-hold -no-open -dist "$UI_DIR/dist"

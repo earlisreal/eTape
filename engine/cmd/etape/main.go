@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -86,6 +87,12 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	noOpen := flag.Bool("no-open", false, "do not auto-open the default browser to the UI")
 	logPath := flag.String("log", "", "also write logs to this file")
 	flag.Parse()
+
+	// ETAPE_NO_OPEN suppresses auto-open, same as -no-open, so agent/CI boots
+	// stay headless without every launch path remembering the flag.
+	if v := os.Getenv("ETAPE_NO_OPEN"); v != "" && v != "0" && v != "false" {
+		*noOpen = true
+	}
 
 	// Destination policy: logToStderr and defaultLogPath are supplied by
 	// logdest_tray.go / logdest_default.go (chosen by the "tray" build tag).
@@ -190,6 +197,13 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}
 	if *dist != "" {
 		cfg.UIHub.DistDir = *dist
+	}
+	// ETAPE_UIHUB_PORT isolates an automated boot onto its own port so it
+	// never collides with a user's instance on the default port.
+	if v := os.Getenv("ETAPE_UIHUB_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil && p > 0 {
+			cfg.UIHub.Port = p
+		}
 	}
 	anchorSecs, err := cfg.MD.AnchorSecs()
 	if err != nil {
