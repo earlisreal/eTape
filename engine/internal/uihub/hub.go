@@ -696,6 +696,12 @@ func (h *Hub) stageMD(s staged) {
 			h.broadcast(s, true)
 			return
 		}
+		if s.Batch {
+			// Batch prepend: broadcast now as a delta on the lossless lane.
+			// Keep-latest coalescing would let a later single-bar delta drop it.
+			h.broadcast(s, false)
+			return
+		}
 		h.pendKeep[dedupOf(s)] = s
 	default: // indicator: immediate; Snap decides snapshot vs delta
 		h.broadcast(s, s.Snap)

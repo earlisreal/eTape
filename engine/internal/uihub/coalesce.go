@@ -61,6 +61,9 @@ func outboundCoalesceKey(s staged, snap bool) string {
 	if snap {
 		return ""
 	}
+	if s.Batch {
+		return "" // bars batch-prepend is lossless/ordered; never shed
+	}
 	switch s.Topic {
 	// Latest-wins market data: a slow client only needs the newest value per
 	// symbol (quote/book), per (symbol,timeframe,bucket) bar, or per venue
