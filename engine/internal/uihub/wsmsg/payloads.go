@@ -446,3 +446,16 @@ type TestConnectionResult struct {
 	Message     string        `json:"message"`
 	Accounts    []TestAccount `json:"accounts"`
 }
+
+// ---- replay control (settings/toolbar StartReplay/GoLive commands) ----
+
+// StartReplayArgs selects the recorded day and playback speed for the
+// StartReplay command. Day is a "YYYY-MM-DD" calendar date; Speed is a
+// playback multiplier (0 = as-fast-as-possible, per Task 4's closure).
+type StartReplayArgs struct {
+	Day   string  `json:"day"`
+	Speed float64 `json:"speed"`
+}
+
+// GoLiveArgs is intentionally empty (kept as a named type for tygo stability).
+type GoLiveArgs struct{}
