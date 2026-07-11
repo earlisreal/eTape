@@ -396,24 +396,42 @@ func (o *Orchestrator) loadOlder(ctx context.Context, symbol string) (olderResul
 		from = dailyFloor
 	}
 
-	// Archive-first: if the local archive already has any 1m bars for this
-	// older window, they win outright -- no provider round-trip. A later call
-	// keeps walking further back regardless of whether this batch's coverage
-	// was gapless, so a sparse archive slice never gets stuck.
+	// archiveCoverSlackMs: an archive window counts as "covered" if its earliest
+	// bar is within ~2 trading days of the window start (IPO/holiday gaps aside).
+	// The archive is written by 3 independent call sites (tail1m, fill1m,
+	// loadOlder) with no completeness metadata, so a sparse/stale slice inside a
+	// requested window is a real scenario, not a contrived one -- without this
+	// check, advanceWatermark below would move the watermark to `from` even
+	// though the returned bars don't actually reach that far back, permanently
+	// and silently skipping the real gap (no future call ever re-requests it).
+	const archiveCoverSlackMs = 2 * 24 * 60 * 60 * 1000
+
+	// Archive-first: if the local archive already covers this older window
+	// (earliest returned bar within slack of `from`), it wins outright -- no
+	// provider round-trip.
 	if bars, err := o.archive.ReadBars1m(symbol, from.UnixMilli(), cur-1); err != nil {
 		slog.Warn("load older: archive read failed", "symbol", symbol, "err", err)
-	} else if len(bars) > 0 {
+	} else if len(bars) > 0 && bars[0].BucketMs <= from.UnixMilli()+archiveCoverSlackMs {
 		o.seedOlderUnlessCanceled(ctx, symbol, bars)
 		o.advanceWatermark(symbol, from.UnixMilli())
 		return olderResult{added: len(bars), exhausted: from.UnixMilli() <= floorMs}, nil
 	}
+	// Archive didn't cover the window (empty, or covers only a newer slice) --
+	// fall through to the provider chain for the full [from, to) window.
 
 	// Provider chain.
 	bars, served, err := walkChain(ctx, symbol, from, to, o.intraday, intraday1m)
 	if len(bars) == 0 {
-		// No archive coverage AND no chain data: floor or pre-listing reached.
+		if err != nil {
+			// Every provider genuinely errored (transient failure, not "no
+			// more history exists") -- don't advance past this window so a
+			// retry re-attempts the same [from, to) instead of skipping it.
+			return olderResult{}, err
+		}
+		// No archive coverage AND no chain data, with no error: floor or
+		// pre-listing reached.
 		o.advanceWatermark(symbol, from.UnixMilli())
-		return olderResult{exhausted: true}, err
+		return olderResult{exhausted: true}, nil
 	}
 	o.archive1m(bars)
 	o.seedOlderUnlessCanceled(ctx, symbol, bars)
@@ -463,7 +481,15 @@ func (o *Orchestrator) loadOlderDaily(ctx context.Context, symbol string) (older
 	floorMs := dailyFloor.UnixMilli()
 
 	// Archive-first: if the archive already holds pre-2016 daily (e.g. from a
-	// prior session's one-shot), re-seed those instead of re-fetching.
+	// prior session's one-shot), re-seed those instead of re-fetching. This
+	// only checks "any bar below floor exists", not depth of coverage, so a
+	// provider that silently truncated a prior pre-2016 fetch could look
+	// "done" here -- accepted as-is: a proper fix needs either persisted
+	// completeness metadata (a schema change the plan's Global Constraints
+	// disallow) or dropping archive-first here (which would contradict the
+	// plan's "previously-explored depth re-serves from the archive instantly,
+	// across restarts" decision), and the same unverified-completeness
+	// characteristic already exists, unfixed, in fillDaily's boot path.
 	if all, err := o.archive.ReadDailyBars(symbol); err != nil {
 		slog.Warn("load older daily: archive read failed", "symbol", symbol, "err", err)
 	} else if len(all) > 0 && all[0].BucketMs < floorMs {
