@@ -19,7 +19,7 @@ type wsSocket interface {
 }
 
 type commandHandler interface {
-	handle(ctx context.Context, name string, args json.RawMessage, connID uint64) wsmsg.AckMsg
+	handle(ctx context.Context, name string, args json.RawMessage, connID uint64, reply func(wsmsg.AckMsg)) (wsmsg.AckMsg, bool)
 }
 
 type queryHandler interface {
@@ -313,10 +313,15 @@ func (c *conn) dispatch(ctx context.Context, b []byte) {
 			c.hub.Unsubscribe(c, head.Topic)
 		}
 	case "command":
-		ack := c.cmd.handle(ctx, head.Name, head.Args, c.nid)
-		ack.Kind = "ack"
-		ack.CorrID = head.CorrID
-		c.enqueueJSON(ack)
+		send := func(ack wsmsg.AckMsg) {
+			ack.Kind = "ack"
+			ack.CorrID = head.CorrID
+			c.enqueueJSON(ack)
+		}
+		ack, deferred := c.cmd.handle(ctx, head.Name, head.Args, c.nid, send)
+		if !deferred {
+			send(ack)
+		}
 	case "query":
 		payload := c.qry.handle(head.Name, head.Args)
 		c.enqueueJSON(wsmsg.ResultMsg{Kind: "result", CorrID: head.CorrID, Payload: payload})

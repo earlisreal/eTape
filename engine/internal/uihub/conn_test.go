@@ -63,9 +63,27 @@ func (s *fakeSocket) writes() [][]byte {
 
 type fakeCmd struct{ last string }
 
-func (f *fakeCmd) handle(_ context.Context, name string, _ json.RawMessage, _ uint64) wsmsg.AckMsg {
+func (f *fakeCmd) handle(_ context.Context, name string, _ json.RawMessage, _ uint64, _ func(wsmsg.AckMsg)) (wsmsg.AckMsg, bool) {
 	f.last = name
-	return wsmsg.AckMsg{Kind: "ack", Status: "accepted", OrderID: "ET9"}
+	return wsmsg.AckMsg{Kind: "ack", Status: "accepted", OrderID: "ET9"}, false
+}
+
+// deferredCmd is a minimal commandHandler double for exercising the
+// deferred-ack contract added in Task 6: handle() calls reply itself (from a
+// goroutine, simulating async work finishing after handle already returned)
+// and reports deferred=true alongside a deliberately wrong "returned" ack, so
+// a test can prove dispatch never sends that returned value -- only reply's
+// ack reaches the client. No production command uses deferred=true yet
+// (Task 7's LoadOlderBars will be the first); this double stands in for it.
+type deferredCmd struct {
+	replyAck wsmsg.AckMsg
+	last     string
+}
+
+func (f *deferredCmd) handle(_ context.Context, name string, _ json.RawMessage, _ uint64, reply func(wsmsg.AckMsg)) (wsmsg.AckMsg, bool) {
+	f.last = name
+	go reply(f.replyAck)
+	return wsmsg.AckMsg{Kind: "ack", Status: "SHOULD_NOT_BE_SENT", OrderID: "WRONG"}, true
 }
 
 type fakeQuery struct{}
@@ -120,6 +138,51 @@ func TestConnCommandProducesAck(t *testing.T) {
 		return false
 	})
 	if cmd.last != "SubmitOrder" {
+		t.Fatalf("command not dispatched: %q", cmd.last)
+	}
+}
+
+// TestConnCommandDeferredAckSendsReplyNotReturnedAck is the missing coverage
+// for Task 6's deferred-ack contract at the dispatch level: when handle
+// returns deferred=true (having already called reply itself, here from a
+// goroutine), dispatch must NOT send the ack value handle returned -- only
+// the ack passed to reply must reach the client, and exactly once. This is
+// what proves conn.dispatch's `if !deferred { send(ack) }` guard (conn.go)
+// actually works, not just that it compiles.
+func TestConnCommandDeferredAckSendsReplyNotReturnedAck(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	sock := newFakeSocket()
+	cmd := &deferredCmd{replyAck: wsmsg.AckMsg{Status: "accepted", OrderID: "DEFERRED1"}}
+	c := newConn(1, sock, h, cmd, fakeQuery{}, 8, time.Second)
+	go c.run(ctx)
+
+	sock.in <- []byte(`{"kind":"command","corrId":"c1","name":"LoadOlderBars","args":{}}`)
+	waitFor(t, func() bool { return len(sock.writes()) > 0 })
+	// Give the (deliberately absent, in dispatch's correct behavior) second
+	// send a moment to show up before asserting there is exactly one ack.
+	time.Sleep(20 * time.Millisecond)
+
+	var acks []map[string]any
+	for _, w := range sock.writes() {
+		var m map[string]any
+		_ = json.Unmarshal(w, &m)
+		if m["kind"] == "ack" {
+			acks = append(acks, m)
+		}
+	}
+	if len(acks) != 1 {
+		t.Fatalf("expected exactly one ack frame, got %d: %v", len(acks), acks)
+	}
+	got := acks[0]
+	if got["corrId"] != "c1" || got["status"] != "accepted" || got["orderId"] != "DEFERRED1" {
+		t.Fatalf("ack must be reply's content, not handle's returned (deferred) ack: %v", got)
+	}
+	if cmd.last != "LoadOlderBars" {
 		t.Fatalf("command not dispatched: %q", cmd.last)
 	}
 }
