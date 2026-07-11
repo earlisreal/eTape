@@ -16,6 +16,18 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
 )
 
+// mustJSON marshals v to a json.RawMessage, failing the test on error. Used
+// by tests that build handle's args from a typed wsmsg struct rather than a
+// hand-written JSON literal.
+func mustJSON(t *testing.T, v any) json.RawMessage {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	return b
+}
+
 type spyExec struct {
 	last exec.Command
 	ack  exec.CmdAck
@@ -259,6 +271,7 @@ type spyDemandCtl struct {
 		conn uint64
 		id   string
 	}
+	loadOlderFn func(symbol string, daily bool, done func(added int, exhausted bool, err error))
 }
 
 func (s *spyDemandCtl) EnsureDemand(conn uint64, d feed.Demand) {
@@ -274,6 +287,14 @@ func (s *spyDemandCtl) ReleaseDemand(conn uint64, id string) {
 	}{conn, id})
 }
 
+func (s *spyDemandCtl) LoadOlder(symbol string, daily bool, done func(added int, exhausted bool, err error)) {
+	if s.loadOlderFn != nil {
+		s.loadOlderFn(symbol, daily, done)
+		return
+	}
+	done(0, true, nil) // default stub: nothing to fetch (mirrors the Hub's nil-slot fallback)
+}
+
 func newCmdWith(t *testing.T, feedErr error, feedNil bool) (*commands, *spyDemandCtl, *spyCmdFeed) {
 	t.Helper()
 	dem := &spyDemandCtl{}
@@ -283,6 +304,69 @@ func newCmdWith(t *testing.T, feedErr error, feedNil bool) (*commands, *spyDeman
 		getter = func() Feed { return nil }
 	}
 	return newCommands(nil, nil, nil, dem, &spyVenueAdmin{}, getter, &spyVenueTester{}), dem, sf
+}
+
+// TestLoadOlderBarsDeferredAckAccepted is Task 7's first real exercise of the
+// deferred-ack contract commands.handle grew in Task 6: LoadOlderBars must
+// return deferred=true immediately (no synchronous ack) and only invoke the
+// reply callback once demandCtl.LoadOlder's done callback fires -- here,
+// asynchronously, mirroring how the real Hub path calls done from its own
+// goroutine after the injected fetcher returns.
+func TestLoadOlderBarsDeferredAckAccepted(t *testing.T) {
+	cd, dem, _ := newCmdWith(t, nil, false)
+	dem.loadOlderFn = func(_ string, _ bool, done func(added int, exhausted bool, err error)) {
+		go done(19000, false, nil) // async, as the real Hub path is
+	}
+	var got wsmsg.AckMsg
+	done := make(chan struct{})
+	ack, deferred := cd.handle(context.Background(), "LoadOlderBars", mustJSON(t, wsmsg.LoadOlderBarsArgs{Symbol: "US.AAPL"}), 1,
+		func(a wsmsg.AckMsg) { got = a; close(done) })
+	if !deferred {
+		t.Fatalf("want deferred=true, got ack=%+v", ack)
+	}
+	<-done
+	if got.Status != "accepted" {
+		t.Fatalf("want accepted, got %+v", got)
+	}
+	v, ok := got.Value.(wsmsg.LoadOlderResult)
+	if !ok || v.Added != 19000 || v.Exhausted {
+		t.Fatalf("want LoadOlderResult{19000,false}, got %+v", got.Value)
+	}
+}
+
+// TestLoadOlderBarsErrorBlocks covers demandCtl.LoadOlder reporting an error
+// (e.g. no backfill watermark yet, or every provider in the chain failed):
+// the deferred ack must still land, with status "blocked" and a reason.
+func TestLoadOlderBarsErrorBlocks(t *testing.T) {
+	cd, dem, _ := newCmdWith(t, nil, false)
+	dem.loadOlderFn = func(_ string, _ bool, done func(added int, exhausted bool, err error)) {
+		done(0, false, errors.New("no watermark"))
+	}
+	var got wsmsg.AckMsg
+	_, deferred := cd.handle(context.Background(), "LoadOlderBars", mustJSON(t, wsmsg.LoadOlderBarsArgs{Symbol: "US.AAPL"}), 1,
+		func(a wsmsg.AckMsg) { got = a })
+	if !deferred || got.Status != "blocked" || got.Reason == "" {
+		t.Fatalf("want deferred blocked ack with a reason, got deferred=%v ack=%+v", deferred, got)
+	}
+}
+
+// TestLoadOlderBarsNoFetchSurfaceExhausted models the Hub's loadOlderSlot
+// never having been set (replay, or backfill disabled with no fallback
+// orchestrator): spyDemandCtl's default stub (dem.loadOlderFn left nil) calls
+// done(0, true, nil), and the command must still deliver a deferred accepted
+// ack reporting Exhausted, not hang or block.
+func TestLoadOlderBarsNoFetchSurfaceExhausted(t *testing.T) {
+	cd, _, _ := newCmdWith(t, nil, false)
+	var got wsmsg.AckMsg
+	_, deferred := cd.handle(context.Background(), "LoadOlderBars", mustJSON(t, wsmsg.LoadOlderBarsArgs{Symbol: "US.AAPL"}), 1,
+		func(a wsmsg.AckMsg) { got = a })
+	if !deferred || got.Status != "accepted" {
+		t.Fatalf("want deferred accepted ack, got deferred=%v ack=%+v", deferred, got)
+	}
+	v, ok := got.Value.(wsmsg.LoadOlderResult)
+	if !ok || !v.Exhausted {
+		t.Fatalf("want Exhausted=true, got %+v", got.Value)
+	}
 }
 
 func TestEnsureSymbol_AcceptsAndMapsWatch(t *testing.T) {
