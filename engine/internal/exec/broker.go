@@ -9,6 +9,7 @@ type Capabilities struct {
 	FlattenAll       bool // Alpaca DELETE /v2/positions only
 	OvernightSession bool // Alpaca (Blue Ocean), moomoo (OVERNIGHT); TZ false
 	ResetBalance     bool // sim only — a real venue's account can't be reset
+	MarketOutsideRTH bool // sim only — real brokers require limits outside RTH
 }
 
 // Broker is the per-venue adapter contract. One instance per configured venue;

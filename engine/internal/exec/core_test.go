@@ -186,9 +186,10 @@ func TestCoreAppendFailureBlocksSubmit(t *testing.T) {
 // implements every exec.Broker method faithfully (the compiler enforces all
 // of them); only Capabilities and Flatten do anything interesting.
 type capStub struct {
-	flatten      bool // value Capabilities().FlattenAll reports
-	resetBalance bool // value Capabilities().ResetBalance reports
-	overnight    bool // value Capabilities().OvernightSession reports
+	flatten          bool // value Capabilities().FlattenAll reports
+	resetBalance     bool // value Capabilities().ResetBalance reports
+	overnight        bool // value Capabilities().OvernightSession reports
+	marketOutsideRTH bool // value Capabilities().MarketOutsideRTH reports
 
 	mu          sync.Mutex
 	called      bool
@@ -200,7 +201,7 @@ type capStub struct {
 var _ exec.Broker = (*capStub)(nil)
 
 func (c *capStub) Capabilities() exec.Capabilities {
-	return exec.Capabilities{FlattenAll: c.flatten, ResetBalance: c.resetBalance, OvernightSession: c.overnight}
+	return exec.Capabilities{FlattenAll: c.flatten, ResetBalance: c.resetBalance, OvernightSession: c.overnight, MarketOutsideRTH: c.marketOutsideRTH}
 }
 
 func (c *capStub) SubmitOrder(context.Context, exec.OrderRequest) (exec.OrderAck, error) {
@@ -282,9 +283,15 @@ func (c *capStub) resetBalanceCalled() bool {
 // real sim.Broker (which always reports FlattenAll:true). startingBalance may
 // be nil (tests that don't exercise ResetBalance amounts).
 func buildCoreWith(t *testing.T, b *capStub, startingBalance map[exec.VenueID]float64) (*exec.Core, *capStub) {
+	return buildCoreWithClock(t, b, startingBalance, clock.NewFake(time.UnixMilli(1_700_000_000_000)))
+}
+
+// buildCoreWithClock is buildCoreWith with an explicit clock, so a test can
+// place the Core inside or outside RTH (the default fake clock, 2023-11-14
+// 17:13 ET, is PostMarket).
+func buildCoreWithClock(t *testing.T, b *capStub, startingBalance map[exec.VenueID]float64, clk *clock.Fake) (*exec.Core, *capStub) {
 	t.Helper()
 	b.ev = make(chan exec.BrokerEvent)
-	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
 	st, err := store.Open(store.Options{Path: filepath.Join(t.TempDir(), "e.db"), Clock: clk})
 	if err != nil {
 		t.Fatal(err)
@@ -311,6 +318,26 @@ func buildCoreWith(t *testing.T, b *capStub, startingBalance map[exec.VenueID]fl
 	go func() { _ = c.Run(ctx) }()
 	t.Cleanup(cancel)
 	return c, b
+}
+
+// submitSettledMarket retries cm until the risk gate stops reporting a missing
+// mark. FeedMark is async (keep-latest, drop-on-full) over an unbuffered cmds
+// channel, so a mark fed just before the submit may not be folded into the
+// Core's mark map yet; "no mark to value market order" is the observable signal
+// that it hasn't. Bounded; every pre-mark attempt is a harmless blocked order.
+func submitSettledMarket(t *testing.T, c *exec.Core, cm exec.SubmitOrder) exec.CmdAck {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for {
+		ack := c.Do(cm)
+		if ack.Reason != "no mark to value market order" {
+			return ack
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("mark never applied to the Core (last ack %+v)", ack)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }
 
 // drainUntilOrderFilled reads Updates until it sees an OrderUpdate for
@@ -671,5 +698,56 @@ func TestCore_SubmitOrder_NonOvernightSessions_NeverCapabilityBlocked(t *testing
 		// next iteration's waitFor-free assertions above.
 		waitFor(t, c, func(u exec.Update) bool { _, ok := u.(exec.FillUpdate); return ok })
 		waitFor(t, c, func(u exec.Update) bool { _, ok := u.(exec.PositionUpdate); return ok })
+	}
+}
+
+const marketOutsideRTHReason = "market order outside regular hours (UI converts these to marketable limits)"
+
+// A raw MARKET reaching the engine outside RTH on a venue whose broker does not
+// support it must be loudly blocked (Alpaca would otherwise silently queue it
+// to the next open). 2023-11-14 22:00 UTC = 17:00 ET (Tue) → PostMarket.
+func TestCore_SubmitOrder_MarketOutsideRTH_BlockedOnRealVenue(t *testing.T) {
+	post := clock.NewFake(time.Date(2023, 11, 14, 22, 0, 0, 0, time.UTC))
+	c, _ := buildCoreWithClock(t, &capStub{}, nil, post)
+	c.Do(exec.Arm{})
+	c.FeedMark(exec.Mark{Symbol: "AAPL", Price: 100})
+	ack := submitSettledMarket(t, c, exec.SubmitOrder{
+		Venue: "v", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, TIF: exec.TIFDay, Qty: 10,
+	})
+	if ack.Accepted || ack.Reason != marketOutsideRTHReason {
+		t.Fatalf("raw MARKET outside RTH on a non-capable venue must block, got %+v", ack)
+	}
+	u := waitFor(t, c, func(u exec.Update) bool { _, ok := u.(exec.OrderUpdate); return ok })
+	if u.(exec.OrderUpdate).Order.Status != exec.StatusBlocked {
+		t.Fatalf("expected blocked order update, got %+v", u)
+	}
+}
+
+// During RTH the same raw MARKET must NOT hit the backstop — it is accepted on a
+// non-capable venue. 2023-11-14 15:00 UTC = 10:00 ET (Tue) → RTH.
+func TestCore_SubmitOrder_MarketDuringRTH_NotBackstopped(t *testing.T) {
+	rth := clock.NewFake(time.Date(2023, 11, 14, 15, 0, 0, 0, time.UTC))
+	c, _ := buildCoreWithClock(t, &capStub{}, nil, rth)
+	c.Do(exec.Arm{})
+	c.FeedMark(exec.Mark{Symbol: "AAPL", Price: 100})
+	ack := submitSettledMarket(t, c, exec.SubmitOrder{
+		Venue: "v", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, TIF: exec.TIFDay, Qty: 10,
+	})
+	if !ack.Accepted {
+		t.Fatalf("MARKET during RTH must not be capability-blocked, got %+v", ack)
+	}
+}
+
+// A sim (capable) venue is exempt: a MARKET outside RTH is accepted and fills
+// off the seeded book (replay/practice sessions run at night by definition).
+func TestCore_SubmitOrder_MarketOutsideRTH_SimExempt(t *testing.T) {
+	c, _, _ := newTestCore(t, "sim-1") // default fake clock = PostMarket (outside RTH)
+	c.Do(exec.Arm{})
+	c.FeedMark(exec.Mark{Symbol: "AAPL", Price: 100})
+	ack := submitSettledMarket(t, c, exec.SubmitOrder{
+		Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, TIF: exec.TIFDay, Qty: 10,
+	})
+	if !ack.Accepted {
+		t.Fatalf("MARKET outside RTH on a sim venue must be accepted (exempt), got %+v", ack)
 	}
 }

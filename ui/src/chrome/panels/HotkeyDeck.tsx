@@ -65,7 +65,10 @@ export function HotkeyDeck(
       {deckTemplates.map((t) => (
         <button key={t.id} type="button" data-testid={`deck-${t.id}`} className={deckToneClass(t)}
           onClick={() => fireTemplate(
-            t, { venue, symbol, quote, buyingPower, positionQty, armed: false, nowMs: Date.now() },
+            t, {
+              venue, symbol, quote, buyingPower, positionQty, armed: false, nowMs: Date.now(),
+              extHoursMarketBufferPct: config.extHoursMarketBufferPct ?? 1,
+            },
             oc, toast, { gateArm: false },
           )}
           style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>

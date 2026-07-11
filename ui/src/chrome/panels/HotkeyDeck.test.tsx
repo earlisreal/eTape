@@ -100,6 +100,7 @@ describe("HotkeyDeck — click dispatch (real fireTemplate/resolvePlaceTemplate)
     fireEvent.click(screen.getByTestId("deck-buy-ask"));
     const expected = resolvePlaceTemplate(t, {
       venue: "alpaca-paper", symbol: "US.AAPL", quote: QUOTE, buyingPower: 100_000, positionQty: 0, nowMs: 0,
+      extHoursMarketBufferPct: 1,
     });
     expect(oc.submit).toHaveBeenCalledTimes(1);
     expect(oc.submit).toHaveBeenCalledWith(expected.args, expected.flash);

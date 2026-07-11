@@ -168,6 +168,7 @@ describe("BackupSection", () => {
       expect(props.onImportOrderConfig).toHaveBeenCalledWith({
         templates: [{ ...importedTemplates[0], id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" }],
         activeVenue: props.orderConfig.activeVenue,
+        extHoursMarketBufferPct: 1,
       });
       expect(props.toast.push).toHaveBeenCalledWith(expect.objectContaining({ level: "info" }));
     });
@@ -236,6 +237,7 @@ describe("BackupSection", () => {
       expect(props.onImportOrderConfig).toHaveBeenCalledWith({
         templates: [{ ...importedTemplates[0], id: "dddddddd-dddd-dddd-dddd-dddddddddddd" }],
         activeVenue: props.orderConfig.activeVenue,
+        extHoursMarketBufferPct: 1,
       });
     });
 
@@ -278,6 +280,7 @@ describe("BackupSection", () => {
       expect(props.onImportOrderConfig).toHaveBeenCalledWith({
         templates: [{ ...importedTemplates[0], id: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee" }],
         activeVenue: props.orderConfig.activeVenue,
+        extHoursMarketBufferPct: 1,
       });
     });
   });

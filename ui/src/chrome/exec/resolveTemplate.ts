@@ -11,6 +11,7 @@ import { sideLabel, bareSymbol, abbrevType } from "./orderStatus";
 export interface ResolveContext {
   venue: VenueID; symbol: string; quote: Quote;
   buyingPower: number; positionQty: number; nowMs: number;
+  extHoursMarketBufferPct: number;
 }
 export interface ResolvedPlace { args: SubmitOrderArgs; flash: string; preCheck: PreCheckResult }
 
@@ -22,7 +23,7 @@ export function resolvePlaceTemplate(t: PlaceOrderTemplate, ctx: ResolveContext)
     limitPrice: t.type === "MARKET" ? 0 : price,
     stopPrice: t.type === "STOP" || t.type === "STOP_LIMIT" ? price : 0,
   };
-  const pc = preCheck(draft, ctx.quote.last, ctx.nowMs);
+  const pc = preCheck(draft, ctx.quote, ctx.nowMs, ctx.extHoursMarketBufferPct);
   const o = pc.order;
   const args: SubmitOrderArgs = {
     venue: ctx.venue, symbol: ctx.symbol, side: o.side, type: o.type, tif: o.tif, session: o.session,

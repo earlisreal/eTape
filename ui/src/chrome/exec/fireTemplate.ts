@@ -15,6 +15,7 @@ import type { ToastApi } from "../Toast";
 export interface FireContext {
   venue: VenueID; symbol: string; quote?: Quote | undefined;
   buyingPower: number; positionQty: number; armed: boolean; nowMs: number;
+  extHoursMarketBufferPct: number;
 }
 
 export function fireTemplate(
@@ -30,6 +31,7 @@ export function fireTemplate(
     const r = resolvePlaceTemplate(t, {
       venue: ctx.venue, symbol: ctx.symbol, quote: ctx.quote,
       buyingPower: ctx.buyingPower, positionQty: ctx.positionQty, nowMs: ctx.nowMs,
+      extHoursMarketBufferPct: ctx.extHoursMarketBufferPct,
     });
     for (const n of r.preCheck.notices) toast.push({ level: "warn", text: n });
     if (!r.preCheck.ok) { toast.push({ level: "danger", text: r.preCheck.errors.join(" ") }); return; }

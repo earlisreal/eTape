@@ -32,6 +32,7 @@ function baseCtx(overrides: Partial<FireContext> = {}): FireContext {
   return {
     venue: "alpaca-paper", symbol: "US.AAPL", quote: QUOTE,
     buyingPower: 100_000, positionQty: 0, armed: true, nowMs: RTH_NOW,
+    extHoursMarketBufferPct: 1,
     ...overrides,
   };
 }
@@ -84,7 +85,7 @@ describe("fireTemplate — place templates", () => {
   it("surfaces preCheck notices as warn toasts and, on failure, joined errors as a danger toast; does not submit", () => {
     const oc = makeOc();
     const toast = makeToast();
-    // MARKET outside RTH -> coercion notice; Shares:0 -> qty error (ok:false).
+    // MARKET outside RTH -> marketable-limit conversion notice; Shares:0 -> qty error (ok:false).
     const t: PlaceOrderTemplate = {
       kind: "place", id: "mkt-0", label: "Market 0",
       side: "BUY", type: "MARKET", tif: "DAY",
@@ -92,7 +93,7 @@ describe("fireTemplate — place templates", () => {
       sizing: { mode: "Shares", shares: 0 },
     };
     fireTemplate(t, baseCtx({ nowMs: NOT_RTH_NOW }), oc, toast, { gateArm: false });
-    expect(toast.push).toHaveBeenCalledWith({ level: "warn", text: expect.stringContaining("coerced to Limit") });
+    expect(toast.push).toHaveBeenCalledWith({ level: "warn", text: expect.stringContaining("Limit @") });
     expect(toast.push).toHaveBeenCalledWith({ level: "danger", text: "Quantity must be greater than 0." });
     expect(oc.submit).not.toHaveBeenCalled();
   });
