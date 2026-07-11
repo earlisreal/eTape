@@ -136,6 +136,13 @@ input.numfield { -moz-appearance: textfield; appearance: textfield; }
 .side-buy { border-color: var(--up); color: var(--up); background: rgba(23,122,88,.08); }
 .side-sell { border-color: var(--down); color: var(--down); background: rgba(194,51,77,.08); }
 
+/* Hotkey deck tones (Task 3): explicit deckColor overrides, plus the neutral/
+   danger tones the deck's own auto-fallback uses for management templates
+   (KillSwitch => danger, everything else manage => neutral). */
+.side-bronze  { border-color: var(--accent); color: var(--accent); background: rgba(154,106,27,.08); }
+.side-neutral { border-color: var(--border-strong); color: var(--text); background: var(--surface); }
+.side-danger  { border-color: var(--danger); color: var(--danger); background: rgba(168,30,48,.06); }
+
 /* Focused panel — bronze ring + tinted header (Task 12 toggles .panel-focused). */
 .panel-focused { outline: 2px solid var(--accent); outline-offset: -2px; }
 .panel-focused .ledger-header { background: rgba(154,106,27,.07); }

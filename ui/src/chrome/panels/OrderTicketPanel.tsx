@@ -17,6 +17,7 @@ import { useOpenSettings } from "../OpenSettingsContext";
 import { StepperInput } from "./StepperInput";
 import { PanelHeaderActionsSlotContext } from "./headerSlot";
 import { IconGear } from "./tv/tvIcons";
+import { HotkeyDeck } from "./HotkeyDeck";
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
@@ -180,6 +181,11 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
         {SIDES.map((s) => (
           <button key={s} type="button" data-testid={`side-${s}`} className={sideTone(s)} onClick={() => submitManual(s)}>{s}</button>
         ))}
+      </div>
+      {/* Strip 5 — hotkey deck: user-configured preset buttons (Settings › Orders & hotkeys) */}
+      <div style={{ borderTop: `1px solid ${palette.border}`, paddingTop: 6 }}>
+        <HotkeyDeck venue={venue} symbol={symbol} quote={quote} buyingPower={buyingPower} positionQty={positionQty}
+          oc={oc} toast={toast} onOpenSettings={() => openSettings?.openOrderSettings()} />
       </div>
     </div>
   );
