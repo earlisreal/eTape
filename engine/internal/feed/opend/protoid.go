@@ -35,13 +35,13 @@ const (
 	ProtoQotGetUSOvernightRank    uint32 = 3412
 	ProtoQotGetTopMoversRank      uint32 = 3413
 
-	// Trade push protocols (5xxx range). The feed connection never sends Trd_* protos,
+	// Trade push protocols (2xxx range). The feed connection never sends Trd_* protos,
 	// but the shared pushProtoIDs map is consulted by any opend.Client reader loop
 	// (including the future trade-only connection). These need to be registered so
 	// the trade client's reader reliably routes them to Pushes() instead of the
 	// resolve-miss fallback.
-	ProtoTrdUpdateOrder     uint32 = 2208
-	ProtoTrdUpdateOrderFill uint32 = 2218
+	ProtoTrdUpdateOrder     uint32 = 2208 // push
+	ProtoTrdUpdateOrderFill uint32 = 2218 // push
 )
 
 // pushProtoIDs are server-initiated update protocols. A frame with one of
@@ -55,7 +55,7 @@ var pushProtoIDs = map[uint32]struct{}{
 	ProtoQotUpdateTicker:    {},
 	ProtoQotUpdateOrderBook: {},
 
-	// Trade pushes (5xxx range): included here so the trade client's reader loop
+	// Trade pushes (2xxx range): included here so the trade client's reader loop
 	// (which uses the same opend.Client and pushProtoIDs map) reliably routes them.
 	ProtoTrdUpdateOrder:     {},
 	ProtoTrdUpdateOrderFill: {},
