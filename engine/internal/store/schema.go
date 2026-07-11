@@ -15,6 +15,15 @@ CREATE TABLE IF NOT EXISTS journal (
   payload TEXT    NOT NULL,   -- JSON of the whole feed.Event struct
   PRIMARY KEY (day, seq)
 );
+CREATE TABLE IF NOT EXISTS journal_chunks (
+  day       TEXT    NOT NULL,   -- ET trading day, same domain as journal.day
+  chunk_no  INTEGER NOT NULL,   -- 0-based within the day
+  first_seq INTEGER NOT NULL,
+  last_seq  INTEGER NOT NULL,
+  n_rows    INTEGER NOT NULL,
+  body      BLOB    NOT NULL,   -- zstd frame of JSONL-encoded rows
+  PRIMARY KEY (day, chunk_no)
+);
 CREATE TABLE IF NOT EXISTS bars_1m (
   symbol TEXT NOT NULL, ts INTEGER NOT NULL,
   o REAL, h REAL, l REAL, c REAL, v INTEGER,
