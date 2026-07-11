@@ -103,7 +103,7 @@ func New(venue exec.VenueID, clk clock.Clock, startingCash float64, opts Options
 }
 
 func (b *Broker) Capabilities() exec.Capabilities {
-	return exec.Capabilities{NativeReplace: true, FlattenAll: true, OvernightSession: false, ResetBalance: true}
+	return exec.Capabilities{NativeReplace: true, FlattenAll: true, OvernightSession: false, ResetBalance: true, MarketOutsideRTH: true}
 }
 
 func (b *Broker) Events() <-chan exec.BrokerEvent { return b.ev }
