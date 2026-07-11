@@ -29,12 +29,16 @@ function fakeFacade() {
   const created: Array<{ kind: string; pane: number; options: unknown; series: ReturnType<typeof fakeSeries> }> = [];
   const scaleMargins: Array<{ id: string; margins: { top: number; bottom: number } }> = [];
   const stretchFactors = new Map<number, number>();
+  let visibleRange: { from: number; to: number } | null = null;
+  const setVisibleRangeCalls: Array<{ from: number; to: number }> = [];
   const facade: ChartApiFacade & { created: typeof created; scrolls: number; resets: number; priceResets: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins }
     & { mainKind: string; screenshots: number; crosshairCb: ((l: number | null) => void) | null }
-    & { watermark: string | null; lastOptions: unknown; stretchFactors: typeof stretchFactors } = {
+    & { watermark: string | null; lastOptions: unknown; stretchFactors: typeof stretchFactors }
+    & { visibleRange: typeof visibleRange; setVisibleRangeCalls: typeof setVisibleRangeCalls } = {
     created, scrolls: 0, resets: 0, priceResets: 0, bands: 0, lastBands: [], scaleMargins,
     mainKind: "", screenshots: 0, crosshairCb: null,
     watermark: null, lastOptions: null, stretchFactors,
+    visibleRange, setVisibleRangeCalls,
     setMainSeries: (kind, o) => { const s = fakeSeries(); created.push({ kind, pane: 0, options: o, series: s }); facade.mainKind = kind; return s; },
     takeScreenshot: () => { facade.screenshots++; return {} as unknown as HTMLCanvasElement; },
     subscribeCrosshairMove: (cb) => { facade.crosshairCb = cb; return () => { facade.crosshairCb = null; }; },
@@ -56,6 +60,8 @@ function fakeFacade() {
     scrollToRealTime: () => { facade.scrolls++; },
     resetTimeScale: () => { facade.resets++; },
     resetPriceScale: () => { facade.priceResets++; },
+    getVisibleRange: () => visibleRange,
+    setVisibleRange: (r) => { setVisibleRangeCalls.push(r); visibleRange = r; },
     resize: () => {},
     applyOptions: (o) => { facade.lastOptions = o; },
     setWatermark: (t) => { facade.watermark = t; },

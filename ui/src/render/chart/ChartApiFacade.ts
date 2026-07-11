@@ -46,5 +46,7 @@ export interface ChartApiFacade {
   paneStretchFactor(paneIndex: number): number;       // relative pane size (LWC default 1) — collapse/expand
   setPaneStretchFactor(paneIndex: number, factor: number): void;
   priceScaleWidth(): number;                          // right-axis width — insets per-pane header controls
+  getVisibleRange(): { from: number; to: number } | null;  // visible time range (UTC seconds)
+  setVisibleRange(range: { from: number; to: number }): void;
   remove(): void;
 }

@@ -80,6 +80,12 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     scrollToRealTime: () => chart.timeScale().scrollToRealTime(),
     resetTimeScale: () => chart.timeScale().resetTimeScale(),
     resetPriceScale: () => chart.priceScale("right").applyOptions({ autoScale: true }),
+    getVisibleRange: () => {
+      const r = chart.timeScale().getVisibleRange();
+      return r ? { from: r.from as unknown as number, to: r.to as unknown as number } : null;
+    },
+    setVisibleRange: (range) =>
+      chart.timeScale().setVisibleRange({ from: range.from as unknown as Time, to: range.to as unknown as Time }),
     resize: (w, h) => chart.resize(w, h),
     applyOptions: (o) => chart.applyOptions(o as object),
     setWatermark: (text) => {
