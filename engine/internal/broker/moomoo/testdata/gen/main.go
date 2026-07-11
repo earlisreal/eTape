@@ -2,18 +2,31 @@
 // from the engine module root) hand-crafts the synthetic golden-frame fixtures
 // for moomoo's two trade push protocols, Trd_UpdateOrder (2208) and
 // Trd_UpdateOrderFill (2218), used by internal/broker/moomoo's
-// TestGoldenTrdUpdateOrderPushesDecode/TestGoldenTrdUpdateOrderFillPushesDecode.
+// TestPushDecoder_OrderPushGoldenFrames/TestPushDecoder_FillPushGoldenFrames.
 //
-// There is no live OpenD trade connection to capture these from at this point
-// in the plan (Task 4) -- Task 7 supersedes testdata/golden/trd_update_order.jsonl
-// with a real paper capture and Task 8 supersedes trd_update_orderfill.jsonl with
-// a real live capture, dropped in at the exact same file paths with zero test
-// code changes (the decode logic under test must not care which source produced
-// the bytes it's fed). This generator is committed for reproducibility/
-// documentation of exactly how these fixtures were built; it is not part of any
-// normal build (it lives under a "testdata" directory, which the go tool always
-// ignores for ./... package patterns) and is not expected to run again once the
-// real captures land.
+// There was no live OpenD trade connection to capture these from at this point
+// in the plan (Task 4). Task 7 has now superseded testdata/golden/trd_update_order.jsonl
+// with a real paper capture (engine/scripts/capture_golden_frames.py's
+// capture_trd_paper/--trd-paper) -- NOT with zero test code changes as originally
+// expected here: a single real order only produces a handful of real pushes
+// (no TimeOut/resubmit-dedup/PartiallyFilled/Rejected scenarios on demand), so
+// TestPushDecoder_OrderPushGoldenFrames was rewritten to match the real fixture's
+// actual (smaller) shape, and those now-uncovered edge cases were preserved as
+// TestPushDecoder_OrderPushEdgeCases via a new hcOrderPush() helper that builds
+// the same *trdupdateorder.Response literals this generator used to write to
+// disk, directly in Go. TestPushDecoder_FillPushGoldenFrames also had to stop
+// borrowing its OrderA seed from trd_update_order.jsonl (now a real, unrelated
+// order) and construct it via hcOrderPush() instead -- Task 8, expect the same
+// class of issue when superseding trd_update_orderfill.jsonl (2218 is LIVE-only,
+// still hand-crafted here): a real live capture will not naturally reproduce the
+// multi-fill/dedup/unknown-correlation narrative below either.
+//
+// This generator is committed for reproducibility/documentation of exactly how
+// trd_update_orderfill.jsonl (and, historically, trd_update_order.jsonl) was
+// built; it is not part of any normal build (it lives under a "testdata"
+// directory, which the go tool always ignores for ./... package patterns) and
+// is not expected to run again for trd_update_order.jsonl now that Task 7 has
+// landed a real capture there.
 //
 // Output format mirrors engine/internal/feed/opend/golden_test.go's goldenFrame
 // struct exactly (proto_id, direction, serial_no, body_len, frame_hex, body_hex)

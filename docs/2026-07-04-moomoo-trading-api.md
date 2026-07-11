@@ -1,8 +1,18 @@
 # eTape — moomoo Trading API Research
 
 **Date:** 2026-07-04
-**Status:** Research complete. moomoo approved as third execution venue (adapter built in
-v1.x) per `docs/superpowers/specs/2026-07-04-multi-broker-execution-design.md`.
+**Status:** Research complete. moomoo approved as third execution venue per
+`docs/superpowers/specs/2026-07-04-multi-broker-execution-design.md`. **Update
+2026-07-11: the `broker/moomoo` adapter is now implemented and wired in**
+(opend trade-push routing, wire↔domain mapping, `trdClient`, push decoding,
+the `exec.Broker` adapter, and boot/config/`venueprobe` wiring — moomoo-broker-exec
+plan Tasks 1–6). A real paper (SIMULATE) `Trd_UpdateOrder` (2208) golden-frame
+corpus has since been captured from a live OpenD paper order and superseded
+the hand-crafted Task 4 fixture (Task 7) — see
+`engine/scripts/capture_golden_frames.py`'s `capture_trd_paper`/`--trd-paper`
+and `engine/internal/broker/moomoo/testdata/golden/`. Authorized live
+validation (real fills, since paper still can't produce them) is Task 8,
+gated on Earl's go-ahead and not yet run.
 **Sources:** official docs `https://openapi.moomoo.com/moomoo-api-doc/en/trade/…` +
 installed Python SDK 10.8.6808 (`moomoo/common/pb/Trd_*.proto`, `moomoo/trade/*.py`,
 `moomoo/common/constant.py:72–94`) + project skill docs

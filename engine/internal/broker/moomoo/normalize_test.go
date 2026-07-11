@@ -16,25 +16,37 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
+	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/trdcommon"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/trdupdateorder"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/trdupdateorderfill"
 )
 
-// Expected content of the hand-crafted fixtures written by
-// testdata/gen/main.go -- kept here as literals (not imported: the generator
-// is package main, and its constants describe fixture INPUT, which is frozen
-// wire bytes once written) so a reviewer can see exactly what each assertion
-// expects without cross-referencing the generator. If Task 7/8 supersede
-// testdata/golden/trd_update_order.jsonl or trd_update_orderfill.jsonl with a
-// real capture, these tests -- and these literals -- get superseded too.
-const (
-	testVenue = exec.VenueID("moomoo")
+const testVenue = exec.VenueID("moomoo")
 
-	goldenRemarkA   = "ET01J9Z4KZ8N3H6VXG2Q7T5WYCMF" // AAPL buy limit
-	goldenOrderIDA  = uint64(620193847)
-	goldenRemarkB   = "ET01J9Z4M8QNVD2K7H4RTXWG3BPS" // MSFT buy limit
-	goldenRemarkC   = "ET01J9Z4NPXQ7VD4K2H8RTWG6MBS" // TSLA buy limit
-	goldenRejectMsg = "Insufficient buying power"
+// Task 7: identifies the REAL order captured by
+// engine/scripts/capture_golden_frames.py's capture_trd_paper into
+// testdata/golden/trd_update_order.jsonl -- one tiny (1 share), far-from-
+// market US.F paper (SIMULATE) limit order, placed then cancelled. Its
+// account id was redacted before commit (public repo); order id and remark
+// are not account-identifying and are kept as captured. This REAL fixture
+// supersedes Task 4's hand-crafted one at the same file path -- see
+// TestPushDecoder_OrderPushGoldenFrames.
+const (
+	goldenRemark  = "ET7CAPTURE"
+	goldenOrderID = uint64(8476557239106489402)
+)
+
+// Fill pushes (2218) are LIVE-only, so testdata/golden/trd_update_orderfill.jsonl
+// is still Task 4's hand-crafted fixture (Task 8 supersedes it with a real
+// LIVE capture). These identify the specific hand-crafted "OrderA" that file
+// correlates against -- testdata/gen/main.go's orderIDA/remarkA. Now that
+// trd_update_order.jsonl is a real, unrelated order, TestPushDecoder_FillPushGoldenFrames
+// can no longer borrow its correlation seed from that file, so
+// hcOrderPush() below re-derives, in Go, the one order-push fact it needs
+// from that same hand-crafted identity.
+const (
+	handCraftedOrderIDA = uint64(620193847)
+	handCraftedRemarkA  = "ET01J9Z4KZ8N3H6VXG2Q7T5WYCMF"
 )
 
 // goldenFrame mirrors engine/internal/feed/opend/golden_test.go's goldenFrame
@@ -118,85 +130,156 @@ func decodeFillPushFrame(t *testing.T, g goldenFrame) *trdupdateorderfill.Respon
 	return &resp
 }
 
-// TestPushDecoder_OrderPushGoldenFrames walks the 7 hand-crafted
-// Trd_UpdateOrder (2208) golden frames in order through one shared
-// pushDecoder, covering: an Accepted transition, a TimeOut push that must
-// leave lastKnownStatus untouched, a repeated push at the SAME domain status
-// producing no event (proving the TimeOut push above really didn't clobber
-// anything), a genuine PartiallyFilled transition that still produces no
-// event (2208 never signals fills), a second order's Accepted->Canceled
-// transition, and a straight-to-Rejected transition carrying LastErrMsg
-// through as Reason.
+// TestPushDecoder_OrderPushGoldenFrames walks the 3 REAL Trd_UpdateOrder
+// (2208) golden frames captured (Task 7) from one live OpenD paper
+// (SIMULATE) order's actual full lifecycle -- see
+// engine/scripts/capture_golden_frames.py's capture_trd_paper: a 1-share
+// US.F limit placed far below market, then cancelled. This is the real-wire
+// proof that Task 4's own design goal holds ("decoding logic must not depend
+// on which source produced the fixture"): the same pushDecoder that passed
+// against Task 4's hand-crafted frames also passes against a real capture.
+//
+// The real order's own status sequence was Submitting(2) -> Submitted(5) ->
+// Cancelled_All(15): statusDomain maps Submitting to StatusSubmitted (no
+// one-shot BrokerEvent), so frame 0 produces no event -- the transition to
+// domain Accepted only happens at frame 1 (Submitted), and the transition to
+// domain Canceled at frame 2 (Cancelled_All).
 func TestPushDecoder_OrderPushGoldenFrames(t *testing.T) {
 	frames := loadGoldenFrames(t, "trd_update_order.jsonl")
-	if len(frames) != 7 {
-		t.Fatalf("expected 7 golden order-push frames, got %d", len(frames))
+	if len(frames) != 3 {
+		t.Fatalf("expected 3 golden order-push frames, got %d", len(frames))
 	}
 	p := newPushDecoder()
 
-	// Frame 0: OrderA Submitted (wire) -> domain Accepted.
-	evs := p.decodeOrderPush(testVenue, decodeOrderPushFrame(t, frames[0]))
+	// Frame 0: Submitting (wire) -> domain StatusSubmitted -- no one-shot
+	// BrokerEvent, but lastKnownStatus must now be tracked as StatusSubmitted.
+	if evs := p.decodeOrderPush(testVenue, decodeOrderPushFrame(t, frames[0])); evs != nil {
+		t.Fatalf("frame 0 (Submitting): got %d events, want 0: %+v", len(evs), evs)
+	}
+
+	// Frame 1: Submitted (wire) -> domain StatusAccepted, a genuine
+	// transition from StatusSubmitted -> exec.OrderAccepted.
+	evs := p.decodeOrderPush(testVenue, decodeOrderPushFrame(t, frames[1]))
 	if len(evs) != 1 {
-		t.Fatalf("frame 0: got %d events, want 1: %+v", len(evs), evs)
+		t.Fatalf("frame 1: got %d events, want 1: %+v", len(evs), evs)
 	}
 	acc, ok := evs[0].(exec.OrderAccepted)
 	if !ok {
-		t.Fatalf("frame 0: got %T, want exec.OrderAccepted", evs[0])
+		t.Fatalf("frame 1: got %T, want exec.OrderAccepted", evs[0])
 	}
-	if acc.V != testVenue || acc.OID != goldenRemarkA || acc.BrokerOrderID != fmt.Sprint(goldenOrderIDA) {
-		t.Fatalf("frame 0: unexpected OrderAccepted %+v", acc)
+	if acc.V != testVenue || acc.OID != goldenRemark || acc.BrokerOrderID != fmt.Sprint(goldenOrderID) {
+		t.Fatalf("frame 1: unexpected OrderAccepted %+v", acc)
 	}
 	if acc.Ts == 0 {
-		t.Fatal("frame 0: Ts should not be 0 (fixture sets a non-zero UpdateTimestamp)")
+		t.Fatal("frame 1: Ts should not be 0 (the real fixture carries a non-zero UpdateTimestamp)")
 	}
 
-	// Frame 1: OrderA TimeOut -> no event, and must not clobber lastKnownStatus.
-	if evs := p.decodeOrderPush(testVenue, decodeOrderPushFrame(t, frames[1])); evs != nil {
-		t.Fatalf("frame 1 (TimeOut): got %d events, want 0: %+v", len(evs), evs)
-	}
-
-	// Frame 2: OrderA Submitted again (same domain status as frame 0) -> no
-	// event. If frame 1's TimeOut had incorrectly overwritten
-	// lastKnownStatus, this would wrongly look like a fresh transition and
-	// emit a second OrderAccepted here.
-	if evs := p.decodeOrderPush(testVenue, decodeOrderPushFrame(t, frames[2])); evs != nil {
-		t.Fatalf("frame 2 (resubmit, same status): got %d events, want 0: %+v", len(evs), evs)
-	}
-
-	// Frame 3: OrderA Filled_Part -> a genuine NEW status transition
-	// (Accepted -> PartiallyFilled) that must STILL produce no event: 2208
-	// never signals Filled/PartiallyFilled, that's exclusively 2218's job.
-	if evs := p.decodeOrderPush(testVenue, decodeOrderPushFrame(t, frames[3])); evs != nil {
-		t.Fatalf("frame 3 (PartiallyFilled): got %d events, want 0: %+v", len(evs), evs)
-	}
-
-	// Frame 4: OrderB Submitted -> Accepted.
-	evs = p.decodeOrderPush(testVenue, decodeOrderPushFrame(t, frames[4]))
+	// Frame 2: Cancelled_All (wire) -> domain StatusCanceled, a genuine
+	// transition from StatusAccepted -> exec.OrderCanceled.
+	evs = p.decodeOrderPush(testVenue, decodeOrderPushFrame(t, frames[2]))
 	if len(evs) != 1 {
-		t.Fatalf("frame 4: got %d events, want 1: %+v", len(evs), evs)
-	}
-	if accB, ok := evs[0].(exec.OrderAccepted); !ok || accB.OID != goldenRemarkB {
-		t.Fatalf("frame 4: unexpected event %+v (%T)", evs[0], evs[0])
-	}
-
-	// Frame 5: OrderB Cancelled_All -> Canceled.
-	evs = p.decodeOrderPush(testVenue, decodeOrderPushFrame(t, frames[5]))
-	if len(evs) != 1 {
-		t.Fatalf("frame 5: got %d events, want 1: %+v", len(evs), evs)
+		t.Fatalf("frame 2: got %d events, want 1: %+v", len(evs), evs)
 	}
 	can, ok := evs[0].(exec.OrderCanceled)
-	if !ok || can.OID != goldenRemarkB || can.V != testVenue {
-		t.Fatalf("frame 5: unexpected event %+v (%T)", evs[0], evs[0])
+	if !ok || can.OID != goldenRemark || can.V != testVenue {
+		t.Fatalf("frame 2: unexpected event %+v (%T)", evs[0], evs[0])
+	}
+}
+
+// hcOrderPush hand-constructs a *trdupdateorder.Response directly in Go
+// (not via a captured golden frame) for order-push scenarios a live OpenD
+// paper capture cannot reliably reproduce on demand: TimeOut, a same-status
+// resubmit, a partial fill, or an outright rejection. Ported from
+// testdata/gen/main.go's now-retired baseOrder/orderResp helpers (that
+// generator produced the fixture file this replaces; these scenarios still
+// need coverage, just not sourced from a wire-frame JSONL file anymore).
+func hcOrderPush(orderID uint64, remark, code, name string, qty, price float64, status trdcommon.OrderStatus, updateTs float64) *trdupdateorder.Response {
+	return &trdupdateorder.Response{
+		RetType: proto.Int32(0), // RetType_RetType_Succeed
+		S2C: &trdupdateorder.S2C{
+			Header: &trdcommon.TrdHeader{
+				TrdEnv:    proto.Int32(int32(trdcommon.TrdEnv_TrdEnv_Simulate)),
+				AccID:     proto.Uint64(28881234), // placeholder, same as testdata/gen/main.go's genAccID
+				TrdMarket: proto.Int32(int32(trdcommon.TrdMarket_TrdMarket_US)),
+			},
+			Order: &trdcommon.Order{
+				TrdSide:         proto.Int32(int32(trdcommon.TrdSide_TrdSide_Buy)),
+				OrderType:       proto.Int32(int32(trdcommon.OrderType_OrderType_Normal)),
+				OrderStatus:     proto.Int32(int32(status)),
+				OrderID:         proto.Uint64(orderID),
+				OrderIDEx:       proto.String(fmt.Sprint(orderID)),
+				Code:            proto.String(code),
+				Name:            proto.String(name),
+				Qty:             proto.Float64(qty),
+				Price:           proto.Float64(price),
+				CreateTime:      proto.String("2026-07-11 09:31:05"),
+				UpdateTime:      proto.String("2026-07-11 09:31:05"),
+				UpdateTimestamp: proto.Float64(updateTs),
+				Remark:          proto.String(remark),
+			},
+		},
+	}
+}
+
+// TestPushDecoder_OrderPushEdgeCases covers the same scenarios Task 4's
+// hand-crafted trd_update_order.jsonl used to (via hcOrderPush, since that
+// file is now a real capture -- see TestPushDecoder_OrderPushGoldenFrames):
+// a TimeOut push that must leave lastKnownStatus untouched, a repeated push
+// at the SAME domain status producing no event (proving the TimeOut push
+// above really didn't clobber anything), a genuine PartiallyFilled
+// transition that still produces no event (2208 never signals fills), and a
+// straight-to-Rejected transition carrying LastErrMsg through as Reason.
+func TestPushDecoder_OrderPushEdgeCases(t *testing.T) {
+	const (
+		orderID = handCraftedOrderIDA
+		remark  = handCraftedRemarkA
+	)
+	p := newPushDecoder()
+
+	// Submitted -> Accepted, establishing a last-known-good status.
+	evs := p.decodeOrderPush(testVenue, hcOrderPush(orderID, remark, "AAPL", "Apple Inc.", 100, 150.25, trdcommon.OrderStatus_OrderStatus_Submitted, 1))
+	if len(evs) != 1 {
+		t.Fatalf("Submitted: got %d events, want 1: %+v", len(evs), evs)
+	}
+	if _, ok := evs[0].(exec.OrderAccepted); !ok {
+		t.Fatalf("Submitted: got %T, want exec.OrderAccepted", evs[0])
 	}
 
-	// Frame 6: OrderC straight to SubmitFailed -> Rejected, LastErrMsg carried as Reason.
-	evs = p.decodeOrderPush(testVenue, decodeOrderPushFrame(t, frames[6]))
+	// TimeOut -> no event, and must not clobber lastKnownStatus.
+	if evs := p.decodeOrderPush(testVenue, hcOrderPush(orderID, remark, "AAPL", "Apple Inc.", 100, 150.25, trdcommon.OrderStatus_OrderStatus_TimeOut, 2)); evs != nil {
+		t.Fatalf("TimeOut: got %d events, want 0: %+v", len(evs), evs)
+	}
+
+	// Submitted again (same domain status as before) -> no event. If the
+	// TimeOut push above had incorrectly overwritten lastKnownStatus, this
+	// would wrongly look like a fresh transition and emit a second
+	// OrderAccepted here.
+	if evs := p.decodeOrderPush(testVenue, hcOrderPush(orderID, remark, "AAPL", "Apple Inc.", 100, 150.25, trdcommon.OrderStatus_OrderStatus_Submitted, 3)); evs != nil {
+		t.Fatalf("resubmit (same status): got %d events, want 0: %+v", len(evs), evs)
+	}
+
+	// Filled_Part -> a genuine NEW status transition (Accepted ->
+	// PartiallyFilled) that must STILL produce no event: 2208 never signals
+	// Filled/PartiallyFilled, that's exclusively 2218's job.
+	if evs := p.decodeOrderPush(testVenue, hcOrderPush(orderID, remark, "AAPL", "Apple Inc.", 100, 150.25, trdcommon.OrderStatus_OrderStatus_Filled_Part, 4)); evs != nil {
+		t.Fatalf("PartiallyFilled: got %d events, want 0: %+v", len(evs), evs)
+	}
+
+	// A second, unrelated order, straight to SubmitFailed -> Rejected, with
+	// LastErrMsg carried through as Reason.
+	const (
+		orderID2 = uint64(620193861)
+		remark2  = "ET01J9Z4NPXQ7VD4K2H8RTWG6MBS"
+	)
+	rejResp := hcOrderPush(orderID2, remark2, "TSLA", "Tesla Inc.", 20, 250.00, trdcommon.OrderStatus_OrderStatus_SubmitFailed, 5)
+	rejResp.S2C.Order.LastErrMsg = proto.String("Insufficient buying power")
+	evs = p.decodeOrderPush(testVenue, rejResp)
 	if len(evs) != 1 {
-		t.Fatalf("frame 6: got %d events, want 1: %+v", len(evs), evs)
+		t.Fatalf("Rejected: got %d events, want 1: %+v", len(evs), evs)
 	}
 	rej, ok := evs[0].(exec.OrderRejected)
-	if !ok || rej.OID != goldenRemarkC || rej.Reason != goldenRejectMsg {
-		t.Fatalf("frame 6: unexpected event %+v (%T)", evs[0], evs[0])
+	if !ok || rej.OID != remark2 || rej.Reason != "Insufficient buying power" {
+		t.Fatalf("Rejected: unexpected event %+v (%T)", evs[0], evs[0])
 	}
 }
 
@@ -223,7 +306,6 @@ func TestPushDecoder_UnknownOrderPushIsIgnored(t *testing.T) {
 // seen via any order push producing no event and no panic -- both BEFORE and
 // AFTER the decoder has learned about a different, unrelated order.
 func TestPushDecoder_FillPushGoldenFrames(t *testing.T) {
-	orderFrames := loadGoldenFrames(t, "trd_update_order.jsonl")
 	fillFrames := loadGoldenFrames(t, "trd_update_orderfill.jsonl")
 	if len(fillFrames) != 4 {
 		t.Fatalf("expected 4 golden fill-push frames, got %d", len(fillFrames))
@@ -237,9 +319,14 @@ func TestPushDecoder_FillPushGoldenFrames(t *testing.T) {
 		t.Fatalf("unknown-correlation fill (pre-seed): got %d events, want 0: %+v", len(evs), evs)
 	}
 
-	// Learn OrderA's numeric OrderID -> (domain OID, total qty) via its first
-	// order push (frame 0 of trd_update_order.jsonl -- Qty=100).
-	if evs := p.decodeOrderPush(testVenue, decodeOrderPushFrame(t, orderFrames[0])); len(evs) != 1 {
+	// Learn OrderA's numeric OrderID -> (domain OID, total qty=100) via a
+	// hand-constructed order push carrying testdata/gen/main.go's exact
+	// OrderA identity (see the handCraftedOrderIDA/handCraftedRemarkA
+	// doc comment above) -- trd_update_order.jsonl is a real, unrelated
+	// capture now (Task 7), so this seed can no longer be borrowed from that
+	// file the way it could when both files were hand-crafted together.
+	seed := hcOrderPush(handCraftedOrderIDA, handCraftedRemarkA, "AAPL", "Apple Inc.", 100, 150.25, trdcommon.OrderStatus_OrderStatus_Submitted, 1)
+	if evs := p.decodeOrderPush(testVenue, seed); len(evs) != 1 {
 		t.Fatalf("seeding OrderA's order push: got %d events, want 1", len(evs))
 	}
 
@@ -252,7 +339,7 @@ func TestPushDecoder_FillPushGoldenFrames(t *testing.T) {
 	if !ok {
 		t.Fatalf("fill 1: got %T, want exec.OrderFilled", evs[0])
 	}
-	if f1.F.Venue != testVenue || f1.F.OrderID != goldenRemarkA {
+	if f1.F.Venue != testVenue || f1.F.OrderID != handCraftedRemarkA {
 		t.Fatalf("fill 1: unexpected Fill venue/orderID %+v", f1.F)
 	}
 	if f1.F.Symbol != "US.AAPL" {
