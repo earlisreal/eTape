@@ -14,6 +14,7 @@ import { PANELS, type PanelProps } from "./panels/registry";
 import { PRESETS } from "./presets";
 import { TopBar } from "./TopBar";
 import { FeedStatusBanner } from "./FeedStatusBanner";
+import { ReplayBanner } from "./ReplayBanner";
 import { AlpacaBackfillBanner } from "./AlpacaBackfillBanner";
 import { EmptyState } from "./EmptyState";
 import { Catalog } from "./Catalog";
@@ -24,6 +25,7 @@ import { modalTracker } from "./modalTracker";
 import { useTheme } from "./ThemeProvider";
 import { useToasts } from "./Toast";
 import { useOrderCommands } from "./exec/useOrderCommands";
+import { useReplayCommands } from "./exec/useReplayCommands";
 import { useHotkeys } from "./exec/useHotkeys";
 import { useSoundWiring } from "../sound/useSoundWiring";
 import { nextWindowName } from "./windows";
@@ -83,6 +85,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const { mode } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
+  const rc = useReplayCommands(commands);
   // DockviewApi is only available once dockview mounts (i.e. once the workspace
   // has at least one panel — see the empty-state switch below); null otherwise.
   const apiRef = useRef<DockviewApi | null>(null);
@@ -446,6 +449,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             </div>
           )}
         </div>
+        <ReplayBanner session={stores.session} engineState={engineState} onGoLive={async () => { await rc.goLive(); }} />
         <FeedStatusBanner health={stores.health} engineState={engineState} onOpenConnection={onOpenConnection} />
         {showAlpacaHint && <AlpacaBackfillBanner onSetup={openAlpacaSetup} onDismiss={dismissAlpacaHint} />}
         <div style={{ flex: 1, minHeight: 0 }}>
