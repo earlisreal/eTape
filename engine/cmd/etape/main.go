@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"flag"
 	"fmt"
@@ -26,7 +27,6 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/creds"
-	"github.com/earlisreal/eTape/engine/internal/demojournal"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
@@ -43,9 +43,11 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/singleinstance"
 	"github.com/earlisreal/eTape/engine/internal/stockinfo"
 	"github.com/earlisreal/eTape/engine/internal/store"
+	"github.com/earlisreal/eTape/engine/internal/synth"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
 	"github.com/earlisreal/eTape/engine/internal/venueadmin"
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
+	"google.golang.org/protobuf/proto"
 )
 
 // openLogFile opens path for appending, creating both the file and its
@@ -80,9 +82,8 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	speed := flag.Float64("speed", 0, "replay speed (>0: real-time x speed; <=0: as fast as possible)")
 	dist := flag.String("dist", "", "serve built UI from this dir (overrides [uihub].dist_dir)")
 	replayHold := flag.Bool("replay-hold", false, "in replay, keep serving after the journal is exhausted (E2E)")
-	demo := flag.Bool("demo", false, "run a self-contained synthetic replay day, no OpenD/broker required")
-	demoDay := flag.String("demo-day", "2026-01-02", "ET day to stamp when -demo is set")
-	demoSpeed := flag.Float64("demo-speed", 1, "replay speed when -demo is set (0 = as fast as possible)")
+	demo := flag.Bool("demo", false, "run the built-in synthetic demo market (no OpenD/broker needed)")
+	demoSeed := flag.Int64("demo-seed", 0, "PRNG seed for -demo; 0 = random per launch")
 	noOpen := flag.Bool("no-open", false, "do not auto-open the default browser to the UI")
 	logPath := flag.String("log", "", "also write logs to this file")
 	flag.Parse()
@@ -159,13 +160,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			return 1, false
 		}
 		cfg.Store.DBPath = filepath.Join(demoDir, "demo.db")
-		if err := demojournal.Generate(cfg.Store.DBPath, *demoDay); err != nil {
-			log.Error("generate demo journal", "err", err)
-			return 1, false
-		}
-		*replayDay = *demoDay
-		*replayHold = true
-		*speed = *demoSpeed
 	} else {
 		var err error
 		cfg, err = config.Load(*cfgPath)
@@ -231,7 +225,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	var restartRequested atomic.Bool
 	requestRestart := func() { restartRequested.Store(true); stop() }
 
-	live := *replayDay == ""
+	live := *replayDay == "" && !*demo
 	uihubClk := clock.System{}
 	var execClk clock.Clock = clock.System{}
 
@@ -254,7 +248,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 
 	// --- replay clock (execClk) if replaying ---
 	var replayRows []store.JournalRow
-	if !live {
+	if *replayDay != "" {
 		replayRows, err = st.ReadJournalDay(*replayDay)
 		if err != nil || len(replayRows) == 0 {
 			log.Error("replay day unavailable", "day", *replayDay, "err", err, "rows", len(replayRows))
@@ -353,7 +347,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// --- fan-in: md/exec Updates -> hub; mark bridge md -> exec ---
 	var forwardWG sync.WaitGroup
 	forwardWG.Add(1)
-	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, live, st) }()
+	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, live || *demo, st) }()
 	go forwardExec(ctx, execCore, hub)
 
 	// Forward marks + books into every sim broker so submitted orders fill: in
@@ -364,60 +358,94 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// simSinksOf alone selects the right set in either mode.
 	go markBridge(ctx, core, execCore, simSinksOf(vbs))
 
-	// --- feed (live OpenD or replay) ---
+	// --- feed (live OpenD, synthetic demo, or replay) ---
 	var pipeWG sync.WaitGroup
 	var backfillWG sync.WaitGroup
 	var orch *backfill.Orchestrator
 	var scanWG sync.WaitGroup
 	var dropWG sync.WaitGroup
-	var client *opend.Client
-	if live {
+	if live || *demo {
 		if n, err := st.PruneJournal(cfg.Store.RetentionDays); err == nil && n > 0 {
 			log.Info("pruned journal", "rows", n)
 		}
 		st.AppendSysEvent("boot", "engine up")
 		dropWG.Add(1)
 		go watchDroppedUpdates(ctx, &dropWG, core, st)
-		client = opend.New(opend.Options{Addr: cfg.OpenD.Addr(), Clock: clock.System{}})
-		fd := opend.NewOpenDFeed(client, opend.FeedOptions{
-			Budget: cfg.Feed.QuotaSlots, Hysteresis: time.Duration(cfg.Feed.UnsubHysteresisSecs) * time.Second,
-			DisableExtendedTime: !cfg.Feed.ExtendedTime,
-		})
-		hub.SetFeed(fd) // enables on-demand EnsureSymbol/ReleaseSymbol + FocusGroup probe
-		go func() { _ = client.Run(ctx) }()
-		go func() { _ = fd.Run(ctx) }()
-		pipeWG.Add(1)
-		go pipe(ctx, &pipeWG, fd.Events(), core, st)
-		var hubBackfill func(sym string, done func(ok bool))
-		if cfg.Backfill.Enabled {
-			var alpacaSrc *histalpaca.Client
-			if cfg.Backfill.Alpaca.Enabled {
-				if p, label, err := resolveBackfillAlpacaCreds(cfg, credsFile); err == nil {
-					alpacaSrc = histalpaca.New("", p.KeyID, p.SecretKey, cfg.Backfill.Alpaca.Feed, clock.System{})
-					log.Info("backfill: alpaca provider resolved", "from", label, "feed", cfg.Backfill.Alpaca.Feed)
-				} else if errors.Is(err, errAlpacaLiveCreds) {
-					log.Warn("backfill: refusing alpaca-live creds for read-only historical provider", "key", cfg.Backfill.Alpaca.CredsKey)
-				} else {
-					log.Warn("backfill: alpaca provider disabled (no creds)", "key", cfg.Backfill.Alpaca.CredsKey, "err", err)
-				}
-			}
-			moomoo := backfill.MoomooFetcher(fd)
-			var dailyChain, intradayChain []backfill.Source
-			if alpacaSrc != nil {
-				dailyChain = append(dailyChain, backfill.Source{Name: "alpaca", HistFetcher: alpacaSrc})
-				intradayChain = append(intradayChain, backfill.Source{Name: "alpaca", HistFetcher: alpacaSrc})
-			}
-			if cfg.Backfill.Yahoo.Enabled {
-				dailyChain = append(dailyChain, backfill.Source{Name: "yahoo", HistFetcher: histyahoo.New("", clock.System{})})
-			}
-			// moomoo request_history_kline is the quota-guarded last resort in both chains.
-			dailyChain = append(dailyChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
-			intradayChain = append(intradayChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
 
+		// feedForHub/pollReq/mmProbe/demand/tail are the mode-agnostic seams
+		// startPollers and the backfill orchestrator are built from below:
+		// the demo branch fills them from a *synth.Feed/*synth.Requester
+		// (no network, no quota), the live branch from the real OpenD
+		// client/feed exactly as before.
+		var feedForHub uihub.Feed
+		var pollReq pollerRequester
+		var mmProbe rttProber
+		var demand demandFeeder
+		var tail backfill.TailFetcher
+		var dailyChain, intradayChain []backfill.Source
+
+		if *demo {
+			gen := synth.New(demoSeedValue(*demoSeed), clock.System{})
+			gen.Seed(st, clock.System{}.Now().UnixMilli())
+			st.Flush()
+			sf := synth.NewFeed(gen, st, clock.System{})
+			req := synth.NewRequester(gen)
+			go func() { _ = sf.Run(ctx) }()
+			pipeWG.Add(1)
+			go pipe(ctx, &pipeWG, sf.Events(), core, st) // journaling ON into demo.db
+			feedForHub, pollReq, mmProbe = sf, req, req
+			log.Info("engine up (demo synth feed)", "seed", demoSeedValue(*demoSeed), "symbols", gen.Symbols())
+		} else {
+			client := opend.New(opend.Options{Addr: cfg.OpenD.Addr(), Clock: clock.System{}})
+			fd := opend.NewOpenDFeed(client, opend.FeedOptions{
+				Budget: cfg.Feed.QuotaSlots, Hysteresis: time.Duration(cfg.Feed.UnsubHysteresisSecs) * time.Second,
+				DisableExtendedTime: !cfg.Feed.ExtendedTime,
+			})
+			go func() { _ = client.Run(ctx) }()
+			go func() { _ = fd.Run(ctx) }()
+			pipeWG.Add(1)
+			go pipe(ctx, &pipeWG, fd.Events(), core, st)
+			feedForHub, pollReq, mmProbe, demand = fd, client, moomooProbe{c: client}, fd
+
+			if cfg.Backfill.Enabled {
+				var alpacaSrc *histalpaca.Client
+				if cfg.Backfill.Alpaca.Enabled {
+					if p, label, err := resolveBackfillAlpacaCreds(cfg, credsFile); err == nil {
+						alpacaSrc = histalpaca.New("", p.KeyID, p.SecretKey, cfg.Backfill.Alpaca.Feed, clock.System{})
+						log.Info("backfill: alpaca provider resolved", "from", label, "feed", cfg.Backfill.Alpaca.Feed)
+					} else if errors.Is(err, errAlpacaLiveCreds) {
+						log.Warn("backfill: refusing alpaca-live creds for read-only historical provider", "key", cfg.Backfill.Alpaca.CredsKey)
+					} else {
+						log.Warn("backfill: alpaca provider disabled (no creds)", "key", cfg.Backfill.Alpaca.CredsKey, "err", err)
+					}
+				}
+				moomoo := backfill.MoomooFetcher(fd)
+				if alpacaSrc != nil {
+					dailyChain = append(dailyChain, backfill.Source{Name: "alpaca", HistFetcher: alpacaSrc})
+					intradayChain = append(intradayChain, backfill.Source{Name: "alpaca", HistFetcher: alpacaSrc})
+				}
+				if cfg.Backfill.Yahoo.Enabled {
+					dailyChain = append(dailyChain, backfill.Source{Name: "yahoo", HistFetcher: histyahoo.New("", clock.System{})})
+				}
+				// moomoo request_history_kline is the quota-guarded last resort in both chains.
+				dailyChain = append(dailyChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
+				intradayChain = append(intradayChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
+				tail = fd // TailFetcher: OpenDFeed.Tail1m (quota-free Qot_GetKL)
+			}
+		}
+		hub.SetFeed(feedForHub) // enables on-demand EnsureSymbol/ReleaseSymbol + FocusGroup probe
+
+		var hubBackfill func(sym string, done func(ok bool))
+		if cfg.Backfill.Enabled || *demo {
+			// demo: dailyChain/intradayChain/tail are all nil here, so this is
+			// a chain-less orchestrator -- walkChain over a nil chain returns
+			// cleanly (nil,"",nil) and o.tail nil-checks before use -- it
+			// still serves warmStart's archive-first LoadOlder/LoadOlderDaily
+			// against the history Seed already wrote, with no special-casing.
 			orch = backfill.New(
 				dailyChain,
 				intradayChain,
-				fd, // TailFetcher: OpenDFeed.Tail1m (quota-free Qot_GetKL)
+				tail,
 				core,
 				st,
 				clock.System{},
@@ -452,7 +480,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			backfillOne = func(sym string) { hubBackfill(sym, nil) }
 		}
 		hub.SetBackfill(hubBackfill) // chart-open demands also deep-backfill (nil-safe if disabled)
-		startPollers(ctx, cfg, client, fd, hub, uihubClk, st, hasTZVenue(cfg), firstAlpacaProber(vbs), backfillOne, &scanWG)
+		startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, hasTZVenue(cfg), mmProbe, firstAlpacaProber(vbs), backfillOne, !*demo, &scanWG)
 	} else {
 		sim := execClk.(*replay.Clock)
 		fd := replay.NewFeed(replay.FeedOptions{Rows: replayRows, Sim: sim, Pace: clock.System{}, Speed: *speed})
@@ -690,27 +718,69 @@ func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks [
 	}
 }
 
-func startPollers(ctx context.Context, cfg config.Config, client *opend.Client, fd *opend.OpenDFeed, hub *uihub.Hub, clk clock.Clock, st *store.Store, hasTZ bool, alpacaProbe rttProber, backfillOne func(string), scanWG *sync.WaitGroup) {
-	scanPoller := scan.New(cfg.Scan, client, hub, clk, fd, backfillOne)
+// demoSeedValue returns the seed to use: the flag if non-zero, else a random
+// per-launch seed. Kept off the hot path; determinism in tests comes from
+// passing a fixed -demo-seed.
+func demoSeedValue(flagSeed int64) int64 {
+	if flagSeed != 0 {
+		return flagSeed
+	}
+	var b [8]byte
+	_, _ = rand.Read(b[:]) // crypto/rand, imported unaliased as `rand` above
+	return int64(binary.LittleEndian.Uint64(b[:]))
+}
+
+// pollerRequester is the request/response seam scan/news/stockinfo/quota's
+// own local `requester` interfaces already require (identical method set on
+// all four): satisfied by *opend.Client in live/replay and *synth.Requester
+// in -demo, so startPollers doesn't need to know which one it was handed.
+type pollerRequester interface {
+	Request(ctx context.Context, protoID uint32, req proto.Message) (opend.Frame, error)
+}
+
+// demandFeeder is the subscription-control surface the scan pool drives:
+// satisfied by *opend.OpenDFeed in live/replay. In -demo it is left nil
+// (*synth.Feed's Ensure/Release are no-ops -- the synthetic universe
+// simulates every symbol unconditionally), which cleanly disables the pool
+// via scan.go's own `if p.feed == nil { return }` guard -- the same
+// mechanism tests/replay already rely on.
+type demandFeeder interface {
+	Ensure(d feed.Demand)
+	Release(id string)
+}
+
+// startQuota gates the quota poller: false in -demo, since the synthetic
+// requester answers Qot_GetSubInfo with the generic "no data" response
+// rather than a real subscription budget, so tracking it would be noise.
+func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, hasTZ bool, mmProbe rttProber, alpacaProbe rttProber, backfillOne func(string), startQuota bool, scanWG *sync.WaitGroup) {
+	scanPoller := scan.New(cfg.Scan, r, hub, clk, demand, backfillOne)
 	symbols := func() []string {
 		return newsSymbols(scanPoller.PoolSymbols(), hub.ActiveDemandSymbols())
 	}
 	scanWG.Add(1)
 	go func() { defer scanWG.Done(); _ = scanPoller.Run(ctx) }()
-	go func() { _ = news.New(cfg.News, client, hub, clk, symbols).Run(ctx) }()
-	go func() { _ = stockinfo.New(cfg.StockInfo, client, hub, clk, symbols, st).Run(ctx) }()
-	// health: moomoo probe via the OpenD client; app-ping RTT source is nil in v1
+	go func() { _ = news.New(cfg.News, r, hub, clk, symbols).Run(ctx) }()
+	go func() { _ = stockinfo.New(cfg.StockInfo, r, hub, clk, symbols, st).Run(ctx) }()
+	// health: mmProbe is the moomoo probe (real OpenD RTT in live/replay, a
+	// constant synthetic RTT in -demo); app-ping RTT source is nil in v1
 	// (ui-engine shows down until ping tracking is wired). alpacaProbe is the
-	// first configured Alpaca adapter (nil if none), giving the engine-alpaca
-	// link the same reachability-RTT treatment as moomoo. The health poller's
-	// sys.events are also persisted by main via a store hook if desired.
-	quotaPoller := quota.New(quota.Config{
-		SubWarnHeadroom: cfg.Feed.QuotaWarnHeadroom,
-		HistWarnRemain:  cfg.Feed.HistQuotaWarnRemain,
-	}, client, hub, clk)
-	go func() { _ = quotaPoller.Run(ctx) }()
+	// first configured Alpaca adapter (nil if none -- which is always the
+	// case in -demo/replay, since buildBrokers forces every venue to sim
+	// there and sim.Broker doesn't implement rttProber), giving the
+	// engine-alpaca link the same reachability-RTT treatment as moomoo. The
+	// health poller's sys.events are also persisted by main via a store hook
+	// if desired.
+	var qsrc health.QuotaSource
+	if startQuota {
+		quotaPoller := quota.New(quota.Config{
+			SubWarnHeadroom: cfg.Feed.QuotaWarnHeadroom,
+			HistWarnRemain:  cfg.Feed.HistQuotaWarnRemain,
+		}, r, hub, clk)
+		go func() { _ = quotaPoller.Run(ctx) }()
+		qsrc = quotaPoller
+	}
 	go func() {
-		_ = health.New(cfg.Health, hub, clk, moomooProbe{c: client}, nil, hasTZ, alpacaProbe, quotaPoller).Run(ctx)
+		_ = health.New(cfg.Health, hub, clk, mmProbe, nil, hasTZ, alpacaProbe, qsrc).Run(ctx)
 	}()
 }
 

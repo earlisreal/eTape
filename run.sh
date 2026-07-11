@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Convenience launcher for eTape. Three modes:
 #   live  - real engine against ~/.eTape/config.toml (live OpenD feed + venues)
-#   demo  - real engine against a synthetic replay day (no OpenD/broker needed)
+#   demo  - real engine against a live built-in synthetic market (no OpenD/broker needed)
 #   dev   - mock WS engine + Vite dev server, hot reload for UI work
 set -euo pipefail
 
@@ -20,10 +20,14 @@ Modes:
                      args are passed through to the engine, e.g.:
                        ./run.sh live -no-open -log /tmp/etape.log
 
-  demo [DAY] [SPEED] Build the UI, generate a synthetic replay day, and run
-                     the engine against it. No OpenD or broker required.
-                     DAY defaults to 2026-01-02. SPEED defaults to 1
-                     (real-time); use 0 to replay as fast as possible.
+  demo [SEED]        Build the UI, then run the engine against its
+                     built-in, self-seeding synthetic market -- a live
+                     feed over a fictional universe, no OpenD or broker
+                     required, no journal to pre-generate. SEED is an
+                     optional PRNG seed (omit for a random seed per
+                     launch). Extra args are passed through to the
+                     engine, e.g.:
+                       ./run.sh demo -no-open
 
   dev [FIXTURE]      Run the mock WS engine + Vite dev server with hot
                      reload, for UI iteration. FIXTURE selects a
@@ -32,7 +36,7 @@ Modes:
 Examples:
   ./run.sh live
   ./run.sh demo
-  ./run.sh demo 2026-01-02 0
+  ./run.sh demo 42
   ./run.sh dev ladder-tape
 EOF
 }
@@ -50,42 +54,24 @@ case "$mode" in
     ;;
 
   demo)
-    day="${1:-2026-01-02}"
-    speed="${2:-1}"
-    work="$(mktemp -d)"
-    db="$work/demo.db"
-    cfg="$work/demo.toml"
+    # Optional leading positional SEED (any non-flag first arg); everything
+    # else (e.g. -no-open, -log ...) passes through to the engine untouched.
+    seed=""
+    if [ $# -gt 0 ] && [[ "$1" != -* ]]; then
+      seed="$1"
+      shift
+    fi
 
     echo "run.sh: building UI bundle" >&2
     (cd "$UI_DIR" && npm run build)
 
-    echo "run.sh: generating synthetic journal ($db)" >&2
-    (cd "$ENGINE_DIR" && go run ./cmd/genjournal -db "$db" -day "$day")
-
-    cat > "$cfg" <<EOF
-[store]
-db_path = "$db"
-[uihub]
-host = "127.0.0.1"
-port = 8686
-[[venue]]
-id = "sim-paper"
-broker = "sim"
-env = "paper"
-[gate.global]
-max_day_loss = 100000
-max_symbol_position_value = 100000
-max_symbol_position_shares = 100000
-[gate.venue.sim-paper]
-max_order_value = 100000
-max_position_value = 100000
-max_position_shares = 100000
-max_open_orders = 50
-EOF
-
-    echo "run.sh: booting engine (replay $day, speed $speed) -- open http://127.0.0.1:8686" >&2
+    echo "run.sh: booting engine (demo synthetic market) -- open http://127.0.0.1:8686" >&2
     cd "$ENGINE_DIR"
-    exec go run ./cmd/etape -config "$cfg" -replay "$day" -speed "$speed" -replay-hold -dist "$UI_DIR/dist"
+    if [ -n "$seed" ]; then
+      exec go run ./cmd/etape -dist "$UI_DIR/dist" -demo -demo-seed "$seed" "$@"
+    else
+      exec go run ./cmd/etape -dist "$UI_DIR/dist" -demo "$@"
+    fi
     ;;
 
   dev)
