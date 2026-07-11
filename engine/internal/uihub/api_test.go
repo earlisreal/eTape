@@ -25,6 +25,8 @@ func (apiStores) ExportFills(context.Context, string, int64, int64) ([]exec.Expo
 	return nil, nil
 }
 
+func (apiStores) JournalDays() ([]string, error) { return nil, nil }
+
 type apiInd struct{}
 
 func (apiInd) EnsureIndicator(string, md.IndicatorSpec) {}

@@ -22,6 +22,7 @@ type Stores interface {
 	SetConfig(key, value string)
 	QueryFills(symbol string, fromMs, toMs int64) ([]exec.FillRow, error)
 	ExportFills(ctx context.Context, venue string, fromMs, toMs int64) ([]exec.ExportFillRow, error)
+	JournalDays() ([]string, error)
 }
 
 // Indicators is the md.Core surface uihub needs (satisfied by *md.Core).
@@ -105,7 +106,7 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	cmd.restart = requestRestart
 	cmd.startReplay = startReplay
 	cmd.goLive = goLive
-	qry := newQueries(st, clk)
+	qry := newQueries(st, st, clk)
 	srv := NewServer(h, cmd, qry, ServerConfig{DistDir: cfg.DistDir, OutBuf: cfg.OutBuf})
 	return h, srv
 }
