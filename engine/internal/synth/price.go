@@ -114,7 +114,13 @@ func stepPrice(rng *rand.Rand, spec SymbolSpec, ps *priceState, nowMs, dtMs int6
 	noise := rng.NormFloat64() * spec.Vol * math.Sqrt(dtSec)
 	ps.Mid *= 1 + (drift+noise)/100
 
-	ps.Mid += (ps.Anchor - ps.Mid) * reversion(ps.Reg) * dtSec
+	// Exponential (not linear-Euler) mean-reversion: stable for any dtSec.
+	// For small dtSec, exp(-rate*dtSec) ~= 1-rate*dtSec, so this matches the
+	// original linear formula in the live-path small-step regime; for large
+	// dtSec (e.g. Task 9's day-scale coarse history seeding) it converges
+	// Mid smoothly to Anchor instead of overshooting past it.
+	decay := math.Exp(-reversion(ps.Reg) * dtSec)
+	ps.Mid = ps.Anchor + (ps.Mid-ps.Anchor)*decay
 	ps.Anchor *= 1 + rng.NormFloat64()*0.0002
 
 	ps.Mid = math.Round(ps.Mid*100) / 100
