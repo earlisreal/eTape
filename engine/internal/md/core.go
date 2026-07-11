@@ -35,6 +35,10 @@ type seedHistory1mMsg struct {
 	symbol string
 	bars   []feed.Bar
 }
+type seedOlder1mMsg struct {
+	symbol string
+	bars   []feed.Bar
+}
 type seedSessionTicksMsg struct {
 	symbol string
 	ticks  []feed.Tick
@@ -45,6 +49,7 @@ func (ensureIndicatorMsg) isInMsg()  {}
 func (releaseIndicatorMsg) isInMsg() {}
 func (seedDailyMsg) isInMsg()        {}
 func (seedHistory1mMsg) isInMsg()    {}
+func (seedOlder1mMsg) isInMsg()      {}
 func (seedSessionTicksMsg) isInMsg() {}
 
 // Core is the single-writer market-data state machine.
@@ -119,6 +124,14 @@ func (c *Core) SeedHistory1m(symbol string, bars []feed.Bar) {
 	c.inbox <- seedHistory1mMsg{symbol: symbol, bars: bars}
 }
 
+// SeedOlder1m enqueues a strictly-older chunk of 1m bars (a pan-triggered
+// deeper-history load). It upserts into the existing series, cascades into
+// 5m/15m/30m/60m, and emits one BarPrepend per intraday timeframe carrying
+// only the newly-added older bars — never a full BarSnapshot re-emit.
+func (c *Core) SeedOlder1m(symbol string, bars []feed.Bar) {
+	c.inbox <- seedOlder1mMsg{symbol: symbol, bars: bars}
+}
+
 // SeedSessionTicks reconstructs a symbol's tick-derived bars (10s + shadow
 // 1m) from a batch of persisted ticks (e.g. the journal, after a restart)
 // without touching the tape ring and without emitting TapeUpdate/Mark — a
@@ -188,6 +201,8 @@ func (c *Core) apply(m inMsg) {
 		c.bars.seedDaily(c, msg.symbol, msg.bars) // Task 11
 	case seedHistory1mMsg:
 		c.bars.seedHistory1m(c, msg.symbol, msg.bars)
+	case seedOlder1mMsg:
+		c.bars.seedOlder1m(c, msg.symbol, msg.bars)
 	case seedSessionTicksMsg:
 		c.seedSessionTicks(msg.symbol, msg.ticks)
 	}

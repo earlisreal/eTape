@@ -468,3 +468,64 @@ func TestFinalizedBarsAccessor(t *testing.T) {
 		t.Fatal("finalizedBars for unknown symbol should be nil")
 	}
 }
+
+// drainUpdates collects everything currently buffered on c.updates.
+func drainUpdates(c *Core) []Update {
+	var out []Update
+	for {
+		select {
+		case u := <-c.updates:
+			out = append(out, u)
+		default:
+			return out
+		}
+	}
+}
+
+func TestSeedOlder1mEmitsPrependAndCascades(t *testing.T) {
+	c := New(Config{}) // confirmed real signature: func New(cfg Config) *Core (core.go:78)
+	sym := "US.AAPL"
+
+	// Seed an initial recent 1m run so an "earliest" exists (two 1m bars in one 5m bucket).
+	base := session.BucketStartMsAnchored(1_700_000_000_000, session.TF5m, c.bars.anchorSecs)
+	c.bars.seedHistory1m(c, sym, []feed.Bar{
+		{Symbol: sym, BucketMs: base, O: 10, H: 11, L: 9, C: 10, Volume: 100},
+		{Symbol: sym, BucketMs: base + 60_000, O: 10, H: 12, L: 10, C: 11, Volume: 120},
+	})
+	_ = drainUpdates(c)
+
+	// Now seed a strictly-older 1m chunk (a full earlier 5m bucket).
+	older := base - 300_000 // 5 minutes earlier, aligned
+	c.bars.seedOlder1m(c, sym, []feed.Bar{
+		{Symbol: sym, BucketMs: older, O: 5, H: 6, L: 4, C: 5, Volume: 50},
+		{Symbol: sym, BucketMs: older + 60_000, O: 5, H: 7, L: 5, C: 6, Volume: 60},
+	})
+	ups := drainUpdates(c)
+
+	// Expect BarPrepend for TF1m and TF5m carrying only the new older bars.
+	prepends := map[session.Timeframe][]Bar{}
+	for _, u := range ups {
+		if p, ok := u.(BarPrepend); ok {
+			prepends[p.TF] = p.Bars
+		}
+		if _, ok := u.(BarSnapshot); ok {
+			t.Fatalf("SeedOlder1m must not emit BarSnapshot for intraday TFs")
+		}
+	}
+	if len(prepends[session.TF1m]) != 2 {
+		t.Fatalf("TF1m prepend: want 2 bars, got %d", len(prepends[session.TF1m]))
+	}
+	if len(prepends[session.TF5m]) != 1 {
+		t.Fatalf("TF5m prepend: want 1 new bucket, got %d", len(prepends[session.TF5m]))
+	}
+	// The prepended TF5m bar must be strictly older than the pre-existing one.
+	if prepends[session.TF5m][0].BucketMs >= base {
+		t.Fatalf("prepended 5m bucket not older than existing earliest")
+	}
+	// The pre-existing earliest 5m bucket must NOT be re-emitted (no boundary mutation).
+	for _, b := range prepends[session.TF5m] {
+		if b.BucketMs == base {
+			t.Fatalf("boundary 5m bar was re-emitted; chunk boundary should not mutate it")
+		}
+	}
+}
