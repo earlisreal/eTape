@@ -399,6 +399,84 @@ func TestPushDecoder_FillPushGoldenFrames(t *testing.T) {
 	}
 }
 
+// TestPushDecoder_ReconnectRaceCumQtyClamp proves the final-review bounding
+// mitigation for the onConnUp reconnect race documented on reconcileOrder
+// (normalize.go) and onConnUp (moomoo.go): subAccPush goes live BEFORE
+// reconcile's getOrderList snapshot, so a fill landing in that window can be
+// counted once via reconcileOrder's catch-up path (which sets cumQtyByOrderID
+// directly from the snapshot's authoritative ExecutedQty) and AGAIN when that
+// same fill's already-queued live push is processed by decodeFillPush
+// afterward (which adds additively). Without the clamp, this test's raw sum
+// (80 seeded + 40 live = 120) would exceed the order's own total qty (100);
+// decodeFillPush must clamp CumQty (and LeavesQty) to the total instead.
+func TestPushDecoder_ReconnectRaceCumQtyClamp(t *testing.T) {
+	const (
+		orderID = uint64(555000111)
+		remark  = "ET-RACE-CLAMP"
+		total   = 100.0
+	)
+	p := newPushDecoder()
+
+	// Simulate reconcile's snapshot already showing 80/100 filled -- as if
+	// the fill that's about to arrive as a live push below had already
+	// landed inside the subAccPush-before-snapshot race window and gotten
+	// folded into the snapshot's authoritative ExecutedQty.
+	raw := reconcileOrderFixture(orderID, remark, "AAPL", trdcommon.OrderStatus_OrderStatus_Filled_Part, total, 80, 150.00)
+	seedEvs := p.reconcileOrder(testVenue, raw)
+	if len(seedEvs) != 1 {
+		t.Fatalf("reconcile seed: got %d events, want 1 (the catch-up fill): %+v", len(seedEvs), seedEvs)
+	}
+	seedFill, ok := seedEvs[0].(exec.OrderFilled)
+	if !ok || seedFill.CumQty != 80 {
+		t.Fatalf("reconcile seed: got %+v, want an OrderFilled with CumQty=80", seedEvs[0])
+	}
+
+	// The SAME underlying fill also arrives as a live Trd_UpdateOrderFill
+	// (2218) push -- queued during the race window, processed only after
+	// onConnUp returns. decodeFillPush has no way to know this qty was
+	// already folded into the snapshot above, so it adds additively:
+	// 80 (seeded) + 40 (this push) = 120, more than the order's total of 100.
+	fillPush := &trdupdateorderfill.Response{
+		RetType: proto.Int32(0),
+		S2C: &trdupdateorderfill.S2C{
+			Header: &trdcommon.TrdHeader{
+				TrdEnv:    proto.Int32(int32(trdcommon.TrdEnv_TrdEnv_Simulate)),
+				AccID:     proto.Uint64(28881234),
+				TrdMarket: proto.Int32(int32(trdcommon.TrdMarket_TrdMarket_US)),
+			},
+			OrderFill: &trdcommon.OrderFill{
+				TrdSide:         proto.Int32(int32(trdcommon.TrdSide_TrdSide_Buy)),
+				FillID:          proto.Uint64(1),
+				FillIDEx:        proto.String("1"),
+				OrderID:         proto.Uint64(orderID),
+				OrderIDEx:       proto.String(fmt.Sprint(orderID)),
+				Code:            proto.String("AAPL"),
+				Name:            proto.String("Apple Inc."),
+				Qty:             proto.Float64(40),
+				Price:           proto.Float64(150.00),
+				CreateTime:      proto.String("2026-07-11 09:31:00"),
+				CreateTimestamp: proto.Float64(1783928460.0),
+				SecMarket:       proto.Int32(int32(trdcommon.TrdSecMarket_TrdSecMarket_US)),
+			},
+		},
+	}
+
+	evs := p.decodeFillPush(testVenue, fillPush)
+	if len(evs) != 1 {
+		t.Fatalf("racing live fill: got %d events, want 1: %+v", len(evs), evs)
+	}
+	f, ok := evs[0].(exec.OrderFilled)
+	if !ok {
+		t.Fatalf("racing live fill: got %T, want exec.OrderFilled", evs[0])
+	}
+	if f.CumQty != total {
+		t.Fatalf("racing live fill: CumQty = %v, want %v clamped (raw unclamped sum would have been 120)", f.CumQty, total)
+	}
+	if f.LeavesQty != 0 {
+		t.Fatalf("racing live fill: LeavesQty = %v, want 0", f.LeavesQty)
+	}
+}
+
 // TestPushDecoder_ConcurrentAccess exercises decodeOrderPush/decodeFillPush
 // from multiple goroutines against one shared pushDecoder under -race:
 // pushDecoder's mutex must actually guard every map it owns. Frames are

@@ -94,6 +94,24 @@ func (p *pushDecoder) learnOrder(orderID uint64, domainOID string, totalQty floa
 // it against the last known tracked state -- used after a (re)connect to catch
 // up on anything missed while disconnected.
 //
+// KNOWN RACE (bounded, not eliminated): moomoo.go's onConnUp calls
+// subAccPush (live push subscription goes active) BEFORE calling reconcile
+// (which is what eventually calls this method with a fresh getOrderList
+// snapshot). OpenD's Trd_SubAccPush + Trd_GetOrderList have no transactional/
+// atomic guarantee between them, so a fill that lands in that window can be
+// observed TWICE: once here (this method sets cumQtyByOrderID directly from
+// the snapshot's authoritative ExecutedQty) and again when the SAME fill's
+// already-queued live 2218 push is processed by decodeFillPush after
+// onConnUp returns (which adds additively on top of what this method just
+// set). decodeFillPush now clamps cumQtyByOrderID to the order's known total
+// qty, which bounds the damage to "at worst LeavesQty reads 0 slightly
+// early" instead of an unbounded overcount corrupting state.go's applyFill
+// (CumQty is taken verbatim from whatever the adapter reports). This is a
+// mitigation, not a fix: a real fix would need either reordering onConnUp to
+// snapshot-before-subscribe (trading this risk for a "missed fill until the
+// next reconnect" risk instead) or a different reconciliation strategy
+// entirely. Both are deferred -- out of scope here.
+//
 // It takes the RAW *trdcommon.Order (not an already-narrowed exec.Order),
 // mirroring decodeOrderPush's own input shape (which decodes a
 // trdupdateorder.Response wrapping the same trdcommon.Order): this keeps
@@ -307,6 +325,29 @@ func (p *pushDecoder) decodeFillPush(venue exec.VenueID, resp *trdupdateorderfil
 	qty, price := f.GetQty(), f.GetPrice()
 	p.cumQtyByOrderID[orderID] += qty
 	p.cumNotionalByOrderID[orderID] += qty * price
+
+	// Reconnect-boundary double-count mitigation (BOUNDING, not eliminating --
+	// see the fuller race writeup on reconcileOrder above and onConnUp in
+	// moomoo.go): moomoo.go's onConnUp subscribes this account to live pushes
+	// (subAccPush) BEFORE reconcile reads its getOrderList snapshot, so a fill
+	// landing in that window can be counted TWICE -- once via reconcileOrder's
+	// catch-up path (which sets cumQtyByOrderID directly from the snapshot's
+	// authoritative ExecutedQty) and again HERE when the same fill's queued
+	// live push is processed afterward (which adds additively, with no way to
+	// know the snapshot already accounted for it). Clamping to the order's
+	// known total turns "an arbitrarily inflated CumQty" into "at worst,
+	// LeavesQty reads 0 slightly early" -- state.go's applyFill takes CumQty
+	// verbatim, so an unclamped overcount would otherwise corrupt the order's
+	// tracked ExecutedQty (and the fills ledger feeding P&L/trade export).
+	// This does NOT close the race itself: cumNotionalByOrderID is left
+	// unclamped (so AvgPrice can still be mildly perturbed in this same rare
+	// window), and a full fix would require either reordering onConnUp
+	// (snapshot-before-subscribe, which trades this risk for a "missed fill
+	// until the next reconnect" risk) or a different reconciliation strategy
+	// entirely -- both are deferred, out of scope for this bounding mitigation.
+	if total, knownTotal := p.totalQtyByOrderID[orderID]; knownTotal && p.cumQtyByOrderID[orderID] > total {
+		p.cumQtyByOrderID[orderID] = total
+	}
 
 	cumQty := p.cumQtyByOrderID[orderID]
 	avgPrice := 0.0

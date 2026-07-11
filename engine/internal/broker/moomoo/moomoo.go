@@ -403,6 +403,16 @@ func (a *Adapter) handlePush(f opend.Frame) {
 // this account to order/fill pushes, then reconcile a fresh snapshot. Called
 // synchronously from Run's select loop on every ConnUp (first connect AND every
 // reconnect).
+//
+// KNOWN RACE (bounded, not eliminated -- see normalize.go's reconcileOrder doc
+// comment for the full writeup): subAccPush below runs BEFORE reconcile's
+// getOrderList snapshot, so a fill landing in that window can be counted both
+// by reconcile's catch-up path AND by the same fill's already-queued live push
+// once handlePush processes it afterward. decodeFillPush clamps its cumulative
+// quantity to the order's known total to bound the damage. A full fix would
+// require either reordering this sequence (subscribe-after-snapshot instead,
+// which trades this risk for a "missed fill until the next reconnect" risk)
+// or a different reconciliation strategy -- both deferred, out of scope here.
 func (a *Adapter) onConnUp(ctx context.Context) {
 	if _, err := a.tc.getAccList(ctx); err != nil {
 		// A validation failure (wrong account role/status/market/env) is a real
