@@ -459,6 +459,32 @@ describe("ChartPanel", () => {
     expect(getSurface().isDirty()).toBe(false);
   });
 
+  it("isDirty tracks MACD's multi-slot sub-keys, not just the base instanceId (multi-slot indicator regression)", () => {
+    // The headline "isDirty reacts only to its own pinned symbol" test above only
+    // exercises EMA/VWAP — both single-slot indicators whose describeIndicator()
+    // key IS the base instanceId. MACD is the multi-slot case: describeIndicator
+    // produces 3 keys — the base instanceId plus `${instanceId}#signal` and
+    // `${instanceId}#hist` (see indicatorSeries.ts's describeIndicator: entry.slots
+    // has length 3 for MACD, so `single` is false and every slot's key is
+    // `${inst.instanceId}#${s.slot}`). A delta keyed to one of the SUFFIXED
+    // sub-keys — not the base id — must still dirty this chart, proving isDirty()'s
+    // sum-over-active-keys loop genuinely iterates every slot describeIndicator
+    // returns for the instance, not just its base id.
+    const { getByRole, stores, getSurface, onConfigChange } = renderChartCapturingSurface();
+
+    fireEvent.click(getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add MACD" }));
+
+    type Persisted = { indicators: { instanceId: string; type: string }[] };
+    const persisted = (onConfigChange.mock.calls.at(-1)![0] as Persisted).indicators;
+    const macdId = persisted.find((i) => i.type === "MACD")!.instanceId;
+
+    getSurface().isDirty(); // baseline: consume the mount + indicator-add dirty state
+
+    stores.indicators.apply({ kind: "delta", topic: "md.indicator", key: `${macdId}#signal`, payload: { timeMs: Date.now(), value: 1 } });
+    expect(getSurface().isDirty()).toBe(true);
+  });
+
   it("does not call perf.recordScan when perf is disabled (mirrors TapePanel's guard — avoids the `chart:${config.id}` template-literal allocation on every hot-path paint)", () => {
     const { stores, getSurface } = renderChartCapturingSurface();
     pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5);

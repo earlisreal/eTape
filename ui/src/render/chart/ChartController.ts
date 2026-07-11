@@ -88,6 +88,18 @@ export class ChartController {
   private barsMsCache: number[] = [];
   // Same content bandsFromBars(bars) would produce, maintained incrementally.
   private bandsCache: Band[] = [];
+  // True whenever bandsCache is NOT guaranteed to reflect the full currently-
+  // loaded `bars` — i.e. it needs a from-scratch rebuild (extendBandsFrom(0, …))
+  // before it can next be trusted, rather than an incremental extend. Set on
+  // every "reset" (a different series may now be loaded) and on every sync where
+  // sessions are inactive (see refreshBands — bandsCache maintenance is paused
+  // while unused, per Finding 1's perf gate, so it can't be assumed valid once
+  // reactivated). Cleared only right after a full rebuild. Starts true: nothing
+  // has been built yet. See refreshBands for how this makes toggling session
+  // shading back on (or switching back to an intraday timeframe), without an
+  // intervening symbol/timeframe reset, still produce correct bands instead of
+  // a stale/empty cache from before shading was turned off.
+  private bandsCacheDirty = true;
   // bars.length as of the last refreshBarCaches call — purely a bookkeeping
   // cursor (kept in sync with lastAppliedCount); not itself consulted for any
   // branch decision, which all live on lastBarsOp/appendedFrom above.
@@ -252,16 +264,23 @@ export class ChartController {
   // Contract (holds after this returns, for every reset/appended/tailUpdated/none
   // sequence): barsMsCache deep-equals bars.map(b => Date.parse(b.bucketStart));
   // closedRange equals candleRangeOf(bars.slice(0, -1)); bandsCache deep-equals
-  // bandsFromBars(bars). See ChartController.test.ts's equivalence tests.
+  // bandsFromBars(bars) -- but ONLY while sessions are active (see refreshBands'
+  // gate, Finding 1). barsMsCache/closedRange (hence candleRange) stay
+  // unconditional regardless — drawings projection and overlay-indicator
+  // autoscale need them on every timeframe, not just when shading is on. See
+  // ChartController.test.ts's equivalence tests.
   private refreshBarCaches(bars: Bar[]): void {
     if (bars.length === 0) return; // nothing to cache; resetForReload already cleared everything
     switch (this.lastBarsOp) {
       case "reset":
-        this.daySeg = null;
         this.barsMsCache = bars.map((b) => Date.parse(b.bucketStart));
-        this.bandsCache = [];
-        this.extendBandsFrom(0, bars);
         this.closedRange = candleRangeOf(bars.slice(0, -1));
+        // A reset may have loaded an entirely different series (new symbol/
+        // timeframe, or a front-growth rebuild) — whatever bandsCache/dirty
+        // state carried over from before is meaningless against it. Force
+        // refreshBands to do a full from-scratch rebuild below, unconditionally
+        // (not just when the PREVIOUS state happened to be dirty already).
+        this.bandsCacheDirty = true;
         break;
       case "appended": {
         const from = this.appendedFrom;
@@ -277,7 +296,6 @@ export class ChartController {
           if (i < this.barsMsCache.length) this.barsMsCache[i] = ms;
           else this.barsMsCache.push(ms);
         }
-        this.extendBandsFrom(from, bars);
         this.foldClosedRangeFrom(from, bars);
         break;
       }
@@ -288,6 +306,7 @@ export class ChartController {
         // revision never invalidates it either — nothing to refresh.
         break;
     }
+    this.refreshBands(bars);
     this.cachedBarCount = bars.length;
     // candleRange = closedRange (everything but the last bar) folded with the
     // CURRENT last bar's own l/h, read fresh every call — so an in-progress bar
@@ -295,6 +314,41 @@ export class ChartController {
     // whatever its highest-seen high was on some earlier call.
     const last = bars[bars.length - 1];
     this.candleRange = combine(this.closedRange, last.l, last.h);
+  }
+
+  // Builds/extends bandsCache — but ONLY when applySessions will actually read
+  // it (same gate it uses: an intraday timeframe with session shading on). On a
+  // Daily chart with years of history, or an intraday chart with shading
+  // manually switched off, applySessions immediately discards bandsCache in
+  // favor of an empty array — so maintaining it on every reset/appended sync
+  // (each bar potentially costing an Intl.DateTimeFormat call via
+  // buildDaySegment) was pure waste. Finding 1 of the follow-up review.
+  //
+  // bandsCacheDirty tracks whether the cache is trustworthy for a full-history
+  // read: set on every "reset" (a different series may now be loaded) and
+  // whenever sessions are inactive (maintenance is paused while unused, so a
+  // stale/short cache from before deactivation can't be assumed valid once
+  // reactivated). Consulted here, not just written: whenever sessions ARE
+  // active and the cache is dirty, this rebuilds from scratch over the FULL
+  // `bars` regardless of lastBarsOp — covering "reset" (needs a full rebuild
+  // anyway) AND, crucially, session shading (or the timeframe) having just been
+  // switched back on with no bar change at all (lastBarsOp "tailUpdated"/"none")
+  // — the toggle-back-on scenario this gate must not regress. Only once the
+  // cache is known-fresh does an "appended" sync fall back to the cheaper
+  // incremental extend.
+  private refreshBands(bars: Bar[]): void {
+    const sessionsActive = !["D", "W", "M"].includes(this.config.timeframe) && this.showSessions;
+    if (!sessionsActive) { this.bandsCacheDirty = true; return; }
+    if (this.bandsCacheDirty) {
+      this.daySeg = null;
+      this.bandsCache = [];
+      this.extendBandsFrom(0, bars);
+      this.bandsCacheDirty = false;
+      return;
+    }
+    if (this.lastBarsOp === "appended") this.extendBandsFrom(this.appendedFrom, bars);
+    // tailUpdated/none: every existing bar's bucketStart (hence its session) is
+    // unchanged — nothing to extend.
   }
 
   // Extends bandsCache (assumed to already correctly cover bars[0 .. from-1], or

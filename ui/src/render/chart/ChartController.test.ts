@@ -73,6 +73,15 @@ const barHL = (bucketStart: string, h: number, l: number, c: number, inProgress 
   ({ symbol: "US.AAPL", timeframe: "1m", bucketStart, o: c, h, l, c, v: 100, inProgress });
 
 function barReaderOf(bars: Bar[]): BarReader { return { series: () => bars }; }
+// A reader whose returned series can be swapped wholesale between sync() calls
+// — mirrors mutableIndicatorReader below, but for bars. Used to simulate a
+// symbol switch where the NEW symbol's bars are a completely different array
+// (not just barReaderOf's fixed reference), independent of setSymbol's own
+// resetForReload bookkeeping.
+function mutableBarReader(initial: Bar[]): BarReader & { set: (b: Bar[]) => void } {
+  let current = initial;
+  return { series: () => current, set: (b) => { current = b; } };
+}
 // A timeframe-aware reader — needed to simulate a switch onto a timeframe
 // whose series is empty/not-yet-arrived while another timeframe is populated
 // (e.g. Daily seeded independently of a cold 1m symbol).
@@ -888,6 +897,106 @@ describe("ChartController chart settings", () => {
     expect(facade.watermark).toBe("AAPL");
     c.setWatermark(false);
     expect(facade.watermark).toBeNull();
+  });
+});
+
+// Finding 1 (follow-up review): refreshBarCaches used to build/extend bandsCache
+// unconditionally on every reset/appended sync, even when applySessions was about
+// to immediately discard it (Daily/Weekly/Monthly timeframe, or session shading
+// manually off) — pure wasted buildDaySegment (Intl.DateTimeFormat) work, once per
+// bar on a reset. The fix gates that work on the SAME condition applySessions
+// checks, but must not let bandsCache go stale/empty if the user later re-enables
+// shading (or switches back to an intraday timeframe) without an intervening
+// symbol/timeframe reset.
+describe("ChartController bandsCache perf gating (Finding 1)", () => {
+  it("does not build any day segments on a Daily-timeframe reset — applySessions will discard the bands anyway", () => {
+    const bars = [bar("2026-07-04T00:00:00Z", 8), bar("2026-07-05T00:00:00Z", 9), bar("2026-07-06T00:00:00Z", 10)];
+    const facade = fakeFacade();
+    const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "D" },
+      { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+    ctrl.mount();
+    ctrl.sync();
+    expect(ctrl.lastSyncDaySegmentBuilds()).toBe(0);
+    expect(facade.lastBands).toEqual([]);
+  });
+
+  it("does not build any day segments on an intraday reset when session shading is manually off", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.setShowSessions(false);
+    ctrl.sync();
+    expect(ctrl.lastSyncDaySegmentBuilds()).toBe(0);
+    expect(facade.lastBands).toEqual([]);
+  });
+
+  it("re-enabling session shading with no intervening reset rebuilds bandsCache from the FULL current bars, not stale/empty (toggle-back-on regression)", () => {
+    const bars = [
+      bar("2026-07-06T08:30:00Z", 10), // pre-market
+      bar("2026-07-06T13:30:00Z", 11), // RTH open
+    ];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // reset, sessions on by default -> bandsCache built for these 2 bars
+    expect(facade.lastBands).toEqual(bandsFromBars(bars));
+
+    ctrl.setShowSessions(false);
+    ctrl.sync(); // "none" (no bar change) — applySessions clears to []; bandsCache maintenance now paused
+    expect(facade.lastBands).toEqual([]);
+
+    // Bars keep streaming in WHILE session shading is off — bandsCache must not be
+    // asked to track them (that's the whole point of the gate), so it can't reflect
+    // this state on its own.
+    bars.push(bar("2026-07-06T20:00:00Z", 12));    // appended, post-market
+    ctrl.sync();
+    bars.push(bar("2026-07-07T08:30:00Z", 13));    // appended again, next day pre-market
+    ctrl.sync();
+
+    ctrl.setShowSessions(true);
+    ctrl.sync(); // NO bar change on this call — lastBarsOp is "none", not "reset"
+    // bandsCache must reflect the FULL current (4-bar) series, not the stale
+    // 2-bar snapshot from before shading was turned off.
+    expect(facade.lastBands).toEqual(bandsFromBars(bars));
+  });
+
+  it("switching from a D/W/M timeframe back to intraday with no bar change also rebuilds bandsCache correctly", () => {
+    // setTimeframe always goes through resetForReload (lastBarsOp -> "reset"), so
+    // this path is already exercised by the "reset" branch — asserted here as an
+    // explicit regression guard against a future refactor that might special-case
+    // "reset" away from the same dirty-rebuild path the toggle above relies on.
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
+    const facade = fakeFacade();
+    const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "D" },
+      { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+    ctrl.mount();
+    ctrl.sync(); // Daily reset — bands gated off, never built
+    expect(facade.lastBands).toEqual([]);
+
+    ctrl.setTimeframe("1m"); // still showSessions=true by default
+    ctrl.sync(); // reset for the new (intraday) timeframe
+    expect(facade.lastBands).toEqual(bandsFromBars(bars));
+  });
+
+  it("a symbol switch made while bandsCache was already fresh (dirty=false) still rebuilds for the new series, not left permanently empty", () => {
+    // Guards a specific gap: bandsCacheDirty must be forced true on EVERY reset,
+    // not just consulted — otherwise a reset landing while the PREVIOUS series'
+    // cache was already fresh (dirty=false) would see refreshBands take neither
+    // the full-rebuild branch (dirty check fails) nor the incremental-extend
+    // branch (lastBarsOp is "reset", not "appended"), leaving the new symbol's
+    // bandsCache stuck at the empty array resetForReload synchronously set.
+    const barsA = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
+    const reader = mutableBarReader(barsA);
+    const { facade, ctrl } = make(reader);
+    ctrl.sync(); // reset — dirty starts true, gets rebuilt and cleared to false
+    expect(facade.lastBands).toEqual(bandsFromBars(barsA));
+
+    barsA.push(bar("2026-07-06T13:32:00Z", 12)); // appended while dirty=false
+    ctrl.sync();
+    expect(facade.lastBands).toEqual(bandsFromBars(barsA));
+
+    const barsB = [bar("2026-07-08T13:30:00Z", 20), bar("2026-07-08T13:31:00Z", 21)];
+    reader.set(barsB);
+    ctrl.setSymbol("US.NVDA"); // resetForReload — lastBarsOp -> "reset"
+    ctrl.sync();
+    expect(facade.lastBands).toEqual(bandsFromBars(barsB));
   });
 });
 
