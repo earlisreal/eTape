@@ -409,6 +409,22 @@ export interface FocusGroupArgs {
   symbol: string;
 }
 /**
+ * LoadOlderBarsArgs is the args for the LoadOlderBars command. Daily=true
+ * requests the one-shot pre-2016 daily fetch; false deepens the intraday 1m
+ * series by one chunk.
+ */
+export interface LoadOlderBarsArgs {
+  symbol: string;
+  daily: boolean;
+}
+/**
+ * LoadOlderResult is the deferred-ack Value for LoadOlderBars.
+ */
+export interface LoadOlderResult {
+  added: number /* int */;
+  exhausted: boolean;
+}
+/**
  * Venue mirrors config.Venue (no secret material — Credentials is a key NAME).
  */
 export interface Venue {
@@ -418,6 +434,8 @@ export interface Venue {
   credentials: string;
   accountId: string;
   startingBalance: number /* float64 */; // sim only; <=0 => engine default
+  slippageBps: number /* float64 */; // sim only; <=0 => off
+  fillLatencyMs: number /* int */; // sim only; <=0 => off
 }
 /**
  * Gate mirrors config.Gate; reuses the existing limit-view shapes.
