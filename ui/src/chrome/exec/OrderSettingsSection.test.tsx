@@ -476,4 +476,22 @@ describe("OrderSettingsSection", () => {
     expect(lastUp.disabled).toBe(false);
     expect(lastDown.disabled).toBe(true);
   });
+
+  it("defaults the ext-hours market buffer to 1.0 and saves it", () => {
+    const { onSave } = wrap();
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].extHoursMarketBufferPct).toBe(1.0);
+  });
+  it("nudges the ext-hours market buffer up by 0.1", () => {
+    const { onSave } = wrap();
+    fireEvent.click(screen.getByTestId("ext-buffer-up"));
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].extHoursMarketBufferPct).toBeCloseTo(1.1);
+  });
+  it("caps a typed ext-hours buffer at 10 on save", () => {
+    const { onSave } = wrap();
+    fireEvent.change(screen.getByLabelText("ext-buffer"), { target: { value: "50" } });
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].extHoursMarketBufferPct).toBe(10);
+  });
 });

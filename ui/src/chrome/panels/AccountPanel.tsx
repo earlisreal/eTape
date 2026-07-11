@@ -7,6 +7,7 @@ import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
 import { useVenueSelection } from "../exec/venueSelection";
+import { useOrderConfig } from "../exec/useOrderConfig";
 import { resolvePlaceTemplate } from "../exec/resolveTemplate";
 import type { PlaceOrderTemplate } from "../exec/actionTemplate";
 import { formatPrice, formatSize } from "../../render/format";
@@ -204,7 +205,7 @@ function StatsStrip({
 // ---- Positions table (folded from PositionsPanel, now sortable via T16) ----
 
 function PositionsTable({
-  stores, commands, oc, palette, config, onConfigChange, venue,
+  stores, commands, oc, palette, config, onConfigChange, venue, extBufferPct,
 }: {
   stores: PanelProps["stores"];
   commands: PanelProps["commands"];
@@ -213,6 +214,7 @@ function PositionsTable({
   config: PanelProps["config"];
   onConfigChange: PanelProps["onConfigChange"];
   venue: string;
+  extBufferPct: number;
 }): JSX.Element {
   const toast = useToasts();
   const rows0 = stores.exec.positions().filter((p) => p.venue === venue && p.qty !== 0); // venue-scoped; NET (venue===null) rows drop out
@@ -241,7 +243,7 @@ function PositionsTable({
       type: "MARKET", tif: "DAY", priceSource: long ? "Bid" : "Ask", priceOffset: 0,
       sizing: { mode: "PositionFraction", pct: 100 },
     };
-    const r = resolvePlaceTemplate(t, { venue, symbol: row.symbol, quote, buyingPower: 0, positionQty: row.qty, nowMs: Date.now() });
+    const r = resolvePlaceTemplate(t, { venue, symbol: row.symbol, quote, buyingPower: 0, positionQty: row.qty, nowMs: Date.now(), extHoursMarketBufferPct: extBufferPct });
     if (!r.preCheck.ok) { toast.push({ level: "danger", text: r.preCheck.errors.join(" ") }); return; }
     void oc.submit(r.args, r.flash);
   };
@@ -302,6 +304,8 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
   const group = groupProp ?? config.group;
   const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
+  const { config: orderConfig } = useOrderConfig();
+  const extBufferPct = orderConfig.extHoursMarketBufferPct ?? 1;
   // Portaled into PanelFrame's ledger-header actions slot, beside the close
   // button (see headerSlot.ts's PanelHeaderActionsSlotContext). undefined (no
   // frame above, e.g. a body-level test) falls back to rendering inline; null
@@ -383,7 +387,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
           {tabBtn("Trade History", activeTab === "history", () => selectTab("history"))}
         </div>
         {activeTab === "positions"
-          ? <PositionsTable stores={stores} commands={commands} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} />
+          ? <PositionsTable stores={stores} commands={commands} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} extBufferPct={extBufferPct} />
           : <TradeHistoryTable stores={stores} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} />}
       </div>
     </div>

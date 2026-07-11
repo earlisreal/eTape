@@ -1,7 +1,8 @@
 // Client-side pre-checks before the wire (ui-design §Trigger flow step 2):
 //   qty > 0; stop/stop-limit price coherence (TZ does not validate — inverted
-//   stop-limits sit unfilled); Market outside RTH auto-coerced to Limit-at-last
-//   + a visible notice (avoids TZ R78). Pure; nowMs decides the ET session.
+//   stop-limits sit unfilled); Market outside RTH auto-converted to an
+//   aggressive marketable limit (ask/bid ± a buffer%, tick-rounded) + a
+//   visible notice (avoids TZ R78). Pure; nowMs decides the ET session.
 //
 // This coercion is keyed on the ACTUAL clock (sessionAt(nowMs)), never on
 // order.session: it exists purely to stop a naked Market order from reaching
@@ -26,16 +27,55 @@ export interface PreCheckResult {
   notices: string[];    // non-blocking (coercions applied)
 }
 
-export function preCheck(draft: DraftOrder, last: number, nowMs: number): PreCheckResult {
+// SEC sub-penny rule: $0.01 tick at/above $1.00, $0.0001 below. Buys round UP
+// and sells round DOWN so a converted marketable limit never lands on an
+// invalid price increment and never loses marketability to the rounding.
+function tickOf(price: number): number {
+  return price >= 1 ? 0.01 : 0.0001;
+}
+function roundUpToTick(price: number): number {
+  const t = tickOf(price);
+  return Number((Math.ceil(price / t) * t).toFixed(t === 0.01 ? 2 : 4));
+}
+function roundDownToTick(price: number): number {
+  const t = tickOf(price);
+  return Number((Math.floor(price / t) * t).toFixed(t === 0.01 ? 2 : 4));
+}
+
+export function preCheck(
+  draft: DraftOrder,
+  quote: { bid: number; ask: number; last: number },
+  nowMs: number,
+  extBufferPct: number,
+): PreCheckResult {
   const errors: string[] = [];
   const notices: string[] = [];
   let order: DraftOrder = { ...draft };
 
   if (!(order.qty > 0)) errors.push("Quantity must be greater than 0.");
 
+  // Market outside RTH → aggressive marketable limit (ask×(1+pct) buys /
+  // bid×(1−pct) sells), tick-rounded. Falls back to last for a one-sided book.
   if (order.type === "MARKET" && sessionAt(nowMs) !== "rth") {
-    if (last > 0) { order = { ...order, type: "LIMIT", limitPrice: last }; notices.push(`Market outside RTH coerced to Limit @ ${last.toFixed(2)}.`); }
-    else errors.push("Market order outside RTH and no last price to coerce to.");
+    const buyish = order.side === "BUY" || order.side === "COVER";
+    const leg = buyish ? quote.ask : quote.bid;
+    const usedFallback = !(leg > 0);
+    const base = usedFallback ? quote.last : leg;
+    if (base > 0) {
+      const mult = buyish ? 1 + extBufferPct / 100 : 1 - extBufferPct / 100;
+      const limitPrice = buyish ? roundUpToTick(base * mult) : roundDownToTick(base * mult);
+      order = { ...order, type: "LIMIT", limitPrice };
+      const legName = buyish ? "ask" : "bid";
+      const sign = buyish ? "+" : "-";
+      const shown = limitPrice >= 1 ? limitPrice.toFixed(2) : limitPrice.toFixed(4);
+      notices.push(
+        usedFallback
+          ? `Market outside RTH → Limit @ ${shown} (no ${legName}; last ${sign}${extBufferPct}%).`
+          : `Market outside RTH → Limit @ ${shown} (${legName} ${sign}${extBufferPct}%).`,
+      );
+    } else {
+      errors.push("Market order outside RTH and no price to coerce to.");
+    }
   }
 
   if (order.type === "STOP" && !(order.stopPrice > 0)) errors.push("Stop price must be greater than 0.");

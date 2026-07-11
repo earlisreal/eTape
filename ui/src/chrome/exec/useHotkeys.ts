@@ -37,7 +37,10 @@ export function useHotkeys(opts: { stores: Stores; commands: Cmd; linkGroups: Li
       const positionQty = stores.exec.positions().filter((p) => p.symbol === symbol && p.venue === venue).reduce((s, p) => s + p.qty, 0);
       fireTemplate(
         t,
-        { venue, symbol, quote, buyingPower: account?.buyingPower ?? 0, positionQty, armed: !!status?.masterArmed, nowMs: Date.now() },
+        {
+          venue, symbol, quote, buyingPower: account?.buyingPower ?? 0, positionQty, armed: !!status?.masterArmed, nowMs: Date.now(),
+          extHoursMarketBufferPct: config.extHoursMarketBufferPct ?? 1,
+        },
         oc, toast, { gateArm: true },
       );
     };

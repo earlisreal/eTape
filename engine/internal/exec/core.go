@@ -361,6 +361,20 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 		}
 		return CmdAck{Accepted: false, Reason: reason, OrderID: req.ClientOrderID}
 	}
+	// A raw MARKET order outside regular hours cannot be placed on a real venue
+	// (TradeZero hard-rejects with R78; Alpaca silently queues it to the next
+	// open — worse). The UI converts these to marketable limits before they get
+	// here; this is the backstop for a bug or a bypassing client. Sim venues are
+	// exempt (Capabilities.MarketOutsideRTH) so replay/practice at night fill.
+	if req.Type == TypeMarket && session.PhaseAt(c.clk.Now()) != session.RTH &&
+		(b == nil || !b.Capabilities().MarketOutsideRTH) {
+		reason := "market order outside regular hours (UI converts these to marketable limits)"
+		ev := OrderBlocked{V: req.Venue, OID: req.ClientOrderID, Req: req, Reason: reason, Ts: c.now()}
+		if err := c.appendAndFold(ev, SrcLocal); err != nil {
+			slog.Error("exec: append OrderBlocked failed", "err", err)
+		}
+		return CmdAck{Accepted: false, Reason: reason, OrderID: req.ClientOrderID}
+	}
 	// Append OrderSubmitted BEFORE the POST (crash-recovery rule). Append failure
 	// blocks submission.
 	o := Order{Venue: req.Venue, ID: req.ClientOrderID, Symbol: req.Symbol, Side: req.Side,
