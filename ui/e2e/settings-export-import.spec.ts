@@ -71,6 +71,16 @@ test.describe("settings export/import", () => {
     await page.getByRole("button", { name: "Orders & hotkeys", exact: true }).click();
     await expect(page.getByTestId("cheat-sheet")).toContainText("Imported Buy");
 
+    // Cleanup: the orderConfig key is engine-side, shared across every spec
+    // file in one `npm run e2e` run (webServer boots ONE engine for the whole
+    // invocation) — same convention as settings-redesign.spec.ts's "orders"
+    // test. Reset now, while the modal is already open to "Orders & hotkeys",
+    // so the imported "Imported Buy"/Ctrl+9 template doesn't survive into a
+    // later spec file's hotkey assumptions.
+    await page.getByTestId("reset-defaults").click();
+    await page.getByTestId("reset-confirm").click();
+    await page.getByTestId("save").click();
+
     await page.mouse.click(5, 5); // close via backdrop (SettingsModal has no Escape handler)
   });
 
