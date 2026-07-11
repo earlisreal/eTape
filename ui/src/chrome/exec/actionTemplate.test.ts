@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { DEFAULT_TEMPLATES, DEFAULT_ORDER_CONFIG, ORDER_CONFIG_KEY, normalizeOrderConfig, type OrderConfig } from "./actionTemplate";
+import { DEFAULT_TEMPLATES, DEFAULT_ORDER_CONFIG, ORDER_CONFIG_KEY, normalizeOrderConfig, type OrderConfig, type DeckColor } from "./actionTemplate";
 
 describe("action templates", () => {
   it("ships with zero default templates/hotkeys (blank slate; user builds their own)", () => {
@@ -54,5 +54,31 @@ describe("normalizeOrderConfig", () => {
     };
     const out = normalizeOrderConfig(raw);
     expect(out.templates[0].kind === "place" && out.templates[0].session).toBe("OVERNIGHT");
+  });
+  it("preserves deck and deckColor fields on PlaceOrderTemplate through normalize", () => {
+    const deckColors: DeckColor[] = ["auto", "green", "red", "bronze", "neutral", "danger"];
+    for (const color of deckColors) {
+      const raw: OrderConfig = {
+        activeVenue: "",
+        templates: [{ kind: "place", id: "a", label: "A", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, sizing: { mode: "Shares", shares: 100 }, deck: true, deckColor: color }] as OrderConfig["templates"],
+      };
+      const out = normalizeOrderConfig(raw);
+      const template = out.templates[0];
+      expect(template.kind === "place" && template.deck).toBe(true);
+      expect(template.kind === "place" && template.deckColor).toBe(color);
+    }
+  });
+  it("preserves deck and deckColor fields on ManagementTemplate through normalize", () => {
+    const deckColors: DeckColor[] = ["auto", "green", "red", "bronze", "neutral", "danger"];
+    for (const color of deckColors) {
+      const raw: OrderConfig = {
+        activeVenue: "",
+        templates: [{ kind: "manage", id: "k", label: "KILL", action: "KillSwitch", hotkey: "Ctrl+Shift+K", deck: true, deckColor: color }] as OrderConfig["templates"],
+      };
+      const out = normalizeOrderConfig(raw);
+      const template = out.templates[0];
+      expect(template.kind === "manage" && template.deck).toBe(true);
+      expect(template.kind === "manage" && template.deckColor).toBe(color);
+    }
   });
 });
