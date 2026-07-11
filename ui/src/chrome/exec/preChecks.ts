@@ -4,14 +4,14 @@
 //   aggressive marketable limit (ask/bid ± a buffer%, tick-rounded) + a
 //   visible notice (avoids TZ R78). Pure; nowMs decides the ET session.
 //
-// This conversion is keyed on the ACTUAL clock (sessionAt(nowMs)), never on
+// This coercion is keyed on the ACTUAL clock (sessionAt(nowMs)), never on
 // order.session: it exists purely to stop a naked Market order from reaching
 // a broker while the market genuinely isn't open for regular trading (TZ
 // hard-rejects one with R78), which is a broker-safety concern independent
 // of which session the trader picked for TIF/extended_hours purposes. The
 // engine-side session override (exec.ExtendedHoursFor) already only applies
 // to Limit/StopLimit orders — Market orders ignore session entirely on the
-// wire — so gating this conversion on order.session would let an explicit RTH
+// wire — so gating this coercion on order.session would let an explicit RTH
 // choice skip the safety net while the market is actually closed.
 import type { OrderType, Side, TIF, OrderSession } from "../../wire/contract";
 import { sessionAt } from "../../render/chart/sessions";
