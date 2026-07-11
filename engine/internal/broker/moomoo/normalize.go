@@ -72,6 +72,99 @@ func newPushDecoder() *pushDecoder {
 	}
 }
 
+// learnOrder records the correlation between moomoo's numeric orderID and
+// eTape's domain order id/qty BEFORE any push has necessarily arrived --
+// closes the race decodeFillPush discloses (a fill push arriving before the
+// first order push is seen would otherwise be dropped, even though the Adapter
+// already knows this correlation from its own SubmitOrder call). It seeds ONLY
+// the correlation maps (domainOID/totalQty), never lastKnownStatus: the domain
+// OrderAccepted still rides in on the 2208 order push (decodeOrderPush) or a
+// reconcile, exactly as it does today -- learnOrder is a fill-correlation
+// safety net, not a status source.
+func (p *pushDecoder) learnOrder(orderID uint64, domainOID string, totalQty float64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.domainOIDByOrderID[orderID] = domainOID
+	p.totalQtyByOrderID[orderID] = totalQty
+}
+
+// reconcileOrder is decodeOrderPush's snapshot-fed sibling: given one raw
+// moomoo order from a trdClient.getOrderList snapshot (NOT a live push), it
+// synthesizes whatever lifecycle/fill catch-up events are implied by comparing
+// it against the last known tracked state -- used after a (re)connect to catch
+// up on anything missed while disconnected.
+//
+// It takes the RAW *trdcommon.Order (not an already-narrowed exec.Order),
+// mirroring decodeOrderPush's own input shape (which decodes a
+// trdupdateorder.Response wrapping the same trdcommon.Order): this keeps
+// reconcileOrder a genuine sibling of decodeOrderPush -- both derive their
+// domain view here, in the one place that owns the tracking maps. Taking the
+// raw order is also what lets the reconcile-sourced terminal/fill events carry
+// a real timestamp (raw.GetUpdateTimestamp, exactly as decodeOrderPush does)
+// and a real reject reason (raw.GetLastErrMsg) instead of the zero values
+// orderDomain deliberately leaves unset (see orderDomain's doc in trd.go).
+func (p *pushDecoder) reconcileOrder(venue exec.VenueID, raw *trdcommon.Order) []exec.BrokerEvent {
+	o := orderDomain(raw)
+	oid := o.ID // == Remark, per orderDomain
+	if oid == "" {
+		return nil // not an eTape-placed order
+	}
+	moomooOrderID := raw.GetOrderID()
+	ts := tsMs(raw.GetUpdateTimestamp())
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.domainOIDByOrderID[moomooOrderID] = oid
+	p.totalQtyByOrderID[moomooOrderID] = o.Qty
+
+	var out []exec.BrokerEvent
+
+	// Missed fill catch-up: o.ExecutedQty is moomoo's authoritative cumulative
+	// filled quantity. cumQtyByOrderID tracks the same thing from live 2218
+	// pushes. A strictly greater o.ExecutedQty than what's tracked means at
+	// least one fill happened while disconnected that this decoder never saw
+	// live -- synthesize ONE catch-up OrderFilled for the whole missed delta
+	// (a snapshot gives no per-fill granularity, only the aggregate;
+	// o.AvgFillPrice is moomoo's own reported average across ALL fills to date,
+	// which is what this one catch-up event's Price/AvgPrice reflect -- there
+	// is no better per-fill price available from a snapshot). Setting
+	// cumQtyByOrderID to o.ExecutedQty afterward (not adding a delta) keeps
+	// future LIVE fills' accumulation correct going forward without
+	// double-counting the catch-up amount.
+	prevCum := p.cumQtyByOrderID[moomooOrderID]
+	if o.ExecutedQty > prevCum {
+		delta := o.ExecutedQty - prevCum
+		p.cumQtyByOrderID[moomooOrderID] = o.ExecutedQty
+		p.cumNotionalByOrderID[moomooOrderID] = o.ExecutedQty * o.AvgFillPrice // reset notional to stay consistent with the now-authoritative cum/avg pair
+		out = append(out, exec.OrderFilled{
+			F:         exec.Fill{Venue: venue, OrderID: oid, Symbol: o.Symbol, Side: o.Side, Qty: delta, Price: o.AvgFillPrice, TsMs: ts},
+			CumQty:    o.ExecutedQty,
+			LeavesQty: o.LeavesQty,
+			AvgPrice:  o.AvgFillPrice,
+		})
+	}
+
+	prevStatus, tracked := p.lastKnownStatus[oid]
+	p.lastKnownStatus[oid] = o.Status
+	if tracked && prevStatus == o.Status {
+		return out // no NEW status transition; the fill catch-up above (if any) still applies
+	}
+	switch o.Status {
+	case exec.StatusAccepted:
+		out = append(out, exec.OrderAccepted{V: venue, OID: oid, BrokerOrderID: fmt.Sprint(moomooOrderID), Ts: ts})
+	case exec.StatusCanceled:
+		out = append(out, exec.OrderCanceled{V: venue, OID: oid, Ts: ts})
+	case exec.StatusRejected:
+		reason := raw.GetLastErrMsg()
+		if reason == "" {
+			reason = "rejected"
+		}
+		out = append(out, exec.OrderRejected{V: venue, OID: oid, Reason: reason, Ts: ts})
+	}
+	return out
+}
+
 // decodeOrderPush turns one Trd_UpdateOrder (2208) push into zero or one
 // domain lifecycle events. It ALWAYS records the numeric-OrderID ->
 // (domainOID, totalQty) correlation first (even when no event results),

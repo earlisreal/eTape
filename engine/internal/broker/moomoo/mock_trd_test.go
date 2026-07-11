@@ -122,6 +122,44 @@ func (m *mockTrdOpenD) setRespond(protoID uint32, fn func(opend.Frame) proto.Mes
 	m.mu.Unlock()
 }
 
+// push writes an unsolicited push frame (serialNo 0) to every connected
+// client -- the Adapter tests use it to drive the live 2208/2218 push path.
+// 2208/2218 are push proto IDs (opend.IsPushProtoID true), so opend.Client's
+// reader routes them to Pushes() regardless of serial; any other protoID with
+// no in-flight matching request routes there too (exercising handlePush's
+// unrecognized-push branch).
+func (m *mockTrdOpenD) push(protoID uint32, msg proto.Message) {
+	body, _ := proto.Marshal(msg)
+	m.pushRaw(protoID, body)
+}
+
+// pushRaw writes protoID + body verbatim (no marshal) so a test can inject a
+// deliberately malformed push body and exercise handlePush's decode-error
+// branch.
+func (m *mockTrdOpenD) pushRaw(protoID uint32, body []byte) {
+	frame := opend.Encode(protoID, 0, body)
+	m.mu.Lock()
+	conns := append([]net.Conn(nil), m.conns...)
+	m.mu.Unlock()
+	for _, c := range conns {
+		_, _ = c.Write(frame)
+	}
+}
+
+// closeConns closes and forgets every server-side connection, simulating a
+// mid-session drop; the Adapter's opend.Client then redials and the acceptLoop
+// records the fresh connection. Clearing m.conns ensures a later push targets
+// only the reconnected socket.
+func (m *mockTrdOpenD) closeConns() {
+	m.mu.Lock()
+	conns := append([]net.Conn(nil), m.conns...)
+	m.conns = nil
+	m.mu.Unlock()
+	for _, c := range conns {
+		_ = c.Close()
+	}
+}
+
 // requestsFor returns a mu-guarded copy of every received frame matching
 // protoID, in arrival order.
 func (m *mockTrdOpenD) requestsFor(protoID uint32) []opend.Frame {
