@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"reflect"
 	"testing"
 	"time"
@@ -154,5 +155,146 @@ func TestJournalDaysUnionsChunksAndRaw(t *testing.T) {
 	}
 	if len(days) != 2 || days[0] != "2026-07-05" || days[1] != "2026-07-06" {
 		t.Fatalf("days = %v, want [2026-07-05 2026-07-06]", days)
+	}
+}
+
+// afterDay is a fake "now" two days after the recorded 2026-07-06 events, so
+// that day is strictly in the past and therefore sealable.
+func afterDay(t *testing.T) time.Time {
+	t.Helper()
+	return time.Date(2026, 7, 8, 12, 0, 0, 0, mustLoc(t)) // mustLoc: retention_test.go
+}
+
+func chunkCount(t *testing.T, s *Store, day string) int {
+	t.Helper()
+	var n int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM journal_chunks WHERE day=?", day).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func rawCount(t *testing.T, s *Store, day string) int {
+	t.Helper()
+	var n int
+	if err := s.db.QueryRow("SELECT COUNT(*) FROM journal WHERE day=?", day).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestSealRoundTripGolden(t *testing.T) {
+	s := openAtClock(t, afterDay(t))
+	evs := sampleEvents()
+	for i, ev := range evs {
+		s.RecordEvent(ev, recvBase+int64(i))
+	}
+	s.Flush()
+
+	before, err := s.ReadJournalDay("2026-07-06")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SealJournalDays(); err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	if rawCount(t, s, "2026-07-06") != 0 {
+		t.Fatal("raw rows survived sealing")
+	}
+	if chunkCount(t, s, "2026-07-06") == 0 {
+		t.Fatal("no chunks written")
+	}
+	after, err := s.ReadJournalDay("2026-07-06")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("seal changed the day:\n before: %#v\n after:  %#v", before, after)
+	}
+}
+
+func TestSealSkipsCurrentDay(t *testing.T) {
+	// Clock = the same day as the events → nothing is older than today.
+	s := openAtClock(t, time.Date(2026, 7, 6, 20, 0, 0, 0, mustLoc(t)))
+	s.RecordEvent(feed.ConnUpEvent{}, recvBase)
+	s.Flush()
+	sum, err := s.SealJournalDays()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Days != 0 || chunkCount(t, s, "2026-07-06") != 0 || rawCount(t, s, "2026-07-06") != 1 {
+		t.Fatalf("current day was sealed: sum=%+v", sum)
+	}
+}
+
+func TestSealRatioFloor(t *testing.T) {
+	s := openAtClock(t, afterDay(t))
+	// 500 near-identical book snapshots — the cross-row redundancy zstd targets.
+	for i := 0; i < 500; i++ {
+		px := 100.0 + float64(i%5)*0.01
+		s.RecordEvent(feed.BookEvent{Book: feed.Book{Symbol: "US.AAPL", TsMs: recvBase + int64(i),
+			Bids: []feed.BookLevel{{Price: px, Volume: 300, Orders: 4}, {Price: px - 0.01, Volume: 500, Orders: 7}},
+			Asks: []feed.BookLevel{{Price: px + 0.01, Volume: 200, Orders: 3}}}}, recvBase+int64(i))
+	}
+	s.Flush()
+	sum, err := s.SealJournalDays()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.BytesBefore == 0 || sum.BytesAfter*4 >= sum.BytesBefore {
+		t.Fatalf("ratio floor failed: before=%d after=%d (want after < 25%% of before)", sum.BytesBefore, sum.BytesAfter)
+	}
+}
+
+func TestSealIsIdempotent(t *testing.T) {
+	s := openAtClock(t, afterDay(t))
+	for i, ev := range sampleEvents() {
+		s.RecordEvent(ev, recvBase+int64(i))
+	}
+	s.Flush()
+	if _, err := s.SealJournalDays(); err != nil {
+		t.Fatal(err)
+	}
+	first := chunkCount(t, s, "2026-07-06")
+	sum, err := s.SealJournalDays() // second pass: day has no raw rows → no-op
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Days != 0 || chunkCount(t, s, "2026-07-06") != first {
+		t.Fatalf("second seal was not a no-op: sum=%+v chunks now %d (was %d)", sum, chunkCount(t, s, "2026-07-06"), first)
+	}
+}
+
+func TestSealCrashLeavesDayRaw(t *testing.T) {
+	s := openAtClock(t, afterDay(t))
+	// Small chunks + a fault on chunk index 1 so the day needs >1 chunk and fails mid-seal.
+	prevSize := chunkSize
+	chunkSize = 2
+	defer func() { chunkSize = prevSize }()
+	sealFaultHook = func(chunkNo int) error {
+		if chunkNo == 1 {
+			return errors.New("injected mid-seal fault")
+		}
+		return nil
+	}
+	defer func() { sealFaultHook = nil }()
+
+	for i := 0; i < 5; i++ {
+		s.RecordEvent(feed.ConnUpEvent{}, recvBase+int64(i))
+	}
+	s.Flush()
+
+	sum, err := s.SealJournalDays()
+	if err != nil {
+		t.Fatalf("SealJournalDays must not return an error on a per-day fault: %v", err)
+	}
+	if sum.Failed != 1 || sum.Days != 0 {
+		t.Fatalf("expected Failed=1 Days=0, got %+v", sum)
+	}
+	if rawCount(t, s, "2026-07-06") != 5 {
+		t.Fatalf("raw rows lost after crash: %d, want 5", rawCount(t, s, "2026-07-06"))
+	}
+	if chunkCount(t, s, "2026-07-06") != 0 {
+		t.Fatalf("partial chunks persisted: %d, want 0", chunkCount(t, s, "2026-07-06"))
 	}
 }
