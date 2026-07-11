@@ -126,18 +126,27 @@ export function boundedOverlayAutoscale(
   };
 }
 
-// Max empty bars the user can pan past the latest bar before hitting a wall.
-// Equals rightOffset so the right edge can't be dragged past its resting margin —
-// the symmetric counterpart to fixLeftEdge + LEFT_PAD_BARS on the left. LWC has no
-// native "capped but non-zero" right-edge option (see the timeScale comment below),
-// so ChartPanel enforces it in a subscribeVisibleLogicalRangeChange handler.
+// Resting right-margin (empty bars past the latest bar) and the floor for the
+// pan cap below — the symmetric counterpart to fixLeftEdge + LEFT_PAD_BARS on the
+// left. LWC has no native "capped but non-zero" right-edge option (see the
+// timeScale comment below), so ChartPanel enforces the cap in a
+// subscribeVisibleLogicalRangeChange handler.
 export const RIGHT_OFFSET_BARS = 4;
 
-// Returns the scroll position to snap back to (RIGHT_OFFSET_BARS) when the current
-// one overshoots the cap, or null when it's already within bounds. `scrollPosition`
-// is LWC's distance-from-right-edge-to-latest-bar, measured in bars.
-export function clampRightScroll(scrollPosition: number): number | null {
-  return scrollPosition > RIGHT_OFFSET_BARS ? RIGHT_OFFSET_BARS : null;
+// Returns the scroll position to snap back to when the current one overshoots the
+// cap, or null when it's already within bounds. `scrollPosition` is LWC's
+// distance-from-right-edge-to-latest-bar, measured in bars; `visibleBars` is the
+// current viewport width in bars (to - from of the visible logical range).
+//
+// TradingView-style max right pan: let the user drag all the way until the latest
+// bar reaches the left edge, rather than stopping at the resting margin.
+// scrollPosition === visibleBars puts the latest bar exactly at the left edge, so
+// visibleBars - 1 leaves it one bar-width inside (still visible under rounding).
+// The cap never goes below RIGHT_OFFSET_BARS, so tiny viewports (few visible bars,
+// deeply zoomed in) can't collapse the pan range below the resting margin.
+export function clampRightScroll(scrollPosition: number, visibleBars: number): number | null {
+  const maxScroll = Math.max(RIGHT_OFFSET_BARS, visibleBars - 1);
+  return scrollPosition > maxScroll ? maxScroll : null;
 }
 
 export function chartOptions(p: Palette): DeepChartOptions {
@@ -163,8 +172,10 @@ export function chartOptions(p: Palette): DeepChartOptions {
       // fixRightEdge+rightOffset together always collapse to zero padding — the
       // 4-bar right margin never actually appeared with fixRightEdge set. Leaving
       // it unset (default false) lets rightOffset's margin take effect; the
-      // tradeoff is the user can scroll further right into blank future space
-      // (LWC has no "capped but non-zero" right-edge mode).
+      // tradeoff is LWC itself places no ceiling on how far right the user can
+      // scroll into blank future space (LWC has no "capped but non-zero"
+      // right-edge mode), so ChartPanel enforces its own dynamic cap via
+      // clampRightScroll — see that function's comment above.
       // fixLeftEdge: max backward pan is the first data point. This one DOES work
       // as intended — unlike maxRightOffset, TimeScale._private__minRightOffset()
       // derives its cap from the first data point's actual index rather than a

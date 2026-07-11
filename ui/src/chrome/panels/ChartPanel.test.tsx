@@ -122,26 +122,44 @@ describe("ChartPanel", () => {
     expect(chartApi.remove).toHaveBeenCalledTimes(1);
   });
 
-  it("caps rightward panning at RIGHT_OFFSET_BARS by subscribing a visible-range clamp, and unsubscribes on unmount", () => {
+  it("caps rightward panning at RIGHT_OFFSET_BARS when no range is known yet, and unsubscribes on unmount", () => {
     const { unmount } = renderChart();
     expect(timeScaleApi.subscribeVisibleLogicalRangeChange).toHaveBeenCalledTimes(1);
-    const clampRight = timeScaleApi.subscribeVisibleLogicalRangeChange.mock.calls[0][0] as () => void;
+    const clampRight = timeScaleApi.subscribeVisibleLogicalRangeChange.mock.calls[0][0] as (r: { from: number; to: number } | null) => void;
 
-    // Panned past the cap: snap back to RIGHT_OFFSET_BARS (4), no bar-spacing change.
+    // No range (e.g. before the chart has laid out bars) falls back to the
+    // RIGHT_OFFSET_BARS floor: panned past it snaps back, no bar-spacing change.
     timeScaleApi.scrollPosition.mockReturnValue(20);
-    clampRight();
+    clampRight(null);
     expect(timeScaleApi.scrollToPosition).toHaveBeenCalledWith(4, false);
 
     // Within bounds (resting position or scrolled into history): no snap.
     timeScaleApi.scrollToPosition.mockClear();
     timeScaleApi.scrollPosition.mockReturnValue(4);
-    clampRight();
+    clampRight(null);
     timeScaleApi.scrollPosition.mockReturnValue(-2);
-    clampRight();
+    clampRight(null);
     expect(timeScaleApi.scrollToPosition).not.toHaveBeenCalled();
 
     unmount();
     expect(timeScaleApi.unsubscribeVisibleLogicalRangeChange).toHaveBeenCalledWith(clampRight);
+  });
+
+  it("expands the rightward pan cap to the visible range width, so the latest bar can reach the left edge", () => {
+    renderChart();
+    const clampRight = timeScaleApi.subscribeVisibleLogicalRangeChange.mock.calls[0][0] as (r: { from: number; to: number } | null) => void;
+
+    // A 50-bar-wide viewport: panning past the resting margin but still within the
+    // expanded range (latest bar not yet past the left edge) does not snap back.
+    timeScaleApi.scrollPosition.mockReturnValue(30);
+    clampRight({ from: 0, to: 50 });
+    expect(timeScaleApi.scrollToPosition).not.toHaveBeenCalled();
+
+    // Panned past the new cap (visibleBars - 1 = 49, i.e. past latest-bar-at-left-edge):
+    // snap back to 49, not the old fixed RIGHT_OFFSET_BARS.
+    timeScaleApi.scrollPosition.mockReturnValue(60);
+    clampRight({ from: 0, to: 50 });
+    expect(timeScaleApi.scrollToPosition).toHaveBeenCalledWith(49, false);
   });
 
   it("scopes indicator instanceIds to the panel, so two panels adding the same indicator type don't collide (Finding 2 regression)", () => {

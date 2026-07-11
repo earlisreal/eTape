@@ -104,16 +104,24 @@ describe("boundedOverlayAutoscale", () => {
 
 describe("clampRightScroll", () => {
   it("does not clamp the resting position (scrollPosition === rightOffset)", () => {
-    expect(clampRightScroll(RIGHT_OFFSET_BARS)).toBeNull();
+    expect(clampRightScroll(RIGHT_OFFSET_BARS, 50)).toBeNull();
   });
 
-  it("snaps back to RIGHT_OFFSET_BARS once panned past the cap", () => {
-    expect(clampRightScroll(RIGHT_OFFSET_BARS + 0.1)).toBe(RIGHT_OFFSET_BARS);
-    expect(clampRightScroll(RIGHT_OFFSET_BARS + 20)).toBe(RIGHT_OFFSET_BARS);
+  it("does not clamp within the expanded latest-bar-at-left-edge range", () => {
+    expect(clampRightScroll(30, 50)).toBeNull();
+  });
+
+  it("snaps back to visibleBars - 1 once panned past the cap (latest bar at left edge)", () => {
+    expect(clampRightScroll(60, 50)).toBe(49);
+    expect(clampRightScroll(49.1, 50)).toBe(49);
+  });
+
+  it("floors the cap at RIGHT_OFFSET_BARS for tiny viewports", () => {
+    expect(clampRightScroll(5, 3)).toBe(RIGHT_OFFSET_BARS);
   });
 
   it("does not clamp when scrolled left of the cap (into history)", () => {
-    expect(clampRightScroll(0)).toBeNull();
-    expect(clampRightScroll(-5)).toBeNull();
+    expect(clampRightScroll(0, 50)).toBeNull();
+    expect(clampRightScroll(-5, 50)).toBeNull();
   });
 });

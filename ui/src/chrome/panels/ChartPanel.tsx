@@ -1,9 +1,9 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { createChart, createTextWatermark, CandlestickSeries, BarSeries, HistogramSeries, LineSeries, AreaSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type Coordinate } from "lightweight-charts";
+import { createChart, createTextWatermark, CandlestickSeries, BarSeries, HistogramSeries, LineSeries, AreaSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type LogicalRange, type Coordinate } from "lightweight-charts";
 import type { PanelProps } from "./registry";
 import { ChartController } from "../../render/chart/ChartController";
-import { clampRightScroll, type ChartType } from "../../render/chart/chartTheme";
+import { clampRightScroll, RIGHT_OFFSET_BARS, type ChartType } from "../../render/chart/chartTheme";
 import type { ChartApiFacade, LwcSeries } from "../../render/chart/ChartApiFacade";
 import { DiamondFillPrimitive } from "../../render/chart/diamondPrimitive";
 import { SessionShadingPrimitive } from "../../render/chart/sessionPrimitive";
@@ -192,10 +192,13 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const chart = createChart(host, { width, height });
     // Right-edge pan cap: LWC has no native "capped but non-zero" right-edge option
     // (fixRightEdge hardcodes the margin to 0 — see chartTheme's rightOffset comment),
-    // so bound it here. scrollPosition() is the distance in bars from the right edge
-    // to the latest bar; snapping it back (without changing bar spacing) preserves
-    // zoom. The re-fired event after scrollToPosition is a no-op second pass since
-    // scrollPosition() then equals the cap.
+    // so bound it here. TradingView-style: the user can pan right until the latest
+    // bar reaches the left edge of the viewport, not just past the resting margin —
+    // clampRightScroll derives that limit from the current visible bar count (the
+    // LogicalRange width), so it tracks zoom level. scrollPosition() is the distance
+    // in bars from the right edge to the latest bar; snapping it back (without
+    // changing bar spacing) preserves zoom. The re-fired event after scrollToPosition
+    // is a no-op second pass since scrollPosition() then equals the cap.
     const timeScale = chart.timeScale();
     // subscribeVisibleLogicalRangeChange fires synchronously from LWC's native
     // pan/zoom/wheel handling -- at input-device polling rate (125-1000Hz),
@@ -213,8 +216,9 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       if (selectionFrame !== null) return;
       selectionFrame = requestAnimationFrame(() => { selectionFrame = null; refreshSelRef.current?.(); });
     };
-    const clampRight = () => {
-      const target = clampRightScroll(timeScale.scrollPosition());
+    const clampRight = (range: LogicalRange | null) => {
+      const visibleBars = range ? range.to - range.from : RIGHT_OFFSET_BARS;
+      const target = clampRightScroll(timeScale.scrollPosition(), visibleBars);
       if (target !== null) timeScale.scrollToPosition(target, false);
       scheduleRefreshSelection();
     };
