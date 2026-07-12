@@ -80,8 +80,17 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
     if (trimmed.toUpperCase() === bareSymbol(symbol).toUpperCase()) return;
     const sym = normalizeSymbol(trimmed);
     if (group !== null) {
-      const r = await linkGroups.focusChecked(group, sym); // validated, broadcasts to group + engine
-      if (!r.ok) toast.push({ level: "danger", text: `${bareSymbol(sym)} rejected — ${r.reason}` });
+      // try/catch mirrors PanelFrame.tsx's `commit` closure (see its Review
+      // finding comment): this is invoked fire-and-forget (`void commitSymbol(...)`
+      // below), so a transport-level rejection from `focusChecked`'s underlying
+      // `sendCommand` — distinct from the engine returning a handled `{ok:false}`
+      // ack below — would otherwise become a silent unhandled rejection.
+      try {
+        const r = await linkGroups.focusChecked(group, sym); // validated, broadcasts to group + engine
+        if (!r.ok) toast.push({ level: "danger", text: `${bareSymbol(sym)} rejected — ${r.reason}` });
+      } catch (err) {
+        toast.push({ level: "danger", text: `${bareSymbol(sym)} failed — ${err instanceof Error ? err.message : "unexpected error"}` });
+      }
     } else {
       onConfigChange({ symbol: sym }); // pinned: unvalidated local persist (no `demand` profile here)
       setSymbol(sym);

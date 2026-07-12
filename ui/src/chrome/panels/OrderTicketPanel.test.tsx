@@ -236,6 +236,23 @@ describe("OrderTicketPanel", () => {
     expect(linkGroups.symbolFor("green")).toBe("HK.00700");
     expect(input.value).toBe("00700");
   });
+  it("a rejecting/throwing focusChecked promise (transport failure) surfaces a toast, not a silent unhandled rejection", async () => {
+    // Mirrors PanelFrame.test.tsx's equivalent `commit` regression test —
+    // commitSymbol's grouped branch must try/catch focusChecked the same way,
+    // since it too is invoked fire-and-forget (`void commitSymbol(...)`).
+    const { props, stores, linkGroups } = mkProps();
+    vi.spyOn(linkGroups, "focusChecked").mockRejectedValue(new Error("network down"));
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    const input = screen.getByTestId("symbol") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "MSFT" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await screen.findByText(/failed — network down/i);
+  });
   it("Escape after editing reverts the header without committing anything", () => {
     const { props, stores, linkGroups } = mkProps();
     act(() => {
