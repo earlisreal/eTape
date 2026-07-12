@@ -38,7 +38,6 @@ const MODE_LABEL: Record<SizingMode, string> = { Dollar: "Dollar", BuyingPowerPc
 const MANAGE_ACTIONS: ManagementAction[] = ["CancelLast", "CancelAllFocused", "CancelAllEverything", "KillSwitch"];
 
 const OFFSET_STEP = 0.05;
-const EXT_BUFFER_STEP = 0.1;
 const SIZE_STEP: Record<SizingMode, number> = { Dollar: 100, BuyingPowerPct: 1, Shares: 1, PositionFraction: 1 };
 // Only the two percent-based modes have a natural ceiling (100% of buying
 // power / position can't be exceeded); Dollar and Shares are unbounded above.
@@ -49,9 +48,6 @@ const isPercentMode = (m: SizingMode): boolean => m === "BuyingPowerPct" || m ==
 // land on 0.09999999999999999 in double precision).
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
-}
-function round1(n: number): number {
-  return Math.round(n * 10) / 10;
 }
 function clampNum(n: number, min: number, max?: number): number {
   const v = Math.max(min, n);
@@ -334,7 +330,6 @@ function TemplateCard({ t, palette, dup, isFirst, isLast, rawEdits, setRawEdit, 
 export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; onSave: (next: OrderConfig) => void }): JSX.Element {
   const { palette } = useTheme();
   const [templates, setTemplates] = useState<ActionTemplate[]>(() => config.templates.map((t) => ({ ...t })));
-  const [extBufferPct, setExtBufferPct] = useState<number>(() => config.extHoursMarketBufferPct ?? 1.0);
   const [addOpen, setAddOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   // Offset and size-value are fully-controlled numeric fields whose display
@@ -387,7 +382,7 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
   // strings, not uid()-generated) — must not survive it; otherwise the
   // display would keep showing pre-reset in-progress typed text instead of
   // snapping to the restored default value.
-  const doReset = () => { setTemplates(normalizeOrderConfig({ ...config, templates: DEFAULT_TEMPLATES.map((t) => ({ ...t })) }).templates); setExtBufferPct(1.0); setRawEdits({}); setConfirmReset(false); };
+  const doReset = () => { setTemplates(normalizeOrderConfig({ ...config, templates: DEFAULT_TEMPLATES.map((t) => ({ ...t })) }).templates); setRawEdits({}); setConfirmReset(false); };
   const places = templates.filter((t): t is PlaceOrderTemplate => t.kind === "place");
 
   const combos = templates.map((t) => t.hotkey ?? "").filter((c) => c !== "");
@@ -416,26 +411,6 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
         ))}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <span style={{ fontSize: 11, color: palette.text }}>Ext-hours market buffer %</span>
-        <StepField
-          ariaLabel="ext-buffer"
-          testid="ext-buffer"
-          value={rawEdits["config:ext-buffer"] ?? String(extBufferPct)}
-          onType={(v) => {
-            setRawEdit("config:ext-buffer", v);
-            const n = Number(v);
-            if (!Number.isNaN(n)) setExtBufferPct(clampNum(n, 0.1, 10));
-          }}
-          onStep={(dir) => {
-            setExtBufferPct((p) => clampNum(round1(p + dir * EXT_BUFFER_STEP), 0.1, 10));
-            clearRawEdit("config:ext-buffer");
-          }}
-          onBlur={() => clearRawEdit("config:ext-buffer")}
-          style={{ width: 84 }}
-        />
-      </div>
-
       <div style={sectionLabel}>TEMPLATES</div>
       {templates.map((t, i) => (
         <TemplateCard
@@ -461,7 +436,7 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
         <HoverButton
-          className="btn" data-testid="save" disabled={hasConflict} onClick={() => onSave({ ...config, templates, extHoursMarketBufferPct: extBufferPct })}
+          className="btn" data-testid="save" disabled={hasConflict} onClick={() => onSave({ ...config, templates })}
           style={{
             ...actionBtn, fontWeight: 700, cursor: hasConflict ? "not-allowed" : "pointer",
             background: hasConflict ? palette.border : palette.accent,

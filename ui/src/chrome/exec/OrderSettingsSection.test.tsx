@@ -477,21 +477,20 @@ describe("OrderSettingsSection", () => {
     expect(lastDown.disabled).toBe(true);
   });
 
-  it("defaults the ext-hours market buffer to 1.0 and saves it", () => {
-    const { onSave } = wrap();
+  // Ext-hours buffer % moved to GeneralSection.tsx; this component must
+  // neither render it nor overwrite it on save — Save spreads the live
+  // `config` prop (whatever GeneralSection last saved) before overriding
+  // only `templates`.
+  it("no longer renders the ext-hours buffer control and preserves its value from config on save", () => {
+    const onSave = vi.fn();
+    render(
+      <ThemeProvider>
+        <OrderSettingsSection config={{ ...SAMPLE_ORDER_CONFIG, extHoursMarketBufferPct: 2.5 }} onSave={onSave} />
+      </ThemeProvider>,
+    );
+    expect(screen.queryByTestId("ext-buffer")).toBeNull();
+    expect(screen.queryByText("Ext-hours market buffer %")).toBeNull();
     fireEvent.click(screen.getByTestId("save"));
-    expect(onSave.mock.calls[0][0].extHoursMarketBufferPct).toBe(1.0);
-  });
-  it("nudges the ext-hours market buffer up by 0.1", () => {
-    const { onSave } = wrap();
-    fireEvent.click(screen.getByTestId("ext-buffer-up"));
-    fireEvent.click(screen.getByTestId("save"));
-    expect(onSave.mock.calls[0][0].extHoursMarketBufferPct).toBeCloseTo(1.1);
-  });
-  it("caps a typed ext-hours buffer at 10 on save", () => {
-    const { onSave } = wrap();
-    fireEvent.change(screen.getByLabelText("ext-buffer"), { target: { value: "50" } });
-    fireEvent.click(screen.getByTestId("save"));
-    expect(onSave.mock.calls[0][0].extHoursMarketBufferPct).toBe(10);
+    expect(onSave.mock.calls[0][0].extHoursMarketBufferPct).toBe(2.5);
   });
 });
