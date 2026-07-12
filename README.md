@@ -217,6 +217,29 @@ caps (max day loss, per-symbol position value/shares) and per-venue caps (max or
 value, position size, open orders) — and the venue must be explicitly **armed** in
 the UI. Live venues trade real money; configure them deliberately.
 
+### Setting up Alpaca
+
+[Alpaca](https://alpaca.markets/) is the quickest venue to get running: a free
+account gives you paper trading with no funding required, and eTape reuses the same
+keys for deep chart history.
+
+1. **Create a free account** at [alpaca.markets](https://alpaca.markets/). Paper
+   trading works without depositing anything.
+2. **Generate paper API keys** (Key ID + Secret Key) from the dashboard — steps 1–2
+   of [Alpaca's connection guide](https://alpaca.markets/learn/connect-to-alpaca-api)
+   show exactly where. Live keys are separate, generated from the live dashboard,
+   and only needed if you configure a live venue.
+3. **Add the venue in eTape**: **Settings → Venues → Add venue**, pick broker
+   **Alpaca**, paste the Key ID and Secret Key, and hit **Test connection** — eTape
+   verifies the keys and auto-detects the environment (paper/live) before saving.
+4. **Arm the venue** in the UI when you're ready to send orders; until then the
+   gate blocks everything.
+
+As a bonus, once a paper Alpaca venue is configured the engine automatically reuses
+its keys (read-only) for historical chart data — full daily history plus deep
+1-minute backfill from Alpaca's free market-data API — no extra setup. Live keys
+are deliberately never used for this.
+
 ## Configuration
 
 Everything lives in `~/.eTape/` (`%USERPROFILE%\.eTape\` on Windows):
