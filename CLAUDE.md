@@ -40,6 +40,13 @@ execution spec: venues, two-layer gate, TZ + Alpaca v1, moomoo v1.x).
   anything is wrong, stop and surface it instead of offering to merge. As with the
   auto-commit rule above, **pushing stays a separate, explicit step** — merge and
   worktree cleanup are local only.
+- **A commit is the finish line — the push is Earl's.** Once the work is committed
+  (or merged into local `main`), the task is **done**: there is no pending item left.
+  Do not treat "not pushed" as an outstanding TODO, do not offer to push, and do not
+  carry an unpushed state forward in summaries or memory as if it were unfinished
+  work. Pushing to the remote is a separate action that **Earl does manually**, when
+  he chooses. (This makes the "pushing stays a separate, explicit step" notes above
+  explicit: *separate ≠ pending*.)
 - **Guard against subagents committing to `main`.** Subagents have repeatedly landed
   stray commits directly on shared `main` instead of their assigned worktree (a bare
   "Work from: `<dir>`" line in a dispatch prompt is not a strong enough gate). Two
