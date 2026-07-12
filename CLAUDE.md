@@ -17,7 +17,9 @@ execution spec: venues, two-layer gate, TZ + Alpaca v1, moomoo v1.x).
 
 - **Auto-commit approved specs and plans.** When a design spec or an implementation
   plan is approved, commit the artifact automatically, in the same turn — don't wait
-  to be asked.
+  to be asked. **A request to execute a spec or plan counts as approval of it** — if
+  the artifact isn't committed yet, auto-commit it first (same rules below), then
+  proceed with execution.
   - Specs live in `docs/superpowers/specs/` → commit as `docs(specs): <description>`.
   - Plans live in `docs/superpowers/plans/` → commit as
     `docs(plans): add <feature> implementation plan`.
