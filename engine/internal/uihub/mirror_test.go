@@ -144,6 +144,38 @@ func TestMirrorPositionsSnapshotUsesMark(t *testing.T) {
 	}
 }
 
+// TestMirrorZeroQtyPositionEvicts verifies a PositionUpdate with Qty == 0
+// (a closed/flattened position) evicts the venue|symbol entry from
+// m.positions instead of storing it -- otherwise the map grows unbounded
+// within a session (the UI already filters qty!==0, but the mirror itself
+// should not retain dead rows).
+func TestMirrorZeroQtyPositionEvicts(t *testing.T) {
+	m := testMirror()
+	m.applyExec(exec.PositionUpdate{Position: exec.Position{Venue: "sim", Symbol: "US.AAPL", Qty: 100, AvgPrice: 3.50}})
+	frames := m.snapshotFrames(wsmsg.TopicExecPositions)
+	if len(frames) != 1 {
+		t.Fatalf("expected one positions snapshot frame, got %d", len(frames))
+	}
+	rows := frames[0].Payload.([]wsmsg.PositionRow)
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row after nonzero position update, got %d: %+v", len(rows), rows)
+	}
+
+	d := m.applyExec(exec.PositionUpdate{Position: exec.Position{Venue: "sim", Symbol: "US.AAPL", Qty: 0}})
+	if len(d) != 1 || d[0].Topic != wsmsg.TopicExecPositions {
+		t.Fatalf("expected one exec.positions delta on zero-qty update, got %+v", d)
+	}
+	if rows := d[0].Payload.([]wsmsg.PositionRow); len(rows) != 0 {
+		t.Fatalf("expected empty payload after zero-qty position update, got %+v", rows)
+	}
+	if _, ok := m.positions["sim|US.AAPL"]; ok {
+		t.Fatalf("expected m.positions to have evicted sim|US.AAPL, but it is still present: %+v", m.positions)
+	}
+	if len(m.positions) != 0 {
+		t.Fatalf("expected m.positions to be empty after eviction, got %+v", m.positions)
+	}
+}
+
 func TestMirrorOrdersSnapshotIsArray(t *testing.T) {
 	m := testMirror()
 	m.applyExec(exec.OrderUpdate{Order: exec.Order{Venue: "sim", ID: "ET1", Symbol: "US.AAPL", Status: exec.StatusSubmitted}})
