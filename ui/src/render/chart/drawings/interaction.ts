@@ -14,9 +14,22 @@ export interface DrawingFacade {
   setPanZoomEnabled(on: boolean): void;
 }
 
+export type PointerLike = { clientX: number; clientY: number; target?: EventTarget | null; button?: number };
+export type KeyLike = { key: string; preventDefault?: () => void };
+
+// Keys mirror the DOM event names registered in the constructor below; a real
+// host's PointerEvent/KeyboardEvent are structurally compatible with the
+// Pointer/Key-Like subsets, so production callers need no cast.
+export type HostEventMap = {
+  pointerdown: PointerLike;
+  pointermove: PointerLike;
+  pointerup: PointerLike;
+  keydown: KeyLike;
+};
+
 export interface InteractionHost {
-  addEventListener(type: string, cb: (e: any) => void): void;
-  removeEventListener(type: string, cb: (e: any) => void): void;
+  addEventListener<K extends keyof HostEventMap>(type: K, cb: (e: HostEventMap[K]) => void): void;
+  removeEventListener<K extends keyof HostEventMap>(type: K, cb: (e: HostEventMap[K]) => void): void;
   getBoundingClientRect(): { left: number; top: number; width: number; height: number };
   focus(): void;
   clientWidth: number;
@@ -29,9 +42,6 @@ export interface DrawingContext {
   bars(): readonly Bar[];
   timeframeMs(): number;
 }
-
-type PointerLike = { clientX: number; clientY: number; target?: EventTarget | null; button?: number };
-type KeyLike = { key: string; preventDefault?: () => void };
 
 type Gesture =
   | { kind: "none" }
@@ -48,7 +58,7 @@ export class DrawingInteraction {
   private readonly onToolChange: ((t: Tool) => void) | undefined;
   private readonly onSelectionChange: (() => void) | undefined;
   private readonly styleForKind: ((k: DrawingKind) => Pick<Drawing, "color" | "width" | "lineStyle">) | undefined;
-  private readonly listeners: [string, (e: any) => void][] = [];
+  private readonly listeners: [keyof HostEventMap, (e: PointerLike | KeyLike) => void][] = [];
 
   constructor(
     private readonly host: InteractionHost,
@@ -67,10 +77,13 @@ export class DrawingInteraction {
     this.styleForKind = opts?.styleForKind;
     host.tabIndex = host.tabIndex >= 0 ? host.tabIndex : 0;
     host.style.outline = "none";
-    const on = (t: string, cb: (e: any) => void) => { host.addEventListener(t, cb); this.listeners.push([t, cb]); };
+    const on = <K extends keyof HostEventMap>(t: K, cb: (e: HostEventMap[K]) => void) => {
+      host.addEventListener(t, cb);
+      this.listeners.push([t, cb as (e: PointerLike | KeyLike) => void]);
+    };
     on("pointerdown", (e) => this.onPointerDown(e));
     on("pointermove", (e) => this.onPointerMove(e));
-    on("pointerup", (e) => this.onPointerUp(e));
+    on("pointerup", () => this.onPointerUp());
     on("keydown", (e) => this.onKeyDown(e));
   }
 
@@ -308,7 +321,7 @@ export class DrawingInteraction {
     }
   }
 
-  private onPointerUp(_e: PointerLike): void {
+  private onPointerUp(): void {
     const g = this.gesture;
     if (g.kind === "handleDrag" || g.kind === "bodyDrag") {
       this.gesture = { kind: "none" };

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { DrawingInteraction } from "./interaction";
+import type { HostEventMap, PointerLike, KeyLike } from "./interaction";
 import { DrawingStore } from "./store";
 import type { Bar } from "../../../gen/wsmsg";
 
@@ -23,17 +24,19 @@ function fakePrimitive() {
   return { setSelection: vi.fn(), setTransient: vi.fn(), requestUpdate: vi.fn() };
 }
 function fakeHost() {
-  const handlers = new Map<string, (e: any) => void>();
+  const handlers = new Map<keyof HostEventMap, (e: PointerLike | KeyLike) => void>();
   const host = {
-    addEventListener: (t: string, cb: (e: any) => void) => handlers.set(t, cb),
-    removeEventListener: (t: string) => handlers.delete(t),
+    addEventListener: <K extends keyof HostEventMap>(t: K, cb: (e: HostEventMap[K]) => void) =>
+      handlers.set(t, cb as (e: PointerLike | KeyLike) => void),
+    removeEventListener: (t: keyof HostEventMap) => handlers.delete(t),
     getBoundingClientRect: () => ({ left: 0, top: 0, width: 400, height: 300 }),
     focus: vi.fn(),
     clientWidth: 400,
     tabIndex: 0,
     style: { outline: "" },
   };
-  return { host, fire: (t: string, e: any) => handlers.get(t)?.(e) };
+  const fire = <K extends keyof HostEventMap>(t: K, e: HostEventMap[K]) => handlers.get(t)?.(e);
+  return { host, fire };
 }
 function ctx() {
   return { symbol: () => "US.AAPL", bars: () => bars, timeframeMs: () => 60_000 };
@@ -293,7 +296,7 @@ describe("DrawingInteraction context-menu/selection API", () => {
   it("hitTestAt returns the drawing id at the point, null elsewhere", () => {
     const store = new DrawingStore();
     seedHline(store);
-    const di = new DrawingInteraction(mkHost() as any, mkFacade() as any, mkPrim() as any, store, mkCtx() as any);
+    const di = new DrawingInteraction(mkHost(), mkFacade(), mkPrim(), store, mkCtx());
     // hline at price 10 → y = 1000-10 = 990, spans full width
     expect(di.hitTestAt({ x: 200, y: 990 })).toBe("h1");
     expect(di.hitTestAt({ x: 200, y: 500 })).toBeNull();
@@ -303,7 +306,7 @@ describe("DrawingInteraction context-menu/selection API", () => {
     const store = new DrawingStore();
     seedHline(store);
     const prim = mkPrim();
-    const di = new DrawingInteraction(mkHost() as any, mkFacade() as any, prim as any, store, mkCtx() as any);
+    const di = new DrawingInteraction(mkHost(), mkFacade(), prim, store, mkCtx());
     di.select("h1");
     expect(di.selectedId()).toBe("h1");
     expect(prim.setSelection).toHaveBeenCalledWith("h1");

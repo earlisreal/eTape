@@ -7,7 +7,7 @@ import { ThemeProvider } from "./ThemeProvider";
 
 function withStore(phase: "connecting" | "sealing" | "ready", daysTotal = 0) {
   const boot = new BootStore();
-  boot.apply({ kind: "snapshot", topic: "sys.boot", payload: { phase, daysTotal } } as any);
+  boot.apply({ kind: "snapshot", topic: "sys.boot", payload: { phase, daysTotal } });
   return boot;
 }
 

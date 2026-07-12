@@ -127,7 +127,7 @@ func VerifyAccount(ctx context.Context, addr string, accountID uint64, env strin
 		clk = clock.System{}
 	}
 	client := opend.New(opend.Options{Addr: addr, ClientID: "etape-trade-probe", Clock: clk})
-	go client.Run(pctx)
+	go func() { _ = client.Run(pctx) }()
 
 	select {
 	case st, ok := <-client.State():

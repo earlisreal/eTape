@@ -4,7 +4,7 @@ import type { AckMsg } from "./contract";
 import type { ConnState } from "./WsClient";
 
 function fakeClient() {
-  const sent: { name: string; args: any }[] = [];
+  const sent: { name: string; args: unknown }[] = [];
   let stateCb: ((s: ConnState) => void) | null = null;
   let nextAck: AckMsg = { kind: "ack", corrId: "", status: "accepted" };
   return {
@@ -22,7 +22,7 @@ function fakeClient() {
 // tests can interleave a release() in between an ensure() call and the
 // moment its EnsureSymbol ack actually resolves.
 function controlledClient() {
-  const sent: { name: string; args: any }[] = [];
+  const sent: { name: string; args: unknown }[] = [];
   let stateCb: ((s: ConnState) => void) | null = null;
   const resolvers: Array<(ack: AckMsg) => void> = [];
   return {

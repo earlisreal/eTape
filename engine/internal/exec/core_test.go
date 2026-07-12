@@ -81,8 +81,17 @@ func newTestCore(t *testing.T, venues ...exec.VenueID) (*exec.Core, map[exec.Ven
 		cancel()
 		t.Fatal(err)
 	}
-	go func() { _ = c.Run(ctx) }()
-	t.Cleanup(cancel)
+	done := make(chan struct{})
+	go func() { defer close(done); _ = c.Run(ctx) }()
+	// cancel THEN wait for Run to actually return before the st.Close()
+	// cleanup (registered earlier, so it runs after this one) closes the
+	// store's write channel — otherwise Run can still be mid-appendAndFold
+	// on a send to that channel, racing Close's close() of it. See the
+	// identical race documented in capstone_test.go.
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
 	return c, sims, cancel
 }
 
@@ -315,8 +324,15 @@ func buildCoreWithClock(t *testing.T, b *capStub, startingBalance map[exec.Venue
 		cancel()
 		t.Fatal(err)
 	}
-	go func() { _ = c.Run(ctx) }()
-	t.Cleanup(cancel)
+	done := make(chan struct{})
+	go func() { defer close(done); _ = c.Run(ctx) }()
+	// See newTestCore's identical cleanup above: cancel THEN wait for Run to
+	// return before the earlier-registered st.Close() cleanup fires, or Run
+	// can still be sending to the store's write channel when Close closes it.
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
 	return c, b
 }
 

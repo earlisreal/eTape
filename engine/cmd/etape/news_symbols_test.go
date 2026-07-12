@@ -7,8 +7,8 @@ import (
 
 func TestNewsSymbols_UnionDedupSorted(t *testing.T) {
 	got := newsSymbols(
-		[]string{"US.AAPL", "US.MSFT"},      // pool members
-		[]string{"US.MSFT", "US.NVDA", ""},  // live UI demands (+ empty)
+		[]string{"US.AAPL", "US.MSFT"},     // pool members
+		[]string{"US.MSFT", "US.NVDA", ""}, // live UI demands (+ empty)
 	)
 	want := []string{"US.AAPL", "US.MSFT", "US.NVDA"}
 	if !reflect.DeepEqual(got, want) {

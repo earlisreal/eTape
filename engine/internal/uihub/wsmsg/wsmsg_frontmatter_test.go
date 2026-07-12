@@ -120,10 +120,10 @@ func testFrontmatterParityEnums(t *testing.T) {
 	frontmatter := frontmatterText(t)
 
 	enums := map[string][]string{
-		"Side":          {string(wsmsg.SideBuy), string(wsmsg.SideSell), string(wsmsg.SideShort), string(wsmsg.SideCover)},
-		"OrderType":     {string(wsmsg.OrderMarket), string(wsmsg.OrderLimit), string(wsmsg.OrderStop), string(wsmsg.OrderStopLimit)},
-		"TIF":           {string(wsmsg.TIFDay), string(wsmsg.TIFGTC), string(wsmsg.TIFIOC), string(wsmsg.TIFFOK)},
-		"OrderSession":  {string(wsmsg.SessionAuto), string(wsmsg.SessionRTH), string(wsmsg.SessionExtended), string(wsmsg.SessionOvernight)},
+		"Side":         {string(wsmsg.SideBuy), string(wsmsg.SideSell), string(wsmsg.SideShort), string(wsmsg.SideCover)},
+		"OrderType":    {string(wsmsg.OrderMarket), string(wsmsg.OrderLimit), string(wsmsg.OrderStop), string(wsmsg.OrderStopLimit)},
+		"TIF":          {string(wsmsg.TIFDay), string(wsmsg.TIFGTC), string(wsmsg.TIFIOC), string(wsmsg.TIFFOK)},
+		"OrderSession": {string(wsmsg.SessionAuto), string(wsmsg.SessionRTH), string(wsmsg.SessionExtended), string(wsmsg.SessionOvernight)},
 		"OrderStatus": {
 			string(wsmsg.StatusSubmitted), string(wsmsg.StatusAccepted), string(wsmsg.StatusPartiallyFilled),
 			string(wsmsg.StatusFilled), string(wsmsg.StatusCanceled), string(wsmsg.StatusRejected),

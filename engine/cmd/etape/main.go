@@ -245,7 +245,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		log.Error("single-instance lock", "err", err)
 		return 1, false, nil
 	}
-	defer releaseLock()
+	defer func() { _ = releaseLock() }()
 	log.Info("single-instance lock acquired", "lock", dbPath+".lock")
 
 	if *vacuum {

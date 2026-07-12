@@ -88,7 +88,7 @@ func TestFeed_RunEmitsConnUpThenData(t *testing.T) {
 			case <-stopAdvancing:
 				return
 			default:
-				fk.Advance(feedTickMs)
+				fk.Advance(feedTick)
 				time.Sleep(time.Millisecond)
 			}
 		}
@@ -291,7 +291,7 @@ func TestFeed_RunConnUpOnce(t *testing.T) {
 	f := NewFeed(g, nopHist{}, fk)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	go f.Run(ctx)
+	go func() { _ = f.Run(ctx) }()
 
 	select {
 	case ev := <-f.Events():

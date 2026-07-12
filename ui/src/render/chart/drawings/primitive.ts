@@ -10,7 +10,7 @@ import { DEFAULT_DRAWING_WIDTH, DEFAULT_LINE_STYLE } from "./model";
 
 // Repo convention: derive the draw target structurally instead of importing
 // fancy-canvas's CanvasRenderingTarget2D directly.
-type DrawTarget = Parameters<IPrimitivePaneRenderer["draw"]>[0];
+export type DrawTarget = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 
 export interface Transient {
   ghost?: { kind: DrawingKind; anchors: Anchor[] };
@@ -104,7 +104,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
     });
   }
 
-  private strokeShape(ctx: any, kind: DrawingKind, anchors: Anchor[], hr: number, vr: number, width: number, color: string, lineWidth: number): void {
+  private strokeShape(ctx: CanvasRenderingContext2D, kind: DrawingKind, anchors: Anchor[], hr: number, vr: number, width: number, color: string, lineWidth: number): void {
     ctx.strokeStyle = color;
     ctx.lineWidth = lineWidth;
     const p0 = this.pt(anchors[0], hr, vr);
@@ -122,14 +122,14 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
     if (kind === "rect") { ctx.strokeRect(Math.min(p0.x, p1.x), Math.min(p0.y, p1.y), Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y)); }
   }
 
-  private line(ctx: any, x0: number, y0: number, x1: number, y1: number): void {
+  private line(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number): void {
     ctx.beginPath();
     ctx.moveTo(x0, y0);
     ctx.lineTo(x1, y1);
     ctx.stroke();
   }
 
-  private handles(ctx: any, anchors: Anchor[], hr: number, vr: number): void {
+  private handles(ctx: CanvasRenderingContext2D, anchors: Anchor[], hr: number, vr: number): void {
     const r = 3;
     for (const a of anchors) {
       const p = this.pt(a, hr, vr);
@@ -142,7 +142,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
     }
   }
 
-  private measure(ctx: any, m: { from: Anchor; to: Anchor }, hr: number, vr: number): void {
+  private measure(ctx: CanvasRenderingContext2D, m: { from: Anchor; to: Anchor }, hr: number, vr: number): void {
     const p0 = this.pt(m.from, hr, vr);
     const p1 = this.pt(m.to, hr, vr);
     if (!p0 || !p1) return;

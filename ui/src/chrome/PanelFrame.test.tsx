@@ -447,10 +447,10 @@ describe("PanelFrame — type-to-load (Task 13)", () => {
 
 describe("PanelFrame — DemandRegistry wiring (Task 10)", () => {
   it("ensures the effective symbol on mount for a demand panel", async () => {
-    const calls: { m: string; args: any[] }[] = [];
+    const calls: { m: string; args: unknown[] }[] = [];
     const reg = {
-      ensure: (...a: any[]) => { calls.push({ m: "ensure", args: a }); return Promise.resolve({ kind: "ack", corrId: "", status: "accepted" }); },
-      release: (...a: any[]) => { calls.push({ m: "release", args: a }); },
+      ensure: (...a: unknown[]) => { calls.push({ m: "ensure", args: a }); return Promise.resolve({ kind: "ack", corrId: "", status: "accepted" }); },
+      release: (...a: unknown[]) => { calls.push({ m: "release", args: a }); },
     } as unknown as import("../wire/DemandRegistry").DemandRegistry;
     renderFrame({ panelId: "chart", group: null, settings: { symbol: "US.AAPL" }, demandRegistry: reg });
     await waitFor(() => expect(calls.some((c) => c.m === "ensure")).toBe(true));
@@ -458,10 +458,10 @@ describe("PanelFrame — DemandRegistry wiring (Task 10)", () => {
   });
 
   it("releases on unmount", () => {
-    const calls: { m: string; args: any[] }[] = [];
+    const calls: { m: string; args: unknown[] }[] = [];
     const reg = {
       ensure: () => Promise.resolve({ kind: "ack", corrId: "", status: "accepted" }),
-      release: (...a: any[]) => { calls.push({ m: "release", args: a }); },
+      release: (...a: unknown[]) => { calls.push({ m: "release", args: a }); },
     } as unknown as import("../wire/DemandRegistry").DemandRegistry;
     const { unmount } = renderFrame({ panelId: "chart", group: null, settings: { symbol: "US.AAPL" }, demandRegistry: reg });
     unmount();

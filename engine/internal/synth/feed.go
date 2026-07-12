@@ -18,11 +18,11 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/uihub"
 )
 
-// feedTickMs is how often Run steps the generator forward and drains its
+// feedTick is how often Run steps the generator forward and drains its
 // accumulated events, per the design spec's ~50ms cadence (fast enough that
 // the 300ms/150ms quote/book throttles inside Drain — not this loop — are
 // what actually pace the visible update rate).
-const feedTickMs = 50 * time.Millisecond
+const feedTick = 50 * time.Millisecond
 
 // HistoryStore is the store surface Feed.HistoryBars needs (satisfied by
 // *store.Store). The synthetic universe never writes bars to a real journal
@@ -62,14 +62,14 @@ func NewFeed(gen *Generator, st HistoryStore, clk clock.Clock) *Feed {
 func (f *Feed) Events() <-chan feed.Event { return f.out }
 
 // Run emits one ConnUpEvent, then steps and drains the generator on a
-// feedTickMs ticker until ctx is done, closing Events() on return. It never
+// feedTick ticker until ctx is done, closing Events() on return. It never
 // emits ResyncedEvent — the synthetic feed has no reconnect to resync from.
 func (f *Feed) Run(ctx context.Context) error {
 	defer close(f.out)
 
 	f.emitConnUp(ctx)
 
-	tk := f.clk.NewTicker(feedTickMs)
+	tk := f.clk.NewTicker(feedTick)
 	defer tk.Stop()
 
 	for {

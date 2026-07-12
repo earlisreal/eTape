@@ -74,10 +74,12 @@ describe("DrawingStore core", () => {
 });
 
 interface FakeAck { status: string; value?: unknown; reason?: string }
+// GetConfig sends just { key }; SetConfig adds value (a Drawing[], asserted at the call site).
+type FakeCommandArgs = { key: string; value?: unknown };
 function fakeCommands(overrides?: Partial<{ get: FakeAck; set: FakeAck }>) {
-  const calls: { name: string; args: any }[] = [];
+  const calls: { name: string; args: FakeCommandArgs }[] = [];
   const sendCommand = vi.fn(async (name: string, args: unknown): Promise<FakeAck> => {
-    calls.push({ name, args });
+    calls.push({ name, args: args as FakeCommandArgs });
     if (name === "GetConfig") return overrides?.get ?? { status: "accepted", value: [] };
     return overrides?.set ?? { status: "accepted" };
   });

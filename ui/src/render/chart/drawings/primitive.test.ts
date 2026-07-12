@@ -1,5 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
+import type { SeriesAttachedParameter, Time } from "lightweight-charts";
 import { DrawingsPrimitive } from "./primitive";
+import type { DrawTarget } from "./primitive";
 import { LIGHT } from "../../palette";
 import type { Drawing } from "./model";
 import { DEFAULT_DRAWING_WIDTH, DEFAULT_LINE_STYLE } from "./model";
@@ -14,31 +16,41 @@ function recordingCtx() {
     ctx: {
       beginPath: rec("beginPath"), moveTo: rec("moveTo"), lineTo: rec("lineTo"),
       stroke: rec("stroke"), strokeRect: rec("strokeRect"), fillRect: rec("fillRect"),
-      fillText: (t: string, x: number, y: number) => { calls.push(["fillText", x, y]); (calls as any).push(["text:" + t]); },
+      fillText: (t: string, x: number, y: number) => { calls.push(["fillText", x, y]); calls.push(["text:" + t]); },
       setLineDash: () => {}, save: () => {}, restore: () => {},
       strokeStyle: "", fillStyle: "", lineWidth: 0, font: "", globalAlpha: 1, textBaseline: "",
     },
   };
 }
 
-function fakeTarget(ctx: unknown, width = 400, height = 300) {
+// Mirrors fancy-canvas's BitmapCoordinatesRenderingScope, minus the real
+// CanvasRenderingContext2D (which recordingCtx()/styleCtx() fake separately).
+type FakeScope = {
+  context: unknown;
+  bitmapSize: { width: number; height: number };
+  mediaSize: { width: number; height: number };
+  horizontalPixelRatio: number;
+  verticalPixelRatio: number;
+};
+
+function fakeTarget(ctx: unknown, width = 400, height = 300): DrawTarget {
   return {
-    useBitmapCoordinateSpace: (cb: (s: any) => void) =>
+    useBitmapCoordinateSpace: (cb: (s: FakeScope) => void) =>
       cb({ context: ctx, bitmapSize: { width, height }, mediaSize: { width, height }, horizontalPixelRatio: 1, verticalPixelRatio: 1 }),
-  };
+  } as unknown as DrawTarget;
 }
 
 // logical*10 = x ; price → y = 1000 - price
 const chartApi = { timeScale: () => ({ logicalToCoordinate: (l: number) => l * 10 }) };
 const series = { priceToCoordinate: (p: number) => 1000 - p };
 function attach(prim: DrawingsPrimitive, requestUpdate = vi.fn()) {
-  (prim as any).attached({ chart: chartApi, series, requestUpdate });
+  prim.attached({ chart: chartApi, series, requestUpdate } as unknown as SeriesAttachedParameter<Time>);
   prim.setBars([0, 60_000], 60_000); // logical 0 at t=0, logical 1 at t=60000
   return requestUpdate;
 }
 function draw(prim: DrawingsPrimitive, ctx: unknown) {
   const view = prim.paneViews()[0];
-  view.renderer()!.draw(fakeTarget(ctx) as any);
+  view.renderer()!.draw(fakeTarget(ctx));
 }
 
 const hline: Drawing = { id: "h", symbol: "US.AAPL", kind: "hline", anchors: [{ timeMs: 0, price: 10 }], createdMs: 1, updatedMs: 1 };
@@ -70,7 +82,7 @@ describe("DrawingsPrimitive", () => {
 
   it("skips a drawing whose price is off-screen (null coordinate)", () => {
     const p = new DrawingsPrimitive(LIGHT);
-    (p as any).attached({ chart: chartApi, series: { priceToCoordinate: () => null }, requestUpdate: vi.fn() });
+    p.attached({ chart: chartApi, series: { priceToCoordinate: () => null }, requestUpdate: vi.fn() } as unknown as SeriesAttachedParameter<Time>);
     p.setBars([0, 60_000], 60_000);
     p.setDrawings([hline]);
     const { ctx, calls } = recordingCtx();
@@ -139,10 +151,16 @@ describe("DrawingsPrimitive", () => {
 });
 
 // Captures strokeStyle / lineWidth / dash at each stroke, which recordingCtx() doesn't.
+type FakeStyleCtx = {
+  beginPath(): void; moveTo(): void; lineTo(): void;
+  stroke(): void; strokeRect(): void; fillRect(): void; fillText(): void;
+  setLineDash(d: number[]): void; save(): void; restore(): void;
+  strokeStyle: string; fillStyle: string; lineWidth: number; font: string; globalAlpha: number; textBaseline: string;
+};
 function styleCtx() {
   const strokes: { color: string; width: number; dash: number[] }[] = [];
   let dash: number[] = [];
-  const ctx: any = {
+  const ctx: FakeStyleCtx = {
     beginPath() {}, moveTo() {}, lineTo() {},
     stroke() { strokes.push({ color: ctx.strokeStyle, width: ctx.lineWidth, dash: [...dash] }); },
     strokeRect() { strokes.push({ color: ctx.strokeStyle, width: ctx.lineWidth, dash: [...dash] }); },
