@@ -8,7 +8,7 @@ const KEYS: (keyof Palette)[] = [
   "sessionPre", "sessionRth", "sessionPost", "sessionClosed",
   "indVwap", "indEma", "indSma", "indMacdLine", "indMacdSignal", "indMacdHist",
   "linkRed", "linkGreen", "linkBlue", "linkYellow",
-  "accent", "ok", "warn", "danger",
+  "accent", "ok", "warn", "danger", "demo",
 ];
 
 describe("palette", () => {

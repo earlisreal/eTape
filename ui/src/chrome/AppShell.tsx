@@ -15,6 +15,7 @@ import { PRESETS } from "./presets";
 import { TopBar } from "./TopBar";
 import { FeedStatusBanner } from "./FeedStatusBanner";
 import { ReplayBanner } from "./ReplayBanner";
+import { DemoBanner } from "./DemoBanner";
 import { AlpacaBackfillBanner } from "./AlpacaBackfillBanner";
 import { EmptyState } from "./EmptyState";
 import { Catalog } from "./Catalog";
@@ -89,6 +90,13 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
   const rc = useReplayCommands(commands);
+  // Shared by both <ReplayBanner> and <DemoBanner>'s "Return to live" button —
+  // GoLive is the same engine command regardless of which practice mode
+  // (replay or demo) is currently active.
+  const onGoLive = async () => {
+    const ack = await rc.goLive();
+    if (ack.status !== "accepted") throw new Error(ack.reason || "Return to live rejected");
+  };
   // DockviewApi is only available once dockview mounts (i.e. once the workspace
   // has at least one panel — see the empty-state switch below); null otherwise.
   const apiRef = useRef<DockviewApi | null>(null);
@@ -468,10 +476,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             </div>
           )}
         </div>
-        <ReplayBanner session={stores.session} engineState={engineState} onGoLive={async () => {
-          const ack = await rc.goLive();
-          if (ack.status !== "accepted") throw new Error(ack.reason || "Return to live rejected");
-        }} />
+        <ReplayBanner session={stores.session} engineState={engineState} onGoLive={onGoLive} />
+        <DemoBanner session={stores.session} engineState={engineState} onGoLive={onGoLive} />
         <FeedStatusBanner health={stores.health} engineState={engineState} onOpenConnection={onOpenConnection} />
         {showAlpacaHint && <AlpacaBackfillBanner onSetup={openAlpacaSetup} onDismiss={dismissAlpacaHint} />}
         <div style={{ flex: 1, minHeight: 0 }}>
