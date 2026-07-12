@@ -308,6 +308,76 @@ func TestMirrorApplyPubStockDetailPerSymbolOverwrite(t *testing.T) {
 	}
 }
 
+// TestMirrorWatchlistRetainAndReplay verifies applyPub + snapshotFrames
+// implement the same snapshot-on-subscribe mirror as scanner.rank for
+// watchlist.rows: nothing before the first publish, and the retained
+// payload (with nil Symbols/Rows coalesced to empty slices) on replay.
+func TestMirrorWatchlistRetainAndReplay(t *testing.T) {
+	m := testMirror()
+
+	// Before any publish, a late subscriber gets no frame at all -- not an
+	// empty-but-present one.
+	if frames := m.snapshotFrames(wsmsg.TopicWatchlistRows); len(frames) != 0 {
+		t.Fatalf("expected no watchlist.rows frames before first publish, got %+v", frames)
+	}
+
+	refreshedAt := "2026-07-12T09:30:00Z"
+	last := 190.5
+	changePct := 1.25
+	m.applyPub(staged{Topic: wsmsg.TopicWatchlistRows, Payload: wsmsg.WatchlistRowsPayload{
+		RefreshedAt: &refreshedAt,
+		Symbols:     []string{"US.AAPL"},
+		Rows:        []wsmsg.WatchlistRow{{Symbol: "US.AAPL", Last: &last, ChangePct: &changePct, Volume: 1000}},
+	}})
+
+	frames := m.snapshotFrames(wsmsg.TopicWatchlistRows)
+	if len(frames) != 1 {
+		t.Fatalf("expected exactly one watchlist.rows snapshot frame, got %d: %+v", len(frames), frames)
+	}
+	pl := frames[0].Payload.(wsmsg.WatchlistRowsPayload)
+	if pl.Symbols == nil || len(pl.Symbols) != 1 || pl.Symbols[0] != "US.AAPL" {
+		t.Fatalf("expected retained Symbols [US.AAPL], got %+v", pl.Symbols)
+	}
+	if pl.Rows == nil || len(pl.Rows) != 1 || pl.Rows[0].Symbol != "US.AAPL" {
+		t.Fatalf("expected retained Rows [US.AAPL], got %+v", pl.Rows)
+	}
+	if pl.RefreshedAt == nil || *pl.RefreshedAt != refreshedAt {
+		t.Fatalf("expected retained RefreshedAt %q, got %+v", refreshedAt, pl.RefreshedAt)
+	}
+}
+
+// TestMirrorEmptyWatchlistSnapshotMarshalsToArrayNotNull verifies that once a
+// watchlist snapshot has been published with nil Symbols/Rows (e.g. an empty
+// membership list), the replayed payload marshals those fields to JSON `[]`,
+// not `null` -- matching the tape/bars/news precedent in snapshotFrames.
+func TestMirrorEmptyWatchlistSnapshotMarshalsToArrayNotNull(t *testing.T) {
+	m := testMirror()
+	refreshedAt := "2026-07-12T09:30:00Z"
+	m.applyPub(staged{Topic: wsmsg.TopicWatchlistRows, Payload: wsmsg.WatchlistRowsPayload{RefreshedAt: &refreshedAt}})
+
+	frames := m.snapshotFrames(wsmsg.TopicWatchlistRows)
+	if len(frames) != 1 {
+		t.Fatalf("expected exactly one watchlist.rows snapshot frame, got %d", len(frames))
+	}
+	b, err := json.Marshal(frames[0].Payload)
+	if err != nil {
+		t.Fatalf("marshal watchlist payload: %v", err)
+	}
+	// Round-trip through a plain map so a nil slice (marshaled as `null`)
+	// decodes back to a Go nil, while `[]` decodes to a non-nil empty slice --
+	// distinguishing the two cases the way a JS client parsing this frame would.
+	var decoded map[string]any
+	if err := json.Unmarshal(b, &decoded); err != nil {
+		t.Fatalf("unmarshal watchlist payload: %v", err)
+	}
+	if decoded["symbols"] == nil {
+		t.Fatalf("empty watchlist snapshot must marshal symbols to [], not null: got %s", b)
+	}
+	if decoded["rows"] == nil {
+		t.Fatalf("empty watchlist snapshot must marshal rows to [], not null: got %s", b)
+	}
+}
+
 func TestMirrorEmptyNewsSnapshotMarshalsToArrayNotNull(t *testing.T) {
 	m := testMirror()
 	// A brand-new subscriber gets a news snapshot before any news exists. The
