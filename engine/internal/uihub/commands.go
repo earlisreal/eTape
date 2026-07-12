@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/config"
@@ -19,6 +20,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
+	"github.com/earlisreal/eTape/engine/internal/watchlist"
 )
 
 type execDoer interface {
@@ -61,6 +63,20 @@ type venueTester interface {
 	TestConnection(ctx context.Context, broker, env, credName, keyID, secretKey, accountID string) venueprobe.Result
 }
 
+// watchlistCtl is the watchlist surface the add/remove commands drive
+// (satisfied by a *watchlist.List + *watchlist.Poller adapter, wired in
+// startPollers). Nil until SetWatchlist runs — guard in the handler.
+type watchlistCtl interface {
+	Add(symbol string) (added bool, err error)
+	Remove(symbol string) (removed bool)
+	Poke()
+}
+
+// watchlistBox boxes watchlistCtl for atomic.Pointer storage — same reason
+// feedBox boxes Feed (hub.go): an interface value can't be atomically stored
+// directly, and boxing sidesteps nil-pointer-vs-nil-interface ambiguity on Load.
+type watchlistBox struct{ wl watchlistCtl }
+
 // commands.tester holds the venueTester dependency; it is named "tester"
 // rather than "probe" because *commands already has an unrelated probe
 // method (symbol-existence validation for EnsureSymbol/FocusGroup) — a
@@ -89,10 +105,24 @@ type commands struct {
 	startReplay func(day string, speed float64) error
 	goLive      func() error
 	startDemo   func() error
+	// wl is late-bound via (*Hub).SetWatchlist once the poller exists
+	// (startPollers, after uihub.New returns), then read from conn goroutines
+	// on every WatchlistAdd/Remove — same atomic-slot rationale as feedSlot
+	// (hub.go:93-97). Boxed (watchlistBox) to match the feedBox precedent.
+	wl atomic.Pointer[watchlistBox]
 }
 
 func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, va venueAdmin, feed func() Feed, tester venueTester) *commands {
 	return &commands{ex: ex, cfg: cfg, ind: ind, dem: dem, va: va, feed: feed, tester: tester}
+}
+
+// watchlist loads the late-bound watchlistCtl (nil-safe: unset until
+// SetWatchlist runs, e.g. in every test that doesn't wire one).
+func (cd *commands) watchlist() watchlistCtl {
+	if b := cd.wl.Load(); b != nil {
+		return b.wl
+	}
+	return nil
 }
 
 // restartAckFlushDelay defers the actual restart trigger past the moment
@@ -221,6 +251,43 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked("bad profile"), false
 		}
 		cd.dem.EnsureDemand(connID, d)
+		return wsmsg.AckMsg{Status: "accepted"}, false
+	case "WatchlistAdd":
+		var a wsmsg.WatchlistAddArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return blocked("bad args"), false
+		}
+		wl := cd.watchlist()
+		if wl == nil {
+			return blocked("watchlist not ready"), false
+		}
+		sym := watchlist.Normalize(a.Symbol)
+		if !supportedMarket(sym) {
+			return blocked("unsupported market"), false
+		}
+		if reason := cd.probe(ctx, sym); reason != "" {
+			return blocked(reason), false
+		}
+		_, err := wl.Add(sym)
+		if errors.Is(err, watchlist.ErrFull) {
+			return blocked("watchlist full (400)"), false
+		}
+		if err != nil {
+			return blocked("watchlist error"), false
+		}
+		wl.Poke()
+		return wsmsg.AckMsg{Status: "accepted"}, false
+	case "WatchlistRemove":
+		var a wsmsg.WatchlistRemoveArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return blocked("bad args"), false
+		}
+		wl := cd.watchlist()
+		if wl == nil {
+			return blocked("watchlist not ready"), false
+		}
+		wl.Remove(a.Symbol) // idempotent — always accepted
+		wl.Poke()
 		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "ReleaseSymbol":
 		var a wsmsg.ReleaseSymbolArgs

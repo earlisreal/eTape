@@ -111,6 +111,7 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	}
 	h := NewHub(clk, HubConfig{MDInterval: cfg.MD, AccountInterval: cfg.Account, PositionInterval: cfg.Position, Buf: cfg.Buf}, m)
 	cmd := newCommands(ex, st, ind, h, va, h.feed, vt)
+	h.cmd = cmd
 	cmd.restart = requestRestart
 	cmd.startReplay = startReplay
 	cmd.goLive = goLive

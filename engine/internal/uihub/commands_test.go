@@ -15,6 +15,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
+	"github.com/earlisreal/eTape/engine/internal/watchlist"
 )
 
 // mustJSON marshals v to a json.RawMessage, failing the test on error. Used
@@ -749,5 +750,120 @@ func TestCommandsStartDemoBlockedOnHandlerError(t *testing.T) {
 	ack, _ := cd.handle(context.Background(), "StartDemo", mustJSON(t, wsmsg.StartDemoArgs{}), 0, func(wsmsg.AckMsg) {})
 	if ack.Status != wsmsg.AckBlocked {
 		t.Fatalf("want blocked, got %+v", ack)
+	}
+}
+
+// fakeWL is the watchlistCtl test double for WatchlistAdd/WatchlistRemove.
+// Add/Remove record every call (symbol order matters for the assertions
+// below); addAdded/addErr/removed let a test script Add/Remove's return
+// value the way the real *watchlist.List would for duplicates/cap/no-op.
+type fakeWL struct {
+	addAdded bool
+	addErr   error
+	removed  bool
+	adds     []string
+	removes  []string
+	poked    int
+}
+
+func (f *fakeWL) Add(symbol string) (bool, error) {
+	f.adds = append(f.adds, symbol)
+	return f.addAdded, f.addErr
+}
+
+func (f *fakeWL) Remove(symbol string) bool {
+	f.removes = append(f.removes, symbol)
+	return f.removed
+}
+
+func (f *fakeWL) Poke() { f.poked++ }
+
+// TestWatchlistAdd_ProbeRejectionBlocks covers the existence-probe guard
+// shared with EnsureSymbol/FocusGroup: an unknown symbol must block before
+// ever reaching wl.Add, exactly like EnsureSymbol's UnknownSymbolReverts case.
+func TestWatchlistAdd_ProbeRejectionBlocks(t *testing.T) {
+	cd, _, _ := newCmdWith(t, feed.ErrUnknownSymbol, false)
+	fw := &fakeWL{}
+	cd.wl.Store(&watchlistBox{wl: fw})
+	ack, _ := cd.handle(context.Background(), "WatchlistAdd",
+		mustJSON(t, wsmsg.WatchlistAddArgs{Symbol: "US.ZZZZQQ"}), 1, func(wsmsg.AckMsg) {})
+	if ack.Status != "blocked" {
+		t.Fatalf("unknown symbol must block, got %+v", ack)
+	}
+	if len(fw.adds) != 0 {
+		t.Fatalf("probe-rejected symbol must never reach wl.Add, got %v", fw.adds)
+	}
+}
+
+// TestWatchlistAdd_DuplicateAccepted covers List.Add's documented duplicate
+// behavior (added=false, err=nil is a harmless no-op) -- the command must
+// still ack "accepted" and still poke the poller.
+func TestWatchlistAdd_DuplicateAccepted(t *testing.T) {
+	cd, _, _ := newCmdWith(t, nil, false)
+	fw := &fakeWL{addAdded: false, addErr: nil}
+	cd.wl.Store(&watchlistBox{wl: fw})
+	ack, _ := cd.handle(context.Background(), "WatchlistAdd",
+		mustJSON(t, wsmsg.WatchlistAddArgs{Symbol: "US.AAPL"}), 1, func(wsmsg.AckMsg) {})
+	if ack.Status != "accepted" {
+		t.Fatalf("duplicate add must still ack accepted, got %+v", ack)
+	}
+	if fw.poked != 1 {
+		t.Fatalf("want Poke called once, got %d", fw.poked)
+	}
+}
+
+// TestWatchlistAdd_CapExceededBlocks covers wl.Add returning watchlist.ErrFull
+// (the 400-symbol cap): the command must translate it to the specific
+// "watchlist full (400)" block reason and must not poke the poller for a
+// rejected add.
+func TestWatchlistAdd_CapExceededBlocks(t *testing.T) {
+	cd, _, _ := newCmdWith(t, nil, false)
+	fw := &fakeWL{addErr: watchlist.ErrFull}
+	cd.wl.Store(&watchlistBox{wl: fw})
+	ack, _ := cd.handle(context.Background(), "WatchlistAdd",
+		mustJSON(t, wsmsg.WatchlistAddArgs{Symbol: "US.AAPL"}), 1, func(wsmsg.AckMsg) {})
+	if ack.Status != "blocked" || ack.Reason != "watchlist full (400)" {
+		t.Fatalf(`want blocked "watchlist full (400)", got %+v`, ack)
+	}
+	if fw.poked != 0 {
+		t.Fatalf("want Poke not called on a rejected add, got %d", fw.poked)
+	}
+}
+
+// TestWatchlistRemove_AcceptedAndPokes covers the always-accepted, idempotent
+// remove path: it must call wl.Remove with the raw wire symbol and poke the
+// poller regardless of whether the symbol was actually a member.
+func TestWatchlistRemove_AcceptedAndPokes(t *testing.T) {
+	cd, _, _ := newCmdWith(t, nil, false)
+	fw := &fakeWL{}
+	cd.wl.Store(&watchlistBox{wl: fw})
+	ack, _ := cd.handle(context.Background(), "WatchlistRemove",
+		mustJSON(t, wsmsg.WatchlistRemoveArgs{Symbol: "US.AAPL"}), 1, func(wsmsg.AckMsg) {})
+	if ack.Status != "accepted" {
+		t.Fatalf("want accepted, got %+v", ack)
+	}
+	if len(fw.removes) != 1 || fw.removes[0] != "US.AAPL" {
+		t.Fatalf("want Remove(US.AAPL) called once, got %v", fw.removes)
+	}
+	if fw.poked != 1 {
+		t.Fatalf("want Poke called once, got %d", fw.poked)
+	}
+}
+
+// TestWatchlistCommands_NoCtlSetBlocks covers the pre-Task-6 boot window (and
+// every test in this file besides the ones above): cd.wl is a zero-value
+// atomic.Pointer, never Store'd, so cd.watchlist() must return nil cleanly
+// and both commands must block rather than panic.
+func TestWatchlistCommands_NoCtlSetBlocks(t *testing.T) {
+	cd, _, _ := newCmdWith(t, nil, false)
+	addAck, _ := cd.handle(context.Background(), "WatchlistAdd",
+		mustJSON(t, wsmsg.WatchlistAddArgs{Symbol: "US.AAPL"}), 1, func(wsmsg.AckMsg) {})
+	if addAck.Status != "blocked" || addAck.Reason != "watchlist not ready" {
+		t.Fatalf(`WatchlistAdd with no ctl: want blocked "watchlist not ready", got %+v`, addAck)
+	}
+	remAck, _ := cd.handle(context.Background(), "WatchlistRemove",
+		mustJSON(t, wsmsg.WatchlistRemoveArgs{Symbol: "US.AAPL"}), 1, func(wsmsg.AckMsg) {})
+	if remAck.Status != "blocked" || remAck.Reason != "watchlist not ready" {
+		t.Fatalf(`WatchlistRemove with no ctl: want blocked "watchlist not ready", got %+v`, remAck)
 	}
 }
