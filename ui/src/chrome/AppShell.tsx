@@ -512,7 +512,19 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     setWs(next);
     wsRef.current = next;
     workspaceStore.save(next);
-    if (apiRef.current) {
+    // next.panels.length === 0 is deliberately excluded: the render right
+    // after this setWs swaps <DockviewReact> out for <EmptyState> (same
+    // ternary addPanel's comment above references for the reverse case),
+    // unmounting/disposing the live dockview instance before this queued
+    // action would ever run in its post-commit effect. Queuing an api.clear()
+    // against that already-disposed instance crashes inside dockview-core
+    // (Tabs.delete reads DOM state the unmount already tore down) — an
+    // uncaught error with no boundary above AppShell, so it takes down the
+    // whole app to a blank screen instead of the EmptyState the ternary
+    // already produces on its own. No action is needed here for the
+    // zero-panel case; the effect that nulls apiRef.current once ws.panels is
+    // empty (below) is all the cleanup dockview's own unmount requires.
+    if (apiRef.current && next.panels.length > 0) {
       // `next.layout` reflects whatever `ws.layout` held in React state — and
       // onDidLayoutChange above only ever persists a fresh layout into the
       // SAVED doc (workspaceStore.save), never back into `ws`/`wsRef`. A

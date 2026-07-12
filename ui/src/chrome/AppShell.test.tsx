@@ -682,4 +682,22 @@ describe("AppShell demo mode-edge orchestration (Task 13)", () => {
     expect(saved.length).toBe(savedCountBeforeReconnect);
     expect(saved[saved.length - 1].groups?.green).toBe("US.CUSTOM");
   });
+
+  it("live(empty)->demo->live: reverting back to an originally-empty workspace re-shows EmptyState instead of crashing", async () => {
+    const emptySeed: Workspace = { name: "default", panels: [], layout: null };
+    const { stores, saved } = mount(emptySeed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    expect(screen.getByText("Empty workspace")).toBeTruthy();
+
+    publishSessionMode(stores, "live");
+    publishWatchlist(stores, ["US.MSFT", "US.GOOG", "US.AMZN", "US.TSLA", "US.NFLX"]);
+    publishSessionMode(stores, "demo"); // live->demo: snapshot is the empty workspace; entry auto-adds Watchlist
+
+    await waitFor(() => expect(saved.some((w) => w.panels.some((p) => p.panelId === "watchlist"))).toBe(true));
+    expect(screen.queryByText("Empty workspace")).toBeNull(); // dockview now mounted with the Watchlist panel
+
+    publishSessionMode(stores, "live"); // demo->live: revert restores the empty snapshot verbatim
+    await waitFor(() => expect(saved[saved.length - 1].panels).toHaveLength(0));
+    expect(screen.getByText("Empty workspace")).toBeTruthy();
+  });
 });
