@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import type { HealthStore } from "../data/HealthStore";
+import type { BootStore } from "../data/BootStore";
 import type { ConnState } from "../wire/WsClient";
 import { useTheme } from "./ThemeProvider";
 import { HoverButton } from "./controls/HoverButton";
@@ -10,12 +11,14 @@ import { HoverButton } from "./controls/HoverButton";
 // app already shows a full-screen ReconnectOverlay for that outage — this
 // banner must stay hidden then to avoid a confusing double-message.
 export function FeedStatusBanner(
-  { health, engineState, onOpenConnection }:
-  { health: HealthStore; engineState: ConnState; onOpenConnection: () => void },
+  { health, boot, engineState, onOpenConnection }:
+  { health: HealthStore; boot: BootStore; engineState: ConnState; onOpenConnection: () => void },
 ): JSX.Element | null {
   const { palette } = useTheme();
   const state = useSyncExternalStore(health.subscribe.bind(health), health.getSnapshot.bind(health));
+  const bootState = useSyncExternalStore(boot.subscribe.bind(boot), boot.getSnapshot.bind(boot));
 
+  if (bootState.phase !== "ready") return null; // expected boot maintenance — the neutral BootStatusBanner owns this window
   if (engineState !== "open") return null;
   const moomoo = state.links.find((l) => l.link === "engine-moomoo");
   if (!moomoo || moomoo.status !== "down") return null;

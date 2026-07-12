@@ -14,7 +14,7 @@ export type Topic =
   | "news.item"
   | "stock.detail"
   | "exec.account" | "exec.positions" | "exec.orders" | "exec.fills" | "exec.status" | "exec.trades"
-  | "sys.health" | "sys.session" | "sys.events"
+  | "sys.health" | "sys.session" | "sys.events" | "sys.boot"
   | "config";
 
 // ---- wire enums (mirrors wsmsg.go's typed string consts) ----
@@ -313,6 +313,18 @@ export interface SessionSnapshot {
   mode: string;
   day?: string;
   speed?: number /* float64 */;
+}
+/**
+ * BootStatus is the sys.boot snapshot: the engine's current boot phase, so the
+ * UI shows a neutral "preparing journal / connecting" banner during the pre-feed
+ * maintenance window instead of the red feed-disconnected strip. Snapshot-bearing
+ * (like SessionSnapshot): re-delivered to every new subscriber, also pushed as a
+ * delta on each transition. Phase is one of "sealing" | "connecting" | "ready".
+ * DaysTotal is the day count for the "sealing" phase (0 otherwise).
+ */
+export interface BootStatus {
+  phase: string;
+  daysTotal?: number /* int */;
 }
 export interface SysEvent {
   seq: number /* int64 */;

@@ -57,6 +57,7 @@ type mirror struct {
 	// system
 	health  wsmsg.HealthSnapshot
 	session wsmsg.SessionSnapshot
+	boot    wsmsg.BootStatus
 	events  []wsmsg.SysEvent // bounded recent
 
 	tapeCap, newsCap, fillsCap, eventsCap, tradesCap int
@@ -305,6 +306,8 @@ func (m *mirror) applyPub(s staged) {
 		}
 	case wsmsg.TopicSysHealth:
 		m.health = s.Payload.(wsmsg.HealthSnapshot)
+	case wsmsg.TopicSysBoot:
+		m.boot = s.Payload.(wsmsg.BootStatus)
 	case wsmsg.TopicSysEvents:
 		switch p := s.Payload.(type) {
 		case wsmsg.SysEvent:
@@ -390,6 +393,8 @@ func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
 		out = append(out, staged{Topic: topic, Payload: m.health})
 	case wsmsg.TopicSysSession:
 		out = append(out, staged{Topic: topic, Payload: m.session})
+	case wsmsg.TopicSysBoot:
+		out = append(out, staged{Topic: topic, Payload: m.boot})
 	case wsmsg.TopicSysEvents:
 		out = append(out, staged{Topic: topic, Payload: append([]wsmsg.SysEvent(nil), m.events...)})
 	}

@@ -14,6 +14,7 @@ import { PANELS, type PanelProps } from "./panels/registry";
 import { PRESETS } from "./presets";
 import { TopBar } from "./TopBar";
 import { FeedStatusBanner } from "./FeedStatusBanner";
+import { BootStatusBanner } from "./BootStatusBanner";
 import { ReplayBanner } from "./ReplayBanner";
 import { AlpacaBackfillBanner } from "./AlpacaBackfillBanner";
 import { EmptyState } from "./EmptyState";
@@ -467,11 +468,12 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             </div>
           )}
         </div>
+        <BootStatusBanner boot={stores.boot} />
         <ReplayBanner session={stores.session} engineState={engineState} onGoLive={async () => {
           const ack = await rc.goLive();
           if (ack.status !== "accepted") throw new Error(ack.reason || "Return to live rejected");
         }} />
-        <FeedStatusBanner health={stores.health} engineState={engineState} onOpenConnection={onOpenConnection} />
+        <FeedStatusBanner health={stores.health} boot={stores.boot} engineState={engineState} onOpenConnection={onOpenConnection} />
         {showAlpacaHint && <AlpacaBackfillBanner onSetup={openAlpacaSetup} onDismiss={dismissAlpacaHint} />}
         <div style={{ flex: 1, minHeight: 0 }}>
           {ws.panels.length === 0 ? (

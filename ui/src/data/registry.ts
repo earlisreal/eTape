@@ -7,6 +7,7 @@ import { BarStore } from "./BarStore";
 import { IndicatorStore } from "./IndicatorStore";
 import { HealthStore } from "./HealthStore";
 import { SessionStore } from "./SessionStore";
+import { BootStore } from "./BootStore";
 import { ExecStore } from "./ExecStore";
 import { ScannerStore } from "./ScannerStore";
 import { NewsStore } from "./NewsStore";
@@ -24,6 +25,7 @@ export interface Stores {
   indicators: IndicatorStore;
   health: HealthStore;
   session: SessionStore;
+  boot: BootStore;
   exec: ExecStore;
   scanner: ScannerStore;
   news: NewsStore;
@@ -43,6 +45,7 @@ export function makeStores(): Stores {
     indicators: new IndicatorStore(),
     health: new HealthStore(),
     session: new SessionStore(),
+    boot: new BootStore(),
     exec: new ExecStore(),
     scanner: new ScannerStore(),
     news: new NewsStore(),
@@ -77,6 +80,7 @@ export function routeToStore(stores: Stores, m: SnapshotMsg | DeltaMsg): void {
     case "sys.health":
     case "sys.events": stores.health.apply(m); return;
     case "sys.session": stores.session.apply(m); return;
+    case "sys.boot": stores.boot.apply(m); return;
     case "config": return; // handled by workspace.ts, not a store
   }
 }

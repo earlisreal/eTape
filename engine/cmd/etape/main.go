@@ -46,6 +46,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/store"
 	"github.com/earlisreal/eTape/engine/internal/synth"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
+	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 	"github.com/earlisreal/eTape/engine/internal/venueadmin"
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
 	"google.golang.org/protobuf/proto"
@@ -87,6 +88,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	demoSeed := flag.Int64("demo-seed", 0, "PRNG seed for -demo; 0 = random per launch")
 	noOpen := flag.Bool("no-open", false, "do not auto-open the default browser to the UI")
 	logPath := flag.String("log", "", "also write logs to this file")
+	vacuum := flag.Bool("vacuum", false, "run one-shot journal maintenance (prune+seal+vacuum) then exit; refuses if an engine is running")
 	flag.Parse()
 
 	// ETAPE_NO_OPEN suppresses auto-open, same as -no-open, so agent/CI boots
@@ -224,6 +226,10 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// crash, so there is no stale-lock cleanup to do.
 	releaseLock, err := singleinstance.Acquire(dbPath + ".lock")
 	if errors.Is(err, singleinstance.ErrAlreadyRunning) {
+		if *vacuum {
+			log.Error("etape -vacuum: engine is running; stop it before running maintenance")
+			return 1, false, nil // must NOT open the browser to the running instance
+		}
 		log.Info("eTape is already running; opening it instead", "addr", cfg.UIHub.Addr())
 		if !*noOpen {
 			// Best-effort: reaches the already-running instance's UI. If it
@@ -239,6 +245,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}
 	defer releaseLock()
 	log.Info("single-instance lock acquired", "lock", dbPath+".lock")
+
+	if *vacuum {
+		code := runVacuumMode(dbPath, cfg, log)
+		return code, false, nil // deferred releaseLock() runs on return
+	}
 
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
@@ -460,13 +471,24 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	var dropWG sync.WaitGroup
 	var sealSchedWG sync.WaitGroup
 	if live || *demo {
+		var sysEventSeq int64 // dedup key disambiguator for the retention sys_events published below
+		stats0, statsErr := st.SizeStats() // PRE-maintenance snapshot for the anomaly backstop
+		if pending, err := st.PendingSealDays(); err == nil && len(pending) > 0 {
+			hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "sealing", DaysTotal: len(pending)})
+		}
 		if n, err := st.PruneJournal(cfg.Store.RetentionDays); err == nil && n > 0 {
 			log.Info("pruned journal", "rows", n)
 		}
 		st.Flush() // drain the queued prune sys_event so it doesn't race the seal's write transaction
 		if sum, err := st.SealJournalDays(); err != nil {
 			log.Error("seal journal", "err", err)
-			st.AppendSysEvent("retention", fmt.Sprintf("journal seal error: %v", err))
+			detail := fmt.Sprintf("journal seal error: %v", err)
+			st.AppendSysEvent("retention", detail)
+			sysEventSeq++
+			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
+				Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+				Kind: "retention", Detail: detail, Level: "danger",
+			})
 		} else if sum.Days > 0 || sum.Failed > 0 {
 			log.Info("sealed journal", "days", sum.Days, "chunks", sum.Chunks, "rows", sum.Rows,
 				"failed", sum.Failed, "mbBefore", sum.BytesBefore>>20, "mbAfter", sum.BytesAfter>>20)
@@ -474,14 +496,48 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 				"sealed %d day(s): %d rows → %d chunks (%d MB → %d MB); %d day(s) left raw",
 				sum.Days, sum.Rows, sum.Chunks, sum.BytesBefore>>20, sum.BytesAfter>>20, sum.Failed))
 		}
-		st.Flush() // drain queued sys_events so no writer tx races the VACUUM
-		if vac, err := st.VacuumIfNeeded(); err != nil {
-			log.Error("vacuum journal db", "err", err)
-		} else if vac {
-			log.Info("vacuumed journal db")
-			st.AppendSysEvent("retention", "vacuumed journal db (reclaimed free pages)")
+		st.Flush() // drain queued sys_events so no writer tx races a possible backstop VACUUM
+		if statsErr == nil && stats0.NeedsBackstopVacuum() {
+			log.Warn("backstop vacuum: cross-day free-page accumulation",
+				"freeMB", stats0.FreeBytes()>>20, "fileMB", stats0.FileBytes()>>20)
+			detail := fmt.Sprintf("backstop vacuum: %d MB free across days, compacting", stats0.FreeBytes()>>20)
+			st.AppendSysEvent("retention", detail)
+			sysEventSeq++
+			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
+				Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+				Kind: "retention", Detail: detail, Level: "warn",
+			})
+			st.Flush() // drain the freshly-queued backstop-trigger sys_event before VACUUM takes its exclusive lock
+			if err := st.Vacuum(); err != nil {
+				log.Error("backstop vacuum", "err", err)
+				failDetail := fmt.Sprintf("backstop vacuum failed: %v", err)
+				st.AppendSysEvent("retention", failDetail)
+				sysEventSeq++
+				hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
+					Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+					Kind: "retention", Detail: failDetail, Level: "danger",
+				})
+			} else {
+				log.Info("backstop vacuum done")
+			}
+		}
+		if stats1, err := st.SizeStats(); err == nil { // POST-maintenance telemetry
+			chunkBytes, rawRows, _ := st.JournalFootprint()
+			advise := stats1.AdviseVacuum()
+			report := store.FormatStorageReport(stats1, chunkBytes, rawRows, advise)
+			st.AppendSysEvent("storage", report)
+			level := ""
+			if advise {
+				level = "warn" // surfaces as a toast via connectEventToasts
+			}
+			sysEventSeq++
+			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
+				Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+				Kind: "storage", Detail: report, Level: level,
+			})
 		}
 		st.AppendSysEvent("boot", "engine up")
+		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "connecting"})
 		dropWG.Add(1)
 		go watchDroppedUpdates(ctx, &dropWG, core, st)
 
@@ -520,6 +576,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			go func() { defer forwardWG.Done(); forwardDailyBars(ctx, gen, core, st, dailyBarPollInterval) }()
 			feedForHub, pollReq, mmProbe = sf, req, req
 			log.Info("engine up (demo synth feed)", "seed", seed, "symbols", gen.Symbols())
+			hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
 		} else {
 			client := opend.New(opend.Options{Addr: cfg.OpenD.Addr(), Clock: clock.System{}})
 			fd := opend.NewOpenDFeed(client, opend.FeedOptions{
@@ -532,6 +589,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			go pipe(ctx, &pipeWG, fd.Events(), core, st)
 			sealSchedWG.Add(1)
 			go runSealScheduler(ctx, &sealSchedWG, st, clock.System{}, log)
+			hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
 			feedForHub, pollReq, mmProbe, demand = fd, client, moomooProbe{c: client}, fd
 
 			if cfg.Backfill.Enabled {
@@ -620,6 +678,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			go func() { pipeWG.Wait(); stop() }() // self-terminate when the journal is exhausted
 		}
 		log.Info("engine up (replay)", "day", *replayDay, "rows", len(replayRows), "speed", *speed)
+		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
 	}
 
 	if orch == nil && st != nil {
