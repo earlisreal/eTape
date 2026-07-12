@@ -1,8 +1,9 @@
 import { useEffect, useRef } from "react";
-import { TV_FONT, TV_GEOM, type TvChrome } from "../../../render/chart/tvTheme";
+import { TV_FONT, TV_GEOM } from "../../../render/chart/tvTheme";
+import type { MenuChrome } from "../../menuChrome";
 
 export type MenuEntry = { label: string; icon?: JSX.Element; onClick: () => void; danger?: boolean } | "separator";
-export interface TVContextMenuProps { chrome: TvChrome; x: number; y: number; items: MenuEntry[]; onClose: () => void }
+export interface TVContextMenuProps { chrome: MenuChrome; x: number; y: number; items: MenuEntry[]; onClose: () => void }
 
 export function TVContextMenu({ chrome, x, y, items, onClose }: TVContextMenuProps): JSX.Element {
   const ref = useRef<HTMLDivElement | null>(null);

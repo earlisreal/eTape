@@ -32,6 +32,7 @@ import { ChartSettingsDialog, DEFAULT_CHART_SETTINGS, type ChartSettings } from 
 import { computeLegendView } from "./tv/legendView";
 import { BarCloseTimer } from "./tv/BarCloseTimer";
 import { perf } from "../../perf/PerfMonitor";
+import { bareSymbol } from "../exec/orderStatus";
 
 // Adapts a real LWC v5 IChartApi to the controller's minimal ChartApiFacade.
 function makeFacade(chart: IChartApi, palette: Palette): {
@@ -607,6 +608,15 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     items.push("separator");
     items.push({ label: "Remove all drawings", danger: true, onClick: () => stores.drawings.clearSymbol(chartSymbol) });
     items.push({ label: hideAll ? "Show all drawings" : "Hide all drawings", onClick: toggleHideAll });
+    items.push("separator");
+    const inWatch = stores.watchlist.has(chartSymbol);
+    items.push(
+      inWatch
+        ? { label: `Remove ${bareSymbol(chartSymbol)} from watchlist`, danger: true,
+            onClick: () => void commands.sendCommand("WatchlistRemove", { symbol: chartSymbol }) }
+        : { label: `Add ${bareSymbol(chartSymbol)} to watchlist`,
+            onClick: () => void commands.sendCommand("WatchlistAdd", { symbol: chartSymbol }) },
+    );
     items.push("separator");
     items.push({ label: "Settings…", onClick: () => setChartSettingsOpen(true) });
     return items;
