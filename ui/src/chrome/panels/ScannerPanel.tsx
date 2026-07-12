@@ -51,9 +51,14 @@ function readSort(s: Record<string, unknown>): SortState {
 }
 
 export function ScannerPanel(
-  { config, stores, linkGroups, commands, onConfigChange, variant }: PanelProps & { variant: "scanner" | "movers" },
+  { config, stores, linkGroups, commands, onConfigChange, variant, group: groupProp }: PanelProps & { variant: "scanner" | "movers" },
 ): JSX.Element {
   const { palette } = useTheme();
+  // config.group is frozen at panel creation (dockview never re-invokes the panel
+  // factory with a fresh config after a later swatch re-pick) — PanelFrame threads
+  // the live re-picked group through as the `group` prop instead. Same pattern as
+  // ChartPanel/LadderPanel/TapePanel/etc.
+  const group = groupProp ?? config.group;
   const [menu, setMenu] = useState<{ clientX: number; clientY: number; symbol: string } | null>(null);
   const snap = useSyncExternalStore((cb) => stores.scanner.subscribe(cb), () => stores.scanner.getSnapshot());
   const cv = useMemo(() => stores.scanner.currentView(), [snap, stores.scanner]);
@@ -156,7 +161,7 @@ export function ScannerPanel(
             return (
             <tr key={r.symbol}
               onClick={() => setSelectedSymbol(r.symbol)}
-              onDoubleClick={() => linkGroups.focus(config.group ?? "green", r.symbol)}
+              onDoubleClick={() => linkGroups.focus(group ?? "green", r.symbol)}
               onContextMenu={(e) => { e.preventDefault(); setMenu({ clientX: e.clientX, clientY: e.clientY, symbol: r.symbol }); }}
               onMouseEnter={() => setHoveredSymbol(r.symbol)}
               onMouseLeave={() => setHoveredSymbol((h) => (h === r.symbol ? null : h))}

@@ -13,7 +13,11 @@ function fakeBus() {
   return { post: (m: unknown) => subs.forEach((cb) => cb(m)), onMessage: (cb: (m: unknown) => void) => { subs.add(cb); return () => subs.delete(cb); }, close: () => {} };
 }
 
-function renderPanel(over: Partial<PanelConfig> = {}, variant: "scanner" | "movers" = "scanner") {
+function renderPanel(
+  over: Partial<PanelConfig> = {},
+  variant: "scanner" | "movers" = "scanner",
+  groupProp?: PanelConfig["group"],
+) {
   const stores = makeStores();
   const scanner = stores.scanner;
   const focus = vi.fn();
@@ -24,7 +28,7 @@ function renderPanel(over: Partial<PanelConfig> = {}, variant: "scanner" | "move
     settings: {}, ...over };
   const commands = { sendCommand: vi.fn(async () => ({ status: "accepted" })) };
   const props = { config, stores, linkGroups, onConfigChange, scheduler: {} as never,
-    width: 400, height: 300, commands } as unknown as PanelProps & { variant: "scanner" | "movers" };
+    width: 400, height: 300, commands, group: groupProp } as unknown as PanelProps & { variant: "scanner" | "movers" };
   render(<ThemeProvider><ScannerPanel {...props} variant={variant} /></ThemeProvider>);
   return { scanner, focus, onConfigChange, commands };
 }
@@ -86,6 +90,17 @@ describe("ScannerPanel", () => {
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
     fireEvent.doubleClick(screen.getByText("KO"));
     expect(focus).toHaveBeenCalledWith("green", "US.KO");
+  });
+
+  // config.group is frozen at panel creation (dockview never re-invokes the panel
+  // factory with a fresh config after a later swatch re-pick) — PanelFrame threads
+  // the live re-picked group through as the `group` prop instead.
+  it("row double-click uses the live group prop, not the frozen config.group, after a group re-pick", () => {
+    const { scanner, focus } = renderPanel({ group: "green" }, "scanner", "blue");
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
+    fireEvent.doubleClick(screen.getByText("KO"));
+    expect(focus).toHaveBeenCalledWith("blue", "US.KO");
   });
 
   it("a single row click only highlights the row — it never loads the symbol into the group", () => {

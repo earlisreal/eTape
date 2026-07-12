@@ -14,7 +14,11 @@ function fakeBus() {
   return { post: (m: unknown) => subs.forEach((cb) => cb(m)), onMessage: (cb: (m: unknown) => void) => { subs.add(cb); return () => subs.delete(cb); }, close: () => {} };
 }
 
-function renderPanel(over: Partial<PanelConfig> = {}, ackImpl?: () => Promise<{ status: "accepted" | "blocked"; reason?: string }>) {
+function renderPanel(
+  over: Partial<PanelConfig> = {},
+  ackImpl?: () => Promise<{ status: "accepted" | "blocked"; reason?: string }>,
+  groupProp?: PanelConfig["group"],
+) {
   const stores = makeStores();
   const watchlist = stores.watchlist;
   const focus = vi.fn();
@@ -24,7 +28,7 @@ function renderPanel(over: Partial<PanelConfig> = {}, ackImpl?: () => Promise<{ 
   const config: PanelConfig = { id: "m-watchlist", panelId: "watchlist", group: null, settings: {}, ...over };
   const commands = { sendCommand: vi.fn(ackImpl ?? (async () => ({ status: "accepted" as const }))) };
   const props = { config, stores, linkGroups, onConfigChange, scheduler: {} as never,
-    width: 400, height: 300, commands } as unknown as PanelProps;
+    width: 400, height: 300, commands, group: groupProp } as unknown as PanelProps;
   render(<ThemeProvider><ToastProvider><WatchlistPanel {...props} /></ToastProvider></ThemeProvider>);
   return { watchlist, focus, onConfigChange, commands };
 }
@@ -97,6 +101,21 @@ describe("WatchlistPanel", () => {
       ] } }));
     fireEvent.doubleClick(screen.getByText("KO"));
     expect(focus).toHaveBeenCalledWith("green", "US.KO");
+  });
+
+  // config.group is frozen at panel creation (dockview never re-invokes the panel
+  // factory with a fresh config after a later swatch re-pick) — PanelFrame threads
+  // the live re-picked group through as the `group` prop instead. A panel that reads
+  // config.group directly (bypassing that live prop) would broadcast to whatever
+  // group the panel started in, not the one the user actually re-picked it into.
+  it("double-click uses the live group prop, not the frozen config.group, after a group re-pick", () => {
+    const { watchlist, focus } = renderPanel({ group: "green" }, undefined, "blue");
+    act(() => watchlist.apply({ kind: "snapshot", topic: "watchlist.rows",
+      payload: { refreshedAt: "2026-07-12T13:00:00.000Z", symbols: ["US.KO"], rows: [
+        { symbol: "US.KO", changePct: 5, last: 1, volume: 1 },
+      ] } }));
+    fireEvent.doubleClick(screen.getByText("KO"));
+    expect(focus).toHaveBeenCalledWith("blue", "US.KO");
   });
 
   it("add-input: Enter with a non-empty value sends WatchlistAdd and clears the input on an accepted ack", async () => {

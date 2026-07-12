@@ -41,8 +41,13 @@ function toRowView(symbol: string, row: WatchlistRow | undefined): WatchlistRowV
   return { symbol, last: row.last, changePct: row.changePct, volume: row.volume };
 }
 
-export function WatchlistPanel({ config, stores, linkGroups, commands }: PanelProps): JSX.Element {
+export function WatchlistPanel({ config, stores, linkGroups, commands, group: groupProp }: PanelProps): JSX.Element {
   const { palette } = useTheme();
+  // config.group is frozen at panel creation (dockview never re-invokes the panel
+  // factory with a fresh config after a later swatch re-pick) — PanelFrame threads
+  // the live re-picked group through as the `group` prop instead. Same pattern as
+  // ChartPanel/LadderPanel/TapePanel/etc.
+  const group = groupProp ?? config.group;
   const toast = useToasts();
   const snap = useSyncExternalStore((cb) => stores.watchlist.subscribe(cb), () => stores.watchlist.getSnapshot());
   const [sort, setSort] = useState<SortState>(null);
@@ -133,7 +138,7 @@ export function WatchlistPanel({ config, stores, linkGroups, commands }: PanelPr
             return (
               <tr key={r.symbol}
                 onClick={() => setSelectedSymbol(r.symbol)}
-                onDoubleClick={() => linkGroups.focus(config.group ?? "green", r.symbol)}
+                onDoubleClick={() => linkGroups.focus(group ?? "green", r.symbol)}
                 onContextMenu={(e) => { e.preventDefault(); setMenu({ clientX: e.clientX, clientY: e.clientY, symbol: r.symbol }); }}
                 onMouseEnter={() => setHoveredSymbol(r.symbol)}
                 onMouseLeave={() => setHoveredSymbol((h) => (h === r.symbol ? null : h))}
