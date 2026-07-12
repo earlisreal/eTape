@@ -481,7 +481,7 @@ describe("AccountPanel", () => {
       (URL as unknown as { revokeObjectURL: (u: string) => void }).revokeObjectURL = vi.fn();
     });
 
-    it("opens the Export popover from the header and downloads for the panel's selected venue", async () => {
+    it("opens the Export popover from the Trade History tab row and downloads for the panel's selected venue", async () => {
       const { props, stores, linkGroups } = mkProps("green");
       const calls: Array<{ name: string; args: unknown }> = [];
       props.commands.sendQuery = vi.fn(async (name: string, args: unknown) => {
@@ -494,6 +494,7 @@ describe("AccountPanel", () => {
         linkGroups.focusVenue("green", "alpaca-paper");
       });
       wrap(props);
+      fireEvent.click(screen.getByText("Trade History")); // Export lives in the Trade History tab row
 
       expect(screen.queryByTestId("export-download")).toBeNull(); // popover closed by default
       fireEvent.click(screen.getByTestId("acct-export"));

@@ -321,14 +321,6 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   const headerActions = (
     <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
       {venueSelect}
-      <HoverButton ref={exportBtnRef} data-testid="acct-export" className="ctl mono" aria-haspopup="menu" aria-expanded={exportOpen}
-        onClick={() => setExportOpen((v) => !v)} style={{ background: "transparent" }}>
-        Export
-      </HoverButton>
-      {exportOpen && (
-        <ExportTradesPopover palette={palette} anchor={exportBtnRef.current} venue={venue} commands={commands} toast={toast}
-          onClose={() => setExportOpen(false)} />
-      )}
     </div>
   );
 
@@ -382,9 +374,22 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
       <div data-testid="orders-resize-handle" onMouseDown={startResize}
         style={{ height: 4, cursor: "row-resize", background: palette.border, flexShrink: 0 }} />
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-        <div style={{ display: "flex", borderBottom: `1px solid ${palette.border}`, background: palette.surface }}>
+        <div style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${palette.border}`, background: palette.surface }}>
           {tabBtn(`Positions (${positionsCount})`, activeTab === "positions", () => selectTab("positions"))}
           {tabBtn("Trade History", activeTab === "history", () => selectTab("history"))}
+          <div style={{ flex: 1 }} />
+          {activeTab === "history" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 8px" }}>
+              <HoverButton ref={exportBtnRef} data-testid="acct-export" className="ctl mono" aria-haspopup="menu" aria-expanded={exportOpen}
+                onClick={() => setExportOpen((v) => !v)} style={{ background: "transparent" }}>
+                Export
+              </HoverButton>
+              {exportOpen && (
+                <ExportTradesPopover palette={palette} anchor={exportBtnRef.current} venue={venue} commands={commands} toast={toast}
+                  onClose={() => setExportOpen(false)} />
+              )}
+            </div>
+          )}
         </div>
         {activeTab === "positions"
           ? <PositionsTable stores={stores} commands={commands} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} extBufferPct={extBufferPct} />
