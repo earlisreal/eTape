@@ -22,10 +22,11 @@ function renderPanel(over: Partial<PanelConfig> = {}, variant: "scanner" | "move
   const onConfigChange = vi.fn();
   const config: PanelConfig = { id: "m-scanner", panelId: "scanner", group: null,
     settings: {}, ...over };
+  const commands = { sendCommand: vi.fn(async () => ({ status: "accepted" })) };
   const props = { config, stores, linkGroups, onConfigChange, scheduler: {} as never,
-    width: 400, height: 300, commands: { sendCommand: async () => ({ status: "accepted" }) } } as unknown as PanelProps & { variant: "scanner" | "movers" };
+    width: 400, height: 300, commands } as unknown as PanelProps & { variant: "scanner" | "movers" };
   render(<ThemeProvider><ScannerPanel {...props} variant={variant} /></ThemeProvider>);
-  return { scanner, focus, onConfigChange };
+  return { scanner, focus, onConfigChange, commands };
 }
 
 describe("ScannerPanel", () => {
@@ -95,6 +96,30 @@ describe("ScannerPanel", () => {
     expect(focus).not.toHaveBeenCalled();
     const row = screen.getByText("KO").closest("tr") as HTMLElement;
     expect(row.style.background).toBe("rgba(154, 106, 27, 0.16)");
+  });
+
+  it("right-click on a row shows an unconditional 'Add ... to watchlist' entry; clicking it sends WatchlistAdd for that row's symbol", () => {
+    const { scanner, commands } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
+    const row = screen.getByText("KO").closest("tr") as HTMLElement;
+    fireEvent.contextMenu(row, { clientX: 20, clientY: 30 });
+    const btn = screen.getByRole("button", { name: "Add KO to watchlist" });
+    expect(btn).toBeTruthy();
+    fireEvent.click(btn);
+    expect(commands.sendCommand).toHaveBeenCalledWith("WatchlistAdd", { symbol: "US.KO" });
+  });
+
+  it("right-click on a row shows the unconditional 'Add ... to watchlist' entry in the movers variant too", () => {
+    const { scanner, commands } = renderPanel({}, "movers");
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth",
+      payload: { refreshedAt: "2026-07-08T14:00:00.000Z", rows: [{ symbol: "US.LOW", changePct: 2, last: 1, floatShares: 1, volume: 1 }] } }));
+    const row = screen.getByText("LOW").closest("tr") as HTMLElement;
+    fireEvent.contextMenu(row, { clientX: 20, clientY: 30 });
+    const btn = screen.getByRole("button", { name: "Add LOW to watchlist" });
+    expect(btn).toBeTruthy();
+    fireEvent.click(btn);
+    expect(commands.sendCommand).toHaveBeenCalledWith("WatchlistAdd", { symbol: "US.LOW" });
   });
 
   it("hovering a non-selected, non-new-hit row shows the hover tint, cleared on mouse-leave", () => {
