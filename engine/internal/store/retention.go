@@ -145,3 +145,39 @@ func (s *Store) JournalFootprint() (chunkBytes, rawRows int64, err error) {
 func (s *Store) PendingSealDays() ([]string, error) {
 	return s.daysToSeal(dayKey(s.clk.Now().UnixMilli()))
 }
+
+// humanBytes renders a byte count as a one-decimal GB (or whole MB below 1 GB)
+// string. Uses DECIMAL units (÷1e9 / ÷1e6) to match the spec's reported figures
+// and the page-reuse experiment's gbExp helper (pages*4096/1e9), not binary GiB.
+func humanBytes(n int64) string {
+	const gb = 1_000_000_000
+	if n >= gb {
+		return fmt.Sprintf("%.1f GB", float64(n)/float64(gb))
+	}
+	return fmt.Sprintf("%d MB", n/1_000_000)
+}
+
+// FormatStorageReport builds the per-boot `storage` sys_event detail. When
+// advise is true it appends a hint to run `etape -vacuum`, estimating the
+// reabsorption horizon from a nominal raw-day size (a display estimate, not a
+// tunable threshold).
+func FormatStorageReport(st SizeStats, chunkBytes, rawRows int64, advise bool) string {
+	file := st.FileBytes()
+	free := st.FreeBytes()
+	pct := 0
+	if file > 0 {
+		pct = int(free * 100 / file)
+	}
+	rep := fmt.Sprintf("file %s, free %s (%d%%), journal_chunks ~%s, raw rows %d",
+		humanBytes(file), humanBytes(free), pct, humanBytes(chunkBytes), rawRows)
+	if advise {
+		const rawDayBytesEstimate = 2 << 30 // ~one trading day of raw feed
+		days := free / rawDayBytesEstimate
+		if days < 1 {
+			days = 1
+		}
+		rep += fmt.Sprintf(" — consider `etape -vacuum` to reclaim %s now (otherwise reabsorbed over ~%d days)",
+			humanBytes(free), days)
+	}
+	return rep
+}

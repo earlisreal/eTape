@@ -143,3 +143,16 @@ func TestPendingSealDays(t *testing.T) {
 		t.Fatalf("pending=%v want [07-08 07-09]", days)
 	}
 }
+
+func TestFormatStorageReport(t *testing.T) {
+	st := SizeStats{PageSize: 4096, PageCount: 1_953_125, FreelistPages: 610_351} // ~8.0 GB file, ~2.5 GB free (~31%)
+	got := FormatStorageReport(st, 4_900_000_000, 0, false)
+	want := "file 8.0 GB, free 2.5 GB (31%), journal_chunks ~4.9 GB, raw rows 0"
+	if got != want {
+		t.Fatalf("report:\n got=%q\nwant=%q", got, want)
+	}
+	adv := FormatStorageReport(st, 4_900_000_000, 0, true)
+	if adv == want || !strings.Contains(adv, "etape -vacuum") {
+		t.Fatalf("advisory suffix missing: %q", adv)
+	}
+}
