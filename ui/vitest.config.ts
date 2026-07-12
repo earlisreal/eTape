@@ -18,11 +18,19 @@ export default defineConfig({
     // node-canvas's native addon isn't safe to load into more than one
     // worker thread per process ("Module did not self-register" once a
     // second file requires it) — jsdom auto-loads it for any real
-    // `<canvas>.getContext("2d")` call, so every file that mounts a real
-    // canvas (golden-image tests, and the panel chrome tests that render an
-    // actual <canvas> rather than mocking it — LadderPanel, TapePanel) runs
-    // in its own child process; everything else keeps the faster default
-    // (threads) pool.
+    // `<canvas>.getContext("2d")` call. Routing these files to the "forks"
+    // pool (real child processes, not worker_threads) is necessary but NOT
+    // sufficient on its own: verified 2026-07-12 that vitest's forks-pool
+    // scheduler still packs multiple matched files into a single forked
+    // process for a small batch like this, which re-triggers the same
+    // self-register crash the moment a second canvas file loads in that
+    // shared process. package.json's "test"/"test:golden"/"test:golden:update"
+    // scripts work around this by invoking `vitest run <file>` once per
+    // canvas file (golden-image tests, and the panel chrome tests that render
+    // an actual <canvas> rather than mocking it — LadderPanel, TapePanel),
+    // each its own top-level process; this poolMatchGlobs entry still matters
+    // so each of those single-file invocations avoids worker_threads.
+    // Everything else keeps the faster default (threads) pool.
     poolMatchGlobs: [
       ["**/test/golden/**", "forks"],
       ["**/chrome/panels/LadderPanel.test.tsx", "forks"],

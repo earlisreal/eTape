@@ -1,0 +1,86 @@
+name: CI
+
+# Runs on every push to main and every pull request. Unlike release.yml
+# (tag-triggered artifact build), this is the PR/push gate: engine tests,
+# vet, lint, and the tygo TS-contract-drift check, plus the UI lint/test/
+# build suite — all of which were previously hand-run only.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: engine/go.mod
+
+      - name: go test -race
+        run: make -C engine test
+
+      - name: go vet
+        run: make -C engine vet
+
+      # engine/.golangci.yml is v2 schema (version: "2") -- a v1 lint binary
+      # rejects it, so this must install golangci-lint 2.x. golangci-lint-action
+      # v7+ is dedicated to golangci-lint v2 (v6 and earlier only support v1).
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+          working-directory: engine
+
+      # Regenerates ui/src/gen/wsmsg.ts via `go tool tygo generate` and fails
+      # if it drifts from the committed copy -- needs the ui/ tree, which the
+      # checkout above already provides.
+      - name: TS contract drift check (gen-ts-check)
+        run: make -C engine gen-ts-check
+
+  ui:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # node-canvas (used by the golden-image / real-<canvas> tests) needs
+      # these native libs to build its prebuilt-binary fallback on a clean
+      # Ubuntu runner.
+      - name: Install canvas native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: npm ci
+
+      - name: Lint
+        working-directory: ui
+        run: npm run lint
+
+      - name: Test
+        working-directory: ui
+        run: npm test
+
+      # Build already runs typecheck (npm run typecheck && vite build).
+      - name: Build
+        working-directory: ui
+        run: npm run build
