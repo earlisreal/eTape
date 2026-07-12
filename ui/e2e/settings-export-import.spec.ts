@@ -13,36 +13,50 @@ async function gotoBlank(page: Page, workspace: string): Promise<void> {
   await expect(page.getByTestId("latency-readout")).toBeVisible({ timeout: 15_000 });
 }
 
-async function openBackupSection(page: Page): Promise<void> {
+async function openGeneral(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("button", { name: "Import & export", exact: true }).click();
+  await page.getByRole("button", { name: "General", exact: true }).click();
+}
+async function openOrdersHotkeys(page: Page): Promise<void> {
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Orders & hotkeys", exact: true }).click();
 }
 
 test.describe("settings export/import", () => {
-  test("opening Settings -> Import & export renders the download/import controls", async ({ page }) => {
-    await gotoBlank(page, "e2e-backup-open");
-    await openBackupSection(page);
+  test("opening Settings -> General renders the layout download/import controls", async ({ page }) => {
+    await gotoBlank(page, "e2e-backup-open-layout");
+    await openGeneral(page);
 
-    await expect(page.getByTestId("export-layout")).toBeVisible();
-    await expect(page.getByTestId("export-hotkeys")).toBeVisible();
     await expect(page.getByTestId("download-json")).toBeVisible();
     await expect(page.getByTestId("import-file")).toBeVisible();
   });
 
-  test("downloading with both checkboxes checked triggers a download named etape-settings-<date>.json", async ({ page }) => {
-    await gotoBlank(page, "e2e-backup-download");
-    await openBackupSection(page);
+  test("opening Settings -> Orders & hotkeys renders the hotkeys download/import controls", async ({ page }) => {
+    await gotoBlank(page, "e2e-backup-open-hotkeys");
+    await openOrdersHotkeys(page);
 
-    // Both checkboxes default to checked (BackupSection's own useState(true))
-    // on every fresh mount of the section — assert that rather than forcing
-    // it, so this test also catches a regression that flips either default.
-    await expect(page.getByTestId("export-layout")).toBeChecked();
-    await expect(page.getByTestId("export-hotkeys")).toBeChecked();
+    await expect(page.getByTestId("download-json")).toBeVisible();
+    await expect(page.getByTestId("import-file")).toBeVisible();
+  });
+
+  test("downloading from General's Layout group triggers a download named etape-layout-<date>.json", async ({ page }) => {
+    await gotoBlank(page, "e2e-backup-download-layout");
+    await openGeneral(page);
 
     const downloadPromise = page.waitForEvent("download");
     await page.getByTestId("download-json").click();
     const download = await downloadPromise;
-    expect(download.suggestedFilename()).toMatch(/^etape-settings-\d{4}-\d{2}-\d{2}\.json$/);
+    expect(download.suggestedFilename()).toMatch(/^etape-layout-\d{4}-\d{2}-\d{2}\.json$/);
+  });
+
+  test("downloading from Orders & hotkeys triggers a download named etape-hotkeys-<date>.json", async ({ page }) => {
+    await gotoBlank(page, "e2e-backup-download-hotkeys");
+    await openOrdersHotkeys(page);
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByTestId("download-json").click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/^etape-hotkeys-\d{4}-\d{2}-\d{2}\.json$/);
   });
 
   test("importing a hotkeys-only fixture with an unbound combo adds its template to Orders & hotkeys", async ({ page }) => {
@@ -52,55 +66,39 @@ test.describe("settings export/import", () => {
     page.on("dialog", (d) => { void d.accept(); });
 
     await gotoBlank(page, "e2e-backup-import-hotkeys");
-    await openBackupSection(page);
+    await openOrdersHotkeys(page);
 
     // fixtures/settings-export-hotkeys.json: one PlaceOrderTemplate labeled
     // "Imported Buy" bound to Ctrl+9 — a combo nothing in a fresh app binds.
     await page.getByTestId("import-file").setInputFiles("fixtures/settings-export-hotkeys.json");
-    await expect(page.getByTestId("import-hotkeys")).toBeVisible();
     await expect(page.getByTestId("apply-import")).toBeVisible();
 
     await page.getByTestId("apply-import").click();
     await expect(page.getByRole("alert")).toContainText("Imported hotkeys.");
 
-    // Switch nav within the still-open modal (no need to close/reopen):
-    // OrderSettingsSection remounts fresh reading the now-updated shared
-    // OrderConfig context (useOrderConfig's save() is synchronous), so the
-    // imported template's label shows up immediately in the cheat sheet
-    // (rendered for every template that has a bound hotkey).
-    await page.getByRole("button", { name: "Orders & hotkeys", exact: true }).click();
+    // No nav switch needed: the cheat sheet (rendered by OrderSettingsSection,
+    // above the hotkeys import panel in this same "Orders & hotkeys" pane)
+    // already reflects the shared OrderConfig context's updated state.
     await expect(page.getByTestId("cheat-sheet")).toContainText("Imported Buy");
 
-    // Cleanup: the orderConfig key is engine-side, shared across every spec
-    // file in one `npm run e2e` run (webServer boots ONE engine for the whole
-    // invocation) — same convention as settings-redesign.spec.ts's "orders"
-    // test. Reset now, while the modal is already open to "Orders & hotkeys",
-    // so the imported "Imported Buy"/Ctrl+9 template doesn't survive into a
-    // later spec file's hotkey assumptions.
+    // Cleanup (same convention as before — orderConfig is engine-side, shared
+    // across every spec file in one `npm run e2e` run): reset now, while the
+    // modal is already open to "Orders & hotkeys".
     await page.getByTestId("reset-defaults").click();
     await page.getByTestId("reset-confirm").click();
     await page.getByTestId("save").click();
 
-    await page.mouse.click(5, 5); // close via backdrop (SettingsModal has no Escape handler)
+    await page.mouse.click(5, 5); // close via backdrop
   });
 
   test("importing a layout-only fixture replaces the panel layout", async ({ page }) => {
     page.on("dialog", (d) => { void d.accept(); });
 
     await gotoBlank(page, "e2e-backup-import-layout");
-    // A blank `?workspace=` starts with zero panels (EmptyState/Catalog, no
-    // dockview mount at all) — confirm there is no "Movers" panel (or any
-    // panel) before the import, so the post-import assertion is a genuine
-    // before/after, not something that was already there.
     await expect(page.locator(".ledger-header")).toHaveCount(0);
 
-    await openBackupSection(page);
-    // fixtures/settings-export-layout.json: a single "movers" panel — going
-    // from zero panels to one exercises AppShell's "first mount" dockview
-    // seed path (onReady's `event.api.fromJSON(ws.layout)`), since dockview
-    // isn't mounted yet while the workspace is empty.
+    await openGeneral(page);
     await page.getByTestId("import-file").setInputFiles("fixtures/settings-export-layout.json");
-    await expect(page.getByTestId("import-layout")).toBeVisible();
     await expect(page.getByTestId("apply-import")).toBeVisible();
 
     await page.getByTestId("apply-import").click();
