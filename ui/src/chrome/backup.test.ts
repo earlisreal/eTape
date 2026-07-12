@@ -390,6 +390,22 @@ describe("backup: reconcileToGrid", () => {
     expect(reconcileToGrid(base, 42 as unknown as Workspace)).toBe(base);
     expect(reconcileToGrid(base, [] as unknown as Workspace)).toBe(base);
   });
+
+  it("returns base unchanged when layout has a null grid (present key, malformed value)", () => {
+    const base: Workspace = {
+      name: "test",
+      panels: [
+        { id: "p1", panelId: "chart", group: "red", settings: {} },
+        { id: "p2", panelId: "tape", group: null, settings: {} },
+      ],
+      layout: { grid: null },
+    };
+
+    const result = reconcileToGrid(base, { grid: null });
+
+    expect(result).toBe(base);
+    expect(result.panels).toBe(base.panels);
+  });
 });
 
 describe("backup: prepareImportedWorkspace with reconciliation", () => {

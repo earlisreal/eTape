@@ -102,7 +102,8 @@ export function reconcileToGrid(base: Workspace, layout: unknown): Workspace {
   if (!isPresentLayout(layout as SettingsExport["layout"])) return base;
   // Only reconcile if there's actually a grid — without one, there's nothing
   // to reconcile against, so return base unchanged.
-  const hasGrid = (layout as Record<string, unknown>).grid !== undefined;
+  const hasGrid = typeof (layout as Record<string, unknown>).grid === "object"
+    && (layout as Record<string, unknown>).grid !== null;
   if (!hasGrid) return base;
   const ids = collectPanelIds(layout);
   return { ...base, layout, panels: base.panels.filter((p) => ids.has(p.id)) };
