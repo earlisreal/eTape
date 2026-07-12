@@ -210,6 +210,11 @@ func TestBook_FixCrossedPreservesAskSortOrder(t *testing.T) {
 func TestBook_ReplenishRespectsSpreadProfile(t *testing.T) {
 	rng := rand.New(rand.NewSource(11))
 	s := spec(PersLargeCap)
+	// spec()'s shared fixture hardcodes Spread{1,5,4} regardless of the
+	// Pers argument (matching the runner profile, not large-cap) -- override
+	// it explicitly here to actually exercise universe.go's real large-cap
+	// numbers, per this test's own doc comment above.
+	s.Spread = SpreadProfile{MinCents: 1, MaxCents: 2, FlushMult: 1.5}
 	mid := 100.0
 	b := newBook(rng, s, mid)
 
