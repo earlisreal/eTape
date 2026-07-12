@@ -127,8 +127,8 @@ no Go or Node toolchain required.
 
 | Platform | Artifact | Run it |
 |---|---|---|
-| Windows (x64) | `eTape-<version>-windows-amd64.zip` | Unzip, then double-click `etape-demo.cmd` to try the demo — or run `etape.exe` for live mode. `README-FIRST.txt` inside covers the details. |
-| macOS (Apple Silicon) | `eTape-<version>-macos-arm64.tar.gz` | `tar xzf` it, then `./etape-darwin-arm64 -demo` — or run it without the flag for live mode. |
+| Windows (x64) | `eTape-<version>-windows-amd64.zip` | Unzip and run `etape.exe`. Click "Try demo" in the app to start with a synthetic market (no setup needed) — or configure OpenD + venues in settings for live mode. `README-FIRST.txt` inside covers the details. |
+| macOS (Apple Silicon) | `eTape-<version>-macos-arm64.tar.gz` | `tar xzf` it, then run `./etape-darwin-arm64`. Click "Try demo" in the app for a synthetic market, or configure settings for live mode. (Developers: `./etape-darwin-arm64 -demo` is equivalent.) |
 
 The binaries aren't code-signed (personal-use release, no certificate), so expect a
 one-time warning on first launch: Windows SmartScreen says "unrecognized app" —
