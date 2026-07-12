@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/earlisreal/eTape/engine/internal/broker/tradezero"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/creds"
@@ -41,6 +43,28 @@ func failMoomoo(t *testing.T) func(context.Context, string, uint64, string, cloc
 }
 
 func fakeClock() clock.Clock { return clock.NewFake(time.Unix(0, 0)) }
+
+// eligibleMoomooAcc builds a *trdcommon.TrdAcc that passes moomoo.EligibleLiveUS:
+// real money, not master, not disabled, US-authorized. accType lets a case
+// tune the AccountType label testMoomooDiscover derives from it.
+func eligibleMoomooAcc(accID uint64, accType trdcommon.TrdAccType) *trdcommon.TrdAcc {
+	return &trdcommon.TrdAcc{
+		TrdEnv:            proto.Int32(int32(trdcommon.TrdEnv_TrdEnv_Real)),
+		AccID:             proto.Uint64(accID),
+		AccType:           proto.Int32(int32(accType)),
+		TrdMarketAuthList: []int32{int32(trdcommon.TrdMarket_TrdMarket_US)},
+		AccStatus:         proto.Int32(int32(trdcommon.TrdAccStatus_TrdAccStatus_Active)),
+		AccRole:           proto.Int32(int32(trdcommon.TrdAccRole_TrdAccRole_Normal)),
+	}
+}
+
+// masterMoomooAcc is otherwise eligible but is the Master account — excluded
+// by moomoo.EligibleLiveUS.
+func masterMoomooAcc(accID uint64) *trdcommon.TrdAcc {
+	a := eligibleMoomooAcc(accID, trdcommon.TrdAccType_TrdAccType_Cash)
+	a.AccRole = proto.Int32(int32(trdcommon.TrdAccRole_TrdAccRole_Master))
+	return a
+}
 
 // ---- credential resolution ----
 
@@ -336,17 +360,139 @@ func TestTestConnection_Moomoo_Success(t *testing.T) {
 	}
 }
 
-func TestTestConnection_Moomoo_EmptyAccountID(t *testing.T) {
+// ---- moomoo discovery (empty accountID) ----
+
+func TestTestConnection_Moomoo_Discover_MultipleEligible(t *testing.T) {
+	var gotAddr, gotClientID string
+	p := &Prober{
+		clk:             fakeClock(),
+		openDAddr:       "127.0.0.1:11111",
+		alpacaVerify:    failAlpaca(t),
+		tzFetchAccounts: failTZ(t),
+		moomooVerify:    failMoomoo(t),
+		moomooList: func(_ context.Context, addr, clientID string, _ clock.Clock) ([]*trdcommon.TrdAcc, error) {
+			gotAddr, gotClientID = addr, clientID
+			return []*trdcommon.TrdAcc{
+				eligibleMoomooAcc(1, trdcommon.TrdAccType_TrdAccType_Cash),
+				eligibleMoomooAcc(2, trdcommon.TrdAccType_TrdAccType_Margin),
+			}, nil
+		},
+	}
+
+	res := p.TestConnection(context.Background(), "moomoo", "", "", "", "", "")
+
+	if !res.OK || res.Env != "live" {
+		t.Fatalf("res = %+v, want OK:true Env:live", res)
+	}
+	if res.AccountID != "" || res.AccountType != "" {
+		t.Fatalf("res = %+v, want top-level AccountID/AccountType left empty (matches TZ's >1 behavior)", res)
+	}
+	wantAccounts := []Account{
+		{AccountID: "1", AccountType: "TrdAccType_Cash", Env: "live"},
+		{AccountID: "2", AccountType: "TrdAccType_Margin", Env: "live"},
+	}
+	if len(res.Accounts) != len(wantAccounts) {
+		t.Fatalf("res.Accounts = %+v, want %+v", res.Accounts, wantAccounts)
+	}
+	for i, want := range wantAccounts {
+		if res.Accounts[i] != want {
+			t.Fatalf("res.Accounts[%d] = %+v, want %+v", i, res.Accounts[i], want)
+		}
+	}
+	if gotAddr != "127.0.0.1:11111" {
+		t.Fatalf("moomooList addr = %q, want 127.0.0.1:11111", gotAddr)
+	}
+	if gotClientID != "etape-trade-probe" {
+		t.Fatalf("moomooList clientID = %q, want etape-trade-probe (match VerifyAccount's)", gotClientID)
+	}
+}
+
+func TestTestConnection_Moomoo_Discover_SingleEligible(t *testing.T) {
+	p := &Prober{
+		clk:             fakeClock(),
+		openDAddr:       "127.0.0.1:11111",
+		alpacaVerify:    failAlpaca(t),
+		tzFetchAccounts: failTZ(t),
+		moomooVerify:    failMoomoo(t),
+		moomooList: func(context.Context, string, string, clock.Clock) ([]*trdcommon.TrdAcc, error) {
+			// A master account and a non-US account are both present but
+			// excluded by moomoo.EligibleLiveUS, exercising the filter rather
+			// than just trivially passing everything through.
+			return []*trdcommon.TrdAcc{
+				masterMoomooAcc(9),
+				eligibleMoomooAcc(42, trdcommon.TrdAccType_TrdAccType_Cash),
+			}, nil
+		},
+	}
+
+	res := p.TestConnection(context.Background(), "moomoo", "", "", "", "", "")
+
+	want := Result{
+		OK:          true,
+		Env:         "live",
+		AccountID:   "42",
+		AccountType: "TrdAccType_Cash",
+		Accounts:    []Account{{AccountID: "42", AccountType: "TrdAccType_Cash", Env: "live"}},
+	}
+	if !reflect.DeepEqual(res, want) {
+		t.Fatalf("res = %+v, want %+v", res, want)
+	}
+}
+
+func TestTestConnection_Moomoo_Discover_ZeroEligible(t *testing.T) {
 	p := &Prober{
 		clk:             fakeClock(),
 		alpacaVerify:    failAlpaca(t),
 		tzFetchAccounts: failTZ(t),
 		moomooVerify:    failMoomoo(t),
+		moomooList: func(context.Context, string, string, clock.Clock) ([]*trdcommon.TrdAcc, error) {
+			return []*trdcommon.TrdAcc{masterMoomooAcc(9)}, nil
+		},
 	}
 
-	res := p.TestConnection(context.Background(), "moomoo", "paper", "", "", "", "")
+	res := p.TestConnection(context.Background(), "moomoo", "", "", "", "", "")
 
-	want := Result{OK: false, Message: "account_id is required for moomoo"}
+	want := Result{OK: false, Message: "no live US-authorized account found on this OpenD login"}
+	if !reflect.DeepEqual(res, want) {
+		t.Fatalf("res = %+v, want %+v", res, want)
+	}
+}
+
+func TestTestConnection_Moomoo_Discover_EmptyList(t *testing.T) {
+	p := &Prober{
+		clk:             fakeClock(),
+		alpacaVerify:    failAlpaca(t),
+		tzFetchAccounts: failTZ(t),
+		moomooVerify:    failMoomoo(t),
+		moomooList: func(context.Context, string, string, clock.Clock) ([]*trdcommon.TrdAcc, error) {
+			return nil, nil
+		},
+	}
+
+	res := p.TestConnection(context.Background(), "moomoo", "", "", "", "", "")
+
+	want := Result{OK: false, Message: "no live US-authorized account found on this OpenD login"}
+	if !reflect.DeepEqual(res, want) {
+		t.Fatalf("res = %+v, want %+v", res, want)
+	}
+}
+
+func TestTestConnection_Moomoo_Discover_TransportError(t *testing.T) {
+	p := &Prober{
+		clk:             fakeClock(),
+		alpacaVerify:    failAlpaca(t),
+		tzFetchAccounts: failTZ(t),
+		moomooVerify:    failMoomoo(t),
+		moomooList: func(context.Context, string, string, clock.Clock) ([]*trdcommon.TrdAcc, error) {
+			return nil, errors.New("moomoo: list accounts: connection failed")
+		},
+	}
+
+	res := p.TestConnection(context.Background(), "moomoo", "", "", "", "", "")
+
+	// Same error shape validate mode's moomooVerify failure gets: err.Error()
+	// surfaced verbatim as Message, OK false, nothing else populated.
+	want := Result{OK: false, Message: "moomoo: list accounts: connection failed"}
 	if !reflect.DeepEqual(res, want) {
 		t.Fatalf("res = %+v, want %+v", res, want)
 	}
@@ -407,8 +553,8 @@ func TestTestConnection_UnrecognizedBroker_NotSupported(t *testing.T) {
 
 func TestNew_WiresRealHelpers(t *testing.T) {
 	p := New("/tmp/does-not-matter.json", "127.0.0.1:11111", clock.System{})
-	if p.alpacaVerify == nil || p.tzFetchAccounts == nil || p.moomooVerify == nil {
-		t.Fatal("New must wire all three broker helpers")
+	if p.alpacaVerify == nil || p.tzFetchAccounts == nil || p.moomooVerify == nil || p.moomooList == nil {
+		t.Fatal("New must wire all four broker helpers")
 	}
 	if p.credsPath != "/tmp/does-not-matter.json" {
 		t.Fatalf("credsPath = %q, want /tmp/does-not-matter.json", p.credsPath)

@@ -161,7 +161,7 @@ func ListAccounts(ctx context.Context, addr, clientID string, clk clock.Clock) (
 		clk = clock.System{}
 	}
 	client := opend.New(opend.Options{Addr: addr, ClientID: clientID, Clock: clk})
-	go client.Run(pctx)
+	go func() { _ = client.Run(pctx) }()
 
 	select {
 	case st, ok := <-client.State():
