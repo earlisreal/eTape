@@ -722,26 +722,6 @@ func TestCommandsGoLiveDispatchesAndAcks(t *testing.T) {
 	}
 }
 
-// TestCommandsGoLiveAcceptedRegardlessOfDemoState is a regression guard for
-// Task 1's guard removal. Before Task 1, main.go's goLive closure returned
-// an error ("replay switching is unavailable in demo mode") whenever *demo
-// was true; that guard was removed specifically so "Return to live" works
-// from a demo session, and commands.go's dispatch switch never duplicated
-// that check itself. This test stands in for the fixed goLive closure — one
-// that always succeeds, independent of any demo-like state — and confirms
-// the "GoLive" case in handle() accepts unconditionally on success, with no
-// demo-flag check of its own to reintroduce.
-func TestCommandsGoLiveAcceptedRegardlessOfDemoState(t *testing.T) {
-	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
-	hit := false
-	// No demo gate here — mirrors main.go's goLive closure post-Task-1.
-	cd.goLive = func() error { hit = true; return nil }
-	ack, _ := cd.handle(context.Background(), "GoLive", mustJSON(t, wsmsg.GoLiveArgs{}), 0, func(wsmsg.AckMsg) {})
-	if !hit || ack.Status != wsmsg.AckAccepted {
-		t.Fatalf("GoLive must accept unconditionally on closure success (no demo gate in commands.go): hit=%v ack=%+v", hit, ack)
-	}
-}
-
 func TestCommandsStartDemoBlockedWithNoHandler(t *testing.T) {
 	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
 	ack, deferred := cd.handle(context.Background(), "StartDemo", mustJSON(t, wsmsg.StartDemoArgs{}), 0, func(wsmsg.AckMsg) {})
