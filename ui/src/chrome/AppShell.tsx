@@ -320,7 +320,9 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     const id = `${panelId}-${crypto.randomUUID().slice(0, 8)}`;
     const settings: Record<string, unknown> = panelId === "chart" ? { symbol: "US.AAPL", timeframe: "1m" } : {};
     const config: PanelConfig = { id, panelId, group: null, settings };
-    const next = { ...ws, panels: [...ws.panels, config] };
+    const current = wsRef.current ?? ws;
+    const next = { ...current, panels: [...current.panels, config] };
+    wsRef.current = next;
     setWs(next);
     workspaceStore.save(next);
     if (apiRef.current) {
