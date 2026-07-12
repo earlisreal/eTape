@@ -41,7 +41,7 @@ describe("OrderTicketPanel", () => {
       linkGroups.focus("green", "US.AAPL");
     });
     wrap(props);
-    expect(await screen.findByText("AAPL")).toBeTruthy();
+    await waitFor(() => expect((screen.getByTestId("symbol") as HTMLInputElement).value).toBe("AAPL"));
     expect(screen.getByTestId("bid").textContent).toContain("3.40");
     expect(screen.getByTestId("ask").textContent).toContain("3.50");
   });
@@ -187,6 +187,134 @@ describe("OrderTicketPanel", () => {
     wrap(props);
     fireEvent.change(screen.getByTestId("venue"), { target: { value: "tradezero" } });
     expect(linkGroups.venueFor("green")).toBe("tradezero");
+  });
+  it("Enter commits an edited header symbol into the link group", async () => {
+    const { props, stores, linkGroups } = mkProps();
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    const input = screen.getByTestId("symbol") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "MSFT" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(linkGroups.symbolFor("green")).toBe("US.MSFT"));
+    expect(input.value).toBe("MSFT");
+  });
+  it("typing a lowercase bare ticker normalizes to a US.-qualified symbol on commit", async () => {
+    const { props, stores, linkGroups } = mkProps();
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    const input = screen.getByTestId("symbol") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "tsla" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(linkGroups.symbolFor("green")).toBe("US.TSLA"));
+  });
+  it("committing an unmodified header symbol is a no-op — does not flip a non-US market prefix", async () => {
+    // Regression: normalizeSymbol re-derives the market prefix from an
+    // allow-list that defaults anything unprefixed to US. — committing the
+    // *bare* text unchanged (e.g. tabbing in and hitting Enter with zero
+    // intended edit) must not run that re-derivation, or an HK ticket like
+    // this one would silently corrupt into US.00700.
+    const { props, stores, linkGroups } = mkProps();
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      linkGroups.focus("green", "HK.00700");
+    });
+    wrap(props);
+    const input = screen.getByTestId("symbol") as HTMLInputElement;
+    expect(input.value).toBe("00700");
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "Enter" }); // no change event — text is untouched
+    // Give any (incorrect) async commit a tick to land before asserting it didn't.
+    await new Promise((r) => setTimeout(r, 0));
+    expect(linkGroups.symbolFor("green")).toBe("HK.00700");
+    expect(input.value).toBe("00700");
+  });
+  it("a rejecting/throwing focusChecked promise (transport failure) surfaces a toast, not a silent unhandled rejection", async () => {
+    // Mirrors PanelFrame.test.tsx's equivalent `commit` regression test —
+    // commitSymbol's grouped branch must try/catch focusChecked the same way,
+    // since it too is invoked fire-and-forget (`void commitSymbol(...)`).
+    const { props, stores, linkGroups } = mkProps();
+    vi.spyOn(linkGroups, "focusChecked").mockRejectedValue(new Error("network down"));
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    const input = screen.getByTestId("symbol") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "MSFT" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await screen.findByText(/failed — network down/i);
+  });
+  it("Escape after editing reverts the header without committing anything", () => {
+    const { props, stores, linkGroups } = mkProps();
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    const input = screen.getByTestId("symbol") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "MSFT" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input.value).toBe("AAPL");
+    expect(linkGroups.symbolFor("green")).toBe("US.AAPL");
+  });
+  it("blurring after editing (without Enter) reverts the header without committing anything", () => {
+    const { props, stores, linkGroups } = mkProps();
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    const input = screen.getByTestId("symbol") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "MSFT" } });
+    fireEvent.blur(input);
+    expect(input.value).toBe("AAPL");
+    expect(linkGroups.symbolFor("green")).toBe("US.AAPL");
+  });
+  it("a pinned panel (group: null) commits an edited symbol via onConfigChange, not the link group", async () => {
+    const { props, stores } = mkProps();
+    const onConfigChange = vi.fn();
+    const pinnedProps: PanelProps = { ...props, config: { ...props.config, group: null }, onConfigChange };
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
+    wrap(pinnedProps);
+    const input = screen.getByTestId("symbol") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "tsla" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(onConfigChange).toHaveBeenCalledWith({ symbol: "US.TSLA" }));
+    expect(input.value).toBe("TSLA");
+  });
+  it("a pinned panel does not call onConfigChange when committing an unmodified symbol", async () => {
+    // Pinned-panel equivalent of the grouped no-op regression above: this
+    // commit path is completely unvalidated (no toast, no revert), so an
+    // unmodified commit reaching normalizeSymbol here would silently and
+    // undetectably flip HK.00700 -> US.00700 in local config.
+    const { props, stores } = mkProps();
+    const onConfigChange = vi.fn();
+    const pinnedProps: PanelProps = {
+      ...props,
+      config: { ...props.config, group: null, settings: { symbol: "HK.00700" } },
+      onConfigChange,
+    };
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
+    wrap(pinnedProps);
+    const input = screen.getByTestId("symbol") as HTMLInputElement;
+    expect(input.value).toBe("00700");
+    fireEvent.focus(input);
+    fireEvent.keyDown(input, { key: "Enter" }); // no change event — text is untouched
+    await new Promise((r) => setTimeout(r, 0));
+    expect(onConfigChange).not.toHaveBeenCalled();
+    expect(input.value).toBe("00700");
   });
   it("shows an on-top label above every field", () => {
     const { props, stores } = mkProps();
