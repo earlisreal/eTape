@@ -66,3 +66,82 @@ func (s *Store) VacuumIfNeeded() (bool, error) {
 	}
 	return true, nil
 }
+
+// Thresholds for the boot-path maintenance decisions. Package vars (not consts)
+// so tests can shrink them; deliberately NOT config keys — see the design spec.
+var (
+	vacuumAdviseFreeBytes int64 = 4 << 30 // post-maintenance free above this → advisory hint
+	vacuumBackstopFloor   int64 = 6 << 30 // pre-maintenance free above max(floor, file/2) → backstop
+)
+
+// vacuumBackstopThreshold is the pre-maintenance free-byte level above which the
+// boot path runs an anomaly-backstop VACUUM: max(floor, half the file). A normal
+// day's ~2.2 GB of seal-freed pages appears only AFTER this boot's prune/seal, so
+// the pre-maintenance freelist is ≈ 0 in every normal scenario and can never trip
+// this — only genuine cross-day reuse failure accumulates here.
+func vacuumBackstopThreshold(fileBytes int64) int64 {
+	if h := fileBytes / 2; h > vacuumBackstopFloor {
+		return h
+	}
+	return vacuumBackstopFloor
+}
+
+// SizeStats is the DB's physical size profile (PRAGMA page_size/page_count/
+// freelist_count).
+type SizeStats struct{ PageSize, PageCount, FreelistPages int64 }
+
+func (st SizeStats) FileBytes() int64 { return st.PageSize * st.PageCount }
+func (st SizeStats) FreeBytes() int64 { return st.PageSize * st.FreelistPages }
+
+// NeedsBackstopVacuum reports whether PRE-maintenance free space indicates
+// cross-day page-reuse failure (anomalous bloat). Pass the pre-prune snapshot.
+func (st SizeStats) NeedsBackstopVacuum() bool {
+	return st.FreeBytes() > vacuumBackstopThreshold(st.FileBytes())
+}
+
+// AdviseVacuum reports whether POST-maintenance free space is high enough to
+// suggest a manual `etape -vacuum` (advisory only; reabsorbed by daily churn
+// otherwise). Pass the post-seal snapshot.
+func (st SizeStats) AdviseVacuum() bool { return st.FreeBytes() > vacuumAdviseFreeBytes }
+
+// SizeStats reads the current physical size profile via three PRAGMAs.
+func (s *Store) SizeStats() (SizeStats, error) {
+	var st SizeStats
+	if err := s.db.QueryRow("PRAGMA page_size").Scan(&st.PageSize); err != nil {
+		return st, err
+	}
+	if err := s.db.QueryRow("PRAGMA page_count").Scan(&st.PageCount); err != nil {
+		return st, err
+	}
+	if err := s.db.QueryRow("PRAGMA freelist_count").Scan(&st.FreelistPages); err != nil {
+		return st, err
+	}
+	return st, nil
+}
+
+// Vacuum runs an unconditional VACUUM. Boot-time-only / no-live-producer
+// contract, identical to PruneJournal: call it before the feed producer starts
+// and after Flush() has drained queued writes (VACUUM needs exclusive access).
+func (s *Store) Vacuum() error {
+	_, err := s.db.Exec("VACUUM")
+	return err
+}
+
+// JournalFootprint returns the sealed-chunk byte total and the raw (unsealed)
+// journal row count — the two numbers the per-boot storage telemetry reports.
+func (s *Store) JournalFootprint() (chunkBytes, rawRows int64, err error) {
+	if err = s.db.QueryRow("SELECT COALESCE(SUM(LENGTH(body)),0) FROM journal_chunks").Scan(&chunkBytes); err != nil {
+		return
+	}
+	err = s.db.QueryRow("SELECT COUNT(*) FROM journal").Scan(&rawRows)
+	return
+}
+
+// PendingSealDays returns exactly the days SealJournalDays would compress on this
+// boot (distinct raw days strictly older than the current ET day). Used by the
+// boot path to size the "preparing journal" banner before the blocking seal.
+// Reuses the same day boundary as SealJournalDays (dayKey + daysToSeal) so the
+// count can never disagree with what the seal actually does.
+func (s *Store) PendingSealDays() ([]string, error) {
+	return s.daysToSeal(dayKey(s.clk.Now().UnixMilli()))
+}
