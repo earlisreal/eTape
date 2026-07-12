@@ -202,7 +202,7 @@ describe("OrderTicketPanel", () => {
     // into PanelFrame's title bar when mounted under a frame), where the
     // select's own value is self-evident without a label.
     const captions = Array.from(container.querySelectorAll(".col-head")).map((el) => el.textContent);
-    for (const label of ["Type", "TIF", "Session", "Price", "Stop", "Size", "Size by"]) {
+    for (const label of ["Bid", "Ask", "Type", "TIF", "Session", "Price", "Stop", "Size", "Size by"]) {
       expect(captions).toContain(label);
     }
   });
