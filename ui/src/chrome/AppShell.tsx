@@ -20,7 +20,7 @@ import { AlpacaBackfillBanner } from "./AlpacaBackfillBanner";
 import { EmptyState } from "./EmptyState";
 import { Catalog } from "./Catalog";
 import { SettingsModal, type SettingsSection } from "./SettingsModal";
-import { ReplayLauncherModal } from "./ReplayLauncherModal";
+import { PracticeLauncherModal } from "./PracticeLauncherModal";
 import { VenueSetupPrompt } from "./VenueSetupPrompt";
 import { OpenSettingsProvider } from "./OpenSettingsContext";
 import { modalTracker } from "./modalTracker";
@@ -74,8 +74,10 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // gear opens it to Appearance, the order ticket's gear (via OpenSettingsContext)
   // opens it straight to Orders & hotkeys.
   const [settings, setSettings] = useState<{ open: boolean; section: SettingsSection }>({ open: false, section: "appearance" });
-  // Task 9: replay launcher modal, opened from TopBar's "Practice" button.
-  const [replayOpen, setReplayOpen] = useState(false);
+  // Task 9 (unified into the Task 5/U3 Practice launcher): opened from
+  // TopBar's "Practice" button, offers a synthetic demo market or replaying
+  // a recorded day.
+  const [practiceOpen, setPracticeOpen] = useState(false);
   // Task 3 (venues/creds redesign): first-run venue-setup prompt. Separate from
   // the `etape.venueSetupHidden` localStorage flag below — this only silences
   // the prompt for the REST OF THIS SESSION after either action, so it doesn't
@@ -468,7 +470,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             onNewWindow={onNewWindow}
             onOpenSettings={() => setSettings({ open: true, section: "appearance" })}
             onOpenConnection={onOpenConnection}
-            onOpenReplay={() => setReplayOpen(true)}
+            onOpenReplay={() => setPracticeOpen(true)}
           />
           {addOpen && (
             <div className="popover" style={{ top: 40, right: 160, width: 580, maxHeight: "70vh", overflow: "auto" }}>
@@ -496,7 +498,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           onImportWorkspace={onImportWorkspace}
           toast={toast}
           engineState={engineState} />
-        <ReplayLauncherModal open={replayOpen} onClose={() => setReplayOpen(false)} commands={commands} />
+        <PracticeLauncherModal open={practiceOpen} onClose={() => setPracticeOpen(false)} commands={commands} />
         {showVenueSetup && <VenueSetupPrompt onConfigure={configureVenueSetup} onDismiss={dismissVenueSetup} />}
       </div>
     </OpenSettingsProvider>
