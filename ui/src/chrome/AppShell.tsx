@@ -20,6 +20,7 @@ import { DemoBanner } from "./DemoBanner";
 import { AlpacaBackfillBanner } from "./AlpacaBackfillBanner";
 import { EmptyState } from "./EmptyState";
 import { Catalog } from "./Catalog";
+import { parseImport, prepareImportedWorkspace, isPresentLayout } from "./backup";
 import { SettingsModal, type SettingsSection } from "./SettingsModal";
 import { PracticeLauncherModal } from "./PracticeLauncherModal";
 import { VenueSetupPrompt } from "./VenueSetupPrompt";
@@ -387,6 +388,26 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // second confirm would double-prompt the user.
   const onImportWorkspace = (w: Workspace) => applyWorkspace(w);
 
+  // Empty-workspace "Import layout" entry point: same parseImport/
+  // prepareImportedWorkspace/applyWorkspace pipeline as BackupSection, but
+  // layout-only (ignores hotkeys even if the file has them, matching the
+  // label) and no confirm — the empty state has nothing to lose.
+  const importLayoutFile = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const text = typeof reader.result === "string" ? reader.result : "";
+      const result = parseImport(text);
+      if (!result.ok) { toast.push({ level: "danger", text: result.error }); return; }
+      if (!isPresentLayout(result.data.layout)) {
+        toast.push({ level: "danger", text: "That file has no layout to import." });
+        return;
+      }
+      applyWorkspace(prepareImportedWorkspace(result.data.layout, (wsRef.current ?? ws).name));
+      toast.push({ level: "info", text: "Imported layout." });
+    };
+    reader.readAsText(file);
+  };
+
   // "Connection" in the latency readout: focus the existing connection-status
   // panel if the workspace already has one, otherwise add it.
   const onOpenConnection = () => {
@@ -511,7 +532,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         {showAlpacaHint && <AlpacaBackfillBanner onSetup={openAlpacaSetup} onDismiss={dismissAlpacaHint} />}
         <div style={{ flex: 1, minHeight: 0 }}>
           {ws.panels.length === 0 ? (
-            <EmptyState onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} showTryDemo={showTryDemo} onTryDemo={onTryDemo} />
+            <EmptyState onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} showTryDemo={showTryDemo} onTryDemo={onTryDemo} onImportLayoutFile={importLayoutFile} />
           ) : (
             <DockviewReact components={components} onReady={onReady}
               theme={mode === "light" ? themeLight : themeDark} />

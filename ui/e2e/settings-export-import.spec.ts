@@ -109,4 +109,18 @@ test.describe("settings export/import", () => {
     await page.mouse.click(5, 5); // close via backdrop
     await expect(page.locator(".ledger-header", { hasText: "Movers" })).toBeVisible({ timeout: 10_000 });
   });
+
+  test("importing a layout via the empty-state 'Import layout' control replaces the panel layout", async ({ page }) => {
+    // Same fixture and end state as the Settings-based import test above, but
+    // through the new direct entry point in EmptyState — no Settings modal,
+    // no Apply-import button, no confirm dialog (the empty state has nothing
+    // to lose, so applyWorkspace runs straight through).
+    await gotoBlank(page, "e2e-empty-import-layout");
+    await expect(page.locator(".ledger-header")).toHaveCount(0);
+
+    await page.getByTestId("empty-import-file").setInputFiles("fixtures/settings-export-layout.json");
+
+    await expect(page.getByRole("alert")).toContainText("Imported layout.");
+    await expect(page.locator(".ledger-header", { hasText: "Movers" })).toBeVisible({ timeout: 10_000 });
+  });
 });
