@@ -56,6 +56,10 @@ export function TopBar(p: TopBarProps): JSX.Element {
         <button className="btn" aria-label="Settings" onClick={p.onOpenSettings}>⚙ Settings</button>
         <HoverButton data-testid="arm-chip" className="btn" onClick={p.onArmToggle}
           style={{ fontWeight: 600, letterSpacing: ".08em",
+            // Fixed width sized to the longer "UNLOCK TRADING" label (measured
+            // 149px) so toggling the shorter "LOCK TRADING" label doesn't
+            // resize the button and shift the other header buttons.
+            width: 154,
             color: p.armed ? palette.accent : palette.textMuted,
             borderColor: p.armed ? palette.accent : palette.borderStrong,
             background: p.armed ? "rgba(154,106,27,.12)" : "rgba(106,114,128,.12)" }}
