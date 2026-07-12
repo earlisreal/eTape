@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { DockviewReact, themeDark, themeLight, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview";
 // dockview's stylesheet is imported in main.tsx (ahead of global.css) so our
 // theme overrides always win the cascade — see the comment there.
@@ -29,8 +29,10 @@ import { modalTracker } from "./modalTracker";
 import { useTheme } from "./ThemeProvider";
 import { useToasts } from "./Toast";
 import { useOrderCommands } from "./exec/useOrderCommands";
+import { useOrderConfig } from "./exec/useOrderConfig";
 import { useReplayCommands } from "./exec/useReplayCommands";
 import { useHotkeys } from "./exec/useHotkeys";
+import { useAutoUnlockOnStartup } from "./exec/useAutoUnlockOnStartup";
 import { useSoundWiring } from "../sound/useSoundWiring";
 import { nextWindowName } from "./windows";
 
@@ -151,6 +153,18 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
   const execStatus = stores.exec.status();
   const armed = execStatus?.masterArmed ?? false;
+  // Auto-unlock-on-startup (fire-once latch — see the hook's own comment):
+  // arms trading automatically once the engine connection is up, if the user
+  // opted in via Settings → General. `orderConfig` is read here (rather than
+  // via `oc`, the order-COMMANDS handle above) because the setting itself
+  // lives in the order-CONFIG blob.
+  const orderConfig = useOrderConfig();
+  useAutoUnlockOnStartup({
+    ready: orderConfig.loaded && execStatus !== null,
+    enabled: orderConfig.config.autoUnlockOnStartup ?? false,
+    armed,
+    onUnlock: useCallback(() => { void oc.arm(); }, [oc]),
+  });
   // A paper "sim" venue is auto-seeded on first run (engine-side config seed),
   // so "no venues configured" is no longer the right signal for either nudge
   // below — a fresh install already has one. Both are re-keyed off "no REAL
