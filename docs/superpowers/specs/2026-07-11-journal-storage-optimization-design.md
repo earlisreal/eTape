@@ -149,3 +149,7 @@ degrade with a `sys_events` banner and leave days raw — never block market dat
   change becomes proto evolution.
 - **Tiered retention / depth truncation / bars-only aging:** ruled out by the
   full-fidelity-for-30-days requirement.
+
+## 7. Operator runbook
+
+**Operator note (2026-07-12 revision):** the engine no longer vacuums on boot. To reclaim disk after lowering `retention_days`, after a `storage` sys_event advises it, or during anomaly investigation, stop the engine and run `etape -vacuum` once. It refuses to run while an engine holds the lock. See `docs/superpowers/specs/2026-07-12-journal-vacuum-boot-revision-design.md`.
