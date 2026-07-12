@@ -142,6 +142,77 @@ func VerifyAccount(ctx context.Context, addr string, accountID uint64, env strin
 	return tc.getAccList(ctx)
 }
 
+// ListAccounts is venueseed's discovery helper: a bare, synchronous, one-shot
+// dial to OpenD's trade protocols returning the FULL account list, rather
+// than validating one specific accID the way VerifyAccount/getAccList do.
+// Same throwaway-connection contract as VerifyAccount -- dial, wait for the
+// InitConnect handshake via a throwaway *opend.Client (clientID is the
+// caller's choice, so a concurrent probe/seed/verify each get their own
+// OpenD-visible client identity), one Trd_GetAccList round trip, then tear
+// the connection down before returning, success or failure. Trd_GetAccList is
+// read-only; like VerifyAccount, this NEVER sends Trd_UnlockTrade (2005) --
+// eTape's standing rule that the trade password never touches eTape holds for
+// discovery exactly as it does for validation.
+func ListAccounts(ctx context.Context, addr, clientID string, clk clock.Clock) ([]*trdcommon.TrdAcc, error) {
+	pctx, cancel := context.WithCancel(ctx)
+	defer cancel() // always tears down the throwaway connection/goroutine before returning
+
+	if clk == nil {
+		clk = clock.System{}
+	}
+	client := opend.New(opend.Options{Addr: addr, ClientID: clientID, Clock: clk})
+	go client.Run(pctx)
+
+	select {
+	case st, ok := <-client.State():
+		if !ok || st != opend.ConnUp {
+			return nil, fmt.Errorf("moomoo: list accounts: connection failed")
+		}
+	case <-pctx.Done():
+		return nil, pctx.Err()
+	}
+
+	return fetchAccList(ctx, client)
+}
+
+// EligibleLiveUS reports whether acc can back eTape's live-only moomoo
+// venue: real-money (TrdEnv_Real), not the Master account, not Disabled, and
+// authorized to trade market US. It shares its Master/Disabled/US-authorized
+// predicates with trdClient.getAccList's validation (trd.go) so venueseed's
+// discovery filter and the adapter's boot-time validation can never drift
+// apart -- only the TrdEnv check is specific to this function (live only;
+// getAccList accepts either env, matching however the venue is configured).
+func EligibleLiveUS(acc *trdcommon.TrdAcc) bool {
+	if acc == nil {
+		return false
+	}
+	if isMasterAcc(acc) || isDisabledAcc(acc) || !isUSAuthorized(acc) {
+		return false
+	}
+	return trdcommon.TrdEnv(acc.GetTrdEnv()) == trdcommon.TrdEnv_TrdEnv_Real
+}
+
+// isMasterAcc, isDisabledAcc, and isUSAuthorized are the three env-independent
+// eligibility predicates shared between EligibleLiveUS (discovery) and
+// trdClient.getAccList (validation, trd.go) -- factored here so the two
+// checks are always evaluated identically and cannot silently diverge.
+func isMasterAcc(acc *trdcommon.TrdAcc) bool {
+	return trdcommon.TrdAccRole(acc.GetAccRole()) == trdcommon.TrdAccRole_TrdAccRole_Master
+}
+
+func isDisabledAcc(acc *trdcommon.TrdAcc) bool {
+	return trdcommon.TrdAccStatus(acc.GetAccStatus()) == trdcommon.TrdAccStatus_TrdAccStatus_Disabled
+}
+
+func isUSAuthorized(acc *trdcommon.TrdAcc) bool {
+	for _, m := range acc.GetTrdMarketAuthList() {
+		if trdcommon.TrdMarket(m) == trdcommon.TrdMarket_TrdMarket_US {
+			return true
+		}
+	}
+	return false
+}
+
 // now returns the current time in epoch milliseconds via the injected clock.
 func (a *Adapter) now() int64 { return a.clk.Now().UnixMilli() }
 

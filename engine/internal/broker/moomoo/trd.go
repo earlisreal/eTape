@@ -277,13 +277,17 @@ func orderStillWorking(o *trdcommon.Order) bool {
 	}
 }
 
-// getAccList resolves and validates tc.accID against moomoo's account list.
-// Every validation failure names exactly which check failed -- never a
-// generic "invalid account" -- since a later task (the exec.Broker Adapter)
-// needs to surface these to Earl at boot time.
-func (tc *trdClient) getAccList(ctx context.Context) (*trdcommon.TrdAcc, error) {
+// fetchAccList sends one Trd_GetAccList round trip over c and returns the
+// raw, unfiltered account list -- no accID selection, no eligibility checks.
+// Shared by trdClient.getAccList (which picks tc.accID out of the results
+// below) and moomoo.ListAccounts (venueseed's discovery helper, which returns
+// everything for the caller to filter with EligibleLiveUS). Factoring the
+// transport/decode step here means both call sites build the request and
+// interpret the response identically -- only the accID/eligibility logic that
+// each caller layers on top can differ.
+func fetchAccList(ctx context.Context, c *opend.Client) ([]*trdcommon.TrdAcc, error) {
 	req := &trdgetacclist.Request{C2S: &trdgetacclist.C2S{UserID: proto.Uint64(0)}} // required-but-deprecated proto2 field, see boot.go's ProbeRTT precedent
-	fr, err := tc.c.Request(ctx, opend.ProtoTrdGetAccList, req)
+	fr, err := c.Request(ctx, opend.ProtoTrdGetAccList, req)
 	if err != nil {
 		return nil, fmt.Errorf("moomoo: get acc list transport: %w", err)
 	}
@@ -294,9 +298,26 @@ func (tc *trdClient) getAccList(ctx context.Context) (*trdcommon.TrdAcc, error) 
 	if !retOK(resp.GetRetType()) {
 		return nil, retErr("get acc list", resp.GetRetType(), resp.GetRetMsg())
 	}
+	return resp.GetS2C().GetAccList(), nil
+}
+
+// getAccList resolves and validates tc.accID against moomoo's account list.
+// Every validation failure names exactly which check failed -- never a
+// generic "invalid account" -- since a later task (the exec.Broker Adapter)
+// needs to surface these to Earl at boot time. The Master/Disabled/US-market
+// checks below call the exact same isMasterAcc/isDisabledAcc/isUSAuthorized
+// predicates EligibleLiveUS (moomoo.go) uses for discovery, so the two can
+// never silently drift apart -- only the TrdEnv check differs (this accepts
+// either paper or live, matching tc.env; EligibleLiveUS only ever accepts
+// live).
+func (tc *trdClient) getAccList(ctx context.Context) (*trdcommon.TrdAcc, error) {
+	accs, err := fetchAccList(ctx, tc.c)
+	if err != nil {
+		return nil, err
+	}
 
 	var acc *trdcommon.TrdAcc
-	for _, a := range resp.GetS2C().GetAccList() {
+	for _, a := range accs {
 		if a.GetAccID() == tc.accID {
 			acc = a
 			break
@@ -305,20 +326,13 @@ func (tc *trdClient) getAccList(ctx context.Context) (*trdcommon.TrdAcc, error) 
 	if acc == nil {
 		return nil, fmt.Errorf("moomoo: accID %d not found in account list", tc.accID)
 	}
-	if trdcommon.TrdAccRole(acc.GetAccRole()) == trdcommon.TrdAccRole_TrdAccRole_Master {
+	if isMasterAcc(acc) {
 		return nil, fmt.Errorf("moomoo: accID %d is a MASTER account -- moomoo does not allow a master account to place orders", tc.accID)
 	}
-	if trdcommon.TrdAccStatus(acc.GetAccStatus()) == trdcommon.TrdAccStatus_TrdAccStatus_Disabled {
+	if isDisabledAcc(acc) {
 		return nil, fmt.Errorf("moomoo: accID %d is disabled (accStatus=Disabled)", tc.accID)
 	}
-	usAuthorized := false
-	for _, m := range acc.GetTrdMarketAuthList() {
-		if trdcommon.TrdMarket(m) == trdcommon.TrdMarket_TrdMarket_US {
-			usAuthorized = true
-			break
-		}
-	}
-	if !usAuthorized {
+	if !isUSAuthorized(acc) {
 		return nil, fmt.Errorf("moomoo: accID %d is not authorized to trade market US (trdMarketAuthList=%v)", tc.accID, acc.GetTrdMarketAuthList())
 	}
 	wantEnv := trdcommon.TrdEnv_TrdEnv_Simulate
