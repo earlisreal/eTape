@@ -48,7 +48,7 @@ type demandCtl interface {
 // venueAdmin is the file-only settings seam (satisfied by *venueadmin.Admin).
 // It never touches the running gate/arm state — edits apply at next boot.
 type venueAdmin interface {
-	GetVenueSetup() (file, running config.VenueConfig, credKeys []string, err error)
+	GetVenueSetup() (file, running config.VenueConfig, credKeys []string, moomooAttempted bool, err error)
 	SetVenueSetup(vc config.VenueConfig) error
 	PutCredential(name, keyID, secretKey string) error
 	DeleteCredential(name string) error
@@ -256,12 +256,13 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		})
 		return wsmsg.AckMsg{}, true // deferred
 	case "GetVenueSetup":
-		file, running, keys, err := cd.va.GetVenueSetup()
+		file, running, keys, moomooAttempted, err := cd.va.GetVenueSetup()
 		if err != nil {
 			return blocked("venue read error"), false
 		}
 		return wsmsg.AckMsg{Status: "accepted", Value: wsmsg.VenueSetup{
 			File: venueConfigToWire(file), Running: venueConfigToWire(running), CredKeys: keys,
+			Seed: wsmsg.SeedView{MoomooAttempted: moomooAttempted},
 		}}, false
 	case "SetVenueSetup":
 		var a wsmsg.SetVenueSetupArgs

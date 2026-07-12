@@ -31,20 +31,24 @@ func New(cfgPath, credsPath string, booted config.VenueConfig) *Admin {
 }
 
 // GetVenueSetup returns the file state (parsed fresh), the running state (what
-// the engine booted with), and the credential key NAMES. A missing/unreadable
-// credentials file yields no keys, not an error.
-func (a *Admin) GetVenueSetup() (file, running config.VenueConfig, credKeys []string, err error) {
+// the engine booted with), the credential key NAMES, and the file's [seed]
+// moomoo-auto-config marker. moomooAttempted comes from the SAME fresh config
+// read as file (config.Load once, not a second re-read) so the two stay a
+// consistent snapshot. A missing/unreadable credentials file yields no keys,
+// not an error.
+func (a *Admin) GetVenueSetup() (file, running config.VenueConfig, credKeys []string, moomooAttempted bool, err error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	file, err = config.ReadVenueConfig(a.cfgPath)
+	cfg, err := config.Load(a.cfgPath)
 	if err != nil {
-		return config.VenueConfig{}, config.VenueConfig{}, nil, err
+		return config.VenueConfig{}, config.VenueConfig{}, nil, false, err
 	}
+	file = config.VenueConfig{Venues: cfg.Venues, Gate: cfg.Gate}
 	keys, kerr := creds.Keys(a.credsPath)
 	if kerr != nil {
 		keys = nil // credentials are optional for read; never fail the setup fetch
 	}
-	return file, a.booted, keys, nil
+	return file, a.booted, keys, cfg.Seed.MoomooAttempted, nil
 }
 
 // SetVenueSetup validates against the current credential keys, then rewrites

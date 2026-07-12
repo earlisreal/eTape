@@ -29,6 +29,7 @@ function baseSetup(overrides: Partial<VenueSetup> = {}): VenueSetup {
     file: runningConfig,
     running: runningConfig,
     credKeys: ["alpaca", "tradeZero"],
+    seed: { moomooAttempted: false },
     ...overrides,
   };
 }

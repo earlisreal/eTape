@@ -46,7 +46,7 @@ func TestSetVenueSetupWritesValid(t *testing.T) {
 
 func TestGetVenueSetupReturnsFileRunningKeys(t *testing.T) {
 	a, _, _ := setup(t)
-	file, running, keys, err := a.GetVenueSetup()
+	file, running, keys, moomooAttempted, err := a.GetVenueSetup()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +58,30 @@ func TestGetVenueSetupReturnsFileRunningKeys(t *testing.T) {
 	}
 	if len(keys) != 1 || keys[0] != "alpaca" {
 		t.Fatalf("keys: %v", keys)
+	}
+	if moomooAttempted {
+		t.Fatalf("fresh config should have moomooAttempted false")
+	}
+}
+
+func TestGetVenueSetupReflectsMoomooSeedMarker(t *testing.T) {
+	a, _, _ := setup(t)
+	_, _, _, moomooAttempted, err := a.GetVenueSetup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moomooAttempted {
+		t.Fatalf("marker should be false before any auto-config attempt")
+	}
+	if err := a.MarkMoomooSeedAttempted(); err != nil {
+		t.Fatalf("MarkMoomooSeedAttempted: %v", err)
+	}
+	_, _, _, moomooAttempted, err = a.GetVenueSetup()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !moomooAttempted {
+		t.Fatalf("marker should be true after MarkMoomooSeedAttempted")
 	}
 }
 
