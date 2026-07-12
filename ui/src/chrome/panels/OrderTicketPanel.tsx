@@ -80,7 +80,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const hasStop = type === "STOP" || type === "STOP_LIMIT";
 
   const submitManual = (side: Side) => {
-    if (venue === "") { toast.push({ level: "danger", text: "No venue configured." }); return; }
+    if (venue === "") { toast.push({ level: "danger", text: "no execution venue — set one up in Settings › Venues & creds" }); return; }
     const px = Number(price) || 0;
     const spec = mode === "Shares" ? { mode, shares: Number(amount) || 0 }
       : mode === "Dollar" ? { mode, dollar: Number(amount) || 0 }

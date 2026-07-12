@@ -11,6 +11,7 @@ import type { ActionTemplate } from "./actionTemplate";
 import { resolvePlaceTemplate } from "./resolveTemplate";
 import type { OrderCommands } from "./commands";
 import type { ToastApi } from "../Toast";
+import { bareSymbol } from "./orderStatus";
 
 export interface FireContext {
   venue: VenueID; symbol: string; quote?: Quote | undefined;
@@ -27,7 +28,18 @@ export function fireTemplate(
 ): void {
   if (t.kind === "place") {
     if (opts.gateArm && !ctx.armed) { toast.push({ level: "warn", text: "disarmed — hotkey blocked" }); return; }
-    if (!ctx.quote || ctx.venue === "") { toast.push({ level: "danger", text: "no venue/quote for order" }); return; }
+    if (ctx.venue === "") {
+      toast.push({ level: "danger", text: "no execution venue — set one up in Settings › Venues & creds" });
+      return;
+    }
+    if (ctx.symbol === "") {
+      toast.push({ level: "danger", text: "no symbol focused — type a symbol in the order ticket or a linked panel" });
+      return;
+    }
+    if (!ctx.quote) {
+      toast.push({ level: "danger", text: `no live quote for ${bareSymbol(ctx.symbol)} yet — waiting for market data` });
+      return;
+    }
     const r = resolvePlaceTemplate(t, {
       venue: ctx.venue, symbol: ctx.symbol, quote: ctx.quote,
       buyingPower: ctx.buyingPower, positionQty: ctx.positionQty, nowMs: ctx.nowMs,

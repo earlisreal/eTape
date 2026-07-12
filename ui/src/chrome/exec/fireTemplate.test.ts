@@ -70,7 +70,7 @@ describe("fireTemplate — place templates", () => {
     const oc = makeOc();
     const toast = makeToast();
     fireTemplate(PLACE_TEMPLATE, baseCtx({ quote: undefined }), oc, toast, { gateArm: false });
-    expect(toast.push).toHaveBeenCalledWith({ level: "danger", text: "no venue/quote for order" });
+    expect(toast.push).toHaveBeenCalledWith({ level: "danger", text: "no live quote for AAPL yet — waiting for market data" });
     expect(oc.submit).not.toHaveBeenCalled();
   });
 
@@ -78,7 +78,15 @@ describe("fireTemplate — place templates", () => {
     const oc = makeOc();
     const toast = makeToast();
     fireTemplate(PLACE_TEMPLATE, baseCtx({ venue: "" }), oc, toast, { gateArm: false });
-    expect(toast.push).toHaveBeenCalledWith({ level: "danger", text: "no venue/quote for order" });
+    expect(toast.push).toHaveBeenCalledWith({ level: "danger", text: "no execution venue — set one up in Settings › Venues & creds" });
+    expect(oc.submit).not.toHaveBeenCalled();
+  });
+
+  it("danger-toasts and does not submit when symbol is empty", () => {
+    const oc = makeOc();
+    const toast = makeToast();
+    fireTemplate(PLACE_TEMPLATE, baseCtx({ symbol: "" }), oc, toast, { gateArm: false });
+    expect(toast.push).toHaveBeenCalledWith({ level: "danger", text: "no symbol focused — type a symbol in the order ticket or a linked panel" });
     expect(oc.submit).not.toHaveBeenCalled();
   });
 
