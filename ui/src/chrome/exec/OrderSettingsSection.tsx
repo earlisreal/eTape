@@ -12,7 +12,7 @@
 // reorder a newly-added card ahead of the other kind's trailing cards, breaking
 // the "last remove button = most recently added template" invariant the
 // stale-raw-edit-on-reused-id regression test relies on.
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useTheme } from "../ThemeProvider";
 import { FONTS, type Palette } from "../../render/palette";
 import { HoverButton } from "../controls/HoverButton";
@@ -340,6 +340,19 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
   // Track the in-progress raw text per cell (keyed by `${templateId}:field`)
   // and only fall back to the derived numeric string once editing ends.
   const [rawEdits, setRawEdits] = useState<Record<string, string>>({});
+  // Task 6 co-mounted this section with the hotkeys BackupPanel in the same
+  // "orders" pane (both share the OrderConfig context), removing the nav-
+  // switch unmount/remount that used to re-run the `templates` useState
+  // initializer above whenever `config` changed underneath this component.
+  // Without this effect, importing hotkeys updates the shared config but this
+  // component's local `templates` (what the cheat sheet and cards render
+  // from) silently keeps showing the pre-import list. This fires on every new
+  // `config.templates` reference — including this component's own Save
+  // round-trip — but re-`.map()`ing content that already matches what's
+  // displayed is a harmless no-op render.
+  useEffect(() => {
+    setTemplates(config.templates.map((t) => ({ ...t })));
+  }, [config.templates]);
   const setRawEdit = (key: string, v: string) => setRawEdits((r) => ({ ...r, [key]: v }));
   const clearRawEdit = (key: string) => setRawEdits((r) => {
     if (!(key in r)) return r;

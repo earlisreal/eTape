@@ -35,12 +35,12 @@ const SAMPLE_ORDER_CONFIG: OrderConfig = {
 };
 
 function wrap(onSave = vi.fn()) {
-  render(
+  const { rerender } = render(
     <ThemeProvider>
       <OrderSettingsSection config={SAMPLE_ORDER_CONFIG} onSave={onSave} />
     </ThemeProvider>,
   );
-  return { onSave };
+  return { onSave, rerender };
 }
 
 describe("OrderSettingsSection", () => {
@@ -337,6 +337,42 @@ describe("OrderSettingsSection", () => {
     fireEvent.change(screen.getByTestId("tmpl-label-buy-5k"), { target: { value: "Big buy" } });
     expect(sheet.textContent).toContain("Big buy");
     expect(sheet.textContent).not.toContain("Buy $5k");
+  });
+
+  // Regression: Task 6 co-mounted this section with the hotkeys BackupPanel in
+  // the same "orders" settings pane, sharing one OrderConfig context. Before
+  // that, importing hotkeys and viewing "Orders & hotkeys" were mutually
+  // exclusive nav sections, so switching to this one always remounted it
+  // against the post-import config. Now the component stays mounted while an
+  // import happens below it, so it must resync its local `templates` (what
+  // the cheat sheet and cards render from) from a new `config` prop without
+  // needing to unmount/remount. This mirrors prepareImportedOrderConfig's
+  // replace-not-merge behavior: the imported config carries a wholly
+  // different template list with freshly-minted ids.
+  it("resyncs the cheat sheet when config.templates changes to a new reference without unmounting (hotkey import while mounted)", () => {
+    const { onSave, rerender } = wrap();
+    const sheet = screen.getByTestId("cheat-sheet");
+    expect(sheet.textContent).toContain("Buy $5k");
+
+    const imported: OrderConfig = {
+      ...SAMPLE_ORDER_CONFIG,
+      templates: [
+        {
+          kind: "place", id: "imported-buy", label: "Imported Buy", side: "BUY", type: "LIMIT", tif: "DAY",
+          priceSource: "Ask", priceOffset: 0, sizing: { mode: "Dollar", dollar: 1000 }, hotkey: "Ctrl+9",
+        },
+      ],
+    };
+    rerender(
+      <ThemeProvider>
+        <OrderSettingsSection config={imported} onSave={onSave} />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByTestId("cheat-sheet").textContent).toContain("Imported Buy");
+    expect(screen.getByTestId("cheat-sheet").textContent).not.toContain("Buy $5k");
+    expect(screen.queryByTestId("tmpl-card-buy-5k")).toBeNull();
+    expect(screen.getByTestId("tmpl-card-imported-buy")).toBeTruthy();
   });
 
   // Regression for a CRITICAL safety finding: the capture input previously called
