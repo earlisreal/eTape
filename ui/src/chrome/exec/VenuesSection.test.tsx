@@ -69,6 +69,34 @@ describe("VenuesSection", () => {
     expect(liveHeader.textContent).toContain("LIVE");
   });
 
+  it("switching an existing live venue's broker to sim clears the LIVE state (setBroker forces env: paper)", async () => {
+    const commands = makeCommands([baseSetup()]);
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("venue-id-1")).toBeTruthy());
+
+    const liveHeader = screen.getByTestId("venue-remove-1").parentElement!;
+    expect(liveHeader.textContent).toContain("LIVE");
+
+    fireEvent.change(screen.getByTestId("venue-broker-1"), { target: { value: "sim" } });
+
+    const header = screen.getByTestId("venue-remove-1").parentElement!;
+    expect(header.textContent).not.toContain("LIVE");
+    expect(header.className ?? "").not.toContain("venue-card-header-live");
+  });
+
+  it("normalizes a legacy sim venue loaded with env: \"live\" (saved by an older build's manual dropdown) to paper on load, so it never shows LIVE", async () => {
+    const legacySimLive: VenueSetup = baseSetup({
+      file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-legacy", broker: "sim", env: "live", credentials: "", accountId: "", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 }] },
+    });
+    const commands = makeCommands([legacySimLive]);
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("venue-id-2")).toBeTruthy());
+
+    const header = screen.getByTestId("venue-remove-2").parentElement!;
+    expect(header.textContent).not.toContain("LIVE");
+    expect(header.className ?? "").not.toContain("venue-card-header-live");
+  });
+
   it("hides the CREDENTIALS group for a sim venue but shows it for tradezero/alpaca/moomoo", async () => {
     const withSim: VenueSetup = baseSetup({
       file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 }] },

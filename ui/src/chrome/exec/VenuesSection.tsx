@@ -84,7 +84,15 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
       if (ack.status === "accepted" && ack.value) {
         const s = ack.value as VenueSetup;
         setSetup(s);
-        setDraft({ venues: s.file.venues.map((v) => ({ ...v })), gate: { global: { ...s.file.gate.global }, venue: { ...s.file.gate.venue } } });
+        // Mirror setBroker's write-path guarantee ("sim is always paper") on
+        // load — a venue saved by an older build of this form (which had a
+        // manual sim env dropdown) can still be on disk as { broker: "sim",
+        // env: "live" }. Only draft (the editable form) is normalized; setup
+        // stays the unmodified server snapshot restartNeeded diffs against.
+        setDraft({
+          venues: s.file.venues.map((v) => (v.broker === "sim" ? { ...v, env: "paper" } : { ...v })),
+          gate: { global: { ...s.file.gate.global }, venue: { ...s.file.gate.venue } },
+        });
         const keys = s.file.venues.map(() => crypto.randomUUID());
         setRowKeys(keys);
         setCapsByRow(Object.fromEntries(s.file.venues.map((v, i) => [keys[i], s.file.gate.venue[v.id] ?? zeroCaps()])));
