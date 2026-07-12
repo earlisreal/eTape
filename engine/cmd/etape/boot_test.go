@@ -56,11 +56,12 @@ func TestBuildBrokersReplayIsAllSim(t *testing.T) {
 // TestBuildBrokersMoomooConstructsAdapter verifies a moomoo venue with a
 // valid numeric account_id builds a real *moomoo.Adapter with Run bound —
 // the stub venue (reject-all, no Run) this replaces is gone; moomoo is no
-// longer deferred to v1.x.
+// longer deferred to v1.x. Env is "live" — moomoo is a live-only venue now
+// (see TestBuildBrokersMoomooPaperEnvErrors).
 func TestBuildBrokersMoomooConstructsAdapter(t *testing.T) {
 	cfg := config.Config{
 		OpenD:  config.OpenD{Host: "127.0.0.1", Port: 11111},
-		Venues: []config.Venue{{ID: "moomoo", Broker: "moomoo", AccountID: "123456", Env: "paper"}},
+		Venues: []config.Venue{{ID: "moomoo", Broker: "moomoo", AccountID: "123456", Env: "live"}},
 	}
 	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, false)
 	if err != nil {
@@ -80,12 +81,34 @@ func TestBuildBrokersMoomooConstructsAdapter(t *testing.T) {
 // TestBuildBrokersMoomooNonNumericAccountIDErrors verifies buildBrokers
 // defensively re-validates account_id at boot time (ValidateVenueConfig
 // already rejects a non-numeric account_id when the settings UI writes
-// config.toml, but a hand-edited file can skip that path entirely).
+// config.toml, but a hand-edited file can skip that path entirely). Env is
+// "live" so this exercises the account_id check specifically, not the
+// live-only env check covered by TestBuildBrokersMoomooPaperEnvErrors.
 func TestBuildBrokersMoomooNonNumericAccountIDErrors(t *testing.T) {
-	cfg := config.Config{Venues: []config.Venue{{ID: "moomoo", Broker: "moomoo", AccountID: "not-a-number"}}}
+	cfg := config.Config{Venues: []config.Venue{{ID: "moomoo", Broker: "moomoo", AccountID: "not-a-number", Env: "live"}}}
 	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, false)
 	if err == nil {
 		t.Fatal("expected error for non-numeric moomoo account_id")
+	}
+	if len(vbs) != 0 {
+		t.Fatalf("expected empty broker slice on error, got %d", len(vbs))
+	}
+}
+
+// TestBuildBrokersMoomooPaperEnvErrors verifies buildBrokers fails loud on a
+// hand-edited config.toml with a moomoo venue set to env = "paper" instead of
+// silently relying on the moomoo adapter's own defense-in-depth
+// simulate-default (env != "live" => TrdEnv_Simulate) — boot does not run
+// configs through ValidateVenueConfig, so this is the only guard for that
+// path. A real-money broker's env must never be silently coerced.
+func TestBuildBrokersMoomooPaperEnvErrors(t *testing.T) {
+	cfg := config.Config{Venues: []config.Venue{{ID: "moomoo", Broker: "moomoo", AccountID: "123456", Env: "paper"}}}
+	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, false)
+	if err == nil {
+		t.Fatal("expected error for moomoo venue with env: paper")
+	}
+	if !strings.Contains(err.Error(), "live-only") {
+		t.Fatalf("expected live-only error, got: %v", err)
 	}
 	if len(vbs) != 0 {
 		t.Fatalf("expected empty broker slice on error, got %d", len(vbs))

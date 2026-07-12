@@ -108,6 +108,9 @@ func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock, replay bool
 			}
 			out = append(out, venueBroker{ID: id, Broker: a, Run: a.Run})
 		case "moomoo":
+			if v.Env != "live" {
+				return nil, fmt.Errorf("venue %s: moomoo is live-only; paper is no longer supported — use a sim venue", v.ID)
+			}
 			accID, err := strconv.ParseUint(v.AccountID, 10, 64)
 			if err != nil {
 				return nil, fmt.Errorf("venue %s: %w", v.ID, err)

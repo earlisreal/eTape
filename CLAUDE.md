@@ -232,7 +232,11 @@ when implementing the wire protocol.
   day-P&L field, no ledger-derived alternative built yet) — the global
   `MaxDayLoss` circuit breaker does not see moomoo losses; do not live-arm
   moomoo as the primary/only venue until this is addressed. Details:
-  `docs/2026-07-04-moomoo-trading-api.md`.
+  `docs/2026-07-04-moomoo-trading-api.md`. **(2026-07-12: moomoo is now
+  live-only in eTape** — paper removed as a selectable venue option (config
+  validation + boot both reject `moomoo` + `env: paper`); the built-in sim
+  broker covers simulation instead. The DayPnL gap above still applies to
+  the live venue.)
 
 Closed by the three approved designs (2026-07-03): OpenD client = raw TCP + Go
 protobuf (engine design); market-data storage = always-on SQLite feed journal +

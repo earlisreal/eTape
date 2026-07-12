@@ -303,6 +303,9 @@ func ValidateVenueConfig(vc VenueConfig, credKeys []string) error {
 			if _, err := strconv.ParseUint(v.AccountID, 10, 64); err != nil {
 				return fmt.Errorf("venue %q: moomoo account_id must be numeric: %w", v.ID, err)
 			}
+			if v.Env != "live" {
+				return fmt.Errorf("venue %q: moomoo is live-only; paper is no longer supported — use a sim venue", v.ID)
+			}
 		}
 		if v.StartingBalance < 0 {
 			return fmt.Errorf("venue %q: starting_balance must be >= 0 (0 = default)", v.ID)
