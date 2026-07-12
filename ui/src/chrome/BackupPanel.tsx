@@ -13,21 +13,18 @@ import type { Workspace } from "./workspace";
 import type { ActionTemplate, OrderConfig } from "./exec/actionTemplate";
 import {
   buildExport, parseImport, prepareImportedWorkspace, prepareImportedOrderConfig,
-  detectHotkeyConflicts, type SettingsExport,
+  detectHotkeyConflicts, isPresentLayout, type SettingsExport,
 } from "./backup";
 
 export type BackupPanelProps =
   | { part: "layout"; getWorkspace: () => Workspace; onImportWorkspace: (ws: Workspace) => void; toast: ToastApi }
   | { part: "hotkeys"; orderConfig: OrderConfig; onImportOrderConfig: (next: OrderConfig) => void; toast: ToastApi };
 
-// Same shape guards as BackupSection.tsx (not exported there, so ported
+// Same shape guard as BackupSection.tsx (not exported there, so ported
 // rather than imported): parseImport only validates the top-level envelope,
-// not `layout`/`hotkeys.templates`'s inner shape, so a hand-edited or
-// partially-truncated file must be treated as "that section isn't present"
-// rather than crashing this component or prepareImportedOrderConfig's `.map`.
-function isPresentLayout(layout: SettingsExport["layout"]): layout is Workspace {
-  return typeof layout === "object" && layout !== null && !Array.isArray(layout);
-}
+// not `hotkeys.templates`'s inner shape, so a hand-edited or partially-
+// truncated file must be treated as "that section isn't present" rather than
+// crashing prepareImportedOrderConfig's `.map`.
 function isPresentHotkeys(hotkeys: SettingsExport["hotkeys"]): hotkeys is { templates: ActionTemplate[] } {
   return Array.isArray(hotkeys?.templates);
 }
@@ -109,7 +106,6 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const headStyle = { marginBottom: 8 };
   const noteStyle = { fontSize: 12, color: palette.textMuted, marginBottom: 8 };
   const scopeNote = props.part === "layout"
     ? "Layout export/import applies only to this window."
@@ -122,15 +118,14 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
     <div style={{ color: palette.text }}>
       <div style={{ ...noteStyle, marginBottom: 14 }} data-testid="scope-note">{scopeNote}</div>
 
-      <div className="col-head serif" style={headStyle}>Export</div>
       <HoverButton
         className="btn" data-testid="download-json" onClick={download}
+        style={{ marginBottom: 10 }}
         hoverStyle={{ background: palette.surface }}
       >
         Download JSON
       </HoverButton>
 
-      <div className="col-head serif" style={{ ...headStyle, marginTop: 22 }}>Import</div>
       <input
         type="file" accept="application/json" aria-label="Import settings file"
         data-testid="import-file" ref={fileInputRef} onChange={onFileSelected}
