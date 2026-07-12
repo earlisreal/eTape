@@ -41,9 +41,11 @@ type mirror struct {
 	marks      map[string]float64                // last price per symbol (pnl + display)
 
 	// scanner / news
-	rank   map[string]wsmsg.ScannerRankPayload // key session
-	detail map[string]wsmsg.StockDetailPayload // key symbol
-	news   []wsmsg.NewsItem                    // bounded recent
+	rank         map[string]wsmsg.ScannerRankPayload // key session
+	detail       map[string]wsmsg.StockDetailPayload // key symbol
+	news         []wsmsg.NewsItem                    // bounded recent
+	watchlist    wsmsg.WatchlistRowsPayload          // the one global list snapshot
+	watchlistSet bool                                // false until the first publish
 
 	// execution
 	accounts    map[string]wsmsg.AccountRow // key venue
@@ -301,6 +303,9 @@ func (m *mirror) applyPub(s staged) {
 		m.rank[s.Key] = s.Payload.(wsmsg.ScannerRankPayload)
 	case wsmsg.TopicStockDetail:
 		m.detail[s.Key] = s.Payload.(wsmsg.StockDetailPayload)
+	case wsmsg.TopicWatchlistRows:
+		m.watchlist = s.Payload.(wsmsg.WatchlistRowsPayload)
+		m.watchlistSet = true
 	case wsmsg.TopicNews:
 		switch p := s.Payload.(type) {
 		case wsmsg.NewsItem:
@@ -381,6 +386,17 @@ func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
 	case wsmsg.TopicStockDetail:
 		for _, sym := range sortedKeysOf(m.detail) {
 			out = append(out, staged{Topic: topic, Key: sym, Payload: m.detail[sym]})
+		}
+	case wsmsg.TopicWatchlistRows:
+		if m.watchlistSet {
+			pl := m.watchlist
+			if pl.Symbols == nil {
+				pl.Symbols = []string{}
+			}
+			if pl.Rows == nil {
+				pl.Rows = []wsmsg.WatchlistRow{}
+			}
+			out = append(out, staged{Topic: topic, Payload: pl})
 		}
 	case wsmsg.TopicNews:
 		// make (not append-to-nil) so an empty news list marshals to `[]`, not

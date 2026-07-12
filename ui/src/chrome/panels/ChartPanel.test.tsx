@@ -86,7 +86,7 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sh
         linkGroups={linkGroups} commands={commands} onConfigChange={onConfigChange} />
     </ThemeProvider>,
   );
-  return { ...utils, stores, onConfigChange, scheduler };
+  return { ...utils, stores, onConfigChange, scheduler, commands };
 }
 
 // Pushes a bar into the shared BarStore, the same delta shape the engine sends
@@ -222,6 +222,28 @@ describe("ChartPanel", () => {
     fireEvent.contextMenu(getByTestId("chart-host"), { clientX: 20, clientY: 30 });
     fireEvent.click(getByRole("button", { name: "Remove all drawings" }));
     expect(stores.drawings.forSymbol("US.AAPL")).toHaveLength(0);
+  });
+
+  it("right-click menu shows 'Add ... to watchlist' when the chart's symbol isn't watchlisted; clicking it sends WatchlistAdd", () => {
+    const stores = makeStores();
+    vi.spyOn(stores.watchlist, "has").mockReturnValue(false);
+    const { getByTestId, getByRole, commands } = renderChart("c1", stores);
+    fireEvent.contextMenu(getByTestId("chart-host"), { clientX: 20, clientY: 30 });
+    const btn = getByRole("button", { name: "Add AAPL to watchlist" });
+    expect(btn).toBeTruthy();
+    fireEvent.click(btn);
+    expect(commands.sendCommand).toHaveBeenCalledWith("WatchlistAdd", { symbol: "US.AAPL" });
+  });
+
+  it("right-click menu shows 'Remove ... from watchlist' when the chart's symbol is already watchlisted; clicking it sends WatchlistRemove", () => {
+    const stores = makeStores();
+    vi.spyOn(stores.watchlist, "has").mockReturnValue(true);
+    const { getByTestId, getByRole, commands } = renderChart("c1", stores);
+    fireEvent.contextMenu(getByTestId("chart-host"), { clientX: 20, clientY: 30 });
+    const btn = getByRole("button", { name: "Remove AAPL from watchlist" });
+    expect(btn).toBeTruthy();
+    fireEvent.click(btn);
+    expect(commands.sendCommand).toHaveBeenCalledWith("WatchlistRemove", { symbol: "US.AAPL" });
   });
 
   it("positions the context menu at viewport coordinates, not host-relative (wrong-chart-in-group regression)", () => {

@@ -5,6 +5,7 @@ import { Scheduler } from "./render/Scheduler";
 import { makeStores, connectStores } from "./data/registry";
 import { BroadcastChannelBus, LinkGroups } from "./chrome/linkGroups";
 import { DemandRegistry } from "./wire/DemandRegistry";
+import { ReannounceGate } from "./chrome/reannounceGate";
 import { WorkspaceStore } from "./chrome/workspace";
 import { PANELS } from "./chrome/panels/registry";
 import { AppShell } from "./chrome/AppShell";
@@ -93,7 +94,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry } = useMemo(() => {
+  const { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry, reannounceGate } = useMemo(() => {
     const client = new WsClient({
       url: `ws://${location.host}/ws`,
       socketFactory: (url) => {
@@ -118,8 +119,15 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     const linkGroups = new LinkGroups(new BroadcastChannelBus(), (group, symbol) =>
       client.sendCommand("FocusGroup", { group, symbol }),
     );
-    const demandRegistry = new DemandRegistry(client);
-    return { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry };
+    // Task 13: ReannounceGate defers DemandRegistry.reannounce() across a
+    // session-mode boundary (e.g. live->demo) so a WS reconnect never
+    // re-sends EnsureSymbol for the PREVIOUS mode's symbol universe — see
+    // chrome/reannounceGate.ts. initialMode mirrors SessionStore's own seed
+    // ("pending", not "live") so the gate's first onSessionMode call sees the
+    // real mode as a no-op "unchanged" resolve, not a spurious "changed" wait.
+    const reannounceGate = new ReannounceGate({ timeoutMs: 5000, initialMode: "pending" });
+    const demandRegistry = new DemandRegistry(client, () => reannounceGate.gate());
+    return { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry, reannounceGate };
   }, []);
 
   useEffect(() => {
@@ -152,6 +160,15 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     return () => { window.clearInterval(ping); disposeStores(); scheduler.stop(); client.stop(); };
   }, [client, stores, scheduler]);
 
+  // Task 13: feed every sys.session snapshot into the gate — the gate itself
+  // (not this subscription) tells "unchanged mode" apart from "changed mode
+  // boundary" and decides how long to hold; this just forwards every
+  // emission, including repeats of the same mode, per reannounceGate.ts.
+  useEffect(
+    () => stores.session.subscribe(() => reannounceGate.onSessionMode(stores.session.getSnapshot().mode)),
+    [stores.session, reannounceGate],
+  );
+
   const commands = useMemo(() => ({
     sendCommand: (name: string, args: unknown) => client.sendCommand(name, args),
     sendQuery: (name: string, args: unknown) => client.sendQuery(name, args),
@@ -169,7 +186,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
             <ReconnectOverlay state={state}>
               <AppShell workspaceName={workspaceName} stores={stores} scheduler={scheduler}
                 workspaceStore={workspaceStore} linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands}
-                engineState={state} />
+                engineState={state} onTransitionApplied={() => reannounceGate.onTransitionApplied()} />
             </ReconnectOverlay>
           </SoundConfigProvider>
         </OrderConfigProvider>

@@ -10,6 +10,8 @@ import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColu
 import type { ScannerRowView } from "../../data/ScannerStore";
 import { bareSymbol } from "../exec/orderStatus";
 import { Button } from "../controls/Button";
+import { TVContextMenu, type MenuEntry } from "./tv/TVContextMenu";
+import { menuChrome } from "../menuChrome";
 
 const SESSION_LABEL: Record<ScannerSession, string> = {
   premarket: "Pre-market", rth: "RTH movers", afterhours: "After-hours", overnight: "Overnight",
@@ -49,9 +51,10 @@ function readSort(s: Record<string, unknown>): SortState {
 }
 
 export function ScannerPanel(
-  { config, stores, linkGroups, onConfigChange, variant }: PanelProps & { variant: "scanner" | "movers" },
+  { config, stores, linkGroups, commands, onConfigChange, variant }: PanelProps & { variant: "scanner" | "movers" },
 ): JSX.Element {
   const { palette } = useTheme();
+  const [menu, setMenu] = useState<{ clientX: number; clientY: number; symbol: string } | null>(null);
   const snap = useSyncExternalStore((cb) => stores.scanner.subscribe(cb), () => stores.scanner.getSnapshot());
   const cv = useMemo(() => stores.scanner.currentView(), [snap, stores.scanner]);
   const [thresholds, setThresholds] = useState<ScannerThresholds>(() => readThresholds(config.settings));
@@ -90,6 +93,11 @@ export function ScannerPanel(
     setSort(next);
     onConfigChange({ sort: next });
   };
+  // Single unconditional entry — unlike ChartPanel's toggle, this menu doesn't
+  // need membership state; adding an already-watchlisted symbol is a no-op on
+  // the engine side (WatchlistAdd is idempotent), so no add/remove branching.
+  const buildRowMenuItems = (sym: string): MenuEntry[] =>
+    [{ label: `Add ${bareSymbol(sym)} to watchlist`, onClick: () => void commands.sendCommand("WatchlistAdd", { symbol: sym }) }];
 
   const header = cv.refreshedAt
     ? `${SESSION_LABEL[cv.session!]} · updated ${formatTapeTime(cv.refreshedAt)}`
@@ -149,6 +157,7 @@ export function ScannerPanel(
             <tr key={r.symbol}
               onClick={() => setSelectedSymbol(r.symbol)}
               onDoubleClick={() => linkGroups.focus(config.group ?? "green", r.symbol)}
+              onContextMenu={(e) => { e.preventDefault(); setMenu({ clientX: e.clientX, clientY: e.clientY, symbol: r.symbol }); }}
               onMouseEnter={() => setHoveredSymbol(r.symbol)}
               onMouseLeave={() => setHoveredSymbol((h) => (h === r.symbol ? null : h))}
               style={{ cursor: "pointer", textAlign: "right", opacity: r.muted ? 0.55 : 1, userSelect: "none",
@@ -169,6 +178,10 @@ export function ScannerPanel(
           )}
         </tbody>
       </table>
+      {menu && (
+        <TVContextMenu chrome={menuChrome(palette)} x={menu.clientX} y={menu.clientY}
+          items={buildRowMenuItems(menu.symbol)} onClose={() => setMenu(null)} />
+      )}
     </div>
   );
 }

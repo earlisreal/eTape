@@ -13,6 +13,7 @@ export type Topic =
   | "scanner.rank" | "scanner.hit"
   | "news.item"
   | "stock.detail"
+  | "watchlist.rows"
   | "exec.account" | "exec.positions" | "exec.orders" | "exec.fills" | "exec.status" | "exec.trades"
   | "sys.health" | "sys.session" | "sys.events" | "sys.boot"
   | "config";
@@ -237,6 +238,35 @@ export interface ScannerRankPayload {
 export interface ScanHitPayload {
   symbol: string;
   at: string;
+}
+/**
+ * WatchlistRow is one row of the user-pinned watchlist. Last/ChangePct are
+ * nil until the first successful snapshot for that symbol (ScannerRow
+ * convention). Not reusing ScannerRow: it carries floatShares (scanner-only),
+ * and coupling the types drags either's evolution onto the other.
+ */
+export interface WatchlistRow {
+  symbol: string;
+  last: number | null;
+  changePct: number | null;
+  volume: number /* int64 */;
+}
+/**
+ * WatchlistRowsPayload is the full-snapshot push on topic watchlist.rows.
+ * Symbols is the authoritative membership + order (always current); Rows may
+ * lag Symbols by up to one poll (mutation push / failed poll) and is keyed by
+ * Symbol — the panel renders dashes for a Symbol absent from Rows.
+ */
+export interface WatchlistRowsPayload {
+  refreshedAt: string | null;
+  symbols: string[];
+  rows: WatchlistRow[];
+}
+export interface WatchlistAddArgs {
+  symbol: string;
+}
+export interface WatchlistRemoveArgs {
+  symbol: string;
 }
 /**
  * StockDetailPayload is the snapshot for the stock.detail topic: fundamentals

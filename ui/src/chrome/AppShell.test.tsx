@@ -27,7 +27,7 @@ function clickTab(el: Element): void {
   el.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
 }
 
-function mount(seed: Workspace) {
+function mount(seed: Workspace, opts?: { onTransitionApplied?: () => void }) {
   const stores = makeStores();
   const scheduler = new Scheduler(browserRaf, () => {});
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
@@ -49,10 +49,22 @@ function mount(seed: Workspace) {
   render(
     <ThemeProvider><ToastProvider><OrderConfigProvider commands={commands}>
       <AppShell workspaceName="default" stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
-        linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} engineState="open" />
+        linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} engineState="open"
+        {...(opts?.onTransitionApplied ? { onTransitionApplied: opts.onTransitionApplied } : {})} />
     </OrderConfigProvider></ToastProvider></ThemeProvider>,
   );
   return { saved, workspaceStore, linkGroups, stores, commands };
+}
+
+// Publishes a watchlist.rows snapshot with the given symbols — the shape
+// WatchlistStore.apply expects (see WatchlistStore.test.ts); `rows`/`refreshedAt`
+// are irrelevant to the mode-edge effect below, which only reads `.symbols`.
+function publishWatchlist(stores: ReturnType<typeof mount>["stores"], symbols: string[]) {
+  act(() => stores.watchlist.apply({ kind: "snapshot", topic: "watchlist.rows", payload: { symbols, rows: [], refreshedAt: null } }));
+}
+
+function publishSessionMode(stores: ReturnType<typeof mount>["stores"], mode: "pending" | "live" | "replay" | "demo") {
+  act(() => stores.session.apply({ kind: "snapshot", topic: "sys.session", payload: { mode, day: "2026-01-02", speed: 0 } }));
 }
 
 describe("AppShell onConfigChange", () => {
@@ -567,5 +579,107 @@ describe("AppShell Alpaca-1m-history hint banner", () => {
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     publishStatus(stores, [venueStatus("tz-1", "tradezero")]);
     expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
+  });
+});
+
+describe("AppShell demo mode-edge orchestration (Task 13)", () => {
+  // A single symbol-bearing, non-grouped Stock Info panel is enough to
+  // exercise planDemoEntry's "remaining universe cycles across pinned
+  // panels" rule (see demoTransition.ts) without dockview's grid math being
+  // relevant here. Deliberately not a "chart" panel: lightweight-charts
+  // schedules its own rAF-driven redraws that can outlive a fast test's
+  // unmount in jsdom (a pre-existing flake source elsewhere in this suite),
+  // and these tests already drive several rapid clear()+fromJSON() cycles.
+  const seed: Workspace = {
+    name: "default",
+    panels: [{ id: "info-1", panelId: "news", group: null, settings: { symbol: "US.ORCL" } }],
+    layout: null,
+    groups: { green: "US.IBM" },
+  };
+
+  it("pending->demo: applies planDemoEntry's group/panel rewrite and auto-adds a Watchlist panel once the watchlist is non-empty (fast path)", async () => {
+    const onTransitionApplied = vi.fn();
+    const { stores, saved } = mount(seed, { onTransitionApplied });
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+
+    // Non-empty BEFORE the mode flips: the barrier's "already non-empty,
+    // proceed synchronously" branch.
+    publishWatchlist(stores, ["US.MSFT", "US.GOOG", "US.AMZN", "US.TSLA", "US.NFLX"]);
+    publishSessionMode(stores, "demo"); // sessionMode starts "pending" (SessionStore's seed) -> this is a tracked entry edge
+
+    await waitFor(() => expect(saved.some((w) => w.panels.some((p) => p.panelId === "watchlist"))).toBe(true));
+    const last = saved[saved.length - 1];
+
+    // sorted universe: AMZN, GOOG, MSFT, NFLX, TSLA -> green/red/blue/yellow
+    // get the first four; the 5th (TSLA) is the only "remaining" symbol, so
+    // the lone pinned info panel (group: null, symbolBearing) gets it.
+    expect(last.groups).toMatchObject({ green: "US.AMZN", red: "US.GOOG", blue: "US.MSFT", yellow: "US.NFLX" });
+    expect(last.panels.find((p) => p.id === "info-1")?.settings.symbol).toBe("US.TSLA");
+    expect(last.panels.filter((p) => p.panelId === "watchlist")).toHaveLength(1);
+    expect(onTransitionApplied).toHaveBeenCalled();
+  });
+
+  it("pending->demo: waits for the watchlist barrier when it's still empty at the moment mode flips, then proceeds once symbols arrive", async () => {
+    const { stores, saved } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+
+    publishSessionMode(stores, "demo"); // watchlist is still empty here -> barrier subscribes and waits
+    // Give any (incorrect) synchronous entry a chance to have run, then assert it hasn't.
+    expect(saved.some((w) => w.panels.some((p) => p.panelId === "watchlist"))).toBe(false);
+
+    publishWatchlist(stores, ["US.MSFT", "US.GOOG", "US.AMZN", "US.TSLA", "US.NFLX"]); // wakes the one-shot subscription
+    await waitFor(() => expect(saved.some((w) => w.panels.some((p) => p.panelId === "watchlist"))).toBe(true));
+    const last = saved[saved.length - 1];
+    expect(last.groups).toMatchObject({ green: "US.AMZN", red: "US.GOOG", blue: "US.MSFT", yellow: "US.NFLX" });
+  });
+
+  it("live->demo captures the pre-demo workspace, and demo->live restores it verbatim (dropping the auto-added Watchlist panel)", async () => {
+    const onTransitionApplied = vi.fn();
+    const { stores, saved } = mount(seed, { onTransitionApplied });
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+
+    publishSessionMode(stores, "live"); // pending->live: not a tracked edge, just establishes "live" as the pre-demo mode
+    publishWatchlist(stores, ["US.MSFT", "US.GOOG", "US.AMZN", "US.TSLA", "US.NFLX"]);
+    publishSessionMode(stores, "demo"); // live->demo: captures a snapshot of the seed workspace above
+
+    await waitFor(() => expect(saved.some((w) => w.panels.some((p) => p.panelId === "watchlist"))).toBe(true));
+    // Sanity: entry actually rewrote the pre-demo state (green flips from
+    // US.IBM to US.AMZN, info-1 from US.ORCL to US.TSLA) — otherwise the
+    // revert assertion below would trivially pass even if revert did nothing.
+    const afterEntry = saved[saved.length - 1];
+    expect(afterEntry.groups?.green).toBe("US.AMZN");
+    expect(afterEntry.panels.find((p) => p.id === "info-1")?.settings.symbol).toBe("US.TSLA");
+
+    publishSessionMode(stores, "live"); // demo->live: revert
+    await waitFor(() => expect(saved[saved.length - 1].panels.some((p) => p.panelId === "watchlist")).toBe(false));
+    const afterRevert = saved[saved.length - 1];
+    expect(afterRevert.groups?.green).toBe("US.IBM");
+    expect(afterRevert.panels.find((p) => p.id === "info-1")?.settings.symbol).toBe("US.ORCL");
+    expect(afterRevert.panels).toHaveLength(1); // the auto-added Watchlist panel is gone — it wasn't in the snapshot
+
+    expect(onTransitionApplied.mock.calls.length).toBeGreaterThanOrEqual(2); // once for entry, once for revert
+  });
+
+  it("demo->demo (e.g. a WS reconnect mid-demo) does not re-run entry, preserving a mid-demo symbol/group change", async () => {
+    const { stores, saved, linkGroups } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+
+    publishWatchlist(stores, ["US.MSFT", "US.GOOG", "US.AMZN", "US.TSLA", "US.NFLX"]);
+    publishSessionMode(stores, "demo");
+    await waitFor(() => expect(saved.some((w) => w.panels.some((p) => p.panelId === "watchlist"))).toBe(true));
+
+    // Simulate a user mid-demo edit via the existing group-focus path (same
+    // one exercised by the "persists a group's focused-symbol change" test
+    // above), then a WS reconnect re-delivering the SAME "demo" mode.
+    act(() => { linkGroups.focus("green", "US.CUSTOM"); });
+    await waitFor(() => expect(saved[saved.length - 1].groups?.green).toBe("US.CUSTOM"));
+    const savedCountBeforeReconnect = saved.length;
+
+    publishSessionMode(stores, "demo"); // demo->demo: must be a pure no-op
+
+    // No new save fires solely from the repeated mode push, and the user's
+    // edit is still in place (not clobbered by a re-run of planDemoEntry).
+    expect(saved.length).toBe(savedCountBeforeReconnect);
+    expect(saved[saved.length - 1].groups?.green).toBe("US.CUSTOM");
   });
 });

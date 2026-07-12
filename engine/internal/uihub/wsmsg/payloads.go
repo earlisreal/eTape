@@ -169,6 +169,35 @@ type ScanHitPayload struct {
 	At     string `json:"at"`
 }
 
+// WatchlistRow is one row of the user-pinned watchlist. Last/ChangePct are
+// nil until the first successful snapshot for that symbol (ScannerRow
+// convention). Not reusing ScannerRow: it carries floatShares (scanner-only),
+// and coupling the types drags either's evolution onto the other.
+type WatchlistRow struct {
+	Symbol    string   `json:"symbol"`
+	Last      *float64 `json:"last" tstype:"number | null,required"`
+	ChangePct *float64 `json:"changePct" tstype:"number | null,required"`
+	Volume    int64    `json:"volume"`
+}
+
+// WatchlistRowsPayload is the full-snapshot push on topic watchlist.rows.
+// Symbols is the authoritative membership + order (always current); Rows may
+// lag Symbols by up to one poll (mutation push / failed poll) and is keyed by
+// Symbol — the panel renders dashes for a Symbol absent from Rows.
+type WatchlistRowsPayload struct {
+	RefreshedAt *string        `json:"refreshedAt" tstype:"string | null,required"`
+	Symbols     []string       `json:"symbols"`
+	Rows        []WatchlistRow `json:"rows"`
+}
+
+type WatchlistAddArgs struct {
+	Symbol string `json:"symbol"`
+}
+
+type WatchlistRemoveArgs struct {
+	Symbol string `json:"symbol"`
+}
+
 // StockDetailPayload is the snapshot for the stock.detail topic: fundamentals
 // for the Stock Info panel. Nullable numerics follow the ScannerRow
 // convention (`*float64` + tstype) — null means moomoo hasn't returned a

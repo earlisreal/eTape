@@ -50,6 +50,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/venueadmin"
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
 	"github.com/earlisreal/eTape/engine/internal/venueseed"
+	"github.com/earlisreal/eTape/engine/internal/watchlist"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -608,6 +609,12 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		var tail backfill.TailFetcher
 		var dailyChain, intradayChain []backfill.Source
 
+		wl, err := watchlist.NewList(st)
+		if err != nil {
+			log.Error("watchlist: load failed, starting empty", "err", err)
+			wl = watchlist.NewEmpty(st)
+		}
+
 		if *demo {
 			// demoSeedValue draws a fresh random seed via crypto/rand each call
 			// when *demoSeed==0 (the documented "random per launch" default) --
@@ -618,6 +625,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			seed := demoSeedValue(*demoSeed)
 			gen := synth.New(seed, clock.System{})
 			gen.Seed(st, clock.System{}.Now().UnixMilli()) // flushes internally
+			wl.Seed(gen.Symbols())                         // synth universe; trusted, no probe; into throwaway demo.db
 			sf := synth.NewFeed(gen, st, clock.System{})
 			req := synth.NewRequester(gen)
 			go func() { _ = sf.Run(ctx) }()
@@ -720,7 +728,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			backfillOne = func(sym string) { hubBackfill(sym, nil) }
 		}
 		hub.SetBackfill(hubBackfill) // chart-open demands also deep-backfill (nil-safe if disabled)
-		startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, hasTZVenue(cfg), mmProbe, firstAlpacaProber(vbs), backfillOne, !*demo, &scanWG)
+		startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, firstAlpacaProber(vbs), backfillOne, !*demo, &scanWG)
 	} else {
 		sim := execClk.(*replay.Clock)
 		fd := replay.NewFeed(replay.FeedOptions{Rows: replayRows, Sim: sim, Pace: clock.System{}, Speed: *speed})
@@ -1010,7 +1018,7 @@ type demandFeeder interface {
 // startQuota gates the quota poller: false in -demo, since the synthetic
 // requester answers Qot_GetSubInfo with the generic "no data" response
 // rather than a real subscription budget, so tracking it would be noise.
-func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, hasTZ bool, mmProbe rttProber, alpacaProbe rttProber, backfillOne func(string), startQuota bool, scanWG *sync.WaitGroup) {
+func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, wl *watchlist.List, hasTZ bool, mmProbe rttProber, alpacaProbe rttProber, backfillOne func(string), startQuota bool, scanWG *sync.WaitGroup) {
 	scanPoller := scan.New(cfg.Scan, r, hub, clk, demand, backfillOne)
 	symbols := func() []string {
 		return newsSymbols(scanPoller.PoolSymbols(), hub.ActiveDemandSymbols())
@@ -1019,6 +1027,12 @@ func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, dem
 	go func() { defer scanWG.Done(); _ = scanPoller.Run(ctx) }()
 	go func() { _ = news.New(cfg.News, r, hub, clk, symbols).Run(ctx) }()
 	go func() { _ = stockinfo.New(cfg.StockInfo, r, hub, clk, symbols, st).Run(ctx) }()
+	if cfg.Watchlist.Enabled {
+		interval := time.Duration(cfg.Watchlist.PollMs) * time.Millisecond
+		wp := watchlist.New(wl, r, hub, clk, interval)
+		hub.SetWatchlist(watchlistAdapter{l: wl, p: wp})
+		go func() { _ = wp.Run(ctx) }()
+	}
 	// health: mmProbe is the moomoo probe (real OpenD RTT in live/replay, a
 	// constant synthetic RTT in -demo); app-ping RTT source is nil in v1
 	// (ui-engine shows down until ping tracking is wired). alpacaProbe is the
@@ -1041,6 +1055,17 @@ func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, dem
 		_ = health.New(cfg.Health, hub, clk, mmProbe, nil, hasTZ, alpacaProbe, qsrc).Run(ctx)
 	}()
 }
+
+// watchlistAdapter satisfies uihub's watchlistCtl: Add/Remove on the List,
+// Poke on the Poller.
+type watchlistAdapter struct {
+	l *watchlist.List
+	p *watchlist.Poller
+}
+
+func (a watchlistAdapter) Add(s string) (bool, error) { return a.l.Add(s) }
+func (a watchlistAdapter) Remove(s string) bool       { return a.l.Remove(s) }
+func (a watchlistAdapter) Poke()                      { a.p.Poke() }
 
 func hasTZVenue(cfg config.Config) bool {
 	for _, v := range cfg.Venues {

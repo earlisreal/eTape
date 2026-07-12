@@ -125,6 +125,10 @@ describe("DemandRegistry", () => {
     // leaked duplicate.
     f.sent.length = 0;
     f.fireState("open");
+    // reannounce() is async (it awaits the injected reannounceGate, which
+    // defaults to an already-resolved promise) — one microtask tick for the
+    // send loop to run after the synchronous fireState() call returns.
+    await Promise.resolve();
     expect(f.sent).toEqual([{ name: "EnsureSymbol", args: { demandId: "p1", symbol: "US.AAPL", profile: "watch" } }]);
   });
 
@@ -135,6 +139,48 @@ describe("DemandRegistry", () => {
     await reg.ensure("p2", "US.MSFT", "focused");
     f.sent.length = 0;
     f.fireState("open");
+    await Promise.resolve(); // let the default (immediately-resolving) gate settle
+    expect(f.sent).toEqual([
+      { name: "EnsureSymbol", args: { demandId: "p1", symbol: "US.AAPL", profile: "watch" } },
+      { name: "EnsureSymbol", args: { demandId: "p2", symbol: "US.MSFT", profile: "focused" } },
+    ]);
+  });
+
+  it("omitting the reannounceGate arg preserves today's immediate reannounce (no regression for callers that don't pass one)", async () => {
+    const f = fakeClient();
+    const reg = new DemandRegistry(f.client); // 1-arg construction, same as production callers
+    await reg.ensure("p1", "US.AAPL", "watch");
+    f.sent.length = 0;
+    f.fireState("open");
+    await Promise.resolve();
+    expect(f.sent).toEqual([{ name: "EnsureSymbol", args: { demandId: "p1", symbol: "US.AAPL", profile: "watch" } }]);
+  });
+
+  it("a never-resolving injected gate defers all EnsureSymbol sends", async () => {
+    const f = fakeClient();
+    const reg = new DemandRegistry(f.client, () => new Promise<void>(() => {})); // never resolves
+    await reg.ensure("p1", "US.AAPL", "watch");
+    f.sent.length = 0;
+    f.fireState("open");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(f.sent).toEqual([]); // gate never resolved — reannounce is stuck awaiting it
+  });
+
+  it("re-announces every live demand once the injected gate resolves", async () => {
+    const f = fakeClient();
+    let releaseGate: () => void = () => {};
+    const gate = () => new Promise<void>((resolve) => { releaseGate = resolve; });
+    const reg = new DemandRegistry(f.client, gate);
+    await reg.ensure("p1", "US.AAPL", "watch");
+    await reg.ensure("p2", "US.MSFT", "focused");
+    f.sent.length = 0;
+    f.fireState("open");
+    await Promise.resolve();
+    expect(f.sent).toEqual([]); // still gated — nothing sent yet
+
+    releaseGate();
+    await Promise.resolve();
     expect(f.sent).toEqual([
       { name: "EnsureSymbol", args: { demandId: "p1", symbol: "US.AAPL", profile: "watch" } },
       { name: "EnsureSymbol", args: { demandId: "p2", symbol: "US.MSFT", profile: "focused" } },
