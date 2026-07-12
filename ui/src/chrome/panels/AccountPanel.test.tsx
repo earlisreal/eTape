@@ -505,5 +505,17 @@ describe("AccountPanel", () => {
       expect(calls).toEqual([{ name: "ExportFills", args: { venue: "alpaca-paper", preset: "all", from: "", to: "" } }]);
       clickSpy.mockRestore();
     });
+
+    it("hides the Export button on the Positions tab and re-hides it after switching back from Trade History", () => {
+      const { props } = mkProps();
+      wrap(props);
+      expect(screen.queryByTestId("acct-export")).toBeNull(); // default Positions tab — Export is gated to history
+
+      fireEvent.click(screen.getByText("Trade History"));
+      expect(screen.getByTestId("acct-export")).toBeTruthy(); // History tab shows Export
+
+      fireEvent.click(screen.getByText(/^Positions/));
+      expect(screen.queryByTestId("acct-export")).toBeNull(); // back on Positions — Export disappears again
+    });
   });
 });
