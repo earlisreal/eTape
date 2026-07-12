@@ -514,6 +514,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 				Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
 				Kind: "retention", Detail: detail, Level: "warn",
 			})
+			st.Flush() // drain the freshly-queued backstop-trigger sys_event before VACUUM takes its exclusive lock
 			if err := st.Vacuum(); err != nil {
 				log.Error("backstop vacuum", "err", err)
 				failDetail := fmt.Sprintf("backstop vacuum failed: %v", err)
@@ -536,7 +537,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			if advise {
 				level = "warn" // surfaces as a toast via connectEventToasts
 			}
-			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{Kind: "storage", Detail: report, Level: level})
+			sysEventSeq++
+			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
+				Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+				Kind: "storage", Detail: report, Level: level,
+			})
 		}
 		st.AppendSysEvent("boot", "engine up")
 		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "connecting"})
