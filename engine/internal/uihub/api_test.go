@@ -29,8 +29,8 @@ func (apiStores) JournalDays() ([]string, error) { return nil, nil }
 
 type apiInd struct{}
 
-func (apiInd) EnsureIndicator(string, md.IndicatorSpec) {}
-func (apiInd) ReleaseIndicator(string)                  {}
+func (apiInd) EnsureIndicator(uint64, string, md.IndicatorSpec) {}
+func (apiInd) ReleaseIndicator(uint64, string)                  {}
 
 func TestUIHubNewBuildsRunnableHubAndServer(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))

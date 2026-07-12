@@ -83,11 +83,11 @@ func run(t *testing.T, evs []feed.Event) []Update {
 			}
 		}
 	}()
-	c.EnsureIndicator("vwap-1", IndicatorSpec{Symbol: "US.AAPL", TF: session.TF10s, Type: IndVWAP})
+	c.EnsureIndicator(1, "vwap-1", IndicatorSpec{Symbol: "US.AAPL", TF: session.TF10s, Type: IndVWAP})
 	for _, ev := range evs {
 		c.Feed(ev)
 	}
-	c.EnsureIndicator("ema-1", IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: IndEMA,
+	c.EnsureIndicator(1, "ema-1", IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: IndEMA,
 		Params: map[string]float64{"period": 2}})
 	// Let the single writer finish the inbox, then stop and drain.
 	time.Sleep(200 * time.Millisecond)

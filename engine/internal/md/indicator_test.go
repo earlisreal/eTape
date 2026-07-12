@@ -124,7 +124,7 @@ func TestIndicatorLifecycleThroughCore(t *testing.T) {
 	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(0, 100, 101, 99, 100, 500)}})
 	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(1, 100, 102, 100, 101, 400)}})
 	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(2, 101, 103, 101, 102, 300)}})
-	c.EnsureIndicator("ema-1", IndicatorSpec{
+	c.EnsureIndicator(1, "ema-1", IndicatorSpec{
 		Symbol: "US.AAPL", TF: session.TF1m, Type: IndEMA, Params: map[string]float64{"period": 2},
 	})
 	// A live update to the forming bar streams a delta point.
@@ -149,7 +149,7 @@ func TestIndicatorLifecycleThroughCore(t *testing.T) {
 	if deltas == 0 {
 		t.Fatal("no delta point for the forming-bar update")
 	}
-	c.ReleaseIndicator("ema-1")
+	c.ReleaseIndicator(1, "ema-1")
 	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(3, 103, 104, 102, 103.5, 100)}})
 	// drain() re-returns the full accumulated stream; ema-1 counts must be
 	// frozen after the release.
@@ -175,11 +175,11 @@ func TestEnsureExistingIdAdoptsNewSpec(t *testing.T) {
 		c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{mk("US.AAPL", i, 190+float64(i))}})
 		c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{mk("US.NVDA", i, 140+float64(i))}})
 	}
-	c.EnsureIndicator("vwap-1", IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: IndVWAP})
+	c.EnsureIndicator(1, "vwap-1", IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: IndVWAP})
 	drain()
 
 	// The chart switches to NVDA and re-subscribes the same instanceId.
-	c.EnsureIndicator("vwap-1", IndicatorSpec{Symbol: "US.NVDA", TF: session.TF1m, Type: IndVWAP})
+	c.EnsureIndicator(1, "vwap-1", IndicatorSpec{Symbol: "US.NVDA", TF: session.TF1m, Type: IndVWAP})
 	var lastSnap IndicatorUpdate
 	countVwap := func(us []Update) (n int) {
 		for _, u := range us {
@@ -217,11 +217,13 @@ func TestEnsureExistingIdAdoptsNewSpec(t *testing.T) {
 	}
 }
 
-// TestParamEditAfterRefInflation covers the UI's param-edit path
-// (updateIndicator = Unsubscribe then Subscribe with the SAME instanceId): once
-// a symbol switch has inflated refs past 1, the release no longer frees the id,
-// so the re-subscribe hits ensure()'s existing-id branch — which must adopt the
-// new params rather than silently keeping the old ones.
+// TestParamEditAfterRefInflation covers the two-owner-survives-one-release
+// scenario combined with the UI's param-edit path (updateIndicator =
+// Unsubscribe then Subscribe with the SAME instanceId): with two connections
+// owning the same instance, releasing one leaves the id alive via the other
+// owner, so the surviving connection's re-ensure with a new spec hits
+// ensure()'s existing-id branch — which must adopt the new params (respec)
+// rather than silently keeping the old ones.
 func TestParamEditAfterRefInflation(t *testing.T) {
 	c, drain := runCore(t)
 	for i := 0; i < 5; i++ {
@@ -230,10 +232,10 @@ func TestParamEditAfterRefInflation(t *testing.T) {
 	spec := func(period float64) IndicatorSpec {
 		return IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: IndSMA, Params: map[string]float64{"period": period}}
 	}
-	c.EnsureIndicator("sma-1", spec(2))
-	c.EnsureIndicator("sma-1", spec(2)) // symbol-switch resubscribe: refs -> 2
-	c.ReleaseIndicator("sma-1")         // param edit: remove...
-	c.EnsureIndicator("sma-1", spec(4)) // ...then re-add, same id, new period
+	c.EnsureIndicator(1, "sma-1", spec(2))
+	c.EnsureIndicator(2, "sma-1", spec(2)) // second owner, same id/spec
+	c.ReleaseIndicator(1, "sma-1")         // one owner releases; instance must survive via conn 2
+	c.EnsureIndicator(2, "sma-1", spec(4)) // surviving owner re-ensures, same id, new period
 	var lastSnap IndicatorUpdate
 	for _, u := range drain() {
 		if iu, ok := u.(IndicatorUpdate); ok && iu.InstanceID == "sma-1" && iu.Snapshot {
@@ -256,7 +258,7 @@ func TestMACDSlotKeys(t *testing.T) {
 	for i := 0; i < 12; i++ {
 		c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(i, 100+float64(i), 101+float64(i), 99+float64(i), 100.5+float64(i), 100)}})
 	}
-	c.EnsureIndicator("macd-1", IndicatorSpec{
+	c.EnsureIndicator(1, "macd-1", IndicatorSpec{
 		Symbol: "US.AAPL", TF: session.TF1m, Type: IndMACD,
 		Params: map[string]float64{"fast": 3, "slow": 6, "signal": 3},
 	})
@@ -315,14 +317,14 @@ func TestInvalidParamsRejected(t *testing.T) {
 	}
 
 	c, drain := runCore(t)
-	c.EnsureIndicator("bad-1", cases[0])
+	c.EnsureIndicator(1, "bad-1", cases[0])
 	for _, u := range drain() { // must not panic and must not emit anything for bad-1
 		if iu, ok := u.(IndicatorUpdate); ok && iu.InstanceID == "bad-1" {
 			t.Fatalf("rejected spec still emitted: %+v", iu)
 		}
 	}
 	// The registry must still work normally afterward.
-	c.EnsureIndicator("good-1", IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: IndEMA, Params: map[string]float64{"period": 2}})
+	c.EnsureIndicator(1, "good-1", IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: IndEMA, Params: map[string]float64{"period": 2}})
 	found := false
 	for _, u := range drain() {
 		if iu, ok := u.(IndicatorUpdate); ok && iu.InstanceID == "good-1" && iu.Snapshot {
@@ -334,17 +336,18 @@ func TestInvalidParamsRejected(t *testing.T) {
 	}
 }
 
-// TestEnsureRefcountReemitsSnapshot covers rule 1's refcount path: a second
-// ensure() of an already-live id must re-emit the stored snapshot (a new
-// subscriber needs the series) rather than silently no-op, and the instance
-// must survive exactly one matching release.
+// TestEnsureRefcountReemitsSnapshot covers the two-owner-survives-one-release
+// scenario: a second ensure() of an already-live id, from a DIFFERENT
+// connection, must re-emit the stored snapshot (a new subscriber needs the
+// series) rather than silently no-op, and the instance must survive a release
+// from one owner as long as the other owner remains.
 func TestEnsureRefcountReemitsSnapshot(t *testing.T) {
 	c, drain := runCore(t)
 	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(0, 100, 101, 99, 100, 500)}})
 	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(1, 100, 102, 100, 101, 400)}})
 	spec := IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: IndEMA, Params: map[string]float64{"period": 2}}
-	c.EnsureIndicator("ema-shared", spec)
-	c.EnsureIndicator("ema-shared", spec) // second subscriber, same id
+	c.EnsureIndicator(1, "ema-shared", spec)
+	c.EnsureIndicator(2, "ema-shared", spec) // second subscriber, different conn, same id
 	snaps := 0
 	for _, u := range drain() {
 		if iu, ok := u.(IndicatorUpdate); ok && iu.InstanceID == "ema-shared" && iu.Snapshot {
@@ -354,7 +357,7 @@ func TestEnsureRefcountReemitsSnapshot(t *testing.T) {
 	if snaps != 2 {
 		t.Fatalf("snapshots after two ensures = %d, want 2 (one per subscriber)", snaps)
 	}
-	c.ReleaseIndicator("ema-shared") // one of two refs released; instance must survive
+	c.ReleaseIndicator(1, "ema-shared") // one of two owners released; instance must survive via the other
 	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(2, 101, 103, 101, 102, 300)}})
 	deltas := 0
 	for _, u := range drain() {
@@ -363,7 +366,7 @@ func TestEnsureRefcountReemitsSnapshot(t *testing.T) {
 		}
 	}
 	if deltas == 0 {
-		t.Fatal("instance stopped emitting after releasing only one of two refs")
+		t.Fatal("instance stopped emitting after releasing only one of two owners")
 	}
 }
 
@@ -376,7 +379,7 @@ func TestBackfillRewritesPastTriggersReseed(t *testing.T) {
 	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(0, 100, 101, 99, 100, 500)}})
 	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(1, 100, 102, 100, 101, 400)}})
 	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(2, 101, 103, 101, 102, 300)}})
-	c.EnsureIndicator("ema-reseed", IndicatorSpec{
+	c.EnsureIndicator(1, "ema-reseed", IndicatorSpec{
 		Symbol: "US.AAPL", TF: session.TF1m, Type: IndEMA, Params: map[string]float64{"period": 2},
 	})
 	drain()

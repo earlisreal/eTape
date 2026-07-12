@@ -36,8 +36,8 @@ func (cfgNoop) SetConfig(string, string)               {}
 
 type indNoop struct{}
 
-func (indNoop) EnsureIndicator(string, md.IndicatorSpec) {}
-func (indNoop) ReleaseIndicator(string)                  {}
+func (indNoop) EnsureIndicator(uint64, string, md.IndicatorSpec) {}
+func (indNoop) ReleaseIndicator(uint64, string)                  {}
 
 type noopDemand struct{}
 

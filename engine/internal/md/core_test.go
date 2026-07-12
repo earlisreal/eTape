@@ -236,6 +236,6 @@ func TestSeedDailyAndSeedHistory1mDoNotPanic(t *testing.T) {
 	c, _ := runCore(t)
 	c.SeedDaily("US.AAPL", []feed.Bar{{Symbol: "US.AAPL", BucketMs: session.DayMs(t0Ms), O: 1, H: 2, L: 0.5, C: 1.5, Volume: 100}})
 	c.SeedHistory1m("US.AAPL", []feed.Bar{{Symbol: "US.AAPL", BucketMs: t0Ms, O: 1, H: 2, L: 0.5, C: 1.5, Volume: 10}})
-	c.EnsureIndicator("panel-1", IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m})
-	c.ReleaseIndicator("panel-1")
+	c.EnsureIndicator(1, "panel-1", IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m})
+	c.ReleaseIndicator(1, "panel-1")
 }
