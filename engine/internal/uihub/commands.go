@@ -78,15 +78,17 @@ type commands struct {
 	// the "RestartEngine" case below. Nil in tests that don't set it, hence
 	// the nil guard there.
 	restart func()
-	// startReplay/goLive are set post-construction by uihub.New, same pattern
-	// as restart above (see api.go) — kept out of newCommands' param list so
-	// the many existing newCommands(...) call sites in commands_test.go don't
-	// need updating. Unlike restart, they carry arguments and can fail
-	// validation (bad day, negative speed), so each call is expected to
-	// validate synchronously and return an error for a blocked ack *before*
-	// scheduling any delayed side effect — see the closures built in main.go.
+	// startReplay/goLive/startDemo are set post-construction by uihub.New,
+	// same pattern as restart above (see api.go) — kept out of newCommands'
+	// param list so the many existing newCommands(...) call sites in
+	// commands_test.go don't need updating. Unlike restart, they carry
+	// arguments and can fail validation (bad day, negative speed), so each
+	// call is expected to validate synchronously and return an error for a
+	// blocked ack *before* scheduling any delayed side effect — see the
+	// closures built in main.go.
 	startReplay func(day string, speed float64) error
 	goLive      func() error
+	startDemo   func() error
 }
 
 func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, va venueAdmin, feed func() Feed, tester venueTester) *commands {
@@ -326,6 +328,14 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked("replay switching not supported"), false
 		}
 		if err := cd.goLive(); err != nil {
+			return blocked(err.Error()), false
+		}
+		return wsmsg.AckMsg{Status: wsmsg.AckAccepted}, false
+	case "StartDemo":
+		if cd.startDemo == nil {
+			return blocked("demo switching not supported"), false
+		}
+		if err := cd.startDemo(); err != nil {
 			return blocked(err.Error()), false
 		}
 		return wsmsg.AckMsg{Status: wsmsg.AckAccepted}, false

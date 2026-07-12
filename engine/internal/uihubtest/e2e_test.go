@@ -94,7 +94,7 @@ func TestE2EExecLifecycleOverWS(t *testing.T) {
 		Global: uihub.GlobalLimits{MaxDayLoss: 1e9},
 		MD:     20 * time.Millisecond, Account: 50 * time.Millisecond, Position: 30 * time.Millisecond,
 		Buf: 4096, TapeCap: 100, NewsCap: 100, FillsCap: 100, EventsCap: 100, OutBuf: 256,
-	}, execCore, st, mdCore, nil, nil, nil, nil, nil)
+	}, execCore, st, mdCore, nil, nil, nil, nil, nil, nil)
 	go func() { _ = hub.Run(ctx) }()
 	go forwardExec(ctx, execCore, hub)
 
@@ -187,7 +187,7 @@ func TestE2EReplayMarketDataOverWS(t *testing.T) {
 	hub, srv := uihub.New(clock.System{}, uihub.Config{
 		MD: 15 * time.Millisecond, Account: 50 * time.Millisecond, Position: 30 * time.Millisecond,
 		Buf: 4096, TapeCap: 100, NewsCap: 100, FillsCap: 100, EventsCap: 100, OutBuf: 256,
-	}, execCore, st, mdCore, nil, nil, nil, nil, nil)
+	}, execCore, st, mdCore, nil, nil, nil, nil, nil, nil)
 	go func() { _ = hub.Run(ctx) }()
 	go forwardMD(ctx, mdCore, hub)
 
