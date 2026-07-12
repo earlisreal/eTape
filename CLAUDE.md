@@ -40,6 +40,23 @@ execution spec: venues, two-layer gate, TZ + Alpaca v1, moomoo v1.x).
   anything is wrong, stop and surface it instead of offering to merge. As with the
   auto-commit rule above, **pushing stays a separate, explicit step** — merge and
   worktree cleanup are local only.
+- **Guard against subagents committing to `main`.** Subagents have repeatedly landed
+  stray commits directly on shared `main` instead of their assigned worktree (a bare
+  "Work from: `<dir>`" line in a dispatch prompt is not a strong enough gate). Two
+  layers, both already in place:
+  - **Mechanical backstop:** `.githooks/commit-msg`, wired in via
+    `git config core.hooksPath /Users/earl.savadera/Projects/eTape/.githooks` (a local,
+    uncommitted config — re-run this once after a fresh clone). It blocks any plain
+    commit whose current branch is `main`, except: commits on any other branch
+    (worktrees), an in-progress merge, a message starting with `docs(specs):` or
+    `docs(plans):` (the auto-commit rule above), or an explicit
+    `ETAPE_ALLOW_MAIN_COMMIT=1 git commit ...` override for a deliberate one-off main
+    commit. Set the env var inline on the command — never export it into a subagent's
+    shell.
+  - **Dispatch discipline:** open every implementer/fix-subagent dispatch prompt in a
+    worktree-based session with the verbatim checklist in
+    `.claude/dispatch/implementer-first-step.md` (pwd/branch verification, STOP on
+    mismatch) — paste it in rather than re-deriving a bare "Work from:" line.
 
 ## Stack (decided)
 
