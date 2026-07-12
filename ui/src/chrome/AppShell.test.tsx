@@ -416,7 +416,10 @@ describe("AppShell Alpaca-1m-history hint banner", () => {
     expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
   });
 
-  it("does not show at zero venues (the venue-setup prompt covers that case instead)", async () => {
+  it("is hidden at zero venues while the venue-setup prompt is showing", async () => {
+    // Suppressed so it doesn't double up with the one-shot venue-setup modal,
+    // which covers this exact case first -- see the "appears ... once the
+    // venue-setup prompt is dismissed" test below for the handoff.
     const { stores } = mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     publishStatus(stores, []);
@@ -424,15 +427,45 @@ describe("AppShell Alpaca-1m-history hint banner", () => {
     expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
   });
 
-  it("does not show at sim-only (the venue-setup prompt covers that case instead)", async () => {
-    // The auto-seeded first-run sim venue is not a "real" venue for this
-    // banner's purposes -- it must not double up with the venue-setup prompt,
-    // which is the one nudging a sim-only user toward a real broker.
+  it("is hidden at sim-only while the venue-setup prompt is showing", async () => {
+    // The auto-seeded first-run sim venue is not a "real" venue -- the
+    // venue-setup prompt covers this case first; the banner takes over once
+    // that prompt is dismissed (see the test below).
     const { stores } = mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     publishStatus(stores, [venueStatus("sim-paper", "sim")]);
     await waitFor(() => expect(screen.getByText("Add a broker to trade live")).toBeTruthy());
     expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
+  });
+
+  it("appears at zero venues once the venue-setup prompt is dismissed", async () => {
+    // This is the case the relaxed gate exists for: a fresh install with no
+    // venues at all gets the one-shot modal first, then the persistent
+    // banner takes over once that modal is out of the way.
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, []);
+    await waitFor(() => expect(screen.getByText("Add a broker to trade live")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "I'll do it later" }));
+    expect(screen.queryByText("Add a broker to trade live")).toBeNull();
+
+    await waitFor(() => expect(screen.getByTestId("alpaca-backfill-banner")).toBeTruthy());
+  });
+
+  it("appears at sim-only once the venue-setup prompt is dismissed", async () => {
+    // The no-real-venue case this task exists to fix: Earl's machine has only
+    // the auto-seeded sim venue, so the banner must hand off from the
+    // venue-setup modal once dismissed, not stay suppressed forever.
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    publishStatus(stores, [venueStatus("sim-paper", "sim")]);
+    await waitFor(() => expect(screen.getByText("Add a broker to trade live")).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "I'll do it later" }));
+    expect(screen.queryByText("Add a broker to trade live")).toBeNull();
+
+    await waitFor(() => expect(screen.getByTestId("alpaca-backfill-banner")).toBeTruthy());
   });
 
   it("shows once a non-Alpaca venue is configured", async () => {
@@ -457,6 +490,22 @@ describe("AppShell Alpaca-1m-history hint banner", () => {
     await waitFor(() => expect(stores.exec.status()?.venues.length).toBe(2));
     expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
   });
+
+  it.each(["replay", "demo"] as const)(
+    "does not show during a confirmed %s session, even with no Alpaca venue",
+    async (mode) => {
+      // Venue edits need an engine restart, which would kill a replay/demo
+      // session -- mirrors showVenueSetup's same guard. Uses a real non-sim
+      // venue so showVenueSetup's own gate is already false here, isolating
+      // this assertion to showAlpacaHint's own sessionMode guard.
+      const { stores } = mount(seed);
+      await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+      act(() => stores.session.apply({ kind: "snapshot", topic: "sys.session", payload: { mode, day: "2026-01-02", speed: 0 } }));
+      publishStatus(stores, [venueStatus("tz-1", "tradezero")]);
+      await waitFor(() => expect(stores.exec.status()?.venues.length).toBe(1));
+      expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
+    },
+  );
 
   it("clicking 'Set up Alpaca' opens Settings on the Venues & creds section and closes the banner", async () => {
     const { stores } = mount(seed);

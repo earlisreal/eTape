@@ -1,8 +1,9 @@
 import { useTheme } from "./ThemeProvider";
 import { HoverButton } from "./controls/HoverButton";
 
-// Non-blocking hint shown when at least one venue is configured but none of
-// them is Alpaca. A paper Alpaca venue is the quota-free deep 1-minute
+// Non-blocking hint shown whenever no Alpaca venue is configured (including
+// sim-only), once the first-run venue-setup modal is dismissed. A paper
+// Alpaca venue is the quota-free deep 1-minute
 // history provider (~20 trading days via SIP, engine/cmd/etape/main.go's
 // intraday chain); without it, deep 1m backfill falls back to moomoo's
 // quota-guarded request_history_kline (1 of 100 slots per rolling 30 days

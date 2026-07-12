@@ -205,15 +205,20 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // "pending" treatment above. VenueSetupPrompt doesn't need an equivalent
   // gate: it's already suppressed during replay/demo by showVenueSetup itself.
   const showTryDemo = sessionMode.mode === "live" || sessionMode.mode === "pending";
-  // Alpaca-1m-history hint: shown once at least one REAL broker venue is
-  // configured (so it never doubles up with the venue-setup prompt above,
-  // which covers the sim-only/no-venue case) but none of them is Alpaca — the
-  // deep-1m backfill chain then falls back to moomoo's quota-guarded history
-  // fetch instead of the quota-free Alpaca SIP path (see
-  // AlpacaBackfillBanner.tsx for the detail).
+  // Alpaca-1m-history hint: shown whenever the engine is open and no Alpaca
+  // venue is configured — including the sim-only/no-venue case, since that's
+  // exactly when the deep-1m backfill chain falls back to moomoo's
+  // quota-guarded history fetch instead of the quota-free Alpaca SIP path
+  // (see AlpacaBackfillBanner.tsx for the detail). Suppressed while the
+  // venue-setup modal is up (it covers first-run and would otherwise double
+  // up) and during replay/demo (venue edits need an engine restart, pointless
+  // mid-practice) — this is the persistent reminder that takes over once the
+  // one-shot modal is dismissed.
   const hasAlpaca = execStatus?.venues.some((v) => v.broker === "alpaca") ?? false;
   const showAlpacaHint = engineState === "open" && execStatus !== null
-    && hasRealVenue && !hasAlpaca
+    && !hasAlpaca
+    && sessionMode.mode !== "replay" && sessionMode.mode !== "demo"
+    && !showVenueSetup
     && !alpacaHintSessionDismissed && !readAlpacaHintHidden();
   const openAlpacaSetup = () => {
     // Session-dismiss only, not the permanent flag — venue edits only apply
