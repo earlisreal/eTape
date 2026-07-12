@@ -64,6 +64,23 @@ func TestSeed_WritesWarmHistory(t *testing.T) {
 	}
 }
 
+// TestSeed_LeavesNoPendingDailyBars checks that Seed's own boot-time
+// rollovers (seedIntraday walks ~3 trailing days, each crossing an
+// ET-midnight boundary) don't leave anything in DrainDailyBars for
+// forwardDailyBars to redundantly re-archive/re-seed on its first live
+// poll - those days are already durable via seedIntraday's own direct
+// st.ArchiveDaily call plus the post-boot warmStart-on-EnsureSymbol path.
+func TestSeed_LeavesNoPendingDailyBars(t *testing.T) {
+	nowMs := int64(1_700_000_000_000)
+	g := New(9, fixedClockAt(nowMs))
+	st := &capStore{}
+	g.Seed(st, nowMs)
+
+	if pending := g.DrainDailyBars(); len(pending) != 0 {
+		t.Errorf("DrainDailyBars() after Seed = %d bars, want 0 (boot-time rollovers should already be cleared)", len(pending))
+	}
+}
+
 func TestSeed_WithinBudget(t *testing.T) {
 	nowMs := int64(1_700_000_000_000)
 	g := New(9, fixedClockAt(nowMs))
