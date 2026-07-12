@@ -43,6 +43,15 @@ function wrap(onSave = vi.fn()) {
   return { onSave };
 }
 
+function wrapWithToastAndClose(onSave = vi.fn(), toast = { push: vi.fn(), dismiss: vi.fn() }, onClose = vi.fn()) {
+  render(
+    <ThemeProvider>
+      <OrderSettingsSection config={SAMPLE_ORDER_CONFIG} onSave={onSave} toast={toast} onClose={onClose} />
+    </ThemeProvider>,
+  );
+  return { onSave, toast, onClose };
+}
+
 describe("OrderSettingsSection", () => {
   it("lists templates and saves an edited label", () => {
     const { onSave } = wrap();
@@ -163,7 +172,9 @@ describe("OrderSettingsSection", () => {
     fireEvent.change(offset, { target: { value: "0.05" } });
     expect(offset.value).toBe("0.05");
     fireEvent.blur(offset);
-    expect(offset.value).toBe("0.05");
+    // Blur clears the raw edit, so the display re-derives from the numeric
+    // model through fmtOffset — a positive value now reads "+0.05".
+    expect(offset.value).toBe("+0.05");
     fireEvent.click(screen.getByTestId("save"));
     const saved = onSave.mock.calls[0][0];
     expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").priceOffset).toBe(0.05);
@@ -493,5 +504,37 @@ describe("OrderSettingsSection", () => {
     fireEvent.change(screen.getByLabelText("ext-buffer"), { target: { value: "50" } });
     fireEvent.click(screen.getByTestId("save"));
     expect(onSave.mock.calls[0][0].extHoursMarketBufferPct).toBe(10);
+  });
+
+  // A positive offset must read unambiguously as positive at a glance
+  // (negatives already render "-" via String()); 0 stays sign-less.
+  it("renders a leading + on a positive offset after nudging up", () => {
+    wrap();
+    const offset = screen.getByLabelText("offset-buy-5k") as HTMLInputElement;
+    expect(offset.value).toBe("0");
+    fireEvent.click(screen.getByTestId("offset-buy-5k-up"));
+    expect(offset.value).toBe("+0.05");
+  });
+
+  it("renders a leading - on a negative offset after nudging down", () => {
+    wrap();
+    const offset = screen.getByLabelText("offset-buy-5k") as HTMLInputElement;
+    fireEvent.click(screen.getByTestId("offset-buy-5k-down"));
+    expect(offset.value).toBe("-0.05");
+  });
+
+  // Save feedback + auto-close (both props optional — see the two tests below
+  // for the omitted-props case).
+  it("clicking Save with toast/onClose supplied pushes a success toast and calls onClose", () => {
+    const { toast, onClose } = wrapWithToastAndClose();
+    fireEvent.click(screen.getByTestId("save"));
+    expect(toast.push).toHaveBeenCalledWith({ level: "success", text: "Order templates & hotkeys saved." });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("clicking Save with toast/onClose omitted still calls onSave and does not throw", () => {
+    const { onSave } = wrap();
+    expect(() => fireEvent.click(screen.getByTestId("save"))).not.toThrow();
+    expect(onSave).toHaveBeenCalledTimes(1);
   });
 });

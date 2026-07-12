@@ -66,4 +66,20 @@ describe("SettingsModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /venues & creds/i }));
     await waitFor(() => expect(commands.sendCommand).toHaveBeenCalledWith("GetVenueSetup", {}));
   });
+
+  // Orders & hotkeys' Save button needs SettingsModal's own `toast` and
+  // `onClose` to give feedback and auto-close — verify both are threaded
+  // down to OrderSettingsSection rather than dropped at this layer.
+  it("forwards toast and onClose to Orders & hotkeys, and Save uses them", () => {
+    const toast = mkToast();
+    const onClose = vi.fn();
+    render(
+      <AppProviders>
+        <SettingsModal open section="orders" onSection={() => {}} onClose={onClose} commands={mkCommands()} getWorkspace={mkWorkspace} onImportWorkspace={() => {}} toast={toast} />
+      </AppProviders>,
+    );
+    fireEvent.click(screen.getByTestId("save"));
+    expect(toast.push).toHaveBeenCalledWith({ level: "success", text: "Order templates & hotkeys saved." });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

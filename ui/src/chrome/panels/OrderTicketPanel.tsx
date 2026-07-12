@@ -86,9 +86,9 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
       : mode === "Dollar" ? { mode, dollar: Number(amount) || 0 }
       : mode === "BuyingPowerPct" ? { mode, pct: Number(amount) || 0 }
       : { mode, pct: Number(amount) || 0 };
-    const qty = resolveShares(spec, { price: px, buyingPower, positionQty });
+    const { qty, reason } = resolveShares(spec, { price: px, buyingPower, positionQty });
     const draft: DraftOrder = { symbol, side, type, tif, session, qty, limitPrice: type === "MARKET" ? 0 : px, stopPrice: hasStop ? Number(stop) || 0 : 0 };
-    const pc = preCheck(draft, quote ?? { bid: 0, ask: 0, last: 0 }, Date.now(), extBufferPct);
+    const pc = preCheck(draft, quote ?? { bid: 0, ask: 0, last: 0 }, Date.now(), extBufferPct, reason);
     for (const n of pc.notices) toast.push({ level: "warn", text: n });
     if (!pc.ok) { toast.push({ level: "danger", text: pc.errors.join(" ") }); return; }
     const o = pc.order;

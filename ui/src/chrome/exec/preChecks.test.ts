@@ -15,6 +15,16 @@ describe("preCheck", () => {
     expect(r.ok).toBe(false);
     expect(r.errors.join(" ")).toMatch(/greater than 0/);
   });
+  it("uses a passed sizeReason instead of the generic qty message", () => {
+    const r = preCheck(draft({ qty: 0 }), q(), RTH, 1, "$100 is less than one share at $150.00.");
+    expect(r.ok).toBe(false);
+    expect(r.errors).toContain("$100 is less than one share at $150.00.");
+    expect(r.errors.join(" ")).not.toMatch(/Quantity must be greater than 0\./);
+  });
+  it("omitting sizeReason keeps the generic qty message", () => {
+    const r = preCheck(draft({ qty: 0 }), q(), RTH, 1);
+    expect(r.errors).toContain("Quantity must be greater than 0.");
+  });
   it("passes a clean RTH limit", () => {
     expect(preCheck(draft({}), q(), RTH, 1).ok).toBe(true);
   });

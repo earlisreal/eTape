@@ -64,7 +64,7 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
         </nav>
         <section style={{ padding: 16, overflow: "auto", minHeight: 0, background: palette.bg }}>
           {section === "appearance" && <AppearanceSection />}
-          {section === "orders" && <OrderSettingsSection config={oc.config} onSave={oc.save} />}
+          {section === "orders" && <OrderSettingsSection config={oc.config} onSave={oc.save} toast={toast} onClose={onClose} />}
           {section === "venues" && <VenuesSection commands={commands} engineState={engineState} />}
           {section === "sounds" && <SoundsSection />}
           {section === "backup" && <BackupSection getWorkspace={getWorkspace} onImportWorkspace={onImportWorkspace} orderConfig={oc.config} onImportOrderConfig={oc.save} toast={toast} />}

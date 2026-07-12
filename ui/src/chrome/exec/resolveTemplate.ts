@@ -17,13 +17,13 @@ export interface ResolvedPlace { args: SubmitOrderArgs; flash: string; preCheck:
 
 export function resolvePlaceTemplate(t: PlaceOrderTemplate, ctx: ResolveContext): ResolvedPlace {
   const price = resolvePrice(t.priceSource, t.priceOffset, t.priceOffsetUnit, ctx.quote);
-  const qty = resolveShares(t.sizing, { price, buyingPower: ctx.buyingPower, positionQty: ctx.positionQty });
+  const { qty, reason } = resolveShares(t.sizing, { price, buyingPower: ctx.buyingPower, positionQty: ctx.positionQty });
   const draft: DraftOrder = {
     symbol: ctx.symbol, side: t.side, type: t.type, tif: t.tif, session: t.session ?? "AUTO", qty,
     limitPrice: t.type === "MARKET" ? 0 : price,
     stopPrice: t.type === "STOP" || t.type === "STOP_LIMIT" ? price : 0,
   };
-  const pc = preCheck(draft, ctx.quote, ctx.nowMs, ctx.extHoursMarketBufferPct);
+  const pc = preCheck(draft, ctx.quote, ctx.nowMs, ctx.extHoursMarketBufferPct, reason);
   const o = pc.order;
   const args: SubmitOrderArgs = {
     venue: ctx.venue, symbol: ctx.symbol, side: o.side, type: o.type, tif: o.tif, session: o.session,

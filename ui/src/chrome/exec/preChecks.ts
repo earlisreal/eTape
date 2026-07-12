@@ -47,12 +47,13 @@ export function preCheck(
   quote: { bid: number; ask: number; last: number },
   nowMs: number,
   extBufferPct: number,
+  sizeReason?: string,
 ): PreCheckResult {
   const errors: string[] = [];
   const notices: string[] = [];
   let order: DraftOrder = { ...draft };
 
-  if (!(order.qty > 0)) errors.push("Quantity must be greater than 0.");
+  if (!(order.qty > 0)) errors.push(sizeReason ?? "Quantity must be greater than 0.");
 
   // Market outside RTH → aggressive marketable limit (ask×(1+pct) buys /
   // bid×(1−pct) sells), tick-rounded. Falls back to last for a one-sided book.

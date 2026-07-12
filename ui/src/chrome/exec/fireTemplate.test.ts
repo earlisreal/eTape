@@ -94,7 +94,7 @@ describe("fireTemplate — place templates", () => {
     };
     fireTemplate(t, baseCtx({ nowMs: NOT_RTH_NOW }), oc, toast, { gateArm: false });
     expect(toast.push).toHaveBeenCalledWith({ level: "warn", text: expect.stringContaining("Limit @") });
-    expect(toast.push).toHaveBeenCalledWith({ level: "danger", text: "Quantity must be greater than 0." });
+    expect(toast.push).toHaveBeenCalledWith({ level: "danger", text: "Share size must be at least 1." });
     expect(oc.submit).not.toHaveBeenCalled();
   });
 });
