@@ -101,6 +101,14 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	}
 	m := newMirror(vms, global, cfg.TapeCap, cfg.NewsCap, cfg.FillsCap, cfg.EventsCap, cfg.TradesCap)
 	m.session = wsmsg.SessionSnapshot{Mode: cfg.Mode, Day: cfg.ReplayDay, Speed: cfg.ReplaySpeed}
+	// Live boots start "connecting"; the boot goroutine advances the phase
+	// (sealing → connecting → ready). Replay/demo have no maintenance window,
+	// so seed "ready" — a mid-boot subscriber must never see the seal banner.
+	if cfg.Mode == "live" {
+		m.boot = wsmsg.BootStatus{Phase: "connecting"}
+	} else {
+		m.boot = wsmsg.BootStatus{Phase: "ready"}
+	}
 	h := NewHub(clk, HubConfig{MDInterval: cfg.MD, AccountInterval: cfg.Account, PositionInterval: cfg.Position, Buf: cfg.Buf}, m)
 	cmd := newCommands(ex, st, ind, h, va, h.feed, vt)
 	cmd.restart = requestRestart

@@ -248,6 +248,17 @@ type SessionSnapshot struct {
 	Speed float64 `json:"speed,omitempty"`
 }
 
+// BootStatus is the sys.boot snapshot: the engine's current boot phase, so the
+// UI shows a neutral "preparing journal / connecting" banner during the pre-feed
+// maintenance window instead of the red feed-disconnected strip. Snapshot-bearing
+// (like SessionSnapshot): re-delivered to every new subscriber, also pushed as a
+// delta on each transition. Phase is one of "sealing" | "connecting" | "ready".
+// DaysTotal is the day count for the "sealing" phase (0 otherwise).
+type BootStatus struct {
+	Phase     string `json:"phase"`
+	DaysTotal int    `json:"daysTotal,omitempty"`
+}
+
 type SysEvent struct {
 	Seq    int64  `json:"seq"`
 	Ts     string `json:"ts"`

@@ -51,7 +51,7 @@ packages:
         | "news.item"
         | "stock.detail"
         | "exec.account" | "exec.positions" | "exec.orders" | "exec.fills" | "exec.status" | "exec.trades"
-        | "sys.health" | "sys.session" | "sys.events"
+        | "sys.health" | "sys.session" | "sys.events" | "sys.boot"
         | "config";
 
       // ---- wire enums (mirrors wsmsg.go's typed string consts) ----

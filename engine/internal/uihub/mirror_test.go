@@ -427,3 +427,20 @@ func TestMirrorBarPrependFrontInsertsAndStagesBatch(t *testing.T) {
 		t.Fatalf("front-insert failed: %+v", cached)
 	}
 }
+
+func TestSysBootSnapshotAndPublish(t *testing.T) {
+	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10)
+	m.boot = wsmsg.BootStatus{Phase: "connecting"}
+
+	frames := m.snapshotFrames(wsmsg.TopicSysBoot)
+	if len(frames) != 1 || frames[0].Payload.(wsmsg.BootStatus).Phase != "connecting" {
+		t.Fatalf("snapshot=%+v", frames)
+	}
+
+	m.applyPub(staged{Topic: wsmsg.TopicSysBoot, Payload: wsmsg.BootStatus{Phase: "sealing", DaysTotal: 3}})
+	frames = m.snapshotFrames(wsmsg.TopicSysBoot)
+	got := frames[0].Payload.(wsmsg.BootStatus)
+	if got.Phase != "sealing" || got.DaysTotal != 3 {
+		t.Fatalf("after publish=%+v", got)
+	}
+}

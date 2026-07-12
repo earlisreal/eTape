@@ -31,6 +31,7 @@ const (
 	TopicSysHealth  Topic = "sys.health"
 	TopicSysSession Topic = "sys.session"
 	TopicSysEvents  Topic = "sys.events"
+	TopicSysBoot    Topic = "sys.boot"
 	TopicConfig     Topic = "config"
 )
 
@@ -40,7 +41,7 @@ var AllTopics = map[Topic]bool{
 	TopicScannerRank: true, TopicScannerHit: true, TopicNews: true, TopicStockDetail: true,
 	TopicExecAccount: true, TopicExecPositions: true, TopicExecOrders: true,
 	TopicExecFills: true, TopicExecStatus: true, TopicExecTrades: true,
-	TopicSysHealth: true, TopicSysSession: true, TopicSysEvents: true, TopicConfig: true,
+	TopicSysHealth: true, TopicSysSession: true, TopicSysEvents: true, TopicSysBoot: true, TopicConfig: true,
 }
 
 // Wire enum types (string literals matching ui/src/wire/contract.ts).
