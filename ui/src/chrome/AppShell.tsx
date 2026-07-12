@@ -33,6 +33,7 @@ import { useReplayCommands } from "./exec/useReplayCommands";
 import { useHotkeys } from "./exec/useHotkeys";
 import { useSoundWiring } from "../sound/useSoundWiring";
 import { nextWindowName } from "./windows";
+import { planDemoEntry, planDemoRevert } from "./demoTransition";
 
 // Task 3: permanent "don't show again" flag for the first-run venue-setup
 // prompt, set only when the user ticks the checkbox on either action.
@@ -67,9 +68,15 @@ interface Props {
   demandRegistry: DemandRegistry;
   commands: PanelProps["commands"];
   engineState: ConnState;
+  // Task 13: fired after the demo-mode entry/revert effect below has finished
+  // applying a workspace patch for a mode-edge transition — App.tsx wires this
+  // to ReannounceGate.onTransitionApplied() so a reconnect that lands on a
+  // *different* session mode doesn't re-announce demands until this mode's
+  // panel/symbol state is actually in place.
+  onTransitionApplied?: () => void;
 }
 
-export function AppShell({ workspaceName, stores, scheduler, workspaceStore, linkGroups, demandRegistry, commands, engineState }: Props): JSX.Element {
+export function AppShell({ workspaceName, stores, scheduler, workspaceStore, linkGroups, demandRegistry, commands, engineState, onTransitionApplied }: Props): JSX.Element {
   const [ws, setWs] = useState<Workspace | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   // Unified Settings modal (Task 11): AppShell owns open/section state; TopBar's
@@ -114,6 +121,21 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // runs after every ws-driven re-render, which (children-before-parent effect
   // ordering) is always after DockviewReact's own components-sync effect.
   const pendingRef = useRef<Array<(api: DockviewApi) => void>>([]);
+  // applyWorkspace's api.clear()+api.fromJSON() dance (below) is a full
+  // teardown/rebuild of dockview's OWN panel set used to force already-
+  // mounted panels to pick up new settings (dockview panels are otherwise
+  // frozen at creation — see PanelFrame's factory comment below). When
+  // `next.panels` keeps the SAME ids as before (true for Task 13's demo
+  // entry/revert, which only rewrites settings/groups, never adds/removes
+  // panels), api.clear() fires onDidRemovePanel for each of those ids before
+  // fromJSON re-adds them — indistinguishable, from that listener's point of
+  // view, from the user closing every tab. Without this guard, removePanel
+  // would drop each one from ws.panels for good, right before fromJSON
+  // re-mounts it in dockview with nothing backing it in the workspace doc.
+  // Set true for the duration of applyWorkspace's own clear()+fromJSON() call
+  // so onDidRemovePanel's handler skips its bookkeeping — applyWorkspace has
+  // already established the correct final panel list via its own setWs.
+  const applyingWorkspaceRef = useRef(false);
   // Lets handlers registered once (onDidRemovePanel, below) read the latest
   // workspace without capturing a stale closure over `ws`.
   const wsRef = useRef<Workspace | null>(null);
@@ -268,6 +290,116 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       workspaceStore.save(next);
     });
   }, [linkGroups, workspaceStore]);
+  // Re-render on watchlist arrival, mirroring the exec-store subscription
+  // above — the entry barrier inside the effect below reads stores.watchlist
+  // directly (not this hook's return value), but AppShell still needs to be
+  // reactive to the watchlist store the same way it is to exec's masterArmed.
+  useSyncExternalStore((cb) => stores.watchlist.subscribe(cb), () => stores.watchlist.getSnapshot());
+
+  // Task 13: demo-mode entry/revert orchestration. `wsLoaded` (a derived
+  // boolean, not raw `ws`) is the effect's second dependency below,
+  // deliberately: it flips false->true exactly once (the workspace doc never
+  // goes back to null after its first load), so including it fixes the one
+  // real race here — a fresh page load where the very first sys.session
+  // snapshot ("pending"->"demo"/"live") beats workspaceStore.load()'s
+  // GetConfig round-trip — without making the effect re-run (and tear down an
+  // in-flight entry barrier) on every LATER, unrelated setWs call from
+  // addPanel/onConfigChange/etc. once ws is already loaded.
+  const wsLoaded = ws !== null;
+  const prevModeRef = useRef(sessionMode.mode);
+  // Pre-demo workspace doc, captured on live/replay->demo and restored
+  // verbatim on demo->live. A ref (not a module-level `let`) is enough: it
+  // only needs to survive across renders of this ONE mounted AppShell, and a
+  // demo relaunch (StartDemo while already live, or GoLive) never remounts
+  // this component — the tab never reloads across a demo transition.
+  const demoSnapshotRef = useRef<Workspace | null>(null);
+  // Belt-and-suspenders re-entrancy guard alongside the effect's own
+  // subscribe/timeout cleanup below (which already tears down a pending entry
+  // barrier the instant mode flips again, since sessionMode.mode is a dep):
+  // bumped at the start of EVERY tracked edge (entry and revert alike), and
+  // checked by a pending entry's continuation before it applies anything, so
+  // even if the cleanup wiring is ever changed later without noticing this
+  // dependency, a superseded continuation still can't slip a stale
+  // planDemoEntry patch through.
+  const transitionEpochRef = useRef(0);
+
+  useEffect(() => {
+    const mode = sessionMode.mode;
+    const prev = prevModeRef.current;
+    const isEntry = (prev === "live" || prev === "replay" || prev === "pending") && mode === "demo";
+    const isRevert = prev === "demo" && mode === "live";
+    if (!isEntry && !isRevert) {
+      // demo->demo (e.g. a WS reconnect mid-demo) or any other pair: no-op —
+      // critically, this preserves whatever symbols the user set mid-demo.
+      prevModeRef.current = mode;
+      return;
+    }
+    // Workspace doc not loaded yet (see the wsLoaded comment above) —
+    // deliberately does NOT update prevModeRef.current, so the re-run this
+    // effect gets once wsLoaded flips true still sees this same edge.
+    const wsNow = wsRef.current ?? ws;
+    if (!wsNow) return;
+
+    prevModeRef.current = mode;
+    const myEpoch = ++transitionEpochRef.current;
+
+    if (isRevert) {
+      // No entry barrier needed on revert — GoLive already implies a real
+      // session, so there's no "wait for the watchlist to arrive" step.
+      const universe = stores.watchlist.getSnapshot().symbols;
+      applyWorkspace(planDemoRevert({ snapshot: demoSnapshotRef.current, universe }, wsRef.current ?? wsNow));
+      onTransitionApplied?.();
+      return; // synchronous — nothing to await, nothing to clean up
+    }
+
+    // Entry edge (live/replay/pending -> demo): snapshot BEFORE anything else,
+    // per edge kind — a pending->demo entry (the engine was already in demo
+    // when this UI (re)connected) has no real pre-demo doc to snapshot.
+    demoSnapshotRef.current = (prev === "live" || prev === "replay") ? structuredClone(wsNow) : null;
+
+    let unsubWatchlist: (() => void) | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let settled = false;
+
+    const finishEntry = (universe: string[]) => {
+      if (settled) return;
+      settled = true;
+      if (unsubWatchlist) { unsubWatchlist(); unsubWatchlist = null; }
+      if (timer !== null) { clearTimeout(timer); timer = null; }
+      if (transitionEpochRef.current !== myEpoch) return; // superseded by a newer edge meanwhile
+      const current = wsRef.current ?? wsNow;
+      const isSymbolBearing = (id: string) => PANELS[id]?.symbolBearing ?? false;
+      applyWorkspace(planDemoEntry(current, universe, isSymbolBearing));
+      // Appended separately (not folded into planDemoEntry) so dockview
+      // computes grid placement for it — see addPanel's own pendingRef
+      // comment for why this composes correctly with the applyWorkspace call
+      // just above in the same tick.
+      if (!(wsRef.current?.panels ?? []).some((p) => p.panelId === "watchlist")) addPanel("watchlist");
+      onTransitionApplied?.();
+    };
+
+    const initialSymbols = stores.watchlist.getSnapshot().symbols;
+    if (initialSymbols.length > 0) {
+      finishEntry(initialSymbols);
+    } else {
+      unsubWatchlist = stores.watchlist.subscribe(() => {
+        const snap = stores.watchlist.getSnapshot();
+        if (snap.symbols.length > 0) finishEntry(snap.symbols);
+      });
+      timer = setTimeout(() => finishEntry(stores.watchlist.getSnapshot().symbols), 5000);
+    }
+
+    // If mode flips again (or this AppShell unmounts) while the barrier above
+    // is still waiting, drop the subscription/timer immediately instead of
+    // letting them dangle up to 5s — `settled` also blocks finishEntry from
+    // running twice if this races the barrier's own natural resolution.
+    return () => {
+      settled = true;
+      if (unsubWatchlist) unsubWatchlist();
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [sessionMode.mode, wsLoaded]);
+
   if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
 
   // A stable per-panel onConfigChange MERGES a settings patch into
@@ -367,9 +499,43 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     wsRef.current = next;
     workspaceStore.save(next);
     if (apiRef.current) {
+      // `next.layout` reflects whatever `ws.layout` held in React state — and
+      // onDidLayoutChange above only ever persists a fresh layout into the
+      // SAVED doc (workspaceStore.save), never back into `ws`/`wsRef`. A
+      // caller that deliberately carries `current.layout` through unchanged
+      // (Task 13's demo entry/revert, which only rewrites panel settings/
+      // groups, never the grid) can therefore hand back a stale-or-null
+      // layout here even though dockview's own grid is fine. Same shape
+      // check onReady uses to decide "layout present".
+      const layout = next.layout as { grid?: unknown } | null;
+      const hasLayout = !!layout && typeof layout.grid === "object" && layout.grid !== null;
       pendingRef.current.push((api) => {
-        api.clear();
-        api.fromJSON(next.layout as Parameters<typeof api.fromJSON>[0]);
+        applyingWorkspaceRef.current = true;
+        try {
+          api.clear();
+          if (hasLayout) {
+            api.fromJSON(next.layout as Parameters<typeof api.fromJSON>[0]);
+          } else {
+            // No real layout to fall back to. Dockview's OWN live toJSON()
+            // is NOT a safe substitute here: Task 13's revert-with-snapshot
+            // can legitimately drop a panel that isn't in the snapshot (e.g.
+            // the auto-added Watchlist panel), so the panel SET in `next` may
+            // differ from whatever dockview is CURRENTLY showing — reusing
+            // its stale layout would reference a panel id with no component
+            // factory anymore and crash. Reseed a default grid straight from
+            // `next.panels` instead, same as onReady's own !restored branch;
+            // correct regardless of whether the panel set changed, since it
+            // doesn't reference dockview's pre-clear() state at all.
+            next.panels.forEach((p, i) => {
+              api.addPanel({
+                id: p.id, component: p.id, title: p.panelId,
+                ...(i === 0 ? {} : { position: { direction: i % 2 ? "right" : "below" } as const }),
+              });
+            });
+          }
+        } finally {
+          applyingWorkspaceRef.current = false;
+        }
       });
     }
   };
@@ -498,7 +664,10 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     // Keep ws.panels in sync when the user closes a dockview tab directly
     // (previously only the layout was re-saved on removal, leaving the closed
     // panel's config as a zombie entry in the workspace doc).
-    event.api.onDidRemovePanel((panel) => removePanel(panel.id));
+    event.api.onDidRemovePanel((panel) => {
+      if (applyingWorkspaceRef.current) return; // torn down by applyWorkspace's own rebuild, not a real removal
+      removePanel(panel.id);
+    });
     event.api.onDidLayoutChange(() => {
       // Read via wsRef, not the `ws` this closure was created with: addPanel /
       // removePanel / applyPresetToWorkspace can change ws.panels after this
