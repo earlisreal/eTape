@@ -3,6 +3,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { FeedStatusBanner } from "./FeedStatusBanner";
 import { HealthStore } from "../data/HealthStore";
+import { BootStore } from "../data/BootStore";
 import { ThemeProvider } from "./ThemeProvider";
 import type { ConnState } from "../wire/WsClient";
 
@@ -13,13 +14,23 @@ function storeWith(links: unknown[]): HealthStore {
   return s;
 }
 
+// Boot store fixed at "ready" (post-boot) for every test below except the
+// dedicated boot-gating test — this file's own scope is the moomoo-link
+// gating, which only applies once the boot window is over; BootStatusBanner.test.tsx
+// and the boot-gating test here cover the "connecting"/"sealing" phases.
+function readyBoot(): BootStore {
+  const s = new BootStore();
+  s.apply({ kind: "snapshot", topic: "sys.boot", payload: { phase: "ready" } } as never);
+  return s;
+}
+
 function Wrapped(
-  { health, engineState, onOpenConnection }:
-  { health: HealthStore; engineState: ConnState; onOpenConnection: () => void },
+  { health, boot, engineState, onOpenConnection }:
+  { health: HealthStore; boot?: BootStore; engineState: ConnState; onOpenConnection: () => void },
 ) {
   return (
     <ThemeProvider>
-      <FeedStatusBanner health={health} engineState={engineState} onOpenConnection={onOpenConnection} />
+      <FeedStatusBanner health={health} boot={boot ?? readyBoot()} engineState={engineState} onOpenConnection={onOpenConnection} />
     </ThemeProvider>
   );
 }
@@ -63,6 +74,15 @@ describe("FeedStatusBanner", () => {
       { link: "engine-moomoo", ms: null, min: null, avg: null, max: null, status: "down" },
     ]);
     render(<Wrapped health={s} engineState="connecting" onOpenConnection={() => {}} />);
+    expect(screen.queryByTestId("feed-status-banner")).toBeNull();
+  });
+
+  it("is hidden while boot phase is not \"ready\", even though moomoo is down (BootStatusBanner owns this window)", () => {
+    const s = storeWith([
+      { link: "engine-moomoo", ms: null, min: null, avg: null, max: null, status: "down" },
+    ]);
+    const boot = new BootStore(); // constructor seeds "connecting"
+    render(<Wrapped health={s} boot={boot} engineState="open" onOpenConnection={() => {}} />);
     expect(screen.queryByTestId("feed-status-banner")).toBeNull();
   });
 

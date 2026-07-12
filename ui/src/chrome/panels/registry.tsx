@@ -77,7 +77,7 @@ export interface PanelDef {
 export const PANELS: Record<string, PanelDef> = {
   "connection-status": {
     component: ({ stores }) => <ConnectionStatusPanel health={stores.health} />,
-    topics: ["sys.health", "sys.events", "sys.session"],
+    topics: ["sys.health", "sys.events", "sys.session", "sys.boot"],
     title: "Connection",
     glyph: "⇄",
     description: "Link latency, event log",
