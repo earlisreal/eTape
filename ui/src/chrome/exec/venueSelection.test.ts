@@ -30,4 +30,24 @@ describe("resolveVenue", () => {
     const lg = new LinkGroups(new BroadcastChannelBus(), () => {});
     expect(resolveVenue(null, lg, "", null)).toBe("");
   });
+
+  it("falls through when the active venue no longer exists in the current venue set", () => {
+    // Reproduces the demo-mode transition bug: activeVenue still names the
+    // pre-transition real venue (e.g. "alpaca-live"), but the engine
+    // restarted into demo mode and now only runs "sim-paper" — the stale
+    // activeVenue must not win the || chain over a venue that actually exists.
+    const lg = new LinkGroups(new BroadcastChannelBus(), () => {});
+    expect(resolveVenue(null, lg, "alpaca-live", status("sim-paper"))).toBe("sim-paper");
+  });
+
+  it("falls through when the group's focused venue no longer exists either", () => {
+    const lg = new LinkGroups(new BroadcastChannelBus(), () => {});
+    lg.focusVenue("green", "tradezero");
+    expect(resolveVenue("green", lg, "alpaca-live", status("sim-paper"))).toBe("sim-paper");
+  });
+
+  it("does not resolve to an empty active venue when status is not loaded yet", () => {
+    const lg = new LinkGroups(new BroadcastChannelBus(), () => {});
+    expect(resolveVenue(null, lg, "alpaca-live", null)).toBe("alpaca-live");
+  });
 });

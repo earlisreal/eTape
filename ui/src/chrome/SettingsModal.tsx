@@ -11,6 +11,7 @@ import type { Workspace } from "./workspace";
 import type { ConnState } from "../wire/WsClient";
 import type { HealthStore } from "../data/HealthStore";
 import type { ExecStore } from "../data/ExecStore";
+import type { SessionStore } from "../data/SessionStore";
 
 export type SettingsSection = "general" | "orders" | "venues";
 const NAV: { id: SettingsSection; label: string }[] = [
@@ -19,7 +20,7 @@ const NAV: { id: SettingsSection; label: string }[] = [
   { id: "venues", label: "Venues & creds" },
 ];
 
-export function SettingsModal({ open, section, onSection, onClose, commands, getWorkspace, onImportWorkspace, toast, engineState, health, exec }:
+export function SettingsModal({ open, section, onSection, onClose, commands, getWorkspace, onImportWorkspace, toast, engineState, health, exec, session }:
   {
     open: boolean; section: SettingsSection; onSection: (s: SettingsSection) => void; onClose: () => void;
     commands: { sendCommand(name: string, args: unknown): Promise<AckMsg> };
@@ -38,6 +39,10 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
     // for the same reason as engineState above.
     health?: HealthStore | undefined;
     exec?: ExecStore | undefined;
+    // Threaded to VenuesSection so it can suppress the restart banner while
+    // in demo mode (see VenuesSection's own doc comment). Optional for the
+    // same reason as health/exec above.
+    session?: SessionStore | undefined;
   }): JSX.Element | null {
   const { palette } = useTheme();
   const oc = useOrderConfig();
@@ -79,7 +84,7 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
               </div>
             </>
           )}
-          {section === "venues" && <VenuesSection commands={commands} engineState={engineState} health={health} exec={exec} />}
+          {section === "venues" && <VenuesSection commands={commands} engineState={engineState} health={health} exec={exec} session={session} />}
         </section>
       </div>
     </div>
