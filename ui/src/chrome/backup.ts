@@ -93,18 +93,38 @@ export function collectPanelIds(layout: unknown): Set<string> {
   return ids;
 }
 
+// A grid's root node is well-formed exactly when it matches one of the two
+// shapes `collectPanelIds`'s own walk understands: a leaf with an array
+// `data.views`, or a branch with an array `data` of child nodes. Anything
+// else (missing, non-object, wrong `type`, or the right `type` with the
+// wrong `data` shape) is malformed. `reconcileToGrid` must treat malformed
+// the same as "no grid at all" — `collectPanelIds` returns an empty id set
+// for malformed input too (by design, so it never throws), and that empty
+// set is indistinguishable from a well-formed grid that legitimately places
+// zero panels. Checking the root's own shape (rather than trusting an empty
+// result) is what tells the two apart.
+function isWellFormedGridRoot(node: unknown): boolean {
+  if (!node || typeof node !== "object") return false;
+  const n = node as { type?: string; data?: unknown };
+  if (n.type === "leaf") return Array.isArray((n.data as { views?: unknown } | null)?.views);
+  if (n.type === "branch") return Array.isArray(n.data);
+  return false;
+}
+
 // Pin `base`'s panel list to exactly what `layout`'s grid actually displays — the
 // single reconciliation point used by both export (against the LIVE dockview grid)
 // and import (against the FILE's grid), so a panel with no grid placement ("ghost")
-// never survives either path. No-op if `layout` isn't a real grid (nothing to
-// reconcile against; don't destroy `base.panels` on an absent/malformed layout).
+// never survives either path. No-op if `layout.grid.root` isn't a well-formed node
+// (see `isWellFormedGridRoot`) — nothing valid to reconcile against, so don't
+// destroy `base.panels` on an absent/malformed layout. Deliberately does NOT treat
+// an empty collected-id set as proof of malformation: a well-formed grid that
+// legitimately places zero panels (e.g. an exported empty workspace) must still
+// filter `base.panels` down to `[]`, same as any other real reconciliation result.
 export function reconcileToGrid(base: Workspace, layout: unknown): Workspace {
   if (!isPresentLayout(layout as SettingsExport["layout"])) return base;
-  // Only reconcile if there's actually a grid — without one, there's nothing
-  // to reconcile against, so return base unchanged.
-  const hasGrid = typeof (layout as Record<string, unknown>).grid === "object"
-    && (layout as Record<string, unknown>).grid !== null;
-  if (!hasGrid) return base;
+  const grid = (layout as Record<string, unknown>).grid;
+  const root = typeof grid === "object" && grid !== null ? (grid as { root?: unknown }).root : undefined;
+  if (!isWellFormedGridRoot(root)) return base;
   const ids = collectPanelIds(layout);
   return { ...base, layout, panels: base.panels.filter((p) => ids.has(p.id)) };
 }

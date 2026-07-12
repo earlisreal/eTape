@@ -406,6 +406,70 @@ describe("backup: reconcileToGrid", () => {
     expect(result).toBe(base);
     expect(result.panels).toBe(base.panels);
   });
+
+  it("returns base unchanged when grid.root is not an object", () => {
+    const base: Workspace = {
+      name: "test",
+      panels: [
+        { id: "p1", panelId: "chart", group: "red", settings: {} },
+        { id: "p2", panelId: "tape", group: null, settings: {} },
+      ],
+      layout: { grid: { root: "garbage" } },
+    };
+
+    const result = reconcileToGrid(base, { grid: { root: "garbage" } });
+
+    expect(result).toBe(base);
+    expect(result.panels).toBe(base.panels);
+  });
+
+  it("returns base unchanged when grid has no root key at all", () => {
+    const base: Workspace = {
+      name: "test",
+      panels: [
+        { id: "p1", panelId: "chart", group: "red", settings: {} },
+        { id: "p2", panelId: "tape", group: null, settings: {} },
+      ],
+      layout: { grid: {} },
+    };
+
+    const result = reconcileToGrid(base, { grid: {} });
+
+    expect(result).toBe(base);
+    expect(result.panels).toBe(base.panels);
+  });
+
+  it("returns base unchanged when grid.root has a branch type but malformed data", () => {
+    const base: Workspace = {
+      name: "test",
+      panels: [
+        { id: "p1", panelId: "chart", group: "red", settings: {} },
+        { id: "p2", panelId: "tape", group: null, settings: {} },
+      ],
+      layout: { grid: { root: { type: "branch", data: null } } },
+    };
+
+    const result = reconcileToGrid(base, { grid: { root: { type: "branch", data: null } } });
+
+    expect(result).toBe(base);
+    expect(result.panels).toBe(base.panels);
+  });
+
+  it("filters panels to empty array for a well-formed grid that legitimately places zero panels", () => {
+    const base: Workspace = {
+      name: "test",
+      panels: [
+        { id: "p1", panelId: "chart", group: "red", settings: {} },
+        { id: "p2", panelId: "tape", group: null, settings: {} },
+      ],
+      layout: { grid: { root: { type: "leaf", data: { views: [] } } } },
+    };
+
+    const result = reconcileToGrid(base, { grid: { root: { type: "leaf", data: { views: [] } } } });
+
+    expect(result).not.toBe(base);
+    expect(result.panels).toEqual([]);
+  });
 });
 
 describe("backup: prepareImportedWorkspace with reconciliation", () => {
