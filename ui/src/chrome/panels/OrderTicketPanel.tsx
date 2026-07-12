@@ -168,10 +168,14 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
       {/* Strip 1 — header blotter line: bid/ask (symbol now lives in PanelFrame's
           own ledger-header title bar — symbolBearing: true in registry.tsx). */}
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-        <span className="mono" style={{ fontSize: 12 }}>
-          {priceSpan("bid", quote?.bid, palette.up)}
-          <span style={{ color: palette.textMuted }}>/</span>
-          {priceSpan("ask", quote?.ask, palette.down)}
+        <span style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
+          <span className="col-head">Bid</span>
+          <span className="mono" style={{ fontSize: 12 }}>{priceSpan("bid", quote?.bid, palette.up)}</span>
+        </span>
+        <span style={{ color: palette.textMuted }}>/</span>
+        <span style={{ display: "flex", alignItems: "baseline", gap: 3 }}>
+          <span className="col-head">Ask</span>
+          <span className="mono" style={{ fontSize: 12 }}>{priceSpan("ask", quote?.ask, palette.down)}</span>
         </span>
       </div>
       {/* Strip 2 — type · price · stop */}
