@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent, act, cleanup, within } from "@testing-library/react";
 import { AppShell } from "./AppShell";
+import { collectPanelIds } from "./backup";
 import { WorkspaceStore, type Workspace } from "./workspace";
 import { makeStores } from "../data/registry";
 import { LinkGroups, BroadcastChannelBus } from "./linkGroups";
@@ -11,6 +12,7 @@ import { browserRaf } from "../render/surface";
 import { ThemeProvider } from "./ThemeProvider";
 import { ToastProvider } from "./Toast";
 import { OrderConfigProvider } from "./exec/useOrderConfig";
+import { SoundConfigProvider } from "../sound/SoundConfigProvider";
 import type { ExecStatus, VenueStatus } from "../wire/contract";
 
 // dockview's DockviewComponent constructor watches its container via a real
@@ -48,9 +50,11 @@ function mount(seed: Workspace, opts?: { onTransitionApplied?: () => void }) {
   const workspaceStore = new WorkspaceStore(client, 1);
   render(
     <ThemeProvider><ToastProvider><OrderConfigProvider commands={commands}>
-      <AppShell workspaceName="default" stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
-        linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} engineState="open"
-        {...(opts?.onTransitionApplied ? { onTransitionApplied: opts.onTransitionApplied } : {})} />
+      <SoundConfigProvider commands={commands}>
+        <AppShell workspaceName="default" stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
+          linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} engineState="open"
+          {...(opts?.onTransitionApplied ? { onTransitionApplied: opts.onTransitionApplied } : {})} />
+      </SoundConfigProvider>
     </OrderConfigProvider></ToastProvider></ThemeProvider>,
   );
   return { saved, workspaceStore, linkGroups, stores, commands };
@@ -699,5 +703,68 @@ describe("AppShell demo mode-edge orchestration (Task 13)", () => {
     publishSessionMode(stores, "live"); // demo->live: revert restores the empty snapshot verbatim
     await waitFor(() => expect(saved[saved.length - 1].panels).toHaveLength(0));
     expect(screen.getByText("Empty workspace")).toBeTruthy();
+  });
+});
+
+describe("AppShell layout export (Task 2: ghost-panel fix)", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  // Regression for the ghost-panel export bug: `getWorkspace()` used to hand
+  // SettingsModal the stale React `ws`/`wsRef` snapshot, which onDidLayoutChange
+  // never updates — so a panel added since the last sync point landed in
+  // `ws.panels` but never in `ws.layout`'s grid, and got exported as a "ghost"
+  // (present as config, absent from the grid, invisible on re-import). Adding a
+  // panel via the UI and then exporting proves the fix reads the LIVE dockview
+  // grid (`apiRef.current.toJSON()`) instead.
+  it("includes a panel added after the last sync point, both as config AND in the grid", async () => {
+    const seed: Workspace = { name: "default", panels: [{ id: "orders-1", panelId: "open-orders", group: null, settings: {} }], layout: null };
+    mount(seed);
+
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    await waitFor(() => expect(screen.getAllByText("Symbol")[0]).toBeTruthy());
+
+    // Add a Watchlist panel via the "+ Add panel" popover, same pattern as the
+    // onConfigChange describe block above — this is the panel that must not
+    // end up ghosted in the export.
+    fireEvent.click(screen.getByText("+ Add panel"));
+    fireEvent.click(screen.getByText("Watchlist"));
+    // Wait for the Watchlist panel's own render marker: proves both that
+    // ws.panels includes it (config) AND that dockview's live grid has
+    // actually placed it (pendingRef's deferred api.addPanel call flushed).
+    await waitFor(() => expect(screen.getByPlaceholderText(/add symbol/i)).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: /settings/i }));
+
+    const createObjectURL = vi.fn<[Blob], string>(() => "blob:mock");
+    vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL: vi.fn() });
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+
+    fireEvent.click(screen.getByTestId("download-json"));
+
+    const blob = createObjectURL.mock.calls[0][0];
+    const text = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsText(blob);
+    });
+    const parsed = JSON.parse(text);
+
+    const watchlistPanel = (parsed.layout.panels as { id: string; panelId: string }[])
+      .find((p) => p.panelId === "watchlist");
+    expect(watchlistPanel).toBeTruthy();
+
+    // Internal self-consistency: every id the exported grid actually places
+    // must be present among the exported panels' ids (no ghosts).
+    const gridIds = collectPanelIds(parsed.layout.layout);
+    const panelIds = new Set((parsed.layout.panels as { id: string }[]).map((p) => p.id));
+    for (const id of gridIds) expect(panelIds.has(id)).toBe(true);
+
+    // The concrete regression check: the freshly-added watchlist panel's id
+    // must itself be in the grid, not just in `panels`.
+    expect(gridIds.has(watchlistPanel!.id)).toBe(true);
   });
 });

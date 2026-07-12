@@ -20,7 +20,7 @@ import { DemoBanner } from "./DemoBanner";
 import { AlpacaBackfillBanner } from "./AlpacaBackfillBanner";
 import { EmptyState } from "./EmptyState";
 import { Catalog } from "./Catalog";
-import { parseImport, prepareImportedWorkspace, isPresentLayout } from "./backup";
+import { parseImport, prepareImportedWorkspace, isPresentLayout, reconcileToGrid } from "./backup";
 import { SettingsModal, type SettingsSection } from "./SettingsModal";
 import { PracticeLauncherModal } from "./PracticeLauncherModal";
 import { VenueSetupPrompt } from "./VenueSetupPrompt";
@@ -744,7 +744,11 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           onSection={(s) => setSettings((v) => ({ ...v, section: s }))}
           onClose={() => setSettings((v) => ({ ...v, open: false }))}
           commands={commands}
-          getWorkspace={() => wsRef.current ?? ws}
+          getWorkspace={() => {
+            const base = wsRef.current ?? ws;
+            const api = apiRef.current;
+            return api && base.panels.length > 0 ? reconcileToGrid(base, api.toJSON()) : base;
+          }}
           onImportWorkspace={onImportWorkspace}
           toast={toast}
           engineState={engineState}
