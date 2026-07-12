@@ -101,6 +101,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
   const { config: orderConfig } = useOrderConfig();
   const extBufferPct = orderConfig.extHoursMarketBufferPct ?? 1;
+  const hasDeck = orderConfig.templates.some((t) => t.deck);
 
   const [type, setType] = useState<OrderType>("LIMIT");
   const [tif, setTif] = useState<TIF>("DAY");
@@ -276,11 +277,15 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
           <button key={s} type="button" data-testid={`side-${s}`} className={sideTone(s)} onClick={() => submitManual(s)}>{s}</button>
         ))}
       </div>
-      {/* Strip 5 — hotkey deck: user-configured preset buttons (Settings › Orders & hotkeys) */}
-      <div style={{ borderTop: `1px solid ${palette.border}`, paddingTop: 6 }}>
-        <HotkeyDeck venue={venue} symbol={symbol} quote={quote} buyingPower={buyingPower} positionQty={positionQty}
-          oc={oc} toast={toast} onOpenSettings={() => openSettings?.openOrderSettings()} />
-      </div>
+      {/* Strip 5 — hotkey deck: user-configured preset buttons (Settings › Orders & hotkeys).
+          Hidden entirely (no wrapper, no separator) when no presets are deck-enabled —
+          only the configured-buttons view renders under Strip 4. */}
+      {hasDeck && (
+        <div style={{ borderTop: `1px solid ${palette.border}`, paddingTop: 6 }}>
+          <HotkeyDeck venue={venue} symbol={symbol} quote={quote} buyingPower={buyingPower} positionQty={positionQty}
+            oc={oc} toast={toast} />
+        </div>
+      )}
     </div>
   );
 }

@@ -353,11 +353,11 @@ describe("OrderTicketPanel", () => {
   // venue/symbol/quote/positionQty derivation (lines ~56-69) flowing into
   // HotkeyDeck as props, and a click reaching the real OrderCommands.submit
   // → commands.sendCommand("SubmitOrder", ...) chain, not a mock.
-  it("shows the deck's empty-state hint by default (no deck templates configured)", () => {
+  it("renders no deck empty-state prompt by default (no deck templates configured)", () => {
     const { props, stores } = mkProps();
     act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
     wrap(props);
-    expect(screen.getByTestId("deck-empty")).toBeTruthy();
+    expect(screen.queryByTestId("deck-empty")).toBeNull();
   });
   it("renders a configured deck button under Strip 4 and fires it through the panel's own derived venue/quote", async () => {
     const deckConfig: OrderConfig = {

@@ -39,19 +39,18 @@ async function setup(templates: ActionTemplate[]) {
   };
   const oc = makeOc();
   const toast = makeToast();
-  const onOpenSettings = vi.fn();
   let container!: HTMLElement;
   await act(async () => {
     const r = render(
       <ThemeProvider><OrderConfigProvider commands={commands}>
         <HotkeyDeck venue="alpaca-paper" symbol="US.AAPL" quote={QUOTE} buyingPower={100_000} positionQty={0}
-          oc={oc} toast={toast} onOpenSettings={onOpenSettings} />
+          oc={oc} toast={toast} />
       </OrderConfigProvider></ThemeProvider>,
     );
     container = r.container;
     await Promise.resolve();
   });
-  return { oc, toast, onOpenSettings, container };
+  return { oc, toast, container };
 }
 
 const place = (over: Partial<PlaceOrderTemplate> = {}): PlaceOrderTemplate => ({
@@ -76,12 +75,10 @@ describe("HotkeyDeck — rendering", () => {
     expect(screen.queryByTestId("deck-sell-hk")).toBeNull();
   });
 
-  it("empty state shows the hint and clicking it calls onOpenSettings", async () => {
-    const { onOpenSettings } = await setup([]);
-    const hint = screen.getByTestId("deck-empty");
-    expect(hint.textContent).toContain("Add preset buttons");
-    fireEvent.click(hint);
-    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  it("renders nothing when no presets are configured (empty-state prompt removed)", async () => {
+    const { container } = await setup([]);
+    expect(screen.queryByTestId("deck-empty")).toBeNull();
+    expect(container.firstChild).toBeNull();
   });
 
   it("renders a Keycap badge only when the template's hotkey is set", async () => {
