@@ -87,6 +87,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	demoSpeed := flag.Float64("demo-speed", 1, "replay speed when -demo is set (0 = as fast as possible)")
 	noOpen := flag.Bool("no-open", false, "do not auto-open the default browser to the UI")
 	logPath := flag.String("log", "", "also write logs to this file")
+	vacuum := flag.Bool("vacuum", false, "run one-shot journal maintenance (prune+seal+vacuum) then exit; refuses if an engine is running")
 	flag.Parse()
 
 	// ETAPE_NO_OPEN suppresses auto-open, same as -no-open, so agent/CI boots
@@ -231,6 +232,10 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// crash, so there is no stale-lock cleanup to do.
 	releaseLock, err := singleinstance.Acquire(dbPath + ".lock")
 	if errors.Is(err, singleinstance.ErrAlreadyRunning) {
+		if *vacuum {
+			log.Error("etape -vacuum: engine is running; stop it before running maintenance")
+			return 1, false, nil // must NOT open the browser to the running instance
+		}
 		log.Info("eTape is already running; opening it instead", "addr", cfg.UIHub.Addr())
 		if !*noOpen {
 			// Best-effort: reaches the already-running instance's UI. If it
@@ -246,6 +251,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}
 	defer releaseLock()
 	log.Info("single-instance lock acquired", "lock", dbPath+".lock")
+
+	if *vacuum {
+		code := runVacuumMode(dbPath, cfg, log)
+		return code, false, nil // deferred releaseLock() runs on return
+	}
 
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
