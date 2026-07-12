@@ -109,6 +109,11 @@ type Gate struct {
 	Venue  map[string]GateVenue `toml:"venue"`
 }
 
+// SeedConfig is the [seed] section: one-shot auto-configuration markers.
+type SeedConfig struct {
+	MoomooAttempted bool `toml:"moomoo_attempted"`
+}
+
 // UIHub is the [uihub] section: the WS/HTTP server the UI connects to.
 type UIHub struct {
 	Host          string  `toml:"host"`
@@ -156,13 +161,6 @@ type Health struct {
 	ProbeMs int  `toml:"probe_ms"` // probe + sys.health emit interval
 }
 
-// SeedConfig records one-shot auto-configuration markers. MoomooAttempted is
-// set after the engine's first definitive moomoo auto-config attempt so a
-// user's later manual removal of the venue sticks (no re-seeding).
-type SeedConfig struct {
-	MoomooAttempted bool `toml:"moomoo_attempted"`
-}
-
 // Backfill is the [backfill] section: deep-history warm-start + gap-fill at boot.
 type Backfill struct {
 	Enabled      bool           `toml:"enabled"`
@@ -197,19 +195,19 @@ type BackfillYahoo struct {
 
 // Config is the engine's bootstrap configuration.
 type Config struct {
-	OpenD     OpenD     `toml:"opend"`
-	Feed      Feed      `toml:"feed"`
-	MD        MD        `toml:"md"`
-	Store     Store     `toml:"store"`
-	Venues    []Venue   `toml:"venue"`
-	Gate      Gate      `toml:"gate"`
+	OpenD     OpenD      `toml:"opend"`
+	Feed      Feed       `toml:"feed"`
+	MD        MD         `toml:"md"`
+	Store     Store      `toml:"store"`
+	Venues    []Venue    `toml:"venue"`
+	Gate      Gate       `toml:"gate"`
 	Seed      SeedConfig `toml:"seed"`
-	UIHub     UIHub     `toml:"uihub"`
-	Scan      Scan      `toml:"scan"`
-	News      News      `toml:"news"`
-	StockInfo StockInfo `toml:"stockinfo"`
-	Health    Health    `toml:"health"`
-	Backfill  Backfill  `toml:"backfill"`
+	UIHub     UIHub      `toml:"uihub"`
+	Scan      Scan       `toml:"scan"`
+	News      News       `toml:"news"`
+	StockInfo StockInfo  `toml:"stockinfo"`
+	Health    Health     `toml:"health"`
+	Backfill  Backfill   `toml:"backfill"`
 }
 
 // Default returns the built-in defaults used when a field or the whole file is absent.
