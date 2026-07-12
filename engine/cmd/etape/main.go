@@ -399,6 +399,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			go func() { _ = sf.Run(ctx) }()
 			pipeWG.Add(1)
 			go pipe(ctx, &pipeWG, sf.Events(), core, st) // journaling ON into demo.db
+			go forwardDailyBars(ctx, gen, core, st, dailyBarPollInterval)
 			feedForHub, pollReq, mmProbe = sf, req, req
 			log.Info("engine up (demo synth feed)", "seed", seed, "symbols", gen.Symbols())
 		} else {
@@ -815,6 +816,57 @@ func pipe(ctx context.Context, wg *sync.WaitGroup, in <-chan feed.Event, core *m
 				journal.RecordEvent(ev, sys.Now().UnixMilli())
 			}
 			core.Feed(ev)
+		}
+	}
+}
+
+// dailyBarPollInterval is how often forwardDailyBars checks the demo
+// generator for a newly-closed day. Daily bars only appear once per symbol
+// per ET-midnight rollover, so this has no latency requirement -- a coarse
+// poll is deliberate, not a shortcut.
+const dailyBarPollInterval = time.Minute
+
+// dailyBarSource is satisfied by *synth.Generator. A live feed has no
+// equivalent: OpenD's official daily bars arrive via a separate periodic
+// K_DAY re-fetch through the backfill orchestrator, not through this poll.
+type dailyBarSource interface {
+	DrainDailyBars() []feed.Bar
+}
+
+// dailyBarSeeder is satisfied by *md.Core.
+type dailyBarSeeder interface {
+	SeedDaily(symbol string, bars []feed.Bar)
+}
+
+// dailyBarArchiver is satisfied by *store.Store.
+type dailyBarArchiver interface {
+	ArchiveDaily(b feed.Bar)
+}
+
+// forwardDailyBars persists demo-only daily bars that the synth generator
+// closes out at each ET-midnight rollover. Without this, a demo session
+// left running past midnight would keep the just-completed day only in the
+// generator's own in-memory state: md.Core's own daily aggregation from 1m
+// bars never finalizes on its own (deriveDaily's locally-aggregated bar
+// stays InProgress forever absent an "official" bar to replace it, per
+// internal/md/bars.go), and there is no backfill chain in demo mode to
+// supply one the way a live K_DAY re-fetch would. Polling gen and pushing
+// each newly-closed day through the same two calls a live boot's daily
+// backfill uses (core.SeedDaily to finalize md.Core's own aggregate,
+// archive.ArchiveDaily to persist it) closes that gap with no change to the
+// live (non-demo) boot path.
+func forwardDailyBars(ctx context.Context, gen dailyBarSource, core dailyBarSeeder, archive dailyBarArchiver, pollEvery time.Duration) {
+	t := time.NewTicker(pollEvery)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			for _, b := range gen.DrainDailyBars() {
+				archive.ArchiveDaily(b)
+				core.SeedDaily(b.Symbol, []feed.Bar{b})
+			}
 		}
 	}
 }

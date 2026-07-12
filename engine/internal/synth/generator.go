@@ -83,19 +83,29 @@ type symRuntime struct {
 	pendingTicks []feed.Tick // since last Drain; cleared by Drain
 	pendingBars  []feed.Bar  // newly-closed bars since last Drain; cleared by Drain
 	lastBarMs    int64       // last time a Bars1mEvent was emitted for this symbol
+
+	// pendingDailies holds daily bars newly archived by rolloverSymbol since
+	// the last DrainDailyBars call. Deliberately separate from the
+	// feed.Event stream Drain serves (TicksEvent/QuoteEvent/BookEvent/
+	// Bars1mEvent): a live feed's official daily bar arrives out-of-band, via
+	// md.Core.SeedDaily + the store's ArchiveDaily, not through that event
+	// union - DrainDailyBars mirrors that same out-of-band path for the
+	// generator's own rollover-produced days rather than growing the event
+	// union (and every exhaustive switch over it) for one demo-only case.
+	pendingDailies []feed.Bar
 }
 
 // Generator is the single stateful simulator for the whole synthetic
 // universe: one seeded *rand.Rand feeds every symbol's price walk, book, and
-// tick stream. clk is only consulted once, by New, to seed lastStepMs/curDay
-// from "now" - StepTo and Drain both take their logical time as an explicit
-// nowMs argument from the caller (typically driven by that same clock, e.g.
-// Task 7's Feed.Run loop) rather than reading g.clk themselves, so a single
-// step is a pure function of (rng state, nowMs) and stays deterministic
-// under clock.Fake. All access goes through mu.
+// tick stream. New's clk argument is consulted only once, to seed
+// lastStepMs/curDay from "now" - StepTo and Drain both take their logical
+// time as an explicit nowMs argument from the caller (typically driven by
+// that same clock, e.g. Task 7's Feed.Run loop) rather than the Generator
+// holding a clock reference of its own, so a single step is a pure function
+// of (rng state, nowMs) and stays deterministic under clock.Fake. All access
+// goes through mu.
 type Generator struct {
 	rng *rand.Rand
-	clk clock.Clock
 	mu  sync.Mutex
 
 	syms  map[string]*symRuntime
@@ -117,7 +127,6 @@ func New(seed int64, clk clock.Clock) *Generator {
 
 	g := &Generator{
 		rng:        rng,
-		clk:        clk,
 		syms:       make(map[string]*symRuntime, len(specs)),
 		order:      make([]string, 0, len(specs)),
 		lastStepMs: nowMs,
@@ -243,7 +252,7 @@ func trimTicksBefore(ticks []feed.Tick, cutoff int64) []feed.Tick {
 func (g *Generator) rolloverSymbol(rt *symRuntime, fromMs, nowMs int64) {
 	switch {
 	case rt.sess.hasOpen:
-		rt.dailies = append(rt.dailies, feed.Bar{
+		closed := feed.Bar{
 			Symbol:   rt.spec.Code,
 			BucketMs: session.DayMs(fromMs),
 			O:        rt.sess.Open,
@@ -252,7 +261,9 @@ func (g *Generator) rolloverSymbol(rt *symRuntime, fromMs, nowMs int64) {
 			C:        rt.sess.Last,
 			Volume:   rt.sess.Vol,
 			Turnover: rt.sess.Turnover,
-		})
+		}
+		rt.dailies = append(rt.dailies, closed)
+		rt.pendingDailies = append(rt.pendingDailies, closed)
 		rt.prevClose = rt.sess.Last
 	case len(rt.dailies) > 0:
 		rt.prevClose = rt.dailies[len(rt.dailies)-1].C
@@ -380,6 +391,28 @@ func (g *Generator) Drain(nowMs int64) []feed.Event {
 		}
 	}
 	return events
+}
+
+// DrainDailyBars returns every daily bar newly closed by an ET-midnight
+// rollover since the last call, across all symbols, then clears the
+// pending buffer. Unlike Drain, this is not on a throttle - daily bars are
+// rare (once per symbol per rollover) and a caller (main.go's demo boot
+// wiring) is expected to poll this on a coarse timer and persist whatever
+// comes back via md.Core.SeedDaily + the store's ArchiveDaily, the same way
+// a live feed's periodic official K_DAY re-fetch would.
+func (g *Generator) DrainDailyBars() []feed.Bar {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	var out []feed.Bar
+	for _, code := range g.order {
+		rt := g.syms[code]
+		if len(rt.pendingDailies) > 0 {
+			out = append(out, rt.pendingDailies...)
+			rt.pendingDailies = nil
+		}
+	}
+	return out
 }
 
 // Symbols returns the universe's symbol codes in stable sorted order.

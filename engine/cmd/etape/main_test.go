@@ -130,6 +130,98 @@ func TestMarkBridgeForwardsBooksToSinks(t *testing.T) {
 	}
 }
 
+// fakeDailyBarSource hands out each entry in bars, oldest first, on
+// successive DrainDailyBars calls (an empty/absent entry mimics a poll that
+// found nothing new).
+type fakeDailyBarSource struct {
+	mu   sync.Mutex
+	bars [][]feed.Bar
+}
+
+func (f *fakeDailyBarSource) DrainDailyBars() []feed.Bar {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.bars) == 0 {
+		return nil
+	}
+	next := f.bars[0]
+	f.bars = f.bars[1:]
+	return next
+}
+
+// recordingDailyBarSink implements both dailyBarSeeder and dailyBarArchiver
+// so a single fake stands in for the *md.Core/*store.Store pair
+// forwardDailyBars writes to.
+type recordingDailyBarSink struct {
+	mu       sync.Mutex
+	archived []feed.Bar
+	seeded   map[string][]feed.Bar
+}
+
+func (r *recordingDailyBarSink) ArchiveDaily(b feed.Bar) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.archived = append(r.archived, b)
+}
+
+func (r *recordingDailyBarSink) SeedDaily(symbol string, bars []feed.Bar) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.seeded == nil {
+		r.seeded = map[string][]feed.Bar{}
+	}
+	r.seeded[symbol] = append(r.seeded[symbol], bars...)
+}
+
+// TestForwardDailyBars_PersistsNewlyClosedDaysAndStopsOnCancel drives
+// forwardDailyBars with a fake generator that has exactly one daily bar
+// ready on its first poll, and checks both sinks receive it, then that the
+// loop actually exits once ctx is canceled (it must not leak a goroutine
+// spinning on the ticker forever).
+func TestForwardDailyBars_PersistsNewlyClosedDaysAndStopsOnCancel(t *testing.T) {
+	bar := feed.Bar{Symbol: "US.TST", BucketMs: 1_700_000_000_000, O: 10, H: 11, L: 9, C: 10.5, Volume: 1000, Turnover: 10500}
+	src := &fakeDailyBarSource{bars: [][]feed.Bar{{bar}}}
+	sink := &recordingDailyBarSink{}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		forwardDailyBars(ctx, src, sink, sink, 10*time.Millisecond)
+		close(done)
+	}()
+
+	deadline := time.After(2 * time.Second)
+	for {
+		sink.mu.Lock()
+		got := len(sink.archived)
+		sink.mu.Unlock()
+		if got >= 1 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("forwardDailyBars never archived the bar")
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+
+	sink.mu.Lock()
+	if len(sink.archived) != 1 || sink.archived[0] != bar {
+		t.Fatalf("archived = %+v, want [%+v]", sink.archived, bar)
+	}
+	if len(sink.seeded["US.TST"]) != 1 || sink.seeded["US.TST"][0] != bar {
+		t.Fatalf("seeded[US.TST] = %+v, want [%+v]", sink.seeded["US.TST"], bar)
+	}
+	sink.mu.Unlock()
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("forwardDailyBars did not stop after ctx cancel")
+	}
+}
+
 // A venue configured with Broker: "sim" runs a real sim.Broker in live mode
 // too (a practice venue against live marks), not only in replay. simSinksOf
 // must pick it up either way — there is no live/replay distinction to make;

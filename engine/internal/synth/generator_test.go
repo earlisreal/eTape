@@ -349,6 +349,50 @@ func TestGenerator_RolloverArchivesDailyBar(t *testing.T) {
 	}
 }
 
+// TestGenerator_DrainDailyBarsReturnsAndClearsNewlyClosedDays crosses the
+// same ET-midnight boundary as TestGenerator_RolloverArchivesDailyBar and
+// checks DrainDailyBars surfaces exactly the bars rolloverSymbol appended to
+// dailies (same fields, same count), then returns nothing on a second call
+// until the next rollover.
+func TestGenerator_DrainDailyBarsReturnsAndClearsNewlyClosedDays(t *testing.T) {
+	start := time.Date(2023, 11, 13, 23, 59, 0, 0, time.FixedZone("EST", -5*3600)).UnixMilli()
+	g := New(11, clock.NewFake(timeMs(start)))
+
+	now := start
+	for i := 0; i < 400; i++ { // 400 * 200ms = 80s, enough to cross midnight
+		now += 200
+		g.StepTo(now)
+		g.Drain(now)
+	}
+	if g.curDay == etDay(start) {
+		t.Fatal("expected ET-midnight rollover to have happened")
+	}
+
+	closed := g.DrainDailyBars()
+	if len(closed) != len(g.Symbols()) {
+		t.Fatalf("DrainDailyBars returned %d bars, want %d (one per symbol)", len(closed), len(g.Symbols()))
+	}
+	bySymbol := map[string]feed.Bar{}
+	for _, b := range closed {
+		bySymbol[b.Symbol] = b
+	}
+	for _, code := range g.Symbols() {
+		want := g.syms[code].dailies[len(g.syms[code].dailies)-1]
+		got, ok := bySymbol[code]
+		if !ok {
+			t.Errorf("%s: missing from DrainDailyBars", code)
+			continue
+		}
+		if got != want {
+			t.Errorf("%s: DrainDailyBars bar %+v != rt.dailies' last entry %+v", code, got, want)
+		}
+	}
+
+	if again := g.DrainDailyBars(); len(again) != 0 {
+		t.Errorf("second DrainDailyBars call returned %d bars, want 0 (already drained)", len(again))
+	}
+}
+
 // TestGenerator_ConcurrentAccessNoRace drives StepTo/Drain from one writer
 // goroutine while several reader goroutines hammer every accessor
 // concurrently, to exercise mu's concurrent paths under `go test -race`.
