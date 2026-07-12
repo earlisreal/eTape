@@ -160,15 +160,26 @@ describe("ChartController", () => {
     expect(candle.calls.filter((c) => c === "setData")).toHaveLength(1);
   });
 
-  it("does not force-scroll when the user has scrolled back", () => {
+  it("resets to the default resting position on a fresh backfill, but not on a tail-only update", () => {
     const bars = [bar("2026-07-06T13:30:00Z", 10, true)];
     const { facade, ctrl } = make(barReaderOf(bars));
-    ctrl.sync();
-    bars[0] = bar("2026-07-06T13:30:00Z", 10.5, true);
-    ctrl.sync();
-    expect(facade.scrolls).toBe(0);
-    ctrl.jumpToLive();
+    ctrl.sync(); // fresh backfill -> scrolls once to latest bar + RIGHT_OFFSET_BARS padding
     expect(facade.scrolls).toBe(1);
+    bars[0] = bar("2026-07-06T13:30:00Z", 10.5, true);
+    ctrl.sync(); // tail-only revision -> must not force another scroll
+    expect(facade.scrolls).toBe(1);
+    ctrl.jumpToLive();
+    expect(facade.scrolls).toBe(2);
+  });
+
+  it("setSymbol resets the horizontal scroll to the default resting position, not whatever the previous symbol was left at", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(); // initial backfill already scrolls to the default resting position
+    const scrollsAfterInitial = facade.scrolls;
+    ctrl.setSymbol("US.NVDA");
+    ctrl.sync(); // reload backfill for the new symbol
+    expect(facade.scrolls).toBe(scrollsAfterInitial + 1);
   });
 
   it("resetZoom resets the time scale to default spacing + the latest bar, and re-enables price autoScale", () => {
