@@ -1,8 +1,7 @@
-import { AppearanceSection } from "./AppearanceSection";
+import { GeneralSection } from "./GeneralSection";
 import { OrderSettingsSection } from "./exec/OrderSettingsSection";
 import { VenuesSection } from "./exec/VenuesSection";
-import { SoundsSection } from "../sound/SoundsSection";
-import { BackupSection } from "./BackupSection";
+import { BackupPanel } from "./BackupPanel";
 import { useOrderConfig } from "./exec/useOrderConfig";
 import { useTheme } from "./ThemeProvider";
 import { HoverButton } from "./controls/HoverButton";
@@ -11,13 +10,11 @@ import type { ToastApi } from "./Toast";
 import type { Workspace } from "./workspace";
 import type { ConnState } from "../wire/WsClient";
 
-export type SettingsSection = "appearance" | "orders" | "venues" | "sounds" | "backup";
+export type SettingsSection = "general" | "orders" | "venues";
 const NAV: { id: SettingsSection; label: string }[] = [
-  { id: "appearance", label: "Appearance" },
+  { id: "general", label: "General" },
   { id: "orders", label: "Orders & hotkeys" },
   { id: "venues", label: "Venues & creds" },
-  { id: "sounds", label: "Sounds" },
-  { id: "backup", label: "Import & export" },
 ];
 
 export function SettingsModal({ open, section, onSection, onClose, commands, getWorkspace, onImportWorkspace, toast, engineState }:
@@ -63,11 +60,17 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
           ))}
         </nav>
         <section style={{ padding: 16, overflow: "auto", minHeight: 0, background: palette.bg }}>
-          {section === "appearance" && <AppearanceSection />}
-          {section === "orders" && <OrderSettingsSection config={oc.config} onSave={oc.save} />}
+          {section === "general" && <GeneralSection getWorkspace={getWorkspace} onImportWorkspace={onImportWorkspace} toast={toast} />}
+          {section === "orders" && (
+            <>
+              <OrderSettingsSection config={oc.config} onSave={oc.save} />
+              <div style={{ borderTop: `1px solid ${palette.border}`, marginTop: 14, paddingTop: 14 }}>
+                <div className="col-head serif" style={{ marginBottom: 8 }}>Import & export hotkeys</div>
+                <BackupPanel part="hotkeys" orderConfig={oc.config} onImportOrderConfig={oc.save} toast={toast} />
+              </div>
+            </>
+          )}
           {section === "venues" && <VenuesSection commands={commands} engineState={engineState} />}
-          {section === "sounds" && <SoundsSection />}
-          {section === "backup" && <BackupSection getWorkspace={getWorkspace} onImportWorkspace={onImportWorkspace} orderConfig={oc.config} onImportOrderConfig={oc.save} toast={toast} />}
         </section>
       </div>
     </div>
