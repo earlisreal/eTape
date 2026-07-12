@@ -795,6 +795,50 @@ func TestWatchlistAdd_ProbeRejectionBlocks(t *testing.T) {
 	}
 }
 
+// TestWatchlistAdd_NonUSMarketBlocks covers the final-review fix: the
+// watchlist is US-only end-to-end (watchlist.Normalize only forces a bare
+// symbol to US.<CODE> -- an explicitly-typed HK.700 passes through
+// unnormalized), so WatchlistAdd must reject any non-"US."-prefixed symbol
+// itself rather than deferring to the shared supportedMarket helper (which
+// also accepts HK. for EnsureSymbol/FocusGroup). The reject must happen
+// before the existence probe and before wl.Add, and lowercase input must not
+// slip through Normalize's uppercasing. US-prefixed and bare symbols (which
+// Normalize maps to US.) must still succeed.
+func TestWatchlistAdd_NonUSMarketBlocks(t *testing.T) {
+	for _, sym := range []string{"HK.700", "hk.700"} {
+		cd, _, _ := newCmdWith(t, nil, false)
+		fw := &fakeWL{}
+		cd.wl.Store(&watchlistBox{wl: fw})
+		ack, _ := cd.handle(context.Background(), "WatchlistAdd",
+			mustJSON(t, wsmsg.WatchlistAddArgs{Symbol: sym}), 1, func(wsmsg.AckMsg) {})
+		if ack.Status != "blocked" || ack.Reason != "unsupported market" {
+			t.Fatalf(`WatchlistAdd(%q): want blocked "unsupported market", got %+v`, sym, ack)
+		}
+		if len(fw.adds) != 0 {
+			t.Fatalf("WatchlistAdd(%q): rejected symbol must never reach wl.Add, got %v", sym, fw.adds)
+		}
+	}
+}
+
+// TestWatchlistAdd_USMarketStillAccepted is the happy-path guard for the fix
+// above: a bare symbol (Normalize prefixes it to US.) and an already-
+// US.-prefixed symbol must both still be accepted.
+func TestWatchlistAdd_USMarketStillAccepted(t *testing.T) {
+	for _, sym := range []string{"AAPL", "US.AAPL"} {
+		cd, _, _ := newCmdWith(t, nil, false)
+		fw := &fakeWL{addAdded: true}
+		cd.wl.Store(&watchlistBox{wl: fw})
+		ack, _ := cd.handle(context.Background(), "WatchlistAdd",
+			mustJSON(t, wsmsg.WatchlistAddArgs{Symbol: sym}), 1, func(wsmsg.AckMsg) {})
+		if ack.Status != "accepted" {
+			t.Fatalf("WatchlistAdd(%q): want accepted, got %+v", sym, ack)
+		}
+		if len(fw.adds) != 1 || fw.adds[0] != "US.AAPL" {
+			t.Fatalf("WatchlistAdd(%q): want Add(US.AAPL) called once, got %v", sym, fw.adds)
+		}
+	}
+}
+
 // TestWatchlistAdd_DuplicateAccepted covers List.Add's documented duplicate
 // behavior (added=false, err=nil is a harmless no-op) -- the command must
 // still ack "accepted" and still poke the poller.

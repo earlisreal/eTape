@@ -262,7 +262,7 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked("watchlist not ready"), false
 		}
 		sym := watchlist.Normalize(a.Symbol)
-		if !supportedMarket(sym) {
+		if !strings.HasPrefix(sym, "US.") {
 			return blocked("unsupported market"), false
 		}
 		if reason := cd.probe(ctx, sym); reason != "" {
