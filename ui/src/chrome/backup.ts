@@ -63,8 +63,49 @@ export function parseImport(text: string): { ok: true; data: SettingsExport } | 
 // The imported doc's own `name` is whatever workspace it happened to be
 // exported from — importing must always land under the *current* workspace
 // (so `?workspace=foo` keeps saving as `workspace.foo`), never rename it.
+// Also reconciles the imported workspace against its own grid: if the file's
+// `panels` exceed what's actually placed in `layout`, the extras are dropped,
+// so already-ghosted exports are healed on import.
 export function prepareImportedWorkspace(imported: Workspace, currentName: string): Workspace {
-  return { ...imported, name: currentName };
+  return reconcileToGrid({ ...imported, name: currentName }, imported.layout);
+}
+
+// Collect every panel id referenced by dockview's serialized grid. `layout` is
+// the SerializedDockview object stored in Workspace.layout ({ grid, panels, ... }).
+// Authoritative "what will render" = the grid tree's leaf `data.views` — `layout.panels`
+// (a separate id->metadata map) is NOT checked here; a leaf's views list is the only
+// thing that actually places a panel on screen. Defensive at every step so a
+// hand-edited/truncated file can't throw.
+export function collectPanelIds(layout: unknown): Set<string> {
+  const ids = new Set<string>();
+  const grid = (layout as { grid?: { root?: unknown } } | null)?.grid;
+  const walk = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    const n = node as { type?: string; data?: unknown };
+    if (n.type === "leaf") {
+      const views = (n.data as { views?: unknown })?.views;
+      if (Array.isArray(views)) for (const v of views) if (typeof v === "string") ids.add(v);
+    } else if (n.type === "branch" && Array.isArray(n.data)) {
+      for (const child of n.data) walk(child);
+    }
+  };
+  walk(grid?.root);
+  return ids;
+}
+
+// Pin `base`'s panel list to exactly what `layout`'s grid actually displays — the
+// single reconciliation point used by both export (against the LIVE dockview grid)
+// and import (against the FILE's grid), so a panel with no grid placement ("ghost")
+// never survives either path. No-op if `layout` isn't a real grid (nothing to
+// reconcile against; don't destroy `base.panels` on an absent/malformed layout).
+export function reconcileToGrid(base: Workspace, layout: unknown): Workspace {
+  if (!isPresentLayout(layout as SettingsExport["layout"])) return base;
+  // Only reconcile if there's actually a grid — without one, there's nothing
+  // to reconcile against, so return base unchanged.
+  const hasGrid = (layout as Record<string, unknown>).grid !== undefined;
+  if (!hasGrid) return base;
+  const ids = collectPanelIds(layout);
+  return { ...base, layout, panels: base.panels.filter((p) => ids.has(p.id)) };
 }
 
 // parseImport only validates the top-level envelope (kind/app) — it does NOT

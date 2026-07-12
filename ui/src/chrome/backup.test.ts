@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   SETTINGS_EXPORT_VERSION, buildExport, parseImport,
   prepareImportedWorkspace, prepareImportedOrderConfig, detectHotkeyConflicts, isPresentLayout,
+  collectPanelIds, reconcileToGrid,
 } from "./backup";
 import type { Workspace } from "./workspace";
 import type { ActionTemplate, OrderConfig } from "./exec/actionTemplate";
@@ -10,7 +11,16 @@ function makeWorkspace(name: string): Workspace {
   return {
     name,
     panels: [{ id: "p1", panelId: "chart", group: "red", settings: { symbol: "AAPL" } }],
-    layout: { panels: { p1: {} } },
+    layout: {
+      grid: {
+        root: { type: "leaf", data: { views: ["p1"], activeView: "p1", id: "1" }, size: 500 },
+        width: 1000,
+        height: 500,
+        orientation: "HORIZONTAL",
+      },
+      panels: { p1: { id: "p1", contentComponent: "chart-p1", title: "Chart" } },
+      activeGroup: "1",
+    },
     groups: { red: "AAPL" },
     linkVenues: { red: "alpaca" },
   };
@@ -207,5 +217,303 @@ describe("backup: detectHotkeyConflicts", () => {
       makeTemplate("t4", "Ctrl+2"), makeTemplate("t5", "Ctrl+2"),
     ]);
     expect(result.sort()).toEqual(["Ctrl+1", "Ctrl+2"]);
+  });
+});
+
+describe("backup: collectPanelIds", () => {
+  it("collects panel ids from nested branches with multiple leaves", () => {
+    const layout = {
+      grid: {
+        root: {
+          type: "branch",
+          data: [
+            { type: "leaf", data: { views: ["chart-1"], activeView: "chart-1", id: "1" }, size: 670 },
+            {
+              type: "branch",
+              data: [
+                { type: "leaf", data: { views: ["t-dom"], activeView: "t-dom", id: "t-ticket" }, size: 294 },
+                { type: "leaf", data: { views: ["t-tape"], activeView: "t-tape", id: "t-tape" }, size: 237 },
+              ],
+              size: 308,
+            },
+          ],
+          size: 926,
+        },
+        width: 1920,
+        height: 926,
+        orientation: "HORIZONTAL",
+      },
+      panels: {},
+      activeGroup: "t-tape",
+    };
+    const result = collectPanelIds(layout);
+    expect(result).toEqual(new Set(["chart-1", "t-dom", "t-tape"]));
+  });
+
+  it("collects panel ids from a leaf with multi-panel views array (tabbed group)", () => {
+    const layout = {
+      grid: {
+        root: {
+          type: "leaf",
+          data: {
+            views: ["panel-a", "panel-b", "panel-c"],
+            activeView: "panel-a",
+            id: "group-id",
+          },
+          size: 100,
+        },
+      },
+    };
+    const result = collectPanelIds(layout);
+    expect(result).toEqual(new Set(["panel-a", "panel-b", "panel-c"]));
+  });
+
+  it("returns empty set for null layout", () => {
+    expect(collectPanelIds(null)).toEqual(new Set());
+  });
+
+  it("returns empty set for empty object layout", () => {
+    expect(collectPanelIds({})).toEqual(new Set());
+  });
+
+  it("returns empty set for layout with null grid", () => {
+    expect(collectPanelIds({ grid: null })).toEqual(new Set());
+  });
+
+  it("returns empty set for layout with non-object grid root", () => {
+    expect(collectPanelIds({ grid: { root: "not-an-object" } })).toEqual(new Set());
+  });
+
+  it("does not throw on malformed/truncated layout", () => {
+    expect(() => collectPanelIds({ grid: { root: { type: "branch", data: null } } })).not.toThrow();
+    expect(() => collectPanelIds({ grid: { root: { type: "leaf", data: { views: "not-array" } } } })).not.toThrow();
+    expect(() => collectPanelIds({ grid: { root: { type: "unknown", data: [] } } })).not.toThrow();
+  });
+});
+
+describe("backup: reconcileToGrid", () => {
+  it("filters panels to only those referenced by the grid", () => {
+    const panelA = { id: "A", panelId: "chart", group: "red" as const, settings: { symbol: "AAPL" } };
+    const panelB = { id: "B", panelId: "tape", group: null, settings: { columns: 5 } };
+    const panelC = { id: "C", panelId: "dom", group: "blue" as const, settings: { levels: 10 } };
+
+    const base: Workspace = {
+      name: "test",
+      panels: [panelA, panelB, panelC],
+      layout: {
+        grid: {
+          root: {
+            type: "branch",
+            data: [
+              { type: "leaf", data: { views: ["A"], activeView: "A", id: "1" }, size: 500 },
+              { type: "leaf", data: { views: ["C"], activeView: "C", id: "2" }, size: 500 },
+            ],
+            size: 1000,
+          },
+        },
+      },
+    };
+
+    const result = reconcileToGrid(base, base.layout);
+
+    expect(result.panels).toHaveLength(2);
+    expect(result.panels[0]).toBe(panelA);
+    expect(result.panels[1]).toBe(panelC);
+    expect(result.layout).toBe(base.layout);
+    expect(result.name).toBe("test");
+  });
+
+  it("preserves original order and identity of kept entries", () => {
+    const panels = [
+      { id: "id-1", panelId: "chart", group: "red" as const, settings: { a: 1 } },
+      { id: "id-2", panelId: "tape", group: null, settings: { b: 2 } },
+      { id: "id-3", panelId: "dom", group: "blue" as const, settings: { c: 3 } },
+    ];
+
+    const base: Workspace = {
+      name: "test",
+      panels,
+      layout: {
+        grid: {
+          root: {
+            type: "branch",
+            data: [
+              { type: "leaf", data: { views: ["id-1", "id-3"], activeView: "id-1", id: "g1" }, size: 500 },
+            ],
+            size: 500,
+          },
+        },
+      },
+    };
+
+    const result = reconcileToGrid(base, base.layout);
+
+    expect(result.panels).toHaveLength(2);
+    expect(result.panels[0]).toBe(panels[0]);
+    expect(result.panels[1]).toBe(panels[2]);
+  });
+
+  it("returns base unchanged when layout is not a present layout", () => {
+    const base: Workspace = {
+      name: "test",
+      panels: [{ id: "p1", panelId: "chart", group: "red", settings: {} }],
+      layout: null,
+    };
+
+    const result = reconcileToGrid(base, null);
+
+    expect(result).toBe(base);
+    expect(result.panels).toBe(base.panels);
+  });
+
+  it("returns base unchanged when layout is an empty object", () => {
+    const base: Workspace = {
+      name: "test",
+      panels: [{ id: "p1", panelId: "chart", group: "red", settings: {} }],
+      layout: {},
+    };
+
+    const result = reconcileToGrid(base, {});
+
+    expect(result).toEqual(base);
+    expect(result.panels).toEqual(base.panels);
+  });
+
+  it("returns base unchanged when layout is not an object", () => {
+    const base: Workspace = {
+      name: "test",
+      panels: [{ id: "p1", panelId: "chart", group: "red", settings: {} }],
+      layout: "invalid",
+    };
+
+    expect(reconcileToGrid(base, "invalid")).toBe(base);
+    expect(reconcileToGrid(base, 42 as unknown as Workspace)).toBe(base);
+    expect(reconcileToGrid(base, [] as unknown as Workspace)).toBe(base);
+  });
+});
+
+describe("backup: prepareImportedWorkspace with reconciliation", () => {
+  it("heals a ghosted file with 13 panels but only 9 placed in grid", () => {
+    const panels = [
+      { id: "chart-1", panelId: "chart", group: "red" as const, settings: { symbol: "AAPL" } },
+      { id: "chart-2", panelId: "chart", group: "red" as const, settings: { symbol: "MSFT" } },
+      { id: "tape-1", panelId: "tape", group: null, settings: {} },
+      { id: "dom-1", panelId: "dom", group: "blue" as const, settings: {} },
+      { id: "watchlist-1", panelId: "watchlist", group: "green" as const, settings: {} },
+      { id: "watchlist-2", panelId: "watchlist", group: "green" as const, settings: {} }, // ghost
+      { id: "watchlist-3", panelId: "watchlist", group: "green" as const, settings: {} }, // ghost
+      { id: "scanner-1", panelId: "scanner", group: "yellow" as const, settings: {} },
+      { id: "scanner-2", panelId: "scanner", group: "yellow" as const, settings: {} }, // ghost
+      { id: "ghost-1", panelId: "unknown", group: null, settings: {} }, // ghost
+      { id: "ghost-2", panelId: "unknown", group: null, settings: {} }, // ghost
+      { id: "ghost-3", panelId: "unknown", group: null, settings: {} }, // ghost
+      { id: "ghost-4", panelId: "unknown", group: null, settings: {} }, // ghost
+    ];
+
+    const imported: Workspace = {
+      name: "old-workspace",
+      panels,
+      layout: {
+        grid: {
+          root: {
+            type: "branch",
+            data: [
+              { type: "leaf", data: { views: ["chart-1"], activeView: "chart-1", id: "1" }, size: 670 },
+              {
+                type: "branch",
+                data: [
+                  { type: "leaf", data: { views: ["tape-1"], activeView: "tape-1", id: "t-ticket" }, size: 294 },
+                  {
+                    type: "branch",
+                    data: [
+                      { type: "leaf", data: { views: ["dom-1"], activeView: "dom-1", id: "dom-group" }, size: 150 },
+                      { type: "leaf", data: { views: ["chart-2"], activeView: "chart-2", id: "chart-2-group" }, size: 150 },
+                    ],
+                    size: 300,
+                  },
+                ],
+                size: 600,
+              },
+            ],
+            size: 1270,
+          },
+          width: 1920,
+          height: 926,
+          orientation: "HORIZONTAL",
+        },
+      },
+      groups: { red: "AAPL", green: "DEFAULT", blue: "DEFAULT", yellow: "DEFAULT" },
+      linkVenues: { red: "alpaca", green: "alpaca", blue: "alpaca", yellow: "alpaca" },
+    };
+
+    const result = prepareImportedWorkspace(imported, "current-workspace");
+
+    // Check rename happened
+    expect(result.name).toBe("current-workspace");
+
+    // Check that only 4 panels remain (those in the grid)
+    expect(result.panels).toHaveLength(4);
+    const panelIds = result.panels.map((p) => p.id);
+    expect(panelIds).toEqual(["chart-1", "chart-2", "tape-1", "dom-1"]);
+
+    // Check that every grid-placed panel is present
+    const gridPanelIds = collectPanelIds(result.layout);
+    for (const id of gridPanelIds) {
+      expect(result.panels.some((p) => p.id === id)).toBe(true);
+    }
+
+    // Check that original settings are preserved
+    const chart1 = result.panels.find((p) => p.id === "chart-1");
+    expect(chart1).toEqual(panels[0]);
+  });
+
+  it("keeps existing rename behavior during reconciliation", () => {
+    const imported = makeWorkspace("someone-elses-workspace");
+    const result = prepareImportedWorkspace(imported, "main");
+    expect(result.name).toBe("main");
+    expect(result.layout).toEqual(imported.layout);
+    expect(result.groups).toEqual(imported.groups);
+    expect(result.linkVenues).toEqual(imported.linkVenues);
+  });
+
+  it("leaves panels untouched when layout is null or missing", () => {
+    const panels = [
+      { id: "p1", panelId: "chart", group: "red" as const, settings: { a: 1 } },
+      { id: "p2", panelId: "tape", group: null, settings: { b: 2 } },
+      { id: "p3", panelId: "dom", group: "blue" as const, settings: { c: 3 } },
+    ];
+
+    const imported: Workspace = {
+      name: "old",
+      panels,
+      layout: null,
+    };
+
+    const result = prepareImportedWorkspace(imported, "new");
+
+    expect(result.name).toBe("new");
+    expect(result.panels).toHaveLength(3);
+    expect(result.panels).toEqual(panels);
+    expect(result.layout).toBeNull();
+  });
+
+  it("leaves panels untouched when layout is empty object", () => {
+    const panels = [
+      { id: "p1", panelId: "chart", group: "red" as const, settings: { a: 1 } },
+      { id: "p2", panelId: "tape", group: null, settings: { b: 2 } },
+    ];
+
+    const imported: Workspace = {
+      name: "old",
+      panels,
+      layout: {},
+    };
+
+    const result = prepareImportedWorkspace(imported, "new");
+
+    expect(result.name).toBe("new");
+    expect(result.panels).toHaveLength(2);
+    expect(result.panels).toEqual(panels);
+    expect(result.layout).toEqual({});
   });
 });
