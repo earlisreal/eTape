@@ -137,7 +137,6 @@ type Scan struct {
 // News is the [news] section: Qot_GetSearchNews polling.
 type News struct {
 	Enabled   bool `toml:"enabled"`
-	FocusedMs int  `toml:"focused_ms"` // poll interval for focused symbols
 	WatchMs   int  `toml:"watch_ms"`   // step interval for the watchlist rotation
 	MaxPerReq int  `toml:"max_per_req"`
 }
@@ -220,7 +219,7 @@ func Default() Config {
 			Enabled: true, PremarketMs: 2000, RTHMs: 3000, RankPages: 2,
 			MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000,
 		},
-		News:      News{Enabled: true, FocusedMs: 20000, WatchMs: 3000, MaxPerReq: 50},
+		News:      News{Enabled: true, WatchMs: 3000, MaxPerReq: 50},
 		StockInfo: StockInfo{Enabled: true, RefreshMs: 15000, MaxPerReq: 400},
 		Health:    Health{Enabled: true, ProbeMs: 5000},
 		Backfill: Backfill{Enabled: true, IntradayDays: 20, DailyYears: 0, Concurrency: 3, SeedChunk: 500,

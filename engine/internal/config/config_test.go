@@ -178,7 +178,7 @@ func TestDefaultHasUIHubAndPollerSections(t *testing.T) {
 	if !c.Scan.Enabled || c.Scan.PremarketMs != 2000 || c.Scan.MaxFloatShares != 50_000_000 {
 		t.Fatalf("Scan defaults wrong: %+v", c.Scan)
 	}
-	if !c.News.Enabled || c.News.FocusedMs != 20000 {
+	if !c.News.Enabled {
 		t.Fatalf("News defaults wrong: %+v", c.News)
 	}
 	if !c.Health.Enabled || c.Health.ProbeMs != 5000 {
