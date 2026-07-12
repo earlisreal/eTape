@@ -1,6 +1,6 @@
 # Convenience launcher for eTape on Windows. Mirrors run.sh. Three modes:
 #   live  - real engine against %USERPROFILE%\.eTape\config.toml (live OpenD feed + venues)
-#   demo  - real engine against a synthetic replay day (no OpenD/broker needed)
+#   demo  - real engine against a live synthetic market (no OpenD/broker needed)
 #   dev   - mock WS engine + Vite dev server, hot reload for UI work
 #
 # Prefer invoking via run.cmd (it sets the PowerShell execution policy for you).
@@ -25,10 +25,10 @@ Modes:
                      args are passed through to the engine, e.g.:
                        run.cmd live -no-open -log C:\temp\etape.log
 
-  demo [DAY] [SPEED] Build the UI, generate a synthetic replay day, and run
-                     the engine against it. No OpenD or broker required.
-                     DAY defaults to 2026-01-02. SPEED defaults to 1
-                     (real-time); use 0 to replay as fast as possible.
+  demo [SEED]        Build the UI, then run the engine against a live
+                     synthetic market -- no OpenD or broker required. A
+                     random universe/seed is drawn per launch; pass SEED to
+                     pin it to the same reproducible universe/day.
 
   dev [FIXTURE]      Run the mock WS engine + Vite dev server with hot
                      reload, for UI iteration. FIXTURE selects a
@@ -37,7 +37,7 @@ Modes:
 Examples:
   run.cmd live
   run.cmd demo
-  run.cmd demo 2026-01-02 0
+  run.cmd demo 42
   run.cmd dev ladder-tape
 '@
 }
@@ -70,48 +70,23 @@ switch ($Mode) {
     }
 
     'demo' {
-        $day   = if ($Rest.Count -ge 1) { [string]$Rest[0] } else { '2026-01-02' }
-        $speed = if ($Rest.Count -ge 2) { [string]$Rest[1] } else { '1' }
-
-        $work = Join-Path ([System.IO.Path]::GetTempPath()) ('etape-demo-' + [System.Guid]::NewGuid().ToString('N'))
-        New-Item -ItemType Directory -Path $work | Out-Null
-        $db  = Join-Path $work 'demo.db'
-        $cfg = Join-Path $work 'demo.toml'
+        # Optional leading positional SEED (any non-flag first arg); everything
+        # else (e.g. -no-open, -log ...) passes through to the engine untouched.
+        $seed = ''
+        if ($Rest.Count -ge 1 -and [string]$Rest[0] -notlike '-*') {
+            $seed = [string]$Rest[0]
+            $Rest = if ($Rest.Count -ge 2) { @($Rest[1..($Rest.Count - 1)]) } else { @() }
+        }
 
         Build-UI
 
-        Log "generating synthetic journal ($db)"
+        Log 'booting engine (demo synthetic market) -- open http://127.0.0.1:8686'
         Set-Location $EngineDir
-        & go run ./cmd/genjournal -db $db -day $day
-        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-        # db_path is a TOML literal string (single quotes) so backslashes in the
-        # Windows temp path are not treated as escape sequences.
-        $toml = @"
-[store]
-db_path = '$db'
-[uihub]
-host = "127.0.0.1"
-port = 8686
-[[venue]]
-id = "sim-paper"
-broker = "sim"
-env = "paper"
-[gate.global]
-max_day_loss = 100000
-max_symbol_position_value = 100000
-max_symbol_position_shares = 100000
-[gate.venue.sim-paper]
-max_order_value = 100000
-max_position_value = 100000
-max_position_shares = 100000
-max_open_orders = 50
-"@
-        # UTF-8 without BOM: a leading BOM can break TOML section parsing.
-        [System.IO.File]::WriteAllText($cfg, $toml, (New-Object System.Text.UTF8Encoding($false)))
-
-        Log "booting engine (replay $day, speed $speed) -- open http://127.0.0.1:8686"
-        & go run ./cmd/etape -config $cfg -replay $day -speed $speed -replay-hold -dist $Dist
+        if ($seed) {
+            & go run ./cmd/etape -dist $Dist -demo -demo-seed $seed @Rest
+        } else {
+            & go run ./cmd/etape -dist $Dist -demo @Rest
+        }
         exit $LASTEXITCODE
     }
 

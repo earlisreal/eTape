@@ -46,9 +46,14 @@ and the broker of your choice for execution, and everything else is free and ope
 - **Safety-gated by default.** Zero venues are configured out of the box. Every order
   must pass a two-layer risk gate (global caps + per-venue caps: max day loss, order
   value, position size, open orders), and each venue has an explicit arm/disarm switch.
+- **A live demo that actually feels live.** No account, no setup: a synthetic market
+  with a warm year of history, a breathing DOM, and a moving scanner/movers board,
+  streaming indefinitely — not a 20-minute canned replay. The universe (which
+  symbols run, which gap, which crash) reshuffles every launch, so spotting the
+  mover is part of the practice, not something you memorize.
 - **Every session recorded.** An always-on SQLite journal captures the full feed —
   quotes, ticks, books, bars — so any day can be replayed through the same engine
-  (this is also how demo mode and the E2E suite work).
+  (the E2E suite runs on this too).
 - **Local-first and private.** Config, credentials, and the journal live in `~/.eTape/`
   on your disk. The UI is served from `127.0.0.1`. Your API keys talk to your broker
   and no one else.
@@ -143,12 +148,16 @@ cd eTape
 ./run.sh demo          # Windows: run.cmd demo
 ```
 
-This builds the UI, generates a synthetic trading day, and opens the full app at
-`http://127.0.0.1:8686` with a funded paper simulator — charts ticking, ladder moving,
-and hotkeys live, with **no OpenD, no broker, and no config**. Place trades immediately.
+This builds the UI, boots a **live** synthetic market — no OpenD, no broker, no
+config — and opens the full app at `http://127.0.0.1:8686` with a funded paper
+simulator: charts warm with a year of history at every timeframe, the DOM ladder
+breathes, the movers board updates as the (fictional) low-float names run, and
+hotkeys are live. Place trades immediately; fills price against the live book. The
+universe reshuffles every launch — pin it to a specific seed for a reproducible
+session:
 
 ```bash
-./run.sh demo 2026-01-02 0    # replay the synthetic day as fast as possible
+./run.sh demo 42       # Windows: run.cmd demo 42
 ```
 
 ## Live market data: moomoo OpenD
