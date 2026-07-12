@@ -31,6 +31,12 @@ export interface OrderConfig {
 }
 export const ORDER_CONFIG_KEY = "orderConfig";
 
+// Shared constants for ext-hours market buffer percentage editing, used by
+// normalizeOrderConfig clamping logic and by UI components (OrderSettingsSection, etc.)
+export const EXT_BUFFER_MIN = 0.1;
+export const EXT_BUFFER_MAX = 10;
+export const EXT_BUFFER_STEP = 0.1;
+
 // Intentionally empty: eTape ships with NO default order templates or hotkeys.
 // A fresh install (engine has no stored `orderConfig`) starts blank; the user
 // builds templates/hotkeys in Settings → Orders & hotkeys. Do not re-seed.
@@ -56,6 +62,6 @@ function normalizeTemplate(t: ActionTemplate): ActionTemplate {
 
 export function normalizeOrderConfig(config: OrderConfig): OrderConfig {
   const raw = config.extHoursMarketBufferPct;
-  const extHoursMarketBufferPct = raw === undefined || Number.isNaN(raw) ? 1.0 : Math.min(10, Math.max(0.1, raw));
+  const extHoursMarketBufferPct = raw === undefined || Number.isNaN(raw) ? 1.0 : Math.min(EXT_BUFFER_MAX, Math.max(EXT_BUFFER_MIN, raw));
   return { ...config, extHoursMarketBufferPct, templates: config.templates.map(normalizeTemplate) };
 }
