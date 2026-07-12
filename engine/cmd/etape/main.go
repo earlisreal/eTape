@@ -408,6 +408,9 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500, TradesCap: 1000,
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
 		Mode: func() string {
+			if *demo {
+				return "demo"
+			}
 			if live {
 				return "live"
 			}

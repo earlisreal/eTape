@@ -241,7 +241,7 @@ type HealthSnapshot struct {
 }
 
 // SessionSnapshot is the static sys.session topic: which mode the engine
-// booted in. Mode is "live" or "replay"; Day/Speed populated only in replay.
+// booted in. Mode is "live", "replay", or "demo"; Day/Speed populated only in replay.
 type SessionSnapshot struct {
 	Mode  string  `json:"mode"`
 	Day   string  `json:"day,omitempty"`

@@ -70,7 +70,7 @@ type Config struct {
 	FillsCap, EventsCap, TradesCap int
 	OutBuf                         int
 	DistDir                        string
-	Mode                           string // "live" | "replay"
+	Mode                           string // "live" | "replay" | "demo"
 	ReplayDay                      string
 	ReplaySpeed                    float64
 }
