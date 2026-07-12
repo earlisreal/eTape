@@ -45,6 +45,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/stockinfo"
 	"github.com/earlisreal/eTape/engine/internal/store"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
+	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 	"github.com/earlisreal/eTape/engine/internal/venueadmin"
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
 )
@@ -467,13 +468,19 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	var sealSchedWG sync.WaitGroup
 	var client *opend.Client
 	if live {
+		stats0, statsErr := st.SizeStats() // PRE-maintenance snapshot for the anomaly backstop
+		if pending, err := st.PendingSealDays(); err == nil && len(pending) > 0 {
+			hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "sealing", DaysTotal: len(pending)})
+		}
 		if n, err := st.PruneJournal(cfg.Store.RetentionDays); err == nil && n > 0 {
 			log.Info("pruned journal", "rows", n)
 		}
 		st.Flush() // drain the queued prune sys_event so it doesn't race the seal's write transaction
 		if sum, err := st.SealJournalDays(); err != nil {
 			log.Error("seal journal", "err", err)
-			st.AppendSysEvent("retention", fmt.Sprintf("journal seal error: %v", err))
+			detail := fmt.Sprintf("journal seal error: %v", err)
+			st.AppendSysEvent("retention", detail)
+			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{Kind: "retention", Detail: detail, Level: "danger"})
 		} else if sum.Days > 0 || sum.Failed > 0 {
 			log.Info("sealed journal", "days", sum.Days, "chunks", sum.Chunks, "rows", sum.Rows,
 				"failed", sum.Failed, "mbBefore", sum.BytesBefore>>20, "mbAfter", sum.BytesAfter>>20)
@@ -481,14 +488,35 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 				"sealed %d day(s): %d rows → %d chunks (%d MB → %d MB); %d day(s) left raw",
 				sum.Days, sum.Rows, sum.Chunks, sum.BytesBefore>>20, sum.BytesAfter>>20, sum.Failed))
 		}
-		st.Flush() // drain queued sys_events so no writer tx races the VACUUM
-		if vac, err := st.VacuumIfNeeded(); err != nil {
-			log.Error("vacuum journal db", "err", err)
-		} else if vac {
-			log.Info("vacuumed journal db")
-			st.AppendSysEvent("retention", "vacuumed journal db (reclaimed free pages)")
+		st.Flush() // drain queued sys_events so no writer tx races a possible backstop VACUUM
+		if statsErr == nil && stats0.NeedsBackstopVacuum() {
+			log.Warn("backstop vacuum: cross-day free-page accumulation",
+				"freeMB", stats0.FreeBytes()>>20, "fileMB", stats0.FileBytes()>>20)
+			detail := fmt.Sprintf("backstop vacuum: %d MB free across days, compacting", stats0.FreeBytes()>>20)
+			st.AppendSysEvent("retention", detail)
+			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{Kind: "retention", Detail: detail, Level: "warn"})
+			if err := st.Vacuum(); err != nil {
+				log.Error("backstop vacuum", "err", err)
+				failDetail := fmt.Sprintf("backstop vacuum failed: %v", err)
+				st.AppendSysEvent("retention", failDetail)
+				hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{Kind: "retention", Detail: failDetail, Level: "danger"})
+			} else {
+				log.Info("backstop vacuum done")
+			}
+		}
+		if stats1, err := st.SizeStats(); err == nil { // POST-maintenance telemetry
+			chunkBytes, rawRows, _ := st.JournalFootprint()
+			advise := stats1.AdviseVacuum()
+			report := store.FormatStorageReport(stats1, chunkBytes, rawRows, advise)
+			st.AppendSysEvent("storage", report)
+			level := ""
+			if advise {
+				level = "warn" // surfaces as a toast via connectEventToasts
+			}
+			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{Kind: "storage", Detail: report, Level: level})
 		}
 		st.AppendSysEvent("boot", "engine up")
+		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "connecting"})
 		dropWG.Add(1)
 		go watchDroppedUpdates(ctx, &dropWG, core, st)
 		client = opend.New(opend.Options{Addr: cfg.OpenD.Addr(), Clock: clock.System{}})
@@ -503,6 +531,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		go pipe(ctx, &pipeWG, fd.Events(), core, st)
 		sealSchedWG.Add(1)
 		go runSealScheduler(ctx, &sealSchedWG, st, clock.System{}, log)
+		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
 		var hubBackfill func(sym string, done func(ok bool))
 		if cfg.Backfill.Enabled {
 			var alpacaSrc *histalpaca.Client
@@ -580,6 +609,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			go func() { pipeWG.Wait(); stop() }() // self-terminate when the journal is exhausted
 		}
 		log.Info("engine up (replay)", "day", *replayDay, "rows", len(replayRows), "speed", *speed)
+		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
 	}
 
 	if orch == nil && st != nil {
