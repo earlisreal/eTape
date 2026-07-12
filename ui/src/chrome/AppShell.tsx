@@ -179,6 +179,31 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     dismissVenueSetup(dontShowAgain);
     setSettings({ open: true, section: "venues" });
   };
+  // Task 6 (U4): the single "Try demo" entry point shared by both first-run
+  // surfaces below (EmptyState + VenueSetupPrompt) — each is a dumb,
+  // controlled component that only ever calls this prop, same as their
+  // existing onAddPanel/onConfigure/onDismiss callbacks. No dismiss/settings
+  // bookkeeping bundled in here (unlike configureVenueSetup above): once
+  // StartDemo is accepted, sessionMode.mode flips to "demo" and both
+  // surfaces' own gating (showTryDemo below; VenueSetupPrompt's showVenueSetup
+  // gate above) hides them naturally. Still surfaces a rejection/transport
+  // failure as a toast so a failed StartDemo doesn't fail silently — mirrors
+  // the ack-status check in PracticeLauncherModal's onStartDemo, minus the
+  // inline pending/error UI that dedicated modal has room for.
+  const onTryDemo = () => {
+    rc.startDemo().then((ack) => {
+      if (ack.status !== "accepted") toast.push({ level: "danger", text: `Try demo: ${ack.reason || "rejected"}` });
+    }).catch((err: unknown) => {
+      toast.push({ level: "danger", text: `Try demo failed: ${err instanceof Error ? err.message : "unknown error"}` });
+    });
+  };
+  // Gates EmptyState's CTA: hidden once already inside a confirmed demo or
+  // replay session (offering "Try demo" while already IN demo mode would be
+  // confusing) — "pending" (mode unconfirmed yet) still allows it through,
+  // same as the prior unconditional "live" default and showVenueSetup's
+  // "pending" treatment above. VenueSetupPrompt doesn't need an equivalent
+  // gate: it's already suppressed during replay/demo by showVenueSetup itself.
+  const showTryDemo = sessionMode.mode === "live" || sessionMode.mode === "pending";
   // Alpaca-1m-history hint: shown once at least one REAL broker venue is
   // configured (so it never doubles up with the venue-setup prompt above,
   // which covers the sim-only/no-venue case) but none of them is Alpaca — the
@@ -484,7 +509,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         {showAlpacaHint && <AlpacaBackfillBanner onSetup={openAlpacaSetup} onDismiss={dismissAlpacaHint} />}
         <div style={{ flex: 1, minHeight: 0 }}>
           {ws.panels.length === 0 ? (
-            <EmptyState onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} />
+            <EmptyState onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} showTryDemo={showTryDemo} onTryDemo={onTryDemo} />
           ) : (
             <DockviewReact components={components} onReady={onReady}
               theme={mode === "light" ? themeLight : themeDark} />
@@ -499,7 +524,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           toast={toast}
           engineState={engineState} />
         <PracticeLauncherModal open={practiceOpen} onClose={() => setPracticeOpen(false)} commands={commands} />
-        {showVenueSetup && <VenueSetupPrompt onConfigure={configureVenueSetup} onDismiss={dismissVenueSetup} />}
+        {showVenueSetup && <VenueSetupPrompt onConfigure={configureVenueSetup} onDismiss={dismissVenueSetup} onTryDemo={onTryDemo} />}
       </div>
     </OpenSettingsProvider>
   );

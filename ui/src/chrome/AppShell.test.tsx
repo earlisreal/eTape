@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, waitFor, fireEvent, act, cleanup } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, cleanup, within } from "@testing-library/react";
 import { AppShell } from "./AppShell";
 import { WorkspaceStore, type Workspace } from "./workspace";
 import { makeStores } from "../data/registry";
@@ -52,7 +52,7 @@ function mount(seed: Workspace) {
         linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} engineState="open" />
     </OrderConfigProvider></ToastProvider></ThemeProvider>,
   );
-  return { saved, workspaceStore, linkGroups, stores };
+  return { saved, workspaceStore, linkGroups, stores, commands };
 }
 
 describe("AppShell onConfigChange", () => {
@@ -326,6 +326,66 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     publishStatus(stores2, []);
     expect(screen.queryByText("Add a broker to trade live")).toBeNull();
+  });
+});
+
+describe("AppShell try-demo CTA (Task 6: U4 first-run affordances)", () => {
+  // Zero panels so EmptyState (and its "Try demo" CTA) is the rendered
+  // workspace surface throughout. Deliberately never publishes an exec.status
+  // snapshot in these EmptyState-focused tests — execStatus stays null, which
+  // keeps VenueSetupPrompt from also mounting (its own gate requires
+  // execStatus !== null) and colliding with EmptyState's "Try demo" button
+  // on an accessible name (see the dedicated VenueSetupPrompt-side test below,
+  // which scopes its query with `within` instead, since production really
+  // does mount both simultaneously in that scenario).
+  const seed: Workspace = { name: "default", panels: [], layout: null };
+
+  it("shows the CTA while sessionMode is pending (the default before the first snapshot)", async () => {
+    mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    expect(screen.getByRole("button", { name: "Try demo" })).toBeTruthy();
+  });
+
+  it.each(["replay", "demo"] as const)(
+    "hides the CTA during a confirmed %s session (already practicing — offering it again would be confusing)",
+    async (mode) => {
+      const { stores } = mount(seed);
+      await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+      act(() => stores.session.apply({ kind: "snapshot", topic: "sys.session", payload: { mode, day: "2026-01-02", speed: 0 } }));
+      expect(screen.queryByRole("button", { name: "Try demo" })).toBeNull();
+    },
+  );
+
+  it("shows the CTA once a confirmed live session snapshot arrives", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    act(() => stores.session.apply({ kind: "snapshot", topic: "sys.session", payload: { mode: "live" } }));
+    expect(screen.getByRole("button", { name: "Try demo" })).toBeTruthy();
+  });
+
+  it("clicking the EmptyState CTA sends StartDemo", async () => {
+    const { commands } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Try demo" }));
+    await waitFor(() => expect(commands.sendCommand).toHaveBeenCalledWith("StartDemo", {}));
+  });
+
+  it("clicking 'Try demo' inside the venue-setup prompt also sends StartDemo", async () => {
+    // Both AppShell.tsx call sites thread the SAME onTryDemo callback — this
+    // proves the wiring reaches this second call site too, not just
+    // EmptyState's. Zero venues makes VenueSetupPrompt mount alongside
+    // EmptyState's own "Try demo" CTA (both true by default: no real venue,
+    // pending session), so the query is scoped to the dialog to avoid an
+    // ambiguous duplicate accessible name across the two surfaces.
+    const { stores, commands } = mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    act(() => stores.exec.apply({
+      kind: "snapshot", topic: "exec.status",
+      payload: { masterArmed: false, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 }, venues: [] },
+    }));
+    const dialog = await waitFor(() => screen.getByRole("dialog"));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Try demo" }));
+    await waitFor(() => expect(commands.sendCommand).toHaveBeenCalledWith("StartDemo", {}));
   });
 });
 
