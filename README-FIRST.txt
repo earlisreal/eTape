@@ -21,10 +21,13 @@ downloaded copy of the binary.
 
 2. Try the demo first (no setup needed)
 -----------------------------------------
-Double-click "etape-demo.cmd" in this folder. It launches etape.exe with a
-built-in synthetic trading day -- no moomoo OpenD, no broker account, no
-credentials required. A browser tab opens automatically to
-http://127.0.0.1:8686 showing the replayed day's chart and tape.
+Double-click "etape-demo.cmd" in this folder. It launches etape.exe against a
+live, self-generated synthetic market -- no moomoo OpenD, no broker account,
+no credentials required. A browser tab opens automatically to
+http://127.0.0.1:8686 with a year of warm chart history, a breathing DOM
+ladder, and a moving scanner/movers board -- streaming continuously, not a
+one-time replay. Which symbols move (and how) reshuffles every time you
+launch it.
 
 The engine keeps running in the background (look for the eTape icon in your
 system tray) even if you close that browser tab -- reopen
