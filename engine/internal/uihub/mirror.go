@@ -246,7 +246,12 @@ func (m *mirror) applyExec(u exec.Update) []staged {
 		}
 		return []staged{{Topic: wsmsg.TopicExecTrades, Payload: w}}
 	case exec.PositionUpdate:
-		m.positions[string(v.Position.Venue)+"|"+v.Position.Symbol] = v.Position
+		key := string(v.Position.Venue) + "|" + v.Position.Symbol
+		if v.Position.Qty == 0 {
+			delete(m.positions, key)
+		} else {
+			m.positions[key] = v.Position
+		}
 		return []staged{{Topic: wsmsg.TopicExecPositions, Payload: m.positionsPayload()}}
 	case exec.AccountUpdate:
 		a := mapAccount(v.Account)

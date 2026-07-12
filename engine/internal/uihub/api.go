@@ -26,9 +26,11 @@ type Stores interface {
 }
 
 // Indicators is the md.Core surface uihub needs (satisfied by *md.Core).
+// Both methods take the owning connection's ID (see Hub.indicators) so
+// ownership can be tracked per connection rather than with a global refcount.
 type Indicators interface {
-	EnsureIndicator(id string, spec md.IndicatorSpec)
-	ReleaseIndicator(id string)
+	EnsureIndicator(connID uint64, id string, spec md.IndicatorSpec)
+	ReleaseIndicator(connID uint64, id string)
 }
 
 // Feed is the market-data control surface uihub needs for on-demand symbol
@@ -110,7 +112,8 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 		m.boot = wsmsg.BootStatus{Phase: "ready"}
 	}
 	h := NewHub(clk, HubConfig{MDInterval: cfg.MD, AccountInterval: cfg.Account, PositionInterval: cfg.Position, Buf: cfg.Buf}, m)
-	cmd := newCommands(ex, st, ind, h, va, h.feed, vt)
+	h.SetIndicators(ind)
+	cmd := newCommands(ex, st, h, h, va, h.feed, vt)
 	h.cmd = cmd
 	cmd.restart = requestRestart
 	cmd.startReplay = startReplay

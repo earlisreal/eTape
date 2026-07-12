@@ -71,8 +71,8 @@ func collect(t *testing.T, feedInto func(feedOne func(feed.Event))) []md.Update 
 		}
 	}()
 
-	c.EnsureIndicator("vwap-1", md.IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: md.IndVWAP})
-	c.EnsureIndicator("ema-1", md.IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: md.IndEMA,
+	c.EnsureIndicator(1, "vwap-1", md.IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: md.IndVWAP})
+	c.EnsureIndicator(1, "ema-1", md.IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: md.IndEMA,
 		Params: map[string]float64{"period": 2}})
 	feedInto(c.Feed)
 	time.Sleep(200 * time.Millisecond)

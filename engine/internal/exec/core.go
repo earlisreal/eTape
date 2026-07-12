@@ -4,10 +4,18 @@ import (
 	"context"
 	"log/slog"
 	"sync/atomic"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
+
+// defaultRecoverSnapshotTimeout bounds each venue's Snapshot call during
+// Recover when CoreConfig.RecoverSnapshotTimeout is unset. It is a short,
+// fixed deadline, not the venue's own HTTP-client timeout (which can be
+// 10-20+s) — one misconfigured/unreachable venue must not stall the whole
+// boot sequence (Recover must fully complete before uihub starts listening).
+const defaultRecoverSnapshotTimeout = 5 * time.Second
 
 // Command is a UI→engine execution command. Sealed union.
 type Command interface{ isCommand() }
@@ -73,14 +81,15 @@ func (m markState) LastTrade(sym string) (float64, bool) { v, ok := m[sym]; retu
 
 // Core is the single-writer execution coordinator.
 type Core struct {
-	venues          []VenueID
-	gate            GateConfig
-	store           EventStore
-	brokers         map[VenueID]Broker
-	clk             clock.Clock
-	idgen           *OrderIDGen
-	syslog          func(kind, detail string)
-	startingBalance map[VenueID]float64
+	venues                 []VenueID
+	gate                   GateConfig
+	store                  EventStore
+	brokers                map[VenueID]Broker
+	clk                    clock.Clock
+	idgen                  *OrderIDGen
+	syslog                 func(kind, detail string)
+	startingBalance        map[VenueID]float64
+	recoverSnapshotTimeout time.Duration
 
 	cmds    chan cmdReq
 	bevents chan BrokerEvent
@@ -106,6 +115,11 @@ type CoreConfig struct {
 	// StartingBalance is the sim-only per-venue amount ResetBalance reseeds the
 	// account to; baked in at boot, never read fresh from a command.
 	StartingBalance map[VenueID]float64
+	// RecoverSnapshotTimeout bounds each venue's Broker.Snapshot call during
+	// Recover, so one misconfigured/unreachable venue can't stall the whole
+	// boot past a short, fixed deadline. Zero means use
+	// defaultRecoverSnapshotTimeout.
+	RecoverSnapshotTimeout time.Duration
 }
 
 func NewCore(cfg CoreConfig) *Core {
@@ -113,22 +127,27 @@ func NewCore(cfg CoreConfig) *Core {
 	if sl == nil {
 		sl = func(string, string) {}
 	}
+	recoverSnapshotTimeout := cfg.RecoverSnapshotTimeout
+	if recoverSnapshotTimeout <= 0 {
+		recoverSnapshotTimeout = defaultRecoverSnapshotTimeout
+	}
 	c := &Core{
-		venues:          cfg.Venues,
-		gate:            cfg.Gate,
-		store:           cfg.Store,
-		brokers:         cfg.Brokers,
-		clk:             cfg.Clock,
-		idgen:           cfg.IDGen,
-		syslog:          sl,
-		startingBalance: cfg.StartingBalance,
-		cmds:            make(chan cmdReq),
-		bevents:         make(chan BrokerEvent, 1024),
-		markCh:          make(chan Mark, 256),
-		updates:         make(chan Update, 4096),
-		state:           NewState(cfg.Venues),
-		marks:           markState{},
-		trades:          NewRoundTripAggregator(),
+		venues:                 cfg.Venues,
+		gate:                   cfg.Gate,
+		store:                  cfg.Store,
+		brokers:                cfg.Brokers,
+		clk:                    cfg.Clock,
+		idgen:                  cfg.IDGen,
+		syslog:                 sl,
+		startingBalance:        cfg.StartingBalance,
+		recoverSnapshotTimeout: recoverSnapshotTimeout,
+		cmds:                   make(chan cmdReq),
+		bevents:                make(chan BrokerEvent, 1024),
+		markCh:                 make(chan Mark, 256),
+		updates:                make(chan Update, 4096),
+		state:                  NewState(cfg.Venues),
+		marks:                  markState{},
+		trades:                 NewRoundTripAggregator(),
 	}
 	// Master always boots disarmed — Recover never touches arm state, so a
 	// restart is fully disarmed until a deliberate arm click.
@@ -188,7 +207,9 @@ func (c *Core) Recover(ctx context.Context) error {
 		if !ok {
 			continue
 		}
-		acct, pos, orders, err := b.Snapshot(ctx)
+		snapCtx, cancel := context.WithTimeout(ctx, c.recoverSnapshotTimeout)
+		acct, pos, orders, err := b.Snapshot(snapCtx)
+		cancel()
 		if err != nil {
 			c.syslog("exec.recover", "snapshot "+string(v)+": "+err.Error())
 			continue

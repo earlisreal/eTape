@@ -23,10 +23,14 @@ type inMsg interface{ isInMsg() }
 
 type eventMsg struct{ ev feed.Event }
 type ensureIndicatorMsg struct {
-	id   string
-	spec IndicatorSpec
+	connID uint64
+	id     string
+	spec   IndicatorSpec
 }
-type releaseIndicatorMsg struct{ id string }
+type releaseIndicatorMsg struct {
+	connID uint64
+	id     string
+}
 type seedDailyMsg struct {
 	symbol string
 	bars   []feed.Bar
@@ -113,10 +117,12 @@ func (c *Core) DroppedUpdates() uint64  { return c.dropped.Load() }
 // genuinely overloaded — that must surface upstream, not vanish.
 func (c *Core) Feed(ev feed.Event) { c.inbox <- eventMsg{ev: ev} }
 
-func (c *Core) EnsureIndicator(id string, spec IndicatorSpec) {
-	c.inbox <- ensureIndicatorMsg{id: id, spec: spec}
+func (c *Core) EnsureIndicator(connID uint64, id string, spec IndicatorSpec) {
+	c.inbox <- ensureIndicatorMsg{connID: connID, id: id, spec: spec}
 }
-func (c *Core) ReleaseIndicator(id string) { c.inbox <- releaseIndicatorMsg{id: id} }
+func (c *Core) ReleaseIndicator(connID uint64, id string) {
+	c.inbox <- releaseIndicatorMsg{connID: connID, id: id}
+}
 func (c *Core) SeedDaily(symbol string, bars []feed.Bar) {
 	c.inbox <- seedDailyMsg{symbol: symbol, bars: bars}
 }
@@ -194,9 +200,9 @@ func (c *Core) apply(m inMsg) {
 	case eventMsg:
 		c.applyEvent(msg.ev)
 	case ensureIndicatorMsg:
-		c.inds.ensure(c, msg.id, msg.spec) // Task 12
+		c.inds.ensure(c, msg.connID, msg.id, msg.spec) // Task 12
 	case releaseIndicatorMsg:
-		c.inds.release(msg.id)
+		c.inds.release(msg.connID, msg.id)
 	case seedDailyMsg:
 		c.bars.seedDaily(c, msg.symbol, msg.bars) // Task 11
 	case seedHistory1mMsg:

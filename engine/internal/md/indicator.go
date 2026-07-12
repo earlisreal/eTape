@@ -40,7 +40,7 @@ type instance struct {
 	id         string
 	spec       IndicatorSpec
 	c          calc
-	refs       int
+	owners     map[uint64]struct{} // connID -> {}; instance lives while non-empty
 	lastFolded int64
 	series     map[string][]Point // stored FINAL points per slot (snapshot source)
 }
@@ -65,9 +65,9 @@ func newIndicatorSet() *indicatorSet {
 	return &indicatorSet{byID: make(map[string]*instance), bySymTF: make(map[symTF][]*instance)}
 }
 
-func (s *indicatorSet) ensure(c *Core, id string, spec IndicatorSpec) {
+func (s *indicatorSet) ensure(c *Core, connID uint64, id string, spec IndicatorSpec) {
 	if in, ok := s.byID[id]; ok {
-		in.refs++
+		in.owners[connID] = struct{}{}
 		if !specEqual(in.spec, spec) {
 			// The UI re-subscribes the SAME instanceId with a new spec on every
 			// symbol/timeframe switch (ChartController.resetForReload) and on a
@@ -86,7 +86,7 @@ func (s *indicatorSet) ensure(c *Core, id string, spec IndicatorSpec) {
 		slog.Warn("indicator spec rejected", "id", id, "type", spec.Type, "err", err)
 		return
 	}
-	in := &instance{id: id, spec: spec, c: ca, refs: 1, lastFolded: -1,
+	in := &instance{id: id, spec: spec, c: ca, owners: map[uint64]struct{}{connID: {}}, lastFolded: -1,
 		series: make(map[string][]Point)}
 	s.byID[id] = in
 	key := symTF{symbol: spec.Symbol, tf: spec.TF}
@@ -180,13 +180,13 @@ func (s *indicatorSet) emitSnapshots(c *Core, in *instance) {
 	}
 }
 
-func (s *indicatorSet) release(id string) {
+func (s *indicatorSet) release(connID uint64, id string) {
 	in, ok := s.byID[id]
 	if !ok {
 		return
 	}
-	in.refs--
-	if in.refs > 0 {
+	delete(in.owners, connID)
+	if len(in.owners) > 0 {
 		return
 	}
 	delete(s.byID, id)

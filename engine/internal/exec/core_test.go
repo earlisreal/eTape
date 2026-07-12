@@ -628,6 +628,110 @@ func TestCore_BrokerConnDown_ThreadsNoteToStatusUpdate(t *testing.T) {
 	}
 }
 
+// slowSnapshotBroker wraps capStub, overriding only Snapshot: it blocks on
+// <-ctx.Done() and returns ctx.Err(), simulating a venue whose Snapshot HTTP
+// call hangs past Recover's per-venue timeout (e.g. a misconfigured/unreachable
+// TradeZero/Alpaca/moomoo endpoint). Every other Broker method is unused by
+// this test and falls back to capStub's "not implemented" stub.
+type slowSnapshotBroker struct{ capStub }
+
+func (b *slowSnapshotBroker) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {
+	<-ctx.Done()
+	return exec.AccountSnapshot{}, nil, nil, ctx.Err()
+}
+
+// TestRecoverBoundsSnapshotPerVenue verifies CoreConfig.RecoverSnapshotTimeout
+// bounds each venue's Snapshot call during Recover: a venue whose broker hangs
+// indefinitely must not stall Recover past the configured deadline, and must
+// not starve a second, fast venue's reconciliation. This is the boot-order
+// hazard the pre-live checklist flagged: one dead venue's HTTP-client timeout
+// (10-20+s) previously could delay the whole boot sequence.
+func TestRecoverBoundsSnapshotPerVenue(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(1_700_000_000_000))
+	fast := sim.New("fast", clk, 100_000, sim.Options{})
+	seedMarketableBook(fast, "AAPL", 100)
+	// A marketable buy fills immediately, seeding a position; a non-marketable
+	// resting order seeds an open order — both must show up reconciled below.
+	if _, err := fast.SubmitOrder(context.Background(), exec.OrderRequest{
+		Venue: "fast", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay,
+		Qty: 10, LimitPrice: 100, ClientOrderID: "seed-fill",
+	}); err != nil {
+		t.Fatalf("seed fill: %v", err)
+	}
+	if _, err := fast.SubmitOrder(context.Background(), exec.OrderRequest{
+		Venue: "fast", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay,
+		Qty: 5, LimitPrice: 50, ClientOrderID: "seed-resting",
+	}); err != nil {
+		t.Fatalf("seed resting order: %v", err)
+	}
+	// Ground truth to compare Core's post-Recover state against, straight from
+	// the broker itself rather than a guessed/hardcoded equity number.
+	wantAcct, wantPos, wantOrders, err := fast.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("fast.Snapshot: %v", err)
+	}
+	if len(wantPos) != 1 || len(wantOrders) != 1 {
+		t.Fatalf("seed setup wrong: pos=%+v orders=%+v", wantPos, wantOrders)
+	}
+
+	slow := &slowSnapshotBroker{}
+
+	var mu sync.Mutex
+	var kinds, details []string
+	fs := &fakeEventStore{}
+	cfg := exec.CoreConfig{
+		Venues:  []exec.VenueID{"fast", "slow"},
+		Store:   fs,
+		Brokers: map[exec.VenueID]exec.Broker{"fast": fast, "slow": slow},
+		Clock:   clk,
+		SysLog: func(kind, detail string) {
+			mu.Lock()
+			kinds = append(kinds, kind)
+			details = append(details, detail)
+			mu.Unlock()
+		},
+		RecoverSnapshotTimeout: 30 * time.Millisecond,
+	}
+	c := exec.NewCore(cfg)
+
+	start := time.Now()
+	if err := c.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Fatalf("Recover took %v, want well under a second (bounded per-venue Snapshot)", elapsed)
+	}
+
+	state := c.StateForTest()
+	fastVS := state.Venue("fast")
+	if fastVS.Account != wantAcct {
+		t.Fatalf("fast venue account not reconciled: got %+v, want %+v", fastVS.Account, wantAcct)
+	}
+	if pos, ok := fastVS.Positions["AAPL"]; !ok || pos != wantPos[0] {
+		t.Fatalf("fast venue position not reconciled: got %+v, want %+v", fastVS.Positions, wantPos[0])
+	}
+	if o, ok := fastVS.Orders["seed-resting"]; !ok || !o.Working() {
+		t.Fatalf("fast venue resting order not reconciled: %+v", fastVS.Orders)
+	}
+
+	slowVS := state.Venue("slow")
+	if slowVS.Account != (exec.AccountSnapshot{}) || len(slowVS.Positions) != 0 {
+		t.Fatalf("slow venue should be left unreconciled, got account=%+v positions=%+v", slowVS.Account, slowVS.Positions)
+	}
+
+	mu.Lock()
+	found := false
+	for i, k := range kinds {
+		if k == "exec.recover" && strings.Contains(details[i], "slow") {
+			found = true
+		}
+	}
+	mu.Unlock()
+	if !found {
+		t.Fatalf("expected a syslog entry for the slow venue's Snapshot timeout, got kinds=%v details=%v", kinds, details)
+	}
+}
+
 func TestCore_Flatten_RequiresFlattenCapability(t *testing.T) {
 	// A venue whose broker advertises FlattenAll=false must reject Flatten.
 	c, _ := buildCoreWith(t, &capStub{flatten: false}, nil)

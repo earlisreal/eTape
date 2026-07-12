@@ -501,3 +501,50 @@ func TestResolveBackfillAlpacaCredsErrorsWhenNothingResolves(t *testing.T) {
 		t.Fatal("expected an error when nothing resolves")
 	}
 }
+
+// TestLiveMoomooDayLossGap verifies the pure predicate backing the DEC3
+// boot-time warning: moomoo/trd.go's snapshot() hardcodes AccountSnapshot.
+// DayPnL to 0 (Trd_GetFunds has no day-P&L field), so the global MaxDayLoss
+// circuit breaker (exec/gate.go's BreachedDayLoss, which sums every venue's
+// DayPnL) is blind to moomoo-originated losses whenever a moomoo venue is
+// configured alongside a non-zero MaxDayLoss. The predicate must require
+// BOTH conditions — either alone is not a gap.
+func TestLiveMoomooDayLossGap(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  config.Config
+		want bool
+	}{
+		{
+			name: "moomoo venue and MaxDayLoss>0",
+			cfg: config.Config{
+				Gate:   config.Gate{Global: config.GateGlobal{MaxDayLoss: 500}},
+				Venues: []config.Venue{{ID: "moomoo", Broker: "moomoo", AccountID: "123456", Env: "live"}},
+			},
+			want: true,
+		},
+		{
+			name: "moomoo venue but MaxDayLoss==0",
+			cfg: config.Config{
+				Gate:   config.Gate{Global: config.GateGlobal{MaxDayLoss: 0}},
+				Venues: []config.Venue{{ID: "moomoo", Broker: "moomoo", AccountID: "123456", Env: "live"}},
+			},
+			want: false,
+		},
+		{
+			name: "no moomoo venue but MaxDayLoss>0",
+			cfg: config.Config{
+				Gate:   config.Gate{Global: config.GateGlobal{MaxDayLoss: 500}},
+				Venues: []config.Venue{{ID: "tz", Broker: "tradezero"}},
+			},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := liveMoomooDayLossGap(tt.cfg); got != tt.want {
+				t.Fatalf("liveMoomooDayLossGap() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

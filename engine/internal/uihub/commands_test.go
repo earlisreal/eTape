@@ -55,8 +55,8 @@ func (s *spyCfg) SetConfig(k, v string) {
 
 type spyInd struct{ ensured, released string }
 
-func (s *spyInd) EnsureIndicator(id string, _ md.IndicatorSpec) { s.ensured = id }
-func (s *spyInd) ReleaseIndicator(id string)                    { s.released = id }
+func (s *spyInd) EnsureIndicator(_ uint64, id string, _ md.IndicatorSpec) { s.ensured = id }
+func (s *spyInd) ReleaseIndicator(_ uint64, id string)                    { s.released = id }
 
 func TestCommandsSubmitOrderMapsEnums(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true, OrderID: "ET5"}}

@@ -127,6 +127,27 @@ func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock, replay bool
 	return out, nil
 }
 
+// liveMoomooDayLossGap reports whether a live boot has both a configured
+// moomoo venue and a non-zero global MaxDayLoss. moomoo/trd.go's snapshot()
+// hardcodes AccountSnapshot.DayPnL to 0 (Trd_GetFunds has no day-P&L field,
+// and no ledger-derived alternative has been built), so the global MaxDayLoss
+// circuit breaker (exec/gate.go's BreachedDayLoss, which sums every venue's
+// DayPnL) cannot see moomoo-originated losses whenever this returns true.
+// This is an accepted gap, not a bug to fix here — the boot block below uses
+// this predicate only to surface a prominent warning so a live session
+// running moomoo alongside MaxDayLoss doesn't silently assume it's protected.
+func liveMoomooDayLossGap(cfg config.Config) bool {
+	if cfg.Gate.Global.MaxDayLoss <= 0 {
+		return false
+	}
+	for _, v := range cfg.Venues {
+		if v.Broker == "moomoo" {
+			return true
+		}
+	}
+	return false
+}
+
 // rttProber is health.New's unexported prober interface, restated here so
 // this package can select an rttProber out of the built brokers without
 // importing health's internals. alpaca.Adapter.ProbeRTT satisfies it.

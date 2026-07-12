@@ -2,8 +2,9 @@
 #   go 1.26.4, protoc 35.1 (libprotoc), protoc-gen-go v1.36.11, golangci-lint 2.12.2
 #
 # .github/workflows/release.yml builds release-windows/release-macos on tag push;
-# no PR/push CI workflow exists yet, so `gen-ts-check` below is the authoritative
-# drift gate and must pass before merge (run it manually).
+# .github/workflows/ci.yml runs `make -C engine gen-ts-check` as part of the PR/push
+# gate, alongside go test/vet/lint and the UI suite. The `gen-ts`/`gen-ts-check`
+# targets remain usable locally to regenerate or verify before pushing.
 #
 # VERSION feeds -ldflags -X into internal/buildinfo.Version for release builds
 # (see release-windows/release-macos below). Falls back to "dev" when git

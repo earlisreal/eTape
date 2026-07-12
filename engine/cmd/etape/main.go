@@ -592,6 +592,16 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 				Kind: "storage", Detail: report, Level: level,
 			})
 		}
+		if live && liveMoomooDayLossGap(cfg) {
+			detail := "MaxDayLoss does not cover moomoo (DayPnL unavailable); moomoo-originated losses are not gated by the day-loss circuit breaker"
+			log.Warn(detail)
+			st.AppendSysEvent("gate", detail)
+			sysEventSeq++
+			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
+				Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+				Kind: "gate", Detail: detail, Level: "warn",
+			})
+		}
 		st.AppendSysEvent("boot", "engine up")
 		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "connecting"})
 		dropWG.Add(1)
