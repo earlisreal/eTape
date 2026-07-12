@@ -4,7 +4,6 @@ import { createPortal } from "react-dom";
 import type { CSSProperties } from "react";
 import type { PanelProps } from "./registry";
 import type { Side, OrderType, TIF, OrderSession, SubmitOrderArgs } from "../../wire/contract";
-import { normalizeSymbol } from "../symbol";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
@@ -35,7 +34,7 @@ const MODE_LABEL: Record<SizingMode, string> = { Shares: "Shares", Dollar: "Doll
 // the default so nothing changes until the trader picks an explicit session.
 const SESSION_LABEL: Record<OrderSession, string> = { AUTO: "Auto", RTH: "Regular", EXTENDED: "Extended", OVERNIGHT: "Overnight" };
 
-export function OrderTicketPanel({ config, stores, commands, linkGroups, group: groupProp, onConfigChange }: PanelProps): JSX.Element {
+export function OrderTicketPanel({ config, stores, commands, linkGroups, group: groupProp }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
@@ -60,42 +59,6 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
     apply();
     return linkGroups.subscribe(apply);
   }, [linkGroups, group, config.settings.symbol]);
-
-  // Editable header symbol. `draft` is `null` when not editing — the effect
-  // above is then free to keep re-applying the shared link-group symbol on
-  // every subscribe fire without clobbering an in-progress edit (draft is a
-  // separate piece of state it never touches). Seeded from the bare symbol
-  // on focus; Enter commits, Escape/blur revert without writing anything.
-  const [draft, setDraft] = useState<string | null>(null);
-  const commitSymbol = async (raw: string) => {
-    const trimmed = raw.trim();
-    if (trimmed === "") return; // empty commit == cancel, not a garbage symbol
-    // No-op guard: compare against the *original qualified* symbol's bare form
-    // (pre-edit), not a re-normalization of the typed text. Without this,
-    // committing unchanged text (e.g. tabbing in and hitting Enter) re-derives
-    // the market prefix from normalizeSymbol's US.-default allow-list, which
-    // silently flips a non-US symbol like "HK.00700" to "US.00700" even
-    // though the user made no edit — the bare text ("00700") looks identical
-    // either way, so the corruption is otherwise undetectable in the input.
-    if (trimmed.toUpperCase() === bareSymbol(symbol).toUpperCase()) return;
-    const sym = normalizeSymbol(trimmed);
-    if (group !== null) {
-      // try/catch mirrors PanelFrame.tsx's `commit` closure (see its Review
-      // finding comment): this is invoked fire-and-forget (`void commitSymbol(...)`
-      // below), so a transport-level rejection from `focusChecked`'s underlying
-      // `sendCommand` — distinct from the engine returning a handled `{ok:false}`
-      // ack below — would otherwise become a silent unhandled rejection.
-      try {
-        const r = await linkGroups.focusChecked(group, sym); // validated, broadcasts to group + engine
-        if (!r.ok) toast.push({ level: "danger", text: `${bareSymbol(sym)} rejected — ${r.reason}` });
-      } catch (err) {
-        toast.push({ level: "danger", text: `${bareSymbol(sym)} failed — ${err instanceof Error ? err.message : "unexpected error"}` });
-      }
-    } else {
-      onConfigChange({ symbol: sym }); // pinned: unvalidated local persist (no `demand` profile here)
-      setSymbol(sym);
-    }
-  };
 
   const quote = useThrottledQuote(stores.quote, symbol);
   const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
@@ -202,34 +165,9 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 6, padding: 6, height: "100%", background: palette.surface, color: palette.text, fontSize: 12, overflow: "auto" }}>
       {actionsSlot === undefined ? headerActions : actionsSlot ? createPortal(headerActions, actionsSlot) : null}
-      {/* Strip 1 — header blotter line */}
+      {/* Strip 1 — header blotter line: bid/ask (symbol now lives in PanelFrame's
+          own ledger-header title bar — symbolBearing: true in registry.tsx). */}
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-        <input
-          data-testid="symbol"
-          className="serif"
-          value={draft ?? bareSymbol(symbol)}
-          size={Math.max((draft ?? bareSymbol(symbol)).length, 3)}
-          onFocus={() => setDraft(bareSymbol(symbol))}
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault();
-              const raw = draft ?? "";
-              setDraft(null);
-              void commitSymbol(raw);
-            } else if (e.key === "Escape") {
-              e.preventDefault();
-              setDraft(null);
-              (e.target as HTMLInputElement).blur();
-            }
-          }}
-          onBlur={() => setDraft(null)}
-          style={{
-            fontSize: 14, fontWeight: 700, color: palette.text, background: "transparent",
-            border: "none", borderBottom: `2px solid ${draft !== null ? palette.accent : "transparent"}`,
-            outline: "none", padding: 0, minWidth: 0,
-          }}
-        />
         <span className="mono" style={{ fontSize: 12 }}>
           {priceSpan("bid", quote?.bid, palette.up)}
           <span style={{ color: palette.textMuted }}>/</span>
