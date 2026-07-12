@@ -599,6 +599,35 @@ func TestCoreSeedTradesLogsUnparseableSide(t *testing.T) {
 	}
 }
 
+// TestCore_BrokerConnDown_ThreadsNoteToStatusUpdate covers handleBrokerEvent's
+// BrokerConnDown branch: a non-empty Note (moomoo's "OpenD unreachable" on
+// OpenD disconnect) must land on the emitted StatusUpdate.Note, and an empty
+// Note (every other emitter today: alpaca, tradezero, sim) must stay empty.
+func TestCore_BrokerConnDown_ThreadsNoteToStatusUpdate(t *testing.T) {
+	c, b := buildCoreWith(t, &capStub{}, nil)
+	b.ev <- exec.BrokerConnDown{V: "v", Note: "OpenD unreachable"}
+	u := waitFor(t, c, func(u exec.Update) bool {
+		s, ok := u.(exec.StatusUpdate)
+		return ok && !s.Connected
+	}).(exec.StatusUpdate)
+	if u.Connected {
+		t.Fatal("BrokerConnDown must produce a StatusUpdate with Connected=false")
+	}
+	if u.Note != "OpenD unreachable" {
+		t.Fatalf("StatusUpdate.Note = %q, want %q", u.Note, "OpenD unreachable")
+	}
+
+	c2, b2 := buildCoreWith(t, &capStub{}, nil)
+	b2.ev <- exec.BrokerConnDown{V: "v"}
+	u2 := waitFor(t, c2, func(u exec.Update) bool {
+		s, ok := u.(exec.StatusUpdate)
+		return ok && !s.Connected
+	}).(exec.StatusUpdate)
+	if u2.Note != "" {
+		t.Fatalf("StatusUpdate.Note = %q, want empty for a no-note BrokerConnDown", u2.Note)
+	}
+}
+
 func TestCore_Flatten_RequiresFlattenCapability(t *testing.T) {
 	// A venue whose broker advertises FlattenAll=false must reject Flatten.
 	c, _ := buildCoreWith(t, &capStub{flatten: false}, nil)

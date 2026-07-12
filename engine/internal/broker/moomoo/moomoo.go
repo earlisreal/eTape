@@ -427,7 +427,7 @@ func (a *Adapter) Run(ctx context.Context) {
 				a.emit(exec.BrokerConnUp{V: a.venue})
 				a.onConnUp(ctx)
 			case opend.ConnDown:
-				a.emit(exec.BrokerConnDown{V: a.venue})
+				a.emit(exec.BrokerConnDown{V: a.venue, Note: "OpenD unreachable"})
 			}
 		case f, ok := <-a.client.Pushes():
 			if !ok {
