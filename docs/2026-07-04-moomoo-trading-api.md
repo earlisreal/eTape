@@ -160,6 +160,14 @@ No documented max-open-orders or daily cap.
 
 ## Paper trading (SIMULATE) — weak, drives the v1.x decision
 
+> **Decided (moomoo-live-only-venue task): moomoo is no longer an eTape venue
+> option in paper env.** Config validation and boot both reject `broker:
+> "moomoo", env: "paper"` — the built-in sim broker covers the practice/
+> simulate need instead. moomoo venues in eTape are live-only now; the
+> weaknesses below remain accurate background on *why* (they're the reason
+> paper was dropped rather than kept as an option), not a description of a
+> live eTape feature.
+
 - Order types: **limit + market only**; TIF **DAY only**; ops modify+cancel only
   (no cancel-all).
 - **No fill data at all**: fill push (2218) and fill lists are live-only — track
@@ -203,6 +211,8 @@ as app. The only per-order fee among eTape's three venues — a routing consider
    holds the trade password; mechanism (GUI vs one SDK call) TBD Monday.
 5. **Paper can't validate fills** → moomoo adapter is v1.x, validated with tiny
    authorized live orders after the multi-venue chassis is proven on TZ+Alpaca paper.
+   (Since decided: this weakness is also why moomoo paper was removed as an eTape
+   venue option entirely — sim covers practice, moomoo venues are live-only.)
 6. **Rate budget** 15 places + 20 modifies / 30 s: per-venue token buckets, ample
    for discretionary flow.
 7. Trading rides a **separate OpenD connection** from the feed; framing/protobuf

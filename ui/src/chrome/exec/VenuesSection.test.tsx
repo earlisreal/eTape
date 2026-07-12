@@ -750,7 +750,11 @@ describe("VenuesSection", () => {
       expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true);
     });
 
-    it("the env dropdown is present only for moomoo rows, and absent for tradezero/alpaca/sim rows", async () => {
+    it("no row (tradezero/alpaca/moomoo/sim) shows an env dropdown; moomoo shows a static LIVE chip instead", async () => {
+      // moomoo is loaded with env: "paper" on disk (an older build's manual
+      // dropdown could have saved this) — refresh()'s load-path
+      // normalization (mirroring the sim case) forces it to "live" in draft,
+      // so the static chip below reads LIVE regardless.
       const withMoomooAndSim: VenueSetup = baseSetup({
         file: {
           ...runningConfig,
@@ -772,10 +776,38 @@ describe("VenuesSection", () => {
       expect(screen.queryByTestId("venue-account-1")).toBeNull();   // tradezero (manual input gone)
       expect(screen.getByTestId("venue-account-detected-1")).toBeTruthy(); // tradezero read-only display
 
-      expect(screen.getByTestId("venue-env-2")).toBeTruthy();       // moomoo: manual env dropdown
+      expect(screen.queryByTestId("venue-env-2")).toBeNull();       // moomoo: no dropdown
+      expect(screen.getByTestId("venue-env-live-2").textContent).toBe("LIVE"); // moomoo: static LIVE chip
       expect(screen.getByTestId("venue-account-2")).toBeTruthy();   // moomoo: manual account-id input
       expect(screen.queryByTestId("venue-env-3")).toBeNull();       // sim: no env field at all
       expect(screen.getByTestId("venue-account-3")).toBeTruthy();   // sim keeps manual account-id
+    });
+
+    it("switching a row's broker to moomoo forces env: live in the draft", async () => {
+      const commands = makeCommands([baseSetup()]);
+      wrap(commands);
+      const i = 0; // alpaca-paper, env: paper
+      await waitFor(() => expect(screen.getByTestId(`venue-id-${i}`)).toBeTruthy());
+
+      fireEvent.change(screen.getByTestId(`venue-broker-${i}`), { target: { value: "moomoo" } });
+
+      expect(screen.getByTestId(`venue-env-live-${i}`).textContent).toBe("LIVE");
+      const header = screen.getByTestId(`venue-remove-${i}`).parentElement!;
+      expect(header.textContent).toContain("LIVE");
+    });
+
+    it("normalizes a moomoo venue loaded with env: \"paper\" on disk (saved by an older build's manual dropdown) to live on load, so it never strands as paper", async () => {
+      const legacyMoomooPaper: VenueSetup = baseSetup({
+        file: { ...runningConfig, venues: [...runningConfig.venues, { id: "moomoo-legacy", broker: "moomoo", env: "paper", credentials: "moomoo", accountId: "MM1", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 }] },
+        credKeys: ["alpaca", "tradeZero", "moomoo"],
+      });
+      const commands = makeCommands([legacyMoomooPaper]);
+      wrap(commands);
+      await waitFor(() => expect(screen.getByTestId("venue-id-2")).toBeTruthy());
+
+      const header = screen.getByTestId("venue-remove-2").parentElement!;
+      expect(header.textContent).toContain("LIVE");
+      expect(screen.getByTestId("venue-env-live-2").textContent).toBe("LIVE");
     });
 
     it("editing an already-verified row's secret resets its test status; Save becomes disabled again without a fresh Test", async () => {

@@ -42,6 +42,9 @@ func TestValidateVenueConfigRejects(t *testing.T) {
 		"moomoo non-numeric account": func(vc *VenueConfig) {
 			vc.Venues = append(vc.Venues, Venue{ID: "moomoo-live", Broker: "moomoo", Env: "live", AccountID: "not-a-number"})
 		},
+		"moomoo paper env": func(vc *VenueConfig) {
+			vc.Venues = append(vc.Venues, Venue{ID: "moomoo-paper", Broker: "moomoo", Env: "paper", AccountID: "12345678"})
+		},
 		"negative gate cap":         func(vc *VenueConfig) { vc.Gate.Global.MaxDayLoss = -1 },
 		"gate key unknown id":       func(vc *VenueConfig) { vc.Gate.Venue["ghost"] = GateVenue{} },
 		"negative starting balance": func(vc *VenueConfig) { vc.Venues[2].StartingBalance = -1 },

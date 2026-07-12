@@ -23,7 +23,6 @@ import type { ConnState } from "../../wire/WsClient";
 interface Commands { sendCommand(name: string, args: unknown): Promise<AckMsg>; }
 
 const BROKERS = ["tradezero", "alpaca", "moomoo", "sim"];
-const ENVS = ["paper", "live"];
 const BROKER_LABEL: Record<string, string> = { tradezero: "TradeZero", alpaca: "Alpaca", moomoo: "moomoo", sim: "Simulated" };
 const VENUE_ID_RE = /^[a-z0-9-]+$/;
 const CRED_REQUIRED_BROKERS = new Set(["tradezero", "alpaca"]);
@@ -84,13 +83,19 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
       if (ack.status === "accepted" && ack.value) {
         const s = ack.value as VenueSetup;
         setSetup(s);
-        // Mirror setBroker's write-path guarantee ("sim is always paper") on
-        // load — a venue saved by an older build of this form (which had a
-        // manual sim env dropdown) can still be on disk as { broker: "sim",
-        // env: "live" }. Only draft (the editable form) is normalized; setup
-        // stays the unmodified server snapshot restartNeeded diffs against.
+        // Mirror setBroker's write-path guarantee ("sim is always paper",
+        // "moomoo is always live") on load — a venue saved by an older build
+        // of this form (which had a manual sim env dropdown, or a manual
+        // moomoo env dropdown) can still be on disk as { broker: "sim", env:
+        // "live" } or { broker: "moomoo", env: "paper" }. Only draft (the
+        // editable form) is normalized; setup stays the unmodified server
+        // snapshot restartNeeded diffs against.
         setDraft({
-          venues: s.file.venues.map((v) => (v.broker === "sim" ? { ...v, env: "paper" } : { ...v })),
+          venues: s.file.venues.map((v) => {
+            if (v.broker === "sim") return { ...v, env: "paper" };
+            if (v.broker === "moomoo") return { ...v, env: "live" };
+            return { ...v };
+          }),
           gate: { global: { ...s.file.gate.global }, venue: { ...s.file.gate.venue } },
         });
         const keys = s.file.venues.map(() => crypto.randomUUID());
@@ -185,7 +190,6 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
 
   const patchVenue = (i: number, over: Partial<Venue>) =>
     setDraft((d) => ({ ...d, venues: d.venues.map((v, j) => (j === i ? { ...v, ...over } : v)) }));
-  const setEnv = (i: number, env: string) => patchVenue(i, { env });
   // A Test result is only meaningful for the exact broker/credential it was
   // run against — invalidate a row's result back to absent/idle whenever
   // either changes (called from setBroker and setSecretField below).
@@ -210,7 +214,9 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
       credentials: broker !== "sim" && !draft.venues[i].credentials ? mintCredName() : draft.venues[i].credentials,
       // sim has no env dropdown — force paper so switching an existing live
       // venue to sim can never strand it on "live" with no way to change it.
-      ...(broker === "sim" ? { env: "paper" } : {}),
+      // moomoo is live-only — force live so a venue switched from a default
+      // sim row (env: "paper") can never land on moomoo+paper.
+      ...(broker === "sim" ? { env: "paper" } : broker === "moomoo" ? { env: "live" } : {}),
     });
     // A Test result from the previous broker is meaningless once the broker
     // itself changes — invalidate it back to absent/idle.
@@ -420,11 +426,10 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
         const testable = TESTABLE_BROKERS.has(v.broker);
         const test = testState[rowKeys[i]];
         // tradezero/alpaca auto-detect env via Test connection (a read-only
-        // chip); moomoo still needs a manual dropdown (unverified how OpenD
-        // exposes a moomoo paper account); sim has no env field at all — it's
-        // forced to paper in setBroker/addVenue, with the card-header chip
-        // still showing the state.
-        const showEnvDropdown = v.broker === "moomoo";
+        // chip); moomoo is forced live-only (no dropdown — see setBroker and
+        // refresh's load-path normalization); sim has no env field at all —
+        // it's forced to paper in setBroker/addVenue, with the card-header
+        // chip still showing the state.
         const showAccountInput = v.broker === "moomoo" || v.broker === "sim";
         const rowKey = rowKeys[i];
         const limitsExpanded = limitsOpen[rowKey] ?? false;
@@ -494,13 +499,12 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
                       lowercase letters, digits, and hyphens — identifies this venue in orders and events.
                     </span>
                   </label>
-                  {showEnvDropdown ? (
+                  {v.broker === "moomoo" ? (
                     <label style={fieldWrap}>
                       env
-                      <select {...field} data-testid={`venue-env-${i}`} value={v.env}
-                        onChange={(e) => setEnv(i, e.target.value)} style={{ width: 80 }}>
-                        {ENVS.map((x) => <option key={x} value={x}>{x}</option>)}
-                      </select>
+                      <span className="chip chip-live" data-testid={`venue-env-live-${i}`}>
+                        LIVE
+                      </span>
                     </label>
                   ) : testable ? (
                     <label style={fieldWrap}>
