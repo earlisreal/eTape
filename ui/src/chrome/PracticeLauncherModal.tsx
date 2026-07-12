@@ -57,8 +57,15 @@ export function PracticeLauncherModal({ open, onClose, commands }: {
   // let a rejection OR a transport failure close the modal out from under
   // the user — leave it open with an inline error so they can see what
   // happened and retry, instead of silently closing as if the session
-  // started. Each launch path (demo/replay) tracks its own pending/error so
-  // starting one doesn't disturb the other section's controls.
+  // started. `error` still tracks which section it belongs to (so a demo
+  // failure doesn't paint a message under the replay section), but `pending`
+  // gates BOTH start buttons regardless of which section set it: StartDemo
+  // and StartReplay each trigger an engine self-restart, and letting one
+  // section's button stay enabled while the other section's request is
+  // still outstanding would let a user fire both concurrently — overwriting
+  // `pending`, re-enabling a button whose request hasn't resolved yet, and
+  // racing which `.then` gets to call onClose()/clear "Starting…" first.
+  // (Reviewed/fixed post-Task 5 — see task-5-report.md.)
   const onStartDemo = () => {
     setPending("demo");
     setError(null);
@@ -108,7 +115,7 @@ export function PracticeLauncherModal({ open, onClose, commands }: {
           </p>
           {error?.section === "demo" && <p style={{ color: palette.danger, fontSize: 12, marginTop: 0 }}>{error.message}</p>}
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button data-testid="demo-start" disabled={pending === "demo"} onClick={onStartDemo}>
+            <button data-testid="demo-start" disabled={pending !== null} onClick={onStartDemo}>
               {pending === "demo" ? "Starting…" : "Start demo market"}
             </button>
           </div>
@@ -137,7 +144,7 @@ export function PracticeLauncherModal({ open, onClose, commands }: {
               </label>
               {error?.section === "replay" && <p style={{ color: palette.danger, fontSize: 12 }}>{error.message}</p>}
               <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                <button data-testid="replay-start" disabled={!day || pending === "replay"} onClick={onStartReplay}>
+                <button data-testid="replay-start" disabled={!day || pending !== null} onClick={onStartReplay}>
                   {pending === "replay" ? "Starting…" : "Start replay"}
                 </button>
               </div>

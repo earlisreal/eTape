@@ -116,6 +116,45 @@ describe("PracticeLauncherModal", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("Start demo market pending blocks Start replay from firing a concurrent command (and vice versa isn't needed to prove the guard)", async () => {
+    // Reviewer-flagged race: pending used to be section-scoped, so a click on
+    // one section's button while the OTHER section's request was still
+    // outstanding was allowed — letting two self-restart-triggering commands
+    // (StartDemo/StartReplay) fire concurrently. Reproduce by holding
+    // StartDemo's ack unresolved and confirming the replay button goes (and
+    // stays) disabled, and that a click on it never reaches sendCommand.
+    let resolveDemo!: (ack: AckMsg) => void;
+    const sent: Array<{ name: string; args: unknown }> = [];
+    const commands: ReplayCommandAdapter = {
+      sendCommand: vi.fn((name: string, args: unknown): Promise<AckMsg> => {
+        sent.push({ name, args });
+        if (name === "StartDemo") {
+          return new Promise<AckMsg>((resolve) => { resolveDemo = resolve; });
+        }
+        return Promise.resolve({ kind: "ack", corrId: "c1", status: "accepted" } as AckMsg);
+      }),
+      sendQuery: vi.fn(async () => ["2026-01-02", "2026-01-05"]),
+    };
+    const onClose = vi.fn();
+    render(<Wrapped open onClose={onClose} commands={commands} />);
+    await waitFor(() => expect(screen.getByTestId("replay-day")).toBeTruthy());
+
+    fireEvent.click(screen.getByTestId("demo-start"));
+    // Demo's ack is deliberately left unresolved — pending === "demo" now.
+    await waitFor(() => expect((screen.getByTestId("demo-start") as HTMLButtonElement).disabled).toBe(true));
+
+    const replayBtn = screen.getByTestId("replay-start") as HTMLButtonElement;
+    expect(replayBtn.disabled).toBe(true); // fixed bug: used to only disable on pending === "replay"
+    fireEvent.click(replayBtn);
+    expect(sent).toEqual([{ name: "StartDemo", args: {} }]); // StartReplay never sent — button ate the click
+
+    // Resolving the outstanding demo request completes normally and doesn't
+    // get clobbered by a second in-flight request that never should've started.
+    resolveDemo({ kind: "ack", corrId: "c1", status: "accepted" } as AckMsg);
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+    expect(sent).toEqual([{ name: "StartDemo", args: {} }]);
+  });
+
   it("a stale error from a previous attempt does not bleed into the next time the modal opens", async () => {
     const { commands } = fakeCommands({ ack: { status: "blocked", reason: "demo unavailable" } });
     const onClose = vi.fn();
