@@ -208,6 +208,46 @@ describe("PanelFrame — type-to-load (Task 13)", () => {
     await waitFor(() => expect(onConfigChange).toHaveBeenCalledWith({ symbol: "US.NVDA" }));
   });
 
+  // Generalizes a guard Order Ticket used to own before its symbol editing
+  // moved into this shared header (removed in 26ec19a, review follow-up).
+  // The header shows a symbol's BARE form only (bareSymbol strips the market
+  // prefix), so a non-US panel on "HK.00700" displays "00700". Retyping that
+  // same bare text and pressing Enter must be a true no-op — without the
+  // guard, normalizeSymbol("00700") defaults bare -> US., silently flipping
+  // the market to "US.00700" even though the user made no edit.
+  it("Enter with an unchanged bare symbol on a non-US grouped panel is a true no-op — must not re-normalize to US.", async () => {
+    const linkGroups = new LinkGroups(fakeBus() as never, () => {});
+    linkGroups.focus("blue", "HK.00700"); // pre-existing group focus, non-US market
+    const spy = vi.spyOn(linkGroups, "focusChecked");
+    const api = fakePanelApi(true);
+    renderFrame({ api, group: "blue", linkGroups });
+    typeKey("0"); typeKey("0"); typeKey("7"); typeKey("0"); typeKey("0");
+    typeKey("Enter");
+    await Promise.resolve(); // let any (unwanted) commit microtask run
+    expect(spy).not.toHaveBeenCalled();
+    expect(linkGroups.symbolFor("blue")).toBe("HK.00700"); // market prefix untouched
+  });
+
+  it("Enter with an unchanged bare symbol on a pinned non-US panel does not call onConfigChange (no-op guard)", async () => {
+    const onConfigChange = vi.fn();
+    const api = fakePanelApi(true);
+    renderFrame({ api, group: null, onConfigChange, settings: { symbol: "HK.00700" } });
+    typeKey("0"); typeKey("0"); typeKey("7"); typeKey("0"); typeKey("0");
+    typeKey("Enter");
+    await Promise.resolve();
+    expect(onConfigChange).not.toHaveBeenCalled();
+  });
+
+  it("Enter with an unchanged bare symbol on a US panel is also a no-op (skips a redundant engine round-trip)", async () => {
+    const onConfigChange = vi.fn();
+    const api = fakePanelApi(true);
+    renderFrame({ api, group: null, onConfigChange, settings: { symbol: "US.AAPL" } });
+    typeKey("a"); typeKey("a"); typeKey("p"); typeKey("l");
+    typeKey("Enter");
+    await Promise.resolve();
+    expect(onConfigChange).not.toHaveBeenCalled();
+  });
+
   it("Escape cancels the edit and restores the previous header symbol", () => {
     const api = fakePanelApi(true);
     renderFrame({ api, group: null, settings: { symbol: "US.AAPL" } });

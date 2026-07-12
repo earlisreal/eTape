@@ -74,6 +74,14 @@ export function PanelFrame(
   const tlRef = useRef<TypeToLoadState>(tl);
   useEffect(() => { tlRef.current = tl; }, [tl]);
 
+  // Mirrors rawSymbol (defined below, after it exists) for the keydown
+  // effect's `commit` closure, same reason as `tlRef`: that effect's
+  // dependency array does not include rawSymbol (it only depends on
+  // active/modalOpen/group/def, which change far less often than the symbol
+  // a linked group is focused on), so reading rawSymbol directly inside
+  // `commit` would close over a stale value.
+  const symbolRef = useRef<string | undefined>(undefined);
+
   // modalTracker is a module-level singleton, not a prop (see modalTracker.ts):
   // AppShell's Settings-modal open/close can't reach an already-mounted
   // PanelFrame as a live prop, same frozen-factory-closure constraint as the
@@ -136,6 +144,7 @@ export function PanelFrame(
   // creation — full live editing of it is Task 13's type-to-load work.
   const rawSymbol = symbol ?? (config.settings.symbol as string | undefined);
   const effectiveSymbol = rawSymbol ? bareSymbol(rawSymbol) : undefined;
+  useEffect(() => { symbolRef.current = rawSymbol; }, [rawSymbol]);
 
   // On-demand subscription. When this panel declares a demand profile, ask the
   // engine to subscribe the effective (full, prefixed) symbol. ensure is an
@@ -245,6 +254,19 @@ export function PanelFrame(
     if (!def?.symbolBearing) return;
 
     const commit = async (draft: string) => {
+      // No-op guard (review follow-up: generalizes a guard Order Ticket used
+      // to own before its symbol editing moved into this shared header).
+      // Compare the typed draft against the CURRENT symbol's BARE form —
+      // what the header actually displays — before re-normalizing. The
+      // header shows a symbol with its market prefix stripped (bareSymbol,
+      // above), so a non-US panel on "HK.00700" displays "00700". Retyping
+      // that same bare text is meant to be a true no-op, but normalizeSymbol
+      // defaults any bare ticker to "US." — comparing the NORMALIZED sym
+      // against the current symbol would not catch this ("US.00700" !=
+      // "HK.00700", so it would still look like a real edit). Comparing in
+      // bare space first catches it regardless of market.
+      const current = symbolRef.current;
+      if (current && draft.trim().toUpperCase() === bareSymbol(current).toUpperCase()) return;
       const sym = normalizeSymbol(draft);
       try {
         if (group !== null) {
