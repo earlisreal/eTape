@@ -468,6 +468,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	var sealSchedWG sync.WaitGroup
 	var client *opend.Client
 	if live {
+		var sysEventSeq int64 // dedup key disambiguator for the retention sys_events published below
 		stats0, statsErr := st.SizeStats() // PRE-maintenance snapshot for the anomaly backstop
 		if pending, err := st.PendingSealDays(); err == nil && len(pending) > 0 {
 			hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "sealing", DaysTotal: len(pending)})
@@ -480,7 +481,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			log.Error("seal journal", "err", err)
 			detail := fmt.Sprintf("journal seal error: %v", err)
 			st.AppendSysEvent("retention", detail)
-			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{Kind: "retention", Detail: detail, Level: "danger"})
+			sysEventSeq++
+			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
+				Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+				Kind: "retention", Detail: detail, Level: "danger",
+			})
 		} else if sum.Days > 0 || sum.Failed > 0 {
 			log.Info("sealed journal", "days", sum.Days, "chunks", sum.Chunks, "rows", sum.Rows,
 				"failed", sum.Failed, "mbBefore", sum.BytesBefore>>20, "mbAfter", sum.BytesAfter>>20)
@@ -494,12 +499,20 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 				"freeMB", stats0.FreeBytes()>>20, "fileMB", stats0.FileBytes()>>20)
 			detail := fmt.Sprintf("backstop vacuum: %d MB free across days, compacting", stats0.FreeBytes()>>20)
 			st.AppendSysEvent("retention", detail)
-			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{Kind: "retention", Detail: detail, Level: "warn"})
+			sysEventSeq++
+			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
+				Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+				Kind: "retention", Detail: detail, Level: "warn",
+			})
 			if err := st.Vacuum(); err != nil {
 				log.Error("backstop vacuum", "err", err)
 				failDetail := fmt.Sprintf("backstop vacuum failed: %v", err)
 				st.AppendSysEvent("retention", failDetail)
-				hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{Kind: "retention", Detail: failDetail, Level: "danger"})
+				sysEventSeq++
+				hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
+					Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+					Kind: "retention", Detail: failDetail, Level: "danger",
+				})
 			} else {
 				log.Info("backstop vacuum done")
 			}
