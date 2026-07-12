@@ -50,9 +50,10 @@ export function VenueSetupPrompt({ onConfigure, onDismiss, onTryDemo }: {
         </div>
         <p style={{ fontSize: 12, color: palette.textMuted, lineHeight: 1.5, margin: "0 0 14px" }}>
           You already have a paper Sim practice venue, so you can place orders right away.
-          To trade real money, add a broker — an environment and its API keys. A paper Alpaca
-          venue also unlocks deeper 1-minute chart history (~20 days, quota-free) instead of
-          moomoo's limited fallback.
+          To trade real money, fill in one of the broker cards — moomoo configures itself from
+          OpenD, Alpaca and TradeZero just need an API key. A paper Alpaca card also unlocks
+          deeper 1-minute chart history (~20 days, quota-free) instead of moomoo's limited
+          fallback.
         </p>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 }}>
           {BROKER_CHIPS.map((b) => <span key={b} className="chip chip-set">{b}</span>)}

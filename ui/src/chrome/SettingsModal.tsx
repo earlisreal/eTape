@@ -10,6 +10,8 @@ import type { AckMsg } from "../wire/contract";
 import type { ToastApi } from "./Toast";
 import type { Workspace } from "./workspace";
 import type { ConnState } from "../wire/WsClient";
+import type { HealthStore } from "../data/HealthStore";
+import type { ExecStore } from "../data/ExecStore";
 
 export type SettingsSection = "appearance" | "orders" | "venues" | "sounds" | "backup";
 const NAV: { id: SettingsSection; label: string }[] = [
@@ -20,7 +22,7 @@ const NAV: { id: SettingsSection; label: string }[] = [
   { id: "backup", label: "Import & export" },
 ];
 
-export function SettingsModal({ open, section, onSection, onClose, commands, getWorkspace, onImportWorkspace, toast, engineState }:
+export function SettingsModal({ open, section, onSection, onClose, commands, getWorkspace, onImportWorkspace, toast, engineState, health, exec }:
   {
     open: boolean; section: SettingsSection; onSection: (s: SettingsSection) => void; onClose: () => void;
     commands: { sendCommand(name: string, args: unknown): Promise<AckMsg> };
@@ -33,6 +35,12 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
     // `ConnState | undefined` (AppShell's engineState is always defined in
     // practice, but its static type here is whatever this prop declares).
     engineState?: ConnState | undefined;
+    // Threaded to VenuesSection's moomoo card (OpenD link status + live
+    // connected/note per venue) — the app's single existing HealthStore/
+    // ExecStore instances (see AppShell), not a new subscription. Optional
+    // for the same reason as engineState above.
+    health?: HealthStore | undefined;
+    exec?: ExecStore | undefined;
   }): JSX.Element | null {
   const { palette } = useTheme();
   const oc = useOrderConfig();
@@ -66,7 +74,7 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
         <section style={{ padding: 16, overflow: "auto", minHeight: 0, background: palette.bg }}>
           {section === "appearance" && <AppearanceSection />}
           {section === "orders" && <OrderSettingsSection config={oc.config} onSave={oc.save} />}
-          {section === "venues" && <VenuesSection commands={commands} engineState={engineState} />}
+          {section === "venues" && <VenuesSection commands={commands} engineState={engineState} health={health} exec={exec} />}
           {section === "sounds" && <SoundsSection />}
           {section === "backup" && <BackupSection getWorkspace={getWorkspace} onImportWorkspace={onImportWorkspace} orderConfig={oc.config} onImportOrderConfig={oc.save} toast={toast} />}
         </section>

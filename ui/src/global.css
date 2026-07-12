@@ -141,6 +141,27 @@ input.numfield { -moz-appearance: textfield; appearance: textfield; }
   .venue-card { animation: none; }
 }
 
+/* Fixed-roster broker cards (venues broker-cards design §C/§D) — VenuesSection
+   applies this ALONGSIDE .venue-card (reusing its mount animation above
+   rather than duplicating it). Shell only: 1px border, radius 6, --bg
+   background; the header row/hairline/eyebrows are inline styles (mirroring
+   the rest of this file's settings-form treatment) since card internals
+   differ too much per broker for a single shared header class to earn its
+   keep. */
+.broker-card { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); overflow: hidden; margin-bottom: 12px; }
+/* 3px top stripe = the card's status voice. Precedence (highest wins):
+   .broker-card-live (danger — any live-env venue on the card) over
+   .broker-card-ok (bronze accent — configured + healthy); neither class
+   applied = unconfigured, falls back to the plain 1px border above. Broker
+   identity itself stays typographic — these two classes are the ONLY color
+   this shell ever carries. */
+.broker-card-live { border-top: 3px solid var(--danger); }
+.broker-card-ok { border-top: 3px solid var(--accent); }
+/* moomoo's persistent DayPnL caveat — deliberately neither bronze nor red (a
+   caveat, not a state or a live signal); dashed border marks it as distinct
+   from every other bordered surface in this form. Never a tooltip. */
+.broker-card-caveat { border: 1px dashed var(--border-strong); color: var(--text-muted); font-size: 10.5px; padding: 6px 8px; border-radius: 4px; }
+
 /* First-run venue-setup prompt (Task 3, venues/creds redesign) — fade-in only,
    no translate, per the design note; disabled under prefers-reduced-motion. */
 @keyframes venue-setup-fade-in { from { opacity: 0; } to { opacity: 1; } }
