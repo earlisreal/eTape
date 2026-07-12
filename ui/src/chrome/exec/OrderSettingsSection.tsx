@@ -346,10 +346,34 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
   // initializer above whenever `config` changed underneath this component.
   // Without this effect, importing hotkeys updates the shared config but this
   // component's local `templates` (what the cheat sheet and cards render
-  // from) silently keeps showing the pre-import list. This fires on every new
-  // `config.templates` reference — including this component's own Save
-  // round-trip — but re-`.map()`ing content that already matches what's
-  // displayed is a harmless no-op render.
+  // from) silently keeps showing the pre-import list.
+  //
+  // The BackupPanel import is not the only thing that can change `config`
+  // while this component is mounted, though. `OrderConfigProvider`
+  // (useOrderConfig.tsx) is a single app-wide context, and its
+  // `setActiveVenue` is reachable from venue-selection UI in the
+  // AccountPanel/OrderTicketPanel dockview panels, which sit underneath the
+  // Settings modal and are never unmounted by it — the modal is an overlay,
+  // not a remount boundary for them. So `config` genuinely can change here
+  // for reasons that have nothing to do with templates.
+  //
+  // That is exactly why this effect is keyed on `[config.templates]` and not
+  // `[config]`: `setActiveVenue` builds its next config as
+  // `{ ...c, activeVenue: v }` — a shallow spread that reuses the exact same
+  // `templates` array reference — so a venue-only change does not fire this
+  // effect and does not clobber an in-progress local edit (e.g. an
+  // added-but-unsaved template). This only fires on a genuinely new
+  // `config.templates` reference: a hotkey import, or this component's own
+  // Save round-trip (re-`.map()`ing content that already matches what's
+  // displayed there, a harmless no-op render).
+  //
+  // This safety is an invariant of `setActiveVenue`'s implementation, not of
+  // the effect itself: if `setActiveVenue` (or any future `OrderConfig`
+  // writer) ever starts minting a new `templates` array for a change
+  // unrelated to templates, this effect will wrongly fire and silently
+  // clobber in-progress local edits — the exact bug it exists to prevent.
+  // The regression test "keeps an unsaved added template across a
+  // venue-only config change" below pins this invariant.
   useEffect(() => {
     setTemplates(config.templates.map((t) => ({ ...t })));
   }, [config.templates]);

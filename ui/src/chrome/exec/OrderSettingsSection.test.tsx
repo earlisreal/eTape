@@ -375,6 +375,42 @@ describe("OrderSettingsSection", () => {
     expect(screen.getByTestId("tmpl-card-imported-buy")).toBeTruthy();
   });
 
+  // Regression for a review finding on the resync effect above: the effect is
+  // keyed on `[config.templates]`, not `[config]`, specifically because a
+  // sibling writer of the shared `OrderConfig` context — `setActiveVenue`
+  // (useOrderConfig.tsx), reachable from venue-selection UI in dockview
+  // panels that stay mounted underneath the Settings modal — can change
+  // `config` for reasons unrelated to templates while this component is
+  // mounted. `setActiveVenue` builds its next config as
+  // `{ ...c, activeVenue: v }`, a shallow spread that reuses the same
+  // `templates` array reference, so this simulates that exact shape (same
+  // reference, different `activeVenue`) and asserts an in-progress, not-yet-
+  // saved local edit survives. The edit is an added template with a label
+  // ("New") that does not exist anywhere in `config.templates` — if the
+  // effect wrongly fired and resynced from `config.templates`, this
+  // assertion would fail because the added template would vanish. If a
+  // future change to `setActiveVenue` (or a new `OrderConfig` writer) ever
+  // mints a new `templates` reference for a templates-unrelated change, this
+  // test catches the regression.
+  it("keeps an unsaved added template across a venue-only config change (same templates reference)", () => {
+    const { rerender } = wrap();
+    fireEvent.click(screen.getByTestId("add-template"));
+    fireEvent.click(screen.getByTestId("add-place"));
+    expect(screen.getByDisplayValue("New")).toBeTruthy();
+
+    const venueChanged: OrderConfig = { ...SAMPLE_ORDER_CONFIG, activeVenue: "tradezero" };
+    expect(venueChanged.templates).toBe(SAMPLE_ORDER_CONFIG.templates);
+    expect(venueChanged.activeVenue).not.toBe(SAMPLE_ORDER_CONFIG.activeVenue);
+
+    rerender(
+      <ThemeProvider>
+        <OrderSettingsSection config={venueChanged} onSave={vi.fn()} />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByDisplayValue("New")).toBeTruthy();
+  });
+
   // Regression for a CRITICAL safety finding: the capture input previously called
   // only e.preventDefault(), not e.stopPropagation(). The real hotkey engine
   // (useHotkeys) listens for keydown on `window` in the bubble phase, so a
