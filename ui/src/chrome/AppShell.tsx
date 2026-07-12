@@ -151,13 +151,14 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // and only while no real broker venue is configured, the user hasn't
   // dismissed it THIS session, and hasn't permanently silenced it via the
   // checkbox. Also suppressed during a confirmed replay/demo session
-  // (sessionMode.mode === "replay") — nudging toward configuring a broker "to
-  // trade live" makes no sense mid-replay, and venue edits need an engine
-  // restart anyway, which would kill the session. "pending" (mode unconfirmed
-  // yet) intentionally still allows it through, same as the prior unconditional
-  // "live" default — this only needs to suppress the case we're SURE is replay.
+  // (sessionMode.mode === "replay" or "demo") — nudging toward configuring a
+  // broker "to trade live" makes no sense mid-replay/demo, and venue edits
+  // need an engine restart anyway, which would kill the session. "pending"
+  // (mode unconfirmed yet) intentionally still allows it through, same as the
+  // prior unconditional "live" default — this only needs to suppress the
+  // cases we're SURE are practice sessions.
   const showVenueSetup = execStatus !== null && !hasRealVenue && sessionMode.mode !== "replay"
-    && !venueSetupSessionDismissed && !readVenueSetupHidden();
+    && sessionMode.mode !== "demo" && !venueSetupSessionDismissed && !readVenueSetupHidden();
   const dismissVenueSetup = (dontShowAgain: boolean) => {
     if (dontShowAgain) {
       try { localStorage.setItem(VENUE_SETUP_HIDDEN_KEY, "1"); } catch { /* best-effort only */ }

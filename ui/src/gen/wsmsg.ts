@@ -307,7 +307,7 @@ export interface HealthSnapshot {
 }
 /**
  * SessionSnapshot is the static sys.session topic: which mode the engine
- * booted in. Mode is "live" or "replay"; Day/Speed populated only in replay.
+ * booted in. Mode is "live", "replay", or "demo"; Day/Speed populated only in replay.
  */
 export interface SessionSnapshot {
   mode: string;
@@ -530,4 +530,10 @@ export interface StartReplayArgs {
  * GoLiveArgs is intentionally empty (kept as a named type for tygo stability).
  */
 export interface GoLiveArgs {
+}
+/**
+ * StartDemoArgs is intentionally empty (kept as a named type for tygo
+ * stability). A UI-triggered demo relaunch takes no knobs — just -demo.
+ */
+export interface StartDemoArgs {
 }
