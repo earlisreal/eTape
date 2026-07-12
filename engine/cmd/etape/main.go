@@ -254,22 +254,25 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 
-	// restartRequested/requestRestart back the "RestartEngine" WS command
-	// (uihub/commands.go): a client triggers requestRestart, which flags the
-	// restart and cancels ctx via stop -- reusing the exact ordered shutdown
-	// drain below. boot's named `restart` return value picks up the flag
-	// after the drain completes, so the caller (run_default.go/run_tray.go)
-	// only relaunches once every deferred cleanup (releaseLock, st.Close,
-	// etc.) has actually run.
+	// restartRequested/requestRestart back every self-relaunch path -- the
+	// plain "RestartEngine" WS command via restartInPlace below, and the
+	// mode-switch closures (startReplay/goLive/startDemo) directly: calling
+	// requestRestart flags the restart and cancels ctx via stop -- reusing the
+	// exact ordered shutdown drain below. boot's named `restart` return value
+	// picks up the flag after the drain completes, so the caller
+	// (run_default.go/run_tray.go) only relaunches once every deferred
+	// cleanup (releaseLock, st.Close, etc.) has actually run.
 	var restartRequested atomic.Bool
 	requestRestart := func() { restartRequested.Store(true); stop() }
 
-	// nextArgs carries a mode-switch relaunch's flag list from the
-	// startReplay/goLive closures (built below, passed into uihub.New) to
-	// boot's final return. atomic.Pointer because it's written from the
-	// command-dispatch goroutine (via time.AfterFunc, same as
-	// requestRestart) and read here after <-ctx.Done() on the boot
-	// goroutine -- nil means "plain RestartEngine: reuse os.Args".
+	// nextArgs carries a relaunch's flag list from the restartInPlace/
+	// startReplay/goLive/startDemo closures (built below, passed into
+	// uihub.New) to boot's final return. atomic.Pointer because it's written
+	// from the command-dispatch goroutine (via time.AfterFunc, same as
+	// requestRestart) and read here after <-ctx.Done() on the boot goroutine.
+	// Every closure now sets this before restarting (nil is only the
+	// zero-value/no-restart-requested case) -- see relaunch_unix.go /
+	// relaunch_windows.go for how a non-nil argv is applied.
 	var nextArgsPtr atomic.Pointer[[]string]
 
 	live := *replayDay == "" && !*demo
@@ -352,6 +355,19 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		})
 		return nil
 	}
+	// restartInPlace backs the plain "RestartEngine" WS command. Unlike the
+	// mode-switch closures above it reuses the current flags verbatim (so the
+	// restart reboots into the exact same mode, preserving flags childArgs
+	// would drop such as -demo-seed), but prepends -no-open: the user clicked
+	// "Restart now" from an already-open tab, so the relaunch must not pop a
+	// second one (same reasoning as childArgs' own -no-open). No
+	// time.AfterFunc here -- uihub/commands.go already schedules cd.restart
+	// via restartAckFlushDelay before invoking it.
+	restartInPlace := func() {
+		argv := append([]string{"-no-open"}, os.Args[1:]...)
+		nextArgsPtr.Store(&argv)
+		requestRestart()
+	}
 
 	// --- md core ---
 	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs})
@@ -428,7 +444,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			return "replay"
 		}(),
 		ReplayDay: *replayDay, ReplaySpeed: *speed,
-	}, execCore, st, core, venueAdm, venueProbe, requestRestart, startReplay, goLive, startDemo)
+	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startReplay, goLive, startDemo)
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
 	httpSrv := &http.Server{

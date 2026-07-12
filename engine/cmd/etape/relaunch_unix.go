@@ -21,10 +21,11 @@ import (
 // would not). flag.Parse runs again inside the re-exec'd boot.
 //
 // argv is the flag list to boot with; nil means "reuse os.Args unchanged"
-// (the existing RestartEngine case: same flags, changed config file on
-// disk) so CLI flags survive the restart unchanged. Non-nil (a mode-switch
-// relaunch) rebuilds argv as [exe, argv...] so the child sees a clean,
-// correct os.Args regardless of how this process was originally invoked.
+// (no restart-side relaunch closure ran, which should not happen in
+// practice -- every relaunch path, including plain RestartEngine via
+// restartInPlace, now sets nextArgs before calling requestRestart). Non-nil
+// rebuilds argv as [exe, argv...] so the child sees a clean, correct
+// os.Args regardless of how this process was originally invoked.
 //
 // Never returns on success -- the process image is replaced.
 func relaunch(argv []string) error {

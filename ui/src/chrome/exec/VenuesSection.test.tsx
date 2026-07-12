@@ -163,14 +163,16 @@ describe("VenuesSection", () => {
     expect(restartBtn().textContent).toBe("Restarting…");
   });
 
-  it("clears the restart banner once the engine drops and reconnects, without any user action", async () => {
+  it("reloads the page once the engine drops and reconnects, without any user action", async () => {
     const drifted: VenueSetup = baseSetup({
       file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 }] },
     });
-    // First GetVenueSetup (initial mount) reports drift; the second (fired by
-    // the reconnect effect's refresh()) reports the new engine already
-    // running the saved file -- simulating a real post-restart refetch.
-    const commands = makeCommands([drifted, baseSetup()]);
+    const commands = makeCommands([drifted]);
+    const reload = vi.fn();
+    const originalLocation = window.location;
+    // jsdom's Location.reload isn't configurable enough for vi.spyOn, so
+    // swap the whole window.location property instead; restored below.
+    Object.defineProperty(window, "location", { value: { ...originalLocation, reload }, writable: true, configurable: true });
     const { rerender } = wrap(commands, "open");
     await waitFor(() => expect(screen.getByTestId("restart-banner")).toBeTruthy());
 
@@ -184,11 +186,16 @@ describe("VenuesSection", () => {
     rerender(
       <ThemeProvider><ToastProvider><VenuesSection commands={commands} engineState="reconnecting" /></ToastProvider></ThemeProvider>,
     );
+    expect(reload).not.toHaveBeenCalled(); // must wait for the actual drop, not reload while still "open"
     rerender(
       <ThemeProvider><ToastProvider><VenuesSection commands={commands} engineState="open" /></ToastProvider></ThemeProvider>,
     );
 
-    await waitFor(() => expect(screen.queryByTestId("restart-banner")).toBeNull());
+    try {
+      await waitFor(() => expect(reload).toHaveBeenCalledTimes(1));
+    } finally {
+      Object.defineProperty(window, "location", { value: originalLocation, writable: true, configurable: true });
+    }
   });
 
   it("save order: typing a venue's key+secret fires PutCredential (named after that venue's credentials key), then SetVenueSetup", async () => {

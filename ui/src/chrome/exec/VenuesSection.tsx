@@ -101,10 +101,12 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
   // before the engine's shutdown drain even starts), so this must wait for
   // an actual drop before treating a later "open" as "back". sawDropRef
   // tracks that: true only once engineState has been seen non-open during
-  // this restart. On the "back to open" edge it refetches venue setup so
-  // restartNeeded flips false and the banner clears itself once the new
-  // engine reports running === file, instead of leaving a stale
-  // "Restarting…" button forever.
+  // this restart. On the "back to open" edge, reload the page rather than
+  // just clearing local state — the user clicked "Restart now" and wants
+  // visible confirmation the restart happened, not a silently-updated
+  // banner. Waiting for sawDropRef (an actual drop already observed) means
+  // the reload lands on the new, already-booted engine instead of hitting
+  // a dead page mid-shutdown.
   const sawDropRef = useRef(false);
   useEffect(() => {
     if (!restarting) {
@@ -116,11 +118,9 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
       return;
     }
     if (sawDropRef.current) {
-      setRestarting(false);
-      setRestartConfirm(false);
-      refresh();
+      window.location.reload();
     }
-  }, [engineState, restarting, refresh]);
+  }, [engineState, restarting]);
 
   // Client-side mirror of the engine's SetVenueSetup validation (settings
   // redesign design §6) — surfaced pre-save so users see errors before a
@@ -309,7 +309,7 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
   // shutting down (see commands.go's restartAckFlushDelay), so this await
   // resolves cleanly before the socket ever drops -- no fire-and-forget
   // hack needed. Leaves `restarting` true on success; the reconnect effect
-  // above clears it once the engine is back and running === file.
+  // above reloads the page once the engine is back up.
   const restartEngine = async () => {
     setRestarting(true);
     try {
