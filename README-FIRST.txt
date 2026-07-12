@@ -22,11 +22,15 @@ downloaded copy of the binary.
 2. Try the demo first (no setup needed)
 -----------------------------------------
 Launch etape.exe. When the app opens at http://127.0.0.1:8686, click the
-"Try demo" button in the top toolbar. This starts a live, self-generated
-synthetic market -- no moomoo OpenD, no broker account, no credentials
-required. You get a year of warm chart history, a breathing DOM ladder, and a
-moving scanner/movers board -- streaming continuously, not a one-time replay.
-Which symbols move (and how) reshuffles every time you launch it.
+"Try demo" button -- it's on the empty-workspace first-run screen, and again
+in the "Add a broker to trade live" prompt if you dismiss that first. (You
+can also open "Practice" in the top toolbar and choose "Synthetic demo
+market" -- same destination, different door.) This starts a live,
+self-generated synthetic market -- no moomoo OpenD, no broker account, no
+credentials required. You get a year of warm chart history, a breathing DOM
+ladder, and a moving scanner/movers board -- streaming continuously, not a
+one-time replay. Which symbols move (and how) reshuffles every time you
+launch it.
 
 The engine keeps running in the background (look for the eTape icon in your
 system tray) even if you close that browser tab -- reopen
@@ -55,9 +59,10 @@ The demo above uses no live data. To trade or watch real quotes:
      moomoo's servers) and unlock trading once inside the OpenD app itself.
      eTape never sees your OpenD trade password -- unlock happens in OpenD's
      own UI, not in eTape.
-  b. Run etape.exe and click the "Practice" button in the toolbar, then
-     select "Live" mode -- a browser tab opens to http://127.0.0.1:8686
-     now backed by live OpenD.
+  b. Run etape.exe by itself (no "-demo" flag) -- it boots straight into
+     live mode, backed by OpenD, at http://127.0.0.1:8686. Already inside a
+     demo or replay session? Click "Return to live" on the banner at the top
+     of the screen instead of relaunching.
   c. Open the Venues & credentials settings panel inside the eTape UI and
      enter your broker API keys there (TradeZero / Alpaca / moomoo). Keys are
      written to %USERPROFILE%\.eTape\credentials.json and are never sent
