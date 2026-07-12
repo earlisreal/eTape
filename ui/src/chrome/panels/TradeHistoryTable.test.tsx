@@ -96,36 +96,6 @@ describe("TradeHistoryTable", () => {
     expect(screen.queryByText("MSFT")).toBeNull();
   });
 
-  it("footer sums realized only across the venue-filtered rows, excluding other venues", () => {
-    const { props, stores } = mkProps();
-    act(() => {
-      stores.trades.apply(snap([
-        row({ seq: 1, venue: "alpaca-paper", symbol: "US.AAPL", realized: 50, closeMs: 1000 }),
-        row({ seq: 2, venue: "alpaca-paper", symbol: "US.MSFT", realized: 25, closeMs: 2000 }),
-        row({ seq: 3, venue: "tradezero-live", symbol: "US.TSLA", realized: 1000, closeMs: 3000 }),
-      ]));
-    });
-    renderHarness(props, "alpaca-paper");
-    const footer = screen.getByTestId("trades-day-realized");
-    expect(footer.textContent).toContain("75.00");
-    expect(footer.textContent).not.toContain("1000.00");
-    // sanity cross-check: dayRealized() sums ALL venues, so it must differ here
-    expect(stores.trades.dayRealized()).toBe(1075);
-  });
-
-  it("footer colors negative venue-scoped totals with palette.down", () => {
-    const { props, stores } = mkProps();
-    act(() => {
-      stores.trades.apply(snap([
-        row({ seq: 1, venue: "alpaca-paper", symbol: "US.AAPL", realized: -50, closeMs: 1000 }),
-      ]));
-    });
-    renderHarness(props, "alpaca-paper");
-    const footer = screen.getByTestId("trades-day-realized");
-    expect(footer.style.color).toBe(hexToRgb(LIGHT.down));
-    expect(footer.textContent).toContain("−$50.00"); // money()-style: unicode minus, $ before magnitude
-  });
-
   it("clicking a sortable header sorts and persists under settings.tradesSort (not the generic sort key)", () => {
     const { props, stores, configChanges } = mkProps();
     act(() => {

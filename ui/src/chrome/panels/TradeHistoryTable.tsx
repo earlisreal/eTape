@@ -13,11 +13,6 @@ import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColu
 // and the NET aggregate row (every ClosedTradeRow already belongs to exactly
 // one venue).
 
-// Distinct from PositionsTable's money() (AccountPanel.tsx) — deliberately not
-// imported from there (that file stays untouched by this task) even though the
-// ± convention (unicode minus, $ before the magnitude) matches exactly.
-const money = (n: number): string => (n < 0 ? "−$" : "$") + formatPrice(Math.abs(n), 2);
-
 // settings.tradesSort is a DISTINCT key from PositionsTable's settings.sort —
 // both tables will live in the same panel config once Task 7 assembles them,
 // so sharing the generic "sort" key would collide.
@@ -68,11 +63,6 @@ export function TradeHistoryTable({
   const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
   const rows = useMemo(() => sortRows(rows0, sort, SORT_ACCESSORS), [rows0, sort]);
 
-  // Venue-scoped realized sum, computed locally (NOT stores.trades.dayRealized() —
-  // that sums across ALL venues unconditionally per Task 5's design; see the
-  // plan's resolved discrepancy note). Same filtered set as the row list above.
-  const dayRealized = useMemo(() => rows0.reduce((sum, r) => sum + r.realized, 0), [rows0]);
-
   const clickSort = (col: string, sortable: boolean) => {
     if (!sortable) return;
     const next = toggleSort(sort, col);
@@ -115,11 +105,6 @@ export function TradeHistoryTable({
             ))}
           </tbody>
         </table>
-      </div>
-      <div title="Computed from closed round trips — may differ from the account strip's broker-reported Realized figure (fees, overnight carry)."
-        style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", padding: "4px 8px", borderTop: `1px solid ${palette.border}`, background: palette.surface }}>
-        <span style={{ color: palette.textMuted }}>Day realized (closed round trips)</span>
-        <span data-testid="trades-day-realized" className="mono" style={{ color: dayRealized >= 0 ? palette.up : palette.down }}>{money(dayRealized)}</span>
       </div>
     </div>
   );

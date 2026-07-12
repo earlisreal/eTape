@@ -194,7 +194,7 @@ export const PANELS: Record<string, PanelDef> = {
     title: "Order Ticket",
     glyph: "$",
     description: "Compact entry, presets, sizing",
-    symbolBearing: false,
+    symbolBearing: true,
     headerActions: true,
   },
 };

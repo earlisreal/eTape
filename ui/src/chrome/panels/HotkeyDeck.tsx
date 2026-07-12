@@ -14,7 +14,6 @@ import type { Quote, VenueID } from "../../wire/contract";
 import type { ActionTemplate } from "../exec/actionTemplate";
 import type { OrderCommands } from "../exec/commands";
 import type { ToastApi } from "../Toast";
-import { useTheme } from "../ThemeProvider";
 import { useOrderConfig } from "../exec/useOrderConfig";
 import { fireTemplate } from "../exec/fireTemplate";
 import { Keycap } from "../exec/Keycap";
@@ -23,7 +22,6 @@ export interface HotkeyDeckProps {
   venue: VenueID; symbol: string; quote?: Quote | undefined;
   buyingPower: number; positionQty: number;
   oc: OrderCommands; toast: ToastApi;
-  onOpenSettings: () => void;
 }
 
 // deckColor is an explicit override; "auto" (or absent) falls back to the
@@ -42,23 +40,12 @@ export function deckToneClass(t: ActionTemplate): string {
 }
 
 export function HotkeyDeck(
-  { venue, symbol, quote, buyingPower, positionQty, oc, toast, onOpenSettings }: HotkeyDeckProps,
-): JSX.Element {
-  const { palette } = useTheme();
+  { venue, symbol, quote, buyingPower, positionQty, oc, toast }: HotkeyDeckProps,
+): JSX.Element | null {
   const { config } = useOrderConfig();
   const deckTemplates = config.templates.filter((t) => t.deck);
 
-  if (deckTemplates.length === 0) {
-    return (
-      <button type="button" data-testid="deck-empty" onClick={onOpenSettings}
-        style={{
-          width: "100%", padding: "6px", borderRadius: 4, cursor: "pointer", fontSize: 11,
-          border: `1px dashed ${palette.borderStrong}`, background: "transparent", color: palette.textMuted,
-        }}>
-        + Add preset buttons
-      </button>
-    );
-  }
+  if (deckTemplates.length === 0) return null;
 
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
