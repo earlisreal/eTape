@@ -28,7 +28,10 @@ describe("TRADING_LAYOUT dockview round-trip", () => {
 
     const roundTripped = api!.toJSON();
     expect(Object.keys(roundTripped.panels).sort()).toEqual(
-      ["t-chart-1m", "t-chart-10s", "t-dom", "t-tape", "t-ticket", "t-account"].sort(),
+      [
+        "chart-977336c7", "t-chart-1m", "watchlist-75d05981", "movers-51fd77fe",
+        "news-eb65ba23", "t-chart-10s", "t-dom", "t-tape", "t-ticket", "t-account",
+      ].sort(),
     );
   });
 });

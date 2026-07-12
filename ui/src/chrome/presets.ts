@@ -78,12 +78,12 @@ const MONITORING_LAYOUT: SerializedDockview = {
   activeGroup: "m-chart-red",
 } as SerializedDockview;
 
-// Grid shape: outer horizontal split into 3 flat columns sized [1.7, 1,
-// 1.05] (left charts, center DOM/tape, right execution rail); left column
-// rows [1, 1]; center column rows [1.15, 1]; right column rows [auto, 1, 1]
-// (order ticket is naturally compact, approximated here as a slightly
-// smaller fixed weight since dockview's serialized grid sizes are plain
-// numbers — there's no literal "auto" in the schema).
+// Sourced verbatim from Earl's own saved `main` workspace export
+// (etape-layout-2026-07-13.json, exported 2026-07-12T22:05:32Z) — his actual
+// working layout, not a hand-built mockup like MONITORING_LAYOUT above. Grid
+// leaf `id`s intentionally don't match the panel ids they hold (e.g. leaf
+// "t-ticket" holds view "t-dom") — that's real dockview state from panels
+// being rearranged after the groups were first created, kept as exported.
 export const TRADING_LAYOUT: SerializedDockview = {
   grid: {
     root: {
@@ -91,43 +91,63 @@ export const TRADING_LAYOUT: SerializedDockview = {
       data: [
         {
           type: "branch",
-          size: 725,
           data: [
-            { type: "leaf", size: 450, data: { id: "t-chart-1m", views: ["t-chart-1m"], activeView: "t-chart-1m" } },
-            { type: "leaf", size: 450, data: { id: "t-chart-10s", views: ["t-chart-10s"], activeView: "t-chart-10s" } },
+            {
+              type: "branch",
+              data: [
+                { type: "leaf", data: { views: ["chart-977336c7"], activeView: "chart-977336c7", id: "2", hideHeader: true }, size: 670 },
+                { type: "leaf", data: { views: ["t-chart-1m"], activeView: "t-chart-1m", id: "t-chart-1m", hideHeader: true }, size: 719 },
+              ],
+              size: 480,
+            },
+            {
+              type: "branch",
+              data: [
+                { type: "leaf", data: { views: ["watchlist-75d05981"], activeView: "watchlist-75d05981", id: "3", hideHeader: true }, size: 305 },
+                { type: "leaf", data: { views: ["movers-51fd77fe", "news-eb65ba23"], activeView: "news-eb65ba23", id: "4" }, size: 365 },
+                { type: "leaf", data: { views: ["t-chart-10s"], activeView: "t-chart-10s", id: "t-chart-10s", hideHeader: true }, size: 719 },
+              ],
+              size: 446,
+            },
           ],
+          size: 1389,
         },
         {
           type: "branch",
-          size: 427,
           data: [
-            { type: "leaf", size: 481, data: { id: "t-dom", views: ["t-dom"], activeView: "t-dom" } },
-            { type: "leaf", size: 419, data: { id: "t-tape", views: ["t-tape"], activeView: "t-tape" } },
+            {
+              type: "branch",
+              data: [
+                { type: "leaf", data: { views: ["t-dom"], activeView: "t-dom", id: "t-ticket", hideHeader: true }, size: 294 },
+                { type: "leaf", data: { views: ["t-tape"], activeView: "t-tape", id: "t-tape", hideHeader: true }, size: 237 },
+              ],
+              size: 308,
+            },
+            { type: "leaf", data: { views: ["t-ticket"], activeView: "t-ticket", id: "t-account", hideHeader: true }, size: 195 },
+            { type: "leaf", data: { views: ["t-account"], activeView: "t-account", id: "t-orders", hideHeader: true }, size: 423 },
           ],
-        },
-        {
-          type: "branch",
-          size: 448,
-          data: [
-            { type: "leaf", size: 258, data: { id: "t-ticket", views: ["t-ticket"], activeView: "t-ticket" } },
-            { type: "leaf", size: 642, data: { id: "t-account", views: ["t-account"], activeView: "t-account" } },
-          ],
+          size: 531,
         },
       ],
+      size: 926,
     },
-    height: 900,
-    width: 1600,
+    width: 1920,
+    height: 926,
     orientation: "HORIZONTAL",
   },
   panels: {
+    "chart-977336c7": { id: "chart-977336c7", contentComponent: "chart-977336c7", title: "Chart" },
     "t-chart-1m": { id: "t-chart-1m", contentComponent: "t-chart-1m", title: "chart" },
+    "watchlist-75d05981": { id: "watchlist-75d05981", contentComponent: "watchlist-75d05981", title: "Watchlist" },
+    "movers-51fd77fe": { id: "movers-51fd77fe", contentComponent: "movers-51fd77fe", title: "Movers" },
+    "news-eb65ba23": { id: "news-eb65ba23", contentComponent: "news-eb65ba23", title: "News" },
     "t-chart-10s": { id: "t-chart-10s", contentComponent: "t-chart-10s", title: "chart" },
     "t-dom": { id: "t-dom", contentComponent: "t-dom", title: "ladder" },
     "t-tape": { id: "t-tape", contentComponent: "t-tape", title: "tape" },
     "t-ticket": { id: "t-ticket", contentComponent: "t-ticket", title: "order-ticket" },
     "t-account": { id: "t-account", contentComponent: "t-account", title: "account" },
   },
-  activeGroup: "t-chart-1m",
+  activeGroup: "2",
 } as SerializedDockview;
 
 export const PRESETS: Preset[] = [
@@ -149,15 +169,56 @@ export const PRESETS: Preset[] = [
   },
   {
     id: "trading", name: "Trading", thumb: "trading",
-    description: "Focused charts + DOM, tape, ticket, positions. The execution seat.",
+    description: "Focused charts + DOM, tape, ticket, positions, watchlist, movers, news. The execution seat.",
     build: () => ({
       panels: [
-        chart("t-chart-1m", "US.AAPL", "1m", "blue"),
-        chart("t-chart-10s", "US.AAPL", "10s", "blue"),
+        {
+          id: "t-chart-1m", panelId: "chart", group: "blue",
+          settings: {
+            symbol: "US.AAPL", timeframe: "10s",
+            indicators: [
+              { instanceId: "t-chart-1m:VWAP-0", type: "VWAP", params: {}, hidden: false, styles: { line: { color: "#089981" } } },
+            ],
+            chartType: "candle", hideAllDrawings: false,
+            chartSettings: { sessionShading: true, grid: true, volume: true, watermark: false },
+            drawingRailPos: { x: 0, y: 445.9375 },
+          },
+        },
+        {
+          id: "t-chart-10s", panelId: "chart", group: "blue",
+          settings: {
+            symbol: "US.AAPL", timeframe: "D",
+            indicators: [
+              { instanceId: "t-chart-10s:SMA-0", type: "SMA", params: { period: 200 }, styles: { line: { color: "#F23645" } }, hidden: false },
+            ],
+            hideAllDrawings: false,
+            drawingRailPos: { x: 114.125, y: 304.9375 },
+            chartSettings: { sessionShading: true, grid: true, volume: true, watermark: false },
+          },
+        },
         { id: "t-dom", panelId: "ladder", group: "blue", settings: { symbol: "US.AAPL" } },
-        { id: "t-tape", panelId: "tape", group: "blue", settings: { symbol: "US.AAPL", minSize: 0 } },
+        { id: "t-tape", panelId: "tape", group: "blue", settings: { symbol: "US.AAPL", minSize: 10 } },
         { id: "t-ticket", panelId: "order-ticket", group: "blue", settings: {} },
-        { id: "t-account", panelId: "account", group: null, settings: {} },
+        {
+          id: "t-account", panelId: "account", group: "blue",
+          settings: { ordersHeight: 119, tab: "positions", ordersSort: { col: "side", dir: "desc" } },
+        },
+        {
+          id: "chart-977336c7", panelId: "chart", group: "blue",
+          settings: {
+            symbol: "US.AAPL", timeframe: "1m",
+            indicators: [
+              { instanceId: "chart-977336c7:MACD-0", type: "MACD", params: { fast: 12, slow: 26, signal: 9 }, styles: { hist: { hidden: true } }, collapsed: true },
+              { instanceId: "chart-977336c7:VWAP-0", type: "VWAP", params: {}, styles: { line: { color: "#089981" } } },
+            ],
+            chartType: "candle", hideAllDrawings: false,
+            chartSettings: { sessionShading: true, grid: true, volume: true, watermark: false },
+            drawingRailPos: { x: 298.375, y: 448 },
+          },
+        },
+        { id: "movers-51fd77fe", panelId: "movers", group: "blue", settings: {} },
+        { id: "news-eb65ba23", panelId: "news", group: "blue", settings: {} },
+        { id: "watchlist-75d05981", panelId: "watchlist", group: "blue", settings: {} },
       ],
       layout: TRADING_LAYOUT,
     }),

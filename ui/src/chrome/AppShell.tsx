@@ -382,8 +382,16 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       if (timer !== null) { clearTimeout(timer); timer = null; }
       if (transitionEpochRef.current !== myEpoch) return; // superseded by a newer edge meanwhile
       const current = wsRef.current ?? wsNow;
+      // An empty workspace has no panels for planDemoEntry to remap symbols
+      // onto, so entering demo from empty used to leave the grid blank
+      // (just the auto-added Watchlist below). Seed the Trading preset's
+      // panels/layout first so "Try demo" from a fresh workspace lands on a
+      // populated, demo-symbol grid instead of an empty one.
+      const base = current.panels.length === 0
+        ? { ...current, ...PRESETS.find((p) => p.id === "trading")!.build() }
+        : current;
       const isSymbolBearing = (id: string) => PANELS[id]?.symbolBearing ?? false;
-      applyWorkspace(planDemoEntry(current, universe, isSymbolBearing));
+      applyWorkspace(planDemoEntry(base, universe, isSymbolBearing));
       // Appended separately (not folded into planDemoEntry) so dockview
       // computes grid placement for it — see addPanel's own pendingRef
       // comment for why this composes correctly with the applyWorkspace call
