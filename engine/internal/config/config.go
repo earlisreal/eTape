@@ -369,6 +369,41 @@ func WriteVenueConfig(path string, vc VenueConfig) error {
 	return nil
 }
 
+// WriteMoomooSeed re-reads path into a full Config, sets
+// Seed.MoomooAttempted = true, appends v to Venues when non-nil, and re-encodes
+// the whole file atomically — venue and marker land in ONE write so a crash can
+// never split "seeded" from "venue exists". v == nil is the marker-only write
+// (multi/zero-account outcomes, or a pre-existing hand-added venue). Mechanics
+// mirror WriteVenueConfig exactly (same .bak-once semantics, same
+// Load → mutate → encode → atomicfile.Write). Does NOT validate — the caller
+// (venueadmin) validates the resulting VenueConfig BEFORE calling.
+func WriteMoomooSeed(path string, v *Venue) error {
+	if orig, err := os.ReadFile(path); err == nil {
+		bak := path + ".bak"
+		if _, statErr := os.Stat(bak); errors.Is(statErr, os.ErrNotExist) {
+			if err := atomicfile.Write(bak, orig, 0o644); err != nil {
+				return fmt.Errorf("config: write .bak: %w", err)
+			}
+		}
+	}
+	c, err := Load(path)
+	if err != nil {
+		return err
+	}
+	c.Seed.MoomooAttempted = true
+	if v != nil {
+		c.Venues = append(c.Venues, *v)
+	}
+	var buf strings.Builder
+	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
+		return fmt.Errorf("config: encode: %w", err)
+	}
+	if err := atomicfile.Write(path, []byte(buf.String()), 0o644); err != nil {
+		return fmt.Errorf("config: write: %w", err)
+	}
+	return nil
+}
+
 // DefaultVenueConfig is the first-run venue seed: one paper "sim" practice
 // venue funded with DefaultSimStartingBalance and no gate caps (matching the
 // settings UI's "add venue" default). Kept here so the seed content lives next

@@ -248,3 +248,117 @@ env = "paper"
 		t.Fatalf(".bak overwritten on second save")
 	}
 }
+
+// TestWriteMoomooSeedMarkerOnly covers the v==nil case: only the marker
+// changes; the venues list is untouched byte-for-byte (same IDs/fields, same
+// order) after the write.
+func TestWriteMoomooSeedMarkerOnly(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	original := `[md]
+session_anchor = "09:30"
+
+[[venue]]
+id = "old"
+broker = "sim"
+env = "paper"
+`
+	if err := os.WriteFile(p, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load before WriteMoomooSeed: %v", err)
+	}
+	if before.Seed.MoomooAttempted {
+		t.Fatalf("marker should start false")
+	}
+
+	if err := WriteMoomooSeed(p, nil); err != nil {
+		t.Fatalf("WriteMoomooSeed: %v", err)
+	}
+
+	after, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load after WriteMoomooSeed: %v", err)
+	}
+	if !after.Seed.MoomooAttempted {
+		t.Fatalf("marker not set after marker-only WriteMoomooSeed")
+	}
+	if len(after.Venues) != len(before.Venues) {
+		t.Fatalf("venues mutated by marker-only write: before=%+v after=%+v", before.Venues, after.Venues)
+	}
+	for i := range before.Venues {
+		if after.Venues[i] != before.Venues[i] {
+			t.Fatalf("venue[%d] mutated by marker-only write: before=%+v after=%+v", i, before.Venues[i], after.Venues[i])
+		}
+	}
+}
+
+// TestWriteMoomooSeedWithVenue covers the v!=nil case: the appended venue and
+// the marker are both visible after a single re-Load (one write did both).
+func TestWriteMoomooSeedWithVenue(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	original := `[md]
+session_anchor = "09:30"
+
+[[venue]]
+id = "old"
+broker = "sim"
+env = "paper"
+`
+	if err := os.WriteFile(p, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	v := &Venue{ID: "moomoo", Broker: "moomoo", Env: "live", AccountID: "12345678"}
+	if err := WriteMoomooSeed(p, v); err != nil {
+		t.Fatalf("WriteMoomooSeed: %v", err)
+	}
+
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load after WriteMoomooSeed: %v", err)
+	}
+	if !cfg.Seed.MoomooAttempted {
+		t.Fatalf("marker not set after venue WriteMoomooSeed")
+	}
+	if len(cfg.Venues) != 2 || cfg.Venues[0].ID != "old" || cfg.Venues[1] != *v {
+		t.Fatalf("appended venue not present: %+v", cfg.Venues)
+	}
+}
+
+// TestWriteMoomooSeedCreatesBakOnce mirrors TestWriteVenueConfigRoundTripAndBak's
+// .bak approach: the FIRST write copies the original bytes to .bak; a second
+// write never overwrites it.
+func TestWriteMoomooSeedCreatesBakOnce(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	original := `# hand-written, keep me
+[md]
+session_anchor = "09:30"
+`
+	if err := os.WriteFile(p, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := WriteMoomooSeed(p, nil); err != nil {
+		t.Fatalf("WriteMoomooSeed: %v", err)
+	}
+	bak, err := os.ReadFile(p + ".bak")
+	if err != nil || string(bak) != original {
+		t.Fatalf(".bak not the original: err=%v\n%s", err, bak)
+	}
+
+	// Second write (this time with a venue) does NOT overwrite .bak.
+	v := &Venue{ID: "moomoo", Broker: "moomoo", Env: "live", AccountID: "999"}
+	if err := WriteMoomooSeed(p, v); err != nil {
+		t.Fatalf("WriteMoomooSeed (2nd): %v", err)
+	}
+	bak2, err := os.ReadFile(p + ".bak")
+	if err != nil || string(bak2) != original {
+		t.Fatalf(".bak overwritten on second WriteMoomooSeed call: err=%v\n%s", err, bak2)
+	}
+}
