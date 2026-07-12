@@ -93,9 +93,9 @@ async function gotoAndApplyPreset(page: Page, workspace: string, presetName: "Tr
 async function ensureArmed(page: Page): Promise<void> {
   const armChip = page.getByTestId("arm-chip");
   await expect(armChip).toBeVisible({ timeout: 15_000 });
-  if ((await armChip.innerText()).trim() !== "ARMED") {
+  if ((await armChip.innerText()).trim() !== "LOCK TRADING") {
     await armChip.click();
-    await expect(armChip).toHaveText("ARMED");
+    await expect(armChip).toHaveText("LOCK TRADING");
   }
 }
 
