@@ -184,6 +184,27 @@ function StatsStrip({
   const dayPnl = account?.dayPnl ?? null;
   const realized = account?.realized ?? null;
 
+  // Equity/Buying Power read as "settled" values: freeze them at their last
+  // flat (no open position) snapshot while a position is open for this venue,
+  // and resume live updates once the venue goes flat again. Day P&L/Realized
+  // stay live always — this freeze is scoped to Equity/BP only.
+  const positionOpen = stores.exec.positions().some((p) => p.venue === venue && p.qty !== 0);
+
+  // Held pairs are keyed by venue (not a bare pair of refs) because StatsStrip
+  // is a single long-lived instance shared across every venue in the <select>
+  // — a reset-on-venue-change ref would lose venue A's held snapshot for good
+  // the moment the trader glances at venue B and back, even though A's
+  // position (and its freeze) never closed. A venue-keyed map survives that
+  // round trip: each venue keeps its own last-flat snapshot independently, and
+  // switching venues never reads or writes another venue's entry.
+  const heldRef = useRef<Map<string, { equity: number; bp: number }>>(new Map());
+  if (!positionOpen && equity !== null && bp !== null) {
+    heldRef.current.set(venue, { equity, bp });
+  }
+  const held = heldRef.current.get(venue);
+  const displayEquity = positionOpen ? held?.equity ?? equity : equity;
+  const displayBp = positionOpen ? held?.bp ?? bp : bp;
+
   const cell = (label: string, testid: string, value: string, tone?: number) => (
     <div style={{ display: "flex", flexDirection: "column", padding: "2px 10px" }}>
       <span style={{ fontSize: 10, color: palette.textMuted }}>{label}</span>
@@ -193,8 +214,8 @@ function StatsStrip({
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
-      {cell("Equity", "acct-equity", money(equity))}
-      {cell("Buying Power", "acct-bp", money(bp))}
+      {cell("Equity", "acct-equity", money(displayEquity))}
+      {cell("Buying Power", "acct-bp", money(displayBp))}
       {cell("Day P&L", "acct-daypnl", money(dayPnl), dayPnl ?? 0)}
       {cell("Realized", "acct-realized", money(realized), realized ?? 0)}
       <div style={{ flex: 1 }} />

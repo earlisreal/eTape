@@ -68,6 +68,109 @@ describe("AccountPanel", () => {
     expect(screen.getByTestId("acct-equity").textContent).toContain("99.00");
   });
 
+  // --- new: Equity/BP freeze while a position is open (Task 6) ---
+  describe("freezes Equity/BP while a position is open", () => {
+    it("keeps updating Equity/BP live while flat (baseline)", () => {
+      const { props, stores, linkGroups } = mkProps("green");
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false, "alpaca-paper") });
+        linkGroups.focusVenue("green", "alpaca-paper");
+      });
+      wrap(props);
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.account" as never, key: "alpaca-paper", payload: acct("alpaca-paper", { equity: 100, buyingPower: 400 }) });
+      });
+      expect(screen.getByTestId("acct-equity").textContent).toContain("100.00");
+      expect(screen.getByTestId("acct-bp").textContent).toContain("400.00");
+    });
+
+    it("freezes Equity/BP at the last flat snapshot once a position opens, while Day P&L keeps updating", () => {
+      const { props, stores, linkGroups } = mkProps("green");
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false, "alpaca-paper") });
+        linkGroups.focusVenue("green", "alpaca-paper");
+      });
+      wrap(props);
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.account" as never, key: "alpaca-paper", payload: acct("alpaca-paper", { equity: 100, buyingPower: 400, dayPnl: 0 }) });
+      });
+      expect(screen.getByTestId("acct-equity").textContent).toContain("100.00");
+
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({ venue: "alpaca-paper", symbol: "US.AAPL", qty: 300 })] });
+        stores.exec.apply({ kind: "delta", topic: "exec.account" as never, key: "alpaca-paper", payload: acct("alpaca-paper", { equity: 250, buyingPower: 900, dayPnl: 55 }) });
+      });
+      // Equity/BP stay pinned to the pre-open (last-flat) snapshot...
+      expect(screen.getByTestId("acct-equity").textContent).toContain("100.00");
+      expect(screen.getByTestId("acct-bp").textContent).toContain("400.00");
+      // ...but Day P&L is not frozen — it tracks the new snapshot.
+      expect(screen.getByTestId("acct-daypnl").textContent).toContain("55.00");
+    });
+
+    it("resumes live Equity/BP updates once the position goes back to flat", () => {
+      const { props, stores, linkGroups } = mkProps("green");
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false, "alpaca-paper") });
+        linkGroups.focusVenue("green", "alpaca-paper");
+      });
+      wrap(props);
+      act(() => {
+        // Flat snapshot must land as its own render — this is what seeds the
+        // held ref — before the position-open + new-equity batch below.
+        stores.exec.apply({ kind: "snapshot", topic: "exec.account" as never, key: "alpaca-paper", payload: acct("alpaca-paper", { equity: 100, buyingPower: 400 }) });
+      });
+      expect(screen.getByTestId("acct-equity").textContent).toContain("100.00");
+
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({ venue: "alpaca-paper", symbol: "US.AAPL", qty: 300 })] });
+        stores.exec.apply({ kind: "delta", topic: "exec.account" as never, key: "alpaca-paper", payload: acct("alpaca-paper", { equity: 250, buyingPower: 900 }) });
+      });
+      expect(screen.getByTestId("acct-equity").textContent).toContain("100.00"); // still frozen while open
+
+      act(() => {
+        // Position closes: qty back to 0 (also covers "row removed" — the
+        // panel's own filter drops qty===0 rows from the open-position check).
+        stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({ venue: "alpaca-paper", symbol: "US.AAPL", qty: 0 })] });
+        stores.exec.apply({ kind: "delta", topic: "exec.account" as never, key: "alpaca-paper", payload: acct("alpaca-paper", { equity: 260, buyingPower: 950 }) });
+      });
+      expect(screen.getByTestId("acct-equity").textContent).toContain("260.00");
+      expect(screen.getByTestId("acct-bp").textContent).toContain("950.00");
+    });
+
+    it("does not leak a held value across venues when the venue selector changes", () => {
+      const { props, stores, linkGroups } = mkProps("green");
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false, "alpaca-paper", "alpaca-live") });
+        linkGroups.focusVenue("green", "alpaca-paper");
+      });
+      wrap(props);
+      act(() => {
+        // Venue A (alpaca-paper): flat snapshot lands first, as its own render,
+        // so the held ref actually captures 100/400 before the position opens.
+        stores.exec.apply({ kind: "snapshot", topic: "exec.account" as never, key: "alpaca-paper", payload: acct("alpaca-paper", { equity: 100, buyingPower: 400 }) });
+      });
+      act(() => {
+        // Position opens, then a new account update arrives that must freeze
+        // at the held (100/400) pair captured above.
+        stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({ venue: "alpaca-paper", symbol: "US.AAPL", qty: 300 })] });
+        stores.exec.apply({ kind: "delta", topic: "exec.account" as never, key: "alpaca-paper", payload: acct("alpaca-paper", { equity: 999, buyingPower: 999 }) });
+        // Venue B (alpaca-live): flat, its own distinct live value — no position seeded for it.
+        stores.exec.apply({ kind: "snapshot", topic: "exec.account" as never, key: "alpaca-live", payload: acct("alpaca-live", { equity: 55, buyingPower: 66 }) });
+      });
+      expect(screen.getByTestId("acct-equity").textContent).toContain("100.00"); // venue A frozen at its held value
+
+      fireEvent.change(screen.getByTestId("acct-venue"), { target: { value: "alpaca-live" } });
+      // Venue B is flat and must show its own live value, not venue A's held 100/400.
+      expect(screen.getByTestId("acct-equity").textContent).toContain("55.00");
+      expect(screen.getByTestId("acct-bp").textContent).toContain("66.00");
+
+      fireEvent.change(screen.getByTestId("acct-venue"), { target: { value: "alpaca-paper" } });
+      // Switching back to venue A: still open, still shows the held value (not venue B's).
+      expect(screen.getByTestId("acct-equity").textContent).toContain("100.00");
+      expect(screen.getByTestId("acct-bp").textContent).toContain("400.00");
+    });
+  });
+
   it("filters positions to the selected venue and drops NET rows", () => {
     const { props, stores, linkGroups } = mkProps("green");
     act(() => {
