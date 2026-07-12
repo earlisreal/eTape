@@ -70,6 +70,14 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const commitSymbol = async (raw: string) => {
     const trimmed = raw.trim();
     if (trimmed === "") return; // empty commit == cancel, not a garbage symbol
+    // No-op guard: compare against the *original qualified* symbol's bare form
+    // (pre-edit), not a re-normalization of the typed text. Without this,
+    // committing unchanged text (e.g. tabbing in and hitting Enter) re-derives
+    // the market prefix from normalizeSymbol's US.-default allow-list, which
+    // silently flips a non-US symbol like "HK.00700" to "US.00700" even
+    // though the user made no edit — the bare text ("00700") looks identical
+    // either way, so the corruption is otherwise undetectable in the input.
+    if (trimmed.toUpperCase() === bareSymbol(symbol).toUpperCase()) return;
     const sym = normalizeSymbol(trimmed);
     if (group !== null) {
       const r = await linkGroups.focusChecked(group, sym); // validated, broadcasts to group + engine
