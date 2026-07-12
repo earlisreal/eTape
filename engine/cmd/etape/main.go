@@ -385,16 +385,22 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		var dailyChain, intradayChain []backfill.Source
 
 		if *demo {
-			gen := synth.New(demoSeedValue(*demoSeed), clock.System{})
-			gen.Seed(st, clock.System{}.Now().UnixMilli())
-			st.Flush()
+			// demoSeedValue draws a fresh random seed via crypto/rand each call
+			// when *demoSeed==0 (the documented "random per launch" default) --
+			// calling it twice would build the generator with one seed and log a
+			// different one, silently breaking the spec's reproducibility
+			// contract ("the same -demo-seed reproduces the identical universe
+			// and day") on the most common (default random) path. Call once.
+			seed := demoSeedValue(*demoSeed)
+			gen := synth.New(seed, clock.System{})
+			gen.Seed(st, clock.System{}.Now().UnixMilli()) // flushes internally
 			sf := synth.NewFeed(gen, st, clock.System{})
 			req := synth.NewRequester(gen)
 			go func() { _ = sf.Run(ctx) }()
 			pipeWG.Add(1)
 			go pipe(ctx, &pipeWG, sf.Events(), core, st) // journaling ON into demo.db
 			feedForHub, pollReq, mmProbe = sf, req, req
-			log.Info("engine up (demo synth feed)", "seed", demoSeedValue(*demoSeed), "symbols", gen.Symbols())
+			log.Info("engine up (demo synth feed)", "seed", seed, "symbols", gen.Symbols())
 		} else {
 			client := opend.New(opend.Options{Addr: cfg.OpenD.Addr(), Clock: clock.System{}})
 			fd := opend.NewOpenDFeed(client, opend.FeedOptions{
