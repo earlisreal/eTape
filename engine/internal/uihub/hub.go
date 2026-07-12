@@ -55,6 +55,17 @@ type releaseDemandReq struct {
 	demandID string
 }
 
+type ensureIndicatorReq struct {
+	connID uint64
+	id     string
+	spec   md.IndicatorSpec
+}
+
+type releaseIndicatorReq struct {
+	connID uint64
+	id     string
+}
+
 // loadOlderReq is a pan-triggered deeper-history request marshaled onto
 // Run's goroutine (see Hub.LoadOlder's doc comment for why).
 type loadOlderReq struct {
@@ -120,30 +131,42 @@ type Hub struct {
 	cfg HubConfig
 	m   *mirror
 
-	register        chan client
-	unregister      chan client
-	subCh           chan subReq
-	unsubCh         chan subReq
-	ensureDemandCh  chan ensureDemandReq
-	releaseDemandCh chan releaseDemandReq
-	loadOlderCh     chan loadOlderReq
-	demandSnapCh    chan chan []string
-	mdCh            chan md.Update
-	execCh          chan exec.Update
-	pubCh           chan pub
-	dropCh          chan dropReport     // conn goroutines -> Run: write-timeout drop reports
-	backfillDoneCh  chan backfillResult // backfill goroutines -> Run: daily-fetch outcome
-	syncCh          chan chan struct{}  // test barrier
-	closed          chan struct{}       // closed when Run returns; unblocks stuck senders
+	register           chan client
+	unregister         chan client
+	subCh              chan subReq
+	unsubCh            chan subReq
+	ensureDemandCh     chan ensureDemandReq
+	releaseDemandCh    chan releaseDemandReq
+	ensureIndicatorCh  chan ensureIndicatorReq
+	releaseIndicatorCh chan releaseIndicatorReq
+	loadOlderCh        chan loadOlderReq
+	demandSnapCh       chan chan []string
+	mdCh               chan md.Update
+	execCh             chan exec.Update
+	pubCh              chan pub
+	dropCh             chan dropReport     // conn goroutines -> Run: write-timeout drop reports
+	backfillDoneCh     chan backfillResult // backfill goroutines -> Run: daily-fetch outcome
+	syncCh             chan chan struct{}  // test barrier
+	closed             chan struct{}       // closed when Run returns; unblocks stuck senders
 
 	feedSlot      atomic.Pointer[feedBox]
 	backfillSlot  atomic.Pointer[backfillBox]
 	loadOlderSlot atomic.Pointer[loadOlderBox]
 
+	// ind is the md.Core surface EnsureIndicator/ReleaseIndicator forward to.
+	// Unlike feedSlot/backfillSlot/loadOlderSlot (injected asynchronously,
+	// after Run is already goroutine-scheduled, hence the atomic.Pointer
+	// boxes), ind is set once via SetIndicators inside uihub.New -- before the
+	// caller ever starts Run's goroutine -- and is read only from Run's own
+	// goroutine (handleEnsureIndicator/handleReleaseIndicator/
+	// handleUnregister), so a plain field is race-safe here.
+	ind Indicators
+
 	// Run-loop-owned:
 	clients          map[client]map[wsmsg.Topic]bool
 	demands          map[uint64]map[string]demandInfo // connID -> demandID -> demandInfo
 	demandLive       map[uint64]bool                  // connID currently registered
+	indicators       map[uint64]map[string]bool       // connID -> instanceIDs owned by that connection
 	backfilled       map[string]bool                  // symbol -> daily backfill has succeeded (process lifetime)
 	backfillInflight map[string]bool                  // symbol -> a backfill spawn is currently running
 	pendKeep         map[string]staged                // classMDKeep, flushed on md ticker
@@ -165,29 +188,32 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 	}
 	return &Hub{
 		clk: clk, cfg: cfg, m: m,
-		register:         make(chan client),
-		unregister:       make(chan client),
-		subCh:            make(chan subReq),
-		unsubCh:          make(chan subReq),
-		ensureDemandCh:   make(chan ensureDemandReq),
-		releaseDemandCh:  make(chan releaseDemandReq),
-		loadOlderCh:      make(chan loadOlderReq),
-		demandSnapCh:     make(chan chan []string),
-		mdCh:             make(chan md.Update, cfg.Buf),
-		execCh:           make(chan exec.Update, cfg.Buf),
-		pubCh:            make(chan pub, cfg.Buf),
-		dropCh:           make(chan dropReport, cfg.Buf),
-		backfillDoneCh:   make(chan backfillResult, cfg.Buf),
-		syncCh:           make(chan chan struct{}),
-		closed:           make(chan struct{}),
-		clients:          map[client]map[wsmsg.Topic]bool{},
-		demands:          map[uint64]map[string]demandInfo{},
-		demandLive:       map[uint64]bool{},
-		backfilled:       map[string]bool{},
-		backfillInflight: map[string]bool{},
-		pendKeep:         map[string]staged{},
-		tapePend:         map[string][]wsmsg.Tick{},
-		acctPend:         map[string]staged{},
+		register:           make(chan client),
+		unregister:         make(chan client),
+		subCh:              make(chan subReq),
+		unsubCh:            make(chan subReq),
+		ensureDemandCh:     make(chan ensureDemandReq),
+		releaseDemandCh:    make(chan releaseDemandReq),
+		ensureIndicatorCh:  make(chan ensureIndicatorReq),
+		releaseIndicatorCh: make(chan releaseIndicatorReq),
+		loadOlderCh:        make(chan loadOlderReq),
+		demandSnapCh:       make(chan chan []string),
+		mdCh:               make(chan md.Update, cfg.Buf),
+		execCh:             make(chan exec.Update, cfg.Buf),
+		pubCh:              make(chan pub, cfg.Buf),
+		dropCh:             make(chan dropReport, cfg.Buf),
+		backfillDoneCh:     make(chan backfillResult, cfg.Buf),
+		syncCh:             make(chan chan struct{}),
+		closed:             make(chan struct{}),
+		clients:            map[client]map[wsmsg.Topic]bool{},
+		demands:            map[uint64]map[string]demandInfo{},
+		demandLive:         map[uint64]bool{},
+		indicators:         map[uint64]map[string]bool{},
+		backfilled:         map[string]bool{},
+		backfillInflight:   map[string]bool{},
+		pendKeep:           map[string]staged{},
+		tapePend:           map[string][]wsmsg.Tick{},
+		acctPend:           map[string]staged{},
 	}
 }
 
@@ -223,6 +249,14 @@ func (h *Hub) Unsubscribe(c client, t wsmsg.Topic) {
 	case <-h.closed:
 	}
 }
+
+// SetIndicators injects the md.Core surface EnsureIndicator/ReleaseIndicator
+// forward to. Unlike SetFeed (called after the hub is already running), this
+// is called synchronously inside uihub.New -- before the caller starts Run's
+// goroutine -- so h.ind needs no atomic box (see the Hub struct's doc comment
+// on the field). Every forwarding call nil-guards h.ind so tests that never
+// call this (NewHubForTest leaves it nil) still exercise the bookkeeping.
+func (h *Hub) SetIndicators(i Indicators) { h.ind = i }
 
 // SetFeed injects the market-data control surface after the hub is running.
 // Safe to call once from boot; nil until then (replay/tests never call it).
@@ -289,6 +323,26 @@ func (h *Hub) EnsureDemand(connID uint64, d feed.Demand) {
 func (h *Hub) ReleaseDemand(connID uint64, demandID string) {
 	select {
 	case h.releaseDemandCh <- releaseDemandReq{connID: connID, demandID: demandID}:
+	case <-h.closed:
+	}
+}
+
+// EnsureIndicator records connID's ownership of instance id and forwards to
+// the injected md.Core (Run-loop side) -- the Indicators-interface mirror of
+// EnsureDemand, so a connection's indicator instances are swept on disconnect
+// the same way its market-data demands already are (handleUnregister).
+func (h *Hub) EnsureIndicator(connID uint64, id string, spec md.IndicatorSpec) {
+	select {
+	case h.ensureIndicatorCh <- ensureIndicatorReq{connID: connID, id: id, spec: spec}:
+	case <-h.closed:
+	}
+}
+
+// ReleaseIndicator forgets connID's ownership of instance id and forwards the
+// release to the injected md.Core.
+func (h *Hub) ReleaseIndicator(connID uint64, id string) {
+	select {
+	case h.releaseIndicatorCh <- releaseIndicatorReq{connID: connID, id: id}:
 	case <-h.closed:
 	}
 }
@@ -404,6 +458,10 @@ func (h *Hub) Run(ctx context.Context) error {
 			h.handleEnsureDemand(r)
 		case r := <-h.releaseDemandCh:
 			h.handleReleaseDemand(r)
+		case r := <-h.ensureIndicatorCh:
+			h.handleEnsureIndicator(r)
+		case r := <-h.releaseIndicatorCh:
+			h.handleReleaseIndicator(r)
 		case r := <-h.loadOlderCh:
 			h.handleLoadOlder(r)
 		case reply := <-h.demandSnapCh:
@@ -459,6 +517,10 @@ func (h *Hub) drain() {
 			h.handleEnsureDemand(r)
 		case r := <-h.releaseDemandCh:
 			h.handleReleaseDemand(r)
+		case r := <-h.ensureIndicatorCh:
+			h.handleEnsureIndicator(r)
+		case r := <-h.releaseIndicatorCh:
+			h.handleReleaseIndicator(r)
 		case r := <-h.loadOlderCh:
 			h.handleLoadOlder(r)
 		case u := <-h.mdCh:
@@ -491,6 +553,14 @@ func (h *Hub) handleUnregister(c client) {
 			}
 		}
 		delete(h.demands, id)
+	}
+	if m := h.indicators[id]; m != nil {
+		if h.ind != nil {
+			for iid := range m {
+				h.ind.ReleaseIndicator(id, iid)
+			}
+		}
+		delete(h.indicators, id)
 	}
 	delete(h.demandLive, id)
 	delete(h.clients, c)
@@ -611,6 +681,38 @@ func (h *Hub) handleReleaseDemand(r releaseDemandReq) {
 	}
 	if f := h.feed(); f != nil {
 		f.Release(r.demandID)
+	}
+}
+
+// handleEnsureIndicator mirrors handleEnsureDemand: it reuses the existing
+// demandLive liveness tracker (rather than a parallel one) so a late ensure
+// for an already-unregistered connection is dropped the same way a late
+// demand ensure is, then records r.id under h.indicators[r.connID] and
+// forwards to the injected md.Core so ownership is tracked on both sides --
+// the Hub only needs to know WHICH ids to release on disconnect; md.Core's
+// owner set (indicator.go) handles the actual idempotency/correctness.
+func (h *Hub) handleEnsureIndicator(r ensureIndicatorReq) {
+	if !h.demandLive[r.connID] {
+		return // conn already gone; drop so it can never leak the instance
+	}
+	m := h.indicators[r.connID]
+	if m == nil {
+		m = map[string]bool{}
+		h.indicators[r.connID] = m
+	}
+	m[r.id] = true
+	if h.ind != nil {
+		h.ind.EnsureIndicator(r.connID, r.id, r.spec)
+	}
+}
+
+// handleReleaseIndicator mirrors handleReleaseDemand.
+func (h *Hub) handleReleaseIndicator(r releaseIndicatorReq) {
+	if m := h.indicators[r.connID]; m != nil {
+		delete(m, r.id)
+	}
+	if h.ind != nil {
+		h.ind.ReleaseIndicator(r.connID, r.id)
 	}
 }
 

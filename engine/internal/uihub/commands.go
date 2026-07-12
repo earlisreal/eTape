@@ -31,8 +31,8 @@ type configStore interface {
 }
 
 type indicatorCtl interface {
-	EnsureIndicator(id string, spec md.IndicatorSpec)
-	ReleaseIndicator(id string)
+	EnsureIndicator(connID uint64, id string, spec md.IndicatorSpec)
+	ReleaseIndicator(connID uint64, id string)
 }
 
 // demandCtl is the hub surface the on-demand-subscription commands drive
@@ -191,7 +191,7 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		if err := json.Unmarshal(args, &a); err != nil || a.InstanceID == "" {
 			return blocked("bad args"), false
 		}
-		cd.ind.EnsureIndicator(a.InstanceID, md.IndicatorSpec{
+		cd.ind.EnsureIndicator(connID, a.InstanceID, md.IndicatorSpec{
 			Symbol: a.Symbol, TF: session.Timeframe(a.Timeframe),
 			Type: md.IndicatorType(a.Type), Params: a.Params,
 		})
@@ -203,7 +203,7 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		if err := json.Unmarshal(args, &a); err != nil || a.InstanceID == "" {
 			return blocked("bad args"), false
 		}
-		cd.ind.ReleaseIndicator(a.InstanceID)
+		cd.ind.ReleaseIndicator(connID, a.InstanceID)
 		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "EnsureSymbol":
 		var a wsmsg.EnsureSymbolArgs
