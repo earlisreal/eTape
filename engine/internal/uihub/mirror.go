@@ -348,16 +348,25 @@ func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
 			out = append(out, staged{Topic: topic, Payload: m.books[s]})
 		}
 	case wsmsg.TopicTape:
+		// make (not append-to-nil) so an empty tape batch marshals to `[]`,
+		// not `null` -- registry.ts:65 calls .length on the payload.
 		for _, s := range sortedKeysOf(m.tape) {
-			out = append(out, staged{Topic: topic, Payload: append([]wsmsg.Tick(nil), m.tape[s]...)})
+			ticks := make([]wsmsg.Tick, 0, len(m.tape[s]))
+			out = append(out, staged{Topic: topic, Payload: append(ticks, m.tape[s]...)})
 		}
 	case wsmsg.TopicBars:
+		// make (not append-to-nil) so an empty bars series marshals to `[]`,
+		// not `null` -- BarStore.apply calls .slice() on the payload.
 		for _, k := range sortedKeysOf(m.bars) {
-			out = append(out, staged{Topic: topic, Payload: append([]wsmsg.Bar(nil), m.bars[k]...)})
+			bars := make([]wsmsg.Bar, 0, len(m.bars[k]))
+			out = append(out, staged{Topic: topic, Payload: append(bars, m.bars[k]...)})
 		}
 	case wsmsg.TopicIndicator:
+		// make (not append-to-nil) so an empty indicator series marshals to
+		// `[]`, not `null` -- IndicatorStore.apply calls .slice() on the payload.
 		for _, k := range sortedKeysOf(m.indicators) {
-			out = append(out, staged{Topic: topic, Key: k, Payload: append([]wsmsg.IndicatorPoint(nil), m.indicators[k]...)})
+			pts := make([]wsmsg.IndicatorPoint, 0, len(m.indicators[k]))
+			out = append(out, staged{Topic: topic, Key: k, Payload: append(pts, m.indicators[k]...)})
 		}
 	case wsmsg.TopicScannerRank:
 		for _, sess := range sortedKeysOf(m.rank) {
@@ -383,7 +392,11 @@ func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
 	case wsmsg.TopicExecOrders:
 		out = append(out, staged{Topic: topic, Payload: m.ordersPayload()})
 	case wsmsg.TopicExecFills:
-		out = append(out, staged{Topic: topic, Payload: append([]wsmsg.Fill(nil), m.fills...)})
+		// make (not append-to-nil) so an empty fills list marshals to `[]`,
+		// not `null` -- FillStore.ingest has no null guard, and m.fills is
+		// nil until the first fill, so every zero-fill reconnect hits this.
+		fills := make([]wsmsg.Fill, 0, len(m.fills))
+		out = append(out, staged{Topic: topic, Payload: append(fills, m.fills...)})
 	case wsmsg.TopicExecTrades:
 		trades := make([]wsmsg.ClosedTradeRow, 0, len(m.trades))
 		out = append(out, staged{Topic: topic, Payload: append(trades, m.trades...)})
@@ -396,7 +409,11 @@ func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
 	case wsmsg.TopicSysBoot:
 		out = append(out, staged{Topic: topic, Payload: m.boot})
 	case wsmsg.TopicSysEvents:
-		out = append(out, staged{Topic: topic, Payload: append([]wsmsg.SysEvent(nil), m.events...)})
+		// make (not append-to-nil) so an empty events list marshals to `[]`,
+		// not `null` -- already null-guarded on the UI side, but kept
+		// consistent with the other four sites in this function.
+		events := make([]wsmsg.SysEvent, 0, len(m.events))
+		out = append(out, staged{Topic: topic, Payload: append(events, m.events...)})
 	}
 	// scanner.hit and config have no snapshot.
 	return out

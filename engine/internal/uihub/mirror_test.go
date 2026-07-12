@@ -326,6 +326,74 @@ func TestMirrorEmptyNewsSnapshotMarshalsToArrayNotNull(t *testing.T) {
 	}
 }
 
+// TestMirrorEmptyFillsSnapshotMarshalsToArrayNotNull verifies a brand-new
+// subscriber's exec.fills snapshot, taken before any fill has ever occurred,
+// serializes to a JSON array `[]` rather than `null` -- this is the sharpest
+// case in the nil-slice bug family: m.fills is nil until the first fill, so
+// every zero-fill reconnect hits it. snapshotFrames must use the make-then-
+// append pattern (like TopicNews/TopicExecTrades), not append-to-nil, which
+// marshals an empty slice to null and crashes FillStore.ingest (no guard).
+func TestMirrorEmptyFillsSnapshotMarshalsToArrayNotNull(t *testing.T) {
+	m := testMirror()
+	frames := m.snapshotFrames(wsmsg.TopicExecFills)
+	if len(frames) != 1 {
+		t.Fatalf("expected exactly one fills snapshot frame, got %d", len(frames))
+	}
+	b, err := json.Marshal(frames[0].Payload)
+	if err != nil {
+		t.Fatalf("marshal fills payload: %v", err)
+	}
+	if string(b) != "[]" {
+		t.Fatalf("empty fills snapshot must marshal to []: got %s", b)
+	}
+}
+
+// TestMirrorEmptyTapeSnapshotMarshalsToArrayNotNull verifies the reachable
+// empty-series edge for md.tape: an empty tick batch (a TapeUpdate with zero
+// Ticks) still records the symbol's key in m.tape (appendTape is called
+// unconditionally regardless of batch size), so a subsequent snapshot for
+// that symbol must marshal to `[]`, not `null` -- registry.ts:65 calls
+// .length on the payload and TapeRing.apply would blow up on null.
+func TestMirrorEmptyTapeSnapshotMarshalsToArrayNotNull(t *testing.T) {
+	m := testMirror()
+	d := m.applyMD(md.TapeUpdate{Symbol: "US.AAPL", Ticks: nil})
+	if d != nil {
+		t.Fatalf("empty tape batch should stage no delta, got %+v", d)
+	}
+	frames := m.snapshotFrames(wsmsg.TopicTape)
+	if len(frames) != 1 {
+		t.Fatalf("expected exactly one tape snapshot frame, got %d", len(frames))
+	}
+	b, err := json.Marshal(frames[0].Payload)
+	if err != nil {
+		t.Fatalf("marshal tape payload: %v", err)
+	}
+	if string(b) != "[]" {
+		t.Fatalf("empty tape snapshot must marshal to []: got %s", b)
+	}
+}
+
+// TestMirrorEmptyIndicatorSnapshotMarshalsToArrayNotNull verifies the
+// reachable empty-series edge for md.indicator: an empty indicator snapshot
+// (Snapshot:true, zero Points) still records the series key in
+// m.indicators, so a subsequent snapshot for that key must marshal to `[]`,
+// not `null` -- IndicatorStore.apply calls .slice() on the payload.
+func TestMirrorEmptyIndicatorSnapshotMarshalsToArrayNotNull(t *testing.T) {
+	m := testMirror()
+	m.applyIndicator(md.IndicatorUpdate{SeriesKey: "vwap", Snapshot: true, Points: nil})
+	frames := m.snapshotFrames(wsmsg.TopicIndicator)
+	if len(frames) != 1 {
+		t.Fatalf("expected exactly one indicator snapshot frame, got %d", len(frames))
+	}
+	b, err := json.Marshal(frames[0].Payload)
+	if err != nil {
+		t.Fatalf("marshal indicator payload: %v", err)
+	}
+	if string(b) != "[]" {
+		t.Fatalf("empty indicator snapshot must marshal to []: got %s", b)
+	}
+}
+
 func TestNewMirrorSeedsDisarmedAndNote(t *testing.T) {
 	m := newMirror([]venueMeta{
 		{ID: "alpaca-paper", Broker: wsmsg.BrokerAlpaca},
