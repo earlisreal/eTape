@@ -150,6 +150,13 @@ type StockInfo struct {
 	MaxPerReq int  `toml:"max_per_req"` // codes per 3203/3207 request (snapshot caps at 400)
 }
 
+// Watchlist is the [watchlist] section: Qot_GetSecuritySnapshot (3203) batch
+// polling for the user-pinned Watchlist panel.
+type Watchlist struct {
+	Enabled bool `toml:"enabled"`
+	PollMs  int  `toml:"poll_ms"` // 3203 poll cadence; 0 => 3000
+}
+
 // Health is the [health] section: moomoo probe RTT + sys.health/sys.events emission.
 type Health struct {
 	Enabled bool `toml:"enabled"`
@@ -200,6 +207,7 @@ type Config struct {
 	Scan      Scan      `toml:"scan"`
 	News      News      `toml:"news"`
 	StockInfo StockInfo `toml:"stockinfo"`
+	Watchlist Watchlist `toml:"watchlist"`
 	Health    Health    `toml:"health"`
 	Backfill  Backfill  `toml:"backfill"`
 }
@@ -222,6 +230,7 @@ func Default() Config {
 		},
 		News:      News{Enabled: true, FocusedMs: 20000, WatchMs: 3000, MaxPerReq: 50},
 		StockInfo: StockInfo{Enabled: true, RefreshMs: 15000, MaxPerReq: 400},
+		Watchlist: Watchlist{Enabled: true, PollMs: 3000},
 		Health:    Health{Enabled: true, ProbeMs: 5000},
 		Backfill: Backfill{Enabled: true, IntradayDays: 20, DailyYears: 0, Concurrency: 3, SeedChunk: 500,
 			Alpaca: BackfillAlpaca{Enabled: true, CredsKey: "", Feed: "sip"},
