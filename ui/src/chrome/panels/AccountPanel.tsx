@@ -183,6 +183,9 @@ function StatsStrip({
   const bp = account?.buyingPower ?? null;
   const dayPnl = account?.dayPnl ?? null;
   const realized = account?.realized ?? null;
+  const unrealized = stores.exec.positions()
+    .filter((p) => p.venue === venue && p.qty !== 0)
+    .reduce((sum, p) => sum + p.unrealizedPnl, 0);
 
   const cell = (label: string, testid: string, value: string, tone?: number) => (
     <div style={{ display: "flex", flexDirection: "column", padding: "2px 10px" }}>
@@ -196,6 +199,7 @@ function StatsStrip({
       {cell("Equity", "acct-equity", money(equity))}
       {cell("Buying Power", "acct-bp", money(bp))}
       {cell("Day P&L", "acct-daypnl", money(dayPnl), dayPnl ?? 0)}
+      {cell("Unrealized", "acct-unrealized", money(unrealized), unrealized)}
       {cell("Realized", "acct-realized", money(realized), realized ?? 0)}
       <div style={{ flex: 1 }} />
     </div>
