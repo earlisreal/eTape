@@ -41,7 +41,7 @@ describe("OrderTicketPanel", () => {
       linkGroups.focus("green", "US.AAPL");
     });
     wrap(props);
-    expect(await screen.findByText("AAPL")).toBeTruthy();
+    await waitFor(() => expect((screen.getByTestId("symbol") as HTMLInputElement).value).toBe("AAPL"));
     expect(screen.getByTestId("bid").textContent).toContain("3.40");
     expect(screen.getByTestId("ask").textContent).toContain("3.50");
   });
@@ -187,6 +187,74 @@ describe("OrderTicketPanel", () => {
     wrap(props);
     fireEvent.change(screen.getByTestId("venue"), { target: { value: "tradezero" } });
     expect(linkGroups.venueFor("green")).toBe("tradezero");
+  });
+  it("Enter commits an edited header symbol into the link group", async () => {
+    const { props, stores, linkGroups } = mkProps();
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    const input = screen.getByTestId("symbol") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "MSFT" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(linkGroups.symbolFor("green")).toBe("US.MSFT"));
+    expect(input.value).toBe("MSFT");
+  });
+  it("typing a lowercase bare ticker normalizes to a US.-qualified symbol on commit", async () => {
+    const { props, stores, linkGroups } = mkProps();
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    const input = screen.getByTestId("symbol") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "tsla" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(linkGroups.symbolFor("green")).toBe("US.TSLA"));
+  });
+  it("Escape after editing reverts the header without committing anything", () => {
+    const { props, stores, linkGroups } = mkProps();
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    const input = screen.getByTestId("symbol") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "MSFT" } });
+    fireEvent.keyDown(input, { key: "Escape" });
+    expect(input.value).toBe("AAPL");
+    expect(linkGroups.symbolFor("green")).toBe("US.AAPL");
+  });
+  it("blurring after editing (without Enter) reverts the header without committing anything", () => {
+    const { props, stores, linkGroups } = mkProps();
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    const input = screen.getByTestId("symbol") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "MSFT" } });
+    fireEvent.blur(input);
+    expect(input.value).toBe("AAPL");
+    expect(linkGroups.symbolFor("green")).toBe("US.AAPL");
+  });
+  it("a pinned panel (group: null) commits an edited symbol via onConfigChange, not the link group", async () => {
+    const { props, stores } = mkProps();
+    const onConfigChange = vi.fn();
+    const pinnedProps: PanelProps = { ...props, config: { ...props.config, group: null }, onConfigChange };
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
+    wrap(pinnedProps);
+    const input = screen.getByTestId("symbol") as HTMLInputElement;
+    fireEvent.focus(input);
+    fireEvent.change(input, { target: { value: "tsla" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(onConfigChange).toHaveBeenCalledWith({ symbol: "US.TSLA" }));
+    expect(input.value).toBe("TSLA");
   });
   it("shows an on-top label above every field", () => {
     const { props, stores } = mkProps();

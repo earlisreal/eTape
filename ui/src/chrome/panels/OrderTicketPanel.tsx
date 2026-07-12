@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import type { CSSProperties } from "react";
 import type { PanelProps } from "./registry";
 import type { Side, OrderType, TIF, OrderSession, SubmitOrderArgs } from "../../wire/contract";
+import { normalizeSymbol } from "../symbol";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
@@ -34,7 +35,7 @@ const MODE_LABEL: Record<SizingMode, string> = { Shares: "Shares", Dollar: "Doll
 // the default so nothing changes until the trader picks an explicit session.
 const SESSION_LABEL: Record<OrderSession, string> = { AUTO: "Auto", RTH: "Regular", EXTENDED: "Extended", OVERNIGHT: "Overnight" };
 
-export function OrderTicketPanel({ config, stores, commands, linkGroups, group: groupProp }: PanelProps): JSX.Element {
+export function OrderTicketPanel({ config, stores, commands, linkGroups, group: groupProp, onConfigChange }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
@@ -59,6 +60,25 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
     apply();
     return linkGroups.subscribe(apply);
   }, [linkGroups, group, config.settings.symbol]);
+
+  // Editable header symbol. `draft` is `null` when not editing — the effect
+  // above is then free to keep re-applying the shared link-group symbol on
+  // every subscribe fire without clobbering an in-progress edit (draft is a
+  // separate piece of state it never touches). Seeded from the bare symbol
+  // on focus; Enter commits, Escape/blur revert without writing anything.
+  const [draft, setDraft] = useState<string | null>(null);
+  const commitSymbol = async (raw: string) => {
+    const trimmed = raw.trim();
+    if (trimmed === "") return; // empty commit == cancel, not a garbage symbol
+    const sym = normalizeSymbol(trimmed);
+    if (group !== null) {
+      const r = await linkGroups.focusChecked(group, sym); // validated, broadcasts to group + engine
+      if (!r.ok) toast.push({ level: "danger", text: `${bareSymbol(sym)} rejected — ${r.reason}` });
+    } else {
+      onConfigChange({ symbol: sym }); // pinned: unvalidated local persist (no `demand` profile here)
+      setSymbol(sym);
+    }
+  };
 
   const quote = useThrottledQuote(stores.quote, symbol);
   const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
@@ -166,7 +186,32 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
       {actionsSlot === undefined ? headerActions : actionsSlot ? createPortal(headerActions, actionsSlot) : null}
       {/* Strip 1 — header blotter line */}
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-        <strong className="serif" style={{ fontSize: 14 }}>{bareSymbol(symbol)}</strong>
+        <input
+          data-testid="symbol"
+          className="serif"
+          value={draft ?? bareSymbol(symbol)}
+          size={Math.max((draft ?? bareSymbol(symbol)).length, 3)}
+          onFocus={() => setDraft(bareSymbol(symbol))}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              const raw = draft ?? "";
+              setDraft(null);
+              void commitSymbol(raw);
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              setDraft(null);
+              (e.target as HTMLInputElement).blur();
+            }
+          }}
+          onBlur={() => setDraft(null)}
+          style={{
+            fontSize: 14, fontWeight: 700, color: palette.text, background: "transparent",
+            border: "none", borderBottom: `2px solid ${draft !== null ? palette.accent : "transparent"}`,
+            outline: "none", padding: 0, minWidth: 0,
+          }}
+        />
         <span className="mono" style={{ fontSize: 12 }}>
           {priceSpan("bid", quote?.bid, palette.up)}
           <span style={{ color: palette.textMuted }}>/</span>
