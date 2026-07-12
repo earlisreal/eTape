@@ -721,3 +721,33 @@ func TestCommandsGoLiveDispatchesAndAcks(t *testing.T) {
 		t.Fatalf("GoLive not dispatched: hit=%v ack=%+v", hit, ack)
 	}
 }
+
+func TestCommandsStartDemoBlockedWithNoHandler(t *testing.T) {
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	ack, deferred := cd.handle(context.Background(), "StartDemo", mustJSON(t, wsmsg.StartDemoArgs{}), 0, func(wsmsg.AckMsg) {})
+	if deferred {
+		t.Fatal("StartDemo must not be deferred")
+	}
+	if ack.Status != wsmsg.AckBlocked {
+		t.Fatalf("StartDemo with no handler: status = %q, want blocked", ack.Status)
+	}
+}
+
+func TestCommandsStartDemoDispatchesAndAcks(t *testing.T) {
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	hit := false
+	cd.startDemo = func() error { hit = true; return nil }
+	ack, _ := cd.handle(context.Background(), "StartDemo", mustJSON(t, wsmsg.StartDemoArgs{}), 0, func(wsmsg.AckMsg) {})
+	if !hit || ack.Status != wsmsg.AckAccepted {
+		t.Fatalf("StartDemo not dispatched: hit=%v ack=%+v", hit, ack)
+	}
+}
+
+func TestCommandsStartDemoBlockedOnHandlerError(t *testing.T) {
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	cd.startDemo = func() error { return errors.New("create demo temp dir: boom") }
+	ack, _ := cd.handle(context.Background(), "StartDemo", mustJSON(t, wsmsg.StartDemoArgs{}), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckBlocked {
+		t.Fatalf("want blocked, got %+v", ack)
+	}
+}

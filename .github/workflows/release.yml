@@ -51,7 +51,7 @@ jobs:
           ver="${{ github.ref_name }}"
           mkdir -p staging/win
           cp dist/etape-windows-amd64.exe staging/win/etape.exe
-          cp README-FIRST.txt etape-demo.cmd staging/win/
+          cp README-FIRST.txt staging/win/
           (cd staging/win && zip -r "../../eTape-${ver}-windows-amd64.zip" .)
           chmod +x dist/etape-darwin-arm64
           tar -C dist -czf "eTape-${ver}-macos-arm64.tar.gz" etape-darwin-arm64

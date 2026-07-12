@@ -46,10 +46,10 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   // yet mounted) renders nothing for that tick.
   const actionsSlot = useContext(PanelHeaderActionsSlotContext);
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
-  // Safety signal (mirrors ReplayBanner.tsx): practice/replay orders must never
-  // be visually confusable with live ones, so surface it right on the ticket
-  // header too — not just the top-of-app banner — in case a trader's eyes are
-  // on the ticket while placing an order.
+  // Safety signal (mirrors ReplayBanner.tsx/DemoBanner.tsx): practice/replay/demo
+  // orders must never be visually confusable with live ones, so surface it right
+  // on the ticket header too — not just the top-of-app banner — in case a
+  // trader's eyes are on the ticket while placing an order.
   const sessionMode = useSyncExternalStore((cb) => stores.session.subscribe(cb), () => stores.session.getSnapshot());
 
   const group = groupProp ?? config.group;
@@ -126,10 +126,11 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   // TapePanel's lone header gear, extended with the venue picker.
   const headerActions = (
     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-      {sessionMode.mode === "replay" && (
+      {(sessionMode.mode === "replay" || sessionMode.mode === "demo") && (
         <span data-testid="practice-badge" style={{
-          padding: "1px 6px", borderRadius: 3, background: palette.warn, color: "#fff",
-          fontWeight: 700, fontSize: 10, letterSpacing: 0.5,
+          padding: "1px 6px", borderRadius: 3,
+          background: sessionMode.mode === "demo" ? palette.demo : palette.warn,
+          color: "#fff", fontWeight: 700, fontSize: 10, letterSpacing: 0.5,
         }}>
           PRACTICE
         </span>

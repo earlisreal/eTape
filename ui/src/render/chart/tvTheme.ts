@@ -46,6 +46,7 @@ export const TV_LIGHT: Palette = {
   ok: "#089981",
   warn: "#F7A600",
   danger: "#F23645",
+  demo: "#AB47BC",
 };
 
 export const TV_DARK: Palette = {
@@ -90,6 +91,7 @@ export const TV_DARK: Palette = {
   ok: "#089981",
   warn: "#F7A600",
   danger: "#F23645",
+  demo: "#AB47BC",
 };
 
 export function getTvPalette(mode: ThemeMode): Palette {

@@ -5,7 +5,9 @@ import type { SnapshotMsg, DeltaMsg, SessionSnapshot } from "../wire/contract";
 // narrow); annotate the literal union explicitly here rather than widen callers.
 // "pending" is a UI-only value (never sent on the wire) held only until the
 // first sys.session snapshot arrives — see the constructor below for why.
-export type SessionState = Omit<SessionSnapshot, "mode"> & { mode: "pending" | "live" | "replay" };
+// "demo" mirrors "replay" as a practice-session mode (synthetic live feed,
+// distinct DEMO banner) — see docs/superpowers/plans/2026-07-12-demo-ui-entry-plan.md.
+export type SessionState = Omit<SessionSnapshot, "mode"> & { mode: "pending" | "live" | "replay" | "demo" };
 
 export class SessionStore extends ReactStore<SessionState> {
   // Seeds to "pending", not "live": sys.session is a snapshot-only topic (set

@@ -53,6 +53,10 @@ export interface Palette {
   ok: string;
   warn: string;
   danger: string;
+  demo: string; // DemoBanner accent — deliberately a magenta/plum hue, distinct from
+                 // warn's amber (ReplayBanner), ok's green, and danger's red, and
+                 // offset from the blue family (linkBlue/shortFill/indEma) so it never
+                 // echoes an existing status meaning. See DemoBanner.tsx.
 }
 
 export const LIGHT: Palette = {
@@ -71,7 +75,7 @@ export const LIGHT: Palette = {
   indVwap: "#9A6A1B", indEma: "#3E7CB1", indSma: "#7A5CA6",
   indMacdLine: "#3E7CB1", indMacdSignal: "#C2334D", indMacdHist: "rgba(106,114,128,0.5)",
   linkRed: "#DB4C56", linkGreen: "#1FA97F", linkBlue: "#3E7CB1", linkYellow: "#CF9A2B",
-  accent: "#9A6A1B", ok: "#177A58", warn: "#9A6A1B", danger: "#A81E30",
+  accent: "#9A6A1B", ok: "#177A58", warn: "#9A6A1B", danger: "#A81E30", demo: "#8E2986",
 };
 
 export const DARK: Palette = {
@@ -90,7 +94,7 @@ export const DARK: Palette = {
   indVwap: "#C79A4B", indEma: "#6BA6D8", indSma: "#A98BD0",
   indMacdLine: "#6BA6D8", indMacdSignal: "#E5637A", indMacdHist: "rgba(154,147,133,0.5)",
   linkRed: "#E5636D", linkGreen: "#35B88F", linkBlue: "#6BA6D8", linkYellow: "#D9AE52",
-  accent: "#C79A4B", ok: "#35B888", warn: "#C79A4B", danger: "#E5455E",
+  accent: "#C79A4B", ok: "#35B888", warn: "#C79A4B", danger: "#E5455E", demo: "#D671CD",
 };
 
 export function getPalette(mode: ThemeMode): Palette {

@@ -9,9 +9,12 @@ type baseFlags struct {
 	LogPath    string
 }
 
-// replayMode selects what the relaunched process boots into.
+// replayMode selects what the relaunched process boots into. Live and Demo
+// are mutually exclusive relaunch targets; Day/Speed only apply to the
+// replay case (Live == false, Demo == false).
 type replayMode struct {
 	Live  bool
+	Demo  bool
 	Day   string
 	Speed float64
 }
@@ -31,7 +34,10 @@ func childArgs(base baseFlags, mode replayMode) []string {
 		argv = append(argv, "-log", base.LogPath)
 	}
 	argv = append(argv, "-no-open")
-	if !mode.Live {
+	if mode.Demo {
+		argv = append(argv, "-demo")
+	}
+	if !mode.Live && !mode.Demo {
 		argv = append(argv, "-replay", mode.Day,
 			"-speed", strconv.FormatFloat(mode.Speed, 'f', -1, 64), "-replay-hold")
 	}

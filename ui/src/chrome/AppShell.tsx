@@ -16,11 +16,12 @@ import { TopBar } from "./TopBar";
 import { FeedStatusBanner } from "./FeedStatusBanner";
 import { BootStatusBanner } from "./BootStatusBanner";
 import { ReplayBanner } from "./ReplayBanner";
+import { DemoBanner } from "./DemoBanner";
 import { AlpacaBackfillBanner } from "./AlpacaBackfillBanner";
 import { EmptyState } from "./EmptyState";
 import { Catalog } from "./Catalog";
 import { SettingsModal, type SettingsSection } from "./SettingsModal";
-import { ReplayLauncherModal } from "./ReplayLauncherModal";
+import { PracticeLauncherModal } from "./PracticeLauncherModal";
 import { VenueSetupPrompt } from "./VenueSetupPrompt";
 import { OpenSettingsProvider } from "./OpenSettingsContext";
 import { modalTracker } from "./modalTracker";
@@ -74,8 +75,10 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // gear opens it to Appearance, the order ticket's gear (via OpenSettingsContext)
   // opens it straight to Orders & hotkeys.
   const [settings, setSettings] = useState<{ open: boolean; section: SettingsSection }>({ open: false, section: "appearance" });
-  // Task 9: replay launcher modal, opened from TopBar's "Practice" button.
-  const [replayOpen, setReplayOpen] = useState(false);
+  // Task 9 (unified into the Task 5/U3 Practice launcher): opened from
+  // TopBar's "Practice" button, offers a synthetic demo market or replaying
+  // a recorded day.
+  const [practiceOpen, setPracticeOpen] = useState(false);
   // Task 3 (venues/creds redesign): first-run venue-setup prompt. Separate from
   // the `etape.venueSetupHidden` localStorage flag below — this only silences
   // the prompt for the REST OF THIS SESSION after either action, so it doesn't
@@ -90,6 +93,13 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
   const rc = useReplayCommands(commands);
+  // Shared by both <ReplayBanner> and <DemoBanner>'s "Return to live" button —
+  // GoLive is the same engine command regardless of which practice mode
+  // (replay or demo) is currently active.
+  const onGoLive = async () => {
+    const ack = await rc.goLive();
+    if (ack.status !== "accepted") throw new Error(ack.reason || "Return to live rejected");
+  };
   // DockviewApi is only available once dockview mounts (i.e. once the workspace
   // has at least one panel — see the empty-state switch below); null otherwise.
   const apiRef = useRef<DockviewApi | null>(null);
@@ -152,13 +162,14 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // and only while no real broker venue is configured, the user hasn't
   // dismissed it THIS session, and hasn't permanently silenced it via the
   // checkbox. Also suppressed during a confirmed replay/demo session
-  // (sessionMode.mode === "replay") — nudging toward configuring a broker "to
-  // trade live" makes no sense mid-replay, and venue edits need an engine
-  // restart anyway, which would kill the session. "pending" (mode unconfirmed
-  // yet) intentionally still allows it through, same as the prior unconditional
-  // "live" default — this only needs to suppress the case we're SURE is replay.
+  // (sessionMode.mode === "replay" or "demo") — nudging toward configuring a
+  // broker "to trade live" makes no sense mid-replay/demo, and venue edits
+  // need an engine restart anyway, which would kill the session. "pending"
+  // (mode unconfirmed yet) intentionally still allows it through, same as the
+  // prior unconditional "live" default — this only needs to suppress the
+  // cases we're SURE are practice sessions.
   const showVenueSetup = execStatus !== null && !hasRealVenue && sessionMode.mode !== "replay"
-    && !venueSetupSessionDismissed && !readVenueSetupHidden();
+    && sessionMode.mode !== "demo" && !venueSetupSessionDismissed && !readVenueSetupHidden();
   const dismissVenueSetup = (dontShowAgain: boolean) => {
     if (dontShowAgain) {
       try { localStorage.setItem(VENUE_SETUP_HIDDEN_KEY, "1"); } catch { /* best-effort only */ }
@@ -169,6 +180,31 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     dismissVenueSetup(dontShowAgain);
     setSettings({ open: true, section: "venues" });
   };
+  // Task 6 (U4): the single "Try demo" entry point shared by both first-run
+  // surfaces below (EmptyState + VenueSetupPrompt) — each is a dumb,
+  // controlled component that only ever calls this prop, same as their
+  // existing onAddPanel/onConfigure/onDismiss callbacks. No dismiss/settings
+  // bookkeeping bundled in here (unlike configureVenueSetup above): once
+  // StartDemo is accepted, sessionMode.mode flips to "demo" and both
+  // surfaces' own gating (showTryDemo below; VenueSetupPrompt's showVenueSetup
+  // gate above) hides them naturally. Still surfaces a rejection/transport
+  // failure as a toast so a failed StartDemo doesn't fail silently — mirrors
+  // the ack-status check in PracticeLauncherModal's onStartDemo, minus the
+  // inline pending/error UI that dedicated modal has room for.
+  const onTryDemo = () => {
+    rc.startDemo().then((ack) => {
+      if (ack.status !== "accepted") toast.push({ level: "danger", text: `Try demo: ${ack.reason || "rejected"}` });
+    }).catch((err: unknown) => {
+      toast.push({ level: "danger", text: `Try demo failed: ${err instanceof Error ? err.message : "unknown error"}` });
+    });
+  };
+  // Gates EmptyState's CTA: hidden once already inside a confirmed demo or
+  // replay session (offering "Try demo" while already IN demo mode would be
+  // confusing) — "pending" (mode unconfirmed yet) still allows it through,
+  // same as the prior unconditional "live" default and showVenueSetup's
+  // "pending" treatment above. VenueSetupPrompt doesn't need an equivalent
+  // gate: it's already suppressed during replay/demo by showVenueSetup itself.
+  const showTryDemo = sessionMode.mode === "live" || sessionMode.mode === "pending";
   // Alpaca-1m-history hint: shown once at least one REAL broker venue is
   // configured (so it never doubles up with the venue-setup prompt above,
   // which covers the sim-only/no-venue case) but none of them is Alpaca — the
@@ -460,7 +496,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             onNewWindow={onNewWindow}
             onOpenSettings={() => setSettings({ open: true, section: "appearance" })}
             onOpenConnection={onOpenConnection}
-            onOpenReplay={() => setReplayOpen(true)}
+            onOpenReplay={() => setPracticeOpen(true)}
           />
           {addOpen && (
             <div className="popover" style={{ top: 40, right: 160, width: 580, maxHeight: "70vh", overflow: "auto" }}>
@@ -469,15 +505,13 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           )}
         </div>
         <BootStatusBanner boot={stores.boot} />
-        <ReplayBanner session={stores.session} engineState={engineState} onGoLive={async () => {
-          const ack = await rc.goLive();
-          if (ack.status !== "accepted") throw new Error(ack.reason || "Return to live rejected");
-        }} />
+        <ReplayBanner session={stores.session} engineState={engineState} onGoLive={onGoLive} />
+        <DemoBanner session={stores.session} engineState={engineState} onGoLive={onGoLive} />
         <FeedStatusBanner health={stores.health} boot={stores.boot} engineState={engineState} onOpenConnection={onOpenConnection} />
         {showAlpacaHint && <AlpacaBackfillBanner onSetup={openAlpacaSetup} onDismiss={dismissAlpacaHint} />}
         <div style={{ flex: 1, minHeight: 0 }}>
           {ws.panels.length === 0 ? (
-            <EmptyState onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} />
+            <EmptyState onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} showTryDemo={showTryDemo} onTryDemo={onTryDemo} />
           ) : (
             <DockviewReact components={components} onReady={onReady}
               theme={mode === "light" ? themeLight : themeDark} />
@@ -491,8 +525,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           onImportWorkspace={onImportWorkspace}
           toast={toast}
           engineState={engineState} />
-        <ReplayLauncherModal open={replayOpen} onClose={() => setReplayOpen(false)} commands={commands} />
-        {showVenueSetup && <VenueSetupPrompt onConfigure={configureVenueSetup} onDismiss={dismissVenueSetup} />}
+        <PracticeLauncherModal open={practiceOpen} onClose={() => setPracticeOpen(false)} commands={commands} />
+        {showVenueSetup && <VenueSetupPrompt onConfigure={configureVenueSetup} onDismiss={dismissVenueSetup} onTryDemo={onTryDemo} />}
       </div>
     </OpenSettingsProvider>
   );

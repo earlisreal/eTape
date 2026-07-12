@@ -298,11 +298,12 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// (see childArgs, Task 1) -- built once here so both closures share it.
 	base := baseFlags{ConfigPath: *cfgPath, DistDir: *dist, LogPath: *logPath}
 
-	// startReplay/goLive are wired into uihub.New below and invoked from the
-	// command-dispatch goroutine on "StartReplay"/"GoLive". Both validate
-	// synchronously and return an error for a blocked ack before scheduling
-	// any delayed side effect, matching requestRestart's ack-then-relaunch
-	// pattern above (relaunchAckFlushDelay lets the ack flush first).
+	// startReplay/goLive/startDemo are wired into uihub.New below and invoked
+	// from the command-dispatch goroutine on "StartReplay"/"GoLive"/
+	// "StartDemo". Each validates synchronously and returns an error for a
+	// blocked ack before scheduling any delayed side effect, matching
+	// requestRestart's ack-then-relaunch pattern above (relaunchAckFlushDelay
+	// lets the ack flush first).
 	startReplay := func(day string, speed float64) error {
 		if *demo {
 			return fmt.Errorf("replay switching is unavailable in demo mode")
@@ -328,11 +329,23 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		})
 		return nil
 	}
+	// goLive has no demo guard (unlike startReplay above): "Return to live"
+	// must work from a demo session, so switching back to live mode is
+	// always allowed regardless of *demo.
 	goLive := func() error {
-		if *demo {
-			return fmt.Errorf("replay switching is unavailable in demo mode")
-		}
 		argv := childArgs(base, replayMode{Live: true})
+		time.AfterFunc(relaunchAckFlushDelay, func() {
+			nextArgsPtr.Store(&argv)
+			requestRestart()
+		})
+		return nil
+	}
+	// startDemo relaunches into -demo (see childArgs/replayMode.Demo). No
+	// synchronous validation is needed: unlike startReplay's day-lookup, a
+	// UI-triggered demo entry takes no knobs and is always available,
+	// regardless of current mode (live, replay, or already-demo).
+	startDemo := func() error {
+		argv := childArgs(base, replayMode{Demo: true})
 		time.AfterFunc(relaunchAckFlushDelay, func() {
 			nextArgsPtr.Store(&argv)
 			requestRestart()
@@ -406,13 +419,16 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500, TradesCap: 1000,
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
 		Mode: func() string {
+			if *demo {
+				return "demo"
+			}
 			if live {
 				return "live"
 			}
 			return "replay"
 		}(),
 		ReplayDay: *replayDay, ReplaySpeed: *speed,
-	}, execCore, st, core, venueAdm, venueProbe, requestRestart, startReplay, goLive)
+	}, execCore, st, core, venueAdm, venueProbe, requestRestart, startReplay, goLive, startDemo)
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
 	httpSrv := &http.Server{

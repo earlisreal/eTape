@@ -241,7 +241,7 @@ type HealthSnapshot struct {
 }
 
 // SessionSnapshot is the static sys.session topic: which mode the engine
-// booted in. Mode is "live" or "replay"; Day/Speed populated only in replay.
+// booted in. Mode is "live", "replay", or "demo"; Day/Speed populated only in replay.
 type SessionSnapshot struct {
 	Mode  string  `json:"mode"`
 	Day   string  `json:"day,omitempty"`
@@ -466,7 +466,7 @@ type TestConnectionResult struct {
 	Accounts    []TestAccount `json:"accounts"`
 }
 
-// ---- replay control (settings/toolbar StartReplay/GoLive commands) ----
+// ---- replay control (settings/toolbar StartReplay/GoLive/StartDemo commands) ----
 
 // StartReplayArgs selects the recorded day and playback speed for the
 // StartReplay command. Day is a "YYYY-MM-DD" calendar date; Speed is a
@@ -478,3 +478,7 @@ type StartReplayArgs struct {
 
 // GoLiveArgs is intentionally empty (kept as a named type for tygo stability).
 type GoLiveArgs struct{}
+
+// StartDemoArgs is intentionally empty (kept as a named type for tygo
+// stability). A UI-triggered demo relaunch takes no knobs — just -demo.
+type StartDemoArgs struct{}

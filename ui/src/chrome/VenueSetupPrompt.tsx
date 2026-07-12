@@ -13,9 +13,14 @@ import { modalTracker } from "./modalTracker";
 
 const BROKER_CHIPS = ["TradeZero", "Alpaca", "moomoo"];
 
-export function VenueSetupPrompt({ onConfigure, onDismiss }: {
+export function VenueSetupPrompt({ onConfigure, onDismiss, onTryDemo }: {
   onConfigure: (dontShowAgain: boolean) => void;
   onDismiss: (dontShowAgain: boolean) => void;
+  // Task 6 (U4): same onTryDemo callback threaded into EmptyState — this
+  // prompt only ever shows while sessionMode.mode isn't "replay"/"demo" (see
+  // AppShell's showVenueSetup), so unlike EmptyState there's no separate
+  // gating boolean needed here; the button is always offered.
+  onTryDemo: () => void;
 }): JSX.Element {
   const { palette } = useTheme();
   const [dontShowAgain, setDontShowAgain] = useState(false);
@@ -57,6 +62,11 @@ export function VenueSetupPrompt({ onConfigure, onDismiss }: {
         </label>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
           <button className="btn" aria-label="I'll do it later" onClick={() => onDismiss(dontShowAgain)}>I&rsquo;ll do it later</button>
+          {/* Same palette.demo tint as EmptyState's "Try demo" CTA (not a
+              full btn-primary treatment) — a lower-commitment alternative to
+              this modal's actual primary action (Configure venues), tinted
+              to preview where it leads without competing with it. */}
+          <button className="btn" aria-label="Try demo" onClick={onTryDemo} style={{ color: palette.demo, borderColor: palette.demo }}>Try demo</button>
           <button className="btn btn-primary" aria-label="Configure venues" onClick={() => onConfigure(dontShowAgain)}>Configure venues</button>
         </div>
       </div>
