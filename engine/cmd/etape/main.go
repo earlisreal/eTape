@@ -588,8 +588,8 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 
 		wl, err := watchlist.NewList(st)
 		if err != nil {
-			log.Error("watchlist: load failed", "err", err)
-			wl, _ = watchlist.NewList(st) // never fatal; worst case starts empty
+			log.Error("watchlist: load failed, starting empty", "err", err)
+			wl = watchlist.NewEmpty(st)
 		}
 
 		if *demo {

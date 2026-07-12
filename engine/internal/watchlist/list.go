@@ -54,6 +54,15 @@ func NewList(st configStore) (*List, error) {
 	return l, nil
 }
 
+// NewEmpty returns a List backed by st but seeded empty in memory, bypassing
+// the initial config read entirely. Used as a fallback when NewList's config
+// load fails (e.g. corrupt persisted JSON) — a corrupt watchlist config must
+// never block engine boot. The list still persists correctly on the next
+// mutation (Add/Remove/Seed), which overwrites the corrupt stored value.
+func NewEmpty(st configStore) *List {
+	return &List{st: st, cap: defaultCap}
+}
+
 // Normalize uppercases and ensures the US. prefix (US-only scope). A symbol
 // that already carries a market prefix (contains ".") is only uppercased.
 func Normalize(raw string) string {

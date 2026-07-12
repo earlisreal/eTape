@@ -120,3 +120,36 @@ func TestSeedReplacesWholesale(t *testing.T) {
 		t.Fatalf("Seed did not replace: %v", got)
 	}
 }
+
+func TestNewEmptyStartsEmptyAndRemainsFunctional(t *testing.T) {
+	// Simulates the main.go fallback: a store whose stored config is
+	// unparseable (what would make NewList fail) must still yield a fully
+	// usable list via NewEmpty, not a degraded stub.
+	st := newFakeStore()
+	st.kv[configKey] = "{not valid json"
+	if _, err := NewList(st); err == nil {
+		t.Fatal("NewList: want error on corrupt config, got nil")
+	}
+
+	l := NewEmpty(st)
+	if got := l.Symbols(); len(got) != 0 {
+		t.Fatalf("NewEmpty: want empty, got %v", got)
+	}
+
+	added, err := l.Add("aapl")
+	if err != nil || !added {
+		t.Fatalf("Add after NewEmpty: added=%v err=%v", added, err)
+	}
+	if got := l.Symbols(); len(got) != 1 || got[0] != "US.AAPL" {
+		t.Fatalf("Add after NewEmpty: normalization/state failed: %v", got)
+	}
+	raw, ok, _ := st.GetConfig(configKey)
+	if !ok {
+		t.Fatal("Add after NewEmpty did not persist")
+	}
+	var persisted []string
+	_ = json.Unmarshal([]byte(raw), &persisted)
+	if len(persisted) != 1 || persisted[0] != "US.AAPL" {
+		t.Fatalf("Add after NewEmpty persisted wrong value: %v (raw=%q)", persisted, raw)
+	}
+}
