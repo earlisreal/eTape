@@ -107,6 +107,86 @@ func TestEffectiveStartingBalanceHonorsPositiveValue(t *testing.T) {
 	}
 }
 
+func TestSeedConfigRoundTripThroughWriteVenueConfig(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	// Create a config file with the [seed] marker and an initial venue.
+	original := `[md]
+session_anchor = "09:30"
+
+[seed]
+moomoo_attempted = true
+
+[[venue]]
+id = "old"
+broker = "sim"
+env = "paper"
+`
+	if err := os.WriteFile(p, []byte(original), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify that the marker is present before WriteVenueConfig.
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load before WriteVenueConfig: %v", err)
+	}
+	if !cfg.Seed.MoomooAttempted {
+		t.Fatalf("marker not loaded: got %v, want true", cfg.Seed.MoomooAttempted)
+	}
+
+	// Call WriteVenueConfig with a different venue set (simulating a settings-UI save).
+	vc := validVC()
+	if err := WriteVenueConfig(p, vc); err != nil {
+		t.Fatalf("WriteVenueConfig: %v", err)
+	}
+
+	// Re-load and verify the marker survived the round-trip.
+	cfg, err = Load(p)
+	if err != nil {
+		t.Fatalf("Load after WriteVenueConfig: %v", err)
+	}
+	if !cfg.Seed.MoomooAttempted {
+		t.Fatalf("marker lost after WriteVenueConfig: got %v, want true", cfg.Seed.MoomooAttempted)
+	}
+
+	// Also verify the new venues took effect.
+	if len(cfg.Venues) != 3 || cfg.Venues[1].ID != "tz-live" {
+		t.Fatalf("venues not updated: %+v", cfg.Venues)
+	}
+}
+
+func TestSeedConfigZeroValueDefault(t *testing.T) {
+	// Test that Default() has the marker false.
+	cfg := Default()
+	if cfg.Seed.MoomooAttempted {
+		t.Fatalf("Default() marker should be false, got %v", cfg.Seed.MoomooAttempted)
+	}
+
+	// Test that a config file with no [seed] table loads with false.
+	dir := t.TempDir()
+	p := filepath.Join(dir, "config.toml")
+	content := `[md]
+session_anchor = "09:30"
+
+[[venue]]
+id = "sim"
+broker = "sim"
+env = "paper"
+`
+	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := Load(p)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Seed.MoomooAttempted {
+		t.Fatalf("config with no [seed] table should have marker false, got %v", cfg.Seed.MoomooAttempted)
+	}
+}
+
 func TestWriteVenueConfigRoundTripAndBak(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "config.toml")

@@ -156,6 +156,13 @@ type Health struct {
 	ProbeMs int  `toml:"probe_ms"` // probe + sys.health emit interval
 }
 
+// SeedConfig records one-shot auto-configuration markers. MoomooAttempted is
+// set after the engine's first definitive moomoo auto-config attempt so a
+// user's later manual removal of the venue sticks (no re-seeding).
+type SeedConfig struct {
+	MoomooAttempted bool `toml:"moomoo_attempted"`
+}
+
 // Backfill is the [backfill] section: deep-history warm-start + gap-fill at boot.
 type Backfill struct {
 	Enabled      bool           `toml:"enabled"`
@@ -196,6 +203,7 @@ type Config struct {
 	Store     Store     `toml:"store"`
 	Venues    []Venue   `toml:"venue"`
 	Gate      Gate      `toml:"gate"`
+	Seed      SeedConfig `toml:"seed"`
 	UIHub     UIHub     `toml:"uihub"`
 	Scan      Scan      `toml:"scan"`
 	News      News      `toml:"news"`
