@@ -47,10 +47,10 @@ func frontmatterText(t *testing.T) string {
 	return string(raw)[idx+len(marker):]
 }
 
-// extractUnionBody returns the text between `export type <name> =` (or
-// `export interface <name> {`) and its terminating `;` or `}`, scoped so
-// that enums sharing literal values (e.g. Side and TickDirection both have
-// "BUY"/"SELL") can't cross-contaminate each other's checks.
+// extractUnionBody returns the text between `export type <name> =` and its
+// terminating `;`, scoped so that enums sharing literal values (e.g. Side
+// and TickDirection both have "BUY"/"SELL") can't cross-contaminate each
+// other's checks.
 func extractUnionBody(t *testing.T, frontmatter, name string) string {
 	t.Helper()
 	marker := "export type " + name + " ="
@@ -251,34 +251,46 @@ func testFrontmatterParityKinds(t *testing.T) {
 		}
 	}
 
-	// ServerMessage / ClientMessage list exactly the right members.
-	serverBody := extractExactUnion(t, frontmatter, "ServerMessage")
-	for _, iface := range serverMessage {
-		if !containsWord(serverBody, iface) {
-			t.Errorf("frontmatter's ServerMessage union missing %s", iface)
-		}
-	}
-	clientBody := extractExactUnion(t, frontmatter, "ClientMessage")
-	for _, iface := range clientMessage {
-		if !containsWord(clientBody, iface) {
-			t.Errorf("frontmatter's ClientMessage union missing %s", iface)
-		}
-	}
+	// ServerMessage / ClientMessage must list EXACTLY the right members: no
+	// extra members, and no cross-listed duplicate (e.g. SnapshotMsg
+	// accidentally appearing in ClientMessage too). A presence-only check
+	// (substring/word match) would miss that, since it never verifies the
+	// union doesn't ALSO contain something it shouldn't.
+	serverBody := extractUnionBody(t, frontmatter, "ServerMessage")
+	checkExactUnionMembers(t, "ServerMessage", serverBody, serverMessage)
+	clientBody := extractUnionBody(t, frontmatter, "ClientMessage")
+	checkExactUnionMembers(t, "ClientMessage", clientBody, clientMessage)
 }
 
-// extractExactUnion returns the text between `export type <name> =` and its
-// terminating `;` (same shape as extractUnionBody, kept separate/named for
-// the Kinds test's readability since it's checking interface names, not
-// quoted literals).
-func extractExactUnion(t *testing.T, frontmatter, name string) string {
+// checkExactUnionMembers splits body (a union's text between `=` and `;`)
+// on `|`, trims whitespace from each piece, and verifies the resulting set
+// of members is exactly equal to want — same size, same elements. Any
+// member present in body but not in want (an unexpected/cross-listed
+// member) and any member in want but missing from body are each reported
+// by name, so a tygo.yaml edit that adds an extra or wrong member to a
+// union fails loudly instead of silently passing a presence-only check.
+func checkExactUnionMembers(t *testing.T, unionName, body string, want []string) {
 	t.Helper()
-	return extractUnionBody(t, frontmatter, name)
-}
-
-// containsWord checks for word s as a whole identifier within body (avoids
-// e.g. "AckMsg" matching inside a longer identifier — not a real risk here
-// given the curated names, but keeps the check honest).
-func containsWord(body, s string) bool {
-	re := regexp.MustCompile(`\b` + regexp.QuoteMeta(s) + `\b`)
-	return re.MatchString(body)
+	wantSet := make(map[string]bool, len(want))
+	for _, w := range want {
+		wantSet[w] = true
+	}
+	gotSet := make(map[string]bool)
+	for _, part := range strings.Split(body, "|") {
+		member := strings.TrimSpace(part)
+		if member == "" {
+			continue
+		}
+		gotSet[member] = true
+	}
+	for member := range gotSet {
+		if !wantSet[member] {
+			t.Errorf("frontmatter's %s union has unexpected member %q (expected exactly %v)", unionName, member, want)
+		}
+	}
+	for _, w := range want {
+		if !gotSet[w] {
+			t.Errorf("frontmatter's %s union is missing expected member %q", unionName, w)
+		}
+	}
 }
