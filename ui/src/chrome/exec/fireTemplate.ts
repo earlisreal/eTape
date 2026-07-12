@@ -26,7 +26,7 @@ export function fireTemplate(
   opts: { gateArm: boolean },
 ): void {
   if (t.kind === "place") {
-    if (opts.gateArm && !ctx.armed) { toast.push({ level: "warn", text: "disarmed — hotkey blocked" }); return; }
+    if (opts.gateArm && !ctx.armed) { toast.push({ level: "warn", text: "locked — hotkey blocked" }); return; }
     if (!ctx.quote || ctx.venue === "") { toast.push({ level: "danger", text: "no venue/quote for order" }); return; }
     const r = resolvePlaceTemplate(t, {
       venue: ctx.venue, symbol: ctx.symbol, quote: ctx.quote,
@@ -44,6 +44,6 @@ export function fireTemplate(
     case "CancelLast": void oc.cancelLast(ctx.symbol || undefined); break;
     case "CancelAllFocused": void oc.cancelAll("focused", ctx.symbol || undefined); break;
     case "CancelAllEverything": void oc.cancelAll("everything"); break;
-    case "KillSwitch": void oc.kill(); toast.push({ level: "warn", text: "KILL — cancel-all + disarm" }); break;
+    case "KillSwitch": void oc.kill(); toast.push({ level: "warn", text: "KILL — cancel-all + lock" }); break;
   }
 }

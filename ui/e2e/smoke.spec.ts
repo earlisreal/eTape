@@ -42,7 +42,7 @@ test.describe("trading workspace", () => {
 
     // Arm the master switch — the only arm gate now (per-venue arm removed).
     await page.getByTestId("arm-chip").click();
-    await expect(page.getByTestId("arm-chip")).toHaveText("ARMED");
+    await expect(page.getByTestId("arm-chip")).toHaveText("LOCK TRADING");
 
     // MARKET order needs no price; default 100 shares of AAPL fills at the mark.
     await page.getByTestId("order-type").selectOption("MARKET");

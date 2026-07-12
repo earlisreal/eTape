@@ -53,7 +53,7 @@ describe("OrderCommands", () => {
     await oc.submit(args, "flash");
     expect(pushed).toContainEqual({
       level: "danger",
-      text: "Blocked (alpaca-paper): master arm is OFF — arm it in the top bar",
+      text: "Blocked (alpaca-paper): trading is locked — unlock it in the top bar",
     });
   });
   it("cancel / arm / disarm / kill send the right command + args", async () => {

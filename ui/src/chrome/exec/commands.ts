@@ -15,7 +15,7 @@ export interface OrderCommandsDeps { cmd: CommandAdapter; exec: ExecStore; toast
 // many caps) fall back to the verbatim ack.reason.
 const REASON_TEXT: Record<string, string> = {
   "no gate config for venue": "no risk limits configured — set them in Settings › Venues",
-  "master disarmed": "master arm is OFF — arm it in the top bar",
+  "master disarmed": "trading is locked — unlock it in the top bar",
 };
 
 export class OrderCommands {

@@ -77,6 +77,17 @@ export function GeneralSection(
         <div style={noteStyle}>Save this window's panel layout to a file, or restore it.</div>
         <BackupPanel part="layout" getWorkspace={getWorkspace} onImportWorkspace={onImportWorkspace} toast={toast} />
       </div>
+
+      <div style={groupStyle}>
+        <div className="col-head serif" style={headStyle}>Trading</div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <input type="checkbox" aria-label="auto-unlock-startup"
+            checked={oc.config.autoUnlockOnStartup ?? false}
+            onChange={(e) => oc.save({ ...oc.config, autoUnlockOnStartup: e.target.checked })} />
+          Automatically unlock trading on startup
+        </label>
+        <div style={noteStyle}>Trading starts locked each session for safety. Enable to unlock it automatically once eTape connects.</div>
+      </div>
     </div>
   );
 }

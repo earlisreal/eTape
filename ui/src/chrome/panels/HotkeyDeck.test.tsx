@@ -120,7 +120,7 @@ describe("HotkeyDeck — click dispatch (real fireTemplate/resolvePlaceTemplate)
     const { oc, toast } = await setup([t]);
     fireEvent.click(screen.getByTestId("deck-kill"));
     expect(oc.kill).toHaveBeenCalledWith();
-    expect(toast.push).toHaveBeenCalledWith({ level: "warn", text: "KILL — cancel-all + disarm" });
+    expect(toast.push).toHaveBeenCalledWith({ level: "warn", text: "KILL — cancel-all + lock" });
   });
 });
 

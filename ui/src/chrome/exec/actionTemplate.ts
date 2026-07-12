@@ -28,6 +28,7 @@ export interface OrderConfig {
   templates: ActionTemplate[];
   activeVenue: VenueID;
   extHoursMarketBufferPct?: number;   // absent => 1.0; clamped [0.1, 10] in normalizeOrderConfig
+  autoUnlockOnStartup?: boolean;   // absent => false (trading boots locked, the safe default)
 }
 export const ORDER_CONFIG_KEY = "orderConfig";
 

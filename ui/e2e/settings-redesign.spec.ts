@@ -47,7 +47,7 @@ test.describe("settings redesign", () => {
     // engine (useHotkeys.ts) refuses to fire while disarmed. Per-venue arm was
     // removed; master arm + the risk-limit gate are the only checks now.
     await page.getByTestId("arm-chip").click();
-    await expect(page.getByTestId("arm-chip")).toHaveText("ARMED");
+    await expect(page.getByTestId("arm-chip")).toHaveText("LOCK TRADING");
 
     // eTape ships with NO default order templates/hotkeys (DEFAULT_TEMPLATES in
     // actionTemplate.ts is empty) — build one from scratch: a Dollar/$5000 Buy
@@ -106,7 +106,8 @@ test.describe("settings redesign", () => {
     // for the whole invocation). reset-defaults now restores the blank baseline
     // (no default templates/hotkeys) — the tmpl-1-1 template built above must
     // not survive into later specs. Restore both this and arm state so
-    // smoke.spec.ts's arm test (which expects to transition disarmed -> ARMED)
+    // smoke.spec.ts's arm test (which expects the chip to transition from
+    // "UNLOCK TRADING" (disarmed) to "LOCK TRADING" (armed))
     // and any hotkey-dependent test that runs after this file aren't left
     // holding a stray template or an already-armed gate.
     await page.getByTestId("open-settings").click();
@@ -115,7 +116,7 @@ test.describe("settings redesign", () => {
     await page.getByTestId("save").click();
     await page.mouse.click(5, 5);
     await page.getByTestId("arm-chip").click();
-    await expect(page.getByTestId("arm-chip")).toHaveText("DISARMED");
+    await expect(page.getByTestId("arm-chip")).toHaveText("UNLOCK TRADING");
   });
 
   test("venues: an invalid venue id surfaces a validation error inline", async ({ page }) => {

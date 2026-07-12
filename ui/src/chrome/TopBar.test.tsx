@@ -24,7 +24,7 @@ describe("TopBar", () => {
   it("arm chip reflects state and toggles", () => {
     render(<ThemeProvider><TopBar {...base} armed /></ThemeProvider>);
     const chip = screen.getByTestId("arm-chip");
-    expect(chip.textContent).toContain("ARMED");
+    expect(chip.textContent).toContain("LOCK TRADING");
     fireEvent.click(chip);
     expect(base.onArmToggle).toHaveBeenCalled();
   });

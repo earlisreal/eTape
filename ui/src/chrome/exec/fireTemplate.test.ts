@@ -48,7 +48,7 @@ describe("fireTemplate — place templates", () => {
     const oc = makeOc();
     const toast = makeToast();
     fireTemplate(PLACE_TEMPLATE, baseCtx({ armed: false }), oc, toast, { gateArm: true });
-    expect(toast.push).toHaveBeenCalledWith({ level: "warn", text: "disarmed — hotkey blocked" });
+    expect(toast.push).toHaveBeenCalledWith({ level: "warn", text: "locked — hotkey blocked" });
     expect(oc.submit).not.toHaveBeenCalled();
   });
 
@@ -135,6 +135,6 @@ describe("fireTemplate — management templates", () => {
     const toast = makeToast();
     fireTemplate(manage("KillSwitch"), baseCtx({ armed: false }), oc, toast, { gateArm: true });
     expect(oc.kill).toHaveBeenCalledWith();
-    expect(toast.push).toHaveBeenCalledWith({ level: "warn", text: "KILL — cancel-all + disarm" });
+    expect(toast.push).toHaveBeenCalledWith({ level: "warn", text: "KILL — cancel-all + lock" });
   });
 });
