@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   SETTINGS_EXPORT_VERSION, buildExport, parseImport,
-  prepareImportedWorkspace, prepareImportedOrderConfig, detectHotkeyConflicts,
+  prepareImportedWorkspace, prepareImportedOrderConfig, detectHotkeyConflicts, isPresentLayout,
 } from "./backup";
 import type { Workspace } from "./workspace";
 import type { ActionTemplate, OrderConfig } from "./exec/actionTemplate";
@@ -166,6 +166,24 @@ describe("backup: parseImport rejects without throwing", () => {
     expect(parseImport("null").ok).toBe(false);
     expect(parseImport("[1,2,3]").ok).toBe(false);
     expect(parseImport("42").ok).toBe(false);
+  });
+});
+
+describe("backup: isPresentLayout", () => {
+  it("returns true for a workspace object", () => {
+    expect(isPresentLayout(makeWorkspace("main"))).toBe(true);
+  });
+
+  it("returns false for undefined (no layout section in the file)", () => {
+    expect(isPresentLayout(undefined)).toBe(false);
+  });
+
+  it("returns false for null", () => {
+    expect(isPresentLayout(null as unknown as Workspace)).toBe(false);
+  });
+
+  it("returns false for an array", () => {
+    expect(isPresentLayout([] as unknown as Workspace)).toBe(false);
   });
 });
 

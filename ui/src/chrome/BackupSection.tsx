@@ -11,7 +11,7 @@ import type { Workspace } from "./workspace";
 import type { ActionTemplate, OrderConfig } from "./exec/actionTemplate";
 import {
   buildExport, parseImport, prepareImportedWorkspace, prepareImportedOrderConfig,
-  detectHotkeyConflicts, type SettingsExport,
+  detectHotkeyConflicts, isPresentLayout, type SettingsExport,
 } from "./backup";
 
 export interface BackupSectionProps {
@@ -29,9 +29,9 @@ export interface BackupSectionProps {
 // be treated as "that section isn't present" rather than crashing this
 // component's `.map`/spread calls (or crashing further downstream in
 // prepareImportedOrderConfig, which does call `.map` on `templates`).
-function isPresentLayout(layout: SettingsExport["layout"]): layout is Workspace {
-  return typeof layout === "object" && layout !== null && !Array.isArray(layout);
-}
+// isPresentLayout itself now lives in backup.ts (shared with the
+// empty-workspace import entry point); isPresentHotkeys stays local since
+// only this Settings-based path imports hotkeys.
 function isPresentHotkeys(hotkeys: SettingsExport["hotkeys"]): hotkeys is { templates: ActionTemplate[] } {
   return Array.isArray(hotkeys?.templates);
 }

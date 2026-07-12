@@ -67,6 +67,16 @@ export function prepareImportedWorkspace(imported: Workspace, currentName: strin
   return { ...imported, name: currentName };
 }
 
+// parseImport only validates the top-level envelope (kind/app) — it does NOT
+// check that `layout` has the right inner shape. A hand-edited or partially-
+// truncated file can carry a `layout` that isn't an object; that must be
+// treated as "no layout present" rather than crashing a caller's downstream
+// spread/`.map` calls. Exported (moved from BackupSection.tsx) so both the
+// Settings import path and the empty-workspace import path share one guard.
+export function isPresentLayout(layout: SettingsExport["layout"]): layout is Workspace {
+  return typeof layout === "object" && layout !== null && !Array.isArray(layout);
+}
+
 // Every imported template gets a freshly minted id. Regenerating (rather
 // than keeping the exported id) matters because imported templates land
 // alongside whatever already exists on this machine — OrderSettingsSection's
