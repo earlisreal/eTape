@@ -564,7 +564,9 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           getWorkspace={() => wsRef.current ?? ws}
           onImportWorkspace={onImportWorkspace}
           toast={toast}
-          engineState={engineState} />
+          engineState={engineState}
+          health={stores.health}
+          exec={stores.exec} />
         <PracticeLauncherModal open={practiceOpen} onClose={() => setPracticeOpen(false)} commands={commands} />
         {showVenueSetup && <VenueSetupPrompt onConfigure={configureVenueSetup} onDismiss={dismissVenueSetup} onTryDemo={onTryDemo} />}
       </div>

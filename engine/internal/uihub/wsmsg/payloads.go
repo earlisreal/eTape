@@ -405,13 +405,20 @@ type VenueConfig struct {
 	Gate   Gate    `json:"gate"`
 }
 
+// SeedView mirrors config.SeedConfig for the settings UI: whether the
+// one-shot moomoo auto-config has produced a definitive outcome.
+type SeedView struct {
+	MoomooAttempted bool `json:"moomooAttempted"`
+}
+
 // VenueSetup is the GetVenueSetup result. file = parsed from config.toml,
 // running = what the engine booted with; the restart banner shows when they
-// differ. credKeys = credential NAMES only.
+// differ. credKeys = credential NAMES only. seed = the file's [seed] marker.
 type VenueSetup struct {
 	File     VenueConfig `json:"file"`
 	Running  VenueConfig `json:"running"`
 	CredKeys []string    `json:"credKeys"`
+	Seed     SeedView    `json:"seed"`
 }
 
 type SetVenueSetupArgs struct {

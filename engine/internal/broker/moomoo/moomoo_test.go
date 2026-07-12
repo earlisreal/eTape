@@ -507,11 +507,28 @@ func TestAdapter_Run_Reconnect_StreamGapAndFillCatchUp(t *testing.T) {
 	m.closeConns()
 
 	// Second connect: expect a StreamGap, and somewhere before it the catch-up
-	// OrderFilled for the missed 40.
+	// OrderFilled for the missed 40 -- and, first of all, the BrokerConnDown
+	// that the forced disconnect above triggers, carrying the human-readable
+	// note the uihub mirror threads into VenueStatus.note.
 	second, _ := collectUntil(t, a, func(e exec.BrokerEvent) bool {
 		_, ok := e.(exec.StreamGap)
 		return ok
 	}, 3*time.Second)
+
+	var connDown *exec.BrokerConnDown
+	for _, e := range second {
+		if d, ok := e.(exec.BrokerConnDown); ok {
+			dd := d
+			connDown = &dd
+			break
+		}
+	}
+	if connDown == nil {
+		t.Fatalf("reconnect missing BrokerConnDown: %+v", second)
+	}
+	if connDown.Note != "OpenD unreachable" {
+		t.Fatalf("BrokerConnDown.Note = %q, want %q", connDown.Note, "OpenD unreachable")
+	}
 
 	var catchUp *exec.OrderFilled
 	for _, e := range second {

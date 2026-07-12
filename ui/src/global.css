@@ -28,17 +28,53 @@ body {
 .col-head.sortable:hover { color: var(--text); }
 .data-row { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 11px; font-variant-numeric: tabular-nums; }
 
-/* Shared controls — replace native <select>/<input>/<button>. */
+/* Shared controls — replace native <select>/<input>/<button>. Button.tsx
+   (ui/src/chrome/controls/Button.tsx) is now the SOLE consumer of .btn* —
+   every former ad hoc `.btn`/`.btn-primary` call site migrated onto the
+   shared primitive (Task 7, Daylight Ledger button system, venues/broker-
+   cards design rev 2 §D). Kept the existing `.btn`/`.btn-primary` names
+   instead of inventing a second parallel class family, so this block only
+   grew by the variants that didn't exist before (danger/quiet/md/icon/
+   loading + the shared focus ring + the reduced-motion transition token) —
+   net smaller than a fully separate componentized system would have been.
+   variant: neutral = bare .btn (the default, unchanged geometry); primary/
+   danger/quiet add a modifier class. size: sm = bare .btn (default); md adds
+   .btn-md. Hover is handled entirely by HoverButton's inline overlay inside
+   Button.tsx, not a CSS `:hover` rule — see that file's own comment — so
+   none is declared here. */
+:root {
+  --btn-transition: background 120ms ease, border-color 120ms ease, color 120ms ease, box-shadow 120ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root { --btn-transition: none; }
+}
 .btn {
   font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 11px;
   padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border-strong);
-  background: var(--bg); color: var(--text); cursor: pointer;
-  transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+  background: transparent; color: var(--text); cursor: pointer;
 }
-.btn:hover { border-color: var(--text-muted); }
-.btn:hover:not(.btn-primary) { background: var(--surface); }
-.btn-primary { background: var(--text); color: var(--bg); border-color: var(--text); }
-.btn-primary:hover { border-color: var(--accent); }
+.btn:disabled { cursor: default; opacity: 0.5; }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+/* primary — bronze-filled, the ONLY filled variant; one per view max.
+   text = --bg: verified AA contrast against --accent in both palettes
+   (light ~4.5:1, dark ~7.3:1 — dark's accent (#C79A4B) is light enough
+   against near-black --bg text that this reads better in dark than light). */
+.btn-primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+/* danger — neutral silhouette, danger outline; never filled (red stays a
+   signal, not a surface). Destructive confirms only — every variant="danger"
+   call site must also pass `confirm` (or an explicit confirm-external
+   comment), enforced by Button.test.tsx's grep-style check. */
+.btn-danger { color: var(--danger); border-color: var(--danger); }
+/* quiet — borderless, muted; disclosure toggles and tertiary actions. */
+.btn-quiet { border-color: transparent; background: transparent; color: var(--text-muted); }
+/* md — modal CTAs (e.g. Settings' main Save buttons); sm (bare .btn) is the
+   default, unchanged geometry. */
+.btn-md { font-size: 12px; padding: 6px 14px; }
+/* iconOnly — square glyph-button padding. */
+.btn-icon { padding: 4px; display: inline-flex; align-items: center; justify-content: center; }
+/* loading — disabled (via the component; see Button.tsx) + a subtle busy
+   affordance, no spinner theatrics. */
+.btn-loading { cursor: default; }
 .ctl {
   display: inline-flex; align-items: center; gap: 4px;
   border: 1px solid var(--border-strong); border-radius: 4px;
@@ -96,15 +132,35 @@ input.numfield { -moz-appearance: textfield; appearance: textfield; }
 }
 .field:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: var(--accent); }
 
-/* Per-venue card mount animation + remove-button state transition — both
-   respect prefers-reduced-motion. */
+/* Per-venue card mount animation — respects prefers-reduced-motion. (The
+   remove button's own transition is Button.tsx's --btn-transition now —
+   Task 7 retired the bespoke .venue-remove-btn rule this used to need.) */
 @keyframes venue-card-in { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: translateY(0); } }
 .venue-card { animation: venue-card-in 160ms ease-out; }
-.venue-remove-btn { transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease; }
 @media (prefers-reduced-motion: reduce) {
   .venue-card { animation: none; }
-  .venue-remove-btn { transition: none; }
 }
+
+/* Fixed-roster broker cards (venues broker-cards design §C/§D) — VenuesSection
+   applies this ALONGSIDE .venue-card (reusing its mount animation above
+   rather than duplicating it). Shell only: 1px border, radius 6, --bg
+   background; the header row/hairline/eyebrows are inline styles (mirroring
+   the rest of this file's settings-form treatment) since card internals
+   differ too much per broker for a single shared header class to earn its
+   keep. */
+.broker-card { border: 1px solid var(--border); border-radius: 6px; background: var(--bg); overflow: hidden; margin-bottom: 12px; }
+/* 3px top stripe = the card's status voice. Precedence (highest wins):
+   .broker-card-live (danger — any live-env venue on the card) over
+   .broker-card-ok (bronze accent — configured + healthy); neither class
+   applied = unconfigured, falls back to the plain 1px border above. Broker
+   identity itself stays typographic — these two classes are the ONLY color
+   this shell ever carries. */
+.broker-card-live { border-top: 3px solid var(--danger); }
+.broker-card-ok { border-top: 3px solid var(--accent); }
+/* moomoo's persistent DayPnL caveat — deliberately neither bronze nor red (a
+   caveat, not a state or a live signal); dashed border marks it as distinct
+   from every other bordered surface in this form. Never a tooltip. */
+.broker-card-caveat { border: 1px dashed var(--border-strong); color: var(--text-muted); font-size: 10.5px; padding: 6px 8px; border-radius: 4px; }
 
 /* First-run venue-setup prompt (Task 3, venues/creds redesign) — fade-in only,
    no translate, per the design note; disabled under prefers-reduced-motion. */

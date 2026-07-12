@@ -541,17 +541,18 @@ func TestFocusGroup_ProbesAndAcks(t *testing.T) {
 }
 
 type spyVenueAdmin struct {
-	setCalled  bool
-	putCalled  bool
-	delErr     error
-	setErr     error
-	lastPutSec string
+	setCalled       bool
+	putCalled       bool
+	delErr          error
+	setErr          error
+	lastPutSec      string
+	moomooAttempted bool
 }
 
-func (s *spyVenueAdmin) GetVenueSetup() (config.VenueConfig, config.VenueConfig, []string, error) {
+func (s *spyVenueAdmin) GetVenueSetup() (config.VenueConfig, config.VenueConfig, []string, bool, error) {
 	return config.VenueConfig{Venues: []config.Venue{{ID: "file-v", Broker: "sim", Env: "paper"}}},
 		config.VenueConfig{Venues: []config.Venue{{ID: "run-v", Broker: "sim", Env: "paper"}}},
-		[]string{"alpaca"}, nil
+		[]string{"alpaca"}, s.moomooAttempted, nil
 }
 func (s *spyVenueAdmin) SetVenueSetup(config.VenueConfig) error { s.setCalled = true; return s.setErr }
 func (s *spyVenueAdmin) PutCredential(_, _, sec string) error {
@@ -571,6 +572,22 @@ func TestGetVenueSetupResultHasNoSecrets(t *testing.T) {
 	b, _ := json.Marshal(ack)
 	if strings.Contains(string(b), "secretKey") || strings.Contains(string(b), "keyId") {
 		t.Fatalf("setup result leaked secret material: %s", b)
+	}
+}
+
+func TestGetVenueSetupExposesSeedMarker(t *testing.T) {
+	va := &spyVenueAdmin{moomooAttempted: true}
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil }, &spyVenueTester{})
+	ack, _ := cd.handle(context.Background(), "GetVenueSetup", json.RawMessage(`{}`), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != "accepted" {
+		t.Fatalf("status %v", ack.Status)
+	}
+	setup, ok := ack.Value.(wsmsg.VenueSetup)
+	if !ok {
+		t.Fatalf("ack.Value type = %T, want wsmsg.VenueSetup", ack.Value)
+	}
+	if !setup.Seed.MoomooAttempted {
+		t.Fatalf("seed.moomooAttempted did not pass through: %+v", setup.Seed)
 	}
 }
 

@@ -109,6 +109,11 @@ type Gate struct {
 	Venue  map[string]GateVenue `toml:"venue"`
 }
 
+// SeedConfig is the [seed] section: one-shot auto-configuration markers.
+type SeedConfig struct {
+	MoomooAttempted bool `toml:"moomoo_attempted"`
+}
+
 // UIHub is the [uihub] section: the WS/HTTP server the UI connects to.
 type UIHub struct {
 	Host          string  `toml:"host"`
@@ -137,7 +142,6 @@ type Scan struct {
 // News is the [news] section: Qot_GetSearchNews polling.
 type News struct {
 	Enabled   bool `toml:"enabled"`
-	FocusedMs int  `toml:"focused_ms"` // poll interval for focused symbols
 	WatchMs   int  `toml:"watch_ms"`   // step interval for the watchlist rotation
 	MaxPerReq int  `toml:"max_per_req"`
 }
@@ -190,18 +194,19 @@ type BackfillYahoo struct {
 
 // Config is the engine's bootstrap configuration.
 type Config struct {
-	OpenD     OpenD     `toml:"opend"`
-	Feed      Feed      `toml:"feed"`
-	MD        MD        `toml:"md"`
-	Store     Store     `toml:"store"`
-	Venues    []Venue   `toml:"venue"`
-	Gate      Gate      `toml:"gate"`
-	UIHub     UIHub     `toml:"uihub"`
-	Scan      Scan      `toml:"scan"`
-	News      News      `toml:"news"`
-	StockInfo StockInfo `toml:"stockinfo"`
-	Health    Health    `toml:"health"`
-	Backfill  Backfill  `toml:"backfill"`
+	OpenD     OpenD      `toml:"opend"`
+	Feed      Feed       `toml:"feed"`
+	MD        MD         `toml:"md"`
+	Store     Store      `toml:"store"`
+	Venues    []Venue    `toml:"venue"`
+	Gate      Gate       `toml:"gate"`
+	Seed      SeedConfig `toml:"seed"`
+	UIHub     UIHub      `toml:"uihub"`
+	Scan      Scan       `toml:"scan"`
+	News      News       `toml:"news"`
+	StockInfo StockInfo  `toml:"stockinfo"`
+	Health    Health     `toml:"health"`
+	Backfill  Backfill   `toml:"backfill"`
 }
 
 // Default returns the built-in defaults used when a field or the whole file is absent.
@@ -220,7 +225,7 @@ func Default() Config {
 			Enabled: true, PremarketMs: 2000, RTHMs: 3000, RankPages: 2,
 			MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000,
 		},
-		News:      News{Enabled: true, FocusedMs: 20000, WatchMs: 3000, MaxPerReq: 50},
+		News:      News{Enabled: true, WatchMs: 3000, MaxPerReq: 50},
 		StockInfo: StockInfo{Enabled: true, RefreshMs: 15000, MaxPerReq: 400},
 		Health:    Health{Enabled: true, ProbeMs: 5000},
 		Backfill: Backfill{Enabled: true, IntradayDays: 20, DailyYears: 0, Concurrency: 3, SeedChunk: 500,
@@ -353,6 +358,41 @@ func WriteVenueConfig(path string, vc VenueConfig) error {
 	}
 	c.Venues = vc.Venues
 	c.Gate = vc.Gate
+	var buf strings.Builder
+	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
+		return fmt.Errorf("config: encode: %w", err)
+	}
+	if err := atomicfile.Write(path, []byte(buf.String()), 0o644); err != nil {
+		return fmt.Errorf("config: write: %w", err)
+	}
+	return nil
+}
+
+// WriteMoomooSeed re-reads path into a full Config, sets
+// Seed.MoomooAttempted = true, appends v to Venues when non-nil, and re-encodes
+// the whole file atomically — venue and marker land in ONE write so a crash can
+// never split "seeded" from "venue exists". v == nil is the marker-only write
+// (multi/zero-account outcomes, or a pre-existing hand-added venue). Mechanics
+// mirror WriteVenueConfig exactly (same .bak-once semantics, same
+// Load → mutate → encode → atomicfile.Write). Does NOT validate — the caller
+// (venueadmin) validates the resulting VenueConfig BEFORE calling.
+func WriteMoomooSeed(path string, v *Venue) error {
+	if orig, err := os.ReadFile(path); err == nil {
+		bak := path + ".bak"
+		if _, statErr := os.Stat(bak); errors.Is(statErr, os.ErrNotExist) {
+			if err := atomicfile.Write(bak, orig, 0o644); err != nil {
+				return fmt.Errorf("config: write .bak: %w", err)
+			}
+		}
+	}
+	c, err := Load(path)
+	if err != nil {
+		return err
+	}
+	c.Seed.MoomooAttempted = true
+	if v != nil {
+		c.Venues = append(c.Venues, *v)
+	}
 	var buf strings.Builder
 	if err := toml.NewEncoder(&buf).Encode(c); err != nil {
 		return fmt.Errorf("config: encode: %w", err)

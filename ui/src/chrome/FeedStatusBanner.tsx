@@ -3,7 +3,7 @@ import type { HealthStore } from "../data/HealthStore";
 import type { BootStore } from "../data/BootStore";
 import type { ConnState } from "../wire/WsClient";
 import { useTheme } from "./ThemeProvider";
-import { HoverButton } from "./controls/HoverButton";
+import { Button } from "./controls/Button";
 
 // Slim, unmissable notice strip shown under the top bar whenever the
 // engine-moomoo link (OpenD's RTT probe) is reported down while the UI's own
@@ -40,14 +40,13 @@ export function FeedStatusBanner(
         <span aria-hidden="true">⚠</span>
         moomoo OpenD disconnected — live market data unavailable. Reconnecting…
       </span>
-      <HoverButton
+      <Button
         data-testid="feed-banner-open-connection"
-        className="btn"
         onClick={onOpenConnection}
         style={{ fontSize: 11, color: palette.danger, borderColor: palette.danger }}
       >
         Connection ▸
-      </HoverButton>
+      </Button>
     </div>
   );
 }

@@ -2,7 +2,7 @@ import { LatencyReadout } from "./LatencyReadout";
 import { SessionClock } from "./SessionClock";
 import type { HealthStore } from "../data/HealthStore";
 import { useTheme } from "./ThemeProvider";
-import { HoverButton } from "./controls/HoverButton";
+import { Button } from "./controls/Button";
 
 // Padlock state icon for the arm/disarm chip. stroke="currentColor" so it
 // inherits the chip's state color automatically (no separate color prop) —
@@ -50,11 +50,11 @@ export function TopBar(p: TopBarProps): JSX.Element {
       </div>
       <SessionClock />
       <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, minWidth: 0 }}>
-        <button className="btn" onClick={p.onAddPanel}>+ Add panel</button>
-        <button className="btn" onClick={p.onNewWindow}>⧉ New window</button>
-        <button className="btn" aria-label="Practice" title="Practice: synthetic demo market or replay a recorded day" onClick={p.onOpenReplay}>▶ Practice</button>
-        <button className="btn" aria-label="Settings" onClick={p.onOpenSettings}>⚙ Settings</button>
-        <HoverButton data-testid="arm-chip" className="btn" onClick={p.onArmToggle}
+        <Button onClick={p.onAddPanel}>+ Add panel</Button>
+        <Button onClick={p.onNewWindow}>⧉ New window</Button>
+        <Button aria-label="Practice" title="Practice: synthetic demo market or replay a recorded day" onClick={p.onOpenReplay}>▶ Practice</Button>
+        <Button aria-label="Settings" onClick={p.onOpenSettings}>⚙ Settings</Button>
+        <Button data-testid="arm-chip" onClick={p.onArmToggle}
           style={{ fontWeight: 600, letterSpacing: ".08em",
             // Fixed width sized to the longer "UNLOCK TRADING" label (measured
             // 149px) so toggling the shorter "LOCK TRADING" label doesn't
@@ -66,9 +66,11 @@ export function TopBar(p: TopBarProps): JSX.Element {
           // The chip's color AND icon (LockIcon above) both track the
           // armed/disarmed state; the label is the click action — the inverse
           // of that state — so a reader must not assume the label names the
-          // current state (className="btn" sets an inline background too,
-          // which permanently defeats global.css's .btn:hover rules — see
-          // HoverButton's own doc comment). Rather than washing to the default
+          // current state. The chip's color/border/background ARE the
+          // armed/disarmed state indicator — a permanent inline background
+          // that would permanently defeat a plain CSS :hover rule (see
+          // HoverButton's own doc comment; Button.tsx wraps it for exactly
+          // this kind of override). Rather than washing to the default
           // neutral overlay, hover adds an inset ring in the SAME state color
           // so armed reads brighter/armed and disarmed reads brighter/disarmed,
           // never neutral.
@@ -77,7 +79,7 @@ export function TopBar(p: TopBarProps): JSX.Element {
             <LockIcon open={p.armed} />
             {p.armed ? "LOCK TRADING" : "UNLOCK TRADING"}
           </span>
-        </HoverButton>
+        </Button>
       </div>
     </div>
   );

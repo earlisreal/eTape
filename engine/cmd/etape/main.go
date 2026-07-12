@@ -49,6 +49,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 	"github.com/earlisreal/eTape/engine/internal/venueadmin"
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
+	"github.com/earlisreal/eTape/engine/internal/venueseed"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -481,10 +482,32 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		}()
 	}
 
+	// --- moomoo auto-config (live boots only) ---
+	// Gated on `live` (never -demo/-replay), the same gate config.
+	// SeedDefaultIfMissing above uses -- a synthetic/replayed feed never
+	// really connects to OpenD, so there is no real account list to probe,
+	// and demo's OpenD-free session must never write to the real
+	// ~/.eTape/config.toml. venueAdm is the same instance uihub's commands
+	// already use, satisfying venueseed.Admin without a second config seam.
+	var seeder *venueseed.Seeder
+	if live {
+		var seedEventSeq int64 // local to this closure; venueseed's Notify runs on its own one-shot goroutine, never concurrently
+		notify := func(kind, detail, level string) {
+			seedEventSeq++
+			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
+				Seq: seedEventSeq, Ts: uihubClk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+				Kind: kind, Detail: detail, Level: level,
+			})
+		}
+		seeder = venueseed.New(venueseed.Config{
+			Admin: venueAdm, OpenDAddr: cfg.OpenD.Addr(), Clock: uihubClk, Notify: notify,
+		})
+	}
+
 	// --- fan-in: md/exec Updates -> hub; mark bridge md -> exec ---
 	var forwardWG sync.WaitGroup
 	forwardWG.Add(1)
-	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, live || *demo, st) }()
+	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, live || *demo, st, seeder) }()
 	go forwardExec(ctx, execCore, hub)
 
 	// Forward marks + books into every sim broker so submitted orders fill: in
@@ -503,7 +526,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	var dropWG sync.WaitGroup
 	var sealSchedWG sync.WaitGroup
 	if live || *demo {
-		var sysEventSeq int64 // dedup key disambiguator for the retention sys_events published below
+		var sysEventSeq int64              // dedup key disambiguator for the retention sys_events published below
 		stats0, statsErr := st.SizeStats() // PRE-maintenance snapshot for the anomaly backstop
 		if pending, err := st.PendingSealDays(); err == nil && len(pending) > 0 {
 			hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "sealing", DaysTotal: len(pending)})
@@ -859,16 +882,23 @@ func hz(rate float64) time.Duration {
 	return time.Duration(float64(time.Second) / rate)
 }
 
-// forwardMD drains md.Core.Updates(): publishes each to the hub and (live only)
-// archives finalized 1m/daily bars — merging the old drainUpdates archiving with
-// the new hub fan-in.
-func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, live bool, archive *store.Store) {
+// forwardMD drains md.Core.Updates(): publishes each to the hub, (live only)
+// archives finalized 1m/daily bars — merging the old drainUpdates archiving
+// with the new hub fan-in — and, on every feed-up transition, kicks the
+// moomoo auto-config probe. seeder is nil outside a real live boot (replay,
+// -demo, or the auto-config already run this process) — see boot's own
+// venueseed.New call site for the exact gate; forwardMD only ever guards
+// against nil, it doesn't decide when a Seeder exists.
+func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, live bool, archive *store.Store, seeder *venueseed.Seeder) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case u := <-core.Updates():
 			hub.PublishMD(u)
+			if cu, ok := u.(md.ConnUpdate); ok && cu.Up && seeder != nil {
+				seeder.OnFeedUp(ctx)
+			}
 			if !live {
 				continue
 			}

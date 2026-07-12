@@ -119,31 +119,50 @@ test.describe("settings redesign", () => {
     await expect(page.getByTestId("arm-chip")).toHaveText("UNLOCK TRADING");
   });
 
-  test("venues: an invalid venue id surfaces a validation error inline", async ({ page }) => {
-    // No preset needed — TopBar (and its Settings gear) is always mounted, even
-    // against the blank/empty-state workspace (AppShell renders TopBar outside
-    // the ws.panels.length check). This test never arms anything or touches an
-    // order; it only exercises the file-only venue-admin write path (Task 3/4/10),
-    // which the engine rejects before writing on any validation failure.
+  // The venues broker-cards redesign (§C) replaced the generic "Add venue" +
+  // user-typed venue-id row model with a fixed 4-card roster and no id input
+  // anywhere in the form — the old "invalid venue id" test below no longer
+  // has anything to exercise (there's no id field left to mistype) and is
+  // replaced by roster/slot-model coverage that fits the new UI.
+  //
+  // NOT covered here (flagged rather than silently dropped): the moomoo
+  // picker's multi-account flow, the auto-configured toast + pending-restart
+  // badge via an injected venue.seeded sys.event, and a full Alpaca
+  // key-typed -> Test passes -> Save round trip. Those need either a live
+  // OpenD login or WS-frame-level mocking of a specific command's response
+  // (this file's only existing WS mock, error-matrix.spec.ts's
+  // routeWebSocket, only intercepts connection lifecycle — open/close — not
+  // individual command frames); building that harness is future work.
+  // Unit coverage for all of the above already exists in
+  // VenuesSection.test.tsx (all six moomoo states, the picker, Alpaca
+  // two-slot save, the stale-draft reload guard).
+  test("venues: the fixed broker-card roster renders, and a nonstandard legacy id is claimed by its slot", async ({ page }) => {
     await page.goto("/?workspace=e2e-settings-venues");
     await expect(page.getByTestId("latency-readout")).toBeVisible({ timeout: 15_000 });
 
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await page.getByRole("button", { name: "Venues & creds", exact: true }).click();
 
-    // e2e/serve.sh seeds config.toml with one venue ("sim-paper"), so the newly
-    // added row lands at whatever index is next, not necessarily 0 — count the
-    // existing rows instead of assuming an empty list.
-    const venueIdInputs = page.locator('[data-testid^="venue-id-"]');
-    const newIndex = await venueIdInputs.count();
-    await page.getByTestId("add-venue").click();
+    await expect(page.getByTestId("sim-card")).toBeVisible();
+    await expect(page.getByTestId("moomoo-card")).toBeVisible();
+    await expect(page.getByTestId("alpaca-card")).toBeVisible();
+    await expect(page.getByTestId("tz-card")).toBeVisible();
 
-    // Illegal chars: config.ValidateVenueConfig enforces venue id ~= ^[a-z0-9-]+$
-    // (engine/internal/config/config.go); this must be rejected server-side
-    // before anything is written to config.toml.
-    await page.getByTestId(`venue-id-${newIndex}`).fill("Bad Id!");
-    await page.getByTestId("save-venues").click();
-    await expect(page.getByTestId("venues-error")).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByTestId("venues-error")).toContainText(/must be non-empty and match/i);
+    // e2e/serve.sh seeds config.toml with one venue, id "sim-paper" (a
+    // nonstandard id, never renamed) — the Simulator card claims it by
+    // broker alone, so it renders as a configured sim venue, not overflow.
+    await expect(page.getByTestId("sim-startingbalance")).toBeVisible();
+    await expect(page.getByTestId("other-venues")).toHaveCount(0);
+
+    // No OpenD reachable in this replay-mode boot (venueseed itself isn't
+    // even constructed on a -replay boot — see §A) — the moomoo card sits in
+    // its deterministic pre-venue "waiting" state with no probe button.
+    await expect(page.getByTestId("moomoo-body")).toContainText(/waiting for opend/i);
+    await expect(page.getByTestId("moomoo-probe")).toHaveCount(0);
+
+    // Client-side validation still blocks Save on a partially-typed key,
+    // without any network round trip.
+    await page.getByTestId("alpaca-paper-keyid").fill("only-id-typed");
+    await expect(page.getByTestId("save-venues")).toBeDisabled();
   });
 });

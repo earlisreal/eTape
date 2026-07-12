@@ -307,7 +307,7 @@ describe("OrderSettingsSection", () => {
     expect(offset.value).toBe("1.");
 
     fireEvent.click(screen.getByTestId("reset-defaults"));
-    fireEvent.click(screen.getByTestId("reset-confirm"));
+    fireEvent.click(screen.getByTestId("reset-defaults")); // same button, now armed
 
     // The default set is empty, so buy-5k's card (and its in-progress "1."
     // edit) is gone entirely rather than snapping back to some value.
@@ -324,7 +324,7 @@ describe("OrderSettingsSection", () => {
     // happening to already match defaults.
     fireEvent.change(screen.getByTestId("tmpl-label-buy-5k"), { target: { value: "mutated" } });
     fireEvent.click(screen.getByTestId("reset-defaults"));
-    fireEvent.click(screen.getByTestId("reset-confirm"));
+    fireEvent.click(screen.getByTestId("reset-defaults")); // same button, now armed
     fireEvent.click(screen.getByTestId("save"));
     const saved = onSave.mock.calls[0][0];
     expect(saved.templates).toEqual(normalizeOrderConfig(DEFAULT_ORDER_CONFIG).templates);

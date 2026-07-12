@@ -57,13 +57,22 @@ type Prober struct {
 	openDAddr string
 	clk       clock.Clock
 
-	// alpacaVerify, tzFetchAccounts, and moomooVerify are injectable seams
-	// for tests (no network); New wires them to the real broker helpers
-	// below.
+	// alpacaVerify, tzFetchAccounts, moomooVerify, and moomooList are
+	// injectable seams for tests (no network); New wires them to the real
+	// broker helpers below.
 	alpacaVerify    func(ctx context.Context, env string, cr creds.Pair, clk clock.Clock) (string, error)
 	tzFetchAccounts func(ctx context.Context, cr creds.Pair, clk clock.Clock) ([]tradezero.AccountInfo, error)
 	moomooVerify    func(ctx context.Context, addr string, accountID uint64, env string, clk clock.Clock) (*trdcommon.TrdAcc, error)
+	moomooList      func(ctx context.Context, addr, clientID string, clk clock.Clock) ([]*trdcommon.TrdAcc, error)
 }
+
+// moomooProbeClientID is the OpenD client identity BOTH moomoo probe paths
+// (validate via moomooVerify/VerifyAccount and discovery via
+// moomooList/ListAccounts) use — a fixed, throwaway-connection identity
+// distinct from the long-lived adapter's "etape-trade" and venueseed's
+// "etape-seed", so a concurrent probe/seed/adapter connection are each
+// individually visible to OpenD.
+const moomooProbeClientID = "etape-trade-probe"
 
 // New builds a Prober wired to the real alpaca/tradezero/moomoo read-only
 // helpers. openDAddr is the local OpenD gateway address (config.OpenD.Addr())
@@ -76,6 +85,7 @@ func New(credsPath, openDAddr string, clk clock.Clock) *Prober {
 		alpacaVerify:    alpaca.VerifyCredentials,
 		tzFetchAccounts: tradezero.FetchAccounts,
 		moomooVerify:    moomoo.VerifyAccount,
+		moomooList:      moomoo.ListAccounts,
 	}
 }
 
@@ -86,8 +96,10 @@ func New(credsPath, openDAddr string, clk clock.Clock) *Prober {
 //
 // moomoo has no key/secret to verify, so its case skips resolveCreds
 // entirely and goes straight to testMoomoo, which dials OpenD directly and
-// validates accountID. Only a truly unrecognized broker name is rejected
-// before anything is looked at, with the generic "not supported" message.
+// is bimodal on accountID: non-empty validates that account, empty runs
+// discovery (lists every eligible live US account instead). Only a truly
+// unrecognized broker name is rejected before anything is looked at, with
+// the generic "not supported" message.
 func (p *Prober) TestConnection(ctx context.Context, broker, env, credName, keyID, secretKey, accountID string) Result {
 	switch broker {
 	case "alpaca":
@@ -198,14 +210,16 @@ func tzEnv(accountType string) string {
 	return "live"
 }
 
-// testMoomoo probes a moomoo venue by dialing OpenD directly and validating
-// the configured account id — unlike alpaca/tradezero, there is no
-// key/secret to verify; accountID (already required by config validation,
-// but re-checked defensively here since a probe can be called with
-// not-yet-saved settings-UI input) is the only credential-like input.
+// testMoomoo probes a moomoo venue by dialing OpenD directly — unlike
+// alpaca/tradezero, there is no key/secret to verify. It is bimodal on
+// accountID: a non-empty accountID validates that specific account, byte-
+// for-byte the same behavior this had before discovery mode existed; an
+// empty accountID switches to discovery mode (testMoomooDiscover), listing
+// every eligible live US account OpenD's current login can see so the
+// settings UI's account picker has something to offer.
 func (p *Prober) testMoomoo(ctx context.Context, env, accountID string) Result {
 	if accountID == "" {
-		return Result{OK: false, Message: "account_id is required for moomoo"}
+		return p.testMoomooDiscover(ctx)
 	}
 	accID, err := strconv.ParseUint(accountID, 10, 64)
 	if err != nil {
@@ -216,4 +230,57 @@ func (p *Prober) testMoomoo(ctx context.Context, env, accountID string) Result {
 		return Result{OK: false, Message: err.Error()}
 	}
 	return Result{OK: true, Env: env, AccountID: accountID}
+}
+
+// testMoomooDiscover lists every account OpenD's current login can see and
+// filters with moomoo.EligibleLiveUS, mapping the survivors into Accounts the
+// same way testTradeZero maps TradeZero's multi-account result. Unlike
+// TradeZero (which can genuinely be either env), every account this filter
+// keeps is by construction TrdEnv_Real, so Env is unconditionally "live" —
+// both on the top-level Result and on each Account — rather than computed
+// per account like tzEnv.
+//
+// Accounts is always populated (one entry per eligible account, even when
+// there is exactly one) — a deliberate difference from testTradeZero's
+// single-account case, which leaves Accounts empty. That is what lets the
+// exactly-one branch below ADD the top-level AccountID/AccountType promotion
+// (mirrors how testTradeZero promotes its own single-account case) without
+// the UI having to choose between reading the top-level fields or the list.
+//
+// Zero eligible accounts is a definitive answer from the current OpenD
+// login (the same account list a retry right now would also see), so it is
+// reported as OK:false with a fixed, exact message rather than a transient
+// error — a transport failure (dead OpenD) is the separate err != nil branch
+// above it, and gets the same error-shape treatment validate mode's
+// moomooVerify failure gets.
+func (p *Prober) testMoomooDiscover(ctx context.Context) Result {
+	accs, err := p.moomooList(ctx, p.openDAddr, moomooProbeClientID, p.clk)
+	if err != nil {
+		return Result{OK: false, Message: err.Error()}
+	}
+
+	var eligible []*trdcommon.TrdAcc
+	for _, a := range accs {
+		if moomoo.EligibleLiveUS(a) {
+			eligible = append(eligible, a)
+		}
+	}
+	if len(eligible) == 0 {
+		return Result{OK: false, Message: "no live US-authorized account found on this OpenD login"}
+	}
+
+	accts := make([]Account, len(eligible))
+	for i, a := range eligible {
+		accts[i] = Account{
+			AccountID:   strconv.FormatUint(a.GetAccID(), 10),
+			AccountType: trdcommon.TrdAccType(a.GetAccType()).String(),
+			Env:         "live",
+		}
+	}
+	res := Result{OK: true, Env: "live", Accounts: accts}
+	if len(accts) == 1 {
+		res.AccountID = accts[0].AccountID
+		res.AccountType = accts[0].AccountType
+	}
+	return res
 }

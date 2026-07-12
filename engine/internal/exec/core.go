@@ -528,6 +528,6 @@ func (c *Core) handleBrokerEvent(_ context.Context, be BrokerEvent) {
 	case BrokerConnUp:
 		c.emit(StatusUpdate{Venue: e.V, Connected: true, MasterArmed: c.state.MasterArmed})
 	case BrokerConnDown:
-		c.emit(StatusUpdate{Venue: e.V, Connected: false, MasterArmed: c.state.MasterArmed})
+		c.emit(StatusUpdate{Venue: e.V, Connected: false, MasterArmed: c.state.MasterArmed, Note: e.Note})
 	}
 }

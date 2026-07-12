@@ -9,6 +9,7 @@ import { applyScannerFilters, formatFilterSummary, type ScannerThresholds } from
 import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
 import type { ScannerRowView } from "../../data/ScannerStore";
 import { bareSymbol } from "../exec/orderStatus";
+import { Button } from "../controls/Button";
 
 const SESSION_LABEL: Record<ScannerSession, string> = {
   premarket: "Pre-market", rth: "RTH movers", afterhours: "After-hours", overnight: "Overnight",
@@ -103,10 +104,10 @@ export function ScannerPanel(
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderBottom: `1px solid ${palette.border}`, position: "relative" }}>
         <span style={{ fontWeight: 600 }}>{header}</span>
         {variant === "scanner" && (
-          <button type="button" className="btn" aria-label="filters" aria-expanded={filtersOpen}
+          <Button aria-label="filters" aria-expanded={filtersOpen}
             onClick={() => (filtersOpen ? setFiltersOpen(false) : openFilters())} style={{ padding: "2px 8px" }}>
             ⚙ filters
-          </button>
+          </Button>
         )}
         {variant === "scanner" && filtersOpen && (
           <div className="popover" style={{ top: 30, left: 8, width: 220 }}>
@@ -118,8 +119,8 @@ export function ScannerPanel(
               <label>vol ≥ <input aria-label="min volume" type="number" value={draft.minVolume}
                 onChange={(e) => setDraft({ ...draft, minVolume: Number(e.target.value) || 0 })} style={{ width: 90 }} /></label>
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-                <button type="button" className="btn" onClick={resetDefaults}>Reset defaults</button>
-                <button type="button" className="btn btn-primary" onClick={applyFilters}>Apply</button>
+                <Button onClick={resetDefaults}>Reset defaults</Button>
+                <Button variant="primary" onClick={applyFilters}>Apply</Button>
               </div>
             </div>
           </div>

@@ -449,6 +449,38 @@ func TestMirrorStatusUpdateDoesNotClobberSeededNote(t *testing.T) {
 	}
 }
 
+// TestMirrorConnDownNoteSurvivesReconnect exercises the real moomoo scenario
+// end-to-end (Task 5): a disconnect note set dynamically via a StatusUpdate
+// (mirroring exec.Core.handleBrokerEvent's BrokerConnDown branch) must persist
+// through a later unrelated empty-note StatusUpdate (e.g. BrokerConnUp, or any
+// arm/disarm/kill emitter), and Connected must still flip correctly. This is
+// the deliberate consequence documented at the mirror's StatusUpdate case: the
+// note goes stale (Connected:true, Note still set) rather than being cleared,
+// so a consumer must gate display of Note on Connected == false.
+func TestMirrorConnDownNoteSurvivesReconnect(t *testing.T) {
+	m := newMirror([]venueMeta{
+		{ID: "moomoo", Broker: wsmsg.BrokerMoomoo},
+	}, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10)
+
+	// OpenD drops: BrokerConnDown{Note: "OpenD unreachable"} -> StatusUpdate.
+	m.applyExec(exec.StatusUpdate{Venue: "moomoo", Connected: false, MasterArmed: false, Note: "OpenD unreachable"})
+	if v := m.execStatus().Venues[0]; v.Connected || v.Note != "OpenD unreachable" {
+		t.Fatalf("after ConnDown update: got %+v", v)
+	}
+
+	// An unrelated StatusUpdate with an empty Note (e.g. BrokerConnUp on
+	// reconnect, or an arm/disarm emitStatus() broadcast) must not clear it.
+	m.applyExec(exec.StatusUpdate{Venue: "moomoo", Connected: true, MasterArmed: false})
+
+	v := m.execStatus().Venues[0]
+	if !v.Connected {
+		t.Fatalf("Connected should flip to true on the reconnect update, got %+v", v)
+	}
+	if v.Note != "OpenD unreachable" {
+		t.Fatalf("empty-note StatusUpdate must not clobber the real note: got %q", v.Note)
+	}
+}
+
 func TestMirrorNewsAndEventsCapBounded(t *testing.T) {
 	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 200, 2, 500, 2, 2)
 	for i := 0; i < 5; i++ {

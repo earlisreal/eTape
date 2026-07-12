@@ -258,6 +258,12 @@ func (m *mirror) applyExec(u exec.Update) []staged {
 		m.masterArmed = v.MasterArmed
 		if vs := m.venueStatus[string(v.Venue)]; vs != nil {
 			vs.Connected = v.Connected
+			// Non-empty guard only: unrelated StatusUpdates (arm/kill emitters,
+			// BrokerConnUp) carry an empty Note and must never clear a real one.
+			// Deliberate consequence: there is no always-overwrite/clear path, so
+			// a disconnect note SURVIVES the next reconnect (Connected flips back
+			// to true, Note is untouched, now stale). Consumers must gate note
+			// display on Connected == false, never show it while connected.
 			if v.Note != "" {
 				vs.Note = v.Note
 			}

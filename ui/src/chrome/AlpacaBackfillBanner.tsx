@@ -1,5 +1,5 @@
 import { useTheme } from "./ThemeProvider";
-import { HoverButton } from "./controls/HoverButton";
+import { Button } from "./controls/Button";
 
 // Non-blocking hint shown whenever no Alpaca venue is configured (including
 // sim-only), once the first-run venue-setup modal is dismissed. A paper
@@ -35,23 +35,21 @@ export function AlpacaBackfillBanner(
         Add a paper Alpaca venue for deeper 1-minute history — ~20 days, quota-free.
       </span>
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <HoverButton
+        <Button
           data-testid="alpaca-banner-setup"
-          className="btn"
           onClick={onSetup}
           style={{ fontSize: 11, color: palette.accent, borderColor: palette.accent }}
         >
           Set up Alpaca ▸
-        </HoverButton>
-        <HoverButton
+        </Button>
+        <Button
           data-testid="alpaca-banner-dismiss"
           aria-label="Dismiss"
-          className="btn"
           onClick={onDismiss}
           style={{ fontSize: 11, color: palette.textMuted }}
         >
           ✕
-        </HoverButton>
+        </Button>
       </div>
     </div>
   );

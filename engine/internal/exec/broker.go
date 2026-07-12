@@ -48,7 +48,17 @@ func (OrderReplaced) isBrokerEvent() {}
 func (StreamGap) isBrokerEvent()     {}
 
 type BrokerConnUp struct{ V VenueID }
-type BrokerConnDown struct{ V VenueID }
+
+// BrokerConnDown is a broker's connection-lost transition. Note is an optional
+// human-readable reason (e.g. moomoo's "OpenD unreachable") threaded through
+// handleBrokerEvent into StatusUpdate.Note for the uihub mirror to surface.
+// Emitters that have nothing venue-specific to say (alpaca, tradezero, sim)
+// leave it empty; the mirror's non-empty guard means an empty Note here is a
+// true no-op, never a clear of a previously-set note.
+type BrokerConnDown struct {
+	V    VenueID
+	Note string
+}
 type BrokerAccount struct{ Account AccountSnapshot }
 type BrokerPositions struct {
 	V         VenueID

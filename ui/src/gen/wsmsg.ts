@@ -470,14 +470,22 @@ export interface VenueConfig {
   gate: Gate;
 }
 /**
+ * SeedView mirrors config.SeedConfig for the settings UI: whether the
+ * one-shot moomoo auto-config has produced a definitive outcome.
+ */
+export interface SeedView {
+  moomooAttempted: boolean;
+}
+/**
  * VenueSetup is the GetVenueSetup result. file = parsed from config.toml,
  * running = what the engine booted with; the restart banner shows when they
- * differ. credKeys = credential NAMES only.
+ * differ. credKeys = credential NAMES only. seed = the file's [seed] marker.
  */
 export interface VenueSetup {
   file: VenueConfig;
   running: VenueConfig;
   credKeys: string[];
+  seed: SeedView;
 }
 export interface SetVenueSetupArgs {
   venues: Venue[];

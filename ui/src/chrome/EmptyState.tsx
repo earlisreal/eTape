@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { Catalog } from "./Catalog";
 import { useTheme } from "./ThemeProvider";
+import { Button } from "./controls/Button";
 
 // The blank-workspace hero: wraps Catalog with heading + lede copy. Shown by
 // AppShell whenever the current workspace has zero panels — first run, or after
@@ -52,10 +53,10 @@ export function EmptyState({ onAddPanel, onApplyPreset, showTryDemo, onTryDemo, 
             <p style={{ margin: 0, fontSize: 12, color: palette.text }}>
               New here? Explore a live-feeling synthetic market — no broker or setup required.
             </p>
-            <button className="btn" onClick={onTryDemo}
+            <Button onClick={onTryDemo}
               style={{ background: palette.demo, color: "#fff", border: `1px solid ${palette.demo}`, flexShrink: 0 }}>
               Try demo
-            </button>
+            </Button>
           </div>
         )}
         <Catalog onAddPanel={onAddPanel} onApplyPreset={onApplyPreset} />
@@ -64,9 +65,9 @@ export function EmptyState({ onAddPanel, onApplyPreset, showTryDemo, onTryDemo, 
           borderTop: `1px solid ${palette.borderStrong}`, marginTop: 22, paddingTop: 14,
         }}>
           <p className="serif" style={{ margin: 0, fontSize: 12, color: palette.textMuted }}>Have a saved layout?</p>
-          <button className="btn" aria-label="Import layout" onClick={() => importInputRef.current?.click()}>
+          <Button aria-label="Import layout" onClick={() => importInputRef.current?.click()}>
             ⤓ Import layout…
-          </button>
+          </Button>
           <input
             ref={importInputRef} type="file" accept="application/json"
             data-testid="empty-import-file" onChange={onFileSelected}

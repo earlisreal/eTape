@@ -4,11 +4,13 @@ import { VenuesSection } from "./exec/VenuesSection";
 import { BackupPanel } from "./BackupPanel";
 import { useOrderConfig } from "./exec/useOrderConfig";
 import { useTheme } from "./ThemeProvider";
-import { HoverButton } from "./controls/HoverButton";
+import { Button } from "./controls/Button";
 import type { AckMsg } from "../wire/contract";
 import type { ToastApi } from "./Toast";
 import type { Workspace } from "./workspace";
 import type { ConnState } from "../wire/WsClient";
+import type { HealthStore } from "../data/HealthStore";
+import type { ExecStore } from "../data/ExecStore";
 
 export type SettingsSection = "general" | "orders" | "venues";
 const NAV: { id: SettingsSection; label: string }[] = [
@@ -17,7 +19,7 @@ const NAV: { id: SettingsSection; label: string }[] = [
   { id: "venues", label: "Venues & creds" },
 ];
 
-export function SettingsModal({ open, section, onSection, onClose, commands, getWorkspace, onImportWorkspace, toast, engineState }:
+export function SettingsModal({ open, section, onSection, onClose, commands, getWorkspace, onImportWorkspace, toast, engineState, health, exec }:
   {
     open: boolean; section: SettingsSection; onSection: (s: SettingsSection) => void; onClose: () => void;
     commands: { sendCommand(name: string, args: unknown): Promise<AckMsg> };
@@ -30,6 +32,12 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
     // `ConnState | undefined` (AppShell's engineState is always defined in
     // practice, but its static type here is whatever this prop declares).
     engineState?: ConnState | undefined;
+    // Threaded to VenuesSection's moomoo card (OpenD link status + live
+    // connected/note per venue) — the app's single existing HealthStore/
+    // ExecStore instances (see AppShell), not a new subscription. Optional
+    // for the same reason as engineState above.
+    health?: HealthStore | undefined;
+    exec?: ExecStore | undefined;
   }): JSX.Element | null {
   const { palette } = useTheme();
   const oc = useOrderConfig();
@@ -42,21 +50,22 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
             Settings
           </div>
           {NAV.map((n) => (
-            <HoverButton key={n.id} className="btn" aria-label={n.label} onClick={() => onSection(n.id)}
+            <Button key={n.id} aria-label={n.label} onClick={() => onSection(n.id)}
               style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 2, background: section === n.id ? palette.bg : "transparent",
                 borderColor: "transparent", borderRadius: 4, borderLeft: `4px solid ${section === n.id ? palette.accent : "transparent"}`,
                 color: section === n.id ? palette.text : palette.textMuted, fontWeight: section === n.id ? 600 : 500,
                 fontSize: 12, padding: "9px 10px" }}
-              // className="btn" sets an inline background too, which permanently
-              // defeats global.css's .btn:hover rules (see HoverButton's own doc
-              // comment). Active rows already sit on palette.bg (bridging to the
-              // content pane below, which is the same color); hovering an inactive
-              // row previews that same bg so it reads as "about to become current."
-              // The border-left accent stripe stays the true active/inactive
-              // differentiator, so it never washes out.
+              // This row sets a permanent inline background too, which would
+              // permanently defeat a plain CSS :hover rule (see HoverButton's
+              // own doc comment). Active rows already sit on palette.bg
+              // (bridging to the content pane below, which is the same
+              // color); hovering an inactive row previews that same bg so it
+              // reads as "about to become current." The border-left accent
+              // stripe stays the true active/inactive differentiator, so it
+              // never washes out.
               hoverStyle={{ background: palette.bg, color: palette.text }}>
               {n.label}
-            </HoverButton>
+            </Button>
           ))}
         </nav>
         <section style={{ padding: 16, overflow: "auto", minHeight: 0, background: palette.bg }}>
@@ -70,7 +79,7 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
               </div>
             </>
           )}
-          {section === "venues" && <VenuesSection commands={commands} engineState={engineState} />}
+          {section === "venues" && <VenuesSection commands={commands} engineState={engineState} health={health} exec={exec} />}
         </section>
       </div>
     </div>
