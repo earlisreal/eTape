@@ -365,6 +365,11 @@ describe("VenuesSection", () => {
     fireEvent.change(screen.getByTestId("venue-id-0"), { target: { value: "tradezero-live" } });
     expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true); // dup id blocks Save
 
+    // Risk limits are collapsed by default — expand both rows so the cap
+    // inputs are actually in the DOM to query.
+    fireEvent.click(screen.getByTestId("venue-limits-toggle-0"));
+    fireEvent.click(screen.getByTestId("venue-limits-toggle-1"));
+
     // Caps are tracked per-row (a stable synthetic key), not by the id shown
     // in the field, so both cards keep displaying their own row's original
     // caps throughout the collision — there is no shared key for a clobber
@@ -431,6 +436,38 @@ describe("VenuesSection", () => {
     // A's original caps followed it to its final id, intact — not lost, not
     // swapped with B's.
     expect(gate.venue["alpaca-paper-2"]).toEqual({ maxOrderValue: 5000, maxPositionValue: 20000, maxPositionShares: 100, maxOpenOrders: 3 });
+  });
+
+  it("collapses per-venue risk limits by default; clicking the toggle reveals the cap inputs, and the toggle reports how many caps are set", async () => {
+    const withCaps: VenueSetup = baseSetup({
+      file: {
+        ...runningConfig,
+        gate: {
+          ...runningConfig.gate,
+          venue: {
+            "alpaca-paper": { maxOrderValue: 5000, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 },
+          },
+        },
+      },
+    });
+    const commands = makeCommands([withCaps]);
+    wrap(commands);
+    await waitFor(() => expect(screen.getByTestId("venue-id-0")).toBeTruthy());
+
+    // Collapsed by default: no cap input in the DOM, but the toggle signals
+    // that venue 0 already has a limit set (1) and venue 1 has none.
+    expect(screen.queryByLabelText("maxOrderValue")).toBeNull();
+    expect(screen.getByTestId("venue-limits-toggle-0").textContent).toContain("Risk limits · 1 set");
+    expect(screen.getByTestId("venue-limits-toggle-1").textContent).toContain("Configure risk limits");
+
+    fireEvent.click(screen.getByTestId("venue-limits-toggle-0"));
+    const maxOrderInputs = screen.getAllByLabelText("maxOrderValue") as HTMLInputElement[];
+    expect(maxOrderInputs).toHaveLength(1); // only venue 0's group expanded
+    expect(maxOrderInputs[0].value).toBe("5000");
+
+    // Clicking again collapses it back.
+    fireEvent.click(screen.getByTestId("venue-limits-toggle-0"));
+    expect(screen.queryByLabelText("maxOrderValue")).toBeNull();
   });
 
   it("does not crash adding a venue on a fresh install where the engine reports credKeys: null", async () => {
@@ -685,7 +722,7 @@ describe("VenuesSection", () => {
       expect((screen.getByTestId("save-venues") as HTMLButtonElement).disabled).toBe(true);
     });
 
-    it("the manual env/account-id inputs are absent for tradezero/alpaca rows and present for moomoo/sim rows", async () => {
+    it("the env dropdown is present only for moomoo rows, and absent for tradezero/alpaca/sim rows", async () => {
       const withMoomooAndSim: VenueSetup = baseSetup({
         file: {
           ...runningConfig,
@@ -707,10 +744,10 @@ describe("VenuesSection", () => {
       expect(screen.queryByTestId("venue-account-1")).toBeNull();   // tradezero (manual input gone)
       expect(screen.getByTestId("venue-account-detected-1")).toBeTruthy(); // tradezero read-only display
 
-      expect(screen.getByTestId("venue-env-2")).toBeTruthy();       // moomoo
-      expect(screen.getByTestId("venue-account-2")).toBeTruthy();   // moomoo
-      expect(screen.getByTestId("venue-env-3")).toBeTruthy();       // sim
-      expect(screen.getByTestId("venue-account-3")).toBeTruthy();   // sim
+      expect(screen.getByTestId("venue-env-2")).toBeTruthy();       // moomoo: manual env dropdown
+      expect(screen.getByTestId("venue-account-2")).toBeTruthy();   // moomoo: manual account-id input
+      expect(screen.queryByTestId("venue-env-3")).toBeNull();       // sim: no env field at all
+      expect(screen.getByTestId("venue-account-3")).toBeTruthy();   // sim keeps manual account-id
     });
 
     it("editing an already-verified row's secret resets its test status; Save becomes disabled again without a fresh Test", async () => {

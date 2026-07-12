@@ -68,6 +68,10 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
   // Save time (see saveVenues).
   const [rowKeys, setRowKeys] = useState<string[]>([]);
   const [capsByRow, setCapsByRow] = useState<Record<string, GateLimitsView>>({});
+  // Per-venue risk limits are collapsed by default; keyed by the same stable
+  // rowKeys as capsByRow (never v.id) so the open/closed state survives id
+  // edits and stays attached to the right card if rows are reordered.
+  const [limitsOpen, setLimitsOpen] = useState<Record<string, boolean>>({});
   // Test-connection outcome per row, keyed by the same stable rowKeys as
   // capsByRow (not by v.id, which is editable, nor v.credentials, since a
   // credential-name mint could in principle change too) — an absent entry
@@ -131,9 +135,9 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
     draft.venues.forEach((v) => idCounts.set(v.id, (idCounts.get(v.id) ?? 0) + 1));
     return draft.venues.map((v, i) => {
       const issues: VenueIssues = {};
-      if (!v.id) issues.id = "id is required";
-      else if (!VENUE_ID_RE.test(v.id)) issues.id = "id must be lowercase letters, digits, and -";
-      else if ((idCounts.get(v.id) ?? 0) > 1) issues.id = "id must be unique";
+      if (!v.id) issues.id = "name is required";
+      else if (!VENUE_ID_RE.test(v.id)) issues.id = "name must be lowercase letters, digits, and hyphens";
+      else if ((idCounts.get(v.id) ?? 0) > 1) issues.id = "name must be unique";
 
       const typed = secretDrafts[v.credentials];
       const typedKeyId = !!typed?.keyId;
@@ -196,6 +200,9 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
     patchVenue(i, {
       broker,
       credentials: broker !== "sim" && !draft.venues[i].credentials ? mintCredName() : draft.venues[i].credentials,
+      // sim has no env dropdown — force paper so switching an existing live
+      // venue to sim can never strand it on "live" with no way to change it.
+      ...(broker === "sim" ? { env: "paper" } : {}),
     });
     // A Test result from the previous broker is meaningless once the broker
     // itself changes — invalidate it back to absent/idle.
@@ -404,7 +411,16 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
         const resetting = resetConfirmIdx === i;
         const testable = TESTABLE_BROKERS.has(v.broker);
         const test = testState[rowKeys[i]];
-        const showManualEnvAccount = !testable; // tradezero/alpaca auto-detect instead
+        // tradezero/alpaca auto-detect env via Test connection (a read-only
+        // chip); moomoo still needs a manual dropdown (unverified how OpenD
+        // exposes a moomoo paper account); sim has no env field at all — it's
+        // forced to paper in setBroker/addVenue, with the card-header chip
+        // still showing the state.
+        const showEnvDropdown = v.broker === "moomoo";
+        const showAccountInput = v.broker === "moomoo" || v.broker === "sim";
+        const rowKey = rowKeys[i];
+        const limitsExpanded = limitsOpen[rowKey] ?? false;
+        const limitsSetCount = GATE_CAPS.filter((c) => (capsByRow[rowKey]?.[c] ?? 0) > 0).length;
 
         return (
           <div key={i} className="venue-card" style={{
@@ -456,18 +472,21 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
                 <div className="col-head" style={groupLabel}>Connection</div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <label style={fieldWrap}>
-                    id
-                    <input {...field} className="field mono" data-testid={`venue-id-${i}`} value={v.id}
-                      onChange={(e) => patchVenue(i, { id: e.target.value })} placeholder="venue-id" style={{ width: 130 }} />
-                  </label>
-                  <label style={fieldWrap}>
                     broker
                     <select {...field} data-testid={`venue-broker-${i}`} value={v.broker}
                       onChange={(e) => setBroker(i, e.target.value)} style={{ width: 100 }}>
                       {BROKERS.map((b) => <option key={b} value={b}>{BROKER_LABEL[b]}</option>)}
                     </select>
                   </label>
-                  {showManualEnvAccount ? (
+                  <label style={fieldWrap}>
+                    Name
+                    <input {...field} className="field mono" data-testid={`venue-id-${i}`} value={v.id}
+                      onChange={(e) => patchVenue(i, { id: e.target.value })} placeholder="alpaca-paper" style={{ width: 130 }} />
+                    <span style={{ fontSize: 9.5, maxWidth: 150 }}>
+                      lowercase letters, digits, and hyphens — identifies this venue in orders and events.
+                    </span>
+                  </label>
+                  {showEnvDropdown ? (
                     <label style={fieldWrap}>
                       env
                       <select {...field} data-testid={`venue-env-${i}`} value={v.env}
@@ -475,7 +494,7 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
                         {ENVS.map((x) => <option key={x} value={x}>{x}</option>)}
                       </select>
                     </label>
-                  ) : (
+                  ) : testable ? (
                     <label style={fieldWrap}>
                       env
                       <span className={`chip ${isLive ? "chip-live" : ""}`} data-testid={`venue-env-detected-${i}`}
@@ -483,8 +502,8 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
                         {v.env ? v.env.toUpperCase() : "—"}
                       </span>
                     </label>
-                  )}
-                  {showManualEnvAccount && (
+                  ) : null}
+                  {showAccountInput && (
                     <label style={fieldWrap}>
                       account id
                       <input {...field} data-testid={`venue-account-${i}`} value={v.accountId}
@@ -565,20 +584,31 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
               )}
 
               <div>
-                <div className="col-head" style={groupLabel}>Risk limits</div>
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
-                  {GATE_CAPS.map((cap) => (
-                    <label key={cap} style={fieldWrap}>
-                      {cap}
-                      <input {...field} className="field mono" value={String(capsByRow[rowKeys[i]]?.[cap] ?? 0)}
-                        onChange={(e) => {
-                          const key = rowKeys[i];
-                          setCapsByRow((c) => ({ ...c, [key]: { ...(c[key] ?? zeroCaps()), [cap]: Number(e.target.value) || 0 } }));
-                        }}
-                        style={{ width: 72 }} />
-                    </label>
-                  ))}
-                </div>
+                <button
+                  data-testid={`venue-limits-toggle-${i}`}
+                  className="btn"
+                  onClick={() => setLimitsOpen((s) => ({ ...s, [rowKey]: !limitsExpanded }))}
+                >
+                  {limitsExpanded ? "▾ " : "▸ "}
+                  {limitsSetCount > 0 ? `Risk limits · ${limitsSetCount} set` : "Configure risk limits"}
+                </button>
+                {limitsExpanded && (
+                  <div style={{ marginTop: 8 }}>
+                    <div className="col-head" style={groupLabel}>Risk limits</div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+                      {GATE_CAPS.map((cap) => (
+                        <label key={cap} style={fieldWrap}>
+                          {cap}
+                          <input {...field} className="field mono" value={String(capsByRow[rowKey]?.[cap] ?? 0)}
+                            onChange={(e) => {
+                              setCapsByRow((c) => ({ ...c, [rowKey]: { ...(c[rowKey] ?? zeroCaps()), [cap]: Number(e.target.value) || 0 } }));
+                            }}
+                            style={{ width: 72 }} />
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
