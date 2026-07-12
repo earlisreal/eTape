@@ -35,6 +35,7 @@ import { useToasts } from "../Toast";
 import { Button } from "../controls/Button";
 import type { HealthStore } from "../../data/HealthStore";
 import type { ExecStore } from "../../data/ExecStore";
+import type { SessionStore } from "../../data/SessionStore";
 import type { AckMsg, Venue, Gate, GateLimitsView, VenueConfig, VenueSetup, TestConnectionResult, TestAccount } from "../../wire/contract";
 import type { ConnState } from "../../wire/WsClient";
 
@@ -81,7 +82,7 @@ function resolveSlots(venues: Venue[]): Slots {
   return s;
 }
 
-export function VenuesSection({ commands, engineState, health, exec }: {
+export function VenuesSection({ commands, engineState, health, exec, session }: {
   commands: Commands;
   engineState?: ConnState | undefined;
   // Live OpenD-reachability (sys.health "engine-moomoo" link) and per-venue
@@ -94,9 +95,20 @@ export function VenuesSection({ commands, engineState, health, exec }: {
   // its pre-venue "waiting" copy and skips the connection chip.
   health?: HealthStore | undefined;
   exec?: ExecStore | undefined;
+  // Demo mode boots a synthetic in-memory venue config (main.go's -demo
+  // override) that never touches config.toml, so GetVenueSetup's file/
+  // running always disagree while in demo — the restart banner (below)
+  // needs this to know the drift isn't real. Optional for the same
+  // stores-wiring reason as health/exec above; absent means the banner
+  // falls back to its pre-demo-aware behavior.
+  session?: SessionStore | undefined;
 }): JSX.Element {
   const { palette } = useTheme();
   const toast = useToasts();
+  const sessionMode = useSyncExternalStore(
+    (cb) => session?.subscribe(cb) ?? (() => {}),
+    () => session?.getSnapshot().mode,
+  );
   const [setup, setSetup] = useState<VenueSetup | null>(null);
   const [draft, setDraft] = useState<VenueConfig>({ venues: [], gate: emptyGate() });
   const [err, setErr] = useState("");
@@ -157,8 +169,8 @@ export function VenuesSection({ commands, engineState, health, exec }: {
   const overflow = useMemo(() => draft.venues.map((_, i) => i).filter((i) => !claimed.has(i)), [draft.venues, claimed]);
 
   const restartNeeded = useMemo(
-    () => setup !== null && JSON.stringify(setup.file) !== JSON.stringify(setup.running),
-    [setup],
+    () => sessionMode !== "demo" && setup !== null && JSON.stringify(setup.file) !== JSON.stringify(setup.running),
+    [setup, sessionMode],
   );
 
   // Same reconnect-then-reload contract as before restart: engineState cycles

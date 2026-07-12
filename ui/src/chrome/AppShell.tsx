@@ -737,7 +737,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           toast={toast}
           engineState={engineState}
           health={stores.health}
-          exec={stores.exec} />
+          exec={stores.exec}
+          session={stores.session} />
         <PracticeLauncherModal open={practiceOpen} onClose={() => setPracticeOpen(false)} commands={commands} />
         {showVenueSetup && <VenueSetupPrompt onConfigure={configureVenueSetup} onDismiss={dismissVenueSetup} onTryDemo={onTryDemo} />}
       </div>

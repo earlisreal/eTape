@@ -6,6 +6,7 @@ import { ToastProvider } from "../Toast";
 import { VenuesSection } from "./VenuesSection";
 import { HealthStore } from "../../data/HealthStore";
 import { ExecStore } from "../../data/ExecStore";
+import { SessionStore } from "../../data/SessionStore";
 import type { AckMsg, Gate, Venue, VenueConfig, VenueSetup, TestConnectionResult, ExecStatus, DeltaMsg, SysEvent } from "../../wire/contract";
 
 function okResult(overrides: Partial<TestConnectionResult> = {}): TestConnectionResult {
@@ -52,11 +53,17 @@ function makeCommands(setupSequence: VenueSetup[], acks: Partial<Record<string, 
   return { sendCommand, sent };
 }
 
-function wrap(commands: { sendCommand: (name: string, args: unknown) => Promise<AckMsg> }, opts: { engineState?: "connecting" | "open" | "reconnecting"; health?: HealthStore; exec?: ExecStore } = {}) {
+function sessionWith(mode: "pending" | "live" | "replay" | "demo"): SessionStore {
+  const s = new SessionStore();
+  if (mode !== "pending") s.apply({ kind: "snapshot", topic: "sys.session", payload: { mode } } as never);
+  return s;
+}
+
+function wrap(commands: { sendCommand: (name: string, args: unknown) => Promise<AckMsg> }, opts: { engineState?: "connecting" | "open" | "reconnecting"; health?: HealthStore; exec?: ExecStore; session?: SessionStore } = {}) {
   return render(
     <ThemeProvider>
       <ToastProvider>
-        <VenuesSection commands={commands} engineState={opts.engineState} health={opts.health} exec={opts.exec} />
+        <VenuesSection commands={commands} engineState={opts.engineState} health={opts.health} exec={opts.exec} session={opts.session} />
       </ToastProvider>
     </ThemeProvider>,
   );
@@ -411,6 +418,18 @@ describe("VenuesSection — restart banner / restart flow (unchanged mechanics)"
 
     fireEvent.click(screen.getByTestId("save-venues"));
     await waitFor(() => expect(screen.getByTestId("restart-banner")).toBeTruthy());
+  });
+
+  it("suppresses the restart banner while in demo mode, even though file != running by construction", async () => {
+    // Demo mode boots a synthetic in-memory venue config (see main.go's -demo
+    // override) and never touches config.toml, so file/running diverge on
+    // every demo boot regardless of whether the user edited Settings. The
+    // banner would otherwise be permanently (and wrongly) stuck on.
+    const drifted = baseSetup({ file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 }] } });
+    const commands = makeCommands([drifted]);
+    wrap(commands, { session: sessionWith("demo") });
+    await waitFor(() => expect(screen.getByTestId("save-venues")).toBeTruthy());
+    expect(screen.queryByTestId("restart-banner")).toBeNull();
   });
 
   it("restart button requires a second click to confirm, and the ~3s confirm timeout backs out without sending RestartEngine", async () => {

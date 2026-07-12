@@ -4,17 +4,31 @@ import type { Stores } from "../../data/registry";
 import type { LinkGroup, LinkGroups } from "../linkGroups";
 import { useOrderConfig } from "./useOrderConfig";
 
+// A candidate is usable if it's non-empty and, once status has loaded, still
+// names a venue the engine actually runs. Without the latter check, a venue
+// id persisted before a mode transition (e.g. a real broker id surviving a
+// switch into demo mode, which restarts the engine onto a "sim-paper"-only
+// registry) would win the || chain below over a venue that actually exists,
+// and orders submitted against it would be gate-rejected as "unknown venue".
+// status === null means no snapshot has arrived yet (nothing to validate
+// against), so a candidate is trusted as-is in that case.
+function isLiveVenue(v: VenueID | undefined, status: ExecStatus | null): v is VenueID {
+  return !!v && (status === null || status.venues.some((s) => s.venue === v));
+}
+
 // The venue-resolution chain shared by the order ticket, the Account panel, and
 // the hotkey engine: a grouped panel's focused venue wins, else the global
-// active venue, else the first configured venue, else none. `||` (not `??`) so
-// the empty-string activeVenue default falls through to the first venue.
+// active venue, else the first configured venue, else none.
 export function resolveVenue(
   group: LinkGroup,
   linkGroups: LinkGroups,
   activeVenue: VenueID,
   status: ExecStatus | null,
 ): VenueID {
-  return linkGroups.venueFor(group) || activeVenue || status?.venues[0]?.venue || "";
+  const grouped = linkGroups.venueFor(group);
+  if (isLiveVenue(grouped, status)) return grouped;
+  if (isLiveVenue(activeVenue, status)) return activeVenue;
+  return status?.venues[0]?.venue || "";
 }
 
 // Hook form for panels: returns the resolved venue, the full venue-id list, and
