@@ -43,6 +43,7 @@ type Poller struct {
 	clk     clock.Clock
 	symbols func() []string // focused + watchlist symbols to rotate through
 	seen    map[string]bool // dedup keys
+	seenDay int64           // ET day of the current seen-set (0 forces a reset on first tick)
 }
 
 func New(cfg config.News, r requester, pub Publisher, clk clock.Clock, symbols func() []string) *Poller {
@@ -61,6 +62,7 @@ func (p *Poller) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-tick.C():
+			p.resetIfNewDay(p.clk.Now())
 			syms := p.symbols()
 			if len(syms) == 0 {
 				continue
@@ -136,6 +138,17 @@ func parsePublishTime(pt string) string {
 		return ""
 	}
 	return t.UTC().Format("2006-01-02T15:04:05.000Z07:00")
+}
+
+// resetIfNewDay clears the dedup seen-set on the ET-day boundary, so the map
+// doesn't grow unboundedly for the life of the process. Mirrors the scan
+// poller's resetIfNewDay (internal/scan/scan.go).
+func (p *Poller) resetIfNewDay(now time.Time) {
+	day := session.DayMs(now.UnixMilli())
+	if day != p.seenDay {
+		p.seenDay = day
+		p.seen = map[string]bool{}
+	}
 }
 
 func (p *Poller) dedup(items []wsmsg.NewsItem) []wsmsg.NewsItem {

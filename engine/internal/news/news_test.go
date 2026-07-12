@@ -2,7 +2,10 @@ package news
 
 import (
 	"testing"
+	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/clock"
+	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
 
@@ -21,6 +24,29 @@ func TestDedupByURL(t *testing.T) {
 	// second call: all already seen
 	if again := p.dedup(in); len(again) != 0 {
 		t.Fatalf("all should be seen on second pass, got %d", len(again))
+	}
+}
+
+func TestSeenResetsAtDayBoundary(t *testing.T) {
+	clk := clock.NewFake(time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC))
+	p := &Poller{seen: map[string]bool{}, seenDay: session.DayMs(clk.Now().UnixMilli())}
+	in := []wsmsg.NewsItem{
+		{Symbol: "US.AAPL", Headline: "A", URL: "http://x/1", SeenAt: "t1"},
+	}
+	out := p.dedup(in)
+	if len(out) != 1 {
+		t.Fatalf("expected 1 unique item, got %d: %+v", len(out), out)
+	}
+	// same day, repeat: suppressed
+	if again := p.dedup(in); len(again) != 0 {
+		t.Fatalf("expected dedup suppression within the same ET day, got %d: %+v", len(again), again)
+	}
+	// advance past ET midnight into the next ET day
+	clk.Advance(24 * time.Hour)
+	p.resetIfNewDay(clk.Now())
+	// seen-set was cleared: the same URL is emitted again
+	if out := p.dedup(in); len(out) != 1 {
+		t.Fatalf("expected seen-set cleared after ET-day rollover, got %d: %+v", len(out), out)
 	}
 }
 
