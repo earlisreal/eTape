@@ -75,7 +75,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // Unified Settings modal (Task 11): AppShell owns open/section state; TopBar's
   // gear opens it to Appearance, the order ticket's gear (via OpenSettingsContext)
   // opens it straight to Orders & hotkeys.
-  const [settings, setSettings] = useState<{ open: boolean; section: SettingsSection }>({ open: false, section: "appearance" });
+  const [settings, setSettings] = useState<{ open: boolean; section: SettingsSection }>({ open: false, section: "general" });
   // Task 9 (unified into the Task 5/U3 Practice launcher): opened from
   // TopBar's "Practice" button, offers a synthetic demo market or replaying
   // a recorded day.
@@ -520,7 +520,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             onArmToggle={() => (armed ? oc.disarm() : oc.arm())}
             onAddPanel={() => setAddOpen((v) => !v)}
             onNewWindow={onNewWindow}
-            onOpenSettings={() => setSettings({ open: true, section: "appearance" })}
+            onOpenSettings={() => setSettings({ open: true, section: "general" })}
             onOpenConnection={onOpenConnection}
             onOpenReplay={() => setPracticeOpen(true)}
           />

@@ -12,7 +12,7 @@
 // reorder a newly-added card ahead of the other kind's trailing cards, breaking
 // the "last remove button = most recently added template" invariant the
 // stale-raw-edit-on-reused-id regression test relies on.
-import { useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { useTheme } from "../ThemeProvider";
 import { FONTS, type Palette } from "../../render/palette";
 import { HoverButton } from "../controls/HoverButton";
@@ -38,7 +38,6 @@ const MODE_LABEL: Record<SizingMode, string> = { Dollar: "Dollar", BuyingPowerPc
 const MANAGE_ACTIONS: ManagementAction[] = ["CancelLast", "CancelAllFocused", "CancelAllEverything", "KillSwitch"];
 
 const OFFSET_STEP = 0.05;
-const EXT_BUFFER_STEP = 0.1;
 const SIZE_STEP: Record<SizingMode, number> = { Dollar: 100, BuyingPowerPct: 1, Shares: 1, PositionFraction: 1 };
 // Only the two percent-based modes have a natural ceiling (100% of buying
 // power / position can't be exceeded); Dollar and Shares are unbounded above.
@@ -49,9 +48,6 @@ const isPercentMode = (m: SizingMode): boolean => m === "BuyingPowerPct" || m ==
 // land on 0.09999999999999999 in double precision).
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
-}
-function round1(n: number): number {
-  return Math.round(n * 10) / 10;
 }
 function clampNum(n: number, min: number, max?: number): number {
   const v = Math.max(min, n);
@@ -334,7 +330,6 @@ function TemplateCard({ t, palette, dup, isFirst, isLast, rawEdits, setRawEdit, 
 export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; onSave: (next: OrderConfig) => void }): JSX.Element {
   const { palette } = useTheme();
   const [templates, setTemplates] = useState<ActionTemplate[]>(() => config.templates.map((t) => ({ ...t })));
-  const [extBufferPct, setExtBufferPct] = useState<number>(() => config.extHoursMarketBufferPct ?? 1.0);
   const [addOpen, setAddOpen] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   // Offset and size-value are fully-controlled numeric fields whose display
@@ -345,6 +340,43 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
   // Track the in-progress raw text per cell (keyed by `${templateId}:field`)
   // and only fall back to the derived numeric string once editing ends.
   const [rawEdits, setRawEdits] = useState<Record<string, string>>({});
+  // Task 6 co-mounted this section with the hotkeys BackupPanel in the same
+  // "orders" pane (both share the OrderConfig context), removing the nav-
+  // switch unmount/remount that used to re-run the `templates` useState
+  // initializer above whenever `config` changed underneath this component.
+  // Without this effect, importing hotkeys updates the shared config but this
+  // component's local `templates` (what the cheat sheet and cards render
+  // from) silently keeps showing the pre-import list.
+  //
+  // The BackupPanel import is not the only thing that can change `config`
+  // while this component is mounted, though. `OrderConfigProvider`
+  // (useOrderConfig.tsx) is a single app-wide context, and its
+  // `setActiveVenue` is reachable from venue-selection UI in the
+  // AccountPanel/OrderTicketPanel dockview panels, which sit underneath the
+  // Settings modal and are never unmounted by it — the modal is an overlay,
+  // not a remount boundary for them. So `config` genuinely can change here
+  // for reasons that have nothing to do with templates.
+  //
+  // That is exactly why this effect is keyed on `[config.templates]` and not
+  // `[config]`: `setActiveVenue` builds its next config as
+  // `{ ...c, activeVenue: v }` — a shallow spread that reuses the exact same
+  // `templates` array reference — so a venue-only change does not fire this
+  // effect and does not clobber an in-progress local edit (e.g. an
+  // added-but-unsaved template). This only fires on a genuinely new
+  // `config.templates` reference: a hotkey import, or this component's own
+  // Save round-trip (re-`.map()`ing content that already matches what's
+  // displayed there, a harmless no-op render).
+  //
+  // This safety is an invariant of `setActiveVenue`'s implementation, not of
+  // the effect itself: if `setActiveVenue` (or any future `OrderConfig`
+  // writer) ever starts minting a new `templates` array for a change
+  // unrelated to templates, this effect will wrongly fire and silently
+  // clobber in-progress local edits — the exact bug it exists to prevent.
+  // The regression test "keeps an unsaved added template across a
+  // venue-only config change" below pins this invariant.
+  useEffect(() => {
+    setTemplates(config.templates.map((t) => ({ ...t })));
+  }, [config.templates]);
   const setRawEdit = (key: string, v: string) => setRawEdits((r) => ({ ...r, [key]: v }));
   const clearRawEdit = (key: string) => setRawEdits((r) => {
     if (!(key in r)) return r;
@@ -387,7 +419,7 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
   // strings, not uid()-generated) — must not survive it; otherwise the
   // display would keep showing pre-reset in-progress typed text instead of
   // snapping to the restored default value.
-  const doReset = () => { setTemplates(normalizeOrderConfig({ ...config, templates: DEFAULT_TEMPLATES.map((t) => ({ ...t })) }).templates); setExtBufferPct(1.0); setRawEdits({}); setConfirmReset(false); };
+  const doReset = () => { setTemplates(normalizeOrderConfig({ ...config, templates: DEFAULT_TEMPLATES.map((t) => ({ ...t })) }).templates); setRawEdits({}); setConfirmReset(false); };
   const places = templates.filter((t): t is PlaceOrderTemplate => t.kind === "place");
 
   const combos = templates.map((t) => t.hotkey ?? "").filter((c) => c !== "");
@@ -416,26 +448,6 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
         ))}
       </div>
 
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        <span style={{ fontSize: 11, color: palette.text }}>Ext-hours market buffer %</span>
-        <StepField
-          ariaLabel="ext-buffer"
-          testid="ext-buffer"
-          value={rawEdits["config:ext-buffer"] ?? String(extBufferPct)}
-          onType={(v) => {
-            setRawEdit("config:ext-buffer", v);
-            const n = Number(v);
-            if (!Number.isNaN(n)) setExtBufferPct(clampNum(n, 0.1, 10));
-          }}
-          onStep={(dir) => {
-            setExtBufferPct((p) => clampNum(round1(p + dir * EXT_BUFFER_STEP), 0.1, 10));
-            clearRawEdit("config:ext-buffer");
-          }}
-          onBlur={() => clearRawEdit("config:ext-buffer")}
-          style={{ width: 84 }}
-        />
-      </div>
-
       <div style={sectionLabel}>TEMPLATES</div>
       {templates.map((t, i) => (
         <TemplateCard
@@ -461,7 +473,7 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
         <HoverButton
-          className="btn" data-testid="save" disabled={hasConflict} onClick={() => onSave({ ...config, templates, extHoursMarketBufferPct: extBufferPct })}
+          className="btn" data-testid="save" disabled={hasConflict} onClick={() => onSave({ ...config, templates })}
           style={{
             ...actionBtn, fontWeight: 700, cursor: hasConflict ? "not-allowed" : "pointer",
             background: hasConflict ? palette.border : palette.accent,

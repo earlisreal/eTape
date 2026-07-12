@@ -20,24 +20,24 @@ const mkToast = (): ToastApi => ({ push: vi.fn(), dismiss: vi.fn() });
 
 describe("SettingsModal", () => {
   it("returns null when closed", () => {
-    const { container } = render(<AppProviders><SettingsModal open={false} section="appearance" onSection={() => {}} onClose={() => {}} commands={mkCommands()} getWorkspace={mkWorkspace} onImportWorkspace={() => {}} toast={mkToast()} /></AppProviders>);
+    const { container } = render(<AppProviders><SettingsModal open={false} section="general" onSection={() => {}} onClose={() => {}} commands={mkCommands()} getWorkspace={mkWorkspace} onImportWorkspace={() => {}} toast={mkToast()} /></AppProviders>);
     expect(container.firstChild).toBeNull();
   });
-  it("shows the five sections and switches", () => {
+  it("shows the three sections and switches", () => {
     const onSection = vi.fn();
-    render(<AppProviders><SettingsModal open section="appearance" onSection={onSection} onClose={() => {}} commands={mkCommands()} getWorkspace={mkWorkspace} onImportWorkspace={() => {}} toast={mkToast()} /></AppProviders>);
+    render(<AppProviders><SettingsModal open section="general" onSection={onSection} onClose={() => {}} commands={mkCommands()} getWorkspace={mkWorkspace} onImportWorkspace={() => {}} toast={mkToast()} /></AppProviders>);
     // Codebase convention (see TopBar.test.tsx / Catalog.test.tsx) is plain
     // vitest/chai matchers — @testing-library/jest-dom isn't installed here.
-    expect(screen.getByRole("button", { name: /appearance/i })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /sounds/i }));
-    expect(onSection).toHaveBeenCalledWith("sounds");
+    expect(screen.getByRole("button", { name: /general/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /orders & hotkeys/i }));
+    expect(onSection).toHaveBeenCalledWith("orders");
   });
   it("appearance toggles theme", () => {
-    render(<AppProviders><SettingsModal open section="appearance" onSection={() => {}} onClose={() => {}} commands={mkCommands()} getWorkspace={mkWorkspace} onImportWorkspace={() => {}} toast={mkToast()} /></AppProviders>);
+    render(<AppProviders><SettingsModal open section="general" onSection={() => {}} onClose={() => {}} commands={mkCommands()} getWorkspace={mkWorkspace} onImportWorkspace={() => {}} toast={mkToast()} /></AppProviders>);
     fireEvent.click(screen.getByLabelText(/dark/i));
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
-  it("has five nav items, routes to Venues & creds, and threads commands through to fire GetVenueSetup", async () => {
+  it("has three nav items, routes to Venues & creds, and threads commands through to fire GetVenueSetup", async () => {
     const commands = mkCommands();
     // A tiny stateful wrapper so clicking a nav item actually re-renders with
     // the new section — SettingsModal itself is controlled by its parent. Wrapped
@@ -45,13 +45,13 @@ describe("SettingsModal", () => {
     // Venues & creds section calls useToasts(); AppProviders omits ToastProvider
     // deliberately (see test/providers.tsx) so it doesn't affect the other tests.
     function Wrapper() {
-      const [section, setSection] = useState<SettingsSection>("appearance");
+      const [section, setSection] = useState<SettingsSection>("general");
       return <AppProviders><ToastProvider><SettingsModal open section={section} onSection={setSection} onClose={() => {}} commands={commands} getWorkspace={mkWorkspace} onImportWorkspace={() => {}} toast={mkToast()} /></ToastProvider></AppProviders>;
     }
     const { container } = render(<Wrapper />);
 
     const nav = screen.getByRole("navigation");
-    expect(within(nav).getAllByRole("button")).toHaveLength(5);
+    expect(within(nav).getAllByRole("button")).toHaveLength(3);
 
     const panel = (container.firstChild as HTMLElement).firstChild as HTMLElement;
     expect(panel.style.width).toBe("920px");

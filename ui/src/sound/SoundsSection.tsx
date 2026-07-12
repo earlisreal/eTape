@@ -27,7 +27,7 @@ export function SoundsSection(): JSX.Element {
 
   return (
     <div>
-      <div style={{ fontWeight: 700, marginTop: 8 }}>Sounds</div>
+      <div className="col-head serif" style={{ marginBottom: 8 }}>Sounds</div>
 
       <label style={row}>
         <input data-testid="sound-enabled" type="checkbox" checked={config.enabled} onChange={(e) => save({ ...config, enabled: e.target.checked })} />

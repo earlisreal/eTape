@@ -35,12 +35,12 @@ const SAMPLE_ORDER_CONFIG: OrderConfig = {
 };
 
 function wrap(onSave = vi.fn()) {
-  render(
+  const { rerender } = render(
     <ThemeProvider>
       <OrderSettingsSection config={SAMPLE_ORDER_CONFIG} onSave={onSave} />
     </ThemeProvider>,
   );
-  return { onSave };
+  return { onSave, rerender };
 }
 
 describe("OrderSettingsSection", () => {
@@ -339,6 +339,78 @@ describe("OrderSettingsSection", () => {
     expect(sheet.textContent).not.toContain("Buy $5k");
   });
 
+  // Regression: Task 6 co-mounted this section with the hotkeys BackupPanel in
+  // the same "orders" settings pane, sharing one OrderConfig context. Before
+  // that, importing hotkeys and viewing "Orders & hotkeys" were mutually
+  // exclusive nav sections, so switching to this one always remounted it
+  // against the post-import config. Now the component stays mounted while an
+  // import happens below it, so it must resync its local `templates` (what
+  // the cheat sheet and cards render from) from a new `config` prop without
+  // needing to unmount/remount. This mirrors prepareImportedOrderConfig's
+  // replace-not-merge behavior: the imported config carries a wholly
+  // different template list with freshly-minted ids.
+  it("resyncs the cheat sheet when config.templates changes to a new reference without unmounting (hotkey import while mounted)", () => {
+    const { onSave, rerender } = wrap();
+    const sheet = screen.getByTestId("cheat-sheet");
+    expect(sheet.textContent).toContain("Buy $5k");
+
+    const imported: OrderConfig = {
+      ...SAMPLE_ORDER_CONFIG,
+      templates: [
+        {
+          kind: "place", id: "imported-buy", label: "Imported Buy", side: "BUY", type: "LIMIT", tif: "DAY",
+          priceSource: "Ask", priceOffset: 0, sizing: { mode: "Dollar", dollar: 1000 }, hotkey: "Ctrl+9",
+        },
+      ],
+    };
+    rerender(
+      <ThemeProvider>
+        <OrderSettingsSection config={imported} onSave={onSave} />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByTestId("cheat-sheet").textContent).toContain("Imported Buy");
+    expect(screen.getByTestId("cheat-sheet").textContent).not.toContain("Buy $5k");
+    expect(screen.queryByTestId("tmpl-card-buy-5k")).toBeNull();
+    expect(screen.getByTestId("tmpl-card-imported-buy")).toBeTruthy();
+  });
+
+  // Regression for a review finding on the resync effect above: the effect is
+  // keyed on `[config.templates]`, not `[config]`, specifically because a
+  // sibling writer of the shared `OrderConfig` context — `setActiveVenue`
+  // (useOrderConfig.tsx), reachable from venue-selection UI in dockview
+  // panels that stay mounted underneath the Settings modal — can change
+  // `config` for reasons unrelated to templates while this component is
+  // mounted. `setActiveVenue` builds its next config as
+  // `{ ...c, activeVenue: v }`, a shallow spread that reuses the same
+  // `templates` array reference, so this simulates that exact shape (same
+  // reference, different `activeVenue`) and asserts an in-progress, not-yet-
+  // saved local edit survives. The edit is an added template with a label
+  // ("New") that does not exist anywhere in `config.templates` — if the
+  // effect wrongly fired and resynced from `config.templates`, this
+  // assertion would fail because the added template would vanish. If a
+  // future change to `setActiveVenue` (or a new `OrderConfig` writer) ever
+  // mints a new `templates` reference for a templates-unrelated change, this
+  // test catches the regression.
+  it("keeps an unsaved added template across a venue-only config change (same templates reference)", () => {
+    const { rerender } = wrap();
+    fireEvent.click(screen.getByTestId("add-template"));
+    fireEvent.click(screen.getByTestId("add-place"));
+    expect(screen.getByDisplayValue("New")).toBeTruthy();
+
+    const venueChanged: OrderConfig = { ...SAMPLE_ORDER_CONFIG, activeVenue: "tradezero" };
+    expect(venueChanged.templates).toBe(SAMPLE_ORDER_CONFIG.templates);
+    expect(venueChanged.activeVenue).not.toBe(SAMPLE_ORDER_CONFIG.activeVenue);
+
+    rerender(
+      <ThemeProvider>
+        <OrderSettingsSection config={venueChanged} onSave={vi.fn()} />
+      </ThemeProvider>,
+    );
+
+    expect(screen.getByDisplayValue("New")).toBeTruthy();
+  });
+
   // Regression for a CRITICAL safety finding: the capture input previously called
   // only e.preventDefault(), not e.stopPropagation(). The real hotkey engine
   // (useHotkeys) listens for keydown on `window` in the bubble phase, so a
@@ -477,21 +549,20 @@ describe("OrderSettingsSection", () => {
     expect(lastDown.disabled).toBe(true);
   });
 
-  it("defaults the ext-hours market buffer to 1.0 and saves it", () => {
-    const { onSave } = wrap();
+  // Ext-hours buffer % moved to GeneralSection.tsx; this component must
+  // neither render it nor overwrite it on save — Save spreads the live
+  // `config` prop (whatever GeneralSection last saved) before overriding
+  // only `templates`.
+  it("no longer renders the ext-hours buffer control and preserves its value from config on save", () => {
+    const onSave = vi.fn();
+    render(
+      <ThemeProvider>
+        <OrderSettingsSection config={{ ...SAMPLE_ORDER_CONFIG, extHoursMarketBufferPct: 2.5 }} onSave={onSave} />
+      </ThemeProvider>,
+    );
+    expect(screen.queryByTestId("ext-buffer")).toBeNull();
+    expect(screen.queryByText("Ext-hours market buffer %")).toBeNull();
     fireEvent.click(screen.getByTestId("save"));
-    expect(onSave.mock.calls[0][0].extHoursMarketBufferPct).toBe(1.0);
-  });
-  it("nudges the ext-hours market buffer up by 0.1", () => {
-    const { onSave } = wrap();
-    fireEvent.click(screen.getByTestId("ext-buffer-up"));
-    fireEvent.click(screen.getByTestId("save"));
-    expect(onSave.mock.calls[0][0].extHoursMarketBufferPct).toBeCloseTo(1.1);
-  });
-  it("caps a typed ext-hours buffer at 10 on save", () => {
-    const { onSave } = wrap();
-    fireEvent.change(screen.getByLabelText("ext-buffer"), { target: { value: "50" } });
-    fireEvent.click(screen.getByTestId("save"));
-    expect(onSave.mock.calls[0][0].extHoursMarketBufferPct).toBe(10);
+    expect(onSave.mock.calls[0][0].extHoursMarketBufferPct).toBe(2.5);
   });
 });
