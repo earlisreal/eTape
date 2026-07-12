@@ -16,6 +16,13 @@ const ACCEPTED: AckMsg = { kind: "ack", corrId: "", status: "accepted" };
 // live demand. Owned by App.tsx alongside LinkGroups; one instance per client
 // connection (demands are connection-scoped engine-side, so multi-window needs
 // no coordination).
+//
+// reannounce() awaits an injected `reannounceGate` before re-sending, so a
+// reconnect that lands on a *different* session mode (live/demo) doesn't
+// re-assert demands from the old mode's symbol universe (see
+// chrome/reannounceGate.ts). The default gate resolves immediately,
+// preserving today's unconditional-reannounce behavior for any caller that
+// doesn't pass one.
 export class DemandRegistry {
   private readonly live = new Map<string, { symbol: string; profile: DemandProfile }>();
   // Per-panel monotonic epoch + in-flight marker, guarding against a
@@ -29,9 +36,12 @@ export class DemandRegistry {
   private readonly epoch = new Map<string, number>();
   private readonly pending = new Set<string>();
 
-  constructor(private readonly client: DemandClient) {
+  constructor(
+    private readonly client: DemandClient,
+    private readonly reannounceGate: () => Promise<void> = () => Promise.resolve(),
+  ) {
     this.client.onState((s) => {
-      if (s === "open") this.reannounce();
+      if (s === "open") void this.reannounce();
     });
   }
 
@@ -68,7 +78,8 @@ export class DemandRegistry {
     void this.client.sendCommand("ReleaseSymbol", { demandId: panelId });
   }
 
-  private reannounce(): void {
+  private async reannounce(): Promise<void> {
+    await this.reannounceGate();
     for (const [panelId, { symbol, profile }] of this.live) {
       void this.client.sendCommand("EnsureSymbol", { demandId: panelId, symbol, profile });
     }
