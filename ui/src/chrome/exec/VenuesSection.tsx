@@ -17,6 +17,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
+import { Button } from "../controls/Button";
 import type { AckMsg, Venue, Gate, GateLimitsView, VenueConfig, VenueSetup, TestConnectionResult, TestAccount } from "../../wire/contract";
 import type { ConnState } from "../../wire/WsClient";
 
@@ -52,9 +53,6 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
   // Write-only typed secrets, keyed by the venue's opaque `credentials` name
   // (stable across id renames) — never populated from a refresh.
   const [secretDrafts, setSecretDrafts] = useState<Record<string, SecretDraft>>({});
-  const [removeConfirmIdx, setRemoveConfirmIdx] = useState<number | null>(null);
-  const [resetConfirmIdx, setResetConfirmIdx] = useState<number | null>(null);
-  const [restartConfirm, setRestartConfirm] = useState(false);
   const [restarting, setRestarting] = useState(false);
   // Stable per-row identity for risk-limit caps, independent of the venue's
   // mutable `id` field. gate.venue is keyed by id on the wire, but tracking
@@ -338,12 +336,10 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
       if (ack.status !== "accepted") {
         toast.push({ level: "danger", text: ack.reason || "Restart rejected" });
         setRestarting(false);
-        setRestartConfirm(false);
       }
     } catch {
       toast.push({ level: "danger", text: "Restart failed (transport)." });
       setRestarting(false);
-      setRestartConfirm(false);
     }
   };
 
@@ -389,20 +385,13 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
         <div data-testid="restart-banner" style={{ background: palette.bg, border: `1px solid ${palette.accent}`, color: palette.accent, padding: "8px 12px", borderRadius: 4, marginBottom: 12, fontSize: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <span>⚠ Engine restart required — saved venue config differs from the running engine.</span>
           <span style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
-            {restartConfirm && !restarting && (
-              <span style={{ fontSize: 11 }}>Restart now? This briefly interrupts live data.</span>
-            )}
-            <button
-              data-testid="restart-engine"
-              className="btn"
-              disabled={restarting}
-              onClick={() => (restartConfirm ? void restartEngine() : setRestartConfirm(true))}
+            <Button
+              variant="danger" confirm confirmLabel="Confirm restart"
+              data-testid="restart-engine" loading={restarting}
+              onClick={() => void restartEngine()}
             >
-              {restarting ? "Restarting…" : restartConfirm ? "Confirm restart" : "Restart now"}
-            </button>
-            {restartConfirm && !restarting && (
-              <button className="btn" onClick={() => setRestartConfirm(false)}>Cancel</button>
-            )}
+              {restarting ? "Restarting…" : "Restart now"}
+            </Button>
           </span>
         </div>
       )}
@@ -410,7 +399,7 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <div className="serif" style={{ fontSize: 14, fontWeight: 600 }}>Venues</div>
-        <button data-testid="add-venue" className="btn" onClick={addVenue}>+ Add venue</button>
+        <Button data-testid="add-venue" onClick={addVenue}>+ Add venue</Button>
       </div>
 
       {draft.venues.map((v, i) => {
@@ -421,8 +410,6 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
         const keySet = !!(setup?.credKeys ?? []).includes(v.credentials);
         const issue = validation[i];
         const typed = secretDrafts[v.credentials] ?? { keyId: "", secret: "" };
-        const removing = removeConfirmIdx === i;
-        const resetting = resetConfirmIdx === i;
         const testable = TESTABLE_BROKERS.has(v.broker);
         const test = testState[rowKeys[i]];
         // tradezero/alpaca auto-detect env via Test connection (a read-only
@@ -452,32 +439,21 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
               </span>
               <span style={{ flex: 1 }} />
               {canReset && (
-                <>
-                  {resetting && (
-                    <span style={{ fontSize: 11, color: palette.accent, marginRight: 4 }}>
-                      Reset to ${v.startingBalance.toLocaleString()}?
-                    </span>
-                  )}
-                  <button
-                    data-testid={`venue-reset-${i}`}
-                    className="btn"
-                    onClick={() => (resetting ? (void resetBalance(v), setResetConfirmIdx(null)) : setResetConfirmIdx(i))}
-                  >
-                    {resetting ? "Confirm reset" : "Reset balance"}
-                  </button>
-                  {resetting && <button className="btn" onClick={() => setResetConfirmIdx(null)}>Cancel</button>}
-                </>
+                <Button
+                  variant="danger" confirm confirmLabel="Confirm reset"
+                  data-testid={`venue-reset-${i}`}
+                  onClick={() => void resetBalance(v)}
+                >
+                  Reset balance
+                </Button>
               )}
-              {removing && <span style={{ fontSize: 11, color: palette.danger, marginRight: 4 }}>Remove {v.id || "this venue"}?</span>}
-              <button
+              <Button
+                variant="danger" confirm confirmLabel="Confirm remove"
                 data-testid={`venue-remove-${i}`}
-                className="btn venue-remove-btn"
-                style={removing ? { borderColor: palette.danger, color: palette.danger } : undefined}
-                onClick={() => (removing ? (removeVenue(i), setRemoveConfirmIdx(null)) : setRemoveConfirmIdx(i))}
+                onClick={() => removeVenue(i)}
               >
-                {removing ? "Confirm remove" : "Remove"}
-              </button>
-              {removing && <button className="btn" onClick={() => setRemoveConfirmIdx(null)}>Cancel</button>}
+                Remove
+              </Button>
             </div>
 
             <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
@@ -578,10 +554,10 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
                       {keySet ? "key set" : "no key"}
                     </span>
                     {testable && (
-                      <button data-testid={`venue-test-${i}`} className="btn"
-                        disabled={test?.status === "testing"} onClick={() => void testConnection(i)}>
+                      <Button data-testid={`venue-test-${i}`}
+                        loading={test?.status === "testing"} onClick={() => void testConnection(i)}>
                         {test?.status === "testing" ? "Testing…" : "Test connection"}
-                      </button>
+                      </Button>
                     )}
                   </div>
                   <div style={{ color: palette.textMuted, fontSize: 10, marginTop: 4 }}>leave blank to keep the existing key</div>
@@ -596,14 +572,14 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
               )}
 
               <div>
-                <button
+                <Button
+                  variant="quiet"
                   data-testid={`venue-limits-toggle-${i}`}
-                  className="btn"
                   onClick={() => setLimitsOpen((s) => ({ ...s, [rowKey]: !limitsExpanded }))}
                 >
                   {limitsExpanded ? "▾ " : "▸ "}
                   {limitsSetCount > 0 ? `Risk limits · ${limitsSetCount} set` : "Configure risk limits"}
-                </button>
+                </Button>
                 {limitsExpanded && (
                   <div style={{ marginTop: 8 }}>
                     <div className="col-head" style={groupLabel}>Risk limits</div>
@@ -642,10 +618,9 @@ export function VenuesSection({ commands, engineState }: { commands: Commands; e
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end" }}>
-        <button data-testid="save-venues" className="btn btn-primary" disabled={hasErrors} onClick={() => void saveVenues()}
-          style={hasErrors ? { opacity: 0.5, cursor: "not-allowed" } : undefined}>
+        <Button variant="primary" size="md" data-testid="save-venues" disabled={hasErrors} onClick={() => void saveVenues()}>
           Save venues & limits
-        </button>
+        </Button>
       </div>
     </div>
   );

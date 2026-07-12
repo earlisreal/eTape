@@ -16,6 +16,7 @@ import { useState, type CSSProperties } from "react";
 import { useTheme } from "../ThemeProvider";
 import { FONTS, type Palette } from "../../render/palette";
 import { HoverButton } from "../controls/HoverButton";
+import { Button } from "../controls/Button";
 import type { Side, OrderType, TIF, OrderSession } from "../../wire/contract";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 import type { SizingSpec, SizingMode } from "./sizing";
@@ -336,7 +337,6 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
   const [templates, setTemplates] = useState<ActionTemplate[]>(() => config.templates.map((t) => ({ ...t })));
   const [extBufferPct, setExtBufferPct] = useState<number>(() => config.extHoursMarketBufferPct ?? 1.0);
   const [addOpen, setAddOpen] = useState(false);
-  const [confirmReset, setConfirmReset] = useState(false);
   // Offset and size-value are fully-controlled numeric fields whose display
   // is re-derived from the numeric model every render. Without this, typing
   // "0" then "." commits Number("0.") -> 0 back into the model and the next
@@ -387,7 +387,7 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
   // strings, not uid()-generated) — must not survive it; otherwise the
   // display would keep showing pre-reset in-progress typed text instead of
   // snapping to the restored default value.
-  const doReset = () => { setTemplates(normalizeOrderConfig({ ...config, templates: DEFAULT_TEMPLATES.map((t) => ({ ...t })) }).templates); setExtBufferPct(1.0); setRawEdits({}); setConfirmReset(false); };
+  const doReset = () => { setTemplates(normalizeOrderConfig({ ...config, templates: DEFAULT_TEMPLATES.map((t) => ({ ...t })) }).templates); setExtBufferPct(1.0); setRawEdits({}); };
   const places = templates.filter((t): t is PlaceOrderTemplate => t.kind === "place");
 
   const combos = templates.map((t) => t.hotkey ?? "").filter((c) => c !== "");
@@ -447,36 +447,24 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
       ))}
 
       <div style={{ display: "flex", gap: 6, marginTop: 10, alignItems: "center", position: "relative" }}>
-        <button className="btn" data-testid="add-template" onClick={() => setAddOpen((v) => !v)} style={actionBtn}>+ Add ▾</button>
+        <Button data-testid="add-template" onClick={() => setAddOpen((v) => !v)} style={actionBtn}>+ Add ▾</Button>
         {addOpen && (
           <>
-            <button className="btn" data-testid="add-place" onClick={() => { addPlace(); setAddOpen(false); }} style={actionBtn}>Order template</button>
-            <button className="btn" data-testid="add-manage" onClick={() => { addManage(); setAddOpen(false); }} style={actionBtn}>Management action</button>
+            <Button data-testid="add-place" onClick={() => { addPlace(); setAddOpen(false); }} style={actionBtn}>Order template</Button>
+            <Button data-testid="add-manage" onClick={() => { addManage(); setAddOpen(false); }} style={actionBtn}>Management action</Button>
           </>
         )}
-        {confirmReset
-          ? <button className="btn" data-testid="reset-confirm" onClick={doReset} style={{ ...actionBtn, color: palette.danger, borderColor: palette.danger }}>Confirm reset</button>
-          : <button className="btn" data-testid="reset-defaults" onClick={() => setConfirmReset(true)} style={actionBtn}>Reset to defaults</button>}
+        <Button variant="danger" confirm confirmLabel="Confirm reset" data-testid="reset-defaults" onClick={doReset} style={actionBtn}>Reset to defaults</Button>
       </div>
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
-        <HoverButton
-          className="btn" data-testid="save" disabled={hasConflict} onClick={() => onSave({ ...config, templates, extHoursMarketBufferPct: extBufferPct })}
-          style={{
-            ...actionBtn, fontWeight: 700, cursor: hasConflict ? "not-allowed" : "pointer",
-            background: hasConflict ? palette.border : palette.accent,
-            borderColor: hasConflict ? palette.border : palette.accent,
-            color: palette.bg,
-          }}
-          // Accent CTA — same principle as .btn-primary's hover fix in
-          // global.css: keep the accent background/color and add a ring
-          // rather than washing to the default neutral overlay. disabled
-          // (hasConflict) never applies hoverStyle (HoverButton gates on
-          // !disabled), so the grey disabled look is untouched.
-          hoverStyle={{ background: palette.accent, color: palette.bg, boxShadow: `inset 0 0 0 1px ${palette.bg}` }}
+        <Button
+          variant="primary" size="md" data-testid="save" disabled={hasConflict}
+          onClick={() => onSave({ ...config, templates, extHoursMarketBufferPct: extBufferPct })}
+          style={actionBtn}
         >
           Save
-        </HoverButton>
+        </Button>
       </div>
     </div>
   );

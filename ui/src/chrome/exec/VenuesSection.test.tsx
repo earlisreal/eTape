@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { ToastProvider } from "../Toast";
 import { VenuesSection } from "./VenuesSection";
@@ -155,7 +155,7 @@ describe("VenuesSection", () => {
     await waitFor(() => expect(screen.getByTestId("restart-banner")).toBeTruthy());
   });
 
-  it("restart button requires a second click to confirm, and Cancel backs out without sending RestartEngine", async () => {
+  it("restart button requires a second click to confirm, and the ~3s confirm timeout backs out without sending RestartEngine", async () => {
     const drifted: VenueSetup = baseSetup({
       file: { ...runningConfig, venues: [...runningConfig.venues, { id: "sim-1", broker: "sim", env: "paper", credentials: "", accountId: "", startingBalance: 0, slippageBps: 0, fillLatencyMs: 0 }] },
     });
@@ -166,12 +166,21 @@ describe("VenuesSection", () => {
     const restartBtn = () => screen.getByTestId("restart-engine") as HTMLButtonElement;
     expect(restartBtn().textContent).toBe("Restart now");
 
-    fireEvent.click(restartBtn());
-    expect(restartBtn().textContent).toBe("Confirm restart");
-    expect(commands.sent.some((s) => s.name === "RestartEngine")).toBe(false);
+    // Fake timers must be active BEFORE the arming click, so Button's
+    // internal 3s revert setTimeout is itself a fake timer we can advance —
+    // switching to fake timers after a real one is already pending wouldn't
+    // affect it.
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(restartBtn());
+      expect(restartBtn().textContent).toBe("Confirm restart");
+      expect(commands.sent.some((s) => s.name === "RestartEngine")).toBe(false);
 
-    fireEvent.click(screen.getByText("Cancel"));
-    expect(restartBtn().textContent).toBe("Restart now");
+      act(() => { vi.advanceTimersByTime(3000); });
+      expect(restartBtn().textContent).toBe("Restart now");
+    } finally {
+      vi.useRealTimers();
+    }
     expect(commands.sent.some((s) => s.name === "RestartEngine")).toBe(false);
   });
 

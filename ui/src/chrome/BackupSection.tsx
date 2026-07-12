@@ -5,7 +5,7 @@
 // only wires checkboxes, the file dialog, and the confirm/toast flow.
 import { useRef, useState } from "react";
 import { useTheme } from "./ThemeProvider";
-import { HoverButton } from "./controls/HoverButton";
+import { Button } from "./controls/Button";
 import type { ToastApi } from "./Toast";
 import type { Workspace } from "./workspace";
 import type { ActionTemplate, OrderConfig } from "./exec/actionTemplate";
@@ -140,12 +140,9 @@ export function BackupSection(
       <label style={{ ...rowStyle, marginBottom: 10 }}>
         <input type="checkbox" aria-label="Hotkeys" data-testid="export-hotkeys" checked={exportHotkeys} onChange={(e) => setExportHotkeys(e.target.checked)} /> Hotkeys
       </label>
-      <HoverButton
-        className="btn" data-testid="download-json" disabled={!exportLayout && !exportHotkeys} onClick={download}
-        hoverStyle={{ background: palette.surface }}
-      >
+      <Button data-testid="download-json" disabled={!exportLayout && !exportHotkeys} onClick={download}>
         Download JSON
-      </HoverButton>
+      </Button>
 
       <div className="col-head serif" style={{ ...headStyle, marginTop: 22 }}>Import</div>
       <input
@@ -169,12 +166,9 @@ export function BackupSection(
               <input type="checkbox" aria-label="Import hotkeys" data-testid="import-hotkeys" checked={importHotkeysChecked} onChange={(e) => setImportHotkeysChecked(e.target.checked)} /> Hotkeys
             </label>
           )}
-          <HoverButton
-            className="btn" data-testid="apply-import" disabled={!doLayout && !doHotkeys} onClick={applyImport}
-            hoverStyle={{ background: palette.surface }}
-          >
+          <Button data-testid="apply-import" disabled={!doLayout && !doHotkeys} onClick={applyImport}>
             Apply import
-          </HoverButton>
+          </Button>
         </div>
       )}
     </div>

@@ -10,6 +10,7 @@
 import { useEffect, useState } from "react";
 import { useTheme } from "./ThemeProvider";
 import { modalTracker } from "./modalTracker";
+import { Button } from "./controls/Button";
 
 const BROKER_CHIPS = ["TradeZero", "Alpaca", "moomoo"];
 
@@ -61,13 +62,13 @@ export function VenueSetupPrompt({ onConfigure, onDismiss, onTryDemo }: {
           Don&rsquo;t show this again
         </label>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button className="btn" aria-label="I'll do it later" onClick={() => onDismiss(dontShowAgain)}>I&rsquo;ll do it later</button>
-          {/* Same palette.demo tint as EmptyState's "Try demo" CTA (not a
-              full btn-primary treatment) — a lower-commitment alternative to
-              this modal's actual primary action (Configure venues), tinted
-              to preview where it leads without competing with it. */}
-          <button className="btn" aria-label="Try demo" onClick={onTryDemo} style={{ color: palette.demo, borderColor: palette.demo }}>Try demo</button>
-          <button className="btn btn-primary" aria-label="Configure venues" onClick={() => onConfigure(dontShowAgain)}>Configure venues</button>
+          <Button aria-label="I'll do it later" onClick={() => onDismiss(dontShowAgain)}>I&rsquo;ll do it later</Button>
+          {/* Same palette.demo tint as EmptyState's "Try demo" CTA (not the
+              primary treatment) — a lower-commitment alternative to this
+              modal's actual primary action (Configure venues), tinted to
+              preview where it leads without competing with it. */}
+          <Button aria-label="Try demo" onClick={onTryDemo} style={{ color: palette.demo, borderColor: palette.demo }}>Try demo</Button>
+          <Button variant="primary" aria-label="Configure venues" onClick={() => onConfigure(dontShowAgain)}>Configure venues</Button>
         </div>
       </div>
     </div>

@@ -5,7 +5,7 @@ import { SoundsSection } from "../sound/SoundsSection";
 import { BackupSection } from "./BackupSection";
 import { useOrderConfig } from "./exec/useOrderConfig";
 import { useTheme } from "./ThemeProvider";
-import { HoverButton } from "./controls/HoverButton";
+import { Button } from "./controls/Button";
 import type { AckMsg } from "../wire/contract";
 import type { ToastApi } from "./Toast";
 import type { Workspace } from "./workspace";
@@ -45,21 +45,22 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
             Settings
           </div>
           {NAV.map((n) => (
-            <HoverButton key={n.id} className="btn" aria-label={n.label} onClick={() => onSection(n.id)}
+            <Button key={n.id} aria-label={n.label} onClick={() => onSection(n.id)}
               style={{ display: "block", width: "100%", textAlign: "left", marginBottom: 2, background: section === n.id ? palette.bg : "transparent",
                 borderColor: "transparent", borderRadius: 4, borderLeft: `4px solid ${section === n.id ? palette.accent : "transparent"}`,
                 color: section === n.id ? palette.text : palette.textMuted, fontWeight: section === n.id ? 600 : 500,
                 fontSize: 12, padding: "9px 10px" }}
-              // className="btn" sets an inline background too, which permanently
-              // defeats global.css's .btn:hover rules (see HoverButton's own doc
-              // comment). Active rows already sit on palette.bg (bridging to the
-              // content pane below, which is the same color); hovering an inactive
-              // row previews that same bg so it reads as "about to become current."
-              // The border-left accent stripe stays the true active/inactive
-              // differentiator, so it never washes out.
+              // This row sets a permanent inline background too, which would
+              // permanently defeat a plain CSS :hover rule (see HoverButton's
+              // own doc comment). Active rows already sit on palette.bg
+              // (bridging to the content pane below, which is the same
+              // color); hovering an inactive row previews that same bg so it
+              // reads as "about to become current." The border-left accent
+              // stripe stays the true active/inactive differentiator, so it
+              // never washes out.
               hoverStyle={{ background: palette.bg, color: palette.text }}>
               {n.label}
-            </HoverButton>
+            </Button>
           ))}
         </nav>
         <section style={{ padding: 16, overflow: "auto", minHeight: 0, background: palette.bg }}>

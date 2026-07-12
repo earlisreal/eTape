@@ -2,6 +2,7 @@ import { useState } from "react";
 import { CATALOG, isDevPanel, PANELS } from "./panels/registry";
 import { PRESETS } from "./presets";
 import { useTheme } from "./ThemeProvider";
+import { Button } from "./controls/Button";
 
 function Thumb({ kind }: { kind: "monitoring" | "trading" }): JSX.Element {
   // Simple grid thumbnail; green cells mark chart slots. Purely decorative.
@@ -34,12 +35,12 @@ export function Catalog({ onAddPanel, onApplyPreset }: { onAddPanel: (id: string
       <div>
         <div className="col-head serif" style={{ borderBottom: `3px double ${palette.borderStrong}`, paddingBottom: 5, marginBottom: 12 }}>Start from a preset</div>
         {PRESETS.map((p) => (
-          <button key={p.id} className="btn" onClick={() => onApplyPreset(p.id)}
+          <Button key={p.id} onClick={() => onApplyPreset(p.id)}
             style={{ display: "flex", gap: 12, width: "100%", textAlign: "left", padding: 12, marginBottom: 12, alignItems: "center" }}>
             <Thumb kind={p.thumb} />
             <span><span className="serif" style={{ fontWeight: 600, display: "block" }}>{p.name}</span>
               <span style={{ color: palette.textMuted, fontSize: 10.5 }}>{p.description}</span></span>
-          </button>
+          </Button>
         ))}
       </div>
       <div>
