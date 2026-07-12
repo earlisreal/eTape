@@ -56,6 +56,11 @@ No schema change, no new files on disk, no read-path or writer-goroutine
 change, no change to the day-roll `RequestSeal` scheduler. Steady-state boot
 maintenance drops from ~45–65 s to ~13–15 s (seal only).
 
+Companion UX change: the remaining seal window gets a **boot-status banner**
+in the UI (new `sys.boot` topic, §7) so it reads as expected maintenance —
+today that window shows the red "feed disconnected" banner, which is
+error-flavored for a predictable daily phase.
+
 ## Design
 
 ### 1. Boot path (`engine/cmd/etape/main.go`, live branch)
@@ -166,6 +171,47 @@ outside RTH per the standing note), runs **no** VACUUM, and leaves a
 0); the advisory hint will. The free space is reabsorbed by ~2 days of live
 writes — or run `etape -vacuum` once at deploy to reclaim immediately.
 
+### 7. Boot-status UI: `sys.boot` topic + banner
+
+The browser already opens before the maintenance block (`main.go`: uihub
+listens ~line 430 and `openbrowser.Open` fires ~line 439; the seal runs
+after, ~line 474), and the hub event loop is broadcast-capable throughout.
+Under WAL the seal's write transaction doesn't block readers, so the UI is
+usable during the seal (archived charts, settings) — the only gap is live
+data plus an explanation of why. Today a client connecting mid-seal reaches
+WS "open" (so `ReconnectOverlay` clears) but the feed link is down, so
+`FeedStatusBanner` shows its red "feed disconnected" strip during expected
+maintenance. No splash screen: it would hide a working app, flash on
+intraday restarts (seal ≈ 0 s there), and still need engine-side phase
+signaling anyway.
+
+Design:
+
+- **New topic `sys.boot`** in the `wsmsg` allow-list, snapshot-bearing so a
+  client that connects mid-seal immediately receives the current phase (the
+  hub's existing snapshot semantic). The boot goroutine publishes:
+  `{phase:"sealing", daysTotal:N, dayIndex:i, day:"2026-07-11"}` (one update
+  per day sealed — free granularity, the seal loop is already per-day) →
+  `{phase:"connecting"}` after the maintenance block → `{phase:"ready"}`
+  once the feed goroutines are started. Replay/demo boots publish `ready`
+  immediately (no maintenance block). After `ready`, live feed connectivity
+  is `sys.health`'s job as today — the banner only owns the boot window.
+- **UI:** a neutral banner in the `FeedStatusBanner` slot ("Preparing
+  journal — compressing 1 day (~15 s)…"; "day i of N" when N > 1;
+  "Connecting to market data…"), hidden at `ready`. **Gate the red
+  `FeedStatusBanner` on `phase === "ready"`** so "feed disconnected" only
+  ever means a real problem. Wire types in `ui/src/wire/contract.ts`,
+  routing in `ui/src/data/registry.ts`, mount beside `FeedStatusBanner` in
+  `AppShell`.
+- **Telemetry synergy:** the maintenance block's `AppendSysEvent` calls are
+  DB-only today (the store sink never broadcasts). Publish the §4 storage
+  report / advisory hint *additionally* to `sys.events` via `hub.Publish`,
+  so the "consider `etape -vacuum`" advisory lands as a toast through the
+  existing `connectEventToasts` bridge instead of sitting unseen in SQLite.
+- **Failure path:** if a seal fails (honesty policy leaves the day raw), the
+  phase still advances to `connecting`/`ready`; the error surfaces via the
+  now-live `sys.events` toast path.
+
 ### Decisions taken by default (overridable at review)
 
 - **Backstop: kept** (vs. advisory-only). Constraint: unbounded growth is not
@@ -215,7 +261,11 @@ pipeline the CPU-bound zstd encoding across days; nothing here forecloses it.
 3. Wiring tests: `-vacuum` happy path on a temp DB (seals + prunes + vacuums,
    exit 0); `-vacuum` against a running instance → refusal, exit 1, no
    browser open; boot with large post-maintenance freelist → hint present.
-4. Deploy checks: record `PRAGMA freelist_count`/`page_count` on the live DB;
+4. Boot-status: component test that the banner renders sealing/connecting
+   phases and hides at `ready`, and that the red `FeedStatusBanner` stays
+   hidden until `phase === "ready"`; Go-side smoke that the boot block
+   publishes `sys.boot` phases in order.
+5. Deploy checks: record `PRAGMA freelist_count`/`page_count` on the live DB;
    boot-time before/after measurement (expect ~45–65 s → ~13–15 s at steady
    state; first boot is the one-time mass seal).
 
@@ -270,9 +320,14 @@ pipeline the CPU-bound zstd encoding across days; nothing here forecloses it.
 
 ## Files touched
 
-`engine/cmd/etape/main.go` (maintenance block, flag registration, vacuum
-branch after `singleinstance.Acquire`), new `engine/cmd/etape/vacuum.go`,
-`engine/internal/store/retention.go` (+ `retention_test.go`), runbook note in
-the 2026-07-11 storage spec or companion doc. Unchanged: `store/seal.go`,
-`store/store.go`, `store/journal.go`, `store/schema.go`,
-`cmd/etape/scheduler.go`, `internal/demojournal`.
+`engine/cmd/etape/main.go` (maintenance block, `sys.boot` publishes, flag
+registration, vacuum branch after `singleinstance.Acquire`), new
+`engine/cmd/etape/vacuum.go`, `engine/internal/store/retention.go`
+(+ `retention_test.go`), `engine/internal/uihub/wsmsg/wsmsg.go` (`sys.boot`
+topic + payload type), UI: `ui/src/wire/contract.ts`,
+`ui/src/data/registry.ts`, new `ui/src/chrome/BootStatusBanner.tsx`,
+`ui/src/chrome/FeedStatusBanner.tsx` (ready-gate),
+`ui/src/chrome/AppShell.tsx` (mount), runbook note in the 2026-07-11 storage
+spec or companion doc. Unchanged: `store/seal.go`, `store/store.go`,
+`store/journal.go`, `store/schema.go`, `cmd/etape/scheduler.go`,
+`internal/demojournal`.
