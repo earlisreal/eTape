@@ -399,7 +399,12 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			go func() { _ = sf.Run(ctx) }()
 			pipeWG.Add(1)
 			go pipe(ctx, &pipeWG, sf.Events(), core, st) // journaling ON into demo.db
-			go forwardDailyBars(ctx, gen, core, st, dailyBarPollInterval)
+			// Joined via forwardWG, same as forwardMD below: it also calls
+			// st.ArchiveDaily/core.SeedDaily, so it must stop before st.Close()
+			// for the same reason forwardMD does (see the shutdown-order
+			// comment above forwardWG.Wait()).
+			forwardWG.Add(1)
+			go func() { defer forwardWG.Done(); forwardDailyBars(ctx, gen, core, st, dailyBarPollInterval) }()
 			feedForHub, pollReq, mmProbe = sf, req, req
 			log.Info("engine up (demo synth feed)", "seed", seed, "symbols", gen.Symbols())
 		} else {
@@ -540,7 +545,10 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// ArchiveDaily, joined via forwardWG — it drains already-buffered
 	// core.Updates() after ctx is cancelled, so it must be waited on even
 	// though md.Core.Run stops producing new updates once pipeWG is
-	// drained), backfill's orch.Backfill goroutines (ArchiveBar1m/
+	// drained), forwardDailyBars() in demo mode (ArchiveDaily for a
+	// synth-generator day closed by an ET-midnight rollover, also joined via
+	// forwardWG — same reasoning as forwardMD), backfill's orch.Backfill
+	// goroutines (ArchiveBar1m/
 	// ArchiveDaily for freshly-fetched history, joined via backfillWG),
 	// watchDroppedUpdates (AppendSysEvent, joined via dropWG — depends only
 	// on ctx, so it can be waited anywhere after <-ctx.Done()), exec.Core.Run
@@ -591,7 +599,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	scanWG.Wait()     // scan poller stopped: no more backfillWG.Add from pool admissions
 	backfillWG.Wait() // boot backfill workers stopped: no more Seed* into the core
 	pipeWG.Wait()     // feed->core pipe stopped: no more RecordEvent
-	forwardWG.Wait()  // forwardMD drained: no more ArchiveBar1m/ArchiveDaily
+	forwardWG.Wait()  // forwardMD + demo's forwardDailyBars drained: no more ArchiveBar1m/ArchiveDaily
 	dropWG.Wait()     // dropped-updates watcher stopped: no more AppendSysEvent from it
 	<-execDone        // exec.Core.Run returned: no more AppendExecEvent
 	brokerWG.Wait()

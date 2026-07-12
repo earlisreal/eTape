@@ -425,6 +425,7 @@ func TestGenerator_ConcurrentAccessNoRace(t *testing.T) {
 					g.Fundamentals(code)
 				}
 				g.RankRows()
+				g.DrainDailyBars()
 			}
 		}()
 	}

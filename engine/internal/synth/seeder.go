@@ -118,6 +118,18 @@ func (g *Generator) Seed(st SeedStore, nowMs int64) {
 
 		g.seedIntraday(rt, fineStartMs, nowMs, st)
 		seedRecentTicksJournal(rt, nowMs, st)
+
+		// seedIntraday's own rollovers already archived each closed day
+		// directly (see its st.ArchiveDaily call above), and the post-boot
+		// warmStart-on-EnsureSymbol path re-seeds every archived day into
+		// md.Core from the store - so any day rolloverSymbol queued into
+		// pendingDailies during this boot-time backfill is already durable
+		// by the time Seed returns. Clear it for the same reason
+		// pendingTicks/pendingBars are left empty by this pass (see
+		// seedIntraday's doc comment): forwardDailyBars' first poll should
+		// only ever see a day that closed during live running, not this
+		// warm-history pass replayed as if it just happened.
+		rt.pendingDailies = nil
 	}
 
 	g.lastStepMs = nowMs
