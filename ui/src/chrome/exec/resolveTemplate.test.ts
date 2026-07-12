@@ -27,12 +27,13 @@ describe("resolvePlaceTemplate", () => {
     expect(r.args.qty).toBe(300);
     expect(r.args.side).toBe("SELL");
   });
-  it("surfaces pre-check failure without throwing (qty 0 → not ok)", () => {
+  it("surfaces pre-check failure without throwing (qty 0 → not ok), with the sizing reason threaded into the error", () => {
     const r = resolvePlaceTemplate(
       tmpl({ sizing: { mode: "Dollar", dollar: 1 } }),
       { venue: "alpaca-paper", symbol: "US.AAPL", quote: { ...q, ask: 100 }, buyingPower: 0, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
     expect(r.args.qty).toBe(0);
     expect(r.preCheck.ok).toBe(false);
+    expect(r.preCheck.errors).toContain("$1 is less than one share at $100.00.");
   });
   it("MARKET keeps limitPrice 0 in args and flashes MKT", () => {
     const r = resolvePlaceTemplate(tmpl({ type: "MARKET" }), { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });

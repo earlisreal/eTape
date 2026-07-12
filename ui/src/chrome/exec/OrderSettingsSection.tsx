@@ -17,6 +17,7 @@ import { useTheme } from "../ThemeProvider";
 import { FONTS, type Palette } from "../../render/palette";
 import { HoverButton } from "../controls/HoverButton";
 import type { Side, OrderType, TIF, OrderSession } from "../../wire/contract";
+import type { ToastApi } from "../Toast";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 import type { SizingSpec, SizingMode } from "./sizing";
 import {
@@ -52,6 +53,11 @@ function round2(n: number): number {
 function clampNum(n: number, min: number, max?: number): number {
   const v = Math.max(min, n);
   return max === undefined ? v : Math.min(max, v);
+}
+// Leading "+" on a positive offset so its sign is unambiguous at a glance
+// (negatives already render "-" via String(), 0 shows plain "0").
+function fmtOffset(n: number): string {
+  return n > 0 ? `+${n}` : String(n);
 }
 
 function sizingValue(s: SizingSpec): string {
@@ -243,7 +249,7 @@ function TemplateCard({ t, palette, dup, isFirst, isLast, rawEdits, setRawEdit, 
                 <StepField
                   ariaLabel={`offset-${t.id}`}
                   testid={`offset-${t.id}`}
-                  value={rawEdits[`${t.id}:offset`] ?? String(t.priceOffset)}
+                  value={rawEdits[`${t.id}:offset`] ?? fmtOffset(t.priceOffset)}
                   onType={(v) => {
                     setRawEdit(`${t.id}:offset`, v);
                     const n = Number(v);
@@ -327,7 +333,9 @@ function TemplateCard({ t, palette, dup, isFirst, isLast, rawEdits, setRawEdit, 
   );
 }
 
-export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; onSave: (next: OrderConfig) => void }): JSX.Element {
+export function OrderSettingsSection({ config, onSave, toast, onClose }: {
+  config: OrderConfig; onSave: (next: OrderConfig) => void; toast?: ToastApi; onClose?: () => void;
+}): JSX.Element {
   const { palette } = useTheme();
   const [templates, setTemplates] = useState<ActionTemplate[]>(() => config.templates.map((t) => ({ ...t })));
   const [addOpen, setAddOpen] = useState(false);
@@ -473,7 +481,12 @@ export function OrderSettingsSection({ config, onSave }: { config: OrderConfig; 
 
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
         <HoverButton
-          className="btn" data-testid="save" disabled={hasConflict} onClick={() => onSave({ ...config, templates })}
+          className="btn" data-testid="save" disabled={hasConflict}
+          onClick={() => {
+            onSave({ ...config, templates });
+            toast?.push({ level: "success", text: "Order templates & hotkeys saved." });
+            onClose?.();
+          }}
           style={{
             ...actionBtn, fontWeight: 700, cursor: hasConflict ? "not-allowed" : "pointer",
             background: hasConflict ? palette.border : palette.accent,
