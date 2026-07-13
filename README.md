@@ -302,7 +302,7 @@ prototypes/ Python research scripts (latency benchmarks, tick aggregation, …)
 | Task | Command |
 |---|---|
 | UI iteration w/ hot reload | `./run.sh dev [fixture]` (mock engine + Vite on `:5173`) |
-| Engine tests | `cd engine && make test` (`go test -race ./...`) |
+| Engine tests | `cd engine && make test` (fast, full) + `make test-race` (`go test -race -short ./...`) |
 | Engine lint / vet | `cd engine && make lint` / `make vet` |
 | UI unit tests | `cd ui && npm test` |
 | UI typecheck / lint | `cd ui && npm run typecheck` / `npm run lint` |
