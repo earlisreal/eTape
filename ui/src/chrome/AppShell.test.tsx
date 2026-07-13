@@ -20,6 +20,42 @@ import type { ExecStatus, VenueStatus } from "../wire/contract";
 class FakeResizeObserver { observe() {} unobserve() {} disconnect() {} }
 (globalThis as unknown as { ResizeObserver: unknown }).ResizeObserver = FakeResizeObserver;
 
+// Mock lightweight-charts so the panel test never touches a real canvas.
+// timeScaleApi is a stable object (not a fresh literal per call) so a test can hold
+// a reference to e.g. resetTimeScale and assert it was invoked by the SUT.
+const timeScaleApi = { timeToCoordinate: vi.fn(() => 0), scrollToRealTime: vi.fn(), scrollPosition: vi.fn(() => 0),
+  coordinateToLogical: vi.fn(() => 0), logicalToCoordinate: vi.fn(() => 0), resetTimeScale: vi.fn(),
+  scrollToPosition: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn(),
+  getVisibleRange: vi.fn(() => null), setVisibleRange: vi.fn() };
+// priceScaleApi is a stable object (not a fresh literal per call) so a test can hold
+// a reference to applyOptions and assert it was invoked by the SUT (mirrors timeScaleApi above).
+const priceScaleApi = { applyOptions: vi.fn(), width: vi.fn(() => 60) };
+// paneApis is a stable array (not a fresh literal per `panes()` call) so setPaneStretchFactor
+// calls made through one `panes()` read are visible to a later `panes()` read in the same
+// test — mirrors why timeScaleApi/priceScaleApi above are hoisted instead of inlined.
+const paneApis = [
+  { attachPrimitive: vi.fn(), getHeight: vi.fn(() => 400), getStretchFactor: vi.fn(() => 1), setStretchFactor: vi.fn() },
+  { attachPrimitive: vi.fn(), getHeight: vi.fn(() => 120), getStretchFactor: vi.fn(() => 1), setStretchFactor: vi.fn() },
+];
+const chartApi = {
+  addSeries: vi.fn(() => ({ setData: vi.fn(), update: vi.fn(), applyOptions: vi.fn(), setSeriesOrder: vi.fn(),
+    attachPrimitive: vi.fn(), priceToCoordinate: vi.fn(() => 0), coordinateToPrice: vi.fn(() => 0) })),
+  removeSeries: vi.fn(),
+  panes: vi.fn(() => paneApis),
+  priceScale: vi.fn(() => priceScaleApi),
+  timeScale: vi.fn(() => timeScaleApi),
+  applyOptions: vi.fn(), resize: vi.fn(), remove: vi.fn(),
+  takeScreenshot: vi.fn(() => document.createElement("canvas")),
+  subscribeCrosshairMove: vi.fn(),
+  unsubscribeCrosshairMove: vi.fn(),
+};
+vi.mock("lightweight-charts", () => ({
+  createChart: vi.fn(() => chartApi),
+  createTextWatermark: vi.fn(() => ({ detach: vi.fn(), applyOptions: vi.fn() })),
+  CandlestickSeries: "Candlestick", HistogramSeries: "Histogram", LineSeries: "Line",
+  BarSeries: "Bar", AreaSeries: "Area", CrosshairMode: { Magnet: 1 },
+}));
+
 // jsdom has no PointerEvent constructor; dockview's tab-activation handler
 // listens for "pointerdown" and reads `.button` off the event. A plain
 // MouseEvent carries the same `.button`/`.shiftKey` fields dockview reads and
