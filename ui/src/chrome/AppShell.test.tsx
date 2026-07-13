@@ -626,10 +626,14 @@ describe("AppShell demo mode-edge orchestration (Task 13)", () => {
   // A single symbol-bearing, non-grouped Stock Info panel is enough to
   // exercise planDemoEntry's "remaining universe cycles across pinned
   // panels" rule (see demoTransition.ts) without dockview's grid math being
-  // relevant here. Deliberately not a "chart" panel: lightweight-charts
-  // schedules its own rAF-driven redraws that can outlive a fast test's
-  // unmount in jsdom (a pre-existing flake source elsewhere in this suite),
-  // and these tests already drive several rapid clear()+fromJSON() cycles.
+  // relevant here. It's a "news" panel rather than "chart" purely for that
+  // reason, not for leak-avoidance: the file-wide lightweight-charts mock
+  // above means real chart panels are safe to mount anywhere in this file.
+  // That mock exists because of the "live(empty)->demo->live" test below
+  // (line 726): AppShell.tsx's finishEntry (lines 390-391) auto-seeds the
+  // Trading preset when demo mode is entered from an empty workspace, and
+  // the Trading preset (presets.ts, id: "trading") contains three real
+  // panelId: "chart" panels, mounted indirectly through that one test.
   const seed: Workspace = {
     name: "default",
     panels: [{ id: "info-1", panelId: "news", group: null, settings: { symbol: "US.ORCL" } }],
