@@ -102,6 +102,7 @@ const (
 //     halted stretches, which contribute zero ticks and pull a runner's
 //     average down without violating the model).
 func TestGenerator_StatisticalSanityAcrossSeedsAndPersonalities(t *testing.T) {
+	skipIfShort(t)
 	for _, seed := range statsSweepSeeds {
 		seed := seed
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {

@@ -2,6 +2,7 @@ package synth
 
 import (
 	"math"
+	"os"
 	"runtime/debug"
 	"testing"
 	"time"
@@ -9,6 +10,18 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 )
+
+// skipIfShort skips heavy, single-threaded full-Seed simulations under `go
+// test -short` (the race pass's flag) — they still run at full fidelity in
+// the non-race pass (`make test`), so no coverage is lost, but their
+// -race instrumentation overhead is exactly the kind of cost the race pass
+// exists to avoid.
+func skipIfShort(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("heavy full-Seed simulation; runs in the non-race full pass")
+	}
+}
 
 // fixedClockAt returns a clock.Clock frozen at ms, for seeding a Generator
 // whose New() call needs a "now" but which is immediately handed to Seed
@@ -37,6 +50,7 @@ func (c *capStore) RecordEvent(ev feed.Event, _ int64) {
 func (c *capStore) Flush() { c.flushed = true }
 
 func TestSeed_WritesWarmHistory(t *testing.T) {
+	skipIfShort(t)
 	nowMs := int64(1_700_000_000_000)
 	g := New(9, fixedClockAt(nowMs))
 	st := &capStore{}
@@ -71,6 +85,7 @@ func TestSeed_WritesWarmHistory(t *testing.T) {
 // poll - those days are already durable via seedIntraday's own direct
 // st.ArchiveDaily call plus the post-boot warmStart-on-EnsureSymbol path.
 func TestSeed_LeavesNoPendingDailyBars(t *testing.T) {
+	skipIfShort(t)
 	nowMs := int64(1_700_000_000_000)
 	g := New(9, fixedClockAt(nowMs))
 	st := &capStore{}
@@ -82,6 +97,9 @@ func TestSeed_LeavesNoPendingDailyBars(t *testing.T) {
 }
 
 func TestSeed_WithinBudget(t *testing.T) {
+	if testing.Short() || os.Getenv("CI") != "" {
+		t.Skip("boot-latency perf guard is local-only; shared CI runners are too noisy for wall-clock budgets")
+	}
 	nowMs := int64(1_700_000_000_000)
 	g := New(9, fixedClockAt(nowMs))
 	st := &capStore{}
@@ -132,6 +150,7 @@ func raceEnabled() bool {
 // Volume/Turnover (no genTicks at that granularity - see seedDailyHistory
 // and seedDayVolume), so this is the only test exercising that directly.
 func TestSeed_DailyBarsSane(t *testing.T) {
+	skipIfShort(t)
 	nowMs := int64(1_700_000_000_000)
 	g := New(4, fixedClockAt(nowMs))
 	st := &capStore{}
@@ -159,6 +178,7 @@ func TestSeed_DailyBarsSane(t *testing.T) {
 // but through the whole Seed pipeline: coarse dailies, fine 1m/tick pass,
 // and the journaled tick count).
 func TestSeed_DeterministicAcrossRuns(t *testing.T) {
+	skipIfShort(t)
 	nowMs := int64(1_700_000_000_000)
 	run := func() *capStore {
 		g := New(9, fixedClockAt(nowMs))
@@ -216,6 +236,7 @@ func TestSeed_DeterministicAcrossRuns(t *testing.T) {
 // "flat-lined" from "not" without being anywhere near either regime's
 // actual value.
 func TestSeedDailyHistory_RunnerSpikeDayCharacter(t *testing.T) {
+	skipIfShort(t)
 	nowMs := int64(1_700_000_000_000)
 	checked := 0
 	for _, seed := range []int64{9, 18} {
@@ -302,6 +323,7 @@ func pctChangeStdev(closes []float64) float64 {
 // seam - hence checking finite/positive/well-formed rather than a tight
 // bound.
 func TestSeed_LeavesGeneratorAtNowMsWithNoSeam(t *testing.T) {
+	skipIfShort(t)
 	nowMs := int64(1_700_000_000_000)
 	g := New(9, fixedClockAt(nowMs))
 	st := &capStore{}
@@ -351,6 +373,7 @@ func TestSeed_LeavesGeneratorAtNowMsWithNoSeam(t *testing.T) {
 // (RecentTicks) after Seed - i.e. the journal is a faithful, non-duplicated
 // snapshot of the same trailing window the generator itself now holds.
 func TestSeed_TicksJournaledMatchRing(t *testing.T) {
+	skipIfShort(t)
 	nowMs := int64(1_700_000_000_000)
 	g := New(9, fixedClockAt(nowMs))
 	st := &capStore{}

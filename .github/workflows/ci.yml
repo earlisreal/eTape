@@ -26,8 +26,11 @@ jobs:
         with:
           go-version-file: engine/go.mod
 
-      - name: go test -race
+      - name: go test (full)
         run: make -C engine test
+
+      - name: go test -race (short)
+        run: make -C engine test-race
 
       - name: go vet
         run: make -C engine vet
