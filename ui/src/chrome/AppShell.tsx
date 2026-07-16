@@ -162,7 +162,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // all "blue"), so the unqualified default silently resolved to an empty
   // symbol/venue and every place-order hotkey (Ctrl+1..4) no-opped with a "no
   // venue/quote for hotkey" toast in the shipped Trading preset.
-  useHotkeys({ stores, commands, linkGroups, group: "blue" });
+  const orderTicketGroup = ws?.panels.find((p) => p.panelId === "order-ticket")?.group ?? null;
+  useHotkeys({ stores, commands, linkGroups, group: orderTicketGroup });
   useSoundWiring(stores);
   // Task 13: mirror Settings-modal open/close into the module-level modalTracker
   // singleton so every already-mounted PanelFrame (frozen-closure-created, can't

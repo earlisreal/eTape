@@ -12,7 +12,7 @@ import { resolveVenue } from "./venueSelection";
 interface Cmd { sendCommand(name: string, args: unknown): Promise<AckMsg> }
 
 export function useHotkeys(opts: { stores: Stores; commands: Cmd; linkGroups: LinkGroups; group?: LinkGroup }): void {
-  const { stores, commands, linkGroups, group = "green" } = opts;
+  const { stores, commands, linkGroups, group } = opts;
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
   const { config } = useOrderConfig(); // shared context (mounted in App via OrderConfigProvider)
@@ -21,6 +21,7 @@ export function useHotkeys(opts: { stores: Stores; commands: Cmd; linkGroups: Li
     const onKey = (e: KeyboardEvent) => {
       const t = matchTemplate(config.templates, normalizeCombo(e));
       if (!t) return;
+      if (!group) return;
       e.preventDefault();
       const status = stores.exec.status();
       const venue = resolveVenue(group, linkGroups, config.activeVenue, status);
