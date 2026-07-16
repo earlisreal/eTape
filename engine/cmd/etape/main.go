@@ -82,15 +82,9 @@ func openLogFile(path string) (*os.File, error) {
 func boot(ctx context.Context, onListening func(addr string)) (code int, restart bool, nextArgs []string) {
 	home, _ := os.UserHomeDir()
 	cfgPath := flag.String("config", filepath.Join(home, ".eTape", "config.toml"), "path to config.toml")
-	replayDay := flag.String("replay", "", "replay a recorded day (YYYY-MM-DD) instead of live OpenD")
-	speed := flag.Float64("speed", 0, "replay speed (>0: real-time x speed; <=0: as fast as possible)")
 	dist := flag.String("dist", "", "serve built UI from this dir (overrides [uihub].dist_dir)")
-	replayHold := flag.Bool("replay-hold", false, "in replay, keep serving after the journal is exhausted (E2E)")
-	demo := flag.Bool("demo", false, "run the built-in synthetic demo market (no OpenD/broker needed)")
-	demoSeed := flag.Int64("demo-seed", 0, "PRNG seed for -demo; 0 = random per launch")
 	noOpen := flag.Bool("no-open", false, "do not auto-open the default browser to the UI")
 	logPath := flag.String("log", "", "also write logs to this file")
-	vacuum := flag.Bool("vacuum", false, "run one-shot journal maintenance (prune+seal+vacuum) then exit; refuses if an engine is running")
 	flag.Parse()
 
 	// ETAPE_NO_OPEN suppresses auto-open, same as -no-open, so agent/CI boots
