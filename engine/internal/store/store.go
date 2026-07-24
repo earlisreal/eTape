@@ -18,6 +18,7 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 )
 
 // Store owns the SQLite handle and the single writer goroutine.
@@ -72,6 +73,26 @@ func (flushReq) render() []pendingWrite { return nil }
 type sealOp struct{ s *Store }
 
 func (sealOp) render() []pendingWrite { return nil }
+
+// recordOp journals one feed event.
+// ponytail: stub while journal features are being removed.
+type recordOp struct {
+	ev     feed.Event
+	recvMs int64
+}
+
+func (recordOp) render() []pendingWrite { return nil }
+
+// SealSum holds the result of SealJournalDays.
+// ponytail: stub while journal/seal features are being removed.
+type SealSum struct {
+	Days        int
+	Failed      int
+	Chunks      int
+	Rows        int
+	BytesBefore int64
+	BytesAfter  int64
+}
 
 // Options configures Open.
 type Options struct {
@@ -177,22 +198,17 @@ func (s *Store) writer(flush time.Duration) {
 				continue
 			case sealOp:
 				commit() // flush any pending batch first
-				if sum, err := v.s.SealJournalDays(); err != nil {
-					slog.Error("store: day-roll seal", "err", err)
-				} else if sum.Days > 0 || sum.Failed > 0 {
-					slog.Info("store: day-roll sealed", "days", sum.Days, "chunks", sum.Chunks,
-						"rows", sum.Rows, "failed", sum.Failed)
-				}
+				// ponytail: seal is a no-op stub while journal/seal features are being removed
 				continue
-			}
-			buf = append(buf, op.render()...)
-			if len(buf) >= s.batch {
-				commit()
-			}
-		case <-ticker.C():
+		}
+		buf = append(buf, op.render()...)
+		if len(buf) >= s.batch {
 			commit()
 		}
+	case <-ticker.C():
+		commit()
 	}
+}
 }
 
 // commit applies a batch in one transaction; on a begin/commit failure it
@@ -232,12 +248,13 @@ func (s *Store) commit(buf []pendingWrite) {
 // flooding the log. A dropped row never advances daySeq, so it burns no seq.
 func (s *Store) execJournalRow(tx *sql.Tx, pw *pendingWrite) {
 	day := pw.journalDay
-	seq, err := s.assignSeq(day)
-	if err != nil {
-		s.dropped.Add(1)
-		s.logRowErr(err, "store: assignSeq "+day)
-		return
+	var err error
+	seq := int64(0)
+	if cached, have := s.daySeq[day]; have {
+		seq = cached + 1
+		s.daySeq[day] = seq
 	}
+	// ponytail: stub while journal features are being removed
 	pw.args[1] = seq
 	_, err = tx.Exec(pw.query, pw.args...)
 	if err == nil {
@@ -247,12 +264,8 @@ func (s *Store) execJournalRow(tx *sql.Tx, pw *pendingWrite) {
 		s.logRowErr(err, pw.query)
 		return
 	}
-	newSeq, err := s.reseedDay(day)
-	if err != nil {
-		s.dropped.Add(1)
-		s.logRowErr(err, "store: reseedDay "+day)
-		return
-	}
+	newSeq := int64(0)
+	// ponytail: stub while journal features are being removed
 	s.logCollisionOnce(day, seq, newSeq-1)
 	pw.args[1] = newSeq
 	if _, err := tx.Exec(pw.query, pw.args...); err != nil {
@@ -305,3 +318,62 @@ func (s *Store) flushErrAgg() {
 		s.errAgg.suppressed = 0
 	}
 }
+
+// SealJournalDays seals completed journal days into compacted chunks.
+// ponytail: no-op stub while journal/seal features are being removed.
+func (s *Store) SealJournalDays() (SealSum, error) {
+	return SealSum{}, nil
+}
+
+// RecordEvent journals one feed event.
+// ponytail: stub while journal features are being removed.
+func (s *Store) RecordEvent(ev feed.Event, recvMs int64) {
+	s.writes <- recordOp{ev: ev, recvMs: recvMs}
+}
+
+// ReadJournalTicks returns ticks for a symbol from the journal.
+// ponytail: stub while journal features are being removed.
+func (s *Store) ReadJournalTicks(symbol string, fromMs int64) ([]feed.Tick, error) {
+	return nil, nil
+}
+// ponytail: stub while journal features are being removed.
+func (s *Store) JournalDays() ([]string, error) { return []string{}, nil }
+
+// SizeStats returns storage statistics for the store's DB file.
+// ponytail: stub while journal/vacuum features are being removed.
+func (s *Store) SizeStats() (*StorageStats, error) {
+	return &StorageStats{}, nil
+}
+
+// PendingSealDays returns the set of journal days not yet sealed.
+// ponytail: stub while journal/seal features are being removed.
+func (s *Store) PendingSealDays() ([]string, error) { return []string{}, nil }
+
+// PruneJournal deletes journal rows older than retentionDays trading days.
+// ponytail: stub while journal features are being removed.
+func (s *Store) PruneJournal(retentionDays int) (int64, error) { return 0, nil }
+
+// Vacuum runs VACUUM on the store's DB file.
+// ponytail: stub while journal/vacuum features are being removed.
+func (s *Store) Vacuum() error { return nil }
+
+// JournalFootprint returns (chunkBytes, rawRows, error).
+// ponytail: stub while journal/seal features are being removed.
+func (s *Store) JournalFootprint() (uint64, uint64, error) { return 0, 0, nil }
+
+// DroppedJournalRows returns the count of journal rows dropped.
+// ponytail: stub while journal features are being removed.
+func (s *Store) DroppedJournalRows() uint64 { return s.dropped.Load() }
+
+// StorageStats holds DB size and free-page statistics.
+// ponytail: stub while journal/vacuum features are being removed.
+type StorageStats struct{}
+
+func (s *StorageStats) NeedsBackstopVacuum() bool  { return false }
+func (s *StorageStats) FreeBytes() int64           { return 0 }
+func (s *StorageStats) FileBytes() int64           { return 0 }
+func (s *StorageStats) AdviseVacuum() bool         { return false }
+
+// FormatStorageReport formats storage stats as a human-readable string.
+// ponytail: stub while journal/vacuum features are being removed.
+func FormatStorageReport(_ *StorageStats, _, _ uint64, _ bool) string { return "" }

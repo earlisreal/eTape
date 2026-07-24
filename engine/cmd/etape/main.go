@@ -38,7 +38,6 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/news"
 	"github.com/earlisreal/eTape/engine/internal/openbrowser"
 	"github.com/earlisreal/eTape/engine/internal/quota"
-	"github.com/earlisreal/eTape/engine/internal/replay"
 	"github.com/earlisreal/eTape/engine/internal/scan"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/singleinstance"
@@ -83,8 +82,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	home, _ := os.UserHomeDir()
 	cfgPath := flag.String("config", filepath.Join(home, ".eTape", "config.toml"), "path to config.toml")
 	dist := flag.String("dist", "", "serve built UI from this dir (overrides [uihub].dist_dir)")
+	demo := flag.Bool("demo", false, "run the built-in synthetic demo market (no OpenD/broker needed)")
+	demoSeed := flag.Int64("demo-seed", 0, "PRNG seed for -demo; 0 = random per launch")
 	noOpen := flag.Bool("no-open", false, "do not auto-open the default browser to the UI")
 	logPath := flag.String("log", "", "also write logs to this file")
+	vacuum := flag.Bool("vacuum", false, "run one-shot journal maintenance (prune+seal+vacuum) then exit; refuses if an engine is running")
 	flag.Parse()
 
 	// ETAPE_NO_OPEN suppresses auto-open, same as -no-open, so agent/CI boots
@@ -144,11 +146,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	slog.SetDefault(log)
 	log.Info("etape starting", "version", buildinfo.Version)
 
-	if *demo && *replayDay != "" {
-		log.Error("parse flags", "err", errors.New("-demo and -replay are mutually exclusive"))
-		return 1, false, nil
-	}
-
 	var cfg config.Config
 	if *demo {
 		cfg = config.Default()
@@ -168,17 +165,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	} else {
 		// First run of a live boot with no config.toml: seed one so a fresh
 		// install comes up with a ready-to-use paper sim practice venue
-		// instead of zero configured venues. Gated to live only
-		// (*replayDay == "") -- -demo (above) has its own injected sim venue
-		// and its own temp config, and an explicit -replay forces every venue
-		// to sim regardless, so neither needs (or should trigger) a write to
-		// the real ~/.eTape/config.toml.
-		if *replayDay == "" {
-			if seeded, serr := config.SeedDefaultIfMissing(*cfgPath); serr != nil {
-				log.Warn("seed first-run config (continuing with empty venues)", "path", *cfgPath, "err", serr)
-			} else if seeded {
-				log.Info("first run: seeded config with a paper sim practice venue", "path", *cfgPath)
-			}
+		// instead of zero configured venues.
+		if seeded, serr := config.SeedDefaultIfMissing(*cfgPath); serr != nil {
+			log.Warn("seed first-run config (continuing with empty venues)", "path", *cfgPath, "err", serr)
+		} else if seeded {
+			log.Info("first run: seeded config with a paper sim practice venue", "path", *cfgPath)
 		}
 		var err error
 		cfg, err = config.Load(*cfgPath)
@@ -252,7 +243,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 
 	// restartRequested/requestRestart back every self-relaunch path -- the
 	// plain "RestartEngine" WS command via restartInPlace below, and the
-	// mode-switch closures (startReplay/goLive/startDemo) directly: calling
+	// mode-switch closures (goLive/startDemo) directly: calling
 	// requestRestart flags the restart and cancels ctx via stop -- reusing the
 	// exact ordered shutdown drain below. boot's named `restart` return value
 	// picks up the flag after the drain completes, so the caller
@@ -262,16 +253,16 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	requestRestart := func() { restartRequested.Store(true); stop() }
 
 	// nextArgs carries a relaunch's flag list from the restartInPlace/
-	// startReplay/goLive/startDemo closures (built below, passed into
-	// uihub.New) to boot's final return. atomic.Pointer because it's written
-	// from the command-dispatch goroutine (via time.AfterFunc, same as
+	// goLive/startDemo closures (built below, passed into uihub.New) to
+	// boot's final return. atomic.Pointer because it's written from the
+	// command-dispatch goroutine (via time.AfterFunc, same as
 	// requestRestart) and read here after <-ctx.Done() on the boot goroutine.
 	// Every closure now sets this before restarting (nil is only the
 	// zero-value/no-restart-requested case) -- see relaunch_unix.go /
 	// relaunch_windows.go for how a non-nil argv is applied.
 	var nextArgsPtr atomic.Pointer[[]string]
 
-	live := *replayDay == "" && !*demo
+	live := !*demo
 	uihubClk := clock.System{}
 	var execClk clock.Clock = clock.System{}
 
@@ -297,40 +288,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// (see childArgs, Task 1) -- built once here so both closures share it.
 	base := baseFlags{ConfigPath: *cfgPath, DistDir: *dist, LogPath: *logPath}
 
-	// startReplay/goLive/startDemo are wired into uihub.New below and invoked
-	// from the command-dispatch goroutine on "StartReplay"/"GoLive"/
-	// "StartDemo". Each validates synchronously and returns an error for a
-	// blocked ack before scheduling any delayed side effect, matching
-	// requestRestart's ack-then-relaunch pattern above (relaunchAckFlushDelay
-	// lets the ack flush first).
-	startReplay := func(day string, speed float64) error {
-		if *demo {
-			return fmt.Errorf("replay switching is unavailable in demo mode")
-		}
-		days, err := st.JournalDays()
-		if err != nil {
-			return fmt.Errorf("list recorded days: %w", err)
-		}
-		found := false
-		for _, d := range days {
-			if d == day {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("no recorded day %q", day)
-		}
-		argv := childArgs(base, replayMode{Live: false, Day: day, Speed: speed})
-		time.AfterFunc(relaunchAckFlushDelay, func() {
-			nextArgsPtr.Store(&argv)
-			requestRestart()
-		})
-		return nil
-	}
-	// goLive has no demo guard (unlike startReplay above): "Return to live"
-	// must work from a demo session, so switching back to live mode is
-	// always allowed regardless of *demo.
+	// goLive/startDemo are wired into uihub.New below and invoked from the
+	// command-dispatch goroutine on "GoLive"/"StartDemo". Each returns a
+	// synchronous ack before scheduling any delayed side effect, matching
+	// requestRestart's ack-then-relaunch pattern above
+	// (relaunchAckFlushDelay lets the ack flush first).
 	goLive := func() error {
 		argv := childArgs(base, replayMode{Live: true})
 		time.AfterFunc(relaunchAckFlushDelay, func() {
@@ -340,9 +302,8 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		return nil
 	}
 	// startDemo relaunches into -demo (see childArgs/replayMode.Demo). No
-	// synchronous validation is needed: unlike startReplay's day-lookup, a
-	// UI-triggered demo entry takes no knobs and is always available,
-	// regardless of current mode (live, replay, or already-demo).
+	// synchronous validation is needed: a UI-triggered demo entry takes no
+	// knobs and is always available, regardless of current mode.
 	startDemo := func() error {
 		argv := childArgs(base, replayMode{Demo: true})
 		time.AfterFunc(relaunchAckFlushDelay, func() {
@@ -368,18 +329,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// --- md core ---
 	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs})
 	go func() { _ = core.Run(ctx) }()
-
-	// --- replay clock (execClk) if replaying ---
-	var replayRows []store.JournalRow
-	if *replayDay != "" {
-		replayRows, err = st.ReadJournalDay(*replayDay)
-		if err != nil || len(replayRows) == 0 {
-			log.Error("replay day unavailable", "day", *replayDay, "err", err, "rows", len(replayRows))
-			_ = st.Close()
-			return 1, false, nil
-		}
-		execClk = replay.NewClock(time.UnixMilli(replayRows[0].TsExch))
-	}
 
 	// --- exec subsystem (Recover -> Run) ---
 	var credsFile creds.File
@@ -434,13 +383,9 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			if *demo {
 				return "demo"
 			}
-			if live {
-				return "live"
-			}
-			return "replay"
+			return "live"
 		}(),
-		ReplayDay: *replayDay, ReplaySpeed: *speed,
-	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startReplay, goLive, startDemo)
+	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, nil, goLive, startDemo)
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
 	httpSrv := &http.Server{
@@ -478,10 +423,10 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}
 
 	// --- moomoo auto-config (live boots only) ---
-	// Gated on `live` (never -demo/-replay), the same gate config.
-	// SeedDefaultIfMissing above uses -- a synthetic/replayed feed never
-	// really connects to OpenD, so there is no real account list to probe,
-	// and demo's OpenD-free session must never write to the real
+	// Gated on `live` (never -demo), the same gate config.
+	// SeedDefaultIfMissing above uses -- a synthetic feed never really
+	// connects to OpenD, so there is no real account list to probe, and
+	// demo's OpenD-free session must never write to the real
 	// ~/.eTape/config.toml. venueAdm is the same instance uihub's commands
 	// already use, satisfying venueseed.Admin without a second config seam.
 	var seeder *venueseed.Seeder
@@ -506,14 +451,13 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	go forwardExec(ctx, execCore, hub)
 
 	// Forward marks + books into every sim broker so submitted orders fill: in
-	// replay every venue is forced to SimBroker, and in live mode a venue
-	// explicitly configured with Broker: "sim" (a practice venue) is one too.
-	// Non-sim live venues (tradezero/alpaca/moomoo) are fed by their own
-	// broker connection and don't implement simSink, so the type-assertion in
-	// simSinksOf alone selects the right set in either mode.
+	// live mode a venue explicitly configured with Broker: "sim" (a practice
+	// venue) is one too. Non-sim live venues (tradezero/alpaca/moomoo) are
+	// fed by their own broker connection and don't implement simSink, so the
+	// type-assertion in simSinksOf alone selects the right set.
 	go markBridge(ctx, core, execCore, simSinksOf(vbs))
 
-	// --- feed (live OpenD, synthetic demo, or replay) ---
+	// --- feed (live OpenD or synthetic demo) ---
 	var pipeWG sync.WaitGroup
 	var backfillWG sync.WaitGroup
 	var orch *backfill.Orchestrator
@@ -733,24 +677,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		}
 		hub.SetBackfill(hubBackfill) // chart-open demands also deep-backfill (nil-safe if disabled)
 		startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, firstAlpacaProber(vbs), backfillOne, !*demo, &scanWG)
-	} else {
-		sim := execClk.(*replay.Clock)
-		fd := replay.NewFeed(replay.FeedOptions{Rows: replayRows, Sim: sim, Pace: clock.System{}, Speed: *speed})
-		go func() { _ = fd.Run(ctx) }()
-		pipeWG.Add(1)
-		go pipe(ctx, &pipeWG, fd.Events(), core, nil) // no journal re-recording in replay
-		if *replayHold {
-			log.Info("replay-hold: serving last state until interrupted")
-		} else {
-			go func() { pipeWG.Wait(); stop() }() // self-terminate when the journal is exhausted
-		}
-		log.Info("engine up (replay)", "day", *replayDay, "rows", len(replayRows), "speed", *speed)
-		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
 	}
 
 	if orch == nil && st != nil {
-		// No live backfill chains were built (replay, or cfg.Backfill.Enabled ==
-		// false) — a chain-less orchestrator still serves archive-first
+		// No live backfill chains were built (cfg.Backfill.Enabled == false) —
+		// a chain-less orchestrator still serves archive-first
 		// LoadOlder/LoadOlderDaily and acks exhausted past the archive, per the
 		// spec's "no special casing beyond a nil-chain check." walkChain over a
 		// nil chain returns (nil,"",nil), so LoadOlder degrades cleanly.
@@ -1146,6 +1077,64 @@ func forwardDailyBars(ctx context.Context, gen dailyBarSource, core dailyBarSeed
 			for _, b := range gen.DrainDailyBars() {
 				archive.ArchiveDaily(b)
 				core.SeedDaily(b.Symbol, []feed.Bar{b})
+			}
+		}
+	}
+}
+
+// The day-roll seal fires at 00:30 ET — inside the 20:00–04:00 ET US-market-
+// closed window, so sealing the just-completed day serializes with a near-idle
+// write queue. The day partition is by receive time, so no new rows for the
+// prior day can arrive after midnight; the seal is safe.
+const (
+	sealHourET = 0
+	sealMinET  = 30
+)
+
+// nextSealFire returns the next 00:30 ET instant strictly after now.
+func nextSealFire(now time.Time) time.Time {
+	et := now.In(session.Loc())
+	fire := time.Date(et.Year(), et.Month(), et.Day(), sealHourET, sealMinET, 0, 0, session.Loc())
+	if !fire.After(et) {
+		fire = fire.AddDate(0, 0, 1)
+	}
+	return fire
+}
+
+// runVacuumMode runs one-shot journal maintenance (prune + seal + vacuum) then exits.
+// ponytail: stub while journal/seal/vacuum features are being removed.
+func runVacuumMode(dbPath string, cfg config.Config, log *slog.Logger) int {
+	st, err := store.Open(store.Options{Path: dbPath, Clock: clock.System{}})
+	if err != nil {
+		log.Error("open store", "err", err)
+		return 1
+	}
+	defer st.Close()
+	if n, err := st.PruneJournal(cfg.Store.RetentionDays); err == nil && n > 0 {
+		log.Info("pruned journal", "rows", n)
+	}
+	if err := st.Vacuum(); err != nil {
+		log.Error("vacuum", "err", err)
+		return 1
+	}
+	log.Info("vacuum mode done")
+	return 0
+}
+
+// runSealScheduler runs the periodic seal scheduler.
+// ponytail: stub while journal/seal features are being removed.
+func runSealScheduler(ctx context.Context, wg *sync.WaitGroup, st *store.Store, clk clock.Clock, log *slog.Logger) {
+	defer wg.Done()
+	ticker := clk.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C():
+			_, err := st.SealJournalDays()
+			if err != nil {
+				log.Warn("seal", "err", err)
 			}
 		}
 	}
