@@ -178,7 +178,7 @@ func (o *Orchestrator) Backfill(ctx context.Context, symbol string) error {
 	o.warmStart(ctx, symbol, from1m, now)
 	tailOldestMs, tailOK := o.tail1m(ctx, symbol)
 	o.fill1m(ctx, symbol, from1m, now, tailOldestMs, tailOK)
-	err := o.fillDaily(ctx, symbol, o.dailyFrom(now), now)
+	err := o.fillDaily(ctx, symbol, o.dailyFrom(now), now.Add(-24*time.Hour))
 	o.noteBackfilled(symbol, from1m)
 	return err
 }
