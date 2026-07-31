@@ -14,7 +14,7 @@ import (
 // consistent with the Adapter fields declared in alpaca.go.
 func newTestAdapter(t *testing.T, v exec.VenueID) *Adapter {
 	t.Helper()
-	return &Adapter{venue: v, seenExecIDs: map[string]bool{}, sideByID: map[string]exec.Side{}}
+	return &Adapter{venue: v, seenExecIDs: map[string]bool{}, sideByID: map[string]exec.Side{}, posBasis: map[string]posBasisEntry{}}
 }
 
 func loadUpdate(t *testing.T, name string) tradeUpdate {
@@ -196,6 +196,144 @@ func TestNormalizeUpdate_Fill_AddsUSPrefixToSymbol(t *testing.T) {
 	if !hasPosition(evs, "US.AAPL", 40) {
 		t.Fatalf("expected BrokerPositions symbol US.AAPL, got %+v", positions(evs))
 	}
+}
+
+func TestNormalizeUpdate_FillBasis_SameDirectionAdd(t *testing.T) {
+	// Buy 40 @ 190.48 opens position (no cache entry → avg = fill price).
+	// Buy 20 more @ 190.60 → same direction → weighted avg.
+	a := newTestAdapter(t, "alpaca")
+
+	// First fill: opens position.
+	tu := loadUpdate(t, "fill.json") // buy 40, position_qty=40
+	evs := a.normalizeUpdate("alpaca", tu)
+	p := positions(evs)[0]
+	if len(p.Positions) != 1 {
+		t.Fatalf("want 1 position, got %d", len(p.Positions))
+	}
+	pos := p.Positions[0]
+	if pos.Qty != 40 {
+		t.Fatalf("qty = %v, want 40", pos.Qty)
+	}
+	if pos.AvgPrice != 190.48 {
+		t.Fatalf("avgPrice = %v, want 190.48", pos.AvgPrice)
+	}
+
+	// Second fill: same direction add.
+	tu2 := loadUpdate(t, "partial_fill.json") // buy 20, position_qty=60
+	evs2 := a.normalizeUpdate("alpaca", tu2)
+	p2 := positions(evs2)[0]
+	pos2 := p2.Positions[0]
+	if pos2.Qty != 60 {
+		t.Fatalf("qty = %v, want 60", pos2.Qty)
+	}
+	expectedAvg := (40*190.48 + 20*190.60) / 60
+	if pos2.AvgPrice != expectedAvg {
+		t.Fatalf("avgPrice = %v, want %v", pos2.AvgPrice, expectedAvg)
+	}
+}
+
+func TestNormalizeUpdate_FillBasis_PartialExit(t *testing.T) {
+	// Cache: long 60 @ 190.50. Sell 20 → position_qty=40, same direction.
+	// Partial exit → avg unchanged.
+	a := newTestAdapter(t, "alpaca")
+	a.posMu.Lock()
+	a.posBasis["US.AAPL"] = posBasisEntry{qty: 60, avgAvg: 190.50}
+	a.posMu.Unlock()
+
+	// Sell 20, position_qty goes from 60→40.
+	tu := tradeUpdate{
+		Event:       "partial_fill",
+		ExecutionID: "e-sell",
+		Price:       numString(191.00),
+		Qty:         numString(20),
+		PositionQty: numString(40),
+		Timestamp:   "2026-07-06T14:00:00Z",
+		Order: auOrder{
+			ClientOrderID: "ord-sell",
+			Symbol:        "AAPL",
+			Side:          "sell",
+		},
+	}
+	evs := a.normalizeUpdate("alpaca", tu)
+	p := positions(evs)[0]
+	pos := p.Positions[0]
+	if pos.Qty != 40 {
+		t.Fatalf("qty = %v, want 40", pos.Qty)
+	}
+	if pos.AvgPrice != 190.50 {
+		t.Fatalf("avgPrice = %v, want 190.50 (unchanged)", pos.AvgPrice)
+	}
+}
+
+func TestNormalizeUpdate_FillBasis_DirectionReversal(t *testing.T) {
+	// Cache: short 40 @ 190.50. Buy 60 → position_qty=20, reversal.
+	// New basis = fill price.
+	a := newTestAdapter(t, "alpaca")
+	a.posMu.Lock()
+	a.posBasis["US.AAPL"] = posBasisEntry{qty: -40, avgAvg: 190.50}
+	a.posMu.Unlock()
+
+	// Buy 60, position_qty goes from -40→20.
+	tu := tradeUpdate{
+		Event:       "fill",
+		ExecutionID: "e-buy",
+		Price:       numString(192.00),
+		Qty:         numString(60),
+		PositionQty: numString(20),
+		Timestamp:   "2026-07-06T14:00:00Z",
+		Order: auOrder{
+			ClientOrderID: "ord-buy",
+			Symbol:        "AAPL",
+			Side:          "buy",
+		},
+	}
+	evs := a.normalizeUpdate("alpaca", tu)
+	p := positions(evs)[0]
+	pos := p.Positions[0]
+	if pos.Qty != 20 {
+		t.Fatalf("qty = %v, want 20", pos.Qty)
+	}
+	if pos.AvgPrice != 192.00 {
+		t.Fatalf("avgPrice = %v, want 192.00 (reversal)", pos.AvgPrice)
+	}
+}
+
+func TestNormalizeUpdate_FillBasis_FlatDeletesEntry(t *testing.T) {
+	// Cache: long 40 @ 190.48. Sell 40 → position_qty=0.
+	// Delete cache entry, avgPrice=0.
+	a := newTestAdapter(t, "alpaca")
+	a.posMu.Lock()
+	a.posBasis["US.AAPL"] = posBasisEntry{qty: 40, avgAvg: 190.48}
+	a.posMu.Unlock()
+
+	// Sell 40, position_qty goes from 40→0.
+	tu := tradeUpdate{
+		Event:       "fill",
+		ExecutionID: "e-flat",
+		Price:       numString(191.00),
+		Qty:         numString(40),
+		PositionQty: numString(0),
+		Timestamp:   "2026-07-06T14:00:00Z",
+		Order: auOrder{
+			ClientOrderID: "ord-flat",
+			Symbol:        "AAPL",
+			Side:          "sell",
+		},
+	}
+	evs := a.normalizeUpdate("alpaca", tu)
+	p := positions(evs)[0]
+	pos := p.Positions[0]
+	if pos.Qty != 0 {
+		t.Fatalf("qty = %v, want 0", pos.Qty)
+	}
+	if pos.AvgPrice != 0 {
+		t.Fatalf("avgPrice = %v, want 0 (flat)", pos.AvgPrice)
+	}
+	a.posMu.Lock()
+	if _, ok := a.posBasis["US.AAPL"]; ok {
+		t.Fatal("cache entry should be deleted for flat position")
+	}
+	a.posMu.Unlock()
 }
 
 func TestNumString_ParsesQuotedAndBareNumbers(t *testing.T) {

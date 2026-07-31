@@ -131,6 +131,17 @@ type Adapter struct {
 	// connectedOnce distinguishes the very first WS connect (nothing could
 	// have been missed yet: no gap diffing, no StreamGap) from a reconnect.
 	connectedOnce bool
+	// posBasis caches per-symbol position quantity and entry-average for
+	// Alpaca fill events that carry only qty in BrokerPositions. Keyed by
+	// domain symbol ("US.AAPL"). Owned by normalizeUpdate; seeded by
+	// Snapshot and reconcile.
+	posBasis map[string]posBasisEntry
+	posMu    sync.Mutex
+}
+
+type posBasisEntry struct {
+	qty    float64 // signed open quantity
+	avgAvg float64 // quantity-weighted average entry price
 }
 
 var _ exec.Broker = (*Adapter)(nil)
@@ -175,6 +186,7 @@ func New(cfg Config) (*Adapter, error) {
 		brokerIDByClientID: map[string]string{},
 		lastKnownStatus:    map[string]exec.OrderStatus{},
 		lastKnownFilledQty: map[string]float64{},
+		posBasis:           map[string]posBasisEntry{},
 	}
 	a.rest = newRESTClient(base, cfg.Creds.KeyID, cfg.Creds.SecretKey, clk)
 	a.ws = newWSClient(wsURL, cfg.Creds.KeyID, cfg.Creds.SecretKey, clk, a.handleUpdate, a.handleConn)
@@ -396,7 +408,24 @@ func (a *Adapter) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Po
 	for i := range orders {
 		orders[i].Venue = a.venue
 	}
+	a.seedPositions(positions)
 	return acct, positions, orders, nil
+}
+
+// seedPositions replaces the entire posBasis map with data from a REST
+// authoritative position list. Called from Snapshot and reconcile so live
+// fills always have correct starting basis after process start or stream
+// reconnect.
+func (a *Adapter) seedPositions(positions []exec.Position) {
+	a.posMu.Lock()
+	defer a.posMu.Unlock()
+	out := make(map[string]posBasisEntry, len(positions))
+	for _, p := range positions {
+		if p.Qty != 0 {
+			out[p.Symbol] = posBasisEntry{qty: p.Qty, avgAvg: p.AvgPrice}
+		}
+	}
+	a.posBasis = out
 }
 
 // Run starts the trade_updates WebSocket client, which drives connect/
@@ -521,6 +550,7 @@ func (a *Adapter) reconcile() {
 	}
 	a.mu.Unlock()
 
+	a.seedPositions(positions)
 	a.emit(exec.BrokerAccount{Account: acct})
 	a.emit(exec.BrokerPositions{V: a.venue, Positions: positions})
 	for _, e := range gapEvents {

@@ -130,11 +130,48 @@ func (a *Adapter) normalizeUpdate(venue exec.VenueID, tu tradeUpdate) []exec.Bro
 			side = sideDomain(tu.Order.Side, float64(tu.PositionQty)-delta)
 		}
 
+		// Calculate position-wide cost basis from cached position.
+		domainSym := domainSymbol(tu.Order.Symbol)
+		positionQtyAfter := float64(tu.PositionQty)
+		delta := float64(tu.Qty)
+		if tu.Order.Side == "sell" {
+			delta = -delta
+		}
+		positionQtyBefore := positionQtyAfter - delta
+		fillPrice := float64(tu.Price)
+
+		a.posMu.Lock()
+		var avgPrice float64
+		entry, hasEntry := a.posBasis[domainSym]
+		switch {
+		case !hasEntry || entry.qty == 0:
+			// Flat → this fill opens a new position.
+			avgPrice = fillPrice
+		case positionQtyBefore*positionQtyAfter > 0 && positionQtyAfter > positionQtyBefore:
+			// Same-direction add: weighted average by absolute quantity.
+			avgPrice = (entry.qty*entry.avgAvg + delta*fillPrice) / positionQtyAfter
+		case positionQtyAfter == 0:
+			// Flat: delete cache entry.
+			delete(a.posBasis, domainSym)
+			// avgPrice stays zero (flat position).
+		case positionQtyBefore*positionQtyAfter > 0:
+			// Partial exit: retain existing basis.
+			avgPrice = entry.avgAvg
+		default:
+			// Direction reversal: new basis is this execution price.
+			avgPrice = fillPrice
+		}
+		// Update cache with post-fill state.
+		if positionQtyAfter != 0 {
+			a.posBasis[domainSym] = posBasisEntry{qty: positionQtyAfter, avgAvg: avgPrice}
+		}
+		a.posMu.Unlock()
+
 		return []exec.BrokerEvent{
 			exec.OrderFilled{
 				F: exec.Fill{
-					Venue: venue, OrderID: oid, Symbol: domainSymbol(tu.Order.Symbol),
-					Side: side, Qty: float64(tu.Qty), Price: float64(tu.Price), TsMs: ts,
+					Venue: venue, OrderID: oid, Symbol: domainSym,
+					Side: side, Qty: float64(tu.Qty), Price: fillPrice, TsMs: ts,
 				},
 				CumQty:    float64(tu.Order.FilledQty),
 				LeavesQty: float64(tu.Order.Qty) - float64(tu.Order.FilledQty),
@@ -143,7 +180,7 @@ func (a *Adapter) normalizeUpdate(venue exec.VenueID, tu tradeUpdate) []exec.Bro
 			exec.BrokerPositions{
 				V: venue,
 				Positions: []exec.Position{
-					{Venue: venue, Symbol: domainSymbol(tu.Order.Symbol), Qty: float64(tu.PositionQty)},
+					{Venue: venue, Symbol: domainSym, Qty: positionQtyAfter, AvgPrice: avgPrice},
 				},
 			},
 		}
