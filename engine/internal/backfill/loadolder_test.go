@@ -19,8 +19,8 @@ func TestLoadOlderErrorsWithoutWatermark(t *testing.T) {
 }
 
 func TestLoadOlderArchiveFirstServesWithoutChain(t *testing.T) {
-	watermark := fixedNow().AddDate(0, 0, -20)
-	from := intradayFrom(watermark, 20)
+	watermark := fixedNow().AddDate(0, 0, -10)
+	from := intradayFrom(watermark, olderIntradayChunkTradingDays)
 	// Archive's earliest bar sits right at `from` -- squarely within the
 	// archive-coverage slack, so this exercises the genuine archive-first-wins
 	// path (contrast with TestLoadOlderArchiveFirstFallsThroughOnSparseSlice,
@@ -49,8 +49,8 @@ func TestLoadOlderArchiveFirstServesWithoutChain(t *testing.T) {
 // call sites (tail1m, fill1m, loadOlder), so a sparse/stale slice inside a
 // requested window is realistic, not contrived.
 func TestLoadOlderArchiveFirstFallsThroughOnSparseSlice(t *testing.T) {
-	watermark := fixedNow().AddDate(0, 0, -20)
-	from := intradayFrom(watermark, 20)
+	watermark := fixedNow().AddDate(0, 0, -10)
+	from := intradayFrom(watermark, olderIntradayChunkTradingDays)
 
 	// Stray bar sits just below `cur` (watermark), nowhere near `from` -- well
 	// outside the archive-coverage slack, so it must not count as coverage.
