@@ -6,7 +6,8 @@
 export abstract class PaintStore {
   private dirty = false;
   private rev = 0;
-  protected markDirty(): void { this.dirty = true; this.rev++; }
+  private readonly subs = new Set<() => void>();
+  protected markDirty(): void { this.dirty = true; this.rev++; this.emit(); }
   isDirty(): boolean { return this.dirty; }
   consumeDirty(): boolean { const d = this.dirty; this.dirty = false; return d; }
   // Multi-consumer alternative to isDirty()/consumeDirty(): unlike consumeDirty(),
@@ -14,6 +15,8 @@ export abstract class PaintStore {
   // surfaces (e.g. several chart panels sharing one BarStore) can each track their
   // own "have I seen this change yet" cursor without starving each other.
   getRev(): number { return this.rev; }
+  subscribe(cb: () => void): () => void { this.subs.add(cb); return () => this.subs.delete(cb); }
+  private emit(): void { this.subs.forEach((cb) => cb()); }
 }
 
 export abstract class ReactStore<S> {

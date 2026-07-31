@@ -578,6 +578,62 @@ describe("AccountPanel", () => {
     });
   });
 
+  describe("live Unrl P&L from quote", () => {
+    it("updates Unrl P&L from live quote bid, not stale exec snapshot", async () => {
+      const { props, stores } = mkProps();
+      wrap(props);
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({ unrealizedPnl: 30 })] });
+      });
+      act(() => {
+        stores.quote.apply({ kind: "delta", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 4.0, ask: 4.01, last: 3.95, ts: "t" } });
+      });
+      // Computed: (4.0 - 3.4) * 300 = 180.00
+      await waitFor(() => {
+        const row = screen.getByRole("row", { name: /AAPL/ });
+        const cells = row.querySelectorAll("td");
+        expect(cells[4].textContent).toBe("180.00");
+      });
+    });
+
+    it("short position uses ask for mark price", async () => {
+      const { props, stores } = mkProps();
+      wrap(props);
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({ qty: -300, avgPrice: 3.4, unrealizedPnl: 30 })] });
+      });
+      act(() => {
+        stores.quote.apply({ kind: "delta", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.3, ask: 3.5, last: 3.45, ts: "t" } });
+      });
+      // Short: mark = ask = 3.5 → (3.5 - 3.4) * (-300) = -30.00
+      await waitFor(() => {
+        const row = screen.getByRole("row", { name: /AAPL/ });
+        const cells = row.querySelectorAll("td");
+        expect(cells[4].textContent).toBe("-30.00");
+      });
+    });
+
+    it("falls back to last when side quote is zero", async () => {
+      const { props, stores } = mkProps();
+      wrap(props);
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({ unrealizedPnl: 42 })] });
+      });
+      act(() => {
+        stores.quote.apply({ kind: "delta", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 0, ask: 0, last: 3.95, ts: "t" } });
+      });
+      // Fallback: last = 3.95 → (3.95 - 3.4) * 300 = 165.00
+      await waitFor(() => {
+        const row = screen.getByRole("row", { name: /AAPL/ });
+        const cells = row.querySelectorAll("td");
+        expect(cells[4].textContent).toBe("165.00");
+      });
+    });
+  });
+
   describe("Export trades (Task 7 wiring)", () => {
     beforeEach(() => {
       (URL as unknown as { createObjectURL: (b: Blob) => string }).createObjectURL = vi.fn(() => "blob:mock");

@@ -2,7 +2,7 @@ import { useContext, useMemo, useRef, useState, useSyncExternalStore } from "rea
 import { createPortal } from "react-dom";
 import type { PanelProps } from "./registry";
 import { HoverButton } from "../controls/HoverButton";
-import type { PositionRow } from "../../wire/contract";
+import type { PositionRow, Quote } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
@@ -51,6 +51,26 @@ const SORT_ACCESSORS: Record<string, (r: PositionRow) => number | string | null>
   avgPrice: (r) => r.avgPrice,
   unrealizedPnl: (r) => r.unrealizedPnl,
 };
+
+// Live mark price from quote: long → bid, short → ask, fallback → last.
+function liveMark(quote: Quote | undefined, qty: number): number | null {
+  if (!quote) return null;
+  if (qty > 0) {
+    if (quote.bid > 0) return quote.bid;
+    if (quote.last > 0) return quote.last;
+  } else {
+    if (quote.ask > 0) return quote.ask;
+    if (quote.last > 0) return quote.last;
+  }
+  return null;
+}
+
+// Compute display unrealized P&L from live mark. Works for long (qty>0) and short (qty<0).
+function displayUnrealized(quote: Quote | undefined, avgPrice: number, qty: number, fallbackPnl: number): number {
+  const mark = liveMark(quote, qty);
+  if (mark !== null) return (mark - avgPrice) * qty;
+  return fallbackPnl;
+}
 
 // ---- Orders table (folded from OpenOrdersPanel; now always-visible, venue-scoped) ----
 
@@ -185,12 +205,13 @@ function StatsStrip({
   const realized = account?.realized ?? null;
   const unrealized = stores.exec.positions()
     .filter((p) => p.venue === venue && p.qty !== 0)
-    .reduce((sum, p) => sum + p.unrealizedPnl, 0);
+    .reduce((sum, p) => sum + displayUnrealized(stores.quote.get(p.symbol), p.avgPrice, p.qty, p.unrealizedPnl), 0);
 
   // Equity/Buying Power read as "settled" values: freeze them at their last
   // flat (no open position) snapshot while a position is open for this venue,
-  // and resume live updates once the venue goes flat again. Day P&L/Realized
-  // stay live always — this freeze is scoped to Equity/BP only.
+  // and resume live updates once the venue goes flat again. Day P&L, Unrealized
+  // (quote-derived), and Realized stay live always — this freeze is scoped to
+  // Equity/BP only.
   const positionOpen = stores.exec.positions().some((p) => p.venue === venue && p.qty !== 0);
 
   // Held pairs are keyed by venue (not a bare pair of refs) because StatsStrip
@@ -247,7 +268,13 @@ function PositionsTable({
   const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
   const masterArmed = !!status?.masterArmed;
 
-  const rows = useMemo(() => sortRows(rows0, sort, SORT_ACCESSORS), [rows0, sort]);
+  const rows = useMemo(() => sortRows(rows0, sort, {
+    ...SORT_ACCESSORS,
+    unrealizedPnl: (r: PositionRow) => {
+      const quote = stores.quote.get(r.symbol);
+      return displayUnrealized(quote, r.avgPrice, r.qty, r.unrealizedPnl);
+    },
+  }), [rows0, sort]);
   const openCount = rows0.length;
 
   const clickSort = (col: string, sortable: boolean) => {
@@ -303,7 +330,11 @@ function PositionsTable({
                   <td style={{ color: palette.textMuted }}>{net ? "NET" : r.venue}</td>
                   <td style={{ color: r.qty >= 0 ? palette.up : palette.down }}>{formatSize(r.qty)}</td>
                   <td>{formatPrice(r.avgPrice, 2)}</td>
-                  <td style={{ color: r.unrealizedPnl >= 0 ? palette.up : palette.down }}>{formatPrice(r.unrealizedPnl, 2)}</td>
+                  {(() => {
+                    const quote = stores.quote.get(r.symbol);
+                    const dUnrealized = displayUnrealized(quote, r.avgPrice, r.qty, r.unrealizedPnl);
+                    return <td style={{ color: dUnrealized >= 0 ? palette.up : palette.down }}>{formatPrice(dUnrealized, 2)}</td>;
+                  })()}
                   <td>{net ? null : (
                     <HoverButton data-testid={`flatten-${r.venue}-${r.symbol}`} data-armed={masterArmed}
                       title={masterArmed ? "Flatten position" : "Master disarmed — flatten still allowed (exposure-reducing)"}
@@ -327,6 +358,8 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
+  // Force re-render on quote updates so live Unrl P&L refreshes.
+  useSyncExternalStore((cb) => stores.quote.subscribe(cb), () => stores.quote.getRev());
   const group = groupProp ?? config.group;
   const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
   const { config: orderConfig } = useOrderConfig();
