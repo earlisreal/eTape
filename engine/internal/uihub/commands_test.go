@@ -413,6 +413,27 @@ func TestLoadOlderBarsNoFetchSurfaceExhausted(t *testing.T) {
 	}
 }
 
+func TestLoadOlderBarsPassesDemandedRangeArgs(t *testing.T) {
+	cd, dem, _ := newCmdWith(t, nil, false)
+	var gotSym string
+	var gotDaily bool
+	var gotStart, gotEnd int64
+	dem.loadOlderFn = func(symbol string, daily bool, requiredStartMs, requiredEndMs int64, done func(added int, exhausted bool, err error)) {
+		gotSym, gotDaily, gotStart, gotEnd = symbol, daily, requiredStartMs, requiredEndMs
+		done(1, false, nil)
+	}
+	var got wsmsg.AckMsg
+	_, deferred := cd.handle(context.Background(), "LoadOlderBars", mustJSON(t, wsmsg.LoadOlderBarsArgs{
+		Symbol: "US.AAPL", Daily: true, RequiredStartMs: 1234, RequiredEndMs: 5678,
+	}), 9, func(a wsmsg.AckMsg) { got = a })
+	if !deferred || got.Status != "accepted" {
+		t.Fatalf("want deferred accepted ack, got deferred=%v ack=%+v", deferred, got)
+	}
+	if gotSym != "US.AAPL" || !gotDaily || gotStart != 1234 || gotEnd != 5678 {
+		t.Fatalf("LoadOlder args = %q %v %d %d, want US.AAPL true 1234 5678", gotSym, gotDaily, gotStart, gotEnd)
+	}
+}
+
 func TestEnsureSymbol_AcceptsAndMapsWatch(t *testing.T) {
 	cd, dem, _ := newCmdWith(t, nil, false)
 	ack, _ := cd.handle(context.Background(), "EnsureSymbol",

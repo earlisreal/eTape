@@ -43,6 +43,7 @@ export class OlderHistoryController {
   private readonly inflight: Record<HistoryKind, boolean> = { intraday: false, daily: false };
   private readonly exhausted: Record<HistoryKind, boolean> = { intraday: false, daily: false };
   private readonly cooldownUntil: Record<HistoryKind, number> = { intraday: 0, daily: 0 };
+  private readonly lastAcceptedStartMs: Record<HistoryKind, number | null> = { intraday: null, daily: null };
   private readonly timers: Record<HistoryKind, ReturnType<typeof setTimeout> | undefined> = {
     intraday: undefined,
     daily: undefined,
@@ -64,6 +65,9 @@ export class OlderHistoryController {
     if (screens <= 0) return;
     const remaining = logicalRange.from - LEFT_PAD_BARS;
     if (remaining >= SCREENS_THRESHOLD * screens) return;
+    const required = requiredRangeMs ?? logicalRange;
+    const requiredStartMs = required.from;
+    if (this.lastAcceptedStartMs[kind] === requiredStartMs) return;
 
     this.inflight[kind] = true;
     this.clearTimer(kind);
@@ -78,13 +82,11 @@ export class OlderHistoryController {
     const daily = kind === "daily";
     // Range-driven: pass the viewport range so the engine can do archive-first
     // coverage checks against the exact demanded window.
-    const required = requiredRangeMs ?? logicalRange;
-    const requiredStartMs = required.from;
     const requiredEndMs = required.to;
     this.deps
       .load(daily, requiredStartMs, requiredEndMs)
-      .then((ack) => this.settle(kind, ack))
-      .catch(() => this.settle(kind, { status: "blocked" }));
+      .then((ack) => this.settle(kind, ack, requiredStartMs))
+      .catch(() => this.settle(kind, { status: "blocked" }, requiredStartMs));
   }
 
   /** Clears all guard state for both kinds. Call on symbol change. */
@@ -93,6 +95,8 @@ export class OlderHistoryController {
     this.inflight.daily = false;
     this.exhausted.intraday = false;
     this.exhausted.daily = false;
+    this.lastAcceptedStartMs.intraday = null;
+    this.lastAcceptedStartMs.daily = null;
     this.cooldownUntil.intraday = 0;
     this.cooldownUntil.daily = 0;
     this.clearTimer("intraday");
@@ -107,10 +111,11 @@ export class OlderHistoryController {
     }
   }
 
-  private settle(kind: HistoryKind, ack: OlderHistoryAck): void {
+  private settle(kind: HistoryKind, ack: OlderHistoryAck, requiredStartMs: number): void {
     this.clearTimer(kind);
     this.inflight[kind] = false;
     if (ack.status === "accepted") {
+      this.lastAcceptedStartMs[kind] = requiredStartMs;
       const value = ack.value as { exhausted?: boolean } | undefined;
       if (value?.exhausted) this.exhausted[kind] = true;
     } else {

@@ -100,4 +100,15 @@ describe("OlderHistoryController", () => {
     c.maybeTrigger(range(10, 110), true); // in-flight cleared, kind not exhausted -> fires again
     expect(load).toHaveBeenCalledTimes(2);
   });
+
+  it("dedupes accepted requests by requiredStartMs per kind", async () => {
+    const load = vi.fn().mockResolvedValue({ status: "accepted", value: { added: 10, exhausted: false } });
+    const c = new OlderHistoryController({ load, now: () => 0 });
+    c.maybeTrigger(range(10, 110), true, { from: 1_000, to: 2_000 });
+    await flush();
+    c.maybeTrigger(range(10, 110), true, { from: 1_000, to: 2_100 }); // same start -> deduped
+    expect(load).toHaveBeenCalledTimes(1);
+    c.maybeTrigger(range(10, 110), true, { from: 900, to: 2_000 }); // deeper start -> allowed
+    expect(load).toHaveBeenCalledTimes(2);
+  });
 });
