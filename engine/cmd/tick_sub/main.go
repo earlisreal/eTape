@@ -1,7 +1,8 @@
 // tick_sub: subscribe to moomoo OpenD TICKER pushes, print each tick + 1s summary.
 //
 // Usage: go run ./cmd/tick_sub [SYMBOL]
-//   SYMBOL defaults to US.BNRG (also accepts bare "BNRG" → US.BNRG)
+//
+//	SYMBOL defaults to US.BNRG (also accepts bare "BNRG" → US.BNRG)
 package main
 
 import (
@@ -31,9 +32,9 @@ import (
 
 // Protocol IDs.
 const (
-	protoInitConnect = 1001
-	protoKeepAlive   = 1004
-	protoQotSub      = 3001
+	protoInitConnect  = 1001
+	protoKeepAlive    = 1004
+	protoQotSub       = 3001
 	protoUpdateTicker = 3011 // push
 )
 
@@ -56,9 +57,9 @@ func encode(protoID, serialNo uint32, body []byte) []byte {
 }
 
 type header struct {
-	protoID uint32
+	protoID  uint32
 	serialNo uint32
-	bodyLen uint32
+	bodyLen  uint32
 }
 
 func parseHeader(b []byte) (header, error) {
@@ -209,7 +210,7 @@ func main() {
 					case qotcommon.TickerDirection_TickerDirection_Ask:
 						dir = "S"
 					}
-					ts := time.Unix(0, int64(math.Round(t.GetTimestamp()*1000)) * 1e6)
+					ts := time.Unix(0, int64(math.Round(t.GetTimestamp()*1000))*1e6)
 					fmt.Printf("[%s] %s %.4f x%d %s\n",
 						ts.Format("15:04:05.000"), symbol, t.GetPrice(), t.GetVolume(), dir)
 					atomic.AddInt64(&tickCount, 1)
@@ -298,7 +299,7 @@ func main() {
 		case <-sumTicker.C:
 			ticks := atomic.SwapInt64(&tickCount, 0)
 			totalTicks += ticks
-			fmt.Fprintf(os.Stderr, "\r[1s: %d ticks | total: %d]   ", ticks, totalTicks)
+			// fmt.Fprintf(os.Stderr, "\r[1s: %d ticks | total: %d]   ", ticks, totalTicks)
 		case err := <-readErr:
 			fmt.Fprintf(os.Stderr, "\nconnection lost: %v\n", err)
 			os.Exit(1)
