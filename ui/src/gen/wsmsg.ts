@@ -337,24 +337,20 @@ export interface HealthSnapshot {
 }
 /**
  * SessionSnapshot is the static sys.session topic: which mode the engine
- * booted in. Mode is "live", "replay", or "demo"; Day/Speed populated only in replay.
+ * booted in. Mode is "live" or "demo".
  */
 export interface SessionSnapshot {
   mode: string;
-  day?: string;
-  speed?: number /* float64 */;
 }
 /**
  * BootStatus is the sys.boot snapshot: the engine's current boot phase, so the
- * UI shows a neutral "preparing journal / connecting" banner during the pre-feed
- * maintenance window instead of the red feed-disconnected strip. Snapshot-bearing
- * (like SessionSnapshot): re-delivered to every new subscriber, also pushed as a
- * delta on each transition. Phase is one of "sealing" | "connecting" | "ready".
- * DaysTotal is the day count for the "sealing" phase (0 otherwise).
+ * UI shows a neutral connecting banner during boot instead of the red
+ * feed-disconnected strip. Snapshot-bearing (like SessionSnapshot):
+ * re-delivered to every new subscriber, also pushed as a delta on each transition.
+ * Phase is one of "connecting" | "ready".
  */
 export interface BootStatus {
   phase: string;
-  daysTotal?: number /* int */;
 }
 export interface SysEvent {
   seq: number /* int64 */;
@@ -566,20 +562,6 @@ export interface TestConnectionResult {
   accountType: string;
   message: string;
   accounts: TestAccount[];
-}
-/**
- * StartReplayArgs selects the recorded day and playback speed for the
- * StartReplay command. Day is a "YYYY-MM-DD" calendar date; Speed is a
- * playback multiplier (0 = as-fast-as-possible, per Task 4's closure).
- */
-export interface StartReplayArgs {
-  day: string;
-  speed: number /* float64 */;
-}
-/**
- * GoLiveArgs is intentionally empty (kept as a named type for tygo stability).
- */
-export interface GoLiveArgs {
 }
 /**
  * StartDemoArgs is intentionally empty (kept as a named type for tygo

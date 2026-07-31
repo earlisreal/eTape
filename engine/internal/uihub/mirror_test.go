@@ -639,10 +639,10 @@ func TestSysBootSnapshotAndPublish(t *testing.T) {
 		t.Fatalf("snapshot=%+v", frames)
 	}
 
-	m.applyPub(staged{Topic: wsmsg.TopicSysBoot, Payload: wsmsg.BootStatus{Phase: "sealing", DaysTotal: 3}})
+	m.applyPub(staged{Topic: wsmsg.TopicSysBoot, Payload: wsmsg.BootStatus{Phase: "ready"}})
 	frames = m.snapshotFrames(wsmsg.TopicSysBoot)
 	got := frames[0].Payload.(wsmsg.BootStatus)
-	if got.Phase != "sealing" || got.DaysTotal != 3 {
+	if got.Phase != "ready" {
 		t.Fatalf("after publish=%+v", got)
 	}
 }

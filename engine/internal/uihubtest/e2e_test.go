@@ -16,7 +16,6 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/md"
-	"github.com/earlisreal/eTape/engine/internal/replay"
 	"github.com/earlisreal/eTape/engine/internal/store"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
@@ -94,7 +93,7 @@ func TestE2EExecLifecycleOverWS(t *testing.T) {
 		Global: uihub.GlobalLimits{MaxDayLoss: 1e9},
 		MD:     20 * time.Millisecond, Account: 50 * time.Millisecond, Position: 30 * time.Millisecond,
 		Buf: 4096, TapeCap: 100, NewsCap: 100, FillsCap: 100, EventsCap: 100, OutBuf: 256,
-	}, execCore, st, mdCore, nil, nil, nil, nil, nil, nil)
+	}, execCore, st, mdCore, nil, nil, nil, nil)
 	go func() { _ = hub.Run(ctx) }()
 	go forwardExec(ctx, execCore, hub)
 
@@ -160,74 +159,6 @@ func TestE2EExecLifecycleOverWS(t *testing.T) {
 	}
 }
 
-func TestE2EReplayMarketDataOverWS(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	st := openStore(t)
-
-	// record a couple of feed events, then read the day back to replay them
-	base := time.Date(2026, 7, 6, 13, 31, 0, 0, time.UTC)
-	day := base.Format("2006-01-02")
-	st.RecordEvent(feed.QuoteEvent{Quote: feed.Quote{Symbol: "US.AAPL", Last: 3.47, TsMs: base.UnixMilli()}}, base.UnixMilli())
-	st.RecordEvent(feed.QuoteEvent{Quote: feed.Quote{Symbol: "US.AAPL", Last: 3.50, TsMs: base.Add(time.Second).UnixMilli()}}, base.Add(time.Second).UnixMilli())
-	st.Flush()
-	rows, err := st.ReadJournalDay(day)
-	if err != nil || len(rows) < 2 {
-		t.Fatalf("recorded rows unavailable: %v (%d rows)", err, len(rows))
-	}
-
-	mdCore := md.New(md.Config{TapeRing: 1024, AnchorSecs: 34200})
-	go func() { _ = mdCore.Run(ctx) }()
-
-	// exec core with no venues (md-only test) still constructs a valid hub
-	execCore := exec.NewCore(exec.CoreConfig{Store: st, Brokers: map[exec.VenueID]exec.Broker{}, Clock: clock.System{}, IDGen: exec.NewOrderIDGen(clock.System{}, deterministicReader())})
-	_ = execCore.Recover(ctx)
-	go func() { _ = execCore.Run(ctx) }()
-
-	hub, srv := uihub.New(clock.System{}, uihub.Config{
-		MD: 15 * time.Millisecond, Account: 50 * time.Millisecond, Position: 30 * time.Millisecond,
-		Buf: 4096, TapeCap: 100, NewsCap: 100, FillsCap: 100, EventsCap: 100, OutBuf: 256,
-	}, execCore, st, mdCore, nil, nil, nil, nil, nil, nil)
-	go func() { _ = hub.Run(ctx) }()
-	go forwardMD(ctx, mdCore, hub)
-
-	ts := httptest.NewServer(srv.Handler())
-	defer ts.Close()
-	url := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
-
-	// replay the recorded day into md.Core
-	simClk := replay.NewClock(time.UnixMilli(rows[0].TsExch))
-	fd := replay.NewFeed(replay.FeedOptions{Rows: rows, Sim: simClk, Speed: 0})
-	go func() { _ = fd.Run(ctx) }()
-	go func() {
-		for ev := range fd.Events() {
-			mdCore.Feed(ev)
-		}
-	}()
-
-	c := dialWS(t, ctx, url, wsmsg.TopicQuote)
-	defer c.Close(websocket.StatusNormalClosure, "")
-
-	// a md.quote frame for US.AAPL must arrive (snapshot or delta)
-	q := waitFrame(t, ctx, c, func(m map[string]any) bool {
-		if m["topic"] != "md.quote" {
-			return false
-		}
-		p, _ := m["payload"].(map[string]any)
-		return p != nil && p["symbol"] == "US.AAPL"
-	})
-	p := q["payload"].(map[string]any)
-	last, ok := p["last"]
-	if !ok {
-		t.Fatalf("md.quote payload missing last: %v", p)
-	}
-	if last != 3.47 && last != 3.50 {
-		t.Fatalf("md.quote last should be one of the replayed prices, got %v: %v", last, p)
-	}
-}
-
-// forwardExec/forwardMD mirror main's fan-in goroutines (the capstone reconstructs
-// the wiring main does, since it can't import package main).
 func forwardExec(ctx context.Context, execCore *exec.Core, hub *uihub.Hub) {
 	for {
 		select {

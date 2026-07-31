@@ -32,13 +32,12 @@ func (h *countHandler) n() int {
 	return h.count
 }
 
-// open makes a temp-file store with a fast flush for tests.
 func open(t *testing.T) *Store {
 	t.Helper()
 	s, err := Open(Options{
 		Path:          t.TempDir() + "/test.db",
 		Clock:         clock.NewFake(time.UnixMilli(0)),
-		FlushInterval: time.Hour, // tests drive flushing explicitly via Flush()
+		FlushInterval: time.Hour,
 	})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -49,15 +48,13 @@ func open(t *testing.T) *Store {
 
 func TestOpenCreatesSchemaAndWAL(t *testing.T) {
 	s := open(t)
-	// All five tables exist.
-	for _, tbl := range []string{"journal", "bars_1m", "bars_daily", "config", "sys_events"} {
+	for _, tbl := range []string{"bars_1m", "bars_daily", "config", "sys_events", "exec_events", "fills"} {
 		var name string
 		row := s.db.QueryRow("SELECT name FROM sqlite_master WHERE type='table' AND name=?", tbl)
 		if err := row.Scan(&name); err != nil {
 			t.Fatalf("table %s missing: %v", tbl, err)
 		}
 	}
-	// WAL is on.
 	var mode string
 	if err := s.db.QueryRow("PRAGMA journal_mode").Scan(&mode); err != nil {
 		t.Fatal(err)
@@ -69,19 +66,12 @@ func TestOpenCreatesSchemaAndWAL(t *testing.T) {
 
 func TestFlushAndCloseAreSafeWhenEmpty(t *testing.T) {
 	s := open(t)
-	s.Flush() // no queued writes — must not hang
+	s.Flush()
 	if err := s.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 }
 
-// TestCommitCoalescesExecErrors is the regression for the field incident: a
-// burst of identical row-exec failures in one batch must not produce one log
-// record per row. Unbounded per-row synchronous logging is what stalled the
-// writer goroutine long enough to back up the (blocking) RecordEvent channel
-// and lag the live feed — see commit()/logRowErr in store.go. This drives
-// non-journal (journalDay=="") rows so it exercises logRowErr's aggregation
-// path directly, independent of the journal-specific collision/reseed path.
 func TestCommitCoalescesExecErrors(t *testing.T) {
 	s := open(t)
 	h := &countHandler{}

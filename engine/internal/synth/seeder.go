@@ -57,11 +57,10 @@ const seedDaySubstepMs = barMs
 
 // SeedStore is the store surface Seed writes warm history through -
 // satisfied by *store.Store (ArchiveDaily/ArchiveBar1m: store/bars.go;
-// RecordEvent: store/journal.go; Flush: store/store.go).
+// Flush: store/store.go).
 type SeedStore interface {
 	ArchiveDaily(feed.Bar)
 	ArchiveBar1m(feed.Bar)
-	RecordEvent(ev feed.Event, recvMs int64)
 	Flush()
 }
 
@@ -88,10 +87,7 @@ type SeedStore interface {
 //     elapsed, at real minute/tick granularity - continuing the exact same
 //     price/book state pass 1 left off at - emitting closed 1m bars and
 //     rolling daily bars at each day crossing.
-//  3. The live ~2h tick ring pass 2 leaves behind is journaled verbatim
-//     (batched per symbol) so warmStart can rebuild today's 10s series from
-//     the journal alone, the same way it would after a real restart.
-//  4. st.Flush().
+//  3. st.Flush().
 func (g *Generator) Seed(st SeedStore, nowMs int64) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
@@ -117,7 +113,6 @@ func (g *Generator) Seed(st SeedStore, nowMs int64) {
 		rt.book.rebuildAround(g.rng, rt.spec, rt.price.Mid, false)
 
 		g.seedIntraday(rt, fineStartMs, nowMs, st)
-		seedRecentTicksJournal(rt, nowMs, st)
 
 		// seedIntraday's own rollovers already archived each closed day
 		// directly (see its st.ArchiveDaily call above), and the post-boot
@@ -302,25 +297,4 @@ func (g *Generator) seedIntraday(rt *symRuntime, fromMs, nowMs int64, st SeedSto
 
 		cur = next
 	}
-}
-
-// seedRecentTicksJournal journals rt's live ~2h tick ring (already trimmed
-// to exactly that window by seedIntraday, the same way stepSymbol trims it
-// on the live path) as one Seed=true TicksEvent batch, so warmStart can
-// rebuild today's 10s series from the journal alone after a restart. The
-// slice is copied rather than handed over directly: rt.ticks keeps being
-// appended to and trimmed in place by the live StepTo path the moment
-// Feed.Run starts, and RecordEvent's write is async (store/journal.go's
-// writer goroutine), so sharing the backing array would race the live
-// path's in-place mutation against the store's JSON encode of this event.
-// Symbols with nothing printed in the trailing window (a halt covering the
-// whole 2h - vanishingly rare, but possible) are skipped rather than
-// journaling a symbol-less empty batch.
-func seedRecentTicksJournal(rt *symRuntime, nowMs int64, st SeedStore) {
-	if len(rt.ticks) == 0 {
-		return
-	}
-	ticks := make([]feed.Tick, len(rt.ticks))
-	copy(ticks, rt.ticks)
-	st.RecordEvent(feed.TicksEvent{Ticks: ticks, Seed: true}, nowMs)
 }

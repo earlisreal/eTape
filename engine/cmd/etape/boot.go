@@ -76,14 +76,10 @@ type venueBroker struct {
 // buildBrokers constructs one exec.Broker per configured venue. In replay mode
 // every venue is a SimBroker (a recorded day has no live broker). In live mode it
 // dispatches on Venue.Broker.
-func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock, replay bool) ([]venueBroker, error) {
+func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock) ([]venueBroker, error) {
 	out := make([]venueBroker, 0, len(cfg.Venues))
 	for _, v := range cfg.Venues {
 		id := exec.VenueID(v.ID)
-		if replay {
-			out = append(out, venueBroker{ID: id, Broker: sim.New(id, clk, v.EffectiveStartingBalance(), sim.Options{SlippageBps: v.SlippageBps, FillLatencyMs: v.FillLatencyMs})})
-			continue
-		}
 		switch v.Broker {
 		case "sim":
 			out = append(out, venueBroker{ID: id, Broker: sim.New(id, clk, v.EffectiveStartingBalance(), sim.Options{SlippageBps: v.SlippageBps, FillLatencyMs: v.FillLatencyMs})})

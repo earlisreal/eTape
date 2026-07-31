@@ -11,32 +11,22 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
 
-// ExecCore is the exec.Core surface uihub commands need (satisfied by *exec.Core).
 type ExecCore interface {
 	Do(exec.Command) exec.CmdAck
 }
 
-// Stores is the store surface uihub needs (satisfied by *store.Store).
 type Stores interface {
 	GetConfig(key string) (string, bool, error)
 	SetConfig(key, value string)
 	QueryFills(symbol string, fromMs, toMs int64) ([]exec.FillRow, error)
 	ExportFills(ctx context.Context, venue string, fromMs, toMs int64) ([]exec.ExportFillRow, error)
-	JournalDays() ([]string, error)
 }
 
-// Indicators is the md.Core surface uihub needs (satisfied by *md.Core).
-// Both methods take the owning connection's ID (see Hub.indicators) so
-// ownership can be tracked per connection rather than with a global refcount.
 type Indicators interface {
 	EnsureIndicator(connID uint64, id string, spec md.IndicatorSpec)
 	ReleaseIndicator(connID uint64, id string)
 }
 
-// Feed is the market-data control surface uihub needs for on-demand symbol
-// subscription (satisfied by *opend.OpenDFeed). It is injected after
-// construction via Hub.SetFeed because the OpenD feed is created only after
-// the hub is already listening; replay/tests leave it nil.
 type Feed interface {
 	Validate(ctx context.Context, symbol string) error
 	Ensure(d feed.Demand)
@@ -59,7 +49,7 @@ type GlobalLimits struct {
 type VenueMeta struct {
 	ID     string
 	Broker string
-	Note   string // e.g. "execution v1.x" for the moomoo stub
+	Note   string
 	Gate   GateLimits
 }
 
@@ -72,19 +62,10 @@ type Config struct {
 	FillsCap, EventsCap, TradesCap int
 	OutBuf                         int
 	DistDir                        string
-	Mode                           string // "live" | "replay" | "demo"
-	ReplayDay                      string
-	ReplaySpeed                    float64
+	Demo                           bool
 }
 
-// New builds the mirror, hub, and server from the cores. Caller runs h.Run(ctx)
-// and serves srv.Handler(); uses h.PublishMD/PublishExec/Publish for fan-in.
-// requestRestart is invoked when a client sends "RestartEngine" — it should
-// cancel the caller's root context and let the caller relaunch the process
-// once boot's ordered shutdown drain finishes (see cmd/etape/main.go). Set on
-// the commands struct post-construction (not threaded through newCommands)
-// so commands_test.go's many call sites stay unaffected.
-func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va venueAdmin, vt venueTester, requestRestart func(), startReplay func(day string, speed float64) error, goLive func() error, startDemo func() error) (*Hub, *Server) {
+func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va venueAdmin, vt venueTester, requestRestart func(), startDemo func() error) (*Hub, *Server) {
 	vms := make([]venueMeta, 0, len(cfg.Venues))
 	for _, v := range cfg.Venues {
 		vms = append(vms, venueMeta{
@@ -102,24 +83,18 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 		MaxSymbolPositionShares: cfg.Global.MaxSymbolPositionShares,
 	}
 	m := newMirror(vms, global, cfg.TapeCap, cfg.NewsCap, cfg.FillsCap, cfg.EventsCap, cfg.TradesCap)
-	m.session = wsmsg.SessionSnapshot{Mode: cfg.Mode, Day: cfg.ReplayDay, Speed: cfg.ReplaySpeed}
-	// Live boots start "connecting"; the boot goroutine advances the phase
-	// (sealing → connecting → ready). Replay/demo have no maintenance window,
-	// so seed "ready" — a mid-boot subscriber must never see the seal banner.
-	if cfg.Mode == "live" {
-		m.boot = wsmsg.BootStatus{Phase: "connecting"}
-	} else {
-		m.boot = wsmsg.BootStatus{Phase: "ready"}
+	m.session = wsmsg.SessionSnapshot{Mode: "live"}
+	if cfg.Demo {
+		m.session = wsmsg.SessionSnapshot{Mode: "demo"}
 	}
+	m.boot = wsmsg.BootStatus{Phase: "connecting"}
 	h := NewHub(clk, HubConfig{MDInterval: cfg.MD, AccountInterval: cfg.Account, PositionInterval: cfg.Position, Buf: cfg.Buf}, m)
 	h.SetIndicators(ind)
 	cmd := newCommands(ex, st, h, h, va, h.feed, vt)
 	h.cmd = cmd
 	cmd.restart = requestRestart
-	cmd.startReplay = startReplay
-	cmd.goLive = goLive
 	cmd.startDemo = startDemo
-	qry := newQueries(st, st, clk)
+	qry := newQueries(st, clk)
 	srv := NewServer(h, cmd, qry, ServerConfig{DistDir: cfg.DistDir, OutBuf: cfg.OutBuf})
 	return h, srv
 }

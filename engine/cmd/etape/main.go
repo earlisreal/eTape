@@ -1,8 +1,6 @@
 // Command etape is the eTape engine: the full boot sequence wiring the market-
 // data plane (OpenD -> feed -> md.Core), the execution subsystem (exec.Core +
-// broker venues), and the uihub WebSocket server the UI connects to. With
-// --replay it reconstructs a recorded day against SimBroker over the identical
-// hub/contract (the mode the UI Playwright E2E boots on).
+// broker venues), and the uihub WebSocket server the UI connects to.
 package main
 
 import (
@@ -38,7 +36,6 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/news"
 	"github.com/earlisreal/eTape/engine/internal/openbrowser"
 	"github.com/earlisreal/eTape/engine/internal/quota"
-	"github.com/earlisreal/eTape/engine/internal/replay"
 	"github.com/earlisreal/eTape/engine/internal/scan"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/singleinstance"
@@ -82,16 +79,12 @@ func openLogFile(path string) (*os.File, error) {
 func boot(ctx context.Context, onListening func(addr string)) (code int, restart bool, nextArgs []string) {
 	home, _ := os.UserHomeDir()
 	cfgPath := flag.String("config", filepath.Join(home, ".eTape", "config.toml"), "path to config.toml")
-	replayDay := flag.String("replay", "", "replay a recorded day (YYYY-MM-DD) instead of live OpenD")
-	speed := flag.Float64("speed", 0, "replay speed (>0: real-time x speed; <=0: as fast as possible)")
 	dist := flag.String("dist", "", "serve built UI from this dir (overrides [uihub].dist_dir)")
-	replayHold := flag.Bool("replay-hold", false, "in replay, keep serving after the journal is exhausted (E2E)")
 	demo := flag.Bool("demo", false, "run the built-in synthetic demo market (no OpenD/broker needed)")
 	demoSeed := flag.Int64("demo-seed", 0, "PRNG seed for -demo; 0 = random per launch")
 	noOpen := flag.Bool("no-open", false, "do not auto-open the default browser to the UI")
 	logPath := flag.String("log", "", "also write logs to this file")
 	logLevel := flag.String("log-level", os.Getenv("SLOG_LEVEL"), "log level: debug, info, warn, error (default SLOG_LEVEL env)")
-	vacuum := flag.Bool("vacuum", false, "run one-shot journal maintenance (prune+seal+vacuum) then exit; refuses if an engine is running")
 	flag.Parse()
 
 	// ETAPE_NO_OPEN suppresses auto-open, same as -no-open, so agent/CI boots
@@ -162,11 +155,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	slog.SetDefault(log)
 	log.Info("etape starting", "version", buildinfo.Version)
 
-	if *demo && *replayDay != "" {
-		log.Error("parse flags", "err", errors.New("-demo and -replay are mutually exclusive"))
-		return 1, false, nil
-	}
-
 	var cfg config.Config
 	if *demo {
 		cfg = config.Default()
@@ -191,7 +179,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		// and its own temp config, and an explicit -replay forces every venue
 		// to sim regardless, so neither needs (or should trigger) a write to
 		// the real ~/.eTape/config.toml.
-		if *replayDay == "" {
+		if true {
 			if seeded, serr := config.SeedDefaultIfMissing(*cfgPath); serr != nil {
 				log.Warn("seed first-run config (continuing with empty venues)", "path", *cfgPath, "err", serr)
 			} else if seeded {
@@ -240,10 +228,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// crash, so there is no stale-lock cleanup to do.
 	releaseLock, err := singleinstance.Acquire(dbPath + ".lock")
 	if errors.Is(err, singleinstance.ErrAlreadyRunning) {
-		if *vacuum {
-			log.Error("etape -vacuum: engine is running; stop it before running maintenance")
-			return 1, false, nil // must NOT open the browser to the running instance
-		}
 		log.Info("eTape is already running; opening it instead", "addr", cfg.UIHub.Addr())
 		if !*noOpen {
 			// Best-effort: reaches the already-running instance's UI. If it
@@ -260,11 +244,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	defer func() { _ = releaseLock() }()
 	log.Info("single-instance lock acquired", "lock", dbPath+".lock")
 
-	if *vacuum {
-		code := runVacuumMode(dbPath, cfg, log)
-		return code, false, nil // deferred releaseLock() runs on return
-	}
-
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
 
@@ -279,8 +258,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	var restartRequested atomic.Bool
 	requestRestart := func() { restartRequested.Store(true); stop() }
 
-	// nextArgs carries a relaunch's flag list from the restartInPlace/
-	// startReplay/goLive/startDemo closures (built below, passed into
+	// nextArgs carries a relaunch's flag list from the restartInPlace/startDemo closures (built below, passed into
 	// uihub.New) to boot's final return. atomic.Pointer because it's written
 	// from the command-dispatch goroutine (via time.AfterFunc, same as
 	// requestRestart) and read here after <-ctx.Done() on the boot goroutine.
@@ -289,7 +267,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// relaunch_windows.go for how a non-nil argv is applied.
 	var nextArgsPtr atomic.Pointer[[]string]
 
-	live := *replayDay == "" && !*demo
+	live := !*demo
 	uihubClk := clock.System{}
 	var execClk clock.Clock = clock.System{}
 
@@ -315,52 +293,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// (see childArgs, Task 1) -- built once here so both closures share it.
 	base := baseFlags{ConfigPath: *cfgPath, DistDir: *dist, LogPath: *logPath}
 
-	// startReplay/goLive/startDemo are wired into uihub.New below and invoked
-	// from the command-dispatch goroutine on "StartReplay"/"GoLive"/
-	// "StartDemo". Each validates synchronously and returns an error for a
-	// blocked ack before scheduling any delayed side effect, matching
-	// requestRestart's ack-then-relaunch pattern above (relaunchAckFlushDelay
-	// lets the ack flush first).
-	startReplay := func(day string, speed float64) error {
-		if *demo {
-			return fmt.Errorf("replay switching is unavailable in demo mode")
-		}
-		days, err := st.JournalDays()
-		if err != nil {
-			return fmt.Errorf("list recorded days: %w", err)
-		}
-		found := false
-		for _, d := range days {
-			if d == day {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return fmt.Errorf("no recorded day %q", day)
-		}
-		argv := childArgs(base, replayMode{Live: false, Day: day, Speed: speed})
-		time.AfterFunc(relaunchAckFlushDelay, func() {
-			nextArgsPtr.Store(&argv)
-			requestRestart()
-		})
-		return nil
-	}
-	// goLive has no demo guard (unlike startReplay above): "Return to live"
-	// must work from a demo session, so switching back to live mode is
-	// always allowed regardless of *demo.
-	goLive := func() error {
-		argv := childArgs(base, replayMode{Live: true})
-		time.AfterFunc(relaunchAckFlushDelay, func() {
-			nextArgsPtr.Store(&argv)
-			requestRestart()
-		})
-		return nil
-	}
-	// startDemo relaunches into -demo (see childArgs/replayMode.Demo). No
-	// synchronous validation is needed: unlike startReplay's day-lookup, a
-	// UI-triggered demo entry takes no knobs and is always available,
-	// regardless of current mode (live, replay, or already-demo).
+	// startDemo relaunches into -demo.
 	startDemo := func() error {
 		argv := childArgs(base, replayMode{Demo: true})
 		time.AfterFunc(relaunchAckFlushDelay, func() {
@@ -387,18 +320,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs})
 	go func() { _ = core.Run(ctx) }()
 
-	// --- replay clock (execClk) if replaying ---
-	var replayRows []store.JournalRow
-	if *replayDay != "" {
-		replayRows, err = st.ReadJournalDay(*replayDay)
-		if err != nil || len(replayRows) == 0 {
-			log.Error("replay day unavailable", "day", *replayDay, "err", err, "rows", len(replayRows))
-			_ = st.Close()
-			return 1, false, nil
-		}
-		execClk = replay.NewClock(time.UnixMilli(replayRows[0].TsExch))
-	}
-
 	// --- exec subsystem (Recover -> Run) ---
 	var credsFile creds.File
 	if live {
@@ -407,7 +328,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			credsFile = creds.File{}
 		}
 	}
-	vbs, err := buildBrokers(cfg, credsFile, execClk, !live)
+	vbs, err := buildBrokers(cfg, credsFile, execClk)
 	if err != nil {
 		log.Error("build brokers", "err", err)
 		_ = st.Close()
@@ -448,17 +369,8 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		Position: time.Duration(cfg.UIHub.PositionMs) * time.Millisecond,
 		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500, TradesCap: 1000,
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
-		Mode: func() string {
-			if *demo {
-				return "demo"
-			}
-			if live {
-				return "live"
-			}
-			return "replay"
-		}(),
-		ReplayDay: *replayDay, ReplaySpeed: *speed,
-	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startReplay, goLive, startDemo)
+		Demo: *demo,
+	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startDemo)
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
 	httpSrv := &http.Server{
@@ -537,237 +449,154 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	var orch *backfill.Orchestrator
 	var scanWG sync.WaitGroup
 	var dropWG sync.WaitGroup
-	var sealSchedWG sync.WaitGroup
-	if live || *demo {
-		var sysEventSeq int64              // dedup key disambiguator for the retention sys_events published below
-		stats0, statsErr := st.SizeStats() // PRE-maintenance snapshot for the anomaly backstop
-		if pending, err := st.PendingSealDays(); err == nil && len(pending) > 0 {
-			hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "sealing", DaysTotal: len(pending)})
-		}
-		if n, err := st.PruneJournal(cfg.Store.RetentionDays); err == nil && n > 0 {
-			log.Info("pruned journal", "rows", n)
-		}
-		st.Flush() // drain the queued prune sys_event so it doesn't race the seal's write transaction
-		if sum, err := st.SealJournalDays(); err != nil {
-			log.Error("seal journal", "err", err)
-			detail := fmt.Sprintf("journal seal error: %v", err)
-			st.AppendSysEvent("retention", detail)
-			sysEventSeq++
-			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
-				Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
-				Kind: "retention", Detail: detail, Level: "danger",
-			})
-		} else if sum.Days > 0 || sum.Failed > 0 {
-			log.Info("sealed journal", "days", sum.Days, "chunks", sum.Chunks, "rows", sum.Rows,
-				"failed", sum.Failed, "mbBefore", sum.BytesBefore>>20, "mbAfter", sum.BytesAfter>>20)
-			st.AppendSysEvent("retention", fmt.Sprintf(
-				"sealed %d day(s): %d rows → %d chunks (%d MB → %d MB); %d day(s) left raw",
-				sum.Days, sum.Rows, sum.Chunks, sum.BytesBefore>>20, sum.BytesAfter>>20, sum.Failed))
-		}
-		st.Flush() // drain queued sys_events so no writer tx races a possible backstop VACUUM
-		if statsErr == nil && stats0.NeedsBackstopVacuum() {
-			log.Warn("backstop vacuum: cross-day free-page accumulation",
-				"freeMB", stats0.FreeBytes()>>20, "fileMB", stats0.FileBytes()>>20)
-			detail := fmt.Sprintf("backstop vacuum: %d MB free across days, compacting", stats0.FreeBytes()>>20)
-			st.AppendSysEvent("retention", detail)
-			sysEventSeq++
-			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
-				Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
-				Kind: "retention", Detail: detail, Level: "warn",
-			})
-			st.Flush() // drain the freshly-queued backstop-trigger sys_event before VACUUM takes its exclusive lock
-			if err := st.Vacuum(); err != nil {
-				log.Error("backstop vacuum", "err", err)
-				failDetail := fmt.Sprintf("backstop vacuum failed: %v", err)
-				st.AppendSysEvent("retention", failDetail)
-				sysEventSeq++
-				hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
-					Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
-					Kind: "retention", Detail: failDetail, Level: "danger",
-				})
-			} else {
-				log.Info("backstop vacuum done")
-			}
-		}
-		if stats1, err := st.SizeStats(); err == nil { // POST-maintenance telemetry
-			chunkBytes, rawRows, _ := st.JournalFootprint()
-			advise := stats1.AdviseVacuum()
-			report := store.FormatStorageReport(stats1, chunkBytes, rawRows, advise)
-			st.AppendSysEvent("storage", report)
-			level := ""
-			if advise {
-				level = "warn" // surfaces as a toast via connectEventToasts
-			}
-			sysEventSeq++
-			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
-				Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
-				Kind: "storage", Detail: report, Level: level,
-			})
-		}
-		if live && liveMoomooDayLossGap(cfg) {
-			detail := "MaxDayLoss does not cover moomoo (DayPnL unavailable); moomoo-originated losses are not gated by the day-loss circuit breaker"
-			log.Warn(detail)
-			st.AppendSysEvent("gate", detail)
-			sysEventSeq++
-			hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
-				Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
-				Kind: "gate", Detail: detail, Level: "warn",
-			})
-		}
-		st.AppendSysEvent("boot", "engine up")
-		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "connecting"})
-		dropWG.Add(1)
-		go watchDroppedUpdates(ctx, &dropWG, core, st)
+	var sysEventSeq int64
+	if live && liveMoomooDayLossGap(cfg) {
+		detail := "MaxDayLoss does not cover moomoo (DayPnL unavailable); moomoo-originated losses are not gated by the day-loss circuit breaker"
+		log.Warn(detail)
+		st.AppendSysEvent("gate", detail)
+		sysEventSeq++
+		hub.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{
+			Seq: sysEventSeq, Ts: time.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+			Kind: "gate", Detail: detail, Level: "warn",
+		})
+	}
+	st.AppendSysEvent("boot", "engine up")
+	hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "connecting"})
+	dropWG.Add(1)
+	go watchDroppedUpdates(ctx, &dropWG, core, st)
 
-		// feedForHub/pollReq/mmProbe/demand/tail are the mode-agnostic seams
-		// startPollers and the backfill orchestrator are built from below:
-		// the demo branch fills them from a *synth.Feed/*synth.Requester
-		// (no network, no quota), the live branch from the real OpenD
-		// client/feed exactly as before.
-		var feedForHub uihub.Feed
-		var pollReq pollerRequester
-		var mmProbe rttProber
-		var demand demandFeeder
-		var tail backfill.TailFetcher
-		var dailyChain, intradayChain []backfill.Source
+	// feedForHub/pollReq/mmProbe/demand/tail are the mode-agnostic seams
+	// startPollers and the backfill orchestrator are built from below:
+	// the demo branch fills them from a *synth.Feed/*synth.Requester
+	// (no network, no quota), the live branch from the real OpenD
+	// client/feed exactly as before.
+	var feedForHub uihub.Feed
+	var pollReq pollerRequester
+	var mmProbe rttProber
+	var demand demandFeeder
+	var tail backfill.TailFetcher
+	var dailyChain, intradayChain []backfill.Source
 
-		wl, err := watchlist.NewList(st)
-		if err != nil {
-			log.Error("watchlist: load failed, starting empty", "err", err)
-			wl = watchlist.NewEmpty(st)
-		}
-
-		if *demo {
-			// demoSeedValue draws a fresh random seed via crypto/rand each call
-			// when *demoSeed==0 (the documented "random per launch" default) --
-			// calling it twice would build the generator with one seed and log a
-			// different one, silently breaking the spec's reproducibility
-			// contract ("the same -demo-seed reproduces the identical universe
-			// and day") on the most common (default random) path. Call once.
-			seed := demoSeedValue(*demoSeed)
-			gen := synth.New(seed, clock.System{})
-			gen.Seed(st, clock.System{}.Now().UnixMilli()) // flushes internally
-			wl.Seed(gen.Symbols())                         // synth universe; trusted, no probe; into throwaway demo.db
-			sf := synth.NewFeed(gen, st, clock.System{})
-			req := synth.NewRequester(gen)
-			go func() { _ = sf.Run(ctx) }()
-			pipeWG.Add(1)
-			go pipe(ctx, &pipeWG, sf.Events(), core, st) // journaling ON into demo.db
-			// Joined via forwardWG, same as forwardMD below: it also calls
-			// st.ArchiveDaily/core.SeedDaily, so it must stop before st.Close()
-			// for the same reason forwardMD does (see the shutdown-order
-			// comment above forwardWG.Wait()).
-			forwardWG.Add(1)
-			go func() { defer forwardWG.Done(); forwardDailyBars(ctx, gen, core, st, dailyBarPollInterval) }()
-			feedForHub, pollReq, mmProbe = sf, req, req
-			log.Info("engine up (demo synth feed)", "seed", seed, "symbols", gen.Symbols())
-			hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
-		} else {
-			client := opend.New(opend.Options{Addr: cfg.OpenD.Addr(), Clock: clock.System{}})
-			fd := opend.NewOpenDFeed(client, opend.FeedOptions{
-				Budget: cfg.Feed.QuotaSlots, Hysteresis: time.Duration(cfg.Feed.UnsubHysteresisSecs) * time.Second,
-				DisableExtendedTime: !cfg.Feed.ExtendedTime,
-			})
-			go func() { _ = client.Run(ctx) }()
-			go func() { _ = fd.Run(ctx) }()
-			pipeWG.Add(1)
-			go pipe(ctx, &pipeWG, fd.Events(), core, st)
-			sealSchedWG.Add(1)
-			go runSealScheduler(ctx, &sealSchedWG, st, clock.System{}, log)
-			hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
-			feedForHub, pollReq, mmProbe, demand = fd, client, moomooProbe{c: client}, fd
-
-			if cfg.Backfill.Enabled {
-				var alpacaSrc *histalpaca.Client
-				if cfg.Backfill.Alpaca.Enabled {
-					if p, label, err := resolveBackfillAlpacaCreds(cfg, credsFile); err == nil {
-						alpacaSrc = histalpaca.New("", p.KeyID, p.SecretKey, cfg.Backfill.Alpaca.Feed, clock.System{})
-						log.Info("backfill: alpaca provider resolved", "from", label, "feed", cfg.Backfill.Alpaca.Feed)
-					} else if errors.Is(err, errAlpacaLiveCreds) {
-						log.Warn("backfill: refusing alpaca-live creds for read-only historical provider", "key", cfg.Backfill.Alpaca.CredsKey)
-					} else {
-						log.Warn("backfill: alpaca provider disabled (no creds)", "key", cfg.Backfill.Alpaca.CredsKey, "err", err)
-					}
-				}
-				moomoo := backfill.MoomooFetcher(fd)
-				if alpacaSrc != nil {
-					intradayChain = append(intradayChain, backfill.Source{Name: "alpaca", HistFetcher: alpacaSrc})
-				}
-				if cfg.Backfill.Yahoo.Enabled {
-					dailyChain = append(dailyChain, backfill.Source{Name: "yahoo", HistFetcher: histyahoo.New("", clock.System{})})
-				}
-				// moomoo request_history_kline is the quota-guarded last resort in both chains.
-				dailyChain = append(dailyChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
-				intradayChain = append(intradayChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
-				tail = fd // TailFetcher: OpenDFeed.Tail1m (quota-free Qot_GetKL)
-			}
-		}
-		hub.SetFeed(feedForHub) // enables on-demand EnsureSymbol/ReleaseSymbol + FocusGroup probe
-
-		var hubBackfill func(sym string, done func(ok bool))
-		if cfg.Backfill.Enabled || *demo {
-			// demo: dailyChain/intradayChain/tail are all nil here, so this is
-			// a chain-less orchestrator -- walkChain over a nil chain returns
-			// cleanly (nil,"",nil) and o.tail nil-checks before use -- it
-			// still serves warmStart's archive-first LoadOlder/LoadOlderDaily
-			// against the history Seed already wrote, with no special-casing.
-			orch = backfill.New(
-				dailyChain,
-				intradayChain,
-				tail,
-				core,
-				st,
-				clock.System{},
-				backfill.Config{
-					IntradayDays: cfg.Backfill.IntradayDays,
-					DailyYears:   cfg.Backfill.DailyYears,
-					Concurrency:  cfg.Backfill.Concurrency,
-					SeedChunk:    cfg.Backfill.SeedChunk,
-				},
-			)
-			// hubBackfill spawns orch.Backfill and reports the daily-fetch
-			// outcome back via done, so the hub knows whether to mark the
-			// symbol backfilled or leave it retryable (see
-			// Hub.handleBackfillDone / Hub.rearmBackfill). The scan poller
-			// (backfillOne below) doesn't need the retry signal -- it has its
-			// own independent, pool-day-scoped dedup -- so it reuses this
-			// same closure with a nil done rather than spawning its own copy
-			// of the Add/goroutine/Done boilerplate.
-			hubBackfill = func(sym string, done func(ok bool)) {
-				backfillWG.Add(1)
-				go func() {
-					defer backfillWG.Done()
-					err := orch.Backfill(ctx, sym)
-					if done != nil {
-						done(err == nil)
-					}
-				}()
-			}
-		}
-		var backfillOne func(string)
-		if hubBackfill != nil {
-			backfillOne = func(sym string) { hubBackfill(sym, nil) }
-		}
-		hub.SetBackfill(hubBackfill) // chart-open demands also deep-backfill (nil-safe if disabled)
-		startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, firstAlpacaProber(vbs), backfillOne, !*demo, &scanWG)
-	} else {
-		sim := execClk.(*replay.Clock)
-		fd := replay.NewFeed(replay.FeedOptions{Rows: replayRows, Sim: sim, Pace: clock.System{}, Speed: *speed})
-		go func() { _ = fd.Run(ctx) }()
-		pipeWG.Add(1)
-		go pipe(ctx, &pipeWG, fd.Events(), core, nil) // no journal re-recording in replay
-		if *replayHold {
-			log.Info("replay-hold: serving last state until interrupted")
-		} else {
-			go func() { pipeWG.Wait(); stop() }() // self-terminate when the journal is exhausted
-		}
-		log.Info("engine up (replay)", "day", *replayDay, "rows", len(replayRows), "speed", *speed)
-		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
+	wl, err := watchlist.NewList(st)
+	if err != nil {
+		log.Error("watchlist: load failed, starting empty", "err", err)
+		wl = watchlist.NewEmpty(st)
 	}
 
+	if *demo {
+		// demoSeedValue draws a fresh random seed via crypto/rand each call
+		// when *demoSeed==0 (the documented "random per launch" default) --
+		// calling it twice would build the generator with one seed and log a
+		// different one, silently breaking the spec's reproducibility
+		// contract ("the same -demo-seed reproduces the identical universe
+		// and day") on the most common (default random) path. Call once.
+		seed := demoSeedValue(*demoSeed)
+		gen := synth.New(seed, clock.System{})
+		gen.Seed(st, clock.System{}.Now().UnixMilli()) // flushes internally
+		wl.Seed(gen.Symbols())                         // synth universe; trusted, no probe; into throwaway demo.db
+		sf := synth.NewFeed(gen, st, clock.System{})
+		req := synth.NewRequester(gen)
+		go func() { _ = sf.Run(ctx) }()
+		pipeWG.Add(1)
+		go pipe(ctx, &pipeWG, sf.Events(), core)
+		// Joined via forwardWG, same as forwardMD below: it also calls
+		// st.ArchiveDaily/core.SeedDaily, so it must stop before st.Close()
+		// for the same reason forwardMD does (see the shutdown-order
+		// comment above forwardWG.Wait()).
+		forwardWG.Add(1)
+		go func() { defer forwardWG.Done(); forwardDailyBars(ctx, gen, core, st, dailyBarPollInterval) }()
+		feedForHub, pollReq, mmProbe = sf, req, req
+		log.Info("engine up (demo synth feed)", "seed", seed, "symbols", gen.Symbols())
+		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
+	} else {
+		client := opend.New(opend.Options{Addr: cfg.OpenD.Addr(), Clock: clock.System{}})
+		fd := opend.NewOpenDFeed(client, opend.FeedOptions{
+			Budget: cfg.Feed.QuotaSlots, Hysteresis: time.Duration(cfg.Feed.UnsubHysteresisSecs) * time.Second,
+			DisableExtendedTime: !cfg.Feed.ExtendedTime,
+		})
+		go func() { _ = client.Run(ctx) }()
+		go func() { _ = fd.Run(ctx) }()
+		pipeWG.Add(1)
+		go pipe(ctx, &pipeWG, fd.Events(), core)
+		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
+		feedForHub, pollReq, mmProbe, demand = fd, client, moomooProbe{c: client}, fd
+
+		if cfg.Backfill.Enabled {
+			var alpacaSrc *histalpaca.Client
+			if cfg.Backfill.Alpaca.Enabled {
+				if p, label, err := resolveBackfillAlpacaCreds(cfg, credsFile); err == nil {
+					alpacaSrc = histalpaca.New("", p.KeyID, p.SecretKey, cfg.Backfill.Alpaca.Feed, clock.System{})
+					log.Info("backfill: alpaca provider resolved", "from", label, "feed", cfg.Backfill.Alpaca.Feed)
+				} else if errors.Is(err, errAlpacaLiveCreds) {
+					log.Warn("backfill: refusing alpaca-live creds for read-only historical provider", "key", cfg.Backfill.Alpaca.CredsKey)
+				} else {
+					log.Warn("backfill: alpaca provider disabled (no creds)", "key", cfg.Backfill.Alpaca.CredsKey, "err", err)
+				}
+			}
+			moomoo := backfill.MoomooFetcher(fd)
+			if alpacaSrc != nil {
+				intradayChain = append(intradayChain, backfill.Source{Name: "alpaca", HistFetcher: alpacaSrc})
+			}
+			if cfg.Backfill.Yahoo.Enabled {
+				dailyChain = append(dailyChain, backfill.Source{Name: "yahoo", HistFetcher: histyahoo.New("", clock.System{})})
+			}
+			// moomoo request_history_kline is the quota-guarded last resort in both chains.
+			dailyChain = append(dailyChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
+			intradayChain = append(intradayChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
+			tail = fd // TailFetcher: OpenDFeed.Tail1m (quota-free Qot_GetKL)
+		}
+	}
+	hub.SetFeed(feedForHub) // enables on-demand EnsureSymbol/ReleaseSymbol + FocusGroup probe
+
+	var hubBackfill func(sym string, done func(ok bool))
+	if cfg.Backfill.Enabled || *demo {
+		// demo: dailyChain/intradayChain/tail are all nil here, so this is
+		// a chain-less orchestrator -- walkChain over a nil chain returns
+		// cleanly (nil,"",nil) and o.tail nil-checks before use -- it
+		// still serves warmStart's archive-first LoadOlder/LoadOlderDaily
+		// against the history Seed already wrote, with no special-casing.
+		orch = backfill.New(
+			dailyChain,
+			intradayChain,
+			tail,
+			core,
+			st,
+			clock.System{},
+			backfill.Config{
+				IntradayDays: cfg.Backfill.IntradayDays,
+				DailyYears:   cfg.Backfill.DailyYears,
+				Concurrency:  cfg.Backfill.Concurrency,
+				SeedChunk:    cfg.Backfill.SeedChunk,
+			},
+		)
+		// hubBackfill spawns orch.Backfill and reports the daily-fetch
+		// outcome back via done, so the hub knows whether to mark the
+		// symbol backfilled or leave it retryable (see
+		// Hub.handleBackfillDone / Hub.rearmBackfill). The scan poller
+		// (backfillOne below) doesn't need the retry signal -- it has its
+		// own independent, pool-day-scoped dedup -- so it reuses this
+		// same closure with a nil done rather than spawning its own copy
+		// of the Add/goroutine/Done boilerplate.
+		hubBackfill = func(sym string, done func(ok bool)) {
+			backfillWG.Add(1)
+			go func() {
+				defer backfillWG.Done()
+				err := orch.Backfill(ctx, sym)
+				if done != nil {
+					done(err == nil)
+				}
+			}()
+		}
+	}
+	var backfillOne func(string)
+	if hubBackfill != nil {
+		backfillOne = func(sym string) { hubBackfill(sym, nil) }
+	}
+	hub.SetBackfill(hubBackfill) // chart-open demands also deep-backfill (nil-safe if disabled)
+	startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, firstAlpacaProber(vbs), backfillOne, !*demo, &scanWG)
+
 	if orch == nil && st != nil {
-		// No live backfill chains were built (replay, or cfg.Backfill.Enabled ==
-		// false) — a chain-less orchestrator still serves archive-first
+		// No live backfill chains were built — a chain-less orchestrator still serves archive-first
 		// LoadOlder/LoadOlderDaily and acks exhausted past the archive, per the
 		// spec's "no special casing beyond a nil-chain check." walkChain over a
 		// nil chain returns (nil,"",nil), so LoadOlder degrades cleanly.
@@ -857,20 +686,19 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	shutCtx, cancelShut := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = httpSrv.Shutdown(shutCtx)
 	cancelShut()
-	srv.Wait()         // every conn.run() returned: no more SetConfig via dispatch
-	<-hubDone          // hub.Run returned: no more handleEnsureDemand/handleLoadOlder, hence no more backfillWG.Add from chart-open demands or LoadOlderBars
-	scanWG.Wait()      // scan poller stopped: no more backfillWG.Add from pool admissions
-	backfillWG.Wait()  // boot backfill workers stopped: no more Seed* into the core
-	pipeWG.Wait()      // feed->core pipe stopped: no more RecordEvent
-	forwardWG.Wait()   // forwardMD + demo's forwardDailyBars drained: no more ArchiveBar1m/ArchiveDaily
-	dropWG.Wait()      // dropped-updates watcher stopped: no more AppendSysEvent from it
-	sealSchedWG.Wait() // day-roll seal scheduler stopped: no more RequestSeal from it
-	<-execDone         // exec.Core.Run returned: no more AppendExecEvent
+	srv.Wait()        // every conn.run() returned: no more SetConfig via dispatch
+	<-hubDone         // hub.Run returned: no more handleEnsureDemand/handleLoadOlder, hence no more backfillWG.Add from chart-open demands or LoadOlderBars
+	scanWG.Wait()     // scan poller stopped: no more backfillWG.Add from pool admissions
+	backfillWG.Wait() // boot backfill workers stopped: no more Seed* into the core
+	pipeWG.Wait()     // feed->core pipe stopped: no more RecordEvent
+	forwardWG.Wait()  // forwardMD + demo's forwardDailyBars drained: no more ArchiveBar1m/ArchiveDaily
+	dropWG.Wait()     // dropped-updates watcher stopped: no more AppendSysEvent from it
+	<-execDone        // exec.Core.Run returned: no more AppendExecEvent
 	brokerWG.Wait()
 	if err := st.Close(); err != nil {
 		log.Error("close store", "err", err)
 	}
-	log.Info("shutdown complete", "droppedUpdates", core.DroppedUpdates(), "droppedJournal", st.DroppedJournalRows())
+	log.Info("shutdown complete", "droppedUpdates", core.DroppedUpdates())
 	var na []string
 	if p := nextArgsPtr.Load(); p != nil {
 		na = *p
@@ -1100,10 +928,9 @@ func hasTZVenue(cfg config.Config) bool {
 	return false
 }
 
-// pipe forwards feed events into the core, journaling each first when journal != nil.
-func pipe(ctx context.Context, wg *sync.WaitGroup, in <-chan feed.Event, core *md.Core, journal *store.Store) {
+// pipe forwards feed events into the core.
+func pipe(ctx context.Context, wg *sync.WaitGroup, in <-chan feed.Event, core *md.Core) {
 	defer wg.Done()
-	sys := clock.System{}
 	for {
 		select {
 		case <-ctx.Done():
@@ -1111,9 +938,6 @@ func pipe(ctx context.Context, wg *sync.WaitGroup, in <-chan feed.Event, core *m
 		case ev, ok := <-in:
 			if !ok {
 				return
-			}
-			if journal != nil {
-				journal.RecordEvent(ev, sys.Now().UnixMilli())
 			}
 			core.Feed(ev)
 		}

@@ -8,7 +8,7 @@ import { ThemeProvider } from "./ThemeProvider";
 const base = {
   workspaceName: "main", health: new HealthStore(), armed: false,
   onArmToggle: vi.fn(), onAddPanel: vi.fn(), onNewWindow: vi.fn(),
-  onOpenSettings: vi.fn(), onOpenConnection: vi.fn(), onOpenReplay: vi.fn(),
+  onOpenSettings: vi.fn(), onOpenConnection: vi.fn(), onOpenPractice: vi.fn(),
 };
 
 describe("TopBar", () => {

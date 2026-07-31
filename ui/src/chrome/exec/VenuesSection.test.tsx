@@ -53,7 +53,7 @@ function makeCommands(setupSequence: VenueSetup[], acks: Partial<Record<string, 
   return { sendCommand, sent };
 }
 
-function sessionWith(mode: "pending" | "live" | "replay" | "demo"): SessionStore {
+function sessionWith(mode: "pending" | "live" | "demo"): SessionStore {
   const s = new SessionStore();
   if (mode !== "pending") s.apply({ kind: "snapshot", topic: "sys.session", payload: { mode } } as never);
   return s;

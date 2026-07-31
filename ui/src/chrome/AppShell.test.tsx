@@ -103,8 +103,8 @@ function publishWatchlist(stores: ReturnType<typeof mount>["stores"], symbols: s
   act(() => stores.watchlist.apply({ kind: "snapshot", topic: "watchlist.rows", payload: { symbols, rows: [], refreshedAt: null } }));
 }
 
-function publishSessionMode(stores: ReturnType<typeof mount>["stores"], mode: "pending" | "live" | "replay" | "demo") {
-  act(() => stores.session.apply({ kind: "snapshot", topic: "sys.session", payload: { mode, day: "2026-01-02", speed: 0 } }));
+function publishSessionMode(stores: ReturnType<typeof mount>["stores"], mode: "pending" | "live" | "demo") {
+  act(() => stores.session.apply({ kind: "snapshot", topic: "sys.session", payload: { mode } }));
 }
 
 describe("AppShell onConfigChange", () => {
@@ -273,7 +273,7 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
     await waitFor(() => expect(screen.getByText("Add a broker to trade live")).toBeTruthy());
   });
 
-  it.each(["replay", "demo"] as const)(
+  it.each(["demo"] as const)(
     "does not show during a confirmed %s session, even with no real venue",
     async (mode) => {
       // Nudging toward configuring a broker "to trade live" makes no sense
@@ -284,7 +284,7 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
       // (Task 3: widened SessionState.mode + AppShell's showVenueSetup gate).
       const { stores } = mount(seed);
       await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
-      act(() => stores.session.apply({ kind: "snapshot", topic: "sys.session", payload: { mode, day: "2026-01-02", speed: 0 } }));
+      act(() => stores.session.apply({ kind: "snapshot", topic: "sys.session", payload: { mode } }));
       publishStatus(stores, []);
       await waitFor(() => expect(stores.exec.status()?.venues.length).toBe(0));
       expect(screen.queryByText("Add a broker to trade live")).toBeNull();
@@ -398,12 +398,12 @@ describe("AppShell try-demo CTA (Task 6: U4 first-run affordances)", () => {
     expect(screen.getByRole("button", { name: "Try demo" })).toBeTruthy();
   });
 
-  it.each(["replay", "demo"] as const)(
+  it.each(["demo"] as const)(
     "hides the CTA during a confirmed %s session (already practicing — offering it again would be confusing)",
     async (mode) => {
       const { stores } = mount(seed);
       await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
-      act(() => stores.session.apply({ kind: "snapshot", topic: "sys.session", payload: { mode, day: "2026-01-02", speed: 0 } }));
+      act(() => stores.session.apply({ kind: "snapshot", topic: "sys.session", payload: { mode } }));
       expect(screen.queryByRole("button", { name: "Try demo" })).toBeNull();
     },
   );
@@ -543,7 +543,7 @@ describe("AppShell Alpaca-1m-history hint banner", () => {
     expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();
   });
 
-  it.each(["replay", "demo"] as const)(
+  it.each(["demo"] as const)(
     "does not show during a confirmed %s session, even with no Alpaca venue",
     async (mode) => {
       // Venue edits need an engine restart, which would kill a replay/demo
@@ -552,7 +552,7 @@ describe("AppShell Alpaca-1m-history hint banner", () => {
       // this assertion to showAlpacaHint's own sessionMode guard.
       const { stores } = mount(seed);
       await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
-      act(() => stores.session.apply({ kind: "snapshot", topic: "sys.session", payload: { mode, day: "2026-01-02", speed: 0 } }));
+      act(() => stores.session.apply({ kind: "snapshot", topic: "sys.session", payload: { mode } }));
       publishStatus(stores, [venueStatus("tz-1", "tradezero")]);
       await waitFor(() => expect(stores.exec.status()?.venues.length).toBe(1));
       expect(screen.queryByTestId("alpaca-backfill-banner")).toBeNull();

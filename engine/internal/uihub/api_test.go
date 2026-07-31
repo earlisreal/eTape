@@ -20,12 +20,9 @@ type apiStores struct{}
 func (apiStores) GetConfig(string) (string, bool, error)                  { return "", false, nil }
 func (apiStores) SetConfig(string, string)                                {}
 func (apiStores) QueryFills(string, int64, int64) ([]exec.FillRow, error) { return nil, nil }
-
 func (apiStores) ExportFills(context.Context, string, int64, int64) ([]exec.ExportFillRow, error) {
 	return nil, nil
 }
-
-func (apiStores) JournalDays() ([]string, error) { return nil, nil }
 
 type apiInd struct{}
 
@@ -39,14 +36,13 @@ func TestUIHubNewBuildsRunnableHubAndServer(t *testing.T) {
 		Global: uihub.GlobalLimits{MaxDayLoss: 500},
 		MD:     20 * time.Millisecond, Account: 250 * time.Millisecond, Position: 100 * time.Millisecond,
 		Buf: 128, TapeCap: 100, NewsCap: 100, FillsCap: 100, EventsCap: 100, OutBuf: 64,
-	}, apiExec{}, apiStores{}, apiInd{}, nil, nil, nil, nil, nil, nil)
+	}, apiExec{}, apiStores{}, apiInd{}, nil, nil, nil, nil)
 	if h == nil || srv == nil {
 		t.Fatal("New must return a hub and server")
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() { _ = h.Run(ctx) }()
-	// smoke: publish an exec update; no panic, mirror knows the venue for exec.status
 	h.PublishExec(exec.StatusUpdate{Venue: "sim", Connected: true})
-	h.Publish("sys.events", "", nil) // generic publish path works
+	h.Publish("sys.events", "", nil)
 }

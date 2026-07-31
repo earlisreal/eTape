@@ -118,8 +118,6 @@ func (s *fakeSeeder) SeedOlder1m(_ string, b []feed.Bar) {
 type fakeArchive struct {
 	mu            sync.Mutex
 	daily, m1     []feed.Bar
-	ticks         []feed.Tick
-	ticksErr      error
 	archivedDaily []feed.Bar
 	archived1m    []feed.Bar
 }
@@ -138,9 +136,6 @@ func (a *fakeArchive) ReadBars1m(_ string, fromMs, toMs int64) ([]feed.Bar, erro
 		}
 	}
 	return out, nil
-}
-func (a *fakeArchive) ReadJournalTicks(_ string, _ int64) ([]feed.Tick, error) {
-	return a.ticks, a.ticksErr
 }
 func (a *fakeArchive) ArchiveBar1m(b feed.Bar) {
 	a.mu.Lock()
@@ -169,23 +164,13 @@ func fixedNow() time.Time { return time.Date(2026, 7, 8, 12, 0, 0, 0, session.Lo
 
 // --- warm-start (unchanged behavior; new New() signature) ---
 
-func TestWarmStartSeedsSessionTicksBeforeDailyAnd1m(t *testing.T) {
+func TestWarmStartSeedsDailyAnd1m(t *testing.T) {
 	seeder := &fakeSeeder{}
-	archive := &fakeArchive{ticks: []feed.Tick{tick(1)}, daily: []feed.Bar{bar(1)}, m1: []feed.Bar{bar(fixedNow().UnixMilli())}}
+	archive := &fakeArchive{daily: []feed.Bar{bar(1)}, m1: []feed.Bar{bar(fixedNow().UnixMilli())}}
 	o := New(nil, nil, nil, seeder, archive, clock.NewFake(fixedNow()), Config{IntradayDays: 20})
 	o.warmStart(context.Background(), "US.AAPL", fixedNow().AddDate(0, 0, -20), fixedNow())
-	if len(seeder.calls) < 3 || seeder.calls[0] != "ticks" {
-		t.Fatalf("call order = %v, want session-ticks first", seeder.calls)
-	}
-}
-
-func TestWarmStartTickReadErrorContinues(t *testing.T) {
-	seeder := &fakeSeeder{}
-	archive := &fakeArchive{ticksErr: context.DeadlineExceeded, daily: []feed.Bar{bar(1)}, m1: []feed.Bar{bar(fixedNow().UnixMilli())}}
-	o := New(nil, nil, nil, seeder, archive, clock.NewFake(fixedNow()), Config{IntradayDays: 20})
-	o.warmStart(context.Background(), "US.AAPL", fixedNow().AddDate(0, 0, -20), fixedNow())
-	if len(seeder.daily) != 1 || len(seeder.hist) != 1 {
-		t.Fatalf("daily=%d hist=%d, want 1 and 1", len(seeder.daily), len(seeder.hist))
+	if len(seeder.calls) < 2 || seeder.calls[0] != "daily" {
+		t.Fatalf("call order = %v, want daily seed first", seeder.calls)
 	}
 }
 
