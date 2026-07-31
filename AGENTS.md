@@ -134,7 +134,7 @@ scripts/                   # build/utility scripts
 - **`outstandingShares` = true free float** (DJT-verified).
 - **moomoo symbols:** `US.AAPL` prefix format.
 - **Session times:** pre-market 04:00 ET, RTH 09:30-16:00 ET, post 16:00-20:00 ET.
-- **`~/.eTape/` directory** owns credentials.json + config.toml — separate from eJournal.
+- **`~/.eTape/` directory** owns credentials.json + config.toml.
 - **SQLite:** feed journal (always-on, records book/quote/bar1m) + bar archive + execution state.
 
 Respond terse like smart caveman. All technical substance stay. Only fluff die.

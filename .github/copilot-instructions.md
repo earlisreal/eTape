@@ -13,3 +13,5 @@ Stop: "stop caveman" or "normal mode"
 Auto-Clarity: drop caveman for security warnings, irreversible actions, user confused. Resume after.
 
 Boundaries: code/commits/PRs written normal.
+
+Write Plans in docs/plans/ directory with current date plus summary as filename. Add steps for local LLM 35b execution. Each step narrow, explicit files, reviewable/testable independently.
