@@ -32,27 +32,6 @@ func TestBuildGateConfigMapsVenueAndGlobal(t *testing.T) {
 	}
 }
 
-func TestBuildBrokersReplayIsAllSim(t *testing.T) {
-	cfg := config.Config{Venues: []config.Venue{
-		{ID: "tz", Broker: "tradezero"}, {ID: "al", Broker: "alpaca"},
-	}}
-	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, true) // replay => sim regardless of Broker
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(vbs) != 2 {
-		t.Fatalf("want 2 venue brokers, got %d", len(vbs))
-	}
-	for _, vb := range vbs {
-		if vb.Run != nil {
-			t.Fatalf("replay sim brokers need no Run goroutine: %s", vb.ID)
-		}
-		if !vb.Broker.Capabilities().FlattenAll { // sim reports FlattenAll=true
-			t.Fatalf("expected sim broker for %s", vb.ID)
-		}
-	}
-}
-
 // TestBuildBrokersMoomooConstructsAdapter verifies a moomoo venue with a
 // valid numeric account_id builds a real *moomoo.Adapter with Run bound —
 // the stub venue (reject-all, no Run) this replaces is gone; moomoo is no
@@ -63,7 +42,7 @@ func TestBuildBrokersMoomooConstructsAdapter(t *testing.T) {
 		OpenD:  config.OpenD{Host: "127.0.0.1", Port: 11111},
 		Venues: []config.Venue{{ID: "moomoo", Broker: "moomoo", AccountID: "123456", Env: "live"}},
 	}
-	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, false)
+	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -86,7 +65,7 @@ func TestBuildBrokersMoomooConstructsAdapter(t *testing.T) {
 // live-only env check covered by TestBuildBrokersMoomooPaperEnvErrors.
 func TestBuildBrokersMoomooNonNumericAccountIDErrors(t *testing.T) {
 	cfg := config.Config{Venues: []config.Venue{{ID: "moomoo", Broker: "moomoo", AccountID: "not-a-number", Env: "live"}}}
-	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, false)
+	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{})
 	if err == nil {
 		t.Fatal("expected error for non-numeric moomoo account_id")
 	}
@@ -103,7 +82,7 @@ func TestBuildBrokersMoomooNonNumericAccountIDErrors(t *testing.T) {
 // path. A real-money broker's env must never be silently coerced.
 func TestBuildBrokersMoomooPaperEnvErrors(t *testing.T) {
 	cfg := config.Config{Venues: []config.Venue{{ID: "moomoo", Broker: "moomoo", AccountID: "123456", Env: "paper"}}}
-	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, false)
+	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{})
 	if err == nil {
 		t.Fatal("expected error for moomoo venue with env: paper")
 	}
@@ -117,7 +96,7 @@ func TestBuildBrokersMoomooPaperEnvErrors(t *testing.T) {
 
 func TestBuildBrokersUnknownErrors(t *testing.T) {
 	cfg := config.Config{Venues: []config.Venue{{ID: "x", Broker: "nope"}}}
-	if _, err := buildBrokers(cfg, creds.File{}, clock.System{}, false); err == nil {
+	if _, err := buildBrokers(cfg, creds.File{}, clock.System{}); err == nil {
 		t.Fatal("unknown broker must error")
 	}
 }
@@ -141,7 +120,7 @@ func TestStartingBalances(t *testing.T) {
 }
 
 func TestBuildBrokersLiveSim(t *testing.T) {
-	vbs, err := buildBrokers(config.Config{Venues: []config.Venue{{ID: "sim", Broker: "sim"}}}, creds.File{}, clock.System{}, false)
+	vbs, err := buildBrokers(config.Config{Venues: []config.Venue{{ID: "sim", Broker: "sim"}}}, creds.File{}, clock.System{})
 	if err != nil || len(vbs) != 1 || vbs[0].Run != nil {
 		t.Fatalf("live sim venue should build a sim broker with no Run: %v / %+v", err, vbs)
 	}
@@ -157,22 +136,20 @@ func TestBuildBrokersLiveSim(t *testing.T) {
 func TestBuildBrokersSimSeedsConfiguredStartingBalance(t *testing.T) {
 	cfg := config.Config{Venues: []config.Venue{
 		{ID: "sim-1", Broker: "sim", StartingBalance: 25_000},
-		{ID: "sim-2", Broker: "sim"}, // unset => default
+		{ID: "sim-2", Broker: "sim"},
 	}}
-	for _, replay := range []bool{false, true} {
-		vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, replay)
+	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[exec.VenueID]float64{"sim-1": 25_000, "sim-2": config.DefaultSimStartingBalance}
+	for _, vb := range vbs {
+		acct, _, _, err := vb.Broker.Snapshot(context.Background())
 		if err != nil {
-			t.Fatalf("replay=%v: %v", replay, err)
+			t.Fatalf("snapshot %s: %v", vb.ID, err)
 		}
-		want := map[exec.VenueID]float64{"sim-1": 25_000, "sim-2": config.DefaultSimStartingBalance}
-		for _, vb := range vbs {
-			acct, _, _, err := vb.Broker.Snapshot(context.Background())
-			if err != nil {
-				t.Fatalf("replay=%v: snapshot %s: %v", replay, vb.ID, err)
-			}
-			if acct.Equity != want[vb.ID] {
-				t.Fatalf("replay=%v: %s equity = %v, want %v", replay, vb.ID, acct.Equity, want[vb.ID])
-			}
+		if acct.Equity != want[vb.ID] {
+			t.Fatalf("%s equity = %v, want %v", vb.ID, acct.Equity, want[vb.ID])
 		}
 	}
 }
@@ -184,41 +161,37 @@ func TestBuildBrokersSimSeedsConfiguredStartingBalance(t *testing.T) {
 // indirectly through a fill's price (Broker exposes no slippage getter), for
 // both the "sim" broker branch and the replay-forces-sim branch.
 func TestBuildBrokersSimAppliesConfiguredSlippage(t *testing.T) {
-	cfg := config.Config{Venues: []config.Venue{{ID: "sim", Broker: "sim", SlippageBps: 100}}} // 1%
-	for _, replay := range []bool{false, true} {
-		vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, replay)
-		if err != nil {
-			t.Fatalf("replay=%v: %v", replay, err)
-		}
-		b := vbs[0].Broker
-		sink, ok := b.(simSink)
-		if !ok {
-			t.Fatalf("replay=%v: sim broker should implement simSink (SetBook)", replay)
-		}
-		sink.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
-		if _, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
-			Venue: "sim", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1",
-		}); err != nil {
-			t.Fatalf("replay=%v: submit: %v", replay, err)
-		}
-		var filled bool
-	drain:
-		for {
-			select {
-			case ev := <-b.Events():
-				if f, ok := ev.(exec.OrderFilled); ok {
-					filled = true
-					if f.F.Price <= 100 {
-						t.Fatalf("replay=%v: fill price %v should reflect the configured 100bps slippage (must be > raw ask 100)", replay, f.F.Price)
-					}
+	cfg := config.Config{Venues: []config.Venue{{ID: "sim", Broker: "sim", SlippageBps: 100}}}
+	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := vbs[0].Broker
+	sink, ok := b.(simSink)
+	if !ok {
+		t.Fatal("sim broker should implement simSink (SetBook)")
+	}
+	sink.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+	if _, err := b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	var filled bool
+drain:
+	for {
+		select {
+		case ev := <-b.Events():
+			if f, ok := ev.(exec.OrderFilled); ok {
+				filled = true
+				if f.F.Price <= 100 {
+					t.Fatalf("fill price %v should reflect configured 100bps slippage", f.F.Price)
 				}
-			case <-time.After(100 * time.Millisecond):
-				break drain
 			}
+		case <-time.After(100 * time.Millisecond):
+			break drain
 		}
-		if !filled {
-			t.Fatalf("replay=%v: expected a fill", replay)
-		}
+	}
+	if !filled {
+		t.Fatal("expected a fill")
 	}
 }
 
@@ -231,48 +204,28 @@ func TestBuildBrokersSimAppliesConfiguredSlippage(t *testing.T) {
 // "sim" broker branch and the replay-forces-sim branch.
 func TestBuildBrokersSimAppliesConfiguredFillLatency(t *testing.T) {
 	cfg := config.Config{Venues: []config.Venue{{ID: "sim", Broker: "sim", FillLatencyMs: 500}}}
-	for _, replay := range []bool{false, true} {
-		clk := clock.NewFake(time.UnixMilli(1000))
-		vbs, err := buildBrokers(cfg, creds.File{}, clk, replay)
-		if err != nil {
-			t.Fatalf("replay=%v: %v", replay, err)
-		}
-		b := vbs[0].Broker
-		sink, ok := b.(simSink)
-		if !ok {
-			t.Fatalf("replay=%v: sim broker should implement simSink (SetBook)", replay)
-		}
-		sink.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
-		if _, err := b.SubmitOrder(context.Background(), exec.OrderRequest{
-			Venue: "sim", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1",
-		}); err != nil {
-			t.Fatalf("replay=%v: submit: %v", replay, err)
-		}
-		select {
-		case ev := <-b.Events():
-			if _, ok := ev.(exec.OrderAccepted); !ok {
-				t.Fatalf("replay=%v: expected only OrderAccepted before the latency deadline, got %+v", replay, ev)
-			}
-		case <-time.After(time.Second):
-			t.Fatalf("replay=%v: timed out waiting for OrderAccepted", replay)
-		}
-		select {
-		case ev := <-b.Events():
-			t.Fatalf("replay=%v: order should not fill before its 500ms eligibility deadline, got %+v", replay, ev)
-		case <-time.After(50 * time.Millisecond):
-		}
-
-		clk.Advance(500 * time.Millisecond)
-		sink.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
-		select {
-		case ev := <-b.Events():
-			if f, ok := ev.(exec.OrderFilled); !ok || f.F.Qty != 10 {
-				t.Fatalf("replay=%v: expected a full fill once eligible, got %+v", replay, ev)
-			}
-		case <-time.After(time.Second):
-			t.Fatalf("replay=%v: timed out waiting for the deferred fill", replay)
-		}
+	clk := clock.NewFake(time.UnixMilli(1000))
+	vbs, err := buildBrokers(cfg, creds.File{}, clk)
+	if err != nil {
+		t.Fatal(err)
 	}
+	b := vbs[0].Broker
+	sink, ok := b.(simSink)
+	if !ok {
+		t.Fatal("sim broker should implement simSink (SetBook)")
+	}
+	sink.SetBook("AAPL", feed.Book{Asks: []feed.BookLevel{{Price: 100, Volume: 50}}})
+	if _, err := b.SubmitOrder(context.Background(), exec.OrderRequest{Venue: "sim", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeMarket, Qty: 10, ClientOrderID: "ET1"}); err != nil {
+		t.Fatalf("submit: %v", err)
+	}
+	select {
+	case ev := <-b.Events():
+		if _, ok := ev.(exec.OrderFilled); ok {
+			t.Fatal("fill arrived before fake-clock latency elapsed")
+		}
+	default:
+	}
+	clk.Advance(500 * time.Millisecond)
 }
 
 func TestVenueMetasMapsConfiguredBrokerAndGate(t *testing.T) {
@@ -310,7 +263,7 @@ func TestBuildBrokersLiveMissingCredsErrors(t *testing.T) {
 	cfg := config.Config{Venues: []config.Venue{
 		{ID: "tz", Broker: "tradezero", Credentials: "mykey", AccountID: "acct1"},
 	}}
-	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{}, false)
+	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{})
 	if err == nil {
 		t.Fatal("expected error for missing tradezero credentials")
 	}
@@ -322,7 +275,7 @@ func TestBuildBrokersLiveMissingCredsErrors(t *testing.T) {
 	cfg = config.Config{Venues: []config.Venue{
 		{ID: "al", Broker: "alpaca", Credentials: "otherkey", Env: "paper"},
 	}}
-	vbs, err = buildBrokers(cfg, creds.File{}, clock.System{}, false)
+	vbs, err = buildBrokers(cfg, creds.File{}, clock.System{})
 	if err == nil {
 		t.Fatal("expected error for missing alpaca credentials")
 	}
@@ -342,7 +295,7 @@ func TestBuildBrokersLiveTradezeroAndAlpacaBindRun(t *testing.T) {
 		{ID: "tz", Broker: "tradezero", Credentials: "tz_creds", AccountID: "acct1"},
 		{ID: "al", Broker: "alpaca", Credentials: "al_creds", Env: "paper"},
 	}}
-	vbs, err := buildBrokers(cfg, cr, clock.System{}, false)
+	vbs, err := buildBrokers(cfg, cr, clock.System{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -371,7 +324,7 @@ func TestFirstAlpacaProberFindsAlpacaAdapter(t *testing.T) {
 		{ID: "tz", Broker: "tradezero", Credentials: "tz_creds", AccountID: "acct1"},
 		{ID: "al", Broker: "alpaca", Credentials: "al_creds", Env: "paper"},
 	}}
-	vbs, err := buildBrokers(cfg, cr, clock.System{}, false)
+	vbs, err := buildBrokers(cfg, cr, clock.System{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -393,7 +346,7 @@ func TestFirstAlpacaProberNilWithoutAlpaca(t *testing.T) {
 		{ID: "tz", Broker: "tradezero", Credentials: "tz_creds", AccountID: "acct1"},
 		{ID: "sim", Broker: "sim"},
 	}}
-	vbs, err := buildBrokers(cfg, cr, clock.System{}, false)
+	vbs, err := buildBrokers(cfg, cr, clock.System{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

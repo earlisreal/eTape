@@ -15,7 +15,6 @@ import { PRESETS } from "./presets";
 import { TopBar } from "./TopBar";
 import { FeedStatusBanner } from "./FeedStatusBanner";
 import { BootStatusBanner } from "./BootStatusBanner";
-import { ReplayBanner } from "./ReplayBanner";
 import { DemoBanner } from "./DemoBanner";
 import { AlpacaBackfillBanner } from "./AlpacaBackfillBanner";
 import { EmptyState } from "./EmptyState";
@@ -30,7 +29,6 @@ import { useTheme } from "./ThemeProvider";
 import { useToasts } from "./Toast";
 import { useOrderCommands } from "./exec/useOrderCommands";
 import { useOrderConfig } from "./exec/useOrderConfig";
-import { useReplayCommands } from "./exec/useReplayCommands";
 import { useHotkeys } from "./exec/useHotkeys";
 import { useAutoUnlockOnStartup } from "./exec/useAutoUnlockOnStartup";
 import { useSoundWiring } from "../sound/useSoundWiring";
@@ -102,14 +100,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const { mode } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
-  const rc = useReplayCommands(commands);
-  // Shared by both <ReplayBanner> and <DemoBanner>'s "Return to live" button —
-  // GoLive is the same engine command regardless of which practice mode
-  // (replay or demo) is currently active.
-  const onGoLive = async () => {
-    const ack = await rc.goLive();
-    if (ack.status !== "accepted") throw new Error(ack.reason || "Return to live rejected");
-  };
   // DockviewApi is only available once dockview mounts (i.e. once the workspace
   // has at least one panel — see the empty-state switch below); null otherwise.
   const apiRef = useRef<DockviewApi | null>(null);
@@ -206,8 +196,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // (mode unconfirmed yet) intentionally still allows it through, same as the
   // prior unconditional "live" default — this only needs to suppress the
   // cases we're SURE are practice sessions.
-  const showVenueSetup = execStatus !== null && !hasRealVenue && sessionMode.mode !== "replay"
-    && sessionMode.mode !== "demo" && !venueSetupSessionDismissed && !readVenueSetupHidden();
+  const showVenueSetup = execStatus !== null && !hasRealVenue && sessionMode.mode !== "demo"
+    && !venueSetupSessionDismissed && !readVenueSetupHidden();
   const dismissVenueSetup = (dontShowAgain: boolean) => {
     if (dontShowAgain) {
       try { localStorage.setItem(VENUE_SETUP_HIDDEN_KEY, "1"); } catch { /* best-effort only */ }
@@ -230,7 +220,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // the ack-status check in PracticeLauncherModal's onStartDemo, minus the
   // inline pending/error UI that dedicated modal has room for.
   const onTryDemo = () => {
-    rc.startDemo().then((ack) => {
+    commands.sendCommand("StartDemo", {}).then((ack) => {
       if (ack.status !== "accepted") toast.push({ level: "danger", text: `Try demo: ${ack.reason || "rejected"}` });
     }).catch((err: unknown) => {
       toast.push({ level: "danger", text: `Try demo failed: ${err instanceof Error ? err.message : "unknown error"}` });
@@ -255,7 +245,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const hasAlpaca = execStatus?.venues.some((v) => v.broker === "alpaca") ?? false;
   const showAlpacaHint = engineState === "open" && execStatus !== null
     && !hasAlpaca
-    && sessionMode.mode !== "replay" && sessionMode.mode !== "demo"
+    && sessionMode.mode !== "demo"
     && !showVenueSetup
     && !alpacaHintSessionDismissed && !readAlpacaHintHidden();
   const openAlpacaSetup = () => {
@@ -341,7 +331,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   useEffect(() => {
     const mode = sessionMode.mode;
     const prev = prevModeRef.current;
-    const isEntry = (prev === "live" || prev === "replay" || prev === "pending") && mode === "demo";
+    const isEntry = (prev === "live" || prev === "pending") && mode === "demo";
     const isRevert = prev === "demo" && mode === "live";
     if (!isEntry && !isRevert) {
       // demo->demo (e.g. a WS reconnect mid-demo) or any other pair: no-op —
@@ -370,7 +360,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     // Entry edge (live/replay/pending -> demo): snapshot BEFORE anything else,
     // per edge kind — a pending->demo entry (the engine was already in demo
     // when this UI (re)connected) has no real pre-demo doc to snapshot.
-    demoSnapshotRef.current = (prev === "live" || prev === "replay") ? structuredClone(wsNow) : null;
+    demoSnapshotRef.current = prev === "live" ? structuredClone(wsNow) : null;
 
     let unsubWatchlist: (() => void) | null = null;
     let timer: ReturnType<typeof setTimeout> | null = null;
@@ -728,7 +718,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             onNewWindow={onNewWindow}
             onOpenSettings={() => setSettings({ open: true, section: "general" })}
             onOpenConnection={onOpenConnection}
-            onOpenReplay={() => setPracticeOpen(true)}
+            onOpenPractice={() => setPracticeOpen(true)}
           />
           {addOpen && (
             <div className="popover" style={{ top: 40, right: 160, width: 580, maxHeight: "70vh", overflow: "auto" }}>
@@ -737,8 +727,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           )}
         </div>
         <BootStatusBanner boot={stores.boot} />
-        <ReplayBanner session={stores.session} engineState={engineState} onGoLive={onGoLive} />
-        <DemoBanner session={stores.session} engineState={engineState} onGoLive={onGoLive} />
+        <DemoBanner session={stores.session} />
         <FeedStatusBanner health={stores.health} boot={stores.boot} engineState={engineState} onOpenConnection={onOpenConnection} />
         {showAlpacaHint && <AlpacaBackfillBanner onSetup={openAlpacaSetup} onDismiss={dismissAlpacaHint} />}
         <div style={{ flex: 1, minHeight: 0 }}>

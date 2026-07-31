@@ -14,18 +14,13 @@ type fillsQuerier interface {
 	ExportFills(ctx context.Context, venue string, fromMs, toMs int64) ([]exec.ExportFillRow, error)
 }
 
-type journalQuerier interface {
-	JournalDays() ([]string, error)
-}
-
 type queries struct {
-	fills   fillsQuerier
-	journal journalQuerier
-	clk     clock.Clock
+	fills fillsQuerier
+	clk   clock.Clock
 }
 
-func newQueries(f fillsQuerier, j journalQuerier, clk clock.Clock) *queries {
-	return &queries{fills: f, journal: j, clk: clk}
+func newQueries(f fillsQuerier, clk clock.Clock) *queries {
+	return &queries{fills: f, clk: clk}
 }
 
 func fillRowToWire(r exec.FillRow) wsmsg.Fill {
@@ -69,13 +64,7 @@ func (q *queries) handle(name string, args json.RawMessage) any {
 			return wsmsg.ExportFillsResult{}
 		}
 		return wsmsg.ExportFillsResult{CSV: csvStr, Count: len(rows)}
-	case "ListReplayDays":
-		days, err := q.journal.JournalDays()
-		if err != nil {
-			return []string{}
-		}
-		return days
 	default:
-		return []any{} // unknown query -> resolves to [] on the UI, never hangs
+		return []any{}
 	}
 }

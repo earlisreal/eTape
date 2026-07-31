@@ -71,13 +71,10 @@ type Seeder interface {
 // package md), so a fresh fetch must be archived here at the source instead.
 // Warm-started bars (read from this same archive by warmStart) are not
 // re-archived -- ArchiveBar1m/ArchiveDaily is idempotent (INSERT OR REPLACE)
-// regardless, but there is nothing new to persist. ReadJournalTicks
-// reconstructs today's session-ticks warm-start (10s series + shadow-1m
-// delta) from the tick journal.
+// regardless, but there is nothing new to persist.
 type Archive interface {
 	ReadDailyBars(symbol string) ([]feed.Bar, error)
 	ReadBars1m(symbol string, fromMs, toMs int64) ([]feed.Bar, error)
-	ReadJournalTicks(symbol string, tsMs int64) ([]feed.Tick, error)
 	ArchiveBar1m(b feed.Bar)
 	ArchiveDaily(b feed.Bar)
 }
@@ -229,18 +226,9 @@ func (o *Orchestrator) dailyFrom(now time.Time) time.Time {
 	return from
 }
 
-// warmStart seeds from the local archive/journal only -- it does not
-// re-archive/re-journal what it just read back out. Session-ticks
-// reconstruction runs first: it rebuilds today's 10s series (and enriches
-// today's shadow-1m delta) from the tick journal before the daily/1m
-// archive seeds run, so SeedHistory1m's fillDelta sees today's shadow data
-// instead of the zero-delta a bars_1m-archived bar would otherwise get.
+// warmStart seeds from local archive only -- it does not re-archive what it
+// just read back out.
 func (o *Orchestrator) warmStart(ctx context.Context, symbol string, from1m, now time.Time) {
-	if ticks, err := o.archive.ReadJournalTicks(symbol, now.UnixMilli()); err != nil {
-		slog.Warn("backfill: warm-start session-ticks read failed", "symbol", symbol, "err", err)
-	} else if len(ticks) > 0 && ctx.Err() == nil {
-		o.seeder.SeedSessionTicks(symbol, ticks)
-	}
 	if daily, err := o.archive.ReadDailyBars(symbol); err != nil {
 		slog.Warn("backfill: warm-start daily read failed", "symbol", symbol, "err", err)
 	} else {

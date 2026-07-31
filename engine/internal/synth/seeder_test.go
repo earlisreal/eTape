@@ -31,23 +31,16 @@ func fixedClockAt(ms int64) clock.Clock {
 	return clock.NewFake(timeMs(ms))
 }
 
-// capStore is a test double for SeedStore: it captures every archived bar and
-// journaled tick count without touching a real *store.Store, so these tests
-// stay fast and dependency-free.
+// capStore is a test double for SeedStore: it captures archived bars without
+// touching a real *store.Store, so these tests stay fast and dependency-free.
 type capStore struct {
 	daily, m1 []feed.Bar
-	ticks     int
 	flushed   bool
 }
 
 func (c *capStore) ArchiveDaily(b feed.Bar) { c.daily = append(c.daily, b) }
 func (c *capStore) ArchiveBar1m(b feed.Bar) { c.m1 = append(c.m1, b) }
-func (c *capStore) RecordEvent(ev feed.Event, _ int64) {
-	if te, ok := ev.(feed.TicksEvent); ok {
-		c.ticks += len(te.Ticks)
-	}
-}
-func (c *capStore) Flush() { c.flushed = true }
+func (c *capStore) Flush()                  { c.flushed = true }
 
 func TestSeed_WritesWarmHistory(t *testing.T) {
 	skipIfShort(t)
@@ -66,9 +59,6 @@ func TestSeed_WritesWarmHistory(t *testing.T) {
 	// ~3 days of 1m across symbols
 	if len(st.m1) < 12*300 {
 		t.Errorf("too few 1m bars: %d", len(st.m1))
-	}
-	if st.ticks == 0 {
-		t.Error("no ticks journaled for the 2h window")
 	}
 	// OHLC sanity on a sample
 	for _, b := range st.m1[:min(200, len(st.m1))] {
@@ -203,9 +193,6 @@ func TestSeed_DeterministicAcrossRuns(t *testing.T) {
 		if a.m1[i] != b.m1[i] {
 			t.Fatalf("1m bar %d differs: %+v vs %+v", i, a.m1[i], b.m1[i])
 		}
-	}
-	if a.ticks != b.ticks {
-		t.Fatalf("journaled tick count differs: %d vs %d", a.ticks, b.ticks)
 	}
 	if a.flushed != b.flushed {
 		t.Fatalf("flushed differs: %v vs %v", a.flushed, b.flushed)
@@ -365,25 +352,5 @@ func TestSeed_LeavesGeneratorAtNowMsWithNoSeam(t *testing.T) {
 		if !ok || len(b.Bids) == 0 || len(b.Asks) == 0 || b.Bids[0].Price >= b.Asks[0].Price {
 			t.Errorf("%s: bad/empty book after resuming live stepping: %+v", code, b)
 		}
-	}
-}
-
-// TestSeed_TicksJournaledMatchRing checks step 3's journaled tick count for
-// each symbol matches exactly what ended up in that symbol's live ~2h ring
-// (RecentTicks) after Seed - i.e. the journal is a faithful, non-duplicated
-// snapshot of the same trailing window the generator itself now holds.
-func TestSeed_TicksJournaledMatchRing(t *testing.T) {
-	skipIfShort(t)
-	nowMs := int64(1_700_000_000_000)
-	g := New(9, fixedClockAt(nowMs))
-	st := &capStore{}
-	g.Seed(st, nowMs)
-
-	var ringTotal int
-	for _, code := range g.Symbols() {
-		ringTotal += len(g.RecentTicks(code, 1_000_000))
-	}
-	if ringTotal != st.ticks {
-		t.Errorf("journaled ticks = %d, want exactly the ring total %d", st.ticks, ringTotal)
 	}
 }

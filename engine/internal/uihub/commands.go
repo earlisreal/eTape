@@ -82,34 +82,16 @@ type watchlistBox struct{ wl watchlistCtl }
 // method (symbol-existence validation for EnsureSymbol/FocusGroup) — a
 // field and a method can't share a name on the same type.
 type commands struct {
-	ex     execDoer
-	cfg    configStore
-	ind    indicatorCtl
-	dem    demandCtl
-	va     venueAdmin
-	feed   func() Feed
-	tester venueTester
-	// restart is set post-construction by uihub.New (not passed through
-	// newCommands, to avoid touching every commands_test.go call site) — see
-	// the "RestartEngine" case below. Nil in tests that don't set it, hence
-	// the nil guard there.
-	restart func()
-	// startReplay/goLive/startDemo are set post-construction by uihub.New,
-	// same pattern as restart above (see api.go) — kept out of newCommands'
-	// param list so the many existing newCommands(...) call sites in
-	// commands_test.go don't need updating. Unlike restart, they carry
-	// arguments and can fail validation (bad day, negative speed), so each
-	// call is expected to validate synchronously and return an error for a
-	// blocked ack *before* scheduling any delayed side effect — see the
-	// closures built in main.go.
-	startReplay func(day string, speed float64) error
-	goLive      func() error
-	startDemo   func() error
-	// wl is late-bound via (*Hub).SetWatchlist once the poller exists
-	// (startPollers, after uihub.New returns), then read from conn goroutines
-	// on every WatchlistAdd/Remove — same atomic-slot rationale as feedSlot
-	// (hub.go:93-97). Boxed (watchlistBox) to match the feedBox precedent.
-	wl atomic.Pointer[watchlistBox]
+	ex        execDoer
+	cfg       configStore
+	ind       indicatorCtl
+	dem       demandCtl
+	va        venueAdmin
+	feed      func() Feed
+	tester    venueTester
+	restart   func()
+	startDemo func() error
+	wl        atomic.Pointer[watchlistBox]
 }
 
 func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, va venueAdmin, feed func() Feed, tester venueTester) *commands {
@@ -376,29 +358,6 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		}
 		time.AfterFunc(restartAckFlushDelay, cd.restart)
 		return wsmsg.AckMsg{Status: "accepted"}, false
-	case "StartReplay":
-		var a wsmsg.StartReplayArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args"), false
-		}
-		if a.Speed < 0 {
-			return blocked("speed must be >= 0"), false
-		}
-		if cd.startReplay == nil {
-			return blocked("replay switching not supported"), false
-		}
-		if err := cd.startReplay(a.Day, a.Speed); err != nil {
-			return blocked(err.Error()), false
-		}
-		return wsmsg.AckMsg{Status: wsmsg.AckAccepted}, false
-	case "GoLive":
-		if cd.goLive == nil {
-			return blocked("replay switching not supported"), false
-		}
-		if err := cd.goLive(); err != nil {
-			return blocked(err.Error()), false
-		}
-		return wsmsg.AckMsg{Status: wsmsg.AckAccepted}, false
 	case "StartDemo":
 		if cd.startDemo == nil {
 			return blocked("demo switching not supported"), false

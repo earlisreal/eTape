@@ -270,22 +270,18 @@ type HealthSnapshot struct {
 }
 
 // SessionSnapshot is the static sys.session topic: which mode the engine
-// booted in. Mode is "live", "replay", or "demo"; Day/Speed populated only in replay.
+// booted in. Mode is "live" or "demo".
 type SessionSnapshot struct {
-	Mode  string  `json:"mode"`
-	Day   string  `json:"day,omitempty"`
-	Speed float64 `json:"speed,omitempty"`
+	Mode string `json:"mode"`
 }
 
 // BootStatus is the sys.boot snapshot: the engine's current boot phase, so the
-// UI shows a neutral "preparing journal / connecting" banner during the pre-feed
-// maintenance window instead of the red feed-disconnected strip. Snapshot-bearing
-// (like SessionSnapshot): re-delivered to every new subscriber, also pushed as a
-// delta on each transition. Phase is one of "sealing" | "connecting" | "ready".
-// DaysTotal is the day count for the "sealing" phase (0 otherwise).
+// UI shows a neutral connecting banner during boot instead of the red
+// feed-disconnected strip. Snapshot-bearing (like SessionSnapshot):
+// re-delivered to every new subscriber, also pushed as a delta on each
+// transition. Phase is one of "connecting" | "ready".
 type BootStatus struct {
-	Phase     string `json:"phase"`
-	DaysTotal int    `json:"daysTotal,omitempty"`
+	Phase string `json:"phase"`
 }
 
 type SysEvent struct {
@@ -502,18 +498,7 @@ type TestConnectionResult struct {
 	Accounts    []TestAccount `json:"accounts"`
 }
 
-// ---- replay control (settings/toolbar StartReplay/GoLive/StartDemo commands) ----
-
-// StartReplayArgs selects the recorded day and playback speed for the
-// StartReplay command. Day is a "YYYY-MM-DD" calendar date; Speed is a
-// playback multiplier (0 = as-fast-as-possible, per Task 4's closure).
-type StartReplayArgs struct {
-	Day   string  `json:"day"`
-	Speed float64 `json:"speed"`
-}
-
-// GoLiveArgs is intentionally empty (kept as a named type for tygo stability).
-type GoLiveArgs struct{}
+// ---- demo control ----
 
 // StartDemoArgs is intentionally empty (kept as a named type for tygo
 // stability). A UI-triggered demo relaunch takes no knobs — just -demo.
