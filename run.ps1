@@ -65,7 +65,7 @@ switch ($Mode) {
         Build-UI
         Log 'booting engine (live) -- open http://127.0.0.1:8686'
         Set-Location $EngineDir
-        $env:SLOG_LEVEL = 'debug'
+        $env:SLOG_LEVEL = 'info'
         & go run ./cmd/etape -dist $Dist @Rest
         exit $LASTEXITCODE
     }

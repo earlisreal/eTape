@@ -204,6 +204,11 @@ func (o *Orchestrator) noteBackfilled(symbol string, from1m time.Time) {
 	}
 }
 
+// archiveCoverSlackMs: an archive window counts as "covered" if its earliest
+// bar is within ~2 trading days of the window start (IPO/holiday gaps aside).
+// promoted from loadOlder so fill1m can reuse it.
+var archiveCoverSlackMs int64 = 2 * 24 * 60 * 60 * 1000
+
 // dailyFloor is the earliest daily-history start requested. Alpaca's free tier
 // hard-floors at 2016-01-04; Yahoo goes deeper, but the extra depth is below
 // the indicator-relevance threshold (spec's indicator-depth rationale: only a
@@ -289,6 +294,19 @@ func (o *Orchestrator) tail1m(ctx context.Context, symbol string) (oldestMs int6
 // fill1m walks the 1m chain for the deep window, trims to bars strictly older
 // than the tail's oldest bar (when a tail seeded), then archives + seeds.
 func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.Time, tailOldestMs int64, tailOK bool) {
+	// Archive-first: skip API if the local archive already covers this window.
+	cutoffMs := to.UnixMilli()
+	if tailOK {
+		cutoffMs = tailOldestMs
+	}
+	if bars, err := o.archive.ReadBars1m(symbol, from.UnixMilli(), cutoffMs-1); err == nil &&
+		len(bars) > 0 && bars[0].BucketMs <= from.UnixMilli()+archiveCoverSlackMs {
+		o.archive1m(bars)
+		seedUnlessCanceled(ctx, bars, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+		slog.Info("backfill: deep 1m served from archive", "symbol", symbol, "bars", len(bars))
+		return
+	}
+
 	bars, served, err := walkChain(ctx, symbol, from, to, o.intraday, intraday1m)
 	if len(bars) == 0 {
 		if err != nil {
@@ -311,6 +329,14 @@ func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.
 // returns nil once any provider served (even with zero bars — no data is not a
 // failure), otherwise the last error, so the uihub knows whether to re-arm.
 func (o *Orchestrator) fillDaily(ctx context.Context, symbol string, from, to time.Time) error {
+	// Archive-first: skip API if the archive has any daily bars for this symbol.
+	if daily, err := o.archive.ReadDailyBars(symbol); err == nil && len(daily) > 0 {
+		o.archiveDailyBars(daily)
+		seedUnlessCanceled(ctx, daily, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
+		slog.Info("backfill: daily served from archive", "symbol", symbol, "bars", len(daily))
+		return nil
+	}
+
 	bars, served, err := walkChain(ctx, symbol, from, to, o.daily, dailyBars)
 	if len(bars) == 0 {
 		return err
@@ -403,16 +429,6 @@ func (o *Orchestrator) loadOlder(ctx context.Context, symbol string) (olderResul
 	if from.Before(dailyFloor) {
 		from = dailyFloor
 	}
-
-	// archiveCoverSlackMs: an archive window counts as "covered" if its earliest
-	// bar is within ~2 trading days of the window start (IPO/holiday gaps aside).
-	// The archive is written by 3 independent call sites (tail1m, fill1m,
-	// loadOlder) with no completeness metadata, so a sparse/stale slice inside a
-	// requested window is a real scenario, not a contrived one -- without this
-	// check, advanceWatermark below would move the watermark to `from` even
-	// though the returned bars don't actually reach that far back, permanently
-	// and silently skipping the real gap (no future call ever re-requests it).
-	const archiveCoverSlackMs = 2 * 24 * 60 * 60 * 1000
 
 	// Archive-first: if the local archive already covers this older window
 	// (earliest returned bar within slack of `from`), it wins outright -- no
