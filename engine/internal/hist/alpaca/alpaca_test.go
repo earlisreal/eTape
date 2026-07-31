@@ -44,6 +44,28 @@ func TestIntraday1mParsesStripsPrefixAndMapsTime(t *testing.T) {
 	}
 }
 
+func TestIntraday1mAlwaysClampsEndToNowMinus16m(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	var gotEnd string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/stocks/AAPL/bars", func(w http.ResponseWriter, r *http.Request) {
+		gotEnd = r.URL.Query().Get("end")
+		_, _ = w.Write([]byte(`{"bars":[],"next_page_token":null}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := New(srv.URL, "K", "S", "iex", clock.NewFake(now))
+	_, err := c.Intraday1m(context.Background(), "US.AAPL", time.UnixMilli(0), now.Add(48*time.Hour))
+	if err != nil {
+		t.Fatalf("err = %v, want nil", err)
+	}
+	wantEnd := now.Add(-16 * time.Minute).UTC().Format(time.RFC3339)
+	if gotEnd != wantEnd {
+		t.Fatalf("end = %q, want clamp %q", gotEnd, wantEnd)
+	}
+}
+
 func TestBarsPaginateViaNextPageToken(t *testing.T) {
 	var gotAdj string
 	mux := http.NewServeMux()

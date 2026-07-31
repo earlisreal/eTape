@@ -206,12 +206,19 @@ func (o *Orchestrator) noteBackfilled(symbol string, from1m time.Time) {
 // promoted from loadOlder so fill1m can reuse it.
 var archiveCoverSlackMs int64 = 2 * 24 * 60 * 60 * 1000
 
+const (
+	olderIntradayChunkTradingDays = 2
+	alpaca1mFloorTradingDays      = 20
+	olderDailyFloorYear           = 2000
+)
+
 // dailyFloor is the earliest daily-history start requested. Alpaca's free tier
 // hard-floors at 2016-01-04; Yahoo goes deeper, but the extra depth is below
 // the indicator-relevance threshold (spec's indicator-depth rationale: only a
 // monthly 200-period indicator wants more, an accepted casualty). Clamping
 // here keeps depth consistent regardless of which provider served.
 var dailyFloor = time.Date(2016, 1, 1, 0, 0, 0, 0, time.UTC)
+var olderDailyFloor = time.Date(olderDailyFloorYear, 1, 1, 0, 0, 0, 0, time.UTC)
 
 // dailyFrom is DailyYears ago clamped to dailyFloor, or dailyFloor when
 // DailyYears<=0.
@@ -384,15 +391,18 @@ type olderResult struct {
 	exhausted bool
 }
 
-// LoadOlder deepens the shared 1m series by one intraday chunk (IntradayDays
-// trading days older than the symbol's current watermark), archive-first,
-// floored at 2016-01-01. exhausted=true means the floor or the symbol's
-// listing date was reached -- the caller must stop asking. Concurrent calls
+// LoadOlder deepens the shared 1m series. When requiredStartMs/requiredEndMs
+// are both zero it deepens one intraday chunk (2 trading days older than the
+// symbol's current watermark), archive-first, floored at the Alpaca 1m limit
+// (last 20 trading days). When non-zero it fetches the demanded
+// [requiredStartMs, endMs) window instead, archive-first, clamped to the same
+// floor. exhausted=true means floor or listing-date reached. Concurrent calls
 // for the same symbol coalesce into a single fetch via the older
-// singleflight.Group (same pattern as opendfeed.HistoryBars' hbGroup).
-func (o *Orchestrator) LoadOlder(ctx context.Context, symbol string) (int, bool, error) {
+// singleflight.Group (same pattern as
+// opendfeed.HistoryBars' hbGroup).
+func (o *Orchestrator) LoadOlder(ctx context.Context, symbol string, requiredStartMs, requiredEndMs int64) (int, bool, error) {
 	v, err, _ := o.older.Do(symbol, func() (any, error) {
-		return o.loadOlder(ctx, symbol)
+		return o.loadOlder(ctx, symbol, requiredStartMs, requiredEndMs)
 	})
 	if err != nil {
 		return 0, false, err
@@ -401,27 +411,57 @@ func (o *Orchestrator) LoadOlder(ctx context.Context, symbol string) (int, bool,
 	return r.added, r.exhausted, nil
 }
 
-func (o *Orchestrator) loadOlder(ctx context.Context, symbol string) (olderResult, error) {
-	o.mu.Lock()
-	cur, ok := o.oldest1m[symbol]
-	o.mu.Unlock()
-	if !ok {
-		return olderResult{}, fmt.Errorf("load older: no backfill watermark for %s", symbol)
-	}
-	floorMs := dailyFloor.UnixMilli()
-	if cur <= floorMs {
-		return olderResult{exhausted: true}, nil
-	}
-	to := time.UnixMilli(cur) // exclusive upper bound: strictly older than what's already loaded
-	from := intradayFrom(to, o.cfg.IntradayDays)
-	if from.Before(dailyFloor) {
-		from = dailyFloor
+func (o *Orchestrator) loadOlder(ctx context.Context, symbol string, requiredStartMs, requiredEndMs int64) (olderResult, error) {
+	floor := intradayFrom(o.clk.Now(), alpaca1mFloorTradingDays)
+	floorMs := floor.UnixMilli()
+
+	// Determine the query window: range-driven (viewport-first) or watermark-driven.
+	var from, to time.Time
+	var cur int64 // watermark for advancing after range-driven fetch
+
+	if requiredStartMs > 0 && requiredEndMs > 0 {
+		// Range-driven: the UI demands a specific window.
+		from = time.UnixMilli(requiredStartMs)
+		to = time.UnixMilli(requiredEndMs)
+		if from.Before(floor) {
+			from = floor
+		}
+		if to.Before(from) {
+			return olderResult{exhausted: true}, nil
+		}
+		o.mu.Lock()
+		cur, _ = o.oldest1m[symbol]
+		o.mu.Unlock()
+		// Duplicate covered demand: already loaded to an older/equal start.
+		if cur > 0 && from.UnixMilli() >= cur {
+			return olderResult{}, nil
+		}
+	} else {
+		// Watermark-driven: one chunk older than the current watermark.
+		o.mu.Lock()
+		cur, _ = o.oldest1m[symbol]
+		o.mu.Unlock()
+		if cur == 0 {
+			return olderResult{}, fmt.Errorf("load older: no backfill watermark for %s", symbol)
+		}
+		if cur <= floorMs {
+			return olderResult{exhausted: true}, nil
+		}
+		to = time.UnixMilli(cur) // exclusive upper bound: strictly older than what's already loaded
+		from = intradayFrom(to, olderIntradayChunkTradingDays)
+		if from.Before(floor) {
+			from = floor
+		}
+		if !to.After(from) {
+			o.advanceWatermark(symbol, from.UnixMilli())
+			return olderResult{exhausted: true}, nil
+		}
 	}
 
-	// Archive-first: if the local archive already covers this older window
+	// Archive-first: if the local archive already covers the demanded window
 	// (earliest returned bar within slack of `from`), it wins outright -- no
 	// provider round-trip.
-	if bars, err := o.archive.ReadBars1m(symbol, from.UnixMilli(), cur-1); err != nil {
+	if bars, err := o.archive.ReadBars1m(symbol, from.UnixMilli(), to.UnixMilli()-1); err != nil {
 		slog.Warn("load older: archive read failed", "symbol", symbol, "err", err)
 	} else if len(bars) > 0 && bars[0].BucketMs <= from.UnixMilli()+archiveCoverSlackMs {
 		o.seedOlderUnlessCanceled(ctx, symbol, bars)
@@ -466,10 +506,10 @@ func (o *Orchestrator) seedOlderUnlessCanceled(ctx context.Context, symbol strin
 	seedUnlessCanceled(ctx, bars, func(b []feed.Bar) { o.seeder.SeedOlder1m(symbol, b) })
 }
 
-// LoadOlderDaily one-shot-fetches pre-2016 daily history (archive-first, then
-// the daily chain: Alpaca empty pre-2016 -> Yahoo to listing). Always
-// exhausted=true after one success or one empty result -- there is only ever
-// one pre-2016 chunk, so a symbol never asks twice in a session. Concurrent
+// LoadOlderDaily one-shot-fetches daily history for [2000, 2016)
+// (archive-first, then daily chain). Always exhausted=true after one success
+// or one empty result -- there is only ever one chunk, so a symbol never asks
+// twice in a session. Concurrent
 // calls for the same symbol coalesce via the olderDay singleflight.Group.
 func (o *Orchestrator) LoadOlderDaily(ctx context.Context, symbol string) (int, bool, error) {
 	v, err, _ := o.olderDay.Do(symbol, func() (any, error) {
@@ -490,9 +530,10 @@ func (o *Orchestrator) loadOlderDaily(ctx context.Context, symbol string) (older
 		return olderResult{exhausted: true}, nil
 	}
 
-	floorMs := dailyFloor.UnixMilli()
+	floorMs := olderDailyFloor.UnixMilli()
+	ceilingMs := dailyFloor.UnixMilli()
 
-	// Archive-first: if the archive already holds pre-2016 daily (e.g. from a
+	// Archive-first: if the archive already holds load-older daily range (e.g. from a
 	// prior session's one-shot), re-seed those instead of re-fetching. This
 	// only checks "any bar below floor exists", not depth of coverage, so a
 	// provider that silently truncated a prior pre-2016 fetch could look
@@ -504,31 +545,47 @@ func (o *Orchestrator) loadOlderDaily(ctx context.Context, symbol string) (older
 	// characteristic already exists, unfixed, in fillDaily's boot path.
 	if all, err := o.archive.ReadDailyBars(symbol); err != nil {
 		slog.Warn("load older daily: archive read failed", "symbol", symbol, "err", err)
-	} else if len(all) > 0 && all[0].BucketMs < floorMs {
+	} else if len(all) > 0 {
 		var pre []feed.Bar
 		for _, b := range all {
-			if b.BucketMs >= floorMs {
+			if b.BucketMs < floorMs {
+				continue
+			}
+			if b.BucketMs >= ceilingMs {
 				break
 			}
 			pre = append(pre, b)
 		}
-		o.seedDailyUnlessCanceled(ctx, symbol, pre)
-		o.markDailyDone(symbol)
-		return olderResult{added: len(pre), exhausted: true}, nil
+		if len(pre) > 0 {
+			o.seedDailyUnlessCanceled(ctx, symbol, pre)
+			o.markDailyDone(symbol)
+			return olderResult{added: len(pre), exhausted: true}, nil
+		}
 	}
 
-	from := time.Unix(0, 0)
+	from := olderDailyFloor
 	to := dailyFloor
 	bars, served, err := walkChain(ctx, symbol, from, to, o.daily, dailyBars)
 	if len(bars) == 0 {
 		o.markDailyDone(symbol) // never ask again this session
 		return olderResult{exhausted: true}, err
 	}
-	o.archiveDailyBars(bars)
-	o.seedDailyUnlessCanceled(ctx, symbol, bars)
+	var clipped []feed.Bar
+	for _, b := range bars {
+		if b.BucketMs < floorMs || b.BucketMs >= ceilingMs {
+			continue
+		}
+		clipped = append(clipped, b)
+	}
+	if len(clipped) == 0 {
+		o.markDailyDone(symbol)
+		return olderResult{exhausted: true}, nil
+	}
+	o.archiveDailyBars(clipped)
+	o.seedDailyUnlessCanceled(ctx, symbol, clipped)
 	o.markDailyDone(symbol)
-	slog.Info("load older: pre-2016 daily served", "symbol", symbol, "provider", served, "bars", len(bars))
-	return olderResult{added: len(bars), exhausted: true}, nil
+	slog.Info("load older: pre-2016 daily served", "symbol", symbol, "provider", served, "bars", len(clipped))
+	return olderResult{added: len(clipped), exhausted: true}, nil
 }
 
 func (o *Orchestrator) markDailyDone(symbol string) {

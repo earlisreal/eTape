@@ -69,9 +69,11 @@ type releaseIndicatorReq struct {
 // loadOlderReq is a pan-triggered deeper-history request marshaled onto
 // Run's goroutine (see Hub.LoadOlder's doc comment for why).
 type loadOlderReq struct {
-	symbol string
-	daily  bool
-	done   func(added int, exhausted bool, err error)
+	symbol          string
+	daily           bool
+	requiredStartMs int64
+	requiredEndMs   int64
+	done            func(added int, exhausted bool, err error)
 }
 
 // dropReport is how a conn's own goroutine (writeLoop, on a write timeout)
@@ -118,7 +120,7 @@ type backfillBox struct {
 // loadOlderBox mirrors backfillBox/feedBox: SetLoadOlder is called once at
 // boot from main's goroutine, after the Hub is already running.
 type loadOlderBox struct {
-	fn func(sym string, daily bool, done func(added int, exhausted bool, err error))
+	fn func(sym string, daily bool, requiredStartMs, requiredEndMs int64, done func(added int, exhausted bool, err error))
 }
 
 // Hub is a single-goroutine event loop that owns the mirror, the connected-
@@ -295,11 +297,11 @@ func (h *Hub) backfill() func(sym string, done func(ok bool)) {
 // the hub is running. Safe to call once from boot; nil until then (replay
 // without a fallback orchestrator, or tests, never call it) — LoadOlder then
 // acks exhausted with no fetch attempted.
-func (h *Hub) SetLoadOlder(fn func(sym string, daily bool, done func(added int, exhausted bool, err error))) {
+func (h *Hub) SetLoadOlder(fn func(sym string, daily bool, requiredStartMs, requiredEndMs int64, done func(added int, exhausted bool, err error))) {
 	h.loadOlderSlot.Store(&loadOlderBox{fn: fn})
 }
 
-func (h *Hub) loadOlderFn() func(sym string, daily bool, done func(added int, exhausted bool, err error)) {
+func (h *Hub) loadOlderFn() func(sym string, daily bool, requiredStartMs, requiredEndMs int64, done func(added int, exhausted bool, err error)) {
 	if b := h.loadOlderSlot.Load(); b != nil {
 		return b.fn
 	}
@@ -368,9 +370,9 @@ func (h *Hub) ReleaseIndicator(connID uint64, id string) {
 // there — the same safety property triggerBackfill relies on for its own
 // WaitGroup, needed here because commands.handle runs on a per-connection
 // goroutine, not Run's.
-func (h *Hub) LoadOlder(symbol string, daily bool, done func(added int, exhausted bool, err error)) {
+func (h *Hub) LoadOlder(symbol string, daily bool, requiredStartMs, requiredEndMs int64, done func(added int, exhausted bool, err error)) {
 	select {
-	case h.loadOlderCh <- loadOlderReq{symbol: symbol, daily: daily, done: done}:
+	case h.loadOlderCh <- loadOlderReq{symbol: symbol, daily: daily, requiredStartMs: requiredStartMs, requiredEndMs: requiredEndMs, done: done}:
 	case <-h.closed:
 		done(0, true, nil)
 	}
@@ -635,7 +637,7 @@ func (h *Hub) handleLoadOlder(r loadOlderReq) {
 		r.done(0, true, nil) // no fetch surface injected — nothing older to serve
 		return
 	}
-	fn(r.symbol, r.daily, r.done)
+	fn(r.symbol, r.daily, r.requiredStartMs, r.requiredEndMs, r.done)
 }
 
 // handleBackfillDone applies a backfill goroutine's reported outcome

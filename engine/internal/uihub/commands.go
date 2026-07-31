@@ -44,7 +44,7 @@ type indicatorCtl interface {
 type demandCtl interface {
 	EnsureDemand(connID uint64, d feed.Demand)
 	ReleaseDemand(connID uint64, demandID string)
-	LoadOlder(symbol string, daily bool, done func(added int, exhausted bool, err error))
+	LoadOlder(symbol string, daily bool, requiredStartMs, requiredEndMs int64, done func(added int, exhausted bool, err error))
 }
 
 // venueAdmin is the file-only settings seam (satisfied by *venueadmin.Admin).
@@ -296,7 +296,7 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		if err := json.Unmarshal(args, &a); err != nil || a.Symbol == "" {
 			return blocked("bad args"), false
 		}
-		cd.dem.LoadOlder(a.Symbol, a.Daily, func(added int, exhausted bool, err error) {
+		cd.dem.LoadOlder(a.Symbol, a.Daily, a.RequiredStartMs, a.RequiredEndMs, func(added int, exhausted bool, err error) {
 			if err != nil {
 				reply(wsmsg.AckMsg{Status: "blocked", Reason: err.Error()})
 				return

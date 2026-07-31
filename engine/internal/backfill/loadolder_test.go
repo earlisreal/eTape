@@ -12,15 +12,15 @@ import (
 
 func TestLoadOlderErrorsWithoutWatermark(t *testing.T) {
 	o := New(nil, nil, &fakeTail{}, &fakeSeeder{}, &fakeArchive{}, clock.NewFake(fixedNow()), Config{})
-	_, _, err := o.LoadOlder(context.Background(), "US.AAPL")
+	_, _, err := o.LoadOlder(context.Background(), "US.AAPL", 0, 0)
 	if err == nil {
 		t.Fatalf("want error when no watermark exists")
 	}
 }
 
 func TestLoadOlderArchiveFirstServesWithoutChain(t *testing.T) {
-	watermark := fixedNow().AddDate(0, 0, -20)
-	from := intradayFrom(watermark, 20)
+	watermark := fixedNow().AddDate(0, 0, -10)
+	from := intradayFrom(watermark, olderIntradayChunkTradingDays)
 	// Archive's earliest bar sits right at `from` -- squarely within the
 	// archive-coverage slack, so this exercises the genuine archive-first-wins
 	// path (contrast with TestLoadOlderArchiveFirstFallsThroughOnSparseSlice,
@@ -31,7 +31,7 @@ func TestLoadOlderArchiveFirstServesWithoutChain(t *testing.T) {
 	// nil intraday chain => archive-only; walkChain over nil returns (nil,"",nil).
 	o := New(nil, nil, &fakeTail{}, seed, arch, clock.NewFake(fixedNow()), Config{IntradayDays: 20})
 	o.noteBackfilled("US.AAPL", watermark)
-	added, exhausted, err := o.LoadOlder(context.Background(), "US.AAPL")
+	added, exhausted, err := o.LoadOlder(context.Background(), "US.AAPL", 0, 0)
 	if err != nil || added == 0 || exhausted {
 		t.Fatalf("archive-first should serve: added=%d exhausted=%v err=%v", added, exhausted, err)
 	}
@@ -49,8 +49,8 @@ func TestLoadOlderArchiveFirstServesWithoutChain(t *testing.T) {
 // call sites (tail1m, fill1m, loadOlder), so a sparse/stale slice inside a
 // requested window is realistic, not contrived.
 func TestLoadOlderArchiveFirstFallsThroughOnSparseSlice(t *testing.T) {
-	watermark := fixedNow().AddDate(0, 0, -20)
-	from := intradayFrom(watermark, 20)
+	watermark := fixedNow().AddDate(0, 0, -10)
+	from := intradayFrom(watermark, olderIntradayChunkTradingDays)
 
 	// Stray bar sits just below `cur` (watermark), nowhere near `from` -- well
 	// outside the archive-coverage slack, so it must not count as coverage.
@@ -63,7 +63,7 @@ func TestLoadOlderArchiveFirstFallsThroughOnSparseSlice(t *testing.T) {
 	o := New(nil, chain(fetcher), &fakeTail{}, seed, arch, clock.NewFake(fixedNow()), Config{IntradayDays: 20})
 	o.noteBackfilled("US.AAPL", watermark)
 
-	added, exhausted, err := o.LoadOlder(context.Background(), "US.AAPL")
+	added, exhausted, err := o.LoadOlder(context.Background(), "US.AAPL", 0, 0)
 	if err != nil {
 		t.Fatalf("LoadOlder err = %v, want nil", err)
 	}
@@ -101,7 +101,7 @@ func TestLoadOlderProviderErrorDoesNotAdvanceWatermark(t *testing.T) {
 	o := New(nil, chain(failing), &fakeTail{}, &fakeSeeder{}, &fakeArchive{}, clock.NewFake(fixedNow()), Config{IntradayDays: 20})
 	o.noteBackfilled("US.AAPL", watermark)
 
-	added, exhausted, err := o.LoadOlder(context.Background(), "US.AAPL")
+	added, exhausted, err := o.LoadOlder(context.Background(), "US.AAPL", 0, 0)
 	if err == nil {
 		t.Fatalf("want a non-nil error when every provider fails")
 	}
@@ -121,7 +121,7 @@ func TestLoadOlderProviderErrorDoesNotAdvanceWatermark(t *testing.T) {
 	// A subsequent call recomputes from the unchanged watermark, so it
 	// re-attempts the identical window -- proven here by the fetcher being
 	// asked again (same deterministic from/to derived from the watermark).
-	added2, exhausted2, err2 := o.LoadOlder(context.Background(), "US.AAPL")
+	added2, exhausted2, err2 := o.LoadOlder(context.Background(), "US.AAPL", 0, 0)
 	if err2 == nil || exhausted2 || added2 != 0 {
 		t.Fatalf("retry = added=%d exhausted=%v err=%v, want the same failing outcome", added2, exhausted2, err2)
 	}
@@ -133,7 +133,7 @@ func TestLoadOlderProviderErrorDoesNotAdvanceWatermark(t *testing.T) {
 func TestLoadOlderExhaustsAtFloor(t *testing.T) {
 	o := New(nil, nil, &fakeTail{}, &fakeSeeder{}, &fakeArchive{}, clock.NewFake(fixedNow()), Config{})
 	o.noteBackfilled("US.AAPL", dailyFloor) // watermark already at 2016 floor
-	_, exhausted, err := o.LoadOlder(context.Background(), "US.AAPL")
+	_, exhausted, err := o.LoadOlder(context.Background(), "US.AAPL", 0, 0)
 	if err != nil || !exhausted {
 		t.Fatalf("want exhausted at floor, got exhausted=%v err=%v", exhausted, err)
 	}
@@ -143,7 +143,7 @@ func TestLoadOlderExhaustsWhenArchiveAndChainEmpty(t *testing.T) {
 	watermark := fixedNow().AddDate(0, 0, -20)
 	o := New(nil, nil, &fakeTail{}, &fakeSeeder{}, &fakeArchive{}, clock.NewFake(fixedNow()), Config{IntradayDays: 20})
 	o.noteBackfilled("US.AAPL", watermark) // empty archive + nil chain
-	_, exhausted, err := o.LoadOlder(context.Background(), "US.AAPL")
+	_, exhausted, err := o.LoadOlder(context.Background(), "US.AAPL", 0, 0)
 	if err != nil || !exhausted {
 		t.Fatalf("want exhausted (pre-listing), got exhausted=%v err=%v", exhausted, err)
 	}

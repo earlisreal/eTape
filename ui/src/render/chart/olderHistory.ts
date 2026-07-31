@@ -12,8 +12,8 @@ export interface OlderHistoryAck {
 }
 
 export interface OlderHistoryDeps {
-  /** Wraps commands.sendCommand("LoadOlderBars", { daily }) — resolves with the ack. */
-  load: (daily: boolean) => Promise<OlderHistoryAck>;
+  /** Wraps commands.sendCommand("LoadOlderBars", { daily, requiredStartMs, requiredEndMs }) — resolves with the ack. */
+  load: (daily: boolean, requiredStartMs: number, requiredEndMs: number) => Promise<OlderHistoryAck>;
   /** Injected clock, so cooldown/timeout logic is deterministic in tests. */
   now: () => number;
 }
@@ -43,6 +43,7 @@ export class OlderHistoryController {
   private readonly inflight: Record<HistoryKind, boolean> = { intraday: false, daily: false };
   private readonly exhausted: Record<HistoryKind, boolean> = { intraday: false, daily: false };
   private readonly cooldownUntil: Record<HistoryKind, number> = { intraday: 0, daily: 0 };
+  private readonly lastAcceptedStartMs: Record<HistoryKind, number | null> = { intraday: null, daily: null };
   private readonly timers: Record<HistoryKind, ReturnType<typeof setTimeout> | undefined> = {
     intraday: undefined,
     daily: undefined,
@@ -50,16 +51,23 @@ export class OlderHistoryController {
 
   constructor(private readonly deps: OlderHistoryDeps) {}
 
-  maybeTrigger(range: { from: number; to: number } | null, isIntraday: boolean): void {
-    if (!range) return;
+  maybeTrigger(
+    logicalRange: { from: number; to: number } | null,
+    isIntraday: boolean,
+    requiredRangeMs: { from: number; to: number } | null = null,
+  ): void {
+    if (!logicalRange) return;
     const kind: HistoryKind = isIntraday ? "intraday" : "daily";
     if (this.inflight[kind] || this.exhausted[kind]) return;
     if (this.deps.now() < this.cooldownUntil[kind]) return;
 
-    const screens = range.to - range.from;
+    const screens = logicalRange.to - logicalRange.from;
     if (screens <= 0) return;
-    const remaining = range.from - LEFT_PAD_BARS;
+    const remaining = logicalRange.from - LEFT_PAD_BARS;
     if (remaining >= SCREENS_THRESHOLD * screens) return;
+    const required = requiredRangeMs ?? logicalRange;
+    const requiredStartMs = required.from;
+    if (this.lastAcceptedStartMs[kind] === requiredStartMs) return;
 
     this.inflight[kind] = true;
     this.clearTimer(kind);
@@ -72,10 +80,13 @@ export class OlderHistoryController {
     }, TIMEOUT_MS);
 
     const daily = kind === "daily";
+    // Range-driven: pass the viewport range so the engine can do archive-first
+    // coverage checks against the exact demanded window.
+    const requiredEndMs = required.to;
     this.deps
-      .load(daily)
-      .then((ack) => this.settle(kind, ack))
-      .catch(() => this.settle(kind, { status: "blocked" }));
+      .load(daily, requiredStartMs, requiredEndMs)
+      .then((ack) => this.settle(kind, ack, requiredStartMs))
+      .catch(() => this.settle(kind, { status: "blocked" }, requiredStartMs));
   }
 
   /** Clears all guard state for both kinds. Call on symbol change. */
@@ -84,6 +95,8 @@ export class OlderHistoryController {
     this.inflight.daily = false;
     this.exhausted.intraday = false;
     this.exhausted.daily = false;
+    this.lastAcceptedStartMs.intraday = null;
+    this.lastAcceptedStartMs.daily = null;
     this.cooldownUntil.intraday = 0;
     this.cooldownUntil.daily = 0;
     this.clearTimer("intraday");
@@ -98,10 +111,11 @@ export class OlderHistoryController {
     }
   }
 
-  private settle(kind: HistoryKind, ack: OlderHistoryAck): void {
+  private settle(kind: HistoryKind, ack: OlderHistoryAck, requiredStartMs: number): void {
     this.clearTimer(kind);
     this.inflight[kind] = false;
     if (ack.status === "accepted") {
+      this.lastAcceptedStartMs[kind] = requiredStartMs;
       const value = ack.value as { exhausted?: boolean } | undefined;
       if (value?.exhausted) this.exhausted[kind] = true;
     } else {

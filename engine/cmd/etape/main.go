@@ -602,10 +602,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		// nil chain returns (nil,"",nil), so LoadOlder degrades cleanly.
 		orch = backfill.New(nil, nil, nil, core, st, clock.System{}, backfill.Config{IntradayDays: cfg.Backfill.IntradayDays})
 	}
-	loadOlderFn := func(sym string, daily bool, done func(added int, exhausted bool, err error)) {
-		// FIXME: 1min bars automatically triggered even there is no manual pan happening
-		return
-
+	loadOlderFn := func(sym string, daily bool, requiredStartMs, requiredEndMs int64, done func(added int, exhausted bool, err error)) {
 		if orch == nil { // st itself was nil — should not happen in practice
 			done(0, true, nil)
 			return
@@ -618,7 +615,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 				done(added, exhausted, err)
 				return
 			}
-			added, exhausted, err := orch.LoadOlder(ctx, sym)
+			added, exhausted, err := orch.LoadOlder(ctx, sym, requiredStartMs, requiredEndMs)
 			done(added, exhausted, err)
 		}()
 	}

@@ -30,7 +30,7 @@ describe("OlderHistoryController", () => {
     const c = new OlderHistoryController({ load, now: () => 0 });
     // screens = to-from = 100; remaining = from - LEFT_PAD_BARS = 10 - 4 = 6 < 150
     c.maybeTrigger(range(10, 110), true);
-    expect(load).toHaveBeenCalledWith(false);
+    expect(load).toHaveBeenCalledWith(false, 10, 110);
   });
 
   it("does not fire when far from the left edge", () => {
@@ -98,6 +98,17 @@ describe("OlderHistoryController", () => {
 
     vi.advanceTimersByTime(2); // crosses the 30s mark
     c.maybeTrigger(range(10, 110), true); // in-flight cleared, kind not exhausted -> fires again
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("dedupes accepted requests by requiredStartMs per kind", async () => {
+    const load = vi.fn().mockResolvedValue({ status: "accepted", value: { added: 10, exhausted: false } });
+    const c = new OlderHistoryController({ load, now: () => 0 });
+    c.maybeTrigger(range(10, 110), true, { from: 1_000, to: 2_000 });
+    await flush();
+    c.maybeTrigger(range(10, 110), true, { from: 1_000, to: 2_100 }); // same start -> deduped
+    expect(load).toHaveBeenCalledTimes(1);
+    c.maybeTrigger(range(10, 110), true, { from: 900, to: 2_000 }); // deeper start -> allowed
     expect(load).toHaveBeenCalledTimes(2);
   });
 });

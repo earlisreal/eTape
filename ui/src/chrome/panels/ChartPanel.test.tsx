@@ -164,6 +164,19 @@ describe("ChartPanel", () => {
     expect(timeScaleApi.scrollToPosition).toHaveBeenCalledWith(49, false);
   });
 
+  it("passes demanded UTC-ms range in LoadOlderBars", () => {
+    const { commands } = renderChart();
+    timeScaleApi.getVisibleRange.mockReturnValue({ from: 1_700_000_000, to: 1_700_000_600 });
+    const clampRight = timeScaleApi.subscribeVisibleLogicalRangeChange.mock.calls[0][0] as (r: { from: number; to: number } | null) => void;
+    clampRight({ from: 10, to: 110 });
+    expect(commands.sendCommand).toHaveBeenCalledWith("LoadOlderBars", {
+      symbol: "US.AAPL",
+      daily: false,
+      requiredStartMs: 1_700_000_000_000,
+      requiredEndMs: 1_700_000_600_000,
+    });
+  });
+
   it("scopes indicator instanceIds to the panel, so two panels adding the same indicator type don't collide (Finding 2 regression)", () => {
     // Both panels share ONE store instance, exactly as App.tsx's single makeStores()
     // call shares BarStore/IndicatorStore across every chart panel in a workspace.

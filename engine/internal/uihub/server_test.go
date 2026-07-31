@@ -43,7 +43,7 @@ type noopDemand struct{}
 
 func (noopDemand) EnsureDemand(uint64, feed.Demand) {}
 func (noopDemand) ReleaseDemand(uint64, string)     {}
-func (noopDemand) LoadOlder(_ string, _ bool, done func(added int, exhausted bool, err error)) {
+func (noopDemand) LoadOlder(_ string, _ bool, _, _ int64, done func(added int, exhausted bool, err error)) {
 	done(0, true, nil)
 }
 

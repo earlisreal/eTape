@@ -20,12 +20,14 @@ const oneDayResp = `{"chart":{"result":[{"timestamp":[1451919600],` +
 	`"adjclose":[{"adjclose":[5]}]}}],"error":null}}`
 
 func TestDailyBarsScalesAndBucketsToETMidnight(t *testing.T) {
-	var gotPath, gotInterval, gotRange, gotUA string
+	var gotPath, gotInterval, gotRange, gotUA, gotP1, gotP2 string
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v8/finance/chart/AAPL", func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
 		gotInterval = r.URL.Query().Get("interval")
 		gotRange = r.URL.Query().Get("range")
+		gotP1 = r.URL.Query().Get("period1")
+		gotP2 = r.URL.Query().Get("period2")
 		gotUA = r.Header.Get("User-Agent")
 		_, _ = w.Write([]byte(oneDayResp))
 	})
@@ -33,12 +35,17 @@ func TestDailyBarsScalesAndBucketsToETMidnight(t *testing.T) {
 	defer srv.Close()
 
 	c := New(srv.URL, clock.NewFake(time.UnixMilli(0)))
-	bars, err := c.DailyBars(context.Background(), "US.AAPL", time.UnixMilli(0), time.UnixMilli(2_000_000_000_000))
+	from := time.UnixMilli(0)
+	to := time.UnixMilli(2_000_000_000_000)
+	bars, err := c.DailyBars(context.Background(), "US.AAPL", from, to)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if gotPath != "/v8/finance/chart/AAPL" || gotInterval != "1d" || gotRange != "" {
 		t.Fatalf("request = path %q interval %q range %q (range must be empty — never use range=)", gotPath, gotInterval, gotRange)
+	}
+	if gotP1 != "0" || gotP2 != "2000000000" {
+		t.Fatalf("period1/period2 = %q/%q, want 0/2000000000", gotP1, gotP2)
 	}
 	if !strings.Contains(strings.ToLower(gotUA), "mozilla") {
 		t.Fatalf("User-Agent = %q, want a browser UA", gotUA)
