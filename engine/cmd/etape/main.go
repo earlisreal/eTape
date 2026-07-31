@@ -679,7 +679,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 				}
 				moomoo := backfill.MoomooFetcher(fd)
 				if alpacaSrc != nil {
-					dailyChain = append(dailyChain, backfill.Source{Name: "alpaca", HistFetcher: alpacaSrc})
 					intradayChain = append(intradayChain, backfill.Source{Name: "alpaca", HistFetcher: alpacaSrc})
 				}
 				if cfg.Backfill.Yahoo.Enabled {
@@ -763,6 +762,9 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		orch = backfill.New(nil, nil, nil, core, st, clock.System{}, backfill.Config{IntradayDays: cfg.Backfill.IntradayDays})
 	}
 	loadOlderFn := func(sym string, daily bool, done func(added int, exhausted bool, err error)) {
+		// FIXME: 1min bars automatically triggered even there is no manual pan happening
+		return
+
 		if orch == nil { // st itself was nil — should not happen in practice
 			done(0, true, nil)
 			return
