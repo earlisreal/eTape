@@ -173,12 +173,20 @@ func (o *Orchestrator) Run(ctx context.Context, symbols []string) {
 // (nil once any daily provider served) so a caller can re-arm on failure (the
 // uihub retries a failed daily backfill once OpenD reconnects).
 func (o *Orchestrator) Backfill(ctx context.Context, symbol string) error {
+	t0 := time.Now()
 	now := o.clk.Now()
 	from1m := intradayFrom(now, o.cfg.IntradayDays)
 	o.warmStart(ctx, symbol, from1m, now)
+	slog.Debug("backfill: warmStart done", "symbol", symbol, "elapsed", time.Since(t0).Round(time.Millisecond))
+	t1 := time.Now()
 	tailOldestMs, tailOK := o.tail1m(ctx, symbol)
+	slog.Debug("backfill: tail1m done", "symbol", symbol, "elapsed", time.Since(t1).Round(time.Millisecond))
+	t2 := time.Now()
 	o.fill1m(ctx, symbol, from1m, now, tailOldestMs, tailOK)
+	slog.Debug("backfill: fill1m done", "symbol", symbol, "elapsed", time.Since(t2).Round(time.Millisecond))
+	t3 := time.Now()
 	err := o.fillDaily(ctx, symbol, o.dailyFrom(now), now.Add(-24*time.Hour))
+	slog.Debug("backfill: fillDaily done", "symbol", symbol, "elapsed", time.Since(t3).Round(time.Millisecond), "total", time.Since(t0).Round(time.Millisecond))
 	o.noteBackfilled(symbol, from1m)
 	return err
 }

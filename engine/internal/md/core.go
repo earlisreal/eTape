@@ -112,10 +112,21 @@ func (c *Core) Marks() <-chan Mark      { return c.marks }
 func (c *Core) Books() <-chan feed.Book { return c.bookOut }
 func (c *Core) DroppedUpdates() uint64  { return c.dropped.Load() }
 
-// Feed enqueues a feed event. Blocking by design: the inbox is deep and the
-// apply path is allocation-light, so sustained blocking means the core is
-// genuinely overloaded — that must surface upstream, not vanish.
-func (c *Core) Feed(ev feed.Event) { c.inbox <- eventMsg{ev: ev} }
+// Feed enqueues a feed event. Non-blocking: live tick events (book/quote/trade)
+// are time-sensitive and safe to drop — OpenD re-delivers on next push.
+// Sustained drops are visible in DroppedUpdates() and the dropped-updates
+// watcher's sys.events. The seed path (SeedDaily/SeedHistory1m) uses separate
+// blocking sends and must never be dropped.
+// ponytail: drop-on-full for live ticks; seed sends still block so backfill
+// order is preserved. If inbox saturation recurs under full load, split into
+// separate seedCh + liveCh channels.
+func (c *Core) Feed(ev feed.Event) {
+	select {
+	case c.inbox <- eventMsg{ev: ev}:
+	default:
+		c.dropped.Add(1)
+	}
+}
 
 func (c *Core) EnsureIndicator(connID uint64, id string, spec IndicatorSpec) {
 	c.inbox <- ensureIndicatorMsg{connID: connID, id: id, spec: spec}

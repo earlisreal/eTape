@@ -65,6 +65,7 @@ switch ($Mode) {
         Build-UI
         Log 'booting engine (live) -- open http://127.0.0.1:8686'
         Set-Location $EngineDir
+        $env:SLOG_LEVEL = 'debug'
         & go run ./cmd/etape -dist $Dist @Rest
         exit $LASTEXITCODE
     }
@@ -82,6 +83,7 @@ switch ($Mode) {
 
         Log 'booting engine (demo synthetic market) -- open http://127.0.0.1:8686'
         Set-Location $EngineDir
+        $env:SLOG_LEVEL = 'debug'
         if ($seed) {
             & go run ./cmd/etape -dist $Dist -demo -demo-seed $seed @Rest
         } else {

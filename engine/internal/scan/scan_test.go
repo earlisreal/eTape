@@ -695,6 +695,8 @@ func TestUpdatePoolEnsuresWatchDemandsAndBackfills(t *testing.T) {
 
 	p.updatePool(clk.Now(), rows("US.A", "US.B"))
 
+	time.Sleep(350 * time.Millisecond) // let staggered goroutines complete
+
 	if len(sf.ensured) != 2 {
 		t.Fatalf("want 2 Ensure calls, got %+v", sf.ensured)
 	}

@@ -179,8 +179,17 @@ func (p *Poller) updatePool(now time.Time, rows []wsmsg.ScannerRow) {
 		p.feed.Ensure(feed.WatchDemand(scanDemandID(s), s))
 	}
 	if p.backfill != nil {
-		for _, s := range d.Backfill {
-			p.backfill(s)
+		for i, s := range d.Backfill {
+			sym := s
+			delay := time.Duration(i) * 300 * time.Millisecond
+			if delay == 0 {
+				p.backfill(sym)
+			} else {
+				go func() {
+					time.Sleep(delay)
+					p.backfill(sym)
+				}()
+			}
 		}
 	}
 	snap := p.pool.Symbols()

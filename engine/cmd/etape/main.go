@@ -90,6 +90,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	demoSeed := flag.Int64("demo-seed", 0, "PRNG seed for -demo; 0 = random per launch")
 	noOpen := flag.Bool("no-open", false, "do not auto-open the default browser to the UI")
 	logPath := flag.String("log", "", "also write logs to this file")
+	logLevel := flag.String("log-level", os.Getenv("SLOG_LEVEL"), "log level: debug, info, warn, error (default SLOG_LEVEL env)")
 	vacuum := flag.Bool("vacuum", false, "run one-shot journal maintenance (prune+seal+vacuum) then exit; refuses if an engine is running")
 	flag.Parse()
 
@@ -146,7 +147,18 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		out = io.MultiWriter(writers...)
 	}
 
-	log := slog.New(slog.NewTextHandler(out, nil))
+	var handlerLevel slog.Level
+	if *logLevel == "" {
+		handlerLevel = slog.LevelInfo
+	} else if err := handlerLevel.UnmarshalText([]byte(*logLevel)); err != nil {
+		log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+		log.Error("bad -log-level", "level", *logLevel, "err", err)
+		return 1, false, nil
+	} else {
+		handlerLevel = handlerLevel
+	}
+	handlerOpts := &slog.HandlerOptions{Level: handlerLevel}
+	log := slog.New(slog.NewTextHandler(out, handlerOpts))
 	slog.SetDefault(log)
 	log.Info("etape starting", "version", buildinfo.Version)
 
