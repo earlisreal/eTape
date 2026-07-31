@@ -12,8 +12,8 @@ export interface OlderHistoryAck {
 }
 
 export interface OlderHistoryDeps {
-  /** Wraps commands.sendCommand("LoadOlderBars", { daily }) — resolves with the ack. */
-  load: (daily: boolean) => Promise<OlderHistoryAck>;
+  /** Wraps commands.sendCommand("LoadOlderBars", { daily, requiredStartMs, requiredEndMs }) — resolves with the ack. */
+  load: (daily: boolean, requiredStartMs: number, requiredEndMs: number) => Promise<OlderHistoryAck>;
   /** Injected clock, so cooldown/timeout logic is deterministic in tests. */
   now: () => number;
 }
@@ -50,15 +50,19 @@ export class OlderHistoryController {
 
   constructor(private readonly deps: OlderHistoryDeps) {}
 
-  maybeTrigger(range: { from: number; to: number } | null, isIntraday: boolean): void {
-    if (!range) return;
+  maybeTrigger(
+    logicalRange: { from: number; to: number } | null,
+    isIntraday: boolean,
+    requiredRangeMs: { from: number; to: number } | null = null,
+  ): void {
+    if (!logicalRange) return;
     const kind: HistoryKind = isIntraday ? "intraday" : "daily";
     if (this.inflight[kind] || this.exhausted[kind]) return;
     if (this.deps.now() < this.cooldownUntil[kind]) return;
 
-    const screens = range.to - range.from;
+    const screens = logicalRange.to - logicalRange.from;
     if (screens <= 0) return;
-    const remaining = range.from - LEFT_PAD_BARS;
+    const remaining = logicalRange.from - LEFT_PAD_BARS;
     if (remaining >= SCREENS_THRESHOLD * screens) return;
 
     this.inflight[kind] = true;
@@ -72,8 +76,13 @@ export class OlderHistoryController {
     }, TIMEOUT_MS);
 
     const daily = kind === "daily";
+    // Range-driven: pass the viewport range so the engine can do archive-first
+    // coverage checks against the exact demanded window.
+    const required = requiredRangeMs ?? logicalRange;
+    const requiredStartMs = required.from;
+    const requiredEndMs = required.to;
     this.deps
-      .load(daily)
+      .load(daily, requiredStartMs, requiredEndMs)
       .then((ack) => this.settle(kind, ack))
       .catch(() => this.settle(kind, { status: "blocked" }));
   }

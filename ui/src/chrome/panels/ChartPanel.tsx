@@ -225,26 +225,36 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       if (selectionFrame !== null) return;
       selectionFrame = requestAnimationFrame(() => { selectionFrame = null; refreshSelRef.current?.(); });
     };
+    const { facade, setPalette, drawings } = makeFacade(chart, palette);
     // currentSymbol (declared below, as a reassigned `let`) is read by `load`
     // via closure so every LoadOlderBars request names whatever symbol is
     // CURRENT at call time, not the symbol at mount time — applySymbol
     // reassigns it on every link-group change.
     const olderHistory = new OlderHistoryController({
-      load: (daily) => commands.sendCommand("LoadOlderBars", { symbol: currentSymbol, daily }),
+      load: (daily, requiredStartMs, requiredEndMs) => commands.sendCommand("LoadOlderBars", { symbol: currentSymbol, daily, requiredStartMs, requiredEndMs }),
       now: () => Date.now(),
     });
     const clampRight = (range: LogicalRange | null) => {
       const visibleBars = range ? range.to - range.from : RIGHT_OFFSET_BARS;
       const target = clampRightScroll(timeScale.scrollPosition(), visibleBars);
       if (target !== null) timeScale.scrollToPosition(target, false);
-      olderHistory.maybeTrigger(
-        range ? { from: range.from, to: range.to } : null,
-        isIntradayTimeframe(tfRef.current as Timeframe),
-      );
+      if (range) {
+        // Convert LogicalRange (bar indices) to UTC-ms timestamps for range-driven load.
+        const vr = (facade as any).getVisibleRange(); // {from: number, to: number} in UTC seconds
+        olderHistory.maybeTrigger(
+          { from: range.from, to: range.to },
+          isIntradayTimeframe(tfRef.current as Timeframe),
+          vr ? { from: vr.from * 1000, to: vr.to * 1000 } : null,
+        );
+      } else {
+        olderHistory.maybeTrigger(null, isIntradayTimeframe(tfRef.current as Timeframe));
+      }
       scheduleRefreshSelection();
     };
     timeScale.subscribeVisibleLogicalRangeChange(clampRight);
-    const { facade, setPalette, drawings } = makeFacade(chart, palette);
+    const getVisibleLogicalRange = (timeScale as { getVisibleLogicalRange?: () => LogicalRange | null }).getVisibleLogicalRange;
+    const initialRange = getVisibleLogicalRange ? getVisibleLogicalRange.call(timeScale) : null;
+    if (initialRange) clampRight(initialRange);
     facadeRef.current = facade;
     drawingsPrimRef.current = drawings;
     setFacadePaletteRef.current = setPalette;

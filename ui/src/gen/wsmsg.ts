@@ -462,11 +462,15 @@ export interface FocusGroupArgs {
 /**
  * LoadOlderBarsArgs is the args for the LoadOlderBars command. Daily=true
  * requests the one-shot pre-2016 daily fetch; false deepens the intraday 1m
- * series by one chunk.
+ * series by one chunk. RequiredStartMs/RequiredEndMs are non-zero when the
+ * caller demands a specific range (viewport-first lazy-load); absent (both
+ * zero) means "fill as much as possible" (deep-backfill path).
  */
 export interface LoadOlderBarsArgs {
   symbol: string;
   daily: boolean;
+  requiredStartMs: number /* int64 */;
+  requiredEndMs: number /* int64 */;
 }
 /**
  * LoadOlderResult is the deferred-ack Value for LoadOlderBars.

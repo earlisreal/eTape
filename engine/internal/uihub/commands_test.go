@@ -315,7 +315,7 @@ type spyDemandCtl struct {
 		conn uint64
 		id   string
 	}
-	loadOlderFn func(symbol string, daily bool, done func(added int, exhausted bool, err error))
+	loadOlderFn func(symbol string, daily bool, requiredStartMs, requiredEndMs int64, done func(added int, exhausted bool, err error))
 }
 
 func (s *spyDemandCtl) EnsureDemand(conn uint64, d feed.Demand) {
@@ -331,9 +331,9 @@ func (s *spyDemandCtl) ReleaseDemand(conn uint64, id string) {
 	}{conn, id})
 }
 
-func (s *spyDemandCtl) LoadOlder(symbol string, daily bool, done func(added int, exhausted bool, err error)) {
+func (s *spyDemandCtl) LoadOlder(symbol string, daily bool, requiredStartMs, requiredEndMs int64, done func(added int, exhausted bool, err error)) {
 	if s.loadOlderFn != nil {
-		s.loadOlderFn(symbol, daily, done)
+		s.loadOlderFn(symbol, daily, requiredStartMs, requiredEndMs, done)
 		return
 	}
 	done(0, true, nil) // default stub: nothing to fetch (mirrors the Hub's nil-slot fallback)
@@ -358,12 +358,12 @@ func newCmdWith(t *testing.T, feedErr error, feedNil bool) (*commands, *spyDeman
 // goroutine after the injected fetcher returns.
 func TestLoadOlderBarsDeferredAckAccepted(t *testing.T) {
 	cd, dem, _ := newCmdWith(t, nil, false)
-	dem.loadOlderFn = func(_ string, _ bool, done func(added int, exhausted bool, err error)) {
+	dem.loadOlderFn = func(_ string, _ bool, _, _ int64, done func(added int, exhausted bool, err error)) {
 		go done(19000, false, nil) // async, as the real Hub path is
 	}
 	var got wsmsg.AckMsg
 	done := make(chan struct{})
-	ack, deferred := cd.handle(context.Background(), "LoadOlderBars", mustJSON(t, wsmsg.LoadOlderBarsArgs{Symbol: "US.AAPL"}), 1,
+	ack, deferred := cd.handle(context.Background(), "LoadOlderBars", mustJSON(t, wsmsg.LoadOlderBarsArgs{Symbol: "US.AAPL", RequiredStartMs: 1000000, RequiredEndMs: 1100000}), 1,
 		func(a wsmsg.AckMsg) { got = a; close(done) })
 	if !deferred {
 		t.Fatalf("want deferred=true, got ack=%+v", ack)
@@ -383,11 +383,11 @@ func TestLoadOlderBarsDeferredAckAccepted(t *testing.T) {
 // the deferred ack must still land, with status "blocked" and a reason.
 func TestLoadOlderBarsErrorBlocks(t *testing.T) {
 	cd, dem, _ := newCmdWith(t, nil, false)
-	dem.loadOlderFn = func(_ string, _ bool, done func(added int, exhausted bool, err error)) {
+	dem.loadOlderFn = func(_ string, _ bool, _, _ int64, done func(added int, exhausted bool, err error)) {
 		done(0, false, errors.New("no watermark"))
 	}
 	var got wsmsg.AckMsg
-	_, deferred := cd.handle(context.Background(), "LoadOlderBars", mustJSON(t, wsmsg.LoadOlderBarsArgs{Symbol: "US.AAPL"}), 1,
+	_, deferred := cd.handle(context.Background(), "LoadOlderBars", mustJSON(t, wsmsg.LoadOlderBarsArgs{Symbol: "US.AAPL", RequiredStartMs: 1000000, RequiredEndMs: 1100000}), 1,
 		func(a wsmsg.AckMsg) { got = a })
 	if !deferred || got.Status != "blocked" || got.Reason == "" {
 		t.Fatalf("want deferred blocked ack with a reason, got deferred=%v ack=%+v", deferred, got)
@@ -402,7 +402,7 @@ func TestLoadOlderBarsErrorBlocks(t *testing.T) {
 func TestLoadOlderBarsNoFetchSurfaceExhausted(t *testing.T) {
 	cd, _, _ := newCmdWith(t, nil, false)
 	var got wsmsg.AckMsg
-	_, deferred := cd.handle(context.Background(), "LoadOlderBars", mustJSON(t, wsmsg.LoadOlderBarsArgs{Symbol: "US.AAPL"}), 1,
+	_, deferred := cd.handle(context.Background(), "LoadOlderBars", mustJSON(t, wsmsg.LoadOlderBarsArgs{Symbol: "US.AAPL", RequiredStartMs: 1000000, RequiredEndMs: 1100000}), 1,
 		func(a wsmsg.AckMsg) { got = a })
 	if !deferred || got.Status != "accepted" {
 		t.Fatalf("want deferred accepted ack, got deferred=%v ack=%+v", deferred, got)

@@ -30,7 +30,7 @@ describe("OlderHistoryController", () => {
     const c = new OlderHistoryController({ load, now: () => 0 });
     // screens = to-from = 100; remaining = from - LEFT_PAD_BARS = 10 - 4 = 6 < 150
     c.maybeTrigger(range(10, 110), true);
-    expect(load).toHaveBeenCalledWith(false);
+    expect(load).toHaveBeenCalledWith(false, 10, 110);
   });
 
   it("does not fire when far from the left edge", () => {

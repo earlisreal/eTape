@@ -396,15 +396,18 @@ type olderResult struct {
 	exhausted bool
 }
 
-// LoadOlder deepens the shared 1m series by one intraday chunk (IntradayDays
-// trading days older than the symbol's current watermark), archive-first,
-// floored at 2016-01-01. exhausted=true means the floor or the symbol's
-// listing date was reached -- the caller must stop asking. Concurrent calls
-// for the same symbol coalesce into a single fetch via the older
-// singleflight.Group (same pattern as opendfeed.HistoryBars' hbGroup).
-func (o *Orchestrator) LoadOlder(ctx context.Context, symbol string) (int, bool, error) {
+// LoadOlder deepens the shared 1m series. When requiredStartMs/requiredEndMs
+// are both zero it deepens one intraday chunk (IntradayDays trading days
+// older than the symbol's current watermark), archive-first, floored at
+// 2016-01-01. When non-zero it fetches the demanded [requiredStartMs, endMs)
+// window instead, archive-first, floored at 2016-01-01. exhausted=true means
+// the floor or the symbol's listing date was reached -- the caller must stop
+// asking. Concurrent calls for the same symbol coalesce into a single fetch
+// via the older singleflight.Group (same pattern as
+// opendfeed.HistoryBars' hbGroup).
+func (o *Orchestrator) LoadOlder(ctx context.Context, symbol string, requiredStartMs, requiredEndMs int64) (int, bool, error) {
 	v, err, _ := o.older.Do(symbol, func() (any, error) {
-		return o.loadOlder(ctx, symbol)
+		return o.loadOlder(ctx, symbol, requiredStartMs, requiredEndMs)
 	})
 	if err != nil {
 		return 0, false, err
@@ -413,27 +416,51 @@ func (o *Orchestrator) LoadOlder(ctx context.Context, symbol string) (int, bool,
 	return r.added, r.exhausted, nil
 }
 
-func (o *Orchestrator) loadOlder(ctx context.Context, symbol string) (olderResult, error) {
-	o.mu.Lock()
-	cur, ok := o.oldest1m[symbol]
-	o.mu.Unlock()
-	if !ok {
-		return olderResult{}, fmt.Errorf("load older: no backfill watermark for %s", symbol)
-	}
+func (o *Orchestrator) loadOlder(ctx context.Context, symbol string, requiredStartMs, requiredEndMs int64) (olderResult, error) {
 	floorMs := dailyFloor.UnixMilli()
-	if cur <= floorMs {
-		return olderResult{exhausted: true}, nil
-	}
-	to := time.UnixMilli(cur) // exclusive upper bound: strictly older than what's already loaded
-	from := intradayFrom(to, o.cfg.IntradayDays)
-	if from.Before(dailyFloor) {
-		from = dailyFloor
+
+	// Determine the query window: range-driven (viewport-first) or watermark-driven.
+	var from, to time.Time
+	var cur int64 // watermark for advancing after range-driven fetch
+
+	if requiredStartMs > 0 && requiredEndMs > 0 {
+		// Range-driven: the UI demands a specific window.
+		from = time.UnixMilli(requiredStartMs)
+		to = time.UnixMilli(requiredEndMs)
+		if from.Before(dailyFloor) {
+			from = dailyFloor
+		}
+		if to.Before(from) {
+			return olderResult{exhausted: true}, nil
+		}
+		// Use the watermark to advance after serving: the watermark must not
+		// exceed `from` (the oldest bar we just served), so the next watermark-
+		// driven fetch goes strictly deeper.
+		o.mu.Lock()
+		cur, _ = o.oldest1m[symbol]
+		o.mu.Unlock()
+	} else {
+		// Watermark-driven: one chunk older than the current watermark.
+		o.mu.Lock()
+		cur, _ = o.oldest1m[symbol]
+		o.mu.Unlock()
+		if cur == 0 {
+			return olderResult{}, fmt.Errorf("load older: no backfill watermark for %s", symbol)
+		}
+		if cur <= floorMs {
+			return olderResult{exhausted: true}, nil
+		}
+		to = time.UnixMilli(cur) // exclusive upper bound: strictly older than what's already loaded
+		from = intradayFrom(to, o.cfg.IntradayDays)
+		if from.Before(dailyFloor) {
+			from = dailyFloor
+		}
 	}
 
-	// Archive-first: if the local archive already covers this older window
+	// Archive-first: if the local archive already covers the demanded window
 	// (earliest returned bar within slack of `from`), it wins outright -- no
 	// provider round-trip.
-	if bars, err := o.archive.ReadBars1m(symbol, from.UnixMilli(), cur-1); err != nil {
+	if bars, err := o.archive.ReadBars1m(symbol, from.UnixMilli(), to.UnixMilli()-1); err != nil {
 		slog.Warn("load older: archive read failed", "symbol", symbol, "err", err)
 	} else if len(bars) > 0 && bars[0].BucketMs <= from.UnixMilli()+archiveCoverSlackMs {
 		o.seedOlderUnlessCanceled(ctx, symbol, bars)
