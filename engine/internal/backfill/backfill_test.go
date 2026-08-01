@@ -84,7 +84,7 @@ func (t *fakeTail) Tail1m(_ context.Context, _ string) ([]feed.Bar, error) {
 
 type fakeSeeder struct {
 	mu          sync.Mutex
-	daily, hist []feed.Bar
+	daily, hist, hist10s []feed.Bar
 	older       []feed.Bar
 	ticks       []feed.Tick
 	calls       []string
@@ -102,6 +102,12 @@ func (s *fakeSeeder) SeedDaily(_ string, b []feed.Bar) {
 	s.daily = append(s.daily, b...)
 	s.calls = append(s.calls, "daily")
 }
+func (s *fakeSeeder) SeedHistory10s(_ string, b []feed.Bar) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hist10s = append(s.hist10s, b...)
+	s.calls = append(s.calls, "hist10s")
+}
 func (s *fakeSeeder) SeedHistory1m(_ string, b []feed.Bar) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -117,9 +123,10 @@ func (s *fakeSeeder) SeedOlder1m(_ string, b []feed.Bar) {
 
 type fakeArchive struct {
 	mu            sync.Mutex
-	daily, m1     []feed.Bar
+	daily, m1, m10s []feed.Bar
 	archivedDaily []feed.Bar
 	archived1m    []feed.Bar
+	archived10s   []feed.Bar
 }
 
 func (a *fakeArchive) ReadDailyBars(_ string) ([]feed.Bar, error) { return a.daily, nil }
@@ -128,6 +135,16 @@ func (a *fakeArchive) ReadDailyBars(_ string) ([]feed.Bar, error) { return a.dai
 // store.Store.ReadBars1m's ts >= fromMs AND ts <= toMs scan -- callers that
 // stash a fixture with timestamps outside a query's actual window must not
 // see it echoed back regardless of range.
+func (a *fakeArchive) ReadBars10s(_ string, fromMs, toMs int64) ([]feed.Bar, error) {
+	var out []feed.Bar
+	for _, b := range a.m10s {
+		if b.BucketMs >= fromMs && b.BucketMs <= toMs {
+			out = append(out, b)
+		}
+	}
+	return out, nil
+}
+
 func (a *fakeArchive) ReadBars1m(_ string, fromMs, toMs int64) ([]feed.Bar, error) {
 	var out []feed.Bar
 	for _, b := range a.m1 {
@@ -136,6 +153,11 @@ func (a *fakeArchive) ReadBars1m(_ string, fromMs, toMs int64) ([]feed.Bar, erro
 		}
 	}
 	return out, nil
+}
+func (a *fakeArchive) ArchiveBar10s(b feed.Bar) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.archived10s = append(a.archived10s, b)
 }
 func (a *fakeArchive) ArchiveBar1m(b feed.Bar) {
 	a.mu.Lock()

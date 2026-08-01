@@ -60,6 +60,7 @@ type TailFetcher interface {
 type Seeder interface {
 	SeedDaily(symbol string, bars []feed.Bar)
 	SeedHistory1m(symbol string, bars []feed.Bar)
+	SeedHistory10s(symbol string, bars []feed.Bar)
 	SeedOlder1m(symbol string, bars []feed.Bar)
 	SeedSessionTicks(symbol string, ticks []feed.Tick)
 }
@@ -75,7 +76,9 @@ type Seeder interface {
 type Archive interface {
 	ReadDailyBars(symbol string) ([]feed.Bar, error)
 	ReadBars1m(symbol string, fromMs, toMs int64) ([]feed.Bar, error)
+	ReadBars10s(symbol string, fromMs, toMs int64) ([]feed.Bar, error)
 	ArchiveBar1m(b feed.Bar)
+	ArchiveBar10s(b feed.Bar)
 	ArchiveDaily(b feed.Bar)
 }
 
@@ -245,6 +248,11 @@ func (o *Orchestrator) warmStart(ctx context.Context, symbol string, from1m, now
 		slog.Warn("backfill: warm-start 1m read failed", "symbol", symbol, "err", err)
 	} else {
 		seedUnlessCanceled(ctx, m1, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+	}
+	if s10, err := o.archive.ReadBars10s(symbol, from1m.UnixMilli(), now.UnixMilli()); err != nil {
+		slog.Warn("backfill: warm-start 10s read failed", "symbol", symbol, "err", err)
+	} else {
+		seedUnlessCanceled(ctx, s10, func(b []feed.Bar) { o.seeder.SeedHistory10s(symbol, b) })
 	}
 }
 

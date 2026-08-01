@@ -763,6 +763,8 @@ func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, live bool, ar
 				b := feed.Bar{Symbol: bu.Bar.Symbol, BucketMs: bu.Bar.BucketMs,
 					O: bu.Bar.O, H: bu.Bar.H, L: bu.Bar.L, C: bu.Bar.C, Volume: bu.Bar.V}
 				switch bu.Bar.TF {
+				case session.TF10s:
+					archive.ArchiveBar10s(b)
 				case session.TF1m:
 					archive.ArchiveBar1m(b)
 				case session.TFDay:

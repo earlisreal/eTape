@@ -56,11 +56,12 @@ const (
 const seedDaySubstepMs = barMs
 
 // SeedStore is the store surface Seed writes warm history through -
-// satisfied by *store.Store (ArchiveDaily/ArchiveBar1m: store/bars.go;
+// satisfied by *store.Store (ArchiveDaily/ArchiveBar1m/ArchiveBar10s: store/bars.go;
 // Flush: store/store.go).
 type SeedStore interface {
 	ArchiveDaily(feed.Bar)
 	ArchiveBar1m(feed.Bar)
+	ArchiveBar10s(feed.Bar)
 	Flush()
 }
 

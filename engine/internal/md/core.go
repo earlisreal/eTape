@@ -39,6 +39,10 @@ type seedHistory1mMsg struct {
 	symbol string
 	bars   []feed.Bar
 }
+type seedHistory10sMsg struct {
+	symbol string
+	bars   []feed.Bar
+}
 type seedOlder1mMsg struct {
 	symbol string
 	bars   []feed.Bar
@@ -53,6 +57,7 @@ func (ensureIndicatorMsg) isInMsg()  {}
 func (releaseIndicatorMsg) isInMsg() {}
 func (seedDailyMsg) isInMsg()        {}
 func (seedHistory1mMsg) isInMsg()    {}
+func (seedHistory10sMsg) isInMsg()   {}
 func (seedOlder1mMsg) isInMsg()      {}
 func (seedSessionTicksMsg) isInMsg() {}
 
@@ -141,6 +146,11 @@ func (c *Core) SeedHistory1m(symbol string, bars []feed.Bar) {
 	c.inbox <- seedHistory1mMsg{symbol: symbol, bars: bars}
 }
 
+// SeedHistory10s enqueues a batch of 10s bars for deep-history seed.
+func (c *Core) SeedHistory10s(symbol string, bars []feed.Bar) {
+	c.inbox <- seedHistory10sMsg{symbol: symbol, bars: bars}
+}
+
 // SeedOlder1m enqueues a strictly-older chunk of 1m bars (a pan-triggered
 // deeper-history load). It upserts into the existing series, cascades into
 // 5m/15m/30m/60m, and emits one BarPrepend per intraday timeframe carrying
@@ -218,6 +228,8 @@ func (c *Core) apply(m inMsg) {
 		c.bars.seedDaily(c, msg.symbol, msg.bars) // Task 11
 	case seedHistory1mMsg:
 		c.bars.seedHistory1m(c, msg.symbol, msg.bars)
+	case seedHistory10sMsg:
+		c.bars.seedHistory10s(c, msg.symbol, msg.bars)
 	case seedOlder1mMsg:
 		c.bars.seedOlder1m(c, msg.symbol, msg.bars)
 	case seedSessionTicksMsg:

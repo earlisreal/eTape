@@ -311,6 +311,38 @@ func (e *barEngine) seedHistory1m(c *Core, symbol string, bars []feed.Bar) {
 	c.inds.reseedSymbol(c, symbol)
 }
 
+// seedHistory10s inserts deep-history 10s bars (all finalized) without
+// disturbing the live forming bar, then emits one BarSnapshot at the end.
+// Per-bar emission is suppressed for the whole batch (c.seeding): a deep seed
+// can span tens of thousands of bars, which would overflow Core's drop-on-full
+// updates channel if emitted per-bar. One BarSnapshot replaces it.
+func (e *barEngine) seedHistory10s(c *Core, symbol string, bars []feed.Bar) {
+	if len(bars) == 0 {
+		return
+	}
+	sb := e.sym(symbol)
+	s10 := sb.series[session.TF10s]
+	forming := int64(-1)
+	if lb := s10.last(); lb != nil && lb.InProgress {
+		forming = lb.BucketMs
+	}
+	c.seeding = true
+	for _, raw := range bars {
+		if raw.BucketMs == forming {
+			continue
+		}
+		nb := Bar{
+			Symbol: symbol, TF: session.TF10s, BucketMs: raw.BucketMs,
+			O: raw.O, H: raw.H, L: raw.L, C: raw.C, V: raw.Volume,
+		}
+		s10.upsert(nb)
+	}
+	c.seeding = false
+	e.emitSeedSnapshots(c, sb, []session.Timeframe{session.TF10s})
+	// No cascade or deriveDaily — 10s bars are leaf; not folded into 1m.
+	// No indicator reseed here — indicators reseed on their own snapshot path.
+}
+
 // seedOlder1m upserts a strictly-older 1m chunk, cascades to 5m/15m/30m/60m,
 // and emits one BarPrepend per intraday TF carrying ONLY the newly-added older
 // bars (constant per-chunk wire cost). Per-bar emission is suppressed for the

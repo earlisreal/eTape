@@ -37,6 +37,37 @@ func TestArchive1mUpsertAndRead(t *testing.T) {
 	}
 }
 
+func TestArchive10sUpsertAndRead(t *testing.T) {
+	s := open(t)
+	s.ArchiveBar10s(feed.Bar{Symbol: "US.AAPL", BucketMs: 1000, O: 10, H: 11, L: 9, C: 10.5, Volume: 100})
+	s.ArchiveBar10s(feed.Bar{Symbol: "US.AAPL", BucketMs: 2000, O: 10.5, H: 12, L: 10, C: 11.8, Volume: 200})
+	s.Flush()
+
+	got, err := s.ReadBars10s("US.AAPL", 0, 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("bars = %d, want 2", len(got))
+	}
+	if got[0].BucketMs != 1000 {
+		t.Fatalf("ordering wrong: %+v", got)
+	}
+	// Re-finalize — must REPLACE, not duplicate.
+	s.ArchiveBar10s(feed.Bar{Symbol: "US.AAPL", BucketMs: 1000, O: 10, H: 11.5, L: 9, C: 11, Volume: 150})
+	s.Flush()
+	got, err = s.ReadBars10s("US.AAPL", 0, 5000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("bars = %d, want 2 after upsert", len(got))
+	}
+	if got[0].C != 11 || got[0].Volume != 150 {
+		t.Fatalf("bucket 1000 not replaced: %+v", got[0])
+	}
+}
+
 func TestArchiveDailyReadAll(t *testing.T) {
 	s := open(t)
 	s.ArchiveDaily(feed.Bar{Symbol: "US.AAPL", BucketMs: 200, O: 1, H: 2, L: 1, C: 2, Volume: 9})
