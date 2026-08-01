@@ -1,5 +1,4 @@
 // ui/src/render/chart/olderHistory.ts
-import { LEFT_PAD_BARS } from "./ChartController";
 
 /** Which side of the history split a request targets. Independent guard state per kind. */
 export type HistoryKind = "intraday" | "daily";
@@ -18,20 +17,18 @@ export interface OlderHistoryDeps {
   now: () => number;
 }
 
-const SCREENS_THRESHOLD = 1.5;
 const COOLDOWN_MS = 5_000;
 const TIMEOUT_MS = 30_000;
 
 /**
- * Decides when to ask the engine for an older chunk of history bars as the
- * user pans a chart left, and guards against duplicate/looping LoadOlderBars
- * requests. UI-framework-agnostic and fully unit-testable via injected
- * `load`/`now`; ChartPanel (Task 12) wires it to
+ * Fires only when called explicitly after gesture release (pointerup, keyup,
+ * wheel idle), not on every range-change event. Guards against duplicate/
+ * looping LoadOlderBars requests. UI-framework-agnostic and fully
+ * unit-testable via injected `load`/`now`; ChartPanel wires it to
  * commands.sendCommand("LoadOlderBars", ...) plus the chart's visible range
  * and current timeframe/symbol.
  *
  * Guards:
- *  - fires only when fewer than ~1.5 screens of bars remain left of the viewport
  *  - one request in flight at a time PER KIND (intraday vs daily are independent)
  *  - once a kind is `exhausted` (an accepted ack with value.exhausted: true), it
  *    is never asked again until `reset()` (symbol change)
@@ -51,23 +48,24 @@ export class OlderHistoryController {
 
   constructor(private readonly deps: OlderHistoryDeps) {}
 
-  maybeTrigger(
-    logicalRange: { from: number; to: number } | null,
+  /**
+   * Called once after the user releases a pan/zoom gesture (pointerup, keyup,
+   * wheel idle). Fires LoadOlderBars if guards pass. Safe to call speculatively
+   * — inflight/exhausted/cooldown/dedup guards prevent duplicate requests.
+   * Returns a promise that resolves when the request settles (ack received or
+   * timeout), so callers can read exhausted state afterwards.
+   */
+  triggerNow(
     isIntraday: boolean,
     requiredRangeMs: { from: number; to: number } | null = null,
-  ): void {
-    if (!logicalRange) return;
+  ): Promise<void> {
     const kind: HistoryKind = isIntraday ? "intraday" : "daily";
-    if (this.inflight[kind] || this.exhausted[kind]) return;
-    if (this.deps.now() < this.cooldownUntil[kind]) return;
+    if (this.inflight[kind] || this.exhausted[kind]) return Promise.resolve();
+    if (this.deps.now() < this.cooldownUntil[kind]) return Promise.resolve();
+    if (!requiredRangeMs) return Promise.resolve();
 
-    const screens = logicalRange.to - logicalRange.from;
-    if (screens <= 0) return;
-    const remaining = logicalRange.from - LEFT_PAD_BARS;
-    if (remaining >= SCREENS_THRESHOLD * screens) return;
-    const required = requiredRangeMs ?? logicalRange;
-    const requiredStartMs = required.from;
-    if (this.lastAcceptedStartMs[kind] === requiredStartMs) return;
+    const requiredStartMs = requiredRangeMs.from;
+    if (this.lastAcceptedStartMs[kind] === requiredStartMs) return Promise.resolve();
 
     this.inflight[kind] = true;
     this.clearTimer(kind);
@@ -80,13 +78,14 @@ export class OlderHistoryController {
     }, TIMEOUT_MS);
 
     const daily = kind === "daily";
-    // Range-driven: pass the viewport range so the engine can do archive-first
-    // coverage checks against the exact demanded window.
-    const requiredEndMs = required.to;
-    this.deps
-      .load(daily, requiredStartMs, requiredEndMs)
+    return this.deps
+      .load(daily, requiredStartMs, requiredRangeMs.to)
       .then((ack) => this.settle(kind, ack, requiredStartMs))
-      .catch(() => this.settle(kind, { status: "blocked" }, requiredStartMs));
+      .catch((err) => { this.settle(kind, { status: "blocked" }, requiredStartMs); throw err; });
+  }
+
+  isExhausted(kind: HistoryKind): boolean {
+    return this.exhausted[kind];
   }
 
   /** Clears all guard state for both kinds. Call on symbol change. */

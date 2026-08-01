@@ -2,8 +2,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { OlderHistoryController } from "./olderHistory";
 
-const range = (from: number, to: number) => ({ from, to });
-
 // vi.fn().mockResolvedValue()'s own resolution plus this module's .then()/
 // .catch() chain take a few real microtask ticks to settle (measured
 // empirically at 3 under this vitest/mock-fn version) — flush with margin
@@ -25,38 +23,37 @@ afterEach(() => {
 });
 
 describe("OlderHistoryController", () => {
-  it("fires when fewer than 1.5 screens remain to the left", () => {
+  it("triggerNow fires when guards clear", async () => {
     const load = vi.fn().mockResolvedValue({ status: "accepted", value: { added: 100, exhausted: false } });
     const c = new OlderHistoryController({ load, now: () => 0 });
-    // screens = to-from = 100; remaining = from - LEFT_PAD_BARS = 10 - 4 = 6 < 150
-    c.maybeTrigger(range(10, 110), true);
-    expect(load).toHaveBeenCalledWith(false, 10, 110);
+    c.triggerNow(true, { from: 1_000, to: 2_000 });
+    expect(load).toHaveBeenCalledWith(false, 1_000, 2_000);
   });
 
-  it("does not fire when far from the left edge", () => {
+  it("triggerNow is a no-op when requiredRangeMs is null", () => {
     const load = vi.fn().mockResolvedValue({ status: "accepted", value: { added: 0, exhausted: false } });
     const c = new OlderHistoryController({ load, now: () => 0 });
-    c.maybeTrigger(range(1000, 1100), true); // remaining 996 > 150
+    c.triggerNow(true, null);
     expect(load).not.toHaveBeenCalled();
   });
 
   it("suppresses a second request while one is in flight", () => {
     const load = vi.fn().mockReturnValue(new Promise(() => {})); // never resolves
     const c = new OlderHistoryController({ load, now: () => 0 });
-    c.maybeTrigger(range(10, 110), true);
-    c.maybeTrigger(range(10, 110), true);
+    c.triggerNow(true, { from: 1_000, to: 2_000 });
+    c.triggerNow(true, { from: 500, to: 2_000 });
     expect(load).toHaveBeenCalledTimes(1);
   });
 
   it("stops asking after an exhausted ack (per kind, independent of the other kind)", async () => {
     const load = vi.fn().mockResolvedValue({ status: "accepted", value: { added: 0, exhausted: true } });
     const c = new OlderHistoryController({ load, now: () => 0 });
-    c.maybeTrigger(range(10, 110), true);
+    c.triggerNow(true, { from: 1_000, to: 2_000 });
     await flush(); // ack lands: intraday is no longer in flight, but is now exhausted
-    c.maybeTrigger(range(10, 110), true);
+    c.triggerNow(true, { from: 1_000, to: 2_000 });
     expect(load).toHaveBeenCalledTimes(1); // blocked by `exhausted`, not a lingering in-flight flag
     // daily kind is independent — still allowed
-    c.maybeTrigger(range(10, 110), false);
+    c.triggerNow(false, { from: 1_000, to: 2_000 });
     expect(load).toHaveBeenCalledTimes(2);
   });
 
@@ -64,51 +61,84 @@ describe("OlderHistoryController", () => {
     const load = vi.fn().mockResolvedValue({ status: "blocked", reason: "not ready" });
     let t = 0;
     const c = new OlderHistoryController({ load, now: () => t });
-    c.maybeTrigger(range(10, 110), true);
+    c.triggerNow(true, { from: 1_000, to: 2_000 });
     await flush();
     t = 1000;
-    c.maybeTrigger(range(10, 110), true); // within 5s cooldown
+    c.triggerNow(true, { from: 1_000, to: 2_000 }); // within 5s cooldown
     expect(load).toHaveBeenCalledTimes(1);
     t = 6000;
-    c.maybeTrigger(range(10, 110), true); // cooldown elapsed
+    c.triggerNow(true, { from: 1_000, to: 2_000 }); // cooldown elapsed
     expect(load).toHaveBeenCalledTimes(2);
   });
 
   it("reset() re-enables an exhausted kind", async () => {
     const load = vi.fn().mockResolvedValue({ status: "accepted", value: { added: 0, exhausted: true } });
     const c = new OlderHistoryController({ load, now: () => 0 });
-    c.maybeTrigger(range(10, 110), true);
+    c.triggerNow(true, { from: 1_000, to: 2_000 });
     await flush();
-    c.maybeTrigger(range(10, 110), true); // exhausted — must not fire again
+    c.triggerNow(true, { from: 1_000, to: 2_000 }); // exhausted — must not fire again
     expect(load).toHaveBeenCalledTimes(1);
     c.reset();
-    c.maybeTrigger(range(10, 110), true); // reset cleared the exhausted flag — fires again
+    c.triggerNow(true, { from: 1_000, to: 2_000 }); // reset cleared the exhausted flag — fires again
     expect(load).toHaveBeenCalledTimes(2);
   });
 
   it("clears the in-flight flag after a 30s timeout when no ack ever arrives, without marking exhausted", () => {
     const load = vi.fn().mockReturnValue(new Promise(() => {})); // ack lost, e.g. across a reconnect
     const c = new OlderHistoryController({ load, now: () => 0 });
-    c.maybeTrigger(range(10, 110), true);
+    c.triggerNow(true, { from: 1_000, to: 2_000 });
     expect(load).toHaveBeenCalledTimes(1);
 
     vi.advanceTimersByTime(29_999);
-    c.maybeTrigger(range(10, 110), true); // still in flight, suppressed
+    c.triggerNow(true, { from: 500, to: 2_000 }); // still in flight, suppressed
     expect(load).toHaveBeenCalledTimes(1);
 
     vi.advanceTimersByTime(2); // crosses the 30s mark
-    c.maybeTrigger(range(10, 110), true); // in-flight cleared, kind not exhausted -> fires again
+    c.triggerNow(true, { from: 500, to: 2_000 }); // in-flight cleared, kind not exhausted -> fires again
     expect(load).toHaveBeenCalledTimes(2);
   });
 
   it("dedupes accepted requests by requiredStartMs per kind", async () => {
     const load = vi.fn().mockResolvedValue({ status: "accepted", value: { added: 10, exhausted: false } });
     const c = new OlderHistoryController({ load, now: () => 0 });
-    c.maybeTrigger(range(10, 110), true, { from: 1_000, to: 2_000 });
+    c.triggerNow(true, { from: 1_000, to: 2_000 });
     await flush();
-    c.maybeTrigger(range(10, 110), true, { from: 1_000, to: 2_100 }); // same start -> deduped
+    c.triggerNow(true, { from: 1_000, to: 2_100 }); // same start -> deduped
     expect(load).toHaveBeenCalledTimes(1);
-    c.maybeTrigger(range(10, 110), true, { from: 900, to: 2_000 }); // deeper start -> allowed
+    c.triggerNow(true, { from: 900, to: 2_000 }); // deeper start -> allowed
     expect(load).toHaveBeenCalledTimes(2);
+  });
+
+  it("isExhausted returns false before any ack", () => {
+    const load = vi.fn().mockResolvedValue({ status: "accepted", value: { added: 100, exhausted: false } });
+    const c = new OlderHistoryController({ load, now: () => 0 });
+    expect(c.isExhausted("intraday")).toBe(false);
+    expect(c.isExhausted("daily")).toBe(false);
+  });
+
+  it("isExhausted returns false after a blocked ack", async () => {
+    const load = vi.fn().mockResolvedValue({ status: "blocked", reason: "not ready" });
+    const c = new OlderHistoryController({ load, now: () => 0 });
+    c.triggerNow(true, { from: 1_000, to: 2_000 });
+    await flush();
+    expect(c.isExhausted("intraday")).toBe(false);
+  });
+
+  it("isExhausted returns true after an accepted ack with exhausted: true", async () => {
+    const load = vi.fn().mockResolvedValue({ status: "accepted", value: { added: 0, exhausted: true } });
+    const c = new OlderHistoryController({ load, now: () => 0 });
+    c.triggerNow(true, { from: 1_000, to: 2_000 });
+    await flush();
+    expect(c.isExhausted("intraday")).toBe(true);
+  });
+
+  it("isExhausted returns false after reset()", async () => {
+    const load = vi.fn().mockResolvedValue({ status: "accepted", value: { added: 0, exhausted: true } });
+    const c = new OlderHistoryController({ load, now: () => 0 });
+    c.triggerNow(true, { from: 1_000, to: 2_000 });
+    await flush();
+    expect(c.isExhausted("intraday")).toBe(true);
+    c.reset();
+    expect(c.isExhausted("intraday")).toBe(false);
   });
 });

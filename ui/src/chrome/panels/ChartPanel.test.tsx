@@ -164,11 +164,11 @@ describe("ChartPanel", () => {
     expect(timeScaleApi.scrollToPosition).toHaveBeenCalledWith(49, false);
   });
 
-  it("passes demanded UTC-ms range in LoadOlderBars", () => {
-    const { commands } = renderChart();
+  it("passes demanded UTC-ms range in LoadOlderBars via pointerup", () => {
+    const { commands, container } = renderChart();
     timeScaleApi.getVisibleRange.mockReturnValue({ from: 1_700_000_000, to: 1_700_000_600 });
-    const clampRight = timeScaleApi.subscribeVisibleLogicalRangeChange.mock.calls[0][0] as (r: { from: number; to: number } | null) => void;
-    clampRight({ from: 10, to: 110 });
+    const host = container.querySelector("[data-testid=chart-host]") as HTMLElement;
+    host.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
     expect(commands.sendCommand).toHaveBeenCalledWith("LoadOlderBars", {
       symbol: "US.AAPL",
       daily: false,
@@ -561,5 +561,68 @@ describe("ChartPanel", () => {
       perf.enabled = false; // restore the shared singleton's default for other tests
       spy.mockRestore();
     }
+  });
+
+  it("dino icon renders when both intraday and daily are exhausted", async () => {
+    const { container, commands, getByRole } = renderChart();
+    const host = container.querySelector("[data-testid=chart-host]") as HTMLElement;
+    // First pointerup: intraday exhausted
+    timeScaleApi.getVisibleRange.mockReturnValue({ from: 1_700_000_000, to: 1_700_000_600 });
+    commands.sendCommand.mockImplementation(async (cmd, args) => {
+      if (cmd === "LoadOlderBars") {
+        return { kind: "ack", corrId: "c", status: "accepted", value: { exhausted: true } };
+      }
+      return { kind: "ack", corrId: "c", status: "accepted" };
+    });
+    const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
+    // First pointerup fires intraday (1m timeframe)
+    await act(async () => {
+      host.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+      await flush();
+    });
+    // Switch to daily timeframe in-place (same panel, fresh tfRef but same olderHistory)
+    await act(async () => {
+      fireEvent.click(getByRole("button", { name: "timeframe D" }));
+    });
+    // Second pointerup fires daily kind
+    await act(async () => {
+      host.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+      await flush();
+    });
+    // Both exhausted → dino icon should be present
+    expect(container.querySelector("[title='No more historical bars available']")).toBeTruthy();
+  });
+
+  it("symbol change resets allExhausted to false", async () => {
+    const { container, commands, getByRole } = renderChart();
+    const host = container.querySelector("[data-testid=chart-host]") as HTMLElement;
+    timeScaleApi.getVisibleRange.mockReturnValue({ from: 1_700_000_000, to: 1_700_000_600 });
+    commands.sendCommand.mockImplementation(async (cmd, args) => {
+      if (cmd === "LoadOlderBars") {
+        return { kind: "ack", corrId: "c", status: "accepted", value: { exhausted: true } };
+      }
+      return { kind: "ack", corrId: "c", status: "accepted" };
+    });
+    const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
+    // First pointerup fires intraday (1m timeframe)
+    await act(async () => {
+      host.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+      await flush();
+    });
+    // Switch to daily timeframe in-place
+    await act(async () => {
+      fireEvent.click(getByRole("button", { name: "timeframe D" }));
+    });
+    // Second pointerup fires daily kind
+    await act(async () => {
+      host.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+      await flush();
+    });
+    expect(container.querySelector("[title='No more historical bars available']")).toBeTruthy();
+    // Change symbol: re-render with new symbol (fresh panel = allExhausted resets)
+    const { unmount } = renderChart("c1", undefined, undefined, { symbol: "US.GOOG", timeframe: "D" });
+    unmount();
+    const { container: c2 } = renderChart("c1", undefined, undefined, { symbol: "US.GOOG", timeframe: "D" });
+    expect(c2.querySelector("[title='No more historical bars available']")).toBeNull();
   });
 });

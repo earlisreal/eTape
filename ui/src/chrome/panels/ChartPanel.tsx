@@ -175,6 +175,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // there's no in-progress bar (nothing live to show) or off-screen.
   const [lastPriceTag, setLastPriceTag] = useState<{ y: number; up: boolean; price: number } | null>(null);
   const [selection, setSelection] = useState<{ id: string; rect: { x: number; y: number; w: number; h: number }; color: string; width: number; lineStyle: LineStyleName } | null>(null);
+  const [allExhausted, setAllExhausted] = useState(false);
 
   const legendRef = useRef<TVLegendHandle | null>(null);
   const instancesRef = useRef(instances);
@@ -234,21 +235,41 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       load: (daily, requiredStartMs, requiredEndMs) => commands.sendCommand("LoadOlderBars", { symbol: currentSymbol, daily, requiredStartMs, requiredEndMs }),
       now: () => Date.now(),
     });
+
+    const triggerOlderHistory = () => {
+      const vr = (facade as any).getVisibleRange() as { from: number; to: number } | null;
+      olderHistory.triggerNow(
+        isIntradayTimeframe(tfRef.current as Timeframe),
+        vr ? { from: vr.from * 1000, to: vr.to * 1000 } : null,
+      ).then(() => {
+        const done = olderHistory.isExhausted("intraday") && olderHistory.isExhausted("daily");
+        setAllExhausted(done);
+      });
+    };
+
+    // Mouse/touch drag release
+    host.addEventListener("pointerup", triggerOlderHistory);
+
+    // Keyboard pan (ArrowLeft, ArrowRight, Home end the pan on keyup)
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight" || e.key === "Home") {
+        triggerOlderHistory();
+      }
+    };
+    host.addEventListener("keyup", onKeyUp);
+
+    // Wheel zoom: debounce 200ms — no "wheel end" event exists
+    let wheelTimer: ReturnType<typeof setTimeout> | undefined;
+    const onWheel = () => {
+      clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(triggerOlderHistory, 200);
+    };
+    host.addEventListener("wheel", onWheel, { passive: true });
+
     const clampRight = (range: LogicalRange | null) => {
       const visibleBars = range ? range.to - range.from : RIGHT_OFFSET_BARS;
       const target = clampRightScroll(timeScale.scrollPosition(), visibleBars);
       if (target !== null) timeScale.scrollToPosition(target, false);
-      if (range) {
-        // Convert LogicalRange (bar indices) to UTC-ms timestamps for range-driven load.
-        const vr = (facade as any).getVisibleRange(); // {from: number, to: number} in UTC seconds
-        olderHistory.maybeTrigger(
-          { from: range.from, to: range.to },
-          isIntradayTimeframe(tfRef.current as Timeframe),
-          vr ? { from: vr.from * 1000, to: vr.to * 1000 } : null,
-        );
-      } else {
-        olderHistory.maybeTrigger(null, isIntradayTimeframe(tfRef.current as Timeframe));
-      }
       scheduleRefreshSelection();
     };
     timeScale.subscribeVisibleLogicalRangeChange(clampRight);
@@ -311,6 +332,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const applySymbol = () => {
       currentSymbol = linkGroups.symbolFor(groupRef.current) ?? symbol;
       olderHistory.reset();
+      setAllExhausted(false);
       controller.setSymbol(currentSymbol);
       backfillFills(currentSymbol);
       stores.drawings.ensureLoaded(currentSymbol);
@@ -432,6 +454,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     return () => {
       off(); offLink(); offCrosshair(); ro.disconnect();
       timeScale.unsubscribeVisibleLogicalRangeChange(clampRight);
+      host.removeEventListener("pointerup", triggerOlderHistory);
+      host.removeEventListener("keyup", onKeyUp);
+      host.removeEventListener("wheel", onWheel);
+      clearTimeout(wheelTimer);
       olderHistory.reset();
       // Cancel any rAF-batched legend/selection recompute still pending from
       // the schedulers above so it doesn't fire after this chart unmounts.
@@ -679,6 +705,23 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
             onClone={cloneSelected} onDelete={() => interactionRef.current?.deleteSelection()} />
         )}
         {menu && <TVContextMenu chrome={chrome} x={menu.clientX} y={menu.clientY} items={buildMenuItems(menu)} onClose={() => setMenu(null)} />}
+        {allExhausted && (
+          <div
+            style={{
+              position: "absolute",
+              left: 4,
+              top: "50%",
+              transform: "translateY(-50%)",
+              pointerEvents: "none",
+              opacity: 0.55,
+              fontSize: 22,
+              userSelect: "none",
+            }}
+            title="No more historical bars available"
+          >
+            🦕
+          </div>
+        )}
       </div>
       {settingsInstanceId && (() => {
         const inst = instances.find((i) => i.instanceId === settingsInstanceId);
