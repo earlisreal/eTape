@@ -127,10 +127,10 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   // TapePanel's lone header gear, extended with the venue picker.
   const headerActions = (
     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-      {(sessionMode.mode === "demo") && (
+      {(sessionMode.mode === "demo" || sessionMode.mode === "replay") && (
         <span data-testid="practice-badge" style={{
           padding: "1px 6px", borderRadius: 3,
-          background: palette.demo,
+          background: sessionMode.mode === "demo" ? palette.demo : palette.warn,
           color: "#fff", fontWeight: 700, fontSize: 10, letterSpacing: 0.5,
         }}>
           PRACTICE
