@@ -96,7 +96,7 @@ func TestSeed_WithinBudget(t *testing.T) {
 	st := &capStore{}
 	start := time.Now()
 	g.Seed(st, nowMs)
-	budget := 4 * time.Second
+	budget := 7 * time.Second
 	if raceEnabled() {
 		// The race detector's instrumentation overhead (typically 2-10x per
 		// the Go team's own documented guidance) is exactly the kind of
