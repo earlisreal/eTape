@@ -14,4 +14,5 @@ Auto-Clarity: drop caveman for security warnings, irreversible actions, user con
 
 Boundaries: code/commits/PRs written normal.
 
-For Plan mode: Add steps for local LLM 35b execution. Each step narrow, explicit files, reviewable/testable independently.
+## Plan mode
+Add steps for local LLM 35b execution. Each step narrow, explicit files, reviewable/testable independently.
