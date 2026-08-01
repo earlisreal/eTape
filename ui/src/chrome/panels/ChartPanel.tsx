@@ -237,6 +237,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     });
 
     const triggerOlderHistory = () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const vr = (facade as any).getVisibleRange() as { from: number; to: number } | null;
       olderHistory.triggerNow(
         isIntradayTimeframe(tfRef.current as Timeframe),

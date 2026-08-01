@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { DockviewReact, themeDark, themeLight, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview";
+import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
+import { themeDark, themeLight } from "dockview";
 // dockview's stylesheet is imported in main.tsx (ahead of global.css) so our
 // theme overrides always win the cascade — see the comment there.
 import { PanelFrame } from "./PanelFrame";

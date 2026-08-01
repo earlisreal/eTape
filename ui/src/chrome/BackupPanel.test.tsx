@@ -89,7 +89,7 @@ describe("BackupPanel", () => {
     });
 
     it("downloads a blob containing only the layout, with a layout-named filename", async () => {
-      const createObjectURL = vi.fn<[Blob], string>(() => "blob:mock");
+      const createObjectURL = vi.fn<(_blob: Blob) => string>(() => "blob:mock");
       vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL: vi.fn() });
       const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
       const { props } = setup();
@@ -202,7 +202,7 @@ describe("BackupPanel", () => {
     });
 
     it("downloads a blob containing only the hotkeys, with a hotkeys-named filename", async () => {
-      const createObjectURL = vi.fn<[Blob], string>(() => "blob:mock");
+      const createObjectURL = vi.fn<(_blob: Blob) => string>(() => "blob:mock");
       vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL: vi.fn() });
       const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
       const { props } = setup();

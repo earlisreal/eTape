@@ -778,7 +778,7 @@ describe("AppShell layout export (Task 2: ghost-panel fix)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /settings/i }));
 
-    const createObjectURL = vi.fn<[Blob], string>(() => "blob:mock");
+    const createObjectURL = vi.fn<(_blob: Blob) => string>(() => "blob:mock");
     vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL: vi.fn() });
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
 

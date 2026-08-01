@@ -4,7 +4,7 @@ import type { SnapshotMsg, DeltaMsg, SessionSnapshot } from "../wire/contract";
 // SessionSnapshot.mode generates as `string` (protoc-gen-go string enums don't
 // narrow); annotate literal union explicitly here rather than widen callers.
 // "pending" is UI-only and held only until first sys.session snapshot arrives.
-export type SessionState = Omit<SessionSnapshot, "mode"> & { mode: "pending" | "live" | "demo" };
+export type SessionState = Omit<SessionSnapshot, "mode"> & { mode: "pending" | "live" | "demo" | "replay" };
 
 export class SessionStore extends ReactStore<SessionState> {
   constructor() {

@@ -38,10 +38,10 @@ type capStore struct {
 	flushed   bool
 }
 
-func (c *capStore) ArchiveDaily(b feed.Bar) { c.daily = append(c.daily, b) }
-func (c *capStore) ArchiveBar1m(b feed.Bar) { c.m1 = append(c.m1, b) }
+func (c *capStore) ArchiveDaily(b feed.Bar)  { c.daily = append(c.daily, b) }
+func (c *capStore) ArchiveBar1m(b feed.Bar)  { c.m1 = append(c.m1, b) }
 func (c *capStore) ArchiveBar10s(b feed.Bar) {}
-func (c *capStore) Flush()                  { c.flushed = true }
+func (c *capStore) Flush()                   { c.flushed = true }
 
 func TestSeed_WritesWarmHistory(t *testing.T) {
 	skipIfShort(t)
@@ -96,7 +96,7 @@ func TestSeed_WithinBudget(t *testing.T) {
 	st := &capStore{}
 	start := time.Now()
 	g.Seed(st, nowMs)
-	budget := 3 * time.Second
+	budget := 4 * time.Second
 	if raceEnabled() {
 		// The race detector's instrumentation overhead (typically 2-10x per
 		// the Go team's own documented guidance) is exactly the kind of

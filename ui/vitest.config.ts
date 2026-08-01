@@ -28,13 +28,31 @@ export default defineConfig({
     // scripts work around this by invoking `vitest run <file>` once per
     // canvas file (golden-image tests, and the panel chrome tests that render
     // an actual <canvas> rather than mocking it — LadderPanel, TapePanel),
-    // each its own top-level process; this poolMatchGlobs entry still matters
+    // each its own top-level process; this projects entry still matters
     // so each of those single-file invocations avoids worker_threads.
     // Everything else keeps the faster default (threads) pool.
-    poolMatchGlobs: [
-      ["**/test/golden/**", "forks"],
-      ["**/chrome/panels/LadderPanel.test.tsx", "forks"],
-      ["**/chrome/panels/TapePanel.test.tsx", "forks"],
+    projects: [
+      {
+        test: {
+          name: 'golden',
+          include: ['test/golden/**/*.test.ts', 'test/golden/**/*.golden.test.ts'],
+          pool: 'forks',
+        },
+      },
+      {
+        test: {
+          name: 'ladder',
+          include: ['src/chrome/panels/LadderPanel.test.tsx'],
+          pool: 'forks',
+        },
+      },
+      {
+        test: {
+          name: 'tape',
+          include: ['src/chrome/panels/TapePanel.test.tsx'],
+          pool: 'forks',
+        },
+      },
     ],
   },
 });
