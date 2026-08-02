@@ -148,8 +148,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		log := slog.New(slog.NewTextHandler(os.Stderr, nil))
 		log.Error("bad -log-level", "level", *logLevel, "err", err)
 		return 1, false, nil
-	} else {
-		handlerLevel = handlerLevel
 	}
 	handlerOpts := &slog.HandlerOptions{Level: handlerLevel}
 	log := slog.New(slog.NewTextHandler(out, handlerOpts))
