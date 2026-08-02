@@ -37,8 +37,8 @@ class FakeFileReader {
     this.onload?.();
   }
 }
-function fileWithText(text: string): File {
-  return { __text: text } as unknown as File;
+function fileWithText(text: string, name = "settings.json"): File {
+  return { __text: text, name } as unknown as File;
 }
 
 // jsdom's Blob has no `.text()`/`.arrayBuffer()`, but its (real, unstubbed)
@@ -125,6 +125,19 @@ describe("BackupPanel", () => {
         };
         selectFile(JSON.stringify(fileData));
         expect(screen.getByTestId("apply-import")).toBeTruthy();
+      });
+
+      it("keeps the selected filename visible after clearing the native input", () => {
+        setup();
+        const fileData: SettingsExport = {
+          app: "eTape", kind: "settings-export", version: 1, exportedAt: new Date().toISOString(),
+          layout: makeWorkspace("other"),
+        };
+        fireEvent.change(screen.getByTestId("import-file"), {
+          target: { files: [fileWithText(JSON.stringify(fileData), "my-layout.json")] },
+        });
+
+        expect(screen.getByTestId("selected-file-name").textContent).toBe("my-layout.json");
       });
 
       it("shows the missing-layout message (no Apply button) when the file has no layout", () => {

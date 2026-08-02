@@ -37,6 +37,7 @@ function localDateStamp(d: Date): string {
 export function BackupPanel(props: BackupPanelProps): JSX.Element {
   const { palette } = useTheme();
   const [importData, setImportData] = useState<SettingsExport | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState("");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Placeholders for whichever field buildExport's `sel` tells it not to
@@ -68,6 +69,7 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
   const onFileSelected = (e: React.ChangeEvent<HTMLInputElement>): void => {
     const file = e.target.files?.[0];
     if (!file) return;
+    setSelectedFileName(file.name);
     const reader = new FileReader();
     reader.onload = () => {
       const text = typeof reader.result === "string" ? reader.result : "";
@@ -103,6 +105,7 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
     }
 
     setImportData(null);
+    setSelectedFileName("");
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
@@ -126,11 +129,22 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
         Download JSON
       </HoverButton>
 
-      <input
-        type="file" accept="application/json" aria-label="Import settings file"
-        data-testid="import-file" ref={fileInputRef} onChange={onFileSelected}
-        style={{ display: "block", marginBottom: 10, fontSize: 12, color: palette.text }}
-      />
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+        <input
+          type="file" accept="application/json" aria-label="Import settings file"
+          data-testid="import-file" ref={fileInputRef} onChange={onFileSelected}
+          style={{ display: "none" }}
+        />
+        <HoverButton
+          className="btn" data-testid="choose-file" onClick={() => fileInputRef.current?.click()}
+          hoverStyle={{ background: palette.surface }}
+        >
+          Choose File
+        </HoverButton>
+        <span data-testid="selected-file-name" style={{ fontSize: 12, color: palette.text }}>
+          {selectedFileName || "No file chosen"}
+        </span>
+      </div>
 
       {importData && (
         partPresent ? (
