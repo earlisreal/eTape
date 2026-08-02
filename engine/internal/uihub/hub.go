@@ -76,6 +76,11 @@ type loadOlderReq struct {
 	done            func(added int, exhausted bool, err error)
 }
 
+type chartWindowReq struct {
+	args  wsmsg.QueryChartWindowArgs
+	reply chan wsmsg.QueryChartWindowResult
+}
+
 // dropReport is how a conn's own goroutine (writeLoop, on a write timeout)
 // tells Run a client is being dropped, so the resulting ui-drop sys.events
 // frame is still built and emitted from Run's own single goroutine -- see
@@ -148,6 +153,7 @@ type Hub struct {
 	ensureIndicatorCh  chan ensureIndicatorReq
 	releaseIndicatorCh chan releaseIndicatorReq
 	loadOlderCh        chan loadOlderReq
+	chartWindowCh      chan chartWindowReq
 	demandSnapCh       chan chan []string
 	mdCh               chan md.Update
 	execCh             chan exec.Update
@@ -205,6 +211,7 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 		ensureIndicatorCh:  make(chan ensureIndicatorReq),
 		releaseIndicatorCh: make(chan releaseIndicatorReq),
 		loadOlderCh:        make(chan loadOlderReq),
+		chartWindowCh:      make(chan chartWindowReq),
 		demandSnapCh:       make(chan chan []string),
 		mdCh:               make(chan md.Update, cfg.Buf),
 		execCh:             make(chan exec.Update, cfg.Buf),
@@ -255,6 +262,21 @@ func (h *Hub) Unsubscribe(c client, t wsmsg.Topic) {
 	select {
 	case h.unsubCh <- subReq{c, t}:
 	case <-h.closed:
+	}
+}
+
+func (h *Hub) QueryChartWindow(a wsmsg.QueryChartWindowArgs) wsmsg.QueryChartWindowResult {
+	reply := make(chan wsmsg.QueryChartWindowResult, 1)
+	select {
+	case h.chartWindowCh <- chartWindowReq{args: a, reply: reply}:
+	case <-h.closed:
+		return wsmsg.QueryChartWindowResult{Symbol: a.Symbol, Timeframe: a.Timeframe, Bars: []wsmsg.Bar{}, Indicators: []wsmsg.IndicatorSeriesWindow{}}
+	}
+	select {
+	case out := <-reply:
+		return out
+	case <-h.closed:
+		return wsmsg.QueryChartWindowResult{Symbol: a.Symbol, Timeframe: a.Timeframe, Bars: []wsmsg.Bar{}, Indicators: []wsmsg.IndicatorSeriesWindow{}}
 	}
 }
 
@@ -482,6 +504,8 @@ func (h *Hub) Run(ctx context.Context) error {
 			h.handleReleaseIndicator(r)
 		case r := <-h.loadOlderCh:
 			h.handleLoadOlder(r)
+		case r := <-h.chartWindowCh:
+			h.handleChartWindow(r)
 		case reply := <-h.demandSnapCh:
 			h.handleDemandSnapshot(reply)
 		case u := <-h.mdCh:
@@ -541,6 +565,8 @@ func (h *Hub) drain() {
 			h.handleReleaseIndicator(r)
 		case r := <-h.loadOlderCh:
 			h.handleLoadOlder(r)
+		case r := <-h.chartWindowCh:
+			h.handleChartWindow(r)
 		case u := <-h.mdCh:
 			h.handleMD(u)
 		case u := <-h.execCh:
@@ -638,6 +664,49 @@ func (h *Hub) handleLoadOlder(r loadOlderReq) {
 		return
 	}
 	fn(r.symbol, r.daily, r.requiredStartMs, r.requiredEndMs, r.done)
+}
+
+func (h *Hub) handleChartWindow(r chartWindowReq) {
+	a := r.args
+	result := wsmsg.QueryChartWindowResult{
+		Symbol: a.Symbol, Timeframe: a.Timeframe, FromMs: a.FromMs, ToMs: a.ToMs,
+		Bars: []wsmsg.Bar{}, Indicators: []wsmsg.IndicatorSeriesWindow{}, HistoryRevision: h.m.historyRevision,
+	}
+	all := h.m.bars[barKey(a.Symbol, a.Timeframe)]
+	from, to := a.FromMs, a.ToMs
+	if a.TailBars > 0 {
+		start := len(all) - a.TailBars
+		if start < 0 {
+			start = 0
+		}
+		result.Bars = append(result.Bars, all[start:]...)
+		if len(result.Bars) > 0 {
+			from = wireBarMs(result.Bars[0])
+			to = wireBarMs(result.Bars[len(result.Bars)-1]) + 1
+			result.FromMs, result.ToMs = from, to
+		}
+	} else if from < to {
+		lo := sort.Search(len(all), func(i int) bool { return wireBarMs(all[i]) >= from })
+		hi := sort.Search(len(all), func(i int) bool { return wireBarMs(all[i]) >= to })
+		result.Bars = append(result.Bars, all[lo:hi]...)
+	}
+	for _, key := range a.IndicatorSeriesKeys {
+		points := h.m.indicators[key]
+		lo := sort.Search(len(points), func(i int) bool { return points[i].TimeMs >= from })
+		hi := sort.Search(len(points), func(i int) bool { return points[i].TimeMs >= to })
+		window := make([]wsmsg.IndicatorPoint, 0, hi-lo)
+		window = append(window, points[lo:hi]...)
+		result.Indicators = append(result.Indicators, wsmsg.IndicatorSeriesWindow{SeriesKey: key, Points: window})
+	}
+	r.reply <- result
+}
+
+func wireBarMs(b wsmsg.Bar) int64 {
+	t, err := time.Parse(time.RFC3339Nano, b.BucketStart)
+	if err != nil {
+		return 0
+	}
+	return t.UnixMilli()
 }
 
 // handleBackfillDone applies a backfill goroutine's reported outcome
@@ -762,6 +831,11 @@ func (h *Hub) handleMD(u md.Update) {
 	for _, s := range h.m.applyMD(u) {
 		h.stageMD(s)
 	}
+	if ready, ok := u.(md.HistoryReadyUpdate); ok {
+		event := h.buildSysEvent("history-ready", ready.Symbol)
+		h.m.applyPub(event)
+		h.broadcast(event, false)
+	}
 	// md.ResyncedUpdate fires once per OpenD reconnect cycle, only after
 	// ResubscribeAll succeeds (see opend.OpenDFeed's stateLoop) -- it is
 	// naturally edge-triggered (not per keepalive), so re-arming here needs
@@ -857,6 +931,11 @@ func (h *Hub) deliverRaw(topic wsmsg.Topic, b []byte) {
 }
 
 func (h *Hub) stageMD(s staged) {
+	// Seed/reseed batches update mirror only. Chart clients pull exact windows;
+	// only live single-point deltas travel through topic broadcasts.
+	if (s.Topic == wsmsg.TopicBars && (s.Snap || s.Batch)) || (s.Topic == wsmsg.TopicIndicator && s.Snap) {
+		return
+	}
 	switch classify(s.Topic) {
 	case classTape:
 		ticks, _ := s.Payload.([]wsmsg.Tick)
@@ -958,6 +1037,9 @@ func (h *Hub) broadcast(s staged, snap bool) {
 }
 
 func (h *Hub) sendSnapshot(c client, topic wsmsg.Topic) {
+	if topic == wsmsg.TopicBars || topic == wsmsg.TopicIndicator {
+		return
+	}
 	for _, fr := range h.m.snapshotFrames(topic) {
 		b, err := json.Marshal(wsmsg.SnapshotMsg{Kind: "snapshot", Topic: fr.Topic, Key: fr.Key, Payload: fr.Payload})
 		if err != nil {

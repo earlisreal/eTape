@@ -535,13 +535,13 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			}
 			moomoo := backfill.MoomooFetcher(fd)
 			if alpacaSrc != nil {
+				dailyChain = append(dailyChain, backfill.Source{Name: "alpaca", HistFetcher: alpacaSrc})
 				intradayChain = append(intradayChain, backfill.Source{Name: "alpaca", HistFetcher: alpacaSrc})
 			}
 			if cfg.Backfill.Yahoo.Enabled {
 				dailyChain = append(dailyChain, backfill.Source{Name: "yahoo", HistFetcher: histyahoo.New("", clock.System{})})
 			}
-			// moomoo request_history_kline is the quota-guarded last resort in both chains.
-			dailyChain = append(dailyChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
+			// Daily synchronization is external-only: Alpaca, then Yahoo fallback.
 			intradayChain = append(intradayChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
 			tail = fd // TailFetcher: OpenDFeed.Tail1m (quota-free Qot_GetKL)
 		}
@@ -611,7 +611,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		go func() {
 			defer backfillWG.Done()
 			if daily {
-				added, exhausted, err := orch.LoadOlderDaily(ctx, sym)
+				added, exhausted, err := orch.LoadOlderDailyRange(ctx, sym, requiredStartMs, requiredEndMs)
 				done(added, exhausted, err)
 				return
 			}

@@ -186,7 +186,18 @@ func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndMoversConsistent(t *testing.T) 
 		t.Fatalf("EnsureSymbol should be accepted, got %v", ack)
 	}
 
-	got := waitBarSnapshots(t, ctx, c, wantSymbol, []string{"1m", "D"})
+	// History stays engine-side and is queried by viewport; topic subscription
+	// carries live deltas only. Poll until async warm seed reaches mirror.
+	var got1m, gotD wsmsg.QueryChartWindowResult
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		got1m = hub.QueryChartWindow(wsmsg.QueryChartWindowArgs{Symbol: wantSymbol, Timeframe: "1m", TailBars: 100000})
+		gotD = hub.QueryChartWindow(wsmsg.QueryChartWindowArgs{Symbol: wantSymbol, Timeframe: "D", TailBars: 100000})
+		if len(got1m.Bars) > 0 && len(gotD.Bars) > 0 {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	// Cross-check against the archive directly (what warmStart itself read)
 	// rather than a fixed magic number, so this assertion tracks whatever
@@ -200,8 +211,8 @@ func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndMoversConsistent(t *testing.T) 
 		t.Fatalf("ReadBars1m: %v", err)
 	}
 
-	if got1m := got["1m"]; len(got1m) != len(wantIntraday) {
-		t.Errorf("md.bars 1m snapshot has %d bars, want %d (matching the store archive)", len(got1m), len(wantIntraday))
+	if len(got1m.Bars) != len(wantIntraday) {
+		t.Errorf("1m chart query has %d bars, want %d (matching the store archive)", len(got1m.Bars), len(wantIntraday))
 	}
 	// seedTrailingDays=3 (synth/seeder.go) plus "today so far": comfortably
 	// more than a single trading day's worth of 1-minute bars, proving real
@@ -210,8 +221,9 @@ func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndMoversConsistent(t *testing.T) 
 		t.Errorf("only %d 1m bars archived, want >1000 (>~1 day) for a 3-trailing-day warm seed", len(wantIntraday))
 	}
 
-	if gotD := got["D"]; len(gotD) != len(wantDaily) {
-		t.Errorf("md.bars daily snapshot has %d bars, want %d (matching the store archive)", len(gotD), len(wantDaily))
+	// Core may also expose current derived in-progress daily bucket.
+	if len(gotD.Bars) < len(wantDaily) || len(gotD.Bars) > len(wantDaily)+1 {
+		t.Errorf("daily chart query has %d bars, want %d archived plus optional live bucket", len(gotD.Bars), len(wantDaily))
 	}
 	// seedHistoryDays=365 (synth/seeder.go): expect the large majority of a
 	// year's worth of daily bars (weekends/holidays aren't modeled, so every

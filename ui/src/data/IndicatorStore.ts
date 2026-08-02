@@ -13,6 +13,7 @@ export class IndicatorStore extends PaintStore {
   // rev counter (bumped via markDirty()) still backs the no-arg getRev()
   // global fallback, unchanged.
   private readonly revs = new Map<string, number>();
+  private readonly visible = new Map<string, { fromMs: number; toMs: number }>();
 
   private bumpRev(id: string): void { this.revs.set(id, (this.revs.get(id) ?? 0) + 1); }
 
@@ -36,7 +37,25 @@ export class IndicatorStore extends PaintStore {
   }
 
   series(instanceId: string): IndicatorPoint[] {
-    return this.byInstance.get(instanceId) ?? [];
+    const all = this.byInstance.get(instanceId) ?? [];
+    const range = this.visible.get(instanceId);
+    return range ? all.filter((p) => p.timeMs >= range.fromMs && p.timeMs < range.toMs) : all;
+  }
+
+  mergeWindow(instanceId: string, points: IndicatorPoint[], fromMs: number, toMs: number, select = true): void {
+    const byTime = new Map((this.byInstance.get(instanceId) ?? []).map((p) => [p.timeMs, p]));
+    for (const point of points) byTime.set(point.timeMs, point);
+    this.byInstance.set(instanceId, [...byTime.values()].sort((a, b) => a.timeMs - b.timeMs));
+    if (select) this.visible.set(instanceId, { fromMs, toMs });
+    this.bumpRev(instanceId); this.markDirty();
+  }
+
+  expandWindow(instanceId: string, fromMs: number, toMs: number): void {
+    const current = this.visible.get(instanceId);
+    this.visible.set(instanceId, current
+      ? { fromMs: Math.min(current.fromMs, fromMs), toMs: Math.max(current.toMs, toMs) }
+      : { fromMs, toMs });
+    this.bumpRev(instanceId); this.markDirty();
   }
 
   // Drop a series' points — called on symbol/timeframe switch so the previous

@@ -176,14 +176,10 @@ export function chartOptions(p: Palette): DeepChartOptions {
       // scroll into blank future space (LWC has no "capped but non-zero"
       // right-edge mode), so ChartPanel enforces its own dynamic cap via
       // clampRightScroll — see that function's comment above.
-      // fixLeftEdge: max backward pan is the first data point. This one DOES work
-      // as intended — unlike maxRightOffset, TimeScale._private__minRightOffset()
-      // derives its cap from the first data point's actual index rather than a
-      // hardcoded constant — so prepending LEFT_PAD_BARS whitespace ahead of the
-      // earliest real bar (ChartController.setAllBars) correctly shifts this cap
-      // to leave that same empty-bar margin on the left.
+      // Left edge stays unlocked: negative logical indexes provide enough blank
+      // pan area to request a full older viewport after gesture release.
       // shiftVisibleRangeOnNewBar: once at the right edge, new bars auto-scroll into view.
-      fixLeftEdge: true, shiftVisibleRangeOnNewBar: true,
+      fixLeftEdge: false, shiftVisibleRangeOnNewBar: true,
       tickMarkFormatter,
     },
     autoSize: false, // we drive resize via ResizeObserver → controller.resize()

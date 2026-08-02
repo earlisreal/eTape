@@ -94,7 +94,7 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	h.cmd = cmd
 	cmd.restart = requestRestart
 	cmd.startDemo = startDemo
-	qry := newQueries(st, clk)
+	qry := newQueries(st, clk, h)
 	srv := NewServer(h, cmd, qry, ServerConfig{DistDir: cfg.DistDir, OutBuf: cfg.OutBuf})
 	return h, srv
 }

@@ -33,6 +33,7 @@ import { computeLegendView } from "./tv/legendView";
 import { BarCloseTimer } from "./tv/BarCloseTimer";
 import { perf } from "../../perf/PerfMonitor";
 import { bareSymbol } from "../exec/orderStatus";
+import type { QueryChartWindowResult } from "../../gen/wsmsg";
 
 // Adapts a real LWC v5 IChartApi to the controller's minimal ChartApiFacade.
 function makeFacade(chart: IChartApi, palette: Palette): {
@@ -79,7 +80,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     coordinateToLogical: (x) => chart.timeScale().coordinateToLogical(x as Coordinate),
     coordinateToPrice: (y) => main?.coordinateToPrice(y as Coordinate) ?? null,
     setPanZoomEnabled: (on) => chart.applyOptions({ handleScroll: on, handleScale: on }),
-    scrollToRealTime: () => chart.timeScale().scrollToRealTime(),
+    scrollToRealTime: () => chart.timeScale().scrollToPosition(RIGHT_OFFSET_BARS, false),
     resetTimeScale: () => chart.timeScale().resetTimeScale(),
     resetPriceScale: () => chart.priceScale("right").applyOptions({ autoScale: true }),
     getVisibleRange: () => {
@@ -195,6 +196,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // applySymbolRef is that closure's own applySymbol, captured once it's created.
   const groupRef = useRef(group);
   const applySymbolRef = useRef<(() => void) | null>(null);
+  const queryViewportRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -227,6 +229,76 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       selectionFrame = requestAnimationFrame(() => { selectionFrame = null; refreshSelRef.current?.(); });
     };
     const { facade, setPalette, drawings } = makeFacade(chart, palette);
+    let viewportGeneration = 0;
+
+    const indicatorKeys = () => instancesRef.current.flatMap((inst) => describeIndicator(inst, paletteRef.current).map((series) => series.key));
+    const mergeWindow = (result: QueryChartWindowResult, generation: number, select = true) => {
+      if (generation !== viewportGeneration || result.symbol !== currentSymbol || result.timeframe !== tfRef.current) return false;
+      stores.bars.mergeWindow(result.symbol, result.timeframe, result.bars ?? [], result.fromMs, result.toMs, select);
+      for (const series of result.indicators ?? []) stores.indicators.mergeWindow(series.seriesKey, series.points ?? [], result.fromMs, result.toMs, select);
+      forceRepaintRef.current = true;
+      return true;
+    };
+    const queryLatest = async () => {
+      const generation = ++viewportGeneration;
+      const tailBars = Math.max(20, Math.ceil(host.clientWidth / 6));
+      const result = await commands.sendQuery("QueryChartWindow", {
+        symbol: currentSymbol, timeframe: tfRef.current, fromMs: 0, toMs: 0, tailBars,
+        indicatorSeriesKeys: indicatorKeys(),
+      }) as QueryChartWindowResult;
+      if (mergeWindow(result, generation)) {
+        facade.resetPriceScale();
+        facade.scrollToRealTime();
+      }
+    };
+    const queryRange = async (fromMs: number, toMs: number, restore?: { from: number; to: number }) => {
+      const generation = ++viewportGeneration;
+      const oldFirstMs = Date.parse(stores.bars.series(currentSymbol, tfRef.current)[0]?.bucketStart ?? "");
+      const clippedTo = Math.min(toMs, Date.now());
+      const gaps = stores.bars.missingRanges(currentSymbol, tfRef.current, fromMs, clippedTo);
+      for (const gap of gaps) {
+        const result = await commands.sendQuery("QueryChartWindow", {
+          symbol: currentSymbol, timeframe: tfRef.current, fromMs: gap.fromMs, toMs: gap.toMs, tailBars: 0,
+          indicatorSeriesKeys: indicatorKeys(),
+        }) as QueryChartWindowResult;
+        if (!mergeWindow(result, generation, false)) return;
+      }
+      if (generation !== viewportGeneration) return;
+      stores.bars.expandWindow(currentSymbol, tfRef.current, fromMs, clippedTo);
+      for (const key of indicatorKeys()) stores.indicators.expandWindow(key, fromMs, clippedTo);
+      // Apply merged data before restoring. Preserve fractional logical bounds:
+      // setVisibleRange recalculates spacing and snaps bars fully into viewport.
+      // Prepending shifts old logical indexes by number of inserted older bars.
+      if (restore) {
+        const prepended = Number.isFinite(oldFirstMs)
+          ? stores.bars.countBefore(currentSymbol, tfRef.current, oldFirstMs)
+          : 0;
+        controller.sync();
+        timeScale.setVisibleLogicalRange({
+          from: (restore.from + prepended) as Logical,
+          to: (restore.to + prepended) as Logical,
+        });
+      }
+      forceRepaintRef.current = true;
+    };
+    const demandedRange = (): { from: number; to: number; logicalFrom: number; logicalTo: number } | null => {
+      const logical = timeScale.getVisibleLogicalRange();
+      const bars = stores.bars.series(currentSymbol, tfRef.current);
+      if (!logical || bars.length === 0) return null;
+      const firstMs = Date.parse(bars[0].bucketStart);
+      const stepMs = timeframeToMs(tfRef.current as Timeframe);
+      return {
+        from: firstMs + Math.floor(logical.from) * stepMs,
+        to: firstMs + Math.ceil(logical.to + 1) * stepMs,
+        logicalFrom: logical.from,
+        logicalTo: logical.to,
+      };
+    };
+    queryViewportRef.current = () => {
+      const range = demandedRange();
+      if (range) void queryRange(range.from, range.to, { from: range.logicalFrom, to: range.logicalTo });
+      else void queryLatest();
+    };
     // currentSymbol (declared below, as a reassigned `let`) is read by `load`
     // via closure so every LoadOlderBars request names whatever symbol is
     // CURRENT at call time, not the symbol at mount time — applySymbol
@@ -237,12 +309,12 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     });
 
     const triggerOlderHistory = () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const vr = (facade as any).getVisibleRange() as { from: number; to: number } | null;
+      const requested = demandedRange();
       olderHistory.triggerNow(
         isIntradayTimeframe(tfRef.current as Timeframe),
-        vr ? { from: vr.from * 1000, to: vr.to * 1000 } : null,
+        requested,
       ).then(() => {
+        if (requested) void queryRange(requested.from, requested.to, { from: requested.logicalFrom, to: requested.logicalTo });
         const done = olderHistory.isExhausted("intraday") && olderHistory.isExhausted("daily");
         setAllExhausted(done);
       });
@@ -268,6 +340,16 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     host.addEventListener("wheel", onWheel, { passive: true });
 
     const clampRight = (range: LogicalRange | null) => {
+      // Left pan remains open through blank history until oldest loaded candle
+      // reaches viewport's right boundary. Past that point range contains no
+      // anchors and LWC may auto-correct bar spacing (visible as zoom-in).
+      // Clamp to `to = 0`, preserving logical width and therefore zoom.
+      if (range && range.to < -0.5) {
+        const width = range.to - range.from;
+        timeScale.setVisibleLogicalRange({ from: (-0.5 - width) as Logical, to: -0.5 as Logical });
+        scheduleRefreshSelection();
+        return;
+      }
       const visibleBars = range ? range.to - range.from : RIGHT_OFFSET_BARS;
       const target = clampRightScroll(timeScale.scrollPosition(), visibleBars);
       if (target !== null) timeScale.scrollToPosition(target, false);
@@ -281,7 +363,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     drawingsPrimRef.current = drawings;
     setFacadePaletteRef.current = setPalette;
     const controller = new ChartController(facade, palette, { symbol, timeframe: timeframe0 },
-      { bars: stores.bars, indicators: stores.indicators, commands });
+      { bars: stores.bars, indicators: stores.indicators, commands, onIndicatorSubscribed: () => queryViewportRef.current?.() });
     controller.mount();
     controllerRef.current = controller;
 
@@ -332,6 +414,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     };
     const applySymbol = () => {
       currentSymbol = linkGroups.symbolFor(groupRef.current) ?? symbol;
+      viewportGeneration++;
       olderHistory.reset();
       setAllExhausted(false);
       controller.setSymbol(currentSymbol);
@@ -340,10 +423,23 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       interactionRef.current?.onSymbolChanged();
       setChartSymbol(currentSymbol);
       forceRepaintRef.current = true;
+      void queryLatest();
     };
     applySymbolRef.current = applySymbol;
     applySymbol();
     const offLink = linkGroups.subscribe(applySymbol);
+    let lastHistorySeq = 0;
+    const offHistoryReady = stores.health.subscribe(() => {
+      const events = stores.health.getSnapshot().events;
+      for (const event of events) {
+        if (event.seq <= lastHistorySeq) continue;
+        lastHistorySeq = event.seq;
+        if (event.kind !== "history-ready" || event.detail !== currentSymbol) continue;
+        const range = demandedRange();
+        if (range) void queryRange(range.from, range.to, { from: range.logicalFrom, to: range.logicalTo });
+        else void queryLatest();
+      }
+    });
 
     const updateLegend = () => {
       const bars = stores.bars.series(currentSymbol, tfRef.current);
@@ -453,7 +549,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     ro.observe(host);
 
     return () => {
-      off(); offLink(); offCrosshair(); ro.disconnect();
+      off(); offLink(); offHistoryReady(); offCrosshair(); ro.disconnect();
       timeScale.unsubscribeVisibleLogicalRangeChange(clampRight);
       host.removeEventListener("pointerup", triggerOlderHistory);
       host.removeEventListener("keyup", onKeyUp);
@@ -465,6 +561,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       if (legendFrame !== null) cancelAnimationFrame(legendFrame);
       if (selectionFrame !== null) cancelAnimationFrame(selectionFrame);
       interaction.dispose(); controller.dispose(); controllerRef.current = null; interactionRef.current = null;
+      queryViewportRef.current = null;
     };
     // Intentionally [config.id] only: symbol/timeframe/indicator/palette changes are
     // handled imperatively via the controller (see the effects/callbacks below) — the
@@ -502,7 +599,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const persist = (patch: Record<string, unknown>) => onConfigChange(patch);
 
   const changeTimeframe = (tf: string) => {
-    setTf(tf); controllerRef.current?.setTimeframe(tf); forceRepaintRef.current = true; persist({ timeframe: tf });
+    setTf(tf); controllerRef.current?.setTimeframe(tf); applySymbolRef.current?.(); forceRepaintRef.current = true; persist({ timeframe: tf });
   };
   // Every mutation goes through instancesRef (updated synchronously here, not
   // just by the post-render effect below): two mutations in the same tick would

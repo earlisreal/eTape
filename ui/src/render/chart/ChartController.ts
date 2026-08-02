@@ -10,8 +10,6 @@ import type { Band, DaySegment } from "./sessions";
 import { describeIndicator, withDefaultParams, type IndicatorInstance } from "./indicatorSeries";
 import { LWC_LINE_STYLE } from "./lineStyle";
 import type { FillMarker } from "./diamondMarker";
-import { timeframeToMs } from "./drawings/geometry";
-import type { Timeframe } from "./barBucket";
 
 export interface BarReader { series(symbol: string, timeframe: string): Bar[] }
 export interface IndicatorReader { series(instanceId: string): { timeMs: number; value: number }[] }
@@ -23,18 +21,15 @@ export interface IndicatorController extends IndicatorReader { reset(instanceId:
 export interface CommandSender { sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown }> }
 
 export interface ChartConfig { symbol: string; timeframe: string }
-interface Deps { bars: BarReader; indicators: IndicatorController; commands: CommandSender }
+interface Deps { bars: BarReader; indicators: IndicatorController; commands: CommandSender; onIndicatorSubscribed?: () => void }
 
 // LWC wants seconds (UTCTimestamp); our bucketStart is an ISO string.
 const toLwcTime = (bucketStart: string): number => Math.floor(Date.parse(bucketStart) / 1000);
 const toLwcTimeMs = (ms: number): number => Math.floor(ms / 1000);
 
-// Empty bars of whitespace kept past both edges of the loaded data: to the right
-// via LWC's native `rightOffset` (chartTheme), and to the left by prepending this
-// many WhitespaceData points ahead of the earliest real bar (LWC has no left-offset
-// option) paired with `fixLeftEdge` so the farthest-left pan stops there. Exported
-// so tests can assert against it instead of a repeated magic number.
-export const LEFT_PAD_BARS = 4;
+// Kept exported for compatibility with chart tests/consumers. Left padding is
+// intentionally zero; unrestricted negative logical indexes drive older loads.
+export const LEFT_PAD_BARS = 0;
 
 // Stretch factor a "collapsed" sub-pane (e.g. MACD) is pinned to — small enough to
 // read as a thin strip but non-zero so LWC never treats the pane as empty/removable.
@@ -227,9 +222,8 @@ export class ChartController {
     // back would have their viewport silently teleport to a different time
     // window on every prepend.
     const before = this.facade.getVisibleRange();
-    const pad = this.leftPad(bars);
-    this.candle.setData([...pad, ...bars.map((b) => this.mainPoint(b))]);
-    this.volume.setData([...pad, ...bars.map((b) => toVolume(b, this.palette))]);
+    this.candle.setData(bars.map((b) => this.mainPoint(b)));
+    this.volume.setData(bars.map((b) => toVolume(b, this.palette)));
     if (before && bars.length > 0) {
       // Restore the pre-rebuild time window — unless the user was parked at the
       // right/live edge, where LWC's own follow-live behavior is already correct
@@ -420,21 +414,6 @@ export class ChartController {
     this.closedRange = { minValue, maxValue };
   }
 
-  // LEFT_PAD_BARS WhitespaceData points (time-only, no OHLC — valid for both the
-  // candle and volume series in LWC v5) placed before the earliest real bar, so
-  // with fixLeftEdge the farthest-left pan leaves the same empty margin the right
-  // edge already gets from rightOffset. Span is derived from the loaded bars
-  // (self-adjusts to the active timeframe); falls back to the nominal timeframe
-  // span when fewer than 2 bars are loaded (can't derive a step from one point).
-  private leftPad(bars: Bar[]): { time: number }[] {
-    const t0 = toLwcTime(bars[0].bucketStart);
-    const spanMs = bars.length > 1
-      ? Date.parse(bars[1].bucketStart) - Date.parse(bars[0].bucketStart)
-      : timeframeToMs(this.config.timeframe as Timeframe);
-    const spanSec = Math.max(1, Math.floor(spanMs / 1000));
-    return Array.from({ length: LEFT_PAD_BARS }, (_, i) => ({ time: t0 - (LEFT_PAD_BARS - i) * spanSec }));
-  }
-
   private applyIndicators(): void {
     for (const { inst, series } of this.indicators.values()) {
       const descriptors = describeIndicator(inst, this.palette);
@@ -559,7 +538,7 @@ export class ChartController {
     void this.deps.commands.sendCommand("SubscribeIndicator", {
       instanceId: inst.instanceId, symbol: this.config.symbol, timeframe: this.config.timeframe,
       type: inst.type, params: inst.params,
-    });
+    }).then((ack) => { if (ack.status === "accepted") this.deps.onIndicatorSubscribed?.(); });
   }
 
   removeIndicator(instanceId: string): void {

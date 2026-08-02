@@ -33,12 +33,13 @@ type mirror struct {
 	global wsmsg.GlobalLimitsView
 
 	// market data (keyed by symbol unless noted)
-	quotes     map[string]wsmsg.Quote
-	books      map[string]wsmsg.Book
-	tape       map[string][]wsmsg.Tick           // bounded recent ring per symbol
-	bars       map[string][]wsmsg.Bar            // key "SYMBOL:TF", sorted by bucketStart
-	indicators map[string][]wsmsg.IndicatorPoint // key instanceId or instanceId#slot
-	marks      map[string]float64                // last price per symbol (pnl + display)
+	quotes          map[string]wsmsg.Quote
+	books           map[string]wsmsg.Book
+	tape            map[string][]wsmsg.Tick           // bounded recent ring per symbol
+	bars            map[string][]wsmsg.Bar            // key "SYMBOL:TF", sorted by bucketStart
+	indicators      map[string][]wsmsg.IndicatorPoint // key instanceId or instanceId#slot
+	marks           map[string]float64                // last price per symbol (pnl + display)
+	historyRevision int64
 
 	// scanner / news
 	rank         map[string]wsmsg.ScannerRankPayload // key session
@@ -145,6 +146,7 @@ func (m *mirror) applyMD(u md.Update) []staged {
 			out[i] = mapBar(b)
 		}
 		m.bars[barKey(v.Symbol, string(v.TF))] = out
+		m.historyRevision++
 		m.marks[v.Symbol] = out[len(out)-1].C
 		return []staged{{Topic: wsmsg.TopicBars, Payload: out, Snap: true}}
 	case md.BarPrepend:
@@ -161,6 +163,7 @@ func (m *mirror) applyMD(u md.Update) []staged {
 		k := barKey(v.Symbol, string(v.TF))
 		// out is ascending and strictly older than the cached run's head.
 		m.bars[k] = append(out, m.bars[k]...)
+		m.historyRevision++
 		return []staged{{Topic: wsmsg.TopicBars, Payload: out, Batch: true}}
 	case md.IndicatorUpdate:
 		return m.applyIndicator(v)
@@ -214,6 +217,7 @@ func (m *mirror) applyIndicator(v md.IndicatorUpdate) []staged {
 			pts[i] = mapIndicatorPoint(p)
 		}
 		m.indicators[key] = pts
+		m.historyRevision++
 		return []staged{{Topic: wsmsg.TopicIndicator, Key: key, Payload: pts, Snap: true}}
 	}
 	if len(v.Points) == 0 {
@@ -371,15 +375,11 @@ func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
 			out = append(out, staged{Topic: topic, Payload: append(ticks, m.tape[s]...)})
 		}
 	case wsmsg.TopicBars:
-		// make (not append-to-nil) so an empty bars series marshals to `[]`,
-		// not `null` -- BarStore.apply calls .slice() on the payload.
 		for _, k := range sortedKeysOf(m.bars) {
 			bars := make([]wsmsg.Bar, 0, len(m.bars[k]))
 			out = append(out, staged{Topic: topic, Payload: append(bars, m.bars[k]...)})
 		}
 	case wsmsg.TopicIndicator:
-		// make (not append-to-nil) so an empty indicator series marshals to
-		// `[]`, not `null` -- IndicatorStore.apply calls .slice() on the payload.
 		for _, k := range sortedKeysOf(m.indicators) {
 			pts := make([]wsmsg.IndicatorPoint, 0, len(m.indicators[k]))
 			out = append(out, staged{Topic: topic, Key: k, Payload: append(pts, m.indicators[k]...)})

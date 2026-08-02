@@ -69,16 +69,21 @@ type ConnUpdate struct{ Up bool }
 // ResyncedUpdate passes through a completed reconnect + resubscribe cycle.
 type ResyncedUpdate struct{}
 
-func (QuoteUpdate) isUpdate()     {}
-func (BookUpdate) isUpdate()      {}
-func (TapeUpdate) isUpdate()      {}
-func (BarUpdate) isUpdate()       {}
-func (BarSnapshot) isUpdate()     {}
-func (BarPrepend) isUpdate()      {}
-func (IndicatorUpdate) isUpdate() {}
-func (MismatchUpdate) isUpdate()  {}
-func (ConnUpdate) isUpdate()      {}
-func (ResyncedUpdate) isUpdate()  {}
+// HistoryReadyUpdate is ordered after all bar and indicator reseed updates
+// for one synchronization job.
+type HistoryReadyUpdate struct{ Symbol string }
+
+func (QuoteUpdate) isUpdate()        {}
+func (BookUpdate) isUpdate()         {}
+func (TapeUpdate) isUpdate()         {}
+func (BarUpdate) isUpdate()          {}
+func (BarSnapshot) isUpdate()        {}
+func (BarPrepend) isUpdate()         {}
+func (IndicatorUpdate) isUpdate()    {}
+func (MismatchUpdate) isUpdate()     {}
+func (ConnUpdate) isUpdate()         {}
+func (ResyncedUpdate) isUpdate()     {}
+func (HistoryReadyUpdate) isUpdate() {}
 
 // Point is one (time, value) sample of an indicator series.
 type Point struct {

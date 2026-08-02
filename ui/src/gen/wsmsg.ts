@@ -475,6 +475,30 @@ export interface LoadOlderResult {
   added: number /* int */;
   exhausted: boolean;
 }
+
+export interface QueryChartWindowArgs {
+  symbol: string;
+  timeframe: string;
+  fromMs: number;
+  toMs: number;
+  tailBars: number;
+  indicatorSeriesKeys: string[];
+}
+
+export interface IndicatorSeriesWindow {
+  seriesKey: string;
+  points: IndicatorPoint[];
+}
+
+export interface QueryChartWindowResult {
+  symbol: string;
+  timeframe: string;
+  fromMs: number;
+  toMs: number;
+  bars: Bar[];
+  indicators: IndicatorSeriesWindow[];
+  historyRevision: number;
+}
 /**
  * Venue mirrors config.Venue (no secret material — Credentials is a key NAME).
  */

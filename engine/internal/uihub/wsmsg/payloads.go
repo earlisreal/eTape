@@ -409,6 +409,32 @@ type LoadOlderResult struct {
 	Exhausted bool `json:"exhausted"`
 }
 
+// QueryChartWindowArgs selects either an exact half-open UTC range or latest
+// TailBars bars. Exactly one mode must be supplied.
+type QueryChartWindowArgs struct {
+	Symbol              string   `json:"symbol"`
+	Timeframe           string   `json:"timeframe"`
+	FromMs              int64    `json:"fromMs"`
+	ToMs                int64    `json:"toMs"`
+	TailBars            int      `json:"tailBars"`
+	IndicatorSeriesKeys []string `json:"indicatorSeriesKeys"`
+}
+
+type IndicatorSeriesWindow struct {
+	SeriesKey string           `json:"seriesKey"`
+	Points    []IndicatorPoint `json:"points"`
+}
+
+type QueryChartWindowResult struct {
+	Symbol          string                  `json:"symbol"`
+	Timeframe       string                  `json:"timeframe"`
+	FromMs          int64                   `json:"fromMs"`
+	ToMs            int64                   `json:"toMs"`
+	Bars            []Bar                   `json:"bars"`
+	Indicators      []IndicatorSeriesWindow `json:"indicators"`
+	HistoryRevision int64                   `json:"historyRevision"`
+}
+
 // ---- venue & credentials config DTOs (settings "Venues & credentials") ----
 
 // Venue mirrors config.Venue (no secret material — Credentials is a key NAME).

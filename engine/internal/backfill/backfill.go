@@ -65,6 +65,14 @@ type Seeder interface {
 	SeedSessionTicks(symbol string, ticks []feed.Tick)
 }
 
+type historyBarrier interface{ SyncHistory(symbol string) }
+
+func (o *Orchestrator) syncHistory(symbol string) {
+	if b, ok := o.seeder.(historyBarrier); ok {
+		b.SyncHistory(symbol)
+	}
+}
+
 // Archive is the local warm-start + persistence source. Implemented by
 // *store.Store. ArchiveBar1m/ArchiveDaily persist freshly-fetched (non
 // warm-start) history: md.Core's history seed no longer emits a per-bar
@@ -188,6 +196,7 @@ func (o *Orchestrator) Backfill(ctx context.Context, symbol string) error {
 	err := o.fillDaily(ctx, symbol, o.dailyFrom(now), now.Add(-24*time.Hour))
 	slog.Debug("backfill: fillDaily done", "symbol", symbol, "elapsed", time.Since(t3).Round(time.Millisecond), "total", time.Since(t0).Round(time.Millisecond))
 	o.noteBackfilled(symbol, from1m)
+	o.syncHistory(symbol)
 	return err
 }
 
@@ -332,12 +341,19 @@ func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.
 // returns nil once any provider served (even with zero bars — no data is not a
 // failure), otherwise the last error, so the uihub knows whether to re-arm.
 func (o *Orchestrator) fillDaily(ctx context.Context, symbol string, from, to time.Time) error {
-	// Archive-first: skip API if the archive has any daily bars for this symbol.
+	// Seed complete archive first, then synchronize only missing tail. Empty DB
+	// starts at 2016-01-01; internal holes remain separate repair work.
 	if daily, err := o.archive.ReadDailyBars(symbol); err == nil && len(daily) > 0 {
 		o.archiveDailyBars(daily)
 		seedUnlessCanceled(ctx, daily, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
-		slog.Info("backfill: daily served from archive", "symbol", symbol, "bars", len(daily))
-		return nil
+		latest := time.UnixMilli(daily[len(daily)-1].BucketMs).UTC()
+		from = latest.AddDate(0, 0, 1)
+		if !to.After(from) {
+			slog.Info("backfill: daily current in archive", "symbol", symbol, "bars", len(daily))
+			return nil
+		}
+	} else {
+		from = dailyFloor
 	}
 
 	bars, served, err := walkChain(ctx, symbol, from, to, o.daily, dailyBars)
@@ -473,6 +489,7 @@ func (o *Orchestrator) loadOlder(ctx context.Context, symbol string, requiredSta
 		slog.Warn("load older: archive read failed", "symbol", symbol, "err", err)
 	} else if len(bars) > 0 && bars[0].BucketMs <= from.UnixMilli()+archiveCoverSlackMs {
 		o.seedOlderUnlessCanceled(ctx, symbol, bars)
+		o.syncHistory(symbol)
 		o.advanceWatermark(symbol, from.UnixMilli())
 		return olderResult{added: len(bars), exhausted: from.UnixMilli() <= floorMs}, nil
 	}
@@ -495,6 +512,7 @@ func (o *Orchestrator) loadOlder(ctx context.Context, symbol string, requiredSta
 	}
 	o.archive1m(bars)
 	o.seedOlderUnlessCanceled(ctx, symbol, bars)
+	o.syncHistory(symbol)
 	o.advanceWatermark(symbol, from.UnixMilli())
 	slog.Info("load older: deep 1m served", "symbol", symbol, "provider", served, "bars", len(bars), "from", from)
 	return olderResult{added: len(bars), exhausted: from.UnixMilli() <= floorMs}, nil
@@ -520,8 +538,12 @@ func (o *Orchestrator) seedOlderUnlessCanceled(ctx context.Context, symbol strin
 // twice in a session. Concurrent
 // calls for the same symbol coalesce via the olderDay singleflight.Group.
 func (o *Orchestrator) LoadOlderDaily(ctx context.Context, symbol string) (int, bool, error) {
+	return o.LoadOlderDailyRange(ctx, symbol, 0, 0)
+}
+
+func (o *Orchestrator) LoadOlderDailyRange(ctx context.Context, symbol string, requiredStartMs, requiredEndMs int64) (int, bool, error) {
 	v, err, _ := o.olderDay.Do(symbol, func() (any, error) {
-		return o.loadOlderDaily(ctx, symbol)
+		return o.loadOlderDaily(ctx, symbol, requiredStartMs, requiredEndMs)
 	})
 	if err != nil {
 		return 0, false, err
@@ -530,16 +552,23 @@ func (o *Orchestrator) LoadOlderDaily(ctx context.Context, symbol string) (int, 
 	return r.added, r.exhausted, nil
 }
 
-func (o *Orchestrator) loadOlderDaily(ctx context.Context, symbol string) (olderResult, error) {
+func (o *Orchestrator) loadOlderDaily(ctx context.Context, symbol string, requiredStartMs, requiredEndMs int64) (olderResult, error) {
 	o.mu.Lock()
 	done := o.dailyDone[symbol]
 	o.mu.Unlock()
-	if done {
+	if done && requiredStartMs == 0 {
 		return olderResult{exhausted: true}, nil
 	}
 
 	floorMs := olderDailyFloor.UnixMilli()
 	ceilingMs := dailyFloor.UnixMilli()
+	if requiredStartMs > 0 && requiredEndMs > requiredStartMs {
+		floorMs = max(floorMs, requiredStartMs)
+		ceilingMs = min(o.clk.Now().UnixMilli()+1, requiredEndMs)
+		if floorMs >= ceilingMs {
+			return olderResult{exhausted: true}, nil
+		}
+	}
 
 	// Archive-first: if the archive already holds load-older daily range (e.g. from a
 	// prior session's one-shot), re-seed those instead of re-fetching. This
@@ -566,13 +595,14 @@ func (o *Orchestrator) loadOlderDaily(ctx context.Context, symbol string) (older
 		}
 		if len(pre) > 0 {
 			o.seedDailyUnlessCanceled(ctx, symbol, pre)
+			o.syncHistory(symbol)
 			o.markDailyDone(symbol)
 			return olderResult{added: len(pre), exhausted: true}, nil
 		}
 	}
 
-	from := olderDailyFloor
-	to := dailyFloor
+	from := time.UnixMilli(floorMs)
+	to := time.UnixMilli(ceilingMs)
 	bars, served, err := walkChain(ctx, symbol, from, to, o.daily, dailyBars)
 	if len(bars) == 0 {
 		o.markDailyDone(symbol) // never ask again this session
@@ -591,6 +621,7 @@ func (o *Orchestrator) loadOlderDaily(ctx context.Context, symbol string) (older
 	}
 	o.archiveDailyBars(clipped)
 	o.seedDailyUnlessCanceled(ctx, symbol, clipped)
+	o.syncHistory(symbol)
 	o.markDailyDone(symbol)
 	slog.Info("load older: pre-2016 daily served", "symbol", symbol, "provider", served, "bars", len(clipped))
 	return olderResult{added: len(clipped), exhausted: true}, nil

@@ -7,6 +7,8 @@ import type { Bar, SnapshotMsg, DeltaMsg } from "../wire/contract";
 // symbols may hold a partial past its wall-clock end — never a "closed" bar.
 export class BarStore extends PaintStore {
   private readonly series_ = new Map<string, Bar[]>();
+  private readonly visible = new Map<string, { fromMs: number; toMs: number }>();
+  private readonly covered = new Map<string, { fromMs: number; toMs: number }[]>();
   // Bumped per (symbol, timeframe) on every apply() for that key — backs the
   // key-scoped getRev(symbol, timeframe) overload below. The base PaintStore's
   // own rev counter (bumped via markDirty()) still backs the no-arg getRev()
@@ -60,7 +62,66 @@ export class BarStore extends PaintStore {
   }
 
   series(symbol: string, timeframe: string): Bar[] {
-    return this.series_.get(this.key(symbol, timeframe)) ?? [];
+    const k = this.key(symbol, timeframe);
+    const all = this.series_.get(k) ?? [];
+    const range = this.visible.get(k);
+    if (!range) return all;
+    return all.filter((b) => { const ms = Date.parse(b.bucketStart); return ms >= range.fromMs && ms < range.toMs; });
+  }
+
+  mergeWindow(symbol: string, timeframe: string, bars: Bar[], fromMs: number, toMs: number, select = true): void {
+    const k = this.key(symbol, timeframe);
+    const byTime = new Map((this.series_.get(k) ?? []).map((b) => [b.bucketStart, b]));
+    for (const bar of bars) byTime.set(bar.bucketStart, bar);
+    this.series_.set(k, [...byTime.values()].sort((a, b) => a.bucketStart.localeCompare(b.bucketStart)));
+    const ranges = [...(this.covered.get(k) ?? []), { fromMs, toMs }].sort((a, b) => a.fromMs - b.fromMs);
+    const merged: { fromMs: number; toMs: number }[] = [];
+    for (const range of ranges) {
+      const last = merged[merged.length - 1];
+      if (last && range.fromMs <= last.toMs) last.toMs = Math.max(last.toMs, range.toMs);
+      else merged.push({ ...range });
+    }
+    this.covered.set(k, merged);
+    if (select) this.visible.set(k, { fromMs, toMs });
+    this.bumpRev(k); this.markDirty();
+  }
+
+  selectWindow(symbol: string, timeframe: string, fromMs: number, toMs: number): void {
+    const k = this.key(symbol, timeframe); this.visible.set(k, { fromMs, toMs }); this.bumpRev(k); this.markDirty();
+  }
+
+  expandWindow(symbol: string, timeframe: string, fromMs: number, toMs: number): void {
+    const k = this.key(symbol, timeframe);
+    const current = this.visible.get(k);
+    this.visible.set(k, current
+      ? { fromMs: Math.min(current.fromMs, fromMs), toMs: Math.max(current.toMs, toMs) }
+      : { fromMs, toMs });
+    this.bumpRev(k); this.markDirty();
+  }
+
+  clearSelection(symbol: string, timeframe: string): void { this.visible.delete(this.key(symbol, timeframe)); }
+
+  countBefore(symbol: string, timeframe: string, timeMs: number): number {
+    const all = this.series_.get(this.key(symbol, timeframe)) ?? [];
+    let lo = 0; let hi = all.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (Date.parse(all[mid].bucketStart) < timeMs) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+
+  missingRanges(symbol: string, timeframe: string, fromMs: number, toMs: number): { fromMs: number; toMs: number }[] {
+    let cursor = fromMs; const out: { fromMs: number; toMs: number }[] = [];
+    for (const range of this.covered.get(this.key(symbol, timeframe)) ?? []) {
+      if (range.toMs <= cursor) continue;
+      if (range.fromMs >= toMs) break;
+      if (range.fromMs > cursor) out.push({ fromMs: cursor, toMs: Math.min(range.fromMs, toMs) });
+      cursor = Math.max(cursor, range.toMs);
+    }
+    if (cursor < toMs) out.push({ fromMs: cursor, toMs });
+    return out;
   }
 
   inProgressBar(symbol: string, timeframe: string): Bar | undefined {

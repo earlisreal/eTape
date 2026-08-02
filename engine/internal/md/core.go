@@ -51,6 +51,10 @@ type seedSessionTicksMsg struct {
 	symbol string
 	ticks  []feed.Tick
 }
+type historyBarrierMsg struct {
+	symbol string
+	done   chan struct{}
+}
 
 func (eventMsg) isInMsg()            {}
 func (ensureIndicatorMsg) isInMsg()  {}
@@ -60,6 +64,7 @@ func (seedHistory1mMsg) isInMsg()    {}
 func (seedHistory10sMsg) isInMsg()   {}
 func (seedOlder1mMsg) isInMsg()      {}
 func (seedSessionTicksMsg) isInMsg() {}
+func (historyBarrierMsg) isInMsg()   {}
 
 // Core is the single-writer market-data state machine.
 type Core struct {
@@ -168,6 +173,12 @@ func (c *Core) SeedSessionTicks(symbol string, ticks []feed.Tick) {
 	c.inbox <- seedSessionTicksMsg{symbol: symbol, ticks: ticks}
 }
 
+func (c *Core) SyncHistory(symbol string) {
+	done := make(chan struct{})
+	c.inbox <- historyBarrierMsg{symbol: symbol, done: done}
+	<-done
+}
+
 // Run is the single writer. It returns when ctx is done.
 func (c *Core) Run(ctx context.Context) error {
 	for {
@@ -234,6 +245,9 @@ func (c *Core) apply(m inMsg) {
 		c.bars.seedOlder1m(c, msg.symbol, msg.bars)
 	case seedSessionTicksMsg:
 		c.seedSessionTicks(msg.symbol, msg.ticks)
+	case historyBarrierMsg:
+		c.emit(HistoryReadyUpdate{Symbol: msg.symbol})
+		close(msg.done)
 	}
 }
 

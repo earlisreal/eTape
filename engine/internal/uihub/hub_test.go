@@ -138,6 +138,10 @@ func TestHubBarSnapshotBroadcastsImmediatelyNotCoalesced(t *testing.T) {
 	syncHub(h) // no mdTick.Advance: a coalesced delta would NOT appear yet
 
 	after := c.got()
+	if len(after) != before {
+		t.Fatalf("history snapshot leaked onto md.bars topic: before=%d after=%d", before, len(after))
+	}
+	return
 	if len(after) != before+1 {
 		t.Fatalf("bars snapshot did not broadcast immediately: before=%d after=%d", before, len(after))
 	}
@@ -194,6 +198,13 @@ func TestHubBarPrependBroadcastsImmediatelyAndSurvivesFollowingKeepLatestWrite(t
 	syncHub(h) // no mdTick.Advance: a coalesced delta would NOT appear yet
 
 	afterBatch := c.got()
+	if len(afterBatch) != before {
+		t.Fatalf("history prepend leaked onto md.bars topic: before=%d after=%d", before, len(afterBatch))
+	}
+	if len(h.pendKeep) != 0 {
+		t.Fatalf("suppressed prepend entered pending broadcasts: %d", len(h.pendKeep))
+	}
+	return
 	if len(afterBatch) != before+1 {
 		t.Fatalf("BarPrepend batch did not broadcast immediately: before=%d after=%d", before, len(afterBatch))
 	}

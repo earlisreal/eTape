@@ -15,12 +15,21 @@ type fillsQuerier interface {
 }
 
 type queries struct {
-	fills fillsQuerier
-	clk   clock.Clock
+	fills  fillsQuerier
+	charts interface {
+		QueryChartWindow(wsmsg.QueryChartWindowArgs) wsmsg.QueryChartWindowResult
+	}
+	clk clock.Clock
 }
 
-func newQueries(f fillsQuerier, clk clock.Clock) *queries {
-	return &queries{fills: f, clk: clk}
+func newQueries(f fillsQuerier, clk clock.Clock, charts ...interface {
+	QueryChartWindow(wsmsg.QueryChartWindowArgs) wsmsg.QueryChartWindowResult
+}) *queries {
+	q := &queries{fills: f, clk: clk}
+	if len(charts) > 0 {
+		q.charts = charts[0]
+	}
+	return q
 }
 
 func fillRowToWire(r exec.FillRow) wsmsg.Fill {
@@ -32,6 +41,12 @@ func fillRowToWire(r exec.FillRow) wsmsg.Fill {
 
 func (q *queries) handle(name string, args json.RawMessage) any {
 	switch name {
+	case "QueryChartWindow":
+		var a wsmsg.QueryChartWindowArgs
+		if json.Unmarshal(args, &a) != nil || q.charts == nil || a.Symbol == "" || a.Timeframe == "" || (a.TailBars > 0) == (a.FromMs < a.ToMs) {
+			return wsmsg.QueryChartWindowResult{Symbol: a.Symbol, Timeframe: a.Timeframe, Bars: []wsmsg.Bar{}, Indicators: []wsmsg.IndicatorSeriesWindow{}}
+		}
+		return q.charts.QueryChartWindow(a)
 	case "QueryFills":
 		var a wsmsg.QueryFillsArgs
 		if err := json.Unmarshal(args, &a); err != nil {

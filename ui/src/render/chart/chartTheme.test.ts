@@ -24,7 +24,7 @@ describe("chartTheme", () => {
     // _private__maxRightOffset()). DeepChartOptions.timeScale has no
     // fixRightEdge field at all (see chartTheme.ts) so this can't be
     // reintroduced without a compile error.
-    expect(o.timeScale?.fixLeftEdge).toBe(true);
+    expect(o.timeScale?.fixLeftEdge).toBe(false);
     expect(o.timeScale?.rightOffset).toBe(RIGHT_OFFSET_BARS);
     expect(o.timeScale?.shiftVisibleRangeOnNewBar).toBe(true);
     expect(o.rightPriceScale?.minimumWidth).toBeGreaterThan(0);
