@@ -1,5 +1,5 @@
 # Toolchain (record exact versions used):
-#   go 1.26.4, protoc 35.1 (libprotoc), protoc-gen-go v1.36.11, golangci-lint 2.12.2
+#   go 1.26.5, protoc 35.1 (libprotoc), protoc-gen-go v1.36.11, golangci-lint 2.12.2
 #
 # .github/workflows/release.yml builds release-windows/release-macos on tag push;
 # .github/workflows/ci.yml runs `make -C engine gen-ts-check` as part of the PR/push

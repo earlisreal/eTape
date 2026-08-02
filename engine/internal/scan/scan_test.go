@@ -689,13 +689,21 @@ func rows(syms ...string) []wsmsg.ScannerRow {
 
 func TestUpdatePoolEnsuresWatchDemandsAndBackfills(t *testing.T) {
 	sf := &spyFeed{}
-	var backfilled []string
+	backfillCh := make(chan string, 2)
 	clk := clock.NewFake(et(2026, 7, 8, 14, 0)) // RTH, well inside a pool day
-	p := New(config.Scan{}, &fakeReq{}, &capturePub{}, clk, sf, func(s string) { backfilled = append(backfilled, s) })
+	p := New(config.Scan{}, &fakeReq{}, &capturePub{}, clk, sf, func(s string) { backfillCh <- s })
 
 	p.updatePool(clk.Now(), rows("US.A", "US.B"))
 
-	time.Sleep(350 * time.Millisecond) // let staggered goroutines complete
+	backfilled := make([]string, 0, 2)
+	for len(backfilled) < 2 {
+		select {
+		case symbol := <-backfillCh:
+			backfilled = append(backfilled, symbol)
+		case <-time.After(time.Second):
+			t.Fatalf("timed out waiting for backfills; got %v", backfilled)
+		}
+	}
 
 	if len(sf.ensured) != 2 {
 		t.Fatalf("want 2 Ensure calls, got %+v", sf.ensured)
