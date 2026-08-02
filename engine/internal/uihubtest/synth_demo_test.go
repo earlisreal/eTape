@@ -186,22 +186,9 @@ func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndMoversConsistent(t *testing.T) 
 		t.Fatalf("EnsureSymbol should be accepted, got %v", ack)
 	}
 
-	// History stays engine-side and is queried by viewport; topic subscription
-	// carries live deltas only. Poll until async warm seed reaches mirror.
-	var got1m, gotD wsmsg.QueryChartWindowResult
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		got1m = hub.QueryChartWindow(wsmsg.QueryChartWindowArgs{Symbol: wantSymbol, Timeframe: "1m", TailBars: 100000})
-		gotD = hub.QueryChartWindow(wsmsg.QueryChartWindowArgs{Symbol: wantSymbol, Timeframe: "D", TailBars: 100000})
-		if len(got1m.Bars) > 0 && len(gotD.Bars) > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-
-	// Cross-check against the archive directly (what warmStart itself read)
-	// rather than a fixed magic number, so this assertion tracks whatever
-	// gen.Seed actually wrote, not a guess at it.
+	// Cross-check against archive directly (what warmStart itself reads)
+	// rather than fixed magic numbers, so assertions track whatever
+	// gen.Seed wrote, not guesses at it.
 	wantDaily, err := st.ReadDailyBars(wantSymbol)
 	if err != nil {
 		t.Fatalf("ReadDailyBars: %v", err)
@@ -209,6 +196,20 @@ func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndMoversConsistent(t *testing.T) 
 	wantIntraday, err := st.ReadBars1m(wantSymbol, 0, nowMs)
 	if err != nil {
 		t.Fatalf("ReadBars1m: %v", err)
+	}
+
+	// History stays engine-side and is queried by viewport; topic subscription
+	// carries live deltas only. Fast first paint publishes a 500-bar tail, so
+	// wait until async warmStart replaces it with full archived history.
+	var got1m, gotD wsmsg.QueryChartWindowResult
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		got1m = hub.QueryChartWindow(wsmsg.QueryChartWindowArgs{Symbol: wantSymbol, Timeframe: "1m", TailBars: 100000})
+		gotD = hub.QueryChartWindow(wsmsg.QueryChartWindowArgs{Symbol: wantSymbol, Timeframe: "D", TailBars: 100000})
+		if len(got1m.Bars) == len(wantIntraday) && len(gotD.Bars) >= len(wantDaily) {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
 	}
 
 	if len(got1m.Bars) != len(wantIntraday) {

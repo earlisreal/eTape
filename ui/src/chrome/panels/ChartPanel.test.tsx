@@ -76,7 +76,11 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sh
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
   const commands = {
     sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })),
-    sendQuery: vi.fn(async (_name: string, _args: unknown) => []),
+    sendQuery: vi.fn(async (name: string, args: unknown) => {
+      void name;
+      void args;
+      return [];
+    }),
   };
   const config = { id, panelId: "chart", group: "green" as const, settings: { symbol: "US.AAPL", timeframe: "1m", ...settingsOverride } };
   const onConfigChange = vi.fn();
