@@ -233,6 +233,10 @@ func (c *Core) apply(m inMsg) {
 		c.applyEvent(msg.ev)
 	case ensureIndicatorMsg:
 		c.inds.ensure(c, msg.connID, msg.id, msg.spec) // Task 12
+		// Indicator snapshots stay engine-side; UI pulls matching viewport after
+		// this ordered barrier reaches hub. Without it SubscribeIndicator's ack
+		// races ahead of reseed/mirror application on timeframe changes.
+		c.emit(HistoryReadyUpdate{Symbol: msg.spec.Symbol})
 	case releaseIndicatorMsg:
 		c.inds.release(msg.connID, msg.id)
 	case seedDailyMsg:

@@ -286,7 +286,15 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       const bars = stores.bars.series(currentSymbol, tfRef.current);
       if (!logical || bars.length === 0) return null;
       const firstMs = Date.parse(bars[0].bucketStart);
-      const stepMs = timeframeToMs(tfRef.current as Timeframe);
+      const nominalStepMs = timeframeToMs(tfRef.current as Timeframe);
+      // Daily logical indexes count trading bars, not calendar days. Using 24h
+      // under-requests across weekends/holidays and leaves part of left blank
+      // viewport unfilled. Extrapolate from observed loaded-bar calendar span.
+      // Intraday keeps nominal bucket width; overnight/session gaps must not
+      // inflate a one-minute logical step.
+      const lastMs = Date.parse(bars[bars.length - 1].bucketStart);
+      const observedStepMs = bars.length > 1 ? (lastMs - firstMs) / (bars.length - 1) : nominalStepMs;
+      const stepMs = tfRef.current === "D" ? Math.max(nominalStepMs * 1.5, observedStepMs) : nominalStepMs;
       return {
         from: firstMs + Math.floor(logical.from) * stepMs,
         to: firstMs + Math.ceil(logical.to + 1) * stepMs,
@@ -599,6 +607,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const persist = (patch: Record<string, unknown>) => onConfigChange(patch);
 
   const changeTimeframe = (tf: string) => {
+    // Imperative chart reset/query runs before React commits state. Keep hot-path
+    // ref authoritative now; otherwise Weekly switch resubscribes engine to W
+    // while queryLatest/history-ready still request stale D (and vice versa).
+    tfRef.current = tf;
     setTf(tf); controllerRef.current?.setTimeframe(tf); applySymbolRef.current?.(); forceRepaintRef.current = true; persist({ timeframe: tf });
   };
   // Every mutation goes through instancesRef (updated synchronously here, not

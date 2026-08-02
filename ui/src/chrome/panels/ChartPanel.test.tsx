@@ -76,7 +76,7 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sh
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
   const commands = {
     sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })),
-    sendQuery: vi.fn(async () => []),
+    sendQuery: vi.fn(async (_name: string, _args: unknown) => []),
   };
   const config = { id, panelId: "chart", group: "green" as const, settings: { symbol: "US.AAPL", timeframe: "1m", ...settingsOverride } };
   const onConfigChange = vi.fn();
@@ -368,6 +368,18 @@ describe("ChartPanel", () => {
     const { getByRole, onConfigChange } = renderChart();
     fireEvent.click(getByRole("button", { name: "timeframe 5m" }));
     expect(onConfigChange).toHaveBeenCalledWith(expect.objectContaining({ timeframe: "5m" }));
+  });
+
+  it("queries the newly selected timeframe synchronously", async () => {
+    const { getByRole, commands } = renderChart("c1", undefined, undefined, { timeframe: "D" });
+    const before = commands.sendQuery.mock.calls.length;
+    fireEvent.click(getByRole("button", { name: "timeframe W" }));
+    await Promise.resolve();
+    const chartQueries = commands.sendQuery.mock.calls.slice(before)
+      .filter(([name]) => name === "QueryChartWindow")
+      .map(([, args]) => (args as { timeframe: string }).timeframe);
+    expect(chartQueries).toContain("W");
+    expect(chartQueries).not.toContain("D");
   });
 
   it("camera button calls the chart's takeScreenshot", () => {
