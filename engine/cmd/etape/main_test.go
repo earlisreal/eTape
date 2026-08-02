@@ -193,14 +193,15 @@ func TestForwardDailyBars_PersistsNewlyClosedDaysAndStopsOnCancel(t *testing.T) 
 	deadline := time.After(2 * time.Second)
 	for {
 		sink.mu.Lock()
-		got := len(sink.archived)
+		gotArchived := len(sink.archived)
+		gotSeeded := len(sink.seeded["US.TST"])
 		sink.mu.Unlock()
-		if got >= 1 {
+		if gotArchived >= 1 && gotSeeded >= 1 {
 			break
 		}
 		select {
 		case <-deadline:
-			t.Fatal("forwardDailyBars never archived the bar")
+			t.Fatal("forwardDailyBars never archived and seeded the bar")
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
