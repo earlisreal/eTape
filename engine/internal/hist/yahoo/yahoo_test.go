@@ -107,6 +107,43 @@ func TestDailyBarsMapsShareClassSymbol(t *testing.T) {
 	}
 }
 
+func TestDailyBarsNoData400ReturnsEmpty(t *testing.T) {
+	body := `{"chart":{"result":null,"error":{"code":"Bad Request",` +
+		`"description":"Data doesn't exist for startDate = 1451606400, endDate = 1549256400"}}}`
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v8/finance/chart/SBEV", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(body))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := New(srv.URL, clock.NewFake(time.UnixMilli(0)))
+	bars, err := c.DailyBars(context.Background(), "US.SBEV", time.UnixMilli(0), time.UnixMilli(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bars) != 0 {
+		t.Fatalf("bars = %d, want empty no-data result", len(bars))
+	}
+}
+
+func TestDailyBarsOther400StillErrors(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v8/finance/chart/AAPL", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"chart":{"result":null,"error":{"code":"Bad Request","description":"Invalid period2 value"}}}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := New(srv.URL, clock.NewFake(time.UnixMilli(0)))
+	_, err := c.DailyBars(context.Background(), "US.AAPL", time.UnixMilli(0), time.UnixMilli(1))
+	if err == nil || !strings.Contains(err.Error(), "status=400") {
+		t.Fatalf("err = %v, want status=400", err)
+	}
+}
+
 func TestDailyBars429RetriesThenErrors(t *testing.T) {
 	var calls int
 	mux := http.NewServeMux()

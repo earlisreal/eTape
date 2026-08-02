@@ -40,6 +40,11 @@ const browserUA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) " +
 // never placed in the orchestrator's 1m chain.
 var ErrIntradayUnsupported = errors.New("yahoo: intraday 1m not supported")
 
+// errNoData marks Yahoo's 400 response for a valid range containing no bars
+// (most commonly a wholly pre-listing range). Callers treat it as an empty
+// result so the backfill orchestrator can record the explored range.
+var errNoData = errors.New("yahoo: no data for range")
+
 // Client is the Yahoo daily-bars transport.
 type Client struct {
 	base   string
@@ -107,6 +112,9 @@ func (c *Client) DailyBars(ctx context.Context, symbol string, from, to time.Tim
 
 	body, err := c.get(ctx, reqURL)
 	if err != nil {
+		if errors.Is(err, errNoData) {
+			return nil, nil
+		}
 		return nil, err
 	}
 	var cr chartResp
@@ -184,6 +192,12 @@ func (c *Client) get(ctx context.Context, reqURL string) ([]byte, error) {
 			}
 		}
 		if resp.StatusCode >= 400 {
+			var cr chartResp
+			if json.Unmarshal(body, &cr) == nil && cr.Chart.Error != nil &&
+				cr.Chart.Error.Code == "Bad Request" &&
+				strings.HasPrefix(cr.Chart.Error.Description, "Data doesn't exist for startDate") {
+				return nil, errNoData
+			}
 			return nil, fmt.Errorf("yahoo: status=%d body=%s", resp.StatusCode, body)
 		}
 		return body, nil
