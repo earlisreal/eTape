@@ -711,8 +711,9 @@ func TestUpdatePoolEnsuresWatchDemandsAndBackfills(t *testing.T) {
 	if sf.ensured[0].ID != "scan:US.A" || sf.ensured[0].Symbol != "US.A" {
 		t.Fatalf("Ensure[0]=%+v, want id scan:US.A", sf.ensured[0])
 	}
-	if len(sf.ensured[0].Subs) != 2 || sf.ensured[0].Focused {
-		t.Fatalf("pool must use the 2-slot non-focused watch shape: %+v", sf.ensured[0])
+	if len(sf.ensured[0].Subs) != 1 || sf.ensured[0].Subs[0] != feed.SubTicker ||
+		sf.ensured[0].Focused || sf.ensured[0].HistoryDays != 2 {
+		t.Fatalf("pool must use ticker-only 2-day watch shape: %+v", sf.ensured[0])
 	}
 	if !sf.ensured[0].BackgroundSeed {
 		t.Fatalf("scanner demand must use background seed lane: %+v", sf.ensured[0])

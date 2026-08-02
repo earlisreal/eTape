@@ -434,11 +434,11 @@ func demandForProfile(id, symbol, profile string) (feed.Demand, bool) {
 	case "watch":
 		return feed.WatchDemand(id, symbol), true
 	case "focused":
-		subs := []feed.SubType{feed.SubQuote, feed.SubTicker, feed.SubKL1m}
+		subs := []feed.SubType{feed.SubQuote, feed.SubTicker, feed.SubKL1m, feed.SubKLDay}
 		if strings.HasPrefix(symbol, "US.") {
 			subs = append(subs, feed.SubBook)
 		}
-		return feed.Demand{ID: id, Symbol: symbol, Subs: subs, Focused: true, WantsHistory: true}, true
+		return feed.Demand{ID: id, Symbol: symbol, Subs: subs, Focused: true, HistoryDays: 70, WantsHistory: true, CachedDaily: true}, true
 	case "interest":
 		return feed.Demand{ID: id, Symbol: symbol}, true
 	default:

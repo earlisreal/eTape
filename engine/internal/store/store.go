@@ -13,6 +13,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 )
 
 // Store owns SQLite handle and single writer goroutine.
@@ -44,6 +45,15 @@ type writeOp interface{ render() []pendingWrite }
 type flushReq struct{ done chan struct{} }
 
 func (flushReq) render() []pendingWrite { return nil }
+
+type archiveRangeOp struct {
+	symbol, timeframe string
+	fromMs, toMs      int64
+	bars              []feed.Bar
+	done              chan error
+}
+
+func (archiveRangeOp) render() []pendingWrite { return nil }
 
 // Options configures Open.
 type Options struct {
@@ -126,6 +136,10 @@ func (s *Store) writer(flush time.Duration) {
 			case execAppendOp:
 				commit()
 				v.done <- s.commitExecAppend(v)
+				continue
+			case archiveRangeOp:
+				commit()
+				v.done <- s.commitArchiveRange(v)
 				continue
 			}
 			buf = append(buf, op.render()...)

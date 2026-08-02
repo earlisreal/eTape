@@ -548,7 +548,9 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	hub.SetFeed(feedForHub) // enables on-demand EnsureSymbol/ReleaseSymbol + FocusGroup probe
 	hub.SetKnownSymbol(st.HasArchivedSymbol)
 
-	var hubBackfill func(sym string, done func(ok bool))
+	var hubBackfill func(sym string, days int, done func(ok bool))
+	var refreshDaily func(sym string)
+	var warmSeen sync.Map // symbol -> deepest requested days; retained for after-close daily repair
 	if cfg.Backfill.Enabled || *demo {
 		// demo: dailyChain/intradayChain/tail are all nil here, so this is
 		// a chain-less orchestrator -- walkChain over a nil chain returns
@@ -577,41 +579,57 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		// own independent, pool-day-scoped dedup -- so it reuses this
 		// same closure with a nil done rather than spawning its own copy
 		// of the Add/goroutine/Done boilerplate.
-		hubBackfill = func(sym string, done func(ok bool)) {
+		hubBackfill = func(sym string, days int, done func(ok bool)) {
+			effectiveDays := days
+			if days <= 2 && cfg.Backfill.WatchIntradayDays > 0 {
+				effectiveDays = cfg.Backfill.WatchIntradayDays
+			} else if days >= 70 && cfg.Backfill.IntradayDays > 0 {
+				effectiveDays = cfg.Backfill.IntradayDays
+			}
+			recordWarmDepth(&warmSeen, sym, effectiveDays)
 			backfillWG.Add(1)
 			go func() {
 				defer backfillWG.Done()
-				err := orch.Backfill(ctx, sym)
+				err := orch.Warm(ctx, sym, effectiveDays)
 				if done != nil {
 					done(err == nil)
+				}
+			}()
+		}
+		refreshDaily = func(sym string) {
+			backfillWG.Add(1)
+			go func() {
+				defer backfillWG.Done()
+				if err := orch.RefreshDaily(ctx, sym); err != nil && ctx.Err() == nil {
+					log.Warn("after-close daily refresh failed", "symbol", sym, "err", err)
 				}
 			}()
 		}
 	}
 	var backfillOne func(string)
 	if hubBackfill != nil {
-		backfillOne = func(sym string) { hubBackfill(sym, nil) }
+		backfillOne = func(sym string) { hubBackfill(sym, 2, nil) }
+		scanWG.Add(1)
+		go func() {
+			defer scanWG.Done()
+			runAfterCloseHistoryRefresh(ctx, &warmSeen, refreshDaily)
+		}()
 	}
-	hub.SetBackfill(hubBackfill) // chart-open demands also deep-backfill (nil-safe if disabled)
+	hub.SetHistoryWarm(hubBackfill) // tiered watch/chart history warming
 	if fd, ok := feedForHub.(*opend.OpenDFeed); ok && st != nil {
 		hub.SetCachedDaily(func(sym string) {
 			backfillWG.Add(1)
 			go func() {
 				defer backfillWG.Done()
-				daily, err := st.ReadDailyBars(sym)
-				if err != nil {
-					log.Warn("cached daily seed: archive read failed", "symbol", sym, "err", err)
-					return
-				}
-				if len(daily) != 0 {
-					return
-				}
 				bars, err := fd.CachedDaily(ctx, sym)
 				if err != nil {
 					log.Warn("cached daily seed failed", "symbol", sym, "err", err)
 					return
 				}
 				if len(bars) > 0 && ctx.Err() == nil {
+					for _, b := range bars {
+						st.ArchiveDaily(b)
+					}
 					core.SeedDaily(sym, bars)
 				}
 			}()
@@ -725,6 +743,44 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		na = *p
 	}
 	return 0, restartRequested.Load(), na
+}
+
+func recordWarmDepth(seen *sync.Map, symbol string, days int) {
+	for {
+		cur, ok := seen.Load(symbol)
+		if !ok {
+			if _, loaded := seen.LoadOrStore(symbol, days); !loaded {
+				return
+			}
+			continue
+		}
+		if cur.(int) >= days || seen.CompareAndSwap(symbol, cur, days) {
+			return
+		}
+	}
+}
+
+func runAfterCloseHistoryRefresh(ctx context.Context, seen *sync.Map, refresh func(string)) {
+	for {
+		now := time.Now().In(session.Loc())
+		next := time.Date(now.Year(), now.Month(), now.Day(), 20, 5, 0, 0, session.Loc())
+		if !next.After(now) {
+			next = next.AddDate(0, 0, 1)
+		}
+		t := time.NewTimer(time.Until(next))
+		select {
+		case <-ctx.Done():
+			if !t.Stop() {
+				<-t.C
+			}
+			return
+		case <-t.C:
+			seen.Range(func(key, _ any) bool {
+				refresh(key.(string))
+				return true
+			})
+		}
+	}
 }
 
 // dropWatchInterval controls how often watchDroppedUpdates samples

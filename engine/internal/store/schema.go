@@ -19,6 +19,16 @@ CREATE TABLE IF NOT EXISTS bars_daily (
   o REAL, h REAL, l REAL, c REAL, v INTEGER,
   PRIMARY KEY (symbol, ts)
 );
+CREATE TABLE IF NOT EXISTS bar_archive_ranges (
+  symbol TEXT NOT NULL,
+  timeframe TEXT NOT NULL,
+  from_ts INTEGER NOT NULL,
+  to_ts INTEGER NOT NULL,
+  completed_at INTEGER NOT NULL,
+  PRIMARY KEY (symbol, timeframe, from_ts, to_ts)
+);
+CREATE INDEX IF NOT EXISTS idx_bar_archive_ranges_lookup
+  ON bar_archive_ranges(symbol, timeframe, from_ts, to_ts);
 CREATE TABLE IF NOT EXISTS config (
   key TEXT PRIMARY KEY, value TEXT NOT NULL
 );

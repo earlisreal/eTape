@@ -188,6 +188,31 @@ func TestHubDemand_WatchAndFocusedTriggerBackfillOnce(t *testing.T) {
 	}
 }
 
+func TestHubDemand_WatchPromotesToDeepHistory(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+	h.SetFeed(&spyHubFeed{})
+	var mu sync.Mutex
+	var days []int
+	h.SetHistoryWarm(func(_ string, d int, _ func(bool)) {
+		mu.Lock()
+		days = append(days, d)
+		mu.Unlock()
+	})
+	c := &fakeClient{nid: 8}
+	h.Register(c)
+	h.EnsureDemand(8, feed.WatchDemand("watch", "US.NFLX"))
+	h.sync()
+	h.EnsureDemand(8, feed.ChartDemand("chart", "US.NFLX"))
+	h.sync()
+	mu.Lock()
+	got := append([]int(nil), days...)
+	mu.Unlock()
+	if !reflect.DeepEqual(got, []int{2, 70}) {
+		t.Fatalf("history tiers=%v, want watch then deep promotion", got)
+	}
+}
+
 func TestHubDemand_InterestDoesNotBackfill(t *testing.T) {
 	h, cancel := runHub(t)
 	defer cancel()

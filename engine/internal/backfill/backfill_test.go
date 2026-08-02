@@ -53,6 +53,80 @@ func TestSeedUnlessCanceledSkipsOnCanceledContext(t *testing.T) {
 	}
 }
 
+func TestWarmUsesTieredSegmentsAndDoesNotSeedDeepSeries(t *testing.T) {
+	watchFetch := &fakeFetcher{}
+	watchSeed := &fakeSeeder{}
+	watchTail := &fakeTail{}
+	watch := New(chain(watchFetch), chain(watchFetch), watchTail, watchSeed, &fakeArchive{},
+		clock.NewFake(fixedNow()), Config{IntradayDays: 70, Concurrency: 1})
+	if err := watch.Warm(context.Background(), "US.WATCH", 2); err != nil {
+		t.Fatal(err)
+	}
+	if got := watchFetch.m1Calls.Load(); got != 1 {
+		t.Fatalf("watch 1m calls=%d, want one 2-day segment", got)
+	}
+	if got := watchTail.calls.Load(); got != 0 {
+		t.Fatalf("watch tail calls=%d, want 0 without K_1M", got)
+	}
+	if len(watchSeed.hist) != 0 || len(watchSeed.daily) != 0 {
+		t.Fatalf("background warm seeded UI series: hist=%d daily=%d", len(watchSeed.hist), len(watchSeed.daily))
+	}
+
+	deepFetch := &fakeFetcher{}
+	deepTail := &fakeTail{}
+	deep := New(chain(deepFetch), chain(deepFetch), deepTail, &fakeSeeder{}, &fakeArchive{},
+		clock.NewFake(fixedNow()), Config{IntradayDays: 70, Concurrency: 1})
+	if err := deep.Warm(context.Background(), "US.DEEP", 70); err != nil {
+		t.Fatal(err)
+	}
+	if got := deepFetch.m1Calls.Load(); got != 7 {
+		t.Fatalf("deep 1m calls=%d, want seven 10-day segments", got)
+	}
+	if got := deepTail.calls.Load(); got != 1 {
+		t.Fatalf("deep tail calls=%d, want 1", got)
+	}
+}
+
+func TestCompletedDailyTo(t *testing.T) {
+	loc := session.Loc()
+	day := time.Date(2026, 8, 3, 0, 0, 0, 0, loc)
+	if got := completedDailyTo(day.Add(19 * time.Hour)); !got.Equal(day.Add(-time.Millisecond)) {
+		t.Fatalf("before close=%s", got)
+	}
+	if got := completedDailyTo(day.Add(20*time.Hour + 5*time.Minute)); !got.Equal(day) {
+		t.Fatalf("after close=%s", got)
+	}
+}
+
+func TestWarmStillLoadsDailyWhenIntradayFails(t *testing.T) {
+	fetch := &fakeFetcher{mErr: errors.New("1m unavailable")}
+	o := New(chain(fetch), chain(fetch), nil, &fakeSeeder{}, &fakeArchive{},
+		clock.NewFake(fixedNow()), Config{IntradayDays: 70, Concurrency: 1})
+	if err := o.Warm(context.Background(), "US.WATCH", 2); err == nil {
+		t.Fatal("Warm error=nil, want intraday failure")
+	}
+	if got := fetch.dCalls.Load(); got != 1 {
+		t.Fatalf("daily calls=%d, want 1 despite intraday failure", got)
+	}
+}
+
+func TestRefreshDailyRefetchesLatestCompletedBar(t *testing.T) {
+	to := completedDailyTo(fixedNow().In(session.Loc()).Add(9 * time.Hour))
+	fetch := &fakeFetcher{daily: []feed.Bar{{Symbol: "US.AAPL", BucketMs: to.UnixMilli()}}}
+	archive := &fakeArchive{daily: []feed.Bar{
+		{Symbol: "US.AAPL", BucketMs: dailyFloor.UnixMilli()},
+		{Symbol: "US.AAPL", BucketMs: to.UnixMilli()},
+	}}
+	o := New(chain(fetch), nil, nil, &fakeSeeder{}, archive,
+		clock.NewFake(fixedNow().In(session.Loc()).Add(9*time.Hour)), Config{Concurrency: 1})
+	if err := o.RefreshDaily(context.Background(), "US.AAPL"); err != nil {
+		t.Fatal(err)
+	}
+	if got := fetch.dCalls.Load(); got != 1 {
+		t.Fatalf("daily calls=%d, want forced refresh of latest completed bar", got)
+	}
+}
+
 // --- test doubles ---
 
 type fakeFetcher struct {

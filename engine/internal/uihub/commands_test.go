@@ -454,11 +454,11 @@ func TestEnsureSymbol_AcceptsAndMapsWatch(t *testing.T) {
 	if got.d.BackgroundSeed {
 		t.Fatalf("UI watch must use foreground seed lane")
 	}
-	if !reflect.DeepEqual(got.d.Subs, []feed.SubType{feed.SubTicker, feed.SubKL1m}) {
+	if !reflect.DeepEqual(got.d.Subs, []feed.SubType{feed.SubTicker}) {
 		t.Fatalf("watch subs = %v", got.d.Subs)
 	}
-	if !got.d.WantsHistory {
-		t.Fatalf("watch must want history (chart-capable, backs the deep-backfill trigger)")
+	if got.d.HistoryDays != 2 {
+		t.Fatalf("watch history days = %d, want 2", got.d.HistoryDays)
 	}
 }
 
@@ -486,11 +486,14 @@ func TestEnsureSymbol_FocusedUSHasBook(t *testing.T) {
 	if d.BackgroundSeed {
 		t.Fatal("UI focused demand must use foreground seed lane")
 	}
-	if !reflect.DeepEqual(d.Subs, []feed.SubType{feed.SubQuote, feed.SubTicker, feed.SubKL1m, feed.SubBook}) {
-		t.Fatalf("US focused subs = %v (want quote,ticker,kl1m,book)", d.Subs)
+	if !reflect.DeepEqual(d.Subs, []feed.SubType{feed.SubQuote, feed.SubTicker, feed.SubKL1m, feed.SubKLDay, feed.SubBook}) {
+		t.Fatalf("US focused subs = %v (want quote,ticker,kl1m,klday,book)", d.Subs)
 	}
-	if !d.WantsHistory {
-		t.Fatalf("focused must want history (chart-capable, backs the deep-backfill trigger)")
+	if !d.CachedDaily {
+		t.Fatal("focused demand must request immediate cached daily bars")
+	}
+	if d.HistoryDays != 70 {
+		t.Fatalf("focused history days = %d, want 70", d.HistoryDays)
 	}
 }
 

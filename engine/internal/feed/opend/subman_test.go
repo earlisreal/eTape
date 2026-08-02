@@ -15,6 +15,10 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotsub"
 )
 
+func testBarDemand(id, symbol string) feed.Demand {
+	return feed.Demand{ID: id, Symbol: symbol, Subs: []feed.SubType{feed.SubTicker, feed.SubKL1m}}
+}
+
 // fakeRPC records Qot_Sub calls and answers success by default. Tests that
 // exercise the failure path (rule 4) set failNext/retType to make the next
 // call(s) fail with a transport error or a non-zero RetType respectively.
@@ -80,9 +84,9 @@ func newTestManager(t *testing.T, budget int) (*subManager, *fakeRPC, *clock.Fak
 
 func TestEnsureBatchesAndRefcounts(t *testing.T) {
 	m, rpc, _ := newTestManager(t, 100)
-	m.Ensure(feed.WatchDemand("w1", "US.AAPL"))
-	m.Ensure(feed.WatchDemand("w2", "US.TSLA"))
-	m.Ensure(feed.WatchDemand("w1b", "US.AAPL")) // second demand, same symbol
+	m.Ensure(testBarDemand("w1", "US.AAPL"))
+	m.Ensure(testBarDemand("w2", "US.TSLA"))
+	m.Ensure(testBarDemand("w1b", "US.AAPL")) // second demand, same symbol
 	m.pass(context.Background())
 
 	calls := rpc.snapshot()
@@ -110,7 +114,7 @@ func TestEnsureBatchesAndRefcounts(t *testing.T) {
 
 func TestUnsubscribeWaitsForMinHoldAndHysteresis(t *testing.T) {
 	m, rpc, clk := newTestManager(t, 100)
-	m.Ensure(feed.WatchDemand("w", "US.AAPL"))
+	m.Ensure(testBarDemand("w", "US.AAPL"))
 	m.pass(context.Background())
 	m.Release("w")
 	m.pass(context.Background()) // stamps droppedAt (worker's first observation)
@@ -131,12 +135,12 @@ func TestUnsubscribeWaitsForMinHoldAndHysteresis(t *testing.T) {
 	}
 
 	// Re-Ensure inside the window cancels a pending unsubscribe.
-	m.Ensure(feed.WatchDemand("w2", "US.MSFT"))
+	m.Ensure(testBarDemand("w2", "US.MSFT"))
 	m.pass(context.Background())
 	m.Release("w2")
 	m.pass(context.Background()) // droppedAt stamped
 	clk.Advance(2 * time.Minute)
-	m.Ensure(feed.WatchDemand("w3", "US.MSFT")) // re-desired: cancels the drop
+	m.Ensure(testBarDemand("w3", "US.MSFT")) // re-desired: cancels the drop
 	base := len(rpc.snapshot())
 	clk.Advance(10 * time.Minute)
 	m.pass(context.Background())
@@ -152,14 +156,14 @@ func TestUnsubscribeWaitsForMinHoldAndHysteresis(t *testing.T) {
 
 func TestPressureWaivesHysteresisButNeverMinHold(t *testing.T) {
 	m, rpc, clk := newTestManager(t, 2) // room for exactly one watch symbol
-	m.Ensure(feed.WatchDemand("a", "US.AAA"))
+	m.Ensure(testBarDemand("a", "US.AAA"))
 	m.pass(context.Background())
 	m.Release("a")
 	m.pass(context.Background()) // droppedAt stamped; slots still held
 
 	// New demand needs the held slots. Inside MinHold nothing can move:
 	// the add must wait (starved), the lingering subs must survive.
-	m.Ensure(feed.WatchDemand("b", "US.BBB"))
+	m.Ensure(testBarDemand("b", "US.BBB"))
 	clk.Advance(30 * time.Second)
 	m.pass(context.Background())
 	if s := m.Starved(); len(s) != 1 || s[0] != "US.BBB" {
@@ -184,8 +188,8 @@ func TestPressureWaivesHysteresisButNeverMinHold(t *testing.T) {
 }
 
 func TestBudgetStarvesLRUNonFocused(t *testing.T) {
-	m, _, clk := newTestManager(t, 5)             // room for one watch(2) + one focused(4)? no: 5 slots
-	m.Ensure(feed.WatchDemand("w-old", "US.OLD")) // 2 slots, oldest
+	m, _, clk := newTestManager(t, 5)          // room for one watch(2) + one focused(4)? no: 5 slots
+	m.Ensure(testBarDemand("w-old", "US.OLD")) // 2 slots, oldest
 	clk.Advance(time.Second)
 	m.Ensure(feed.Demand{ID: "f", Symbol: "US.FOC", Focused: true,
 		Subs: []feed.SubType{feed.SubQuote, feed.SubBook, feed.SubTicker, feed.SubKL1m}}) // 4 slots, focused
@@ -208,7 +212,7 @@ func TestBudgetStarvesLRUNonFocused(t *testing.T) {
 
 func TestResubscribeAllReissuesActiveSet(t *testing.T) {
 	m, rpc, _ := newTestManager(t, 100)
-	m.Ensure(feed.WatchDemand("w", "US.AAPL"))
+	m.Ensure(testBarDemand("w", "US.AAPL"))
 	m.Ensure(feed.Demand{ID: "f", Symbol: "US.TSLA", Focused: true,
 		Subs: []feed.SubType{feed.SubQuote, feed.SubBook, feed.SubTicker, feed.SubKL1m}})
 	m.pass(context.Background())
@@ -235,7 +239,7 @@ func TestQotSubTransportErrorLeavesStateUnchangedAndRetries(t *testing.T) {
 	rpc.failNext = 1
 	rpc.mu.Unlock()
 
-	m.Ensure(feed.WatchDemand("w", "US.AAPL"))
+	m.Ensure(testBarDemand("w", "US.AAPL"))
 	m.pass(context.Background()) // subscribe attempt fails
 	if got := m.Slots(); got != 0 {
 		t.Fatalf("Slots after failed subscribe = %d, want 0 (state unchanged)", got)
@@ -262,7 +266,7 @@ func TestQotSubNonZeroRetTypeLeavesStateUnchangedAndRetries(t *testing.T) {
 	rpc.retType = 1
 	rpc.mu.Unlock()
 
-	m.Ensure(feed.WatchDemand("w", "US.AAPL"))
+	m.Ensure(testBarDemand("w", "US.AAPL"))
 	m.pass(context.Background()) // subscribe attempt "succeeds" transportwise but RetType != 0
 	if got := m.Slots(); got != 0 {
 		t.Fatalf("Slots after RetType!=0 = %d, want 0 (state unchanged)", got)
@@ -296,7 +300,7 @@ func TestSubscribeBinarySplitIsolatesBadSymbolAndQuarantinesAfterThreshold(t *te
 	rpc.setFailSyms("BAD") // e.g. an OTC code with no quote entitlement
 
 	for _, sym := range []string{"US.AAA", "US.BBB", "US.BAD", "US.CCC"} {
-		m.Ensure(feed.WatchDemand(sym, sym))
+		m.Ensure(testBarDemand(sym, sym))
 	}
 	m.pass(context.Background()) // pass 1: all four batched together (same subtype set)
 
@@ -340,7 +344,7 @@ func TestSubscribeTransientBizFailureRecoversBeforeQuarantine(t *testing.T) {
 	m, rpc, _ := newTestManager(t, 100)
 	rpc.setFailSyms("FLAKY")
 
-	m.Ensure(feed.WatchDemand("w", "US.FLAKY"))
+	m.Ensure(testBarDemand("w", "US.FLAKY"))
 	for i := 0; i < subQuarantineThreshold-1; i++ {
 		m.pass(context.Background())
 	}
@@ -368,7 +372,7 @@ func TestSubscribeTransientBizFailureRecoversBeforeQuarantine(t *testing.T) {
 func TestResubscribeAllClearsQuarantine(t *testing.T) {
 	m, rpc, _ := newTestManager(t, 100)
 	rpc.setFailSyms("BAD")
-	m.Ensure(feed.WatchDemand("w", "US.BAD"))
+	m.Ensure(testBarDemand("w", "US.BAD"))
 	for i := 0; i < subQuarantineThreshold; i++ {
 		m.pass(context.Background())
 	}

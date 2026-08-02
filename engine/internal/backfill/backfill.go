@@ -11,6 +11,7 @@ package backfill
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
 // HistFetcher pulls history from one source. Bars are ascending, bucket-START
@@ -92,6 +94,11 @@ type Archive interface {
 	ArchiveDaily(b feed.Bar)
 }
 
+type rangeArchive interface {
+	ArchiveRange(symbol, timeframe string, fromMs, toMs int64, bars []feed.Bar) error
+	RangeCovered(symbol, timeframe string, fromMs, toMs int64) (bool, error)
+}
+
 // seedUnlessCanceled calls seed(bars) unless ctx is already done or bars is
 // empty -- the same shutdown guard seedChunked used to apply per chunk:
 // md.Core's inbox is bounded and blocking, and nothing drains it once
@@ -137,11 +144,15 @@ type Orchestrator struct {
 	dailyDone map[string]bool  // symbol -> pre-2016 daily one-shot already served
 	older     singleflight.Group
 	olderDay  singleflight.Group
+	warm      singleflight.Group
+	sem       chan struct{}
+	warmMu    sync.Mutex
+	warmLocks map[string]*sync.Mutex
 }
 
 func New(daily, intraday []Source, tail TailFetcher, seeder Seeder, archive Archive, clk clock.Clock, cfg Config) *Orchestrator {
 	if cfg.IntradayDays <= 0 {
-		cfg.IntradayDays = 20
+		cfg.IntradayDays = 70
 	}
 	if cfg.Concurrency <= 0 {
 		cfg.Concurrency = 3
@@ -149,8 +160,182 @@ func New(daily, intraday []Source, tail TailFetcher, seeder Seeder, archive Arch
 	return &Orchestrator{
 		daily: daily, intraday: intraday, tail: tail, seeder: seeder, archive: archive,
 		clk: clk, cfg: cfg,
-		oldest1m: map[string]int64{}, dailyDone: map[string]bool{},
+		oldest1m: map[string]int64{}, dailyDone: map[string]bool{}, sem: make(chan struct{}, cfg.Concurrency),
+		warmLocks: map[string]*sync.Mutex{},
 	}
+}
+
+const warmSegmentTradingDays = 10
+
+// Warm archives tiered history without publishing the full archive into the
+// chart mirror. Watch demands pass 2; chart/focused demands pass 70. A deep
+// request may race a watch request, so the singleflight key includes depth;
+// archive upserts make their overlap harmless and restart-safe.
+func (o *Orchestrator) Warm(ctx context.Context, symbol string, days int) error {
+	if days <= 0 {
+		return nil
+	}
+	key := fmt.Sprintf("%s|%d", symbol, days)
+	_, err, _ := o.warm.Do(key, func() (any, error) {
+		lock := o.symbolWarmLock(symbol)
+		lock.Lock()
+		defer lock.Unlock()
+		select {
+		case o.sem <- struct{}{}:
+			defer func() { <-o.sem }()
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return nil, o.warmDepth(ctx, symbol, days)
+	})
+	return err
+}
+
+func (o *Orchestrator) symbolWarmLock(symbol string) *sync.Mutex {
+	o.warmMu.Lock()
+	defer o.warmMu.Unlock()
+	lock := o.warmLocks[symbol]
+	if lock == nil {
+		lock = &sync.Mutex{}
+		o.warmLocks[symbol] = lock
+	}
+	return lock
+}
+
+// RefreshDaily repairs only the completed daily tail; used by after-close
+// scheduling so 1m segments do not shift and refetch every evening.
+func (o *Orchestrator) RefreshDaily(ctx context.Context, symbol string) error {
+	lock := o.symbolWarmLock(symbol)
+	lock.Lock()
+	defer lock.Unlock()
+	select {
+	case o.sem <- struct{}{}:
+		defer func() { <-o.sem }()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return o.fillDailyArchiveOnly(ctx, symbol, dailyFloor, completedDailyTo(o.clk.Now()), true)
+}
+
+func (o *Orchestrator) warmDepth(ctx context.Context, symbol string, days int) error {
+	now := o.clk.Now()
+	if days >= o.cfg.IntradayDays {
+		o.fastArchiveFirstPaint(ctx, symbol)
+		// K_1M is active for chart/focused demands. This cache read gives first
+		// paint and persists the latest 1,000 bars while deep segments archive.
+		o.tail1m(ctx, symbol)
+	}
+	remaining := days
+	to := now
+	var intradayErr error
+	for remaining > 0 {
+		step := warmSegmentTradingDays
+		if remaining < step {
+			step = remaining
+		}
+		from := intradayFrom(to, step)
+		if err := o.fill1mArchiveOnly(ctx, symbol, from, to); err != nil {
+			intradayErr = err
+			break
+		}
+		to = from
+		remaining -= step
+	}
+	dailyErr := o.fillDailyArchiveOnly(ctx, symbol, dailyFloor, completedDailyTo(now), false)
+	if intradayErr != nil || dailyErr != nil {
+		return errors.Join(intradayErr, dailyErr)
+	}
+	o.noteBackfilled(symbol, intradayFrom(now, days))
+	return nil
+}
+
+// completedDailyTo includes today's ET bucket only after extended-hours close;
+// before then it stops just before today's midnight bucket.
+func completedDailyTo(now time.Time) time.Time {
+	et := now.In(session.Loc())
+	day := time.Date(et.Year(), et.Month(), et.Day(), 0, 0, 0, 0, session.Loc())
+	closeReady := day.Add(20*time.Hour + 5*time.Minute)
+	if !et.Before(closeReady) {
+		return day
+	}
+	return day.Add(-time.Millisecond)
+}
+
+func (o *Orchestrator) fill1mArchiveOnly(ctx context.Context, symbol string, from, to time.Time) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if a, ok := o.archive.(rangeArchive); ok {
+		covered, err := a.RangeCovered(symbol, "1m", from.UnixMilli(), to.UnixMilli())
+		if err == nil && covered {
+			return nil
+		}
+	}
+	if bars, err := o.archive.ReadBars1m(symbol, from.UnixMilli(), to.UnixMilli()); err == nil &&
+		len(bars) > 0 && bars[0].BucketMs <= from.UnixMilli()+archiveCoverSlackMs {
+		if _, ok := o.archive.(rangeArchive); !ok {
+			return nil
+		}
+	}
+	bars, served, err := walkChain(ctx, symbol, from, to, o.intraday, intraday1m)
+	if err != nil && len(bars) == 0 {
+		return err
+	}
+	if a, ok := o.archive.(rangeArchive); ok {
+		if err := a.ArchiveRange(symbol, "1m", from.UnixMilli(), to.UnixMilli(), bars); err != nil {
+			return err
+		}
+	} else {
+		o.archive1m(bars)
+	}
+	slog.Info("history warm: 1m segment", "symbol", symbol, "provider", served,
+		"from", from, "to", to, "bars", len(bars))
+	return nil
+}
+
+func (o *Orchestrator) fillDailyArchiveOnly(ctx context.Context, symbol string, from, to time.Time, forceLatest bool) error {
+	if a, ok := o.archive.(rangeArchive); ok && !forceLatest {
+		covered, err := a.RangeCovered(symbol, "1d", from.UnixMilli(), to.UnixMilli())
+		if err == nil && covered {
+			return nil
+		}
+	}
+	type window struct{ from, to time.Time }
+	windows := []window{{from: from, to: to}}
+	if daily, err := o.archive.ReadDailyBars(symbol); err == nil && len(daily) > 0 {
+		earliest := time.UnixMilli(daily[0].BucketMs).UTC()
+		latest := time.UnixMilli(daily[len(daily)-1].BucketMs).UTC()
+		windows = windows[:0]
+		if earliest.After(from) {
+			windows = append(windows, window{from: from, to: earliest.AddDate(0, 0, -1)})
+		}
+		tailFrom := latest.AddDate(0, 0, 1)
+		if forceLatest && !latest.Before(from) && !latest.After(to) {
+			tailFrom = latest
+		}
+		if !tailFrom.After(to) {
+			windows = append(windows, window{from: tailFrom, to: to})
+		}
+	}
+	for _, w := range windows {
+		if w.to.Before(w.from) {
+			continue
+		}
+		bars, served, err := walkChain(ctx, symbol, w.from, w.to, o.daily, dailyBars)
+		if err != nil && len(bars) == 0 {
+			return err
+		}
+		if a, ok := o.archive.(rangeArchive); ok {
+			if err := a.ArchiveRange(symbol, "1d", w.from.UnixMilli(), w.to.UnixMilli(), bars); err != nil {
+				return err
+			}
+		} else {
+			o.archiveDailyBars(bars)
+		}
+		slog.Info("history warm: daily", "symbol", symbol, "provider", served,
+			"from", w.from, "to", w.to, "bars", len(bars))
+	}
+	return nil
 }
 
 // Run backfills every symbol through a bounded worker pool, honoring ctx.
@@ -208,7 +393,10 @@ func (o *Orchestrator) Backfill(ctx context.Context, symbol string) error {
 	return err
 }
 
-const fastArchiveTailBars = 500
+const (
+	fastArchiveTailBars  = 500
+	fastArchiveDailyBars = 1000
+)
 
 // fastArchiveFirstPaint seeds every visible chart timeframe before warmStart
 // scans full archives. Official daily goes first so 1m derivation cannot emit
@@ -219,6 +407,9 @@ func (o *Orchestrator) fastArchiveFirstPaint(ctx context.Context, symbol string)
 	if err != nil {
 		slog.Warn("backfill: fast daily archive read failed", "symbol", symbol, "err", err)
 	} else {
+		if len(daily) > fastArchiveDailyBars {
+			daily = daily[len(daily)-fastArchiveDailyBars:]
+		}
 		seedUnlessCanceled(ctx, daily, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
 	}
 	m1, err := o.archive.ReadRecentBars1m(symbol, fastArchiveTailBars)
@@ -260,7 +451,6 @@ var archiveCoverSlackMs int64 = 2 * 24 * 60 * 60 * 1000
 
 const (
 	olderIntradayChunkTradingDays = 2
-	alpaca1mFloorTradingDays      = 20
 	olderDailyFloorYear           = 2000
 )
 
@@ -457,8 +647,8 @@ type olderResult struct {
 
 // LoadOlder deepens the shared 1m series. When requiredStartMs/requiredEndMs
 // are both zero it deepens one intraday chunk (2 trading days older than the
-// symbol's current watermark), archive-first, floored at the Alpaca 1m limit
-// (last 20 trading days). When non-zero it fetches the demanded
+// symbol's current watermark), archive-first, floored at configured archive
+// depth (70 trading days by default). When non-zero it fetches the demanded
 // [requiredStartMs, endMs) window instead, archive-first, clamped to the same
 // floor. exhausted=true means floor or listing-date reached. Concurrent calls
 // for the same symbol coalesce into a single fetch via the older
@@ -476,7 +666,7 @@ func (o *Orchestrator) LoadOlder(ctx context.Context, symbol string, requiredSta
 }
 
 func (o *Orchestrator) loadOlder(ctx context.Context, symbol string, requiredStartMs, requiredEndMs int64) (olderResult, error) {
-	floor := intradayFrom(o.clk.Now(), alpaca1mFloorTradingDays)
+	floor := intradayFrom(o.clk.Now(), o.cfg.IntradayDays)
 	floorMs := floor.UnixMilli()
 
 	// Determine the query window: range-driven (viewport-first) or watermark-driven.

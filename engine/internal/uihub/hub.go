@@ -95,16 +95,16 @@ type dropReport struct {
 // (Run-loop-owned) are only ever touched from Run -- see reportBackfill and
 // handleBackfillDone.
 type backfillResult struct {
-	sym string
-	ok  bool
+	sym  string
+	days int
+	ok   bool
 }
 
-// demandInfo is what the hub tracks per (connID, demandID): the symbol, and
-// whether the demand is chart-capable (WantsHistory) so a reconnect re-arm
-// (rearmBackfill) can tell a chart demand from a watchlist "interest" one.
+// demandInfo tracks symbol plus requested archive depth so reconnect can re-arm
+// watch (2-day) and chart/focused (70-day) warming at the correct tier.
 type demandInfo struct {
-	symbol       string
-	wantsHistory bool
+	symbol      string
+	historyDays int
 }
 
 // feedBox lets the (single-write, many-read) feed reference live in an
@@ -119,7 +119,7 @@ type feedBox struct{ f Feed }
 // exactly once when it finishes (ok=false on a failed daily fetch) via
 // reportBackfill, so Run can decide whether the symbol needs a retry.
 type backfillBox struct {
-	fn func(sym string, done func(ok bool))
+	fn func(sym string, days int, done func(ok bool))
 }
 
 type cachedDailyBox struct{ fn func(sym string) }
@@ -184,8 +184,8 @@ type Hub struct {
 	demands          map[uint64]map[string]demandInfo // connID -> demandID -> demandInfo
 	demandLive       map[uint64]bool                  // connID currently registered
 	indicators       map[uint64]map[string]bool       // connID -> instanceIDs owned by that connection
-	backfilled       map[string]bool                  // symbol -> daily backfill has succeeded (process lifetime)
-	backfillInflight map[string]bool                  // symbol -> a backfill spawn is currently running
+	backfilled       map[string]int                   // symbol -> deepest successful history target
+	backfillInflight map[string]int                   // symbol -> deepest target currently running
 	pendKeep         map[string]staged                // classMDKeep, flushed on md ticker
 	tapePend         map[string][]wsmsg.Tick          // symbol -> accumulated ticks
 	acctPend         map[string]staged                // venue -> latest account frame
@@ -227,8 +227,8 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 		demands:            map[uint64]map[string]demandInfo{},
 		demandLive:         map[uint64]bool{},
 		indicators:         map[uint64]map[string]bool{},
-		backfilled:         map[string]bool{},
-		backfillInflight:   map[string]bool{},
+		backfilled:         map[string]int{},
+		backfillInflight:   map[string]int{},
 		pendKeep:           map[string]staged{},
 		tapePend:           map[string][]wsmsg.Tick{},
 		acctPend:           map[string]staged{},
@@ -316,6 +316,19 @@ func (h *Hub) feed() Feed {
 // (replay/tests/backfill-disabled never call it, in which case chart-open
 // demands simply skip the deep backfill).
 func (h *Hub) SetBackfill(fn func(sym string, done func(ok bool))) {
+	if fn == nil {
+		h.backfillSlot.Store(nil)
+		return
+	}
+	h.backfillSlot.Store(&backfillBox{fn: func(sym string, _ int, done func(ok bool)) { fn(sym, done) }})
+}
+
+// SetHistoryWarm installs the tier-aware archive warmer used by live boot.
+func (h *Hub) SetHistoryWarm(fn func(sym string, days int, done func(ok bool))) {
+	if fn == nil {
+		h.backfillSlot.Store(nil)
+		return
+	}
 	h.backfillSlot.Store(&backfillBox{fn: fn})
 }
 
@@ -335,7 +348,7 @@ func (h *Hub) cachedDaily() func(string) {
 	return nil
 }
 
-func (h *Hub) backfill() func(sym string, done func(ok bool)) {
+func (h *Hub) backfill() func(sym string, days int, done func(ok bool)) {
 	if b := h.backfillSlot.Load(); b != nil {
 		return b.fn
 	}
@@ -377,9 +390,9 @@ func (h *Hub) SetScanner(c scannerCtl) {
 // fetch outcome back to Run's own goroutine -- the same cross-goroutine
 // channel-send pattern as ReportUIDrop, so backfilled/backfillInflight stay
 // Run-loop-owned (see handleBackfillDone).
-func (h *Hub) reportBackfill(sym string, ok bool) {
+func (h *Hub) reportBackfill(sym string, days int, ok bool) {
 	select {
-	case h.backfillDoneCh <- backfillResult{sym: sym, ok: ok}:
+	case h.backfillDoneCh <- backfillResult{sym: sym, days: days, ok: ok}:
 	case <-h.closed:
 	}
 }
@@ -653,7 +666,11 @@ func (h *Hub) handleEnsureDemand(r ensureDemandReq) {
 		m = map[string]demandInfo{}
 		h.demands[r.connID] = m
 	}
-	m[r.d.ID] = demandInfo{symbol: r.d.Symbol, wantsHistory: r.d.WantsHistory}
+	historyDays := r.d.HistoryDays
+	if historyDays == 0 && r.d.WantsHistory {
+		historyDays = 70
+	}
+	m[r.d.ID] = demandInfo{symbol: r.d.Symbol, historyDays: historyDays}
 	if f := h.feed(); f != nil {
 		f.Ensure(r.d)
 	}
@@ -675,21 +692,21 @@ func (h *Hub) handleEnsureDemand(r ensureDemandReq) {
 	// OpenDFeed.HistoryBars coalesces concurrent same-symbol fetches
 	// (singleflight) and the 30-day dedup window covers sequential ones, so
 	// a second call spends no additional history quota.
-	h.triggerBackfill(r.d.Symbol, r.d.WantsHistory)
+	h.triggerBackfill(r.d.Symbol, historyDays)
 }
 
-// triggerBackfill spawns the injected backfill fn for sym if it is a chart-
-// capable (wantsHistory) demand whose daily fetch hasn't already succeeded
-// and isn't already in flight. Called from handleEnsureDemand (a fresh
+// triggerBackfill spawns the injected warmer when requested depth has not
+// already succeeded and an equal/deeper request is not in flight. Called from
+// handleEnsureDemand (a fresh
 // demand) and rearmBackfill (an OpenD reconnect re-arm) -- always from Run's
 // own goroutine, so backfilled/backfillInflight need no extra locking.
-func (h *Hub) triggerBackfill(sym string, wantsHistory bool) {
+func (h *Hub) triggerBackfill(sym string, days int) {
 	fn := h.backfill()
-	if fn == nil || !wantsHistory || h.backfilled[sym] || h.backfillInflight[sym] {
+	if fn == nil || days <= 0 || h.backfilled[sym] >= days || h.backfillInflight[sym] >= days {
 		return
 	}
-	h.backfillInflight[sym] = true
-	fn(sym, func(ok bool) { h.reportBackfill(sym, ok) })
+	h.backfillInflight[sym] = days
+	fn(sym, days, func(ok bool) { h.reportBackfill(sym, days, ok) })
 }
 
 // handleLoadOlder runs on Run's own goroutine, so the injected fn's
@@ -752,9 +769,13 @@ func wireBarMs(b wsmsg.Bar) int64 {
 // success, so a failed attempt stays retryable (a later chart-open demand or
 // OpenD-reconnect re-arm will try again).
 func (h *Hub) handleBackfillDone(r backfillResult) {
-	delete(h.backfillInflight, r.sym)
+	if h.backfillInflight[r.sym] <= r.days {
+		delete(h.backfillInflight, r.sym)
+	}
 	if r.ok {
-		h.backfilled[r.sym] = true
+		if h.backfilled[r.sym] < r.days {
+			h.backfilled[r.sym] = r.days
+		}
 	}
 }
 
@@ -771,32 +792,27 @@ func (h *Hub) forEachDemand(fn func(demandInfo)) {
 	}
 }
 
-// rearmBackfill re-triggers the deep/daily backfill for every symbol
-// currently under a chart-capable (wantsHistory) demand that hasn't
+// rearmBackfill re-triggers tiered history warming for every symbol
+// currently under a history-bearing demand that hasn't
 // succeeded yet. Called from handleMD on the md.ResyncedUpdate transition --
 // i.e. once OpenD reconnects and resubscribes -- so a symbol whose backfill
 // failed while OpenD was down (or never fired because the app opened before
 // OpenD did) gets a fresh attempt without requiring a UI refresh.
 //
-// Symbols are collected into a set by ORing wantsHistory across every demand
-// for that symbol, not by picking whichever demandInfo a map iteration
-// visits first: a symbol can carry both an interest-only demand
-// (wantsHistory=false, e.g. a watchlist row) and a chart demand
-// (wantsHistory=true) at the same time under different demand IDs, and Go's
-// randomized map iteration order must never decide whether the chart demand
-// gets re-armed.
+// Symbols take maximum requested depth across all demands, so map iteration
+// order cannot downgrade a symbol shared by watch and chart panels.
 func (h *Hub) rearmBackfill() {
 	if h.backfill() == nil {
 		return // no backfill trigger injected (replay / backfill disabled)
 	}
-	chartSymbols := map[string]struct{}{}
+	chartSymbols := map[string]int{}
 	h.forEachDemand(func(info demandInfo) {
-		if info.wantsHistory {
-			chartSymbols[info.symbol] = struct{}{}
+		if info.historyDays > chartSymbols[info.symbol] {
+			chartSymbols[info.symbol] = info.historyDays
 		}
 	})
-	for sym := range chartSymbols {
-		h.triggerBackfill(sym, true)
+	for sym, days := range chartSymbols {
+		h.triggerBackfill(sym, days)
 	}
 }
 

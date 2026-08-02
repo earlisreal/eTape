@@ -169,13 +169,14 @@ type Health struct {
 
 // Backfill is the [backfill] section: deep-history warm-start + gap-fill at boot.
 type Backfill struct {
-	Enabled      bool           `toml:"enabled"`
-	IntradayDays int            `toml:"intraday_days"` // trading days of 1m history to backfill
-	DailyYears   int            `toml:"daily_years"`   // 0 = since the 2016-01-01 provider floor; >0 = max(now−daily_years, 2016-01-01)
-	Concurrency  int            `toml:"concurrency"`   // bounded boot worker pool
-	SeedChunk    int            `toml:"seed_chunk"`    // vestigial: no longer read (see backfill.Config.SeedChunk); kept so an existing config.toml's seed_chunk key doesn't need editing
-	Alpaca       BackfillAlpaca `toml:"alpaca"`
-	Yahoo        BackfillYahoo  `toml:"yahoo"`
+	Enabled           bool           `toml:"enabled"`
+	IntradayDays      int            `toml:"intraday_days"`       // trading days of 1m history to backfill
+	WatchIntradayDays int            `toml:"watch_intraday_days"` // scanner/tape 1m archive depth
+	DailyYears        int            `toml:"daily_years"`         // 0 = since the 2016-01-01 provider floor; >0 = max(now−daily_years, 2016-01-01)
+	Concurrency       int            `toml:"concurrency"`         // bounded boot worker pool
+	SeedChunk         int            `toml:"seed_chunk"`          // vestigial: no longer read (see backfill.Config.SeedChunk); kept so an existing config.toml's seed_chunk key doesn't need editing
+	Alpaca            BackfillAlpaca `toml:"alpaca"`
+	Yahoo             BackfillYahoo  `toml:"yahoo"`
 }
 
 // BackfillAlpaca is the [backfill.alpaca] section: the optional 1m-depth
@@ -237,7 +238,7 @@ func Default() Config {
 		StockInfo: StockInfo{Enabled: true, RefreshMs: 15000, MaxPerReq: 400},
 		Watchlist: Watchlist{Enabled: true, PollMs: 3000},
 		Health:    Health{Enabled: true, ProbeMs: 5000},
-		Backfill: Backfill{Enabled: true, IntradayDays: 20, DailyYears: 0, Concurrency: 3, SeedChunk: 500,
+		Backfill: Backfill{Enabled: true, IntradayDays: 70, WatchIntradayDays: 2, DailyYears: 0, Concurrency: 3, SeedChunk: 500,
 			Alpaca: BackfillAlpaca{Enabled: true, CredsKey: "", Feed: "sip"},
 			Yahoo:  BackfillYahoo{Enabled: true},
 		},

@@ -46,7 +46,7 @@ func TestEnsureSubscribesAndSeeds(t *testing.T) {
 	defer cancel()
 	go func() { _ = f.Run(ctx) }()
 
-	f.Ensure(feed.WatchDemand("w", "US.AAPL"))
+	f.Ensure(testBarDemand("w", "US.AAPL"))
 
 	// Watch profile seeds bars then ticks (per-subtype order: KL, Ticker).
 	if ev, ok := nextEvent(t, f.Events()).(feed.Bars1mEvent); !ok || !ev.Seed || len(ev.Bars) != 1 {
@@ -284,7 +284,7 @@ func TestEnsureDoesNotBlockWhenSeedQueueFull(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		f.Ensure(feed.WatchDemand("w", "US.AAPL"))
+		f.Ensure(testBarDemand("w", "US.AAPL"))
 		close(done)
 	}()
 	select {
@@ -302,7 +302,7 @@ func TestEnsureDoesNotBlockWhenBackgroundSeedQueueFull(t *testing.T) {
 	}
 	done := make(chan struct{})
 	go func() {
-		d := feed.WatchDemand("scan:AAPL", "US.AAPL")
+		d := testBarDemand("scan:AAPL", "US.AAPL")
 		d.BackgroundSeed = true
 		f.Ensure(d)
 		close(done)

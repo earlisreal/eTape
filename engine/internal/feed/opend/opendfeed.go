@@ -379,7 +379,9 @@ func (f *OpenDFeed) CachedDaily(ctx context.Context, symbol string) ([]feed.Bar,
 		if err := f.sub.WaitActive(ctx, subKey{Symbol: symbol, Sub: feed.SubKLDay}); err != nil {
 			return nil, err
 		}
-		return f.bf.cachedDaily(ctx, symbol)
+		return seedRetry(ctx, f.clk, func() ([]feed.Bar, error) {
+			return f.bf.cachedDaily(ctx, symbol)
+		})
 	})
 	if err != nil {
 		return nil, err

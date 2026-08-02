@@ -114,3 +114,33 @@ func TestArchiveDailyReadAll(t *testing.T) {
 		t.Fatalf("daily read not ascending: %+v", got)
 	}
 }
+
+func TestArchiveRangeWritesBarsAndCoverageAtomically(t *testing.T) {
+	s := open(t)
+	bars := []feed.Bar{
+		{Symbol: "US.NFLX", BucketMs: 1100, C: 1},
+		{Symbol: "US.NFLX", BucketMs: 1200, C: 2},
+	}
+	if err := s.ArchiveRange("US.NFLX", "1m", 1000, 2000, bars); err != nil {
+		t.Fatal(err)
+	}
+	covered, err := s.RangeCovered("US.NFLX", "1m", 1000, 2000)
+	if err != nil || !covered {
+		t.Fatalf("covered=%v err=%v", covered, err)
+	}
+	covered, err = s.RangeCovered("US.NFLX", "1m", 900, 2000)
+	if err != nil || covered {
+		t.Fatalf("unexpected wider coverage=%v err=%v", covered, err)
+	}
+	got, err := s.ReadBars1m("US.NFLX", 0, 3000)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("bars=%+v err=%v", got, err)
+	}
+	if err := s.ArchiveRange("US.IPO", "1d", 100, 200, nil); err != nil {
+		t.Fatal(err)
+	}
+	covered, err = s.RangeCovered("US.IPO", "1d", 100, 200)
+	if err != nil || !covered {
+		t.Fatalf("empty range covered=%v err=%v", covered, err)
+	}
+}

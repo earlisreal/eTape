@@ -1,6 +1,11 @@
 package store
 
-import "github.com/earlisreal/eTape/engine/internal/feed"
+import (
+	"fmt"
+	"time"
+
+	"github.com/earlisreal/eTape/engine/internal/feed"
+)
 
 const (
 	bar10sUpsertSQL        = `INSERT OR REPLACE INTO bars_10s (symbol, ts, o, h, l, c, v) VALUES (?, ?, ?, ?, ?, ?, ?)`
@@ -98,4 +103,74 @@ func (s *Store) readBars(query string, args ...any) ([]feed.Bar, error) {
 		out = append(out, b)
 	}
 	return out, rows.Err()
+}
+
+// ArchiveRange atomically upserts a fetched segment and records that the
+// requested interval was completely explored. Empty successful segments are
+// recorded too, preventing repeated pre-IPO/provider-empty requests.
+func (s *Store) ArchiveRange(symbol, timeframe string, fromMs, toMs int64, bars []feed.Bar) error {
+	done := make(chan error, 1)
+	s.writes <- archiveRangeOp{symbol: symbol, timeframe: timeframe, fromMs: fromMs,
+		toMs: toMs, bars: append([]feed.Bar(nil), bars...), done: done}
+	return <-done
+}
+
+func (s *Store) commitArchiveRange(op archiveRangeOp) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	query := bar1mUpsertSQL
+	if op.timeframe == "1d" {
+		query = dailyUpsertSQL
+	}
+	for _, b := range op.bars {
+		if _, err := tx.Exec(query, b.Symbol, b.BucketMs, b.O, b.H, b.L, b.C, b.Volume); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+	}
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO bar_archive_ranges
+		(symbol,timeframe,from_ts,to_ts,completed_at) VALUES (?,?,?,?,?)`,
+		op.symbol, op.timeframe, op.fromMs, op.toMs, time.Now().UnixMilli()); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		_ = tx.Rollback()
+		return err
+	}
+	return nil
+}
+
+// RangeCovered reports whether completed ranges form an unbroken union over
+// [fromMs,toMs].
+func (s *Store) RangeCovered(symbol, timeframe string, fromMs, toMs int64) (bool, error) {
+	rows, err := s.db.Query(`SELECT from_ts,to_ts FROM bar_archive_ranges
+		WHERE symbol=? AND timeframe=? AND to_ts>=? AND from_ts<=? ORDER BY from_ts`,
+		symbol, timeframe, fromMs, toMs)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	cursor := fromMs
+	for rows.Next() {
+		var from, to int64
+		if err := rows.Scan(&from, &to); err != nil {
+			return false, err
+		}
+		if from > cursor+1 {
+			return false, nil
+		}
+		if to > cursor {
+			cursor = to
+		}
+		if cursor >= toMs {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, fmt.Errorf("range coverage: %w", err)
+	}
+	return cursor >= toMs, nil
 }
