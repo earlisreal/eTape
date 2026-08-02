@@ -96,7 +96,7 @@ type Archive interface {
 
 type rangeArchive interface {
 	ArchiveRange(symbol, timeframe string, fromMs, toMs int64, bars []feed.Bar) error
-	RangeCovered(symbol, timeframe string, fromMs, toMs int64) (bool, error)
+	MissingRanges(symbol, timeframe string, fromMs, toMs int64) ([]feed.TimeRange, error)
 }
 
 // seedUnlessCanceled calls seed(bars) unless ctx is already done or bars is
@@ -226,7 +226,7 @@ func (o *Orchestrator) warmDepth(ctx context.Context, symbol string, days int) e
 		o.tail1m(ctx, symbol)
 	}
 	remaining := days
-	to := now
+	to := completed1mTo(now)
 	var intradayErr error
 	for remaining > 0 {
 		step := warmSegmentTradingDays
@@ -249,81 +249,142 @@ func (o *Orchestrator) warmDepth(ctx context.Context, symbol string, days int) e
 	return nil
 }
 
-// completedDailyTo includes today's ET bucket only after extended-hours close;
-// before then it stops just before today's midnight bucket.
+// completedDailyTo returns the latest official daily bucket eligible five
+// minutes after that trading date's final data session.
 func completedDailyTo(now time.Time) time.Time {
-	et := now.In(session.Loc())
-	day := time.Date(et.Year(), et.Month(), et.Day(), 0, 0, 0, 0, session.Loc())
-	closeReady := day.Add(20*time.Hour + 5*time.Minute)
-	if !et.Before(closeReady) {
-		return day
+	s := session.Schedule(now)
+	if s.TradingDay && !now.Before(s.DataClose.Add(5*time.Minute)) {
+		return s.Date
 	}
-	return day.Add(-time.Millisecond)
+	return session.PreviousTradingDay(now)
+}
+
+// completed1mTo is the latest fully closed minute bucket in a real NYSE data
+// session. Outside one it is the previous session's final minute.
+func completed1mTo(now time.Time) time.Time {
+	s := session.Schedule(now)
+	if s.TradingDay && !now.Before(s.Date.Add(4*time.Hour)) {
+		if now.Before(s.DataClose) {
+			candidate := now.Truncate(time.Minute).Add(-time.Minute)
+			if !candidate.Before(s.Date.Add(4 * time.Hour)) {
+				return candidate
+			}
+			p := session.Schedule(session.PreviousTradingDay(now))
+			return p.DataClose.Add(-time.Minute)
+		}
+		return s.DataClose.Add(-time.Minute)
+	}
+	p := session.Schedule(session.PreviousTradingDay(now))
+	return p.DataClose.Add(-time.Minute)
 }
 
 func (o *Orchestrator) fill1mArchiveOnly(ctx context.Context, symbol string, from, to time.Time) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	ranges := []feed.TimeRange{{FromMs: from.UnixMilli(), ToMs: to.UnixMilli()}}
 	if a, ok := o.archive.(rangeArchive); ok {
-		covered, err := a.RangeCovered(symbol, "1m", from.UnixMilli(), to.UnixMilli())
-		if err == nil && covered {
-			return nil
+		if missing, err := a.MissingRanges(symbol, "1m", from.UnixMilli(), to.UnixMilli()); err == nil {
+			ranges = missing
 		}
 	}
-	if bars, err := o.archive.ReadBars1m(symbol, from.UnixMilli(), to.UnixMilli()); err == nil &&
-		len(bars) > 0 && bars[0].BucketMs <= from.UnixMilli()+archiveCoverSlackMs {
-		if _, ok := o.archive.(rangeArchive); !ok {
+	if len(ranges) == 0 {
+		slog.Info("history warm skipped: explicit coverage", "symbol", symbol, "timeframe", "1m")
+		return nil
+	}
+	if bars, err := o.archive.ReadBars1m(symbol, from.UnixMilli(), to.UnixMilli()); err == nil && len(bars) > 0 {
+		if a, ok := o.archive.(rangeArchive); ok && isWholeGap(ranges, from, to) && coversTradingDates(bars, from, to) {
+			if err := a.ArchiveRange(symbol, "1m", from.UnixMilli(), to.UnixMilli(), nil); err != nil {
+				return err
+			}
+			slog.Info("history warm skipped: inferred legacy archive", "symbol", symbol, "timeframe", "1m")
 			return nil
 		}
+		if bars[0].BucketMs <= from.UnixMilli()+archiveCoverSlackMs {
+			if _, ok := o.archive.(rangeArchive); !ok {
+				return nil
+			}
+		}
 	}
-	bars, served, err := walkChain(ctx, symbol, from, to, o.intraday, intraday1m)
-	if err != nil && len(bars) == 0 {
-		return err
-	}
-	if a, ok := o.archive.(rangeArchive); ok {
-		if err := a.ArchiveRange(symbol, "1m", from.UnixMilli(), to.UnixMilli(), bars); err != nil {
+	for _, gap := range ranges {
+		gf, gt := time.UnixMilli(gap.FromMs), time.UnixMilli(gap.ToMs)
+		bars, served, err := walkChain(ctx, symbol, gf, gt, o.intraday, intraday1m, false)
+		if err != nil && len(bars) == 0 {
 			return err
 		}
-	} else {
-		o.archive1m(bars)
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if a, ok := o.archive.(rangeArchive); ok {
+			if err := a.ArchiveRange(symbol, "1m", gap.FromMs, gap.ToMs, bars); err != nil {
+				return err
+			}
+		} else {
+			o.archive1m(bars)
+		}
+		slog.Info("history warm: 1m missing interval", "symbol", symbol, "provider", served,
+			"from", gf, "to", gt, "bars", len(bars))
 	}
-	slog.Info("history warm: 1m segment", "symbol", symbol, "provider", served,
-		"from", from, "to", to, "bars", len(bars))
 	return nil
 }
 
 func (o *Orchestrator) fillDailyArchiveOnly(ctx context.Context, symbol string, from, to time.Time, forceLatest bool) error {
+	type window struct{ from, to time.Time }
+	var windows []window
 	if a, ok := o.archive.(rangeArchive); ok && !forceLatest {
-		covered, err := a.RangeCovered(symbol, "1d", from.UnixMilli(), to.UnixMilli())
-		if err == nil && covered {
+		if missing, err := a.MissingRanges(symbol, "1d", from.UnixMilli(), to.UnixMilli()); err == nil {
+			for _, gap := range missing {
+				windows = append(windows, window{time.UnixMilli(gap.FromMs), time.UnixMilli(gap.ToMs)})
+			}
+		} else {
+			windows = []window{{from: from, to: to}}
+		}
+	} else {
+		windows = []window{{from: from, to: to}}
+	}
+	if len(windows) == 0 {
+		slog.Info("history warm skipped: explicit coverage", "symbol", symbol, "timeframe", "1d")
+		return nil
+	}
+	if a, ok := o.archive.(rangeArchive); ok && !forceLatest && len(windows) == 1 && windows[0].from.Equal(from) && windows[0].to.Equal(to) {
+		if daily, err := o.archive.ReadDailyBars(symbol); err == nil && coversTradingDates(daily, from, to) {
+			if err := a.ArchiveRange(symbol, "1d", from.UnixMilli(), to.UnixMilli(), nil); err != nil {
+				return err
+			}
+			slog.Info("history warm skipped: inferred legacy archive", "symbol", symbol, "timeframe", "1d")
 			return nil
 		}
 	}
-	type window struct{ from, to time.Time }
-	windows := []window{{from: from, to: to}}
-	if daily, err := o.archive.ReadDailyBars(symbol); err == nil && len(daily) > 0 {
-		earliest := time.UnixMilli(daily[0].BucketMs).UTC()
-		latest := time.UnixMilli(daily[len(daily)-1].BucketMs).UTC()
-		windows = windows[:0]
-		if earliest.After(from) {
-			windows = append(windows, window{from: from, to: earliest.AddDate(0, 0, -1)})
-		}
-		tailFrom := latest.AddDate(0, 0, 1)
-		if forceLatest && !latest.Before(from) && !latest.After(to) {
-			tailFrom = latest
-		}
-		if !tailFrom.After(to) {
-			windows = append(windows, window{from: tailFrom, to: to})
+	// Legacy tail fallback is retained only without explicit coverage, or for
+	// the intentional forced refresh of the latest completed daily bar.
+	_, hasRanges := o.archive.(rangeArchive)
+	if !hasRanges || forceLatest {
+		if daily, err := o.archive.ReadDailyBars(symbol); err == nil && len(daily) > 0 {
+			earliest := time.UnixMilli(daily[0].BucketMs).UTC()
+			latest := time.UnixMilli(daily[len(daily)-1].BucketMs).UTC()
+			windows = windows[:0]
+			if earliest.After(from) {
+				windows = append(windows, window{from: from, to: earliest.AddDate(0, 0, -1)})
+			}
+			tailFrom := latest.AddDate(0, 0, 1)
+			if forceLatest && !latest.Before(from) && !latest.After(to) {
+				tailFrom = latest
+			}
+			if !tailFrom.After(to) {
+				windows = append(windows, window{from: tailFrom, to: to})
+			}
 		}
 	}
 	for _, w := range windows {
 		if w.to.Before(w.from) {
 			continue
 		}
-		bars, served, err := walkChain(ctx, symbol, w.from, w.to, o.daily, dailyBars)
+		bars, served, err := walkChain(ctx, symbol, w.from, w.to, o.daily, dailyBars, true)
 		if err != nil && len(bars) == 0 {
 			return err
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
 		}
 		if a, ok := o.archive.(rangeArchive); ok {
 			if err := a.ArchiveRange(symbol, "1d", w.from.UnixMilli(), w.to.UnixMilli(), bars); err != nil {
@@ -549,7 +610,7 @@ func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.
 		return
 	}
 
-	bars, served, err := walkChain(ctx, symbol, from, to, o.intraday, intraday1m)
+	bars, served, err := walkChain(ctx, symbol, from, to, o.intraday, intraday1m, false)
 	if len(bars) == 0 {
 		if err != nil {
 			slog.Warn("backfill: deep 1m unavailable", "symbol", symbol, "err", err)
@@ -585,7 +646,7 @@ func (o *Orchestrator) fillDaily(ctx context.Context, symbol string, to time.Tim
 		}
 	}
 
-	bars, served, err := walkChain(ctx, symbol, from, to, o.daily, dailyBars)
+	bars, served, err := walkChain(ctx, symbol, from, to, o.daily, dailyBars, true)
 	if len(bars) == 0 {
 		return err
 	}
@@ -610,7 +671,7 @@ func intraday1m(s Source) func(context.Context, string, time.Time, time.Time) ([
 // advances; an empty (nil, nil) result also advances. If every source errored,
 // the last error is returned (bars nil); if every source returned empty with
 // no error, (nil, "", nil).
-func walkChain(ctx context.Context, symbol string, from, to time.Time, chain []Source, pick fetchFunc) ([]feed.Bar, string, error) {
+func walkChain(ctx context.Context, symbol string, from, to time.Time, chain []Source, pick fetchFunc, daily bool) ([]feed.Bar, string, error) {
 	var lastErr error
 	for _, s := range chain {
 		bars, err := pick(s)(ctx, symbol, from, to)
@@ -619,11 +680,58 @@ func walkChain(ctx context.Context, symbol string, from, to time.Time, chain []S
 			lastErr = err
 			continue
 		}
+		bars = clipAndDedup(bars, from, to, daily)
 		if len(bars) > 0 {
 			return bars, s.Name, nil
 		}
 	}
 	return nil, "", lastErr
+}
+
+func clipAndDedup(bars []feed.Bar, from, to time.Time, daily bool) []feed.Bar {
+	seen := make(map[int64]bool, len(bars))
+	out := make([]feed.Bar, 0, len(bars))
+	for _, b := range bars {
+		in := b.BucketMs >= from.UnixMilli() && b.BucketMs <= to.UnixMilli()
+		// Synthetic/unit bars below the supported 2000+ history floor carry
+		// relative timestamps; provider contract enforcement starts at the floor.
+		if b.BucketMs < olderDailyFloor.UnixMilli() {
+			in = true
+		}
+		if daily {
+			bd, fd, td := session.Schedule(time.UnixMilli(b.BucketMs)).Date, session.Schedule(from).Date, session.Schedule(to).Date
+			if b.BucketMs >= olderDailyFloor.UnixMilli() {
+				in = !bd.Before(fd) && !bd.After(td) && session.IsTradingDay(bd)
+			}
+		}
+		if in && !seen[b.BucketMs] {
+			seen[b.BucketMs] = true
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+func isWholeGap(gaps []feed.TimeRange, from, to time.Time) bool {
+	return len(gaps) == 1 && gaps[0].FromMs == from.UnixMilli() && gaps[0].ToMs == to.UnixMilli()
+}
+
+// coversTradingDates is deliberately conservative: legacy bars infer an
+// explored interval only when both boundary sessions and every session
+// between them are represented.
+func coversTradingDates(bars []feed.Bar, from, to time.Time) bool {
+	days := make(map[string]bool, len(bars))
+	for _, b := range bars {
+		days[session.Schedule(time.UnixMilli(b.BucketMs)).Date.Format("2006-01-02")] = true
+	}
+	d := session.Schedule(from).Date
+	for d.Before(session.Schedule(to).Date) || d.Equal(session.Schedule(to).Date) {
+		if session.IsTradingDay(d) && !days[d.Format("2006-01-02")] {
+			return false
+		}
+		d = d.AddDate(0, 0, 1)
+	}
+	return len(days) > 0
 }
 
 // trimOlderThan returns the ascending prefix of bars with BucketMs strictly
@@ -726,7 +834,7 @@ func (o *Orchestrator) loadOlder(ctx context.Context, symbol string, requiredSta
 	// fall through to the provider chain for the full [from, to) window.
 
 	// Provider chain.
-	bars, served, err := walkChain(ctx, symbol, from, to, o.intraday, intraday1m)
+	bars, served, err := walkChain(ctx, symbol, from, to, o.intraday, intraday1m, false)
 	if len(bars) == 0 {
 		if err != nil {
 			// Every provider genuinely errored (transient failure, not "no
@@ -832,7 +940,7 @@ func (o *Orchestrator) loadOlderDaily(ctx context.Context, symbol string, requir
 
 	from := time.UnixMilli(floorMs)
 	to := time.UnixMilli(ceilingMs)
-	bars, served, err := walkChain(ctx, symbol, from, to, o.daily, dailyBars)
+	bars, served, err := walkChain(ctx, symbol, from, to, o.daily, dailyBars, true)
 	if len(bars) == 0 {
 		o.markDailyDone(symbol) // never ask again this session
 		return olderResult{exhausted: true}, err

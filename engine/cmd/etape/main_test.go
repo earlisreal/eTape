@@ -12,7 +12,20 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/md"
+	"github.com/earlisreal/eTape/engine/internal/session"
 )
+
+func TestNextHistoryRefreshUsesTradingCalendar(t *testing.T) {
+	loc := session.Loc()
+	now := time.Date(2026, 11, 27, 12, 0, 0, 0, loc)
+	if got, want := nextHistoryRefresh(now), time.Date(2026, 11, 27, 17, 5, 0, 0, loc); !got.Equal(want) {
+		t.Fatalf("early-close refresh = %s, want %s", got, want)
+	}
+	now = time.Date(2026, 7, 4, 12, 0, 0, 0, loc)
+	if got, want := nextHistoryRefresh(now), time.Date(2026, 7, 6, 20, 5, 0, 0, loc); !got.Equal(want) {
+		t.Fatalf("holiday refresh = %s, want %s", got, want)
+	}
+}
 
 type recordingSink struct {
 	mu    sync.Mutex

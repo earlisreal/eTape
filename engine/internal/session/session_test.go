@@ -107,6 +107,34 @@ func TestPhaseAtOvernight(t *testing.T) {
 	}
 }
 
+func TestNYSECalendar(t *testing.T) {
+	et := func(s string) time.Time {
+		d, err := time.ParseInLocation("2006-01-02 15:04", s, Loc())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return d
+	}
+	closed := []string{"2026-07-04 12:00", "2026-07-03 12:00", "2024-03-29 12:00", "2022-06-20 12:00", "2001-09-12 12:00", "2012-10-29 12:00", "2018-12-05 12:00", "2025-01-09 12:00"}
+	for _, raw := range closed {
+		if IsTradingDay(et(raw)) || PhaseAt(et(raw)) != Closed {
+			t.Errorf("%s should be closed", raw)
+		}
+	}
+	for _, raw := range []string{"2026-03-09 10:00", "2026-11-02 10:00"} {
+		if PhaseAt(et(raw)) != RTH {
+			t.Errorf("%s should be RTH across DST", raw)
+		}
+	}
+	s := Schedule(et("2026-11-27 14:00"))
+	if !s.TradingDay || s.Close.Hour() != 13 || s.DataClose.Hour() != 17 || PhaseAt(et("2026-11-27 14:00")) != PostMarket {
+		t.Fatalf("early close schedule = %+v", s)
+	}
+	if got := PreviousTradingDay(et("2026-07-06 08:00")); got.Day() != 2 {
+		t.Fatalf("previous trading day = %s", got)
+	}
+}
+
 func TestDayMs(t *testing.T) {
 	if got, want := DayMs(ms("2026-07-06T18:00:00Z")), ms("2026-07-06T04:00:00Z"); got != want {
 		t.Fatalf("DayMs = %d, want %d", got, want)

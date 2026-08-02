@@ -89,22 +89,24 @@ func (p Phase) String() string {
 	return "closed"
 }
 
-// PhaseAt classifies t. Weekends are Closed; US market holidays are NOT
-// modeled in v1 (a holiday reads as a normal weekday with no data).
+// PhaseAt classifies t against the offline NYSE calendar.
 func PhaseAt(t time.Time) Phase {
 	et := t.In(loc)
-	if wd := et.Weekday(); wd == time.Saturday || wd == time.Sunday {
+	sched := Schedule(et)
+	if !sched.TradingDay {
 		return Closed
 	}
 	s := wallSecs(et)
+	closeSecs := wallSecs(sched.Close)
+	dataCloseSecs := wallSecs(sched.DataClose)
 	switch {
 	case s >= 4*3600 && s < AnchorSecsDefault:
 		return PreMarket
-	case s >= AnchorSecsDefault && s < 16*3600:
+	case s >= AnchorSecsDefault && s < closeSecs:
 		return RTH
-	case s >= 16*3600 && s < 20*3600:
+	case s >= closeSecs && s < dataCloseSecs:
 		return PostMarket
-	case s >= 20*3600 || s < 4*3600:
+	case s >= dataCloseSecs || s < 4*3600:
 		return Overnight
 	}
 	return Closed

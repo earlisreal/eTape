@@ -763,10 +763,7 @@ func recordWarmDepth(seen *sync.Map, symbol string, days int) {
 func runAfterCloseHistoryRefresh(ctx context.Context, seen *sync.Map, refresh func(string)) {
 	for {
 		now := time.Now().In(session.Loc())
-		next := time.Date(now.Year(), now.Month(), now.Day(), 20, 5, 0, 0, session.Loc())
-		if !next.After(now) {
-			next = next.AddDate(0, 0, 1)
-		}
+		next := nextHistoryRefresh(now)
 		t := time.NewTimer(time.Until(next))
 		select {
 		case <-ctx.Done():
@@ -775,12 +772,25 @@ func runAfterCloseHistoryRefresh(ctx context.Context, seen *sync.Map, refresh fu
 			}
 			return
 		case <-t.C:
-			seen.Range(func(key, _ any) bool {
-				refresh(key.(string))
-				return true
-			})
+			if session.IsTradingDay(next) {
+				seen.Range(func(key, _ any) bool {
+					refresh(key.(string))
+					return true
+				})
+			}
 		}
 	}
+}
+
+func nextHistoryRefresh(now time.Time) time.Time {
+	s := session.Schedule(now)
+	if s.TradingDay {
+		ready := s.DataClose.Add(5 * time.Minute)
+		if ready.After(now) {
+			return ready
+		}
+	}
+	return session.Schedule(session.NextTradingDay(now)).DataClose.Add(5 * time.Minute)
 }
 
 // dropWatchInterval controls how often watchDroppedUpdates samples

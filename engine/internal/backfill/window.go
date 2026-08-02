@@ -6,11 +6,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
-// intradayFrom returns ET midnight `tradingDays` weekdays before now. Weekends
-// are skipped; US market holidays are not modeled (a holiday counts as a
-// trading day here), matching the session package's documented v1 stance — the
-// result is only a lower bound for the history query, so over-counting a
-// holiday just widens the window harmlessly.
+// intradayFrom returns ET midnight `tradingDays` NYSE sessions before now.
 func intradayFrom(now time.Time, tradingDays int) time.Time {
 	if tradingDays < 1 {
 		tradingDays = 1
@@ -19,7 +15,7 @@ func intradayFrom(now time.Time, tradingDays int) time.Time {
 	d := time.Date(et.Year(), et.Month(), et.Day(), 0, 0, 0, 0, session.Loc())
 	for tradingDays > 0 {
 		d = d.AddDate(0, 0, -1)
-		if wd := d.Weekday(); wd != time.Saturday && wd != time.Sunday {
+		if session.IsTradingDay(d) {
 			tradingDays--
 		}
 	}

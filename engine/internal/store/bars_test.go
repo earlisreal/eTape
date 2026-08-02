@@ -144,3 +144,24 @@ func TestArchiveRangeWritesBarsAndCoverageAtomically(t *testing.T) {
 		t.Fatalf("empty range covered=%v err=%v", covered, err)
 	}
 }
+
+func TestMissingRangesMergesCoverageAndFindsGaps(t *testing.T) {
+	s := open(t)
+	if err := s.ArchiveRange("US.GAP", "1m", 100, 199, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ArchiveRange("US.GAP", "1m", 200, 250, nil); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ArchiveRange("US.GAP", "1m", 300, 350, nil); err != nil {
+		t.Fatal(err)
+	}
+	gaps, err := s.MissingRanges("US.GAP", "1m", 50, 400)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gaps) != 3 || gaps[0].FromMs != 50 || gaps[0].ToMs != 99 ||
+		gaps[1].FromMs != 251 || gaps[1].ToMs != 299 || gaps[2].FromMs != 351 || gaps[2].ToMs != 400 {
+		t.Fatalf("gaps = %+v", gaps)
+	}
+}

@@ -19,7 +19,7 @@ func TestIntradayFromSkipsWeekends(t *testing.T) {
 	if got, want := intradayFrom(now, 1), time.Date(2026, 7, 7, 0, 0, 0, 0, session.Loc()); !got.Equal(want) {
 		t.Fatalf("intradayFrom(1) = %s, want %s", got, want)
 	}
-	if got, want := intradayFrom(now, 3), time.Date(2026, 7, 3, 0, 0, 0, 0, session.Loc()); !got.Equal(want) {
+	if got, want := intradayFrom(now, 3), time.Date(2026, 7, 2, 0, 0, 0, 0, session.Loc()); !got.Equal(want) {
 		t.Fatalf("intradayFrom(3) = %s, want %s", got, want)
 	}
 }
@@ -90,11 +90,37 @@ func TestWarmUsesTieredSegmentsAndDoesNotSeedDeepSeries(t *testing.T) {
 func TestCompletedDailyTo(t *testing.T) {
 	loc := session.Loc()
 	day := time.Date(2026, 8, 3, 0, 0, 0, 0, loc)
-	if got := completedDailyTo(day.Add(19 * time.Hour)); !got.Equal(day.Add(-time.Millisecond)) {
+	if got, want := completedDailyTo(day.Add(19*time.Hour)), time.Date(2026, 7, 31, 0, 0, 0, 0, loc); !got.Equal(want) {
 		t.Fatalf("before close=%s", got)
 	}
 	if got := completedDailyTo(day.Add(20*time.Hour + 5*time.Minute)); !got.Equal(day) {
 		t.Fatalf("after close=%s", got)
+	}
+}
+
+func TestCompletedHorizonsRespectCalendar(t *testing.T) {
+	loc := session.Loc()
+	et := func(y int, m time.Month, d, h, min int) time.Time { return time.Date(y, m, d, h, min, 0, 0, loc) }
+	if got, want := completedDailyTo(et(2026, 7, 4, 20, 5)), et(2026, 7, 2, 0, 0); !got.Equal(want) {
+		t.Fatalf("holiday daily=%s want %s", got, want)
+	}
+	if got, want := completed1mTo(et(2026, 7, 6, 3, 0)), et(2026, 7, 2, 16, 59); !got.Equal(want) {
+		t.Fatalf("premarket 1m=%s want %s", got, want)
+	}
+	if got, want := completed1mTo(et(2026, 11, 27, 18, 0)), et(2026, 11, 27, 16, 59); !got.Equal(want) {
+		t.Fatalf("early-close 1m=%s want %s", got, want)
+	}
+}
+
+func TestWalkChainDiscardsOutOfRangeBeforeFallback(t *testing.T) {
+	loc := session.Loc()
+	from := time.Date(2026, 7, 6, 0, 0, 0, 0, loc)
+	to := from
+	a := &fakeFetcher{daily: []feed.Bar{{Symbol: "US.AAPL", BucketMs: time.Date(2026, 7, 2, 0, 0, 0, 0, loc).UnixMilli()}}}
+	b := &fakeFetcher{daily: []feed.Bar{{Symbol: "US.AAPL", BucketMs: from.UnixMilli()}}}
+	bars, served, err := walkChain(context.Background(), "US.AAPL", from, to, chain(a, b), dailyBars, true)
+	if err != nil || served != "f1" || len(bars) != 1 || a.dCalls.Load() != 1 || b.dCalls.Load() != 1 {
+		t.Fatalf("served=%q bars=%v err=%v calls=%d/%d", served, bars, err, a.dCalls.Load(), b.dCalls.Load())
 	}
 }
 

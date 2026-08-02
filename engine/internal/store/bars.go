@@ -146,31 +146,44 @@ func (s *Store) commitArchiveRange(op archiveRangeOp) error {
 // RangeCovered reports whether completed ranges form an unbroken union over
 // [fromMs,toMs].
 func (s *Store) RangeCovered(symbol, timeframe string, fromMs, toMs int64) (bool, error) {
+	gaps, err := s.MissingRanges(symbol, timeframe, fromMs, toMs)
+	return len(gaps) == 0, err
+}
+
+// MissingRanges returns the merged uncovered portions of [fromMs,toMs].
+func (s *Store) MissingRanges(symbol, timeframe string, fromMs, toMs int64) ([]feed.TimeRange, error) {
+	if toMs < fromMs {
+		return nil, nil
+	}
 	rows, err := s.db.Query(`SELECT from_ts,to_ts FROM bar_archive_ranges
 		WHERE symbol=? AND timeframe=? AND to_ts>=? AND from_ts<=? ORDER BY from_ts`,
 		symbol, timeframe, fromMs, toMs)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer rows.Close()
 	cursor := fromMs
+	var gaps []feed.TimeRange
 	for rows.Next() {
 		var from, to int64
 		if err := rows.Scan(&from, &to); err != nil {
-			return false, err
+			return nil, err
 		}
 		if from > cursor+1 {
-			return false, nil
+			gaps = append(gaps, feed.TimeRange{FromMs: cursor, ToMs: min(from-1, toMs)})
 		}
-		if to > cursor {
-			cursor = to
+		if to >= cursor {
+			cursor = to + 1
 		}
-		if cursor >= toMs {
-			return true, nil
+		if cursor > toMs {
+			break
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return false, fmt.Errorf("range coverage: %w", err)
+		return nil, fmt.Errorf("range coverage: %w", err)
 	}
-	return cursor >= toMs, nil
+	if cursor <= toMs {
+		gaps = append(gaps, feed.TimeRange{FromMs: cursor, ToMs: toMs})
+	}
+	return gaps, nil
 }
