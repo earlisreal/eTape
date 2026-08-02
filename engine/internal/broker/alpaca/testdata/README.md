@@ -1,7 +1,7 @@
 # Alpaca normalization fixtures
 
 All six fixtures here are **authored** from the documented `trade_updates` shape
-(`docs/2026-07-03-alpaca-api.md`: event, execution_id, price, qty, timestamp,
+(`41aa9993777cab4ea59e711775094c516032ebf2^:docs/2026-07-03-alpaca-api.md`: event, execution_id, price, qty, timestamp,
 position_qty, plus the full order object with filled_qty/filled_avg_price),
 not captured from a real paper stream — no eTape session has driven an Alpaca
 paper order through a full fill yet (Task 13/14 add the REST + WS clients that

@@ -1,7 +1,7 @@
 # TradeZero normalization fixtures
 
 `order_partial_fill.json` and `order_short_new.json` are **authored** from the
-documented Portfolio-WS order shape (`docs/2026-07-03-tradezero-api.md`), not
+documented Portfolio-WS order shape (`41aa9993777cab4ea59e711775094c516032ebf2^:docs/2026-07-03-tradezero-api.md`), not
 captured from real order-flow frames — capturing those needs real orders,
 which the eTape safety rule (never place/modify/cancel real orders without
 Earl's explicit go-ahead in the running conversation) forbids doing casually.

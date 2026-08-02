@@ -199,7 +199,7 @@ Notes:
 | **Built-in simulator** (`sim`) | paper | ✅ Realistic fills: book-walk pricing, partials, slippage & latency models |
 | **Alpaca** | paper + live | ✅ Fully supported (REST + streaming) |
 | **TradeZero** | live | ✅ Fully supported (REST + WebSocket) |
-| **moomoo** | paper + live | ✅ Fully supported (native OpenD trade connection) |
+| **moomoo** | live only | ✅ Fully supported (native OpenD trade connection) |
 
 Execution is **off by default** — with no venues configured, every order is blocked.
 The easiest way to add one is in-app: **Settings → Venues** lets you add a venue,
@@ -292,10 +292,12 @@ just works. Prebuilt binaries for both platforms are attached to the
 
 ## Development
 
+Codebase guides: [engine](engine/README.md) · [UI](ui/README.md) · [documentation](docs/README.md) · [external APIs](docs/external-apis.md) · [performance evidence](docs/performance.md) · [prototypes](prototypes/README.md) · [scripts](scripts/README.md)
+
 ```
 engine/     Go engine — feed, books, bars, scanner, brokers, risk gate, WS hub
 ui/         React + TypeScript + Vite UI — panels, canvas renderers, settings
-docs/       Design docs, decision records, and approved specs
+docs/       Current architecture, dependency, evidence, and planning guides
 prototypes/ Python research scripts (latency benchmarks, tick aggregation, …)
 ```
 
@@ -328,8 +330,8 @@ terms. Test against the simulator or a paper account before arming a live venue.
 ## Contributing
 
 Issues, bug reports, and pull requests are welcome. If you're adding a broker
-adapter or a panel, open an issue first — the approved design specs in
-`docs/superpowers/specs/` explain the architecture decisions you'll want to fit into.
+adapter or panel, open an issue first and follow its subsystem README plus current
+specifications in `docs/specs/`.
 
 ## License
 
