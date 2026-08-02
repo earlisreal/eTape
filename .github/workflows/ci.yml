@@ -52,18 +52,13 @@ jobs:
         run: make -C engine gen-ts-check
 
   ui:
-    runs-on: ubuntu-latest
+    # Golden PNGs are generated on Windows. Cairo/Pango text rasterization is
+    # OS-specific even with the same bundled TTF, so strict pixel comparison
+    # must run on the baseline platform.
+    runs-on: windows-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-
-      # node-canvas (used by the golden-image / real-<canvas> tests) needs
-      # these native libs to build its prebuilt-binary fallback on a clean
-      # Ubuntu runner.
-      - name: Install canvas native dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
 
       - name: Set up Node
         uses: actions/setup-node@v6
