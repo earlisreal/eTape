@@ -403,6 +403,8 @@ func supportedMarket(sym string) bool {
 // for an unknown profile.
 func demandForProfile(id, symbol, profile string) (feed.Demand, bool) {
 	switch profile {
+	case "chart":
+		return feed.ChartDemand(id, symbol), true
 	case "watch":
 		return feed.WatchDemand(id, symbol), true
 	case "focused":

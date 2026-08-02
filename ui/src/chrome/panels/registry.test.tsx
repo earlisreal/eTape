@@ -73,8 +73,8 @@ describe("catalog metadata", () => {
 });
 
 describe("panel demand profiles", () => {
-  it("maps chart/tape to watch, ladder to focused, news to interest", () => {
-    expect(PANELS.chart.demand).toBe("watch");
+  it("maps chart to chart, tape to watch, ladder to focused, news to interest", () => {
+    expect(PANELS.chart.demand).toBe("chart");
     expect(PANELS.tape.demand).toBe("watch");
     expect(PANELS.ladder.demand).toBe("focused");
     expect(PANELS.news.demand).toBe("interest");

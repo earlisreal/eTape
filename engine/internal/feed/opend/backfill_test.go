@@ -10,6 +10,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
+	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetkl"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotrequesthistorykl"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotupdateticker"
 )
@@ -24,6 +25,33 @@ func kl(tsSec float64, c float64, v int64) *qotcommon.KLine {
 		Timestamp: proto.Float64(tsSec), OpenPrice: proto.Float64(c), HighPrice: proto.Float64(c),
 		LowPrice: proto.Float64(c), ClosePrice: proto.Float64(c), Volume: proto.Int64(v),
 	}
+}
+
+func TestCachedDailyEncodesDayForwardAndMaxRows(t *testing.T) {
+	m := newMockOpenD(t)
+	m.setData("US.AAPL", &qotData{bars1m: []*qotcommon.KLine{kl(1782086400, 200, 1000)}})
+	bars, err := newBackfill(liveClient(t, m)).cachedDaily(context.Background(), "US.AAPL")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(bars) != 1 || bars[0].BucketMs != 1782086400_000 {
+		t.Fatalf("bars = %+v", bars)
+	}
+	for _, f := range m.snapshotRequests() {
+		if f.ProtoID != ProtoQotGetKL {
+			continue
+		}
+		var req qotgetkl.Request
+		if err := proto.Unmarshal(f.Body, &req); err != nil {
+			t.Fatal(err)
+		}
+		c := req.GetC2S()
+		if c.GetKlType() != int32(qotcommon.KLType_KLType_Day) || c.GetRehabType() != int32(qotcommon.RehabType_RehabType_Forward) || c.GetReqNum() != 1000 {
+			t.Fatalf("cached daily request = %+v", c)
+		}
+		return
+	}
+	t.Fatal("missing Qot_GetKL request")
 }
 
 // liveClient dials the mock and returns a connected client (helper shared

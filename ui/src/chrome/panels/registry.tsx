@@ -99,7 +99,7 @@ export const PANELS: Record<string, PanelDef> = {
     glyph: "▁▃▅▇",
     description: "Candles, volume, indicators",
     symbolBearing: true,
-    demand: "watch",
+    demand: "chart",
     headerControls: true,
   },
   "ladder": {

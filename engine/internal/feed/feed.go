@@ -89,6 +89,7 @@ const (
 	SubBook
 	SubTicker
 	SubKL1m
+	SubKLDay
 )
 
 // Demand is a consumer's declaration of interest. The subscription manager
@@ -100,6 +101,7 @@ type Demand struct {
 	Focused        bool // focused symbols survive LRU eviction under quota pressure
 	WantsHistory   bool // chart-capable demand: worth a deep-history backfill (see uihub.Hub.handleEnsureDemand)
 	BackgroundSeed bool // cache seed may wait behind interactive panel loads
+	CachedDaily    bool // chart demand: seed empty daily archive from OpenD cache
 }
 
 // WatchDemand is the watchlist profile: tape/10s/1m recording, no depth
@@ -107,6 +109,12 @@ type Demand struct {
 func WatchDemand(id, symbol string) Demand {
 	return Demand{ID: id, Symbol: symbol,
 		Subs: []SubType{SubTicker, SubKL1m}, WantsHistory: true}
+}
+
+// ChartDemand adds K_DAY solely to unlock one fast cached-daily read.
+func ChartDemand(id, symbol string) Demand {
+	return Demand{ID: id, Symbol: symbol,
+		Subs: []SubType{SubTicker, SubKL1m, SubKLDay}, WantsHistory: true, CachedDaily: true}
 }
 
 // Resolution selects a history series.

@@ -49,8 +49,9 @@ type OpenDFeed struct {
 	// synchronization with each other; without this, both could race past
 	// the fetched-map check below before either updates it, each spending a
 	// real history-quota slot for what should be one fetch.
-	hbGroup       singleflight.Group
-	validateGroup singleflight.Group
+	hbGroup         singleflight.Group
+	validateGroup   singleflight.Group
+	dailyCacheGroup singleflight.Group
 }
 
 type seedJob struct {
@@ -369,6 +370,21 @@ func (f *OpenDFeed) seed(ctx context.Context, job seedJob) {
 	log("seed timing", "symbol", symbol, "lane", lane,
 		"queueWait", queueWait, "bars", barsDuration, "book", bookDuration, "ticks", ticksDuration,
 		"quote", quoteDuration, "total", f.clk.Now().Sub(job.enqueuedAt))
+}
+
+// CachedDaily waits for K_DAY subscription success, then issues one cache read.
+// Concurrent chart loads for one symbol share that request.
+func (f *OpenDFeed) CachedDaily(ctx context.Context, symbol string) ([]feed.Bar, error) {
+	v, err, _ := f.dailyCacheGroup.Do(symbol, func() (any, error) {
+		if err := f.sub.WaitActive(ctx, subKey{Symbol: symbol, Sub: feed.SubKLDay}); err != nil {
+			return nil, err
+		}
+		return f.bf.cachedDaily(ctx, symbol)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return v.([]feed.Bar), nil
 }
 
 // HistoryBars spends history quota; guard new symbols against exhaustion.

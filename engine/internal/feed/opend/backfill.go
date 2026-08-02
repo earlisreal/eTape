@@ -79,6 +79,30 @@ func (b *backfill) cachedBars1m(ctx context.Context, symbol string, n int) ([]fe
 	return decodeKLines(symbol, resp.GetS2C().GetKlList(), feed.Res1m)
 }
 
+func (b *backfill) cachedDaily(ctx context.Context, symbol string) ([]feed.Bar, error) {
+	sec, err := parseSymbol(symbol)
+	if err != nil {
+		return nil, err
+	}
+	req := &qotgetkl.Request{C2S: &qotgetkl.C2S{
+		RehabType: proto.Int32(int32(qotcommon.RehabType_RehabType_Forward)),
+		KlType:    proto.Int32(int32(qotcommon.KLType_KLType_Day)),
+		Security:  sec, ReqNum: proto.Int32(maxAPIRows),
+	}}
+	f, err := b.rpc.Request(ctx, ProtoQotGetKL, req)
+	if err != nil {
+		return nil, err
+	}
+	var resp qotgetkl.Response
+	if err := proto.Unmarshal(f.Body, &resp); err != nil {
+		return nil, fmt.Errorf("get_kl daily decode: %w", err)
+	}
+	if resp.GetRetType() != 0 {
+		return nil, retErr(ProtoQotGetKL, resp.GetRetType(), resp.GetRetMsg())
+	}
+	return decodeKLines(symbol, resp.GetS2C().GetKlList(), feed.ResDay)
+}
+
 func decodeKLines(symbol string, list []*qotcommon.KLine, res feed.Resolution) ([]feed.Bar, error) {
 	bars := make([]feed.Bar, 0, len(list))
 	for _, k := range list {

@@ -122,6 +122,8 @@ type backfillBox struct {
 	fn func(sym string, done func(ok bool))
 }
 
+type cachedDailyBox struct{ fn func(sym string) }
+
 // loadOlderBox mirrors backfillBox/feedBox: SetLoadOlder is called once at
 // boot from main's goroutine, after the Hub is already running.
 type loadOlderBox struct {
@@ -163,9 +165,10 @@ type Hub struct {
 	syncCh             chan chan struct{}  // test barrier
 	closed             chan struct{}       // closed when Run returns; unblocks stuck senders
 
-	feedSlot      atomic.Pointer[feedBox]
-	backfillSlot  atomic.Pointer[backfillBox]
-	loadOlderSlot atomic.Pointer[loadOlderBox]
+	feedSlot        atomic.Pointer[feedBox]
+	backfillSlot    atomic.Pointer[backfillBox]
+	cachedDailySlot atomic.Pointer[cachedDailyBox]
+	loadOlderSlot   atomic.Pointer[loadOlderBox]
 
 	// ind is the md.Core surface EnsureIndicator/ReleaseIndicator forward to.
 	// Unlike feedSlot/backfillSlot/loadOlderSlot (injected asynchronously,
@@ -314,6 +317,22 @@ func (h *Hub) feed() Feed {
 // demands simply skip the deep backfill).
 func (h *Hub) SetBackfill(fn func(sym string, done func(ok bool))) {
 	h.backfillSlot.Store(&backfillBox{fn: fn})
+}
+
+// SetCachedDaily injects chart-only, memory-only daily cache seeding.
+func (h *Hub) SetCachedDaily(fn func(sym string)) {
+	if fn == nil {
+		h.cachedDailySlot.Store(nil)
+		return
+	}
+	h.cachedDailySlot.Store(&cachedDailyBox{fn: fn})
+}
+
+func (h *Hub) cachedDaily() func(string) {
+	if b := h.cachedDailySlot.Load(); b != nil {
+		return b.fn
+	}
+	return nil
 }
 
 func (h *Hub) backfill() func(sym string, done func(ok bool)) {
@@ -631,6 +650,11 @@ func (h *Hub) handleEnsureDemand(r ensureDemandReq) {
 	m[r.d.ID] = demandInfo{symbol: r.d.Symbol, wantsHistory: r.d.WantsHistory}
 	if f := h.feed(); f != nil {
 		f.Ensure(r.d)
+	}
+	if r.d.CachedDaily {
+		if fn := h.cachedDaily(); fn != nil {
+			fn(r.d.Symbol)
+		}
 	}
 	// Deep-backfill (deep intraday + full daily history) any chart-capable
 	// demand whose daily fetch hasn't yet succeeded, so a symbol opened on a

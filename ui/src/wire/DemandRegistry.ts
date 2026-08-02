@@ -1,7 +1,7 @@
 import type { AckMsg } from "./contract";
 import type { ConnState } from "./WsClient";
 
-export type DemandProfile = "watch" | "focused" | "interest";
+export type DemandProfile = "chart" | "watch" | "focused" | "interest";
 
 interface DemandClient {
   sendCommand(name: string, args: unknown): Promise<AckMsg>;

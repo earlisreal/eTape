@@ -594,6 +594,30 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		backfillOne = func(sym string) { hubBackfill(sym, nil) }
 	}
 	hub.SetBackfill(hubBackfill) // chart-open demands also deep-backfill (nil-safe if disabled)
+	if fd, ok := feedForHub.(*opend.OpenDFeed); ok && st != nil {
+		hub.SetCachedDaily(func(sym string) {
+			backfillWG.Add(1)
+			go func() {
+				defer backfillWG.Done()
+				daily, err := st.ReadDailyBars(sym)
+				if err != nil {
+					log.Warn("cached daily seed: archive read failed", "symbol", sym, "err", err)
+					return
+				}
+				if len(daily) != 0 {
+					return
+				}
+				bars, err := fd.CachedDaily(ctx, sym)
+				if err != nil {
+					log.Warn("cached daily seed failed", "symbol", sym, "err", err)
+					return
+				}
+				if len(bars) > 0 && ctx.Err() == nil {
+					core.SeedDaily(sym, bars)
+				}
+			}()
+		})
+	}
 	startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, firstAlpacaProber(vbs), backfillOne, !*demo, &scanWG)
 
 	if orch == nil && st != nil {

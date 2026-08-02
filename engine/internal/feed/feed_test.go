@@ -19,6 +19,10 @@ func TestDemandProfiles(t *testing.T) {
 	if w.Subs[0] != SubTicker || w.Subs[1] != SubKL1m {
 		t.Fatalf("watch subs = %v, want [SubTicker SubKL1m]", w.Subs)
 	}
+	c := ChartDemand("chart-AAPL", "US.AAPL")
+	if !c.CachedDaily || !c.WantsHistory || len(c.Subs) != 3 || c.Subs[2] != SubKLDay {
+		t.Fatalf("chart profile = %+v, want watch subs plus SubKLDay", c)
+	}
 }
 
 // Compile-time exhaustiveness: every event type is part of the union.

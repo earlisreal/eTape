@@ -34,8 +34,33 @@ func pbSubType(s feed.SubType) int32 {
 		return int32(qotcommon.SubType_SubType_Ticker) // 4
 	case feed.SubKL1m:
 		return int32(qotcommon.SubType_SubType_KL_1Min) // 11
+	case feed.SubKLDay:
+		return int32(qotcommon.SubType_SubType_KL_Day) // 6
 	}
 	return 0
+}
+
+// WaitActive blocks until a successful subscription ack made key active.
+func (m *subManager) WaitActive(ctx context.Context, key subKey) error {
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		m.mu.Lock()
+		_, ok := m.active[key]
+		quarantined := m.quarantine[key]
+		m.mu.Unlock()
+		if ok {
+			return nil
+		}
+		if quarantined {
+			return fmt.Errorf("subscription unavailable: %s", key.Symbol)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }
 
 type subOptions struct {

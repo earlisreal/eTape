@@ -462,6 +462,19 @@ func TestEnsureSymbol_AcceptsAndMapsWatch(t *testing.T) {
 	}
 }
 
+func TestEnsureSymbol_ChartAddsCachedDailySubscription(t *testing.T) {
+	cd, dem, _ := newCmdWith(t, nil, false)
+	ack, _ := cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"chart1","symbol":"US.AAPL","profile":"chart"}`), 7, func(wsmsg.AckMsg) {})
+	if ack.Status != "accepted" {
+		t.Fatalf("ack = %+v", ack)
+	}
+	d := dem.ensured[0].d
+	if !d.CachedDaily || !reflect.DeepEqual(d.Subs, []feed.SubType{feed.SubTicker, feed.SubKL1m, feed.SubKLDay}) {
+		t.Fatalf("chart demand = %+v", d)
+	}
+}
+
 func TestEnsureSymbol_FocusedUSHasBook(t *testing.T) {
 	cd, dem, _ := newCmdWith(t, nil, false)
 	cd.handle(context.Background(), "EnsureSymbol",
