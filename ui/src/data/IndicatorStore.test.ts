@@ -77,6 +77,19 @@ describe("IndicatorStore", () => {
     expect(s.consumeDirty()).toBe(true);
   });
 
+  it("reset drops the previous generation's visible range", () => {
+    const s = new IndicatorStore();
+    s.mergeWindow("ema-200", [{ timeMs: 1000, value: 10 }], 1000, 2000);
+    expect(s.series("ema-200")).toEqual([{ timeMs: 1000, value: 10 }]);
+
+    s.reset("ema-200");
+    s.apply(snap("ema-200", [{ timeMs: 3000, value: 20 }]));
+
+    // A fresh snapshot can render immediately instead of being filtered by
+    // the old timeframe's [1000, 2000) selection.
+    expect(s.series("ema-200")).toEqual([{ timeMs: 3000, value: 20 }]);
+  });
+
   it("bumps only the applied instance's own revision", () => {
     const s = new IndicatorStore();
     expect(s.getRev("ind-1")).toBe(0);

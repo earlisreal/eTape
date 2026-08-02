@@ -230,10 +230,16 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     };
     const { facade, setPalette, drawings } = makeFacade(chart, palette);
     let viewportGeneration = 0;
+    // A symbol/timeframe reset leaves LWC's logical range describing the old
+    // series until the replacement tail has been installed and scrolled. Any
+    // indicator ack/history-ready arriving in that interval must request latest,
+    // not translate that stale logical range onto the new timeframe.
+    let reloadLatestRequired = true;
 
     const indicatorKeys = () => instancesRef.current.flatMap((inst) => describeIndicator(inst, paletteRef.current).map((series) => series.key));
     const mergeWindow = (result: QueryChartWindowResult, generation: number, select = true) => {
-      if (generation !== viewportGeneration || result.symbol !== currentSymbol || result.timeframe !== tfRef.current) return false;
+      const accepted = generation === viewportGeneration && result.symbol === currentSymbol && result.timeframe === tfRef.current;
+      if (!accepted) return false;
       stores.bars.mergeWindow(result.symbol, result.timeframe, result.bars ?? [], result.fromMs, result.toMs, select);
       for (const series of result.indicators ?? []) stores.indicators.mergeWindow(series.seriesKey, series.points ?? [], result.fromMs, result.toMs, select);
       forceRepaintRef.current = true;
@@ -242,13 +248,15 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const queryLatest = async () => {
       const generation = ++viewportGeneration;
       const tailBars = Math.max(20, Math.ceil(host.clientWidth / 6));
+      const keys = indicatorKeys();
       const result = await commands.sendQuery("QueryChartWindow", {
         symbol: currentSymbol, timeframe: tfRef.current, fromMs: 0, toMs: 0, tailBars,
-        indicatorSeriesKeys: indicatorKeys(),
+        indicatorSeriesKeys: keys,
       }) as QueryChartWindowResult;
       if (mergeWindow(result, generation)) {
         facade.resetPriceScale();
         facade.scrollToRealTime();
+        reloadLatestRequired = false;
       }
     };
     const queryRange = async (fromMs: number, toMs: number, restore?: { from: number; to: number }) => {
@@ -257,9 +265,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       const clippedTo = Math.min(toMs, Date.now());
       const gaps = stores.bars.missingRanges(currentSymbol, tfRef.current, fromMs, clippedTo);
       for (const gap of gaps) {
+        const keys = indicatorKeys();
         const result = await commands.sendQuery("QueryChartWindow", {
           symbol: currentSymbol, timeframe: tfRef.current, fromMs: gap.fromMs, toMs: gap.toMs, tailBars: 0,
-          indicatorSeriesKeys: indicatorKeys(),
+          indicatorSeriesKeys: keys,
         }) as QueryChartWindowResult;
         if (!mergeWindow(result, generation, false)) return;
       }
@@ -303,6 +312,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       };
     };
     queryViewportRef.current = () => {
+      if (reloadLatestRequired) {
+        void queryLatest();
+        return;
+      }
       const range = demandedRange();
       if (range) void queryRange(range.from, range.to, { from: range.logicalFrom, to: range.logicalTo });
       else void queryLatest();
@@ -431,6 +444,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         lastFirstPaintSequence = timing.sequence;
       }
       viewportGeneration++;
+      reloadLatestRequired = true;
       olderHistory.reset();
       setAllExhausted(false);
       controller.setSymbol(currentSymbol);
@@ -444,17 +458,27 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     applySymbolRef.current = applySymbol;
     applySymbol();
     const offLink = linkGroups.subscribe(applySymbol);
-    let lastHistorySeq = 0;
+    // SysEvent.seq is only monotonic within its producer (the hub, health
+    // poller, venue seeder, etc.), not across the combined sys.events stream.
+    // Remember the concrete events currently in HealthStore instead of using a
+    // global high-water mark: an unrelated seq=20 must not hide a later hub
+    // history-ready seq=1 and strand a freshly re-specified indicator.
+    const eventKey = (event: { seq: number; ts: string; kind: string; detail: string; level?: string }) =>
+      `${event.kind}\u0000${event.seq}\u0000${event.ts}\u0000${event.detail}\u0000${event.level ?? ""}`;
+    let seenEventKeys = new Set(stores.health.getSnapshot().events.map(eventKey));
     const offHistoryReady = stores.health.subscribe(() => {
       const events = stores.health.getSnapshot().events;
+      const nextSeen = new Set<string>();
       for (const event of events) {
-        if (event.seq <= lastHistorySeq) continue;
-        lastHistorySeq = event.seq;
+        const key = eventKey(event);
+        nextSeen.add(key);
+        if (seenEventKeys.has(key)) continue;
         if (event.kind !== "history-ready" || event.detail !== currentSymbol) continue;
-        const range = demandedRange();
-        if (range) void queryRange(range.from, range.to, { from: range.logicalFrom, to: range.logicalTo });
-        else void queryLatest();
+        queryViewportRef.current?.();
       }
+      // HealthStore retains only its bounded event window. Mirroring that window
+      // here keeps this dedup state bounded too.
+      seenEventKeys = nextSeen;
     });
 
     const updateLegend = () => {

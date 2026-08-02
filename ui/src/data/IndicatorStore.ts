@@ -64,6 +64,10 @@ export class IndicatorStore extends PaintStore {
   // change a per-instance consumer must see, not just new/updated points.
   reset(instanceId: string): void {
     this.byInstance.delete(instanceId);
+    // The selected viewport belongs to the same symbol/timeframe generation as
+    // the points. Keeping it would filter a newly re-specified indicator through
+    // the previous timeframe's window before the follow-up query lands.
+    this.visible.delete(instanceId);
     this.bumpRev(instanceId);
     this.markDirty();
   }

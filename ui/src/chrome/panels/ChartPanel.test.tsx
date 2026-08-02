@@ -9,7 +9,8 @@ import { ThemeProvider } from "../ThemeProvider";
 const timeScaleApi = { timeToCoordinate: vi.fn(() => 0), scrollToRealTime: vi.fn(), scrollPosition: vi.fn(() => 0),
   coordinateToLogical: vi.fn(() => 0), logicalToCoordinate: vi.fn(() => 0), resetTimeScale: vi.fn(),
   scrollToPosition: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn(),
-  getVisibleRange: vi.fn<() => { from: number; to: number } | null>(() => null), setVisibleRange: vi.fn() };
+  getVisibleRange: vi.fn<() => { from: number; to: number } | null>(() => null),
+  getVisibleLogicalRange: vi.fn<() => { from: number; to: number } | null>(() => null), setVisibleRange: vi.fn() };
 // priceScaleApi is a stable object (not a fresh literal per call) so a test can hold
 // a reference to applyOptions and assert it was invoked by the SUT (mirrors timeScaleApi above).
 const priceScaleApi = { applyOptions: vi.fn(), width: vi.fn(() => 60) };
@@ -44,7 +45,7 @@ import { makeStores } from "../../data/registry";
 import { Scheduler } from "../../render/Scheduler";
 import { browserRaf, type Surface } from "../../render/surface";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
-import type { AckMsg, Bar, DeltaMsg } from "../../wire/contract";
+import type { AckMsg, Bar, DeltaMsg, SysEvent } from "../../wire/contract";
 import { DEFAULT_CHART_SETTINGS } from "./tv/ChartSettingsDialog";
 import { FakeDrawingBus, FakeDrawingBusHub } from "../../../test/fakes";
 import { perf } from "../../perf/PerfMonitor";
@@ -384,6 +385,30 @@ describe("ChartPanel", () => {
       .map(([, args]) => (args as { timeframe: string }).timeframe);
     expect(chartQueries).toContain("W");
     expect(chartQueries).not.toContain("D");
+  });
+
+  it("refreshes indicators for a lower-sequence history-ready event from another producer", async () => {
+    const { stores, commands } = renderChart("c1", undefined, undefined, {
+      timeframe: "D",
+      indicators: [{ instanceId: "c1:EMA-0", type: "EMA", params: { period: 200 } }],
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    commands.sendQuery.mockClear();
+
+    const pushEvent = (event: SysEvent) => act(() => stores.health.apply({
+      kind: "delta", topic: "sys.events", payload: event,
+    }));
+    pushEvent({ seq: 50, ts: "2026-08-02T01:00:00Z", kind: "quota", detail: "unrelated" });
+    expect(commands.sendQuery).not.toHaveBeenCalled();
+
+    // Hub-owned history-ready sequences are independent from other sys.events
+    // producers, so seq=1 is newer here despite being numerically lower.
+    pushEvent({ seq: 1, ts: "2026-08-02T01:00:01Z", kind: "history-ready", detail: "US.AAPL" });
+    await act(async () => { await Promise.resolve(); });
+
+    expect(commands.sendQuery).toHaveBeenCalledWith("QueryChartWindow", expect.objectContaining({
+      symbol: "US.AAPL", timeframe: "D", indicatorSeriesKeys: ["c1:EMA-0"],
+    }));
   });
 
   it("camera button calls the chart's takeScreenshot", () => {
