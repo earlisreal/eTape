@@ -37,6 +37,39 @@ func TestArchive1mUpsertAndRead(t *testing.T) {
 	}
 }
 
+func TestReadRecentBars1mLimitsAndReturnsAscending(t *testing.T) {
+	s := open(t)
+	for i := int64(1); i <= 5; i++ {
+		s.ArchiveBar1m(feed.Bar{Symbol: "US.AAPL", BucketMs: i * 1000, C: float64(i)})
+	}
+	s.Flush()
+	got, err := s.ReadRecentBars1m("US.AAPL", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].BucketMs != 3000 || got[1].BucketMs != 4000 || got[2].BucketMs != 5000 {
+		t.Fatalf("recent bars = %+v, want newest three ascending", got)
+	}
+}
+
+func TestReadRecentBars10sAndKnownSymbol(t *testing.T) {
+	s := open(t)
+	for i := int64(1); i <= 4; i++ {
+		s.ArchiveBar10s(feed.Bar{Symbol: "US.NVDA", BucketMs: i * 1000, C: float64(i)})
+	}
+	s.Flush()
+	got, err := s.ReadRecentBars10s("US.NVDA", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].BucketMs != 3000 || got[1].BucketMs != 4000 {
+		t.Fatalf("recent 10s bars = %+v, want newest two ascending", got)
+	}
+	if !s.HasArchivedSymbol("US.NVDA") || s.HasArchivedSymbol("US.UNKNOWN") {
+		t.Fatal("archived-symbol lookup returned wrong result")
+	}
+}
+
 func TestArchive10sUpsertAndRead(t *testing.T) {
 	s := open(t)
 	s.ArchiveBar10s(feed.Bar{Symbol: "US.AAPL", BucketMs: 1000, O: 10, H: 11, L: 9, C: 10.5, Volume: 100})

@@ -258,7 +258,14 @@ func (c *Core) apply(m inMsg) {
 func (c *Core) applyEvent(ev feed.Event) {
 	switch e := ev.(type) {
 	case feed.TicksEvent:
-		c.applyTicks(e)
+		if e.Seed && len(e.Ticks) > 0 {
+			c.applyTicks(e)
+			symbol := e.Ticks[0].Symbol
+			c.bars.emitTickSeedSnapshots(c, symbol)
+			c.emit(HistoryReadyUpdate{Symbol: symbol})
+		} else {
+			c.applyTicks(e)
+		}
 	case feed.QuoteEvent:
 		c.emit(QuoteUpdate{Quote: c.quotes.set(e.Quote)})
 	case feed.BookEvent:
@@ -266,7 +273,12 @@ func (c *Core) applyEvent(ev feed.Event) {
 		c.emit(BookUpdate{Book: stored})
 		c.emitBook(stored)
 	case feed.Bars1mEvent:
-		c.bars.apply1m(c, e.Bars) // Task 11
+		if e.Seed && len(e.Bars) > 0 {
+			c.bars.seedHistory1m(c, e.Bars[0].Symbol, e.Bars)
+			c.emit(HistoryReadyUpdate{Symbol: e.Bars[0].Symbol})
+		} else {
+			c.bars.apply1m(c, e.Bars) // Task 11
+		}
 	case feed.ConnUpEvent:
 		c.emit(ConnUpdate{Up: true})
 	case feed.ConnDownEvent:

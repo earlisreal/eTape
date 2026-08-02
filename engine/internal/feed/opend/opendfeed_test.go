@@ -278,8 +278,8 @@ func TestEnsureDoesNotBlockWhenSeedQueueFull(t *testing.T) {
 	f := NewOpenDFeed(cli, FeedOptions{})
 	// Fill the seed queue to capacity without a seed worker draining it
 	// (Run is deliberately not started), then confirm Ensure still returns.
-	for i := 0; i < cap(f.seedq); i++ {
-		f.seedq <- seedJob{symbol: "US.FILL"}
+	for i := 0; i < cap(f.foregroundSeedq); i++ {
+		f.foregroundSeedq <- seedJob{symbol: "US.FILL"}
 	}
 
 	done := make(chan struct{})
@@ -291,6 +291,108 @@ func TestEnsureDoesNotBlockWhenSeedQueueFull(t *testing.T) {
 	case <-done:
 	case <-time.After(1 * time.Second):
 		t.Fatal("Ensure blocked when the seed queue was full")
+	}
+}
+
+func TestEnsureDoesNotBlockWhenBackgroundSeedQueueFull(t *testing.T) {
+	m := newMockOpenD(t)
+	f := NewOpenDFeed(liveClient(t, m), FeedOptions{})
+	for i := 0; i < cap(f.backgroundSeedq); i++ {
+		f.backgroundSeedq <- seedJob{symbol: "US.FILL", background: true}
+	}
+	done := make(chan struct{})
+	go func() {
+		d := feed.WatchDemand("scan:AAPL", "US.AAPL")
+		d.BackgroundSeed = true
+		f.Ensure(d)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("Ensure blocked when the background seed queue was full")
+	}
+}
+
+func TestEnsureSkipsEmptyInterestSeed(t *testing.T) {
+	m := newMockOpenD(t)
+	f := NewOpenDFeed(liveClient(t, m), FeedOptions{})
+	f.Ensure(feed.Demand{ID: "interest", Symbol: "US.AAPL"})
+	if len(f.foregroundSeedq) != 0 || len(f.backgroundSeedq) != 0 {
+		t.Fatal("interest-only demand enqueued an empty seed job")
+	}
+}
+
+func TestSeedClaimsDeduplicateBurstBySubtype(t *testing.T) {
+	m := newMockOpenD(t)
+	f := NewOpenDFeed(liveClient(t, m), FeedOptions{})
+	if !f.claimSeed("US.AAPL", feed.SubKL1m, false) {
+		t.Fatal("first seed claim rejected")
+	}
+	if f.claimSeed("US.AAPL", feed.SubKL1m, false) {
+		t.Fatal("concurrent duplicate seed claim accepted")
+	}
+	if !f.claimSeed("US.AAPL", feed.SubBook, false) {
+		t.Fatal("different subtype claim rejected")
+	}
+	f.finishSeed("US.AAPL", feed.SubKL1m, true)
+	if f.claimSeed("US.AAPL", feed.SubKL1m, false) {
+		t.Fatal("recent duplicate seed claim accepted")
+	}
+	if !f.claimSeed("US.AAPL", feed.SubKL1m, true) {
+		t.Fatal("forced reconnect seed claim rejected")
+	}
+}
+
+func TestForegroundSeedDoesNotWaitBehindBlockedBackgroundSeed(t *testing.T) {
+	testSecondSeedStartsWhileFirstBlocked(t, true)
+}
+
+func TestTwoForegroundSeedsRunConcurrently(t *testing.T) {
+	testSecondSeedStartsWhileFirstBlocked(t, false)
+}
+
+func testSecondSeedStartsWhileFirstBlocked(t *testing.T, firstBackground bool) {
+	t.Helper()
+	m := newMockOpenD(t)
+	m.setData("US.FIRST", &qotData{bars1m: []*qotcommon.KLine{kl(1782146460, 1, 1)}})
+	m.setData("US.SECOND", &qotData{bars1m: []*qotcommon.KLine{kl(1782146460, 2, 1)}})
+	firstStarted := make(chan struct{})
+	var once sync.Once
+	m.handler = func(mm *mockOpenD, conn net.Conn, frame Frame) {
+		if frame.ProtoID == ProtoQotGetKL {
+			blocked := false
+			once.Do(func() {
+				blocked = true
+				close(firstStarted)
+			})
+			if blocked {
+				return // leave first RPC pending until test cancellation
+			}
+		}
+		mm.defaultHandler(mm, conn, frame)
+	}
+
+	f := NewOpenDFeed(liveClient(t, m), FeedOptions{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = f.Run(ctx) }()
+	first := feed.Demand{ID: "first", Symbol: "US.FIRST", Subs: []feed.SubType{feed.SubKL1m}, BackgroundSeed: firstBackground}
+	f.Ensure(first)
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first seed did not start")
+	}
+	f.Ensure(feed.Demand{ID: "second", Symbol: "US.SECOND", Subs: []feed.SubType{feed.SubKL1m}})
+	select {
+	case ev := <-f.Events():
+		bars, ok := ev.(feed.Bars1mEvent)
+		if !ok || len(bars.Bars) != 1 || bars.Bars[0].Symbol != "US.SECOND" {
+			t.Fatalf("event = %#v, want second symbol seed", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("second seed waited behind blocked first seed")
 	}
 }
 

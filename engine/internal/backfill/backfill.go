@@ -84,7 +84,9 @@ func (o *Orchestrator) syncHistory(symbol string) {
 type Archive interface {
 	ReadDailyBars(symbol string) ([]feed.Bar, error)
 	ReadBars1m(symbol string, fromMs, toMs int64) ([]feed.Bar, error)
+	ReadRecentBars1m(symbol string, limit int) ([]feed.Bar, error)
 	ReadBars10s(symbol string, fromMs, toMs int64) ([]feed.Bar, error)
+	ReadRecentBars10s(symbol string, limit int) ([]feed.Bar, error)
 	ArchiveBar1m(b feed.Bar)
 	ArchiveBar10s(b feed.Bar)
 	ArchiveDaily(b feed.Bar)
@@ -184,10 +186,16 @@ func (o *Orchestrator) Backfill(ctx context.Context, symbol string) error {
 	t0 := time.Now()
 	now := o.clk.Now()
 	from1m := intradayFrom(now, o.cfg.IntradayDays)
+	if o.fastArchiveFirstPaint(ctx, symbol) {
+		o.syncHistory(symbol)
+	}
 	o.warmStart(ctx, symbol, from1m, now)
 	slog.Debug("backfill: warmStart done", "symbol", symbol, "elapsed", time.Since(t0).Round(time.Millisecond))
 	t1 := time.Now()
 	tailOldestMs, tailOK := o.tail1m(ctx, symbol)
+	if tailOK {
+		o.syncHistory(symbol)
+	}
 	slog.Debug("backfill: tail1m done", "symbol", symbol, "elapsed", time.Since(t1).Round(time.Millisecond))
 	t2 := time.Now()
 	o.fill1m(ctx, symbol, from1m, now, tailOldestMs, tailOK)
@@ -198,6 +206,38 @@ func (o *Orchestrator) Backfill(ctx context.Context, symbol string) error {
 	o.noteBackfilled(symbol, from1m)
 	o.syncHistory(symbol)
 	return err
+}
+
+const fastArchiveTailBars = 500
+
+// fastArchiveFirstPaint seeds every visible chart timeframe before warmStart
+// scans full archives. Official daily goes first so 1m derivation cannot emit
+// a transient one-bar daily snapshot. Later full seeds replace these tails.
+func (o *Orchestrator) fastArchiveFirstPaint(ctx context.Context, symbol string) bool {
+	start := time.Now()
+	daily, err := o.archive.ReadDailyBars(symbol)
+	if err != nil {
+		slog.Warn("backfill: fast daily archive read failed", "symbol", symbol, "err", err)
+	} else {
+		seedUnlessCanceled(ctx, daily, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
+	}
+	m1, err := o.archive.ReadRecentBars1m(symbol, fastArchiveTailBars)
+	if err != nil {
+		slog.Warn("backfill: fast 1m archive tail read failed", "symbol", symbol, "err", err)
+	} else {
+		seedUnlessCanceled(ctx, m1, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+	}
+	s10, err := o.archive.ReadRecentBars10s(symbol, fastArchiveTailBars)
+	if err != nil {
+		slog.Warn("backfill: fast 10s archive tail read failed", "symbol", symbol, "err", err)
+	} else {
+		seedUnlessCanceled(ctx, s10, func(b []feed.Bar) { o.seeder.SeedHistory10s(symbol, b) })
+	}
+	if len(daily)+len(m1)+len(s10) > 0 {
+		slog.Info("backfill: fast archive first paint served", "symbol", symbol, "daily", len(daily), "bars1m", len(m1), "bars10s", len(s10), "elapsed", time.Since(start).Round(time.Millisecond))
+		return true
+	}
+	return false
 }
 
 // noteBackfilled records the initial 1m watermark for a symbol once its boot/

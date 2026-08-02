@@ -451,6 +451,9 @@ func TestEnsureSymbol_AcceptsAndMapsWatch(t *testing.T) {
 	if got.d.Focused {
 		t.Fatalf("watch must not be focused")
 	}
+	if got.d.BackgroundSeed {
+		t.Fatalf("UI watch must use foreground seed lane")
+	}
 	if !reflect.DeepEqual(got.d.Subs, []feed.SubType{feed.SubTicker, feed.SubKL1m}) {
 		t.Fatalf("watch subs = %v", got.d.Subs)
 	}
@@ -466,6 +469,9 @@ func TestEnsureSymbol_FocusedUSHasBook(t *testing.T) {
 	d := dem.ensured[0].d
 	if !d.Focused {
 		t.Fatal("focused flag missing")
+	}
+	if d.BackgroundSeed {
+		t.Fatal("UI focused demand must use foreground seed lane")
 	}
 	if !reflect.DeepEqual(d.Subs, []feed.SubType{feed.SubQuote, feed.SubTicker, feed.SubKL1m, feed.SubBook}) {
 		t.Fatalf("US focused subs = %v (want quote,ticker,kl1m,book)", d.Subs)
@@ -518,6 +524,17 @@ func TestEnsureSymbol_UnknownSymbolReverts(t *testing.T) {
 	}
 	if ack.Reason == "" {
 		t.Fatal("expected a reason mentioning the symbol")
+	}
+}
+
+func TestEnsureSymbol_ArchivedSymbolSkipsLiveProbe(t *testing.T) {
+	cd, _, sf := newCmdWith(t, nil, false)
+	sf.err = feed.ErrFeedUnavailable
+	cd.knownSymbol.Store(&knownSymbolBox{fn: func(symbol string) bool { return symbol == "US.NVDA" }})
+	ack, _ := cd.handle(context.Background(), "EnsureSymbol",
+		[]byte(`{"demandId":"p1","symbol":"US.NVDA","profile":"watch"}`), 1, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckAccepted {
+		t.Fatalf("archived symbol should skip unavailable live probe: %+v", ack)
 	}
 }
 

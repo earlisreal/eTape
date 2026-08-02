@@ -2,6 +2,7 @@ import type { AckMsg, VenueID } from "../wire/contract";
 
 export type LinkGroup = "red" | "green" | "blue" | "yellow" | null; // null = pinned
 export interface LinkMsg { group: LinkGroup; symbol?: string; venue?: VenueID }
+export interface FocusTiming { symbol: string; startedAt: number; sequence: number }
 
 export interface LinkBus {
   post(msg: LinkMsg): void;
@@ -25,6 +26,8 @@ export class BroadcastChannelBus implements LinkBus {
 export class LinkGroups {
   private readonly focused = new Map<Exclude<LinkGroup, null>, string>();
   private readonly focusedVenues = new Map<Exclude<LinkGroup, null>, VenueID>();
+  private readonly focusTimings = new Map<Exclude<LinkGroup, null>, FocusTiming>();
+  private focusTimingSequence = 0;
   private readonly subs = new Set<() => void>();
 
   constructor(
@@ -52,9 +55,14 @@ export class LinkGroups {
    * any, is intentionally not awaited there).
    */
   async focusChecked(group: Exclude<LinkGroup, null>, symbol: string): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const timing: FocusTiming = { symbol, startedAt: performance.now(), sequence: ++this.focusTimingSequence };
+    this.focusTimings.set(group, timing);
     const ackP = this.onEcho(group, symbol);
     const ack = ackP ? await ackP : { status: "accepted" as const };
-    if (ack.status !== "accepted") return { ok: false, reason: ack.reason ?? "symbol rejected" };
+    if (ack.status !== "accepted") {
+      if (this.focusTimings.get(group)?.sequence === timing.sequence) this.focusTimings.delete(group);
+      return { ok: false, reason: ack.reason ?? "symbol rejected" };
+    }
     this.setLocal(group, symbol);
     this.bus.post({ group, symbol });
     return { ok: true };
@@ -67,6 +75,14 @@ export class LinkGroups {
 
   symbolFor(group: LinkGroup): string | undefined {
     return group ? this.focused.get(group) : undefined;
+  }
+
+  // Temporary cold-chart diagnostic. ChartPanel reads this after group focus
+  // changes so timing includes symbol validation and demand setup.
+  focusTimingFor(group: LinkGroup, symbol: string): FocusTiming | undefined {
+    if (!group) return undefined;
+    const timing = this.focusTimings.get(group);
+    return timing?.symbol === symbol ? timing : undefined;
   }
 
   // Venue focus is UI-only state — unlike symbol focus it does NOT echo to the

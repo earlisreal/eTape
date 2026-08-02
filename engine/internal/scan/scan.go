@@ -176,7 +176,9 @@ func (p *Poller) updatePool(now time.Time, rows []wsmsg.ScannerRow) {
 		p.feed.Release(scanDemandID(s))
 	}
 	for _, s := range d.Admitted {
-		p.feed.Ensure(feed.WatchDemand(scanDemandID(s), s))
+		demand := feed.WatchDemand(scanDemandID(s), s)
+		demand.BackgroundSeed = true
+		p.feed.Ensure(demand)
 	}
 	if p.backfill != nil {
 		for i, s := range d.Backfill {

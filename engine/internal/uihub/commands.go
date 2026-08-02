@@ -76,22 +76,24 @@ type watchlistCtl interface {
 // feedBox boxes Feed (hub.go): an interface value can't be atomically stored
 // directly, and boxing sidesteps nil-pointer-vs-nil-interface ambiguity on Load.
 type watchlistBox struct{ wl watchlistCtl }
+type knownSymbolBox struct{ fn func(string) bool }
 
 // commands.tester holds the venueTester dependency; it is named "tester"
 // rather than "probe" because *commands already has an unrelated probe
 // method (symbol-existence validation for EnsureSymbol/FocusGroup) — a
 // field and a method can't share a name on the same type.
 type commands struct {
-	ex        execDoer
-	cfg       configStore
-	ind       indicatorCtl
-	dem       demandCtl
-	va        venueAdmin
-	feed      func() Feed
-	tester    venueTester
-	restart   func()
-	startDemo func() error
-	wl        atomic.Pointer[watchlistBox]
+	ex          execDoer
+	cfg         configStore
+	ind         indicatorCtl
+	dem         demandCtl
+	va          venueAdmin
+	feed        func() Feed
+	knownSymbol atomic.Pointer[knownSymbolBox]
+	tester      venueTester
+	restart     func()
+	startDemo   func() error
+	wl          atomic.Pointer[watchlistBox]
 }
 
 func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, va venueAdmin, feed func() Feed, tester venueTester) *commands {
@@ -374,6 +376,9 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 // probe validates a symbol exists; returns "" to accept, else a block reason.
 // Skipped when the feed is nil (replay/tests) so those paths accept.
 func (cd *commands) probe(ctx context.Context, symbol string) string {
+	if known := cd.knownSymbol.Load(); known != nil && known.fn(symbol) {
+		return ""
+	}
 	f := cd.feed()
 	if f == nil {
 		return ""

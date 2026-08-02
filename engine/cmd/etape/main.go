@@ -547,6 +547,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		}
 	}
 	hub.SetFeed(feedForHub) // enables on-demand EnsureSymbol/ReleaseSymbol + FocusGroup probe
+	hub.SetKnownSymbol(st.HasArchivedSymbol)
 
 	var hubBackfill func(sym string, done func(ok bool))
 	if cfg.Backfill.Enabled || *demo {

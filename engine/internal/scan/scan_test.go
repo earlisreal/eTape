@@ -706,6 +706,9 @@ func TestUpdatePoolEnsuresWatchDemandsAndBackfills(t *testing.T) {
 	if len(sf.ensured[0].Subs) != 2 || sf.ensured[0].Focused {
 		t.Fatalf("pool must use the 2-slot non-focused watch shape: %+v", sf.ensured[0])
 	}
+	if !sf.ensured[0].BackgroundSeed {
+		t.Fatalf("scanner demand must use background seed lane: %+v", sf.ensured[0])
+	}
 	if !reflect.DeepEqual(backfilled, []string{"US.A", "US.B"}) {
 		t.Fatalf("backfilled=%v, want [US.A US.B]", backfilled)
 	}

@@ -3,13 +3,27 @@ package store
 import "github.com/earlisreal/eTape/engine/internal/feed"
 
 const (
-	bar10sUpsertSQL  = `INSERT OR REPLACE INTO bars_10s (symbol, ts, o, h, l, c, v) VALUES (?, ?, ?, ?, ?, ?, ?)`
-	bar1mUpsertSQL  = `INSERT OR REPLACE INTO bars_1m (symbol, ts, o, h, l, c, v) VALUES (?, ?, ?, ?, ?, ?, ?)`
-	dailyUpsertSQL  = `INSERT OR REPLACE INTO bars_daily (symbol, ts, o, h, l, c, v) VALUES (?, ?, ?, ?, ?, ?, ?)`
-	bars10sSelectSQL = `SELECT ts, o, h, l, c, v FROM bars_10s WHERE symbol=? AND ts>=? AND ts<=? ORDER BY ts`
-	bars1mSelectSQL = `SELECT ts, o, h, l, c, v FROM bars_1m WHERE symbol=? AND ts>=? AND ts<=? ORDER BY ts`
-	dailySelectSQL  = `SELECT ts, o, h, l, c, v FROM bars_daily WHERE symbol=? ORDER BY ts`
+	bar10sUpsertSQL        = `INSERT OR REPLACE INTO bars_10s (symbol, ts, o, h, l, c, v) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	bar1mUpsertSQL         = `INSERT OR REPLACE INTO bars_1m (symbol, ts, o, h, l, c, v) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	dailyUpsertSQL         = `INSERT OR REPLACE INTO bars_daily (symbol, ts, o, h, l, c, v) VALUES (?, ?, ?, ?, ?, ?, ?)`
+	bars10sSelectSQL       = `SELECT ts, o, h, l, c, v FROM bars_10s WHERE symbol=? AND ts>=? AND ts<=? ORDER BY ts`
+	bars1mSelectSQL        = `SELECT ts, o, h, l, c, v FROM bars_1m WHERE symbol=? AND ts>=? AND ts<=? ORDER BY ts`
+	recentBars1mSelectSQL  = `SELECT ts, o, h, l, c, v FROM bars_1m WHERE symbol=? ORDER BY ts DESC LIMIT ?`
+	recentBars10sSelectSQL = `SELECT ts, o, h, l, c, v FROM bars_10s WHERE symbol=? ORDER BY ts DESC LIMIT ?`
+	dailySelectSQL         = `SELECT ts, o, h, l, c, v FROM bars_daily WHERE symbol=? ORDER BY ts`
 )
+
+// HasArchivedSymbol is a fast positive-only existence check. Archived market
+// data proves a symbol was valid; false still requires live feed validation.
+func (s *Store) HasArchivedSymbol(symbol string) bool {
+	var exists int
+	err := s.db.QueryRow(`SELECT EXISTS(
+		SELECT 1 FROM bars_1m WHERE symbol=?
+		UNION ALL SELECT 1 FROM bars_10s WHERE symbol=?
+		UNION ALL SELECT 1 FROM bars_daily WHERE symbol=?
+	)`, symbol, symbol, symbol).Scan(&exists)
+	return err == nil && exists != 0
+}
 
 type barOp struct {
 	query string
@@ -40,6 +54,27 @@ func (s *Store) ReadBars10s(symbol string, fromMs, toMs int64) ([]feed.Bar, erro
 // ReadBars1m returns 1m bars in [fromMs, toMs], ascending.
 func (s *Store) ReadBars1m(symbol string, fromMs, toMs int64) ([]feed.Bar, error) {
 	return s.readBars(bars1mSelectSQL, symbol, fromMs, toMs)
+}
+
+// ReadRecentBars1m returns at most limit newest 1m bars, ascending. DESC LIMIT
+// lets SQLite stop after first-paint depth instead of scanning full archive.
+func (s *Store) ReadRecentBars1m(symbol string, limit int) ([]feed.Bar, error) {
+	return s.readRecentBars(recentBars1mSelectSQL, symbol, limit)
+}
+
+func (s *Store) ReadRecentBars10s(symbol string, limit int) ([]feed.Bar, error) {
+	return s.readRecentBars(recentBars10sSelectSQL, symbol, limit)
+}
+
+func (s *Store) readRecentBars(query, symbol string, limit int) ([]feed.Bar, error) {
+	bars, err := s.readBars(query, symbol, limit)
+	if err != nil {
+		return nil, err
+	}
+	for left, right := 0, len(bars)-1; left < right; left, right = left+1, right-1 {
+		bars[left], bars[right] = bars[right], bars[left]
+	}
+	return bars, nil
 }
 
 // ReadDailyBars returns all daily bars for a symbol, ascending.

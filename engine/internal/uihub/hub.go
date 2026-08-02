@@ -292,6 +292,14 @@ func (h *Hub) SetIndicators(i Indicators) { h.ind = i }
 // Safe to call once from boot; nil until then (replay/tests never call it).
 func (h *Hub) SetFeed(f Feed) { h.feedSlot.Store(&feedBox{f: f}) }
 
+// SetKnownSymbol installs a positive-only local archive lookup used to avoid
+// blocking chart switches on OpenD validation for previously seen symbols.
+func (h *Hub) SetKnownSymbol(fn func(string) bool) {
+	if fn != nil {
+		h.cmd.knownSymbol.Store(&knownSymbolBox{fn: fn})
+	}
+}
+
 func (h *Hub) feed() Feed {
 	if b := h.feedSlot.Load(); b != nil {
 		return b.f

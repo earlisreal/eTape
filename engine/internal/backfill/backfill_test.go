@@ -83,11 +83,18 @@ func (t *fakeTail) Tail1m(_ context.Context, _ string) ([]feed.Bar, error) {
 }
 
 type fakeSeeder struct {
-	mu          sync.Mutex
+	mu                   sync.Mutex
 	daily, hist, hist10s []feed.Bar
-	older       []feed.Bar
-	ticks       []feed.Tick
-	calls       []string
+	older                []feed.Bar
+	ticks                []feed.Tick
+	calls                []string
+	syncs                int
+}
+
+func (s *fakeSeeder) SyncHistory(string) {
+	s.mu.Lock()
+	s.syncs++
+	s.mu.Unlock()
 }
 
 func (s *fakeSeeder) SeedSessionTicks(_ string, t []feed.Tick) {
@@ -122,11 +129,11 @@ func (s *fakeSeeder) SeedOlder1m(_ string, b []feed.Bar) {
 }
 
 type fakeArchive struct {
-	mu            sync.Mutex
+	mu              sync.Mutex
 	daily, m1, m10s []feed.Bar
-	archivedDaily []feed.Bar
-	archived1m    []feed.Bar
-	archived10s   []feed.Bar
+	archivedDaily   []feed.Bar
+	archived1m      []feed.Bar
+	archived10s     []feed.Bar
 }
 
 func (a *fakeArchive) ReadDailyBars(_ string) ([]feed.Bar, error) { return a.daily, nil }
@@ -153,6 +160,22 @@ func (a *fakeArchive) ReadBars1m(_ string, fromMs, toMs int64) ([]feed.Bar, erro
 		}
 	}
 	return out, nil
+}
+
+func (a *fakeArchive) ReadRecentBars1m(_ string, limit int) ([]feed.Bar, error) {
+	start := len(a.m1) - limit
+	if start < 0 {
+		start = 0
+	}
+	return append([]feed.Bar(nil), a.m1[start:]...), nil
+}
+
+func (a *fakeArchive) ReadRecentBars10s(_ string, limit int) ([]feed.Bar, error) {
+	start := len(a.m10s) - limit
+	if start < 0 {
+		start = 0
+	}
+	return append([]feed.Bar(nil), a.m10s[start:]...), nil
 }
 func (a *fakeArchive) ArchiveBar10s(b feed.Bar) {
 	a.mu.Lock()

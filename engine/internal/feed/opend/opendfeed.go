@@ -32,12 +32,14 @@ type OpenDFeed struct {
 	bf  *backfill
 	clk clock.Clock
 
-	events chan feed.Event
-	seedq  chan seedJob
+	events          chan feed.Event
+	foregroundSeedq chan seedJob
+	backgroundSeedq chan seedJob
 
 	mu          sync.Mutex
 	fetched     map[string]time.Time // history-quota dedup window (30 days)
 	validated   map[string]struct{}  // process-lifetime positive existence cache
+	seedStates  map[seedKey]seedState
 	decodeFails uint64
 
 	// hbGroup coalesces concurrent HistoryBars calls for the same
@@ -47,17 +49,37 @@ type OpenDFeed struct {
 	// synchronization with each other; without this, both could race past
 	// the fetched-map check below before either updates it, each spending a
 	// real history-quota slot for what should be one fetch.
-	hbGroup singleflight.Group
+	hbGroup       singleflight.Group
+	validateGroup singleflight.Group
 }
 
 type seedJob struct {
+	symbol     string
+	subs       []feed.SubType
+	enqueuedAt time.Time
+	background bool
+	force      bool
+}
+
+type seedKey struct {
 	symbol string
-	subs   []feed.SubType
+	sub    feed.SubType
+}
+
+type seedState struct {
+	inFlight    bool
+	completedAt time.Time
 }
 
 // fetchDedupWindow mirrors moomoo's 30-day rule: re-requesting a symbol's
 // history within 30 days consumes no quota, so only new symbols are guarded.
 const fetchDedupWindow = 30 * 24 * time.Hour
+
+// seedDedupWindow collapses the burst of overlapping chart/ladder/tape
+// demands emitted when a linked symbol changes. Live pushes keep the stores
+// current after the first cache replay, so another replay seconds later only
+// adds OpenD latency and occupies an interactive worker.
+const seedDedupWindow = 2 * time.Second
 
 // NewOpenDFeed wires the adapter. Call Run to start it.
 func NewOpenDFeed(cli *Client, opt FeedOptions) *OpenDFeed {
@@ -74,12 +96,14 @@ func NewOpenDFeed(cli *Client, opt FeedOptions) *OpenDFeed {
 			Hysteresis:   opt.Hysteresis,
 			ExtendedTime: !opt.DisableExtendedTime,
 		}),
-		bf:        newBackfill(cli),
-		clk:       opt.Clock,
-		events:    make(chan feed.Event, opt.EventBuf),
-		seedq:     make(chan seedJob, 64),
-		fetched:   make(map[string]time.Time),
-		validated: make(map[string]struct{}),
+		bf:              newBackfill(cli),
+		clk:             opt.Clock,
+		events:          make(chan feed.Event, opt.EventBuf),
+		foregroundSeedq: make(chan seedJob, 64),
+		backgroundSeedq: make(chan seedJob, 64),
+		fetched:         make(map[string]time.Time),
+		validated:       make(map[string]struct{}),
+		seedStates:      make(map[seedKey]seedState),
 	}
 }
 
@@ -87,11 +111,48 @@ func (f *OpenDFeed) Events() <-chan feed.Event { return f.events }
 
 func (f *OpenDFeed) Ensure(d feed.Demand) {
 	f.sub.Ensure(d)
-	select {
-	case f.seedq <- seedJob{symbol: d.Symbol, subs: d.Subs}:
-	default:
-		slog.Warn("seed queue full; symbol will seed on next resync", "symbol", d.Symbol)
+	if len(d.Subs) == 0 {
+		return
 	}
+	lane := "foreground"
+	queue := f.foregroundSeedq
+	if d.BackgroundSeed {
+		lane = "background"
+		queue = f.backgroundSeedq
+	}
+	select {
+	case queue <- seedJob{symbol: d.Symbol, subs: d.Subs, enqueuedAt: f.clk.Now(), background: d.BackgroundSeed}:
+	default:
+		slog.Warn("seed queue full; symbol will seed on next resync", "symbol", d.Symbol, "lane", lane)
+	}
+}
+
+func (f *OpenDFeed) claimSeed(symbol string, sub feed.SubType, force bool) bool {
+	key := seedKey{symbol: symbol, sub: sub}
+	now := f.clk.Now()
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	state := f.seedStates[key]
+	if state.inFlight || (!force && !state.completedAt.IsZero() && now.Sub(state.completedAt) < seedDedupWindow) {
+		return false
+	}
+	state.inFlight = true
+	f.seedStates[key] = state
+	return true
+}
+
+func (f *OpenDFeed) finishSeed(symbol string, sub feed.SubType, success bool) {
+	key := seedKey{symbol: symbol, sub: sub}
+	f.mu.Lock()
+	state := f.seedStates[key]
+	state.inFlight = false
+	if success {
+		state.completedAt = f.clk.Now()
+	} else {
+		state.completedAt = time.Time{}
+	}
+	f.seedStates[key] = state
+	f.mu.Unlock()
 }
 
 func (f *OpenDFeed) Release(id string) { f.sub.Release(id) }
@@ -100,10 +161,13 @@ func (f *OpenDFeed) Release(id string) { f.sub.Release(id) }
 // subscription-manager goroutines. The caller runs Client.Run separately.
 func (f *OpenDFeed) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(5)
 	go func() { defer wg.Done(); f.sub.Run(ctx) }()
 	go func() { defer wg.Done(); f.pump(ctx) }()
-	go func() { defer wg.Done(); f.seedWorker(ctx) }()
+	for range 2 {
+		go func() { defer wg.Done(); f.seedWorker(ctx, f.foregroundSeedq) }()
+	}
+	go func() { defer wg.Done(); f.seedWorker(ctx, f.backgroundSeedq) }()
 	f.stateLoop(ctx)
 	wg.Wait()
 	return ctx.Err()
@@ -156,7 +220,7 @@ func (f *OpenDFeed) stateLoop(ctx context.Context) {
 					continue // client will cycle the connection; next ConnUp retries
 				}
 				for symbol, subs := range f.sub.ActiveSymbols() {
-					f.seed(ctx, symbol, subs)
+					f.seed(ctx, seedJob{symbol: symbol, subs: subs, enqueuedAt: f.clk.Now(), force: true})
 				}
 				f.emit(ctx, feed.ResyncedEvent{})
 			}
@@ -164,13 +228,13 @@ func (f *OpenDFeed) stateLoop(ctx context.Context) {
 	}
 }
 
-func (f *OpenDFeed) seedWorker(ctx context.Context) {
+func (f *OpenDFeed) seedWorker(ctx context.Context, queue <-chan seedJob) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case job := <-f.seedq:
-			f.seed(ctx, job.symbol, job.subs)
+		case job := <-queue:
+			f.seed(ctx, job)
 		}
 	}
 }
@@ -214,12 +278,16 @@ func seedRetry[T any](ctx context.Context, clk clock.Clock, fn func() (T, error)
 }
 
 // seed replays OpenD's local caches as Seed events, per subtype, in a fixed
-// order (bars, ticks, book, quote). Each read goes through seedRetry: it's a
+// order (bars, book, ticks, quote). Each read goes through seedRetry: it's a
 // quota-free real-time-cache lookup that can lose the subscribe-ack race (see
 // seedRetryAttempts above). Failures that survive every retry log and
 // continue — a partial seed beats none, and the md core's dedup makes
 // overlap harmless.
-func (f *OpenDFeed) seed(ctx context.Context, symbol string, subs []feed.SubType) {
+func (f *OpenDFeed) seed(ctx context.Context, job seedJob) {
+	symbol, subs := job.symbol, job.subs
+	startedAt := f.clk.Now()
+	queueWait := startedAt.Sub(job.enqueuedAt)
+	var barsDuration, bookDuration, ticksDuration, quoteDuration time.Duration
 	has := func(want feed.SubType) bool {
 		for _, s := range subs {
 			if s == want {
@@ -228,46 +296,79 @@ func (f *OpenDFeed) seed(ctx context.Context, symbol string, subs []feed.SubType
 		}
 		return false
 	}
-	if has(feed.SubKL1m) {
+	// Claim every requested subtype before starting I/O. Otherwise a duplicate
+	// worker can skip bars, claim ticks, and occupy the second foreground worker
+	// while the focused job carrying book waits behind it.
+	claimed := make(map[feed.SubType]bool, len(subs))
+	for _, sub := range []feed.SubType{feed.SubKL1m, feed.SubBook, feed.SubTicker, feed.SubQuote} {
+		if has(sub) {
+			claimed[sub] = f.claimSeed(symbol, sub, job.force)
+		}
+	}
+	if claimed[feed.SubKL1m] {
+		start := f.clk.Now()
 		bars, err := seedRetry(ctx, f.clk, func() ([]feed.Bar, error) {
 			return f.bf.cachedBars1m(ctx, symbol, maxAPIRows)
 		})
+		barsDuration = f.clk.Now().Sub(start)
+		f.finishSeed(symbol, feed.SubKL1m, err == nil)
 		if err != nil {
 			slog.Warn("seed bars1m failed", "symbol", symbol, "err", err)
 		} else if len(bars) > 0 {
 			f.emit(ctx, feed.Bars1mEvent{Bars: bars, Seed: true})
 		}
 	}
-	if has(feed.SubTicker) {
-		ticks, err := seedRetry(ctx, f.clk, func() ([]feed.Tick, error) {
-			return f.bf.recentTicks(ctx, symbol, maxAPIRows)
-		})
-		if err != nil {
-			slog.Warn("seed ticks failed", "symbol", symbol, "err", err)
-		} else if len(ticks) > 0 {
-			f.emit(ctx, feed.TicksEvent{Ticks: ticks, Seed: true})
-		}
-	}
-	if has(feed.SubBook) {
+	if claimed[feed.SubBook] {
+		start := f.clk.Now()
 		book, err := seedRetry(ctx, f.clk, func() (feed.Book, error) {
 			return f.bf.bookSnapshot(ctx, symbol)
 		})
+		bookDuration = f.clk.Now().Sub(start)
+		f.finishSeed(symbol, feed.SubBook, err == nil)
 		if err != nil {
 			slog.Warn("seed book failed", "symbol", symbol, "err", err)
 		} else {
 			f.emit(ctx, feed.BookEvent{Book: book, Seed: true})
 		}
 	}
-	if has(feed.SubQuote) {
+	if claimed[feed.SubTicker] {
+		start := f.clk.Now()
+		ticks, err := seedRetry(ctx, f.clk, func() ([]feed.Tick, error) {
+			return f.bf.recentTicks(ctx, symbol, maxAPIRows)
+		})
+		ticksDuration = f.clk.Now().Sub(start)
+		f.finishSeed(symbol, feed.SubTicker, err == nil)
+		if err != nil {
+			slog.Warn("seed ticks failed", "symbol", symbol, "err", err)
+		} else if len(ticks) > 0 {
+			f.emit(ctx, feed.TicksEvent{Ticks: ticks, Seed: true})
+		}
+	}
+	if claimed[feed.SubQuote] {
+		start := f.clk.Now()
 		q, err := seedRetry(ctx, f.clk, func() (feed.Quote, error) {
 			return f.bf.quoteSnapshot(ctx, symbol)
 		})
+		quoteDuration = f.clk.Now().Sub(start)
+		f.finishSeed(symbol, feed.SubQuote, err == nil)
 		if err != nil {
 			slog.Warn("seed quote failed", "symbol", symbol, "err", err)
 		} else {
 			f.emit(ctx, feed.QuoteEvent{Quote: q, Seed: true})
 		}
 	}
+	if barsDuration == 0 && bookDuration == 0 && ticksDuration == 0 && quoteDuration == 0 {
+		return
+	}
+	log := slog.Info
+	lane := "foreground"
+	if job.background {
+		log = slog.Debug
+		lane = "background"
+	}
+	log("seed timing", "symbol", symbol, "lane", lane,
+		"queueWait", queueWait, "bars", barsDuration, "book", bookDuration, "ticks", ticksDuration,
+		"quote", quoteDuration, "total", f.clk.Now().Sub(job.enqueuedAt))
 }
 
 // HistoryBars spends history quota; guard new symbols against exhaustion.
@@ -343,15 +444,20 @@ func (f *OpenDFeed) Validate(ctx context.Context, symbol string) error {
 	if ok {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
-	defer cancel()
-	if err := f.bf.securityExists(ctx, symbol); err != nil {
-		return err
-	}
-	f.mu.Lock()
-	f.validated[symbol] = struct{}{}
-	f.mu.Unlock()
-	return nil
+	start := time.Now()
+	_, err, shared := f.validateGroup.Do(symbol, func() (any, error) {
+		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
+		defer cancel()
+		if err := f.bf.securityExists(probeCtx, symbol); err != nil {
+			return nil, err
+		}
+		f.mu.Lock()
+		f.validated[symbol] = struct{}{}
+		f.mu.Unlock()
+		return struct{}{}, nil
+	})
+	slog.Info("symbol validation timing", "symbol", symbol, "elapsed", time.Since(start).Round(time.Millisecond), "shared", shared, "err", err)
+	return err
 }
 
 var _ feed.Feed = (*OpenDFeed)(nil)

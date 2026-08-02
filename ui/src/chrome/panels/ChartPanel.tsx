@@ -420,8 +420,16 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       void commands.sendQuery("QueryFills", { symbol: sym, fromMs: 0, toMs: Date.now() })
         .then((payload) => { stores.fills.ingest((payload as Parameters<typeof stores.fills.ingest>[0]) ?? []); });
     };
+    let pendingFirstPaint: { symbol: string; timeframe: string; startedAt: number; sequence: number } | null = null;
+    let lastFirstPaintSequence = 0;
+    let firstPaintLogFrame: number | null = null;
     const applySymbol = () => {
       currentSymbol = linkGroups.symbolFor(groupRef.current) ?? symbol;
+      const timing = linkGroups.focusTimingFor(groupRef.current, currentSymbol);
+      if (timing && timing.sequence > lastFirstPaintSequence) {
+        pendingFirstPaint = { ...timing, timeframe: tfRef.current };
+        lastFirstPaintSequence = timing.sequence;
+      }
       viewportGeneration++;
       olderHistory.reset();
       setAllExhausted(false);
@@ -522,6 +530,20 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       },
       paint: () => {
         controller.sync();
+        const paintedBars = stores.bars.series(currentSymbol, tfRef.current);
+        if (pendingFirstPaint && pendingFirstPaint.symbol === currentSymbol && pendingFirstPaint.timeframe === tfRef.current && paintedBars.length > 0) {
+          const timing = pendingFirstPaint;
+          pendingFirstPaint = null;
+          firstPaintLogFrame = requestAnimationFrame(() => {
+            firstPaintLogFrame = null;
+            console.info("chart first bars painted", {
+              symbol: timing.symbol,
+              timeframe: timing.timeframe,
+              bars: paintedBars.length,
+              elapsedMs: Math.round((performance.now() - timing.startedAt) * 10) / 10,
+            });
+          });
+        }
         // Diagnostic-only (Task 6): how many times this sync() actually paid the
         // Intl.DateTimeFormat cost (buildDaySegment) versus hitting the cached day
         // segment. Guard here, not just inside recordScan: skipping the call avoids
@@ -568,6 +590,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       // the schedulers above so it doesn't fire after this chart unmounts.
       if (legendFrame !== null) cancelAnimationFrame(legendFrame);
       if (selectionFrame !== null) cancelAnimationFrame(selectionFrame);
+      if (firstPaintLogFrame !== null) cancelAnimationFrame(firstPaintLogFrame);
       interaction.dispose(); controller.dispose(); controllerRef.current = null; interactionRef.current = null;
       queryViewportRef.current = null;
     };

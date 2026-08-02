@@ -75,6 +75,29 @@ func TestTapeDedupsBySeqWithinDay(t *testing.T) {
 	}
 }
 
+func TestFeedSeedsEmitSnapshotsAndHistoryReady(t *testing.T) {
+	c, drain := runCore(t)
+	c.Feed(feed.Bars1mEvent{Seed: true, Bars: []feed.Bar{
+		{Symbol: "US.AAPL", BucketMs: t0Ms, O: 100, H: 101, L: 99, C: 100.5, Volume: 10},
+	}})
+	c.Feed(feed.TicksEvent{Seed: true, Ticks: []feed.Tick{
+		tick(1, 0, 100, 10, feed.Buy), tick(2, 11_000, 101, 5, feed.Sell),
+	}})
+	var bars1m, bars10s, ready bool
+	for _, update := range drain() {
+		switch value := update.(type) {
+		case BarSnapshot:
+			bars1m = bars1m || value.TF == session.TF1m
+			bars10s = bars10s || value.TF == session.TF10s
+		case HistoryReadyUpdate:
+			ready = ready || value.Symbol == "US.AAPL"
+		}
+	}
+	if !bars1m || !bars10s || !ready {
+		t.Fatalf("seed delivery bars1m=%v bars10s=%v ready=%v", bars1m, bars10s, ready)
+	}
+}
+
 func TestBookAndQuoteReplaceAndEmit(t *testing.T) {
 	c, drain := runCore(t)
 	c.Feed(feed.BookEvent{Book: feed.Book{Symbol: "US.AAPL", Bids: []feed.BookLevel{{Price: 100, Volume: 5}}}})
