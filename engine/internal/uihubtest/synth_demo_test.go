@@ -234,68 +234,6 @@ func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndMoversConsistent(t *testing.T) 
 	}
 }
 
-// waitBarSnapshots reads WS frames until it has seen a "md.bars" snapshot
-// for symbol at every timeframe in want (or ctx/the deadline runs out),
-// returning each timeframe's bar payloads keyed by timeframe string. It
-// exists because a plain waitFrame call for one timeframe would silently
-// discard a same-connection snapshot for the OTHER requested timeframe if it
-// happens to arrive first -- SeedDaily and SeedHistory1m (md/core.go) each
-// emit their own independent BarSnapshot, in no guaranteed relative order.
-func waitBarSnapshots(t *testing.T, ctx context.Context, c *websocket.Conn, symbol string, want []string) map[string][]map[string]any {
-	t.Helper()
-	rctx, cancel := context.WithTimeout(ctx, 6*time.Second)
-	defer cancel()
-
-	got := map[string][]map[string]any{}
-	pending := map[string]bool{}
-	for _, tf := range want {
-		pending[tf] = true
-	}
-
-	for len(pending) > 0 {
-		_, data, err := c.Read(rctx)
-		if err != nil {
-			t.Fatalf("read frame (still waiting on timeframes %v for %s): %v", keysOf(pending), symbol, err)
-		}
-		var m map[string]any
-		if json.Unmarshal(data, &m) != nil {
-			continue
-		}
-		if m["kind"] != "snapshot" || m["topic"] != string(wsmsg.TopicBars) {
-			continue
-		}
-		bars, _ := m["payload"].([]any)
-		if len(bars) == 0 {
-			continue
-		}
-		first, _ := bars[0].(map[string]any)
-		if first == nil || first["symbol"] != symbol {
-			continue
-		}
-		tf, _ := first["timeframe"].(string)
-		if !pending[tf] {
-			continue
-		}
-		out := make([]map[string]any, 0, len(bars))
-		for _, b := range bars {
-			if bm, ok := b.(map[string]any); ok {
-				out = append(out, bm)
-			}
-		}
-		got[tf] = out
-		delete(pending, tf)
-	}
-	return got
-}
-
-func keysOf(m map[string]bool) []string {
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	return out
-}
-
 // TestSynthDemoBoot_SimFillsPriceAgainstSyntheticBook is Task 11's third
 // checklist item: a sim order fills against the LIVE synthetic book via the
 // book-walk path, mirroring replay_smoke_test.go's own

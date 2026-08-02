@@ -295,7 +295,10 @@ func main() {
 			body, _ := proto.Marshal(reqKA)
 			serno := serial
 			serial++
-			send(protoKeepAlive, serno, body)
+			if err := send(protoKeepAlive, serno, body); err != nil {
+				fmt.Fprintf(os.Stderr, "\nkeepalive: %v\n", err)
+				return
+			}
 		case <-sumTicker.C:
 			ticks := atomic.SwapInt64(&tickCount, 0)
 			totalTicks += ticks

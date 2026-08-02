@@ -267,8 +267,7 @@ func (a *fakeArchive) ArchiveDaily(b feed.Bar) {
 	a.archivedDaily = append(a.archivedDaily, b)
 }
 
-func bar(ms int64) feed.Bar   { return feed.Bar{Symbol: "US.AAPL", BucketMs: ms, C: 1} }
-func tick(ms int64) feed.Tick { return feed.Tick{Symbol: "US.AAPL", TsMs: ms, Price: 1} }
+func bar(ms int64) feed.Bar { return feed.Bar{Symbol: "US.AAPL", BucketMs: ms, C: 1} }
 
 // chain wraps fetchers as a named Source chain for New.
 func chain(fs ...HistFetcher) []Source {

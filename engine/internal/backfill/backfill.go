@@ -386,7 +386,7 @@ func (o *Orchestrator) Backfill(ctx context.Context, symbol string) error {
 	o.fill1m(ctx, symbol, from1m, now, tailOldestMs, tailOK)
 	slog.Debug("backfill: fill1m done", "symbol", symbol, "elapsed", time.Since(t2).Round(time.Millisecond))
 	t3 := time.Now()
-	err := o.fillDaily(ctx, symbol, o.dailyFrom(now), now.Add(-24*time.Hour))
+	err := o.fillDaily(ctx, symbol, now.Add(-24*time.Hour))
 	slog.Debug("backfill: fillDaily done", "symbol", symbol, "elapsed", time.Since(t3).Round(time.Millisecond), "total", time.Since(t0).Round(time.Millisecond))
 	o.noteBackfilled(symbol, from1m)
 	o.syncHistory(symbol)
@@ -570,7 +570,8 @@ func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.
 // fillDaily walks the daily chain and seeds the first non-empty result. It
 // returns nil once any provider served (even with zero bars — no data is not a
 // failure), otherwise the last error, so the uihub knows whether to re-arm.
-func (o *Orchestrator) fillDaily(ctx context.Context, symbol string, from, to time.Time) error {
+func (o *Orchestrator) fillDaily(ctx context.Context, symbol string, to time.Time) error {
+	from := dailyFloor
 	// Seed complete archive first, then synchronize only missing tail. Empty DB
 	// starts at 2016-01-01; internal holes remain separate repair work.
 	if daily, err := o.archive.ReadDailyBars(symbol); err == nil && len(daily) > 0 {
@@ -582,8 +583,6 @@ func (o *Orchestrator) fillDaily(ctx context.Context, symbol string, from, to ti
 			slog.Info("backfill: daily current in archive", "symbol", symbol, "bars", len(daily))
 			return nil
 		}
-	} else {
-		from = dailyFloor
 	}
 
 	bars, served, err := walkChain(ctx, symbol, from, to, o.daily, dailyBars)
@@ -684,7 +683,7 @@ func (o *Orchestrator) loadOlder(ctx context.Context, symbol string, requiredSta
 			return olderResult{exhausted: true}, nil
 		}
 		o.mu.Lock()
-		cur, _ = o.oldest1m[symbol]
+		cur = o.oldest1m[symbol]
 		o.mu.Unlock()
 		// Duplicate covered demand: already loaded to an older/equal start.
 		if cur > 0 && from.UnixMilli() >= cur {
@@ -693,7 +692,7 @@ func (o *Orchestrator) loadOlder(ctx context.Context, symbol string, requiredSta
 	} else {
 		// Watermark-driven: one chunk older than the current watermark.
 		o.mu.Lock()
-		cur, _ = o.oldest1m[symbol]
+		cur = o.oldest1m[symbol]
 		o.mu.Unlock()
 		if cur == 0 {
 			return olderResult{}, fmt.Errorf("load older: no backfill watermark for %s", symbol)
