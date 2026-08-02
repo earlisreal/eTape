@@ -56,7 +56,6 @@ const MONITORING_LAYOUT: SerializedDockview = {
           size: 533,
           data: [
             { type: "leaf", size: 348, data: { id: "m-scanner", views: ["m-scanner"], activeView: "m-scanner" } },
-            { type: "leaf", size: 290, data: { id: "m-movers", views: ["m-movers"], activeView: "m-movers" } },
             { type: "leaf", size: 262, data: { id: "m-news", views: ["m-news"], activeView: "m-news" } },
           ],
         },
@@ -72,7 +71,6 @@ const MONITORING_LAYOUT: SerializedDockview = {
     "m-chart-blue": { id: "m-chart-blue", contentComponent: "m-chart-blue", title: "chart" },
     "m-chart-yellow": { id: "m-chart-yellow", contentComponent: "m-chart-yellow", title: "chart" },
     "m-scanner": { id: "m-scanner", contentComponent: "m-scanner", title: "scanner" },
-    "m-movers": { id: "m-movers", contentComponent: "m-movers", title: "movers" },
     "m-news": { id: "m-news", contentComponent: "m-news", title: "news" },
   },
   activeGroup: "m-chart-red",
@@ -104,7 +102,7 @@ export const TRADING_LAYOUT: SerializedDockview = {
               type: "branch",
               data: [
                 { type: "leaf", data: { views: ["watchlist-75d05981"], activeView: "watchlist-75d05981", id: "3", hideHeader: true }, size: 305 },
-                { type: "leaf", data: { views: ["movers-51fd77fe", "news-eb65ba23"], activeView: "news-eb65ba23", id: "4" }, size: 365 },
+                { type: "leaf", data: { views: ["scanner-51fd77fe", "news-eb65ba23"], activeView: "news-eb65ba23", id: "4" }, size: 365 },
                 { type: "leaf", data: { views: ["t-chart-10s"], activeView: "t-chart-10s", id: "t-chart-10s", hideHeader: true }, size: 719 },
               ],
               size: 446,
@@ -139,7 +137,7 @@ export const TRADING_LAYOUT: SerializedDockview = {
     "chart-977336c7": { id: "chart-977336c7", contentComponent: "chart-977336c7", title: "Chart" },
     "t-chart-1m": { id: "t-chart-1m", contentComponent: "t-chart-1m", title: "chart" },
     "watchlist-75d05981": { id: "watchlist-75d05981", contentComponent: "watchlist-75d05981", title: "Watchlist" },
-    "movers-51fd77fe": { id: "movers-51fd77fe", contentComponent: "movers-51fd77fe", title: "Movers" },
+    "scanner-51fd77fe": { id: "scanner-51fd77fe", contentComponent: "scanner-51fd77fe", title: "Scanner" },
     "news-eb65ba23": { id: "news-eb65ba23", contentComponent: "news-eb65ba23", title: "News" },
     "t-chart-10s": { id: "t-chart-10s", contentComponent: "t-chart-10s", title: "chart" },
     "t-dom": { id: "t-dom", contentComponent: "t-dom", title: "ladder" },
@@ -153,15 +151,14 @@ export const TRADING_LAYOUT: SerializedDockview = {
 export const PRESETS: Preset[] = [
   {
     id: "monitoring", name: "Monitoring", thumb: "monitoring",
-    description: "Chart wall + scanner, movers, news. Watching the market, not trading it.",
+    description: "Chart wall + scanner + news. Watching market, not trading it.",
     build: () => ({
       panels: [
         chart("m-chart-red", "US.TSLA", "1m", "red"),
         chart("m-chart-green", "US.NVDA", "1m", "green"),
         chart("m-chart-blue", "US.AAPL", "1m", "blue"),
         chart("m-chart-yellow", "US.SPY", "1m", "yellow"),
-        { id: "m-scanner", panelId: "scanner", group: null, settings: { thresholds: { minChangePct: 10, floatCapShares: 20_000_000, minVolume: 100_000 } } },
-        { id: "m-movers", panelId: "movers", group: null, settings: { thresholds: { minChangePct: 5, floatCapShares: null, minVolume: 500_000 } } },
+        { id: "m-scanner", panelId: "scanner", group: null, settings: {} },
         { id: "m-news", panelId: "news", group: "blue", settings: {} },
       ],
       layout: MONITORING_LAYOUT,
@@ -169,7 +166,7 @@ export const PRESETS: Preset[] = [
   },
   {
     id: "trading", name: "Trading", thumb: "trading",
-    description: "Focused charts + DOM, tape, ticket, positions, watchlist, movers, news. The execution seat.",
+    description: "Focused charts + DOM, tape, ticket, positions, watchlist, scanner, news. Execution seat.",
     build: () => ({
       panels: [
         {
@@ -216,7 +213,7 @@ export const PRESETS: Preset[] = [
             drawingRailPos: { x: 298.375, y: 448 },
           },
         },
-        { id: "movers-51fd77fe", panelId: "movers", group: "blue", settings: {} },
+        { id: "scanner-51fd77fe", panelId: "scanner", group: "blue", settings: {} },
         { id: "news-eb65ba23", panelId: "news", group: "blue", settings: {} },
         { id: "watchlist-75d05981", panelId: "watchlist", group: "blue", settings: {} },
       ],

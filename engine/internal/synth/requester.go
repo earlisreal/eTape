@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"strings"
 	"time"
 
@@ -101,13 +102,13 @@ func (r *Requester) Request(ctx context.Context, protoID uint32, req proto.Messa
 	var resp proto.Message
 	switch protoID {
 	case opend.ProtoQotGetUSPreMarketRank:
-		resp = buildPreMarketRankResponse(r.gen)
+		resp = buildPreMarketRankResponse(r.gen, req)
 	case opend.ProtoQotGetTopMoversRank:
-		resp = buildTopMoversRankResponse(r.gen)
+		resp = buildTopMoversRankResponse(r.gen, req)
 	case opend.ProtoQotGetUSAfterHoursRank:
-		resp = buildAfterHoursRankResponse(r.gen)
+		resp = buildAfterHoursRankResponse(r.gen, req)
 	case opend.ProtoQotGetUSOvernightRank:
-		resp = buildOvernightRankResponse(r.gen)
+		resp = buildOvernightRankResponse(r.gen, req)
 	case opend.ProtoQotGetStaticInfo:
 		resp = buildStaticInfoResponse(r.gen, req)
 	case opend.ProtoQotGetSecuritySnapshot:
@@ -170,8 +171,25 @@ func genCodeOf(wire string) string {
 // Security + this session's change-ratio/price/volume triple. Rank rows
 // never carry float/name/turnover (scan.go gets float separately via 3203).
 
-func buildPreMarketRankResponse(g *Generator) *rankpb.Response {
+func rankRequestRows(g *Generator, dir, count int32) []RankRow {
 	rows := g.RankRows()
+	if dir == 1 {
+		slices.Reverse(rows)
+	}
+	if count > 0 && int(count) < len(rows) {
+		rows = rows[:count]
+	}
+	return rows
+}
+
+func buildPreMarketRankResponse(g *Generator, message ...proto.Message) *rankpb.Response {
+	var dir, count int32
+	if len(message) > 0 {
+		if r, ok := message[0].(*rankpb.Request); ok {
+			dir, count = r.GetC2S().GetSortDir(), r.GetC2S().GetCount()
+		}
+	}
+	rows := rankRequestRows(g, dir, count)
 	items := make([]*rankpb.PreMarketRankItem, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, &rankpb.PreMarketRankItem{
@@ -184,8 +202,14 @@ func buildPreMarketRankResponse(g *Generator) *rankpb.Response {
 	return &rankpb.Response{RetType: proto.Int32(0), S2C: &rankpb.S2C{DataList: items}}
 }
 
-func buildTopMoversRankResponse(g *Generator) *tmrpb.Response {
-	rows := g.RankRows()
+func buildTopMoversRankResponse(g *Generator, message ...proto.Message) *tmrpb.Response {
+	var dir, count int32
+	if len(message) > 0 {
+		if r, ok := message[0].(*tmrpb.Request); ok {
+			dir, count = r.GetC2S().GetSortDir(), r.GetC2S().GetCount()
+		}
+	}
+	rows := rankRequestRows(g, dir, count)
 	items := make([]*tmrpb.TopMoversRankItem, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, &tmrpb.TopMoversRankItem{
@@ -198,8 +222,14 @@ func buildTopMoversRankResponse(g *Generator) *tmrpb.Response {
 	return &tmrpb.Response{RetType: proto.Int32(0), S2C: &tmrpb.S2C{DataList: items}}
 }
 
-func buildAfterHoursRankResponse(g *Generator) *ahpb.Response {
-	rows := g.RankRows()
+func buildAfterHoursRankResponse(g *Generator, message ...proto.Message) *ahpb.Response {
+	var dir, count int32
+	if len(message) > 0 {
+		if r, ok := message[0].(*ahpb.Request); ok {
+			dir, count = r.GetC2S().GetSortDir(), r.GetC2S().GetCount()
+		}
+	}
+	rows := rankRequestRows(g, dir, count)
 	items := make([]*ahpb.AfterHoursRankItem, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, &ahpb.AfterHoursRankItem{
@@ -212,8 +242,14 @@ func buildAfterHoursRankResponse(g *Generator) *ahpb.Response {
 	return &ahpb.Response{RetType: proto.Int32(0), S2C: &ahpb.S2C{DataList: items}}
 }
 
-func buildOvernightRankResponse(g *Generator) *onpb.Response {
-	rows := g.RankRows()
+func buildOvernightRankResponse(g *Generator, message ...proto.Message) *onpb.Response {
+	var dir, count int32
+	if len(message) > 0 {
+		if r, ok := message[0].(*onpb.Request); ok {
+			dir, count = r.GetC2S().GetSortDir(), r.GetC2S().GetCount()
+		}
+	}
+	rows := rankRequestRows(g, dir, count)
 	items := make([]*onpb.OvernightRankItem, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, &onpb.OvernightRankItem{

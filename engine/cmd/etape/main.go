@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -896,6 +897,13 @@ type demandFeeder interface {
 // rather than a real subscription budget, so tracking it would be noise.
 func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, wl *watchlist.List, hasTZ bool, mmProbe rttProber, alpacaProbe rttProber, backfillOne func(string), startQuota bool, scanWG *sync.WaitGroup) {
 	scanPoller := scan.New(cfg.Scan, r, hub, clk, demand, backfillOne)
+	if raw, ok, err := st.GetConfig("scanner.filters.v1"); err == nil && ok {
+		var saved wsmsg.ScannerFilters
+		if json.Unmarshal([]byte(raw), &saved) == nil && scan.ValidateFilters(saved) == nil {
+			_ = scanPoller.SetFilters(saved)
+		}
+	}
+	hub.SetScanner(scanPoller)
 	symbols := func() []string {
 		return newsSymbols(scanPoller.PoolSymbols(), hub.ActiveDemandSymbols())
 	}

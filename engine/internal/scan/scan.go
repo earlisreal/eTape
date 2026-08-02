@@ -12,7 +12,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -79,11 +81,57 @@ type Poller struct {
 	otc      map[string]bool            // symbol -> resolved exchange type (true = OTC/Pink); absent = unknown
 	seen     map[string]map[string]bool // session -> symbol -> seen
 	seenDay  int64                      // ET day of the current seen-sets + float cache
+	mu       sync.RWMutex
+	filters  wsmsg.ScannerFilters
+	baseline bool
+	poke     chan struct{}
 }
 
 func New(cfg config.Scan, r requester, pub Publisher, clk clock.Clock, feed demandFeed, backfill func(string)) *Poller {
+	filters := Defaults(cfg)
 	return &Poller{cfg: cfg, r: r, pub: pub, clk: clk, feed: feed, backfill: backfill, pool: NewPool(),
-		floats: map[string]floatEntry{}, otc: map[string]bool{}, seen: map[string]map[string]bool{}}
+		floats: map[string]floatEntry{}, otc: map[string]bool{}, seen: map[string]map[string]bool{}, filters: filters, baseline: true, poke: make(chan struct{}, 1)}
+}
+
+func Defaults(cfg config.Scan) wsmsg.ScannerFilters {
+	var cap *float64
+	if cfg.MaxFloatShares > 0 {
+		v := cfg.MaxFloatShares
+		cap = &v
+	}
+	return wsmsg.ScannerFilters{Mode: "gainers", MinChangePct: cfg.MinChangePct, MaxFloatShares: cap, MinVolume: float64(cfg.MinVolume), FloatUnit: "M", VolumeUnit: "K"}
+}
+
+func ValidateFilters(f wsmsg.ScannerFilters) error {
+	if f.Mode != "gainers" && f.Mode != "losers" {
+		return fmt.Errorf("invalid mode")
+	}
+	if (f.FloatUnit != "K" && f.FloatUnit != "M") || (f.VolumeUnit != "K" && f.VolumeUnit != "M") {
+		return fmt.Errorf("invalid unit")
+	}
+	if math.IsNaN(f.MinChangePct) || math.IsInf(f.MinChangePct, 0) || f.MinChangePct < 0 || math.IsNaN(f.MinVolume) || math.IsInf(f.MinVolume, 0) || f.MinVolume < 0 {
+		return fmt.Errorf("invalid numeric filter")
+	}
+	if f.MaxFloatShares != nil && (math.IsNaN(*f.MaxFloatShares) || math.IsInf(*f.MaxFloatShares, 0) || *f.MaxFloatShares < 0) {
+		return fmt.Errorf("invalid float cap")
+	}
+	return nil
+}
+
+func (p *Poller) Filters() wsmsg.ScannerFilters { p.mu.RLock(); defer p.mu.RUnlock(); return p.filters }
+func (p *Poller) SetFilters(f wsmsg.ScannerFilters) error {
+	if err := ValidateFilters(f); err != nil {
+		return err
+	}
+	p.mu.Lock()
+	p.filters = f
+	p.baseline = true
+	p.mu.Unlock()
+	select {
+	case p.poke <- struct{}{}:
+	default:
+	}
+	return nil
 }
 
 func (p *Poller) Run(ctx context.Context) error {
@@ -105,6 +153,8 @@ func (p *Poller) Run(ctx context.Context) error {
 			}
 			last = now
 			p.pollOnce(ctx, now)
+		case <-p.poke:
+			p.pollOnce(ctx, p.clk.Now())
 		}
 	}
 }
@@ -132,8 +182,9 @@ func sessionKey(phase session.Phase) string {
 }
 
 func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
+	filters := p.Filters()
 	phase := session.PhaseAt(now)
-	items, err := p.fetchRank(ctx, phase)
+	items, err := p.fetchRank(ctx, phase, filters.Mode)
 	if err != nil {
 		slog.Warn("scan: rank fetch failed", "err", err)
 		return // transient; next tick retries
@@ -142,18 +193,35 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 	p.resolveExch(ctx, items) // populate the exchange-type cache before dropping OTC
 	items = dropOTC(items, p.otc)
 	p.resolveFloats(ctx, items) // populate the float cache before filtering
-	rows := rankRows(items, p.floats, p.cfg)
+	rows := rankRowsFiltered(items, p.floats, filters)
+	if !sameFilters(filters, p.Filters()) {
+		return // SetFilters queued a fresh poll; never publish stale authoritative filters.
+	}
 	p.updatePool(now, rows)
 	sess := sessionKey(phase)
+	p.mu.Lock()
+	baseline := p.baseline
+	p.baseline = false
+	p.mu.Unlock()
 	p.pub.Publish(wsmsg.TopicScannerRank, sess, wsmsg.ScannerRankPayload{
 		RefreshedAt: p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
-		Rows:        rows,
+		Rows:        rows, Filters: filters, Baseline: baseline,
 	})
 	for _, sym := range p.newHits(sess, rows) {
 		p.pub.Publish(wsmsg.TopicScannerHit, sess, wsmsg.ScanHitPayload{
 			Symbol: sym, At: p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
 		})
 	}
+}
+
+func sameFilters(a, b wsmsg.ScannerFilters) bool {
+	if a.Mode != b.Mode || a.MinChangePct != b.MinChangePct || a.MinVolume != b.MinVolume || a.FloatUnit != b.FloatUnit || a.VolumeUnit != b.VolumeUnit {
+		return false
+	}
+	if a.MaxFloatShares == nil || b.MaxFloatShares == nil {
+		return a.MaxFloatShares == nil && b.MaxFloatShares == nil
+	}
+	return *a.MaxFloatShares == *b.MaxFloatShares
 }
 
 func scanDemandID(symbol string) string { return "scan:" + symbol }
@@ -231,22 +299,26 @@ func dropOTC(items []rankItem, otc map[string]bool) []rankItem {
 //   - bad & cap>0: drop; bad & cap==0: include, float blank
 //   - absent (transient): include, float blank
 func rankRows(items []rankItem, floats map[string]floatEntry, cfg config.Scan) []wsmsg.ScannerRow {
+	return rankRowsFiltered(items, floats, Defaults(cfg))
+}
+
+func rankRowsFiltered(items []rankItem, floats map[string]floatEntry, f wsmsg.ScannerFilters) []wsmsg.ScannerRow {
 	out := make([]wsmsg.ScannerRow, 0, len(items))
 	for _, it := range items {
-		if it.ChangePct < cfg.MinChangePct {
+		if (f.Mode == "gainers" && it.ChangePct < f.MinChangePct) || (f.Mode == "losers" && it.ChangePct > -f.MinChangePct) {
 			continue
 		}
-		if cfg.MinVolume > 0 && it.Volume < cfg.MinVolume {
+		if f.MinVolume > 0 && float64(it.Volume) < f.MinVolume {
 			continue
 		}
 		var floatPtr *float64
 		if e, ok := floats[it.Symbol]; ok {
 			if e.bad {
-				if cfg.MaxFloatShares > 0 {
+				if f.MaxFloatShares != nil && *f.MaxFloatShares > 0 {
 					continue // known-bad: drop when float screening is on
 				}
 			} else {
-				if cfg.MaxFloatShares > 0 && e.shares > cfg.MaxFloatShares {
+				if f.MaxFloatShares != nil && *f.MaxFloatShares > 0 && e.shares > *f.MaxFloatShares {
 					continue // known float exceeds the cap
 				}
 				fv := e.shares
@@ -300,22 +372,30 @@ func (p *Poller) resetIfNewDay(now time.Time) {
 // fetchRank issues the rank request for the given session phase and normalizes
 // the response to []rankItem (gainers-only, SortDir descending). Each session
 // uses its native change ratio (spec: "vs most-recent close").
-func (p *Poller) fetchRank(ctx context.Context, phase session.Phase) ([]rankItem, error) {
+func (p *Poller) fetchRank(ctx context.Context, phase session.Phase, modes ...string) ([]rankItem, error) {
+	mode := "gainers"
+	if len(modes) > 0 {
+		mode = modes[0]
+	}
+	dir := int32(0)
+	if mode == "losers" {
+		dir = 1
+	}
 	switch phase {
 	case session.RTH:
-		return p.fetchTopMovers(ctx)
+		return p.fetchTopMovers(ctx, dir)
 	case session.PostMarket:
-		return p.fetchAfterHours(ctx)
+		return p.fetchAfterHours(ctx, dir)
 	case session.Overnight:
-		return p.fetchOvernight(ctx)
+		return p.fetchOvernight(ctx, dir)
 	default: // PreMarket + Closed
-		return p.fetchPreMarket(ctx)
+		return p.fetchPreMarket(ctx, dir)
 	}
 }
 
-func (p *Poller) fetchPreMarket(ctx context.Context) ([]rankItem, error) {
+func (p *Poller) fetchPreMarket(ctx context.Context, dir int32) ([]rankItem, error) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSPreMarketRank,
-		&rankpb.Request{C2S: &rankpb.C2S{SortDir: proto.Int32(0), Offset: proto.Int32(0), Count: proto.Int32(35)}})
+		&rankpb.Request{C2S: &rankpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(35)}})
 	if err != nil {
 		return nil, err
 	}
@@ -334,11 +414,11 @@ func (p *Poller) fetchPreMarket(ctx context.Context) ([]rankItem, error) {
 	return out, nil
 }
 
-func (p *Poller) fetchTopMovers(ctx context.Context) ([]rankItem, error) {
+func (p *Poller) fetchTopMovers(ctx context.Context, dir int32) ([]rankItem, error) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetTopMoversRank,
 		&tmrpb.Request{C2S: &tmrpb.C2S{
 			Market:  proto.Int32(int32(qotcommon.QotMarket_QotMarket_US_Security)), // required field
-			SortDir: proto.Int32(0), Offset: proto.Int32(0), Count: proto.Int32(35)}})
+			SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(100)}})
 	if err != nil {
 		return nil, err
 	}
@@ -357,9 +437,9 @@ func (p *Poller) fetchTopMovers(ctx context.Context) ([]rankItem, error) {
 	return out, nil
 }
 
-func (p *Poller) fetchAfterHours(ctx context.Context) ([]rankItem, error) {
+func (p *Poller) fetchAfterHours(ctx context.Context, dir int32) ([]rankItem, error) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSAfterHoursRank,
-		&ahpb.Request{C2S: &ahpb.C2S{SortDir: proto.Int32(0), Offset: proto.Int32(0), Count: proto.Int32(35)}})
+		&ahpb.Request{C2S: &ahpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(35)}})
 	if err != nil {
 		return nil, err
 	}
@@ -378,9 +458,9 @@ func (p *Poller) fetchAfterHours(ctx context.Context) ([]rankItem, error) {
 	return out, nil
 }
 
-func (p *Poller) fetchOvernight(ctx context.Context) ([]rankItem, error) {
+func (p *Poller) fetchOvernight(ctx context.Context, dir int32) ([]rankItem, error) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSOvernightRank,
-		&onpb.Request{C2S: &onpb.C2S{SortDir: proto.Int32(0), Offset: proto.Int32(0), Count: proto.Int32(35)}})
+		&onpb.Request{C2S: &onpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(35)}})
 	if err != nil {
 		return nil, err
 	}

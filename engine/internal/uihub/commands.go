@@ -71,11 +71,16 @@ type watchlistCtl interface {
 	Remove(symbol string) (removed bool)
 	Poke()
 }
+type scannerCtl interface {
+	Filters() wsmsg.ScannerFilters
+	SetFilters(wsmsg.ScannerFilters) error
+}
 
 // watchlistBox boxes watchlistCtl for atomic.Pointer storage — same reason
 // feedBox boxes Feed (hub.go): an interface value can't be atomically stored
 // directly, and boxing sidesteps nil-pointer-vs-nil-interface ambiguity on Load.
 type watchlistBox struct{ wl watchlistCtl }
+type scannerBox struct{ scanner scannerCtl }
 type knownSymbolBox struct{ fn func(string) bool }
 
 // commands.tester holds the venueTester dependency; it is named "tester"
@@ -94,6 +99,7 @@ type commands struct {
 	restart     func()
 	startDemo   func() error
 	wl          atomic.Pointer[watchlistBox]
+	scanner     atomic.Pointer[scannerBox]
 }
 
 func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, va venueAdmin, feed func() Feed, tester venueTester) *commands {
@@ -194,6 +200,26 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		}
 		cd.cfg.SetConfig(a.Key, string(a.Value))
 		return wsmsg.AckMsg{Status: "accepted"}, false
+	case "GetScannerFilters":
+		if b := cd.scanner.Load(); b != nil {
+			return wsmsg.AckMsg{Status: "accepted", Value: b.scanner.Filters()}, false
+		}
+		return blocked("scanner unavailable"), false
+	case "SetScannerFilters":
+		var a wsmsg.SetScannerFiltersArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return blocked("bad args"), false
+		}
+		b := cd.scanner.Load()
+		if b == nil {
+			return blocked("scanner unavailable"), false
+		}
+		if err := b.scanner.SetFilters(a.Filters); err != nil {
+			return blocked(err.Error()), false
+		}
+		raw, _ := json.Marshal(a.Filters)
+		cd.cfg.SetConfig("scanner.filters.v1", string(raw))
+		return wsmsg.AckMsg{Status: "accepted", Value: a.Filters}, false
 	case "SubscribeIndicator":
 		var a struct {
 			InstanceID string             `json:"instanceId"`

@@ -160,8 +160,19 @@ type ScannerRow struct {
 }
 
 type ScannerRankPayload struct {
-	RefreshedAt string       `json:"refreshedAt"`
-	Rows        []ScannerRow `json:"rows"`
+	RefreshedAt string         `json:"refreshedAt"`
+	Rows        []ScannerRow   `json:"rows"`
+	Filters     ScannerFilters `json:"filters,omitempty"`
+	Baseline    bool           `json:"baseline,omitempty"`
+}
+
+type ScannerFilters struct {
+	Mode           string   `json:"mode" tstype:"\"gainers\" | \"losers\""`
+	MinChangePct   float64  `json:"minChangePct"`
+	MaxFloatShares *float64 `json:"maxFloatShares" tstype:"number | null,required"`
+	MinVolume      float64  `json:"minVolume"`
+	FloatUnit      string   `json:"floatUnit" tstype:"\"K\" | \"M\""`
+	VolumeUnit     string   `json:"volumeUnit" tstype:"\"K\" | \"M\""`
 }
 
 type ScanHitPayload struct {
@@ -369,6 +380,10 @@ type GetConfigArgs struct {
 type SetConfigArgs struct {
 	Key   string          `json:"key"`
 	Value json.RawMessage `json:"value"`
+}
+
+type SetScannerFiltersArgs struct {
+	Filters ScannerFilters `json:"filters"`
 }
 
 // EnsureSymbolArgs subscribes a panel's symbol on demand. profile is one of

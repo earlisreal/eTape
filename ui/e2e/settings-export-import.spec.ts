@@ -105,7 +105,7 @@ test.describe("settings export/import", () => {
     await expect(page.getByRole("alert")).toContainText("Imported layout.");
 
     await page.mouse.click(5, 5); // close via backdrop
-    await expect(page.locator(".ledger-header", { hasText: "Movers" })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator(".ledger-header", { hasText: "Scanner" })).toBeVisible({ timeout: 10_000 });
   });
 
   test("importing a layout via the empty-state 'Import layout' control replaces the panel layout", async ({ page }) => {
@@ -119,6 +119,6 @@ test.describe("settings export/import", () => {
     await page.getByTestId("empty-import-file").setInputFiles("fixtures/settings-export-layout.json");
 
     await expect(page.getByRole("alert")).toContainText("Imported layout.");
-    await expect(page.locator(".ledger-header", { hasText: "Movers" })).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator(".ledger-header", { hasText: "Scanner" })).toBeVisible({ timeout: 10_000 });
   });
 });

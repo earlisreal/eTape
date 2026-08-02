@@ -122,19 +122,11 @@ export const PANELS: Record<string, PanelDef> = {
     headerActions: true,
   },
   "scanner": {
-    component: (p) => <ScannerPanel {...p} variant="scanner" />,
+	component: ScannerPanel,
     topics: ["scanner.rank", "scanner.hit"],
     title: "Scanner",
     glyph: "%",
     description: "Live gappers, all sessions, filters",
-    symbolBearing: false,
-  },
-  "movers": {
-    component: (p) => <ScannerPanel {...p} variant="movers" />,
-    topics: ["scanner.rank", "scanner.hit"],
-    title: "Movers",
-    glyph: "↕",
-    description: "Live % leaders, all sessions",
     symbolBearing: false,
   },
   "watchlist": {
@@ -211,7 +203,7 @@ export const PANELS: Record<string, PanelDef> = {
 export const DEV_PANELS = new Set(["smoke-painter"]);
 export const isDevPanel = (panelId: string): boolean => DEV_PANELS.has(panelId);
 
-const CATALOG_ORDER = ["chart", "ladder", "tape", "scanner", "movers", "watchlist", "news",
+const CATALOG_ORDER = ["chart", "ladder", "tape", "scanner", "watchlist", "news",
   "account", "order-ticket", "connection-status"];
 // "account-bar", "positions", and (as of Task 8) "open-orders" all stay
 // registered in PANELS (above) as back-compat aliases for saved workspace docs,

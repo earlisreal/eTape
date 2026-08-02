@@ -367,6 +367,12 @@ func (h *Hub) SetWatchlist(c watchlistCtl) {
 	}
 }
 
+func (h *Hub) SetScanner(c scannerCtl) {
+	if h.cmd != nil && c != nil {
+		h.cmd.scanner.Store(&scannerBox{scanner: c})
+	}
+}
+
 // reportBackfill lets a spawned orch.Backfill goroutine report its daily-
 // fetch outcome back to Run's own goroutine -- the same cross-goroutine
 // channel-send pattern as ReportUIDrop, so backfilled/backfillInflight stay

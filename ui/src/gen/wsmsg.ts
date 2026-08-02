@@ -234,6 +234,16 @@ export interface ScannerRow {
 export interface ScannerRankPayload {
   refreshedAt: string;
   rows: ScannerRow[];
+  filters?: ScannerFilters;
+  baseline?: boolean;
+}
+export interface ScannerFilters {
+  mode: "gainers" | "losers";
+  minChangePct: number /* float64 */;
+  maxFloatShares: number | null;
+  minVolume: number /* float64 */;
+  floatUnit: "K" | "M";
+  volumeUnit: "K" | "M";
 }
 export interface ScanHitPayload {
   symbol: string;
@@ -346,8 +356,8 @@ export interface SessionSnapshot {
  * BootStatus is the sys.boot snapshot: the engine's current boot phase, so the
  * UI shows a neutral connecting banner during boot instead of the red
  * feed-disconnected strip. Snapshot-bearing (like SessionSnapshot):
- * re-delivered to every new subscriber, also pushed as a delta on each transition.
- * Phase is one of "connecting" | "ready".
+ * re-delivered to every new subscriber, also pushed as a delta on each
+ * transition. Phase is one of "connecting" | "ready".
  */
 export interface BootStatus {
   phase: string;
@@ -432,6 +442,9 @@ export interface SetConfigArgs {
   key: string;
   value: unknown;
 }
+export interface SetScannerFiltersArgs {
+  filters: ScannerFilters;
+}
 /**
  * EnsureSymbolArgs subscribes a panel's symbol on demand. profile is one of
  * "watch" | "focused" | "interest". demandId is the UI panel instance id.
@@ -475,29 +488,30 @@ export interface LoadOlderResult {
   added: number /* int */;
   exhausted: boolean;
 }
-
+/**
+ * QueryChartWindowArgs selects either an exact half-open UTC range or latest
+ * TailBars bars. Exactly one mode must be supplied.
+ */
 export interface QueryChartWindowArgs {
   symbol: string;
   timeframe: string;
-  fromMs: number;
-  toMs: number;
-  tailBars: number;
+  fromMs: number /* int64 */;
+  toMs: number /* int64 */;
+  tailBars: number /* int */;
   indicatorSeriesKeys: string[];
 }
-
 export interface IndicatorSeriesWindow {
   seriesKey: string;
   points: IndicatorPoint[];
 }
-
 export interface QueryChartWindowResult {
   symbol: string;
   timeframe: string;
-  fromMs: number;
-  toMs: number;
+  fromMs: number /* int64 */;
+  toMs: number /* int64 */;
   bars: Bar[];
   indicators: IndicatorSeriesWindow[];
-  historyRevision: number;
+  historyRevision: number /* int64 */;
 }
 /**
  * Venue mirrors config.Venue (no secret material — Credentials is a key NAME).
