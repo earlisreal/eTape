@@ -212,6 +212,7 @@ func TestReconnectResubscribesReseedsAndEmitsResynced(t *testing.T) {
 
 	f.Ensure(feed.Demand{ID: "d", Symbol: "US.AAPL", Subs: []feed.SubType{feed.SubKL1m}})
 	nextEvent(t, f.Events()) // initial seed
+	waitForQotSubs(t, m, 1)
 
 	subsBefore := countQotSubs(m)
 	m.dropAllConns() // sever: client reconnects via backoff
@@ -254,6 +255,18 @@ func countQotSubs(m *mockOpenD) int {
 	return n
 }
 
+func waitForQotSubs(t *testing.T, m *mockOpenD, want int) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for countQotSubs(m) < want {
+		select {
+		case <-deadline:
+			t.Fatalf("timed out waiting for %d Qot_Sub requests", want)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
 func TestHistoryBarsQuotaGuard(t *testing.T) {
 	m := newMockOpenD(t)
 	m.setData("US.NEW", &qotData{bars1m: []*qotcommon.KLine{kl(1782146460, 1, 1)}})
@@ -281,6 +294,13 @@ func TestHistoryBarsQuotaGuard(t *testing.T) {
 func TestHistoryBarsCoalescesConcurrentSameSymbol(t *testing.T) {
 	m := newMockOpenD(t)
 	m.setData("US.AAPL", &qotData{bars1m: []*qotcommon.KLine{kl(1782146460, 309.1, 1000)}})
+	var delayFirstHistory sync.Once
+	m.handler = func(mm *mockOpenD, conn net.Conn, frame Frame) {
+		if frame.ProtoID == ProtoQotRequestHistoryKL {
+			delayFirstHistory.Do(func() { time.Sleep(20 * time.Millisecond) })
+		}
+		mm.defaultHandler(mm, conn, frame)
+	}
 	cli := liveClient(t, m)
 	f := NewOpenDFeed(cli, FeedOptions{})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -466,6 +486,7 @@ func TestReconnectSeedFailureLogsAndContinues(t *testing.T) {
 	if ev, ok := nextEvent(t, f.Events()).(feed.Bars1mEvent); !ok || !ev.Seed {
 		t.Fatalf("initial seed = %#v, want seed Bars1mEvent (quote seed fails and emits nothing)", ev)
 	}
+	waitForQotSubs(t, m, 1)
 
 	m.dropAllConns() // sever: client reconnects via backoff
 
