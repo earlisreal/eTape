@@ -238,7 +238,7 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 			all[it.Symbol] = it
 		}
 	}
-	p.refreshSnapshots(ctx, all)
+	p.refreshSnapshots(ctx, phase, all)
 	for _, it := range items {
 		it = all[it.Symbol]
 		if len(rankRowsFiltered([]rankItem{it}, p.floats, filters)) != 0 {
@@ -755,14 +755,14 @@ func (p *Poller) resolveFloats(ctx context.Context, items []rankItem) {
 		if end > len(missing) {
 			end = len(missing)
 		}
-		p.snapshotBatch(ctx, missing[start:end], &reqs, nil)
+		p.snapshotBatch(ctx, session.Closed, missing[start:end], &reqs, nil)
 	}
 }
 
 // refreshSnapshots refreshes every accumulated row in the same quota-free
 // batch used for float enrichment. Failed or omitted symbols keep their prior
 // rank values.
-func (p *Poller) refreshSnapshots(ctx context.Context, items map[string]rankItem) {
+func (p *Poller) refreshSnapshots(ctx context.Context, phase session.Phase, items map[string]rankItem) {
 	syms := make([]string, 0, len(items))
 	for sym := range items {
 		syms = append(syms, sym)
@@ -773,7 +773,7 @@ func (p *Poller) refreshSnapshots(ctx context.Context, items map[string]rankItem
 		if end > len(syms) {
 			end = len(syms)
 		}
-		p.snapshotBatch(ctx, syms[start:end], &reqs, items)
+		p.snapshotBatch(ctx, phase, syms[start:end], &reqs, items)
 	}
 }
 
@@ -781,7 +781,7 @@ func (p *Poller) refreshSnapshots(ctx context.Context, items map[string]rankItem
 // recursing with a binary split when OpenD errors the whole batch (the "one
 // bad code fails the batch" case — e.g. an OTC code without quote rights).
 // *reqs tracks the per-poll request budget across chunks and recursion.
-func (p *Poller) snapshotBatch(ctx context.Context, syms []string, reqs *int, items map[string]rankItem) {
+func (p *Poller) snapshotBatch(ctx context.Context, phase session.Phase, syms []string, reqs *int, items map[string]rankItem) {
 	if len(syms) == 0 {
 		return
 	}
@@ -817,8 +817,8 @@ func (p *Poller) snapshotBatch(ctx context.Context, syms []string, reqs *int, it
 			return
 		}
 		mid := len(syms) / 2
-		p.snapshotBatch(ctx, syms[:mid], reqs, items)
-		p.snapshotBatch(ctx, syms[mid:], reqs, items)
+		p.snapshotBatch(ctx, phase, syms[:mid], reqs, items)
+		p.snapshotBatch(ctx, phase, syms[mid:], reqs, items)
 		return
 	}
 	// Success: record each returned security; anything requested-but-absent is bad.
@@ -828,14 +828,31 @@ func (p *Poller) snapshotBatch(ctx context.Context, syms []string, reqs *int, it
 		sym := symbolOf(basic.GetSecurity())
 		got[sym] = true
 		if it, ok := items[sym]; items != nil && ok {
-			if basic.GetCurPrice() > 0 {
-				it.Last = basic.GetCurPrice()
-				if basic.GetLastClosePrice() > 0 {
-					it.ChangePct = (it.Last - basic.GetLastClosePrice()) / basic.GetLastClosePrice() * 100
+			if phase == session.RTH {
+				if basic.GetCurPrice() > 0 {
+					it.Last = basic.GetCurPrice()
+					if basic.GetLastClosePrice() > 0 {
+						it.ChangePct = (it.Last - basic.GetLastClosePrice()) / basic.GetLastClosePrice() * 100
+					}
 				}
-			}
-			if basic.Volume != nil {
-				it.Volume = basic.GetVolume()
+				if basic.Volume != nil {
+					it.Volume = basic.GetVolume()
+				}
+			} else {
+				var extended *qotcommon.PreAfterMarketData
+				switch phase {
+				case session.PostMarket:
+					extended = basic.GetAfterMarket()
+				case session.Overnight:
+					extended = basic.GetOvernight()
+				default:
+					extended = basic.GetPreMarket()
+				}
+				if extended != nil {
+					it.Last = extended.GetPrice()
+					it.ChangePct = extended.GetChangeRate()
+					it.Volume = extended.GetVolume()
+				}
 			}
 			items[sym] = it
 		}

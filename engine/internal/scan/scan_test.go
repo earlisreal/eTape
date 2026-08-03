@@ -376,6 +376,20 @@ func marketSnap(code string, outstanding int64, last, close float64, volume int6
 	return s
 }
 
+func extendedSnap(code string, phase session.Phase, price, change float64, volume int64) *snappb.Snapshot {
+	s := marketSnap(code, 1, 90, 80, 999)
+	d := &qotcommon.PreAfterMarketData{Price: proto.Float64(price), ChangeRate: proto.Float64(change), Volume: proto.Int64(volume)}
+	switch phase {
+	case session.PostMarket:
+		s.Basic.AfterMarket = d
+	case session.Overnight:
+		s.Basic.Overnight = d
+	default:
+		s.Basic.PreMarket = d
+	}
+	return s
+}
+
 func snapResp(snaps ...*snappb.Snapshot) *snappb.Response {
 	return &snappb.Response{RetType: proto.Int32(0), S2C: &snappb.S2C{SnapshotList: snaps}}
 }
@@ -806,7 +820,7 @@ func TestAccumulatedRowsRefreshAndSurviveSnapshotFailure(t *testing.T) {
 		if fail {
 			return nil, fmt.Errorf("temporary")
 		}
-		return snapResp(marketSnap("A", 1, 12, 10, 321)), nil
+		return snapResp(extendedSnap("A", session.PreMarket, 12, 20, 321)), nil
 	}}
 	pub := &capturePub{}
 	clk := clock.NewFake(et(2026, 7, 8, 8, 0))
@@ -822,17 +836,29 @@ func TestAccumulatedRowsRefreshAndSurviveSnapshotFailure(t *testing.T) {
 	}
 }
 
-func TestSnapshotRefreshUpdatesPriceAndVolumeWithoutClose(t *testing.T) {
-	fr := &fakeReq{rankResp: rankResp(rankItem{Symbol: "US.A", ChangePct: 5, Last: 1, Volume: 1}), snap: func(codes []string) (*snappb.Response, error) {
-		return snapResp(marketSnap("A", 1, 12, 0, 321)), nil
-	}}
-	pub := &capturePub{}
-	clk := clock.NewFake(et(2026, 7, 8, 8, 0))
-	p := New(config.Scan{Enabled: true}, fr, pub, clk, nil, nil)
-	p.pollOnce(context.Background(), clk.Now())
-	r := pub.ranks[0].Rows[0]
-	if r.Last == nil || *r.Last != 12 || r.ChangePct == nil || *r.ChangePct != 5 || r.Volume != 321 {
-		t.Fatalf("price/volume should refresh while percent is preserved without a close: %+v", r)
+func TestSnapshotRefreshUsesActiveSessionData(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		phase  session.Phase
+		want   rankItem
+		makeSn func() *snappb.Snapshot
+	}{
+		{"premarket", session.PreMarket, rankItem{Last: 101, ChangePct: 1, Volume: 11}, func() *snappb.Snapshot { return extendedSnap("A", session.PreMarket, 101, 1, 11) }},
+		{"after-hours", session.PostMarket, rankItem{Last: 102, ChangePct: 2, Volume: 22}, func() *snappb.Snapshot { return extendedSnap("A", session.PostMarket, 102, 2, 22) }},
+		{"overnight", session.Overnight, rankItem{Last: 103, ChangePct: 3, Volume: 33}, func() *snappb.Snapshot { return extendedSnap("A", session.Overnight, 103, 3, 33) }},
+		{"rth", session.RTH, rankItem{Last: 90, ChangePct: 12.5, Volume: 999}, func() *snappb.Snapshot { return marketSnap("A", 1, 90, 80, 999) }},
+		{"missing extended data", session.PreMarket, rankItem{Last: 7, ChangePct: 6, Volume: 5}, func() *snappb.Snapshot { return marketSnap("A", 1, 90, 80, 999) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fr := &fakeReq{snap: func([]string) (*snappb.Response, error) { return snapResp(tc.makeSn()), nil }}
+			p := newTestPoller(config.Scan{}, fr, &capturePub{})
+			items := map[string]rankItem{"US.A": {Symbol: "US.A", Last: 7, ChangePct: 6, Volume: 5}}
+			p.refreshSnapshots(context.Background(), tc.phase, items)
+			got := items["US.A"]
+			if got.Last != tc.want.Last || got.ChangePct != tc.want.ChangePct || got.Volume != tc.want.Volume {
+				t.Fatalf("got %+v, want market values %+v", got, tc.want)
+			}
+		})
 	}
 }
 
