@@ -289,7 +289,7 @@ func (o *Orchestrator) fill1mArchiveOnly(ctx context.Context, symbol string, fro
 		}
 	}
 	if len(ranges) == 0 {
-		slog.Info("history warm skipped: explicit coverage", "symbol", symbol, "timeframe", "1m")
+		slog.Debug("history warm skipped: explicit coverage", "symbol", symbol, "timeframe", "1m")
 		return nil
 	}
 	if bars, err := o.archive.ReadBars1m(symbol, from.UnixMilli(), to.UnixMilli()); err == nil && len(bars) > 0 {
@@ -297,7 +297,7 @@ func (o *Orchestrator) fill1mArchiveOnly(ctx context.Context, symbol string, fro
 			if err := a.ArchiveRange(symbol, "1m", from.UnixMilli(), to.UnixMilli(), nil); err != nil {
 				return err
 			}
-			slog.Info("history warm skipped: inferred legacy archive", "symbol", symbol, "timeframe", "1m")
+			slog.Debug("history warm skipped: inferred legacy archive", "symbol", symbol, "timeframe", "1m")
 			return nil
 		}
 		if bars[0].BucketMs <= from.UnixMilli()+archiveCoverSlackMs {
@@ -322,7 +322,7 @@ func (o *Orchestrator) fill1mArchiveOnly(ctx context.Context, symbol string, fro
 		} else {
 			o.archive1m(bars)
 		}
-		slog.Info("history warm: 1m missing interval", "symbol", symbol, "provider", served,
+		slog.Debug("history warm: 1m missing interval", "symbol", symbol, "provider", served,
 			"from", gf, "to", gt, "bars", len(bars))
 	}
 	return nil
@@ -343,7 +343,7 @@ func (o *Orchestrator) fillDailyArchiveOnly(ctx context.Context, symbol string, 
 		windows = []window{{from: from, to: to}}
 	}
 	if len(windows) == 0 {
-		slog.Info("history warm skipped: explicit coverage", "symbol", symbol, "timeframe", "1d")
+		slog.Debug("history warm skipped: explicit coverage", "symbol", symbol, "timeframe", "1d")
 		return nil
 	}
 	if a, ok := o.archive.(rangeArchive); ok && !forceLatest && len(windows) == 1 && windows[0].from.Equal(from) && windows[0].to.Equal(to) {
@@ -351,7 +351,7 @@ func (o *Orchestrator) fillDailyArchiveOnly(ctx context.Context, symbol string, 
 			if err := a.ArchiveRange(symbol, "1d", from.UnixMilli(), to.UnixMilli(), nil); err != nil {
 				return err
 			}
-			slog.Info("history warm skipped: inferred legacy archive", "symbol", symbol, "timeframe", "1d")
+			slog.Debug("history warm skipped: inferred legacy archive", "symbol", symbol, "timeframe", "1d")
 			return nil
 		}
 	}
@@ -393,7 +393,7 @@ func (o *Orchestrator) fillDailyArchiveOnly(ctx context.Context, symbol string, 
 		} else {
 			o.archiveDailyBars(bars)
 		}
-		slog.Info("history warm: daily", "symbol", symbol, "provider", served,
+		slog.Debug("history warm: daily", "symbol", symbol, "provider", served,
 			"from", w.from, "to", w.to, "bars", len(bars))
 	}
 	return nil
@@ -486,7 +486,7 @@ func (o *Orchestrator) fastArchiveFirstPaint(ctx context.Context, symbol string)
 		seedUnlessCanceled(ctx, s10, func(b []feed.Bar) { o.seeder.SeedHistory10s(symbol, b) })
 	}
 	if len(daily)+len(m1)+len(s10) > 0 {
-		slog.Info("backfill: fast archive first paint served", "symbol", symbol, "daily", len(daily), "bars1m", len(m1), "bars10s", len(s10), "elapsed", time.Since(start).Round(time.Millisecond))
+		slog.Debug("backfill: fast archive first paint served", "symbol", symbol, "daily", len(daily), "bars1m", len(m1), "bars10s", len(s10), "elapsed", time.Since(start).Round(time.Millisecond))
 		return true
 	}
 	return false

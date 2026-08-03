@@ -432,10 +432,9 @@ func (f *OpenDFeed) seed(ctx context.Context, job seedJob) {
 	if barsDuration == 0 && bookDuration == 0 && ticksDuration == 0 && quoteDuration == 0 {
 		return
 	}
-	log := slog.Info
+	log := slog.Debug
 	lane := "foreground"
 	if job.background {
-		log = slog.Debug
 		lane = "background"
 	}
 	log("seed timing", "symbol", symbol, "lane", lane,

@@ -726,7 +726,6 @@ func (p *Poller) snapshotBatch(ctx context.Context, syms []string, reqs *int) {
 		// code by binary split; a single failing code is marked bad.
 		if len(syms) == 1 {
 			p.floats[syms[0]] = floatEntry{bad: true}
-			slog.Info("scan: float unresolvable", "symbol", syms[0], "reason", resp.GetRetMsg())
 			return
 		}
 		mid := len(syms) / 2
@@ -742,7 +741,6 @@ func (p *Poller) snapshotBatch(ctx context.Context, syms []string, reqs *int) {
 		ex := sn.GetEquityExData()
 		if ex == nil || ex.GetOutstandingShares() <= 0 {
 			p.floats[sym] = floatEntry{bad: true}
-			slog.Info("scan: float unresolvable", "symbol", sym, "reason", "no equity float data")
 			continue
 		}
 		p.floats[sym] = floatEntry{shares: float64(ex.GetOutstandingShares())}
@@ -750,7 +748,7 @@ func (p *Poller) snapshotBatch(ctx context.Context, syms []string, reqs *int) {
 	for _, s := range syms {
 		if !got[s] {
 			p.floats[s] = floatEntry{bad: true}
-			slog.Info("scan: float unresolvable", "symbol", s, "reason", "omitted from snapshot response")
+			slog.Debug("scan: float unresolvable", "symbol", s, "reason", "omitted from snapshot response")
 		}
 	}
 }
