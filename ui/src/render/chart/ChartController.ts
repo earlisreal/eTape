@@ -53,11 +53,6 @@ export class ChartController {
   // below) doesn't look like a generation swap. See applyIndicators.
   private indicatorLastAppliedTimeMs = new Map<string, number>();
   private backfilled = false;
-  // Live [low, high] across all currently-applied bars — the reference range
-  // main-pane overlay lines (EMA/SMA/VWAP) are bounded against (chartTheme's
-  // boundedOverlayAutoscale). Recomputed on every applyBars call; cleared on
-  // symbol/timeframe switch so a stale range never bounds the new series.
-  private candleRange: PriceRange | null = null;
   // --- Per-call memoization (Task 3) -----------------------------------
   // applyBars' outcome for the bars it was just given — set exclusively inside
   // applyBars/setAllBars, read by refreshBarCaches (called right after applyBars
@@ -69,14 +64,6 @@ export class ChartController {
   // by refreshBarCaches so the cache fold starts from the exact same bar the LWC
   // replay did, never a second, independently-computed index.
   private appendedFrom = 0;
-  // Min/max across bars[0 .. n-2] ONLY — i.e. every bar except the current last
-  // one, which may still be live/in-progress. Maintained incrementally (full
-  // rescan on "reset", folded forward on "appended", untouched on "tailUpdated"/
-  // "none" since the live last bar is excluded either way). candleRange (above)
-  // is recombined with the CURRENT last bar's own l/h fresh on every sync() call
-  // — see refreshBarCaches — so a same-bar revision (e.g. a spike that later
-  // retreats) is always reflected exactly, never stuck at a stale peak.
-  private closedRange: PriceRange | null = null;
   // Date.parse(bucketStart) for every bar in the currently-applied series,
   // index-aligned with it. Exposed read-only via barsMs() so other call sites
   // (e.g. the drawings primitive) can reuse it instead of re-parsing.
@@ -282,25 +269,21 @@ export class ChartController {
   // prove the fix rather than infer it from paint duration alone.
   lastSyncDaySegmentBuilds(): number { return this.daySegmentBuildsThisSync; }
 
-  // Refreshes barsMsCache/bandsCache/closedRange (and, from those, candleRange)
+  // Refreshes barsMsCache/bandsCache
   // to match `bars` exactly, sharing lastBarsOp/appendedFrom (just set by
   // applyBars, above) so every cache advances from the SAME notion of "what's
   // new" as the LWC replay did — never a second, independently-computed cursor.
   //
   // Contract (holds after this returns, for every reset/appended/tailUpdated/none
   // sequence): barsMsCache deep-equals bars.map(b => Date.parse(b.bucketStart));
-  // closedRange equals candleRangeOf(bars.slice(0, -1)); bandsCache deep-equals
-  // bandsFromBars(bars) -- but ONLY while sessions are active (see refreshBands'
-  // gate, Finding 1). barsMsCache/closedRange (hence candleRange) stay
-  // unconditional regardless — drawings projection and overlay-indicator
-  // autoscale need them on every timeframe, not just when shading is on. See
-  // ChartController.test.ts's equivalence tests.
+  // bandsCache deep-equals bandsFromBars(bars) -- but ONLY while sessions are
+  // active (see refreshBands' gate, Finding 1). See ChartController.test.ts's
+  // equivalence tests.
   private refreshBarCaches(bars: Bar[]): void {
     if (bars.length === 0) return; // nothing to cache; resetForReload already cleared everything
     switch (this.lastBarsOp) {
       case "reset":
         this.barsMsCache = bars.map((b) => Date.parse(b.bucketStart));
-        this.closedRange = candleRangeOf(bars.slice(0, -1));
         // A reset may have loaded an entirely different series (new symbol/
         // timeframe, or a front-growth rebuild) — whatever bandsCache/dirty
         // state carried over from before is meaningless against it. Force
@@ -322,24 +305,16 @@ export class ChartController {
           if (i < this.barsMsCache.length) this.barsMsCache[i] = ms;
           else this.barsMsCache.push(ms);
         }
-        this.foldClosedRangeFrom(from, bars);
         break;
       }
       case "tailUpdated":
       case "none":
         // Every existing bar's bucketStart (hence its ms and session) is
-        // unchanged; closedRange excludes the live last bar so a tail-only
-        // revision never invalidates it either — nothing to refresh.
+        // unchanged — nothing to refresh.
         break;
     }
     this.refreshBands(bars);
     this.cachedBarCount = bars.length;
-    // candleRange = closedRange (everything but the last bar) folded with the
-    // CURRENT last bar's own l/h, read fresh every call — so an in-progress bar
-    // that spikes then retreats is always reflected exactly, never stuck at
-    // whatever its highest-seen high was on some earlier call.
-    const last = bars[bars.length - 1];
-    this.candleRange = combine(this.closedRange, last.l, last.h);
   }
 
   // Builds/extends bandsCache — but ONLY when applySessions will actually read
@@ -404,22 +379,6 @@ export class ChartController {
       const lastBand = this.bandsCache[this.bandsCache.length - 1];
       if (lastBand) lastBand.endMs = this.barsMsCache[bars.length - 1];
     }
-  }
-
-  // Folds bars[from .. bars.length-2] (i.e. every bar in that span EXCEPT the
-  // current last one, which is live/in-progress and excluded from closedRange by
-  // definition) into closedRange. `from` is applyBars' own appendedFrom, so this
-  // always includes the previously-last bar — which may have just finalized in
-  // the same missed window that also appended new bars, and so may be entering
-  // closedRange for the first time here.
-  private foldClosedRangeFrom(from: number, bars: Bar[]): void {
-    const base = this.closedRange ?? { minValue: Infinity, maxValue: -Infinity };
-    let { minValue, maxValue } = base;
-    for (let i = from; i <= bars.length - 2; i++) {
-      if (bars[i].l < minValue) minValue = bars[i].l;
-      if (bars[i].h > maxValue) maxValue = bars[i].h;
-    }
-    this.closedRange = { minValue, maxValue };
   }
 
   private applyIndicators(): void {
@@ -518,12 +477,12 @@ export class ChartController {
           // overlay indicators; the crosshair itself is free-moving — chartTheme).
           ...(d.kind === "line" ? { lineWidth: d.width, lineStyle: LWC_LINE_STYLE[d.lineStyle], crosshairMarkerVisible: false } : {}),
           // Main-pane overlay lines (EMA/SMA/VWAP) share the candle price scale, bounded
-          // to OVERLAY_AUTOSCALE_FACTORx the live candle range (chartTheme's
+          // to OVERLAY_AUTOSCALE_FACTORx the visible candle range (chartTheme's
           // boundedOverlayAutoscale) so a far-off value stays visible without crushing
           // the candles. MACD's sub-pane lines (paneIndex 1) are excluded: they must
           // autoscale their own pane.
           ...(d.kind === "line" && d.paneIndex === 0
-            ? { autoscaleInfoProvider: boundedOverlayAutoscale(() => this.candleRange, OVERLAY_AUTOSCALE_FACTOR) }
+            ? { autoscaleInfoProvider: boundedOverlayAutoscale(() => this.visibleCandleRange(), OVERLAY_AUTOSCALE_FACTOR) }
             : {}),
         }, d.paneIndex));
     }
@@ -595,8 +554,6 @@ export class ChartController {
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
     this.lastTailBucket = "";
-    this.candleRange = null;
-    this.closedRange = null;
     this.barsMsCache = [];
     this.bandsCache = [];
     this.cachedBarCount = 0;
@@ -651,6 +608,15 @@ export class ChartController {
       : toCandle(b);
   }
 
+  private visibleCandleRange(): PriceRange | null {
+    const range = this.facade.getVisibleLogicalRange();
+    if (!range) return null;
+    const bars = this.deps.bars.series(this.config.symbol, this.config.timeframe);
+    const from = Math.max(0, Math.floor(range.from));
+    const to = Math.min(bars.length - 1, Math.ceil(range.to));
+    return from <= to ? candleRangeOf(bars.slice(from, to + 1)) : null;
+  }
+
   setChartType(type: ChartType): void {
     if (type === this.chartType) return;
     this.chartType = type;
@@ -661,7 +627,6 @@ export class ChartController {
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
     this.lastTailBucket = "";
-    this.closedRange = null;
     this.barsMsCache = [];
     this.bandsCache = [];
     this.cachedBarCount = 0;
@@ -733,28 +698,13 @@ function isSorted(bars: Bar[], from: number): boolean {
   return true;
 }
 function toCandle(b: Bar) { return { time: toLwcTime(b.bucketStart), open: b.o, high: b.h, low: b.l, close: b.c }; }
-// [low, high] across every currently-applied bar — the reference range overlay
-// lines are bounded against. A plain scan: bar counts here (a few thousand at
-// most) make this negligible next to the rest of applyBars' per-sync work.
-// Exported (unused by production code — refreshBarCaches maintains candleRange
-// incrementally instead) purely as the from-scratch reference ChartController.
-// test.ts's equivalence tests assert `closedRange`/`candleRange` against.
-export function candleRangeOf(bars: Bar[]): PriceRange {
+function candleRangeOf(bars: Bar[]): PriceRange {
   let minValue = Infinity, maxValue = -Infinity;
   for (const b of bars) {
     if (b.l < minValue) minValue = b.l;
     if (b.h > maxValue) maxValue = b.h;
   }
   return { minValue, maxValue };
-}
-// Folds one more bar's [l, h] into a PriceRange (or the identity range when
-// `range` is null) — the O(1) step refreshBarCaches uses to combine closedRange
-// with the CURRENT last bar's own l/h on every sync() call.
-function combine(range: PriceRange | null, l: number, h: number): PriceRange {
-  return {
-    minValue: Math.min(range?.minValue ?? Infinity, l),
-    maxValue: Math.max(range?.maxValue ?? -Infinity, h),
-  };
 }
 function toVolume(b: Bar, p: Palette) {
   return { time: toLwcTime(b.bucketStart), value: b.v, color: b.c >= b.o ? p.volUp : p.volDown };

@@ -1,11 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
-  ChartController, LEFT_PAD_BARS, bandsFromBars, candleRangeOf,
+  ChartController, LEFT_PAD_BARS, bandsFromBars,
   type BarReader, type IndicatorController, type CommandSender,
 } from "./ChartController";
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import { LIGHT, DARK } from "../palette";
-import { OVERLAY_AUTOSCALE_FACTOR } from "./chartTheme";
 import type { Bar } from "../../wire/contract";
 import { withDefaultParams } from "./indicatorSeries";
 import type { Band } from "./sessions";
@@ -75,12 +74,6 @@ function fakeFacade() {
 
 const bar = (bucketStart: string, c: number, inProgress = false): Bar =>
   ({ symbol: "US.AAPL", timeframe: "1m", bucketStart, o: c, h: c, l: c, c, v: 100, inProgress });
-// `bar()` always sets h=l=c — fine for most tests, but the candleRange/closedRange
-// tests below need independent high/low values (e.g. a spike whose high moves
-// without its close moving), hence this separate constructor.
-const barHL = (bucketStart: string, h: number, l: number, c: number, inProgress = false): Bar =>
-  ({ symbol: "US.AAPL", timeframe: "1m", bucketStart, o: c, h, l, c, v: 100, inProgress });
-
 function barReaderOf(bars: Bar[]): BarReader { return { series: () => bars }; }
 // A reader whose returned series can be swapped wholesale between sync() calls
 // — mirrors mutableIndicatorReader below, but for bars. Used to simulate a
@@ -226,24 +219,26 @@ describe("ChartController", () => {
       .toEqual({ priceRange: null });
   });
 
-  it("main-pane overlay lines bound their autoscale to a multiple of the live candle range", () => {
-    // A far-off indicator value (e.g. a 200-period MA computed over reverse-split-
-    // adjusted history, where price has since fallen several multiples) must not
-    // silently vanish (the old always-excluded behavior), but also must not be free
-    // to crush the candles down to a sliver — it's capped at OVERLAY_AUTOSCALE_FACTORx
-    // the candles' own [low, high] span.
-    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 20)];
+  it("main-pane overlays autoscale against visible candles after panning through split-adjusted history", () => {
+    const bars = [
+      bar("2026-07-06T13:30:00Z", 970),
+      bar("2026-07-06T13:31:00Z", 980),
+      bar("2026-07-06T13:32:00Z", 0.30),
+      bar("2026-07-06T13:33:00Z", 0.32),
+    ];
     const { facade, ctrl } = make(barReaderOf(bars));
-    ctrl.sync(); // establishes the live candle range: [10, 20]
+    ctrl.sync();
     ctrl.addIndicator({ instanceId: "ema-1", type: "EMA", params: { period: 200 } });
     const line = facade.created.find((c) => c.kind === "line");
     const options = line?.options as { autoscaleInfoProvider?: (base: () => unknown) => { priceRange: unknown } };
-    // Wildly far off -> clipped to factor(3)x the candle span: [10-20, 20+20] = [-10, 40].
-    expect(options.autoscaleInfoProvider!(() => ({ priceRange: { minValue: -1000, maxValue: 1000 } })))
-      .toEqual({ priceRange: { minValue: -10, maxValue: 40 } });
-    // Already within the candle range -> passes through unclamped.
-    expect(options.autoscaleInfoProvider!(() => ({ priceRange: { minValue: 12, maxValue: 18 } })))
-      .toEqual({ priceRange: { minValue: 12, maxValue: 18 } });
+    const autoscale = () => options.autoscaleInfoProvider!(() => ({ priceRange: { minValue: 980, maxValue: 980 } }));
+
+    facade.visibleLogicalRange = { from: 2.1, to: 2.2 }; // rounds outward to recent bars 2..3
+    expect(autoscale()).toEqual({ priceRange: null });
+    facade.visibleLogicalRange = { from: -0.2, to: 0.2 }; // rounds outward to historical bars 0..1
+    expect(autoscale()).toEqual({ priceRange: { minValue: 980, maxValue: 980 } });
+    facade.visibleLogicalRange = { from: 2.1, to: 2.2 };
+    expect(autoscale()).toEqual({ priceRange: null });
   });
 
   it("MACD's sub-pane lines keep autoscaling their own pane (no priceRange override)", () => {
@@ -1020,28 +1015,9 @@ describe("ChartController bandsCache perf gating (Finding 1)", () => {
   });
 });
 
-// Task 3: applyBars/refreshBarCaches per-call memoization. bandsFromBars/
-// candleRangeOf (exported by ChartController.ts purely for this purpose) are the
-// from-scratch reference every equivalence assertion below compares against —
-// production code no longer calls either.
-describe("ChartController bar-cache memoization (barsMs/bandsCache/candleRange)", () => {
-  // Reads back the controller's live candleRange indirectly via an EMA overlay's
-  // autoscaleInfoProvider (the only public surface candleRange feeds): an extreme
-  // input priceRange fully clips to [candleMin - pad, candleMax + pad], so passing
-  // the EXPECTED [minValue, maxValue] through the same formula and asserting exact
-  // equality pins down candleRange without needing a test-only getter.
-  function attachRangeProbe(facade: ReturnType<typeof fakeFacade>, ctrl: ChartController) {
-    ctrl.addIndicator({ instanceId: "range-probe", type: "EMA", params: { period: 200 } });
-    const line = facade.created.find((c) => c.kind === "line" && c.options && (c.options as { autoscaleInfoProvider?: unknown }).autoscaleInfoProvider);
-    const options = line!.options as { autoscaleInfoProvider: (base: () => unknown) => { priceRange: { minValue: number; maxValue: number } | null } };
-    const read = () => options.autoscaleInfoProvider(() => ({ priceRange: { minValue: -1e9, maxValue: 1e9 } })).priceRange!;
-    const expectRange = (minValue: number, maxValue: number) => {
-      const span = maxValue - minValue;
-      const pad = (OVERLAY_AUTOSCALE_FACTOR - 1) * span;
-      expect(read()).toEqual({ minValue: minValue - pad, maxValue: maxValue + pad });
-    };
-    return { expectRange };
-  }
+// Task 3: applyBars/refreshBarCaches per-call memoization. bandsFromBars is the
+// from-scratch reference every equivalence assertion below compares against.
+describe("ChartController bar-cache memoization (barsMs/bandsCache)", () => {
 
   it("barsMs() mirrors bars.map(Date.parse), index-aligned, across reset/append/tailUpdate/none; barsCached() tracks bars.length throughout", () => {
     const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
@@ -1065,54 +1041,7 @@ describe("ChartController bar-cache memoization (barsMs/bandsCache/candleRange)"
     expect(ctrl.barsCached()).toBe(bars.length);
   });
 
-  it("candleRange tracks a live last-bar revision (spike then retreat) exactly, never stuck at a stale peak", () => {
-    const bars = [
-      barHL("2026-07-06T13:30:00Z", 10, 9, 10, false), // closed
-      barHL("2026-07-06T13:31:00Z", 11, 10, 11, true), // live/last
-    ];
-    const { facade, ctrl } = make(barReaderOf(bars));
-    ctrl.sync(); // reset: closedRange = [9,10] (bar0 only); candleRange = combine -> [9,11]
-    const { expectRange } = attachRangeProbe(facade, ctrl);
-    expectRange(9, 11);
-
-    // Spike: the live bar's high jumps to 20 (still in-progress, same bucketStart).
-    bars[1] = barHL("2026-07-06T13:31:00Z", 20, 10, 15, true);
-    ctrl.sync(); // tailUpdated — closedRange untouched; candleRange = combine([9,10], l=10,h=20)
-    expectRange(9, 20);
-
-    // Retreat: the SAME bar's high falls back to 13, still in-progress.
-    bars[1] = barHL("2026-07-06T13:31:00Z", 13, 10, 12, true);
-    ctrl.sync(); // tailUpdated again — must reflect 13, NOT stay stuck at the earlier spike (20).
-    expectRange(9, 13);
-  });
-
-  it("closedRange folds exactly the newly-closed bar(s) on each single-bar growth step — no gaps, no stale exclusion", () => {
-    // Regression target: an off-by-one in `appendedFrom` (e.g. using lastAppliedCount
-    // instead of lastAppliedCount-1) would permanently skip folding the bar that was
-    // "last" as of the previous apply, once a later bar supersedes it as last — this
-    // test fails immediately if that happens, because bar1's extreme [20,30] would
-    // never enter closedRange and candleRange would stay wrong even once bar1 is no
-    // longer the live bar.
-    const bars = [barHL("2026-07-06T13:30:00Z", 10, 5, 8, true)]; // single live bar, [l,h]=[5,10]
-    const { facade, ctrl } = make(barReaderOf(bars));
-    ctrl.sync(); // reset: closedRange = candleRangeOf([]) = {Infinity,-Infinity}; candleRange = [5,10]
-    const { expectRange } = attachRangeProbe(facade, ctrl);
-    expectRange(5, 10);
-
-    // Grow by exactly one bar: bar0 [5,10] is now closed (no longer last) and must
-    // fold into closedRange for the first time; bar1 [20,30] becomes the live last.
-    bars.push(barHL("2026-07-06T13:31:00Z", 30, 20, 25, true));
-    ctrl.sync();
-    expectRange(5, 30); // bar0 via closedRange, bar1 via the fresh combine — nothing missing
-
-    // Grow by one more, deliberately narrow bar: bar1 [20,30] is now closed and must
-    // fold in turn. If it were skipped, this would regress to [5,10] here.
-    bars.push(barHL("2026-07-06T13:32:00Z", 6, 5.5, 6, true));
-    ctrl.sync();
-    expectRange(5, 30);
-  });
-
-  it("front-growth backfill replace (deep-history prepend) fully rebuilds barsMs/bandsCache/candleRange, not just the LWC series", () => {
+  it("front-growth backfill replace (deep-history prepend) fully rebuilds barsMs/bandsCache, not just the LWC series", () => {
     const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
     const { facade, ctrl } = make(barReaderOf(bars));
     ctrl.sync(); // shallow cache-seed backfill
@@ -1207,7 +1136,7 @@ describe("ChartController bar-cache memoization (barsMs/bandsCache/candleRange)"
     expect(ctrl.barsMs()).toEqual(applied.map((b) => Date.parse(b.bucketStart)));
   });
 
-  it("streaming vs from-scratch: bandsCache/barsMsCache/candleRange all match a from-scratch recompute across a long varied reset/append/tailUpdate/none sequence", () => {
+  it("streaming vs from-scratch: bandsCache/barsMsCache match a from-scratch recompute across a long varied reset/append/tailUpdate/none sequence", () => {
     // Two consecutive weekdays, 5-minute bars from 04:00 to just before 20:00 ET
     // (pre/rth/post all represented, several transitions per day), streamed a few
     // bars at a time with interleaved in-progress-bar revisions and no-op syncs —
@@ -1248,9 +1177,6 @@ describe("ChartController bar-cache memoization (barsMs/bandsCache/candleRange)"
     expect(ctrl.barsMs()).toEqual(applied.map((b) => Date.parse(b.bucketStart)));
     expect(facade.lastBands).toEqual(bandsFromBars(applied));
 
-    const range = candleRangeOf(applied);
-    const { expectRange } = attachRangeProbe(facade, ctrl);
-    expectRange(range.minValue, range.maxValue);
   });
 });
 
