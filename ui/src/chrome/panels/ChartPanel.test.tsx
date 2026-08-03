@@ -10,7 +10,8 @@ const timeScaleApi = { timeToCoordinate: vi.fn(() => 0), scrollToRealTime: vi.fn
   coordinateToLogical: vi.fn(() => 0), logicalToCoordinate: vi.fn(() => 0), resetTimeScale: vi.fn(),
   scrollToPosition: vi.fn(), subscribeVisibleLogicalRangeChange: vi.fn(), unsubscribeVisibleLogicalRangeChange: vi.fn(),
   getVisibleRange: vi.fn<() => { from: number; to: number } | null>(() => null),
-  getVisibleLogicalRange: vi.fn<() => { from: number; to: number } | null>(() => null), setVisibleRange: vi.fn() };
+  getVisibleLogicalRange: vi.fn<() => { from: number; to: number } | null>(() => null),
+  setVisibleRange: vi.fn(), setVisibleLogicalRange: vi.fn() };
 // priceScaleApi is a stable object (not a fresh literal per call) so a test can hold
 // a reference to applyOptions and assert it was invoked by the SUT (mirrors timeScaleApi above).
 const priceScaleApi = { applyOptions: vi.fn(), width: vi.fn(() => 60) };

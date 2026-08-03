@@ -115,3 +115,22 @@ describe("BarStore batch prepend", () => {
     ]);
   });
 });
+
+describe("BarStore chart windows", () => {
+  it("does not let a late tail query hide shared older history", () => {
+    const s = new BarStore();
+    s.mergeWindow("US.AAPL", "1m", [
+      bar("2026-07-09T13:30:00Z", 3.5, false),
+      bar("2026-07-09T13:31:00Z", 3.6, false),
+    ], Date.parse("2026-07-09T13:30:00Z"), Date.parse("2026-07-09T13:32:00Z"));
+    s.mergeWindow("US.AAPL", "1m", [
+      bar("2026-07-09T14:00:00Z", 3.7, false),
+    ], Date.parse("2026-07-09T14:00:00Z"), Date.parse("2026-07-09T14:01:00Z"));
+
+    expect(s.series("US.AAPL", "1m").map((b) => b.bucketStart)).toEqual([
+      "2026-07-09T13:30:00Z",
+      "2026-07-09T13:31:00Z",
+      "2026-07-09T14:00:00Z",
+    ]);
+  });
+});

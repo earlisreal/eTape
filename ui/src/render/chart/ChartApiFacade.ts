@@ -48,5 +48,7 @@ export interface ChartApiFacade {
   priceScaleWidth(): number;                          // right-axis width — insets per-pane header controls
   getVisibleRange(): { from: number; to: number } | null;  // visible time range (UTC seconds)
   setVisibleRange(range: { from: number; to: number }): void;
+  getVisibleLogicalRange(): { from: number; to: number } | null;
+  setVisibleLogicalRange(range: { from: number; to: number }): void;
   remove(): void;
 }

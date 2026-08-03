@@ -89,6 +89,12 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     },
     setVisibleRange: (range) =>
       chart.timeScale().setVisibleRange({ from: range.from as unknown as Time, to: range.to as unknown as Time }),
+    getVisibleLogicalRange: () => {
+      const r = chart.timeScale().getVisibleLogicalRange();
+      return r ? { from: r.from, to: r.to } : null;
+    },
+    setVisibleLogicalRange: (range) =>
+      chart.timeScale().setVisibleLogicalRange({ from: range.from as Logical, to: range.to as Logical }),
     resize: (w, h) => chart.resize(w, h),
     applyOptions: (o) => chart.applyOptions(o as object),
     setWatermark: (text) => {

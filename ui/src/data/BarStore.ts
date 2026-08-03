@@ -82,7 +82,12 @@ export class BarStore extends PaintStore {
       else merged.push({ ...range });
     }
     this.covered.set(k, merged);
-    if (select) this.visible.set(k, { fromMs, toMs });
+    if (select) {
+      const current = this.visible.get(k);
+      this.visible.set(k, current
+        ? { fromMs: Math.min(current.fromMs, fromMs), toMs: Math.max(current.toMs, toMs) }
+        : { fromMs, toMs });
+    }
     this.bumpRev(k); this.markDirty();
   }
 

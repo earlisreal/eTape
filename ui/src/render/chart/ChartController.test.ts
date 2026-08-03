@@ -30,14 +30,16 @@ function fakeFacade() {
   const scaleMargins: Array<{ id: string; margins: { top: number; bottom: number } }> = [];
   const stretchFactors = new Map<number, number>();
   const setVisibleRangeCalls: Array<{ from: number; to: number }> = [];
+  const setVisibleLogicalRangeCalls: Array<{ from: number; to: number }> = [];
   const facade: ChartApiFacade & { created: typeof created; scrolls: number; resets: number; priceResets: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins }
     & { mainKind: string; screenshots: number; crosshairCb: ((l: number | null) => void) | null }
     & { watermark: string | null; lastOptions: unknown; stretchFactors: typeof stretchFactors }
-    & { visibleRange: { from: number; to: number } | null; setVisibleRangeCalls: typeof setVisibleRangeCalls } = {
+    & { visibleRange: { from: number; to: number } | null; setVisibleRangeCalls: typeof setVisibleRangeCalls }
+    & { visibleLogicalRange: { from: number; to: number } | null; setVisibleLogicalRangeCalls: typeof setVisibleLogicalRangeCalls } = {
     created, scrolls: 0, resets: 0, priceResets: 0, bands: 0, lastBands: [], scaleMargins,
     mainKind: "", screenshots: 0, crosshairCb: null,
     watermark: null, lastOptions: null, stretchFactors,
-    visibleRange: null, setVisibleRangeCalls,
+    visibleRange: null, setVisibleRangeCalls, visibleLogicalRange: null, setVisibleLogicalRangeCalls,
     setMainSeries: (kind, o) => { const s = fakeSeries(); created.push({ kind, pane: 0, options: o, series: s }); facade.mainKind = kind; return s; },
     takeScreenshot: () => { facade.screenshots++; return {} as unknown as HTMLCanvasElement; },
     subscribeCrosshairMove: (cb) => { facade.crosshairCb = cb; return () => { facade.crosshairCb = null; }; },
@@ -61,6 +63,8 @@ function fakeFacade() {
     resetPriceScale: () => { facade.priceResets++; },
     getVisibleRange: () => facade.visibleRange,
     setVisibleRange: (r) => { setVisibleRangeCalls.push(r); facade.visibleRange = r; },
+    getVisibleLogicalRange: () => facade.visibleLogicalRange,
+    setVisibleLogicalRange: (r) => { setVisibleLogicalRangeCalls.push(r); facade.visibleLogicalRange = r; },
     resize: () => {},
     applyOptions: (o) => { facade.lastOptions = o; },
     setWatermark: (t) => { facade.watermark = t; },
@@ -1326,6 +1330,20 @@ describe("ChartController viewport preservation around front-growth rebuilds (Ta
     bars.unshift(bar("2026-07-06T13:28:00Z", 8), bar("2026-07-06T13:29:00Z", 9));
     ctrl.sync();
 
+    expect(facade.setVisibleRangeCalls).toEqual([]);
+  });
+
+  it("preserves logical width and live-edge offset when shared history prepends", () => {
+    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync();
+    facade.visibleRange = { from: sec("2026-07-06T13:30:00Z"), to: sec("2026-07-06T13:31:00Z") };
+    facade.visibleLogicalRange = { from: -20, to: 5 };
+
+    bars.unshift(bar("2026-07-06T13:28:00Z", 8), bar("2026-07-06T13:29:00Z", 9));
+    ctrl.sync();
+
+    expect(facade.setVisibleLogicalRangeCalls).toEqual([{ from: -18, to: 7 }]);
     expect(facade.setVisibleRangeCalls).toEqual([]);
   });
 });
