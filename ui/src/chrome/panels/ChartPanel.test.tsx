@@ -72,15 +72,16 @@ vi.stubGlobal("cancelAnimationFrame", () => {});
 
 beforeEach(() => { vi.clearAllMocks(); cleanup(); });
 
-function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sharedScheduler?: Scheduler, settingsOverride?: Record<string, unknown>) {
+function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sharedScheduler?: Scheduler,
+  settingsOverride?: Record<string, unknown>, chartQueryResult?: unknown) {
   const stores = sharedStores ?? makeStores();
   const scheduler = sharedScheduler ?? new Scheduler(browserRaf, () => {});
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
   const commands = {
     sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })),
     sendQuery: vi.fn(async (name: string, args: unknown) => {
-      void name;
       void args;
+      if (name === "QueryChartWindow" && chartQueryResult) return chartQueryResult;
       return [];
     }),
   };
@@ -386,6 +387,34 @@ describe("ChartPanel", () => {
       .map(([, args]) => (args as { timeframe: string }).timeframe);
     expect(chartQueries).toContain("W");
     expect(chartQueries).not.toContain("D");
+  });
+
+  it("keeps bars and indicators visible beyond the latest query boundary", async () => {
+    const fromMs = Date.parse("2026-07-09T13:30:00.000Z");
+    const toMs = fromMs + 1;
+    const latest: Bar = {
+      symbol: "US.AAPL", timeframe: "10s", bucketStart: "2026-07-09T13:30:00.000Z",
+      o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: true,
+    };
+    const queryResult = {
+      symbol: "US.AAPL", timeframe: "10s", fromMs, toMs, bars: [latest],
+      indicators: [{ seriesKey: "vwap-1", points: [{ timeMs: fromMs, value: 100.5 }] }],
+      historyRevision: 1,
+    };
+    const { stores } = renderChart("c1", undefined, undefined, {
+      timeframe: "10s",
+      indicators: [{ instanceId: "vwap-1", type: "VWAP", params: {} }],
+    }, queryResult);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const nextMs = Date.parse("2026-07-09T13:31:00.000Z");
+    pushLiveBar(stores, "US.AAPL", "10s", 100.5, 101);
+    stores.indicators.apply({ kind: "delta", topic: "md.indicator", key: "vwap-1",
+      payload: { timeMs: nextMs, value: 100.75 } });
+
+    expect(stores.bars.series("US.AAPL", "10s").at(-1)?.bucketStart).toBe("2026-07-09T13:31:00.000Z");
+    expect(stores.indicators.series("vwap-1").at(-1)?.timeMs).toBe(nextMs);
+    expect(stores.bars.missingRanges("US.AAPL", "10s", toMs, nextMs + 1)).toEqual([{ fromMs: toMs, toMs: nextMs + 1 }]);
   });
 
   it("refreshes indicators for a lower-sequence history-ready event from another producer", async () => {

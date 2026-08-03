@@ -260,6 +260,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         indicatorSeriesKeys: keys,
       }) as QueryChartWindowResult;
       if (mergeWindow(result, generation)) {
+        // A latest-tail query's finite `toMs` describes fetched coverage, not a
+        // live visibility ceiling. Keep future buckets visible as they stream in.
+        stores.bars.expandWindow(result.symbol, result.timeframe, result.fromMs, Number.POSITIVE_INFINITY);
+        for (const key of keys) stores.indicators.expandWindow(key, result.fromMs, Number.POSITIVE_INFINITY);
         facade.resetPriceScale();
         facade.scrollToRealTime();
         reloadLatestRequired = false;
