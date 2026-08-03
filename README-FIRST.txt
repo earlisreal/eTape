@@ -28,7 +28,7 @@ can also open "Practice" in the top toolbar and choose "Synthetic demo
 market" -- same destination, different door.) This starts a live,
 self-generated synthetic market -- no moomoo OpenD, no broker account, no
 credentials required. You get a year of warm chart history, a breathing DOM
-ladder, and a moving scanner/movers board -- streaming continuously, not a
+ladder, and a moving scanner board -- streaming continuously, not a
 one-time replay. Which symbols move (and how) reshuffles every time you
 launch it.
 

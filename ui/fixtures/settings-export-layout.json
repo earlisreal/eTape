@@ -6,14 +6,14 @@
   "layout": {
     "name": "export-source",
     "panels": [
-      { "id": "imp-movers", "panelId": "movers", "group": null, "settings": {} }
+      { "id": "imp-scanner", "panelId": "scanner", "group": null, "settings": {} }
     ],
     "layout": {
       "grid": {
         "root": {
           "type": "branch",
           "data": [
-            { "type": "leaf", "data": { "id": "1", "views": ["imp-movers"], "activeView": "imp-movers" }, "size": 900 }
+            { "type": "leaf", "data": { "id": "1", "views": ["imp-scanner"], "activeView": "imp-scanner" }, "size": 900 }
           ],
           "size": 1600
         },
@@ -22,7 +22,7 @@
         "orientation": "HORIZONTAL"
       },
       "panels": {
-        "imp-movers": { "id": "imp-movers", "contentComponent": "imp-movers", "title": "Movers" }
+        "imp-scanner": { "id": "imp-scanner", "contentComponent": "imp-scanner", "title": "Scanner" }
       },
       "activeGroup": "1"
     }

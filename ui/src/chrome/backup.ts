@@ -3,7 +3,7 @@
 // — same machine or a fresh one. Pure module, no React/DOM, so every rule
 // here (envelope shape, id regeneration, activeVenue scrubbing) is directly
 // unit-testable; BackupSection.tsx (Task 2) is a thin UI shell around this.
-import { migrateMoversWorkspace, type Workspace } from "./workspace";
+import type { Workspace } from "./workspace";
 import { normalizeOrderConfig, type ActionTemplate, type OrderConfig } from "./exec/actionTemplate";
 
 export const SETTINGS_EXPORT_VERSION = 1;
@@ -67,7 +67,7 @@ export function parseImport(text: string): { ok: true; data: SettingsExport } | 
 // `panels` exceed what's actually placed in `layout`, the extras are dropped,
 // so already-ghosted exports are healed on import.
 export function prepareImportedWorkspace(imported: Workspace, currentName: string): Workspace {
-  return migrateMoversWorkspace(reconcileToGrid({ ...imported, name: currentName }, imported.layout)).workspace;
+  return reconcileToGrid({ ...imported, name: currentName }, imported.layout);
 }
 
 // Collect every panel id referenced by dockview's serialized grid. `layout` is

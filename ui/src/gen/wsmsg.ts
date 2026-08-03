@@ -238,7 +238,7 @@ export interface ScannerRankPayload {
   baseline?: boolean;
 }
 export interface ScannerFilters {
-  mode: "gainers" | "losers";
+  mode: "gainers" | "losers" | "most_active";
   minChangePct: number /* float64 */;
   maxFloatShares: number | null;
   minVolume: number /* float64 */;

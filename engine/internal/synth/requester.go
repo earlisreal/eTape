@@ -37,6 +37,7 @@ import (
 	ahpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusafterhoursrank"
 	onpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusovernightrank"
 	rankpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetuspremarketrank"
+	filterpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotstockfilter"
 )
 
 // unknownProtoIDBody is the wire-format encoding of {retType: -400} - the
@@ -105,6 +106,8 @@ func (r *Requester) Request(ctx context.Context, protoID uint32, req proto.Messa
 		resp = buildPreMarketRankResponse(r.gen, req)
 	case opend.ProtoQotGetTopMoversRank:
 		resp = buildTopMoversRankResponse(r.gen, req)
+	case opend.ProtoQotStockFilter:
+		resp = buildStockFilterResponse(r.gen, req)
 	case opend.ProtoQotGetUSAfterHoursRank:
 		resp = buildAfterHoursRankResponse(r.gen, req)
 	case opend.ProtoQotGetUSOvernightRank:
@@ -124,6 +127,36 @@ func (r *Requester) Request(ctx context.Context, protoID uint32, req proto.Messa
 		return opend.Frame{}, fmt.Errorf("synth: marshal response for protoID %d: %w", protoID, err)
 	}
 	return opend.Frame{ProtoID: protoID, FmtType: opend.FmtProtobuf, Body: body}, nil
+}
+
+func buildStockFilterResponse(g *Generator, message ...proto.Message) *filterpb.Response {
+	var count int32 = 200
+	if len(message) > 0 {
+		if r, ok := message[0].(*filterpb.Request); ok && r.GetC2S().GetNum() > 0 {
+			count = r.GetC2S().GetNum()
+		}
+	}
+	rows := g.RankRows()
+	slices.SortStableFunc(rows, func(a, b RankRow) int {
+		if a.Volume > b.Volume {
+			return -1
+		}
+		if a.Volume < b.Volume {
+			return 1
+		}
+		return strings.Compare(a.Code, b.Code)
+	})
+	if int(count) < len(rows) {
+		rows = rows[:count]
+	}
+	data := make([]*filterpb.StockData, 0, len(rows))
+	for _, row := range rows {
+		data = append(data, &filterpb.StockData{Security: usSecurity(row.Code), Name: proto.String(row.Code),
+			BaseDataList:       []*filterpb.BaseData{{FieldName: proto.Int32(int32(filterpb.StockField_StockField_CurPrice)), Value: proto.Float64(row.Last)}},
+			AccumulateDataList: []*filterpb.AccumulateData{{FieldName: proto.Int32(int32(filterpb.AccumulateField_AccumulateField_Volume)), Value: proto.Float64(float64(row.Volume)), Days: proto.Int32(1)}, {FieldName: proto.Int32(int32(filterpb.AccumulateField_AccumulateField_ChangeRate)), Value: proto.Float64(row.PctChange), Days: proto.Int32(1)}},
+		})
+	}
+	return &filterpb.Response{RetType: proto.Int32(0), S2C: &filterpb.S2C{LastPage: proto.Bool(true), AllCount: proto.Int32(int32(len(data))), DataList: data}}
 }
 
 // ProbeRTT satisfies health.prober so the demo's "moomoo" health link

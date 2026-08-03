@@ -2,11 +2,9 @@ import { describe, it, expect } from "vitest";
 import { PANELS, CATALOG, isDevPanel } from "./registry";
 
 describe("panel registry — monitoring surfaces", () => {
-  it("registers scanner and movers with the scanner topics", () => {
-    for (const id of ["scanner", "movers"]) {
-      expect(PANELS[id]).toBeDefined();
-      expect(PANELS[id].topics).toEqual(["scanner.rank", "scanner.hit"]);
-    }
+  it("registers scanner only with the scanner topics", () => {
+    expect(PANELS.scanner.topics).toEqual(["scanner.rank", "scanner.hit"]);
+    expect(PANELS.movers).toBeUndefined();
   });
 });
 

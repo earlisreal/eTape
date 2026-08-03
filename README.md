@@ -47,7 +47,7 @@ and the broker of your choice for execution, and everything else is free and ope
   must pass a two-layer risk gate (global caps + per-venue caps: max day loss, order
   value, position size, open orders), and each venue has an explicit arm/disarm switch.
 - **A live demo that actually feels live.** No account, no setup: a synthetic market
-  with a warm year of history, a breathing DOM, and a moving scanner/movers board,
+  with a warm year of history, a breathing DOM, and a moving scanner board,
   streaming indefinitely — not a 20-minute canned replay. The universe (which
   symbols run, which gap, which crash) reshuffles every launch, so spotting the
   mover is part of the practice, not something you memorize.
@@ -75,7 +75,7 @@ and the broker of your choice for execution, and everything else is free and ope
 
 **Scanning & context**
 - Pre-market gap scanner with float, volume, and %-change filters
-- Session-aware top movers (pre-market / regular hours / after-hours)
+- Session-aware scanner (gainers, losers, and most active)
 - Stock Info panel: fundamentals grid plus a live news feed with publish times and
   type badges
 
@@ -151,7 +151,7 @@ cd eTape
 This builds the UI, boots a **live** synthetic market — no OpenD, no broker, no
 config — and opens the full app at `http://127.0.0.1:8686` with a funded paper
 simulator: charts warm with a year of history at every timeframe, the DOM ladder
-breathes, the movers board updates as the (fictional) low-float names run, and
+breathes, the scanner updates as the (fictional) low-float names run, and
 hotkeys are live. Place trades immediately; fills price against the live book. The
 universe reshuffles every launch — pin it to a specific seed for a reproducible
 session:
@@ -178,13 +178,13 @@ moomoo's [OpenAPI](https://openapi.moomoo.com/) program. One-time setup:
    ```
 
 Then just type a ticker in any panel — the engine subscribes on demand, and the
-scanner keeps the day's top movers warm automatically.
+scanner keeps the day's leading symbols warm automatically.
 
 **Quote entitlements** (check what your moomoo account includes for US stocks):
 
 | Your entitlement | What works |
 |---|---|
-| Level 1 quotes | Charts, time & sales, scanner, movers, news — everything except book depth |
+| Level 1 quotes | Charts, time & sales, scanner, news — everything except book depth |
 | Level 2+ depth | All of the above **plus** the full DOM ladder |
 
 Notes:

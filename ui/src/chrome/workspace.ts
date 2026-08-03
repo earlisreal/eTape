@@ -21,63 +21,6 @@ export interface Workspace {
   linkVenues?: Partial<Record<Exclude<LinkGroup, null>, VenueID>>;
 }
 
-export function migrateMoversWorkspace(ws: Workspace): { workspace: Workspace; changed: boolean } {
-  const movers = ws.panels.filter((p) => p.panelId === "movers");
-  if (!movers.length) return { workspace: ws, changed: false };
-  const hasScanner = ws.panels.some((p) => p.panelId === "scanner");
-  const convertID = hasScanner ? null : movers[0].id;
-  const remove = new Set(movers.map((p) => p.id).filter((id) => id !== convertID));
-  const panels = ws.panels.filter((p) => !remove.has(p.id)).map((p) => p.id === convertID ? { ...p, panelId: "scanner", settings: {} } : p);
-  const layout = structuredClone(ws.layout) as Record<string, unknown> | null;
-  if (layout && typeof layout === "object") {
-    const panelMeta = layout.panels;
-    if (panelMeta && typeof panelMeta === "object") {
-      for (const id of remove) delete (panelMeta as Record<string, unknown>)[id];
-      if (convertID && (panelMeta as Record<string, unknown>)[convertID]) {
-        const old = (panelMeta as Record<string, Record<string, unknown>>)[convertID];
-        (panelMeta as Record<string, unknown>)[convertID] = { ...old, title: "Scanner" };
-      }
-    }
-    const grid = layout.grid as { root?: unknown } | undefined;
-    const prune = (node: unknown): unknown => {
-      if (!node || typeof node !== "object") return node;
-      const n = node as { type?: string; data?: unknown };
-      if (n.type === "leaf") {
-        const d = n.data as { views?: unknown; activeView?: unknown };
-        if (!Array.isArray(d?.views)) return node;
-        const views = d.views.filter((v): v is string => typeof v === "string" && !remove.has(v));
-        d.views = views;
-        if (!views.length) return null;
-        if (typeof d.activeView !== "string" || !views.includes(d.activeView)) d.activeView = views[0];
-        return node;
-      }
-      if (n.type === "branch" && Array.isArray(n.data)) {
-        const children = n.data.map(prune).filter(Boolean);
-        n.data = children;
-        if (!children.length) return null;
-        if (children.length === 1) return children[0];
-      }
-      return node;
-    };
-    if (grid) {
-      grid.root = prune(grid.root);
-      const leafIDs: string[] = [];
-      const gather = (node: unknown): void => {
-        if (!node || typeof node !== "object") return;
-        const n = node as { type?: string; data?: unknown };
-        if (n.type === "leaf") {
-          const id = (n.data as { id?: unknown } | null)?.id;
-          if (typeof id === "string") leafIDs.push(id);
-        } else if (n.type === "branch" && Array.isArray(n.data)) n.data.forEach(gather);
-      };
-      gather(grid.root);
-      const active = layout.activeGroup;
-      if (typeof active !== "string" || !leafIDs.includes(active)) layout.activeGroup = leafIDs[0];
-    }
-  }
-  return { workspace: { ...ws, panels, layout }, changed: true };
-}
-
 interface CommandClient {
   sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown }>;
 }
@@ -95,9 +38,7 @@ export class WorkspaceStore {
     const key = `workspace.${name}`;
     const ack = await this.client.sendCommand("GetConfig", { key });
     if (ack.status === "accepted" && ack.value) {
-      const migrated = migrateMoversWorkspace(ack.value as Workspace);
-      if (migrated.changed) await this.client.sendCommand("SetConfig", { key, value: migrated.workspace });
-      return migrated.workspace;
+      return ack.value as Workspace;
     }
     return { name, panels: [], layout: null };
   }

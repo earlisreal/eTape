@@ -24,6 +24,7 @@ import (
 	ahpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusafterhoursrank"
 	onpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusovernightrank"
 	rankpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetuspremarketrank"
+	filterpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotstockfilter"
 )
 
 func TestRankRowsThresholds(t *testing.T) {
@@ -44,6 +45,86 @@ func TestRankRowsThresholds(t *testing.T) {
 	}
 	if rows[0].ChangePct == nil || *rows[0].ChangePct != 12.5 {
 		t.Fatalf("changePct wrong: %+v", rows[0])
+	}
+}
+
+func TestMostActiveIgnoresChangeThreshold(t *testing.T) {
+	f := Defaults(config.Scan{})
+	f.Mode, f.MinChangePct, f.MinVolume = "most_active", 50, 100
+	rows := rankRowsFiltered([]rankItem{{Symbol: "US.A", ChangePct: 1, Volume: 101}, {Symbol: "US.B", ChangePct: 99, Volume: 99}}, nil, f)
+	if len(rows) != 1 || rows[0].Symbol != "US.A" {
+		t.Fatalf("got %+v", rows)
+	}
+}
+
+type requesterFunc func(context.Context, uint32, proto.Message) (opend.Frame, error)
+
+func (f requesterFunc) Request(ctx context.Context, id uint32, req proto.Message) (opend.Frame, error) {
+	return f(ctx, id, req)
+}
+
+func TestMostActiveExtendedMergesDeduplicatesAndSorts(t *testing.T) {
+	call := 0
+	r := requesterFunc(func(_ context.Context, id uint32, req proto.Message) (opend.Frame, error) {
+		if id != opend.ProtoQotGetUSPreMarketRank {
+			t.Fatalf("proto=%d", id)
+		}
+		call++
+		if call == 2 {
+			return frameOf(&rankpb.Response{RetType: proto.Int32(0), S2C: &rankpb.S2C{DataList: []*rankpb.PreMarketRankItem{
+				{Security: usSec("A"), PreMarketVolume: proto.Int64(300)}, {Security: usSec("C"), PreMarketVolume: proto.Int64(200)},
+			}}}), nil
+		}
+		return frameOf(&rankpb.Response{RetType: proto.Int32(0), S2C: &rankpb.S2C{DataList: []*rankpb.PreMarketRankItem{
+			{Security: usSec("A"), PreMarketVolume: proto.Int64(100)}, {Security: usSec("B"), PreMarketVolume: proto.Int64(400)},
+		}}}), nil
+	})
+	p := New(config.Scan{}, r, nil, clock.System{}, nil, nil)
+	got, err := p.fetchRank(context.Background(), session.PreMarket, "most_active")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].Symbol != "US.B" || got[1].Symbol != "US.A" || got[1].Volume != 300 || got[2].Symbol != "US.C" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestMostActiveExtendedRejectsHalfBoard(t *testing.T) {
+	call := 0
+	r := requesterFunc(func(_ context.Context, _ uint32, _ proto.Message) (opend.Frame, error) {
+		call++
+		if call == 2 {
+			return opend.Frame{}, fmt.Errorf("losers failed")
+		}
+		return frameOf(&rankpb.Response{RetType: proto.Int32(0), S2C: &rankpb.S2C{}}), nil
+	})
+	p := New(config.Scan{}, r, nil, clock.System{}, nil, nil)
+	if _, err := p.fetchRank(context.Background(), session.PreMarket, "most_active"); err == nil {
+		t.Fatal("expected error")
+	}
+}
+
+func TestMostActiveRTHUsesVolumeSortedStockFilter(t *testing.T) {
+	r := requesterFunc(func(_ context.Context, id uint32, msg proto.Message) (opend.Frame, error) {
+		if id != opend.ProtoQotStockFilter {
+			t.Fatalf("proto=%d", id)
+		}
+		c := msg.(*filterpb.Request).GetC2S()
+		if c.GetBegin() != 0 || c.GetNum() != 200 || len(c.GetAccumulateFilterList()) != 2 {
+			t.Fatalf("request=%+v", c)
+		}
+		if v := c.GetAccumulateFilterList()[0]; v.GetFieldName() != int32(filterpb.AccumulateField_AccumulateField_Volume) || v.GetDays() != 1 || v.GetSortDir() != int32(filterpb.SortDir_SortDir_Descend) {
+			t.Fatalf("volume filter=%+v", v)
+		}
+		return frameOf(&filterpb.Response{RetType: proto.Int32(0), S2C: &filterpb.S2C{LastPage: proto.Bool(true), AllCount: proto.Int32(1), DataList: []*filterpb.StockData{{
+			Security: usSec("A"), Name: proto.String("A"), BaseDataList: []*filterpb.BaseData{{FieldName: proto.Int32(int32(filterpb.StockField_StockField_CurPrice)), Value: proto.Float64(12.5)}},
+			AccumulateDataList: []*filterpb.AccumulateData{{FieldName: proto.Int32(int32(filterpb.AccumulateField_AccumulateField_Volume)), Value: proto.Float64(1234), Days: proto.Int32(1)}, {FieldName: proto.Int32(int32(filterpb.AccumulateField_AccumulateField_ChangeRate)), Value: proto.Float64(4.5), Days: proto.Int32(1)}},
+		}}}}), nil
+	})
+	p := New(config.Scan{}, r, nil, clock.System{}, nil, nil)
+	got, err := p.fetchRank(context.Background(), session.RTH, "most_active")
+	if err != nil || len(got) != 1 || got[0] != (rankItem{Symbol: "US.A", Last: 12.5, ChangePct: 4.5, Volume: 1234}) {
+		t.Fatalf("got=%+v err=%v", got, err)
 	}
 }
 

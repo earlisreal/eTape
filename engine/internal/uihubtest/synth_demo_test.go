@@ -38,8 +38,8 @@ const (
 	synthDemoLargeCapSlot = 2
 )
 
-// TestSynthDemoBoot_EnsureSymbolWarmHistoryAndMoversConsistent is Task 11's
-// boot-integration check for the -demo path's warm-history and movers wiring
+// TestSynthDemoBoot_EnsureSymbolWarmHistoryAndScannerConsistent is Task 11's
+// boot-integration check for the -demo path's warm-history and scanner wiring
 // (cmd/etape/main.go's *demo branch: synth.New -> gen.Seed(st, now) ->
 // synth.NewFeed/synth.NewRequester), mirroring replay_smoke_test.go's own
 // precedent of reconstructing (not reimplementing) main's fan-in wiring
@@ -58,7 +58,7 @@ const (
 //     md.Core -> uihub mirror -> WS frame), not just the store round trip in
 //     isolation.
 //   - The pre-market-rank protocol (3410, what scan.go's fetchPreMarket polls
-//     for the movers board in production) answers, from the SAME live
+//     for the scanner board in production) answers, from the SAME live
 //     Generator instance, with rows whose price/%-change/volume are exactly
 //     what Generator.QuoteOf independently reports for each symbol --
 //     verifying the requester and the quote-producing side of the generator
@@ -72,7 +72,7 @@ const (
 // TestSynthDemoBoot_SimFillsPriceAgainstSyntheticBook for the one check that
 // does need live ticking, and why that one uses clock.System{} instead,
 // matching main.go's own -demo wiring exactly).
-func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndMoversConsistent(t *testing.T) {
+func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndScannerConsistent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -91,7 +91,7 @@ func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndMoversConsistent(t *testing.T) 
 	gen.Seed(st, nowMs)
 	st.Flush()
 
-	// --- movers/rank check: the SAME gen the Requester answers from, cross
+	// --- scanner/rank check: the SAME gen the Requester answers from, cross
 	// checked against QuoteOf directly (no scan.Poller wiring needed -- the
 	// poller's own float/OTC-resolution machinery is orthogonal to what this
 	// check is verifying: that the wire response and the generator's quotes

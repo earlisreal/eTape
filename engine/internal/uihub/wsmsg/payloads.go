@@ -167,7 +167,7 @@ type ScannerRankPayload struct {
 }
 
 type ScannerFilters struct {
-	Mode           string   `json:"mode" tstype:"\"gainers\" | \"losers\""`
+	Mode           string   `json:"mode" tstype:"\"gainers\" | \"losers\" | \"most_active\""`
 	MinChangePct   float64  `json:"minChangePct"`
 	MaxFloatShares *float64 `json:"maxFloatShares" tstype:"number | null,required"`
 	MinVolume      float64  `json:"minVolume"`

@@ -1,12 +1,14 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, act, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, screen, act, fireEvent, cleanup } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { LinkGroups } from "../linkGroups";
 import { makeStores } from "../../data/registry";
 import { ScannerPanel } from "./ScannerPanel";
 import type { PanelProps } from "./registry";
 import type { PanelConfig } from "../workspace";
+
+afterEach(cleanup);
 
 function fakeBus() {
   const subs = new Set<(m: unknown) => void>();
@@ -15,7 +17,6 @@ function fakeBus() {
 
 function renderPanel(
   over: Partial<PanelConfig> = {},
-  variant: "scanner" | "movers" = "scanner",
   groupProp?: PanelConfig["group"],
 ) {
   const stores = makeStores();
@@ -28,8 +29,8 @@ function renderPanel(
     settings: {}, ...over };
   const commands = { sendCommand: vi.fn(async () => ({ status: "accepted" })) };
   const props = { config, stores, linkGroups, onConfigChange, scheduler: {} as never,
-    width: 400, height: 300, commands, group: groupProp } as unknown as PanelProps & { variant: "scanner" | "movers" };
-  render(<ThemeProvider><ScannerPanel {...props} variant={variant} /></ThemeProvider>);
+    width: 400, height: 300, commands, group: groupProp } as unknown as PanelProps;
+  render(<ThemeProvider><ScannerPanel {...props} /></ThemeProvider>);
   return { scanner, focus, onConfigChange, commands };
 }
 
@@ -65,17 +66,6 @@ describe("ScannerPanel", () => {
     expect([...rowCells].some((c) => c.textContent === "0%")).toBe(false);
   });
 
-  it("applies the min-%-change threshold", () => {
-    const { scanner } = renderPanel({ settings: { thresholds: { minChangePct: 10, floatCapShares: null, minVolume: 0 } } });
-    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
-      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [
-        { symbol: "US.KO", changePct: 18.4, last: 1, floatShares: 1, volume: 1 },
-        { symbol: "US.LOW", changePct: 2, last: 1, floatShares: 1, volume: 1 },
-      ] } }));
-    expect(screen.queryByText("KO")).toBeTruthy();
-    expect(screen.queryByText("LOW")).toBeNull();
-  });
-
   it("row double-click publishes focus to the panel's linked group", () => {
     const { scanner, focus } = renderPanel({ group: "blue" });
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
@@ -96,7 +86,7 @@ describe("ScannerPanel", () => {
   // factory with a fresh config after a later swatch re-pick) — PanelFrame threads
   // the live re-picked group through as the `group` prop instead.
   it("row double-click uses the live group prop, not the frozen config.group, after a group re-pick", () => {
-    const { scanner, focus } = renderPanel({ group: "green" }, "scanner", "blue");
+    const { scanner, focus } = renderPanel({ group: "green" }, "blue");
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } }));
     fireEvent.doubleClick(screen.getByText("KO"));
@@ -123,18 +113,6 @@ describe("ScannerPanel", () => {
     expect(btn).toBeTruthy();
     fireEvent.click(btn);
     expect(commands.sendCommand).toHaveBeenCalledWith("WatchlistAdd", { symbol: "US.KO" });
-  });
-
-  it("right-click on a row shows the unconditional 'Add ... to watchlist' entry in the movers variant too", () => {
-    const { scanner, commands } = renderPanel({}, "movers");
-    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth",
-      payload: { refreshedAt: "2026-07-08T14:00:00.000Z", rows: [{ symbol: "US.LOW", changePct: 2, last: 1, floatShares: 1, volume: 1 }] } }));
-    const row = screen.getByText("LOW").closest("tr") as HTMLElement;
-    fireEvent.contextMenu(row, { clientX: 20, clientY: 30 });
-    const btn = screen.getByRole("button", { name: "Add LOW to watchlist" });
-    expect(btn).toBeTruthy();
-    fireEvent.click(btn);
-    expect(commands.sendCommand).toHaveBeenCalledWith("WatchlistAdd", { symbol: "US.LOW" });
   });
 
   it("hovering a non-selected, non-new-hit row shows the hover tint, cleared on mouse-leave", () => {
@@ -179,40 +157,59 @@ describe("ScannerPanel", () => {
 
   it("has no persistent input row on load; the ⚙ button reveals the filter inputs", () => {
     renderPanel();
-    expect(screen.queryByLabelText("min change %")).toBeNull();
+    expect(screen.queryByLabelText("min gain %")).toBeNull();
     expect(screen.queryByLabelText("float cap")).toBeNull();
     expect(screen.queryByLabelText("min volume")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /filters/i }));
-    expect(screen.getByLabelText("min change %")).toBeTruthy();
+    expect(screen.getByLabelText("min gain %")).toBeTruthy();
     expect(screen.getByLabelText("float cap")).toBeTruthy();
     expect(screen.getByLabelText("min volume")).toBeTruthy();
   });
 
   it("the summary line reflects the active thresholds", () => {
-    renderPanel({ settings: { thresholds: { minChangePct: 10, floatCapShares: 20_000_000, minVolume: 100_000 } } });
-    expect(screen.getByText("change ≥ 10% · float ≤ 20M · vol ≥ 100k")).toBeTruthy();
+    const { scanner } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [], filters: { mode: "gainers", minChangePct: 10, maxFloatShares: 20_000_000, minVolume: 100_000, floatUnit: "M", volumeUnit: "K" } } }));
+    expect(screen.getByText(/change magnitude ≥ 10% · float ≤ 20M · vol ≥ 100k/)).toBeTruthy();
   });
 
   it("summary line reads 'no filters' when thresholds are off", () => {
     renderPanel();
-    expect(screen.getByText("no filters")).toBeTruthy();
+    expect(screen.getByText(/no filters/)).toBeTruthy();
   });
 
-  it("editing a threshold in the popover and clicking Apply persists via onConfigChange", () => {
-    const { onConfigChange } = renderPanel();
+  it("editing a threshold in the popover and clicking Apply persists via command", () => {
+    const { commands } = renderPanel();
     fireEvent.click(screen.getByRole("button", { name: /filters/i }));
-    fireEvent.change(screen.getByLabelText("min change %"), { target: { value: "7" } });
+    fireEvent.change(screen.getByLabelText("min gain %"), { target: { value: "7" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-    expect(onConfigChange).toHaveBeenCalledWith(expect.objectContaining({
-      thresholds: expect.objectContaining({ minChangePct: 7 }) }));
+    expect(commands.sendCommand).toHaveBeenCalledWith("SetScannerFilters", { filters: expect.objectContaining({ minChangePct: 7 }) });
   });
 
   it("Reset defaults clears the draft inputs without persisting until Apply", () => {
     const { onConfigChange } = renderPanel({ settings: { thresholds: { minChangePct: 10, floatCapShares: null, minVolume: 0 } } });
     fireEvent.click(screen.getByRole("button", { name: /filters/i }));
     fireEvent.click(screen.getByRole("button", { name: "Reset defaults" }));
-    expect((screen.getByLabelText("min change %") as HTMLInputElement).value).toBe("0");
+    expect((screen.getByLabelText("min gain %") as HTMLInputElement).value).toBe("0");
     expect(onConfigChange).not.toHaveBeenCalled();
+  });
+
+  it("offers Most active, hides change threshold, persists it, and resets sort to volume descending", () => {
+    const { commands, onConfigChange } = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /filters/i }));
+    fireEvent.change(screen.getByLabelText("rank mode"), { target: { value: "most_active" } });
+    expect(screen.queryByLabelText("min gain %")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(commands.sendCommand).toHaveBeenCalledWith("SetScannerFilters", { filters: expect.objectContaining({ mode: "most_active" }) });
+    expect(onConfigChange).toHaveBeenCalledWith({ sort: { col: "vol", dir: "desc" } });
+  });
+
+  it("labels extended-hours Most active as approximate", () => {
+    const { scanner } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "afterhours", payload: {
+      refreshedAt: "2026-07-08T21:00:00.000Z", rows: [], filters: { mode: "most_active", minChangePct: 99, maxFloatShares: null, minVolume: 0, floatUnit: "M", volumeUnit: "K" },
+    } }));
+    expect(screen.getByText(/Most active · approximate/)).toBeTruthy();
+    expect(screen.queryByText(/change/)).toBeNull();
   });
 
   it("default view sorts by % change descending", () => {
@@ -240,20 +237,8 @@ describe("ScannerPanel", () => {
     expect(symbols).toEqual(["LOW", "HIGH"]);
   });
 
-  it("movers variant has no filter button and applies no thresholds", () => {
-    const { scanner } = renderPanel(
-      { settings: { thresholds: { minChangePct: 50, floatCapShares: null, minVolume: 0 } } },
-      "movers",
-    );
-    expect(screen.queryByRole("button", { name: /filters/i })).toBeNull();
-    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth",
-      payload: { refreshedAt: "2026-07-08T14:00:00.000Z", rows: [
-        { symbol: "US.LOW", changePct: 2, last: 1, floatShares: 1, volume: 1 }] } }));
-    expect(screen.getByText("LOW")).toBeTruthy(); // not filtered out despite minChangePct:50
-  });
-
   it("follows the live session label", () => {
-    const { scanner } = renderPanel({}, "movers");
+    const { scanner } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "afterhours",
       payload: { refreshedAt: "2026-07-08T21:00:00.000Z", rows: [
         { symbol: "US.AH", changePct: 3, last: 1, floatShares: 1, volume: 1 }] } }));

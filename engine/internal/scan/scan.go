@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -34,6 +35,7 @@ import (
 	ahpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusafterhoursrank"
 	onpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusovernightrank"
 	rankpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetuspremarketrank"
+	filterpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotstockfilter"
 )
 
 type Publisher interface {
@@ -69,22 +71,23 @@ type floatEntry struct {
 }
 
 type Poller struct {
-	cfg      config.Scan
-	r        requester
-	pub      Publisher
-	clk      clock.Clock
-	feed     demandFeed   // nil => pool disabled
-	backfill func(string) // async per-symbol deep-history seed; nil => no backfill
-	pool     *Pool
-	poolSyms atomic.Pointer[[]string]   // lock-free snapshot for the news set
-	floats   map[string]floatEntry      // symbol -> resolved float; absent = unknown
-	otc      map[string]bool            // symbol -> resolved exchange type (true = OTC/Pink); absent = unknown
-	seen     map[string]map[string]bool // session -> symbol -> seen
-	seenDay  int64                      // ET day of the current seen-sets + float cache
-	mu       sync.RWMutex
-	filters  wsmsg.ScannerFilters
-	baseline bool
-	poke     chan struct{}
+	cfg             config.Scan
+	r               requester
+	pub             Publisher
+	clk             clock.Clock
+	feed            demandFeed   // nil => pool disabled
+	backfill        func(string) // async per-symbol deep-history seed; nil => no backfill
+	pool            *Pool
+	poolSyms        atomic.Pointer[[]string]   // lock-free snapshot for the news set
+	floats          map[string]floatEntry      // symbol -> resolved float; absent = unknown
+	otc             map[string]bool            // symbol -> resolved exchange type (true = OTC/Pink); absent = unknown
+	seen            map[string]map[string]bool // session -> symbol -> seen
+	seenDay         int64                      // ET day of the current seen-sets + float cache
+	mu              sync.RWMutex
+	filters         wsmsg.ScannerFilters
+	baseline        bool
+	poke            chan struct{}
+	lastStockFilter time.Time
 }
 
 func New(cfg config.Scan, r requester, pub Publisher, clk clock.Clock, feed demandFeed, backfill func(string)) *Poller {
@@ -103,7 +106,7 @@ func Defaults(cfg config.Scan) wsmsg.ScannerFilters {
 }
 
 func ValidateFilters(f wsmsg.ScannerFilters) error {
-	if f.Mode != "gainers" && f.Mode != "losers" {
+	if f.Mode != "gainers" && f.Mode != "losers" && f.Mode != "most_active" {
 		return fmt.Errorf("invalid mode")
 	}
 	if (f.FloatUnit != "K" && f.FloatUnit != "M") || (f.VolumeUnit != "K" && f.VolumeUnit != "M") {
@@ -377,6 +380,12 @@ func (p *Poller) fetchRank(ctx context.Context, phase session.Phase, modes ...st
 	if len(modes) > 0 {
 		mode = modes[0]
 	}
+	if mode == "most_active" {
+		if phase == session.RTH {
+			return p.fetchMostActiveRTH(ctx)
+		}
+		return p.fetchMostActiveExtended(ctx, phase)
+	}
 	dir := int32(0)
 	if mode == "losers" {
 		dir = 1
@@ -391,6 +400,79 @@ func (p *Poller) fetchRank(ctx context.Context, phase session.Phase, modes ...st
 	default: // PreMarket + Closed
 		return p.fetchPreMarket(ctx, dir)
 	}
+}
+
+func (p *Poller) fetchMostActiveExtended(ctx context.Context, phase session.Phase) ([]rankItem, error) {
+	gainers, err := p.fetchRank(ctx, phase, "gainers")
+	if err != nil {
+		return nil, err
+	}
+	losers, err := p.fetchRank(ctx, phase, "losers")
+	if err != nil {
+		return nil, err
+	}
+	bySymbol := make(map[string]rankItem, len(gainers)+len(losers))
+	for _, it := range append(gainers, losers...) {
+		if old, ok := bySymbol[it.Symbol]; !ok || it.Volume > old.Volume {
+			bySymbol[it.Symbol] = it
+		}
+	}
+	out := make([]rankItem, 0, len(bySymbol))
+	for _, it := range bySymbol {
+		out = append(out, it)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Volume > out[j].Volume })
+	return out, nil
+}
+
+func (p *Poller) fetchMostActiveRTH(ctx context.Context) ([]rankItem, error) {
+	if wait := 3100*time.Millisecond - p.clk.Now().Sub(p.lastStockFilter); !p.lastStockFilter.IsZero() && wait > 0 {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-p.clk.After(wait):
+		}
+	}
+	p.lastStockFilter = p.clk.Now()
+	volume := int32(filterpb.AccumulateField_AccumulateField_Volume)
+	desc := int32(filterpb.SortDir_SortDir_Descend)
+	change := int32(filterpb.AccumulateField_AccumulateField_ChangeRate)
+	price := int32(filterpb.StockField_StockField_CurPrice)
+	one := int32(1)
+	fr, err := p.r.Request(ctx, opend.ProtoQotStockFilter, &filterpb.Request{C2S: &filterpb.C2S{
+		Begin: proto.Int32(0), Num: proto.Int32(200), Market: proto.Int32(int32(qotcommon.QotMarket_QotMarket_US_Security)),
+		BaseFilterList:       []*filterpb.BaseFilter{{FieldName: &price, IsNoFilter: proto.Bool(true)}},
+		AccumulateFilterList: []*filterpb.AccumulateFilter{{FieldName: &volume, IsNoFilter: proto.Bool(true), SortDir: &desc, Days: &one}, {FieldName: &change, IsNoFilter: proto.Bool(true), Days: &one}},
+	}})
+	if err != nil {
+		return nil, err
+	}
+	var resp filterpb.Response
+	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
+		return nil, err
+	}
+	if resp.GetRetType() != 0 {
+		return nil, fmt.Errorf("stock filter retType=%d: %s", resp.GetRetType(), resp.GetRetMsg())
+	}
+	out := make([]rankItem, 0, len(resp.GetS2C().GetDataList()))
+	for _, d := range resp.GetS2C().GetDataList() {
+		it := rankItem{Symbol: symbolOf(d.GetSecurity())}
+		for _, v := range d.GetBaseDataList() {
+			if v.GetFieldName() == price {
+				it.Last = v.GetValue()
+			}
+		}
+		for _, v := range d.GetAccumulateDataList() {
+			switch v.GetFieldName() {
+			case volume:
+				it.Volume = int64(v.GetValue())
+			case change:
+				it.ChangePct = v.GetValue()
+			}
+		}
+		out = append(out, it)
+	}
+	return out, nil
 }
 
 func (p *Poller) fetchPreMarket(ctx context.Context, dir int32) ([]rankItem, error) {

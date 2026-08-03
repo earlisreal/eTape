@@ -1,4 +1,4 @@
-// Chrome-layer formatters for the monitoring tables (scanner/movers/news).
+// Chrome-layer formatters for the monitoring tables (scanner/news).
 // The canvas surfaces format via render/format.ts; these are the React-table
 // equivalents: 3-digit-safe %, compact float/volume, and ET-midnight math for
 // the scanner's dedup reset. Pure and DOM-free.

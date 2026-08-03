@@ -72,7 +72,7 @@ export interface PanelDef {
 }
 
 // Plan 1 registered the two stack-proving panels; Plan 2 added the chart panel;
-// Plan 3 added the L2 ladder + time & sales; Plan 4 added scanner / movers / news;
+// Plan 3 added the L2 ladder + time & sales; Plan 4 added scanner / news;
 // Plan 5 adds the execution surfaces (account-bar / positions / open-orders /
 // order-ticket). Plan 6 owns Playwright smoke E2E + ui/dist static serving.
 export const PANELS: Record<string, PanelDef> = {

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { PanelProps } from "./registry";
 import type { ScannerFilters, ScannerSession } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
@@ -17,6 +17,7 @@ const SESSION_LABEL: Record<ScannerSession, string> = {
   premarket: "Pre-market", rth: "RTH", afterhours: "After-hours", overnight: "Overnight",
 };
 const DEFAULT_SORT: SortState = { col: "changePct", dir: "desc" };
+const modeSort = (mode: ScannerFilters["mode"]): SortState => mode === "most_active" ? { col: "vol", dir: "desc" } : { col: "changePct", dir: mode === "losers" ? "asc" : "desc" };
 const DEFAULT_FILTERS: ScannerFilters = { mode: "gainers", minChangePct: 0, maxFloatShares: null, minVolume: 0, floatUnit: "M", volumeUnit: "K" };
 const COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
   { col: "sym", label: "Symbol", align: "left" },
@@ -44,7 +45,7 @@ function readSort(s: Record<string, unknown>): SortState {
 }
 
 export function ScannerPanel(
-  { config, stores, linkGroups, commands, onConfigChange, group: groupProp }: PanelProps & { variant?: "scanner" | "movers" },
+  { config, stores, linkGroups, commands, onConfigChange, group: groupProp }: PanelProps,
 ): JSX.Element {
   const { palette } = useTheme();
   // config.group is frozen at panel creation (dockview never re-invokes the panel
@@ -56,6 +57,7 @@ export function ScannerPanel(
   const snap = useSyncExternalStore((cb) => stores.scanner.subscribe(cb), () => stores.scanner.getSnapshot());
   const cv = useMemo(() => stores.scanner.currentView(), [snap, stores.scanner]);
   const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
+  const sortedMode = useRef<ScannerFilters["mode"] | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [draft, setDraft] = useState<ScannerFilters>(DEFAULT_FILTERS);
   const [engineFilters, setEngineFilters] = useState<ScannerFilters | null>(null);
@@ -81,11 +83,17 @@ export function ScannerPanel(
   }, [commands]);
 
   const filters = cv.filters ?? engineFilters ?? DEFAULT_FILTERS;
+  useEffect(() => {
+    if (sortedMode.current === filters.mode) return;
+    sortedMode.current = filters.mode;
+    setSort(modeSort(filters.mode));
+  }, [filters.mode]);
   const rows = useMemo(() => sortRows(cv.rows, sort, SORT_ACCESSORS), [cv.rows, sort]);
 
   const openFilters = () => { setDraft(filters); setFiltersOpen(true); };
   const applyFilters = () => {
     void commands.sendCommand("SetScannerFilters", { filters: draft });
+    if (draft.mode !== filters.mode) { const next = modeSort(draft.mode); setSort(next); onConfigChange({ sort: next }); }
     setFiltersOpen(false);
   };
   const resetDefaults = () => setDraft(DEFAULT_FILTERS);
@@ -121,8 +129,8 @@ export function ScannerPanel(
         {filtersOpen && (
           <div className="popover" style={{ top: 30, left: 8, width: 220 }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label>rank <select aria-label="rank mode" value={draft.mode} onChange={(e) => setDraft({ ...draft, mode: e.target.value as ScannerFilters["mode"] })}><option value="gainers">Top gainers</option><option value="losers">Top losers</option></select></label>
-			  <label>{draft.mode === "gainers" ? "min gain %" : "min loss %"} <input aria-label={draft.mode === "gainers" ? "min gain %" : "min loss %"} type="number" min="0" value={draft.minChangePct} onChange={(e) => setDraft({ ...draft, minChangePct: Math.max(0, Number(e.target.value)) })} style={{ width: 60 }} /></label>
+              <label>rank <select aria-label="rank mode" value={draft.mode} onChange={(e) => setDraft({ ...draft, mode: e.target.value as ScannerFilters["mode"] })}><option value="gainers">Top gainers</option><option value="losers">Top losers</option><option value="most_active">Most active</option></select></label>
+			  {draft.mode !== "most_active" && <label>{draft.mode === "gainers" ? "min gain %" : "min loss %"} <input aria-label={draft.mode === "gainers" ? "min gain %" : "min loss %"} type="number" min="0" value={draft.minChangePct} onChange={(e) => setDraft({ ...draft, minChangePct: Math.max(0, Number(e.target.value)) })} style={{ width: 60 }} /></label>}
               <label>float ≤ <input aria-label="float cap" type="number" min="0" value={draft.maxFloatShares === null ? "" : draft.maxFloatShares / unitScale(draft.floatUnit)} onChange={(e) => setDraft({ ...draft, maxFloatShares: e.target.value === "" ? null : Number(e.target.value) * unitScale(draft.floatUnit) })} style={{ width: 70 }} /><select aria-label="float unit" value={draft.floatUnit} onChange={(e) => setDraft({ ...draft, floatUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
               <label>vol ≥ <input aria-label="min volume" type="number" min="0" value={draft.minVolume / unitScale(draft.volumeUnit)} onChange={(e) => setDraft({ ...draft, minVolume: Number(e.target.value) * unitScale(draft.volumeUnit) })} style={{ width: 70 }} /><select aria-label="volume unit" value={draft.volumeUnit} onChange={(e) => setDraft({ ...draft, volumeUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
@@ -135,7 +143,7 @@ export function ScannerPanel(
       </div>
       {(
         <div className="mono" style={{ padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>
-          {filters.mode === "gainers" ? "Top gainers" : "Top losers"} · {formatFilterSummary({ minChangePct: filters.minChangePct, floatCapShares: filters.maxFloatShares, minVolume: filters.minVolume })}
+          {filters.mode === "most_active" ? `Most active${cv.session === "rth" ? "" : " · approximate"}` : filters.mode === "gainers" ? "Top gainers" : "Top losers"} · {formatFilterSummary({ minChangePct: filters.mode === "most_active" ? 0 : filters.minChangePct, floatCapShares: filters.maxFloatShares, minVolume: filters.minVolume })}
         </div>
       )}
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
