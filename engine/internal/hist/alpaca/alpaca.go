@@ -56,6 +56,10 @@ func New(base, keyID, secret, feedName string, clk clock.Clock) *Client {
 }
 
 func (c *Client) DailyBars(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error) {
+	to = c.clk.Now().Add(-24 * time.Hour)
+	if !to.After(from) {
+		return nil, nil
+	}
 	return c.bars(ctx, symbol, "1Day", "all", from, to)
 }
 

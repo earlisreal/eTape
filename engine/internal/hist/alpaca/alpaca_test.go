@@ -66,6 +66,38 @@ func TestIntraday1mAlwaysClampsEndToNowMinus16m(t *testing.T) {
 	}
 }
 
+func TestDailyBarsAlwaysClampsEndToNowMinus24h(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	var gotEnd string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEnd = r.URL.Query().Get("end")
+		_, _ = w.Write([]byte(`{"bars":[],"next_page_token":null}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "K", "S", "iex", clock.NewFake(now))
+	if _, err := c.DailyBars(context.Background(), "US.AAPL", time.UnixMilli(0), now.Add(48*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	wantEnd := now.Add(-24 * time.Hour).Format(time.RFC3339)
+	if gotEnd != wantEnd {
+		t.Fatalf("end = %q, want clamp %q", gotEnd, wantEnd)
+	}
+}
+
+func TestDailyBarsSkipsEmptyCappedRange(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer srv.Close()
+
+	c := New(srv.URL, "K", "S", "iex", clock.NewFake(now))
+	bars, err := c.DailyBars(context.Background(), "US.AAPL", now.Add(-24*time.Hour), now)
+	if err != nil || len(bars) != 0 || requests != 0 {
+		t.Fatalf("bars = %v, err = %v, requests = %d; want empty, nil, 0", bars, err, requests)
+	}
+}
+
 func TestBarsPaginateViaNextPageToken(t *testing.T) {
 	var gotAdj string
 	mux := http.NewServeMux()
@@ -80,7 +112,7 @@ func TestBarsPaginateViaNextPageToken(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := New(srv.URL, "K", "S", "iex", clock.NewFake(time.UnixMilli(0)))
+	c := New(srv.URL, "K", "S", "iex", clock.NewFake(time.UnixMilli(1<<40)))
 	bars, err := c.DailyBars(context.Background(), "US.AAPL", time.UnixMilli(0), time.UnixMilli(1<<40))
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +153,7 @@ func TestNewDefaultsToSIP(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := New(srv.URL, "K", "S", "", clock.NewFake(time.UnixMilli(0))) // empty feed => default
+	c := New(srv.URL, "K", "S", "", clock.NewFake(time.UnixMilli(1<<40))) // empty feed => default
 	if _, err := c.DailyBars(context.Background(), "US.AAPL", time.UnixMilli(0), time.UnixMilli(1<<40)); err != nil {
 		t.Fatal(err)
 	}
