@@ -272,7 +272,9 @@ max_open_orders = 10
 ```
 
 The UI and WebSocket are served on `127.0.0.1:8686` by default (`[uihub]` section to
-change it). OpenD is expected on `127.0.0.1:11111` (`[opend]` section).
+change it). On startup, eTape waits two seconds for an existing UI tab to reconnect
+before opening the browser, avoiding a duplicate tab after a normal engine restart.
+OpenD is expected on `127.0.0.1:11111` (`[opend]` section).
 
 ## Windows
 
