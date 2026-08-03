@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -31,9 +32,11 @@ func TestPutPreservesSiblingsByteForByte(t *testing.T) {
 	if p := got["alpaca"]; p.KeyID != "AK" || p.SecretKey != "AS" {
 		t.Fatalf("put entry wrong: %+v", p)
 	}
-	fi, _ := os.Stat(p)
-	if fi.Mode().Perm() != 0o600 {
-		t.Fatalf("perm = %v, want 0600", fi.Mode().Perm())
+	if runtime.GOOS != "windows" {
+		fi, _ := os.Stat(p)
+		if fi.Mode().Perm() != 0o600 {
+			t.Fatalf("perm = %v, want 0600", fi.Mode().Perm())
+		}
 	}
 }
 

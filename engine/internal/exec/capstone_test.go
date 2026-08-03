@@ -127,8 +127,13 @@ func TestCapstoneMasterArmingCoversEveryVenue(t *testing.T) {
 	// the broker->pump->Run pipeline; wait for both fills before the test
 	// returns, otherwise the deferred cancel()+st.Close() can race with Run
 	// still appending fills to the store.
-	waitFor(t, c, func(u exec.Update) bool { f, ok := u.(exec.FillUpdate); return ok && f.Fill.OrderID == ack1.OrderID })
-	waitFor(t, c, func(u exec.Update) bool { f, ok := u.(exec.FillUpdate); return ok && f.Fill.OrderID == ack2.OrderID })
+	filled := map[string]bool{}
+	waitFor(t, c, func(u exec.Update) bool {
+		if f, ok := u.(exec.FillUpdate); ok {
+			filled[f.Fill.OrderID] = true
+		}
+		return filled[ack1.OrderID] && filled[ack2.OrderID]
+	})
 }
 
 func TestCapstoneDayLossAutoDisarm(t *testing.T) {

@@ -311,6 +311,9 @@ prototypes/ Python research scripts (latency benchmarks, tick aggregation, …)
 | E2E (Playwright, real engine in replay mode) | `cd ui && npm run e2e` |
 | Regenerate TS wire types from Go | `cd engine && make gen-ts` (`gen-ts-check` to verify drift) |
 
+CI runs the full engine test suite on Linux and Windows; race, vet, lint, and
+generated-contract checks remain Linux-only.
+
 The Go structs are the single source of truth for the engine↔UI protocol —
 `ui/src/gen/wsmsg.ts` is generated, never hand-edited.
 

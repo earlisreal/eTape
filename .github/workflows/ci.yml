@@ -51,6 +51,22 @@ jobs:
       - name: TS contract drift check (gen-ts-check)
         run: make -C engine gen-ts-check
 
+  engine-windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: engine/go.mod
+          cache-dependency-path: engine/go.sum
+
+      - name: go test (full)
+        working-directory: engine
+        run: go test ./...
+
   ui:
     # Golden PNGs are generated on Windows. Cairo/Pango text rasterization is
     # OS-specific even with the same bundled TTF, so strict pixel comparison
