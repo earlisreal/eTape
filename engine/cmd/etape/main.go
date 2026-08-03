@@ -433,7 +433,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}
 	if !*noOpen {
 		go func() {
-			if uiConnectedWithin(srv.FirstConnection(), 2*time.Second) {
+			if uiConnectedWithin(srv.FirstConnection(), 4*time.Second) {
 				log.Info("existing UI reconnected; suppressing browser open")
 				return
 			}
