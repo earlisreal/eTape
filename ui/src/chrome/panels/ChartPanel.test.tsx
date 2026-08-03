@@ -93,7 +93,7 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sh
         linkGroups={linkGroups} commands={commands} onConfigChange={onConfigChange} />
     </ThemeProvider>,
   );
-  return { ...utils, stores, onConfigChange, scheduler, commands };
+  return { ...utils, stores, onConfigChange, scheduler, commands, linkGroups };
 }
 
 // Pushes a bar into the shared BarStore, the same delta shape the engine sends
@@ -439,6 +439,50 @@ describe("ChartPanel", () => {
     expect(commands.sendQuery).toHaveBeenCalledWith("QueryChartWindow", expect.objectContaining({
       symbol: "US.AAPL", timeframe: "D", indicatorSeriesKeys: ["c1:EMA-0"],
     }));
+  });
+
+  it("waits for history-ready before reloading a reused VWAP after a symbol switch", async () => {
+    const key = "c1:VWAP-0";
+    const { stores, commands, linkGroups } = renderChart("c1", undefined, undefined, {
+      timeframe: "D",
+      indicators: [{ instanceId: key, type: "VWAP", params: {} }],
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    commands.sendQuery.mockClear();
+    commands.sendQuery.mockImplementation(async (_name: string, raw: unknown) => {
+      const args = raw as { symbol: string; timeframe: string; indicatorSeriesKeys: string[] };
+      return {
+        symbol: args.symbol, timeframe: args.timeframe, fromMs: 1, toMs: 3, bars: [],
+        indicators: args.indicatorSeriesKeys.length
+          ? [{ seriesKey: key, points: [{ timeMs: 2, value: 4.25 }] }]
+          : [],
+      };
+    });
+
+    act(() => linkGroups.focus("green", "US.YYAI"));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const immediate = commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow");
+    expect(immediate).toHaveLength(1);
+    expect(immediate[0][1]).toEqual(expect.objectContaining({
+      symbol: "US.YYAI", indicatorSeriesKeys: [],
+    }));
+
+    // An old live point can arrive after the controller reset but before the
+    // engine's ordered replacement snapshot reaches the mirror.
+    act(() => stores.indicators.apply({ kind: "delta", topic: "md.indicator", key,
+      payload: { timeMs: 1, value: 99 } }));
+    expect(stores.indicators.series(key)).toEqual([{ timeMs: 1, value: 99 }]);
+    expect(commands.sendQuery).toHaveBeenCalledTimes(1); // accepted subscribe ack did not query
+
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "history-ready", detail: "US.YYAI",
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(commands.sendQuery).toHaveBeenLastCalledWith("QueryChartWindow", expect.objectContaining({
+      symbol: "US.YYAI", indicatorSeriesKeys: [key],
+    }));
+    expect(stores.indicators.series(key)).toEqual([{ timeMs: 2, value: 4.25 }]);
   });
 
   it("camera button calls the chart's takeScreenshot", () => {

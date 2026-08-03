@@ -241,6 +241,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     // indicator ack/history-ready arriving in that interval must request latest,
     // not translate that stale logical range onto the new timeframe.
     let reloadLatestRequired = true;
+    let indicatorReloadPending = false;
 
     const indicatorKeys = () => instancesRef.current.flatMap((inst) => describeIndicator(inst, paletteRef.current).map((series) => series.key));
     const mergeWindow = (result: QueryChartWindowResult, generation: number, select = true) => {
@@ -254,7 +255,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const queryLatest = async () => {
       const generation = ++viewportGeneration;
       const tailBars = Math.max(20, Math.ceil(host.clientWidth / 6));
-      const keys = indicatorKeys();
+      const keys = indicatorReloadPending ? [] : indicatorKeys();
       const result = await commands.sendQuery("QueryChartWindow", {
         symbol: currentSymbol, timeframe: tfRef.current, fromMs: 0, toMs: 0, tailBars,
         indicatorSeriesKeys: keys,
@@ -275,7 +276,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       const clippedTo = Math.min(toMs, Date.now());
       const gaps = stores.bars.missingRanges(currentSymbol, tfRef.current, fromMs, clippedTo);
       for (const gap of gaps) {
-        const keys = indicatorKeys();
+        const keys = indicatorReloadPending ? [] : indicatorKeys();
         const result = await commands.sendQuery("QueryChartWindow", {
           symbol: currentSymbol, timeframe: tfRef.current, fromMs: gap.fromMs, toMs: gap.toMs, tailBars: 0,
           indicatorSeriesKeys: keys,
@@ -284,7 +285,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       }
       if (generation !== viewportGeneration) return;
       stores.bars.expandWindow(currentSymbol, tfRef.current, fromMs, clippedTo);
-      for (const key of indicatorKeys()) stores.indicators.expandWindow(key, fromMs, clippedTo);
+      if (!indicatorReloadPending) for (const key of indicatorKeys()) stores.indicators.expandWindow(key, fromMs, clippedTo);
       // Apply merged data before restoring. Preserve fractional logical bounds:
       // setVisibleRange recalculates spacing and snaps bars fully into viewport.
       // Prepending shifts old logical indexes by number of inserted older bars.
@@ -394,7 +395,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     drawingsPrimRef.current = drawings;
     setFacadePaletteRef.current = setPalette;
     const controller = new ChartController(facade, palette, { symbol, timeframe: timeframe0 },
-      { bars: stores.bars, indicators: stores.indicators, commands, onIndicatorSubscribed: () => queryViewportRef.current?.() });
+      { bars: stores.bars, indicators: stores.indicators, commands });
     controller.mount();
     controllerRef.current = controller;
 
@@ -445,6 +446,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     };
     let pendingFirstPaint: { symbol: string; timeframe: string; startedAt: number; sequence: number } | null = null;
     let lastFirstPaintSequence = 0;
+    let initialized = false;
     let firstPaintLogFrame: number | null = null;
     const applySymbol = () => {
       currentSymbol = linkGroups.symbolFor(groupRef.current) ?? symbol;
@@ -455,6 +457,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       }
       viewportGeneration++;
       reloadLatestRequired = true;
+      indicatorReloadPending = initialized;
+      initialized = true;
       olderHistory.reset();
       setAllExhausted(false);
       controller.setSymbol(currentSymbol);
@@ -484,6 +488,9 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         nextSeen.add(key);
         if (seenEventKeys.has(key)) continue;
         if (event.kind !== "history-ready" || event.detail !== currentSymbol) continue;
+        for (const indicatorKey of indicatorKeys()) stores.indicators.reset(indicatorKey);
+        indicatorReloadPending = false;
+        reloadLatestRequired = true;
         queryViewportRef.current?.();
       }
       // HealthStore retains only its bounded event window. Mirroring that window
