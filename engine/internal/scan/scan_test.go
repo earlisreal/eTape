@@ -232,6 +232,9 @@ type fakeReq struct {
 	afterHrsRsp  *ahpb.Response   // 3411 post-market
 	overnightRsp *onpb.Response   // 3412 overnight
 	rankErr      error
+	topErr       error
+	preCalls     int
+	topCalls     int
 	snap         func(codes []string) (*snappb.Response, error)
 	snapCalls    int
 	// staticInfo answers 3202 (exchange type). nil => every code resolves as
@@ -243,11 +246,16 @@ type fakeReq struct {
 func (f *fakeReq) Request(_ context.Context, protoID uint32, req proto.Message) (opend.Frame, error) {
 	switch protoID {
 	case opend.ProtoQotGetUSPreMarketRank:
+		f.preCalls++
 		if f.rankErr != nil {
 			return opend.Frame{}, f.rankErr
 		}
 		return frameOf(f.rankResp), nil
 	case opend.ProtoQotGetTopMoversRank:
+		f.topCalls++
+		if f.topErr != nil {
+			return opend.Frame{}, f.topErr
+		}
 		return frameOf(f.topMoversRsp), nil
 	case opend.ProtoQotGetUSAfterHoursRank:
 		return frameOf(f.afterHrsRsp), nil
@@ -360,6 +368,14 @@ func snap(code string, outstanding int64, equity bool) *snappb.Snapshot {
 	return s
 }
 
+func marketSnap(code string, outstanding int64, last, close float64, volume int64) *snappb.Snapshot {
+	s := snap(code, outstanding, true)
+	s.Basic.CurPrice = proto.Float64(last)
+	s.Basic.LastClosePrice = proto.Float64(close)
+	s.Basic.Volume = proto.Int64(volume)
+	return s
+}
+
 func snapResp(snaps ...*snappb.Snapshot) *snappb.Response {
 	return &snappb.Response{RetType: proto.Int32(0), S2C: &snappb.S2C{SnapshotList: snaps}}
 }
@@ -405,6 +421,14 @@ func rankResp(items ...rankItem) *rankpb.Response {
 		})
 	}
 	return &rankpb.Response{RetType: proto.Int32(0), S2C: &rankpb.S2C{DataList: data}}
+}
+
+func topResp(items ...rankItem) *tmrpb.Response {
+	data := make([]*tmrpb.TopMoversRankItem, 0, len(items))
+	for _, it := range items {
+		data = append(data, &tmrpb.TopMoversRankItem{Security: usSec(codeOf(it.Symbol)), ChangeRatio: proto.Float64(it.ChangePct), CurPrice: proto.Float64(it.Last), Volume: proto.Int64(it.Volume)})
+	}
+	return &tmrpb.Response{RetType: proto.Int32(0), S2C: &tmrpb.S2C{DataList: data}}
 }
 
 func newTestPoller(cfg config.Scan, fr *fakeReq, pub *capturePub) *Poller {
@@ -640,7 +664,7 @@ func TestPollOnceDropsOTCBeforeFloatResolveAndPool(t *testing.T) {
 					t.Fatalf("OTC1 must be dropped before the 3203 float call, got codes=%v", codes)
 				}
 			}
-			return snapResp(snap("LOWF", 20_000_000, true)), nil
+			return snapResp(marketSnap("LOWF", 20_000_000, 4, 3.5, 300_000)), nil
 		},
 	}
 	sf := &spyFeed{}
@@ -668,9 +692,9 @@ func TestPollOnceEndToEnd(t *testing.T) {
 		),
 		snap: func(codes []string) (*snappb.Response, error) {
 			return snapResp(
-				snap("LOWF", 20_000_000, true),
-				snap("BIGF", 500_000_000, true),
-				snap("THIN", 1_000_000, true),
+				marketSnap("LOWF", 20_000_000, 4, 3.5, 300_000),
+				marketSnap("BIGF", 500_000_000, 8, 6, 900_000),
+				marketSnap("THIN", 1_000_000, 1, .75, 5_000),
 			), nil
 		},
 	}
@@ -701,8 +725,142 @@ func TestPollOnceEndToEnd(t *testing.T) {
 	if len(pub.hits) != 0 {
 		t.Fatalf("baseline seeded, US.LOWF already seen -> no hits on second poll: %+v", pub.hits)
 	}
-	if fr.snapCalls != 1 {
-		t.Fatalf("float cache should make the second poll issue zero snapshots: snapCalls=%d", fr.snapCalls)
+	if fr.snapCalls != 2 {
+		t.Fatalf("each poll should refresh accumulated rows: snapCalls=%d", fr.snapCalls)
+	}
+}
+
+func TestRTHBootstrapIsStickyAndRunsOnce(t *testing.T) {
+	fr := &fakeReq{
+		rankResp:     rankResp(rankItem{Symbol: "US.PRE", ChangePct: 8, Last: 2, Volume: 10}),
+		topMoversRsp: topResp(rankItem{Symbol: "US.RTH", ChangePct: 6, Last: 3, Volume: 20}),
+		snap: func(codes []string) (*snappb.Response, error) {
+			out := make([]*snappb.Snapshot, 0, len(codes))
+			for _, code := range codes {
+				out = append(out, marketSnap(code, 1_000_000, 2, 1, 100))
+			}
+			return snapResp(out...), nil
+		},
+	}
+	pub := &capturePub{}
+	clk := clock.NewFake(et(2026, 7, 8, 10, 0))
+	p := New(config.Scan{Enabled: true}, fr, pub, clk, nil, nil)
+	p.pollOnce(context.Background(), clk.Now())
+	p.pollOnce(context.Background(), clk.Now())
+	if fr.preCalls != 1 || fr.topCalls != 2 {
+		t.Fatalf("calls pre=%d rth=%d", fr.preCalls, fr.topCalls)
+	}
+	if got := len(pub.ranks[1].Rows); got != 2 {
+		t.Fatalf("sticky combined rows=%d: %+v", got, pub.ranks[1].Rows)
+	}
+}
+
+func TestRTHBootstrapFailureRetriesWithoutBlocking(t *testing.T) {
+	fr := &fakeReq{rankErr: fmt.Errorf("temporary"), rankResp: rankResp(rankItem{Symbol: "US.PRE", ChangePct: 8}), topMoversRsp: topResp(rankItem{Symbol: "US.RTH", ChangePct: 6}), snap: func(codes []string) (*snappb.Response, error) {
+		out := make([]*snappb.Snapshot, 0, len(codes))
+		for _, code := range codes {
+			out = append(out, marketSnap(code, 1, 2, 1, 100))
+		}
+		return snapResp(out...), nil
+	}}
+	pub := &capturePub{}
+	clk := clock.NewFake(et(2026, 7, 8, 10, 0))
+	p := New(config.Scan{Enabled: true}, fr, pub, clk, nil, nil)
+	p.pollOnce(context.Background(), clk.Now())
+	if len(pub.ranks) != 1 || len(pub.ranks[0].Rows) != 1 {
+		t.Fatalf("RTH must publish despite bootstrap failure: %+v", pub.ranks)
+	}
+	fr.rankErr = nil
+	p.pollOnce(context.Background(), clk.Now())
+	p.pollOnce(context.Background(), clk.Now())
+	if fr.preCalls != 2 || len(pub.ranks[2].Rows) != 2 {
+		t.Fatalf("bootstrap retry/stop failed: calls=%d rows=%+v", fr.preCalls, pub.ranks[2].Rows)
+	}
+}
+
+func TestRTHFilterResetRepeatsBootstrap(t *testing.T) {
+	fr := &fakeReq{rankResp: rankResp(rankItem{Symbol: "US.PRE", ChangePct: 8}), topMoversRsp: topResp(rankItem{Symbol: "US.RTH", ChangePct: 6}), snap: func(codes []string) (*snappb.Response, error) {
+		out := make([]*snappb.Snapshot, 0, len(codes))
+		for _, code := range codes {
+			out = append(out, marketSnap(code, 1, 2, 1, 100))
+		}
+		return snapResp(out...), nil
+	}}
+	clk := clock.NewFake(et(2026, 7, 8, 10, 0))
+	p := New(config.Scan{Enabled: true}, fr, &capturePub{}, clk, nil, nil)
+	p.pollOnce(context.Background(), clk.Now())
+	f := p.Filters()
+	f.MinVolume = 1
+	if err := p.SetFilters(f); err != nil {
+		t.Fatal(err)
+	}
+	p.pollOnce(context.Background(), clk.Now())
+	if fr.preCalls != 2 {
+		t.Fatalf("filter reset premarket calls=%d", fr.preCalls)
+	}
+}
+
+func TestAccumulatedRowsRefreshAndSurviveSnapshotFailure(t *testing.T) {
+	fail := false
+	fr := &fakeReq{rankResp: rankResp(rankItem{Symbol: "US.A", ChangePct: 5, Last: 1, Volume: 1}), snap: func(codes []string) (*snappb.Response, error) {
+		if fail {
+			return nil, fmt.Errorf("temporary")
+		}
+		return snapResp(marketSnap("A", 1, 12, 10, 321)), nil
+	}}
+	pub := &capturePub{}
+	clk := clock.NewFake(et(2026, 7, 8, 8, 0))
+	p := New(config.Scan{Enabled: true}, fr, pub, clk, nil, nil)
+	p.pollOnce(context.Background(), clk.Now())
+	fail = true
+	p.pollOnce(context.Background(), clk.Now())
+	for i := range pub.ranks {
+		r := pub.ranks[i].Rows[0]
+		if r.Last == nil || *r.Last != 12 || r.ChangePct == nil || *r.ChangePct != 20 || r.Volume != 321 {
+			t.Fatalf("poll %d did not preserve refreshed values: %+v", i, r)
+		}
+	}
+}
+
+func TestSnapshotRefreshUpdatesPriceAndVolumeWithoutClose(t *testing.T) {
+	fr := &fakeReq{rankResp: rankResp(rankItem{Symbol: "US.A", ChangePct: 5, Last: 1, Volume: 1}), snap: func(codes []string) (*snappb.Response, error) {
+		return snapResp(marketSnap("A", 1, 12, 0, 321)), nil
+	}}
+	pub := &capturePub{}
+	clk := clock.NewFake(et(2026, 7, 8, 8, 0))
+	p := New(config.Scan{Enabled: true}, fr, pub, clk, nil, nil)
+	p.pollOnce(context.Background(), clk.Now())
+	r := pub.ranks[0].Rows[0]
+	if r.Last == nil || *r.Last != 12 || r.ChangePct == nil || *r.ChangePct != 5 || r.Volume != 321 {
+		t.Fatalf("price/volume should refresh while percent is preserved without a close: %+v", r)
+	}
+}
+
+func TestBoardSurvivesCycleUntilPostMarketTransition(t *testing.T) {
+	fr := &fakeReq{
+		overnightRsp: &onpb.Response{RetType: proto.Int32(0), S2C: &onpb.S2C{DataList: []*onpb.OvernightRankItem{{Security: usSec("ON"), OvernightChangeRatio: proto.Float64(5), OvernightPrice: proto.Float64(2), OvernightVolume: proto.Int64(10)}}}},
+		rankResp:     rankResp(rankItem{Symbol: "US.PRE", ChangePct: 6}),
+		topMoversRsp: topResp(rankItem{Symbol: "US.RTH", ChangePct: 7}),
+		afterHrsRsp:  &ahpb.Response{RetType: proto.Int32(0), S2C: &ahpb.S2C{DataList: []*ahpb.AfterHoursRankItem{{Security: usSec("POST"), AfterHoursChangeRatio: proto.Float64(8), AfterHoursPrice: proto.Float64(2), AfterHoursVolume: proto.Int64(10)}}}},
+		snap: func(codes []string) (*snappb.Response, error) {
+			out := make([]*snappb.Snapshot, 0, len(codes))
+			for _, code := range codes {
+				out = append(out, marketSnap(code, 1, 2, 1, 100))
+			}
+			return snapResp(out...), nil
+		},
+	}
+	pub := &capturePub{}
+	clk := clock.NewFake(et(2026, 7, 8, 2, 0))
+	p := New(config.Scan{Enabled: true}, fr, pub, clk, nil, nil)
+	p.pollOnce(context.Background(), et(2026, 7, 8, 2, 0))
+	p.pollOnce(context.Background(), et(2026, 7, 8, 10, 0))
+	if got := len(pub.ranks[1].Rows); got != 3 {
+		t.Fatalf("overnight/pre/RTH board rows=%d: %+v", got, pub.ranks[1].Rows)
+	}
+	p.pollOnce(context.Background(), et(2026, 7, 8, 16, 0))
+	if got := pub.ranks[2].Rows; len(got) != 1 || got[0].Symbol != "US.POST" {
+		t.Fatalf("post-market reset rows=%+v", got)
 	}
 }
 
@@ -834,7 +992,7 @@ func TestPollOnceDrivesPool(t *testing.T) {
 	fr := &fakeReq{
 		rankResp: rankResp(rankItem{Symbol: "US.LOWF", ChangePct: 12.5, Last: 4.2, Volume: 300_000}),
 		snap: func(codes []string) (*snappb.Response, error) {
-			return snapResp(snap("LOWF", 20_000_000, true)), nil
+			return snapResp(marketSnap("LOWF", 20_000_000, 4.2, 3.5, 300_000)), nil
 		},
 	}
 	sf := &spyFeed{}
