@@ -33,6 +33,24 @@ export default defineConfig({
     // Everything else keeps the faster default (threads) pool.
     projects: [
       {
+        extends: true,
+        test: {
+          name: 'chart-core',
+          include: [
+            'src/data/BarStore.test.ts',
+            'src/render/chart/ChartController.test.ts',
+            'src/render/chart/olderHistory.test.ts',
+          ],
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'chart-panel',
+          include: ['src/chrome/panels/ChartPanel.test.tsx'],
+        },
+      },
+      {
         test: {
           name: 'golden',
           include: ['test/golden/**/*.test.ts', 'test/golden/**/*.golden.test.ts'],

@@ -778,7 +778,6 @@ func (o *Orchestrator) loadOlder(ctx context.Context, symbol string, requiredSta
 
 	// Determine the query window: range-driven (viewport-first) or watermark-driven.
 	var from, to time.Time
-	var cur int64 // watermark for advancing after range-driven fetch
 
 	if requiredStartMs > 0 && requiredEndMs > 0 {
 		// Range-driven: the UI demands a specific window.
@@ -790,17 +789,10 @@ func (o *Orchestrator) loadOlder(ctx context.Context, symbol string, requiredSta
 		if to.Before(from) {
 			return olderResult{exhausted: true}, nil
 		}
-		o.mu.Lock()
-		cur = o.oldest1m[symbol]
-		o.mu.Unlock()
-		// Duplicate covered demand: already loaded to an older/equal start.
-		if cur > 0 && from.UnixMilli() >= cur {
-			return olderResult{}, nil
-		}
 	} else {
 		// Watermark-driven: one chunk older than the current watermark.
 		o.mu.Lock()
-		cur = o.oldest1m[symbol]
+		cur := o.oldest1m[symbol]
 		o.mu.Unlock()
 		if cur == 0 {
 			return olderResult{}, fmt.Errorf("load older: no backfill watermark for %s", symbol)

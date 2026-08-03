@@ -40,6 +40,31 @@ func TestLoadOlderArchiveFirstServesWithoutChain(t *testing.T) {
 	}
 }
 
+func TestLoadOlderRangeSeedsArchiveInsideExploredWatermark(t *testing.T) {
+	from := fixedNow().AddDate(0, 0, -5)
+	to := from.Add(2 * time.Minute)
+	bars := []feed.Bar{bar(from.UnixMilli()), bar(from.Add(time.Minute).UnixMilli())}
+	arch := &fakeArchive{m1: bars}
+	fetcher := &fakeFetcher{}
+	seed := &fakeSeeder{}
+	o := New(nil, chain(fetcher), &fakeTail{}, seed, arch, clock.NewFake(fixedNow()), Config{IntradayDays: 20})
+	// Warm records explored archive depth, but does not publish that full depth
+	// into the mirror. A viewport request inside that watermark must still seed
+	// its archived bars instead of being mistaken for an already-loaded range.
+	o.noteBackfilled("US.AAPL", fixedNow().AddDate(0, 0, -20))
+
+	added, exhausted, err := o.LoadOlder(context.Background(), "US.AAPL", from.UnixMilli(), to.UnixMilli())
+	if err != nil || exhausted || added != len(bars) {
+		t.Fatalf("range archive load = added=%d exhausted=%v err=%v, want added=%d", added, exhausted, err, len(bars))
+	}
+	if len(seed.older) != len(bars) {
+		t.Fatalf("seeded older bars = %d, want %d", len(seed.older), len(bars))
+	}
+	if fetcher.m1Calls.Load() != 0 {
+		t.Fatalf("provider calls = %d, want 0 for archive-covered range", fetcher.m1Calls.Load())
+	}
+}
+
 // TestLoadOlderArchiveFirstFallsThroughOnSparseSlice proves a stray/gappy
 // archive slice that does NOT reach back near `from` is not mistaken for
 // coverage of the requested window: LoadOlder falls through to the provider

@@ -171,16 +171,60 @@ describe("ChartPanel", () => {
     expect(timeScaleApi.scrollToPosition).toHaveBeenCalledWith(49, false);
   });
 
-  it("passes demanded UTC-ms range in LoadOlderBars via pointerup", () => {
-    const { commands, container } = renderChart();
-    timeScaleApi.getVisibleRange.mockReturnValue({ from: 1_700_000_000, to: 1_700_000_600 });
+  it("reloads the demanded range, not the latest tail, when pan history becomes ready", async () => {
+    const firstMs = 1_700_000_000_000;
+    const latest: Bar = { symbol: "US.AAPL", timeframe: "1m", bucketStart: new Date(firstMs).toISOString(),
+      o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false };
+    const result = { symbol: "US.AAPL", timeframe: "1m", fromMs: firstMs, toMs: firstMs + 1,
+      bars: [latest], indicators: [], historyRevision: 1 };
+    const { commands, container, stores } = renderChart("c1", undefined, undefined, undefined, result);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    commands.sendQuery.mockClear();
+    timeScaleApi.getVisibleLogicalRange.mockReturnValue({ from: -10, to: 0 });
     const host = container.querySelector("[data-testid=chart-host]") as HTMLElement;
-    host.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+    await act(async () => {
+      host.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+      await Promise.resolve(); await Promise.resolve();
+    });
     expect(commands.sendCommand).toHaveBeenCalledWith("LoadOlderBars", {
       symbol: "US.AAPL",
       daily: false,
-      requiredStartMs: 1_700_000_000_000,
-      requiredEndMs: 1_700_000_600_000,
+      requiredStartMs: firstMs - 7 * 24 * 60 * 60_000,
+      requiredEndMs: firstMs + 60_000,
+    });
+
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "history-ready", detail: "US.AAPL",
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const viewportQueries = commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow");
+    expect(viewportQueries).not.toHaveLength(0);
+    expect(viewportQueries.every(([, args]) => (args as { tailBars: number }).tailBars === 0)).toBe(true);
+    expect(viewportQueries).toContainEqual(["QueryChartWindow", expect.objectContaining({
+      fromMs: firstMs - 7 * 24 * 60 * 60_000, toMs: firstMs, tailBars: 0,
+    })]);
+  });
+
+  it("loads daily history to the 2016 floor when pan history becomes ready", async () => {
+    const firstMs = Date.UTC(2022, 7, 5);
+    const latest: Bar = { symbol: "US.NVDA", timeframe: "D", bucketStart: new Date(firstMs).toISOString(),
+      o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false };
+    const result = { symbol: "US.NVDA", timeframe: "D", fromMs: firstMs, toMs: firstMs + 1,
+      bars: [latest], indicators: [], historyRevision: 1 };
+    const { commands, container } = renderChart("c1", undefined, undefined, { symbol: "US.NVDA", timeframe: "D" }, result);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    timeScaleApi.getVisibleLogicalRange.mockReturnValue({ from: -10, to: 0 });
+    const host = container.querySelector("[data-testid=chart-host]") as HTMLElement;
+
+    await act(async () => {
+      host.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
+      await Promise.resolve(); await Promise.resolve();
+    });
+
+    expect(commands.sendCommand).toHaveBeenCalledWith("LoadOlderBars", {
+      symbol: "US.NVDA", daily: true,
+      requiredStartMs: Date.UTC(2016, 0, 1),
+      requiredEndMs: expect.any(Number),
     });
   });
 

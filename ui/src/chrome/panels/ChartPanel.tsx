@@ -35,6 +35,9 @@ import { perf } from "../../perf/PerfMonitor";
 import { bareSymbol } from "../exec/orderStatus";
 import type { QueryChartWindowResult } from "../../gen/wsmsg";
 
+const INTRADAY_HISTORY_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+const DAILY_HISTORY_FLOOR_MS = Date.UTC(2016, 0, 1);
+
 // Adapts a real LWC v5 IChartApi to the controller's minimal ChartApiFacade.
 function makeFacade(chart: IChartApi, palette: Palette): {
   facade: ChartApiFacade; setPalette: (p: Palette) => void; drawings: DrawingsPrimitive;
@@ -315,8 +318,18 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       const lastMs = Date.parse(bars[bars.length - 1].bucketStart);
       const observedStepMs = bars.length > 1 ? (lastMs - firstMs) / (bars.length - 1) : nominalStepMs;
       const stepMs = tfRef.current === "D" ? Math.max(nominalStepMs * 1.5, observedStepMs) : nominalStepMs;
+      const extrapolatedFrom = firstMs + Math.floor(logical.from) * stepMs;
+      const crossesLoadedHead = logical.from < 0;
       return {
-        from: firstMs + Math.floor(logical.from) * stepMs,
+        // A one-viewport minute extrapolation cannot cross the overnight/weekend
+        // gap because clampRight caps blank leftward travel. Fetch one calendar
+        // week when the viewport crosses the loaded head so the prior trading
+        // session is reachable in a single release.
+        from: crossesLoadedHead
+          ? isIntradayTimeframe(tfRef.current as Timeframe)
+            ? Math.min(extrapolatedFrom, firstMs - INTRADAY_HISTORY_LOOKBACK_MS)
+            : Math.min(extrapolatedFrom, DAILY_HISTORY_FLOOR_MS)
+          : extrapolatedFrom,
         to: firstMs + Math.ceil(logical.to + 1) * stepMs,
         logicalFrom: logical.from,
         logicalTo: logical.to,
@@ -488,9 +501,14 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         nextSeen.add(key);
         if (seenEventKeys.has(key)) continue;
         if (event.kind !== "history-ready" || event.detail !== currentSymbol) continue;
-        for (const indicatorKey of indicatorKeys()) stores.indicators.reset(indicatorKey);
-        indicatorReloadPending = false;
-        reloadLatestRequired = true;
+        // Symbol/timeframe changes need a clean latest-tail indicator reload.
+        // Ordinary history-ready events (including LoadOlderBars) must keep the
+        // current viewport so queryViewport fetches the newly available range.
+        if (indicatorReloadPending) {
+          for (const indicatorKey of indicatorKeys()) stores.indicators.reset(indicatorKey);
+          indicatorReloadPending = false;
+          reloadLatestRequired = true;
+        }
         queryViewportRef.current?.();
       }
       // HealthStore retains only its bounded event window. Mirroring that window
