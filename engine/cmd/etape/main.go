@@ -280,6 +280,23 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		log.Error("open store", "err", err)
 		return 1, false, nil
 	}
+	if cfg.Store.RetentionDays > 0 {
+		cutoff := bars10sRetentionCutoff(time.Now(), cfg.Store.RetentionDays)
+		rows, pruneErr := st.PruneBars10sBefore(cutoff)
+		if pruneErr != nil {
+			log.Warn("prune 10s bars", "err", pruneErr)
+		} else {
+			log.Info("pruned 10s bars", "rows", rows, "retentionDays", cfg.Store.RetentionDays)
+			if rows > 0 {
+				vacuumed, vacuumErr := st.VacuumIfNeeded()
+				if vacuumErr != nil {
+					log.Warn("vacuum after 10s bar prune", "err", vacuumErr)
+				} else if vacuumed {
+					log.Info("vacuumed store after 10s bar prune")
+				}
+			}
+		}
+	}
 	// NOTE: st.Close() is deferred until AFTER every store-writer goroutine has
 	// stopped (feed pipe + forwardMD + exec.Core) — see the shutdown block below.
 
@@ -316,8 +333,24 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}
 
 	// --- md core ---
-	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs})
-	go func() { _ = core.Run(ctx) }()
+	archiveFinalizedBar := func(b md.Bar) {
+		stored := feed.Bar{Symbol: b.Symbol, BucketMs: b.BucketMs,
+			O: b.O, H: b.H, L: b.L, C: b.C, Volume: b.V}
+		switch b.TF {
+		case session.TF10s:
+			st.ArchiveBar10s(stored)
+		case session.TF1m:
+			st.ArchiveBar1m(stored)
+		case session.TFDay:
+			st.ArchiveDaily(stored)
+		}
+	}
+	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs, FinalizedBar: archiveFinalizedBar})
+	coreDone := make(chan struct{})
+	go func() {
+		defer close(coreDone)
+		_ = core.Run(ctx)
+	}()
 
 	// --- exec subsystem (Recover -> Run) ---
 	var credsFile creds.File
@@ -431,7 +464,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// --- fan-in: md/exec Updates -> hub; mark bridge md -> exec ---
 	var forwardWG sync.WaitGroup
 	forwardWG.Add(1)
-	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, live || *demo, st, seeder) }()
+	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, seeder) }()
 	go forwardExec(ctx, execCore, hub)
 
 	// Forward marks + books into every sim broker so submitted orders fill: in
@@ -667,16 +700,14 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 
 	// --- ordered shutdown: stop accepting, drain all store writers, then Close ---
 	// Every goroutine that can call a store-writing method (RecordEvent,
-	// AppendExecEvent, ArchiveBar1m/ArchiveDaily, AppendSysEvent, SetConfig)
+	// AppendExecEvent, finalized-bar archives, AppendSysEvent, SetConfig)
 	// must be joined before st.Close() runs, since Close() closes the
 	// s.writes channel and any send on it afterward panics. Sources: pipe()
-	// (RecordEvent, joined via pipeWG), forwardMD() (ArchiveBar1m/
-	// ArchiveDaily, joined via forwardWG — it drains already-buffered
-	// core.Updates() after ctx is cancelled, so it must be waited on even
-	// though md.Core.Run stops producing new updates once pipeWG is
-	// drained), forwardDailyBars() in demo mode (ArchiveDaily for a
+	// (RecordEvent, joined via pipeWG), md.Core.Run (finalized-bar callback,
+	// joined via coreDone after pipeWG quiesces its feed input),
+	// forwardDailyBars() in demo mode (ArchiveDaily for a
 	// synth-generator day closed by an ET-midnight rollover, also joined via
-	// forwardWG — same reasoning as forwardMD), backfill's orch.Backfill
+	// forwardWG), backfill's orch.Backfill
 	// goroutines (ArchiveBar1m/
 	// ArchiveDaily for freshly-fetched history, joined via backfillWG),
 	// watchDroppedUpdates (AppendSysEvent, joined via dropWG — depends only
@@ -730,7 +761,8 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	scanWG.Wait()     // scan poller stopped: no more backfillWG.Add from pool admissions
 	backfillWG.Wait() // boot backfill workers stopped: no more Seed* into the core
 	pipeWG.Wait()     // feed->core pipe stopped: no more RecordEvent
-	forwardWG.Wait()  // forwardMD + demo's forwardDailyBars drained: no more ArchiveBar1m/ArchiveDaily
+	<-coreDone        // md core stopped: no more finalized-bar archive callbacks
+	forwardWG.Wait()  // forwardMD + demo's forwardDailyBars stopped: no more ArchiveDaily
 	dropWG.Wait()     // dropped-updates watcher stopped: no more AppendSysEvent from it
 	<-execDone        // exec.Core.Run returned: no more AppendExecEvent
 	brokerWG.Wait()
@@ -743,6 +775,10 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		na = *p
 	}
 	return 0, restartRequested.Load(), na
+}
+
+func bars10sRetentionCutoff(now time.Time, days int) int64 {
+	return now.AddDate(0, 0, -days).UnixMilli()
 }
 
 func recordWarmDepth(seen *sync.Map, symbol string, days int) {
@@ -829,14 +865,13 @@ func hz(rate float64) time.Duration {
 	return time.Duration(float64(time.Second) / rate)
 }
 
-// forwardMD drains md.Core.Updates(): publishes each to the hub, (live only)
-// archives finalized 1m/daily bars — merging the old drainUpdates archiving
-// with the new hub fan-in — and, on every feed-up transition, kicks the
+// forwardMD drains md.Core.Updates(), publishes each to the hub, and, on
+// every feed-up transition, kicks the
 // moomoo auto-config probe. seeder is nil outside a real live boot (replay,
 // -demo, or the auto-config already run this process) — see boot's own
 // venueseed.New call site for the exact gate; forwardMD only ever guards
 // against nil, it doesn't decide when a Seeder exists.
-func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, live bool, archive *store.Store, seeder *venueseed.Seeder) {
+func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, seeder *venueseed.Seeder) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -845,21 +880,6 @@ func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, live bool, ar
 			hub.PublishMD(u)
 			if cu, ok := u.(md.ConnUpdate); ok && cu.Up && seeder != nil {
 				seeder.OnFeedUp(ctx)
-			}
-			if !live {
-				continue
-			}
-			if bu, ok := u.(md.BarUpdate); ok && !bu.Bar.InProgress {
-				b := feed.Bar{Symbol: bu.Bar.Symbol, BucketMs: bu.Bar.BucketMs,
-					O: bu.Bar.O, H: bu.Bar.H, L: bu.Bar.L, C: bu.Bar.C, Volume: bu.Bar.V}
-				switch bu.Bar.TF {
-				case session.TF10s:
-					archive.ArchiveBar10s(b)
-				case session.TF1m:
-					archive.ArchiveBar1m(b)
-				case session.TFDay:
-					archive.ArchiveDaily(b)
-				}
 			}
 		}
 	}
@@ -1035,7 +1055,7 @@ func pipe(ctx context.Context, wg *sync.WaitGroup, in <-chan feed.Event, core *m
 			if !ok {
 				return
 			}
-			core.Feed(ev)
+			core.FeedContext(ctx, ev)
 		}
 	}
 }

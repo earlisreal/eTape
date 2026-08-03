@@ -35,6 +35,18 @@ type barOp struct {
 	b     feed.Bar
 }
 
+type pruneBars10sOp struct {
+	beforeMs int64
+	done     chan pruneResult
+}
+
+func (pruneBars10sOp) render() []pendingWrite { return nil }
+
+type pruneResult struct {
+	rows int64
+	err  error
+}
+
 func (o barOp) render() []pendingWrite {
 	return []pendingWrite{{
 		query: o.query,
@@ -44,6 +56,22 @@ func (o barOp) render() []pendingWrite {
 
 // ArchiveBar10s upserts a finalized 10s bar. Idempotent by (symbol, ts).
 func (s *Store) ArchiveBar10s(b feed.Bar) { s.writes <- barOp{query: bar10sUpsertSQL, b: b} }
+
+// PruneBars10sBefore deletes archived 10s bars older than beforeMs.
+func (s *Store) PruneBars10sBefore(beforeMs int64) (int64, error) {
+	done := make(chan pruneResult, 1)
+	s.writes <- pruneBars10sOp{beforeMs: beforeMs, done: done}
+	r := <-done
+	return r.rows, r.err
+}
+
+func (s *Store) commitPruneBars10s(beforeMs int64) (int64, error) {
+	result, err := s.db.Exec(`DELETE FROM bars_10s WHERE ts < ?`, beforeMs)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
 
 // ArchiveBar1m upserts a finalized 1m bar. Idempotent by (symbol, ts).
 func (s *Store) ArchiveBar1m(b feed.Bar) { s.writes <- barOp{query: bar1mUpsertSQL, b: b} }

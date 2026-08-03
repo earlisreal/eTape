@@ -59,7 +59,7 @@ func (m MD) AnchorSecs() (int64, error) {
 // Store configures SQLite persistence (journal, bar archives, config, sys_events).
 type Store struct {
 	DBPath        string `toml:"db_path"`        // empty → resolved to ~/.eTape/etape.db by main
-	RetentionDays int    `toml:"retention_days"` // journal pruned older than this many days
+	RetentionDays int    `toml:"retention_days"` // 10s bars pruned at boot beyond this many calendar days; 0 disables
 	FlushMs       int    `toml:"flush_ms"`       // writer batch-flush interval
 }
 
@@ -254,6 +254,9 @@ func Load(path string) (Config, error) {
 	}
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return Config{}, fmt.Errorf("config %s: %w", path, err)
+	}
+	if cfg.Store.RetentionDays < 0 {
+		return Config{}, fmt.Errorf("config %s: store.retention_days must be >= 0", path)
 	}
 	return cfg, nil
 }

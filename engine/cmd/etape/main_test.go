@@ -27,6 +27,15 @@ func TestNextHistoryRefreshUsesTradingCalendar(t *testing.T) {
 	}
 }
 
+func TestBars10sRetentionCutoffUsesCalendarDays(t *testing.T) {
+	loc := session.Loc()
+	now := time.Date(2026, 3, 20, 12, 30, 0, 0, loc)
+	want := time.Date(2026, 2, 18, 12, 30, 0, 0, loc).UnixMilli()
+	if got := bars10sRetentionCutoff(now, 30); got != want {
+		t.Fatalf("cutoff = %d, want %d", got, want)
+	}
+}
+
 type recordingSink struct {
 	mu    sync.Mutex
 	marks map[string]float64

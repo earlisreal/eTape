@@ -74,6 +74,57 @@ func TestEnsureSubscribesAndSeeds(t *testing.T) {
 	}
 }
 
+func TestTickerSeedPrecedesPushArrivingDuringGetTicker(t *testing.T) {
+	m := newMockOpenD(t)
+	m.setData("US.AAPL", &qotData{ticks: []*qotcommon.Ticker{{
+		Time: proto.String("2026-07-05 09:30:00"), Sequence: proto.Int64(1),
+		Timestamp: proto.Float64(1782146400), Price: proto.Float64(309), Volume: proto.Int64(100),
+		Turnover: proto.Float64(30900), Dir: proto.Int32(int32(qotcommon.TickerDirection_TickerDirection_Bid)),
+	}}})
+	started := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	m.handler = func(mm *mockOpenD, conn net.Conn, frame Frame) {
+		if frame.ProtoID == ProtoQotGetTicker {
+			once.Do(func() { close(started) })
+			<-release
+		}
+		mm.defaultHandler(mm, conn, frame)
+	}
+	f := NewOpenDFeed(liveClient(t, m), FeedOptions{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = f.Run(ctx) }()
+	f.Ensure(feed.Demand{ID: "d", Symbol: "US.AAPL", Subs: []feed.SubType{feed.SubTicker}})
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("Qot_GetTicker did not start")
+	}
+	m.pushToAll(ProtoQotUpdateTicker, 1517, &qotupdateticker.Response{
+		RetType: proto.Int32(0), S2C: &qotupdateticker.S2C{Security: sec(11, "AAPL"),
+			TickerList: []*qotcommon.Ticker{{
+				Time: proto.String("2026-07-05 09:30:01"), Sequence: proto.Int64(2),
+				Timestamp: proto.Float64(1782146401), Price: proto.Float64(310), Volume: proto.Int64(1),
+				Turnover: proto.Float64(310), Dir: proto.Int32(int32(qotcommon.TickerDirection_TickerDirection_Ask)),
+			}}},
+	})
+	select {
+	case ev := <-f.Events():
+		t.Fatalf("live push overtook blocked seed: %#v", ev)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	seed, ok := nextEvent(t, f.Events()).(feed.TicksEvent)
+	if !ok || !seed.Seed || seed.Ticks[0].Seq != 1 {
+		t.Fatalf("first event = %#v, want seed seq=1", seed)
+	}
+	live, ok := nextEvent(t, f.Events()).(feed.TicksEvent)
+	if !ok || live.Seed || live.Ticks[0].Seq != 2 {
+		t.Fatalf("second event = %#v, want live seq=2", live)
+	}
+}
+
 // TestSeedRetriesTransientGetKLFailure covers the race Ensure's doc comment
 // describes: the KL_1Min subscribe and the seed job fire with no ordering
 // between them, so the seed's Qot_GetKL can reach OpenD before the subscribe

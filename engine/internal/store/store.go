@@ -141,6 +141,11 @@ func (s *Store) writer(flush time.Duration) {
 				commit()
 				v.done <- s.commitArchiveRange(v)
 				continue
+			case pruneBars10sOp:
+				commit()
+				result, err := s.commitPruneBars10s(v.beforeMs)
+				v.done <- pruneResult{rows: result, err: err}
+				continue
 			}
 			buf = append(buf, op.render()...)
 			if len(buf) >= s.batch {

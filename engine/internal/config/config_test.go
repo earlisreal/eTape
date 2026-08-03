@@ -107,6 +107,27 @@ func TestStoreOverride(t *testing.T) {
 	}
 }
 
+func TestStoreRetentionRejectsNegative(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[store]\nretention_days = -1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil {
+		t.Fatal("negative store.retention_days accepted")
+	}
+}
+
+func TestStoreRetentionZeroDisablesPruning(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[store]\nretention_days = 0\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil || cfg.Store.RetentionDays != 0 {
+		t.Fatalf("Load retention_days=0: value %d, err %v", cfg.Store.RetentionDays, err)
+	}
+}
+
 func TestVenueAndGateParse(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.toml")

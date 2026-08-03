@@ -40,6 +40,8 @@ type OpenDFeed struct {
 	fetched     map[string]time.Time // history-quota dedup window (30 days)
 	validated   map[string]struct{}  // process-lifetime positive existence cache
 	seedStates  map[seedKey]seedState
+	tickerGated map[string]bool
+	tickerLive  map[string][]feed.TicksEvent
 	decodeFails uint64
 
 	// hbGroup coalesces concurrent HistoryBars calls for the same
@@ -105,14 +107,16 @@ func NewOpenDFeed(cli *Client, opt FeedOptions) *OpenDFeed {
 		fetched:         make(map[string]time.Time),
 		validated:       make(map[string]struct{}),
 		seedStates:      make(map[seedKey]seedState),
+		tickerGated:     make(map[string]bool),
+		tickerLive:      make(map[string][]feed.TicksEvent),
 	}
 }
 
 func (f *OpenDFeed) Events() <-chan feed.Event { return f.events }
 
 func (f *OpenDFeed) Ensure(d feed.Demand) {
-	f.sub.Ensure(d)
 	if len(d.Subs) == 0 {
+		f.sub.Ensure(d)
 		return
 	}
 	lane := "foreground"
@@ -121,11 +125,22 @@ func (f *OpenDFeed) Ensure(d feed.Demand) {
 		lane = "background"
 		queue = f.backgroundSeedq
 	}
+	job := seedJob{symbol: d.Symbol, subs: d.Subs, enqueuedAt: f.clk.Now(), background: d.BackgroundSeed}
+	ticker := false
+	for _, sub := range d.Subs {
+		ticker = ticker || sub == feed.SubTicker
+	}
+	f.mu.Lock()
 	select {
-	case queue <- seedJob{symbol: d.Symbol, subs: d.Subs, enqueuedAt: f.clk.Now(), background: d.BackgroundSeed}:
+	case queue <- job:
+		if ticker {
+			f.tickerGated[d.Symbol] = true
+		}
 	default:
 		slog.Warn("seed queue full; symbol will seed on next resync", "symbol", d.Symbol, "lane", lane)
 	}
+	f.mu.Unlock()
+	f.sub.Ensure(d)
 }
 
 func (f *OpenDFeed) claimSeed(symbol string, sub feed.SubType, force bool) bool {
@@ -153,6 +168,46 @@ func (f *OpenDFeed) finishSeed(symbol string, sub feed.SubType, success bool) {
 		state.completedAt = time.Time{}
 	}
 	f.seedStates[key] = state
+	f.mu.Unlock()
+}
+
+// finishTickerSeed emits the cache tail before any live pushes buffered while
+// Qot_GetTicker was in flight, then opens the symbol's live gate.
+func (f *OpenDFeed) finishTickerSeed(ctx context.Context, symbol string, ticks []feed.Tick, success bool) {
+	f.mu.Lock()
+	if success && len(ticks) > 0 {
+		f.emit(ctx, feed.TicksEvent{Ticks: ticks, Seed: true})
+	}
+	for _, ev := range f.tickerLive[symbol] {
+		f.emit(ctx, ev)
+	}
+	delete(f.tickerLive, symbol)
+	delete(f.tickerGated, symbol)
+	state := f.seedStates[seedKey{symbol: symbol, sub: feed.SubTicker}]
+	state.inFlight = false
+	if success {
+		state.completedAt = f.clk.Now()
+	} else {
+		state.completedAt = time.Time{}
+	}
+	f.seedStates[seedKey{symbol: symbol, sub: feed.SubTicker}] = state
+	f.mu.Unlock()
+}
+
+func (f *OpenDFeed) emitPush(ctx context.Context, ev feed.Event) {
+	ticks, ok := ev.(feed.TicksEvent)
+	if !ok || ticks.Seed || len(ticks.Ticks) == 0 {
+		f.emit(ctx, ev)
+		return
+	}
+	symbol := ticks.Ticks[0].Symbol
+	f.mu.Lock()
+	if f.tickerGated[symbol] {
+		f.tickerLive[symbol] = append(f.tickerLive[symbol], ticks)
+		f.mu.Unlock()
+		return
+	}
+	f.emit(ctx, ev)
 	f.mu.Unlock()
 }
 
@@ -199,7 +254,7 @@ func (f *OpenDFeed) pump(ctx context.Context) {
 				continue
 			}
 			for _, ev := range evs {
-				f.emit(ctx, ev)
+				f.emitPush(ctx, ev)
 			}
 		}
 	}
@@ -215,12 +270,22 @@ func (f *OpenDFeed) stateLoop(ctx context.Context) {
 			case ConnDown:
 				f.emit(ctx, feed.ConnDownEvent{})
 			case ConnUp:
+				active := f.sub.ActiveSymbols()
+				f.mu.Lock()
+				for symbol, subs := range active {
+					for _, sub := range subs {
+						if sub == feed.SubTicker {
+							f.tickerGated[symbol] = true
+						}
+					}
+				}
+				f.mu.Unlock()
 				f.emit(ctx, feed.ConnUpEvent{})
 				if err := f.sub.ResubscribeAll(ctx); err != nil {
 					slog.Error("resubscribe after reconnect failed", "err", err)
 					continue // client will cycle the connection; next ConnUp retries
 				}
-				for symbol, subs := range f.sub.ActiveSymbols() {
+				for symbol, subs := range active {
 					f.seed(ctx, seedJob{symbol: symbol, subs: subs, enqueuedAt: f.clk.Now(), force: true})
 				}
 				f.emit(ctx, feed.ResyncedEvent{})
@@ -306,6 +371,14 @@ func (f *OpenDFeed) seed(ctx context.Context, job seedJob) {
 			claimed[sub] = f.claimSeed(symbol, sub, job.force)
 		}
 	}
+	if has(feed.SubTicker) && !claimed[feed.SubTicker] {
+		f.mu.Lock()
+		inFlight := f.seedStates[seedKey{symbol: symbol, sub: feed.SubTicker}].inFlight
+		f.mu.Unlock()
+		if !inFlight {
+			f.finishTickerSeed(ctx, symbol, nil, true)
+		}
+	}
 	if claimed[feed.SubKL1m] {
 		start := f.clk.Now()
 		bars, err := seedRetry(ctx, f.clk, func() ([]feed.Bar, error) {
@@ -338,12 +411,10 @@ func (f *OpenDFeed) seed(ctx context.Context, job seedJob) {
 			return f.bf.recentTicks(ctx, symbol, maxAPIRows)
 		})
 		ticksDuration = f.clk.Now().Sub(start)
-		f.finishSeed(symbol, feed.SubTicker, err == nil)
 		if err != nil {
 			slog.Warn("seed ticks failed", "symbol", symbol, "err", err)
-		} else if len(ticks) > 0 {
-			f.emit(ctx, feed.TicksEvent{Ticks: ticks, Seed: true})
 		}
+		f.finishTickerSeed(ctx, symbol, ticks, err == nil)
 	}
 	if claimed[feed.SubQuote] {
 		start := f.clk.Now()

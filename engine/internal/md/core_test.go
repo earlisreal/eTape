@@ -83,9 +83,11 @@ func TestFeedSeedsEmitSnapshotsAndHistoryReady(t *testing.T) {
 	c.Feed(feed.TicksEvent{Seed: true, Ticks: []feed.Tick{
 		tick(1, 0, 100, 10, feed.Buy), tick(2, 11_000, 101, 5, feed.Sell),
 	}})
-	var bars1m, bars10s, ready bool
+	var bars1m, bars10s, finalized10s, ready bool
 	for _, update := range drain() {
 		switch value := update.(type) {
+		case BarUpdate:
+			finalized10s = finalized10s || value.Bar.TF == session.TF10s && !value.Bar.InProgress
 		case BarSnapshot:
 			bars1m = bars1m || value.TF == session.TF1m
 			bars10s = bars10s || value.TF == session.TF10s
@@ -93,8 +95,8 @@ func TestFeedSeedsEmitSnapshotsAndHistoryReady(t *testing.T) {
 			ready = ready || value.Symbol == "US.AAPL"
 		}
 	}
-	if !bars1m || !bars10s || !ready {
-		t.Fatalf("seed delivery bars1m=%v bars10s=%v ready=%v", bars1m, bars10s, ready)
+	if !bars1m || !bars10s || !finalized10s || !ready {
+		t.Fatalf("seed delivery bars1m=%v bars10s=%v finalized10s=%v ready=%v", bars1m, bars10s, finalized10s, ready)
 	}
 }
 
@@ -179,6 +181,69 @@ func TestDroppedUpdatesIncrementsWhenFull(t *testing.T) {
 	}
 	if got := c.DroppedUpdates(); got == 0 {
 		t.Fatalf("DroppedUpdates = %d, want > 0 after flooding an undrained updates channel", got)
+	}
+}
+
+func TestFeedContextBlocksUntilSeedFitsInbox(t *testing.T) {
+	c := New(Config{})
+	for i := 0; i < cap(c.inbox); i++ {
+		c.inbox <- eventMsg{ev: feed.ConnUpEvent{}}
+	}
+	seed := feed.TicksEvent{Seed: true, Ticks: []feed.Tick{tick(1, 0, 100, 1, feed.Buy)}}
+	done := make(chan struct{})
+	go func() {
+		c.FeedContext(context.Background(), seed)
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("seed enqueue did not block on full inbox")
+	case <-time.After(20 * time.Millisecond):
+	}
+	<-c.inbox
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("seed enqueue did not resume after inbox space became available")
+	}
+	found := false
+	for len(c.inbox) > 0 {
+		msg := <-c.inbox
+		if got, ok := msg.(eventMsg); ok {
+			if ticks, ok := got.ev.(feed.TicksEvent); ok && ticks.Seed {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("seed missing from inbox")
+	}
+}
+
+func TestFinalizedBarSinkIsLosslessWhenUpdatesFull(t *testing.T) {
+	finals := make(chan Bar, 2)
+	c := New(Config{FinalizedBar: func(b Bar) { finals <- b }})
+	for i := 0; i < cap(c.updates); i++ {
+		c.updates <- ConnUpdate{Up: true}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = c.Run(ctx) }()
+	c.FeedContext(ctx, feed.TicksEvent{Seed: true, Ticks: []feed.Tick{
+		tick(1, 0, 100, 1, feed.Buy), tick(2, 11_000, 101, 1, feed.Buy),
+	}})
+	select {
+	case got := <-finals:
+		if got.TF != session.TF10s || got.InProgress || got.BucketMs != t0Ms {
+			t.Fatalf("finalized sink got %+v", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("finalized sink missed bar while Updates was full")
+	}
+	select {
+	case got := <-finals:
+		t.Fatalf("finalized sink received duplicate/unexpected bar %+v", got)
+	case <-time.After(20 * time.Millisecond):
 	}
 }
 

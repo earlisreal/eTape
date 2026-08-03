@@ -15,8 +15,9 @@ import (
 
 // Config sizes the core. Zero values get defaults.
 type Config struct {
-	TapeRing   int   // per-symbol tick ring capacity (default 65536)
-	AnchorSecs int64 // intraday bucket anchor (default session.AnchorSecsDefault)
+	TapeRing     int       // per-symbol tick ring capacity (default 65536)
+	AnchorSecs   int64     // intraday bucket anchor (default session.AnchorSecsDefault)
+	FinalizedBar func(Bar) // optional lossless sink, called before UI emission
 }
 
 type inMsg interface{ isInMsg() }
@@ -138,6 +139,34 @@ func (c *Core) Feed(ev feed.Event) {
 	}
 }
 
+// FeedContext preserves cache seeds under inbox backpressure. Live events keep
+// Feed's drop-on-full behavior; callers can cancel a blocked seed on shutdown.
+func (c *Core) FeedContext(ctx context.Context, ev feed.Event) {
+	if !seedEvent(ev) {
+		c.Feed(ev)
+		return
+	}
+	select {
+	case c.inbox <- eventMsg{ev: ev}:
+	case <-ctx.Done():
+	}
+}
+
+func seedEvent(ev feed.Event) bool {
+	switch e := ev.(type) {
+	case feed.TicksEvent:
+		return e.Seed
+	case feed.Bars1mEvent:
+		return e.Seed
+	case feed.QuoteEvent:
+		return e.Seed
+	case feed.BookEvent:
+		return e.Seed
+	default:
+		return false
+	}
+}
+
 func (c *Core) EnsureIndicator(connID uint64, id string, spec IndicatorSpec) {
 	c.inbox <- ensureIndicatorMsg{connID: connID, id: id, spec: spec}
 }
@@ -208,6 +237,9 @@ func (c *Core) emit(u Update) {
 func (c *Core) barOut(b Bar) {
 	if c.seeding {
 		return
+	}
+	if !b.InProgress && c.cfg.FinalizedBar != nil {
+		c.cfg.FinalizedBar(b)
 	}
 	c.emit(BarUpdate{Bar: b})
 	c.inds.onBar(c, b)

@@ -101,6 +101,32 @@ func TestArchive10sUpsertAndRead(t *testing.T) {
 	}
 }
 
+func TestPruneBars10sBefore(t *testing.T) {
+	s := open(t)
+	for _, b := range []feed.Bar{
+		{Symbol: "US.AAPL", BucketMs: 999},
+		{Symbol: "US.AAPL", BucketMs: 1000},
+		{Symbol: "US.NVDA", BucketMs: 2000},
+	} {
+		s.ArchiveBar10s(b)
+	}
+	s.ArchiveBar1m(feed.Bar{Symbol: "US.AAPL", BucketMs: 500})
+
+	rows, err := s.PruneBars10sBefore(1000)
+	if err != nil || rows != 1 {
+		t.Fatalf("PruneBars10sBefore = rows %d, err %v; want 1, nil", rows, err)
+	}
+	if got, err := s.ReadBars10s("US.AAPL", 0, 2000); err != nil || len(got) != 1 || got[0].BucketMs != 1000 {
+		t.Fatalf("remaining AAPL bars = %+v, err %v", got, err)
+	}
+	if rows, err = s.PruneBars10sBefore(1000); err != nil || rows != 0 {
+		t.Fatalf("second prune = rows %d, err %v; want 0, nil", rows, err)
+	}
+	if got, err := s.ReadBars1m("US.AAPL", 0, 1000); err != nil || len(got) != 1 {
+		t.Fatalf("1m bars changed by 10s prune: %+v, err %v", got, err)
+	}
+}
+
 func TestArchiveDailyReadAll(t *testing.T) {
 	s := open(t)
 	s.ArchiveDaily(feed.Bar{Symbol: "US.AAPL", BucketMs: 200, O: 1, H: 2, L: 1, C: 2, Volume: 9})
