@@ -57,10 +57,17 @@ const ET_TICK = {
     timeZone: ET_ZONE, hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit",
   }),
 };
-const ET_CROSSHAIR = new Intl.DateTimeFormat("en-US", {
-  timeZone: ET_ZONE, hour12: false, month: "short", day: "numeric",
-  hour: "2-digit", minute: "2-digit", second: "2-digit",
+const ET_PREVIEW_DATE = new Intl.DateTimeFormat("en-US", {
+  timeZone: ET_ZONE, weekday: "short", month: "short", day: "numeric", year: "numeric",
 });
+const ET_PREVIEW_TIME = {
+  minute: new Intl.DateTimeFormat("en-US", {
+    timeZone: ET_ZONE, hour12: false, hour: "2-digit", minute: "2-digit",
+  }),
+  second: new Intl.DateTimeFormat("en-US", {
+    timeZone: ET_ZONE, hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit",
+  }),
+};
 
 // TickMarkType (LWC v5): Year=0, Month=1, DayOfMonth=2, Time=3, TimeWithSeconds=4.
 // `time` is always a UTCTimestamp (seconds) for our data (every timeframe, incl.
@@ -79,8 +86,12 @@ function tickMarkFormatter(time: number, tickMarkType: number): string | null {
     default: return null;
   }
 }
-function timeFormatter(time: number): string {
-  return typeof time === "number" ? ET_CROSSHAIR.format(time * 1000) : String(time);
+function timeFormatter(time: number, timeframe: string): string {
+  if (typeof time !== "number") return String(time);
+  const ms = time * 1000;
+  const date = ET_PREVIEW_DATE.format(ms);
+  if (["D", "W", "M"].includes(timeframe)) return date;
+  return `${date} ${ET_PREVIEW_TIME[timeframe === "10s" ? "second" : "minute"].format(ms)}`;
 }
 
 // Volume rides an invisible overlay scale confined to the bottom VOLUME_BAND of
@@ -149,7 +160,7 @@ export function clampRightScroll(scrollPosition: number, visibleBars: number): n
   return scrollPosition > maxScroll ? maxScroll : null;
 }
 
-export function chartOptions(p: Palette): DeepChartOptions {
+export function chartOptions(p: Palette, timeframe: string): DeepChartOptions {
   return {
     layout: { background: { type: "solid", color: p.bg }, textColor: p.text },
     grid: { vertLines: { color: p.grid }, horzLines: { color: p.grid } },
@@ -161,7 +172,7 @@ export function chartOptions(p: Palette): DeepChartOptions {
     // minimumWidth: keeps the right axis column from re-sizing (and shifting the whole
     // plot area) as tick-label widths change with price digit count.
     rightPriceScale: { borderColor: p.border, scaleMargins: CANDLE_SCALE_MARGINS, minimumWidth: 64 },
-    localization: { timeFormatter },
+    localization: { timeFormatter: (time) => timeFormatter(time, timeframe) },
     timeScale: {
       borderColor: p.border, rightOffset: RIGHT_OFFSET_BARS, secondsVisible: true, timeVisible: true,
       // rightOffset alone (no fixRightEdge): verified against

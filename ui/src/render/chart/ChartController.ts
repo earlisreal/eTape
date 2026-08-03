@@ -122,7 +122,7 @@ export class ChartController {
   ) {}
 
   mount(): void {
-    this.facade.applyOptions(chartOptions(this.palette));
+    this.facade.applyOptions(chartOptions(this.palette, this.config.timeframe));
     this.candle = this.facade.setMainSeries("candle", candleOptions(this.palette));
     this.volume = this.facade.addSeries("histogram", volumeOptions(this.palette), 0);
     // Confine the volume overlay to the bottom band of the main pane so it never
@@ -547,7 +547,11 @@ export class ChartController {
   }
 
   setSymbol(symbol: string): void { this.config = { ...this.config, symbol }; this.resetForReload(); }
-  setTimeframe(timeframe: string): void { this.config = { ...this.config, timeframe }; this.resetForReload(); }
+  setTimeframe(timeframe: string): void {
+    this.config = { ...this.config, timeframe };
+    this.facade.applyOptions(chartOptions(this.palette, timeframe));
+    this.resetForReload();
+  }
 
   private resetForReload(): void {
     this.backfilled = false;
@@ -591,7 +595,7 @@ export class ChartController {
 
   setPalette(p: Palette): void {
     this.palette = p;
-    this.facade.applyOptions(chartOptions(p));
+    this.facade.applyOptions(chartOptions(p, this.config.timeframe));
     this.candle.applyOptions(mainSeriesOptions(this.chartType, p));
     this.candle.applyOptions({ lastValueVisible: this.lastValueVisible });
     this.volume.applyOptions({ ...volumeOptions(p), visible: this.volumeVisible });

@@ -318,13 +318,19 @@ describe("ChartController", () => {
       { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
     ctrl.mount();
     ctrl.sync(); // backfill Daily
+    const preview = () => (facade.lastOptions as { localization?: { timeFormatter?: (time: number) => string } })
+      .localization?.timeFormatter?.(Date.parse("2026-07-06T13:30:00Z") / 1000);
+    expect(preview()).toBe("Mon, Jul 6, 2026");
     const candle = facade.created[0].series;
     const volume = facade.created[1].series;
     // 2 real bars + LEFT_PAD_BARS leading whitespace points (Bug 4: farthest-left
     // pan leaves empty margin before the earliest real bar, mirroring rightOffset).
     expect(candle.setDataCalls.at(-1)).toHaveLength(2 + LEFT_PAD_BARS);
 
+    ctrl.setTimeframe("10s");
+    expect(preview()).toBe("Mon, Jul 6, 2026 09:30:00");
     ctrl.setTimeframe("1m"); // 1m series is currently empty
+    expect(preview()).toBe("Mon, Jul 6, 2026 09:30");
     // resetForReload() must clear immediately — before any sync() call —
     // so the Daily candles never remain frozen on screen.
     expect(candle.setDataCalls.at(-1)).toEqual([]);

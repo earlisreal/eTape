@@ -7,7 +7,7 @@ import {
 
 describe("chartTheme", () => {
   it("maps palette surfaces onto chart layout + grid", () => {
-    const o = chartOptions(LIGHT);
+    const o = chartOptions(LIGHT, "1m");
     expect(o.layout?.background).toEqual({ type: "solid", color: LIGHT.bg });
     expect(o.layout?.textColor).toBe(LIGHT.text);
     expect(o.grid?.vertLines?.color).toBe(LIGHT.grid);
@@ -16,7 +16,7 @@ describe("chartTheme", () => {
   });
 
   it("pads the right edge via rightOffset, locks the left edge, and keeps a stable price-scale width", () => {
-    const o = chartOptions(LIGHT);
+    const o = chartOptions(LIGHT, "1m");
     // Regression guard: LWC's TimeScale hardcodes the max right offset to the
     // literal constant 0 whenever fixRightEdge is true, REGARDLESS of
     // rightOffset — so the two together always collapse to zero right-edge
@@ -31,16 +31,20 @@ describe("chartTheme", () => {
   });
 
   it("formats axis tick marks and the crosshair time in US/Eastern, not UTC", () => {
-    const o = chartOptions(LIGHT);
+    const o = chartOptions(LIGHT, "10s");
     // 2026-07-06T13:30:00Z is 09:30 ET (EDT, UTC-4) — the RTH open.
     const rthOpenUtcSecs = Date.parse("2026-07-06T13:30:00Z") / 1000;
     expect(o.timeScale?.tickMarkFormatter?.(rthOpenUtcSecs, 3, "en-US")).toBe("09:30");
     expect(o.timeScale?.tickMarkFormatter?.(rthOpenUtcSecs, 4, "en-US")).toBe("09:30:00");
-    expect(o.localization?.timeFormatter?.(rthOpenUtcSecs)).toContain("09:30:00");
+    expect(o.localization?.timeFormatter?.(rthOpenUtcSecs)).toBe("Mon, Jul 6, 2026 09:30:00");
+    expect(chartOptions(LIGHT, "1m").localization?.timeFormatter?.(rthOpenUtcSecs)).toBe("Mon, Jul 6, 2026 09:30");
+    expect(chartOptions(LIGHT, "5m").localization?.timeFormatter?.(rthOpenUtcSecs)).toBe("Mon, Jul 6, 2026 09:30");
+    for (const timeframe of ["D", "W", "M"])
+      expect(chartOptions(LIGHT, timeframe).localization?.timeFormatter?.(rthOpenUtcSecs)).toBe("Mon, Jul 6, 2026");
   });
 
   it("tickMarkFormatter degrades to the default (null) for a non-numeric time", () => {
-    const o = chartOptions(LIGHT);
+    const o = chartOptions(LIGHT, "1m");
     expect(o.timeScale?.tickMarkFormatter?.("2026-07-06" as unknown as number, 2, "en-US")).toBeNull();
   });
 
