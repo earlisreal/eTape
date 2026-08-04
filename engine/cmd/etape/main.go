@@ -569,7 +569,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 					log.Warn("backfill: alpaca provider disabled (no creds)", "key", cfg.Backfill.Alpaca.CredsKey, "err", err)
 				}
 			}
-			moomoo := backfill.MoomooFetcher(fd)
 			if alpacaSrc != nil {
 				dailyChain = append(dailyChain, backfill.Source{Name: "alpaca", HistFetcher: alpacaSrc})
 				intradayChain = append(intradayChain, backfill.Source{Name: "alpaca", HistFetcher: alpacaSrc})
@@ -577,8 +576,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			if cfg.Backfill.Yahoo.Enabled {
 				dailyChain = append(dailyChain, backfill.Source{Name: "yahoo", HistFetcher: histyahoo.New("", clock.System{})})
 			}
-			// Daily synchronization is external-only: Alpaca, then Yahoo fallback.
-			intradayChain = append(intradayChain, backfill.Source{Name: "moomoo", HistFetcher: moomoo})
 			tail = fd // TailFetcher: OpenDFeed.Tail1m (quota-free Qot_GetKL)
 		}
 	}

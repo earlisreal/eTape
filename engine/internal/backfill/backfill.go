@@ -1,7 +1,7 @@
 // Package backfill wires eTape's deep-history path: at boot it warm-starts each
 // fed symbol from the SQLite bar archives, then walks ordered provider chains
-// (daily = [alpaca?, yahoo?, moomoo-last-resort], intraday 1m = [alpaca?,
-// moomoo-last-resort]) plus a quota-free moomoo 1m tail, seeding md.Core with
+// (daily = [alpaca?, yahoo?, moomoo-last-resort]) plus a quota-free moomoo 1m
+// tail, seeding md.Core with
 // each batch in one call. md.Core itself absorbs an entire
 // history batch as one BarSnapshot per timeframe rather than one BarUpdate
 // per bar, so the per-bar fan-out that used to require chunking (see the
@@ -128,8 +128,8 @@ type Config struct {
 
 // Orchestrator runs the per-symbol backfill sequence over ordered provider
 // chains: daily = [alpaca?, yahoo?, moomoo-last-resort], intraday (1m deep) =
-// [alpaca?, moomoo-last-resort], plus the moomoo quota-free 1m tail. In normal
-// operation the moomoo entries never fire, so historical quota spend is ~0.
+// [alpaca?], plus the moomoo quota-free 1m tail. In normal operation the
+// moomoo entries never fire, so historical quota spend is ~0.
 type Orchestrator struct {
 	daily    []Source
 	intraday []Source
