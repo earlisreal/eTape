@@ -24,7 +24,7 @@ func TestIntraday1mParsesStripsPrefixAndMapsTime(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := New(srv.URL, "K", "S", "iex", clock.NewFake(time.UnixMilli(0)))
+	c := New(srv.URL, "K", "S", "iex", clock.NewFake(time.UnixMilli(1<<40)))
 	bars, err := c.Intraday1m(context.Background(), "US.AAPL", time.UnixMilli(0), time.UnixMilli(1<<40))
 	if err != nil {
 		t.Fatal(err)
@@ -44,7 +44,7 @@ func TestIntraday1mParsesStripsPrefixAndMapsTime(t *testing.T) {
 	}
 }
 
-func TestIntraday1mAlwaysClampsEndToNowMinus16m(t *testing.T) {
+func TestIntraday1mCapsEndAtNowMinus16m(t *testing.T) {
 	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
 	var gotEnd string
 	mux := http.NewServeMux()
@@ -66,7 +66,39 @@ func TestIntraday1mAlwaysClampsEndToNowMinus16m(t *testing.T) {
 	}
 }
 
-func TestDailyBarsAlwaysClampsEndToNowMinus24h(t *testing.T) {
+func TestIntraday1mPreservesOlderEnd(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	wantEnd := now.Add(-time.Hour)
+	var gotEnd string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEnd = r.URL.Query().Get("end")
+		_, _ = w.Write([]byte(`{"bars":[],"next_page_token":null}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "K", "S", "iex", clock.NewFake(now))
+	if _, err := c.Intraday1m(context.Background(), "US.AAPL", wantEnd.Add(-time.Hour), wantEnd); err != nil {
+		t.Fatal(err)
+	}
+	if gotEnd != wantEnd.Format(time.RFC3339) {
+		t.Fatalf("end = %q, want %q", gotEnd, wantEnd.Format(time.RFC3339))
+	}
+}
+
+func TestIntraday1mSkipsEmptyCappedRange(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { requests++ }))
+	defer srv.Close()
+
+	c := New(srv.URL, "K", "S", "iex", clock.NewFake(now))
+	bars, err := c.Intraday1m(context.Background(), "US.AAPL", now.Add(-16*time.Minute), now)
+	if err != nil || len(bars) != 0 || requests != 0 {
+		t.Fatalf("bars = %v, err = %v, requests = %d; want empty, nil, 0", bars, err, requests)
+	}
+}
+
+func TestDailyBarsCapsEndAtNowMinus24h(t *testing.T) {
 	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
 	var gotEnd string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -82,6 +114,25 @@ func TestDailyBarsAlwaysClampsEndToNowMinus24h(t *testing.T) {
 	wantEnd := now.Add(-24 * time.Hour).Format(time.RFC3339)
 	if gotEnd != wantEnd {
 		t.Fatalf("end = %q, want clamp %q", gotEnd, wantEnd)
+	}
+}
+
+func TestDailyBarsPreservesOlderEnd(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
+	wantEnd := now.Add(-48 * time.Hour)
+	var gotEnd string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotEnd = r.URL.Query().Get("end")
+		_, _ = w.Write([]byte(`{"bars":[],"next_page_token":null}`))
+	}))
+	defer srv.Close()
+
+	c := New(srv.URL, "K", "S", "iex", clock.NewFake(now))
+	if _, err := c.DailyBars(context.Background(), "US.AAPL", wantEnd.Add(-24*time.Hour), wantEnd); err != nil {
+		t.Fatal(err)
+	}
+	if gotEnd != wantEnd.Format(time.RFC3339) {
+		t.Fatalf("end = %q, want %q", gotEnd, wantEnd.Format(time.RFC3339))
 	}
 }
 
@@ -136,7 +187,7 @@ func TestBarsErrorStatusSurfaces(t *testing.T) {
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
-	c := New(srv.URL, "K", "S", "iex", clock.NewFake(time.UnixMilli(0)))
+	c := New(srv.URL, "K", "S", "iex", clock.NewFake(time.UnixMilli(1<<40)))
 	_, err := c.Intraday1m(context.Background(), "US.AAPL", time.UnixMilli(0), time.UnixMilli(1<<40))
 	if err == nil || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("want a 403 error, got %v", err)

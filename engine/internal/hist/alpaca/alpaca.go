@@ -56,7 +56,9 @@ func New(base, keyID, secret, feedName string, clk clock.Clock) *Client {
 }
 
 func (c *Client) DailyBars(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error) {
-	to = c.clk.Now().Add(-24 * time.Hour)
+	if cutoff := c.clk.Now().Add(-24 * time.Hour); to.After(cutoff) {
+		to = cutoff
+	}
 	if !to.After(from) {
 		return nil, nil
 	}
@@ -69,10 +71,14 @@ func (c *Client) DailyBars(ctx context.Context, symbol string, from, to time.Tim
 // now−16m), but this defensive retry covers a return to the old 403 behavior.
 const recentSIPClampBuffer = 16 * time.Minute
 
-// Ignore 'to' parameter and always clamp to now-16m. With paid SIP, 'to' can be now.
-func (c *Client) Intraday1m(ctx context.Context, symbol string, from, _ time.Time) ([]feed.Bar, error) {
-	clampedTo := c.clk.Now().Add(-recentSIPClampBuffer)
-	return c.bars(ctx, symbol, "1Min", "raw", from, clampedTo)
+func (c *Client) Intraday1m(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error) {
+	if cutoff := c.clk.Now().Add(-recentSIPClampBuffer); to.After(cutoff) {
+		to = cutoff
+	}
+	if !to.After(from) {
+		return nil, nil
+	}
+	return c.bars(ctx, symbol, "1Min", "raw", from, to)
 }
 
 type barJSON struct {
