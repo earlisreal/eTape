@@ -10,6 +10,7 @@ import type { Band, DaySegment } from "./sessions";
 import { describeIndicator, withDefaultParams, type IndicatorInstance } from "./indicatorSeries";
 import { LWC_LINE_STYLE } from "./lineStyle";
 import type { FillMarker } from "./diamondMarker";
+import { bucketStartMs } from "./barBucket";
 
 export interface BarReader { series(symbol: string, timeframe: string): Bar[] }
 export interface IndicatorReader { series(instanceId: string): { timeMs: number; value: number }[] }
@@ -130,13 +131,14 @@ export class ChartController {
     this.facade.setPriceScaleMargins("", VOLUME_SCALE_MARGINS);
   }
 
-  sync(): void {
+  sync(nowMs = Date.now()): void {
     this.daySegmentBuildsThisSync = 0;
     const bars = this.deps.bars.series(this.config.symbol, this.config.timeframe);
-    this.applyBars(bars);
-    this.refreshBarCaches(bars);
+    const displayBars = this.config.timeframe === "10s" ? fillEmptyTenSecondSlots(bars, nowMs) : bars;
+    this.applyBars(displayBars);
+    this.refreshBarCaches(displayBars);
     this.applyIndicators();
-    this.applySessions(bars);
+    this.applySessions(displayBars);
   }
 
   private applyBars(bars: Bar[]): void {
@@ -607,6 +609,7 @@ export class ChartController {
   // Main-series data point matched to the active chart type: OHLC for candle/bar,
   // single close value for line/area (LWC line/area series read `.value`).
   private mainPoint(b: Bar): object {
+    if (isWhitespace(b)) return { time: toLwcTime(b.bucketStart) };
     return this.chartType === "line" || this.chartType === "area"
       ? { time: toLwcTime(b.bucketStart), value: b.c }
       : toCandle(b);
@@ -711,7 +714,25 @@ function candleRangeOf(bars: Bar[]): PriceRange {
   return { minValue, maxValue };
 }
 function toVolume(b: Bar, p: Palette) {
+  if (isWhitespace(b)) return { time: toLwcTime(b.bucketStart) };
   return { time: toLwcTime(b.bucketStart), value: b.v, color: b.c >= b.o ? p.volUp : p.volDown };
+}
+
+function isWhitespace(b: Bar): boolean { return b.o === 0 && b.h === 0 && b.l === 0 && b.c === 0 && b.v === 0; }
+
+export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number): Bar[] {
+  if (bars.length === 0) return bars;
+  const current = bucketStartMs(nowMs, "10s");
+  const out: Bar[] = [];
+  for (let i = 0; i < bars.length; i++) {
+    const real = bars[i];
+    out.push(real);
+    const limit = Math.min(i + 1 < bars.length ? Date.parse(bars[i + 1].bucketStart) : current + 10_000, current + 10_000);
+    for (let ms = Date.parse(real.bucketStart) + 10_000; ms < limit && sessionAt(ms) !== "closed"; ms += 10_000) {
+      out.push({ ...real, bucketStart: new Date(ms).toISOString(), o: 0, h: 0, l: 0, c: 0, v: 0, inProgress: false });
+    }
+  }
+  return out;
 }
 
 // One band per contiguous run of same-session bars, with every edge pinned to a

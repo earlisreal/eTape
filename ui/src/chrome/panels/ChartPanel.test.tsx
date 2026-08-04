@@ -659,6 +659,15 @@ describe("ChartPanel", () => {
     expect(queryByTestId("bar-close-timer")).toBeNull();
   });
 
+  it("hides the 10s badge after its real bar falls behind the wall-clock bucket", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-09T13:31:11Z"));
+    const { stores, getSurface, queryByTestId } = renderChartCapturingSurface({ timeframe: "10s" });
+    pushLiveBar(stores, "US.AAPL", "10s", 100, 100.5);
+    act(() => { getSurface().paint(); });
+    expect(queryByTestId("bar-close-timer")).toBeNull();
+    now.mockRestore();
+  });
+
   it("isDirty reacts only to its own pinned symbol's bar revision and its own indicator instances' revisions — not a foreign symbol's bar delta or an unrelated instance's update (per-key scoping regression)", () => {
     const { getByRole, stores, getSurface, onConfigChange } = renderChartCapturingSurface(); // pinned to US.AAPL/1m via config.settings
 
@@ -694,6 +703,16 @@ describe("ChartPanel", () => {
     // chart's active instances) must NOT dirty it.
     stores.indicators.apply({ kind: "delta", topic: "md.indicator", key: "other-panel:EMA-0", payload: { timeMs: Date.now(), value: 1 } });
     expect(getSurface().isDirty()).toBe(false);
+  });
+
+  it("dirties a 10s chart when the wall-clock bucket advances without a store revision", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-06T13:30:01Z"));
+    const { getSurface } = renderChartCapturingSurface({ timeframe: "10s" });
+    getSurface().isDirty();
+    expect(getSurface().isDirty()).toBe(false);
+    now.mockReturnValue(Date.parse("2026-07-06T13:30:11Z"));
+    expect(getSurface().isDirty()).toBe(true);
+    now.mockRestore();
   });
 
   it("isDirty tracks MACD's multi-slot sub-keys, not just the base instanceId (multi-slot indicator regression)", () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  ChartController, LEFT_PAD_BARS, bandsFromBars,
+  ChartController, LEFT_PAD_BARS, bandsFromBars, fillEmptyTenSecondSlots,
   type BarReader, type IndicatorController, type CommandSender,
 } from "./ChartController";
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
@@ -119,6 +119,50 @@ const make = (reader: BarReader, cmd = commandSpy(), ind: IndicatorController = 
 };
 
 describe("ChartController", () => {
+  it("fills only the active 10s session with zero-valued source bars", () => {
+    const real = { ...bar("2026-07-06T23:59:40Z", 10), timeframe: "10s" };
+    const filled = fillEmptyTenSecondSlots([real], Date.parse("2026-07-07T00:00:20Z"));
+    expect(filled.map((b) => [b.bucketStart, b.o, b.h, b.l, b.c, b.v])).toEqual([
+      ["2026-07-06T23:59:40Z", 10, 10, 10, 10, 100],
+      ["2026-07-06T23:59:50.000Z", 0, 0, 0, 0, 0],
+    ]);
+  });
+
+  it("renders missing 10s buckets as price and volume whitespace", () => {
+    const bars = [{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }];
+    const facade = fakeFacade();
+    const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+    ctrl.mount();
+    ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
+    expect(facade.created[0].series.setDataCalls.at(-1)).toEqual([
+      { time: Date.parse("2026-07-06T13:30:00Z") / 1000, open: 10, high: 10, low: 10, close: 10 },
+      { time: Date.parse("2026-07-06T13:30:10Z") / 1000 },
+      { time: Date.parse("2026-07-06T13:30:20Z") / 1000 },
+    ]);
+    expect(facade.created[1].series.setDataCalls.at(-1)?.slice(1)).toEqual([
+      { time: Date.parse("2026-07-06T13:30:10Z") / 1000 },
+      { time: Date.parse("2026-07-06T13:30:20Z") / 1000 },
+    ]);
+  });
+
+  it("a resumed 10s real bar replaces its placeholder and keeps earlier gaps", () => {
+    const reader = mutableBarReader([{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }]);
+    const facade = fakeFacade();
+    const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
+    ctrl.mount();
+    ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
+    reader.set([
+      { ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" },
+      { ...bar("2026-07-06T13:30:20Z", 12, true), timeframe: "10s" },
+    ]);
+    ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
+    expect(facade.created[0].series.setDataCalls.at(-1)).toEqual([
+      { time: Date.parse("2026-07-06T13:30:00Z") / 1000, open: 10, high: 10, low: 10, close: 10 },
+      { time: Date.parse("2026-07-06T13:30:10Z") / 1000 },
+      { time: Date.parse("2026-07-06T13:30:20Z") / 1000, open: 12, high: 12, low: 12, close: 12 },
+    ]);
+  });
+
   it("mount creates a candle + volume series", () => {
     const { facade } = make(barReaderOf([]));
     expect(facade.created.map((c) => c.kind)).toEqual(["candle", "histogram"]);

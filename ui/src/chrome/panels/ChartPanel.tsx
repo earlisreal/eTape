@@ -550,6 +550,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     let lastIndicatorsRev = -1;
     let lastFillsRev = -1;
     let lastDrawingsRev = -1;
+    let lastWallBucket = -1;
     // Dragging a pane separator (e.g. resizing the MACD sub-pane by hand) changes
     // pane heights inside LWC directly — it bumps no store revision and moves no
     // crosshair, so none of the revision checks above ever see it. Without this
@@ -582,13 +583,15 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         const fillsRev = stores.fills.getRev();
         const drawingsRev = stores.drawings.getRev();
         const paneSig = `${facade.paneHeights().join(",")}|${facade.priceScaleWidth()}`;
+        const wallBucket = tfRef.current === "10s" ? Math.floor(Date.now() / 10_000) : -1;
         const changed = barsRev !== lastBarsRev || indicatorsRev !== lastIndicatorsRev || fillsRev !== lastFillsRev || drawingsRev !== lastDrawingsRev
-          || paneSig !== lastPaneSig || forceRepaintRef.current;
+          || paneSig !== lastPaneSig || wallBucket !== lastWallBucket || forceRepaintRef.current;
         lastBarsRev = barsRev;
         lastIndicatorsRev = indicatorsRev;
         lastFillsRev = fillsRev;
         lastDrawingsRev = drawingsRev;
         lastPaneSig = paneSig;
+        lastWallBucket = wallBucket;
         forceRepaintRef.current = false;
         return changed;
       },
@@ -628,7 +631,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         // BarCloseTimer anchors directly on LWC's own last-price coordinate, which
         // only exists while the current bucket's bar is still in progress — no live
         // bar, nothing to anchor to, so the badge stays hidden (see the JSX gate below).
-        const live = stores.bars.inProgressBar(currentSymbol, tfRef.current);
+        const candidate = stores.bars.inProgressBar(currentSymbol, tfRef.current);
+        const live = candidate && (tfRef.current !== "10s" || Date.parse(candidate.bucketStart) === Math.floor(Date.now() / 10_000) * 10_000) ? candidate : null;
         const y = live ? facade.priceToCoordinate(live.c) : null;
         const next = live && y != null ? { y, up: live.c >= live.o, price: live.c } : null;
         setLastPriceTag((prev) =>
