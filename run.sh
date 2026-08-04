@@ -41,7 +41,7 @@ Examples:
 EOF
 }
 
-mode="${1:-}"
+mode="${1:-live}"
 [ $# -gt 0 ] && shift
 
 case "$mode" in
@@ -85,7 +85,7 @@ case "$mode" in
     npm run dev
     ;;
 
-  ""|-h|--help|help)
+  -h|--help|help)
     usage
     exit 0
     ;;

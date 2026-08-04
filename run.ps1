@@ -55,7 +55,7 @@ function Build-UI {
 
 # Parse args WITHOUT a param() block so engine flags like -log=... pass
 # through verbatim (PowerShell parameter binding would try to interpret them).
-$Mode = ''
+$Mode = 'live'
 $Rest = @()
 if ($args.Count -ge 1) { $Mode = [string]$args[0] }
 if ($args.Count -ge 2) { $Rest = @($args[1..($args.Count - 1)]) }
@@ -117,7 +117,7 @@ switch ($Mode) {
         exit $code
     }
 
-    { $_ -in @('', '-h', '--help', 'help') } {
+    { $_ -in @('-h', '--help', 'help') } {
         Show-Usage
         exit 0
     }
