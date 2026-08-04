@@ -30,6 +30,7 @@ type execDoer interface {
 type configStore interface {
 	GetConfig(key string) (string, bool, error)
 	SetConfig(key, value string)
+	DeleteConfig(key string)
 }
 
 type indicatorCtl interface {
@@ -199,6 +200,13 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked("bad args"), false
 		}
 		cd.cfg.SetConfig(a.Key, string(a.Value))
+		return wsmsg.AckMsg{Status: "accepted"}, false
+	case "DeleteConfig":
+		var a wsmsg.DeleteConfigArgs
+		if err := json.Unmarshal(args, &a); err != nil || a.Key == "" {
+			return blocked("bad args"), false
+		}
+		cd.cfg.DeleteConfig(a.Key)
 		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "GetScannerFilters":
 		if b := cd.scanner.Load(); b != nil {

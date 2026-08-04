@@ -398,6 +398,10 @@ type SetConfigArgs struct {
 	Value json.RawMessage `json:"value"`
 }
 
+type DeleteConfigArgs struct {
+	Key string `json:"key"`
+}
+
 type SetScannerFiltersArgs struct {
 	Filters ScannerFilters `json:"filters"`
 }

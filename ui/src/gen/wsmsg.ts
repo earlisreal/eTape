@@ -457,6 +457,9 @@ export interface SetConfigArgs {
   key: string;
   value: unknown;
 }
+export interface DeleteConfigArgs {
+  key: string;
+}
 export interface SetScannerFiltersArgs {
   filters: ScannerFilters;
 }

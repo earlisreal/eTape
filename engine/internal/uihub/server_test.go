@@ -33,6 +33,7 @@ type cfgNoop struct{}
 
 func (cfgNoop) GetConfig(string) (string, bool, error) { return "", false, nil }
 func (cfgNoop) SetConfig(string, string)               {}
+func (cfgNoop) DeleteConfig(string)                    {}
 
 type indNoop struct{}
 
@@ -329,6 +330,7 @@ func (c *slowConfig) SetConfig(string, string) {
 	<-c.release
 	c.active.Store(false)
 }
+func (c *slowConfig) DeleteConfig(string) {}
 
 // TestServerWaitBlocksUntilConnectionDrains is a regression test for the final
 // whole-branch review finding: store.SetConfig sends unconditionally on

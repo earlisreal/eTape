@@ -19,6 +19,7 @@ type apiStores struct{}
 
 func (apiStores) GetConfig(string) (string, bool, error)                  { return "", false, nil }
 func (apiStores) SetConfig(string, string)                                {}
+func (apiStores) DeleteConfig(string)                                     {}
 func (apiStores) QueryFills(string, int64, int64) ([]exec.FillRow, error) { return nil, nil }
 func (apiStores) ExportFills(context.Context, string, int64, int64) ([]exec.ExportFillRow, error) {
 	return nil, nil

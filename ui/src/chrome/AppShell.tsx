@@ -33,7 +33,8 @@ import { useOrderConfig } from "./exec/useOrderConfig";
 import { useHotkeys } from "./exec/useHotkeys";
 import { useAutoUnlockOnStartup } from "./exec/useAutoUnlockOnStartup";
 import { useSoundWiring } from "../sound/useSoundWiring";
-import { nextWindowName } from "./windows";
+import { NewWindowModal } from "./NewWindowModal";
+import { mutateWindows, readWindows } from "./catalogs";
 import { planDemoEntry, planDemoRevert } from "./demoTransition";
 
 // Task 3: permanent "don't show again" flag for the first-run venue-setup
@@ -84,6 +85,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // gear opens it to Appearance, the order ticket's gear (via OpenSettingsContext)
   // opens it straight to Orders & hotkeys.
   const [settings, setSettings] = useState<{ open: boolean; section: SettingsSection }>({ open: false, section: "general" });
+  const [newWindowOpen, setNewWindowOpen] = useState(false);
+  const [workspaceLabel, setWorkspaceLabel] = useState(workspaceName);
   // Task 9 (unified into the Task 5/U3 Practice launcher): opened from
   // TopBar's "Practice" button, offers a synthetic demo market or replaying
   // a recorded day.
@@ -145,6 +148,28 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       setWs(w);
     });
   }, [workspaceName, workspaceStore, linkGroups]);
+  useEffect(() => {
+    if (workspaceName === "main") { setWorkspaceLabel("main"); return; }
+    const refresh = () => void readWindows(commands).then((c) => setWorkspaceLabel(c.entries.find((e) => e.id === workspaceName)?.name ?? workspaceName));
+    refresh(); const channel = new BroadcastChannel("etape.window-catalog"); channel.onmessage = refresh;
+    return () => channel.close();
+  }, [workspaceName, commands]);
+  useEffect(() => {
+    if (workspaceName === "main" || !navigator.locks) return;
+    const stop = new AbortController();
+    void navigator.locks.request(`etape.workspace.${workspaceName}`, { mode: "shared", signal: stop.signal }, () => new Promise<void>((resolve) => stop.signal.addEventListener("abort", () => resolve(), { once: true }))).catch(() => {});
+    return () => stop.abort();
+  }, [workspaceName]);
+  useEffect(() => {
+    void commands.sendCommand("GetConfig", { key: "windows.v1" }).then(async (ack) => {
+      if (ack.value !== undefined || localStorage.getItem("etape.windows") == null) return;
+      let legacy: string[]; try { legacy = JSON.parse(localStorage.getItem("etape.windows") ?? "[]"); } catch { legacy = []; }
+      const names = legacy.filter((n) => typeof n === "string" && n !== "main");
+      if (!names.length) { localStorage.removeItem("etape.windows"); return; }
+      await mutateWindows(commands, (fresh) => fresh.entries.length ? fresh : ({ version: 1, entries: [...new Set(names)].map((name) => ({ id: name, name })) }));
+      localStorage.removeItem("etape.windows");
+    }).catch(() => {});
+  }, [commands]);
   // Mounted once, globally — must run unconditionally, before the loading-state
   // early return below, per the Rules of Hooks. group: "blue" (not useHotkeys'
   // own "green" default) — found via the Task 12 E2E smoke spec: no preset in
@@ -374,14 +399,16 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       if (timer !== null) { clearTimeout(timer); timer = null; }
       if (transitionEpochRef.current !== myEpoch) return; // superseded by a newer edge meanwhile
       const current = wsRef.current ?? wsNow;
-      // An empty workspace has no panels for planDemoEntry to remap symbols
-      // onto, so entering demo from empty used to leave the grid blank
-      // (just the auto-added Watchlist below). Seed the Trading preset's
-      // panels/layout first so "Try demo" from a fresh workspace lands on a
-      // populated, demo-symbol grid instead of an empty one.
-      const base = current.panels.length === 0
+      // Only main gets the demo starter layout. Named workspaces are explicit
+      // user-created canvases and must remain empty until the user chooses a
+      // preset, template, or panel.
+      const base = current.panels.length === 0 && workspaceName === "main"
         ? { ...current, ...PRESETS.find((p) => p.id === "trading")!.build() }
         : current;
+      if (current.panels.length === 0 && workspaceName !== "main") {
+        onTransitionApplied?.();
+        return;
+      }
       const isSymbolBearing = (id: string) => PANELS[id]?.symbolBearing ?? false;
       applyWorkspace(planDemoEntry(base, universe, isSymbolBearing));
       // Appended separately (not folded into planDemoEntry) so dockview
@@ -574,8 +601,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // closes on an actual replace, same as before this was extracted.
   const applyPresetToWorkspace = (presetId: string) => {
     const preset = PRESETS.find((p) => p.id === presetId);
-    if (!preset) return;
     const current = wsRef.current ?? ws;
+    if (!preset) return;
     const { panels, layout } = preset.build();
     const next = { ...current, panels, layout };
     applyWorkspace(next, current.panels.length > 0 ? { confirm: "Replace the current layout with this preset?" } : undefined);
@@ -616,26 +643,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     else addPanel("connection-status");
   };
 
-  // Best-effort window tracking in localStorage so repeated "New window"
-  // clicks fill the lowest free window-N gap rather than colliding.
-  const onNewWindow = () => {
-    let known: string[] = [];
-    try {
-      known = JSON.parse(localStorage.getItem("etape.windows") ?? "[]") as string[];
-    } catch {
-      known = [];
-    }
-    const names = Array.from(new Set([workspaceName, ...known]));
-    const name = nextWindowName(names);
-    try {
-      localStorage.setItem("etape.windows", JSON.stringify([...names, name]));
-    } catch {
-      // best-effort only — a full/blocked localStorage shouldn't stop the new window
-    }
-    const url = `?workspace=${name}`;
-    const w = window.open(url, "_blank");
-    if (!w) toast.push({ level: "warn", text: `Popup blocked — open ${url} manually.`, sticky: true });
-  };
+  const onNewWindow = () => setNewWindowOpen(true);
 
   // Stable React keys: panels are keyed by config.id so dockview drag/resize
   // never remounts them (canvas keeps its context). Each factory is called by
@@ -713,7 +721,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     <OpenSettingsProvider value={{ openOrderSettings: () => setSettings({ open: true, section: "orders" }) }}>
       <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
         <div style={{ position: "relative" }}>
-          <TopBar workspaceName={workspaceName} health={stores.health} armed={armed}
+          <TopBar workspaceName={workspaceLabel} health={stores.health} armed={armed}
             onArmToggle={() => (armed ? oc.disarm() : oc.arm())}
             onAddPanel={() => setAddOpen((v) => !v)}
             onNewWindow={onNewWindow}
@@ -755,6 +763,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           exec={stores.exec}
           session={stores.session} />
         <PracticeLauncherModal open={practiceOpen} onClose={() => setPracticeOpen(false)} commands={commands} />
+        <NewWindowModal open={newWindowOpen} currentId={workspaceName} commands={commands} onClose={() => setNewWindowOpen(false)} />
         {showVenueSetup && <VenueSetupPrompt onConfigure={configureVenueSetup} onDismiss={dismissVenueSetup} onTryDemo={onTryDemo} />}
       </div>
     </OpenSettingsProvider>

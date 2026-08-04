@@ -45,7 +45,7 @@ export function TopBar(p: TopBarProps): JSX.Element {
       padding: "7px 12px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
         <span className="serif" style={{ fontWeight: 600, fontSize: 14 }}>eTape</span>
-        <span style={{ color: palette.textMuted }}>· {p.workspaceName}</span>
+        {p.workspaceName !== "main" && <span style={{ color: palette.textMuted }}>· {p.workspaceName}</span>}
         <LatencyReadout health={p.health} onOpen={p.onOpenConnection} />
       </div>
       <SessionClock />

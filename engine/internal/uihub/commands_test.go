@@ -38,8 +38,9 @@ type spyExec struct {
 func (s *spyExec) Do(c exec.Command) exec.CmdAck { s.last = c; return s.ack }
 
 type spyCfg struct {
-	got    map[string]string
-	values map[string]string
+	got     map[string]string
+	values  map[string]string
+	deleted string
 }
 
 func (s *spyCfg) GetConfig(k string) (string, bool, error) {
@@ -52,6 +53,7 @@ func (s *spyCfg) SetConfig(k, v string) {
 	}
 	s.got[k] = v
 }
+func (s *spyCfg) DeleteConfig(k string) { s.deleted = k }
 
 type spyInd struct{ ensured, released string }
 
@@ -223,6 +225,19 @@ func TestCommandsGetSetConfig(t *testing.T) {
 	set, _ := cd.handle(context.Background(), "SetConfig", json.RawMessage(`{"key":"theme","value":"light"}`), 0, func(wsmsg.AckMsg) {})
 	if set.Status != "accepted" || cfg.got["theme"] != `"light"` {
 		t.Fatalf("SetConfig must persist raw JSON value: %+v / %v", set, cfg.got)
+	}
+}
+
+func TestCommandsDeleteConfig(t *testing.T) {
+	cfg := &spyCfg{}
+	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	ack, _ := cd.handle(context.Background(), "DeleteConfig", json.RawMessage(`{"key":"workspace.dead"}`), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckAccepted || cfg.deleted != "workspace.dead" {
+		t.Fatalf("DeleteConfig: %+v deleted=%q", ack, cfg.deleted)
+	}
+	bad, _ := cd.handle(context.Background(), "DeleteConfig", json.RawMessage(`{"key":`), 0, func(wsmsg.AckMsg) {})
+	if bad.Status != wsmsg.AckBlocked {
+		t.Fatalf("malformed DeleteConfig accepted: %+v", bad)
 	}
 }
 

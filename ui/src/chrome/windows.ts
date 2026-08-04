@@ -1,11 +1,11 @@
-const NAME_RE = /^[a-z0-9-]{1,32}$/;
+const WORKSPACE_ID_RE = /^[a-z0-9-]{1,64}$/;
 
-/** Parse `?workspace=<name>`; default `main`; reject anything not [a-z0-9-]. */
+/** Parse `?workspace=<id>`; default `main`; accepts catalog UUIDs. */
 export function parseWorkspaceName(search: string): string {
   const raw = new URLSearchParams(search).get("workspace");
   if (!raw) return "main";
   const name = raw.toLowerCase();
-  return NAME_RE.test(name) ? name : "main";
+  return WORKSPACE_ID_RE.test(name) ? name : "main";
 }
 
 /** Lowest free `window-N` (N starts at 2; `main` is window 1). */

@@ -18,6 +18,7 @@ type ExecCore interface {
 type Stores interface {
 	GetConfig(key string) (string, bool, error)
 	SetConfig(key, value string)
+	DeleteConfig(key string)
 	QueryFills(symbol string, fromMs, toMs int64) ([]exec.FillRow, error)
 	ExportFills(ctx context.Context, venue string, fromMs, toMs int64) ([]exec.ExportFillRow, error)
 }
