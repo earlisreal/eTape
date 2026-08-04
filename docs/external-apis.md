@@ -14,6 +14,7 @@
 - Subscription and historical-K-line quotas are separate. Multiple K-line periods for one symbol share one subscription slot; code centralizes demand and quota tracking.
 - Broker adapters normalize venue payloads into `exec` domain types. Risk gates and venue arming run before adapter submission.
 - Historical requests use completed offline-NYSE-calendar horizons and persisted explored-range coverage. A complete archive therefore makes no Alpaca/Yahoo request on weekends, holidays, or unchanged completed sessions; successful provider-empty intervals are also remembered.
+- Focused charts archive and seed OpenD's K_1M tail, then K_DAY cache, before external history. Alpaca fills only uncovered one-minute and daily ranges ending before OpenD's oldest bars; Yahoo is the optional daily fallback. OpenD cache failures retain the calendar-derived fallback windows.
 
 ## Research-only alternatives
 

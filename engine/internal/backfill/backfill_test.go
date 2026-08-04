@@ -79,8 +79,8 @@ func TestWarmUsesTieredSegmentsAndDoesNotSeedDeepSeries(t *testing.T) {
 	if err := deep.Warm(context.Background(), "US.DEEP", 70); err != nil {
 		t.Fatal(err)
 	}
-	if got := deepFetch.m1Calls.Load(); got != 7 {
-		t.Fatalf("deep 1m calls=%d, want seven 10-day segments", got)
+	if got := deepFetch.m1Calls.Load(); got != 1 {
+		t.Fatalf("deep 1m calls=%d, want one missing-range query", got)
 	}
 	if got := deepTail.calls.Load(); got != 1 {
 		t.Fatalf("deep tail calls=%d, want 1", got)
@@ -172,14 +172,55 @@ func (f *fakeFetcher) Intraday1m(_ context.Context, _ string, _, _ time.Time) ([
 }
 
 type fakeTail struct {
-	bars  []feed.Bar
-	err   error
-	calls atomic.Int32
+	bars, daily       []feed.Bar
+	err, dailyErr     error
+	block1m           bool
+	calls, dailyCalls atomic.Int32
 }
 
-func (t *fakeTail) Tail1m(_ context.Context, _ string) ([]feed.Bar, error) {
+func (t *fakeTail) Tail1m(ctx context.Context, _ string) ([]feed.Bar, error) {
 	t.calls.Add(1)
+	if t.block1m {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return t.bars, t.err
+}
+func (t *fakeTail) CachedDaily(_ context.Context, _ string) ([]feed.Bar, error) {
+	t.dailyCalls.Add(1)
+	return t.daily, t.dailyErr
+}
+
+func TestFocusedCacheTimeoutContinuesFallbacks(t *testing.T) {
+	oldTimeout := focusedCacheTimeout
+	focusedCacheTimeout = time.Millisecond
+	defer func() { focusedCacheTimeout = oldTimeout }()
+
+	tail := &fakeTail{block1m: true, daily: []feed.Bar{bar(dailyFloor.AddDate(1, 0, 0).UnixMilli())}}
+	fetch := &fakeFetcher{}
+	o := New(chain(fetch), chain(fetch), tail, &fakeSeeder{}, &fakeArchive{},
+		clock.NewFake(fixedNow()), Config{IntradayDays: 70, Concurrency: 1})
+	if err := o.Warm(context.Background(), "US.AAPL", 70); err != nil {
+		t.Fatal(err)
+	}
+	if tail.dailyCalls.Load() != 1 || fetch.m1Calls.Load() != 1 || fetch.dCalls.Load() != 1 {
+		t.Fatalf("calls daily-cache/1m/daily = %d/%d/%d, want 1/1/1", tail.dailyCalls.Load(), fetch.m1Calls.Load(), fetch.dCalls.Load())
+	}
+}
+
+func TestFocusedIntradayFailureDoesNotAdvanceWatermark(t *testing.T) {
+	fetch := &fakeFetcher{mErr: errors.New("1m unavailable")}
+	o := New(chain(fetch), chain(fetch), nil, &fakeSeeder{}, &fakeArchive{},
+		clock.NewFake(fixedNow()), Config{IntradayDays: 70, Concurrency: 1})
+	if err := o.Warm(context.Background(), "US.AAPL", 70); err == nil {
+		t.Fatal("Warm error=nil, want intraday failure")
+	}
+	o.mu.Lock()
+	watermark := o.oldest1m["US.AAPL"]
+	o.mu.Unlock()
+	if watermark != 0 || fetch.dCalls.Load() != 1 {
+		t.Fatalf("watermark=%d daily calls=%d, want 0/1", watermark, fetch.dCalls.Load())
+	}
 }
 
 type fakeSeeder struct {

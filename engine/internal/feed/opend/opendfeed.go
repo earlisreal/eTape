@@ -509,7 +509,12 @@ func (f *OpenDFeed) CachedBars1m(ctx context.Context, symbol string, n int) ([]f
 // read otherwise, surfacing as an error the backfill orchestrator treats as
 // "skip the tail step". Implements backfill.TailFetcher.
 func (f *OpenDFeed) Tail1m(ctx context.Context, symbol string) ([]feed.Bar, error) {
-	return f.bf.cachedBars1m(ctx, symbol, maxAPIRows)
+	if err := f.sub.WaitActive(ctx, subKey{Symbol: symbol, Sub: feed.SubKL1m}); err != nil {
+		return nil, err
+	}
+	return seedRetry(ctx, f.clk, func() ([]feed.Bar, error) {
+		return f.bf.cachedBars1m(ctx, symbol, maxAPIRows)
+	})
 }
 
 func (f *OpenDFeed) BookSnapshot(ctx context.Context, symbol string) (feed.Book, error) {

@@ -47,12 +47,12 @@ type Source struct {
 	HistFetcher
 }
 
-// TailFetcher pulls the quota-free recent 1m window (moomoo Qot_GetKL, ≤1,000
-// bars) for a symbol with an active K_1M subscription. Implemented by
+// TailFetcher pulls the quota-free recent K-line caches. Implemented by
 // *opend.OpenDFeed; nil in replay/demo (no OpenD), where the tail step is
 // skipped.
 type TailFetcher interface {
 	Tail1m(ctx context.Context, symbol string) ([]feed.Bar, error)
+	CachedDaily(ctx context.Context, symbol string) ([]feed.Bar, error)
 }
 
 // Seeder receives backfilled bars. Implemented by *md.Core. SeedOlder1m feeds
@@ -167,6 +167,8 @@ func New(daily, intraday []Source, tail TailFetcher, seeder Seeder, archive Arch
 
 const warmSegmentTradingDays = 10
 
+var focusedCacheTimeout = 3 * time.Second
+
 // Warm archives tiered history without publishing the full archive into the
 // chart mirror. Watch demands pass 2; chart/focused demands pass 70. A deep
 // request may race a watch request, so the singleflight key includes depth;
@@ -221,9 +223,7 @@ func (o *Orchestrator) warmDepth(ctx context.Context, symbol string, days int) e
 	now := o.clk.Now()
 	if days >= o.cfg.IntradayDays {
 		o.fastArchiveFirstPaint(ctx, symbol)
-		// K_1M is active for chart/focused demands. This cache read gives first
-		// paint and persists the latest 1,000 bars while deep segments archive.
-		o.tail1m(ctx, symbol)
+		return o.warmFocused(ctx, symbol, days, now)
 	}
 	remaining := days
 	to := completed1mTo(now)
@@ -247,6 +247,72 @@ func (o *Orchestrator) warmDepth(ctx context.Context, symbol string, days int) e
 	}
 	o.noteBackfilled(symbol, intradayFrom(now, days))
 	return nil
+}
+
+// warmFocused establishes OpenD's seams before optional external providers
+// fill only the older, still-uncovered ranges.
+func (o *Orchestrator) warmFocused(ctx context.Context, symbol string, days int, now time.Time) error {
+	intradayTo := completed1mTo(now)
+	dailyTo := completedDailyTo(now)
+	if oldest, ok, err := o.cache1m(ctx, symbol); err != nil {
+		slog.Warn("history warm: OpenD 1m cache unavailable", "symbol", symbol, "err", err)
+	} else if ok {
+		intradayTo = time.UnixMilli(oldest - 1)
+	}
+	if oldest, ok, err := o.cacheDaily(ctx, symbol); err != nil {
+		slog.Warn("history warm: OpenD daily cache unavailable", "symbol", symbol, "err", err)
+	} else if ok {
+		dailyTo = time.UnixMilli(oldest - 1)
+	}
+	intradayFloor := intradayFrom(intradayTo.Add(time.Millisecond), days)
+	intradayErr := o.fill1mArchiveOnly(ctx, symbol, intradayFloor, intradayTo)
+	dailyErr := o.fillDailyArchiveOnly(ctx, symbol, dailyFloor, dailyTo, false)
+	if intradayErr == nil {
+		o.noteBackfilled(symbol, intradayFloor)
+	}
+	return errors.Join(intradayErr, dailyErr)
+}
+
+func (o *Orchestrator) cache1m(ctx context.Context, symbol string) (int64, bool, error) {
+	if o.tail == nil {
+		return 0, false, nil
+	}
+	cacheCtx, cancel := context.WithTimeout(ctx, focusedCacheTimeout)
+	defer cancel()
+	bars, err := o.tail.Tail1m(cacheCtx, symbol)
+	return o.archiveAndSeedCache(ctx, symbol, "1m", bars, err)
+}
+
+func (o *Orchestrator) cacheDaily(ctx context.Context, symbol string) (int64, bool, error) {
+	if o.tail == nil {
+		return 0, false, nil
+	}
+	cacheCtx, cancel := context.WithTimeout(ctx, focusedCacheTimeout)
+	defer cancel()
+	bars, err := o.tail.CachedDaily(cacheCtx, symbol)
+	return o.archiveAndSeedCache(ctx, symbol, "1d", bars, err)
+}
+
+func (o *Orchestrator) archiveAndSeedCache(ctx context.Context, symbol, timeframe string, bars []feed.Bar, err error) (int64, bool, error) {
+	if err != nil || len(bars) == 0 {
+		return 0, false, err
+	}
+	if a, ok := o.archive.(rangeArchive); ok {
+		if err := a.ArchiveRange(symbol, timeframe, bars[0].BucketMs, bars[len(bars)-1].BucketMs, bars); err != nil {
+			return 0, false, err
+		}
+	} else if timeframe == "1m" {
+		o.archive1m(bars)
+	} else {
+		o.archiveDailyBars(bars)
+	}
+	if timeframe == "1m" {
+		seedUnlessCanceled(ctx, bars, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
+	} else {
+		seedUnlessCanceled(ctx, bars, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
+	}
+	o.syncHistory(symbol)
+	return bars[0].BucketMs, true, nil
 }
 
 // completedDailyTo returns the latest official daily bucket eligible five

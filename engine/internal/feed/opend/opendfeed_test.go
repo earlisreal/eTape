@@ -550,7 +550,11 @@ func TestTail1mReturnsCachedBars(t *testing.T) {
 		kl(1782146520, 309.2, 1100),
 	}})
 	fd := NewOpenDFeed(liveClient(t, m), FeedOptions{})
-	bars, err := fd.Tail1m(context.Background(), "US.AAPL")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = fd.Run(ctx) }()
+	fd.Ensure(feed.Demand{ID: "tail", Symbol: "US.AAPL", Subs: []feed.SubType{feed.SubKL1m}})
+	bars, err := fd.Tail1m(ctx, "US.AAPL")
 	if err != nil {
 		t.Fatal(err)
 	}

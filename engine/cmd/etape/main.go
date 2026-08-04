@@ -650,7 +650,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		}()
 	}
 	hub.SetHistoryWarm(hubBackfill) // tiered watch/chart history warming
-	if fd, ok := feedForHub.(*opend.OpenDFeed); ok && st != nil {
+	if fd, ok := feedForHub.(*opend.OpenDFeed); ok && st != nil && !cfg.Backfill.Enabled {
 		hub.SetCachedDaily(func(sym string) {
 			backfillWG.Add(1)
 			go func() {
