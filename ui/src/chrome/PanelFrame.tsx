@@ -62,7 +62,8 @@ export function PanelFrame(
   // to update immediately (mirrors TapePanel's local-state + write-through
   // onConfigChange pattern for the same underlying reason).
   const [group, setGroup] = useState<LinkGroup>(config.group);
-  const [symbol, setSymbol] = useState<string | undefined>(() => linkGroups.symbolFor(group));
+  const [symbol, setSymbol] = useState<string | undefined>(() =>
+    linkGroups.symbolFor(group) ?? (config.settings.symbol as string | undefined));
   const { palette } = useTheme();
   const toast = useToasts();
 
@@ -127,15 +128,14 @@ export function PanelFrame(
   // subscribe pattern as StockInfoPanel) — this is what makes "a grouped panel
   // follows its group's symbol" actually true rather than a one-time snapshot.
   useEffect(() => {
-    setSymbol(linkGroups.symbolFor(group));
-    return linkGroups.subscribe(() => setSymbol(linkGroups.symbolFor(group)));
+    if (group !== null) setSymbol(linkGroups.symbolFor(group));
+    return linkGroups.subscribe(() => {
+      if (group !== null) setSymbol(linkGroups.symbolFor(group));
+    });
   }, [linkGroups, group]);
 
   const def = PANELS[config.panelId];
   const Body = def?.component;
-  const props: PanelProps = { config, stores, scheduler, width: size.width, height: size.height,
-    linkGroups, commands, onConfigChange, active, onGroupChange, group };
-
   const pinned = group === null;
   // Effective symbol shown in the header: this group's shared symbol if linked,
   // else the panel's own settings.symbol (pinned panels, or a linked group with
@@ -144,6 +144,8 @@ export function PanelFrame(
   // creation — full live editing of it is Task 13's type-to-load work.
   const rawSymbol = symbol ?? (config.settings.symbol as string | undefined);
   const effectiveSymbol = rawSymbol ? bareSymbol(rawSymbol) : undefined;
+  const props: PanelProps = { config, stores, scheduler, width: size.width, height: size.height,
+    linkGroups, commands, onConfigChange, active, onGroupChange, group, ...(rawSymbol ? { symbol: rawSymbol } : {}) };
   useEffect(() => { symbolRef.current = rawSymbol; }, [rawSymbol]);
 
   // On-demand subscription. When this panel declares a demand profile, ask the
@@ -288,6 +290,7 @@ export function PanelFrame(
         // at panel creation (dockview never re-invokes the factory), so spreading
         // it reverted every setting the panel persisted since mount — a symbol
         // commit used to silently wipe a chart's indicators, timeframe, etc.
+        setSymbol(sym);
         onConfigChange({ symbol: sym });
       } catch (err) {
         // Review finding (Important): `commit` is invoked fire-and-forget
@@ -343,6 +346,9 @@ export function PanelFrame(
   }, [active, modalOpen, group, def?.symbolBearing, def?.demand, linkGroups, demandRegistry, onConfigChange, toast, config.id, config.settings]);
 
   const handleGroupPick = (g: LinkGroup) => {
+    // Detaching keeps the symbol the panel is showing now, not the stale
+    // creation-time settings.symbol that happened to exist before it linked.
+    if (g === null && group !== null && rawSymbol) onConfigChange({ symbol: rawSymbol });
     setGroup(g);
     onGroupChange(g);
   };

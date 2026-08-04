@@ -142,6 +142,16 @@ describe("PanelFrame", () => {
     expect(onGroupChange).toHaveBeenCalledWith("green");
   });
 
+  it("pins the currently displayed group symbol as the panel's own symbol", () => {
+    const linkGroups = new LinkGroups(fakeBus() as never, () => {});
+    linkGroups.focus("blue", "US.NVDA");
+    const { onConfigChange, onGroupChange } = renderFrame({ group: "blue", linkGroups });
+    fireEvent.click(screen.getByLabelText("link group"));
+    fireEvent.click(screen.getByText(/pinned/i));
+    expect(onConfigChange).toHaveBeenCalledWith({ symbol: "US.NVDA" });
+    expect(onGroupChange).toHaveBeenCalledWith(null);
+  });
+
   it("applies panel-focused only when the panel's own dockview api reports isActive, and stays live across activation changes without remounting", () => {
     const api = fakePanelApi(false);
     const { container } = renderFrame({ api });
@@ -242,6 +252,7 @@ describe("PanelFrame — type-to-load (Task 13)", () => {
     typeKey("n"); typeKey("v"); typeKey("d"); typeKey("a");
     typeKey("Enter");
     await waitFor(() => expect(onConfigChange).toHaveBeenCalledWith({ symbol: "US.NVDA" }));
+    expect(screen.getByTestId("panel-symbol").textContent).toBe("NVDA");
   });
 
   // Generalizes a guard Order Ticket used to own before its symbol editing

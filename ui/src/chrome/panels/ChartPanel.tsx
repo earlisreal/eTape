@@ -123,7 +123,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
   return { facade, setPalette: (p) => { session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); }, drawings };
 }
 
-export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange, group: groupProp }: PanelProps): JSX.Element {
+export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange, group: groupProp, symbol: symbolProp }: PanelProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<ChartController | null>(null);
   const setFacadePaletteRef = useRef<((p: Palette) => void) | null>(null);
@@ -136,7 +136,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const palette = getTvPalette(mode);
   const chrome = getTvChrome(mode);
   const headerSlot = useContext(PanelHeaderSlotContext);
-  const symbol = (config.settings.symbol as string) ?? "US.AAPL";
+  const symbol = symbolProp ?? (config.settings.symbol as string) ?? "US.AAPL";
   const timeframe0 = (config.settings.timeframe as string) ?? "1m";
   const chartType0 = (config.settings.chartType as ChartType) ?? "candle";
   const hideAll0 = (config.settings.hideAllDrawings as boolean) ?? false;
@@ -147,7 +147,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // re-pick — see PanelFrame's `group` prop comment). PanelFrame threads its own
   // live `group` state through as a prop; fall back to config.group so tests
   // that construct PanelProps directly (no `group` prop) keep working.
-  const group = groupProp ?? config.group;
+  const group = groupProp === undefined ? config.group : groupProp;
 
   // Config surfaces (timeframe + indicators) ARE low-rate chrome, so React state is
   // fine here (the hard rule is about market data, not per-chart config).
@@ -204,6 +204,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // already-mounted closure "the group was reassigned, re-resolve the symbol" —
   // applySymbolRef is that closure's own applySymbol, captured once it's created.
   const groupRef = useRef(group);
+  const ownSymbolRef = useRef(symbol);
   const applySymbolRef = useRef<(() => void) | null>(null);
   const queryViewportRef = useRef<(() => void) | null>(null);
 
@@ -462,7 +463,11 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     let initialized = false;
     let firstPaintLogFrame: number | null = null;
     const applySymbol = () => {
-      currentSymbol = linkGroups.symbolFor(groupRef.current) ?? symbol;
+      // Pinning detaches from the bus without changing the symbol currently on
+      // screen. PanelFrame persists that snapshot for the next workspace load.
+      const linkedSymbol = linkGroups.symbolFor(groupRef.current);
+      if (linkedSymbol) ownSymbolRef.current = linkedSymbol;
+      currentSymbol = linkedSymbol ?? ownSymbolRef.current;
       const timing = linkGroups.focusTimingFor(groupRef.current, currentSymbol);
       if (timing && timing.sequence > lastFirstPaintSequence) {
         pendingFirstPaint = { ...timing, timeframe: tfRef.current };
@@ -671,6 +676,12 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       applySymbolRef.current?.();
     }
   }, [group]);
+
+  useEffect(() => {
+    if (!symbolProp || symbolProp === ownSymbolRef.current) return;
+    ownSymbolRef.current = symbolProp;
+    if (groupRef.current === null) applySymbolRef.current?.();
+  }, [symbolProp]);
 
   // Theme switch: re-apply palette to chart, series and the custom primitives.
   useEffect(() => {

@@ -46,6 +46,7 @@ import { makeStores } from "../../data/registry";
 import { Scheduler } from "../../render/Scheduler";
 import { browserRaf, type Surface } from "../../render/surface";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
+import type { PanelConfig } from "../workspace";
 import type { AckMsg, Bar, DeltaMsg, SysEvent } from "../../wire/contract";
 import { DEFAULT_CHART_SETTINGS } from "./tv/ChartSettingsDialog";
 import { FakeDrawingBus, FakeDrawingBusHub } from "../../../test/fakes";
@@ -87,13 +88,17 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sh
   };
   const config = { id, panelId: "chart", group: "green" as const, settings: { symbol: "US.AAPL", timeframe: "1m", ...settingsOverride } };
   const onConfigChange = vi.fn();
-  const utils = render(
+  const panel = (group?: PanelConfig["group"], symbol?: string) => (
     <ThemeProvider>
       <ChartPanel config={config} stores={stores} scheduler={scheduler} width={400} height={300}
-        linkGroups={linkGroups} commands={commands} onConfigChange={onConfigChange} />
-    </ThemeProvider>,
+        linkGroups={linkGroups} commands={commands} onConfigChange={onConfigChange}
+        {...(group === undefined ? {} : { group })} {...(symbol === undefined ? {} : { symbol })} />
+    </ThemeProvider>
   );
-  return { ...utils, stores, onConfigChange, scheduler, commands, linkGroups };
+  const utils = render(panel());
+  return { ...utils, stores, onConfigChange, scheduler, commands, linkGroups,
+    rerenderGroup: (group: PanelConfig["group"]) => utils.rerender(panel(group)),
+    rerenderPinnedSymbol: (symbol: string) => utils.rerender(panel(null, symbol)) };
 }
 
 // Pushes a bar into the shared BarStore, the same delta shape the engine sends
@@ -527,6 +532,25 @@ describe("ChartPanel", () => {
       symbol: "US.YYAI", indicatorSeriesKeys: [key],
     }));
     expect(stores.indicators.series(key)).toEqual([{ timeMs: 2, value: 4.25 }]);
+  });
+
+  it("keeps the displayed group symbol when pinned", async () => {
+    const { commands, linkGroups, rerenderGroup } = renderChart();
+    act(() => linkGroups.focus("green", "US.NVDA"));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    commands.sendQuery.mockClear();
+
+    rerenderGroup(null);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(commands.sendQuery).toHaveBeenCalledWith("QueryChartWindow", expect.objectContaining({ symbol: "US.NVDA" }));
+  });
+
+  it("loads a newly typed pinned symbol without remounting", async () => {
+    const { commands, rerenderPinnedSymbol } = renderChart();
+    rerenderPinnedSymbol("US.NVDA");
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(commands.sendQuery).toHaveBeenCalledWith("QueryChartWindow", expect.objectContaining({ symbol: "US.NVDA" }));
   });
 
   it("camera button calls the chart's takeScreenshot", () => {

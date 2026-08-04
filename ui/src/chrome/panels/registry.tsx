@@ -50,6 +50,9 @@ export interface PanelProps {
   // active/onGroupChange above) so Body-level tests constructing a PanelProps
   // literal directly don't need touching; panel bodies fall back to config.group.
   group?: LinkGroup;
+  // Live effective symbol from PanelFrame. Unlike config.settings, this changes
+  // without remounting when a pinned panel commits a typed symbol.
+  symbol?: string;
 }
 export interface PanelDef {
   component: FC<PanelProps>;
