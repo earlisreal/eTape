@@ -137,6 +137,12 @@ func (s *Store) writer(flush time.Duration) {
 				commit()
 				v.done <- s.commitExecAppend(v)
 				continue
+			case cycleCheckpointOp:
+				commit()
+				_, err := s.db.Exec(`INSERT INTO exec_cycle_checkpoints(venue,start_ts,payload) VALUES(?,?,?)
+					ON CONFLICT(venue) DO UPDATE SET start_ts=excluded.start_ts,payload=excluded.payload`, v.venue, v.startMs, v.payload)
+				v.done <- err
+				continue
 			case archiveRangeOp:
 				commit()
 				v.done <- s.commitArchiveRange(v)

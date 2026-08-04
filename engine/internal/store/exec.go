@@ -2,9 +2,65 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
 
 	"github.com/earlisreal/eTape/engine/internal/exec"
 )
+
+func (s *Store) SaveCycleCheckpoint(cp exec.CycleCheckpoint) error {
+	b, err := json.Marshal(cp)
+	if err != nil {
+		return err
+	}
+	done := make(chan error, 1)
+	s.writes <- cycleCheckpointOp{venue: cp.Venue, startMs: cp.StartMs, payload: string(b), done: done}
+	return <-done
+}
+
+type cycleCheckpointOp struct {
+	venue   exec.VenueID
+	startMs int64
+	payload string
+	done    chan error
+}
+
+func (cycleCheckpointOp) render() []pendingWrite { return nil }
+
+func (s *Store) LoadCycleCheckpoint(venue exec.VenueID) (exec.CycleCheckpoint, bool, error) {
+	var raw string
+	err := s.db.QueryRow(`SELECT payload FROM exec_cycle_checkpoints WHERE venue=?`, venue).Scan(&raw)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return exec.CycleCheckpoint{}, false, nil
+		}
+		return exec.CycleCheckpoint{}, false, err
+	}
+	var cp exec.CycleCheckpoint
+	if err := json.Unmarshal([]byte(raw), &cp); err != nil {
+		return cp, false, err
+	}
+	return cp, true, nil
+}
+
+func (s *Store) QueryVenueFillsSince(ctx context.Context, venue string, fromMs int64) ([]exec.FillRow, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT order_id,symbol,side,qty,price,ts,venue
+        FROM fills WHERE venue=? AND ts>=? ORDER BY ts,seq`, venue, fromMs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []exec.FillRow
+	for rows.Next() {
+		var f exec.FillRow
+		if err := rows.Scan(&f.OrderID, &f.Symbol, &f.Side, &f.Qty, &f.Price, &f.TsMs, &f.Venue); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
+}
 
 const (
 	execEventInsertSQL = `INSERT INTO exec_events (ts, source, venue, type, order_id, payload)

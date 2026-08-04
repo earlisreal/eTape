@@ -62,4 +62,8 @@ export class FillStore extends PaintStore {
       side: f.side === "SHORT" ? "short" : f.side === "SELL" ? "sell" : "buy",
     }));
   }
+
+  forVenue(venue: string, fromMs = 0): Fill[] {
+    return [...this.bySymbol.values()].flat().filter((f) => f.venue === venue && f.tsMs >= fromMs).sort((a, b) => a.tsMs - b.tsMs);
+  }
 }

@@ -6,12 +6,18 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
 
 type fillsQuerier interface {
 	QueryFills(symbol string, fromMs, toMs int64) ([]exec.FillRow, error)
 	ExportFills(ctx context.Context, venue string, fromMs, toMs int64) ([]exec.ExportFillRow, error)
+}
+
+type cycleFillsQuerier interface {
+	LoadCycleCheckpoint(exec.VenueID) (exec.CycleCheckpoint, bool, error)
+	QueryVenueFillsSince(context.Context, string, int64) ([]exec.FillRow, error)
 }
 
 type queries struct {
@@ -59,6 +65,29 @@ func (q *queries) handle(name string, args json.RawMessage) any {
 		out := make([]wsmsg.Fill, 0, len(rows))
 		for _, r := range rows {
 			out = append(out, fillRowToWire(r))
+		}
+		return out
+	case "QueryCycleFills":
+		var a wsmsg.QueryCycleFillsArgs
+		cq, ok := q.fills.(cycleFillsQuerier)
+		if json.Unmarshal(args, &a) != nil || a.Venue == "" || !ok {
+			return wsmsg.QueryCycleFillsResult{Carried: []wsmsg.CarriedPosition{}, Fills: []wsmsg.Fill{}}
+		}
+		start := session.TradingCycleStart(q.clk.Now()).UnixMilli()
+		rows, err := cq.QueryVenueFillsSince(context.Background(), a.Venue, start)
+		if err != nil {
+			return wsmsg.QueryCycleFillsResult{CycleStartMs: start, Carried: []wsmsg.CarriedPosition{}, Fills: []wsmsg.Fill{}}
+		}
+		out := wsmsg.QueryCycleFillsResult{CycleStartMs: start, Carried: []wsmsg.CarriedPosition{}, Fills: make([]wsmsg.Fill, 0, len(rows))}
+		if cp, found, _ := cq.LoadCycleCheckpoint(exec.VenueID(a.Venue)); found && cp.StartMs == start {
+			for symbol, p := range cp.Positions {
+				if p.Carried != 0 {
+					out.Carried = append(out.Carried, wsmsg.CarriedPosition{Symbol: symbol, Qty: p.Carried})
+				}
+			}
+		}
+		for _, row := range rows {
+			out.Fills = append(out.Fills, fillRowToWire(row))
 		}
 		return out
 	case "ExportFills":

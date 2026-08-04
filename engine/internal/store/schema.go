@@ -60,4 +60,10 @@ CREATE TABLE IF NOT EXISTS fills (
   venue    TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_fills_symbol_ts ON fills(symbol, ts);
+CREATE INDEX IF NOT EXISTS idx_fills_venue_ts ON fills(venue, ts);
+CREATE TABLE IF NOT EXISTS exec_cycle_checkpoints (
+  venue TEXT PRIMARY KEY,
+  start_ts INTEGER NOT NULL,
+  payload TEXT NOT NULL
+);
 `

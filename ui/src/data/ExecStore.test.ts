@@ -11,7 +11,7 @@ const order = (id: string, over: Partial<Order> = {}): Order => ({
   avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, ...over,
 });
 const acct = (venue: string, dayPnl: number): AccountRow => ({
-  venue, equity: 100, buyingPower: 400, availableCash: 50, sodEquity: 100, realized: 0, dayPnl, leverage: 4, tsMs: 1,
+  venue, equity: 100, buyingPower: 400, availableCash: 50, sodEquity: 100, realized: 0, dayPnl, leverage: 4, tsMs: 1, cycleStartMs: 0, cycleRealized: 0,
 });
 const status: ExecStatus = {
   masterArmed: true, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },

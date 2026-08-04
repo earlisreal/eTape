@@ -135,6 +135,29 @@ func TestNYSECalendar(t *testing.T) {
 	}
 }
 
+func TestTradingCycleBoundaries(t *testing.T) {
+	et := func(raw string) time.Time {
+		tm, err := time.ParseInLocation("2006-01-02 15:04", raw, Loc())
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tm
+	}
+	for _, tc := range []struct{ at, start, next string }{
+		{"2026-07-06 15:59", "2026-07-02 13:00", "2026-07-06 16:00"},
+		{"2026-07-06 16:00", "2026-07-06 16:00", "2026-07-07 16:00"},
+		{"2026-11-27 13:00", "2026-11-27 13:00", "2026-11-30 16:00"},
+		{"2026-11-29 12:00", "2026-11-27 13:00", "2026-11-30 16:00"},
+	} {
+		if got := TradingCycleStart(et(tc.at)); !got.Equal(et(tc.start)) {
+			t.Errorf("start %s = %s, want %s", tc.at, got, tc.start)
+		}
+		if got := NextTradingCycleStart(et(tc.at)); !got.Equal(et(tc.next)) {
+			t.Errorf("next %s = %s, want %s", tc.at, got, tc.next)
+		}
+	}
+}
+
 func TestDayMs(t *testing.T) {
 	if got, want := DayMs(ms("2026-07-06T18:00:00Z")), ms("2026-07-06T04:00:00Z"); got != want {
 		t.Fatalf("DayMs = %d, want %d", got, want)

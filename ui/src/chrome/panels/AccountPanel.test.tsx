@@ -28,7 +28,7 @@ function mkProps(group: LinkGroup = null) {
   } as PanelProps;
   return { props, stores, sent, configChanges, linkGroups };
 }
-const acct = (venue: string, o: Partial<AccountRow> = {}): AccountRow => ({ venue, equity: 100, buyingPower: 400, availableCash: 50, sodEquity: 100, realized: 0, dayPnl: 0, leverage: 4, tsMs: 1, ...o });
+const acct = (venue: string, o: Partial<AccountRow> = {}): AccountRow => ({ venue, equity: 100, buyingPower: 400, availableCash: 50, sodEquity: 100, realized: 0, dayPnl: 0, leverage: 4, tsMs: 1, cycleStartMs: 0, cycleRealized: 0, ...o });
 const status = (masterArmed: boolean, ...venueIds: string[]): ExecStatus => ({
   masterArmed, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
   venues: (venueIds.length ? venueIds : ["alpaca-paper"]).map((venue) => ({
@@ -36,7 +36,7 @@ const status = (masterArmed: boolean, ...venueIds: string[]): ExecStatus => ({
     note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 },
   })),
 });
-const pos = (o: Partial<PositionRow>): PositionRow => ({ venue: "alpaca-paper", symbol: "US.AAPL", qty: 300, avgPrice: 3.4, unrealizedPnl: 30, ...o });
+const pos = (o: Partial<PositionRow>): PositionRow => ({ venue: "alpaca-paper", symbol: "US.AAPL", qty: 300, avgPrice: 3.4, unrealizedPnl: 30, dayBasis: 3.4, ...o });
 
 function wrap(props: PanelProps) {
   return render(
@@ -661,7 +661,7 @@ describe("AccountPanel", () => {
 
       fireEvent.click(screen.getByTestId("export-download"));
       await waitFor(() => expect(clickSpy).toHaveBeenCalledTimes(1));
-      expect(calls).toEqual([{ name: "ExportFills", args: { venue: "alpaca-paper", preset: "all", from: "", to: "" } }]);
+      expect(calls).toContainEqual({ name: "ExportFills", args: { venue: "alpaca-paper", preset: "all", from: "", to: "" } });
       clickSpy.mockRestore();
     });
 

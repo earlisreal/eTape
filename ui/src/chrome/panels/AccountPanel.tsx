@@ -1,8 +1,8 @@
-import { useContext, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { PanelProps } from "./registry";
 import { HoverButton } from "../controls/HoverButton";
-import type { PositionRow, Quote } from "../../wire/contract";
+import type { Fill, PositionRow, Quote } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
@@ -10,7 +10,7 @@ import { useVenueSelection } from "../exec/venueSelection";
 import { useOrderConfig } from "../exec/useOrderConfig";
 import { resolvePlaceTemplate } from "../exec/resolveTemplate";
 import type { PlaceOrderTemplate } from "../exec/actionTemplate";
-import { formatPrice, formatSize } from "../../render/format";
+import { formatClock, formatPrice, formatSize } from "../../render/format";
 import { displayStatus, STATUS_LABEL, sideLabel, bareSymbol, abbrevType, isWorking, type DisplayStatus } from "../exec/orderStatus";
 import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
 import type { OrderView } from "../../data/ExecStore";
@@ -351,13 +351,49 @@ function PositionsTable({
   );
 }
 
-type Tab = "positions" | "history";
+const FILLS_DEFAULT_SORT: SortState = { col:"time", dir:"desc" };
+const FILLS_COLUMNS = [
+  { col:"symbol", label:"Symbol" }, { col:"side", label:"Side" }, { col:"qty", label:"Qty" },
+  { col:"price", label:"Price" }, { col:"time", label:"Time" }, { col:"orderId", label:"Order ID" },
+];
+const FILLS_SORT_ACCESSORS: Record<string, (f:Fill) => number|string> = {
+  symbol:(f) => bareSymbol(f.symbol), side:(f) => f.side, qty:(f) => f.qty,
+  price:(f) => f.price, time:(f) => f.tsMs, orderId:(f) => f.orderId,
+};
+
+function readFillsSort(settings:Record<string, unknown>):SortState {
+  const raw = settings.fillsSort as { col?:unknown; dir?:unknown } | undefined;
+  return raw && typeof raw.col === "string" && (raw.dir === "asc" || raw.dir === "desc") ? { col:raw.col, dir:raw.dir } : FILLS_DEFAULT_SORT;
+}
+
+function FillsTable({ stores, palette, venue, cycleStartMs, config, onConfigChange }: {
+  stores: PanelProps["stores"]; palette: ReturnType<typeof useTheme>["palette"];
+  venue: string; cycleStartMs:number; config:PanelProps["config"]; onConfigChange:PanelProps["onConfigChange"];
+}): JSX.Element {
+  const [sort, setSort] = useState<SortState>(() => readFillsSort(config.settings));
+  const fills = sortRows(stores.fills.forVenue(venue, cycleStartMs), sort, FILLS_SORT_ACCESSORS);
+  const cell = { textAlign:"center" as const, padding:"2px 8px" };
+  const clickSort = (col:string) => { const next = toggleSort(sort, col); setSort(next); onConfigChange({ fillsSort:next }); };
+  return <div data-testid="fills-table" style={{ overflow:"auto", flex:1, fontSize:12 }}>
+    <table style={{ width:"100%", borderCollapse:"collapse" }}><thead><tr style={{ color:palette.textMuted, background:palette.surface }}>
+      {FILLS_COLUMNS.map((c) => <th key={c.col} className={`col-head${sort?.col === c.col ? " sort-active" : ""}`}
+        style={{ ...cell, cursor:"pointer" }} onClick={() => clickSort(c.col)}>{c.label} {sortIndicator(sort, c.col)}</th>)}
+    </tr></thead><tbody>{fills.map((f, n) => <tr key={`${f.orderId}-${f.tsMs}-${n}`} style={{ borderTop:`1px solid ${palette.border}` }}>
+      <td style={cell}>{bareSymbol(f.symbol)}</td><td style={cell}>{sideLabel(f.side)}</td>
+      <td style={cell}>{formatSize(f.qty)}</td><td style={cell}>{formatPrice(f.price, 2)}</td>
+      <td style={cell}>{formatClock(f.tsMs)}</td><td style={cell}>{f.orderId}</td>
+    </tr>)}</tbody></table>
+  </div>;
+}
+
+type Tab = "positions" | "history" | "fills";
 
 export function AccountPanel({ config, stores, commands, onConfigChange, linkGroups, group: groupProp, height }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
+  useSyncExternalStore((cb) => stores.fills.subscribe(cb), () => stores.fills.getRev());
   // Force re-render on quote updates so live Unrl P&L refreshes.
   useSyncExternalStore((cb) => stores.quote.subscribe(cb), () => stores.quote.getRev());
   const group = groupProp ?? config.group;
@@ -386,7 +422,19 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
     const raw = config.settings.ordersHeight;
     return typeof raw === "number" && raw >= 80 ? raw : 200;
   });
-  const [activeTab, setActiveTab] = useState<Tab>(() => (config.settings.tab === "history" ? "history" : "positions"));
+  const [activeTab, setActiveTab] = useState<Tab>(() => config.settings.tab === "history" || config.settings.tab === "fills" ? config.settings.tab : "positions");
+  const accountCycleStart = stores.exec.accounts().find((a) => a.venue === venue)?.cycleStartMs ?? 0;
+  const [fillCycleStart, setFillCycleStart] = useState(accountCycleStart);
+  useEffect(() => {
+    let live = true;
+    void commands.sendQuery("QueryCycleFills", { venue }).then((raw) => {
+      if (!live) return;
+      const r = raw as { cycleStartMs?:number; fills?:Fill[] };
+      stores.fills.ingest(r.fills ?? []);
+      setFillCycleStart(r.cycleStartMs ?? accountCycleStart);
+    });
+    return () => { live = false; };
+  }, [venue, accountCycleStart, commands, stores.fills]);
 
   // Pinned per the reference implementation (task brief): `finalHeight` is a
   // plain closure-captured variable, not React state, so `onUp` always reads
@@ -435,6 +483,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
         <div style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${palette.border}`, background: palette.surface }}>
           {tabBtn(`Positions (${positionsCount})`, activeTab === "positions", () => selectTab("positions"))}
           {tabBtn("Trade History", activeTab === "history", () => selectTab("history"))}
+          {tabBtn("Fills", activeTab === "fills", () => selectTab("fills"))}
           <div style={{ flex: 1 }} />
           {activeTab === "history" && (
             <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "0 8px" }}>
@@ -449,9 +498,9 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
             </div>
           )}
         </div>
-        {activeTab === "positions"
-          ? <PositionsTable stores={stores} commands={commands} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} extBufferPct={extBufferPct} />
-          : <TradeHistoryTable stores={stores} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} />}
+        {activeTab === "positions" ? <PositionsTable stores={stores} commands={commands} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} extBufferPct={extBufferPct} />
+          : activeTab === "history" ? <TradeHistoryTable stores={stores} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} />
+          : <FillsTable stores={stores} palette={palette} venue={venue} cycleStartMs={fillCycleStart} config={config} onConfigChange={onConfigChange} />}
       </div>
     </div>
   );

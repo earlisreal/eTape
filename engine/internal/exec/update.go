@@ -7,8 +7,12 @@ type Update interface{ isExecUpdate() }
 type OrderUpdate struct{ Order Order }
 type FillUpdate struct{ Fill Fill }
 type AccountUpdate struct {
-	Account     AccountSnapshot
-	MasterArmed bool
+	Account         AccountSnapshot
+	MasterArmed     bool
+	CycleStartMs    int64
+	CycleRealized   float64
+	DisplayRealized float64
+	DisplayDayPnL   float64
 }
 type PositionUpdate struct{ Position Position }
 type StatusUpdate struct {

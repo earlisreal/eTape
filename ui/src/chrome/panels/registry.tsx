@@ -151,7 +151,7 @@ export const PANELS: Record<string, PanelDef> = {
   },
   "account": {
     component: AccountPanel,
-    topics: ["exec.account", "exec.positions", "exec.orders", "exec.trades", "exec.status", "md.quote"],
+    topics: ["exec.account", "exec.positions", "exec.orders", "exec.fills", "exec.trades", "exec.status", "md.quote"],
     title: "Account",
     glyph: "Σ",
     description: "Equity, BP, day P&L, positions, arm",
@@ -167,7 +167,7 @@ export const PANELS: Record<string, PanelDef> = {
   // merged panel regardless of which legacy id a saved doc references.
   "account-bar": {
     component: AccountPanel,
-    topics: ["exec.account", "exec.positions", "exec.orders", "exec.trades", "exec.status", "md.quote"],
+    topics: ["exec.account", "exec.positions", "exec.orders", "exec.fills", "exec.trades", "exec.status", "md.quote"],
     title: "Account",
     glyph: "Σ",
     description: "Equity, BP, day P&L, positions, arm",
@@ -176,7 +176,7 @@ export const PANELS: Record<string, PanelDef> = {
   },
   "positions": {
     component: AccountPanel,
-    topics: ["exec.account", "exec.positions", "exec.orders", "exec.trades", "exec.status", "md.quote"],
+    topics: ["exec.account", "exec.positions", "exec.orders", "exec.fills", "exec.trades", "exec.status", "md.quote"],
     title: "Account",
     glyph: "Σ",
     description: "Equity, BP, day P&L, positions, arm",
@@ -185,7 +185,7 @@ export const PANELS: Record<string, PanelDef> = {
   },
   "open-orders": {
     component: AccountPanel,
-    topics: ["exec.account", "exec.positions", "exec.orders", "exec.trades", "exec.status", "md.quote"],
+    topics: ["exec.account", "exec.positions", "exec.orders", "exec.fills", "exec.trades", "exec.status", "md.quote"],
     title: "Open Orders",
     glyph: "◷",
     description: "Lifecycle, cancel, cancel-all",

@@ -233,6 +233,7 @@ type Position struct {
 	Symbol   string
 	Qty      float64
 	AvgPrice float64
+	DayBasis float64
 }
 
 type AccountSnapshot struct {

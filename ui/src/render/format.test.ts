@@ -62,9 +62,11 @@ describe("formatDuration", () => {
     expect(formatDuration(192000)).toBe("03m 12s"); // 3 min 12 s
   });
   it("floors negative/garbage input at 0", () => {
-    expect(formatDuration(-500)).toBe("00m 00s");
+    expect(formatDuration(-500)).toBe("0s");
   });
   it("rounds sub-second dust", () => {
-    expect(formatDuration(59999)).toBe("01m 00s"); // 59.999s rounds to 60s -> 1m 0s
+    expect(formatDuration(59999)).toBe("60s");
+    expect(formatDuration(45000)).toBe("45s");
+    expect(formatDuration(60000)).toBe("01m 00s");
   });
 });

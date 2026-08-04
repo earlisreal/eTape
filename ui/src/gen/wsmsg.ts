@@ -187,6 +187,7 @@ export interface PositionRow {
   qty: number /* float64 */;
   avgPrice: number /* float64 */;
   unrealizedPnl: number /* float64 */;
+  dayBasis: number /* float64 */;
 }
 export interface AccountRow {
   venue: string;
@@ -198,6 +199,8 @@ export interface AccountRow {
   dayPnl: number /* float64 */;
   leverage: number /* float64 */;
   tsMs: number /* int64 */;
+  cycleStartMs: number /* int64 */;
+  cycleRealized: number /* float64 */;
 }
 export interface GateLimitsView {
   maxOrderValue: number /* float64 */;
@@ -415,6 +418,18 @@ export interface QueryFillsArgs {
   symbol: string;
   fromMs: number /* int64 */;
   toMs: number /* int64 */;
+}
+export interface QueryCycleFillsArgs {
+  venue: string;
+}
+export interface CarriedPosition {
+  symbol: string;
+  qty: number /* float64 */;
+}
+export interface QueryCycleFillsResult {
+  cycleStartMs: number /* int64 */;
+  carried: CarriedPosition[];
+  fills: Fill[];
 }
 /**
  * ExportFillsArgs selects one venue's fills for the trade-export CSV.

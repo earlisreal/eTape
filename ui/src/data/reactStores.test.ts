@@ -10,7 +10,7 @@ describe("ExecStore", () => {
     const s = new ExecStore();
     const row: AccountRow = {
       venue: "alpaca-paper", equity: 1000, buyingPower: 4000, availableCash: 500,
-      sodEquity: 1000, realized: 0, dayPnl: 0, leverage: 4, tsMs: 1,
+      sodEquity: 1000, realized: 0, dayPnl: 0, leverage: 4, tsMs: 1, cycleStartMs: 0, cycleRealized: 0,
     };
     s.apply({ kind: "snapshot", topic: "exec.account", payload: row });
     expect(s.accounts()).toContainEqual(row);

@@ -259,6 +259,9 @@ func (m *mirror) applyExec(u exec.Update) []staged {
 		return []staged{{Topic: wsmsg.TopicExecPositions, Payload: m.positionsPayload()}}
 	case exec.AccountUpdate:
 		a := mapAccount(v.Account)
+		if v.CycleStartMs != 0 {
+			a = mapAccountUpdate(v)
+		}
 		m.accounts[a.Venue] = a
 		m.masterArmed = v.MasterArmed
 		return []staged{

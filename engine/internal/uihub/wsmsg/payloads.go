@@ -106,6 +106,7 @@ type PositionRow struct {
 	Qty           float64 `json:"qty"`
 	AvgPrice      float64 `json:"avgPrice"`
 	UnrealizedPnl float64 `json:"unrealizedPnl"`
+	DayBasis      float64 `json:"dayBasis"`
 }
 
 type AccountRow struct {
@@ -118,6 +119,8 @@ type AccountRow struct {
 	DayPnl        float64 `json:"dayPnl"`
 	Leverage      float64 `json:"leverage"`
 	TsMs          int64   `json:"tsMs"`
+	CycleStartMs  int64   `json:"cycleStartMs"`
+	CycleRealized float64 `json:"cycleRealized"`
 }
 
 type GateLimitsView struct {
@@ -354,6 +357,19 @@ type QueryFillsArgs struct {
 	Symbol string `json:"symbol"`
 	FromMs int64  `json:"fromMs"`
 	ToMs   int64  `json:"toMs"`
+}
+
+type QueryCycleFillsArgs struct {
+	Venue string `json:"venue"`
+}
+type CarriedPosition struct {
+	Symbol string  `json:"symbol"`
+	Qty    float64 `json:"qty"`
+}
+type QueryCycleFillsResult struct {
+	CycleStartMs int64             `json:"cycleStartMs"`
+	Carried      []CarriedPosition `json:"carried"`
+	Fills        []Fill            `json:"fills"`
 }
 
 // ExportFillsArgs selects one venue's fills for the trade-export CSV.

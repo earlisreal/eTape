@@ -144,7 +144,11 @@ func mapPosition(p exec.Position, mark float64) wsmsg.PositionRow {
 	if mark != 0 {
 		upl = (mark - p.AvgPrice) * p.Qty
 	}
-	return wsmsg.PositionRow{Venue: &v, Symbol: p.Symbol, Qty: p.Qty, AvgPrice: p.AvgPrice, UnrealizedPnl: upl}
+	basis := p.DayBasis
+	if basis == 0 {
+		basis = p.AvgPrice
+	}
+	return wsmsg.PositionRow{Venue: &v, Symbol: p.Symbol, Qty: p.Qty, AvgPrice: p.AvgPrice, UnrealizedPnl: upl, DayBasis: basis}
 }
 
 func mapAccount(a exec.AccountSnapshot) wsmsg.AccountRow {
@@ -153,6 +157,12 @@ func mapAccount(a exec.AccountSnapshot) wsmsg.AccountRow {
 		AvailableCash: a.AvailableCash, SodEquity: a.SodEquity, Realized: a.Realized,
 		DayPnl: a.DayPnL, Leverage: a.Leverage, TsMs: a.TsMs,
 	}
+}
+
+func mapAccountUpdate(u exec.AccountUpdate) wsmsg.AccountRow {
+	w := mapAccount(u.Account)
+	w.Realized, w.DayPnl, w.CycleStartMs, w.CycleRealized = u.DisplayRealized, u.DisplayDayPnL, u.CycleStartMs, u.CycleRealized
+	return w
 }
 
 func mapQuote(q feed.Quote, bid, ask float64) wsmsg.Quote {

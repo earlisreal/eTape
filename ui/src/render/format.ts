@@ -87,6 +87,7 @@ export function formatClock(ms: number): string {
  * minutes+seconds below that ("03m 12s"), zero-padded. */
 export function formatDuration(ms: number): string {
   const totalSec = Math.max(0, Math.round(ms / 1000));
+	if (ms < 60000) return `${totalSec}s`;
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;

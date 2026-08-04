@@ -101,6 +101,7 @@ type Core struct {
 	marks markState
 
 	trades *RoundTripAggregator
+	cycles *cycleProjection
 }
 
 // CoreConfig configures NewCore.
@@ -148,6 +149,7 @@ func NewCore(cfg CoreConfig) *Core {
 		state:                  NewState(cfg.Venues),
 		marks:                  markState{},
 		trades:                 NewRoundTripAggregator(),
+		cycles:                 newCycleProjection(),
 	}
 	// Master always boots disarmed — Recover never touches arm state, so a
 	// restart is fully disarmed until a deliberate arm click.
@@ -218,8 +220,48 @@ func (c *Core) Recover(ctx context.Context) error {
 		c.state.ReconcilePositions(v, pos)
 		c.state.ReconcileOpenOrders(v, orders)
 	}
+	c.recoverCycles(ctx)
 	c.seedTrades(ctx)
 	return nil
+}
+
+type cycleStore interface {
+	SaveCycleCheckpoint(CycleCheckpoint) error
+	LoadCycleCheckpoint(VenueID) (CycleCheckpoint, bool, error)
+	QueryVenueFillsSince(context.Context, string, int64) ([]FillRow, error)
+}
+
+func (c *Core) recoverCycles(ctx context.Context) {
+	start := session.TradingCycleStart(c.clk.Now()).UnixMilli()
+	cs, _ := c.store.(cycleStore)
+	for _, v := range c.venues {
+		positions := make([]Position, 0, len(c.state.Venue(v).Positions))
+		for _, p := range c.state.Venue(v).Positions {
+			positions = append(positions, p)
+		}
+		if cs == nil {
+			c.cycles.bootstrap(v, start, positions)
+			continue
+		}
+		cp, ok, err := cs.LoadCycleCheckpoint(v)
+		if err != nil || !ok || cp.StartMs != start {
+			c.cycles.bootstrap(v, start, positions)
+			continue
+		}
+		c.cycles.restore(cp)
+		fills, err := cs.QueryVenueFillsSince(ctx, string(v), start)
+		if err != nil {
+			c.syslog("exec.recover", "cycle fills: "+err.Error())
+			continue
+		}
+		for _, row := range fills {
+			side, ok := sideFromString(row.Side)
+			if !ok {
+				continue
+			}
+			c.cycles.applyFill(Fill{Venue: v, OrderID: row.OrderID, Symbol: row.Symbol, Side: side, Qty: row.Qty, Price: row.Price, TsMs: row.TsMs})
+		}
+	}
 }
 
 // seedTrades rebuilds today's closed round-trips from persisted fills, so a
@@ -266,6 +308,7 @@ func (c *Core) Run(ctx context.Context) error {
 	for v, b := range c.brokers {
 		go c.pump(ctx, v, b)
 	}
+	cycleTimer := c.clk.After(time.Until(session.NextTradingCycleStart(c.clk.Now())))
 	for {
 		select {
 		case <-ctx.Done():
@@ -276,8 +319,48 @@ func (c *Core) Run(ctx context.Context) error {
 			c.handleBrokerEvent(ctx, be)
 		case m := <-c.markCh:
 			c.marks[m.Symbol] = m.Price
+			c.cycles.mark(m.Symbol, m.Price)
+			for _, v := range c.venues {
+				c.emitProjectedAccount(v)
+			}
+		case <-cycleTimer:
+			c.rollCycle()
+			cycleTimer = c.clk.After(session.NextTradingCycleStart(c.clk.Now()).Sub(c.clk.Now()))
 		}
 	}
+}
+
+func (c *Core) rollCycle() {
+	start := session.TradingCycleStart(c.clk.Now()).UnixMilli()
+	cs, _ := c.store.(cycleStore)
+	for _, v := range c.venues {
+		vs := c.state.Venue(v)
+		positions := make([]Position, 0, len(vs.Positions))
+		for _, p := range vs.Positions {
+			positions = append(positions, p)
+		}
+		c.cycles.reset(v, start, positions)
+		if cs != nil {
+			if err := cs.SaveCycleCheckpoint(*c.cycles.byVenue[v]); err != nil {
+				c.syslog("exec.cycle", err.Error())
+			}
+		}
+		c.emitProjectedAccount(v)
+		for _, p := range positions {
+			c.emitProjectedPosition(p)
+		}
+	}
+}
+
+func (c *Core) emitProjectedAccount(v VenueID) {
+	start, open, realized, day := c.cycles.account(v)
+	c.emit(AccountUpdate{Account: c.state.Venue(v).Account, MasterArmed: c.state.MasterArmed,
+		CycleStartMs: start, CycleRealized: realized, DisplayRealized: open, DisplayDayPnL: day})
+}
+
+func (c *Core) emitProjectedPosition(p Position) {
+	p.DayBasis = c.cycles.position(p.Venue, p.Symbol).Basis
+	c.emit(PositionUpdate{Position: p})
 }
 
 // pump forwards one venue's broker events into the shared inbox.
@@ -316,10 +399,12 @@ func (c *Core) appendAndFold(ev Event, src Source) error {
 // emitForEvent pushes the Update(s) an event implies.
 func (c *Core) emitForEvent(ev Event) {
 	if f, ok := ev.(OrderFilled); ok {
+		c.cycles.applyFill(f.F)
 		c.emit(FillUpdate{Fill: f.F})
 		for _, t := range c.trades.Apply(f.F.Venue, f.F.Symbol, f.F.Side, f.F.Qty, f.F.Price, f.F.TsMs) {
 			c.emit(TradeUpdate{Trade: t})
 		}
+		c.emitProjectedAccount(f.F.Venue)
 	}
 	if v, ok := c.state.OrderVenue(ev.OrderID()); ok {
 		if o, ok := c.state.Venue(v).Orders[ev.OrderID()]; ok {
@@ -540,11 +625,11 @@ func (c *Core) handleBrokerEvent(_ context.Context, be BrokerEvent) {
 			c.syslog("exec.autodisarm", "day-loss breach: master disarmed")
 			c.emitStatus()
 		}
-		c.emit(AccountUpdate{Account: e.Account, MasterArmed: c.state.MasterArmed})
+		c.emitProjectedAccount(e.Account.Venue)
 	case BrokerPositions:
 		c.state.ReconcilePositions(e.V, e.Positions)
 		for _, p := range e.Positions {
-			c.emit(PositionUpdate{Position: p})
+			c.emitProjectedPosition(p)
 		}
 	case BrokerConnUp:
 		c.emit(StatusUpdate{Venue: e.V, Connected: true, MasterArmed: c.state.MasterArmed})

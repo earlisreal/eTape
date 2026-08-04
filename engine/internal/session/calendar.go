@@ -48,6 +48,25 @@ func NextTradingDay(t time.Time) time.Time {
 	return d
 }
 
+// TradingCycleStart returns the scheduled NYSE close that starts the account
+// trading cycle containing t. At the close itself the new cycle has begun.
+func TradingCycleStart(t time.Time) time.Time {
+	et := t.In(loc)
+	if s := Schedule(et); s.TradingDay && !et.Before(s.Close) {
+		return s.Close
+	}
+	return Schedule(PreviousTradingDay(et)).Close
+}
+
+// NextTradingCycleStart returns the first scheduled close after t.
+func NextTradingCycleStart(t time.Time) time.Time {
+	et := t.In(loc)
+	if s := Schedule(et); s.TradingDay && et.Before(s.Close) {
+		return s.Close
+	}
+	return Schedule(NextTradingDay(et)).Close
+}
+
 func midnightET(t time.Time) time.Time {
 	et := t.In(loc)
 	return time.Date(et.Year(), et.Month(), et.Day(), 0, 0, 0, 0, loc)
