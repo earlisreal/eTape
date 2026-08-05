@@ -175,7 +175,6 @@ type Backfill struct {
 	WatchIntradayDays int            `toml:"watch_intraday_days"` // scanner/tape 1m archive depth
 	DailyYears        int            `toml:"daily_years"`         // calendar years; 0 = since the 2016-01-01 provider floor
 	Concurrency       int            `toml:"concurrency"`         // bounded boot worker pool
-	SeedChunk         int            `toml:"seed_chunk"`          // vestigial: no longer read (see backfill.Config.SeedChunk); kept so an existing config.toml's seed_chunk key doesn't need editing
 	Alpaca            BackfillAlpaca `toml:"alpaca"`
 	Yahoo             BackfillYahoo  `toml:"yahoo"`
 }
@@ -239,7 +238,7 @@ func Default() Config {
 		StockInfo: StockInfo{Enabled: true, RefreshMs: 15000, MaxPerReq: 400},
 		Watchlist: Watchlist{Enabled: true, PollMs: 3000},
 		Health:    Health{Enabled: true, ProbeMs: 5000},
-		Backfill: Backfill{Enabled: true, TenSecondDays: 0, IntradayDays: 70, WatchIntradayDays: 2, DailyYears: 0, Concurrency: 3, SeedChunk: 500,
+		Backfill: Backfill{Enabled: true, TenSecondDays: 0, IntradayDays: 70, WatchIntradayDays: 2, DailyYears: 0, Concurrency: 3,
 			Alpaca: BackfillAlpaca{Enabled: true, CredsKey: "", Feed: "sip"},
 			Yahoo:  BackfillYahoo{Enabled: true},
 		},

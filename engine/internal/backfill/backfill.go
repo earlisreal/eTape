@@ -117,14 +117,6 @@ type Config struct {
 	IntradayDays  int
 	DailyYears    int
 	Concurrency   int
-	// SeedChunk is vestigial: it bounded seedChunked's per-call emitted-update
-	// count, a mitigation for the per-bar BarUpdate fan-out that overflowed
-	// md.Core's updates channel on a deep seed. Now that a seed emits one
-	// BarSnapshot per timeframe regardless of batch size (see package md),
-	// there is no longer a batch to chunk. Left in place (rather than removed)
-	// to avoid an unrecognized-key break for any existing config.toml that
-	// still sets seed_chunk.
-	SeedChunk int
 }
 
 // Orchestrator runs the per-symbol backfill sequence over ordered provider

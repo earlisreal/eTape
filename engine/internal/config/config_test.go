@@ -237,19 +237,19 @@ func TestBackfillDefaultsAndOverride(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !cfg.Backfill.Enabled || cfg.Backfill.TenSecondDays != 0 || cfg.Backfill.IntradayDays != 70 || cfg.Backfill.WatchIntradayDays != 2 ||
-		cfg.Backfill.DailyYears != 0 || cfg.Backfill.Concurrency != 3 || cfg.Backfill.SeedChunk != 500 {
+		cfg.Backfill.DailyYears != 0 || cfg.Backfill.Concurrency != 3 {
 		t.Fatalf("backfill defaults = %+v", cfg.Backfill)
 	}
 	// Overrides parse.
 	p := filepath.Join(t.TempDir(), "config.toml")
-	if err := os.WriteFile(p, []byte("[backfill]\nenabled = false\nten_second_days = 3\nintraday_days = 5\nwatch_intraday_days = 1\nconcurrency = 8\nseed_chunk = 250\n"), 0o600); err != nil {
+	if err := os.WriteFile(p, []byte("[backfill]\nenabled = false\nten_second_days = 3\nintraday_days = 5\nwatch_intraday_days = 1\nconcurrency = 8\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg, err = Load(p)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Backfill.Enabled || cfg.Backfill.TenSecondDays != 3 || cfg.Backfill.IntradayDays != 5 || cfg.Backfill.WatchIntradayDays != 1 || cfg.Backfill.Concurrency != 8 || cfg.Backfill.SeedChunk != 250 {
+	if cfg.Backfill.Enabled || cfg.Backfill.TenSecondDays != 3 || cfg.Backfill.IntradayDays != 5 || cfg.Backfill.WatchIntradayDays != 1 || cfg.Backfill.Concurrency != 8 {
 		t.Fatalf("backfill override = %+v", cfg.Backfill)
 	}
 }

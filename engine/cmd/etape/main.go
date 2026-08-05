@@ -604,7 +604,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 				IntradayDays:  cfg.Backfill.IntradayDays,
 				DailyYears:    cfg.Backfill.DailyYears,
 				Concurrency:   cfg.Backfill.Concurrency,
-				SeedChunk:     cfg.Backfill.SeedChunk,
 			},
 		)
 		prepareChart = func(sym string, done func(ok bool)) {
