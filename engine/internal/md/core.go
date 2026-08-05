@@ -7,7 +7,9 @@ package md
 
 import (
 	"context"
+	"log/slog"
 	"sync/atomic"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/session"
@@ -44,6 +46,12 @@ type seedHistory10sMsg struct {
 	symbol string
 	bars   []feed.Bar
 }
+type seedChartHistoryMsg struct {
+	symbol                 string
+	daily, bars1m, bars10s []feed.Bar
+	queued                 time.Time
+	done                   chan struct{}
+}
 type seedOlder1mMsg struct {
 	symbol string
 	bars   []feed.Bar
@@ -63,6 +71,7 @@ func (releaseIndicatorMsg) isInMsg() {}
 func (seedDailyMsg) isInMsg()        {}
 func (seedHistory1mMsg) isInMsg()    {}
 func (seedHistory10sMsg) isInMsg()   {}
+func (seedChartHistoryMsg) isInMsg() {}
 func (seedOlder1mMsg) isInMsg()      {}
 func (seedSessionTicksMsg) isInMsg() {}
 func (historyBarrierMsg) isInMsg()   {}
@@ -185,6 +194,17 @@ func (c *Core) SeedHistory10s(symbol string, bars []feed.Bar) {
 	c.inbox <- seedHistory10sMsg{symbol: symbol, bars: bars}
 }
 
+// SeedChartHistory applies one complete focused-chart seed and waits for its
+// ordered chart-ready barrier.
+func (c *Core) SeedChartHistory(symbol string, daily, bars1m, bars10s []feed.Bar) {
+	done := make(chan struct{})
+	c.inbox <- seedChartHistoryMsg{
+		symbol: symbol, daily: daily, bars1m: bars1m, bars10s: bars10s,
+		queued: time.Now(), done: done,
+	}
+	<-done
+}
+
 // SeedOlder1m enqueues a strictly-older chunk of 1m bars (a pan-triggered
 // deeper-history load). It upserts into the existing series, cascades into
 // 5m/15m/30m/60m, and emits one BarPrepend per intraday timeframe carrying
@@ -276,13 +296,28 @@ func (c *Core) apply(m inMsg) {
 	case seedHistory1mMsg:
 		c.bars.seedHistory1m(c, msg.symbol, msg.bars)
 	case seedHistory10sMsg:
+		started := time.Now()
 		c.bars.seedHistory10s(c, msg.symbol, msg.bars)
+		slog.Info("10s history seed complete", "symbol", msg.symbol, "bars", len(msg.bars),
+			"elapsed", time.Since(started).Round(time.Millisecond))
+	case seedChartHistoryMsg:
+		started := time.Now()
+		queueWait := started.Sub(msg.queued)
+		c.bars.seedDaily(c, msg.symbol, msg.daily)
+		c.bars.seedHistory1m(c, msg.symbol, msg.bars1m)
+		c.bars.seedHistory10s(c, msg.symbol, msg.bars10s)
+		c.emit(HistoryReadyUpdate{Symbol: msg.symbol, Prepared: true})
+		close(msg.done)
+		slog.Info("chart history core seed complete", "symbol", msg.symbol,
+			"daily", len(msg.daily), "bars1m", len(msg.bars1m), "bars10s", len(msg.bars10s),
+			"queueWait", queueWait.Round(time.Millisecond),
+			"processing", time.Since(started).Round(time.Millisecond))
 	case seedOlder1mMsg:
 		c.bars.seedOlder1m(c, msg.symbol, msg.bars)
 	case seedSessionTicksMsg:
 		c.seedSessionTicks(msg.symbol, msg.ticks)
 	case historyBarrierMsg:
-		c.emit(HistoryReadyUpdate{Symbol: msg.symbol})
+		c.emit(HistoryReadyUpdate{Symbol: msg.symbol, Prepared: true})
 		close(msg.done)
 	}
 }

@@ -147,19 +147,11 @@ export class ChartController {
       this.setAllBars(bars);
       return;
     }
-    // The incremental branches below assume the drawn candles are a PREFIX of `bars`
-    // that only extends at the tail. A BarStore snapshot replace — the deep-history
-    // backfill landing after the shallow live seed prepends ~20 days of 1m bars; the
-    // official daily series replacing the single derived in-progress day — grows the
-    // series at the FRONT, so the bar now at the anchor index is a different, older
-    // bar. Replaying update() from there hands LWC a time older than it holds
-    // ("Cannot update oldest data") and never draws the prepended history. Rebuild
-    // wholesale instead. Mirrors applyIndicators' `continues` guard.
+    // Once opened, history is immutable and only the live tail should change.
+    // Rebuild safely if an unexpected reconnect/correction violates that contract.
     const anchor = bars[this.lastAppliedCount - 1];
     if (!anchor || anchor.bucketStart !== this.lastTailBucket) {
-      const previousTailIndex = bars.findIndex((b) => b.bucketStart === this.lastTailBucket);
-      const logicalShift = previousTailIndex >= 0 ? previousTailIndex - (this.lastAppliedCount - 1) : undefined;
-      this.setAllBars(bars, logicalShift);
+      this.setAllBars(bars);
       return;
     }
     const last = bars[bars.length - 1];
@@ -205,23 +197,18 @@ export class ChartController {
     }
   }
 
-  private setAllBars(bars: Bar[], logicalShift?: number): void {
-    // Captured BEFORE setData: LWC's setData preserves the viewport's LOGICAL
-    // index range, not its TIME range. A front-growth rebuild (deep-history
-    // prepend, or the official-daily-replaces-derived-bar case) shifts every
-    // existing bar's logical index, so without restoring below, a user scrolled
-    // back would have their viewport silently teleport to a different time
-    // window on every prepend.
-    const beforeLogical = logicalShift === undefined ? null : this.facade.getVisibleLogicalRange();
+  private setAllBars(bars: Bar[]): void {
     const before = this.facade.getVisibleRange();
+    const startedAt = performance.now();
     this.candle.setData(bars.map((b) => this.mainPoint(b)));
     this.volume.setData(bars.map((b) => toVolume(b, this.palette)));
-    if (beforeLogical && logicalShift !== undefined) {
-      this.facade.setVisibleLogicalRange({
-        from: beforeLogical.from + logicalShift,
-        to: beforeLogical.to + logicalShift,
-      });
-    } else if (before && bars.length > 0) {
+    console.info("chart setData complete", {
+      symbol: this.config.symbol,
+      timeframe: this.config.timeframe,
+      bars: bars.length,
+      elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
+    });
+    if (before && bars.length > 0) {
       // Restore the pre-rebuild time window — unless the user was parked at the
       // right/live edge, where LWC's own follow-live behavior is already correct
       // and must not be overridden into a stale range.

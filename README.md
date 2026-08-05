@@ -250,6 +250,16 @@ Everything lives in `~/.eTape/` (`%USERPROFILE%\.eTape\` on Windows):
 | `credentials.json` | Broker API keys (managed by Settings → Venues) |
 | `etape.db` | SQLite feed journal + bar archives (created automatically) |
 
+Chart-history limits are calendar spans. The default 10-second limit keeps the
+current trading cycle only, beginning at the latest NYSE close/post-market start:
+
+```toml
+[backfill]
+ten_second_days = 0
+intraday_days = 70
+daily_years = 0
+```
+
 A minimal hand-written config with a paper simulator and tight risk caps:
 
 ```toml

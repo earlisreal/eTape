@@ -66,16 +66,6 @@ type releaseIndicatorReq struct {
 	id     string
 }
 
-// loadOlderReq is a pan-triggered deeper-history request marshaled onto
-// Run's goroutine (see Hub.LoadOlder's doc comment for why).
-type loadOlderReq struct {
-	symbol          string
-	daily           bool
-	requiredStartMs int64
-	requiredEndMs   int64
-	done            func(added int, exhausted bool, err error)
-}
-
 type chartWindowReq struct {
 	args  wsmsg.QueryChartWindowArgs
 	reply chan wsmsg.QueryChartWindowResult
@@ -90,14 +80,13 @@ type dropReport struct {
 	reason string
 }
 
-// backfillResult is how a spawned orch.Backfill goroutine reports its daily-
-// fetch outcome back to Run's own goroutine, so backfilled/backfillInflight
-// (Run-loop-owned) are only ever touched from Run -- see reportBackfill and
-// handleBackfillDone.
+// backfillResult reports focused preparation or archive warming completion
+// back to Run's own goroutine.
 type backfillResult struct {
-	sym  string
-	days int
-	ok   bool
+	sym     string
+	days    int
+	focused bool
+	ok      bool
 }
 
 // demandInfo tracks symbol plus requested archive depth so reconnect can re-arm
@@ -105,6 +94,7 @@ type backfillResult struct {
 type demandInfo struct {
 	symbol      string
 	historyDays int
+	focused     bool
 }
 
 // feedBox lets the (single-write, many-read) feed reference live in an
@@ -112,23 +102,14 @@ type demandInfo struct {
 // safely with Validate reads in conn goroutines and Ensure/Release in Run.
 type feedBox struct{ f Feed }
 
-// backfillBox mirrors feedBox: SetBackfill is called once at boot from main's
-// goroutine, after the Hub is already running, so the function pointer needs
-// the same atomic-store/atomic-load discipline as the feed reference. The
-// injected fn spawns the deep/daily backfill for sym and must call done(ok)
-// exactly once when it finishes (ok=false on a failed daily fetch) via
-// reportBackfill, so Run can decide whether the symbol needs a retry.
+// backfillBox mirrors feedBox: its explicit focused and archive callbacks are
+// installed after the Hub is running, so the pointers use atomic publication.
 type backfillBox struct {
-	fn func(sym string, days int, done func(ok bool))
+	prepare func(sym string, done func(ok bool))
+	warm    func(sym string, days int, done func(ok bool))
 }
 
 type cachedDailyBox struct{ fn func(sym string) }
-
-// loadOlderBox mirrors backfillBox/feedBox: SetLoadOlder is called once at
-// boot from main's goroutine, after the Hub is already running.
-type loadOlderBox struct {
-	fn func(sym string, daily bool, requiredStartMs, requiredEndMs int64, done func(added int, exhausted bool, err error))
-}
 
 // Hub is a single-goroutine event loop that owns the mirror, the connected-
 // client set, and per-topic-class coalescing buffers. Every field below the
@@ -154,7 +135,6 @@ type Hub struct {
 	releaseDemandCh    chan releaseDemandReq
 	ensureIndicatorCh  chan ensureIndicatorReq
 	releaseIndicatorCh chan releaseIndicatorReq
-	loadOlderCh        chan loadOlderReq
 	chartWindowCh      chan chartWindowReq
 	demandSnapCh       chan chan []string
 	mdCh               chan md.Update
@@ -168,10 +148,9 @@ type Hub struct {
 	feedSlot        atomic.Pointer[feedBox]
 	backfillSlot    atomic.Pointer[backfillBox]
 	cachedDailySlot atomic.Pointer[cachedDailyBox]
-	loadOlderSlot   atomic.Pointer[loadOlderBox]
 
 	// ind is the md.Core surface EnsureIndicator/ReleaseIndicator forward to.
-	// Unlike feedSlot/backfillSlot/loadOlderSlot (injected asynchronously,
+	// Unlike feedSlot/backfillSlot (injected asynchronously,
 	// after Run is already goroutine-scheduled, hence the atomic.Pointer
 	// boxes), ind is set once via SetIndicators inside uihub.New -- before the
 	// caller ever starts Run's goroutine -- and is read only from Run's own
@@ -180,17 +159,18 @@ type Hub struct {
 	ind Indicators
 
 	// Run-loop-owned:
-	clients          map[client]map[wsmsg.Topic]bool
-	demands          map[uint64]map[string]demandInfo // connID -> demandID -> demandInfo
-	demandLive       map[uint64]bool                  // connID currently registered
-	indicators       map[uint64]map[string]bool       // connID -> instanceIDs owned by that connection
-	backfilled       map[string]int                   // symbol -> deepest successful history target
-	backfillInflight map[string]int                   // symbol -> deepest target currently running
-	pendKeep         map[string]staged                // classMDKeep, flushed on md ticker
-	tapePend         map[string][]wsmsg.Tick          // symbol -> accumulated ticks
-	acctPend         map[string]staged                // venue -> latest account frame
-	posLatest        staged
-	posDirty         bool
+	clients         map[client]map[wsmsg.Topic]bool
+	demands         map[uint64]map[string]demandInfo // connID -> demandID -> demandInfo
+	demandLive      map[uint64]bool                  // connID currently registered
+	indicators      map[uint64]map[string]bool       // connID -> instanceIDs owned by that connection
+	warmed          map[string]int                   // symbol -> deepest successful archive target
+	warmInflight    map[string]int                   // symbol -> deepest archive target currently running
+	prepareInflight map[string]bool                  // symbol -> focused preparation currently running
+	pendKeep        map[string]staged                // classMDKeep, flushed on md ticker
+	tapePend        map[string][]wsmsg.Tick          // symbol -> accumulated ticks
+	acctPend        map[string]staged                // venue -> latest account frame
+	posLatest       staged
+	posDirty        bool
 
 	// sysEventSeq numbers ui-drop sys.events frames the Hub itself emits
 	// (buildSysEvent). It is independent of health.Poller's own seq counter
@@ -213,7 +193,6 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 		releaseDemandCh:    make(chan releaseDemandReq),
 		ensureIndicatorCh:  make(chan ensureIndicatorReq),
 		releaseIndicatorCh: make(chan releaseIndicatorReq),
-		loadOlderCh:        make(chan loadOlderReq),
 		chartWindowCh:      make(chan chartWindowReq),
 		demandSnapCh:       make(chan chan []string),
 		mdCh:               make(chan md.Update, cfg.Buf),
@@ -227,8 +206,9 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 		demands:            map[uint64]map[string]demandInfo{},
 		demandLive:         map[uint64]bool{},
 		indicators:         map[uint64]map[string]bool{},
-		backfilled:         map[string]int{},
-		backfillInflight:   map[string]int{},
+		warmed:             map[string]int{},
+		warmInflight:       map[string]int{},
+		prepareInflight:    map[string]bool{},
 		pendKeep:           map[string]staged{},
 		tapePend:           map[string][]wsmsg.Tick{},
 		acctPend:           map[string]staged{},
@@ -320,16 +300,22 @@ func (h *Hub) SetBackfill(fn func(sym string, done func(ok bool))) {
 		h.backfillSlot.Store(nil)
 		return
 	}
-	h.backfillSlot.Store(&backfillBox{fn: func(sym string, _ int, done func(ok bool)) { fn(sym, done) }})
+	h.backfillSlot.Store(&backfillBox{
+		prepare: fn,
+		warm:    func(sym string, _ int, done func(ok bool)) { fn(sym, done) },
+	})
 }
 
-// SetHistoryWarm installs the tier-aware archive warmer used by live boot.
-func (h *Hub) SetHistoryWarm(fn func(sym string, days int, done func(ok bool))) {
-	if fn == nil {
+// SetHistoryWarm installs explicit focused preparation and archive-only roles.
+func (h *Hub) SetHistoryWarm(
+	prepare func(sym string, done func(ok bool)),
+	warm func(sym string, days int, done func(ok bool)),
+) {
+	if prepare == nil && warm == nil {
 		h.backfillSlot.Store(nil)
 		return
 	}
-	h.backfillSlot.Store(&backfillBox{fn: fn})
+	h.backfillSlot.Store(&backfillBox{prepare: prepare, warm: warm})
 }
 
 // SetCachedDaily injects chart-only, memory-only daily cache seeding.
@@ -348,27 +334,7 @@ func (h *Hub) cachedDaily() func(string) {
 	return nil
 }
 
-func (h *Hub) backfill() func(sym string, days int, done func(ok bool)) {
-	if b := h.backfillSlot.Load(); b != nil {
-		return b.fn
-	}
-	return nil
-}
-
-// SetLoadOlder injects the pan-triggered deeper-history fetch trigger after
-// the hub is running. Safe to call once from boot; nil until then (replay
-// without a fallback orchestrator, or tests, never call it) — LoadOlder then
-// acks exhausted with no fetch attempted.
-func (h *Hub) SetLoadOlder(fn func(sym string, daily bool, requiredStartMs, requiredEndMs int64, done func(added int, exhausted bool, err error))) {
-	h.loadOlderSlot.Store(&loadOlderBox{fn: fn})
-}
-
-func (h *Hub) loadOlderFn() func(sym string, daily bool, requiredStartMs, requiredEndMs int64, done func(added int, exhausted bool, err error)) {
-	if b := h.loadOlderSlot.Load(); b != nil {
-		return b.fn
-	}
-	return nil
-}
+func (h *Hub) backfill() *backfillBox { return h.backfillSlot.Load() }
 
 // SetWatchlist wires the watchlist add/remove commands once the poller exists
 // (called from startPollers, after uihub.New). Stores atomically into the
@@ -386,13 +352,10 @@ func (h *Hub) SetScanner(c scannerCtl) {
 	}
 }
 
-// reportBackfill lets a spawned orch.Backfill goroutine report its daily-
-// fetch outcome back to Run's own goroutine -- the same cross-goroutine
-// channel-send pattern as ReportUIDrop, so backfilled/backfillInflight stay
-// Run-loop-owned (see handleBackfillDone).
-func (h *Hub) reportBackfill(sym string, days int, ok bool) {
+// reportBackfill returns worker completion to Run's own goroutine.
+func (h *Hub) reportBackfill(sym string, days int, focused, ok bool) {
 	select {
-	case h.backfillDoneCh <- backfillResult{sym: sym, days: days, ok: ok}:
+	case h.backfillDoneCh <- backfillResult{sym: sym, days: days, focused: focused, ok: ok}:
 	case <-h.closed:
 	}
 }
@@ -430,19 +393,6 @@ func (h *Hub) ReleaseIndicator(connID uint64, id string) {
 	select {
 	case h.releaseIndicatorCh <- releaseIndicatorReq{connID: connID, id: id}:
 	case <-h.closed:
-	}
-}
-
-// LoadOlder marshals a pan-triggered deeper-history request onto Run's
-// goroutine so the injected fetcher's backfillWG.Add (if any) always executes
-// there — the same safety property triggerBackfill relies on for its own
-// WaitGroup, needed here because commands.handle runs on a per-connection
-// goroutine, not Run's.
-func (h *Hub) LoadOlder(symbol string, daily bool, requiredStartMs, requiredEndMs int64, done func(added int, exhausted bool, err error)) {
-	select {
-	case h.loadOlderCh <- loadOlderReq{symbol: symbol, daily: daily, requiredStartMs: requiredStartMs, requiredEndMs: requiredEndMs, done: done}:
-	case <-h.closed:
-		done(0, true, nil)
 	}
 }
 
@@ -548,8 +498,6 @@ func (h *Hub) Run(ctx context.Context) error {
 			h.handleEnsureIndicator(r)
 		case r := <-h.releaseIndicatorCh:
 			h.handleReleaseIndicator(r)
-		case r := <-h.loadOlderCh:
-			h.handleLoadOlder(r)
 		case r := <-h.chartWindowCh:
 			h.handleChartWindow(r)
 		case reply := <-h.demandSnapCh:
@@ -609,8 +557,6 @@ func (h *Hub) drain() {
 			h.handleEnsureIndicator(r)
 		case r := <-h.releaseIndicatorCh:
 			h.handleReleaseIndicator(r)
-		case r := <-h.loadOlderCh:
-			h.handleLoadOlder(r)
 		case r := <-h.chartWindowCh:
 			h.handleChartWindow(r)
 		case u := <-h.mdCh:
@@ -670,7 +616,7 @@ func (h *Hub) handleEnsureDemand(r ensureDemandReq) {
 	if historyDays == 0 && r.d.WantsHistory {
 		historyDays = 70
 	}
-	m[r.d.ID] = demandInfo{symbol: r.d.Symbol, historyDays: historyDays}
+	m[r.d.ID] = demandInfo{symbol: r.d.Symbol, historyDays: historyDays, focused: r.d.Focused}
 	if f := h.feed(); f != nil {
 		f.Ensure(r.d)
 	}
@@ -679,46 +625,33 @@ func (h *Hub) handleEnsureDemand(r ensureDemandReq) {
 			fn(r.d.Symbol)
 		}
 	}
-	// Deep-backfill (deep intraday + full daily history) any chart-capable
-	// demand whose daily fetch hasn't yet succeeded, so a symbol opened on a
-	// chart gets full daily history even if it was never a scanner-pool
-	// admission. backfilled is set only once the daily fetch actually
-	// succeeds (handleBackfillDone) -- a failed attempt (e.g. OpenD was down)
-	// leaves it unset so a later demand, or the reconnect re-arm below
-	// (rearmBackfill), retries it. backfillInflight prevents spawning a
-	// second goroutine for a symbol still being backfilled. The scan poller
-	// runs its own independent, pool-day-scoped dedup for the same underlying
-	// orch.Backfill; the two can each fire once for the same symbol, but
-	// OpenDFeed.HistoryBars coalesces concurrent same-symbol fetches
-	// (singleflight) and the 30-day dedup window covers sequential ones, so
-	// a second call spends no additional history quota.
-	h.triggerBackfill(r.d.Symbol, historyDays)
+	// Focused demands prepare one chart snapshot; watch/scanner demands warm
+	// only the archive. The role comes from Demand.Focused, never day counts.
+	h.triggerBackfill(r.d.Symbol, historyDays, r.d.Focused)
 }
 
-// triggerBackfill spawns the injected warmer when requested depth has not
-// already succeeded and an equal/deeper request is not in flight. Called from
-// handleEnsureDemand (a fresh
-// demand) and rearmBackfill (an OpenD reconnect re-arm) -- always from Run's
-// own goroutine, so backfilled/backfillInflight need no extra locking.
-func (h *Hub) triggerBackfill(sym string, days int) {
-	fn := h.backfill()
-	if fn == nil || days <= 0 || h.backfilled[sym] >= days || h.backfillInflight[sym] >= days {
+// triggerBackfill dispatches an explicit focused or archive-only worker.
+func (h *Hub) triggerBackfill(sym string, days int, focused bool) {
+	worker := h.backfill()
+	if focused {
+		if worker == nil || worker.prepare == nil {
+			event := h.buildSysEvent("chart-ready", sym)
+			h.m.applyPub(event)
+			h.broadcast(event, false)
+			return
+		}
+		if h.prepareInflight[sym] {
+			return
+		}
+		h.prepareInflight[sym] = true
+		worker.prepare(sym, func(ok bool) { h.reportBackfill(sym, 0, true, ok) })
 		return
 	}
-	h.backfillInflight[sym] = days
-	fn(sym, days, func(ok bool) { h.reportBackfill(sym, days, ok) })
-}
-
-// handleLoadOlder runs on Run's own goroutine, so the injected fn's
-// backfillWG.Add (main.go's loadOlderFn) is race-safe against the shutdown
-// sequence's backfillWG.Wait(), exactly like triggerBackfill's fn.
-func (h *Hub) handleLoadOlder(r loadOlderReq) {
-	fn := h.loadOlderFn()
-	if fn == nil {
-		r.done(0, true, nil) // no fetch surface injected — nothing older to serve
+	if worker == nil || worker.warm == nil || days <= 0 || h.warmed[sym] >= days || h.warmInflight[sym] >= days {
 		return
 	}
-	fn(r.symbol, r.daily, r.requiredStartMs, r.requiredEndMs, r.done)
+	h.warmInflight[sym] = days
+	worker.warm(sym, days, func(ok bool) { h.reportBackfill(sym, days, false, ok) })
 }
 
 func (h *Hub) handleChartWindow(r chartWindowReq) {
@@ -764,17 +697,18 @@ func wireBarMs(b wsmsg.Bar) int64 {
 	return t.UnixMilli()
 }
 
-// handleBackfillDone applies a backfill goroutine's reported outcome
-// (reportBackfill) on Run's own goroutine: backfilled is set only on
-// success, so a failed attempt stays retryable (a later chart-open demand or
-// OpenD-reconnect re-arm will try again).
+// handleBackfillDone clears focused in-flight state or advances archive depth.
 func (h *Hub) handleBackfillDone(r backfillResult) {
-	if h.backfillInflight[r.sym] <= r.days {
-		delete(h.backfillInflight, r.sym)
+	if r.focused {
+		delete(h.prepareInflight, r.sym)
+		return
+	}
+	if h.warmInflight[r.sym] <= r.days {
+		delete(h.warmInflight, r.sym)
 	}
 	if r.ok {
-		if h.backfilled[r.sym] < r.days {
-			h.backfilled[r.sym] = r.days
+		if h.warmed[r.sym] < r.days {
+			h.warmed[r.sym] = r.days
 		}
 	}
 }
@@ -805,14 +739,15 @@ func (h *Hub) rearmBackfill() {
 	if h.backfill() == nil {
 		return // no backfill trigger injected (replay / backfill disabled)
 	}
-	chartSymbols := map[string]int{}
+	targets := map[string]demandInfo{}
 	h.forEachDemand(func(info demandInfo) {
-		if info.historyDays > chartSymbols[info.symbol] {
-			chartSymbols[info.symbol] = info.historyDays
+		current := targets[info.symbol]
+		if info.focused || (!current.focused && info.historyDays > current.historyDays) {
+			targets[info.symbol] = info
 		}
 	})
-	for sym, days := range chartSymbols {
-		h.triggerBackfill(sym, days)
+	for sym, target := range targets {
+		h.triggerBackfill(sym, target.historyDays, target.focused)
 	}
 }
 
@@ -886,7 +821,11 @@ func (h *Hub) handleMD(u md.Update) {
 		h.stageMD(s)
 	}
 	if ready, ok := u.(md.HistoryReadyUpdate); ok {
-		event := h.buildSysEvent("history-ready", ready.Symbol)
+		kind := "history-ready"
+		if ready.Prepared {
+			kind = "chart-ready"
+		}
+		event := h.buildSysEvent(kind, ready.Symbol)
 		h.m.applyPub(event)
 		h.broadcast(event, false)
 	}

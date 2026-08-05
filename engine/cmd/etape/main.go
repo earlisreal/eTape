@@ -582,15 +582,16 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	hub.SetFeed(feedForHub) // enables on-demand EnsureSymbol/ReleaseSymbol + FocusGroup probe
 	hub.SetKnownSymbol(st.HasArchivedSymbol)
 
-	var hubBackfill func(sym string, days int, done func(ok bool))
+	var prepareChart func(sym string, done func(ok bool))
+	var warmArchive func(sym string, days int, done func(ok bool))
 	var refreshDaily func(sym string)
 	var warmSeen sync.Map // symbol -> deepest requested days; retained for after-close daily repair
 	if cfg.Backfill.Enabled || *demo {
 		// demo: dailyChain/intradayChain/tail are all nil here, so this is
 		// a chain-less orchestrator -- walkChain over a nil chain returns
 		// cleanly (nil,"",nil) and o.tail nil-checks before use -- it
-		// still serves warmStart's archive-first LoadOlder/LoadOlderDaily
-		// against the history Seed already wrote, with no special-casing.
+		// still serves warmStart's archive-first history against the data
+		// the demo seed already wrote, with no special-casing.
 		orch = backfill.New(
 			dailyChain,
 			intradayChain,
@@ -599,32 +600,40 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			st,
 			clock.System{},
 			backfill.Config{
-				IntradayDays: cfg.Backfill.IntradayDays,
-				DailyYears:   cfg.Backfill.DailyYears,
-				Concurrency:  cfg.Backfill.Concurrency,
-				SeedChunk:    cfg.Backfill.SeedChunk,
+				TenSecondDays: cfg.Backfill.TenSecondDays,
+				IntradayDays:  cfg.Backfill.IntradayDays,
+				DailyYears:    cfg.Backfill.DailyYears,
+				Concurrency:   cfg.Backfill.Concurrency,
+				SeedChunk:     cfg.Backfill.SeedChunk,
 			},
 		)
-		// hubBackfill spawns orch.Backfill and reports the daily-fetch
-		// outcome back via done, so the hub knows whether to mark the
-		// symbol backfilled or leave it retryable (see
-		// Hub.handleBackfillDone / Hub.rearmBackfill). The scan poller
-		// (backfillOne below) doesn't need the retry signal -- it has its
-		// own independent, pool-day-scoped dedup -- so it reuses this
-		// same closure with a nil done rather than spawning its own copy
-		// of the Add/goroutine/Done boilerplate.
-		hubBackfill = func(sym string, days int, done func(ok bool)) {
+		prepareChart = func(sym string, done func(ok bool)) {
+			recordWarmDepth(&warmSeen, sym, cfg.Backfill.IntradayDays)
+			backfillWG.Add(1)
+			go func() {
+				defer backfillWG.Done()
+				err := orch.PrepareChart(ctx, sym)
+				if done != nil {
+					done(err == nil)
+				}
+				if err == nil {
+					err = orch.WarmArchive(ctx, sym, cfg.Backfill.IntradayDays)
+				}
+				if err != nil && ctx.Err() == nil {
+					log.Warn("focused history warm failed", "symbol", sym, "err", err)
+				}
+			}()
+		}
+		warmArchive = func(sym string, days int, done func(ok bool)) {
 			effectiveDays := days
-			if days <= 2 && cfg.Backfill.WatchIntradayDays > 0 {
+			if cfg.Backfill.WatchIntradayDays > 0 {
 				effectiveDays = cfg.Backfill.WatchIntradayDays
-			} else if days >= 70 && cfg.Backfill.IntradayDays > 0 {
-				effectiveDays = cfg.Backfill.IntradayDays
 			}
 			recordWarmDepth(&warmSeen, sym, effectiveDays)
 			backfillWG.Add(1)
 			go func() {
 				defer backfillWG.Done()
-				err := orch.Warm(ctx, sym, effectiveDays)
+				err := orch.WarmArchive(ctx, sym, effectiveDays)
 				if done != nil {
 					done(err == nil)
 				}
@@ -641,15 +650,15 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		}
 	}
 	var backfillOne func(string)
-	if hubBackfill != nil {
-		backfillOne = func(sym string) { hubBackfill(sym, 2, nil) }
+	if warmArchive != nil {
+		backfillOne = func(sym string) { warmArchive(sym, cfg.Backfill.WatchIntradayDays, nil) }
 		scanWG.Add(1)
 		go func() {
 			defer scanWG.Done()
 			runAfterCloseHistoryRefresh(ctx, &warmSeen, refreshDaily)
 		}()
 	}
-	hub.SetHistoryWarm(hubBackfill) // tiered watch/chart history warming
+	hub.SetHistoryWarm(prepareChart, warmArchive)
 	if fd, ok := feedForHub.(*opend.OpenDFeed); ok && st != nil && !cfg.Backfill.Enabled {
 		hub.SetCachedDaily(func(sym string) {
 			backfillWG.Add(1)
@@ -670,32 +679,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		})
 	}
 	startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, firstAlpacaProber(vbs), backfillOne, !*demo, &scanWG)
-
-	if orch == nil && st != nil {
-		// No live backfill chains were built — a chain-less orchestrator still serves archive-first
-		// LoadOlder/LoadOlderDaily and acks exhausted past the archive, per the
-		// spec's "no special casing beyond a nil-chain check." walkChain over a
-		// nil chain returns (nil,"",nil), so LoadOlder degrades cleanly.
-		orch = backfill.New(nil, nil, nil, core, st, clock.System{}, backfill.Config{IntradayDays: cfg.Backfill.IntradayDays})
-	}
-	loadOlderFn := func(sym string, daily bool, requiredStartMs, requiredEndMs int64, done func(added int, exhausted bool, err error)) {
-		if orch == nil { // st itself was nil — should not happen in practice
-			done(0, true, nil)
-			return
-		}
-		backfillWG.Add(1)
-		go func() {
-			defer backfillWG.Done()
-			if daily {
-				added, exhausted, err := orch.LoadOlderDailyRange(ctx, sym, requiredStartMs, requiredEndMs)
-				done(added, exhausted, err)
-				return
-			}
-			added, exhausted, err := orch.LoadOlder(ctx, sym, requiredStartMs, requiredEndMs)
-			done(added, exhausted, err)
-		}()
-	}
-	hub.SetLoadOlder(loadOlderFn)
 
 	<-ctx.Done()
 
@@ -730,35 +713,30 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// actually returned, confirming its dispatch loop -- and therefore any
 	// SetConfig call it could make -- is stopped before st.Close() runs.
 	//
-	// backfillWG.Add(1) now has three producers: the scan poller (pool
+	// backfillWG.Add(1) has two producers: the scan poller (pool
 	// admission, joined via scanWG); the Hub goroutine via the hubBackfill
 	// closure injected with SetBackfill -- called from both
 	// Hub.handleEnsureDemand (chart-open demand) and Hub.rearmBackfill
 	// (OpenD-reconnect re-arm, triggered from handleMD on an
-	// md.ResyncedUpdate); and the Hub goroutine again via the loadOlderFn
-	// closure injected with SetLoadOlder -- called from Hub.handleLoadOlder,
-	// itself reachable only via loadOlderCh (the LoadOlderBars command,
-	// routed through Hub.LoadOlder from a conn's dispatch goroutine
-	// specifically so its Add(1) executes on the Hub goroutine, not the conn
-	// goroutine -- see Hub.LoadOlder's doc comment). srv.Wait() only proves
-	// every conn's dispatch loop has returned, not that the Hub goroutine has
-	// finished servicing the ensureDemandCh/mdCh/loadOlderCh sends already
+	// md.ResyncedUpdate). srv.Wait() only proves every conn's dispatch loop
+	// has returned, not that the Hub goroutine has finished servicing the
+	// ensureDemandCh/mdCh sends already
 	// made on their way out -- that Add(1) can still be in flight on the Hub
 	// goroutine after srv.Wait() returns. <-hubDone closes that gap: Hub.Run
 	// only returns via its own <-ctx.Done() branch, by which point any
-	// ensureDemandCh/mdCh/loadOlderCh message it had already received has
+	// ensureDemandCh/mdCh message it had already received has
 	// finished its handler call (and therefore its Add, if any), so no
 	// further Add(1) can occur once hubDone closes. Waiting on it here,
 	// before scanWG.Wait()/backfillWG.Wait(), keeps all three Add(1)
 	// producers quiesced before the counter is read -- otherwise a late Add
 	// could land after backfillWG.Wait() already observed zero, spawning an
-	// unwaited orch.Backfill/LoadOlder/LoadOlderDaily goroutine that touches
+	// unwaited orch.Backfill goroutine that touches
 	// the store during/after st.Close().
 	shutCtx, cancelShut := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = httpSrv.Shutdown(shutCtx)
 	cancelShut()
 	srv.Wait()        // every conn.run() returned: no more SetConfig via dispatch
-	<-hubDone         // hub.Run returned: no more handleEnsureDemand/handleLoadOlder, hence no more backfillWG.Add from chart-open demands or LoadOlderBars
+	<-hubDone         // hub.Run returned: no more handleEnsureDemand, hence no more backfillWG.Add from chart-open demands
 	scanWG.Wait()     // scan poller stopped: no more backfillWG.Add from pool admissions
 	backfillWG.Wait() // boot backfill workers stopped: no more Seed* into the core
 	pipeWG.Wait()     // feed->core pipe stopped: no more RecordEvent

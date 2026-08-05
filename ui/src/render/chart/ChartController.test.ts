@@ -285,6 +285,17 @@ describe("ChartController", () => {
     expect(autoscale()).toEqual({ priceRange: null });
   });
 
+  it("sets initial data once, then applies only live tail updates", () => {
+	const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11, true)];
+	const { facade, ctrl } = make(barReaderOf(bars));
+	ctrl.sync();
+	bars.push(bar("2026-07-06T13:32:00Z", 12, true));
+	ctrl.sync();
+	const candle = facade.created[0].series;
+	expect(candle.setDataCalls).toHaveLength(1);
+	expect(candle.updates).toHaveLength(2);
+  });
+
   it("MACD's sub-pane lines keep autoscaling their own pane (no priceRange override)", () => {
     const { facade, ctrl } = make(barReaderOf([]));
     ctrl.addIndicator({ instanceId: "macd-1", type: "MACD", params: { fast: 12, slow: 26, signal: 9 } });
@@ -696,7 +707,6 @@ describe("ChartController", () => {
     expect(candle.setDataCalls.at(-1)).toHaveLength(3 + LEFT_PAD_BARS); // + leading whitespace pad
   });
 });
-
 describe("ChartController main series + facade capabilities", () => {
   it("mount creates the main series via setMainSeries (kind 'candle') and the volume via addSeries", () => {
     const facade = fakeFacade();
@@ -721,7 +731,6 @@ describe("ChartController main series + facade capabilities", () => {
     expect(facade.crosshairCb).toBeNull();
   });
 });
-
 describe("ChartController.setChartType", () => {
   const bars = [bar("2026-07-08T13:30:00Z", 10), bar("2026-07-08T13:31:00Z", 11)];
 
@@ -1265,61 +1274,5 @@ describe("ChartController.lastSyncDaySegmentBuilds (Task 6 diagnostic probe)", (
     bars.push(bar("2026-07-06T13:31:00Z", 11, true)); // same calendar day
     ctrl.sync(); // appended
     expect(ctrl.lastSyncDaySegmentBuilds()).toBe(0);
-  });
-});
-
-describe("ChartController viewport preservation around front-growth rebuilds (Task 10)", () => {
-  // LWC's setData preserves the viewport's LOGICAL index range, not its TIME
-  // range. A front-growth rebuild (deep-history prepend, or the official-daily-
-  // replaces-derived-bar case) shifts every existing bar's logical index, so
-  // without this fix a scrolled-back viewport would silently teleport to a
-  // different time window every time older bars land.
-  const sec = (iso: string) => Math.floor(Date.parse(iso) / 1000);
-
-  it("restores the visible time range after a front-growth rebuild (scrolled back)", () => {
-    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
-    const { facade, ctrl } = make(barReaderOf(bars));
-    ctrl.sync(); // shallow cache-seed backfill (cold setAllBars; no prior visibleRange to restore)
-
-    // Simulate the user having scrolled back: an interior window whose `to` sits
-    // strictly before the newest (tail) bar's time.
-    const scrolledBack = { from: sec("2026-07-06T13:29:00Z"), to: sec("2026-07-06T13:30:00Z") };
-    facade.visibleRange = scrolledBack;
-
-    // Deep-history snapshot lands: two OLDER bars prepended ahead of the shallow
-    // window — the front-growth anchor-mismatch path (applyBars), routing back
-    // into setAllBars.
-    bars.unshift(bar("2026-07-06T13:28:00Z", 8), bar("2026-07-06T13:29:00Z", 9));
-    ctrl.sync();
-
-    expect(facade.setVisibleRangeCalls).toEqual([scrolledBack]);
-  });
-
-  it("does NOT restore when parked at the right edge (newest bar visible)", () => {
-    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
-    const { facade, ctrl } = make(barReaderOf(bars));
-    ctrl.sync(); // shallow cache-seed backfill
-
-    // Parked at the live edge: `to` is at (>=) the newest (tail) bar's time.
-    facade.visibleRange = { from: sec("2026-07-06T13:30:00Z"), to: sec("2026-07-06T13:31:00Z") };
-
-    bars.unshift(bar("2026-07-06T13:28:00Z", 8), bar("2026-07-06T13:29:00Z", 9));
-    ctrl.sync();
-
-    expect(facade.setVisibleRangeCalls).toEqual([]);
-  });
-
-  it("preserves logical width and live-edge offset when shared history prepends", () => {
-    const bars = [bar("2026-07-06T13:30:00Z", 10), bar("2026-07-06T13:31:00Z", 11)];
-    const { facade, ctrl } = make(barReaderOf(bars));
-    ctrl.sync();
-    facade.visibleRange = { from: sec("2026-07-06T13:30:00Z"), to: sec("2026-07-06T13:31:00Z") };
-    facade.visibleLogicalRange = { from: -20, to: 5 };
-
-    bars.unshift(bar("2026-07-06T13:28:00Z", 8), bar("2026-07-06T13:29:00Z", 9));
-    ctrl.sync();
-
-    expect(facade.setVisibleLogicalRangeCalls).toEqual([{ from: -18, to: 7 }]);
-    expect(facade.setVisibleRangeCalls).toEqual([]);
   });
 });

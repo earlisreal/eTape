@@ -39,7 +39,6 @@ export default defineConfig({
           include: [
             'src/data/BarStore.test.ts',
             'src/render/chart/ChartController.test.ts',
-            'src/render/chart/olderHistory.test.ts',
           ],
         },
       },

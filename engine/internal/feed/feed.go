@@ -115,7 +115,8 @@ func WatchDemand(id, symbol string) Demand {
 // ChartDemand adds K_DAY solely to unlock one fast cached-daily read.
 func ChartDemand(id, symbol string) Demand {
 	return Demand{ID: id, Symbol: symbol,
-		Subs: []SubType{SubTicker, SubKL1m, SubKLDay}, HistoryDays: 70, WantsHistory: true, CachedDaily: true}
+		Subs: []SubType{SubTicker, SubKL1m, SubKLDay}, Focused: true,
+		HistoryDays: 70, WantsHistory: true, CachedDaily: true}
 }
 
 // Resolution selects a history series.

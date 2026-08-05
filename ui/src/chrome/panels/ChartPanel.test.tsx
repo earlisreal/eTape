@@ -81,8 +81,8 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sh
   const commands = {
     sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })),
     sendQuery: vi.fn(async (name: string, args: unknown) => {
-      void args;
       if (name === "QueryChartWindow" && chartQueryResult) return chartQueryResult;
+	  if (name === "QueryChartWindow") return { ...(args as object), bars: [], indicators: [], historyRevision: 0 };
       return [];
     }),
   };
@@ -176,61 +176,34 @@ describe("ChartPanel", () => {
     expect(timeScaleApi.scrollToPosition).toHaveBeenCalledWith(49, false);
   });
 
-  it("reloads the demanded range, not the latest tail, when pan history becomes ready", async () => {
-    const firstMs = 1_700_000_000_000;
-    const latest: Bar = { symbol: "US.AAPL", timeframe: "1m", bucketStart: new Date(firstMs).toISOString(),
-      o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false };
-    const result = { symbol: "US.AAPL", timeframe: "1m", fromMs: firstMs, toMs: firstMs + 1,
-      bars: [latest], indicators: [], historyRevision: 1 };
-    const { commands, container, stores } = renderChart("c1", undefined, undefined, undefined, result);
+  it("loads one prepared snapshot and ignores pan/zoom releases", async () => {
+    const { commands, container, stores } = renderChart();
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     commands.sendQuery.mockClear();
-    timeScaleApi.getVisibleLogicalRange.mockReturnValue({ from: -10, to: 0 });
+    commands.sendCommand.mockClear();
+
     const host = container.querySelector("[data-testid=chart-host]") as HTMLElement;
-    await act(async () => {
-      host.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
-      await Promise.resolve(); await Promise.resolve();
-    });
-    expect(commands.sendCommand).toHaveBeenCalledWith("LoadOlderBars", {
-      symbol: "US.AAPL",
-      daily: false,
-      requiredStartMs: firstMs - 7 * 24 * 60 * 60_000,
-      requiredEndMs: firstMs + 60_000,
-    });
+    fireEvent.pointerUp(host);
+    fireEvent.wheel(host);
+    fireEvent.keyUp(window, { key: "ArrowLeft" });
+    expect(commands.sendCommand).not.toHaveBeenCalledWith("LoadOlderBars", expect.anything());
+    expect(commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow")).toHaveLength(0);
 
     act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
-      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "history-ready", detail: "US.AAPL",
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
     } }));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    const viewportQueries = commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow");
-    expect(viewportQueries).not.toHaveLength(0);
-    expect(viewportQueries.every(([, args]) => (args as { tailBars: number }).tailBars === 0)).toBe(true);
-    expect(viewportQueries).toContainEqual(["QueryChartWindow", expect.objectContaining({
-      fromMs: firstMs - 7 * 24 * 60 * 60_000, toMs: firstMs, tailBars: 0,
-    })]);
-  });
-
-  it("loads daily history to the 2016 floor when pan history becomes ready", async () => {
-    const firstMs = Date.UTC(2022, 7, 5);
-    const latest: Bar = { symbol: "US.NVDA", timeframe: "D", bucketStart: new Date(firstMs).toISOString(),
-      o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false };
-    const result = { symbol: "US.NVDA", timeframe: "D", fromMs: firstMs, toMs: firstMs + 1,
-      bars: [latest], indicators: [], historyRevision: 1 };
-    const { commands, container } = renderChart("c1", undefined, undefined, { symbol: "US.NVDA", timeframe: "D" }, result);
-    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-    timeScaleApi.getVisibleLogicalRange.mockReturnValue({ from: -10, to: 0 });
-    const host = container.querySelector("[data-testid=chart-host]") as HTMLElement;
-
-    await act(async () => {
-      host.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
-      await Promise.resolve(); await Promise.resolve();
-    });
-
-    expect(commands.sendCommand).toHaveBeenCalledWith("LoadOlderBars", {
-      symbol: "US.NVDA", daily: true,
-      requiredStartMs: Date.UTC(2016, 0, 1),
-      requiredEndMs: expect.any(Number),
-    });
+    expect(commands.sendQuery).toHaveBeenCalledWith("QueryChartWindow", expect.objectContaining({
+      symbol: "US.AAPL", timeframe: "1m", tailBars: 1_000_000,
+    }));
+	act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+	  seq: 2, ts: "2026-08-03T01:00:01Z", kind: "chart-ready", detail: "US.AAPL",
+	} }));
+	act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+	  seq: 3, ts: "2026-08-03T01:00:02Z", kind: "history-ready", detail: "US.AAPL",
+	} }));
+	await act(async () => { await Promise.resolve(); });
+	expect(commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow")).toHaveLength(1);
   });
 
   it("scopes indicator instanceIds to the panel, so two panels adding the same indicator type don't collide (Finding 2 regression)", () => {
@@ -466,7 +439,7 @@ describe("ChartPanel", () => {
     expect(stores.bars.missingRanges("US.AAPL", "10s", toMs, nextMs + 1)).toEqual([{ fromMs: toMs, toMs: nextMs + 1 }]);
   });
 
-  it("refreshes indicators for a lower-sequence history-ready event from another producer", async () => {
+  it("loads indicators for a lower-sequence chart-ready event from another producer", async () => {
     const { stores, commands } = renderChart("c1", undefined, undefined, {
       timeframe: "D",
       indicators: [{ instanceId: "c1:EMA-0", type: "EMA", params: { period: 200 } }],
@@ -480,9 +453,9 @@ describe("ChartPanel", () => {
     pushEvent({ seq: 50, ts: "2026-08-02T01:00:00Z", kind: "quota", detail: "unrelated" });
     expect(commands.sendQuery).not.toHaveBeenCalled();
 
-    // Hub-owned history-ready sequences are independent from other sys.events
+    // Hub-owned chart-ready sequences are independent from other sys.events
     // producers, so seq=1 is newer here despite being numerically lower.
-    pushEvent({ seq: 1, ts: "2026-08-02T01:00:01Z", kind: "history-ready", detail: "US.AAPL" });
+    pushEvent({ seq: 1, ts: "2026-08-02T01:00:01Z", kind: "chart-ready", detail: "US.AAPL" });
     await act(async () => { await Promise.resolve(); });
 
     expect(commands.sendQuery).toHaveBeenCalledWith("QueryChartWindow", expect.objectContaining({
@@ -490,7 +463,7 @@ describe("ChartPanel", () => {
     }));
   });
 
-  it("waits for history-ready before reloading a reused VWAP after a symbol switch", async () => {
+  it("waits for chart-ready before loading a reused VWAP after a symbol switch", async () => {
     const key = "c1:VWAP-0";
     const { stores, commands, linkGroups } = renderChart("c1", undefined, undefined, {
       timeframe: "D",
@@ -499,6 +472,7 @@ describe("ChartPanel", () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     commands.sendQuery.mockClear();
     commands.sendQuery.mockImplementation(async (_name: string, raw: unknown) => {
+      if (_name === "QueryFills") return [];
       const args = raw as { symbol: string; timeframe: string; indicatorSeriesKeys: string[] };
       return {
         symbol: args.symbol, timeframe: args.timeframe, fromMs: 1, toMs: 3, bars: [],
@@ -511,20 +485,17 @@ describe("ChartPanel", () => {
     act(() => linkGroups.focus("green", "US.YYAI"));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     const immediate = commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow");
-    expect(immediate).toHaveLength(1);
-    expect(immediate[0][1]).toEqual(expect.objectContaining({
-      symbol: "US.YYAI", indicatorSeriesKeys: [],
-    }));
+    expect(immediate).toHaveLength(0);
 
     // An old live point can arrive after the controller reset but before the
     // engine's ordered replacement snapshot reaches the mirror.
     act(() => stores.indicators.apply({ kind: "delta", topic: "md.indicator", key,
       payload: { timeMs: 1, value: 99 } }));
     expect(stores.indicators.series(key)).toEqual([{ timeMs: 1, value: 99 }]);
-    expect(commands.sendQuery).toHaveBeenCalledTimes(1); // accepted subscribe ack did not query
+    expect(commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow")).toHaveLength(0);
 
     act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
-      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "history-ready", detail: "US.YYAI",
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.YYAI",
     } }));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
@@ -547,8 +518,12 @@ describe("ChartPanel", () => {
   });
 
   it("loads a newly typed pinned symbol without remounting", async () => {
-    const { commands, rerenderPinnedSymbol } = renderChart();
+    const { commands, stores, rerenderPinnedSymbol } = renderChart();
     rerenderPinnedSymbol("US.NVDA");
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.NVDA",
+    } }));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(commands.sendQuery).toHaveBeenCalledWith("QueryChartWindow", expect.objectContaining({ symbol: "US.NVDA" }));
   });
@@ -629,9 +604,13 @@ describe("ChartPanel", () => {
     }
   });
 
-  it("renders the bar-close-timer badge for an in-progress bar on an intraday timeframe when the setting is on", () => {
-    const { stores, getSurface, getByTestId } = renderChartCapturingSurface();
-    pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5);
+	it("renders the bar-close-timer badge for an in-progress bar on an intraday timeframe when the setting is on", async () => {
+		const { stores, getSurface, getByTestId } = renderChartCapturingSurface();
+		act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+			seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+		} }));
+		await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+		pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5);
     act(() => { getSurface().paint(); });
     expect(getByTestId("bar-close-timer")).toBeTruthy();
   });
@@ -765,66 +744,4 @@ describe("ChartPanel", () => {
     }
   });
 
-  it("dino icon renders when both intraday and daily are exhausted", async () => {
-    const { container, commands, getByRole } = renderChart();
-    const host = container.querySelector("[data-testid=chart-host]") as HTMLElement;
-    // First pointerup: intraday exhausted
-    timeScaleApi.getVisibleRange.mockReturnValue({ from: 1_700_000_000, to: 1_700_000_600 });
-    commands.sendCommand.mockImplementation(async () => {
-      if ("LoadOlderBars" === "LoadOlderBars") {
-        return { kind: "ack", corrId: "c", status: "accepted", value: { exhausted: true } };
-      }
-      return { kind: "ack", corrId: "c", status: "accepted" };
-    });
-    const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
-    // First pointerup fires intraday (1m timeframe)
-    await act(async () => {
-      host.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
-      await flush();
-    });
-    // Switch to daily timeframe in-place (same panel, fresh tfRef but same olderHistory)
-    await act(async () => {
-      fireEvent.click(getByRole("button", { name: "timeframe D" }));
-    });
-    // Second pointerup fires daily kind
-    await act(async () => {
-      host.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
-      await flush();
-    });
-    // Both exhausted → dino icon should be present
-    expect(container.querySelector("[title='No more historical bars available']")).toBeTruthy();
-  });
-
-  it("symbol change resets allExhausted to false", async () => {
-    const { container, commands, getByRole } = renderChart();
-    const host = container.querySelector("[data-testid=chart-host]") as HTMLElement;
-    timeScaleApi.getVisibleRange.mockReturnValue({ from: 1_700_000_000, to: 1_700_000_600 });
-    commands.sendCommand.mockImplementation(async () => {
-      if ("LoadOlderBars" === "LoadOlderBars") {
-        return { kind: "ack", corrId: "c", status: "accepted", value: { exhausted: true } };
-      }
-      return { kind: "ack", corrId: "c", status: "accepted" };
-    });
-    const flush = async () => { for (let i = 0; i < 5; i++) await Promise.resolve(); };
-    // First pointerup fires intraday (1m timeframe)
-    await act(async () => {
-      host.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
-      await flush();
-    });
-    // Switch to daily timeframe in-place
-    await act(async () => {
-      fireEvent.click(getByRole("button", { name: "timeframe D" }));
-    });
-    // Second pointerup fires daily kind
-    await act(async () => {
-      host.dispatchEvent(new MouseEvent("pointerup", { bubbles: true }));
-      await flush();
-    });
-    expect(container.querySelector("[title='No more historical bars available']")).toBeTruthy();
-    // Change symbol: re-render with new symbol (fresh panel = allExhausted resets)
-    const { unmount } = renderChart("c1", undefined, undefined, { symbol: "US.GOOG", timeframe: "D" });
-    unmount();
-    const { container: c2 } = renderChart("c1", undefined, undefined, { symbol: "US.GOOG", timeframe: "D" });
-    expect(c2.querySelector("[title='No more historical bars available']")).toBeNull();
-  });
 });

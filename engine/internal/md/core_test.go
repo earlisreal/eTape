@@ -316,6 +316,24 @@ func TestSeedHistory1mEmitsCompleteSnapshot(t *testing.T) {
 	}
 }
 
+func TestSeedChartHistoryEmitsOnePreparedBarrier(t *testing.T) {
+	c, drain := runCore(t)
+	c.SeedChartHistory("US.AAPL",
+		[]feed.Bar{{Symbol: "US.AAPL", BucketMs: session.DayMs(t0Ms), O: 1, H: 2, L: 0.5, C: 1.5}},
+		[]feed.Bar{{Symbol: "US.AAPL", BucketMs: t0Ms, O: 1, H: 2, L: 0.5, C: 1.5}},
+		[]feed.Bar{{Symbol: "US.AAPL", BucketMs: t0Ms, O: 1, H: 2, L: 0.5, C: 1.5}},
+	)
+	prepared := 0
+	for _, update := range drain() {
+		if ready, ok := update.(HistoryReadyUpdate); ok && ready.Prepared {
+			prepared++
+		}
+	}
+	if prepared != 1 {
+		t.Fatalf("prepared barriers=%d, want 1", prepared)
+	}
+}
+
 // TestSeedDailyAndSeedHistory1mDoNotPanic exercises the SeedDaily/
 // SeedHistory1m mutators end-to-end through the inbox — Task 11 will give
 // them real behavior, but Task 9 must wire the plumbing without panicking

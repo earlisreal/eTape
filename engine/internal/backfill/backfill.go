@@ -63,6 +63,7 @@ type Seeder interface {
 	SeedDaily(symbol string, bars []feed.Bar)
 	SeedHistory1m(symbol string, bars []feed.Bar)
 	SeedHistory10s(symbol string, bars []feed.Bar)
+	SeedChartHistory(symbol string, daily, bars1m, bars10s []feed.Bar)
 	SeedOlder1m(symbol string, bars []feed.Bar)
 	SeedSessionTicks(symbol string, ticks []feed.Tick)
 }
@@ -88,7 +89,6 @@ type Archive interface {
 	ReadBars1m(symbol string, fromMs, toMs int64) ([]feed.Bar, error)
 	ReadRecentBars1m(symbol string, limit int) ([]feed.Bar, error)
 	ReadBars10s(symbol string, fromMs, toMs int64) ([]feed.Bar, error)
-	ReadRecentBars10s(symbol string, limit int) ([]feed.Bar, error)
 	ArchiveBar1m(b feed.Bar)
 	ArchiveBar10s(b feed.Bar)
 	ArchiveDaily(b feed.Bar)
@@ -113,9 +113,10 @@ func seedUnlessCanceled(ctx context.Context, bars []feed.Bar, seed func([]feed.B
 
 // Config sizes the orchestrator. Zero fields get defaults in New.
 type Config struct {
-	IntradayDays int
-	DailyYears   int
-	Concurrency  int
+	TenSecondDays int
+	IntradayDays  int
+	DailyYears    int
+	Concurrency   int
 	// SeedChunk is vestigial: it bounded seedChunked's per-call emitted-update
 	// count, a mitigation for the per-bar BarUpdate fan-out that overflowed
 	// md.Core's updates channel on a deep seed. Now that a seed emits one
@@ -139,15 +140,16 @@ type Orchestrator struct {
 	clk      clock.Clock
 	cfg      Config
 
-	mu        sync.Mutex
-	oldest1m  map[string]int64 // symbol -> oldest loaded 1m watermark (ms); floor of explored depth
-	dailyDone map[string]bool  // symbol -> pre-2016 daily one-shot already served
-	older     singleflight.Group
-	olderDay  singleflight.Group
-	warm      singleflight.Group
-	sem       chan struct{}
-	warmMu    sync.Mutex
-	warmLocks map[string]*sync.Mutex
+	mu         sync.Mutex
+	oldest1m   map[string]int64 // symbol -> oldest loaded 1m watermark (ms); floor of explored depth
+	dailyDone  map[string]bool  // symbol -> pre-2016 daily one-shot already served
+	older      singleflight.Group
+	olderDay   singleflight.Group
+	warm       singleflight.Group
+	archiveSem chan struct{}
+	foreground chan struct{}
+	warmMu     sync.Mutex
+	warmLocks  map[string]*sync.Mutex
 }
 
 func New(daily, intraday []Source, tail TailFetcher, seeder Seeder, archive Archive, clk clock.Clock, cfg Config) *Orchestrator {
@@ -160,37 +162,130 @@ func New(daily, intraday []Source, tail TailFetcher, seeder Seeder, archive Arch
 	return &Orchestrator{
 		daily: daily, intraday: intraday, tail: tail, seeder: seeder, archive: archive,
 		clk: clk, cfg: cfg,
-		oldest1m: map[string]int64{}, dailyDone: map[string]bool{}, sem: make(chan struct{}, cfg.Concurrency),
+		oldest1m: map[string]int64{}, dailyDone: map[string]bool{},
+		archiveSem: make(chan struct{}, cfg.Concurrency), foreground: make(chan struct{}, 1),
 		warmLocks: map[string]*sync.Mutex{},
 	}
 }
 
-const warmSegmentTradingDays = 10
+const warmSegmentDays = 10
 
 var focusedCacheTimeout = 3 * time.Second
 
-// Warm archives tiered history without publishing the full archive into the
-// chart mirror. Watch demands pass 2; chart/focused demands pass 70. A deep
-// request may race a watch request, so the singleflight key includes depth;
-// archive upserts make their overlap harmless and restart-safe.
-func (o *Orchestrator) Warm(ctx context.Context, symbol string, days int) error {
+// WarmArchive fills persistent history only. It never publishes to md.Core.
+func (o *Orchestrator) WarmArchive(ctx context.Context, symbol string, days int) error {
 	if days <= 0 {
 		return nil
 	}
-	key := fmt.Sprintf("%s|%d", symbol, days)
-	_, err, _ := o.warm.Do(key, func() (any, error) {
+	_, err, _ := o.warm.Do(fmt.Sprintf("%s|%d", symbol, days), func() (any, error) {
 		lock := o.symbolWarmLock(symbol)
 		lock.Lock()
 		defer lock.Unlock()
 		select {
-		case o.sem <- struct{}{}:
-			defer func() { <-o.sem }()
+		case o.archiveSem <- struct{}{}:
+			defer func() { <-o.archiveSem }()
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		}
-		return nil, o.warmDepth(ctx, symbol, days)
+		return nil, o.warmArchive(ctx, symbol, days)
 	})
 	return err
+}
+
+// PrepareChart loads the configured archive windows plus both OpenD caches,
+// then submits one ordered core seed. Its dedicated slot cannot queue behind
+// scanner/archive work.
+func (o *Orchestrator) PrepareChart(ctx context.Context, symbol string) error {
+	queued := time.Now()
+	select {
+	case o.foreground <- struct{}{}:
+		defer func() { <-o.foreground }()
+		slog.Info("chart history foreground admitted", "symbol", symbol,
+			"queueWait", time.Since(queued).Round(time.Millisecond))
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
+	now := o.clk.Now()
+	from1m := intradayFrom(now, o.cfg.IntradayDays)
+	from10s := tenSecondFrom(now, o.cfg.TenSecondDays)
+	fromDaily := o.dailyFrom(now)
+	daily, dailyErr := o.archive.ReadDailyBars(symbol)
+	bars1m, m1Err := o.archive.ReadBars1m(symbol, from1m.UnixMilli(), now.UnixMilli())
+	bars10s, s10Err := o.archive.ReadBars10s(symbol, from10s.UnixMilli(), now.UnixMilli())
+	if dailyErr != nil || m1Err != nil || s10Err != nil {
+		slog.Warn("chart history archive read incomplete", "symbol", symbol,
+			"dailyErr", dailyErr, "bars1mErr", m1Err, "bars10sErr", s10Err)
+	}
+	daily = clipBars(daily, fromDaily.UnixMilli(), now.UnixMilli())
+	slog.Info("chart history archive loaded", "symbol", symbol, "daily", len(daily),
+		"bars1m", len(bars1m), "bars10s", len(bars10s))
+
+	type cacheResult struct {
+		bars []feed.Bar
+		err  error
+	}
+	var cached1m, cachedDaily cacheResult
+	cacheStarted := time.Now()
+	if o.tail != nil {
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			cacheCtx, cancel := context.WithTimeout(ctx, focusedCacheTimeout)
+			defer cancel()
+			cached1m.bars, cached1m.err = o.tail.Tail1m(cacheCtx, symbol)
+		}()
+		go func() {
+			defer wg.Done()
+			cacheCtx, cancel := context.WithTimeout(ctx, focusedCacheTimeout)
+			defer cancel()
+			cachedDaily.bars, cachedDaily.err = o.tail.CachedDaily(cacheCtx, symbol)
+		}()
+		wg.Wait()
+	}
+	slog.Info("chart history OpenD caches read", "symbol", symbol,
+		"bars1m", len(cached1m.bars), "daily", len(cachedDaily.bars),
+		"elapsed", time.Since(cacheStarted).Round(time.Millisecond),
+		"bars1mErr", cached1m.err, "dailyErr", cachedDaily.err)
+	if cached1m.err == nil {
+		o.archiveCache(symbol, "1m", cached1m.bars)
+		bars1m = append(bars1m, clipBars(cached1m.bars, from1m.UnixMilli(), now.UnixMilli())...)
+	}
+	if cachedDaily.err == nil {
+		o.archiveCache(symbol, "1d", cachedDaily.bars)
+		daily = append(daily, clipBars(cachedDaily.bars, fromDaily.UnixMilli(), now.UnixMilli())...)
+	}
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	o.seeder.SeedChartHistory(symbol, daily, bars1m, bars10s)
+	return nil
+}
+
+func clipBars(bars []feed.Bar, fromMs, toMs int64) []feed.Bar {
+	out := bars[:0]
+	for _, b := range bars {
+		if b.BucketMs >= fromMs && b.BucketMs <= toMs {
+			out = append(out, b)
+		}
+	}
+	return out
+}
+
+func (o *Orchestrator) archiveCache(symbol, timeframe string, bars []feed.Bar) {
+	if len(bars) == 0 {
+		return
+	}
+	if a, ok := o.archive.(rangeArchive); ok {
+		if err := a.ArchiveRange(symbol, timeframe, bars[0].BucketMs, bars[len(bars)-1].BucketMs, bars); err != nil {
+			slog.Warn("chart history cache archive failed", "symbol", symbol, "timeframe", timeframe, "err", err)
+		}
+	} else if timeframe == "1m" {
+		o.archive1m(bars)
+	} else {
+		o.archiveDailyBars(bars)
+	}
 }
 
 func (o *Orchestrator) symbolWarmLock(symbol string) *sync.Mutex {
@@ -211,25 +306,21 @@ func (o *Orchestrator) RefreshDaily(ctx context.Context, symbol string) error {
 	lock.Lock()
 	defer lock.Unlock()
 	select {
-	case o.sem <- struct{}{}:
-		defer func() { <-o.sem }()
+	case o.archiveSem <- struct{}{}:
+		defer func() { <-o.archiveSem }()
 	case <-ctx.Done():
 		return ctx.Err()
 	}
 	return o.fillDailyArchiveOnly(ctx, symbol, dailyFloor, completedDailyTo(o.clk.Now()), true)
 }
 
-func (o *Orchestrator) warmDepth(ctx context.Context, symbol string, days int) error {
+func (o *Orchestrator) warmArchive(ctx context.Context, symbol string, days int) error {
 	now := o.clk.Now()
-	if days >= o.cfg.IntradayDays {
-		o.fastArchiveFirstPaint(ctx, symbol)
-		return o.warmFocused(ctx, symbol, days, now)
-	}
 	remaining := days
 	to := completed1mTo(now)
 	var intradayErr error
 	for remaining > 0 {
-		step := warmSegmentTradingDays
+		step := warmSegmentDays
 		if remaining < step {
 			step = remaining
 		}
@@ -241,78 +332,12 @@ func (o *Orchestrator) warmDepth(ctx context.Context, symbol string, days int) e
 		to = from
 		remaining -= step
 	}
-	dailyErr := o.fillDailyArchiveOnly(ctx, symbol, dailyFloor, completedDailyTo(now), false)
+	dailyErr := o.fillDailyArchiveOnly(ctx, symbol, o.dailyFrom(now), completedDailyTo(now), false)
 	if intradayErr != nil || dailyErr != nil {
 		return errors.Join(intradayErr, dailyErr)
 	}
 	o.noteBackfilled(symbol, intradayFrom(now, days))
 	return nil
-}
-
-// warmFocused establishes OpenD's seams before optional external providers
-// fill only the older, still-uncovered ranges.
-func (o *Orchestrator) warmFocused(ctx context.Context, symbol string, days int, now time.Time) error {
-	intradayTo := completed1mTo(now)
-	dailyTo := completedDailyTo(now)
-	if oldest, ok, err := o.cache1m(ctx, symbol); err != nil {
-		slog.Warn("history warm: OpenD 1m cache unavailable", "symbol", symbol, "err", err)
-	} else if ok {
-		intradayTo = time.UnixMilli(oldest - 1)
-	}
-	if oldest, ok, err := o.cacheDaily(ctx, symbol); err != nil {
-		slog.Warn("history warm: OpenD daily cache unavailable", "symbol", symbol, "err", err)
-	} else if ok {
-		dailyTo = time.UnixMilli(oldest - 1)
-	}
-	intradayFloor := intradayFrom(intradayTo.Add(time.Millisecond), days)
-	intradayErr := o.fill1mArchiveOnly(ctx, symbol, intradayFloor, intradayTo)
-	dailyErr := o.fillDailyArchiveOnly(ctx, symbol, dailyFloor, dailyTo, false)
-	if intradayErr == nil {
-		o.noteBackfilled(symbol, intradayFloor)
-	}
-	return errors.Join(intradayErr, dailyErr)
-}
-
-func (o *Orchestrator) cache1m(ctx context.Context, symbol string) (int64, bool, error) {
-	if o.tail == nil {
-		return 0, false, nil
-	}
-	cacheCtx, cancel := context.WithTimeout(ctx, focusedCacheTimeout)
-	defer cancel()
-	bars, err := o.tail.Tail1m(cacheCtx, symbol)
-	return o.archiveAndSeedCache(ctx, symbol, "1m", bars, err)
-}
-
-func (o *Orchestrator) cacheDaily(ctx context.Context, symbol string) (int64, bool, error) {
-	if o.tail == nil {
-		return 0, false, nil
-	}
-	cacheCtx, cancel := context.WithTimeout(ctx, focusedCacheTimeout)
-	defer cancel()
-	bars, err := o.tail.CachedDaily(cacheCtx, symbol)
-	return o.archiveAndSeedCache(ctx, symbol, "1d", bars, err)
-}
-
-func (o *Orchestrator) archiveAndSeedCache(ctx context.Context, symbol, timeframe string, bars []feed.Bar, err error) (int64, bool, error) {
-	if err != nil || len(bars) == 0 {
-		return 0, false, err
-	}
-	if a, ok := o.archive.(rangeArchive); ok {
-		if err := a.ArchiveRange(symbol, timeframe, bars[0].BucketMs, bars[len(bars)-1].BucketMs, bars); err != nil {
-			return 0, false, err
-		}
-	} else if timeframe == "1m" {
-		o.archive1m(bars)
-	} else {
-		o.archiveDailyBars(bars)
-	}
-	if timeframe == "1m" {
-		seedUnlessCanceled(ctx, bars, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
-	} else {
-		seedUnlessCanceled(ctx, bars, func(b []feed.Bar) { o.seeder.SeedDaily(symbol, b) })
-	}
-	o.syncHistory(symbol)
-	return bars[0].BucketMs, true, nil
 }
 
 // completedDailyTo returns the latest official daily bucket eligible five
@@ -530,6 +555,7 @@ const (
 // a transient one-bar daily snapshot. Later full seeds replace these tails.
 func (o *Orchestrator) fastArchiveFirstPaint(ctx context.Context, symbol string) bool {
 	start := time.Now()
+	now := o.clk.Now()
 	daily, err := o.archive.ReadDailyBars(symbol)
 	if err != nil {
 		slog.Warn("backfill: fast daily archive read failed", "symbol", symbol, "err", err)
@@ -545,7 +571,8 @@ func (o *Orchestrator) fastArchiveFirstPaint(ctx context.Context, symbol string)
 	} else {
 		seedUnlessCanceled(ctx, m1, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
 	}
-	s10, err := o.archive.ReadRecentBars10s(symbol, fastArchiveTailBars)
+	from10s := tenSecondFrom(now, o.cfg.TenSecondDays)
+	s10, err := o.archive.ReadBars10s(symbol, from10s.UnixMilli(), now.UnixMilli())
 	if err != nil {
 		slog.Warn("backfill: fast 10s archive tail read failed", "symbol", symbol, "err", err)
 	} else {
@@ -615,10 +642,15 @@ func (o *Orchestrator) warmStart(ctx context.Context, symbol string, from1m, now
 	} else {
 		seedUnlessCanceled(ctx, m1, func(b []feed.Bar) { o.seeder.SeedHistory1m(symbol, b) })
 	}
-	if s10, err := o.archive.ReadBars10s(symbol, from1m.UnixMilli(), now.UnixMilli()); err != nil {
+	from10s := tenSecondFrom(now, o.cfg.TenSecondDays)
+	started10s := time.Now()
+	if s10, err := o.archive.ReadBars10s(symbol, from10s.UnixMilli(), now.UnixMilli()); err != nil {
 		slog.Warn("backfill: warm-start 10s read failed", "symbol", symbol, "err", err)
 	} else {
+		readElapsed := time.Since(started10s)
 		seedUnlessCanceled(ctx, s10, func(b []feed.Bar) { o.seeder.SeedHistory10s(symbol, b) })
+		slog.Info("10s history archive loaded", "symbol", symbol, "bars", len(s10), "from", from10s,
+			"readElapsed", readElapsed.Round(time.Millisecond), "elapsed", time.Since(started10s).Round(time.Millisecond))
 	}
 }
 
@@ -698,7 +730,7 @@ func (o *Orchestrator) fill1m(ctx context.Context, symbol string, from, to time.
 // returns nil once any provider served (even with zero bars — no data is not a
 // failure), otherwise the last error, so the uihub knows whether to re-arm.
 func (o *Orchestrator) fillDaily(ctx context.Context, symbol string, to time.Time) error {
-	from := dailyFloor
+	from := o.dailyFrom(o.clk.Now())
 	// Seed complete archive first, then synchronize only missing tail. Empty DB
 	// starts at 2016-01-01; internal holes remain separate repair work.
 	if daily, err := o.archive.ReadDailyBars(symbol); err == nil && len(daily) > 0 {

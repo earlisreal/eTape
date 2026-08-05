@@ -426,24 +426,6 @@ type FocusGroupArgs struct {
 	Symbol string `json:"symbol"`
 }
 
-// LoadOlderBarsArgs is the args for the LoadOlderBars command. Daily=true
-// requests the one-shot pre-2016 daily fetch; false deepens the intraday 1m
-// series by one chunk. RequiredStartMs/RequiredEndMs are non-zero when the
-// caller demands a specific range (viewport-first lazy-load); absent (both
-// zero) means "fill as much as possible" (deep-backfill path).
-type LoadOlderBarsArgs struct {
-	Symbol          string `json:"symbol"`
-	Daily           bool   `json:"daily"`
-	RequiredStartMs int64  `json:"requiredStartMs"`
-	RequiredEndMs   int64  `json:"requiredEndMs"`
-}
-
-// LoadOlderResult is the deferred-ack Value for LoadOlderBars.
-type LoadOlderResult struct {
-	Added     int  `json:"added"`
-	Exhausted bool `json:"exhausted"`
-}
-
 // QueryChartWindowArgs selects either an exact half-open UTC range or latest
 // TailBars bars. Exactly one mode must be supplied.
 type QueryChartWindowArgs struct {

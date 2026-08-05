@@ -10,6 +10,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/md"
+	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
 
 type spyHubFeed struct {
@@ -194,7 +195,11 @@ func TestHubDemand_WatchPromotesToDeepHistory(t *testing.T) {
 	h.SetFeed(&spyHubFeed{})
 	var mu sync.Mutex
 	var days []int
-	h.SetHistoryWarm(func(_ string, d int, _ func(bool)) {
+	h.SetHistoryWarm(func(_ string, _ func(bool)) {
+		mu.Lock()
+		days = append(days, 70)
+		mu.Unlock()
+	}, func(_ string, d int, _ func(bool)) {
 		mu.Lock()
 		days = append(days, d)
 		mu.Unlock()
@@ -249,6 +254,23 @@ func TestHubDemand_NilBackfillNoPanic(t *testing.T) {
 	sf.mu.Unlock()
 	if n != 1 {
 		t.Fatalf("feed.Ensure calls = %d, want 1 (demand path must work without a backfill trigger)", n)
+	}
+}
+
+func TestHubDemand_FocusedWithoutBackfillEmitsChartReady(t *testing.T) {
+	h, cancel := runHub(t)
+	defer cancel()
+	c := &fakeClient{nid: 9}
+	h.Register(c)
+	h.EnsureDemand(9, feed.ChartDemand("chart", "US.AAPL"))
+	h.sync()
+	frames := h.m.snapshotFrames(wsmsg.TopicSysEvents)
+	if len(frames) != 1 {
+		t.Fatalf("sys.events frames=%d, want immediate chart-ready", len(frames))
+	}
+	events, ok := frames[0].Payload.([]wsmsg.SysEvent)
+	if !ok || len(events) != 1 || events[0].Kind != "chart-ready" || events[0].Detail != "US.AAPL" {
+		t.Fatalf("event=%+v, want chart-ready US.AAPL", frames[0].Payload)
 	}
 }
 
@@ -364,9 +386,17 @@ func TestHubResyncRearmsOnlyUnbackfilledChartSymbols(t *testing.T) {
 	h.sync()
 
 	got = bf.snapshot()
-	if len(got) != 3 || got[2] != "US.AAPL" {
-		t.Fatalf("resync must re-arm only the still-unbackfilled chart symbol: triggers = %v, want a 3rd AAPL retry", got)
+	if len(got) != 4 || countStrings(got)["US.AAPL"] != 2 || countStrings(got)["US.MSFT"] != 2 {
+		t.Fatalf("resync must refresh each focused chart: triggers = %v", got)
 	}
+}
+
+func countStrings(values []string) map[string]int {
+	out := map[string]int{}
+	for _, value := range values {
+		out[value]++
+	}
+	return out
 }
 
 // TestHubResyncNoopWithoutBackfill confirms a resync with no backfill fn

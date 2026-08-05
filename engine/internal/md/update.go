@@ -69,9 +69,13 @@ type ConnUpdate struct{ Up bool }
 // ResyncedUpdate passes through a completed reconnect + resubscribe cycle.
 type ResyncedUpdate struct{}
 
-// HistoryReadyUpdate is ordered after all bar and indicator reseed updates
-// for one synchronization job.
-type HistoryReadyUpdate struct{ Symbol string }
+// HistoryReadyUpdate is ordered after all bar and indicator reseed updates.
+// Prepared marks the archive+OpenD snapshot barrier; feed/indicator seeds leave
+// it false so the UI cannot mistake them for the one symbol-open snapshot.
+type HistoryReadyUpdate struct {
+	Symbol   string
+	Prepared bool
+}
 
 func (QuoteUpdate) isUpdate()        {}
 func (BookUpdate) isUpdate()         {}

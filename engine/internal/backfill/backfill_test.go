@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,13 +15,31 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
-func TestIntradayFromSkipsWeekends(t *testing.T) {
+func TestIntradayFromUsesCalendarDays(t *testing.T) {
 	now := time.Date(2026, 7, 8, 12, 0, 0, 0, session.Loc())
 	if got, want := intradayFrom(now, 1), time.Date(2026, 7, 7, 0, 0, 0, 0, session.Loc()); !got.Equal(want) {
 		t.Fatalf("intradayFrom(1) = %s, want %s", got, want)
 	}
-	if got, want := intradayFrom(now, 3), time.Date(2026, 7, 2, 0, 0, 0, 0, session.Loc()); !got.Equal(want) {
+	if got, want := intradayFrom(now, 3), time.Date(2026, 7, 5, 0, 0, 0, 0, session.Loc()); !got.Equal(want) {
 		t.Fatalf("intradayFrom(3) = %s, want %s", got, want)
+	}
+}
+
+func TestTenSecondFromUsesTradingCycleOrCalendarDays(t *testing.T) {
+	now := time.Date(2026, 7, 8, 12, 0, 0, 0, session.Loc())
+	if got, want := tenSecondFrom(now, 0), time.Date(2026, 7, 7, 16, 0, 0, 0, session.Loc()); !got.Equal(want) {
+		t.Fatalf("tenSecondFrom(0) = %s, want %s", got, want)
+	}
+	if got, want := tenSecondFrom(now, 2), time.Date(2026, 7, 6, 0, 0, 0, 0, session.Loc()); !got.Equal(want) {
+		t.Fatalf("tenSecondFrom(2) = %s, want %s", got, want)
+	}
+}
+
+func TestDailyFromUsesCalendarYears(t *testing.T) {
+	o := New(nil, nil, nil, &fakeSeeder{}, &fakeArchive{}, clock.NewFake(fixedNow()), Config{DailyYears: 2})
+	now := time.Date(2026, 8, 5, 12, 0, 0, 0, session.Loc())
+	if got, want := o.dailyFrom(now), time.Date(2024, 8, 5, 12, 0, 0, 0, session.Loc()); !got.Equal(want) {
+		t.Fatalf("dailyFrom(2) = %s, want %s", got, want)
 	}
 }
 
@@ -58,8 +77,8 @@ func TestWarmUsesTieredSegmentsAndDoesNotSeedDeepSeries(t *testing.T) {
 	watchSeed := &fakeSeeder{}
 	watchTail := &fakeTail{}
 	watch := New(chain(watchFetch), chain(watchFetch), watchTail, watchSeed, &fakeArchive{},
-		clock.NewFake(fixedNow()), Config{IntradayDays: 70, Concurrency: 1})
-	if err := watch.Warm(context.Background(), "US.WATCH", 2); err != nil {
+		clock.NewFake(fixedNow()), Config{IntradayDays: 2, Concurrency: 1})
+	if err := watch.WarmArchive(context.Background(), "US.WATCH", 2); err != nil {
 		t.Fatal(err)
 	}
 	if got := watchFetch.m1Calls.Load(); got != 1 {
@@ -72,18 +91,18 @@ func TestWarmUsesTieredSegmentsAndDoesNotSeedDeepSeries(t *testing.T) {
 		t.Fatalf("background warm seeded UI series: hist=%d daily=%d", len(watchSeed.hist), len(watchSeed.daily))
 	}
 
-	deepFetch := &fakeFetcher{}
 	deepTail := &fakeTail{}
-	deep := New(chain(deepFetch), chain(deepFetch), deepTail, &fakeSeeder{}, &fakeArchive{},
-		clock.NewFake(fixedNow()), Config{IntradayDays: 70, Concurrency: 1})
-	if err := deep.Warm(context.Background(), "US.DEEP", 70); err != nil {
+	deepSeed := &fakeSeeder{}
+	deep := New(nil, nil, deepTail, deepSeed, &fakeArchive{},
+		clock.NewFake(fixedNow()), Config{IntradayDays: 2, Concurrency: 1})
+	if err := deep.PrepareChart(context.Background(), "US.DEEP"); err != nil {
 		t.Fatal(err)
-	}
-	if got := deepFetch.m1Calls.Load(); got != 1 {
-		t.Fatalf("deep 1m calls=%d, want one missing-range query", got)
 	}
 	if got := deepTail.calls.Load(); got != 1 {
 		t.Fatalf("deep tail calls=%d, want 1", got)
+	}
+	if !reflect.DeepEqual(deepSeed.calls, []string{"chart"}) {
+		t.Fatalf("focused seed calls=%v, want one bundled chart seed", deepSeed.calls)
 	}
 }
 
@@ -128,7 +147,7 @@ func TestWarmStillLoadsDailyWhenIntradayFails(t *testing.T) {
 	fetch := &fakeFetcher{mErr: errors.New("1m unavailable")}
 	o := New(chain(fetch), chain(fetch), nil, &fakeSeeder{}, &fakeArchive{},
 		clock.NewFake(fixedNow()), Config{IntradayDays: 70, Concurrency: 1})
-	if err := o.Warm(context.Background(), "US.WATCH", 2); err == nil {
+	if err := o.WarmArchive(context.Background(), "US.WATCH", 2); err == nil {
 		t.Fatal("Warm error=nil, want intraday failure")
 	}
 	if got := fetch.dCalls.Load(); got != 1 {
@@ -172,10 +191,10 @@ func (f *fakeFetcher) Intraday1m(_ context.Context, _ string, _, _ time.Time) ([
 }
 
 type fakeTail struct {
-	bars, daily       []feed.Bar
-	err, dailyErr     error
-	block1m           bool
-	calls, dailyCalls atomic.Int32
+	bars, daily         []feed.Bar
+	err, dailyErr       error
+	block1m, blockDaily bool
+	calls, dailyCalls   atomic.Int32
 }
 
 func (t *fakeTail) Tail1m(ctx context.Context, _ string) ([]feed.Bar, error) {
@@ -186,25 +205,88 @@ func (t *fakeTail) Tail1m(ctx context.Context, _ string) ([]feed.Bar, error) {
 	}
 	return t.bars, t.err
 }
-func (t *fakeTail) CachedDaily(_ context.Context, _ string) ([]feed.Bar, error) {
+
+func (t *fakeTail) CachedDaily(ctx context.Context, _ string) ([]feed.Bar, error) {
 	t.dailyCalls.Add(1)
+	if t.blockDaily {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return t.daily, t.dailyErr
 }
 
-func TestFocusedCacheTimeoutContinuesFallbacks(t *testing.T) {
+func TestFocusedCacheTimeoutReadsCachesConcurrently(t *testing.T) {
 	oldTimeout := focusedCacheTimeout
 	focusedCacheTimeout = time.Millisecond
 	defer func() { focusedCacheTimeout = oldTimeout }()
 
-	tail := &fakeTail{block1m: true, daily: []feed.Bar{bar(dailyFloor.AddDate(1, 0, 0).UnixMilli())}}
-	fetch := &fakeFetcher{}
-	o := New(chain(fetch), chain(fetch), tail, &fakeSeeder{}, &fakeArchive{},
+	focusedCacheTimeout = 30 * time.Millisecond
+	tail := &fakeTail{block1m: true, blockDaily: true}
+	o := New(nil, nil, tail, &fakeSeeder{}, &fakeArchive{},
 		clock.NewFake(fixedNow()), Config{IntradayDays: 70, Concurrency: 1})
-	if err := o.Warm(context.Background(), "US.AAPL", 70); err != nil {
+	started := time.Now()
+	if err := o.PrepareChart(context.Background(), "US.AAPL"); err != nil {
 		t.Fatal(err)
 	}
-	if tail.dailyCalls.Load() != 1 || fetch.m1Calls.Load() != 1 || fetch.dCalls.Load() != 1 {
-		t.Fatalf("calls daily-cache/1m/daily = %d/%d/%d, want 1/1/1", tail.dailyCalls.Load(), fetch.m1Calls.Load(), fetch.dCalls.Load())
+	if elapsed := time.Since(started); elapsed >= 55*time.Millisecond {
+		t.Fatalf("parallel cache wait=%s, want one ~30ms timeout", elapsed)
+	}
+	if tail.calls.Load() != 1 || tail.dailyCalls.Load() != 1 {
+		t.Fatalf("cache calls 1m/daily = %d/%d, want 1/1", tail.calls.Load(), tail.dailyCalls.Load())
+	}
+}
+
+func TestPrepareChartClipsDailyArchiveBeforeCore(t *testing.T) {
+	now := fixedNow()
+	seed := &fakeSeeder{}
+	o := New(nil, nil, nil, seed, &fakeArchive{daily: []feed.Bar{
+		bar(now.AddDate(-3, 0, 0).UnixMilli()),
+		bar(now.AddDate(0, -6, 0).UnixMilli()),
+	}}, clock.NewFake(now), Config{DailyYears: 1})
+	if err := o.PrepareChart(context.Background(), "US.AAPL"); err != nil {
+		t.Fatal(err)
+	}
+	if len(seed.daily) != 1 || seed.daily[0].BucketMs != now.AddDate(0, -6, 0).UnixMilli() {
+		t.Fatalf("seeded daily=%v, want only configured one-year window", seed.daily)
+	}
+}
+
+type blockingFetcher struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (f *blockingFetcher) Intraday1m(context.Context, string, time.Time, time.Time) ([]feed.Bar, error) {
+	close(f.started)
+	<-f.release
+	return nil, nil
+}
+
+func (*blockingFetcher) DailyBars(context.Context, string, time.Time, time.Time) ([]feed.Bar, error) {
+	return nil, nil
+}
+
+func TestPrepareChartDoesNotWaitForArchiveSlot(t *testing.T) {
+	fetch := &blockingFetcher{started: make(chan struct{}), release: make(chan struct{})}
+	o := New(nil, chain(fetch), nil, &fakeSeeder{}, &fakeArchive{},
+		clock.NewFake(fixedNow()), Config{IntradayDays: 2, Concurrency: 1})
+	warmDone := make(chan error, 1)
+	go func() { warmDone <- o.WarmArchive(context.Background(), "US.SCAN", 2) }()
+	<-fetch.started
+
+	prepared := make(chan error, 1)
+	go func() { prepared <- o.PrepareChart(context.Background(), "US.AAPL") }()
+	select {
+	case err := <-prepared:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("focused preparation waited behind archive semaphore")
+	}
+	close(fetch.release)
+	if err := <-warmDone; err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -212,8 +294,8 @@ func TestFocusedIntradayFailureDoesNotAdvanceWatermark(t *testing.T) {
 	fetch := &fakeFetcher{mErr: errors.New("1m unavailable")}
 	o := New(chain(fetch), chain(fetch), nil, &fakeSeeder{}, &fakeArchive{},
 		clock.NewFake(fixedNow()), Config{IntradayDays: 70, Concurrency: 1})
-	if err := o.Warm(context.Background(), "US.AAPL", 70); err == nil {
-		t.Fatal("Warm error=nil, want intraday failure")
+	if err := o.WarmArchive(context.Background(), "US.AAPL", 70); err == nil {
+		t.Fatal("WarmArchive error=nil, want intraday failure")
 	}
 	o.mu.Lock()
 	watermark := o.oldest1m["US.AAPL"]
@@ -261,6 +343,15 @@ func (s *fakeSeeder) SeedHistory1m(_ string, b []feed.Bar) {
 	defer s.mu.Unlock()
 	s.hist = append(s.hist, b...)
 	s.calls = append(s.calls, "hist")
+}
+func (s *fakeSeeder) SeedChartHistory(_ string, daily, bars1m, bars10s []feed.Bar) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.daily = append(s.daily, daily...)
+	s.hist = append(s.hist, bars1m...)
+	s.hist10s = append(s.hist10s, bars10s...)
+	s.calls = append(s.calls, "chart")
+	s.syncs++
 }
 func (s *fakeSeeder) SeedOlder1m(_ string, b []feed.Bar) {
 	s.mu.Lock()
