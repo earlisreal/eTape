@@ -251,7 +251,7 @@ function StatsStrip({
 // ---- Positions table (folded from PositionsPanel, now sortable via T16) ----
 
 function PositionsTable({
-  stores, commands, oc, palette, config, onConfigChange, venue, extBufferPct,
+  stores, commands, oc, palette, config, onConfigChange, venue, extBufferPct, onOpenSymbol,
 }: {
   stores: PanelProps["stores"];
   commands: PanelProps["commands"];
@@ -261,11 +261,14 @@ function PositionsTable({
   onConfigChange: PanelProps["onConfigChange"];
   venue: string;
   extBufferPct: number;
+  onOpenSymbol: (symbol: string) => void;
 }): JSX.Element {
   const toast = useToasts();
   const rows0 = stores.exec.positions().filter((p) => p.venue === venue && p.qty !== 0); // venue-scoped; NET (venue===null) rows drop out
   const status = stores.exec.status();
   const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
+  const [selectedPosition, setSelectedPosition] = useState<string | null>(null);
+  const [hoveredPosition, setHoveredPosition] = useState<string | null>(null);
   const masterArmed = !!status?.masterArmed;
 
   const rows = useMemo(() => sortRows(rows0, sort, {
@@ -321,11 +324,19 @@ function PositionsTable({
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => {
+            {rows.map((r) => {
               const net = r.venue === null;
+              const positionKey = `${r.venue ?? "NET"}:${r.symbol}`;
+              const selected = positionKey === selectedPosition;
               return (
-                <tr key={`${r.venue ?? "NET"}-${r.symbol}-${i}`} data-testid={net ? "pos-net" : undefined}
-                  style={{ textAlign: "right", borderTop: `1px solid ${palette.border}`, fontWeight: net ? 700 : 400 }}>
+                <tr key={positionKey} data-testid={net ? "pos-net" : `pos-row-${r.venue}-${r.symbol}`} aria-selected={selected}
+                  onClick={() => setSelectedPosition(positionKey)}
+                  onDoubleClick={() => onOpenSymbol(r.symbol)}
+                  onMouseEnter={() => setHoveredPosition(positionKey)}
+                  onMouseLeave={() => setHoveredPosition((key) => key === positionKey ? null : key)}
+                  style={{ cursor: "pointer", textAlign: "right", userSelect: "none", borderTop: `1px solid ${palette.border}`, fontWeight: net ? 700 : 400,
+                    background: selected ? "rgba(154,106,27,.16)" : hoveredPosition === positionKey ? "rgba(154,106,27,.06)" : "transparent",
+                    boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : "none", transition: "background 120ms ease" }}>
                   <td style={{ textAlign: "left", padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
                   <td style={{ color: palette.textMuted }}>{net ? "NET" : r.venue}</td>
                   <td style={{ color: r.qty >= 0 ? palette.up : palette.down }}>{formatSize(r.qty)}</td>
@@ -338,7 +349,7 @@ function PositionsTable({
                   <td>{net ? null : (
                     <HoverButton data-testid={`flatten-${r.venue}-${r.symbol}`} data-armed={masterArmed}
                       title={masterArmed ? "Flatten position" : "Master disarmed — flatten still allowed (exposure-reducing)"}
-                      onClick={() => flatten(r)}
+                      onClick={(e) => { e.stopPropagation(); flatten(r); }} onDoubleClick={(e) => e.stopPropagation()}
                       style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Flatten</HoverButton>
                   )}</td>
                 </tr>
@@ -397,6 +408,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   // Force re-render on quote updates so live Unrl P&L refreshes.
   useSyncExternalStore((cb) => stores.quote.subscribe(cb), () => stores.quote.getRev());
   const group = groupProp ?? config.group;
+  const openPositionSymbol = (symbol: string) => linkGroups.focus(group ?? "green", symbol);
   const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
   const { config: orderConfig } = useOrderConfig();
   const extBufferPct = orderConfig.extHoursMarketBufferPct ?? 1;
@@ -498,7 +510,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
             </div>
           )}
         </div>
-        {activeTab === "positions" ? <PositionsTable stores={stores} commands={commands} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} extBufferPct={extBufferPct} />
+        {activeTab === "positions" ? <PositionsTable stores={stores} commands={commands} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} extBufferPct={extBufferPct} onOpenSymbol={openPositionSymbol} />
           : activeTab === "history" ? <TradeHistoryTable stores={stores} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} />
           : <FillsTable stores={stores} palette={palette} venue={venue} cycleStartMs={fillCycleStart} config={config} onConfigChange={onConfigChange} />}
       </div>

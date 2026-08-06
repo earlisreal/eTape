@@ -12,7 +12,7 @@ import type { AckMsg, AccountRow, ClosedTradeRow, ExecStatus, Order, PositionRow
 import type { PanelProps } from "./registry";
 import type { LinkGroup } from "../linkGroups";
 
-function mkProps(group: LinkGroup = null) {
+function mkProps(group: LinkGroup = null, groupProp?: LinkGroup) {
   const stores = makeStores();
   const sent: Array<{ name: string; args: unknown }> = [];
   const configChanges: Array<Record<string, unknown>> = [];
@@ -21,12 +21,15 @@ function mkProps(group: LinkGroup = null) {
     sendQuery: vi.fn(async () => []),
   };
   const linkGroups = new LinkGroups(new FakeBus(new FakeBusHub()), () => {});
+  const focus = vi.fn();
+  vi.spyOn(linkGroups, "focus").mockImplementation(focus);
   const props = {
     config: { id: "t-account", panelId: "account", group, settings: {} },
     stores, scheduler: {} as never, width: 800, height: 400, linkGroups, commands,
+    group: groupProp,
     onConfigChange: (s: Record<string, unknown>) => configChanges.push(s),
   } as PanelProps;
-  return { props, stores, sent, configChanges, linkGroups };
+  return { props, stores, sent, configChanges, linkGroups, focus };
 }
 const acct = (venue: string, o: Partial<AccountRow> = {}): AccountRow => ({ venue, equity: 100, buyingPower: 400, availableCash: 50, sodEquity: 100, realized: 0, dayPnl: 0, leverage: 4, tsMs: 1, cycleStartMs: 0, cycleRealized: 0, ...o });
 const status = (masterArmed: boolean, ...venueIds: string[]): ExecStatus => ({
@@ -204,9 +207,50 @@ describe("AccountPanel", () => {
     expect(screen.getByText("Positions (1)")).toBeTruthy();
   });
 
+  it("selects positions on click and focuses their full symbol on double-click", () => {
+    const { props, stores, focus, linkGroups } = mkProps("blue");
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false) });
+      linkGroups.focusVenue("blue", "alpaca-paper");
+    });
+    wrap(props);
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({ symbol: "US.AAPL" }), pos({ symbol: "US.MSFT" })] }));
+    const aapl = screen.getByTestId("pos-row-alpaca-paper-US.AAPL");
+    fireEvent.click(aapl);
+    expect(aapl.getAttribute("aria-selected")).toBe("true");
+    expect(focus).not.toHaveBeenCalled();
+    fireEvent.doubleClick(screen.getByTestId("pos-row-alpaca-paper-US.MSFT"));
+    expect(focus).toHaveBeenCalledWith("blue", "US.MSFT");
+    expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the live group prop instead of frozen config group", () => {
+    const { props, stores, focus, linkGroups } = mkProps("green", "blue");
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false) });
+      linkGroups.focusVenue("blue", "alpaca-paper");
+    });
+    wrap(props);
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({})] }));
+    fireEvent.doubleClick(screen.getByTestId("pos-row-alpaca-paper-US.AAPL"));
+    expect(focus).toHaveBeenCalledWith("blue", "US.AAPL");
+  });
+
+  it("falls back to green when ungrouped", () => {
+    const { props, stores, focus, linkGroups } = mkProps(null);
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false) });
+      linkGroups.focusVenue("green", "alpaca-paper");
+    });
+    wrap(props);
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({})] }));
+    fireEvent.doubleClick(screen.getByTestId("pos-row-alpaca-paper-US.AAPL"));
+    expect(focus).toHaveBeenCalledWith("green", "US.AAPL");
+  });
+
   // --- ported from PositionsPanel.test.tsx ---
   it("flatten on a long row submits a SELL for the full qty (priced from the quote)", () => {
-    const { props, stores, sent } = mkProps();
+    const { props, stores, sent, focus } = mkProps();
     wrap(props);
     act(() => {
       stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
@@ -219,6 +263,7 @@ describe("AccountPanel", () => {
     expect(args.side).toBe("SELL");
     expect(args.qty).toBe(300);
     expect(args.venue).toBe("alpaca-paper");
+    expect(focus).not.toHaveBeenCalled();
   });
   it("annotates Flatten with master's armed state but keeps it clickable when disarmed", () => {
     const { props, stores, sent } = mkProps();
