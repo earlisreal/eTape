@@ -411,6 +411,37 @@ describe("ChartPanel", () => {
     expect(chartQueries).not.toContain("D");
   });
 
+  it("does not reset a loaded VWAP when the linked group focuses the displayed symbol", async () => {
+    const key = "c1:VWAP-0";
+    const point = { timeMs: 1, value: 100.5 };
+    const { stores, commands, linkGroups } = renderChart("c1", undefined, undefined, {
+      timeframe: "D",
+      indicators: [{ instanceId: key, type: "VWAP", params: {} }],
+    }, {
+      symbol: "US.AAPL", timeframe: "D", fromMs: 1, toMs: 2, bars: [],
+      indicators: [{ seriesKey: key, points: [point] }], historyRevision: 1,
+    });
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const existingPoints = stores.indicators.series(key);
+    expect(existingPoints).toEqual([point]);
+    const commandCalls = commands.sendCommand.mock.calls as unknown[][];
+    const subscribeCount = commandCalls.filter(([name]) => name === "SubscribeIndicator").length;
+    commands.sendQuery.mockClear();
+
+    act(() => linkGroups.focus("green", "US.AAPL"));
+    await act(async () => { await Promise.resolve(); });
+    act(() => linkGroups.focus("green", "US.AAPL"));
+    await act(async () => { await Promise.resolve(); });
+
+    expect(stores.indicators.series(key)).toEqual(existingPoints);
+    expect(commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow")).toHaveLength(0);
+    expect((commands.sendCommand.mock.calls as unknown[][]).filter(([name]) => name === "SubscribeIndicator")).toHaveLength(subscribeCount);
+    expect(chartApi.remove).not.toHaveBeenCalled();
+  });
+
   it("keeps bars and indicators visible beyond the latest query boundary", async () => {
     const fromMs = Date.parse("2026-07-09T13:30:00.000Z");
     const toMs = fromMs + 1;
@@ -505,7 +536,7 @@ describe("ChartPanel", () => {
     expect(stores.indicators.series(key)).toEqual([{ timeMs: 2, value: 4.25 }]);
   });
 
-  it("keeps the displayed group symbol when pinned", async () => {
+  it("keeps the displayed group symbol without reloading when pinned", async () => {
     const { commands, linkGroups, rerenderGroup } = renderChart();
     act(() => linkGroups.focus("green", "US.NVDA"));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
@@ -514,7 +545,7 @@ describe("ChartPanel", () => {
     rerenderGroup(null);
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
-    expect(commands.sendQuery).toHaveBeenCalledWith("QueryChartWindow", expect.objectContaining({ symbol: "US.NVDA" }));
+    expect(commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow")).toHaveLength(0);
   });
 
   it("loads a newly typed pinned symbol without remounting", async () => {

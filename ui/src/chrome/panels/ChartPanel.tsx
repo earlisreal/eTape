@@ -319,6 +319,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
 
     let currentSymbol = linkGroups.symbolFor(groupRef.current) ?? symbol;
     let lastOpenedSymbol = "";
+    let lastOpenedTimeframe = "";
 
     const interaction = new DrawingInteraction(
       host,
@@ -358,9 +359,16 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       // screen. PanelFrame persists that snapshot for the next workspace load.
       const linkedSymbol = linkGroups.symbolFor(groupRef.current);
       if (linkedSymbol) ownSymbolRef.current = linkedSymbol;
-      currentSymbol = linkedSymbol ?? ownSymbolRef.current;
-      const symbolChanged = currentSymbol !== lastOpenedSymbol;
-      lastOpenedSymbol = currentSymbol;
+      const nextSymbol = linkedSymbol ?? ownSymbolRef.current;
+      const nextTimeframe = tfRef.current;
+      const symbolChanged = nextSymbol !== lastOpenedSymbol;
+      const timeframeChanged = nextTimeframe !== lastOpenedTimeframe;
+      // Link-group notifications can repeat the displayed symbol. Reloading it
+      // would reset live indicator series such as VWAP.
+      if (initialized && !symbolChanged && !timeframeChanged) return;
+      currentSymbol = nextSymbol;
+      lastOpenedSymbol = nextSymbol;
+      lastOpenedTimeframe = nextTimeframe;
       const timing = linkGroups.focusTimingFor(groupRef.current, currentSymbol);
       if (timing && timing.sequence > lastFirstPaintSequence) {
         pendingFirstPaint = { ...timing, timeframe: tfRef.current };
@@ -377,7 +385,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       interactionRef.current?.onSymbolChanged();
       setChartSymbol(currentSymbol);
       forceRepaintRef.current = true;
-	  if (!symbolChanged) {
+	  if (!symbolChanged && timeframeChanged) {
         void querySnapshot(); // timeframe-only switch: engine mirror is ready
       }
     };
