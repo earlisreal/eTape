@@ -189,19 +189,19 @@ func TestHubDemand_WatchAndFocusedTriggerBackfillOnce(t *testing.T) {
 	}
 }
 
-func TestHubDemand_WatchPromotesToDeepHistory(t *testing.T) {
+func TestHubDemand_WatchThenFocusedUsesSeparateHistoryRoles(t *testing.T) {
 	h, cancel := runHub(t)
 	defer cancel()
 	h.SetFeed(&spyHubFeed{})
 	var mu sync.Mutex
-	var days []int
+	var roles []string
 	h.SetHistoryWarm(func(_ string, _ func(bool)) {
 		mu.Lock()
-		days = append(days, 70)
+		roles = append(roles, "prepare")
 		mu.Unlock()
-	}, func(_ string, d int, _ func(bool)) {
+	}, func(_ string, _ func(bool)) {
 		mu.Lock()
-		days = append(days, d)
+		roles = append(roles, "warm")
 		mu.Unlock()
 	})
 	c := &fakeClient{nid: 8}
@@ -211,10 +211,10 @@ func TestHubDemand_WatchPromotesToDeepHistory(t *testing.T) {
 	h.EnsureDemand(8, feed.ChartDemand("chart", "US.NFLX"))
 	h.sync()
 	mu.Lock()
-	got := append([]int(nil), days...)
+	got := append([]string(nil), roles...)
 	mu.Unlock()
-	if !reflect.DeepEqual(got, []int{2, 70}) {
-		t.Fatalf("history tiers=%v, want watch then deep promotion", got)
+	if !reflect.DeepEqual(got, []string{"warm", "prepare"}) {
+		t.Fatalf("history roles=%v, want watch warm then focused preparation", got)
 	}
 }
 

@@ -583,9 +583,9 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	hub.SetKnownSymbol(st.HasArchivedSymbol)
 
 	var prepareChart func(sym string, done func(ok bool))
-	var warmArchive func(sym string, days int, done func(ok bool))
+	var warmArchive func(sym string, done func(ok bool))
 	var refreshDaily func(sym string)
-	var warmSeen sync.Map // symbol -> deepest requested days; retained for after-close daily repair
+	var warmSeen sync.Map // symbol set retained for after-close daily repair
 	if cfg.Backfill.Enabled || *demo {
 		// demo: dailyChain/intradayChain/tail are all nil here, so this is
 		// a chain-less orchestrator -- walkChain over a nil chain returns
@@ -607,7 +607,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			},
 		)
 		prepareChart = func(sym string, done func(ok bool)) {
-			recordWarmDepth(&warmSeen, sym, cfg.Backfill.IntradayDays)
+			warmSeen.Store(sym, struct{}{})
 			backfillWG.Add(1)
 			go func() {
 				defer backfillWG.Done()
@@ -616,23 +616,19 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 					done(err == nil)
 				}
 				if err == nil {
-					err = orch.WarmArchive(ctx, sym, cfg.Backfill.IntradayDays)
+					err = orch.WarmArchive(ctx, sym)
 				}
 				if err != nil && ctx.Err() == nil {
 					log.Warn("focused history warm failed", "symbol", sym, "err", err)
 				}
 			}()
 		}
-		warmArchive = func(sym string, days int, done func(ok bool)) {
-			effectiveDays := days
-			if cfg.Backfill.WatchIntradayDays > 0 {
-				effectiveDays = cfg.Backfill.WatchIntradayDays
-			}
-			recordWarmDepth(&warmSeen, sym, effectiveDays)
+		warmArchive = func(sym string, done func(ok bool)) {
+			warmSeen.Store(sym, struct{}{})
 			backfillWG.Add(1)
 			go func() {
 				defer backfillWG.Done()
-				err := orch.WarmArchive(ctx, sym, effectiveDays)
+				err := orch.WarmArchive(ctx, sym)
 				if done != nil {
 					done(err == nil)
 				}
@@ -650,7 +646,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}
 	var backfillOne func(string)
 	if warmArchive != nil {
-		backfillOne = func(sym string) { warmArchive(sym, cfg.Backfill.WatchIntradayDays, nil) }
+		backfillOne = func(sym string) { warmArchive(sym, nil) }
 		scanWG.Add(1)
 		go func() {
 			defer scanWG.Done()
@@ -768,21 +764,6 @@ func uiConnectedWithin(connected <-chan struct{}, grace time.Duration) bool {
 
 func bars10sRetentionCutoff(now time.Time, days int) int64 {
 	return now.AddDate(0, 0, -days).UnixMilli()
-}
-
-func recordWarmDepth(seen *sync.Map, symbol string, days int) {
-	for {
-		cur, ok := seen.Load(symbol)
-		if !ok {
-			if _, loaded := seen.LoadOrStore(symbol, days); !loaded {
-				return
-			}
-			continue
-		}
-		if cur.(int) >= days || seen.CompareAndSwap(symbol, cur, days) {
-			return
-		}
-	}
 }
 
 func runAfterCloseHistoryRefresh(ctx context.Context, seen *sync.Map, refresh func(string)) {

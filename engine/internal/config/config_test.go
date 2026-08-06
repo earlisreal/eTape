@@ -236,7 +236,7 @@ func TestBackfillDefaultsAndOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.Backfill.Enabled || cfg.Backfill.TenSecondDays != 0 || cfg.Backfill.IntradayDays != 70 || cfg.Backfill.WatchIntradayDays != 2 ||
+	if !cfg.Backfill.Enabled || cfg.Backfill.TenSecondDays != 0 || cfg.Backfill.IntradayDays != 70 ||
 		cfg.Backfill.DailyYears != 0 || cfg.Backfill.Concurrency != 3 {
 		t.Fatalf("backfill defaults = %+v", cfg.Backfill)
 	}
@@ -249,7 +249,7 @@ func TestBackfillDefaultsAndOverride(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Backfill.Enabled || cfg.Backfill.TenSecondDays != 3 || cfg.Backfill.IntradayDays != 5 || cfg.Backfill.WatchIntradayDays != 1 || cfg.Backfill.Concurrency != 8 {
+	if cfg.Backfill.Enabled || cfg.Backfill.TenSecondDays != 3 || cfg.Backfill.IntradayDays != 5 || cfg.Backfill.Concurrency != 8 {
 		t.Fatalf("backfill override = %+v", cfg.Backfill)
 	}
 }

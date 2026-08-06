@@ -78,7 +78,7 @@ func TestWarmUsesTieredSegmentsAndDoesNotSeedDeepSeries(t *testing.T) {
 	watchTail := &fakeTail{}
 	watch := New(chain(watchFetch), chain(watchFetch), watchTail, watchSeed, &fakeArchive{},
 		clock.NewFake(fixedNow()), Config{IntradayDays: 2, Concurrency: 1})
-	if err := watch.WarmArchive(context.Background(), "US.WATCH", 2); err != nil {
+	if err := watch.WarmArchive(context.Background(), "US.WATCH"); err != nil {
 		t.Fatal(err)
 	}
 	if got := watchFetch.m1Calls.Load(); got != 1 {
@@ -147,7 +147,7 @@ func TestWarmStillLoadsDailyWhenIntradayFails(t *testing.T) {
 	fetch := &fakeFetcher{mErr: errors.New("1m unavailable")}
 	o := New(chain(fetch), chain(fetch), nil, &fakeSeeder{}, &fakeArchive{},
 		clock.NewFake(fixedNow()), Config{IntradayDays: 70, Concurrency: 1})
-	if err := o.WarmArchive(context.Background(), "US.WATCH", 2); err == nil {
+	if err := o.WarmArchive(context.Background(), "US.WATCH"); err == nil {
 		t.Fatal("Warm error=nil, want intraday failure")
 	}
 	if got := fetch.dCalls.Load(); got != 1 {
@@ -271,7 +271,7 @@ func TestPrepareChartDoesNotWaitForArchiveSlot(t *testing.T) {
 	o := New(nil, chain(fetch), nil, &fakeSeeder{}, &fakeArchive{},
 		clock.NewFake(fixedNow()), Config{IntradayDays: 2, Concurrency: 1})
 	warmDone := make(chan error, 1)
-	go func() { warmDone <- o.WarmArchive(context.Background(), "US.SCAN", 2) }()
+	go func() { warmDone <- o.WarmArchive(context.Background(), "US.SCAN") }()
 	<-fetch.started
 
 	prepared := make(chan error, 1)
@@ -294,7 +294,7 @@ func TestFocusedIntradayFailureDoesNotAdvanceWatermark(t *testing.T) {
 	fetch := &fakeFetcher{mErr: errors.New("1m unavailable")}
 	o := New(chain(fetch), chain(fetch), nil, &fakeSeeder{}, &fakeArchive{},
 		clock.NewFake(fixedNow()), Config{IntradayDays: 70, Concurrency: 1})
-	if err := o.WarmArchive(context.Background(), "US.AAPL", 70); err == nil {
+	if err := o.WarmArchive(context.Background(), "US.AAPL"); err == nil {
 		t.Fatal("WarmArchive error=nil, want intraday failure")
 	}
 	o.mu.Lock()

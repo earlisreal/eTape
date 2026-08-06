@@ -164,12 +164,10 @@ const warmSegmentDays = 10
 
 var focusedCacheTimeout = 3 * time.Second
 
-// WarmArchive fills persistent history only. It never publishes to md.Core.
-func (o *Orchestrator) WarmArchive(ctx context.Context, symbol string, days int) error {
-	if days <= 0 {
-		return nil
-	}
-	_, err, _ := o.warm.Do(fmt.Sprintf("%s|%d", symbol, days), func() (any, error) {
+// WarmArchive fills the configured persistent history only. It never publishes to md.Core.
+func (o *Orchestrator) WarmArchive(ctx context.Context, symbol string) error {
+	days := o.cfg.IntradayDays
+	_, err, _ := o.warm.Do(symbol, func() (any, error) {
 		lock := o.symbolWarmLock(symbol)
 		lock.Lock()
 		defer lock.Unlock()

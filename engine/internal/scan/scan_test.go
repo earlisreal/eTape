@@ -977,8 +977,8 @@ func TestUpdatePoolEnsuresWatchDemandsAndBackfills(t *testing.T) {
 		t.Fatalf("Ensure[0]=%+v, want id scan:US.A", sf.ensured[0])
 	}
 	if len(sf.ensured[0].Subs) != 1 || sf.ensured[0].Subs[0] != feed.SubTicker ||
-		sf.ensured[0].Focused || sf.ensured[0].HistoryDays != 2 {
-		t.Fatalf("pool must use ticker-only 2-day watch shape: %+v", sf.ensured[0])
+		sf.ensured[0].Focused || !sf.ensured[0].WantsHistory {
+		t.Fatalf("pool must use ticker-only archive-warm watch shape: %+v", sf.ensured[0])
 	}
 	if !sf.ensured[0].BackgroundSeed {
 		t.Fatalf("scanner demand must use background seed lane: %+v", sf.ensured[0])

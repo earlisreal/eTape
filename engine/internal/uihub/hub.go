@@ -84,17 +84,15 @@ type dropReport struct {
 // back to Run's own goroutine.
 type backfillResult struct {
 	sym     string
-	days    int
 	focused bool
 	ok      bool
 }
 
-// demandInfo tracks symbol plus requested archive depth so reconnect can re-arm
-// watch (2-day) and chart/focused (70-day) warming at the correct tier.
+// demandInfo tracks the history role so reconnect can re-arm warming.
 type demandInfo struct {
-	symbol      string
-	historyDays int
-	focused     bool
+	symbol       string
+	wantsHistory bool
+	focused      bool
 }
 
 // feedBox lets the (single-write, many-read) feed reference live in an
@@ -106,7 +104,7 @@ type feedBox struct{ f Feed }
 // installed after the Hub is running, so the pointers use atomic publication.
 type backfillBox struct {
 	prepare func(sym string, done func(ok bool))
-	warm    func(sym string, days int, done func(ok bool))
+	warm    func(sym string, done func(ok bool))
 }
 
 type cachedDailyBox struct{ fn func(sym string) }
@@ -163,8 +161,8 @@ type Hub struct {
 	demands         map[uint64]map[string]demandInfo // connID -> demandID -> demandInfo
 	demandLive      map[uint64]bool                  // connID currently registered
 	indicators      map[uint64]map[string]bool       // connID -> instanceIDs owned by that connection
-	warmed          map[string]int                   // symbol -> deepest successful archive target
-	warmInflight    map[string]int                   // symbol -> deepest archive target currently running
+	warmed          map[string]bool                  // symbol -> archive warm succeeded
+	warmInflight    map[string]bool                  // symbol -> archive warm currently running
 	prepareInflight map[string]bool                  // symbol -> focused preparation currently running
 	pendKeep        map[string]staged                // classMDKeep, flushed on md ticker
 	tapePend        map[string][]wsmsg.Tick          // symbol -> accumulated ticks
@@ -206,8 +204,8 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 		demands:            map[uint64]map[string]demandInfo{},
 		demandLive:         map[uint64]bool{},
 		indicators:         map[uint64]map[string]bool{},
-		warmed:             map[string]int{},
-		warmInflight:       map[string]int{},
+		warmed:             map[string]bool{},
+		warmInflight:       map[string]bool{},
 		prepareInflight:    map[string]bool{},
 		pendKeep:           map[string]staged{},
 		tapePend:           map[string][]wsmsg.Tick{},
@@ -302,14 +300,14 @@ func (h *Hub) SetBackfill(fn func(sym string, done func(ok bool))) {
 	}
 	h.backfillSlot.Store(&backfillBox{
 		prepare: fn,
-		warm:    func(sym string, _ int, done func(ok bool)) { fn(sym, done) },
+		warm:    fn,
 	})
 }
 
 // SetHistoryWarm installs explicit focused preparation and archive-only roles.
 func (h *Hub) SetHistoryWarm(
 	prepare func(sym string, done func(ok bool)),
-	warm func(sym string, days int, done func(ok bool)),
+	warm func(sym string, done func(ok bool)),
 ) {
 	if prepare == nil && warm == nil {
 		h.backfillSlot.Store(nil)
@@ -353,9 +351,9 @@ func (h *Hub) SetScanner(c scannerCtl) {
 }
 
 // reportBackfill returns worker completion to Run's own goroutine.
-func (h *Hub) reportBackfill(sym string, days int, focused, ok bool) {
+func (h *Hub) reportBackfill(sym string, focused, ok bool) {
 	select {
-	case h.backfillDoneCh <- backfillResult{sym: sym, days: days, focused: focused, ok: ok}:
+	case h.backfillDoneCh <- backfillResult{sym: sym, focused: focused, ok: ok}:
 	case <-h.closed:
 	}
 }
@@ -612,11 +610,7 @@ func (h *Hub) handleEnsureDemand(r ensureDemandReq) {
 		m = map[string]demandInfo{}
 		h.demands[r.connID] = m
 	}
-	historyDays := r.d.HistoryDays
-	if historyDays == 0 && r.d.WantsHistory {
-		historyDays = 70
-	}
-	m[r.d.ID] = demandInfo{symbol: r.d.Symbol, historyDays: historyDays, focused: r.d.Focused}
+	m[r.d.ID] = demandInfo{symbol: r.d.Symbol, wantsHistory: r.d.WantsHistory, focused: r.d.Focused}
 	if f := h.feed(); f != nil {
 		f.Ensure(r.d)
 	}
@@ -627,11 +621,11 @@ func (h *Hub) handleEnsureDemand(r ensureDemandReq) {
 	}
 	// Focused demands prepare one chart snapshot; watch/scanner demands warm
 	// only the archive. The role comes from Demand.Focused, never day counts.
-	h.triggerBackfill(r.d.Symbol, historyDays, r.d.Focused)
+	h.triggerBackfill(r.d.Symbol, r.d.WantsHistory, r.d.Focused)
 }
 
 // triggerBackfill dispatches an explicit focused or archive-only worker.
-func (h *Hub) triggerBackfill(sym string, days int, focused bool) {
+func (h *Hub) triggerBackfill(sym string, wantsHistory, focused bool) {
 	worker := h.backfill()
 	if focused {
 		if worker == nil || worker.prepare == nil {
@@ -644,14 +638,14 @@ func (h *Hub) triggerBackfill(sym string, days int, focused bool) {
 			return
 		}
 		h.prepareInflight[sym] = true
-		worker.prepare(sym, func(ok bool) { h.reportBackfill(sym, 0, true, ok) })
+		worker.prepare(sym, func(ok bool) { h.reportBackfill(sym, true, ok) })
 		return
 	}
-	if worker == nil || worker.warm == nil || days <= 0 || h.warmed[sym] >= days || h.warmInflight[sym] >= days {
+	if worker == nil || worker.warm == nil || !wantsHistory || h.warmed[sym] || h.warmInflight[sym] {
 		return
 	}
-	h.warmInflight[sym] = days
-	worker.warm(sym, days, func(ok bool) { h.reportBackfill(sym, days, false, ok) })
+	h.warmInflight[sym] = true
+	worker.warm(sym, func(ok bool) { h.reportBackfill(sym, false, ok) })
 }
 
 func (h *Hub) handleChartWindow(r chartWindowReq) {
@@ -697,19 +691,15 @@ func wireBarMs(b wsmsg.Bar) int64 {
 	return t.UnixMilli()
 }
 
-// handleBackfillDone clears focused in-flight state or advances archive depth.
+// handleBackfillDone clears focused in-flight state or records archive success.
 func (h *Hub) handleBackfillDone(r backfillResult) {
 	if r.focused {
 		delete(h.prepareInflight, r.sym)
 		return
 	}
-	if h.warmInflight[r.sym] <= r.days {
-		delete(h.warmInflight, r.sym)
-	}
+	delete(h.warmInflight, r.sym)
 	if r.ok {
-		if h.warmed[r.sym] < r.days {
-			h.warmed[r.sym] = r.days
-		}
+		h.warmed[r.sym] = true
 	}
 }
 
@@ -726,15 +716,14 @@ func (h *Hub) forEachDemand(fn func(demandInfo)) {
 	}
 }
 
-// rearmBackfill re-triggers tiered history warming for every symbol
+// rearmBackfill re-triggers history warming for every symbol
 // currently under a history-bearing demand that hasn't
 // succeeded yet. Called from handleMD on the md.ResyncedUpdate transition --
 // i.e. once OpenD reconnects and resubscribes -- so a symbol whose backfill
 // failed while OpenD was down (or never fired because the app opened before
 // OpenD did) gets a fresh attempt without requiring a UI refresh.
 //
-// Symbols take maximum requested depth across all demands, so map iteration
-// order cannot downgrade a symbol shared by watch and chart panels.
+// Focused demands win over archive-only watch demands for a shared symbol.
 func (h *Hub) rearmBackfill() {
 	if h.backfill() == nil {
 		return // no backfill trigger injected (replay / backfill disabled)
@@ -742,12 +731,12 @@ func (h *Hub) rearmBackfill() {
 	targets := map[string]demandInfo{}
 	h.forEachDemand(func(info demandInfo) {
 		current := targets[info.symbol]
-		if info.focused || (!current.focused && info.historyDays > current.historyDays) {
+		if info.focused || (!current.focused && info.wantsHistory) {
 			targets[info.symbol] = info
 		}
 	})
 	for sym, target := range targets {
-		h.triggerBackfill(sym, target.historyDays, target.focused)
+		h.triggerBackfill(sym, target.wantsHistory, target.focused)
 	}
 }
 

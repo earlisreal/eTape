@@ -12,14 +12,14 @@ func TestDirectionString(t *testing.T) {
 
 func TestDemandProfiles(t *testing.T) {
 	w := WatchDemand("watch-AAPL", "US.AAPL")
-	if w.Focused || len(w.Subs) != 1 || w.HistoryDays != 2 {
-		t.Fatalf("watch profile = %+v, want ticker-only 2-day warm", w)
+	if w.Focused || !w.WantsHistory || len(w.Subs) != 1 {
+		t.Fatalf("watch profile = %+v, want ticker-only archive warm", w)
 	}
 	if w.Subs[0] != SubTicker {
 		t.Fatalf("watch subs = %v, want [SubTicker]", w.Subs)
 	}
 	c := ChartDemand("chart-AAPL", "US.AAPL")
-	if !c.CachedDaily || c.HistoryDays != 70 || len(c.Subs) != 3 || c.Subs[2] != SubKLDay {
+	if !c.CachedDaily || !c.WantsHistory || len(c.Subs) != 3 || c.Subs[2] != SubKLDay {
 		t.Fatalf("chart profile = %+v, want watch subs plus SubKLDay", c)
 	}
 }

@@ -432,7 +432,7 @@ func demandForProfile(id, symbol, profile string) (feed.Demand, bool) {
 		if strings.HasPrefix(symbol, "US.") {
 			subs = append(subs, feed.SubBook)
 		}
-		return feed.Demand{ID: id, Symbol: symbol, Subs: subs, Focused: true, HistoryDays: 70, WantsHistory: true, CachedDaily: true}, true
+		return feed.Demand{ID: id, Symbol: symbol, Subs: subs, Focused: true, WantsHistory: true, CachedDaily: true}, true
 	case "interest":
 		return feed.Demand{ID: id, Symbol: symbol}, true
 	default:

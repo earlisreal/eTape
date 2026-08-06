@@ -99,24 +99,23 @@ type Demand struct {
 	Symbol         string
 	Subs           []SubType
 	Focused        bool // focused symbols survive LRU eviction under quota pressure
-	HistoryDays    int  // background 1m archive target; 0 disables history warming
-	WantsHistory   bool // deprecated compatibility flag; use HistoryDays
+	WantsHistory   bool // request archive warming or focused history preparation
 	BackgroundSeed bool // cache seed may wait behind interactive panel loads
 	CachedDaily    bool // chart demand: seed empty daily archive from OpenD cache
 }
 
-// WatchDemand is the tape/scanner profile: live prints plus a small archive
-// warm, without a permanent K_1M subscription.
+// WatchDemand is the tape/scanner profile: live prints plus archive warming,
+// without a permanent K_1M subscription.
 func WatchDemand(id, symbol string) Demand {
 	return Demand{ID: id, Symbol: symbol,
-		Subs: []SubType{SubTicker}, HistoryDays: 2, WantsHistory: true}
+		Subs: []SubType{SubTicker}, WantsHistory: true}
 }
 
 // ChartDemand adds K_DAY solely to unlock one fast cached-daily read.
 func ChartDemand(id, symbol string) Demand {
 	return Demand{ID: id, Symbol: symbol,
 		Subs: []SubType{SubTicker, SubKL1m, SubKLDay}, Focused: true,
-		HistoryDays: 70, WantsHistory: true, CachedDaily: true}
+		WantsHistory: true, CachedDaily: true}
 }
 
 // Resolution selects a history series.

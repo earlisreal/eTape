@@ -251,7 +251,8 @@ Everything lives in `~/.eTape/` (`%USERPROFILE%\.eTape\` on Windows):
 | `etape.db` | SQLite feed journal + bar archives (created automatically) |
 
 Chart-history limits are calendar spans. The default 10-second limit keeps the
-current trading cycle only, beginning at the latest NYSE close/post-market start:
+current trading cycle only, beginning at the latest NYSE close/post-market start.
+`intraday_days` applies to focused charts and scanner/watch archive warming:
 
 ```toml
 [backfill]

@@ -388,8 +388,8 @@ func TestEnsureSymbol_AcceptsAndMapsWatch(t *testing.T) {
 	if !reflect.DeepEqual(got.d.Subs, []feed.SubType{feed.SubTicker}) {
 		t.Fatalf("watch subs = %v", got.d.Subs)
 	}
-	if got.d.HistoryDays != 2 {
-		t.Fatalf("watch history days = %d, want 2", got.d.HistoryDays)
+	if !got.d.WantsHistory {
+		t.Fatal("watch must request archive history")
 	}
 }
 
@@ -423,8 +423,8 @@ func TestEnsureSymbol_FocusedUSHasBook(t *testing.T) {
 	if !d.CachedDaily {
 		t.Fatal("focused demand must request immediate cached daily bars")
 	}
-	if d.HistoryDays != 70 {
-		t.Fatalf("focused history days = %d, want 70", d.HistoryDays)
+	if !d.WantsHistory {
+		t.Fatal("focused demand must request history")
 	}
 }
 

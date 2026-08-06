@@ -14,7 +14,7 @@
 - Subscription and historical-K-line quotas are separate. Multiple K-line periods for one symbol share one subscription slot; code centralizes demand and quota tracking.
 - Broker adapters normalize venue payloads into `exec` domain types. Risk gates and venue arming run before adapter submission.
 - Historical requests use completed offline-NYSE-calendar horizons and persisted explored-range coverage. A complete archive therefore makes no Alpaca/Yahoo request on weekends, holidays, or unchanged completed sessions; successful provider-empty intervals are also remembered.
-- Focused charts combine the configured archive windows with concurrent OpenD K_1M and K_DAY cache reads in one ordered core seed and one UI snapshot. Scanner/watch warming is archive-only and cannot occupy the focused foreground slot. Alpaca fills uncovered ranges into the archive asynchronously; Yahoo is the optional daily fallback. `intraday_days` and `daily_years` are plain calendar spans, including weekends and holidays, and newly archived bars appear on the next symbol open.
+- Focused charts combine the configured archive windows with concurrent OpenD K_1M and K_DAY cache reads in one ordered core seed and one UI snapshot. Scanner/watch warming is archive-only and cannot occupy the focused foreground slot. Alpaca fills uncovered ranges into the archive asynchronously; Yahoo is the optional daily fallback. `intraday_days` applies to focused charts and scanner/watch warming; it and `daily_years` are plain calendar spans, including weekends and holidays, and newly archived bars appear on the next symbol open.
 
 ## Research-only alternatives
 
