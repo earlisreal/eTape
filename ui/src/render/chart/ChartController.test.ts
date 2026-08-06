@@ -156,11 +156,12 @@ describe("ChartController", () => {
       { ...bar("2026-07-06T13:30:20Z", 12, true), timeframe: "10s" },
     ]);
     ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
-    expect(facade.created[0].series.setDataCalls.at(-1)).toEqual([
-      { time: Date.parse("2026-07-06T13:30:00Z") / 1000, open: 10, high: 10, low: 10, close: 10 },
-      { time: Date.parse("2026-07-06T13:30:10Z") / 1000, open: 10, high: 10, low: 10, close: 10 },
-      { time: Date.parse("2026-07-06T13:30:20Z") / 1000, open: 12, high: 12, low: 12, close: 12 },
-    ]);
+    const candle = facade.created[0].series;
+    const volume = facade.created[1].series;
+    expect(candle.setDataCalls).toHaveLength(1);
+    expect(candle.updates.at(-1)).toEqual({ time: Date.parse("2026-07-06T13:30:20Z") / 1000, open: 12, high: 12, low: 12, close: 12 });
+    expect(volume.updates.at(-1)).toEqual({ time: Date.parse("2026-07-06T13:30:20Z") / 1000, value: 100, color: LIGHT.volUp });
+    expect(ctrl.displayBars().at(-1)?.synthetic).toBeUndefined();
   });
 
   it("rebuilds when a delayed real bar replaces an identical interior synthetic bar", () => {

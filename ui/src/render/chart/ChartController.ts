@@ -43,13 +43,14 @@ export class ChartController {
   private volume!: LwcSeries;
   private lastAppliedCount = 0;             // bars applied via setData/update
   private lastAppliedKey = "";              // last bar's bucketStart|close, to detect in-progress change
-  private lastAppliedKeys: string[] = [];    // marker-aware fingerprints for interior replacement detection
   // bucketStart of the bar at index (lastAppliedCount-1) as of the last apply — an
   // anchor-identity check independent of value, so applyBars can tell a real tail
   // extension from a store snapshot that grew the series at the FRONT (deep-history
   // backfill prepending bars, or a daily series replacing a single derived bar).
   // See applyBars.
   private lastTailBucket = "";
+  private lastRawCount = 0;
+  private lastRawTailKey = "";
   private displayedBars: DisplayBar[] = [];
   private indicatorApplied = new Map<string, number>(); // per-series point count applied via setData/update
   private indicatorLastKey = new Map<string, string>(); // per-series fingerprint of the last applied point, `${timeMs}|${value}`
@@ -139,33 +140,42 @@ export class ChartController {
     this.daySegmentBuildsThisSync = 0;
     const bars = this.deps.bars.series(this.config.symbol, this.config.timeframe);
     const displayBars = this.config.timeframe === "10s" ? fillEmptyTenSecondSlots(bars, nowMs) : bars;
+    this.applyBars(displayBars, bars);
     this.displayedBars = displayBars;
-    this.applyBars(displayBars);
     this.refreshBarCaches(displayBars);
     this.applyIndicators();
     this.applySessions(displayBars);
   }
 
-  private applyBars(bars: DisplayBar[]): void {
+  private applyBars(bars: DisplayBar[], rawBars: Bar[]): void {
     if (bars.length === 0) return; // cold symbol — panel shows the hint, not an error
     if (!this.backfilled) {
-      this.setAllBars(bars);
+      this.setAllBars(bars, rawBars);
       return;
     }
     // Once opened, history is immutable and only the live tail should change.
     // Rebuild safely if an unexpected reconnect/correction violates that contract.
     const anchor = bars[this.lastAppliedCount - 1];
-    if (!anchor || anchor.bucketStart !== this.lastTailBucket) {
-      this.setAllBars(bars);
+    if (!anchor || Date.parse(anchor.bucketStart) !== Date.parse(this.lastTailBucket)) {
+      this.setAllBars(bars, rawBars);
       return;
     }
-    const firstChanged = this.lastAppliedKeys.findIndex((key, i) => key !== keyOf(bars[i]));
-    // update() can replace only the tail. A delayed real bar (including one with
-    // identical OHLC) or a changed close that carries through synthetic slots is
-    // an interior display change and needs a complete seed.
-    if (firstChanged >= 0 && firstChanged < Math.min(this.lastAppliedCount - 1, bars.length)) {
-      this.setAllBars(bars);
-      return;
+    if (this.config.timeframe === "10s") {
+      const rawTailKey = rawBars.length ? keyOf(rawBars[rawBars.length - 1]) : "";
+      if (rawBars.length !== this.lastRawCount) {
+        // A source-count change can insert a delayed real bar. Compare only then,
+        // keeping normal tail updates and unrelated repaints O(1).
+        for (let i = 0; i < Math.min(this.lastAppliedCount - 1, bars.length); i++) {
+          if (keyOf(this.displayedBars[i]) !== keyOf(bars[i])) {
+            this.setAllBars(bars, rawBars);
+            return;
+          }
+        }
+      } else if (rawTailKey !== this.lastRawTailKey && bars.at(-1)?.synthetic) {
+        // A corrected tail close carries through the synthetic suffix.
+        this.setAllBars(bars, rawBars);
+        return;
+      }
     }
     const last = bars[bars.length - 1];
     const grew = bars.length > this.lastAppliedCount;
@@ -185,7 +195,7 @@ export class ChartController {
         // permanently freeze this chart (Scheduler used to drop a panel on its first
         // paint error). Rebuilding via setData is always safe, so prefer a full
         // resync over ever risking that throw.
-        this.setAllBars(bars);
+        this.setAllBars(bars, rawBars);
         return;
       }
       for (let i = from; i < bars.length; i++) {
@@ -195,7 +205,7 @@ export class ChartController {
       this.lastAppliedCount = bars.length;
       this.lastAppliedKey = keyOf(last);
       this.lastTailBucket = last.bucketStart;
-      this.lastAppliedKeys = bars.map(keyOf);
+      this.rememberRaw(rawBars);
       this.lastBarsOp = "appended";
       this.appendedFrom = from;
     } else if (lastChanged) {
@@ -203,7 +213,7 @@ export class ChartController {
       this.volume.update(toVolume(last, this.palette));
       this.lastAppliedKey = keyOf(last);
       this.lastTailBucket = last.bucketStart;
-      this.lastAppliedKeys = bars.map(keyOf);
+      this.rememberRaw(rawBars);
       // Auto-follow is LWC's default when already at the right edge; never force it
       // when the user has scrolled back (honesty: don't yank their view).
       this.lastBarsOp = "tailUpdated";
@@ -212,7 +222,7 @@ export class ChartController {
     }
   }
 
-  private setAllBars(bars: DisplayBar[]): void {
+  private setAllBars(bars: DisplayBar[], rawBars: Bar[]): void {
     const before = this.facade.getVisibleRange();
     const startedAt = performance.now();
     this.candle.setData(bars.map((b) => this.mainPoint(b)));
@@ -244,11 +254,16 @@ export class ChartController {
     this.lastAppliedCount = bars.length;
     this.lastAppliedKey = keyOf(bars[bars.length - 1]);
     this.lastTailBucket = bars[bars.length - 1].bucketStart;
-    this.lastAppliedKeys = bars.map(keyOf);
+    this.rememberRaw(rawBars);
     // Single source of truth for the "reset" outcome: setAllBars is the only
     // thing all 3 reset call sites in applyBars share, so marking it here (rather
     // than once per call site) can't drift out of sync with a future 4th site.
     this.lastBarsOp = "reset";
+  }
+
+  private rememberRaw(bars: Bar[]): void {
+    this.lastRawCount = bars.length;
+    this.lastRawTailKey = bars.length ? keyOf(bars[bars.length - 1]) : "";
   }
 
   // Read-only mirror of barsMsCache — Date.parse(bucketStart) for every currently-
@@ -560,8 +575,9 @@ export class ChartController {
     this.backfilled = false;
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
-    this.lastAppliedKeys = [];
     this.lastTailBucket = "";
+    this.lastRawCount = 0;
+    this.lastRawTailKey = "";
     this.displayedBars = [];
     this.barsMsCache = [];
     this.bandsCache = [];
@@ -635,8 +651,9 @@ export class ChartController {
     this.backfilled = false;
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
-    this.lastAppliedKeys = [];
     this.lastTailBucket = "";
+    this.lastRawCount = 0;
+    this.lastRawTailKey = "";
     this.displayedBars = [];
     this.barsMsCache = [];
     this.bandsCache = [];
