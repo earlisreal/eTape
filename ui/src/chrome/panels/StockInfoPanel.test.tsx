@@ -29,7 +29,7 @@ function renderPanel(opts?: { settings?: Record<string, unknown> }) {
 }
 
 const newsItem = (symbol: string, url: string, seen_at: string, overrides: Partial<NewsItem> = {}): NewsItem =>
-  ({ symbol, headline: "h", source: "R", url, seen_at, published_at: "", view_count: 0, type: "news", ...overrides });
+  ({ id: url, symbols: [symbol], headline: "h", source: "R", url, seen_at, published_at: "", published_precision: "unknown", view_count: 0, type: "news", catalyst_category: "earnings", catalyst_score: 65, catalyst_reasons: [], ...overrides });
 
 const detailPayload = (symbol: string, overrides: Partial<StockDetailPayload> = {}): StockDetailPayload => ({
   symbol, name: `${symbol} Inc`, industry: "Tech", exchange: "NASDAQ", price: 10, lastClose: 9.5, changePct: 5.2,
@@ -65,9 +65,9 @@ describe("StockInfoPanel", () => {
     expect(screen.getByText(/no symbol focused/i)).toBeTruthy();
   });
 
-  it("shows nothing below the header — no Hot only checkbox, no news area — when no symbol is focused", () => {
+  it("shows nothing below the header — no catalyst checkbox, no news area — when no symbol is focused", () => {
     renderPanel();
-    expect(screen.queryByRole("checkbox", { name: /hot only/i })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /catalysts only/i })).toBeNull();
     expect(screen.queryByText(/no news for/i)).toBeNull();
   });
 
@@ -290,7 +290,7 @@ describe("StockInfoPanel news list enhancements", () => {
     const { news, linkGroups } = renderPanel();
     act(() => {
       news.apply({ kind: "snapshot", topic: "news.item", payload: [
-        newsItem("US.AAPL", "u1", "2020-01-01T00:00:00Z", { published_at: "2026-07-06T13:30:05Z" }),
+        newsItem("US.AAPL", "u1", "2020-01-01T00:00:00Z", { published_at: "2026-07-06T13:30:05Z", published_precision: "second" }),
       ] });
       linkGroups.focus("green", "US.AAPL");
     });
@@ -313,32 +313,36 @@ describe("StockInfoPanel news list enhancements", () => {
     expect(screen.getByText("[NEWS]")).toBeTruthy();
   });
 
-  it("the Hot only control is a real, accessible checkbox once a symbol is focused", () => {
+  it("the Catalysts only control defaults on and is accessible once a symbol is focused", () => {
     const { linkGroups } = renderPanel();
     act(() => linkGroups.focus("green", "US.AAPL"));
-    const checkbox = screen.getByRole("checkbox", { name: /hot only/i });
+    const checkbox = screen.getByRole("checkbox", { name: /catalysts only/i });
     expect((checkbox as HTMLInputElement).type).toBe("checkbox");
-    expect((checkbox as HTMLInputElement).checked).toBe(false);
+    expect((checkbox as HTMLInputElement).checked).toBe(true);
   });
 
-  it("Hot only filters to type=news items at/above the view-count floor, excluding rating/notice even if hot", () => {
-    const { news, linkGroups } = renderPanel();
+  it("Catalysts only hides non-catalysts, persists its toggle, and shows the distinct empty state", () => {
+    const { news, linkGroups, onConfigChange } = renderPanel();
     act(() => {
       news.apply({ kind: "snapshot", topic: "news.item", payload: [
-        newsItem("US.AAPL", "hot", "t2", { headline: "Hot news", view_count: 5000, type: "news" }),
-        newsItem("US.AAPL", "cold", "t1", { headline: "Cold news", view_count: 10, type: "news" }),
-        newsItem("US.AAPL", "hotrating", "t3", { headline: "Hot rating", view_count: 5000, type: "rating" }),
+        newsItem("US.AAPL", "hot", "t2", { headline: "Catalyst", catalyst_category: "offering", catalyst_score: 80 }),
+        newsItem("US.AAPL", "cold", "t1", { headline: "Cold", catalyst_category: "other", catalyst_score: 0 }),
       ] });
       linkGroups.focus("green", "US.AAPL");
     });
-    expect(screen.getByText("Hot news")).toBeTruthy();
-    expect(screen.getByText("Cold news")).toBeTruthy();
-    expect(screen.getByText("Hot rating")).toBeTruthy();
+    expect(screen.getByText("Catalyst")).toBeTruthy();
+    expect(screen.queryByText("Cold")).toBeNull();
+    fireEvent.click(screen.getByRole("checkbox", { name: /catalysts only/i }));
+    expect(screen.getByText("Cold")).toBeTruthy();
+    expect(onConfigChange).toHaveBeenCalledWith({ catalystsOnly: false });
+  });
 
-    fireEvent.click(screen.getByRole("checkbox", { name: /hot only/i }));
-
-    expect(screen.getByText("Hot news")).toBeTruthy();
-    expect(screen.queryByText("Cold news")).toBeNull();
-    expect(screen.queryByText("Hot rating")).toBeNull();
+  it("shows no-catalyst text and never treats an unknown time as today", () => {
+    const { news, linkGroups } = renderPanel();
+    act(() => {
+      news.apply({ kind: "snapshot", topic: "news.item", payload: [newsItem("US.AAPL", "u", "2026-07-06T13:31:00Z", { catalyst_category: "other", catalyst_score: 0 })] });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    expect(screen.getByText("No catalyst news for US.AAPL.")).toBeTruthy();
   });
 });

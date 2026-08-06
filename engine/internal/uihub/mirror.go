@@ -44,7 +44,7 @@ type mirror struct {
 	// scanner / news
 	rank         map[string]wsmsg.ScannerRankPayload // key session
 	detail       map[string]wsmsg.StockDetailPayload // key symbol
-	news         []wsmsg.NewsItem                    // bounded recent
+	news         []wsmsg.NewsItem                    // bounded recent, upserted by article ID
 	watchlist    wsmsg.WatchlistRowsPayload          // the one global list snapshot
 	watchlistSet bool                                // false until the first publish
 
@@ -345,6 +345,14 @@ func (m *mirror) applyPub(s staged) {
 }
 
 func (m *mirror) appendNews(it wsmsg.NewsItem) {
+	if it.ID != "" {
+		for i := range m.news {
+			if m.news[i].ID == it.ID {
+				m.news[i] = it
+				return
+			}
+		}
+	}
 	m.news = append(m.news, it)
 	if len(m.news) > m.newsCap {
 		m.news = m.news[len(m.news)-m.newsCap:]

@@ -141,9 +141,13 @@ type Scan struct {
 
 // News is the [news] section: Qot_GetSearchNews polling.
 type News struct {
-	Enabled   bool `toml:"enabled"`
-	WatchMs   int  `toml:"watch_ms"` // step interval for the watchlist rotation
-	MaxPerReq int  `toml:"max_per_req"`
+	Enabled          bool `toml:"enabled"`
+	WatchMs          int  `toml:"watch_ms"` // quota-controlled request-slot interval
+	ActiveRefreshMs  int  `toml:"active_refresh_ms"`
+	ScannerRefreshMs int  `toml:"scanner_refresh_ms"`
+	MaxPerReq        int  `toml:"max_per_req"`
+	MaxAgeHours      int  `toml:"max_age_hours"`
+	CatalystMinScore int  `toml:"catalyst_min_score"`
 }
 
 // StockInfo is the [stockinfo] section: Qot_GetSecuritySnapshot (3203) fundamentals
@@ -233,7 +237,7 @@ func Default() Config {
 			Enabled: true, PremarketMs: 2000, RTHMs: 3000, RankPages: 2,
 			MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000,
 		},
-		News:      News{Enabled: true, WatchMs: 3000, MaxPerReq: 50},
+		News:      News{Enabled: true, WatchMs: 3100, ActiveRefreshMs: 10000, ScannerRefreshMs: 60000, MaxPerReq: 50, MaxAgeHours: 96, CatalystMinScore: 50},
 		StockInfo: StockInfo{Enabled: true, RefreshMs: 15000, MaxPerReq: 400},
 		Watchlist: Watchlist{Enabled: true, PollMs: 3000},
 		Health:    Health{Enabled: true, ProbeMs: 5000},
@@ -256,6 +260,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Store.RetentionDays < 0 {
 		return Config{}, fmt.Errorf("config %s: store.retention_days must be >= 0", path)
+	}
+	if n := cfg.News; n.WatchMs < 3100 || n.ActiveRefreshMs < n.WatchMs || n.ScannerRefreshMs < n.WatchMs || n.MaxPerReq < 1 || n.MaxPerReq > 100 || n.MaxAgeHours <= 0 || n.CatalystMinScore < 0 || n.CatalystMinScore > 100 {
+		return Config{}, fmt.Errorf("config %s: news requires watch_ms >= 3100, refresh intervals >= watch_ms, max_per_req 1..100, max_age_hours > 0, and catalyst_min_score 0..100", path)
 	}
 	return cfg, nil
 }

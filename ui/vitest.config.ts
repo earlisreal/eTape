@@ -50,6 +50,13 @@ export default defineConfig({
         },
       },
       {
+        extends: true,
+        test: {
+          name: 'news',
+          include: ['src/data/NewsStore.test.ts', 'src/chrome/panels/StockInfoPanel.test.tsx'],
+        },
+      },
+      {
         test: {
           name: 'golden',
           include: ['test/golden/**/*.test.ts', 'test/golden/**/*.golden.test.ts'],

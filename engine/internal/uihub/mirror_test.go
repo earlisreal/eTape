@@ -285,8 +285,8 @@ func TestMirrorTradesSnapshotInsertionOrder(t *testing.T) {
 
 func TestMirrorApplyPubNewsHealthEvents(t *testing.T) {
 	m := testMirror()
-	m.applyPub(staged{Topic: wsmsg.TopicNews, Payload: wsmsg.NewsItem{Symbol: "US.AAPL", Headline: "one"}})
-	m.applyPub(staged{Topic: wsmsg.TopicNews, Payload: []wsmsg.NewsItem{{Symbol: "US.AAPL", Headline: "two"}, {Symbol: "US.AAPL", Headline: "three"}}})
+	m.applyPub(staged{Topic: wsmsg.TopicNews, Payload: wsmsg.NewsItem{ID: "one", Symbols: []string{"US.AAPL"}, Headline: "one"}})
+	m.applyPub(staged{Topic: wsmsg.TopicNews, Payload: []wsmsg.NewsItem{{ID: "two", Symbols: []string{"US.AAPL"}, Headline: "two"}, {ID: "three", Symbols: []string{"US.AAPL"}, Headline: "three"}}})
 	m.applyPub(staged{Topic: wsmsg.TopicSysHealth, Payload: wsmsg.HealthSnapshot{Links: []wsmsg.HealthLink{{Link: wsmsg.LinkUIEngine, Status: wsmsg.LinkOK}}}})
 	m.applyPub(staged{Topic: wsmsg.TopicSysEvents, Payload: wsmsg.SysEvent{Seq: 1, Kind: "boot"}})
 	m.applyPub(staged{Topic: wsmsg.TopicSysEvents, Payload: []wsmsg.SysEvent{{Seq: 2, Kind: "resync"}, {Seq: 3, Kind: "gap"}}})
@@ -597,6 +597,16 @@ func TestMirrorNewsAndEventsCapBounded(t *testing.T) {
 	}
 	if m.events[1].Seq != 4 {
 		t.Fatalf("expected most recent event retained, got %+v", m.events)
+	}
+}
+
+func TestMirrorNewsUpsertsByID(t *testing.T) {
+	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 200, 2, 500, 2, 2)
+	m.applyPub(staged{Topic: wsmsg.TopicNews, Payload: wsmsg.NewsItem{ID: "one", Symbols: []string{"US.AAPL"}, Headline: "shared"}})
+	m.applyPub(staged{Topic: wsmsg.TopicNews, Payload: wsmsg.NewsItem{ID: "one", Symbols: []string{"US.AAPL", "US.NVDA"}, Headline: "shared"}})
+	m.applyPub(staged{Topic: wsmsg.TopicNews, Payload: wsmsg.NewsItem{ID: "two", Symbols: []string{"US.AAPL"}, Headline: "shared"}})
+	if len(m.news) != 2 || len(m.news[0].Symbols) != 2 || m.news[1].ID != "two" {
+		t.Fatalf("news upsert = %+v", m.news)
 	}
 }
 

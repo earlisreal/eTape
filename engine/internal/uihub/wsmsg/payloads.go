@@ -240,14 +240,19 @@ type StockDetailPayload struct {
 }
 
 type NewsItem struct {
-	Symbol      string `json:"symbol"`
-	Headline    string `json:"headline"`
-	Source      string `json:"source"`
-	URL         string `json:"url"`
-	SeenAt      string `json:"seen_at"`
-	PublishedAt string `json:"published_at"`
-	ViewCount   int64  `json:"view_count"`
-	Type        string `json:"type"` // "news" | "notice" | "rating"
+	ID                 string   `json:"id"`
+	Symbols            []string `json:"symbols"`
+	Headline           string   `json:"headline"`
+	Source             string   `json:"source"`
+	URL                string   `json:"url"`
+	SeenAt             string   `json:"seen_at"`
+	PublishedAt        string   `json:"published_at"`
+	PublishedPrecision string   `json:"published_precision"`
+	ViewCount          int64    `json:"view_count"`
+	Type               string   `json:"type"` // "news" | "notice" | "rating"
+	CatalystCategory   string   `json:"catalyst_category"`
+	CatalystScore      int      `json:"catalyst_score"`
+	CatalystReasons    []string `json:"catalyst_reasons"`
 }
 
 // LinkName and LinkStatus (HealthLink's typed enums) live in wsmsg.go

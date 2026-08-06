@@ -310,14 +310,19 @@ export interface StockDetailPayload {
   refreshedAt: string;
 }
 export interface NewsItem {
-  symbol: string;
+  id: string;
+  symbols: string[];
   headline: string;
   source: string;
   url: string;
   seen_at: string;
   published_at: string;
+  published_precision: string;
   view_count: number /* int64 */;
   type: string; // "news" | "notice" | "rating"
+  catalyst_category: string;
+  catalyst_score: number /* int */;
+  catalyst_reasons: string[];
 }
 export interface HealthLink {
   link: LinkName;

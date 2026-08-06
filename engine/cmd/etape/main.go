@@ -958,12 +958,11 @@ func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, dem
 		}
 	}
 	hub.SetScanner(scanPoller)
-	symbols := func() []string {
-		return newsSymbols(scanPoller.PoolSymbols(), hub.ActiveDemandSymbols())
-	}
+	newsPlan := func() news.SymbolPlan { return newsSymbolPlan(scanPoller.PoolSymbols(), hub.ActiveDemandSymbols()) }
+	symbols := func() []string { return newsPlan().All() }
 	scanWG.Add(1)
 	go func() { defer scanWG.Done(); _ = scanPoller.Run(ctx) }()
-	go func() { _ = news.New(cfg.News, r, hub, clk, symbols).Run(ctx) }()
+	go func() { _ = news.New(cfg.News, r, hub, clk, newsPlan).Run(ctx) }()
 	go func() { _ = stockinfo.New(cfg.StockInfo, r, hub, clk, symbols, st).Run(ctx) }()
 	if cfg.Watchlist.Enabled {
 		interval := time.Duration(cfg.Watchlist.PollMs) * time.Millisecond

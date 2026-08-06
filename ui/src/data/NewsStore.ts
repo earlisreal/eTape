@@ -3,50 +3,51 @@ import type { SnapshotMsg, DeltaMsg, NewsItem } from "../wire/contract";
 
 interface NewsState { items: NewsItem[] }
 
-// Broker-agnostic news feed. Snapshot replaces (and rebuilds the dedup set);
-// delta appends one item or an array. Dedup by url (fallback: symbol|headline|
-// seen_at). itemsFor(symbol) returns that symbol's items newest-first by the
-// effective timestamp (published_at when moomoo supplied a parseable publish
-// time, falling back to seen_at — the engine's fetch time — otherwise).
+// Article deltas are ID upserts. Snapshots replace state; malformed legacy
+// payloads get a defensive URL/headline key until every reconnect is current.
 export class NewsStore extends ReactStore<NewsState> {
-  private readonly seenKeys = new Set<string>();
   constructor(private readonly cap = 500) { super({ items: [] }); }
 
   apply(m: SnapshotMsg | DeltaMsg): void {
+    const incoming = this.asArray(m.payload);
     if (m.kind === "snapshot") {
-      this.seenKeys.clear();
-      this.set({ items: this.dedupe(this.asArray(m.payload)).slice(-this.cap) });
+      this.set({ items: this.upsert([], incoming) });
       return;
     }
-    const fresh = this.dedupe(this.asArray(m.payload));
-    if (fresh.length === 0) return;
-    this.set({ items: [...this.getSnapshot().items, ...fresh].slice(-this.cap) });
+    const items = this.upsert(this.getSnapshot().items, incoming);
+    if (items !== this.getSnapshot().items) this.set({ items });
   }
 
   itemsFor(symbol: string): NewsItem[] {
     return this.getSnapshot().items
-      .filter((it) => it.symbol === symbol)
-      // ISO strings sort chronologically; prefer the real publish time, falling
-      // back to the engine's fetch time when moomoo couldn't supply one.
-      .sort((a, b) => (b.published_at || b.seen_at).localeCompare(a.published_at || a.seen_at));
+      .filter((it) => it.symbols?.includes(symbol))
+      .slice()
+      .sort((a, b) => this.compareNewest(a, b));
   }
 
-  // Coerce a payload to an item array, dropping null/non-object entries. An empty
-  // news snapshot arrives as `payload: null` (a nil Go slice marshals to JSON null),
-  // and a malformed message could carry null entries — neither must reach keyOf().
   private asArray(p: unknown): NewsItem[] {
     const raw = Array.isArray(p) ? p : p == null ? [] : [p];
     return raw.filter((it): it is NewsItem => it != null && typeof it === "object");
   }
-  private keyOf(it: NewsItem): string { return it.url || `${it.symbol}|${it.headline}|${it.seen_at}`; }
-  private dedupe(items: NewsItem[]): NewsItem[] {
-    const out: NewsItem[] = [];
-    for (const it of items) {
-      const k = this.keyOf(it);
-      if (this.seenKeys.has(k)) continue;
-      this.seenKeys.add(k);
-      out.push(it);
+
+  private keyOf(it: NewsItem): string { return it.id || it.url || `${it.headline}|${it.seen_at}`; }
+
+  private upsert(existing: NewsItem[], incoming: NewsItem[]): NewsItem[] {
+    if (incoming.length === 0) return existing;
+    const items = existing.slice();
+    const index = new Map(items.map((it, i) => [this.keyOf(it), i]));
+    for (const item of incoming) {
+      const key = this.keyOf(item); const at = index.get(key);
+      if (at == null) { index.set(key, items.length); items.push(item); } else items[at] = item;
     }
-    return out;
+    return items.slice(-this.cap);
+  }
+
+  private compareNewest(a: NewsItem, b: NewsItem): number {
+    const aKnown = a.published_precision !== "unknown" && !!a.published_at;
+    const bKnown = b.published_precision !== "unknown" && !!b.published_at;
+    if (aKnown && bKnown) return b.published_at.localeCompare(a.published_at);
+    if (aKnown !== bKnown) return aKnown ? -1 : 1;
+    return b.seen_at.localeCompare(a.seen_at);
   }
 }

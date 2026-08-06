@@ -5,10 +5,8 @@ import { formatTapeTime, formatPrice, QUOTE_DECIMALS } from "../../render/format
 import { formatCompactShares } from "../format";
 import type { Palette } from "../../render/palette";
 
-// Tunable: view-count floor for the "Hot only" news filter. A UI-only heuristic
-// to declutter the list — not an engine contract; the engine's view_count field
-// is purely descriptive, this threshold is local/cosmetic.
-const HOT_MIN_VIEWS = 1000;
+// Mirrors the engine default; classification stays exclusively in the engine.
+const CATALYST_MIN_SCORE = 50;
 
 /** Classifies a news item's effective timestamp as "today" (bronze fresh treatment) vs an older, muted date. */
 export function newsDateLabel(seenAtISO: string, nowMs: number): { label: string; today: boolean } {
@@ -17,6 +15,14 @@ export function newsDateLabel(seenAtISO: string, nowMs: number): { label: string
   const sameDay = d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate();
   if (sameDay) return { label: "today", today: true };
   return { label: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), today: false };
+}
+
+function newsMeta(item: { published_at: string; published_precision: string; seen_at: string }, nowMs: number): { label: string; detail: string; today: boolean } {
+  if (item.published_precision === "unknown" || !item.published_at) {
+    return { label: "time unavailable", detail: `seen ${formatTapeTime(item.seen_at)}`, today: false };
+  }
+  const date = newsDateLabel(item.published_at, nowMs);
+  return { label: date.label, detail: item.published_precision === "date" ? "" : formatTapeTime(item.published_at), today: date.today };
 }
 
 /** Bracket-style mono news-type tag — the ledger/tape vocabulary stand-in for a colored pill badge.
@@ -33,6 +39,12 @@ function typeBadge(type: string, palette: Palette): JSX.Element {
       {cfg.label}
     </span>
   );
+}
+
+function catalystBadge(category: string, palette: Palette): JSX.Element | null {
+  const labels: Record<string, string> = { earnings: "EARNINGS", guidance: "GUIDANCE", offering: "OFFERING", financing: "FINANCING", fda_clinical: "FDA", contract: "CONTRACT", merger_acquisition: "M&A", bankruptcy: "BANKRUPTCY", regulatory: "REGULATORY", analyst: "ANALYST", corporate_action: "CORP ACTION", halt: "HALT" };
+  const label = labels[category];
+  return label ? <span className="mono" style={{ fontSize: 9, border: `1px solid ${palette.accent}`, color: palette.accent, padding: "0 3px", marginRight: 4 }}>[{label}]</span> : null;
 }
 
 function fmtCompactOrDash(value: number | null, palette: Palette): JSX.Element {
@@ -78,7 +90,7 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, o
     setSymbol(linkGroups.symbolFor(group));
     return linkGroups.subscribe(() => setSymbol(linkGroups.symbolFor(group)));
   }, [linkGroups, group]);
-  const [hotOnly, setHotOnly] = useState(false);
+  const [catalystsOnly, setCatalystsOnly] = useState<boolean>(() => (config.settings.catalystsOnly as boolean) ?? true);
   // Default collapsed: a compact one-line summary (name · industry · float · EMA200,
   // no price/change) so the news list starts higher. Persisted per panel like
   // ChartPanel's timeframe/indicators — patch only this key, never spread config.settings.
@@ -92,10 +104,7 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, o
   const items = useMemo(() => (symbol ? stores.news.itemsFor(symbol) : []), [snap, symbol, stores.news]);
   // Derived from `items`, never mutates it — something else may reasonably
   // re-derive from the unfiltered list later.
-  const visibleItems = useMemo(
-    () => (hotOnly ? items.filter((it) => it.type === "news" && it.view_count >= HOT_MIN_VIEWS) : items),
-    [items, hotOnly],
-  );
+  const visibleItems = useMemo(() => catalystsOnly ? items.filter((it) => it.catalyst_score >= CATALYST_MIN_SCORE && it.catalyst_category !== "other") : items, [items, catalystsOnly]);
   const detail = useMemo(
     () => (symbol ? stores.stockDetail.detailFor(symbol) : undefined),
     [detailSnap, symbol, stores.stockDetail],
@@ -192,30 +201,34 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, o
       {symbol && (
         <>
           <div style={{ background: palette.surface, display: "flex", alignItems: "center", gap: 8, padding: "4px 8px", borderBottom: `1px solid ${palette.border}` }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: hotOnly ? palette.text : palette.textMuted }}>
-              <input type="checkbox" checked={hotOnly} onChange={(e) => setHotOnly(e.target.checked)} style={{ width: 12, height: 12 }} />
-              Hot only
+            <label style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer", color: catalystsOnly ? palette.text : palette.textMuted }}>
+              <input type="checkbox" checked={catalystsOnly} onChange={(e) => { const next = e.target.checked; setCatalystsOnly(next); onConfigChange({ catalystsOnly: next }); }} style={{ width: 12, height: 12 }} />
+              Catalysts only
             </label>
           </div>
 
           {items.length === 0 && (
             <div style={{ padding: 12, color: palette.textMuted }}>No news for {symbol}.</div>
           )}
-          {visibleItems.map((it, i) => {
-            const effectiveTs = it.published_at || it.seen_at;
-            const { label, today } = newsDateLabel(effectiveTs, Date.now());
+          {items.length > 0 && visibleItems.length === 0 && (
+            <div style={{ padding: 12, color: palette.textMuted }}>No catalyst news for {symbol}.</div>
+          )}
+          {visibleItems.map((it) => {
+            const meta = newsMeta(it, Date.now());
             return (
-              <div key={it.url || `${it.headline}-${i}`}
+              <div key={it.id}
                 style={{
                   padding: "6px 8px", borderBottom: `1px solid ${palette.border}`,
-                  ...(today ? { background: "rgba(154,106,27,.08)", boxShadow: "inset 2px 0 0 var(--accent)" } : {}),
+                  ...(meta.today ? { background: "rgba(154,106,27,.08)", boxShadow: "inset 2px 0 0 var(--accent)" } : {}),
                 }}>
                 {typeBadge(it.type, palette)}
+                {catalystBadge(it.catalyst_category, palette)}
                 <a href={it.url} onClick={(e) => { e.preventDefault(); window.open(it.url, "_blank", "noopener,noreferrer"); }}
                   style={{ color: palette.accent, textDecoration: "none", cursor: "pointer" }}>{it.headline}</a>
                 <div className="mono" style={{ marginTop: 2 }}>
-                  <span style={{ color: today ? palette.accent : palette.textMuted }}>{label}</span>
-                  <span style={{ color: palette.textMuted }}> · {formatTapeTime(effectiveTs)} · {it.source}</span>
+                  <span style={{ color: meta.today ? palette.accent : palette.textMuted }}>{meta.label}</span>
+                  {meta.detail && <span style={{ color: palette.textMuted }}> · {meta.detail}</span>}
+                  {it.source && <span style={{ color: palette.textMuted }}> · {it.source}</span>}
                 </div>
               </div>
             );

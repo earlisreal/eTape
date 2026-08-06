@@ -4,102 +4,133 @@ import (
 	"testing"
 	"time"
 
-	"github.com/earlisreal/eTape/engine/internal/clock"
-	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
 
-func TestDedupByURL(t *testing.T) {
-	p := &Poller{seen: map[string]bool{}}
-	in := []wsmsg.NewsItem{
-		{Symbol: "US.AAPL", Headline: "A", URL: "http://x/1", SeenAt: "t1"},
-		{Symbol: "US.AAPL", Headline: "A", URL: "http://x/1", SeenAt: "t2"}, // dup url
-		{Symbol: "US.AAPL", Headline: "B", URL: "", SeenAt: "t3"},           // no url -> symbol|headline key
-		{Symbol: "US.AAPL", Headline: "B", URL: "", SeenAt: "t4"},           // dup by fallback key
-	}
-	out := p.dedup(in)
-	if len(out) != 2 {
-		t.Fatalf("expected 2 unique items, got %d: %+v", len(out), out)
-	}
-	// second call: all already seen
-	if again := p.dedup(in); len(again) != 0 {
-		t.Fatalf("all should be seen on second pass, got %d", len(again))
-	}
-}
-
-func TestSeenResetsAtDayBoundary(t *testing.T) {
-	clk := clock.NewFake(time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC))
-	p := &Poller{seen: map[string]bool{}, seenDay: session.DayMs(clk.Now().UnixMilli())}
-	in := []wsmsg.NewsItem{
-		{Symbol: "US.AAPL", Headline: "A", URL: "http://x/1", SeenAt: "t1"},
-	}
-	out := p.dedup(in)
-	if len(out) != 1 {
-		t.Fatalf("expected 1 unique item, got %d: %+v", len(out), out)
-	}
-	// same day, repeat: suppressed
-	if again := p.dedup(in); len(again) != 0 {
-		t.Fatalf("expected dedup suppression within the same ET day, got %d: %+v", len(again), again)
-	}
-	// advance past ET midnight into the next ET day
-	clk.Advance(24 * time.Hour)
-	p.resetIfNewDay(clk.Now())
-	// seen-set was cleared: the same URL is emitted again
-	if out := p.dedup(in); len(out) != 1 {
-		t.Fatalf("expected seen-set cleared after ET-day rollover, got %d: %+v", len(out), out)
-	}
-}
-
-func TestNormalizeStampsSeenAt(t *testing.T) {
-	items := normalize([]searchNews{{
-		Title: "PR drops", Source: "Newswire", URL: "http://x/9",
-		NewsSubType: 2, PublishTime: "2026-07-06 09:31:00", ViewCount: 42,
-	}}, "US.AAPL", "2026-07-06T13:31:00.000Z")
-	if len(items) != 1 {
-		t.Fatalf("want 1 item, got %d", len(items))
-	}
-	it := items[0]
-	if it.Symbol != "US.AAPL" || it.Headline != "PR drops" || it.Source != "Newswire" || it.URL != "http://x/9" || it.SeenAt != "2026-07-06T13:31:00.000Z" {
-		t.Fatalf("normalize wrong: %+v", it)
-	}
-	if wantPublished := parsePublishTime("2026-07-06 09:31:00"); it.PublishedAt != wantPublished {
-		t.Fatalf("PublishedAt = %q, want %q", it.PublishedAt, wantPublished)
-	}
-	if it.ViewCount != 42 {
-		t.Fatalf("ViewCount = %d, want 42", it.ViewCount)
-	}
-	if wantType := mapNewsType(2); it.Type != wantType {
-		t.Fatalf("Type = %q, want %q", it.Type, wantType)
-	}
-}
-
-func TestMapNewsType(t *testing.T) {
-	cases := []struct {
-		subType int32
-		want    string
-	}{
-		{0, "news"},   // ALL -> falls back to the most common category
-		{1, "news"},   // NEWS
-		{2, "notice"}, // NOTICE
-		{3, "rating"}, // RATING
-		{99, "news"},  // unknown -> falls back to the most common category
-	}
-	for _, c := range cases {
-		if got := mapNewsType(c.subType); got != c.want {
-			t.Fatalf("mapNewsType(%d) = %q, want %q", c.subType, got, c.want)
+func TestNormalizeMoomooSecurity(t *testing.T) {
+	for _, tc := range []struct {
+		raw, want string
+		ok        bool
+	}{{"US.LITE", "US.LITE", true}, {" lite.us ", "US.LITE", true}, {"HK.00700", "", false}, {"AAPL", "", false}, {"US.A A", "", false}} {
+		got, ok := normalizeMoomooSecurity(tc.raw)
+		if got != tc.want || ok != tc.ok {
+			t.Fatalf("%q = %q,%v", tc.raw, got, ok)
 		}
+	}
+	got := normalizeRelatedSecurities([]string{"US.AAPL", "aapl.us", "HK.1"})
+	if len(got) != 1 || got[0] != "US.AAPL" {
+		t.Fatalf("normalized = %v", got)
+	}
+}
+
+func TestAssociationIsConservative(t *testing.T) {
+	plan := SymbolPlan{Active: []string{"US.AAPL", "US.NVDA", "US.ON", "US.AI"}}
+	now := time.Date(2026, 7, 6, 14, 0, 0, 0, time.UTC)
+	items := normalizeArticles([]searchNews{
+		{Title: "Apple result", RelatedSecurities: []string{"NVDA.US", "US.AAPL"}},
+		{Title: "Wrong result", RelatedSecurities: []string{"US.TSLA"}},
+		{Title: "AAPL Reports Quarterly Results"},
+		{Title: "Economy turns on a dime"},
+		{Title: "AI reports results"},
+	}, "US.AAPL", plan, now, 96*time.Hour)
+	if len(items) != 2 || len(items[0].item.Symbols) != 2 || items[1].item.Symbols[0] != "US.AAPL" {
+		t.Fatalf("associations = %+v", items)
+	}
+	if got := normalizeArticles([]searchNews{{Title: "Economy turns on a dime"}}, "US.ON", plan, now, 96*time.Hour); len(got) != 0 {
+		t.Fatal("short ticker matched inside word")
+	}
+	if got := normalizeArticles([]searchNews{{Title: "AI reports results"}}, "US.AI", plan, now, 96*time.Hour); len(got) != 1 {
+		t.Fatal("standalone short ticker did not match")
 	}
 }
 
 func TestParsePublishTime(t *testing.T) {
-	// 2026-07-06 is EDT (UTC-4) in America/New_York.
-	if got, want := parsePublishTime("2026-07-06 09:31:00"), "2026-07-06T13:31:00.000Z"; got != want {
-		t.Fatalf("parsePublishTime(valid) = %q, want %q", got, want)
+	now := time.Date(2026, 1, 2, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct{ raw, at, precision string }{{"2026-07-06 09:31:00", "2026-07-06T13:31:00.000Z", "second"}, {"2026/01/06 09:31:00", "2026-01-06T14:31:00.000Z", "second"}, {"5/13", "2025-05-13T04:00:00.000Z", "date"}, {"12/31", "2025-12-31T05:00:00.000Z", "date"}} {
+		got := parsePublishTime(tc.raw, now)
+		if got.At != tc.at || got.Precision != tc.precision {
+			t.Fatalf("%q = %+v", tc.raw, got)
+		}
 	}
-	if got := parsePublishTime(""); got != "" {
-		t.Fatalf("parsePublishTime(empty) = %q, want \"\"", got)
+	if got := parsePublishTime("bad", now); got.OK || got.Precision != "unknown" {
+		t.Fatalf("bad=%+v", got)
 	}
-	if got := parsePublishTime("not-a-time"); got != "" {
-		t.Fatalf("parsePublishTime(malformed) = %q, want \"\"", got)
+}
+
+func TestArticleIDAndUpsert(t *testing.T) {
+	a := wsmsg.NewsItem{Headline: "A", Source: "S", URL: " HTTPS://Example.com/x#one ", Type: "news"}
+	b := a
+	b.URL = "https://example.com/x#two"
+	if articleID(a, "") != articleID(b, "") {
+		t.Fatal("fragment changed ID")
+	}
+	p := &Poller{seen: map[string]seenArticle{}}
+	now := time.Now()
+	a.ID = articleID(a, "")
+	a.Symbols = []string{"US.AAPL"}
+	a.PublishedPrecision = "unknown"
+	if got := p.upsert([]normalizedArticle{{item: a}}, now); len(got) != 1 {
+		t.Fatal("new article not emitted")
+	}
+	b = a
+	b.Symbols = []string{"US.AAPL", "US.NVDA"}
+	b.ViewCount = 9
+	if got := p.upsert([]normalizedArticle{{item: b}}, now); len(got) != 1 || len(got[0].Symbols) != 2 {
+		t.Fatalf("symbol expansion=%+v", got)
+	}
+	if got := p.upsert([]normalizedArticle{{item: b}}, now); len(got) != 0 {
+		t.Fatal("view-only change emitted")
+	}
+}
+
+func TestRetentionAndLimit(t *testing.T) {
+	now := time.Now()
+	p := &Poller{seen: map[string]seenArticle{"old": {LastSeenAt: now.Add(-articleRetention - time.Second)}}}
+	p.prune(now)
+	if len(p.seen) != 0 {
+		t.Fatal("old item retained")
+	}
+	for i := 0; i <= maxArticles; i++ {
+		p.seen[string(rune(i))] = seenArticle{LastSeenAt: now.Add(time.Duration(i) * time.Second)}
+	}
+	p.prune(now)
+	if len(p.seen) != maxArticles {
+		t.Fatalf("len=%d", len(p.seen))
+	}
+}
+
+func TestSchedulerAndLimiter(t *testing.T) {
+	s := newScheduler()
+	now := time.Now()
+	plan := SymbolPlan{Active: []string{"US.A"}, Scanner: []string{"US.B"}}
+	if got := s.next(plan, now, time.Minute, time.Hour); got != "US.A" {
+		t.Fatalf("got %s", got)
+	}
+	s.record("US.A", now)
+	if got := s.next(plan, now.Add(time.Second), time.Minute, time.Hour); got != "US.B" {
+		t.Fatalf("got %s", got)
+	}
+	var l limiter
+	for i := 0; i < 10; i++ {
+		if !l.allow(now.Add(time.Duration(i) * 3 * time.Second)) {
+			t.Fatal("premature quota block")
+		}
+	}
+	if l.allow(now.Add(29 * time.Second)) {
+		t.Fatal("quota exceeded")
+	}
+	if !l.allow(now.Add(31 * time.Second)) {
+		t.Fatal("quota did not expire")
+	}
+}
+
+func TestClassifyCatalyst(t *testing.T) {
+	now := time.Now()
+	got := classifyCatalyst(catalystInput{Headline: "Company announces public offering", Source: "Business Wire", PublishedAt: now.Add(-time.Hour), PublishedPrecision: "second", SeenAt: now, UsedRelatedSymbols: true})
+	if got.Category != "offering" || got.Score != 100 {
+		t.Fatalf("classifier=%+v", got)
+	}
+	if got := classifyCatalyst(catalystInput{Headline: "Top gainers: company announces earnings", SeenAt: now}); got.Category != "earnings" || got.Score != 40 {
+		t.Fatalf("generic concrete=%+v", got)
 	}
 }
