@@ -179,6 +179,22 @@ describe("ChartController", () => {
     expect(ctrl.displayBars()[1].synthetic).toBeUndefined();
   });
 
+  it("rebuilds a reconnect batch with an interior real bar before its suffix", () => {
+    const reader = mutableBarReader([{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }]);
+    const facade = fakeFacade();
+    const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
+    ctrl.mount();
+    ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
+    reader.set([
+      { ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" },
+      { ...bar("2026-07-06T13:30:10Z", 11), timeframe: "10s" },
+      { ...bar("2026-07-06T13:30:30Z", 13), timeframe: "10s" },
+    ]);
+    ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
+    expect(facade.created[0].series.setDataCalls).toHaveLength(2);
+    expect(facade.created[1].series.setDataCalls.at(-1)?.[1]).toEqual({ time: Date.parse("2026-07-06T13:30:10Z") / 1000, value: 100, color: LIGHT.volUp });
+  });
+
   it("rebuilds when a corrected close changes its synthetic suffix", () => {
     const bars = [{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }];
     const { facade, ctrl } = (() => {

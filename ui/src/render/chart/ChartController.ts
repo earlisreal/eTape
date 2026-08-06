@@ -169,14 +169,14 @@ export class ChartController {
       }
       if (rawBars.length > this.lastRawCount) {
         const previousTail = rawBars[this.lastRawCount - 1];
-        const rawTail = rawBars[rawBars.length - 1];
+        const firstNewRaw = rawBars[this.lastRawCount];
         const displayTail = this.displayedBars.at(-1);
         // Only a clean suffix append can stay incremental. An insertion/front
         // growth, a revised old tail, or a delayed slot before the display tail
         // can alter interior display slots.
         if (!previousTail || !displayTail || previousTail.bucketStart !== this.lastRawTailBucket
           || keyOf(previousTail) !== this.lastRawTailKey
-          || Date.parse(rawTail.bucketStart) < Date.parse(displayTail.bucketStart)) {
+          || Date.parse(firstNewRaw.bucketStart) < Date.parse(displayTail.bucketStart)) {
           this.setAllBars(bars, rawBars);
           return;
         }
