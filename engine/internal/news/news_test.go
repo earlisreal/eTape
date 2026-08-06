@@ -63,12 +63,12 @@ func TestArticleIDAndUpsert(t *testing.T) {
 	a := wsmsg.NewsItem{Headline: "A", Source: "S", URL: " HTTPS://Example.com/x#one ", Type: "news"}
 	b := a
 	b.URL = "https://example.com/x#two"
-	if articleID(a) != articleID(b) {
+	if articleID(a, "") != articleID(b, "") {
 		t.Fatal("fragment changed ID")
 	}
 	p := &Poller{seen: map[string]seenArticle{}}
 	now := time.Now()
-	a.ID = articleID(a)
+	a.ID = articleID(a, "")
 	a.Symbols = []string{"US.AAPL"}
 	a.PublishedPrecision = "unknown"
 	if got := p.upsert([]normalizedArticle{{item: a}}, now); len(got) != 1 {
@@ -154,7 +154,7 @@ func TestURLLessArticleIDAllowsTimeUpgrade(t *testing.T) {
 	p := &Poller{seen: map[string]seenArticle{}}
 	now := time.Now()
 	base := wsmsg.NewsItem{Headline: "Result", Source: "Wire", Type: "news", Symbols: []string{"US.AAPL"}, PublishedPrecision: "unknown"}
-	base.ID = articleID(base)
+	base.ID = articleID(base, "")
 	if got := p.upsert([]normalizedArticle{{item: base}}, now); len(got) != 1 {
 		t.Fatal("initial item not emitted")
 	}
@@ -162,6 +162,34 @@ func TestURLLessArticleIDAllowsTimeUpgrade(t *testing.T) {
 	updated.PublishedAt, updated.PublishedPrecision = "2026-08-06T13:31:00.000Z", "second"
 	if got := p.upsert([]normalizedArticle{{item: updated}}, now); len(got) != 1 || got[0].ID != base.ID || got[0].PublishedPrecision != "second" {
 		t.Fatalf("time upgrade = %+v", got)
+	}
+}
+
+func TestArticleReconciliationUpgradesOptionalMetadata(t *testing.T) {
+	p := &Poller{seen: map[string]seenArticle{}}
+	now := time.Now()
+	base := wsmsg.NewsItem{Headline: "Company Announces Public Offering", Type: "news", Symbols: []string{"US.AAPL"}, PublishedPrecision: "unknown"}
+	base.ID = articleID(base, "")
+	p.upsert([]normalizedArticle{{item: base}}, now)
+	updated := base
+	updated.Source, updated.URL = "GlobeNewswire", "https://example.com/aapl"
+	updated.ID = articleID(updated, "")
+	got := p.upsert([]normalizedArticle{{item: updated}}, now)
+	if len(got) != 1 || len(p.seen) != 1 || got[0].ID != base.ID || got[0].URL == "" || got[0].Source == "" {
+		t.Fatalf("optional metadata created duplicate: %+v", got)
+	}
+}
+
+func TestURLLessStoriesDoNotMergeAcrossSymbols(t *testing.T) {
+	p := &Poller{seen: map[string]seenArticle{}}
+	now := time.Now()
+	first := wsmsg.NewsItem{Headline: "Company Announces Public Offering", Source: "GlobeNewswire", Type: "news", Symbols: []string{"US.AAAA"}}
+	second := first
+	second.Symbols = []string{"US.BBBB"}
+	first.ID, second.ID = articleID(first, ""), articleID(second, "")
+	got := p.upsert([]normalizedArticle{{item: first}, {item: second}}, now)
+	if len(got) != 2 || len(p.seen) != 2 || got[0].ID == got[1].ID {
+		t.Fatalf("distinct URL-less stories merged: %+v", got)
 	}
 }
 

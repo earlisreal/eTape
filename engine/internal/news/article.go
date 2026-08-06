@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 
 const articleRetention = 7 * 24 * time.Hour
 const maxArticles = 5000
+const reconciliationWindow = 6 * time.Hour
 
 type normalizedArticle struct {
 	item        wsmsg.NewsItem
@@ -48,7 +50,7 @@ func normalizeArticles(raw []searchNews, queried string, plan SymbolPlan, now ti
 			continue
 		}
 		item := wsmsg.NewsItem{Symbols: symbols, Headline: n.Title, Source: n.Source, URL: n.URL, SeenAt: iso(now), PublishedAt: pt.At, PublishedPrecision: pt.Precision, ViewCount: n.ViewCount, Type: mapNewsType(n.NewsSubType)}
-		item.ID = articleID(item)
+		item.ID = articleID(item, n.PublishTime)
 		c := classifyCatalyst(catalystInput{Headline: item.Headline, Source: item.Source, Type: item.Type, PublishedAt: published, PublishedPrecision: item.PublishedPrecision, SeenAt: now, UsedRelatedSymbols: usedRelated})
 		item.CatalystCategory, item.CatalystScore, item.CatalystReasons = c.Category, c.Score, c.Reasons
 		out = append(out, normalizedArticle{item: item, publishedAt: published, usedRelated: usedRelated})
@@ -56,10 +58,10 @@ func normalizeArticles(raw []searchNews, queried string, plan SymbolPlan, now ti
 	return out
 }
 
-func articleID(item wsmsg.NewsItem) string {
+func articleID(item wsmsg.NewsItem, rawPublished string) string {
 	identity := canonicalURL(item.URL)
 	if identity == "" {
-		identity = strings.ToLower(strings.TrimSpace(item.Headline)) + "|" + strings.ToLower(strings.TrimSpace(item.Source)) + "|" + item.Type
+		identity = semanticFingerprint(item) + "|" + strings.ToLower(strings.TrimSpace(item.Source)) + "|" + strings.TrimSpace(rawPublished) + "|" + strings.Join(item.Symbols, "|")
 	}
 	sum := sha256.Sum256([]byte(identity))
 	return hex.EncodeToString(sum[:16])
@@ -83,6 +85,11 @@ func canonicalURL(raw string) string {
 func (p *Poller) upsert(items []normalizedArticle, now time.Time) []wsmsg.NewsItem {
 	out := make([]wsmsg.NewsItem, 0, len(items))
 	for _, a := range items {
+		if id, ok := p.reconcileID(a.item, now); ok {
+			a.item.ID = id
+		} else {
+			a.item.ID = p.uniqueID(a.item.ID)
+		}
 		prior, exists := p.seen[a.item.ID]
 		if !exists {
 			p.seen[a.item.ID] = seenArticle{Item: a.item, LastSeenAt: now}
@@ -98,6 +105,59 @@ func (p *Poller) upsert(items []normalizedArticle, now time.Time) []wsmsg.NewsIt
 		}
 	}
 	return out
+}
+
+func semanticFingerprint(item wsmsg.NewsItem) string {
+	return strings.ToLower(strings.TrimSpace(item.Headline)) + "|" + item.Type
+}
+
+func sharedSymbol(a, b []string) bool {
+	set := make(map[string]struct{}, len(a))
+	for _, symbol := range a {
+		set[symbol] = struct{}{}
+	}
+	for _, symbol := range b {
+		if _, ok := set[symbol]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// reconcileID retains the first article ID when optional fields appear later.
+// ponytail: bounded O(n) search over 5,000 retained items; add aliases only if profiling needs them.
+func (p *Poller) reconcileID(item wsmsg.NewsItem, now time.Time) (string, bool) {
+	url := canonicalURL(item.URL)
+	if url != "" {
+		for id, prior := range p.seen {
+			if canonicalURL(prior.Item.URL) == url {
+				return id, true
+			}
+		}
+	}
+	var id string
+	var latest time.Time
+	for candidate, prior := range p.seen {
+		if now.Sub(prior.LastSeenAt) > reconciliationWindow || semanticFingerprint(prior.Item) != semanticFingerprint(item) || !sharedSymbol(prior.Item.Symbols, item.Symbols) {
+			continue
+		}
+		if id == "" || prior.LastSeenAt.After(latest) {
+			id, latest = candidate, prior.LastSeenAt
+		}
+	}
+	return id, id != ""
+}
+
+func (p *Poller) uniqueID(base string) string {
+	if _, exists := p.seen[base]; !exists {
+		return base
+	}
+	for suffix := 2; ; suffix++ {
+		id := base + "-" + strconv.Itoa(suffix)
+		if _, exists := p.seen[id]; !exists {
+			return id
+		}
+	}
 }
 
 func mergeArticle(old, next wsmsg.NewsItem) (wsmsg.NewsItem, bool) {
