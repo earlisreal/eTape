@@ -113,12 +113,12 @@ function pushLiveBar(stores: ReturnType<typeof makeStores>, symbol: string, time
 // Mounts ChartPanel with a scheduler.register spy that captures the registered
 // Surface, mirroring the "repositions the MACD legend" test above — lets a test
 // call paint() directly instead of racing the scheduler's own rAF loop.
-function renderChartCapturingSurface(settingsOverride?: Record<string, unknown>) {
+function renderChartCapturingSurface(settingsOverride?: Record<string, unknown>, chartQueryResult?: unknown) {
   const stores = makeStores();
   const scheduler = new Scheduler(browserRaf, () => {});
   let surface: Surface | undefined;
   vi.spyOn(scheduler, "register").mockImplementation((s: Surface) => { surface = s; return vi.fn(); });
-  const utils = renderChart("c1", stores, scheduler, settingsOverride);
+  const utils = renderChart("c1", stores, scheduler, settingsOverride, chartQueryResult);
   return { ...utils, stores, getSurface: () => surface! };
 }
 
@@ -526,6 +526,28 @@ describe("ChartPanel", () => {
     } }));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(commands.sendQuery).toHaveBeenCalledWith("QueryChartWindow", expect.objectContaining({ symbol: "US.NVDA" }));
+  });
+
+  it("uses generated 10s display bars for the legend logical index", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-09T13:30:20Z"));
+    try {
+      const first: Bar = { symbol: "US.AAPL", timeframe: "10s", bucketStart: "2026-07-09T13:30:00Z", o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false };
+      const next: Bar = { ...first, bucketStart: "2026-07-09T13:30:20Z", o: 100.5, h: 12, l: 100, c: 12 };
+      const { getByTestId, stores, getSurface } = renderChartCapturingSurface({ timeframe: "10s" }, {
+        symbol: "US.AAPL", timeframe: "10s", fromMs: Date.parse(first.bucketStart), toMs: Date.parse(next.bucketStart), bars: [first, next], indicators: [], historyRevision: 1,
+      });
+      act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+        seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+      } }));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      act(() => getSurface().paint());
+      const crosshair = chartApi.subscribeCrosshairMove.mock.calls[0][0] as (param: { logical?: number }) => void;
+      act(() => crosshair({ logical: 1 })); // generated :10 slot, not raw :20 bar
+      expect(getByTestId("legend-c").textContent).toContain("100.5");
+      expect(getByTestId("legend-vol").textContent).toContain("0");
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it("camera button calls the chart's takeScreenshot", () => {

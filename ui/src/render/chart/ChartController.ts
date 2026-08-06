@@ -13,6 +13,8 @@ import type { FillMarker } from "./diamondMarker";
 import { bucketStartMs } from "./barBucket";
 
 export interface BarReader { series(symbol: string, timeframe: string): Bar[] }
+// Display-only extension. This never enters BarStore or engine-facing paths.
+export type DisplayBar = Bar & { synthetic?: true };
 export interface IndicatorReader { series(instanceId: string): { timeMs: number; value: number }[] }
 // IndicatorReader plus the ability to drop a series — resetForReload uses this to
 // wipe the previous symbol's points instead of leaving them stranded in the shared
@@ -41,12 +43,14 @@ export class ChartController {
   private volume!: LwcSeries;
   private lastAppliedCount = 0;             // bars applied via setData/update
   private lastAppliedKey = "";              // last bar's bucketStart|close, to detect in-progress change
+  private lastAppliedKeys: string[] = [];    // marker-aware fingerprints for interior replacement detection
   // bucketStart of the bar at index (lastAppliedCount-1) as of the last apply — an
   // anchor-identity check independent of value, so applyBars can tell a real tail
   // extension from a store snapshot that grew the series at the FRONT (deep-history
   // backfill prepending bars, or a daily series replacing a single derived bar).
   // See applyBars.
   private lastTailBucket = "";
+  private displayedBars: DisplayBar[] = [];
   private indicatorApplied = new Map<string, number>(); // per-series point count applied via setData/update
   private indicatorLastKey = new Map<string, string>(); // per-series fingerprint of the last applied point, `${timeMs}|${value}`
   // per-series timeMs of the point at index (applied-1) as of the last apply — an
@@ -135,13 +139,14 @@ export class ChartController {
     this.daySegmentBuildsThisSync = 0;
     const bars = this.deps.bars.series(this.config.symbol, this.config.timeframe);
     const displayBars = this.config.timeframe === "10s" ? fillEmptyTenSecondSlots(bars, nowMs) : bars;
+    this.displayedBars = displayBars;
     this.applyBars(displayBars);
     this.refreshBarCaches(displayBars);
     this.applyIndicators();
     this.applySessions(displayBars);
   }
 
-  private applyBars(bars: Bar[]): void {
+  private applyBars(bars: DisplayBar[]): void {
     if (bars.length === 0) return; // cold symbol — panel shows the hint, not an error
     if (!this.backfilled) {
       this.setAllBars(bars);
@@ -151,6 +156,14 @@ export class ChartController {
     // Rebuild safely if an unexpected reconnect/correction violates that contract.
     const anchor = bars[this.lastAppliedCount - 1];
     if (!anchor || anchor.bucketStart !== this.lastTailBucket) {
+      this.setAllBars(bars);
+      return;
+    }
+    const firstChanged = this.lastAppliedKeys.findIndex((key, i) => key !== keyOf(bars[i]));
+    // update() can replace only the tail. A delayed real bar (including one with
+    // identical OHLC) or a changed close that carries through synthetic slots is
+    // an interior display change and needs a complete seed.
+    if (firstChanged >= 0 && firstChanged < Math.min(this.lastAppliedCount - 1, bars.length)) {
       this.setAllBars(bars);
       return;
     }
@@ -182,6 +195,7 @@ export class ChartController {
       this.lastAppliedCount = bars.length;
       this.lastAppliedKey = keyOf(last);
       this.lastTailBucket = last.bucketStart;
+      this.lastAppliedKeys = bars.map(keyOf);
       this.lastBarsOp = "appended";
       this.appendedFrom = from;
     } else if (lastChanged) {
@@ -189,6 +203,7 @@ export class ChartController {
       this.volume.update(toVolume(last, this.palette));
       this.lastAppliedKey = keyOf(last);
       this.lastTailBucket = last.bucketStart;
+      this.lastAppliedKeys = bars.map(keyOf);
       // Auto-follow is LWC's default when already at the right edge; never force it
       // when the user has scrolled back (honesty: don't yank their view).
       this.lastBarsOp = "tailUpdated";
@@ -197,7 +212,7 @@ export class ChartController {
     }
   }
 
-  private setAllBars(bars: Bar[]): void {
+  private setAllBars(bars: DisplayBar[]): void {
     const before = this.facade.getVisibleRange();
     const startedAt = performance.now();
     this.candle.setData(bars.map((b) => this.mainPoint(b)));
@@ -226,12 +241,10 @@ export class ChartController {
       this.facade.scrollToRealTime();
     }
     this.backfilled = true;
-    // lastAppliedCount/lastAppliedKey/lastTailBucket track the REAL bars only — the
-    // incremental applyBars path above indexes into `bars` (the BarReader's series),
-    // which never includes this padding.
     this.lastAppliedCount = bars.length;
     this.lastAppliedKey = keyOf(bars[bars.length - 1]);
     this.lastTailBucket = bars[bars.length - 1].bucketStart;
+    this.lastAppliedKeys = bars.map(keyOf);
     // Single source of truth for the "reset" outcome: setAllBars is the only
     // thing all 3 reset call sites in applyBars share, so marking it here (rather
     // than once per call site) can't drift out of sync with a future 4th site.
@@ -243,6 +256,7 @@ export class ChartController {
   // (e.g. the drawings primitive) reuse the maintained cache instead of running
   // their own O(bars) .map(Date.parse) on every paint.
   barsMs(): readonly number[] { return this.barsMsCache; }
+  displayBars(): readonly DisplayBar[] { return this.displayedBars; }
 
   // bars.length as of the last refreshBarCaches call — a bookkeeping cursor kept
   // in sync with lastAppliedCount, exposed so tests can assert the caches never
@@ -268,7 +282,7 @@ export class ChartController {
   // bandsCache deep-equals bandsFromBars(bars) -- but ONLY while sessions are
   // active (see refreshBands' gate, Finding 1). See ChartController.test.ts's
   // equivalence tests.
-  private refreshBarCaches(bars: Bar[]): void {
+  private refreshBarCaches(bars: DisplayBar[]): void {
     if (bars.length === 0) return; // nothing to cache; resetForReload already cleared everything
     switch (this.lastBarsOp) {
       case "reset":
@@ -326,7 +340,7 @@ export class ChartController {
   // — the toggle-back-on scenario this gate must not regress. Only once the
   // cache is known-fresh does an "appended" sync fall back to the cheaper
   // incremental extend.
-  private refreshBands(bars: Bar[]): void {
+  private refreshBands(bars: DisplayBar[]): void {
     const sessionsActive = !["D", "W", "M"].includes(this.config.timeframe) && this.showSessions;
     if (!sessionsActive) { this.bandsCacheDirty = true; return; }
     if (this.bandsCacheDirty) {
@@ -345,7 +359,7 @@ export class ChartController {
   // to be empty when from === 0) through bars[from .. bars.length-1]. Mirrors
   // bandsFromBars' exact run-detection/edge semantics — see its comment — one
   // bar at a time using the already-parsed barsMsCache instead of re-parsing.
-  private extendBandsFrom(from: number, bars: Bar[]): void {
+  private extendBandsFrom(from: number, bars: DisplayBar[]): void {
     for (let i = from; i < bars.length; i++) {
       const ms = this.barsMsCache[i];
       if (!this.daySeg || ms < this.daySeg.dayStartMs || ms >= this.daySeg.dayEndMs) {
@@ -546,7 +560,9 @@ export class ChartController {
     this.backfilled = false;
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
+    this.lastAppliedKeys = [];
     this.lastTailBucket = "";
+    this.displayedBars = [];
     this.barsMsCache = [];
     this.bandsCache = [];
     this.cachedBarCount = 0;
@@ -595,8 +611,7 @@ export class ChartController {
 
   // Main-series data point matched to the active chart type: OHLC for candle/bar,
   // single close value for line/area (LWC line/area series read `.value`).
-  private mainPoint(b: Bar): object {
-    if (isWhitespace(b)) return { time: toLwcTime(b.bucketStart) };
+  private mainPoint(b: DisplayBar): object {
     return this.chartType === "line" || this.chartType === "area"
       ? { time: toLwcTime(b.bucketStart), value: b.c }
       : toCandle(b);
@@ -605,7 +620,7 @@ export class ChartController {
   private visibleCandleRange(): PriceRange | null {
     const range = this.facade.getVisibleLogicalRange();
     if (!range) return null;
-    const bars = this.deps.bars.series(this.config.symbol, this.config.timeframe);
+    const bars = this.displayedBars;
     const from = Math.max(0, Math.floor(range.from));
     const to = Math.min(bars.length - 1, Math.ceil(range.to));
     return from <= to ? candleRangeOf(bars.slice(from, to + 1)) : null;
@@ -620,7 +635,9 @@ export class ChartController {
     this.backfilled = false;
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
+    this.lastAppliedKeys = [];
     this.lastTailBucket = "";
+    this.displayedBars = [];
     this.barsMsCache = [];
     this.bandsCache = [];
     this.cachedBarCount = 0;
@@ -680,7 +697,7 @@ export class ChartController {
   }
 }
 
-function keyOf(b: Bar): string { return `${b.bucketStart}|${b.c}|${b.h}|${b.l}|${b.v}|${b.inProgress}`; }
+function keyOf(b: DisplayBar): string { return `${b.bucketStart}|${b.o}|${b.c}|${b.h}|${b.l}|${b.v}|${b.inProgress}|${b.synthetic === true}`; }
 function bareSymbol(s: string): string { return s.replace(/^US\./, ""); }
 // Whether bars[from..] is non-decreasing by bucketStart — the property update()'s
 // bar-by-bar replay depends on to never hand Lightweight Charts a time that goes
@@ -691,8 +708,8 @@ function isSorted(bars: Bar[], from: number): boolean {
   }
   return true;
 }
-function toCandle(b: Bar) { return { time: toLwcTime(b.bucketStart), open: b.o, high: b.h, low: b.l, close: b.c }; }
-function candleRangeOf(bars: Bar[]): PriceRange {
+function toCandle(b: DisplayBar) { return { time: toLwcTime(b.bucketStart), open: b.o, high: b.h, low: b.l, close: b.c }; }
+function candleRangeOf(bars: readonly DisplayBar[]): PriceRange {
   let minValue = Infinity, maxValue = -Infinity;
   for (const b of bars) {
     if (b.l < minValue) minValue = b.l;
@@ -700,23 +717,21 @@ function candleRangeOf(bars: Bar[]): PriceRange {
   }
   return { minValue, maxValue };
 }
-function toVolume(b: Bar, p: Palette) {
-  if (isWhitespace(b)) return { time: toLwcTime(b.bucketStart) };
+function toVolume(b: DisplayBar, p: Palette) {
+  if (b.synthetic) return { time: toLwcTime(b.bucketStart) };
   return { time: toLwcTime(b.bucketStart), value: b.v, color: b.c >= b.o ? p.volUp : p.volDown };
 }
 
-function isWhitespace(b: Bar): boolean { return b.o === 0 && b.h === 0 && b.l === 0 && b.c === 0 && b.v === 0; }
-
-export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number): Bar[] {
+export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number): DisplayBar[] {
   if (bars.length === 0) return bars;
   const current = bucketStartMs(nowMs, "10s");
-  const out: Bar[] = [];
+  const out: DisplayBar[] = [];
   for (let i = 0; i < bars.length; i++) {
     const real = bars[i];
     out.push(real);
     const limit = Math.min(i + 1 < bars.length ? Date.parse(bars[i + 1].bucketStart) : current + 10_000, current + 10_000);
     for (let ms = Date.parse(real.bucketStart) + 10_000; ms < limit && sessionAt(ms) !== "closed"; ms += 10_000) {
-      out.push({ ...real, bucketStart: new Date(ms).toISOString(), o: 0, h: 0, l: 0, c: 0, v: 0, inProgress: false });
+      out.push({ ...real, bucketStart: new Date(ms).toISOString(), o: real.c, h: real.c, l: real.c, c: real.c, v: 0, inProgress: false, synthetic: true });
     }
   }
   return out;

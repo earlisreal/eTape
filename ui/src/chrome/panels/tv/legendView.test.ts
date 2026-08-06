@@ -25,6 +25,12 @@ describe("computeLegendView", () => {
     expect(v.up).toBe(true);
   });
 
+  it("uses display-only synthetic bars at their own logical index", () => {
+    const display = [bars[0], { ...bars[0], bucketStart: "2026-07-08T13:30:10Z", o: 11, h: 11, l: 11, c: 11, v: 0, synthetic: true }];
+    const v = computeLegendView(display, emptyReader, [], LIGHT, 1);
+    expect(v).toMatchObject({ o: 11, h: 11, l: 11, c: 11, volume: 0, changePct: 0 });
+  });
+
   it("resolves indicator values + colors + a TV-style label", () => {
     const reader: IndicatorReader = { series: (k) => (k === "e1" ? [{ timeMs: Date.parse("2026-07-08T13:31:00Z"), value: 10.7 }] : []) };
     const v = computeLegendView(bars, reader, [{ instanceId: "e1", type: "EMA", params: { period: 9 } }], LIGHT, null);

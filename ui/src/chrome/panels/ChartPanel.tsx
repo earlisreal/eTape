@@ -412,7 +412,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     });
 
     const updateLegend = () => {
-      const bars = stores.bars.series(currentSymbol, tfRef.current);
+      const bars = controller.displayBars();
       legendRef.current?.update(computeLegendView(bars, stores.indicators, instancesRef.current, paletteRef.current, crosshairLogicalRef.current));
     };
     // subscribeCrosshairMove has the same unthrottled-input-rate shape as

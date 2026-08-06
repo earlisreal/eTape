@@ -119,16 +119,16 @@ const make = (reader: BarReader, cmd = commandSpy(), ind: IndicatorController = 
 };
 
 describe("ChartController", () => {
-  it("fills only the active 10s session with zero-valued source bars", () => {
+  it("fills only the active 10s session with marked flat display bars", () => {
     const real = { ...bar("2026-07-06T23:59:40Z", 10), timeframe: "10s" };
     const filled = fillEmptyTenSecondSlots([real], Date.parse("2026-07-07T00:00:20Z"));
-    expect(filled.map((b) => [b.bucketStart, b.o, b.h, b.l, b.c, b.v])).toEqual([
-      ["2026-07-06T23:59:40Z", 10, 10, 10, 10, 100],
-      ["2026-07-06T23:59:50.000Z", 0, 0, 0, 0, 0],
+    expect(filled.map((b) => [b.bucketStart, b.o, b.h, b.l, b.c, b.v, b.synthetic])).toEqual([
+      ["2026-07-06T23:59:40Z", 10, 10, 10, 10, 100, undefined],
+      ["2026-07-06T23:59:50.000Z", 10, 10, 10, 10, 0, true],
     ]);
   });
 
-  it("renders missing 10s buckets as price and volume whitespace", () => {
+  it("renders missing 10s buckets as flat prices with empty volume", () => {
     const bars = [{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }];
     const facade = fakeFacade();
     const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
@@ -136,8 +136,8 @@ describe("ChartController", () => {
     ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
     expect(facade.created[0].series.setDataCalls.at(-1)).toEqual([
       { time: Date.parse("2026-07-06T13:30:00Z") / 1000, open: 10, high: 10, low: 10, close: 10 },
-      { time: Date.parse("2026-07-06T13:30:10Z") / 1000 },
-      { time: Date.parse("2026-07-06T13:30:20Z") / 1000 },
+      { time: Date.parse("2026-07-06T13:30:10Z") / 1000, open: 10, high: 10, low: 10, close: 10 },
+      { time: Date.parse("2026-07-06T13:30:20Z") / 1000, open: 10, high: 10, low: 10, close: 10 },
     ]);
     expect(facade.created[1].series.setDataCalls.at(-1)?.slice(1)).toEqual([
       { time: Date.parse("2026-07-06T13:30:10Z") / 1000 },
@@ -158,9 +158,39 @@ describe("ChartController", () => {
     ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
     expect(facade.created[0].series.setDataCalls.at(-1)).toEqual([
       { time: Date.parse("2026-07-06T13:30:00Z") / 1000, open: 10, high: 10, low: 10, close: 10 },
-      { time: Date.parse("2026-07-06T13:30:10Z") / 1000 },
+      { time: Date.parse("2026-07-06T13:30:10Z") / 1000, open: 10, high: 10, low: 10, close: 10 },
       { time: Date.parse("2026-07-06T13:30:20Z") / 1000, open: 12, high: 12, low: 12, close: 12 },
     ]);
+  });
+
+  it("rebuilds when a delayed real bar replaces an identical interior synthetic bar", () => {
+    const reader = mutableBarReader([{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }]);
+    const facade = fakeFacade();
+    const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
+    ctrl.mount();
+    ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
+    reader.set([
+      { ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" },
+      { ...bar("2026-07-06T13:30:10Z", 10), timeframe: "10s" },
+    ]);
+    ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
+    expect(facade.created[0].series.setDataCalls).toHaveLength(2);
+    expect(ctrl.displayBars()[1].synthetic).toBeUndefined();
+  });
+
+  it("rebuilds when a corrected close changes its synthetic suffix", () => {
+    const bars = [{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }];
+    const { facade, ctrl } = (() => {
+      const facade = fakeFacade();
+      const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
+      ctrl.mount();
+      return { facade, ctrl };
+    })();
+    ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
+    bars[0] = { ...bar("2026-07-06T13:30:00Z", 12), timeframe: "10s" };
+    ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
+    expect(facade.created[0].series.setDataCalls).toHaveLength(2);
+    expect(ctrl.displayBars()[1].c).toBe(12);
   });
 
   it("mount creates a candle + volume series", () => {
