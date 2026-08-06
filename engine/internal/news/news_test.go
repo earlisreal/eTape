@@ -165,6 +165,21 @@ func TestURLLessArticleIDAllowsTimeUpgrade(t *testing.T) {
 	}
 }
 
+func TestURLLessDatePrecisionUpgradesToSecond(t *testing.T) {
+	p := &Poller{seen: map[string]seenArticle{}}
+	now := time.Date(2026, 5, 13, 14, 0, 0, 0, time.UTC)
+	date := wsmsg.NewsItem{Headline: "Result", Source: "Wire", Type: "news", Symbols: []string{"US.AAPL"}, PublishedAt: "2026-05-13T04:00:00.000Z", PublishedPrecision: "date"}
+	date.ID = articleID(date, "5/13")
+	p.upsert([]normalizedArticle{{item: date}}, now)
+	second := date
+	second.PublishedAt, second.PublishedPrecision = "2026-05-13T13:31:00.000Z", "second"
+	second.ID = articleID(second, "2026-05-13 09:31:00")
+	got := p.upsert([]normalizedArticle{{item: second}}, now.Add(time.Minute))
+	if len(got) != 1 || len(p.seen) != 1 || got[0].ID != date.ID || got[0].PublishedAt != second.PublishedAt || got[0].PublishedPrecision != "second" {
+		t.Fatalf("date precision upgrade = %+v", got)
+	}
+}
+
 func TestArticleReconciliationUpgradesOptionalMetadata(t *testing.T) {
 	p := &Poller{seen: map[string]seenArticle{}}
 	now := time.Now()

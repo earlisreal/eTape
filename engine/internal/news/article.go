@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
 
@@ -146,7 +147,7 @@ func (p *Poller) reconcileID(item wsmsg.NewsItem, now time.Time) (string, bool) 
 			(url != "" && priorURL != "" && url != priorURL) || conflictingSource(item.Source, prior.Item.Source) {
 			continue
 		}
-		if knownPublished(prior.Item) && knownPublished(item) && prior.Item.PublishedAt != item.PublishedAt {
+		if conflictingPublication(prior.Item, item) {
 			continue
 		}
 		if id == "" || prior.LastSeenAt.After(latest) {
@@ -163,6 +164,22 @@ func conflictingSource(a, b string) bool {
 
 func knownPublished(item wsmsg.NewsItem) bool {
 	return item.PublishedPrecision != "unknown" && item.PublishedAt != ""
+}
+
+func conflictingPublication(a, b wsmsg.NewsItem) bool {
+	if !knownPublished(a) || !knownPublished(b) {
+		return false
+	}
+	aTime, aOK := parseISO(a.PublishedAt)
+	bTime, bOK := parseISO(b.PublishedAt)
+	if !aOK || !bOK {
+		return a.PublishedAt != b.PublishedAt
+	}
+	if a.PublishedPrecision == "second" && b.PublishedPrecision == "second" {
+		return !aTime.Equal(bTime)
+	}
+	aET, bET := aTime.In(session.Loc()), bTime.In(session.Loc())
+	return aET.Year() != bET.Year() || aET.YearDay() != bET.YearDay()
 }
 
 func (p *Poller) uniqueID(base string) string {
