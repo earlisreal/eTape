@@ -19,6 +19,10 @@ body {
   background: var(--bg); border-bottom: 3px double var(--border-strong);
 }
 .ledger-title { font-family: "IBM Plex Serif", Georgia, serif; font-weight: 600; }
+.chart-header-controls { container-type: inline-size; }
+@container (max-width: 360px) {
+  .chart-header-drawings-label { display: none; }
+}
 .col-head {
   font-family: "IBM Plex Sans", system-ui, sans-serif; font-size: 9.5px;
   letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted);

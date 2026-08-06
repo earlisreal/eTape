@@ -34,37 +34,43 @@ export function ChartHeaderControls(
   const sep = <div style={{ width: 1, height: 16, background: palette.border, margin: "0 4px", flex: "0 0 auto" }} />;
 
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0, overflow: "hidden" }}>
-      {TIMEFRAMES.map((tf) => {
-        const on = tf === timeframe;
-        return (
-          <HoverButton key={tf} type="button" aria-label={`timeframe ${tf}`} aria-pressed={on} onClick={() => onTimeframe(tf)}
-            style={{ ...btn, fontWeight: on ? 700 : 500, color: on ? palette.accent : palette.textMuted }}
-            hoverStyle={{ background: palette.surface, color: on ? palette.accent : palette.text }}>
-            {tf}
-          </HoverButton>
-        );
-      })}
-      {sep}
-      <HoverButton ref={indicatorsBtnRef} type="button" aria-label="indicators" aria-haspopup="menu" aria-expanded={pickerOpen}
-        onClick={() => setPickerOpen((v) => !v)} style={btn} hoverStyle={{ background: palette.surface, color: palette.text }}>
-        <IconIndicators size={13} /> Indicators
-      </HoverButton>
-      {pickerOpen && (
-        <IndicatorPickerPopover palette={palette} anchor={indicatorsBtnRef.current} onClose={() => setPickerOpen(false)}
-          onAdd={(t) => { onAddIndicator(t); setPickerOpen(false); }} />
-      )}
-      <HoverButton type="button" aria-label="drawing tools" aria-pressed={drawingToolsVisible}
-        title={drawingToolsVisible ? "Hide drawing tools" : "Show drawing tools"} onClick={onToggleDrawingTools}
-        style={{ ...btn, fontWeight: drawingToolsVisible ? 700 : 500, color: drawingToolsVisible ? palette.accent : palette.textMuted }}
-        hoverStyle={{ background: palette.surface, color: drawingToolsVisible ? palette.accent : palette.text }}>
-        <IconTrend size={13} /> Drawings
-      </HoverButton>
+    <div className="chart-header-controls" style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0, overflow: "hidden" }}>
+      <div className="chart-header-timeframes" style={{ display: "flex", alignItems: "center", gap: 2, flex: "1 1 auto", minWidth: 0, overflow: "hidden" }}>
+        {TIMEFRAMES.map((tf) => {
+          const on = tf === timeframe;
+          return (
+            <HoverButton key={tf} type="button" aria-label={`timeframe ${tf}`} aria-pressed={on} onClick={() => onTimeframe(tf)}
+              style={{ ...btn, fontWeight: on ? 700 : 500, color: on ? palette.accent : palette.textMuted }}
+              hoverStyle={{ background: palette.surface, color: on ? palette.accent : palette.text }}>
+              {tf}
+            </HoverButton>
+          );
+        })}
+        {sep}
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 2, flex: "0 0 auto" }}>
+        <HoverButton ref={indicatorsBtnRef} type="button" aria-label="indicators" aria-haspopup="menu" aria-expanded={pickerOpen}
+          onClick={() => setPickerOpen((v) => !v)} style={btn} hoverStyle={{ background: palette.surface, color: palette.text }}>
+          <IconIndicators size={13} /> Indicators
+        </HoverButton>
+        {pickerOpen && (
+          <IndicatorPickerPopover palette={palette} anchor={indicatorsBtnRef.current} onClose={() => setPickerOpen(false)}
+            onAdd={(t) => { onAddIndicator(t); setPickerOpen(false); }} />
+        )}
+        <HoverButton type="button" aria-label="drawing tools" aria-pressed={drawingToolsVisible}
+          title={drawingToolsVisible ? "Hide drawing tools" : "Show drawing tools"} onClick={onToggleDrawingTools}
+          style={{ ...btn, fontWeight: drawingToolsVisible ? 700 : 500, color: drawingToolsVisible ? palette.accent : palette.textMuted }}
+          hoverStyle={{ background: palette.surface, color: drawingToolsVisible ? palette.accent : palette.text }}>
+          <IconTrend size={13} /> <span className="chart-header-drawings-label">Drawings</span>
+        </HoverButton>
+      </div>
       <span style={{ flex: 1 }} />
-      <HoverButton type="button" aria-label="screenshot" onClick={onScreenshot} style={iconBtn}
-        hoverStyle={{ background: palette.surface, color: palette.text }}><IconCamera size={14} /></HoverButton>
-      <HoverButton type="button" aria-label="chart settings" onClick={onOpenSettings} style={iconBtn}
-        hoverStyle={{ background: palette.surface, color: palette.text }}><IconGear size={14} /></HoverButton>
+      <div style={{ display: "flex", alignItems: "center", gap: 2, flex: "0 0 auto" }}>
+        <HoverButton type="button" aria-label="screenshot" onClick={onScreenshot} style={iconBtn}
+          hoverStyle={{ background: palette.surface, color: palette.text }}><IconCamera size={14} /></HoverButton>
+        <HoverButton type="button" aria-label="chart settings" onClick={onOpenSettings} style={iconBtn}
+          hoverStyle={{ background: palette.surface, color: palette.text }}><IconGear size={14} /></HoverButton>
+      </div>
     </div>
   );
 }

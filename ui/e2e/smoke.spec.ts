@@ -63,6 +63,18 @@ test.describe("monitoring workspace", () => {
     await expect(page.getByText(/no symbols match|no symbol focused/i).first()).toBeVisible({ timeout: 15_000 });
     await page.screenshot({ path: "e2e/.artifacts/monitoring-loaded.png", fullPage: true });
   });
+
+  test("keeps chart header actions clickable when narrow", async ({ page }) => {
+    await page.setViewportSize({ width: 900, height: 700 });
+    await gotoAndApplyPreset(page, "e2e-monitoring-narrow-header", "Monitoring");
+    const chartPanel = page.getByTestId("chart-host").first().locator("xpath=../..");
+    const drawings = chartPanel.getByRole("button", { name: "drawing tools" });
+    await expect(drawings).toBeVisible({ timeout: 15_000 });
+    await drawings.click();
+    await chartPanel.getByRole("button", { name: "screenshot" }).click();
+    await chartPanel.getByRole("button", { name: "chart settings" }).click();
+    await expect(page.getByRole("dialog")).toBeVisible();
+  });
 });
 
 test.describe("link groups", () => {
