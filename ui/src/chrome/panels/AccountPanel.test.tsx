@@ -248,6 +248,18 @@ describe("AccountPanel", () => {
     expect(focus).toHaveBeenCalledWith("green", "US.AAPL");
   });
 
+  it("uses green fallback after a colored panel is reassigned to null", () => {
+    const { props, stores, focus, linkGroups } = mkProps("blue", null);
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false) });
+      linkGroups.focusVenue("green", "alpaca-paper");
+    });
+    wrap(props);
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({})] }));
+    fireEvent.doubleClick(screen.getByTestId("pos-row-alpaca-paper-US.AAPL"));
+    expect(focus).toHaveBeenCalledWith("green", "US.AAPL");
+  });
+
   // --- ported from PositionsPanel.test.tsx ---
   it("flatten on a long row submits a SELL for the full qty (priced from the quote)", () => {
     const { props, stores, sent, focus } = mkProps();

@@ -407,7 +407,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   useSyncExternalStore((cb) => stores.fills.subscribe(cb), () => stores.fills.getRev());
   // Force re-render on quote updates so live Unrl P&L refreshes.
   useSyncExternalStore((cb) => stores.quote.subscribe(cb), () => stores.quote.getRev());
-  const group = groupProp ?? config.group;
+  const group = groupProp === undefined ? config.group : groupProp;
   const openPositionSymbol = (symbol: string) => linkGroups.focus(group ?? "green", symbol);
   const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
   const { config: orderConfig } = useOrderConfig();
