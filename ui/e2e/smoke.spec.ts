@@ -67,12 +67,12 @@ test.describe("monitoring workspace", () => {
   test("keeps chart header actions clickable when narrow", async ({ page }) => {
     await page.setViewportSize({ width: 900, height: 700 });
     await gotoAndApplyPreset(page, "e2e-monitoring-narrow-header", "Monitoring");
-    const chartPanel = page.getByTestId("chart-host").first().locator("xpath=../..");
-    const drawings = chartPanel.getByRole("button", { name: "drawing tools" });
+    const chartFrame = page.getByTestId("chart-host").first().locator("xpath=../../..");
+    const drawings = chartFrame.getByRole("button", { name: "drawing tools" });
     await expect(drawings).toBeVisible({ timeout: 15_000 });
     await drawings.click();
-    await chartPanel.getByRole("button", { name: "screenshot" }).click();
-    await chartPanel.getByRole("button", { name: "chart settings" }).click();
+    await chartFrame.getByRole("button", { name: "screenshot" }).click();
+    await chartFrame.getByRole("button", { name: "chart settings" }).click();
     await expect(page.getByRole("dialog")).toBeVisible();
   });
 });

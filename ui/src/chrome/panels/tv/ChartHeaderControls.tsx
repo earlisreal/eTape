@@ -34,7 +34,7 @@ export function ChartHeaderControls(
   const sep = <div style={{ width: 1, height: 16, background: palette.border, margin: "0 4px", flex: "0 0 auto" }} />;
 
   return (
-    <div className="chart-header-controls" style={{ display: "flex", alignItems: "center", gap: 2, minWidth: 0, overflow: "hidden" }}>
+    <div className="chart-header-controls" style={{ display: "flex", alignItems: "center", gap: 2, flex: "1 1 auto", width: "100%", minWidth: 0, overflow: "hidden" }}>
       <div className="chart-header-timeframes" style={{ display: "flex", alignItems: "center", gap: 2, flex: "1 1 auto", minWidth: 0, overflow: "hidden" }}>
         {TIMEFRAMES.map((tf) => {
           const on = tf === timeframe;
