@@ -180,6 +180,37 @@ func TestArticleReconciliationUpgradesOptionalMetadata(t *testing.T) {
 	}
 }
 
+func TestArticleReconciliationRejectsConflictingMetadata(t *testing.T) {
+	now := time.Now()
+	for _, tc := range []struct {
+		name          string
+		first, second wsmsg.NewsItem
+	}{
+		{"urls", wsmsg.NewsItem{Headline: "Filing", Type: "notice", Symbols: []string{"US.AAPL"}, URL: "https://example.com/123"}, wsmsg.NewsItem{Headline: "Filing", Type: "notice", Symbols: []string{"US.AAPL"}, URL: "https://example.com/456"}},
+		{"sources", wsmsg.NewsItem{Headline: "Filing", Type: "notice", Symbols: []string{"US.AAPL"}, Source: "SEC"}, wsmsg.NewsItem{Headline: "Filing", Type: "notice", Symbols: []string{"US.AAPL"}, Source: "Newswire"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := &Poller{seen: map[string]seenArticle{}}
+			tc.first.ID, tc.second.ID = articleID(tc.first, ""), articleID(tc.second, "")
+			got := p.upsert([]normalizedArticle{{item: tc.first}, {item: tc.second}}, now)
+			if len(got) != 2 || len(p.seen) != 2 {
+				t.Fatalf("conflicting metadata merged: %+v", got)
+			}
+		})
+	}
+}
+
+func TestExactArticleIDSurvivesReconciliationWindow(t *testing.T) {
+	p := &Poller{seen: map[string]seenArticle{}}
+	now := time.Now()
+	item := wsmsg.NewsItem{Headline: "Result", Source: "Wire", Type: "news", Symbols: []string{"US.AAPL"}}
+	item.ID = articleID(item, "")
+	p.upsert([]normalizedArticle{{item: item}}, now)
+	if got := p.upsert([]normalizedArticle{{item: item}}, now.Add(reconciliationWindow+time.Hour)); len(got) != 0 || len(p.seen) != 1 {
+		t.Fatalf("exact article duplicated after window: %+v", p.seen)
+	}
+}
+
 func TestURLLessStoriesDoNotMergeAcrossSymbols(t *testing.T) {
 	p := &Poller{seen: map[string]seenArticle{}}
 	now := time.Now()

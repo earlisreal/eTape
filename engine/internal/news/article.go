@@ -85,10 +85,12 @@ func canonicalURL(raw string) string {
 func (p *Poller) upsert(items []normalizedArticle, now time.Time) []wsmsg.NewsItem {
 	out := make([]wsmsg.NewsItem, 0, len(items))
 	for _, a := range items {
-		if id, ok := p.reconcileID(a.item, now); ok {
-			a.item.ID = id
-		} else {
-			a.item.ID = p.uniqueID(a.item.ID)
+		if _, exists := p.seen[a.item.ID]; !exists {
+			if id, ok := p.reconcileID(a.item, now); ok {
+				a.item.ID = id
+			} else {
+				a.item.ID = p.uniqueID(a.item.ID)
+			}
 		}
 		prior, exists := p.seen[a.item.ID]
 		if !exists {
@@ -138,7 +140,9 @@ func (p *Poller) reconcileID(item wsmsg.NewsItem, now time.Time) (string, bool) 
 	var id string
 	var latest time.Time
 	for candidate, prior := range p.seen {
-		if now.Sub(prior.LastSeenAt) > reconciliationWindow || semanticFingerprint(prior.Item) != semanticFingerprint(item) || !sharedSymbol(prior.Item.Symbols, item.Symbols) {
+		priorURL := canonicalURL(prior.Item.URL)
+		if now.Sub(prior.LastSeenAt) > reconciliationWindow || semanticFingerprint(prior.Item) != semanticFingerprint(item) || !sharedSymbol(prior.Item.Symbols, item.Symbols) ||
+			(url != "" && priorURL != "" && url != priorURL) || conflictingSource(item.Source, prior.Item.Source) {
 			continue
 		}
 		if id == "" || prior.LastSeenAt.After(latest) {
@@ -146,6 +150,11 @@ func (p *Poller) reconcileID(item wsmsg.NewsItem, now time.Time) (string, bool) 
 		}
 	}
 	return id, id != ""
+}
+
+func conflictingSource(a, b string) bool {
+	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
+	return a != "" && b != "" && !strings.EqualFold(a, b)
 }
 
 func (p *Poller) uniqueID(base string) string {
