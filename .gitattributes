@@ -1,1 +1,1 @@
-* text=auto eol=lf
+ui/e2e/*.sh text eol=lf
