@@ -22,8 +22,9 @@ type normalizedArticle struct {
 	usedRelated bool
 }
 type seenArticle struct {
-	Item       wsmsg.NewsItem
-	LastSeenAt time.Time
+	Item        wsmsg.NewsItem
+	FirstSeenAt time.Time
+	LastSeenAt  time.Time
 }
 
 func normalizeArticles(raw []searchNews, queried string, plan SymbolPlan, now time.Time, maxAge time.Duration) []normalizedArticle {
@@ -94,7 +95,7 @@ func (p *Poller) upsert(items []normalizedArticle, now time.Time) []wsmsg.NewsIt
 		}
 		prior, exists := p.seen[a.item.ID]
 		if !exists {
-			p.seen[a.item.ID] = seenArticle{Item: a.item, LastSeenAt: now}
+			p.seen[a.item.ID] = seenArticle{Item: a.item, FirstSeenAt: now, LastSeenAt: now}
 			out = append(out, a.item)
 			continue
 		}
@@ -141,8 +142,11 @@ func (p *Poller) reconcileID(item wsmsg.NewsItem, now time.Time) (string, bool) 
 	var latest time.Time
 	for candidate, prior := range p.seen {
 		priorURL := canonicalURL(prior.Item.URL)
-		if now.Sub(prior.LastSeenAt) > reconciliationWindow || semanticFingerprint(prior.Item) != semanticFingerprint(item) || !sharedSymbol(prior.Item.Symbols, item.Symbols) ||
+		if now.Sub(prior.FirstSeenAt) > reconciliationWindow || semanticFingerprint(prior.Item) != semanticFingerprint(item) || !sharedSymbol(prior.Item.Symbols, item.Symbols) ||
 			(url != "" && priorURL != "" && url != priorURL) || conflictingSource(item.Source, prior.Item.Source) {
+			continue
+		}
+		if knownPublished(prior.Item) && knownPublished(item) && prior.Item.PublishedAt != item.PublishedAt {
 			continue
 		}
 		if id == "" || prior.LastSeenAt.After(latest) {
@@ -155,6 +159,10 @@ func (p *Poller) reconcileID(item wsmsg.NewsItem, now time.Time) (string, bool) 
 func conflictingSource(a, b string) bool {
 	a, b = strings.TrimSpace(a), strings.TrimSpace(b)
 	return a != "" && b != "" && !strings.EqualFold(a, b)
+}
+
+func knownPublished(item wsmsg.NewsItem) bool {
+	return item.PublishedPrecision != "unknown" && item.PublishedAt != ""
 }
 
 func (p *Poller) uniqueID(base string) string {

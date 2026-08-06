@@ -183,15 +183,17 @@ func TestArticleReconciliationUpgradesOptionalMetadata(t *testing.T) {
 func TestArticleReconciliationRejectsConflictingMetadata(t *testing.T) {
 	now := time.Now()
 	for _, tc := range []struct {
-		name          string
-		first, second wsmsg.NewsItem
+		name                string
+		first, second       wsmsg.NewsItem
+		firstRaw, secondRaw string
 	}{
-		{"urls", wsmsg.NewsItem{Headline: "Filing", Type: "notice", Symbols: []string{"US.AAPL"}, URL: "https://example.com/123"}, wsmsg.NewsItem{Headline: "Filing", Type: "notice", Symbols: []string{"US.AAPL"}, URL: "https://example.com/456"}},
-		{"sources", wsmsg.NewsItem{Headline: "Filing", Type: "notice", Symbols: []string{"US.AAPL"}, Source: "SEC"}, wsmsg.NewsItem{Headline: "Filing", Type: "notice", Symbols: []string{"US.AAPL"}, Source: "Newswire"}},
+		{"urls", wsmsg.NewsItem{Headline: "Filing", Type: "notice", Symbols: []string{"US.AAPL"}, URL: "https://example.com/123"}, wsmsg.NewsItem{Headline: "Filing", Type: "notice", Symbols: []string{"US.AAPL"}, URL: "https://example.com/456"}, "", ""},
+		{"sources", wsmsg.NewsItem{Headline: "Filing", Type: "notice", Symbols: []string{"US.AAPL"}, Source: "SEC"}, wsmsg.NewsItem{Headline: "Filing", Type: "notice", Symbols: []string{"US.AAPL"}, Source: "Newswire"}, "", ""},
+		{"publication", wsmsg.NewsItem{Headline: "Filing", Type: "notice", Symbols: []string{"US.AAPL"}, PublishedAt: "2026-08-06T13:00:00Z", PublishedPrecision: "second"}, wsmsg.NewsItem{Headline: "Filing", Type: "notice", Symbols: []string{"US.AAPL"}, PublishedAt: "2026-08-06T14:00:00Z", PublishedPrecision: "second"}, "2026-08-06 09:00:00", "2026-08-06 10:00:00"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			p := &Poller{seen: map[string]seenArticle{}}
-			tc.first.ID, tc.second.ID = articleID(tc.first, ""), articleID(tc.second, "")
+			tc.first.ID, tc.second.ID = articleID(tc.first, tc.firstRaw), articleID(tc.second, tc.secondRaw)
 			got := p.upsert([]normalizedArticle{{item: tc.first}, {item: tc.second}}, now)
 			if len(got) != 2 || len(p.seen) != 2 {
 				t.Fatalf("conflicting metadata merged: %+v", got)
@@ -208,6 +210,21 @@ func TestExactArticleIDSurvivesReconciliationWindow(t *testing.T) {
 	p.upsert([]normalizedArticle{{item: item}}, now)
 	if got := p.upsert([]normalizedArticle{{item: item}}, now.Add(reconciliationWindow+time.Hour)); len(got) != 0 || len(p.seen) != 1 {
 		t.Fatalf("exact article duplicated after window: %+v", p.seen)
+	}
+}
+
+func TestReconciliationWindowStartsAtFirstSeen(t *testing.T) {
+	p := &Poller{seen: map[string]seenArticle{}}
+	now := time.Now()
+	first := wsmsg.NewsItem{Headline: "Company Reports Results", Source: "Newswire", Type: "news", Symbols: []string{"US.AAPL"}, PublishedAt: "2026-08-06T13:00:00Z", PublishedPrecision: "second"}
+	first.ID = articleID(first, "2026-08-06 09:00:00")
+	p.upsert([]normalizedArticle{{item: first}}, now)
+	p.upsert([]normalizedArticle{{item: first}}, now.Add(5*time.Hour+50*time.Minute))
+	second := first
+	second.PublishedAt = "2026-08-06T20:00:00Z"
+	second.ID = articleID(second, "2026-08-06 16:00:00")
+	if got := p.upsert([]normalizedArticle{{item: second}}, now.Add(7*time.Hour)); len(got) != 1 || len(p.seen) != 2 {
+		t.Fatalf("recurring headline suppressed later article: %+v", p.seen)
 	}
 }
 
