@@ -139,6 +139,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const chartType0 = (config.settings.chartType as ChartType) ?? "candle";
   const hideAll0 = (config.settings.hideAllDrawings as boolean) ?? false;
   const railPos0 = (config.settings.drawingRailPos as RailPos | undefined) ?? null;
+  const drawingToolsVisible0 = (config.settings.drawingToolsVisible as boolean | undefined) ?? true;
   const chartSettings0: ChartSettings = { ...DEFAULT_CHART_SETTINGS, ...((config.settings.chartSettings as Partial<ChartSettings>) ?? {}) };
   // config.group is frozen (dockview captures this panel's factory once, at
   // creation, and never re-invokes it with a fresh config on a later group
@@ -173,6 +174,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // persisted setting is still honored at mount so old workspaces keep rendering.
   const chartType = chartType0;
   const [hideAll, setHideAll] = useState(hideAll0);
+  const [drawingToolsVisible, setDrawingToolsVisible] = useState(drawingToolsVisible0);
+  const [drawingRailPos, setDrawingRailPos] = useState<RailPos | null>(railPos0);
   const [chartSettings, setChartSettings] = useState<ChartSettings>(chartSettings0);
   const [settingsInstanceId, setSettingsInstanceId] = useState<string | null>(null);
   const [chartSettingsOpen, setChartSettingsOpen] = useState(false);
@@ -664,6 +667,15 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const next = !hideAll; setHideAll(next); drawingsPrimRef.current?.setHideAll(next);
     drawingsPrimRef.current?.requestUpdate(); persist({ hideAllDrawings: next });
   };
+  const toggleDrawingTools = () => {
+    const next = !drawingToolsVisible;
+    if (!next) {
+      setActiveTool("select");
+      interactionRef.current?.setTool("select");
+    }
+    setDrawingToolsVisible(next);
+    persist({ drawingToolsVisible: next });
+  };
   const applyChartSettings = (s: ChartSettings) => {
     setChartSettings(s);
     const c = controllerRef.current;
@@ -775,20 +787,21 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // that one tick rather than flash the controls inline first.
   const headerControls = <ChartHeaderControls palette={appPalette} timeframe={timeframe}
     onTimeframe={changeTimeframe} onAddIndicator={addIndicator}
-    onScreenshot={onScreenshot} onOpenSettings={() => setChartSettingsOpen(true)} />;
+    onScreenshot={onScreenshot} onOpenSettings={() => setChartSettingsOpen(true)}
+    drawingToolsVisible={drawingToolsVisible} onToggleDrawingTools={toggleDrawingTools} />;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", background: chrome.bg }}>
       {headerSlot === undefined ? headerControls : headerSlot ? createPortal(headerControls, headerSlot) : null}
       <div ref={hostRef} data-testid="chart-host" tabIndex={0} style={{ flex: 1, minHeight: 0, position: "relative" }}
         onContextMenu={onContextMenu}>
-        <TVDrawingRail chrome={chrome} activeTool={activeTool} hideAll={hideAll} symbol={chartSymbol}
+        {drawingToolsVisible && <TVDrawingRail chrome={chrome} activeTool={activeTool} hideAll={hideAll} symbol={chartSymbol}
           onSelectTool={(t) => { setActiveTool(t); interactionRef.current?.setTool(t); }}
           onToggleHideAll={toggleHideAll}
           hasSelection={() => interactionRef.current?.hasSelection() ?? false}
           onDeleteSelection={() => interactionRef.current?.deleteSelection()}
           onClearAll={() => stores.drawings.clearSymbol(chartSymbol)}
-          initialPos={railPos0} onPosChange={(p) => persist({ drawingRailPos: p })} />
+          initialPos={drawingRailPos} onPosChange={(p) => { setDrawingRailPos(p); persist({ drawingRailPos: p }); }} />}
         <TVLegend chrome={chrome} symbol={chartSymbol} timeframe={timeframe} instances={instances} paneOffsets={paneOffsets}
           rightAxisWidth={rightAxisWidth}
           onToggleHidden={toggleIndicatorHidden} onEditIndicator={setSettingsInstanceId} onRemoveIndicator={removeIndicator}

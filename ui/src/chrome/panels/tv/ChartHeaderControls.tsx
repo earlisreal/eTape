@@ -2,7 +2,7 @@
 import { useRef, useState, type CSSProperties } from "react";
 import type { Palette } from "../../../render/palette";
 import type { IndicatorType } from "../../../render/chart/indicatorSeries";
-import { IconIndicators, IconCamera, IconGear } from "./tvIcons";
+import { IconIndicators, IconCamera, IconGear, IconTrend } from "./tvIcons";
 import { IndicatorPickerPopover } from "./IndicatorPickerPopover";
 import { HoverButton } from "../../controls/HoverButton";
 
@@ -12,6 +12,7 @@ export interface ChartHeaderControlsProps {
   palette: Palette; timeframe: string;
   onTimeframe: (tf: string) => void;
   onAddIndicator: (type: IndicatorType) => void; onScreenshot: () => void; onOpenSettings: () => void;
+  drawingToolsVisible: boolean; onToggleDrawingTools: () => void;
 }
 
 // Replaces the retired TVToolbar. That component was a second, self-contained 38px
@@ -21,7 +22,7 @@ export interface ChartHeaderControlsProps {
 // header already shows — no separate symbol button here, and styled with the app
 // Daylight-Ledger palette + sans font so it reads as chrome, not canvas.
 export function ChartHeaderControls(
-  { palette, timeframe, onTimeframe, onAddIndicator, onScreenshot, onOpenSettings }: ChartHeaderControlsProps,
+  { palette, timeframe, onTimeframe, onAddIndicator, onScreenshot, onOpenSettings, drawingToolsVisible, onToggleDrawingTools }: ChartHeaderControlsProps,
 ): JSX.Element {
   const [pickerOpen, setPickerOpen] = useState(false);
   const indicatorsBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -53,6 +54,12 @@ export function ChartHeaderControls(
         <IndicatorPickerPopover palette={palette} anchor={indicatorsBtnRef.current} onClose={() => setPickerOpen(false)}
           onAdd={(t) => { onAddIndicator(t); setPickerOpen(false); }} />
       )}
+      <HoverButton type="button" aria-label="drawing tools" aria-pressed={drawingToolsVisible}
+        title={drawingToolsVisible ? "Hide drawing tools" : "Show drawing tools"} onClick={onToggleDrawingTools}
+        style={{ ...btn, fontWeight: drawingToolsVisible ? 700 : 500, color: drawingToolsVisible ? palette.accent : palette.textMuted }}
+        hoverStyle={{ background: palette.surface, color: drawingToolsVisible ? palette.accent : palette.text }}>
+        <IconTrend size={13} /> Drawings
+      </HoverButton>
       <span style={{ flex: 1 }} />
       <HoverButton type="button" aria-label="screenshot" onClick={onScreenshot} style={iconBtn}
         hoverStyle={{ background: palette.surface, color: palette.text }}><IconCamera size={14} /></HoverButton>

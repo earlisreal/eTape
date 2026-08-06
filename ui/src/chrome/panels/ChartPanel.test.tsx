@@ -51,6 +51,7 @@ import type { AckMsg, Bar, DeltaMsg, SysEvent } from "../../wire/contract";
 import { DEFAULT_CHART_SETTINGS } from "./tv/ChartSettingsDialog";
 import { FakeDrawingBus, FakeDrawingBusHub } from "../../../test/fakes";
 import { perf } from "../../perf/PerfMonitor";
+import { DrawingInteraction } from "../../render/chart/drawings/interaction";
 
 // jsdom has no ResizeObserver; ChartPanel's resize wiring only needs observe/disconnect.
 class MockResizeObserver {
@@ -409,6 +410,59 @@ describe("ChartPanel", () => {
       .map(([, args]) => (args as { timeframe: string }).timeframe);
     expect(chartQueries).toContain("W");
     expect(chartQueries).not.toContain("D");
+  });
+
+  it("shows drawing tools by default, toggles only its rail, and persists patch-only state", () => {
+    const { getByRole, queryByRole, onConfigChange } = renderChart();
+    const toggle = getByRole("button", { name: "drawing tools" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(getByRole("button", { name: "move toolbar" })).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(queryByRole("button", { name: "move toolbar" })).toBeNull();
+    expect(onConfigChange).toHaveBeenLastCalledWith({ drawingToolsVisible: false });
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(getByRole("button", { name: "move toolbar" })).toBeTruthy();
+    expect(onConfigChange).toHaveBeenLastCalledWith({ drawingToolsVisible: true });
+  });
+
+  it("honors persisted hidden drawing tools and keeps chart panels independent", () => {
+    const { container: hidden } = renderChart("hidden", undefined, undefined, { drawingToolsVisible: false });
+    const { container: visible, onConfigChange } = renderChart("visible");
+    expect(within(hidden).getByRole("button", { name: "drawing tools" }).getAttribute("aria-pressed")).toBe("false");
+    expect(within(hidden).queryByRole("button", { name: "move toolbar" })).toBeNull();
+    fireEvent.click(within(visible).getByRole("button", { name: "drawing tools" }));
+    expect(within(hidden).queryByRole("button", { name: "move toolbar" })).toBeNull();
+    expect(within(visible).queryByRole("button", { name: "move toolbar" })).toBeNull();
+    expect(onConfigChange).toHaveBeenLastCalledWith({ drawingToolsVisible: false });
+  });
+
+  it("restores the current drawing rail position after hide and show", () => {
+    const { getByRole, onConfigChange } = renderChart("c1", undefined, undefined, { drawingRailPos: { x: 33, y: 44 } });
+    const toggle = getByRole("button", { name: "drawing tools" });
+    const grip = getByRole("button", { name: "move toolbar" });
+    const rail = grip.parentElement as HTMLElement;
+    const host = rail.parentElement as HTMLElement;
+    vi.spyOn(rail, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 100, height: 30 } as DOMRect);
+    vi.spyOn(host, "getBoundingClientRect").mockReturnValue({ left: 0, top: 0, width: 400, height: 300 } as DOMRect);
+    fireEvent.pointerDown(grip, { clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(window, { clientX: 60, clientY: 70 });
+    fireEvent.pointerUp(window);
+    expect(onConfigChange).toHaveBeenLastCalledWith({ drawingRailPos: { x: 50, y: 60 } });
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+    expect((getByRole("button", { name: "move toolbar" }).parentElement as HTMLElement).style.left).toBe("50px");
+    expect((getByRole("button", { name: "move toolbar" }).parentElement as HTMLElement).style.top).toBe("60px");
+  });
+
+  it("disarms the active drawing tool when hiding the rail", () => {
+    const setTool = vi.spyOn(DrawingInteraction.prototype, "setTool");
+    const { getByRole } = renderChart();
+    fireEvent.click(getByRole("button", { name: "trend line" }));
+    fireEvent.click(getByRole("button", { name: "drawing tools" }));
+    expect(setTool).toHaveBeenLastCalledWith("select");
+    setTool.mockRestore();
   });
 
   it("does not reset a loaded VWAP when the linked group focuses the displayed symbol", async () => {

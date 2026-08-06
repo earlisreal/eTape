@@ -9,6 +9,7 @@ afterEach(cleanup);
 const base = {
   palette: LIGHT, timeframe: "1m",
   onTimeframe: vi.fn(), onAddIndicator: vi.fn(), onScreenshot: vi.fn(), onOpenSettings: vi.fn(),
+  drawingToolsVisible: true, onToggleDrawingTools: vi.fn(),
 };
 
 // jsdom/cssstyle normalizes hex assignments to rgb() on readback; run every
