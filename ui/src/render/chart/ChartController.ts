@@ -50,6 +50,7 @@ export class ChartController {
   // See applyBars.
   private lastTailBucket = "";
   private lastRawCount = 0;
+  private lastRawTailBucket = "";
   private lastRawTailKey = "";
   private displayedBars: DisplayBar[] = [];
   private indicatorApplied = new Map<string, number>(); // per-series point count applied via setData/update
@@ -162,14 +163,22 @@ export class ChartController {
     }
     if (this.config.timeframe === "10s") {
       const rawTailKey = rawBars.length ? keyOf(rawBars[rawBars.length - 1]) : "";
-      if (rawBars.length !== this.lastRawCount) {
-        // A source-count change can insert a delayed real bar. Compare only then,
-        // keeping normal tail updates and unrelated repaints O(1).
-        for (let i = 0; i < Math.min(this.lastAppliedCount - 1, bars.length); i++) {
-          if (keyOf(this.displayedBars[i]) !== keyOf(bars[i])) {
-            this.setAllBars(bars, rawBars);
-            return;
-          }
+      if (rawBars.length < this.lastRawCount) {
+        this.setAllBars(bars, rawBars);
+        return;
+      }
+      if (rawBars.length > this.lastRawCount) {
+        const previousTail = rawBars[this.lastRawCount - 1];
+        const rawTail = rawBars[rawBars.length - 1];
+        const displayTail = this.displayedBars.at(-1);
+        // Only a clean suffix append can stay incremental. An insertion/front
+        // growth, a revised old tail, or a delayed slot before the display tail
+        // can alter interior display slots.
+        if (!previousTail || !displayTail || previousTail.bucketStart !== this.lastRawTailBucket
+          || keyOf(previousTail) !== this.lastRawTailKey
+          || Date.parse(rawTail.bucketStart) < Date.parse(displayTail.bucketStart)) {
+          this.setAllBars(bars, rawBars);
+          return;
         }
       } else if (rawTailKey !== this.lastRawTailKey && bars.at(-1)?.synthetic) {
         // A corrected tail close carries through the synthetic suffix.
@@ -263,6 +272,7 @@ export class ChartController {
 
   private rememberRaw(bars: Bar[]): void {
     this.lastRawCount = bars.length;
+    this.lastRawTailBucket = bars.length ? bars[bars.length - 1].bucketStart : "";
     this.lastRawTailKey = bars.length ? keyOf(bars[bars.length - 1]) : "";
   }
 
@@ -577,6 +587,7 @@ export class ChartController {
     this.lastAppliedKey = "";
     this.lastTailBucket = "";
     this.lastRawCount = 0;
+    this.lastRawTailBucket = "";
     this.lastRawTailKey = "";
     this.displayedBars = [];
     this.barsMsCache = [];
@@ -653,6 +664,7 @@ export class ChartController {
     this.lastAppliedKey = "";
     this.lastTailBucket = "";
     this.lastRawCount = 0;
+    this.lastRawTailBucket = "";
     this.lastRawTailKey = "";
     this.displayedBars = [];
     this.barsMsCache = [];
