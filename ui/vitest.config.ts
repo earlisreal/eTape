@@ -53,7 +53,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'news',
-          include: ['src/data/NewsStore.test.ts', 'src/chrome/panels/StockInfoPanel.test.tsx'],
+          include: ['src/data/NewsStore.test.ts', 'src/chrome/panels/StockInfoPanel.test.tsx', 'fixtures/monitoring.test.ts'],
         },
       },
       {

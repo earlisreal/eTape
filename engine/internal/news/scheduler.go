@@ -6,8 +6,9 @@ import (
 )
 
 // SymbolPlan keeps active UI demand separate from scanner symbols. Active
-// demand gets priority; refresh intervals are minimums, not guarantees. One
-// 3.1s lane plus a sliding 10-per-30s limiter stays below Moomoo's quota.
+// demand gets priority, but a scanner slot is reserved after three active
+// attempts; refresh intervals are minimums, not guarantees. One 3.1s lane
+// plus a sliding 10-per-30s limiter stays below Moomoo's quota.
 type SymbolPlan struct{ Active, Scanner []string }
 
 func (p SymbolPlan) All() []string {
@@ -27,7 +28,10 @@ func (p SymbolPlan) All() []string {
 	return out
 }
 
-type scheduler struct{ attempts map[string]time.Time }
+type scheduler struct {
+	attempts          map[string]time.Time
+	consecutiveActive int
+}
 
 func newScheduler() *scheduler { return &scheduler{attempts: map[string]time.Time{}} }
 
@@ -49,17 +53,30 @@ func (s *scheduler) next(plan SymbolPlan, now time.Time, activeEvery, scannerEve
 		}
 		return best
 	}
-	if sym := choose(plan.Active, activeEvery); sym != "" {
-		return sym
+	active, scanner := choose(plan.Active, activeEvery), choose(plan.Scanner, scannerEvery)
+	if scanner != "" && (active == "" || s.consecutiveActive >= 3) {
+		return scanner
 	}
-	if sym := choose(plan.Scanner, scannerEvery); sym != "" {
-		return sym
+	if active != "" {
+		return active
+	}
+	if scanner != "" {
+		return scanner
 	}
 	s.prune(plan, now)
 	return ""
 }
 
-func (s *scheduler) record(symbol string, now time.Time) { s.attempts[symbol] = now }
+func (s *scheduler) record(plan SymbolPlan, symbol string, now time.Time) {
+	s.attempts[symbol] = now
+	for _, active := range plan.Active {
+		if symbol == active {
+			s.consecutiveActive++
+			return
+		}
+	}
+	s.consecutiveActive = 0
+}
 
 func (s *scheduler) prune(plan SymbolPlan, now time.Time) {
 	keep := map[string]struct{}{}

@@ -12,14 +12,14 @@
       { "symbol": "US.TSLA", "changePct": -2.1, "last": 240.50, "floatShares": 2800000000, "volume": 8000000 }
     ] } },
     { "topic": "news.item", "payload": [
-      { "symbol": "US.AAPL", "headline": "Apple ships record quarter",  "source": "Reuters",   "url": "https://ex.com/a1", "seen_at": "2026-07-06T13:29:50Z" },
-      { "symbol": "US.AAPL", "headline": "Analysts raise AAPL targets", "source": "Bloomberg", "url": "https://ex.com/a2", "seen_at": "2026-07-06T13:28:10Z" },
-      { "symbol": "US.NVDA", "headline": "NVDA unveils new GPU line",    "source": "CNBC",      "url": "https://ex.com/n1", "seen_at": "2026-07-06T13:25:00Z" }
+      { "id": "a1", "symbols": ["US.AAPL"], "headline": "Apple ships record quarter", "source": "Reuters", "url": "https://ex.com/a1", "seen_at": "2026-07-06T13:29:50Z", "published_at": "2026-07-06T13:29:00Z", "published_precision": "second", "view_count": 0, "type": "news", "catalyst_category": "earnings", "catalyst_score": 65, "catalyst_reasons": ["category:earnings"] },
+      { "id": "a2", "symbols": ["US.AAPL"], "headline": "Analysts raise AAPL targets", "source": "Bloomberg", "url": "https://ex.com/a2", "seen_at": "2026-07-06T13:28:10Z", "published_at": "", "published_precision": "unknown", "view_count": 0, "type": "rating", "catalyst_category": "analyst", "catalyst_score": 40, "catalyst_reasons": ["category:analyst"] },
+      { "id": "n1", "symbols": ["US.NVDA"], "headline": "NVDA unveils new GPU line", "source": "CNBC", "url": "https://ex.com/n1", "seen_at": "2026-07-06T13:25:00Z", "published_at": "2026-07-06T13:24:00Z", "published_precision": "second", "view_count": 0, "type": "news", "catalyst_category": "other", "catalyst_score": 0, "catalyst_reasons": [] }
     ] }
   ],
   "deltas": [
     { "afterMs": 1500, "topic": "news.item", "payload":
-      { "symbol": "US.AAPL", "headline": "Apple schedules fall event", "source": "WSJ", "url": "https://ex.com/a3", "seen_at": "2026-07-06T13:31:00Z" } },
+      { "id": "a3", "symbols": ["US.AAPL"], "headline": "Apple schedules fall event", "source": "WSJ", "url": "https://ex.com/a3", "seen_at": "2026-07-06T13:31:00Z", "published_at": "", "published_precision": "unknown", "view_count": 0, "type": "news", "catalyst_category": "corporate_action", "catalyst_score": 35, "catalyst_reasons": ["category:corporate_action"] } },
     { "afterMs": 2000, "topic": "scanner.rank", "key": "premarket", "payload": { "refreshedAt": "2026-07-06T08:30:02Z", "rows": [
       { "symbol": "US.DJT",  "changePct": 40.5, "last": 30.90, "floatShares": 110000000, "volume": 3600000 },
       { "symbol": "US.KO",   "changePct": 19.1, "last": 62.60, "floatShares": 4300000000, "volume": 1300000 },

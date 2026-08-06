@@ -74,5 +74,5 @@ func headlineHasTicker(headline, symbol string) bool {
 	if len(ticker) <= 2 {
 		prefix = ""
 	} // avoid lower-case English words such as "on"
-	return regexp.MustCompile(prefix + `(^|[^A-Z0-9])` + regexp.QuoteMeta(ticker) + `($|[^A-Z0-9])`).MatchString(headline)
+	return regexp.MustCompile(prefix + `(^|[^A-Za-z0-9])` + regexp.QuoteMeta(ticker) + `($|[^A-Za-z0-9])`).MatchString(headline)
 }

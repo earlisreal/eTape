@@ -61,7 +61,7 @@ func (p *Poller) Run(ctx context.Context) error {
 			p.prune(now)
 			symbol := p.scheduler.next(plan, now, time.Duration(p.cfg.ActiveRefreshMs)*time.Millisecond, time.Duration(p.cfg.ScannerRefreshMs)*time.Millisecond)
 			if symbol != "" && p.limiter.allow(now) {
-				p.scheduler.record(symbol, now)
+				p.scheduler.record(plan, symbol, now)
 				p.pollSymbol(ctx, symbol, plan, now)
 			}
 		}

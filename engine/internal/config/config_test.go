@@ -3,7 +3,10 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/BurntSushi/toml"
 )
 
 func TestLoadMissingFileReturnsDefaults(t *testing.T) {
@@ -272,6 +275,26 @@ func TestFeedQuotaWarnDefaults(t *testing.T) {
 	}
 	if c.Feed.HistQuotaWarnRemain != 10 {
 		t.Fatalf("HistQuotaWarnRemain default = %d, want 10", c.Feed.HistQuotaWarnRemain)
+	}
+}
+
+func TestLoadMigratesLegacyNewsWatchMs(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	legacy := Default()
+	legacy.News.WatchMs = 3000
+	var text strings.Builder
+	if err := toml.NewEncoder(&text).Encode(legacy); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(text.String()), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.News.WatchMs != 3100 {
+		t.Fatalf("legacy WatchMs = %d, want 3100", cfg.News.WatchMs)
 	}
 }
 

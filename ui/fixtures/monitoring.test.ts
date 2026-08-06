@@ -37,13 +37,17 @@ describe("monitoring fixture conforms to the contract", () => {
     }
   });
 
-  it("news items carry all five string fields", () => {
-    for (const e of all.filter((x) => x.topic === "news.item")) {
-      const items = Array.isArray(e.payload) ? e.payload : [e.payload];
-      for (const it of items as Record<string, unknown>[]) {
-        for (const f of ["symbol", "headline", "source", "url", "seen_at"]) expect(typeof it[f]).toBe("string");
-      }
-    }
+  it("news items carry the article contract", () => {
+	for (const e of all.filter((x) => x.topic === "news.item")) {
+		const items = Array.isArray(e.payload) ? e.payload : [e.payload];
+		for (const it of items as Record<string, unknown>[]) {
+			for (const f of ["id", "headline", "source", "url", "seen_at", "published_at", "published_precision", "type", "catalyst_category"]) expect(typeof it[f]).toBe("string");
+			expect(Array.isArray(it.symbols)).toBe(true);
+			expect(Array.isArray(it.catalyst_reasons)).toBe(true);
+			expect(isNum(it.view_count)).toBe(true);
+			expect(isNum(it.catalyst_score)).toBe(true);
+		}
+	}
   });
 
   it("scanner.hit carries string symbol + at", () => {

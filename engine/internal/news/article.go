@@ -48,7 +48,7 @@ func normalizeArticles(raw []searchNews, queried string, plan SymbolPlan, now ti
 			continue
 		}
 		item := wsmsg.NewsItem{Symbols: symbols, Headline: n.Title, Source: n.Source, URL: n.URL, SeenAt: iso(now), PublishedAt: pt.At, PublishedPrecision: pt.Precision, ViewCount: n.ViewCount, Type: mapNewsType(n.NewsSubType)}
-		item.ID = articleID(item, n.PublishTime)
+		item.ID = articleID(item)
 		c := classifyCatalyst(catalystInput{Headline: item.Headline, Source: item.Source, Type: item.Type, PublishedAt: published, PublishedPrecision: item.PublishedPrecision, SeenAt: now, UsedRelatedSymbols: usedRelated})
 		item.CatalystCategory, item.CatalystScore, item.CatalystReasons = c.Category, c.Score, c.Reasons
 		out = append(out, normalizedArticle{item: item, publishedAt: published, usedRelated: usedRelated})
@@ -56,10 +56,10 @@ func normalizeArticles(raw []searchNews, queried string, plan SymbolPlan, now ti
 	return out
 }
 
-func articleID(item wsmsg.NewsItem, rawPublished string) string {
+func articleID(item wsmsg.NewsItem) string {
 	identity := canonicalURL(item.URL)
 	if identity == "" {
-		identity = strings.ToLower(strings.TrimSpace(item.Headline)) + "|" + strings.ToLower(strings.TrimSpace(item.Source)) + "|" + strings.TrimSpace(rawPublished) + "|" + item.Type
+		identity = strings.ToLower(strings.TrimSpace(item.Headline)) + "|" + strings.ToLower(strings.TrimSpace(item.Source)) + "|" + item.Type
 	}
 	sum := sha256.Sum256([]byte(identity))
 	return hex.EncodeToString(sum[:16])

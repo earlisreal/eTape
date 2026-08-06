@@ -36,8 +36,10 @@ func TestAssociationIsConservative(t *testing.T) {
 	if len(items) != 2 || len(items[0].item.Symbols) != 2 || items[1].item.Symbols[0] != "US.AAPL" {
 		t.Fatalf("associations = %+v", items)
 	}
-	if got := normalizeArticles([]searchNews{{Title: "Economy turns on a dime"}}, "US.ON", plan, now, 96*time.Hour); len(got) != 0 {
-		t.Fatal("short ticker matched inside word")
+	for _, tc := range []struct{ symbol, headline string }{{"US.A", "Apple reports earnings"}, {"US.ON", "ONcology trial results"}, {"US.AI", "AIming for growth"}} {
+		if got := normalizeArticles([]searchNews{{Title: tc.headline}}, tc.symbol, plan, now, 96*time.Hour); len(got) != 0 {
+			t.Fatalf("%s matched %q", tc.symbol, tc.headline)
+		}
 	}
 	if got := normalizeArticles([]searchNews{{Title: "AI reports results"}}, "US.AI", plan, now, 96*time.Hour); len(got) != 1 {
 		t.Fatal("standalone short ticker did not match")
@@ -61,12 +63,12 @@ func TestArticleIDAndUpsert(t *testing.T) {
 	a := wsmsg.NewsItem{Headline: "A", Source: "S", URL: " HTTPS://Example.com/x#one ", Type: "news"}
 	b := a
 	b.URL = "https://example.com/x#two"
-	if articleID(a, "") != articleID(b, "") {
+	if articleID(a) != articleID(b) {
 		t.Fatal("fragment changed ID")
 	}
 	p := &Poller{seen: map[string]seenArticle{}}
 	now := time.Now()
-	a.ID = articleID(a, "")
+	a.ID = articleID(a)
 	a.Symbols = []string{"US.AAPL"}
 	a.PublishedPrecision = "unknown"
 	if got := p.upsert([]normalizedArticle{{item: a}}, now); len(got) != 1 {
@@ -106,7 +108,7 @@ func TestSchedulerAndLimiter(t *testing.T) {
 	if got := s.next(plan, now, time.Minute, time.Hour); got != "US.A" {
 		t.Fatalf("got %s", got)
 	}
-	s.record("US.A", now)
+	s.record(plan, "US.A", now)
 	if got := s.next(plan, now.Add(time.Second), time.Minute, time.Hour); got != "US.B" {
 		t.Fatalf("got %s", got)
 	}
@@ -121,6 +123,45 @@ func TestSchedulerAndLimiter(t *testing.T) {
 	}
 	if !l.allow(now.Add(31 * time.Second)) {
 		t.Fatal("quota did not expire")
+	}
+}
+
+func TestSchedulerReservesScannerSlot(t *testing.T) {
+	s := newScheduler()
+	plan := SymbolPlan{Active: []string{"US.A", "US.B", "US.C", "US.D"}, Scanner: []string{"US.S"}}
+	now := time.Now()
+	scannerRuns := 0
+	for i := 0; i < 40; i++ {
+		symbol := s.next(plan, now, 10*time.Second, time.Minute)
+		if symbol == "" {
+			t.Fatal("no symbol due")
+		}
+		s.record(plan, symbol, now)
+		if i == 3 && symbol != "US.S" {
+			t.Fatalf("scanner starved after active burst: %s", symbol)
+		}
+		if symbol == "US.S" {
+			scannerRuns++
+		}
+		now = now.Add(3100 * time.Millisecond)
+	}
+	if scannerRuns < 2 {
+		t.Fatalf("scanner polled %d times over two minutes", scannerRuns)
+	}
+}
+
+func TestURLLessArticleIDAllowsTimeUpgrade(t *testing.T) {
+	p := &Poller{seen: map[string]seenArticle{}}
+	now := time.Now()
+	base := wsmsg.NewsItem{Headline: "Result", Source: "Wire", Type: "news", Symbols: []string{"US.AAPL"}, PublishedPrecision: "unknown"}
+	base.ID = articleID(base)
+	if got := p.upsert([]normalizedArticle{{item: base}}, now); len(got) != 1 {
+		t.Fatal("initial item not emitted")
+	}
+	updated := base
+	updated.PublishedAt, updated.PublishedPrecision = "2026-08-06T13:31:00.000Z", "second"
+	if got := p.upsert([]normalizedArticle{{item: updated}}, now); len(got) != 1 || got[0].ID != base.ID || got[0].PublishedPrecision != "second" {
+		t.Fatalf("time upgrade = %+v", got)
 	}
 }
 

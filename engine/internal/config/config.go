@@ -258,6 +258,11 @@ func Load(path string) (Config, error) {
 	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return Config{}, fmt.Errorf("config %s: %w", path, err)
 	}
+	// Older complete configs encoded the former default directly. Migrate only
+	// that known-safe value; other invalid cadence values remain actionable.
+	if cfg.News.WatchMs == 3000 {
+		cfg.News.WatchMs = 3100
+	}
 	if cfg.Store.RetentionDays < 0 {
 		return Config{}, fmt.Errorf("config %s: store.retention_days must be >= 0", path)
 	}
