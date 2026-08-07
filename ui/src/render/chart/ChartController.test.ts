@@ -151,6 +151,7 @@ describe("ChartController", () => {
     const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
     ctrl.mount();
     ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
+    const scrollsBefore = facade.scrolls;
     reader.set([
       { ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" },
       { ...bar("2026-07-06T13:30:20Z", 12, true), timeframe: "10s" },
@@ -161,6 +162,7 @@ describe("ChartController", () => {
     expect(candle.setDataCalls).toHaveLength(1);
     expect(candle.updates.at(-1)).toEqual({ time: Date.parse("2026-07-06T13:30:20Z") / 1000, open: 12, high: 12, low: 12, close: 12 });
     expect(volume.updates.at(-1)).toEqual({ time: Date.parse("2026-07-06T13:30:20Z") / 1000, value: 100, color: LIGHT.volUp });
+    expect(facade.scrolls).toBe(scrollsBefore);
     expect(ctrl.displayBars().at(-1)?.synthetic).toBeUndefined();
   });
 
@@ -170,12 +172,45 @@ describe("ChartController", () => {
     const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
     ctrl.mount();
     ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
+    const beforeTime = {
+      from: Date.parse("2026-07-06T13:29:00Z") / 1000,
+      to: Date.parse("2026-07-06T13:30:20Z") / 1000,
+    };
+    facade.visibleRange = beforeTime;
+    facade.visibleLogicalRange = { from: -10, to: 6 };
+    const scrollsBefore = facade.scrolls;
     reader.set([
       { ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" },
       { ...bar("2026-07-06T13:30:10Z", 10), timeframe: "10s" },
     ]);
     ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
     expect(facade.created[0].series.setDataCalls).toHaveLength(2);
+    expect(facade.scrolls).toBe(scrollsBefore + 1);
+    expect(facade.setVisibleRangeCalls).toHaveLength(0);
+    expect(ctrl.displayBars()[1].synthetic).toBeUndefined();
+  });
+
+  it("preserves a historical viewport when a delayed real bar replaces an interior synthetic bar", () => {
+    const reader = mutableBarReader([{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }]);
+    const facade = fakeFacade();
+    const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
+    ctrl.mount();
+    ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
+    const beforeTime = {
+      from: Date.parse("2026-07-06T13:28:00Z") / 1000,
+      to: Date.parse("2026-07-06T13:30:10Z") / 1000,
+    };
+    facade.visibleRange = beforeTime;
+    facade.visibleLogicalRange = { from: -10, to: 1 };
+    const scrollsBefore = facade.scrolls;
+    reader.set([
+      { ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" },
+      { ...bar("2026-07-06T13:30:10Z", 10), timeframe: "10s" },
+    ]);
+    ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
+    expect(facade.created[0].series.setDataCalls).toHaveLength(2);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleRangeCalls.at(-1)).toEqual(beforeTime);
     expect(ctrl.displayBars()[1].synthetic).toBeUndefined();
   });
 

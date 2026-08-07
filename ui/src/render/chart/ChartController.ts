@@ -232,7 +232,12 @@ export class ChartController {
   }
 
   private setAllBars(bars: DisplayBar[], rawBars: Bar[]): void {
-    const before = this.facade.getVisibleRange();
+    const beforeTime = this.facade.getVisibleRange();
+    const beforeLogical = this.facade.getVisibleLogicalRange();
+    const oldLastLogical = this.lastAppliedCount - 1;
+    const wasFollowingLive = oldLastLogical >= 0
+      && beforeLogical !== null
+      && beforeLogical.to >= oldLastLogical;
     const startedAt = performance.now();
     this.candle.setData(bars.map((b) => this.mainPoint(b)));
     this.volume.setData(bars.map((b) => toVolume(b, this.palette)));
@@ -242,22 +247,24 @@ export class ChartController {
       bars: bars.length,
       elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
     });
-    if (before && bars.length > 0) {
-      // Restore the pre-rebuild time window — unless the user was parked at the
-      // right/live edge, where LWC's own follow-live behavior is already correct
-      // and must not be overridden into a stale range.
-      const newestSec = toLwcTime(bars[bars.length - 1].bucketStart);
-      const atRightEdge = before.to >= newestSec;
-      if (!atRightEdge) this.facade.setVisibleRange(before);
-    } else if (bars.length > 0) {
-      // No prior viewport to restore — a genuinely fresh load (initial mount, or
-      // a symbol/timeframe switch via resetForReload's setData([]) wipe). The
-      // chart/timeScale instance persists across symbol switches (ChartPanel's
-      // mount effect only re-runs on [config.id]), so without this a new symbol
-      // would silently inherit whatever scroll offset the PREVIOUS symbol was
-      // left at. Reset to the default resting position instead: latest bar +
-      // RIGHT_OFFSET_BARS of padding (same position "Jump to live" restores to).
-      this.facade.scrollToRealTime();
+    if (bars.length > 0) {
+      if (wasFollowingLive) {
+        // setData can change the logical right offset even when the latest bar
+        // was visible. Restore the resting live position without resetting zoom.
+        this.facade.scrollToRealTime();
+      } else if (this.lastAppliedCount > 0 && beforeTime) {
+        // Historical browsing must survive a rebuild unchanged.
+        this.facade.setVisibleRange(beforeTime);
+      } else {
+        // No prior viewport to restore — a genuinely fresh load (initial mount, or
+        // a symbol/timeframe switch via resetForReload's setData([]) wipe). The
+        // chart/timeScale instance persists across symbol switches (ChartPanel's
+        // mount effect only re-runs on [config.id]), so without this a new symbol
+        // would silently inherit whatever scroll offset the PREVIOUS symbol was
+        // left at. Reset to the default resting position instead: latest bar +
+        // RIGHT_OFFSET_BARS of padding (same position "Jump to live" restores to).
+        this.facade.scrollToRealTime();
+      }
     }
     this.backfilled = true;
     this.lastAppliedCount = bars.length;
