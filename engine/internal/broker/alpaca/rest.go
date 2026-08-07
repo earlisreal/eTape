@@ -71,6 +71,13 @@ type alpacaError struct {
 	Message string `json:"message"`
 }
 
+type assetStatusResponse struct {
+	BorrowStatus *string `json:"borrow_status"`
+	Shortable    *bool   `json:"shortable"`
+	Marginable   *bool   `json:"marginable"`
+	Tradable     *bool   `json:"tradable"`
+}
+
 // apiError turns a >=400 HTTP response into a Go error. It tries to decode
 // the structured {code,message} shape Alpaca documents, but an unparseable
 // or differently-shaped body (an HTML error page from a proxy outage, an
@@ -83,6 +90,37 @@ func apiError(status int, body []byte) error {
 		return fmt.Errorf("alpaca: status=%d code=%d message=%s", status, ae.Code, ae.Message)
 	}
 	return fmt.Errorf("alpaca: status=%d body=%s", status, body)
+}
+
+// assetStatus issues the narrow read-only GET /v2/assets/{symbol} request.
+// Borrow availability is intentionally not cached here: it can change, and
+// every call shares restClient.do's pooled execution rate limiter.
+func (rc *restClient) assetStatus(ctx context.Context, symbol string) (assetStatusResponse, error) {
+	symbol = wireSymbol(symbol)
+	if symbol == "" {
+		return assetStatusResponse{}, errors.New("alpaca: asset status requires symbol")
+	}
+	resp, err := rc.do(ctx, http.MethodGet, "/v2/assets/"+url.PathEscape(symbol), nil)
+	if err != nil {
+		return assetStatusResponse{}, fmt.Errorf("alpaca: asset status transport: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return assetStatusResponse{}, fmt.Errorf("alpaca: read asset status response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return assetStatusResponse{}, apiError(resp.StatusCode, body)
+	}
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return assetStatusResponse{}, errors.New("alpaca: asset status response is not an object")
+	}
+	var status assetStatusResponse
+	if err := json.Unmarshal(body, &status); err != nil {
+		return assetStatusResponse{}, fmt.Errorf("alpaca: decode asset status response: %w", err)
+	}
+	return status, nil
 }
 
 // submitOrder POSTs an order and returns Alpaca's broker-assigned order id.

@@ -95,6 +95,118 @@ func TestPing_StructuredError(t *testing.T) {
 	}
 }
 
+func TestAssetStatus_HTB(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/assets/TSLA", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"symbol":"TSLA","tradable":true,"marginable":true,"shortable":true,"borrow_status":"hard_to_borrow"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	got, err := rc.assetStatus(context.Background(), "US.TSLA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BorrowStatus == nil || *got.BorrowStatus != "hard_to_borrow" || got.Shortable == nil || !*got.Shortable || got.Marginable == nil || !*got.Marginable || got.Tradable == nil || !*got.Tradable {
+		t.Fatalf("HTB asset status = %+v", got)
+	}
+}
+
+func TestAssetStatus_ETBAndMissingBorrowStatus(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+		want *string
+	}{
+		{name: "ETB", body: `{"borrow_status":"easy_to_borrow"}`, want: func() *string { s := "easy_to_borrow"; return &s }()},
+		{name: "missing", body: `{"shortable":true}`, want: nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/v2/assets/AAPL", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(tc.body)) })
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+
+			rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+			got, err := rc.assetStatus(context.Background(), "US.AAPL")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if (got.BorrowStatus == nil) != (tc.want == nil) {
+				t.Fatalf("BorrowStatus = %v, want %v", got.BorrowStatus, tc.want)
+			}
+			if got.BorrowStatus != nil && tc.want != nil && *got.BorrowStatus != *tc.want {
+				t.Fatalf("BorrowStatus = %v, want %v", got.BorrowStatus, tc.want)
+			}
+		})
+	}
+}
+
+func TestAssetStatus_ExplicitFalseValues(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/assets/AAPL", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"tradable":false,"marginable":false,"shortable":false}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	got, err := rc.assetStatus(context.Background(), "US.AAPL")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]*bool{"shortable": got.Shortable, "marginable": got.Marginable, "tradable": got.Tradable} {
+		if value == nil || *value {
+			t.Fatalf("%s = %v, want non-nil false", name, value)
+		}
+	}
+}
+
+func TestAssetStatus_SymbolConversion(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/assets/AAPL", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/assets/AAPL" {
+			t.Errorf("request path = %q, want /v2/assets/AAPL", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`{}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if _, err := rc.assetStatus(context.Background(), "US.AAPL"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestAssetStatus_HTTPError(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/assets/AAPL", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"code":40410000,"message":"asset not found"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if _, err := rc.assetStatus(context.Background(), "US.AAPL"); err == nil || !strings.Contains(err.Error(), "asset not found") {
+		t.Fatalf("expected structured API error, got %v", err)
+	}
+}
+
+func TestAssetStatus_Malformed200(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/assets/AAPL", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{not valid json`)) })
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if _, err := rc.assetStatus(context.Background(), "US.AAPL"); err == nil {
+		t.Fatal("malformed 200 response must return a decode error")
+	}
+}
+
 // TestVerifyAccount_Success verifies a 200 GET /v2/account decodes the
 // account number — the happy path VerifyCredentials (alpaca.go) relies on to
 // report a credential that authenticates in the tested environment.

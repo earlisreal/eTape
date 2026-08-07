@@ -216,7 +216,9 @@ type WatchlistRemoveArgs struct {
 // for the Stock Info panel. Nullable numerics follow the ScannerRow
 // convention (`*float64` + tstype) — null means moomoo hasn't returned a
 // value for that field yet (e.g. no snapshot fetched, or the field is
-// genuinely absent for this instrument type).
+// genuinely absent for this instrument type). Alpaca asset fields are
+// informational only: false means Alpaca explicitly reported false, while
+// null means no Alpaca source, an unavailable field, or a failed request.
 type StockDetailPayload struct {
 	Symbol            string   `json:"symbol"`
 	Name              string   `json:"name"`
@@ -234,8 +236,12 @@ type StockDetailPayload struct {
 	Eps               *float64 `json:"eps" tstype:"number | null,required"`               // moomoo EarningsPershare
 	High52            *float64 `json:"high52" tstype:"number | null,required"`
 	Low52             *float64 `json:"low52" tstype:"number | null,required"`
-	Ema200            *float64 `json:"ema200" tstype:"number | null,required"` // 200-day EMA of daily closes; nil until 200 daily bars are backfilled
-	Volume            int64    `json:"volume"`                                 // 0 is legitimate
+	Ema200            *float64 `json:"ema200" tstype:"number | null,required"`       // 200-day EMA of daily closes; nil until 200 daily bars are backfilled
+	Volume            int64    `json:"volume"`                                       // 0 is legitimate
+	BorrowStatus      *string  `json:"borrowStatus" tstype:"string | null,required"` // informational; HTB still needs a future locate workflow
+	Shortable         *bool    `json:"shortable" tstype:"boolean | null,required"`   // asset-level flag, not short-order authorization
+	Marginable        *bool    `json:"marginable" tstype:"boolean | null,required"`  // asset-level flag, not account margin authorization
+	Tradable          *bool    `json:"tradable" tstype:"boolean | null,required"`    // asset-level flag, not execution authorization
 	RefreshedAt       string   `json:"refreshedAt"`
 }
 

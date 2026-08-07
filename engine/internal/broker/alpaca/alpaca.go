@@ -60,6 +60,17 @@ type Config struct {
 	Clock    clock.Clock
 }
 
+// AssetStatus is read-only Alpaca asset metadata for informational display.
+// shortable reports asset-level shortability, not permission to submit a
+// short; hard_to_borrow still requires the future locate workflow. marginable
+// and tradable are also asset-level flags, not account or risk authorization.
+type AssetStatus struct {
+	BorrowStatus *string
+	Shortable    *bool
+	Marginable   *bool
+	Tradable     *bool
+}
+
 // Adapter is the Alpaca exec.Broker implementation. It owns the REST client
 // (order entry/replace/cancel/flatten/snapshot) and the trade_updates
 // WebSocket client (live order/fill pushes), and holds only the bookkeeping
@@ -247,6 +258,22 @@ func (a *Adapter) ProbeRTT(ctx context.Context) (time.Duration, error) {
 	start := time.Now()
 	err := a.rest.ping(ctx)
 	return time.Since(start), err
+}
+
+// AssetStatus fetches the current read-only asset eligibility metadata used by
+// Stock Info. This does not perform a locate request or authorize a future
+// short order; execution must validate current venue/account state itself.
+func (a *Adapter) AssetStatus(ctx context.Context, symbol string) (AssetStatus, error) {
+	status, err := a.rest.assetStatus(ctx, symbol)
+	if err != nil {
+		return AssetStatus{}, err
+	}
+	return AssetStatus{
+		BorrowStatus: status.BorrowStatus,
+		Shortable:    status.Shortable,
+		Marginable:   status.Marginable,
+		Tradable:     status.Tradable,
+	}, nil
 }
 
 // Capabilities reports Alpaca's native replace, native flatten-all, and

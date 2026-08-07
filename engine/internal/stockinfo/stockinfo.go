@@ -1,10 +1,11 @@
 // Package stockinfo is the poll-only stock-fundamentals + industry fetcher
-// for the focused-symbol Stock Info panel. It combines three request/
+// for the Stock Info panel. It combines three request/
 // response moomoo protocols — Qot_GetSecuritySnapshot (3203: price, market
 // cap, float, PE, EPS, 52-week range), Qot_GetOwnerPlate (3207: industry/
 // sector plate lookup), and Qot_GetStaticInfo (3202: listing exchange) —
 // plus a locally-computed 200-day EMA from the daily bar archive, and
-// publishes one wsmsg.StockDetailPayload per symbol per tick.
+// optionally reads Alpaca asset metadata for active symbols before publishing
+// one wsmsg.StockDetailPayload per broad-universe symbol per tick.
 //
 // Rate-limit note: one 3203 request per RefreshMs tick per MaxPerReq-sized
 // chunk of symbols (fundamentals refresh every tick, no caching); 3207 and
@@ -20,11 +21,13 @@ package stockinfo
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"strings"
 	"time"
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/feed"
@@ -56,6 +59,13 @@ type dailyBarReader interface {
 	ReadDailyBars(symbol string) ([]feed.Bar, error)
 }
 
+// assetStatusReader is deliberately narrower than exec.Broker: Stock Info
+// needs only read-only asset metadata, and Alpaca failures must stay
+// supplemental to the Moomoo fundamentals path.
+type assetStatusReader interface {
+	AssetStatus(context.Context, string) (alpaca.AssetStatus, error)
+}
+
 // ema200Entry is the once-per-day cache entry for a symbol's EMA-200: day is
 // the UTC calendar day (YYYY-MM-DD) it was computed on, val is nil when
 // fewer than ema200Period daily bars were available that day.
@@ -64,26 +74,30 @@ type ema200Entry struct {
 	val *float64
 }
 
-// Poller ticks on cfg.RefreshMs, refetching fundamentals for every symbol in
-// symbols() every tick, industry/exchange for symbols not yet cached, and
-// EMA-200 at most once per UTC day per symbol (it reads the daily bar
-// archive, which only advances once per session). industry, exch, and ema
-// are only ever touched from the Run goroutine, so none needs a mutex.
+// Poller ticks on cfg.RefreshMs, refetching fundamentals for every broad
+// symbol in symbols() every tick, Alpaca metadata for activeSymbols() every
+// tick, industry/exchange for symbols not yet cached, and EMA-200 at most once
+// per UTC day per symbol (it reads the daily bar archive, which only advances
+// once per session). industry, exch, and ema are only ever touched from the
+// Run goroutine, so none needs a mutex.
 type Poller struct {
-	cfg      config.StockInfo
-	r        requester
-	pub      Publisher
-	clk      clock.Clock
-	bars     dailyBarReader
-	symbols  func() []string        // focused + watchlist symbols to refresh
-	industry map[string]string      // symbol -> resolved industry name; "" = known-absent
-	exch     map[string]string      // symbol -> resolved exchange label; "" = known-absent/unresolvable
-	ema      map[string]ema200Entry // symbol -> last-computed EMA-200, day-stamped
+	cfg           config.StockInfo
+	r             requester
+	pub           Publisher
+	clk           clock.Clock
+	bars          dailyBarReader
+	symbols       func() []string // broad focused + scanner universe for Moomoo
+	activeSymbols func() []string // active/focused symbols for Alpaca only
+	assetReader   assetStatusReader
+	industry      map[string]string      // symbol -> resolved industry name; "" = known-absent
+	exch          map[string]string      // symbol -> resolved exchange label; "" = known-absent/unresolvable
+	ema           map[string]ema200Entry // symbol -> last-computed EMA-200, day-stamped
 }
 
-func New(cfg config.StockInfo, r requester, pub Publisher, clk clock.Clock, symbols func() []string, bars dailyBarReader) *Poller {
+func New(cfg config.StockInfo, r requester, pub Publisher, clk clock.Clock, symbols func() []string, bars dailyBarReader, activeSymbols func() []string, assetReader assetStatusReader) *Poller {
 	return &Poller{
 		cfg: cfg, r: r, pub: pub, clk: clk, bars: bars, symbols: symbols,
+		activeSymbols: activeSymbols, assetReader: assetReader,
 		industry: map[string]string{}, exch: map[string]string{}, ema: map[string]ema200Entry{},
 	}
 }
@@ -115,6 +129,7 @@ func (p *Poller) fetchTick(ctx context.Context) {
 	}
 	refreshedAt := p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
 	snapshots := p.fetchSnapshots(ctx, syms)
+	assetStatuses := p.fetchAssetStatuses(ctx)
 	p.resolveIndustries(ctx, syms)
 	p.resolveExchanges(ctx, syms)
 	for _, sym := range syms {
@@ -126,8 +141,44 @@ func (p *Poller) fetchTick(ctx context.Context) {
 		payload.Symbol = sym
 		payload.Exchange = p.exch[sym]
 		payload.Ema200 = p.ema200For(sym)
+		if status, ok := assetStatuses[sym]; ok {
+			payload.BorrowStatus = status.BorrowStatus
+			payload.Shortable = status.Shortable
+			payload.Marginable = status.Marginable
+			payload.Tradable = status.Tradable
+		}
 		p.pub.Publish(wsmsg.TopicStockDetail, sym, payload)
 	}
+}
+
+// fetchAssetStatuses reads only active/focused symbols, never scanner-only
+// symbols. Reads are sequential and uncached because borrow availability can
+// change; each failure is isolated so Moomoo data still publishes.
+func (p *Poller) fetchAssetStatuses(ctx context.Context) map[string]alpaca.AssetStatus {
+	out := map[string]alpaca.AssetStatus{}
+	if p.assetReader == nil || p.activeSymbols == nil {
+		return out
+	}
+	set := map[string]struct{}{}
+	for _, sym := range p.activeSymbols() {
+		if sym != "" {
+			set[sym] = struct{}{}
+		}
+	}
+	syms := make([]string, 0, len(set))
+	for sym := range set {
+		syms = append(syms, sym)
+	}
+	sort.Strings(syms)
+	for _, sym := range syms {
+		status, err := p.assetReader.AssetStatus(ctx, sym)
+		if err != nil {
+			slog.Warn("stockinfo: alpaca asset status failed", "symbol", sym, "err", err)
+			continue
+		}
+		out[sym] = status
+	}
+	return out
 }
 
 // fetchSnapshots issues one Qot_GetSecuritySnapshot request per MaxPerReq

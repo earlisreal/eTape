@@ -2,12 +2,14 @@ package stockinfo
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/feed"
@@ -233,6 +235,34 @@ func (f *fakeRequester) Request(ctx context.Context, protoID uint32, req proto.M
 	}
 }
 
+type fakeAssetStatusReader struct {
+	statuses map[string]alpaca.AssetStatus
+	errs     map[string]error
+	calls    []string
+}
+
+func (f *fakeAssetStatusReader) AssetStatus(_ context.Context, symbol string) (alpaca.AssetStatus, error) {
+	f.calls = append(f.calls, symbol)
+	if err := f.errs[symbol]; err != nil {
+		return alpaca.AssetStatus{}, err
+	}
+	return f.statuses[symbol], nil
+}
+
+func enrichmentRequester() *fakeRequester {
+	fr := newFakeRequester()
+	fr.snapshotFn = func(codes []string) *snappb.Response {
+		list := make([]*snappb.Snapshot, 0, len(codes))
+		for _, code := range codes {
+			list = append(list, snapshotFor(code, true))
+		}
+		return &snappb.Response{RetType: proto.Int32(0), S2C: &snappb.S2C{SnapshotList: list}}
+	}
+	fr.ownerPlate = &ownerplatepb.Response{RetType: proto.Int32(0), S2C: &ownerplatepb.S2C{}}
+	fr.staticInfo = &staticpb.Response{RetType: proto.Int32(0), S2C: &staticpb.S2C{}}
+	return fr
+}
+
 // fakeBars is a dailyBarReader test double. barsFor, when set, overrides the
 // static bars map for a given symbol; err, when set, is returned for every
 // symbol (simulating a store-read failure). readCalls counts ReadDailyBars
@@ -387,7 +417,7 @@ func TestFetchTickPublishesOnePayloadPerSymbolKeyedBySymbol(t *testing.T) {
 	}
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars())
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars(), nil, nil)
 
 	p.fetchTick(context.Background())
 
@@ -424,7 +454,7 @@ func TestFetchTickETFGateNilsEquityFieldsButStillPublishes(t *testing.T) {
 	fr.staticInfo = &staticpb.Response{RetType: proto.Int32(0), S2C: &staticpb.S2C{}}
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars())
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars(), nil, nil)
 
 	p.fetchTick(context.Background())
 
@@ -458,7 +488,7 @@ func TestFetchTickIndustryCachedAcrossTicksNoRepeatOwnerPlateRequest(t *testing.
 	}
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars())
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars(), nil, nil)
 
 	p.fetchTick(context.Background())
 	if fr.calls[opend.ProtoQotGetOwnerPlate] != 1 {
@@ -496,7 +526,7 @@ func TestFetchTickCachesEmptyIndustryToAvoidRerequest(t *testing.T) {
 	fr.staticInfo = &staticpb.Response{RetType: proto.Int32(0), S2C: &staticpb.S2C{}}
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars())
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars(), nil, nil)
 
 	p.fetchTick(context.Background())
 	p.fetchTick(context.Background())
@@ -570,7 +600,7 @@ func TestFetchSnapshotsIsolatesBadSymbolViaBinarySplit(t *testing.T) {
 	syms := []string{"US.AAA", "US.BBB", "US.CCC"}
 	fr := newFakeRequester()
 	fr.snapshotFn = batchOrPoison("BBB")
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()), func() []string { return syms }, newFakeBars())
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()), func() []string { return syms }, newFakeBars(), nil, nil)
 
 	out := p.fetchSnapshots(context.Background(), syms)
 
@@ -589,7 +619,7 @@ func TestResolveIndustriesIsolatesBadSymbolAndCachesEmptyOnPersistentFailure(t *
 	syms := []string{"US.AAA", "US.BBB", "US.CCC"}
 	fr := newFakeRequester()
 	fr.ownerPlateFn = ownerPlateBatchOrPoison("BBB")
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()), func() []string { return syms }, newFakeBars())
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()), func() []string { return syms }, newFakeBars(), nil, nil)
 
 	p.resolveIndustries(context.Background(), syms)
 
@@ -631,7 +661,7 @@ func TestFetchTickPublishesGoodSymbolsWhenOneSnapshotBatchIsPoisoned(t *testing.
 	fr.ownerPlateFn = ownerPlateBatchOrPoison("BBB")
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars())
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars(), nil, nil)
 
 	p.fetchTick(context.Background())
 
@@ -654,7 +684,7 @@ func TestFetchTickSkipsWhenSymbolsEmpty(t *testing.T) {
 	fr := newFakeRequester()
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return nil }, newFakeBars())
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return nil }, newFakeBars(), nil, nil)
 
 	p.fetchTick(context.Background())
 
@@ -663,6 +693,110 @@ func TestFetchTickSkipsWhenSymbolsEmpty(t *testing.T) {
 	}
 	if fr.calls[opend.ProtoQotGetSecuritySnapshot] != 0 || fr.calls[opend.ProtoQotGetOwnerPlate] != 0 {
 		t.Fatalf("want no requests when symbols() is empty, got %+v", fr.calls)
+	}
+}
+
+func TestFetchTickEnrichesActiveSymbolsWithAlpacaStatus(t *testing.T) {
+	fr := enrichmentRequester()
+	pub := &fakePublisher{}
+	borrow := "hard_to_borrow"
+	reader := &fakeAssetStatusReader{statuses: map[string]alpaca.AssetStatus{
+		"US.AAPL": {BorrowStatus: &borrow, Shortable: proto.Bool(true), Marginable: proto.Bool(true), Tradable: proto.Bool(true)},
+	}}
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clock.NewFake(time.Now()),
+		func() []string { return []string{"US.AAPL"} }, newFakeBars(), func() []string { return []string{"US.AAPL"} }, reader)
+
+	p.fetchTick(context.Background())
+	payload := pub.calls[0].payload.(wsmsg.StockDetailPayload)
+	if payload.BorrowStatus == nil || *payload.BorrowStatus != "hard_to_borrow" || payload.Shortable == nil || !*payload.Shortable || payload.Marginable == nil || !*payload.Marginable || payload.Tradable == nil || !*payload.Tradable {
+		t.Fatalf("Alpaca status not merged into StockDetailPayload: %+v", payload)
+	}
+}
+
+func TestFetchTickPreservesAlpacaExplicitFalse(t *testing.T) {
+	fr := enrichmentRequester()
+	pub := &fakePublisher{}
+	reader := &fakeAssetStatusReader{statuses: map[string]alpaca.AssetStatus{
+		"US.AAPL": {Shortable: proto.Bool(false), Marginable: proto.Bool(false), Tradable: proto.Bool(false)},
+	}}
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clock.NewFake(time.Now()),
+		func() []string { return []string{"US.AAPL"} }, newFakeBars(), func() []string { return []string{"US.AAPL"} }, reader)
+
+	p.fetchTick(context.Background())
+	payload := pub.calls[0].payload.(wsmsg.StockDetailPayload)
+	for name, value := range map[string]*bool{"shortable": payload.Shortable, "marginable": payload.Marginable, "tradable": payload.Tradable} {
+		if value == nil || *value {
+			t.Fatalf("%s = %v, want non-nil false", name, value)
+		}
+	}
+}
+
+func TestFetchTickWithoutAlpacaReaderStillPublishesWithNilStatus(t *testing.T) {
+	fr := enrichmentRequester()
+	pub := &fakePublisher{}
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clock.NewFake(time.Now()),
+		func() []string { return []string{"US.AAPL"} }, newFakeBars(), func() []string { return []string{"US.AAPL"} }, nil)
+
+	p.fetchTick(context.Background())
+	if len(pub.calls) != 1 {
+		t.Fatalf("Moomoo data should publish without Alpaca, got %d calls", len(pub.calls))
+	}
+	payload := pub.calls[0].payload.(wsmsg.StockDetailPayload)
+	if payload.BorrowStatus != nil || payload.Shortable != nil || payload.Marginable != nil || payload.Tradable != nil {
+		t.Fatalf("unconfigured Alpaca fields should remain nil: %+v", payload)
+	}
+}
+
+func TestFetchTickIsolatesAlpacaFailure(t *testing.T) {
+	fr := enrichmentRequester()
+	pub := &fakePublisher{}
+	reader := &fakeAssetStatusReader{errs: map[string]error{"US.AAPL": errors.New("asset unavailable")}}
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clock.NewFake(time.Now()),
+		func() []string { return []string{"US.AAPL"} }, newFakeBars(), func() []string { return []string{"US.AAPL"} }, reader)
+
+	p.fetchTick(context.Background())
+	if len(pub.calls) != 1 {
+		t.Fatalf("Moomoo data should publish when Alpaca fails, got %d calls", len(pub.calls))
+	}
+	payload := pub.calls[0].payload.(wsmsg.StockDetailPayload)
+	if payload.Name == "" || payload.Price == nil || payload.BorrowStatus != nil || payload.Shortable != nil || payload.Marginable != nil || payload.Tradable != nil {
+		t.Fatalf("Alpaca failure should only remove supplemental fields: %+v", payload)
+	}
+}
+
+func TestFetchTickQueriesAlpacaOnlyForActiveSymbols(t *testing.T) {
+	fr := enrichmentRequester()
+	reader := &fakeAssetStatusReader{statuses: map[string]alpaca.AssetStatus{}}
+	active := []string{"US.AAPL", "US.AAPL"}
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()),
+		func() []string { return []string{"US.AAPL", "US.NVDA", "US.TSLA"} }, newFakeBars(), func() []string { return active }, reader)
+
+	p.fetchTick(context.Background())
+	if len(reader.calls) != 1 || reader.calls[0] != "US.AAPL" {
+		t.Fatalf("Alpaca calls = %v, want only deduped active US.AAPL", reader.calls)
+	}
+}
+
+func TestFetchTickRefreshesBorrowStatus(t *testing.T) {
+	fr := enrichmentRequester()
+	pub := &fakePublisher{}
+	htb, etb := "hard_to_borrow", "easy_to_borrow"
+	reader := &fakeAssetStatusReader{statuses: map[string]alpaca.AssetStatus{
+		"US.AAPL": {BorrowStatus: &htb},
+	}}
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clock.NewFake(time.Now()),
+		func() []string { return []string{"US.AAPL"} }, newFakeBars(), func() []string { return []string{"US.AAPL"} }, reader)
+
+	p.fetchTick(context.Background())
+	reader.statuses["US.AAPL"] = alpaca.AssetStatus{BorrowStatus: &etb}
+	p.fetchTick(context.Background())
+	if len(pub.calls) != 2 || len(reader.calls) != 2 {
+		t.Fatalf("want two uncached polls, publishes=%d calls=%d", len(pub.calls), len(reader.calls))
+	}
+	first := pub.calls[0].payload.(wsmsg.StockDetailPayload)
+	second := pub.calls[1].payload.(wsmsg.StockDetailPayload)
+	if first.BorrowStatus == nil || *first.BorrowStatus != "hard_to_borrow" || second.BorrowStatus == nil || *second.BorrowStatus != "easy_to_borrow" {
+		t.Fatalf("borrow status did not refresh: first=%v second=%v", first.BorrowStatus, second.BorrowStatus)
 	}
 }
 
@@ -681,7 +815,7 @@ func TestRunTicksAndStopsOnContextCancel(t *testing.T) {
 	fr.ownerPlate = &ownerplatepb.Response{RetType: proto.Int32(0), S2C: &ownerplatepb.S2C{}}
 	fr.staticInfo = &staticpb.Response{RetType: proto.Int32(0), S2C: &staticpb.S2C{}}
 	pub := &fakePublisher{}
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 5, MaxPerReq: 400}, fr, pub, clock.System{}, func() []string { return syms }, newFakeBars())
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 5, MaxPerReq: 400}, fr, pub, clock.System{}, func() []string { return syms }, newFakeBars(), nil, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
@@ -711,7 +845,7 @@ func TestRunDisabledReturnsImmediately(t *testing.T) {
 	fr := newFakeRequester()
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: false, RefreshMs: 1000}, fr, pub, clk, func() []string { return []string{"US.AAPL"} }, newFakeBars())
+	p := New(config.StockInfo{Enabled: false, RefreshMs: 1000}, fr, pub, clk, func() []string { return []string{"US.AAPL"} }, newFakeBars(), nil, nil)
 
 	done := make(chan error, 1)
 	go func() { done <- p.Run(context.Background()) }()
@@ -817,7 +951,7 @@ func TestFetchTickSetsExchangeFromStaticInfo(t *testing.T) {
 	}
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars())
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars(), nil, nil)
 
 	p.fetchTick(context.Background())
 
@@ -849,7 +983,7 @@ func TestFetchTickExchangeCachedAcrossTicksNoRepeatStaticInfoRequest(t *testing.
 	}
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars())
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, newFakeBars(), nil, nil)
 
 	p.fetchTick(context.Background())
 	if fr.calls[opend.ProtoQotGetStaticInfo] != 1 {
@@ -870,7 +1004,7 @@ func TestResolveExchangesIsolatesBadSymbolAndCachesEmptyOnPersistentFailure(t *t
 	syms := []string{"US.AAA", "US.BBB", "US.CCC"}
 	fr := newFakeRequester()
 	fr.staticInfoFn = staticInfoBatchOrPoison("BBB")
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()), func() []string { return syms }, newFakeBars())
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()), func() []string { return syms }, newFakeBars(), nil, nil)
 
 	p.resolveExchanges(context.Background(), syms)
 
@@ -905,7 +1039,7 @@ func TestEma200ForReturnsNilWhenFewerThanPeriodBars(t *testing.T) {
 	}
 	bars.bars["US.IPO"] = closesBars("US.IPO", closes...)
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000}, newFakeRequester(), &fakePublisher{}, clk, func() []string { return nil }, bars)
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000}, newFakeRequester(), &fakePublisher{}, clk, func() []string { return nil }, bars, nil, nil)
 
 	if got := p.ema200For("US.IPO"); got != nil {
 		t.Fatalf("want nil EMA-200 with only %d bars, got %v", len(closes), *got)
@@ -920,7 +1054,7 @@ func TestEma200ForMatchesMdEMAWhenEnoughBars(t *testing.T) {
 	}
 	bars.bars["US.AAPL"] = closesBars("US.AAPL", closes...)
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000}, newFakeRequester(), &fakePublisher{}, clk, func() []string { return nil }, bars)
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000}, newFakeRequester(), &fakePublisher{}, clk, func() []string { return nil }, bars, nil, nil)
 
 	want, ok := md.EMA(closes, ema200Period)
 	if !ok {
@@ -940,7 +1074,7 @@ func TestEma200ForCachedPerDayNoRepeatReadDailyBars(t *testing.T) {
 	}
 	bars.bars["US.AAPL"] = closesBars("US.AAPL", closes...)
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000}, newFakeRequester(), &fakePublisher{}, clk, func() []string { return nil }, bars)
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000}, newFakeRequester(), &fakePublisher{}, clk, func() []string { return nil }, bars, nil, nil)
 
 	p.ema200For("US.AAPL")
 	if bars.readCalls["US.AAPL"] != 1 {
@@ -977,7 +1111,7 @@ func TestFetchTickSetsEma200Field(t *testing.T) {
 	bars.bars["US.AAPL"] = closesBars("US.AAPL", closes...)
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 9, 12, 0, 0, 0, time.UTC))
-	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, bars)
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clk, func() []string { return syms }, bars, nil, nil)
 
 	p.fetchTick(context.Background())
 

@@ -21,6 +21,10 @@ const payload = (symbol: string, overrides: Partial<StockDetailPayload> = {}): S
   low52: 5,
   ema200: 12.5,
   volume: 1000,
+  borrowStatus: null,
+  shortable: null,
+  marginable: null,
+  tradable: null,
   refreshedAt: "t1",
   ...overrides,
 });

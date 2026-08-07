@@ -151,6 +151,29 @@ type rttProber interface {
 	ProbeRTT(ctx context.Context) (time.Duration, error)
 }
 
+type stockInfoAssetReader interface {
+	AssetStatus(context.Context, string) (alpaca.AssetStatus, error)
+}
+
+// firstAlpacaAdapter returns the first configured Alpaca adapter. Keeping the
+// concrete assertion here prevents another broker from being selected merely
+// because it happens to expose a compatible read-only method.
+func firstAlpacaAdapter(vbs []venueBroker) *alpaca.Adapter {
+	for _, vb := range vbs {
+		if a, ok := vb.Broker.(*alpaca.Adapter); ok {
+			return a
+		}
+	}
+	return nil
+}
+
+func firstAlpacaAssetReader(vbs []venueBroker) stockInfoAssetReader {
+	if a := firstAlpacaAdapter(vbs); a != nil {
+		return a
+	}
+	return nil
+}
+
 // firstAlpacaProber returns the first configured Alpaca adapter's ProbeRTT,
 // for wiring the engine-alpaca health link. This asserts against the
 // CONCRETE *alpaca.Adapter type rather than the generic rttProber
@@ -170,10 +193,8 @@ type rttProber interface {
 // latency (keyed by venue id) is a deferred generalization if that split
 // ever matters day to day.
 func firstAlpacaProber(vbs []venueBroker) rttProber {
-	for _, vb := range vbs {
-		if p, ok := vb.Broker.(*alpaca.Adapter); ok {
-			return p
-		}
+	if a := firstAlpacaAdapter(vbs); a != nil {
+		return a
 	}
 	return nil
 }

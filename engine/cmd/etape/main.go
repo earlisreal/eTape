@@ -673,7 +673,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			}()
 		})
 	}
-	startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, firstAlpacaProber(vbs), backfillOne, !*demo, &scanWG)
+	startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, firstAlpacaProber(vbs), firstAlpacaAssetReader(vbs), backfillOne, !*demo, &scanWG)
 
 	<-ctx.Done()
 
@@ -949,7 +949,7 @@ type demandFeeder interface {
 // startQuota gates the quota poller: false in -demo, since the synthetic
 // requester answers Qot_GetSubInfo with the generic "no data" response
 // rather than a real subscription budget, so tracking it would be noise.
-func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, wl *watchlist.List, hasTZ bool, mmProbe rttProber, alpacaProbe rttProber, backfillOne func(string), startQuota bool, scanWG *sync.WaitGroup) {
+func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, wl *watchlist.List, hasTZ bool, mmProbe rttProber, alpacaProbe rttProber, assetReader stockInfoAssetReader, backfillOne func(string), startQuota bool, scanWG *sync.WaitGroup) {
 	scanPoller := scan.New(cfg.Scan, r, hub, clk, demand, backfillOne)
 	if raw, ok, err := st.GetConfig("scanner.filters.v1"); err == nil && ok {
 		var saved wsmsg.ScannerFilters
@@ -960,10 +960,13 @@ func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, dem
 	hub.SetScanner(scanPoller)
 	newsPlan := func() news.SymbolPlan { return newsSymbolPlan(scanPoller.PoolSymbols(), hub.ActiveDemandSymbols()) }
 	symbols := func() []string { return newsPlan().All() }
+	activeSymbols := func() []string { return newsPlan().Active }
 	scanWG.Add(1)
 	go func() { defer scanWG.Done(); _ = scanPoller.Run(ctx) }()
 	go func() { _ = news.New(cfg.News, r, hub, clk, newsPlan).Run(ctx) }()
-	go func() { _ = stockinfo.New(cfg.StockInfo, r, hub, clk, symbols, st).Run(ctx) }()
+	go func() {
+		_ = stockinfo.New(cfg.StockInfo, r, hub, clk, symbols, st, activeSymbols, assetReader).Run(ctx)
+	}()
 	if cfg.Watchlist.Enabled {
 		interval := time.Duration(cfg.Watchlist.PollMs) * time.Millisecond
 		wp := watchlist.New(wl, r, hub, clk, interval)

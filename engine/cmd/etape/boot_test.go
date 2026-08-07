@@ -346,6 +346,9 @@ func TestFirstAlpacaProberFindsAlpacaAdapter(t *testing.T) {
 	if _, ok := p.(*alpaca.Adapter); !ok {
 		t.Fatalf("expected the alpaca.Adapter itself, got %T", p)
 	}
+	if reader := firstAlpacaAssetReader(vbs); reader == nil {
+		t.Fatal("expected a non-nil Stock Info asset reader when Alpaca is configured")
+	}
 }
 
 // TestFirstAlpacaProberNilWithoutAlpaca verifies no alpaca venue configured
@@ -363,6 +366,9 @@ func TestFirstAlpacaProberNilWithoutAlpaca(t *testing.T) {
 	}
 	if p := firstAlpacaProber(vbs); p != nil {
 		t.Fatalf("expected nil prober with no alpaca venue, got %T", p)
+	}
+	if reader := firstAlpacaAssetReader(vbs); reader != nil {
+		t.Fatalf("expected nil Stock Info asset reader with no alpaca venue, got %T", reader)
 	}
 }
 

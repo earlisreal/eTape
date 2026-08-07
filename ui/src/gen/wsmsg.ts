@@ -286,7 +286,9 @@ export interface WatchlistRemoveArgs {
  * for the Stock Info panel. Nullable numerics follow the ScannerRow
  * convention (`*float64` + tstype) — null means moomoo hasn't returned a
  * value for that field yet (e.g. no snapshot fetched, or the field is
- * genuinely absent for this instrument type).
+ * genuinely absent for this instrument type). Alpaca asset fields are
+ * informational only: false means Alpaca explicitly reported false, while
+ * null means no Alpaca source, an unavailable field, or a failed request.
  */
 export interface StockDetailPayload {
   symbol: string;
@@ -307,6 +309,10 @@ export interface StockDetailPayload {
   low52: number | null;
   ema200: number | null; // 200-day EMA of daily closes; nil until 200 daily bars are backfilled
   volume: number /* int64 */; // 0 is legitimate
+  borrowStatus: string | null; // informational; HTB still needs a future locate workflow
+  shortable: boolean | null; // asset-level flag, not short-order authorization
+  marginable: boolean | null; // asset-level flag, not account margin authorization
+  tradable: boolean | null; // asset-level flag, not execution authorization
   refreshedAt: string;
 }
 export interface NewsItem {

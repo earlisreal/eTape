@@ -35,6 +35,7 @@ const detailPayload = (symbol: string, overrides: Partial<StockDetailPayload> = 
   symbol, name: `${symbol} Inc`, industry: "Tech", exchange: "NASDAQ", price: 10, lastClose: 9.5, changePct: 5.2,
   marketCap: 3_210_000_000_000, floatMarketCap: 900_000_000, sharesOutstanding: 22_700_000, floatShares: 20_000_000,
   pe: 20, peTTM: 21, eps: 0.5, high52: 15, low52: 5, ema200: 145.5, volume: 1000, refreshedAt: "t1",
+  borrowStatus: null, shortable: null, marginable: null, tradable: null,
   ...overrides,
 });
 const detailSnap = (p: unknown) => ({ kind: "snapshot", topic: "stock.detail", payload: p } as SnapshotMsg);
@@ -225,6 +226,55 @@ describe("StockInfoPanel fundamentals section", () => {
     });
     expect(screen.queryByText(/stock info/i)).toBeNull();
   });
+
+  it("renders Alpaca borrow status and preserves explicit boolean false values", () => {
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.TSLA", {
+        borrowStatus: "hard_to_borrow", shortable: true, marginable: false, tradable: false,
+      })));
+      linkGroups.focus("green", "US.TSLA");
+    });
+    expect(screen.getByText("Borrow status")).toBeTruthy();
+    expect(screen.getByText("HTB")).toBeTruthy();
+    expect(screen.getByText("Shortable")).toBeTruthy();
+    expect(screen.getByText("Marginable")).toBeTruthy();
+    expect(screen.getByText("Tradable")).toBeTruthy();
+    expect(screen.getByText("Yes")).toBeTruthy();
+    expect(screen.getAllByText("No")).toHaveLength(2);
+  });
+
+  it("renders ETB and keeps nullable booleans unknown instead of turning them into No", () => {
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.AAPL", { borrowStatus: "easy_to_borrow" })));
+      linkGroups.focus("green", "US.AAPL");
+    });
+    expect(screen.getByText("ETB")).toBeTruthy();
+    expect(screen.queryByText("No")).toBeNull();
+    expect(screen.getByText("Shortable")).toBeTruthy();
+  });
+
+  it("hides Alpaca rows when every Alpaca field is null", () => {
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.MSFT")));
+      linkGroups.focus("green", "US.MSFT");
+    });
+    expect(screen.queryByText("Borrow status")).toBeNull();
+    expect(screen.queryByText("Shortable")).toBeNull();
+    expect(screen.queryByText("Marginable")).toBeNull();
+    expect(screen.queryByText("Tradable")).toBeNull();
+  });
+
+  it("humanizes an unknown future borrow status without crashing", () => {
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.NVDA", { borrowStatus: "special_borrow" })));
+      linkGroups.focus("green", "US.NVDA");
+    });
+    expect(screen.getByText("Special borrow")).toBeTruthy();
+  });
 });
 
 describe("StockInfoPanel details collapse (compact-by-default)", () => {
@@ -282,6 +332,29 @@ describe("StockInfoPanel details collapse (compact-by-default)", () => {
     });
     expect(screen.queryByText(/N\/A/i)).toBeNull();
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3); // industry + float + ema200
+  });
+
+  it.each([
+    ["hard_to_borrow", "HTB"],
+    ["easy_to_borrow", "ETB"],
+  ])("collapsed row shows %s as %s", (borrowStatus, label) => {
+    const { stockDetail, linkGroups } = renderPanel();
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.AAPL", { borrowStatus })));
+      linkGroups.focus("green", "US.AAPL");
+    });
+    expect(screen.getByText(label)).toBeTruthy();
+    expect(screen.queryByText("Shortable")).toBeNull();
+  });
+
+  it("collapsed row is unchanged when borrow status is null", () => {
+    const { stockDetail, linkGroups } = renderPanel();
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.AAPL", { borrowStatus: null })));
+      linkGroups.focus("green", "US.AAPL");
+    });
+    expect(screen.queryByText("HTB")).toBeNull();
+    expect(screen.queryByText("ETB")).toBeNull();
   });
 });
 

@@ -65,6 +65,19 @@ function textOrDash(value: string, palette: Palette): JSX.Element {
     : <span className="mono" style={{ color: palette.textMuted }}>—</span>;
 }
 
+function borrowStatusLabel(value: string | null | undefined): string | null {
+  if (!value?.trim()) return null;
+  if (value === "easy_to_borrow") return "ETB";
+  if (value === "hard_to_borrow") return "HTB";
+  const readable = value.trim().replace(/_/g, " ").toLowerCase();
+  return readable.charAt(0).toUpperCase() + readable.slice(1);
+}
+
+function nullableBoolean(value: boolean | null | undefined, palette: Palette): JSX.Element {
+  const label = value == null ? "—" : value === true ? "Yes" : "No";
+  return <span className="mono" style={{ color: value == null ? palette.textMuted : palette.text }}>{label}</span>;
+}
+
 /** Combined "52wk low–high" cell — each side dashes independently if null, so a missing
  * high doesn't blank out a known low (or vice versa). */
 function rangeCell(low: number | null, high: number | null, palette: Palette): JSX.Element {
@@ -109,6 +122,10 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, o
     () => (symbol ? stores.stockDetail.detailFor(symbol) : undefined),
     [detailSnap, symbol, stores.stockDetail],
   );
+  const borrowStatus = borrowStatusLabel(detail?.borrowStatus);
+  const hasAlpacaStatus = detail != null && (
+    detail.borrowStatus != null || detail.shortable != null || detail.marginable != null || detail.tradable != null
+  );
 
   return (
     <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
@@ -139,6 +156,12 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, o
                 <span style={{ color: palette.textMuted }}>·</span>
                 <span style={{ color: palette.textMuted }}>EMA200</span>
                 {fmtDecimalOrDash(detail.ema200, palette)}
+                {borrowStatus && (
+                  <>
+                    <span style={{ color: palette.textMuted }}>·</span>
+                    <span className="mono" style={{ color: palette.text }}>{borrowStatus}</span>
+                  </>
+                )}
                 <button type="button" onClick={toggleDetails} aria-expanded={false} aria-label="Toggle fundamentals"
                   style={{ marginLeft: "auto", background: "transparent", border: "none", padding: 0, cursor: "pointer", color: palette.textMuted, fontSize: 11 }}>
                   ▸
@@ -190,6 +213,19 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, o
                   {fmtCompactOrDash(detail.volume, palette)}
                   <span style={{ color: palette.textMuted }}>EMA 200</span>
                   {fmtDecimalOrDash(detail.ema200, palette)}
+
+                  {hasAlpacaStatus && (
+                    <>
+                      <span style={{ color: palette.textMuted }}>Borrow status</span>
+                      {textOrDash(borrowStatus ?? "", palette)}
+                      <span style={{ color: palette.textMuted }}>Shortable</span>
+                      {nullableBoolean(detail.shortable, palette)}
+                      <span style={{ color: palette.textMuted }}>Marginable</span>
+                      {nullableBoolean(detail.marginable, palette)}
+                      <span style={{ color: palette.textMuted }}>Tradable</span>
+                      {nullableBoolean(detail.tradable, palette)}
+                    </>
+                  )}
                 </div>
               </>
             )}
