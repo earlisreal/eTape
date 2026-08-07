@@ -266,6 +266,19 @@ func (f *fakeAssetStatusReader) setStatus(symbol string, status AssetStatus) {
 	f.statuses[symbol] = status
 }
 
+func (f *fakeAssetStatusReader) setError(symbol string, err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.errs == nil {
+		f.errs = map[string]error{}
+	}
+	if err == nil {
+		delete(f.errs, symbol)
+		return
+	}
+	f.errs[symbol] = err
+}
+
 func waitForAssetCalls(t *testing.T, reader *fakeAssetStatusReader, want int) []string {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
@@ -285,10 +298,10 @@ func waitForCachedAssetStatus(t *testing.T, p *Poller, symbol string) AssetStatu
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		p.assetMu.RLock()
-		status, ok := p.assetStatuses[symbol]
+		cached, ok := p.assetStatuses[symbol]
 		p.assetMu.RUnlock()
 		if ok {
-			return status
+			return cached.Status
 		}
 		time.Sleep(time.Millisecond)
 	}
@@ -301,7 +314,7 @@ func waitForCachedBorrowStatus(t *testing.T, p *Poller, symbol, want string) {
 	deadline := time.Now().Add(time.Second)
 	for time.Now().Before(deadline) {
 		p.assetMu.RLock()
-		status := p.assetStatuses[symbol]
+		status := p.assetStatuses[symbol].Status
 		p.assetMu.RUnlock()
 		if status.BorrowStatus != nil && *status.BorrowStatus == want {
 			return
@@ -316,6 +329,31 @@ type blockingAssetStatusReader struct {
 	started chan struct{}
 	release chan struct{}
 	done    chan struct{}
+}
+
+type limitedAssetStatusReader struct {
+	mu        sync.Mutex
+	passSize  int
+	callCount int
+	passWidth int
+	calls     []string
+	successes map[string]int
+}
+
+func (r *limitedAssetStatusReader) AssetStatus(_ context.Context, symbol string) (AssetStatus, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	callInPass := r.callCount % r.passSize
+	r.callCount++
+	r.calls = append(r.calls, symbol)
+	if callInPass >= r.passWidth {
+		return AssetStatus{}, errors.New("asset budget skipped")
+	}
+	if r.successes == nil {
+		r.successes = map[string]int{}
+	}
+	r.successes[symbol]++
+	return AssetStatus{}, nil
 }
 
 func (r *blockingAssetStatusReader) AssetStatus(ctx context.Context, _ string) (AssetStatus, error) {
@@ -895,6 +933,73 @@ func TestFetchTickQueriesAlpacaOnlyForActiveSymbols(t *testing.T) {
 	calls := waitForAssetCalls(t, reader, 1)
 	if len(calls) != 1 || calls[0] != "US.AAPL" {
 		t.Fatalf("Alpaca calls = %v, want only deduped active US.AAPL", calls)
+	}
+}
+
+func TestFetchAssetStatusesRoundRobinAvoidsStarvation(t *testing.T) {
+	syms := []string{"US.AAPL", "US.AMD", "US.META", "US.NVDA", "US.PLTR", "US.QCOM", "US.TSLA", "US.XOM"}
+	reader := &limitedAssetStatusReader{passSize: len(syms), passWidth: 2, successes: map[string]int{}}
+	p := New(config.StockInfo{RefreshMs: 1000}, newFakeRequester(), &fakePublisher{}, clock.NewFake(time.UnixMilli(0)),
+		func() []string { return nil }, newFakeBars(), nil, reader)
+
+	for range syms {
+		p.fetchAssetStatuses(context.Background(), syms)
+	}
+
+	reader.mu.Lock()
+	defer reader.mu.Unlock()
+	if len(reader.successes) != len(syms) {
+		t.Fatalf("successful symbols = %v, want every active symbol after round-robin passes", reader.successes)
+	}
+}
+
+func TestAssetStatusCacheRetainsFreshValueThenExpiresAfterFailures(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	borrow := "easy_to_borrow"
+	reader := &fakeAssetStatusReader{statuses: map[string]AssetStatus{
+		"US.AAPL": {BorrowStatus: &borrow},
+	}}
+	p := New(config.StockInfo{RefreshMs: 1000}, newFakeRequester(), &fakePublisher{}, clk,
+		func() []string { return nil }, newFakeBars(), nil, reader)
+
+	p.fetchAssetStatuses(context.Background(), []string{"US.AAPL"})
+	reader.setError("US.AAPL", errors.New("temporary unavailable"))
+	clk.Advance(1500 * time.Millisecond)
+	p.fetchAssetStatuses(context.Background(), []string{"US.AAPL"})
+	got := p.assetStatusSnapshot()["US.AAPL"]
+	if got.BorrowStatus == nil || *got.BorrowStatus != borrow {
+		t.Fatalf("fresh cached borrow status = %v, want %q", got.BorrowStatus, borrow)
+	}
+
+	clk.Advance(600 * time.Millisecond)
+	if _, ok := p.assetStatusSnapshot()["US.AAPL"]; ok {
+		t.Fatal("expired Alpaca status should no longer be exposed")
+	}
+}
+
+func TestFetchTickHidesExpiredStatusWhenSymbolIsReactivated(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	borrow := "easy_to_borrow"
+	reader := &fakeAssetStatusReader{statuses: map[string]AssetStatus{
+		"US.AAPL": {BorrowStatus: &borrow},
+	}}
+	active := []string{"US.AAPL"}
+	pub := &fakePublisher{}
+	p := New(config.StockInfo{RefreshMs: 1000, MaxPerReq: 400}, enrichmentRequester(), pub, clk,
+		func() []string { return []string{"US.AAPL"} }, newFakeBars(), func() []string { return active }, reader)
+
+	p.fetchAssetStatuses(context.Background(), active)
+	active = nil
+	clk.Advance(2500 * time.Millisecond)
+	active = []string{"US.AAPL"}
+	reader.setError("US.AAPL", errors.New("reactivation refresh unavailable"))
+	ctx, cancel := context.WithCancel(context.Background())
+	p.fetchTick(ctx)
+	cancel()
+
+	payload := pub.calls[len(pub.calls)-1].payload.(wsmsg.StockDetailPayload)
+	if payload.BorrowStatus != nil || payload.Shortable != nil || payload.Marginable != nil || payload.Tradable != nil {
+		t.Fatalf("expired status should be unavailable on reactivation: %+v", payload)
 	}
 }
 

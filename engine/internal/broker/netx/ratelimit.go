@@ -55,6 +55,21 @@ func (tb *TokenBucket) AllowWithReserve(reserve int) bool {
 	return false
 }
 
+// Refund returns one token after a caller admits a request from this bucket
+// but cannot complete a later admission step. It is for compound, non-blocking
+// reservations only; normal callers should use Allow or Take.
+func (tb *TokenBucket) Refund() {
+	tb.mu.Lock()
+	defer tb.mu.Unlock()
+	tb.refillLocked()
+	if tb.tokens < tb.burst {
+		tb.tokens++
+		if tb.tokens > tb.burst {
+			tb.tokens = tb.burst
+		}
+	}
+}
+
 // waitLocked returns how long until the next whole token; 0 if one is ready.
 func (tb *TokenBucket) waitLocked() time.Duration {
 	tb.refillLocked()

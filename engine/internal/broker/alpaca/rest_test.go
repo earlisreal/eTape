@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/session"
@@ -191,6 +192,9 @@ func TestAssetStatus_SkipsWhenExecutionReserveIsNeeded(t *testing.T) {
 	if !errors.Is(err, errAssetStatusRateLimited) {
 		t.Fatalf("asset status error = %v, want low-priority skip", err)
 	}
+	if got := drainTokens(rc.assetBucket); got != assetStatusBurst {
+		t.Fatalf("asset-budget tokens after shared-pool skip = %d, want %d", got, assetStatusBurst)
+	}
 }
 
 func TestAssetStatusSkipsWhenAssetSubBudgetIsExhausted(t *testing.T) {
@@ -203,6 +207,14 @@ func TestAssetStatusSkipsWhenAssetSubBudgetIsExhausted(t *testing.T) {
 	if !errors.Is(err, errAssetStatusRateLimited) {
 		t.Fatalf("asset status error = %v, want asset-budget skip", err)
 	}
+}
+
+func drainTokens(tb *netx.TokenBucket) int {
+	n := 0
+	for tb.Allow() {
+		n++
+	}
+	return n
 }
 
 func TestAssetStatus_HTTPError(t *testing.T) {

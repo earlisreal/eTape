@@ -70,6 +70,11 @@ type AssetStatus struct {
 	Tradable     *bool
 }
 
+type cachedAssetStatus struct {
+	Status    AssetStatus
+	FetchedAt time.Time
+}
+
 // assetStatusReader is deliberately narrower than exec.Broker: Stock Info
 // needs only read-only asset metadata, and Alpaca failures must stay
 // supplemental to the Moomoo fundamentals path.
@@ -102,7 +107,8 @@ type Poller struct {
 	activeSymbols        func() []string // active/focused symbols for Alpaca only
 	assetReader          assetStatusReader
 	assetMu              sync.RWMutex
-	assetStatuses        map[string]AssetStatus // last successful status per symbol
+	assetStatuses        map[string]cachedAssetStatus // fresh successful status per symbol
+	assetCursor          int
 	assetRefreshInFlight bool
 	industry             map[string]string      // symbol -> resolved industry name; "" = known-absent
 	exch                 map[string]string      // symbol -> resolved exchange label; "" = known-absent/unresolvable
@@ -113,7 +119,7 @@ func New(cfg config.StockInfo, r requester, pub Publisher, clk clock.Clock, symb
 	return &Poller{
 		cfg: cfg, r: r, pub: pub, clk: clk, bars: bars, symbols: symbols,
 		activeSymbols: activeSymbols, assetReader: assetReader,
-		assetStatuses: map[string]AssetStatus{},
+		assetStatuses: map[string]cachedAssetStatus{},
 		industry:      map[string]string{}, exch: map[string]string{}, ema: map[string]ema200Entry{},
 	}
 }
@@ -187,13 +193,27 @@ func (p *Poller) currentActiveSymbols() []string {
 }
 
 func (p *Poller) assetStatusSnapshot() map[string]AssetStatus {
-	p.assetMu.RLock()
-	defer p.assetMu.RUnlock()
+	now := p.clk.Now()
+	ttl := p.assetStatusTTL()
+	p.assetMu.Lock()
+	defer p.assetMu.Unlock()
 	out := make(map[string]AssetStatus, len(p.assetStatuses))
-	for sym, status := range p.assetStatuses {
-		out[sym] = status
+	for sym, cached := range p.assetStatuses {
+		if now.Sub(cached.FetchedAt) > ttl {
+			delete(p.assetStatuses, sym)
+			continue
+		}
+		out[sym] = cached.Status
 	}
 	return out
+}
+
+func (p *Poller) assetStatusTTL() time.Duration {
+	refresh := time.Duration(p.cfg.RefreshMs) * time.Millisecond
+	if refresh <= 0 {
+		return 30 * time.Second
+	}
+	return 2 * refresh
 }
 
 // startAssetStatusRefresh launches at most one sequential, low-priority
@@ -240,14 +260,23 @@ func (p *Poller) fetchAssetStatuses(ctx context.Context, activeSyms []string) {
 		syms = append(syms, sym)
 	}
 	sort.Strings(syms)
-	for _, sym := range syms {
+	if len(syms) == 0 {
+		return
+	}
+	p.assetMu.Lock()
+	start := p.assetCursor % len(syms)
+	p.assetCursor = (start + 1) % len(syms)
+	p.assetMu.Unlock()
+	ordered := append(append([]string{}, syms[start:]...), syms[:start]...)
+	for _, sym := range ordered {
 		status, err := p.assetReader.AssetStatus(ctx, sym)
 		if err != nil {
 			slog.Debug("stockinfo: alpaca asset status unavailable", "symbol", sym, "err", err)
 			continue
 		}
+		fetchedAt := p.clk.Now()
 		p.assetMu.Lock()
-		p.assetStatuses[sym] = status
+		p.assetStatuses[sym] = cachedAssetStatus{Status: status, FetchedAt: fetchedAt}
 		p.assetMu.Unlock()
 	}
 }

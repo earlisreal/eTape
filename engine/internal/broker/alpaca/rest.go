@@ -21,7 +21,7 @@ const (
 	alpacaRESTBurst       = 5
 	assetStatusRatePerSec = 50.0 / 60.0 // explicit low-priority sub-budget
 	assetStatusBurst      = 5
-	assetStatusReserve    = 1 // keep one pooled token available for execution
+	assetStatusReserve    = 3 // keep burst headroom for higher-priority REST work
 )
 
 var errAssetStatusRateLimited = errors.New("alpaca: asset status skipped by low-priority rate limit")
@@ -69,13 +69,19 @@ func (rc *restClient) do(ctx context.Context, method, path string, body io.Reade
 
 // doAsset is the low-priority path for informational asset metadata. It uses
 // a small asset-only budget and admits a request from the shared pool only if
-// one execution reserve token remains. Both checks are non-blocking: a busy
+// the higher-priority headroom remains. Both checks are non-blocking: a busy
 // execution venue skips this refresh instead of waiting behind it.
 func (rc *restClient) doAsset(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if !rc.assetBucket.Allow() || !rc.bucket.AllowWithReserve(assetStatusReserve) {
+	if !rc.assetBucket.Allow() {
+		return nil, errAssetStatusRateLimited
+	}
+	if !rc.bucket.AllowWithReserve(assetStatusReserve) {
+		// Do not burn an asset-budget token when the shared execution pool
+		// cannot admit this low-priority request.
+		rc.assetBucket.Refund()
 		return nil, errAssetStatusRateLimited
 	}
 	return rc.doHTTP(ctx, method, path, body)

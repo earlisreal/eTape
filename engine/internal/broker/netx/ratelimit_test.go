@@ -45,6 +45,18 @@ func TestTokenBucket_AllowWithReservePreservesCapacity(t *testing.T) {
 	}
 }
 
+func TestTokenBucket_RefundRestoresOneToken(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	tb := NewTokenBucket(clk, 1, 1)
+	if !tb.Allow() {
+		t.Fatal("initial token should be available")
+	}
+	tb.Refund()
+	if !tb.Allow() {
+		t.Fatal("Refund should restore the admitted token")
+	}
+}
+
 func TestTokenBucket_CapsAtBurst(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	tb := NewTokenBucket(clk, 10, 3)
