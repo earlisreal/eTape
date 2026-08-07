@@ -9,7 +9,6 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
-	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/feed"
@@ -236,17 +235,98 @@ func (f *fakeRequester) Request(ctx context.Context, protoID uint32, req proto.M
 }
 
 type fakeAssetStatusReader struct {
-	statuses map[string]alpaca.AssetStatus
+	mu       sync.Mutex
+	statuses map[string]AssetStatus
 	errs     map[string]error
 	calls    []string
 }
 
-func (f *fakeAssetStatusReader) AssetStatus(_ context.Context, symbol string) (alpaca.AssetStatus, error) {
+func (f *fakeAssetStatusReader) AssetStatus(_ context.Context, symbol string) (AssetStatus, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.calls = append(f.calls, symbol)
 	if err := f.errs[symbol]; err != nil {
-		return alpaca.AssetStatus{}, err
+		return AssetStatus{}, err
 	}
 	return f.statuses[symbol], nil
+}
+
+func (f *fakeAssetStatusReader) callsSnapshot() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.calls...)
+}
+
+func (f *fakeAssetStatusReader) setStatus(symbol string, status AssetStatus) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.statuses == nil {
+		f.statuses = map[string]AssetStatus{}
+	}
+	f.statuses[symbol] = status
+}
+
+func waitForAssetCalls(t *testing.T, reader *fakeAssetStatusReader, want int) []string {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		calls := reader.callsSnapshot()
+		if len(calls) >= want {
+			return calls
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for %d Alpaca asset calls; got %v", want, reader.callsSnapshot())
+	return nil
+}
+
+func waitForCachedAssetStatus(t *testing.T, p *Poller, symbol string) AssetStatus {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		p.assetMu.RLock()
+		status, ok := p.assetStatuses[symbol]
+		p.assetMu.RUnlock()
+		if ok {
+			return status
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for cached Alpaca status for %s", symbol)
+	return AssetStatus{}
+}
+
+func waitForCachedBorrowStatus(t *testing.T, p *Poller, symbol, want string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		p.assetMu.RLock()
+		status := p.assetStatuses[symbol]
+		p.assetMu.RUnlock()
+		if status.BorrowStatus != nil && *status.BorrowStatus == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for cached borrow status %s=%q", symbol, want)
+}
+
+type blockingAssetStatusReader struct {
+	once    sync.Once
+	started chan struct{}
+	release chan struct{}
+	done    chan struct{}
+}
+
+func (r *blockingAssetStatusReader) AssetStatus(ctx context.Context, _ string) (AssetStatus, error) {
+	r.once.Do(func() { close(r.started) })
+	defer close(r.done)
+	select {
+	case <-r.release:
+		return AssetStatus{}, nil
+	case <-ctx.Done():
+		return AssetStatus{}, ctx.Err()
+	}
 }
 
 func enrichmentRequester() *fakeRequester {
@@ -696,18 +776,55 @@ func TestFetchTickSkipsWhenSymbolsEmpty(t *testing.T) {
 	}
 }
 
+func TestFetchTickPublishesMoomooBeforeSlowAlpaca(t *testing.T) {
+	reader := &blockingAssetStatusReader{started: make(chan struct{}), release: make(chan struct{}), done: make(chan struct{})}
+	pub := &fakePublisher{}
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, enrichmentRequester(), pub, clock.NewFake(time.Now()),
+		func() []string { return []string{"US.AAPL"} }, newFakeBars(), func() []string { return []string{"US.AAPL"} }, reader)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		p.fetchTick(ctx)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		close(reader.release)
+		t.Fatal("Moomoo publication waited for the slow Alpaca reader")
+	}
+	select {
+	case <-reader.started:
+	case <-time.After(time.Second):
+		t.Fatal("expected the asynchronous Alpaca refresh to start")
+	}
+	if len(pub.calls) != 1 {
+		t.Fatalf("want one immediate Moomoo publication, got %d", len(pub.calls))
+	}
+	close(reader.release)
+	select {
+	case <-reader.done:
+	case <-time.After(time.Second):
+		t.Fatal("slow Alpaca refresh did not stop after release")
+	}
+}
+
 func TestFetchTickEnrichesActiveSymbolsWithAlpacaStatus(t *testing.T) {
 	fr := enrichmentRequester()
 	pub := &fakePublisher{}
 	borrow := "hard_to_borrow"
-	reader := &fakeAssetStatusReader{statuses: map[string]alpaca.AssetStatus{
+	reader := &fakeAssetStatusReader{statuses: map[string]AssetStatus{
 		"US.AAPL": {BorrowStatus: &borrow, Shortable: proto.Bool(true), Marginable: proto.Bool(true), Tradable: proto.Bool(true)},
 	}}
 	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clock.NewFake(time.Now()),
 		func() []string { return []string{"US.AAPL"} }, newFakeBars(), func() []string { return []string{"US.AAPL"} }, reader)
 
 	p.fetchTick(context.Background())
-	payload := pub.calls[0].payload.(wsmsg.StockDetailPayload)
+	waitForCachedAssetStatus(t, p, "US.AAPL")
+	p.fetchTick(context.Background())
+	payload := pub.calls[len(pub.calls)-1].payload.(wsmsg.StockDetailPayload)
 	if payload.BorrowStatus == nil || *payload.BorrowStatus != "hard_to_borrow" || payload.Shortable == nil || !*payload.Shortable || payload.Marginable == nil || !*payload.Marginable || payload.Tradable == nil || !*payload.Tradable {
 		t.Fatalf("Alpaca status not merged into StockDetailPayload: %+v", payload)
 	}
@@ -716,14 +833,16 @@ func TestFetchTickEnrichesActiveSymbolsWithAlpacaStatus(t *testing.T) {
 func TestFetchTickPreservesAlpacaExplicitFalse(t *testing.T) {
 	fr := enrichmentRequester()
 	pub := &fakePublisher{}
-	reader := &fakeAssetStatusReader{statuses: map[string]alpaca.AssetStatus{
+	reader := &fakeAssetStatusReader{statuses: map[string]AssetStatus{
 		"US.AAPL": {Shortable: proto.Bool(false), Marginable: proto.Bool(false), Tradable: proto.Bool(false)},
 	}}
 	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clock.NewFake(time.Now()),
 		func() []string { return []string{"US.AAPL"} }, newFakeBars(), func() []string { return []string{"US.AAPL"} }, reader)
 
 	p.fetchTick(context.Background())
-	payload := pub.calls[0].payload.(wsmsg.StockDetailPayload)
+	waitForCachedAssetStatus(t, p, "US.AAPL")
+	p.fetchTick(context.Background())
+	payload := pub.calls[len(pub.calls)-1].payload.(wsmsg.StockDetailPayload)
 	for name, value := range map[string]*bool{"shortable": payload.Shortable, "marginable": payload.Marginable, "tradable": payload.Tradable} {
 		if value == nil || *value {
 			t.Fatalf("%s = %v, want non-nil false", name, value)
@@ -755,6 +874,7 @@ func TestFetchTickIsolatesAlpacaFailure(t *testing.T) {
 		func() []string { return []string{"US.AAPL"} }, newFakeBars(), func() []string { return []string{"US.AAPL"} }, reader)
 
 	p.fetchTick(context.Background())
+	waitForAssetCalls(t, reader, 1)
 	if len(pub.calls) != 1 {
 		t.Fatalf("Moomoo data should publish when Alpaca fails, got %d calls", len(pub.calls))
 	}
@@ -766,14 +886,15 @@ func TestFetchTickIsolatesAlpacaFailure(t *testing.T) {
 
 func TestFetchTickQueriesAlpacaOnlyForActiveSymbols(t *testing.T) {
 	fr := enrichmentRequester()
-	reader := &fakeAssetStatusReader{statuses: map[string]alpaca.AssetStatus{}}
+	reader := &fakeAssetStatusReader{statuses: map[string]AssetStatus{}}
 	active := []string{"US.AAPL", "US.AAPL"}
 	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, &fakePublisher{}, clock.NewFake(time.Now()),
 		func() []string { return []string{"US.AAPL", "US.NVDA", "US.TSLA"} }, newFakeBars(), func() []string { return active }, reader)
 
 	p.fetchTick(context.Background())
-	if len(reader.calls) != 1 || reader.calls[0] != "US.AAPL" {
-		t.Fatalf("Alpaca calls = %v, want only deduped active US.AAPL", reader.calls)
+	calls := waitForAssetCalls(t, reader, 1)
+	if len(calls) != 1 || calls[0] != "US.AAPL" {
+		t.Fatalf("Alpaca calls = %v, want only deduped active US.AAPL", calls)
 	}
 }
 
@@ -781,22 +902,30 @@ func TestFetchTickRefreshesBorrowStatus(t *testing.T) {
 	fr := enrichmentRequester()
 	pub := &fakePublisher{}
 	htb, etb := "hard_to_borrow", "easy_to_borrow"
-	reader := &fakeAssetStatusReader{statuses: map[string]alpaca.AssetStatus{
+	reader := &fakeAssetStatusReader{statuses: map[string]AssetStatus{
 		"US.AAPL": {BorrowStatus: &htb},
 	}}
 	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000, MaxPerReq: 400}, fr, pub, clock.NewFake(time.Now()),
 		func() []string { return []string{"US.AAPL"} }, newFakeBars(), func() []string { return []string{"US.AAPL"} }, reader)
 
 	p.fetchTick(context.Background())
-	reader.statuses["US.AAPL"] = alpaca.AssetStatus{BorrowStatus: &etb}
+	waitForCachedAssetStatus(t, p, "US.AAPL")
+	reader.setStatus("US.AAPL", AssetStatus{BorrowStatus: &etb})
 	p.fetchTick(context.Background())
-	if len(pub.calls) != 2 || len(reader.calls) != 2 {
-		t.Fatalf("want two uncached polls, publishes=%d calls=%d", len(pub.calls), len(reader.calls))
+	if len(pub.calls) != 2 {
+		t.Fatalf("want two Moomoo publishes, got %d", len(pub.calls))
 	}
 	first := pub.calls[0].payload.(wsmsg.StockDetailPayload)
 	second := pub.calls[1].payload.(wsmsg.StockDetailPayload)
-	if first.BorrowStatus == nil || *first.BorrowStatus != "hard_to_borrow" || second.BorrowStatus == nil || *second.BorrowStatus != "easy_to_borrow" {
+	if first.BorrowStatus != nil || second.BorrowStatus == nil || *second.BorrowStatus != "hard_to_borrow" {
 		t.Fatalf("borrow status did not refresh: first=%v second=%v", first.BorrowStatus, second.BorrowStatus)
+	}
+	waitForAssetCalls(t, reader, 2)
+	waitForCachedBorrowStatus(t, p, "US.AAPL", "easy_to_borrow")
+	p.fetchTick(context.Background())
+	third := pub.calls[2].payload.(wsmsg.StockDetailPayload)
+	if third.BorrowStatus == nil || *third.BorrowStatus != "easy_to_borrow" {
+		t.Fatalf("cached borrow status did not refresh: got %v", third.BorrowStatus)
 	}
 }
 

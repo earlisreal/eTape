@@ -4,10 +4,12 @@
 
 - **moomoo OpenD:** primary US quote, ticker, order-book, K-line, scanner, news, stock-info, quota, and moomoo execution gateway. Engine uses raw TCP framing plus protobuf at `127.0.0.1:11111`; `InitConnect` and keepalive establish session. Trade unlock stays in OpenD GUI. See [OpenD package](../engine/internal/feed/opend/README.md).
 - **Alpaca:** paper/live REST and trade-update WebSocket execution, plus
-  read-only asset eligibility/borrow metadata used by Stock Info. Paper
-  credentials may also provide daily and one-minute history; live credentials
-  are not reused for history. See [adapter](../engine/internal/broker/alpaca/README.md)
-  and [history provider](../engine/internal/hist/alpaca/README.md).
+  read-only asset eligibility/borrow metadata used by Stock Info. Asset reads
+  are low-priority and non-blocking, with a dedicated sub-budget and one-token
+  reserve in the shared execution pool. Paper credentials may also provide
+  daily and one-minute history; live credentials are not reused for history.
+  See [adapter](../engine/internal/broker/alpaca/README.md) and [history
+  provider](../engine/internal/hist/alpaca/README.md).
 - **TradeZero:** live REST execution plus portfolio WebSocket events. No market-data dependency. See [adapter](../engine/internal/broker/tradezero/README.md).
 - **Yahoo Finance:** unauthenticated fallback daily history only. Intraday bars never come from Yahoo. See [provider](../engine/internal/hist/yahoo/README.md).
 

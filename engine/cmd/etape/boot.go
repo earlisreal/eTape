@@ -17,6 +17,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
 	getglobalstate "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/getglobalstate"
+	"github.com/earlisreal/eTape/engine/internal/stockinfo"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
 	"google.golang.org/protobuf/proto"
 )
@@ -152,7 +153,24 @@ type rttProber interface {
 }
 
 type stockInfoAssetReader interface {
-	AssetStatus(context.Context, string) (alpaca.AssetStatus, error)
+	AssetStatus(context.Context, string) (stockinfo.AssetStatus, error)
+}
+
+type alpacaStockInfoReader struct {
+	adapter *alpaca.Adapter
+}
+
+func (r alpacaStockInfoReader) AssetStatus(ctx context.Context, symbol string) (stockinfo.AssetStatus, error) {
+	status, err := r.adapter.AssetStatus(ctx, symbol)
+	if err != nil {
+		return stockinfo.AssetStatus{}, err
+	}
+	return stockinfo.AssetStatus{
+		BorrowStatus: status.BorrowStatus,
+		Shortable:    status.Shortable,
+		Marginable:   status.Marginable,
+		Tradable:     status.Tradable,
+	}, nil
 }
 
 // firstAlpacaAdapter returns the first configured Alpaca adapter. Keeping the
@@ -169,7 +187,7 @@ func firstAlpacaAdapter(vbs []venueBroker) *alpaca.Adapter {
 
 func firstAlpacaAssetReader(vbs []venueBroker) stockInfoAssetReader {
 	if a := firstAlpacaAdapter(vbs); a != nil {
-		return a
+		return alpacaStockInfoReader{adapter: a}
 	}
 	return nil
 }

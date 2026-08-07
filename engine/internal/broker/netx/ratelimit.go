@@ -35,10 +35,20 @@ func (tb *TokenBucket) refillLocked() {
 }
 
 func (tb *TokenBucket) Allow() bool {
+	return tb.AllowWithReserve(0)
+}
+
+// AllowWithReserve consumes one token only when reserve whole tokens would
+// remain. It is for low-priority callers that must never drain the capacity
+// needed by a higher-priority operation; unlike Take, it never waits.
+func (tb *TokenBucket) AllowWithReserve(reserve int) bool {
+	if reserve < 0 {
+		reserve = 0
+	}
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
 	tb.refillLocked()
-	if tb.tokens >= 1 {
+	if tb.tokens >= float64(reserve+1) {
 		tb.tokens--
 		return true
 	}

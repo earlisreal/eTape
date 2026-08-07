@@ -30,6 +30,21 @@ func TestTokenBucket_BurstThenRefill(t *testing.T) {
 	}
 }
 
+func TestTokenBucket_AllowWithReservePreservesCapacity(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	tb := NewTokenBucket(clk, 1, 2)
+
+	if !tb.AllowWithReserve(1) {
+		t.Fatal("first low-priority token should be admitted while one reserve remains")
+	}
+	if tb.AllowWithReserve(1) {
+		t.Fatal("low-priority caller must stop at the reserved token")
+	}
+	if !tb.Allow() {
+		t.Fatal("higher-priority caller should still be able to take the reserved token")
+	}
+}
+
 func TestTokenBucket_CapsAtBurst(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	tb := NewTokenBucket(clk, 10, 3)

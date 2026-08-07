@@ -16,6 +16,16 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/exec"
 )
 
+const (
+	alpacaRESTRatePerSec  = 200.0 / 60.0
+	alpacaRESTBurst       = 5
+	assetStatusRatePerSec = 50.0 / 60.0 // explicit low-priority sub-budget
+	assetStatusBurst      = 5
+	assetStatusReserve    = 1 // keep one pooled token available for execution
+)
+
+var errAssetStatusRateLimited = errors.New("alpaca: asset status skipped by low-priority rate limit")
+
 // restClient is Alpaca's REST transport: order entry/replace/cancel, kill
 // switches (cancel-all, flatten), and account snapshot. Unlike TradeZero,
 // Alpaca returns proper HTTP status codes with structured JSON errors
@@ -33,25 +43,45 @@ type restClient struct {
 	hc     *http.Client
 	clk    clock.Clock
 
-	bucket *netx.TokenBucket // single pooled 200/min (~3.33/s) bucket, burst 5
+	bucket      *netx.TokenBucket // single pooled 200/min (~3.33/s) bucket, burst 5
+	assetBucket *netx.TokenBucket // asset-only 50/min sub-budget, burst 5
 }
 
 func newRESTClient(base, keyID, secret string, clk clock.Clock) *restClient {
 	return &restClient{
 		base: base, keyID: keyID, secret: secret,
-		hc:     netx.NewHTTPClient(10 * time.Second),
-		clk:    clk,
-		bucket: netx.NewTokenBucket(clk, 200.0/60.0, 5),
+		hc:          netx.NewHTTPClient(10 * time.Second),
+		clk:         clk,
+		bucket:      netx.NewTokenBucket(clk, alpacaRESTRatePerSec, alpacaRESTBurst),
+		assetBucket: netx.NewTokenBucket(clk, assetStatusRatePerSec, assetStatusBurst),
 	}
 }
 
-// do takes one token from the shared pooled bucket, then issues the request
-// with Alpaca's key/secret headers. Every restClient method funnels through
-// here so no endpoint can bypass the pooled limit.
+// do takes one token from the shared pooled bucket, then issues a normal
+// execution/account request with Alpaca's key/secret headers. Informational
+// asset reads use doAsset's non-blocking low-priority path below.
 func (rc *restClient) do(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	if err := rc.bucket.Take(ctx); err != nil {
 		return nil, err
 	}
+	return rc.doHTTP(ctx, method, path, body)
+}
+
+// doAsset is the low-priority path for informational asset metadata. It uses
+// a small asset-only budget and admits a request from the shared pool only if
+// one execution reserve token remains. Both checks are non-blocking: a busy
+// execution venue skips this refresh instead of waiting behind it.
+func (rc *restClient) doAsset(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !rc.assetBucket.Allow() || !rc.bucket.AllowWithReserve(assetStatusReserve) {
+		return nil, errAssetStatusRateLimited
+	}
+	return rc.doHTTP(ctx, method, path, body)
+}
+
+func (rc *restClient) doHTTP(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, rc.base+path, body)
 	if err != nil {
 		return nil, err
@@ -94,13 +124,13 @@ func apiError(status int, body []byte) error {
 
 // assetStatus issues the narrow read-only GET /v2/assets/{symbol} request.
 // Borrow availability is intentionally not cached here: it can change, and
-// every call shares restClient.do's pooled execution rate limiter.
+// every call uses the low-priority asset budget and shared execution reserve.
 func (rc *restClient) assetStatus(ctx context.Context, symbol string) (assetStatusResponse, error) {
 	symbol = wireSymbol(symbol)
 	if symbol == "" {
 		return assetStatusResponse{}, errors.New("alpaca: asset status requires symbol")
 	}
-	resp, err := rc.do(ctx, http.MethodGet, "/v2/assets/"+url.PathEscape(symbol), nil)
+	resp, err := rc.doAsset(ctx, http.MethodGet, "/v2/assets/"+url.PathEscape(symbol), nil)
 	if err != nil {
 		return assetStatusResponse{}, fmt.Errorf("alpaca: asset status transport: %w", err)
 	}

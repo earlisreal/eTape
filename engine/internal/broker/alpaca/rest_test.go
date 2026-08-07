@@ -3,6 +3,7 @@ package alpaca
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -177,6 +178,30 @@ func TestAssetStatus_SymbolConversion(t *testing.T) {
 	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
 	if _, err := rc.assetStatus(context.Background(), "US.AAPL"); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestAssetStatus_SkipsWhenExecutionReserveIsNeeded(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	rc := newRESTClient("http://127.0.0.1:0", "K", "S", clk)
+	for rc.bucket.Allow() {
+	}
+
+	_, err := rc.assetStatus(context.Background(), "US.AAPL")
+	if !errors.Is(err, errAssetStatusRateLimited) {
+		t.Fatalf("asset status error = %v, want low-priority skip", err)
+	}
+}
+
+func TestAssetStatusSkipsWhenAssetSubBudgetIsExhausted(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	rc := newRESTClient("http://127.0.0.1:0", "K", "S", clk)
+	for rc.assetBucket.Allow() {
+	}
+
+	_, err := rc.assetStatus(context.Background(), "US.AAPL")
+	if !errors.Is(err, errAssetStatusRateLimited) {
+		t.Fatalf("asset status error = %v, want asset-budget skip", err)
 	}
 }
 
