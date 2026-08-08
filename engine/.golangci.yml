@@ -2,6 +2,10 @@ version: "2"
 linters:
   enable:
     - misspell
+  settings:
+    misspell:
+      ignore-rules:
+        - marginable
   exclusions:
     generated: lax
     presets:

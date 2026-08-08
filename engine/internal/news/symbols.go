@@ -21,7 +21,7 @@ func normalizeMoomooSecurity(raw string) (string, bool) {
 		return "", false
 	}
 	for _, r := range ticker {
-		if !(r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r == '-' || r == '.') {
+		if (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '.' {
 			return "", false
 		}
 	}
