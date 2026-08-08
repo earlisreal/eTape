@@ -453,6 +453,7 @@ func TestFetchTickEnrichesDerivedSSRFromSnapshotLowAndIgnoresAlpacaFlags(t *test
 	asset := &fakeAssetStatusReader{statuses: map[string]AssetStatus{"US.NVDA": {Shortable: &shortable}}}
 	pub := &fakePublisher{}
 	clk := clock.NewFake(time.Date(2026, 7, 8, 10, 0, 0, 0, session.Loc()))
+	snapshot.Basic.UpdateTimestamp = proto.Float64(float64(clk.Now().Unix()))
 	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000}, fr, pub, clk,
 		func() []string { return []string{"US.NVDA"} }, newFakeBars(), asset, ssr.New(nil))
 	p.fetchTick(context.Background())

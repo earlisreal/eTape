@@ -21,6 +21,7 @@ package stockinfo
 import (
 	"context"
 	"log/slog"
+	"math"
 	"strings"
 	"time"
 
@@ -75,7 +76,15 @@ type assetStatusReader interface {
 }
 
 type shortSellRestrictionResolver interface {
-	IsRestricted(symbol string, now time.Time, dayLow, priorClose float64) bool
+	IsRestricted(symbol string, now, snapshotAt time.Time, dayLow, priorClose float64) bool
+}
+
+func snapshotObservationTime(basic *snappb.SnapshotBasicData) time.Time {
+	ts := basic.GetUpdateTimestamp()
+	if ts <= 0 || math.IsNaN(ts) || math.IsInf(ts, 0) {
+		return time.Time{}
+	}
+	return time.Unix(int64(ts), 0)
 }
 
 // ema200Entry is the once-per-day cache entry for a symbol's EMA-200: day is
@@ -157,7 +166,7 @@ func (p *Poller) fetchTick(ctx context.Context) {
 		payload.Exchange = p.exch[sym]
 		if p.ssr != nil && payload.Exchange != "OTC" && snap.GetBasic() != nil {
 			basic := snap.GetBasic()
-			payload.ShortSellRestricted = p.ssr.IsRestricted(sym, now, basic.GetLowPrice(), basic.GetLastClosePrice())
+			payload.ShortSellRestricted = p.ssr.IsRestricted(sym, now, snapshotObservationTime(basic), basic.GetLowPrice(), basic.GetLastClosePrice())
 		}
 		payload.Ema200 = p.ema200For(sym)
 		if p.assetReader != nil {

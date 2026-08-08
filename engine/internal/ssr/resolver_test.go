@@ -49,6 +49,14 @@ func daily(y int, m time.Month, d int, low, close float64) feed.Bar {
 	}
 }
 
+func liveLookup(r *Resolver, symbol string, now time.Time, low, priorClose float64) bool {
+	return r.IsRestricted(symbol, now, now, low, priorClose)
+}
+
+func carryLookup(r *Resolver, symbol string, now time.Time, low, priorClose float64) bool {
+	return r.IsRestricted(symbol, now, time.Time{}, low, priorClose)
+}
+
 func TestTriggersRule201Threshold(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -75,20 +83,20 @@ func TestTriggersRule201Threshold(t *testing.T) {
 
 func TestIsRestrictedUsesRegularLowAndSurvivesRecovery(t *testing.T) {
 	r := New(nil)
-	if r.IsRestricted("US.TEST", et(2026, time.July, 6, 8, 0), 89, 100) {
+	if liveLookup(r, "US.TEST", et(2026, time.July, 6, 8, 0), 89, 100) {
 		t.Fatal("premarket low must not create a trigger")
 	}
-	if !r.IsRestricted("US.TEST", et(2026, time.July, 6, 10, 0), 89, 100) {
+	if !liveLookup(r, "US.TEST", et(2026, time.July, 6, 10, 0), 89, 100) {
 		t.Fatal("RTH low at the threshold must trigger")
 	}
-	if !r.IsRestricted("US.TEST", et(2026, time.July, 6, 17, 0), 95, 100) {
+	if !liveLookup(r, "US.TEST", et(2026, time.July, 6, 17, 0), 95, 100) {
 		t.Fatal("a recovered current price/low update must not clear the trigger")
 	}
 }
 
 func TestFirstDayIPOHasNoDerivedTrigger(t *testing.T) {
 	r := New(nil)
-	if r.IsRestricted("US.IPO", et(2026, time.July, 6, 10, 0), 0, 0) {
+	if liveLookup(r, "US.IPO", et(2026, time.July, 6, 10, 0), 0, 0) {
 		t.Fatal("missing prior close/low must not trigger")
 	}
 }
@@ -102,21 +110,21 @@ func TestPreviousTradingDayCarrySkipsHoliday(t *testing.T) {
 		daily(2026, time.July, 1, 95, 100),
 	)
 	r := New(bars)
-	if !r.IsRestricted("US.TEST", et(2026, time.July, 6, 8, 0), 0, 0) {
+	if !carryLookup(r, "US.TEST", et(2026, time.July, 6, 8, 0), 0, 0) {
 		t.Fatal("previous session trigger must carry across the holiday")
 	}
 }
 
 func TestFridayTriggerCarriesToMonday(t *testing.T) {
 	r := New(nil)
-	if !r.IsRestricted("US.TEST", et(2026, time.July, 10, 10, 0), 89, 100) {
+	if !liveLookup(r, "US.TEST", et(2026, time.July, 10, 10, 0), 89, 100) {
 		t.Fatal("Friday should trigger")
 	}
-	if r.IsRestricted("US.TEST", et(2026, time.July, 11, 10, 0), 89, 100) ||
-		r.IsRestricted("US.TEST", et(2026, time.July, 12, 10, 0), 89, 100) {
+	if carryLookup(r, "US.TEST", et(2026, time.July, 11, 10, 0), 89, 100) ||
+		carryLookup(r, "US.TEST", et(2026, time.July, 12, 10, 0), 89, 100) {
 		t.Fatal("weekends must not be treated as trading days")
 	}
-	if !r.IsRestricted("US.TEST", et(2026, time.July, 13, 8, 0), 0, 0) {
+	if !carryLookup(r, "US.TEST", et(2026, time.July, 13, 8, 0), 0, 0) {
 		t.Fatal("Friday trigger must carry to Monday")
 	}
 }
@@ -128,16 +136,16 @@ func TestConsecutiveDayRetriggerExtendsRestriction(t *testing.T) {
 		daily(2026, time.July, 13, 84, 95),
 	)
 	r := New(bars)
-	if !r.IsRestricted("US.TEST", et(2026, time.July, 13, 10, 0), 89, 100) {
+	if !liveLookup(r, "US.TEST", et(2026, time.July, 13, 10, 0), 89, 100) {
 		t.Fatal("Monday should trigger")
 	}
-	if !r.IsRestricted("US.TEST", et(2026, time.July, 14, 8, 0), 0, 0) {
+	if !carryLookup(r, "US.TEST", et(2026, time.July, 14, 8, 0), 0, 0) {
 		t.Fatal("Tuesday should carry Monday's trigger")
 	}
-	if !r.IsRestricted("US.TEST", et(2026, time.July, 14, 10, 0), 84, 95) {
+	if !liveLookup(r, "US.TEST", et(2026, time.July, 14, 10, 0), 84, 95) {
 		t.Fatal("Tuesday retrigger should be recognized")
 	}
-	if !r.IsRestricted("US.TEST", et(2026, time.July, 15, 8, 0), 0, 0) {
+	if !carryLookup(r, "US.TEST", et(2026, time.July, 15, 8, 0), 0, 0) {
 		t.Fatal("Tuesday retrigger should carry to Wednesday")
 	}
 }
@@ -150,30 +158,58 @@ func TestNoRetriggerExpiresAfterFollowingTradingDay(t *testing.T) {
 		daily(2026, time.July, 14, 95, 95),
 	)
 	r := New(bars)
-	if !r.IsRestricted("US.TEST", et(2026, time.July, 13, 10, 0), 90, 100) {
+	if !liveLookup(r, "US.TEST", et(2026, time.July, 13, 10, 0), 90, 100) {
 		t.Fatal("Monday should trigger")
 	}
-	if !r.IsRestricted("US.TEST", et(2026, time.July, 14, 8, 0), 0, 0) {
+	if !carryLookup(r, "US.TEST", et(2026, time.July, 14, 8, 0), 0, 0) {
 		t.Fatal("Tuesday should carry Monday's trigger")
 	}
-	if !r.IsRestricted("US.TEST", et(2026, time.July, 14, 10, 0), 95, 100) {
+	if !liveLookup(r, "US.TEST", et(2026, time.July, 14, 10, 0), 95, 100) {
 		t.Fatal("Tuesday remains restricted even without a retrigger")
 	}
-	if r.IsRestricted("US.TEST", et(2026, time.July, 15, 8, 0), 0, 0) {
+	if carryLookup(r, "US.TEST", et(2026, time.July, 15, 8, 0), 0, 0) {
 		t.Fatal("Monday's trigger must not carry beyond Tuesday")
 	}
 }
 
-func TestMissingArchiveCanRetry(t *testing.T) {
+func TestMissingArchiveIsTemporarilyThrottledButRetries(t *testing.T) {
 	bars := &fakeBars{}
 	r := New(bars)
 	when := et(2026, time.July, 7, 8, 0)
-	if r.IsRestricted("US.TEST", when, 0, 0) {
+	if carryLookup(r, "US.TEST", when, 0, 0) {
 		t.Fatal("missing history must not create a false positive")
 	}
+	if got := bars.callCount(); got != 1 {
+		t.Fatalf("initial missing-history calls = %d, want 1", got)
+	}
+	if carryLookup(r, "US.TEST", when.Add(negativeCarryTTL-time.Second), 0, 0) {
+		t.Fatal("missing history should remain temporarily unrestricted")
+	}
+	if got := bars.callCount(); got != 1 {
+		t.Fatalf("pre-TTL missing-history calls = %d, want 1", got)
+	}
+
 	bars.set(daily(2026, time.July, 6, 90, 95), daily(2026, time.July, 2, 95, 100))
-	if !r.IsRestricted("US.TEST", when, 0, 0) {
+	if !carryLookup(r, "US.TEST", when.Add(negativeCarryTTL+time.Second), 0, 0) {
 		t.Fatal("resolver should retry after history arrives")
+	}
+	if got := bars.callCount(); got != 2 {
+		t.Fatalf("post-TTL missing-history calls = %d, want 2", got)
+	}
+}
+
+func TestLiveTriggerBypassesMissingHistoryCache(t *testing.T) {
+	bars := &fakeBars{}
+	r := New(bars)
+	premarket := et(2026, time.July, 7, 8, 0)
+	if carryLookup(r, "US.TEST", premarket, 0, 0) {
+		t.Fatal("missing history must not create a false positive")
+	}
+	if !r.IsRestricted("US.TEST", et(2026, time.July, 7, 10, 0), et(2026, time.July, 7, 10, 0), 89, 100) {
+		t.Fatal("fresh live trigger must bypass the missing-history cache")
+	}
+	if got := bars.callCount(); got != 1 {
+		t.Fatalf("live trigger should not reread history, calls = %d, want 1", got)
 	}
 }
 
@@ -183,7 +219,7 @@ func TestNegativeCarryCacheRetriesAfterArchivedDailyBarIsCorrected(t *testing.T)
 	r := New(bars)
 	when := et(2026, time.July, 7, 8, 0)
 
-	if r.IsRestricted("US.TEST", when, 0, 0) {
+	if carryLookup(r, "US.TEST", when, 0, 0) {
 		t.Fatal("initial stale archive should be unrestricted")
 	}
 	if got := bars.callCount(); got != 1 {
@@ -191,14 +227,14 @@ func TestNegativeCarryCacheRetriesAfterArchivedDailyBarIsCorrected(t *testing.T)
 	}
 
 	bars.set(daily(2026, time.July, 6, 89, 95), daily(2026, time.July, 2, 95, 100))
-	if r.IsRestricted("US.TEST", when.Add(negativeCarryTTL-time.Second), 0, 0) {
+	if carryLookup(r, "US.TEST", when.Add(negativeCarryTTL-time.Second), 0, 0) {
 		t.Fatal("negative carry result should remain cached before TTL")
 	}
 	if got := bars.callCount(); got != 1 {
 		t.Fatalf("pre-TTL carry lookup calls = %d, want 1", got)
 	}
 
-	if !r.IsRestricted("US.TEST", when.Add(negativeCarryTTL+time.Second), 0, 0) {
+	if !carryLookup(r, "US.TEST", when.Add(negativeCarryTTL+time.Second), 0, 0) {
 		t.Fatal("corrected archived low should produce carry after TTL")
 	}
 	if got := bars.callCount(); got != 2 {
@@ -212,10 +248,10 @@ func TestPositiveCarryCacheDoesNotReread(t *testing.T) {
 	r := New(bars)
 	when := et(2026, time.July, 7, 8, 0)
 
-	if !r.IsRestricted("US.TEST", when, 0, 0) {
+	if !carryLookup(r, "US.TEST", when, 0, 0) {
 		t.Fatal("positive carry should be restricted")
 	}
-	if !r.IsRestricted("US.TEST", when.Add(negativeCarryTTL+time.Second), 0, 0) {
+	if !carryLookup(r, "US.TEST", when.Add(negativeCarryTTL+time.Second), 0, 0) {
 		t.Fatal("positive carry should remain restricted")
 	}
 	if got := bars.callCount(); got != 1 {
@@ -226,14 +262,58 @@ func TestPositiveCarryCacheDoesNotReread(t *testing.T) {
 func TestRestartReconstructsPreviousDayCarry(t *testing.T) {
 	bars := &fakeBars{}
 	bars.set(daily(2026, time.July, 6, 90, 95), daily(2026, time.July, 2, 95, 100))
-	if !New(bars).IsRestricted("US.TEST", et(2026, time.July, 7, 8, 0), 0, 0) {
+	if !carryLookup(New(bars), "US.TEST", et(2026, time.July, 7, 8, 0), 0, 0) {
 		t.Fatal("fresh resolver should reconstruct yesterday's trigger")
 	}
 }
 
 func TestNonUSSymbolNeverTriggersRule201(t *testing.T) {
-	if New(nil).IsRestricted("HK.00700", et(2026, time.July, 6, 10, 0), 80, 100) {
+	if liveLookup(New(nil), "HK.00700", et(2026, time.July, 6, 10, 0), 80, 100) {
 		t.Fatal("non-US symbol must not receive derived Rule 201 status")
+	}
+}
+
+func TestStalePreviousDaySnapshotAfterOpenCannotRetriggerToday(t *testing.T) {
+	r := New(nil)
+	monday := et(2026, time.July, 6, 10, 0)
+	tuesday := et(2026, time.July, 7, 10, 0)
+	if !r.IsRestricted("US.TEST", monday, monday, 89, 100) {
+		t.Fatal("Monday should trigger")
+	}
+	if !r.IsRestricted("US.TEST", tuesday, monday, 89, 100) {
+		t.Fatal("Monday carry should restrict Tuesday")
+	}
+	if r.IsRestricted("US.TEST", et(2026, time.July, 8, 8, 0), time.Time{}, 0, 0) {
+		t.Fatal("stale Monday snapshot must not extend restriction into Wednesday")
+	}
+}
+
+func TestCurrentDaySnapshotCanRetriggerCarryDay(t *testing.T) {
+	r := New(nil)
+	monday := et(2026, time.July, 6, 10, 0)
+	tuesday := et(2026, time.July, 7, 10, 0)
+	if !r.IsRestricted("US.TEST", monday, monday, 89, 100) {
+		t.Fatal("Monday should trigger")
+	}
+	if !carryLookup(r, "US.TEST", et(2026, time.July, 7, 8, 0), 0, 0) {
+		t.Fatal("Monday carry should restrict Tuesday")
+	}
+	if !r.IsRestricted("US.TEST", tuesday, tuesday, 84, 95) {
+		t.Fatal("fresh Tuesday snapshot should retrigger")
+	}
+	if !carryLookup(r, "US.TEST", et(2026, time.July, 8, 8, 0), 0, 0) {
+		t.Fatal("Tuesday retrigger should carry into Wednesday")
+	}
+}
+
+func TestMissingSnapshotTimestampCannotRetrigger(t *testing.T) {
+	r := New(nil)
+	tuesday := et(2026, time.July, 7, 10, 0)
+	if r.IsRestricted("US.TEST", tuesday, time.Time{}, 89, 100) {
+		t.Fatal("missing snapshot timestamp must not create a current-day trigger")
+	}
+	if carryLookup(r, "US.TEST", et(2026, time.July, 8, 8, 0), 0, 0) {
+		t.Fatal("missing timestamp trigger must not carry into Wednesday")
 	}
 }
 
@@ -245,7 +325,7 @@ func TestResolverConcurrentCalls(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if !r.IsRestricted("US.TEST", when, 89, 100) {
+			if !liveLookup(r, "US.TEST", when, 89, 100) {
 				t.Errorf("concurrent lookup returned unrestricted")
 			}
 		}()

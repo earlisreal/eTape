@@ -52,9 +52,11 @@ func New(bars DailyBarReader) *Resolver {
 }
 
 // IsRestricted returns the derived Rule 201 estimate for symbol at now.
-// dayLow and priorClose must come from the regular-session snapshot fields;
-// callers should not substitute current price or extended-hours prices.
-func (r *Resolver) IsRestricted(symbol string, now time.Time, dayLow, priorClose float64) bool {
+// snapshotAt is the provider-neutral observation time for dayLow/priorClose;
+// it must be current-date to create a new live trigger. dayLow and priorClose
+// must come from the regular-session snapshot fields; callers should not
+// substitute current price or extended-hours prices.
+func (r *Resolver) IsRestricted(symbol string, now, snapshotAt time.Time, dayLow, priorClose float64) bool {
 	if r == nil || !strings.HasPrefix(symbol, "US.") {
 		return false
 	}
@@ -73,7 +75,9 @@ func (r *Resolver) IsRestricted(symbol string, now time.Time, dayLow, priorClose
 	if last, ok := r.triggers[symbol]; ok && last.Before(previous) {
 		delete(r.triggers, symbol)
 	}
-	if !etNow.Before(schedule.Open) && triggersRule201(dayLow, priorClose) {
+	if !etNow.Before(schedule.Open) &&
+		sameDate(snapshotAt, today) &&
+		triggersRule201(dayLow, priorClose) {
 		r.triggers[symbol] = today
 	}
 	if r.triggers[symbol].Equal(today) || r.triggers[symbol].Equal(previous) {
@@ -89,15 +93,17 @@ func (r *Resolver) IsRestricted(symbol string, now time.Time, dayLow, priorClose
 		return false
 	}
 
-	// Do not cache an incomplete read: a later backfill may make the result
-	// derivable without requiring a process restart.
 	archived, err := r.bars.ReadRecentDailyBars(symbol, recentDailyLimit)
 	if err != nil {
+		r.carry[symbol] = carryEntry{date: today, checkedAt: etNow}
 		return false
 	}
 	p1, ok1 := barForDate(archived, previous)
 	p2, ok2 := barForDate(archived, session.PreviousTradingDay(previous))
 	if !ok1 || !ok2 {
+		// Backfill may make an incomplete result derivable later; keep this
+		// temporary negative result retryable without rereading every poll.
+		r.carry[symbol] = carryEntry{date: today, checkedAt: etNow}
 		return false
 	}
 

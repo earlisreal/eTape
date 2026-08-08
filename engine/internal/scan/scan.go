@@ -54,7 +54,15 @@ type demandFeed interface {
 }
 
 type shortSellRestrictionResolver interface {
-	IsRestricted(symbol string, now time.Time, dayLow, priorClose float64) bool
+	IsRestricted(symbol string, now, snapshotAt time.Time, dayLow, priorClose float64) bool
+}
+
+func snapshotObservationTime(basic *snappb.SnapshotBasicData) time.Time {
+	ts := basic.GetUpdateTimestamp()
+	if ts <= 0 || math.IsNaN(ts) || math.IsInf(ts, 0) {
+		return time.Time{}
+	}
+	return time.Unix(int64(ts), 0)
 }
 
 // rankItem is the poller-internal normalized form of one rank row (decoupled
@@ -866,7 +874,7 @@ func (p *Poller) snapshotBatch(ctx context.Context, phase session.Phase, syms []
 				}
 			}
 			if p.ssr != nil {
-				it.ShortSellRestricted = p.ssr.IsRestricted(sym, p.clk.Now(), basic.GetLowPrice(), basic.GetLastClosePrice())
+				it.ShortSellRestricted = p.ssr.IsRestricted(sym, p.clk.Now(), snapshotObservationTime(basic), basic.GetLowPrice(), basic.GetLastClosePrice())
 			}
 			items[sym] = it
 		}

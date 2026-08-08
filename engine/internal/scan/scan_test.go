@@ -867,6 +867,7 @@ func TestSnapshotRefreshEnrichesDerivedSSRWithoutChangingCanonicalSymbol(t *test
 	fr := &fakeReq{snap: func([]string) (*snappb.Response, error) {
 		s := marketSnap("A", 1, 105, 100, 999)
 		s.Basic.LowPrice = proto.Float64(89)
+		s.Basic.UpdateTimestamp = proto.Float64(float64(time.Date(2026, 7, 8, 10, 0, 0, 0, session.Loc()).Unix()))
 		return snapResp(s), nil
 	}}
 	clk := clock.NewFake(et(2026, 7, 8, 10, 0))
