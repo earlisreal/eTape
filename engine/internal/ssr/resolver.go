@@ -4,6 +4,7 @@
 package ssr
 
 import (
+	"strings"
 	"sync"
 	"time"
 
@@ -11,7 +12,10 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
-const recentDailyLimit = 8
+const (
+	recentDailyLimit = 8
+	negativeCarryTTL = time.Minute
+)
 
 // DailyBarReader is the bounded daily-history surface needed to reconstruct a
 // previous-session derived Rule 201 trigger after a process restart.
@@ -33,6 +37,7 @@ type Resolver struct {
 type carryEntry struct {
 	date       time.Time
 	restricted bool
+	checkedAt  time.Time
 }
 
 // New creates a derived SSR resolver. A nil reader is allowed; current-day
@@ -50,7 +55,7 @@ func New(bars DailyBarReader) *Resolver {
 // dayLow and priorClose must come from the regular-session snapshot fields;
 // callers should not substitute current price or extended-hours prices.
 func (r *Resolver) IsRestricted(symbol string, now time.Time, dayLow, priorClose float64) bool {
-	if r == nil || symbol == "" {
+	if r == nil || !strings.HasPrefix(symbol, "US.") {
 		return false
 	}
 
@@ -76,7 +81,9 @@ func (r *Resolver) IsRestricted(symbol string, now time.Time, dayLow, priorClose
 	}
 
 	if entry, ok := r.carry[symbol]; ok && entry.date.Equal(today) {
-		return entry.restricted
+		if entry.restricted || etNow.Sub(entry.checkedAt) < negativeCarryTTL {
+			return entry.restricted
+		}
 	}
 	if r.bars == nil {
 		return false
@@ -95,7 +102,7 @@ func (r *Resolver) IsRestricted(symbol string, now time.Time, dayLow, priorClose
 	}
 
 	restricted := triggersRule201(p1.L, p2.C)
-	r.carry[symbol] = carryEntry{date: today, restricted: restricted}
+	r.carry[symbol] = carryEntry{date: today, restricted: restricted, checkedAt: etNow}
 	return restricted
 }
 

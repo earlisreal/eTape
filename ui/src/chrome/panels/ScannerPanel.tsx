@@ -172,7 +172,7 @@ export function ScannerPanel(
                   : hoveredSymbol === r.symbol ? "rgba(154,106,27,.06)" : "transparent",
                 boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : r.isUnseen ? `inset 2px 0 0 ${palette.accent}` : "none",
                 transition: "background 120ms ease" }}>
-              <td style={symCell} title={r.shortSellRestricted ? "Short Sell Restricted — derived Rule 201 status" : undefined}>
+              <td style={symCell} title={r.shortSellRestricted ? "Short Sell Restricted — derived Rule 201 estimate" : undefined}>
                 {appendSsrMarker(bareSymbol(r.symbol), r.shortSellRestricted)}
               </td>
               <td style={{ ...numCell, color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>{formatChangePct(r.changePct)}</td>

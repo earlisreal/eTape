@@ -30,6 +30,12 @@ func (f *fakeBars) set(bars ...feed.Bar) {
 	f.mu.Unlock()
 }
 
+func (f *fakeBars) callCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
 func et(y int, m time.Month, d, hour, minute int) time.Time {
 	return time.Date(y, m, d, hour, minute, 0, 0, session.Loc())
 }
@@ -171,11 +177,63 @@ func TestMissingArchiveCanRetry(t *testing.T) {
 	}
 }
 
+func TestNegativeCarryCacheRetriesAfterArchivedDailyBarIsCorrected(t *testing.T) {
+	bars := &fakeBars{}
+	bars.set(daily(2026, time.July, 6, 95, 95), daily(2026, time.July, 2, 95, 100))
+	r := New(bars)
+	when := et(2026, time.July, 7, 8, 0)
+
+	if r.IsRestricted("US.TEST", when, 0, 0) {
+		t.Fatal("initial stale archive should be unrestricted")
+	}
+	if got := bars.callCount(); got != 1 {
+		t.Fatalf("initial carry lookup calls = %d, want 1", got)
+	}
+
+	bars.set(daily(2026, time.July, 6, 89, 95), daily(2026, time.July, 2, 95, 100))
+	if r.IsRestricted("US.TEST", when.Add(negativeCarryTTL-time.Second), 0, 0) {
+		t.Fatal("negative carry result should remain cached before TTL")
+	}
+	if got := bars.callCount(); got != 1 {
+		t.Fatalf("pre-TTL carry lookup calls = %d, want 1", got)
+	}
+
+	if !r.IsRestricted("US.TEST", when.Add(negativeCarryTTL+time.Second), 0, 0) {
+		t.Fatal("corrected archived low should produce carry after TTL")
+	}
+	if got := bars.callCount(); got != 2 {
+		t.Fatalf("post-TTL carry lookup calls = %d, want 2", got)
+	}
+}
+
+func TestPositiveCarryCacheDoesNotReread(t *testing.T) {
+	bars := &fakeBars{}
+	bars.set(daily(2026, time.July, 6, 89, 95), daily(2026, time.July, 2, 95, 100))
+	r := New(bars)
+	when := et(2026, time.July, 7, 8, 0)
+
+	if !r.IsRestricted("US.TEST", when, 0, 0) {
+		t.Fatal("positive carry should be restricted")
+	}
+	if !r.IsRestricted("US.TEST", when.Add(negativeCarryTTL+time.Second), 0, 0) {
+		t.Fatal("positive carry should remain restricted")
+	}
+	if got := bars.callCount(); got != 1 {
+		t.Fatalf("positive carry lookup calls = %d, want 1", got)
+	}
+}
+
 func TestRestartReconstructsPreviousDayCarry(t *testing.T) {
 	bars := &fakeBars{}
 	bars.set(daily(2026, time.July, 6, 90, 95), daily(2026, time.July, 2, 95, 100))
 	if !New(bars).IsRestricted("US.TEST", et(2026, time.July, 7, 8, 0), 0, 0) {
 		t.Fatal("fresh resolver should reconstruct yesterday's trigger")
+	}
+}
+
+func TestNonUSSymbolNeverTriggersRule201(t *testing.T) {
+	if New(nil).IsRestricted("HK.00700", et(2026, time.July, 6, 10, 0), 80, 100) {
+		t.Fatal("non-US symbol must not receive derived Rule 201 status")
 	}
 }
 
