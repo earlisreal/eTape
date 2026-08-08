@@ -142,6 +142,14 @@ func (s *indicatorSet) reseedSymbol(c *Core, symbol string) {
 	}
 }
 
+// reseedSymTF rebuilds only the instances attached to one symbol and
+// timeframe after that timeframe's finalized history changes.
+func (s *indicatorSet) reseedSymTF(c *Core, symbol string, tf session.Timeframe) {
+	for _, in := range s.bySymTF[symTF{symbol: symbol, tf: tf}] {
+		s.reseed(c, in)
+	}
+}
+
 // reseed rebuilds an instance from finalized history and emits snapshots.
 func (s *indicatorSet) reseed(c *Core, in *instance) {
 	ca, err := newCalc(in.spec)

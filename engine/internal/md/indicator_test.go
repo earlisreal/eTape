@@ -14,6 +14,23 @@ func mkBar(i int, c float64, v, buyV int64) Bar {
 		O: c - 0.1, H: c + 0.2, L: c - 0.2, C: c, V: v, BuyV: buyV, SellV: v - buyV}
 }
 
+func expectedVWAP(bars []Bar) float64 {
+	var pv, volume float64
+	for _, b := range bars {
+		pv += ((b.H + b.L + b.C) / 3) * float64(b.V)
+		volume += float64(b.V)
+	}
+	return pv / volume
+}
+
+func feedPartialNAMI(c *Core) {
+	c.Feed(feed.TicksEvent{Ticks: []feed.Tick{
+		{Symbol: "US.NAMI", Seq: 1, TsMs: t0Ms, Price: 6.50, Volume: 10},
+		{Symbol: "US.NAMI", Seq: 2, TsMs: t0Ms + 3_000, Price: 6.60, Volume: 10},
+		{Symbol: "US.NAMI", Seq: 3, TsMs: t0Ms + 10_000, Price: 6.55, Volume: 5},
+	}})
+}
+
 func TestEMAMatchesReference(t *testing.T) {
 	spec := IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: IndEMA, Params: map[string]float64{"period": 3}}
 	ca, err := newCalc(spec)
@@ -156,6 +173,132 @@ func TestIndicatorLifecycleThroughCore(t *testing.T) {
 	snaps2, deltas2, _ := countEma(drain())
 	if snaps2 != snaps || deltas2 != deltas {
 		t.Fatalf("released instance still emitting: snapshots %d->%d deltas %d->%d", snaps, snaps2, deltas, deltas2)
+	}
+}
+
+func TestSeedHistory10sReseedsExistingVWAP(t *testing.T) {
+	c, drain := runCore(t)
+	sym := "US.NAMI"
+	feedPartialNAMI(c)
+	c.EnsureIndicator(1, "vwap-1", IndicatorSpec{Symbol: sym, TF: session.TF10s, Type: IndVWAP})
+	_ = drain()
+
+	history := []feed.Bar{
+		{Symbol: sym, BucketMs: t0Ms - 30_000, O: 7.5, H: 7.6, L: 7.4, C: 7.5, Volume: 1_000},
+		{Symbol: sym, BucketMs: t0Ms - 20_000, O: 7.4, H: 7.5, L: 7.3, C: 7.4, Volume: 1_000},
+		{Symbol: sym, BucketMs: t0Ms - 10_000, O: 7.3, H: 7.4, L: 7.2, C: 7.3, Volume: 1_000},
+	}
+	c.SeedHistory10s(sym, history)
+	updates := drain()
+	var last IndicatorUpdate
+	snapshots := 0
+	for _, u := range updates {
+		if iu, ok := u.(IndicatorUpdate); ok && iu.InstanceID == "vwap-1" && iu.Snapshot {
+			snapshots++
+			last = iu
+		}
+	}
+	if snapshots < 2 {
+		t.Fatalf("VWAP snapshots = %d, want initial plus post-10s-seed replacement", snapshots)
+	}
+
+	full := []Bar{
+		{H: 7.6, L: 7.4, C: 7.5, V: 1_000},
+		{H: 7.5, L: 7.3, C: 7.4, V: 1_000},
+		{H: 7.4, L: 7.2, C: 7.3, V: 1_000},
+		{H: 6.6, L: 6.5, C: 6.6, V: 20},
+	}
+	want := expectedVWAP(full)
+	if len(last.Points) == 0 {
+		t.Fatal("post-seed VWAP snapshot has no points")
+	}
+	got := last.Points[len(last.Points)-1].Value
+	if math.Abs(got-want) > 1e-9 {
+		t.Fatalf("post-seed VWAP = %g, want full-history value %g", got, want)
+	}
+	if math.Abs(got-expectedVWAP(full[3:])) < 0.1 {
+		t.Fatalf("post-seed VWAP = %g still matches live-only state", got)
+	}
+}
+
+func TestSeedChartHistoryColdSymbolVWAPUsesFull10sHistory(t *testing.T) {
+	c, drain := runCore(t)
+	sym := "US.NAMI"
+	feedPartialNAMI(c)
+	c.EnsureIndicator(1, "vwap-1", IndicatorSpec{Symbol: sym, TF: session.TF10s, Type: IndVWAP})
+	_ = drain()
+
+	history10s := []feed.Bar{
+		{Symbol: sym, BucketMs: t0Ms - 30_000, O: 7.5, H: 7.6, L: 7.4, C: 7.5, Volume: 1_000},
+		{Symbol: sym, BucketMs: t0Ms - 20_000, O: 7.4, H: 7.5, L: 7.3, C: 7.4, Volume: 1_000},
+		{Symbol: sym, BucketMs: t0Ms - 10_000, O: 7.3, H: 7.4, L: 7.2, C: 7.3, Volume: 1_000},
+	}
+	c.SeedChartHistory(sym,
+		[]feed.Bar{{Symbol: sym, BucketMs: session.DayMs(t0Ms), O: 7, H: 8, L: 6, C: 7, Volume: 10_000}},
+		[]feed.Bar{{Symbol: sym, BucketMs: t0Ms - 60_000, O: 7, H: 7.1, L: 6.9, C: 7, Volume: 100}},
+		history10s,
+	)
+	updates := drain()
+
+	readyIndex := -1
+	for i, u := range updates {
+		if ready, ok := u.(HistoryReadyUpdate); ok && ready.Symbol == sym && ready.Prepared {
+			readyIndex = i
+		}
+	}
+	if readyIndex < 0 {
+		t.Fatal("SeedChartHistory emitted no prepared history barrier")
+	}
+
+	var last IndicatorUpdate
+	for _, u := range updates[:readyIndex] {
+		if iu, ok := u.(IndicatorUpdate); ok && iu.InstanceID == "vwap-1" && iu.Snapshot {
+			last = iu
+		}
+	}
+	if len(last.Points) == 0 {
+		t.Fatal("no VWAP snapshot before prepared history barrier")
+	}
+	want := expectedVWAP([]Bar{
+		{H: 7.6, L: 7.4, C: 7.5, V: 1_000},
+		{H: 7.5, L: 7.3, C: 7.4, V: 1_000},
+		{H: 7.4, L: 7.2, C: 7.3, V: 1_000},
+		{H: 6.6, L: 6.5, C: 6.6, V: 20},
+	})
+	got := last.Points[len(last.Points)-1].Value
+	if math.Abs(got-want) > 1e-9 {
+		t.Fatalf("VWAP at prepared barrier = %g, want full-history value %g", got, want)
+	}
+}
+
+func TestSeedHistory10sReseedsOnlyMatchingTimeframe(t *testing.T) {
+	c, drain := runCore(t)
+	sym := "US.NAMI"
+	c.SeedHistory10s(sym, []feed.Bar{{Symbol: sym, BucketMs: t0Ms, O: 6.5, H: 6.6, L: 6.4, C: 6.5, Volume: 20}})
+	c.SeedHistory1m(sym, []feed.Bar{{Symbol: sym, BucketMs: t0Ms, O: 6.5, H: 6.6, L: 6.4, C: 6.5, Volume: 20}})
+	_ = drain()
+	c.EnsureIndicator(1, "vwap-10s", IndicatorSpec{Symbol: sym, TF: session.TF10s, Type: IndVWAP})
+	c.EnsureIndicator(1, "vwap-1m", IndicatorSpec{Symbol: sym, TF: session.TF1m, Type: IndVWAP})
+	initial := drain()
+
+	countSnapshots := func(us []Update, id string) int {
+		count := 0
+		for _, u := range us {
+			if iu, ok := u.(IndicatorUpdate); ok && iu.InstanceID == id && iu.Snapshot {
+				count++
+			}
+		}
+		return count
+	}
+	initial10s := countSnapshots(initial, "vwap-10s")
+	initial1m := countSnapshots(initial, "vwap-1m")
+	c.SeedHistory10s(sym, []feed.Bar{{Symbol: sym, BucketMs: t0Ms - 10_000, O: 7.5, H: 7.6, L: 7.4, C: 7.5, Volume: 1_000}})
+	updates := drain()
+	if got := countSnapshots(updates, "vwap-10s") - initial10s; got != 1 {
+		t.Fatalf("TF10s replacement snapshots = %d, want 1", got)
+	}
+	if got := countSnapshots(updates, "vwap-1m") - initial1m; got != 0 {
+		t.Fatalf("TF1m replacement snapshots = %d, want 0", got)
 	}
 }
 

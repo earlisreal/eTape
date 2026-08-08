@@ -340,7 +340,10 @@ func (e *barEngine) seedHistory10s(c *Core, symbol string, bars []feed.Bar) {
 	c.seeding = false
 	e.emitSeedSnapshots(c, sb, []session.Timeframe{session.TF10s})
 	// No cascade or deriveDaily — 10s bars are leaf; not folded into 1m.
-	// No indicator reseed here — indicators reseed on their own snapshot path.
+	// 10s history changes the finalized input set for TF10s indicators.
+	// Rebuild those instances after the full batch is installed so a cold
+	// symbol cannot leave VWAP/EMA/etc. seeded only from pre-existing live bars.
+	c.inds.reseedSymTF(c, symbol, session.TF10s)
 }
 
 // seedOlder1m upserts a strictly-older 1m chunk, cascades to 5m/15m/30m/60m,
