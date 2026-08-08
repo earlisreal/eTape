@@ -303,6 +303,54 @@ same for macOS (arm64). The engine is pure Go (no cgo), so cross-compiling from 
 just works. Prebuilt binaries for both platforms are attached to the
 [latest release](https://github.com/earlisreal/eTape/releases/latest).
 
+### Race tests with MinGW-w64
+
+The regular Windows build and tests do not need cgo, but `go test -race` does.
+For the native Windows race runtime, use a MinGW-w64 compiler; Cygwin's `gcc`
+is not compatible. [MSYS2](https://www.msys2.org/) provides the recommended
+toolchain.
+
+1. Install [MSYS2](https://www.msys2.org/docs/installer/), using the default
+   `C:\msys64` installation path.
+2. Open **MSYS2 UCRT64** from the Start menu. Do not use Cygwin or the plain
+   **MSYS** terminal; UCRT64 puts the native compiler first on `PATH`.
+3. Update MSYS2 and install the compiler plus the Make executable:
+
+   ```bash
+   pacman -Suy
+   # If the terminal closes during the core update, reopen MSYS2 UCRT64 and run
+   # `pacman -Suy` again before continuing.
+   pacman -S --needed mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make
+   ```
+
+4. Verify the toolchain from the same UCRT64 terminal:
+
+   ```bash
+   which gcc
+   gcc --version
+   mingw32-make --version
+   go version
+   ```
+
+   `which gcc` should resolve to `/ucrt64/bin/gcc`, not `/usr/bin/gcc` or a
+   `C:\cygwin64\bin\gcc.exe` installation.
+
+5. From the repository root, run the race test:
+
+   ```bash
+   mingw32-make -C engine test-race
+   ```
+
+   Or run Go directly from `engine`:
+
+   ```bash
+   go test -race -short ./...
+   ```
+
+See the [MSYS2 UCRT64 environment guide](https://www.msys2.org/docs/environments/)
+for environment details. WSL/Linux and CI remain alternatives if a native
+Windows race toolchain is not needed.
+
 ## Development
 
 Codebase guides: [engine](engine/README.md) · [UI](ui/README.md) · [documentation](docs/README.md) · [external APIs](docs/external-apis.md) · [performance evidence](docs/performance.md) · [prototypes](prototypes/README.md) · [scripts](scripts/README.md)
