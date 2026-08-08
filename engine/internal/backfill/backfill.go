@@ -162,6 +162,8 @@ func New(daily, intraday []Source, tail TailFetcher, seeder Seeder, archive Arch
 
 const warmSegmentDays = 10
 
+const chartHistorySlowThreshold = 3 * time.Second
+
 var focusedCacheTimeout = 3 * time.Second
 
 // WarmArchive fills the configured persistent history only. It never publishes to md.Core.
@@ -186,12 +188,13 @@ func (o *Orchestrator) WarmArchive(ctx context.Context, symbol string) error {
 // then submits one ordered core seed. Its dedicated slot cannot queue behind
 // scanner/archive work.
 func (o *Orchestrator) PrepareChart(ctx context.Context, symbol string) error {
+	started := time.Now()
 	queued := time.Now()
+	var queueWait time.Duration
 	select {
 	case o.foreground <- struct{}{}:
 		defer func() { <-o.foreground }()
-		slog.Info("chart history foreground admitted", "symbol", symbol,
-			"queueWait", time.Since(queued).Round(time.Millisecond))
+		queueWait = time.Since(queued)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
@@ -200,16 +203,16 @@ func (o *Orchestrator) PrepareChart(ctx context.Context, symbol string) error {
 	from1m := intradayFrom(now, o.cfg.IntradayDays)
 	from10s := tenSecondFrom(now, o.cfg.TenSecondDays)
 	fromDaily := o.dailyFrom(now)
+	archiveStarted := time.Now()
 	daily, dailyErr := o.archive.ReadDailyBars(symbol)
 	bars1m, m1Err := o.archive.ReadBars1m(symbol, from1m.UnixMilli(), now.UnixMilli())
 	bars10s, s10Err := o.archive.ReadBars10s(symbol, from10s.UnixMilli(), now.UnixMilli())
+	archiveDuration := time.Since(archiveStarted)
 	if dailyErr != nil || m1Err != nil || s10Err != nil {
 		slog.Warn("chart history archive read incomplete", "symbol", symbol,
 			"dailyErr", dailyErr, "bars1mErr", m1Err, "bars10sErr", s10Err)
 	}
 	daily = clipBars(daily, fromDaily.UnixMilli(), now.UnixMilli())
-	slog.Info("chart history archive loaded", "symbol", symbol, "daily", len(daily),
-		"bars1m", len(bars1m), "bars10s", len(bars10s))
 
 	type cacheResult struct {
 		bars []feed.Bar
@@ -234,10 +237,7 @@ func (o *Orchestrator) PrepareChart(ctx context.Context, symbol string) error {
 		}()
 		wg.Wait()
 	}
-	slog.Info("chart history OpenD caches read", "symbol", symbol,
-		"bars1m", len(cached1m.bars), "daily", len(cachedDaily.bars),
-		"elapsed", time.Since(cacheStarted).Round(time.Millisecond),
-		"bars1mErr", cached1m.err, "dailyErr", cachedDaily.err)
+	cacheDuration := time.Since(cacheStarted)
 	if cached1m.err == nil {
 		o.archiveCache(symbol, "1m", cached1m.bars)
 		bars1m = append(bars1m, clipBars(cached1m.bars, from1m.UnixMilli(), now.UnixMilli())...)
@@ -249,7 +249,28 @@ func (o *Orchestrator) PrepareChart(ctx context.Context, symbol string) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
+	coreStarted := time.Now()
 	o.seeder.SeedChartHistory(symbol, daily, bars1m, bars10s)
+	coreSeedDuration := time.Since(coreStarted)
+	total := time.Since(started)
+	slog.Debug("chart history prepared", "symbol", symbol,
+		"daily", len(daily), "bars1m", len(bars1m), "bars10s", len(bars10s),
+		"cachedDaily", len(cachedDaily.bars), "cached1m", len(cached1m.bars),
+		"queueWait", queueWait.Round(time.Millisecond),
+		"archive", archiveDuration.Round(time.Millisecond),
+		"cache", cacheDuration.Round(time.Millisecond),
+		"coreSeed", coreSeedDuration.Round(time.Millisecond),
+		"total", total.Round(time.Millisecond),
+		"cachedDailyErr", cachedDaily.err, "cached1mErr", cached1m.err)
+	if total > chartHistorySlowThreshold && ctx.Err() == nil {
+		slog.Warn("chart history preparation slow", "symbol", symbol,
+			"daily", len(daily), "bars1m", len(bars1m), "bars10s", len(bars10s),
+			"queueWait", queueWait.Round(time.Millisecond),
+			"archive", archiveDuration.Round(time.Millisecond),
+			"cache", cacheDuration.Round(time.Millisecond),
+			"coreSeed", coreSeedDuration.Round(time.Millisecond),
+			"total", total.Round(time.Millisecond))
+	}
 	return nil
 }
 

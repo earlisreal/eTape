@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { WsClient } from "./WsClient";
 import { FakeSocket } from "../../test/fakes";
 import { perf } from "../perf/PerfMonitor";
+import { uiLog } from "../logging/logger";
 
 function makeClient() {
   const timers: Array<() => void> = [];
@@ -16,9 +17,21 @@ function makeClient() {
   return { client, flushTimers: () => { const t = timers.splice(0); t.forEach((f) => f()); } };
 }
 
-beforeEach(() => FakeSocket.reset());
+beforeEach(() => { vi.restoreAllMocks(); FakeSocket.reset(); });
 
 describe("WsClient", () => {
+  it("logs connection lifecycle with reconnect metadata", () => {
+    const info = vi.spyOn(uiLog, "info").mockImplementation(() => {});
+    const warn = vi.spyOn(uiLog, "warn").mockImplementation(() => {});
+    const { client } = makeClient();
+    client.start();
+    FakeSocket.last().open();
+    expect(info).toHaveBeenCalledWith("ws connected", expect.objectContaining({ reconnect: false }));
+
+    FakeSocket.last().dropFromServer();
+    expect(warn).toHaveBeenCalledWith("ws disconnected", expect.objectContaining({ reconnectAttempt: 1, retryMs: 5 }));
+  });
+
   it("sends subscribe on first subscriber and unsubscribe on last", () => {
     const { client } = makeClient();
     client.start();
@@ -97,6 +110,64 @@ describe("WsClient", () => {
     const ping = JSON.parse(FakeSocket.last().sent.at(-1)!);
     FakeSocket.last().emit(JSON.stringify({ kind: "pong", t: ping.t }));
     expect(client.rttMs()).toBe(0); // now() is fixed at 1000 in the fake
+  });
+
+  it("counts and rate-limits malformed frames without logging their contents", () => {
+    const warn = vi.spyOn(uiLog, "warn").mockImplementation(() => {});
+    const { client } = makeClient();
+    client.start();
+    FakeSocket.last().open();
+    const raw = "malformed-secret-frame";
+    FakeSocket.last().emit(raw);
+    expect(warn).toHaveBeenCalledWith("malformed websocket frame dropped", { count: 1, length: raw.length });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain(raw);
+
+    for (let i = 0; i < 99; i++) FakeSocket.last().emit("x");
+    expect(warn).toHaveBeenCalledTimes(1);
+    FakeSocket.last().emit("xx");
+    expect(warn).toHaveBeenCalledTimes(2);
+    expect(warn).toHaveBeenLastCalledWith("malformed websocket frame dropped", { count: 101, length: 2 });
+  });
+
+  it("logs rejected command ACKs without retaining or logging args", async () => {
+    const warn = vi.spyOn(uiLog, "warn").mockImplementation(() => {});
+    const { client } = makeClient();
+    client.start();
+    FakeSocket.last().open();
+    const args = { symbol: "US.SECRET", token: "do-not-log" };
+    const p = client.sendCommand("EnsureSymbol", args);
+    const sent = JSON.parse(FakeSocket.last().sent.at(-1)!);
+    FakeSocket.last().emit(JSON.stringify({ kind: "ack", corrId: sent.corrId, status: "blocked", reason: "unknown symbol" }));
+    await expect(p).resolves.toMatchObject({ status: "blocked" });
+    expect(warn).toHaveBeenCalledWith("command rejected", {
+      command: "EnsureSymbol", corrId: sent.corrId, status: "blocked", reason: "unknown symbol",
+    });
+    expect(JSON.stringify(warn.mock.calls)).not.toContain("do-not-log");
+  });
+
+  it("does not warn for successful command ACKs or normal wire traffic", async () => {
+    const debug = vi.spyOn(uiLog, "debug").mockImplementation(() => {});
+    const info = vi.spyOn(uiLog, "info").mockImplementation(() => {});
+    const warn = vi.spyOn(uiLog, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(uiLog, "error").mockImplementation(() => {});
+    const { client } = makeClient();
+    client.start();
+    FakeSocket.last().open();
+    const p = client.sendCommand("Subscribe", { topic: "md.quote" });
+    const sent = JSON.parse(FakeSocket.last().sent.at(-1)!);
+    FakeSocket.last().emit(JSON.stringify({ kind: "ack", corrId: sent.corrId, status: "accepted" }));
+    await expect(p).resolves.toMatchObject({ status: "accepted" });
+    vi.clearAllMocks();
+
+    client.subscribe("md.quote", () => {});
+    client.sendPing();
+    FakeSocket.last().emit(JSON.stringify({ kind: "snapshot", topic: "md.quote", payload: {} }));
+    FakeSocket.last().emit(JSON.stringify({ kind: "delta", topic: "md.quote", payload: {} }));
+    FakeSocket.last().emit(JSON.stringify({ kind: "pong", t: 1000 }));
+    expect(debug).not.toHaveBeenCalled();
+    expect(info).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+    expect(error).not.toHaveBeenCalled();
   });
 
   it("sendQuery resolves with the correlated result payload", async () => {

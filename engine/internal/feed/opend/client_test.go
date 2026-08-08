@@ -63,6 +63,17 @@ func TestRequestGetsCorrelatedResponse(t *testing.T) {
 	}
 }
 
+func TestPushDropBookkeepingAndRateLimit(t *testing.T) {
+	c := New(Options{})
+	c.notePushDrop(1500)
+	if got := c.pushDrops.Load(); got != 1 {
+		t.Fatalf("pushDrops = %d, want 1", got)
+	}
+	if !shouldLogPushDrop(1) || shouldLogPushDrop(2) || shouldLogPushDrop(1001) == false {
+		t.Fatal("push-drop warning cadence is not first plus every 1000 additional drops")
+	}
+}
+
 func TestRequestTimesOutWhenServerSilent(t *testing.T) {
 	m := newMockOpenD(t)
 	m.handler = func(_ *mockOpenD, _ net.Conn, _ Frame) {} // never reply

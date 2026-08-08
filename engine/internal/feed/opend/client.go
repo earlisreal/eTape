@@ -3,8 +3,10 @@ package opend
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -60,9 +62,12 @@ type Client struct {
 	serial  serialGen
 	pending *pending
 
-	pushes chan Frame
-	state  chan ConnState
+	pushes    chan Frame
+	state     chan ConnState
+	pushDrops atomic.Uint64
 }
+
+const opendPushDropLogEvery uint64 = 1000
 
 // New builds a Client, filling defaults.
 func New(opt Options) *Client {
@@ -160,9 +165,10 @@ func (c *Client) send(frame []byte) error {
 
 // serveConn runs one connection to completion: it spawns the reader, performs the
 // InitConnect handshake, runs the keepalive loop, and returns the error that ended
-// the session. Lifecycle helpers (initConnect, keepAliveLoop) are in lifecycle.go;
-// the supervising Run loop is added below.
-func (c *Client) serveConn(ctx context.Context, conn net.Conn) error {
+// the session plus whether the handshake established the session. Lifecycle
+// helpers (initConnect, keepAliveLoop) are in lifecycle.go; the supervising Run
+// loop is added below.
+func (c *Client) serveConn(ctx context.Context, conn net.Conn) (error, bool) {
 	sctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
@@ -193,13 +199,14 @@ func (c *Client) serveConn(ctx context.Context, conn net.Conn) error {
 				default:
 					// push buffer full: drop. Plan 2's feed wrapper owns
 					// coalescing/backpressure and forces a re-snapshot instead.
+					c.notePushDrop(f.ProtoID)
 				}
 			}
 		}
 	}()
 
 	if err := c.initConnect(sctx); err != nil {
-		return err
+		return err, false
 	}
 	c.emit(ConnUp)
 	defer c.emit(ConnDown)
@@ -209,12 +216,25 @@ func (c *Client) serveConn(ctx context.Context, conn net.Conn) error {
 
 	select {
 	case <-sctx.Done():
-		return sctx.Err()
+		return sctx.Err(), true
 	case err := <-readErr:
-		return err
+		return err, true
 	case err := <-kaErr:
-		return err
+		return err, true
 	}
+}
+
+func (c *Client) notePushDrop(protoID uint32) {
+	total := c.pushDrops.Add(1)
+	if !shouldLogPushDrop(total) {
+		return
+	}
+	slog.Warn("opend push buffer full; dropping frame", "protoID", protoID,
+		"total", total, "queueLen", len(c.pushes), "queueCap", cap(c.pushes))
+}
+
+func shouldLogPushDrop(total uint64) bool {
+	return total > 0 && (total == 1 || (total-1)%opendPushDropLogEvery == 0)
 }
 
 func (c *Client) setConn(conn net.Conn) {
@@ -267,18 +287,24 @@ func (c *Client) Run(ctx context.Context) error {
 			return err
 		}
 		conn, err := c.dialOnce(ctx)
+		var serveErr error
+		var established bool
 		if err == nil {
 			bo.reset()
 			// serveConn emits ConnUp on handshake and ConnDown on exit.
-			_ = c.serveConn(ctx, conn)
+			serveErr, established = c.serveConn(ctx, conn)
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
+		delay := bo.next()
+		if established && serveErr != nil {
+			slog.Warn("opend disconnected", "err", serveErr, "reconnectDelay", delay)
+		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-c.clk.After(bo.next()):
+		case <-c.clk.After(delay):
 		}
 	}
 }

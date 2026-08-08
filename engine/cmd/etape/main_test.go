@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -33,6 +34,53 @@ func TestBars10sRetentionCutoffUsesCalendarDays(t *testing.T) {
 	want := time.Date(2026, 2, 18, 12, 30, 0, 0, loc).UnixMilli()
 	if got := bars10sRetentionCutoff(now, 30); got != want {
 		t.Fatalf("cutoff = %d, want %d", got, want)
+	}
+}
+
+func TestDropWarningRateLimit(t *testing.T) {
+	first := time.Unix(100, 0)
+	if !dropWarningDue(first, time.Time{}) {
+		t.Fatal("first drop did not warn")
+	}
+	if dropWarningDue(first.Add(59*time.Second), first) {
+		t.Fatal("drop before cooldown warned")
+	}
+	if !dropWarningDue(first.Add(time.Minute), first) {
+		t.Fatal("drop after cooldown did not warn")
+	}
+}
+
+func TestDropEventDetailsIncludeSourceBreakdown(t *testing.T) {
+	detail := formatMDDropDetail(md.DropStats{Inbox: 5, Updates: 12}, md.DropStats{Inbox: 20, Updates: 30})
+	for _, want := range []string{"dropped 17 md message(s)", "inbox=5", "updates=12", "total=17", "cumulative inbox=20", "updates=30", "total=50"} {
+		if !strings.Contains(detail, want) {
+			t.Fatalf("detail %q does not contain %q", detail, want)
+		}
+	}
+	execDetail := formatExecDropDetail(3, 9)
+	if !strings.Contains(execDetail, "dropped 3 execution update(s)") || !strings.Contains(execDetail, "total 9") {
+		t.Fatalf("exec detail = %q", execDetail)
+	}
+}
+
+func TestReportDroppedUpdatesEmitsMDAndExecEvents(t *testing.T) {
+	type event struct{ kind, detail string }
+	var events []event
+	appendEvent := func(kind, detail string) { events = append(events, event{kind: kind, detail: detail}) }
+	state := &dropWatchState{}
+	now := time.Unix(100, 0)
+
+	reportDroppedUpdates(now, md.DropStats{Inbox: 5, Updates: 12}, 3, appendEvent, state)
+	if len(events) != 2 || events[0].kind != "md-drop" || events[1].kind != "exec-drop" {
+		t.Fatalf("events = %+v, want md-drop and exec-drop", events)
+	}
+	if !strings.Contains(events[0].detail, "inbox=5") || !strings.Contains(events[0].detail, "updates=12") {
+		t.Fatalf("md detail = %q", events[0].detail)
+	}
+
+	reportDroppedUpdates(now.Add(time.Second), md.DropStats{Inbox: 5, Updates: 12}, 3, appendEvent, state)
+	if len(events) != 2 {
+		t.Fatalf("unchanged counters emitted events: %+v", events)
 	}
 }
 

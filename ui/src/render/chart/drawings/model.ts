@@ -2,6 +2,7 @@
 
 import type { LineStyleName } from "../lineStyle";
 import { LINE_STYLE_NAMES } from "../lineStyle";
+import { uiLog } from "../../../logging/logger";
 
 export type DrawingKind = "hline" | "trendline" | "extendedline" | "rect";
 
@@ -66,6 +67,6 @@ export function validateDrawings(raw: unknown): Drawing[] {
   if (!Array.isArray(raw)) return [];
   const out = raw.filter(isValidDrawing);
   const dropped = raw.length - out.length;
-  if (dropped > 0) console.warn(`[drawings] dropped ${dropped} malformed drawing(s) on load`);
+  if (dropped > 0) uiLog.warn("malformed drawings dropped", { dropped });
   return out;
 }

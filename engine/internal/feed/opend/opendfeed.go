@@ -261,6 +261,7 @@ func (f *OpenDFeed) pump(ctx context.Context) {
 }
 
 func (f *OpenDFeed) stateLoop(ctx context.Context) {
+	hadConnection := false
 	for {
 		select {
 		case <-ctx.Done():
@@ -270,6 +271,9 @@ func (f *OpenDFeed) stateLoop(ctx context.Context) {
 			case ConnDown:
 				f.emit(ctx, feed.ConnDownEvent{})
 			case ConnUp:
+				reconnect := hadConnection
+				hadConnection = true
+				started := f.clk.Now()
 				active := f.sub.ActiveSymbols()
 				f.mu.Lock()
 				for symbol, subs := range active {
@@ -289,6 +293,10 @@ func (f *OpenDFeed) stateLoop(ctx context.Context) {
 					f.seed(ctx, seedJob{symbol: symbol, subs: subs, enqueuedAt: f.clk.Now(), force: true})
 				}
 				f.emit(ctx, feed.ResyncedEvent{})
+				if reconnect && ctx.Err() == nil {
+					slog.Info("opend resynced", "symbols", len(active),
+						"elapsed", f.clk.Now().Sub(started).Round(time.Millisecond))
+				}
 			}
 		}
 	}
@@ -549,7 +557,7 @@ func (f *OpenDFeed) Validate(ctx context.Context, symbol string) error {
 		f.mu.Unlock()
 		return struct{}{}, nil
 	})
-	slog.Info("symbol validation timing", "symbol", symbol, "elapsed", time.Since(start).Round(time.Millisecond), "shared", shared, "err", err)
+	slog.Debug("symbol validation timing", "symbol", symbol, "elapsed", time.Since(start).Round(time.Millisecond), "shared", shared, "err", err)
 	return err
 }
 

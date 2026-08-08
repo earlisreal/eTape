@@ -184,6 +184,34 @@ func TestDroppedUpdatesIncrementsWhenFull(t *testing.T) {
 	}
 }
 
+func TestDropStatsDistinguishesInboxAndUpdates(t *testing.T) {
+	c := New(Config{})
+	for i := 0; i < cap(c.inbox); i++ {
+		c.inbox <- eventMsg{ev: feed.ConnUpEvent{}}
+	}
+	c.Feed(feed.QuoteEvent{Quote: feed.Quote{Symbol: "US.AAPL", Last: 1}})
+
+	for i := 0; i < cap(c.updates); i++ {
+		c.updates <- ConnUpdate{Up: true}
+	}
+	c.emit(ConnUpdate{Up: true})
+
+	got := c.DropStats()
+	if got.Inbox != 1 || got.Updates != 1 {
+		t.Fatalf("DropStats = %+v, want inbox=1 updates=1", got)
+	}
+	if got.Total() != 2 || c.DroppedUpdates() != 2 {
+		t.Fatalf("drop totals = %d/%d, want 2/2", got.Total(), c.DroppedUpdates())
+	}
+
+	clean := New(Config{})
+	clean.Feed(feed.QuoteEvent{Quote: feed.Quote{Symbol: "US.AAPL", Last: 1}})
+	clean.emit(ConnUpdate{Up: true})
+	if got := clean.DropStats(); got.Total() != 0 {
+		t.Fatalf("successful enqueue changed DropStats = %+v", got)
+	}
+}
+
 func TestFeedContextBlocksUntilSeedFitsInbox(t *testing.T) {
 	c := New(Config{})
 	for i := 0; i < cap(c.inbox); i++ {

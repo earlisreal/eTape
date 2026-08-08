@@ -65,6 +65,16 @@ type historyBarrierMsg struct {
 	done   chan struct{}
 }
 
+// DropStats describes lossy paths owned by the market-data core. Inbox drops
+// happen before an event reaches the single writer; update drops happen while
+// publishing derived state to the UI bridge.
+type DropStats struct {
+	Inbox   uint64
+	Updates uint64
+}
+
+func (s DropStats) Total() uint64 { return s.Inbox + s.Updates }
+
 func (eventMsg) isInMsg()            {}
 func (ensureIndicatorMsg) isInMsg()  {}
 func (releaseIndicatorMsg) isInMsg() {}
@@ -83,7 +93,8 @@ type Core struct {
 	updates chan Update
 	marks   chan Mark
 	bookOut chan feed.Book
-	dropped atomic.Uint64
+	droppedInbox   atomic.Uint64
+	droppedUpdates atomic.Uint64
 
 	// Domain state — touched ONLY inside Run's goroutine.
 	books   *bookStore
@@ -130,12 +141,20 @@ func New(cfg Config) *Core {
 func (c *Core) Updates() <-chan Update  { return c.updates }
 func (c *Core) Marks() <-chan Mark      { return c.marks }
 func (c *Core) Books() <-chan feed.Book { return c.bookOut }
-func (c *Core) DroppedUpdates() uint64  { return c.dropped.Load() }
+
+// DropStats returns a race-safe snapshot of the two lossy MD paths.
+func (c *Core) DropStats() DropStats {
+	return DropStats{Inbox: c.droppedInbox.Load(), Updates: c.droppedUpdates.Load()}
+}
+
+// DroppedUpdates preserves the historical aggregate counter for callers that
+// only need one number. New diagnostics should use DropStats instead.
+func (c *Core) DroppedUpdates() uint64 { return c.DropStats().Total() }
 
 // Feed enqueues a feed event. Non-blocking: live tick events (book/quote/trade)
 // are time-sensitive and safe to drop — OpenD re-delivers on next push.
-// Sustained drops are visible in DroppedUpdates() and the dropped-updates
-// watcher's sys.events. The seed path (SeedDaily/SeedHistory1m) uses separate
+// Sustained drops are visible in DropStats/DroppedUpdates() and the
+// dropped-updates watcher's sys.events. The seed path (SeedDaily/SeedHistory1m) uses separate
 // blocking sends and must never be dropped.
 // ponytail: drop-on-full for live ticks; seed sends still block so backfill
 // order is preserved. If inbox saturation recurs under full load, split into
@@ -144,7 +163,7 @@ func (c *Core) Feed(ev feed.Event) {
 	select {
 	case c.inbox <- eventMsg{ev: ev}:
 	default:
-		c.dropped.Add(1)
+		c.droppedInbox.Add(1)
 	}
 }
 
@@ -244,7 +263,7 @@ func (c *Core) emit(u Update) {
 	select {
 	case c.updates <- u:
 	default:
-		c.dropped.Add(1)
+		c.droppedUpdates.Add(1)
 	}
 }
 
@@ -298,7 +317,7 @@ func (c *Core) apply(m inMsg) {
 	case seedHistory10sMsg:
 		started := time.Now()
 		c.bars.seedHistory10s(c, msg.symbol, msg.bars)
-		slog.Info("10s history seed complete", "symbol", msg.symbol, "bars", len(msg.bars),
+		slog.Debug("10s history seed complete", "symbol", msg.symbol, "bars", len(msg.bars),
 			"elapsed", time.Since(started).Round(time.Millisecond))
 	case seedChartHistoryMsg:
 		started := time.Now()
@@ -308,7 +327,7 @@ func (c *Core) apply(m inMsg) {
 		c.bars.seedHistory10s(c, msg.symbol, msg.bars10s)
 		c.emit(HistoryReadyUpdate{Symbol: msg.symbol, Prepared: true})
 		close(msg.done)
-		slog.Info("chart history core seed complete", "symbol", msg.symbol,
+		slog.Debug("chart history core seed complete", "symbol", msg.symbol,
 			"daily", len(msg.daily), "bars1m", len(msg.bars1m), "bars10s", len(msg.bars10s),
 			"queueWait", queueWait.Round(time.Millisecond),
 			"processing", time.Since(started).Round(time.Millisecond))

@@ -33,6 +33,7 @@ import { BarCloseTimer } from "./tv/BarCloseTimer";
 import { perf } from "../../perf/PerfMonitor";
 import { bareSymbol } from "../exec/orderStatus";
 import type { QueryChartWindowResult } from "../../gen/wsmsg";
+import { uiLog } from "../../logging/logger";
 
 const ALL_CHART_BARS = 1_000_000;
 
@@ -268,7 +269,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         facade.resetPriceScale();
         facade.scrollToRealTime();
         chartSnapshotLoaded = true;
-        console.info("chart snapshot loaded", {
+        uiLog.debug("chart snapshot loaded", {
           symbol: result.symbol,
           timeframe: result.timeframe,
           bars: result.bars?.length ?? 0,
@@ -504,7 +505,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           pendingFirstPaint = null;
           firstPaintLogFrame = requestAnimationFrame(() => {
             firstPaintLogFrame = null;
-            console.info("chart first bars painted", {
+            uiLog.debug("chart first bars painted", {
               symbol: timing.symbol,
               timeframe: timing.timeframe,
               bars: paintedBars.length,

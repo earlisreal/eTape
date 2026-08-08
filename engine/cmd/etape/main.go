@@ -241,7 +241,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		return 1, false, nil
 	}
 	defer func() { _ = releaseLock() }()
-	log.Info("single-instance lock acquired", "lock", dbPath+".lock")
+	log.Debug("single-instance lock acquired", "lock", dbPath+".lock")
 
 	ctx, stop := context.WithCancel(ctx)
 	defer stop()
@@ -271,7 +271,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	var execClk clock.Clock = clock.System{}
 
 	// --- store ---
-	log.Info("store opening", "db", dbPath)
+	log.Debug("store opening", "db", dbPath)
 	st, err := store.Open(store.Options{
 		Path: dbPath, Clock: clock.System{},
 		FlushInterval: time.Duration(cfg.Store.FlushMs) * time.Millisecond,
@@ -516,7 +516,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	st.AppendSysEvent("boot", "engine up")
 	hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "connecting"})
 	dropWG.Add(1)
-	go watchDroppedUpdates(ctx, &dropWG, core, st)
+	go watchDroppedUpdates(ctx, &dropWG, core, execCore, st)
 
 	// feedForHub/pollReq/mmProbe/demand/tail are the mode-agnostic seams
 	// startPollers and the backfill orchestrator are built from below:
@@ -699,6 +699,12 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		}
 	}
 	startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, firstAlpacaProber(vbs), firstAlpacaAssetReader(vbs), backfillOne, !*demo, &scanWG)
+	mode := "live"
+	if *demo {
+		mode = "demo"
+	}
+	log.Info("etape ready", "version", buildinfo.Version, "mode", mode,
+		"uiAddr", cfg.UIHub.Addr(), "venues", len(cfg.Venues))
 
 	<-ctx.Done()
 
@@ -768,7 +774,10 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	if err := st.Close(); err != nil {
 		log.Error("close store", "err", err)
 	}
-	log.Info("shutdown complete", "droppedUpdates", core.DroppedUpdates())
+	mdDrops := core.DropStats()
+	log.Info("shutdown complete", "mdInboxDrops", mdDrops.Inbox,
+		"mdUpdateDrops", mdDrops.Updates, "execUpdateDrops", execCore.DroppedUpdates(),
+		"droppedUpdates", mdDrops.Total())
 	var na []string
 	if p := nextArgsPtr.Load(); p != nil {
 		na = *p
@@ -825,30 +834,74 @@ func nextHistoryRefresh(now time.Time) time.Time {
 }
 
 // dropWatchInterval controls how often watchDroppedUpdates samples
-// core.DroppedUpdates() for a live sys.events trail: a drop should surface
+// core.DropStats() for a live sys.events trail: a drop should surface
 // during the session it happens in, not only in the shutdown log line.
-const dropWatchInterval = 5 * time.Second
+const (
+	dropWatchInterval = 5 * time.Second
+	dropWarnCooldown  = time.Minute
+)
 
-// watchDroppedUpdates polls core.DroppedUpdates() and appends a "md-drop"
-// sys.events row whenever it increases, so an md.Core updates-channel
+func dropWarningDue(now, last time.Time) bool {
+	return last.IsZero() || now.Sub(last) >= dropWarnCooldown
+}
+
+func formatMDDropDetail(delta, total md.DropStats) string {
+	return fmt.Sprintf("dropped %d md message(s) since last check (inbox=%d updates=%d total=%d; cumulative inbox=%d updates=%d total=%d)",
+		delta.Total(), delta.Inbox, delta.Updates, delta.Total(), total.Inbox, total.Updates, total.Total())
+}
+
+func formatExecDropDetail(delta, total uint64) string {
+	return fmt.Sprintf("dropped %d execution update(s) since last check (total %d)", delta, total)
+}
+
+type dropWatchState struct {
+	lastMD                   md.DropStats
+	lastExec                 uint64
+	lastMDWarn, lastExecWarn time.Time
+}
+
+func reportDroppedUpdates(now time.Time, mdTotal md.DropStats, execTotal uint64, appendSysEvent func(string, string), state *dropWatchState) {
+	mdDelta := md.DropStats{Inbox: mdTotal.Inbox - state.lastMD.Inbox, Updates: mdTotal.Updates - state.lastMD.Updates}
+	if mdDelta.Total() > 0 {
+		appendSysEvent("md-drop", formatMDDropDetail(mdDelta, mdTotal))
+		if dropWarningDue(now, state.lastMDWarn) {
+			slog.Warn("md backpressure detected", "inboxDelta", mdDelta.Inbox,
+				"updatesDelta", mdDelta.Updates, "inboxTotal", mdTotal.Inbox,
+				"updatesTotal", mdTotal.Updates, "total", mdTotal.Total())
+			state.lastMDWarn = now
+		}
+	}
+	state.lastMD = mdTotal
+
+	if execTotal > state.lastExec {
+		delta := execTotal - state.lastExec
+		appendSysEvent("exec-drop", formatExecDropDetail(delta, execTotal))
+		if dropWarningDue(now, state.lastExecWarn) {
+			slog.Warn("execution update drops detected", "delta", delta, "total", execTotal)
+			state.lastExecWarn = now
+		}
+		state.lastExec = execTotal
+	}
+}
+
+// watchDroppedUpdates polls MD and execution drop counters and appends
+// "md-drop"/"exec-drop" sys.events rows whenever they increase, so an
+// md.Core updates-channel or exec.Core updates-channel
 // overflow (see Core.emit) is visible on the sys.events topic live instead
 // of only in the "shutdown complete" log line. It is a store-writing
 // goroutine (AppendSysEvent) and must be joined via wg before st.Close() --
 // see the shutdown-ordering comment in main().
-func watchDroppedUpdates(ctx context.Context, wg *sync.WaitGroup, core *md.Core, st *store.Store) {
+func watchDroppedUpdates(ctx context.Context, wg *sync.WaitGroup, core *md.Core, execCore *exec.Core, st *store.Store) {
 	defer wg.Done()
 	t := time.NewTicker(dropWatchInterval)
 	defer t.Stop()
-	var last uint64
+	state := dropWatchState{}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if cur := core.DroppedUpdates(); cur > last {
-				st.AppendSysEvent("md-drop", fmt.Sprintf("dropped %d md update(s) since last check (total %d)", cur-last, cur))
-				last = cur
-			}
+			reportDroppedUpdates(time.Now(), core.DropStats(), execCore.DroppedUpdates(), st.AppendSysEvent, &state)
 		}
 	}
 }

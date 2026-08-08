@@ -11,6 +11,7 @@ import { describeIndicator, withDefaultParams, type IndicatorInstance } from "./
 import { LWC_LINE_STYLE } from "./lineStyle";
 import type { FillMarker } from "./diamondMarker";
 import { bucketStartMs } from "./barBucket";
+import { uiLog } from "../../logging/logger";
 
 export interface BarReader { series(symbol: string, timeframe: string): Bar[] }
 // Display-only extension. This never enters BarStore or engine-facing paths.
@@ -241,7 +242,7 @@ export class ChartController {
     const startedAt = performance.now();
     this.candle.setData(bars.map((b) => this.mainPoint(b)));
     this.volume.setData(bars.map((b) => toVolume(b, this.palette)));
-    console.info("chart setData complete", {
+    uiLog.debug("chart setData complete", {
       symbol: this.config.symbol,
       timeframe: this.config.timeframe,
       bars: bars.length,

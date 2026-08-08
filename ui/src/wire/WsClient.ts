@@ -3,6 +3,7 @@ import type {
 } from "./contract";
 import { decodeServerMessage, encodeClientMessage } from "./codec";
 import { perf } from "../perf/PerfMonitor";
+import { uiLog } from "../logging/logger";
 
 export interface ISocket {
   send(data: string): void;
@@ -14,6 +15,7 @@ export interface ISocket {
 export type SetTimeoutLike = (fn: () => void, ms: number) => unknown;
 export type ConnState = "connecting" | "open" | "reconnecting";
 type TopicHandler = (m: SnapshotMsg | DeltaMsg) => void;
+interface PendingCommand { command: string; resolve: (ack: AckMsg) => void }
 
 interface Opts {
   url: string;
@@ -36,10 +38,11 @@ export class WsClient {
   private lastRtt: number | null = null;
   private readonly handlers = new Map<TopicName, Set<TopicHandler>>();
   private readonly stateCbs = new Set<(s: ConnState) => void>();
-  private readonly pending = new Map<string, (ack: AckMsg) => void>();
+  private readonly pending = new Map<string, PendingCommand>();
   private readonly pendingQueries = new Map<string, (payload: unknown) => void>();
   private readonly outbox: string[] = []; // commands buffered while not open
   private readonly backoff: (attempt: number) => number;
+  private malformedFrames = 0;
 
   constructor(private readonly opts: Opts) {
     this.backoff = opts.backoff ?? DEFAULT_BACKOFF;
@@ -73,7 +76,7 @@ export class WsClient {
   sendCommand(name: string, args: unknown): Promise<AckMsg> {
     const corrId = `c${++this.corr}`;
     return new Promise<AckMsg>((resolve) => {
-      this.pending.set(corrId, resolve);
+      this.pending.set(corrId, { command: name, resolve });
       this.sendRaw({ kind: "command", corrId, name, args });
     });
   }
@@ -100,8 +103,16 @@ export class WsClient {
     const sock = this.opts.socketFactory(this.opts.url);
     this.socket = sock;
     sock.onopen = () => {
+      const reconnect = this.attempt > 0;
+      const bufferedCommands = this.outbox.length;
       this.attempt = 0;
       this.setState("open");
+      uiLog.info("ws connected", {
+        reconnect,
+        bufferedCommands,
+        pendingCommands: this.pending.size,
+        pendingQueries: this.pendingQueries.size,
+      });
       // Re-run snapshot-then-delta for every live topic on (re)connect, then flush
       // any commands buffered while the socket was down.
       for (const topic of this.handlers.keys()) this.sendRaw({ kind: "subscribe", topic });
@@ -112,14 +123,31 @@ export class WsClient {
       if (this.socket !== sock) return;
       this.socket = null;
       this.setState("reconnecting");
+      const reconnectAttempt = this.attempt + 1;
       const delay = this.backoff(this.attempt++);
+      uiLog.warn("ws disconnected", {
+        reconnectAttempt,
+        retryMs: delay,
+        outbox: this.outbox.length,
+        pendingCommands: this.pending.size,
+        pendingQueries: this.pendingQueries.size,
+      });
       this.opts.setTimeout(() => this.connect(), delay);
     };
   }
 
   private onMessage(raw: string): void {
     const msg: ServerMessage | null = decodeServerMessage(raw);
-    if (!msg) return; // drop-and-count malformed frames
+    if (!msg) {
+      this.malformedFrames++;
+      if (this.malformedFrames === 1 || (this.malformedFrames - 1) % 100 === 0) {
+        uiLog.warn("malformed websocket frame dropped", {
+          count: this.malformedFrames,
+          length: raw.length,
+        });
+      }
+      return;
+    }
     switch (msg.kind) {
       case "snapshot":
       case "delta": {
@@ -129,8 +157,19 @@ export class WsClient {
         return;
       }
       case "ack": {
-        const resolve = this.pending.get(msg.corrId);
-        if (resolve) { this.pending.delete(msg.corrId); resolve(msg); }
+        const pending = this.pending.get(msg.corrId);
+        if (pending) {
+          this.pending.delete(msg.corrId);
+          if (msg.status !== "accepted") {
+            uiLog.warn("command rejected", {
+              command: pending.command,
+              corrId: msg.corrId,
+              status: msg.status,
+              reason: msg.reason,
+            });
+          }
+          pending.resolve(msg);
+        }
         return;
       }
       case "pong": {
@@ -157,6 +196,8 @@ export class WsClient {
 
   private flushOutbox(): void {
     if (!this.socket) return;
-    for (const raw of this.outbox.splice(0)) this.socket.send(raw);
+    const queued = this.outbox.splice(0);
+    for (const raw of queued) this.socket.send(raw);
+    if (queued.length > 0) uiLog.debug("ws outbox flushed", { count: queued.length });
   }
 }
