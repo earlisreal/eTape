@@ -22,7 +22,7 @@ import type { HealthLink, LinkStatus, TopicName } from "./wire/contract";
 import { connectEventToasts } from "./data/quotaToasts";
 import { perf, initPerfFromQuery } from "./perf/PerfMonitor";
 import { PerfHud } from "./perf/PerfHud";
-import { uiLog } from "./logging/logger";
+import { initUiLogFromQuery, uiLog } from "./logging/logger";
 
 function EventToastBridge({ client }: { client: WsClient }): null {
   const toast = useToasts();
@@ -82,6 +82,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
   // actually turns on instrumentation everywhere else (Scheduler, WsClient,
   // registry, TapePanel) — perfOn only decides whether <PerfHud/> mounts.
   const [perfOn, setPerfOn] = useState<boolean>(() => {
+    initUiLogFromQuery(location.search);
     initPerfFromQuery(location.search);
     return perf.enabled;
   });
