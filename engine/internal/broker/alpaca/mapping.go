@@ -17,6 +17,10 @@ func wireSymbol(symbol string) string {
 	return strings.TrimPrefix(symbol, "US.")
 }
 
+func assetCacheKey(symbol string) string {
+	return strings.ToUpper(strings.TrimSpace(wireSymbol(symbol)))
+}
+
 // domainSymbol re-adds the "US." prefix to a bare ticker Alpaca's API
 // returns, so it matches the domain convention the rest of eTape keys
 // Order/Position/Fill.Symbol by. Alpaca is a US-only venue (CLAUDE.md), so

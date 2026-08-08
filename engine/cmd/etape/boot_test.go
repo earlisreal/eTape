@@ -346,8 +346,12 @@ func TestFirstAlpacaProberFindsAlpacaAdapter(t *testing.T) {
 	if _, ok := p.(*alpaca.Adapter); !ok {
 		t.Fatalf("expected the alpaca.Adapter itself, got %T", p)
 	}
-	if reader := firstAlpacaAssetReader(vbs); reader == nil {
+	reader := firstAlpacaAssetReader(vbs)
+	if reader == nil {
 		t.Fatal("expected a non-nil Stock Info asset reader when Alpaca is configured")
+	}
+	if _, ok := reader.AssetStatus("US.AAPL"); ok {
+		t.Fatal("unloaded Alpaca asset directory must not resolve a symbol")
 	}
 }
 

@@ -17,14 +17,9 @@ import (
 )
 
 const (
-	alpacaRESTRatePerSec  = 200.0 / 60.0
-	alpacaRESTBurst       = 5
-	assetStatusRatePerSec = 50.0 / 60.0 // explicit low-priority sub-budget
-	assetStatusBurst      = 5
-	assetStatusReserve    = 3 // keep burst headroom for higher-priority REST work
+	alpacaRESTRatePerSec = 200.0 / 60.0
+	alpacaRESTBurst      = 5
 )
-
-var errAssetStatusRateLimited = errors.New("alpaca: asset status skipped by low-priority rate limit")
 
 // restClient is Alpaca's REST transport: order entry/replace/cancel, kill
 // switches (cancel-all, flatten), and account snapshot. Unlike TradeZero,
@@ -43,46 +38,23 @@ type restClient struct {
 	hc     *http.Client
 	clk    clock.Clock
 
-	bucket      *netx.TokenBucket // single pooled 200/min (~3.33/s) bucket, burst 5
-	assetBucket *netx.TokenBucket // asset-only 50/min sub-budget, burst 5
+	bucket *netx.TokenBucket // single pooled 200/min (~3.33/s) bucket, burst 5
 }
 
 func newRESTClient(base, keyID, secret string, clk clock.Clock) *restClient {
 	return &restClient{
 		base: base, keyID: keyID, secret: secret,
-		hc:          netx.NewHTTPClient(10 * time.Second),
-		clk:         clk,
-		bucket:      netx.NewTokenBucket(clk, alpacaRESTRatePerSec, alpacaRESTBurst),
-		assetBucket: netx.NewTokenBucket(clk, assetStatusRatePerSec, assetStatusBurst),
+		hc:     netx.NewHTTPClient(10 * time.Second),
+		clk:    clk,
+		bucket: netx.NewTokenBucket(clk, alpacaRESTRatePerSec, alpacaRESTBurst),
 	}
 }
 
 // do takes one token from the shared pooled bucket, then issues a normal
-// execution/account request with Alpaca's key/secret headers. Informational
-// asset reads use doAsset's non-blocking low-priority path below.
+// request with Alpaca's key/secret headers.
 func (rc *restClient) do(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
 	if err := rc.bucket.Take(ctx); err != nil {
 		return nil, err
-	}
-	return rc.doHTTP(ctx, method, path, body)
-}
-
-// doAsset is the low-priority path for informational asset metadata. It uses
-// a small asset-only budget and admits a request from the shared pool only if
-// the higher-priority headroom remains. Both checks are non-blocking: a busy
-// execution venue skips this refresh instead of waiting behind it.
-func (rc *restClient) doAsset(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if !rc.assetBucket.Allow() {
-		return nil, errAssetStatusRateLimited
-	}
-	if !rc.bucket.AllowWithReserve(assetStatusReserve) {
-		// Do not burn an asset-budget token when the shared execution pool
-		// cannot admit this low-priority request.
-		rc.assetBucket.Refund()
-		return nil, errAssetStatusRateLimited
 	}
 	return rc.doHTTP(ctx, method, path, body)
 }
@@ -107,7 +79,8 @@ type alpacaError struct {
 	Message string `json:"message"`
 }
 
-type assetStatusResponse struct {
+type assetResponse struct {
+	Symbol       string  `json:"symbol"`
 	BorrowStatus *string `json:"borrow_status"`
 	Shortable    *bool   `json:"shortable"`
 	Marginable   *bool   `json:"marginable"`
@@ -128,35 +101,30 @@ func apiError(status int, body []byte) error {
 	return fmt.Errorf("alpaca: status=%d body=%s", status, body)
 }
 
-// assetStatus issues the narrow read-only GET /v2/assets/{symbol} request.
-// Borrow availability is intentionally not cached here: it can change, and
-// every call uses the low-priority asset budget and shared execution reserve.
-func (rc *restClient) assetStatus(ctx context.Context, symbol string) (assetStatusResponse, error) {
-	symbol = wireSymbol(symbol)
-	if symbol == "" {
-		return assetStatusResponse{}, errors.New("alpaca: asset status requires symbol")
-	}
-	resp, err := rc.doAsset(ctx, http.MethodGet, "/v2/assets/"+url.PathEscape(symbol), nil)
+// activeAssets loads Alpaca's complete active asset directory. The response
+// contract is an array; Stock Info treats this snapshot as session-static.
+func (rc *restClient) activeAssets(ctx context.Context) ([]assetResponse, error) {
+	resp, err := rc.do(ctx, http.MethodGet, "/v2/assets?status=active", nil)
 	if err != nil {
-		return assetStatusResponse{}, fmt.Errorf("alpaca: asset status transport: %w", err)
+		return nil, fmt.Errorf("alpaca: active assets transport: %w", err)
 	}
 	defer resp.Body.Close()
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return assetStatusResponse{}, fmt.Errorf("alpaca: read asset status response: %w", err)
+		return nil, fmt.Errorf("alpaca: read active assets response: %w", err)
 	}
 	if resp.StatusCode >= 400 {
-		return assetStatusResponse{}, apiError(resp.StatusCode, body)
+		return nil, apiError(resp.StatusCode, body)
 	}
 	trimmed := bytes.TrimSpace(body)
-	if len(trimmed) == 0 || trimmed[0] != '{' {
-		return assetStatusResponse{}, errors.New("alpaca: asset status response is not an object")
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return nil, errors.New("alpaca: active assets response is not an array")
 	}
-	var status assetStatusResponse
-	if err := json.Unmarshal(body, &status); err != nil {
-		return assetStatusResponse{}, fmt.Errorf("alpaca: decode asset status response: %w", err)
+	var assets []assetResponse
+	if err := json.Unmarshal(body, &assets); err != nil {
+		return nil, fmt.Errorf("alpaca: decode active assets response: %w", err)
 	}
-	return status, nil
+	return assets, nil
 }
 
 // submitOrder POSTs an order and returns Alpaca's broker-assigned order id.

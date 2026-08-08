@@ -3,14 +3,12 @@ package alpaca
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/session"
@@ -97,129 +95,83 @@ func TestPing_StructuredError(t *testing.T) {
 	}
 }
 
-func TestAssetStatus_HTB(t *testing.T) {
+func TestActiveAssets_EndpointAndDecode(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v2/assets/TSLA", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"symbol":"TSLA","tradable":true,"marginable":true,"shortable":true,"borrow_status":"hard_to_borrow"}`))
+	mux.HandleFunc("/v2/assets", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/v2/assets" {
+			t.Fatalf("request path = %q, want /v2/assets", r.URL.Path)
+		}
+		if r.URL.RawQuery != "status=active" {
+			t.Fatalf("request query = %q, want status=active", r.URL.RawQuery)
+		}
+		if _, ok := r.URL.Query()["asset_class"]; ok {
+			t.Fatal("request must not include asset_class")
+		}
+		_, _ = w.Write([]byte(`[
+            {"symbol":"AAPL","tradable":true,"marginable":true,"shortable":true,"borrow_status":"easy_to_borrow"},
+            {"symbol":"TSLA","tradable":true,"marginable":true,"shortable":true,"borrow_status":"hard_to_borrow"}
+        ]`))
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
-	got, err := rc.assetStatus(context.Background(), "US.TSLA")
+	got, err := rc.activeAssets(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.BorrowStatus == nil || *got.BorrowStatus != "hard_to_borrow" || got.Shortable == nil || !*got.Shortable || got.Marginable == nil || !*got.Marginable || got.Tradable == nil || !*got.Tradable {
-		t.Fatalf("HTB asset status = %+v", got)
+	if len(got) != 2 || got[0].Symbol != "AAPL" || got[1].Symbol != "TSLA" {
+		t.Fatalf("active assets = %+v, want AAPL and TSLA", got)
+	}
+	if got[0].BorrowStatus == nil || *got[0].BorrowStatus != "easy_to_borrow" || got[1].BorrowStatus == nil || *got[1].BorrowStatus != "hard_to_borrow" {
+		t.Fatalf("borrow statuses = %+v", got)
 	}
 }
 
-func TestAssetStatus_ETBAndMissingBorrowStatus(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		body string
-		want *string
-	}{
-		{name: "ETB", body: `{"borrow_status":"easy_to_borrow"}`, want: func() *string { s := "easy_to_borrow"; return &s }()},
-		{name: "missing", body: `{"shortable":true}`, want: nil},
+func TestActiveAssets_PreservesExplicitFalseAndMissingBorrowStatus(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/assets", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[
+            {"symbol":"XYZ","tradable":false,"marginable":false,"shortable":false},
+            {"symbol":"AAPL","shortable":true}
+        ]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	got, err := rc.activeAssets(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, value := range map[string]*bool{
+		"shortable": got[0].Shortable, "marginable": got[0].Marginable, "tradable": got[0].Tradable,
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			mux := http.NewServeMux()
-			mux.HandleFunc("/v2/assets/AAPL", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(tc.body)) })
-			srv := httptest.NewServer(mux)
-			defer srv.Close()
-
-			rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
-			got, err := rc.assetStatus(context.Background(), "US.AAPL")
-			if err != nil {
-				t.Fatal(err)
-			}
-			if (got.BorrowStatus == nil) != (tc.want == nil) {
-				t.Fatalf("BorrowStatus = %v, want %v", got.BorrowStatus, tc.want)
-			}
-			if got.BorrowStatus != nil && tc.want != nil && *got.BorrowStatus != *tc.want {
-				t.Fatalf("BorrowStatus = %v, want %v", got.BorrowStatus, tc.want)
-			}
-		})
-	}
-}
-
-func TestAssetStatus_ExplicitFalseValues(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v2/assets/AAPL", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"tradable":false,"marginable":false,"shortable":false}`))
-	})
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
-
-	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
-	got, err := rc.assetStatus(context.Background(), "US.AAPL")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for name, value := range map[string]*bool{"shortable": got.Shortable, "marginable": got.Marginable, "tradable": got.Tradable} {
 		if value == nil || *value {
 			t.Fatalf("%s = %v, want non-nil false", name, value)
 		}
 	}
+	if got[1].BorrowStatus != nil {
+		t.Fatalf("missing borrow_status = %v, want nil", got[1].BorrowStatus)
+	}
 }
 
-func TestAssetStatus_SymbolConversion(t *testing.T) {
+func TestActiveAssets_EmptyArray(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v2/assets/AAPL", func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v2/assets/AAPL" {
-			t.Errorf("request path = %q, want /v2/assets/AAPL", r.URL.Path)
-		}
-		_, _ = w.Write([]byte(`{}`))
-	})
+	mux.HandleFunc("/v2/assets", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`[]`)) })
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 
 	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
-	if _, err := rc.assetStatus(context.Background(), "US.AAPL"); err != nil {
-		t.Fatal(err)
+	got, err := rc.activeAssets(context.Background())
+	if err != nil || len(got) != 0 {
+		t.Fatalf("activeAssets = %v, %v; want empty success", got, err)
 	}
 }
 
-func TestAssetStatus_SkipsWhenExecutionReserveIsNeeded(t *testing.T) {
-	clk := clock.NewFake(time.UnixMilli(0))
-	rc := newRESTClient("http://127.0.0.1:0", "K", "S", clk)
-	for rc.bucket.Allow() {
-	}
-
-	_, err := rc.assetStatus(context.Background(), "US.AAPL")
-	if !errors.Is(err, errAssetStatusRateLimited) {
-		t.Fatalf("asset status error = %v, want low-priority skip", err)
-	}
-	if got := drainTokens(rc.assetBucket); got != assetStatusBurst {
-		t.Fatalf("asset-budget tokens after shared-pool skip = %d, want %d", got, assetStatusBurst)
-	}
-}
-
-func TestAssetStatusSkipsWhenAssetSubBudgetIsExhausted(t *testing.T) {
-	clk := clock.NewFake(time.UnixMilli(0))
-	rc := newRESTClient("http://127.0.0.1:0", "K", "S", clk)
-	for rc.assetBucket.Allow() {
-	}
-
-	_, err := rc.assetStatus(context.Background(), "US.AAPL")
-	if !errors.Is(err, errAssetStatusRateLimited) {
-		t.Fatalf("asset status error = %v, want asset-budget skip", err)
-	}
-}
-
-func drainTokens(tb *netx.TokenBucket) int {
-	n := 0
-	for tb.Allow() {
-		n++
-	}
-	return n
-}
-
-func TestAssetStatus_HTTPError(t *testing.T) {
+func TestActiveAssets_HTTPError(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v2/assets/AAPL", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("/v2/assets", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNotFound)
 		_, _ = w.Write([]byte(`{"code":40410000,"message":"asset not found"}`))
 	})
@@ -227,20 +179,30 @@ func TestAssetStatus_HTTPError(t *testing.T) {
 	defer srv.Close()
 
 	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
-	if _, err := rc.assetStatus(context.Background(), "US.AAPL"); err == nil || !strings.Contains(err.Error(), "asset not found") {
+	if _, err := rc.activeAssets(context.Background()); err == nil || !strings.Contains(err.Error(), "asset not found") {
 		t.Fatalf("expected structured API error, got %v", err)
 	}
 }
 
-func TestAssetStatus_Malformed200(t *testing.T) {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/v2/assets/AAPL", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{not valid json`)) })
-	srv := httptest.NewServer(mux)
-	defer srv.Close()
+func TestActiveAssets_RejectsMalformedOrWrongShape(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "malformed array", body: `[{"symbol":`},
+		{name: "object", body: `{}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/v2/assets", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(tc.body)) })
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
 
-	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
-	if _, err := rc.assetStatus(context.Background(), "US.AAPL"); err == nil {
-		t.Fatal("malformed 200 response must return a decode error")
+			rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+			if _, err := rc.activeAssets(context.Background()); err == nil {
+				t.Fatal("invalid successful response must return an error")
+			}
+		})
 	}
 }
 

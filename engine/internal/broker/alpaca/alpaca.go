@@ -60,10 +60,11 @@ type Config struct {
 	Clock    clock.Clock
 }
 
-// AssetStatus is read-only Alpaca asset metadata for informational display.
-// shortable reports asset-level shortability, not permission to submit a
-// short; hard_to_borrow still requires the future locate workflow. marginable
-// and tradable are also asset-level flags, not account or risk authorization.
+// AssetStatus is read-only Alpaca asset metadata snapshotted at engine startup
+// for informational display. shortable reports asset-level shortability, not
+// permission to submit a short; hard_to_borrow still requires the future
+// locate workflow. marginable and tradable are also asset-level flags, not
+// account or risk authorization.
 type AssetStatus struct {
 	BorrowStatus *string
 	Shortable    *bool
@@ -86,6 +87,9 @@ type Adapter struct {
 	ws   *wsClient
 
 	events chan exec.BrokerEvent
+
+	assetMu        sync.RWMutex
+	assetsBySymbol map[string]AssetStatus
 
 	// runCtx is the context Run(ctx) was invoked with. It is only ever read
 	// from the wsClient's callbacks, which are only ever invoked from the
@@ -198,6 +202,7 @@ func New(cfg Config) (*Adapter, error) {
 		lastKnownStatus:    map[string]exec.OrderStatus{},
 		lastKnownFilledQty: map[string]float64{},
 		posBasis:           map[string]posBasisEntry{},
+		assetsBySymbol:     map[string]AssetStatus{},
 	}
 	a.rest = newRESTClient(base, cfg.Creds.KeyID, cfg.Creds.SecretKey, clk)
 	a.ws = newWSClient(wsURL, cfg.Creds.KeyID, cfg.Creds.SecretKey, clk, a.handleUpdate, a.handleConn)
@@ -260,20 +265,42 @@ func (a *Adapter) ProbeRTT(ctx context.Context) (time.Duration, error) {
 	return time.Since(start), err
 }
 
-// AssetStatus fetches the current read-only asset eligibility metadata used by
-// Stock Info. This does not perform a locate request or authorize a future
-// short order; execution must validate current venue/account state itself.
-func (a *Adapter) AssetStatus(ctx context.Context, symbol string) (AssetStatus, error) {
-	status, err := a.rest.assetStatus(ctx, symbol)
+// LoadActiveAssets fetches Alpaca's active asset directory once and replaces
+// the in-memory snapshot only after the complete response has decoded.
+func (a *Adapter) LoadActiveAssets(ctx context.Context) (int, error) {
+	assets, err := a.rest.activeAssets(ctx)
 	if err != nil {
-		return AssetStatus{}, err
+		return 0, err
 	}
-	return AssetStatus{
-		BorrowStatus: status.BorrowStatus,
-		Shortable:    status.Shortable,
-		Marginable:   status.Marginable,
-		Tradable:     status.Tradable,
-	}, nil
+
+	next := make(map[string]AssetStatus, len(assets))
+	for _, asset := range assets {
+		symbol := assetCacheKey(asset.Symbol)
+		if symbol == "" {
+			continue
+		}
+		next[symbol] = AssetStatus{
+			BorrowStatus: asset.BorrowStatus,
+			Shortable:    asset.Shortable,
+			Marginable:   asset.Marginable,
+			Tradable:     asset.Tradable,
+		}
+	}
+
+	a.assetMu.Lock()
+	a.assetsBySymbol = next
+	a.assetMu.Unlock()
+	return len(next), nil
+}
+
+// AssetStatus returns metadata from the startup active-assets snapshot. It
+// performs no network I/O and returns false for unknown/inactive symbols.
+func (a *Adapter) AssetStatus(symbol string) (AssetStatus, bool) {
+	symbol = assetCacheKey(symbol)
+	a.assetMu.RLock()
+	status, ok := a.assetsBySymbol[symbol]
+	a.assetMu.RUnlock()
+	return status, ok
 }
 
 // Capabilities reports Alpaca's native replace, native flatten-all, and

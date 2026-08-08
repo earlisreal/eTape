@@ -7,15 +7,12 @@ Stock Info publishes the existing `stock.detail` snapshot by combining:
 - Alpaca asset metadata when an Alpaca venue is configured: borrow status,
   shortable, marginable, and tradable
 
-Moomoo uses the broad focused/watch/scanner symbol universe. Alpaca asset
-requests are intentionally restricted to active/focused symbols. One
-sequential, asynchronous refresh pass runs at a time, rotates its starting
-symbol for fairness, and uses a small Alpaca asset sub-budget; scanner-only
-symbols do not consume the shared execution REST quota. Moomoo publishes
-immediately using the last successful in-memory status for the active symbol.
-Alpaca failures or slow responses never block fundamentals; a completed refresh
-is visible on the next Stock Info tick. Cached metadata expires after two Stock
-Info refresh intervals, so prolonged failures and inactive symbols eventually
-return to unavailable/null rather than displaying stale borrow status.
+Moomoo uses the broad focused/watch/scanner symbol universe. Alpaca's active
+asset directory is loaded once during engine boot by the first configured
+Alpaca adapter. Stock Info performs an in-memory lookup for every symbol in its
+normal universe, so scanner/watch symbols can receive the same metadata without
+focus-triggered requests, asynchronous refreshes, TTLs, or REST quota use.
+The snapshot is session-static and remains unavailable when the startup load
+fails or a symbol is not present.
 
 Test: `go test ./internal/stockinfo`.

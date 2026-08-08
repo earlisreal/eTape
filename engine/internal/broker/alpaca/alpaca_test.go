@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -434,6 +435,89 @@ func TestAdapter_New_DefaultsPaperAndLive(t *testing.T) {
 	}
 	if live.ws.url != defaultLiveWSURL {
 		t.Fatalf("live WS url = %q, want %q", live.ws.url, defaultLiveWSURL)
+	}
+}
+
+func TestAdapter_LoadActiveAssetsCachesLookups(t *testing.T) {
+	var calls atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/assets", func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.RawQuery != "status=active" {
+			t.Fatalf("request query = %q, want status=active", r.URL.RawQuery)
+		}
+		_, _ = w.Write([]byte(`[
+            {"symbol":"AAPL","tradable":true,"marginable":true,"shortable":true,"borrow_status":"easy_to_borrow"},
+            {"symbol":"TSLA","tradable":false,"marginable":false,"shortable":false}
+        ]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	a, err := New(Config{Venue: "alpaca", RESTBase: srv.URL, WSURL: "ws://unused", Creds: creds.Pair{KeyID: "K", SecretKey: "S"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	count, err := a.LoadActiveAssets(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if count != 2 || calls.Load() != 1 {
+		t.Fatalf("loaded count=%d HTTP calls=%d, want count=2 and calls=1", count, calls.Load())
+	}
+
+	status, ok := a.AssetStatus("US.AAPL")
+	if !ok || status.BorrowStatus == nil || *status.BorrowStatus != "easy_to_borrow" {
+		t.Fatalf("US.AAPL status = %+v, ok=%v", status, ok)
+	}
+	status, ok = a.AssetStatus("US.TSLA")
+	if !ok || status.Shortable == nil || *status.Shortable || status.Marginable == nil || *status.Marginable || status.Tradable == nil || *status.Tradable {
+		t.Fatalf("US.TSLA status = %+v, ok=%v; explicit false values must survive", status, ok)
+	}
+	if _, ok := a.AssetStatus("US.NOTREAL"); ok {
+		t.Fatal("unknown symbol should not resolve")
+	}
+	for range 100 {
+		if _, ok := a.AssetStatus("US.AAPL"); !ok {
+			t.Fatal("cached AAPL lookup failed")
+		}
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("HTTP calls after repeated lookups = %d, want 1", got)
+	}
+}
+
+func TestAdapter_LoadActiveAssetsKeepsPreviousMapOnFailureAndReplaces(t *testing.T) {
+	body := `[{"symbol":"AAPL","tradable":true}]`
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/assets", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(body)) })
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	a, err := New(Config{Venue: "alpaca", RESTBase: srv.URL, WSURL: "ws://unused", Creds: creds.Pair{KeyID: "K", SecretKey: "S"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.LoadActiveAssets(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	body = `[{"symbol":"TSLA","tradable":true}]`
+	if _, err := a.LoadActiveAssets(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := a.AssetStatus("US.AAPL"); ok {
+		t.Fatal("replaced map should not retain stale AAPL")
+	}
+	if _, ok := a.AssetStatus("US.TSLA"); !ok {
+		t.Fatal("replaced map should contain TSLA")
+	}
+
+	body = `[{"symbol":`
+	if _, err := a.LoadActiveAssets(context.Background()); err == nil {
+		t.Fatal("malformed load must fail")
+	}
+	if _, ok := a.AssetStatus("US.TSLA"); !ok {
+		t.Fatal("failed load must leave the previous map unchanged")
 	}
 }
 

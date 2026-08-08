@@ -4,9 +4,10 @@
 
 - **moomoo OpenD:** primary US quote, ticker, order-book, K-line, scanner, news, stock-info, quota, and moomoo execution gateway. Engine uses raw TCP framing plus protobuf at `127.0.0.1:11111`; `InitConnect` and keepalive establish session. Trade unlock stays in OpenD GUI. See [OpenD package](../engine/internal/feed/opend/README.md).
 - **Alpaca:** paper/live REST and trade-update WebSocket execution, plus
-  read-only asset eligibility/borrow metadata used by Stock Info. Asset reads
-  are low-priority and non-blocking, with a dedicated sub-budget and three-token
-  headroom reserve in the shared execution pool. Paper credentials may also provide
+  read-only asset eligibility/borrow metadata used by Stock Info. The first
+  configured Alpaca adapter loads the active asset directory once at engine
+  startup with `GET /v2/assets?status=active`; Stock Info then uses in-memory
+  lookups for the rest of the process. Paper credentials may also provide
   daily and one-minute history; live credentials are not reused for history.
   See [adapter](../engine/internal/broker/alpaca/README.md) and [history
   provider](../engine/internal/hist/alpaca/README.md).

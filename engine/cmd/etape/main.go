@@ -366,6 +366,14 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		_ = st.Close()
 		return 1, false, nil
 	}
+	if a := firstAlpacaAdapter(vbs); a != nil {
+		count, err := a.LoadActiveAssets(ctx)
+		if err != nil {
+			log.Warn("alpaca active assets load failed", "err", err)
+		} else {
+			log.Info("alpaca active assets loaded", "count", count)
+		}
+	}
 	brokers := map[exec.VenueID]exec.Broker{}
 	venueIDs := make([]exec.VenueID, 0, len(vbs))
 	var brokerWG sync.WaitGroup
@@ -960,12 +968,11 @@ func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, dem
 	hub.SetScanner(scanPoller)
 	newsPlan := func() news.SymbolPlan { return newsSymbolPlan(scanPoller.PoolSymbols(), hub.ActiveDemandSymbols()) }
 	symbols := func() []string { return newsPlan().All() }
-	activeSymbols := func() []string { return newsPlan().Active }
 	scanWG.Add(1)
 	go func() { defer scanWG.Done(); _ = scanPoller.Run(ctx) }()
 	go func() { _ = news.New(cfg.News, r, hub, clk, newsPlan).Run(ctx) }()
 	go func() {
-		_ = stockinfo.New(cfg.StockInfo, r, hub, clk, symbols, st, activeSymbols, assetReader).Run(ctx)
+		_ = stockinfo.New(cfg.StockInfo, r, hub, clk, symbols, st, assetReader).Run(ctx)
 	}()
 	if cfg.Watchlist.Enabled {
 		interval := time.Duration(cfg.Watchlist.PollMs) * time.Millisecond

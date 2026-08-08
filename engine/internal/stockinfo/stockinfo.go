@@ -22,9 +22,7 @@ package stockinfo
 import (
 	"context"
 	"log/slog"
-	"sort"
 	"strings"
-	"sync"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -70,16 +68,9 @@ type AssetStatus struct {
 	Tradable     *bool
 }
 
-type cachedAssetStatus struct {
-	Status    AssetStatus
-	FetchedAt time.Time
-}
-
 // assetStatusReader is deliberately narrower than exec.Broker: Stock Info
-// needs only read-only asset metadata, and Alpaca failures must stay
-// supplemental to the Moomoo fundamentals path.
 type assetStatusReader interface {
-	AssetStatus(context.Context, string) (AssetStatus, error)
+	AssetStatus(string) (AssetStatus, bool)
 }
 
 // ema200Entry is the once-per-day cache entry for a symbol's EMA-200: day is
@@ -91,36 +82,28 @@ type ema200Entry struct {
 }
 
 // Poller ticks on cfg.RefreshMs, refetching fundamentals for every broad
-// symbol in symbols() every tick, a single asynchronous Alpaca metadata pass
-// for activeSymbols(), industry/exchange for symbols not yet cached, and
-// EMA-200 at most once per UTC day per symbol (it reads the daily bar archive,
-// which only advances once per session). industry, exch, and ema are only
-// touched from the Run goroutine; the status cache has its own mutex because
-// the refresh pass runs separately.
+// symbol in symbols() every tick, industry/exchange for symbols not yet
+// cached, and EMA-200 at most once per UTC day per symbol (it reads the daily
+// bar archive, which only advances once per session). Alpaca metadata is a
+// startup snapshot looked up in memory while building each payload.
 type Poller struct {
-	cfg                  config.StockInfo
-	r                    requester
-	pub                  Publisher
-	clk                  clock.Clock
-	bars                 dailyBarReader
-	symbols              func() []string // broad focused + scanner universe for Moomoo
-	activeSymbols        func() []string // active/focused symbols for Alpaca only
-	assetReader          assetStatusReader
-	assetMu              sync.RWMutex
-	assetStatuses        map[string]cachedAssetStatus // fresh successful status per symbol
-	assetCursor          int
-	assetRefreshInFlight bool
-	industry             map[string]string      // symbol -> resolved industry name; "" = known-absent
-	exch                 map[string]string      // symbol -> resolved exchange label; "" = known-absent/unresolvable
-	ema                  map[string]ema200Entry // symbol -> last-computed EMA-200, day-stamped
+	cfg         config.StockInfo
+	r           requester
+	pub         Publisher
+	clk         clock.Clock
+	bars        dailyBarReader
+	symbols     func() []string // broad focused + scanner universe for Moomoo
+	assetReader assetStatusReader
+	industry    map[string]string      // symbol -> resolved industry name; "" = known-absent
+	exch        map[string]string      // symbol -> resolved exchange label; "" = known-absent/unresolvable
+	ema         map[string]ema200Entry // symbol -> last-computed EMA-200, day-stamped
 }
 
-func New(cfg config.StockInfo, r requester, pub Publisher, clk clock.Clock, symbols func() []string, bars dailyBarReader, activeSymbols func() []string, assetReader assetStatusReader) *Poller {
+func New(cfg config.StockInfo, r requester, pub Publisher, clk clock.Clock, symbols func() []string, bars dailyBarReader, assetReader assetStatusReader) *Poller {
 	return &Poller{
 		cfg: cfg, r: r, pub: pub, clk: clk, bars: bars, symbols: symbols,
-		activeSymbols: activeSymbols, assetReader: assetReader,
-		assetStatuses: map[string]cachedAssetStatus{},
-		industry:      map[string]string{}, exch: map[string]string{}, ema: map[string]ema200Entry{},
+		assetReader: assetReader,
+		industry:    map[string]string{}, exch: map[string]string{}, ema: map[string]ema200Entry{},
 	}
 }
 
@@ -143,26 +126,16 @@ func (p *Poller) Run(ctx context.Context) error {
 // fetchTick performs the fundamentals fetch (snapshot for every requested
 // symbol, industry/exchange lookups only for symbols not yet cached, EMA-200
 // at most once per UTC day per symbol) and publishes one
-// wsmsg.StockDetailPayload per symbol that a snapshot was returned for. The
-// Alpaca pass is deliberately started only after these publications, so an
-// execution-venue slowdown cannot delay the Moomoo payload.
+// wsmsg.StockDetailPayload per symbol that a snapshot was returned for.
 func (p *Poller) fetchTick(ctx context.Context) {
 	syms := p.symbols()
 	if len(syms) == 0 {
 		return
 	}
-	activeSyms := p.currentActiveSymbols()
-	activeSet := make(map[string]struct{}, len(activeSyms))
-	for _, sym := range activeSyms {
-		if sym != "" {
-			activeSet[sym] = struct{}{}
-		}
-	}
 	refreshedAt := p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
 	snapshots := p.fetchSnapshots(ctx, syms)
 	p.resolveIndustries(ctx, syms)
 	p.resolveExchanges(ctx, syms)
-	assetStatuses := p.assetStatusSnapshot()
 	for _, sym := range syms {
 		snap, ok := snapshots[sym]
 		if !ok {
@@ -172,8 +145,8 @@ func (p *Poller) fetchTick(ctx context.Context) {
 		payload.Symbol = sym
 		payload.Exchange = p.exch[sym]
 		payload.Ema200 = p.ema200For(sym)
-		if _, active := activeSet[sym]; active {
-			if status, ok := assetStatuses[sym]; ok {
+		if p.assetReader != nil {
+			if status, ok := p.assetReader.AssetStatus(sym); ok {
 				payload.BorrowStatus = status.BorrowStatus
 				payload.Shortable = status.Shortable
 				payload.Marginable = status.Marginable
@@ -181,103 +154,6 @@ func (p *Poller) fetchTick(ctx context.Context) {
 			}
 		}
 		p.pub.Publish(wsmsg.TopicStockDetail, sym, payload)
-	}
-	p.startAssetStatusRefresh(ctx, activeSyms)
-}
-
-func (p *Poller) currentActiveSymbols() []string {
-	if p.activeSymbols == nil {
-		return nil
-	}
-	return append([]string(nil), p.activeSymbols()...)
-}
-
-func (p *Poller) assetStatusSnapshot() map[string]AssetStatus {
-	now := p.clk.Now()
-	ttl := p.assetStatusTTL()
-	p.assetMu.Lock()
-	defer p.assetMu.Unlock()
-	out := make(map[string]AssetStatus, len(p.assetStatuses))
-	for sym, cached := range p.assetStatuses {
-		if now.Sub(cached.FetchedAt) > ttl {
-			delete(p.assetStatuses, sym)
-			continue
-		}
-		out[sym] = cached.Status
-	}
-	return out
-}
-
-func (p *Poller) assetStatusTTL() time.Duration {
-	refresh := time.Duration(p.cfg.RefreshMs) * time.Millisecond
-	if refresh <= 0 {
-		return 30 * time.Second
-	}
-	return 2 * refresh
-}
-
-// startAssetStatusRefresh launches at most one sequential, low-priority
-// refresh pass. A slow or rate-limited reader can delay only this goroutine;
-// the next Stock Info tick continues to publish Moomoo data from the cache.
-func (p *Poller) startAssetStatusRefresh(ctx context.Context, activeSyms []string) {
-	if p.assetReader == nil || len(activeSyms) == 0 || ctx.Err() != nil {
-		return
-	}
-	p.assetMu.Lock()
-	if p.assetRefreshInFlight {
-		p.assetMu.Unlock()
-		return
-	}
-	p.assetRefreshInFlight = true
-	p.assetMu.Unlock()
-
-	syms := append([]string(nil), activeSyms...)
-	go func() {
-		defer func() {
-			p.assetMu.Lock()
-			p.assetRefreshInFlight = false
-			p.assetMu.Unlock()
-		}()
-		p.fetchAssetStatuses(ctx, syms)
-	}()
-}
-
-// fetchAssetStatuses reads only active/focused symbols, never scanner-only
-// symbols. Requests are sequential and non-blocking at the Alpaca adapter;
-// the in-flight guard above prevents overlapping passes from piling up.
-func (p *Poller) fetchAssetStatuses(ctx context.Context, activeSyms []string) {
-	if p.assetReader == nil {
-		return
-	}
-	set := map[string]struct{}{}
-	for _, sym := range activeSyms {
-		if sym != "" {
-			set[sym] = struct{}{}
-		}
-	}
-	syms := make([]string, 0, len(set))
-	for sym := range set {
-		syms = append(syms, sym)
-	}
-	sort.Strings(syms)
-	if len(syms) == 0 {
-		return
-	}
-	p.assetMu.Lock()
-	start := p.assetCursor % len(syms)
-	p.assetCursor = (start + 1) % len(syms)
-	p.assetMu.Unlock()
-	ordered := append(append([]string{}, syms[start:]...), syms[:start]...)
-	for _, sym := range ordered {
-		status, err := p.assetReader.AssetStatus(ctx, sym)
-		if err != nil {
-			slog.Debug("stockinfo: alpaca asset status unavailable", "symbol", sym, "err", err)
-			continue
-		}
-		fetchedAt := p.clk.Now()
-		p.assetMu.Lock()
-		p.assetStatuses[sym] = cachedAssetStatus{Status: status, FetchedAt: fetchedAt}
-		p.assetMu.Unlock()
 	}
 }
 

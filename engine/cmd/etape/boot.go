@@ -153,24 +153,24 @@ type rttProber interface {
 }
 
 type stockInfoAssetReader interface {
-	AssetStatus(context.Context, string) (stockinfo.AssetStatus, error)
+	AssetStatus(string) (stockinfo.AssetStatus, bool)
 }
 
 type alpacaStockInfoReader struct {
 	adapter *alpaca.Adapter
 }
 
-func (r alpacaStockInfoReader) AssetStatus(ctx context.Context, symbol string) (stockinfo.AssetStatus, error) {
-	status, err := r.adapter.AssetStatus(ctx, symbol)
-	if err != nil {
-		return stockinfo.AssetStatus{}, err
+func (r alpacaStockInfoReader) AssetStatus(symbol string) (stockinfo.AssetStatus, bool) {
+	status, ok := r.adapter.AssetStatus(symbol)
+	if !ok {
+		return stockinfo.AssetStatus{}, false
 	}
 	return stockinfo.AssetStatus{
 		BorrowStatus: status.BorrowStatus,
 		Shortable:    status.Shortable,
 		Marginable:   status.Marginable,
 		Tradable:     status.Tradable,
-	}, nil
+	}, true
 }
 
 // firstAlpacaAdapter returns the first configured Alpaca adapter. Keeping the
