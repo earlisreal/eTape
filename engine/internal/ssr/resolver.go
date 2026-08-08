@@ -52,10 +52,11 @@ func New(bars DailyBarReader) *Resolver {
 }
 
 // IsRestricted returns the derived Rule 201 estimate for symbol at now.
-// snapshotAt is the provider-neutral observation time for dayLow/priorClose;
-// it must be current-date to create a new live trigger. dayLow and priorClose
-// must come from the regular-session snapshot fields; callers should not
-// substitute current price or extended-hours prices.
+// snapshotAt is the provider's basic/latest-price update time; it does not
+// establish the timestamps of dayLow or priorClose. A new live trigger is
+// accepted only when snapshotAt reaches today's regular-session open.
+// dayLow and priorClose must come from the regular-session snapshot fields;
+// callers should not substitute current price or extended-hours prices.
 func (r *Resolver) IsRestricted(symbol string, now, snapshotAt time.Time, dayLow, priorClose float64) bool {
 	if r == nil || !strings.HasPrefix(symbol, "US.") {
 		return false
@@ -75,8 +76,11 @@ func (r *Resolver) IsRestricted(symbol string, now, snapshotAt time.Time, dayLow
 	if last, ok := r.triggers[symbol]; ok && last.Before(previous) {
 		delete(r.triggers, symbol)
 	}
+	freshRTHSnapshot := !snapshotAt.IsZero() &&
+		!snapshotAt.Before(schedule.Open) &&
+		sameDate(snapshotAt, today)
 	if !etNow.Before(schedule.Open) &&
-		sameDate(snapshotAt, today) &&
+		freshRTHSnapshot &&
 		triggersRule201(dayLow, priorClose) {
 		r.triggers[symbol] = today
 	}

@@ -288,6 +288,22 @@ func TestStalePreviousDaySnapshotAfterOpenCannotRetriggerToday(t *testing.T) {
 	}
 }
 
+func TestCurrentDatePremarketSnapshotAfterOpenCannotRetriggerToday(t *testing.T) {
+	r := New(nil)
+	friday := et(2026, time.July, 10, 10, 0)
+	mondayPremarketSnapshot := et(2026, time.July, 13, 8, 30)
+	mondayAfterOpen := et(2026, time.July, 13, 9, 30).Add(time.Second)
+	if !r.IsRestricted("US.TEST", friday, friday, 89, 100) {
+		t.Fatal("Friday should trigger")
+	}
+	if !r.IsRestricted("US.TEST", mondayAfterOpen, mondayPremarketSnapshot, 89, 100) {
+		t.Fatal("Friday carry should restrict Monday")
+	}
+	if r.IsRestricted("US.TEST", et(2026, time.July, 14, 8, 0), time.Time{}, 0, 0) {
+		t.Fatal("Monday premarket snapshot must not extend restriction into Tuesday")
+	}
+}
+
 func TestCurrentDaySnapshotCanRetriggerCarryDay(t *testing.T) {
 	r := New(nil)
 	monday := et(2026, time.July, 6, 10, 0)

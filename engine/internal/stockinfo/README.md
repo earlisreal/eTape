@@ -21,7 +21,8 @@ fails or a symbol is not present.
 
 SSR reuses the existing Qot_GetSecuritySnapshot response; it does not add a
 market-data request or use Alpaca shortable/borrow fields. New live triggers
-require the snapshot observation timestamp to be on the current ET date;
-incomplete archive reads use a temporary retryable cache.
+require the provider's latest-price update timestamp to be on the current ET
+date and at or after that day's regular-session open; incomplete archive reads
+use a temporary retryable cache.
 
 Test: `go test ./internal/stockinfo`.

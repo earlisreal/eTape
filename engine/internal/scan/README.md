@@ -1,6 +1,6 @@
 # Scanner
 
-Rule 201 live triggers require the snapshot observation timestamp to be on the current ET date; incomplete archive reads use a temporary retryable cache.
+Rule 201 live triggers require the provider's latest-price update timestamp to be on the current ET date and at or after that day's regular-session open; incomplete archive reads use a temporary retryable cache.
 
 Session-aware scanner polling, float/snapshot enrichment, filtering, and UI publication. Request/response scans consume no subscription slots; endpoint rate budgets still apply.
 
