@@ -4,7 +4,7 @@ import type { ScannerFilters, ScannerSession } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
 import { FONTS } from "../../render/palette";
 import { formatTapeTime } from "../../render/format";
-import { formatChangePct, formatCompactShares, msUntilEtMidnight } from "../format";
+import { appendSsrMarker, formatChangePct, formatCompactShares, msUntilEtMidnight } from "../format";
 import { formatFilterSummary } from "./scannerFilter";
 import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
 import type { ScannerRowView } from "../../data/ScannerStore";
@@ -172,7 +172,9 @@ export function ScannerPanel(
                   : hoveredSymbol === r.symbol ? "rgba(154,106,27,.06)" : "transparent",
                 boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : r.isUnseen ? `inset 2px 0 0 ${palette.accent}` : "none",
                 transition: "background 120ms ease" }}>
-              <td style={symCell}>{bareSymbol(r.symbol)}</td>
+              <td style={symCell} title={r.shortSellRestricted ? "Short Sell Restricted — derived Rule 201 status" : undefined}>
+                {appendSsrMarker(bareSymbol(r.symbol), r.shortSellRestricted)}
+              </td>
               <td style={{ ...numCell, color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>{formatChangePct(r.changePct)}</td>
               <td style={numCell}>{r.last === null ? "—" : r.last.toFixed(2)}</td>
               <td style={numCell}>{formatCompactShares(r.floatShares)}</td>

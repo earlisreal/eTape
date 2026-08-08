@@ -24,6 +24,11 @@ export function formatCompactShares(n: number | null): string {
   return `${Math.round(n)}`;
 }
 
+/** Adds the derived Rule 201 marker to an already-display-formatted ticker. */
+export function appendSsrMarker(label: string, restricted: boolean): string {
+  return restricted ? `${label}**` : label;
+}
+
 /** Milliseconds from `now` until the next 00:00 America/New_York — the dedup
  *  reset boundary. Uses Intl so it tracks EST/EDT automatically. */
 export function msUntilEtMidnight(now: Date): number {

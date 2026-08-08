@@ -229,6 +229,7 @@ export interface ExecStatus {
 }
 export interface ScannerRow {
   symbol: string;
+  shortSellRestricted: boolean;
   changePct: number | null; // null = no print yet
   last: number | null; // null = no print yet
   floatShares: number | null; // ACTUAL shares (engine converts moomoo thousands); null = unknown
@@ -313,6 +314,7 @@ export interface StockDetailPayload {
   shortable: boolean | null; // asset-level flag, not short-order authorization
   marginable: boolean | null; // asset-level flag, not account margin authorization
   tradable: boolean | null; // asset-level flag, not execution authorization
+  shortSellRestricted: boolean;
   refreshedAt: string;
 }
 export interface NewsItem {

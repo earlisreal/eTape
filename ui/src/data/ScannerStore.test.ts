@@ -7,7 +7,7 @@ const rank = (kind: "snapshot" | "delta", session: string, payload: ScannerRankP
 const hit = (session: string, payload: ScanHitPayload) =>
   ({ kind: "delta", topic: "scanner.hit", key: session, payload } as DeltaMsg);
 const r = (symbol: string, changePct: number) =>
-  ({ symbol, changePct, last: 1, floatShares: 1_000_000, volume: 1000 });
+  ({ symbol, shortSellRestricted: false, changePct, last: 1, floatShares: 1_000_000, volume: 1000 });
 
 describe("ScannerStore", () => {
   it("snapshot seeds the baseline without flashing", () => {
@@ -79,7 +79,7 @@ describe("ScannerStore", () => {
 // Distinct name to avoid colliding with the file's existing `rank(kind, session, payload)`.
 const rankMsg = (kind: "snapshot" | "delta", symbols: string[]) => ({
   kind, topic: "scanner.rank" as const, key: "premarket",
-  payload: { refreshedAt: "2026-07-06T13:00:00Z", rows: symbols.map((symbol) => ({ symbol, changePct: 5, last: 1, floatShares: 1, volume: 1 })) },
+  payload: { refreshedAt: "2026-07-06T13:00:00Z", rows: symbols.map((symbol) => ({ symbol, shortSellRestricted: false, changePct: 5, last: 1, floatShares: 1, volume: 1 })) },
 });
 
 describe("ScannerStore.onNewHit", () => {

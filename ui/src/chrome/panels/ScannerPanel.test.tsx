@@ -57,6 +57,28 @@ describe("ScannerPanel", () => {
     expect(screen.getByText("KO")).toBeTruthy();
   });
 
+  it("renders the derived SSR marker without decorating row actions", () => {
+    const { scanner, focus } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [
+        { symbol: "US.NVDA", shortSellRestricted: true, changePct: 12, last: 100, floatShares: 1, volume: 1 },
+      ] } }));
+    expect(screen.getByText("NVDA**")).toBeTruthy();
+    fireEvent.doubleClick(screen.getByText("NVDA**"));
+    expect(focus).toHaveBeenCalledWith("green", "US.NVDA");
+    expect(focus).not.toHaveBeenCalledWith("green", "US.NVDA**");
+  });
+
+  it("renders an unrestricted scanner ticker without the marker", () => {
+    const { scanner } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [
+        { symbol: "US.NVDA", shortSellRestricted: false, changePct: 12, last: 100, floatShares: 1, volume: 1 },
+      ] } }));
+    expect(screen.getByText("NVDA")).toBeTruthy();
+    expect(screen.queryByText("NVDA**")).toBeNull();
+  });
+
   it("renders no-print rows as em dash, never 0", () => {
     const { scanner } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",

@@ -13,6 +13,8 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
 	"github.com/earlisreal/eTape/engine/internal/md"
+	"github.com/earlisreal/eTape/engine/internal/session"
+	"github.com/earlisreal/eTape/engine/internal/ssr"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 
 	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
@@ -433,6 +435,61 @@ func TestFetchTickPublishesOnePayloadPerSymbolKeyedBySymbol(t *testing.T) {
 	}
 	if !seen["US.AAPL"] || !seen["US.TSLA"] {
 		t.Fatalf("expected publishes keyed by US.AAPL and US.TSLA, got %+v", pub.calls)
+	}
+}
+
+func TestFetchTickEnrichesDerivedSSRFromSnapshotLowAndIgnoresAlpacaFlags(t *testing.T) {
+	fr := newFakeRequester()
+	snapshot := snapshotFor("NVDA", true)
+	snapshot.Basic.CurPrice = proto.Float64(105)
+	snapshot.Basic.LastClosePrice = proto.Float64(100)
+	snapshot.Basic.LowPrice = proto.Float64(89)
+	fr.snapshot = &snappb.Response{RetType: proto.Int32(0), S2C: &snappb.S2C{SnapshotList: []*snappb.Snapshot{snapshot}}}
+	fr.ownerPlate = &ownerplatepb.Response{RetType: proto.Int32(0), S2C: &ownerplatepb.S2C{}}
+	fr.staticInfo = &staticpb.Response{RetType: proto.Int32(0), S2C: &staticpb.S2C{StaticInfoList: []*qotcommon.SecurityStaticInfo{
+		staticInfoFor("NVDA", qotcommon.ExchType_ExchType_US_Nasdaq),
+	}}}
+	shortable := false
+	asset := &fakeAssetStatusReader{statuses: map[string]AssetStatus{"US.NVDA": {Shortable: &shortable}}}
+	pub := &fakePublisher{}
+	clk := clock.NewFake(time.Date(2026, 7, 8, 10, 0, 0, 0, session.Loc()))
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000}, fr, pub, clk,
+		func() []string { return []string{"US.NVDA"} }, newFakeBars(), asset, ssr.New(nil))
+	p.fetchTick(context.Background())
+
+	if len(pub.calls) != 1 {
+		t.Fatalf("want one Stock Detail publish, got %d", len(pub.calls))
+	}
+	payload := pub.calls[0].payload.(wsmsg.StockDetailPayload)
+	if !payload.ShortSellRestricted || payload.Symbol != "US.NVDA" {
+		t.Fatalf("derived SSR/canonical symbol wrong: %+v", payload)
+	}
+	if payload.Shortable == nil || *payload.Shortable {
+		t.Fatalf("Alpaca shortable metadata should remain independent: %+v", payload)
+	}
+	if fr.calls[opend.ProtoQotGetSecuritySnapshot] != 1 {
+		t.Fatalf("SSR added a snapshot request: %d", fr.calls[opend.ProtoQotGetSecuritySnapshot])
+	}
+}
+
+func TestFetchTickSkipsDerivedSSRForKnownOTC(t *testing.T) {
+	fr := newFakeRequester()
+	snapshot := snapshotFor("PINK", true)
+	snapshot.Basic.LowPrice = proto.Float64(80)
+	snapshot.Basic.LastClosePrice = proto.Float64(100)
+	fr.snapshot = &snappb.Response{RetType: proto.Int32(0), S2C: &snappb.S2C{SnapshotList: []*snappb.Snapshot{snapshot}}}
+	fr.ownerPlate = &ownerplatepb.Response{RetType: proto.Int32(0), S2C: &ownerplatepb.S2C{}}
+	fr.staticInfo = &staticpb.Response{RetType: proto.Int32(0), S2C: &staticpb.S2C{StaticInfoList: []*qotcommon.SecurityStaticInfo{
+		staticInfoFor("PINK", qotcommon.ExchType_ExchType_US_Pink),
+	}}}
+	pub := &fakePublisher{}
+	clk := clock.NewFake(time.Date(2026, 7, 8, 10, 0, 0, 0, session.Loc()))
+	p := New(config.StockInfo{Enabled: true, RefreshMs: 1000}, fr, pub, clk,
+		func() []string { return []string{"US.PINK"} }, newFakeBars(), nil, ssr.New(nil))
+	p.fetchTick(context.Background())
+	payload := pub.calls[0].payload.(wsmsg.StockDetailPayload)
+	if payload.Exchange != "OTC" || payload.ShortSellRestricted {
+		t.Fatalf("known OTC symbol should not be marked derived SSR: %+v", payload)
 	}
 }
 

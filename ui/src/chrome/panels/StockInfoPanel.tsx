@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { PanelProps } from "./registry";
 import { useTheme } from "../ThemeProvider";
 import { formatTapeTime, formatPrice, QUOTE_DECIMALS } from "../../render/format";
-import { formatCompactShares } from "../format";
+import { appendSsrMarker, formatCompactShares } from "../format";
 import type { Palette } from "../../render/palette";
+import { bareSymbol } from "../exec/orderStatus";
 
 // Mirrors the engine default; classification stays exclusively in the engine.
 const CATALYST_MIN_SCORE = 50;
@@ -126,6 +127,7 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, o
   const hasAlpacaStatus = detail != null && (
     detail.borrowStatus != null || detail.shortable != null || detail.marginable != null || detail.tradable != null
   );
+  const displaySymbol = symbol && detail ? appendSsrMarker(bareSymbol(symbol), detail.shortSellRestricted) : undefined;
 
   return (
     <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
@@ -145,6 +147,9 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, o
           <>
             {detailsCollapsed ? (
               <div style={{ padding: "6px 8px", display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
+                <span className="mono" title={detail.shortSellRestricted ? "Short Sell Restricted — derived Rule 201 status" : undefined}
+                  style={{ fontWeight: 600, color: palette.text }}>{displaySymbol}</span>
+                <span style={{ color: palette.textMuted }}>·</span>
                 <span style={{ fontWeight: 600, color: detail.name ? palette.text : palette.textMuted }}>
                   {detail.name || "—"}
                 </span>
@@ -170,6 +175,8 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, o
             ) : (
               <>
                 <div style={{ padding: "6px 8px", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+                  <span className="mono" title={detail.shortSellRestricted ? "Short Sell Restricted — derived Rule 201 status" : undefined}
+                    style={{ fontWeight: 600, color: palette.text }}>{displaySymbol}</span>
                   <span style={{ fontWeight: 600, color: detail.name ? palette.text : palette.textMuted }}>
                     {detail.name || "—"}
                   </span>

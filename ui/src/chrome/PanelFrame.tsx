@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import type { DockviewPanelApi } from "dockview";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { HoverButton } from "./controls/HoverButton";
@@ -13,6 +13,7 @@ import { useTheme } from "./ThemeProvider";
 import type { Palette } from "../render/palette";
 import { GroupPicker } from "./GroupPicker";
 import { bareSymbol } from "./exec/orderStatus";
+import { appendSsrMarker } from "./format";
 import { normalizeSymbol } from "./symbol";
 import { useToasts } from "./Toast";
 import { modalTracker } from "./modalTracker";
@@ -67,6 +68,19 @@ export function PanelFrame(
   const { palette } = useTheme();
   const toast = useToasts();
 
+  // Canonical symbol state stays undecorated. SSR is a narrow per-symbol
+  // subscription so unrelated Stock Info refreshes do not repaint every
+  // symbol-bearing panel header.
+  const rawSymbol = symbol ?? (config.settings.symbol as string | undefined);
+  const effectiveSymbol = rawSymbol ? bareSymbol(rawSymbol) : undefined;
+  const shortSellRestricted = useSyncExternalStore(
+    (cb) => rawSymbol ? stores.stockDetail.subscribeShortSellRestricted(rawSymbol, cb) : () => {},
+    () => rawSymbol ? stores.stockDetail.shortSellRestrictedFor(rawSymbol) : false,
+  );
+  const effectiveDisplaySymbol = effectiveSymbol
+    ? appendSsrMarker(effectiveSymbol, shortSellRestricted)
+    : effectiveSymbol;
+
   // Task 13: type-to-load. `tl` drives the header's edit-affordance render;
   // `tlRef` mirrors it for the native keydown listener below so that listener
   // doesn't need to be torn down/rebuilt on every keystroke (it only depends
@@ -75,7 +89,7 @@ export function PanelFrame(
   const tlRef = useRef<TypeToLoadState>(tl);
   useEffect(() => { tlRef.current = tl; }, [tl]);
 
-  // Mirrors rawSymbol (defined below, after it exists) for the keydown
+  // Mirrors rawSymbol for the keydown
   // effect's `commit` closure, same reason as `tlRef`: that effect's
   // dependency array does not include rawSymbol (it only depends on
   // active/modalOpen/group/def, which change far less often than the symbol
@@ -142,8 +156,6 @@ export function PanelFrame(
   // no focus published yet), rendered bare (no "US." prefix) like the exec
   // panels. A pinned panel's own settings.symbol is a snapshot from panel
   // creation — full live editing of it is Task 13's type-to-load work.
-  const rawSymbol = symbol ?? (config.settings.symbol as string | undefined);
-  const effectiveSymbol = rawSymbol ? bareSymbol(rawSymbol) : undefined;
   const props: PanelProps = { config, stores, scheduler, width: size.width, height: size.height,
     linkGroups, commands, onConfigChange, active, onGroupChange, group, ...(rawSymbol ? { symbol: rawSymbol } : {}) };
   useEffect(() => { symbolRef.current = rawSymbol; }, [rawSymbol]);
@@ -371,7 +383,7 @@ export function PanelFrame(
             </span>
           ) : (
             <span className="mono" data-testid="panel-symbol" style={{ fontWeight: 700 }}>
-              {effectiveSymbol ?? "—"}
+              {effectiveDisplaySymbol ?? "—"}
             </span>
           )
         )}

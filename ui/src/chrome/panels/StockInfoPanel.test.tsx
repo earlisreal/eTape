@@ -32,7 +32,7 @@ const newsItem = (symbol: string, url: string, seen_at: string, overrides: Parti
   ({ id: url, symbols: [symbol], headline: "h", source: "R", url, seen_at, published_at: "", published_precision: "unknown", view_count: 0, type: "news", catalyst_category: "earnings", catalyst_score: 65, catalyst_reasons: [], ...overrides });
 
 const detailPayload = (symbol: string, overrides: Partial<StockDetailPayload> = {}): StockDetailPayload => ({
-  symbol, name: `${symbol} Inc`, industry: "Tech", exchange: "NASDAQ", price: 10, lastClose: 9.5, changePct: 5.2,
+  symbol, shortSellRestricted: false, name: `${symbol} Inc`, industry: "Tech", exchange: "NASDAQ", price: 10, lastClose: 9.5, changePct: 5.2,
   marketCap: 3_210_000_000_000, floatMarketCap: 900_000_000, sharesOutstanding: 22_700_000, floatShares: 20_000_000,
   pe: 20, peTTM: 21, eps: 0.5, high52: 15, low52: 5, ema200: 145.5, volume: 1000, refreshedAt: "t1",
   borrowStatus: null, shortable: null, marginable: null, tradable: null,
@@ -278,6 +278,27 @@ describe("StockInfoPanel fundamentals section", () => {
 });
 
 describe("StockInfoPanel details collapse (compact-by-default)", () => {
+  it("shows the derived SSR marker in the collapsed summary", () => {
+    const { stockDetail, linkGroups } = renderPanel();
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.NVDA", { shortSellRestricted: true })));
+      linkGroups.focus("green", "US.NVDA");
+    });
+    expect(screen.getByText("NVDA**")).toBeTruthy();
+  });
+
+  it("shows the derived SSR marker in the expanded header and omits it when unrestricted", () => {
+    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.NVDA", { shortSellRestricted: true })));
+      linkGroups.focus("green", "US.NVDA");
+    });
+    expect(screen.getByText("NVDA**")).toBeTruthy();
+    act(() => stockDetail.apply(detailSnap(detailPayload("US.NVDA", { shortSellRestricted: false }))));
+    expect(screen.getByText("NVDA")).toBeTruthy();
+    expect(screen.queryByText("NVDA**")).toBeNull();
+  });
+
   it("defaults to a single collapsed row (name · industry · Flt · EMA200) with no price/change and no grid", () => {
     const { stockDetail, linkGroups } = renderPanel();
     act(() => {

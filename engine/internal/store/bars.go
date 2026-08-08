@@ -15,6 +15,7 @@ const (
 	bars1mSelectSQL        = `SELECT ts, o, h, l, c, v FROM bars_1m WHERE symbol=? AND ts>=? AND ts<=? ORDER BY ts`
 	recentBars1mSelectSQL  = `SELECT ts, o, h, l, c, v FROM bars_1m WHERE symbol=? ORDER BY ts DESC LIMIT ?`
 	recentBars10sSelectSQL = `SELECT ts, o, h, l, c, v FROM bars_10s WHERE symbol=? ORDER BY ts DESC LIMIT ?`
+	recentDailySelectSQL   = `SELECT ts, o, h, l, c, v FROM bars_daily WHERE symbol=? ORDER BY ts DESC LIMIT ?`
 	dailySelectSQL         = `SELECT ts, o, h, l, c, v FROM bars_daily WHERE symbol=? ORDER BY ts`
 )
 
@@ -97,6 +98,13 @@ func (s *Store) ReadRecentBars1m(symbol string, limit int) ([]feed.Bar, error) {
 
 func (s *Store) ReadRecentBars10s(symbol string, limit int) ([]feed.Bar, error) {
 	return s.readRecentBars(recentBars10sSelectSQL, symbol, limit)
+}
+
+// ReadRecentDailyBars returns at most limit newest daily bars, ascending.
+// SSR carryover only needs the most recent completed sessions, so this avoids
+// scanning the full multi-year daily archive on every lookup.
+func (s *Store) ReadRecentDailyBars(symbol string, limit int) ([]feed.Bar, error) {
+	return s.readRecentBars(recentDailySelectSQL, symbol, limit)
 }
 
 func (s *Store) readRecentBars(query, symbol string, limit int) ([]feed.Bar, error) {

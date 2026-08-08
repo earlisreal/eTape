@@ -53,13 +53,18 @@ type demandFeed interface {
 	Release(id string)
 }
 
+type shortSellRestrictionResolver interface {
+	IsRestricted(symbol string, now time.Time, dayLow, priorClose float64) bool
+}
+
 // rankItem is the poller-internal normalized form of one rank row (decoupled
 // from the pb type so the transform is unit-testable without protobuf).
 type rankItem struct {
-	Symbol    string
-	ChangePct float64
-	Last      float64
-	Volume    int64
+	Symbol              string
+	ChangePct           float64
+	Last                float64
+	Volume              int64
+	ShortSellRestricted bool
 }
 
 // floatEntry is a resolved float-cache entry. bad = definitively unresolvable
@@ -93,11 +98,16 @@ type Poller struct {
 	lastPhase             session.Phase
 	phaseSet              bool
 	resetBoard            bool
+	ssr                   shortSellRestrictionResolver
 }
 
-func New(cfg config.Scan, r requester, pub Publisher, clk clock.Clock, feed demandFeed, backfill func(string)) *Poller {
+func New(cfg config.Scan, r requester, pub Publisher, clk clock.Clock, feed demandFeed, backfill func(string), ssr ...shortSellRestrictionResolver) *Poller {
 	filters := Defaults(cfg)
-	return &Poller{cfg: cfg, r: r, pub: pub, clk: clk, feed: feed, backfill: backfill, pool: NewPool(),
+	var resolver shortSellRestrictionResolver
+	if len(ssr) > 0 {
+		resolver = ssr[0]
+	}
+	return &Poller{cfg: cfg, r: r, pub: pub, clk: clk, feed: feed, backfill: backfill, ssr: resolver, pool: NewPool(),
 		floats: map[string]floatEntry{}, otc: map[string]bool{}, seen: map[string]map[string]bool{}, filters: filters, baseline: true, poke: make(chan struct{}, 1)}
 }
 
@@ -400,7 +410,8 @@ func rankRowsFiltered(items []rankItem, floats map[string]floatEntry, f wsmsg.Sc
 		}
 		cp, lp := it.ChangePct, it.Last
 		out = append(out, wsmsg.ScannerRow{
-			Symbol: it.Symbol, ChangePct: &cp, Last: &lp, FloatShares: floatPtr, Volume: it.Volume,
+			Symbol: it.Symbol, ShortSellRestricted: it.ShortSellRestricted,
+			ChangePct: &cp, Last: &lp, FloatShares: floatPtr, Volume: it.Volume,
 		})
 	}
 	return out
@@ -853,6 +864,9 @@ func (p *Poller) snapshotBatch(ctx context.Context, phase session.Phase, syms []
 					it.ChangePct = extended.GetChangeRate()
 					it.Volume = extended.GetVolume()
 				}
+			}
+			if p.ssr != nil {
+				it.ShortSellRestricted = p.ssr.IsRestricted(sym, p.clk.Now(), basic.GetLowPrice(), basic.GetLastClosePrice())
 			}
 			items[sym] = it
 		}

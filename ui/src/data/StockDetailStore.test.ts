@@ -4,6 +4,7 @@ import type { StockDetailPayload, SnapshotMsg, DeltaMsg } from "../wire/contract
 
 const payload = (symbol: string, overrides: Partial<StockDetailPayload> = {}): StockDetailPayload => ({
   symbol,
+  shortSellRestricted: false,
   name: `${symbol} Inc`,
   industry: "Tech",
   exchange: "NASDAQ",
@@ -68,5 +69,29 @@ describe("StockDetailStore", () => {
   it("detailFor returns undefined for a symbol never seen", () => {
     const s = new StockDetailStore();
     expect(s.detailFor("US.TSLA")).toBeUndefined();
+  });
+
+  it("only notifies an SSR listener for that symbol when the boolean changes", () => {
+    const s = new StockDetailStore();
+    let calls = 0;
+    s.subscribeShortSellRestricted("US.NVDA", () => { calls++; });
+
+    s.apply(delta(payload("US.AAPL")));
+    expect(calls).toBe(0);
+    s.apply(delta(payload("US.NVDA", { price: 11 })));
+    expect(calls).toBe(0);
+    s.apply(delta(payload("US.NVDA", { shortSellRestricted: true })));
+    expect(calls).toBe(1);
+    s.apply(delta(payload("US.NVDA", { shortSellRestricted: false })));
+    expect(calls).toBe(2);
+  });
+
+  it("does not notify after an SSR listener is unsubscribed", () => {
+    const s = new StockDetailStore();
+    let calls = 0;
+    const off = s.subscribeShortSellRestricted("US.NVDA", () => { calls++; });
+    off();
+    s.apply(delta(payload("US.NVDA", { shortSellRestricted: true })));
+    expect(calls).toBe(0);
   });
 });

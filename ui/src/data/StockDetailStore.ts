@@ -14,16 +14,40 @@ interface StockDetailState { bySymbol: Record<string, StockDetailPayload> }
 // map on snapshot would wipe out every other symbol's already-known data
 // every time a new symbol's snapshot frame arrives.
 export class StockDetailStore extends ReactStore<StockDetailState> {
+  private readonly ssrSubs = new Map<string, Set<() => void>>();
+
   constructor() { super({ bySymbol: {} }); }
 
   apply(m: SnapshotMsg | DeltaMsg): void {
     const payload = this.asPayload(m.payload);
     if (!payload) return;
+    const previous = this.shortSellRestrictedFor(payload.symbol);
+    const next = payload.shortSellRestricted === true;
     this.set({ bySymbol: { ...this.getSnapshot().bySymbol, [payload.symbol]: payload } });
+    if (previous !== next) {
+      this.ssrSubs.get(payload.symbol)?.forEach((cb) => cb());
+    }
   }
 
   detailFor(symbol: string): StockDetailPayload | undefined {
     return this.getSnapshot().bySymbol[symbol];
+  }
+
+  shortSellRestrictedFor(symbol: string): boolean {
+    return this.detailFor(symbol)?.shortSellRestricted === true;
+  }
+
+  subscribeShortSellRestricted(symbol: string, cb: () => void): () => void {
+    let listeners = this.ssrSubs.get(symbol);
+    if (!listeners) {
+      listeners = new Set();
+      this.ssrSubs.set(symbol, listeners);
+    }
+    listeners.add(cb);
+    return () => {
+      listeners!.delete(cb);
+      if (listeners!.size === 0) this.ssrSubs.delete(symbol);
+    };
   }
 
   // Guards against a malformed/null payload (defensive — the engine never

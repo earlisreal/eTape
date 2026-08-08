@@ -141,6 +141,21 @@ func TestArchiveDailyReadAll(t *testing.T) {
 	}
 }
 
+func TestReadRecentDailyBarsLimitsAndReturnsAscending(t *testing.T) {
+	s := open(t)
+	for i := int64(1); i <= 5; i++ {
+		s.ArchiveDaily(feed.Bar{Symbol: "US.AAPL", BucketMs: i * 1000, C: float64(i)})
+	}
+	s.Flush()
+	got, err := s.ReadRecentDailyBars("US.AAPL", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0].BucketMs != 3000 || got[1].BucketMs != 4000 || got[2].BucketMs != 5000 {
+		t.Fatalf("recent daily bars = %+v, want newest three ascending", got)
+	}
+}
+
 func TestArchiveRangeWritesBarsAndCoverageAtomically(t *testing.T) {
 	s := open(t)
 	bars := []feed.Bar{

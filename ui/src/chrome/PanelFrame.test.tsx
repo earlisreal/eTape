@@ -12,7 +12,7 @@ import { PanelFrame } from "./PanelFrame";
 import { PANELS } from "./panels/registry";
 import { PanelHeaderSlotContext, PanelHeaderActionsSlotContext } from "./panels/headerSlot";
 import type { PanelConfig } from "./workspace";
-import type { AckMsg } from "../wire/contract";
+import type { AckMsg, SnapshotMsg } from "../wire/contract";
 
 // jsdom has no ResizeObserver; PanelFrame's host-size wiring only needs observe/disconnect.
 class MockResizeObserver {
@@ -117,8 +117,12 @@ function renderFrame(opts: { panelId?: string; group?: PanelConfig["group"]; set
       </ToastProvider>
     </ThemeProvider>,
   );
-  return { container, unmount, onConfigChange, onGroupChange, onClose, api, linkGroups, demandRegistry };
+  return { container, unmount, onConfigChange, onGroupChange, onClose, api, linkGroups, demandRegistry, stores };
 }
+
+const detailMsg = (symbol: string, shortSellRestricted: boolean): SnapshotMsg => ({
+  kind: "snapshot", topic: "stock.detail", payload: { symbol, shortSellRestricted },
+});
 
 // Fires a real DOM keydown on `document` — the same target PanelFrame's
 // type-to-load listener is registered on (document, capture phase; see the
@@ -175,6 +179,25 @@ describe("PanelFrame", () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it("renders a restricted focused symbol with the display-only SSR marker", () => {
+    const { stores, linkGroups } = renderFrame({ group: "green" });
+    act(() => {
+      stores.stockDetail.apply(detailMsg("US.NVDA", true));
+      linkGroups.focus("green", "US.NVDA");
+    });
+    expect(screen.getByTestId("panel-symbol").textContent).toBe("NVDA**");
+  });
+
+  it("keeps the header unrestricted when the derived flag is false and ignores unrelated symbols", () => {
+    const { stores, linkGroups } = renderFrame({ group: "green" });
+    act(() => {
+      stores.stockDetail.apply(detailMsg("US.NVDA", false));
+      linkGroups.focus("green", "US.NVDA");
+      stores.stockDetail.apply(detailMsg("US.AAPL", true));
+    });
+    expect(screen.getByTestId("panel-symbol").textContent).toBe("NVDA");
+  });
+
   // Task 4: close button uses HoverButton's default overlay (var(--surface)/var(--text)).
   it("hovering the close button applies the default surface/text overlay", () => {
     renderFrame();
@@ -220,6 +243,18 @@ describe("PanelFrame — type-to-load (Task 13)", () => {
     renderFrame({ api, group: null, settings: { symbol: "US.AAPL" } });
     typeKey("n"); typeKey("v"); typeKey("d"); typeKey("a");
     expect(screen.getByTestId("panel-symbol").textContent).toContain("NVDA");
+  });
+
+  it("never carries the SSR marker into a type-to-load draft", () => {
+    const api = fakePanelApi(true);
+    const { stores, linkGroups } = renderFrame({ api, group: "green" });
+    act(() => {
+      stores.stockDetail.apply(detailMsg("US.NVDA", true));
+      linkGroups.focus("green", "US.NVDA");
+    });
+    expect(screen.getByTestId("panel-symbol").textContent).toBe("NVDA**");
+    typeKey("t"); typeKey("s"); typeKey("l"); typeKey("a");
+    expect(screen.getByTestId("panel-symbol").textContent).toBe("TSLA▌");
   });
 
   it("Enter on a grouped panel commits via linkGroups.focusChecked using the normalized symbol, and the group follows on accept", async () => {

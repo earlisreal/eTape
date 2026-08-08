@@ -155,11 +155,12 @@ type ExecStatus struct {
 // ---- scanner / news / health payloads ----
 
 type ScannerRow struct {
-	Symbol      string   `json:"symbol"`
-	ChangePct   *float64 `json:"changePct" tstype:"number | null,required"`   // null = no print yet
-	Last        *float64 `json:"last" tstype:"number | null,required"`        // null = no print yet
-	FloatShares *float64 `json:"floatShares" tstype:"number | null,required"` // ACTUAL shares (engine converts moomoo thousands); null = unknown
-	Volume      int64    `json:"volume"`                                      // 0 is legitimate
+	Symbol              string   `json:"symbol"`
+	ShortSellRestricted bool     `json:"shortSellRestricted"`
+	ChangePct           *float64 `json:"changePct" tstype:"number | null,required"`   // null = no print yet
+	Last                *float64 `json:"last" tstype:"number | null,required"`        // null = no print yet
+	FloatShares         *float64 `json:"floatShares" tstype:"number | null,required"` // ACTUAL shares (engine converts moomoo thousands); null = unknown
+	Volume              int64    `json:"volume"`                                      // 0 is legitimate
 }
 
 type ScannerRankPayload struct {
@@ -220,29 +221,30 @@ type WatchlistRemoveArgs struct {
 // informational only: false means Alpaca explicitly reported false, while
 // null means no Alpaca source, an unavailable field, or a failed request.
 type StockDetailPayload struct {
-	Symbol            string   `json:"symbol"`
-	Name              string   `json:"name"`
-	Industry          string   `json:"industry"`
-	Exchange          string   `json:"exchange"` // NASDAQ/NYSE/AMEX/OTC via moomoo ExchType; "" = unresolved/unknown
-	Price             *float64 `json:"price" tstype:"number | null,required"`
-	LastClose         *float64 `json:"lastClose" tstype:"number | null,required"`
-	ChangePct         *float64 `json:"changePct" tstype:"number | null,required"`
-	MarketCap         *float64 `json:"marketCap" tstype:"number | null,required"`         // moomoo IssuedMarketVal
-	FloatMarketCap    *float64 `json:"floatMarketCap" tstype:"number | null,required"`    // moomoo OutstandingMarketVal
-	SharesOutstanding *float64 `json:"sharesOutstanding" tstype:"number | null,required"` // moomoo IssuedShares, raw share count
-	FloatShares       *float64 `json:"floatShares" tstype:"number | null,required"`       // moomoo OutstandingShares, raw share count
-	Pe                *float64 `json:"pe" tstype:"number | null,required"`                // moomoo PeRate
-	PeTTM             *float64 `json:"peTTM" tstype:"number | null,required"`             // moomoo PeTTMRate
-	Eps               *float64 `json:"eps" tstype:"number | null,required"`               // moomoo EarningsPershare
-	High52            *float64 `json:"high52" tstype:"number | null,required"`
-	Low52             *float64 `json:"low52" tstype:"number | null,required"`
-	Ema200            *float64 `json:"ema200" tstype:"number | null,required"`       // 200-day EMA of daily closes; nil until 200 daily bars are backfilled
-	Volume            int64    `json:"volume"`                                       // 0 is legitimate
-	BorrowStatus      *string  `json:"borrowStatus" tstype:"string | null,required"` // informational; HTB still needs a future locate workflow
-	Shortable         *bool    `json:"shortable" tstype:"boolean | null,required"`   // asset-level flag, not short-order authorization
-	Marginable        *bool    `json:"marginable" tstype:"boolean | null,required"`  // asset-level flag, not account margin authorization
-	Tradable          *bool    `json:"tradable" tstype:"boolean | null,required"`    // asset-level flag, not execution authorization
-	RefreshedAt       string   `json:"refreshedAt"`
+	Symbol              string   `json:"symbol"`
+	Name                string   `json:"name"`
+	Industry            string   `json:"industry"`
+	Exchange            string   `json:"exchange"` // NASDAQ/NYSE/AMEX/OTC via moomoo ExchType; "" = unresolved/unknown
+	Price               *float64 `json:"price" tstype:"number | null,required"`
+	LastClose           *float64 `json:"lastClose" tstype:"number | null,required"`
+	ChangePct           *float64 `json:"changePct" tstype:"number | null,required"`
+	MarketCap           *float64 `json:"marketCap" tstype:"number | null,required"`         // moomoo IssuedMarketVal
+	FloatMarketCap      *float64 `json:"floatMarketCap" tstype:"number | null,required"`    // moomoo OutstandingMarketVal
+	SharesOutstanding   *float64 `json:"sharesOutstanding" tstype:"number | null,required"` // moomoo IssuedShares, raw share count
+	FloatShares         *float64 `json:"floatShares" tstype:"number | null,required"`       // moomoo OutstandingShares, raw share count
+	Pe                  *float64 `json:"pe" tstype:"number | null,required"`                // moomoo PeRate
+	PeTTM               *float64 `json:"peTTM" tstype:"number | null,required"`             // moomoo PeTTMRate
+	Eps                 *float64 `json:"eps" tstype:"number | null,required"`               // moomoo EarningsPershare
+	High52              *float64 `json:"high52" tstype:"number | null,required"`
+	Low52               *float64 `json:"low52" tstype:"number | null,required"`
+	Ema200              *float64 `json:"ema200" tstype:"number | null,required"`       // 200-day EMA of daily closes; nil until 200 daily bars are backfilled
+	Volume              int64    `json:"volume"`                                       // 0 is legitimate
+	BorrowStatus        *string  `json:"borrowStatus" tstype:"string | null,required"` // informational; HTB still needs a future locate workflow
+	Shortable           *bool    `json:"shortable" tstype:"boolean | null,required"`   // asset-level flag, not short-order authorization
+	Marginable          *bool    `json:"marginable" tstype:"boolean | null,required"`  // asset-level flag, not account margin authorization
+	Tradable            *bool    `json:"tradable" tstype:"boolean | null,required"`    // asset-level flag, not execution authorization
+	ShortSellRestricted bool     `json:"shortSellRestricted"`
+	RefreshedAt         string   `json:"refreshedAt"`
 }
 
 type NewsItem struct {

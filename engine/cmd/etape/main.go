@@ -40,6 +40,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/scan"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/singleinstance"
+	"github.com/earlisreal/eTape/engine/internal/ssr"
 	"github.com/earlisreal/eTape/engine/internal/stockinfo"
 	"github.com/earlisreal/eTape/engine/internal/store"
 	"github.com/earlisreal/eTape/engine/internal/synth"
@@ -1028,7 +1029,8 @@ type demandFeeder interface {
 // requester answers Qot_GetSubInfo with the generic "no data" response
 // rather than a real subscription budget, so tracking it would be noise.
 func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, wl *watchlist.List, hasTZ bool, mmProbe rttProber, alpacaProbe rttProber, assetReader stockInfoAssetReader, backfillOne func(string), startQuota bool, scanWG *sync.WaitGroup) {
-	scanPoller := scan.New(cfg.Scan, r, hub, clk, demand, backfillOne)
+	ssrResolver := ssr.New(st)
+	scanPoller := scan.New(cfg.Scan, r, hub, clk, demand, backfillOne, ssrResolver)
 	if raw, ok, err := st.GetConfig("scanner.filters.v1"); err == nil && ok {
 		var saved wsmsg.ScannerFilters
 		if json.Unmarshal([]byte(raw), &saved) == nil && scan.ValidateFilters(saved) == nil {
@@ -1042,7 +1044,7 @@ func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, dem
 	go func() { defer scanWG.Done(); _ = scanPoller.Run(ctx) }()
 	go func() { _ = news.New(cfg.News, r, hub, clk, newsPlan).Run(ctx) }()
 	go func() {
-		_ = stockinfo.New(cfg.StockInfo, r, hub, clk, symbols, st, assetReader).Run(ctx)
+		_ = stockinfo.New(cfg.StockInfo, r, hub, clk, symbols, st, assetReader, ssrResolver).Run(ctx)
 	}()
 	if cfg.Watchlist.Enabled {
 		interval := time.Duration(cfg.Watchlist.PollMs) * time.Millisecond

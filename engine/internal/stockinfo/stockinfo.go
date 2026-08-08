@@ -74,6 +74,10 @@ type assetStatusReader interface {
 	AssetStatus(string) (AssetStatus, bool)
 }
 
+type shortSellRestrictionResolver interface {
+	IsRestricted(symbol string, now time.Time, dayLow, priorClose float64) bool
+}
+
 // ema200Entry is the once-per-day cache entry for a symbol's EMA-200: day is
 // the UTC calendar day (YYYY-MM-DD) it was computed on, val is nil when
 // fewer than ema200Period daily bars were available that day.
@@ -98,13 +102,18 @@ type Poller struct {
 	industry    map[string]string      // symbol -> resolved industry name; "" = known-absent
 	exch        map[string]string      // symbol -> resolved exchange label; "" = known-absent/unresolvable
 	ema         map[string]ema200Entry // symbol -> last-computed EMA-200, day-stamped
+	ssr         shortSellRestrictionResolver
 }
 
-func New(cfg config.StockInfo, r requester, pub Publisher, clk clock.Clock, symbols func() []string, bars dailyBarReader, assetReader assetStatusReader) *Poller {
+func New(cfg config.StockInfo, r requester, pub Publisher, clk clock.Clock, symbols func() []string, bars dailyBarReader, assetReader assetStatusReader, ssr ...shortSellRestrictionResolver) *Poller {
+	var resolver shortSellRestrictionResolver
+	if len(ssr) > 0 {
+		resolver = ssr[0]
+	}
 	return &Poller{
 		cfg: cfg, r: r, pub: pub, clk: clk, bars: bars, symbols: symbols,
-		assetReader: assetReader,
-		industry:    map[string]string{}, exch: map[string]string{}, ema: map[string]ema200Entry{},
+		assetReader: assetReader, ssr: resolver,
+		industry: map[string]string{}, exch: map[string]string{}, ema: map[string]ema200Entry{},
 	}
 }
 
@@ -133,7 +142,8 @@ func (p *Poller) fetchTick(ctx context.Context) {
 	if len(syms) == 0 {
 		return
 	}
-	refreshedAt := p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
+	now := p.clk.Now()
+	refreshedAt := now.UTC().Format("2006-01-02T15:04:05.000Z07:00")
 	snapshots := p.fetchSnapshots(ctx, syms)
 	p.resolveIndustries(ctx, syms)
 	p.resolveExchanges(ctx, syms)
@@ -145,6 +155,10 @@ func (p *Poller) fetchTick(ctx context.Context) {
 		payload := snapshotToPayload(snap.GetBasic(), snap.GetEquityExData(), p.industry[sym], refreshedAt)
 		payload.Symbol = sym
 		payload.Exchange = p.exch[sym]
+		if p.ssr != nil && payload.Exchange != "OTC" && snap.GetBasic() != nil {
+			basic := snap.GetBasic()
+			payload.ShortSellRestricted = p.ssr.IsRestricted(sym, now, basic.GetLowPrice(), basic.GetLastClosePrice())
+		}
 		payload.Ema200 = p.ema200For(sym)
 		if p.assetReader != nil {
 			if status, ok := p.assetReader.AssetStatus(sym); ok {

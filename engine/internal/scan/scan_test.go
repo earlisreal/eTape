@@ -15,6 +15,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
 	"github.com/earlisreal/eTape/engine/internal/session"
+	"github.com/earlisreal/eTape/engine/internal/ssr"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 
 	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
@@ -859,6 +860,33 @@ func TestSnapshotRefreshUsesActiveSessionData(t *testing.T) {
 				t.Fatalf("got %+v, want market values %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSnapshotRefreshEnrichesDerivedSSRWithoutChangingCanonicalSymbol(t *testing.T) {
+	fr := &fakeReq{snap: func([]string) (*snappb.Response, error) {
+		s := marketSnap("A", 1, 105, 100, 999)
+		s.Basic.LowPrice = proto.Float64(89)
+		return snapResp(s), nil
+	}}
+	clk := clock.NewFake(et(2026, 7, 8, 10, 0))
+	p := New(config.Scan{}, fr, &capturePub{}, clk, nil, nil, ssr.New(nil))
+	items := map[string]rankItem{"US.A": {Symbol: "US.A"}}
+	p.refreshSnapshots(context.Background(), session.RTH, items)
+
+	got := items["US.A"]
+	if got.Symbol != "US.A" {
+		t.Fatalf("snapshot enrichment changed canonical symbol: %+v", got)
+	}
+	if got.Last != 105 || !got.ShortSellRestricted {
+		t.Fatalf("SSR should use the crossed low while preserving recovered current price: %+v", got)
+	}
+	rows := rankRowsFiltered([]rankItem{got}, nil, wsmsg.ScannerFilters{Mode: "most_active"})
+	if len(rows) != 1 || !rows[0].ShortSellRestricted || rows[0].Symbol != "US.A" {
+		t.Fatalf("SSR did not reach ScannerRow: %+v", rows)
+	}
+	if fr.snapCalls != 1 {
+		t.Fatalf("SSR enrichment added a snapshot request: %d", fr.snapCalls)
 	}
 }
 
