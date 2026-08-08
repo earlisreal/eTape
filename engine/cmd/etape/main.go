@@ -366,14 +366,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		_ = st.Close()
 		return 1, false, nil
 	}
-	if a := firstAlpacaAdapter(vbs); a != nil {
-		count, err := a.LoadActiveAssets(ctx)
-		if err != nil {
-			log.Warn("alpaca active assets load failed", "err", err)
-		} else {
-			log.Info("alpaca active assets loaded", "count", count)
-		}
-	}
 	brokers := map[exec.VenueID]exec.Broker{}
 	venueIDs := make([]exec.VenueID, 0, len(vbs))
 	var brokerWG sync.WaitGroup
@@ -396,6 +388,23 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}
 	execDone := make(chan struct{})
 	go func() { defer close(execDone); _ = execCore.Run(ctx) }()
+
+	// Asset metadata is supplemental. Start its one-shot load after execution
+	// recovery so a slow Alpaca assets response cannot delay broker startup;
+	// wait for it immediately before Stock Info starts below.
+	type activeAssetsResult struct {
+		count int
+		err   error
+	}
+	var activeAssetsDone <-chan activeAssetsResult
+	if a := firstAlpacaAdapter(vbs); a != nil {
+		results := make(chan activeAssetsResult, 1)
+		activeAssetsDone = results
+		go func() {
+			count, err := a.LoadActiveAssets(ctx)
+			results <- activeAssetsResult{count: count, err: err}
+		}()
+	}
 
 	// --- uihub (listening BEFORE OpenD is dialed) ---
 	venueAdm := venueadmin.New(*cfgPath, creds.DefaultPath(), config.VenueConfig{Venues: cfg.Venues, Gate: cfg.Gate})
@@ -680,6 +689,14 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 				}
 			}()
 		})
+	}
+	if activeAssetsDone != nil {
+		result := <-activeAssetsDone
+		if result.err != nil {
+			log.Warn("alpaca active assets load failed", "err", result.err)
+		} else {
+			log.Info("alpaca active assets loaded", "count", result.count)
+		}
 	}
 	startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, firstAlpacaProber(vbs), firstAlpacaAssetReader(vbs), backfillOne, !*demo, &scanWG)
 

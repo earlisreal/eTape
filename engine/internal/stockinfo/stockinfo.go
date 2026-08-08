@@ -4,9 +4,8 @@
 // cap, float, PE, EPS, 52-week range), Qot_GetOwnerPlate (3207: industry/
 // sector plate lookup), and Qot_GetStaticInfo (3202: listing exchange) —
 // plus a locally-computed 200-day EMA from the daily bar archive. Alpaca asset
-// metadata is supplemental: each tick publishes Moomoo data immediately using
-// the most recent in-memory status, then refreshes active-symbol statuses in a
-// background pass for the next tick.
+// metadata is supplemental: boot loads one active-assets snapshot, and each
+// tick applies its in-memory status lookup while building the payload.
 //
 // Rate-limit note: one 3203 request per RefreshMs tick per MaxPerReq-sized
 // chunk of symbols (fundamentals refresh every tick, no caching); 3207 and
@@ -69,6 +68,8 @@ type AssetStatus struct {
 }
 
 // assetStatusReader is deliberately narrower than exec.Broker: Stock Info
+// needs only read-only metadata, and the bool reports whether the symbol is
+// present in the startup snapshot. The lookup performs no network I/O.
 type assetStatusReader interface {
 	AssetStatus(string) (AssetStatus, bool)
 }
