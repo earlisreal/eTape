@@ -9,11 +9,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/locates"
 )
 
 const (
@@ -53,13 +55,23 @@ func newRESTClient(base, keyID, secret string, clk clock.Clock) *restClient {
 // do takes one token from the shared pooled bucket, then issues a normal
 // request with Alpaca's key/secret headers.
 func (rc *restClient) do(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
+	return rc.doWithHeaders(ctx, method, path, body, nil)
+}
+
+// doWithHeaders is the same pooled/authenticated request path as do, with a
+// small escape hatch for endpoint-specific headers such as Idempotency-Key.
+func (rc *restClient) doWithHeaders(ctx context.Context, method, path string, body io.Reader, extra http.Header) (*http.Response, error) {
 	if err := rc.bucket.Take(ctx); err != nil {
 		return nil, err
 	}
-	return rc.doHTTP(ctx, method, path, body)
+	return rc.doHTTPWithHeaders(ctx, method, path, body, extra)
 }
 
 func (rc *restClient) doHTTP(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
+	return rc.doHTTPWithHeaders(ctx, method, path, body, nil)
+}
+
+func (rc *restClient) doHTTPWithHeaders(ctx context.Context, method, path string, body io.Reader, extra http.Header) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, rc.base+path, body)
 	if err != nil {
 		return nil, err
@@ -68,6 +80,11 @@ func (rc *restClient) doHTTP(ctx context.Context, method, path string, body io.R
 	req.Header.Set("APCA-API-SECRET-KEY", rc.secret)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
+	}
+	for key, values := range extra {
+		for _, value := range values {
+			req.Header.Add(key, value)
+		}
 	}
 	return rc.hc.Do(req)
 }
@@ -85,6 +102,44 @@ type assetResponse struct {
 	Shortable    *bool   `json:"shortable"`
 	Marginable   *bool   `json:"marginable"`
 	Tradable     *bool   `json:"tradable"`
+}
+
+type locateQuoteResponse struct {
+	Quotes []locateQuoteWire      `json:"quotes"`
+	Errors []locateQuoteErrorWire `json:"errors"`
+}
+
+type locateQuoteWire struct {
+	Symbol       string `json:"symbol"`
+	AvailableQty int64  `json:"available_qty"`
+	Price        string `json:"price"`
+	QuotedAt     string `json:"quoted_at"`
+}
+
+type locateQuoteErrorWire struct {
+	Symbol  string `json:"symbol"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type locateRecordWire struct {
+	ID           string `json:"id"`
+	Symbol       string `json:"symbol"`
+	Qty          int64  `json:"qty"`
+	RequestedQty int64  `json:"requested_qty"`
+	LimitPrice   string `json:"limit_price"`
+	AllOrNone    bool   `json:"all_or_none"`
+	Status       string `json:"status"`
+	CreatedAt    string `json:"created_at"`
+	LocatedQty   int64  `json:"located_qty"`
+	LocatedPrice string `json:"located_price"`
+	TotalFee     string `json:"total_fee"`
+	ExpiresAt    string `json:"expires_at"`
+}
+
+type locateListResponse struct {
+	Locates       []locateRecordWire `json:"locates"`
+	NextPageToken string             `json:"next_page_token"`
 }
 
 // apiError turns a >=400 HTTP response into a Go error. It tries to decode
@@ -125,6 +180,232 @@ func (rc *restClient) activeAssets(ctx context.Context) ([]assetResponse, error)
 		return nil, fmt.Errorf("alpaca: decode active assets response: %w", err)
 	}
 	return assets, nil
+}
+
+func (rc *restClient) locateQuotes(ctx context.Context, symbols []string) (locates.QuoteResult, error) {
+	normalized, err := normalizeLocateSymbols(symbols)
+	if err != nil {
+		return locates.QuoteResult{}, err
+	}
+	q := url.Values{}
+	q.Set("symbols", strings.Join(normalized, ","))
+	resp, err := rc.do(ctx, http.MethodGet, "/v1/locates/quotes?"+q.Encode(), nil)
+	if err != nil {
+		return locates.QuoteResult{}, fmt.Errorf("alpaca: locate quotes transport: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return locates.QuoteResult{}, fmt.Errorf("alpaca: read locate quotes response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return locates.QuoteResult{}, apiError(resp.StatusCode, body)
+	}
+	if err := requireLocateArrayField(body, "quotes", "quotes"); err != nil {
+		return locates.QuoteResult{}, err
+	}
+	var wire locateQuoteResponse
+	if err := json.Unmarshal(body, &wire); err != nil {
+		return locates.QuoteResult{}, fmt.Errorf("alpaca: decode locate quotes response: %w", err)
+	}
+	result := locates.QuoteResult{
+		Quotes: make([]locates.Quote, 0, len(wire.Quotes)),
+		Errors: make([]locates.QuoteError, 0, len(wire.Errors)),
+	}
+	for _, quote := range wire.Quotes {
+		if strings.TrimSpace(quote.Symbol) == "" || strings.TrimSpace(quote.Price) == "" {
+			return locates.QuoteResult{}, fmt.Errorf("alpaca: locate quote response missing symbol or price")
+		}
+		quotedAt, err := parseLocateTime(quote.QuotedAt, "quoted_at")
+		if err != nil {
+			return locates.QuoteResult{}, err
+		}
+		result.Quotes = append(result.Quotes, locates.Quote{
+			Symbol: locateDomainSymbol(quote.Symbol), AvailableQty: quote.AvailableQty,
+			Price: quote.Price, QuotedAt: quotedAt,
+		})
+	}
+	for _, item := range wire.Errors {
+		result.Errors = append(result.Errors, locates.QuoteError{Symbol: locateDomainSymbol(item.Symbol), Code: item.Code, Message: item.Message})
+	}
+	return result, nil
+}
+
+func (rc *restClient) createLocate(ctx context.Context, request locates.Request) (locates.Record, error) {
+	normalized, err := normalizeLocateSymbols([]string{request.Symbol})
+	if err != nil {
+		return locates.Record{}, err
+	}
+	request.Symbol = normalized[0]
+	request.LimitPrice = strings.TrimSpace(request.LimitPrice)
+	request.IdempotencyKey = strings.TrimSpace(request.IdempotencyKey)
+	if err := request.Validate(); err != nil {
+		return locates.Record{}, err
+	}
+	body, err := json.Marshal(struct {
+		Symbol     string `json:"symbol"`
+		Qty        int64  `json:"qty"`
+		LimitPrice string `json:"limit_price"`
+		AllOrNone  bool   `json:"all_or_none"`
+	}{
+		Symbol: request.Symbol, Qty: request.Qty, LimitPrice: request.LimitPrice, AllOrNone: request.AllOrNone,
+	})
+	if err != nil {
+		return locates.Record{}, fmt.Errorf("alpaca: marshal locate request: %w", err)
+	}
+	resp, err := rc.doWithHeaders(ctx, http.MethodPost, "/v1/locates", bytes.NewReader(body), http.Header{
+		"Idempotency-Key": []string{request.IdempotencyKey},
+	})
+	if err != nil {
+		return locates.Record{}, fmt.Errorf("alpaca: create locate transport: %w", err)
+	}
+	defer resp.Body.Close()
+	responseBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return locates.Record{}, fmt.Errorf("alpaca: read create locate response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return locates.Record{}, apiError(resp.StatusCode, responseBody)
+	}
+	var wire locateRecordWire
+	if err := json.Unmarshal(responseBody, &wire); err != nil {
+		return locates.Record{}, fmt.Errorf("alpaca: decode create locate response: %w", err)
+	}
+	return mapLocateRecord(wire)
+}
+
+func (rc *restClient) listLocates(ctx context.Context, filter locates.ListFilter) (locates.Page, error) {
+	if err := filter.Validate(); err != nil {
+		return locates.Page{}, err
+	}
+	q := url.Values{}
+	if filter.PageToken != "" {
+		q.Set("page_token", filter.PageToken)
+	}
+	if filter.Limit > 0 {
+		q.Set("limit", fmt.Sprintf("%d", filter.Limit))
+	}
+	if filter.Status != "" {
+		q.Set("status", filter.Status)
+	}
+	if filter.Symbol != "" {
+		normalized, err := normalizeLocateSymbols([]string{filter.Symbol})
+		if err != nil {
+			return locates.Page{}, err
+		}
+		q.Set("symbol", normalized[0])
+	}
+	if filter.Start != "" {
+		q.Set("start", filter.Start)
+	}
+	if filter.End != "" {
+		q.Set("end", filter.End)
+	}
+	path := "/v1/locates"
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	resp, err := rc.do(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return locates.Page{}, fmt.Errorf("alpaca: list locates transport: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return locates.Page{}, fmt.Errorf("alpaca: read locates response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return locates.Page{}, apiError(resp.StatusCode, body)
+	}
+	if err := requireLocateArrayField(body, "locates", "list"); err != nil {
+		return locates.Page{}, err
+	}
+	var wire locateListResponse
+	if err := json.Unmarshal(body, &wire); err != nil {
+		return locates.Page{}, fmt.Errorf("alpaca: decode locates response: %w", err)
+	}
+	page := locates.Page{Locates: make([]locates.Record, 0, len(wire.Locates)), NextPageToken: wire.NextPageToken}
+	for _, item := range wire.Locates {
+		record, err := mapLocateRecord(item)
+		if err != nil {
+			return locates.Page{}, err
+		}
+		page.Locates = append(page.Locates, record)
+	}
+	return page, nil
+}
+
+func (rc *restClient) getLocate(ctx context.Context, id string) (locates.Record, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return locates.Record{}, fmt.Errorf("alpaca: locate id is required")
+	}
+	resp, err := rc.do(ctx, http.MethodGet, "/v1/locates/"+url.PathEscape(id), nil)
+	if err != nil {
+		return locates.Record{}, fmt.Errorf("alpaca: get locate transport: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return locates.Record{}, fmt.Errorf("alpaca: read locate response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return locates.Record{}, apiError(resp.StatusCode, body)
+	}
+	var wire locateRecordWire
+	if err := json.Unmarshal(body, &wire); err != nil {
+		return locates.Record{}, fmt.Errorf("alpaca: decode locate response: %w", err)
+	}
+	return mapLocateRecord(wire)
+}
+
+func parseLocateTime(raw, field string) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	t, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("alpaca: invalid locate %s %q: %w", field, raw, err)
+	}
+	return t, nil
+}
+
+func requireLocateArrayField(body []byte, field, kind string) error {
+	var object map[string]json.RawMessage
+	if err := json.Unmarshal(body, &object); err != nil {
+		return fmt.Errorf("alpaca: decode locate %s response: %w", kind, err)
+	}
+	raw, ok := object[field]
+	trimmed := bytes.TrimSpace(raw)
+	if !ok || len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) || trimmed[0] != '[' {
+		return fmt.Errorf("alpaca: locate %s response missing array %q", kind, field)
+	}
+	return nil
+}
+
+func mapLocateRecord(wire locateRecordWire) (locates.Record, error) {
+	if wire.ID == "" {
+		return locates.Record{}, fmt.Errorf("alpaca: locate response missing id")
+	}
+	createdAt, err := parseLocateTime(wire.CreatedAt, "created_at")
+	if err != nil {
+		return locates.Record{}, err
+	}
+	expiresAt, err := parseLocateTime(wire.ExpiresAt, "expires_at")
+	if err != nil {
+		return locates.Record{}, err
+	}
+	requestedQty := wire.RequestedQty
+	if requestedQty == 0 {
+		requestedQty = wire.Qty
+	}
+	return locates.Record{
+		ID: wire.ID, Symbol: locateDomainSymbol(wire.Symbol), RequestedQty: requestedQty,
+		LimitPrice: wire.LimitPrice, AllOrNone: wire.AllOrNone, Status: wire.Status,
+		CreatedAt: createdAt, LocatedQty: wire.LocatedQty, LocatedPrice: wire.LocatedPrice,
+		TotalFee: wire.TotalFee, ExpiresAt: expiresAt,
+	}, nil
 }
 
 // submitOrder POSTs an order and returns Alpaca's broker-assigned order id.

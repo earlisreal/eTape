@@ -227,6 +227,53 @@ export interface ExecStatus {
   global: GlobalLimitsView;
   venues: VenueStatus[];
 }
+/**
+ * LocateEligibility is sourced from Alpaca's startup active-assets cache.
+ * A nil field means Alpaca did not provide that piece of metadata.
+ */
+export interface LocateEligibility {
+  supported: boolean;
+  found: boolean;
+  borrowStatus: string | null;
+  shortable: boolean | null;
+  marginable: boolean | null;
+  tradable: boolean | null;
+  error: string;
+}
+export interface LocateQuote {
+  symbol: string;
+  availableQty: number /* int64 */;
+  price: string;
+  quotedAt: string;
+}
+export interface LocateQuoteError {
+  symbol: string;
+  code: string;
+  message: string;
+}
+export interface LocateQuoteResult {
+  quotes: LocateQuote[];
+  errors: LocateQuoteError[];
+  error: string;
+}
+export interface LocateRecord {
+  id: string;
+  symbol: string;
+  requestedQty: number /* int64 */;
+  limitPrice: string;
+  allOrNone: boolean;
+  status: string;
+  createdAt: string;
+  locatedQty: number /* int64 */;
+  locatedPrice: string;
+  totalFee: string;
+  expiresAt: string;
+}
+export interface LocateListResult {
+  locates: LocateRecord[];
+  nextPageToken: string;
+  error: string;
+}
 export interface ScannerRow {
   symbol: string;
   shortSellRestricted: boolean;
@@ -431,6 +478,35 @@ export interface QueryFillsArgs {
   symbol: string;
   fromMs: number /* int64 */;
   toMs: number /* int64 */;
+}
+export interface QueryLocateEligibilityArgs {
+  venue: string;
+  symbol: string;
+}
+export interface QueryLocateQuotesArgs {
+  venue: string;
+  symbols: string[];
+}
+export interface QueryLocatesArgs {
+  venue: string;
+  status: string;
+  symbol: string;
+  start: string;
+  end: string;
+  limit: number /* int */;
+  pageToken: string;
+}
+export interface QueryLocateArgs {
+  venue: string;
+  locateId: string;
+}
+export interface RequestLocateArgs {
+  venue: string;
+  symbol: string;
+  qty: number /* int64 */;
+  limitPrice: string;
+  allOrNone: boolean;
+  idempotencyKey: string;
 }
 export interface QueryCycleFillsArgs {
   venue: string;

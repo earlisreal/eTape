@@ -15,6 +15,7 @@ import { WatchlistPanel } from "./WatchlistPanel";
 import { StockInfoPanel } from "./StockInfoPanel";
 import { AccountPanel } from "./AccountPanel";
 import { OrderTicketPanel } from "./OrderTicketPanel";
+import { LocatesPanel } from "./LocatesPanel";
 
 export interface PanelProps {
   config: PanelConfig;
@@ -150,6 +151,14 @@ export const PANELS: Record<string, PanelDef> = {
     symbolBearing: true,
     demand: "interest",
   },
+  "locates": {
+    component: LocatesPanel,
+    topics: ["exec.status"],
+    title: "Locates",
+    glyph: "L",
+    description: "Alpaca borrow availability and locates",
+    symbolBearing: true,
+  },
   "account": {
     component: AccountPanel,
     topics: ["exec.account", "exec.positions", "exec.orders", "exec.fills", "exec.trades", "exec.status", "md.quote"],
@@ -207,7 +216,7 @@ export const PANELS: Record<string, PanelDef> = {
 export const DEV_PANELS = new Set(["smoke-painter"]);
 export const isDevPanel = (panelId: string): boolean => DEV_PANELS.has(panelId);
 
-const CATALOG_ORDER = ["chart", "ladder", "tape", "scanner", "watchlist", "news",
+const CATALOG_ORDER = ["chart", "ladder", "tape", "scanner", "watchlist", "news", "locates",
   "account", "order-ticket", "connection-status"];
 // "account-bar", "positions", and (as of Task 8) "open-orders" all stay
 // registered in PANELS (above) as back-compat aliases for saved workspace docs,

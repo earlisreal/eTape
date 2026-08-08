@@ -29,6 +29,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/creds"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/locates"
 )
 
 // errResetBalanceUnsupported is returned by ResetBalance: a real Alpaca
@@ -160,6 +161,7 @@ type posBasisEntry struct {
 }
 
 var _ exec.Broker = (*Adapter)(nil)
+var _ locates.Provider = (*Adapter)(nil)
 
 // New builds an Alpaca Adapter. RESTBase/WSURL fall back to Alpaca's
 // documented paper/live endpoints (selected by Env; unset Env defaults to
@@ -301,6 +303,37 @@ func (a *Adapter) AssetStatus(symbol string) (AssetStatus, bool) {
 	status, ok := a.assetsBySymbol[symbol]
 	a.assetMu.RUnlock()
 	return status, ok
+}
+
+// LocateEligibility reads the startup active-assets cache only. It never
+// makes a per-symbol REST request.
+func (a *Adapter) LocateEligibility(symbol string) (locates.Eligibility, bool) {
+	status, ok := a.AssetStatus(symbol)
+	if !ok {
+		return locates.Eligibility{}, false
+	}
+	return locates.Eligibility{
+		BorrowStatus: status.BorrowStatus,
+		Shortable:    status.Shortable,
+		Marginable:   status.Marginable,
+		Tradable:     status.Tradable,
+	}, true
+}
+
+func (a *Adapter) QuoteLocates(ctx context.Context, symbols []string) (locates.QuoteResult, error) {
+	return a.rest.locateQuotes(ctx, symbols)
+}
+
+func (a *Adapter) CreateLocate(ctx context.Context, req locates.Request) (locates.Record, error) {
+	return a.rest.createLocate(ctx, req)
+}
+
+func (a *Adapter) ListLocates(ctx context.Context, filter locates.ListFilter) (locates.Page, error) {
+	return a.rest.listLocates(ctx, filter)
+}
+
+func (a *Adapter) GetLocate(ctx context.Context, id string) (locates.Record, error) {
+	return a.rest.getLocate(ctx, id)
 }
 
 // Capabilities reports Alpaca's native replace, native flatten-all, and

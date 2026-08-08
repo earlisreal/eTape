@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/backfill"
+	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
 	"github.com/earlisreal/eTape/engine/internal/buildinfo"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
@@ -367,6 +368,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		_ = st.Close()
 		return 1, false, nil
 	}
+	locateProviders := locateRegistry(vbs)
 	brokers := map[exec.VenueID]exec.Broker{}
 	venueIDs := make([]exec.VenueID, 0, len(vbs))
 	var brokerWG sync.WaitGroup
@@ -390,20 +392,37 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	execDone := make(chan struct{})
 	go func() { defer close(execDone); _ = execCore.Run(ctx) }()
 
-	// Asset metadata is supplemental. Start its one-shot load after execution
-	// recovery so a slow Alpaca assets response cannot delay broker startup;
-	// wait for it immediately before Stock Info starts below.
+	// Asset metadata is supplemental. Start one-shot loads for every Alpaca
+	// account after execution recovery so locate eligibility is venue-specific;
+	// wait for them immediately before Stock Info starts below.
 	type activeAssetsResult struct {
+		venue exec.VenueID
 		count int
 		err   error
 	}
-	var activeAssetsDone <-chan activeAssetsResult
-	if a := firstAlpacaAdapter(vbs); a != nil {
-		results := make(chan activeAssetsResult, 1)
+	var activeAssetsDone <-chan []activeAssetsResult
+	alpacaAdapters := make([]struct {
+		venue   exec.VenueID
+		adapter *alpaca.Adapter
+	}, 0)
+	for _, vb := range vbs {
+		if a, ok := vb.Broker.(*alpaca.Adapter); ok {
+			alpacaAdapters = append(alpacaAdapters, struct {
+				venue   exec.VenueID
+				adapter *alpaca.Adapter
+			}{venue: vb.ID, adapter: a})
+		}
+	}
+	if len(alpacaAdapters) > 0 {
+		results := make(chan []activeAssetsResult, 1)
 		activeAssetsDone = results
 		go func() {
-			count, err := a.LoadActiveAssets(ctx)
-			results <- activeAssetsResult{count: count, err: err}
+			out := make([]activeAssetsResult, 0, len(alpacaAdapters))
+			for _, item := range alpacaAdapters {
+				count, err := item.adapter.LoadActiveAssets(ctx)
+				out = append(out, activeAssetsResult{venue: item.venue, count: count, err: err})
+			}
+			results <- out
 		}()
 	}
 
@@ -420,7 +439,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500, TradesCap: 1000,
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
 		Demo: *demo,
-	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startDemo)
+	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startDemo, locateProviders)
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
 	httpSrv := &http.Server{
@@ -692,11 +711,12 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		})
 	}
 	if activeAssetsDone != nil {
-		result := <-activeAssetsDone
-		if result.err != nil {
-			log.Warn("alpaca active assets load failed", "err", result.err)
-		} else {
-			log.Info("alpaca active assets loaded", "count", result.count)
+		for _, result := range <-activeAssetsDone {
+			if result.err != nil {
+				log.Warn("alpaca active assets load failed", "venue", result.venue, "err", result.err)
+			} else {
+				log.Info("alpaca active assets loaded", "venue", result.venue, "count", result.count)
+			}
 		}
 	}
 	startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, firstAlpacaProber(vbs), firstAlpacaAssetReader(vbs), backfillOne, !*demo, &scanWG)

@@ -17,6 +17,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
 	getglobalstate "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/getglobalstate"
+	"github.com/earlisreal/eTape/engine/internal/locates"
 	"github.com/earlisreal/eTape/engine/internal/stockinfo"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
 	"google.golang.org/protobuf/proto"
@@ -183,6 +184,19 @@ func firstAlpacaAdapter(vbs []venueBroker) *alpaca.Adapter {
 		}
 	}
 	return nil
+}
+
+// locateRegistry preserves the exact Alpaca venue/account selected by the UI.
+// The concrete assertion is intentional: no other broker is allowed to become
+// a locate provider merely because it happens to grow compatible methods.
+func locateRegistry(vbs []venueBroker) *locates.Registry {
+	registry := locates.NewRegistry()
+	for _, vb := range vbs {
+		if a, ok := vb.Broker.(*alpaca.Adapter); ok {
+			registry.Register(vb.ID, a)
+		}
+	}
+	return registry
 }
 
 func firstAlpacaAssetReader(vbs []venueBroker) stockInfoAssetReader {

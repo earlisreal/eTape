@@ -82,6 +82,15 @@ describe("panel demand profiles", () => {
   });
 });
 
+describe("locates panel", () => {
+  it("is a symbol-bearing execution panel without market-data demand", () => {
+    expect(PANELS.locates.topics).toEqual(["exec.status"]);
+    expect(PANELS.locates.symbolBearing).toBe(true);
+    expect(PANELS.locates.demand).toBeUndefined();
+    expect(CATALOG.map((c) => c.panelId)).toContain("locates");
+  });
+});
+
 describe("ladder header actions", () => {
   it("provides a header slot for the DOM settings gear", () => {
     expect(PANELS.ladder.headerActions).toBe(true);

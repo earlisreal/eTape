@@ -1,6 +1,7 @@
 package alpaca
 
 import (
+	"strconv"
 	"testing"
 	"time"
 
@@ -29,6 +30,23 @@ func TestDomainSymbol_AddsUSPrefix(t *testing.T) {
 	}
 	if got := domainSymbol("BRK.B"); got != "US.BRK.B" {
 		t.Fatalf("domainSymbol(BRK.B) = %q, want US.BRK.B", got)
+	}
+}
+
+func TestNormalizeLocateSymbols(t *testing.T) {
+	got, err := normalizeLocateSymbols([]string{" us.aapl ", "AAPL", "US.BRK.B"})
+	if err != nil || len(got) != 2 || got[0] != "AAPL" || got[1] != "BRK.B" {
+		t.Fatalf("normalized symbols = %v, err=%v", got, err)
+	}
+	tooMany := make([]string, 101)
+	for i := range tooMany {
+		tooMany[i] = "SYM" + strconv.Itoa(i)
+	}
+	if _, err := normalizeLocateSymbols(tooMany); err == nil {
+		t.Fatal("more than 100 unique locate symbols must be rejected")
+	}
+	if _, err := normalizeLocateSymbols([]string{"HK.700"}); err == nil {
+		t.Fatal("non-US locate symbol must be rejected")
 	}
 }
 

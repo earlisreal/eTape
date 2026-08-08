@@ -376,6 +376,38 @@ func TestFirstAlpacaProberNilWithoutAlpaca(t *testing.T) {
 	}
 }
 
+func TestLocateRegistryRoutesEveryAlpacaVenueExactly(t *testing.T) {
+	cr := creds.File{
+		"paper-creds": {KeyID: "paper-key", SecretKey: "paper-secret"},
+		"live-creds":  {KeyID: "live-key", SecretKey: "live-secret"},
+	}
+	cfg := config.Config{Venues: []config.Venue{
+		{ID: "alpaca-paper", Broker: "alpaca", Credentials: "paper-creds", Env: "paper"},
+		{ID: "sim", Broker: "sim"},
+		{ID: "alpaca-live", Broker: "alpaca", Credentials: "live-creds", Env: "live"},
+	}}
+	vbs, err := buildBrokers(cfg, cr, clock.System{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	registry := locateRegistry(vbs)
+	byVenue := make(map[string]*alpaca.Adapter)
+	for _, vb := range vbs {
+		if a, ok := vb.Broker.(*alpaca.Adapter); ok {
+			byVenue[string(vb.ID)] = a
+		}
+	}
+	for _, venue := range []string{"alpaca-paper", "alpaca-live"} {
+		got, ok := registry.ProviderFor(exec.VenueID(venue))
+		if !ok || got != byVenue[venue] {
+			t.Fatalf("provider for %s = %T/%v, want its concrete adapter", venue, got, ok)
+		}
+	}
+	if _, ok := registry.ProviderFor("sim"); ok {
+		t.Fatal("sim must not be routed to a locate provider")
+	}
+}
+
 // TestResolveBackfillAlpacaCredsExplicitKeyWins verifies an explicit, resolvable
 // backfill.alpaca.creds_key is used as-is, even when a configured alpaca venue
 // (with different credentials) would also resolve — the explicit override

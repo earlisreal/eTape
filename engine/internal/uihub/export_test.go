@@ -23,13 +23,17 @@ func NewHubForTest(clk clock.Clock) (*Hub, *mirror) {
 }
 
 // NewCommandsForTest exposes newCommands to external test packages.
-func NewCommandsForTest(ex execDoer, c configStore, i indicatorCtl, d demandCtl, va venueAdmin, f func() Feed, vt venueTester) commandHandler {
-	return newCommands(ex, c, i, d, va, f, vt)
+func NewCommandsForTest(ex execDoer, c configStore, i indicatorCtl, d demandCtl, va venueAdmin, f func() Feed, vt venueTester, registries ...LocateRegistry) commandHandler {
+	return newCommands(ex, c, i, d, va, f, vt, registries...)
 }
 
 // NewQueriesForTest exposes newQueries to external test packages.
-func NewQueriesForTest(f fillsQuerier, clk clock.Clock) queryHandler {
-	return newQueries(f, clk)
+func NewQueriesForTest(f fillsQuerier, clk clock.Clock, registries ...LocateRegistry) queryHandler {
+	q := newQueries(f, clk)
+	if len(registries) > 0 {
+		q.locates = registries[0]
+	}
+	return q
 }
 
 // SpaHandlerForTest exposes spaHandler to external test packages so they can

@@ -11,6 +11,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/locates"
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
@@ -1288,5 +1289,152 @@ func TestSnapshot_AddsUSPrefixToPositionAndOrderSymbols(t *testing.T) {
 	}
 	if len(orders) != 1 || orders[0].Symbol != "US.AAPL" {
 		t.Fatalf("order symbol = %+v, want US.AAPL", orders)
+	}
+}
+
+func TestLocateQuotes_NormalizesSymbolsAndPreservesDecimalStrings(t *testing.T) {
+	var gotSymbols string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/locates/quotes", func(w http.ResponseWriter, r *http.Request) {
+		gotSymbols = r.URL.Query().Get("symbols")
+		if r.Header.Get("APCA-API-KEY-ID") != "K" || r.Header.Get("APCA-API-SECRET-KEY") != "S" {
+			t.Fatal("locate quote request missing Alpaca auth headers")
+		}
+		_, _ = w.Write([]byte(`{"quotes":[{"symbol":"AAPL","available_qty":1200,"price":"0.012300","quoted_at":"2026-07-06T13:30:00.123456Z"}],"errors":[{"symbol":"TSLA","code":"not_quotable","message":"no locate"}]}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	result, err := rc.locateQuotes(context.Background(), []string{"us.aapl", "AAPL", "US.TSLA"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotSymbols != "AAPL,TSLA" {
+		t.Fatalf("symbols query = %q, want AAPL,TSLA", gotSymbols)
+	}
+	if len(result.Quotes) != 1 || result.Quotes[0].Symbol != "US.AAPL" || result.Quotes[0].Price != "0.012300" {
+		t.Fatalf("quotes = %+v, want domain symbol and exact decimal string", result.Quotes)
+	}
+	if result.Quotes[0].QuotedAt.Nanosecond() != 123456000 {
+		t.Fatalf("quoted timestamp = %v, want nanosecond precision preserved", result.Quotes[0].QuotedAt)
+	}
+	if len(result.Errors) != 1 || result.Errors[0].Symbol != "US.TSLA" {
+		t.Fatalf("quote errors = %+v, want US.TSLA error", result.Errors)
+	}
+}
+
+func TestLocateREST_CreateListAndGet(t *testing.T) {
+	var body struct {
+		Symbol     string `json:"symbol"`
+		Qty        int64  `json:"qty"`
+		LimitPrice string `json:"limit_price"`
+		AllOrNone  bool   `json:"all_or_none"`
+	}
+	var idempotency string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/locates", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			idempotency = r.Header.Get("Idempotency-Key")
+			_, _ = w.Write([]byte(`{"id":"loc-7","symbol":"AAPL","requested_qty":500,"limit_price":"0.012300","all_or_none":true,"status":"active","created_at":"2026-07-06T13:30:00Z","located_qty":500,"located_price":"0.012300","total_fee":"6.150000","expires_at":"2026-07-07T13:30:00Z"}`))
+		case http.MethodGet:
+			q := r.URL.Query()
+			for key, want := range map[string]string{"page_token": "next", "limit": "25", "status": "active", "symbol": "AAPL", "start": "2026-07-01", "end": "2026-07-06"} {
+				if q.Get(key) != want {
+					t.Fatalf("query %s = %q, want %q", key, q.Get(key), want)
+				}
+			}
+			_, _ = w.Write([]byte(`{"locates":[{"id":"loc-7","symbol":"AAPL","qty":500,"limit_price":"0.012300","all_or_none":true,"status":"active","created_at":"2026-07-06T13:30:00Z","located_qty":500,"located_price":"0.012300","total_fee":"6.150000","expires_at":"2026-07-07T13:30:00Z"}],"next_page_token":"next-2"}`))
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+	mux.HandleFunc("/v1/locates/loc-7", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("get locate method = %s, want GET", r.Method)
+		}
+		_, _ = w.Write([]byte(`{"id":"loc-7","symbol":"AAPL","qty":500,"limit_price":"0.012300","all_or_none":true,"status":"active","created_at":"2026-07-06T13:30:00Z","located_qty":500,"located_price":"0.012300","total_fee":"6.150000","expires_at":"2026-07-07T13:30:00Z"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+
+	record, err := rc.createLocate(context.Background(), locates.Request{
+		Symbol: " us.aapl ", Qty: 500, LimitPrice: " 0.012300 ", AllOrNone: true, IdempotencyKey: " retry-key ",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if body.Symbol != "AAPL" || body.Qty != 500 || body.LimitPrice != "0.012300" || !body.AllOrNone || idempotency != "retry-key" {
+		t.Fatalf("create request = %+v idempotency=%q", body, idempotency)
+	}
+	if record.Symbol != "US.AAPL" || record.LimitPrice != "0.012300" || record.TotalFee != "6.150000" {
+		t.Fatalf("created record = %+v, want exact decimal values and domain symbol", record)
+	}
+
+	page, err := rc.listLocates(context.Background(), locates.ListFilter{Status: locates.StatusActive, Symbol: "US.AAPL", Start: "2026-07-01", End: "2026-07-06", Limit: 25, PageToken: "next"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.NextPageToken != "next-2" || len(page.Locates) != 1 || page.Locates[0].ID != "loc-7" {
+		t.Fatalf("locate page = %+v", page)
+	}
+	got, err := rc.getLocate(context.Background(), "loc-7")
+	if err != nil || got.ID != "loc-7" || got.Symbol != "US.AAPL" {
+		t.Fatalf("get locate = %+v, err=%v", got, err)
+	}
+}
+
+func TestLocateREST_HTTPErrorFailsClosed(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/locates/quotes", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write([]byte(`{"code":42210000,"message":"quote unavailable"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if _, err := rc.locateQuotes(context.Background(), []string{"US.AAPL"}); err == nil || !strings.Contains(err.Error(), "quote unavailable") {
+		t.Fatalf("expected structured locate error, got %v", err)
+	}
+}
+
+func TestLocateREST_MalformedEnvelopeAndInvalidCreateFailClosed(t *testing.T) {
+	var calls int
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/locates/quotes", func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{}`))
+	})
+	mux.HandleFunc("/v1/locates", func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		_, _ = w.Write([]byte(`{}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+	if _, err := rc.locateQuotes(context.Background(), []string{"US.AAPL"}); err == nil {
+		t.Fatal("malformed quote envelope must be an error")
+	}
+	if _, err := rc.listLocates(context.Background(), locates.ListFilter{Status: locates.StatusActive}); err == nil {
+		t.Fatal("malformed locate-list envelope must be an error")
+	}
+	before := calls
+	for _, request := range []locates.Request{
+		{Symbol: "US.AAPL", Qty: 50, LimitPrice: "0.01", IdempotencyKey: "k"},
+		{Symbol: "US.AAPL", Qty: 100, LimitPrice: "", IdempotencyKey: "k"},
+		{Symbol: "US.AAPL", Qty: 100, LimitPrice: "0.01", IdempotencyKey: ""},
+		{Symbol: "US.AAPL", Qty: 100, LimitPrice: "not-a-price", IdempotencyKey: "k"},
+	} {
+		if _, err := rc.createLocate(context.Background(), request); err == nil {
+			t.Fatalf("invalid request %+v was accepted", request)
+		}
+	}
+	if calls != before {
+		t.Fatalf("invalid create requests reached HTTP: calls before=%d after=%d", before, calls)
 	}
 }

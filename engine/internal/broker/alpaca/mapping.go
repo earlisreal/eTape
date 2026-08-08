@@ -21,6 +21,46 @@ func assetCacheKey(symbol string) string {
 	return strings.ToUpper(strings.TrimSpace(wireSymbol(symbol)))
 }
 
+func locateWireSymbol(symbol string) string {
+	symbol = strings.ToUpper(strings.TrimSpace(symbol))
+	return strings.TrimPrefix(symbol, "US.")
+}
+
+func locateDomainSymbol(symbol string) string {
+	symbol = locateWireSymbol(symbol)
+	if symbol == "" {
+		return ""
+	}
+	return "US." + symbol
+}
+
+func normalizeLocateSymbols(symbols []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(symbols))
+	out := make([]string, 0, len(symbols))
+	for _, raw := range symbols {
+		raw = strings.ToUpper(strings.TrimSpace(raw))
+		if strings.HasPrefix(raw, "HK.") {
+			return nil, fmt.Errorf("alpaca: locate symbols must be US symbols")
+		}
+		symbol := locateWireSymbol(raw)
+		if symbol == "" {
+			continue
+		}
+		if _, ok := seen[symbol]; ok {
+			continue
+		}
+		seen[symbol] = struct{}{}
+		out = append(out, symbol)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("alpaca: at least one locate symbol is required")
+	}
+	if len(out) > 100 {
+		return nil, fmt.Errorf("alpaca: locate quotes support at most 100 unique symbols")
+	}
+	return out, nil
+}
+
 // domainSymbol re-adds the "US." prefix to a bare ticker Alpaca's API
 // returns, so it matches the domain convention the rest of eTape keys
 // Order/Position/Fill.Symbol by. Alpaca is a US-only venue (CLAUDE.md), so

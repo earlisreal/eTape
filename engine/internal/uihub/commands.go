@@ -16,6 +16,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/config"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/locates"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
@@ -96,14 +97,19 @@ type commands struct {
 	feed        func() Feed
 	knownSymbol atomic.Pointer[knownSymbolBox]
 	tester      venueTester
+	locates     LocateRegistry
 	restart     func()
 	startDemo   func() error
 	wl          atomic.Pointer[watchlistBox]
 	scanner     atomic.Pointer[scannerBox]
 }
 
-func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, va venueAdmin, feed func() Feed, tester venueTester) *commands {
-	return &commands{ex: ex, cfg: cfg, ind: ind, dem: dem, va: va, feed: feed, tester: tester}
+func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, va venueAdmin, feed func() Feed, tester venueTester, locateRegistries ...LocateRegistry) *commands {
+	var locateRegistry LocateRegistry
+	if len(locateRegistries) > 0 {
+		locateRegistry = locateRegistries[0]
+	}
+	return &commands{ex: ex, cfg: cfg, ind: ind, dem: dem, va: va, feed: feed, tester: tester, locates: locateRegistry}
 }
 
 // watchlist loads the late-bound watchlistCtl (nil-safe: unset until
@@ -172,6 +178,39 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked("bad args"), false
 		}
 		return ackFromCmd(cd.ex.Do(exec.ResetBalance{Venue: exec.VenueID(a.Venue)})), false
+	case "RequestLocate":
+		var a wsmsg.RequestLocateArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return blocked("bad args"), false
+		}
+		if cd.locates == nil {
+			return blocked("locate unsupported for selected venue"), false
+		}
+		provider, ok := cd.locates.ProviderFor(exec.VenueID(a.Venue))
+		if !ok || provider == nil {
+			return blocked("locate unsupported for selected venue"), false
+		}
+		req := locates.Request{
+			Symbol: a.Symbol, Qty: a.Qty, LimitPrice: a.LimitPrice,
+			AllOrNone: a.AllOrNone, IdempotencyKey: a.IdempotencyKey,
+		}
+		if req.Qty <= 0 || req.Qty%100 != 0 {
+			return blocked("locate quantity must be a positive multiple of 100"), false
+		}
+		if strings.TrimSpace(req.LimitPrice) == "" {
+			return blocked("locate limit price is required"), false
+		}
+		if strings.TrimSpace(req.IdempotencyKey) == "" {
+			return blocked("locate idempotency key is required"), false
+		}
+		if err := req.Validate(); err != nil {
+			return blocked(err.Error()), false
+		}
+		record, err := provider.CreateLocate(ctx, req)
+		if err != nil {
+			return blocked(err.Error()), false
+		}
+		return wsmsg.AckMsg{Status: wsmsg.AckAccepted, Value: locateRecordToWire(record)}, false
 	case "KillSwitch":
 		var a wsmsg.KillSwitchArgs
 		_ = json.Unmarshal(args, &a) // empty ok => all venues

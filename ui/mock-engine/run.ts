@@ -22,6 +22,23 @@ const fixture = JSON.parse(
 const port = 8686;
 const isExec = name === "exec-session";
 let seq = 0;
+let locateSeq = 0;
+const mockLocates: Array<Record<string, unknown>> = [];
+const mockQuoteTime = "2026-01-02T15:30:00Z";
+
+function mockTotalFee(qty: number, raw: string): string {
+  const value = raw.trim();
+  const [whole, fraction = ""] = value.split(".");
+  if (!/^\d+$/.test(whole) || !/^\d*$/.test(fraction)) return "";
+  const digits = BigInt(`${whole}${fraction}`) * BigInt(qty);
+  let result = digits.toString().padStart(fraction.length + 1, "0");
+  if (fraction.length > 0) {
+    const point = result.length - fraction.length;
+    result = `${result.slice(0, point)}.${result.slice(point)}`;
+    result = result.replace(/0+$/, "").replace(/\.$/, "");
+  }
+  return result;
+}
 // Tracks master-arm state across commands so the account bar's ARMED toggle and
 // a disarmed SubmitOrder's gate-block are both observable in the dev app (the
 // exec-session fixture seeds masterArmed: true — see fixtures/exec-session.json).
@@ -50,6 +67,25 @@ startMockEngine({
     if (!isExec) { send({ kind: "ack", corrId: msg.corrId, status: "accepted" }); return; }
     if (msg.name === "Arm") { armed = true; send({ kind: "ack", corrId: msg.corrId, status: "accepted" }); send(execStatus()); return; }
     if (msg.name === "Disarm") { armed = false; send({ kind: "ack", corrId: msg.corrId, status: "accepted" }); send(execStatus()); return; }
+    if (msg.name === "RequestLocate") {
+      const a = msg.args as { symbol: string; qty: number; limitPrice: string; allOrNone: boolean };
+      const record = {
+        id: `LOC-mock-${++locateSeq}`,
+        symbol: a.symbol,
+        requestedQty: a.qty,
+        limitPrice: a.limitPrice,
+        allOrNone: a.allOrNone,
+        status: "active",
+        createdAt: mockQuoteTime,
+        locatedQty: a.qty,
+        locatedPrice: a.limitPrice,
+        totalFee: mockTotalFee(a.qty, a.limitPrice),
+        expiresAt: "2026-01-03T15:30:00Z",
+      };
+      mockLocates.unshift(record);
+      send({ kind: "ack", corrId: msg.corrId, status: "accepted", value: record });
+      return;
+    }
     if (msg.name === "SubmitOrder") {
       if (!armed) { send({ kind: "ack", corrId: msg.corrId, status: "blocked", reason: "Master arm is OFF." }); return; }
       const id = `ET-mock-${++seq}`;
@@ -74,6 +110,41 @@ startMockEngine({
     if (msg.name === "QueryFills") {
       const a = msg.args as { symbol: string };
       send({ kind: "result", corrId: msg.corrId, payload: [{ venue: "alpaca-paper", orderId: "ET-seed-0", symbol: a.symbol, side: "BUY", qty: 300, price: 3.40, tsMs: 0 }] });
+      return;
+    }
+    if (msg.name === "QueryLocateEligibility") {
+      const a = msg.args as { symbol: string };
+      const easy = a.symbol === "US.MSFT";
+      send({ kind: "result", corrId: msg.corrId, payload: {
+        supported: true,
+        found: true,
+        borrowStatus: easy ? "easy_to_borrow" : "hard_to_borrow",
+        shortable: true,
+        marginable: true,
+        tradable: true,
+        error: "",
+      } });
+      return;
+    }
+    if (msg.name === "QueryLocateQuotes") {
+      const a = msg.args as { symbols: string[] };
+      const symbol = a.symbols?.[0] ?? "";
+      send({ kind: "result", corrId: msg.corrId, payload: {
+        quotes: symbol ? [{ symbol, availableQty: 10000, price: "0.0123", quotedAt: mockQuoteTime }] : [],
+        errors: symbol ? [] : [{ symbol: "", code: "missing_symbol", message: "symbol is required" }],
+        error: "",
+      } });
+      return;
+    }
+    if (msg.name === "QueryLocates") {
+      const a = msg.args as { status: string; symbol: string };
+      const locates = mockLocates.filter((item) => item.status === a.status && (!a.symbol || item.symbol === a.symbol));
+      send({ kind: "result", corrId: msg.corrId, payload: { locates, nextPageToken: "", error: "" } });
+      return;
+    }
+    if (msg.name === "QueryLocate") {
+      const a = msg.args as { id: string };
+      send({ kind: "result", corrId: msg.corrId, payload: mockLocates.find((item) => item.id === a.id) ?? null });
       return;
     }
     send({ kind: "result", corrId: msg.corrId, payload: [] });

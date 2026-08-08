@@ -70,6 +70,7 @@ export default defineConfig({
           include: [
             'src/chrome/panels/LadderPanel.test.tsx',
             'src/chrome/panels/LadderSettingsDialog.test.tsx',
+            'src/chrome/panels/LocatesPanel.test.tsx',
             'src/chrome/panels/registry.test.tsx',
           ],
           pool: 'forks',

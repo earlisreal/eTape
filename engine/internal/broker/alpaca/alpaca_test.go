@@ -1093,3 +1093,32 @@ func TestVerifyCredentials_ReturnsPromptly_NoAdapterNoGoroutine(t *testing.T) {
 		t.Fatal("VerifyCredentials did not return promptly on a canceled context")
 	}
 }
+
+func TestAdapter_LocateEligibilityUsesStartupAssetCache(t *testing.T) {
+	var assetCalls atomic.Int32
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/assets", func(w http.ResponseWriter, _ *http.Request) {
+		assetCalls.Add(1)
+		_, _ = w.Write([]byte(`[{"symbol":"AAPL","borrow_status":"hard_to_borrow","shortable":true,"marginable":true,"tradable":true}]`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	a, err := New(Config{Venue: "alpaca-paper", RESTBase: srv.URL, Creds: creds.Pair{KeyID: "K", SecretKey: "S"}, Clock: clock.NewFake(time.UnixMilli(0))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.LoadActiveAssets(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	eligibility, found := a.LocateEligibility("US.AAPL")
+	if !found || eligibility.BorrowStatus == nil || *eligibility.BorrowStatus != "hard_to_borrow" || eligibility.Shortable == nil || !*eligibility.Shortable {
+		t.Fatalf("eligibility = %+v, found=%v", eligibility, found)
+	}
+	if _, found := a.LocateEligibility("US.UNKNOWN"); found {
+		t.Fatal("unknown symbol must remain unknown without a per-symbol REST lookup")
+	}
+	if got := assetCalls.Load(); got != 1 {
+		t.Fatalf("asset endpoint calls = %d, want only the startup snapshot call", got)
+	}
+}

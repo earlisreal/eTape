@@ -7,6 +7,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/feed"
+	"github.com/earlisreal/eTape/engine/internal/locates"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
@@ -32,6 +33,10 @@ type Feed interface {
 	Validate(ctx context.Context, symbol string) error
 	Ensure(d feed.Demand)
 	Release(id string)
+}
+
+type LocateRegistry interface {
+	ProviderFor(exec.VenueID) (locates.Provider, bool)
 }
 
 type GateLimits struct {
@@ -66,7 +71,7 @@ type Config struct {
 	Demo                           bool
 }
 
-func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va venueAdmin, vt venueTester, requestRestart func(), startDemo func() error) (*Hub, *Server) {
+func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va venueAdmin, vt venueTester, requestRestart func(), startDemo func() error, locateRegistries ...LocateRegistry) (*Hub, *Server) {
 	vms := make([]venueMeta, 0, len(cfg.Venues))
 	for _, v := range cfg.Venues {
 		vms = append(vms, venueMeta{
@@ -91,11 +96,16 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	m.boot = wsmsg.BootStatus{Phase: "connecting"}
 	h := NewHub(clk, HubConfig{MDInterval: cfg.MD, AccountInterval: cfg.Account, PositionInterval: cfg.Position, Buf: cfg.Buf}, m)
 	h.SetIndicators(ind)
-	cmd := newCommands(ex, st, h, h, va, h.feed, vt)
+	var locateRegistry LocateRegistry
+	if len(locateRegistries) > 0 {
+		locateRegistry = locateRegistries[0]
+	}
+	cmd := newCommands(ex, st, h, h, va, h.feed, vt, locateRegistry)
 	h.cmd = cmd
 	cmd.restart = requestRestart
 	cmd.startDemo = startDemo
 	qry := newQueries(st, clk, h)
+	qry.locates = locateRegistry
 	srv := NewServer(h, cmd, qry, ServerConfig{DistDir: cfg.DistDir, OutBuf: cfg.OutBuf})
 	return h, srv
 }

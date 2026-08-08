@@ -152,6 +152,57 @@ type ExecStatus struct {
 	Venues      []VenueStatus    `json:"venues"`
 }
 
+// LocateEligibility is sourced from Alpaca's startup active-assets cache.
+// A nil field means Alpaca did not provide that piece of metadata.
+type LocateEligibility struct {
+	Supported    bool    `json:"supported"`
+	Found        bool    `json:"found"`
+	BorrowStatus *string `json:"borrowStatus" tstype:"string | null,required"`
+	Shortable    *bool   `json:"shortable" tstype:"boolean | null,required"`
+	Marginable   *bool   `json:"marginable" tstype:"boolean | null,required"`
+	Tradable     *bool   `json:"tradable" tstype:"boolean | null,required"`
+	Error        string  `json:"error"`
+}
+
+type LocateQuote struct {
+	Symbol       string `json:"symbol"`
+	AvailableQty int64  `json:"availableQty"`
+	Price        string `json:"price"`
+	QuotedAt     string `json:"quotedAt"`
+}
+
+type LocateQuoteError struct {
+	Symbol  string `json:"symbol"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+}
+
+type LocateQuoteResult struct {
+	Quotes []LocateQuote      `json:"quotes"`
+	Errors []LocateQuoteError `json:"errors"`
+	Error  string             `json:"error"`
+}
+
+type LocateRecord struct {
+	ID           string `json:"id"`
+	Symbol       string `json:"symbol"`
+	RequestedQty int64  `json:"requestedQty"`
+	LimitPrice   string `json:"limitPrice"`
+	AllOrNone    bool   `json:"allOrNone"`
+	Status       string `json:"status"`
+	CreatedAt    string `json:"createdAt"`
+	LocatedQty   int64  `json:"locatedQty"`
+	LocatedPrice string `json:"locatedPrice"`
+	TotalFee     string `json:"totalFee"`
+	ExpiresAt    string `json:"expiresAt"`
+}
+
+type LocateListResult struct {
+	Locates       []LocateRecord `json:"locates"`
+	NextPageToken string         `json:"nextPageToken"`
+	Error         string         `json:"error"`
+}
+
 // ---- scanner / news / health payloads ----
 
 type ScannerRow struct {
@@ -370,6 +421,40 @@ type QueryFillsArgs struct {
 	Symbol string `json:"symbol"`
 	FromMs int64  `json:"fromMs"`
 	ToMs   int64  `json:"toMs"`
+}
+
+type QueryLocateEligibilityArgs struct {
+	Venue  string `json:"venue"`
+	Symbol string `json:"symbol"`
+}
+
+type QueryLocateQuotesArgs struct {
+	Venue   string   `json:"venue"`
+	Symbols []string `json:"symbols"`
+}
+
+type QueryLocatesArgs struct {
+	Venue     string `json:"venue"`
+	Status    string `json:"status"`
+	Symbol    string `json:"symbol"`
+	Start     string `json:"start"`
+	End       string `json:"end"`
+	Limit     int    `json:"limit"`
+	PageToken string `json:"pageToken"`
+}
+
+type QueryLocateArgs struct {
+	Venue    string `json:"venue"`
+	LocateID string `json:"locateId"`
+}
+
+type RequestLocateArgs struct {
+	Venue          string `json:"venue"`
+	Symbol         string `json:"symbol"`
+	Qty            int64  `json:"qty"`
+	LimitPrice     string `json:"limitPrice"`
+	AllOrNone      bool   `json:"allOrNone"`
+	IdempotencyKey string `json:"idempotencyKey"`
 }
 
 type QueryCycleFillsArgs struct {

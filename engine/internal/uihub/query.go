@@ -3,9 +3,12 @@ package uihub
 import (
 	"context"
 	"encoding/json"
+	"strings"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/locates"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
@@ -25,7 +28,8 @@ type queries struct {
 	charts interface {
 		QueryChartWindow(wsmsg.QueryChartWindowArgs) wsmsg.QueryChartWindowResult
 	}
-	clk clock.Clock
+	clk     clock.Clock
+	locates LocateRegistry
 }
 
 func newQueries(f fillsQuerier, clk clock.Clock, charts ...interface {
@@ -108,7 +112,120 @@ func (q *queries) handle(name string, args json.RawMessage) any {
 			return wsmsg.ExportFillsResult{}
 		}
 		return wsmsg.ExportFillsResult{CSV: csvStr, Count: len(rows)}
+	case "QueryLocateEligibility":
+		var a wsmsg.QueryLocateEligibilityArgs
+		if err := json.Unmarshal(args, &a); err != nil || a.Venue == "" || strings.TrimSpace(a.Symbol) == "" {
+			return wsmsg.LocateEligibility{Error: "bad args"}
+		}
+		provider, ok := q.provider(a.Venue)
+		if !ok {
+			return wsmsg.LocateEligibility{Error: "locate unsupported for selected venue"}
+		}
+		eligibility, found := provider.LocateEligibility(a.Symbol)
+		return locateEligibilityToWire(true, found, eligibility, "")
+	case "QueryLocateQuotes":
+		var a wsmsg.QueryLocateQuotesArgs
+		if err := json.Unmarshal(args, &a); err != nil || a.Venue == "" || len(a.Symbols) == 0 {
+			return wsmsg.LocateQuoteResult{Quotes: []wsmsg.LocateQuote{}, Errors: []wsmsg.LocateQuoteError{}, Error: "bad args"}
+		}
+		provider, ok := q.provider(a.Venue)
+		if !ok {
+			return wsmsg.LocateQuoteResult{Quotes: []wsmsg.LocateQuote{}, Errors: []wsmsg.LocateQuoteError{}, Error: "locate unsupported for selected venue"}
+		}
+		result, err := provider.QuoteLocates(context.Background(), a.Symbols)
+		if err != nil {
+			return wsmsg.LocateQuoteResult{Quotes: []wsmsg.LocateQuote{}, Errors: []wsmsg.LocateQuoteError{}, Error: err.Error()}
+		}
+		return locateQuoteResultToWire(result)
+	case "QueryLocates":
+		var a wsmsg.QueryLocatesArgs
+		if err := json.Unmarshal(args, &a); err != nil || a.Venue == "" {
+			return wsmsg.LocateListResult{Locates: []wsmsg.LocateRecord{}, Error: "bad args"}
+		}
+		provider, ok := q.provider(a.Venue)
+		if !ok {
+			return wsmsg.LocateListResult{Locates: []wsmsg.LocateRecord{}, Error: "locate unsupported for selected venue"}
+		}
+		page, err := provider.ListLocates(context.Background(), locates.ListFilter{
+			Status: a.Status, Symbol: a.Symbol, Start: a.Start, End: a.End,
+			Limit: a.Limit, PageToken: a.PageToken,
+		})
+		if err != nil {
+			return wsmsg.LocateListResult{Locates: []wsmsg.LocateRecord{}, Error: err.Error()}
+		}
+		return locatePageToWire(page)
+	case "QueryLocate":
+		var a wsmsg.QueryLocateArgs
+		if err := json.Unmarshal(args, &a); err != nil || a.Venue == "" || a.LocateID == "" {
+			return wsmsg.LocateRecord{}
+		}
+		provider, ok := q.provider(a.Venue)
+		if !ok {
+			return wsmsg.LocateRecord{}
+		}
+		record, err := provider.GetLocate(context.Background(), a.LocateID)
+		if err != nil {
+			return wsmsg.LocateRecord{}
+		}
+		return locateRecordToWire(record)
 	default:
 		return []any{}
 	}
+}
+
+func (q *queries) provider(venue string) (locates.Provider, bool) {
+	if q.locates == nil {
+		return nil, false
+	}
+	provider, ok := q.locates.ProviderFor(exec.VenueID(venue))
+	return provider, ok && provider != nil
+}
+
+func locateEligibilityToWire(supported, found bool, e locates.Eligibility, errText string) wsmsg.LocateEligibility {
+	return wsmsg.LocateEligibility{
+		Supported: supported, Found: found, BorrowStatus: e.BorrowStatus,
+		Shortable: e.Shortable, Marginable: e.Marginable, Tradable: e.Tradable,
+		Error: errText,
+	}
+}
+
+func locateQuoteResultToWire(result locates.QuoteResult) wsmsg.LocateQuoteResult {
+	out := wsmsg.LocateQuoteResult{
+		Quotes: make([]wsmsg.LocateQuote, 0, len(result.Quotes)),
+		Errors: make([]wsmsg.LocateQuoteError, 0, len(result.Errors)),
+	}
+	for _, quote := range result.Quotes {
+		out.Quotes = append(out.Quotes, wsmsg.LocateQuote{
+			Symbol: quote.Symbol, AvailableQty: quote.AvailableQty, Price: quote.Price,
+			QuotedAt: formatLocateTime(quote.QuotedAt),
+		})
+	}
+	for _, item := range result.Errors {
+		out.Errors = append(out.Errors, wsmsg.LocateQuoteError{Symbol: item.Symbol, Code: item.Code, Message: item.Message})
+	}
+	return out
+}
+
+func locateRecordToWire(record locates.Record) wsmsg.LocateRecord {
+	return wsmsg.LocateRecord{
+		ID: record.ID, Symbol: record.Symbol, RequestedQty: record.RequestedQty,
+		LimitPrice: record.LimitPrice, AllOrNone: record.AllOrNone, Status: record.Status,
+		CreatedAt: formatLocateTime(record.CreatedAt), LocatedQty: record.LocatedQty,
+		LocatedPrice: record.LocatedPrice, TotalFee: record.TotalFee, ExpiresAt: formatLocateTime(record.ExpiresAt),
+	}
+}
+
+func locatePageToWire(page locates.Page) wsmsg.LocateListResult {
+	out := wsmsg.LocateListResult{Locates: make([]wsmsg.LocateRecord, 0, len(page.Locates)), NextPageToken: page.NextPageToken}
+	for _, record := range page.Locates {
+		out.Locates = append(out.Locates, locateRecordToWire(record))
+	}
+	return out
+}
+
+func formatLocateTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339Nano)
 }
