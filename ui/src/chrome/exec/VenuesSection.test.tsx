@@ -276,7 +276,7 @@ describe("VenuesSection — Alpaca card (two independent slots)", () => {
     await waitFor(() => expect(commands.sent.some((s) => s.name === "SetVenueSetup")).toBe(true));
 
     const venues = (commands.sent.find((s) => s.name === "SetVenueSetup")!.args as { venues: Venue[] }).venues;
-    expect(venues.find((v) => v.id === "alpaca")?.broker).toBe("alpaca");
+    expect(venues.find((v) => v.id === "alpaca-paper")?.broker).toBe("alpaca");
     expect(venues.find((v) => v.id === "alpaca-live")?.broker).toBe("alpaca");
     const puts = commands.sent.filter((s) => s.name === "PutCredential").map((s) => s.args as { keyId: string });
     expect(puts.some((p) => p.keyId === "paper-id")).toBe(true);
@@ -594,7 +594,7 @@ describe("VenuesSection — save mechanics", () => {
     await waitFor(() => expect(commands.sent.some((s) => s.name === "SetVenueSetup")).toBe(true));
 
     const gate = (commands.sent.find((s) => s.name === "SetVenueSetup")!.args as { gate: Gate }).gate;
-    expect(gate.venue["alpaca"]).toEqual({ maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 });
+    expect(gate.venue["alpaca-paper"]).toEqual({ maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 });
   });
 
   it("collapses per-venue risk limits by default; the toggle reports how many caps are set", async () => {

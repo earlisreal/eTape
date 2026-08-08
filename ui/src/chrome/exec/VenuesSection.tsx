@@ -15,7 +15,7 @@
 // claimed as-is and never renamed; venues beyond the roster render read-only
 // in "Other venues" and are never mutated, so they round-trip through Save
 // byte-for-byte. New venues from a card action get canonical ids (moomoo,
-// alpaca, alpaca-live, tradezero, sim) — there is no more user-typed venue-id
+// alpaca-paper, alpaca-live, tradezero, sim) — there is no more user-typed venue-id
 // field anywhere in this form.
 //
 // Credentials model: ONE opaque key per venue (no more shared/named credential
@@ -466,7 +466,7 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
       });
       newCreds.push({ credName, keyId: typed.keyId, secret: typed.secret });
     };
-    if (slots.alpacaPaper === -1) materialize(PENDING_ALPACA_PAPER, "alpaca", "alpaca", "paper");
+    if (slots.alpacaPaper === -1) materialize(PENDING_ALPACA_PAPER, "alpaca-paper", "alpaca", "paper");
     if (slots.alpacaLive === -1) materialize(PENDING_ALPACA_LIVE, "alpaca-live", "alpaca", "live");
     if (slots.tradezero === -1) materialize(PENDING_TRADEZERO, "tradezero", "tradezero", "live");
     return { venues, newCreds };
