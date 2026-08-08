@@ -21,6 +21,15 @@ describe("LadderSettingsDialog", () => {
     expect(onApply).toHaveBeenCalledWith(60);
   });
 
+  it("defaults an empty value to 10 on Ok", () => {
+    const onApply = vi.fn();
+    render(<LadderSettingsDialog chrome={chrome} levels={35} onClose={() => {}} onApply={onApply} />);
+    fireEvent.change(screen.getByLabelText("depth levels"), { target: { value: "" } });
+    expect((screen.getByLabelText("depth levels") as HTMLInputElement).value).toBe("");
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+    expect(onApply).toHaveBeenCalledWith(10);
+  });
+
   it("resets Defaults to 10", () => {
     const onApply = vi.fn();
     render(<LadderSettingsDialog chrome={chrome} levels={35} onClose={() => {}} onApply={onApply} />);

@@ -9,8 +9,16 @@ import { browserRaf, type Surface } from "../../render/surface";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
 import type { AckMsg } from "../../wire/contract";
 
+const paintedLadders = vi.hoisted(() => ({ states: [] as unknown[] }));
+vi.mock("../../render/ladder/paintLadder", () => ({
+  paintLadder: (_ctx: unknown, state: unknown) => {
+    paintedLadders.states.push(state);
+  },
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
+  paintedLadders.states.length = 0;
   cleanup();
 });
 
@@ -26,14 +34,35 @@ function renderLadder(settings: Record<string, unknown> = { symbol: "US.AAPL" },
   });
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
   const config = { id: "t-ladder", panelId: "ladder", group: "green" as const, settings };
-  const utils = render(
+  const renderPanel = (panelHeight: number) => (
     <ThemeProvider>
-      <LadderPanel config={config} stores={stores} scheduler={scheduler} width={300} height={height}
+      <LadderPanel config={config} stores={stores} scheduler={scheduler} width={300} height={panelHeight}
         linkGroups={linkGroups} commands={{ sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })), sendQuery: vi.fn(async () => []) }}
         onConfigChange={onConfigChange} />
-    </ThemeProvider>,
+    </ThemeProvider>
   );
-  return { ...utils, stores, linkGroups, surface: () => surface!, off, onConfigChange };
+  const utils = render(renderPanel(height));
+  return { ...utils, stores, linkGroups, surface: () => surface!, off, onConfigChange,
+    resize: (panelHeight: number) => utils.rerender(renderPanel(panelHeight)) };
+}
+
+function applyDeepBook(stores: ReturnType<typeof makeStores>, symbol = "US.AAPL"): void {
+  const bids = Array.from({ length: 60 }, (_, i) => ({ price: 3.49 - i * 0.01, size: 100 }));
+  const asks = bids.map((row) => ({ ...row, price: 3.51 + (3.49 - row.price) }));
+  stores.book.apply({
+    kind: "snapshot", topic: "md.book",
+    payload: { symbol, bids, asks, ts: "t" },
+  });
+}
+
+function wheel(container: HTMLElement, deltaY: number): WheelEvent {
+  const event = new WheelEvent("wheel", { deltaY, cancelable: true });
+  container.querySelector("canvas")!.dispatchEvent(event);
+  return event;
+}
+
+function lastPaintedOffset(): number {
+  return (paintedLadders.states[paintedLadders.states.length - 1] as { rowOffset: number }).rowOffset;
 }
 
 describe("LadderPanel", () => {
@@ -47,16 +76,56 @@ describe("LadderPanel", () => {
 
   it("scrolls a deep book without allowing the page to scroll", () => {
     const { stores, surface, container } = renderLadder({ symbol: "US.AAPL", levels: 60 }, 256);
-    const rows = Array.from({ length: 60 }, (_, i) => ({ price: 3.49 - i * 0.01, size: 100 }));
-    stores.book.apply({
-      kind: "snapshot", topic: "md.book",
-      payload: { symbol: "US.AAPL", bids: rows, asks: rows.map((r) => ({ ...r, price: 3.51 + (3.49 - r.price) })), ts: "t" },
-    });
+    applyDeepBook(stores);
+    surface().paint();
     surface().isDirty();
-    const event = new WheelEvent("wheel", { deltaY: 220, cancelable: true });
-    container.querySelector("canvas")!.dispatchEvent(event);
+    const event = wheel(container, 220);
     expect(event.defaultPrevented).toBe(true);
     expect(surface().isDirty()).toBe(true);
+    surface().paint();
+    expect(lastPaintedOffset()).toBeGreaterThan(0);
+  });
+
+  it("resets the painted row offset when switching symbols after a deep scroll", () => {
+    const { stores, surface, linkGroups, container } = renderLadder({ symbol: "US.AAPL", levels: 60 }, 256);
+    applyDeepBook(stores, "US.AAPL");
+    surface().paint();
+    wheel(container, 660);
+    surface().paint();
+    expect(lastPaintedOffset()).toBeGreaterThan(0);
+
+    linkGroups.focus("green", "US.NVDA");
+    applyDeepBook(stores, "US.NVDA");
+    surface().paint();
+    expect(lastPaintedOffset()).toBe(0);
+  });
+
+  it("clamps the painted row offset when reducing configured depth", () => {
+    const { stores, surface, container } = renderLadder({ symbol: "US.AAPL", levels: 60 }, 256);
+    applyDeepBook(stores);
+    surface().paint();
+    wheel(container, 660);
+    surface().paint();
+    expect(lastPaintedOffset()).toBeGreaterThan(0);
+
+    fireEvent.click(screen.getByLabelText("ladder settings"));
+    fireEvent.change(screen.getByLabelText("depth levels"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+    surface().paint();
+    expect(lastPaintedOffset()).toBe(0);
+  });
+
+  it("clamps the painted row offset when enlarging the panel", () => {
+    const { stores, surface, container, resize } = renderLadder({ symbol: "US.AAPL", levels: 60 }, 256);
+    applyDeepBook(stores);
+    surface().paint();
+    wheel(container, 660);
+    surface().paint();
+    expect(lastPaintedOffset()).toBe(30);
+
+    resize(36 + 40 * 22);
+    surface().paint();
+    expect(lastPaintedOffset()).toBe(20);
   });
 
   it("does not create a scroll range when the configured rows fit", () => {

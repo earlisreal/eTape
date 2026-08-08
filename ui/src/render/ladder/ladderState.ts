@@ -62,7 +62,7 @@ export function depthFraction(value: number, max: number): number {
   return max <= 0 ? 0 : value / max;
 }
 
-/** Full-depth order book is a US LV3 entitlement (CLAUDE.md scope); every other market renders the no-depth state. */
+/** Depth rendering is currently enabled for U.S. symbols; every other market renders the no-depth state. */
 export function entitledForDepth(symbol: string): boolean {
   return symbol.startsWith("US.");
 }
