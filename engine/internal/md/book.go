@@ -6,8 +6,8 @@ type bookStore struct{ m map[string]feed.Book }
 
 func newBookStore() *bookStore { return &bookStore{m: make(map[string]feed.Book)} }
 
-// set replaces the symbol's book (full 10-level replace — cheaper than
-// diffing at this depth) and returns it for emission.
+// set replaces the symbol's full book (cheaper than diffing) and returns it for
+// emission.
 func (s *bookStore) set(b feed.Book) feed.Book {
 	s.m[b.Symbol] = b
 	return b

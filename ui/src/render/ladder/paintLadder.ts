@@ -4,11 +4,16 @@
 // rowIndex × LADDER_ROW_H, both sides share the same row index (best at top).
 import { FONTS } from "../palette";
 import { formatPrice, formatSize } from "../format";
-import { flashAlpha, type LadderPaintState, type LadderRow } from "./ladderState";
+import {
+  flashAlpha,
+  LADDER_HEADER_H,
+  LADDER_ROW_H,
+  LADDER_SPREAD_H,
+  type LadderPaintState,
+  type LadderRow,
+} from "./ladderState";
+export { LADDER_ROW_H } from "./ladderState";
 
-export const LADDER_ROW_H = 22;
-const SPREAD_H = 18;
-const HEADER_H = 18;
 const PAD = 8;
 const ORDER_EDGE = 3; // bronze inner-edge width for a working-order mark
 
@@ -35,15 +40,15 @@ export function paintLadder(ctx: CanvasRenderingContext2D, s: LadderPaintState):
   ctx.fillStyle = p.textMuted;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  if (s.spread !== null) ctx.fillText(spreadLabel(s), mid, SPREAD_H / 2);
+  if (s.spread !== null) ctx.fillText(spreadLabel(s), mid, LADDER_SPREAD_H / 2);
   ctx.strokeStyle = p.border;
   ctx.beginPath();
-  ctx.moveTo(0, SPREAD_H - 0.5);
-  ctx.lineTo(w, SPREAD_H - 0.5);
+  ctx.moveTo(0, LADDER_SPREAD_H - 0.5);
+  ctx.lineTo(w, LADDER_SPREAD_H - 0.5);
   ctx.stroke();
 
   // column header: SIZE | BID ‖ ASK | SIZE
-  const headY = SPREAD_H + HEADER_H / 2;
+  const headY = LADDER_SPREAD_H + LADDER_HEADER_H / 2;
   // FONTS.mono for ALL canvas text: the golden harness only registers IBM Plex
   // Mono, so any FONTS.sans text would render with a non-deterministic
   // node-canvas fallback and defeat the pixel goldens.
@@ -61,13 +66,21 @@ export function paintLadder(ctx: CanvasRenderingContext2D, s: LadderPaintState):
   // center divider — borderStrong per the palette's own field comment
   ctx.strokeStyle = p.borderStrong;
   ctx.beginPath();
-  ctx.moveTo(mid + 0.5, SPREAD_H);
+  ctx.moveTo(mid + 0.5, LADDER_SPREAD_H);
   ctx.lineTo(mid + 0.5, s.height);
   ctx.stroke();
 
-  const top = SPREAD_H + HEADER_H;
-  for (let i = 0; i < s.bids.length; i++) drawSide(ctx, s, s.bids[i], "bid", mid, top + i * LADDER_ROW_H);
-  for (let i = 0; i < s.asks.length; i++) drawSide(ctx, s, s.asks[i], "ask", mid, top + i * LADDER_ROW_H);
+  const top = LADDER_SPREAD_H + LADDER_HEADER_H;
+  for (let i = s.rowOffset; i < s.bids.length; i++) {
+    const y = top + (i - s.rowOffset) * LADDER_ROW_H;
+    if (y >= s.height) break;
+    drawSide(ctx, s, s.bids[i], "bid", mid, y);
+  }
+  for (let i = s.rowOffset; i < s.asks.length; i++) {
+    const y = top + (i - s.rowOffset) * LADDER_ROW_H;
+    if (y >= s.height) break;
+    drawSide(ctx, s, s.asks[i], "ask", mid, y);
+  }
 }
 
 function drawSide(

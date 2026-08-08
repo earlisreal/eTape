@@ -2,16 +2,34 @@
 // High-frequency data (book, ticks) never touches React state; the only React
 // here is the mount itself. Store dirtiness is observed via getRev() cursors
 // (BookStore/TapeRing are shared across panels — never consumeDirty()).
-import { useEffect, useRef } from "react";
+import { useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { PanelProps } from "./registry";
 import { useTheme } from "../ThemeProvider";
 import { applyCanvasSize } from "../../render/canvas";
-import { buildLadderState, flashAlpha, type LastTrade, type TradeFlash } from "../../render/ladder/ladderState";
+import { scrollAccumulate } from "../../render/scroll";
+import {
+  buildLadderState,
+  clampLadderOffset,
+  flashAlpha,
+  LADDER_ROW_H,
+  maxLadderOffset,
+  normalizeLadderLevels,
+  type LastTrade,
+  type TradeFlash,
+} from "../../render/ladder/ladderState";
 import { paintLadder } from "../../render/ladder/paintLadder";
+import { getTvChrome } from "../../render/chart/tvTheme";
+import { PanelHeaderActionsSlotContext } from "./headerSlot";
+import { IconGear } from "./tv/tvIcons";
+import { LadderSettingsDialog } from "./LadderSettingsDialog";
 
-export function LadderPanel({ config, stores, scheduler, width, height, linkGroups, group: groupProp }: PanelProps): JSX.Element {
+export function LadderPanel({ config, stores, scheduler, width, height, linkGroups, onConfigChange, group: groupProp }: PanelProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const { palette } = useTheme();
+  const { palette, mode } = useTheme();
+  const [levels, setLevels] = useState<number>(() => normalizeLadderLevels(config.settings.levels));
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const actionsSlot = useContext(PanelHeaderActionsSlotContext);
   // config.group is frozen (dockview never re-invokes this panel's factory with a
   // fresh config after creation); PanelFrame's live `group` prop is what actually
   // changes on a group re-pick — see registry.ts's PanelProps.group comment.
@@ -23,10 +41,14 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
   paletteRef.current = palette;
   const sizeRef = useRef({ width, height });
   sizeRef.current = { width, height };
+  const levelsRef = useRef(levels);
+  levelsRef.current = levels;
+  const scrollOffsetRef = useRef(0);
+  const scrollRemainderRef = useRef(0);
   const forceRef = useRef(0);
   useEffect(() => {
     forceRef.current++;
-  }, [width, height, palette]);
+  }, [width, height, palette, levels]);
 
   // groupRef/reseedForGroupRef bridge a later group re-pick into the mount
   // effect's own closure (which is [config.id]-only — the canvas must never
@@ -62,6 +84,8 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
       if (next !== symbol) {
         symbol = next;
         flash = null;
+        scrollOffsetRef.current = 0;
+        scrollRemainderRef.current = 0;
         // The new symbol has its own generation counter — refresh tapeGen here,
         // or the very next paint would compare the new symbol's generation
         // against the OLD symbol's stale value and misfire the reconnect branch.
@@ -74,6 +98,22 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
     const offLink = linkGroups.subscribe(reseedForGroup);
 
     const offExec = stores.exec.subscribe(() => { forceRef.current++; });
+
+    // Native non-passive listener: React attaches wheel passively at the root,
+    // which would ignore preventDefault and let the page/dock scroll.
+    const onWheel = (e: WheelEvent): void => {
+      e.preventDefault();
+      const acc = scrollAccumulate(scrollRemainderRef.current, e.deltaY, LADDER_ROW_H);
+      scrollRemainderRef.current = acc.remainder;
+      const book = stores.book.get(symbol);
+      const maxOffset = maxLadderOffset(book, levelsRef.current, sizeRef.current.height);
+      const nextOffset = clampLadderOffset(scrollOffsetRef.current + acc.rows, maxOffset);
+      if (nextOffset !== scrollOffsetRef.current) {
+        scrollOffsetRef.current = nextOffset;
+        forceRef.current++;
+      }
+    };
+    canvas.addEventListener("wheel", onWheel, { passive: false });
 
     let lastBookRev = -1;
     let lastTapeRev = -1;
@@ -111,10 +151,15 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
         tapeSeq = tip;
 
         const { width: w, height: h } = sizeRef.current;
+        const book = stores.book.get(symbol);
+        scrollOffsetRef.current = clampLadderOffset(
+          scrollOffsetRef.current,
+          maxLadderOffset(book, levelsRef.current, h),
+        );
         if (!applyCanvasSize(canvas, ctx, w, h, window.devicePixelRatio || 1)) return;
         paintLadder(ctx, buildLadderState({
           symbol,
-          book: stores.book.get(symbol),
+          book,
           orders: stores.exec.workingOrdersFor(symbol),
           flash,
           last,
@@ -122,6 +167,8 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
           width: w,
           height: h,
           palette: paletteRef.current,
+          levels: levelsRef.current,
+          rowOffset: scrollOffsetRef.current,
         }));
       },
     });
@@ -130,6 +177,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
       off();
       offLink();
       offExec();
+      canvas.removeEventListener("wheel", onWheel);
     };
   }, [config.id]);
 
@@ -143,5 +191,24 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
     }
   }, [group]);
 
-  return <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%" }} />;
+  const gearBtn = (
+    <button type="button" aria-label="ladder settings" onClick={() => setSettingsOpen(true)}
+      title={`${levels} levels`}
+      style={{ position: "relative", display: "inline-flex", border: "none", background: "transparent",
+        color: palette.textMuted, cursor: "pointer", padding: 3 }}>
+      <IconGear size={13} />
+    </button>
+  );
+
+  return (
+    <>
+      {actionsSlot === undefined ? gearBtn : actionsSlot ? createPortal(gearBtn, actionsSlot) : null}
+      <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%" }} />
+      {settingsOpen && (
+        <LadderSettingsDialog chrome={getTvChrome(mode)} levels={levels}
+          onClose={() => setSettingsOpen(false)}
+          onApply={(v) => { setLevels(v); onConfigChange({ levels: v }); }} />
+      )}
+    </>
+  );
 }

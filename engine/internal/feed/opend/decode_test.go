@@ -137,16 +137,22 @@ func TestDecodePushTickerNoSecurity(t *testing.T) {
 }
 
 func TestDecodePushBookUsesTypoField(t *testing.T) {
+	bids := []*qotcommon.OrderBook{
+		{Price: proto.Float64(309.00), Volume: proto.Int64(500), OrederCount: proto.Int32(4)},
+	}
+	asks := []*qotcommon.OrderBook{
+		{Price: proto.Float64(309.02), Volume: proto.Int64(300), OrederCount: proto.Int32(2)},
+	}
+	for i := 1; i < 60; i++ {
+		bids = append(bids, &qotcommon.OrderBook{Price: proto.Float64(309.00 - float64(i)*0.01), Volume: proto.Int64(500 + int64(i)), OrederCount: proto.Int32(4)})
+		asks = append(asks, &qotcommon.OrderBook{Price: proto.Float64(309.02 + float64(i)*0.01), Volume: proto.Int64(300 + int64(i)), OrederCount: proto.Int32(2)})
+	}
 	resp := &qotupdateorderbook.Response{
 		RetType: proto.Int32(0),
 		S2C: &qotupdateorderbook.S2C{
-			Security: sec(11, "AAPL"),
-			OrderBookBidList: []*qotcommon.OrderBook{
-				{Price: proto.Float64(309.00), Volume: proto.Int64(500), OrederCount: proto.Int32(4)},
-			},
-			OrderBookAskList: []*qotcommon.OrderBook{
-				{Price: proto.Float64(309.02), Volume: proto.Int64(300), OrederCount: proto.Int32(2)},
-			},
+			Security:                sec(11, "AAPL"),
+			OrderBookBidList:        bids,
+			OrderBookAskList:        asks,
 			SvrRecvTimeBidTimestamp: proto.Float64(1782146001.0),
 			SvrRecvTimeAskTimestamp: proto.Float64(1782146001.5),
 		},
@@ -157,7 +163,7 @@ func TestDecodePushBookUsesTypoField(t *testing.T) {
 		t.Fatal(err)
 	}
 	be := evs[0].(feed.BookEvent)
-	if be.Book.Bids[0].Orders != 4 || be.Book.Asks[0].Volume != 300 {
+	if len(be.Book.Bids) != 60 || len(be.Book.Asks) != 60 || be.Book.Bids[0].Orders != 4 || be.Book.Asks[0].Volume != 300 {
 		t.Fatalf("book = %+v", be.Book)
 	}
 	if be.Book.TsMs != 1782146001500 { // max(bid, ask) server recv time

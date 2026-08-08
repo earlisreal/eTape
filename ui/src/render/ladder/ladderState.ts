@@ -5,7 +5,15 @@ import type { Palette } from "../palette";
 import { QUOTE_DECIMALS } from "../format";
 import { isWorking, sideIsSell } from "../../wire/orderStatus";
 
-export const LADDER_LEVELS = 10;
+export const MIN_LADDER_LEVELS = 1;
+export const DEFAULT_LADDER_LEVELS = 10;
+export const MAX_LADDER_LEVELS = 60;
+/** @deprecated Use DEFAULT_LADDER_LEVELS for the default, not a projection cap. */
+export const LADDER_LEVELS = DEFAULT_LADDER_LEVELS;
+export const LADDER_SPREAD_H = 18;
+export const LADDER_HEADER_H = 18;
+export const LADDER_ROW_H = 22;
+export const LADDER_CHROME_H = LADDER_SPREAD_H + LADDER_HEADER_H;
 export const FLASH_MS = 400;
 
 export interface LadderRow {
@@ -45,6 +53,7 @@ export interface LadderPaintState {
   nowMs: number;
   width: number;
   height: number;
+  rowOffset: number;
   palette: Palette;
 }
 
@@ -58,19 +67,49 @@ export function entitledForDepth(symbol: string): boolean {
   return symbol.startsWith("US.");
 }
 
-function accumulate(levels: BookLevel[]): LadderRow[] {
-  return levels.slice(0, LADDER_LEVELS).map((l) => ({ price: l.price, size: l.size, sizeFraction: 0 }));
+export function normalizeLadderLevels(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_LADDER_LEVELS;
+  return Math.min(MAX_LADDER_LEVELS, Math.max(MIN_LADDER_LEVELS, Math.floor(value)));
+}
+
+function normalizeRowOffset(value: unknown): number {
+  return typeof value === "number" && Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+}
+
+function accumulate(levels: BookLevel[], count: number): LadderRow[] {
+  return levels.slice(0, count).map((l) => ({ price: l.price, size: l.size, sizeFraction: 0 }));
 }
 
 /** Book sides (best-first, as delivered) → ladder rows, each bar length proportional to
  *  that row's own size, normalized against the largest single level across BOTH sides. */
-export function buildLadderSides(book: Book | undefined): { asks: LadderRow[]; bids: LadderRow[] } {
-  const asks = accumulate(book?.asks ?? []);
-  const bids = accumulate(book?.bids ?? []);
+export function buildLadderSides(book: Book | undefined, levels: unknown = DEFAULT_LADDER_LEVELS): { asks: LadderRow[]; bids: LadderRow[] } {
+  const count = normalizeLadderLevels(levels);
+  const asks = accumulate(book?.asks ?? [], count);
+  const bids = accumulate(book?.bids ?? [], count);
   const maxSize = Math.max(0, ...asks.map((r) => r.size), ...bids.map((r) => r.size));
   for (const r of asks) r.sizeFraction = depthFraction(r.size, maxSize);
   for (const r of bids) r.sizeFraction = depthFraction(r.size, maxSize);
   return { asks, bids };
+}
+
+/** Number of complete depth rows that fit below the fixed spread and column headers. */
+export function visibleLadderRows(height: number): number {
+  const contentHeight = Number.isFinite(height) ? Math.max(0, height - LADDER_CHROME_H) : 0;
+  return Math.floor(contentHeight / LADDER_ROW_H);
+}
+
+/** Maximum logical row offset for the current book, setting, and canvas height. */
+export function maxLadderOffset(book: Book | undefined, levels: unknown, height: number): number {
+  const availableDepth = Math.min(
+    normalizeLadderLevels(levels),
+    Math.max(book?.bids.length ?? 0, book?.asks.length ?? 0),
+  );
+  return Math.max(0, availableDepth - Math.max(1, visibleLadderRows(height)));
+}
+
+export function clampLadderOffset(offset: number, maxOffset: number): number {
+  const max = Number.isFinite(maxOffset) ? Math.max(0, Math.floor(maxOffset)) : 0;
+  return Math.min(max, normalizeRowOffset(offset));
 }
 
 /**
@@ -110,9 +149,11 @@ export function buildLadderState(args: {
   width: number;
   height: number;
   palette: Palette;
+  levels?: unknown;
+  rowOffset?: number;
 }): LadderPaintState {
   const entitled = entitledForDepth(args.symbol);
-  const { asks, bids } = buildLadderSides(entitled ? args.book : undefined);
+  const { asks, bids } = buildLadderSides(entitled ? args.book : undefined, args.levels);
   const spread = asks.length > 0 && bids.length > 0 ? asks[0].price - bids[0].price : null;
   return {
     symbol: args.symbol,
@@ -127,6 +168,7 @@ export function buildLadderState(args: {
     nowMs: args.nowMs,
     width: args.width,
     height: args.height,
+    rowOffset: normalizeRowOffset(args.rowOffset),
     palette: args.palette,
   };
 }

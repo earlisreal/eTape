@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest";
 import type { Book, Order } from "../../wire/contract";
 import { getPalette } from "../palette";
 import {
-  buildLadderSides, buildLadderState, depthFraction, entitledForDepth,
-  flashAlpha, workingOrderMarks, FLASH_MS, LADDER_LEVELS,
+  buildLadderSides, buildLadderState, clampLadderOffset, DEFAULT_LADDER_LEVELS,
+  depthFraction, entitledForDepth, flashAlpha, maxLadderOffset, normalizeLadderLevels,
+  workingOrderMarks, FLASH_MS, MAX_LADDER_LEVELS, MIN_LADDER_LEVELS,
 } from "./ladderState";
 
 function book(overrides: Partial<Book> = {}): Book {
@@ -48,15 +49,51 @@ describe("buildLadderSides", () => {
     expect(bids.map((r) => r.sizeFraction)).toEqual([300 / 500, 1, 200 / 500]);
     expect(asks.map((r) => r.sizeFraction)).toEqual([400 / 500, 100 / 500]);
   });
-  it("caps at LADDER_LEVELS per side", () => {
+  it("caps at the default depth per side", () => {
     const levels = Array.from({ length: 15 }, (_, i) => ({ price: 3.49 - i * 0.01, size: 100 }));
     const { bids } = buildLadderSides(book({ bids: levels }));
-    expect(bids).toHaveLength(LADDER_LEVELS);
+    expect(bids).toHaveLength(DEFAULT_LADDER_LEVELS);
+  });
+  it("accepts the full configured depth", () => {
+    const levels = Array.from({ length: 61 }, (_, i) => ({ price: 3.49 - i * 0.01, size: 100 }));
+    const { bids } = buildLadderSides(book({ bids: levels }), MAX_LADDER_LEVELS);
+    expect(bids).toHaveLength(MAX_LADDER_LEVELS);
   });
   it("returns empty sides for no book (never fabricated zeros)", () => {
     const { asks, bids } = buildLadderSides(undefined);
     expect(asks).toEqual([]);
     expect(bids).toEqual([]);
+  });
+});
+
+describe("normalizeLadderLevels", () => {
+  it("defaults invalid persisted values and floors/clamps valid values", () => {
+    expect(normalizeLadderLevels(undefined)).toBe(DEFAULT_LADDER_LEVELS);
+    expect(normalizeLadderLevels("60")).toBe(DEFAULT_LADDER_LEVELS);
+    expect(normalizeLadderLevels(Number.NaN)).toBe(DEFAULT_LADDER_LEVELS);
+    expect(normalizeLadderLevels(10.8)).toBe(10);
+    expect(normalizeLadderLevels(0)).toBe(MIN_LADDER_LEVELS);
+    expect(normalizeLadderLevels(-1)).toBe(MIN_LADDER_LEVELS);
+    expect(normalizeLadderLevels(100)).toBe(MAX_LADDER_LEVELS);
+  });
+});
+
+describe("ladder viewport bounds", () => {
+  const deepBook = book({
+    bids: Array.from({ length: 60 }, (_, i) => ({ price: 3.49 - i * 0.01, size: i + 1 })),
+    asks: [{ price: 3.51, size: 10 }],
+  });
+  const tenRowsHeight = 36 + 10 * 22;
+
+  it("uses the longer side and configured depth for the maximum offset", () => {
+    expect(maxLadderOffset(deepBook, 60, tenRowsHeight)).toBe(50);
+    expect(maxLadderOffset(deepBook, 10, tenRowsHeight)).toBe(0);
+    expect(maxLadderOffset(book(), 60, tenRowsHeight)).toBe(0);
+  });
+  it("guards tiny dimensions and clamps the current offset", () => {
+    expect(maxLadderOffset(deepBook, 60, 0)).toBe(59);
+    expect(clampLadderOffset(55, 50)).toBe(50);
+    expect(clampLadderOffset(-1, 50)).toBe(0);
   });
 });
 
@@ -115,5 +152,15 @@ describe("buildLadderState", () => {
     expect(s.entitled).toBe(false);
     expect(s.asks).toEqual([]);
     expect(s.bids).toEqual([]);
+  });
+  it("normalizes bars against the full configured depth while scrolled", () => {
+    const deep = book({
+      bids: Array.from({ length: 60 }, (_, i) => ({ price: 3.49 - i * 0.01, size: i === 59 ? 1000 : 10 })),
+      asks: [],
+    });
+    const s = buildLadderState({ ...base, book: deep, levels: 60, rowOffset: 20 });
+    expect(s.bids).toHaveLength(60);
+    expect(s.bids[0].sizeFraction).toBe(0.01);
+    expect(s.rowOffset).toBe(20);
   });
 });

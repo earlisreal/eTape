@@ -28,6 +28,11 @@ var ErrHistoryQuotaExhausted = errors.New("opend: history K-line quota exhausted
 // maxAPIRows is moomoo's per-call cap for cache reads and history pages.
 const maxAPIRows = 1000
 
+const (
+	defaultBookDepth int32 = 10
+	usBookDepth      int32 = 60
+)
+
 // maxHistoryPages caps pagination (40k bars) as a runaway backstop.
 const maxHistoryPages = 40
 
@@ -143,15 +148,20 @@ func (b *backfill) recentTicks(ctx context.Context, symbol string, n int) ([]fee
 	return ticks, nil
 }
 
-// bookSnapshot reads the current 10-level order book (Qot_GetOrderBook).
+// bookSnapshot reads the current order book (Qot_GetOrderBook). U.S. securities
+// support deeper LV2 books; other markets keep their existing request depth.
 func (b *backfill) bookSnapshot(ctx context.Context, symbol string) (feed.Book, error) {
 	sec, err := parseSymbol(symbol)
 	if err != nil {
 		return feed.Book{}, err
 	}
+	depth := defaultBookDepth
+	if sec.GetMarket() == int32(qotcommon.QotMarket_QotMarket_US_Security) {
+		depth = usBookDepth
+	}
 	req := &qotgetorderbook.Request{C2S: &qotgetorderbook.C2S{
 		Security: sec,
-		Num:      proto.Int32(10), // API max for securities; entitlement-gated
+		Num:      proto.Int32(depth), // entitlement-gated; OpenD may return fewer rows
 	}}
 	f, err := b.rpc.Request(ctx, ProtoQotGetOrderBook, req)
 	if err != nil {

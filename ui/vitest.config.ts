@@ -39,6 +39,7 @@ export default defineConfig({
           include: [
             'src/data/BarStore.test.ts',
             'src/render/chart/ChartController.test.ts',
+            'src/render/ladder/ladderState.test.ts',
           ],
         },
       },
@@ -66,7 +67,11 @@ export default defineConfig({
       {
         test: {
           name: 'ladder',
-          include: ['src/chrome/panels/LadderPanel.test.tsx'],
+          include: [
+            'src/chrome/panels/LadderPanel.test.tsx',
+            'src/chrome/panels/LadderSettingsDialog.test.tsx',
+            'src/chrome/panels/registry.test.tsx',
+          ],
           pool: 'forks',
         },
       },

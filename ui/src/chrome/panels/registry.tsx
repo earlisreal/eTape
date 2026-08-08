@@ -110,9 +110,10 @@ export const PANELS: Record<string, PanelDef> = {
     topics: ["md.book", "md.tape", "exec.orders"],
     title: "DOM Ladder",
     glyph: "≡",
-    description: "10-level depth, working orders",
+    description: "Configurable 1–60 level depth, working orders",
     symbolBearing: true,
     demand: "focused",
+    headerActions: true,
   },
   "tape": {
     component: TapePanel,

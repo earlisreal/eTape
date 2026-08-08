@@ -8,8 +8,8 @@ export class BookStore extends PaintStore {
   // via markDirty()) still backs the no-arg getRev() global fallback, unchanged.
   private readonly revs = new Map<string, number>();
 
-  // The engine pushes the full 10-level book every time; snapshot and delta are
-  // both full replaces (replace is cheaper than diff at ~20 rows).
+  // Snapshot and delta are both full replaces; replace is cheaper than diffing
+  // the relatively small depth payload.
   apply(m: SnapshotMsg | DeltaMsg): void {
     const b = m.payload as Book;
     this.books.set(b.symbol, b);

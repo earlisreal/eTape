@@ -81,3 +81,9 @@ describe("panel demand profiles", () => {
     expect(PANELS.scanner?.demand).toBeUndefined();
   });
 });
+
+describe("ladder header actions", () => {
+  it("provides a header slot for the DOM settings gear", () => {
+    expect(PANELS.ladder.headerActions).toBe(true);
+  });
+});

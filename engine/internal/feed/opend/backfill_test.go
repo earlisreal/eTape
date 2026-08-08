@@ -11,6 +11,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetkl"
+	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetorderbook"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotrequesthistorykl"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotupdateticker"
 )
@@ -100,18 +101,60 @@ func TestRecentTicksDecodesAndClamps(t *testing.T) {
 
 func TestBookSnapshotDecodes(t *testing.T) {
 	m := newMockOpenD(t)
+	bids := make([]*qotcommon.OrderBook, 0, usBookDepth)
+	asks := make([]*qotcommon.OrderBook, 0, usBookDepth)
+	for i := int32(0); i < usBookDepth; i++ {
+		bids = append(bids, &qotcommon.OrderBook{Price: proto.Float64(100 - float64(i)*0.01), Volume: proto.Int64(10 + int64(i)), OrederCount: proto.Int32(i + 1)})
+		asks = append(asks, &qotcommon.OrderBook{Price: proto.Float64(101 + float64(i)*0.01), Volume: proto.Int64(20 + int64(i)), OrederCount: proto.Int32(i + 2)})
+	}
 	m.setData("US.AAPL", &qotData{
-		bids: []*qotcommon.OrderBook{{Price: proto.Float64(100), Volume: proto.Int64(10), OrederCount: proto.Int32(1)}},
-		asks: []*qotcommon.OrderBook{{Price: proto.Float64(101), Volume: proto.Int64(20), OrederCount: proto.Int32(2)}},
+		bids: bids,
+		asks: asks,
 	})
 	b := newBackfill(liveClient(t, m))
 	book, err := b.bookSnapshot(context.Background(), "US.AAPL")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(book.Bids) != 1 || len(book.Asks) != 1 || book.Bids[0].Price != 100 || book.Asks[0].Price != 101 {
+	if len(book.Bids) != int(usBookDepth) || len(book.Asks) != int(usBookDepth) || book.Bids[0].Price != 100 || book.Asks[0].Price != 101 {
 		t.Fatalf("book = %+v", book)
 	}
+	for _, f := range m.snapshotRequests() {
+		if f.ProtoID != ProtoQotGetOrderBook {
+			continue
+		}
+		var req qotgetorderbook.Request
+		if err := proto.Unmarshal(f.Body, &req); err != nil {
+			t.Fatal(err)
+		}
+		if req.GetC2S().GetNum() != usBookDepth {
+			t.Fatalf("U.S. order-book depth = %d, want %d", req.GetC2S().GetNum(), usBookDepth)
+		}
+		return
+	}
+	t.Fatal("missing Qot_GetOrderBook request")
+}
+
+func TestBookSnapshotKeepsDefaultDepthForNonUS(t *testing.T) {
+	m := newMockOpenD(t)
+	m.setData("HK.00700", &qotData{bids: []*qotcommon.OrderBook{{Price: proto.Float64(300), Volume: proto.Int64(1), OrederCount: proto.Int32(1)}}})
+	if _, err := newBackfill(liveClient(t, m)).bookSnapshot(context.Background(), "HK.00700"); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range m.snapshotRequests() {
+		if f.ProtoID != ProtoQotGetOrderBook {
+			continue
+		}
+		var req qotgetorderbook.Request
+		if err := proto.Unmarshal(f.Body, &req); err != nil {
+			t.Fatal(err)
+		}
+		if req.GetC2S().GetNum() != defaultBookDepth {
+			t.Fatalf("non-U.S. order-book depth = %d, want %d", req.GetC2S().GetNum(), defaultBookDepth)
+		}
+		return
+	}
+	t.Fatal("missing Qot_GetOrderBook request")
 }
 
 func TestQuoteSnapshotDecodes(t *testing.T) {

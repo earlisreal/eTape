@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, cleanup } from "@testing-library/react";
+import { fireEvent, render, cleanup, screen } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { LadderPanel } from "./LadderPanel";
 import { makeStores } from "../../data/registry";
@@ -14,11 +14,12 @@ beforeEach(() => {
   cleanup();
 });
 
-function renderLadder(settings: Record<string, unknown> = { symbol: "US.AAPL" }) {
+function renderLadder(settings: Record<string, unknown> = { symbol: "US.AAPL" }, height = 480) {
   const stores = makeStores();
   const scheduler = new Scheduler(browserRaf, () => {});
   let surface: Surface | undefined;
   const off = vi.fn();
+  const onConfigChange = vi.fn();
   vi.spyOn(scheduler, "register").mockImplementation((s: Surface) => {
     surface = s;
     return off;
@@ -27,15 +28,51 @@ function renderLadder(settings: Record<string, unknown> = { symbol: "US.AAPL" })
   const config = { id: "t-ladder", panelId: "ladder", group: "green" as const, settings };
   const utils = render(
     <ThemeProvider>
-      <LadderPanel config={config} stores={stores} scheduler={scheduler} width={300} height={480}
+      <LadderPanel config={config} stores={stores} scheduler={scheduler} width={300} height={height}
         linkGroups={linkGroups} commands={{ sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })), sendQuery: vi.fn(async () => []) }}
-        onConfigChange={vi.fn()} />
+        onConfigChange={onConfigChange} />
     </ThemeProvider>,
   );
-  return { ...utils, stores, linkGroups, surface: () => surface!, off };
+  return { ...utils, stores, linkGroups, surface: () => surface!, off, onConfigChange };
 }
 
 describe("LadderPanel", () => {
+  it("persists the level setting as a patch from the header gear", () => {
+    const { onConfigChange } = renderLadder({ symbol: "US.AAPL", levels: 35 });
+    fireEvent.click(screen.getByLabelText("ladder settings"));
+    fireEvent.change(screen.getByLabelText("depth levels"), { target: { value: "60" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+    expect(onConfigChange).toHaveBeenCalledWith({ levels: 60 });
+  });
+
+  it("scrolls a deep book without allowing the page to scroll", () => {
+    const { stores, surface, container } = renderLadder({ symbol: "US.AAPL", levels: 60 }, 256);
+    const rows = Array.from({ length: 60 }, (_, i) => ({ price: 3.49 - i * 0.01, size: 100 }));
+    stores.book.apply({
+      kind: "snapshot", topic: "md.book",
+      payload: { symbol: "US.AAPL", bids: rows, asks: rows.map((r) => ({ ...r, price: 3.51 + (3.49 - r.price) })), ts: "t" },
+    });
+    surface().isDirty();
+    const event = new WheelEvent("wheel", { deltaY: 220, cancelable: true });
+    container.querySelector("canvas")!.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(surface().isDirty()).toBe(true);
+  });
+
+  it("does not create a scroll range when the configured rows fit", () => {
+    const { stores, surface, container } = renderLadder({ symbol: "US.AAPL" }, 256);
+    const rows = Array.from({ length: 60 }, (_, i) => ({ price: 3.49 - i * 0.01, size: 100 }));
+    stores.book.apply({
+      kind: "snapshot", topic: "md.book",
+      payload: { symbol: "US.AAPL", bids: rows, asks: [], ts: "t" },
+    });
+    surface().isDirty();
+    const event = new WheelEvent("wheel", { deltaY: 220, cancelable: true });
+    container.querySelector("canvas")!.dispatchEvent(event);
+    expect(event.defaultPrevented).toBe(true);
+    expect(surface().isDirty()).toBe(false);
+  });
+
   it("registers one surface and unregisters it on unmount", () => {
     const { surface, off, unmount } = renderLadder();
     expect(surface().id).toBe("ladder:t-ladder");
