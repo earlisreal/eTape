@@ -466,7 +466,7 @@ export interface ResetBalanceArgs {
   venue: string;
 }
 export interface KillSwitchArgs {
-  venue?: string; // omitted/empty => all venues
+  venue?: string; // omitted/empty => all venues; any scope disarms the global master
 }
 /**
  * ArmArgs is intentionally empty: Arm/Disarm are master-only commands with no
@@ -587,6 +587,7 @@ export interface QueryChartWindowArgs {
   toMs: number /* int64 */;
   tailBars: number /* int */;
   indicatorSeriesKeys: string[];
+  skipBars?: boolean;
 }
 export interface IndicatorSeriesWindow {
   seriesKey: string;

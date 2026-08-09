@@ -533,6 +533,7 @@ type QueryChartWindowArgs struct {
 	ToMs                int64    `json:"toMs"`
 	TailBars            int      `json:"tailBars"`
 	IndicatorSeriesKeys []string `json:"indicatorSeriesKeys"`
+	SkipBars            bool     `json:"skipBars,omitempty"`
 }
 
 type IndicatorSeriesWindow struct {

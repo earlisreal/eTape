@@ -110,6 +110,80 @@ func TestHubSubscribeSendsSnapshotThenCoalescedDelta(t *testing.T) {
 	}
 }
 
+func TestHubIndicatorReadyBroadcastsExactInstanceID(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	c := &fakeClient{nid: 1}
+	h.Register(c)
+	h.Subscribe(c, wsmsg.TopicSysEvents)
+	syncHub(h)
+	h.PublishMD(md.IndicatorReadyUpdate{Symbol: "US.AAPL", InstanceID: "panel-a:VWAP-0"})
+	syncHub(h)
+
+	for _, frame := range c.got() {
+		var msg struct {
+			Kind    string          `json:"kind"`
+			Topic   string          `json:"topic"`
+			Payload json.RawMessage `json:"payload"`
+		}
+		if err := json.Unmarshal(frame, &msg); err != nil || msg.Topic != string(wsmsg.TopicSysEvents) || msg.Kind != "delta" {
+			continue
+		}
+		var event wsmsg.SysEvent
+		if err := json.Unmarshal(msg.Payload, &event); err == nil && event.Kind == "indicator-ready" {
+			if event.Detail != "panel-a:VWAP-0" {
+				t.Fatalf("indicator-ready detail = %q, want exact instance ID", event.Detail)
+			}
+			return
+		}
+	}
+	t.Fatal("subscribed sys.events consumer received no indicator-ready event")
+}
+
+func TestHubQueryChartWindowSkipBarsReturnsOnlyIndicators(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	for _, bucket := range []int64{1_000, 2_000, 3_000} {
+		h.PublishMD(md.BarUpdate{Bar: md.Bar{
+			Symbol: "US.AAPL", TF: session.TF1m, BucketMs: bucket, C: float64(bucket),
+		}})
+	}
+	h.PublishMD(md.IndicatorUpdate{
+		InstanceID: "panel-a:VWAP-0", SeriesKey: "panel-a:VWAP-0", Snapshot: true,
+		Points: []md.Point{{TimeMs: 1_000, Value: 10}, {TimeMs: 2_000, Value: 11}, {TimeMs: 3_000, Value: 12}},
+	})
+	syncHub(h)
+
+	args := wsmsg.QueryChartWindowArgs{
+		Symbol: "US.AAPL", Timeframe: "1m", FromMs: 1_000, ToMs: 3_000,
+		TailBars: 0, IndicatorSeriesKeys: []string{"panel-a:VWAP-0"}, SkipBars: true,
+	}
+	hydrated := h.QueryChartWindow(args)
+	if len(hydrated.Bars) != 0 {
+		t.Fatalf("skipBars result returned %d bars, want none", len(hydrated.Bars))
+	}
+	if hydrated.FromMs != args.FromMs || hydrated.ToMs != args.ToMs {
+		t.Fatalf("skipBars range = [%d,%d), want [%d,%d)", hydrated.FromMs, hydrated.ToMs, args.FromMs, args.ToMs)
+	}
+	if len(hydrated.Indicators) != 1 || len(hydrated.Indicators[0].Points) != 2 {
+		t.Fatalf("skipBars indicators = %+v, want one range-filtered series", hydrated.Indicators)
+	}
+
+	args.SkipBars = false
+	withBars := h.QueryChartWindow(args)
+	if len(withBars.Bars) != 2 {
+		t.Fatalf("normal chart-window result returned %d bars, want 2", len(withBars.Bars))
+	}
+}
+
 // TestHubBarSnapshotDoesNotLeakOntoBarsTopic verifies history snapshots remain
 // command responses and never leak onto the live md.bars broadcast topic.
 func TestHubBarSnapshotDoesNotLeakOntoBarsTopic(t *testing.T) {

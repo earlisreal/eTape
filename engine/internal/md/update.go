@@ -69,25 +69,35 @@ type ConnUpdate struct{ Up bool }
 // ResyncedUpdate passes through a completed reconnect + resubscribe cycle.
 type ResyncedUpdate struct{}
 
-// HistoryReadyUpdate is ordered after all bar and indicator reseed updates.
-// Prepared marks the archive+OpenD snapshot barrier; feed/indicator seeds leave
-// it false so the UI cannot mistake them for the one symbol-open snapshot.
+// HistoryReadyUpdate is the barrier for history/bar preparation. Prepared marks
+// the archive+OpenD snapshot barrier; feed/history seeds may leave it false.
+// Indicator reseeds use IndicatorReadyUpdate instead so they cannot be
+// mistaken for a chart-history barrier.
 type HistoryReadyUpdate struct {
 	Symbol   string
 	Prepared bool
 }
 
-func (QuoteUpdate) isUpdate()        {}
-func (BookUpdate) isUpdate()         {}
-func (TapeUpdate) isUpdate()         {}
-func (BarUpdate) isUpdate()          {}
-func (BarSnapshot) isUpdate()        {}
-func (BarPrepend) isUpdate()         {}
-func (IndicatorUpdate) isUpdate()    {}
-func (MismatchUpdate) isUpdate()     {}
-func (ConnUpdate) isUpdate()         {}
-func (ResyncedUpdate) isUpdate()     {}
-func (HistoryReadyUpdate) isUpdate() {}
+// IndicatorReadyUpdate is ordered after one indicator instance has completed
+// its initial/reseed snapshot. The UI may query that instance's historical
+// series from the mirror after receiving this barrier.
+type IndicatorReadyUpdate struct {
+	Symbol     string
+	InstanceID string
+}
+
+func (QuoteUpdate) isUpdate()          {}
+func (BookUpdate) isUpdate()           {}
+func (TapeUpdate) isUpdate()           {}
+func (BarUpdate) isUpdate()            {}
+func (BarSnapshot) isUpdate()          {}
+func (BarPrepend) isUpdate()           {}
+func (IndicatorUpdate) isUpdate()      {}
+func (MismatchUpdate) isUpdate()       {}
+func (ConnUpdate) isUpdate()           {}
+func (ResyncedUpdate) isUpdate()       {}
+func (HistoryReadyUpdate) isUpdate()   {}
+func (IndicatorReadyUpdate) isUpdate() {}
 
 // Point is one (time, value) sample of an indicator series.
 type Point struct {

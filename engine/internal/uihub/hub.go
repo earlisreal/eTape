@@ -656,21 +656,23 @@ func (h *Hub) handleChartWindow(r chartWindowReq) {
 	}
 	all := h.m.bars[barKey(a.Symbol, a.Timeframe)]
 	from, to := a.FromMs, a.ToMs
-	if a.TailBars > 0 {
-		start := len(all) - a.TailBars
-		if start < 0 {
-			start = 0
+	if !a.SkipBars {
+		if a.TailBars > 0 {
+			start := len(all) - a.TailBars
+			if start < 0 {
+				start = 0
+			}
+			result.Bars = append(result.Bars, all[start:]...)
+			if len(result.Bars) > 0 {
+				from = wireBarMs(result.Bars[0])
+				to = wireBarMs(result.Bars[len(result.Bars)-1]) + 1
+				result.FromMs, result.ToMs = from, to
+			}
+		} else if from < to {
+			lo := sort.Search(len(all), func(i int) bool { return wireBarMs(all[i]) >= from })
+			hi := sort.Search(len(all), func(i int) bool { return wireBarMs(all[i]) >= to })
+			result.Bars = append(result.Bars, all[lo:hi]...)
 		}
-		result.Bars = append(result.Bars, all[start:]...)
-		if len(result.Bars) > 0 {
-			from = wireBarMs(result.Bars[0])
-			to = wireBarMs(result.Bars[len(result.Bars)-1]) + 1
-			result.FromMs, result.ToMs = from, to
-		}
-	} else if from < to {
-		lo := sort.Search(len(all), func(i int) bool { return wireBarMs(all[i]) >= from })
-		hi := sort.Search(len(all), func(i int) bool { return wireBarMs(all[i]) >= to })
-		result.Bars = append(result.Bars, all[lo:hi]...)
 	}
 	for _, key := range a.IndicatorSeriesKeys {
 		points := h.m.indicators[key]
@@ -815,6 +817,11 @@ func (h *Hub) handleMD(u md.Update) {
 			kind = "chart-ready"
 		}
 		event := h.buildSysEvent(kind, ready.Symbol)
+		h.m.applyPub(event)
+		h.broadcast(event, false)
+	}
+	if ready, ok := u.(md.IndicatorReadyUpdate); ok {
+		event := h.buildSysEvent("indicator-ready", ready.InstanceID)
 		h.m.applyPub(event)
 		h.broadcast(event, false)
 	}

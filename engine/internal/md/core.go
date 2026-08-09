@@ -88,11 +88,11 @@ func (historyBarrierMsg) isInMsg()   {}
 
 // Core is the single-writer market-data state machine.
 type Core struct {
-	cfg     Config
-	inbox   chan inMsg
-	updates chan Update
-	marks   chan Mark
-	bookOut chan feed.Book
+	cfg            Config
+	inbox          chan inMsg
+	updates        chan Update
+	marks          chan Mark
+	bookOut        chan feed.Book
 	droppedInbox   atomic.Uint64
 	droppedUpdates atomic.Uint64
 
@@ -307,7 +307,7 @@ func (c *Core) apply(m inMsg) {
 		// Indicator snapshots stay engine-side; UI pulls matching viewport after
 		// this ordered barrier reaches hub. Without it SubscribeIndicator's ack
 		// races ahead of reseed/mirror application on timeframe changes.
-		c.emit(HistoryReadyUpdate{Symbol: msg.spec.Symbol})
+		c.emit(IndicatorReadyUpdate{Symbol: msg.spec.Symbol, InstanceID: msg.id})
 	case releaseIndicatorMsg:
 		c.inds.release(msg.connID, msg.id)
 	case seedDailyMsg:

@@ -650,6 +650,206 @@ describe("ChartPanel", () => {
     }));
   });
 
+  it("hydrates a VWAP added after the chart snapshot is already loaded", async () => {
+    const fromMs = Date.parse("2026-07-09T13:30:00.000Z");
+    const toMs = Date.parse("2026-07-09T13:31:00.000Z") + 1;
+    const bars: Bar[] = [
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:30:00.000Z", o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false },
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:31:00.000Z", o: 100.5, h: 102, l: 100, c: 101.5, v: 120, inProgress: true },
+    ];
+    const { container, stores, commands, onConfigChange } = renderChart("c1", undefined, undefined, undefined, {
+      symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars, indicators: [], historyRevision: 1,
+    });
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const barsRev = stores.bars.getRev("US.AAPL", "1m");
+    commands.sendQuery.mockClear();
+
+    fireEvent.click(within(container).getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add VWAP" }));
+    type Persisted = { indicators: { instanceId: string }[] };
+    const instanceId = ((onConfigChange.mock.calls.at(-1)![0] as Persisted).indicators[0]).instanceId;
+    expect(commands.sendCommand).toHaveBeenCalledWith("SubscribeIndicator", expect.objectContaining({ instanceId }));
+    expect(commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow")).toHaveLength(0);
+
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 2, ts: "2026-08-03T01:00:01Z", kind: "history-ready", detail: "US.AAPL",
+    } }));
+    await act(async () => { await Promise.resolve(); });
+    expect(commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow")).toHaveLength(0);
+
+    const points = [{ timeMs: fromMs, value: 100.25 }, { timeMs: Date.parse("2026-07-09T13:31:00.000Z"), value: 101.1 }];
+    commands.sendQuery.mockImplementation(async (name: string, raw: unknown) => {
+      if (name !== "QueryChartWindow") return [];
+      const args = raw as { symbol: string; timeframe: string; fromMs: number; toMs: number };
+      return {
+        symbol: args.symbol, timeframe: args.timeframe, fromMs: args.fromMs, toMs: args.toMs, bars: [],
+        indicators: [{ seriesKey: instanceId, points }], historyRevision: 2,
+      };
+    });
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 3, ts: "2026-08-03T01:00:02Z", kind: "indicator-ready", detail: instanceId,
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const queryCalls = commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow");
+    expect(queryCalls).toHaveLength(1);
+    expect(queryCalls[0][1]).toEqual(expect.objectContaining({
+      symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, tailBars: 0,
+      indicatorSeriesKeys: [instanceId], skipBars: true,
+    }));
+    expect(stores.indicators.series(instanceId)).toEqual(points);
+    expect(stores.bars.getRev("US.AAPL", "1m")).toBe(barsRev);
+  });
+
+  it("hydrates a ready indicator after an in-flight initial snapshot that missed it", async () => {
+    const fromMs = Date.parse("2026-07-09T13:30:00.000Z");
+    const toMs = Date.parse("2026-07-09T13:31:00.000Z") + 1;
+    const bars: Bar[] = [
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:30:00.000Z", o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false },
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:31:00.000Z", o: 100.5, h: 102, l: 100, c: 101.5, v: 120, inProgress: true },
+    ];
+    let resolveInitial!: (result: {}) => void;
+    const initial = new Promise<{}>((resolve) => { resolveInitial = resolve; });
+    const { container, stores, commands, onConfigChange } = renderChart();
+    commands.sendQuery.mockClear();
+    commands.sendQuery.mockImplementation(async (name: string, raw: unknown) => {
+      if (name !== "QueryChartWindow") return [];
+      return (raw as { skipBars?: boolean }).skipBars
+        ? { symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars: [], indicators: [{ seriesKey: (raw as { indicatorSeriesKeys: string[] }).indicatorSeriesKeys[0], points: [{ timeMs: fromMs, value: 100.25 }] }], historyRevision: 2 }
+        : initial;
+    });
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+    } }));
+    await act(async () => { await Promise.resolve(); });
+
+    fireEvent.click(within(container).getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add VWAP" }));
+    type Persisted = { indicators: { instanceId: string }[] };
+    const instanceId = ((onConfigChange.mock.calls.at(-1)![0] as Persisted).indicators[0]).instanceId;
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 2, ts: "2026-08-03T01:00:01Z", kind: "indicator-ready", detail: instanceId,
+    } }));
+    await act(async () => { await Promise.resolve(); });
+    expect(commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow")).toHaveLength(1);
+
+    resolveInitial({ symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars, indicators: [], historyRevision: 1 });
+    await act(async () => { await initial; await Promise.resolve(); await Promise.resolve(); });
+
+    const queryCalls = commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow");
+    expect(queryCalls).toHaveLength(2);
+    expect(queryCalls[1][1]).toEqual(expect.objectContaining({ indicatorSeriesKeys: [instanceId], skipBars: true, tailBars: 0 }));
+    expect(stores.indicators.series(instanceId)).toEqual([{ timeMs: fromMs, value: 100.25 }]);
+  });
+
+  it("does not issue targeted hydration when the initial snapshot already includes the indicator", async () => {
+    const fromMs = Date.parse("2026-07-09T13:30:00.000Z");
+    const toMs = Date.parse("2026-07-09T13:31:00.000Z") + 1;
+    const bars: Bar[] = [
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:30:00.000Z", o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false },
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:31:00.000Z", o: 100.5, h: 102, l: 100, c: 101.5, v: 120, inProgress: true },
+    ];
+    const { container, stores, commands, onConfigChange } = renderChart();
+    commands.sendQuery.mockClear();
+    fireEvent.click(within(container).getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add VWAP" }));
+    type Persisted = { indicators: { instanceId: string }[] };
+    const instanceId = ((onConfigChange.mock.calls.at(-1)![0] as Persisted).indicators[0]).instanceId;
+    commands.sendQuery.mockImplementation(async (name: string) => name === "QueryChartWindow"
+      ? { symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars, indicators: [{ seriesKey: instanceId, points: [{ timeMs: fromMs, value: 100.25 }] }], historyRevision: 1 }
+      : []);
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 2, ts: "2026-08-03T01:00:01Z", kind: "indicator-ready", detail: instanceId,
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const queryCalls = commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow");
+    expect(queryCalls).toHaveLength(1);
+    expect(queryCalls[0][1]).not.toEqual(expect.objectContaining({ skipBars: true }));
+    expect(stores.indicators.series(instanceId)).toEqual([{ timeMs: fromMs, value: 100.25 }]);
+  });
+
+  it("ignores indicator-ready after an indicator is removed", async () => {
+    const fromMs = Date.parse("2026-07-09T13:30:00.000Z");
+    const toMs = Date.parse("2026-07-09T13:31:00.000Z") + 1;
+    const bar: Bar = { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:30:00.000Z", o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false };
+    const { container, stores, commands, onConfigChange } = renderChart("c1", undefined, undefined, undefined, {
+      symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars: [bar], indicators: [], historyRevision: 1,
+    });
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    commands.sendQuery.mockClear();
+    fireEvent.click(within(container).getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add VWAP" }));
+    type Persisted = { indicators: { instanceId: string }[] };
+    const instanceId = ((onConfigChange.mock.calls.at(-1)![0] as Persisted).indicators[0]).instanceId;
+    fireEvent.mouseEnter(screen.getByTestId(`legend-row-${instanceId}`));
+    fireEvent.click(screen.getByRole("button", { name: `remove ${instanceId}` }));
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 2, ts: "2026-08-03T01:00:01Z", kind: "indicator-ready", detail: instanceId,
+    } }));
+    await act(async () => { await Promise.resolve(); });
+
+    expect(commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow")).toHaveLength(0);
+    expect(stores.indicators.series(instanceId)).toEqual([]);
+    expect(onConfigChange).toHaveBeenLastCalledWith({ indicators: [] });
+  });
+
+  it("hydrates multiple indicators independently by instance and series key", async () => {
+    const fromMs = Date.parse("2026-07-09T13:30:00.000Z");
+    const toMs = Date.parse("2026-07-09T13:31:00.000Z") + 1;
+    const bars: Bar[] = [{ symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:30:00.000Z", o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false }];
+    const { container, stores, commands, onConfigChange } = renderChart("c1", undefined, undefined, undefined, {
+      symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars, indicators: [], historyRevision: 1,
+    });
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    commands.sendQuery.mockClear();
+    commands.sendQuery.mockImplementation(async (name: string, raw: unknown) => {
+      if (name !== "QueryChartWindow") return [];
+      const args = raw as { indicatorSeriesKeys: string[] };
+      return { symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars: [], indicators: [{ seriesKey: args.indicatorSeriesKeys[0], points: [{ timeMs: fromMs, value: args.indicatorSeriesKeys[0].includes("EMA") ? 9 : 100 }] }], historyRevision: 2 };
+    });
+
+    fireEvent.click(within(container).getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add EMA" }));
+    fireEvent.click(within(container).getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add VWAP" }));
+    type Persisted = { indicators: { instanceId: string; type: string }[] };
+    const persisted = (onConfigChange.mock.calls.at(-1)![0] as Persisted).indicators;
+    const emaId = persisted.find((i) => i.type === "EMA")!.instanceId;
+    const vwapId = persisted.find((i) => i.type === "VWAP")!.instanceId;
+
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 2, ts: "2026-08-03T01:00:01Z", kind: "indicator-ready", detail: emaId,
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const first = commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow");
+    expect(first).toHaveLength(1);
+    expect(first[0][1]).toEqual(expect.objectContaining({ indicatorSeriesKeys: [emaId], skipBars: true }));
+
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 3, ts: "2026-08-03T01:00:02Z", kind: "indicator-ready", detail: vwapId,
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const all = commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow");
+    expect(all).toHaveLength(2);
+    expect(all[1][1]).toEqual(expect.objectContaining({ indicatorSeriesKeys: [vwapId], skipBars: true }));
+    expect(stores.indicators.series(emaId)).toEqual([{ timeMs: fromMs, value: 9 }]);
+    expect(stores.indicators.series(vwapId)).toEqual([{ timeMs: fromMs, value: 100 }]);
+  });
+
   it("MACD sub-pane's close button removes all 3 of its series and persists the removal", () => {
     const { getByRole, onConfigChange } = renderChart();
     fireEvent.click(getByRole("button", { name: "indicators" }));

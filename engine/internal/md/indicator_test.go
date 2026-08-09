@@ -159,7 +159,23 @@ func TestIndicatorLifecycleThroughCore(t *testing.T) {
 		}
 		return
 	}
-	snaps, deltas, snap := countEma(drain())
+	updates := drain()
+	snapshotIndex, readyIndex := -1, -1
+	for i, u := range updates {
+		if iu, ok := u.(IndicatorUpdate); ok && iu.InstanceID == "ema-1" && iu.Snapshot && snapshotIndex < 0 {
+			snapshotIndex = i
+		}
+		if ready, ok := u.(IndicatorReadyUpdate); ok && ready.Symbol == "US.AAPL" && ready.InstanceID == "ema-1" {
+			readyIndex = i
+		}
+		if ready, ok := u.(HistoryReadyUpdate); ok && !ready.Prepared && ready.Symbol == "US.AAPL" {
+			t.Fatal("indicator subscription emitted a generic non-prepared history barrier")
+		}
+	}
+	if snapshotIndex < 0 || readyIndex <= snapshotIndex {
+		t.Fatalf("indicator readiness ordering: snapshot=%d ready=%d updates=%#v", snapshotIndex, readyIndex, updates)
+	}
+	snaps, deltas, snap := countEma(updates)
 	if snaps != 1 || snap.SeriesKey != "ema-1" || len(snap.Points) != 1 {
 		t.Fatalf("snapshots=%d last=%+v, want 1 snapshot with 1 seeded point (bars 0-1 finalized; EMA(2) warm from bar 1)", snaps, snap)
 	}

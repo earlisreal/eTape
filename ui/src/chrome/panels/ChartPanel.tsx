@@ -37,6 +37,14 @@ import { uiLog } from "../../logging/logger";
 
 const ALL_CHART_BARS = 1_000_000;
 
+type PendingIndicatorHydration = {
+  instanceId: string;
+  seriesKeys: string[];
+  ready: boolean;
+  generation: number;
+  querying: boolean;
+};
+
 // Adapts a real LWC v5 IChartApi to the controller's minimal ChartApiFacade.
 function makeFacade(chart: IChartApi, palette: Palette): {
   facade: ChartApiFacade; setPalette: (p: Palette) => void; drawings: DrawingsPrimitive;
@@ -191,6 +199,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const legendRef = useRef<TVLegendHandle | null>(null);
   const instancesRef = useRef(instances);
   const paletteRef = useRef(palette);
+  const pendingIndicatorHydrationRef = useRef<Map<string, PendingIndicatorHydration>>(new Map());
+  const chartGenerationRef = useRef(0);
   const crosshairLogicalRef = useRef<number | null>(null);
   const refreshSelRef = useRef<() => void>(() => {});
   const facadeRef = useRef<ChartApiFacade | null>(null);
@@ -243,13 +253,65 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     let indicatorReloadPending = false;
     let chartSnapshotLoaded = false;
     let chartSnapshotPending = false;
+    let disposed = false;
 
     const indicatorKeys = () => instancesRef.current.flatMap((inst) => describeIndicator(inst, paletteRef.current).map((series) => series.key));
+    const markPendingHydrated = (result: QueryChartWindowResult) => {
+      const returned = new Set((result.indicators ?? []).map((series) => series.seriesKey));
+      for (const [instanceId, pending] of pendingIndicatorHydrationRef.current) {
+        if (pending.generation !== chartGenerationRef.current) continue;
+        if (pending.seriesKeys.every((key) => returned.has(key))) pendingIndicatorHydrationRef.current.delete(instanceId);
+      }
+    };
+    const queryIndicatorHydration = async (instanceId: string) => {
+      const pending = pendingIndicatorHydrationRef.current.get(instanceId);
+      if (!pending || !pending.ready || pending.querying || !chartSnapshotLoaded) return;
+      if (pending.generation !== chartGenerationRef.current) {
+        pendingIndicatorHydrationRef.current.delete(instanceId);
+        return;
+      }
+      const generation = chartGenerationRef.current;
+      const symbol = currentSymbol;
+      const timeframe = tfRef.current;
+      const bars = stores.bars.series(symbol, timeframe);
+      if (bars.length === 0) return;
+      const fromMs = Date.parse(bars[0].bucketStart);
+      const toMs = Date.parse(bars[bars.length - 1].bucketStart) + 1;
+      if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs >= toMs) return;
+
+      pending.querying = true;
+      try {
+        const result = await commands.sendQuery("QueryChartWindow", {
+          symbol, timeframe, fromMs, toMs, tailBars: 0,
+          indicatorSeriesKeys: pending.seriesKeys, skipBars: true,
+        }) as QueryChartWindowResult;
+        if (disposed || generation !== chartGenerationRef.current || currentSymbol !== symbol || tfRef.current !== timeframe
+          || pendingIndicatorHydrationRef.current.get(instanceId) !== pending) return;
+        for (const series of result.indicators ?? []) {
+          stores.indicators.mergeWindow(series.seriesKey, series.points ?? [], result.fromMs, result.toMs);
+          stores.indicators.expandWindow(series.seriesKey, result.fromMs, Number.POSITIVE_INFINITY);
+        }
+        forceRepaintRef.current = true;
+        pendingIndicatorHydrationRef.current.delete(instanceId);
+      } catch {
+        // A disconnected request is settled by WsClient; the next chart generation
+        // will receive the normal full snapshot.
+      } finally {
+        if (pendingIndicatorHydrationRef.current.get(instanceId) === pending) pending.querying = false;
+      }
+    };
+    const flushPendingIndicatorHydration = () => {
+      if (!chartSnapshotLoaded) return;
+      for (const pending of pendingIndicatorHydrationRef.current.values()) {
+        if (pending.generation === chartGenerationRef.current && pending.ready) void queryIndicatorHydration(pending.instanceId);
+      }
+    };
     const mergeSnapshot = (result: QueryChartWindowResult, generation: number) => {
-      const accepted = generation === viewportGeneration && result.symbol === currentSymbol && result.timeframe === tfRef.current;
+      const accepted = !disposed && generation === viewportGeneration && result.symbol === currentSymbol && result.timeframe === tfRef.current;
       if (!accepted) return false;
       stores.bars.mergeWindow(result.symbol, result.timeframe, result.bars ?? [], result.fromMs, result.toMs);
       for (const series of result.indicators ?? []) stores.indicators.mergeWindow(series.seriesKey, series.points ?? [], result.fromMs, result.toMs);
+      markPendingHydrated(result);
       forceRepaintRef.current = true;
       return true;
     };
@@ -270,6 +332,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           facade.resetPriceScale();
           facade.scrollToRealTime();
           chartSnapshotLoaded = true;
+          flushPendingIndicatorHydration();
           uiLog.debug("chart snapshot loaded", {
             symbol: result.symbol,
             timeframe: result.timeframe,
@@ -385,6 +448,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         lastFirstPaintSequence = timing.sequence;
       }
       viewportGeneration++;
+      chartGenerationRef.current++;
+      pendingIndicatorHydrationRef.current.clear();
       indicatorReloadPending = initialized;
       initialized = true;
       chartSnapshotLoaded = false;
@@ -417,7 +482,14 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         const key = eventKey(event);
         nextSeen.add(key);
         if (seenEventKeys.has(key)) continue;
-		if (event.detail !== currentSymbol || event.kind !== "chart-ready") continue;
+        if (event.kind === "indicator-ready") {
+          const pending = pendingIndicatorHydrationRef.current.get(event.detail);
+          if (!pending || pending.generation !== chartGenerationRef.current) continue;
+          pending.ready = true;
+          void queryIndicatorHydration(pending.instanceId);
+          continue;
+        }
+        if (event.detail !== currentSymbol || event.kind !== "chart-ready") continue;
         if (indicatorReloadPending) {
           for (const indicatorKey of indicatorKeys()) stores.indicators.reset(indicatorKey);
           indicatorReloadPending = false;
@@ -555,6 +627,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     ro.observe(host);
 
     return () => {
+      disposed = true;
+      viewportGeneration++;
+      chartGenerationRef.current++;
+      pendingIndicatorHydrationRef.current.clear();
       off(); offLink(); offHistoryReady(); offCrosshair(); ro.disconnect();
       timeScale.unsubscribeVisibleLogicalRangeChange(clampRight);
       // Cancel any rAF-batched legend/selection recompute still pending from
@@ -624,6 +700,13 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   };
   const addIndicator = (type: IndicatorType) => {
     const inst: IndicatorInstance = { instanceId: `${config.id}:${type}-${idSeq.current++}`, type, params: withDefaultParams(type) };
+    pendingIndicatorHydrationRef.current.set(inst.instanceId, {
+      instanceId: inst.instanceId,
+      seriesKeys: describeIndicator(inst, paletteRef.current).map((series) => series.key),
+      ready: false,
+      generation: chartGenerationRef.current,
+      querying: false,
+    });
     controllerRef.current?.addIndicator(inst);
     setInstancesNow([...instancesRef.current, inst]);
   };
@@ -632,6 +715,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     setInstancesNow(instancesRef.current.map((i) => (i.instanceId === inst.instanceId ? inst : i)));
   };
   const removeIndicator = (id: string) => {
+    pendingIndicatorHydrationRef.current.delete(id);
     controllerRef.current?.removeIndicator(id);
     setInstancesNow(instancesRef.current.filter((i) => i.instanceId !== id));
   };
