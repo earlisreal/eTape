@@ -138,11 +138,11 @@ describe("fireTemplate — management templates", () => {
     expect(oc.cancelAll).toHaveBeenCalledWith("everything");
   });
 
-  it("KillSwitch calls oc.kill() and warn-toasts, even when disarmed", () => {
+  it("KillSwitch calls oc.kill() without an immediate success toast, even when disarmed", () => {
     const oc = makeOc();
     const toast = makeToast();
     fireTemplate(manage("KillSwitch"), baseCtx({ armed: false }), oc, toast, { gateArm: true });
     expect(oc.kill).toHaveBeenCalledWith();
-    expect(toast.push).toHaveBeenCalledWith({ level: "warn", text: "KILL — cancel-all + lock" });
+    expect(toast.push).not.toHaveBeenCalled();
   });
 });

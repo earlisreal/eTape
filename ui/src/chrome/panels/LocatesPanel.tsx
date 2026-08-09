@@ -98,6 +98,8 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
   const [quoteError, setQuoteError] = useState("");
   const [locateResult, setLocateResult] = useState<LocateRecord | null>(null);
   const [requestError, setRequestError] = useState("");
+  const [activeListError, setActiveListError] = useState("");
+  const [historyListError, setHistoryListError] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [activeLocates, setActiveLocates] = useState<LocateRecord[]>(emptyList);
@@ -107,6 +109,7 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
   const activeFilterSymbol = activeScope === "symbol" ? symbol : "";
   const activeListIdentity = `${venue}|${activeFilterSymbol}`;
   const historyListIdentity = `${venue}|${historyStatus}`;
+  const listError = activeTab === "active" ? activeListError : historyListError;
   activeListIdentityRef.current = activeListIdentity;
   historyListIdentityRef.current = historyListIdentity;
 
@@ -147,12 +150,14 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
 
   useEffect(() => {
     setActiveLocates([]);
+    setActiveListError("");
     activeListSeqRef.current += 1;
   }, [activeListIdentity]);
 
   useEffect(() => {
     setHistoryLocates([]);
     setHistoryNext("");
+    setHistoryListError("");
     historyListSeqRef.current += 1;
   }, [historyListIdentity]);
 
@@ -173,6 +178,7 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
   const loadLocates = useCallback(async (filter: { status: string; symbol: string; pageToken?: string }, target: Tab, append: boolean): Promise<void> => {
     const seqRef = target === "active" ? activeListSeqRef : historyListSeqRef;
     const identityRef = target === "active" ? activeListIdentityRef : historyListIdentityRef;
+    const setListError = target === "active" ? setActiveListError : setHistoryListError;
     const seq = ++seqRef.current;
     const requestIdentity = target === "active" ? `${venue}|${filter.symbol}` : `${venue}|${filter.status}`;
     const isCurrent = () => seq === seqRef.current && identityRef.current === requestIdentity;
@@ -182,9 +188,10 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
       }) as LocateListResult;
       if (!isCurrent()) return;
       if (raw.error) {
-        setRequestError(raw.error);
+        setListError(raw.error);
         return;
       }
+      setListError("");
       if (target === "active") {
         setActiveLocates((current) => append ? [...current, ...(raw.locates ?? [])] : (raw.locates ?? []));
       } else {
@@ -192,7 +199,7 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
         setHistoryNext(raw.nextPageToken ?? "");
       }
     } catch (err: unknown) {
-      if (isCurrent()) setRequestError(err instanceof Error ? err.message : "locates unavailable");
+      if (isCurrent()) setListError(err instanceof Error ? err.message : "locates unavailable");
     }
   }, [commands, venue]);
 
@@ -370,7 +377,7 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
                 <div style={{ color: palette.ok, marginTop: 8 }}>Short order may now be submitted.</div>
               </section>}
 
-              {(quoteError || requestError) && <div data-testid="locates-error" style={{ padding: "6px 8px", color: palette.danger, borderBottom: `1px solid ${palette.border}` }}>{quoteError || requestError}</div>}
+              {(quoteError || requestError || listError) && <div data-testid="locates-error" style={{ padding: "6px 8px", color: palette.danger, borderBottom: `1px solid ${palette.border}` }}>{quoteError || requestError || listError}</div>}
 
               <section style={{ display: "flex", flexDirection: "column", minHeight: 130 }}>
                 <div style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${palette.border}`, background: palette.surface }}>

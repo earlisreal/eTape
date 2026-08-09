@@ -235,7 +235,7 @@ describe("LocatesPanel", () => {
         const filter = args as { status: string; pageToken?: string };
         if (filter.status === "active") {
           activeCalls += 1;
-          return activeCalls === 1 ? { locates: [], nextPageToken: "", error: "" } : Promise.reject(new Error("active websocket disconnected"));
+          return activeCalls === 1 || activeCalls === 3 ? { locates: [], nextPageToken: "", error: "" } : Promise.reject(new Error("active websocket disconnected"));
         }
         historyCalls += 1;
         return historyCalls === 1 ? { locates: [], nextPageToken: "history-next", error: "" } : Promise.reject(new Error("history websocket disconnected"));
@@ -246,6 +246,9 @@ describe("LocatesPanel", () => {
     await waitFor(() => expect(activeCalls).toBe(1));
     fireEvent.click(screen.getByRole("button", { name: "refresh active locates" }));
     await waitFor(() => expect(screen.getByTestId("locates-error").textContent).toContain("active websocket disconnected"));
+    fireEvent.click(screen.getByRole("button", { name: "refresh active locates" }));
+    await waitFor(() => expect(activeCalls).toBe(3));
+    await waitFor(() => expect(screen.queryByTestId("locates-error")).toBeNull());
 
     fireEvent.click(screen.getByRole("button", { name: "HISTORY" }));
     await waitFor(() => expect(screen.getByRole("button", { name: "Load more" })).toBeTruthy());

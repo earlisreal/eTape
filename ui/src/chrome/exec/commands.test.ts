@@ -124,4 +124,21 @@ describe("OrderCommands sound triggers", () => {
       text: "Outcome unknown (alpaca-paper) — connection was lost after the request was sent. Verify Open Orders / position before submitting again.",
     });
   });
+
+  it("Kill Switch reports accepted, blocked, and ambiguous outcomes", async () => {
+    const run = async (ack: Partial<AckMsg>) => {
+      const push = vi.fn();
+      const cmd: CommandAdapter = { sendCommand: vi.fn(async () => ({ kind: "ack", corrId: "c", status: "accepted", ...ack }) as AckMsg) };
+      const oc = new OrderCommands({ cmd, exec: {} as never, toast: { push } as never, now: () => 0 });
+      await oc.kill();
+      return push;
+    };
+
+    expect(await run({})).toHaveBeenCalledWith({ level: "warn", text: "KILL — cancel-all + lock" });
+    expect(await run({ status: "blocked", reason: "master disarmed" })).toHaveBeenCalledWith({ level: "danger", text: "Kill Switch failed: master disarmed" });
+    expect(await run({ status: "blocked", ambiguous: true, reason: "websocket disconnected" })).toHaveBeenCalledWith({
+      level: "warn",
+      text: "KILL outcome unknown — connection was lost. Verify open orders and positions immediately.",
+    });
+  });
 });

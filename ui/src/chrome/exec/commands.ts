@@ -22,6 +22,9 @@ function ambiguousText(venue: VenueID): string {
   return `Outcome unknown (${venue}) — connection was lost after the request was sent. Verify Open Orders / position before submitting again.`;
 }
 
+const KILL_SUCCESS_TEXT = "KILL — cancel-all + lock";
+const KILL_UNKNOWN_TEXT = "KILL outcome unknown — connection was lost. Verify open orders and positions immediately.";
+
 export class OrderCommands {
   constructor(private readonly d: OrderCommandsDeps) {}
 
@@ -70,7 +73,23 @@ export class OrderCommands {
 
   async arm(): Promise<void> { await this.d.cmd.sendCommand("Arm", {}); }
   async disarm(): Promise<void> { await this.d.cmd.sendCommand("Disarm", {}); }
-  async kill(venue?: VenueID): Promise<void> { await this.d.cmd.sendCommand("KillSwitch", venue ? { venue } : {}); }
+  async kill(venue?: VenueID): Promise<void> {
+    try {
+      const ack = await this.d.cmd.sendCommand("KillSwitch", venue ? { venue } : {});
+      if (ack.ambiguous) {
+        this.d.toast.push({ level: "warn", text: KILL_UNKNOWN_TEXT });
+        return;
+      }
+      if (ack.status === "accepted") {
+        this.d.toast.push({ level: "warn", text: KILL_SUCCESS_TEXT });
+        return;
+      }
+      this.d.toast.push({ level: "danger", text: `Kill Switch failed: ${ack.reason ?? "unknown"}` });
+    } catch (err: unknown) {
+      const reason = err instanceof Error ? err.message : "connection was lost";
+      this.d.toast.push({ level: "warn", text: `KILL outcome unknown — ${reason}. Verify open orders and positions immediately.` });
+    }
+  }
 
   async cancelLast(symbol?: string): Promise<void> {
     const working = this.d.exec.workingOrdersFor(symbol);

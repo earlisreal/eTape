@@ -56,6 +56,6 @@ export function fireTemplate(
     case "CancelLast": void oc.cancelLast(ctx.symbol || undefined); break;
     case "CancelAllFocused": void oc.cancelAll("focused", ctx.symbol || undefined); break;
     case "CancelAllEverything": void oc.cancelAll("everything"); break;
-    case "KillSwitch": void oc.kill(); toast.push({ level: "warn", text: "KILL — cancel-all + lock" }); break;
+    case "KillSwitch": void oc.kill(); break;
   }
 }
