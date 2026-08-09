@@ -948,6 +948,67 @@ describe("ChartPanel", () => {
     expect(stores.indicators.series(emaId)).toEqual(newPoints);
   });
 
+  it("waits for every readiness barrier across rapid EMA edits", async () => {
+    const fromMs = Date.parse("2026-07-09T13:30:00.000Z");
+    const toMs = Date.parse("2026-07-09T13:31:00.000Z") + 1;
+    const emaId = "c1:EMA-1";
+    const bars: Bar[] = [
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:30:00.000Z", o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false },
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:31:00.000Z", o: 100.5, h: 102, l: 100, c: 101.5, v: 120, inProgress: true },
+    ];
+    const oldPoints = [{ timeMs: fromMs, value: 9 }];
+    const ema20Points = [{ timeMs: fromMs, value: 20 }];
+    const ema50Points = [{ timeMs: fromMs, value: 50 }];
+    const { stores, commands } = renderChart("c1", undefined, undefined, {
+      symbol: "US.AAPL", timeframe: "1m", indicators: [{ instanceId: emaId, type: "EMA", params: { period: 9 } }],
+    });
+    let hydrationQueries = 0;
+    let readinessEvents = 0;
+    commands.sendQuery.mockImplementation(async (name: string, raw: unknown) => {
+      if (name !== "QueryChartWindow") return [];
+      const args = raw as { skipBars?: boolean };
+      if (!args.skipBars) return { symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars, indicators: [{ seriesKey: emaId, points: oldPoints }], historyRevision: 1 };
+      hydrationQueries++;
+      const points = readinessEvents === 1 ? ema20Points : ema50Points;
+      return { symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars: [], indicators: [{ seriesKey: emaId, points }], historyRevision: 2 };
+    });
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(stores.indicators.series(emaId)).toEqual(oldPoints);
+
+    const editPeriod = (period: string) => {
+      fireEvent.mouseEnter(screen.getByTestId(`legend-row-${emaId}`));
+      fireEvent.click(screen.getByRole("button", { name: `settings ${emaId}` }));
+      fireEvent.change(screen.getByLabelText("Period"), { target: { value: period } });
+      fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+    };
+    editPeriod("20");
+    editPeriod("50");
+    expect(stores.indicators.series(emaId)).toEqual([]);
+
+    readinessEvents++;
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 2, ts: "2026-08-03T01:00:01Z", kind: "indicator-ready", detail: emaId,
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow")).toHaveLength(1);
+    expect(hydrationQueries).toBe(0);
+
+    readinessEvents++;
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 3, ts: "2026-08-03T01:00:02Z", kind: "indicator-ready", detail: emaId,
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const queryCalls = commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow");
+    expect(queryCalls).toHaveLength(2);
+    expect(queryCalls[1][1]).toEqual(expect.objectContaining({ indicatorSeriesKeys: [emaId], skipBars: true, tailBars: 0 }));
+    expect(hydrationQueries).toBe(1);
+    expect(stores.indicators.series(emaId)).toEqual(ema50Points);
+  });
+
   it("resets and rehydrates all MACD slots after a parameter edit", async () => {
     const fromMs = Date.parse("2026-07-09T13:30:00.000Z");
     const toMs = Date.parse("2026-07-09T13:31:00.000Z") + 1;

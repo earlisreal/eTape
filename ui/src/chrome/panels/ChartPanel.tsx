@@ -40,7 +40,7 @@ const ALL_CHART_BARS = 1_000_000;
 type PendingIndicatorHydration = {
   instanceId: string;
   seriesKeys: string[];
-  ready: boolean;
+  readyDebt: number;
   generation: number;
   querying: boolean;
   retryUsed: boolean;
@@ -259,7 +259,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const indicatorKeys = () => instancesRef.current.flatMap((inst) => describeIndicator(inst, paletteRef.current).map((series) => series.key));
     const queryIndicatorHydration = async (instanceId: string) => {
       const pending = pendingIndicatorHydrationRef.current.get(instanceId);
-      if (!pending || !pending.ready || pending.querying || !chartSnapshotLoaded) return;
+      if (!pending || pending.readyDebt !== 0 || pending.querying || !chartSnapshotLoaded) return;
       if (pending.generation !== chartGenerationRef.current) {
         pendingIndicatorHydrationRef.current.delete(instanceId);
         return;
@@ -303,7 +303,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const flushPendingIndicatorHydration = () => {
       if (!chartSnapshotLoaded) return;
       for (const pending of pendingIndicatorHydrationRef.current.values()) {
-        if (pending.generation === chartGenerationRef.current && pending.ready) void queryIndicatorHydration(pending.instanceId);
+        if (pending.generation === chartGenerationRef.current && pending.readyDebt === 0) void queryIndicatorHydration(pending.instanceId);
       }
     };
     const mergeSnapshot = (result: QueryChartWindowResult, generation: number) => {
@@ -484,8 +484,9 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         if (event.kind === "indicator-ready") {
           const pending = pendingIndicatorHydrationRef.current.get(event.detail);
           if (!pending || pending.generation !== chartGenerationRef.current) continue;
-          pending.ready = true;
-          void queryIndicatorHydration(pending.instanceId);
+          if (pending.readyDebt === 0) continue;
+          pending.readyDebt--;
+          if (pending.readyDebt === 0) void queryIndicatorHydration(pending.instanceId);
           continue;
         }
         if (event.detail !== currentSymbol || event.kind !== "chart-ready") continue;
@@ -680,10 +681,12 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // frozen at panel creation — dockview never re-invokes the factory).
   const persist = (patch: Record<string, unknown>) => onConfigChange(patch);
   const queueIndicatorHydration = (inst: IndicatorInstance) => {
+    const previous = pendingIndicatorHydrationRef.current.get(inst.instanceId);
+    const readyDebt = previous?.generation === chartGenerationRef.current ? previous.readyDebt + 1 : 1;
     pendingIndicatorHydrationRef.current.set(inst.instanceId, {
       instanceId: inst.instanceId,
       seriesKeys: describeIndicator(inst, paletteRef.current).map((series) => series.key),
-      ready: false,
+      readyDebt,
       generation: chartGenerationRef.current,
       querying: false,
       retryUsed: false,
