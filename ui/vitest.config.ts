@@ -65,6 +65,13 @@ export default defineConfig({
         },
       },
       {
+        extends: true,
+        test: {
+          name: 'exec',
+          include: ['src/chrome/exec/commands.test.ts'],
+        },
+      },
+      {
         test: {
           name: 'golden',
           include: ['test/golden/**/*.test.ts', 'test/golden/**/*.golden.test.ts'],

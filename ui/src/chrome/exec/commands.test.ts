@@ -104,4 +104,24 @@ describe("OrderCommands sound triggers", () => {
     await oc2.replace({ venue: "alpaca-paper", orderId: "o1", qty: 1, limitPrice: 1, stopPrice: 0 });
     expect(sound.rejected).toBe(2);
   });
+
+  it("ambiguous execution ACKs warn without rejection or placement feedback", async () => {
+    const sound = soundSpy();
+    const push = vi.fn();
+    const cmd: CommandAdapter = { sendCommand: vi.fn(async () => ({ kind: "ack", corrId: "c", status: "blocked", reason: "websocket disconnected", ambiguous: true }) as AckMsg) };
+    const oc = new OrderCommands({ cmd, exec: {} as never, toast: { push } as never, now: () => 0, sound });
+
+    await oc.submit(args, "flash");
+    await oc.cancel("alpaca-paper", "o1");
+    await oc.replace({ venue: "alpaca-paper", orderId: "o1", qty: 1, limitPrice: 1, stopPrice: 0 });
+    await oc.flatten("alpaca-paper");
+
+    expect(sound.rejected).toBe(0);
+    expect(sound.placed).toEqual([]);
+    expect(push).toHaveBeenCalledTimes(4);
+    expect(push).toHaveBeenCalledWith({
+      level: "warn",
+      text: "Outcome unknown (alpaca-paper) — connection was lost after the request was sent. Verify Open Orders / position before submitting again.",
+    });
+  });
 });

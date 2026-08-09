@@ -73,6 +73,8 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
   const generationRef = useRef(0);
   const activeListSeqRef = useRef(0);
   const historyListSeqRef = useRef(0);
+  const activeListIdentityRef = useRef("");
+  const historyListIdentityRef = useRef("");
   const inFlightRef = useRef(false);
   const requestSeqRef = useRef(0);
   const requestKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
@@ -102,6 +104,12 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
   const [historyLocates, setHistoryLocates] = useState<LocateRecord[]>(emptyList);
   const [historyNext, setHistoryNext] = useState("");
 
+  const activeFilterSymbol = activeScope === "symbol" ? symbol : "";
+  const activeListIdentity = `${venue}|${activeFilterSymbol}`;
+  const historyListIdentity = `${venue}|${historyStatus}`;
+  activeListIdentityRef.current = activeListIdentity;
+  historyListIdentityRef.current = historyListIdentity;
+
   const quantity = Number(quantityText);
   const quantityValid = Number.isSafeInteger(quantity) && quantity > 0 && quantity % 100 === 0;
   const maxFeeValid = positiveDecimal(maxFee);
@@ -119,8 +127,8 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
     if (requestKeyRef.current && requestKeyRef.current.fingerprint !== fingerprint) requestKeyRef.current = null;
   }, [fingerprint]);
 
-  // Symbol/venue changes invalidate every broker-derived view. The identity
-  // check below also discards responses that were already in flight.
+  // Symbol/venue changes invalidate quote and request state. List views use
+  // separate identities below so All/History can survive symbol changes.
   useEffect(() => {
     generationRef.current += 1;
     setEligibility(null);
@@ -129,18 +137,24 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
     setQuoteError("");
     setLocateResult(null);
     setRequestError("");
-    setActiveLocates([]);
-    setHistoryLocates([]);
-    setHistoryNext("");
     setConfirmOpen(false);
     setQuoteLoading(false);
-    activeListSeqRef.current += 1;
-    historyListSeqRef.current += 1;
     requestSeqRef.current += 1;
     inFlightRef.current = false;
     requestKeyRef.current = null;
     setSubmitting(false);
   }, [identity]);
+
+  useEffect(() => {
+    setActiveLocates([]);
+    activeListSeqRef.current += 1;
+  }, [activeListIdentity]);
+
+  useEffect(() => {
+    setHistoryLocates([]);
+    setHistoryNext("");
+    historyListSeqRef.current += 1;
+  }, [historyListIdentity]);
 
   useEffect(() => {
     if (!supported || !symbol) return;
@@ -158,38 +172,39 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
 
   const loadLocates = useCallback(async (filter: { status: string; symbol: string; pageToken?: string }, target: Tab, append: boolean): Promise<void> => {
     const seqRef = target === "active" ? activeListSeqRef : historyListSeqRef;
+    const identityRef = target === "active" ? activeListIdentityRef : historyListIdentityRef;
     const seq = ++seqRef.current;
-    const generation = generationRef.current;
-    const requestIdentity = identity;
-    const raw = await commands.sendQuery("QueryLocates", {
-      venue, status: filter.status, symbol: filter.symbol, start: "", end: "", limit: 100, pageToken: filter.pageToken ?? "",
-    }) as LocateListResult;
-    if (seq !== seqRef.current || generation !== generationRef.current || identityRef.current !== requestIdentity) return;
-    if (raw.error) {
-      setRequestError(raw.error);
-      return;
+    const requestIdentity = target === "active" ? `${venue}|${filter.symbol}` : `${venue}|${filter.status}`;
+    const isCurrent = () => seq === seqRef.current && identityRef.current === requestIdentity;
+    try {
+      const raw = await commands.sendQuery("QueryLocates", {
+        venue, status: filter.status, symbol: filter.symbol, start: "", end: "", limit: 100, pageToken: filter.pageToken ?? "",
+      }) as LocateListResult;
+      if (!isCurrent()) return;
+      if (raw.error) {
+        setRequestError(raw.error);
+        return;
+      }
+      if (target === "active") {
+        setActiveLocates((current) => append ? [...current, ...(raw.locates ?? [])] : (raw.locates ?? []));
+      } else {
+        setHistoryLocates((current) => append ? [...current, ...(raw.locates ?? [])] : (raw.locates ?? []));
+        setHistoryNext(raw.nextPageToken ?? "");
+      }
+    } catch (err: unknown) {
+      if (isCurrent()) setRequestError(err instanceof Error ? err.message : "locates unavailable");
     }
-    if (target === "active") {
-      setActiveLocates((current) => append ? [...current, ...(raw.locates ?? [])] : (raw.locates ?? []));
-    } else {
-      setHistoryLocates((current) => append ? [...current, ...(raw.locates ?? [])] : (raw.locates ?? []));
-      setHistoryNext(raw.nextPageToken ?? "");
-    }
-  }, [commands, identity, venue]);
+  }, [commands, venue]);
 
   useEffect(() => {
     if (!supported) return;
-    void loadLocates({ status: "active", symbol: activeScope === "symbol" ? symbol : "" }, "active", false).catch((err: unknown) => {
-      setRequestError(err instanceof Error ? err.message : "active locates unavailable");
-    });
-  }, [activeScope, loadLocates, supported, symbol]);
+    void loadLocates({ status: "active", symbol: activeFilterSymbol }, "active", false);
+  }, [activeFilterSymbol, activeListIdentity, loadLocates, supported]);
 
   useEffect(() => {
     if (!supported || activeTab !== "history") return;
-    void loadLocates({ status: historyStatus, symbol: "" }, "history", false).catch((err: unknown) => {
-      setRequestError(err instanceof Error ? err.message : "locate history unavailable");
-    });
-  }, [activeTab, historyStatus, loadLocates, supported]);
+    void loadLocates({ status: historyStatus, symbol: "" }, "history", false);
+  }, [activeTab, historyListIdentity, historyStatus, loadLocates, supported]);
 
   const getQuote = async (): Promise<void> => {
     if (!workflowEnabled || !quantityValid || quoteLoading) return;
@@ -253,9 +268,7 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
       requestKeyRef.current = null;
       setConfirmOpen(false);
       toast.push({ level: "success", text: "Locate active. Short order may now be submitted." });
-      void loadLocates({ status: "active", symbol: activeScope === "symbol" ? symbol : "" }, "active", false).catch((err: unknown) => {
-        if (requestSeq === requestSeqRef.current && identityRef.current === requestIdentity) setRequestError(err instanceof Error ? err.message : "active locates unavailable");
-      });
+      void loadLocates({ status: "active", symbol: activeFilterSymbol }, "active", false);
     } catch (err: unknown) {
       if (requestSeq === requestSeqRef.current && generation === generationRef.current && identityRef.current === requestIdentity) {
         setRequestError(err instanceof Error ? err.message : "locate request failed");
@@ -367,7 +380,7 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
                   {activeTab === "active" ? <>
                     <button type="button" onClick={() => setScope("all")} style={tabStyle(activeScope === "all", palette)}>All</button>
                     <button type="button" onClick={() => setScope("symbol")} style={tabStyle(activeScope === "symbol", palette)}>This Symbol</button>
-                    <button type="button" aria-label="refresh active locates" onClick={() => void loadLocates({ status: "active", symbol: activeScope === "symbol" ? symbol : "" }, "active", false)} style={refreshStyle(palette)}>↻</button>
+                    <button type="button" aria-label="refresh active locates" onClick={() => void loadLocates({ status: "active", symbol: activeFilterSymbol }, "active", false)} style={refreshStyle(palette)}>↻</button>
                   </> : <>
                     <select data-testid="locates-history-status" className="ctl mono" value={historyStatus} onChange={(e) => updateHistoryStatus(e.target.value)} style={{ marginRight: 6 }}>
                       <option value="expired">Expired</option><option value="rejected">Rejected</option>

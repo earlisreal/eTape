@@ -1,6 +1,6 @@
 // Typed order-command client. Every method wraps the correlated command adapter;
 // submit registers the optimistic PendingNew row (keyed by the ack's orderId) and
-// raises the flash/block toast. Cancel-all/last are composed from CancelOrder over
+// raises the flash/block/unknown-outcome toast. Cancel-all/last are composed from CancelOrder over
 // the working set — the engine's token buckets pace the burst.
 import type { AckMsg, SubmitOrderArgs, ReplaceOrderArgs, VenueID } from "../../wire/contract";
 import type { ExecStore } from "../../data/ExecStore";
@@ -18,11 +18,19 @@ const REASON_TEXT: Record<string, string> = {
   "master disarmed": "trading is locked — unlock it in the top bar",
 };
 
+function ambiguousText(venue: VenueID): string {
+  return `Outcome unknown (${venue}) — connection was lost after the request was sent. Verify Open Orders / position before submitting again.`;
+}
+
 export class OrderCommands {
   constructor(private readonly d: OrderCommandsDeps) {}
 
   async submit(args: SubmitOrderArgs, flash: string): Promise<void> {
     const ack = await this.d.cmd.sendCommand("SubmitOrder", args);
+    if (ack.ambiguous) {
+      this.d.toast.push({ level: "warn", text: ambiguousText(args.venue) });
+      return;
+    }
     if (ack.status === "blocked") {
       const reason = REASON_TEXT[ack.reason ?? ""] ?? ack.reason ?? "unknown";
       this.d.toast.push({ level: "danger", text: `Blocked (${args.venue}): ${reason}` });
@@ -36,14 +44,26 @@ export class OrderCommands {
 
   async cancel(venue: VenueID, orderId: string): Promise<void> {
     const ack = await this.d.cmd.sendCommand("CancelOrder", { venue, orderId });
+    if (ack.ambiguous) {
+      this.d.toast.push({ level: "warn", text: ambiguousText(venue) });
+      return;
+    }
     if (ack.status === "blocked") this.d.sound?.orderRejected();
   }
   async replace(args: ReplaceOrderArgs): Promise<void> {
     const ack = await this.d.cmd.sendCommand("ReplaceOrder", args);
+    if (ack.ambiguous) {
+      this.d.toast.push({ level: "warn", text: ambiguousText(args.venue) });
+      return;
+    }
     if (ack.status === "blocked") this.d.sound?.orderRejected();
   }
   async flatten(venue: VenueID): Promise<void> {
     const ack = await this.d.cmd.sendCommand("Flatten", { venue });
+    if (ack.ambiguous) {
+      this.d.toast.push({ level: "warn", text: ambiguousText(venue) });
+      return;
+    }
     if (ack.status === "blocked") this.d.sound?.orderRejected();
     else this.d.sound?.orderPlaced("SELL"); // risk-off: falling pitch
   }

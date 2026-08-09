@@ -208,6 +208,51 @@ describe("LocatesPanel", () => {
     await waitFor(() => expect(sentQueries.some((call) => call.name === "QueryLocates" && (call.args as { symbol: string }).symbol === "US.AAPL")).toBe(true));
   });
 
+  it("keeps All and History lists across symbol changes but reloads This Symbol", async () => {
+    const { props, stores, sentQueries, execStatus } = mkProps();
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: execStatus }));
+    const view = renderPanel(props);
+    await waitFor(() => expect(sentQueries.some((call) => call.name === "QueryLocates" && (call.args as { status: string }).status === "active")).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "HISTORY" }));
+    await waitFor(() => expect(sentQueries.some((call) => call.name === "QueryLocates" && (call.args as { status: string }).status === "expired")).toBe(true));
+    const listCallsBeforeSymbolChange = sentQueries.filter((call) => call.name === "QueryLocates").length;
+
+    view.rerender(panelNode({ ...props, symbol: "US.TSLA" }));
+    await waitFor(() => expect(sentQueries.some((call) => call.name === "QueryLocateEligibility" && (call.args as { symbol: string }).symbol === "US.TSLA")).toBe(true));
+    expect(sentQueries.filter((call) => call.name === "QueryLocates")).toHaveLength(listCallsBeforeSymbolChange);
+
+    fireEvent.click(screen.getByRole("button", { name: "ACTIVE" }));
+    fireEvent.click(screen.getByRole("button", { name: "This Symbol" }));
+    await waitFor(() => expect(sentQueries.some((call) => call.name === "QueryLocates" && (call.args as { symbol: string }).symbol === "US.TSLA")).toBe(true));
+  });
+
+  it("surfaces Active refresh and History load-more disconnects in the panel", async () => {
+    let activeCalls = 0;
+    let historyCalls = 0;
+    const { props, stores, execStatus } = mkProps({
+      query: (name, args) => {
+        if (name !== "QueryLocates") return undefined;
+        const filter = args as { status: string; pageToken?: string };
+        if (filter.status === "active") {
+          activeCalls += 1;
+          return activeCalls === 1 ? { locates: [], nextPageToken: "", error: "" } : Promise.reject(new Error("active websocket disconnected"));
+        }
+        historyCalls += 1;
+        return historyCalls === 1 ? { locates: [], nextPageToken: "history-next", error: "" } : Promise.reject(new Error("history websocket disconnected"));
+      },
+    });
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: execStatus }));
+    renderPanel(props);
+    await waitFor(() => expect(activeCalls).toBe(1));
+    fireEvent.click(screen.getByRole("button", { name: "refresh active locates" }));
+    await waitFor(() => expect(screen.getByTestId("locates-error").textContent).toContain("active websocket disconnected"));
+
+    fireEvent.click(screen.getByRole("button", { name: "HISTORY" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Load more" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() => expect(screen.getByTestId("locates-error").textContent).toContain("history websocket disconnected"));
+  });
+
   it("starts a new idempotency key after a definitive provider rejection", async () => {
     const { props, stores, sentCommands, execStatus } = mkProps({
       command: async (name) => name === "RequestLocate"
