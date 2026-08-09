@@ -52,6 +52,7 @@ export interface AckMsg {
   reason?: string;
   orderId?: string;
   value?: unknown;
+  ambiguous?: boolean;
 }
 export interface PongMsg {
   kind: "pong";

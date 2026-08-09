@@ -26,6 +26,13 @@ type queryHandler interface {
 	handle(name string, args json.RawMessage) any
 }
 
+// asyncQueryHandler is an optional escape hatch for queries backed by slow
+// external services. The callback carries the original request correlation
+// through dispatch, so the connection reader can continue immediately.
+type asyncQueryHandler interface {
+	handleAsync(ctx context.Context, name string, args json.RawMessage, reply func(any)) bool
+}
+
 // qitem is one queued outbound frame. ck is its coalesce key: "" means the
 // frame is lossless/ordered (an event or a snapshot -- never superseded), and a
 // non-empty ck means the frame is a latest-wins delta whose newest value may
@@ -323,6 +330,11 @@ func (c *conn) dispatch(ctx context.Context, b []byte) {
 			send(ack)
 		}
 	case "query":
+		if async, ok := c.qry.(asyncQueryHandler); ok && async.handleAsync(ctx, head.Name, head.Args, func(payload any) {
+			c.enqueueJSON(wsmsg.ResultMsg{Kind: "result", CorrID: head.CorrID, Payload: payload})
+		}) {
+			return
+		}
 		payload := c.qry.handle(head.Name, head.Args)
 		c.enqueueJSON(wsmsg.ResultMsg{Kind: "result", CorrID: head.CorrID, Payload: payload})
 	case "ping":

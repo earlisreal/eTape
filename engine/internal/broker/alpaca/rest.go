@@ -257,21 +257,29 @@ func (rc *restClient) createLocate(ctx context.Context, request locates.Request)
 		"Idempotency-Key": []string{request.IdempotencyKey},
 	})
 	if err != nil {
-		return locates.Record{}, fmt.Errorf("alpaca: create locate transport: %w", err)
+		return locates.Record{}, locates.MarkAmbiguous(fmt.Errorf("alpaca: create locate transport: %w", err))
 	}
 	defer resp.Body.Close()
 	responseBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return locates.Record{}, fmt.Errorf("alpaca: read create locate response: %w", err)
+		return locates.Record{}, locates.MarkAmbiguous(fmt.Errorf("alpaca: read create locate response: %w", err))
 	}
 	if resp.StatusCode >= 400 {
-		return locates.Record{}, apiError(resp.StatusCode, responseBody)
+		apiErr := apiError(resp.StatusCode, responseBody)
+		if resp.StatusCode >= 500 {
+			return locates.Record{}, locates.MarkAmbiguous(apiErr)
+		}
+		return locates.Record{}, apiErr
 	}
 	var wire locateRecordWire
 	if err := json.Unmarshal(responseBody, &wire); err != nil {
-		return locates.Record{}, fmt.Errorf("alpaca: decode create locate response: %w", err)
+		return locates.Record{}, locates.MarkAmbiguous(fmt.Errorf("alpaca: decode create locate response: %w", err))
 	}
-	return mapLocateRecord(wire)
+	record, err := mapLocateRecord(wire)
+	if err != nil {
+		return locates.Record{}, locates.MarkAmbiguous(err)
+	}
+	return record, nil
 }
 
 func (rc *restClient) listLocates(ctx context.Context, filter locates.ListFilter) (locates.Page, error) {

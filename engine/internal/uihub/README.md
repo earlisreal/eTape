@@ -6,6 +6,8 @@ Locate eligibility, quote, list, and recovery reads are UIHub queries. The
 fee-bearing `RequestLocate` path is a command and returns the broker-confirmed
 locate record in `AckMsg.Value`. UIHub receives an optional exact-venue locate
 provider registry; unsupported venues fail closed rather than falling through
-to another Alpaca account.
+to another Alpaca account. Broker-backed locate queries and requests run off
+the connection reader with correlation-preserving deferred replies, so a slow
+Alpaca REST call cannot delay unrelated commands.
 
 Local HTTP/WebSocket bridge. Publishes topic snapshots/updates; dispatches typed commands. Go `wsmsg/` structs own contract; generated TypeScript follows generator. Mirror supplies snapshot-on-subscribe. Test: `go test ./internal/uihub`; `make gen-ts-check`.

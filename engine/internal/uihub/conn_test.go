@@ -73,8 +73,8 @@ func (f *fakeCmd) handle(_ context.Context, name string, _ json.RawMessage, _ ui
 // goroutine, simulating async work finishing after handle already returned)
 // and reports deferred=true alongside a deliberately wrong "returned" ack, so
 // a test can prove dispatch never sends that returned value -- only reply's
-// ack reaches the client. No production command uses deferred=true yet
-// (Task 7's LoadOlderBars will be the first); this double stands in for it.
+// ack reaches the client. RequestLocate is the production deferred command;
+// this double keeps the dispatch contract independently testable.
 type deferredCmd struct {
 	replyAck wsmsg.AckMsg
 	last     string
@@ -89,6 +89,27 @@ func (f *deferredCmd) handle(_ context.Context, name string, _ json.RawMessage, 
 type fakeQuery struct{}
 
 func (fakeQuery) handle(_ string, _ json.RawMessage) any { return []wsmsg.Fill{} }
+
+type deferredQuery struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (deferredQuery) handle(_ string, _ json.RawMessage) any { return []wsmsg.Fill{} }
+func (q deferredQuery) handleAsync(ctx context.Context, name string, _ json.RawMessage, reply func(any)) bool {
+	if name != "slow" {
+		return false
+	}
+	close(q.started)
+	go func() {
+		select {
+		case <-q.release:
+			reply([]string{"done"})
+		case <-ctx.Done():
+		}
+	}()
+	return true
+}
 
 func TestConnPingPong(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
@@ -185,6 +206,38 @@ func TestConnCommandDeferredAckSendsReplyNotReturnedAck(t *testing.T) {
 	if cmd.last != "LoadOlderBars" {
 		t.Fatalf("command not dispatched: %q", cmd.last)
 	}
+}
+
+func TestConnDeferredQueryDoesNotBlockReader(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10))
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	sock := newFakeSocket()
+	query := deferredQuery{started: make(chan struct{}), release: make(chan struct{})}
+	c := newConn(1, sock, h, &fakeCmd{}, query, 8, time.Second)
+	go c.run(ctx)
+
+	sock.in <- []byte(`{"kind":"query","corrId":"q1","name":"slow","args":{}}`)
+	select {
+	case <-query.started:
+	case <-time.After(time.Second):
+		t.Fatal("slow query was not dispatched")
+	}
+	sock.in <- []byte(`{"kind":"ping","t":123}`)
+	waitFor(t, func() bool {
+		for _, w := range sock.writes() {
+			var m map[string]any
+			_ = json.Unmarshal(w, &m)
+			if m["kind"] == "pong" && m["t"] == float64(123) {
+				return true
+			}
+		}
+		return false
+	})
+	close(query.release)
 }
 
 func TestConnSubscribeRoutesToHub(t *testing.T) {

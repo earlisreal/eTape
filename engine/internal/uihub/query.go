@@ -50,6 +50,27 @@ func fillRowToWire(r exec.FillRow) wsmsg.Fill {
 }
 
 func (q *queries) handle(name string, args json.RawMessage) any {
+	return q.handleContext(context.Background(), name, args)
+}
+
+func (q *queries) handleAsync(ctx context.Context, name string, args json.RawMessage, reply func(any)) bool {
+	if !isLocateQuery(name) {
+		return false
+	}
+	go func() { reply(q.handleContext(ctx, name, args)) }()
+	return true
+}
+
+func isLocateQuery(name string) bool {
+	switch name {
+	case "QueryLocateEligibility", "QueryLocateQuotes", "QueryLocates", "QueryLocate":
+		return true
+	default:
+		return false
+	}
+}
+
+func (q *queries) handleContext(ctx context.Context, name string, args json.RawMessage) any {
 	switch name {
 	case "QueryChartWindow":
 		var a wsmsg.QueryChartWindowArgs
@@ -132,7 +153,7 @@ func (q *queries) handle(name string, args json.RawMessage) any {
 		if !ok {
 			return wsmsg.LocateQuoteResult{Quotes: []wsmsg.LocateQuote{}, Errors: []wsmsg.LocateQuoteError{}, Error: "locate unsupported for selected venue"}
 		}
-		result, err := provider.QuoteLocates(context.Background(), a.Symbols)
+		result, err := provider.QuoteLocates(ctx, a.Symbols)
 		if err != nil {
 			return wsmsg.LocateQuoteResult{Quotes: []wsmsg.LocateQuote{}, Errors: []wsmsg.LocateQuoteError{}, Error: err.Error()}
 		}
@@ -146,7 +167,7 @@ func (q *queries) handle(name string, args json.RawMessage) any {
 		if !ok {
 			return wsmsg.LocateListResult{Locates: []wsmsg.LocateRecord{}, Error: "locate unsupported for selected venue"}
 		}
-		page, err := provider.ListLocates(context.Background(), locates.ListFilter{
+		page, err := provider.ListLocates(ctx, locates.ListFilter{
 			Status: a.Status, Symbol: a.Symbol, Start: a.Start, End: a.End,
 			Limit: a.Limit, PageToken: a.PageToken,
 		})
@@ -163,7 +184,7 @@ func (q *queries) handle(name string, args json.RawMessage) any {
 		if !ok {
 			return wsmsg.LocateRecord{}
 		}
-		record, err := provider.GetLocate(context.Background(), a.LocateID)
+		record, err := provider.GetLocate(ctx, a.LocateID)
 		if err != nil {
 			return wsmsg.LocateRecord{}
 		}

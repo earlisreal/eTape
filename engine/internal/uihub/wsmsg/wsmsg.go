@@ -165,12 +165,13 @@ type DeltaMsg struct {
 }
 
 type AckMsg struct {
-	Kind    string    `json:"kind"` // always "ack"
-	CorrID  string    `json:"corrId"`
-	Status  AckStatus `json:"status"`
-	Reason  string    `json:"reason,omitempty"`
-	OrderID string    `json:"orderId,omitempty"`
-	Value   any       `json:"value,omitempty"`
+	Kind      string    `json:"kind"` // always "ack"
+	CorrID    string    `json:"corrId"`
+	Status    AckStatus `json:"status"`
+	Reason    string    `json:"reason,omitempty"`
+	OrderID   string    `json:"orderId,omitempty"`
+	Value     any       `json:"value,omitempty"`
+	Ambiguous bool      `json:"ambiguous,omitempty"`
 }
 
 type PongMsg struct {

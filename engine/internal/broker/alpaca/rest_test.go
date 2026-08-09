@@ -1403,6 +1403,35 @@ func TestLocateREST_HTTPErrorFailsClosed(t *testing.T) {
 	}
 }
 
+func TestLocateREST_CreateErrorAmbiguity(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    int
+		ambiguous bool
+	}{
+		{name: "definitive 422", status: http.StatusUnprocessableEntity},
+		{name: "ambiguous 500", status: http.StatusInternalServerError, ambiguous: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mux := http.NewServeMux()
+			mux.HandleFunc("/v1/locates", func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodPost {
+					t.Fatalf("method = %s, want POST", r.Method)
+				}
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(`{"code":50010000,"message":"locate unavailable"}`))
+			})
+			srv := httptest.NewServer(mux)
+			defer srv.Close()
+			rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
+			_, err := rc.createLocate(context.Background(), locates.Request{Symbol: "US.AAPL", Qty: 100, LimitPrice: "0.01", IdempotencyKey: "retry-key"})
+			if err == nil || locates.IsAmbiguous(err) != tc.ambiguous {
+				t.Fatalf("err = %v ambiguous=%v, want %v", err, locates.IsAmbiguous(err), tc.ambiguous)
+			}
+		})
+	}
+}
+
 func TestLocateREST_MalformedEnvelopeAndInvalidCreateFailClosed(t *testing.T) {
 	var calls int
 	mux := http.NewServeMux()

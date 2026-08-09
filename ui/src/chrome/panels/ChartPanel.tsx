@@ -255,28 +255,33 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     };
     const querySnapshot = async () => {
 	  if (chartSnapshotLoaded || chartSnapshotPending) return;
-	  chartSnapshotPending = true;
-      const generation = ++viewportGeneration;
-      const startedAt = performance.now();
-      const keys = indicatorReloadPending ? [] : indicatorKeys();
-      const result = await commands.sendQuery("QueryChartWindow", {
-        symbol: currentSymbol, timeframe: tfRef.current, fromMs: 0, toMs: 0, tailBars: ALL_CHART_BARS,
-        indicatorSeriesKeys: keys,
-      }) as QueryChartWindowResult;
-      if (mergeSnapshot(result, generation)) {
-        stores.bars.expandWindow(result.symbol, result.timeframe, result.fromMs, Number.POSITIVE_INFINITY);
-        for (const key of keys) stores.indicators.expandWindow(key, result.fromMs, Number.POSITIVE_INFINITY);
-        facade.resetPriceScale();
-        facade.scrollToRealTime();
-        chartSnapshotLoaded = true;
-        uiLog.debug("chart snapshot loaded", {
-          symbol: result.symbol,
-          timeframe: result.timeframe,
-          bars: result.bars?.length ?? 0,
-          elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
-        });
-      }
-	  chartSnapshotPending = false;
+      chartSnapshotPending = true;
+      try {
+        const generation = ++viewportGeneration;
+        const startedAt = performance.now();
+        const keys = indicatorReloadPending ? [] : indicatorKeys();
+        const result = await commands.sendQuery("QueryChartWindow", {
+          symbol: currentSymbol, timeframe: tfRef.current, fromMs: 0, toMs: 0, tailBars: ALL_CHART_BARS,
+          indicatorSeriesKeys: keys,
+        }) as QueryChartWindowResult;
+        if (mergeSnapshot(result, generation)) {
+          stores.bars.expandWindow(result.symbol, result.timeframe, result.fromMs, Number.POSITIVE_INFINITY);
+          for (const key of keys) stores.indicators.expandWindow(key, result.fromMs, Number.POSITIVE_INFINITY);
+          facade.resetPriceScale();
+          facade.scrollToRealTime();
+          chartSnapshotLoaded = true;
+          uiLog.debug("chart snapshot loaded", {
+            symbol: result.symbol,
+            timeframe: result.timeframe,
+            bars: result.bars?.length ?? 0,
+            elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
+          });
+        }
+	  } catch {
+		// A disconnected request is settled by WsClient; reconnect triggers the normal snapshot path.
+	  } finally {
+		chartSnapshotPending = false;
+	  }
     };
 
     const clampRight = (range: LogicalRange | null) => {
@@ -352,7 +357,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const backfillFills = (sym: string) => {
       controller.setFills(aggregateFillMarkers(stores.fills.forSymbolFills(sym), tfRef.current as Timeframe));
       void commands.sendQuery("QueryFills", { symbol: sym, fromMs: 0, toMs: Date.now() })
-        .then((payload) => { stores.fills.ingest((payload as Parameters<typeof stores.fills.ingest>[0]) ?? []); });
+        .then((payload) => { stores.fills.ingest((payload as Parameters<typeof stores.fills.ingest>[0]) ?? []); })
+        .catch(() => { /* reconnect triggers the next chart refresh */ });
     };
     let pendingFirstPaint: { symbol: string; timeframe: string; startedAt: number; sequence: number } | null = null;
     let lastFirstPaintSequence = 0;

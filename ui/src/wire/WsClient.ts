@@ -15,7 +15,9 @@ export interface ISocket {
 export type SetTimeoutLike = (fn: () => void, ms: number) => unknown;
 export type ConnState = "connecting" | "open" | "reconnecting";
 type TopicHandler = (m: SnapshotMsg | DeltaMsg) => void;
-interface PendingCommand { command: string; resolve: (ack: AckMsg) => void }
+interface PendingCommand { command: string; resolve: (ack: AckMsg) => void; sent: boolean }
+interface PendingQuery { resolve: (payload: unknown) => void; reject: (reason: unknown) => void; sent: boolean }
+interface OutboxMessage { raw: string; corrId: string }
 
 interface Opts {
   url: string;
@@ -39,8 +41,8 @@ export class WsClient {
   private readonly handlers = new Map<TopicName, Set<TopicHandler>>();
   private readonly stateCbs = new Set<(s: ConnState) => void>();
   private readonly pending = new Map<string, PendingCommand>();
-  private readonly pendingQueries = new Map<string, (payload: unknown) => void>();
-  private readonly outbox: string[] = []; // commands buffered while not open
+  private readonly pendingQueries = new Map<string, PendingQuery>();
+  private readonly outbox: OutboxMessage[] = []; // requests buffered while not open
   private readonly backoff: (attempt: number) => number;
   private malformedFrames = 0;
 
@@ -76,16 +78,18 @@ export class WsClient {
   sendCommand(name: string, args: unknown): Promise<AckMsg> {
     const corrId = `c${++this.corr}`;
     return new Promise<AckMsg>((resolve) => {
-      this.pending.set(corrId, { command: name, resolve });
-      this.sendRaw({ kind: "command", corrId, name, args });
+      const pending = { command: name, resolve, sent: false };
+      this.pending.set(corrId, pending);
+      pending.sent = this.sendRaw({ kind: "command", corrId, name, args });
     });
   }
 
   sendQuery(name: string, args: unknown): Promise<unknown> {
     const corrId = `q${++this.corr}`;
-    return new Promise<unknown>((resolve) => {
-      this.pendingQueries.set(corrId, resolve);
-      this.sendRaw({ kind: "query", corrId, name, args });
+    return new Promise<unknown>((resolve, reject) => {
+      const pending = { resolve, reject, sent: false };
+      this.pendingQueries.set(corrId, pending);
+      pending.sent = this.sendRaw({ kind: "query", corrId, name, args });
     });
   }
 
@@ -122,6 +126,7 @@ export class WsClient {
     sock.onclose = () => {
       if (this.socket !== sock) return;
       this.socket = null;
+      this.settleLostRequests();
       this.setState("reconnecting");
       const reconnectAttempt = this.attempt + 1;
       const delay = this.backoff(this.attempt++);
@@ -177,27 +182,47 @@ export class WsClient {
         return;
       }
       case "result": {
-        const resolve = this.pendingQueries.get(msg.corrId);
-        if (resolve) { this.pendingQueries.delete(msg.corrId); resolve(msg.payload); }
+        const pending = this.pendingQueries.get(msg.corrId);
+        if (pending) { this.pendingQueries.delete(msg.corrId); pending.resolve(msg.payload); }
         return;
       }
     }
   }
 
-  private sendRaw(msg: ClientMessage): void {
+  private settleLostRequests(): void {
+    for (const [corrId, pending] of this.pending) {
+      if (!pending.sent) continue;
+      this.pending.delete(corrId);
+      pending.resolve({ kind: "ack", corrId, status: "blocked", reason: "websocket disconnected", ambiguous: true });
+    }
+    for (const [corrId, pending] of this.pendingQueries) {
+      if (!pending.sent) continue;
+      this.pendingQueries.delete(corrId);
+      pending.reject(new Error("websocket disconnected"));
+    }
+  }
+
+  private sendRaw(msg: ClientMessage): boolean {
     if (this.state === "open" && this.socket) {
       this.socket.send(encodeClientMessage(msg));
-      return;
+      return true;
     }
-    // Not open: buffer commands (each carries a pending promise); drop subscribe/
+    // Not open: buffer requests (each carries a pending promise); drop subscribe/
     // unsubscribe (reconstructed from handlers on open) and pings (re-fired on interval).
-    if (msg.kind === "command" || msg.kind === "query") this.outbox.push(encodeClientMessage(msg));
+    if (msg.kind === "command" || msg.kind === "query") this.outbox.push({ raw: encodeClientMessage(msg), corrId: msg.corrId });
+    return false;
   }
 
   private flushOutbox(): void {
     if (!this.socket) return;
     const queued = this.outbox.splice(0);
-    for (const raw of queued) this.socket.send(raw);
+    for (const item of queued) {
+      this.socket.send(item.raw);
+      const command = this.pending.get(item.corrId);
+      if (command) command.sent = true;
+      const query = this.pendingQueries.get(item.corrId);
+      if (query) query.sent = true;
+    }
     if (queued.length > 0) uiLog.debug("ws outbox flushed", { count: queued.length });
   }
 }

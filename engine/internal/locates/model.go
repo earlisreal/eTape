@@ -1,11 +1,46 @@
 package locates
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 	"unicode/utf8"
 )
+
+// Error carries whether a failed locate operation may have reached the broker.
+// Ambiguous failures must keep the request's idempotency key for a safe retry;
+// definitive broker rejections start a new logical attempt.
+type Error struct {
+	Err       error
+	Ambiguous bool
+}
+
+func (e *Error) Error() string {
+	if e == nil || e.Err == nil {
+		return "locate operation failed"
+	}
+	return e.Err.Error()
+}
+
+func (e *Error) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
+}
+
+func MarkAmbiguous(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &Error{Err: err, Ambiguous: true}
+}
+
+func IsAmbiguous(err error) bool {
+	var locateErr *Error
+	return errors.As(err, &locateErr) && locateErr.Ambiguous
+}
 
 // Eligibility is the Alpaca asset-cache view used by the locate workflow.
 type Eligibility struct {

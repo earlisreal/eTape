@@ -206,11 +206,15 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		if err := req.Validate(); err != nil {
 			return blocked(err.Error()), false
 		}
-		record, err := provider.CreateLocate(ctx, req)
-		if err != nil {
-			return blocked(err.Error()), false
-		}
-		return wsmsg.AckMsg{Status: wsmsg.AckAccepted, Value: locateRecordToWire(record)}, false
+		go func() {
+			record, err := provider.CreateLocate(ctx, req)
+			if err != nil {
+				reply(wsmsg.AckMsg{Status: wsmsg.AckBlocked, Reason: err.Error(), Ambiguous: locates.IsAmbiguous(err)})
+				return
+			}
+			reply(wsmsg.AckMsg{Status: wsmsg.AckAccepted, Value: locateRecordToWire(record)})
+		}()
+		return wsmsg.AckMsg{}, true
 	case "KillSwitch":
 		var a wsmsg.KillSwitchArgs
 		_ = json.Unmarshal(args, &a) // empty ok => all venues

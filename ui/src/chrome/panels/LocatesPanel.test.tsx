@@ -208,7 +208,7 @@ describe("LocatesPanel", () => {
     await waitFor(() => expect(sentQueries.some((call) => call.name === "QueryLocates" && (call.args as { symbol: string }).symbol === "US.AAPL")).toBe(true));
   });
 
-  it("keeps the same idempotency key for an unchanged retry and shows provider errors", async () => {
+  it("starts a new idempotency key after a definitive provider rejection", async () => {
     const { props, stores, sentCommands, execStatus } = mkProps({
       command: async (name) => name === "RequestLocate"
         ? { kind: "ack", corrId: "c", status: "blocked", reason: "requested price is no longer available" }
@@ -227,7 +227,74 @@ describe("LocatesPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /^REQUEST LOCATE$/ }));
     await waitFor(() => expect(sentCommands.filter((call) => call.name === "RequestLocate")).toHaveLength(2));
     const second = sentCommands.filter((call) => call.name === "RequestLocate")[1].args as { idempotencyKey: string };
+    expect(second.idempotencyKey).not.toBe(first.idempotencyKey);
+  });
+
+  it("keeps the same idempotency key after an ambiguous disconnect", async () => {
+    const { props, stores, sentCommands, execStatus } = mkProps({
+      command: async (name, args) => {
+        if (name !== "RequestLocate") return { kind: "ack", corrId: "c", status: "accepted" };
+        const key = (args as { idempotencyKey: string }).idempotencyKey;
+        const attempts = sentCommands.filter((call) => call.name === "RequestLocate").length;
+        if (attempts === 1) return { kind: "ack", corrId: "c", status: "blocked", reason: "websocket disconnected", ambiguous: true };
+        return { kind: "ack", corrId: "c", status: "accepted", value: {
+          id: "loc-retry", symbol: "US.AAPL", requestedQty: 100, limitPrice: "0.0123", allOrNone: true,
+          status: "active", createdAt: "2026-07-06T13:30:00Z", locatedQty: 100, locatedPrice: "0.0123",
+          totalFee: "1.2300", expiresAt: "2026-07-07T13:30:00Z", key,
+        } };
+      },
+    });
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: execStatus }));
+    renderPanel(props);
+    await waitFor(() => expect(screen.getByTestId("locates-borrow-status")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("get-locate-quote"));
+    await waitFor(() => expect(screen.getByTestId("locate-quote")).toBeTruthy());
+    fireEvent.click(screen.getByTestId("request-locate"));
+    fireEvent.click(screen.getByRole("button", { name: /^REQUEST LOCATE$/ }));
+    await waitFor(() => expect(screen.getByTestId("locates-error").textContent).toContain("websocket disconnected"));
+    const first = sentCommands.filter((call) => call.name === "RequestLocate")[0].args as { idempotencyKey: string };
+    fireEvent.click(screen.getByTestId("request-locate"));
+    fireEvent.click(screen.getByRole("button", { name: /^REQUEST LOCATE$/ }));
+    await waitFor(() => expect(screen.getByTestId("locate-success")).toBeTruthy());
+    const second = sentCommands.filter((call) => call.name === "RequestLocate")[1].args as { idempotencyKey: string };
     expect(second.idempotencyKey).toBe(first.idempotencyKey);
+  });
+
+  it("keeps an active response when History starts before it returns", async () => {
+    let resolveActive!: (value: unknown) => void;
+    const active = new Promise<unknown>((resolve) => { resolveActive = resolve; });
+    const activeRecord = {
+      id: "loc-active", symbol: "US.AAPL", requestedQty: 100, limitPrice: "0.0123", allOrNone: true,
+      status: "active", createdAt: "2026-07-06T13:30:00Z", locatedQty: 100, locatedPrice: "0.0123",
+      totalFee: "1.2300", expiresAt: "2026-07-07T13:30:00Z",
+    };
+    const { props, stores, sentQueries, execStatus } = mkProps({
+      query: (name, args) => name === "QueryLocates"
+        ? ((args as { status: string }).status === "active" ? active : { locates: [], nextPageToken: "", error: "" })
+        : undefined,
+    });
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: execStatus }));
+    renderPanel(props);
+    await waitFor(() => expect(sentQueries.some((call) => call.name === "QueryLocates" && (call.args as { status: string }).status === "active")).toBe(true));
+    fireEvent.click(screen.getByRole("button", { name: "HISTORY" }));
+    await waitFor(() => expect(sentQueries.some((call) => call.name === "QueryLocates" && (call.args as { status: string }).status === "expired")).toBe(true));
+    resolveActive({ locates: [activeRecord], nextPageToken: "", error: "" });
+    fireEvent.click(screen.getByRole("button", { name: "ACTIVE" }));
+    await waitFor(() => expect(screen.getByRole("row", { name: /AAPL.*100.*ACTIVE/ })).toBeTruthy());
+  });
+
+  it("does not display a rejected limit price as a charged fee", async () => {
+    const rejected = {
+      id: "loc-rejected", symbol: "US.AAPL", requestedQty: 100, limitPrice: "0.0123", allOrNone: true,
+      status: "rejected", createdAt: "2026-07-06T13:30:00Z", locatedQty: 0, locatedPrice: "",
+      totalFee: "", expiresAt: "2026-07-07T13:30:00Z",
+    };
+    const { props, stores, execStatus } = mkProps({ query: (name) => name === "QueryLocates" ? { locates: [rejected], nextPageToken: "", error: "" } : undefined });
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: execStatus }));
+    renderPanel(props);
+    fireEvent.click(screen.getByRole("button", { name: "HISTORY" }));
+    const row = await screen.findByRole("row", { name: /AAPL.*100.*REJECTED/ });
+    expect(row.textContent).not.toContain("$0.0123");
   });
 
   it("ignores a quote response that belongs to the previous symbol", async () => {

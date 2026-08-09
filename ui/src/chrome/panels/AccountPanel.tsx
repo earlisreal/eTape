@@ -444,7 +444,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
       const r = raw as { cycleStartMs?:number; fills?:Fill[] };
       stores.fills.ingest(r.fills ?? []);
       setFillCycleStart(r.cycleStartMs ?? accountCycleStart);
-    });
+    }).catch(() => { /* reconnect settles the next cycle query */ });
     return () => { live = false; };
   }, [venue, accountCycleStart, commands, stores.fills]);
 

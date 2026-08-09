@@ -3,6 +3,7 @@ package uihub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
@@ -103,18 +104,45 @@ func TestRequestLocateCommandUsesSelectedProviderAndReturnsRecord(t *testing.T) 
 		ID: "loc-42", Symbol: "US.AAPL", RequestedQty: 500, LimitPrice: "0.012300", AllOrNone: true, Status: locates.StatusActive,
 	}}
 	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{}, locateTestRegistry(provider))
+	replies := make(chan wsmsg.AckMsg, 1)
 	ack, deferred := cd.handle(context.Background(), "RequestLocate", mustJSON(t, wsmsg.RequestLocateArgs{
 		Venue: "alpaca-paper", Symbol: "US.AAPL", Qty: 500, LimitPrice: "0.012300", AllOrNone: true, IdempotencyKey: "retry-1",
-	}), 0, func(wsmsg.AckMsg) {})
-	if deferred || ack.Status != wsmsg.AckAccepted {
+	}), 0, func(ack wsmsg.AckMsg) { replies <- ack })
+	if !deferred || ack.Status != "" {
 		t.Fatalf("ack = %+v deferred=%v", ack, deferred)
 	}
-	value, ok := ack.Value.(wsmsg.LocateRecord)
+	var resolved wsmsg.AckMsg
+	select {
+	case resolved = <-replies:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for deferred locate ack")
+	}
+	value, ok := resolved.Value.(wsmsg.LocateRecord)
 	if !ok || value.ID != "loc-42" || provider.request.Qty != 500 || provider.request.LimitPrice != "0.012300" || provider.request.IdempotencyKey != "retry-1" {
-		t.Fatalf("ack value=%#v request=%+v", ack.Value, provider.request)
+		t.Fatalf("ack value=%#v request=%+v", resolved.Value, provider.request)
 	}
 	blockedAck, _ := cd.handle(context.Background(), "RequestLocate", json.RawMessage(`{"venue":"sim","symbol":"US.AAPL","qty":500,"limitPrice":"0.0123","allOrNone":true,"idempotencyKey":"retry-1"}`), 0, func(wsmsg.AckMsg) {})
 	if blockedAck.Status != wsmsg.AckBlocked || blockedAck.Reason != "locate unsupported for selected venue" {
 		t.Fatalf("unsupported command ack = %+v", blockedAck)
+	}
+}
+
+func TestRequestLocateCommandMarksAmbiguousProviderFailures(t *testing.T) {
+	provider := &locateProviderSpy{err: locates.MarkAmbiguous(errors.New("timeout"))}
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{}, locateTestRegistry(provider))
+	replies := make(chan wsmsg.AckMsg, 1)
+	_, deferred := cd.handle(context.Background(), "RequestLocate", mustJSON(t, wsmsg.RequestLocateArgs{
+		Venue: "alpaca-paper", Symbol: "US.AAPL", Qty: 500, LimitPrice: "0.012300", AllOrNone: true, IdempotencyKey: "retry-1",
+	}), 0, func(ack wsmsg.AckMsg) { replies <- ack })
+	if !deferred {
+		t.Fatal("RequestLocate must defer provider work")
+	}
+	select {
+	case ack := <-replies:
+		if ack.Status != wsmsg.AckBlocked || !ack.Ambiguous || ack.Reason != "timeout" {
+			t.Fatalf("ambiguous ack = %+v", ack)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for ambiguous locate ack")
 	}
 }

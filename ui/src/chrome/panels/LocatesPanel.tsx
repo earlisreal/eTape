@@ -71,7 +71,8 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
   const identityRef = useRef(identity);
   identityRef.current = identity;
   const generationRef = useRef(0);
-  const listSeqRef = useRef(0);
+  const activeListSeqRef = useRef(0);
+  const historyListSeqRef = useRef(0);
   const inFlightRef = useRef(false);
   const requestSeqRef = useRef(0);
   const requestKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
@@ -133,6 +134,8 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
     setHistoryNext("");
     setConfirmOpen(false);
     setQuoteLoading(false);
+    activeListSeqRef.current += 1;
+    historyListSeqRef.current += 1;
     requestSeqRef.current += 1;
     inFlightRef.current = false;
     requestKeyRef.current = null;
@@ -154,13 +157,14 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
   }, [commands, identity, supported, symbol, venue]);
 
   const loadLocates = useCallback(async (filter: { status: string; symbol: string; pageToken?: string }, target: Tab, append: boolean): Promise<void> => {
-    const seq = ++listSeqRef.current;
+    const seqRef = target === "active" ? activeListSeqRef : historyListSeqRef;
+    const seq = ++seqRef.current;
     const generation = generationRef.current;
     const requestIdentity = identity;
     const raw = await commands.sendQuery("QueryLocates", {
       venue, status: filter.status, symbol: filter.symbol, start: "", end: "", limit: 100, pageToken: filter.pageToken ?? "",
     }) as LocateListResult;
-    if (seq !== listSeqRef.current || generation !== generationRef.current || identityRef.current !== requestIdentity) return;
+    if (seq !== seqRef.current || generation !== generationRef.current || identityRef.current !== requestIdentity) return;
     if (raw.error) {
       setRequestError(raw.error);
       return;
@@ -233,6 +237,7 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
       });
       if (requestSeq !== requestSeqRef.current || generation !== generationRef.current || identityRef.current !== requestIdentity) return;
       if (ack.status !== "accepted") {
+        if (!ack.ambiguous) requestKeyRef.current = null;
         setRequestError(ack.reason ?? "locate request rejected");
         setConfirmOpen(false);
         return;
@@ -374,7 +379,7 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
                   {(activeTab === "active" ? activeLocates : historyLocates).length === 0 ? <div style={{ padding: 10, color: palette.textMuted }}>No locates.</div> : <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                     <thead><tr style={{ color: palette.textMuted, textAlign: "right" }}><th style={cellStyle}>Symbol</th><th style={cellStyle}>Qty</th><th style={cellStyle}>Fee/sh</th><th style={cellStyle}>Total</th><th style={cellStyle}>Expires</th><th style={cellStyle}>Status</th></tr></thead>
                     <tbody>{(activeTab === "active" ? activeLocates : historyLocates).map((item) => <tr key={item.id} style={{ borderTop: `1px solid ${palette.border}`, textAlign: "right" }}>
-                      <td style={{ ...cellStyle, textAlign: "left" }}>{bareSymbol(item.symbol)}</td><td style={cellStyle}>{item.locatedQty || item.requestedQty}</td><td style={cellStyle}>{money(item.locatedPrice || item.limitPrice)}</td><td style={cellStyle}>{money(item.totalFee)}</td><td style={cellStyle}>{displayTime(item.expiresAt)}</td><td style={cellStyle}>{statusChip(item.status, palette)}</td>
+                      <td style={{ ...cellStyle, textAlign: "left" }}>{bareSymbol(item.symbol)}</td><td style={cellStyle}>{item.locatedQty || item.requestedQty}</td><td style={cellStyle}>{money(item.locatedPrice)}</td><td style={cellStyle}>{money(item.totalFee)}</td><td style={cellStyle}>{displayTime(item.expiresAt)}</td><td style={cellStyle}>{statusChip(item.status, palette)}</td>
                     </tr>)}</tbody>
                   </table>}
                 </div>

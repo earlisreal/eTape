@@ -102,6 +102,28 @@ describe("WsClient", () => {
     await expect(p).resolves.toMatchObject({ status: "accepted" });
   });
 
+  it("settles sent commands as ambiguous on disconnect without replaying them", async () => {
+    const { client, flushTimers } = makeClient();
+    client.start();
+    FakeSocket.last().open();
+    const p = client.sendCommand("RequestLocate", { idempotencyKey: "same-key" });
+    FakeSocket.last().dropFromServer();
+    await expect(p).resolves.toMatchObject({ status: "blocked", reason: "websocket disconnected", ambiguous: true });
+
+    flushTimers();
+    FakeSocket.last().open();
+    expect(FakeSocket.last().sent).toHaveLength(0);
+  });
+
+  it("rejects sent queries on disconnect", async () => {
+    const { client } = makeClient();
+    client.start();
+    FakeSocket.last().open();
+    const p = client.sendQuery("QueryLocateQuotes", { symbols: ["US.AAPL"] });
+    FakeSocket.last().dropFromServer();
+    await expect(p).rejects.toThrow("websocket disconnected");
+  });
+
   it("measures RTT from ping/pong", () => {
     const { client } = makeClient();
     client.start();
