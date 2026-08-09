@@ -745,7 +745,7 @@ describe("ChartPanel", () => {
     expect(stores.indicators.series(instanceId)).toEqual([{ timeMs: fromMs, value: 100.25 }]);
   });
 
-  it("does not issue targeted hydration when the initial snapshot already includes the indicator", async () => {
+  it("hydrates an indicator whose initial snapshot only returned an empty series", async () => {
     const fromMs = Date.parse("2026-07-09T13:30:00.000Z");
     const toMs = Date.parse("2026-07-09T13:31:00.000Z") + 1;
     const bars: Bar[] = [
@@ -758,22 +758,74 @@ describe("ChartPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "add VWAP" }));
     type Persisted = { indicators: { instanceId: string }[] };
     const instanceId = ((onConfigChange.mock.calls.at(-1)![0] as Persisted).indicators[0]).instanceId;
-    commands.sendQuery.mockImplementation(async (name: string) => name === "QueryChartWindow"
-      ? { symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars, indicators: [{ seriesKey: instanceId, points: [{ timeMs: fromMs, value: 100.25 }] }], historyRevision: 1 }
-      : []);
+    const points = [{ timeMs: fromMs, value: 100.25 }];
+    commands.sendQuery.mockImplementation(async (name: string, raw: unknown) => {
+      if (name !== "QueryChartWindow") return [];
+      const args = raw as { skipBars?: boolean };
+      return args.skipBars
+        ? { symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars: [], indicators: [{ seriesKey: instanceId, points }], historyRevision: 2 }
+        : { symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars, indicators: [{ seriesKey: instanceId, points: [] }], historyRevision: 1 };
+    });
     act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
       seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
     } }));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(stores.indicators.series(instanceId)).toEqual([]);
     act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
       seq: 2, ts: "2026-08-03T01:00:01Z", kind: "indicator-ready", detail: instanceId,
     } }));
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
 
     const queryCalls = commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow");
-    expect(queryCalls).toHaveLength(1);
-    expect(queryCalls[0][1]).not.toEqual(expect.objectContaining({ skipBars: true }));
-    expect(stores.indicators.series(instanceId)).toEqual([{ timeMs: fromMs, value: 100.25 }]);
+    expect(queryCalls).toHaveLength(2);
+    expect(queryCalls[0][1]).toEqual(expect.objectContaining({ indicatorSeriesKeys: [instanceId] }));
+    expect(queryCalls[1][1]).toEqual(expect.objectContaining({ indicatorSeriesKeys: [instanceId], skipBars: true, tailBars: 0 }));
+    expect(stores.indicators.series(instanceId)).toEqual(points);
+  });
+
+  it("retries targeted hydration once after a disconnect", async () => {
+    const fromMs = Date.parse("2026-07-09T13:30:00.000Z");
+    const toMs = Date.parse("2026-07-09T13:31:00.000Z") + 1;
+    const bars: Bar[] = [
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:30:00.000Z", o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false },
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:31:00.000Z", o: 100.5, h: 102, l: 100, c: 101.5, v: 120, inProgress: true },
+    ];
+    const { container, stores, commands, onConfigChange } = renderChart("c1", undefined, undefined, undefined, {
+      symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars, indicators: [], historyRevision: 1,
+    });
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    commands.sendQuery.mockClear();
+
+    fireEvent.click(within(container).getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add VWAP" }));
+    type Persisted = { indicators: { instanceId: string }[] };
+    const instanceId = ((onConfigChange.mock.calls.at(-1)![0] as Persisted).indicators[0]).instanceId;
+    const points = [{ timeMs: fromMs, value: 100.25 }];
+    let resolveRetry!: (result: {}) => void;
+    const retry = new Promise<{}>((resolve) => { resolveRetry = resolve; });
+    let attempts = 0;
+    commands.sendQuery.mockImplementation(async (name: string, raw: unknown) => {
+      if (name !== "QueryChartWindow") return [];
+      const args = raw as { skipBars?: boolean };
+      if (!args.skipBars) return { symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars, indicators: [], historyRevision: 1 };
+      if (attempts++ === 0) throw new Error("websocket disconnected");
+      return retry;
+    });
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 2, ts: "2026-08-03T01:00:01Z", kind: "indicator-ready", detail: instanceId,
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); await Promise.resolve(); });
+
+    const targeted = commands.sendQuery.mock.calls.filter(([name, raw]) => name === "QueryChartWindow" && (raw as { skipBars?: boolean }).skipBars);
+    expect(targeted).toHaveLength(2);
+    expect(targeted[1][1]).toEqual(expect.objectContaining({ indicatorSeriesKeys: [instanceId], skipBars: true, tailBars: 0 }));
+
+    resolveRetry({ symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars: [], indicators: [{ seriesKey: instanceId, points }], historyRevision: 2 });
+    await act(async () => { await retry; await Promise.resolve(); });
+    expect(stores.indicators.series(instanceId)).toEqual(points);
   });
 
   it("ignores indicator-ready after an indicator is removed", async () => {

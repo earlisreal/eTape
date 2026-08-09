@@ -43,6 +43,7 @@ type PendingIndicatorHydration = {
   ready: boolean;
   generation: number;
   querying: boolean;
+  retryUsed: boolean;
 };
 
 // Adapts a real LWC v5 IChartApi to the controller's minimal ChartApiFacade.
@@ -256,13 +257,6 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     let disposed = false;
 
     const indicatorKeys = () => instancesRef.current.flatMap((inst) => describeIndicator(inst, paletteRef.current).map((series) => series.key));
-    const markPendingHydrated = (result: QueryChartWindowResult) => {
-      const returned = new Set((result.indicators ?? []).map((series) => series.seriesKey));
-      for (const [instanceId, pending] of pendingIndicatorHydrationRef.current) {
-        if (pending.generation !== chartGenerationRef.current) continue;
-        if (pending.seriesKeys.every((key) => returned.has(key))) pendingIndicatorHydrationRef.current.delete(instanceId);
-      }
-    };
     const queryIndicatorHydration = async (instanceId: string) => {
       const pending = pendingIndicatorHydrationRef.current.get(instanceId);
       if (!pending || !pending.ready || pending.querying || !chartSnapshotLoaded) return;
@@ -280,6 +274,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || fromMs >= toMs) return;
 
       pending.querying = true;
+      let retry = false;
       try {
         const result = await commands.sendQuery("QueryChartWindow", {
           symbol, timeframe, fromMs, toMs, tailBars: 0,
@@ -294,11 +289,16 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         forceRepaintRef.current = true;
         pendingIndicatorHydrationRef.current.delete(instanceId);
       } catch {
-        // A disconnected request is settled by WsClient; the next chart generation
-        // will receive the normal full snapshot.
+        // WsClient rejects queries that were sent just before a disconnect. Re-issue
+        // once while reconnecting so its outbox can carry the hydration request.
+        if (pendingIndicatorHydrationRef.current.get(instanceId) === pending && !pending.retryUsed) {
+          pending.retryUsed = true;
+          retry = true;
+        }
       } finally {
         if (pendingIndicatorHydrationRef.current.get(instanceId) === pending) pending.querying = false;
       }
+      if (retry) void queryIndicatorHydration(instanceId);
     };
     const flushPendingIndicatorHydration = () => {
       if (!chartSnapshotLoaded) return;
@@ -311,7 +311,6 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       if (!accepted) return false;
       stores.bars.mergeWindow(result.symbol, result.timeframe, result.bars ?? [], result.fromMs, result.toMs);
       for (const series of result.indicators ?? []) stores.indicators.mergeWindow(series.seriesKey, series.points ?? [], result.fromMs, result.toMs);
-      markPendingHydrated(result);
       forceRepaintRef.current = true;
       return true;
     };
@@ -706,6 +705,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       ready: false,
       generation: chartGenerationRef.current,
       querying: false,
+      retryUsed: false,
     });
     controllerRef.current?.addIndicator(inst);
     setInstancesNow([...instancesRef.current, inst]);
