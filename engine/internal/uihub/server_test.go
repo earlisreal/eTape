@@ -63,11 +63,6 @@ func TestServerWSSubscribeSnapshot(t *testing.T) {
 		uihub.ServerConfig{OutBuf: 32})
 	ts := httptest.NewServer(srv.Handler())
 	defer ts.Close()
-	select {
-	case <-srv.FirstConnection():
-		t.Fatal("connection signal fired before a WebSocket connected")
-	default:
-	}
 
 	wsURL := "ws" + strings.TrimPrefix(ts.URL, "http") + "/ws"
 	c, _, err := websocket.Dial(ctx, wsURL, nil)
@@ -75,11 +70,6 @@ func TestServerWSSubscribeSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close(websocket.StatusNormalClosure, "")
-	select {
-	case <-srv.FirstConnection():
-	case <-time.After(time.Second):
-		t.Fatal("connection signal did not fire")
-	}
 
 	// exec.status always has an assembled snapshot
 	sub, _ := json.Marshal(wsmsg.SubscribeMsg{Kind: "subscribe", Topic: wsmsg.TopicExecStatus})

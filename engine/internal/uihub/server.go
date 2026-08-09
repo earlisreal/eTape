@@ -33,25 +33,20 @@ type ServerConfig struct {
 }
 
 type Server struct {
-	hub           *Hub
-	cmd           commandHandler
-	qry           queryHandler
-	cfg           ServerConfig
-	nextID        atomic.Uint64
-	firstConn     chan struct{}
-	firstConnOnce sync.Once
-	connWG        sync.WaitGroup // tracks every accepted conn.run() from accept to teardown
+	hub    *Hub
+	cmd    commandHandler
+	qry    queryHandler
+	cfg    ServerConfig
+	nextID atomic.Uint64
+	connWG sync.WaitGroup // tracks every accepted conn.run() from accept to teardown
 }
 
 func NewServer(h *Hub, cmd commandHandler, qry queryHandler, cfg ServerConfig) *Server {
 	if cfg.OutBuf <= 0 {
 		cfg.OutBuf = 1024
 	}
-	return &Server{hub: h, cmd: cmd, qry: qry, cfg: cfg, firstConn: make(chan struct{})}
+	return &Server{hub: h, cmd: cmd, qry: qry, cfg: cfg}
 }
-
-// FirstConnection closes when the first UI WebSocket is accepted.
-func (s *Server) FirstConnection() <-chan struct{} { return s.firstConn }
 
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
@@ -75,7 +70,6 @@ func (s *Server) serveWS(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		return
 	}
-	s.firstConnOnce.Do(func() { close(s.firstConn) })
 	c.SetReadLimit(1 << 20) // 1 MiB frame cap
 	id := s.nextID.Add(1)
 	conn := newConn(id, coderSocket{c: c}, s.hub, s.cmd, s.qry, s.cfg.OutBuf, defaultWriteTimeout)

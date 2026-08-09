@@ -470,10 +470,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}
 	if !*noOpen {
 		go func() {
-			if uiConnectedWithin(srv.FirstConnection(), 4*time.Second) {
-				log.Info("existing UI reconnected; suppressing browser open")
-				return
-			}
 			if err := openbrowser.Open("http://" + cfg.UIHub.Addr()); err != nil {
 				log.Warn("open browser", "err", err)
 			}
@@ -804,17 +800,6 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		na = *p
 	}
 	return 0, restartRequested.Load(), na
-}
-
-func uiConnectedWithin(connected <-chan struct{}, grace time.Duration) bool {
-	timer := time.NewTimer(grace)
-	defer timer.Stop()
-	select {
-	case <-connected:
-		return true
-	case <-timer.C:
-		return false
-	}
 }
 
 func bars10sRetentionCutoff(now time.Time, days int) int64 {

@@ -32,17 +32,6 @@ func TestBuildGateConfigMapsVenueAndGlobal(t *testing.T) {
 	}
 }
 
-func TestUIConnectedWithin(t *testing.T) {
-	connected := make(chan struct{})
-	close(connected)
-	if !uiConnectedWithin(connected, time.Hour) {
-		t.Fatal("connected UI should suppress browser open")
-	}
-	if uiConnectedWithin(make(chan struct{}), time.Millisecond) {
-		t.Fatal("missing UI should allow browser open after grace period")
-	}
-}
-
 // TestBuildBrokersMoomooConstructsAdapter verifies a moomoo venue with a
 // valid numeric account_id builds a real *moomoo.Adapter with Run bound —
 // the stub venue (reject-all, no Run) this replaces is gone; moomoo is no
