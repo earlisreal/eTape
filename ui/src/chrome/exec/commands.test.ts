@@ -125,7 +125,7 @@ describe("OrderCommands sound triggers", () => {
     });
   });
 
-  it("Kill Switch reports accepted, blocked, and ambiguous outcomes", async () => {
+  it("Kill Switch reports initiated, blocked, and ambiguous outcomes", async () => {
     const run = async (ack: Partial<AckMsg>) => {
       const push = vi.fn();
       const cmd: CommandAdapter = { sendCommand: vi.fn(async () => ({ kind: "ack", corrId: "c", status: "accepted", ...ack }) as AckMsg) };
@@ -134,7 +134,7 @@ describe("OrderCommands sound triggers", () => {
       return push;
     };
 
-    expect(await run({})).toHaveBeenCalledWith({ level: "warn", text: "KILL — cancel-all + lock" });
+    expect(await run({})).toHaveBeenCalledWith({ level: "warn", text: "KILL initiated — trading locked; cancel-all requested. Verify Open Orders." });
     expect(await run({ status: "blocked", reason: "master disarmed" })).toHaveBeenCalledWith({ level: "danger", text: "Kill Switch failed: master disarmed" });
     expect(await run({ status: "blocked", ambiguous: true, reason: "websocket disconnected" })).toHaveBeenCalledWith({
       level: "warn",

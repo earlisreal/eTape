@@ -22,7 +22,7 @@ function ambiguousText(venue: VenueID): string {
   return `Outcome unknown (${venue}) — connection was lost after the request was sent. Verify Open Orders / position before submitting again.`;
 }
 
-const KILL_SUCCESS_TEXT = "KILL — cancel-all + lock";
+const KILL_SUCCESS_TEXT = "KILL initiated — trading locked; cancel-all requested. Verify Open Orders.";
 const KILL_UNKNOWN_TEXT = "KILL outcome unknown — connection was lost. Verify open orders and positions immediately.";
 
 export class OrderCommands {

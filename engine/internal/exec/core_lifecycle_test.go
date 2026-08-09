@@ -109,6 +109,26 @@ func TestCoreKillSwitchDisarmsAndCancels(t *testing.T) {
 	}
 }
 
+func TestCoreVenueKillSwitchDisarmsGlobalMaster(t *testing.T) {
+	c, sims, _ := newTestCore(t, "sim-1", "sim-2")
+	sims["sim-1"].SetMark("AAPL", 100)
+	armBoth(t, c, "sim-1")
+	order := c.Do(exec.SubmitOrder{Venue: "sim-1", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 1, LimitPrice: 90})
+	if !order.Accepted {
+		t.Fatalf("submit: %+v", order)
+	}
+	if ack := c.Do(exec.KillSwitch{Venue: "sim-1"}); !ack.Accepted {
+		t.Fatalf("venue kill: %+v", ack)
+	}
+	waitFor(t, c, func(u exec.Update) bool {
+		o, ok := u.(exec.OrderUpdate)
+		return ok && o.Order.ID == order.OrderID && o.Order.Status == exec.StatusCanceled
+	})
+	if ack := c.Do(exec.SubmitOrder{Venue: "sim-2", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 1, LimitPrice: 90}); ack.Accepted || ack.Reason != "master disarmed" {
+		t.Fatalf("venue kill should disarm the global master, got %+v", ack)
+	}
+}
+
 // A fresh Core on the same store replays today's persisted events into order
 // state (crash-recovery). Reads state via StateForTest (see file header)
 // directly after Recover, before Run — single goroutine, race-free.

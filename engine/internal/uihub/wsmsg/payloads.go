@@ -409,7 +409,7 @@ type ResetBalanceArgs struct {
 }
 
 type KillSwitchArgs struct {
-	Venue string `json:"venue,omitempty"` // omitted/empty => all venues
+	Venue string `json:"venue,omitempty"` // omitted/empty => all venues; any scope disarms the global master
 }
 
 // ArmArgs is intentionally empty: Arm/Disarm are master-only commands with no

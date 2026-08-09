@@ -575,11 +575,11 @@ func (c *Core) handleResetBalance(ctx context.Context, cm ResetBalance) CmdAck {
 
 func (c *Core) handleKill(ctx context.Context, cm KillSwitch) CmdAck {
 	// Kill never places orders: cancel-all on the targeted venue(s) + disarm.
+	// MasterArmed is global, so a venue-scoped kill still locks all trading.
+	c.state.SetMasterArmed(false)
 	targets := c.venues
 	if cm.Venue != "" {
 		targets = []VenueID{cm.Venue}
-	} else {
-		c.state.SetMasterArmed(false)
 	}
 	for _, v := range targets {
 		b := c.brokers[v]
