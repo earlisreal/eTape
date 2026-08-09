@@ -902,6 +902,99 @@ describe("ChartPanel", () => {
     expect(stores.indicators.series(vwapId)).toEqual([{ timeMs: fromMs, value: 100 }]);
   });
 
+  it("resets and rehydrates EMA history after a period edit", async () => {
+    const fromMs = Date.parse("2026-07-09T13:30:00.000Z");
+    const toMs = Date.parse("2026-07-09T13:31:00.000Z") + 1;
+    const emaId = "c1:EMA-1";
+    const bars: Bar[] = [
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:30:00.000Z", o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false },
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:31:00.000Z", o: 100.5, h: 102, l: 100, c: 101.5, v: 120, inProgress: true },
+    ];
+    const oldPoints = [{ timeMs: fromMs, value: 9 }, { timeMs: toMs - 1, value: 9.5 }];
+    const newPoints = [{ timeMs: fromMs, value: 20 }];
+    const { stores, commands } = renderChart("c1", undefined, undefined, {
+      symbol: "US.AAPL", timeframe: "1m", indicators: [{ instanceId: emaId, type: "EMA", params: { period: 9 } }],
+    });
+    commands.sendQuery.mockImplementation(async (name: string, raw: unknown) => {
+      if (name !== "QueryChartWindow") return [];
+      const args = raw as { skipBars?: boolean };
+      return args.skipBars
+        ? { symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars: [], indicators: [{ seriesKey: emaId, points: newPoints }], historyRevision: 2 }
+        : { symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars, indicators: [{ seriesKey: emaId, points: oldPoints }], historyRevision: 1 };
+    });
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    expect(stores.indicators.series(emaId)).toEqual(oldPoints);
+
+    fireEvent.mouseEnter(screen.getByTestId(`legend-row-${emaId}`));
+    fireEvent.click(screen.getByRole("button", { name: `settings ${emaId}` }));
+    fireEvent.change(screen.getByLabelText("Period"), { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+
+    expect(stores.indicators.series(emaId)).toEqual([]);
+    expect(commands.sendCommand.mock.calls).toContainEqual([
+      "SubscribeIndicator", expect.objectContaining({ instanceId: emaId, type: "EMA", params: { period: 20 } }),
+    ]);
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 2, ts: "2026-08-03T01:00:01Z", kind: "indicator-ready", detail: emaId,
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const queryCalls = commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow");
+    expect(queryCalls).toHaveLength(2);
+    expect(queryCalls[1][1]).toEqual(expect.objectContaining({ indicatorSeriesKeys: [emaId], skipBars: true, tailBars: 0 }));
+    expect(stores.indicators.series(emaId)).toEqual(newPoints);
+  });
+
+  it("resets and rehydrates all MACD slots after a parameter edit", async () => {
+    const fromMs = Date.parse("2026-07-09T13:30:00.000Z");
+    const toMs = Date.parse("2026-07-09T13:31:00.000Z") + 1;
+    const macdId = "c1:MACD-1";
+    const keys = [`${macdId}#macd`, `${macdId}#signal`, `${macdId}#hist`];
+    const bars: Bar[] = [
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:30:00.000Z", o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false },
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:31:00.000Z", o: 100.5, h: 102, l: 100, c: 101.5, v: 120, inProgress: true },
+    ];
+    const oldPoints = keys.map((seriesKey, i) => ({ seriesKey, points: [{ timeMs: fromMs, value: i + 1 }, { timeMs: toMs - 1, value: i + 2 }] }));
+    const newPoints = keys.map((seriesKey, i) => ({ seriesKey, points: [{ timeMs: fromMs, value: i + 10 }] }));
+    const { stores, commands } = renderChart("c1", undefined, undefined, {
+      symbol: "US.AAPL", timeframe: "1m", indicators: [{ instanceId: macdId, type: "MACD", params: { fast: 12, slow: 26, signal: 9 } }],
+    });
+    commands.sendQuery.mockImplementation(async (name: string, raw: unknown) => {
+      if (name !== "QueryChartWindow") return [];
+      const args = raw as { skipBars?: boolean };
+      return args.skipBars
+        ? { symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars: [], indicators: newPoints, historyRevision: 2 }
+        : { symbol: "US.AAPL", timeframe: "1m", fromMs, toMs, bars, indicators: oldPoints, historyRevision: 1 };
+    });
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    for (const { seriesKey, points } of oldPoints) expect(stores.indicators.series(seriesKey)).toEqual(points);
+
+    fireEvent.mouseEnter(screen.getByTestId(`legend-row-${macdId}`));
+    fireEvent.click(screen.getByRole("button", { name: `settings ${macdId}` }));
+    fireEvent.change(screen.getByLabelText("Fast"), { target: { value: "8" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+
+    for (const key of keys) expect(stores.indicators.series(key)).toEqual([]);
+    expect(commands.sendCommand.mock.calls).toContainEqual([
+      "SubscribeIndicator", expect.objectContaining({ instanceId: macdId, type: "MACD", params: { fast: 8, slow: 26, signal: 9 } }),
+    ]);
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 2, ts: "2026-08-03T01:00:01Z", kind: "indicator-ready", detail: macdId,
+    } }));
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    const queryCalls = commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow");
+    expect(queryCalls).toHaveLength(2);
+    expect(queryCalls[1][1]).toEqual(expect.objectContaining({ indicatorSeriesKeys: keys, skipBars: true, tailBars: 0 }));
+    for (const { seriesKey, points } of newPoints) expect(stores.indicators.series(seriesKey)).toEqual(points);
+  });
+
   it("MACD sub-pane's close button removes all 3 of its series and persists the removal", () => {
     const { getByRole, onConfigChange } = renderChart();
     fireEvent.click(getByRole("button", { name: "indicators" }));

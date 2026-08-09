@@ -679,6 +679,16 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // state here would clobber newer values with stale closures (this `config` is
   // frozen at panel creation — dockview never re-invokes the factory).
   const persist = (patch: Record<string, unknown>) => onConfigChange(patch);
+  const queueIndicatorHydration = (inst: IndicatorInstance) => {
+    pendingIndicatorHydrationRef.current.set(inst.instanceId, {
+      instanceId: inst.instanceId,
+      seriesKeys: describeIndicator(inst, paletteRef.current).map((series) => series.key),
+      ready: false,
+      generation: chartGenerationRef.current,
+      querying: false,
+      retryUsed: false,
+    });
+  };
 
   const changeTimeframe = (tf: string) => {
     // Imperative chart reset/query runs before React commits state. Keep hot-path
@@ -699,18 +709,19 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   };
   const addIndicator = (type: IndicatorType) => {
     const inst: IndicatorInstance = { instanceId: `${config.id}:${type}-${idSeq.current++}`, type, params: withDefaultParams(type) };
-    pendingIndicatorHydrationRef.current.set(inst.instanceId, {
-      instanceId: inst.instanceId,
-      seriesKeys: describeIndicator(inst, paletteRef.current).map((series) => series.key),
-      ready: false,
-      generation: chartGenerationRef.current,
-      querying: false,
-      retryUsed: false,
-    });
+    queueIndicatorHydration(inst);
     controllerRef.current?.addIndicator(inst);
     setInstancesNow([...instancesRef.current, inst]);
   };
   const updateIndicator = (inst: IndicatorInstance) => {
+    const previous = instancesRef.current.find((i) => i.instanceId === inst.instanceId);
+    const paramsChanged = previous !== undefined
+      && JSON.stringify(withDefaultParams(previous.type, previous.params))
+        !== JSON.stringify(withDefaultParams(inst.type, inst.params));
+    if (paramsChanged) {
+      for (const series of describeIndicator(inst, paletteRef.current)) stores.indicators.reset(series.key);
+      queueIndicatorHydration(inst);
+    }
     controllerRef.current?.updateIndicator(inst);
     setInstancesNow(instancesRef.current.map((i) => (i.instanceId === inst.instanceId ? inst : i)));
   };
