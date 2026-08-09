@@ -34,4 +34,6 @@ Never place, modify, or cancel real orders unless Earl explicitly authorizes cur
 
 ## Git
 
-Keep commits scoped. Main hook escape only when task explicitly authorizes it. Agents do not push. Preserve unrelated changes. Approved specs use `docs(specs):`; plans use `docs(plans):`.
+Keep commits scoped. Main hook escape only when task explicitly authorizes it. Preserve unrelated changes. Approved specs use `docs(specs):`; plans use `docs(plans):`.
+
+After executing a plan or addressing review comments, automatically commit the resulting changes and push the branch, but only on weekends or on weekdays after 3:00 PM Philippines time (Asia/Manila). Skip this auto-commit and auto-push rule for small, specific tasks unless explicitly requested. Whenever the rule applies, push immediately after the commit succeeds.
