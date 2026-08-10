@@ -14,7 +14,7 @@ import { ThemeProvider } from "./ThemeProvider";
 import { ToastProvider } from "./Toast";
 import { OrderConfigProvider } from "./exec/useOrderConfig";
 import { SoundConfigProvider } from "../sound/SoundConfigProvider";
-import type { AccountRow, ExecStatus, VenueStatus } from "../wire/contract";
+import type { AccountRow, ExecStatus, VenueStatus, WatchlistRow } from "../wire/contract";
 
 // dockview's DockviewComponent constructor watches its container via a real
 // ResizeObserver on mount, which jsdom doesn't implement.
@@ -171,13 +171,27 @@ describe("AppShell execution subscription", () => {
     act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: status(false) }));
     await waitFor(() => expect(screen.getByTestId("arm-chip").textContent).toContain("UNLOCK TRADING"));
   });
+
+  it("does not re-render for watchlist row-only refreshes", async () => {
+    let renders = 0;
+    const { stores } = mount(seed, { onRender: () => { renders++; } });
+    await waitFor(() => expect(screen.getByText("Link")).toBeTruthy());
+    const afterMount = renders;
+
+    const row = (last: number): WatchlistRow => ({ symbol: "US.AAPL", last, changePct: 1, volume: 1000 });
+    publishWatchlist(stores, ["US.AAPL"], [row(100)], "2026-08-10T10:00:00.000Z");
+    publishWatchlist(stores, ["US.AAPL"], [row(101)], "2026-08-10T10:00:01.000Z");
+
+    expect(stores.watchlist.getSnapshot().rows.get("US.AAPL")?.last).toBe(101);
+    expect(renders).toBe(afterMount);
+  });
 });
 
 // Publishes a watchlist.rows snapshot with the given symbols — the shape
 // WatchlistStore.apply expects (see WatchlistStore.test.ts); `rows`/`refreshedAt`
 // are irrelevant to the mode-edge effect below, which only reads `.symbols`.
-function publishWatchlist(stores: ReturnType<typeof mount>["stores"], symbols: string[]) {
-  act(() => stores.watchlist.apply({ kind: "snapshot", topic: "watchlist.rows", payload: { symbols, rows: [], refreshedAt: null } }));
+function publishWatchlist(stores: ReturnType<typeof mount>["stores"], symbols: string[], rows: WatchlistRow[] = [], refreshedAt: string | null = null) {
+  act(() => stores.watchlist.apply({ kind: "snapshot", topic: "watchlist.rows", payload: { symbols, rows, refreshedAt } }));
 }
 
 function publishSessionMode(stores: ReturnType<typeof mount>["stores"], mode: "pending" | "live" | "demo") {

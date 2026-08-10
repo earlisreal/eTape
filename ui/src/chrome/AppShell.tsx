@@ -333,12 +333,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       workspaceStore.save(next);
     });
   }, [linkGroups, workspaceStore]);
-  // Re-render on watchlist arrival, mirroring the exec-store subscription
-  // above — the entry barrier inside the effect below reads stores.watchlist
-  // directly (not this hook's return value), but AppShell still needs to be
-  // reactive to the watchlist store the same way it is to exec's masterArmed.
-  useSyncExternalStore((cb) => stores.watchlist.subscribe(cb), () => stores.watchlist.getSnapshot());
-
   // Task 13: demo-mode entry/revert orchestration. `wsLoaded` (a derived
   // boolean, not raw `ws`) is the effect's second dependency below,
   // deliberately: it flips false->true exactly once (the workspace doc never
