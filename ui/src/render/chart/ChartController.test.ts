@@ -34,11 +34,11 @@ function fakeFacade() {
     & { mainKind: string; screenshots: number; crosshairCb: ((l: number | null) => void) | null }
     & { watermark: string | null; lastOptions: unknown; stretchFactors: typeof stretchFactors }
     & { visibleRange: { from: number; to: number } | null; setVisibleRangeCalls: typeof setVisibleRangeCalls }
-    & { visibleLogicalRange: { from: number; to: number } | null; setVisibleLogicalRangeCalls: typeof setVisibleLogicalRangeCalls } = {
+    & { visibleLogicalRange: { from: number; to: number } | null; setVisibleLogicalRangeCalls: typeof setVisibleLogicalRangeCalls; scrollPosition: number } = {
     created, scrolls: 0, resets: 0, priceResets: 0, bands: 0, lastBands: [], scaleMargins,
     mainKind: "", screenshots: 0, crosshairCb: null,
     watermark: null, lastOptions: null, stretchFactors,
-    visibleRange: null, setVisibleRangeCalls, visibleLogicalRange: null, setVisibleLogicalRangeCalls,
+    visibleRange: null, setVisibleRangeCalls, visibleLogicalRange: null, setVisibleLogicalRangeCalls, scrollPosition: 0,
     setMainSeries: (kind, o) => { const s = fakeSeries(); created.push({ kind, pane: 0, options: o, series: s }); facade.mainKind = kind; return s; },
     takeScreenshot: () => { facade.screenshots++; return {} as unknown as HTMLCanvasElement; },
     subscribeCrosshairMove: (cb) => { facade.crosshairCb = cb; return () => { facade.crosshairCb = null; }; },
@@ -58,6 +58,7 @@ function fakeFacade() {
     coordinateToPrice: () => 0,
     setPanZoomEnabled: () => {},
     scrollToRealTime: () => { facade.scrolls++; },
+    getScrollPosition: () => facade.scrollPosition,
     resetTimeScale: () => { facade.resets++; },
     resetPriceScale: () => { facade.priceResets++; },
     getVisibleRange: () => facade.visibleRange,
@@ -74,6 +75,8 @@ function fakeFacade() {
 
 const bar = (bucketStart: string, c: number, inProgress = false): Bar =>
   ({ symbol: "US.AAPL", timeframe: "1m", bucketStart, o: c, h: c, l: c, c, v: 100, inProgress });
+const tenSecondBar = (bucketStart: string, c: number, inProgress = false): Bar =>
+  ({ ...bar(bucketStart, c, inProgress), timeframe: "10s" });
 function barReaderOf(bars: Bar[]): BarReader { return { series: () => bars }; }
 // A reader whose returned series can be swapped wholesale between sync() calls
 // — mirrors mutableIndicatorReader below, but for bars. Used to simulate a
@@ -114,6 +117,13 @@ function commandSpy(): CommandSender & { names: string[]; calls: Array<{ name: s
 const make = (reader: BarReader, cmd = commandSpy(), ind: IndicatorController = emptyIndicators) => {
   const facade = fakeFacade();
   const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" }, { bars: reader, indicators: ind, commands: cmd });
+  ctrl.mount();
+  return { facade, ctrl, cmd };
+};
+const make10s = (reader: BarReader, cmd = commandSpy()) => {
+  const facade = fakeFacade();
+  const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" },
+    { bars: reader, indicators: emptyIndicators, commands: cmd });
   ctrl.mount();
   return { facade, ctrl, cmd };
 };
@@ -176,6 +186,7 @@ describe("ChartController", () => {
       from: Date.parse("2026-07-06T13:29:00Z") / 1000,
       to: Date.parse("2026-07-06T13:30:20Z") / 1000,
     };
+    facade.scrollPosition = 4;
     facade.visibleRange = beforeTime;
     facade.visibleLogicalRange = { from: -10, to: 6 };
     const scrollsBefore = facade.scrolls;
@@ -200,6 +211,7 @@ describe("ChartController", () => {
       from: Date.parse("2026-07-06T13:28:00Z") / 1000,
       to: Date.parse("2026-07-06T13:30:10Z") / 1000,
     };
+    facade.scrollPosition = -1;
     facade.visibleRange = beforeTime;
     facade.visibleLogicalRange = { from: -10, to: 1 };
     const scrollsBefore = facade.scrolls;
@@ -212,6 +224,236 @@ describe("ChartController", () => {
     expect(facade.scrolls).toBe(scrollsBefore);
     expect(facade.setVisibleRangeCalls.at(-1)).toEqual(beforeTime);
     expect(ctrl.displayBars()[1].synthetic).toBeUndefined();
+  });
+
+  it("10s future-detached incremental append consumes one empty slot", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const { facade, ctrl } = make10s(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
+    ctrl.sync(base + 10_000);
+    const beforeLogical = { from: -2, to: 5 };
+    facade.scrollPosition = 20;
+    facade.visibleLogicalRange = beforeLogical;
+    const scrollsBefore = facade.scrolls;
+    ctrl.sync(base + 20_000);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+  });
+
+  it("10s future-detached batch preserves the logical viewport while consuming multiple slots", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const { facade, ctrl } = make10s(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
+    ctrl.sync(base + 10_000);
+    const beforeLogical = { from: 1, to: 8 };
+    facade.scrollPosition = 20;
+    facade.visibleLogicalRange = beforeLogical;
+    const scrollsBefore = facade.scrolls;
+    ctrl.sync(base + 60_000);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+  });
+
+  it("10s future-detached append landing exactly at four bars keeps the logical viewport", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const { facade, ctrl } = make10s(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
+    ctrl.sync(base + 10_000);
+    const beforeLogical = { from: -1, to: 4 };
+    facade.scrollPosition = 6;
+    facade.visibleLogicalRange = beforeLogical;
+    const scrollsBefore = facade.scrolls;
+    ctrl.sync(base + 30_000);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+  });
+
+  it("10s future-detached batch crossing four bars resumes live exactly once", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const { facade, ctrl } = make10s(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
+    ctrl.sync(base + 10_000);
+    facade.scrollPosition = 6;
+    facade.visibleLogicalRange = { from: -1, to: 4 };
+    const scrollsBefore = facade.scrolls;
+    ctrl.sync(base + 40_000);
+    expect(facade.scrolls).toBe(scrollsBefore + 1);
+    expect(facade.setVisibleLogicalRangeCalls).toHaveLength(0);
+  });
+
+  it("10s ordinary live append leaves follow behavior to Lightweight Charts", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const { facade, ctrl } = make10s(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
+    ctrl.sync(base + 10_000);
+    facade.scrollPosition = 4;
+    facade.visibleLogicalRange = { from: 0, to: 1 };
+    const scrollsBefore = facade.scrolls;
+    ctrl.sync(base + 20_000);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls).toHaveLength(0);
+  });
+
+  it("10s historical append never follows live", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const { facade, ctrl } = make10s(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
+    ctrl.sync(base + 10_000);
+    facade.scrollPosition = -2;
+    facade.visibleLogicalRange = { from: -20, to: -10 };
+    const scrollsBefore = facade.scrolls;
+    ctrl.sync(base + 30_000);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls).toHaveLength(0);
+  });
+
+  it("preserves a future-detached viewport when a 10s interior synthetic bar becomes real", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
+    const { facade, ctrl } = make10s(reader);
+    ctrl.sync(base + 20_000);
+    const beforeLogical = { from: -10, to: 6 };
+    const beforeTime = { from: base / 1000 - 60, to: (base + 20_000) / 1000 };
+    facade.scrollPosition = 20;
+    facade.visibleLogicalRange = beforeLogical;
+    facade.visibleRange = beforeTime;
+    const scrollsBefore = facade.scrolls;
+    reader.set([tenSecondBar(new Date(base).toISOString(), 10), tenSecondBar(new Date(base + 10_000).toISOString(), 10)]);
+    ctrl.sync(base + 20_000);
+    expect(facade.created[0].series.setDataCalls).toHaveLength(2);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+  });
+
+  it("10s delayed replacement still follows when the viewport is truly live", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
+    const { facade, ctrl } = make10s(reader);
+    ctrl.sync(base + 20_000);
+    facade.scrollPosition = 4;
+    facade.visibleLogicalRange = { from: -10, to: 6 };
+    const scrollsBefore = facade.scrolls;
+    reader.set([tenSecondBar(new Date(base).toISOString(), 10), tenSecondBar(new Date(base + 10_000).toISOString(), 10)]);
+    ctrl.sync(base + 20_000);
+    expect(facade.scrolls).toBe(scrollsBefore + 1);
+  });
+
+  it("future-detached 10s rebuild preserves an unchanged-length range", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
+    const { facade, ctrl } = make10s(reader);
+    ctrl.sync(base + 20_000);
+    const beforeLogical = { from: 2, to: 9 };
+    facade.scrollPosition = 12;
+    facade.visibleLogicalRange = beforeLogical;
+    reader.set([tenSecondBar(new Date(base).toISOString(), 10), tenSecondBar(new Date(base + 10_000).toISOString(), 10)]);
+    ctrl.sync(base + 20_000);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+    expect(facade.scrolls).toBe(1);
+  });
+
+  it("future-detached 10s rebuild consumes tail extensions after the old tail", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([
+      tenSecondBar(new Date(base).toISOString(), 10),
+      tenSecondBar(new Date(base + 30_000).toISOString(), 11),
+    ]);
+    const { facade, ctrl } = make10s(reader);
+    ctrl.sync(base + 30_000);
+    const beforeLogical = { from: 0, to: 3 };
+    facade.scrollPosition = 10;
+    facade.visibleLogicalRange = beforeLogical;
+    reader.set([
+      tenSecondBar(new Date(base).toISOString(), 10),
+      tenSecondBar(new Date(base + 10_000).toISOString(), 10),
+      tenSecondBar(new Date(base + 30_000).toISOString(), 11),
+      tenSecondBar(new Date(base + 40_000).toISOString(), 12),
+    ]);
+    ctrl.sync(base + 50_000);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+    expect(facade.scrolls).toBe(1);
+  });
+
+  it("future-detached 10s rebuild shifts the logical range for a front prepend", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([
+      tenSecondBar(new Date(base + 30_000).toISOString(), 10),
+      tenSecondBar(new Date(base + 40_000).toISOString(), 11),
+    ]);
+    const { facade, ctrl } = make10s(reader);
+    ctrl.sync(base + 40_000);
+    facade.scrollPosition = 10;
+    facade.visibleLogicalRange = { from: -1, to: 2 };
+    reader.set([
+      tenSecondBar(new Date(base + 20_000).toISOString(), 9),
+      tenSecondBar(new Date(base + 30_000).toISOString(), 10),
+      tenSecondBar(new Date(base + 40_000).toISOString(), 11),
+    ]);
+    ctrl.sync(base + 40_000);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: 0, to: 3 });
+    expect(facade.scrolls).toBe(1);
+  });
+
+  it("future-detached 10s rebuild handles front prepend and tail extension together", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([
+      tenSecondBar(new Date(base + 30_000).toISOString(), 10),
+      tenSecondBar(new Date(base + 40_000).toISOString(), 11),
+    ]);
+    const { facade, ctrl } = make10s(reader);
+    ctrl.sync(base + 40_000);
+    facade.scrollPosition = 10;
+    facade.visibleLogicalRange = { from: -1, to: 2 };
+    reader.set([
+      tenSecondBar(new Date(base + 20_000).toISOString(), 9),
+      tenSecondBar(new Date(base + 30_000).toISOString(), 10),
+      tenSecondBar(new Date(base + 40_000).toISOString(), 11),
+      tenSecondBar(new Date(base + 50_000).toISOString(), 12),
+      tenSecondBar(new Date(base + 60_000).toISOString(), 13),
+    ]);
+    ctrl.sync(base + 60_000);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: 0, to: 3 });
+    expect(facade.scrolls).toBe(1);
+  });
+
+  it("a 10s rebuild with a missing old tail preserves time instead of jumping live", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([
+      tenSecondBar(new Date(base).toISOString(), 10),
+      tenSecondBar(new Date(base + 10_000).toISOString(), 11),
+    ]);
+    const { facade, ctrl } = make10s(reader);
+    ctrl.sync(base + 10_000);
+    const beforeTime = { from: (base - 60_000) / 1000, to: (base + 10_000) / 1000 };
+    facade.scrollPosition = 10;
+    facade.visibleRange = beforeTime;
+    facade.visibleLogicalRange = { from: -4, to: 3 };
+    const scrollsBefore = facade.scrolls;
+    reader.set([
+      tenSecondBar(new Date(base + 20_000).toISOString(), 12),
+      tenSecondBar(new Date(base + 30_000).toISOString(), 13),
+    ]);
+    ctrl.sync(base + 30_000);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleRangeCalls.at(-1)).toEqual(beforeTime);
+  });
+
+  it("a fresh 10s load still opens at live", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const { facade, ctrl } = make10s(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
+    ctrl.sync(base);
+    expect(facade.scrolls).toBe(1);
+  });
+
+  it("keeps the existing 1m visible-latest rebuild behavior", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([bar(new Date(base).toISOString(), 10), bar(new Date(base + 60_000).toISOString(), 11)]);
+    const { facade, ctrl } = make(reader);
+    ctrl.sync();
+    facade.scrollPosition = -10;
+    facade.visibleLogicalRange = { from: 0, to: 1 };
+    reader.set([
+      bar(new Date(base).toISOString(), 10),
+      bar(new Date(base + 30_000).toISOString(), 10.5),
+      bar(new Date(base + 60_000).toISOString(), 11),
+    ]);
+    const scrollsBefore = facade.scrolls;
+    ctrl.sync();
+    expect(facade.scrolls).toBe(scrollsBefore + 1);
   });
 
   it("rebuilds a reconnect batch with an interior real bar before its suffix", () => {

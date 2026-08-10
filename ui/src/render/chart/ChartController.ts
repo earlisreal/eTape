@@ -3,7 +3,7 @@ import type { Palette } from "../palette";
 import type { Bar } from "../../wire/contract";
 import {
   chartOptions, candleOptions, volumeOptions, mainSeriesOptions, VOLUME_SCALE_MARGINS,
-  boundedOverlayAutoscale, OVERLAY_AUTOSCALE_FACTOR, type ChartType, type PriceRange,
+  boundedOverlayAutoscale, OVERLAY_AUTOSCALE_FACTOR, RIGHT_OFFSET_BARS, type ChartType, type PriceRange,
 } from "./chartTheme";
 import { sessionAt, buildDaySegment, classify } from "./sessions";
 import type { Band, DaySegment } from "./sessions";
@@ -38,6 +38,8 @@ export const LEFT_PAD_BARS = 0;
 // Stretch factor a "collapsed" sub-pane (e.g. MACD) is pinned to — small enough to
 // read as a thin strip but non-zero so LWC never treats the pane as empty/removable.
 export const COLLAPSED_STRETCH = 0.06;
+
+type TenSecondViewportMode = "historical" | "live" | "futureDetached";
 
 export class ChartController {
   private candle!: LwcSeries;
@@ -208,9 +210,26 @@ export class ChartController {
         this.setAllBars(bars, rawBars);
         return;
       }
+      const oldAppliedCount = this.lastAppliedCount;
+      const appendedCount = bars.length - oldAppliedCount;
+      // LWC shifts a visible latest bar on update(). For 10s, a positive
+      // scrollPosition can instead mean the user deliberately left future
+      // space; hold that logical range while new display bars consume it.
+      const beforeScrollPosition = this.config.timeframe === "10s"
+        ? this.facade.getScrollPosition() : null;
+      const beforeLogical = beforeScrollPosition !== null && beforeScrollPosition > RIGHT_OFFSET_BARS
+        ? this.facade.getVisibleLogicalRange() : null;
       for (let i = from; i < bars.length; i++) {
         this.candle.update(this.mainPoint(bars[i]));
         this.volume.update(toVolume(bars[i], this.palette));
+      }
+      if (beforeScrollPosition !== null && beforeScrollPosition > RIGHT_OFFSET_BARS) {
+        const remainingFutureGap = beforeScrollPosition - appendedCount;
+        if (remainingFutureGap < RIGHT_OFFSET_BARS) {
+          this.facade.scrollToRealTime();
+        } else if (beforeLogical) {
+          this.facade.setVisibleLogicalRange(beforeLogical);
+        }
       }
       this.lastAppliedCount = bars.length;
       this.lastAppliedKey = keyOf(last);
@@ -235,7 +254,10 @@ export class ChartController {
   private setAllBars(bars: DisplayBar[], rawBars: Bar[]): void {
     const beforeTime = this.facade.getVisibleRange();
     const beforeLogical = this.facade.getVisibleLogicalRange();
+    const beforeScrollPosition = this.config.timeframe === "10s"
+      ? this.facade.getScrollPosition() : null;
     const oldLastLogical = this.lastAppliedCount - 1;
+    const oldTailBucket = this.lastTailBucket;
     const wasFollowingLive = oldLastLogical >= 0
       && beforeLogical !== null
       && beforeLogical.to >= oldLastLogical;
@@ -249,22 +271,59 @@ export class ChartController {
       elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
     });
     if (bars.length > 0) {
-      if (wasFollowingLive) {
-        // setData can change the logical right offset even when the latest bar
-        // was visible. Restore the resting live position without resetting zoom.
-        this.facade.scrollToRealTime();
-      } else if (this.lastAppliedCount > 0 && beforeTime) {
-        // Historical browsing must survive a rebuild unchanged.
-        this.facade.setVisibleRange(beforeTime);
+      if (this.config.timeframe !== "10s") {
+        if (wasFollowingLive) {
+          // setData can change the logical right offset even when the latest bar
+          // was visible. Restore the resting live position without resetting zoom.
+          this.facade.scrollToRealTime();
+        } else if (this.lastAppliedCount > 0 && beforeTime) {
+          // Historical browsing must survive a rebuild unchanged.
+          this.facade.setVisibleRange(beforeTime);
+        } else {
+          // No prior viewport to restore — a genuinely fresh load (initial mount, or
+          // a symbol/timeframe switch via resetForReload's setData([]) wipe). The
+          // chart/timeScale instance persists across symbol switches (ChartPanel's
+          // mount effect only re-runs on [config.id]), so without this a new symbol
+          // would silently inherit whatever scroll offset the PREVIOUS symbol was
+          // left at. Reset to the default resting position instead: latest bar +
+          // RIGHT_OFFSET_BARS of padding (same position "Jump to live" restores to).
+          this.facade.scrollToRealTime();
+        }
       } else {
-        // No prior viewport to restore — a genuinely fresh load (initial mount, or
-        // a symbol/timeframe switch via resetForReload's setData([]) wipe). The
-        // chart/timeScale instance persists across symbol switches (ChartPanel's
-        // mount effect only re-runs on [config.id]), so without this a new symbol
-        // would silently inherit whatever scroll offset the PREVIOUS symbol was
-        // left at. Reset to the default resting position instead: latest bar +
-        // RIGHT_OFFSET_BARS of padding (same position "Jump to live" restores to).
-        this.facade.scrollToRealTime();
+        const mode = this.lastAppliedCount === 0
+          ? null
+          : classifyTenSecondViewport(beforeScrollPosition!);
+        if (mode === null || mode === "live") {
+          this.facade.scrollToRealTime();
+        } else if (mode === "historical") {
+          // A time range anchors history by timestamps even when older bars were
+          // prepended and logical indexes shifted.
+          if (beforeTime) this.facade.setVisibleRange(beforeTime);
+        } else {
+          // The latest bar being visible does not mean the user is following live:
+          // synthetic 10s bars let them leave extra future space. Re-anchor the
+          // old logical range at the prior tail, then let only bars after that tail
+          // consume the gap. A missing tail is a generation replacement, so use the
+          // conservative timestamp fallback instead of guessing an index shift.
+          const oldTailIndex = findBucketIndex(bars, oldTailBucket);
+          if (oldTailIndex < 0) {
+            if (beforeTime) this.facade.setVisibleRange(beforeTime);
+          } else {
+            const tailAppendedCount = bars.length - 1 - oldTailIndex;
+            const remainingFutureGap = beforeScrollPosition! - tailAppendedCount;
+            if (remainingFutureGap < RIGHT_OFFSET_BARS) {
+              this.facade.scrollToRealTime();
+            } else if (beforeLogical) {
+              const indexShift = oldTailIndex - oldLastLogical;
+              this.facade.setVisibleLogicalRange({
+                from: beforeLogical.from + indexShift,
+                to: beforeLogical.to + indexShift,
+              });
+            } else if (beforeTime) {
+              this.facade.setVisibleRange(beforeTime);
+            }
+          }
+        }
       }
     }
     this.backfilled = true;
@@ -744,6 +803,19 @@ function isSorted(bars: Bar[], from: number): boolean {
     if (bars[i].bucketStart < bars[i - 1].bucketStart) return false;
   }
   return true;
+}
+function classifyTenSecondViewport(scrollPosition: number): TenSecondViewportMode {
+  if (scrollPosition < 0) return "historical";
+  return scrollPosition <= RIGHT_OFFSET_BARS ? "live" : "futureDetached";
+}
+function findBucketIndex(bars: readonly DisplayBar[], bucketStart: string): number {
+  const targetMs = Date.parse(bucketStart);
+  for (let i = bars.length - 1; i >= 0; i--) {
+    const candidateMs = Date.parse(bars[i].bucketStart);
+    if ((Number.isFinite(targetMs) && candidateMs === targetMs)
+      || (!Number.isFinite(targetMs) && bars[i].bucketStart === bucketStart)) return i;
+  }
+  return -1;
 }
 function toCandle(b: DisplayBar) { return { time: toLwcTime(b.bucketStart), open: b.o, high: b.h, low: b.l, close: b.c }; }
 function candleRangeOf(bars: readonly DisplayBar[]): PriceRange {

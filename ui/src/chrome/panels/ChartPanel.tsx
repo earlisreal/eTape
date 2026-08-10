@@ -92,6 +92,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     coordinateToPrice: (y) => main?.coordinateToPrice(y as Coordinate) ?? null,
     setPanZoomEnabled: (on) => chart.applyOptions({ handleScroll: on, handleScale: on }),
     scrollToRealTime: () => chart.timeScale().scrollToPosition(RIGHT_OFFSET_BARS, false),
+    getScrollPosition: () => chart.timeScale().scrollPosition(),
     resetTimeScale: () => chart.timeScale().resetTimeScale(),
     resetPriceScale: () => chart.priceScale("right").applyOptions({ autoScale: true }),
     getVisibleRange: () => {

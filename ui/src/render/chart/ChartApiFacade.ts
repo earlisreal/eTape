@@ -34,6 +34,7 @@ export interface ChartApiFacade {
   coordinateToPrice(y: number): number | null;
   setPanZoomEnabled(on: boolean): void;
   scrollToRealTime(): void;
+  getScrollPosition(): number;
   resetTimeScale(): void; // default bar spacing + scroll to the latest bar
   resetPriceScale(): void; // re-enable the right price scale's autoScale (undo a manual vertical drag)
   resize(width: number, height: number): void;
