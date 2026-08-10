@@ -68,7 +68,7 @@ function clickTab(el: Element): void {
   el.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
 }
 
-function mount(seed: Workspace, opts?: { onTransitionApplied?: () => void; onRender?: () => void }) {
+function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApplied?: () => void; onRender?: () => void }) {
   const stores = makeStores();
   const scheduler = new Scheduler(browserRaf, () => {});
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
@@ -91,7 +91,7 @@ function mount(seed: Workspace, opts?: { onTransitionApplied?: () => void; onRen
     <ThemeProvider><ToastProvider><OrderConfigProvider commands={commands}>
       <SoundConfigProvider commands={commands}>
         <Profiler id="AppShell" onRender={() => opts?.onRender?.()}>
-          <AppShell workspaceName="default" stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
+          <AppShell workspaceName={opts?.workspaceName ?? "default"} stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
             linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} engineState="open"
             {...(opts?.onTransitionApplied ? { onTransitionApplied: opts.onTransitionApplied } : {})} />
         </Profiler>
@@ -822,7 +822,7 @@ describe("AppShell demo mode-edge orchestration (Task 13)", () => {
 
   it("live(empty)->demo->live: reverting back to an originally-empty workspace re-shows EmptyState instead of crashing", async () => {
     const emptySeed: Workspace = { name: "default", panels: [], layout: null };
-    const { stores, saved } = mount(emptySeed);
+    const { stores, saved } = mount(emptySeed, { workspaceName: "main" });
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     expect(screen.getByText("Empty workspace")).toBeTruthy();
 

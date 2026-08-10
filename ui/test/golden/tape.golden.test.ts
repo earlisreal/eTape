@@ -5,7 +5,7 @@ import { getPalette } from "../../src/render/palette";
 import type { Tick } from "../../src/wire/contract";
 import { buildTapeRows, liveView, type TapeSource } from "../../src/render/tape/tapeState";
 import { paintTape } from "../../src/render/tape/paintTape";
-import { TAPE_MIN_WIDTH } from "../../src/render/tape/tapeLayout";
+import { TAPE_MIN_WIDTH, TAPE_TIME_VISIBLE_MIN_WIDTH } from "../../src/render/tape/tapeLayout";
 
 const W = 260;
 const H = 360; // 20 rows × 18
@@ -79,6 +79,12 @@ describe("paintTape goldens (full-row color)", () => {
       const { rows, paused } = buildTapeRows(src, liveView(src), { symbol: "US.AAPL", minSize: 0, maxRows: 20 });
       expectGolden(`tapecolor-narrow-${mode}`, renderScene(TAPE_MIN_WIDTH, H, (ctx) =>
         paintTape(ctx, { rows, paused, width: TAPE_MIN_WIDTH, height: H, palette })));
+    });
+
+    it(`compact three-column breakpoint keeps Time visible — ${mode}`, () => {
+      const { rows, paused } = buildTapeRows(src, liveView(src), { symbol: "US.AAPL", minSize: 0, maxRows: 20 });
+      expectGolden(`tapecolor-time-breakpoint-${mode}`, renderScene(TAPE_TIME_VISIBLE_MIN_WIDTH, H, (ctx) =>
+        paintTape(ctx, { rows, paused, width: TAPE_TIME_VISIBLE_MIN_WIDTH, height: H, palette })));
     });
   }
 });

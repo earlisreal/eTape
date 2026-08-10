@@ -10,7 +10,7 @@ import { browserRaf, type Surface } from "../../render/surface";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
 import type { Tick, AckMsg } from "../../wire/contract";
 import { perf } from "../../perf/PerfMonitor";
-import { TAPE_MIN_WIDTH } from "../../render/tape/tapeLayout";
+import { TAPE_MIN_WIDTH, TAPE_TIME_VISIBLE_MIN_WIDTH } from "../../render/tape/tapeLayout";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -64,7 +64,10 @@ describe("TapePanel", () => {
     expect(screen.getByText("Size")).toBeTruthy();
     expect(screen.getByText("Time")).toBeTruthy();
 
-    rerenderWidth(220);
+    rerenderWidth(TAPE_TIME_VISIBLE_MIN_WIDTH);
+    expect(screen.getByText("Time")).toBeTruthy();
+
+    rerenderWidth(TAPE_TIME_VISIBLE_MIN_WIDTH - 1);
     expect(screen.queryByText("Time")).toBeNull();
     expect(screen.getByText("Price")).toBeTruthy();
     expect(screen.getByText("Size")).toBeTruthy();
@@ -74,7 +77,7 @@ describe("TapePanel", () => {
     expect(screen.getByText("Price")).toBeTruthy();
     expect(screen.getByText("Size")).toBeTruthy();
 
-    rerenderWidth(260);
+    rerenderWidth(TAPE_TIME_VISIBLE_MIN_WIDTH);
     expect(screen.getByText("Time")).toBeTruthy();
   });
 

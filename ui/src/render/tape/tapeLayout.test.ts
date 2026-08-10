@@ -3,6 +3,7 @@ import {
   computeTapeColumnLayout,
   TAPE_MIN_GAP,
   TAPE_MIN_WIDTH,
+  TAPE_SIZE_WIDTH,
   TAPE_TIME_VISIBLE_MIN_WIDTH,
   TAPE_TIME_WIDTH,
 } from "./tapeLayout";
@@ -25,6 +26,13 @@ describe("computeTapeColumnLayout", () => {
 
   it("hides Time immediately below the breakpoint", () => {
     expect(computeTapeColumnLayout(TAPE_TIME_VISIBLE_MIN_WIDTH - 1).showTime).toBe(false);
+  });
+
+  it("keeps Price and Size separated at the exact two-column minimum", () => {
+    const layout = computeTapeColumnLayout(TAPE_MIN_WIDTH);
+    expect(layout.showTime).toBe(false);
+    expect(layout.sizeLeft - layout.priceRight).toBe(TAPE_MIN_GAP);
+    expect(layout.sizeRight - layout.sizeLeft).toBe(TAPE_SIZE_WIDTH);
   });
 
   it("keeps Price and Size separated at and below the Dockview minimum", () => {

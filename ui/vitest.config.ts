@@ -72,6 +72,13 @@ export default defineConfig({
         },
       },
       {
+        extends: true,
+        test: {
+          name: 'layout',
+          include: ['src/render/tape/tapeLayout.test.ts'],
+        },
+      },
+      {
         test: {
           name: 'golden',
           include: ['test/golden/**/*.test.ts', 'test/golden/**/*.golden.test.ts'],
@@ -85,6 +92,17 @@ export default defineConfig({
             'src/chrome/panels/LadderPanel.test.tsx',
             'src/chrome/panels/LadderSettingsDialog.test.tsx',
             'src/chrome/panels/LocatesPanel.test.tsx',
+          ],
+          pool: 'forks',
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'chrome-regressions',
+          include: [
+            'src/chrome/AppShell.test.tsx',
+            'src/chrome/backup.test.ts',
             'src/chrome/panels/registry.test.tsx',
           ],
           pool: 'forks',

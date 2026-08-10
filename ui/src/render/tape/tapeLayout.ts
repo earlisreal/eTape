@@ -1,8 +1,8 @@
 export const TAPE_PAD = 6;
 export const TAPE_PRICE_WIDTH = 66;
-export const TAPE_SIZE_WIDTH = 78;
+export const TAPE_SIZE_WIDTH = 66;
 export const TAPE_TIME_WIDTH = 56;
-export const TAPE_MIN_GAP = 8;
+export const TAPE_MIN_GAP = 4;
 
 export const TAPE_MIN_WIDTH = TAPE_PAD * 2 + TAPE_PRICE_WIDTH + TAPE_MIN_GAP + TAPE_SIZE_WIDTH;
 export const TAPE_TIME_VISIBLE_MIN_WIDTH = TAPE_MIN_WIDTH + TAPE_MIN_GAP + TAPE_TIME_WIDTH;
