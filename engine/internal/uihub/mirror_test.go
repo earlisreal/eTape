@@ -108,25 +108,27 @@ func TestMirrorExecStatusAggregate(t *testing.T) {
 		Account:     exec.AccountSnapshot{Venue: "sim", Equity: 100000, DayPnL: -50, TsMs: 5},
 		MasterArmed: true,
 	})
-	// AccountUpdate produces both an exec.account delta and an exec.status delta.
-	var accountSeen, statusSeen bool
-	for _, s := range d {
-		switch s.Topic {
-		case wsmsg.TopicExecAccount:
-			accountSeen = true
-		case wsmsg.TopicExecStatus:
-			st := s.Payload.(wsmsg.ExecStatus)
-			if !st.MasterArmed || len(st.Venues) != 1 || !st.Venues[0].Connected {
-				t.Fatalf("exec.status aggregate wrong: %+v", st)
-			}
-			if st.Global.MaxDayLoss != 500 || st.Venues[0].Gate.MaxOrderValue != 1000 {
-				t.Fatalf("gate limits not merged from config: %+v", st)
-			}
-			statusSeen = true
-		}
+	if len(d) != 1 || d[0].Topic != wsmsg.TopicExecAccount {
+		t.Fatalf("AccountUpdate must yield only an account delta; got %v", d)
 	}
-	if !accountSeen || !statusSeen {
-		t.Fatalf("AccountUpdate must yield account+status deltas; got %v", d)
+	if !m.masterArmed {
+		t.Fatal("AccountUpdate must keep masterArmed current for late snapshots")
+	}
+	statusSnapshot := m.snapshotFrames(wsmsg.TopicExecStatus)
+	if len(statusSnapshot) != 1 || !statusSnapshot[0].Payload.(wsmsg.ExecStatus).MasterArmed {
+		t.Fatalf("late exec.status snapshot lost masterArmed: %+v", statusSnapshot)
+	}
+
+	d = m.applyExec(exec.StatusUpdate{Venue: "sim", Connected: true, MasterArmed: true})
+	if len(d) != 1 || d[0].Topic != wsmsg.TopicExecStatus {
+		t.Fatalf("StatusUpdate must yield an exec.status delta; got %v", d)
+	}
+	st := d[0].Payload.(wsmsg.ExecStatus)
+	if !st.MasterArmed || len(st.Venues) != 1 || !st.Venues[0].Connected {
+		t.Fatalf("exec.status aggregate wrong: %+v", st)
+	}
+	if st.Global.MaxDayLoss != 500 || st.Venues[0].Gate.MaxOrderValue != 1000 {
+		t.Fatalf("gate limits not merged from config: %+v", st)
 	}
 }
 

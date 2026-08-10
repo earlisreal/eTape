@@ -61,6 +61,19 @@ function readAlpacaHintHidden(): boolean {
   }
 }
 
+// AppShell only needs these execution fields. Keep this a primitive so
+// useSyncExternalStore can retain the same snapshot across account/P&L updates
+// and status replacements that do not change shell behavior.
+function appShellExecSignature(stores: Stores): string {
+  const status = stores.exec.status();
+  if (status === null) return "pending";
+  const venues = status.venues
+    .map((v) => `${v.venue}:${v.broker}`)
+    .sort()
+    .join(",");
+  return `ready|armed=${status.masterArmed ? 1 : 0}|venues=${venues}`;
+}
+
 interface Props {
   workspaceName: string;
   stores: Stores;
@@ -186,10 +199,9 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // receive this as a live prop — see modalTracker.ts) can suppress type-to-load
   // capture while the modal has focus.
   useEffect(() => { modalTracker.setOpen(settings.open); }, [settings.open]);
-  // Same exec/armed pattern as AccountBarPanel: subscribe to the exec store so
-  // the top bar's arm chip re-renders on masterArmed flips from any source
-  // (this bar, the account panel, or the engine).
-  useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
+  // Subscribe only to shell-relevant execution state. Account/P&L updates stay
+  // in AccountPanel's own subscription and must not re-render Dockview's owner.
+  useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => appShellExecSignature(stores));
   const execStatus = stores.exec.status();
   const armed = execStatus?.masterArmed ?? false;
   // Auto-unlock-on-startup (fire-once latch — see the hook's own comment):

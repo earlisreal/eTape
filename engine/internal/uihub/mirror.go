@@ -263,11 +263,10 @@ func (m *mirror) applyExec(u exec.Update) []staged {
 			a = mapAccountUpdate(v)
 		}
 		m.accounts[a.Venue] = a
+		// Keep this for late-subscriber exec.status snapshots. Genuine status
+		// transitions publish their own exec.StatusUpdate below.
 		m.masterArmed = v.MasterArmed
-		return []staged{
-			{Topic: wsmsg.TopicExecAccount, Key: a.Venue, Payload: a},
-			{Topic: wsmsg.TopicExecStatus, Payload: m.execStatus()},
-		}
+		return []staged{{Topic: wsmsg.TopicExecAccount, Key: a.Venue, Payload: a}}
 	case exec.StatusUpdate:
 		m.masterArmed = v.MasterArmed
 		if vs := m.venueStatus[string(v.Venue)]; vs != nil {

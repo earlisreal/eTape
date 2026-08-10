@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { Profiler } from "react";
 import { render, screen, waitFor, fireEvent, act, cleanup, within } from "@testing-library/react";
 import { AppShell } from "./AppShell";
 import { collectPanelIds } from "./backup";
@@ -13,7 +14,7 @@ import { ThemeProvider } from "./ThemeProvider";
 import { ToastProvider } from "./Toast";
 import { OrderConfigProvider } from "./exec/useOrderConfig";
 import { SoundConfigProvider } from "../sound/SoundConfigProvider";
-import type { ExecStatus, VenueStatus } from "../wire/contract";
+import type { AccountRow, ExecStatus, VenueStatus } from "../wire/contract";
 
 // dockview's DockviewComponent constructor watches its container via a real
 // ResizeObserver on mount, which jsdom doesn't implement.
@@ -65,7 +66,7 @@ function clickTab(el: Element): void {
   el.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
 }
 
-function mount(seed: Workspace, opts?: { onTransitionApplied?: () => void }) {
+function mount(seed: Workspace, opts?: { onTransitionApplied?: () => void; onRender?: () => void }) {
   const stores = makeStores();
   const scheduler = new Scheduler(browserRaf, () => {});
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
@@ -87,14 +88,90 @@ function mount(seed: Workspace, opts?: { onTransitionApplied?: () => void }) {
   render(
     <ThemeProvider><ToastProvider><OrderConfigProvider commands={commands}>
       <SoundConfigProvider commands={commands}>
-        <AppShell workspaceName="default" stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
-          linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} engineState="open"
-          {...(opts?.onTransitionApplied ? { onTransitionApplied: opts.onTransitionApplied } : {})} />
+        <Profiler id="AppShell" onRender={() => opts?.onRender?.()}>
+          <AppShell workspaceName="default" stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
+            linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} engineState="open"
+            {...(opts?.onTransitionApplied ? { onTransitionApplied: opts.onTransitionApplied } : {})} />
+        </Profiler>
       </SoundConfigProvider>
     </OrderConfigProvider></ToastProvider></ThemeProvider>,
   );
   return { saved, workspaceStore, linkGroups, stores, commands };
 }
+
+describe("AppShell execution subscription", () => {
+  const seed: Workspace = {
+    name: "default",
+    panels: [{ id: "connection-1", panelId: "connection-status", group: null, settings: {} }],
+    layout: null,
+  };
+  const venue = (over: Partial<VenueStatus> = {}): VenueStatus => ({
+    venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: false,
+    note: "", lastReconcileMs: null,
+    gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 },
+    ...over,
+  });
+  const status = (masterArmed = false, venues = [venue()]): ExecStatus => ({
+    masterArmed,
+    global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
+    venues,
+  });
+  const account = (dayPnl: number): AccountRow => ({
+    venue: "alpaca-paper", equity: 100, buyingPower: 400, availableCash: 50,
+    sodEquity: 100, realized: 0, dayPnl, leverage: 4, tsMs: dayPnl,
+    cycleStartMs: 0, cycleRealized: 0,
+  });
+
+  it("does not re-render for sequential account-only updates", async () => {
+    let renders = 0;
+    const { stores } = mount(seed, { onRender: () => { renders++; } });
+    await waitFor(() => expect(screen.getByText("Link")).toBeTruthy());
+
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: status() }));
+    await waitFor(() => expect(screen.getByTestId("arm-chip").textContent).toContain("UNLOCK TRADING"));
+    const afterStatus = renders;
+
+    for (const dayPnl of [1, 2, 3, 4]) {
+      act(() => stores.exec.apply({ kind: "delta", topic: "exec.account", key: "alpaca-paper", payload: account(dayPnl) }));
+    }
+
+    expect(renders).toBe(afterStatus);
+  });
+
+  it("does not re-render for shell-equivalent status replacements", async () => {
+    let renders = 0;
+    const { stores } = mount(seed, { onRender: () => { renders++; } });
+    await waitFor(() => expect(screen.getByText("Link")).toBeTruthy());
+
+    const initial = status();
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: initial }));
+    await waitFor(() => expect(screen.getByTestId("arm-chip").textContent).toContain("UNLOCK TRADING"));
+    const afterInitial = renders;
+
+    act(() => stores.exec.apply({
+      kind: "snapshot", topic: "exec.status",
+      payload: {
+        ...initial,
+        global: { ...initial.global, maxDayLoss: 500 },
+        venues: [venue({ connected: false, note: "reconnecting" })],
+      },
+    }));
+
+    expect(renders).toBe(afterInitial);
+  });
+
+  it("still updates the arm chip for genuine master-arm changes", async () => {
+    const { stores } = mount(seed);
+    await waitFor(() => expect(screen.getByText("Link")).toBeTruthy());
+
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: status(false) }));
+    await waitFor(() => expect(screen.getByTestId("arm-chip").textContent).toContain("UNLOCK TRADING"));
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: status(true) }));
+    await waitFor(() => expect(screen.getByTestId("arm-chip").textContent).toContain("LOCK TRADING"));
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: status(false) }));
+    await waitFor(() => expect(screen.getByTestId("arm-chip").textContent).toContain("UNLOCK TRADING"));
+  });
+});
 
 // Publishes a watchlist.rows snapshot with the given symbols — the shape
 // WatchlistStore.apply expects (see WatchlistStore.test.ts); `rows`/`refreshedAt`
