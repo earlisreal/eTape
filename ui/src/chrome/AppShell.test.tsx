@@ -15,6 +15,8 @@ import { ToastProvider } from "./Toast";
 import { OrderConfigProvider } from "./exec/useOrderConfig";
 import { SoundConfigProvider } from "../sound/SoundConfigProvider";
 import type { AccountRow, ExecStatus, VenueStatus, WatchlistRow } from "../wire/contract";
+import { TAPE_MIN_WIDTH } from "../render/tape/tapeLayout";
+import { DockviewApi } from "dockview";
 
 // dockview's DockviewComponent constructor watches its container via a real
 // ResizeObserver on mount, which jsdom doesn't implement.
@@ -834,6 +836,49 @@ describe("AppShell demo mode-edge orchestration (Task 13)", () => {
     publishSessionMode(stores, "live"); // demo->live: revert restores the empty snapshot verbatim
     await waitFor(() => expect(saved[saved.length - 1].panels).toHaveLength(0));
     expect(screen.getByText("Empty workspace")).toBeTruthy();
+  });
+});
+
+describe("AppShell Dockview panel constraints", () => {
+  it("creates a seeded tape panel with the shared minimum width", async () => {
+    const seed: Workspace = {
+      name: "default",
+      panels: [{ id: "tape-1", panelId: "tape", group: null, settings: {} }],
+      layout: null,
+    };
+    const addPanel = vi.spyOn(DockviewApi.prototype, "addPanel");
+    try {
+      mount(seed);
+      await waitFor(() => expect(addPanel).toHaveBeenCalled());
+      expect(addPanel.mock.calls.map(([options]) => options)).toContainEqual(
+        expect.objectContaining({ id: "tape-1", minimumWidth: TAPE_MIN_WIDTH }),
+      );
+    } finally {
+      addPanel.mockRestore();
+    }
+  });
+
+  it("normalizes a legacy tape entry before restoring Dockview JSON", async () => {
+    const seed: Workspace = {
+      name: "default",
+      panels: [{ id: "tape-1", panelId: "tape", group: null, settings: {} }],
+      layout: {
+        grid: {
+          root: { type: "leaf", size: 400, data: { id: "tape-1", views: ["tape-1"], activeView: "tape-1" } },
+          width: 400, height: 300, orientation: "HORIZONTAL",
+        },
+        panels: { "tape-1": { id: "tape-1", contentComponent: "tape-1", title: "tape" } },
+      },
+    };
+    const fromJSON = vi.spyOn(DockviewApi.prototype, "fromJSON");
+    try {
+      mount(seed);
+      await waitFor(() => expect(fromJSON).toHaveBeenCalled());
+      const restored = fromJSON.mock.calls[0][0] as { panels: Record<string, { minimumWidth?: number }> };
+      expect(restored.panels["tape-1"].minimumWidth).toBe(TAPE_MIN_WIDTH);
+    } finally {
+      fromJSON.mockRestore();
+    }
   });
 });
 

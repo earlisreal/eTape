@@ -21,7 +21,8 @@ import { TapeSettingsDialog } from "./TapeSettingsDialog";
 import {
   adjustAnchor, buildTapeRows, liveView, TAPE_ROW_H, type TapeView,
 } from "../../render/tape/tapeState";
-import { paintTape, TAPE_PAD, TAPE_SIZE_RIGHT_FRAC } from "../../render/tape/paintTape";
+import { paintTape } from "../../render/tape/paintTape";
+import { computeTapeColumnLayout } from "../../render/tape/tapeLayout";
 import { perf } from "../../perf/PerfMonitor";
 
 const HEADER_H = 26;
@@ -43,6 +44,7 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
   // fresh config after creation); PanelFrame's live `group` prop is what actually
   // changes on a group re-pick — see registry.ts's PanelProps.group comment.
   const group = groupProp ?? config.group;
+  const columnLayout = computeTapeColumnLayout(width);
 
   const paletteRef = useRef(palette);
   paletteRef.current = palette;
@@ -224,9 +226,11 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
           fontSize: 10, fontFamily: FONTS.mono, color: palette.textMuted, textTransform: "uppercase",
         }}
       >
-        <span style={{ position: "absolute", left: TAPE_PAD, top: "50%", transform: "translateY(-50%)" }}>Price</span>
-        <span style={{ position: "absolute", right: `${(1 - TAPE_SIZE_RIGHT_FRAC) * 100}%`, top: "50%", transform: "translateY(-50%)" }}>Size</span>
-        <span style={{ position: "absolute", right: TAPE_PAD, top: "50%", transform: "translateY(-50%)" }}>Time</span>
+        <span style={{ position: "absolute", left: columnLayout.priceLeft, top: "50%", transform: "translateY(-50%)" }}>Price</span>
+        <span style={{ position: "absolute", right: width - columnLayout.sizeRight, top: "50%", transform: "translateY(-50%)" }}>Size</span>
+        {columnLayout.showTime && (
+          <span style={{ position: "absolute", right: width - columnLayout.timeRight!, top: "50%", transform: "translateY(-50%)" }}>Time</span>
+        )}
       </div>
       <canvas ref={canvasRef} style={{ display: "block", flex: 1, minHeight: 0 }} />
       {settingsOpen && (

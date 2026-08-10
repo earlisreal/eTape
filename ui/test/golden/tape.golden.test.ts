@@ -5,6 +5,7 @@ import { getPalette } from "../../src/render/palette";
 import type { Tick } from "../../src/wire/contract";
 import { buildTapeRows, liveView, type TapeSource } from "../../src/render/tape/tapeState";
 import { paintTape } from "../../src/render/tape/paintTape";
+import { TAPE_MIN_WIDTH } from "../../src/render/tape/tapeLayout";
 
 const W = 260;
 const H = 360; // 20 rows × 18
@@ -72,6 +73,12 @@ describe("paintTape goldens (full-row color)", () => {
       // honesty-policy warn strip, not just "no prints yet".
       expectGolden(`tapecolor-paused-empty-${mode}`, renderScene(W, H, (ctx) =>
         paintTape(ctx, { rows: [], paused: true, width: W, height: H, palette })));
+    });
+
+    it(`minimum-width tape hides Time without overlapping Price and Size — ${mode}`, () => {
+      const { rows, paused } = buildTapeRows(src, liveView(src), { symbol: "US.AAPL", minSize: 0, maxRows: 20 });
+      expectGolden(`tapecolor-narrow-${mode}`, renderScene(TAPE_MIN_WIDTH, H, (ctx) =>
+        paintTape(ctx, { rows, paused, width: TAPE_MIN_WIDTH, height: H, palette })));
     });
   }
 });

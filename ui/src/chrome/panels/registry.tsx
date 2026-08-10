@@ -16,6 +16,7 @@ import { StockInfoPanel } from "./StockInfoPanel";
 import { AccountPanel } from "./AccountPanel";
 import { OrderTicketPanel } from "./OrderTicketPanel";
 import { LocatesPanel } from "./LocatesPanel";
+import { TAPE_MIN_WIDTH } from "../../render/tape/tapeLayout";
 
 export interface PanelProps {
   config: PanelConfig;
@@ -73,6 +74,12 @@ export interface PanelDef {
   // (see headerSlot.ts's PanelHeaderActionsSlotContext). Unlike headerControls,
   // this does NOT suppress the panel's title — it's for one icon, not a toolbar.
   headerActions?: boolean;
+  minimumWidth?: number;
+}
+
+export function dockviewPanelConstraints(panelId: string): { minimumWidth?: number } {
+  const minimumWidth = PANELS[panelId]?.minimumWidth;
+  return minimumWidth === undefined ? {} : { minimumWidth };
 }
 
 // Plan 1 registered the two stack-proving panels; Plan 2 added the chart panel;
@@ -125,6 +132,7 @@ export const PANELS: Record<string, PanelDef> = {
     symbolBearing: true,
     demand: "watch",
     headerActions: true,
+    minimumWidth: TAPE_MIN_WIDTH,
   },
   "scanner": {
 	component: ScannerPanel,

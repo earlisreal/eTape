@@ -10,6 +10,7 @@ import { browserRaf, type Surface } from "../../render/surface";
 import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
 import type { Tick, AckMsg } from "../../wire/contract";
 import { perf } from "../../perf/PerfMonitor";
+import { TAPE_MIN_WIDTH } from "../../render/tape/tapeLayout";
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -20,7 +21,7 @@ function mkTick(i: number, symbol = "US.AAPL"): Tick {
   return { symbol, price: 3.5, size: 100 + i, direction: "BUY", ts: "2026-07-06T13:30:00Z" };
 }
 
-function renderTape() {
+function renderTape(width = 260) {
   const stores = makeStores();
   const scheduler = new Scheduler(browserRaf, () => {});
   let surface: Surface | undefined;
@@ -31,16 +32,17 @@ function renderTape() {
   });
   const onConfigChange = vi.fn();
   const config = { id: "t-tape", panelId: "tape", group: "green" as const, settings: { symbol: "US.AAPL", minSize: 0 } };
-  const utils = render(
+  const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
+  const commands = { sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })), sendQuery: vi.fn(async () => []) };
+  const renderPanel = (nextWidth: number) => (
     <ThemeProvider>
-      <TapePanel config={config} stores={stores} scheduler={scheduler} width={260} height={400}
-        linkGroups={new LinkGroups(new BroadcastChannelBus(), () => {})}
-        commands={{ sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })), sendQuery: vi.fn(async () => []) }}
-        onConfigChange={onConfigChange} />
-    </ThemeProvider>,
+      <TapePanel config={config} stores={stores} scheduler={scheduler} width={nextWidth} height={400}
+        linkGroups={linkGroups} commands={commands} onConfigChange={onConfigChange} />
+    </ThemeProvider>
   );
+  const utils = render(renderPanel(width));
   const canvas = utils.container.querySelector("canvas")!;
-  return { ...utils, stores, canvas, surface: () => surface!, off, onConfigChange };
+  return { ...utils, stores, canvas, surface: () => surface!, off, onConfigChange, rerenderWidth: (nextWidth: number) => utils.rerender(renderPanel(nextWidth)) };
 }
 
 describe("TapePanel", () => {
@@ -54,6 +56,26 @@ describe("TapePanel", () => {
   it("has no inline min-size input in the body (moved to the settings dialog)", () => {
     renderTape();
     expect(screen.queryByLabelText(/min size/i)).toBeNull();
+  });
+
+  it("derives the header columns from width and restores Time when expanded", () => {
+    const { rerenderWidth } = renderTape(260);
+    expect(screen.getByText("Price")).toBeTruthy();
+    expect(screen.getByText("Size")).toBeTruthy();
+    expect(screen.getByText("Time")).toBeTruthy();
+
+    rerenderWidth(220);
+    expect(screen.queryByText("Time")).toBeNull();
+    expect(screen.getByText("Price")).toBeTruthy();
+    expect(screen.getByText("Size")).toBeTruthy();
+
+    rerenderWidth(TAPE_MIN_WIDTH);
+    expect(screen.queryByText("Time")).toBeNull();
+    expect(screen.getByText("Price")).toBeTruthy();
+    expect(screen.getByText("Size")).toBeTruthy();
+
+    rerenderWidth(260);
+    expect(screen.getByText("Time")).toBeTruthy();
   });
 
   it("persists the min-size filter through the settings dialog's onConfigChange", () => {

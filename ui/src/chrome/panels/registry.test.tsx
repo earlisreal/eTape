@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { PANELS, CATALOG, isDevPanel } from "./registry";
+import { TAPE_MIN_WIDTH } from "../../render/tape/tapeLayout";
 
 describe("panel registry — monitoring surfaces", () => {
   it("registers scanner only with the scanner topics", () => {
@@ -94,5 +95,11 @@ describe("locates panel", () => {
 describe("ladder header actions", () => {
   it("provides a header slot for the DOM settings gear", () => {
     expect(PANELS.ladder.headerActions).toBe(true);
+  });
+});
+
+describe("panel minimum widths", () => {
+  it("registers the tape minimum from the shared layout constants", () => {
+    expect(PANELS.tape.minimumWidth).toBe(TAPE_MIN_WIDTH);
   });
 });

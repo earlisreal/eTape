@@ -3,7 +3,7 @@
 // — same machine or a fresh one. Pure module, no React/DOM, so every rule
 // here (envelope shape, id regeneration, activeVenue scrubbing) is directly
 // unit-testable; BackupSection.tsx (Task 2) is a thin UI shell around this.
-import type { Workspace } from "./workspace";
+import type { PanelConfig, Workspace } from "./workspace";
 import { normalizeOrderConfig, type ActionTemplate, type OrderConfig } from "./exec/actionTemplate";
 
 export const SETTINGS_EXPORT_VERSION = 1;
@@ -68,6 +68,26 @@ export function parseImport(text: string): { ok: true; data: SettingsExport } | 
 // so already-ghosted exports are healed on import.
 export function prepareImportedWorkspace(imported: Workspace, currentName: string): Workspace {
   return reconcileToGrid({ ...imported, name: currentName }, imported.layout);
+}
+
+export function applyPanelConstraintsToLayout(
+  layout: unknown,
+  panelConfigs: readonly Pick<PanelConfig, "id" | "panelId">[],
+  panelDefs: Record<string, { minimumWidth?: number }>,
+): unknown {
+  if (typeof layout !== "object" || layout === null || Array.isArray(layout)) return layout;
+  const serialized = layout as { panels?: unknown };
+  if (typeof serialized.panels !== "object" || serialized.panels === null || Array.isArray(serialized.panels)) return layout;
+
+  const configById = new Map(panelConfigs.map((config) => [config.id, config]));
+  let changed = false;
+  const panels = Object.fromEntries(Object.entries(serialized.panels).map(([id, panel]) => {
+    const minimumWidth = panelDefs[configById.get(id)?.panelId ?? ""]?.minimumWidth;
+    if (minimumWidth === undefined || typeof panel !== "object" || panel === null || Array.isArray(panel)) return [id, panel];
+    changed = true;
+    return [id, { ...panel, minimumWidth }];
+  }));
+  return changed ? { ...layout, panels } : layout;
 }
 
 // Collect every panel id referenced by dockview's serialized grid. `layout` is

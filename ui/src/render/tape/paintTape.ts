@@ -2,14 +2,10 @@
 // Pure painter: paint(ctx, state). Newest print on top; y = rowIndex × TAPE_ROW_H.
 import { FONTS } from "../palette";
 import { TAPE_ROW_H, type TapePaintState } from "./tapeState";
-
-// Shared with TapePanel's column-header strip so the labels stay aligned with
-// where the painter actually draws each column. Column order: Price, Size, Time.
-export const TAPE_PAD = 6;
-export const TAPE_SIZE_RIGHT_FRAC = 0.68;
-const PAD = TAPE_PAD;
+import { computeTapeColumnLayout } from "./tapeLayout";
 
 export function paintTape(ctx: CanvasRenderingContext2D, s: TapePaintState): void {
+  const columns = computeTapeColumnLayout(s.width);
   const p = s.palette;
   ctx.fillStyle = p.bg;
   ctx.fillRect(0, 0, s.width, s.height);
@@ -52,17 +48,19 @@ export function paintTape(ctx: CanvasRenderingContext2D, s: TapePaintState): voi
     // price at full strength, left-aligned (leftmost column)
     ctx.fillStyle = dir;
     ctx.textAlign = "left";
-    ctx.fillText(r.price, PAD, midY);
+    ctx.fillText(r.price, columns.priceLeft, midY);
 
     // size at full strength, right-aligned at the mid boundary
     ctx.textAlign = "right";
-    ctx.fillText(r.size, s.width * TAPE_SIZE_RIGHT_FRAC, midY);
+    ctx.fillText(r.size, columns.sizeRight, midY);
 
-    // timestamp dimmed within the row's own direction color (not a separate
-    // muted color — it should read as a quieter shade of the same print),
-    // right-aligned (rightmost column)
-    ctx.globalAlpha = 0.65;
-    ctx.fillText(r.time, s.width - PAD, midY);
-    ctx.globalAlpha = 1;
+    if (columns.showTime) {
+      // timestamp dimmed within the row's own direction color (not a separate
+      // muted color — it should read as a quieter shade of the same print),
+      // right-aligned (rightmost column)
+      ctx.globalAlpha = 0.65;
+      ctx.fillText(r.time, columns.timeRight!, midY);
+      ctx.globalAlpha = 1;
+    }
   }
 }

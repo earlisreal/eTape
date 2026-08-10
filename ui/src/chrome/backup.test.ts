@@ -2,10 +2,11 @@ import { describe, it, expect } from "vitest";
 import {
   SETTINGS_EXPORT_VERSION, buildExport, parseImport,
   prepareImportedWorkspace, prepareImportedOrderConfig, detectHotkeyConflicts, isPresentLayout,
-  collectPanelIds, reconcileToGrid,
+  collectPanelIds, reconcileToGrid, applyPanelConstraintsToLayout,
 } from "./backup";
 import type { Workspace } from "./workspace";
 import type { ActionTemplate, OrderConfig } from "./exec/actionTemplate";
+import { TAPE_MIN_WIDTH } from "../render/tape/tapeLayout";
 
 function makeWorkspace(name: string): Workspace {
   return {
@@ -469,6 +470,27 @@ describe("backup: reconcileToGrid", () => {
 
     expect(result).not.toBe(base);
     expect(result.panels).toEqual([]);
+  });
+});
+
+describe("backup: Dockview panel constraint normalization", () => {
+  it("overlays current registry constraints without mutating a legacy layout", () => {
+    const layout = {
+      grid: { root: { type: "leaf", data: { views: ["tape-1"], activeView: "tape-1", id: "g1" } }, width: 400, height: 300, orientation: "HORIZONTAL" },
+      panels: {
+        "tape-1": { id: "tape-1", contentComponent: "tape-1", title: "tape", minimumWidth: 100 },
+        "chart-1": { id: "chart-1", contentComponent: "chart-1", title: "chart" },
+      },
+    };
+    const normalized = applyPanelConstraintsToLayout(
+      layout,
+      [{ id: "tape-1", panelId: "tape" }, { id: "chart-1", panelId: "chart" }],
+      { tape: { minimumWidth: TAPE_MIN_WIDTH }, chart: {} },
+    ) as typeof layout;
+
+    expect(normalized.panels["tape-1"].minimumWidth).toBe(TAPE_MIN_WIDTH);
+    expect(normalized.panels["chart-1"]).toEqual(layout.panels["chart-1"]);
+    expect(layout.panels["tape-1"].minimumWidth).toBe(100);
   });
 });
 

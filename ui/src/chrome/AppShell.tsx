@@ -11,7 +11,7 @@ import type { Scheduler } from "../render/Scheduler";
 import type { LinkGroup, LinkGroups } from "./linkGroups";
 import type { DemandRegistry } from "../wire/DemandRegistry";
 import type { ConnState } from "../wire/WsClient";
-import { PANELS, type PanelProps } from "./panels/registry";
+import { PANELS, dockviewPanelConstraints, type PanelProps } from "./panels/registry";
 import { PRESETS } from "./presets";
 import { TopBar } from "./TopBar";
 import { FeedStatusBanner } from "./FeedStatusBanner";
@@ -20,7 +20,7 @@ import { DemoBanner } from "./DemoBanner";
 import { AlpacaBackfillBanner } from "./AlpacaBackfillBanner";
 import { EmptyState } from "./EmptyState";
 import { Catalog } from "./Catalog";
-import { parseImport, prepareImportedWorkspace, isPresentLayout, reconcileToGrid } from "./backup";
+import { parseImport, prepareImportedWorkspace, isPresentLayout, reconcileToGrid, applyPanelConstraintsToLayout } from "./backup";
 import { SettingsModal, type SettingsSection } from "./SettingsModal";
 import { PracticeLauncherModal } from "./PracticeLauncherModal";
 import { VenueSetupPrompt } from "./VenueSetupPrompt";
@@ -506,7 +506,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     workspaceStore.save(next);
     if (apiRef.current) {
       pendingRef.current.push((api) => {
-        if (!api.getPanel(id)) api.addPanel({ id, component: id, title: def.title });
+        if (!api.getPanel(id)) api.addPanel({ id, component: id, title: def.title, ...dockviewPanelConstraints(panelId) });
       });
     }
     setAddOpen(false);
@@ -566,14 +566,14 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       // groups, never the grid) can therefore hand back a stale-or-null
       // layout here even though dockview's own grid is fine. Same shape
       // check onReady uses to decide "layout present".
-      const layout = next.layout as { grid?: unknown } | null;
+      const layout = applyPanelConstraintsToLayout(next.layout, next.panels, PANELS) as { grid?: unknown } | null;
       const hasLayout = !!layout && typeof layout.grid === "object" && layout.grid !== null;
       pendingRef.current.push((api) => {
         applyingWorkspaceRef.current = true;
         try {
           api.clear();
           if (hasLayout) {
-            api.fromJSON(next.layout as Parameters<typeof api.fromJSON>[0]);
+            api.fromJSON(layout as Parameters<typeof api.fromJSON>[0]);
           } else {
             // No real layout to fall back to. Dockview's OWN live toJSON()
             // is NOT a safe substitute here: Task 13's revert-with-snapshot
@@ -588,6 +588,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             next.panels.forEach((p, i) => {
               api.addPanel({
                 id: p.id, component: p.id, title: p.panelId,
+                ...dockviewPanelConstraints(p.panelId),
                 ...(i === 0 ? {} : { position: { direction: i % 2 ? "right" : "below" } as const }),
               });
             });
@@ -683,7 +684,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     // Restore a previously saved dockview layout if present; otherwise seed the grid
     // from the panel list (first run — the seed's `layout` is a placeholder string).
     let restored = false;
-    const layout = ws.layout as { grid?: unknown } | null;
+    const layout = applyPanelConstraintsToLayout(ws.layout, ws.panels, PANELS) as { grid?: unknown } | null;
     try {
       if (layout && typeof layout.grid === "object" && layout.grid !== null) {
         event.api.fromJSON(layout as Parameters<typeof event.api.fromJSON>[0]);
@@ -696,6 +697,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       ws.panels.forEach((p, i) => {
         event.api.addPanel({
           id: p.id, component: p.id, title: p.panelId,
+          ...dockviewPanelConstraints(p.panelId),
           ...(i === 0 ? {} : { position: { direction: i % 2 ? "right" : "below" } as const }),
         });
       });
