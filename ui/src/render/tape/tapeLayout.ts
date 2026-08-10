@@ -1,6 +1,6 @@
 export const TAPE_PAD = 6;
-export const TAPE_PRICE_WIDTH = 66;
-export const TAPE_SIZE_WIDTH = 66;
+export const TAPE_PRICE_WIDTH = 48;
+export const TAPE_SIZE_WIDTH = 42;
 export const TAPE_TIME_WIDTH = 56;
 export const TAPE_MIN_GAP = 4;
 
