@@ -105,8 +105,9 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sh
 // Pushes a bar into the shared BarStore, the same delta shape the engine sends
 // for a live bar (see BarStore.test.ts's own `bar`/`delta` helpers). Defaults to
 // an in-progress bar; set inProgress to false to push a closed bar.
-function pushLiveBar(stores: ReturnType<typeof makeStores>, symbol: string, timeframe: string, o: number, c: number, inProgress = true): void {
-  const bar: Bar = { symbol, timeframe, bucketStart: "2026-07-09T13:31:00.000Z", o, h: Math.max(o, c) + 0.1, l: Math.min(o, c) - 0.1, c, v: 100, inProgress };
+function pushLiveBar(stores: ReturnType<typeof makeStores>, symbol: string, timeframe: string, o: number, c: number, inProgress = true,
+  bucketStart = "2026-07-09T13:31:00.000Z"): void {
+  const bar: Bar = { symbol, timeframe, bucketStart, o, h: Math.max(o, c) + 0.1, l: Math.min(o, c) - 0.1, c, v: 100, inProgress };
   const msg: DeltaMsg = { kind: "delta", topic: "md.bars", key: `${symbol}:${timeframe}`, payload: bar };
   stores.bars.apply(msg);
 }
@@ -711,8 +712,8 @@ describe("ChartPanel", () => {
       { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:30:00.000Z", o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false },
       { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:31:00.000Z", o: 100.5, h: 102, l: 100, c: 101.5, v: 120, inProgress: true },
     ];
-    let resolveInitial!: (result: {}) => void;
-    const initial = new Promise<{}>((resolve) => { resolveInitial = resolve; });
+    let resolveInitial!: (result: object) => void;
+    const initial = new Promise<object>((resolve) => { resolveInitial = resolve; });
     const { container, stores, commands, onConfigChange } = renderChart();
     commands.sendQuery.mockClear();
     commands.sendQuery.mockImplementation(async (name: string, raw: unknown) => {
@@ -804,8 +805,8 @@ describe("ChartPanel", () => {
     type Persisted = { indicators: { instanceId: string }[] };
     const instanceId = ((onConfigChange.mock.calls.at(-1)![0] as Persisted).indicators[0]).instanceId;
     const points = [{ timeMs: fromMs, value: 100.25 }];
-    let resolveRetry!: (result: {}) => void;
-    const retry = new Promise<{}>((resolve) => { resolveRetry = resolve; });
+    let resolveRetry!: (result: object) => void;
+    const retry = new Promise<object>((resolve) => { resolveRetry = resolve; });
     let attempts = 0;
     commands.sendQuery.mockImplementation(async (name: string, raw: unknown) => {
       if (name !== "QueryChartWindow") return [];
@@ -1153,11 +1154,47 @@ describe("ChartPanel", () => {
 
   it("hides the 10s badge after its real bar falls behind the wall-clock bucket", () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-09T13:31:11Z"));
-    const { stores, getSurface, queryByTestId } = renderChartCapturingSurface({ timeframe: "10s" });
-    pushLiveBar(stores, "US.AAPL", "10s", 100, 100.5);
-    act(() => { getSurface().paint(); });
-    expect(queryByTestId("bar-close-timer")).toBeNull();
-    now.mockRestore();
+    try {
+      const { stores, getSurface, queryByTestId } = renderChartCapturingSurface({ timeframe: "10s" });
+      pushLiveBar(stores, "US.AAPL", "10s", 100, 100.5);
+      act(() => { getSurface().paint(); });
+      expect(queryByTestId("bar-close-timer")).toBeNull();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("keeps the badge visible when the real next 10s bar arrives slightly early", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-09T13:31:08Z"));
+    try {
+      const { stores, getSurface, getByTestId } = renderChartCapturingSurface({ timeframe: "10s" });
+      act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+        seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+      } }));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      pushLiveBar(stores, "US.AAPL", "10s", 100, 101.25, true, "2026-07-09T13:31:10.000Z");
+      act(() => { getSurface().paint(); });
+      expect(getByTestId("bar-close-timer")).toBeTruthy();
+      expect(getByTestId("bar-close-timer-price").textContent).toBe("101.25");
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("hides a 10s badge for a candidate that arrives too far ahead", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-09T13:31:04Z"));
+    try {
+      const { stores, getSurface, queryByTestId } = renderChartCapturingSurface({ timeframe: "10s" });
+      act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+        seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+      } }));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      pushLiveBar(stores, "US.AAPL", "10s", 100, 101.25, true, "2026-07-09T13:31:10.000Z");
+      act(() => { getSurface().paint(); });
+      expect(queryByTestId("bar-close-timer")).toBeNull();
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it("isDirty reacts only to its own pinned symbol's bar revision and its own indicator instances' revisions — not a foreign symbol's bar delta or an unrelated instance's update (per-key scoping regression)", () => {

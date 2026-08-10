@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { remainingToBarCloseMs, isIntradayTimeframe, formatCountdown } from "./barClose";
+import { remainingToBarCloseMs, isIntradayTimeframe, formatCountdown, isTenSecondTimerCandidateLive } from "./barClose";
 
 const at = (iso: string) => Date.parse(iso);
 
@@ -68,6 +68,54 @@ describe("remainingToBarCloseMs", () => {
     const monthStartMs = at("2026-07-01T04:00:00Z");
     const expected = monthStartMs + 30 * 24 * 3600 * 1000 - at("2026-07-06T13:30:00Z");
     expect(remaining).toBe(expected);
+  });
+});
+
+describe("isTenSecondTimerCandidateLive", () => {
+  it("accepts a candidate in the current bucket", () => {
+    expect(isTenSecondTimerCandidateLive(
+      "2026-07-09T13:31:00.000Z",
+      at("2026-07-09T13:31:05Z"),
+    )).toBe(true);
+  });
+
+  it("accepts the next bucket when it arrives two seconds early", () => {
+    expect(isTenSecondTimerCandidateLive(
+      "2026-07-09T13:31:10.000Z",
+      at("2026-07-09T13:31:08Z"),
+    )).toBe(true);
+  });
+
+  it("accepts the next bucket exactly at the three-second grace limit", () => {
+    expect(isTenSecondTimerCandidateLive(
+      "2026-07-09T13:31:10.000Z",
+      at("2026-07-09T13:31:07Z"),
+    )).toBe(true);
+  });
+
+  it("rejects the next bucket beyond the grace limit", () => {
+    expect(isTenSecondTimerCandidateLive(
+      "2026-07-09T13:31:10.000Z",
+      at("2026-07-09T13:31:06Z"),
+    )).toBe(false);
+  });
+
+  it("rejects a stale previous bucket", () => {
+    expect(isTenSecondTimerCandidateLive(
+      "2026-07-09T13:31:00.000Z",
+      at("2026-07-09T13:31:11Z"),
+    )).toBe(false);
+  });
+
+  it("rejects a candidate two buckets ahead", () => {
+    expect(isTenSecondTimerCandidateLive(
+      "2026-07-09T13:31:20.000Z",
+      at("2026-07-09T13:31:08Z"),
+    )).toBe(false);
+  });
+
+  it("rejects a malformed candidate timestamp", () => {
+    expect(isTenSecondTimerCandidateLive("invalid", at("2026-07-09T13:31:08Z"))).toBe(false);
   });
 });
 

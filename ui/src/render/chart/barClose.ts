@@ -1,6 +1,23 @@
 import { bucketStartMs, type Timeframe } from "./barBucket";
 import { timeframeToMs } from "./drawings/geometry";
 
+export const TEN_SECOND_TIMER_EARLY_ROLLOVER_GRACE_MS = 3_000;
+
+// Exchange-timestamped bars can enter the next bucket slightly before the
+// local browser clock reaches it, so allow only that immediately-next bucket
+// within a small wall-clock grace period.
+export function isTenSecondTimerCandidateLive(candidateBucketStart: string, nowMs: number): boolean {
+  const candidateMs = Date.parse(candidateBucketStart);
+  if (!Number.isFinite(candidateMs)) return false;
+
+  const currentBucketMs = bucketStartMs(nowMs, "10s");
+  if (candidateMs === currentBucketMs) return true;
+
+  const nextBucketMs = currentBucketMs + timeframeToMs("10s");
+  return candidateMs === nextBucketMs && candidateMs > nowMs
+    && candidateMs - nowMs <= TEN_SECOND_TIMER_EARLY_ROLLOVER_GRACE_MS;
+}
+
 // Countdown target: ms until the current bar closes (wall-clock time, not tick arrival).
 // Bar close instant = bucketStartMs(now, tf) + timeframeToMs(tf); this returns close - now.
 export function remainingToBarCloseMs(tf: Timeframe, nowMs: number): number {

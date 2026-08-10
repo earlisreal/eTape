@@ -13,7 +13,7 @@ import { DrawingInteraction, type Tool } from "../../render/chart/drawings/inter
 import { timeframeToMs } from "../../render/chart/drawings/geometry";
 import type { Timeframe } from "../../render/chart/barBucket";
 import { aggregateFillMarkers } from "../../render/chart/fillAggregate";
-import { isIntradayTimeframe } from "../../render/chart/barClose";
+import { isIntradayTimeframe, isTenSecondTimerCandidateLive } from "../../render/chart/barClose";
 import { formatPrice } from "../../render/format";
 import type { Palette } from "../../render/palette";
 import { useTheme } from "../ThemeProvider";
@@ -610,10 +610,11 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         const axisW = facade.priceScaleWidth();
         setRightAxisWidth((prev) => (prev === axisW ? prev : axisW));
         // BarCloseTimer anchors directly on LWC's own last-price coordinate, which
-        // only exists while the current bucket's bar is still in progress — no live
+        // only exists while an accepted in-progress bar is live — no live
         // bar, nothing to anchor to, so the badge stays hidden (see the JSX gate below).
+		const nowMs = Date.now();
 		const candidate = chartSnapshotLoaded ? stores.bars.inProgressBar(currentSymbol, tfRef.current) : null;
-        const live = candidate && (tfRef.current !== "10s" || Date.parse(candidate.bucketStart) === Math.floor(Date.now() / 10_000) * 10_000) ? candidate : null;
+        const live = candidate && (tfRef.current !== "10s" || isTenSecondTimerCandidateLive(candidate.bucketStart, nowMs)) ? candidate : null;
         const y = live ? facade.priceToCoordinate(live.c) : null;
         const next = live && y != null ? { y, up: live.c >= live.o, price: live.c } : null;
         setLastPriceTag((prev) =>
