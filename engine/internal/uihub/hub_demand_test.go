@@ -39,15 +39,6 @@ func runHub(t *testing.T) (*Hub, func()) {
 	return h, cancel
 }
 
-func sysEvents(h *Hub) []wsmsg.SysEvent {
-	frames := h.m.snapshotFrames(wsmsg.TopicSysEvents)
-	if len(frames) == 0 {
-		return nil
-	}
-	events, _ := frames[0].Payload.([]wsmsg.SysEvent)
-	return events
-}
-
 func TestHubDemand_TrackReleaseSnapshot(t *testing.T) {
 	h, cancel := runHub(t)
 	defer cancel()
@@ -133,125 +124,6 @@ func TestHubDemand_NilFeedNoPanic(t *testing.T) {
 	h.sync()
 	if got := h.ActiveDemandSymbols(); len(got) != 1 {
 		t.Fatalf("nil-feed should still track demands: %v", got)
-	}
-}
-
-func TestHubDemand_FeedConfiguredAfterDemandReplaysExactDemand(t *testing.T) {
-	h, cancel := runHub(t)
-	defer cancel()
-	c := &fakeClient{nid: 10}
-	d := feed.ChartDemand("chart", "US.AAPL")
-	d.BackgroundSeed = true
-	h.Register(c)
-	h.EnsureDemand(c.nid, d)
-	h.sync()
-
-	if h.feed() != nil {
-		t.Fatal("feed became available before SetFeed")
-	}
-	sf := &spyHubFeed{}
-	if len(sf.ensured) != 0 {
-		t.Fatalf("feed.Ensure before configuration = %d, want 0", len(sf.ensured))
-	}
-	h.SetFeed(sf)
-	h.sync()
-
-	sf.mu.Lock()
-	got := append([]feed.Demand(nil), sf.ensured...)
-	sf.mu.Unlock()
-	if len(got) != 1 {
-		t.Fatalf("feed.Ensure calls = %d, want 1", len(got))
-	}
-	if !reflect.DeepEqual(got[0], d) {
-		t.Fatalf("replayed demand = %+v, want %+v", got[0], d)
-	}
-	hasTicker := false
-	for _, sub := range got[0].Subs {
-		if sub == feed.SubTicker {
-			hasTicker = true
-		}
-	}
-	if !hasTicker {
-		t.Fatalf("replayed demand subscriptions = %v, want SubTicker", got[0].Subs)
-	}
-}
-
-func TestHubDemand_FeedConfiguredBeforeDemandEnsuresOnce(t *testing.T) {
-	h, cancel := runHub(t)
-	defer cancel()
-	sf := &spyHubFeed{}
-	h.SetFeed(sf)
-	h.sync()
-	c := &fakeClient{nid: 11}
-	h.Register(c)
-	h.EnsureDemand(c.nid, feed.ChartDemand("chart", "US.AAPL"))
-	h.sync()
-
-	sf.mu.Lock()
-	n := len(sf.ensured)
-	sf.mu.Unlock()
-	if n != 1 {
-		t.Fatalf("feed.Ensure calls = %d, want 1", n)
-	}
-}
-
-func TestHubDemand_ReleaseBeforeFeedConfigurationNotReplayed(t *testing.T) {
-	h, cancel := runHub(t)
-	defer cancel()
-	c := &fakeClient{nid: 12}
-	h.Register(c)
-	h.EnsureDemand(c.nid, feed.ChartDemand("chart", "US.AAPL"))
-	h.ReleaseDemand(c.nid, "chart")
-	h.sync()
-
-	sf := &spyHubFeed{}
-	h.SetFeed(sf)
-	h.sync()
-	sf.mu.Lock()
-	n := len(sf.ensured)
-	sf.mu.Unlock()
-	if n != 0 {
-		t.Fatalf("released demand replayed %d times", n)
-	}
-}
-
-func TestHubDemand_UnregisterBeforeFeedConfigurationNotReplayed(t *testing.T) {
-	h, cancel := runHub(t)
-	defer cancel()
-	c := &fakeClient{nid: 13}
-	h.Register(c)
-	h.EnsureDemand(c.nid, feed.ChartDemand("chart", "US.AAPL"))
-	h.Unregister(c)
-	h.sync()
-
-	sf := &spyHubFeed{}
-	h.SetFeed(sf)
-	h.sync()
-	sf.mu.Lock()
-	n := len(sf.ensured)
-	sf.mu.Unlock()
-	if n != 0 {
-		t.Fatalf("unregistered demand replayed %d times", n)
-	}
-}
-
-func TestHubDemand_LatestDemandReplayedAfterFeedConfiguration(t *testing.T) {
-	h, cancel := runHub(t)
-	defer cancel()
-	c := &fakeClient{nid: 14}
-	h.Register(c)
-	h.EnsureDemand(c.nid, feed.ChartDemand("p1", "US.AAPL"))
-	h.EnsureDemand(c.nid, feed.ChartDemand("p1", "US.NVDA"))
-	h.sync()
-
-	sf := &spyHubFeed{}
-	h.SetFeed(sf)
-	h.sync()
-	sf.mu.Lock()
-	got := append([]feed.Demand(nil), sf.ensured...)
-	sf.mu.Unlock()
-	if len(got) != 1 || got[0].Symbol != "US.NVDA" {
-		t.Fatalf("replayed demands = %+v, want only latest NVDA demand", got)
 	}
 }
 
@@ -385,142 +257,20 @@ func TestHubDemand_NilBackfillNoPanic(t *testing.T) {
 	}
 }
 
-func TestHubDemand_HistoryNotConfiguredRetainsFocusedDemand(t *testing.T) {
+func TestHubDemand_FocusedWithoutBackfillEmitsChartReady(t *testing.T) {
 	h, cancel := runHub(t)
 	defer cancel()
 	c := &fakeClient{nid: 9}
 	h.Register(c)
 	h.EnsureDemand(9, feed.ChartDemand("chart", "US.AAPL"))
 	h.sync()
-	if events := sysEvents(h); len(events) != 0 {
-		t.Fatalf("sys.events = %+v, want no chart-ready before history configuration", events)
+	frames := h.m.snapshotFrames(wsmsg.TopicSysEvents)
+	if len(frames) != 1 {
+		t.Fatalf("sys.events frames=%d, want immediate chart-ready", len(frames))
 	}
-	if got := h.ActiveDemandSymbols(); len(got) != 1 || got[0] != "US.AAPL" {
-		t.Fatalf("retained demand symbols = %v, want [US.AAPL]", got)
-	}
-}
-
-func TestHubDemand_HistoryExplicitlyDisabledEmitsChartReady(t *testing.T) {
-	h, cancel := runHub(t)
-	defer cancel()
-	h.SetHistoryWarm(nil, nil)
-	c := &fakeClient{nid: 15}
-	h.Register(c)
-	h.EnsureDemand(c.nid, feed.ChartDemand("chart", "US.AAPL"))
-	h.sync()
-	events := sysEvents(h)
-	if len(events) != 1 {
-		t.Fatalf("sys.events = %+v, want one chart-ready", events)
-	}
-	if events[0].Kind != "chart-ready" || events[0].Detail != "US.AAPL" {
-		t.Fatalf("event=%+v, want chart-ready US.AAPL", events[0])
-	}
-}
-
-func TestHubDemand_FocusedBeforeHistoryConfigurationReconciles(t *testing.T) {
-	h, cancel := runHub(t)
-	defer cancel()
-	c := &fakeClient{nid: 16}
-	h.Register(c)
-	h.EnsureDemand(c.nid, feed.ChartDemand("chart", "US.AAPL"))
-	h.sync()
-	if events := sysEvents(h); len(events) != 0 {
-		t.Fatalf("chart-ready before history configuration = %+v, want none", events)
-	}
-
-	var mu sync.Mutex
-	var prepared []string
-	h.SetHistoryWarm(func(sym string, _ func(bool)) {
-		mu.Lock()
-		prepared = append(prepared, sym)
-		mu.Unlock()
-	}, nil)
-	h.sync()
-	mu.Lock()
-	gotPrepared := append([]string(nil), prepared...)
-	mu.Unlock()
-	if !reflect.DeepEqual(gotPrepared, []string{"US.AAPL"}) {
-		t.Fatalf("prepared symbols = %v, want [US.AAPL]", gotPrepared)
-	}
-	if events := sysEvents(h); len(events) != 0 {
-		t.Fatalf("chart-ready during focused preparation = %+v, want none", events)
-	}
-
-	h.PublishMD(md.HistoryReadyUpdate{Symbol: "US.AAPL", Prepared: true})
-	h.sync()
-	if events := sysEvents(h); len(events) != 1 || events[0].Kind != "chart-ready" {
-		t.Fatalf("sys.events after history-ready = %+v, want one chart-ready", events)
-	}
-}
-
-func TestHubDemand_ExplicitlyDisabledHistoryAfterEarlyDemandEmitsOnce(t *testing.T) {
-	h, cancel := runHub(t)
-	defer cancel()
-	c := &fakeClient{nid: 17}
-	h.Register(c)
-	h.EnsureDemand(c.nid, feed.ChartDemand("chart", "US.AAPL"))
-	h.sync()
-	if events := sysEvents(h); len(events) != 0 {
-		t.Fatalf("chart-ready before explicit disable = %+v, want none", events)
-	}
-
-	h.SetHistoryWarm(nil, nil)
-	h.sync()
-	if events := sysEvents(h); len(events) != 1 || events[0].Kind != "chart-ready" {
-		t.Fatalf("sys.events after explicit disable = %+v, want one chart-ready", events)
-	}
-}
-
-func TestHubDemand_EarlyWatchReconcilesWhenHistoryConfigured(t *testing.T) {
-	h, cancel := runHub(t)
-	defer cancel()
-	c := &fakeClient{nid: 18}
-	h.Register(c)
-	h.EnsureDemand(c.nid, feed.WatchDemand("watch", "US.AAPL"))
-	h.sync()
-
-	var mu sync.Mutex
-	var warmed []string
-	h.SetHistoryWarm(nil, func(sym string, _ func(bool)) {
-		mu.Lock()
-		warmed = append(warmed, sym)
-		mu.Unlock()
-	})
-	h.sync()
-	mu.Lock()
-	got := append([]string(nil), warmed...)
-	mu.Unlock()
-	if !reflect.DeepEqual(got, []string{"US.AAPL"}) {
-		t.Fatalf("warmed symbols = %v, want [US.AAPL]", got)
-	}
-}
-
-func TestHubDemand_FocusedWinsDuringHistoryReconciliation(t *testing.T) {
-	h, cancel := runHub(t)
-	defer cancel()
-	c := &fakeClient{nid: 19}
-	h.Register(c)
-	h.EnsureDemand(c.nid, feed.WatchDemand("watch", "US.AAPL"))
-	h.EnsureDemand(c.nid, feed.ChartDemand("chart", "US.AAPL"))
-	h.sync()
-
-	var mu sync.Mutex
-	var roles []string
-	h.SetHistoryWarm(func(_ string, _ func(bool)) {
-		mu.Lock()
-		roles = append(roles, "prepare")
-		mu.Unlock()
-	}, func(_ string, _ func(bool)) {
-		mu.Lock()
-		roles = append(roles, "warm")
-		mu.Unlock()
-	})
-	h.sync()
-	mu.Lock()
-	got := append([]string(nil), roles...)
-	mu.Unlock()
-	if !reflect.DeepEqual(got, []string{"prepare"}) {
-		t.Fatalf("history roles = %v, want focused preparation only", got)
+	events, ok := frames[0].Payload.([]wsmsg.SysEvent)
+	if !ok || len(events) != 1 || events[0].Kind != "chart-ready" || events[0].Detail != "US.AAPL" {
+		t.Fatalf("event=%+v, want chart-ready US.AAPL", frames[0].Payload)
 	}
 }
 
