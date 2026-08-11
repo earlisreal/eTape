@@ -208,6 +208,22 @@ describe("ChartPanel", () => {
 	expect(commands.sendQuery.mock.calls.filter(([name]) => name === "QueryChartWindow")).toHaveLength(1);
   });
 
+  it("loads a chart snapshot when chart-ready arrived before panel mount", async () => {
+    const stores = makeStores();
+    act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+    } }));
+
+    const { commands } = renderChart("c1", stores, undefined, { timeframe: "10s" }, {
+      symbol: "US.AAPL", timeframe: "10s", fromMs: 1, toMs: 2, bars: [], indicators: [], historyRevision: 1,
+    });
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+
+    expect(commands.sendQuery).toHaveBeenCalledWith("QueryChartWindow", expect.objectContaining({
+      symbol: "US.AAPL", timeframe: "10s", tailBars: 1_000_000,
+    }));
+  });
+
   it("scopes indicator instanceIds to the panel, so two panels adding the same indicator type don't collide (Finding 2 regression)", () => {
     // Both panels share ONE store instance, exactly as App.tsx's single makeStores()
     // call shares BarStore/IndicatorStore across every chart panel in a workspace.

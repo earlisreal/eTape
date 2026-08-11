@@ -474,8 +474,9 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     // history-ready seq=1 and strand a freshly re-specified indicator.
     const eventKey = (event: { seq: number; ts: string; kind: string; detail: string; level?: string }) =>
       `${event.kind}\u0000${event.seq}\u0000${event.ts}\u0000${event.detail}\u0000${event.level ?? ""}`;
-    let seenEventKeys = new Set(stores.health.getSnapshot().events.map(eventKey));
-    const offHistoryReady = stores.health.subscribe(() => {
+    const initialEvents = stores.health.getSnapshot().events;
+    let seenEventKeys = new Set(initialEvents.map(eventKey));
+    const processHealthEvents = () => {
       const events = stores.health.getSnapshot().events;
       const nextSeen = new Set<string>();
       for (const event of events) {
@@ -500,7 +501,18 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       // HealthStore retains only its bounded event window. Mirroring that window
       // here keeps this dedup state bounded too.
       seenEventKeys = nextSeen;
-    });
+    };
+    const offHistoryReady = stores.health.subscribe(processHealthEvents);
+    // The WebSocket snapshot can deliver chart-ready before this panel mounts.
+    // Replay only that barrier here: an old indicator-ready must remain unseen
+    // until its corresponding live subscription is established.
+    if (initialEvents.some((event) => event.kind === "chart-ready" && event.detail === currentSymbol)) {
+      if (indicatorReloadPending) {
+        for (const indicatorKey of indicatorKeys()) stores.indicators.reset(indicatorKey);
+        indicatorReloadPending = false;
+      }
+      void querySnapshot();
+    }
 
     const updateLegend = () => {
       const bars = controller.displayBars();
