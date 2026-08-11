@@ -234,7 +234,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			// Best-effort: reaches the already-running instance's UI. If it
 			// fails (no browser handler, etc.) there's nothing more useful
 			// to do than exit -- the other instance is already up.
-			_ = openbrowser.Open("http://" + cfg.UIHub.Addr())
+			_ = openbrowser.Open(browserURL(cfg.UIHub.Addr(), handlerLevel == slog.LevelDebug))
 		}
 		return 0, false, nil
 	}
@@ -470,7 +470,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}
 	if !*noOpen {
 		go func() {
-			if err := openbrowser.Open("http://" + cfg.UIHub.Addr()); err != nil {
+			if err := openbrowser.Open(browserURL(cfg.UIHub.Addr(), handlerLevel == slog.LevelDebug)); err != nil {
 				log.Warn("open browser", "err", err)
 			}
 		}()
@@ -800,6 +800,14 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		na = *p
 	}
 	return 0, restartRequested.Load(), na
+}
+
+func browserURL(addr string, debug bool) string {
+	url := "http://" + addr
+	if debug {
+		url += "?debug=1"
+	}
+	return url
 }
 
 func bars10sRetentionCutoff(now time.Time, days int) int64 {

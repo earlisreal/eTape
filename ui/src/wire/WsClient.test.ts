@@ -161,7 +161,7 @@ describe("WsClient", () => {
     const sent = JSON.parse(FakeSocket.last().sent.at(-1)!);
     FakeSocket.last().emit(JSON.stringify({ kind: "ack", corrId: sent.corrId, status: "blocked", reason: "unknown symbol" }));
     await expect(p).resolves.toMatchObject({ status: "blocked" });
-    expect(warn).toHaveBeenCalledWith("command rejected", {
+    expect(warn).toHaveBeenCalledWith(`command rejected command=EnsureSymbol corrId=${sent.corrId} status=blocked reason=unknown symbol`, {
       command: "EnsureSymbol", corrId: sent.corrId, status: "blocked", reason: "unknown symbol",
     });
     expect(JSON.stringify(warn.mock.calls)).not.toContain("do-not-log");

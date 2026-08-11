@@ -166,7 +166,7 @@ export class WsClient {
         if (pending) {
           this.pending.delete(msg.corrId);
           if (msg.status !== "accepted") {
-            uiLog.warn("command rejected", {
+            uiLog.warn(`command rejected command=${pending.command} corrId=${msg.corrId} status=${msg.status} reason=${msg.reason ?? ""}`, {
               command: pending.command,
               corrId: msg.corrId,
               status: msg.status,

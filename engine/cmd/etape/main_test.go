@@ -28,6 +28,15 @@ func TestNextHistoryRefreshUsesTradingCalendar(t *testing.T) {
 	}
 }
 
+func TestBrowserURLAddsUIDebugQuery(t *testing.T) {
+	if got := browserURL("127.0.0.1:8686", true); got != "http://127.0.0.1:8686?debug=1" {
+		t.Fatalf("debug URL = %q", got)
+	}
+	if got := browserURL("127.0.0.1:8686", false); got != "http://127.0.0.1:8686" {
+		t.Fatalf("normal URL = %q", got)
+	}
+}
+
 func TestBars10sRetentionCutoffUsesCalendarDays(t *testing.T) {
 	loc := session.Loc()
 	now := time.Date(2026, 3, 20, 12, 30, 0, 0, loc)

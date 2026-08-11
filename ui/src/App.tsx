@@ -113,7 +113,10 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
       setTimeout: (fn, ms) => window.setTimeout(fn, ms),
     });
     const stores = makeStores();
-    const scheduler = new Scheduler(browserRaf, (id, err) => uiLog.error("painter crashed", { painterId: id, error: err }));
+    const scheduler = new Scheduler(browserRaf, (id, err) => {
+      const detail = err instanceof Error ? (err.stack ?? `${err.name}: ${err.message}`) : String(err);
+      uiLog.error(`painter crashed painterId=${id}: ${detail}`, { painterId: id, error: err });
+    });
     const workspaceStore = new WorkspaceStore(client);
     // Task 13: return the ack promise (rather than discarding it with `void`)
     // so a grouped type-to-load commit can await it via LinkGroups.focusChecked
