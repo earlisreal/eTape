@@ -338,7 +338,7 @@ func (c *conn) dispatch(ctx context.Context, b []byte) {
 		payload := c.qry.handle(head.Name, head.Args)
 		c.enqueueJSON(wsmsg.ResultMsg{Kind: "result", CorrID: head.CorrID, Payload: payload})
 	case "ping":
-		c.enqueueJSON(wsmsg.PongMsg{Kind: "pong", T: head.T})
+		c.enqueueJSON(c.hub.pong(head.T))
 	default:
 		// unknown kind: ignore
 	}

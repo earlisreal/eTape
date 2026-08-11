@@ -97,6 +97,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
   }, []);
 
   const { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry, reannounceGate } = useMemo(() => {
+    const stores = makeStores();
     const client = new WsClient({
       url: `ws://${location.host}/ws`,
       socketFactory: (url) => {
@@ -109,10 +110,10 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
         ws.onclose = () => sock.onclose?.();
         return sock;
       },
-      now: () => performance.now(),
+      now: () => Date.now(),
       setTimeout: (fn, ms) => window.setTimeout(fn, ms),
+      onMarketClockSample: (sample) => stores.marketClock.update(sample),
     });
-    const stores = makeStores();
     const scheduler = new Scheduler(browserRaf, (id, err) => {
       const detail = err instanceof Error ? (err.stack ?? `${err.name}: ${err.message}`) : String(err);
       uiLog.error(`painter crashed painterId=${id}: ${detail}`, { painterId: id, error: err });

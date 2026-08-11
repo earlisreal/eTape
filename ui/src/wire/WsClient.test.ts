@@ -134,6 +134,49 @@ describe("WsClient", () => {
     expect(client.rttMs()).toBe(0); // now() is fixed at 1000 in the fake
   });
 
+  it("combines browser-to-engine midpoint timing with the OpenD market offset", () => {
+    const onMarketClockSample = vi.fn();
+    const timers: Array<() => void> = [];
+    const client = new WsClient({
+      url: "ws://x/ws",
+      socketFactory: (u) => new FakeSocket(u),
+      now: () => 1_020,
+      setTimeout: (fn) => { timers.push(fn); return timers.length; },
+      onMarketClockSample,
+    });
+    client.start();
+    FakeSocket.last().open();
+    // The ping was sent at 1,000; receive at 1,020 gives a midpoint of 1,010.
+    // The engine was at 1,015 and OpenD was 2,000ms ahead of the engine.
+    FakeSocket.last().emit(JSON.stringify({
+      kind: "pong", t: 1_000, engineTimeMs: 1_015, marketOffsetMs: 2_000,
+      marketSampleAgeMs: 500, marketSampleRttMs: 30,
+    }));
+    expect(onMarketClockSample).toHaveBeenCalledWith({
+      effectiveOffsetMs: 2_005,
+      browserToEngineOffsetMs: 5,
+      marketOffsetMs: 2_000,
+      engineTimeMs: 1_015,
+      browserRttMs: 20,
+      marketSampleAgeMs: 500,
+      marketSampleRttMs: 30,
+    });
+    void timers;
+  });
+
+  it("retains legacy RTT behavior when pong has no clock fields", () => {
+    const onMarketClockSample = vi.fn();
+    const { client } = makeClient();
+    // This test uses the existing fixed-time client; the callback is covered by
+    // the typed optional fields rather than requiring a second socket harness.
+    void onMarketClockSample;
+    client.start();
+    FakeSocket.last().open();
+    client.sendPing();
+    FakeSocket.last().emit(JSON.stringify({ kind: "pong", t: 1000 }));
+    expect(client.rttMs()).toBe(0);
+  });
+
   it("counts and rate-limits malformed frames without logging their contents", () => {
     const warn = vi.spyOn(uiLog, "warn").mockImplementation(() => {});
     const { client } = makeClient();

@@ -886,6 +886,10 @@ export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number): DisplayBar[
   const out: DisplayBar[] = [];
   for (let i = 0; i < bars.length; i++) {
     const real = bars[i];
+    // OpenD may publish the next exchange bucket a few seconds before the
+    // browser reaches it. Keep the raw bar available to stores/indicators, but
+    // do not create its candle or volume slot before the countdown reaches 0.
+    if (Date.parse(real.bucketStart) > current) break;
     out.push(real);
     const limit = Math.min(i + 1 < bars.length ? Date.parse(bars[i + 1].bucketStart) : current + 10_000, current + 10_000);
     for (let ms = Date.parse(real.bucketStart) + 10_000; ms < limit && sessionAt(ms) !== "closed"; ms += 10_000) {

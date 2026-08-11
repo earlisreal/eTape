@@ -34,6 +34,26 @@ type HubConfig struct {
 	Buf              int // channel buffer depth for md/exec/pub inbound
 }
 
+// MarketClockSample is a validated estimate of the OpenD upstream market
+// clock relative to the engine clock. SampledAt is the engine time at which
+// the request completed; the Hub derives the current sample age when it sends
+// a pong. The source is optional so demo/replay and older feeds keep the local
+// browser-clock fallback.
+type MarketClockSample struct {
+	OffsetMs  int64
+	SampledAt time.Time
+	RTT       time.Duration
+}
+
+// MarketClockSource supplies the latest OpenD clock estimate. Implementations
+// must retain the last valid sample when a later probe fails. The now argument
+// is supplied for deterministic tests and future source-specific age checks.
+type MarketClockSource interface {
+	LatestMarketClock(now time.Time) (MarketClockSample, bool)
+}
+
+type marketClockBox struct{ source MarketClockSource }
+
 type subReq struct {
 	c     client
 	topic wsmsg.Topic
@@ -146,6 +166,7 @@ type Hub struct {
 	feedSlot        atomic.Pointer[feedBox]
 	backfillSlot    atomic.Pointer[backfillBox]
 	cachedDailySlot atomic.Pointer[cachedDailyBox]
+	marketClockSlot atomic.Pointer[marketClockBox]
 
 	// ind is the md.Core surface EnsureIndicator/ReleaseIndicator forward to.
 	// Unlike feedSlot/backfillSlot (injected asynchronously,
@@ -272,6 +293,46 @@ func (h *Hub) SetIndicators(i Indicators) { h.ind = i }
 // SetFeed injects the market-data control surface after the hub is running.
 // Safe to call once from boot; nil until then (replay/tests never call it).
 func (h *Hub) SetFeed(f Feed) { h.feedSlot.Store(&feedBox{f: f}) }
+
+// SetMarketClockSource publishes the optional upstream-clock source. It is
+// installed after the Hub is already running in live mode, so the atomic slot
+// keeps concurrent ping dispatches race-free. Passing nil restores local-clock
+// fallback for demo/replay or after a feed teardown.
+func (h *Hub) SetMarketClockSource(source MarketClockSource) {
+	if source == nil {
+		h.marketClockSlot.Store(nil)
+		return
+	}
+	h.marketClockSlot.Store(&marketClockBox{source: source})
+}
+
+func (h *Hub) pong(t int64) wsmsg.PongMsg {
+	msg := wsmsg.PongMsg{Kind: "pong", T: t}
+	box := h.marketClockSlot.Load()
+	if box == nil || box.source == nil {
+		return msg
+	}
+	now := h.clk.Now()
+	sample, ok := box.source.LatestMarketClock(now)
+	if !ok || sample.SampledAt.IsZero() {
+		return msg
+	}
+	engineMs := now.UnixMilli()
+	offsetMs := sample.OffsetMs
+	ageMs := now.Sub(sample.SampledAt).Milliseconds()
+	if ageMs < 0 {
+		ageMs = 0
+	}
+	rttMs := sample.RTT.Milliseconds()
+	if rttMs < 0 {
+		rttMs = 0
+	}
+	msg.EngineTimeMs = &engineMs
+	msg.MarketOffsetMs = &offsetMs
+	msg.MarketSampleAgeMs = &ageMs
+	msg.MarketSampleRttMs = &rttMs
+	return msg
+}
 
 // SetKnownSymbol installs a positive-only local archive lookup used to avoid
 // blocking chart switches on OpenD validation for previously seen symbols.

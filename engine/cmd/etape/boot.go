@@ -4,7 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
+	"math"
+	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
@@ -285,15 +289,107 @@ func resolveBackfillAlpacaCreds(cfg config.Config, cr creds.File) (creds.Pair, s
 // moomooProbe measures OpenD round-trip latency with a lightweight Qot_GetGlobalState.
 type moomooProbe struct {
 	c *opend.Client
+
+	mu      sync.RWMutex
+	offsets []int64
+	sample  uihub.MarketClockSample
+	have    bool
 }
 
-func (p moomooProbe) ProbeRTT(ctx context.Context) (time.Duration, error) {
+const (
+	maxMarketClockProbeRTT = 2 * time.Second
+	maxMarketClockOffset   = 24 * time.Hour
+	marketClockWindow      = 5
+)
+
+func (p *moomooProbe) ProbeRTT(ctx context.Context) (time.Duration, error) {
 	if p.c == nil {
 		return 0, errors.New("no opend client")
 	}
 	start := time.Now()
 	// UserID is a required (deprecated) proto2 field — a zero C2S{} fails to marshal.
-	_, err := p.c.Request(ctx, opend.ProtoGetGlobalState,
+	frame, err := p.c.Request(ctx, opend.ProtoGetGlobalState,
 		&getglobalstate.Request{C2S: &getglobalstate.C2S{UserID: proto.Uint64(0)}})
-	return time.Since(start), err
+	end := time.Now()
+	rtt := end.Sub(start)
+	if err != nil {
+		return rtt, err
+	}
+	var response getglobalstate.Response
+	if proto.Unmarshal(frame.Body, &response) != nil || response.GetRetType() != 0 {
+		return rtt, nil
+	}
+	if offset, ok := marketClockOffset(response.GetS2C(), start.Add(rtt/2), rtt); ok {
+		p.mu.Lock()
+		p.offsets = append(p.offsets, offset)
+		if len(p.offsets) > marketClockWindow {
+			p.offsets = p.offsets[len(p.offsets)-marketClockWindow:]
+		}
+		p.sample = uihub.MarketClockSample{
+			OffsetMs:  medianInt64(p.offsets),
+			SampledAt: end,
+			RTT:       rtt,
+		}
+		rollingOffset := p.sample.OffsetMs
+		p.have = true
+		p.mu.Unlock()
+		s2c := response.GetS2C()
+		slog.Debug("market clock sample", "serverTimeSec", s2c.GetTime(), "openDLocalTimeSec", s2c.GetLocalTime(),
+			"engineMidpointMs", start.Add(rtt/2).UnixMilli(), "sampleOffsetMs", offset,
+			"rollingOffsetMs", rollingOffset, "sampleRttMs", rtt.Milliseconds())
+	}
+	return rtt, nil
+}
+
+func (p *moomooProbe) LatestMarketClock(_ time.Time) (uihub.MarketClockSample, bool) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.sample, p.have
+}
+
+// marketClockOffset reconstructs the upstream timestamp at the request
+// midpoint. OpenD reports the server's whole-second `time` plus a fractional
+// `localTime` captured at the same instant; reusing that fractional phase avoids
+// the ±500ms error that adding a fixed half-second would introduce.
+func marketClockOffset(s2c *getglobalstate.S2C, midpoint time.Time, rtt time.Duration) (int64, bool) {
+	if s2c == nil || rtt <= 0 || rtt > maxMarketClockProbeRTT {
+		return 0, false
+	}
+	serverMs, ok := reconstructedMarketTimeMs(s2c)
+	if !ok {
+		return 0, false
+	}
+	offset := serverMs - midpoint.UnixMilli()
+	if offset < -maxMarketClockOffset.Milliseconds() || offset > maxMarketClockOffset.Milliseconds() {
+		return 0, false
+	}
+	return offset, true
+}
+
+func reconstructedMarketTimeMs(s2c *getglobalstate.S2C) (int64, bool) {
+	if s2c == nil || s2c.GetTime() <= 0 {
+		return 0, false
+	}
+	local := s2c.GetLocalTime()
+	if local <= 0 || math.IsNaN(local) || math.IsInf(local, 0) {
+		return 0, false
+	}
+	frac := local - math.Floor(local)
+	if frac < 0 || frac >= 1 {
+		return 0, false
+	}
+	ms := float64(s2c.GetTime())*1000 + frac*1000
+	if ms <= 0 || ms >= float64(math.MaxInt64) {
+		return 0, false
+	}
+	return int64(math.Round(ms)), true
+}
+
+func medianInt64(values []int64) int64 {
+	if len(values) == 0 {
+		return 0
+	}
+	copyValues := append([]int64(nil), values...)
+	sort.Slice(copyValues, func(i, j int) bool { return copyValues[i] < copyValues[j] })
+	return copyValues[len(copyValues)/2]
 }

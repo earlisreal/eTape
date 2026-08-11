@@ -37,7 +37,9 @@ export default defineConfig({
         test: {
           name: 'chart-core',
           include: [
+            'src/data/MarketClock.test.ts',
             'src/data/BarStore.test.ts',
+            'src/render/chart/barClose.test.ts',
             'src/render/chart/ChartController.test.ts',
             'src/render/chart/chartTheme.test.ts',
             'src/render/ladder/ladderState.test.ts',
@@ -48,7 +50,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'chart-panel',
-          include: ['src/chrome/panels/ChartPanel.test.tsx'],
+          include: ['src/chrome/panels/ChartPanel.test.tsx', 'src/chrome/panels/tv/BarCloseTimer.test.tsx'],
         },
       },
       {

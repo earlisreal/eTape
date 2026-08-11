@@ -10,4 +10,4 @@ to another Alpaca account. Broker-backed locate queries and requests run off
 the connection reader with correlation-preserving deferred replies, so a slow
 Alpaca REST call cannot delay unrelated commands.
 
-Local HTTP/WebSocket bridge. Publishes topic snapshots/updates; dispatches typed commands. Go `wsmsg/` structs own contract; generated TypeScript follows generator. Mirror supplies snapshot-on-subscribe. Test: `go test ./internal/uihub`; `make gen-ts-check`.
+Local HTTP/WebSocket bridge. Publishes topic snapshots/updates; dispatches typed commands. Go `wsmsg/` structs own contract; generated TypeScript follows generator. Mirror supplies snapshot-on-subscribe. WebSocket pongs optionally carry the latest OpenD upstream-clock offset, sample age, and request RTT so managed charts can share one boundary clock; clients without that source fall back to browser time. Test: `go test ./internal/uihub`; `make gen-ts-check`.

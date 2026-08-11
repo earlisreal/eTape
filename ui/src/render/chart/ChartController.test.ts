@@ -301,7 +301,7 @@ describe("ChartController", () => {
     expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: -20, to: -10 });
   });
 
-  it("paints an early 10s bar immediately, then follows exactly once at its boundary", () => {
+  it("holds an early 10s candle until its boundary, then paints and follows exactly once", () => {
     const base = Date.parse("2026-07-06T13:31:00Z");
     const bars = [tenSecondBar(new Date(base).toISOString(), 10)];
     const { facade, ctrl } = make10s(barReaderOf(bars));
@@ -310,21 +310,27 @@ describe("ChartController", () => {
     const beforeLogical = { from: -10, to: 4 };
     facade.visibleLogicalRange = beforeLogical;
     const scrollsBefore = facade.scrolls;
+    const candle = facade.created[0].series;
+    const volume = facade.created[1].series;
+    const candleUpdatesBefore = candle.updates.length;
+    const volumeUpdatesBefore = volume.updates.length;
 
     bars.push(tenSecondBar(new Date(base + 10_000).toISOString(), 11, true));
     ctrl.sync(base + 8_000);
 
-    expect(facade.created[0].series.updates.at(-1)).toEqual({
+    expect(bars).toHaveLength(2); // market-data truth remains immediate
+    expect(ctrl.displayBars()).toHaveLength(1);
+    expect(candle.updates).toHaveLength(candleUpdatesBefore);
+    expect(volume.updates).toHaveLength(volumeUpdatesBefore);
+    expect(facade.scrolls).toBe(scrollsBefore);
+
+    ctrl.sync(base + 10_000);
+    expect(candle.updates.at(-1)).toEqual({
       time: (base + 10_000) / 1000, open: 11, high: 11, low: 11, close: 11,
     });
-    expect(facade.created[1].series.updates.at(-1)).toEqual({
+    expect(volume.updates.at(-1)).toEqual({
       time: (base + 10_000) / 1000, value: 100, color: LIGHT.volUp,
     });
-    expect(facade.scrolls).toBe(scrollsBefore);
-    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
-
-    facade.scrollPosition = 3; // the stationary range now has one fewer empty slot
-    ctrl.sync(base + 10_000);
     expect(facade.scrolls).toBe(scrollsBefore + 1);
     ctrl.sync(base + 11_000);
     ctrl.sync(base + 12_000);
@@ -416,7 +422,7 @@ describe("ChartController", () => {
     expect(facade.scrolls).toBe(scrollsBefore);
   });
 
-  it("defers a future-detached threshold crossing when the newest 10s bar is early", () => {
+  it("keeps a future-detached early 10s bar hidden until its threshold-crossing boundary", () => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
     const { facade, ctrl } = make10s(reader);
@@ -433,7 +439,8 @@ describe("ChartController", () => {
     ctrl.sync(base + 18_000);
     expect(facade.scrolls).toBe(scrollsBefore);
     expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
-    facade.scrollPosition = 3;
+    expect(ctrl.displayBars().at(-1)?.bucketStart).toBe(new Date(base + 10_000).toISOString());
+    facade.scrollPosition = 4;
     ctrl.sync(base + 20_000);
     expect(facade.scrolls).toBe(scrollsBefore + 1);
   });
@@ -441,7 +448,7 @@ describe("ChartController", () => {
   it.each([
     ["10s", 10_000, tenSecondBar],
     ["1m", 60_000, bar],
-  ] as const)("%s live rebuild paints an early bucket but defers follow", (timeframe, spanMs, makeBar) => {
+  ] as const)("%s live rebuild keeps visual rollover boundary-synchronized", (timeframe, spanMs, makeBar) => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const reader = mutableBarReader([
       makeBar(new Date(base).toISOString(), 10),
@@ -461,13 +468,18 @@ describe("ChartController", () => {
       makeBar(new Date(base + 2 * spanMs).toISOString(), 12, true),
     ]);
     made.ctrl.sync(base + 2 * spanMs - 2_000);
+    const isTenSeconds = timeframe === "10s";
+    const preBoundaryScrolls = scrollsBefore + (isTenSeconds ? 1 : 0);
     expect(candle.setDataCalls).toHaveLength(2);
-    expect(candle.setDataCalls.at(-1)?.at(-1)).toEqual(expect.objectContaining({ time: (base + 2 * spanMs) / 1000 }));
-    expect(made.facade.scrolls).toBe(scrollsBefore);
-    expect(made.facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
-    made.facade.scrollPosition = 3;
+    expect(candle.setDataCalls.at(-1)?.at(-1)).toEqual(expect.objectContaining({
+      time: (base + (isTenSeconds ? spanMs : 2 * spanMs)) / 1000,
+    }));
+    expect(made.facade.scrolls).toBe(preBoundaryScrolls);
+    if (isTenSeconds) expect(made.facade.setVisibleLogicalRangeCalls).toHaveLength(0);
+    else expect(made.facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+    made.facade.scrollPosition = isTenSeconds ? 4 : 3;
     made.ctrl.sync(base + 2 * spanMs);
-    expect(made.facade.scrolls).toBe(scrollsBefore + 1);
+    expect(made.facade.scrolls).toBe(preBoundaryScrolls + 1);
   });
 
   it("Jump to Live follows immediately and clears an early 1m pending follow", () => {

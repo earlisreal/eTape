@@ -5,6 +5,7 @@ import { remainingToBarCloseMs, formatCountdown } from "../../../render/chart/ba
 import type { Timeframe } from "../../../render/chart/barBucket";
 
 export interface BarCloseTimerProps {
+  now?: () => number;
   chrome: TvChrome;
   timeframe: string;
   price: string;
@@ -26,12 +27,12 @@ const PILL_HEIGHT = PAD_V * 2 + ROW_HEIGHT * 2;
 // idiom as SessionClock's useEtClock. Interval (not rAF) keeps this
 // deterministic under fake timers; this is low-rate chrome state, not the
 // high-frequency canvas path, so a React re-render per tick is fine.
-function useNowTick(): number {
-  const [now, setNow] = useState<number>(() => Date.now());
+function useNowTick(nowFn: () => number): number {
+  const [now, setNow] = useState<number>(() => nowFn());
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), 1000);
+    const id = setInterval(() => setNow(nowFn()), 1000);
     return () => clearInterval(id);
-  }, []);
+  }, [nowFn]);
   return now;
 }
 
@@ -45,8 +46,8 @@ function useNowTick(): number {
 // sits. Plain position:absolute DOM over the canvas (same overlay layer as
 // TVLegend) — pointerEvents:none so it never steals clicks/drag from the
 // interactive chart underneath.
-export function BarCloseTimer({ chrome, timeframe, price, lastPriceY, rightAxisWidth, paneBottom, up }: BarCloseTimerProps): JSX.Element {
-  const now = useNowTick();
+export function BarCloseTimer({ now: nowFn = Date.now, chrome, timeframe, price, lastPriceY, rightAxisWidth, paneBottom, up }: BarCloseTimerProps): JSX.Element {
+  const now = useNowTick(nowFn);
   const text = formatCountdown(remainingToBarCloseMs(timeframe as Timeframe, now));
   const tint = up ? chrome.up : chrome.down;
   const top = Math.min(lastPriceY - PAD_V - ROW_HEIGHT / 2, paneBottom - PILL_HEIGHT);

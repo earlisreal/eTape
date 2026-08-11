@@ -24,6 +24,14 @@ describe("BarCloseTimer", () => {
     vi.useRealTimers();
   });
 
+  it("uses the supplied market clock instead of the browser clock", () => {
+    const marketNow = Date.parse("2026-07-06T13:30:45Z");
+    render(
+      <BarCloseTimer now={() => marketNow} chrome={chrome} timeframe="1m" price="205.60" lastPriceY={100} rightAxisWidth={60} paneBottom={400} up={true} />,
+    );
+    expect(screen.getByTestId("bar-close-timer-countdown").textContent).toBe("0:15");
+  });
+
   it("decrements once per second as fake timers advance", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-06T13:30:45Z"));

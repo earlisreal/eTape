@@ -15,6 +15,7 @@ import { NewsStore } from "./NewsStore";
 import { StockDetailStore } from "./StockDetailStore";
 import { FillStore } from "./FillStore";
 import { TradeStore } from "./TradeStore";
+import { MarketClock } from "./MarketClock";
 import { DrawingStore } from "../render/chart/drawings/store";
 import { DrawingToolStyleStore } from "../render/chart/drawings/toolStyles";
 
@@ -34,6 +35,7 @@ export interface Stores {
   stockDetail: StockDetailStore;
   fills: FillStore;
   trades: TradeStore;
+  marketClock: MarketClock;
   drawings: DrawingStore;
   drawingToolStyles: DrawingToolStyleStore;
 }
@@ -55,6 +57,7 @@ export function makeStores(): Stores {
     stockDetail: new StockDetailStore(),
     fills: new FillStore(),
     trades: new TradeStore(),
+    marketClock: new MarketClock(),
     drawings: new DrawingStore(),
     drawingToolStyles: new DrawingToolStyleStore(),
   };

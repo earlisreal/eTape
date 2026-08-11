@@ -4,6 +4,7 @@ import type {
 import { decodeServerMessage, encodeClientMessage } from "./codec";
 import { perf } from "../perf/PerfMonitor";
 import { uiLog } from "../logging/logger";
+import type { MarketClockUpdate } from "../data/MarketClock";
 
 export interface ISocket {
   send(data: string): void;
@@ -25,6 +26,7 @@ interface Opts {
   now: () => number;
   setTimeout: SetTimeoutLike;
   backoff?: (attempt: number) => number;
+  onMarketClockSample?: (sample: MarketClockUpdate) => void;
 }
 
 const DEFAULT_BACKOFF = (attempt: number) => {
@@ -178,7 +180,26 @@ export class WsClient {
         return;
       }
       case "pong": {
-        this.lastRtt = this.opts.now() - msg.t;
+        const receivedAt = this.opts.now();
+        const rtt = Math.max(0, receivedAt - msg.t);
+        this.lastRtt = rtt;
+        if (msg.engineTimeMs !== undefined && msg.marketOffsetMs !== undefined
+          && msg.marketSampleAgeMs !== undefined && msg.marketSampleRttMs !== undefined) {
+          const midpoint = msg.t + rtt / 2;
+          const browserToEngineOffsetMs = msg.engineTimeMs - midpoint;
+          const effectiveOffsetMs = browserToEngineOffsetMs + msg.marketOffsetMs;
+          if (Number.isFinite(effectiveOffsetMs) && Number.isFinite(browserToEngineOffsetMs)) {
+            this.opts.onMarketClockSample?.({
+              effectiveOffsetMs,
+              browserToEngineOffsetMs,
+              marketOffsetMs: msg.marketOffsetMs,
+              engineTimeMs: msg.engineTimeMs,
+              browserRttMs: rtt,
+              marketSampleAgeMs: msg.marketSampleAgeMs,
+              marketSampleRttMs: msg.marketSampleRttMs,
+            });
+          }
+        }
         return;
       }
       case "result": {

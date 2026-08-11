@@ -57,6 +57,10 @@ export interface AckMsg {
 export interface PongMsg {
   kind: "pong";
   t: number;
+  engineTimeMs?: number;
+  marketOffsetMs?: number;
+  marketSampleAgeMs?: number;
+  marketSampleRttMs?: number;
 }
 export interface ResultMsg {
   kind: "result";

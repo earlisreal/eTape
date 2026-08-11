@@ -11,7 +11,7 @@ import { INDICATOR_CATALOG, withDefaultParams, describeIndicator, type Indicator
 import { DrawingsPrimitive } from "../../render/chart/drawings/primitive";
 import { DrawingInteraction, type Tool } from "../../render/chart/drawings/interaction";
 import { timeframeToMs } from "../../render/chart/drawings/geometry";
-import type { Timeframe } from "../../render/chart/barBucket";
+import { bucketStartMs, type Timeframe } from "../../render/chart/barBucket";
 import { aggregateFillMarkers } from "../../render/chart/fillAggregate";
 import { isIntradayTimeframe, isTenSecondTimerCandidateLive } from "../../render/chart/barClose";
 import { formatPrice } from "../../render/format";
@@ -532,6 +532,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     let lastFillsRev = -1;
     let lastDrawingsRev = -1;
     let lastWallBucket = -1;
+    let lastBoundaryTraceKey = "";
     // Dragging a pane separator (e.g. resizing the MACD sub-pane by hand) changes
     // pane heights inside LWC directly — it bumps no store revision and moves no
     // crosshair, so none of the revision checks above ever see it. Without this
@@ -565,7 +566,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         const drawingsRev = stores.drawings.getRev();
         const paneSig = `${facade.paneHeights().join(",")}|${facade.priceScaleWidth()}`;
         const wallBucket = usesBoundaryManagedFollow(tfRef.current)
-          ? Math.floor(Date.now() / timeframeToMs(tfRef.current as Timeframe))
+          ? Math.floor(stores.marketClock.nowMs() / timeframeToMs(tfRef.current as Timeframe))
           : -1;
         const changed = barsRev !== lastBarsRev || indicatorsRev !== lastIndicatorsRev || fillsRev !== lastFillsRev || drawingsRev !== lastDrawingsRev
           || paneSig !== lastPaneSig || wallBucket !== lastWallBucket || forceRepaintRef.current;
@@ -579,9 +580,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         return changed;
       },
       paint: () => {
-		const nowMs = Date.now();
-		if (chartSnapshotLoaded) controller.sync(nowMs);
-		const paintedBars = chartSnapshotLoaded ? stores.bars.series(currentSymbol, tfRef.current) : [];
+        const browserNowMs = Date.now();
+        const nowMs = stores.marketClock.nowMs();
+        if (chartSnapshotLoaded) controller.sync(nowMs);
+        const paintedBars = chartSnapshotLoaded ? stores.bars.series(currentSymbol, tfRef.current) : [];
         if (pendingFirstPaint && pendingFirstPaint.symbol === currentSymbol && pendingFirstPaint.timeframe === tfRef.current && paintedBars.length > 0) {
           const timing = pendingFirstPaint;
           pendingFirstPaint = null;
@@ -601,6 +603,38 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         // building the `chart:${config.id}` template-literal id on every hot-path
         // paint while disabled (mirrors TapePanel.tsx's identical recordScan guard).
         if (perf.enabled) perf.recordScan(`chart:${config.id}`, controller.lastSyncDaySegmentBuilds());
+        if (chartSnapshotLoaded && usesBoundaryManagedFollow(tfRef.current)) {
+          const timeframe = tfRef.current as Timeframe;
+          const marketBoundaryMs = bucketStartMs(nowMs, timeframe);
+          const traceKey = `${currentSymbol}|${timeframe}|${marketBoundaryMs}`;
+          if (traceKey !== lastBoundaryTraceKey) {
+            const rawTail = stores.bars.series(currentSymbol, timeframe).at(-1);
+            const rawTailMs = rawTail ? Date.parse(rawTail.bucketStart) : NaN;
+            const browserBoundaryMs = bucketStartMs(browserNowMs, timeframe);
+            const clock = stores.marketClock.snapshot();
+            uiLog.debug("chart market clock boundary", {
+              symbol: currentSymbol,
+              timeframe,
+              browserNowMs,
+              marketNowMs: Math.round(nowMs),
+              browserBoundaryMs,
+              marketBoundaryMs,
+              rawTailBucketMs: Number.isFinite(rawTailMs) ? rawTailMs : null,
+              browserLeadMs: Number.isFinite(rawTailMs) ? rawTailMs - browserBoundaryMs : null,
+              marketLeadMs: Number.isFinite(rawTailMs) ? rawTailMs - marketBoundaryMs : null,
+              synchronized: clock.synchronized,
+              effectiveOffsetMs: clock.offsetMs,
+              browserToEngineOffsetMs: clock.browserToEngineOffsetMs,
+              marketOffsetMs: clock.marketOffsetMs,
+              engineTimeMs: clock.engineTimeMs,
+              browserRttMs: clock.browserRttMs,
+              marketSampleAgeMs: clock.marketSampleAgeMs,
+              marketSampleRttMs: clock.marketSampleRttMs,
+              marketClockStale: clock.stale,
+            });
+            lastBoundaryTraceKey = traceKey;
+          }
+        }
         controller.setFills(aggregateFillMarkers(stores.fills.forSymbolFills(currentSymbol), tfRef.current as Timeframe));
         drawings.setDrawings(stores.drawings.forSymbol(currentSymbol));
         drawings.setBars(controller.barsMs(), timeframeToMs(tfRef.current as Timeframe));
@@ -615,7 +649,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         // BarCloseTimer anchors directly on LWC's own last-price coordinate, which
         // only exists while an accepted in-progress bar is live — no live
         // bar, nothing to anchor to, so the badge stays hidden (see the JSX gate below).
-		const candidate = chartSnapshotLoaded ? stores.bars.inProgressBar(currentSymbol, tfRef.current) : null;
+        const candidate = chartSnapshotLoaded ? stores.bars.inProgressBar(currentSymbol, tfRef.current) : null;
         const live = candidate && (tfRef.current !== "10s" || isTenSecondTimerCandidateLive(candidate.bucketStart, nowMs)) ? candidate : null;
         const y = live ? facade.priceToCoordinate(live.c) : null;
         const next = live && y != null ? { y, up: live.c >= live.o, price: live.c } : null;
@@ -917,7 +951,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           onClosePane={closePane} onToggleCollapsePane={togglePaneCollapsed}
           legendRef={legendRef} />
         {showBarCloseTimer && lastPriceTag && (
-          <BarCloseTimer chrome={chrome} timeframe={timeframe} price={formatPrice(lastPriceTag.price, 2)} lastPriceY={lastPriceTag.y}
+          <BarCloseTimer now={stores.marketClock.nowMs} chrome={chrome} timeframe={timeframe} price={formatPrice(lastPriceTag.price, 2)} lastPriceY={lastPriceTag.y}
             rightAxisWidth={rightAxisWidth} paneBottom={paneOffsets[1] ?? height} up={lastPriceTag.up} />
         )}
         {selection && (

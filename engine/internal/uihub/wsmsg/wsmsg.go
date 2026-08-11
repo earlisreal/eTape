@@ -175,8 +175,12 @@ type AckMsg struct {
 }
 
 type PongMsg struct {
-	Kind string `json:"kind"` // always "pong"
-	T    int64  `json:"t"`
+	Kind              string `json:"kind"` // always "pong"
+	T                 int64  `json:"t"`
+	EngineTimeMs      *int64 `json:"engineTimeMs,omitempty"`
+	MarketOffsetMs    *int64 `json:"marketOffsetMs,omitempty"`
+	MarketSampleAgeMs *int64 `json:"marketSampleAgeMs,omitempty"`
+	MarketSampleRttMs *int64 `json:"marketSampleRttMs,omitempty"`
 }
 
 type ResultMsg struct {

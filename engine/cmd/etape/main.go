@@ -588,7 +588,9 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		pipeWG.Add(1)
 		go pipe(ctx, &pipeWG, fd.Events(), core)
 		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
-		feedForHub, pollReq, mmProbe, demand = fd, client, moomooProbe{c: client}, fd
+		probe := &moomooProbe{c: client}
+		hub.SetMarketClockSource(probe)
+		feedForHub, pollReq, mmProbe, demand = fd, client, probe, fd
 
 		if cfg.Backfill.Enabled {
 			var alpacaSrc *histalpaca.Client
