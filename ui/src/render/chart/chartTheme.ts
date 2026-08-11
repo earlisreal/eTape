@@ -144,6 +144,10 @@ export function boundedOverlayAutoscale(
 // subscribeVisibleLogicalRangeChange handler.
 export const RIGHT_OFFSET_BARS = 4;
 
+export function usesBoundaryManagedFollow(timeframe: string): boolean {
+  return timeframe === "10s" || timeframe === "1m";
+}
+
 // Returns the scroll position to snap back to when the current one overshoots the
 // cap, or null when it's already within bounds. `scrollPosition` is LWC's
 // distance-from-right-edge-to-latest-bar, measured in bars; `visibleBars` is the
@@ -189,8 +193,10 @@ export function chartOptions(p: Palette, timeframe: string): DeepChartOptions {
       // clampRightScroll — see that function's comment above.
       // Left edge stays unlocked: negative logical indexes provide enough blank
       // pan area to request a full older viewport after gesture release.
-      // shiftVisibleRangeOnNewBar: once at the right edge, new bars auto-scroll into view.
-      fixLeftEdge: false, shiftVisibleRangeOnNewBar: true,
+      // Exchange timestamps can enter the next 10s/1m bucket before the browser
+      // wall clock. The controller accepts those bars immediately but owns the
+      // visual follow so it can wait for the actual bucket boundary.
+      fixLeftEdge: false, shiftVisibleRangeOnNewBar: !usesBoundaryManagedFollow(timeframe),
       tickMarkFormatter,
     },
     autoSize: false, // we drive resize via ResizeObserver → controller.resize()

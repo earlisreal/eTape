@@ -277,7 +277,7 @@ describe("ChartController", () => {
     expect(facade.setVisibleLogicalRangeCalls).toHaveLength(0);
   });
 
-  it("10s ordinary live append leaves follow behavior to Lightweight Charts", () => {
+  it("10s ordinary live append follows immediately once its wall-clock bucket has started", () => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const { facade, ctrl } = make10s(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
     ctrl.sync(base + 10_000);
@@ -285,7 +285,7 @@ describe("ChartController", () => {
     facade.visibleLogicalRange = { from: 0, to: 1 };
     const scrollsBefore = facade.scrolls;
     ctrl.sync(base + 20_000);
-    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.scrolls).toBe(scrollsBefore + 1);
     expect(facade.setVisibleLogicalRangeCalls).toHaveLength(0);
   });
 
@@ -298,7 +298,211 @@ describe("ChartController", () => {
     const scrollsBefore = facade.scrolls;
     ctrl.sync(base + 30_000);
     expect(facade.scrolls).toBe(scrollsBefore);
-    expect(facade.setVisibleLogicalRangeCalls).toHaveLength(0);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: -20, to: -10 });
+  });
+
+  it("paints an early 10s bar immediately, then follows exactly once at its boundary", () => {
+    const base = Date.parse("2026-07-06T13:31:00Z");
+    const bars = [tenSecondBar(new Date(base).toISOString(), 10)];
+    const { facade, ctrl } = make10s(barReaderOf(bars));
+    ctrl.sync(base);
+    facade.scrollPosition = 4;
+    const beforeLogical = { from: -10, to: 4 };
+    facade.visibleLogicalRange = beforeLogical;
+    const scrollsBefore = facade.scrolls;
+
+    bars.push(tenSecondBar(new Date(base + 10_000).toISOString(), 11, true));
+    ctrl.sync(base + 8_000);
+
+    expect(facade.created[0].series.updates.at(-1)).toEqual({
+      time: (base + 10_000) / 1000, open: 11, high: 11, low: 11, close: 11,
+    });
+    expect(facade.created[1].series.updates.at(-1)).toEqual({
+      time: (base + 10_000) / 1000, value: 100, color: LIGHT.volUp,
+    });
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+
+    facade.scrollPosition = 3; // the stationary range now has one fewer empty slot
+    ctrl.sync(base + 10_000);
+    expect(facade.scrolls).toBe(scrollsBefore + 1);
+    ctrl.sync(base + 11_000);
+    ctrl.sync(base + 12_000);
+    expect(facade.scrolls).toBe(scrollsBefore + 1);
+  });
+
+  it("paints an early 1m bar immediately, then follows exactly once at its boundary", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const bars = [bar(new Date(base).toISOString(), 10)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(base);
+    facade.scrollPosition = 4;
+    const beforeLogical = { from: -10, to: 4 };
+    facade.visibleLogicalRange = beforeLogical;
+    const scrollsBefore = facade.scrolls;
+
+    bars.push(bar(new Date(base + 60_000).toISOString(), 11, true));
+    ctrl.sync(base + 58_000);
+
+    expect(facade.created[0].series.updates.at(-1)).toEqual({
+      time: (base + 60_000) / 1000, open: 11, high: 11, low: 11, close: 11,
+    });
+    expect(facade.created[1].series.updates.at(-1)).toEqual({
+      time: (base + 60_000) / 1000, value: 100, color: LIGHT.volUp,
+    });
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+
+    facade.scrollPosition = 3;
+    ctrl.sync(base + 60_000);
+    expect(facade.scrolls).toBe(scrollsBefore + 1);
+    ctrl.sync(base + 61_000);
+    ctrl.sync(base + 62_000);
+    expect(facade.scrolls).toBe(scrollsBefore + 1);
+  });
+
+  it.each([
+    ["10s", 10_000, tenSecondBar],
+    ["1m", 60_000, bar],
+  ] as const)("%s live append follows immediately when data arrives after the boundary", (timeframe, spanMs, makeBar) => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const bars: Bar[] = [makeBar(new Date(base).toISOString(), 10)];
+    const made = timeframe === "10s" ? make10s(barReaderOf(bars)) : make(barReaderOf(bars));
+    made.ctrl.sync(base);
+    made.facade.scrollPosition = 4;
+    made.facade.visibleLogicalRange = { from: -10, to: 4 };
+    const scrollsBefore = made.facade.scrolls;
+    bars.push(makeBar(new Date(base + spanMs).toISOString(), 11, true));
+    made.ctrl.sync(base + spanMs + 250);
+    expect(made.facade.scrolls).toBe(scrollsBefore + 1);
+  });
+
+  it.each([
+    ["10s", 10_000, tenSecondBar],
+    ["1m", 60_000, bar],
+  ] as const)("%s historical browsing is never followed after an early append", (timeframe, spanMs, makeBar) => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const bars: Bar[] = [makeBar(new Date(base).toISOString(), 10)];
+    const made = timeframe === "10s" ? make10s(barReaderOf(bars)) : make(barReaderOf(bars));
+    made.ctrl.sync(base);
+    made.facade.scrollPosition = -2;
+    made.facade.visibleLogicalRange = { from: -20, to: -10 };
+    const scrollsBefore = made.facade.scrolls;
+    bars.push(makeBar(new Date(base + spanMs).toISOString(), 11, true));
+    made.ctrl.sync(base + spanMs - 2_000);
+    made.ctrl.sync(base + spanMs);
+    made.facade.scrollPosition = 4;
+    made.ctrl.sync(base + spanMs + 1_000);
+    expect(made.facade.scrolls).toBe(scrollsBefore);
+  });
+
+  it.each([
+    ["history", -2],
+    ["future space", 8],
+  ] as const)("pending follow yields when the user moves into %s before the boundary", (_label, userScrollPosition) => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const bars = [bar(new Date(base).toISOString(), 10)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(base);
+    facade.scrollPosition = 4;
+    facade.visibleLogicalRange = { from: -10, to: 4 };
+    bars.push(bar(new Date(base + 60_000).toISOString(), 11, true));
+    ctrl.sync(base + 58_000);
+    const scrollsBefore = facade.scrolls;
+    facade.scrollPosition = userScrollPosition;
+    ctrl.sync(base + 60_000);
+    facade.scrollPosition = 4;
+    ctrl.sync(base + 61_000);
+    expect(facade.scrolls).toBe(scrollsBefore);
+  });
+
+  it("defers a future-detached threshold crossing when the newest 10s bar is early", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
+    const { facade, ctrl } = make10s(reader);
+    ctrl.sync(base);
+    const beforeLogical = { from: -4, to: 5 };
+    facade.scrollPosition = 5;
+    facade.visibleLogicalRange = beforeLogical;
+    const scrollsBefore = facade.scrolls;
+    reader.set([
+      tenSecondBar(new Date(base).toISOString(), 10),
+      tenSecondBar(new Date(base + 10_000).toISOString(), 11),
+      tenSecondBar(new Date(base + 20_000).toISOString(), 12, true),
+    ]);
+    ctrl.sync(base + 18_000);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+    facade.scrollPosition = 3;
+    ctrl.sync(base + 20_000);
+    expect(facade.scrolls).toBe(scrollsBefore + 1);
+  });
+
+  it.each([
+    ["10s", 10_000, tenSecondBar],
+    ["1m", 60_000, bar],
+  ] as const)("%s live rebuild paints an early bucket but defers follow", (timeframe, spanMs, makeBar) => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([
+      makeBar(new Date(base).toISOString(), 10),
+      makeBar(new Date(base + spanMs).toISOString(), 11),
+    ]);
+    const made = timeframe === "10s" ? make10s(reader) : make(reader);
+    made.ctrl.sync(base + spanMs);
+    made.facade.scrollPosition = 4;
+    const beforeLogical = { from: -10, to: 5 };
+    made.facade.visibleLogicalRange = beforeLogical;
+    const scrollsBefore = made.facade.scrolls;
+    const candle = made.facade.created[0].series;
+    reader.set([
+      makeBar(new Date(base - spanMs).toISOString(), 9),
+      makeBar(new Date(base).toISOString(), 10),
+      makeBar(new Date(base + spanMs).toISOString(), 11),
+      makeBar(new Date(base + 2 * spanMs).toISOString(), 12, true),
+    ]);
+    made.ctrl.sync(base + 2 * spanMs - 2_000);
+    expect(candle.setDataCalls).toHaveLength(2);
+    expect(candle.setDataCalls.at(-1)?.at(-1)).toEqual(expect.objectContaining({ time: (base + 2 * spanMs) / 1000 }));
+    expect(made.facade.scrolls).toBe(scrollsBefore);
+    expect(made.facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+    made.facade.scrollPosition = 3;
+    made.ctrl.sync(base + 2 * spanMs);
+    expect(made.facade.scrolls).toBe(scrollsBefore + 1);
+  });
+
+  it("Jump to Live follows immediately and clears an early 1m pending follow", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const bars = [bar(new Date(base).toISOString(), 10)];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    ctrl.sync(base);
+    facade.scrollPosition = 4;
+    facade.visibleLogicalRange = { from: -10, to: 4 };
+    bars.push(bar(new Date(base + 60_000).toISOString(), 11, true));
+    ctrl.sync(base + 58_000);
+    const scrollsBefore = facade.scrolls;
+    ctrl.jumpToLive();
+    expect(facade.scrolls).toBe(scrollsBefore + 1);
+    ctrl.sync(base + 60_000);
+    expect(facade.scrolls).toBe(scrollsBefore + 1);
+  });
+
+  it("symbol reload cannot inherit an early 1m pending follow", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([bar(new Date(base).toISOString(), 10)]);
+    const { facade, ctrl } = make(reader);
+    ctrl.sync(base);
+    facade.scrollPosition = 4;
+    facade.visibleLogicalRange = { from: -10, to: 4 };
+    reader.set([
+      bar(new Date(base).toISOString(), 10),
+      bar(new Date(base + 60_000).toISOString(), 11, true),
+    ]);
+    ctrl.sync(base + 58_000);
+    ctrl.setSymbol("US.NVDA");
+    reader.set([bar(new Date(base).toISOString(), 20)]);
+    const scrollsBeforeReload = facade.scrolls;
+    ctrl.sync(base + 60_000);
+    expect(facade.scrolls).toBe(scrollsBeforeReload + 1);
   });
 
   it("preserves a future-detached viewport when a 10s interior synthetic bar becomes real", () => {
@@ -444,7 +648,7 @@ describe("ChartController", () => {
     const reader = mutableBarReader([bar(new Date(base).toISOString(), 10), bar(new Date(base + 60_000).toISOString(), 11)]);
     const { facade, ctrl } = make(reader);
     ctrl.sync();
-    facade.scrollPosition = -10;
+    facade.scrollPosition = 4;
     facade.visibleLogicalRange = { from: 0, to: 1 };
     reader.set([
       bar(new Date(base).toISOString(), 10),

@@ -3,7 +3,8 @@ import type { Palette } from "../palette";
 import type { Bar } from "../../wire/contract";
 import {
   chartOptions, candleOptions, volumeOptions, mainSeriesOptions, VOLUME_SCALE_MARGINS,
-  boundedOverlayAutoscale, OVERLAY_AUTOSCALE_FACTOR, RIGHT_OFFSET_BARS, type ChartType, type PriceRange,
+  boundedOverlayAutoscale, OVERLAY_AUTOSCALE_FACTOR, RIGHT_OFFSET_BARS, usesBoundaryManagedFollow,
+  type ChartType, type PriceRange,
 } from "./chartTheme";
 import { sessionAt, buildDaySegment, classify } from "./sessions";
 import type { Band, DaySegment } from "./sessions";
@@ -39,7 +40,7 @@ export const LEFT_PAD_BARS = 0;
 // read as a thin strip but non-zero so LWC never treats the pane as empty/removable.
 export const COLLAPSED_STRETCH = 0.06;
 
-type TenSecondViewportMode = "historical" | "live" | "futureDetached";
+type ManagedViewportMode = "historical" | "live" | "futureDetached";
 
 export class ChartController {
   private candle!: LwcSeries;
@@ -114,6 +115,7 @@ export class ChartController {
   private gridVisible = true;
   private volumeVisible = true;
   private watermarkOn = false;
+  private pendingBoundaryFollowMs: number | null = null;
   // Suppressed while ChartPanel is showing its own merged price+countdown badge
   // (BarCloseTimer) so LWC's built-in tag doesn't double up behind it; restored
   // whenever the main series is recreated (setChartType) or restyled (setPalette),
@@ -144,30 +146,31 @@ export class ChartController {
     this.daySegmentBuildsThisSync = 0;
     const bars = this.deps.bars.series(this.config.symbol, this.config.timeframe);
     const displayBars = this.config.timeframe === "10s" ? fillEmptyTenSecondSlots(bars, nowMs) : bars;
-    this.applyBars(displayBars, bars);
+    this.applyBars(displayBars, bars, nowMs);
+    this.reconcilePendingBoundaryFollow(nowMs);
     this.displayedBars = displayBars;
     this.refreshBarCaches(displayBars);
     this.applyIndicators();
     this.applySessions(displayBars);
   }
 
-  private applyBars(bars: DisplayBar[], rawBars: Bar[]): void {
+  private applyBars(bars: DisplayBar[], rawBars: Bar[], nowMs: number): void {
     if (bars.length === 0) return; // cold symbol — panel shows the hint, not an error
     if (!this.backfilled) {
-      this.setAllBars(bars, rawBars);
+      this.setAllBars(bars, rawBars, nowMs);
       return;
     }
     // Once opened, history is immutable and only the live tail should change.
     // Rebuild safely if an unexpected reconnect/correction violates that contract.
     const anchor = bars[this.lastAppliedCount - 1];
     if (!anchor || Date.parse(anchor.bucketStart) !== Date.parse(this.lastTailBucket)) {
-      this.setAllBars(bars, rawBars);
+      this.setAllBars(bars, rawBars, nowMs);
       return;
     }
     if (this.config.timeframe === "10s") {
       const rawTailKey = rawBars.length ? keyOf(rawBars[rawBars.length - 1]) : "";
       if (rawBars.length < this.lastRawCount) {
-        this.setAllBars(bars, rawBars);
+        this.setAllBars(bars, rawBars, nowMs);
         return;
       }
       if (rawBars.length > this.lastRawCount) {
@@ -180,12 +183,12 @@ export class ChartController {
         if (!previousTail || !displayTail || previousTail.bucketStart !== this.lastRawTailBucket
           || keyOf(previousTail) !== this.lastRawTailKey
           || Date.parse(firstNewRaw.bucketStart) < Date.parse(displayTail.bucketStart)) {
-          this.setAllBars(bars, rawBars);
+          this.setAllBars(bars, rawBars, nowMs);
           return;
         }
       } else if (rawTailKey !== this.lastRawTailKey && bars.at(-1)?.synthetic) {
         // A corrected tail close carries through the synthetic suffix.
-        this.setAllBars(bars, rawBars);
+        this.setAllBars(bars, rawBars, nowMs);
         return;
       }
     }
@@ -207,28 +210,34 @@ export class ChartController {
         // permanently freeze this chart (Scheduler used to drop a panel on its first
         // paint error). Rebuilding via setData is always safe, so prefer a full
         // resync over ever risking that throw.
-        this.setAllBars(bars, rawBars);
+        this.setAllBars(bars, rawBars, nowMs);
         return;
       }
       const oldAppliedCount = this.lastAppliedCount;
       const appendedCount = bars.length - oldAppliedCount;
-      // LWC shifts a visible latest bar on update(). For 10s, a positive
-      // scrollPosition can instead mean the user deliberately left future
-      // space; hold that logical range while new display bars consume it.
-      const beforeScrollPosition = this.config.timeframe === "10s"
+      const managedFollow = usesBoundaryManagedFollow(this.config.timeframe);
+      const beforeScrollPosition = managedFollow
         ? this.facade.getScrollPosition() : null;
-      const beforeLogical = beforeScrollPosition !== null && beforeScrollPosition > RIGHT_OFFSET_BARS
-        ? this.facade.getVisibleLogicalRange() : null;
+      const beforeLogical = managedFollow ? this.facade.getVisibleLogicalRange() : null;
       for (let i = from; i < bars.length; i++) {
         this.candle.update(this.mainPoint(bars[i]));
         this.volume.update(toVolume(bars[i], this.palette));
       }
-      if (beforeScrollPosition !== null && beforeScrollPosition > RIGHT_OFFSET_BARS) {
-        const remainingFutureGap = beforeScrollPosition - appendedCount;
-        if (remainingFutureGap < RIGHT_OFFSET_BARS) {
-          this.facade.scrollToRealTime();
-        } else if (beforeLogical) {
-          this.facade.setVisibleLogicalRange(beforeLogical);
+      if (beforeScrollPosition !== null) {
+        const mode = classifyManagedViewport(beforeScrollPosition);
+        if (mode === "historical") {
+          this.pendingBoundaryFollowMs = null;
+          if (beforeLogical) this.facade.setVisibleLogicalRange(beforeLogical);
+        } else if (mode === "futureDetached") {
+          const remainingFutureGap = beforeScrollPosition - appendedCount;
+          if (remainingFutureGap < RIGHT_OFFSET_BARS) {
+            this.followAtBoundaryOrDefer(last.bucketStart, nowMs, beforeLogical);
+          } else {
+            this.pendingBoundaryFollowMs = null;
+            if (beforeLogical) this.facade.setVisibleLogicalRange(beforeLogical);
+          }
+        } else {
+          this.followAtBoundaryOrDefer(last.bucketStart, nowMs, beforeLogical);
         }
       }
       this.lastAppliedCount = bars.length;
@@ -251,10 +260,11 @@ export class ChartController {
     }
   }
 
-  private setAllBars(bars: DisplayBar[], rawBars: Bar[]): void {
+  private setAllBars(bars: DisplayBar[], rawBars: Bar[], nowMs: number): void {
     const beforeTime = this.facade.getVisibleRange();
     const beforeLogical = this.facade.getVisibleLogicalRange();
-    const beforeScrollPosition = this.config.timeframe === "10s"
+    const managedFollow = usesBoundaryManagedFollow(this.config.timeframe);
+    const beforeScrollPosition = managedFollow
       ? this.facade.getScrollPosition() : null;
     const oldLastLogical = this.lastAppliedCount - 1;
     const oldTailBucket = this.lastTailBucket;
@@ -271,7 +281,7 @@ export class ChartController {
       elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
     });
     if (bars.length > 0) {
-      if (this.config.timeframe !== "10s") {
+      if (!managedFollow) {
         if (wasFollowingLive) {
           // setData can change the logical right offset even when the latest bar
           // was visible. Restore the resting live position without resetting zoom.
@@ -292,10 +302,14 @@ export class ChartController {
       } else {
         const mode = this.lastAppliedCount === 0
           ? null
-          : classifyTenSecondViewport(beforeScrollPosition!);
-        if (mode === null || mode === "live") {
+          : classifyManagedViewport(beforeScrollPosition!);
+        if (mode === null) {
+          this.pendingBoundaryFollowMs = null;
           this.facade.scrollToRealTime();
+        } else if (mode === "live") {
+          this.followAtBoundaryOrDefer(bars[bars.length - 1].bucketStart, nowMs, beforeLogical);
         } else if (mode === "historical") {
+          this.pendingBoundaryFollowMs = null;
           // A time range anchors history by timestamps even when older bars were
           // prepended and logical indexes shifted.
           if (beforeTime) this.facade.setVisibleRange(beforeTime);
@@ -307,19 +321,23 @@ export class ChartController {
           // conservative timestamp fallback instead of guessing an index shift.
           const oldTailIndex = findBucketIndex(bars, oldTailBucket);
           if (oldTailIndex < 0) {
+            this.pendingBoundaryFollowMs = null;
             if (beforeTime) this.facade.setVisibleRange(beforeTime);
           } else {
             const tailAppendedCount = bars.length - 1 - oldTailIndex;
             const remainingFutureGap = beforeScrollPosition! - tailAppendedCount;
+            const indexShift = oldTailIndex - oldLastLogical;
+            const shiftedLogical = beforeLogical ? {
+              from: beforeLogical.from + indexShift,
+              to: beforeLogical.to + indexShift,
+            } : null;
             if (remainingFutureGap < RIGHT_OFFSET_BARS) {
-              this.facade.scrollToRealTime();
-            } else if (beforeLogical) {
-              const indexShift = oldTailIndex - oldLastLogical;
-              this.facade.setVisibleLogicalRange({
-                from: beforeLogical.from + indexShift,
-                to: beforeLogical.to + indexShift,
-              });
+              this.followAtBoundaryOrDefer(bars[bars.length - 1].bucketStart, nowMs, shiftedLogical, beforeTime);
+            } else if (shiftedLogical) {
+              this.pendingBoundaryFollowMs = null;
+              this.facade.setVisibleLogicalRange(shiftedLogical);
             } else if (beforeTime) {
+              this.pendingBoundaryFollowMs = null;
               this.facade.setVisibleRange(beforeTime);
             }
           }
@@ -335,6 +353,34 @@ export class ChartController {
     // thing all 3 reset call sites in applyBars share, so marking it here (rather
     // than once per call site) can't drift out of sync with a future 4th site.
     this.lastBarsOp = "reset";
+  }
+
+  private followAtBoundaryOrDefer(
+    bucketStart: string,
+    nowMs: number,
+    preserveLogical: { from: number; to: number } | null,
+    preserveTime: { from: number; to: number } | null = null,
+  ): void {
+    const followAtMs = Date.parse(bucketStart);
+    if (!Number.isFinite(followAtMs) || nowMs >= followAtMs) {
+      this.pendingBoundaryFollowMs = null;
+      this.facade.scrollToRealTime();
+      return;
+    }
+    // Data remains exchange-time authoritative and is already painted. Only the
+    // live viewport waits so its rollover matches the wall-clock countdown.
+    this.pendingBoundaryFollowMs = followAtMs;
+    if (preserveLogical) this.facade.setVisibleLogicalRange(preserveLogical);
+    else if (preserveTime) this.facade.setVisibleRange(preserveTime);
+  }
+
+  private reconcilePendingBoundaryFollow(nowMs: number): void {
+    if (this.pendingBoundaryFollowMs === null || nowMs < this.pendingBoundaryFollowMs) return;
+    this.pendingBoundaryFollowMs = null;
+    if (usesBoundaryManagedFollow(this.config.timeframe)
+      && classifyManagedViewport(this.facade.getScrollPosition()) === "live") {
+      this.facade.scrollToRealTime();
+    }
   }
 
   private rememberRaw(bars: Bar[]): void {
@@ -656,6 +702,7 @@ export class ChartController {
     this.lastRawCount = 0;
     this.lastRawTailBucket = "";
     this.lastRawTailKey = "";
+    this.pendingBoundaryFollowMs = null;
     this.displayedBars = [];
     this.barsMsCache = [];
     this.bandsCache = [];
@@ -733,6 +780,7 @@ export class ChartController {
     this.lastRawCount = 0;
     this.lastRawTailBucket = "";
     this.lastRawTailKey = "";
+    this.pendingBoundaryFollowMs = null;
     this.displayedBars = [];
     this.barsMsCache = [];
     this.bandsCache = [];
@@ -785,9 +833,10 @@ export class ChartController {
   }
 
   resize(w: number, h: number): void { this.facade.resize(w, h); }
-  jumpToLive(): void { this.facade.scrollToRealTime(); }
+  jumpToLive(): void { this.pendingBoundaryFollowMs = null; this.facade.scrollToRealTime(); }
   resetZoom(): void { this.facade.resetTimeScale(); this.facade.resetPriceScale(); }
   dispose(): void {
+    this.pendingBoundaryFollowMs = null;
     for (const id of [...this.indicators.keys()]) this.removeIndicator(id);
     this.facade.remove();
   }
@@ -804,7 +853,7 @@ function isSorted(bars: Bar[], from: number): boolean {
   }
   return true;
 }
-function classifyTenSecondViewport(scrollPosition: number): TenSecondViewportMode {
+function classifyManagedViewport(scrollPosition: number): ManagedViewportMode {
   if (scrollPosition < 0) return "historical";
   return scrollPosition <= RIGHT_OFFSET_BARS ? "live" : "futureDetached";
 }

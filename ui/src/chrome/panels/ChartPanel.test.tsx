@@ -1244,6 +1244,16 @@ describe("ChartPanel", () => {
     now.mockRestore();
   });
 
+  it("dirties a 1m chart when the wall-clock bucket advances without a store revision", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-06T13:30:58Z"));
+    const { getSurface } = renderChartCapturingSurface({ timeframe: "1m" });
+    getSurface().isDirty();
+    expect(getSurface().isDirty()).toBe(false);
+    now.mockReturnValue(Date.parse("2026-07-06T13:31:00Z"));
+    expect(getSurface().isDirty()).toBe(true);
+    now.mockRestore();
+  });
+
   it("isDirty tracks MACD's multi-slot sub-keys, not just the base instanceId (multi-slot indicator regression)", () => {
     // The headline "isDirty reacts only to its own pinned symbol" test above only
     // exercises EMA/VWAP — both single-slot indicators whose describeIndicator()

@@ -26,8 +26,13 @@ describe("chartTheme", () => {
     // reintroduced without a compile error.
     expect(o.timeScale?.fixLeftEdge).toBe(false);
     expect(o.timeScale?.rightOffset).toBe(RIGHT_OFFSET_BARS);
-    expect(o.timeScale?.shiftVisibleRangeOnNewBar).toBe(true);
     expect(o.rightPriceScale?.minimumWidth).toBeGreaterThan(0);
+  });
+
+  it("lets eTape manage 10s/1m follow while retaining native follow elsewhere", () => {
+    expect(chartOptions(LIGHT, "10s").timeScale?.shiftVisibleRangeOnNewBar).toBe(false);
+    expect(chartOptions(LIGHT, "1m").timeScale?.shiftVisibleRangeOnNewBar).toBe(false);
+    expect(chartOptions(LIGHT, "5m").timeScale?.shiftVisibleRangeOnNewBar).toBe(true);
   });
 
   it("formats axis tick marks and the crosshair time in US/Eastern, not UTC", () => {

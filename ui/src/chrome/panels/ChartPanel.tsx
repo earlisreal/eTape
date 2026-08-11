@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { createChart, createTextWatermark, CandlestickSeries, BarSeries, HistogramSeries, LineSeries, AreaSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type LogicalRange, type Coordinate } from "lightweight-charts";
 import type { PanelProps } from "./registry";
 import { ChartController } from "../../render/chart/ChartController";
-import { clampRightScroll, RIGHT_OFFSET_BARS, type ChartType } from "../../render/chart/chartTheme";
+import { clampRightScroll, RIGHT_OFFSET_BARS, usesBoundaryManagedFollow, type ChartType } from "../../render/chart/chartTheme";
 import type { ChartApiFacade, LwcSeries } from "../../render/chart/ChartApiFacade";
 import { DiamondFillPrimitive } from "../../render/chart/diamondPrimitive";
 import { SessionShadingPrimitive } from "../../render/chart/sessionPrimitive";
@@ -564,7 +564,9 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         const fillsRev = stores.fills.getRev();
         const drawingsRev = stores.drawings.getRev();
         const paneSig = `${facade.paneHeights().join(",")}|${facade.priceScaleWidth()}`;
-        const wallBucket = tfRef.current === "10s" ? Math.floor(Date.now() / 10_000) : -1;
+        const wallBucket = usesBoundaryManagedFollow(tfRef.current)
+          ? Math.floor(Date.now() / timeframeToMs(tfRef.current as Timeframe))
+          : -1;
         const changed = barsRev !== lastBarsRev || indicatorsRev !== lastIndicatorsRev || fillsRev !== lastFillsRev || drawingsRev !== lastDrawingsRev
           || paneSig !== lastPaneSig || wallBucket !== lastWallBucket || forceRepaintRef.current;
         lastBarsRev = barsRev;
@@ -577,7 +579,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         return changed;
       },
       paint: () => {
-		if (chartSnapshotLoaded) controller.sync();
+		const nowMs = Date.now();
+		if (chartSnapshotLoaded) controller.sync(nowMs);
 		const paintedBars = chartSnapshotLoaded ? stores.bars.series(currentSymbol, tfRef.current) : [];
         if (pendingFirstPaint && pendingFirstPaint.symbol === currentSymbol && pendingFirstPaint.timeframe === tfRef.current && paintedBars.length > 0) {
           const timing = pendingFirstPaint;
@@ -612,7 +615,6 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         // BarCloseTimer anchors directly on LWC's own last-price coordinate, which
         // only exists while an accepted in-progress bar is live — no live
         // bar, nothing to anchor to, so the badge stays hidden (see the JSX gate below).
-		const nowMs = Date.now();
 		const candidate = chartSnapshotLoaded ? stores.bars.inProgressBar(currentSymbol, tfRef.current) : null;
         const live = candidate && (tfRef.current !== "10s" || isTenSecondTimerCandidateLive(candidate.bucketStart, nowMs)) ? candidate : null;
         const y = live ? facade.priceToCoordinate(live.c) : null;
