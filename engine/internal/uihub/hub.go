@@ -88,11 +88,10 @@ type backfillResult struct {
 	ok      bool
 }
 
-// demandInfo tracks the history role so reconnect can re-arm warming.
+// demandInfo retains the canonical demand so late-bound dependencies can be
+// reconciled without reconstructing subscription details.
 type demandInfo struct {
-	symbol       string
-	wantsHistory bool
-	focused      bool
+	demand feed.Demand
 }
 
 // feedBox lets the (single-write, many-read) feed reference live in an
@@ -125,23 +124,25 @@ type Hub struct {
 	// goroutine) is race-free without its own atomic slot.
 	cmd *commands
 
-	register           chan client
-	unregister         chan client
-	subCh              chan subReq
-	unsubCh            chan subReq
-	ensureDemandCh     chan ensureDemandReq
-	releaseDemandCh    chan releaseDemandReq
-	ensureIndicatorCh  chan ensureIndicatorReq
-	releaseIndicatorCh chan releaseIndicatorReq
-	chartWindowCh      chan chartWindowReq
-	demandSnapCh       chan chan []string
-	mdCh               chan md.Update
-	execCh             chan exec.Update
-	pubCh              chan pub
-	dropCh             chan dropReport     // conn goroutines -> Run: write-timeout drop reports
-	backfillDoneCh     chan backfillResult // backfill goroutines -> Run: daily-fetch outcome
-	syncCh             chan chan struct{}  // test barrier
-	closed             chan struct{}       // closed when Run returns; unblocks stuck senders
+	register            chan client
+	unregister          chan client
+	subCh               chan subReq
+	unsubCh             chan subReq
+	ensureDemandCh      chan ensureDemandReq
+	releaseDemandCh     chan releaseDemandReq
+	ensureIndicatorCh   chan ensureIndicatorReq
+	releaseIndicatorCh  chan releaseIndicatorReq
+	chartWindowCh       chan chartWindowReq
+	demandSnapCh        chan chan []string
+	mdCh                chan md.Update
+	execCh              chan exec.Update
+	pubCh               chan pub
+	dropCh              chan dropReport     // conn goroutines -> Run: write-timeout drop reports
+	backfillDoneCh      chan backfillResult // backfill goroutines -> Run: daily-fetch outcome
+	feedConfiguredCh    chan struct{}
+	historyConfiguredCh chan struct{}
+	syncCh              chan chan struct{} // test barrier
+	closed              chan struct{}      // closed when Run returns; unblocks stuck senders
 
 	feedSlot        atomic.Pointer[feedBox]
 	backfillSlot    atomic.Pointer[backfillBox]
@@ -157,18 +158,20 @@ type Hub struct {
 	ind Indicators
 
 	// Run-loop-owned:
-	clients         map[client]map[wsmsg.Topic]bool
-	demands         map[uint64]map[string]demandInfo // connID -> demandID -> demandInfo
-	demandLive      map[uint64]bool                  // connID currently registered
-	indicators      map[uint64]map[string]bool       // connID -> instanceIDs owned by that connection
-	warmed          map[string]bool                  // symbol -> archive warm succeeded
-	warmInflight    map[string]bool                  // symbol -> archive warm currently running
-	prepareInflight map[string]bool                  // symbol -> focused preparation currently running
-	pendKeep        map[string]staged                // classMDKeep, flushed on md ticker
-	tapePend        map[string][]wsmsg.Tick          // symbol -> accumulated ticks
-	acctPend        map[string]staged                // venue -> latest account frame
-	posLatest       staged
-	posDirty        bool
+	clients           map[client]map[wsmsg.Topic]bool
+	demands           map[uint64]map[string]demandInfo // connID -> demandID -> demandInfo
+	demandLive        map[uint64]bool                  // connID currently registered
+	indicators        map[uint64]map[string]bool       // connID -> instanceIDs owned by that connection
+	warmed            map[string]bool                  // symbol -> archive warm succeeded
+	warmInflight      map[string]bool                  // symbol -> archive warm currently running
+	prepareInflight   map[string]bool                  // symbol -> focused preparation currently running
+	feedConfigured    bool
+	historyConfigured bool
+	pendKeep          map[string]staged       // classMDKeep, flushed on md ticker
+	tapePend          map[string][]wsmsg.Tick // symbol -> accumulated ticks
+	acctPend          map[string]staged       // venue -> latest account frame
+	posLatest         staged
+	posDirty          bool
 
 	// sysEventSeq numbers ui-drop sys.events frames the Hub itself emits
 	// (buildSysEvent). It is independent of health.Poller's own seq counter
@@ -183,33 +186,35 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 	}
 	return &Hub{
 		clk: clk, cfg: cfg, m: m,
-		register:           make(chan client),
-		unregister:         make(chan client),
-		subCh:              make(chan subReq),
-		unsubCh:            make(chan subReq),
-		ensureDemandCh:     make(chan ensureDemandReq),
-		releaseDemandCh:    make(chan releaseDemandReq),
-		ensureIndicatorCh:  make(chan ensureIndicatorReq),
-		releaseIndicatorCh: make(chan releaseIndicatorReq),
-		chartWindowCh:      make(chan chartWindowReq),
-		demandSnapCh:       make(chan chan []string),
-		mdCh:               make(chan md.Update, cfg.Buf),
-		execCh:             make(chan exec.Update, cfg.Buf),
-		pubCh:              make(chan pub, cfg.Buf),
-		dropCh:             make(chan dropReport, cfg.Buf),
-		backfillDoneCh:     make(chan backfillResult, cfg.Buf),
-		syncCh:             make(chan chan struct{}),
-		closed:             make(chan struct{}),
-		clients:            map[client]map[wsmsg.Topic]bool{},
-		demands:            map[uint64]map[string]demandInfo{},
-		demandLive:         map[uint64]bool{},
-		indicators:         map[uint64]map[string]bool{},
-		warmed:             map[string]bool{},
-		warmInflight:       map[string]bool{},
-		prepareInflight:    map[string]bool{},
-		pendKeep:           map[string]staged{},
-		tapePend:           map[string][]wsmsg.Tick{},
-		acctPend:           map[string]staged{},
+		register:            make(chan client),
+		unregister:          make(chan client),
+		subCh:               make(chan subReq),
+		unsubCh:             make(chan subReq),
+		ensureDemandCh:      make(chan ensureDemandReq),
+		releaseDemandCh:     make(chan releaseDemandReq),
+		ensureIndicatorCh:   make(chan ensureIndicatorReq),
+		releaseIndicatorCh:  make(chan releaseIndicatorReq),
+		chartWindowCh:       make(chan chartWindowReq),
+		demandSnapCh:        make(chan chan []string),
+		mdCh:                make(chan md.Update, cfg.Buf),
+		execCh:              make(chan exec.Update, cfg.Buf),
+		pubCh:               make(chan pub, cfg.Buf),
+		dropCh:              make(chan dropReport, cfg.Buf),
+		backfillDoneCh:      make(chan backfillResult, cfg.Buf),
+		feedConfiguredCh:    make(chan struct{}, 1),
+		historyConfiguredCh: make(chan struct{}, 1),
+		syncCh:              make(chan chan struct{}),
+		closed:              make(chan struct{}),
+		clients:             map[client]map[wsmsg.Topic]bool{},
+		demands:             map[uint64]map[string]demandInfo{},
+		demandLive:          map[uint64]bool{},
+		indicators:          map[uint64]map[string]bool{},
+		warmed:              map[string]bool{},
+		warmInflight:        map[string]bool{},
+		prepareInflight:     map[string]bool{},
+		pendKeep:            map[string]staged{},
+		tapePend:            map[string][]wsmsg.Tick{},
+		acctPend:            map[string]staged{},
 	}
 }
 
@@ -271,7 +276,13 @@ func (h *Hub) SetIndicators(i Indicators) { h.ind = i }
 
 // SetFeed injects the market-data control surface after the hub is running.
 // Safe to call once from boot; nil until then (replay/tests never call it).
-func (h *Hub) SetFeed(f Feed) { h.feedSlot.Store(&feedBox{f: f}) }
+func (h *Hub) SetFeed(f Feed) {
+	h.feedSlot.Store(&feedBox{f: f})
+	select {
+	case h.feedConfiguredCh <- struct{}{}:
+	default:
+	}
+}
 
 // SetKnownSymbol installs a positive-only local archive lookup used to avoid
 // blocking chart switches on OpenD validation for previously seen symbols.
@@ -296,12 +307,16 @@ func (h *Hub) feed() Feed {
 func (h *Hub) SetBackfill(fn func(sym string, done func(ok bool))) {
 	if fn == nil {
 		h.backfillSlot.Store(nil)
-		return
+	} else {
+		h.backfillSlot.Store(&backfillBox{
+			prepare: fn,
+			warm:    fn,
+		})
 	}
-	h.backfillSlot.Store(&backfillBox{
-		prepare: fn,
-		warm:    fn,
-	})
+	select {
+	case h.historyConfiguredCh <- struct{}{}:
+	default:
+	}
 }
 
 // SetHistoryWarm installs explicit focused preparation and archive-only roles.
@@ -311,9 +326,13 @@ func (h *Hub) SetHistoryWarm(
 ) {
 	if prepare == nil && warm == nil {
 		h.backfillSlot.Store(nil)
-		return
+	} else {
+		h.backfillSlot.Store(&backfillBox{prepare: prepare, warm: warm})
 	}
-	h.backfillSlot.Store(&backfillBox{prepare: prepare, warm: warm})
+	select {
+	case h.historyConfiguredCh <- struct{}{}:
+	default:
+	}
 }
 
 // SetCachedDaily injects chart-only, memory-only daily cache seeding.
@@ -484,6 +503,10 @@ func (h *Hub) Run(ctx context.Context) error {
 			h.handleRegister(c)
 		case c := <-h.unregister:
 			h.handleUnregister(c)
+		case <-h.feedConfiguredCh:
+			h.handleFeedConfigured()
+		case <-h.historyConfiguredCh:
+			h.handleHistoryConfigured()
 		case r := <-h.subCh:
 			h.handleSub(r)
 		case r := <-h.unsubCh:
@@ -543,6 +566,10 @@ func (h *Hub) drain() {
 			h.handleRegister(c)
 		case c := <-h.unregister:
 			h.handleUnregister(c)
+		case <-h.feedConfiguredCh:
+			h.handleFeedConfigured()
+		case <-h.historyConfiguredCh:
+			h.handleHistoryConfigured()
 		case r := <-h.subCh:
 			h.handleSub(r)
 		case r := <-h.unsubCh:
@@ -581,9 +608,11 @@ func (h *Hub) handleRegister(c client) {
 func (h *Hub) handleUnregister(c client) {
 	id := c.id()
 	if m := h.demands[id]; m != nil {
-		if f := h.feed(); f != nil {
-			for did := range m {
-				f.Release(did)
+		if h.feedConfigured {
+			if f := h.feed(); f != nil {
+				for did := range m {
+					f.Release(did)
+				}
 			}
 		}
 		delete(h.demands, id)
@@ -610,9 +639,11 @@ func (h *Hub) handleEnsureDemand(r ensureDemandReq) {
 		m = map[string]demandInfo{}
 		h.demands[r.connID] = m
 	}
-	m[r.d.ID] = demandInfo{symbol: r.d.Symbol, wantsHistory: r.d.WantsHistory, focused: r.d.Focused}
-	if f := h.feed(); f != nil {
-		f.Ensure(r.d)
+	m[r.d.ID] = demandInfo{demand: r.d}
+	if h.feedConfigured {
+		if f := h.feed(); f != nil {
+			f.Ensure(r.d)
+		}
 	}
 	if r.d.CachedDaily {
 		if fn := h.cachedDaily(); fn != nil {
@@ -624,8 +655,28 @@ func (h *Hub) handleEnsureDemand(r ensureDemandReq) {
 	h.triggerBackfill(r.d.Symbol, r.d.WantsHistory, r.d.Focused)
 }
 
+func (h *Hub) handleFeedConfigured() {
+	h.feedConfigured = true
+	f := h.feed()
+	if f == nil {
+		return
+	}
+	h.forEachDemand(func(info demandInfo) { f.Ensure(info.demand) })
+}
+
+func (h *Hub) handleHistoryConfigured() {
+	h.historyConfigured = true
+	for sym, target := range h.historyTargets() {
+		d := target.demand
+		h.triggerBackfill(sym, d.WantsHistory, d.Focused)
+	}
+}
+
 // triggerBackfill dispatches an explicit focused or archive-only worker.
 func (h *Hub) triggerBackfill(sym string, wantsHistory, focused bool) {
+	if !h.historyConfigured {
+		return
+	}
 	worker := h.backfill()
 	if focused {
 		if worker == nil || worker.prepare == nil {
@@ -718,6 +769,18 @@ func (h *Hub) forEachDemand(fn func(demandInfo)) {
 	}
 }
 
+func (h *Hub) historyTargets() map[string]demandInfo {
+	targets := map[string]demandInfo{}
+	h.forEachDemand(func(info demandInfo) {
+		d := info.demand
+		current := targets[d.Symbol]
+		if d.Focused || (!current.demand.Focused && d.WantsHistory) {
+			targets[d.Symbol] = info
+		}
+	})
+	return targets
+}
+
 // rearmBackfill re-triggers history warming for every symbol
 // currently under a history-bearing demand that hasn't
 // succeeded yet. Called from handleMD on the md.ResyncedUpdate transition --
@@ -727,18 +790,13 @@ func (h *Hub) forEachDemand(fn func(demandInfo)) {
 //
 // Focused demands win over archive-only watch demands for a shared symbol.
 func (h *Hub) rearmBackfill() {
-	if h.backfill() == nil {
+	if !h.historyConfigured || h.backfill() == nil {
 		return // no backfill trigger injected (replay / backfill disabled)
 	}
-	targets := map[string]demandInfo{}
-	h.forEachDemand(func(info demandInfo) {
-		current := targets[info.symbol]
-		if info.focused || (!current.focused && info.wantsHistory) {
-			targets[info.symbol] = info
-		}
-	})
+	targets := h.historyTargets()
 	for sym, target := range targets {
-		h.triggerBackfill(sym, target.wantsHistory, target.focused)
+		d := target.demand
+		h.triggerBackfill(sym, d.WantsHistory, d.Focused)
 	}
 }
 
@@ -746,8 +804,10 @@ func (h *Hub) handleReleaseDemand(r releaseDemandReq) {
 	if m := h.demands[r.connID]; m != nil {
 		delete(m, r.demandID)
 	}
-	if f := h.feed(); f != nil {
-		f.Release(r.demandID)
+	if h.feedConfigured {
+		if f := h.feed(); f != nil {
+			f.Release(r.demandID)
+		}
 	}
 }
 
@@ -785,7 +845,7 @@ func (h *Hub) handleReleaseIndicator(r releaseIndicatorReq) {
 
 func (h *Hub) handleDemandSnapshot(reply chan []string) {
 	set := map[string]struct{}{}
-	h.forEachDemand(func(info demandInfo) { set[info.symbol] = struct{}{} })
+	h.forEachDemand(func(info demandInfo) { set[info.demand.Symbol] = struct{}{} })
 	out := make([]string, 0, len(set))
 	for s := range set {
 		out = append(out, s)
