@@ -13,7 +13,7 @@ import { DrawingInteraction, type Tool } from "../../render/chart/drawings/inter
 import { timeframeToMs } from "../../render/chart/drawings/geometry";
 import { bucketStartMs, type Timeframe } from "../../render/chart/barBucket";
 import { aggregateFillMarkers } from "../../render/chart/fillAggregate";
-import { isIntradayTimeframe, isTenSecondTimerCandidateLive } from "../../render/chart/barClose";
+import { isIntradayTimeframe, latestEligibleCountdownBar } from "../../render/chart/barClose";
 import { formatPrice } from "../../render/format";
 import type { Palette } from "../../render/palette";
 import { useTheme } from "../ThemeProvider";
@@ -646,13 +646,13 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         setPaneOffsets((prev) => (prev.length === offs.length && prev.every((v, i) => v === offs[i]) ? prev : offs));
         const axisW = facade.priceScaleWidth();
         setRightAxisWidth((prev) => (prev === axisW ? prev : axisW));
-        // BarCloseTimer anchors directly on LWC's own last-price coordinate, which
-        // only exists while an accepted in-progress bar is live — no live
-        // bar, nothing to anchor to, so the badge stays hidden (see the JSX gate below).
-        const candidate = chartSnapshotLoaded ? stores.bars.inProgressBar(currentSymbol, tfRef.current) : null;
-        const live = candidate && (tfRef.current !== "10s" || isTenSecondTimerCandidateLive(candidate.bucketStart, nowMs)) ? candidate : null;
-        const y = live ? facade.priceToCoordinate(live.c) : null;
-        const next = live && y != null ? { y, up: live.c >= live.o, price: live.c } : null;
+        // Anchor on the newest eligible raw exchange bar, not only an
+        // in-progress tail. Quiet/delayed buckets retain the last confirmed
+        // same-day price while the active ET session remains open.
+        const rawBars = chartSnapshotLoaded ? stores.bars.series(currentSymbol, tfRef.current) : [];
+        const candidate = latestEligibleCountdownBar(rawBars, tfRef.current as Timeframe, nowMs);
+        const y = candidate ? facade.priceToCoordinate(candidate.c) : null;
+        const next = candidate && y != null && Number.isFinite(y) ? { y, up: candidate.c >= candidate.o, price: candidate.c } : null;
         setLastPriceTag((prev) =>
           prev === next || (prev && next && prev.y === next.y && prev.up === next.up && prev.price === next.price) ? prev : next);
       },

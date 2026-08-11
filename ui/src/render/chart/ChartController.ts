@@ -16,7 +16,7 @@ import { uiLog } from "../../logging/logger";
 
 export interface BarReader { series(symbol: string, timeframe: string): Bar[] }
 // Display-only extension. This never enters BarStore or engine-facing paths.
-export type DisplayBar = Bar & { synthetic?: true };
+export type DisplayBar = Bar & { synthetic?: true; pending?: true };
 export interface IndicatorReader { series(instanceId: string): { timeMs: number; value: number }[] }
 // IndicatorReader plus the ability to drop a series — resetForReload uses this to
 // wipe the previous symbol's points instead of leaving them stranded in the shared
@@ -186,8 +186,10 @@ export class ChartController {
           this.setAllBars(bars, rawBars, nowMs);
           return;
         }
-      } else if (rawTailKey !== this.lastRawTailKey && bars.at(-1)?.synthetic) {
-        // A corrected tail close carries through the synthetic suffix.
+      } else if (rawTailKey !== this.lastRawTailKey && (bars.at(-1)?.synthetic || bars.at(-1)?.pending)
+        && Date.parse(rawBars[rawBars.length - 1]?.bucketStart ?? "") <= bucketStartMs(nowMs, "10s")) {
+        // A corrected visible tail close carries through the synthetic/pending
+        // suffix. Future raw bars remain hidden until their boundary.
         this.setAllBars(bars, rawBars, nowMs);
         return;
       }
@@ -753,6 +755,7 @@ export class ChartController {
   // Main-series data point matched to the active chart type: OHLC for candle/bar,
   // single close value for line/area (LWC line/area series read `.value`).
   private mainPoint(b: DisplayBar): object {
+    if (b.pending) return { time: toLwcTime(b.bucketStart) };
     return this.chartType === "line" || this.chartType === "area"
       ? { time: toLwcTime(b.bucketStart), value: b.c }
       : toCandle(b);
@@ -842,7 +845,7 @@ export class ChartController {
   }
 }
 
-function keyOf(b: DisplayBar): string { return `${b.bucketStart}|${b.o}|${b.c}|${b.h}|${b.l}|${b.v}|${b.inProgress}|${b.synthetic === true}`; }
+function keyOf(b: DisplayBar): string { return `${b.bucketStart}|${b.o}|${b.c}|${b.h}|${b.l}|${b.v}|${b.inProgress}|${b.synthetic === true}|${b.pending === true}`; }
 function bareSymbol(s: string): string { return s.replace(/^US\./, ""); }
 // Whether bars[from..] is non-decreasing by bucketStart — the property update()'s
 // bar-by-bar replay depends on to never hand Lightweight Charts a time that goes
@@ -867,35 +870,47 @@ function findBucketIndex(bars: readonly DisplayBar[], bucketStart: string): numb
   return -1;
 }
 function toCandle(b: DisplayBar) { return { time: toLwcTime(b.bucketStart), open: b.o, high: b.h, low: b.l, close: b.c }; }
-function candleRangeOf(bars: readonly DisplayBar[]): PriceRange {
+function candleRangeOf(bars: readonly DisplayBar[]): PriceRange | null {
   let minValue = Infinity, maxValue = -Infinity;
   for (const b of bars) {
+    if (b.pending) continue;
     if (b.l < minValue) minValue = b.l;
     if (b.h > maxValue) maxValue = b.h;
   }
-  return { minValue, maxValue };
+  return minValue <= maxValue ? { minValue, maxValue } : null;
 }
 function toVolume(b: DisplayBar, p: Palette) {
-  if (b.synthetic) return { time: toLwcTime(b.bucketStart) };
+  if (b.synthetic || b.pending) return { time: toLwcTime(b.bucketStart) };
   return { time: toLwcTime(b.bucketStart), value: b.v, color: b.c >= b.o ? p.volUp : p.volDown };
 }
 
 export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number): DisplayBar[] {
-  if (bars.length === 0) return bars;
+  if (bars.length === 0 || !Number.isFinite(nowMs)) return bars;
   const current = bucketStartMs(nowMs, "10s");
   const out: DisplayBar[] = [];
-  for (let i = 0; i < bars.length; i++) {
-    const real = bars[i];
-    // OpenD may publish the next exchange bucket a few seconds before the
-    // browser reaches it. Keep the raw bar available to stores/indicators, but
-    // do not create its candle or volume slot before the countdown reaches 0.
-    if (Date.parse(real.bucketStart) > current) break;
-    out.push(real);
-    const limit = Math.min(i + 1 < bars.length ? Date.parse(bars[i + 1].bucketStart) : current + 10_000, current + 10_000);
-    for (let ms = Date.parse(real.bucketStart) + 10_000; ms < limit && sessionAt(ms) !== "closed"; ms += 10_000) {
-      out.push({ ...real, bucketStart: new Date(ms).toISOString(), o: real.c, h: real.c, l: real.c, c: real.c, v: 0, inProgress: false, synthetic: true });
+  const valid = bars.filter((bar) => Number.isFinite(Date.parse(bar.bucketStart)));
+  let previous: Bar | undefined;
+
+  const addGap = (base: Bar, fromMs: number, limitMs: number) => {
+    for (let ms = fromMs + 10_000; ms < limitMs; ms += 10_000) {
+      if (sessionAt(ms) === "closed") continue;
+      const pending = ms === current;
+      out.push({ ...base, bucketStart: new Date(ms).toISOString(), o: base.c, h: base.c, l: base.c, c: base.c, v: 0,
+        inProgress: false, ...(pending ? { pending: true } : { synthetic: true }) });
     }
+  };
+
+  for (const real of valid) {
+    const realMs = Date.parse(real.bucketStart);
+    // OpenD may publish the next exchange bucket before the synchronized clock
+    // reaches it. Keep that raw bar available to stores/indicators, but reveal
+    // it only when this display pass reaches its boundary.
+    if (realMs > current) break;
+    if (previous) addGap(previous, Date.parse(previous.bucketStart), realMs);
+    out.push(real);
+    previous = real;
   }
+  if (previous) addGap(previous, Date.parse(previous.bucketStart), current + 10_000);
   return out;
 }
 

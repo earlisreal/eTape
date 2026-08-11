@@ -138,7 +138,7 @@ describe("ChartController", () => {
     ]);
   });
 
-  it("renders missing 10s buckets as flat prices with empty volume", () => {
+  it("renders completed 10s gaps flat and the current missing bucket as whitespace", () => {
     const bars = [{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }];
     const facade = fakeFacade();
     const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
@@ -147,12 +147,57 @@ describe("ChartController", () => {
     expect(facade.created[0].series.setDataCalls.at(-1)).toEqual([
       { time: Date.parse("2026-07-06T13:30:00Z") / 1000, open: 10, high: 10, low: 10, close: 10 },
       { time: Date.parse("2026-07-06T13:30:10Z") / 1000, open: 10, high: 10, low: 10, close: 10 },
-      { time: Date.parse("2026-07-06T13:30:20Z") / 1000, open: 10, high: 10, low: 10, close: 10 },
+      { time: Date.parse("2026-07-06T13:30:20Z") / 1000 },
     ]);
     expect(facade.created[1].series.setDataCalls.at(-1)?.slice(1)).toEqual([
       { time: Date.parse("2026-07-06T13:30:10Z") / 1000 },
       { time: Date.parse("2026-07-06T13:30:20Z") / 1000 },
     ]);
+    expect(ctrl.displayBars().at(-1)?.pending).toBe(true);
+  });
+
+  it("turns an old pending slot synthetic and appends the next pending slot once per boundary", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const { facade, ctrl } = make10s(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
+    ctrl.sync(base);
+    ctrl.sync(base + 10_000);
+    expect(ctrl.displayBars().map((b) => [b.bucketStart, b.synthetic, b.pending])).toEqual([
+      [new Date(base).toISOString(), undefined, undefined],
+      [new Date(base + 10_000).toISOString(), undefined, true],
+    ]);
+    expect(facade.created[0].series.updates.at(-1)).toEqual({ time: (base + 10_000) / 1000 });
+    expect(facade.created[1].series.updates.at(-1)).toEqual({ time: (base + 10_000) / 1000 });
+
+    ctrl.sync(base + 20_000);
+    expect(ctrl.displayBars().map((b) => [b.bucketStart, b.synthetic, b.pending])).toEqual([
+      [new Date(base).toISOString(), undefined, undefined],
+      [new Date(base + 10_000).toISOString(), true, undefined],
+      [new Date(base + 20_000).toISOString(), undefined, true],
+    ]);
+    expect(facade.created[0].series.updates.slice(-2)).toEqual([
+      { time: (base + 10_000) / 1000, open: 10, high: 10, low: 10, close: 10 },
+      { time: (base + 20_000) / 1000 },
+    ]);
+  });
+
+  it("replaces current-bucket whitespace with the first real update without rebuilding", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
+    const { facade, ctrl } = make10s(reader);
+    ctrl.sync(base + 10_000);
+    reader.set([
+      tenSecondBar(new Date(base).toISOString(), 10),
+      tenSecondBar(new Date(base + 10_000).toISOString(), 12, true),
+    ]);
+    ctrl.sync(base + 10_000);
+    expect(facade.created[0].series.setDataCalls).toHaveLength(1);
+    expect(facade.created[0].series.updates.at(-1)).toEqual({
+      time: (base + 10_000) / 1000, open: 12, high: 12, low: 12, close: 12,
+    });
+    expect(facade.created[1].series.updates.at(-1)).toEqual({
+      time: (base + 10_000) / 1000, value: 100, color: LIGHT.volUp,
+    });
+    expect(ctrl.displayBars().at(-1)?.pending).toBeUndefined();
   });
 
   it("a resumed 10s real bar replaces its placeholder and keeps earlier gaps", () => {

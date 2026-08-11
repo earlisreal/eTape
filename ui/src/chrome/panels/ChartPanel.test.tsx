@@ -1119,6 +1119,8 @@ describe("ChartPanel", () => {
   });
 
 	it("renders the bar-close-timer badge for an in-progress bar on an intraday timeframe when the setting is on", async () => {
+		const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-09T13:31:05Z"));
+		try {
 		const { stores, getSurface, getByTestId } = renderChartCapturingSurface();
 		act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
 			seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
@@ -1127,6 +1129,9 @@ describe("ChartPanel", () => {
 		pushLiveBar(stores, "US.AAPL", "1m", 100, 100.5);
     act(() => { getSurface().paint(); });
     expect(getByTestId("bar-close-timer")).toBeTruthy();
+		} finally {
+			now.mockRestore();
+		}
   });
 
   it("does not render the badge when chartSettings.barCloseTimer is off, even with an in-progress bar", () => {
@@ -1152,13 +1157,18 @@ describe("ChartPanel", () => {
     expect(queryByTestId("bar-close-timer")).toBeNull();
   });
 
-  it("hides the 10s badge after its real bar falls behind the wall-clock bucket", () => {
+  it("keeps the 10s badge on the last confirmed price after a quiet bucket", async () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-09T13:31:11Z"));
     try {
-      const { stores, getSurface, queryByTestId } = renderChartCapturingSurface({ timeframe: "10s" });
+      const { stores, getSurface, getByTestId } = renderChartCapturingSurface({ timeframe: "10s" });
+      act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+        seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+      } }));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
       pushLiveBar(stores, "US.AAPL", "10s", 100, 100.5);
       act(() => { getSurface().paint(); });
-      expect(queryByTestId("bar-close-timer")).toBeNull();
+      expect(getByTestId("bar-close-timer")).toBeTruthy();
+      expect(getByTestId("bar-close-timer-price").textContent).toBe("100.50");
     } finally {
       now.mockRestore();
     }
@@ -1192,6 +1202,24 @@ describe("ChartPanel", () => {
       pushLiveBar(stores, "US.AAPL", "10s", 100, 101.25, true, "2026-07-09T13:31:10.000Z");
       act(() => { getSurface().paint(); });
       expect(queryByTestId("bar-close-timer")).toBeNull();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it("falls back to the previous same-session price when a far-future 10s bar is present", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-09T13:31:04Z"));
+    try {
+      const { stores, getSurface, getByTestId } = renderChartCapturingSurface({ timeframe: "10s" });
+      act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+        seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+      } }));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      pushLiveBar(stores, "US.AAPL", "10s", 100, 100, false, "2026-07-09T13:31:00.000Z");
+      pushLiveBar(stores, "US.AAPL", "10s", 101, 101.25, true, "2026-07-09T13:31:20.000Z");
+      act(() => { getSurface().paint(); });
+      expect(getByTestId("bar-close-timer")).toBeTruthy();
+      expect(getByTestId("bar-close-timer-price").textContent).toBe("100.00");
     } finally {
       now.mockRestore();
     }

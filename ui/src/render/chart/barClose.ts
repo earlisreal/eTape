@@ -1,5 +1,7 @@
-import { bucketStartMs, type Timeframe } from "./barBucket";
+import { bucketStartMs, etParts, type EtParts, type Timeframe } from "./barBucket";
 import { timeframeToMs } from "./drawings/geometry";
+import { sessionAt } from "./sessions";
+import type { Bar } from "../../wire/contract";
 
 export const TEN_SECOND_TIMER_EARLY_ROLLOVER_GRACE_MS = 3_000;
 
@@ -16,6 +18,35 @@ export function isTenSecondTimerCandidateLive(candidateBucketStart: string, nowM
   const nextBucketMs = currentBucketMs + timeframeToMs("10s");
   return candidateMs === nextBucketMs && candidateMs > nowMs
     && candidateMs - nowMs <= TEN_SECOND_TIMER_EARLY_ROLLOVER_GRACE_MS;
+}
+
+// Pick the newest raw exchange bar that can anchor the countdown. A quiet
+// bucket must not erase the badge: the last confirmed price remains usable for
+// the active ET trading day, while malformed, closed-session, stale-day, and
+// excessively-future bars are ignored.
+export function latestEligibleCountdownBar(bars: readonly Bar[], tf: Timeframe, nowMs: number): Bar | null {
+  if (!isIntradayTimeframe(tf) || !Number.isFinite(nowMs) || sessionAt(nowMs) === "closed") return null;
+  const nowDay = etParts(nowMs);
+  const currentBucketMs = tf === "10s" ? bucketStartMs(nowMs, "10s") : 0;
+  const dayKey = (day: EtParts) => `${day.y}-${day.mo.toString().padStart(2, "0")}-${day.d.toString().padStart(2, "0")}`;
+  const nowDayKey = dayKey(nowDay);
+  // BarStore keeps raw bars chronologically ordered, so the first eligible
+  // bar from the tail is the newest one; far-future entries are skipped until
+  // the previous eligible price is found.
+  for (let i = bars.length - 1; i >= 0; i--) {
+    const bar = bars[i];
+    const barMs = Date.parse(bar.bucketStart);
+    if (!Number.isFinite(barMs) || !Number.isFinite(bar.o) || !Number.isFinite(bar.c)) continue;
+    const barDay = etParts(barMs);
+    const barDayKey = dayKey(barDay);
+    if (barDayKey < nowDayKey) break;
+    if (barDayKey > nowDayKey || sessionAt(barMs) === "closed") continue;
+    const future = tf === "10s"
+      ? barMs > currentBucketMs && !isTenSecondTimerCandidateLive(bar.bucketStart, nowMs)
+      : barMs > nowMs;
+    if (!future) return bar;
+  }
+  return null;
 }
 
 // Countdown target: ms until the current bar closes (wall-clock time, not tick arrival).

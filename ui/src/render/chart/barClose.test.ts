@@ -1,7 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { remainingToBarCloseMs, isIntradayTimeframe, formatCountdown, isTenSecondTimerCandidateLive } from "./barClose";
+import { remainingToBarCloseMs, isIntradayTimeframe, formatCountdown, isTenSecondTimerCandidateLive, latestEligibleCountdownBar } from "./barClose";
+import type { Bar } from "../../wire/contract";
 
 const at = (iso: string) => Date.parse(iso);
+const bar = (bucketStart: string, c: number, timeframe = "10s"): Bar => ({
+  symbol: "US.AAPL", timeframe, bucketStart, o: c, h: c, l: c, c, v: 100, inProgress: false,
+});
 
 describe("remainingToBarCloseMs", () => {
   it("returns time remaining until the current bar closes at 10s timeframe", () => {
@@ -116,6 +120,30 @@ describe("isTenSecondTimerCandidateLive", () => {
 
   it("rejects a malformed candidate timestamp", () => {
     expect(isTenSecondTimerCandidateLive("invalid", at("2026-07-09T13:31:08Z"))).toBe(false);
+  });
+});
+
+describe("latestEligibleCountdownBar", () => {
+  it("keeps the latest confirmed same-day price through a quiet bucket", () => {
+    const latest = bar("2026-07-09T13:31:00.000Z", 101);
+    expect(latestEligibleCountdownBar([latest], "10s", at("2026-07-09T13:31:15Z"))).toBe(latest);
+  });
+
+  it("falls back to the previous eligible price when a newer bar is too far ahead", () => {
+    const previous = bar("2026-07-09T13:31:00.000Z", 101);
+    const future = bar("2026-07-09T13:31:20.000Z", 102);
+    expect(latestEligibleCountdownBar([previous, future], "10s", at("2026-07-09T13:31:04Z"))).toBe(previous);
+  });
+
+  it("rejects previous-day, closed-session, malformed, and non-finite price bars", () => {
+    const bars = [
+      bar("2026-07-08T19:59:50.000Z", 98),
+      bar("2026-07-09T03:00:00.000Z", 99),
+      { ...bar("invalid", 100), bucketStart: "invalid" },
+      { ...bar("2026-07-09T13:31:00.000Z", 101), c: Number.NaN },
+    ];
+    expect(latestEligibleCountdownBar(bars, "10s", at("2026-07-09T13:31:05Z"))).toBeNull();
+    expect(latestEligibleCountdownBar([bar("2026-07-09T13:31:00.000Z", 101)], "10s", at("2026-07-10T00:01:00Z"))).toBeNull();
   });
 });
 
