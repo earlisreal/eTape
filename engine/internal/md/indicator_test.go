@@ -192,6 +192,36 @@ func TestIndicatorLifecycleThroughCore(t *testing.T) {
 	}
 }
 
+func TestIndicatorIgnoresInProgressBarsBehindFinalTail(t *testing.T) {
+	c := New(Config{})
+	c.inds.ensure(c, 1, "vwap-stale", IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m, Type: IndVWAP})
+	c.inds.onBar(c, Bar{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: t0Ms, H: 101, L: 99, C: 100, V: 100})
+	c.inds.onBar(c, Bar{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: t0Ms + 60_000, H: 102, L: 100, C: 101, V: 100})
+	for len(c.updates) > 0 {
+		<-c.updates
+	}
+
+	for _, bucket := range []int64{t0Ms, t0Ms + 60_000} {
+		c.inds.onBar(c, Bar{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: bucket, H: 103, L: 98, C: 99, V: 50, InProgress: true})
+	}
+	select {
+	case update := <-c.updates:
+		t.Fatalf("stale in-progress bar emitted indicator update: %+v", update)
+	default:
+	}
+
+	c.inds.onBar(c, Bar{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: t0Ms + 120_000, H: 103, L: 101, C: 102, V: 50, InProgress: true})
+	select {
+	case update := <-c.updates:
+		point := update.(IndicatorUpdate).Points[0]
+		if point.TimeMs != t0Ms+120_000 {
+			t.Fatalf("forward indicator delta time = %d, want %d", point.TimeMs, t0Ms+120_000)
+		}
+	default:
+		t.Fatal("forward in-progress bar emitted no indicator update")
+	}
+}
+
 func TestSeedHistory10sReseedsExistingVWAP(t *testing.T) {
 	c, drain := runCore(t)
 	sym := "US.NAMI"

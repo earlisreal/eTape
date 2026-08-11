@@ -215,6 +215,12 @@ func (s *indicatorSet) release(connID uint64, id string) {
 func (s *indicatorSet) onBar(c *Core, b Bar) {
 	list := s.bySymTF[symTF{symbol: b.Symbol, tf: b.TF}]
 	for _, in := range list {
+		// A cached/reseeded final tail is authoritative. Startup bursts can still
+		// deliver an older forming bar afterward; emitting it would make the
+		// forward-only indicator stream regress and crash LWC's update() path.
+		if b.InProgress && b.BucketMs <= in.lastFolded {
+			continue
+		}
 		switch {
 		case b.InProgress:
 			for _, p := range in.c.points(b) {
