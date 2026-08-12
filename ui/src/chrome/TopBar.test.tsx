@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { TopBar } from "./TopBar";
+import { TopBar, targetCueFor } from "./TopBar";
 import { HealthStore } from "../data/HealthStore";
 import { ThemeProvider } from "./ThemeProvider";
 
@@ -15,7 +15,7 @@ describe("TopBar", () => {
   it("renders wordmark, workspace name, and the shell buttons", () => {
     render(<ThemeProvider><TopBar {...base} /></ThemeProvider>);
     expect(screen.getByText("eTape")).toBeTruthy();
-    expect(screen.getByText("· main")).toBeTruthy();
+    expect(screen.queryByText("· main")).toBeNull();
     expect(screen.getByRole("button", { name: /add panel/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /new window/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /practice/i })).toBeTruthy();
@@ -35,5 +35,21 @@ describe("TopBar", () => {
   it("renders the ET session clock in the center", () => {
     render(<ThemeProvider><TopBar {...base} /></ThemeProvider>);
     expect(screen.getByTestId("session-clock")).toBeTruthy();
+  });
+  it("renders every target cue state without making the cue interactive", () => {
+    const cases = [
+      [targetCueFor(null), "no-target"],
+      [targetCueFor({ ownerWindow: "a", panel: "p", group: null, symbol: "US.AAPL", venue: "sim-paper", revision: 1 }), "ungrouped"],
+      [targetCueFor({ ownerWindow: "a", panel: "p", group: "blue", venue: "sim-paper", revision: 1 }), "missing-symbol"],
+      [targetCueFor({ ownerWindow: "a", panel: "p", group: "blue", symbol: "US.AAPL", revision: 1 }), "missing-venue"],
+      [targetCueFor({ ownerWindow: "a", panel: "p", group: "blue", symbol: "US.AAPL", venue: "sim-paper", revision: 1 }), "ready"],
+    ] as const;
+    for (const [cue, state] of cases) {
+      const view = render(<ThemeProvider><TopBar {...base} targetCue={cue} /></ThemeProvider>);
+      const element = screen.getByTestId("hotkey-target-cue");
+      expect(element.getAttribute("data-state")).toBe(state);
+      expect(element.tagName).toBe("SPAN");
+      view.unmount();
+    }
   });
 });

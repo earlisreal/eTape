@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { DockviewReact, type DockviewApi, type DockviewReadyEvent, type IDockviewPanelProps } from "dockview-react";
 import { themeDark, themeLight } from "dockview";
 // dockview's stylesheet is imported in main.tsx (ahead of global.css) so our
@@ -9,11 +9,12 @@ import { WorkspaceStore } from "./workspace";
 import type { Stores } from "../data/registry";
 import type { Scheduler } from "../render/Scheduler";
 import type { LinkGroup, LinkGroups } from "./linkGroups";
+import { HotkeyTargetCoordinator, type HotkeyTargetChannel, type HotkeyTargetInput } from "./hotkeyTarget";
 import type { DemandRegistry } from "../wire/DemandRegistry";
 import type { ConnState } from "../wire/WsClient";
 import { PANELS, dockviewPanelConstraints, type PanelProps } from "./panels/registry";
 import { PRESETS } from "./presets";
-import { TopBar } from "./TopBar";
+import { TopBar, targetCueFor } from "./TopBar";
 import { FeedStatusBanner } from "./FeedStatusBanner";
 import { BootStatusBanner } from "./BootStatusBanner";
 import { DemoBanner } from "./DemoBanner";
@@ -36,6 +37,7 @@ import { useSoundWiring } from "../sound/useSoundWiring";
 import { NewWindowModal } from "./NewWindowModal";
 import { mutateWindows, readWindows } from "./catalogs";
 import { planDemoEntry, planDemoRevert } from "./demoTransition";
+import { resolveVenue } from "./exec/venueSelection";
 
 // Task 3: permanent "don't show again" flag for the first-run venue-setup
 // prompt, set only when the user ticks the checkbox on either action.
@@ -83,6 +85,7 @@ interface Props {
   demandRegistry: DemandRegistry;
   commands: PanelProps["commands"];
   engineState: ConnState;
+  hotkeyTargetChannel?: HotkeyTargetChannel;
   // Task 13: fired after the demo-mode entry/revert effect below has finished
   // applying a workspace patch for a mode-edge transition — App.tsx wires this
   // to ReannounceGate.onTransitionApplied() so a reconnect that lands on a
@@ -91,7 +94,7 @@ interface Props {
   onTransitionApplied?: () => void;
 }
 
-export function AppShell({ workspaceName, stores, scheduler, workspaceStore, linkGroups, demandRegistry, commands, engineState, onTransitionApplied }: Props): JSX.Element {
+export function AppShell({ workspaceName, stores, scheduler, workspaceStore, linkGroups, demandRegistry, commands, engineState, hotkeyTargetChannel, onTransitionApplied }: Props): JSX.Element {
   const [ws, setWs] = useState<Workspace | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   // Unified Settings modal (Task 11): AppShell owns open/section state; TopBar's
@@ -117,6 +120,18 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const { mode } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
+  const orderConfig = useOrderConfig();
+  const [windowId] = useState(() => crypto.randomUUID());
+  const hotkeyCoordinator = useMemo(
+    () => new HotkeyTargetCoordinator(windowId, hotkeyTargetChannel),
+    [hotkeyTargetChannel, windowId],
+  );
+  const hotkeyTarget = useSyncExternalStore(
+    (cb) => hotkeyCoordinator.subscribe(cb),
+    () => hotkeyCoordinator.snapshot(),
+    () => null,
+  );
+  const coordinatorCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // DockviewApi is only available once dockview mounts (i.e. once the workspace
   // has at least one panel — see the empty-state switch below); null otherwise.
   const apiRef = useRef<DockviewApi | null>(null);
@@ -174,6 +189,30 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     return () => stop.abort();
   }, [workspaceName]);
   useEffect(() => {
+    if (coordinatorCloseTimerRef.current !== null) {
+      clearTimeout(coordinatorCloseTimerRef.current);
+      coordinatorCloseTimerRef.current = null;
+    }
+    const clearOwnedTarget = () => {
+      const current = hotkeyCoordinator.snapshot();
+      if (current?.ownerWindow === windowId) hotkeyCoordinator.clearOwned(current.panel);
+    };
+    const closeCoordinator = () => hotkeyCoordinator.close();
+    window.addEventListener("beforeunload", clearOwnedTarget);
+    window.addEventListener("unload", closeCoordinator);
+    return () => {
+      window.removeEventListener("beforeunload", clearOwnedTarget);
+      window.removeEventListener("unload", closeCoordinator);
+      // React StrictMode replays effects immediately; defer disposal so its
+      // replay can cancel this timer, while a real unmount still closes the
+      // ephemeral channel and clears the owner target.
+      coordinatorCloseTimerRef.current = setTimeout(() => {
+        coordinatorCloseTimerRef.current = null;
+        hotkeyCoordinator.close();
+      }, 0);
+    };
+  }, [hotkeyCoordinator, windowId]);
+  useEffect(() => {
     void commands.sendCommand("GetConfig", { key: "windows.v1" }).then(async (ack) => {
       if (ack.value !== undefined || localStorage.getItem("etape.windows") == null) return;
       let legacy: string[]; try { legacy = JSON.parse(localStorage.getItem("etape.windows") ?? "[]"); } catch { legacy = []; }
@@ -183,16 +222,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       localStorage.removeItem("etape.windows");
     }).catch(() => {});
   }, [commands]);
-  // Mounted once, globally — must run unconditionally, before the loading-state
-  // early return below, per the Rules of Hooks. group: "blue" (not useHotkeys'
-  // own "green" default) — found via the Task 12 E2E smoke spec: no preset in
-  // presets.ts ever puts an order ticket/DOM/tape in a "green" group (Monitoring
-  // has no execution surface at all; Trading's t-ticket/t-dom/t-tape/charts are
-  // all "blue"), so the unqualified default silently resolved to an empty
-  // symbol/venue and every place-order hotkey (Ctrl+1..4) no-opped with a "no
-  // venue/quote for hotkey" toast in the shipped Trading preset.
-  const orderTicketGroup = ws?.panels.find((p) => p.panelId === "order-ticket")?.group ?? null;
-  useHotkeys({ stores, commands, linkGroups, group: orderTicketGroup });
   useSoundWiring(stores);
   // Task 13: mirror Settings-modal open/close into the module-level modalTracker
   // singleton so every already-mounted PanelFrame (frozen-closure-created, can't
@@ -204,12 +233,37 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => appShellExecSignature(stores));
   const execStatus = stores.exec.status();
   const armed = execStatus?.masterArmed ?? false;
+  const execStatusRef = useRef(execStatus);
+  execStatusRef.current = execStatus;
+  const activeVenueRef = useRef(orderConfig.config.activeVenue);
+  activeVenueRef.current = orderConfig.config.activeVenue;
+  const hotkeyTargetInputForPanel = useCallback((panelId: string): HotkeyTargetInput | null => {
+    const panel = wsRef.current?.panels.find((p) => p.id === panelId);
+    if (!panel) return null;
+    const group = panel.group;
+    return {
+      panel: panel.id,
+      group,
+      ...(group ? { symbol: linkGroups.symbolFor(group) } : { symbol: panel.settings.symbol as string | undefined }),
+      venue: resolveVenue(group, linkGroups, activeVenueRef.current, execStatusRef.current),
+    };
+  }, [linkGroups]);
+  const refreshOwnedTarget = useCallback(() => {
+    const current = hotkeyCoordinator.snapshot();
+    if (!current || current.ownerWindow !== windowId) return;
+    const input = hotkeyTargetInputForPanel(current.panel);
+    if (!input) {
+      hotkeyCoordinator.clearOwned(current.panel);
+      return;
+    }
+    hotkeyCoordinator.updateOwned(current.panel, input);
+  }, [hotkeyCoordinator, hotkeyTargetInputForPanel, windowId]);
+  useHotkeys({ stores, commands, target: hotkeyTarget });
   // Auto-unlock-on-startup (fire-once latch — see the hook's own comment):
   // arms trading automatically once the engine connection is up, if the user
   // opted in via Settings → General. `orderConfig` is read here (rather than
   // via `oc`, the order-COMMANDS handle above) because the setting itself
   // lives in the order-CONFIG blob.
-  const orderConfig = useOrderConfig();
   useAutoUnlockOnStartup({
     ready: orderConfig.loaded && execStatus !== null,
     enabled: orderConfig.config.autoUnlockOnStartup ?? false,
@@ -326,13 +380,16 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   useEffect(() => {
     return linkGroups.subscribe(() => {
       const current = wsRef.current;
-      if (!current) return; // a cross-window bus echo can arrive before the first load resolves
-      const next = { ...current, groups: linkGroups.snapshot(), linkVenues: linkGroups.snapshotVenues() };
-      wsRef.current = next;
-      setWs(next);
-      workspaceStore.save(next);
+      if (current) {
+        const next = { ...current, groups: linkGroups.snapshot(), linkVenues: linkGroups.snapshotVenues() };
+        wsRef.current = next;
+        setWs(next);
+        workspaceStore.save(next);
+      }
+      refreshOwnedTarget();
     });
-  }, [linkGroups, workspaceStore]);
+  }, [linkGroups, refreshOwnedTarget, workspaceStore]);
+  useEffect(() => { refreshOwnedTarget(); }, [refreshOwnedTarget, ws]);
   // Task 13: demo-mode entry/revert orchestration. `wsLoaded` (a derived
   // boolean, not raw `ws`) is the effect's second dependency below,
   // deliberately: it flips false->true exactly once (the workspace doc never
@@ -449,6 +506,11 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
 
   if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
 
+  const activatePanelTarget = (panelId: string) => {
+    const input = hotkeyTargetInputForPanel(panelId);
+    if (input) hotkeyCoordinator.activate(input);
+  };
+
   // A stable per-panel onConfigChange MERGES a settings patch into
   // ws.panels[i].settings then saves. Merge, not replace: the panels below and
   // PanelFrame all hold config captured once by dockview at panel-creation time,
@@ -468,6 +530,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     wsRef.current = next;
     setWs(next);                 // keep local state authoritative for subsequent edits
     workspaceStore.save(next);   // debounced persist (config key workspace.<name>)
+    refreshOwnedTarget();
   };
 
   // Re-links (or pins) a panel: PanelFrame's swatch/GroupPicker calls this on a
@@ -485,6 +548,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     wsRef.current = next;
     setWs(next);
     workspaceStore.save(next);
+    refreshOwnedTarget();
   };
 
   // Allocate a fresh panel id and default settings per panel type, add it to
@@ -520,6 +584,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const removePanel = (id: string) => {
     const current = wsRef.current;
     if (!current || !current.panels.some((p) => p.id === id)) return; // already synced
+    hotkeyCoordinator.clearOwned(id);
     const next = { ...current, panels: current.panels.filter((p) => p.id !== id) };
     wsRef.current = next;
     setWs(next);
@@ -540,6 +605,10 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // components map first.
   const applyWorkspace = (next: Workspace, opts?: { confirm?: string }) => {
     if (opts?.confirm && !window.confirm(opts.confirm)) return;
+    const currentTarget = hotkeyCoordinator.snapshot();
+    if (currentTarget?.ownerWindow === windowId && !next.panels.some((p) => p.id === currentTarget.panel)) {
+      hotkeyCoordinator.clearOwned(currentTarget.panel);
+    }
     linkGroups.hydrate(next.groups ?? {});
     linkGroups.hydrateVenues(next.linkVenues ?? {});
     setWs(next);
@@ -703,6 +772,12 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       });
     }
     syncTabVisibility(event.api);
+    event.api.onDidActivePanelChange(({ panel, origin }) => {
+      if (origin === "user" && panel) activatePanelTarget(panel.id);
+    });
+    // Programmatic layout restore is deliberately not treated as a user
+    // activation. Only the OS-focused window may seed that restored panel.
+    if (document.hasFocus() && event.api.activePanel) activatePanelTarget(event.api.activePanel.id);
     // Keep ws.panels in sync when the user closes a dockview tab directly
     // (previously only the layout was re-saved on removal, leaving the closed
     // panel's config as a zombie entry in the workspace doc).
@@ -736,6 +811,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             onOpenSettings={() => setSettings({ open: true, section: "general" })}
             onOpenConnection={onOpenConnection}
             onOpenPractice={() => setPracticeOpen(true)}
+            targetCue={targetCueFor(hotkeyTarget)}
           />
           {addOpen && (
             <div className="popover" style={{ top: 40, right: 160, width: 580, maxHeight: "70vh", overflow: "auto" }}>

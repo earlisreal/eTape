@@ -2,12 +2,18 @@ import { useEffect, useState } from "react";
 import { Button } from "./controls/Button";
 import { mutateWindows, readWindows, validateName, type CommandClient, type WindowCatalogV1 } from "./catalogs";
 import { useTheme } from "./ThemeProvider";
+import { modalTracker } from "./modalTracker";
 
 export function NewWindowModal({ open, currentId, commands, onClose }: { open: boolean; currentId: string; commands: CommandClient; onClose: () => void }): JSX.Element | null {
   const [catalog, setCatalog] = useState<WindowCatalogV1>({ version: 1, entries: [] });
   const [name, setName] = useState(""); const [error, setError] = useState("");
   const { palette } = useTheme();
   useEffect(() => { if (open) void readWindows(commands).then(setCatalog); }, [open, commands]);
+  useEffect(() => {
+    if (!open) return;
+    modalTracker.setOpen(true);
+    return () => modalTracker.setOpen(false);
+  }, [open]);
   if (!open) return null;
   const create = async () => {
     setError(""); const placeholder = window.open("about:blank", "_blank");

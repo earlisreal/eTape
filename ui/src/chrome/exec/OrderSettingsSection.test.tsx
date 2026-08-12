@@ -8,7 +8,6 @@ import { useHotkeys } from "./useHotkeys";
 import { OrderSettingsSection } from "./OrderSettingsSection";
 import { DEFAULT_ORDER_CONFIG, normalizeOrderConfig, type OrderConfig } from "./actionTemplate";
 import { makeStores } from "../../data/registry";
-import { LinkGroups, BroadcastChannelBus } from "../linkGroups";
 import type { AckMsg, ExecStatus } from "../../wire/contract";
 
 // Seeds the hotkeys engine's exec store in the kill-leak regression below —
@@ -446,11 +445,10 @@ describe("OrderSettingsSection", () => {
         return { kind: "ack", corrId: "c", status: "accepted", orderId: "ETX", value: undefined };
       }),
     };
-    const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
     stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status });
 
     function Harness() {
-      useHotkeys({ stores, commands, linkGroups, group: "green" });
+      useHotkeys({ stores, commands, target: { ownerWindow: "settings-test", panel: "settings", group: "green", symbol: "US.AAPL", venue: "sim-paper", revision: 1 } });
       return <OrderSettingsSection config={SAMPLE_ORDER_CONFIG} onSave={vi.fn()} />;
     }
 

@@ -43,6 +43,10 @@ and the broker of your choice for execution, and everything else is free and ope
 - **Broker-agnostic execution.** The same order ticket, hotkeys, and risk gates drive
   TradeZero, Alpaca, or the built-in simulator. Fills come back as generic events and
   land on your chart as markers in real time, whatever the venue.
+- **Ticketless hotkeys.** The order ticket is optional: hotkeys use the most recently
+  user-activated grouped Dockview panel across open windows. The target is ephemeral,
+  never saved in a workspace or restored across a full restart, and its read-only cue
+  shows the linked symbol and resolved venue.
 - **Safety-gated by default.** Zero venues are configured out of the box. Every order
   must pass a two-layer risk gate (global caps + per-venue caps: max day loss, order
   value, position size, open orders), and each venue has an explicit arm/disarm switch.

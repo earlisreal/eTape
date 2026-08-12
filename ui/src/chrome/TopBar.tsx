@@ -3,6 +3,10 @@ import { SessionClock } from "./SessionClock";
 import type { HealthStore } from "../data/HealthStore";
 import { useTheme } from "./ThemeProvider";
 import { Button } from "./controls/Button";
+import type { LinkGroup } from "./linkGroups";
+import type { HotkeyTarget } from "./hotkeyTarget";
+import type { VenueID } from "../wire/contract";
+import { bareSymbol } from "./exec/orderStatus";
 
 // Padlock state icon for the arm/disarm chip. stroke="currentColor" so it
 // inherits the chip's state color automatically (no separate color prop) —
@@ -31,6 +35,58 @@ export interface TopBarProps {
   onOpenSettings: () => void;
   onOpenConnection: () => void;
   onOpenPractice: () => void;
+  targetCue?: HotkeyTargetCue;
+}
+
+export type HotkeyTargetCueState = "ready" | "no-target" | "ungrouped" | "missing-symbol" | "missing-venue";
+export interface HotkeyTargetCue {
+  state: HotkeyTargetCueState;
+  group: Exclude<LinkGroup, null> | null;
+  symbol?: string;
+  venue?: VenueID;
+}
+
+export function targetCueFor(target: HotkeyTarget | null): HotkeyTargetCue {
+  if (!target) return { state: "no-target", group: null };
+  if (!target.group) return {
+    state: "ungrouped", group: null,
+    ...(target.symbol === undefined ? {} : { symbol: target.symbol }),
+    ...(target.venue === undefined ? {} : { venue: target.venue }),
+  };
+  if (!target.symbol) return {
+    state: "missing-symbol", group: target.group,
+    ...(target.venue === undefined ? {} : { venue: target.venue }),
+  };
+  if (!target.venue) return { state: "missing-venue", group: target.group, symbol: target.symbol };
+  return { state: "ready", group: target.group, symbol: target.symbol, venue: target.venue };
+}
+
+function TargetCue({ cue, palette }: { cue: HotkeyTargetCue; palette: ReturnType<typeof useTheme>["palette"] }): JSX.Element {
+  const dot = cue.group === null ? palette.textMuted : {
+    red: palette.linkRed, green: palette.linkGreen, blue: palette.linkBlue, yellow: palette.linkYellow,
+  }[cue.group];
+  const symbol = cue.symbol ? bareSymbol(cue.symbol) : "—";
+  const venue = cue.venue ?? "—";
+  const reason = {
+    ready: "",
+    "no-target": "no target",
+    ungrouped: "ungrouped panel",
+    "missing-symbol": "no symbol",
+    "missing-venue": "no venue",
+  }[cue.state];
+  const label = cue.state === "ready"
+    ? `${symbol} · ${venue}`
+    : `Hotkeys blocked · ${reason}${cue.state === "no-target" ? "" : ` · ${symbol} · ${venue}`}`;
+  return (
+    <span data-testid="hotkey-target-cue" data-state={cue.state} role="status"
+      aria-label={label} title={label}
+      style={{ display: "inline-flex", alignItems: "center", gap: 5, minWidth: 0,
+        color: cue.state === "ready" ? palette.textMuted : palette.danger, fontSize: 11, whiteSpace: "nowrap" }}>
+      <span data-testid="hotkey-target-dot" aria-hidden="true"
+        style={{ width: 7, height: 7, borderRadius: "50%", background: dot, flex: "0 0 auto" }} />
+      <span>{label}</span>
+    </span>
+  );
 }
 
 // Daylight Ledger top bar: eTape wordmark + workspace name + connection latency on the
@@ -40,6 +96,7 @@ export interface TopBarProps {
 // interaction, per-panel.
 export function TopBar(p: TopBarProps): JSX.Element {
   const { palette } = useTheme();
+  const cue = p.targetCue ?? targetCueFor(null);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 10,
       padding: "7px 12px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
@@ -54,6 +111,7 @@ export function TopBar(p: TopBarProps): JSX.Element {
         <Button onClick={p.onNewWindow}>⧉ New window</Button>
         <Button aria-label="Practice" title="Practice: synthetic demo market" onClick={p.onOpenPractice}>▶ Practice</Button>
         <Button aria-label="Settings" onClick={p.onOpenSettings}>⚙ Settings</Button>
+        <TargetCue cue={cue} palette={palette} />
         <Button data-testid="arm-chip" onClick={p.onArmToggle}
           style={{ fontWeight: 600, letterSpacing: ".08em",
             // Fixed width sized to the longer "UNLOCK TRADING" label (measured

@@ -17,6 +17,7 @@ import { SoundConfigProvider } from "../sound/SoundConfigProvider";
 import type { AccountRow, ExecStatus, VenueStatus, WatchlistRow } from "../wire/contract";
 import { TAPE_MIN_WIDTH } from "../render/tape/tapeLayout";
 import { DockviewApi } from "dockview";
+import type { HotkeyTargetChannel, HotkeyTargetMessage } from "./hotkeyTarget";
 
 // dockview's DockviewComponent constructor watches its container via a real
 // ResizeObserver on mount, which jsdom doesn't implement.
@@ -68,7 +69,18 @@ function clickTab(el: Element): void {
   el.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0 }));
 }
 
-function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApplied?: () => void; onRender?: () => void }) {
+class TargetChannel implements HotkeyTargetChannel {
+  readonly messages: HotkeyTargetMessage[] = [];
+  private listener: ((event: MessageEvent<HotkeyTargetMessage>) => void) | undefined;
+  postMessage(message: HotkeyTargetMessage): void { this.messages.push(message); }
+  addEventListener(_type: "message", listener: (event: MessageEvent<HotkeyTargetMessage>) => void): void { this.listener = listener; }
+  removeEventListener(_type: "message", listener: (event: MessageEvent<HotkeyTargetMessage>) => void): void {
+    if (this.listener === listener) this.listener = undefined;
+  }
+  close(): void { this.listener = undefined; }
+}
+
+function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApplied?: () => void; onRender?: () => void; hotkeyTargetChannel?: HotkeyTargetChannel }) {
   const stores = makeStores();
   const scheduler = new Scheduler(browserRaf, () => {});
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
@@ -93,6 +105,7 @@ function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApp
         <Profiler id="AppShell" onRender={() => opts?.onRender?.()}>
           <AppShell workspaceName={opts?.workspaceName ?? "default"} stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
             linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} engineState="open"
+            {...(opts?.hotkeyTargetChannel ? { hotkeyTargetChannel: opts.hotkeyTargetChannel } : {})}
             {...(opts?.onTransitionApplied ? { onTransitionApplied: opts.onTransitionApplied } : {})} />
         </Profiler>
       </SoundConfigProvider>
@@ -878,6 +891,34 @@ describe("AppShell Dockview panel constraints", () => {
       expect(restored.panels["tape-1"].minimumWidth).toBe(TAPE_MIN_WIDTH);
     } finally {
       fromJSON.mockRestore();
+    }
+  });
+});
+
+describe("AppShell hotkey target lifecycle", () => {
+  it("seeds the focused restored panel and retargets only a user activation", async () => {
+    const channel = new TargetChannel();
+    const hasFocus = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    try {
+      mount({
+        name: "default",
+        panels: [{ id: "news-a", panelId: "news", group: "green", settings: { symbol: "US.AAPL" } }],
+        layout: null,
+      }, { hotkeyTargetChannel: channel });
+      await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+      await waitFor(() => expect(channel.messages.some((m) => m.type === "target")).toBe(true));
+      const seeded = channel.messages.filter((m): m is Extract<HotkeyTargetMessage, { type: "target" }> => m.type === "target").at(-1);
+      expect(seeded?.target.panel).toBe("news-a");
+
+      channel.messages.length = 0;
+      fireEvent.click(screen.getByText("+ Add panel"));
+      fireEvent.click(screen.getAllByText("Stock Info")[0]);
+      await waitFor(() => expect((document.querySelector(".dv-tabs-and-actions-container") as HTMLElement).style.display).not.toBe("none"));
+      expect(channel.messages.some((m) => m.type === "target")).toBe(false);
+      act(() => clickTab(screen.getByText("news")));
+      await waitFor(() => expect(channel.messages.some((m) => m.type === "target" && m.target.panel === seeded?.target.panel)).toBe(true));
+    } finally {
+      hasFocus.mockRestore();
     }
   });
 });

@@ -71,7 +71,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'exec',
-          include: ['src/chrome/exec/commands.test.ts', 'src/chrome/exec/fireTemplate.test.ts'],
+          include: ['src/chrome/exec/commands.test.ts', 'src/chrome/exec/fireTemplate.test.ts', 'src/chrome/exec/useHotkeys.test.tsx'],
         },
       },
       {
@@ -105,6 +105,8 @@ export default defineConfig({
           name: 'chrome-regressions',
           include: [
             'src/chrome/AppShell.test.tsx',
+            'src/chrome/hotkeyTarget.test.ts',
+            'src/chrome/TopBar.test.tsx',
             'src/chrome/backup.test.ts',
             'src/chrome/panels/registry.test.tsx',
           ],

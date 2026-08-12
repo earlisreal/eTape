@@ -1,18 +1,29 @@
 import { useEffect } from "react";
 import type { AckMsg } from "../../wire/contract";
 import type { Stores } from "../../data/registry";
-import type { LinkGroup, LinkGroups } from "../linkGroups";
+import type { HotkeyTarget } from "../hotkeyTarget";
+import { modalTracker } from "../modalTracker";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "./useOrderCommands";
 import { useOrderConfig } from "./useOrderConfig";
 import { normalizeCombo, matchTemplate } from "./hotkeys";
 import { fireTemplate } from "./fireTemplate";
-import { resolveVenue } from "./venueSelection";
 
 interface Cmd { sendCommand(name: string, args: unknown): Promise<AckMsg> }
 
-export function useHotkeys(opts: { stores: Stores; commands: Cmd; linkGroups: LinkGroups; group?: LinkGroup }): void {
-  const { stores, commands, linkGroups, group } = opts;
+function isScoped(t: ReturnType<typeof matchTemplate>): boolean {
+  return t?.kind === "place" || t?.action === "CancelLast" || t?.action === "CancelAllFocused";
+}
+
+function isEditableFocus(): boolean {
+  const active = document.activeElement;
+  if (!active) return false;
+  const tag = active.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (active as HTMLElement).isContentEditable;
+}
+
+export function useHotkeys(opts: { stores: Stores; commands: Cmd; target: HotkeyTarget | null }): void {
+  const { stores, commands, target } = opts;
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
   const { config } = useOrderConfig(); // shared context (mounted in App via OrderConfigProvider)
@@ -21,11 +32,31 @@ export function useHotkeys(opts: { stores: Stores; commands: Cmd; linkGroups: Li
     const onKey = (e: KeyboardEvent) => {
       const t = matchTemplate(config.templates, normalizeCombo(e));
       if (!t) return;
-      if (!group) return;
       e.preventDefault();
+      e.stopPropagation();
+      if (e.repeat) return;
+
+      if (isScoped(t)) {
+        // Scoped bindings are deliberately quiet while the user is working in
+        // a form or modal. Global emergency bindings continue below.
+        if (modalTracker.isOpen() || isEditableFocus()) return;
+        if (!target) {
+          toast.push({ level: "warn", text: "hotkey blocked — no grouped panel target" });
+          return;
+        }
+        if (!target.group) {
+          toast.push({ level: "warn", text: "hotkey blocked — target panel is ungrouped; choose a link group" });
+          return;
+        }
+        if (t.kind === "manage" && !target.symbol) {
+          toast.push({ level: "warn", text: "hotkey blocked — target group has no symbol" });
+          return;
+        }
+      }
+
       const status = stores.exec.status();
-      const venue = resolveVenue(group, linkGroups, config.activeVenue, status);
-      const symbol = linkGroups.symbolFor(group) ?? "";
+      const venue = target?.venue ?? "";
+      const symbol = target?.symbol ?? "";
 
       // Keyboard-specific: place orders require OS window focus (never gated
       // for management templates — closing exposure is never gated on focus
@@ -47,5 +78,5 @@ export function useHotkeys(opts: { stores: Stores; commands: Cmd; linkGroups: Li
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [stores, linkGroups, group, oc, toast, config]);
+  }, [stores, target, oc, toast, config]);
 }

@@ -19,6 +19,7 @@
     "mock-engine": "tsx mock-engine/run.ts",
     "capture": "tsx mock-engine/capture.ts",
     "e2e": "playwright test",
+    "e2e:ticketless": "playwright test --config=playwright.ticketless.config.ts",
     "e2e:ui": "playwright test --ui"
   },
   "dependencies": {

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTheme } from "./ThemeProvider";
 import type { AckMsg } from "../wire/contract";
+import { modalTracker } from "./modalTracker";
 
 export function PracticeLauncherModal({ open, onClose, commands }: {
   open: boolean;
@@ -16,6 +17,11 @@ export function PracticeLauncherModal({ open, onClose, commands }: {
       setPending(false);
       setError(null);
     }
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    modalTracker.setOpen(true);
+    return () => modalTracker.setOpen(false);
   }, [open]);
 
   if (!open) return null;
