@@ -8,6 +8,20 @@ Local-first US-stock trading platform: Go engine plus TypeScript/React/Vite UI. 
 - [Engine](engine/README.md), [UI](ui/README.md), [external APIs](docs/external-apis.md)
 - [Documentation](docs/README.md), [plans](docs/plans/README.md), [prototypes](prototypes/README.md), [scripts](scripts/README.md)
 
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked as local Markdown files under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Issue status uses the five default canonical triage roles. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repository uses a single-context domain layout. See `docs/agents/domain.md`.
+
 ## Invariants
 
 - High-frequency data never flows through React state. Stores/controllers mutate imperatively; canvas/chart rendering coalesces work.
