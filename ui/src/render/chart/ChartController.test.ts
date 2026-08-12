@@ -322,6 +322,26 @@ describe("ChartController", () => {
     expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
   });
 
+  it("follows when a pending replacement rebuild also advances the tail", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
+    const { facade, ctrl } = make10sWithViewport(reader);
+    ctrl.sync(base + 20_000);
+    facade.scrollPosition = 4;
+    facade.visibleLogicalRange = { from: -8, to: 5 };
+    const scrollsBefore = facade.scrolls;
+
+    reader.set([
+      tenSecondBar(new Date(base).toISOString(), 10),
+      tenSecondBar(new Date(base + 10_000).toISOString(), 11),
+      tenSecondBar(new Date(base + 20_000).toISOString(), 12, true),
+    ]);
+    ctrl.sync(base + 30_000);
+
+    expect(ctrl.displayBars().at(-1)?.pending).toBe(true);
+    expect(facade.scrolls).toBe(scrollsBefore + 1);
+  });
+
   it("a resumed 10s real bar replaces its placeholder and keeps earlier gaps", () => {
     const reader = mutableBarReader([{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }]);
     const facade = fakeFacade();

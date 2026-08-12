@@ -280,7 +280,7 @@ export class ChartController {
       ? this.facade.getScrollPosition() : null;
     const oldLastLogical = this.lastAppliedCount - 1;
     const oldTailBucket = this.lastTailBucket;
-    const pendingReplacement = replacedPendingSlot(this.displayedBars, bars);
+    const pendingReplacement = replacedPendingTail(this.displayedBars, bars);
     const wasFollowingLive = oldLastLogical >= 0
       && beforeLogical !== null
       && beforeLogical.to >= oldLastLogical;
@@ -954,9 +954,13 @@ export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number): DisplayBar[
   return out;
 }
 
-function replacedPendingSlot(previous: readonly DisplayBar[], next: readonly DisplayBar[]): boolean {
-  const pending = new Set(previous.filter((bar) => bar.pending).map((bar) => bar.bucketStart));
-  return next.some((bar) => pending.has(bar.bucketStart) && !bar.pending && !bar.synthetic);
+function replacedPendingTail(previous: readonly DisplayBar[], next: readonly DisplayBar[]): boolean {
+  const previousTail = previous.at(-1);
+  const nextTail = next.at(-1);
+  if (!previousTail?.pending || !nextTail || nextTail.pending || nextTail.synthetic) return false;
+  const previousMs = Date.parse(previousTail.bucketStart);
+  const nextMs = Date.parse(nextTail.bucketStart);
+  return Number.isFinite(previousMs) && previousMs === nextMs;
 }
 
 // One band per contiguous run of same-session bars, with every edge pinned to a

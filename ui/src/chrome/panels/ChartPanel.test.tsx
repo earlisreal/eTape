@@ -42,6 +42,7 @@ vi.mock("lightweight-charts", () => ({
 }));
 
 import { ChartPanel } from "./ChartPanel";
+import { ChartController } from "../../render/chart/ChartController";
 import { makeStores } from "../../data/registry";
 import { Scheduler } from "../../render/Scheduler";
 import { browserRaf, type Surface } from "../../render/surface";
@@ -159,6 +160,30 @@ describe("ChartPanel", () => {
 
     unmount();
     expect(timeScaleApi.unsubscribeVisibleLogicalRangeChange).toHaveBeenCalledWith(clampRight);
+  });
+
+  it("samples viewport intent through the full pointer-drag lifecycle", () => {
+    const noteViewport = vi.spyOn(ChartController.prototype, "noteUserViewportInteraction");
+    try {
+      const { getByTestId } = renderChart();
+      const host = getByTestId("chart-host");
+      timeScaleApi.scrollPosition
+        .mockReturnValueOnce(3.7)
+        .mockReturnValueOnce(-5)
+        .mockReturnValueOnce(-20);
+
+      fireEvent.pointerDown(host, { button: 0, pointerType: "mouse", clientX: 0, clientY: 0 });
+      fireEvent.pointerMove(host, { buttons: 1, pointerType: "mouse", clientX: 1, clientY: 0 });
+      fireEvent.pointerMove(host, { buttons: 1, pointerType: "mouse", clientX: 4, clientY: 0 });
+      fireEvent.pointerMove(host, { buttons: 1, pointerType: "mouse", clientX: 40, clientY: 0 });
+      fireEvent.pointerUp(host, { pointerType: "mouse" });
+
+      // The first move crosses the threshold while still live; the continued
+      // move and pointer-up must sample the final historical position too.
+      expect(noteViewport).toHaveBeenCalledTimes(3);
+    } finally {
+      noteViewport.mockRestore();
+    }
   });
 
   it("expands the rightward pan cap to the visible range width, so the latest bar can reach the left edge", () => {

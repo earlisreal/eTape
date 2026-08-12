@@ -387,6 +387,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     // from actual input gestures; the controller then preserves that intent
     // while market data changes the series.
     let pointerStart: { x: number; y: number } | null = null;
+    let viewportGesture = false;
     const isDrawingUi = (target: EventTarget | null) => {
       const element = target as { closest?: (selector: string) => unknown } | null;
       return typeof element?.closest === "function" && Boolean(element.closest("[data-drawing-ui]"));
@@ -394,16 +395,21 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const onViewportPointerDown = (event: PointerEvent) => {
       if ((event.button === 0 || event.pointerType === "touch") && !isDrawingUi(event.target)) {
         pointerStart = { x: event.clientX, y: event.clientY };
+        viewportGesture = false;
       }
     };
     const onViewportPointerMove = (event: PointerEvent) => {
       if (!pointerStart || isDrawingUi(event.target)) return;
       if (event.buttons === 0 && event.pointerType !== "touch") return;
       if (Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) < 2) return;
-      pointerStart = null;
+      viewportGesture = true;
       controller.noteUserViewportInteraction();
     };
-    const onViewportPointerUp = () => { pointerStart = null; };
+    const onViewportPointerUp = () => {
+      if (viewportGesture) controller.noteUserViewportInteraction();
+      pointerStart = null;
+      viewportGesture = false;
+    };
     const onViewportWheel = (event: WheelEvent) => {
       if (!isDrawingUi(event.target)) controller.noteUserViewportInteraction();
     };
