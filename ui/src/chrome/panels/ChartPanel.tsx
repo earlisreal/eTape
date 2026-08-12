@@ -2,7 +2,7 @@ import { useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createChart, createTextWatermark, CandlestickSeries, BarSeries, HistogramSeries, LineSeries, AreaSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type LogicalRange, type Coordinate } from "lightweight-charts";
 import type { PanelProps } from "./registry";
-import { ChartController } from "../../render/chart/ChartController";
+import { ChartController, type ManagedViewportMode } from "../../render/chart/ChartController";
 import { clampRightScroll, RIGHT_OFFSET_BARS, usesBoundaryManagedFollow, type ChartType } from "../../render/chart/chartTheme";
 import type { ChartApiFacade, LwcSeries } from "../../render/chart/ChartApiFacade";
 import { DiamondFillPrimitive } from "../../render/chart/diamondPrimitive";
@@ -178,6 +178,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // otherwise never repaint them until an unrelated bar delta happens to
   // arrive. This flag forces exactly one repaint on the next scheduled frame.
   const forceRepaintRef = useRef(false);
+  const viewportModeRef = useRef<ManagedViewportMode>("live");
   const [activeTool, setActiveTool] = useState<Tool>("select");
   const [chartSymbol, setChartSymbol] = useState(symbol);
   const [menu, setMenu] = useState<{ x: number; y: number; clientX: number; clientY: number; drawingId: string | null } | null>(null);
@@ -223,6 +224,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   useEffect(() => {
     const host = hostRef.current;
     if (!host) return;
+    viewportModeRef.current = "live";
     const chart = createChart(host, { width, height });
     // Right-edge pan cap: LWC has no native "capped but non-zero" right-edge option
     // (fixRightEdge hardcodes the margin to 0 — see chartTheme's rightOffset comment),
@@ -330,6 +332,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           stores.bars.expandWindow(result.symbol, result.timeframe, result.fromMs, Number.POSITIVE_INFINITY);
           for (const key of keys) stores.indicators.expandWindow(key, result.fromMs, Number.POSITIVE_INFINITY);
           facade.resetPriceScale();
+          viewportModeRef.current = "live";
           facade.scrollToRealTime();
           chartSnapshotLoaded = true;
           flushPendingIndicatorHydration();
@@ -371,9 +374,44 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     drawingsPrimRef.current = drawings;
     setFacadePaletteRef.current = setPalette;
     const controller = new ChartController(facade, palette, { symbol, timeframe: timeframe0 },
-      { bars: stores.bars, indicators: stores.indicators, commands });
+      {
+        bars: stores.bars, indicators: stores.indicators, commands,
+        viewportMode: () => viewportModeRef.current,
+        setViewportMode: (mode) => { viewportModeRef.current = mode; },
+      });
     controller.mount();
     controllerRef.current = controller;
+
+    // LWC's visible-range callback has no source marker, so it cannot tell a
+    // user pan from a setData/update or a range restoration. Record intent only
+    // from actual input gestures; the controller then preserves that intent
+    // while market data changes the series.
+    let pointerStart: { x: number; y: number } | null = null;
+    const isDrawingUi = (target: EventTarget | null) => {
+      const element = target as { closest?: (selector: string) => unknown } | null;
+      return typeof element?.closest === "function" && Boolean(element.closest("[data-drawing-ui]"));
+    };
+    const onViewportPointerDown = (event: PointerEvent) => {
+      if ((event.button === 0 || event.pointerType === "touch") && !isDrawingUi(event.target)) {
+        pointerStart = { x: event.clientX, y: event.clientY };
+      }
+    };
+    const onViewportPointerMove = (event: PointerEvent) => {
+      if (!pointerStart || isDrawingUi(event.target)) return;
+      if (event.buttons === 0 && event.pointerType !== "touch") return;
+      if (Math.hypot(event.clientX - pointerStart.x, event.clientY - pointerStart.y) < 2) return;
+      pointerStart = null;
+      controller.noteUserViewportInteraction();
+    };
+    const onViewportPointerUp = () => { pointerStart = null; };
+    const onViewportWheel = (event: WheelEvent) => {
+      if (!isDrawingUi(event.target)) controller.noteUserViewportInteraction();
+    };
+    host.addEventListener("pointerdown", onViewportPointerDown);
+    host.addEventListener("pointermove", onViewportPointerMove);
+    host.addEventListener("pointerup", onViewportPointerUp);
+    host.addEventListener("pointercancel", onViewportPointerUp);
+    host.addEventListener("wheel", onViewportWheel);
 
     // Restore persisted indicator instances (colors + params) saved with the workspace.
     for (const inst of instances) controller.addIndicator(inst);
@@ -670,6 +708,11 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       chartGenerationRef.current++;
       pendingIndicatorHydrationRef.current.clear();
       off(); offLink(); offHistoryReady(); offCrosshair(); ro.disconnect();
+      host.removeEventListener("pointerdown", onViewportPointerDown);
+      host.removeEventListener("pointermove", onViewportPointerMove);
+      host.removeEventListener("pointerup", onViewportPointerUp);
+      host.removeEventListener("pointercancel", onViewportPointerUp);
+      host.removeEventListener("wheel", onViewportWheel);
       timeScale.unsubscribeVisibleLogicalRangeChange(clampRight);
       // Cancel any rAF-batched legend/selection recompute still pending from
       // the schedulers above so it doesn't fire after this chart unmounts.

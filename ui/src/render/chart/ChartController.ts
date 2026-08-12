@@ -26,7 +26,19 @@ export interface IndicatorController extends IndicatorReader { reset(instanceId:
 export interface CommandSender { sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown }> }
 
 export interface ChartConfig { symbol: string; timeframe: string }
-interface Deps { bars: BarReader; indicators: IndicatorController; commands: CommandSender; onIndicatorSubscribed?: () => void }
+export type ManagedViewportMode = "historical" | "live" | "futureDetached";
+interface Deps {
+  bars: BarReader;
+  indicators: IndicatorController;
+  commands: CommandSender;
+  onIndicatorSubscribed?: () => void;
+  // ChartPanel owns this intent because only its input handlers know whether a
+  // range change came from the user. Series updates and range restoration must
+  // never infer it; the controller only switches to live when it intentionally
+  // follows the boundary or the user explicitly jumps live.
+  viewportMode?: () => ManagedViewportMode;
+  setViewportMode?: (mode: ManagedViewportMode) => void;
+}
 
 // LWC wants seconds (UTCTimestamp); our bucketStart is an ISO string.
 const toLwcTime = (bucketStart: string): number => Math.floor(Date.parse(bucketStart) / 1000);
@@ -39,8 +51,6 @@ export const LEFT_PAD_BARS = 0;
 // Stretch factor a "collapsed" sub-pane (e.g. MACD) is pinned to — small enough to
 // read as a thin strip but non-zero so LWC never treats the pane as empty/removable.
 export const COLLAPSED_STRETCH = 0.06;
-
-type ManagedViewportMode = "historical" | "live" | "futureDetached";
 
 export class ChartController {
   private candle!: LwcSeries;
@@ -226,7 +236,7 @@ export class ChartController {
         this.volume.update(toVolume(bars[i], this.palette));
       }
       if (beforeScrollPosition !== null) {
-        const mode = classifyManagedViewport(beforeScrollPosition);
+        const mode = this.managedViewportMode(beforeScrollPosition);
         if (mode === "historical") {
           this.pendingBoundaryFollowMs = null;
           if (beforeLogical) this.facade.setVisibleLogicalRange(beforeLogical);
@@ -270,6 +280,7 @@ export class ChartController {
       ? this.facade.getScrollPosition() : null;
     const oldLastLogical = this.lastAppliedCount - 1;
     const oldTailBucket = this.lastTailBucket;
+    const pendingReplacement = replacedPendingSlot(this.displayedBars, bars);
     const wasFollowingLive = oldLastLogical >= 0
       && beforeLogical !== null
       && beforeLogical.to >= oldLastLogical;
@@ -283,7 +294,14 @@ export class ChartController {
       elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
     });
     if (bars.length > 0) {
-      if (!managedFollow) {
+      if (pendingReplacement && managedFollow) {
+        // A raw bar replacing whitespace at an existing timestamp changes only
+        // the contents of that slot. Keep the viewport exactly where it was;
+        // the next clock boundary owns the next follow decision.
+        this.pendingBoundaryFollowMs = null;
+        if (beforeLogical) this.facade.setVisibleLogicalRange(beforeLogical);
+        else if (beforeTime) this.facade.setVisibleRange(beforeTime);
+      } else if (!managedFollow) {
         if (wasFollowingLive) {
           // setData can change the logical right offset even when the latest bar
           // was visible. Restore the resting live position without resetting zoom.
@@ -304,10 +322,10 @@ export class ChartController {
       } else {
         const mode = this.lastAppliedCount === 0
           ? null
-          : classifyManagedViewport(beforeScrollPosition!);
+          : this.managedViewportMode(beforeScrollPosition!);
         if (mode === null) {
           this.pendingBoundaryFollowMs = null;
-          this.facade.scrollToRealTime();
+          this.scrollToLive();
         } else if (mode === "live") {
           this.followAtBoundaryOrDefer(bars[bars.length - 1].bucketStart, nowMs, beforeLogical);
         } else if (mode === "historical") {
@@ -366,7 +384,7 @@ export class ChartController {
     const followAtMs = Date.parse(bucketStart);
     if (!Number.isFinite(followAtMs) || nowMs >= followAtMs) {
       this.pendingBoundaryFollowMs = null;
-      this.facade.scrollToRealTime();
+      this.scrollToLive();
       return;
     }
     // Data remains exchange-time authoritative and is already painted. Only the
@@ -379,10 +397,26 @@ export class ChartController {
   private reconcilePendingBoundaryFollow(nowMs: number): void {
     if (this.pendingBoundaryFollowMs === null || nowMs < this.pendingBoundaryFollowMs) return;
     this.pendingBoundaryFollowMs = null;
-    if (usesBoundaryManagedFollow(this.config.timeframe)
-      && classifyManagedViewport(this.facade.getScrollPosition()) === "live") {
-      this.facade.scrollToRealTime();
+    const stillEligible = this.deps.viewportMode
+      ? true // explicit panel input cancels pending follow through noteUserViewportInteraction()
+      : this.managedViewportMode(this.facade.getScrollPosition()) === "live";
+    if (usesBoundaryManagedFollow(this.config.timeframe) && stillEligible) {
+      this.scrollToLive();
     }
+  }
+
+  private managedViewportMode(scrollPosition: number): ManagedViewportMode {
+    return this.deps.viewportMode?.() ?? classifyManagedViewport(scrollPosition);
+  }
+
+  private setViewportMode(mode: ManagedViewportMode): void {
+    this.deps.setViewportMode?.(mode);
+  }
+
+  private scrollToLive(): void {
+    this.pendingBoundaryFollowMs = null;
+    this.setViewportMode("live");
+    this.facade.scrollToRealTime();
   }
 
   private rememberRaw(bars: Bar[]): void {
@@ -836,8 +870,14 @@ export class ChartController {
   }
 
   resize(w: number, h: number): void { this.facade.resize(w, h); }
-  jumpToLive(): void { this.pendingBoundaryFollowMs = null; this.facade.scrollToRealTime(); }
-  resetZoom(): void { this.facade.resetTimeScale(); this.facade.resetPriceScale(); }
+  noteUserViewportInteraction(): void {
+    if (!usesBoundaryManagedFollow(this.config.timeframe)) return;
+    const mode = classifyManagedViewport(this.facade.getScrollPosition());
+    this.setViewportMode(mode);
+    if (mode !== "live") this.pendingBoundaryFollowMs = null;
+  }
+  jumpToLive(): void { this.scrollToLive(); }
+  resetZoom(): void { this.setViewportMode("live"); this.facade.resetTimeScale(); this.facade.resetPriceScale(); }
   dispose(): void {
     this.pendingBoundaryFollowMs = null;
     for (const id of [...this.indicators.keys()]) this.removeIndicator(id);
@@ -893,7 +933,7 @@ export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number): DisplayBar[
 
   const addGap = (base: Bar, fromMs: number, limitMs: number) => {
     for (let ms = fromMs + 10_000; ms < limitMs; ms += 10_000) {
-      if (sessionAt(ms) === "closed") continue;
+      if (sessionAt(ms) === "closed") break;
       const pending = ms === current;
       out.push({ ...base, bucketStart: new Date(ms).toISOString(), o: base.c, h: base.c, l: base.c, c: base.c, v: 0,
         inProgress: false, ...(pending ? { pending: true } : { synthetic: true }) });
@@ -912,6 +952,11 @@ export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number): DisplayBar[
   }
   if (previous) addGap(previous, Date.parse(previous.bucketStart), current + 10_000);
   return out;
+}
+
+function replacedPendingSlot(previous: readonly DisplayBar[], next: readonly DisplayBar[]): boolean {
+  const pending = new Set(previous.filter((bar) => bar.pending).map((bar) => bar.bucketStart));
+  return next.some((bar) => pending.has(bar.bucketStart) && !bar.pending && !bar.synthetic);
 }
 
 // One band per contiguous run of same-session bars, with every edge pinned to a

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   ChartController, LEFT_PAD_BARS, bandsFromBars, fillEmptyTenSecondSlots,
-  type BarReader, type IndicatorController, type CommandSender,
+  type BarReader, type IndicatorController, type CommandSender, type ManagedViewportMode,
 } from "./ChartController";
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import { LIGHT, DARK } from "../palette";
@@ -9,16 +9,29 @@ import type { Bar } from "../../wire/contract";
 import { withDefaultParams } from "./indicatorSeries";
 import type { Band } from "./sessions";
 
-function fakeSeries(): LwcSeries & { calls: string[]; updates: unknown[]; setDataCalls: unknown[][]; orderCalls: number[]; optionCalls: unknown[] } {
+function fakeSeries(onAppend?: () => void): LwcSeries & { calls: string[]; updates: unknown[]; setDataCalls: unknown[][]; orderCalls: number[]; optionCalls: unknown[] } {
   const calls: string[] = [];
   const updates: unknown[] = [];
   const setDataCalls: unknown[][] = [];
   const orderCalls: number[] = [];
   const optionCalls: unknown[] = [];
+  let lastTime = -Infinity;
+  const timeOf = (value: unknown): number | null => {
+    const time = (value as { time?: unknown } | null)?.time;
+    return typeof time === "number" && Number.isFinite(time) ? time : null;
+  };
   return {
     calls, updates, setDataCalls, orderCalls, optionCalls,
-    setData: (data) => { calls.push("setData"); setDataCalls.push(data as unknown[]); },
-    update: (bar) => { calls.push("update"); updates.push(bar); },
+    setData: (data) => {
+      calls.push("setData");
+      setDataCalls.push(data as unknown[]);
+      lastTime = timeOf(data[data.length - 1]) ?? -Infinity;
+    },
+    update: (bar) => {
+      const time = timeOf(bar);
+      if (time !== null && time > lastTime) { onAppend?.(); lastTime = time; }
+      calls.push("update"); updates.push(bar);
+    },
     applyOptions: (o) => { calls.push("applyOptions"); optionCalls.push(o); },
     setSeriesOrder: (order) => { calls.push("setSeriesOrder"); orderCalls.push(order); },
   };
@@ -30,6 +43,7 @@ function fakeFacade() {
   const stretchFactors = new Map<number, number>();
   const setVisibleRangeCalls: Array<{ from: number; to: number }> = [];
   const setVisibleLogicalRangeCalls: Array<{ from: number; to: number }> = [];
+  const scroll = { value: 0 };
   const facade: ChartApiFacade & { created: typeof created; scrolls: number; resets: number; priceResets: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins }
     & { mainKind: string; screenshots: number; crosshairCb: ((l: number | null) => void) | null }
     & { watermark: string | null; lastOptions: unknown; stretchFactors: typeof stretchFactors }
@@ -38,8 +52,8 @@ function fakeFacade() {
     created, scrolls: 0, resets: 0, priceResets: 0, bands: 0, lastBands: [], scaleMargins,
     mainKind: "", screenshots: 0, crosshairCb: null,
     watermark: null, lastOptions: null, stretchFactors,
-    visibleRange: null, setVisibleRangeCalls, visibleLogicalRange: null, setVisibleLogicalRangeCalls, scrollPosition: 0,
-    setMainSeries: (kind, o) => { const s = fakeSeries(); created.push({ kind, pane: 0, options: o, series: s }); facade.mainKind = kind; return s; },
+    visibleRange: null, setVisibleRangeCalls, visibleLogicalRange: null, setVisibleLogicalRangeCalls,
+    setMainSeries: (kind, o) => { const s = fakeSeries(() => { scroll.value--; }); created.push({ kind, pane: 0, options: o, series: s }); facade.mainKind = kind; return s; },
     takeScreenshot: () => { facade.screenshots++; return {} as unknown as HTMLCanvasElement; },
     subscribeCrosshairMove: (cb) => { facade.crosshairCb = cb; return () => { facade.crosshairCb = null; }; },
     paneHeights: () => [400, 120],
@@ -57,8 +71,10 @@ function fakeFacade() {
     coordinateToLogical: () => 0,
     coordinateToPrice: () => 0,
     setPanZoomEnabled: () => {},
-    scrollToRealTime: () => { facade.scrolls++; },
-    getScrollPosition: () => facade.scrollPosition,
+    scrollToRealTime: () => { facade.scrolls++; scroll.value = 4; },
+    get scrollPosition() { return scroll.value; },
+    set scrollPosition(value: number) { scroll.value = value; },
+    getScrollPosition: () => scroll.value,
     resetTimeScale: () => { facade.resets++; },
     resetPriceScale: () => { facade.priceResets++; },
     getVisibleRange: () => facade.visibleRange,
@@ -127,6 +143,18 @@ const make10s = (reader: BarReader, cmd = commandSpy()) => {
   ctrl.mount();
   return { facade, ctrl, cmd };
 };
+const make10sWithViewport = (reader: BarReader) => {
+  const facade = fakeFacade();
+  const viewport = { mode: "live" as ManagedViewportMode };
+  const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" },
+    {
+      bars: reader, indicators: emptyIndicators, commands: commandSpy(),
+      viewportMode: () => viewport.mode,
+      setViewportMode: (mode) => { viewport.mode = mode; },
+    });
+  ctrl.mount();
+  return { facade, ctrl, viewport };
+};
 
 describe("ChartController", () => {
   it("fills only the active 10s session with marked flat display bars", () => {
@@ -135,6 +163,15 @@ describe("ChartController", () => {
     expect(filled.map((b) => [b.bucketStart, b.o, b.h, b.l, b.c, b.v, b.synthetic])).toEqual([
       ["2026-07-06T23:59:40Z", 10, 10, 10, 10, 100, undefined],
       ["2026-07-06T23:59:50.000Z", 10, 10, 10, 10, 0, true],
+    ]);
+  });
+
+  it("stops gap filling at the closed-session boundary", () => {
+    const real = { ...bar("2026-07-06T23:59:40Z", 10), timeframe: "10s" };
+    const filled = fillEmptyTenSecondSlots([real], Date.parse("2026-07-07T13:30:20Z"));
+    expect(filled.map((b) => [b.bucketStart, b.synthetic])).toEqual([
+      ["2026-07-06T23:59:40Z", undefined],
+      ["2026-07-06T23:59:50.000Z", true],
     ]);
   });
 
@@ -180,6 +217,69 @@ describe("ChartController", () => {
     ]);
   });
 
+  it("keeps exactly four live-padding bars through pending and real rollovers", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
+    const { facade, ctrl } = make10sWithViewport(reader);
+    ctrl.sync(base);
+    const initialScrolls = facade.scrolls;
+    expect(facade.scrollPosition).toBe(4);
+
+    ctrl.sync(base + 10_000);
+    expect(facade.scrollPosition).toBe(4);
+    expect(facade.scrolls).toBe(initialScrolls + 1);
+
+    reader.set([
+      tenSecondBar(new Date(base).toISOString(), 10),
+      tenSecondBar(new Date(base + 10_000).toISOString(), 12, true),
+    ]);
+    ctrl.sync(base + 10_000);
+    expect(facade.scrollPosition).toBe(4);
+    expect(facade.scrolls).toBe(initialScrolls + 1);
+
+    ctrl.sync(base + 20_000);
+    expect(facade.scrollPosition).toBe(4);
+    expect(facade.scrolls).toBe(initialScrolls + 2);
+  });
+
+  it("preserves a user-panned history viewport through multiple rollovers", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const { facade, ctrl } = make10sWithViewport(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
+    ctrl.sync(base);
+    facade.scrollPosition = -2;
+    facade.visibleLogicalRange = { from: -12, to: 0 };
+    ctrl.noteUserViewportInteraction();
+    const scrollsBefore = facade.scrolls;
+
+    ctrl.sync(base + 10_000);
+    ctrl.sync(base + 20_000);
+    ctrl.sync(base + 30_000);
+
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls.length).toBeGreaterThan(0);
+  });
+
+  it("consumes detached future space and resumes live follow at four bars", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const { facade, ctrl } = make10sWithViewport(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
+    ctrl.sync(base);
+    facade.scrollPosition = 8;
+    facade.visibleLogicalRange = { from: -2, to: 5 };
+    ctrl.noteUserViewportInteraction();
+    const scrollsBefore = facade.scrolls;
+
+    ctrl.sync(base + 10_000);
+    ctrl.sync(base + 20_000);
+    ctrl.sync(base + 30_000);
+    ctrl.sync(base + 40_000);
+    expect(facade.scrollPosition).toBe(4);
+    expect(facade.scrolls).toBe(scrollsBefore);
+
+    ctrl.sync(base + 50_000);
+    expect(facade.scrollPosition).toBe(4);
+    expect(facade.scrolls).toBe(scrollsBefore + 1);
+  });
+
   it("replaces current-bucket whitespace with the first real update without rebuilding", () => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
@@ -198,6 +298,28 @@ describe("ChartController", () => {
       time: (base + 10_000) / 1000, value: 100, color: LIGHT.volUp,
     });
     expect(ctrl.displayBars().at(-1)?.pending).toBeUndefined();
+  });
+
+  it("does not follow when a rebuild replaces a pending slot with a real bar", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
+    const { facade, ctrl } = make10sWithViewport(reader);
+    ctrl.sync(base + 20_000);
+    const beforeLogical = { from: -8, to: 5 };
+    facade.scrollPosition = 4;
+    facade.visibleLogicalRange = beforeLogical;
+    const scrollsBefore = facade.scrolls;
+
+    reader.set([
+      tenSecondBar(new Date(base).toISOString(), 10),
+      tenSecondBar(new Date(base + 10_000).toISOString(), 11),
+      tenSecondBar(new Date(base + 20_000).toISOString(), 12, true),
+    ]);
+    ctrl.sync(base + 20_000);
+
+    expect(facade.created[0].series.setDataCalls).toHaveLength(2);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
   });
 
   it("a resumed 10s real bar replaces its placeholder and keeps earlier gaps", () => {
