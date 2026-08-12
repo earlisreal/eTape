@@ -28,6 +28,20 @@ func (d Direction) String() string {
 	return "NEUTRAL"
 }
 
+// TransactionType is the normalized OpenD ticker category used by the tape
+// classifier. Unknown values are deliberately not treated as continuous
+// trades.
+type TransactionType uint8
+
+const (
+	TransactionUnknown TransactionType = iota
+	TransactionRegular
+	TransactionOddLot
+	TransactionIntermarketSweep
+	TransactionIntermarketSweepOddLot
+	TransactionExcluded
+)
+
 // Tick is one trade print. TsMs is the exchange timestamp (authoritative for
 // bucketing); RecvTsMs is OpenD receive time, used only for latency metrics.
 type Tick struct {
@@ -38,6 +52,7 @@ type Tick struct {
 	Volume   int64
 	Turnover float64
 	Dir      Direction
+	Type     TransactionType
 	RecvTsMs int64
 }
 

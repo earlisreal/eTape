@@ -13,12 +13,12 @@ const here = dirname(fileURLToPath(import.meta.url));
 const name = process.argv[2] ?? "session-e2e";
 const url = process.env.ENGINE_WS ?? "ws://127.0.0.1:8686/ws";
 
-// Full Topic union from gen/wsmsg.ts (16 topics).
+// Subscribe to every topic in the wire contract.
 const TOPICS = [
-  "md.quote", "md.book", "md.tape", "md.bars", "md.indicator",
-  "scanner.rank", "scanner.hit", "news.item",
-  "exec.account", "exec.positions", "exec.orders", "exec.fills", "exec.status",
-  "sys.health", "sys.events", "config",
+  "md.quote", "md.book", "md.tape", "md.tape.status", "md.bars", "md.indicator",
+  "scanner.rank", "scanner.hit", "news.item", "stock.detail", "watchlist.rows",
+  "exec.account", "exec.positions", "exec.orders", "exec.fills", "exec.status", "exec.trades",
+  "sys.health", "sys.session", "sys.events", "sys.boot", "config",
 ];
 
 const snapshots: Array<{ topic: string; key?: string; payload: unknown }> = [];

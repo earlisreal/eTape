@@ -130,8 +130,16 @@ func testFrontmatterParityEnums(t *testing.T) {
 			string(wsmsg.StatusExpired), string(wsmsg.StatusBlocked), string(wsmsg.StatusReplaced),
 		},
 		"TickDirection": {string(wsmsg.DirBuy), string(wsmsg.DirSell), string(wsmsg.DirNeutral)},
-		"Broker":        {string(wsmsg.BrokerTradeZero), string(wsmsg.BrokerAlpaca), string(wsmsg.BrokerMoomoo), string(wsmsg.BrokerSim)},
-		"AckStatus":     {string(wsmsg.AckAccepted), string(wsmsg.AckBlocked)},
+		"TickTransactionType": {
+			string(wsmsg.TransactionRegular), string(wsmsg.TransactionOddLot),
+			string(wsmsg.TransactionIntermarketSweep), string(wsmsg.TransactionIntermarketSweepOdd),
+			string(wsmsg.TransactionExcluded), string(wsmsg.TransactionUnknown),
+		},
+		"SignificanceLevel": {string(wsmsg.SignificanceNone), string(wsmsg.SignificanceLarge), string(wsmsg.SignificanceExceptional)},
+		"SignificancePool":  {string(wsmsg.SignificancePoolRTH), string(wsmsg.SignificancePoolExtended)},
+		"SignificanceState": {string(wsmsg.SignificanceStateWarming), string(wsmsg.SignificanceStateActive), string(wsmsg.SignificanceStateClosed)},
+		"Broker":            {string(wsmsg.BrokerTradeZero), string(wsmsg.BrokerAlpaca), string(wsmsg.BrokerMoomoo), string(wsmsg.BrokerSim)},
+		"AckStatus":         {string(wsmsg.AckAccepted), string(wsmsg.AckBlocked)},
 		"LinkName": {
 			string(wsmsg.LinkUIEngine), string(wsmsg.LinkEngineMoomoo),
 			string(wsmsg.LinkEngineTZ), string(wsmsg.LinkEngineAlpaca),

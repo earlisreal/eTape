@@ -93,12 +93,14 @@ func TestDecodePushTicker(t *testing.T) {
 				Time:     proto.String("2026-07-02 12:33:20"),
 				Sequence: proto.Int64(7001), Timestamp: proto.Float64(1782146000.123),
 				Price: proto.Float64(309.10), Volume: proto.Int64(200), Turnover: proto.Float64(61820),
-				Dir: proto.Int32(int32(qotcommon.TickerDirection_TickerDirection_Bid)),
+				Dir:  proto.Int32(int32(qotcommon.TickerDirection_TickerDirection_Bid)),
+				Type: proto.Int32(int32(qotcommon.TickerType_TickerType_Automatch)),
 			}, {
 				Time:     proto.String("2026-07-02 12:33:20"),
 				Sequence: proto.Int64(7002), Timestamp: proto.Float64(1782146000.500),
 				Price: proto.Float64(309.05), Volume: proto.Int64(100), Turnover: proto.Float64(30905),
-				Dir: proto.Int32(int32(qotcommon.TickerDirection_TickerDirection_Ask)),
+				Dir:  proto.Int32(int32(qotcommon.TickerDirection_TickerDirection_Ask)),
+				Type: proto.Int32(int32(qotcommon.TickerType_TickerType_OddLot)),
 			}},
 		},
 	}
@@ -115,8 +117,35 @@ func TestDecodePushTicker(t *testing.T) {
 	if t0.Symbol != "US.AAPL" || t0.Seq != 7001 || t0.TsMs != 1782146000123 || t0.Dir != feed.Buy {
 		t.Fatalf("tick[0] = %+v", t0)
 	}
+	if t0.Type != feed.TransactionRegular || te.Ticks[1].Type != feed.TransactionOddLot {
+		t.Fatalf("transaction types = (%v, %v)", t0.Type, te.Ticks[1].Type)
+	}
 	if te.Ticks[1].Dir != feed.Sell {
 		t.Fatalf("tick[1].Dir = %v, want Sell", te.Ticks[1].Dir)
+	}
+}
+
+func TestDecodeTransactionType(t *testing.T) {
+	cases := []struct {
+		name string
+		in   qotcommon.TickerType
+		want feed.TransactionType
+	}{
+		{"regular", qotcommon.TickerType_TickerType_Automatch, feed.TransactionRegular},
+		{"odd lot", qotcommon.TickerType_TickerType_OddLot, feed.TransactionOddLot},
+		{"intermarket sweep", qotcommon.TickerType_TickerType_CrossMarket, feed.TransactionIntermarketSweep},
+		{"intermarket sweep odd lot", qotcommon.TickerType_TickerType_OddLotCrossMarket, feed.TransactionIntermarketSweepOddLot},
+		{"auction", qotcommon.TickerType_TickerType_Auction, feed.TransactionExcluded},
+		{"average price", qotcommon.TickerType_TickerType_AvgPrice, feed.TransactionExcluded},
+		{"unknown", qotcommon.TickerType_TickerType_Unknown, feed.TransactionUnknown},
+		{"unrecognized", qotcommon.TickerType(999), feed.TransactionUnknown},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := decodeTransactionType(int32(tc.in)); got != tc.want {
+				t.Fatalf("decodeTransactionType(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 

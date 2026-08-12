@@ -182,6 +182,7 @@ func genTicks(rng *rand.Rand, spec SymbolSpec, ps *priceState, b *bookState, ses
 			Volume:   filled,
 			Turnover: execPrice * float64(filled),
 			Dir:      dir,
+			Type:     feed.TransactionRegular,
 			RecvTsMs: tsMs,
 		}
 		seq++

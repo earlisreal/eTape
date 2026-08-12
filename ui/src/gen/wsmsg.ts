@@ -9,7 +9,7 @@
 
 // ---- topics ----
 export type Topic =
-  | "md.quote" | "md.book" | "md.tape" | "md.bars" | "md.indicator"
+  | "md.quote" | "md.book" | "md.tape" | "md.tape.status" | "md.bars" | "md.indicator"
   | "scanner.rank" | "scanner.hit"
   | "news.item"
   | "stock.detail"
@@ -27,6 +27,10 @@ export type OrderStatus =
   | "SUBMITTED" | "ACCEPTED" | "PARTIALLY_FILLED" | "FILLED"
   | "CANCELED" | "REJECTED" | "EXPIRED" | "BLOCKED" | "REPLACED";
 export type TickDirection = "BUY" | "SELL" | "NEUTRAL";
+export type TickTransactionType = "regular" | "oddLot" | "intermarketSweep" | "intermarketSweepOddLot" | "excluded" | "unknown";
+export type SignificanceLevel = "none" | "large" | "exceptional";
+export type SignificancePool = "RTH" | "EXTENDED";
+export type SignificanceState = "warming" | "active" | "closed";
 export type Broker = "tradezero" | "alpaca" | "moomoo" | "sim";
 export type AckStatus = "accepted" | "blocked";
 export type LinkName = "ui-engine" | "engine-moomoo" | "engine-tz" | "engine-alpaca";
@@ -119,7 +123,21 @@ export interface Tick {
   price: number /* float64 */;
   size: number /* int64 */;
   direction: TickDirection;
+  transactionType: TickTransactionType;
+  significance: SignificanceLevel;
   ts: string;
+}
+export interface SignificanceStatus {
+  symbol: string;
+  pool: SignificancePool;
+  baselineCount: number /* int */;
+  largeAvailable: boolean;
+  largeThreshold: number /* int64 */;
+  exceptionalAvailable: boolean;
+  exceptionalThreshold: number /* int64 */;
+  provisional: boolean;
+  full: boolean;
+  state: SignificanceState;
 }
 export interface Bar {
   symbol: string;

@@ -34,16 +34,24 @@ export function paintTape(ctx: CanvasRenderingContext2D, s: TapePaintState): voi
     const r = s.rows[i];
     const midY = top + TAPE_ROW_H / 2;
     const dir = r.direction === "BUY" ? p.up : r.direction === "SELL" ? p.down : p.neutral;
+    const exceptional = r.significance === "exceptional";
 
     // full-row tint background — market direction, not app state, hence the
     // up/down/neutral flash tokens rather than a bronze/status color.
-    ctx.fillStyle = r.direction === "BUY" ? p.flashBuy : r.direction === "SELL" ? p.flashSell : p.flashNeutral;
+    ctx.fillStyle = exceptional
+      ? r.direction === "BUY" ? p.flashBuyStrong : r.direction === "SELL" ? p.flashSellStrong : p.flashNeutralStrong
+      : r.direction === "BUY" ? p.flashBuy : r.direction === "SELL" ? p.flashSell : p.flashNeutral;
     ctx.fillRect(0, top, s.width, TAPE_ROW_H);
+    if (exceptional) {
+      ctx.fillStyle = dir;
+      ctx.fillRect(0, top, 2, TAPE_ROW_H);
+    }
 
     // FONTS.mono for ALL canvas text: the golden harness only registers IBM
     // Plex Mono, so any other family would render with a non-deterministic
     // node-canvas fallback and defeat the pixel goldens.
-    ctx.font = `${r.isBlock ? "600 " : ""}11px ${FONTS.mono}`;
+    const weight = r.significance === "exceptional" ? "700 " : r.significance === "large" ? "600 " : "";
+    ctx.font = `${weight}11px ${FONTS.mono}`;
 
     // price at full strength, left-aligned (leftmost column)
     ctx.fillStyle = dir;
@@ -59,6 +67,7 @@ export function paintTape(ctx: CanvasRenderingContext2D, s: TapePaintState): voi
       // muted color — it should read as a quieter shade of the same print),
       // right-aligned (rightmost column)
       ctx.globalAlpha = 0.65;
+      ctx.font = `11px ${FONTS.mono}`;
       ctx.fillText(r.time, columns.timeRight!, midY);
       ctx.globalAlpha = 1;
     }

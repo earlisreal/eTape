@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { Tick } from "../../wire/contract";
-import { adjustAnchor, BLOCK_THRESHOLD, buildTapeRows, liveView, type TapeSource, type TapeView } from "./tapeState";
+import { adjustAnchor, buildTapeRows, liveView, type TapeSource, type TapeView } from "./tapeState";
 
 function mkTick(i: number, over: Partial<Tick> = {}): Tick {
   return {
@@ -8,6 +8,8 @@ function mkTick(i: number, over: Partial<Tick> = {}): Tick {
     price: 3.5 + ((i % 5) - 2) * 0.01,
     size: 100 * (1 + (i % 3)), // 100 / 200 / 300
     direction: (["BUY", "SELL", "NEUTRAL"] as const)[i % 3],
+    transactionType: "regular",
+    significance: "none",
     ts: new Date(Date.UTC(2026, 6, 6, 13, 30, i)).toISOString(),
     ...over,
   };
@@ -84,12 +86,14 @@ describe("buildTapeRows", () => {
     expect(paused).toBe(false);
   });
 
-  it("flags prints >= the block threshold", () => {
-    expect(BLOCK_THRESHOLD).toBe(10_000);
-    const blocky = srcFrom([mkTick(1, { size: 12_500 }), mkTick(2, { size: 400 })]);
-    const { rows } = buildTapeRows(blocky, liveView(blocky), { symbol: "US.AAPL", minSize: 0, maxRows: 10 });
-    // newest first: seq 2 (400 shares) then seq 1 (12,500 shares)
-    expect(rows.map((r) => r.isBlock)).toEqual([false, true]);
+  it("uses the engine-supplied significance instead of reclassifying size", () => {
+    const classified = srcFrom([
+      mkTick(1, { size: 12_500, significance: "large" }),
+      mkTick(2, { size: 400, significance: "exceptional" }),
+      mkTick(3, { size: 50_000, significance: "none" }),
+    ]);
+    const { rows } = buildTapeRows(classified, liveView(classified), { symbol: "US.AAPL", minSize: 0, maxRows: 10 });
+    expect(rows.map((r) => r.significance)).toEqual(["none", "exceptional", "large"]);
   });
 
   // Task 0 (perf HUD): scanned is an additive field on the return value —

@@ -6,7 +6,7 @@
 // paused (Task 7's buildTapeRows eviction fix). The min-size input lives in a
 // settings dialog reached via a header gear (portaled into PanelFrame's ledger
 // header, beside the close button) rather than an inline control in the body.
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { PanelProps } from "./registry";
 import { useTheme } from "../ThemeProvider";
@@ -35,7 +35,13 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
   const [minSize, setMinSize] = useState<number>(
     typeof config.settings.minSize === "number" ? config.settings.minSize : 0,
   );
+  const configuredSymbol = typeof config.settings.symbol === "string" ? config.settings.symbol : "US.AAPL";
+  const [selectedSymbol, setSelectedSymbol] = useState(configuredSymbol);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const statuses = useSyncExternalStore(
+    (cb) => stores.tapeStatus.subscribe(cb),
+    () => stores.tapeStatus.getSnapshot(),
+  );
   // undefined: no PanelFrame above (body-level test) — render the gear inline.
   // null: PanelFrame is present but its actions-slot div hasn't mounted yet.
   // HTMLElement: the live portal target beside the close button.
@@ -82,6 +88,7 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
       const next = linkGroups.symbolFor(groupRef.current) ?? seedSymbol;
       if (next !== symbolRef.current) {
         symbolRef.current = next;
+        setSelectedSymbol(next);
         jumpToLive();
       }
     }
@@ -95,10 +102,12 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
 
     const seedSymbol = typeof config.settings.symbol === "string" ? config.settings.symbol : "US.AAPL";
     symbolRef.current = linkGroups.symbolFor(groupRef.current) ?? seedSymbol;
+    setSelectedSymbol(symbolRef.current);
     const offLink = linkGroups.subscribe(() => {
       const next = linkGroups.symbolFor(groupRef.current) ?? seedSymbol;
       if (next !== symbolRef.current) {
         symbolRef.current = next;
+        setSelectedSymbol(next);
         jumpToLive();
       }
     });
@@ -235,6 +244,8 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
       <canvas ref={canvasRef} style={{ display: "block", flex: 1, minHeight: 0 }} />
       {settingsOpen && (
         <TapeSettingsDialog chrome={getTvChrome(mode)} minSize={minSize}
+          symbol={selectedSymbol}
+          status={statuses[selectedSymbol]}
           onClose={() => setSettingsOpen(false)}
           onApply={(v) => { setMinSize(v); onConfigChange({ minSize: v }); }} />
       )}

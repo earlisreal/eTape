@@ -3,12 +3,11 @@
 // anchor is a (seq, generation) pair: seqs are stable while ticks stream, and
 // a generation bump (snapshot rebuild on reconnect) invalidates the anchor so
 // a stale frozen view is never rendered as if it were still meaningful.
-import type { Tick, TickDirection } from "../../wire/contract";
+import type { SignificanceLevel, Tick, TickDirection } from "../../wire/contract";
 import type { Palette } from "../palette";
 import { formatPrice, formatSize, formatTapeTime, QUOTE_DECIMALS } from "../format";
 
 export const TAPE_ROW_H = 18;
-export const BLOCK_THRESHOLD = 10_000; // shares; v1.1 fixed (see spec open items)
 
 /** What the tape needs from TapeRing (satisfied structurally; tests use plain fakes). */
 export interface TapeSource {
@@ -29,7 +28,7 @@ export interface TapeRow {
   price: string;
   size: string;
   direction: TickDirection;
-  isBlock: boolean; // raw tick size >= BLOCK_THRESHOLD (computed before formatting)
+  significance: SignificanceLevel;
 }
 
 export interface TapePaintState {
@@ -83,7 +82,7 @@ export function buildTapeRows(
     price: formatPrice(t.price, QUOTE_DECIMALS),
     size: formatSize(t.size),
     direction: t.direction,
-    isBlock: t.size >= BLOCK_THRESHOLD,
+    significance: t.significance ?? "none",
   }));
   return { rows, paused: anchorValid, scanned };
 }

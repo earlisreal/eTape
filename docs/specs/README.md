@@ -13,5 +13,6 @@ Current durable domain decisions:
 - SQLite uses single-writer batching and WAL. Journal/archive failure is visible but must not stop live market flow.
 - Orders use stable client IDs and normalized lifecycle events. Ambiguous submit outcomes require reconciliation, never blind duplicate submission.
 - Watchlist membership is authoritative engine state; row snapshots may lag membership and render placeholders.
+- Time & Sales Significant Prints are Go UI-hub annotations: separate RTH/Extended 2,000-print learning pools reset on the 20:00 ET cycle, emit low-rate `md.tape.status`, and carry `none`/`large`/`exceptional` on generated tick contracts. Minimum Trade Size is display-only.
 
 Create focused approved specifications here as `YYYY-MM-DD-short-feature.md`. After implementation, keep durable decisions current and remove obsolete proposal detail.

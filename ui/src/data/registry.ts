@@ -3,6 +3,7 @@ import { perf } from "../perf/PerfMonitor";
 import { QuoteStore } from "./QuoteStore";
 import { BookStore } from "./BookStore";
 import { TapeRing } from "./TapeRing";
+import { TapeStatusStore } from "./TapeStatusStore";
 import { BarStore } from "./BarStore";
 import { IndicatorStore } from "./IndicatorStore";
 import { HealthStore } from "./HealthStore";
@@ -23,6 +24,7 @@ export interface Stores {
   quote: QuoteStore;
   book: BookStore;
   tape: TapeRing;
+  tapeStatus: TapeStatusStore;
   bars: BarStore;
   indicators: IndicatorStore;
   health: HealthStore;
@@ -45,6 +47,7 @@ export function makeStores(): Stores {
     quote: new QuoteStore(),
     book: new BookStore(),
     tape: new TapeRing(),
+    tapeStatus: new TapeStatusStore(),
     bars: new BarStore(),
     indicators: new IndicatorStore(),
     health: new HealthStore(),
@@ -71,6 +74,7 @@ export function routeToStore(stores: Stores, m: SnapshotMsg | DeltaMsg): void {
       perf.countTicks((m.payload as Tick[]).length); // no-op while perf is disabled (the default)
       stores.tape.apply(m);
       return;
+    case "md.tape.status": stores.tapeStatus.apply(m); return;
     case "md.bars": stores.bars.apply(m); return;
     case "md.indicator": stores.indicators.apply(m); return;
     case "scanner.rank":

@@ -46,7 +46,7 @@ packages:
 
       // ---- topics ----
       export type Topic =
-        | "md.quote" | "md.book" | "md.tape" | "md.bars" | "md.indicator"
+        | "md.quote" | "md.book" | "md.tape" | "md.tape.status" | "md.bars" | "md.indicator"
         | "scanner.rank" | "scanner.hit"
         | "news.item"
         | "stock.detail"
@@ -64,6 +64,10 @@ packages:
         | "SUBMITTED" | "ACCEPTED" | "PARTIALLY_FILLED" | "FILLED"
         | "CANCELED" | "REJECTED" | "EXPIRED" | "BLOCKED" | "REPLACED";
       export type TickDirection = "BUY" | "SELL" | "NEUTRAL";
+      export type TickTransactionType = "regular" | "oddLot" | "intermarketSweep" | "intermarketSweepOddLot" | "excluded" | "unknown";
+      export type SignificanceLevel = "none" | "large" | "exceptional";
+      export type SignificancePool = "RTH" | "EXTENDED";
+      export type SignificanceState = "warming" | "active" | "closed";
       export type Broker = "tradezero" | "alpaca" | "moomoo" | "sim";
       export type AckStatus = "accepted" | "blocked";
       export type LinkName = "ui-engine" | "engine-moomoo" | "engine-tz" | "engine-alpaca";

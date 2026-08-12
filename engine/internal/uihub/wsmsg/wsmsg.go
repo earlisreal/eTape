@@ -10,11 +10,12 @@ import "encoding/json"
 type Topic string
 
 const (
-	TopicQuote     Topic = "md.quote"
-	TopicBook      Topic = "md.book"
-	TopicTape      Topic = "md.tape"
-	TopicBars      Topic = "md.bars"
-	TopicIndicator Topic = "md.indicator"
+	TopicQuote      Topic = "md.quote"
+	TopicBook       Topic = "md.book"
+	TopicTape       Topic = "md.tape"
+	TopicTapeStatus Topic = "md.tape.status"
+	TopicBars       Topic = "md.bars"
+	TopicIndicator  Topic = "md.indicator"
 
 	TopicScannerRank   Topic = "scanner.rank"
 	TopicScannerHit    Topic = "scanner.hit"
@@ -38,7 +39,7 @@ const (
 
 // AllTopics is the set a client may subscribe to (server-side allow-list).
 var AllTopics = map[Topic]bool{
-	TopicQuote: true, TopicBook: true, TopicTape: true, TopicBars: true, TopicIndicator: true,
+	TopicQuote: true, TopicBook: true, TopicTape: true, TopicTapeStatus: true, TopicBars: true, TopicIndicator: true,
 	TopicScannerRank: true, TopicScannerHit: true, TopicNews: true, TopicStockDetail: true, TopicWatchlistRows: true,
 	TopicExecAccount: true, TopicExecPositions: true, TopicExecOrders: true,
 	TopicExecFills: true, TopicExecStatus: true, TopicExecTrades: true,
@@ -103,6 +104,43 @@ const (
 	DirBuy     TickDirection = "BUY"
 	DirSell    TickDirection = "SELL"
 	DirNeutral TickDirection = "NEUTRAL"
+)
+
+// TickTransactionType is the normalized transaction category retained from
+// the feed. It describes scoring eligibility, not participant identity.
+type TickTransactionType string
+
+const (
+	TransactionRegular             TickTransactionType = "regular"
+	TransactionOddLot              TickTransactionType = "oddLot"
+	TransactionIntermarketSweep    TickTransactionType = "intermarketSweep"
+	TransactionIntermarketSweepOdd TickTransactionType = "intermarketSweepOddLot"
+	TransactionExcluded            TickTransactionType = "excluded"
+	TransactionUnknown             TickTransactionType = "unknown"
+)
+
+// SignificanceLevel is the engine-stamped adaptive share-size emphasis.
+type SignificanceLevel string
+
+const (
+	SignificanceNone        SignificanceLevel = "none"
+	SignificanceLarge       SignificanceLevel = "large"
+	SignificanceExceptional SignificanceLevel = "exceptional"
+)
+
+type SignificancePool string
+
+const (
+	SignificancePoolRTH      SignificancePool = "RTH"
+	SignificancePoolExtended SignificancePool = "EXTENDED"
+)
+
+type SignificanceState string
+
+const (
+	SignificanceStateWarming SignificanceState = "warming"
+	SignificanceStateActive  SignificanceState = "active"
+	SignificanceStateClosed  SignificanceState = "closed"
 )
 
 type Broker string

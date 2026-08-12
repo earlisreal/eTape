@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -145,6 +146,12 @@ func (b *backfill) recentTicks(ctx context.Context, symbol string, n int) ([]fee
 	for _, t := range resp.GetS2C().GetTickerList() {
 		ticks = append(ticks, decodeTicker(symbol, t))
 	}
+	sort.SliceStable(ticks, func(i, j int) bool {
+		if ticks[i].TsMs != ticks[j].TsMs {
+			return ticks[i].TsMs < ticks[j].TsMs
+		}
+		return ticks[i].Seq < ticks[j].Seq
+	})
 	return ticks, nil
 }
 

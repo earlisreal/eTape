@@ -125,7 +125,7 @@ export const PANELS: Record<string, PanelDef> = {
   },
   "tape": {
     component: TapePanel,
-    topics: ["md.tape"],
+    topics: ["md.tape", "md.tape.status"],
     title: "Time & Sales",
     glyph: "⋮⋮",
     description: "Live prints, buy/sell colored",

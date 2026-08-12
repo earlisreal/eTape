@@ -30,6 +30,9 @@ export interface Palette {
   flashBuy: string;     // last-trade flash row fill at full strength (painter decays via globalAlpha)
   flashSell: string;
   flashNeutral: string;
+  flashBuyStrong: string;     // exceptional-print row fill
+  flashSellStrong: string;
+  flashNeutralStrong: string;
   orderMark: string;    // display-only working-order marks on the ladder
   // ET session shading (rgba, low alpha — drawn behind bars)
   sessionPre: string;
@@ -69,6 +72,7 @@ export const LIGHT: Palette = {
   neutral: "#6A7280",
   depthBid: "rgba(23,122,88,0.13)", depthAsk: "rgba(194,51,77,0.11)",
   flashBuy: "rgba(23,122,88,0.20)", flashSell: "rgba(194,51,77,0.20)", flashNeutral: "rgba(106,114,128,0.16)",
+  flashBuyStrong: "rgba(23,122,88,0.34)", flashSellStrong: "rgba(194,51,77,0.34)", flashNeutralStrong: "rgba(106,114,128,0.28)",
   orderMark: "#9A6A1B",
   sessionPre: "rgba(154,106,27,0.05)", sessionRth: "rgba(0,0,0,0)",
   sessionPost: "rgba(106,114,128,0.06)", sessionClosed: "rgba(106,114,128,0.10)",
@@ -88,6 +92,7 @@ export const DARK: Palette = {
   neutral: "#9A9385",
   depthBid: "rgba(53,184,136,0.16)", depthAsk: "rgba(229,99,122,0.14)",
   flashBuy: "rgba(53,184,136,0.24)", flashSell: "rgba(229,99,122,0.24)", flashNeutral: "rgba(154,147,133,0.18)",
+  flashBuyStrong: "rgba(53,184,136,0.38)", flashSellStrong: "rgba(229,99,122,0.38)", flashNeutralStrong: "rgba(154,147,133,0.30)",
   orderMark: "#C79A4B",
   sessionPre: "rgba(199,154,75,0.07)", sessionRth: "rgba(0,0,0,0)",
   sessionPost: "rgba(154,147,133,0.07)", sessionClosed: "rgba(154,147,133,0.12)",

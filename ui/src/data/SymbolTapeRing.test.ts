@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import { SymbolTapeRing } from "./TapeRing";
 import type { SnapshotMsg, DeltaMsg, Tick } from "../wire/contract";
 
-const tick = (price: number): Tick => ({ symbol: "US.AAPL", price, size: 100, direction: "BUY", ts: `t${price}` });
+const tick = (price: number): Tick => ({ symbol: "US.AAPL", price, size: 100, direction: "BUY", transactionType: "regular", significance: "none", ts: `t${price}` });
 const snap = (ticks: Tick[]): SnapshotMsg => ({ kind: "snapshot", topic: "md.tape", key: "US.AAPL", payload: ticks });
 const delta = (ticks: Tick[]): DeltaMsg => ({ kind: "delta", topic: "md.tape", key: "US.AAPL", payload: ticks });
 
@@ -48,7 +48,7 @@ describe("SymbolTapeRing", () => {
   describe("sequence tracking (Plan 3 pause anchoring)", () => {
     // Named to avoid shadowing the file's existing top-level snapshot helper.
     const seqTick = (n: number): Tick =>
-      ({ symbol: "US.AAPL", price: 3.5, size: n, direction: "BUY", ts: `2026-07-06T13:30:0${n % 10}Z` });
+      ({ symbol: "US.AAPL", price: 3.5, size: n, direction: "BUY", transactionType: "regular", significance: "none", ts: `2026-07-06T13:30:0${n % 10}Z` });
     const seqSnap = (ticks: Tick[]): SnapshotMsg => ({ kind: "snapshot", topic: "md.tape", payload: ticks });
     const seqDel = (ticks: Tick[]): DeltaMsg => ({ kind: "delta", topic: "md.tape", payload: ticks });
 

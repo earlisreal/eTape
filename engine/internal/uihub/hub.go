@@ -572,6 +572,9 @@ func (h *Hub) Run(ctx context.Context) error {
 		case r := <-h.backfillDoneCh:
 			h.handleBackfillDone(r)
 		case <-mdTick.C():
+			for _, s := range h.m.advanceSignificance(h.clk.Now()) {
+				h.stageMD(s)
+			}
 			h.flushMD()
 		case <-acctTick.C():
 			h.flushAcct()

@@ -72,6 +72,51 @@ func decodeDirection(d int32) feed.Direction {
 	return feed.Neutral
 }
 
+func decodeTransactionType(t int32) feed.TransactionType {
+	switch qotcommon.TickerType(t) {
+	case qotcommon.TickerType_TickerType_Automatch:
+		return feed.TransactionRegular
+	case qotcommon.TickerType_TickerType_OddLot:
+		return feed.TransactionOddLot
+	case qotcommon.TickerType_TickerType_CrossMarket:
+		return feed.TransactionIntermarketSweep
+	case qotcommon.TickerType_TickerType_OddLotCrossMarket:
+		return feed.TransactionIntermarketSweepOddLot
+	case qotcommon.TickerType_TickerType_Unknown:
+		return feed.TransactionUnknown
+	case qotcommon.TickerType_TickerType_Late,
+		qotcommon.TickerType_TickerType_NoneAutomatch,
+		qotcommon.TickerType_TickerType_InterAutomatch,
+		qotcommon.TickerType_TickerType_InterNoneAutomatch,
+		qotcommon.TickerType_TickerType_Auction,
+		qotcommon.TickerType_TickerType_Bulk,
+		qotcommon.TickerType_TickerType_Crash,
+		qotcommon.TickerType_TickerType_BulkSold,
+		qotcommon.TickerType_TickerType_FreeOnBoard,
+		qotcommon.TickerType_TickerType_Rule127Or155,
+		qotcommon.TickerType_TickerType_Delay,
+		qotcommon.TickerType_TickerType_MarketCenterClosePrice,
+		qotcommon.TickerType_TickerType_NextDay,
+		qotcommon.TickerType_TickerType_MarketCenterOpening,
+		qotcommon.TickerType_TickerType_PriorReferencePrice,
+		qotcommon.TickerType_TickerType_MarketCenterOpenPrice,
+		qotcommon.TickerType_TickerType_Seller,
+		qotcommon.TickerType_TickerType_T,
+		qotcommon.TickerType_TickerType_ExtendedTradingHours,
+		qotcommon.TickerType_TickerType_Contingent,
+		qotcommon.TickerType_TickerType_AvgPrice,
+		qotcommon.TickerType_TickerType_OTCSold,
+		qotcommon.TickerType_TickerType_DerivativelyPriced,
+		qotcommon.TickerType_TickerType_ReOpeningPriced,
+		qotcommon.TickerType_TickerType_ClosingPriced,
+		qotcommon.TickerType_TickerType_ComprehensiveDelayPrice,
+		qotcommon.TickerType_TickerType_Overseas:
+		return feed.TransactionExcluded
+	default:
+		return feed.TransactionUnknown
+	}
+}
+
 func decodeTicker(symbol string, t *qotcommon.Ticker) feed.Tick {
 	return feed.Tick{
 		Symbol:   symbol,
@@ -81,6 +126,7 @@ func decodeTicker(symbol string, t *qotcommon.Ticker) feed.Tick {
 		Volume:   t.GetVolume(),
 		Turnover: t.GetTurnover(),
 		Dir:      decodeDirection(t.GetDir()),
+		Type:     decodeTransactionType(t.GetType()),
 		RecvTsMs: tsMs(t.GetRecvTime()),
 	}
 }

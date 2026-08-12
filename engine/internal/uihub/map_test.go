@@ -68,8 +68,8 @@ func TestMapBarTimeframeAndBucket(t *testing.T) {
 }
 
 func TestMapTickDirection(t *testing.T) {
-	w := mapTick(feed.Tick{Symbol: "US.AAPL", Price: 3.47, Volume: 10, Dir: feed.Sell, TsMs: 1_783_344_660_000})
-	if w.Direction != wsmsg.DirSell || w.Size != 10 {
+	w := mapTick(feed.Tick{Symbol: "US.AAPL", Price: 3.47, Volume: 10, Dir: feed.Sell, Type: feed.TransactionOddLot, TsMs: 1_783_344_660_000}, wsmsg.SignificanceLarge)
+	if w.Direction != wsmsg.DirSell || w.Size != 10 || w.TransactionType != wsmsg.TransactionOddLot || w.Significance != wsmsg.SignificanceLarge {
 		t.Fatalf("tick map wrong: %+v", w)
 	}
 }

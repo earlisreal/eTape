@@ -18,6 +18,8 @@
 
 - Symbols crossing OpenD use `US.<ticker>` form.
 - TICKER ticks drive time-and-sales and exchange-time-bucketed 10-second bars. K-line data drives one-minute and larger intraday bars. Daily history is fetched; weekly/monthly derive from daily.
+- OpenD `TickerType` is normalized at the feed boundary: `Automatch` is a regular continuous trade, `OddLot` an odd-lot trade, `CrossMarket` and `OddLotCrossMarket` intermarket sweeps, known auction/delayed/derived/unusual values are excluded, and unrecognized future values are unknown. The UI-hub Significant Print classifier scores only the documented eligible categories; Aggressor Direction remains the feed's liquidity-taking side, not participant identity.
+- Cached OpenD ticker seeds are decoded and ordered chronologically before entering the same normalized tick path as live pushes. The startup seed is capped at 1,000 prints.
 - Subscription and historical-K-line quotas are separate. Multiple K-line periods for one symbol share one subscription slot; code centralizes demand and quota tracking.
 - Broker adapters normalize venue payloads into `exec` domain types. Risk gates and venue arming run before adapter submission.
 - Historical requests use completed offline-NYSE-calendar horizons and persisted explored-range coverage. A complete archive therefore makes no Alpaca/Yahoo request on weekends, holidays, or unchanged completed sessions; successful provider-empty intervals are also remembered.

@@ -109,6 +109,23 @@ func dirToWire(d feed.Direction) wsmsg.TickDirection {
 	}
 }
 
+func transactionTypeToWire(t feed.TransactionType) wsmsg.TickTransactionType {
+	switch t {
+	case feed.TransactionRegular:
+		return wsmsg.TransactionRegular
+	case feed.TransactionOddLot:
+		return wsmsg.TransactionOddLot
+	case feed.TransactionIntermarketSweep:
+		return wsmsg.TransactionIntermarketSweep
+	case feed.TransactionIntermarketSweepOddLot:
+		return wsmsg.TransactionIntermarketSweepOdd
+	case feed.TransactionExcluded:
+		return wsmsg.TransactionExcluded
+	default:
+		return wsmsg.TransactionUnknown
+	}
+}
+
 func mapOrder(o exec.Order) wsmsg.Order {
 	return wsmsg.Order{
 		Venue: string(o.Venue), ID: o.ID, Symbol: o.Symbol,
@@ -181,8 +198,11 @@ func mapBook(b feed.Book) wsmsg.Book {
 	return wsmsg.Book{Symbol: b.Symbol, Bids: bids, Asks: asks, Ts: isoMs(b.TsMs)}
 }
 
-func mapTick(t feed.Tick) wsmsg.Tick {
-	return wsmsg.Tick{Symbol: t.Symbol, Price: t.Price, Size: t.Volume, Direction: dirToWire(t.Dir), Ts: isoMs(t.TsMs)}
+func mapTick(t feed.Tick, level wsmsg.SignificanceLevel) wsmsg.Tick {
+	return wsmsg.Tick{
+		Symbol: t.Symbol, Price: t.Price, Size: t.Volume, Direction: dirToWire(t.Dir),
+		TransactionType: transactionTypeToWire(t.Type), Significance: level, Ts: isoMs(t.TsMs),
+	}
 }
 
 func mapBar(b md.Bar) wsmsg.Bar {

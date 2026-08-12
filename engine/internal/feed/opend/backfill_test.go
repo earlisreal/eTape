@@ -87,15 +87,33 @@ func TestRecentTicksDecodesAndClamps(t *testing.T) {
 	m := newMockOpenD(t)
 	m.setData("US.AAPL", &qotData{ticks: []*qotcommon.Ticker{
 		{Time: proto.String("2026-07-05 09:31:00"), Sequence: proto.Int64(1), Timestamp: proto.Float64(1782146460), Price: proto.Float64(309.1),
-			Volume: proto.Int64(100), Turnover: proto.Float64(30910), Dir: proto.Int32(int32(qotcommon.TickerDirection_TickerDirection_Bid))},
+			Volume: proto.Int64(100), Turnover: proto.Float64(30910), Dir: proto.Int32(int32(qotcommon.TickerDirection_TickerDirection_Bid)),
+			Type: proto.Int32(int32(qotcommon.TickerType_TickerType_Automatch))},
 	}})
 	b := newBackfill(liveClient(t, m))
 	ticks, err := b.recentTicks(context.Background(), "US.AAPL", 5000) // clamped to 1000
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ticks) != 1 || ticks[0].Dir != feed.Buy || ticks[0].Price != 309.1 {
+	if len(ticks) != 1 || ticks[0].Dir != feed.Buy || ticks[0].Price != 309.1 || ticks[0].Type != feed.TransactionRegular {
 		t.Fatalf("ticks = %+v", ticks)
+	}
+}
+
+func TestRecentTicksReturnsChronologicalSeed(t *testing.T) {
+	m := newMockOpenD(t)
+	m.setData("US.AAPL", &qotData{ticks: []*qotcommon.Ticker{
+		{Time: proto.String("2026-07-05 09:32:00"), Sequence: proto.Int64(2), Timestamp: proto.Float64(1782146520), Price: proto.Float64(309.2),
+			Volume: proto.Int64(100), Turnover: proto.Float64(30920), Dir: proto.Int32(int32(qotcommon.TickerDirection_TickerDirection_Bid)), Type: proto.Int32(int32(qotcommon.TickerType_TickerType_Automatch))},
+		{Time: proto.String("2026-07-05 09:31:00"), Sequence: proto.Int64(1), Timestamp: proto.Float64(1782146460), Price: proto.Float64(309.1),
+			Volume: proto.Int64(100), Turnover: proto.Float64(30910), Dir: proto.Int32(int32(qotcommon.TickerDirection_TickerDirection_Bid)), Type: proto.Int32(int32(qotcommon.TickerType_TickerType_Automatch))},
+	}})
+	ticks, err := newBackfill(liveClient(t, m)).recentTicks(context.Background(), "US.AAPL", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ticks) != 2 || ticks[0].Seq != 1 || ticks[1].Seq != 2 {
+		t.Fatalf("ticks = %+v, want chronological sequence", ticks)
 	}
 }
 

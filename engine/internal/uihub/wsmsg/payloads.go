@@ -25,11 +25,26 @@ type Book struct {
 }
 
 type Tick struct {
-	Symbol    string        `json:"symbol"`
-	Price     float64       `json:"price"`
-	Size      int64         `json:"size"`
-	Direction TickDirection `json:"direction"`
-	Ts        string        `json:"ts"`
+	Symbol          string              `json:"symbol"`
+	Price           float64             `json:"price"`
+	Size            int64               `json:"size"`
+	Direction       TickDirection       `json:"direction"`
+	TransactionType TickTransactionType `json:"transactionType"`
+	Significance    SignificanceLevel   `json:"significance"`
+	Ts              string              `json:"ts"`
+}
+
+type SignificanceStatus struct {
+	Symbol               string            `json:"symbol"`
+	Pool                 SignificancePool  `json:"pool"`
+	BaselineCount        int               `json:"baselineCount"`
+	LargeAvailable       bool              `json:"largeAvailable"`
+	LargeThreshold       int64             `json:"largeThreshold"`
+	ExceptionalAvailable bool              `json:"exceptionalAvailable"`
+	ExceptionalThreshold int64             `json:"exceptionalThreshold"`
+	Provisional          bool              `json:"provisional"`
+	Full                 bool              `json:"full"`
+	State                SignificanceState `json:"state"`
 }
 
 type Bar struct {

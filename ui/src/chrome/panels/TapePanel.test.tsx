@@ -18,7 +18,7 @@ beforeEach(() => {
 });
 
 function mkTick(i: number, symbol = "US.AAPL"): Tick {
-  return { symbol, price: 3.5, size: 100 + i, direction: "BUY", ts: "2026-07-06T13:30:00Z" };
+  return { symbol, price: 3.5, size: 100 + i, direction: "BUY", transactionType: "regular", significance: "none", ts: "2026-07-06T13:30:00Z" };
 }
 
 function renderTape(width = 260) {
@@ -89,6 +89,18 @@ describe("TapePanel", () => {
     // Patch-only: AppShell merges patches, so the panel sends just the key it
     // changed (a full-settings rewrite from frozen config clobbered siblings).
     expect(onConfigChange).toHaveBeenCalledWith({ minSize: 250 });
+  });
+
+  it("shows the read-only engine significance status in settings", () => {
+    const { stores } = renderTape();
+    stores.tapeStatus.apply({ kind: "delta", topic: "md.tape.status", payload: {
+      symbol: "US.AAPL", pool: "RTH", baselineCount: 512, largeAvailable: true, largeThreshold: 1200,
+      exceptionalAvailable: false, exceptionalThreshold: 0, provisional: true, full: false, state: "active",
+    }});
+    fireEvent.click(screen.getByLabelText("tape settings"));
+    expect(screen.getByLabelText("significant print status").textContent).toContain("512 / 2,000");
+    expect(screen.getByText(/Aggressor Direction describes/)).toBeTruthy();
+    expect(screen.getByLabelText("minimum trade size")).toBeTruthy();
   });
 
   it("shows an active-filter dot on the gear once minSize is applied above 0, and clears it back at 0", () => {

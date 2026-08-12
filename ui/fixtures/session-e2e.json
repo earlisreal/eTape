@@ -130,6 +130,8 @@
           "price": 190.05,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:30:00.000Z"
         },
         {
@@ -137,6 +139,8 @@
           "price": 190.1,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:30:10.000Z"
         },
         {
@@ -144,6 +148,8 @@
           "price": 190.15,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:30:20.000Z"
         },
         {
@@ -151,6 +157,8 @@
           "price": 190.2,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:30:30.000Z"
         },
         {
@@ -158,6 +166,8 @@
           "price": 190.25,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:30:40.000Z"
         },
         {
@@ -165,6 +175,8 @@
           "price": 190.27,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:30:50.000Z"
         },
         {
@@ -172,6 +184,8 @@
           "price": 190.32,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:31:00.000Z"
         },
         {
@@ -179,6 +193,8 @@
           "price": 190.37,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:31:10.000Z"
         },
         {
@@ -186,6 +202,8 @@
           "price": 190.42,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:31:20.000Z"
         },
         {
@@ -193,6 +211,8 @@
           "price": 190.47,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:31:30.000Z"
         },
         {
@@ -200,6 +220,8 @@
           "price": 190.52,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:31:40.000Z"
         },
         {
@@ -207,6 +229,8 @@
           "price": 190.54,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:31:50.000Z"
         },
         {
@@ -214,6 +238,8 @@
           "price": 190.59,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:32:00.000Z"
         },
         {
@@ -221,6 +247,8 @@
           "price": 190.64,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:32:10.000Z"
         },
         {
@@ -228,6 +256,8 @@
           "price": 190.69,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:32:20.000Z"
         },
         {
@@ -235,6 +265,8 @@
           "price": 190.74,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:32:30.000Z"
         },
         {
@@ -242,6 +274,8 @@
           "price": 190.79,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:32:40.000Z"
         },
         {
@@ -249,6 +283,8 @@
           "price": 190.81,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:32:50.000Z"
         },
         {
@@ -256,6 +292,8 @@
           "price": 190.86,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:33:00.000Z"
         },
         {
@@ -263,6 +301,8 @@
           "price": 190.91,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:33:10.000Z"
         },
         {
@@ -270,6 +310,8 @@
           "price": 190.96,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:33:20.000Z"
         },
         {
@@ -277,6 +319,8 @@
           "price": 191.01,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:33:30.000Z"
         },
         {
@@ -284,6 +328,8 @@
           "price": 191.06,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:33:40.000Z"
         },
         {
@@ -291,6 +337,8 @@
           "price": 191.08,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:33:50.000Z"
         },
         {
@@ -298,6 +346,8 @@
           "price": 191.13,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:34:00.000Z"
         },
         {
@@ -305,6 +355,8 @@
           "price": 191.18,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:34:10.000Z"
         },
         {
@@ -312,6 +364,8 @@
           "price": 191.23,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:34:20.000Z"
         },
         {
@@ -319,6 +373,8 @@
           "price": 191.28,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:34:30.000Z"
         },
         {
@@ -326,6 +382,8 @@
           "price": 191.33,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:34:40.000Z"
         },
         {
@@ -333,6 +391,8 @@
           "price": 191.35,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:34:50.000Z"
         },
         {
@@ -340,6 +400,8 @@
           "price": 191.4,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:35:00.000Z"
         },
         {
@@ -347,6 +409,8 @@
           "price": 191.45,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:35:10.000Z"
         },
         {
@@ -354,6 +418,8 @@
           "price": 191.5,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:35:20.000Z"
         },
         {
@@ -361,6 +427,8 @@
           "price": 191.55,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:35:30.000Z"
         },
         {
@@ -368,6 +436,8 @@
           "price": 191.6,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:35:40.000Z"
         },
         {
@@ -375,6 +445,8 @@
           "price": 191.62,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:35:50.000Z"
         },
         {
@@ -382,6 +454,8 @@
           "price": 191.67,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:36:00.000Z"
         },
         {
@@ -389,6 +463,8 @@
           "price": 191.72,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:36:10.000Z"
         },
         {
@@ -396,6 +472,8 @@
           "price": 191.77,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:36:20.000Z"
         },
         {
@@ -403,6 +481,8 @@
           "price": 191.82,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:36:30.000Z"
         },
         {
@@ -410,6 +490,8 @@
           "price": 191.87,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:36:40.000Z"
         },
         {
@@ -417,6 +499,8 @@
           "price": 191.89,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:36:50.000Z"
         },
         {
@@ -424,6 +508,8 @@
           "price": 191.94,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:37:00.000Z"
         },
         {
@@ -431,6 +517,8 @@
           "price": 191.99,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:37:10.000Z"
         },
         {
@@ -438,6 +526,8 @@
           "price": 192.04,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:37:20.000Z"
         },
         {
@@ -445,6 +535,8 @@
           "price": 192.09,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:37:30.000Z"
         },
         {
@@ -452,6 +544,8 @@
           "price": 192.14,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:37:40.000Z"
         },
         {
@@ -459,6 +553,8 @@
           "price": 192.16,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:37:50.000Z"
         },
         {
@@ -466,6 +562,8 @@
           "price": 192.21,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:38:00.000Z"
         },
         {
@@ -473,6 +571,8 @@
           "price": 192.26,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:38:10.000Z"
         },
         {
@@ -480,6 +580,8 @@
           "price": 192.31,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:38:20.000Z"
         },
         {
@@ -487,6 +589,8 @@
           "price": 192.36,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:38:30.000Z"
         },
         {
@@ -494,6 +598,8 @@
           "price": 192.41,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:38:40.000Z"
         },
         {
@@ -501,6 +607,8 @@
           "price": 192.43,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:38:50.000Z"
         },
         {
@@ -508,6 +616,8 @@
           "price": 192.48,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:39:00.000Z"
         },
         {
@@ -515,6 +625,8 @@
           "price": 192.53,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:39:10.000Z"
         },
         {
@@ -522,6 +634,8 @@
           "price": 192.58,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:39:20.000Z"
         },
         {
@@ -529,6 +643,8 @@
           "price": 192.63,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:39:30.000Z"
         },
         {
@@ -536,6 +652,8 @@
           "price": 192.68,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:39:40.000Z"
         },
         {
@@ -543,6 +661,8 @@
           "price": 192.7,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:39:50.000Z"
         },
         {
@@ -550,6 +670,8 @@
           "price": 192.75,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:40:00.000Z"
         },
         {
@@ -557,6 +679,8 @@
           "price": 192.8,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:40:10.000Z"
         },
         {
@@ -564,6 +688,8 @@
           "price": 192.85,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:40:20.000Z"
         },
         {
@@ -571,6 +697,8 @@
           "price": 192.9,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:40:30.000Z"
         },
         {
@@ -578,6 +706,8 @@
           "price": 192.95,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:40:40.000Z"
         },
         {
@@ -585,6 +715,8 @@
           "price": 192.97,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:40:50.000Z"
         },
         {
@@ -592,6 +724,8 @@
           "price": 193.02,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:41:00.000Z"
         },
         {
@@ -599,6 +733,8 @@
           "price": 193.07,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:41:10.000Z"
         },
         {
@@ -606,6 +742,8 @@
           "price": 193.12,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:41:20.000Z"
         },
         {
@@ -613,6 +751,8 @@
           "price": 193.17,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:41:30.000Z"
         },
         {
@@ -620,6 +760,8 @@
           "price": 193.22,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:41:40.000Z"
         },
         {
@@ -627,6 +769,8 @@
           "price": 193.24,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:41:50.000Z"
         },
         {
@@ -634,6 +778,8 @@
           "price": 193.29,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:42:00.000Z"
         },
         {
@@ -641,6 +787,8 @@
           "price": 193.34,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:42:10.000Z"
         },
         {
@@ -648,6 +796,8 @@
           "price": 193.39,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:42:20.000Z"
         },
         {
@@ -655,6 +805,8 @@
           "price": 193.44,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:42:30.000Z"
         },
         {
@@ -662,6 +814,8 @@
           "price": 193.49,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:42:40.000Z"
         },
         {
@@ -669,6 +823,8 @@
           "price": 193.51,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:42:50.000Z"
         },
         {
@@ -676,6 +832,8 @@
           "price": 193.56,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:43:00.000Z"
         },
         {
@@ -683,6 +841,8 @@
           "price": 193.61,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:43:10.000Z"
         },
         {
@@ -690,6 +850,8 @@
           "price": 193.66,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:43:20.000Z"
         },
         {
@@ -697,6 +859,8 @@
           "price": 193.71,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:43:30.000Z"
         },
         {
@@ -704,6 +868,8 @@
           "price": 193.76,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:43:40.000Z"
         },
         {
@@ -711,6 +877,8 @@
           "price": 193.78,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:43:50.000Z"
         },
         {
@@ -718,6 +886,8 @@
           "price": 193.83,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:44:00.000Z"
         },
         {
@@ -725,6 +895,8 @@
           "price": 193.88,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:44:10.000Z"
         },
         {
@@ -732,6 +904,8 @@
           "price": 193.93,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:44:20.000Z"
         },
         {
@@ -739,6 +913,8 @@
           "price": 193.98,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:44:30.000Z"
         },
         {
@@ -746,6 +922,8 @@
           "price": 194.03,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:44:40.000Z"
         },
         {
@@ -753,6 +931,8 @@
           "price": 194.05,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:44:50.000Z"
         },
         {
@@ -760,6 +940,8 @@
           "price": 194.1,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:45:00.000Z"
         },
         {
@@ -767,6 +949,8 @@
           "price": 194.15,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:45:10.000Z"
         },
         {
@@ -774,6 +958,8 @@
           "price": 194.2,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:45:20.000Z"
         },
         {
@@ -781,6 +967,8 @@
           "price": 194.25,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:45:30.000Z"
         },
         {
@@ -788,6 +976,8 @@
           "price": 194.3,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:45:40.000Z"
         },
         {
@@ -795,6 +985,8 @@
           "price": 194.32,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:45:50.000Z"
         },
         {
@@ -802,6 +994,8 @@
           "price": 194.37,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:46:00.000Z"
         },
         {
@@ -809,6 +1003,8 @@
           "price": 194.42,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:46:10.000Z"
         },
         {
@@ -816,6 +1012,8 @@
           "price": 194.47,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:46:20.000Z"
         },
         {
@@ -823,6 +1021,8 @@
           "price": 194.52,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:46:30.000Z"
         },
         {
@@ -830,6 +1030,8 @@
           "price": 194.57,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:46:40.000Z"
         },
         {
@@ -837,6 +1039,8 @@
           "price": 194.59,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:46:50.000Z"
         },
         {
@@ -844,6 +1048,8 @@
           "price": 194.64,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:47:00.000Z"
         },
         {
@@ -851,6 +1057,8 @@
           "price": 194.69,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:47:10.000Z"
         },
         {
@@ -858,6 +1066,8 @@
           "price": 194.74,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:47:20.000Z"
         },
         {
@@ -865,6 +1075,8 @@
           "price": 194.79,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:47:30.000Z"
         },
         {
@@ -872,6 +1084,8 @@
           "price": 194.84,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:47:40.000Z"
         },
         {
@@ -879,6 +1093,8 @@
           "price": 194.86,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:47:50.000Z"
         },
         {
@@ -886,6 +1102,8 @@
           "price": 194.91,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:48:00.000Z"
         },
         {
@@ -893,6 +1111,8 @@
           "price": 194.96,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:48:10.000Z"
         },
         {
@@ -900,6 +1120,8 @@
           "price": 195.01,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:48:20.000Z"
         },
         {
@@ -907,6 +1129,8 @@
           "price": 195.06,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:48:30.000Z"
         },
         {
@@ -914,6 +1138,8 @@
           "price": 195.11,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:48:40.000Z"
         },
         {
@@ -921,6 +1147,8 @@
           "price": 195.13,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:48:50.000Z"
         },
         {
@@ -928,6 +1156,8 @@
           "price": 195.18,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:49:00.000Z"
         },
         {
@@ -935,6 +1165,8 @@
           "price": 195.23,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:49:10.000Z"
         },
         {
@@ -942,6 +1174,8 @@
           "price": 195.28,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:49:20.000Z"
         },
         {
@@ -949,6 +1183,8 @@
           "price": 195.33,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:49:30.000Z"
         },
         {
@@ -956,6 +1192,8 @@
           "price": 195.38,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:49:40.000Z"
         },
         {
@@ -963,6 +1201,8 @@
           "price": 195.4,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:49:50.000Z"
         }
       ]
@@ -975,6 +1215,8 @@
           "price": 140.05,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:30:00.000Z"
         },
         {
@@ -982,6 +1224,8 @@
           "price": 140.1,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:30:10.000Z"
         },
         {
@@ -989,6 +1233,8 @@
           "price": 140.15,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:30:20.000Z"
         },
         {
@@ -996,6 +1242,8 @@
           "price": 140.2,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:30:30.000Z"
         },
         {
@@ -1003,6 +1251,8 @@
           "price": 140.25,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:30:40.000Z"
         },
         {
@@ -1010,6 +1260,8 @@
           "price": 140.27,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:30:50.000Z"
         },
         {
@@ -1017,6 +1269,8 @@
           "price": 140.32,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:31:00.000Z"
         },
         {
@@ -1024,6 +1278,8 @@
           "price": 140.37,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:31:10.000Z"
         },
         {
@@ -1031,6 +1287,8 @@
           "price": 140.42,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:31:20.000Z"
         },
         {
@@ -1038,6 +1296,8 @@
           "price": 140.47,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:31:30.000Z"
         },
         {
@@ -1045,6 +1305,8 @@
           "price": 140.52,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:31:40.000Z"
         },
         {
@@ -1052,6 +1314,8 @@
           "price": 140.54,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:31:50.000Z"
         },
         {
@@ -1059,6 +1323,8 @@
           "price": 140.59,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:32:00.000Z"
         },
         {
@@ -1066,6 +1332,8 @@
           "price": 140.64,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:32:10.000Z"
         },
         {
@@ -1073,6 +1341,8 @@
           "price": 140.69,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:32:20.000Z"
         },
         {
@@ -1080,6 +1350,8 @@
           "price": 140.74,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:32:30.000Z"
         },
         {
@@ -1087,6 +1359,8 @@
           "price": 140.79,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:32:40.000Z"
         },
         {
@@ -1094,6 +1368,8 @@
           "price": 140.81,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:32:50.000Z"
         },
         {
@@ -1101,6 +1377,8 @@
           "price": 140.86,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:33:00.000Z"
         },
         {
@@ -1108,6 +1386,8 @@
           "price": 140.91,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:33:10.000Z"
         },
         {
@@ -1115,6 +1395,8 @@
           "price": 140.96,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:33:20.000Z"
         },
         {
@@ -1122,6 +1404,8 @@
           "price": 141.01,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:33:30.000Z"
         },
         {
@@ -1129,6 +1413,8 @@
           "price": 141.06,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:33:40.000Z"
         },
         {
@@ -1136,6 +1422,8 @@
           "price": 141.08,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:33:50.000Z"
         },
         {
@@ -1143,6 +1431,8 @@
           "price": 141.13,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:34:00.000Z"
         },
         {
@@ -1150,6 +1440,8 @@
           "price": 141.18,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:34:10.000Z"
         },
         {
@@ -1157,6 +1449,8 @@
           "price": 141.23,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:34:20.000Z"
         },
         {
@@ -1164,6 +1458,8 @@
           "price": 141.28,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:34:30.000Z"
         },
         {
@@ -1171,6 +1467,8 @@
           "price": 141.33,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:34:40.000Z"
         },
         {
@@ -1178,6 +1476,8 @@
           "price": 141.35,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:34:50.000Z"
         },
         {
@@ -1185,6 +1485,8 @@
           "price": 141.4,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:35:00.000Z"
         },
         {
@@ -1192,6 +1494,8 @@
           "price": 141.45,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:35:10.000Z"
         },
         {
@@ -1199,6 +1503,8 @@
           "price": 141.5,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:35:20.000Z"
         },
         {
@@ -1206,6 +1512,8 @@
           "price": 141.55,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:35:30.000Z"
         },
         {
@@ -1213,6 +1521,8 @@
           "price": 141.6,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:35:40.000Z"
         },
         {
@@ -1220,6 +1530,8 @@
           "price": 141.62,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:35:50.000Z"
         },
         {
@@ -1227,6 +1539,8 @@
           "price": 141.67,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:36:00.000Z"
         },
         {
@@ -1234,6 +1548,8 @@
           "price": 141.72,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:36:10.000Z"
         },
         {
@@ -1241,6 +1557,8 @@
           "price": 141.77,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:36:20.000Z"
         },
         {
@@ -1248,6 +1566,8 @@
           "price": 141.82,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:36:30.000Z"
         },
         {
@@ -1255,6 +1575,8 @@
           "price": 141.87,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:36:40.000Z"
         },
         {
@@ -1262,6 +1584,8 @@
           "price": 141.89,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:36:50.000Z"
         },
         {
@@ -1269,6 +1593,8 @@
           "price": 141.94,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:37:00.000Z"
         },
         {
@@ -1276,6 +1602,8 @@
           "price": 141.99,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:37:10.000Z"
         },
         {
@@ -1283,6 +1611,8 @@
           "price": 142.04,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:37:20.000Z"
         },
         {
@@ -1290,6 +1620,8 @@
           "price": 142.09,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:37:30.000Z"
         },
         {
@@ -1297,6 +1629,8 @@
           "price": 142.14,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:37:40.000Z"
         },
         {
@@ -1304,6 +1638,8 @@
           "price": 142.16,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:37:50.000Z"
         },
         {
@@ -1311,6 +1647,8 @@
           "price": 142.21,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:38:00.000Z"
         },
         {
@@ -1318,6 +1656,8 @@
           "price": 142.26,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:38:10.000Z"
         },
         {
@@ -1325,6 +1665,8 @@
           "price": 142.31,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:38:20.000Z"
         },
         {
@@ -1332,6 +1674,8 @@
           "price": 142.36,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:38:30.000Z"
         },
         {
@@ -1339,6 +1683,8 @@
           "price": 142.41,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:38:40.000Z"
         },
         {
@@ -1346,6 +1692,8 @@
           "price": 142.43,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:38:50.000Z"
         },
         {
@@ -1353,6 +1701,8 @@
           "price": 142.48,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:39:00.000Z"
         },
         {
@@ -1360,6 +1710,8 @@
           "price": 142.53,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:39:10.000Z"
         },
         {
@@ -1367,6 +1719,8 @@
           "price": 142.58,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:39:20.000Z"
         },
         {
@@ -1374,6 +1728,8 @@
           "price": 142.63,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:39:30.000Z"
         },
         {
@@ -1381,6 +1737,8 @@
           "price": 142.68,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:39:40.000Z"
         },
         {
@@ -1388,6 +1746,8 @@
           "price": 142.7,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:39:50.000Z"
         },
         {
@@ -1395,6 +1755,8 @@
           "price": 142.75,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:40:00.000Z"
         },
         {
@@ -1402,6 +1764,8 @@
           "price": 142.8,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:40:10.000Z"
         },
         {
@@ -1409,6 +1773,8 @@
           "price": 142.85,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:40:20.000Z"
         },
         {
@@ -1416,6 +1782,8 @@
           "price": 142.9,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:40:30.000Z"
         },
         {
@@ -1423,6 +1791,8 @@
           "price": 142.95,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:40:40.000Z"
         },
         {
@@ -1430,6 +1800,8 @@
           "price": 142.97,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:40:50.000Z"
         },
         {
@@ -1437,6 +1809,8 @@
           "price": 143.02,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:41:00.000Z"
         },
         {
@@ -1444,6 +1818,8 @@
           "price": 143.07,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:41:10.000Z"
         },
         {
@@ -1451,6 +1827,8 @@
           "price": 143.12,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:41:20.000Z"
         },
         {
@@ -1458,6 +1836,8 @@
           "price": 143.17,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:41:30.000Z"
         },
         {
@@ -1465,6 +1845,8 @@
           "price": 143.22,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:41:40.000Z"
         },
         {
@@ -1472,6 +1854,8 @@
           "price": 143.24,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:41:50.000Z"
         },
         {
@@ -1479,6 +1863,8 @@
           "price": 143.29,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:42:00.000Z"
         },
         {
@@ -1486,6 +1872,8 @@
           "price": 143.34,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:42:10.000Z"
         },
         {
@@ -1493,6 +1881,8 @@
           "price": 143.39,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:42:20.000Z"
         },
         {
@@ -1500,6 +1890,8 @@
           "price": 143.44,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:42:30.000Z"
         },
         {
@@ -1507,6 +1899,8 @@
           "price": 143.49,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:42:40.000Z"
         },
         {
@@ -1514,6 +1908,8 @@
           "price": 143.51,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:42:50.000Z"
         },
         {
@@ -1521,6 +1917,8 @@
           "price": 143.56,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:43:00.000Z"
         },
         {
@@ -1528,6 +1926,8 @@
           "price": 143.61,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:43:10.000Z"
         },
         {
@@ -1535,6 +1935,8 @@
           "price": 143.66,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:43:20.000Z"
         },
         {
@@ -1542,6 +1944,8 @@
           "price": 143.71,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:43:30.000Z"
         },
         {
@@ -1549,6 +1953,8 @@
           "price": 143.76,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:43:40.000Z"
         },
         {
@@ -1556,6 +1962,8 @@
           "price": 143.78,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:43:50.000Z"
         },
         {
@@ -1563,6 +1971,8 @@
           "price": 143.83,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:44:00.000Z"
         },
         {
@@ -1570,6 +1980,8 @@
           "price": 143.88,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:44:10.000Z"
         },
         {
@@ -1577,6 +1989,8 @@
           "price": 143.93,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:44:20.000Z"
         },
         {
@@ -1584,6 +1998,8 @@
           "price": 143.98,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:44:30.000Z"
         },
         {
@@ -1591,6 +2007,8 @@
           "price": 144.03,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:44:40.000Z"
         },
         {
@@ -1598,6 +2016,8 @@
           "price": 144.05,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:44:50.000Z"
         },
         {
@@ -1605,6 +2025,8 @@
           "price": 144.1,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:45:00.000Z"
         },
         {
@@ -1612,6 +2034,8 @@
           "price": 144.15,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:45:10.000Z"
         },
         {
@@ -1619,6 +2043,8 @@
           "price": 144.2,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:45:20.000Z"
         },
         {
@@ -1626,6 +2052,8 @@
           "price": 144.25,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:45:30.000Z"
         },
         {
@@ -1633,6 +2061,8 @@
           "price": 144.3,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:45:40.000Z"
         },
         {
@@ -1640,6 +2070,8 @@
           "price": 144.32,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:45:50.000Z"
         },
         {
@@ -1647,6 +2079,8 @@
           "price": 144.37,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:46:00.000Z"
         },
         {
@@ -1654,6 +2088,8 @@
           "price": 144.42,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:46:10.000Z"
         },
         {
@@ -1661,6 +2097,8 @@
           "price": 144.47,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:46:20.000Z"
         },
         {
@@ -1668,6 +2106,8 @@
           "price": 144.52,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:46:30.000Z"
         },
         {
@@ -1675,6 +2115,8 @@
           "price": 144.57,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:46:40.000Z"
         },
         {
@@ -1682,6 +2124,8 @@
           "price": 144.59,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:46:50.000Z"
         },
         {
@@ -1689,6 +2133,8 @@
           "price": 144.64,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:47:00.000Z"
         },
         {
@@ -1696,6 +2142,8 @@
           "price": 144.69,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:47:10.000Z"
         },
         {
@@ -1703,6 +2151,8 @@
           "price": 144.74,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:47:20.000Z"
         },
         {
@@ -1710,6 +2160,8 @@
           "price": 144.79,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:47:30.000Z"
         },
         {
@@ -1717,6 +2169,8 @@
           "price": 144.84,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:47:40.000Z"
         },
         {
@@ -1724,6 +2178,8 @@
           "price": 144.86,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:47:50.000Z"
         },
         {
@@ -1731,6 +2187,8 @@
           "price": 144.91,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:48:00.000Z"
         },
         {
@@ -1738,6 +2196,8 @@
           "price": 144.96,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:48:10.000Z"
         },
         {
@@ -1745,6 +2205,8 @@
           "price": 145.01,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:48:20.000Z"
         },
         {
@@ -1752,6 +2214,8 @@
           "price": 145.06,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:48:30.000Z"
         },
         {
@@ -1759,6 +2223,8 @@
           "price": 145.11,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:48:40.000Z"
         },
         {
@@ -1766,6 +2232,8 @@
           "price": 145.13,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:48:50.000Z"
         },
         {
@@ -1773,6 +2241,8 @@
           "price": 145.18,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:49:00.000Z"
         },
         {
@@ -1780,6 +2250,8 @@
           "price": 145.23,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:49:10.000Z"
         },
         {
@@ -1787,6 +2259,8 @@
           "price": 145.28,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:49:20.000Z"
         },
         {
@@ -1794,6 +2268,8 @@
           "price": 145.33,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:49:30.000Z"
         },
         {
@@ -1801,6 +2277,8 @@
           "price": 145.38,
           "size": 100,
           "direction": "BUY",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:49:40.000Z"
         },
         {
@@ -1808,6 +2286,8 @@
           "price": 145.4,
           "size": 100,
           "direction": "SELL",
+          "transactionType": "regular",
+          "significance": "none",
           "ts": "2026-01-02T14:49:50.000Z"
         }
       ]

@@ -4,8 +4,10 @@ import (
 	"maps"
 	"slices"
 	"sort"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/exec"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
@@ -35,7 +37,8 @@ type mirror struct {
 	// market data (keyed by symbol unless noted)
 	quotes          map[string]wsmsg.Quote
 	books           map[string]wsmsg.Book
-	tape            map[string][]wsmsg.Tick           // bounded recent ring per symbol
+	tape            map[string][]wsmsg.Tick // bounded recent ring per symbol
+	significance    significanceEngine
 	bars            map[string][]wsmsg.Bar            // key "SYMBOL:TF", sorted by bucketStart
 	indicators      map[string][]wsmsg.IndicatorPoint // key instanceId or instanceId#slot
 	marks           map[string]float64                // last price per symbol (pnl + display)
@@ -69,20 +72,21 @@ type mirror struct {
 
 func newMirror(venues []venueMeta, global wsmsg.GlobalLimitsView, tapeCap, newsCap, fillsCap, eventsCap, tradesCap int) *mirror {
 	m := &mirror{
-		global:      global,
-		quotes:      map[string]wsmsg.Quote{},
-		books:       map[string]wsmsg.Book{},
-		tape:        map[string][]wsmsg.Tick{},
-		bars:        map[string][]wsmsg.Bar{},
-		indicators:  map[string][]wsmsg.IndicatorPoint{},
-		marks:       map[string]float64{},
-		rank:        map[string]wsmsg.ScannerRankPayload{},
-		detail:      map[string]wsmsg.StockDetailPayload{},
-		accounts:    map[string]wsmsg.AccountRow{},
-		positions:   map[string]exec.Position{},
-		orders:      map[string]wsmsg.Order{},
-		venueStatus: map[string]*wsmsg.VenueStatus{},
-		tapeCap:     tapeCap, newsCap: newsCap, fillsCap: fillsCap, eventsCap: eventsCap,
+		global:       global,
+		quotes:       map[string]wsmsg.Quote{},
+		books:        map[string]wsmsg.Book{},
+		tape:         map[string][]wsmsg.Tick{},
+		significance: newSignificanceEngine(),
+		bars:         map[string][]wsmsg.Bar{},
+		indicators:   map[string][]wsmsg.IndicatorPoint{},
+		marks:        map[string]float64{},
+		rank:         map[string]wsmsg.ScannerRankPayload{},
+		detail:       map[string]wsmsg.StockDetailPayload{},
+		accounts:     map[string]wsmsg.AccountRow{},
+		positions:    map[string]exec.Position{},
+		orders:       map[string]wsmsg.Order{},
+		venueStatus:  map[string]*wsmsg.VenueStatus{},
+		tapeCap:      tapeCap, newsCap: newsCap, fillsCap: fillsCap, eventsCap: eventsCap,
 		tradesCap: tradesCap,
 	}
 	for _, v := range venues {
@@ -116,17 +120,34 @@ func (m *mirror) applyMD(u md.Update) []staged {
 		}
 		return []staged{{Topic: wsmsg.TopicBook, Payload: b}}
 	case md.TapeUpdate:
-		out := make([]wsmsg.Tick, 0, len(v.Ticks))
-		for _, t := range v.Ticks {
-			wt := mapTick(t)
+		ticks := append([]feed.Tick(nil), v.Ticks...)
+		sort.SliceStable(ticks, func(i, j int) bool {
+			if ticks[i].TsMs != ticks[j].TsMs {
+				return ticks[i].TsMs < ticks[j].TsMs
+			}
+			return ticks[i].Seq < ticks[j].Seq
+		})
+		out := make([]wsmsg.Tick, 0, len(ticks))
+		statuses := map[string]wsmsg.SignificanceStatus{}
+		for _, t := range ticks {
+			level, status := m.significance.classify(t)
+			wt := mapTick(t, level)
 			out = append(out, wt)
 			m.marks[t.Symbol] = t.Price
+			if status != nil {
+				statuses[t.Symbol] = *status
+			}
 		}
 		m.appendTape(v.Symbol, out)
 		if len(out) == 0 {
 			return nil
 		}
-		return []staged{{Topic: wsmsg.TopicTape, Payload: out}}
+		frames := []staged{{Topic: wsmsg.TopicTape, Payload: out}}
+		for _, symbol := range sortedKeysOf(statuses) {
+			status := statuses[symbol]
+			frames = append(frames, staged{Topic: wsmsg.TopicTapeStatus, Key: symbol, Payload: status})
+		}
+		return frames
 	case md.BarUpdate:
 		wb := mapBar(v.Bar)
 		m.upsertBar(wb)
@@ -170,6 +191,15 @@ func (m *mirror) applyMD(u md.Update) []staged {
 	default:
 		return nil // MismatchUpdate/ConnUpdate/ResyncedUpdate are handled by main->sys.events, not topics
 	}
+}
+
+func (m *mirror) advanceSignificance(now time.Time) []staged {
+	statuses := m.significance.advance(now)
+	out := make([]staged, 0, len(statuses))
+	for _, status := range statuses {
+		out = append(out, staged{Topic: wsmsg.TopicTapeStatus, Key: status.Symbol, Payload: status})
+	}
+	return out
 }
 
 func (m *mirror) topOfBook(symbol string) (bid, ask float64) {
@@ -383,6 +413,10 @@ func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
 		for _, s := range sortedKeysOf(m.tape) {
 			ticks := make([]wsmsg.Tick, 0, len(m.tape[s]))
 			out = append(out, staged{Topic: topic, Payload: append(ticks, m.tape[s]...)})
+		}
+	case wsmsg.TopicTapeStatus:
+		for _, status := range m.significance.snapshot() {
+			out = append(out, staged{Topic: topic, Key: status.Symbol, Payload: status})
 		}
 	case wsmsg.TopicBars:
 		for _, k := range sortedKeysOf(m.bars) {
