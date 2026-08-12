@@ -27,3 +27,13 @@ _Avoid_: Blank bar, empty placeholder, synthetic candle
 **Data Gap**:
 An interval known to lack trustworthy market data, including a confirmed feed interruption. It remains visually empty and is never represented by No-Trade Bars.
 _Avoid_: Halt, no-trade interval
+
+## Market Tape
+
+**Aggressor Direction**:
+The side inferred to have crossed the spread for a trade: buy, sell, or neutral when neither side can be assigned. It does not identify the market participant.
+_Avoid_: Buyer, seller, trade side
+
+**Significant Print**:
+A trade whose size is unusually large relative to recent comparable trades for the same symbol and trading session. Its direction describes the aggressor side, not the identity or intent of a market participant.
+_Avoid_: Big buyer, big seller, whale trade
