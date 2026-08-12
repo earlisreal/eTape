@@ -376,6 +376,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const controller = new ChartController(facade, palette, { symbol, timeframe: timeframe0 },
       {
         bars: stores.bars, indicators: stores.indicators, commands,
+        isOpenDDown: () => stores.health.getSnapshot().links.find((link) => link.link === "engine-moomoo")?.status === "down",
         viewportMode: () => viewportModeRef.current,
         setViewportMode: (mode) => { viewportModeRef.current = mode; },
       });
@@ -576,6 +577,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     let lastFillsRev = -1;
     let lastDrawingsRev = -1;
     let lastWallBucket = -1;
+    let lastOpenDStatus = "";
     let lastBoundaryTraceKey = "";
     // Dragging a pane separator (e.g. resizing the MACD sub-pane by hand) changes
     // pane heights inside LWC directly — it bumps no store revision and moves no
@@ -608,18 +610,22 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         }
         const fillsRev = stores.fills.getRev();
         const drawingsRev = stores.drawings.getRev();
+        const openDStatus = tfRef.current === "10s"
+          ? stores.health.getSnapshot().links.find((link) => link.link === "engine-moomoo")?.status ?? ""
+          : "";
         const paneSig = `${facade.paneHeights().join(",")}|${facade.priceScaleWidth()}`;
         const wallBucket = usesBoundaryManagedFollow(tfRef.current)
           ? Math.floor(stores.marketClock.nowMs() / timeframeToMs(tfRef.current as Timeframe))
           : -1;
         const changed = barsRev !== lastBarsRev || indicatorsRev !== lastIndicatorsRev || fillsRev !== lastFillsRev || drawingsRev !== lastDrawingsRev
-          || paneSig !== lastPaneSig || wallBucket !== lastWallBucket || forceRepaintRef.current;
+          || paneSig !== lastPaneSig || wallBucket !== lastWallBucket || openDStatus !== lastOpenDStatus || forceRepaintRef.current;
         lastBarsRev = barsRev;
         lastIndicatorsRev = indicatorsRev;
         lastFillsRev = fillsRev;
         lastDrawingsRev = drawingsRev;
         lastPaneSig = paneSig;
         lastWallBucket = wallBucket;
+        lastOpenDStatus = openDStatus;
         forceRepaintRef.current = false;
         return changed;
       },
@@ -941,7 +947,6 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       items.push("separator");
     }
     items.push({ label: "Reset chart view", onClick: () => { controllerRef.current?.resetZoom(); forceRepaintRef.current = true; } });
-    items.push({ label: "Jump to live", onClick: () => { controllerRef.current?.jumpToLive(); forceRepaintRef.current = true; } });
     const price = facadeRef.current?.coordinateToPrice(m.y) ?? null;
     if (price !== null) items.push({ label: `Copy price ${price.toFixed(2)}`, onClick: () => void navigator.clipboard?.writeText(price.toFixed(2)) });
     items.push("separator");

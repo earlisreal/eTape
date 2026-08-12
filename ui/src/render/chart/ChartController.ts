@@ -16,7 +16,7 @@ import { uiLog } from "../../logging/logger";
 
 export interface BarReader { series(symbol: string, timeframe: string): Bar[] }
 // Display-only extension. This never enters BarStore or engine-facing paths.
-export type DisplayBar = Bar & { synthetic?: true; pending?: true };
+export type DisplayBar = Bar & { synthetic?: true; dataGap?: true };
 export interface IndicatorReader { series(instanceId: string): { timeMs: number; value: number }[] }
 // IndicatorReader plus the ability to drop a series — resetForReload uses this to
 // wipe the previous symbol's points instead of leaving them stranded in the shared
@@ -33,11 +33,11 @@ interface Deps {
   commands: CommandSender;
   onIndicatorSubscribed?: () => void;
   // ChartPanel owns this intent because only its input handlers know whether a
-  // range change came from the user. Series updates and range restoration must
-  // never infer it; the controller only switches to live when it intentionally
-  // follows the boundary or the user explicitly jumps live.
+  // range change came from the user. This compatibility hook is used by the
+  // 1m boundary-follow path; 10s follow is derived from visible logical slots.
   viewportMode?: () => ManagedViewportMode;
   setViewportMode?: (mode: ManagedViewportMode) => void;
+  isOpenDDown?: () => boolean;
 }
 
 // LWC wants seconds (UTCTimestamp); our bucketStart is an ISO string.
@@ -67,6 +67,9 @@ export class ChartController {
   private lastRawTailBucket = "";
   private lastRawTailKey = "";
   private displayedBars: DisplayBar[] = [];
+  private noTradeSuspended = false;
+  private suspendedRawCount = 0;
+  private suspendedRawTailBucket = "";
   private indicatorApplied = new Map<string, number>(); // per-series point count applied via setData/update
   private indicatorLastKey = new Map<string, string>(); // per-series fingerprint of the last applied point, `${timeMs}|${value}`
   // per-series timeMs of the point at index (applied-1) as of the last apply — an
@@ -155,7 +158,23 @@ export class ChartController {
   sync(nowMs = Date.now()): void {
     this.daySegmentBuildsThisSync = 0;
     const bars = this.deps.bars.series(this.config.symbol, this.config.timeframe);
-    const displayBars = this.config.timeframe === "10s" ? fillEmptyTenSecondSlots(bars, nowMs) : bars;
+    const openDDown = this.deps.isOpenDDown?.() === true;
+    if (this.config.timeframe === "10s") {
+      if (openDDown) {
+        if (!this.noTradeSuspended) {
+          this.noTradeSuspended = true;
+          this.suspendedRawCount = bars.length;
+          this.suspendedRawTailBucket = bars.at(-1)?.bucketStart ?? "";
+        }
+      } else if (this.noTradeSuspended && rawFlowResumed(
+        bars, this.suspendedRawCount, this.suspendedRawTailBucket,
+      )) {
+        this.noTradeSuspended = false;
+      }
+    }
+    const displayBars = this.config.timeframe === "10s"
+      ? fillEmptyTenSecondSlots(bars, nowMs, openDDown || this.noTradeSuspended)
+      : bars;
     this.applyBars(displayBars, bars, nowMs);
     this.reconcilePendingBoundaryFollow(nowMs);
     this.displayedBars = displayBars;
@@ -178,6 +197,10 @@ export class ChartController {
       return;
     }
     if (this.config.timeframe === "10s") {
+      if (bars.length === this.lastAppliedCount && !sameDataGapSlots(this.displayedBars, bars)) {
+        this.setAllBars(bars, rawBars, nowMs);
+        return;
+      }
       const rawTailKey = rawBars.length ? keyOf(rawBars[rawBars.length - 1]) : "";
       if (rawBars.length < this.lastRawCount) {
         this.setAllBars(bars, rawBars, nowMs);
@@ -190,16 +213,16 @@ export class ChartController {
         // Only a clean suffix append can stay incremental. An insertion/front
         // growth, a revised old tail, or a delayed slot before the display tail
         // can alter interior display slots.
-        if (!previousTail || !displayTail || previousTail.bucketStart !== this.lastRawTailBucket
+        if (!previousTail || !displayTail || firstNewRaw.gap || previousTail.bucketStart !== this.lastRawTailBucket
           || keyOf(previousTail) !== this.lastRawTailKey
           || Date.parse(firstNewRaw.bucketStart) < Date.parse(displayTail.bucketStart)) {
           this.setAllBars(bars, rawBars, nowMs);
           return;
         }
-      } else if (rawTailKey !== this.lastRawTailKey && (bars.at(-1)?.synthetic || bars.at(-1)?.pending)
+      } else if (rawTailKey !== this.lastRawTailKey && bars.at(-1)?.synthetic
         && Date.parse(rawBars[rawBars.length - 1]?.bucketStart ?? "") <= bucketStartMs(nowMs, "10s")) {
-        // A corrected visible tail close carries through the synthetic/pending
-        // suffix. Future raw bars remain hidden until their boundary.
+        // A corrected visible tail close carries through the No-Trade suffix.
+        // Future raw bars remain hidden until their boundary.
         this.setAllBars(bars, rawBars, nowMs);
         return;
       }
@@ -235,7 +258,9 @@ export class ChartController {
         this.candle.update(this.mainPoint(bars[i]));
         this.volume.update(toVolume(bars[i], this.palette));
       }
-      if (beforeScrollPosition !== null) {
+      if (this.config.timeframe === "10s") {
+        this.followTenSecondAppend(oldAppliedCount, appendedCount, beforeLogical);
+      } else if (beforeScrollPosition !== null) {
         const mode = this.managedViewportMode(beforeScrollPosition);
         if (mode === "historical") {
           this.pendingBoundaryFollowMs = null;
@@ -280,7 +305,9 @@ export class ChartController {
       ? this.facade.getScrollPosition() : null;
     const oldLastLogical = this.lastAppliedCount - 1;
     const oldTailBucket = this.lastTailBucket;
-    const pendingReplacement = replacedPendingTail(this.displayedBars, bars);
+    const sameTimeSlots = sameBucketSlots(this.displayedBars, bars);
+    const confirmedDataGap = bars.some((bar) => bar.dataGap === true)
+      && !this.displayedBars.some((bar) => bar.dataGap === true);
     const wasFollowingLive = oldLastLogical >= 0
       && beforeLogical !== null
       && beforeLogical.to >= oldLastLogical;
@@ -294,13 +321,8 @@ export class ChartController {
       elapsedMs: Math.round((performance.now() - startedAt) * 10) / 10,
     });
     if (bars.length > 0) {
-      if (pendingReplacement && managedFollow) {
-        // A raw bar replacing whitespace at an existing timestamp changes only
-        // the contents of that slot. Keep the viewport exactly where it was;
-        // the next clock boundary owns the next follow decision.
-        this.pendingBoundaryFollowMs = null;
-        if (beforeLogical) this.facade.setVisibleLogicalRange(beforeLogical);
-        else if (beforeTime) this.facade.setVisibleRange(beforeTime);
+      if (this.config.timeframe === "10s") {
+        this.restoreTenSecondViewport(bars, beforeTime, beforeLogical, oldLastLogical, oldTailBucket, sameTimeSlots, confirmedDataGap);
       } else if (!managedFollow) {
         if (wasFollowingLive) {
           // setData can change the logical right offset even when the latest bar
@@ -316,7 +338,7 @@ export class ChartController {
           // mount effect only re-runs on [config.id]), so without this a new symbol
           // would silently inherit whatever scroll offset the PREVIOUS symbol was
           // left at. Reset to the default resting position instead: latest bar +
-          // RIGHT_OFFSET_BARS of padding (same position "Jump to live" restores to).
+          // RIGHT_OFFSET_BARS of padding.
           this.facade.scrollToRealTime();
         }
       } else {
@@ -335,10 +357,9 @@ export class ChartController {
           if (beforeTime) this.facade.setVisibleRange(beforeTime);
         } else {
           // The latest bar being visible does not mean the user is following live:
-          // synthetic 10s bars let them leave extra future space. Re-anchor the
-          // old logical range at the prior tail, then let only bars after that tail
-          // consume the gap. A missing tail is a generation replacement, so use the
-          // conservative timestamp fallback instead of guessing an index shift.
+          // re-anchor the old logical range at the prior tail, then let only bars
+          // after that tail consume the gap. A missing tail is a generation
+          // replacement, so use the conservative timestamp fallback.
           const oldTailIndex = findBucketIndex(bars, oldTailBucket);
           if (oldTailIndex < 0) {
             this.pendingBoundaryFollowMs = null;
@@ -373,6 +394,82 @@ export class ChartController {
     // thing all 3 reset call sites in applyBars share, so marking it here (rather
     // than once per call site) can't drift out of sync with a future 4th site.
     this.lastBarsOp = "reset";
+  }
+
+  private followTenSecondAppend(oldAppliedCount: number, appendedCount: number, beforeLogical: { from: number; to: number } | null): void {
+    if (!beforeLogical) return;
+    const oldLastLogical = oldAppliedCount - 1;
+    if (!logicalSlotVisible(oldLastLogical, beforeLogical)) {
+      this.facade.setVisibleLogicalRange(beforeLogical);
+      return;
+    }
+    // A deliberately created Future Buffer is consumed in place. Once four
+    // empty bar-widths remain, shift by the appended slots and keep the exact
+    // range width, which preserves the user's horizontal zoom.
+    if (beforeLogical.to - oldLastLogical > RIGHT_OFFSET_BARS) {
+      this.facade.setVisibleLogicalRange(beforeLogical);
+      return;
+    }
+    this.facade.setVisibleLogicalRange({
+      from: beforeLogical.from + appendedCount,
+      to: beforeLogical.to + appendedCount,
+    });
+  }
+
+  private restoreTenSecondViewport(
+    bars: readonly DisplayBar[],
+    beforeTime: { from: number; to: number } | null,
+    beforeLogical: { from: number; to: number } | null,
+    oldLastLogical: number,
+    oldTailBucket: string,
+    sameTimeSlots: boolean,
+    confirmedDataGap: boolean,
+  ): void {
+    if (oldLastLogical < 0) {
+      this.scrollToLive();
+      return;
+    }
+    if (sameTimeSlots) {
+      if (beforeLogical) this.facade.setVisibleLogicalRange(beforeLogical);
+      else if (beforeTime) this.facade.setVisibleRange(beforeTime);
+      return;
+    }
+    if (confirmedDataGap) {
+      if (beforeLogical) this.facade.setVisibleLogicalRange(beforeLogical);
+      else if (beforeTime) this.facade.setVisibleRange(beforeTime);
+      return;
+    }
+
+    const oldTailIndex = findBucketIndex(bars, oldTailBucket);
+    if (oldTailIndex < 0) {
+      // A confirmed gap can remove the provisional old tail. Timestamps are
+      // the only stable anchors left, so restore the time range verbatim.
+      if (beforeTime) this.facade.setVisibleRange(beforeTime);
+      return;
+    }
+    const indexShift = oldTailIndex - oldLastLogical;
+    const shiftedLogical = beforeLogical ? {
+      from: beforeLogical.from + indexShift,
+      to: beforeLogical.to + indexShift,
+    } : null;
+    if (!shiftedLogical) {
+      if (beforeTime) this.facade.setVisibleRange(beforeTime);
+      return;
+    }
+    if (!beforeLogical || !logicalSlotVisible(oldLastLogical, beforeLogical)) {
+      this.facade.setVisibleLogicalRange(shiftedLogical);
+      return;
+    }
+
+    const appendedCount = bars.length - 1 - oldTailIndex;
+    if (shiftedLogical.to - oldTailIndex > RIGHT_OFFSET_BARS) {
+      this.facade.setVisibleLogicalRange(shiftedLogical);
+      return;
+    }
+    this.facade.setVisibleLogicalRange({
+      from: shiftedLogical.from + appendedCount,
+      to: shiftedLogical.to + appendedCount,
+    });
   }
 
   private followAtBoundaryOrDefer(
@@ -738,6 +835,9 @@ export class ChartController {
     this.lastRawCount = 0;
     this.lastRawTailBucket = "";
     this.lastRawTailKey = "";
+    this.noTradeSuspended = false;
+    this.suspendedRawCount = 0;
+    this.suspendedRawTailBucket = "";
     this.pendingBoundaryFollowMs = null;
     this.displayedBars = [];
     this.barsMsCache = [];
@@ -760,7 +860,7 @@ export class ChartController {
     // LWC series AND its shared-store entry (keyed by instanceId, not symbol) keep the
     // OLD symbol's points drawn until the engine's fresh snapshot arrives — a stale,
     // differently-priced VWAP/EMA/SMA line then drags the shared price scale down on
-    // the next reset-view / jump-to-live (down-spike + 0-based autoscale). Clearing
+    // the next reset-view operation (down-spike + 0-based autoscale). Clearing
     // both also keeps indicatorApplied at 0 (already cleared above) so the incoming
     // snapshot takes the clean setData() branch instead of applyIndicators' continues()
     // last-point-only update.
@@ -789,7 +889,7 @@ export class ChartController {
   // Main-series data point matched to the active chart type: OHLC for candle/bar,
   // single close value for line/area (LWC line/area series read `.value`).
   private mainPoint(b: DisplayBar): object {
-    if (b.pending) return { time: toLwcTime(b.bucketStart) };
+    if (b.dataGap) return { time: toLwcTime(b.bucketStart) };
     return this.chartType === "line" || this.chartType === "area"
       ? { time: toLwcTime(b.bucketStart), value: b.c }
       : toCandle(b);
@@ -817,6 +917,9 @@ export class ChartController {
     this.lastRawCount = 0;
     this.lastRawTailBucket = "";
     this.lastRawTailKey = "";
+    this.noTradeSuspended = false;
+    this.suspendedRawCount = 0;
+    this.suspendedRawTailBucket = "";
     this.pendingBoundaryFollowMs = null;
     this.displayedBars = [];
     this.barsMsCache = [];
@@ -876,7 +979,6 @@ export class ChartController {
     this.setViewportMode(mode);
     if (mode !== "live") this.pendingBoundaryFollowMs = null;
   }
-  jumpToLive(): void { this.scrollToLive(); }
   resetZoom(): void { this.setViewportMode("live"); this.facade.resetTimeScale(); this.facade.resetPriceScale(); }
   dispose(): void {
     this.pendingBoundaryFollowMs = null;
@@ -885,7 +987,7 @@ export class ChartController {
   }
 }
 
-function keyOf(b: DisplayBar): string { return `${b.bucketStart}|${b.o}|${b.c}|${b.h}|${b.l}|${b.v}|${b.inProgress}|${b.synthetic === true}|${b.pending === true}`; }
+function keyOf(b: DisplayBar): string { return `${b.bucketStart}|${b.o}|${b.c}|${b.h}|${b.l}|${b.v}|${b.inProgress}|${b.synthetic === true}|${b.gap === true}|${b.dataGap === true}`; }
 function bareSymbol(s: string): string { return s.replace(/^US\./, ""); }
 // Whether bars[from..] is non-decreasing by bucketStart — the property update()'s
 // bar-by-bar replay depends on to never hand Lightweight Charts a time that goes
@@ -909,34 +1011,65 @@ function findBucketIndex(bars: readonly DisplayBar[], bucketStart: string): numb
   }
   return -1;
 }
+function sameBucketSlots(previous: readonly DisplayBar[], next: readonly DisplayBar[]): boolean {
+  return previous.length === next.length && previous.every((bar, i) => Date.parse(bar.bucketStart) === Date.parse(next[i].bucketStart));
+}
+function sameDataGapSlots(previous: readonly DisplayBar[], next: readonly DisplayBar[]): boolean {
+  return previous.length === next.length && previous.every((bar, i) =>
+    Date.parse(bar.bucketStart) === Date.parse(next[i].bucketStart) && bar.dataGap === next[i].dataGap);
+}
+function logicalSlotVisible(index: number, range: { from: number; to: number }): boolean {
+  return range.from <= index + 0.5 && range.to >= index - 0.5;
+}
+function rawFlowResumed(bars: readonly Bar[], count: number, tailBucket: string): boolean {
+  const tail = bars.at(-1);
+  return bars.length > count
+    || tail?.bucketStart !== tailBucket;
+}
 function toCandle(b: DisplayBar) { return { time: toLwcTime(b.bucketStart), open: b.o, high: b.h, low: b.l, close: b.c }; }
 function candleRangeOf(bars: readonly DisplayBar[]): PriceRange | null {
   let minValue = Infinity, maxValue = -Infinity;
   for (const b of bars) {
-    if (b.pending) continue;
+    if (b.dataGap) continue;
     if (b.l < minValue) minValue = b.l;
     if (b.h > maxValue) maxValue = b.h;
   }
   return minValue <= maxValue ? { minValue, maxValue } : null;
 }
 function toVolume(b: DisplayBar, p: Palette) {
-  if (b.synthetic || b.pending) return { time: toLwcTime(b.bucketStart) };
+  if (b.synthetic || b.dataGap) return { time: toLwcTime(b.bucketStart) };
   return { time: toLwcTime(b.bucketStart), value: b.v, color: b.c >= b.o ? p.volUp : p.volDown };
 }
 
-export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number): DisplayBar[] {
+export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number, openDDown = false): DisplayBar[] {
   if (bars.length === 0 || !Number.isFinite(nowMs)) return bars;
   const current = bucketStartMs(nowMs, "10s");
   const out: DisplayBar[] = [];
   const valid = bars.filter((bar) => Number.isFinite(Date.parse(bar.bucketStart)));
   let previous: Bar | undefined;
 
-  const addGap = (base: Bar, fromMs: number, limitMs: number) => {
+  const addNoTradeBars = (base: Bar, fromMs: number, limitMs: number) => {
+    if (openDDown) return;
+    const session = sessionAt(fromMs);
+    if (session === "closed") return;
+    // limitMs is the current bucket start, so only completed slots are filled.
     for (let ms = fromMs + 10_000; ms < limitMs; ms += 10_000) {
-      if (sessionAt(ms) === "closed") break;
-      const pending = ms === current;
-      out.push({ ...base, bucketStart: new Date(ms).toISOString(), o: base.c, h: base.c, l: base.c, c: base.c, v: 0,
-        inProgress: false, ...(pending ? { pending: true } : { synthetic: true }) });
+      // Do not carry yesterday's close into a new session. A new session gets
+      // No-Trade Bars only after its first real bar arrives.
+      if (sessionAt(ms) !== session) break;
+      const { gap: _gap, ...withoutGap } = base;
+      out.push({ ...withoutGap, bucketStart: new Date(ms).toISOString(), o: base.c, h: base.c, l: base.c, c: base.c, v: 0,
+        inProgress: false, synthetic: true });
+    }
+  };
+
+  const addDataGap = (base: Bar, fromMs: number, limitMs: number) => {
+    const session = sessionAt(fromMs);
+    if (session === "closed") return;
+    for (let ms = fromMs + 10_000; ms < limitMs; ms += 10_000) {
+      if (sessionAt(ms) !== session) break;
+      const { gap: _gap, ...withoutGap } = base;
+      out.push({ ...withoutGap, bucketStart: new Date(ms).toISOString(), inProgress: false, dataGap: true });
     }
   };
 
@@ -946,21 +1079,16 @@ export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number): DisplayBar[
     // reaches it. Keep that raw bar available to stores/indicators, but reveal
     // it only when this display pass reaches its boundary.
     if (realMs > current) break;
-    if (previous) addGap(previous, Date.parse(previous.bucketStart), realMs);
+    if (previous) {
+      const fromMs = Date.parse(previous.bucketStart);
+      if (real.gap) addDataGap(previous, fromMs, realMs);
+      else addNoTradeBars(previous, fromMs, realMs);
+    }
     out.push(real);
     previous = real;
   }
-  if (previous) addGap(previous, Date.parse(previous.bucketStart), current + 10_000);
+  if (previous) addNoTradeBars(previous, Date.parse(previous.bucketStart), current);
   return out;
-}
-
-function replacedPendingTail(previous: readonly DisplayBar[], next: readonly DisplayBar[]): boolean {
-  const previousTail = previous.at(-1);
-  const nextTail = next.at(-1);
-  if (!previousTail?.pending || !nextTail || nextTail.pending || nextTail.synthetic) return false;
-  const previousMs = Date.parse(previousTail.bucketStart);
-  const nextMs = Date.parse(nextTail.bucketStart);
-  return Number.isFinite(previousMs) && previousMs === nextMs;
 }
 
 // One band per contiguous run of same-session bars, with every edge pinned to a

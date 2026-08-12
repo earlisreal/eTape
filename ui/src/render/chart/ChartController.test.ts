@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   ChartController, LEFT_PAD_BARS, bandsFromBars, fillEmptyTenSecondSlots,
-  type BarReader, type IndicatorController, type CommandSender, type ManagedViewportMode,
+  type BarReader, type IndicatorController, type CommandSender,
 } from "./ChartController";
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import { LIGHT, DARK } from "../palette";
@@ -143,17 +143,15 @@ const make10s = (reader: BarReader, cmd = commandSpy()) => {
   ctrl.mount();
   return { facade, ctrl, cmd };
 };
-const make10sWithViewport = (reader: BarReader) => {
+const make10sWithViewport = (reader: BarReader, openDDown = () => false) => {
   const facade = fakeFacade();
-  const viewport = { mode: "live" as ManagedViewportMode };
   const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" },
     {
       bars: reader, indicators: emptyIndicators, commands: commandSpy(),
-      viewportMode: () => viewport.mode,
-      setViewportMode: (mode) => { viewport.mode = mode; },
+      isOpenDDown: openDDown,
     });
   ctrl.mount();
-  return { facade, ctrl, viewport };
+  return { facade, ctrl };
 };
 
 describe("ChartController", () => {
@@ -175,7 +173,7 @@ describe("ChartController", () => {
     ]);
   });
 
-  it("renders completed 10s gaps flat and the current missing bucket as whitespace", () => {
+  it("renders completed 10s gaps flat without the current interval", () => {
     const bars = [{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }];
     const facade = fakeFacade();
     const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: barReaderOf(bars), indicators: emptyIndicators, commands: commandSpy() });
@@ -184,62 +182,174 @@ describe("ChartController", () => {
     expect(facade.created[0].series.setDataCalls.at(-1)).toEqual([
       { time: Date.parse("2026-07-06T13:30:00Z") / 1000, open: 10, high: 10, low: 10, close: 10 },
       { time: Date.parse("2026-07-06T13:30:10Z") / 1000, open: 10, high: 10, low: 10, close: 10 },
-      { time: Date.parse("2026-07-06T13:30:20Z") / 1000 },
     ]);
     expect(facade.created[1].series.setDataCalls.at(-1)?.slice(1)).toEqual([
       { time: Date.parse("2026-07-06T13:30:10Z") / 1000 },
-      { time: Date.parse("2026-07-06T13:30:20Z") / 1000 },
     ]);
-    expect(ctrl.displayBars().at(-1)?.pending).toBe(true);
+    expect(ctrl.displayBars().at(-1)?.synthetic).toBe(true);
   });
 
-  it("turns an old pending slot synthetic and appends the next pending slot once per boundary", () => {
+  it("adds a No-Trade Bar only after its 10-second interval completes", () => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const { facade, ctrl } = make10s(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
-    ctrl.sync(base);
     ctrl.sync(base + 10_000);
-    expect(ctrl.displayBars().map((b) => [b.bucketStart, b.synthetic, b.pending])).toEqual([
-      [new Date(base).toISOString(), undefined, undefined],
-      [new Date(base + 10_000).toISOString(), undefined, true],
+    expect(ctrl.displayBars().map((b) => [b.bucketStart, b.synthetic])).toEqual([
+      [new Date(base).toISOString(), undefined],
     ]);
-    expect(facade.created[0].series.updates.at(-1)).toEqual({ time: (base + 10_000) / 1000 });
-    expect(facade.created[1].series.updates.at(-1)).toEqual({ time: (base + 10_000) / 1000 });
 
     ctrl.sync(base + 20_000);
-    expect(ctrl.displayBars().map((b) => [b.bucketStart, b.synthetic, b.pending])).toEqual([
-      [new Date(base).toISOString(), undefined, undefined],
-      [new Date(base + 10_000).toISOString(), true, undefined],
-      [new Date(base + 20_000).toISOString(), undefined, true],
+    expect(ctrl.displayBars().map((b) => [b.bucketStart, b.synthetic])).toEqual([
+      [new Date(base).toISOString(), undefined],
+      [new Date(base + 10_000).toISOString(), true],
     ]);
-    expect(facade.created[0].series.updates.slice(-2)).toEqual([
-      { time: (base + 10_000) / 1000, open: 10, high: 10, low: 10, close: 10 },
-      { time: (base + 20_000) / 1000 },
+    expect(facade.created[0].series.updates.at(-1)).toEqual({ time: (base + 10_000) / 1000, open: 10, high: 10, low: 10, close: 10 });
+  });
+
+  it("does not carry No-Trade Bars across sessions or into a session without a real bar", () => {
+    const premarket = { ...tenSecondBar("2026-07-06T13:29:50Z", 10), inProgress: false };
+    const rth = { ...tenSecondBar("2026-07-06T13:30:20Z", 11), inProgress: false };
+    expect(fillEmptyTenSecondSlots([premarket, rth], Date.parse("2026-07-06T13:30:30Z"))).toEqual([premarket, rth]);
+    expect(fillEmptyTenSecondSlots([premarket], Date.parse("2026-07-06T13:30:30Z"))).toEqual([premarket]);
+  });
+
+  it("renders a confirmed Data Gap as empty time-scale slots", () => {
+    const bars = [
+      tenSecondBar("2026-07-06T13:30:00Z", 10),
+      { ...tenSecondBar("2026-07-06T13:30:30Z", 11), gap: true },
+    ];
+    const filled = fillEmptyTenSecondSlots(bars, Date.parse("2026-07-06T13:30:40Z"));
+    expect(filled.map((b) => [b.bucketStart, b.synthetic, b.dataGap, b.gap])).toEqual([
+      ["2026-07-06T13:30:00Z", undefined, undefined, undefined],
+      ["2026-07-06T13:30:10.000Z", undefined, true, undefined],
+      ["2026-07-06T13:30:20.000Z", undefined, true, undefined],
+      ["2026-07-06T13:30:30Z", undefined, undefined, true],
     ]);
   });
 
-  it("keeps exactly four live-padding bars through pending and real rollovers", () => {
+  it("suspends No-Trade Bars while OpenD health is down", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    let down = false;
+    const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
+    const { ctrl } = make10sWithViewport(reader, () => down);
+    ctrl.sync(base + 20_000);
+    expect(ctrl.displayBars().map((b) => b.bucketStart)).toEqual([
+      new Date(base).toISOString(), new Date(base + 10_000).toISOString(),
+    ]);
+
+    down = true;
+    ctrl.sync(base + 30_000);
+    expect(ctrl.displayBars().map((b) => b.bucketStart)).toEqual([new Date(base).toISOString()]);
+  });
+
+  it("keeps No-Trade creation suspended until raw flow resumes", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    let down = true;
+    const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
+    const { ctrl } = make10sWithViewport(reader, () => down);
+    ctrl.sync(base + 20_000);
+    down = false;
+    ctrl.sync(base + 30_000);
+    expect(ctrl.displayBars().map((b) => b.bucketStart)).toEqual([new Date(base).toISOString()]);
+
+    reader.set([
+      tenSecondBar(new Date(base).toISOString(), 10),
+      { ...tenSecondBar(new Date(base + 30_000).toISOString(), 11), gap: true },
+    ]);
+    ctrl.sync(base + 40_000);
+    expect(ctrl.displayBars().map((b) => [b.bucketStart, b.dataGap, b.synthetic])).toEqual([
+      [new Date(base).toISOString(), undefined, undefined],
+      [new Date(base + 10_000).toISOString(), true, undefined],
+      [new Date(base + 20_000).toISOString(), true, undefined],
+      [new Date(base + 30_000).toISOString(), undefined, undefined],
+    ]);
+  });
+
+  it("removes provisional No-Trade Bars when a resumed gap is confirmed", () => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
     const { facade, ctrl } = make10sWithViewport(reader);
-    ctrl.sync(base);
-    const initialScrolls = facade.scrolls;
-    expect(facade.scrollPosition).toBe(4);
+    ctrl.sync(base + 30_000);
+    const beforeLogical = { from: -4, to: 2 };
+    const beforeTime = { from: base / 1000 - 60, to: (base + 20_000) / 1000 };
+    facade.visibleLogicalRange = beforeLogical;
+    facade.visibleRange = beforeTime;
+    const scrollsBefore = facade.scrolls;
 
-    ctrl.sync(base + 10_000);
-    expect(facade.scrollPosition).toBe(4);
-    expect(facade.scrolls).toBe(initialScrolls + 1);
+    reader.set([
+      tenSecondBar(new Date(base).toISOString(), 10),
+      { ...tenSecondBar(new Date(base + 30_000).toISOString(), 11), gap: true },
+    ]);
+    ctrl.sync(base + 40_000);
 
+    expect(ctrl.displayBars().map((b) => [b.bucketStart, b.synthetic, b.dataGap, b.gap])).toEqual([
+      [new Date(base).toISOString(), undefined, undefined, undefined],
+      [new Date(base + 10_000).toISOString(), undefined, true, undefined],
+      [new Date(base + 20_000).toISOString(), undefined, true, undefined],
+      [new Date(base + 30_000).toISOString(), undefined, undefined, true],
+    ]);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.visibleLogicalRange).toEqual(beforeLogical);
+  });
+
+  it("preserves the viewport when the previous newest candle is completely outside", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
+    const { facade, ctrl } = make10sWithViewport(reader);
+    ctrl.sync(base + 20_000);
+    const before = { from: -4, to: 0.49 };
+    facade.visibleLogicalRange = before;
+    const scrollsBefore = facade.scrolls;
+
+    ctrl.sync(base + 30_000);
+
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(before);
+  });
+
+  it("follows when any part of the previous newest candle is visible", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const { facade, ctrl } = make10sWithViewport(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
+    ctrl.sync(base + 20_000);
+    facade.visibleLogicalRange = { from: -4, to: 0.5 };
+
+    ctrl.sync(base + 30_000);
+
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: -3, to: 1.5 });
+  });
+
+  it("consumes a large Future Buffer before shifting the viewport", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const { facade, ctrl } = make10sWithViewport(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
+    ctrl.sync(base + 20_000);
+    const before = { from: -4, to: 7 };
+    facade.visibleLogicalRange = before;
+
+    ctrl.sync(base + 30_000);
+    ctrl.sync(base + 40_000);
+    expect(facade.setVisibleLogicalRangeCalls.slice(-2)).toEqual([before, before]);
+
+    ctrl.sync(base + 50_000);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: -3, to: 8 });
+  });
+
+  it("repairs a No-Trade Bar in place without moving the viewport", () => {
+    const base = Date.parse("2026-07-06T13:30:00Z");
+    const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
+    const { facade, ctrl } = make10sWithViewport(reader);
+    ctrl.sync(base + 20_000);
+    const before = { from: -4, to: 2 };
+    facade.visibleLogicalRange = before;
+    const scrollsBefore = facade.scrolls;
     reader.set([
       tenSecondBar(new Date(base).toISOString(), 10),
       tenSecondBar(new Date(base + 10_000).toISOString(), 12, true),
     ]);
-    ctrl.sync(base + 10_000);
-    expect(facade.scrollPosition).toBe(4);
-    expect(facade.scrolls).toBe(initialScrolls + 1);
 
     ctrl.sync(base + 20_000);
-    expect(facade.scrollPosition).toBe(4);
-    expect(facade.scrolls).toBe(initialScrolls + 2);
+
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.visibleLogicalRange).toEqual(before);
+    expect(ctrl.displayBars()[1].synthetic).toBeUndefined();
   });
 
   it("preserves a user-panned history viewport through multiple rollovers", () => {
@@ -259,28 +369,7 @@ describe("ChartController", () => {
     expect(facade.setVisibleLogicalRangeCalls.length).toBeGreaterThan(0);
   });
 
-  it("consumes detached future space and resumes live follow at four bars", () => {
-    const base = Date.parse("2026-07-06T13:30:00Z");
-    const { facade, ctrl } = make10sWithViewport(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
-    ctrl.sync(base);
-    facade.scrollPosition = 8;
-    facade.visibleLogicalRange = { from: -2, to: 5 };
-    ctrl.noteUserViewportInteraction();
-    const scrollsBefore = facade.scrolls;
-
-    ctrl.sync(base + 10_000);
-    ctrl.sync(base + 20_000);
-    ctrl.sync(base + 30_000);
-    ctrl.sync(base + 40_000);
-    expect(facade.scrollPosition).toBe(4);
-    expect(facade.scrolls).toBe(scrollsBefore);
-
-    ctrl.sync(base + 50_000);
-    expect(facade.scrollPosition).toBe(4);
-    expect(facade.scrolls).toBe(scrollsBefore + 1);
-  });
-
-  it("replaces current-bucket whitespace with the first real update without rebuilding", () => {
+  it("replaces a completed No-Trade Bar with a real update without rebuilding", () => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
     const { facade, ctrl } = make10s(reader);
@@ -297,52 +386,10 @@ describe("ChartController", () => {
     expect(facade.created[1].series.updates.at(-1)).toEqual({
       time: (base + 10_000) / 1000, value: 100, color: LIGHT.volUp,
     });
-    expect(ctrl.displayBars().at(-1)?.pending).toBeUndefined();
+    expect(ctrl.displayBars().at(-1)?.synthetic).toBeUndefined();
   });
 
-  it("does not follow when a rebuild replaces a pending slot with a real bar", () => {
-    const base = Date.parse("2026-07-06T13:30:00Z");
-    const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
-    const { facade, ctrl } = make10sWithViewport(reader);
-    ctrl.sync(base + 20_000);
-    const beforeLogical = { from: -8, to: 5 };
-    facade.scrollPosition = 4;
-    facade.visibleLogicalRange = beforeLogical;
-    const scrollsBefore = facade.scrolls;
-
-    reader.set([
-      tenSecondBar(new Date(base).toISOString(), 10),
-      tenSecondBar(new Date(base + 10_000).toISOString(), 11),
-      tenSecondBar(new Date(base + 20_000).toISOString(), 12, true),
-    ]);
-    ctrl.sync(base + 20_000);
-
-    expect(facade.created[0].series.setDataCalls).toHaveLength(2);
-    expect(facade.scrolls).toBe(scrollsBefore);
-    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
-  });
-
-  it("follows when a pending replacement rebuild also advances the tail", () => {
-    const base = Date.parse("2026-07-06T13:30:00Z");
-    const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
-    const { facade, ctrl } = make10sWithViewport(reader);
-    ctrl.sync(base + 20_000);
-    facade.scrollPosition = 4;
-    facade.visibleLogicalRange = { from: -8, to: 5 };
-    const scrollsBefore = facade.scrolls;
-
-    reader.set([
-      tenSecondBar(new Date(base).toISOString(), 10),
-      tenSecondBar(new Date(base + 10_000).toISOString(), 11),
-      tenSecondBar(new Date(base + 20_000).toISOString(), 12, true),
-    ]);
-    ctrl.sync(base + 30_000);
-
-    expect(ctrl.displayBars().at(-1)?.pending).toBe(true);
-    expect(facade.scrolls).toBe(scrollsBefore + 1);
-  });
-
-  it("a resumed 10s real bar replaces its placeholder and keeps earlier gaps", () => {
+  it("a resumed 10s real bar replaces its No-Trade Bar and keeps earlier gaps", () => {
     const reader = mutableBarReader([{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }]);
     const facade = fakeFacade();
     const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
@@ -363,7 +410,7 @@ describe("ChartController", () => {
     expect(ctrl.displayBars().at(-1)?.synthetic).toBeUndefined();
   });
 
-  it("rebuilds when a delayed real bar replaces an identical interior synthetic bar", () => {
+  it("updates a delayed real bar at the existing timestamp without navigating", () => {
     const reader = mutableBarReader([{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }]);
     const facade = fakeFacade();
     const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
@@ -382,13 +429,13 @@ describe("ChartController", () => {
       { ...bar("2026-07-06T13:30:10Z", 10), timeframe: "10s" },
     ]);
     ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
-    expect(facade.created[0].series.setDataCalls).toHaveLength(2);
-    expect(facade.scrolls).toBe(scrollsBefore + 1);
+    expect(facade.created[0].series.setDataCalls).toHaveLength(1);
+    expect(facade.scrolls).toBe(scrollsBefore);
     expect(facade.setVisibleRangeCalls).toHaveLength(0);
     expect(ctrl.displayBars()[1].synthetic).toBeUndefined();
   });
 
-  it("preserves a historical viewport when a delayed real bar replaces an interior synthetic bar", () => {
+  it("preserves a historical viewport when a delayed real bar arrives", () => {
     const reader = mutableBarReader([{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }]);
     const facade = fakeFacade();
     const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
@@ -407,9 +454,9 @@ describe("ChartController", () => {
       { ...bar("2026-07-06T13:30:10Z", 10), timeframe: "10s" },
     ]);
     ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
-    expect(facade.created[0].series.setDataCalls).toHaveLength(2);
+    expect(facade.created[0].series.setDataCalls).toHaveLength(1);
     expect(facade.scrolls).toBe(scrollsBefore);
-    expect(facade.setVisibleRangeCalls.at(-1)).toEqual(beforeTime);
+    expect(facade.visibleRange).toEqual(beforeTime);
     expect(ctrl.displayBars()[1].synthetic).toBeUndefined();
   });
 
@@ -439,7 +486,7 @@ describe("ChartController", () => {
     expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
   });
 
-  it("10s future-detached append landing exactly at four bars keeps the logical viewport", () => {
+  it("10s append at the four-bar threshold preserves zoom while shifting the range", () => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const { facade, ctrl } = make10s(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
     ctrl.sync(base + 10_000);
@@ -449,10 +496,10 @@ describe("ChartController", () => {
     const scrollsBefore = facade.scrolls;
     ctrl.sync(base + 30_000);
     expect(facade.scrolls).toBe(scrollsBefore);
-    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: 1, to: 6 });
   });
 
-  it("10s future-detached batch crossing four bars resumes live exactly once", () => {
+  it("10s future-detached batch shifts the range once it reaches four bars", () => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const { facade, ctrl } = make10s(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
     ctrl.sync(base + 10_000);
@@ -460,11 +507,11 @@ describe("ChartController", () => {
     facade.visibleLogicalRange = { from: -1, to: 4 };
     const scrollsBefore = facade.scrolls;
     ctrl.sync(base + 40_000);
-    expect(facade.scrolls).toBe(scrollsBefore + 1);
-    expect(facade.setVisibleLogicalRangeCalls).toHaveLength(0);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: 2, to: 7 });
   });
 
-  it("10s ordinary live append follows immediately once its wall-clock bucket has started", () => {
+  it("10s ordinary live append shifts the visible range without resetting zoom", () => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const { facade, ctrl } = make10s(barReaderOf([tenSecondBar(new Date(base).toISOString(), 10)]));
     ctrl.sync(base + 10_000);
@@ -472,8 +519,8 @@ describe("ChartController", () => {
     facade.visibleLogicalRange = { from: 0, to: 1 };
     const scrollsBefore = facade.scrolls;
     ctrl.sync(base + 20_000);
-    expect(facade.scrolls).toBe(scrollsBefore + 1);
-    expect(facade.setVisibleLogicalRangeCalls).toHaveLength(0);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: 1, to: 2 });
   });
 
   it("10s historical append never follows live", () => {
@@ -488,7 +535,7 @@ describe("ChartController", () => {
     expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: -20, to: -10 });
   });
 
-  it("holds an early 10s candle until its boundary, then paints and follows exactly once", () => {
+  it("holds an early 10s candle until its boundary, then paints without navigating", () => {
     const base = Date.parse("2026-07-06T13:31:00Z");
     const bars = [tenSecondBar(new Date(base).toISOString(), 10)];
     const { facade, ctrl } = make10s(barReaderOf(bars));
@@ -518,10 +565,11 @@ describe("ChartController", () => {
     expect(volume.updates.at(-1)).toEqual({
       time: (base + 10_000) / 1000, value: 100, color: LIGHT.volUp,
     });
-    expect(facade.scrolls).toBe(scrollsBefore + 1);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: -9, to: 5 });
     ctrl.sync(base + 11_000);
     ctrl.sync(base + 12_000);
-    expect(facade.scrolls).toBe(scrollsBefore + 1);
+    expect(facade.scrolls).toBe(scrollsBefore);
   });
 
   it("paints an early 1m bar immediately, then follows exactly once at its boundary", () => {
@@ -567,7 +615,12 @@ describe("ChartController", () => {
     const scrollsBefore = made.facade.scrolls;
     bars.push(makeBar(new Date(base + spanMs).toISOString(), 11, true));
     made.ctrl.sync(base + spanMs + 250);
-    expect(made.facade.scrolls).toBe(scrollsBefore + 1);
+    if (timeframe === "10s") {
+      expect(made.facade.scrolls).toBe(scrollsBefore);
+      expect(made.facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: -9, to: 5 });
+    } else {
+      expect(made.facade.scrolls).toBe(scrollsBefore + 1);
+    }
   });
 
   it.each([
@@ -592,7 +645,7 @@ describe("ChartController", () => {
   it.each([
     ["history", -2],
     ["future space", 8],
-  ] as const)("pending follow yields when the user moves into %s before the boundary", (_label, userScrollPosition) => {
+  ] as const)("boundary follow yields when the user moves into %s before the boundary", (_label, userScrollPosition) => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const bars = [bar(new Date(base).toISOString(), 10)];
     const { facade, ctrl } = make(barReaderOf(bars));
@@ -609,7 +662,7 @@ describe("ChartController", () => {
     expect(facade.scrolls).toBe(scrollsBefore);
   });
 
-  it("keeps a future-detached early 10s bar hidden until its threshold-crossing boundary", () => {
+  it("keeps an early 10s bar hidden until its boundary, then follows by logical range", () => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
     const { facade, ctrl } = make10s(reader);
@@ -629,7 +682,8 @@ describe("ChartController", () => {
     expect(ctrl.displayBars().at(-1)?.bucketStart).toBe(new Date(base + 10_000).toISOString());
     facade.scrollPosition = 4;
     ctrl.sync(base + 20_000);
-    expect(facade.scrolls).toBe(scrollsBefore + 1);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: -3, to: 6 });
   });
 
   it.each([
@@ -656,36 +710,28 @@ describe("ChartController", () => {
     ]);
     made.ctrl.sync(base + 2 * spanMs - 2_000);
     const isTenSeconds = timeframe === "10s";
-    const preBoundaryScrolls = scrollsBefore + (isTenSeconds ? 1 : 0);
     expect(candle.setDataCalls).toHaveLength(2);
     expect(candle.setDataCalls.at(-1)?.at(-1)).toEqual(expect.objectContaining({
       time: (base + (isTenSeconds ? spanMs : 2 * spanMs)) / 1000,
     }));
-    expect(made.facade.scrolls).toBe(preBoundaryScrolls);
-    if (isTenSeconds) expect(made.facade.setVisibleLogicalRangeCalls).toHaveLength(0);
-    else expect(made.facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+    if (isTenSeconds) {
+      expect(made.facade.scrolls).toBe(scrollsBefore);
+      expect(made.facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: -9, to: 6 });
+    } else {
+      expect(made.facade.scrolls).toBe(scrollsBefore);
+      expect(made.facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+    }
     made.facade.scrollPosition = isTenSeconds ? 4 : 3;
     made.ctrl.sync(base + 2 * spanMs);
-    expect(made.facade.scrolls).toBe(preBoundaryScrolls + 1);
+    if (isTenSeconds) {
+      expect(made.facade.scrolls).toBe(scrollsBefore);
+      expect(made.facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: -8, to: 7 });
+    } else {
+      expect(made.facade.scrolls).toBe(scrollsBefore + 1);
+    }
   });
 
-  it("Jump to Live follows immediately and clears an early 1m pending follow", () => {
-    const base = Date.parse("2026-07-06T13:30:00Z");
-    const bars = [bar(new Date(base).toISOString(), 10)];
-    const { facade, ctrl } = make(barReaderOf(bars));
-    ctrl.sync(base);
-    facade.scrollPosition = 4;
-    facade.visibleLogicalRange = { from: -10, to: 4 };
-    bars.push(bar(new Date(base + 60_000).toISOString(), 11, true));
-    ctrl.sync(base + 58_000);
-    const scrollsBefore = facade.scrolls;
-    ctrl.jumpToLive();
-    expect(facade.scrolls).toBe(scrollsBefore + 1);
-    ctrl.sync(base + 60_000);
-    expect(facade.scrolls).toBe(scrollsBefore + 1);
-  });
-
-  it("symbol reload cannot inherit an early 1m pending follow", () => {
+  it("symbol reload cannot inherit an early 1m boundary follow", () => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const reader = mutableBarReader([bar(new Date(base).toISOString(), 10)]);
     const { facade, ctrl } = make(reader);
@@ -704,7 +750,7 @@ describe("ChartController", () => {
     expect(facade.scrolls).toBe(scrollsBeforeReload + 1);
   });
 
-  it("preserves a future-detached viewport when a 10s interior synthetic bar becomes real", () => {
+  it("preserves a future-detached viewport when a 10s No-Trade Bar becomes real", () => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
     const { facade, ctrl } = make10s(reader);
@@ -717,12 +763,12 @@ describe("ChartController", () => {
     const scrollsBefore = facade.scrolls;
     reader.set([tenSecondBar(new Date(base).toISOString(), 10), tenSecondBar(new Date(base + 10_000).toISOString(), 10)]);
     ctrl.sync(base + 20_000);
-    expect(facade.created[0].series.setDataCalls).toHaveLength(2);
+    expect(facade.created[0].series.setDataCalls).toHaveLength(1);
     expect(facade.scrolls).toBe(scrollsBefore);
-    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+    expect(facade.visibleLogicalRange).toEqual(beforeLogical);
   });
 
-  it("10s delayed replacement still follows when the viewport is truly live", () => {
+  it("10s delayed replacement never navigates even when the newest candle is visible", () => {
     const base = Date.parse("2026-07-06T13:30:00Z");
     const reader = mutableBarReader([tenSecondBar(new Date(base).toISOString(), 10)]);
     const { facade, ctrl } = make10s(reader);
@@ -732,7 +778,8 @@ describe("ChartController", () => {
     const scrollsBefore = facade.scrolls;
     reader.set([tenSecondBar(new Date(base).toISOString(), 10), tenSecondBar(new Date(base + 10_000).toISOString(), 10)]);
     ctrl.sync(base + 20_000);
-    expect(facade.scrolls).toBe(scrollsBefore + 1);
+    expect(facade.scrolls).toBe(scrollsBefore);
+    expect(facade.visibleLogicalRange).toEqual({ from: -10, to: 6 });
   });
 
   it("future-detached 10s rebuild preserves an unchanged-length range", () => {
@@ -745,7 +792,8 @@ describe("ChartController", () => {
     facade.visibleLogicalRange = beforeLogical;
     reader.set([tenSecondBar(new Date(base).toISOString(), 10), tenSecondBar(new Date(base + 10_000).toISOString(), 10)]);
     ctrl.sync(base + 20_000);
-    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+    expect(facade.setVisibleLogicalRangeCalls).toHaveLength(0);
+    expect(facade.visibleLogicalRange).toEqual(beforeLogical);
     expect(facade.scrolls).toBe(1);
   });
 
@@ -767,7 +815,7 @@ describe("ChartController", () => {
       tenSecondBar(new Date(base + 40_000).toISOString(), 12),
     ]);
     ctrl.sync(base + 50_000);
-    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual(beforeLogical);
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: 1, to: 4 });
     expect(facade.scrolls).toBe(1);
   });
 
@@ -809,7 +857,7 @@ describe("ChartController", () => {
       tenSecondBar(new Date(base + 60_000).toISOString(), 13),
     ]);
     ctrl.sync(base + 60_000);
-    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: 0, to: 3 });
+    expect(facade.setVisibleLogicalRangeCalls.at(-1)).toEqual({ from: 2, to: 5 });
     expect(facade.scrolls).toBe(1);
   });
 
@@ -859,7 +907,7 @@ describe("ChartController", () => {
     expect(facade.scrolls).toBe(scrollsBefore + 1);
   });
 
-  it("rebuilds a reconnect batch with an interior real bar before its suffix", () => {
+  it("updates a reconnect batch's delayed interior bar before its hidden suffix", () => {
     const reader = mutableBarReader([{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }]);
     const facade = fakeFacade();
     const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
@@ -871,11 +919,11 @@ describe("ChartController", () => {
       { ...bar("2026-07-06T13:30:30Z", 13), timeframe: "10s" },
     ]);
     ctrl.sync(Date.parse("2026-07-06T13:30:20Z"));
-    expect(facade.created[0].series.setDataCalls).toHaveLength(2);
-    expect(facade.created[1].series.setDataCalls.at(-1)?.[1]).toEqual({ time: Date.parse("2026-07-06T13:30:10Z") / 1000, value: 100, color: LIGHT.volUp });
+    expect(facade.created[0].series.setDataCalls).toHaveLength(1);
+    expect(facade.created[1].series.updates.at(-1)).toEqual({ time: Date.parse("2026-07-06T13:30:10Z") / 1000, value: 100, color: LIGHT.volUp });
   });
 
-  it("rebuilds when a corrected close changes its synthetic suffix", () => {
+  it("rebuilds when a corrected close changes its No-Trade suffix", () => {
     const bars = [{ ...bar("2026-07-06T13:30:00Z", 10), timeframe: "10s" }];
     const { facade, ctrl } = (() => {
       const facade = fakeFacade();
@@ -936,8 +984,6 @@ describe("ChartController", () => {
     bars[0] = bar("2026-07-06T13:30:00Z", 10.5, true);
     ctrl.sync(); // tail-only revision -> must not force another scroll
     expect(facade.scrolls).toBe(1);
-    ctrl.jumpToLive();
-    expect(facade.scrolls).toBe(2);
   });
 
   it("setSymbol resets the horizontal scroll to the default resting position, not whatever the previous symbol was left at", () => {

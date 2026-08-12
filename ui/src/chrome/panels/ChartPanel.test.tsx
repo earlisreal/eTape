@@ -279,6 +279,7 @@ describe("ChartPanel", () => {
   it("right-click opens a context menu; Reset chart view calls the chart's resetTimeScale and re-enables price autoScale", () => {
     const { getByTestId, getByRole } = renderChart();
     fireEvent.contextMenu(getByTestId("chart-host"), { clientX: 20, clientY: 30 });
+    expect(screen.queryByRole("button", { name: "Jump to live" })).toBeNull();
     fireEvent.click(getByRole("button", { name: "Reset chart view" }));
     expect(timeScaleApi.resetTimeScale).toHaveBeenCalledTimes(1);
     expect(priceScaleApi.applyOptions).toHaveBeenCalledWith({ autoScale: true });
@@ -1295,6 +1296,24 @@ describe("ChartPanel", () => {
     now.mockReturnValue(Date.parse("2026-07-06T13:30:11Z"));
     expect(getSurface().isDirty()).toBe(true);
     now.mockRestore();
+  });
+
+  it("dirties a 10s chart when OpenD health changes", () => {
+    const { stores, getSurface } = renderChartCapturingSurface({ timeframe: "10s" });
+    getSurface().isDirty();
+    act(() => stores.health.apply({ kind: "snapshot", topic: "sys.health", payload: {
+      links: [{ link: "engine-moomoo", ms: null, min: null, avg: null, max: null, status: "down" }],
+    } }));
+    expect(getSurface().isDirty()).toBe(true);
+  });
+
+  it("does not dirty a 1m chart when OpenD health changes", () => {
+    const { stores, getSurface } = renderChartCapturingSurface({ timeframe: "1m" });
+    getSurface().isDirty();
+    act(() => stores.health.apply({ kind: "snapshot", topic: "sys.health", payload: {
+      links: [{ link: "engine-moomoo", ms: null, min: null, avg: null, max: null, status: "down" }],
+    } }));
+    expect(getSurface().isDirty()).toBe(false);
   });
 
   it("dirties a 1m chart when the wall-clock bucket advances without a store revision", () => {

@@ -16,7 +16,7 @@ export interface LegendView {
   volume: number | null; indicators: LegendIndicatorRow[];
 }
 
-type LegendBar = Bar & { pending?: true };
+type LegendBar = Bar & { synthetic?: boolean; dataGap?: boolean };
 
 // points is sorted ascending by timeMs (IndicatorStore's snapshot-sort +
 // append-in-order behavior guarantees this) — binary search for the rightmost
@@ -45,11 +45,8 @@ export function computeLegendView(
   const has = bars.length > 0;
   const i = !has ? -1 : logical === null ? bars.length - 1 : Math.max(0, Math.min(bars.length - 1, Math.round(logical)));
   const selected = has ? bars[i] : null;
-  // Pending bars are time-axis whitespace only. Keep the logical slot for
-  // crosshair positioning, but never expose its copied display fields in the
-  // OHLC/volume legend or use it as a change baseline.
-  const b = selected && !selected.pending ? selected : null;
-  const prev = b && i > 0 && !bars[i - 1].pending ? bars[i - 1] : null;
+  const b = selected?.dataGap ? null : selected;
+  const prev = b && i > 0 && !bars[i - 1].dataGap ? bars[i - 1] : null;
   const barMs = b ? Date.parse(b.bucketStart) : NaN;
   const changePct = b && prev && prev.c !== 0 ? ((b.c - prev.c) / prev.c) * 100 : null;
   const indicators: LegendIndicatorRow[] = instances.map((inst) => {

@@ -1,5 +1,52 @@
 # Chart Renderer
 
-On `10s`, exchange-timestamped next-bucket data remains immediately available to stores and indicators, while its candle and volume slot is released at the synchronized market-clock boundary. If that boundary has no raw bar, the display inserts a pending time-axis whitespace slot; it becomes a real bar when data arrives, or a flat zero-volume synthetic candle once the bucket is complete. Pending whitespace advances session shading, drawings, and live-follow but contributes no OHLC/volume values to the legend. The countdown uses the newest eligible raw price from the active ET trading day, so it remains visible through quiet or delayed buckets and ignores far-future data. On `1m`, bars are painted immediately while only automatic viewport follow waits for that same boundary. The market clock is estimated from OpenD's upstream server timestamp and periodically synchronized to the browser through WebSocket ping/pong; if no valid sample exists, charts fall back to browser time and retain the last valid offset across a failed probe. Lightweight Charts native follow is disabled only for those managed timeframes; the panel's bucket-change dirty signal releases the visual update even when no market event arrives at the boundary. A rate-limited `chart market clock boundary` debug trace records browser/market boundaries, raw-tail lead, offsets, round trips, and sample age. The controller derives live, historical, and future-detached behavior from the time-scale scroll position so appended bars consume user-created future space without snapping the viewport; other timeframes retain native follow behavior.
+`ChartController` keeps `BarStore` and the engine's bars authoritative while
+the chart derives its display series imperatively. High-frequency updates do
+not flow through React state.
 
-Chart controllers, indicators, sessions, drawings, and primitives. A symbol open waits for the engine's `chart-ready` barrier, queries the complete prepared archive/seed once, and calls `setData` once; pan and zoom never request history. Older provider backfill is archive-only and appears on the next symbol open. Main-pane indicators autoscale against visible candles, while live bars continue through imperative store/controller updates. Managed-timeframe follow intent changes only on user pan/scroll or an explicit jump-to-live; series updates and viewport restoration preserve that intent. Snapshot and `setData` timings are logged for tuning acceptable startup delay. Preserve chronological merge/dedupe and controller disposal. Test: `npm test -- chart`.
+## 10-second display
+
+The `10s` display contains real bars and completed No-Trade Bars, plus explicit
+time-scale whitespace for confirmed Data Gaps. The current incomplete interval
+is never fabricated. A No-Trade Bar is flat at the previous same-session real
+close with zero volume; it is not carried across premarket, regular, postmarket,
+overnight, or weekend boundaries, and a new
+session needs a real bar before quiet intervals can be filled.
+
+When the OpenD link is down, provisional No-Trade Bars are suppressed. A real
+bar marked `gap` confirms a Data Gap since the previous trustworthy real bar;
+the interval remains visually empty and any provisional No-Trade Bars in it are
+removed. A delayed real bar replaces a No-Trade Bar at the same timestamp.
+
+## Viewport behavior
+
+For `10s`, an appended bar follows when the previous newest displayed slot is
+at least partially visible. If it is completely outside the view, the current
+range and zoom are preserved. Future Buffer space is consumed until four empty
+bar widths remain; after that, the range shifts by the number of appended
+slots while preserving its width. Corrections and gap repair preserve the
+existing timestamp view. Symbol/timeframe changes start in Live View, and
+Reset Chart View restores default spacing, four-bar right padding, and price
+auto-scaling. The chart menu exposes Reset Chart View; it has no separate live
+navigation command.
+
+The visible 1-minute behavior remains unchanged: raw bars paint immediately
+and its existing boundary-follow behavior is retained.
+
+Sessions, drawings, and the legend consume the same display bars. The countdown
+uses the newest eligible raw price from the active ET
+trading day, so it remains useful through quiet or delayed buckets and ignores
+far-future data. The market clock is estimated from OpenD's upstream server
+timestamp and synchronized to the browser through WebSocket ping/pong; without
+a valid sample, charts use browser time and retain the last valid offset across
+a failed probe. A rate-limited `chart market clock boundary` trace records the
+clock inputs used for diagnostics.
+
+A symbol open waits for the engine's `chart-ready` barrier, queries the prepared
+archive/seed once, and calls `setData` once; pan and zoom do not request history.
+Older provider backfill is archive-only and appears on the next symbol open.
+Main-pane indicators autoscale against visible candles, while live bars continue
+through imperative store/controller updates. Preserve chronological merge/dedupe
+and controller disposal. Focused tests run with `npm exec vitest -- run
+--project chart-core src/render/chart/ChartController.test.ts`; the full UI suite
+runs with `npm test`.
