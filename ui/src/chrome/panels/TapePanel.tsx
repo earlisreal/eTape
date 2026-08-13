@@ -119,8 +119,8 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
       const acc = scrollAccumulate(remainderRef.current, e.deltaY, TAPE_ROW_H);
       remainderRef.current = acc.remainder;
       if (acc.rows === 0) return;
-      // wheel up (deltaY < 0) → negative rows → older; wheel down → toward live
-      viewRef.current = adjustAnchor(stores.tape.source(symbolRef.current), viewRef.current, acc.rows, {
+      // wheel down (deltaY > 0) → older; wheel up (deltaY < 0) → toward live
+      viewRef.current = adjustAnchor(stores.tape.source(symbolRef.current), viewRef.current, -acc.rows, {
         symbol: symbolRef.current,
         minSize: minSizeRef.current,
       });

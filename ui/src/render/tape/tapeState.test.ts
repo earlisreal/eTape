@@ -117,18 +117,18 @@ describe("buildTapeRows", () => {
 describe("adjustAnchor", () => {
   const opts = { symbol: "US.AAPL", minSize: 0 };
 
-  it("scrolling up from live pauses N rows back", () => {
+  it("moving older from live anchors N rows back", () => {
     const v = adjustAnchor(src, liveView(src), -3, opts);
     expect(v).toEqual({ anchorSeq: 27, generation: 1 });
   });
 
-  it("scrolling down toward the newest tick resumes live", () => {
+  it("moving newer toward the newest tick resumes live", () => {
     const v = adjustAnchor(src, { anchorSeq: 28, generation: 1 }, 5, opts);
     expect(v.anchorSeq).toBeNull();
   });
 
   it("steps in FILTERED row space so one wheel row is one on-screen row", () => {
-    // minSize 300 keeps seqs 2, 5, 8, ..., 29; from live, 2 rows up lands on 26
+    // minSize 300 keeps seqs 2, 5, 8, ..., 29; from live, 2 older rows lands on 26
     const v = adjustAnchor(src, liveView(src), -2, { symbol: "US.AAPL", minSize: 300 });
     expect(v.anchorSeq).toBe(26);
   });

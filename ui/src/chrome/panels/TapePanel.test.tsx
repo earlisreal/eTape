@@ -117,14 +117,33 @@ describe("TapePanel", () => {
     expect(screen.queryByTestId("tape-minsize-active")).toBeNull();
   });
 
-  it("wheel-up pauses (pill appears); jump to live resumes", () => {
+  it("wheel-down pauses (pill appears); jump to live resumes", () => {
     const { stores, canvas } = renderTape();
     stores.tape.apply({ kind: "snapshot", topic: "md.tape",
       payload: Array.from({ length: 30 }, (_, i) => mkTick(i)) });
     expect(screen.queryByText(/jump to live/i)).toBeNull();
-    fireEvent.wheel(canvas, { deltaY: -54 }); // 3 rows up at TAPE_ROW_H = 18
+    fireEvent.wheel(canvas, { deltaY: 54 }); // 3 rows down at TAPE_ROW_H = 18
     expect(screen.getByText(/jump to live/i)).toBeTruthy();
     fireEvent.click(screen.getByText(/jump to live/i));
+    expect(screen.queryByText(/jump to live/i)).toBeNull();
+  });
+
+  it("wheel-down enters history and wheel-up returns to live", () => {
+    const { stores, canvas } = renderTape();
+    stores.tape.apply({ kind: "snapshot", topic: "md.tape",
+      payload: Array.from({ length: 30 }, (_, i) => mkTick(i)) });
+    fireEvent.wheel(canvas, { deltaY: 54 });
+    expect(screen.getByText(/jump to live/i)).toBeTruthy();
+
+    fireEvent.wheel(canvas, { deltaY: -54 });
+    expect(screen.queryByText(/jump to live/i)).toBeNull();
+  });
+
+  it("wheel-up at live stays live", () => {
+    const { stores, canvas } = renderTape();
+    stores.tape.apply({ kind: "snapshot", topic: "md.tape",
+      payload: Array.from({ length: 30 }, (_, i) => mkTick(i)) });
+    fireEvent.wheel(canvas, { deltaY: -54 });
     expect(screen.queryByText(/jump to live/i)).toBeNull();
   });
 
@@ -176,7 +195,7 @@ describe("TapePanel", () => {
     const { stores, canvas, surface } = renderTape();
     stores.tape.apply({ kind: "snapshot", topic: "md.tape",
       payload: Array.from({ length: 30 }, (_, i) => mkTick(i)) });
-    fireEvent.wheel(canvas, { deltaY: -54 }); // pauses 3 rows back (anchorSeq 27)
+    fireEvent.wheel(canvas, { deltaY: 54 }); // pauses 3 rows back (anchorSeq 27)
     expect(screen.getByText(/jump to live/i)).toBeTruthy();
 
     // Burst past US.AAPL's own ring capacity (~4096) so the anchored seq (27) is
