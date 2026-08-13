@@ -1,1 +1,2 @@
 ui/e2e/*.sh text eol=lf
+*.go text eol=lf

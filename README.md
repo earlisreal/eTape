@@ -368,15 +368,58 @@ prototypes/ Python research scripts (latency benchmarks, tick aggregation, …)
 | Task | Command |
 |---|---|
 | UI iteration w/ hot reload | `./run.sh dev [fixture]` (mock engine + Vite on `:5173`) |
-| Engine tests | `cd engine && make test` (fast, full) + `make test-race` (`go test -race -short ./...`) |
-| Engine lint / vet | `cd engine && make lint` / `make vet` |
+| Engine tests | `cd engine && go test ./...` (full) + `go test -race -short ./...` |
+| Engine lint / vet | `cd engine && golangci-lint run` / `go vet ./...` |
 | UI unit tests | `cd ui && npm test` |
 | UI typecheck / lint | `cd ui && npm run typecheck` / `npm run lint` |
 | E2E (Playwright, real engine in replay mode) | `cd ui && npm run e2e` |
-| Regenerate TS wire types from Go | `cd engine && make gen-ts` (`gen-ts-check` to verify drift) |
+| Regenerate TS wire types from Go | `mingw32-make -C engine gen-ts` (`gen-ts-check` to verify drift) |
 
-CI runs the full engine test suite on Linux and Windows; race, vet, lint, and
-generated-contract checks remain Linux-only.
+### CI-equivalent validation on Windows
+
+The executable source of truth is [.github/workflows/ci.yml](.github/workflows/ci.yml).
+Use the checklist below for the same locally applicable checks; if this list
+drifts from the workflow, follow the workflow and update this guide.
+
+Install the pinned linter once, then verify it before using the fast command:
+
+```powershell
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+Get-Command golangci-lint
+golangci-lint version
+```
+
+The reported version must be `2.12.2`. From the repository root, run the
+CI-equivalent suite:
+
+```powershell
+Set-Location engine
+go test ./...
+go test -race -short ./...
+go vet ./...
+golangci-lint run
+# If the installed binary is not v2.12.2:
+go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run
+Set-Location ..
+mingw32-make -C engine gen-ts-check
+Set-Location ui
+npm ci
+npm run lint
+npm test
+npm run build
+Set-Location ..
+git diff --check
+```
+
+Native Windows `go test -race` requires the existing [MSYS2 UCRT64
+toolchain](#race-tests-with-mingw-w64). The UI E2E suite (`npm run e2e`) is an
+additional proportional check, not a step in the current CI workflow. Before
+handoff, verify that `git ls-files --eol '*.go'` reports LF worktree files,
+`ui/src/gen/wsmsg.ts` has no generated drift, and no credentials or runtime
+data were introduced. List every check run and every skipped required check
+with its reason; hosted CI remains authoritative for the exact Ubuntu
+environment, and one complete hosted run must pass after pushing recovery
+changes.
 
 The Go structs are the single source of truth for the engine↔UI protocol —
 `ui/src/gen/wsmsg.ts` is generated, never hand-edited.

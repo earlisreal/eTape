@@ -36,11 +36,22 @@ This repository uses a single-context domain layout. See `docs/agents/domain.md`
 ```bash
 cd engine && go build ./cmd/etape
 cd engine && go test ./...
-cd engine && make gen-ts-check
+cd engine && mingw32-make gen-ts-check
 cd ui && npm test
 cd ui && npm run typecheck
 cd ui && npm run e2e
 ```
+
+## Validation
+
+After an approved plan, a substantial change, changes spanning engine and UI,
+or changes to CI, build configuration, dependencies, or generated contracts,
+run the CI-equivalent Windows checklist in [README.md](README.md#ci-equivalent-validation-on-windows).
+The workflow at [.github/workflows/ci.yml](.github/workflows/ci.yml) is the
+executable source of truth if the command lists drift. Small isolated changes
+may use proportional subsystem checks. Every handoff must list checks run and
+results, plus every skipped required check and its reason; hosted CI must still
+complete successfully.
 
 ## Live-order safety
 

@@ -156,11 +156,11 @@ const make10sWithViewport = (reader: BarReader, openDDown = () => false) => {
 
 describe("ChartController", () => {
   it("fills only the active 10s session with marked flat display bars", () => {
-    const real = { ...bar("2026-07-06T23:59:40Z", 10), timeframe: "10s" };
+    const real = { ...bar("2026-07-06T23:59:40Z", 10), timeframe: "10s", gap: true };
     const filled = fillEmptyTenSecondSlots([real], Date.parse("2026-07-07T00:00:20Z"));
-    expect(filled.map((b) => [b.bucketStart, b.o, b.h, b.l, b.c, b.v, b.synthetic])).toEqual([
-      ["2026-07-06T23:59:40Z", 10, 10, 10, 10, 100, undefined],
-      ["2026-07-06T23:59:50.000Z", 10, 10, 10, 10, 0, true],
+    expect(filled.map((b) => [b.bucketStart, b.o, b.h, b.l, b.c, b.v, b.synthetic, b.gap])).toEqual([
+      ["2026-07-06T23:59:40Z", 10, 10, 10, 10, 100, undefined, true],
+      ["2026-07-06T23:59:50.000Z", 10, 10, 10, 10, 0, true, undefined],
     ]);
   });
 
@@ -214,12 +214,12 @@ describe("ChartController", () => {
 
   it("renders a confirmed Data Gap as empty time-scale slots", () => {
     const bars = [
-      tenSecondBar("2026-07-06T13:30:00Z", 10),
+      { ...tenSecondBar("2026-07-06T13:30:00Z", 10), gap: true },
       { ...tenSecondBar("2026-07-06T13:30:30Z", 11), gap: true },
     ];
     const filled = fillEmptyTenSecondSlots(bars, Date.parse("2026-07-06T13:30:40Z"));
     expect(filled.map((b) => [b.bucketStart, b.synthetic, b.dataGap, b.gap])).toEqual([
-      ["2026-07-06T13:30:00Z", undefined, undefined, undefined],
+      ["2026-07-06T13:30:00Z", undefined, undefined, true],
       ["2026-07-06T13:30:10.000Z", undefined, true, undefined],
       ["2026-07-06T13:30:20.000Z", undefined, true, undefined],
       ["2026-07-06T13:30:30Z", undefined, undefined, true],

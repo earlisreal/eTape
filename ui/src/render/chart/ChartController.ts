@@ -1057,7 +1057,8 @@ export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number, openDDown = 
       // Do not carry yesterday's close into a new session. A new session gets
       // No-Trade Bars only after its first real bar arrives.
       if (sessionAt(ms) !== session) break;
-      const { gap: _gap, ...withoutGap } = base;
+      const withoutGap = { ...base };
+      delete withoutGap.gap;
       out.push({ ...withoutGap, bucketStart: new Date(ms).toISOString(), o: base.c, h: base.c, l: base.c, c: base.c, v: 0,
         inProgress: false, synthetic: true });
     }
@@ -1068,7 +1069,8 @@ export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number, openDDown = 
     if (session === "closed") return;
     for (let ms = fromMs + 10_000; ms < limitMs; ms += 10_000) {
       if (sessionAt(ms) !== session) break;
-      const { gap: _gap, ...withoutGap } = base;
+      const withoutGap = { ...base };
+      delete withoutGap.gap;
       out.push({ ...withoutGap, bucketStart: new Date(ms).toISOString(), inProgress: false, dataGap: true });
     }
   };

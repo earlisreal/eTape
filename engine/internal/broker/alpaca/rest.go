@@ -67,10 +67,6 @@ func (rc *restClient) doWithHeaders(ctx context.Context, method, path string, bo
 	return rc.doHTTPWithHeaders(ctx, method, path, body, extra)
 }
 
-func (rc *restClient) doHTTP(ctx context.Context, method, path string, body io.Reader) (*http.Response, error) {
-	return rc.doHTTPWithHeaders(ctx, method, path, body, nil)
-}
-
 func (rc *restClient) doHTTPWithHeaders(ctx context.Context, method, path string, body io.Reader, extra http.Header) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, method, rc.base+path, body)
 	if err != nil {

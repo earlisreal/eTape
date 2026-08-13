@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -74,9 +75,27 @@ const (
 // matching main.go's own -demo wiring exactly).
 func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndScannerConsistent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	st := openStore(t)
+	// Keep the md writer alive until backfill workers finish their synchronous
+	// history barriers; canceling the shared test context first can strand one.
+	mdCtx, cancelMD := context.WithCancel(context.Background())
+	backfillCtx, cancelBackfill := context.WithCancel(context.Background())
+	var backfillWG sync.WaitGroup
+	hubDone := make(chan struct{})
+	mdDone := make(chan struct{})
+	mdStarted, hubStarted := false, false
+	t.Cleanup(func() {
+		cancel()
+		if hubStarted {
+			<-hubDone
+		}
+		backfillWG.Wait()
+		cancelBackfill()
+		if mdStarted {
+			cancelMD()
+			<-mdDone
+		}
+	})
 	clk := clock.NewFake(time.Date(2026, 1, 5, 15, 0, 0, 0, time.UTC))
 	nowMs := clk.Now().UnixMilli()
 
@@ -136,7 +155,11 @@ func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndScannerConsistent(t *testing.T)
 	// daily/intraday providers, no tail fetcher -- Backfill only warm-starts
 	// from what gen.Seed already archived in st). ---
 	mdCore := md.New(md.Config{TapeRing: 1024, AnchorSecs: 34200})
-	go func() { _ = mdCore.Run(ctx) }()
+	mdStarted = true
+	go func() {
+		defer close(mdDone)
+		_ = mdCore.Run(mdCtx)
+	}()
 
 	execCore := exec.NewCore(exec.CoreConfig{
 		Store: st, Brokers: map[exec.VenueID]exec.Broker{}, Clock: clock.System{},
@@ -151,7 +174,11 @@ func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndScannerConsistent(t *testing.T)
 		MD: 15 * time.Millisecond, Account: 50 * time.Millisecond, Position: 30 * time.Millisecond,
 		Buf: 4096, TapeCap: 100, NewsCap: 100, FillsCap: 100, EventsCap: 100, OutBuf: 256,
 	}, execCore, st, mdCore, nil, nil, nil, nil)
-	go func() { _ = hub.Run(ctx) }()
+	hubStarted = true
+	go func() {
+		defer close(hubDone)
+		_ = hub.Run(ctx)
+	}()
 	go forwardMD(ctx, mdCore, hub)
 
 	sf := synth.NewFeed(gen, st, clk)
@@ -159,8 +186,10 @@ func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndScannerConsistent(t *testing.T)
 
 	orch := backfill.New(nil, nil, nil, mdCore, st, clk, backfill.Config{})
 	hub.SetBackfill(func(sym string, done func(ok bool)) {
+		backfillWG.Add(1)
 		go func() {
-			err := orch.Backfill(ctx, sym)
+			defer backfillWG.Done()
+			err := orch.Backfill(backfillCtx, sym)
 			if done != nil {
 				done(err == nil)
 			}
