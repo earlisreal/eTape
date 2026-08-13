@@ -2,7 +2,7 @@
 import { useContext } from "react";
 import { createPortal } from "react-dom";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, within, fireEvent, act, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, within, fireEvent, act, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "./ThemeProvider";
 import { ToastProvider } from "./Toast";
 import { LinkGroups } from "./linkGroups";
@@ -14,13 +14,42 @@ import { PanelHeaderSlotContext, PanelHeaderActionsSlotContext } from "./panels/
 import type { PanelConfig } from "./workspace";
 import type { AckMsg, SnapshotMsg } from "../wire/contract";
 
-// jsdom has no ResizeObserver; PanelFrame's host-size wiring only needs observe/disconnect.
+// jsdom has no ResizeObserver; keep the mock controllable so responsive-title
+// tests can fire a resize for the actual title slot.
+const resizeObservers = new Set<MockResizeObserver>();
 class MockResizeObserver {
-  observe(): void {}
-  unobserve(): void {}
-  disconnect(): void {}
+  private readonly targets = new Set<Element>();
+
+  constructor(private readonly callback: ResizeObserverCallback) {
+    resizeObservers.add(this);
+  }
+
+  observe(target: Element): void { this.targets.add(target); }
+  unobserve(target: Element): void { this.targets.delete(target); }
+  disconnect(): void {
+    this.targets.clear();
+    resizeObservers.delete(this);
+  }
+  trigger(target: Element): void {
+    if (!this.targets.has(target)) return;
+    this.callback([{ target, contentRect: target.getBoundingClientRect() } as ResizeObserverEntry], this as unknown as ResizeObserver);
+  }
 }
 vi.stubGlobal("ResizeObserver", MockResizeObserver);
+afterEach(cleanup);
+
+function setElementWidth(element: Element, width: number): void {
+  Object.defineProperty(element, "getBoundingClientRect", {
+    configurable: true,
+    value: () => ({ width, height: 12 } as DOMRect),
+  });
+}
+
+function triggerResize(element: Element): void {
+  act(() => {
+    for (const observer of resizeObservers) observer.trigger(element);
+  });
+}
 
 // Mock lightweight-charts so the panel test never touches a real canvas.
 // timeScaleApi is a stable object (not a fresh literal per call) so a test can hold
@@ -118,6 +147,21 @@ function renderFrame(opts: { panelId?: string; group?: PanelConfig["group"]; set
     </ThemeProvider>,
   );
   return { container, unmount, onConfigChange, onGroupChange, onClose, api, linkGroups, demandRegistry, stores };
+}
+
+function renderTapeFrame() {
+  const realTapeDef = PANELS.tape;
+  PANELS.tape = { ...realTapeDef, component: () => null };
+  const frame = renderFrame({ panelId: "tape", group: null, settings: { symbol: "US.AAPL" } });
+  return { ...frame, restore: () => { PANELS.tape = realTapeDef; } };
+}
+
+function setTitleGeometry(container: HTMLElement, slotWidth: number, fullTitleWidth: number): void {
+  const slot = within(container).getByTestId("panel-title-slot");
+  const measurement = within(container).queryByTestId("panel-title-measurement");
+  setElementWidth(slot, slotWidth);
+  if (measurement) setElementWidth(measurement, fullTitleWidth);
+  triggerResize(slot);
 }
 
 const detailMsg = (symbol: string, shortSellRestricted: boolean): SnapshotMsg => ({
@@ -228,6 +272,61 @@ describe("PanelFrame", () => {
 
     fireEvent.mouseLeave(btn);
     expect(btn.style.boxShadow).toBe("");
+  });
+});
+
+describe("PanelFrame — responsive titles", () => {
+  it("shows the full tape title when the actual title slot is wide enough", () => {
+    const frame = renderTapeFrame();
+    try {
+      setTitleGeometry(frame.container, 120, 90);
+      expect(screen.getByTestId("panel-title").textContent).toBe("Time & Sales");
+    } finally {
+      frame.unmount();
+      frame.restore();
+    }
+  });
+
+  it("shows T&S when the actual title slot is narrower than the full title", () => {
+    const frame = renderTapeFrame();
+    try {
+      setTitleGeometry(frame.container, 40, 90);
+      expect(screen.getByTestId("panel-title").textContent).toBe("T&S");
+      const slot = within(frame.container).getByTestId("panel-title-slot") as HTMLElement;
+      expect(slot.style.whiteSpace).toBe("nowrap");
+      expect(slot.style.overflow).toBe("hidden");
+    } finally {
+      frame.unmount();
+      frame.restore();
+    }
+  });
+
+  it("restores the full title when the title slot grows again", () => {
+    const frame = renderTapeFrame();
+    try {
+      const header = within(frame.container).getByTestId("panel-title-slot").parentElement as HTMLElement;
+      setElementWidth(header, 400);
+      setTitleGeometry(frame.container, 40, 90);
+      expect(screen.getByTestId("panel-title").textContent).toBe("T&S");
+
+      // The overall header stays the same; only the space left by neighboring
+      // content changes. That is the measurement the title should respond to.
+      setTitleGeometry(frame.container, 120, 90);
+      expect(screen.getByTestId("panel-title").textContent).toBe("Time & Sales");
+    } finally {
+      frame.unmount();
+      frame.restore();
+    }
+  });
+
+  it("does not abbreviate a panel without a short title", () => {
+    const frame = renderFrame();
+    try {
+      expect(screen.getByText("Stock Info")).toBeTruthy();
+      expect(within(frame.container).queryByTestId("panel-title-slot")).toBeNull();
+    } finally {
+      frame.unmount();
+    }
   });
 });
 
@@ -625,7 +724,7 @@ describe("PanelFrame — headerActions slot (tape panel)", () => {
     PANELS["tape"] = { ...realTapeDef, component: ActionsSlotProbe };
     try {
       const { container } = renderFrame({ panelId: "tape", group: null, settings: { symbol: "US.AAPL" } });
-      expect(within(container).getByText("Time & Sales")).toBeTruthy(); // title still shown, unlike headerControls
+      expect(within(container).getByTestId("panel-title").textContent).toBe("Time & Sales"); // title still shown, unlike headerControls
       const probe = within(container).getByTestId("actions-probe");
       expect(probe.textContent).toBe("portaled");
       const header = container.querySelector(".ledger-header");

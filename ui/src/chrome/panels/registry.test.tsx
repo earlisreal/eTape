@@ -53,6 +53,12 @@ describe("chart panel subscribes to fills", () => {
 });
 
 describe("catalog metadata", () => {
+  it("keeps the canonical tape title and its responsive short title", () => {
+    expect(PANELS.tape.title).toBe("Time & Sales");
+    expect(PANELS.tape.shortTitle).toBe("T&S");
+    expect(CATALOG.find((panel) => panel.panelId === "tape")?.title).toBe("Time & Sales");
+  });
+
   it("every non-dev panel has title/glyph/description", () => {
     for (const [id, def] of Object.entries(PANELS)) {
       if (isDevPanel(id)) continue;

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
 import type { DockviewPanelApi } from "dockview";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { HoverButton } from "./controls/HoverButton";
@@ -21,6 +21,53 @@ import { canStartTypeToLoad, reduceTypeToLoad, PRINTABLE_SYMBOL_CHAR, type TypeT
 
 const swatch = (g: LinkGroup, palette: Palette): string =>
   g === null ? "transparent" : { red: palette.linkRed, green: palette.linkGreen, blue: palette.linkBlue, yellow: palette.linkYellow }[g];
+
+function ResponsivePanelTitle({ title, shortTitle, className, style }: {
+  title: string;
+  shortTitle?: string | undefined;
+  className?: string;
+  style?: CSSProperties;
+}): JSX.Element {
+  const slotRef = useRef<HTMLSpanElement | null>(null);
+  const measurementRef = useRef<HTMLSpanElement | null>(null);
+  const [showShortTitle, setShowShortTitle] = useState(false);
+
+  const measure = useCallback(() => {
+    const slot = slotRef.current;
+    const fullTitle = measurementRef.current;
+    if (!slot || !fullTitle || !shortTitle) return;
+    const next = fullTitle.getBoundingClientRect().width > slot.getBoundingClientRect().width;
+    setShowShortTitle((previous) => previous === next ? previous : next);
+  }, [shortTitle, title]);
+
+  useLayoutEffect(() => { measure(); }, [measure]);
+
+  useEffect(() => {
+    if (!shortTitle) return;
+    const slot = slotRef.current;
+    const fullTitle = measurementRef.current;
+    if (!slot || !fullTitle) return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(slot);
+    ro.observe(fullTitle);
+    return () => ro.disconnect();
+  }, [measure, shortTitle]);
+
+  return (
+    <span ref={slotRef} data-testid="panel-title-slot" className={className}
+      style={{ ...style, flex: "1 1 0", minWidth: 0, overflow: "hidden", whiteSpace: "nowrap" }}>
+      {shortTitle && (
+        <span ref={measurementRef} data-testid="panel-title-measurement" aria-hidden="true"
+          style={{ position: "absolute", display: "inline-block", visibility: "hidden", pointerEvents: "none", whiteSpace: "nowrap" }}>
+          {title}
+        </span>
+      )}
+      <span data-testid="panel-title" style={{ whiteSpace: "nowrap" }}>
+        {showShortTitle && shortTitle ? shortTitle : title}
+      </span>
+    </span>
+  );
+}
 
 export function PanelFrame(
   { config, stores, scheduler, linkGroups, demandRegistry, commands, onConfigChange, onGroupChange, onClose, api }: {
@@ -388,9 +435,14 @@ export function PanelFrame(
           )
         )}
         {!def?.headerControls && (
-          <span className="serif" style={{ fontWeight: def?.symbolBearing ? 400 : 600, color: def?.symbolBearing ? palette.textMuted : palette.text }}>
-            {def?.title ?? config.panelId}
-          </span>
+          def?.shortTitle ? (
+            <ResponsivePanelTitle title={def.title} shortTitle={def.shortTitle}
+              className="serif" style={{ fontWeight: def.symbolBearing ? 400 : 600, color: def.symbolBearing ? palette.textMuted : palette.text }} />
+          ) : (
+            <span className="serif" style={{ fontWeight: def?.symbolBearing ? 400 : 600, color: def?.symbolBearing ? palette.textMuted : palette.text, whiteSpace: "nowrap" }}>
+              {def?.title ?? config.panelId}
+            </span>
+          )
         )}
         {tl.editing && (
           <span className="mono" data-testid="panel-symbol-hint" style={{ fontSize: 10, color: palette.textMuted }}>
@@ -400,9 +452,9 @@ export function PanelFrame(
         {def?.headerControls ? (
           <div ref={setHeaderSlot} data-testid="panel-header-slot" style={{ flex: 1, minWidth: 0, display: "flex",
             alignItems: "center", gap: 2, overflow: "hidden", fontFamily: '"IBM Plex Sans", system-ui, sans-serif' }} />
-        ) : (
+        ) : !def?.shortTitle ? (
           <span style={{ flex: 1 }} />
-        )}
+        ) : null}
         {def?.headerActions && (
           <div ref={setActionsSlot} data-testid="panel-header-actions"
             style={{ display: "inline-flex", alignItems: "center", gap: 2, flex: "0 0 auto" }} />

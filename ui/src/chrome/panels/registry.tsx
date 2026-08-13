@@ -60,6 +60,7 @@ export interface PanelDef {
   component: FC<PanelProps>;
   topics: TopicName[];
   title: string;
+  shortTitle?: string;
   glyph: string;
   description: string;
   symbolBearing: boolean;
@@ -127,6 +128,7 @@ export const PANELS: Record<string, PanelDef> = {
     component: TapePanel,
     topics: ["md.tape", "md.tape.status"],
     title: "Time & Sales",
+    shortTitle: "T&S",
     glyph: "⋮⋮",
     description: "Live prints, buy/sell colored",
     symbolBearing: true,
