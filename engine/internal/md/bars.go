@@ -137,6 +137,18 @@ func (e *barEngine) markGaps() {
 	}
 }
 
+func (e *barEngine) seedAnchor(symbol string, price, fallback float64, tsMs int64) {
+	if price <= 0 {
+		price = fallback
+	}
+	if price <= 0 {
+		return
+	}
+	sb := e.sym(symbol)
+	sb.agg10.seedAnchorAt(price, 0, tsMs)
+	sb.shadow.seedAnchorAt(price, 0, tsMs)
+}
+
 func (e *barEngine) finalizedBars(symbol string, tf session.Timeframe) []Bar {
 	sb := e.symbols[symbol]
 	if sb == nil {
@@ -202,6 +214,7 @@ func (e *barEngine) apply1m(c *Core, bars []feed.Bar) {
 	sb := e.sym(bars[0].Symbol)
 	oneM := sb.series[session.TF1m]
 	for _, raw := range bars {
+		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs)
 		nb := Bar{
 			Symbol: raw.Symbol, TF: session.TF1m, BucketMs: raw.BucketMs,
 			O: raw.O, H: raw.H, L: raw.L, C: raw.C, V: raw.Volume,
@@ -295,6 +308,7 @@ func (e *barEngine) seedHistory1m(c *Core, symbol string, bars []feed.Bar) {
 		if raw.BucketMs == forming {
 			continue // the live stream owns the forming bar
 		}
+		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs)
 		nb := Bar{
 			Symbol: symbol, TF: session.TF1m, BucketMs: raw.BucketMs,
 			O: raw.O, H: raw.H, L: raw.L, C: raw.C, V: raw.Volume,
@@ -336,6 +350,7 @@ func (e *barEngine) seedHistory10s(c *Core, symbol string, bars []feed.Bar) {
 			O: raw.O, H: raw.H, L: raw.L, C: raw.C, V: raw.Volume,
 		}
 		s10.upsert(nb)
+		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs)
 	}
 	c.seeding = false
 	e.emitSeedSnapshots(c, sb, []session.Timeframe{session.TF10s})
@@ -386,6 +401,7 @@ func (e *barEngine) seedOlder1m(c *Core, symbol string, bars []feed.Bar) {
 			Symbol: symbol, TF: session.TF1m, BucketMs: raw.BucketMs,
 			O: raw.O, H: raw.H, L: raw.L, C: raw.C, V: raw.Volume,
 		}
+		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs)
 		e.fillDelta(sb, &nb)
 		if oneM.upsert(nb) {
 			c.barOut(nb) // suppressed while seeding

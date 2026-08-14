@@ -28,7 +28,12 @@ describe("computeLegendView", () => {
   it("uses display-only synthetic bars at their own logical index", () => {
     const display = [bars[0], { ...bars[0], bucketStart: "2026-07-08T13:30:10Z", o: 11, h: 11, l: 11, c: 11, v: 0, synthetic: true }];
     const v = computeLegendView(display, emptyReader, [], LIGHT, 1);
-    expect(v).toMatchObject({ o: 11, h: 11, l: 11, c: 11, volume: 0, changePct: 0 });
+    expect(v).toMatchObject({ o: 11, h: 11, l: 11, c: 11, volume: 0, changePct: 0, barState: "noTrade" });
+  });
+
+  it("identifies a real Volume-Only Bar without inferring from its shape", () => {
+    const display = [{ ...bars[0], volumeOnly: true }];
+    expect(computeLegendView(display, emptyReader, [], LIGHT, 0).barState).toBe("volumeOnly");
   });
 
   it("keeps a Data Gap slot empty in the legend", () => {

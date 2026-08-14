@@ -93,14 +93,17 @@ func TestDecodePushTicker(t *testing.T) {
 				Time:     proto.String("2026-07-02 12:33:20"),
 				Sequence: proto.Int64(7001), Timestamp: proto.Float64(1782146000.123),
 				Price: proto.Float64(309.10), Volume: proto.Int64(200), Turnover: proto.Float64(61820),
-				Dir:  proto.Int32(int32(qotcommon.TickerDirection_TickerDirection_Bid)),
-				Type: proto.Int32(int32(qotcommon.TickerType_TickerType_Automatch)),
+				Dir:      proto.Int32(int32(qotcommon.TickerDirection_TickerDirection_Bid)),
+				RecvTime: proto.Float64(1782146000.321),
+				Type:     proto.Int32(int32(qotcommon.TickerType_TickerType_Automatch)), TypeSign: proto.Int32(85),
+				PushDataType: proto.Int32(int32(qotcommon.PushDataType_PushDataType_Realtime)),
 			}, {
 				Time:     proto.String("2026-07-02 12:33:20"),
 				Sequence: proto.Int64(7002), Timestamp: proto.Float64(1782146000.500),
 				Price: proto.Float64(309.05), Volume: proto.Int64(100), Turnover: proto.Float64(30905),
 				Dir:  proto.Int32(int32(qotcommon.TickerDirection_TickerDirection_Ask)),
-				Type: proto.Int32(int32(qotcommon.TickerType_TickerType_OddLot)),
+				Type: proto.Int32(int32(qotcommon.TickerType_TickerType_OddLot)), TypeSign: proto.Int32(73),
+				PushDataType: proto.Int32(int32(qotcommon.PushDataType_PushDataType_Cache)),
 			}},
 		},
 	}
@@ -114,14 +117,67 @@ func TestDecodePushTicker(t *testing.T) {
 		t.Fatalf("got %#v, want TicksEvent with 2 ticks", evs)
 	}
 	t0 := te.Ticks[0]
-	if t0.Symbol != "US.AAPL" || t0.Seq != 7001 || t0.TsMs != 1782146000123 || t0.Dir != feed.Buy {
+	if t0.Symbol != "US.AAPL" || t0.Seq != 7001 || t0.TsMs != 1782146000123 || t0.Dir != feed.Buy ||
+		t0.RecvTsMs != 1782146000321 || t0.Condition != feed.TradeConditionAutomaticMatch || t0.RawType != 1 ||
+		t0.TypeSign != 85 || t0.PushDataType != 1 || t0.Delivery != feed.DeliveryRealtime {
 		t.Fatalf("tick[0] = %+v", t0)
 	}
 	if t0.Type != feed.TransactionRegular || te.Ticks[1].Type != feed.TransactionOddLot {
 		t.Fatalf("transaction types = (%v, %v)", t0.Type, te.Ticks[1].Type)
 	}
+	if te.Ticks[1].Condition != feed.TradeConditionOddLot || te.Ticks[1].Delivery != feed.DeliveryCache || te.Ticks[1].TypeSign != 73 {
+		t.Fatalf("tick[1] evidence = %+v", te.Ticks[1])
+	}
 	if te.Ticks[1].Dir != feed.Sell {
 		t.Fatalf("tick[1].Dir = %v, want Sell", te.Ticks[1].Dir)
+	}
+}
+
+func TestDecodeTradeReportConditionIsExhaustive(t *testing.T) {
+	cases := []struct {
+		raw  qotcommon.TickerType
+		want feed.TradeReportCondition
+	}{
+		{qotcommon.TickerType_TickerType_Unknown, feed.TradeConditionUnknown},
+		{qotcommon.TickerType_TickerType_Automatch, feed.TradeConditionAutomaticMatch},
+		{qotcommon.TickerType_TickerType_Late, feed.TradeConditionLate},
+		{qotcommon.TickerType_TickerType_NoneAutomatch, feed.TradeConditionNonAutomaticMatch},
+		{qotcommon.TickerType_TickerType_InterAutomatch, feed.TradeConditionSameBrokerAutomaticMatch},
+		{qotcommon.TickerType_TickerType_InterNoneAutomatch, feed.TradeConditionSameBrokerNonAutomaticMatch},
+		{qotcommon.TickerType_TickerType_OddLot, feed.TradeConditionOddLot},
+		{qotcommon.TickerType_TickerType_Auction, feed.TradeConditionAuction},
+		{qotcommon.TickerType_TickerType_Bulk, feed.TradeConditionBunchedTrade},
+		{qotcommon.TickerType_TickerType_Crash, feed.TradeConditionCashSale},
+		{qotcommon.TickerType_TickerType_CrossMarket, feed.TradeConditionIntermarketSweep},
+		{qotcommon.TickerType_TickerType_BulkSold, feed.TradeConditionBunchedSold},
+		{qotcommon.TickerType_TickerType_FreeOnBoard, feed.TradeConditionPriceVariation},
+		{qotcommon.TickerType_TickerType_Rule127Or155, feed.TradeConditionRule127Or155},
+		{qotcommon.TickerType_TickerType_Delay, feed.TradeConditionDelayed},
+		{qotcommon.TickerType_TickerType_MarketCenterClosePrice, feed.TradeConditionMarketCenterOfficialClose},
+		{qotcommon.TickerType_TickerType_NextDay, feed.TradeConditionNextDaySettlement},
+		{qotcommon.TickerType_TickerType_MarketCenterOpening, feed.TradeConditionMarketCenterOpening},
+		{qotcommon.TickerType_TickerType_PriorReferencePrice, feed.TradeConditionPriorReferencePrice},
+		{qotcommon.TickerType_TickerType_MarketCenterOpenPrice, feed.TradeConditionMarketCenterOfficialOpen},
+		{qotcommon.TickerType_TickerType_Seller, feed.TradeConditionSeller},
+		{qotcommon.TickerType_TickerType_T, feed.TradeConditionFormT},
+		{qotcommon.TickerType_TickerType_ExtendedTradingHours, feed.TradeConditionExtendedHours},
+		{qotcommon.TickerType_TickerType_Contingent, feed.TradeConditionContingent},
+		{qotcommon.TickerType_TickerType_AvgPrice, feed.TradeConditionAveragePrice},
+		{qotcommon.TickerType_TickerType_OTCSold, feed.TradeConditionOTCSold},
+		{qotcommon.TickerType_TickerType_OddLotCrossMarket, feed.TradeConditionOddLotIntermarketSweep},
+		{qotcommon.TickerType_TickerType_DerivativelyPriced, feed.TradeConditionDerivativelyPriced},
+		{qotcommon.TickerType_TickerType_ReOpeningPriced, feed.TradeConditionReopeningPrice},
+		{qotcommon.TickerType_TickerType_ClosingPriced, feed.TradeConditionClosingPrice},
+		{qotcommon.TickerType_TickerType_ComprehensiveDelayPrice, feed.TradeConditionCorrectedComprehensiveLatePrice},
+		{qotcommon.TickerType_TickerType_Overseas, feed.TradeConditionOverseas},
+	}
+	for _, tc := range cases {
+		if got := decodeTradeReportCondition(int32(tc.raw)); got != tc.want {
+			t.Errorf("decodeTradeReportCondition(%d) = %s, want %s", tc.raw, got, tc.want)
+		}
+	}
+	if got := decodeTradeReportCondition(999); got != feed.TradeConditionUnknown {
+		t.Fatalf("unrecognized condition = %s, want unknown", got)
 	}
 }
 

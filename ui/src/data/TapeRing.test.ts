@@ -8,7 +8,7 @@ import { TapeRing } from "./TapeRing";
 import type { SnapshotMsg, DeltaMsg, Tick } from "../wire/contract";
 
 const tick = (symbol: string, price: number): Tick =>
-  ({ symbol, price, size: 100, direction: "BUY", transactionType: "regular", significance: "none", ts: `t${price}` });
+  ({ symbol, price, size: 100, direction: "BUY", transactionType: "regular", significance: "none", condition: "automaticMatch", rawType: 1, rawTypeSign: 0, deliverySource: "realtime", rangeEligible: true, lastEligible: true, volumeEligible: true, ts: `t${price}` });
 const snap = (ticks: Tick[]): SnapshotMsg => ({ kind: "snapshot", topic: "md.tape", payload: ticks });
 const delta = (ticks: Tick[]): DeltaMsg => ({ kind: "delta", topic: "md.tape", payload: ticks });
 

@@ -28,6 +28,16 @@ export type OrderStatus =
   | "CANCELED" | "REJECTED" | "EXPIRED" | "BLOCKED" | "REPLACED";
 export type TickDirection = "BUY" | "SELL" | "NEUTRAL";
 export type TickTransactionType = "regular" | "oddLot" | "intermarketSweep" | "intermarketSweepOddLot" | "excluded" | "unknown";
+export type TickTradeReportCondition =
+  | "unknown" | "automaticMatch" | "late" | "nonAutomaticMatch"
+  | "sameBrokerAutomaticMatch" | "sameBrokerNonAutomaticMatch" | "oddLot" | "auction"
+  | "bunchedTrade" | "cashSale" | "intermarketSweep" | "bunchedSold" | "priceVariation"
+  | "rule127Or155" | "delayed" | "marketCenterOfficialClose" | "nextDaySettlement"
+  | "marketCenterOpening" | "priorReferencePrice" | "marketCenterOfficialOpen" | "seller"
+  | "formT" | "extendedHours" | "contingent" | "averagePrice" | "otcSold"
+  | "oddLotIntermarketSweep" | "derivativelyPriced" | "reopeningPrice" | "closingPrice"
+  | "correctedComprehensiveLatePrice" | "overseas";
+export type TickDeliverySource = "unknown" | "realtime" | "disconnectBackfill" | "cache";
 export type SignificanceLevel = "none" | "large" | "exceptional";
 export type SignificancePool = "RTH" | "EXTENDED";
 export type SignificanceState = "warming" | "active" | "closed";
@@ -125,6 +135,13 @@ export interface Tick {
   direction: TickDirection;
   transactionType: TickTransactionType;
   significance: SignificanceLevel;
+  condition: TickTradeReportCondition;
+  rawType: number /* int32 */;
+  rawTypeSign: number /* int32 */;
+  deliverySource: TickDeliverySource;
+  rangeEligible: boolean;
+  lastEligible: boolean;
+  volumeEligible: boolean;
   ts: string;
 }
 export interface SignificanceStatus {
@@ -150,6 +167,7 @@ export interface Bar {
   v: number /* int64 */;
   inProgress: boolean;
   gap?: boolean;
+  volumeOnly?: boolean;
 }
 export interface IndicatorPoint {
   timeMs: number /* int64 */;

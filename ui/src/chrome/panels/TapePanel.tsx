@@ -19,7 +19,7 @@ import { PanelHeaderActionsSlotContext } from "./headerSlot";
 import { IconGear } from "./tv/tvIcons";
 import { TapeSettingsDialog } from "./TapeSettingsDialog";
 import {
-  adjustAnchor, buildTapeRows, liveView, TAPE_ROW_H, type TapeView,
+  adjustAnchor, buildTapeRows, conditionLabel, deliveryLabel, liveView, TAPE_ROW_H, type TapeRow, type TapeView,
 } from "../../render/tape/tapeState";
 import { paintTape } from "../../render/tape/paintTape";
 import { computeTapeColumnLayout } from "../../render/tape/tapeLayout";
@@ -27,6 +27,12 @@ import { perf } from "../../perf/PerfMonitor";
 
 const HEADER_H = 26;
 const COLHEAD_H = 16;
+
+interface TapeHover {
+  row: TapeRow;
+  x: number;
+  y: number;
+}
 
 export function TapePanel({ config, stores, scheduler, width, height, linkGroups, onConfigChange, group: groupProp }: PanelProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -38,6 +44,8 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
   const configuredSymbol = typeof config.settings.symbol === "string" ? config.settings.symbol : "US.AAPL";
   const [selectedSymbol, setSelectedSymbol] = useState(configuredSymbol);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [hoverEnabled, setHoverEnabled] = useState(config.settings.hoverEnabled === true);
+  const [hover, setHover] = useState<TapeHover | null>(null);
   const statuses = useSyncExternalStore(
     (cb) => stores.tapeStatus.subscribe(cb),
     () => stores.tapeStatus.getSnapshot(),
@@ -128,6 +136,29 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
       forceRef.current++;
     };
     canvas.addEventListener("wheel", onWheel, { passive: false });
+    const onMouseMove = (e: MouseEvent): void => {
+      const rect = canvas.getBoundingClientRect();
+      const canvasH = sizeRef.current.height - (pausedRef.current ? HEADER_H : 0) - COLHEAD_H;
+      const rowIndex = Math.floor((e.clientY - rect.top) / TAPE_ROW_H);
+      if (rowIndex < 0) {
+        setHover(null);
+        return;
+      }
+      const { rows } = buildTapeRows(stores.tape.source(symbolRef.current), viewRef.current, {
+        symbol: symbolRef.current, minSize: minSizeRef.current, maxRows: Math.ceil(canvasH / TAPE_ROW_H) + 1,
+      });
+      const row = rows[rowIndex];
+      if (!row) {
+        setHover(null);
+        return;
+      }
+      setHover({ row, x: e.clientX + 10, y: e.clientY + 10 });
+    };
+    const onMouseLeave = (): void => setHover(null);
+    if (hoverEnabled) {
+      canvas.addEventListener("mousemove", onMouseMove);
+      canvas.addEventListener("mouseleave", onMouseLeave);
+    }
 
     let lastTapeRev = -1;
     let lastForce = -1;
@@ -186,8 +217,10 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
       off();
       offLink();
       canvas.removeEventListener("wheel", onWheel);
+      canvas.removeEventListener("mousemove", onMouseMove);
+      canvas.removeEventListener("mouseleave", onMouseLeave);
     };
-  }, [config.id]);
+  }, [config.id, hoverEnabled]);
 
   // Portaled into PanelFrame's ledger-header actions slot, beside the close
   // button (see headerSlot.ts's PanelHeaderActionsSlotContext). undefined (no
@@ -242,12 +275,34 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
         )}
       </div>
       <canvas ref={canvasRef} style={{ display: "block", flex: 1, minHeight: 0 }} />
+      {hoverEnabled && hover && (
+        <div
+          role="tooltip"
+          data-testid="tape-hover"
+          style={{
+            position: "fixed", left: hover.x, top: hover.y, zIndex: 20, pointerEvents: "none",
+            padding: "6px 8px", border: `1px solid ${palette.border}`, borderRadius: 3,
+            background: palette.surface, color: palette.text, font: `11px ${FONTS.mono}`, lineHeight: 1.35,
+            boxShadow: "0 3px 10px rgba(0,0,0,.22)", whiteSpace: "nowrap",
+          }}
+        >
+          <div>{conditionLabel(hover.row.condition)} · {hover.row.badge || "regular"}</div>
+          <div>range {hover.row.rangeEligible ? "yes" : "no"} · last {hover.row.lastEligible ? "yes" : "no"} · volume {hover.row.volumeEligible ? "yes" : "no"}</div>
+          <div>raw type {hover.row.rawType ?? "—"} · typeSign {hover.row.rawTypeSign ?? "—"}</div>
+          <div>source {deliveryLabel(hover.row.deliverySource)}</div>
+        </div>
+      )}
       {settingsOpen && (
-        <TapeSettingsDialog chrome={getTvChrome(mode)} minSize={minSize}
+        <TapeSettingsDialog chrome={getTvChrome(mode)} minSize={minSize} hoverEnabled={hoverEnabled}
           symbol={selectedSymbol}
           status={statuses[selectedSymbol]}
           onClose={() => setSettingsOpen(false)}
-          onApply={(v) => { setMinSize(v); onConfigChange({ minSize: v }); }} />
+          onApply={(v, nextHoverEnabled) => {
+            setMinSize(v);
+            setHoverEnabled(nextHoverEnabled);
+            if (!nextHoverEnabled) setHover(null);
+            onConfigChange({ minSize: v, hoverEnabled: nextHoverEnabled });
+          }} />
       )}
     </div>
   );

@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import { SymbolTapeRing } from "./TapeRing";
 import type { SnapshotMsg, DeltaMsg, Tick } from "../wire/contract";
 
-const tick = (price: number): Tick => ({ symbol: "US.AAPL", price, size: 100, direction: "BUY", transactionType: "regular", significance: "none", ts: `t${price}` });
+const tick = (price: number, over: Partial<Tick> = {}): Tick => ({ symbol: "US.AAPL", price, size: 100, direction: "BUY", transactionType: "regular", significance: "none", condition: "automaticMatch", rawType: 1, rawTypeSign: 0, deliverySource: "realtime", rangeEligible: true, lastEligible: true, volumeEligible: true, ts: `t${price}`, ...over });
 const snap = (ticks: Tick[]): SnapshotMsg => ({ kind: "snapshot", topic: "md.tape", key: "US.AAPL", payload: ticks });
 const delta = (ticks: Tick[]): DeltaMsg => ({ kind: "delta", topic: "md.tape", key: "US.AAPL", payload: ticks });
 
@@ -45,10 +45,31 @@ describe("SymbolTapeRing", () => {
     expect(r.latest(1)[0].price).toBe(9);
   });
 
+  it("retains condition evidence through append, wraparound, and snapshot replacement", () => {
+    const r = new SymbolTapeRing(3);
+    const odd = tick(2, {
+      condition: "oddLot", rawType: 6, rawTypeSign: 73, deliverySource: "cache",
+      rangeEligible: false, lastEligible: false, volumeEligible: true,
+    });
+    r.apply(snap([tick(1), odd]));
+    r.apply(delta([tick(3), tick(4)]));
+    expect(r.latest(3).find((t) => t.condition === "oddLot")).toMatchObject({
+      rawType: 6, rawTypeSign: 73, deliverySource: "cache",
+      rangeEligible: false, lastEligible: false, volumeEligible: true,
+    });
+
+    const unknown = tick(99, {
+      condition: "unknown", rawType: 999, rawTypeSign: 121, deliverySource: "disconnectBackfill",
+      rangeEligible: false, lastEligible: false, volumeEligible: false,
+    });
+    r.apply(snap([unknown]));
+    expect(r.tickBySeq(1)).toMatchObject({ condition: "unknown", rawType: 999, rawTypeSign: 121, deliverySource: "disconnectBackfill" });
+  });
+
   describe("sequence tracking (Plan 3 pause anchoring)", () => {
     // Named to avoid shadowing the file's existing top-level snapshot helper.
     const seqTick = (n: number): Tick =>
-      ({ symbol: "US.AAPL", price: 3.5, size: n, direction: "BUY", transactionType: "regular", significance: "none", ts: `2026-07-06T13:30:0${n % 10}Z` });
+      ({ symbol: "US.AAPL", price: 3.5, size: n, direction: "BUY", transactionType: "regular", significance: "none", condition: "automaticMatch", rawType: 1, rawTypeSign: 0, deliverySource: "realtime", rangeEligible: true, lastEligible: true, volumeEligible: true, ts: `2026-07-06T13:30:0${n % 10}Z` });
     const seqSnap = (ticks: Tick[]): SnapshotMsg => ({ kind: "snapshot", topic: "md.tape", payload: ticks });
     const seqDel = (ticks: Tick[]): DeltaMsg => ({ kind: "delta", topic: "md.tape", payload: ticks });
 

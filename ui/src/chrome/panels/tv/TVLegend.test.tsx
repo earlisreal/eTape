@@ -39,7 +39,7 @@ describe("TVLegend", () => {
   it("writes OHLC + indicator values imperatively via the handle", () => {
     const hRef: { current: TVLegendHandle | null } = { current: null };
     render(<Harness onToggle={() => {}} hRef={hRef} />);
-    hRef.current!.update({ o: 10, h: 12, l: 9.5, c: 11.5, changePct: 1.2, up: true, volume: 1_240_000,
+    hRef.current!.update({ o: 10, h: 12, l: 9.5, c: 11.5, changePct: 1.2, up: true, volume: 1_240_000, barState: null,
       indicators: [{ instanceId: "e1", label: "EMA 9 close", paneIndex: 0, values: [11.3], colors: [chrome.accent] }] });
     expect(screen.getByTestId("legend-c").textContent).toContain("11.5");
     expect(screen.getByTestId("legend-vol").textContent).toContain("1.24M");
@@ -81,7 +81,7 @@ describe("TVLegend", () => {
   it("writes an OPEN/CLOSE signal badge for a MACD row, tinted up/down", () => {
     const hRef: { current: TVLegendHandle | null } = { current: null };
     render(<Harness onToggle={() => {}} hRef={hRef} instances={[macd]} />);
-    hRef.current!.update({ o: 10, h: 12, l: 9.5, c: 11.5, changePct: 1.2, up: true, volume: null,
+    hRef.current!.update({ o: 10, h: 12, l: 9.5, c: 11.5, changePct: 1.2, up: true, volume: null, barState: null,
       indicators: [{ instanceId: "m1", label: "MACD 12 26 9", paneIndex: 1, values: [0.5, 0.3, 0.2],
         colors: [chrome.accent, chrome.accent, chrome.accent], signal: "open" }] });
     const badge = screen.getByTestId("legend-sig-m1");

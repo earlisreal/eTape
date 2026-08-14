@@ -97,13 +97,14 @@ type Core struct {
 	droppedUpdates atomic.Uint64
 
 	// Domain state — touched ONLY inside Run's goroutine.
-	books   *bookStore
-	quotes  *quoteStore
-	tapes   map[string]*ring
-	lastSeq map[string]int64 // per-symbol tick dedup high-water
-	lastDay map[string]int64 // ET day of lastSeq (sequences restart daily)
-	bars    *barEngine       // Task 11
-	inds    *indicatorSet    // Task 12
+	books       *bookStore
+	quotes      *quoteStore
+	tapes       map[string]*ring
+	lastSeq     map[string]int64 // per-symbol tick dedup high-water
+	lastDay     map[string]int64 // ET day of lastSeq (sequences restart daily)
+	eligibility map[string]*eligibilityState
+	bars        *barEngine    // Task 11
+	inds        *indicatorSet // Task 12
 
 	// seeding is true only while barEngine.seedHistory1m/seedDaily are
 	// looping over a history batch. It suppresses barOut's per-bar fan-out
@@ -123,18 +124,19 @@ func New(cfg Config) *Core {
 		cfg.AnchorSecs = session.AnchorSecsDefault
 	}
 	return &Core{
-		cfg:     cfg,
-		inbox:   make(chan inMsg, 1024),
-		updates: make(chan Update, 8192),
-		marks:   make(chan Mark, 1024),
-		bookOut: make(chan feed.Book, 1024),
-		books:   newBookStore(),
-		quotes:  newQuoteStore(),
-		tapes:   make(map[string]*ring),
-		lastSeq: make(map[string]int64),
-		lastDay: make(map[string]int64),
-		bars:    newBarEngine(cfg.AnchorSecs),
-		inds:    newIndicatorSet(),
+		cfg:         cfg,
+		inbox:       make(chan inMsg, 1024),
+		updates:     make(chan Update, 8192),
+		marks:       make(chan Mark, 1024),
+		bookOut:     make(chan feed.Book, 1024),
+		books:       newBookStore(),
+		quotes:      newQuoteStore(),
+		tapes:       make(map[string]*ring),
+		lastSeq:     make(map[string]int64),
+		lastDay:     make(map[string]int64),
+		eligibility: make(map[string]*eligibilityState),
+		bars:        newBarEngine(cfg.AnchorSecs),
+		inds:        newIndicatorSet(),
 	}
 }
 
@@ -353,7 +355,9 @@ func (c *Core) applyEvent(ev feed.Event) {
 			c.applyTicks(e)
 		}
 	case feed.QuoteEvent:
-		c.emit(QuoteUpdate{Quote: c.quotes.set(e.Quote)})
+		quote := c.quotes.set(e.Quote)
+		c.bars.seedAnchor(quote.Symbol, quote.Last, quote.PrevClose, quote.TsMs)
+		c.emit(QuoteUpdate{Quote: quote})
 	case feed.BookEvent:
 		stored := c.books.set(e.Book)
 		c.emit(BookUpdate{Book: stored})
@@ -394,6 +398,22 @@ func (c *Core) dedupTicks(symbol string, ticks []feed.Tick) []feed.Tick {
 	return accepted
 }
 
+func (c *Core) stampEligibility(ticks []feed.Tick) []feed.Tick {
+	if len(ticks) == 0 {
+		return ticks
+	}
+	symbol := ticks[0].Symbol
+	state := c.eligibility[symbol]
+	if state == nil {
+		state = &eligibilityState{}
+		c.eligibility[symbol] = state
+	}
+	for i := range ticks {
+		ticks[i] = state.stamp(ticks[i])
+	}
+	return ticks
+}
+
 // applyTicks dedups by (day, seq), appends to the tape, drives tick-derived
 // bars, and emits one TapeUpdate + one Mark per accepted batch.
 func (c *Core) applyTicks(e feed.TicksEvent) {
@@ -405,6 +425,7 @@ func (c *Core) applyTicks(e feed.TicksEvent) {
 	if len(accepted) == 0 {
 		return
 	}
+	accepted = c.stampEligibility(accepted)
 	tape := c.tapes[symbol]
 	if tape == nil {
 		tape = newRing(c.cfg.TapeRing)
@@ -415,8 +436,13 @@ func (c *Core) applyTicks(e feed.TicksEvent) {
 	}
 	c.bars.applyTicks(c, accepted) // Task 11 (10s + shadow 1m)
 	c.emit(TapeUpdate{Symbol: symbol, Ticks: accepted})
-	last := accepted[len(accepted)-1]
-	c.mark(Mark{Symbol: last.Symbol, Price: last.Price, TsMs: last.TsMs})
+	for i := len(accepted) - 1; i >= 0; i-- {
+		if accepted[i].LastEligible {
+			last := accepted[i]
+			c.mark(Mark{Symbol: last.Symbol, Price: last.Price, TsMs: last.TsMs})
+			break
+		}
+	}
 }
 
 // seedSessionTicks reconstructs tick-derived bars from a batch of persisted
@@ -432,6 +458,7 @@ func (c *Core) seedSessionTicks(symbol string, ticks []feed.Tick) {
 	if len(accepted) == 0 {
 		return
 	}
+	accepted = c.stampEligibility(accepted)
 	c.seeding = true
 	c.bars.applyTicks(c, accepted) // agg10 + shadow; barOut suppressed
 	c.seeding = false

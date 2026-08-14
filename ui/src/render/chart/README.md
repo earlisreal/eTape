@@ -6,12 +6,18 @@ not flow through React state.
 
 ## 10-second display
 
-The `10s` display contains real bars and completed No-Trade Bars, plus explicit
+The `10s` display contains real bars, explicit Volume-Only Bars, and completed No-Trade Bars, plus explicit
 time-scale whitespace for confirmed Data Gaps. The current incomplete interval
 is never fabricated. A No-Trade Bar is flat at the previous same-session real
 close with zero volume; it is not carried across premarket, regular, postmarket,
 overnight, or weekend boundaries, and a new
 session needs a real bar before quiet intervals can be filled.
+
+A Volume-Only Bar is a real eligible-volume bucket with no Price-Forming Print.
+It is flat at the prior trusted last-eligible close, retains real volume, and
+keeps ordinary candle styling; the legend labels it `volume only`. TypeScript
+does not infer this state from candle shape or volume. No-Trade Bars remain
+zero-volume synthetic display fills and are labeled separately.
 
 When the OpenD link is down, provisional No-Trade Bars are suppressed. A real
 bar marked `gap` confirms a Data Gap since the previous trustworthy real bar;

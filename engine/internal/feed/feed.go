@@ -42,18 +42,102 @@ const (
 	TransactionExcluded
 )
 
+// TradeReportCondition is the stable, feed-domain name for OpenD's primary
+// TickerType. RawType is retained on Tick for diagnostics; policy code uses
+// this enum and fails closed for Unknown.
+type TradeReportCondition uint8
+
+const (
+	TradeConditionUnknown TradeReportCondition = iota
+	TradeConditionAutomaticMatch
+	TradeConditionLate
+	TradeConditionNonAutomaticMatch
+	TradeConditionSameBrokerAutomaticMatch
+	TradeConditionSameBrokerNonAutomaticMatch
+	TradeConditionOddLot
+	TradeConditionAuction
+	TradeConditionBunchedTrade
+	TradeConditionCashSale
+	TradeConditionIntermarketSweep
+	TradeConditionBunchedSold
+	TradeConditionPriceVariation
+	TradeConditionRule127Or155
+	TradeConditionDelayed
+	TradeConditionMarketCenterOfficialClose
+	TradeConditionNextDaySettlement
+	TradeConditionMarketCenterOpening
+	TradeConditionPriorReferencePrice
+	TradeConditionMarketCenterOfficialOpen
+	TradeConditionSeller
+	TradeConditionFormT
+	TradeConditionExtendedHours
+	TradeConditionContingent
+	TradeConditionAveragePrice
+	TradeConditionOTCSold
+	TradeConditionOddLotIntermarketSweep
+	TradeConditionDerivativelyPriced
+	TradeConditionReopeningPrice
+	TradeConditionClosingPrice
+	TradeConditionCorrectedComprehensiveLatePrice
+	TradeConditionOverseas
+)
+
+func (c TradeReportCondition) String() string {
+	conditions := [...]string{
+		"unknown", "automaticMatch", "late", "nonAutomaticMatch",
+		"sameBrokerAutomaticMatch", "sameBrokerNonAutomaticMatch", "oddLot",
+		"auction", "bunchedTrade", "cashSale", "intermarketSweep", "bunchedSold",
+		"priceVariation", "rule127Or155", "delayed", "marketCenterOfficialClose",
+		"nextDaySettlement", "marketCenterOpening", "priorReferencePrice",
+		"marketCenterOfficialOpen", "seller", "formT", "extendedHours", "contingent",
+		"averagePrice", "otcSold", "oddLotIntermarketSweep", "derivativelyPriced",
+		"reopeningPrice", "closingPrice", "correctedComprehensiveLatePrice", "overseas",
+	}
+	if int(c) < len(conditions) {
+		return conditions[c]
+	}
+	return conditions[0]
+}
+
+// DeliverySource describes how OpenD delivered a Reported Print. It is
+// provenance only and never changes statistical eligibility.
+type DeliverySource uint8
+
+const (
+	DeliveryUnknown DeliverySource = iota
+	DeliveryRealtime
+	DeliveryDisconnectBackfill
+	DeliveryCache
+)
+
+func (s DeliverySource) String() string {
+	sources := [...]string{"unknown", "realtime", "disconnectBackfill", "cache"}
+	if int(s) < len(sources) {
+		return sources[s]
+	}
+	return sources[0]
+}
+
 // Tick is one trade print. TsMs is the exchange timestamp (authoritative for
 // bucketing); RecvTsMs is OpenD receive time, used only for latency metrics.
 type Tick struct {
-	Symbol   string
-	Seq      int64
-	TsMs     int64
-	Price    float64
-	Volume   int64
-	Turnover float64
-	Dir      Direction
-	Type     TransactionType
-	RecvTsMs int64
+	Symbol         string
+	Seq            int64
+	TsMs           int64
+	Price          float64
+	Volume         int64
+	Turnover       float64
+	Dir            Direction
+	Type           TransactionType
+	Condition      TradeReportCondition
+	RawType        int32
+	TypeSign       int32
+	PushDataType   int32
+	Delivery       DeliverySource
+	RangeEligible  bool
+	LastEligible   bool
+	VolumeEligible bool
+	RecvTsMs       int64
 }
 
 // Quote is the latest basic quote. moomoo's BasicQot carries no bid/ask —

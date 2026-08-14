@@ -88,14 +88,18 @@ func TestRecentTicksDecodesAndClamps(t *testing.T) {
 	m.setData("US.AAPL", &qotData{ticks: []*qotcommon.Ticker{
 		{Time: proto.String("2026-07-05 09:31:00"), Sequence: proto.Int64(1), Timestamp: proto.Float64(1782146460), Price: proto.Float64(309.1),
 			Volume: proto.Int64(100), Turnover: proto.Float64(30910), Dir: proto.Int32(int32(qotcommon.TickerDirection_TickerDirection_Bid)),
-			Type: proto.Int32(int32(qotcommon.TickerType_TickerType_Automatch))},
+			RecvTime: proto.Float64(1782146460.321), Type: proto.Int32(int32(qotcommon.TickerType_TickerType_OddLot)),
+			TypeSign: proto.Int32(73), PushDataType: proto.Int32(int32(qotcommon.PushDataType_PushDataType_Realtime))},
 	}})
 	b := newBackfill(liveClient(t, m))
 	ticks, err := b.recentTicks(context.Background(), "US.AAPL", 5000) // clamped to 1000
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(ticks) != 1 || ticks[0].Dir != feed.Buy || ticks[0].Price != 309.1 || ticks[0].Type != feed.TransactionRegular {
+	if len(ticks) != 1 || ticks[0].Dir != feed.Buy || ticks[0].Price != 309.1 || ticks[0].Type != feed.TransactionOddLot ||
+		ticks[0].Condition != feed.TradeConditionOddLot || ticks[0].RawType != int32(qotcommon.TickerType_TickerType_OddLot) ||
+		ticks[0].TypeSign != 73 || ticks[0].PushDataType != int32(qotcommon.PushDataType_PushDataType_Realtime) ||
+		ticks[0].Delivery != feed.DeliveryCache || ticks[0].RecvTsMs != 1782146460321 {
 		t.Fatalf("ticks = %+v", ticks)
 	}
 }

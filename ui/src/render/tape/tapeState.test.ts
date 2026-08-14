@@ -10,6 +10,13 @@ function mkTick(i: number, over: Partial<Tick> = {}): Tick {
     direction: (["BUY", "SELL", "NEUTRAL"] as const)[i % 3],
     transactionType: "regular",
     significance: "none",
+    condition: "automaticMatch",
+    rawType: 1,
+    rawTypeSign: 0,
+    deliverySource: "realtime",
+    rangeEligible: true,
+    lastEligible: true,
+    volumeEligible: true,
     ts: new Date(Date.UTC(2026, 6, 6, 13, 30, i)).toISOString(),
     ...over,
   };
@@ -94,6 +101,29 @@ describe("buildTapeRows", () => {
     ]);
     const { rows } = buildTapeRows(classified, liveView(classified), { symbol: "US.AAPL", minSize: 0, maxRows: 10 });
     expect(rows.map((r) => r.significance)).toEqual(["none", "exceptional", "large"]);
+  });
+
+  it("retains condition evidence for a price-ineligible volume-only print", () => {
+    const odd = srcFrom([mkTick(1, {
+      transactionType: "oddLot", condition: "oddLot", rawType: 6, rawTypeSign: 73,
+      deliverySource: "cache", rangeEligible: false, lastEligible: false, volumeEligible: true,
+    })]);
+    const { rows } = buildTapeRows(odd, liveView(odd), { symbol: "US.AAPL", minSize: 0, maxRows: 1 });
+    expect(rows[0]).toMatchObject({
+      condition: "oddLot", rawType: 6, rawTypeSign: 73, deliverySource: "cache",
+      rangeEligible: false, lastEligible: false, volumeEligible: true, badge: "ODD",
+    });
+  });
+
+  it("retains evidence while paused and scrolled to an older row", () => {
+    const odd = mkTick(1, {
+      condition: "oddLot", rawType: 6, rawTypeSign: 73, deliverySource: "cache",
+      rangeEligible: false, lastEligible: false, volumeEligible: true,
+    });
+    const source = srcFrom([odd, mkTick(2)]);
+    const { rows, paused } = buildTapeRows(source, { anchorSeq: 1, generation: 1 }, { symbol: "US.AAPL", minSize: 0, maxRows: 1 });
+    expect(paused).toBe(true);
+    expect(rows[0]).toMatchObject({ condition: "oddLot", rawType: 6, rawTypeSign: 73, deliverySource: "cache" });
   });
 
   // Task 0 (perf HUD): scanned is an additive field on the return value —

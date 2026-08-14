@@ -117,17 +117,104 @@ func decodeTransactionType(t int32) feed.TransactionType {
 	}
 }
 
-func decodeTicker(symbol string, t *qotcommon.Ticker) feed.Tick {
+func decodeTradeReportCondition(t int32) feed.TradeReportCondition {
+	switch qotcommon.TickerType(t) {
+	case qotcommon.TickerType_TickerType_Automatch:
+		return feed.TradeConditionAutomaticMatch
+	case qotcommon.TickerType_TickerType_Late:
+		return feed.TradeConditionLate
+	case qotcommon.TickerType_TickerType_NoneAutomatch:
+		return feed.TradeConditionNonAutomaticMatch
+	case qotcommon.TickerType_TickerType_InterAutomatch:
+		return feed.TradeConditionSameBrokerAutomaticMatch
+	case qotcommon.TickerType_TickerType_InterNoneAutomatch:
+		return feed.TradeConditionSameBrokerNonAutomaticMatch
+	case qotcommon.TickerType_TickerType_OddLot:
+		return feed.TradeConditionOddLot
+	case qotcommon.TickerType_TickerType_Auction:
+		return feed.TradeConditionAuction
+	case qotcommon.TickerType_TickerType_Bulk:
+		return feed.TradeConditionBunchedTrade
+	case qotcommon.TickerType_TickerType_Crash:
+		return feed.TradeConditionCashSale
+	case qotcommon.TickerType_TickerType_CrossMarket:
+		return feed.TradeConditionIntermarketSweep
+	case qotcommon.TickerType_TickerType_BulkSold:
+		return feed.TradeConditionBunchedSold
+	case qotcommon.TickerType_TickerType_FreeOnBoard:
+		return feed.TradeConditionPriceVariation
+	case qotcommon.TickerType_TickerType_Rule127Or155:
+		return feed.TradeConditionRule127Or155
+	case qotcommon.TickerType_TickerType_Delay:
+		return feed.TradeConditionDelayed
+	case qotcommon.TickerType_TickerType_MarketCenterClosePrice:
+		return feed.TradeConditionMarketCenterOfficialClose
+	case qotcommon.TickerType_TickerType_NextDay:
+		return feed.TradeConditionNextDaySettlement
+	case qotcommon.TickerType_TickerType_MarketCenterOpening:
+		return feed.TradeConditionMarketCenterOpening
+	case qotcommon.TickerType_TickerType_PriorReferencePrice:
+		return feed.TradeConditionPriorReferencePrice
+	case qotcommon.TickerType_TickerType_MarketCenterOpenPrice:
+		return feed.TradeConditionMarketCenterOfficialOpen
+	case qotcommon.TickerType_TickerType_Seller:
+		return feed.TradeConditionSeller
+	case qotcommon.TickerType_TickerType_T:
+		return feed.TradeConditionFormT
+	case qotcommon.TickerType_TickerType_ExtendedTradingHours:
+		return feed.TradeConditionExtendedHours
+	case qotcommon.TickerType_TickerType_Contingent:
+		return feed.TradeConditionContingent
+	case qotcommon.TickerType_TickerType_AvgPrice:
+		return feed.TradeConditionAveragePrice
+	case qotcommon.TickerType_TickerType_OTCSold:
+		return feed.TradeConditionOTCSold
+	case qotcommon.TickerType_TickerType_OddLotCrossMarket:
+		return feed.TradeConditionOddLotIntermarketSweep
+	case qotcommon.TickerType_TickerType_DerivativelyPriced:
+		return feed.TradeConditionDerivativelyPriced
+	case qotcommon.TickerType_TickerType_ReOpeningPriced:
+		return feed.TradeConditionReopeningPrice
+	case qotcommon.TickerType_TickerType_ClosingPriced:
+		return feed.TradeConditionClosingPrice
+	case qotcommon.TickerType_TickerType_ComprehensiveDelayPrice:
+		return feed.TradeConditionCorrectedComprehensiveLatePrice
+	case qotcommon.TickerType_TickerType_Overseas:
+		return feed.TradeConditionOverseas
+	default:
+		return feed.TradeConditionUnknown
+	}
+}
+
+func decodeDeliverySource(t int32) feed.DeliverySource {
+	switch qotcommon.PushDataType(t) {
+	case qotcommon.PushDataType_PushDataType_Realtime:
+		return feed.DeliveryRealtime
+	case qotcommon.PushDataType_PushDataType_ByDisConn:
+		return feed.DeliveryDisconnectBackfill
+	case qotcommon.PushDataType_PushDataType_Cache:
+		return feed.DeliveryCache
+	default:
+		return feed.DeliveryUnknown
+	}
+}
+
+func decodeTicker(symbol string, t *qotcommon.Ticker, delivery feed.DeliverySource) feed.Tick {
 	return feed.Tick{
-		Symbol:   symbol,
-		Seq:      t.GetSequence(),
-		TsMs:     tsMs(t.GetTimestamp()),
-		Price:    t.GetPrice(),
-		Volume:   t.GetVolume(),
-		Turnover: t.GetTurnover(),
-		Dir:      decodeDirection(t.GetDir()),
-		Type:     decodeTransactionType(t.GetType()),
-		RecvTsMs: tsMs(t.GetRecvTime()),
+		Symbol:       symbol,
+		Seq:          t.GetSequence(),
+		TsMs:         tsMs(t.GetTimestamp()),
+		Price:        t.GetPrice(),
+		Volume:       t.GetVolume(),
+		Turnover:     t.GetTurnover(),
+		Dir:          decodeDirection(t.GetDir()),
+		Type:         decodeTransactionType(t.GetType()),
+		Condition:    decodeTradeReportCondition(t.GetType()),
+		RawType:      t.GetType(),
+		TypeSign:     t.GetTypeSign(),
+		PushDataType: t.GetPushDataType(),
+		Delivery:     delivery,
+		RecvTsMs:     tsMs(t.GetRecvTime()),
 	}
 }
 
@@ -209,7 +296,7 @@ func DecodePush(f Frame) ([]feed.Event, error) {
 		symbol := formatSymbol(s2c.GetSecurity())
 		ticks := make([]feed.Tick, 0, len(s2c.GetTickerList()))
 		for _, t := range s2c.GetTickerList() {
-			ticks = append(ticks, decodeTicker(symbol, t))
+			ticks = append(ticks, decodeTicker(symbol, t, decodeDeliverySource(t.GetPushDataType())))
 		}
 		if len(ticks) == 0 {
 			return nil, nil

@@ -128,6 +128,37 @@ func TestMismatchEmitsOnDivergence(t *testing.T) {
 	}
 }
 
+func TestEligibleTickShadowMismatchDoesNotMutateOfficialKLine(t *testing.T) {
+	c, drain := runCore(t)
+	// The odd lot contributes volume to the eligibility-correct shadow but
+	// cannot form a price. The official K_1M bar remains authoritative.
+	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(0, 200, 200, 200, 200, 500)}})
+	c.Feed(feed.TicksEvent{Ticks: []feed.Tick{
+		{Symbol: "US.AAPL", Seq: 1, TsMs: t0Ms + 1_000, Price: 223.123, Volume: 10, Dir: feed.Buy,
+			Type: feed.TransactionOddLot, Condition: feed.TradeConditionOddLot},
+		{Symbol: "US.AAPL", Seq: 2, TsMs: t0Ms + 61_000, Price: 200, Volume: 0, Dir: feed.Neutral,
+			Type: feed.TransactionUnknown, Condition: feed.TradeConditionUnknown},
+	}})
+	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(1, 200, 200, 200, 200, 1)}})
+	updates := drain()
+	var mismatches []MismatchUpdate
+	var officialFinal Bar
+	for _, u := range updates {
+		if mu, ok := u.(MismatchUpdate); ok {
+			mismatches = append(mismatches, mu)
+		}
+		if b, ok := u.(BarUpdate); ok && b.Bar.TF == session.TF1m && b.Bar.BucketMs == t0Ms && !b.Bar.InProgress {
+			officialFinal = b.Bar
+		}
+	}
+	if len(mismatches) != 1 || mismatches[0].BucketMs != t0Ms {
+		t.Fatalf("condition-correct shadow mismatch = %+v, want one bucket-0 diagnostic", mismatches)
+	}
+	if officialFinal.V != 500 || officialFinal.C != 200 {
+		t.Fatalf("official K_1M mutated by tick shadow: %+v", officialFinal)
+	}
+}
+
 func TestDerivedDailyAndOfficialReplacement(t *testing.T) {
 	c, drain := runCore(t)
 	c.Feed(feed.Bars1mEvent{Bars: []feed.Bar{bar1m(0, 100, 101, 99, 100.5, 1000)}})

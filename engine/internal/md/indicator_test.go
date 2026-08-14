@@ -25,9 +25,9 @@ func expectedVWAP(bars []Bar) float64 {
 
 func feedPartialNAMI(c *Core) {
 	c.Feed(feed.TicksEvent{Ticks: []feed.Tick{
-		{Symbol: "US.NAMI", Seq: 1, TsMs: t0Ms, Price: 6.50, Volume: 10},
-		{Symbol: "US.NAMI", Seq: 2, TsMs: t0Ms + 3_000, Price: 6.60, Volume: 10},
-		{Symbol: "US.NAMI", Seq: 3, TsMs: t0Ms + 10_000, Price: 6.55, Volume: 5},
+		{Symbol: "US.NAMI", Seq: 1, TsMs: t0Ms, Price: 6.50, Volume: 10, Type: feed.TransactionRegular, Condition: feed.TradeConditionAutomaticMatch},
+		{Symbol: "US.NAMI", Seq: 2, TsMs: t0Ms + 3_000, Price: 6.60, Volume: 10, Type: feed.TransactionRegular, Condition: feed.TradeConditionAutomaticMatch},
+		{Symbol: "US.NAMI", Seq: 3, TsMs: t0Ms + 10_000, Price: 6.55, Volume: 5, Type: feed.TransactionRegular, Condition: feed.TradeConditionAutomaticMatch},
 	}})
 }
 

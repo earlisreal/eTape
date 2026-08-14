@@ -25,13 +25,20 @@ type Book struct {
 }
 
 type Tick struct {
-	Symbol          string              `json:"symbol"`
-	Price           float64             `json:"price"`
-	Size            int64               `json:"size"`
-	Direction       TickDirection       `json:"direction"`
-	TransactionType TickTransactionType `json:"transactionType"`
-	Significance    SignificanceLevel   `json:"significance"`
-	Ts              string              `json:"ts"`
+	Symbol          string                   `json:"symbol"`
+	Price           float64                  `json:"price"`
+	Size            int64                    `json:"size"`
+	Direction       TickDirection            `json:"direction"`
+	TransactionType TickTransactionType      `json:"transactionType"`
+	Significance    SignificanceLevel        `json:"significance"`
+	Condition       TickTradeReportCondition `json:"condition"`
+	RawType         int32                    `json:"rawType"`
+	RawTypeSign     int32                    `json:"rawTypeSign"`
+	DeliverySource  TickDeliverySource       `json:"deliverySource"`
+	RangeEligible   bool                     `json:"rangeEligible"`
+	LastEligible    bool                     `json:"lastEligible"`
+	VolumeEligible  bool                     `json:"volumeEligible"`
+	Ts              string                   `json:"ts"`
 }
 
 type SignificanceStatus struct {
@@ -58,6 +65,7 @@ type Bar struct {
 	V           int64   `json:"v"`
 	InProgress  bool    `json:"inProgress"`
 	Gap         bool    `json:"gap,omitempty"`
+	VolumeOnly  bool    `json:"volumeOnly,omitempty"`
 }
 
 type IndicatorPoint struct {

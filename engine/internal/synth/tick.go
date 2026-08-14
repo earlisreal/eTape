@@ -175,15 +175,16 @@ func genTicks(rng *rand.Rand, spec SymbolSpec, ps *priceState, b *bookState, ses
 		}
 
 		tk := feed.Tick{
-			Symbol:   symbol,
-			Seq:      seq,
-			TsMs:     tsMs,
-			Price:    execPrice,
-			Volume:   filled,
-			Turnover: execPrice * float64(filled),
-			Dir:      dir,
-			Type:     feed.TransactionRegular,
-			RecvTsMs: tsMs,
+			Symbol:    symbol,
+			Seq:       seq,
+			TsMs:      tsMs,
+			Price:     execPrice,
+			Volume:    filled,
+			Turnover:  execPrice * float64(filled),
+			Dir:       dir,
+			Type:      feed.TransactionRegular,
+			Condition: feed.TradeConditionAutomaticMatch,
+			RecvTsMs:  tsMs,
 		}
 		seq++
 		ticks = append(ticks, tk)

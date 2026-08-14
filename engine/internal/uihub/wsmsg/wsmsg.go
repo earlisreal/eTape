@@ -119,6 +119,54 @@ const (
 	TransactionUnknown             TickTransactionType = "unknown"
 )
 
+// TickTradeReportCondition is the exact stable condition name stamped by the
+// market-data core. RawType and RawTypeSign remain diagnostic fields on Tick.
+type TickTradeReportCondition string
+
+const (
+	TradeConditionUnknown                     TickTradeReportCondition = "unknown"
+	TradeConditionAutomaticMatch              TickTradeReportCondition = "automaticMatch"
+	TradeConditionLate                        TickTradeReportCondition = "late"
+	TradeConditionNonAutomaticMatch           TickTradeReportCondition = "nonAutomaticMatch"
+	TradeConditionSameBrokerAutomaticMatch    TickTradeReportCondition = "sameBrokerAutomaticMatch"
+	TradeConditionSameBrokerNonAutomaticMatch TickTradeReportCondition = "sameBrokerNonAutomaticMatch"
+	TradeConditionOddLot                      TickTradeReportCondition = "oddLot"
+	TradeConditionAuction                     TickTradeReportCondition = "auction"
+	TradeConditionBunchedTrade                TickTradeReportCondition = "bunchedTrade"
+	TradeConditionCashSale                    TickTradeReportCondition = "cashSale"
+	TradeConditionIntermarketSweep            TickTradeReportCondition = "intermarketSweep"
+	TradeConditionBunchedSold                 TickTradeReportCondition = "bunchedSold"
+	TradeConditionPriceVariation              TickTradeReportCondition = "priceVariation"
+	TradeConditionRule127Or155                TickTradeReportCondition = "rule127Or155"
+	TradeConditionDelayed                     TickTradeReportCondition = "delayed"
+	TradeConditionMarketCenterOfficialClose   TickTradeReportCondition = "marketCenterOfficialClose"
+	TradeConditionNextDaySettlement           TickTradeReportCondition = "nextDaySettlement"
+	TradeConditionMarketCenterOpening         TickTradeReportCondition = "marketCenterOpening"
+	TradeConditionPriorReferencePrice         TickTradeReportCondition = "priorReferencePrice"
+	TradeConditionMarketCenterOfficialOpen    TickTradeReportCondition = "marketCenterOfficialOpen"
+	TradeConditionSeller                      TickTradeReportCondition = "seller"
+	TradeConditionFormT                       TickTradeReportCondition = "formT"
+	TradeConditionExtendedHours               TickTradeReportCondition = "extendedHours"
+	TradeConditionContingent                  TickTradeReportCondition = "contingent"
+	TradeConditionAveragePrice                TickTradeReportCondition = "averagePrice"
+	TradeConditionOTCSold                     TickTradeReportCondition = "otcSold"
+	TradeConditionOddLotIntermarketSweep      TickTradeReportCondition = "oddLotIntermarketSweep"
+	TradeConditionDerivativelyPriced          TickTradeReportCondition = "derivativelyPriced"
+	TradeConditionReopeningPrice              TickTradeReportCondition = "reopeningPrice"
+	TradeConditionClosingPrice                TickTradeReportCondition = "closingPrice"
+	TradeConditionCorrectedComprehensiveLate  TickTradeReportCondition = "correctedComprehensiveLatePrice"
+	TradeConditionOverseas                    TickTradeReportCondition = "overseas"
+)
+
+type TickDeliverySource string
+
+const (
+	DeliveryUnknown            TickDeliverySource = "unknown"
+	DeliveryRealtime           TickDeliverySource = "realtime"
+	DeliveryDisconnectBackfill TickDeliverySource = "disconnectBackfill"
+	DeliveryCache              TickDeliverySource = "cache"
+)
+
 // SignificanceLevel is the engine-stamped adaptive share-size emphasis.
 type SignificanceLevel string
 

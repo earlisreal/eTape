@@ -18,12 +18,33 @@ function mkTick(i: number, over: Partial<Tick> = {}): Tick {
     direction: (["BUY", "SELL", "NEUTRAL", "BUY", "SELL", "BUY", "BUY", "SELL", "NEUTRAL", "BUY"] as const)[i % 10],
     transactionType: "regular",
     significance: "none",
+    condition: "automaticMatch",
+    rawType: 1,
+    rawTypeSign: 0,
+    deliverySource: "realtime",
+    rangeEligible: true,
+    lastEligible: true,
+    volumeEligible: true,
     ts: new Date(Date.UTC(2026, 6, 6, 13, 30, i * 2)).toISOString(),
     ...over,
   };
 }
 
 const ticks = Array.from({ length: 30 }, (_, i) => mkTick(i + 1));
+const conditionVariants: Tick[] = [
+  mkTick(1, {
+    price: 223.123, size: 10, direction: "SELL", condition: "oddLot", rawType: 6, rawTypeSign: 73,
+    deliverySource: "cache", rangeEligible: false, lastEligible: false, volumeEligible: true,
+  }),
+  mkTick(2, {
+    price: 222.95, size: 40, condition: "priorReferencePrice", rawType: 19, rawTypeSign: 85,
+    deliverySource: "disconnectBackfill", rangeEligible: true, lastEligible: false, volumeEligible: true,
+  }),
+  mkTick(3, {
+    price: 222.94, size: 20, condition: "unknown", rawType: 999, rawTypeSign: 121,
+    deliverySource: "unknown", rangeEligible: false, lastEligible: false, volumeEligible: false,
+  }),
+];
 function sourceFor(tapeTicks: Tick[]): TapeSource {
   return {
     lastSeq: () => tapeTicks.length,
@@ -113,6 +134,20 @@ describe("paintTape goldens (full-row color)", () => {
       const { rows, paused } = buildTapeRows(src, liveView(src), { symbol: "US.AAPL", minSize: 0, maxRows: 20 });
       expectGolden(`tapecolor-time-breakpoint-${mode}`, renderScene(TAPE_TIME_VISIBLE_MIN_WIDTH, H, (ctx) =>
         paintTape(ctx, { rows, paused, width: TAPE_TIME_VISIBLE_MIN_WIDTH, height: H, palette })));
+    });
+
+    it(`condition evidence does not clutter the tape — ${mode}`, () => {
+      const evidenceSrc = sourceFor(conditionVariants);
+      const { rows, paused } = buildTapeRows(evidenceSrc, liveView(evidenceSrc), { symbol: "US.AAPL", minSize: 0, maxRows: 20 });
+      expectGolden(`tapecolor-conditions-${mode}`, renderScene(W, H, (ctx) =>
+        paintTape(ctx, { rows, paused, width: W, height: H, palette })));
+    });
+
+    it(`condition evidence leaves the narrow tape clean — ${mode}`, () => {
+      const evidenceSrc = sourceFor(conditionVariants);
+      const { rows, paused } = buildTapeRows(evidenceSrc, liveView(evidenceSrc), { symbol: "US.AAPL", minSize: 0, maxRows: 20 });
+      expectGolden(`tapecolor-conditions-narrow-${mode}`, renderScene(TAPE_MIN_WIDTH, H, (ctx) =>
+        paintTape(ctx, { rows, paused, width: TAPE_MIN_WIDTH, height: H, palette })));
     });
   }
 });

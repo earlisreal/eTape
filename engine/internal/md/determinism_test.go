@@ -18,7 +18,8 @@ func script() []feed.Event {
 	rng := rand.New(rand.NewSource(99))
 	var evs []feed.Event
 	mk := func(sym string, seq int64, offMs int64, px float64, v int64, d feed.Direction) feed.Tick {
-		return feed.Tick{Symbol: sym, Seq: seq, TsMs: t0Ms + offMs, Price: px, Volume: v, Dir: d}
+		return feed.Tick{Symbol: sym, Seq: seq, TsMs: t0Ms + offMs, Price: px, Volume: v, Dir: d,
+			Type: feed.TransactionRegular, Condition: feed.TradeConditionAutomaticMatch}
 	}
 	// Cache seeds.
 	evs = append(evs, feed.Bars1mEvent{Seed: true, Bars: []feed.Bar{

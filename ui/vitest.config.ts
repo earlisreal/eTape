@@ -43,6 +43,8 @@ export default defineConfig({
             'src/render/chart/ChartController.test.ts',
             'src/render/chart/chartTheme.test.ts',
             'src/render/ladder/ladderState.test.ts',
+            'src/render/tape/tapeState.test.ts',
+            'src/chrome/panels/tv/legendView.test.ts',
           ],
         },
       },
@@ -116,7 +118,7 @@ export default defineConfig({
       {
         test: {
           name: 'tape',
-          include: ['src/chrome/panels/TapePanel.test.tsx'],
+          include: ['src/chrome/panels/TapePanel.test.tsx', 'src/chrome/panels/TapeSettingsDialog.test.tsx'],
           pool: 'forks',
         },
       },

@@ -36,7 +36,9 @@ func runCore(t *testing.T) (*Core, func() []Update) {
 const t0Ms = int64(1783344600_000)
 
 func tick(seq int64, offMs int64, price float64, vol int64, dir feed.Direction) feed.Tick {
-	return feed.Tick{Symbol: "US.AAPL", Seq: seq, TsMs: t0Ms + offMs, Price: price, Volume: vol, Dir: dir}
+	return feed.Tick{Symbol: "US.AAPL", Seq: seq, TsMs: t0Ms + offMs, Price: price, Volume: vol, Dir: dir,
+		Type: feed.TransactionRegular, Condition: feed.TradeConditionAutomaticMatch,
+		RangeEligible: true, LastEligible: true, VolumeEligible: true}
 }
 
 func TestTapeDedupsBySeqWithinDay(t *testing.T) {
@@ -140,7 +142,8 @@ func TestTapeDedupResetsOnDayBoundary(t *testing.T) {
 		tick(500, 0, 100, 10, feed.Buy), // day 1, high seq
 	}})
 	c.Feed(feed.TicksEvent{Ticks: []feed.Tick{
-		{Symbol: "US.AAPL", Seq: 1, TsMs: t0Ms + oneDayMs, Price: 101, Volume: 1, Dir: feed.Buy}, // day 2, low seq
+		{Symbol: "US.AAPL", Seq: 1, TsMs: t0Ms + oneDayMs, Price: 101, Volume: 1, Dir: feed.Buy,
+			Type: feed.TransactionRegular, Condition: feed.TradeConditionAutomaticMatch}, // day 2, low seq
 	}})
 	var tapes []TapeUpdate
 	for _, u := range drain() {

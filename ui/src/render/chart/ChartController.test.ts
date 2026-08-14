@@ -164,6 +164,15 @@ describe("ChartController", () => {
     ]);
   });
 
+  it("does not copy Volume-Only metadata onto a synthetic No-Trade fill", () => {
+    const real = { ...tenSecondBar("2026-07-06T13:30:00Z", 10), v: 25, volumeOnly: true };
+    const filled = fillEmptyTenSecondSlots([real], Date.parse("2026-07-06T13:30:20Z"));
+    expect(filled[0]).toMatchObject({ volumeOnly: true, v: 25 });
+    expect(filled[0].synthetic).toBeUndefined();
+    expect(filled[1]).toMatchObject({ v: 0, synthetic: true });
+    expect(filled[1].volumeOnly).toBeUndefined();
+  });
+
   it("stops gap filling at the closed-session boundary", () => {
     const real = { ...bar("2026-07-06T23:59:40Z", 10), timeframe: "10s" };
     const filled = fillEmptyTenSecondSlots([real], Date.parse("2026-07-07T13:30:20Z"));

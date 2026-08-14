@@ -144,7 +144,7 @@ func (b *backfill) recentTicks(ctx context.Context, symbol string, n int) ([]fee
 	}
 	ticks := make([]feed.Tick, 0, len(resp.GetS2C().GetTickerList()))
 	for _, t := range resp.GetS2C().GetTickerList() {
-		ticks = append(ticks, decodeTicker(symbol, t))
+		ticks = append(ticks, decodeTicker(symbol, t, feed.DeliveryCache))
 	}
 	sort.SliceStable(ticks, func(i, j int) bool {
 		if ticks[i].TsMs != ticks[j].TsMs {

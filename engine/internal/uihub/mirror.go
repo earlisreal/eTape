@@ -133,7 +133,9 @@ func (m *mirror) applyMD(u md.Update) []staged {
 			level, status := m.significance.classify(t)
 			wt := mapTick(t, level)
 			out = append(out, wt)
-			m.marks[t.Symbol] = t.Price
+			if t.LastEligible {
+				m.marks[t.Symbol] = t.Price
+			}
 			if status != nil {
 				statuses[t.Symbol] = *status
 			}

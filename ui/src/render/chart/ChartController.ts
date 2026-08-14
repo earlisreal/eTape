@@ -987,7 +987,7 @@ export class ChartController {
   }
 }
 
-function keyOf(b: DisplayBar): string { return `${b.bucketStart}|${b.o}|${b.c}|${b.h}|${b.l}|${b.v}|${b.inProgress}|${b.synthetic === true}|${b.gap === true}|${b.dataGap === true}`; }
+function keyOf(b: DisplayBar): string { return `${b.bucketStart}|${b.o}|${b.c}|${b.h}|${b.l}|${b.v}|${b.inProgress}|${b.synthetic === true}|${b.gap === true}|${b.dataGap === true}|${b.volumeOnly === true}`; }
 function bareSymbol(s: string): string { return s.replace(/^US\./, ""); }
 // Whether bars[from..] is non-decreasing by bucketStart — the property update()'s
 // bar-by-bar replay depends on to never hand Lightweight Charts a time that goes
@@ -1059,6 +1059,7 @@ export function fillEmptyTenSecondSlots(bars: Bar[], nowMs: number, openDDown = 
       if (sessionAt(ms) !== session) break;
       const withoutGap = { ...base };
       delete withoutGap.gap;
+      delete withoutGap.volumeOnly;
       out.push({ ...withoutGap, bucketStart: new Date(ms).toISOString(), o: base.c, h: base.c, l: base.c, c: base.c, v: 0,
         inProgress: false, synthetic: true });
     }

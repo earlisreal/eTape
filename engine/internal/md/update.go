@@ -126,4 +126,5 @@ type Bar struct {
 	Ticks      int32
 	InProgress bool
 	Gap        bool // first bar after a feed gap (resync) — UI renders the flag
+	VolumeOnly bool // eligible volume with no eligible price-forming print
 }

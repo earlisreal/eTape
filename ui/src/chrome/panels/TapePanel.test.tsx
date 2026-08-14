@@ -18,7 +18,9 @@ beforeEach(() => {
 });
 
 function mkTick(i: number, symbol = "US.AAPL"): Tick {
-  return { symbol, price: 3.5, size: 100 + i, direction: "BUY", transactionType: "regular", significance: "none", ts: "2026-07-06T13:30:00Z" };
+  return { symbol, price: 3.5, size: 100 + i, direction: "BUY", transactionType: "regular", significance: "none",
+    condition: "automaticMatch", rawType: 1, rawTypeSign: 0, deliverySource: "realtime",
+    rangeEligible: true, lastEligible: true, volumeEligible: true, ts: "2026-07-06T13:30:00Z" };
 }
 
 function renderTape(width = 260) {
@@ -88,7 +90,7 @@ describe("TapePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Ok" }));
     // Patch-only: AppShell merges patches, so the panel sends just the key it
     // changed (a full-settings rewrite from frozen config clobbered siblings).
-    expect(onConfigChange).toHaveBeenCalledWith({ minSize: 250 });
+    expect(onConfigChange).toHaveBeenCalledWith({ minSize: 250, hoverEnabled: false });
   });
 
   it("shows the read-only engine significance status in settings", () => {
@@ -145,6 +147,36 @@ describe("TapePanel", () => {
       payload: Array.from({ length: 30 }, (_, i) => mkTick(i)) });
     fireEvent.wheel(canvas, { deltaY: -54 });
     expect(screen.queryByText(/jump to live/i)).toBeNull();
+  });
+
+  it("keeps details hover off by default and enables it from settings", () => {
+    const { stores, canvas, onConfigChange } = renderTape();
+    stores.tape.apply({ kind: "snapshot", topic: "md.tape", payload: [{
+      ...mkTick(1), condition: "oddLot", rawType: 6, rawTypeSign: 73, deliverySource: "cache",
+      rangeEligible: false, lastEligible: false, volumeEligible: true,
+    }] });
+    fireEvent.mouseMove(canvas, { clientX: 5, clientY: 5 });
+    expect(screen.queryByRole("tooltip")).toBeNull();
+
+    fireEvent.click(screen.getByLabelText("tape settings"));
+    const hover = screen.getByLabelText("show details on hover") as HTMLInputElement;
+    expect(hover.checked).toBe(false);
+    fireEvent.click(hover);
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+    expect(onConfigChange).toHaveBeenCalledWith({ minSize: 0, hoverEnabled: true });
+
+    fireEvent.mouseMove(canvas, { clientX: 5, clientY: 5 });
+    expect(screen.getByRole("tooltip").textContent).toContain("Odd lot");
+    expect(screen.getByRole("tooltip").textContent).toContain("range no · last no · volume yes");
+    expect(screen.getByRole("tooltip").textContent).toContain("raw type 6 · typeSign 73");
+    expect(screen.getByRole("tooltip").textContent).toContain("source Cache");
+
+    fireEvent.click(screen.getByLabelText("tape settings"));
+    fireEvent.click(screen.getByLabelText("show details on hover"));
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    fireEvent.mouseMove(canvas, { clientX: 5, clientY: 5 });
+    expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
   it("paints without throwing on an empty ring", () => {

@@ -126,6 +126,23 @@ func transactionTypeToWire(t feed.TransactionType) wsmsg.TickTransactionType {
 	}
 }
 
+func conditionToWire(c feed.TradeReportCondition) wsmsg.TickTradeReportCondition {
+	return wsmsg.TickTradeReportCondition(c.String())
+}
+
+func deliverySourceToWire(s feed.DeliverySource) wsmsg.TickDeliverySource {
+	switch s {
+	case feed.DeliveryRealtime:
+		return wsmsg.DeliveryRealtime
+	case feed.DeliveryDisconnectBackfill:
+		return wsmsg.DeliveryDisconnectBackfill
+	case feed.DeliveryCache:
+		return wsmsg.DeliveryCache
+	default:
+		return wsmsg.DeliveryUnknown
+	}
+}
+
 func mapOrder(o exec.Order) wsmsg.Order {
 	return wsmsg.Order{
 		Venue: string(o.Venue), ID: o.ID, Symbol: o.Symbol,
@@ -201,7 +218,10 @@ func mapBook(b feed.Book) wsmsg.Book {
 func mapTick(t feed.Tick, level wsmsg.SignificanceLevel) wsmsg.Tick {
 	return wsmsg.Tick{
 		Symbol: t.Symbol, Price: t.Price, Size: t.Volume, Direction: dirToWire(t.Dir),
-		TransactionType: transactionTypeToWire(t.Type), Significance: level, Ts: isoMs(t.TsMs),
+		TransactionType: transactionTypeToWire(t.Type), Significance: level,
+		Condition: conditionToWire(t.Condition), RawType: t.RawType, RawTypeSign: t.TypeSign,
+		DeliverySource: deliverySourceToWire(t.Delivery), RangeEligible: t.RangeEligible,
+		LastEligible: t.LastEligible, VolumeEligible: t.VolumeEligible, Ts: isoMs(t.TsMs),
 	}
 }
 
@@ -209,6 +229,7 @@ func mapBar(b md.Bar) wsmsg.Bar {
 	return wsmsg.Bar{
 		Symbol: b.Symbol, Timeframe: string(b.TF), BucketStart: isoMs(b.BucketMs),
 		O: b.O, H: b.H, L: b.L, C: b.C, V: b.V, InProgress: b.InProgress, Gap: b.Gap,
+		VolumeOnly: b.VolumeOnly,
 	}
 }
 

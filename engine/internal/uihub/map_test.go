@@ -1,6 +1,7 @@
 package uihub
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/earlisreal/eTape/engine/internal/exec"
@@ -57,20 +58,50 @@ func TestMapPositionUnrealizedFromMark(t *testing.T) {
 
 func TestMapBarTimeframeAndBucket(t *testing.T) {
 	b := md.Bar{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: 1_783_344_660_000, // 2026-07-06T13:31:00Z
-		O: 1, H: 2, L: 0.5, C: 1.5, V: 1000, InProgress: true}
+		O: 1, H: 2, L: 0.5, C: 1.5, V: 1000, InProgress: true, VolumeOnly: true}
 	w := mapBar(b)
 	if w.Timeframe != "1m" || w.BucketStart != "2026-07-06T13:31:00.000Z" {
 		t.Fatalf("bar tf/bucket wrong: tf=%q bucket=%q", w.Timeframe, w.BucketStart)
 	}
-	if !w.InProgress || w.V != 1000 {
+	if !w.InProgress || w.V != 1000 || !w.VolumeOnly {
 		t.Fatalf("bar fields wrong: %+v", w)
 	}
 }
 
 func TestMapTickDirection(t *testing.T) {
-	w := mapTick(feed.Tick{Symbol: "US.AAPL", Price: 3.47, Volume: 10, Dir: feed.Sell, Type: feed.TransactionOddLot, TsMs: 1_783_344_660_000}, wsmsg.SignificanceLarge)
+	w := mapTick(feed.Tick{Symbol: "US.AAPL", Price: 3.47, Volume: 10, Dir: feed.Sell, Type: feed.TransactionOddLot,
+		Condition: feed.TradeConditionOddLot, RawType: 6, TypeSign: 73, Delivery: feed.DeliveryCache,
+		RangeEligible: false, LastEligible: false, VolumeEligible: true, TsMs: 1_783_344_660_000}, wsmsg.SignificanceLarge)
 	if w.Direction != wsmsg.DirSell || w.Size != 10 || w.TransactionType != wsmsg.TransactionOddLot || w.Significance != wsmsg.SignificanceLarge {
 		t.Fatalf("tick map wrong: %+v", w)
+	}
+	if w.Condition != wsmsg.TradeConditionOddLot || w.RawType != 6 || w.RawTypeSign != 73 || w.DeliverySource != wsmsg.DeliveryCache ||
+		w.RangeEligible || w.LastEligible || !w.VolumeEligible {
+		t.Fatalf("tick evidence map wrong: %+v", w)
+	}
+}
+
+func TestMapTickEvidenceSerializesFalseAndZeroValues(t *testing.T) {
+	w := mapTick(feed.Tick{
+		Symbol: "US.AAPL", Price: 3.47, Volume: 10, Dir: feed.Sell,
+		Condition: feed.TradeConditionUnknown, Delivery: feed.DeliveryUnknown,
+	}, wsmsg.SignificanceNone)
+	raw, err := json.Marshal(w)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"rawType", "rawTypeSign", "rangeEligible", "lastEligible", "volumeEligible"} {
+		if _, ok := fields[key]; !ok {
+			t.Fatalf("serialized evidence omitted %q: %s", key, raw)
+		}
+	}
+	if fields["rawType"] != float64(0) || fields["rawTypeSign"] != float64(0) ||
+		fields["rangeEligible"] != false || fields["lastEligible"] != false || fields["volumeEligible"] != false {
+		t.Fatalf("serialized evidence changed: %s", raw)
 	}
 }
 

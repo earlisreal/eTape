@@ -25,8 +25,8 @@ describe("routeToStore", () => {
   it("reports the md.tape payload's tick count to the shared perf singleton", () => {
     const stores = makeStores();
     const ticks: Tick[] = [
-      { symbol: "US.AAPL", price: 1, size: 1, direction: "BUY", transactionType: "regular", significance: "none", ts: "t" },
-      { symbol: "US.AAPL", price: 1, size: 1, direction: "SELL", transactionType: "regular", significance: "large", ts: "t" },
+      { symbol: "US.AAPL", price: 1, size: 1, direction: "BUY", transactionType: "regular", significance: "none", condition: "automaticMatch", rawType: 1, rawTypeSign: 0, deliverySource: "realtime", rangeEligible: true, lastEligible: true, volumeEligible: true, ts: "t" },
+      { symbol: "US.AAPL", price: 1, size: 1, direction: "SELL", transactionType: "regular", significance: "large", condition: "automaticMatch", rawType: 1, rawTypeSign: 0, deliverySource: "realtime", rangeEligible: true, lastEligible: true, volumeEligible: true, ts: "t" },
     ];
     const spy = vi.spyOn(perf, "countTicks");
     routeToStore(stores, { kind: "delta", topic: "md.tape", payload: ticks });

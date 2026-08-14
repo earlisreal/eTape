@@ -65,6 +65,16 @@ packages:
         | "CANCELED" | "REJECTED" | "EXPIRED" | "BLOCKED" | "REPLACED";
       export type TickDirection = "BUY" | "SELL" | "NEUTRAL";
       export type TickTransactionType = "regular" | "oddLot" | "intermarketSweep" | "intermarketSweepOddLot" | "excluded" | "unknown";
+      export type TickTradeReportCondition =
+        | "unknown" | "automaticMatch" | "late" | "nonAutomaticMatch"
+        | "sameBrokerAutomaticMatch" | "sameBrokerNonAutomaticMatch" | "oddLot" | "auction"
+        | "bunchedTrade" | "cashSale" | "intermarketSweep" | "bunchedSold" | "priceVariation"
+        | "rule127Or155" | "delayed" | "marketCenterOfficialClose" | "nextDaySettlement"
+        | "marketCenterOpening" | "priorReferencePrice" | "marketCenterOfficialOpen" | "seller"
+        | "formT" | "extendedHours" | "contingent" | "averagePrice" | "otcSold"
+        | "oddLotIntermarketSweep" | "derivativelyPriced" | "reopeningPrice" | "closingPrice"
+        | "correctedComprehensiveLatePrice" | "overseas";
+      export type TickDeliverySource = "unknown" | "realtime" | "disconnectBackfill" | "cache";
       export type SignificanceLevel = "none" | "large" | "exceptional";
       export type SignificancePool = "RTH" | "EXTENDED";
       export type SignificanceState = "warming" | "active" | "closed";

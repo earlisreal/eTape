@@ -13,7 +13,7 @@ export interface LegendIndicatorRow {
 }
 export interface LegendView {
   o: number | null; h: number | null; l: number | null; c: number | null; changePct: number | null; up: boolean;
-  volume: number | null; indicators: LegendIndicatorRow[];
+  volume: number | null; barState: "volumeOnly" | "noTrade" | null; indicators: LegendIndicatorRow[];
 }
 
 type LegendBar = Bar & { synthetic?: boolean; dataGap?: boolean };
@@ -65,5 +65,10 @@ export function computeLegendView(
       signal,
     };
   });
-  return { o: b?.o ?? null, h: b?.h ?? null, l: b?.l ?? null, c: b?.c ?? null, changePct, up: b ? b.c >= b.o : true, volume: b?.v ?? null, indicators };
+  return {
+    o: b?.o ?? null, h: b?.h ?? null, l: b?.l ?? null, c: b?.c ?? null, changePct,
+    up: b ? b.c >= b.o : true, volume: b?.v ?? null,
+    barState: b?.synthetic ? "noTrade" : b?.volumeOnly ? "volumeOnly" : null,
+    indicators,
+  };
 }

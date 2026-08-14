@@ -149,6 +149,7 @@ func TestMarkBridgeForwardsToSinks(t *testing.T) {
 
 	core.Feed(feed.TicksEvent{Ticks: []feed.Tick{{
 		Symbol: "US.AAPL", TsMs: time.Now().UnixMilli(), Price: 191.23, Volume: 100,
+		Type: feed.TransactionRegular, Condition: feed.TradeConditionAutomaticMatch,
 	}}})
 
 	deadline := time.After(2 * time.Second)

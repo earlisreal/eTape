@@ -53,7 +53,6 @@ export function paintTape(ctx: CanvasRenderingContext2D, s: TapePaintState): voi
     const weight = r.significance === "exceptional" ? "700 " : r.significance === "large" ? "600 " : "";
     ctx.font = `${weight}11px ${FONTS.mono}`;
 
-    // price at full strength, left-aligned (leftmost column)
     ctx.fillStyle = dir;
     ctx.textAlign = "left";
     ctx.fillText(r.price, columns.priceLeft, midY);
