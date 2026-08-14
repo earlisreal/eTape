@@ -11,6 +11,7 @@ import type { ToastApi } from "./Toast";
 function makeWorkspace(name = "main"): Workspace {
   return {
     name,
+    layoutVersion: 8,
     panels: [{ id: "p1", panelId: "chart", group: "red", settings: { symbol: "AAPL" } }],
     layout: { panels: { p1: {} } },
   };
@@ -149,6 +150,17 @@ describe("BackupPanel", () => {
         selectFile(JSON.stringify(fileData));
         expect(screen.queryByTestId("apply-import")).toBeNull();
         expect(screen.getByText("This file has no layout to import.")).toBeTruthy();
+      });
+
+      it("shows exactly Invalid layout for a legacy layout version", () => {
+        setup();
+        const fileData: SettingsExport = {
+          app: "eTape", kind: "settings-export", version: 1, exportedAt: new Date().toISOString(),
+          layout: { ...makeWorkspace("old"), layoutVersion: 7 },
+        };
+        selectFile(JSON.stringify(fileData));
+        expect(screen.queryByTestId("apply-import")).toBeNull();
+        expect(screen.getByText("Invalid layout")).toBeTruthy();
       });
 
       it("applies the imported layout on confirm, forcing the current workspace name, and toasts info", () => {

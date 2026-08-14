@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, afterEach } from "vitest";
 import { createDockview, type DockviewApi } from "dockview-core";
-import { TRADING_LAYOUT } from "./presets";
+import { PRESETS, TRADING_LAYOUT } from "./presets";
 
 // dockview's DockviewComponent constructor watches its container via a real
 // ResizeObserver on mount, which jsdom doesn't implement (same stub as AppShell.test.tsx).
@@ -35,3 +35,28 @@ describe("TRADING_LAYOUT dockview round-trip", () => {
     );
   });
 });
+
+for (const preset of PRESETS.filter((p) => p.id !== "trading")) {
+  describe(`${preset.id} dockview round-trip`, () => {
+    let api: DockviewApi | undefined;
+    let container: HTMLElement | undefined;
+
+    afterEach(() => {
+      api?.dispose();
+      container?.remove();
+    });
+
+    it("restores every declared panel without legacy hidden headers", () => {
+      const built = preset.build();
+      container = document.createElement("div");
+      document.body.appendChild(container);
+      api = createDockview(container, {
+        createComponent: () => ({ element: document.createElement("div"), init: () => {} }),
+      });
+
+      expect(JSON.stringify(built.layout)).not.toContain("hideHeader");
+      expect(() => api!.fromJSON(built.layout)).not.toThrow();
+      expect(Object.keys(api!.toJSON().panels).sort()).toEqual(built.panels.map((p) => p.id).sort());
+    });
+  });
+}

@@ -18,6 +18,9 @@ body {
   font-family: "IBM Plex Serif", Georgia, serif; font-size: 12px;
   background: var(--bg); border-bottom: 3px double var(--border-strong);
 }
+.etape-panel-tab-host { display: flex; align-items: stretch; flex: 1 1 auto; min-width: 0; width: 100%; height: 100%; }
+.etape-panel-tab-host > .ledger-header { flex: 1 1 auto; width: 100%; height: 100%; box-sizing: border-box; }
+.etape-panel-tab-overflow { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding: 0 6px; font: 11px "IBM Plex Sans", system-ui, sans-serif; }
 .ledger-title { font-family: "IBM Plex Serif", Georgia, serif; font-weight: 600; }
 .chart-header-controls { container-type: inline-size; }
 @container (max-width: 360px) {
@@ -205,7 +208,7 @@ input.numfield { -moz-appearance: textfield; appearance: textfield; }
 
 /* Focused panel — bronze ring + tinted header (Task 12 toggles .panel-focused). */
 .panel-focused { outline: 2px solid var(--accent); outline-offset: -2px; }
-.panel-focused .ledger-header { background: rgba(154,106,27,.07); }
+.panel-focused .ledger-header, .ledger-header.panel-focused-header { background: rgba(154,106,27,.07); }
 
 /* dockview chrome themed from our tokens (was VS-Code greys). */
 .dockview-theme-light, .dockview-theme-dark {

@@ -9,11 +9,11 @@ import { useRef, useState } from "react";
 import { useTheme } from "./ThemeProvider";
 import { HoverButton } from "./controls/HoverButton";
 import type { ToastApi } from "./Toast";
-import type { Workspace } from "./workspace";
+import { WORKSPACE_LAYOUT_VERSION, type Workspace } from "./workspace";
 import type { ActionTemplate, OrderConfig } from "./exec/actionTemplate";
 import {
   buildExport, parseImport, prepareImportedWorkspace, prepareImportedOrderConfig,
-  detectHotkeyConflicts, isPresentLayout, type SettingsExport,
+  detectHotkeyConflicts, isCurrentLayout, isPresentLayout, type SettingsExport,
 } from "./backup";
 
 export type BackupPanelProps =
@@ -45,11 +45,12 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
   // and only reads `src.orderConfig.templates` when `sel.hotkeys` is true) —
   // never actually inspected, so a cheap stand-in avoids needing a real
   // Workspace/OrderConfig for the part this panel instance doesn't own.
-  const placeholderWorkspace: Workspace = { name: "", panels: [], layout: {} };
+  const placeholderWorkspace: Workspace = { name: "", layoutVersion: WORKSPACE_LAYOUT_VERSION, panels: [], layout: {} };
   const placeholderOrderConfig: OrderConfig = { templates: [], activeVenue: "" };
 
+  const layoutPresent = importData ? isPresentLayout(importData.layout) : false;
   const partPresent = importData
-    ? props.part === "layout" ? isPresentLayout(importData.layout) : isPresentHotkeys(importData.hotkeys)
+    ? props.part === "layout" ? isCurrentLayout(importData.layout) : isPresentHotkeys(importData.hotkeys)
     : false;
 
   const download = (): void => {
@@ -155,7 +156,7 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
             Apply import
           </HoverButton>
         ) : (
-          <div style={noteStyle}>{missingText}</div>
+          <div style={noteStyle}>{props.part === "layout" && layoutPresent ? "Invalid layout" : missingText}</div>
         )
       )}
     </div>

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   SETTINGS_EXPORT_VERSION, buildExport, parseImport,
-  prepareImportedWorkspace, prepareImportedOrderConfig, detectHotkeyConflicts, isPresentLayout,
+  prepareImportedWorkspace, prepareImportedOrderConfig, detectHotkeyConflicts, isCurrentLayout, isPresentLayout,
   collectPanelIds, reconcileToGrid, applyPanelConstraintsToLayout,
 } from "./backup";
 import type { Workspace } from "./workspace";
@@ -11,6 +11,7 @@ import { TAPE_MIN_WIDTH } from "../render/tape/tapeLayout";
 function makeWorkspace(name: string): Workspace {
   return {
     name,
+    layoutVersion: 8,
     panels: [{ id: "p1", panelId: "chart", group: "red", settings: { symbol: "AAPL" } }],
     layout: {
       grid: {
@@ -198,6 +199,17 @@ describe("backup: isPresentLayout", () => {
   });
 });
 
+describe("backup: current layout version", () => {
+  it("accepts only version-8 workspace payloads", () => {
+    const current = makeWorkspace("main");
+    expect(isCurrentLayout(current)).toBe(true);
+    expect(isCurrentLayout({ ...current, layoutVersion: 7 })).toBe(false);
+    const missing = { ...current } as unknown as Record<string, unknown>;
+    delete missing.layoutVersion;
+    expect(isCurrentLayout(missing as unknown as Workspace)).toBe(false);
+  });
+});
+
 describe("backup: detectHotkeyConflicts", () => {
   it("returns [] when no template has a hotkey", () => {
     expect(detectHotkeyConflicts([makeTemplate("t1"), makeTemplate("t2")])).toEqual([]);
@@ -300,6 +312,7 @@ describe("backup: reconcileToGrid", () => {
 
     const base: Workspace = {
       name: "test",
+      layoutVersion: 8,
       panels: [panelA, panelB, panelC],
       layout: {
         grid: {
@@ -333,6 +346,7 @@ describe("backup: reconcileToGrid", () => {
 
     const base: Workspace = {
       name: "test",
+      layoutVersion: 8,
       panels,
       layout: {
         grid: {
@@ -357,6 +371,7 @@ describe("backup: reconcileToGrid", () => {
   it("returns base unchanged when layout is not a present layout", () => {
     const base: Workspace = {
       name: "test",
+      layoutVersion: 8,
       panels: [{ id: "p1", panelId: "chart", group: "red", settings: {} }],
       layout: null,
     };
@@ -370,6 +385,7 @@ describe("backup: reconcileToGrid", () => {
   it("returns base unchanged when layout is an empty object", () => {
     const base: Workspace = {
       name: "test",
+      layoutVersion: 8,
       panels: [{ id: "p1", panelId: "chart", group: "red", settings: {} }],
       layout: {},
     };
@@ -383,6 +399,7 @@ describe("backup: reconcileToGrid", () => {
   it("returns base unchanged when layout is not an object", () => {
     const base: Workspace = {
       name: "test",
+      layoutVersion: 8,
       panels: [{ id: "p1", panelId: "chart", group: "red", settings: {} }],
       layout: "invalid",
     };
@@ -395,6 +412,7 @@ describe("backup: reconcileToGrid", () => {
   it("returns base unchanged when layout has a null grid (present key, malformed value)", () => {
     const base: Workspace = {
       name: "test",
+      layoutVersion: 8,
       panels: [
         { id: "p1", panelId: "chart", group: "red", settings: {} },
         { id: "p2", panelId: "tape", group: null, settings: {} },
@@ -411,6 +429,7 @@ describe("backup: reconcileToGrid", () => {
   it("returns base unchanged when grid.root is not an object", () => {
     const base: Workspace = {
       name: "test",
+      layoutVersion: 8,
       panels: [
         { id: "p1", panelId: "chart", group: "red", settings: {} },
         { id: "p2", panelId: "tape", group: null, settings: {} },
@@ -427,6 +446,7 @@ describe("backup: reconcileToGrid", () => {
   it("returns base unchanged when grid has no root key at all", () => {
     const base: Workspace = {
       name: "test",
+      layoutVersion: 8,
       panels: [
         { id: "p1", panelId: "chart", group: "red", settings: {} },
         { id: "p2", panelId: "tape", group: null, settings: {} },
@@ -443,6 +463,7 @@ describe("backup: reconcileToGrid", () => {
   it("returns base unchanged when grid.root has a branch type but malformed data", () => {
     const base: Workspace = {
       name: "test",
+      layoutVersion: 8,
       panels: [
         { id: "p1", panelId: "chart", group: "red", settings: {} },
         { id: "p2", panelId: "tape", group: null, settings: {} },
@@ -459,6 +480,7 @@ describe("backup: reconcileToGrid", () => {
   it("filters panels to empty array for a well-formed grid that legitimately places zero panels", () => {
     const base: Workspace = {
       name: "test",
+      layoutVersion: 8,
       panels: [
         { id: "p1", panelId: "chart", group: "red", settings: {} },
         { id: "p2", panelId: "tape", group: null, settings: {} },
@@ -514,6 +536,7 @@ describe("backup: prepareImportedWorkspace with reconciliation", () => {
 
     const imported: Workspace = {
       name: "old-workspace",
+      layoutVersion: 8,
       panels,
       layout: {
         grid: {
@@ -587,6 +610,7 @@ describe("backup: prepareImportedWorkspace with reconciliation", () => {
 
     const imported: Workspace = {
       name: "old",
+      layoutVersion: 8,
       panels,
       layout: null,
     };
@@ -607,6 +631,7 @@ describe("backup: prepareImportedWorkspace with reconciliation", () => {
 
     const imported: Workspace = {
       name: "old",
+      layoutVersion: 8,
       panels,
       layout: {},
     };

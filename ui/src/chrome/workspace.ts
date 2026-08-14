@@ -7,8 +7,11 @@ export interface PanelConfig {
   group: LinkGroup;
   settings: Record<string, unknown>;
 }
+export const WORKSPACE_LAYOUT_VERSION = 8;
+
 export interface Workspace {
   name: string;
+  layoutVersion: number;
   panels: PanelConfig[];
   layout: unknown; // dockview serialized layout JSON
   // Per-link-group focused symbol (LinkGroups.focused), persisted so a refresh
@@ -19,6 +22,19 @@ export interface Workspace {
   // Per-link-group focused venue (LinkGroups.focusedVenues), persisted beside
   // `groups`. Optional: absent in any workspace doc saved before this field.
   linkVenues?: Partial<Record<Exclude<LinkGroup, null>, VenueID>>;
+}
+
+export function blankWorkspace(name: string): Workspace {
+  return { name, layoutVersion: WORKSPACE_LAYOUT_VERSION, panels: [], layout: null };
+}
+
+export function isCurrentWorkspace(value: unknown): value is Workspace {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
+  const workspace = value as Partial<Workspace>;
+  return workspace.layoutVersion === WORKSPACE_LAYOUT_VERSION
+    && typeof workspace.name === "string"
+    && Array.isArray(workspace.panels)
+    && "layout" in workspace;
 }
 
 interface CommandClient {
@@ -37,10 +53,14 @@ export class WorkspaceStore {
   async load(name: string): Promise<Workspace> {
     const key = `workspace.${name}`;
     const ack = await this.client.sendCommand("GetConfig", { key });
-    if (ack.status === "accepted" && ack.value) {
-      return ack.value as Workspace;
+    if (ack.status === "accepted" && ack.value && isCurrentWorkspace(ack.value)) {
+      return ack.value;
     }
-    return { name, panels: [], layout: null };
+    const blank = blankWorkspace(name);
+    if (ack.status === "accepted" && ack.value) {
+      await this.client.sendCommand("SetConfig", { key, value: blank });
+    }
+    return blank;
   }
 
   save(ws: Workspace): void {

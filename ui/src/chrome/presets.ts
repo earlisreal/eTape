@@ -93,17 +93,17 @@ export const TRADING_LAYOUT: SerializedDockview = {
             {
               type: "branch",
               data: [
-                { type: "leaf", data: { views: ["chart-977336c7"], activeView: "chart-977336c7", id: "2", hideHeader: true }, size: 670 },
-                { type: "leaf", data: { views: ["t-chart-1m"], activeView: "t-chart-1m", id: "t-chart-1m", hideHeader: true }, size: 719 },
+                { type: "leaf", data: { views: ["chart-977336c7"], activeView: "chart-977336c7", id: "2" }, size: 670 },
+                { type: "leaf", data: { views: ["t-chart-1m"], activeView: "t-chart-1m", id: "t-chart-1m" }, size: 719 },
               ],
               size: 480,
             },
             {
               type: "branch",
               data: [
-                { type: "leaf", data: { views: ["watchlist-75d05981"], activeView: "watchlist-75d05981", id: "3", hideHeader: true }, size: 305 },
+                { type: "leaf", data: { views: ["watchlist-75d05981"], activeView: "watchlist-75d05981", id: "3" }, size: 305 },
                 { type: "leaf", data: { views: ["scanner-51fd77fe", "news-eb65ba23"], activeView: "news-eb65ba23", id: "4" }, size: 365 },
-                { type: "leaf", data: { views: ["t-chart-10s"], activeView: "t-chart-10s", id: "t-chart-10s", hideHeader: true }, size: 719 },
+                { type: "leaf", data: { views: ["t-chart-10s"], activeView: "t-chart-10s", id: "t-chart-10s" }, size: 719 },
               ],
               size: 446,
             },
@@ -116,13 +116,13 @@ export const TRADING_LAYOUT: SerializedDockview = {
             {
               type: "branch",
               data: [
-                { type: "leaf", data: { views: ["t-dom"], activeView: "t-dom", id: "t-ticket", hideHeader: true }, size: 294 },
-                { type: "leaf", data: { views: ["t-tape"], activeView: "t-tape", id: "t-tape", hideHeader: true }, size: 237 },
+                { type: "leaf", data: { views: ["t-dom"], activeView: "t-dom", id: "t-ticket" }, size: 294 },
+                { type: "leaf", data: { views: ["t-tape"], activeView: "t-tape", id: "t-tape" }, size: 237 },
               ],
               size: 308,
             },
-            { type: "leaf", data: { views: ["t-ticket"], activeView: "t-ticket", id: "t-account", hideHeader: true }, size: 195 },
-            { type: "leaf", data: { views: ["t-account"], activeView: "t-account", id: "t-orders", hideHeader: true }, size: 423 },
+            { type: "leaf", data: { views: ["t-ticket"], activeView: "t-ticket", id: "t-account" }, size: 195 },
+            { type: "leaf", data: { views: ["t-account"], activeView: "t-account", id: "t-orders" }, size: 423 },
           ],
           size: 531,
         },

@@ -16,6 +16,7 @@ describe("presets", () => {
       }
       // layout JSON references exactly the panel ids we declared
       expect(layout && typeof layout).toBe("object");
+      expect(JSON.stringify(layout)).not.toContain("hideHeader");
     });
     it(`${preset.id}: layout panel ids match the config list`, () => {
       const { panels, layout } = preset.build();

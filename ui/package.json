@@ -23,8 +23,8 @@
     "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
-    "dockview": "^7.0.4",
-    "dockview-react": "^7.0.4",
+    "dockview": "^8.1.0",
+    "dockview-react": "^8.1.0",
     "lightweight-charts": "^5.2.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
@@ -42,7 +42,7 @@
     "@typescript-eslint/parser": "^8.65.0",
     "@vitejs/plugin-react": "^6.0.5",
     "canvas": "^3.2.3",
-    "dockview-core": "7.0.4",
+    "dockview-core": "8.1.0",
     "eslint": "^10.8.0",
     "jsdom": "^30.0.1",
     "pixelmatch": "^7.2.0",

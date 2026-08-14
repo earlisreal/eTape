@@ -8,7 +8,7 @@ import type { Workspace } from "./workspace";
 
 // Codebase convention (see SettingsModal.test.tsx) is plain vitest/chai
 // matchers — @testing-library/jest-dom isn't installed here.
-const mkWorkspace = (): Workspace => ({ name: "main", panels: [], layout: {}, groups: {}, linkVenues: {} });
+const mkWorkspace = (): Workspace => ({ name: "main", layoutVersion: 8, panels: [], layout: {}, groups: {}, linkVenues: {} });
 const mkToast = (): ToastApi => ({ push: vi.fn(), dismiss: vi.fn() });
 
 function renderSection() {

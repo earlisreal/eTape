@@ -1,4 +1,41 @@
-import { createContext } from "react";
+import { createContext, createElement, useCallback, useMemo, useRef, type ReactNode } from "react";
+
+export interface PanelHeaderHostRegistry {
+  get(panelId: string): HTMLElement | null;
+  subscribe(panelId: string, listener: () => void): () => void;
+  register(panelId: string, host: HTMLElement): () => void;
+}
+
+export const PanelHeaderHostContext = createContext<PanelHeaderHostRegistry | undefined>(undefined);
+
+export function PanelHeaderHostProvider({ children }: { children: ReactNode }): JSX.Element {
+  const hosts = useRef(new Map<string, HTMLElement>());
+  const listeners = useRef(new Map<string, Set<() => void>>());
+  const notify = useCallback((panelId: string) => {
+    listeners.current.get(panelId)?.forEach((listener) => listener());
+  }, []);
+  const get = useCallback((panelId: string) => hosts.current.get(panelId) ?? null, []);
+  const subscribe = useCallback((panelId: string, listener: () => void) => {
+    const current = listeners.current.get(panelId) ?? new Set<() => void>();
+    current.add(listener);
+    listeners.current.set(panelId, current);
+    return () => {
+      current.delete(listener);
+      if (current.size === 0) listeners.current.delete(panelId);
+    };
+  }, []);
+  const register = useCallback((panelId: string, host: HTMLElement) => {
+    hosts.current.set(panelId, host);
+    notify(panelId);
+    return () => {
+      if (hosts.current.get(panelId) !== host) return;
+      hosts.current.delete(panelId);
+      notify(panelId);
+    };
+  }, [notify]);
+  const value = useMemo(() => ({ get, subscribe, register }), [get, register, subscribe]);
+  return createElement(PanelHeaderHostContext.Provider, { value }, children);
+}
 
 // PanelFrame renders the per-panel "ledger header" row above every panel body. Some
 // panel bodies (currently only ChartPanel) own controls that belong visually in that

@@ -3,6 +3,7 @@ import { Button } from "./controls/Button";
 import { mutateWindows, readWindows, validateName, type CommandClient, type WindowCatalogV1 } from "./catalogs";
 import { useTheme } from "./ThemeProvider";
 import { modalTracker } from "./modalTracker";
+import { blankWorkspace } from "./workspace";
 
 export function NewWindowModal({ open, currentId, commands, onClose }: { open: boolean; currentId: string; commands: CommandClient; onClose: () => void }): JSX.Element | null {
   const [catalog, setCatalog] = useState<WindowCatalogV1>({ version: 1, entries: [] });
@@ -20,7 +21,7 @@ export function NewWindowModal({ open, currentId, commands, onClose }: { open: b
     try {
       const clean = validateName(name, catalog.entries.map((e) => e.name), ["main"]); const id = crypto.randomUUID();
       const next = await mutateWindows(commands, (fresh) => ({ ...fresh, entries: [...fresh.entries, { id, name: validateName(clean, fresh.entries.map((e) => e.name), ["main"]) }] }));
-      const saved = await commands.sendCommand("SetConfig", { key: `workspace.${id}`, value: { name: id, panels: [], layout: null } });
+      const saved = await commands.sendCommand("SetConfig", { key: `workspace.${id}`, value: blankWorkspace(id) });
       if (saved.status !== "accepted") {
         await mutateWindows(commands, (fresh) => ({ ...fresh, entries: fresh.entries.filter((e) => e.id !== id) }));
         throw new Error(saved.reason ?? "Could not create empty workspace.");

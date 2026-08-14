@@ -6,7 +6,7 @@ const UNI = ["US.AAA", "US.BBB", "US.CCC", "US.DDD", "US.EEE", "US.FFF"];
 const isSymbolBearing = (panelId: string) => panelId === "chart" || panelId === "tape";
 
 function ws(panels: Workspace["panels"], groups?: Workspace["groups"]): Workspace {
-  return groups === undefined ? { name: "test", panels, layout: null } : { name: "test", panels, layout: null, groups };
+  return groups === undefined ? { name: "test", layoutVersion: 8, panels, layout: null } : { name: "test", layoutVersion: 8, panels, layout: null, groups };
 }
 
 describe("planDemoEntry", () => {

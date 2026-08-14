@@ -117,6 +117,7 @@ function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApp
 describe("AppShell execution subscription", () => {
   const seed: Workspace = {
     name: "default",
+    layoutVersion: 8,
     panels: [{ id: "connection-1", panelId: "connection-status", group: null, settings: {} }],
     layout: null,
   };
@@ -221,7 +222,7 @@ describe("AppShell onConfigChange", () => {
   // to the workspace AFTER an earlier panel was created must survive a later
   // onConfigChange call fired from that earlier panel's own (stale) closure.
   it("does not drop a later-added panel when an earlier panel's onConfigChange fires", async () => {
-    const seed: Workspace = { name: "default", panels: [{ id: "orders-1", panelId: "open-orders", group: null, settings: {} }], layout: null };
+    const seed: Workspace = { name: "default", layoutVersion: 8, panels: [{ id: "orders-1", panelId: "open-orders", group: null, settings: {} }], layout: null };
     const { saved } = mount(seed);
 
     // Wait for the initial (pre-existing) panel's content to actually mount inside
@@ -239,7 +240,7 @@ describe("AppShell onConfigChange", () => {
     // now the active one — switch back to the open-orders tab (dockview only mounts
     // the active tab's content) before touching its sort header. dockview's tab
     // activates on `pointerdown`, not `click`.
-    act(() => clickTab(screen.getByText("open-orders")));
+    act(() => clickTab(screen.getByTestId("panel-tab-orders-1")));
     await waitFor(() => expect(screen.getAllByText("Symbol")[0]).toBeTruthy());
 
     // Trigger the pre-existing open-orders panel's onConfigChange path (sort-by
@@ -266,6 +267,7 @@ describe("AppShell onConfigChange", () => {
   it("merges a settings patch without dropping sibling keys", async () => {
     const seed: Workspace = {
       name: "default",
+      layoutVersion: 8,
       panels: [{ id: "orders-1", panelId: "open-orders", group: null, settings: { keepMe: "precious" } }],
       layout: null,
     };
@@ -285,21 +287,22 @@ describe("AppShell onConfigChange", () => {
   });
 });
 
-describe("AppShell single-panel tab visibility", () => {
-  // A lone panel's own ledger-header already shows its title, so dockview's own tab
-  // strip above it is redundant chrome — hidden until a second panel joins the group.
-  it("hides the dockview tab strip for a single-panel group and shows it once a second panel joins", async () => {
-    const seed: Workspace = { name: "default", panels: [{ id: "orders-1", panelId: "open-orders", group: null, settings: {} }], layout: null };
+describe("AppShell custom panel headers", () => {
+  it("keeps the full-width header visible for one panel and adds selectable hosts for a second", async () => {
+    const seed: Workspace = { name: "default", layoutVersion: 8, panels: [{ id: "orders-1", panelId: "open-orders", group: null, settings: {} }], layout: null };
     mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     await waitFor(() => expect(screen.getAllByText("Symbol")[0]).toBeTruthy());
 
     const tabStrip = () => document.querySelector(".dv-tabs-and-actions-container") as HTMLElement;
-    expect(tabStrip().style.display).toBe("none");
+    expect(tabStrip().style.display).not.toBe("none");
+    const firstHost = screen.getByTestId("panel-tab-orders-1");
+    expect(within(firstHost).getByLabelText("close panel")).toBeTruthy();
+    expect(firstHost.querySelector(".panel-focused-header")).not.toBeNull();
 
     fireEvent.click(screen.getByText("+ Add panel"));
     fireEvent.click(screen.getByText("Stock Info"));
-    await waitFor(() => expect(tabStrip().style.display).not.toBe("none"));
+    await waitFor(() => expect(document.querySelectorAll('[data-testid^="panel-tab-"]').length).toBe(2));
   });
 });
 
@@ -311,6 +314,7 @@ describe("AppShell group-symbol persistence (Bug 5: refresh resetting a grouped 
   it("hydrates LinkGroups from the saved workspace's groups map before panels mount", async () => {
     const seed: Workspace = {
       name: "default",
+      layoutVersion: 8,
       panels: [{ id: "n1", panelId: "news", group: "green", settings: {} }],
       layout: null,
       groups: { green: "US.NVDA" },
@@ -323,6 +327,7 @@ describe("AppShell group-symbol persistence (Bug 5: refresh resetting a grouped 
   it("persists a group's focused-symbol change into the workspace doc", async () => {
     const seed: Workspace = {
       name: "default",
+      layoutVersion: 8,
       panels: [{ id: "n1", panelId: "news", group: "green", settings: {} }],
       layout: null,
     };
@@ -338,7 +343,7 @@ describe("AppShell group-symbol persistence (Bug 5: refresh resetting a grouped 
 
 describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
   const VENUE_SETUP_HIDDEN_KEY = "etape.venueSetupHidden";
-  const seed: Workspace = { name: "default", panels: [], layout: null };
+  const seed: Workspace = { name: "default", layoutVersion: 8, panels: [], layout: null };
 
   const emptyGate = { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 };
   const venueStatus = (id: string, broker: VenueStatus["broker"] = "alpaca"): VenueStatus => ({
@@ -496,7 +501,7 @@ describe("AppShell try-demo CTA (Task 6: U4 first-run affordances)", () => {
   // on an accessible name (see the dedicated VenueSetupPrompt-side test below,
   // which scopes its query with `within` instead, since production really
   // does mount both simultaneously in that scenario).
-  const seed: Workspace = { name: "default", panels: [], layout: null };
+  const seed: Workspace = { name: "default", layoutVersion: 8, panels: [], layout: null };
 
   it("shows the CTA while sessionMode is pending (the default before the first snapshot)", async () => {
     mount(seed);
@@ -549,7 +554,7 @@ describe("AppShell try-demo CTA (Task 6: U4 first-run affordances)", () => {
 
 describe("AppShell Alpaca-1m-history hint banner", () => {
   const ALPACA_HINT_HIDDEN_KEY = "etape.alpacaHintHidden";
-  const seed: Workspace = { name: "default", panels: [], layout: null };
+  const seed: Workspace = { name: "default", layoutVersion: 8, panels: [], layout: null };
 
   const emptyGate = { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 };
   const venueStatus = (id: string, broker: VenueStatus["broker"]): VenueStatus => ({
@@ -742,6 +747,7 @@ describe("AppShell demo mode-edge orchestration (Task 13)", () => {
   // panelId: "chart" panels, mounted indirectly through that one test.
   const seed: Workspace = {
     name: "default",
+    layoutVersion: 8,
     panels: [{ id: "info-1", panelId: "news", group: null, settings: { symbol: "US.ORCL" } }],
     layout: null,
     groups: { green: "US.IBM" },
@@ -834,7 +840,7 @@ describe("AppShell demo mode-edge orchestration (Task 13)", () => {
   });
 
   it("live(empty)->demo->live: reverting back to an originally-empty workspace re-shows EmptyState instead of crashing", async () => {
-    const emptySeed: Workspace = { name: "default", panels: [], layout: null };
+    const emptySeed: Workspace = { name: "default", layoutVersion: 8, panels: [], layout: null };
     const { stores, saved } = mount(emptySeed, { workspaceName: "main" });
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
     expect(screen.getByText("Empty workspace")).toBeTruthy();
@@ -856,6 +862,7 @@ describe("AppShell Dockview panel constraints", () => {
   it("creates a seeded tape panel with the shared minimum width", async () => {
     const seed: Workspace = {
       name: "default",
+      layoutVersion: 8,
       panels: [{ id: "tape-1", panelId: "tape", group: null, settings: {} }],
       layout: null,
     };
@@ -874,6 +881,7 @@ describe("AppShell Dockview panel constraints", () => {
   it("normalizes a legacy tape entry before restoring Dockview JSON", async () => {
     const seed: Workspace = {
       name: "default",
+      layoutVersion: 8,
       panels: [{ id: "tape-1", panelId: "tape", group: null, settings: {} }],
       layout: {
         grid: {
@@ -902,6 +910,7 @@ describe("AppShell hotkey target lifecycle", () => {
     try {
       mount({
         name: "default",
+        layoutVersion: 8,
         panels: [{ id: "news-a", panelId: "news", group: "green", settings: { symbol: "US.AAPL" } }],
         layout: null,
       }, { hotkeyTargetChannel: channel });
@@ -915,7 +924,7 @@ describe("AppShell hotkey target lifecycle", () => {
       fireEvent.click(screen.getAllByText("Stock Info")[0]);
       await waitFor(() => expect((document.querySelector(".dv-tabs-and-actions-container") as HTMLElement).style.display).not.toBe("none"));
       expect(channel.messages.some((m) => m.type === "target")).toBe(false);
-      act(() => clickTab(screen.getByText("news")));
+      act(() => clickTab(screen.getByTestId("panel-tab-news-a")));
       await waitFor(() => expect(channel.messages.some((m) => m.type === "target" && m.target.panel === seeded?.target.panel)).toBe(true));
     } finally {
       hasFocus.mockRestore();
@@ -937,7 +946,7 @@ describe("AppShell layout export (Task 2: ghost-panel fix)", () => {
   // panel via the UI and then exporting proves the fix reads the LIVE dockview
   // grid (`apiRef.current.toJSON()`) instead.
   it("includes a panel added after the last sync point, both as config AND in the grid", async () => {
-    const seed: Workspace = { name: "default", panels: [{ id: "orders-1", panelId: "open-orders", group: null, settings: {} }], layout: null };
+    const seed: Workspace = { name: "default", layoutVersion: 8, panels: [{ id: "orders-1", panelId: "open-orders", group: null, settings: {} }], layout: null };
     mount(seed);
 
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());

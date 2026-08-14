@@ -4,7 +4,7 @@ import { themeDark, themeLight } from "dockview";
 // dockview's stylesheet is imported in main.tsx (ahead of global.css) so our
 // theme overrides always win the cascade — see the comment there.
 import { PanelFrame } from "./PanelFrame";
-import type { PanelConfig, Workspace } from "./workspace";
+import { isCurrentWorkspace, type PanelConfig, type Workspace } from "./workspace";
 import { WorkspaceStore } from "./workspace";
 import type { Stores } from "../data/registry";
 import type { Scheduler } from "../render/Scheduler";
@@ -21,7 +21,7 @@ import { DemoBanner } from "./DemoBanner";
 import { AlpacaBackfillBanner } from "./AlpacaBackfillBanner";
 import { EmptyState } from "./EmptyState";
 import { Catalog } from "./Catalog";
-import { parseImport, prepareImportedWorkspace, isPresentLayout, reconcileToGrid, applyPanelConstraintsToLayout } from "./backup";
+import { parseImport, prepareImportedWorkspace, isCurrentLayout, isPresentLayout, reconcileToGrid, applyPanelConstraintsToLayout } from "./backup";
 import { SettingsModal, type SettingsSection } from "./SettingsModal";
 import { PracticeLauncherModal } from "./PracticeLauncherModal";
 import { VenueSetupPrompt } from "./VenueSetupPrompt";
@@ -38,6 +38,8 @@ import { NewWindowModal } from "./NewWindowModal";
 import { mutateWindows, readWindows } from "./catalogs";
 import { planDemoEntry, planDemoRevert } from "./demoTransition";
 import { resolveVenue } from "./exec/venueSelection";
+import { PanelHeaderTab } from "./PanelHeaderTab";
+import { PanelHeaderHostProvider } from "./panels/headerSlot";
 
 // Task 3: permanent "don't show again" flag for the first-run venue-setup
 // prompt, set only when the user ticks the checkbox on either action.
@@ -604,6 +606,10 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // already mounted, api.fromJSON needs the new panel ids present in the
   // components map first.
   const applyWorkspace = (next: Workspace, opts?: { confirm?: string }) => {
+    if (!isCurrentWorkspace(next)) {
+      toast.push({ level: "danger", text: "Invalid layout" });
+      return;
+    }
     if (opts?.confirm && !window.confirm(opts.confirm)) return;
     const currentTarget = hotkeyCoordinator.snapshot();
     if (currentTarget?.ownerWindow === windowId && !next.panels.some((p) => p.id === currentTarget.panel)) {
@@ -704,6 +710,10 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         toast.push({ level: "danger", text: "That file has no layout to import." });
         return;
       }
+      if (!isCurrentLayout(result.data.layout)) {
+        toast.push({ level: "danger", text: "Invalid layout" });
+        return;
+      }
       applyWorkspace(prepareImportedWorkspace(result.data.layout, (wsRef.current ?? ws).name));
       toast.push({ level: "info", text: "Imported layout." });
     };
@@ -741,13 +751,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     ]),
   );
 
-  // A pane's tab strip is only useful once there's more than one panel to switch
-  // between — a lone panel's own header (PanelFrame's ledger-header) already shows
-  // its title, so the dockview tab above it is pure redundant chrome.
-  const syncTabVisibility = (api: DockviewApi) => {
-    for (const g of api.groups) g.header.hidden = g.panels.length <= 1;
-  };
-
   const onReady = (event: DockviewReadyEvent) => {
     apiRef.current = event.api;
     // Restore a previously saved dockview layout if present; otherwise seed the grid
@@ -771,7 +774,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         });
       });
     }
-    syncTabVisibility(event.api);
     event.api.onDidActivePanelChange(({ panel, origin }) => {
       if (origin === "user" && panel) activatePanelTarget(panel.id);
     });
@@ -793,10 +795,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       // drop any panel added/removed since mount from the persisted doc.
       const current = wsRef.current ?? ws;
       workspaceStore.save({ ...current, layout: event.api.toJSON() });
-      // "an aggregation of many events" (dockview's own doc comment) — covers
-      // every panel/group add, remove, and move, so a group's tab strip stays
-      // in sync with its current panel count after any rearrangement.
-      syncTabVisibility(event.api);
     });
   };
 
@@ -827,8 +825,11 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           {ws.panels.length === 0 ? (
             <EmptyState onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} showTryDemo={showTryDemo} onTryDemo={onTryDemo} onImportLayoutFile={importLayoutFile} />
           ) : (
-            <DockviewReact components={components} onReady={onReady}
-              theme={mode === "light" ? themeLight : themeDark} />
+            <PanelHeaderHostProvider>
+              <DockviewReact components={components} onReady={onReady}
+                defaultTabComponent={PanelHeaderTab} singleTabMode="fullwidth"
+                theme={mode === "light" ? themeLight : themeDark} />
+            </PanelHeaderHostProvider>
           )}
         </div>
         <SettingsModal open={settings.open} section={settings.section}

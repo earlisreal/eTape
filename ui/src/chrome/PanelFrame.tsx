@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 import type { DockviewPanelApi } from "dockview";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { HoverButton } from "./controls/HoverButton";
 import { PANELS, type PanelProps } from "./panels/registry";
-import { PanelHeaderSlotContext, PanelHeaderActionsSlotContext } from "./panels/headerSlot";
+import { PanelHeaderHostContext, PanelHeaderSlotContext, PanelHeaderActionsSlotContext } from "./panels/headerSlot";
 import type { PanelConfig } from "./workspace";
 import type { Stores } from "../data/registry";
 import type { Scheduler } from "../render/Scheduler";
@@ -104,6 +105,12 @@ export function PanelFrame(
   // Same pattern, for the narrower headerActions slot (a single icon button
   // beside the close button — see headerSlot.ts's PanelHeaderActionsSlotContext).
   const [actionsSlot, setActionsSlot] = useState<HTMLDivElement | null>(null);
+  const headerHostRegistry = useContext(PanelHeaderHostContext);
+  const headerHost = useSyncExternalStore(
+    (listener) => headerHostRegistry?.subscribe(config.id, listener) ?? (() => {}),
+    () => headerHostRegistry?.get(config.id) ?? null,
+    () => null,
+  );
   // Local group state, seeded from config.group at mount: config itself is
   // frozen inside the same per-panel factory closure described above, so
   // re-picking a group here needs its own mutable state for the swatch/symbol
@@ -412,9 +419,8 @@ export function PanelFrame(
     onGroupChange(g);
   };
 
-  return (
-    <div className={active ? "panel-focused" : undefined} style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      <div className="ledger-header" style={{ position: "relative" }}>
+  const header = (
+    <div className={`ledger-header${active ? " panel-focused-header" : ""}`} style={{ position: "relative" }}>
         <HoverButton type="button" aria-label="link group" onClick={() => setShowPicker((v) => !v)}
           style={{ width: 12, height: 12, padding: 0, border: pinned ? `1.5px solid ${palette.textMuted}` : "1px solid transparent",
             borderRadius: 2, background: swatch(group, palette), cursor: "pointer", flex: "0 0 auto" }}
@@ -463,7 +469,12 @@ export function PanelFrame(
           style={{ border: "none", background: "transparent", color: palette.textMuted, cursor: "pointer", fontSize: 13, padding: "0 2px", lineHeight: 1 }}>
           ✕
         </HoverButton>
-      </div>
+    </div>
+  );
+
+  return (
+    <div className={active ? "panel-focused" : undefined} style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {headerHost ? createPortal(header, headerHost) : header}
       <div ref={hostRef} data-testid="panel-body" style={{ flex: 1, minHeight: 0 }}>
         <ErrorBoundary label={config.panelId}>
           <PanelHeaderSlotContext.Provider value={def?.headerControls ? headerSlot : undefined}>

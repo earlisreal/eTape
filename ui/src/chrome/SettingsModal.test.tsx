@@ -15,7 +15,7 @@ const mkCommands = () => ({ sendCommand: vi.fn().mockResolvedValue({ kind: "ack"
 // Task 3 (export/import): getWorkspace/onImportWorkspace/toast are required
 // props threaded down to BackupSection — stub them for every render, same as
 // `commands` above.
-const mkWorkspace = (): Workspace => ({ name: "main", panels: [], layout: {}, groups: {}, linkVenues: {} });
+const mkWorkspace = (): Workspace => ({ name: "main", layoutVersion: 8, panels: [], layout: {}, groups: {}, linkVenues: {} });
 const mkToast = (): ToastApi => ({ push: vi.fn(), dismiss: vi.fn() });
 
 describe("SettingsModal", () => {

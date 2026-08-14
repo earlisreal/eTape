@@ -3,7 +3,7 @@
 // — same machine or a fresh one. Pure module, no React/DOM, so every rule
 // here (envelope shape, id regeneration, activeVenue scrubbing) is directly
 // unit-testable; BackupSection.tsx (Task 2) is a thin UI shell around this.
-import type { PanelConfig, Workspace } from "./workspace";
+import { WORKSPACE_LAYOUT_VERSION, isCurrentWorkspace, type PanelConfig, type Workspace } from "./workspace";
 import { normalizeOrderConfig, type ActionTemplate, type OrderConfig } from "./exec/actionTemplate";
 
 export const SETTINGS_EXPORT_VERSION = 1;
@@ -157,6 +157,10 @@ export function reconcileToGrid(base: Workspace, layout: unknown): Workspace {
 // Settings import path and the empty-workspace import path share one guard.
 export function isPresentLayout(layout: SettingsExport["layout"]): layout is Workspace {
   return typeof layout === "object" && layout !== null && !Array.isArray(layout);
+}
+
+export function isCurrentLayout(layout: SettingsExport["layout"]): layout is Workspace {
+  return isCurrentWorkspace(layout) && layout.layoutVersion === WORKSPACE_LAYOUT_VERSION;
 }
 
 // Every imported template gets a freshly minted id. Regenerating (rather
