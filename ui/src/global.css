@@ -212,6 +212,8 @@ input.numfield { -moz-appearance: textfield; appearance: textfield; }
 
 /* dockview chrome themed from our tokens (was VS-Code greys). */
 .dockview-theme-light, .dockview-theme-dark {
+  --dv-tabs-and-actions-container-height: 24px;
+  --dv-tabs-and-actions-container-font-size: 11px;
   --dv-group-view-background-color: var(--bg);
   --dv-tabs-and-actions-container-background-color: var(--surface);
   --dv-activegroup-visiblepanel-tab-background-color: var(--bg);
@@ -222,4 +224,13 @@ input.numfield { -moz-appearance: textfield; appearance: textfield; }
   --dv-icon-hover-background-color: var(--surface);
   --dv-activegroup-visiblepanel-tab-color: var(--text);
   --dv-inactivegroup-visiblepanel-tab-color: var(--text-muted);
+}
+
+.dv-tab .dv-default-tab .dv-default-tab-action {
+  padding: 2px;
+}
+
+.dv-tab .dv-default-tab .dv-default-tab-action .dv-svg {
+  width: 8px;
+  height: 8px;
 }
