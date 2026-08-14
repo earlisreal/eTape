@@ -137,12 +137,13 @@ export const PANELS: Record<string, PanelDef> = {
     minimumWidth: TAPE_MIN_WIDTH,
   },
   "scanner": {
-	component: ScannerPanel,
+    component: ScannerPanel,
     topics: ["scanner.rank", "scanner.hit"],
     title: "Scanner",
     glyph: "%",
     description: "Live gappers, all sessions, filters",
     symbolBearing: false,
+    headerControls: true,
   },
   "watchlist": {
     component: WatchlistPanel,

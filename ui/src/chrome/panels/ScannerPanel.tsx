@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { createPortal } from "react-dom";
 import type { PanelProps } from "./registry";
 import type { ScannerFilters, ScannerSession } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
@@ -12,6 +13,8 @@ import { bareSymbol } from "../exec/orderStatus";
 import { Button } from "../controls/Button";
 import { TVContextMenu, type MenuEntry } from "./tv/TVContextMenu";
 import { menuChrome } from "../menuChrome";
+import { PanelHeaderSlotContext } from "./headerSlot";
+import { IconGear } from "./tv/tvIcons";
 
 const SESSION_LABEL: Record<ScannerSession, string> = {
   premarket: "Pre-market", rth: "RTH", afterhours: "After-hours", overnight: "Overnight",
@@ -48,6 +51,7 @@ export function ScannerPanel(
   { config, stores, linkGroups, commands, onConfigChange, group: groupProp }: PanelProps,
 ): JSX.Element {
   const { palette } = useTheme();
+  const headerSlot = useContext(PanelHeaderSlotContext);
   // config.group is frozen at panel creation (dockview never re-invokes the panel
   // factory with a fresh config after a later swatch re-pick) — PanelFrame threads
   // the live re-picked group through as the `group` prop instead. Same pattern as
@@ -108,39 +112,43 @@ export function ScannerPanel(
   const buildRowMenuItems = (sym: string): MenuEntry[] =>
     [{ label: `Add ${bareSymbol(sym)} to watchlist`, onClick: () => void commands.sendCommand("WatchlistAdd", { symbol: sym }) }];
 
-  const header = cv.refreshedAt
-    ? `${SESSION_LABEL[cv.session!]} · updated ${formatTapeTime(cv.refreshedAt)}`
-    : "Waiting for scanner data…";
+  const sessionLabel = cv.session ? SESSION_LABEL[cv.session] : null;
+  const headerControls = (
+    <div data-testid="scanner-header-controls" style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
+      <span className="serif" style={{ fontWeight: 600, whiteSpace: "nowrap" }}>Scanner</span>
+      {sessionLabel && <span className="mono" style={{ color: palette.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>· {sessionLabel}</span>}
+      <span style={{ flex: 1 }} />
+      <button type="button" aria-label="filters" aria-expanded={filtersOpen} title="Filters"
+        onClick={() => (filtersOpen ? setFiltersOpen(false) : openFilters())}
+        style={{ position: "relative", display: "inline-flex", border: "none", background: "transparent", color: palette.textMuted, cursor: "pointer", padding: 3, flex: "0 0 auto" }}>
+        <IconGear size={13} />
+      </button>
+    </div>
+  );
 
   const th = { padding: "2px 8px", position: "sticky" as const, top: 0, background: palette.surface };
   // Data-surface treatment (matches tape/ladder): mono, tabular figures, ticker as the row anchor.
   const symCell = { textAlign: "left" as const, padding: "2px 8px", fontFamily: FONTS.mono, fontWeight: 600 };
   const numCell = { padding: "2px 8px", fontFamily: FONTS.mono, fontWeight: 500, fontVariantNumeric: "tabular-nums" as const };
   return (
-    <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", borderBottom: `1px solid ${palette.border}`, position: "relative" }}>
-        <span style={{ fontWeight: 600 }}>{header}</span>
-        {(
-          <Button aria-label="filters" aria-expanded={filtersOpen}
-            onClick={() => (filtersOpen ? setFiltersOpen(false) : openFilters())} style={{ padding: "2px 8px" }}>
-            ⚙ filters
-          </Button>
-        )}
-        {filtersOpen && (
-          <div className="popover" style={{ top: 30, left: 8, width: 220 }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-              <label>rank <select aria-label="rank mode" value={draft.mode} onChange={(e) => setDraft({ ...draft, mode: e.target.value as ScannerFilters["mode"] })}><option value="gainers">Top gainers</option><option value="losers">Top losers</option><option value="most_active">Most active</option></select></label>
-			  {draft.mode !== "most_active" && <label>{draft.mode === "gainers" ? "min gain %" : "min loss %"} <input aria-label={draft.mode === "gainers" ? "min gain %" : "min loss %"} type="number" min="0" value={draft.minChangePct} onChange={(e) => setDraft({ ...draft, minChangePct: Math.max(0, Number(e.target.value)) })} style={{ width: 60 }} /></label>}
-              <label>float ≤ <input aria-label="float cap" type="number" min="0" value={draft.maxFloatShares === null ? "" : draft.maxFloatShares / unitScale(draft.floatUnit)} onChange={(e) => setDraft({ ...draft, maxFloatShares: e.target.value === "" ? null : Number(e.target.value) * unitScale(draft.floatUnit) })} style={{ width: 70 }} /><select aria-label="float unit" value={draft.floatUnit} onChange={(e) => setDraft({ ...draft, floatUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
-              <label>vol ≥ <input aria-label="min volume" type="number" min="0" value={draft.minVolume / unitScale(draft.volumeUnit)} onChange={(e) => setDraft({ ...draft, minVolume: Number(e.target.value) * unitScale(draft.volumeUnit) })} style={{ width: 70 }} /><select aria-label="volume unit" value={draft.volumeUnit} onChange={(e) => setDraft({ ...draft, volumeUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
-              <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-                <Button onClick={resetDefaults}>Reset defaults</Button>
-                <Button variant="primary" onClick={applyFilters}>Apply</Button>
-              </div>
+    <div style={{ height: "100%", overflow: "auto", position: "relative", background: palette.bg, color: palette.text, fontSize: 12 }}>
+      {headerSlot === undefined ? headerControls : headerSlot ? createPortal(headerControls, headerSlot) : null}
+      {!cv.refreshedAt && <div style={{ padding: "6px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>Waiting for scanner data…</div>}
+      {filtersOpen && (
+        <div className="popover" style={{ top: headerSlot === undefined ? 30 : 6, left: headerSlot === undefined ? 8 : undefined, right: headerSlot === undefined ? undefined : 8, width: 220 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {cv.refreshedAt && <div className="mono" style={{ color: palette.textMuted }}>updated {formatTapeTime(cv.refreshedAt)}</div>}
+            <label>rank <select aria-label="rank mode" value={draft.mode} onChange={(e) => setDraft({ ...draft, mode: e.target.value as ScannerFilters["mode"] })}><option value="gainers">Top gainers</option><option value="losers">Top losers</option><option value="most_active">Most active</option></select></label>
+            {draft.mode !== "most_active" && <label>{draft.mode === "gainers" ? "min gain %" : "min loss %"} <input aria-label={draft.mode === "gainers" ? "min gain %" : "min loss %"} type="number" min="0" value={draft.minChangePct} onChange={(e) => setDraft({ ...draft, minChangePct: Math.max(0, Number(e.target.value)) })} style={{ width: 60 }} /></label>}
+            <label>float ≤ <input aria-label="float cap" type="number" min="0" value={draft.maxFloatShares === null ? "" : draft.maxFloatShares / unitScale(draft.floatUnit)} onChange={(e) => setDraft({ ...draft, maxFloatShares: e.target.value === "" ? null : Number(e.target.value) * unitScale(draft.floatUnit) })} style={{ width: 70 }} /><select aria-label="float unit" value={draft.floatUnit} onChange={(e) => setDraft({ ...draft, floatUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
+            <label>vol ≥ <input aria-label="min volume" type="number" min="0" value={draft.minVolume / unitScale(draft.volumeUnit)} onChange={(e) => setDraft({ ...draft, minVolume: Number(e.target.value) * unitScale(draft.volumeUnit) })} style={{ width: 70 }} /><select aria-label="volume unit" value={draft.volumeUnit} onChange={(e) => setDraft({ ...draft, volumeUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+              <Button onClick={resetDefaults}>Reset defaults</Button>
+              <Button variant="primary" onClick={applyFilters}>Apply</Button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
       {(
         <div className="mono" style={{ padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>
           {filters.mode === "most_active" ? `Most active${cv.session === "rth" ? "" : " · approximate"}` : filters.mode === "gainers" ? "Top gainers" : "Top losers"} · {formatFilterSummary({ minChangePct: filters.mode === "most_active" ? 0 : filters.minChangePct, floatCapShares: filters.maxFloatShares, minVolume: filters.minVolume })}

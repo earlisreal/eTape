@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, act, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, act, fireEvent, cleanup, within } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { LinkGroups } from "../linkGroups";
 import { makeStores } from "../../data/registry";
 import { ScannerPanel } from "./ScannerPanel";
+import { PanelHeaderSlotContext } from "./headerSlot";
 import type { PanelProps } from "./registry";
 import type { PanelConfig } from "../workspace";
 
@@ -18,6 +19,7 @@ function fakeBus() {
 function renderPanel(
   over: Partial<PanelConfig> = {},
   groupProp?: PanelConfig["group"],
+  headerSlot?: HTMLElement,
 ) {
   const stores = makeStores();
   const scanner = stores.scanner;
@@ -30,8 +32,8 @@ function renderPanel(
   const commands = { sendCommand: vi.fn(async () => ({ status: "accepted" })) };
   const props = { config, stores, linkGroups, onConfigChange, scheduler: {} as never,
     width: 400, height: 300, commands, group: groupProp } as unknown as PanelProps;
-  render(<ThemeProvider><ScannerPanel {...props} /></ThemeProvider>);
-  return { scanner, focus, onConfigChange, commands };
+  const view = render(<ThemeProvider><PanelHeaderSlotContext.Provider value={headerSlot}><ScannerPanel {...props} /></PanelHeaderSlotContext.Provider></ThemeProvider>);
+  return { scanner, focus, onConfigChange, commands, ...view };
 }
 
 describe("ScannerPanel", () => {
@@ -45,6 +47,25 @@ describe("ScannerPanel", () => {
       ] } }));
     expect(screen.getByText("KO")).toBeTruthy();
     expect(screen.getByText("+18.4%")).toBeTruthy();
+  });
+
+  it("keeps session and the icon-only Filters button in the panel header", () => {
+    const slot = document.body.appendChild(document.createElement("div"));
+    const { scanner, container, unmount } = renderPanel({}, undefined, slot);
+    try {
+      act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+        payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [] } }));
+      expect(within(slot).getByText("Scanner")).toBeTruthy();
+      expect(within(slot).getByText("Pre-market")).toBeTruthy();
+      expect(within(slot).queryByText(/updated/i)).toBeNull();
+      const filters = within(slot).getByRole("button", { name: "filters" });
+      expect(filters.textContent).toBe("");
+      fireEvent.click(filters);
+      expect(within(container).getByText(/updated/i)).toBeTruthy();
+    } finally {
+      unmount();
+      slot.remove();
+    }
   });
 
   it("renders the symbol column without the US. market prefix", () => {

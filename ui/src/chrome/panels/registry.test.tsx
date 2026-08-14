@@ -5,6 +5,7 @@ import { TAPE_MIN_WIDTH } from "../../render/tape/tapeLayout";
 describe("panel registry — monitoring surfaces", () => {
   it("registers scanner only with the scanner topics", () => {
     expect(PANELS.scanner.topics).toEqual(["scanner.rank", "scanner.hit"]);
+    expect(PANELS.scanner.headerControls).toBe(true);
     expect(PANELS.movers).toBeUndefined();
   });
 });
