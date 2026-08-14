@@ -301,6 +301,17 @@ describe("PanelFrame — responsive titles", () => {
     }
   });
 
+  it("shows T&S before the full title reaches adjacent header controls", () => {
+    const frame = renderTapeFrame();
+    try {
+      setTitleGeometry(frame.container, 97, 90);
+      expect(screen.getByTestId("panel-title").textContent).toBe("T&S");
+    } finally {
+      frame.unmount();
+      frame.restore();
+    }
+  });
+
   it("restores the full title when the title slot grows again", () => {
     const frame = renderTapeFrame();
     try {

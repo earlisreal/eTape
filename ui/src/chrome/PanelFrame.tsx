@@ -37,7 +37,9 @@ function ResponsivePanelTitle({ title, shortTitle, className, style }: {
     const slot = slotRef.current;
     const fullTitle = measurementRef.current;
     if (!slot || !fullTitle || !shortTitle) return;
-    const next = fullTitle.getBoundingClientRect().width > slot.getBoundingClientRect().width;
+    const fullTitleWidth = fullTitle.getBoundingClientRect().width;
+    const slotWidth = slot.getBoundingClientRect().width;
+    const next = fullTitleWidth > slotWidth || (slotWidth > 0 && fullTitleWidth + 8 > slotWidth);
     setShowShortTitle((previous) => previous === next ? previous : next);
   }, [shortTitle, title]);
 

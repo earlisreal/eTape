@@ -55,6 +55,22 @@ test.describe("trading workspace", () => {
 });
 
 test.describe("monitoring workspace", () => {
+  test("keeps a singleton panel out of tab overflow when narrowed", async ({ page }) => {
+    await page.setViewportSize({ width: 1200, height: 700 });
+    await page.goto("/?workspace=e2e-singleton-header-narrow");
+    await expect(page.getByTestId("latency-readout")).toBeVisible({ timeout: 15_000 });
+    await page.getByRole("button", { name: "+ Add panel" }).click();
+    await page.getByText("Time & Sales", { exact: true }).click();
+
+    const title = page.getByTestId("panel-title");
+    await expect(title).toHaveText("Time & Sales");
+    await page.setViewportSize({ width: 200, height: 700 });
+
+    await expect(title).toHaveText("T&S");
+    expect(await page.locator(".dv-tabs-container").evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(false);
+    await expect(page.locator(".dv-tabs-overflow-dropdown-root")).toBeHidden();
+  });
+
   test("loads; scanner/news show their empty state (no pollers in replay)", async ({ page }) => {
     await gotoAndApplyPreset(page, "e2e-monitoring", "Monitoring");
     // Charts are canvas; assert a deterministic empty-state text + screenshot.
