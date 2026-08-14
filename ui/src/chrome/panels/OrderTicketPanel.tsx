@@ -18,7 +18,7 @@ import { useOpenSettings } from "../OpenSettingsContext";
 import { StepperInput } from "./StepperInput";
 import { PanelHeaderActionsSlotContext } from "./headerSlot";
 import { IconGear } from "./tv/tvIcons";
-import { HotkeyDeck } from "./HotkeyDeck";
+import { HotkeyDeck, resolveDeckRows } from "./HotkeyDeck";
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
@@ -64,7 +64,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
   const { config: orderConfig } = useOrderConfig();
   const extBufferPct = orderConfig.extHoursMarketBufferPct ?? 1;
-  const hasDeck = orderConfig.templates.some((t) => t.deck);
+  const hasDeck = resolveDeckRows(orderConfig).length > 0;
 
   const [type, setType] = useState<OrderType>("LIMIT");
   const [tif, setTif] = useState<TIF>("DAY");
@@ -219,9 +219,9 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
           <button key={s} type="button" data-testid={`side-${s}`} className={sideTone(s)} onClick={() => submitManual(s)}>{s}</button>
         ))}
       </div>
-      {/* Strip 5 — hotkey deck: user-configured preset buttons (Settings › Orders & hotkeys).
-          Hidden entirely (no wrapper, no separator) when no presets are deck-enabled —
-          only the configured-buttons view renders under Strip 4. */}
+      {/* Strip 5 — embedded Hotkey Deck (Settings › Orders & hotkeys).
+          Hidden entirely (no wrapper, no separator) when no saved Deck Row
+          resolves to a current Action Template. */}
       {hasDeck && (
         <div style={{ borderTop: `1px solid ${palette.border}`, paddingTop: 6 }}>
           <HotkeyDeck venue={venue} symbol={symbol} quote={quote} buyingPower={buyingPower} positionQty={positionQty}

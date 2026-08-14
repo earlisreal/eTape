@@ -37,7 +37,8 @@ describe("normalizeOrderConfig", () => {
   });
   it("passes manage templates through untouched", () => {
     const raw: OrderConfig = { activeVenue: "", templates: [{ kind: "manage", id: "k", label: "KILL", action: "KillSwitch", hotkey: "Ctrl+Shift+K" }] as OrderConfig["templates"] };
-    expect(normalizeOrderConfig(raw).templates[0]).toEqual(raw.templates[0]);
+    expect(normalizeOrderConfig(raw).templates[0]).toMatchObject(raw.templates[0]);
+    expect(normalizeOrderConfig(raw).templates[0].deck).toBe(false);
   });
   it("defaults a missing session to AUTO (a config saved before this feature keeps today's behavior)", () => {
     const raw: OrderConfig = {
@@ -91,5 +92,39 @@ describe("normalizeOrderConfig", () => {
   });
   it("preserves an in-range extHoursMarketBufferPct", () => {
     expect(normalizeOrderConfig({ activeVenue: "", templates: [], extHoursMarketBufferPct: 2.5 }).extHoursMarketBufferPct).toBe(2.5);
+  });
+  it("migrates legacy deck flags into one row and defaults labels off", () => {
+    const out = normalizeOrderConfig({
+      activeVenue: "",
+      templates: [
+        { kind: "place", id: "a", label: "A", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, sizing: { mode: "Shares", shares: 1 }, deck: true },
+        { kind: "place", id: "b", label: "B", side: "SELL", type: "LIMIT", tif: "DAY", priceSource: "Bid", priceOffset: 0, sizing: { mode: "Shares", shares: 1 } },
+        { kind: "manage", id: "c", label: "C", action: "CancelLast", deck: true },
+      ] as OrderConfig["templates"],
+    });
+    expect(out.hotkeyDeck).toEqual({ rows: [["a", "c"]], showHotkeyLabels: false });
+    expect(out.templates.map((t) => t.deck)).toEqual([true, false, true]);
+  });
+  it("preserves valid explicit rows and labels while dropping empty, stale, and duplicate references", () => {
+    const raw: OrderConfig = {
+      activeVenue: "",
+      templates: [
+        { kind: "place", id: "a", label: "A", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, sizing: { mode: "Shares", shares: 1 }, deck: true },
+        { kind: "place", id: "b", label: "B", side: "SELL", type: "LIMIT", tif: "DAY", priceSource: "Bid", priceOffset: 0, sizing: { mode: "Shares", shares: 1 } },
+      ] as OrderConfig["templates"],
+      hotkeyDeck: { rows: [[], ["missing", "b", "a", "b"], ["a"]], showHotkeyLabels: true },
+    };
+    const out = normalizeOrderConfig(raw);
+    expect(out.hotkeyDeck).toEqual({ rows: [["b", "a"]], showHotkeyLabels: true });
+    expect(out.templates.map((t) => t.deck)).toEqual([true, true]);
+  });
+  it("does not fall back to legacy flags when an explicit layout is present but malformed", () => {
+    const out = normalizeOrderConfig({
+      activeVenue: "",
+      templates: [{ kind: "manage", id: "kill", label: "KILL", action: "KillSwitch", deck: true }] as OrderConfig["templates"],
+      hotkeyDeck: { rows: "not rows" as unknown as string[][], showHotkeyLabels: true },
+    });
+    expect(out.hotkeyDeck).toEqual({ rows: [], showHotkeyLabels: true });
+    expect(out.templates[0].deck).toBe(false);
   });
 });

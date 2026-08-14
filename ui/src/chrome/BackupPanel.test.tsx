@@ -206,8 +206,7 @@ describe("BackupPanel", () => {
   });
 
   describe("hotkeys part", () => {
-    function setup() {
-      const orderConfig = makeOrderConfig([makeTemplate("t1", "Ctrl+1")]);
+    function setup(orderConfig = makeOrderConfig([makeTemplate("t1", "Ctrl+1")])) {
       const props = {
         part: "hotkeys" as const,
         orderConfig,
@@ -222,6 +221,7 @@ describe("BackupPanel", () => {
       setup();
       const note = screen.getByTestId("scope-note").textContent ?? "";
       expect(note).toContain("Hotkeys are shared across all");
+      expect(note).toContain("deck configuration travels with them");
       expect(note).toContain("won't see an import until it reloads");
       expect(note).not.toContain("applies only to this window");
     });
@@ -242,6 +242,22 @@ describe("BackupPanel", () => {
 
       const anchor = clickSpy.mock.instances[0] as unknown as HTMLAnchorElement;
       expect(anchor.download).toBe(todayFilename("etape-hotkeys"));
+    });
+
+    it("downloads the Deck Layout and label visibility with hotkeys", async () => {
+      const createObjectURL = vi.fn<(_blob: Blob) => string>(() => "blob:mock");
+      vi.stubGlobal("URL", { ...URL, createObjectURL, revokeObjectURL: vi.fn() });
+      vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+      const orderConfig = {
+        ...makeOrderConfig([makeTemplate("t1", "Ctrl+1")]),
+        hotkeyDeck: { rows: [["t1"]], showHotkeyLabels: true },
+      };
+      setup(orderConfig);
+
+      fireEvent.click(screen.getByTestId("download-json"));
+      const parsed = JSON.parse(await readBlobText(createObjectURL.mock.calls[0][0])) as SettingsExport;
+      expect(parsed.hotkeys).toEqual({ templates: orderConfig.templates, hotkeyDeck: orderConfig.hotkeyDeck });
+      expect(JSON.stringify(parsed)).not.toContain("activeVenue");
     });
 
     describe("import", () => {
@@ -285,11 +301,47 @@ describe("BackupPanel", () => {
 
         expect(window.confirm).toHaveBeenCalledWith("Replace your current hotkeys with the imported ones?");
         expect(props.onImportOrderConfig).toHaveBeenCalledWith({
-          templates: [{ ...importedTemplates[0], id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" }],
+          templates: [{ ...importedTemplates[0], id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", deck: false }],
           activeVenue: props.orderConfig.activeVenue,
           extHoursMarketBufferPct: 1,
+          hotkeyDeck: { rows: [], showHotkeyLabels: false },
         });
         expect(props.toast.push).toHaveBeenCalledWith({ level: "info", text: "Imported hotkeys." });
+      });
+
+      it("remaps imported Deck Layout ids while preserving row order and labels", () => {
+        vi.spyOn(window, "confirm").mockReturnValue(true);
+        const importedTemplates = [makeTemplate("old-1"), makeTemplate("old-2")];
+        const fileData: SettingsExport = {
+          app: "eTape", kind: "settings-export", version: 1, exportedAt: new Date().toISOString(),
+          hotkeys: { templates: importedTemplates, hotkeyDeck: { rows: [["old-2", "old-1"]], showHotkeyLabels: true } },
+        };
+        const { props } = setup();
+
+        selectFile(JSON.stringify(fileData));
+        fireEvent.click(screen.getByTestId("apply-import"));
+
+        const imported = props.onImportOrderConfig.mock.calls[0][0] as OrderConfig;
+        expect(imported.hotkeyDeck).toEqual({
+          rows: [[imported.templates[1].id, imported.templates[0].id]],
+          showHotkeyLabels: true,
+        });
+        expect(imported.templates.map((t) => t.id)).not.toEqual(importedTemplates.map((t) => t.id));
+      });
+
+      it("accepts malformed optional Deck Layout data and normalizes it safely", () => {
+        vi.spyOn(window, "confirm").mockReturnValue(true);
+        const fileData = {
+          app: "eTape", kind: "settings-export", version: 1, exportedAt: new Date().toISOString(),
+          hotkeys: { templates: [makeTemplate("old-1")], hotkeyDeck: { rows: "bad", showHotkeyLabels: true } },
+        };
+        const { props } = setup();
+
+        expect(() => {
+          selectFile(JSON.stringify(fileData));
+          fireEvent.click(screen.getByTestId("apply-import"));
+        }).not.toThrow();
+        expect((props.onImportOrderConfig.mock.calls[0][0] as OrderConfig).hotkeyDeck).toEqual({ rows: [], showHotkeyLabels: true });
       });
 
       it("pushes a warn toast (in addition to the info toast) when imported hotkeys conflict", () => {

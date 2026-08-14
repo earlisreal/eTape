@@ -101,6 +101,19 @@ describe("backup: activeVenue never leaks into an export", () => {
   });
 });
 
+describe("backup: Deck Layout travels with hotkeys", () => {
+  it("exports the optional Deck Layout and label visibility without activeVenue", () => {
+    const workspace = makeWorkspace("main");
+    const orderConfig = {
+      ...makeOrderConfig([makeTemplate("t1", "Ctrl+1")], "alpaca-live"),
+      hotkeyDeck: { rows: [["t1"]], showHotkeyLabels: true },
+    };
+    const out = buildExport({ layout: false, hotkeys: true }, { workspace, orderConfig });
+    expect(out.hotkeys).toEqual({ templates: orderConfig.templates, hotkeyDeck: orderConfig.hotkeyDeck });
+    expect(JSON.stringify(out)).not.toContain("activeVenue");
+  });
+});
+
 describe("backup: prepareImportedOrderConfig", () => {
   it("keeps current.activeVenue verbatim and regenerates every template id", () => {
     const imported = { templates: [makeTemplate("old-1", "Ctrl+1"), makeTemplate("old-2", "Ctrl+2")] };
@@ -113,6 +126,31 @@ describe("backup: prepareImportedOrderConfig", () => {
       expect(typeof t.id).toBe("string");
       expect(t.id.length).toBeGreaterThan(0);
     });
+    expect(result.hotkeyDeck).toEqual({ rows: [], showHotkeyLabels: false });
+  });
+
+  it("remaps new-file Deck Layout references to regenerated template ids", () => {
+    const imported = {
+      templates: [makeTemplate("old-1"), makeTemplate("old-2")],
+      hotkeyDeck: { rows: [["old-2", "old-1", "stale"], ["old-1"]], showHotkeyLabels: true },
+    };
+    const result = prepareImportedOrderConfig(imported, makeOrderConfig([], "tradezero"));
+    expect(result.hotkeyDeck).toEqual({
+      rows: [[result.templates[1].id, result.templates[0].id]],
+      showHotkeyLabels: true,
+    });
+    expect(result.templates.map((t) => t.deck)).toEqual([true, true]);
+  });
+
+  it("safely normalizes malformed optional Deck Layout data", () => {
+    const imported = {
+      templates: [makeTemplate("old-1")],
+      hotkeyDeck: { rows: "not rows", showHotkeyLabels: true },
+    } as unknown as { templates: ActionTemplate[]; hotkeyDeck?: unknown };
+    expect(() => prepareImportedOrderConfig(imported, makeOrderConfig([]))).not.toThrow();
+    const result = prepareImportedOrderConfig(imported, makeOrderConfig([]));
+    expect(result.hotkeyDeck).toEqual({ rows: [], showHotkeyLabels: true });
+    expect(result.templates[0].deck).toBe(false);
   });
 
   it("produces distinct ids across templates (no accidental collision)", () => {

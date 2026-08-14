@@ -11,3 +11,10 @@ Day/Realized P&L and a persisted flat Fills table for the selected venue. It
 backfills `QueryCycleFills` and merges deduplicated live `exec.fills`. Panels
 acquire/release topics and symbol demand; data stays in stores/controllers.
 [TradingView integration](tv/README.md) backs chart surface. Test: `npm test -- panels`.
+
+The Order Ticket embeds the Hotkey Deck beneath its manual action row. It
+resolves the saved Deck Layout by Action Template id, preserves row and
+within-row order, renders each row as a non-wrapping horizontal scroller, and
+omits stale or empty placements. Bound hotkeys appear as Keycap badges only
+when Hotkey Label Visibility is enabled. Deck Buttons remain references to
+the shared Action Template execution path, not a separate action surface.

@@ -372,6 +372,7 @@ describe("OrderSettingsSection", () => {
           priceSource: "Ask", priceOffset: 0, sizing: { mode: "Dollar", dollar: 1000 }, hotkey: "Ctrl+9",
         },
       ],
+      hotkeyDeck: { rows: [["imported-buy"]], showHotkeyLabels: true },
     };
     rerender(
       <ThemeProvider>
@@ -383,10 +384,12 @@ describe("OrderSettingsSection", () => {
     expect(screen.getByTestId("cheat-sheet").textContent).not.toContain("Buy $5k");
     expect(screen.queryByTestId("tmpl-card-buy-5k")).toBeNull();
     expect(screen.getByTestId("tmpl-card-imported-buy")).toBeTruthy();
+    expect(screen.getByTestId("deck-placement-imported-buy")).toBeTruthy();
+    expect((screen.getByTestId("show-hotkey-labels") as HTMLInputElement).checked).toBe(true);
   });
 
   // Regression for a review finding on the resync effect above: the effect is
-  // keyed on `[config.templates]`, not `[config]`, specifically because a
+  // keyed on `[config.templates, config.hotkeyDeck]`, not `[config]`, specifically because a
   // sibling writer of the shared `OrderConfig` context — `setActiveVenue`
   // (useOrderConfig.tsx), reachable from venue-selection UI in dockview
   // panels that stay mounted underneath the Settings modal — can change
@@ -521,6 +524,73 @@ describe("OrderSettingsSection", () => {
     fireEvent.click(green);
     expect(green.style.boxShadow).not.toBe("none");
     expect(auto.style.boxShadow).toBe("none");
+  });
+
+  it("keeps Deck Row order independent from template-card order and supports same-row controls", () => {
+    const { onSave } = wrap();
+    fireEvent.click(screen.getByTestId("tmpl-deck-toggle-buy-5k"));
+    fireEvent.click(screen.getByTestId("tmpl-deck-toggle-buy-25pct"));
+    fireEvent.click(screen.getByTestId("deck-right-buy-5k"));
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.map((t: { id: string }) => t.id).slice(0, 2)).toEqual(["buy-5k", "buy-25pct"]);
+    expect(saved.hotkeyDeck).toEqual({ rows: [["buy-25pct", "buy-5k"]], showHotkeyLabels: false });
+  });
+
+  it("moves a Deck Placement to an adjacent row with an accessible control", () => {
+    const { onSave } = wrap();
+    fireEvent.click(screen.getByTestId("tmpl-deck-toggle-buy-5k"));
+    fireEvent.click(screen.getByTestId("tmpl-deck-toggle-buy-25pct"));
+    fireEvent.click(screen.getByTestId("add-deck-row"));
+    fireEvent.click(screen.getByTestId("deck-down-buy-25pct"));
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].hotkeyDeck).toEqual({ rows: [["buy-5k"], ["buy-25pct"]], showHotkeyLabels: false });
+  });
+
+  it("moves placement ids through native drag/drop without auto-saving", () => {
+    const { onSave } = wrap();
+    fireEvent.click(screen.getByTestId("tmpl-deck-toggle-buy-5k"));
+    fireEvent.click(screen.getByTestId("tmpl-deck-toggle-buy-25pct"));
+    fireEvent.click(screen.getByTestId("add-deck-row"));
+    const dataTransfer = { effectAllowed: "", dropEffect: "", setData: vi.fn(), getData: vi.fn(() => "buy-25pct") };
+    fireEvent.dragStart(screen.getByTestId("deck-placement-buy-25pct"), { dataTransfer });
+    fireEvent.drop(screen.getByTestId("deck-row-1"), { dataTransfer });
+    expect(onSave).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].hotkeyDeck).toEqual({ rows: [["buy-5k"], ["buy-25pct"]], showHotkeyLabels: false });
+    expect(dataTransfer.setData).toHaveBeenCalledWith("text/plain", "buy-25pct");
+  });
+
+  it("stages global hotkey-label visibility and drops an unused temporary row on save", () => {
+    const { onSave } = wrap();
+    const labels = screen.getByTestId("show-hotkey-labels") as HTMLInputElement;
+    fireEvent.click(labels);
+    fireEvent.click(screen.getByTestId("add-deck-row"));
+    expect(onSave).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].hotkeyDeck).toEqual({ rows: [], showHotkeyLabels: true });
+  });
+
+  it("removes a placement when its template is deleted", () => {
+    const { onSave } = wrap();
+    fireEvent.click(screen.getByTestId("tmpl-deck-toggle-buy-5k"));
+    fireEvent.click(screen.getByRole("button", { name: "Remove Buy $5k" }));
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.some((t: { id: string }) => t.id === "buy-5k")).toBe(false);
+    expect(saved.hotkeyDeck).toEqual({ rows: [], showHotkeyLabels: false });
+  });
+
+  it("reset clears templates, Deck Layout, and label visibility", () => {
+    const { onSave } = wrap();
+    fireEvent.click(screen.getByTestId("tmpl-deck-toggle-buy-5k"));
+    fireEvent.click(screen.getByTestId("show-hotkey-labels"));
+    fireEvent.click(screen.getByTestId("reset-defaults"));
+    fireEvent.click(screen.getByTestId("reset-defaults"));
+    expect((screen.getByTestId("show-hotkey-labels") as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].templates).toEqual([]);
+    expect(onSave.mock.calls[0][0].hotkeyDeck).toEqual({ rows: [], showHotkeyLabels: false });
   });
 
   // Task 4a: reorder swaps two templates and the swap is reflected on save.

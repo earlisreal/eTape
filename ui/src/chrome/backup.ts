@@ -4,22 +4,21 @@
 // here (envelope shape, id regeneration, activeVenue scrubbing) is directly
 // unit-testable; BackupSection.tsx (Task 2) is a thin UI shell around this.
 import { WORKSPACE_LAYOUT_VERSION, isCurrentWorkspace, type PanelConfig, type Workspace } from "./workspace";
-import { normalizeOrderConfig, type ActionTemplate, type OrderConfig } from "./exec/actionTemplate";
+import { normalizeOrderConfig, type ActionTemplate, type HotkeyDeckConfig, type OrderConfig } from "./exec/actionTemplate";
 
 export const SETTINGS_EXPORT_VERSION = 1;
 
-// `hotkeys` deliberately carries only `templates`, never `activeVenue` — the
-// active venue is which broker *this* install currently has selected, not
-// something that should follow a hotkey set to another machine (or come
-// back on import and silently switch venues here). See plan's Global
-// Constraints.
+// `hotkeys` carries templates and the embedded Deck Layout, never
+// `activeVenue` — the active venue is which broker *this* install currently
+// has selected, not something that should follow a hotkey set to another
+// machine (or come back on import and silently switch venues here).
 export interface SettingsExport {
   app: "eTape";
   kind: "settings-export";
   version: number;
   exportedAt: string;
   layout?: Workspace;
-  hotkeys?: { templates: ActionTemplate[] };
+  hotkeys?: { templates: ActionTemplate[]; hotkeyDeck?: HotkeyDeckConfig };
 }
 
 export function buildExport(
@@ -33,7 +32,12 @@ export function buildExport(
     exportedAt: new Date().toISOString(),
   };
   if (sel.layout) out.layout = src.workspace;
-  if (sel.hotkeys) out.hotkeys = { templates: src.orderConfig.templates };
+  if (sel.hotkeys) {
+    out.hotkeys = {
+      templates: src.orderConfig.templates,
+      ...(src.orderConfig.hotkeyDeck !== undefined ? { hotkeyDeck: src.orderConfig.hotkeyDeck } : {}),
+    };
+  }
   return out;
 }
 
@@ -175,11 +179,36 @@ export function isCurrentLayout(layout: SettingsExport["layout"]): layout is Wor
 // templates entering the app from anywhere, so imported ones go through it
 // too.
 export function prepareImportedOrderConfig(
-  imported: { templates: ActionTemplate[] },
+  imported: { templates: ActionTemplate[]; hotkeyDeck?: unknown },
   current: OrderConfig,
 ): OrderConfig {
-  const templates = imported.templates.map((t) => ({ ...t, id: crypto.randomUUID() }));
-  return normalizeOrderConfig({ templates, activeVenue: current.activeVenue });
+  const idMap = new Map<string, string>();
+  const templates = imported.templates.map((t) => {
+    const id = crypto.randomUUID();
+    if (!idMap.has(t.id)) idMap.set(t.id, id);
+    return { ...t, id };
+  });
+  const remappedDeck = remapImportedDeck(imported.hotkeyDeck, idMap);
+  const next = {
+    templates,
+    activeVenue: current.activeVenue,
+    ...(remappedDeck !== undefined ? { hotkeyDeck: remappedDeck } : {}),
+  } as OrderConfig;
+  return normalizeOrderConfig(next);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function remapImportedDeck(raw: unknown, idMap: Map<string, string>): unknown {
+  if (!isRecord(raw) || !Array.isArray(raw.rows)) return raw;
+  return {
+    ...raw,
+    rows: raw.rows.map((row) => Array.isArray(row)
+      ? row.map((id) => typeof id === "string" ? idMap.get(id) : undefined).filter((id): id is string => id !== undefined)
+      : row),
+  };
 }
 
 // Mirrors the dupes/isDup/hasConflict shape in OrderSettingsSection.tsx —

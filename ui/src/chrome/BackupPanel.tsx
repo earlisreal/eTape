@@ -10,7 +10,7 @@ import { useTheme } from "./ThemeProvider";
 import { HoverButton } from "./controls/HoverButton";
 import type { ToastApi } from "./Toast";
 import { WORKSPACE_LAYOUT_VERSION, type Workspace } from "./workspace";
-import type { ActionTemplate, OrderConfig } from "./exec/actionTemplate";
+import type { ActionTemplate, HotkeyDeckConfig, OrderConfig } from "./exec/actionTemplate";
 import {
   buildExport, parseImport, prepareImportedWorkspace, prepareImportedOrderConfig,
   detectHotkeyConflicts, isCurrentLayout, isPresentLayout, type SettingsExport,
@@ -25,7 +25,7 @@ export type BackupPanelProps =
 // not `hotkeys.templates`'s inner shape, so a hand-edited or partially-
 // truncated file must be treated as "that section isn't present" rather than
 // crashing prepareImportedOrderConfig's `.map`.
-function isPresentHotkeys(hotkeys: SettingsExport["hotkeys"]): hotkeys is { templates: ActionTemplate[] } {
+function isPresentHotkeys(hotkeys: SettingsExport["hotkeys"]): hotkeys is { templates: ActionTemplate[]; hotkeyDeck?: HotkeyDeckConfig } {
   return Array.isArray(hotkeys?.templates);
 }
 
@@ -96,7 +96,7 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
       props.toast.push({ level: "info", text: "Imported layout." });
     } else {
       if (!window.confirm("Replace your current hotkeys with the imported ones?")) return;
-      const next = prepareImportedOrderConfig(importData.hotkeys as { templates: ActionTemplate[] }, props.orderConfig);
+      const next = prepareImportedOrderConfig(importData.hotkeys as { templates: ActionTemplate[]; hotkeyDeck?: unknown }, props.orderConfig);
       props.onImportOrderConfig(next);
       const conflicts = detectHotkeyConflicts(next.templates);
       if (conflicts.length > 0) {
@@ -113,7 +113,7 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
   const noteStyle = { fontSize: 12, color: palette.textMuted, marginBottom: 8 };
   const scopeNote = props.part === "layout"
     ? "Layout export/import applies only to this window."
-    : "Hotkeys are shared across all windows, but an already-open window won't see an import until it reloads.";
+    : "Hotkeys are shared across all windows, and the deck configuration travels with them; an already-open window won't see an import until it reloads.";
   const missingText = props.part === "layout"
     ? "This file has no layout to import."
     : "This file has no hotkeys to import.";

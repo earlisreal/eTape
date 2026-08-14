@@ -29,8 +29,8 @@ function makeOc(): OrderCommands {
 }
 function makeToast(): ToastApi { return { push: vi.fn(), dismiss: vi.fn() }; }
 
-async function setup(templates: ActionTemplate[]) {
-  const config: OrderConfig = { activeVenue: "", templates };
+async function setup(templates: ActionTemplate[], hotkeyDeck?: OrderConfig["hotkeyDeck"]) {
+  const config: OrderConfig = { activeVenue: "", templates, ...(hotkeyDeck ? { hotkeyDeck } : {}) };
   const commands = {
     sendCommand: vi.fn(async (n: string): Promise<AckMsg> => {
       if (n === "GetConfig") return { kind: "ack", corrId: "c", status: "accepted", value: config };
@@ -64,15 +64,34 @@ const manage = (over: Partial<ManagementTemplate> = {}): ManagementTemplate => (
 });
 
 describe("HotkeyDeck — rendering", () => {
-  it("renders only deck:true templates, in the config's array order (filtering doesn't reorder)", async () => {
+  it("renders saved rows in row and within-row order, independent of template order", async () => {
     const t1 = place({ id: "buy1", label: "Buy 1", deck: true });
     const hotkeyOnly = place({ id: "sell-hk", label: "Hotkey Only", side: "SELL", deck: false, hotkey: "Ctrl+9" });
     const t3 = place({ id: "sell1", label: "Sell 1", side: "SELL", deck: true });
-    const { container } = await setup([t1, hotkeyOnly, t3]);
-    const ids = Array.from(container.querySelectorAll("[data-testid^='deck-']"))
+    const { container } = await setup([t3, hotkeyOnly, t1], { rows: [["buy1"], ["sell1"]], showHotkeyLabels: false });
+    const ids = Array.from(container.querySelectorAll("button[data-testid^='deck-']"))
       .map((el) => el.getAttribute("data-testid"));
     expect(ids).toEqual(["deck-buy1", "deck-sell1"]);
     expect(screen.queryByTestId("deck-sell-hk")).toBeNull();
+  });
+
+  it("keeps each Deck Row non-wrapping and horizontally scrollable", async () => {
+    const t1 = place({ id: "buy1", label: "Buy 1", deck: true });
+    const t2 = place({ id: "buy2", label: "Buy 2", deck: true });
+    const { container } = await setup([t1, t2], { rows: [["buy2", "buy1"]], showHotkeyLabels: false });
+    const row = container.querySelector("[data-testid='deck-row-0']") as HTMLElement;
+    expect(row.style.flexWrap).toBe("nowrap");
+    expect(row.style.overflowX).toBe("auto");
+    expect(Array.from(row.querySelectorAll("button")).map((el) => el.dataset.testid)).toEqual(["deck-buy2", "deck-buy1"]);
+  });
+
+  it("omits stale row references and rows with no resolved buttons", async () => {
+    const t1 = place({ id: "buy1", label: "Buy 1", deck: true });
+    const { container } = await setup([t1], { rows: [["missing"], ["buy1", "gone"]], showHotkeyLabels: false });
+    expect(screen.getByTestId("deck-buy1")).toBeTruthy();
+    expect(screen.getByTestId("deck-row-0")).toBeTruthy();
+    expect(screen.queryByTestId("deck-row-1")).toBeNull();
+    expect(container.textContent).not.toContain("missing");
   });
 
   it("renders nothing when no presets are configured (empty-state prompt removed)", async () => {
@@ -81,10 +100,18 @@ describe("HotkeyDeck — rendering", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("renders a Keycap badge only when the template's hotkey is set", async () => {
+  it("hides bound hotkey Keycaps by default", async () => {
     const withHotkey = place({ id: "hk", label: "HK", deck: true, hotkey: "Ctrl+1" });
     const noHotkey = place({ id: "nohk", label: "NoHK", deck: true });
     await setup([withHotkey, noHotkey]);
+    expect(screen.getByTestId("deck-hk").querySelector("kbd")).toBeNull();
+    expect(screen.getByTestId("deck-nohk").querySelector("kbd")).toBeNull();
+  });
+
+  it("shows a Keycap for bound templates when global label visibility is enabled", async () => {
+    const withHotkey = place({ id: "hk", label: "HK", deck: true, hotkey: "Ctrl+1" });
+    const noHotkey = place({ id: "nohk", label: "NoHK", deck: true });
+    await setup([withHotkey, noHotkey], { rows: [["hk", "nohk"]], showHotkeyLabels: true });
     expect(screen.getByTestId("deck-hk").querySelector("kbd")).not.toBeNull();
     expect(screen.getByTestId("deck-nohk").querySelector("kbd")).toBeNull();
   });
@@ -112,12 +139,12 @@ describe("HotkeyDeck — click dispatch (real fireTemplate/resolvePlaceTemplate)
     expect(oc.submit).toHaveBeenCalledTimes(1);
   });
 
-  it("a management template (KillSwitch) with deck:true calls oc.kill() on click", async () => {
+  it("a management template (KillSwitch) with deck:true calls oc.kill() on click without an immediate success toast", async () => {
     const t = manage({ id: "kill", label: "KILL", action: "KillSwitch", deck: true });
     const { oc, toast } = await setup([t]);
     fireEvent.click(screen.getByTestId("deck-kill"));
     expect(oc.kill).toHaveBeenCalledWith();
-    expect(toast.push).toHaveBeenCalledWith({ level: "warn", text: "KILL — cancel-all + lock" });
+    expect(toast.push).not.toHaveBeenCalled();
   });
 });
 

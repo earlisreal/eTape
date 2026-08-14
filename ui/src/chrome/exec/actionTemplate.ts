@@ -7,6 +7,11 @@ import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 
 export type DeckColor = "auto" | "green" | "red" | "bronze" | "neutral" | "danger";
 
+export interface HotkeyDeckConfig {
+  rows: string[][];
+  showHotkeyLabels: boolean;
+}
+
 export interface PlaceOrderTemplate {
   kind: "place";
   id: string; label: string;
@@ -29,6 +34,7 @@ export interface OrderConfig {
   activeVenue: VenueID;
   extHoursMarketBufferPct?: number;   // absent => 1.0; clamped [0.1, 10] in normalizeOrderConfig
   autoUnlockOnStartup?: boolean;   // absent => false (trading boots locked, the safe default)
+  hotkeyDeck?: HotkeyDeckConfig;   // absent at the type boundary for legacy configs
 }
 export const ORDER_CONFIG_KEY = "orderConfig";
 
@@ -61,8 +67,43 @@ function normalizeTemplate(t: ActionTemplate): ActionTemplate {
   return { ...t, priceOffsetUnit: t.priceOffsetUnit ?? "$", session: t.session ?? "AUTO", sizing };
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeHotkeyDeck(raw: unknown, templates: ActionTemplate[]): HotkeyDeckConfig {
+  const explicit = raw !== undefined;
+  const source = isRecord(raw) && Array.isArray(raw.rows) ? raw.rows : !explicit
+    ? [templates.filter((t) => t.deck).map((t) => t.id)]
+    : [];
+  const templateIds = new Set(templates.map((t) => t.id));
+  const placed = new Set<string>();
+  const rows: string[][] = [];
+
+  for (const row of source) {
+    if (!Array.isArray(row)) continue;
+    const next: string[] = [];
+    for (const id of row) {
+      if (typeof id !== "string" || !templateIds.has(id) || placed.has(id)) continue;
+      placed.add(id);
+      next.push(id);
+    }
+    if (next.length > 0) rows.push(next);
+  }
+
+  return { rows, showHotkeyLabels: isRecord(raw) && raw.showHotkeyLabels === true };
+}
+
 export function normalizeOrderConfig(config: OrderConfig): OrderConfig {
   const raw = config.extHoursMarketBufferPct;
   const extHoursMarketBufferPct = raw === undefined || Number.isNaN(raw) ? 1.0 : Math.min(EXT_BUFFER_MAX, Math.max(EXT_BUFFER_MIN, raw));
-  return { ...config, extHoursMarketBufferPct, templates: config.templates.map(normalizeTemplate) };
+  const templates = config.templates.map(normalizeTemplate);
+  const hotkeyDeck = normalizeHotkeyDeck((config as { hotkeyDeck?: unknown }).hotkeyDeck, templates);
+  const placed = new Set(hotkeyDeck.rows.flat());
+  return {
+    ...config,
+    extHoursMarketBufferPct,
+    templates: templates.map((t) => ({ ...t, deck: placed.has(t.id) })),
+    hotkeyDeck,
+  };
 }

@@ -1,7 +1,7 @@
 // The hotkey deck: a row of clickable preset buttons under the order ticket's
-// manual BUY/SELL/SHORT/COVER row (Strip 4). Reads only `deck: true` templates
+// manual BUY/SELL/SHORT/COVER row (Strip 4). Reads only saved Deck Layout rows
 // from the shared order config (useOrderConfig) so it live-updates the moment
-// Settings saves a new deck layout — venue/symbol/quote/etc. arrive as props
+// Settings saves a new Deck Layout — venue/symbol/quote/etc. arrive as props
 // from OrderTicketPanel rather than being re-derived here, keeping this
 // component a dumb rendering + click-dispatch layer.
 //
@@ -11,7 +11,7 @@
 // armed state (matching the ticket's own Buy/Sell/Short/Cover buttons; the
 // engine's arm gate still rejects + toasts server-side if disarmed).
 import type { Quote, VenueID } from "../../wire/contract";
-import type { ActionTemplate } from "../exec/actionTemplate";
+import type { ActionTemplate, OrderConfig } from "../exec/actionTemplate";
 import type { OrderCommands } from "../exec/commands";
 import type { ToastApi } from "../Toast";
 import { useOrderConfig } from "../exec/useOrderConfig";
@@ -39,29 +39,44 @@ export function deckToneClass(t: ActionTemplate): string {
   return t.side === "BUY" || t.side === "COVER" ? "side side-buy" : "side side-sell";
 }
 
+export function resolveDeckRows(config: OrderConfig): Array<{ rowIndex: number; templates: ActionTemplate[] }> {
+  const byId = new Map(config.templates.map((t) => [t.id, t]));
+  const rows: Array<{ rowIndex: number; templates: ActionTemplate[] }> = [];
+  for (const ids of config.hotkeyDeck?.rows ?? []) {
+    const templates = ids.map((id) => byId.get(id)).filter((t): t is ActionTemplate => t !== undefined);
+    if (templates.length > 0) rows.push({ rowIndex: rows.length, templates });
+  }
+  return rows;
+}
+
 export function HotkeyDeck(
   { venue, symbol, quote, buyingPower, positionQty, oc, toast }: HotkeyDeckProps,
 ): JSX.Element | null {
   const { config } = useOrderConfig();
-  const deckTemplates = config.templates.filter((t) => t.deck);
+  const deckRows = resolveDeckRows(config);
 
-  if (deckTemplates.length === 0) return null;
+  if (deckRows.length === 0) return null;
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-      {deckTemplates.map((t) => (
-        <button key={t.id} type="button" data-testid={`deck-${t.id}`} className={deckToneClass(t)}
-          onClick={() => fireTemplate(
-            t, {
-              venue, symbol, quote, buyingPower, positionQty, armed: false, nowMs: Date.now(),
-              extHoursMarketBufferPct: config.extHoursMarketBufferPct ?? 1,
-            },
-            oc, toast, { gateArm: false },
-          )}
-          style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-          <span>{t.label}</span>
-          {t.hotkey ? <Keycap combo={t.hotkey} /> : null}
-        </button>
+    <div data-testid="hotkey-deck" style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
+      {deckRows.map(({ rowIndex, templates }) => (
+        <div key={`deck-row-${rowIndex}`} data-testid={`deck-row-${rowIndex}`} data-row-index={rowIndex}
+          style={{ display: "flex", flexWrap: "nowrap", gap: 3, minWidth: 0, overflowX: "auto" }}>
+          {templates.map((t) => (
+            <button key={t.id} type="button" data-testid={`deck-${t.id}`} className={deckToneClass(t)}
+              onClick={() => fireTemplate(
+                t, {
+                  venue, symbol, quote, buyingPower, positionQty, armed: false, nowMs: Date.now(),
+                  extHoursMarketBufferPct: config.extHoursMarketBufferPct ?? 1,
+                },
+                oc, toast, { gateArm: false },
+              )}
+              style={{ display: "inline-flex", alignItems: "center", gap: 4, flex: "0 0 auto", whiteSpace: "nowrap" }}>
+              <span>{t.label}</span>
+              {config.hotkeyDeck?.showHotkeyLabels && t.hotkey ? <Keycap combo={t.hotkey} /> : null}
+            </button>
+          ))}
+        </div>
       ))}
     </div>
   );

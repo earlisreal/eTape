@@ -12,7 +12,7 @@
 // reorder a newly-added card ahead of the other kind's trailing cards, breaking
 // the "last remove button = most recently added template" invariant the
 // stale-raw-edit-on-reused-id regression test relies on.
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useState, type CSSProperties, type DragEvent } from "react";
 import { useTheme } from "../ThemeProvider";
 import { FONTS, type Palette } from "../../render/palette";
 import { HoverButton } from "../controls/HoverButton";
@@ -23,7 +23,7 @@ import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 import type { SizingSpec, SizingMode } from "./sizing";
 import {
   DEFAULT_TEMPLATES, normalizeOrderConfig, type ActionTemplate, type DeckColor, type ManagementAction,
-  type OrderConfig, type PlaceOrderTemplate,
+  type HotkeyDeckConfig, type OrderConfig, type PlaceOrderTemplate,
 } from "./actionTemplate";
 import { normalizeCombo } from "./hotkeys";
 import { Keycap } from "./Keycap";
@@ -114,6 +114,28 @@ function tint(hex: string, alpha: number): string {
 
 const DECK_COLORS: DeckColor[] = ["auto", "green", "red", "bronze", "neutral", "danger"];
 
+function cloneHotkeyDeck(deck: HotkeyDeckConfig | undefined): HotkeyDeckConfig {
+  return { rows: (deck?.rows ?? []).map((row) => [...row]), showHotkeyLabels: deck?.showHotkeyLabels === true };
+}
+
+function removeDeckPlacement(rows: string[][], id: string): string[][] {
+  return rows.flatMap((row) => {
+    const next = row.filter((item) => item !== id);
+    return row.length > 0 && next.length === 0 ? [] : [next];
+  });
+}
+
+function moveDeckPlacement(rows: string[][], id: string, targetRow: number, targetIndex: number): string[][] {
+  const next = rows.map((row) => [...row]);
+  const sourceRow = next.findIndex((row) => row.includes(id));
+  if (sourceRow < 0 || targetRow < 0 || targetRow >= next.length) return next;
+  const sourceIndex = next[sourceRow].indexOf(id);
+  next[sourceRow].splice(sourceIndex, 1);
+  const insertionIndex = sourceRow === targetRow && sourceIndex < targetIndex ? targetIndex - 1 : targetIndex;
+  next[targetRow].splice(Math.max(0, Math.min(insertionIndex, next[targetRow].length)), 0, id);
+  return next;
+}
+
 // The selected swatch gets an outer ring (boxShadow) — a concrete, testable
 // visual signal distinct from the swatch's own border, so selection state
 // can be asserted independent of color.
@@ -132,6 +154,90 @@ function swatchStyle(palette: Palette, color: DeckColor, selected: boolean): CSS
   }
 }
 
+interface DeckLayoutEditorProps {
+  palette: Palette;
+  rows: string[][];
+  templates: ActionTemplate[];
+  showHotkeyLabels: boolean;
+  onShowHotkeyLabels: (show: boolean) => void;
+  onAddRow: () => void;
+  onMove: (id: string, targetRow: number, targetIndex: number) => void;
+  onRemove: (id: string) => void;
+}
+
+// Module-scope and passive: this editor only moves template ids. It never
+// renders or invokes an order action, so drag/drop cannot become a second
+// execution path.
+function DeckLayoutEditor({ palette, rows, templates, showHotkeyLabels, onShowHotkeyLabels, onAddRow, onMove, onRemove }: DeckLayoutEditorProps): JSX.Element {
+  const templateById = new Map(templates.map((t) => [t.id, t]));
+  const startDrag = (e: DragEvent<HTMLDivElement>, id: string) => {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/plain", id);
+  };
+  const allowDrop = (e: DragEvent<HTMLElement>) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+  };
+  const drop = (e: DragEvent<HTMLElement>, rowIndex: number, index: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const id = e.dataTransfer.getData("text/plain");
+    if (id) onMove(id, rowIndex, index);
+  };
+  const controlStyle: CSSProperties = {
+    border: `1px solid ${palette.border}`, background: palette.bg, color: palette.textMuted,
+    borderRadius: 3, cursor: "pointer", minWidth: 22, height: 22, lineHeight: 1,
+  };
+
+  return (
+    <div data-testid="deck-layout-editor" style={{ border: `1px solid ${palette.border}`, borderRadius: 5, padding: "8px 10px", marginBottom: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11 }}>
+          <input
+            type="checkbox" data-testid="show-hotkey-labels" aria-label="Show hotkey labels"
+            checked={showHotkeyLabels} onChange={(e) => onShowHotkeyLabels(e.target.checked)}
+          />
+          Show hotkey labels
+        </label>
+        <Button type="button" data-testid="add-deck-row" onClick={onAddRow}>+ Add row</Button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        {rows.map((row, rowIndex) => (
+          <div
+            key={`deck-row-${rowIndex}`} data-testid={`deck-row-${rowIndex}`} data-row-index={rowIndex}
+            onDragOver={allowDrop} onDrop={(e) => drop(e, rowIndex, row.length)}
+            style={{ display: "flex", alignItems: "center", gap: 4, minHeight: 34, padding: 4, overflowX: "auto", border: `1px dashed ${palette.border}`, borderRadius: 4 }}
+          >
+            <span style={{ color: palette.textMuted, fontSize: 10, width: 42, flex: "0 0 auto" }}>Row {rowIndex + 1}</span>
+            {row.map((id, index) => {
+              const template = templateById.get(id);
+              if (!template) return null;
+              return (
+                <div
+                  key={id} data-testid={`deck-placement-${id}`} data-deck-placement-id={id}
+                  draggable onDragStart={(e) => startDrag(e, id)} onDragOver={allowDrop} onDrop={(e) => drop(e, rowIndex, index)}
+                  style={{ display: "inline-flex", alignItems: "center", gap: 3, flex: "0 0 auto", padding: "3px 4px", border: `1px solid ${palette.border}`, borderRadius: 4, background: palette.surface }}
+                >
+                  <span>{template.label}</span>
+                  <button type="button" data-testid={`deck-left-${id}`} aria-label={`Move ${template.label} left`} disabled={index === 0}
+                    onClick={() => onMove(id, rowIndex, index - 1)} style={{ ...controlStyle, opacity: index === 0 ? 0.35 : 1 }}>←</button>
+                  <button type="button" data-testid={`deck-right-${id}`} aria-label={`Move ${template.label} right`} disabled={index === row.length - 1}
+                    onClick={() => onMove(id, rowIndex, index + 2)} style={{ ...controlStyle, opacity: index === row.length - 1 ? 0.35 : 1 }}>→</button>
+                  <button type="button" data-testid={`deck-up-${id}`} aria-label={`Move ${template.label} to previous row`} disabled={rowIndex === 0}
+                    onClick={() => onMove(id, rowIndex - 1, index)} style={{ ...controlStyle, opacity: rowIndex === 0 ? 0.35 : 1 }}>↑</button>
+                  <button type="button" data-testid={`deck-down-${id}`} aria-label={`Move ${template.label} to next row`} disabled={rowIndex === rows.length - 1}
+                    onClick={() => onMove(id, rowIndex + 1, index)} style={{ ...controlStyle, opacity: rowIndex === rows.length - 1 ? 0.35 : 1 }}>↓</button>
+                  <button type="button" data-testid={`deck-remove-${id}`} aria-label={`Remove ${template.label} from deck`} onClick={() => onRemove(id)} style={{ ...controlStyle, color: palette.danger }}>×</button>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 interface TemplateCardProps {
   t: ActionTemplate;
   palette: Palette;
@@ -142,6 +248,8 @@ interface TemplateCardProps {
   setRawEdit: (key: string, v: string) => void;
   clearRawEdit: (key: string) => void;
   patch: (id: string, over: Partial<ActionTemplate>) => void;
+  isPlaced: boolean;
+  onToggleDeck: (id: string, placed: boolean) => void;
   onRemove: (id: string) => void;
   onMove: (id: string, dir: -1 | 1) => void;
 }
@@ -150,7 +258,7 @@ interface TemplateCardProps {
 // across renders — a component defined inside another component's body gets a
 // fresh type every render, forcing React to unmount+remount every card (and
 // drop input focus) on each keystroke.
-function TemplateCard({ t, palette, dup, isFirst, isLast, rawEdits, setRawEdit, clearRawEdit, patch, onRemove, onMove }: TemplateCardProps): JSX.Element {
+function TemplateCard({ t, palette, dup, isFirst, isLast, rawEdits, setRawEdit, clearRawEdit, patch, isPlaced, onToggleDeck, onRemove, onMove }: TemplateCardProps): JSX.Element {
   const card: CSSProperties = { border: `1px solid ${palette.border}`, borderRadius: 6, background: palette.surface, padding: "8px 10px 10px", marginBottom: 8 };
   const eyebrow: CSSProperties = { fontSize: 9.5, letterSpacing: "0.08em", textTransform: "uppercase", color: palette.textMuted, marginBottom: 4 };
   const headerRow: CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 };
@@ -313,11 +421,11 @@ function TemplateCard({ t, palette, dup, isFirst, isLast, rawEdits, setRawEdit, 
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: palette.text }}>
           <input
             type="checkbox" data-testid={`tmpl-deck-toggle-${t.id}`} aria-label={`deck-${t.id}`}
-            checked={!!t.deck} onChange={(e) => patch(t.id, { deck: e.target.checked })}
+            checked={isPlaced} onChange={(e) => onToggleDeck(t.id, e.target.checked)}
           />
           Show as button
         </label>
-        {t.deck ? (
+        {isPlaced ? (
           <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
             {DECK_COLORS.map((c) => (
               <button
@@ -338,7 +446,8 @@ export function OrderSettingsSection({ config, onSave, toast, onClose }: {
   config: OrderConfig; onSave: (next: OrderConfig) => void; toast?: ToastApi; onClose?: () => void;
 }): JSX.Element {
   const { palette } = useTheme();
-  const [templates, setTemplates] = useState<ActionTemplate[]>(() => config.templates.map((t) => ({ ...t })));
+  const [templates, setTemplates] = useState<ActionTemplate[]>(() => normalizeOrderConfig(config).templates.map((t) => ({ ...t })));
+  const [deck, setDeck] = useState<HotkeyDeckConfig>(() => cloneHotkeyDeck(normalizeOrderConfig(config).hotkeyDeck));
   const [addOpen, setAddOpen] = useState(false);
   // Offset and size-value are fully-controlled numeric fields whose display
   // is re-derived from the numeric model every render. Without this, typing
@@ -365,15 +474,15 @@ export function OrderSettingsSection({ config, onSave, toast, onClose }: {
   // not a remount boundary for them. So `config` genuinely can change here
   // for reasons that have nothing to do with templates.
   //
-  // That is exactly why this effect is keyed on `[config.templates]` and not
-  // `[config]`: `setActiveVenue` builds its next config as
+  // That is exactly why this effect is keyed on `[config.templates,
+  // config.hotkeyDeck]` and not `[config]`: `setActiveVenue` builds its next config as
   // `{ ...c, activeVenue: v }` — a shallow spread that reuses the exact same
   // `templates` array reference — so a venue-only change does not fire this
   // effect and does not clobber an in-progress local edit (e.g. an
   // added-but-unsaved template). This only fires on a genuinely new
-  // `config.templates` reference: a hotkey import, or this component's own
-  // Save round-trip (re-`.map()`ing content that already matches what's
-  // displayed there, a harmless no-op render).
+  // `config.templates`/`config.hotkeyDeck` references: a hotkey import, or this
+  // component's own Save round-trip (re-`.map()`ing content that already
+  // matches what's displayed there, a harmless no-op render).
   //
   // This safety is an invariant of `setActiveVenue`'s implementation, not of
   // the effect itself: if `setActiveVenue` (or any future `OrderConfig`
@@ -383,8 +492,11 @@ export function OrderSettingsSection({ config, onSave, toast, onClose }: {
   // The regression test "keeps an unsaved added template across a
   // venue-only config change" below pins this invariant.
   useEffect(() => {
-    setTemplates(config.templates.map((t) => ({ ...t })));
-  }, [config.templates]);
+    const normalized = normalizeOrderConfig(config);
+    setTemplates(normalized.templates.map((t) => ({ ...t })));
+    setDeck(cloneHotkeyDeck(normalized.hotkeyDeck));
+    setRawEdits({});
+  }, [config.templates, config.hotkeyDeck]);
   const setRawEdit = (key: string, v: string) => setRawEdits((r) => ({ ...r, [key]: v }));
   const clearRawEdit = (key: string) => setRawEdits((r) => {
     if (!(key in r)) return r;
@@ -404,6 +516,7 @@ export function OrderSettingsSection({ config, onSave, toast, onClose }: {
   // holds the real, correct value.
   const removeTemplate = (id: string) => {
     setTemplates((ts) => ts.filter((t) => t.id !== id));
+    setDeck((d) => ({ ...d, rows: removeDeckPlacement(d.rows, id) }));
     clearRawEdit(`${id}:offset`);
     clearRawEdit(`${id}:size`);
   };
@@ -427,7 +540,28 @@ export function OrderSettingsSection({ config, onSave, toast, onClose }: {
   // strings, not uid()-generated) — must not survive it; otherwise the
   // display would keep showing pre-reset in-progress typed text instead of
   // snapping to the restored default value.
-  const doReset = () => { setTemplates(normalizeOrderConfig({ ...config, templates: DEFAULT_TEMPLATES.map((t) => ({ ...t })) }).templates); setRawEdits({}); };
+  const doReset = () => {
+    const reset = normalizeOrderConfig({
+      ...config,
+      templates: DEFAULT_TEMPLATES.map((t) => ({ ...t })),
+      hotkeyDeck: { rows: [], showHotkeyLabels: false },
+    });
+    setTemplates(reset.templates);
+    setDeck(cloneHotkeyDeck(reset.hotkeyDeck));
+    setRawEdits({});
+  };
+  const toggleDeck = (id: string, placed: boolean) => setDeck((d) => {
+    if (!placed) return { ...d, rows: removeDeckPlacement(d.rows, id) };
+    if (d.rows.some((row) => row.includes(id))) return d;
+    const rows = d.rows.map((row) => [...row]);
+    if (rows.length === 0) rows.push([]);
+    rows[rows.length - 1].push(id);
+    return { ...d, rows };
+  });
+  const addDeckRow = () => setDeck((d) => ({ ...d, rows: [...d.rows.map((row) => [...row]), []] }));
+  const moveDeck = (id: string, targetRow: number, targetIndex: number) => setDeck((d) => ({ ...d, rows: moveDeckPlacement(d.rows, id, targetRow, targetIndex) }));
+  const removeDeck = (id: string) => setDeck((d) => ({ ...d, rows: removeDeckPlacement(d.rows, id) }));
+  const isPlaced = (id: string) => deck.rows.some((row) => row.includes(id));
   const places = templates.filter((t): t is PlaceOrderTemplate => t.kind === "place");
 
   const combos = templates.map((t) => t.hotkey ?? "").filter((c) => c !== "");
@@ -456,13 +590,20 @@ export function OrderSettingsSection({ config, onSave, toast, onClose }: {
         ))}
       </div>
 
+      <DeckLayoutEditor
+        palette={palette} rows={deck.rows} templates={templates} showHotkeyLabels={deck.showHotkeyLabels}
+        onShowHotkeyLabels={(show) => setDeck((d) => ({ ...d, showHotkeyLabels: show }))}
+        onAddRow={addDeckRow} onMove={moveDeck} onRemove={removeDeck}
+      />
+
       <div style={sectionLabel}>TEMPLATES</div>
       {templates.map((t, i) => (
         <TemplateCard
           key={t.id} t={t} palette={palette} dup={isDup(t)}
           isFirst={i === 0} isLast={i === templates.length - 1}
           rawEdits={rawEdits} setRawEdit={setRawEdit} clearRawEdit={clearRawEdit}
-          patch={patch} onRemove={removeTemplate} onMove={moveTemplate}
+          patch={patch} isPlaced={isPlaced(t.id)} onToggleDeck={toggleDeck}
+          onRemove={removeTemplate} onMove={moveTemplate}
         />
       ))}
 
@@ -481,7 +622,7 @@ export function OrderSettingsSection({ config, onSave, toast, onClose }: {
         <Button
           variant="primary" size="md" data-testid="save" disabled={hasConflict}
           onClick={() => {
-            onSave({ ...config, templates });
+            onSave(normalizeOrderConfig({ ...config, templates, hotkeyDeck: deck }));
             toast?.push({ level: "success", text: "Order templates & hotkeys saved." });
             onClose?.();
           }}
