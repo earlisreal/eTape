@@ -18,6 +18,7 @@ const cssColor = (hex: string): string => {
 
 const base = {
   chrome, activeTool: "select" as const, hideAll: false, symbol: "US.AAPL",
+  stylesReady: true,
   onSelectTool: vi.fn(), onToggleHideAll: vi.fn(),
   hasSelection: () => false, onDeleteSelection: vi.fn(), onClearAll: vi.fn(),
 };
@@ -41,6 +42,19 @@ describe("TVDrawingRail", () => {
     render(<TVDrawingRail {...base} activeTool="rect" />);
     fireEvent.click(screen.getByLabelText("rectangle"));
     expect(base.onSelectTool).toHaveBeenCalledWith("select");
+  });
+
+  it("gates persisted-style tools while keeping Measure usable", () => {
+    render(<TVDrawingRail {...base} stylesReady={false} />);
+    for (const label of ["trend line", "horizontal line", "extended line", "rectangle"]) {
+      expect((screen.getByLabelText(label) as HTMLButtonElement).disabled).toBe(true);
+      fireEvent.click(screen.getByLabelText(label));
+    }
+    const measure = screen.getByLabelText("measure");
+    expect((measure as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(measure);
+    expect(base.onSelectTool).toHaveBeenCalledWith("measure");
+    expect(base.onSelectTool).not.toHaveBeenCalledWith("trendline");
   });
 
   it("lays out horizontally and drags via the grip, reporting one position on release", () => {

@@ -57,9 +57,11 @@ describe("DrawingInteraction", () => {
   it("commits an hline on the first click and reverts to select", () => {
     const store = new DrawingStore();
     const f = fakeFacade();
+    const prim = fakePrimitive();
     const onToolChange = vi.fn();
+    const onSelectionChange = vi.fn();
     const { host, fire } = fakeHost();
-    const di = new DrawingInteraction(host, f, fakePrimitive(), store, ctx(), { newId, onToolChange });
+    const di = new DrawingInteraction(host, f, prim, store, ctx(), { newId, onToolChange, onSelectionChange });
     di.setTool("hline");
     fire("pointerdown", { clientX: 5, clientY: 900 }); // price = 1000-900 = 100
     const drawn = store.forSymbol("US.AAPL");
@@ -68,6 +70,44 @@ describe("DrawingInteraction", () => {
     expect(drawn[0].anchors[0].price).toBe(100);
     expect(onToolChange).toHaveBeenLastCalledWith("select");
     expect(f.setPanZoomEnabled).toHaveBeenLastCalledWith(true); // unlocked after commit
+    expect(di.selectedId()).toBe(drawn[0].id);
+    expect(prim.setSelection).toHaveBeenLastCalledWith(drawn[0].id);
+    expect(onSelectionChange).toHaveBeenCalled();
+  });
+
+  it("uses loaded timestamps through the latest bar and nominal slots in the Future Buffer", () => {
+    const store = new DrawingStore();
+    const { host, fire } = fakeHost();
+    const di = new DrawingInteraction(host, fakeFacade(), fakePrimitive(), store, ctx(), { newId });
+
+    di.setTool("hline");
+    fire("pointerdown", { clientX: 10, clientY: 900 });
+    expect(store.forSymbol("US.AAPL")[0].anchors[0].timeMs).toBe(60_000);
+    di.setTool("hline");
+    fire("pointerdown", { clientX: 30, clientY: 900 });
+    expect(store.forSymbol("US.AAPL")[1].anchors[0].timeMs).toBe(180_000);
+  });
+
+  it("moves handles and bodies into the Future Buffer with the same slot conversion", () => {
+    const handleStore = new DrawingStore();
+    handleStore.upsert({ id: "line", symbol: "US.AAPL", kind: "trendline",
+      anchors: [{ timeMs: 0, price: 100 }, { timeMs: 60_000, price: 200 }], createdMs: 1, updatedMs: 1 });
+    const handleHost = fakeHost();
+    new DrawingInteraction(handleHost.host, fakeFacade(), fakePrimitive(), handleStore, ctx(), { newId });
+    handleHost.fire("pointerdown", { clientX: 10, clientY: 800 });
+    handleHost.fire("pointermove", { clientX: 40, clientY: 800 });
+    handleHost.fire("pointerup", { clientX: 40, clientY: 800 });
+    expect(handleStore.forSymbol("US.AAPL")[0].anchors[1].timeMs).toBe(240_000);
+
+    const bodyStore = new DrawingStore();
+    bodyStore.upsert({ id: "hline", symbol: "US.AAPL", kind: "hline",
+      anchors: [{ timeMs: 60_000, price: 100 }], createdMs: 1, updatedMs: 1 });
+    const bodyHost = fakeHost();
+    new DrawingInteraction(bodyHost.host, fakeFacade(), fakePrimitive(), bodyStore, ctx(), { newId });
+    bodyHost.fire("pointerdown", { clientX: 20, clientY: 901 });
+    bodyHost.fire("pointermove", { clientX: 50, clientY: 901 });
+    bodyHost.fire("pointerup", { clientX: 50, clientY: 901 });
+    expect(bodyStore.forSymbol("US.AAPL")[0].anchors[0].timeMs).toBe(240_000);
   });
 
   it("requires two clicks for a trendline, showing a ghost between them", () => {
@@ -179,6 +219,71 @@ describe("DrawingInteraction", () => {
     fire("pointerup", { clientX: 10, clientY: 980 });
     expect(prim.setTransient).toHaveBeenCalledWith(expect.objectContaining({ measure: expect.anything() }));
     expect(store.forSymbol("US.AAPL")).toHaveLength(0);
+  });
+
+  it("supports click-click Measure and keeps the finished result transient", () => {
+    const store = new DrawingStore();
+    const prim = fakePrimitive();
+    const { host, fire } = fakeHost();
+    const di = new DrawingInteraction(host, fakeFacade(), prim, store, ctx(), { newId });
+    di.setTool("measure");
+
+    fire("pointerdown", { clientX: 0, clientY: 990 });
+    fire("pointerup", { clientX: 0, clientY: 990 });
+    fire("pointerdown", { clientX: 20, clientY: 980 });
+    fire("pointerup", { clientX: 20, clientY: 980 });
+
+    const result = prim.setTransient.mock.calls.at(-1)?.[0];
+    expect(result).toEqual({ measure: {
+      from: { timeMs: 0, price: 10 }, to: { timeMs: 120_000, price: 20 },
+    } });
+    expect(store.forSymbol("US.AAPL")).toHaveLength(0);
+  });
+
+  it("keeps a pending Measure after a moved second press so chart navigation wins", () => {
+    const store = new DrawingStore();
+    const prim = fakePrimitive();
+    const f = fakeFacade();
+    const { host, fire } = fakeHost();
+    const di = new DrawingInteraction(host, f, prim, store, ctx(), { newId });
+    di.setTool("measure");
+
+    fire("pointerdown", { clientX: 0, clientY: 990 });
+    fire("pointerup", { clientX: 0, clientY: 990 });
+    fire("pointerdown", { clientX: 10, clientY: 980 });
+    fire("pointermove", { clientX: 50, clientY: 970 });
+    fire("pointerup", { clientX: 50, clientY: 970 });
+
+    expect(store.forSymbol("US.AAPL")).toHaveLength(0);
+    expect(f.setPanZoomEnabled.mock.calls.filter(([enabled]) => enabled === false)).toHaveLength(1);
+    expect(prim.setTransient.mock.calls.at(-1)?.[0]).toEqual({ measure: {
+      from: { timeMs: 0, price: 10 }, to: { timeMs: 300_000, price: 30 },
+    } });
+  });
+
+  it("cancels a pending Measure on Escape, tool change, symbol change, and right-click", () => {
+    const store = new DrawingStore();
+    const prim = fakePrimitive();
+    const { host, fire } = fakeHost();
+    const di = new DrawingInteraction(host, fakeFacade(), prim, store, ctx(), { newId });
+    const start = () => {
+      di.setTool("measure");
+      fire("pointerdown", { clientX: 0, clientY: 990 });
+      fire("pointerup", { clientX: 0, clientY: 990 });
+    };
+
+    start();
+    fire("keydown", { key: "Escape" });
+    expect(prim.setTransient).toHaveBeenLastCalledWith(null);
+    start();
+    di.setTool("hline");
+    expect(prim.setTransient).toHaveBeenLastCalledWith(null);
+    start();
+    di.onSymbolChanged();
+    expect(prim.setTransient).toHaveBeenLastCalledWith(null);
+    start();
+    fire("pointerdown", { clientX: 0, clientY: 990, button: 2 });
+    expect(prim.setTransient).toHaveBeenLastCalledWith(null);
   });
 
   it("onSymbolChanged cancels the gesture, drops selection, and restores pan/zoom", () => {

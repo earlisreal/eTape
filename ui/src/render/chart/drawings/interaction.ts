@@ -43,9 +43,14 @@ export interface DrawingContext {
   timeframeMs(): number;
 }
 
+const MEASURE_MOVE_THRESHOLD = 3;
+
 type Gesture =
   | { kind: "none" }
   | { kind: "placing"; anchor0: Anchor }
+  | { kind: "measureInitialPress"; from: Anchor; down: Px }
+  | { kind: "measurePending"; from: Anchor; to: Anchor }
+  | { kind: "measureSecondPress"; from: Anchor; down: Px; to: Anchor }
   | { kind: "measuring"; from: Anchor }
   | { kind: "handleDrag"; id: string; index: number }
   | { kind: "bodyDrag"; id: string; downLogical: number; downPrice: number; orig: Anchor[] };
@@ -83,7 +88,7 @@ export class DrawingInteraction {
     };
     on("pointerdown", (e) => this.onPointerDown(e));
     on("pointermove", (e) => this.onPointerMove(e));
-    on("pointerup", () => this.onPointerUp());
+    on("pointerup", (e) => this.onPointerUp(e));
     on("keydown", (e) => this.onKeyDown(e));
   }
 
@@ -186,15 +191,23 @@ export class DrawingInteraction {
   private barsMs(): number[] {
     return this.ctx.bars().map((b) => Date.parse(b.bucketStart));
   }
-  private snap(p: Px): Anchor | null {
+  private timeAtLogical(logical: number): number | null {
     const bars = this.ctx.bars();
-    if (bars.length === 0) return null;
+    if (bars.length === 0 || !Number.isFinite(logical)) return null;
+    const slot = Math.max(0, Math.round(logical));
+    if (slot < bars.length) return Date.parse(bars[slot].bucketStart);
+    const last = Date.parse(bars[bars.length - 1].bucketStart);
+    return last + (slot - bars.length + 1) * this.ctx.timeframeMs();
+  }
+  private anchorAtLogical(logical: number, price: number): Anchor | null {
+    const timeMs = this.timeAtLogical(logical);
+    return timeMs === null || !Number.isFinite(timeMs) ? null : { timeMs, price };
+  }
+  private snap(p: Px): Anchor | null {
     const logical = this.facade.coordinateToLogical(p.x);
-    if (logical === null) return null;
-    const idx = Math.max(0, Math.min(bars.length - 1, Math.round(logical)));
-    const timeMs = Date.parse(bars[idx].bucketStart);
+    if (logical === null || !Number.isFinite(logical)) return null;
     const price = this.facade.coordinateToPrice(p.y) ?? 0;
-    return { timeMs, price };
+    return this.anchorAtLogical(logical, price);
   }
   private project(a: Anchor): Px | null {
     const logical = timeToLogical(a.timeMs, this.barsMs(), this.ctx.timeframeMs());
@@ -207,7 +220,14 @@ export class DrawingInteraction {
   private onPointerDown(e: PointerLike): void {
     // Right-click is reserved for the chart's own context menu (Clear drawings /
     // Reset zoom) — never start a placement, selection, or measure gesture from it.
-    if (e.button === 2) return;
+    if (e.button === 2) {
+      if (this.isMeasureGesture()) {
+        this.cancelGesture();
+        this.applyPanZoomLock();
+        this.primitive.requestUpdate();
+      }
+      return;
+    }
     // The drawing chrome (rail, floating style toolbar, context menu) sits inside
     // `host` as DOM children; their own stopPropagation() runs too late to matter
     // (React's delegated dispatch fires after this raw listener during native
@@ -224,9 +244,15 @@ export class DrawingInteraction {
 
     if (this.tool === "measure") {
       if (!anchor) return;
-      this.gesture = { kind: "measuring", from: anchor };
-      this.facade.setPanZoomEnabled(false);
-      this.primitive.setTransient({ measure: { from: anchor, to: anchor } });
+      if (this.gesture.kind === "measurePending") {
+        this.gesture = { kind: "measureSecondPress", from: this.gesture.from, down: p, to: anchor };
+      } else {
+        this.gesture = { kind: "measureInitialPress", from: anchor, down: p };
+        // The first press owns the pointer for drag-to-measure. A released click
+        // re-enables pan/zoom and leaves a pending first point instead.
+        this.facade.setPanZoomEnabled(false);
+      }
+      this.primitive.setTransient({ measure: { from: this.gesture.from, to: anchor } });
       this.primitive.requestUpdate();
       return;
     }
@@ -277,6 +303,7 @@ export class DrawingInteraction {
     const style = this.styleForKind?.(kind) ?? {};
     const d: Drawing = { id: this.newId(), symbol: this.ctx.symbol(), kind, anchors, createdMs: now, updatedMs: now, ...style };
     this.store.upsert(d);
+    this.setSelectionId(d.id);
     this.cancelGesture();
     // revert to select (TradingView behavior)
     this.tool = "select";
@@ -291,9 +318,19 @@ export class DrawingInteraction {
     if (g.kind === "placing") {
       const anchor = this.snap(p);
       if (anchor) { this.primitive.setTransient({ ghost: { kind: this.tool as DrawingKind, anchors: [g.anchor0, anchor] } }); this.primitive.requestUpdate(); }
-    } else if (g.kind === "measuring") {
+    } else if (g.kind === "measureInitialPress") {
+      if (!this.moved(g.down, p)) return;
+      this.gesture = { kind: "measuring", from: g.from };
+      this.updateMeasure(g.from, p);
+    } else if (g.kind === "measureSecondPress") {
       const anchor = this.snap(p);
-      if (anchor) { this.primitive.setTransient({ measure: { from: g.from, to: anchor } }); this.primitive.requestUpdate(); }
+      if (anchor) {
+        this.gesture = { ...g, to: anchor };
+        this.primitive.setTransient({ measure: { from: g.from, to: anchor } });
+        this.primitive.requestUpdate();
+      }
+    } else if (g.kind === "measuring") {
+      this.updateMeasure(g.from, p);
     } else if (g.kind === "handleDrag") {
       const anchor = this.snap(p);
       const d = this.currentDrawing(g.id);
@@ -309,11 +346,10 @@ export class DrawingInteraction {
       if (d && curLogical !== null && curPrice !== null) {
         const dBars = Math.round(curLogical) - Math.round(g.downLogical);
         const dPrice = curPrice - g.downPrice;
-        const bars = this.ctx.bars();
         const barsMs = this.barsMs();
         const anchors = g.orig.map((a) => {
-          const idx = Math.max(0, Math.min(bars.length - 1, Math.round(timeToLogical(a.timeMs, barsMs, this.ctx.timeframeMs())) + dBars));
-          return { timeMs: bars.length ? Date.parse(bars[idx].bucketStart) : a.timeMs, price: a.price + dPrice };
+          const next = this.anchorAtLogical(timeToLogical(a.timeMs, barsMs, this.ctx.timeframeMs()) + dBars, a.price + dPrice);
+          return next ?? { timeMs: a.timeMs, price: a.price + dPrice };
         });
         this.store.upsert({ ...d, anchors, updatedMs: Date.now() });
         this.primitive.requestUpdate();
@@ -321,17 +357,52 @@ export class DrawingInteraction {
     }
   }
 
-  private onPointerUp(): void {
+  private onPointerUp(e: PointerLike): void {
     const g = this.gesture;
     if (g.kind === "handleDrag" || g.kind === "bodyDrag") {
       this.gesture = { kind: "none" };
       this.applyPanZoomLock(); // back to select → unlock
       this.primitive.requestUpdate();
+    } else if (g.kind === "measureInitialPress") {
+      const p = this.pos(e);
+      if (this.moved(g.down, p)) {
+        this.gesture = { kind: "none" };
+        this.updateMeasure(g.from, p);
+      } else {
+        this.gesture = { kind: "measurePending", from: g.from, to: g.from };
+      }
+      this.facade.setPanZoomEnabled(true);
+      this.primitive.requestUpdate();
     } else if (g.kind === "measuring") {
       // keep the box visible until the next pointerdown or Esc; just end the drag
       this.gesture = { kind: "none" };
       this.facade.setPanZoomEnabled(true);
+    } else if (g.kind === "measureSecondPress") {
+      const p = this.pos(e);
+      if (this.moved(g.down, p)) {
+        const to = this.snap(p) ?? g.to;
+        this.gesture = { kind: "measurePending", from: g.from, to };
+        this.primitive.setTransient({ measure: { from: g.from, to } });
+      } else {
+        this.gesture = { kind: "none" };
+      }
+      this.facade.setPanZoomEnabled(true);
+      this.primitive.requestUpdate();
     }
+  }
+
+  private updateMeasure(from: Anchor, p: Px): void {
+    const anchor = this.snap(p);
+    if (anchor) { this.primitive.setTransient({ measure: { from, to: anchor } }); this.primitive.requestUpdate(); }
+  }
+
+  private moved(from: Px, to: Px): boolean {
+    return Math.hypot(to.x - from.x, to.y - from.y) >= MEASURE_MOVE_THRESHOLD;
+  }
+
+  private isMeasureGesture(): boolean {
+    return this.gesture.kind === "measureInitialPress" || this.gesture.kind === "measurePending"
+      || this.gesture.kind === "measureSecondPress" || this.gesture.kind === "measuring";
   }
 
   private onKeyDown(e: KeyLike): void {

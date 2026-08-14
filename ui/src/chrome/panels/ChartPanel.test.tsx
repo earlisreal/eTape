@@ -492,6 +492,55 @@ describe("ChartPanel", () => {
     setTool.mockRestore();
   });
 
+  it("gates persisted-style drawing tools until style hydration, but leaves Measure usable", async () => {
+    let resolveGet!: (ack: { status: string; value?: unknown }) => void;
+    const styleCommands = {
+      sendCommand: vi.fn((name: string) => name === "GetConfig"
+        ? new Promise<{ status: string; value?: unknown }>((resolve) => { resolveGet = resolve; })
+        : Promise.resolve({ status: "accepted" })),
+    };
+    const stores = makeStores();
+    stores.drawingToolStyles.connect({ commands: styleCommands });
+    const { getByRole } = renderChart("c1", stores);
+
+    expect((getByRole("button", { name: "horizontal line" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((getByRole("button", { name: "measure" }) as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(getByRole("button", { name: "measure" }));
+    expect((getByRole("button", { name: "measure" }) as HTMLButtonElement).getAttribute("aria-pressed")).toBeNull();
+
+    await act(async () => {
+      resolveGet({ status: "accepted", value: {} });
+      await Promise.resolve(); await Promise.resolve();
+    });
+    expect((getByRole("button", { name: "horizontal line" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("selects a completed drawing and opens its floating style toolbar immediately", async () => {
+    const bars: Bar[] = [
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:30:00.000Z", o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false },
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:31:00.000Z", o: 100.5, h: 102, l: 100, c: 101.5, v: 120, inProgress: true },
+    ];
+    const { stores, getByRole, getByTestId } = renderChart("c1", undefined, undefined, { timeframe: "1m" }, {
+      symbol: "US.AAPL", timeframe: "1m", fromMs: Date.parse(bars[0].bucketStart), toMs: Date.parse(bars[1].bucketStart) + 60_000,
+      bars, indicators: [], historyRevision: 1,
+    });
+    await act(async () => {
+      stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+        seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+      } });
+      await Promise.resolve(); await Promise.resolve();
+    });
+
+    fireEvent.click(getByRole("button", { name: "horizontal line" }));
+    const host = getByTestId("chart-host");
+    fireEvent.pointerDown(host, { button: 0, clientX: 0, clientY: 0 });
+    fireEvent.pointerUp(host, { clientX: 0, clientY: 0 });
+
+    expect(stores.drawings.forSymbol("US.AAPL")).toHaveLength(1);
+    expect(getByRole("button", { name: "delete drawing" })).toBeTruthy();
+    expect(getByRole("button", { name: "width 1" })).toBeTruthy();
+  });
+
   it("does not reset a loaded VWAP when the linked group focuses the displayed symbol", async () => {
     const key = "c1:VWAP-0";
     const point = { timeMs: 1, value: 100.5 };

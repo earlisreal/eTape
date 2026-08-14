@@ -19,6 +19,7 @@ export interface RailPos { x: number; y: number }
 
 export interface TVDrawingRailProps {
   chrome: TvChrome; activeTool: Tool; hideAll: boolean; symbol: string;
+  stylesReady: boolean;
   onSelectTool: (t: Tool) => void; onToggleHideAll: () => void;
   hasSelection: () => boolean; onDeleteSelection: () => void; onClearAll: () => void;
   initialPos?: RailPos | null; onPosChange?: (p: RailPos) => void;
@@ -26,7 +27,7 @@ export interface TVDrawingRailProps {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
-export function TVDrawingRail({ chrome, activeTool, hideAll, symbol, onSelectTool, onToggleHideAll, hasSelection, onDeleteSelection, onClearAll, initialPos, onPosChange }: TVDrawingRailProps): JSX.Element {
+export function TVDrawingRail({ chrome, activeTool, hideAll, symbol, stylesReady, onSelectTool, onToggleHideAll, hasSelection, onDeleteSelection, onClearAll, initialPos, onPosChange }: TVDrawingRailProps): JSX.Element {
   const [confirm, setConfirm] = useState(false);
   const [pos, setPos] = useState<RailPos | null>(initialPos ?? null);
   const railRef = useRef<HTMLDivElement | null>(null);
@@ -108,12 +109,16 @@ export function TVDrawingRail({ chrome, activeTool, hideAll, symbol, onSelectToo
       </div>
 
       <HoverButton aria-label="trend line" style={btn(activeTool === "trendline")} hoverStyle={toolHover(activeTool === "trendline")}
+        disabled={!stylesReady}
         onClick={() => toggleTool("trendline", activeTool === "trendline")}><IconTrend size={16} /></HoverButton>
       <HoverButton aria-label="horizontal line" style={btn(activeTool === "hline")} hoverStyle={toolHover(activeTool === "hline")}
+        disabled={!stylesReady}
         onClick={() => toggleTool("hline", activeTool === "hline")}><IconHLine size={16} /></HoverButton>
       <HoverButton aria-label="extended line" style={btn(activeTool === "extendedline")} hoverStyle={toolHover(activeTool === "extendedline")}
+        disabled={!stylesReady}
         onClick={() => toggleTool("extendedline", activeTool === "extendedline")}><IconExtended size={16} /></HoverButton>
       <HoverButton aria-label="rectangle" style={btn(activeTool === "rect")} hoverStyle={toolHover(activeTool === "rect")}
+        disabled={!stylesReady}
         onClick={() => toggleTool("rect", activeTool === "rect")}><IconRect size={16} /></HoverButton>
       <HoverButton aria-label="measure" style={btn(activeTool === "measure")} hoverStyle={toolHover(activeTool === "measure")}
         onClick={() => toggleTool("measure", activeTool === "measure")}><IconMeasure size={16} /></HoverButton>

@@ -180,6 +180,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const forceRepaintRef = useRef(false);
   const viewportModeRef = useRef<ManagedViewportMode>("live");
   const [activeTool, setActiveTool] = useState<Tool>("select");
+  const [drawingStylesReady, setDrawingStylesReady] = useState(() => {
+    const styleStore = stores.drawingToolStyles;
+    return styleStore.isReady() || !styleStore.isConnected();
+  });
   const [chartSymbol, setChartSymbol] = useState(symbol);
   const [menu, setMenu] = useState<{ x: number; y: number; clientX: number; clientY: number; drawingId: string | null } | null>(null);
   // The top-bar chart-type switcher was removed (candles-only trading UI); the
@@ -210,6 +214,12 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const drawingsPrimRef = useRef<DrawingsPrimitive | null>(null);
 
   useEffect(() => { tfRef.current = timeframe; }, [timeframe]);
+  useEffect(() => {
+    const styleStore = stores.drawingToolStyles;
+    const sync = () => setDrawingStylesReady(styleStore.isReady() || !styleStore.isConnected());
+    sync();
+    return styleStore.subscribe(sync);
+  }, [stores.drawingToolStyles]);
 
   // The mount effect below is [config.id]-only (the chart/canvas must never
   // remount on a symbol/group/timeframe change — see that effect's closing
@@ -993,7 +1003,11 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       <div ref={hostRef} data-testid="chart-host" tabIndex={0} style={{ flex: 1, minHeight: 0, position: "relative" }}
         onContextMenu={onContextMenu}>
         {drawingToolsVisible && <TVDrawingRail chrome={chrome} activeTool={activeTool} hideAll={hideAll} symbol={chartSymbol}
-          onSelectTool={(t) => { setActiveTool(t); interactionRef.current?.setTool(t); }}
+          stylesReady={drawingStylesReady}
+          onSelectTool={(t) => {
+            if (t !== "select" && t !== "measure" && !drawingStylesReady) return;
+            setActiveTool(t); interactionRef.current?.setTool(t);
+          }}
           onToggleHideAll={toggleHideAll}
           hasSelection={() => interactionRef.current?.hasSelection() ?? false}
           onDeleteSelection={() => interactionRef.current?.deleteSelection()}

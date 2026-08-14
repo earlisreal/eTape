@@ -46,6 +46,23 @@ describe("DrawingToolStyleStore in-memory behavior", () => {
 });
 
 describe("DrawingToolStyleStore persistence", () => {
+  it("starts hydration when connected and notifies readiness after the load resolves", async () => {
+    let resolveGet!: (ack: FakeAck) => void;
+    const sendCommand = vi.fn((name: string) => name === "GetConfig"
+      ? new Promise<FakeAck>((resolve) => { resolveGet = resolve; })
+      : Promise.resolve<FakeAck>({ status: "accepted" }));
+    const s = new DrawingToolStyleStore(0);
+    const ready = vi.fn();
+    s.subscribe(ready);
+    expect(s.isReady()).toBe(false);
+    s.connect({ commands: { sendCommand } });
+    expect(s.isReady()).toBe(false);
+    resolveGet({ status: "accepted", value: {} });
+    await settle();
+    expect(s.isReady()).toBe(true);
+    expect(ready).toHaveBeenCalledTimes(2);
+  });
+
   it("connect loads a previously remembered style from GetConfig", async () => {
     const cmd = fakeCommands({ get: { status: "accepted", value: { trendline: { color: "#2962FF", width: 2, lineStyle: "solid" } } } });
     const s = new DrawingToolStyleStore(0);
@@ -61,6 +78,38 @@ describe("DrawingToolStyleStore persistence", () => {
     await settle();
     expect(s.styleFor("trendline")).toEqual({});
     expect(s.styleFor("hline")).toEqual({ color: "#2962FF" });
+  });
+
+  it("releases readiness for missing and failed loads", async () => {
+    const missing = new DrawingToolStyleStore(0);
+    const missingReady = vi.fn();
+    missing.subscribe(missingReady);
+    missing.connect({ commands: fakeCommands({ get: { status: "accepted" } }) });
+    await settle();
+    expect(missing.isReady()).toBe(true);
+    expect(missingReady).toHaveBeenCalledTimes(2);
+
+    const sendCommand = vi.fn(async () => { throw new Error("offline"); });
+    const failed = new DrawingToolStyleStore(0);
+    const failedReady = vi.fn();
+    failed.subscribe(failedReady);
+    failed.connect({ commands: { sendCommand } });
+    await settle();
+    expect(failed.isReady()).toBe(true);
+    expect(failedReady).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps a local edit made while hydration is in flight", async () => {
+    let resolveGet!: (ack: FakeAck) => void;
+    const sendCommand = vi.fn((name: string) => name === "GetConfig"
+      ? new Promise<FakeAck>((resolve) => { resolveGet = resolve; })
+      : Promise.resolve<FakeAck>({ status: "accepted" }));
+    const s = new DrawingToolStyleStore(0);
+    s.connect({ commands: { sendCommand } });
+    s.remember("trendline", { color: "#LOCAL" });
+    resolveGet({ status: "accepted", value: { trendline: { color: "#REMOTE", width: 2 } } });
+    await settle();
+    expect(s.styleFor("trendline")).toEqual({ color: "#LOCAL", width: 2 });
   });
 
   it("remember schedules a debounced SetConfig write of the whole map", async () => {

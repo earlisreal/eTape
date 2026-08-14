@@ -48,6 +48,10 @@ a valid sample, charts use browser time and retain the last valid offset across
 a failed probe. A rate-limited `chart market clock boundary` trace records the
 clock inputs used for diagnostics.
 
+Chart drawings consume the Future Buffer as future chart positions. Their future
+Drawing Anchors are not clamped to the newest loaded bar; incoming displayed bars
+eventually align with those anchors.
+
 A symbol open waits for the engine's `chart-ready` barrier, queries the prepared
 archive/seed once, and calls `setData` once; pan and zoom do not request history.
 Older provider backfill is archive-only and appears on the next symbol open.
