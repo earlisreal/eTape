@@ -5,16 +5,16 @@ eTape presents live US-market data and trading controls while preserving the tra
 ## Workspace Layout
 
 **Panel Group**:
-A Dockview container for one or more eTape panels. A one-panel group presents a full-width Panel Header; a multi-panel group presents selectable Tabs.
+A container for one or more eTape panels. A one-panel group presents a full-width Panel Header; a multi-panel group presents Tabs above the active panel's Panel Header.
 _Avoid_: Pane, window
 
 **Panel Header**:
-The draggable eTape control surface for a panel, carrying its identity and panel-level controls. It is full-width when alone and becomes a Tab when its Panel Group contains peers.
+The eTape control surface for a panel, carrying its identity and panel-level controls. It is a drag handle when alone; when its Panel Group contains peers, it appears beneath the group's Tabs.
 _Avoid_: In-body header, title bar
 
 **Tab**:
-A selectable Panel Header within a multi-panel Panel Group.
-_Avoid_: Panel header in a one-panel group
+A selectable, draggable panel selector within a multi-panel Panel Group.
+_Avoid_: Panel header
 
 **Link Group**:
 A colour-named shared focus channel through which panels follow the same symbol and venue across windows. It is independent of a Panel Group; a panel with no Link Group is pinned.

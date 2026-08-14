@@ -288,7 +288,7 @@ describe("AppShell onConfigChange", () => {
 });
 
 describe("AppShell custom panel headers", () => {
-  it("keeps the full-width header visible for one panel and adds selectable hosts for a second", async () => {
+  it("keeps the full-width header for one panel and restores tabs above it for a second", async () => {
     const seed: Workspace = { name: "default", layoutVersion: 8, panels: [{ id: "orders-1", panelId: "open-orders", group: null, settings: {} }], layout: null };
     mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
@@ -303,6 +303,11 @@ describe("AppShell custom panel headers", () => {
     fireEvent.click(screen.getByText("+ Add panel"));
     fireEvent.click(screen.getByText("Stock Info"));
     await waitFor(() => expect(document.querySelectorAll('[data-testid^="panel-tab-"]').length).toBe(2));
+    expect(document.querySelectorAll(".dv-default-tab").length).toBe(2);
+    expect(document.querySelectorAll(".etape-panel-tab-host").length).toBe(0);
+    expect(document.querySelector(".panel-focused-header")).not.toBeNull();
+    expect(screen.getAllByLabelText("Close tab")).toHaveLength(2);
+    expect(screen.getByLabelText("close panel")).toBeTruthy();
   });
 });
 
