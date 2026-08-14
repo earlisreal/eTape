@@ -12,7 +12,11 @@
   See [adapter](../engine/internal/broker/alpaca/README.md) and [history
   provider](../engine/internal/hist/alpaca/README.md).
 - **TradeZero:** live REST execution plus portfolio WebSocket events. No market-data dependency. See [adapter](../engine/internal/broker/tradezero/README.md).
-- **Yahoo Finance:** unauthenticated fallback daily history only. Intraday bars never come from Yahoo. See [provider](../engine/internal/hist/yahoo/README.md).
+- **Yahoo Finance:** unauthenticated fallback daily history plus an
+  off-by-default, experimental headline supplement (`[news].yahoo_enabled`).
+  It follows the existing `US.<ticker>` news rotation and is not a source of
+  intraday bars. See [news](../engine/internal/news/README.md) and
+  [history provider](../engine/internal/hist/yahoo/README.md).
 
 ## Contract facts
 

@@ -298,6 +298,20 @@ func TestLoadMigratesLegacyNewsWatchMs(t *testing.T) {
 	}
 }
 
+func TestNewsYahooOptIn(t *testing.T) {
+	if Default().News.YahooEnabled {
+		t.Fatal("Yahoo news must be opt-in")
+	}
+	path := filepath.Join(t.TempDir(), "config.toml")
+	if err := os.WriteFile(path, []byte("[news]\nyahoo_enabled = true\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load(path)
+	if err != nil || !cfg.News.YahooEnabled {
+		t.Fatalf("Yahoo opt-in = %v, %v", cfg.News.YahooEnabled, err)
+	}
+}
+
 func TestBackfillDefaultsAndYahooKillSwitch(t *testing.T) {
 	d := Default()
 	if d.Backfill.Alpaca.Feed != "sip" {

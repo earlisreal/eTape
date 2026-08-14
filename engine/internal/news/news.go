@@ -1,9 +1,11 @@
-// Package news polls Moomoo's Qot_GetSearchNews API (3263). Moomoo has no
-// news push feed, so all requests share a quota-controlled polling lane.
+// Package news polls Moomoo's Qot_GetSearchNews API (3263) and can
+// supplement it with Yahoo headlines. Moomoo has no news push feed, so all
+// requests share a quota-controlled polling lane.
 package news
 
 import (
 	"context"
+	"net/http"
 	"time"
 
 	"google.golang.org/protobuf/proto"
@@ -40,10 +42,15 @@ type Poller struct {
 	seen      map[string]seenArticle
 	scheduler *scheduler
 	limiter   limiter
+	yahoo     *yahooFetcher
 }
 
 func New(cfg config.News, r requester, pub Publisher, clk clock.Clock, symbols func() SymbolPlan) *Poller {
-	return &Poller{cfg: cfg, r: r, pub: pub, clk: clk, symbols: symbols, seen: map[string]seenArticle{}, scheduler: newScheduler()}
+	p := &Poller{cfg: cfg, r: r, pub: pub, clk: clk, symbols: symbols, seen: map[string]seenArticle{}, scheduler: newScheduler()}
+	if cfg.YahooEnabled {
+		p.yahoo = &yahooFetcher{client: &http.Client{Timeout: 4 * time.Second}, endpoint: yahooSearchEndpoint, maxCount: cfg.MaxPerReq}
+	}
+	return p
 }
 
 func (p *Poller) Run(ctx context.Context) error {
@@ -69,18 +76,20 @@ func (p *Poller) Run(ctx context.Context) error {
 }
 
 func (p *Poller) pollSymbol(ctx context.Context, symbol string, plan SymbolPlan, now time.Time) {
-	req := &newspb.C2S{Keyword: proto.String(symbol), MaxCount: proto.Int32(int32(p.cfg.MaxPerReq))}
-	fr, err := p.r.Request(ctx, opend.ProtoQotGetSearchNews, &newspb.Request{C2S: req})
-	if err != nil {
-		return
-	}
-	var resp newspb.Response
-	if err := proto.Unmarshal(fr.Body, &resp); err != nil || resp.GetRetType() != 0 {
-		return
-	}
 	raw := make([]searchNews, 0)
-	for _, n := range resp.GetS2C().GetSearchNewsList() {
-		raw = append(raw, searchNews{Title: n.GetTitle(), Source: n.GetSource(), URL: n.GetUrl(), NewsSubType: n.GetNewsSubType(), PublishTime: n.GetPublishTime(), ViewCount: n.GetViewCount(), RelatedSecurities: append([]string(nil), n.GetRelatedSecurities()...)})
+	req := &newspb.C2S{Keyword: proto.String(symbol), MaxCount: proto.Int32(int32(p.cfg.MaxPerReq))}
+	if fr, err := p.r.Request(ctx, opend.ProtoQotGetSearchNews, &newspb.Request{C2S: req}); err == nil {
+		var resp newspb.Response
+		if proto.Unmarshal(fr.Body, &resp) == nil && resp.GetRetType() == 0 {
+			for _, n := range resp.GetS2C().GetSearchNewsList() {
+				raw = append(raw, searchNews{Title: n.GetTitle(), Source: n.GetSource(), URL: n.GetUrl(), NewsSubType: n.GetNewsSubType(), PublishTime: n.GetPublishTime(), ViewCount: n.GetViewCount(), RelatedSecurities: append([]string(nil), n.GetRelatedSecurities()...)})
+			}
+		}
+	}
+	if p.yahoo != nil {
+		if items, err := p.yahoo.fetch(ctx, symbol); err == nil {
+			raw = append(raw, items...)
+		}
 	}
 	fresh := p.upsert(normalizeArticles(raw, symbol, plan, now, time.Duration(p.cfg.MaxAgeHours)*time.Hour), now)
 	if len(fresh) > 0 {

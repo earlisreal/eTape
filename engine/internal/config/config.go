@@ -139,10 +139,12 @@ type Scan struct {
 	MinVolume      int64   `toml:"min_volume"`       // session cumulative volume floor
 }
 
-// News is the [news] section: Qot_GetSearchNews polling.
+// News is the [news] section: Qot_GetSearchNews polling plus optional
+// supplemental public sources.
 type News struct {
 	Enabled          bool `toml:"enabled"`
-	WatchMs          int  `toml:"watch_ms"` // quota-controlled request-slot interval
+	YahooEnabled     bool `toml:"yahoo_enabled"` // experimental Yahoo headline supplement; off by default
+	WatchMs          int  `toml:"watch_ms"`      // quota-controlled request-slot interval
 	ActiveRefreshMs  int  `toml:"active_refresh_ms"`
 	ScannerRefreshMs int  `toml:"scanner_refresh_ms"`
 	MaxPerReq        int  `toml:"max_per_req"`
@@ -237,7 +239,7 @@ func Default() Config {
 			Enabled: true, PremarketMs: 2000, RTHMs: 3000, RankPages: 2,
 			MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000,
 		},
-		News:      News{Enabled: true, WatchMs: 3100, ActiveRefreshMs: 10000, ScannerRefreshMs: 60000, MaxPerReq: 50, MaxAgeHours: 96, CatalystMinScore: 50},
+		News:      News{Enabled: true, YahooEnabled: false, WatchMs: 3100, ActiveRefreshMs: 10000, ScannerRefreshMs: 60000, MaxPerReq: 50, MaxAgeHours: 96, CatalystMinScore: 50},
 		StockInfo: StockInfo{Enabled: true, RefreshMs: 15000, MaxPerReq: 400},
 		Watchlist: Watchlist{Enabled: true, PollMs: 3000},
 		Health:    Health{Enabled: true, ProbeMs: 5000},
