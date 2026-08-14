@@ -95,6 +95,7 @@ export function PanelFrame(
   },
 ): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const groupPickerAnchor = useRef<HTMLButtonElement | null>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [showPicker, setShowPicker] = useState(false);
   const [active, setActive] = useState(api.isActive);
@@ -421,12 +422,12 @@ export function PanelFrame(
 
   const header = (
     <div className={`ledger-header${active ? " panel-focused-header" : ""}`} style={{ position: "relative" }}>
-        <HoverButton type="button" aria-label="link group" onClick={() => setShowPicker((v) => !v)}
+        <HoverButton ref={groupPickerAnchor} type="button" aria-label="link group" onClick={() => setShowPicker((v) => !v)}
           style={{ width: 12, height: 12, padding: 0, border: pinned ? `1.5px solid ${palette.textMuted}` : "1px solid transparent",
             borderRadius: 2, background: swatch(group, palette), cursor: "pointer", flex: "0 0 auto" }}
           hoverStyle={{ boxShadow: "inset 0 0 0 2px var(--text-muted)" }} />
         {showPicker && (
-          <GroupPicker group={group} onPick={handleGroupPick} onClose={() => setShowPicker(false)} />
+          <GroupPicker group={group} anchor={groupPickerAnchor.current} onPick={handleGroupPick} onClose={() => setShowPicker(false)} />
         )}
         {def?.symbolBearing && (
           tl.editing ? (

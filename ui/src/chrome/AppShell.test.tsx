@@ -288,6 +288,18 @@ describe("AppShell onConfigChange", () => {
 });
 
 describe("AppShell custom panel headers", () => {
+  it("renders a singleton header's group picker outside Dockview's clipped tab host", async () => {
+    const seed: Workspace = { name: "default", layoutVersion: 8, panels: [{ id: "orders-1", panelId: "open-orders", group: null, settings: {} }], layout: null };
+    mount(seed);
+    await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
+    await waitFor(() => expect(screen.getAllByText("Symbol")[0]).toBeTruthy());
+
+    const host = screen.getByTestId("panel-tab-orders-1");
+    fireEvent.click(within(host).getByLabelText("link group"));
+    const picker = screen.getByText("Red group", { exact: true }).closest(".popover");
+    expect(picker?.parentElement).toBe(document.body);
+  });
+
   it("keeps the full-width header for one panel and restores tabs above it for a second", async () => {
     const seed: Workspace = { name: "default", layoutVersion: 8, panels: [{ id: "orders-1", panelId: "open-orders", group: null, settings: {} }], layout: null };
     mount(seed);
