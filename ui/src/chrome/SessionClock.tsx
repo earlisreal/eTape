@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { sessionAt, type Session } from "../render/chart/sessions";
+import { nextSessionTransition, sessionAt, type Session } from "../render/chart/sessions";
 import { useTheme } from "./ThemeProvider";
 import type { Palette } from "../render/palette";
 
@@ -12,6 +12,16 @@ const ET_CLOCK = new Intl.DateTimeFormat("en-US", {
 });
 
 const SESSION_LABEL: Record<Session, string> = { pre: "PRE", rth: "RTH", post: "POST", closed: "CLOSED" };
+
+function formatSessionCountdown(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const days = Math.floor(totalSeconds / 86_400);
+  const hours = Math.floor((totalSeconds % 86_400) / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  const clock = [hours, minutes, seconds].map((part) => part.toString().padStart(2, "0")).join(":");
+  return days > 0 ? `${days}d ${clock}` : clock;
+}
 
 // sessionPre/Rth/Post/Closed in the palette are low-alpha chart-shading fills
 // (sessionRth is "usually transparent") — not visible as a status dot, so this
@@ -30,19 +40,22 @@ function useEtClock(): number {
   return now;
 }
 
-// Center-of-top-bar ET clock + session badge (PRE/RTH/POST/CLOSED). Client-derived —
-// no store, no props. sessionAt() is a client-side wall-clock classifier only (no
-// holiday awareness); acceptable here since this is a glance indicator, not the
-// order-gate source of truth (preChecks.ts has its own sessionAt call for that).
+// Left-side ET clock + next-session countdown. Client-derived — no store, no props.
+// sessionAt() is a client-side wall-clock classifier only (no holiday awareness);
+// acceptable here since this is a glance indicator, not the order-gate source of
+// truth (preChecks.ts has its own sessionAt call for that).
 export function SessionClock(): JSX.Element {
   const { palette } = useTheme();
   const now = useEtClock();
   const session = sessionAt(now);
+  const transition = nextSessionTransition(now);
+  const countdown = formatSessionCountdown(transition.atMs - now);
+  const nextLabel = SESSION_LABEL[transition.session];
   return (
     <div
       data-testid="session-clock"
       style={{ display: "inline-flex", alignItems: "center", gap: 6, whiteSpace: "nowrap" }}
-      title="Current time (US/Eastern)"
+      title={`Current time (US/Eastern); ${SESSION_LABEL[session]}; ${nextLabel} in ${countdown}`}
     >
       <span
         style={{ width: 7, height: 7, borderRadius: "50%", background: sessionColor(session, palette) }}
@@ -54,7 +67,7 @@ export function SessionClock(): JSX.Element {
         className="serif"
         style={{ fontSize: 9, letterSpacing: ".06em", textTransform: "uppercase", color: palette.textMuted }}
       >
-        ET · {SESSION_LABEL[session]}
+        ET · {nextLabel} in {countdown}
       </span>
     </div>
   );

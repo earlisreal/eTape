@@ -32,9 +32,17 @@ describe("TopBar", () => {
     render(<ThemeProvider><TopBar {...base} /></ThemeProvider>);
     expect(screen.queryByLabelText(/focus green/i)).toBeNull();
   });
-  it("renders the ET session clock in the center", () => {
+  it("renders the ET clock after latency and the hotkey cue in the center", () => {
     render(<ThemeProvider><TopBar {...base} /></ThemeProvider>);
-    expect(screen.getByTestId("session-clock")).toBeTruthy();
+    const bar = screen.getByTestId("top-bar");
+    const clock = screen.getByTestId("session-clock");
+    const cue = screen.getByTestId("hotkey-target-cue");
+    const left = bar.querySelector(".top-bar-left")!;
+    const children = Array.from(left.children);
+    expect(left.contains(clock)).toBe(true);
+    expect(children.indexOf(left.querySelector(".top-bar-latency")!)).toBeLessThan(children.indexOf(clock));
+    expect(bar.querySelector(".top-bar-target")?.contains(cue)).toBe(true);
+    expect(bar.querySelector(".top-bar-actions")?.contains(cue)).toBe(false);
   });
   it("renders every target cue state without making the cue interactive", () => {
     const cases = [

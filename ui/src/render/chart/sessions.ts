@@ -2,6 +2,7 @@ import { etParts } from "./barBucket";
 
 export type Session = "pre" | "rth" | "post" | "closed";
 export interface Band { startMs: number; endMs: number; session: Session }
+export interface SessionTransition { session: Session; atMs: number }
 
 const PRE = 4 * 60, RTH = 9 * 60 + 30, POST = 16 * 60, CLOSE = 20 * 60; // minutes into ET day
 
@@ -14,6 +15,16 @@ export function sessionAt(tsMs: number): Session {
   if (m < POST) return "rth";
   if (m < CLOSE) return "post";
   return "closed";
+}
+
+// Find the next boundary where the session actually changes. Weekends contain
+// several clock boundaries that remain CLOSED, so skip those no-op transitions.
+export function nextSessionTransition(tsMs: number): SessionTransition {
+  const current = sessionAt(tsMs);
+  for (let boundary = nextBoundaryMs(tsMs); ; boundary = nextBoundaryMs(boundary)) {
+    const session = sessionAt(boundary);
+    if (session !== current) return { session, atMs: boundary };
+  }
 }
 
 // Contiguous session bands covering [fromMs, toMs). Steps at each ET boundary by

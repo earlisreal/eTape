@@ -5,13 +5,13 @@ import { SessionClock } from "./SessionClock";
 import { ThemeProvider } from "./ThemeProvider";
 
 describe("SessionClock", () => {
-  it("renders the ET wall-clock time and RTH badge during market hours", () => {
+  it("renders the ET wall-clock time and next phase during market hours", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-09T14:30:00Z")); // 10:30:00 EDT -> RTH
     render(<ThemeProvider><SessionClock /></ThemeProvider>);
     const text = screen.getByTestId("session-clock").textContent;
     expect(text).toContain("10:30:00");
-    expect(text).toContain("RTH");
+    expect(text).toContain("POST in 05:30:00");
     vi.useRealTimers();
   });
 
@@ -22,15 +22,25 @@ describe("SessionClock", () => {
     act(() => {
       vi.advanceTimersByTime(1000);
     });
-    expect(screen.getByTestId("session-clock").textContent).toContain("10:30:01");
+    const text = screen.getByTestId("session-clock").textContent;
+    expect(text).toContain("10:30:01");
+    expect(text).toContain("POST in 05:29:59");
     vi.useRealTimers();
   });
 
-  it("shows CLOSED outside trading hours", () => {
+  it("counts to PRE before the trading day", () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-09T06:00:00Z")); // 02:00 EDT -> before pre-market, closed
     render(<ThemeProvider><SessionClock /></ThemeProvider>);
-    expect(screen.getByTestId("session-clock").textContent).toContain("CLOSED");
+    expect(screen.getByTestId("session-clock").textContent).toContain("PRE in 02:00:00");
+    vi.useRealTimers();
+  });
+
+  it("uses day formatting for a weekend wait", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-11T01:00:00Z")); // Friday 21:00 EDT -> Monday PRE
+    render(<ThemeProvider><SessionClock /></ThemeProvider>);
+    expect(screen.getByTestId("session-clock").textContent).toContain("PRE in 2d 07:00:00");
     vi.useRealTimers();
   });
 });

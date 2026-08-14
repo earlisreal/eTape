@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { sessionBands, sessionAt, buildDaySegment, classify } from "./sessions";
+import { sessionBands, sessionAt, nextSessionTransition, buildDaySegment, classify } from "./sessions";
 
 const at = (iso: string) => Date.parse(iso);
 
@@ -23,6 +23,20 @@ describe("sessionBands", () => {
     expect(bands[0].startMs).toBe(from);
     expect(bands[bands.length - 1].endMs).toBe(to);
     for (let i = 1; i < bands.length; i++) expect(bands[i].startMs).toBe(bands[i - 1].endMs);
+  });
+});
+
+describe("nextSessionTransition", () => {
+  it("returns the next phase boundary for each weekday session", () => {
+    expect(nextSessionTransition(at("2026-07-06T13:00:00Z"))).toEqual({ session: "rth", atMs: at("2026-07-06T13:30:00Z") });
+    expect(nextSessionTransition(at("2026-07-06T14:30:00Z"))).toEqual({ session: "post", atMs: at("2026-07-06T20:00:00Z") });
+    expect(nextSessionTransition(at("2026-07-06T21:00:00Z"))).toEqual({ session: "closed", atMs: at("2026-07-07T00:00:00Z") });
+    expect(nextSessionTransition(at("2026-07-07T01:00:00Z"))).toEqual({ session: "pre", atMs: at("2026-07-07T08:00:00Z") });
+  });
+
+  it("skips weekend boundaries until Monday PRE", () => {
+    expect(nextSessionTransition(at("2026-07-10T23:00:00Z"))).toEqual({ session: "closed", atMs: at("2026-07-11T00:00:00Z") });
+    expect(nextSessionTransition(at("2026-07-11T01:00:00Z"))).toEqual({ session: "pre", atMs: at("2026-07-13T08:00:00Z") });
   });
 });
 

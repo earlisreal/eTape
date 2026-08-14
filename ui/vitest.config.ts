@@ -42,6 +42,7 @@ export default defineConfig({
             'src/render/chart/barClose.test.ts',
             'src/render/chart/ChartController.test.ts',
             'src/render/chart/chartTheme.test.ts',
+            'src/render/chart/sessions.test.ts',
             'src/render/ladder/ladderState.test.ts',
             'src/render/tape/tapeState.test.ts',
             'src/chrome/panels/tv/legendView.test.ts',
@@ -108,6 +109,7 @@ export default defineConfig({
           include: [
             'src/chrome/AppShell.test.tsx',
             'src/chrome/hotkeyTarget.test.ts',
+            'src/chrome/SessionClock.test.tsx',
             'src/chrome/TopBar.test.tsx',
             'src/chrome/backup.test.ts',
             'src/chrome/panels/registry.test.tsx',

@@ -78,40 +78,40 @@ function TargetCue({ cue, palette }: { cue: HotkeyTargetCue; palette: ReturnType
     ? `${symbol} · ${venue}`
     : `Hotkeys blocked · ${reason}${cue.state === "no-target" ? "" : ` · ${symbol} · ${venue}`}`;
   return (
-    <span data-testid="hotkey-target-cue" data-state={cue.state} role="status"
+    <span className="top-bar-target-cue" data-testid="hotkey-target-cue" data-state={cue.state} role="status"
       aria-label={label} title={label}
       style={{ display: "inline-flex", alignItems: "center", gap: 5, minWidth: 0,
         color: cue.state === "ready" ? palette.textMuted : palette.danger, fontSize: 11, whiteSpace: "nowrap" }}>
       <span data-testid="hotkey-target-dot" aria-hidden="true"
         style={{ width: 7, height: 7, borderRadius: "50%", background: dot, flex: "0 0 auto" }} />
-      <span>{label}</span>
+      <span className="top-bar-target-label">{label}</span>
     </span>
   );
 }
 
-// Daylight Ledger top bar: eTape wordmark + workspace name + connection latency on the
-// left, a live ET clock + session badge dead-center, and shell actions (add panel / new
-// window / settings) + the arm/disarm chip on the right. The link-group symbol boxes
-// from the old WorkspaceHeader are gone — Task 13's type-to-load replaces that
-// interaction, per-panel.
+// Daylight Ledger top bar: eTape wordmark + workspace name + connection latency +
+// live ET clock/countdown on the left, the hotkey target dead-center, and shell
+// actions (add panel / new window / settings) + the arm/disarm chip on the right.
 export function TopBar(p: TopBarProps): JSX.Element {
   const { palette } = useTheme();
   const cue = p.targetCue ?? targetCueFor(null);
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: 10,
+    <div className="top-bar" data-testid="top-bar" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)", alignItems: "center", gap: 10,
       padding: "7px 12px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+      <div className="top-bar-left" style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
         <span className="serif" style={{ fontWeight: 600, fontSize: 14 }}>eTape</span>
-        {p.workspaceName !== "main" && <span style={{ color: palette.textMuted }}>· {p.workspaceName}</span>}
-        <LatencyReadout health={p.health} onOpen={p.onOpenConnection} />
+        {p.workspaceName !== "main" && <span className="top-bar-workspace" style={{ color: palette.textMuted }}>· {p.workspaceName}</span>}
+        <span className="top-bar-latency"><LatencyReadout health={p.health} onOpen={p.onOpenConnection} /></span>
+        <SessionClock />
       </div>
-      <SessionClock />
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, minWidth: 0 }}>
+      <div className="top-bar-target" style={{ display: "flex", alignItems: "center", justifyContent: "center", minWidth: 0, maxWidth: "100%" }}>
+        <TargetCue cue={cue} palette={palette} />
+      </div>
+      <div className="top-bar-actions" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, minWidth: 0 }}>
         <Button onClick={p.onAddPanel}>+ Add panel</Button>
         <Button onClick={p.onNewWindow}>⧉ New window</Button>
         <Button aria-label="Practice" title="Practice: synthetic demo market" onClick={p.onOpenPractice}>▶ Practice</Button>
         <Button aria-label="Settings" onClick={p.onOpenSettings}>⚙ Settings</Button>
-        <TargetCue cue={cue} palette={palette} />
         <Button data-testid="arm-chip" onClick={p.onArmToggle}
           style={{ fontWeight: 600, letterSpacing: ".08em",
             // Fixed width sized to the longer "UNLOCK TRADING" label (measured

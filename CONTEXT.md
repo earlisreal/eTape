@@ -12,6 +12,14 @@ _Avoid_: Pane, window
 The eTape control surface for a panel, carrying its identity and panel-level controls. It is a drag handle when alone; when its Panel Group contains peers, it appears beneath the group's Tabs.
 _Avoid_: In-body header, title bar
 
+**Top Bar**:
+The global eTape control surface above the workspace, carrying application-wide time, Link Group focus, and workspace commands.
+_Avoid_: Top header, app header, panel header
+
+**Session Transition Countdown**:
+A Top Bar time display showing the remaining time until the next scheduled market-session phase.
+_Avoid_: Next session countdown, market open timer
+
 **Tab**:
 A selectable, draggable panel selector within a multi-panel Panel Group.
 _Avoid_: Panel header
