@@ -48,6 +48,37 @@ func TestAppendExecEventSeqAndReadBack(t *testing.T) {
 	}
 }
 
+func TestReadExecOrderHistoriesSinceReturnsCompleteCandidateHistories(t *testing.T) {
+	s := openTestStore(t)
+	mk := func(ts int64, oid string) exec.EventEnvelope {
+		return exec.EventEnvelope{TsMs: ts, Source: "ws", Venue: "sim-1", OrderID: oid, Kind: "order_canceled", Payload: []byte(`{}`)}
+	}
+	appendEvent := func(env exec.EventEnvelope) {
+		t.Helper()
+		if _, err := s.AppendExecEvent(env, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	appendEvent(mk(90, "excluded"))
+	appendEvent(mk(50, "old"))
+	appendEvent(mk(120, "other"))
+	appendEvent(mk(150, "old"))
+	appendEvent(mk(160, "")) // stream_gap-like rows never identify a candidate order
+
+	got, err := s.ReadExecOrderHistoriesSince(100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d candidate-history events, want 3: %+v", len(got), got)
+	}
+	if got[0].OrderID != "old" || got[0].TsMs != 50 ||
+		got[1].OrderID != "other" || got[1].TsMs != 120 ||
+		got[2].OrderID != "old" || got[2].TsMs != 150 {
+		t.Fatalf("candidate histories not in global seq order or missing pre-cutoff event: %+v", got)
+	}
+}
+
 func TestAppendExecEventFillProjection(t *testing.T) {
 	s := openTestStore(t)
 	env := exec.EventEnvelope{TsMs: 2000, Source: "ws", Venue: "sim-1", OrderID: "ETc", Kind: "order_filled", Payload: []byte(`{}`)}

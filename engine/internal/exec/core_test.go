@@ -457,8 +457,10 @@ func TestCoreNoTradeUpdateOnPartialClose(t *testing.T) {
 type fakeEventStore struct {
 	fills    []exec.FillRow
 	fillsErr error
+	history  []exec.EventEnvelope
 
-	sinceCalls []int64
+	sinceCalls   []int64
+	historyCalls []int64
 }
 
 func (f *fakeEventStore) AppendExecEvent(exec.EventEnvelope, *exec.FillRow) (int64, error) {
@@ -467,6 +469,11 @@ func (f *fakeEventStore) AppendExecEvent(exec.EventEnvelope, *exec.FillRow) (int
 
 func (f *fakeEventStore) ReadExecEventsSince(int64) ([]exec.EventEnvelope, error) {
 	return nil, nil
+}
+
+func (f *fakeEventStore) ReadExecOrderHistoriesSince(fromMs int64) ([]exec.EventEnvelope, error) {
+	f.historyCalls = append(f.historyCalls, fromMs)
+	return f.history, nil
 }
 
 func (f *fakeEventStore) QueryFillsSince(_ context.Context, fromMs int64) ([]exec.FillRow, error) {
@@ -478,6 +485,221 @@ func (f *fakeEventStore) QueryFillsSince(_ context.Context, fromMs int64) ([]exe
 }
 
 var _ exec.EventStore = (*fakeEventStore)(nil)
+
+type persistingEventStore struct {
+	fakeEventStore
+	events  []exec.EventEnvelope
+	appends []exec.EventEnvelope
+}
+
+func (f *persistingEventStore) AppendExecEvent(env exec.EventEnvelope, _ *exec.FillRow) (int64, error) {
+	env.Seq = int64(len(f.events) + 1)
+	f.events = append(f.events, env)
+	f.appends = append(f.appends, env)
+	f.history = append(f.history, env)
+	return env.Seq, nil
+}
+
+func (f *persistingEventStore) ReadExecEventsSince(fromMs int64) ([]exec.EventEnvelope, error) {
+	var out []exec.EventEnvelope
+	for _, env := range f.events {
+		if env.TsMs >= fromMs {
+			out = append(out, env)
+		}
+	}
+	return out, nil
+}
+
+func (f *persistingEventStore) ReadExecOrderHistoriesSince(fromMs int64) ([]exec.EventEnvelope, error) {
+	ids := map[string]bool{}
+	for _, env := range f.history {
+		if env.OrderID != "" && (env.TsMs >= fromMs || env.Source == "reconcile") {
+			ids[env.OrderID] = true
+		}
+	}
+	var out []exec.EventEnvelope
+	for _, env := range f.history {
+		if ids[env.OrderID] {
+			out = append(out, env)
+		}
+	}
+	return out, nil
+}
+
+var _ exec.EventStore = (*persistingEventStore)(nil)
+
+func historyEnv(seq int64, ev exec.Event) exec.EventEnvelope {
+	env := exec.EnvelopeOf(ev, exec.SrcWS, seq)
+	env.Seq = seq
+	return env
+}
+
+func testOrder(id string, ts int64) exec.Order {
+	return exec.Order{Venue: "sim-1", ID: id, Symbol: "US.AAPL", Side: exec.SideBuy,
+		Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 100, Status: exec.StatusSubmitted,
+		LeavesQty: 10, CreatedMs: ts, UpdatedMs: ts}
+}
+
+func TestCoreRecoverSeedsClosedOrdersFromPoolDayHistory(t *testing.T) {
+	loc := session.Loc()
+	now := time.Date(2026, time.August, 15, 10, 0, 0, 0, loc)
+	submitted := time.Date(2026, time.August, 14, 19, 55, 0, 0, loc).UnixMilli()
+	canceled := time.Date(2026, time.August, 14, 20, 5, 0, 0, loc).UnixMilli()
+	order := testOrder("cross-cutoff", submitted)
+	fs := &fakeEventStore{history: []exec.EventEnvelope{
+		historyEnv(1, exec.OrderSubmitted{Order: order}),
+		historyEnv(2, exec.OrderCanceled{V: "sim-1", OID: order.ID, Ts: canceled}),
+	}}
+	c := newSeedTestCore(t, clock.NewFake(time.UnixMilli(now.UnixMilli())), fs)
+	if err := c.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	rows := c.ClosedOrdersForTest()
+	if len(rows) != 1 {
+		t.Fatalf("got %d closed rows, want 1: %+v", len(rows), rows)
+	}
+	row := rows[0]
+	if row.Order.ID != order.ID || row.Order.Status != exec.StatusCanceled || row.Order.CreatedMs != submitted ||
+		row.Order.Qty != 10 || row.Order.LimitPrice != 100 || row.Order.UpdatedMs != canceled {
+		t.Fatalf("cross-cutoff row lost original order details: %+v", row)
+	}
+	wantCutoff := session.PoolDay(now) * 1000
+	if len(fs.historyCalls) != 1 || fs.historyCalls[0] != wantCutoff {
+		t.Fatalf("history query cutoff = %v, want [%d]", fs.historyCalls, wantCutoff)
+	}
+}
+
+func TestCoreRecoverFiltersRowsWhoseTerminalTransitionPredatesPoolDay(t *testing.T) {
+	now := time.Date(2026, time.August, 15, 10, 0, 0, 0, session.Loc())
+	order := testOrder("old-terminal", time.Date(2026, time.August, 14, 19, 0, 0, 0, session.Loc()).UnixMilli())
+	fs := &fakeEventStore{history: []exec.EventEnvelope{
+		historyEnv(3, exec.OrderSubmitted{Order: order}),
+		historyEnv(4, exec.OrderCanceled{V: order.Venue, OID: order.ID, Ts: time.Date(2026, time.August, 14, 19, 59, 59, 0, session.Loc()).UnixMilli()}),
+	}}
+	c := newSeedTestCore(t, clock.NewFake(time.UnixMilli(now.UnixMilli())), fs)
+	if err := c.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	if rows := c.ClosedOrdersForTest(); len(rows) != 0 {
+		t.Fatalf("terminal-before-cutoff row leaked into startup history: %+v", rows)
+	}
+}
+
+func TestCoreRecoverFiltersReplacedLegsBeforePoolDay(t *testing.T) {
+	now := time.Date(2026, time.August, 15, 10, 0, 0, 0, session.Loc())
+	order := testOrder("replace-cutoff", time.Date(2026, time.August, 14, 19, 0, 0, 0, session.Loc()).UnixMilli())
+	fs := &fakeEventStore{history: []exec.EventEnvelope{
+		historyEnv(5, exec.OrderSubmitted{Order: order}),
+		historyEnv(6, exec.OrderReplaced{V: order.Venue, OID: order.ID, NewQty: 20, NewLimit: 101,
+			Ts: time.Date(2026, time.August, 14, 19, 59, 0, 0, session.Loc()).UnixMilli()}),
+		historyEnv(7, exec.OrderCanceled{V: order.Venue, OID: order.ID,
+			Ts: time.Date(2026, time.August, 14, 20, 5, 0, 0, session.Loc()).UnixMilli()}),
+	}}
+	c := newSeedTestCore(t, clock.NewFake(time.UnixMilli(now.UnixMilli())), fs)
+	if err := c.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	rows := c.ClosedOrdersForTest()
+	if len(rows) != 1 || rows[0].Order.Status != exec.StatusCanceled || rows[0].Order.Qty != 20 {
+		t.Fatalf("pre-cutoff replaced leg leaked or post-cutoff leg lost: %+v", rows)
+	}
+}
+
+func TestCoreRecoverProjectsReplaceLegsWithoutChangingLiveIdentity(t *testing.T) {
+	now := time.Date(2026, time.August, 15, 10, 0, 0, 0, session.Loc())
+	order := testOrder("replace-me", now.Add(-time.Hour).UnixMilli())
+	fs := &fakeEventStore{history: []exec.EventEnvelope{
+		historyEnv(10, exec.OrderSubmitted{Order: order}),
+		historyEnv(11, exec.OrderReplaced{V: order.Venue, OID: order.ID, NewQty: 20, NewLimit: 101, Ts: now.Add(-30 * time.Minute).UnixMilli()}),
+		historyEnv(12, exec.OrderCanceled{V: order.Venue, OID: order.ID, Ts: now.Add(-20 * time.Minute).UnixMilli()}),
+	}}
+	c := newSeedTestCore(t, clock.NewFake(time.UnixMilli(now.UnixMilli())), fs)
+	if err := c.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	rows := c.ClosedOrdersForTest()
+	if len(rows) != 2 {
+		t.Fatalf("got %d closed rows, want replaced + canceled: %+v", len(rows), rows)
+	}
+	var replaced, canceled *exec.ClosedOrder
+	for i := range rows {
+		switch rows[i].Order.Status {
+		case exec.StatusReplaced:
+			replaced = &rows[i]
+		case exec.StatusCanceled:
+			canceled = &rows[i]
+		}
+	}
+	if replaced == nil || canceled == nil || replaced.RowID == canceled.RowID {
+		t.Fatalf("replacement rows not independently keyed: %+v", rows)
+	}
+	if replaced.Order.Qty != 10 || replaced.Order.LimitPrice != 100 || canceled.Order.Qty != 20 || canceled.Order.LimitPrice != 101 {
+		t.Fatalf("replace legs have wrong instruction details: %+v", rows)
+	}
+}
+
+func TestCoreRecoverClosedPartialCancelRetainsExecutionFields(t *testing.T) {
+	now := time.Date(2026, time.August, 15, 10, 0, 0, 0, session.Loc())
+	order := testOrder("partial-cancel", now.Add(-time.Hour).UnixMilli())
+	fs := &fakeEventStore{history: []exec.EventEnvelope{
+		historyEnv(20, exec.OrderSubmitted{Order: order}),
+		historyEnv(21, exec.OrderFilled{F: exec.Fill{Venue: order.Venue, OrderID: order.ID, Symbol: order.Symbol, Side: order.Side, Qty: 4, Price: 101, TsMs: now.Add(-30 * time.Minute).UnixMilli()}, CumQty: 4, LeavesQty: 6, AvgPrice: 101}),
+		historyEnv(22, exec.OrderCanceled{V: order.Venue, OID: order.ID, Ts: now.Add(-20 * time.Minute).UnixMilli()}),
+	}}
+	c := newSeedTestCore(t, clock.NewFake(time.UnixMilli(now.UnixMilli())), fs)
+	if err := c.Recover(context.Background()); err != nil {
+		t.Fatalf("Recover: %v", err)
+	}
+	rows := c.ClosedOrdersForTest()
+	if len(rows) != 1 || rows[0].Order.Status != exec.StatusCanceled || rows[0].Order.ExecutedQty != 4 || rows[0].Order.AvgFillPrice != 101 {
+		t.Fatalf("partial cancel projection wrong: %+v", rows)
+	}
+}
+
+type reconcileBroker struct {
+	capStub
+	orders []exec.Order
+}
+
+func (b *reconcileBroker) Snapshot(context.Context) (exec.AccountSnapshot, []exec.Position, []exec.Order, error) {
+	return exec.AccountSnapshot{Venue: "sim-1"}, nil, b.orders, nil
+}
+
+func TestCoreRecoverDurablyAdoptsUnknownWorkingOrderOnce(t *testing.T) {
+	now := time.Date(2026, time.August, 15, 10, 0, 0, 0, session.Loc())
+	order := testOrder("external-open", time.Date(2026, time.August, 14, 18, 0, 0, 0, session.Loc()).UnixMilli())
+	order.Status = exec.StatusAccepted
+	fs := &persistingEventStore{}
+	broker := &reconcileBroker{orders: []exec.Order{order}}
+	newCore := func() *exec.Core {
+		return exec.NewCore(exec.CoreConfig{
+			Venues:  []exec.VenueID{"sim-1"},
+			Store:   fs,
+			Brokers: map[exec.VenueID]exec.Broker{"sim-1": broker},
+			Clock:   clock.NewFake(time.UnixMilli(now.UnixMilli())),
+		})
+	}
+	if err := newCore().Recover(context.Background()); err != nil {
+		t.Fatalf("first Recover: %v", err)
+	}
+	if len(fs.appends) != 1 || fs.appends[0].Source != "reconcile" || fs.appends[0].Kind != "order_submitted" {
+		t.Fatalf("adopted order seed = %+v, want one reconcile OrderSubmitted", fs.appends)
+	}
+	ev, err := exec.DecodeEvent(fs.appends[0].Kind, fs.appends[0].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed, ok := ev.(exec.OrderSubmitted)
+	if !ok || seed.Order.Symbol != order.Symbol || seed.Order.Qty != order.Qty || seed.Order.LimitPrice != order.LimitPrice {
+		t.Fatalf("adopted seed lost order details: %#v", ev)
+	}
+	if err := newCore().Recover(context.Background()); err != nil {
+		t.Fatalf("second Recover: %v", err)
+	}
+	if len(fs.appends) != 1 {
+		t.Fatalf("reconcile seed duplicated across restart: %d appends", len(fs.appends))
+	}
+}
 
 // newSeedTestCore builds a brokerless Core (Recover's per-venue snapshot loop
 // is a no-op when a venue has no configured Broker) around fs, so Recover

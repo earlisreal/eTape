@@ -11,10 +11,10 @@ describe("panel registry — monitoring surfaces", () => {
 });
 
 describe("Task 19: merged account panel + back-compat aliases", () => {
-  it("registers the merged account panel with all six exec/quote topics", () => {
+  it("registers the merged account panel with all exec/quote topics", () => {
     expect(PANELS["account"]).toBeDefined();
     expect(PANELS["account"].topics).toEqual([
-      "exec.account", "exec.positions", "exec.orders", "exec.fills", "exec.trades", "exec.status", "md.quote",
+      "exec.account", "exec.positions", "exec.orders", "exec.closedOrders", "exec.fills", "exec.trades", "exec.status", "md.quote",
     ]);
   });
   it("aliases the pre-merge ids to the same merged component for saved-doc back-compat", () => {
@@ -39,7 +39,7 @@ describe("Task 8: open-orders folds into the merged account panel", () => {
   });
   it("gives all four account aliases the identical topics array, including exec.orders and exec.trades", () => {
     const expected = [
-      "exec.account", "exec.positions", "exec.orders", "exec.fills", "exec.trades", "exec.status", "md.quote",
+      "exec.account", "exec.positions", "exec.orders", "exec.closedOrders", "exec.fills", "exec.trades", "exec.status", "md.quote",
     ];
     for (const id of ["account", "account-bar", "positions", "open-orders"]) {
       expect(PANELS[id].topics, id).toEqual(expected);

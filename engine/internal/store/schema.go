@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS exec_events (
   payload  TEXT    NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_exec_events_ts ON exec_events(ts);
+CREATE INDEX IF NOT EXISTS idx_exec_events_order_id ON exec_events(order_id);
 CREATE TABLE IF NOT EXISTS fills (
   fill_id  INTEGER PRIMARY KEY AUTOINCREMENT,
   seq      INTEGER NOT NULL REFERENCES exec_events(seq),

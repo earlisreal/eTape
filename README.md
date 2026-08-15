@@ -87,7 +87,7 @@ and the broker of your choice for execution, and everything else is free and ope
 - Order ticket with market / limit / stop / stop-limit
 - Hotkey deck: configurable one-keystroke order templates with price offsets and
   position sizing by buying-power % or position %
-- Account, positions, open orders, and trade-history panels
+- Account, positions, open/closed orders, and trade-history panels
 - Built-in **paper simulator with realistic fills**: orders walk the live book,
   partial fills, resting limit orders, configurable slippage and fill latency
 

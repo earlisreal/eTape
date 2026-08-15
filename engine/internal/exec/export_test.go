@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
 // export_test.go exposes Core's internal state to exec_test (the external test
@@ -16,6 +18,13 @@ import (
 // when no other goroutine is concurrently mutating it (e.g. right after Recover,
 // before Run starts) to stay race-free.
 func (c *Core) StateForTest() *State { return c.state }
+
+// ClosedOrdersForTest returns the historical rows visible after startup's
+// PoolDay cutoff. Callers must only read it when Core is not concurrently
+// running.
+func (c *Core) ClosedOrdersForTest() []ClosedOrder {
+	return c.closed.snapshotSince(session.PoolDay(c.clk.Now()) * 1000)
+}
 
 func ms(iso string) int64 {
 	t, err := time.Parse(time.RFC3339, iso)

@@ -155,6 +155,18 @@ func mapOrder(o exec.Order) wsmsg.Order {
 	}
 }
 
+func mapClosedOrder(row exec.ClosedOrder) wsmsg.ClosedOrder {
+	o := row.Order
+	return wsmsg.ClosedOrder{
+		Venue: string(o.Venue), ID: row.RowID, Symbol: o.Symbol,
+		Side: sideToWire(o.Side), Type: orderTypeToWire(o.Type), TIF: tifToWire(o.TIF),
+		Session: sessionToWire(o.Session), Qty: o.Qty, LimitPrice: o.LimitPrice, StopPrice: o.StopPrice,
+		Status: statusToWire(o.Status), ExecutedQty: o.ExecutedQty, LeavesQty: o.LeavesQty,
+		AvgFillPrice: o.AvgFillPrice, RejectReason: o.RejectReason, ReplacesID: o.ReplacesID,
+		CreatedMs: o.CreatedMs, UpdatedMs: o.UpdatedMs,
+	}
+}
+
 func mapFill(f exec.Fill) wsmsg.Fill {
 	return wsmsg.Fill{
 		Venue: string(f.Venue), OrderID: f.OrderID, Symbol: f.Symbol,

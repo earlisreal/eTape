@@ -52,13 +52,14 @@ type mirror struct {
 	watchlistSet bool                                // false until the first publish
 
 	// execution
-	accounts    map[string]wsmsg.AccountRow // key venue
-	positions   map[string]exec.Position    // key "venue|symbol"; mapped w/ mark on read
-	orders      map[string]wsmsg.Order      // key orderID
-	fills       []wsmsg.Fill                // bounded recent
-	trades      []wsmsg.ClosedTradeRow      // bounded recent
-	venueStatus map[string]*wsmsg.VenueStatus
-	masterArmed bool
+	accounts     map[string]wsmsg.AccountRow  // key venue
+	positions    map[string]exec.Position     // key "venue|symbol"; mapped w/ mark on read
+	orders       map[string]wsmsg.Order       // key orderID
+	closedOrders map[string]wsmsg.ClosedOrder // key historical row ID
+	fills        []wsmsg.Fill                 // bounded recent
+	trades       []wsmsg.ClosedTradeRow       // bounded recent
+	venueStatus  map[string]*wsmsg.VenueStatus
+	masterArmed  bool
 
 	// system
 	health  wsmsg.HealthSnapshot
@@ -85,6 +86,7 @@ func newMirror(venues []venueMeta, global wsmsg.GlobalLimitsView, tapeCap, newsC
 		accounts:     map[string]wsmsg.AccountRow{},
 		positions:    map[string]exec.Position{},
 		orders:       map[string]wsmsg.Order{},
+		closedOrders: map[string]wsmsg.ClosedOrder{},
 		venueStatus:  map[string]*wsmsg.VenueStatus{},
 		tapeCap:      tapeCap, newsCap: newsCap, fillsCap: fillsCap, eventsCap: eventsCap,
 		tradesCap: tradesCap,
@@ -267,6 +269,10 @@ func (m *mirror) applyExec(u exec.Update) []staged {
 		w := mapOrder(v.Order)
 		m.orders[w.ID] = w
 		return []staged{{Topic: wsmsg.TopicExecOrders, Payload: w}}
+	case exec.ClosedOrderUpdate:
+		w := mapClosedOrder(v.ClosedOrder)
+		m.closedOrders[w.ID] = w
+		return []staged{{Topic: wsmsg.TopicExecClosedOrders, Payload: w}}
 	case exec.FillUpdate:
 		w := mapFill(v.Fill)
 		m.fills = append(m.fills, w)
@@ -464,6 +470,8 @@ func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
 		out = append(out, staged{Topic: topic, Payload: m.positionsPayload()})
 	case wsmsg.TopicExecOrders:
 		out = append(out, staged{Topic: topic, Payload: m.ordersPayload()})
+	case wsmsg.TopicExecClosedOrders:
+		out = append(out, staged{Topic: topic, Payload: m.closedOrdersPayload()})
 	case wsmsg.TopicExecFills:
 		// make (not append-to-nil) so an empty fills list marshals to `[]`,
 		// not `null` -- FillStore.ingest has no null guard, and m.fills is
@@ -496,6 +504,14 @@ func (m *mirror) ordersPayload() []wsmsg.Order {
 	out := make([]wsmsg.Order, 0, len(m.orders))
 	for _, id := range sortedKeysOf(m.orders) {
 		out = append(out, m.orders[id])
+	}
+	return out
+}
+
+func (m *mirror) closedOrdersPayload() []wsmsg.ClosedOrder {
+	out := make([]wsmsg.ClosedOrder, 0, len(m.closedOrders))
+	for _, id := range sortedKeysOf(m.closedOrders) {
+		out = append(out, m.closedOrders[id])
 	}
 	return out
 }

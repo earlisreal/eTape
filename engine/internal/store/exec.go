@@ -151,6 +151,39 @@ func (s *Store) ReadExecEventsSince(fromMs int64) ([]exec.EventEnvelope, error) 
 	return out, rows.Err()
 }
 
+// ReadExecOrderHistoriesSince returns complete event histories for orders with
+// at least one non-empty order_id event at/after fromMs. Durable reconcile
+// seeds are also candidates so an older still-working external order is not
+// appended again after a midnight restart. The set-based query includes
+// pre-cutoff submission events needed to reconstruct full terminal rows.
+func (s *Store) ReadExecOrderHistoriesSince(fromMs int64) ([]exec.EventEnvelope, error) {
+	rows, err := s.db.Query(
+		`WITH touched AS (
+			SELECT DISTINCT order_id
+			FROM exec_events
+			WHERE order_id <> '' AND (ts >= ? OR source = 'reconcile')
+		)
+		SELECT e.seq, e.ts, e.source, e.venue, e.type, e.order_id, e.payload
+		FROM exec_events e
+		JOIN touched t ON t.order_id = e.order_id
+		ORDER BY e.seq`, fromMs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []exec.EventEnvelope
+	for rows.Next() {
+		var e exec.EventEnvelope
+		var payload string
+		if err := rows.Scan(&e.Seq, &e.TsMs, &e.Source, &e.Venue, &e.Kind, &e.OrderID, &payload); err != nil {
+			return nil, err
+		}
+		e.Payload = []byte(payload)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
 // QueryFills returns fills for a symbol in [fromMs, toMs), ascending — the chart-
 // annotation backfill query (Plan 6 exposes it on exec.fills).
 func (s *Store) QueryFills(symbol string, fromMs, toMs int64) ([]exec.FillRow, error) {

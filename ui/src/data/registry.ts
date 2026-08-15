@@ -85,6 +85,7 @@ export function routeToStore(stores: Stores, m: SnapshotMsg | DeltaMsg): void {
     case "exec.account":
     case "exec.positions":
     case "exec.orders":
+    case "exec.closedOrders":
     case "exec.status": stores.exec.apply(m); return;
     case "exec.fills": stores.fills.apply(m); return;
     case "exec.trades": stores.trades.apply(m); return;

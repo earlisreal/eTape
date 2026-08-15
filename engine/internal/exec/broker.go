@@ -94,3 +94,10 @@ type EventStore interface {
 	ReadExecEventsSince(fromMs int64) ([]EventEnvelope, error)
 	QueryFillsSince(ctx context.Context, fromMs int64) ([]FillRow, error)
 }
+
+// closedHistoryStore is an optional persistence seam for startup Closed Orders
+// recovery. It returns every event for any order touched at/after the cutoff,
+// including that order's pre-cutoff submission history.
+type closedHistoryStore interface {
+	ReadExecOrderHistoriesSince(fromMs int64) ([]EventEnvelope, error)
+}

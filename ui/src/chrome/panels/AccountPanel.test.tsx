@@ -8,7 +8,7 @@ import { AccountPanel } from "./AccountPanel";
 import { makeStores } from "../../data/registry";
 import { LinkGroups } from "../linkGroups";
 import { FakeBus, FakeBusHub } from "../../../test/fakes";
-import type { AckMsg, AccountRow, ClosedTradeRow, ExecStatus, Order, PositionRow, SubmitOrderArgs } from "../../wire/contract";
+import type { AckMsg, AccountRow, ClosedOrder, ClosedTradeRow, ExecStatus, Order, PositionRow, SubmitOrderArgs } from "../../wire/contract";
 import type { PanelProps } from "./registry";
 import type { LinkGroup } from "../linkGroups";
 
@@ -491,6 +491,11 @@ describe("AccountPanel", () => {
       qty: 10, limitPrice: 3.5, stopPrice: 0, status: "ACCEPTED", executedQty: 0, leavesQty: 10,
       avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, ...o,
     });
+    const closed = (o: Partial<ClosedOrder> = {}): ClosedOrder => ({
+      venue: "alpaca-paper", id: "closed-1", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO",
+      qty: 10, limitPrice: 3.5, stopPrice: 0, status: "CANCELED", executedQty: 0, leavesQty: 10,
+      avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, ...o,
+    });
     const statusReconciling = (): ExecStatus => ({
       masterArmed: true, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
       venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: true, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }],
@@ -518,8 +523,9 @@ describe("AccountPanel", () => {
       const accepted = screen.getByText("Accepted");
       expect(accepted.className).toContain("chip-working");
       expect(accepted.getAttribute("data-chip")).toBe("working");
-      const submitted = screen.getByText("Submitted");
-      expect(submitted.className).toContain("chip-working");
+      const submitted = screen.getAllByText("Submitted").find((el) => el.getAttribute("data-chip") === "working");
+      expect(submitted).toBeTruthy();
+      expect(submitted!.className).toContain("chip-working");
     });
 
     it("shows a reject reason verbatim, a rejected chip, and no cancel button on a terminal row", () => {
@@ -527,8 +533,9 @@ describe("AccountPanel", () => {
       wrap(props);
       act(() => {
         stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
-        stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: [order("ET1", { status: "REJECTED", rejectReason: "R78: market order in extended hours" })] });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [closed({ id: "ET1", status: "REJECTED", rejectReason: "R78: market order in extended hours" })] });
       });
+      fireEvent.click(screen.getByTestId("closed-orders-tab"));
       expect(screen.getByText(/R78: market order in extended hours/)).toBeTruthy();
       const chip = screen.getByText("Rejected");
       expect(chip.className).toContain("chip-rejected");
@@ -541,8 +548,9 @@ describe("AccountPanel", () => {
       wrap(props);
       act(() => {
         stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
-        stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: [order("ET1", { status: "CANCELED" })] });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [closed({ id: "ET1", status: "CANCELED" })] });
       });
+      fireEvent.click(screen.getByTestId("closed-orders-tab"));
       const canceled = screen.getByText("Canceled");
       expect(canceled.className).not.toContain("chip");
     });
@@ -591,7 +599,7 @@ describe("AccountPanel", () => {
           order("ET3", { symbol: "US.TSLA", createdMs: 2 }),
         ] });
       });
-      const symbols = [...screen.getByTestId("orders-table").querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent);
+      const symbols = [...screen.getByTestId("orders-table").querySelectorAll("tbody tr td:nth-child(2)")].map((td) => td.textContent);
       expect(symbols).toEqual(["MSFT", "TSLA", "AAPL"]); // createdMs desc: ET2(3), ET3(2), ET1(1)
       // PositionsTable's headers never carry a sort-active class (only OrdersTable
       // applies one), so this stays unscoped and unambiguous.
@@ -613,7 +621,7 @@ describe("AccountPanel", () => {
       // its "Symbol" header, not PositionsTable's.
       fireEvent.click(screen.getAllByRole("columnheader", { name: /Symbol/ })[0]);
       expect(configChanges.at(-1)).toEqual({ ordersSort: { col: "symbol", dir: "desc" } });
-      const symbols = [...screen.getByTestId("orders-table").querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent);
+      const symbols = [...screen.getByTestId("orders-table").querySelectorAll("tbody tr td:nth-child(2)")].map((td) => td.textContent);
       expect(symbols).toEqual(["TSLA", "MSFT", "AAPL"]);
     });
 
@@ -629,9 +637,143 @@ describe("AccountPanel", () => {
           order("ET3", { symbol: "US.TSLA", createdMs: 2 }),
         ] });
       });
-      const symbols = [...screen.getByTestId("orders-table").querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent);
+      const symbols = [...screen.getByTestId("orders-table").querySelectorAll("tbody tr td:nth-child(2)")].map((td) => td.textContent);
       expect(symbols).toEqual(["AAPL", "MSFT", "TSLA"]);
       expect(screen.getAllByRole("columnheader", { name: /Symbol/ })[0].className).toContain("sort-active");
+    });
+
+    it("keeps only canonical working statuses open and puts every terminal status in Closed", () => {
+      const { props, stores } = mkProps();
+      wrap(props);
+      const working = ["SUBMITTED", "ACCEPTED", "PARTIALLY_FILLED"] as const;
+      const terminal = ["FILLED", "CANCELED", "REJECTED", "EXPIRED", "BLOCKED", "REPLACED"] as const;
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: [...working, ...terminal].map((state) => order(state, { status: state, symbol: `US.${state}` })) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: terminal.map((state) => closed({ id: `closed-${state}`, status: state, symbol: `US.${state}` })) });
+      });
+      expect(screen.getByTestId("open-orders-tab").textContent).toBe("Open Orders (3)");
+      expect(screen.getByTestId("open-orders-table").querySelectorAll("tbody tr")).toHaveLength(3);
+      fireEvent.click(screen.getByTestId("closed-orders-tab"));
+      expect(screen.getByTestId("closed-orders-tab").textContent).toBe("Closed Orders (6)");
+      expect(screen.getByTestId("closed-orders-table").querySelectorAll("tbody tr")).toHaveLength(6);
+    });
+
+    it("keeps the selected upper tab while a working order becomes terminal", () => {
+      const { props, stores } = mkProps();
+      wrap(props);
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: [order("ET1")] });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [] });
+      });
+      fireEvent.click(screen.getByTestId("closed-orders-tab"));
+      act(() => {
+        stores.exec.apply({ kind: "delta", topic: "exec.orders" as never, payload: order("ET1", { status: "CANCELED", updatedMs: 2 }) });
+        stores.exec.apply({ kind: "delta", topic: "exec.closedOrders" as never, payload: closed({ id: "ET1", status: "CANCELED", updatedMs: 2 }) });
+      });
+      expect(screen.queryByTestId("open-orders-table")).toBeNull();
+      expect(screen.getByTestId("closed-orders-tab").textContent).toBe("Closed Orders (1)");
+      expect(screen.getByTestId("closed-orders-table").querySelectorAll("tbody tr")).toHaveLength(1);
+    });
+
+    it("scopes both counts and rows by venue without switching the upper tab", () => {
+      const { props, stores, linkGroups } = mkProps("green");
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true, "alpaca-paper", "alpaca-live") });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: [
+          order("paper-open", { venue: "alpaca-paper", symbol: "US.AAPL" }),
+          order("live-open", { venue: "alpaca-live", symbol: "US.MSFT" }),
+        ] });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [
+          closed({ id: "paper-closed", venue: "alpaca-paper", symbol: "US.AAPL" }),
+          closed({ id: "live-closed", venue: "alpaca-live", symbol: "US.MSFT" }),
+        ] });
+        linkGroups.focusVenue("green", "alpaca-paper");
+      });
+      wrap(props);
+      fireEvent.click(screen.getByTestId("closed-orders-tab"));
+      expect(screen.getByTestId("closed-orders-tab").textContent).toBe("Closed Orders (1)");
+      fireEvent.change(screen.getByTestId("acct-venue"), { target: { value: "alpaca-live" } });
+      expect(screen.getByTestId("closed-orders-tab").textContent).toBe("Closed Orders (1)");
+      expect(screen.getByTestId("closed-orders-table").textContent).toContain("MSFT");
+      expect(screen.getByTestId("closed-orders-table").textContent).not.toContain("AAPL");
+    });
+
+    it("resets the upper tab to Open when the panel remounts", () => {
+      const { props, stores } = mkProps();
+      const first = wrap(props);
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [closed()] });
+      });
+      fireEvent.click(screen.getByTestId("closed-orders-tab"));
+      expect(screen.getByTestId("closed-orders-table")).toBeTruthy();
+      first.unmount();
+      wrap(props);
+      expect(screen.getByTestId("open-orders-table")).toBeTruthy();
+      expect(screen.queryByTestId("closed-orders-table")).toBeNull();
+    });
+
+    it("persists open and closed sorts separately and keeps the closed sort for new rows", () => {
+      const { props, stores, configChanges } = mkProps();
+      wrap(props);
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: [order("open")] });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [
+          closed({ id: "a", symbol: "US.AAPL", updatedMs: 1 }),
+          closed({ id: "m", symbol: "US.MSFT", updatedMs: 2 }),
+        ] });
+      });
+      fireEvent.click(screen.getAllByRole("columnheader", { name: /Symbol/ })[0]);
+      expect(configChanges.at(-1)).toEqual({ ordersSort: { col: "symbol", dir: "desc" } });
+      fireEvent.click(screen.getByTestId("closed-orders-tab"));
+      fireEvent.click(screen.getAllByRole("columnheader", { name: /Symbol/ })[0]);
+      expect(configChanges.at(-1)).toEqual({ closedOrdersSort: { col: "symbol", dir: "desc" } });
+      act(() => stores.exec.apply({ kind: "delta", topic: "exec.closedOrders" as never, payload: closed({ id: "t", symbol: "US.TSLA", updatedMs: 3 }) }));
+      const symbols = [...screen.getByTestId("closed-orders-table").querySelectorAll("tbody tr td:nth-child(2)")].map((td) => td.textContent);
+      expect(symbols).toEqual(["TSLA", "MSFT", "AAPL"]);
+    });
+
+    it("renders the closed columns, ET timestamp, instruction prices, reasons, and read-only state", () => {
+      const { props, stores } = mkProps();
+      wrap(props);
+      const reason = "R78: market order in extended hours with a long explanation";
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [
+          closed({ id: "market", type: "MARKET", updatedMs: Date.parse("2026-08-15T13:31:42Z"), rejectReason: reason }),
+          closed({ id: "stop", type: "STOP", stopPrice: 2.5, status: "REJECTED", rejectReason: reason }),
+          closed({ id: "stop-limit", type: "STOP_LIMIT", stopPrice: 2.5, limitPrice: 2.45, status: "FILLED", executedQty: 2, avgFillPrice: 2.123 }),
+        ] });
+      });
+      fireEvent.click(screen.getByTestId("closed-orders-tab"));
+      const table = screen.getByTestId("closed-orders-table");
+      expect(table.style.minWidth).toBe("1040px");
+      expect((table.querySelector("th") as HTMLElement).style.position).toBe("sticky");
+      expect(table.textContent).toContain("08/15 09:31:42");
+      expect(table.textContent).toContain("MKT");
+      expect(table.textContent).toContain("2.500 STP");
+      expect(table.textContent).toContain("2.500 / 2.450 STPLMT");
+      expect(table.textContent).toContain("2.123");
+      expect(table.textContent).toContain("—");
+      expect(screen.getAllByText("Rejected").some((el) => el.className.includes("chip-rejected"))).toBe(true);
+      expect(screen.queryByTestId("cancel-market")).toBeNull();
+      expect(screen.getAllByTitle(reason)).toHaveLength(2);
+    });
+
+    it("keeps closed headers visible with no empty-state row", () => {
+      const { props, stores } = mkProps();
+      wrap(props);
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [] });
+      });
+      fireEvent.click(screen.getByTestId("closed-orders-tab"));
+      expect(screen.getByTestId("closed-orders-table").querySelectorAll("thead th")).toHaveLength(10);
+      expect(screen.getByTestId("closed-orders-table").querySelectorAll("tbody tr")).toHaveLength(0);
+      expect(screen.getByTestId("closed-orders-tab").textContent).toBe("Closed Orders (0)");
     });
   });
 

@@ -1,5 +1,5 @@
 import { ReactStore } from "./store";
-import type { SnapshotMsg, DeltaMsg, Order, PositionRow, AccountRow, ExecStatus, SubmitOrderArgs } from "../wire/contract";
+import type { SnapshotMsg, DeltaMsg, ClosedOrder, Order, PositionRow, AccountRow, ExecStatus, SubmitOrderArgs } from "../wire/contract";
 import { isWorking } from "../wire/orderStatus";
 
 export interface OptimisticOrder { args: SubmitOrderArgs; id: string; createdMs: number }
@@ -9,6 +9,7 @@ interface ExecState {
   accounts: Map<string, AccountRow>;
   positions: PositionRow[];
   orders: Map<string, Order>;
+  closedOrders: Map<string, ClosedOrder>;
   optimistic: Map<string, OptimisticOrder>;
   status: ExecStatus | null;
 }
@@ -26,7 +27,7 @@ function synthOptimistic(o: OptimisticOrder): Order {
 export class ExecStore extends ReactStore<ExecState> {
   private readonly rejectListeners = new Set<(order: Order) => void>();
 
-  constructor() { super({ accounts: new Map(), positions: [], orders: new Map(), optimistic: new Map(), status: null }); }
+  constructor() { super({ accounts: new Map(), positions: [], orders: new Map(), closedOrders: new Map(), optimistic: new Map(), status: null }); }
 
   onOrderRejected(cb: (order: Order) => void): () => void {
     this.rejectListeners.add(cb);
@@ -61,6 +62,14 @@ export class ExecStore extends ReactStore<ExecState> {
         this.set({ ...cur, orders, optimistic });
         return;
       }
+      case "exec.closedOrders": {
+        const closedOrders = new Map(cur.closedOrders);
+        const list = m.kind === "snapshot" ? (m.payload as ClosedOrder[]) : [m.payload as ClosedOrder];
+        if (m.kind === "snapshot") closedOrders.clear();
+        for (const o of list) closedOrders.set(o.id, o);
+        this.set({ ...cur, closedOrders });
+        return;
+      }
       case "exec.status":
         this.set({ ...cur, status: m.payload as ExecStatus }); // full replace
         return;
@@ -87,6 +96,8 @@ export class ExecStore extends ReactStore<ExecState> {
     for (const o of cur.optimistic.values()) if (!cur.orders.has(o.id)) views.push({ order: synthOptimistic(o), optimistic: true });
     return views.sort((a, b) => b.order.createdMs - a.order.createdMs);
   }
+
+  closedOrders(): ClosedOrder[] { return [...this.getSnapshot().closedOrders.values()]; }
 
   workingOrdersFor(symbol?: string): Order[] {
     return [...this.getSnapshot().orders.values()]

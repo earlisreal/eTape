@@ -14,7 +14,7 @@ export type Topic =
   | "news.item"
   | "stock.detail"
   | "watchlist.rows"
-  | "exec.account" | "exec.positions" | "exec.orders" | "exec.fills" | "exec.status" | "exec.trades"
+  | "exec.account" | "exec.positions" | "exec.orders" | "exec.closedOrders" | "exec.fills" | "exec.status" | "exec.trades"
   | "sys.health" | "sys.session" | "sys.events" | "sys.boot"
   | "config";
 
@@ -174,6 +174,31 @@ export interface IndicatorPoint {
   value: number /* float64 */;
 }
 export interface Order {
+  venue: string;
+  id: string;
+  symbol: string;
+  side: Side;
+  type: OrderType;
+  tif: TIF;
+  session: OrderSession;
+  qty: number /* float64 */;
+  limitPrice: number /* float64 */;
+  stopPrice: number /* float64 */;
+  status: OrderStatus;
+  executedQty: number /* float64 */;
+  leavesQty: number /* float64 */;
+  avgFillPrice: number /* float64 */;
+  rejectReason: string;
+  replacesId: string;
+  createdMs: number /* int64 */;
+  updatedMs: number /* int64 */;
+}
+/**
+ * ClosedOrder is a read-only historical order-leg projection. ID is the
+ * projection row key; it may differ from the live domain order ID for a
+ * replaced leg.
+ */
+export interface ClosedOrder {
   venue: string;
   id: string;
   symbol: string;

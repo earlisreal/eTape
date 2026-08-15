@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { axisDecimals, priceDecimals, formatPrice, formatSize, formatTapeTime, formatClock, formatDuration } from "./format";
+import { axisDecimals, priceDecimals, formatPrice, formatSize, formatTapeTime, formatClock, formatEtDateTime, formatDuration } from "./format";
 
 describe("axisDecimals (wickplot CandlestickChartMath port)", () => {
   it.each([
@@ -51,6 +51,21 @@ describe("formatTapeTime", () => {
 describe("formatClock", () => {
   it("renders an epoch-ms timestamp as ET wall clock", () => {
     expect(formatClock(Date.parse("2026-07-06T13:30:05Z"))).toBe("09:30:05"); // EDT = UTC-4
+  });
+});
+
+describe("formatEtDateTime", () => {
+  it("renders the exact MM/DD HH:MM:SS ET shape", () => {
+    expect(formatEtDateTime(Date.parse("2026-08-15T13:31:42Z"))).toBe("08/15 09:31:42");
+  });
+  it.each([
+    ["2026-01-15T14:30:05Z", "01/15 09:30:05"],
+    ["2026-07-15T14:30:05Z", "07/15 10:30:05"],
+  ])("handles ET DST conversion for %s", (iso, want) => {
+    expect(formatEtDateTime(Date.parse(iso))).toBe(want);
+  });
+  it("keeps the existing invalid timestamp convention", () => {
+    expect(formatEtDateTime(Number.NaN)).toBe("Invalid Date");
   });
 });
 

@@ -23,12 +23,13 @@ const (
 	TopicStockDetail   Topic = "stock.detail"
 	TopicWatchlistRows Topic = "watchlist.rows"
 
-	TopicExecAccount   Topic = "exec.account"
-	TopicExecPositions Topic = "exec.positions"
-	TopicExecOrders    Topic = "exec.orders"
-	TopicExecFills     Topic = "exec.fills"
-	TopicExecStatus    Topic = "exec.status"
-	TopicExecTrades    Topic = "exec.trades"
+	TopicExecAccount      Topic = "exec.account"
+	TopicExecPositions    Topic = "exec.positions"
+	TopicExecOrders       Topic = "exec.orders"
+	TopicExecClosedOrders Topic = "exec.closedOrders"
+	TopicExecFills        Topic = "exec.fills"
+	TopicExecStatus       Topic = "exec.status"
+	TopicExecTrades       Topic = "exec.trades"
 
 	TopicSysHealth  Topic = "sys.health"
 	TopicSysSession Topic = "sys.session"
@@ -42,7 +43,8 @@ var AllTopics = map[Topic]bool{
 	TopicQuote: true, TopicBook: true, TopicTape: true, TopicTapeStatus: true, TopicBars: true, TopicIndicator: true,
 	TopicScannerRank: true, TopicScannerHit: true, TopicNews: true, TopicStockDetail: true, TopicWatchlistRows: true,
 	TopicExecAccount: true, TopicExecPositions: true, TopicExecOrders: true,
-	TopicExecFills: true, TopicExecStatus: true, TopicExecTrades: true,
+	TopicExecClosedOrders: true,
+	TopicExecFills:        true, TopicExecStatus: true, TopicExecTrades: true,
 	TopicSysHealth: true, TopicSysSession: true, TopicSysEvents: true, TopicSysBoot: true, TopicConfig: true,
 }
 

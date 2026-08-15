@@ -55,6 +55,10 @@ const SIZE_FMT = new Intl.NumberFormat("en-US");
 const ET_TIME_FMT = new Intl.DateTimeFormat("en-US", {
   hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "America/New_York",
 });
+const ET_DATE_TIME_FMT = new Intl.DateTimeFormat("en-US", {
+  month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  hourCycle: "h23", timeZone: "America/New_York",
+});
 
 /** Integer share sizes with thousands separators: 12345 → "12,345". */
 export function formatSize(size: number): string {
@@ -81,6 +85,14 @@ export function formatTapeTime(ts: string): string {
  * numbers (unlike formatTapeTime's ISO-string tape timestamps). */
 export function formatClock(ms: number): string {
   return formatTime(new Date(ms));
+}
+
+/** Epoch-ms timestamp → exact ET MM/DD HH:MM:SS for order lifecycle rows. */
+export function formatEtDateTime(ms: number): string {
+  const d = new Date(ms);
+  if (Number.isNaN(d.getTime())) return "Invalid Date";
+  const parts = Object.fromEntries(ET_DATE_TIME_FMT.formatToParts(d).map((p) => [p.type, p.value]));
+  return `${parts.month}/${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
 }
 
 /** Duration in ms → a compact human string: hours+minutes once >= 1h ("1h 04m"),

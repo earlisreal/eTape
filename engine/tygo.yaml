@@ -51,7 +51,7 @@ packages:
         | "news.item"
         | "stock.detail"
         | "watchlist.rows"
-        | "exec.account" | "exec.positions" | "exec.orders" | "exec.fills" | "exec.status" | "exec.trades"
+        | "exec.account" | "exec.positions" | "exec.orders" | "exec.closedOrders" | "exec.fills" | "exec.status" | "exec.trades"
         | "sys.health" | "sys.session" | "sys.events" | "sys.boot"
         | "config";
 

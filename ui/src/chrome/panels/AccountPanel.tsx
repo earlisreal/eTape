@@ -2,7 +2,7 @@ import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore 
 import { createPortal } from "react-dom";
 import type { PanelProps } from "./registry";
 import { HoverButton } from "../controls/HoverButton";
-import type { Fill, PositionRow, Quote } from "../../wire/contract";
+import type { ClosedOrder, Fill, Order, PositionRow, Quote } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
@@ -10,8 +10,8 @@ import { useVenueSelection } from "../exec/venueSelection";
 import { useOrderConfig } from "../exec/useOrderConfig";
 import { resolvePlaceTemplate } from "../exec/resolveTemplate";
 import type { PlaceOrderTemplate } from "../exec/actionTemplate";
-import { formatClock, formatPrice, formatSize } from "../../render/format";
-import { displayStatus, STATUS_LABEL, sideLabel, bareSymbol, abbrevType, isWorking, type DisplayStatus } from "../exec/orderStatus";
+import { formatClock, formatEtDateTime, formatPrice, formatSize } from "../../render/format";
+import { displayStatus, STATUS_LABEL, sideLabel, bareSymbol, isTerminal, isWorking, type DisplayStatus } from "../exec/orderStatus";
 import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
 import type { OrderView } from "../../data/ExecStore";
 import { TradeHistoryTable } from "./TradeHistoryTable";
@@ -84,17 +84,18 @@ function chipVariant(ds: DisplayStatus): ChipVariant | null {
 
 const ORDERS_DEFAULT_SORT: SortState = { col: "createdMs", dir: "desc" };
 const ORDERS_COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
+  { col: "createdMs", label: "Submitted", align: "left" },
   { col: "symbol", label: "Symbol", align: "left" },
   { col: "side", label: "Side", align: "left" },
   { col: "qty", label: "Qty@Px", align: "right" },
   { col: "state", label: "State", align: "left" },
 ];
 const ORDERS_SORT_ACCESSORS: Record<string, (r: OrderView) => number | string | null> = {
+  createdMs: (r) => r.order.createdMs,
   symbol: (r) => r.order.symbol,
   side: (r) => r.order.side,
   qty: (r) => (r.order.leavesQty > 0 ? r.order.leavesQty : r.order.qty),
   state: (r) => STATUS_LABEL[displayStatus(r.order, r.optimistic)],
-  createdMs: (r) => r.order.createdMs,
 };
 
 function readOrdersSort(s: Record<string, unknown>): SortState {
@@ -104,6 +105,47 @@ function readOrdersSort(s: Record<string, unknown>): SortState {
   }
   return ORDERS_DEFAULT_SORT;
 }
+
+const CLOSED_DEFAULT_SORT: SortState = { col: "updatedMs", dir: "desc" };
+const CLOSED_COLUMNS: { col: string; label: string; align: "left" | "right"; sortable: boolean }[] = [
+  { col: "updatedMs", label: "Closed", align: "left", sortable: true },
+  { col: "symbol", label: "Symbol", align: "left", sortable: true },
+  { col: "side", label: "Side", align: "left", sortable: true },
+  { col: "qty", label: "Qty", align: "right", sortable: true },
+  { col: "executedQty", label: "Filled", align: "right", sortable: true },
+  { col: "price", label: "Price", align: "right", sortable: false },
+  { col: "avgFillPrice", label: "Avg Fill", align: "right", sortable: true },
+  { col: "state", label: "State", align: "left", sortable: true },
+  { col: "reason", label: "Reason", align: "left", sortable: false },
+  { col: "venue", label: "Venue", align: "left", sortable: true },
+];
+const CLOSED_SORT_ACCESSORS: Record<string, (r: ClosedOrder) => number | string | null> = {
+  updatedMs: (r) => r.updatedMs,
+  symbol: (r) => bareSymbol(r.symbol),
+  side: (r) => r.side,
+  qty: (r) => r.qty,
+  executedQty: (r) => r.executedQty,
+  avgFillPrice: (r) => r.executedQty > 0 ? r.avgFillPrice : null,
+  state: (r) => STATUS_LABEL[r.status],
+  venue: (r) => r.venue,
+};
+
+function readClosedSort(s: Record<string, unknown>): SortState {
+  const raw = s.closedOrdersSort as { col?: unknown; dir?: unknown } | undefined;
+  if (raw && typeof raw.col === "string" && (raw.dir === "asc" || raw.dir === "desc")) {
+    return { col: raw.col, dir: raw.dir };
+  }
+  return CLOSED_DEFAULT_SORT;
+}
+
+function orderInstructionPrice(order: Pick<Order, "type" | "limitPrice" | "stopPrice"> | Pick<ClosedOrder, "type" | "limitPrice" | "stopPrice">): string {
+  if (order.type === "MARKET") return "MKT";
+  if (order.type === "LIMIT") return `${formatPrice(order.limitPrice, 3)} LMT`;
+  if (order.type === "STOP") return `${formatPrice(order.stopPrice, 3)} STP`;
+  return `${formatPrice(order.stopPrice, 3)} / ${formatPrice(order.limitPrice, 3)} STPLMT`;
+}
+
+type UpperOrdersTab = "open" | "closed";
 
 function OrdersTable({
   stores, oc, palette, config, onConfigChange, venue, height,
@@ -116,73 +158,99 @@ function OrdersTable({
   venue: string;
   height: number;
 }): JSX.Element {
-  const [sort, setSort] = useState<SortState>(() => readOrdersSort(config.settings));
-
-  const views = sortRows(stores.exec.orders().filter((v) => v.order.venue === venue && v.order.status !== "FILLED"), sort, ORDERS_SORT_ACCESSORS);
+  const [tab, setTab] = useState<UpperOrdersTab>("open");
+  const [openSort, setOpenSort] = useState<SortState>(() => readOrdersSort(config.settings));
+  const [closedSort, setClosedSort] = useState<SortState>(() => readClosedSort(config.settings));
+  const views = sortRows(stores.exec.orders().filter((v) => v.order.venue === venue && (v.optimistic || isWorking(v.order.status))), openSort, ORDERS_SORT_ACCESSORS);
+  const closedRows = sortRows(stores.exec.closedOrders().filter((o) => o.venue === venue && isTerminal(o.status)), closedSort, CLOSED_SORT_ACCESSORS);
   const reconciling = (stores.exec.status()?.venues ?? []).some((v) => v.reconcilePending);
 
-  const clickSort = (col: string) => {
-    const next = toggleSort(sort, col);
-    setSort(next);
+  const clickOpenSort = (col: string) => {
+    const next = toggleSort(openSort, col);
+    setOpenSort(next);
     onConfigChange({ ordersSort: next });
   };
+  const clickClosedSort = (col: string, sortable: boolean) => {
+    if (!sortable) return;
+    const next = toggleSort(closedSort, col);
+    setClosedSort(next);
+    onConfigChange({ closedOrdersSort: next });
+  };
 
-  const th = { padding: "2px 8px" };
+  const th = { padding: "2px 8px", position: "sticky" as const, top: 0, zIndex: 1, background: palette.surface };
+  const upperTab = (label: string, active: boolean, onClick: () => void, testid: string) => (
+    <button data-testid={testid} onClick={onClick} style={{
+      fontSize: 12, padding: "3px 8px", background: "transparent", border: "none",
+      borderBottom: active ? `2px solid ${palette.accent}` : "2px solid transparent",
+      color: active ? palette.text : palette.textMuted, cursor: "pointer", fontWeight: active ? 600 : 400,
+    }}>{label}</button>
+  );
   return (
     <div data-testid="orders-table" style={{ height, flexShrink: 0, overflow: "hidden", display: "flex", flexDirection: "column", background: palette.bg, color: palette.text, fontSize: 12 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
-        <span style={{ fontWeight: 600 }}>Open Orders ({views.length})</span>
-        <HoverButton data-testid="cancel-all" onClick={() => void oc.cancelAll("everything")}
-          style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.warn}`, background: "transparent", color: palette.warn, cursor: "pointer" }}>Cancel All</HoverButton>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
+        {upperTab(`Open Orders (${views.length})`, tab === "open", () => setTab("open"), "open-orders-tab")}
+        {upperTab(`Closed Orders (${closedRows.length})`, tab === "closed", () => setTab("closed"), "closed-orders-tab")}
+        {tab === "open" && <HoverButton data-testid="cancel-all" onClick={() => void oc.cancelAll("everything")}
+          style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.warn}`, background: "transparent", color: palette.warn, cursor: "pointer" }}>Cancel All</HoverButton>}
         {reconciling && (
           <span data-testid="reconcile-badge" className="chip chip-pending" style={{ marginLeft: "auto" }}>
             stream gap — reconciled, verify
           </span>
         )}
       </div>
-      <div style={{ flex: 1, overflow: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
-          <thead>
-            <tr style={{ color: palette.textMuted }}>
-              {ORDERS_COLUMNS.map((c) => (
-                <th key={c.col} style={{ ...th, textAlign: c.align, cursor: "pointer" }} onClick={() => clickSort(c.col)}
-                  className={`col-head${sort?.col === c.col ? " sort-active" : ""}`}>
-                  {c.label} {sortIndicator(sort, c.col)}
-                </th>
-              ))}
-              <th style={th} />
-              <th style={th} />
-              <th style={th} />
-            </tr>
-          </thead>
-          <tbody>
-            {views.map(({ order, optimistic }) => {
-              const ds = displayStatus(order, optimistic);
-              const variant = chipVariant(ds);
-              const working = !optimistic && isWorking(order.status);
-              const priceStr = order.type === "MARKET" ? "MKT" : formatPrice(order.type === "STOP" ? order.stopPrice : order.limitPrice, 2);
-              return (
-                <tr key={order.id} style={{ borderTop: `1px solid ${palette.border}` }}>
-                  <td style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
-                  <td style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
-                  <td style={{ textAlign: "right" }}>{formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)} @ {priceStr} {abbrevType(order.type)}</td>
-                  <td>{variant ? (
-                    <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
-                  ) : (
-                    <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>
-                  )}</td>
-                  <td style={{ color: palette.danger, fontSize: 10 }}>{order.rejectReason}</td>
-                  <td style={{ color: palette.textMuted, fontSize: 10 }}>{order.venue}</td>
-                  <td>{(working || optimistic) ? (
-                    <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
-                      style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</HoverButton>
-                  ) : null}</td>
-                </tr>
-              );
-            })}
-          </tbody>
+      {tab === "open" ? <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+        <table data-testid="open-orders-table" style={{ width: "100%", minWidth: 560, borderCollapse: "collapse", whiteSpace: "nowrap" }}>
+          <thead><tr style={{ color: palette.textMuted }}>
+            {ORDERS_COLUMNS.map((c) => <th key={c.col} style={{ ...th, textAlign: c.align, cursor: "pointer" }} onClick={() => clickOpenSort(c.col)}
+              className={`col-head${openSort?.col === c.col && !(c.col === "createdMs" && openSort.dir === "desc") ? " sort-active" : ""}`}>
+              {c.label} {openSort?.col === c.col && !(c.col === "createdMs" && openSort.dir === "desc") ? sortIndicator(openSort, c.col) : ""}
+            </th>)}
+            <th style={th} />
+          </tr></thead>
+          <tbody>{views.map(({ order, optimistic }) => {
+            const ds = displayStatus(order, optimistic);
+            const variant = chipVariant(ds);
+            const working = !optimistic && isWorking(order.status);
+            return <tr key={order.id} style={{ borderTop: `1px solid ${palette.border}` }}>
+              <td style={{ padding: "2px 8px" }}>{formatEtDateTime(order.createdMs)}</td>
+              <td style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
+              <td style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
+              <td style={{ textAlign: "right" }}>{formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)} @ {orderInstructionPrice(order)}</td>
+              <td>{variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
+                : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}</td>
+              <td>{(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
+                style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</HoverButton> : null}</td>
+            </tr>;
+          })}</tbody>
         </table>
-      </div>
+      </div> : <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
+        <table data-testid="closed-orders-table" style={{ minWidth: 1040, borderCollapse: "collapse", whiteSpace: "nowrap" }}>
+          <thead><tr style={{ color: palette.textMuted }}>
+            {CLOSED_COLUMNS.map((c) => <th key={c.col} style={{ ...th, textAlign: c.align, cursor: c.sortable ? "pointer" : "default" }}
+              onClick={() => clickClosedSort(c.col, c.sortable)} className={`col-head${c.sortable && closedSort?.col === c.col && !(c.col === "updatedMs" && closedSort.dir === "desc") ? " sort-active" : ""}`}>
+              {c.label} {c.sortable && closedSort?.col === c.col && !(c.col === "updatedMs" && closedSort.dir === "desc") ? sortIndicator(closedSort, c.col) : ""}
+            </th>)}
+          </tr></thead>
+          <tbody>{closedRows.map((order) => {
+            const danger = order.status === "REJECTED" || order.status === "BLOCKED";
+            const muted = order.status === "CANCELED" || order.status === "EXPIRED" || order.status === "REPLACED";
+            const reason = order.rejectReason || "—";
+            return <tr key={order.id} style={{ borderTop: `1px solid ${palette.border}` }}>
+              <td style={{ padding: "2px 8px" }}>{formatEtDateTime(order.updatedMs)}</td>
+              <td style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
+              <td style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
+              <td style={{ textAlign: "right" }}>{formatSize(order.qty)}</td>
+              <td style={{ textAlign: "right" }}>{formatSize(order.executedQty)}</td>
+              <td style={{ textAlign: "right" }}>{orderInstructionPrice(order)}</td>
+              <td style={{ textAlign: "right" }}>{order.executedQty > 0 ? formatPrice(order.avgFillPrice, 3) : "—"}</td>
+              <td>{danger ? <span className="chip chip-rejected" data-chip="rejected">{STATUS_LABEL[order.status]}</span>
+                : <span style={{ color: muted ? palette.textMuted : palette.text }}>{STATUS_LABEL[order.status]}</span>}</td>
+              <td style={{ maxWidth: 180 }}><span title={order.rejectReason || undefined} style={{ display: "block", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{reason}</span></td>
+              <td style={{ color: palette.textMuted }}>{order.venue}</td>
+            </tr>;
+          })}</tbody>
+        </table>
+      </div>}
     </div>
   );
 }

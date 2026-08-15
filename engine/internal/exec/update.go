@@ -5,6 +5,7 @@ package exec
 type Update interface{ isExecUpdate() }
 
 type OrderUpdate struct{ Order Order }
+type ClosedOrderUpdate struct{ ClosedOrder ClosedOrder }
 type FillUpdate struct{ Fill Fill }
 type AccountUpdate struct {
 	Account         AccountSnapshot
@@ -23,9 +24,10 @@ type StatusUpdate struct {
 }
 type TradeUpdate struct{ Trade ClosedTrade }
 
-func (OrderUpdate) isExecUpdate()    {}
-func (FillUpdate) isExecUpdate()     {}
-func (AccountUpdate) isExecUpdate()  {}
-func (PositionUpdate) isExecUpdate() {}
-func (StatusUpdate) isExecUpdate()   {}
-func (TradeUpdate) isExecUpdate()    {}
+func (OrderUpdate) isExecUpdate()       {}
+func (ClosedOrderUpdate) isExecUpdate() {}
+func (FillUpdate) isExecUpdate()        {}
+func (AccountUpdate) isExecUpdate()     {}
+func (PositionUpdate) isExecUpdate()    {}
+func (StatusUpdate) isExecUpdate()      {}
+func (TradeUpdate) isExecUpdate()       {}

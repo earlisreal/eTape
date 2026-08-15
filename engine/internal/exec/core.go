@@ -102,6 +102,7 @@ type Core struct {
 
 	trades *RoundTripAggregator
 	cycles *cycleProjection
+	closed *closedOrders
 }
 
 // CoreConfig configures NewCore.
@@ -150,6 +151,7 @@ func NewCore(cfg CoreConfig) *Core {
 		marks:                  markState{},
 		trades:                 NewRoundTripAggregator(),
 		cycles:                 newCycleProjection(),
+		closed:                 newClosedOrders(),
 	}
 	// Master always boots disarmed — Recover never touches arm state, so a
 	// restart is fully disarmed until a deliberate arm click.
@@ -192,6 +194,7 @@ func (c *Core) now() int64 { return c.clk.Now().UnixMilli() }
 // account/positions/open-orders from each venue's broker snapshot. Call before
 // Run.
 func (c *Core) Recover(ctx context.Context) error {
+	c.closed = newClosedOrders()
 	fromMs := session.DayMs(c.now())
 	envs, err := c.store.ReadExecEventsSince(fromMs)
 	if err != nil {
@@ -204,6 +207,27 @@ func (c *Core) Recover(ctx context.Context) error {
 		}
 		c.state.Apply(ev)
 	}
+	cutoffMs := session.PoolDay(c.clk.Now()) * 1000
+	var history []EventEnvelope
+	if hs, ok := c.store.(closedHistoryStore); ok {
+		history, err = hs.ReadExecOrderHistoriesSince(cutoffMs)
+		if err != nil {
+			return err
+		}
+	} else {
+		history, err = c.store.ReadExecEventsSince(cutoffMs)
+		if err != nil {
+			return err
+		}
+	}
+	for _, env := range history {
+		ev, err := DecodeEvent(env.Kind, env.Payload)
+		if err != nil {
+			return err
+		}
+		c.closed.apply(ev, env.Seq)
+	}
+	c.closed.seedState(c.state)
 	for _, v := range c.venues {
 		b, ok := c.brokers[v]
 		if !ok {
@@ -218,7 +242,29 @@ func (c *Core) Recover(ctx context.Context) error {
 		}
 		c.state.ReconcileAccount(acct)
 		c.state.ReconcilePositions(v, pos)
-		c.state.ReconcileOpenOrders(v, orders)
+		for _, o := range orders {
+			o.Venue = v
+			if _, exists := c.state.OrderVenue(o.ID); !exists && !c.closed.hasSeed(o.ID) {
+				if err := c.appendAndFold(OrderSubmitted{Order: o}, SrcReconcile); err != nil {
+					c.syslog("exec.recover", "persist adopted order "+o.ID+": "+err.Error())
+					c.state.ReconcileOpenOrders(v, []Order{o})
+					c.closed.adopt(o)
+				}
+			} else {
+				c.state.ReconcileOpenOrders(v, []Order{o})
+				c.closed.adopt(o)
+			}
+		}
+	}
+	for _, row := range c.closed.snapshotSince(cutoffMs) {
+		c.emit(ClosedOrderUpdate{ClosedOrder: row})
+	}
+	for _, vs := range c.state.Venues {
+		for _, o := range vs.Orders {
+			if o.Working() {
+				c.emit(OrderUpdate{Order: o})
+			}
+		}
 	}
 	c.recoverCycles(ctx)
 	c.seedTrades(ctx)
@@ -388,10 +434,14 @@ func (c *Core) pump(ctx context.Context, _ VenueID, b Broker) {
 func (c *Core) appendAndFold(ev Event, src Source) error {
 	env := EnvelopeOf(ev, src, 0)
 	fill, _ := FillRowOf(ev)
-	if _, err := c.store.AppendExecEvent(env, fill); err != nil {
+	seq, err := c.store.AppendExecEvent(env, fill)
+	if err != nil {
 		return err
 	}
 	c.state.Apply(ev)
+	for _, row := range c.closed.apply(ev, seq) {
+		c.emit(ClosedOrderUpdate{ClosedOrder: row})
+	}
 	c.emitForEvent(ev)
 	return nil
 }
