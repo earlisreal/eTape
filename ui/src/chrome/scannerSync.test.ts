@@ -19,6 +19,13 @@ describe("planScannerSync", () => {
     expect(plan.patches).toEqual([]);
   });
 
+  it("fills added slots and replaces removed targets without moving retained symbols", () => {
+    expect(planScannerSync({ slots: slots(["A", "B", undefined]), rankedSymbols: ["B", "A", "C"], enabled: true, sourceAvailable: true }).patches)
+      .toEqual([{ slotId: "slot-2", symbol: "C" }]);
+    expect(planScannerSync({ slots: slots(["A", "C"]), rankedSymbols: ["A", "B", "C"], enabled: true, sourceAvailable: true }).patches)
+      .toEqual([{ slotId: "slot-1", symbol: "B" }]);
+  });
+
   it("replaces departed symbols in earliest open slots", () => {
     const plan = planScannerSync({ slots: slots(["A", "B", "C", "D"]), rankedSymbols: ["A", "E", "C", "F"], enabled: true, sourceAvailable: true });
     expect(plan.patches).toEqual([

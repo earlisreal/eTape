@@ -384,6 +384,29 @@ describe("AppShell Monitoring Scanner Sync", () => {
     fireEvent.click(screen.getByRole("button", { name: "Disable Scanner Sync" }));
     await waitFor(() => expect(saved.some((workspace) => workspace.scannerSync?.enabled === false && workspace.scannerSync.sourcePanelId === "m-scanner")).toBe(true));
   });
+
+  it("excludes linked charts from the target count", async () => {
+    const { saved, stores } = mount(buildMonitoringWorkspace(), { workspaceName: "monitoring" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Follow Monitoring" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Follow Monitoring" }));
+
+    act(() => stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      refreshedAt: "2026-08-15T08:00:00.000Z",
+      rows: [
+        { symbol: "US.A", changePct: 4, last: 1, floatShares: 1, volume: 1 },
+        { symbol: "US.B", changePct: 3, last: 1, floatShares: 1, volume: 1 },
+        { symbol: "US.C", changePct: 2, last: 1, floatShares: 1, volume: 1 },
+        { symbol: "US.D", changePct: 1, last: 1, floatShares: 1, volume: 1 },
+      ],
+    } }));
+    await waitFor(() => expect(saved.some((workspace) => workspace.panels.find((panel) => panel.id === "m-chart-red")?.settings.symbol === "US.A")).toBe(true));
+
+    fireEvent.click(within(screen.getByTestId("panel-tab-m-chart-green")).getByLabelText("link group"));
+    fireEvent.click(screen.getByRole("button", { name: "Red group" }));
+
+    await waitFor(() => expect(saved.some((workspace) => workspace.panels.find((panel) => panel.id === "m-chart-green")?.group === "red")).toBe(true));
+    await waitFor(() => expect(saved.some((workspace) => workspace.panels.find((panel) => panel.id === "m-chart-yellow")?.settings.symbol === "US.B")).toBe(true));
+  });
 });
 
 describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
