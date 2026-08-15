@@ -83,8 +83,18 @@ export function dockviewPanelConstraints(panelId: string): { minimumWidth?: numb
   return minimumWidth === undefined ? {} : { minimumWidth };
 }
 
+const stockInfoPanel: PanelDef = {
+  component: StockInfoPanel,
+  topics: ["news.item", "stock.detail"],
+  title: "Stock Info",
+  glyph: "¶",
+  description: "Fundamentals + news for focused symbol",
+  symbolBearing: true,
+  demand: "interest",
+};
+
 // Plan 1 registered the two stack-proving panels; Plan 2 added the chart panel;
-// Plan 3 added the L2 ladder + time & sales; Plan 4 added scanner / news;
+// Plan 3 added the L2 ladder + time & sales; Plan 4 added scanner / stock info;
 // Plan 5 adds the execution surfaces (account-bar / positions / open-orders /
 // order-ticket). Plan 6 owns Playwright smoke E2E + ui/dist static serving.
 export const PANELS: Record<string, PanelDef> = {
@@ -153,15 +163,9 @@ export const PANELS: Record<string, PanelDef> = {
     description: "Your pinned symbols, quote snapshots",
     symbolBearing: false,
   },
-  "news": {
-    component: StockInfoPanel,
-    topics: ["news.item", "stock.detail"],
-    title: "Stock Info",
-    glyph: "¶",
-    description: "Fundamentals + news for focused symbol",
-    symbolBearing: true,
-    demand: "interest",
-  },
+  "stock-info": stockInfoPanel,
+  // Saved workspaces may still carry the former panel id.
+  "news": stockInfoPanel,
   "locates": {
     component: LocatesPanel,
     topics: ["exec.status"],
@@ -227,7 +231,7 @@ export const PANELS: Record<string, PanelDef> = {
 export const DEV_PANELS = new Set(["smoke-painter"]);
 export const isDevPanel = (panelId: string): boolean => DEV_PANELS.has(panelId);
 
-const CATALOG_ORDER = ["chart", "ladder", "tape", "scanner", "watchlist", "news", "locates",
+const CATALOG_ORDER = ["chart", "ladder", "tape", "scanner", "watchlist", "stock-info", "locates",
   "account", "order-ticket", "connection-status"];
 // "account-bar", "positions", and (as of Task 8) "open-orders" all stay
 // registered in PANELS (above) as back-compat aliases for saved workspace docs,

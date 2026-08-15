@@ -70,7 +70,7 @@ test.describe("ticketless cross-window hotkeys", () => {
     await page.getByRole("button", { name: "+ Add panel" }).click();
     await page.locator(".popover").getByText("Stock Info", { exact: true }).click();
     const stockPanel = page.getByRole("tabpanel", { name: "Stock Info" });
-    await page.getByRole("tab", { name: "News", exact: true }).click();
+    await page.getByRole("tab", { name: "Stock Info", exact: true }).first().click();
     await page.getByRole("tab", { name: "Stock Info", exact: true }).last().click();
     await stockPanel.getByTestId("panel-body").click();
     await expect(page.getByTestId("hotkey-target-cue")).toHaveAttribute("data-state", "ungrouped");

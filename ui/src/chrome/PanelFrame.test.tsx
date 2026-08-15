@@ -117,7 +117,7 @@ function fakePanelApi(initial = false) {
   };
 }
 
-// "news" is symbol-bearing but renders no <canvas> (unlike chart/ladder/tape), so this
+// "stock-info" is symbol-bearing but renders no <canvas> (unlike chart/ladder/tape), so this
 // test stays in vitest's default (threads) pool per vitest.config.ts's poolMatchGlobs
 // comment about node-canvas being unsafe to load into more than one worker.
 function renderFrame(opts: { panelId?: string; group?: PanelConfig["group"]; settings?: Record<string, unknown>; onConfigChange?: (s: Record<string, unknown>) => void; onGroupChange?: (g: PanelConfig["group"]) => void; onClose?: () => void; api?: ReturnType<typeof fakePanelApi>; linkGroups?: LinkGroups; demandRegistry?: import("../wire/DemandRegistry").DemandRegistry } = {}) {
@@ -128,7 +128,7 @@ function renderFrame(opts: { panelId?: string; group?: PanelConfig["group"]; set
     ensure: () => Promise.resolve({ kind: "ack", corrId: "", status: "accepted" }),
     release: () => {},
   }) as unknown as import("../wire/DemandRegistry").DemandRegistry;
-  const panelId = opts.panelId ?? "news";
+  const panelId = opts.panelId ?? "stock-info";
   // `opts.group === undefined` (not `??`): callers pass `null` explicitly to mean
   // "pinned", and `??` treats `null` as absent too, which would silently coerce a
   // pinned-panel test back to the "green" default.
@@ -757,7 +757,7 @@ describe("PanelFrame — headerActions slot (tape panel)", () => {
   });
 
   it("does not render the actions slot for a panel without headerActions", () => {
-    renderFrame({ panelId: "news" });
+    renderFrame({ panelId: "stock-info" });
     expect(screen.queryByTestId("panel-header-actions")).toBeNull();
   });
 });

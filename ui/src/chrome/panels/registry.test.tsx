@@ -79,11 +79,16 @@ describe("catalog metadata", () => {
 });
 
 describe("panel demand profiles", () => {
-  it("maps chart to chart, tape to watch, ladder to focused, news to interest", () => {
+  it("maps chart to chart, tape to watch, ladder to focused, stock info to interest", () => {
     expect(PANELS.chart.demand).toBe("chart");
     expect(PANELS.tape.demand).toBe("watch");
     expect(PANELS.ladder.demand).toBe("focused");
-    expect(PANELS.news.demand).toBe("interest");
+    expect(PANELS["stock-info"].demand).toBe("interest");
+  });
+  it("keeps the former news id as a Stock Info alias for saved workspaces", () => {
+    expect(PANELS.news).toBe(PANELS["stock-info"]);
+    expect(CATALOG.map((panel) => panel.panelId)).toContain("stock-info");
+    expect(CATALOG.map((panel) => panel.panelId)).not.toContain("news");
   });
   it("leaves non-symbol panels without a demand profile", () => {
     expect(PANELS.scanner?.demand).toBeUndefined();

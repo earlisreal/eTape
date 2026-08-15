@@ -251,10 +251,10 @@ describe("AppShell onConfigChange", () => {
     const last = saved[saved.length - 1];
     const panelIds = last.panels.map((p) => p.panelId);
     // Both the original open-orders panel AND the just-added Stock Info panel
-    // (registry key "news", unchanged) must survive the save — the bug silently
+    // (registry key "stock-info") must survive the save — the bug silently
     // dropped the latter.
     expect(panelIds).toContain("open-orders");
-    expect(panelIds).toContain("news");
+    expect(panelIds).toContain("stock-info");
     expect(last.panels).toHaveLength(2);
   });
 
@@ -332,7 +332,7 @@ describe("AppShell group-symbol persistence (Bug 5: refresh resetting a grouped 
     const seed: Workspace = {
       name: "default",
       layoutVersion: 8,
-      panels: [{ id: "n1", panelId: "news", group: "green", settings: {} }],
+      panels: [{ id: "n1", panelId: "stock-info", group: "green", settings: {} }],
       layout: null,
       groups: { green: "US.NVDA" },
     };
@@ -345,7 +345,7 @@ describe("AppShell group-symbol persistence (Bug 5: refresh resetting a grouped 
     const seed: Workspace = {
       name: "default",
       layoutVersion: 8,
-      panels: [{ id: "n1", panelId: "news", group: "green", settings: {} }],
+      panels: [{ id: "n1", panelId: "stock-info", group: "green", settings: {} }],
       layout: null,
     };
     const { saved, linkGroups } = mount(seed);
@@ -765,7 +765,7 @@ describe("AppShell demo mode-edge orchestration (Task 13)", () => {
   const seed: Workspace = {
     name: "default",
     layoutVersion: 8,
-    panels: [{ id: "info-1", panelId: "news", group: null, settings: { symbol: "US.ORCL" } }],
+    panels: [{ id: "info-1", panelId: "stock-info", group: null, settings: { symbol: "US.ORCL" } }],
     layout: null,
     groups: { green: "US.IBM" },
   };
@@ -928,7 +928,7 @@ describe("AppShell hotkey target lifecycle", () => {
       mount({
         name: "default",
         layoutVersion: 8,
-        panels: [{ id: "news-a", panelId: "news", group: "green", settings: { symbol: "US.AAPL" } }],
+        panels: [{ id: "news-a", panelId: "stock-info", group: "green", settings: { symbol: "US.AAPL" } }],
         layout: null,
       }, { hotkeyTargetChannel: channel });
       await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());

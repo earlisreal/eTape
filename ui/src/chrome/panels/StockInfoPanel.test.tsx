@@ -21,7 +21,7 @@ function renderPanel(opts?: { settings?: Record<string, unknown> }) {
   const stockDetail = stores.stockDetail;
   const linkGroups = new LinkGroups(fakeBus() as never, () => {});
   const onConfigChange = vi.fn();
-  const config: PanelConfig = { id: "m-news", panelId: "news", group: "green", settings: opts?.settings ?? {} };
+  const config: PanelConfig = { id: "m-news", panelId: "stock-info", group: "green", settings: opts?.settings ?? {} };
   const props = { config, stores, linkGroups, onConfigChange, scheduler: {} as never,
     width: 400, height: 300, commands: { sendCommand: async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" }), sendQuery: async () => [] } } as PanelProps;
   render(<ThemeProvider><StockInfoPanel {...props} /></ThemeProvider>);
@@ -284,7 +284,34 @@ describe("StockInfoPanel details collapse (compact-by-default)", () => {
       stockDetail.apply(detailSnap(detailPayload("US.NVDA", { shortSellRestricted: true })));
       linkGroups.focus("green", "US.NVDA");
     });
-    expect(screen.getByText("NVDA**")).toBeTruthy();
+    expect(screen.queryByText("NVDA**")).toBeNull();
+  });
+
+  it("shows shortable and tradable in the collapsed summary", () => {
+    const { stockDetail, linkGroups } = renderPanel();
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.NVDA", { borrowStatus: "hard_to_borrow", shortable: true, tradable: false })));
+      linkGroups.focus("green", "US.NVDA");
+    });
+    expect(screen.getByText("HTB")).toBeTruthy();
+    expect(screen.queryByText("Shortable")).toBeNull();
+    expect(screen.getByText("NOT Tradeable")).toBeTruthy();
+    expect(screen.queryByText("Tradable")).toBeNull();
+    expect(screen.queryByText("Yes")).toBeNull();
+    expect(screen.queryByText("No")).toBeNull();
+  });
+
+  it("replaces borrow status with Not Shortable when the asset is not shortable", () => {
+    const { stockDetail, linkGroups } = renderPanel();
+    act(() => {
+      stockDetail.apply(detailSnap(detailPayload("US.NVDA", { borrowStatus: "easy_to_borrow", shortable: false, tradable: true })));
+      linkGroups.focus("green", "US.NVDA");
+    });
+    expect(screen.getByText("Not Shortable")).toBeTruthy();
+    expect(screen.queryByText("ETB")).toBeNull();
+    expect(screen.queryByText("HTB")).toBeNull();
+    expect(screen.getByText("Tradable")).toBeTruthy();
+    expect(screen.queryByText("NOT Tradeable")).toBeNull();
   });
 
   it("shows the derived SSR marker in the expanded header and omits it when unrestricted", () => {

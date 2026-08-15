@@ -147,9 +147,6 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, o
           <>
             {detailsCollapsed ? (
               <div style={{ padding: "6px 8px", display: "flex", alignItems: "baseline", gap: 6, flexWrap: "wrap" }}>
-                <span className="mono" title={detail.shortSellRestricted ? "Short Sell Restricted — derived Rule 201 estimate" : undefined}
-                  style={{ fontWeight: 600, color: palette.text }}>{displaySymbol}</span>
-                <span style={{ color: palette.textMuted }}>·</span>
                 <span style={{ fontWeight: 600, color: detail.name ? palette.text : palette.textMuted }}>
                   {detail.name || "—"}
                 </span>
@@ -161,10 +158,21 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, o
                 <span style={{ color: palette.textMuted }}>·</span>
                 <span style={{ color: palette.textMuted }}>EMA200</span>
                 {fmtDecimalOrDash(detail.ema200, palette)}
-                {borrowStatus && (
+                {detail.shortable === false ? (
+                  <>
+                    <span style={{ color: palette.textMuted }}>·</span>
+                    <span className="mono" style={{ color: palette.text }}>Not Shortable</span>
+                  </>
+                ) : borrowStatus && (
                   <>
                     <span style={{ color: palette.textMuted }}>·</span>
                     <span className="mono" style={{ color: palette.text }}>{borrowStatus}</span>
+                  </>
+                )}
+                {detail.tradable != null && (
+                  <>
+                    <span style={{ color: palette.textMuted }}>·</span>
+                    <span className="mono" style={{ color: palette.text }}>{detail.tradable ? "Tradable" : "NOT Tradeable"}</span>
                   </>
                 )}
                 <button type="button" onClick={toggleDetails} aria-expanded={false} aria-label="Toggle fundamentals"
