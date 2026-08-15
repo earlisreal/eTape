@@ -833,6 +833,25 @@ describe("AccountPanel", () => {
     });
   });
 
+  describe("adjustable account columns", () => {
+    it("exposes resize handles on every account table", () => {
+      const { props } = mkProps();
+      wrap(props);
+
+      expect(screen.getByTestId("open-orders-resize-symbol")).toBeTruthy();
+      expect(screen.getByTestId("positions-resize-symbol")).toBeTruthy();
+
+      fireEvent.click(screen.getByTestId("closed-orders-tab"));
+      expect(screen.getByTestId("closed-orders-resize-symbol")).toBeTruthy();
+
+      fireEvent.click(screen.getByText("Trade History"));
+      expect(screen.getByTestId("trades-resize-symbol")).toBeTruthy();
+
+      fireEvent.click(screen.getByText("Fills"));
+      expect(screen.getByTestId("fills-resize-symbol")).toBeTruthy();
+    });
+  });
+
   describe("Export trades (Task 7 wiring)", () => {
     beforeEach(() => {
       (URL as unknown as { createObjectURL: (b: Blob) => string }).createObjectURL = vi.fn(() => "blob:mock");

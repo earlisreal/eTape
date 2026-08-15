@@ -17,6 +17,7 @@ import type { OrderView } from "../../data/ExecStore";
 import { TradeHistoryTable } from "./TradeHistoryTable";
 import { PanelHeaderActionsSlotContext } from "./headerSlot";
 import { ExportTradesPopover } from "./ExportTradesPopover";
+import { ColumnGroup, ColumnResizeHandle, useResizableColumns, type ResizableColumn } from "./ResizableColumns";
 
 // Task 19 merges the old AccountBarPanel (stats strip) and PositionsPanel
 // (sortable positions table, Flatten) into one Account panel. Per-venue arm
@@ -36,13 +37,13 @@ function readSort(s: Record<string, unknown>): SortState {
   return DEFAULT_SORT;
 }
 
-const COLUMNS: { col: string; label: string; align: "left" | "right"; sortable: boolean }[] = [
-  { col: "symbol", label: "Symbol", align: "left", sortable: true },
-  { col: "venue", label: "Venue", align: "right", sortable: true },
-  { col: "qty", label: "Qty", align: "right", sortable: true },
-  { col: "avgPrice", label: "Avg", align: "right", sortable: true },
-  { col: "unrealizedPnl", label: "Unrl P&L", align: "right", sortable: true },
-  { col: "flatten", label: "", align: "right", sortable: false },
+const COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
+  { col: "symbol", label: "Symbol", defaultWidth: 100, align: "left", sortable: true },
+  { col: "venue", label: "Venue", defaultWidth: 120, align: "right", sortable: true },
+  { col: "qty", label: "Qty", defaultWidth: 70, align: "right", sortable: true },
+  { col: "avgPrice", label: "Avg", defaultWidth: 90, align: "right", sortable: true },
+  { col: "unrealizedPnl", label: "Unrl P&L", defaultWidth: 100, align: "right", sortable: true },
+  { col: "flatten", label: "", defaultWidth: 80, align: "right", sortable: false },
 ];
 const SORT_ACCESSORS: Record<string, (r: PositionRow) => number | string | null> = {
   symbol: (r) => bareSymbol(r.symbol),
@@ -83,12 +84,13 @@ function chipVariant(ds: DisplayStatus): ChipVariant | null {
 }
 
 const ORDERS_DEFAULT_SORT: SortState = { col: "createdMs", dir: "desc" };
-const ORDERS_COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
-  { col: "createdMs", label: "Submitted", align: "left" },
-  { col: "symbol", label: "Symbol", align: "left" },
-  { col: "side", label: "Side", align: "left" },
-  { col: "qty", label: "Qty@Px", align: "right" },
-  { col: "state", label: "State", align: "left" },
+const ORDERS_COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
+  { col: "createdMs", label: "Submitted", defaultWidth: 160, align: "left", sortable: true },
+  { col: "symbol", label: "Symbol", defaultWidth: 100, align: "left", sortable: true },
+  { col: "side", label: "Side", defaultWidth: 70, align: "left", sortable: true },
+  { col: "qty", label: "Qty@Px", defaultWidth: 120, align: "right", sortable: true },
+  { col: "state", label: "State", defaultWidth: 100, align: "left", sortable: true },
+  { col: "actions", label: "", defaultWidth: 80, align: "right", sortable: false },
 ];
 const ORDERS_SORT_ACCESSORS: Record<string, (r: OrderView) => number | string | null> = {
   createdMs: (r) => r.order.createdMs,
@@ -107,17 +109,17 @@ function readOrdersSort(s: Record<string, unknown>): SortState {
 }
 
 const CLOSED_DEFAULT_SORT: SortState = { col: "updatedMs", dir: "desc" };
-const CLOSED_COLUMNS: { col: string; label: string; align: "left" | "right"; sortable: boolean }[] = [
-  { col: "updatedMs", label: "Closed", align: "left", sortable: true },
-  { col: "symbol", label: "Symbol", align: "left", sortable: true },
-  { col: "side", label: "Side", align: "left", sortable: true },
-  { col: "qty", label: "Qty", align: "right", sortable: true },
-  { col: "executedQty", label: "Filled", align: "right", sortable: true },
-  { col: "price", label: "Price", align: "right", sortable: false },
-  { col: "avgFillPrice", label: "Avg Fill", align: "right", sortable: true },
-  { col: "state", label: "State", align: "left", sortable: true },
-  { col: "reason", label: "Reason", align: "left", sortable: false },
-  { col: "venue", label: "Venue", align: "left", sortable: true },
+const CLOSED_COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
+  { col: "updatedMs", label: "Closed", defaultWidth: 140, align: "left", sortable: true },
+  { col: "symbol", label: "Symbol", defaultWidth: 100, align: "left", sortable: true },
+  { col: "side", label: "Side", defaultWidth: 70, align: "left", sortable: true },
+  { col: "qty", label: "Qty", defaultWidth: 75, align: "right", sortable: true },
+  { col: "executedQty", label: "Filled", defaultWidth: 75, align: "right", sortable: true },
+  { col: "price", label: "Price", defaultWidth: 100, align: "right", sortable: false },
+  { col: "avgFillPrice", label: "Avg Fill", defaultWidth: 100, align: "right", sortable: true },
+  { col: "state", label: "State", defaultWidth: 90, align: "left", sortable: true },
+  { col: "reason", label: "Reason", defaultWidth: 180, align: "left", sortable: false },
+  { col: "venue", label: "Venue", defaultWidth: 100, align: "left", sortable: true },
 ];
 const CLOSED_SORT_ACCESSORS: Record<string, (r: ClosedOrder) => number | string | null> = {
   updatedMs: (r) => r.updatedMs,
@@ -161,11 +163,14 @@ function OrdersTable({
   const [tab, setTab] = useState<UpperOrdersTab>("open");
   const [openSort, setOpenSort] = useState<SortState>(() => readOrdersSort(config.settings));
   const [closedSort, setClosedSort] = useState<SortState>(() => readClosedSort(config.settings));
+  const openResize = useResizableColumns(config.settings, "openOrdersColumnWidths", ORDERS_COLUMNS, onConfigChange);
+  const closedResize = useResizableColumns(config.settings, "closedOrdersColumnWidths", CLOSED_COLUMNS, onConfigChange);
   const views = sortRows(stores.exec.orders().filter((v) => v.order.venue === venue && (v.optimistic || isWorking(v.order.status))), openSort, ORDERS_SORT_ACCESSORS);
   const closedRows = sortRows(stores.exec.closedOrders().filter((o) => o.venue === venue && isTerminal(o.status)), closedSort, CLOSED_SORT_ACCESSORS);
   const reconciling = (stores.exec.status()?.venues ?? []).some((v) => v.reconcilePending);
 
-  const clickOpenSort = (col: string) => {
+  const clickOpenSort = (col: string, sortable: boolean) => {
+    if (!sortable) return;
     const next = toggleSort(openSort, col);
     setOpenSort(next);
     onConfigChange({ ordersSort: next });
@@ -199,36 +204,43 @@ function OrdersTable({
         )}
       </div>
       {tab === "open" ? <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        <table data-testid="open-orders-table" style={{ width: "100%", minWidth: 560, borderCollapse: "collapse", whiteSpace: "nowrap" }}>
+        <table ref={openResize.tableRef} data-testid="open-orders-table" style={{ width: "100%", minWidth: Math.max(560, openResize.totalWidth), tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
+          <ColumnGroup columns={ORDERS_COLUMNS} widths={openResize.widths} />
           <thead><tr style={{ color: palette.textMuted }}>
-            {ORDERS_COLUMNS.map((c) => <th key={c.col} style={{ ...th, textAlign: c.align, cursor: "pointer" }} onClick={() => clickOpenSort(c.col)}
-              className={`col-head${openSort?.col === c.col && !(c.col === "createdMs" && openSort.dir === "desc") ? " sort-active" : ""}`}>
-              {c.label} {openSort?.col === c.col && !(c.col === "createdMs" && openSort.dir === "desc") ? sortIndicator(openSort, c.col) : ""}
+            {ORDERS_COLUMNS.map((c) => <th key={c.col} data-column={c.col} style={{ ...th, textAlign: c.align, cursor: c.sortable ? "pointer" : "default" }} onClick={() => clickOpenSort(c.col, c.sortable)}
+              className={`col-head${c.sortable && openSort?.col === c.col && !(c.col === "createdMs" && openSort.dir === "desc") ? " sort-active" : ""}`}>
+              {c.label} {c.sortable && openSort?.col === c.col && !(c.col === "createdMs" && openSort.dir === "desc") ? sortIndicator(openSort, c.col) : ""}
+              <ColumnResizeHandle column={c} width={openResize.widths[c.col]} testId={`open-orders-resize-${c.col}`}
+                onMouseDown={(event) => openResize.startResize(c.col, event)} onDoubleClick={() => openResize.autoFit(c.col)}
+                onKeyDown={(event) => openResize.onKeyDown(c.col, event)} />
             </th>)}
-            <th style={th} />
           </tr></thead>
           <tbody>{views.map(({ order, optimistic }) => {
             const ds = displayStatus(order, optimistic);
             const variant = chipVariant(ds);
             const working = !optimistic && isWorking(order.status);
             return <tr key={order.id} style={{ borderTop: `1px solid ${palette.border}` }}>
-              <td style={{ padding: "2px 8px" }}>{formatEtDateTime(order.createdMs)}</td>
-              <td style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
-              <td style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
-              <td style={{ textAlign: "right" }}>{formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)} @ {orderInstructionPrice(order)}</td>
-              <td>{variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
+              <td data-column="createdMs" style={{ padding: "2px 8px" }}>{formatEtDateTime(order.createdMs)}</td>
+              <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
+              <td data-column="side" style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
+              <td data-column="qty" style={{ textAlign: "right" }}>{formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)} @ {orderInstructionPrice(order)}</td>
+              <td data-column="state">{variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
                 : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}</td>
-              <td>{(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
+              <td data-column="actions">{(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
                 style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</HoverButton> : null}</td>
             </tr>;
           })}</tbody>
         </table>
       </div> : <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        <table data-testid="closed-orders-table" style={{ minWidth: 1040, borderCollapse: "collapse", whiteSpace: "nowrap" }}>
+        <table ref={closedResize.tableRef} data-testid="closed-orders-table" style={{ width: "100%", minWidth: Math.max(1040, closedResize.totalWidth), tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
+          <ColumnGroup columns={CLOSED_COLUMNS} widths={closedResize.widths} />
           <thead><tr style={{ color: palette.textMuted }}>
-            {CLOSED_COLUMNS.map((c) => <th key={c.col} style={{ ...th, textAlign: c.align, cursor: c.sortable ? "pointer" : "default" }}
+            {CLOSED_COLUMNS.map((c) => <th key={c.col} data-column={c.col} style={{ ...th, textAlign: c.align, cursor: c.sortable ? "pointer" : "default" }}
               onClick={() => clickClosedSort(c.col, c.sortable)} className={`col-head${c.sortable && closedSort?.col === c.col && !(c.col === "updatedMs" && closedSort.dir === "desc") ? " sort-active" : ""}`}>
               {c.label} {c.sortable && closedSort?.col === c.col && !(c.col === "updatedMs" && closedSort.dir === "desc") ? sortIndicator(closedSort, c.col) : ""}
+              <ColumnResizeHandle column={c} width={closedResize.widths[c.col]} testId={`closed-orders-resize-${c.col}`}
+                onMouseDown={(event) => closedResize.startResize(c.col, event)} onDoubleClick={() => closedResize.autoFit(c.col)}
+                onKeyDown={(event) => closedResize.onKeyDown(c.col, event)} />
             </th>)}
           </tr></thead>
           <tbody>{closedRows.map((order) => {
@@ -236,17 +248,17 @@ function OrdersTable({
             const muted = order.status === "CANCELED" || order.status === "EXPIRED" || order.status === "REPLACED";
             const reason = order.rejectReason || "—";
             return <tr key={order.id} style={{ borderTop: `1px solid ${palette.border}` }}>
-              <td style={{ padding: "2px 8px" }}>{formatEtDateTime(order.updatedMs)}</td>
-              <td style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
-              <td style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
-              <td style={{ textAlign: "right" }}>{formatSize(order.qty)}</td>
-              <td style={{ textAlign: "right" }}>{formatSize(order.executedQty)}</td>
-              <td style={{ textAlign: "right" }}>{orderInstructionPrice(order)}</td>
-              <td style={{ textAlign: "right" }}>{order.executedQty > 0 ? formatPrice(order.avgFillPrice, 3) : "—"}</td>
-              <td>{danger ? <span className="chip chip-rejected" data-chip="rejected">{STATUS_LABEL[order.status]}</span>
+              <td data-column="updatedMs" style={{ padding: "2px 8px" }}>{formatEtDateTime(order.updatedMs)}</td>
+              <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
+              <td data-column="side" style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
+              <td data-column="qty" style={{ textAlign: "right" }}>{formatSize(order.qty)}</td>
+              <td data-column="executedQty" style={{ textAlign: "right" }}>{formatSize(order.executedQty)}</td>
+              <td data-column="price" style={{ textAlign: "right" }}>{orderInstructionPrice(order)}</td>
+              <td data-column="avgFillPrice" style={{ textAlign: "right" }}>{order.executedQty > 0 ? formatPrice(order.avgFillPrice, 3) : "—"}</td>
+              <td data-column="state">{danger ? <span className="chip chip-rejected" data-chip="rejected">{STATUS_LABEL[order.status]}</span>
                 : <span style={{ color: muted ? palette.textMuted : palette.text }}>{STATUS_LABEL[order.status]}</span>}</td>
-              <td style={{ maxWidth: 180 }}><span title={order.rejectReason || undefined} style={{ display: "block", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{reason}</span></td>
-              <td style={{ color: palette.textMuted }}>{order.venue}</td>
+              <td data-column="reason" style={{ maxWidth: 180 }}><span title={order.rejectReason || undefined} style={{ display: "block", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{reason}</span></td>
+              <td data-column="venue" style={{ color: palette.textMuted }}>{order.venue}</td>
             </tr>;
           })}</tbody>
         </table>
@@ -337,6 +349,7 @@ function PositionsTable({
   const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
   const [selectedPosition, setSelectedPosition] = useState<string | null>(null);
   const [hoveredPosition, setHoveredPosition] = useState<string | null>(null);
+  const resize = useResizableColumns(config.settings, "posColumnWidths", COLUMNS, onConfigChange);
   const masterArmed = !!status?.masterArmed;
 
   const rows = useMemo(() => sortRows(rows0, sort, {
@@ -380,13 +393,17 @@ function PositionsTable({
         {openCount} open position{openCount === 1 ? "" : "s"}
       </div>
       <div style={{ flex: 1, overflow: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table ref={resize.tableRef} style={{ width: "100%", minWidth: resize.totalWidth, tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
+          <ColumnGroup columns={COLUMNS} widths={resize.widths} />
           <thead>
             <tr style={{ color: palette.textMuted, textAlign: "right" }}>
               {COLUMNS.map((c) => (
-                <th key={c.col} style={{ ...th, textAlign: c.align, cursor: c.sortable ? "pointer" : "default" }}
+                <th key={c.col} data-column={c.col} style={{ ...th, textAlign: c.align, cursor: c.sortable ? "pointer" : "default" }}
                   onClick={() => clickSort(c.col, c.sortable)}>
                   {c.label} {c.sortable ? sortIndicator(sort, c.col) : ""}
+                  <ColumnResizeHandle column={c} width={resize.widths[c.col]} testId={`positions-resize-${c.col}`}
+                    onMouseDown={(event) => resize.startResize(c.col, event)} onDoubleClick={() => resize.autoFit(c.col)}
+                    onKeyDown={(event) => resize.onKeyDown(c.col, event)} />
                 </th>
               ))}
             </tr>
@@ -405,16 +422,16 @@ function PositionsTable({
                   style={{ cursor: "pointer", textAlign: "right", userSelect: "none", borderTop: `1px solid ${palette.border}`, fontWeight: net ? 700 : 400,
                     background: selected ? "rgba(154,106,27,.16)" : hoveredPosition === positionKey ? "rgba(154,106,27,.06)" : "transparent",
                     boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : "none", transition: "background 120ms ease" }}>
-                  <td style={{ textAlign: "left", padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
-                  <td style={{ color: palette.textMuted }}>{net ? "NET" : r.venue}</td>
-                  <td style={{ color: r.qty >= 0 ? palette.up : palette.down }}>{formatSize(r.qty)}</td>
-                  <td>{formatPrice(r.avgPrice, 2)}</td>
+                  <td data-column="symbol" style={{ textAlign: "left", padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
+                  <td data-column="venue" style={{ color: palette.textMuted }}>{net ? "NET" : r.venue}</td>
+                  <td data-column="qty" style={{ color: r.qty >= 0 ? palette.up : palette.down }}>{formatSize(r.qty)}</td>
+                  <td data-column="avgPrice">{formatPrice(r.avgPrice, 2)}</td>
                   {(() => {
                     const quote = stores.quote.get(r.symbol);
                     const dUnrealized = displayUnrealized(quote, r.avgPrice, r.qty, r.unrealizedPnl);
-                    return <td style={{ color: dUnrealized >= 0 ? palette.up : palette.down }}>{formatPrice(dUnrealized, 2)}</td>;
+                    return <td data-column="unrealizedPnl" style={{ color: dUnrealized >= 0 ? palette.up : palette.down }}>{formatPrice(dUnrealized, 2)}</td>;
                   })()}
-                  <td>{net ? null : (
+                  <td data-column="flatten">{net ? null : (
                     <HoverButton data-testid={`flatten-${r.venue}-${r.symbol}`} data-armed={masterArmed}
                       title={masterArmed ? "Flatten position" : "Master disarmed — flatten still allowed (exposure-reducing)"}
                       onClick={(e) => { e.stopPropagation(); flatten(r); }} onDoubleClick={(e) => e.stopPropagation()}
@@ -431,9 +448,9 @@ function PositionsTable({
 }
 
 const FILLS_DEFAULT_SORT: SortState = { col:"time", dir:"desc" };
-const FILLS_COLUMNS = [
-  { col:"symbol", label:"Symbol" }, { col:"side", label:"Side" }, { col:"qty", label:"Qty" },
-  { col:"price", label:"Price" }, { col:"time", label:"Time" }, { col:"orderId", label:"Order ID" },
+const FILLS_COLUMNS: ResizableColumn[] = [
+  { col:"symbol", label:"Symbol", defaultWidth:100 }, { col:"side", label:"Side", defaultWidth:80 }, { col:"qty", label:"Qty", defaultWidth:70 },
+  { col:"price", label:"Price", defaultWidth:90 }, { col:"time", label:"Time", defaultWidth:90 }, { col:"orderId", label:"Order ID", defaultWidth:160 },
 ];
 const FILLS_SORT_ACCESSORS: Record<string, (f:Fill) => number|string> = {
   symbol:(f) => bareSymbol(f.symbol), side:(f) => f.side, qty:(f) => f.qty,
@@ -450,17 +467,22 @@ function FillsTable({ stores, palette, venue, cycleStartMs, config, onConfigChan
   venue: string; cycleStartMs:number; config:PanelProps["config"]; onConfigChange:PanelProps["onConfigChange"];
 }): JSX.Element {
   const [sort, setSort] = useState<SortState>(() => readFillsSort(config.settings));
+  const resize = useResizableColumns(config.settings, "fillsColumnWidths", FILLS_COLUMNS, onConfigChange);
   const fills = sortRows(stores.fills.forVenue(venue, cycleStartMs), sort, FILLS_SORT_ACCESSORS);
   const cell = { textAlign:"center" as const, padding:"2px 8px" };
   const clickSort = (col:string) => { const next = toggleSort(sort, col); setSort(next); onConfigChange({ fillsSort:next }); };
   return <div data-testid="fills-table" style={{ overflow:"auto", flex:1, fontSize:12 }}>
-    <table style={{ width:"100%", borderCollapse:"collapse" }}><thead><tr style={{ color:palette.textMuted, background:palette.surface }}>
-      {FILLS_COLUMNS.map((c) => <th key={c.col} className={`col-head${sort?.col === c.col ? " sort-active" : ""}`}
-        style={{ ...cell, cursor:"pointer" }} onClick={() => clickSort(c.col)}>{c.label} {sortIndicator(sort, c.col)}</th>)}
+    <table ref={resize.tableRef} style={{ width:"100%", minWidth:resize.totalWidth, tableLayout:"fixed", borderCollapse:"collapse", whiteSpace:"nowrap" }}><ColumnGroup columns={FILLS_COLUMNS} widths={resize.widths} /><thead><tr style={{ color:palette.textMuted, background:palette.surface }}>
+      {FILLS_COLUMNS.map((c) => <th key={c.col} data-column={c.col} className={`col-head${sort?.col === c.col ? " sort-active" : ""}`}
+        style={{ ...cell, position:"sticky", top:0, zIndex:1, cursor:"pointer" }} onClick={() => clickSort(c.col)}>{c.label} {sortIndicator(sort, c.col)}
+        <ColumnResizeHandle column={c} width={resize.widths[c.col]} testId={`fills-resize-${c.col}`}
+          onMouseDown={(event) => resize.startResize(c.col, event)} onDoubleClick={() => resize.autoFit(c.col)}
+          onKeyDown={(event) => resize.onKeyDown(c.col, event)} />
+      </th>)}
     </tr></thead><tbody>{fills.map((f, n) => <tr key={`${f.orderId}-${f.tsMs}-${n}`} style={{ borderTop:`1px solid ${palette.border}` }}>
-      <td style={cell}>{bareSymbol(f.symbol)}</td><td style={cell}>{sideLabel(f.side)}</td>
-      <td style={cell}>{formatSize(f.qty)}</td><td style={cell}>{formatPrice(f.price, 2)}</td>
-      <td style={cell}>{formatClock(f.tsMs)}</td><td style={cell}>{f.orderId}</td>
+      <td data-column="symbol" style={cell}>{bareSymbol(f.symbol)}</td><td data-column="side" style={cell}>{sideLabel(f.side)}</td>
+      <td data-column="qty" style={cell}>{formatSize(f.qty)}</td><td data-column="price" style={cell}>{formatPrice(f.price, 2)}</td>
+      <td data-column="time" style={cell}>{formatClock(f.tsMs)}</td><td data-column="orderId" style={cell}>{f.orderId}</td>
     </tr>)}</tbody></table>
   </div>;
 }

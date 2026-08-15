@@ -5,6 +5,7 @@ import { useTheme } from "../ThemeProvider";
 import { formatPrice, formatSize, formatClock, formatDuration } from "../../render/format";
 import { bareSymbol } from "../exec/orderStatus";
 import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
+import { ColumnGroup, ColumnResizeHandle, useResizableColumns, type ResizableColumn } from "./ResizableColumns";
 
 // Task 6 (plan B6): read-only history of closed round trips, sibling to
 // PositionsTable inside the same Account panel (Task 7 wires both into a
@@ -26,16 +27,16 @@ function readSort(s: Record<string, unknown>): SortState {
   return DEFAULT_SORT;
 }
 
-const COLUMNS: { col: string; label: string; align: "left" | "right"; sortable: boolean }[] = [
-  { col: "symbol", label: "Symbol", align: "left", sortable: true },
-  { col: "venue", label: "Venue", align: "right", sortable: true },
-  { col: "qty", label: "Qty", align: "right", sortable: true },
-  { col: "entryPrice", label: "Entry", align: "right", sortable: true },
-  { col: "exitPrice", label: "Exit", align: "right", sortable: true },
-  { col: "realized", label: "Realized", align: "right", sortable: true },
-  { col: "openMs", label: "Opened", align: "right", sortable: true },
-  { col: "closeMs", label: "Closed", align: "right", sortable: true },
-  { col: "duration", label: "Duration", align: "right", sortable: true },
+const COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
+  { col: "symbol", label: "Symbol", defaultWidth: 100, align: "left", sortable: true },
+  { col: "venue", label: "Venue", defaultWidth: 120, align: "right", sortable: true },
+  { col: "qty", label: "Qty", defaultWidth: 70, align: "right", sortable: true },
+  { col: "entryPrice", label: "Entry", defaultWidth: 90, align: "right", sortable: true },
+  { col: "exitPrice", label: "Exit", defaultWidth: 90, align: "right", sortable: true },
+  { col: "realized", label: "Realized", defaultWidth: 100, align: "right", sortable: true },
+  { col: "openMs", label: "Opened", defaultWidth: 100, align: "right", sortable: true },
+  { col: "closeMs", label: "Closed", defaultWidth: 100, align: "right", sortable: true },
+  { col: "duration", label: "Duration", defaultWidth: 90, align: "right", sortable: true },
 ];
 const SORT_ACCESSORS: Record<string, (r: ClosedTradeRow) => number | string | null> = {
   symbol: (r) => bareSymbol(r.symbol),
@@ -61,6 +62,7 @@ export function TradeHistoryTable({
   useSyncExternalStore((cb) => stores.trades.subscribe(cb), () => stores.trades.getSnapshot());
   const rows0 = stores.trades.trades().filter((r) => r.venue === venue);
   const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
+  const resize = useResizableColumns(config.settings, "tradesColumnWidths", COLUMNS, onConfigChange);
   const rows = useMemo(() => sortRows(rows0, sort, SORT_ACCESSORS), [rows0, sort]);
 
   const clickSort = (col: string, sortable: boolean) => {
@@ -78,13 +80,17 @@ export function TradeHistoryTable({
         {rows0.length} closed trade{rows0.length === 1 ? "" : "s"}
       </div>
       <div style={{ flex: 1, overflow: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <table ref={resize.tableRef} data-testid="trade-history-table" style={{ width: "100%", minWidth: resize.totalWidth, tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
+          <ColumnGroup columns={COLUMNS} widths={resize.widths} />
           <thead>
             <tr style={{ color: palette.textMuted, textAlign: "right" }}>
               {COLUMNS.map((c) => (
-                <th key={c.col} style={{ ...th, textAlign: c.align, cursor: c.sortable ? "pointer" : "default" }}
+                <th key={c.col} data-column={c.col} style={{ ...th, textAlign: c.align, cursor: c.sortable ? "pointer" : "default" }}
                   onClick={() => clickSort(c.col, c.sortable)}>
                   {c.label} {c.sortable ? sortIndicator(sort, c.col) : ""}
+                  <ColumnResizeHandle column={c} width={resize.widths[c.col]} testId={`trades-resize-${c.col}`}
+                    onMouseDown={(event) => resize.startResize(c.col, event)} onDoubleClick={() => resize.autoFit(c.col)}
+                    onKeyDown={(event) => resize.onKeyDown(c.col, event)} />
                 </th>
               ))}
             </tr>
@@ -92,15 +98,15 @@ export function TradeHistoryTable({
           <tbody>
             {rows.map((r) => (
               <tr key={r.seq} data-testid={`trade-${r.seq}`} style={{ textAlign: "right", borderTop: `1px solid ${palette.border}` }}>
-                <td style={{ textAlign: "left", padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
-                <td style={{ color: palette.textMuted }}>{r.venue}</td>
-                <td>{formatSize(r.qty)}</td>
-                <td>{formatPrice(r.entryPrice, 2)}</td>
-                <td>{formatPrice(r.exitPrice, 2)}</td>
-                <td style={{ color: r.realized >= 0 ? palette.up : palette.down }}>{formatPrice(r.realized, 2)}</td>
-                <td style={{ color: palette.textMuted }}>{formatClock(r.openMs)}</td>
-                <td style={{ color: palette.textMuted }}>{formatClock(r.closeMs)}</td>
-                <td style={{ color: palette.textMuted }}>{formatDuration(r.closeMs - r.openMs)}</td>
+                <td data-column="symbol" style={{ textAlign: "left", padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
+                <td data-column="venue" style={{ color: palette.textMuted }}>{r.venue}</td>
+                <td data-column="qty">{formatSize(r.qty)}</td>
+                <td data-column="entryPrice">{formatPrice(r.entryPrice, 2)}</td>
+                <td data-column="exitPrice">{formatPrice(r.exitPrice, 2)}</td>
+                <td data-column="realized" style={{ color: r.realized >= 0 ? palette.up : palette.down }}>{formatPrice(r.realized, 2)}</td>
+                <td data-column="openMs" style={{ color: palette.textMuted }}>{formatClock(r.openMs)}</td>
+                <td data-column="closeMs" style={{ color: palette.textMuted }}>{formatClock(r.closeMs)}</td>
+                <td data-column="duration" style={{ color: palette.textMuted }}>{formatDuration(r.closeMs - r.openMs)}</td>
               </tr>
             ))}
           </tbody>
