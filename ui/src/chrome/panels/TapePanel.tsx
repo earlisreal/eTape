@@ -34,15 +34,17 @@ interface TapeHover {
   y: number;
 }
 
-export function TapePanel({ config, stores, scheduler, width, height, linkGroups, onConfigChange, group: groupProp }: PanelProps): JSX.Element {
+export function TapePanel({ config, stores, scheduler, width, height, linkGroups, onConfigChange, group: groupProp, symbol: symbolProp }: PanelProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const { palette, mode } = useTheme();
   const [paused, setPaused] = useState(false);
   const [minSize, setMinSize] = useState<number>(
     typeof config.settings.minSize === "number" ? config.settings.minSize : 0,
   );
-  const configuredSymbol = typeof config.settings.symbol === "string" ? config.settings.symbol : "US.AAPL";
-  const [selectedSymbol, setSelectedSymbol] = useState(configuredSymbol);
+  const configuredSymbol = typeof config.settings.symbol === "string" ? config.settings.symbol : undefined;
+  const group = groupProp ?? config.group;
+  const displaySymbol = symbolProp ?? linkGroups.symbolFor(group) ?? configuredSymbol ?? "";
+  const [selectedSymbol, setSelectedSymbol] = useState(symbolProp ?? linkGroups.symbolFor(group) ?? configuredSymbol ?? "");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [hoverEnabled, setHoverEnabled] = useState(config.settings.hoverEnabled === true);
   const [hover, setHover] = useState<TapeHover | null>(null);
@@ -54,10 +56,6 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
   // null: PanelFrame is present but its actions-slot div hasn't mounted yet.
   // HTMLElement: the live portal target beside the close button.
   const actionsSlot = useContext(PanelHeaderActionsSlotContext);
-  // config.group is frozen (dockview never re-invokes this panel's factory with a
-  // fresh config after creation); PanelFrame's live `group` prop is what actually
-  // changes on a group re-pick — see registry.ts's PanelProps.group comment.
-  const group = groupProp ?? config.group;
   const columnLayout = computeTapeColumnLayout(width);
 
   const paletteRef = useRef(palette);
@@ -75,6 +73,8 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
   const symbolRef = useRef("");
   const forceRef = useRef(0);
   const groupRef = useRef(group);
+  const symbolPropRef = useRef(symbolProp);
+  symbolPropRef.current = symbolProp;
   useEffect(() => {
     forceRef.current++;
   }, [width, height, palette, minSize, paused]);
@@ -92,15 +92,21 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
   useEffect(() => {
     if (groupRef.current !== group) {
       groupRef.current = group;
-      const seedSymbol = typeof config.settings.symbol === "string" ? config.settings.symbol : "US.AAPL";
-      const next = linkGroups.symbolFor(groupRef.current) ?? seedSymbol;
+      const next = linkGroups.symbolFor(groupRef.current) ?? symbolProp ?? configuredSymbol ?? "";
+      if (next !== symbolRef.current) {
+        symbolRef.current = next;
+        setSelectedSymbol(next);
+        jumpToLive();
+      }
+    } else if (group === null) {
+      const next = symbolProp ?? configuredSymbol ?? "";
       if (next !== symbolRef.current) {
         symbolRef.current = next;
         setSelectedSymbol(next);
         jumpToLive();
       }
     }
-  }, [group]);
+  }, [group, symbolProp]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -108,11 +114,11 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const seedSymbol = typeof config.settings.symbol === "string" ? config.settings.symbol : "US.AAPL";
+    const seedSymbol = symbolPropRef.current ?? configuredSymbol ?? "";
     symbolRef.current = linkGroups.symbolFor(groupRef.current) ?? seedSymbol;
     setSelectedSymbol(symbolRef.current);
     const offLink = linkGroups.subscribe(() => {
-      const next = linkGroups.symbolFor(groupRef.current) ?? seedSymbol;
+      const next = linkGroups.symbolFor(groupRef.current) ?? symbolPropRef.current ?? configuredSymbol ?? "";
       if (next !== symbolRef.current) {
         symbolRef.current = next;
         setSelectedSymbol(next);
@@ -220,7 +226,7 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
       canvas.removeEventListener("mousemove", onMouseMove);
       canvas.removeEventListener("mouseleave", onMouseLeave);
     };
-  }, [config.id, hoverEnabled]);
+  }, [config.id, hoverEnabled, !!displaySymbol]);
 
   // Portaled into PanelFrame's ledger-header actions slot, beside the close
   // button (see headerSlot.ts's PanelHeaderActionsSlotContext). undefined (no
@@ -274,7 +280,8 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
           <span style={{ position: "absolute", right: width - columnLayout.timeRight!, top: "50%", transform: "translateY(-50%)" }}>Time</span>
         )}
       </div>
-      <canvas ref={canvasRef} style={{ display: "block", flex: 1, minHeight: 0 }} />
+      {displaySymbol ? <canvas ref={canvasRef} style={{ display: "block", flex: 1, minHeight: 0 }} />
+        : <div data-testid="tape-empty-state" style={{ display: "grid", placeItems: "center", flex: 1, color: palette.textMuted }}>Type a symbol to load</div>}
       {hoverEnabled && hover && (
         <div
           role="tooltip"

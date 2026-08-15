@@ -225,9 +225,9 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       if (!alive) return;
       // Hydrate LinkGroups' per-group focused symbol BEFORE setWs: panels read
       // linkGroups.symbolFor(group) on their very first mount, and mounting
-      // starts as soon as `ws` goes non-null below (Bug 5 — a grouped panel's
-      // symbol otherwise falls back to its AAPL creation-time seed on refresh,
-      // because LinkGroups itself is rebuilt empty on every page load).
+      // starts as soon as `ws` goes non-null below (a grouped panel would
+      // otherwise mount without its saved focused symbol because LinkGroups
+      // itself is rebuilt empty on every page load).
       linkGroups.hydrate(w.groups ?? {});
       linkGroups.hydrateVenues(w.linkVenues ?? {});
       if (workspaceName === MONITORING_WORKSPACE_ID) {
@@ -759,9 +759,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     const def = PANELS[panelId];
     if (!def) return;
     const id = `${panelId}-${crypto.randomUUID().slice(0, 8)}`;
-    const settings: Record<string, unknown> = panelId === "chart"
-      ? workspaceName === MONITORING_WORKSPACE_ID ? { timeframe: "1m" } : { symbol: "US.AAPL", timeframe: "1m" }
-      : {};
+    const settings: Record<string, unknown> = panelId === "chart" ? { timeframe: "1m" } : {};
     const config: PanelConfig = { id, panelId, group: null, settings };
     const current = wsRef.current ?? ws;
     const next = { ...current, panels: [...current.panels, config] };
@@ -799,8 +797,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // don't double-prompt). Hydrates LinkGroups from `next` BEFORE setWs, same
   // ordering as the load effect above and for the same reason: panels read
   // linkGroups.symbolFor(group) on their very first mount, so a group whose
-  // focused symbol isn't hydrated yet would fall back to its AAPL
-  // creation-time seed. Same pendingRef deferral as addPanel: if dockview is
+  // focused symbol isn't hydrated yet would mount without its saved symbol.
+  // Same pendingRef deferral as addPanel: if dockview is
   // already mounted, api.fromJSON needs the new panel ids present in the
   // components map first.
   const applyWorkspace = (next: Workspace, opts?: { confirm?: string }) => {

@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   SETTINGS_EXPORT_VERSION, buildExport, parseImport,
   prepareImportedWorkspace, prepareImportedOrderConfig, detectHotkeyConflicts, isCurrentLayout, isPresentLayout,
-  collectPanelIds, orderedPanelIds, reconcileToGrid, applyPanelConstraintsToLayout,
+  collectPanelIds, orderedPanelIds, reconcileToGrid, applyPanelConstraintsToLayout, structuralWorkspace,
 } from "./backup";
 import type { Workspace } from "./workspace";
 import type { ActionTemplate, OrderConfig } from "./exec/actionTemplate";
@@ -58,7 +58,8 @@ describe("backup: buildExport selection matrix", () => {
 
   it("layout only: has layout, no hotkeys", () => {
     const out = buildExport({ layout: true, hotkeys: false }, { workspace, orderConfig });
-    expect(out.layout).toEqual(workspace);
+    expect(out.layout).toEqual(structuralWorkspace(workspace));
+    expect(out.layout).not.toBe(workspace);
     expect(out.hotkeys).toBeUndefined();
   });
 
@@ -70,7 +71,7 @@ describe("backup: buildExport selection matrix", () => {
 
   it("both: has layout and hotkeys", () => {
     const out = buildExport({ layout: true, hotkeys: true }, { workspace, orderConfig });
-    expect(out.layout).toEqual(workspace);
+    expect(out.layout).toEqual(structuralWorkspace(workspace));
     expect(out.hotkeys).toEqual({ templates: orderConfig.templates });
   });
 
@@ -87,6 +88,23 @@ describe("backup: buildExport selection matrix", () => {
     expect(out.version).toBe(SETTINGS_EXPORT_VERSION);
     expect(typeof out.exportedAt).toBe("string");
     expect(new Date(out.exportedAt).toISOString()).toBe(out.exportedAt);
+  });
+});
+
+describe("backup: structural layout export", () => {
+  it("removes symbols and cross-window Scanner Source state without mutating the live workspace", () => {
+    const workspace: Workspace = {
+      ...makeWorkspace("monitoring"),
+      panels: [{ id: "p1", panelId: "chart", group: "red", settings: { symbol: "US.MSFT", timeframe: "1m" } }],
+      scannerSync: { enabled: true, sourceWorkspaceId: "other", sourcePanelId: "scanner-1" },
+    };
+    const before = JSON.stringify(workspace);
+    const out = buildExport({ layout: true, hotkeys: false }, { workspace, orderConfig: makeOrderConfig([]) });
+    expect(out.layout?.panels[0].settings).toEqual({ timeframe: "1m" });
+    expect(out.layout?.groups).toEqual({});
+    expect(out.layout?.linkVenues).toEqual({ red: "alpaca" });
+    expect(out.layout?.scannerSync).toEqual({ enabled: true });
+    expect(JSON.stringify(workspace)).toBe(before);
   });
 });
 

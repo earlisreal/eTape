@@ -91,7 +91,7 @@ function rangeCell(low: number | null, high: number | null, palette: Palette): J
   );
 }
 
-export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, onConfigChange }: PanelProps): JSX.Element {
+export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, symbol: symbolProp, onConfigChange }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   const snap = useSyncExternalStore((cb) => stores.news.subscribe(cb), () => stores.news.getSnapshot());
   const detailSnap = useSyncExternalStore((cb) => stores.stockDetail.subscribe(cb), () => stores.stockDetail.getSnapshot());
@@ -99,11 +99,13 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, o
   // fresh config after creation); PanelFrame's live `group` prop is what actually
   // changes on a group re-pick — see registry.ts's PanelProps.group comment.
   const group = groupProp ?? config.group;
-  const [symbol, setSymbol] = useState<string | undefined>(() => linkGroups.symbolFor(group));
+  const configuredSymbol = typeof config.settings.symbol === "string" ? config.settings.symbol : undefined;
+  const [symbol, setSymbol] = useState<string | undefined>(() => symbolProp ?? linkGroups.symbolFor(group) ?? configuredSymbol);
   useEffect(() => {
-    setSymbol(linkGroups.symbolFor(group));
-    return linkGroups.subscribe(() => setSymbol(linkGroups.symbolFor(group)));
-  }, [linkGroups, group]);
+    const apply = () => setSymbol(symbolProp ?? linkGroups.symbolFor(group) ?? configuredSymbol);
+    apply();
+    return linkGroups.subscribe(apply);
+  }, [linkGroups, group, symbolProp, configuredSymbol]);
   const [catalystsOnly, setCatalystsOnly] = useState<boolean>(() => (config.settings.catalystsOnly as boolean) ?? true);
   // Default collapsed: a compact one-line summary (name · industry · float · EMA200,
   // no price/change) so the news list starts higher. Persisted per panel like

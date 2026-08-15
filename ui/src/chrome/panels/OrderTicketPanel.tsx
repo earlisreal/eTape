@@ -34,7 +34,7 @@ const MODE_LABEL: Record<SizingMode, string> = { Shares: "Shares", Dollar: "Doll
 // the default so nothing changes until the trader picks an explicit session.
 const SESSION_LABEL: Record<OrderSession, string> = { AUTO: "Auto", RTH: "Regular", EXTENDED: "Extended", OVERNIGHT: "Overnight" };
 
-export function OrderTicketPanel({ config, stores, commands, linkGroups, group: groupProp }: PanelProps): JSX.Element {
+export function OrderTicketPanel({ config, stores, commands, linkGroups, group: groupProp, symbol: symbolProp }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
@@ -53,12 +53,13 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const sessionMode = useSyncExternalStore((cb) => stores.session.subscribe(cb), () => stores.session.getSnapshot());
 
   const group = groupProp ?? config.group;
-  const [symbol, setSymbol] = useState<string>(() => linkGroups.symbolFor(group) ?? (config.settings.symbol as string) ?? "US.AAPL");
+  const configuredSymbol = typeof config.settings.symbol === "string" ? config.settings.symbol : undefined;
+  const [symbol, setSymbol] = useState<string>(() => symbolProp ?? linkGroups.symbolFor(group) ?? configuredSymbol ?? "");
   useEffect(() => {
-    const apply = () => setSymbol(linkGroups.symbolFor(group) ?? (config.settings.symbol as string) ?? "US.AAPL");
+    const apply = () => setSymbol(symbolProp ?? linkGroups.symbolFor(group) ?? configuredSymbol ?? "");
     apply();
     return linkGroups.subscribe(apply);
-  }, [linkGroups, group, config.settings.symbol]);
+  }, [linkGroups, group, symbolProp, configuredSymbol]);
 
   const quote = useThrottledQuote(stores.quote, symbol);
   const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
@@ -82,6 +83,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
 
   const submitManual = (side: Side) => {
     if (venue === "") { toast.push({ level: "danger", text: "no execution venue — set one up in Settings › Venues & creds" }); return; }
+    if (symbol === "") { toast.push({ level: "danger", text: "no symbol focused — type a symbol in the order ticket or a linked panel" }); return; }
     const px = Number(price) || 0;
     const spec = mode === "Shares" ? { mode, shares: Number(amount) || 0 }
       : mode === "Dollar" ? { mode, dollar: Number(amount) || 0 }
@@ -178,6 +180,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
           <span className="mono" style={{ fontSize: 12 }}>{priceSpan("ask", quote?.ask, palette.down)}</span>
         </span>
       </div>
+      {!symbol && <div data-testid="order-ticket-unassigned" style={{ color: palette.textMuted }}>No symbol focused — type or link a symbol.</div>}
       {/* Strip 2 — type · price · stop */}
       <div style={{ display: "flex", gap: 6 }}>
         {field("Type", (

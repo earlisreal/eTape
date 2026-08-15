@@ -21,6 +21,22 @@ export interface SettingsExport {
   hotkeys?: { templates: ActionTemplate[]; hotkeyDeck?: HotkeyDeckConfig };
 }
 
+// Layout files describe structure, not the trader's current watchlist. Copy
+// only the workspace data that is portable; never mutate the live document.
+export function structuralWorkspace(workspace: Workspace): Workspace {
+  const panels = workspace.panels.map((panel) => {
+    const settings = { ...panel.settings };
+    delete settings.symbol;
+    return { ...panel, settings };
+  });
+  return {
+    ...workspace,
+    panels,
+    ...(workspace.groups === undefined ? {} : { groups: {} }),
+    ...(workspace.scannerSync === undefined ? {} : { scannerSync: { enabled: workspace.scannerSync.enabled } }),
+  };
+}
+
 export function buildExport(
   sel: { layout: boolean; hotkeys: boolean },
   src: { workspace: Workspace; orderConfig: OrderConfig },
@@ -31,7 +47,7 @@ export function buildExport(
     version: SETTINGS_EXPORT_VERSION,
     exportedAt: new Date().toISOString(),
   };
-  if (sel.layout) out.layout = src.workspace;
+  if (sel.layout) out.layout = structuralWorkspace(src.workspace);
   if (sel.hotkeys) {
     out.hotkeys = {
       templates: src.orderConfig.templates,

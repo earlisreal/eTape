@@ -30,5 +30,9 @@ describe("presets", () => {
       const layoutIds = Object.keys((layout as { panels: Record<string, unknown> }).panels).sort();
       expect(layoutIds).toEqual(panels.map((p) => p.id).sort());
     });
+    it(`${preset.id}: does not seed a selected symbol`, () => {
+      const { panels } = preset.build();
+      expect(panels.every((panel) => !("symbol" in panel.settings))).toBe(true);
+    });
   }
 });

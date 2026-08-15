@@ -24,7 +24,7 @@ import { PanelHeaderActionsSlotContext } from "./headerSlot";
 import { IconGear } from "./tv/tvIcons";
 import { LadderSettingsDialog } from "./LadderSettingsDialog";
 
-export function LadderPanel({ config, stores, scheduler, width, height, linkGroups, onConfigChange, group: groupProp }: PanelProps): JSX.Element {
+export function LadderPanel({ config, stores, scheduler, width, height, linkGroups, onConfigChange, group: groupProp, symbol: symbolProp }: PanelProps): JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const { palette, mode } = useTheme();
   const [levels, setLevels] = useState<number>(() => normalizeLadderLevels(config.settings.levels));
@@ -34,6 +34,8 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
   // fresh config after creation); PanelFrame's live `group` prop is what actually
   // changes on a group re-pick — see registry.ts's PanelProps.group comment.
   const group = groupProp ?? config.group;
+  const configuredSymbol = typeof config.settings.symbol === "string" ? config.settings.symbol : undefined;
+  const displaySymbol = symbolProp ?? linkGroups.symbolFor(group) ?? configuredSymbol ?? "";
 
   // Refs bridge React-world changes (size, theme) into the paint loop without
   // remounting the surface; forceRef bumps mark the surface dirty.
@@ -55,6 +57,8 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
   // remount on a symbol/group change): the reactive effect below sees live
   // `group` changes and calls back into the mount effect's own re-seed logic.
   const groupRef = useRef(group);
+  const symbolPropRef = useRef(symbolProp);
+  symbolPropRef.current = symbolProp;
   const reseedForGroupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -63,7 +67,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const seedSymbol = typeof config.settings.symbol === "string" ? config.settings.symbol : "US.AAPL";
+    const seedSymbol = symbolPropRef.current ?? configuredSymbol ?? "";
     let symbol = linkGroups.symbolFor(groupRef.current) ?? seedSymbol;
     let last: LastTrade | null = null;
     let flash: TradeFlash | null = null;
@@ -80,7 +84,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
     seedLast();
 
     const reseedForGroup = () => {
-      const next = linkGroups.symbolFor(groupRef.current) ?? seedSymbol;
+      const next = linkGroups.symbolFor(groupRef.current) ?? symbolPropRef.current ?? configuredSymbol ?? "";
       if (next !== symbol) {
         symbol = next;
         flash = null;
@@ -179,7 +183,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
       offExec();
       canvas.removeEventListener("wheel", onWheel);
     };
-  }, [config.id]);
+  }, [config.id, !!displaySymbol]);
 
   // This panel's own group was reassigned (as opposed to the group's focused
   // symbol changing, which linkGroups.subscribe above already handles). Guard
@@ -188,8 +192,10 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
     if (groupRef.current !== group) {
       groupRef.current = group;
       reseedForGroupRef.current?.();
+    } else if (group === null) {
+      reseedForGroupRef.current?.();
     }
-  }, [group]);
+  }, [group, symbolProp]);
 
   const gearBtn = (
     <button type="button" aria-label="ladder settings" onClick={() => setSettingsOpen(true)}
@@ -203,7 +209,8 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
   return (
     <>
       {actionsSlot === undefined ? gearBtn : actionsSlot ? createPortal(gearBtn, actionsSlot) : null}
-      <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%" }} />
+      {displaySymbol ? <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%" }} />
+        : <div data-testid="ladder-empty-state" style={{ display: "grid", placeItems: "center", height: "100%", color: palette.textMuted }}>Type a symbol to load</div>}
       {settingsOpen && (
         <LadderSettingsDialog chrome={getTvChrome(mode)} levels={levels}
           onClose={() => setSettingsOpen(false)}

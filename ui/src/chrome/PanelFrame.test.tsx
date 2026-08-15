@@ -638,6 +638,14 @@ describe("PanelFrame — type-to-load (Task 13)", () => {
 });
 
 describe("PanelFrame — DemandRegistry wiring (Task 10)", () => {
+  it("does not demand market data without an effective symbol", async () => {
+    const ensure = vi.fn(() => Promise.resolve({ kind: "ack", corrId: "", status: "accepted" }));
+    const reg = { ensure, release: () => {} } as unknown as import("../wire/DemandRegistry").DemandRegistry;
+    renderFrame({ panelId: "chart", group: null, settings: {}, demandRegistry: reg });
+    await Promise.resolve();
+    expect(ensure).not.toHaveBeenCalled();
+  });
+
   it("ensures the effective symbol on mount for a demand panel", async () => {
     const calls: { m: string; args: unknown[] }[] = [];
     const reg = {

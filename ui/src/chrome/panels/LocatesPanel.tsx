@@ -122,7 +122,7 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
   const easyToBorrow = borrowStatus === "easy_to_borrow";
   const hardToBorrow = borrowStatus === "hard_to_borrow";
   const statusLabel = notShortable ? "NOT SHORTABLE" : easyToBorrow ? "EASY TO BORROW" : hardToBorrow ? "HARD TO BORROW" : "BORROW STATUS UNKNOWN";
-  const workflowEnabled = selectedAlpaca && symbol.startsWith("US.") && !easyToBorrow && !notShortable;
+  const workflowEnabled = !!symbol && selectedAlpaca && symbol.startsWith("US.") && !easyToBorrow && !notShortable;
   const estimatedFee = quote && quantityValid ? multiplyDecimal(quantity, quote.price) : "";
   const maximumFee = maxFeeValid && quantityValid ? multiplyDecimal(quantity, maxFee) : "";
 
@@ -306,6 +306,7 @@ export function LocatesPanel({ config, stores, commands, linkGroups, group: grou
       </div>
 
       {status === null ? <div style={{ padding: 12, color: palette.textMuted }}>Loading venue status…</div>
+        : !symbol ? <div data-testid="locates-unassigned" style={{ padding: 12, color: palette.textMuted }}>No symbol focused — type or link a symbol.</div>
         : alpacaVenues.length === 0 ? <div data-testid="locates-empty" style={{ padding: 12, color: palette.textMuted }}>No Alpaca venue configured.</div>
           : !selectedAlpaca ? <div data-testid="locates-unsupported" style={{ padding: 12 }}>
             <strong>LOCATES NOT AVAILABLE FOR THIS VENUE</strong>

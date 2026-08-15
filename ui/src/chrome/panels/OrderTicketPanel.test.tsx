@@ -49,6 +49,15 @@ describe("OrderTicketPanel", () => {
     await waitFor(() => expect(screen.getByTestId("bid").textContent).toContain("3.40"));
     expect(screen.getByTestId("ask").textContent).toContain("3.50");
   });
+  it("shows an honest unassigned state and never submits without a symbol", async () => {
+    const { props, stores, sent } = mkProps();
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }));
+    wrap(props);
+    expect(screen.getByTestId("order-ticket-unassigned")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("side-BUY"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sent.some((s) => s.name === "SubmitOrder")).toBe(false);
+  });
   it("manual Shares submit sends a venue-tagged SubmitOrder", async () => {
     const { props, stores, linkGroups, sent } = mkProps();
     act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.4, ask: 3.5, last: 3.45, ts: "" } }); linkGroups.focus("green", "US.AAPL"); });

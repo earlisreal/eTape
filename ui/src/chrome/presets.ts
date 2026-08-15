@@ -175,7 +175,7 @@ export const PRESETS: Preset[] = [
         {
           id: "t-chart-1m", panelId: "chart", group: "blue",
           settings: {
-            symbol: "US.AAPL", timeframe: "10s",
+            timeframe: "10s",
             indicators: [
               { instanceId: "t-chart-1m:VWAP-0", type: "VWAP", params: {}, hidden: false, styles: { line: { color: "#089981" } } },
             ],
@@ -187,7 +187,7 @@ export const PRESETS: Preset[] = [
         {
           id: "t-chart-10s", panelId: "chart", group: "blue",
           settings: {
-            symbol: "US.AAPL", timeframe: "D",
+            timeframe: "D",
             indicators: [
               { instanceId: "t-chart-10s:SMA-0", type: "SMA", params: { period: 200 }, styles: { line: { color: "#F23645" } }, hidden: false },
             ],
@@ -196,8 +196,8 @@ export const PRESETS: Preset[] = [
             chartSettings: { sessionShading: true, grid: true, volume: true, watermark: false },
           },
         },
-        { id: "t-dom", panelId: "ladder", group: "blue", settings: { symbol: "US.AAPL" } },
-        { id: "t-tape", panelId: "tape", group: "blue", settings: { symbol: "US.AAPL", minSize: 10 } },
+        { id: "t-dom", panelId: "ladder", group: "blue", settings: {} },
+        { id: "t-tape", panelId: "tape", group: "blue", settings: { minSize: 10 } },
         { id: "t-ticket", panelId: "order-ticket", group: "blue", settings: {} },
         {
           id: "t-account", panelId: "account", group: "blue",
@@ -206,7 +206,7 @@ export const PRESETS: Preset[] = [
         {
           id: "chart-977336c7", panelId: "chart", group: "blue",
           settings: {
-            symbol: "US.AAPL", timeframe: "1m",
+            timeframe: "1m",
             indicators: [
               { instanceId: "chart-977336c7:MACD-0", type: "MACD", params: { fast: 12, slow: 26, signal: 9 }, styles: { hist: { hidden: true } }, collapsed: true },
               { instanceId: "chart-977336c7:VWAP-0", type: "VWAP", params: {}, styles: { line: { color: "#089981" } } },

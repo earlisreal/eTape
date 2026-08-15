@@ -66,6 +66,12 @@ function lastPaintedOffset(): number {
 }
 
 describe("LadderPanel", () => {
+  it("shows an honest unassigned state without mounting a data surface", () => {
+    const { surface } = renderLadder({});
+    expect(screen.getByTestId("ladder-empty-state").textContent).toContain("Type a symbol");
+    expect(surface()).toBeUndefined();
+  });
+
   it("persists the level setting as a patch from the header gear", () => {
     const { onConfigChange } = renderLadder({ symbol: "US.AAPL", levels: 35 });
     fireEvent.click(screen.getByLabelText("ladder settings"));

@@ -23,7 +23,7 @@ function mkTick(i: number, symbol = "US.AAPL"): Tick {
     rangeEligible: true, lastEligible: true, volumeEligible: true, ts: "2026-07-06T13:30:00Z" };
 }
 
-function renderTape(width = 260) {
+function renderTape(width = 260, settings: Record<string, unknown> = { symbol: "US.AAPL", minSize: 0 }) {
   const stores = makeStores();
   const scheduler = new Scheduler(browserRaf, () => {});
   let surface: Surface | undefined;
@@ -33,7 +33,7 @@ function renderTape(width = 260) {
     return off;
   });
   const onConfigChange = vi.fn();
-  const config = { id: "t-tape", panelId: "tape", group: "green" as const, settings: { symbol: "US.AAPL", minSize: 0 } };
+  const config = { id: "t-tape", panelId: "tape", group: "green" as const, settings };
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
   const commands = { sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })), sendQuery: vi.fn(async () => []) };
   const renderPanel = (nextWidth: number) => (
@@ -48,6 +48,12 @@ function renderTape(width = 260) {
 }
 
 describe("TapePanel", () => {
+  it("shows an honest unassigned state without mounting a data surface", () => {
+    const { surface } = renderTape(260, {});
+    expect(screen.getByTestId("tape-empty-state").textContent).toContain("Type a symbol");
+    expect(surface()).toBeUndefined();
+  });
+
   it("registers one surface and unregisters on unmount", () => {
     const { surface, off, unmount } = renderTape();
     expect(surface().id).toBe("tape:t-tape");
