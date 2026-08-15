@@ -76,7 +76,7 @@ vi.stubGlobal("cancelAnimationFrame", () => {});
 beforeEach(() => { vi.clearAllMocks(); cleanup(); });
 
 function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sharedScheduler?: Scheduler,
-  settingsOverride?: Record<string, unknown>, chartQueryResult?: unknown) {
+  settingsOverride?: Record<string, unknown>, chartQueryResult?: unknown, monitoring = false) {
   const stores = sharedStores ?? makeStores();
   const scheduler = sharedScheduler ?? new Scheduler(browserRaf, () => {});
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
@@ -94,6 +94,7 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sh
     <ThemeProvider>
       <ChartPanel config={config} stores={stores} scheduler={scheduler} width={400} height={300}
         linkGroups={linkGroups} commands={commands} onConfigChange={onConfigChange}
+        monitoring={monitoring}
         {...(group === undefined ? {} : { group })} {...(symbol === undefined ? {} : { symbol })} />
     </ThemeProvider>
   );
@@ -126,6 +127,14 @@ function renderChartCapturingSurface(settingsOverride?: Record<string, unknown>,
 }
 
 describe("ChartPanel", () => {
+  it("keeps an unassigned Monitoring chart idle and shows the sync wait state", async () => {
+    const { createChart } = await import("lightweight-charts");
+    const { commands } = renderChart("empty", undefined, undefined, { symbol: undefined }, undefined, true);
+    expect(screen.getByTestId("chart-empty-state").textContent).toBe("Waiting for Scanner Sync");
+    expect(createChart).not.toHaveBeenCalled();
+    expect(commands.sendQuery).not.toHaveBeenCalled();
+  });
+
   it("creates a chart and registers candle + volume series on mount", async () => {
     const { createChart } = await import("lightweight-charts");
     renderChart();

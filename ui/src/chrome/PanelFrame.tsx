@@ -73,12 +73,13 @@ function ResponsivePanelTitle({ title, shortTitle, className, style }: {
 }
 
 export function PanelFrame(
-  { config, stores, scheduler, linkGroups, demandRegistry, commands, onConfigChange, onGroupChange, onClose, api }: {
+  { config, stores, scheduler, linkGroups, demandRegistry, commands, onConfigChange, onGroupChange, onClose, monitoring, api }: {
     config: PanelConfig; stores: Stores; scheduler: Scheduler;
     linkGroups: LinkGroups; demandRegistry: DemandRegistry; commands: PanelProps["commands"];
     onConfigChange: (settings: Record<string, unknown>) => void;
     onGroupChange: (group: LinkGroup) => void;
     onClose: () => void;
+    monitoring?: boolean;
     // This panel's own dockview panel API (threaded through from AppShell's
     // per-panel component factory, which dockview supplies as a prop — see
     // IDockviewPanelProps). Used ONLY to read/subscribe to isActive: dockview
@@ -214,7 +215,8 @@ export function PanelFrame(
   // panels. A pinned panel's own settings.symbol is a snapshot from panel
   // creation — full live editing of it is Task 13's type-to-load work.
   const props: PanelProps = { config, stores, scheduler, width: size.width, height: size.height,
-    linkGroups, commands, onConfigChange, active, onGroupChange, group, ...(rawSymbol ? { symbol: rawSymbol } : {}) };
+    linkGroups, commands, onConfigChange, active, onGroupChange, group,
+    ...(monitoring === undefined ? {} : { monitoring }), ...(rawSymbol ? { symbol: rawSymbol } : {}) };
   useEffect(() => { symbolRef.current = rawSymbol; }, [rawSymbol]);
 
   // On-demand subscription. When this panel declares a demand profile, ask the

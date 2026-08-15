@@ -10,9 +10,12 @@ import "dockview/dist/styles/dockview.css";
 import "./fonts.css";
 import "./global.css";
 import { App } from "./App";
-import { parseWorkspaceName } from "./chrome/windows";
+import { parseWorkspaceName, workspaceWindowTarget } from "./chrome/windows";
+import { MONITORING_WORKSPACE_ID } from "./chrome/workspace";
 
 const workspaceName = parseWorkspaceName(location.search);
+if (workspaceName === MONITORING_WORKSPACE_ID) window.name = workspaceWindowTarget(MONITORING_WORKSPACE_ID);
+else if (window.name === workspaceWindowTarget(MONITORING_WORKSPACE_ID)) window.name = "";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

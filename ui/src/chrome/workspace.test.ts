@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { WorkspaceStore } from "./workspace";
+import { buildMonitoringWorkspace } from "./presets";
 
 function fakeClient() {
   const calls: Array<{ name: string; args: unknown }> = [];
@@ -54,5 +55,26 @@ describe("WorkspaceStore", () => {
 
     await expect(store.load("main")).resolves.toEqual(stored);
     expect(client.sendCommand).toHaveBeenCalledTimes(3);
+  });
+
+  it("seeds Monitoring only when its workspace document is missing", async () => {
+    const client = fakeClient();
+    const seed = buildMonitoringWorkspace();
+    const store = new WorkspaceStore(client);
+
+    await expect(store.load("monitoring", seed)).resolves.toBe(seed);
+    expect(client.calls).toEqual([
+      { name: "GetConfig", args: { key: "workspace.monitoring" } },
+      { name: "SetConfig", args: { key: "workspace.monitoring", value: seed } },
+    ]);
+  });
+
+  it("preserves an existing Monitoring workspace instead of reseeding it", async () => {
+    const existing = { ...buildMonitoringWorkspace(), panels: [{ id: "custom", panelId: "chart", group: null, settings: { timeframe: "D" } }] };
+    const client = { sendCommand: vi.fn(async (name: string) => name === "GetConfig" ? { status: "accepted", value: existing } : { status: "accepted" }) };
+    const store = new WorkspaceStore(client);
+
+    await expect(store.load("monitoring", buildMonitoringWorkspace())).resolves.toBe(existing);
+    expect(client.sendCommand).toHaveBeenCalledTimes(1);
   });
 });

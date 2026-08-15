@@ -8,6 +8,8 @@ Dockview owns tabs, activation, native drag-and-drop, merge/split, floating/popo
 
 Persisted workspaces require `layoutVersion: 8`. `WorkspaceStore` replaces an unmarked or older saved workspace with a blank version-8 workspace and writes that reset immediately. Built-in presets are trusted version-8 layouts. Imported layout payloads must declare version 8 after envelope and shape checks; older or missing versions are rejected as `Invalid layout` and never applied. Hotkey-only imports remain independent.
 
+`monitoring` is a reserved workspace identity, not a replaceable preset. The catalog and New Window modal open it through the named browser target `etape-workspace-monitoring`; rename/delete controls are omitted. A missing Monitoring document is seeded once with four pinned, unassigned charts, a Scanner, and unassigned Stock Info. Existing Monitoring data is kept, and unassigned Monitoring charts show `Waiting for Scanner Sync` without creating a chart or symbol demand until a symbol is typed or linked.
+
 The shell owns the ephemeral cross-window hotkey target coordinator. It listens
 only to Dockview user-origin panel activation, seeds a restored active panel
 only in the OS-focused window, and republishes the owning panel's group, symbol,

@@ -4,7 +4,7 @@ import { themeDark, themeLight } from "dockview";
 // dockview's stylesheet is imported in main.tsx (ahead of global.css) so our
 // theme overrides always win the cascade — see the comment there.
 import { PanelFrame } from "./PanelFrame";
-import { isCurrentWorkspace, type PanelConfig, type Workspace } from "./workspace";
+import { isCurrentWorkspace, MONITORING_WORKSPACE_ID, MONITORING_WORKSPACE_NAME, type PanelConfig, type Workspace } from "./workspace";
 import { WorkspaceStore } from "./workspace";
 import type { Stores } from "../data/registry";
 import type { Scheduler } from "../render/Scheduler";
@@ -13,7 +13,7 @@ import { HotkeyTargetCoordinator, type HotkeyTargetChannel, type HotkeyTargetInp
 import type { DemandRegistry } from "../wire/DemandRegistry";
 import type { ConnState } from "../wire/WsClient";
 import { PANELS, dockviewPanelConstraints, type PanelProps } from "./panels/registry";
-import { PRESETS } from "./presets";
+import { buildMonitoringWorkspace, PRESETS } from "./presets";
 import { TopBar, targetCueFor } from "./TopBar";
 import { FeedStatusBanner } from "./FeedStatusBanner";
 import { BootStatusBanner } from "./BootStatusBanner";
@@ -36,6 +36,7 @@ import { useAutoUnlockOnStartup } from "./exec/useAutoUnlockOnStartup";
 import { useSoundWiring } from "../sound/useSoundWiring";
 import { NewWindowModal } from "./NewWindowModal";
 import { mutateWindows, readWindows } from "./catalogs";
+import { openWorkspaceWindow } from "./windows";
 import { planDemoEntry, planDemoRevert } from "./demoTransition";
 import { resolveVenue } from "./exec/venueSelection";
 import { PanelHeaderTab } from "./PanelHeaderTab";
@@ -167,7 +168,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const wsRef = useRef<Workspace | null>(null);
   wsRef.current = ws;
   useEffect(() => {
-    void workspaceStore.load(workspaceName).then((w) => {
+    void workspaceStore.load(workspaceName, workspaceName === MONITORING_WORKSPACE_ID ? buildMonitoringWorkspace() : undefined).then((w) => {
       // Hydrate LinkGroups' per-group focused symbol BEFORE setWs: panels read
       // linkGroups.symbolFor(group) on their very first mount, and mounting
       // starts as soon as `ws` goes non-null below (Bug 5 — a grouped panel's
@@ -180,6 +181,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   }, [workspaceName, workspaceStore, linkGroups]);
   useEffect(() => {
     if (workspaceName === "main") { setWorkspaceLabel("main"); return; }
+    if (workspaceName === MONITORING_WORKSPACE_ID) { setWorkspaceLabel(MONITORING_WORKSPACE_NAME); return; }
     const refresh = () => void readWindows(commands).then((c) => setWorkspaceLabel(c.entries.find((e) => e.id === workspaceName)?.name ?? workspaceName));
     refresh(); const channel = new BroadcastChannel("etape.window-catalog"); channel.onmessage = refresh;
     return () => channel.close();
@@ -563,7 +565,9 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     const def = PANELS[panelId];
     if (!def) return;
     const id = `${panelId}-${crypto.randomUUID().slice(0, 8)}`;
-    const settings: Record<string, unknown> = panelId === "chart" ? { symbol: "US.AAPL", timeframe: "1m" } : {};
+    const settings: Record<string, unknown> = panelId === "chart"
+      ? workspaceName === MONITORING_WORKSPACE_ID ? { timeframe: "1m" } : { symbol: "US.AAPL", timeframe: "1m" }
+      : {};
     const config: PanelConfig = { id, panelId, group: null, settings };
     const current = wsRef.current ?? ws;
     const next = { ...current, panels: [...current.panels, config] };
@@ -730,6 +734,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   };
 
   const onNewWindow = () => setNewWindowOpen(true);
+  const onOpenMonitoring = () => { setAddOpen(false); openWorkspaceWindow(MONITORING_WORKSPACE_ID); };
 
   // Stable React keys: panels are keyed by config.id so dockview drag/resize
   // never remounts them (canvas keeps its context). Each factory is called by
@@ -747,6 +752,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         onConfigChange={(settings) => onConfigChange(p.id, settings)}
         onGroupChange={(group) => onGroupChange(p.id, group)}
         onClose={() => removePanel(p.id)}
+        monitoring={workspaceName === MONITORING_WORKSPACE_ID}
         api={panelProps.api} />,
     ]),
   );
@@ -813,7 +819,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           />
           {addOpen && (
             <div className="popover" style={{ top: 40, right: 160, width: 580, maxHeight: "70vh", overflow: "auto" }}>
-              <Catalog onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} />
+              <Catalog onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} onOpenMonitoring={onOpenMonitoring} />
             </div>
           )}
         </div>
@@ -823,7 +829,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         {showAlpacaHint && <AlpacaBackfillBanner onSetup={openAlpacaSetup} onDismiss={dismissAlpacaHint} />}
         <div style={{ flex: 1, minHeight: 0 }}>
           {ws.panels.length === 0 ? (
-            <EmptyState onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} showTryDemo={showTryDemo} onTryDemo={onTryDemo} onImportLayoutFile={importLayoutFile} />
+            <EmptyState onAddPanel={addPanel} onApplyPreset={applyPresetToWorkspace} onOpenMonitoring={onOpenMonitoring} showTryDemo={showTryDemo} onTryDemo={onTryDemo} onImportLayoutFile={importLayoutFile} />
           ) : (
             <PanelHeaderHostProvider>
               <DockviewReact components={components} onReady={onReady}

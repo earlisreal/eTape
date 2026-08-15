@@ -1,4 +1,5 @@
 import type { PanelConfig } from "./workspace";
+import { MONITORING_WORKSPACE_ID, WORKSPACE_LAYOUT_VERSION, type Workspace } from "./workspace";
 import type { SerializedDockview } from "dockview";
 
 export interface Preset {
@@ -8,9 +9,6 @@ export interface Preset {
   thumb: "monitoring" | "trading";
   build(): { panels: PanelConfig[]; layout: SerializedDockview };
 }
-
-const chart = (id: string, symbol: string, timeframe: string, group: PanelConfig["group"]): PanelConfig =>
-  ({ id, panelId: "chart", group, settings: { symbol, timeframe } });
 
 // NOTE: `layout` below is real dockview serialized JSON (SerializedDockview),
 // structurally validated against dockview-core's `fromJSON`/`toJSON` (built
@@ -75,6 +73,25 @@ const MONITORING_LAYOUT: SerializedDockview = {
   },
   activeGroup: "m-chart-red",
 } as SerializedDockview;
+
+const unassignedChart = (id: string): PanelConfig =>
+  ({ id, panelId: "chart", group: null, settings: { timeframe: "1m" } });
+
+export function buildMonitoringWorkspace(): Workspace {
+  return {
+    name: MONITORING_WORKSPACE_ID,
+    layoutVersion: WORKSPACE_LAYOUT_VERSION,
+    panels: [
+      unassignedChart("m-chart-red"),
+      unassignedChart("m-chart-green"),
+      unassignedChart("m-chart-blue"),
+      unassignedChart("m-chart-yellow"),
+      { id: "m-scanner", panelId: "scanner", group: null, settings: {} },
+      { id: "m-news", panelId: "stock-info", group: null, settings: {} },
+    ],
+    layout: MONITORING_LAYOUT,
+  };
+}
 
 // Sourced verbatim from Earl's own saved `main` workspace export
 // (etape-layout-2026-07-13.json, exported 2026-07-12T22:05:32Z) — his actual
@@ -149,21 +166,6 @@ export const TRADING_LAYOUT: SerializedDockview = {
 } as SerializedDockview;
 
 export const PRESETS: Preset[] = [
-  {
-    id: "monitoring", name: "Monitoring", thumb: "monitoring",
-    description: "Chart wall + scanner + news. Watching market, not trading it.",
-    build: () => ({
-      panels: [
-        chart("m-chart-red", "US.TSLA", "1m", "red"),
-        chart("m-chart-green", "US.NVDA", "1m", "green"),
-        chart("m-chart-blue", "US.AAPL", "1m", "blue"),
-        chart("m-chart-yellow", "US.SPY", "1m", "yellow"),
-        { id: "m-scanner", panelId: "scanner", group: null, settings: {} },
-        { id: "m-news", panelId: "stock-info", group: "blue", settings: {} },
-      ],
-      layout: MONITORING_LAYOUT,
-    }),
-  },
   {
     id: "trading", name: "Trading", thumb: "trading",
     description: "Focused charts + DOM, tape, ticket, positions, watchlist, scanner, news. Execution seat.",

@@ -55,6 +55,9 @@ export interface PanelProps {
   // Live effective symbol from PanelFrame. Unlike config.settings, this changes
   // without remounting when a pinned panel commits a typed symbol.
   symbol?: string;
+  // The reserved Monitoring workspace gives unassigned charts a specific
+  // waiting state; ordinary symbol-bearing panels keep their type-to-load hint.
+  monitoring?: boolean;
 }
 export interface PanelDef {
   component: FC<PanelProps>;

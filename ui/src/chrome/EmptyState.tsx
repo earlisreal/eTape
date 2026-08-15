@@ -6,9 +6,10 @@ import { Button } from "./controls/Button";
 // The blank-workspace hero: wraps Catalog with heading + lede copy. Shown by
 // AppShell whenever the current workspace has zero panels — first run, or after
 // the last panel is removed.
-export function EmptyState({ onAddPanel, onApplyPreset, showTryDemo, onTryDemo, onImportLayoutFile }: {
+export function EmptyState({ onAddPanel, onApplyPreset, onOpenMonitoring, showTryDemo, onTryDemo, onImportLayoutFile }: {
   onAddPanel: (id: string) => void;
   onApplyPreset: (id: string) => void;
+  onOpenMonitoring: () => void;
   // Task 6 (U4): AppShell computes this off sessionMode.mode — hidden while
   // already inside a demo/replay session (see AppShell's showTryDemo).
   showTryDemo: boolean;
@@ -59,7 +60,7 @@ export function EmptyState({ onAddPanel, onApplyPreset, showTryDemo, onTryDemo, 
             </Button>
           </div>
         )}
-        <Catalog onAddPanel={onAddPanel} onApplyPreset={onApplyPreset} />
+        <Catalog onAddPanel={onAddPanel} onApplyPreset={onApplyPreset} onOpenMonitoring={onOpenMonitoring} />
         <div style={{
           display: "flex", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", gap: 14,
           borderTop: `1px solid ${palette.borderStrong}`, marginTop: 22, paddingTop: 14,

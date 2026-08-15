@@ -24,7 +24,11 @@ function Thumb({ kind }: { kind: "monitoring" | "trading" }): JSX.Element {
 // one". Reused by the blank-workspace EmptyState and the TopBar's "+ Add panel"
 // popover. Dev-only panels (smoke-painter) only ever appear in the one-by-one list
 // when running under `import.meta.env.DEV` — never in a production build.
-export function Catalog({ onAddPanel, onApplyPreset }: { onAddPanel: (id: string) => void; onApplyPreset: (id: string) => void }): JSX.Element {
+export function Catalog({ onAddPanel, onApplyPreset, onOpenMonitoring }: {
+  onAddPanel: (id: string) => void;
+  onApplyPreset: (id: string) => void;
+  onOpenMonitoring: () => void;
+}): JSX.Element {
   const { palette } = useTheme();
   const [hoveredPanelId, setHoveredPanelId] = useState<string | null>(null);
   const panels = CATALOG.concat(import.meta.env.DEV && !CATALOG.some((c) => isDevPanel(c.panelId))
@@ -33,6 +37,13 @@ export function Catalog({ onAddPanel, onApplyPreset }: { onAddPanel: (id: string
   return (
     <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: 28, alignItems: "start" }}>
       <div>
+        <div className="col-head serif" style={{ borderBottom: `3px double ${palette.borderStrong}`, paddingBottom: 5, marginBottom: 12 }}>Open a workspace</div>
+        <Button onClick={onOpenMonitoring}
+          style={{ display: "flex", gap: 12, width: "100%", textAlign: "left", padding: 12, marginBottom: 20, alignItems: "center" }}>
+          <Thumb kind="monitoring" />
+          <span><span className="serif" style={{ fontWeight: 600, display: "block" }}>Monitoring</span>
+            <span style={{ color: palette.textMuted, fontSize: 10.5 }}>Permanent chart wall + scanner. Opens in its own window.</span></span>
+        </Button>
         <div className="col-head serif" style={{ borderBottom: `3px double ${palette.borderStrong}`, paddingBottom: 5, marginBottom: 12 }}>Start from a preset</div>
         {PRESETS.map((p) => (
           <Button key={p.id} onClick={() => onApplyPreset(p.id)}

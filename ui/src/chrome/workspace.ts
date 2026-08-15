@@ -8,6 +8,8 @@ export interface PanelConfig {
   settings: Record<string, unknown>;
 }
 export const WORKSPACE_LAYOUT_VERSION = 8;
+export const MONITORING_WORKSPACE_ID = "monitoring";
+export const MONITORING_WORKSPACE_NAME = "Monitoring";
 
 export interface Workspace {
   name: string;
@@ -50,11 +52,26 @@ export class WorkspaceStore {
 
   constructor(private readonly client: CommandClient, private readonly debounceMs = 500) {}
 
-  async load(name: string): Promise<Workspace> {
+  async load(name: string, seed?: Workspace): Promise<Workspace> {
     const key = `workspace.${name}`;
     const ack = await this.client.sendCommand("GetConfig", { key });
     if (ack.status === "accepted" && ack.value && isCurrentWorkspace(ack.value)) {
       return ack.value;
+    }
+    if (ack.status === "accepted" && seed && typeof ack.value === "object" && ack.value !== null) {
+      const legacy = ack.value as Partial<Workspace>;
+      if (Array.isArray(legacy.panels) && "layout" in legacy) {
+        return { ...legacy, name, layoutVersion: WORKSPACE_LAYOUT_VERSION } as Workspace;
+      }
+    }
+    if (ack.status === "accepted" && ack.value == null) {
+      const blank = blankWorkspace(name);
+      if (seed) {
+        const saved = await this.client.sendCommand("SetConfig", { key, value: seed });
+        if (saved.status !== "accepted") this.save(seed);
+        return seed;
+      }
+      return blank;
     }
     const blank = blankWorkspace(name);
     if (ack.status === "accepted" && ack.value) {

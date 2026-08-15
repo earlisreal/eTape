@@ -132,7 +132,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
   return { facade, setPalette: (p) => { session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); }, drawings };
 }
 
-export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange, group: groupProp, symbol: symbolProp }: PanelProps): JSX.Element {
+export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange, group: groupProp, symbol: symbolProp, monitoring }: PanelProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<ChartController | null>(null);
   const setFacadePaletteRef = useRef<((p: Palette) => void) | null>(null);
@@ -145,7 +145,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const palette = getTvPalette(mode);
   const chrome = getTvChrome(mode);
   const headerSlot = useContext(PanelHeaderSlotContext);
-  const symbol = symbolProp ?? (config.settings.symbol as string) ?? "US.AAPL";
+  const symbol = symbolProp ?? (typeof config.settings.symbol === "string" ? config.settings.symbol : "");
   const timeframe0 = (config.settings.timeframe as string) ?? "1m";
   const chartType0 = (config.settings.chartType as ChartType) ?? "candle";
   const hideAll0 = (config.settings.hideAllDrawings as boolean) ?? false;
@@ -233,7 +233,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
 
   useEffect(() => {
     const host = hostRef.current;
-    if (!host) return;
+    if (!host || !symbol) return;
+    ownSymbolRef.current = symbol;
     viewportModeRef.current = "live";
     const chart = createChart(host, { width, height });
     // Right-edge pan cap: LWC has no native "capped but non-zero" right-edge option
@@ -743,10 +744,11 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       if (firstPaintLogFrame !== null) cancelAnimationFrame(firstPaintLogFrame);
       interaction.dispose(); controller.dispose(); controllerRef.current = null; interactionRef.current = null;
     };
-    // Intentionally [config.id] only: symbol/timeframe/indicator/palette changes are
+    // Intentionally keyed only by panel identity and symbol availability:
+    // symbol/timeframe/indicator/palette changes are
     // handled imperatively via the controller (see the effects/callbacks below) — the
     // chart must never remount on those changes (the canvas keeps its context).
-  }, [config.id]);
+  }, [config.id, !!symbol]);
 
   // Group re-assignment (Bug: switching this chart's color group updated the
   // header but left the candles on the previous group's symbol). The mount
@@ -939,6 +941,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   useEffect(() => { refreshSelRef.current = refreshSelection; });
 
   const onContextMenu = (e: React.MouseEvent) => {
+    if (!chartSymbol) return;
     e.preventDefault();
     const r = hostRef.current!.getBoundingClientRect();
     // x/y are host-local (for hit-testing + coordinateToPrice below); clientX/clientY
@@ -1002,32 +1005,38 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       {headerSlot === undefined ? headerControls : headerSlot ? createPortal(headerControls, headerSlot) : null}
       <div ref={hostRef} data-testid="chart-host" tabIndex={0} style={{ flex: 1, minHeight: 0, position: "relative" }}
         onContextMenu={onContextMenu}>
-        {drawingToolsVisible && <TVDrawingRail chrome={chrome} activeTool={activeTool} hideAll={hideAll} symbol={chartSymbol}
-          stylesReady={drawingStylesReady}
-          onSelectTool={(t) => {
-            if (t !== "select" && t !== "measure" && !drawingStylesReady) return;
-            setActiveTool(t); interactionRef.current?.setTool(t);
-          }}
-          onToggleHideAll={toggleHideAll}
-          hasSelection={() => interactionRef.current?.hasSelection() ?? false}
-          onDeleteSelection={() => interactionRef.current?.deleteSelection()}
-          onClearAll={() => stores.drawings.clearSymbol(chartSymbol)}
-          initialPos={drawingRailPos} onPosChange={(p) => { setDrawingRailPos(p); persist({ drawingRailPos: p }); }} />}
-        <TVLegend chrome={chrome} symbol={chartSymbol} timeframe={timeframe} instances={instances} paneOffsets={paneOffsets}
-          rightAxisWidth={rightAxisWidth}
-          onToggleHidden={toggleIndicatorHidden} onEditIndicator={setSettingsInstanceId} onRemoveIndicator={removeIndicator}
-          onClosePane={closePane} onToggleCollapsePane={togglePaneCollapsed}
-          legendRef={legendRef} />
-        {showBarCloseTimer && lastPriceTag && (
-          <BarCloseTimer now={stores.marketClock.nowMs} chrome={chrome} timeframe={timeframe} price={formatPrice(lastPriceTag.price, 2)} lastPriceY={lastPriceTag.y}
-            rightAxisWidth={rightAxisWidth} paneBottom={paneOffsets[1] ?? height} up={lastPriceTag.up} />
+        {chartSymbol ? <>
+          {drawingToolsVisible && <TVDrawingRail chrome={chrome} activeTool={activeTool} hideAll={hideAll} symbol={chartSymbol}
+            stylesReady={drawingStylesReady}
+            onSelectTool={(t) => {
+              if (t !== "select" && t !== "measure" && !drawingStylesReady) return;
+              setActiveTool(t); interactionRef.current?.setTool(t);
+            }}
+            onToggleHideAll={toggleHideAll}
+            hasSelection={() => interactionRef.current?.hasSelection() ?? false}
+            onDeleteSelection={() => interactionRef.current?.deleteSelection()}
+            onClearAll={() => stores.drawings.clearSymbol(chartSymbol)}
+            initialPos={drawingRailPos} onPosChange={(p) => { setDrawingRailPos(p); persist({ drawingRailPos: p }); }} />}
+          <TVLegend chrome={chrome} symbol={chartSymbol} timeframe={timeframe} instances={instances} paneOffsets={paneOffsets}
+            rightAxisWidth={rightAxisWidth}
+            onToggleHidden={toggleIndicatorHidden} onEditIndicator={setSettingsInstanceId} onRemoveIndicator={removeIndicator}
+            onClosePane={closePane} onToggleCollapsePane={togglePaneCollapsed}
+            legendRef={legendRef} />
+          {showBarCloseTimer && lastPriceTag && (
+            <BarCloseTimer now={stores.marketClock.nowMs} chrome={chrome} timeframe={timeframe} price={formatPrice(lastPriceTag.price, 2)} lastPriceY={lastPriceTag.y}
+              rightAxisWidth={rightAxisWidth} paneBottom={paneOffsets[1] ?? height} up={lastPriceTag.up} />
+          )}
+          {selection && (
+            <TVFloatingToolbar chrome={chrome} rect={selection.rect} color={selection.color} width={selection.width} lineStyle={selection.lineStyle}
+              onColor={(c) => patchSelected({ color: c })} onWidth={(w) => patchSelected({ width: w })} onLineStyle={(s) => patchSelected({ lineStyle: s })}
+              onClone={cloneSelected} onDelete={() => interactionRef.current?.deleteSelection()} />
+          )}
+          {menu && <TVContextMenu chrome={chrome} x={menu.clientX} y={menu.clientY} items={buildMenuItems(menu)} onClose={() => setMenu(null)} />}
+        </> : (
+          <div data-testid="chart-empty-state" style={{ height: "100%", display: "grid", placeItems: "center", color: chrome.muted, fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontSize: 12 }}>
+            {monitoring ? "Waiting for Scanner Sync" : "Type a symbol to load"}
+          </div>
         )}
-        {selection && (
-          <TVFloatingToolbar chrome={chrome} rect={selection.rect} color={selection.color} width={selection.width} lineStyle={selection.lineStyle}
-            onColor={(c) => patchSelected({ color: c })} onWidth={(w) => patchSelected({ width: w })} onLineStyle={(s) => patchSelected({ lineStyle: s })}
-            onClone={cloneSelected} onDelete={() => interactionRef.current?.deleteSelection()} />
-        )}
-        {menu && <TVContextMenu chrome={chrome} x={menu.clientX} y={menu.clientY} items={buildMenuItems(menu)} onClose={() => setMenu(null)} />}
       </div>
       {settingsInstanceId && (() => {
         const inst = instances.find((i) => i.instanceId === settingsInstanceId);

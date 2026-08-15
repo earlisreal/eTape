@@ -8,6 +8,21 @@ export function parseWorkspaceName(search: string): string {
   return WORKSPACE_ID_RE.test(name) ? name : "main";
 }
 
+export function workspaceWindowTarget(id: string): string {
+  return `etape-workspace-${id}`;
+}
+
+export function workspaceUrl(id: string, href = window.location.href): string {
+  const target = new URL(href);
+  target.search = `?workspace=${encodeURIComponent(id)}`;
+  target.hash = "";
+  return target.href;
+}
+
+export function openWorkspaceWindow(id: string): Window | null {
+  return window.open(workspaceUrl(id), workspaceWindowTarget(id));
+}
+
 /** Lowest free `window-N` (N starts at 2; `main` is window 1). */
 export function nextWindowName(existing: string[]): string {
   const taken = new Set(existing);

@@ -1,10 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { PRESETS } from "./presets";
+import { buildMonitoringWorkspace, PRESETS } from "./presets";
 import { PANELS, isDevPanel } from "./panels/registry";
 
 describe("presets", () => {
-  it("exposes Monitoring and Trading", () => {
-    expect(PRESETS.map((p) => p.id).sort()).toEqual(["monitoring", "trading"]);
+  it("exposes Trading as the replaceable preset", () => {
+    expect(PRESETS.map((p) => p.id).sort()).toEqual(["trading"]);
+  });
+  it("builds an unassigned Monitoring workspace", () => {
+    const workspace = buildMonitoringWorkspace();
+    expect(workspace.name).toBe("monitoring");
+    expect(workspace.panels.filter((p) => p.panelId === "chart")).toHaveLength(4);
+    expect(workspace.panels.every((p) => p.group === null)).toBe(true);
+    expect(workspace.panels.every((p) => !("symbol" in p.settings))).toBe(true);
   });
   for (const preset of PRESETS) {
     it(`${preset.id}: every panel id is a real, non-dev registered panel`, () => {
