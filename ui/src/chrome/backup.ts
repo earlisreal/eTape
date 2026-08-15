@@ -100,20 +100,36 @@ export function applyPanelConstraintsToLayout(
 // (a separate id->metadata map) is NOT checked here; a leaf's views list is the only
 // thing that actually places a panel on screen. Defensive at every step so a
 // hand-edited/truncated file can't throw.
-export function collectPanelIds(layout: unknown): Set<string> {
-  const ids = new Set<string>();
+function walkPanelIds(layout: unknown, visit: (id: string) => void): void {
   const grid = (layout as { grid?: { root?: unknown } } | null)?.grid;
   const walk = (node: unknown): void => {
     if (!node || typeof node !== "object") return;
     const n = node as { type?: string; data?: unknown };
     if (n.type === "leaf") {
       const views = (n.data as { views?: unknown })?.views;
-      if (Array.isArray(views)) for (const v of views) if (typeof v === "string") ids.add(v);
+      if (Array.isArray(views)) for (const v of views) if (typeof v === "string") visit(v);
     } else if (n.type === "branch" && Array.isArray(n.data)) {
       for (const child of n.data) walk(child);
     }
   };
   walk(grid?.root);
+}
+
+export function collectPanelIds(layout: unknown): Set<string> {
+  const ids = new Set<string>();
+  walkPanelIds(layout, (id) => ids.add(id));
+  return ids;
+}
+
+/** Return panel ids in Dockview's serialized left-to-right, top-to-bottom order. */
+export function orderedPanelIds(layout: unknown): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  walkPanelIds(layout, (id) => {
+    if (seen.has(id)) return;
+    seen.add(id);
+    ids.push(id);
+  });
   return ids;
 }
 

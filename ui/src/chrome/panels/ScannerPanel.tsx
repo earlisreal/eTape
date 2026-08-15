@@ -7,20 +7,18 @@ import { FONTS } from "../../render/palette";
 import { formatTapeTime } from "../../render/format";
 import { appendSsrMarker, formatChangePct, formatCompactShares, msUntilEtMidnight } from "../format";
 import { formatFilterSummary } from "./scannerFilter";
-import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
-import type { ScannerRowView } from "../../data/ScannerStore";
+import { toggleSort, sortIndicator, type SortState } from "../sortColumns";
 import { bareSymbol } from "../exec/orderStatus";
 import { Button } from "../controls/Button";
 import { TVContextMenu, type MenuEntry } from "./tv/TVContextMenu";
 import { menuChrome } from "../menuChrome";
 import { PanelHeaderSlotContext } from "./headerSlot";
 import { IconGear } from "./tv/tvIcons";
+import { rankScannerRows, readScannerSort, scannerModeSort, scannerSyncStatusText } from "../scannerSync";
 
 const SESSION_LABEL: Record<ScannerSession, string> = {
   premarket: "Pre-market", rth: "RTH", afterhours: "After-hours", overnight: "Overnight",
 };
-const DEFAULT_SORT: SortState = { col: "changePct", dir: "desc" };
-const modeSort = (mode: ScannerFilters["mode"]): SortState => mode === "most_active" ? { col: "vol", dir: "desc" } : { col: "changePct", dir: mode === "losers" ? "asc" : "desc" };
 const DEFAULT_FILTERS: ScannerFilters = { mode: "gainers", minChangePct: 0, maxFloatShares: null, minVolume: 0, floatUnit: "M", volumeUnit: "K" };
 const COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
   { col: "sym", label: "Symbol", align: "left" },
@@ -29,26 +27,11 @@ const COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
   { col: "float", label: "Float", align: "right" },
   { col: "vol", label: "Vol", align: "right" },
 ];
-const SORT_ACCESSORS: Record<string, (r: ScannerRowView) => number | string | null> = {
-  sym: (r) => r.symbol,
-  changePct: (r) => r.changePct,
-  last: (r) => r.last,
-  float: (r) => r.floatShares,
-  vol: (r) => r.volume,
-};
 
 const unitScale = (unit: "K" | "M") => unit === "K" ? 1_000 : 1_000_000;
 
-function readSort(s: Record<string, unknown>): SortState {
-  const raw = s.sort as { col?: unknown; dir?: unknown } | undefined;
-  if (raw && typeof raw.col === "string" && (raw.dir === "asc" || raw.dir === "desc")) {
-    return { col: raw.col, dir: raw.dir };
-  }
-  return DEFAULT_SORT;
-}
-
 export function ScannerPanel(
-  { config, stores, linkGroups, commands, onConfigChange, group: groupProp }: PanelProps,
+  { config, stores, linkGroups, commands, onConfigChange, group: groupProp, scannerSync }: PanelProps,
 ): JSX.Element {
   const { palette } = useTheme();
   const headerSlot = useContext(PanelHeaderSlotContext);
@@ -60,7 +43,7 @@ export function ScannerPanel(
   const [menu, setMenu] = useState<{ clientX: number; clientY: number; symbol: string } | null>(null);
   const snap = useSyncExternalStore((cb) => stores.scanner.subscribe(cb), () => stores.scanner.getSnapshot());
   const cv = useMemo(() => stores.scanner.currentView(), [snap, stores.scanner]);
-  const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
+  const [sort, setSort] = useState<SortState>(() => readScannerSort(config.settings));
   const sortedMode = useRef<ScannerFilters["mode"] | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [draft, setDraft] = useState<ScannerFilters>(DEFAULT_FILTERS);
@@ -88,16 +71,19 @@ export function ScannerPanel(
 
   const filters = cv.filters ?? engineFilters ?? DEFAULT_FILTERS;
   useEffect(() => {
+    if (sortedMode.current === null) { sortedMode.current = filters.mode; return; }
     if (sortedMode.current === filters.mode) return;
     sortedMode.current = filters.mode;
-    setSort(modeSort(filters.mode));
-  }, [filters.mode]);
-  const rows = useMemo(() => sortRows(cv.rows, sort, SORT_ACCESSORS), [cv.rows, sort]);
+    const next = scannerModeSort(filters.mode);
+    setSort(next);
+    onConfigChange({ sort: next });
+  }, [filters.mode, onConfigChange]);
+  const rows = useMemo(() => rankScannerRows(cv.rows, sort), [cv.rows, sort]);
 
   const openFilters = () => { setDraft(filters); setFiltersOpen(true); };
   const applyFilters = () => {
     void commands.sendCommand("SetScannerFilters", { filters: draft });
-    if (draft.mode !== filters.mode) { const next = modeSort(draft.mode); setSort(next); onConfigChange({ sort: next }); }
+    if (draft.mode !== filters.mode) { const next = scannerModeSort(draft.mode); setSort(next); onConfigChange({ sort: next }); }
     setFiltersOpen(false);
   };
   const resetDefaults = () => setDraft(DEFAULT_FILTERS);
@@ -113,11 +99,29 @@ export function ScannerPanel(
     [{ label: `Add ${bareSymbol(sym)} to watchlist`, onClick: () => void commands.sendCommand("WatchlistAdd", { symbol: sym }) }];
 
   const sessionLabel = cv.session ? SESSION_LABEL[cv.session] : null;
+  const syncControl = scannerSync && (
+    <span data-testid="scanner-sync-control" style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+      {scannerSync.selected ? (
+        <button type="button" aria-label={scannerSync.enabled ? "Disable Scanner Sync" : "Enable Scanner Sync"}
+          title={scannerSync.enabled ? "Disable Scanner Sync" : "Enable Scanner Sync"} onClick={scannerSync.onToggle}
+          style={{ border: "none", background: "transparent", color: scannerSync.enabled ? palette.accent : palette.textMuted, cursor: "pointer", padding: "2px 0", whiteSpace: "nowrap" }}>
+          {scannerSync.enabled ? "Sync on" : "Sync off"}
+        </button>
+      ) : (
+        <button type="button" aria-label="Follow Monitoring" title="Use this Scanner as the Monitoring Source" onClick={scannerSync.onSelect}
+          style={{ border: "none", background: "transparent", color: palette.textMuted, cursor: "pointer", padding: "2px 0", whiteSpace: "nowrap" }}>
+          Follow Monitoring
+        </button>
+      )}
+      {scannerSync.selected && <span className="mono" aria-live="polite" style={{ color: palette.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{scannerSyncStatusText(scannerSync.status)}</span>}
+    </span>
+  );
   const headerControls = (
     <div data-testid="scanner-header-controls" style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
       <span className="serif" style={{ fontWeight: 600, whiteSpace: "nowrap" }}>Scanner</span>
-      {sessionLabel && <span className="mono" style={{ color: palette.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>· {sessionLabel}</span>}
+      {sessionLabel && <span className="mono" style={{ color: palette.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>· <span>{sessionLabel}</span></span>}
       <span style={{ flex: 1 }} />
+      {syncControl}
       <button type="button" aria-label="filters" aria-expanded={filtersOpen} title="Filters"
         onClick={() => (filtersOpen ? setFiltersOpen(false) : openFilters())}
         style={{ position: "relative", display: "inline-flex", border: "none", background: "transparent", color: palette.textMuted, cursor: "pointer", padding: 3, flex: "0 0 auto" }}>

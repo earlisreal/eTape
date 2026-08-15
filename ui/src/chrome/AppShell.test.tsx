@@ -5,6 +5,7 @@ import { render, screen, waitFor, fireEvent, act, cleanup, within } from "@testi
 import { AppShell } from "./AppShell";
 import { collectPanelIds } from "./backup";
 import { WorkspaceStore, type Workspace } from "./workspace";
+import { buildMonitoringWorkspace } from "./presets";
 import { makeStores } from "../data/registry";
 import { LinkGroups, BroadcastChannelBus } from "./linkGroups";
 import { DemandRegistry } from "../wire/DemandRegistry";
@@ -355,6 +356,33 @@ describe("AppShell group-symbol persistence (Bug 5: refresh resetting a grouped 
     act(() => { linkGroups.focus("green", "US.NVDA"); });
 
     await waitFor(() => expect(saved.some((w) => w.groups?.green === "US.NVDA")).toBe(true));
+  });
+});
+
+describe("AppShell Monitoring Scanner Sync", () => {
+  it("persists source selection, follows ranked rows, preserves chart settings, and remembers Sync off", async () => {
+    const { saved, stores } = mount(buildMonitoringWorkspace(), { workspaceName: "monitoring" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Follow Monitoring" })).toBeTruthy());
+
+    fireEvent.click(screen.getByRole("button", { name: "Follow Monitoring" }));
+    await waitFor(() => expect(saved.some((workspace) => workspace.scannerSync?.enabled && workspace.scannerSync.sourcePanelId === "m-scanner")).toBe(true));
+
+    act(() => stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      refreshedAt: "2026-08-15T08:00:00.000Z",
+      rows: [
+        { symbol: "US.A", changePct: 4, last: 1, floatShares: 1, volume: 1 },
+        { symbol: "US.B", changePct: 3, last: 1, floatShares: 1, volume: 1 },
+        { symbol: "US.C", changePct: 2, last: 1, floatShares: 1, volume: 1 },
+        { symbol: "US.D", changePct: 1, last: 1, floatShares: 1, volume: 1 },
+      ],
+    } }));
+    await waitFor(() => {
+      const latest = saved[saved.length - 1];
+      expect(latest?.panels.find((panel) => panel.id === "m-chart-red")?.settings).toEqual({ timeframe: "1m", symbol: "US.A" });
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Disable Scanner Sync" }));
+    await waitFor(() => expect(saved.some((workspace) => workspace.scannerSync?.enabled === false && workspace.scannerSync.sourcePanelId === "m-scanner")).toBe(true));
   });
 });
 

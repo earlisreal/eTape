@@ -5,6 +5,7 @@ import type { PanelConfig } from "../workspace";
 import type { Stores } from "../../data/registry";
 import type { Scheduler } from "../../render/Scheduler";
 import type { LinkGroup, LinkGroups } from "../linkGroups";
+import type { ScannerSyncPanelState } from "../scannerSync";
 import { ConnectionStatusPanel } from "./ConnectionStatusPanel";
 import { SmokePainterPanel } from "./SmokePainterPanel";
 import { ChartPanel } from "./ChartPanel";
@@ -58,6 +59,7 @@ export interface PanelProps {
   // The reserved Monitoring workspace gives unassigned charts a specific
   // waiting state; ordinary symbol-bearing panels keep their type-to-load hint.
   monitoring?: boolean;
+  scannerSync?: ScannerSyncPanelState;
 }
 export interface PanelDef {
   component: FC<PanelProps>;

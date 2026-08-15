@@ -20,6 +20,7 @@ function renderPanel(
   over: Partial<PanelConfig> = {},
   groupProp?: PanelConfig["group"],
   headerSlot?: HTMLElement,
+  scannerSync?: PanelProps["scannerSync"],
 ) {
   const stores = makeStores();
   const scanner = stores.scanner;
@@ -31,7 +32,7 @@ function renderPanel(
     settings: {}, ...over };
   const commands = { sendCommand: vi.fn(async () => ({ status: "accepted" })) };
   const props = { config, stores, linkGroups, onConfigChange, scheduler: {} as never,
-    width: 400, height: 300, commands, group: groupProp } as unknown as PanelProps;
+    width: 400, height: 300, commands, group: groupProp, scannerSync } as unknown as PanelProps;
   const view = render(<ThemeProvider><PanelHeaderSlotContext.Provider value={headerSlot}><ScannerPanel {...props} /></PanelHeaderSlotContext.Provider></ThemeProvider>);
   return { scanner, focus, onConfigChange, commands, ...view };
 }
@@ -66,6 +67,32 @@ describe("ScannerPanel", () => {
       unmount();
       slot.remove();
     }
+  });
+
+  it("selects Monitoring as the source, then toggles Sync without losing the source", () => {
+    const onSelect = vi.fn();
+    const onToggle = vi.fn();
+    renderPanel({}, undefined, undefined, {
+      selected: false,
+      enabled: false,
+      status: { kind: "disabled", availableCount: 0, targetCount: 4 },
+      onSelect,
+      onToggle,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Follow Monitoring" }));
+    expect(onSelect).toHaveBeenCalledOnce();
+    cleanup();
+
+    renderPanel({}, undefined, undefined, {
+      selected: true,
+      enabled: true,
+      status: { kind: "following", availableCount: 4, targetCount: 4 },
+      onSelect,
+      onToggle,
+    });
+    expect(screen.getByText("Following 4/4")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Disable Scanner Sync" }));
+    expect(onToggle).toHaveBeenCalledOnce();
   });
 
   it("renders the symbol column without the US. market prefix", () => {

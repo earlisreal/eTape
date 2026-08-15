@@ -117,6 +117,8 @@ export default defineConfig({
             'src/chrome/TopBar.test.tsx',
             'src/chrome/backup.test.ts',
             'src/chrome/panels/registry.test.tsx',
+            'src/chrome/panels/ScannerPanel.test.tsx',
+            'src/chrome/scannerSync.test.ts',
             'src/chrome/workspace.test.ts',
           ],
           pool: 'forks',

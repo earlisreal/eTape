@@ -89,6 +89,7 @@ export function buildMonitoringWorkspace(): Workspace {
       { id: "m-scanner", panelId: "scanner", group: null, settings: {} },
       { id: "m-news", panelId: "stock-info", group: null, settings: {} },
     ],
+    scannerSync: { enabled: false },
     layout: MONITORING_LAYOUT,
   };
 }

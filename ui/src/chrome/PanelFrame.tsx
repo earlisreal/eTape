@@ -19,6 +19,7 @@ import { normalizeSymbol } from "./symbol";
 import { useToasts } from "./Toast";
 import { modalTracker } from "./modalTracker";
 import { canStartTypeToLoad, reduceTypeToLoad, PRINTABLE_SYMBOL_CHAR, type TypeToLoadState } from "./typeToLoad";
+import type { PanelSymbolRuntime, ScannerSyncRuntime } from "./scannerSync";
 
 const swatch = (g: LinkGroup, palette: Palette): string =>
   g === null ? "transparent" : { red: palette.linkRed, green: palette.linkGreen, blue: palette.linkBlue, yellow: palette.linkYellow }[g];
@@ -73,13 +74,15 @@ function ResponsivePanelTitle({ title, shortTitle, className, style }: {
 }
 
 export function PanelFrame(
-  { config, stores, scheduler, linkGroups, demandRegistry, commands, onConfigChange, onGroupChange, onClose, monitoring, api }: {
+  { config, stores, scheduler, linkGroups, demandRegistry, commands, onConfigChange, onGroupChange, onClose, monitoring, scannerSyncRuntime, panelSymbols, api }: {
     config: PanelConfig; stores: Stores; scheduler: Scheduler;
     linkGroups: LinkGroups; demandRegistry: DemandRegistry; commands: PanelProps["commands"];
     onConfigChange: (settings: Record<string, unknown>) => void;
     onGroupChange: (group: LinkGroup) => void;
     onClose: () => void;
     monitoring?: boolean;
+    scannerSyncRuntime?: ScannerSyncRuntime;
+    panelSymbols?: PanelSymbolRuntime;
     // This panel's own dockview panel API (threaded through from AppShell's
     // per-panel component factory, which dockview supplies as a prop — see
     // IDockviewPanelProps). Used ONLY to read/subscribe to isActive: dockview
@@ -115,6 +118,16 @@ export function PanelFrame(
     () => headerHostRegistry?.get(config.id) ?? null,
     () => null,
   );
+  const scannerSync = useSyncExternalStore(
+    (cb) => scannerSyncRuntime?.subscribe(config.id, cb) ?? (() => {}),
+    () => scannerSyncRuntime?.get(config.id),
+    () => scannerSyncRuntime?.get(config.id),
+  );
+  const runtimeSymbol = useSyncExternalStore(
+    (cb) => panelSymbols?.subscribe(config.id, cb) ?? (() => {}),
+    () => panelSymbols?.get(config.id),
+    () => panelSymbols?.get(config.id),
+  );
   // Local group state, seeded from config.group at mount: config itself is
   // frozen inside the same per-panel factory closure described above, so
   // re-picking a group here needs its own mutable state for the swatch/symbol
@@ -122,14 +135,14 @@ export function PanelFrame(
   // onConfigChange pattern for the same underlying reason).
   const [group, setGroup] = useState<LinkGroup>(config.group);
   const [symbol, setSymbol] = useState<string | undefined>(() =>
-    linkGroups.symbolFor(group) ?? (config.settings.symbol as string | undefined));
+    runtimeSymbol ?? linkGroups.symbolFor(group) ?? (config.settings.symbol as string | undefined));
   const { palette } = useTheme();
   const toast = useToasts();
 
   // Canonical symbol state stays undecorated. SSR is a narrow per-symbol
   // subscription so unrelated Stock Info refreshes do not repaint every
   // symbol-bearing panel header.
-  const rawSymbol = symbol ?? (config.settings.symbol as string | undefined);
+  const rawSymbol = (group === null ? runtimeSymbol ?? symbol : symbol) ?? (config.settings.symbol as string | undefined);
   const effectiveSymbol = rawSymbol ? bareSymbol(rawSymbol) : undefined;
   const shortSellRestricted = useSyncExternalStore(
     (cb) => rawSymbol ? stores.stockDetail.subscribeShortSellRestricted(rawSymbol, cb) : () => {},
@@ -216,7 +229,7 @@ export function PanelFrame(
   // creation — full live editing of it is Task 13's type-to-load work.
   const props: PanelProps = { config, stores, scheduler, width: size.width, height: size.height,
     linkGroups, commands, onConfigChange, active, onGroupChange, group,
-    ...(monitoring === undefined ? {} : { monitoring }), ...(rawSymbol ? { symbol: rawSymbol } : {}) };
+    ...(monitoring === undefined ? {} : { monitoring }), ...(scannerSync ? { scannerSync } : {}), ...(rawSymbol ? { symbol: rawSymbol } : {}) };
   useEffect(() => { symbolRef.current = rawSymbol; }, [rawSymbol]);
 
   // On-demand subscription. When this panel declares a demand profile, ask the
@@ -361,6 +374,7 @@ export function PanelFrame(
         // at panel creation (dockview never re-invokes the factory), so spreading
         // it reverted every setting the panel persisted since mount — a symbol
         // commit used to silently wipe a chart's indicators, timeframe, etc.
+        panelSymbols?.set(config.id, sym);
         setSymbol(sym);
         onConfigChange({ symbol: sym });
       } catch (err) {
@@ -419,7 +433,11 @@ export function PanelFrame(
   const handleGroupPick = (g: LinkGroup) => {
     // Detaching keeps the symbol the panel is showing now, not the stale
     // creation-time settings.symbol that happened to exist before it linked.
-    if (g === null && group !== null && rawSymbol) onConfigChange({ symbol: rawSymbol });
+    if (g === null && group !== null && rawSymbol) {
+      panelSymbols?.set(config.id, rawSymbol);
+      onConfigChange({ symbol: rawSymbol });
+    }
+    if (g !== null) panelSymbols?.clear(config.id);
     setGroup(g);
     onGroupChange(g);
   };

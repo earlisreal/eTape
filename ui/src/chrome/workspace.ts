@@ -7,6 +7,11 @@ export interface PanelConfig {
   group: LinkGroup;
   settings: Record<string, unknown>;
 }
+export interface ScannerSyncConfig {
+  enabled: boolean;
+  sourceWorkspaceId?: string;
+  sourcePanelId?: string;
+}
 export const WORKSPACE_LAYOUT_VERSION = 8;
 export const MONITORING_WORKSPACE_ID = "monitoring";
 export const MONITORING_WORKSPACE_NAME = "Monitoring";
@@ -24,6 +29,7 @@ export interface Workspace {
   // Per-link-group focused venue (LinkGroups.focusedVenues), persisted beside
   // `groups`. Optional: absent in any workspace doc saved before this field.
   linkVenues?: Partial<Record<Exclude<LinkGroup, null>, VenueID>>;
+  scannerSync?: ScannerSyncConfig;
 }
 
 export function blankWorkspace(name: string): Workspace {

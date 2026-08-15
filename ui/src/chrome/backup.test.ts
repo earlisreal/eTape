@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   SETTINGS_EXPORT_VERSION, buildExport, parseImport,
   prepareImportedWorkspace, prepareImportedOrderConfig, detectHotkeyConflicts, isCurrentLayout, isPresentLayout,
-  collectPanelIds, reconcileToGrid, applyPanelConstraintsToLayout,
+  collectPanelIds, orderedPanelIds, reconcileToGrid, applyPanelConstraintsToLayout,
 } from "./backup";
 import type { Workspace } from "./workspace";
 import type { ActionTemplate, OrderConfig } from "./exec/actionTemplate";
@@ -299,6 +299,19 @@ describe("backup: collectPanelIds", () => {
     };
     const result = collectPanelIds(layout);
     expect(result).toEqual(new Set(["chart-1", "t-dom", "t-tape"]));
+  });
+
+  it("keeps Dockview's visual traversal order for stable chart slots", () => {
+    const layout = {
+      grid: { root: { type: "branch", data: [
+        { type: "leaf", data: { views: ["bottom-left"] } },
+        { type: "branch", data: [
+          { type: "leaf", data: { views: ["top-right"] } },
+          { type: "leaf", data: { views: ["bottom-right"] } },
+        ] },
+      ] } },
+    };
+    expect(orderedPanelIds(layout)).toEqual(["bottom-left", "top-right", "bottom-right"]);
   });
 
   it("collects panel ids from a leaf with multi-panel views array (tabbed group)", () => {

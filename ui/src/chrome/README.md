@@ -10,6 +10,8 @@ Persisted workspaces require `layoutVersion: 8`. `WorkspaceStore` replaces an un
 
 `monitoring` is a reserved workspace identity, not a replaceable preset. The catalog and New Window modal open it through the named browser target `etape-workspace-monitoring`; rename/delete controls are omitted. A missing Monitoring document is seeded once with four pinned, unassigned charts, a Scanner, and unassigned Stock Info. Existing Monitoring data is kept, and unassigned Monitoring charts show `Waiting for Scanner Sync` without creating a chart or symbol demand until a symbol is typed or linked.
 
+Monitoring Scanner Sync persists its enabled intent and the local Scanner Source workspace/panel identity in the Monitoring workspace. Its pure planner retains ranked symbols in their chart slots, fills departed slots from the source's visible sort, and leaves unmatched chart symbols in place when rows are scarce. AppShell coalesces successful symbol applications to one batch per second and patches only each chart's symbol; the panel-symbol runtime keeps mounted charts and their settings alive.
+
 The shell owns the ephemeral cross-window hotkey target coordinator. It listens
 only to Dockview user-origin panel activation, seeds a restored active panel
 only in the OS-focused window, and republishes the owning panel's group, symbol,
