@@ -75,14 +75,16 @@ describe("HotkeyDeck — rendering", () => {
     expect(screen.queryByTestId("deck-sell-hk")).toBeNull();
   });
 
-  it("keeps each Deck Row non-wrapping and horizontally scrollable", async () => {
+  it("wraps each Deck Row and gives buttons flexible single-line labels", async () => {
     const t1 = place({ id: "buy1", label: "Buy 1", deck: true });
     const t2 = place({ id: "buy2", label: "Buy 2", deck: true });
     const { container } = await setup([t1, t2], { rows: [["buy2", "buy1"]], showHotkeyLabels: false });
     const row = container.querySelector("[data-testid='deck-row-0']") as HTMLElement;
-    expect(row.style.flexWrap).toBe("nowrap");
-    expect(row.style.overflowX).toBe("auto");
-    expect(Array.from(row.querySelectorAll("button")).map((el) => el.dataset.testid)).toEqual(["deck-buy2", "deck-buy1"]);
+    expect(row.style.flexWrap).toBe("wrap");
+    const buttons = Array.from(row.querySelectorAll("button"));
+    expect(buttons.map((el) => el.dataset.testid)).toEqual(["deck-buy2", "deck-buy1"]);
+    expect(buttons[0].style.flex).toBe("1 1 0%");
+    expect(buttons[0].style.whiteSpace).toBe("nowrap");
   });
 
   it("omits stale row references and rows with no resolved buttons", async () => {

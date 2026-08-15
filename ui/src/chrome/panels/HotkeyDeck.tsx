@@ -61,7 +61,7 @@ export function HotkeyDeck(
     <div data-testid="hotkey-deck" style={{ display: "flex", flexDirection: "column", gap: 3, minWidth: 0 }}>
       {deckRows.map(({ rowIndex, templates }) => (
         <div key={`deck-row-${rowIndex}`} data-testid={`deck-row-${rowIndex}`} data-row-index={rowIndex}
-          style={{ display: "flex", flexWrap: "nowrap", gap: 3, minWidth: 0, overflowX: "auto" }}>
+          style={{ display: "flex", flexWrap: "wrap", gap: 3, minWidth: 0 }}>
           {templates.map((t) => (
             <button key={t.id} type="button" data-testid={`deck-${t.id}`} className={deckToneClass(t)}
               onClick={() => fireTemplate(
@@ -71,7 +71,7 @@ export function HotkeyDeck(
                 },
                 oc, toast, { gateArm: false },
               )}
-              style={{ display: "inline-flex", alignItems: "center", gap: 4, flex: "0 0 auto", whiteSpace: "nowrap" }}>
+              style={{ display: "inline-flex", alignItems: "center", gap: 4, flex: "1 1 0%", whiteSpace: "nowrap" }}>
               <span>{t.label}</span>
               {config.hotkeyDeck?.showHotkeyLabels && t.hotkey ? <Keycap combo={t.hotkey} /> : null}
             </button>
