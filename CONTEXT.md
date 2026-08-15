@@ -28,6 +28,30 @@ _Avoid_: Panel header
 A colour-named shared focus channel through which panels follow the same symbol and venue across windows. It is independent of a Panel Group; a panel with no Link Group is pinned.
 _Avoid_: Panel group, tab group
 
+**Monitoring Workspace**:
+eTape's reserved workspace for following Scanner rankings with Chart Panels. It cannot be renamed or deleted, while its Panel Groups remain user-editable.
+_Avoid_: Monitoring window, monitoring layout
+
+**Scanner Sync**:
+A persistent, toggleable Monitoring Workspace mode driven by one Scanner Source that maintains pinned Chart Panel symbols from ranked Scanner results. Its top set contains as many symbols as the Monitoring Workspace has pinned Chart Panels; a Chart Panel keeps its current symbol until it leaves that set. It remains enabled but pauses when no pinned Chart Panel exists; unmatched Chart Panels retain their current symbols when the Scanner Source returns too few rows.
+_Avoid_: Auto load, scanner auto-refresh
+
+**Unassigned Chart Panel**:
+A pinned Chart Panel with no current symbol. In a Monitoring Workspace it displays “Waiting for Scanner Sync” until Scanner Sync assigns it a ranked symbol.
+_Avoid_: Blank chart, default chart
+
+**Layout-only Export**:
+A portable Workspace Layout export that preserves panel arrangement, panel settings unrelated to symbol selection, Link Group membership, and Scanner Sync's enabled intent, but omits every panel symbol, every Link Group focused symbol, and the non-portable Scanner Source reference. An imported enabled Scanner Sync is paused until its user selects a Scanner Source. It never alters an already saved Workspace.
+_Avoid_: Workspace backup, symbol-free preset
+
+**Scanner Source**:
+The Scanner Panel, in any Workspace, explicitly selected to drive Scanner Sync for the Monitoring Workspace. Only one Scanner Source is active at a time. Its identity survives closing its host window; deleting it pauses Scanner Sync.
+_Avoid_: Active scanner, selected scanner
+
+**Stock Info Panel**:
+A symbol-bearing panel that displays fundamentals and news for the focused symbol of its selected Link Group. It is not a Scanner Sync target.
+_Avoid_: News panel
+
 ## Order Entry
 
 **Action Template**:
