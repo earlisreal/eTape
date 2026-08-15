@@ -3,10 +3,10 @@ import { Button } from "./controls/Button";
 import { mutateWindows, readWindows, validateName, type CommandClient, type WindowCatalogV1 } from "./catalogs";
 import { useTheme } from "./ThemeProvider";
 import { modalTracker } from "./modalTracker";
-import { blankWorkspace, MONITORING_WORKSPACE_ID, MONITORING_WORKSPACE_NAME } from "./workspace";
+import { blankWorkspace, MONITORING_WORKSPACE_ID, MONITORING_WORKSPACE_NAME, type WorkspaceStore } from "./workspace";
 import { openWorkspaceWindow, workspaceUrl } from "./windows";
 
-export function NewWindowModal({ open, currentId, commands, onClose }: { open: boolean; currentId: string; commands: CommandClient; onClose: () => void }): JSX.Element | null {
+export function NewWindowModal({ open, currentId, commands, workspaceStore, onClose }: { open: boolean; currentId: string; commands: CommandClient; workspaceStore?: WorkspaceStore; onClose: () => void }): JSX.Element | null {
   const [catalog, setCatalog] = useState<WindowCatalogV1>({ version: 1, entries: [] });
   const [name, setName] = useState(""); const [error, setError] = useState("");
   const { palette } = useTheme();
@@ -47,7 +47,8 @@ export function NewWindowModal({ open, currentId, commands, onClose }: { open: b
     if (id === MONITORING_WORKSPACE_ID || !navigator.locks || id === currentId || !window.confirm("Delete this workspace and its saved layout?")) return;
     await navigator.locks.request(`etape.workspace.${id}`, { mode: "exclusive", ifAvailable: true }, async (lock) => {
       if (!lock) { setError("That workspace is open in another tab."); return; }
-      await commands.sendCommand("DeleteConfig", { key: `workspace.${id}` });
+      const deleted = await commands.sendCommand("DeleteConfig", { key: `workspace.${id}` });
+      if (deleted.status === "accepted") workspaceStore?.notify(id);
       setCatalog(await mutateWindows(commands, (fresh) => ({ ...fresh, entries: fresh.entries.filter((e) => e.id !== id) })));
     });
   };

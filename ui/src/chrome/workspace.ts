@@ -32,6 +32,8 @@ export interface Workspace {
   scannerSync?: ScannerSyncConfig;
 }
 
+type WorkspaceChangeListener = () => void;
+
 export function blankWorkspace(name: string): Workspace {
   return { name, layoutVersion: WORKSPACE_LAYOUT_VERSION, panels: [], layout: null };
 }
@@ -53,10 +55,21 @@ interface CommandClient {
 // (config key `workspace.<name>`), debounced. Loads the saved doc, or a blank
 // workspace when none exists (no seed fallback — seeds are opt-in presets, Task 7/10).
 export class WorkspaceStore {
-  private pending: Workspace | null = null;
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  private readonly pending = new Map<string, Workspace>();
+  private readonly timers = new Map<string, ReturnType<typeof setTimeout>>();
+  private readonly changeListeners = new Map<string, Set<WorkspaceChangeListener>>();
+  private readonly changeChannel: BroadcastChannel | null;
 
-  constructor(private readonly client: CommandClient, private readonly debounceMs = 500) {}
+  constructor(private readonly client: CommandClient, private readonly debounceMs = 500) {
+    this.changeChannel = typeof window !== "undefined" && typeof BroadcastChannel !== "undefined"
+      ? new BroadcastChannel("etape.workspace")
+      : null;
+    this.changeChannel?.addEventListener("message", (event) => {
+      const workspaceId = (event.data as { workspaceId?: unknown })?.workspaceId;
+      if (typeof workspaceId !== "string") return;
+      this.changeListeners.get(workspaceId)?.forEach((listener) => listener());
+    });
+  }
 
   async load(name: string, seed?: Workspace): Promise<Workspace> {
     const key = `workspace.${name}`;
@@ -87,22 +100,41 @@ export class WorkspaceStore {
   }
 
   save(ws: Workspace): void {
-    this.pending = ws;
-    if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(() => { void this.writeNow(); }, this.debounceMs);
+    this.pending.set(ws.name, ws);
+    const timer = this.timers.get(ws.name);
+    if (timer) clearTimeout(timer);
+    this.timers.set(ws.name, setTimeout(() => {
+      this.timers.delete(ws.name);
+      void this.writeNow(ws.name);
+    }, this.debounceMs));
+  }
+
+  watch(name: string, listener: WorkspaceChangeListener): () => void {
+    const listeners = this.changeListeners.get(name) ?? new Set<WorkspaceChangeListener>();
+    listeners.add(listener);
+    this.changeListeners.set(name, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.changeListeners.delete(name);
+    };
+  }
+
+  notify(name: string): void {
+    this.changeChannel?.postMessage({ workspaceId: name });
   }
 
   async flush(): Promise<void> {
-    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
-    await this.writeNow();
+    for (const timer of this.timers.values()) clearTimeout(timer);
+    this.timers.clear();
+    while (this.pending.size > 0) await Promise.all([...this.pending.keys()].map((name) => this.writeNow(name)));
   }
 
-  private async writeNow(): Promise<void> {
-    if (!this.pending) return;
-    const ws = this.pending;
-    this.pending = null;
-    this.timer = null;
+  private async writeNow(name: string): Promise<void> {
+    const ws = this.pending.get(name);
+    if (!ws) return;
+    this.pending.delete(name);
     const key = `workspace.${ws.name}`;
-    await this.client.sendCommand("SetConfig", { key, value: ws });
+    const ack = await this.client.sendCommand("SetConfig", { key, value: ws });
+    if (ack.status === "accepted") this.notify(ws.name);
   }
 }

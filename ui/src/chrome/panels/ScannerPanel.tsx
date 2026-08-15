@@ -113,7 +113,7 @@ export function ScannerPanel(
           Follow Monitoring
         </button>
       )}
-      {scannerSync.selected && <span className="mono" aria-live="polite" style={{ color: palette.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{scannerSyncStatusText(scannerSync.status)}</span>}
+      {(scannerSync.statusVisible ?? scannerSync.selected) && (scannerSync.status.targetCount > 0 || scannerSync.status.kind === "paused") && <span className="mono" aria-live="polite" style={{ color: palette.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{scannerSyncStatusText(scannerSync.status)}</span>}
     </span>
   );
   const headerControls = (

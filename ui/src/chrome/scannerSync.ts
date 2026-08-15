@@ -127,6 +127,7 @@ export interface ScannerSyncPanelState {
   selected: boolean;
   enabled: boolean;
   status: ScannerSyncStatus;
+  statusVisible?: boolean;
   onSelect: () => void;
   onToggle: () => void;
 }

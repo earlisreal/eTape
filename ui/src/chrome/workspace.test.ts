@@ -35,6 +35,25 @@ describe("WorkspaceStore", () => {
     vi.useRealTimers();
   });
 
+  it("keeps pending writes for different workspace identities independent", async () => {
+    vi.useFakeTimers();
+    try {
+      const client = fakeClient();
+      const store = new WorkspaceStore(client, 50);
+      store.save({ name: "source", layoutVersion: 8, panels: [], layout: null });
+      store.save({ name: "monitoring", layoutVersion: 8, panels: [], layout: null });
+
+      await store.flush();
+
+      expect(client.calls.filter((c) => c.name === "SetConfig").map((c) => c.args)).toEqual([
+        { key: "workspace.source", value: { name: "source", layoutVersion: 8, panels: [], layout: null } },
+        { key: "workspace.monitoring", value: { name: "monitoring", layoutVersion: 8, panels: [], layout: null } },
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("resets an unmarked workspace once and persists the current blank version", async () => {
     let stored: unknown = {
       name: "main", panels: [{ id: "old", panelId: "chart", group: "red", settings: {} }],

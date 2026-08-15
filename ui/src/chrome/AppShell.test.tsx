@@ -360,6 +360,125 @@ describe("AppShell group-symbol persistence (Bug 5: refresh resetting a grouped 
 });
 
 describe("AppShell Monitoring Scanner Sync", () => {
+  it("offers Follow Monitoring from a Scanner in another workspace", async () => {
+    const seed: Workspace = {
+      name: "trading-window",
+      layoutVersion: 8,
+      panels: [{ id: "source-scanner", panelId: "scanner", group: null, settings: {} }],
+      layout: null,
+    };
+    mount(seed, { workspaceName: "trading-window" });
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Follow Monitoring" })).toBeTruthy());
+  });
+
+  it("keeps a cross-window source by identity through close, deletion, replacement, and restart", async () => {
+    const source: Workspace = {
+      name: "source-window",
+      layoutVersion: 8,
+      panels: [{ id: "source-scanner", panelId: "scanner", group: null, settings: { sort: { col: "last", dir: "asc" } } }],
+      layout: null,
+    };
+    const replacement: Workspace = {
+      name: "replacement-window",
+      layoutVersion: 8,
+      panels: [{ id: "replacement-scanner", panelId: "scanner", group: null, settings: {} }],
+      layout: null,
+    };
+    const docs = new Map<string, Workspace>([
+      ["monitoring", { ...buildMonitoringWorkspace(), layout: null }],
+      ["source-window", source],
+      ["replacement-window", replacement],
+    ]);
+    const mountWindow = (name: string) => {
+      const stores = makeStores();
+      const scheduler = new Scheduler(browserRaf, () => {});
+      const commands = {
+        sendCommand: vi.fn(async () => ({ kind: "ack" as const, corrId: "c", status: "accepted" as const, value: undefined })),
+        sendQuery: vi.fn(async () => []),
+      };
+      const client = {
+        sendCommand: vi.fn(async (command: string, args: unknown) => {
+          const key = (args as { key?: string }).key ?? "";
+          if (command === "GetConfig") return { status: "accepted" as const, value: docs.get(key.replace(/^workspace\./, "")) ?? null };
+          if (command === "SetConfig") {
+            const value = (args as { value: Workspace }).value;
+            docs.set(key.replace(/^workspace\./, ""), structuredClone(value));
+          }
+          return { status: "accepted" as const };
+        }),
+      };
+      const workspaceStore = new WorkspaceStore(client, 1);
+      const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
+      const demandRegistry = new DemandRegistry({ sendCommand: commands.sendCommand, onState: () => {} });
+      const view = render(
+        <ThemeProvider><ToastProvider><OrderConfigProvider commands={commands}>
+          <SoundConfigProvider commands={commands}>
+            <AppShell workspaceName={name} stores={stores} scheduler={scheduler} workspaceStore={workspaceStore}
+              linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands} engineState="open" />
+          </SoundConfigProvider>
+        </OrderConfigProvider></ToastProvider></ThemeProvider>,
+      );
+      return { ...view, stores, workspaceStore };
+    };
+
+    const monitor = mountWindow("monitoring");
+    const sourceWindow = mountWindow("source-window");
+    await waitFor(() => expect(within(sourceWindow.container).getByRole("button", { name: "Follow Monitoring" })).toBeTruthy());
+    fireEvent.click(within(sourceWindow.container).getByRole("button", { name: "Follow Monitoring" }));
+    await waitFor(() => expect(docs.get("monitoring")?.scannerSync).toEqual({
+      enabled: true, sourceWorkspaceId: "source-window", sourcePanelId: "source-scanner",
+    }));
+
+    sourceWindow.unmount();
+    act(() => monitor.stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      refreshedAt: "2026-08-15T08:00:00.000Z",
+      rows: [
+        { symbol: "US.A", changePct: 1, last: 30, floatShares: 1, volume: 1 },
+        { symbol: "US.B", changePct: 2, last: 10, floatShares: 1, volume: 1 },
+      ],
+    } }));
+    await waitFor(() => expect(docs.get("monitoring")?.panels.find((panel) => panel.id === "m-chart-red")?.settings.symbol).toBe("US.B"));
+    expect(docs.get("monitoring")?.panels.find((panel) => panel.id === "m-chart-green")?.settings.symbol).toBe("US.A");
+
+    await monitor.workspaceStore.flush();
+    const sourceStore = new WorkspaceStore({
+      sendCommand: vi.fn(async (command: string, args: unknown) => {
+        const key = (args as { key?: string }).key ?? "";
+        if (command === "GetConfig") return { status: "accepted" as const, value: docs.get(key.replace(/^workspace\./, "")) ?? null };
+        if (command === "SetConfig") docs.set(key.replace(/^workspace\./, ""), structuredClone((args as { value: Workspace }).value));
+        return { status: "accepted" as const };
+      }),
+    }, 1);
+    sourceStore.save({ ...source, panels: [] });
+    await sourceStore.flush();
+    expect(docs.get("monitoring")?.scannerSync?.sourceWorkspaceId).toBe("source-window");
+    await waitFor(() => expect(within(monitor.container).getByText("Paused — Scanner Source unavailable")).toBeTruthy());
+    act(() => monitor.stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      refreshedAt: "2026-08-15T08:00:30.000Z",
+      rows: [{ symbol: "US.C", changePct: 9, last: 1, floatShares: 1, volume: 1 }],
+    } }));
+    await new Promise((resolve) => setTimeout(resolve, 1100));
+    expect(docs.get("monitoring")?.panels.find((panel) => panel.id === "m-chart-red")?.settings.symbol).toBe("US.B");
+
+    const replacementWindow = mountWindow("replacement-window");
+    await waitFor(() => expect(within(replacementWindow.container).getByRole("button", { name: "Follow Monitoring" })).toBeTruthy());
+    fireEvent.click(within(replacementWindow.container).getByRole("button", { name: "Follow Monitoring" }));
+    await waitFor(() => expect(docs.get("monitoring")?.scannerSync).toEqual({
+      enabled: true, sourceWorkspaceId: "replacement-window", sourcePanelId: "replacement-scanner",
+    }));
+
+    monitor.unmount();
+    const restarted = mountWindow("monitoring");
+    act(() => restarted.stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      refreshedAt: "2026-08-15T08:01:00.000Z",
+      rows: [{ symbol: "US.Z", changePct: 9, last: 1, floatShares: 1, volume: 1 }],
+    } }));
+    await waitFor(() => expect(docs.get("monitoring")?.panels.find((panel) => panel.id === "m-chart-red")?.settings.symbol).toBe("US.Z"));
+    replacementWindow.unmount();
+    restarted.unmount();
+  });
+
   it("persists source selection, follows ranked rows, preserves chart settings, and remembers Sync off", async () => {
     const { saved, stores } = mount(buildMonitoringWorkspace(), { workspaceName: "monitoring" });
     await waitFor(() => expect(screen.getByRole("button", { name: "Follow Monitoring" })).toBeTruthy());
