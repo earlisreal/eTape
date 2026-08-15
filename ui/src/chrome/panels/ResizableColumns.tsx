@@ -183,7 +183,8 @@ export function ColumnResizeHandle({
     onKeyDown={onKeyDown}
     style={{
       position: "absolute", top: 2, right: -3, bottom: 2, zIndex: 2, width: 6,
-      cursor: "col-resize", touchAction: "none", userSelect: "none",
+      cursor: "col-resize", touchAction: "none", userSelect: "none", opacity: 0.55,
+      background: "linear-gradient(90deg, transparent 2px, currentColor 2px, currentColor 4px, transparent 4px)",
     }}
   />;
 }
