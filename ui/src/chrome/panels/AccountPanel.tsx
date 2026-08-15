@@ -38,12 +38,12 @@ function readSort(s: Record<string, unknown>): SortState {
 }
 
 const COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
-  { col: "symbol", label: "Symbol", defaultWidth: 100, align: "left", sortable: true },
-  { col: "venue", label: "Venue", defaultWidth: 120, align: "right", sortable: true },
-  { col: "qty", label: "Qty", defaultWidth: 70, align: "right", sortable: true },
-  { col: "avgPrice", label: "Avg", defaultWidth: 90, align: "right", sortable: true },
-  { col: "unrealizedPnl", label: "Unrl P&L", defaultWidth: 100, align: "right", sortable: true },
-  { col: "flatten", label: "", defaultWidth: 80, align: "right", sortable: false },
+  { col: "symbol", label: "Symbol", defaultWidth: 84, minWidth: 68, align: "left", sortable: true },
+  { col: "venue", label: "Venue", defaultWidth: 92, minWidth: 72, align: "right", sortable: true },
+  { col: "qty", label: "Qty", defaultWidth: 58, minWidth: 48, align: "right", sortable: true },
+  { col: "avgPrice", label: "Avg", defaultWidth: 72, minWidth: 60, align: "right", sortable: true },
+  { col: "unrealizedPnl", label: "Unrl P&L", defaultWidth: 88, minWidth: 72, align: "right", sortable: true },
+  { col: "flatten", label: "", defaultWidth: 64, minWidth: 60, align: "right", sortable: false },
 ];
 const SORT_ACCESSORS: Record<string, (r: PositionRow) => number | string | null> = {
   symbol: (r) => bareSymbol(r.symbol),
@@ -85,12 +85,12 @@ function chipVariant(ds: DisplayStatus): ChipVariant | null {
 
 const ORDERS_DEFAULT_SORT: SortState = { col: "createdMs", dir: "desc" };
 const ORDERS_COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
-  { col: "createdMs", label: "Submitted", defaultWidth: 160, align: "left", sortable: true },
-  { col: "symbol", label: "Symbol", defaultWidth: 100, align: "left", sortable: true },
-  { col: "side", label: "Side", defaultWidth: 70, align: "left", sortable: true },
-  { col: "qty", label: "Qty@Px", defaultWidth: 120, align: "right", sortable: true },
-  { col: "state", label: "State", defaultWidth: 100, align: "left", sortable: true },
-  { col: "actions", label: "", defaultWidth: 80, align: "right", sortable: false },
+  { col: "createdMs", label: "Submitted", defaultWidth: 128, minWidth: 108, align: "left", sortable: true },
+  { col: "symbol", label: "Symbol", defaultWidth: 84, minWidth: 68, align: "left", sortable: true },
+  { col: "side", label: "Side", defaultWidth: 56, minWidth: 48, align: "left", sortable: true },
+  { col: "qty", label: "Qty@Px", defaultWidth: 96, minWidth: 80, align: "right", sortable: true },
+  { col: "state", label: "State", defaultWidth: 76, minWidth: 64, align: "left", sortable: true },
+  { col: "actions", label: "", defaultWidth: 64, minWidth: 60, align: "right", sortable: false },
 ];
 const ORDERS_SORT_ACCESSORS: Record<string, (r: OrderView) => number | string | null> = {
   createdMs: (r) => r.order.createdMs,
@@ -110,16 +110,16 @@ function readOrdersSort(s: Record<string, unknown>): SortState {
 
 const CLOSED_DEFAULT_SORT: SortState = { col: "updatedMs", dir: "desc" };
 const CLOSED_COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
-  { col: "updatedMs", label: "Closed", defaultWidth: 140, align: "left", sortable: true },
-  { col: "symbol", label: "Symbol", defaultWidth: 100, align: "left", sortable: true },
-  { col: "side", label: "Side", defaultWidth: 70, align: "left", sortable: true },
-  { col: "qty", label: "Qty", defaultWidth: 75, align: "right", sortable: true },
-  { col: "executedQty", label: "Filled", defaultWidth: 75, align: "right", sortable: true },
-  { col: "price", label: "Price", defaultWidth: 100, align: "right", sortable: false },
-  { col: "avgFillPrice", label: "Avg Fill", defaultWidth: 100, align: "right", sortable: true },
-  { col: "state", label: "State", defaultWidth: 90, align: "left", sortable: true },
-  { col: "reason", label: "Reason", defaultWidth: 180, align: "left", sortable: false },
-  { col: "venue", label: "Venue", defaultWidth: 100, align: "left", sortable: true },
+  { col: "updatedMs", label: "Closed", defaultWidth: 120, minWidth: 104, align: "left", sortable: true },
+  { col: "symbol", label: "Symbol", defaultWidth: 84, minWidth: 68, align: "left", sortable: true },
+  { col: "side", label: "Side", defaultWidth: 56, minWidth: 48, align: "left", sortable: true },
+  { col: "qty", label: "Qty", defaultWidth: 56, minWidth: 48, align: "right", sortable: true },
+  { col: "executedQty", label: "Filled", defaultWidth: 56, minWidth: 48, align: "right", sortable: true },
+  { col: "price", label: "Price", defaultWidth: 82, minWidth: 64, align: "right", sortable: false },
+  { col: "avgFillPrice", label: "Avg Fill", defaultWidth: 84, minWidth: 68, align: "right", sortable: true },
+  { col: "state", label: "State", defaultWidth: 72, minWidth: 64, align: "left", sortable: true },
+  { col: "reason", label: "Reason", defaultWidth: 120, minWidth: 96, align: "left", sortable: false },
+  { col: "venue", label: "Venue", defaultWidth: 84, minWidth: 68, align: "left", sortable: true },
 ];
 const CLOSED_SORT_ACCESSORS: Record<string, (r: ClosedOrder) => number | string | null> = {
   updatedMs: (r) => r.updatedMs,
@@ -150,7 +150,7 @@ function orderInstructionPrice(order: Pick<Order, "type" | "limitPrice" | "stopP
 type UpperOrdersTab = "open" | "closed";
 
 function OrdersTable({
-  stores, oc, palette, config, onConfigChange, venue, height,
+  stores, oc, palette, config, onConfigChange, venue, height, availableWidth,
 }: {
   stores: PanelProps["stores"];
   oc: ReturnType<typeof useOrderCommands>;
@@ -159,12 +159,13 @@ function OrdersTable({
   onConfigChange: PanelProps["onConfigChange"];
   venue: string;
   height: number;
+  availableWidth: number;
 }): JSX.Element {
   const [tab, setTab] = useState<UpperOrdersTab>("open");
   const [openSort, setOpenSort] = useState<SortState>(() => readOrdersSort(config.settings));
   const [closedSort, setClosedSort] = useState<SortState>(() => readClosedSort(config.settings));
-  const openResize = useResizableColumns(config.settings, "openOrdersColumnWidths", ORDERS_COLUMNS, onConfigChange);
-  const closedResize = useResizableColumns(config.settings, "closedOrdersColumnWidths", CLOSED_COLUMNS, onConfigChange);
+  const openResize = useResizableColumns(config.settings, "openOrdersColumnWidths", ORDERS_COLUMNS, onConfigChange, availableWidth);
+  const closedResize = useResizableColumns(config.settings, "closedOrdersColumnWidths", CLOSED_COLUMNS, onConfigChange, availableWidth);
   const views = sortRows(stores.exec.orders().filter((v) => v.order.venue === venue && (v.optimistic || isWorking(v.order.status))), openSort, ORDERS_SORT_ACCESSORS);
   const closedRows = sortRows(stores.exec.closedOrders().filter((o) => o.venue === venue && isTerminal(o.status)), closedSort, CLOSED_SORT_ACCESSORS);
   const reconciling = (stores.exec.status()?.venues ?? []).some((v) => v.reconcilePending);
@@ -204,7 +205,7 @@ function OrdersTable({
         )}
       </div>
       {tab === "open" ? <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        <table ref={openResize.tableRef} data-testid="open-orders-table" style={{ width: "100%", minWidth: Math.max(560, openResize.totalWidth), tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
+        <table ref={openResize.tableRef} data-testid="open-orders-table" style={{ width: "100%", minWidth: openResize.totalWidth, tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
           <ColumnGroup columns={ORDERS_COLUMNS} widths={openResize.widths} />
           <thead><tr style={{ color: palette.textMuted }}>
             {ORDERS_COLUMNS.map((c) => <th key={c.col} data-column={c.col} style={{ ...th, textAlign: c.align, cursor: c.sortable ? "pointer" : "default" }} onClick={() => clickOpenSort(c.col, c.sortable)}
@@ -232,7 +233,7 @@ function OrdersTable({
           })}</tbody>
         </table>
       </div> : <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
-        <table ref={closedResize.tableRef} data-testid="closed-orders-table" style={{ width: "100%", minWidth: Math.max(1040, closedResize.totalWidth), tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
+        <table ref={closedResize.tableRef} data-testid="closed-orders-table" style={{ width: "100%", minWidth: closedResize.totalWidth, tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
           <ColumnGroup columns={CLOSED_COLUMNS} widths={closedResize.widths} />
           <thead><tr style={{ color: palette.textMuted }}>
             {CLOSED_COLUMNS.map((c) => <th key={c.col} data-column={c.col} style={{ ...th, textAlign: c.align, cursor: c.sortable ? "pointer" : "default" }}
@@ -331,7 +332,7 @@ function StatsStrip({
 // ---- Positions table (folded from PositionsPanel, now sortable via T16) ----
 
 function PositionsTable({
-  stores, commands, oc, palette, config, onConfigChange, venue, extBufferPct, onOpenSymbol,
+  stores, commands, oc, palette, config, onConfigChange, venue, extBufferPct, onOpenSymbol, availableWidth,
 }: {
   stores: PanelProps["stores"];
   commands: PanelProps["commands"];
@@ -342,6 +343,7 @@ function PositionsTable({
   venue: string;
   extBufferPct: number;
   onOpenSymbol: (symbol: string) => void;
+  availableWidth: number;
 }): JSX.Element {
   const toast = useToasts();
   const rows0 = stores.exec.positions().filter((p) => p.venue === venue && p.qty !== 0); // venue-scoped; NET (venue===null) rows drop out
@@ -349,7 +351,7 @@ function PositionsTable({
   const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
   const [selectedPosition, setSelectedPosition] = useState<string | null>(null);
   const [hoveredPosition, setHoveredPosition] = useState<string | null>(null);
-  const resize = useResizableColumns(config.settings, "posColumnWidths", COLUMNS, onConfigChange);
+  const resize = useResizableColumns(config.settings, "posColumnWidths", COLUMNS, onConfigChange, availableWidth);
   const masterArmed = !!status?.masterArmed;
 
   const rows = useMemo(() => sortRows(rows0, sort, {
@@ -449,8 +451,8 @@ function PositionsTable({
 
 const FILLS_DEFAULT_SORT: SortState = { col:"time", dir:"desc" };
 const FILLS_COLUMNS: ResizableColumn[] = [
-  { col:"symbol", label:"Symbol", defaultWidth:100 }, { col:"side", label:"Side", defaultWidth:80 }, { col:"qty", label:"Qty", defaultWidth:70 },
-  { col:"price", label:"Price", defaultWidth:90 }, { col:"time", label:"Time", defaultWidth:90 }, { col:"orderId", label:"Order ID", defaultWidth:160 },
+  { col:"symbol", label:"Symbol", defaultWidth:84, minWidth:68 }, { col:"side", label:"Side", defaultWidth:56, minWidth:48 }, { col:"qty", label:"Qty", defaultWidth:56, minWidth:48 },
+  { col:"price", label:"Price", defaultWidth:72, minWidth:60 }, { col:"time", label:"Time", defaultWidth:84, minWidth:68 }, { col:"orderId", label:"Order ID", defaultWidth:140, minWidth:100 },
 ];
 const FILLS_SORT_ACCESSORS: Record<string, (f:Fill) => number|string> = {
   symbol:(f) => bareSymbol(f.symbol), side:(f) => f.side, qty:(f) => f.qty,
@@ -462,12 +464,13 @@ function readFillsSort(settings:Record<string, unknown>):SortState {
   return raw && typeof raw.col === "string" && (raw.dir === "asc" || raw.dir === "desc") ? { col:raw.col, dir:raw.dir } : FILLS_DEFAULT_SORT;
 }
 
-function FillsTable({ stores, palette, venue, cycleStartMs, config, onConfigChange }: {
+function FillsTable({ stores, palette, venue, cycleStartMs, config, onConfigChange, availableWidth }: {
   stores: PanelProps["stores"]; palette: ReturnType<typeof useTheme>["palette"];
   venue: string; cycleStartMs:number; config:PanelProps["config"]; onConfigChange:PanelProps["onConfigChange"];
+  availableWidth: number;
 }): JSX.Element {
   const [sort, setSort] = useState<SortState>(() => readFillsSort(config.settings));
-  const resize = useResizableColumns(config.settings, "fillsColumnWidths", FILLS_COLUMNS, onConfigChange);
+  const resize = useResizableColumns(config.settings, "fillsColumnWidths", FILLS_COLUMNS, onConfigChange, availableWidth);
   const fills = sortRows(stores.fills.forVenue(venue, cycleStartMs), sort, FILLS_SORT_ACCESSORS);
   const cell = { textAlign:"center" as const, padding:"2px 8px" };
   const clickSort = (col:string) => { const next = toggleSort(sort, col); setSort(next); onConfigChange({ fillsSort:next }); };
@@ -489,7 +492,7 @@ function FillsTable({ stores, palette, venue, cycleStartMs, config, onConfigChan
 
 type Tab = "positions" | "history" | "fills";
 
-export function AccountPanel({ config, stores, commands, onConfigChange, linkGroups, group: groupProp, height }: PanelProps): JSX.Element {
+export function AccountPanel({ config, stores, commands, onConfigChange, linkGroups, group: groupProp, width, height }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
@@ -578,7 +581,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
     <div style={{ height: "100%", display: "flex", flexDirection: "column", background: palette.bg, color: palette.text, fontFamily: "inherit" }}>
       {actionsSlot === undefined ? headerActions : actionsSlot ? createPortal(headerActions, actionsSlot) : null}
       <StatsStrip stores={stores} palette={palette} venue={venue} />
-      <OrdersTable stores={stores} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} height={ordersHeight} />
+      <OrdersTable stores={stores} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} height={ordersHeight} availableWidth={width} />
       <div data-testid="orders-resize-handle" onMouseDown={startResize}
         style={{ height: 4, cursor: "row-resize", background: palette.border, flexShrink: 0 }} />
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
@@ -600,9 +603,9 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
             </div>
           )}
         </div>
-        {activeTab === "positions" ? <PositionsTable stores={stores} commands={commands} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} extBufferPct={extBufferPct} onOpenSymbol={openPositionSymbol} />
-          : activeTab === "history" ? <TradeHistoryTable stores={stores} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} />
-          : <FillsTable stores={stores} palette={palette} venue={venue} cycleStartMs={fillCycleStart} config={config} onConfigChange={onConfigChange} />}
+        {activeTab === "positions" ? <PositionsTable stores={stores} commands={commands} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} extBufferPct={extBufferPct} onOpenSymbol={openPositionSymbol} availableWidth={width} />
+          : activeTab === "history" ? <TradeHistoryTable stores={stores} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} availableWidth={width} />
+          : <FillsTable stores={stores} palette={palette} venue={venue} cycleStartMs={fillCycleStart} config={config} onConfigChange={onConfigChange} availableWidth={width} />}
       </div>
     </div>
   );

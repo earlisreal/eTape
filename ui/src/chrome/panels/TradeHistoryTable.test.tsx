@@ -37,14 +37,14 @@ function mkProps(settings: Record<string, unknown> = {}) {
 // TradeHistoryTable takes palette as a prop (AccountPanel resolves it once via
 // useTheme() and passes it down to every table, same as PositionsTable) — this
 // harness mirrors that call site inside a ThemeProvider.
-function Harness(props: { stores: PanelProps["stores"]; config: PanelProps["config"]; onConfigChange: PanelProps["onConfigChange"]; venue: string }) {
+function Harness(props: { stores: PanelProps["stores"]; config: PanelProps["config"]; onConfigChange: PanelProps["onConfigChange"]; venue: string; availableWidth: number }) {
   const { palette } = useTheme();
   return <TradeHistoryTable {...props} palette={palette} />;
 }
 function renderHarness(props: ReturnType<typeof mkProps>["props"], venue: string) {
   return render(
     <ThemeProvider>
-      <Harness stores={props.stores} config={props.config} onConfigChange={props.onConfigChange} venue={venue} />
+      <Harness stores={props.stores} config={props.config} onConfigChange={props.onConfigChange} venue={venue} availableWidth={props.width} />
     </ThemeProvider>,
   );
 }

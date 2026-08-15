@@ -4,13 +4,13 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { ColumnGroup, ColumnResizeHandle, useResizableColumns, type ResizableColumn } from "./ResizableColumns";
 
 const COLUMNS: ResizableColumn[] = [
-  { col: "symbol", label: "Symbol", defaultWidth: 100 },
-  { col: "qty", label: "Qty", defaultWidth: 80 },
+  { col: "symbol", label: "Symbol", defaultWidth: 100, minWidth: 48 },
+  { col: "qty", label: "Qty", defaultWidth: 80, minWidth: 48 },
 ];
 
-function Harness({ settings = {}, onConfigChange }: { settings?: Record<string, unknown>; onConfigChange: (patch: Record<string, unknown>) => void }) {
-  const resize = useResizableColumns(settings, "columnWidths", COLUMNS, onConfigChange);
-  return <table ref={resize.tableRef}>
+function Harness({ settings = {}, availableWidth, onConfigChange }: { settings?: Record<string, unknown>; availableWidth?: number; onConfigChange: (patch: Record<string, unknown>) => void }) {
+  const resize = useResizableColumns(settings, "columnWidths", COLUMNS, onConfigChange, availableWidth);
+  return <table ref={resize.tableRef} data-total-width={resize.totalWidth}>
     <ColumnGroup columns={COLUMNS} widths={resize.widths} />
     <thead><tr>{COLUMNS.map((column) => <th key={column.col} data-column={column.col}>
       {column.label}
@@ -29,14 +29,32 @@ describe("ResizableColumns", () => {
     const handle = screen.getByTestId("resize-symbol");
 
     fireEvent.mouseDown(handle, { clientX: 100 });
-    fireEvent.mouseMove(window, { clientX: 150 });
+    fireEvent.mouseMove(window, { clientX: 120 });
     fireEvent.mouseUp(window);
-    expect(changes.at(-1)).toEqual({ columnWidths: { symbol: 150, qty: 80 } });
+    expect(changes.at(-1)).toEqual({ columnWidths: { symbol: 120, qty: 60 } });
 
     fireEvent.mouseDown(handle, { clientX: 100 });
     fireEvent.mouseMove(window, { clientX: -500 });
     fireEvent.mouseUp(window);
-    expect(changes.at(-1)).toEqual({ columnWidths: { symbol: 48, qty: 80 } });
+    expect(changes.at(-1)).toEqual({ columnWidths: { symbol: 48, qty: 132 } });
+  });
+
+  it("fills a wide panel, compresses a narrow panel, then scrolls at the minimum", () => {
+    const changes: Array<Record<string, unknown>> = [];
+    const { rerender } = render(<Harness availableWidth={300} onConfigChange={(patch) => changes.push(patch)} />);
+    expect(screen.getByTestId("resize-symbol").getAttribute("aria-valuenow")).toBe("167");
+    expect(screen.getByTestId("resize-qty").getAttribute("aria-valuenow")).toBe("133");
+    expect(Number(screen.getByRole("table").getAttribute("data-total-width"))).toBeCloseTo(300, 5);
+
+    rerender(<Harness availableWidth={120} onConfigChange={(patch) => changes.push(patch)} />);
+    expect(screen.getByTestId("resize-symbol").getAttribute("aria-valuenow")).toBe("67");
+    expect(screen.getByTestId("resize-qty").getAttribute("aria-valuenow")).toBe("53");
+    expect(Number(screen.getByRole("table").getAttribute("data-total-width"))).toBeCloseTo(120, 5);
+
+    rerender(<Harness availableWidth={80} onConfigChange={(patch) => changes.push(patch)} />);
+    expect(screen.getByTestId("resize-symbol").getAttribute("aria-valuenow")).toBe("48");
+    expect(screen.getByTestId("resize-qty").getAttribute("aria-valuenow")).toBe("48");
+    expect(Number(screen.getByRole("table").getAttribute("data-total-width"))).toBeCloseTo(96, 5);
   });
 
   it("restores saved widths and auto-fits on double-click", () => {

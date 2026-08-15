@@ -750,7 +750,7 @@ describe("AccountPanel", () => {
       });
       fireEvent.click(screen.getByTestId("closed-orders-tab"));
       const table = screen.getByTestId("closed-orders-table");
-      expect(table.style.minWidth).toBe("1040px");
+      expect(Number.parseFloat(table.style.minWidth)).toBeCloseTo(800, 5);
       expect((table.querySelector("th") as HTMLElement).style.position).toBe("sticky");
       expect(table.textContent).toContain("08/15 09:31:42");
       expect(table.textContent).toContain("MKT");

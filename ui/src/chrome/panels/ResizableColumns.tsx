@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent, MouseEvent, RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { KeyboardEvent, MouseEvent, RefCallback } from "react";
 
 export type ResizableColumn = {
   col: string;
@@ -24,6 +24,50 @@ function readWidths(settings: Record<string, unknown>, settingsKey: string, colu
     const width = typeof value === "number" && Number.isFinite(value) ? value : column.defaultWidth;
     return [column.col, Math.max(minWidth(column), width)];
   }));
+}
+
+function fitWidths(baseWidths: ColumnWidths, availableWidth: number | undefined, columns: readonly ResizableColumn[]): ColumnWidths {
+  const baseTotal = columns.reduce((sum, column) => sum + baseWidths[column.col], 0);
+  if (!Number.isFinite(availableWidth) || (availableWidth ?? 0) <= 0 || baseTotal <= 0) return { ...baseWidths };
+
+  const minTotal = columns.reduce((sum, column) => sum + minWidth(column), 0);
+  if (availableWidth! <= minTotal) return Object.fromEntries(columns.map((column) => [column.col, minWidth(column)]));
+
+  const result: ColumnWidths = {};
+  let remainingWidth = availableWidth!;
+  let remainingBase = baseTotal;
+  let active = [...columns];
+  while (active.length > 0) {
+    const scale = remainingWidth / remainingBase;
+    const constrained = active.filter((column) => baseWidths[column.col] * scale < minWidth(column));
+    if (constrained.length === 0) {
+      for (const column of active) result[column.col] = baseWidths[column.col] * scale;
+      break;
+    }
+    for (const column of constrained) {
+      result[column.col] = minWidth(column);
+      remainingWidth -= result[column.col];
+      remainingBase -= baseWidths[column.col];
+    }
+    active = active.filter((column) => !constrained.includes(column));
+  }
+  return result;
+}
+
+function resizeWidths(current: ColumnWidths, columns: readonly ResizableColumn[], column: string, delta: number): ColumnWidths {
+  const targetIndex = columns.findIndex((candidate) => candidate.col === column);
+  if (targetIndex < 0) return current;
+  const neighborIndex = targetIndex === columns.length - 1 ? targetIndex - 1 : targetIndex + 1;
+  if (neighborIndex < 0) return { ...current, [column]: Math.max(minWidth(columns[targetIndex]), current[column] + delta) };
+
+  const target = columns[targetIndex];
+  const neighbor = columns[neighborIndex];
+  const targetWidth = current[target.col] ?? target.defaultWidth;
+  const neighborWidth = current[neighbor.col] ?? neighbor.defaultWidth;
+  const applied = delta >= 0
+    ? Math.min(delta, neighborWidth - minWidth(neighbor))
+    : Math.max(delta, minWidth(target) - targetWidth);
+  return { ...current, [target.col]: targetWidth + applied, [neighbor.col]: neighborWidth - applied };
 }
 
 function measureCell(cell: HTMLElement): number {
@@ -57,32 +101,52 @@ export function useResizableColumns(
   settingsKey: string,
   columns: readonly ResizableColumn[],
   onConfigChange: (patch: Record<string, unknown>) => void,
+  availableWidth?: number,
 ): {
-  tableRef: RefObject<HTMLTableElement | null>;
+  tableRef: RefCallback<HTMLTableElement>;
   widths: ColumnWidths;
   totalWidth: number;
   startResize: (column: string, event: MouseEvent<HTMLSpanElement>) => void;
   autoFit: (column: string) => void;
   onKeyDown: (column: string, event: KeyboardEvent<HTMLSpanElement>) => void;
 } {
-  const [widths, setWidths] = useState<ColumnWidths>(() => readWidths(settings, settingsKey, columns));
+  const [baseWidths, setBaseWidths] = useState<ColumnWidths>(() => readWidths(settings, settingsKey, columns));
+  const baseWidthsRef = useRef(baseWidths);
+  baseWidthsRef.current = baseWidths;
+  const [tableElement, setTableElement] = useState<HTMLTableElement | null>(null);
+  const tableRef = useCallback((element: HTMLTableElement | null) => setTableElement(element), []);
+  const [containerWidth, setContainerWidth] = useState(0);
+
+  useEffect(() => {
+    const container = tableElement?.parentElement;
+    if (!container) {
+      setContainerWidth(0);
+      return;
+    }
+    const updateWidth = () => setContainerWidth(container.clientWidth);
+    updateWidth();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [tableElement]);
+
+  const effectiveWidth = containerWidth > 0 ? containerWidth : availableWidth;
+  const widths = useMemo(() => fitWidths(baseWidths, effectiveWidth, columns), [baseWidths, effectiveWidth, columns]);
   const widthsRef = useRef(widths);
   widthsRef.current = widths;
-  const tableRef = useRef<HTMLTableElement>(null);
   const cleanupRef = useRef<((commit: boolean) => void) | null>(null);
 
   useEffect(() => () => cleanupRef.current?.(false), []);
 
-  const setLiveWidth = (column: string, width: number) => {
-    const next = { ...widthsRef.current, [column]: width };
-    widthsRef.current = next;
-    setWidths(next);
+  const setLiveWidths = (next: ColumnWidths) => {
+    baseWidthsRef.current = next;
+    setBaseWidths(next);
   };
 
-  const commitWidth = (column: string, width: number) => {
-    const next = { ...widthsRef.current, [column]: width };
-    widthsRef.current = next;
-    setWidths(next);
+  const commitWidths = (next: ColumnWidths) => {
+    baseWidthsRef.current = next;
+    setBaseWidths(next);
     onConfigChange({ [settingsKey]: next });
   };
 
@@ -91,13 +155,13 @@ export function useResizableColumns(
   const autoFit = (column: string) => {
     const definition = findColumn(column);
     if (!definition) return;
-    const cells = tableRef.current
-      ? Array.from(tableRef.current.querySelectorAll<HTMLElement>("[data-column]"))
+    const cells = tableElement
+      ? Array.from(tableElement.querySelectorAll<HTMLElement>("[data-column]"))
         .filter((cell) => cell.dataset.column === column)
       : [];
     const measured = cells.reduce((max, cell) => Math.max(max, measureCell(cell)), 0);
     const fallback = definition.label ? definition.label.length * 8 + 16 : definition.defaultWidth;
-    commitWidth(column, Math.max(minWidth(definition), Math.ceil(measured || fallback)));
+    commitWidths({ ...baseWidthsRef.current, [column]: Math.max(minWidth(definition), Math.ceil(measured || fallback)) });
   };
 
   const startResize = (column: string, event: MouseEvent<HTMLSpanElement>) => {
@@ -106,13 +170,13 @@ export function useResizableColumns(
     cleanupRef.current?.(false);
     event.preventDefault();
     const startX = event.clientX;
-    const startWidth = widthsRef.current[column] ?? definition.defaultWidth;
-    let finalWidth = startWidth;
+    const startWidths = { ...widthsRef.current };
+    let finalWidths = { ...baseWidthsRef.current };
     let active = true;
 
     const onMove = (moveEvent: globalThis.MouseEvent) => {
-      finalWidth = Math.max(minWidth(definition), startWidth + moveEvent.clientX - startX);
-      setLiveWidth(column, finalWidth);
+      finalWidths = resizeWidths(startWidths, columns, column, moveEvent.clientX - startX);
+      setLiveWidths(finalWidths);
     };
     const onUp = (commit: boolean) => {
       if (!active) return;
@@ -120,7 +184,7 @@ export function useResizableColumns(
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onMouseUp);
       cleanupRef.current = null;
-      if (commit) commitWidth(column, finalWidth);
+      if (commit) commitWidths(finalWidths);
     };
     const onMouseUp = () => onUp(true);
     cleanupRef.current = onUp;
@@ -141,13 +205,13 @@ export function useResizableColumns(
     if (!delta) return;
     event.preventDefault();
     event.stopPropagation();
-    commitWidth(column, Math.max(minWidth(definition), (widthsRef.current[column] ?? definition.defaultWidth) + delta));
+    commitWidths(resizeWidths(widthsRef.current, columns, column, delta));
   };
 
   return {
     tableRef,
     widths,
-    totalWidth: columns.reduce((sum, column) => sum + (widths[column.col] ?? column.defaultWidth), 0),
+    totalWidth: Math.round(columns.reduce((sum, column) => sum + (widths[column.col] ?? column.defaultWidth), 0)),
     startResize,
     autoFit,
     onKeyDown,
@@ -182,7 +246,7 @@ export function ColumnResizeHandle({
     onDoubleClick={(event) => { event.preventDefault(); event.stopPropagation(); onDoubleClick(); }}
     onKeyDown={onKeyDown}
     style={{
-      position: "absolute", top: 2, right: -3, bottom: 2, zIndex: 2, width: 6,
+      position: "absolute", top: 2, right: 0, bottom: 2, zIndex: 2, width: 6,
       cursor: "col-resize", touchAction: "none", userSelect: "none", opacity: 0.55,
       background: "linear-gradient(90deg, transparent 2px, currentColor 2px, currentColor 4px, transparent 4px)",
     }}

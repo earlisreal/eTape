@@ -28,15 +28,15 @@ function readSort(s: Record<string, unknown>): SortState {
 }
 
 const COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
-  { col: "symbol", label: "Symbol", defaultWidth: 100, align: "left", sortable: true },
-  { col: "venue", label: "Venue", defaultWidth: 120, align: "right", sortable: true },
-  { col: "qty", label: "Qty", defaultWidth: 70, align: "right", sortable: true },
-  { col: "entryPrice", label: "Entry", defaultWidth: 90, align: "right", sortable: true },
-  { col: "exitPrice", label: "Exit", defaultWidth: 90, align: "right", sortable: true },
-  { col: "realized", label: "Realized", defaultWidth: 100, align: "right", sortable: true },
-  { col: "openMs", label: "Opened", defaultWidth: 100, align: "right", sortable: true },
-  { col: "closeMs", label: "Closed", defaultWidth: 100, align: "right", sortable: true },
-  { col: "duration", label: "Duration", defaultWidth: 90, align: "right", sortable: true },
+  { col: "symbol", label: "Symbol", defaultWidth: 84, minWidth: 68, align: "left", sortable: true },
+  { col: "venue", label: "Venue", defaultWidth: 92, minWidth: 72, align: "right", sortable: true },
+  { col: "qty", label: "Qty", defaultWidth: 56, minWidth: 48, align: "right", sortable: true },
+  { col: "entryPrice", label: "Entry", defaultWidth: 72, minWidth: 60, align: "right", sortable: true },
+  { col: "exitPrice", label: "Exit", defaultWidth: 72, minWidth: 60, align: "right", sortable: true },
+  { col: "realized", label: "Realized", defaultWidth: 84, minWidth: 72, align: "right", sortable: true },
+  { col: "openMs", label: "Opened", defaultWidth: 84, minWidth: 72, align: "right", sortable: true },
+  { col: "closeMs", label: "Closed", defaultWidth: 84, minWidth: 72, align: "right", sortable: true },
+  { col: "duration", label: "Duration", defaultWidth: 76, minWidth: 64, align: "right", sortable: true },
 ];
 const SORT_ACCESSORS: Record<string, (r: ClosedTradeRow) => number | string | null> = {
   symbol: (r) => bareSymbol(r.symbol),
@@ -51,18 +51,19 @@ const SORT_ACCESSORS: Record<string, (r: ClosedTradeRow) => number | string | nu
 };
 
 export function TradeHistoryTable({
-  stores, palette, config, onConfigChange, venue,
+  stores, palette, config, onConfigChange, venue, availableWidth,
 }: {
   stores: PanelProps["stores"];
   palette: ReturnType<typeof useTheme>["palette"];
   config: PanelProps["config"];
   onConfigChange: PanelProps["onConfigChange"];
   venue: string;
+  availableWidth: number;
 }): JSX.Element {
   useSyncExternalStore((cb) => stores.trades.subscribe(cb), () => stores.trades.getSnapshot());
   const rows0 = stores.trades.trades().filter((r) => r.venue === venue);
   const [sort, setSort] = useState<SortState>(() => readSort(config.settings));
-  const resize = useResizableColumns(config.settings, "tradesColumnWidths", COLUMNS, onConfigChange);
+  const resize = useResizableColumns(config.settings, "tradesColumnWidths", COLUMNS, onConfigChange, availableWidth);
   const rows = useMemo(() => sortRows(rows0, sort, SORT_ACCESSORS), [rows0, sort]);
 
   const clickSort = (col: string, sortable: boolean) => {

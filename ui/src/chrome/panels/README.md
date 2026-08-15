@@ -12,7 +12,9 @@ backfills `QueryCycleFills` and merges deduplicated live `exec.fills`. Panels
 acquire/release topics and symbol demand; data stays in stores/controllers.
 [Account tables](./AccountPanel.tsx) persist independent column widths per
 table; drag a header separator to resize and double-click it to auto-fit. The
-widths are shared when switching the selected venue.
+widths are shared when switching the selected venue, then scale proportionally
+to the panel width with per-column minimums before horizontal scrolling is
+needed.
 [TradingView integration](tv/README.md) backs chart surface. Test: `npm test -- panels`.
 
 The Order Ticket embeds the Hotkey Deck beneath its manual action row. It
