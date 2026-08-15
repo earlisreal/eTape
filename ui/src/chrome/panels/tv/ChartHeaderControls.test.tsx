@@ -43,6 +43,12 @@ describe("ChartHeaderControls", () => {
     expect(base.onOpenSettings).toHaveBeenCalled();
   });
 
+  it("fires the timeframe callback from the narrow-layout dropdown", () => {
+    render(<ChartHeaderControls {...base} />);
+    fireEvent.change(screen.getByRole("combobox", { name: "timeframe" }), { target: { value: "15m" } });
+    expect(base.onTimeframe).toHaveBeenCalledWith("15m");
+  });
+
   it("opens an indicator dropdown on click, and picking an entry adds it and closes the dropdown", () => {
     render(<ChartHeaderControls {...base} />);
     const trigger = screen.getByRole("button", { name: "indicators" });

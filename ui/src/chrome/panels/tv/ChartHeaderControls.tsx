@@ -31,27 +31,34 @@ export function ChartHeaderControls(
     color: palette.textMuted, cursor: "pointer", fontSize: 11,
     fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontVariantNumeric: "tabular-nums" };
   const iconBtn: CSSProperties = { ...btn, padding: 3 };
+  const timeframeSelect: CSSProperties = { ...btn, display: undefined, padding: "1px 4px", fontWeight: 700, color: palette.accent };
   const sep = <div style={{ width: 1, height: 16, background: palette.border, margin: "0 4px", flex: "0 0 auto" }} />;
 
   return (
     <div className="chart-header-controls" style={{ display: "flex", alignItems: "center", gap: 2, flex: "1 1 auto", width: "100%", minWidth: 0, overflow: "hidden" }}>
-      <div className="chart-header-timeframes" style={{ display: "flex", alignItems: "center", gap: 2, flex: "1 1 auto", minWidth: 0, overflow: "hidden" }}>
-        {TIMEFRAMES.map((tf) => {
-          const on = tf === timeframe;
-          return (
-            <HoverButton key={tf} type="button" aria-label={`timeframe ${tf}`} aria-pressed={on} onClick={() => onTimeframe(tf)}
-              style={{ ...btn, fontWeight: on ? 700 : 500, color: on ? palette.accent : palette.textMuted }}
-              hoverStyle={{ background: palette.surface, color: on ? palette.accent : palette.text }}>
-              {tf}
-            </HoverButton>
-          );
-        })}
+      <div className="chart-header-timeframe-controls" style={{ display: "flex", alignItems: "center", gap: 2, flex: "1 1 auto", minWidth: 0, overflow: "hidden" }}>
+        <div className="chart-header-timeframes" style={{ alignItems: "center", gap: 2, flex: "1 1 auto", minWidth: 0, overflow: "hidden" }}>
+          {TIMEFRAMES.map((tf) => {
+            const on = tf === timeframe;
+            return (
+              <HoverButton key={tf} type="button" aria-label={`timeframe ${tf}`} aria-pressed={on} onClick={() => onTimeframe(tf)}
+                style={{ ...btn, fontWeight: on ? 700 : 500, color: on ? palette.accent : palette.textMuted }}
+                hoverStyle={{ background: palette.surface, color: on ? palette.accent : palette.text }}>
+                {tf}
+              </HoverButton>
+            );
+          })}
+        </div>
+        <select className="chart-header-timeframe-select" aria-label="timeframe" value={timeframe}
+          onChange={(e) => onTimeframe(e.currentTarget.value)} style={timeframeSelect}>
+          {TIMEFRAMES.map((tf) => <option key={tf} value={tf}>{tf}</option>)}
+        </select>
         {sep}
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 2, flex: "0 0 auto" }}>
-        <HoverButton ref={indicatorsBtnRef} type="button" aria-label="indicators" aria-haspopup="menu" aria-expanded={pickerOpen}
+        <HoverButton ref={indicatorsBtnRef} type="button" aria-label="indicators" title="Indicators" aria-haspopup="menu" aria-expanded={pickerOpen}
           onClick={() => setPickerOpen((v) => !v)} style={btn} hoverStyle={{ background: palette.surface, color: palette.text }}>
-          <IconIndicators size={13} /> Indicators
+          <IconIndicators size={13} /> <span className="chart-header-indicators-label">Indicators</span>
         </HoverButton>
         {pickerOpen && (
           <IndicatorPickerPopover palette={palette} anchor={indicatorsBtnRef.current} onClose={() => setPickerOpen(false)}
