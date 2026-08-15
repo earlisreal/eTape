@@ -84,6 +84,20 @@ describe("useHotkeys", () => {
     await act(async () => { fireEvent.keyDown(window, { key: "k", ctrlKey: true, shiftKey: true }); await Promise.resolve(); });
     expect(sent.some((s) => s.name === "KillSwitch")).toBe(true);
   });
+  it("fires Cancel Last through the shared action-feedback path", async () => {
+    const { sent, stores } = await setup(true);
+    stores.exec.apply({
+      kind: "snapshot", topic: "exec.orders" as never,
+      payload: [{
+        venue: "alpaca-paper", id: "ETX", symbol: "US.AAPL", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO",
+        qty: 1, limitPrice: 3.5, stopPrice: 0, status: "ACCEPTED", executedQty: 0, leavesQty: 1,
+        avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1,
+      }],
+    });
+    await act(async () => { fireEvent.keyDown(window, { key: "Backspace", ctrlKey: true }); await Promise.resolve(); });
+    expect(sent.some((s) => s.name === "CancelOrder" && (s.args as { orderId: string }).orderId === "ETX")).toBe(true);
+    expect(screen.getByRole("alert").textContent).toBe("Cancel Last requested — AAPL");
+  });
   it("blocks a scoped hotkey without a grouped target and shows a warning", async () => {
     const { sent } = await setup(true, null);
     await act(async () => { fireEvent.keyDown(window, { key: "1", ctrlKey: true }); await Promise.resolve(); });

@@ -13,9 +13,13 @@ function soundSpy(): SoundApi & { placed: string[]; rejected: number } {
   return s as SoundApi & { placed: string[]; rejected: number };
 }
 
-function fakes(ack: Partial<AckMsg> = {}) {
+function fakes(ack: Partial<AckMsg> | ((orderId: string) => Partial<AckMsg>) = {}) {
   const sent: Array<{ name: string; args: unknown }> = [];
-  const cmd: CommandAdapter = { sendCommand: vi.fn(async (name, args) => { sent.push({ name, args }); return { kind: "ack", corrId: "c1", status: "accepted", ...ack } as AckMsg; }) };
+  const cmd: CommandAdapter = { sendCommand: vi.fn(async (name, args) => {
+    sent.push({ name, args });
+    const extra = typeof ack === "function" ? ack((args as { orderId?: string }).orderId ?? "") : ack;
+    return { kind: "ack", corrId: "c1", status: "accepted", ...extra } as AckMsg;
+  }) };
   const exec = new ExecStore();
   const pushed: Array<{ level: string; text: string }> = [];
   const toast = { push: (t: { level: string; text: string }) => pushed.push(t), dismiss: () => {} };
@@ -75,6 +79,133 @@ describe("OrderCommands", () => {
     await oc.cancelAll("focused", "US.AAPL");
     expect(sent.map((s) => (s.args as { orderId: string }).orderId).sort()).toEqual(["ET1", "ET2"]);
   });
+  it("action Cancel Last acknowledges immediately and stays silent after an accepted ACK", async () => {
+    const { cmd, exec, pushed, oc } = fakes();
+    exec.apply(snap([order("ET1", { createdMs: 2 })]));
+    let resolveAck!: (ack: AckMsg) => void;
+    vi.mocked(cmd.sendCommand).mockImplementation(() => new Promise<AckMsg>((resolve) => { resolveAck = resolve; }));
+
+    const pending = oc.cancelLast("US.AAPL", { feedback: "action" });
+    expect(pushed).toEqual([{ level: "info", text: "Cancel Last requested — AAPL" }]);
+
+    resolveAck({ kind: "ack", corrId: "c1", status: "accepted" });
+    await pending;
+    expect(pushed).toHaveLength(1);
+  });
+  it("action Cancel Last reports an empty working set without sending", async () => {
+    const { sent, pushed, oc } = fakes();
+    await oc.cancelLast("US.AAPL", { feedback: "action" });
+    expect(sent).toHaveLength(0);
+    expect(pushed).toEqual([{ level: "info", text: "Cancel Last — no working order" }]);
+  });
+  it("action Cancel Last reports blocked and ambiguous outcomes once", async () => {
+    const blocked = fakes({ status: "blocked", reason: "master disarmed" });
+    blocked.exec.apply(snap([order("ET1")]));
+    await blocked.oc.cancelLast("US.AAPL", { feedback: "action" });
+    expect(blocked.pushed).toEqual([
+      { level: "info", text: "Cancel Last requested — AAPL" },
+      { level: "danger", text: "Cancel failed (alpaca-paper): master disarmed" },
+    ]);
+
+    const ambiguous = fakes({ ambiguous: true });
+    ambiguous.exec.apply(snap([order("ET2")]));
+    await ambiguous.oc.cancelLast("US.AAPL", { feedback: "action" });
+    expect(ambiguous.pushed).toEqual([
+      { level: "info", text: "Cancel Last requested — AAPL" },
+      { level: "warn", text: "Cancel outcome uncertain — AAPL" },
+    ]);
+  });
+  it("action Cancel Last uses the newest order's display symbol when no symbol is supplied", async () => {
+    const { sent, exec, pushed, oc } = fakes();
+    exec.apply(snap([
+      order("ET1", { symbol: "US.AAPL", createdMs: 10 }),
+      order("ET2", { symbol: "US.TSLA", createdMs: 20 }),
+    ]));
+    await oc.cancelLast("", { feedback: "action" });
+    expect(sent.at(-1)?.args).toEqual({ venue: "alpaca-paper", orderId: "ET2" });
+    expect(pushed[0]).toEqual({ level: "info", text: "Cancel Last requested — TSLA" });
+  });
+});
+
+describe("OrderCommands action Cancel All feedback", () => {
+  it("reports empty, focused, everything, singular, and plural scopes", async () => {
+    const empty = fakes();
+    await empty.oc.cancelAll("everything", undefined, { feedback: "action" });
+    expect(empty.sent).toHaveLength(0);
+    expect(empty.pushed).toEqual([{ level: "info", text: "Cancel All — no working orders" }]);
+
+    const plural = fakes();
+    plural.exec.apply(snap([order("ET1", { createdMs: 1 }), order("ET2", { createdMs: 2 })]));
+    await plural.oc.cancelAll("focused", "US.AAPL", { feedback: "action" });
+    expect(plural.pushed[0]).toEqual({ level: "info", text: "Cancel All requested — AAPL (2 orders)" });
+    plural.pushed.length = 0;
+    await plural.oc.cancelAll("everything", undefined, { feedback: "action" });
+    expect(plural.pushed[0]).toEqual({ level: "info", text: "Cancel All requested — 2 orders" });
+    plural.pushed.length = 0;
+    await plural.oc.cancelAll("focused", "", { feedback: "action" });
+    expect(plural.pushed[0]).toEqual({ level: "info", text: "Cancel All requested — 2 orders" });
+
+    const singular = fakes();
+    singular.exec.apply(snap([order("ET3")]));
+    await singular.oc.cancelAll("focused", "US.AAPL", { feedback: "action" });
+    expect(singular.pushed[0]).toEqual({ level: "info", text: "Cancel All requested — AAPL (1 order)" });
+  });
+  it("freezes the target count before requests complete", async () => {
+    const sent: Array<{ name: string; args: unknown }> = [];
+    const resolvers: Array<(ack: AckMsg) => void> = [];
+    const cmd: CommandAdapter = { sendCommand: vi.fn(async (name, args) => {
+      sent.push({ name, args });
+      return new Promise<AckMsg>((resolve) => { resolvers.push(resolve); });
+    }) };
+    const exec = new ExecStore();
+    const pushed: Array<{ level: string; text: string }> = [];
+    const oc = new OrderCommands({ cmd, exec, toast: { push: (t: { level: string; text: string }) => pushed.push(t), dismiss: () => {} } as never, now: () => 100 });
+    exec.apply(snap([order("ET1", { createdMs: 1 }), order("ET2", { createdMs: 2 })]));
+
+    const pending = oc.cancelAll("everything", undefined, { feedback: "action" });
+    expect(pushed).toEqual([{ level: "info", text: "Cancel All requested — 2 orders" }]);
+    expect(sent.map((s) => (s.args as { orderId: string }).orderId).sort()).toEqual(["ET1", "ET2"]);
+    exec.apply(snap([]));
+    resolvers[0]({ kind: "ack", corrId: "c1", status: "blocked", reason: "master disarmed" });
+    resolvers[1]({ kind: "ack", corrId: "c2", status: "accepted" });
+    await pending;
+    expect(pushed).toEqual([
+      { level: "info", text: "Cancel All requested — 2 orders" },
+      { level: "danger", text: "Cancel All incomplete — 1 of 2 failed: master disarmed" },
+    ]);
+  });
+  it("aggregates accepted, ambiguous, and blocked outcomes without per-order toast spam", async () => {
+    const ambiguous = fakes(() => ({ ambiguous: true }));
+    ambiguous.exec.apply(snap([order("ET1"), order("ET2"), order("ET3")]));
+    await ambiguous.oc.cancelAll("everything", undefined, { feedback: "action" });
+    expect(ambiguous.pushed).toEqual([
+      { level: "info", text: "Cancel All requested — 3 orders" },
+      { level: "warn", text: "Cancel All outcome uncertain — 3 of 3 requests could not be confirmed" },
+    ]);
+
+    const mixed = fakes((id) => id === "ET1"
+      ? { status: "blocked", reason: "master disarmed" }
+      : id === "ET2" ? { ambiguous: true } : {});
+    mixed.exec.apply(snap([order("ET1"), order("ET2"), order("ET3")]));
+    await mixed.oc.cancelAll("everything", undefined, { feedback: "action" });
+    expect(mixed.pushed).toEqual([
+      { level: "info", text: "Cancel All requested — 3 orders" },
+      { level: "danger", text: "Cancel All incomplete — 1 failed, 1 uncertain of 3: master disarmed" },
+    ]);
+  });
+  it("includes a common failure reason but omits different reasons", async () => {
+    const common = fakes((id) => id === "ET1" || id === "ET2" ? { status: "blocked", reason: "master disarmed" } : {});
+    common.exec.apply(snap([order("ET1"), order("ET2"), order("ET3")]));
+    await common.oc.cancelAll("everything", undefined, { feedback: "action" });
+    expect(common.pushed.at(-1)).toEqual({ level: "danger", text: "Cancel All incomplete — 2 of 3 failed: master disarmed" });
+
+    const different = fakes((id) => id === "ET1"
+      ? { status: "blocked", reason: "master disarmed" }
+      : id === "ET2" ? { status: "blocked", reason: "venue disconnected" } : {});
+    different.exec.apply(snap([order("ET1"), order("ET2"), order("ET3")]));
+    await different.oc.cancelAll("everything", undefined, { feedback: "action" });
+    expect(different.pushed.at(-1)).toEqual({ level: "danger", text: "Cancel All incomplete — 2 of 3 failed" });
+  });
 });
 
 describe("OrderCommands sound triggers", () => {
@@ -102,6 +233,15 @@ describe("OrderCommands sound triggers", () => {
     const oc2 = new OrderCommands({ cmd: blockCmd, exec: {} as never, toast: { push: vi.fn() } as never, now: () => 0, sound });
     await oc2.cancel("alpaca-paper", "o1");
     await oc2.replace({ venue: "alpaca-paper", orderId: "o1", qty: 1, limitPrice: 1, stopPrice: 0 });
+    expect(sound.rejected).toBe(2);
+  });
+  it("action Cancel All keeps per-request rejection sounds for blocked cancellations", async () => {
+    const sound = soundSpy();
+    const cmd: CommandAdapter = { sendCommand: vi.fn(async () => ({ kind: "ack", corrId: "c", status: "blocked", reason: "master disarmed" }) as AckMsg) };
+    const exec = new ExecStore();
+    exec.apply(snap([order("ET1"), order("ET2")]));
+    const oc = new OrderCommands({ cmd, exec, toast: { push: vi.fn() } as never, now: () => 0, sound });
+    await oc.cancelAll("everything", undefined, { feedback: "action" });
     expect(sound.rejected).toBe(2);
   });
 

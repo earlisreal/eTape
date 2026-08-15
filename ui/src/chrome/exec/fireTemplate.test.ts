@@ -110,32 +110,32 @@ describe("fireTemplate — place templates", () => {
 describe("fireTemplate — management templates", () => {
   const manage = (action: ManagementAction): ManagementTemplate => ({ kind: "manage", id: action, label: action, action });
 
-  it("CancelLast calls oc.cancelLast(symbol), even when disarmed", () => {
+  it("CancelLast opts into action feedback, even when disarmed", () => {
     const oc = makeOc();
     const toast = makeToast();
     fireTemplate(manage("CancelLast"), baseCtx({ armed: false, symbol: "US.AAPL" }), oc, toast, { gateArm: true });
-    expect(oc.cancelLast).toHaveBeenCalledWith("US.AAPL");
+    expect(oc.cancelLast).toHaveBeenCalledWith("US.AAPL", { feedback: "action" });
   });
 
-  it("CancelLast passes undefined for an empty symbol", () => {
+  it("CancelLast passes undefined for an empty symbol and opts into action feedback", () => {
     const oc = makeOc();
     const toast = makeToast();
     fireTemplate(manage("CancelLast"), baseCtx({ symbol: "" }), oc, toast, { gateArm: true });
-    expect(oc.cancelLast).toHaveBeenCalledWith(undefined);
+    expect(oc.cancelLast).toHaveBeenCalledWith(undefined, { feedback: "action" });
   });
 
-  it("CancelAllFocused calls oc.cancelAll('focused', symbol), even when disarmed", () => {
+  it("CancelAllFocused opts into action feedback, even when disarmed", () => {
     const oc = makeOc();
     const toast = makeToast();
     fireTemplate(manage("CancelAllFocused"), baseCtx({ armed: false, symbol: "US.AAPL" }), oc, toast, { gateArm: true });
-    expect(oc.cancelAll).toHaveBeenCalledWith("focused", "US.AAPL");
+    expect(oc.cancelAll).toHaveBeenCalledWith("focused", "US.AAPL", { feedback: "action" });
   });
 
-  it("CancelAllEverything calls oc.cancelAll('everything'), even when disarmed", () => {
+  it("CancelAllEverything opts into action feedback, even when disarmed", () => {
     const oc = makeOc();
     const toast = makeToast();
     fireTemplate(manage("CancelAllEverything"), baseCtx({ armed: false }), oc, toast, { gateArm: true });
-    expect(oc.cancelAll).toHaveBeenCalledWith("everything");
+    expect(oc.cancelAll).toHaveBeenCalledWith("everything", undefined, { feedback: "action" });
   });
 
   it("KillSwitch calls oc.kill() without an immediate success toast, even when disarmed", () => {

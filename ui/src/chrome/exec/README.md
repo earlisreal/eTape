@@ -15,7 +15,9 @@ Place, Cancel Last, and Cancel All Focused require a grouped target; focused can
 also require its symbol. Scoped bindings pause silently in modals and editable fields,
 and OS key-repeat is consumed. Kill Switch and Cancel All Everything remain available
 without a target, while disarmed, and during modal/editor focus. Arming, quote/pre-check
-validation, venue fallback, engine risk gates, sounds, and acknowledgements are unchanged.
+validation, venue fallback, engine risk gates, and sounds are unchanged. Action-template
+Cancel Last and Cancel All show immediate request feedback and aggregate blocked or
+ambiguous outcomes; ordinary Account-panel cancellation remains unchanged.
 
 Action Templates own the saved order recipe, hotkey, and optional Deck Button
 color. `OrderConfig.hotkeyDeck` owns the normalized, non-empty ordered Deck

@@ -146,6 +146,12 @@ describe("HotkeyDeck — click dispatch (real fireTemplate/resolvePlaceTemplate)
     expect(oc.kill).toHaveBeenCalledWith();
     expect(toast.push).not.toHaveBeenCalled();
   });
+  it("a Cancel Last Deck button opts into action feedback through fireTemplate", async () => {
+    const t = manage({ id: "cancel-last", label: "Cancel Last", action: "CancelLast", deck: true });
+    const { oc } = await setup([t], { rows: [["cancel-last"]], showHotkeyLabels: false });
+    fireEvent.click(screen.getByTestId("deck-cancel-last"));
+    expect(oc.cancelLast).toHaveBeenCalledWith("US.AAPL", { feedback: "action" });
+  });
 });
 
 describe("deckToneClass", () => {
