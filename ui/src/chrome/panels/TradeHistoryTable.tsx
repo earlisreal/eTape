@@ -84,9 +84,9 @@ export function TradeHistoryTable({
         <table ref={resize.tableRef} data-testid="trade-history-table" style={{ width: "100%", minWidth: resize.totalWidth, tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
           <ColumnGroup columns={COLUMNS} widths={resize.widths} />
           <thead>
-            <tr style={{ color: palette.textMuted, textAlign: "right" }}>
+            <tr style={{ color: palette.textMuted, textAlign: "center" }}>
               {COLUMNS.map((c) => (
-                <th key={c.col} data-column={c.col} style={{ ...th, textAlign: c.align, cursor: c.sortable ? "pointer" : "default" }}
+                <th key={c.col} data-column={c.col} style={{ ...th, textAlign: "center", cursor: c.sortable ? "pointer" : "default" }}
                   onClick={() => clickSort(c.col, c.sortable)}>
                   {c.label} {c.sortable ? sortIndicator(sort, c.col) : ""}
                   <ColumnResizeHandle column={c} width={resize.widths[c.col]} testId={`trades-resize-${c.col}`}
@@ -98,8 +98,8 @@ export function TradeHistoryTable({
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.seq} data-testid={`trade-${r.seq}`} style={{ textAlign: "right", borderTop: `1px solid ${palette.border}` }}>
-                <td data-column="symbol" style={{ textAlign: "left", padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
+              <tr key={r.seq} data-testid={`trade-${r.seq}`} style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
+                <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
                 <td data-column="venue" style={{ color: palette.textMuted }}>{r.venue}</td>
                 <td data-column="qty">{formatSize(r.qty)}</td>
                 <td data-column="entryPrice">{formatPrice(r.entryPrice, 2)}</td>

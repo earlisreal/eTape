@@ -207,8 +207,8 @@ function OrdersTable({
       {tab === "open" ? <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <table ref={openResize.tableRef} data-testid="open-orders-table" style={{ width: "100%", minWidth: openResize.totalWidth, tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
           <ColumnGroup columns={ORDERS_COLUMNS} widths={openResize.widths} />
-          <thead><tr style={{ color: palette.textMuted }}>
-            {ORDERS_COLUMNS.map((c) => <th key={c.col} data-column={c.col} style={{ ...th, textAlign: c.align, cursor: c.sortable ? "pointer" : "default" }} onClick={() => clickOpenSort(c.col, c.sortable)}
+          <thead><tr style={{ color: palette.textMuted, textAlign: "center" }}>
+            {ORDERS_COLUMNS.map((c) => <th key={c.col} data-column={c.col} style={{ ...th, textAlign: "center", cursor: c.sortable ? "pointer" : "default" }} onClick={() => clickOpenSort(c.col, c.sortable)}
               className={`col-head${c.sortable && openSort?.col === c.col && !(c.col === "createdMs" && openSort.dir === "desc") ? " sort-active" : ""}`}>
               {c.label} {c.sortable && openSort?.col === c.col && !(c.col === "createdMs" && openSort.dir === "desc") ? sortIndicator(openSort, c.col) : ""}
               <ColumnResizeHandle column={c} width={openResize.widths[c.col]} testId={`open-orders-resize-${c.col}`}
@@ -220,11 +220,11 @@ function OrdersTable({
             const ds = displayStatus(order, optimistic);
             const variant = chipVariant(ds);
             const working = !optimistic && isWorking(order.status);
-            return <tr key={order.id} style={{ borderTop: `1px solid ${palette.border}` }}>
+            return <tr key={order.id} style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
               <td data-column="createdMs" style={{ padding: "2px 8px" }}>{formatEtDateTime(order.createdMs)}</td>
               <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
               <td data-column="side" style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
-              <td data-column="qty" style={{ textAlign: "right" }}>{formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)} @ {orderInstructionPrice(order)}</td>
+              <td data-column="qty">{formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)} @ {orderInstructionPrice(order)}</td>
               <td data-column="state">{variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
                 : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}</td>
               <td data-column="actions">{(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
@@ -235,8 +235,8 @@ function OrdersTable({
       </div> : <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <table ref={closedResize.tableRef} data-testid="closed-orders-table" style={{ width: "100%", minWidth: closedResize.totalWidth, tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
           <ColumnGroup columns={CLOSED_COLUMNS} widths={closedResize.widths} />
-          <thead><tr style={{ color: palette.textMuted }}>
-            {CLOSED_COLUMNS.map((c) => <th key={c.col} data-column={c.col} style={{ ...th, textAlign: c.align, cursor: c.sortable ? "pointer" : "default" }}
+          <thead><tr style={{ color: palette.textMuted, textAlign: "center" }}>
+            {CLOSED_COLUMNS.map((c) => <th key={c.col} data-column={c.col} style={{ ...th, textAlign: "center", cursor: c.sortable ? "pointer" : "default" }}
               onClick={() => clickClosedSort(c.col, c.sortable)} className={`col-head${c.sortable && closedSort?.col === c.col && !(c.col === "updatedMs" && closedSort.dir === "desc") ? " sort-active" : ""}`}>
               {c.label} {c.sortable && closedSort?.col === c.col && !(c.col === "updatedMs" && closedSort.dir === "desc") ? sortIndicator(closedSort, c.col) : ""}
               <ColumnResizeHandle column={c} width={closedResize.widths[c.col]} testId={`closed-orders-resize-${c.col}`}
@@ -248,14 +248,14 @@ function OrdersTable({
             const danger = order.status === "REJECTED" || order.status === "BLOCKED";
             const muted = order.status === "CANCELED" || order.status === "EXPIRED" || order.status === "REPLACED";
             const reason = order.rejectReason || "—";
-            return <tr key={order.id} style={{ borderTop: `1px solid ${palette.border}` }}>
+            return <tr key={order.id} style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
               <td data-column="updatedMs" style={{ padding: "2px 8px" }}>{formatEtDateTime(order.updatedMs)}</td>
               <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
               <td data-column="side" style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
-              <td data-column="qty" style={{ textAlign: "right" }}>{formatSize(order.qty)}</td>
-              <td data-column="executedQty" style={{ textAlign: "right" }}>{formatSize(order.executedQty)}</td>
-              <td data-column="price" style={{ textAlign: "right" }}>{orderInstructionPrice(order)}</td>
-              <td data-column="avgFillPrice" style={{ textAlign: "right" }}>{order.executedQty > 0 ? formatPrice(order.avgFillPrice, 3) : "—"}</td>
+              <td data-column="qty">{formatSize(order.qty)}</td>
+              <td data-column="executedQty">{formatSize(order.executedQty)}</td>
+              <td data-column="price">{orderInstructionPrice(order)}</td>
+              <td data-column="avgFillPrice">{order.executedQty > 0 ? formatPrice(order.avgFillPrice, 3) : "—"}</td>
               <td data-column="state">{danger ? <span className="chip chip-rejected" data-chip="rejected">{STATUS_LABEL[order.status]}</span>
                 : <span style={{ color: muted ? palette.textMuted : palette.text }}>{STATUS_LABEL[order.status]}</span>}</td>
               <td data-column="reason" style={{ maxWidth: 180 }}><span title={order.rejectReason || undefined} style={{ display: "block", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{reason}</span></td>
@@ -398,9 +398,9 @@ function PositionsTable({
         <table ref={resize.tableRef} style={{ width: "100%", minWidth: resize.totalWidth, tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
           <ColumnGroup columns={COLUMNS} widths={resize.widths} />
           <thead>
-            <tr style={{ color: palette.textMuted, textAlign: "right" }}>
+            <tr style={{ color: palette.textMuted, textAlign: "center" }}>
               {COLUMNS.map((c) => (
-                <th key={c.col} data-column={c.col} style={{ ...th, textAlign: c.align, cursor: c.sortable ? "pointer" : "default" }}
+                <th key={c.col} data-column={c.col} style={{ ...th, textAlign: "center", cursor: c.sortable ? "pointer" : "default" }}
                   onClick={() => clickSort(c.col, c.sortable)}>
                   {c.label} {c.sortable ? sortIndicator(sort, c.col) : ""}
                   <ColumnResizeHandle column={c} width={resize.widths[c.col]} testId={`positions-resize-${c.col}`}
@@ -421,10 +421,10 @@ function PositionsTable({
                   onDoubleClick={() => onOpenSymbol(r.symbol)}
                   onMouseEnter={() => setHoveredPosition(positionKey)}
                   onMouseLeave={() => setHoveredPosition((key) => key === positionKey ? null : key)}
-                  style={{ cursor: "pointer", textAlign: "right", userSelect: "none", borderTop: `1px solid ${palette.border}`, fontWeight: net ? 700 : 400,
+                  style={{ cursor: "pointer", textAlign: "center", userSelect: "none", borderTop: `1px solid ${palette.border}`, fontWeight: net ? 700 : 400,
                     background: selected ? "rgba(154,106,27,.16)" : hoveredPosition === positionKey ? "rgba(154,106,27,.06)" : "transparent",
                     boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : "none", transition: "background 120ms ease" }}>
-                  <td data-column="symbol" style={{ textAlign: "left", padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
+                  <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
                   <td data-column="venue" style={{ color: palette.textMuted }}>{net ? "NET" : r.venue}</td>
                   <td data-column="qty" style={{ color: r.qty >= 0 ? palette.up : palette.down }}>{formatSize(r.qty)}</td>
                   <td data-column="avgPrice">{formatPrice(r.avgPrice, 2)}</td>
@@ -513,7 +513,8 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   const [exportOpen, setExportOpen] = useState(false);
   const exportBtnRef = useRef<HTMLButtonElement | null>(null);
   const venueSelect = (
-    <select data-testid="acct-venue" className="ctl mono" value={venue} onChange={(e) => selectVenue(e.target.value)}>
+    <select data-testid="acct-venue" className="ctl mono" value={venue} onChange={(e) => selectVenue(e.target.value)}
+      style={{ padding: "2px 9px", margin: "1px 0" }}>
       {venues.map((v) => <option key={v} value={v}>{v}</option>)}
     </select>
   );

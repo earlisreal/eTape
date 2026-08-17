@@ -498,7 +498,7 @@ export function PanelFrame(
   return (
     <div className={active ? "panel-focused" : undefined} style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {headerHost ? createPortal(header, headerHost) : header}
-      <div ref={hostRef} data-testid="panel-body" style={{ flex: 1, minHeight: 0 }}>
+      <div ref={hostRef} data-testid="panel-body" style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
         <ErrorBoundary label={config.panelId}>
           <PanelHeaderSlotContext.Provider value={def?.headerControls ? headerSlot : undefined}>
             <PanelHeaderActionsSlotContext.Provider value={def?.headerActions ? actionsSlot : undefined}>
