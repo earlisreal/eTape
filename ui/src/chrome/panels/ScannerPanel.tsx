@@ -99,29 +99,42 @@ export function ScannerPanel(
     [{ label: `Add ${bareSymbol(sym)} to watchlist`, onClick: () => void commands.sendCommand("WatchlistAdd", { symbol: sym }) }];
 
   const sessionLabel = cv.session ? SESSION_LABEL[cv.session] : null;
+  const syncStatus = scannerSync && (scannerSync.statusVisible ?? scannerSync.selected)
+    && scannerSync.status.kind !== "disabled"
+    && (scannerSync.status.targetCount > 0 || scannerSync.status.kind === "paused")
+    ? scannerSync.status.kind === "paused" ? "Paused" : `${scannerSync.status.availableCount}/${scannerSync.status.targetCount}`
+    : null;
   const syncControl = scannerSync && (
-    <span data-testid="scanner-sync-control" style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0 }}>
+    <div data-testid="scanner-sync-control" style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 8px", borderBottom: `1px solid ${palette.border}`, minWidth: 0 }}>
       {scannerSync.selected ? (
-        <button type="button" aria-label={scannerSync.enabled ? "Disable Scanner Sync" : "Enable Scanner Sync"}
-          title={scannerSync.enabled ? "Disable Scanner Sync" : "Enable Scanner Sync"} onClick={scannerSync.onToggle}
-          style={{ border: "none", background: "transparent", color: scannerSync.enabled ? palette.accent : palette.textMuted, cursor: "pointer", padding: "2px 0", whiteSpace: "nowrap" }}>
-          {scannerSync.enabled ? "Sync on" : "Sync off"}
-        </button>
+        <>
+          <span className="mono" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Sync to Following</span>
+          <span style={{ flex: 1, minWidth: 0 }} />
+          <button type="button" aria-label={scannerSync.enabled ? "Disable Scanner Sync" : "Enable Scanner Sync"}
+            aria-pressed={scannerSync.enabled} title={scannerSync.enabled ? "Disable Scanner Sync" : "Enable Scanner Sync"} onClick={scannerSync.onToggle}
+            style={{ display: "inline-flex", alignItems: "center", gap: 3, border: `1px solid ${scannerSync.enabled ? palette.accent : palette.border}`, borderRadius: 3, background: palette.surface, color: scannerSync.enabled ? palette.accent : palette.textMuted, cursor: "pointer", padding: "2px 5px", fontFamily: FONTS.mono, fontSize: 11, lineHeight: 1, whiteSpace: "nowrap", flex: "0 0 auto" }}>
+            <span aria-hidden="true">{scannerSync.enabled ? "●" : "○"}</span>
+            <span>{scannerSync.enabled ? "ON" : "OFF"}</span>
+          </button>
+        </>
       ) : (
-        <button type="button" aria-label="Follow Monitoring" title="Use this Scanner as the Monitoring Source" onClick={scannerSync.onSelect}
-          style={{ border: "none", background: "transparent", color: palette.textMuted, cursor: "pointer", padding: "2px 0", whiteSpace: "nowrap" }}>
-          Follow Monitoring
-        </button>
+        <>
+          <span className="mono" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Monitoring source</span>
+          <span style={{ flex: 1, minWidth: 0 }} />
+          <button type="button" aria-label="Use this Scanner as Monitoring Source" title="Use this Scanner as the Monitoring Source" onClick={scannerSync.onSelect}
+            style={{ border: `1px solid ${palette.border}`, borderRadius: 3, background: palette.surface, color: palette.textMuted, cursor: "pointer", padding: "2px 5px", fontFamily: FONTS.mono, fontSize: 11, lineHeight: 1, whiteSpace: "nowrap", flex: "0 0 auto" }}>
+            Use this Scanner
+          </button>
+        </>
       )}
-      {(scannerSync.statusVisible ?? scannerSync.selected) && (scannerSync.status.targetCount > 0 || scannerSync.status.kind === "paused") && <span className="mono" aria-live="polite" style={{ color: palette.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{scannerSyncStatusText(scannerSync.status)}</span>}
-    </span>
+      {syncStatus && <span className="mono" aria-live="polite" title={scannerSync.status.kind === "paused" ? scannerSyncStatusText(scannerSync.status) : undefined} style={{ color: palette.textMuted, whiteSpace: "nowrap", flex: "0 0 auto" }}>{syncStatus}</span>}
+    </div>
   );
   const headerControls = (
     <div data-testid="scanner-header-controls" style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0, flex: 1 }}>
       <span className="serif" style={{ fontWeight: 600, whiteSpace: "nowrap" }}>Scanner</span>
       {sessionLabel && <span className="mono" style={{ color: palette.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>· <span>{sessionLabel}</span></span>}
       <span style={{ flex: 1 }} />
-      {syncControl}
       <button type="button" aria-label="filters" aria-expanded={filtersOpen} title="Filters"
         onClick={() => (filtersOpen ? setFiltersOpen(false) : openFilters())}
         style={{ position: "relative", display: "inline-flex", border: "none", background: "transparent", color: palette.textMuted, cursor: "pointer", padding: 3, flex: "0 0 auto" }}>
@@ -153,8 +166,9 @@ export function ScannerPanel(
           </div>
         </div>
       )}
+      {syncControl}
       {(
-        <div className="mono" style={{ padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>
+        <div data-testid="scanner-filter-summary" className="mono" style={{ padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>
           {filters.mode === "most_active" ? `Most active${cv.session === "rth" ? "" : " · approximate"}` : filters.mode === "gainers" ? "Top gainers" : "Top losers"} · {formatFilterSummary({ minChangePct: filters.mode === "most_active" ? 0 : filters.minChangePct, floatCapShares: filters.maxFloatShares, minVolume: filters.minVolume })}
         </div>
       )}

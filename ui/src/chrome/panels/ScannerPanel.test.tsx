@@ -52,17 +52,30 @@ describe("ScannerPanel", () => {
 
   it("keeps session and the icon-only Filters button in the panel header", () => {
     const slot = document.body.appendChild(document.createElement("div"));
-    const { scanner, container, unmount } = renderPanel({}, undefined, slot);
+    const { scanner, container, unmount } = renderPanel({}, undefined, slot, {
+      selected: true,
+      enabled: true,
+      status: { kind: "following", availableCount: 4, targetCount: 4 },
+      onSelect: vi.fn(),
+      onToggle: vi.fn(),
+    });
     try {
       act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
         payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [] } }));
       expect(within(slot).getByText("Scanner")).toBeTruthy();
       expect(within(slot).getByText("Pre-market")).toBeTruthy();
+      expect(within(slot).queryByText("Sync to Following")).toBeNull();
+      expect(within(slot).queryByText("4/4")).toBeNull();
       expect(within(slot).queryByText(/updated/i)).toBeNull();
       const filters = within(slot).getByRole("button", { name: "filters" });
       expect(filters.textContent).toBe("");
       fireEvent.click(filters);
       expect(within(container).getByText(/updated/i)).toBeTruthy();
+      const sync = within(container).getByTestId("scanner-sync-control");
+      const summary = within(container).getByTestId("scanner-filter-summary");
+      const table = within(container).getByRole("table");
+      expect(sync.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(summary.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     } finally {
       unmount();
       slot.remove();
@@ -79,7 +92,7 @@ describe("ScannerPanel", () => {
       onSelect,
       onToggle,
     });
-    fireEvent.click(screen.getByRole("button", { name: "Follow Monitoring" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use this Scanner as Monitoring Source" }));
     expect(onSelect).toHaveBeenCalledOnce();
     cleanup();
 
@@ -90,9 +103,89 @@ describe("ScannerPanel", () => {
       onSelect,
       onToggle,
     });
-    expect(screen.getByText("Following 4/4")).toBeTruthy();
+    expect(screen.getByText("4/4")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Disable Scanner Sync" }));
     expect(onToggle).toHaveBeenCalledOnce();
+  });
+
+  it("renders selected Sync as an accessible compact toggle", () => {
+    const onToggle = vi.fn();
+    renderPanel({}, undefined, undefined, {
+      selected: true,
+      enabled: true,
+      status: { kind: "following", availableCount: 4, targetCount: 4 },
+      onSelect: vi.fn(),
+      onToggle,
+    });
+    expect(screen.getByText("Sync to Following")).toBeTruthy();
+    expect(screen.getByText("ON")).toBeTruthy();
+    expect(screen.getByText("4/4")).toBeTruthy();
+    const toggle = screen.getByRole("button", { name: "Disable Scanner Sync" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(toggle);
+    expect(onToggle).toHaveBeenCalledOnce();
+  });
+
+  it("renders disabled Sync as OFF without a redundant status", () => {
+    renderPanel({}, undefined, undefined, {
+      selected: true,
+      enabled: false,
+      status: { kind: "disabled", availableCount: 0, targetCount: 4 },
+      onSelect: vi.fn(),
+      onToggle: vi.fn(),
+    });
+    expect(screen.getByText("OFF")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Enable Scanner Sync" }).getAttribute("aria-pressed")).toBe("false");
+    expect(screen.queryByText("Sync off")).toBeNull();
+  });
+
+  it("renders incomplete coverage as a count without repeating Following", () => {
+    renderPanel({}, undefined, undefined, {
+      selected: true,
+      enabled: true,
+      status: { kind: "incomplete", availableCount: 3, targetCount: 6 },
+      onSelect: vi.fn(),
+      onToggle: vi.fn(),
+    });
+    expect(screen.getByText("3/6")).toBeTruthy();
+    expect(screen.queryByText("Following 3/6")).toBeNull();
+  });
+
+  it("renders paused Sync compactly while retaining the detailed reason", () => {
+    renderPanel({}, undefined, undefined, {
+      selected: true,
+      enabled: true,
+      status: { kind: "paused", availableCount: 0, targetCount: 0, reason: "targets" },
+      onSelect: vi.fn(),
+      onToggle: vi.fn(),
+    });
+    expect(screen.getByText("Paused").getAttribute("title")).toBe("Paused — add a pinned Chart Panel");
+    cleanup();
+
+    renderPanel({}, undefined, undefined, {
+      selected: true,
+      enabled: true,
+      status: { kind: "paused", availableCount: 0, targetCount: 6, reason: "rows" },
+      onSelect: vi.fn(),
+      onToggle: vi.fn(),
+    });
+    expect(screen.getByText("Paused").getAttribute("title")).toBe("Paused — waiting for Scanner rows");
+  });
+
+  it("offers a non-selected Scanner as the Monitoring source without a toggle", () => {
+    const onSelect = vi.fn();
+    renderPanel({}, undefined, undefined, {
+      selected: false,
+      enabled: false,
+      status: { kind: "disabled", availableCount: 0, targetCount: 4 },
+      onSelect,
+      onToggle: vi.fn(),
+    });
+    expect(screen.getByText("Monitoring source")).toBeTruthy();
+    expect(screen.getByText("Use this Scanner")).toBeTruthy();
+    expect(screen.queryByText("ON")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Use this Scanner as Monitoring Source" }));
+    expect(onSelect).toHaveBeenCalledOnce();
   });
 
   it("renders the symbol column without the US. market prefix", () => {

@@ -360,7 +360,7 @@ describe("AppShell group-symbol persistence (Bug 5: refresh resetting a grouped 
 });
 
 describe("AppShell Monitoring Scanner Sync", () => {
-  it("offers Follow Monitoring from a Scanner in another workspace", async () => {
+  it("offers a Scanner as the Monitoring source from another workspace", async () => {
     const seed: Workspace = {
       name: "trading-window",
       layoutVersion: 8,
@@ -369,7 +369,7 @@ describe("AppShell Monitoring Scanner Sync", () => {
     };
     mount(seed, { workspaceName: "trading-window" });
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "Follow Monitoring" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Use this Scanner as Monitoring Source" })).toBeTruthy());
   });
 
   it("keeps a cross-window source by identity through close, deletion, replacement, and restart", async () => {
@@ -424,8 +424,8 @@ describe("AppShell Monitoring Scanner Sync", () => {
 
     const monitor = mountWindow("monitoring");
     const sourceWindow = mountWindow("source-window");
-    await waitFor(() => expect(within(sourceWindow.container).getByRole("button", { name: "Follow Monitoring" })).toBeTruthy());
-    fireEvent.click(within(sourceWindow.container).getByRole("button", { name: "Follow Monitoring" }));
+    await waitFor(() => expect(within(sourceWindow.container).getByRole("button", { name: "Use this Scanner as Monitoring Source" })).toBeTruthy());
+    fireEvent.click(within(sourceWindow.container).getByRole("button", { name: "Use this Scanner as Monitoring Source" }));
     await waitFor(() => expect(docs.get("monitoring")?.scannerSync).toEqual({
       enabled: true, sourceWorkspaceId: "source-window", sourcePanelId: "source-scanner",
     }));
@@ -453,7 +453,7 @@ describe("AppShell Monitoring Scanner Sync", () => {
     sourceStore.save({ ...source, panels: [] });
     await sourceStore.flush();
     expect(docs.get("monitoring")?.scannerSync?.sourceWorkspaceId).toBe("source-window");
-    await waitFor(() => expect(within(monitor.container).getByText("Paused — Scanner Source unavailable")).toBeTruthy());
+    await waitFor(() => expect(within(monitor.container).getByText("Paused").getAttribute("title")).toBe("Paused — Scanner Source unavailable"));
     act(() => monitor.stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
       refreshedAt: "2026-08-15T08:00:30.000Z",
       rows: [{ symbol: "US.C", changePct: 9, last: 1, floatShares: 1, volume: 1 }],
@@ -462,8 +462,8 @@ describe("AppShell Monitoring Scanner Sync", () => {
     expect(docs.get("monitoring")?.panels.find((panel) => panel.id === "m-chart-red")?.settings.symbol).toBe("US.B");
 
     const replacementWindow = mountWindow("replacement-window");
-    await waitFor(() => expect(within(replacementWindow.container).getByRole("button", { name: "Follow Monitoring" })).toBeTruthy());
-    fireEvent.click(within(replacementWindow.container).getByRole("button", { name: "Follow Monitoring" }));
+    await waitFor(() => expect(within(replacementWindow.container).getByRole("button", { name: "Use this Scanner as Monitoring Source" })).toBeTruthy());
+    fireEvent.click(within(replacementWindow.container).getByRole("button", { name: "Use this Scanner as Monitoring Source" }));
     await waitFor(() => expect(docs.get("monitoring")?.scannerSync).toEqual({
       enabled: true, sourceWorkspaceId: "replacement-window", sourcePanelId: "replacement-scanner",
     }));
@@ -481,9 +481,9 @@ describe("AppShell Monitoring Scanner Sync", () => {
 
   it("persists source selection, follows ranked rows, preserves chart settings, and remembers Sync off", async () => {
     const { saved, stores } = mount(buildMonitoringWorkspace(), { workspaceName: "monitoring" });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Follow Monitoring" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Use this Scanner as Monitoring Source" })).toBeTruthy());
 
-    fireEvent.click(screen.getByRole("button", { name: "Follow Monitoring" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use this Scanner as Monitoring Source" }));
     await waitFor(() => expect(saved.some((workspace) => workspace.scannerSync?.enabled && workspace.scannerSync.sourcePanelId === "m-scanner")).toBe(true));
 
     act(() => stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
@@ -506,8 +506,8 @@ describe("AppShell Monitoring Scanner Sync", () => {
 
   it("excludes linked charts from the target count", async () => {
     const { saved, stores } = mount(buildMonitoringWorkspace(), { workspaceName: "monitoring" });
-    await waitFor(() => expect(screen.getByRole("button", { name: "Follow Monitoring" })).toBeTruthy());
-    fireEvent.click(screen.getByRole("button", { name: "Follow Monitoring" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Use this Scanner as Monitoring Source" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Use this Scanner as Monitoring Source" }));
 
     act(() => stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
       refreshedAt: "2026-08-15T08:00:00.000Z",
