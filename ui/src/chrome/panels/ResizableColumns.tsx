@@ -26,12 +26,15 @@ function readWidths(settings: Record<string, unknown>, settingsKey: string, colu
   }));
 }
 
-function fitWidths(baseWidths: ColumnWidths, availableWidth: number | undefined, columns: readonly ResizableColumn[]): ColumnWidths {
+function fitWidths(baseWidths: ColumnWidths, availableWidth: number | undefined, columns: readonly ResizableColumn[], preserveOverflow: boolean): ColumnWidths {
   const baseTotal = columns.reduce((sum, column) => sum + baseWidths[column.col], 0);
   if (!Number.isFinite(availableWidth) || (availableWidth ?? 0) <= 0 || baseTotal <= 0) return { ...baseWidths };
 
   const minTotal = columns.reduce((sum, column) => sum + minWidth(column), 0);
-  if (availableWidth! <= minTotal) return Object.fromEntries(columns.map((column) => [column.col, minWidth(column)]));
+  if (preserveOverflow && baseTotal > availableWidth!) return { ...baseWidths };
+  if (availableWidth! <= minTotal) {
+    return preserveOverflow ? { ...baseWidths } : Object.fromEntries(columns.map((column) => [column.col, minWidth(column)]));
+  }
 
   const result: ColumnWidths = {};
   let remainingWidth = availableWidth!;
@@ -58,16 +61,29 @@ function resizeWidths(current: ColumnWidths, columns: readonly ResizableColumn[]
   const targetIndex = columns.findIndex((candidate) => candidate.col === column);
   if (targetIndex < 0) return current;
   const neighborIndex = targetIndex === columns.length - 1 ? targetIndex - 1 : targetIndex + 1;
-  if (neighborIndex < 0) return { ...current, [column]: Math.max(minWidth(columns[targetIndex]), current[column] + delta) };
-
   const target = columns[targetIndex];
-  const neighbor = columns[neighborIndex];
   const targetWidth = current[target.col] ?? target.defaultWidth;
-  const neighborWidth = current[neighbor.col] ?? neighbor.defaultWidth;
-  const applied = delta >= 0
-    ? Math.min(delta, neighborWidth - minWidth(neighbor))
-    : Math.max(delta, minWidth(target) - targetWidth);
-  return { ...current, [target.col]: targetWidth + applied, [neighbor.col]: neighborWidth - applied };
+  if (delta < 0) {
+    const applied = Math.max(delta, minWidth(target) - targetWidth);
+    if (neighborIndex < 0) return { ...current, [column]: targetWidth + applied };
+    const neighbor = columns[neighborIndex];
+    const neighborWidth = current[neighbor.col] ?? neighbor.defaultWidth;
+    return { ...current, [target.col]: targetWidth + applied, [neighbor.col]: neighborWidth - applied };
+  }
+
+  const next = { ...current, [target.col]: targetWidth + delta };
+  const donorIndexes = [neighborIndex, ...columns.map((_, index) => index).filter((index) => index !== targetIndex && index !== neighborIndex)]
+    .filter((index) => index >= 0);
+  let remaining = delta;
+  for (const donorIndex of donorIndexes) {
+    const donor = columns[donorIndex];
+    const donorWidth = current[donor.col] ?? donor.defaultWidth;
+    const taken = Math.min(remaining, Math.max(0, donorWidth - minWidth(donor)));
+    next[donor.col] = donorWidth - taken;
+    remaining -= taken;
+    if (remaining <= 0) break;
+  }
+  return next;
 }
 
 function measureCell(cell: HTMLElement): number {
@@ -113,6 +129,8 @@ export function useResizableColumns(
   const [baseWidths, setBaseWidths] = useState<ColumnWidths>(() => readWidths(settings, settingsKey, columns));
   const baseWidthsRef = useRef(baseWidths);
   baseWidthsRef.current = baseWidths;
+  const savedWidths = settings[settingsKey];
+  const [preserveOverflow, setPreserveOverflow] = useState(() => Boolean(savedWidths && typeof savedWidths === "object" && Object.keys(savedWidths).length > 0));
   const [tableElement, setTableElement] = useState<HTMLTableElement | null>(null);
   const tableRef = useCallback((element: HTMLTableElement | null) => setTableElement(element), []);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -132,7 +150,7 @@ export function useResizableColumns(
   }, [tableElement]);
 
   const effectiveWidth = containerWidth > 0 ? containerWidth : availableWidth;
-  const widths = useMemo(() => fitWidths(baseWidths, effectiveWidth, columns), [baseWidths, effectiveWidth, columns]);
+  const widths = useMemo(() => fitWidths(baseWidths, effectiveWidth, columns, preserveOverflow), [baseWidths, effectiveWidth, columns, preserveOverflow]);
   const widthsRef = useRef(widths);
   widthsRef.current = widths;
   const cleanupRef = useRef<((commit: boolean) => void) | null>(null);
@@ -140,11 +158,13 @@ export function useResizableColumns(
   useEffect(() => () => cleanupRef.current?.(false), []);
 
   const setLiveWidths = (next: ColumnWidths) => {
+    setPreserveOverflow(true);
     baseWidthsRef.current = next;
     setBaseWidths(next);
   };
 
   const commitWidths = (next: ColumnWidths) => {
+    setPreserveOverflow(true);
     baseWidthsRef.current = next;
     setBaseWidths(next);
     onConfigChange({ [settingsKey]: next });
@@ -171,7 +191,7 @@ export function useResizableColumns(
     event.preventDefault();
     const startX = event.clientX;
     const startWidths = { ...widthsRef.current };
-    let finalWidths = { ...baseWidthsRef.current };
+    let finalWidths = { ...startWidths };
     let active = true;
 
     const onMove = (moveEvent: globalThis.MouseEvent) => {
