@@ -22,6 +22,10 @@ Issue status uses the five default canonical triage roles. See `docs/agents/tria
 
 This repository uses a single-context domain layout. See `docs/agents/domain.md`.
 
+### Skill resolution
+
+Explicit skill paths are authoritative: verify and read the referenced `SKILL.md` before deciding availability. Treat any skills it references as active dependencies and read them before proceeding; absence from the catalog alone is insufficient.
+
 ## Invariants
 
 - High-frequency data never flows through React state. Stores/controllers mutate imperatively; canvas/chart rendering coalesces work.
