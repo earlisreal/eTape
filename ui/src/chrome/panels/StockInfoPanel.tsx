@@ -5,6 +5,7 @@ import { formatTapeTime, formatPrice, QUOTE_DECIMALS } from "../../render/format
 import { appendSsrMarker, formatCompactShares } from "../format";
 import type { Palette } from "../../render/palette";
 import { bareSymbol } from "../exec/orderStatus";
+import { openNewsWindow } from "../windows";
 
 // Mirrors the engine default; classification stays exclusively in the engine.
 const CATALYST_MIN_SCORE = 50;
@@ -276,7 +277,7 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, s
                 }}>
                 {typeBadge(it.type, palette)}
                 {catalystBadge(it.catalyst_category, palette)}
-                <a href={it.url} onClick={(e) => { e.preventDefault(); window.open(it.url, "_blank", "noopener,noreferrer"); }}
+                <a href={it.url} onClick={(e) => { e.preventDefault(); openNewsWindow(it.url); }}
                   style={{ color: palette.accent, textDecoration: "none", cursor: "pointer" }}>{it.headline}</a>
                 <div className="mono" style={{ marginTop: 2 }}>
                   <span style={{ color: meta.today ? palette.accent : palette.textMuted }}>{meta.label}</span>

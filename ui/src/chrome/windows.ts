@@ -1,4 +1,9 @@
 const WORKSPACE_ID_RE = /^[a-z0-9-]{1,64}$/;
+const NEWS_WINDOW_TARGET = "etape-news-reader";
+const NEWS_WINDOW_WIDTH = 1100;
+const NEWS_WINDOW_HEIGHT = 800;
+
+let newsWindow: Window | null = null;
 
 /** Parse `?workspace=<id>`; default `main`; accepts catalog UUIDs. */
 export function parseWorkspaceName(search: string): string {
@@ -21,6 +26,38 @@ export function workspaceUrl(id: string, href = window.location.href): string {
 
 export function openWorkspaceWindow(id: string): Window | null {
   return window.open(workspaceUrl(id), workspaceWindowTarget(id));
+}
+
+export function openNewsWindow(url: string): Window | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+
+  if (newsWindow && !newsWindow.closed) {
+    newsWindow.location.href = url;
+    newsWindow.focus();
+    return newsWindow;
+  }
+
+  const left = Math.round(window.screenX + (window.outerWidth - NEWS_WINDOW_WIDTH) / 2);
+  const top = Math.round(window.screenY + (window.outerHeight - NEWS_WINDOW_HEIGHT) / 2);
+  newsWindow = window.open(url, NEWS_WINDOW_TARGET, [
+    "popup=yes",
+    `width=${NEWS_WINDOW_WIDTH}`,
+    `height=${NEWS_WINDOW_HEIGHT}`,
+    `left=${left}`,
+    `top=${top}`,
+    "resizable=yes",
+    "scrollbars=yes",
+    "noopener",
+    "noreferrer",
+  ].join(","));
+  newsWindow?.focus();
+  return newsWindow;
 }
 
 /** Lowest free `window-N` (N starts at 2; `main` is window 1). */

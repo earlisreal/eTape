@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { render, screen, act, fireEvent } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { LinkGroups } from "../linkGroups";
 import { makeStores } from "../../data/registry";
 import { StockInfoPanel, newsDateLabel } from "./StockInfoPanel";
+import { openNewsWindow } from "../windows";
 import type { PanelProps } from "./registry";
 import type { PanelConfig } from "../workspace";
 import type { AckMsg, NewsItem, StockDetailPayload, SnapshotMsg } from "../../wire/contract";
@@ -39,6 +40,12 @@ const detailPayload = (symbol: string, overrides: Partial<StockDetailPayload> = 
   ...overrides,
 });
 const detailSnap = (p: unknown) => ({ kind: "snapshot", topic: "stock.detail", payload: p } as SnapshotMsg);
+
+let lastPopup: { closed: boolean } | undefined;
+afterEach(() => {
+  if (lastPopup) lastPopup.closed = true;
+  vi.restoreAllMocks();
+});
 
 describe("newsDateLabel", () => {
   it("labels today vs older dates", () => {
@@ -87,16 +94,83 @@ describe("StockInfoPanel", () => {
     expect(screen.getAllByText(/\d{2}:\d{2}:\d{2}/).length).toBeGreaterThan(0);
   });
 
-  it("clicking a headline opens its url", () => {
+  it("clicking a headline opens its url in the centered News Reader popup", () => {
     const { news, linkGroups } = renderPanel();
     const open = vi.spyOn(window, "open").mockReturnValue(null);
+    Object.defineProperties(window, {
+      screenX: { configurable: true, value: 100 },
+      screenY: { configurable: true, value: 40 },
+      outerWidth: { configurable: true, value: 1400 },
+      outerHeight: { configurable: true, value: 1200 },
+    });
     act(() => {
       news.apply({ kind: "snapshot", topic: "news.item", payload: [
         newsItem("US.AAPL", "https://x/a", "t", { headline: "H" })] });
       linkGroups.focus("green", "US.AAPL");
     });
     fireEvent.click(screen.getByText("H"));
-    expect(open).toHaveBeenCalledWith("https://x/a", "_blank", "noopener,noreferrer");
+    expect(open).toHaveBeenCalledWith(
+      "https://x/a",
+      "etape-news-reader",
+      "popup=yes,width=1100,height=800,left=250,top=240,resizable=yes,scrollbars=yes,noopener,noreferrer",
+    );
+  });
+
+  it("reuses and focuses the News Reader for another headline", () => {
+    const { news, linkGroups } = renderPanel();
+    const popup = { closed: false, focus: vi.fn(), location: { href: "" } };
+    lastPopup = popup;
+    const open = vi.spyOn(window, "open").mockReturnValue(popup as unknown as Window);
+    act(() => {
+      news.apply({ kind: "snapshot", topic: "news.item", payload: [
+        newsItem("US.AAPL", "https://x/a", "t1", { headline: "H1" }),
+        newsItem("US.AAPL", "https://x/b", "t2", { headline: "H2" }),
+      ] });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    fireEvent.click(screen.getByText("H1"));
+    fireEvent.click(screen.getByText("H2"));
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(popup.location.href).toBe("https://x/b");
+    expect(popup.focus).toHaveBeenCalledTimes(2);
+  });
+
+  it("recreates the News Reader after it closes", () => {
+    const { news, linkGroups } = renderPanel();
+    const first = { closed: false, focus: vi.fn(), location: { href: "" } };
+    const second = { closed: false, focus: vi.fn(), location: { href: "" } };
+    lastPopup = second;
+    const open = vi.spyOn(window, "open")
+      .mockReturnValueOnce(first as unknown as Window)
+      .mockReturnValueOnce(second as unknown as Window);
+    act(() => {
+      news.apply({ kind: "snapshot", topic: "news.item", payload: [
+        newsItem("US.AAPL", "https://x/a", "t1", { headline: "H1" }),
+        newsItem("US.AAPL", "https://x/b", "t2", { headline: "H2" }),
+      ] });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    fireEvent.click(screen.getByText("H1"));
+    first.closed = true;
+    fireEvent.click(screen.getByText("H2"));
+    expect(open).toHaveBeenCalledTimes(2);
+    expect(open.mock.calls[1][0]).toBe("https://x/b");
+  });
+
+  it("rejects malformed and non-HTTP news URLs without opening a window", () => {
+    const { news, linkGroups } = renderPanel();
+    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    act(() => {
+      news.apply({ kind: "snapshot", topic: "news.item", payload: [
+        newsItem("US.AAPL", "javascript:alert(1)", "t1", { headline: "Bad scheme" }),
+        newsItem("US.AAPL", "not a url", "t2", { headline: "Malformed" }),
+      ] });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    fireEvent.click(screen.getByText("Bad scheme"));
+    fireEvent.click(screen.getByText("Malformed"));
+    expect(open).not.toHaveBeenCalled();
+    expect(openNewsWindow("ftp://x/a")).toBeNull();
   });
 
   it("shows an empty state when the focused symbol has no news", () => {
