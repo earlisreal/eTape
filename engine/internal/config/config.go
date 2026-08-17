@@ -155,9 +155,10 @@ type News struct {
 // StockInfo is the [stockinfo] section: Qot_GetSecuritySnapshot (3203) fundamentals
 // + Qot_GetOwnerPlate (3207) industry lookup for the focused-symbol Stock Info panel.
 type StockInfo struct {
-	Enabled   bool `toml:"enabled"`
-	RefreshMs int  `toml:"refresh_ms"`  // snapshot+industry refresh interval
-	MaxPerReq int  `toml:"max_per_req"` // codes per 3203/3207 request (snapshot caps at 400)
+	Enabled       bool `toml:"enabled"`
+	RefreshMs     int  `toml:"refresh_ms"`     // snapshot+industry refresh interval
+	MaxPerReq     int  `toml:"max_per_req"`    // codes per 3203/3207 request (snapshot caps at 400)
+	YahooMetadata bool `toml:"yahoo_metadata"` // best-effort Yahoo profile country/sector/industry fallback
 }
 
 // Watchlist is the [watchlist] section: Qot_GetSecuritySnapshot (3203) batch
@@ -240,7 +241,7 @@ func Default() Config {
 			MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000,
 		},
 		News:      News{Enabled: true, YahooEnabled: false, WatchMs: 3100, ActiveRefreshMs: 10000, ScannerRefreshMs: 60000, MaxPerReq: 50, MaxAgeHours: 96, CatalystMinScore: 50},
-		StockInfo: StockInfo{Enabled: true, RefreshMs: 15000, MaxPerReq: 400},
+		StockInfo: StockInfo{Enabled: true, RefreshMs: 15000, MaxPerReq: 400, YahooMetadata: true},
 		Watchlist: Watchlist{Enabled: true, PollMs: 3000},
 		Health:    Health{Enabled: true, ProbeMs: 5000},
 		Backfill: Backfill{Enabled: true, TenSecondDays: 0, IntradayDays: 70, DailyYears: 0, Concurrency: 3,

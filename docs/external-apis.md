@@ -13,10 +13,13 @@
   provider](../engine/internal/hist/alpaca/README.md).
 - **TradeZero:** live REST execution plus portfolio WebSocket events. No market-data dependency. See [adapter](../engine/internal/broker/tradezero/README.md).
 - **Yahoo Finance:** unauthenticated fallback daily history plus an
-  off-by-default, experimental headline supplement (`[news].yahoo_enabled`).
-  It follows the existing `US.<ticker>` news rotation and is not a source of
-  intraday bars. See [news](../engine/internal/news/README.md) and
-  [history provider](../engine/internal/hist/yahoo/README.md).
+  off-by-default, experimental headline supplement (`[news].yahoo_enabled`),
+  plus the optional Stock Info profile metadata path
+  (`[stockinfo].yahoo_metadata`, enabled by default). The profile endpoint is
+  undocumented and best-effort: Country and Sector are cached daily, and
+  Industry is used only when Moomoo's Industry plate is blank. It follows the
+  existing `US.<ticker>` symbol convention and is never part of the quote
+  path. See [news](../engine/internal/news/README.md), [history provider](../engine/internal/hist/yahoo/README.md), and [Stock Info](../engine/internal/stockinfo/README.md).
 
 ## Contract facts
 

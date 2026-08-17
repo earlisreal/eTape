@@ -52,6 +52,26 @@ _Avoid_: Active scanner, selected scanner
 A symbol-bearing panel that displays fundamentals and news for the focused symbol of its selected Link Group. It is not a Scanner Sync target.
 _Avoid_: News panel
 
+**Operating Country**:
+The company profile country associated with the issuer's primary operating or headquarters location; it is not the listing market or legal incorporation jurisdiction.
+_Avoid_: Incorporation country, listing country
+
+**Sector**:
+A broad provider classification of a company's business; it is distinct from a narrower Industry classification and is not assumed to be GICS unless the source says so.
+_Avoid_: Industry, sub-sector
+
+**Industry**:
+A provider-specific business classification for a company; it is narrower than Sector and is not interchangeable with it.
+_Avoid_: Sector
+
+**Free Float**:
+Shares available for public trading rather than held by restricted or controlling owners.
+_Avoid_: Free-float market cap
+
+**Free-Float Market Cap**:
+The market value calculated from the share price multiplied by Free Float shares.
+_Avoid_: Free Float
+
 ## Order Entry
 
 **Action Template**:

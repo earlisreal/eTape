@@ -9,7 +9,6 @@ import { openNewsWindow } from "../windows";
 import type { PanelProps } from "./registry";
 import type { PanelConfig } from "../workspace";
 import type { AckMsg, NewsItem, StockDetailPayload, SnapshotMsg } from "../../wire/contract";
-import { formatPrice, QUOTE_DECIMALS } from "../../render/format";
 
 function fakeBus() {
   const subs = new Set<(m: unknown) => void>();
@@ -33,7 +32,7 @@ const newsItem = (symbol: string, url: string, seen_at: string, overrides: Parti
   ({ id: url, symbols: [symbol], headline: "h", source: "R", url, seen_at, published_at: "", published_precision: "unknown", view_count: 0, type: "news", catalyst_category: "earnings", catalyst_score: 65, catalyst_reasons: [], ...overrides });
 
 const detailPayload = (symbol: string, overrides: Partial<StockDetailPayload> = {}): StockDetailPayload => ({
-  symbol, shortSellRestricted: false, name: `${symbol} Inc`, industry: "Tech", exchange: "NASDAQ", price: 10, lastClose: 9.5, changePct: 5.2,
+  symbol, shortSellRestricted: false, name: `${symbol} Inc`, industry: "Software", country: "United States", sector: "Technology", exchange: "NASDAQ", price: 10, lastClose: 9.5, changePct: 5.2,
   marketCap: 3_210_000_000_000, floatMarketCap: 900_000_000, sharesOutstanding: 22_700_000, floatShares: 20_000_000,
   pe: 20, peTTM: 21, eps: 0.5, high52: 15, low52: 5, ema200: 145.5, volume: 1000, refreshedAt: "t1",
   borrowStatus: null, shortable: null, marginable: null, tradable: null,
@@ -230,7 +229,7 @@ describe("StockInfoPanel fundamentals section", () => {
     expect(document.body.textContent).not.toContain("▼");
   });
 
-  it("formats market cap, free float cap, free float, and volume with a compact magnitude suffix", () => {
+  it("does not render removed market, float, or volume fields", () => {
     const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.MSFT", {
@@ -239,57 +238,48 @@ describe("StockInfoPanel fundamentals section", () => {
       })));
       linkGroups.focus("green", "US.MSFT");
     });
-    expect(screen.getByText("3.21T")).toBeTruthy();
-    expect(screen.getByText("1.5B")).toBeTruthy();
-    expect(screen.getByText("900K")).toBeTruthy();
-    expect(screen.getByText("Volume")).toBeTruthy();
-    expect(screen.getByText("1K")).toBeTruthy();
+    expect(screen.queryByText("Mkt cap")).toBeNull();
+    expect(screen.queryByText("Free float cap")).toBeNull();
+    expect(screen.queryByText("Free Float")).toBeNull();
+    expect(screen.queryByText("Volume")).toBeNull();
   });
 
-  it("renders the 52-week range at QUOTE_DECIMALS", () => {
-    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
-    act(() => {
-      stockDetail.apply(detailSnap(detailPayload("US.MSFT", { low52: 5, high52: 15 })));
-      linkGroups.focus("green", "US.MSFT");
-    });
-    expect(document.body.textContent).toContain("5.000–15.000");
-  });
-
-  it("renders the renamed Free Float / Free float cap labels, and no longer renders Float, Shares out, P/E · TTM, or EPS", () => {
+  it("renders Country, Sector, Industry, and Exchange", () => {
     const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.MSFT")));
       linkGroups.focus("green", "US.MSFT");
     });
-    expect(screen.getByText("Free Float")).toBeTruthy();
-    expect(screen.getByText("Free float cap")).toBeTruthy();
-    expect(screen.queryByText(/^Float$/)).toBeNull();
-    expect(screen.queryByText(/^Float cap$/)).toBeNull();
-    expect(screen.queryByText(/shares out/i)).toBeNull();
-    expect(screen.queryByText(/P\/E/i)).toBeNull();
-    expect(screen.queryByText(/^EPS$/)).toBeNull();
+    expect(screen.getByText("Country")).toBeTruthy();
+    expect(screen.getByText("United States")).toBeTruthy();
+    expect(screen.getByText("Sector")).toBeTruthy();
+    expect(screen.getByText("Technology")).toBeTruthy();
+    expect(screen.getByText("Industry")).toBeTruthy();
+    expect(screen.getByText("Software")).toBeTruthy();
+    expect(screen.getByText("Exchange")).toBeTruthy();
   });
 
-  it("renders Exchange and EMA 200 cells with their values", () => {
+  it("does not render EMA 200 or the 52-week range", () => {
     const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.MSFT", { exchange: "NASDAQ", ema200: 145.5 })));
       linkGroups.focus("green", "US.MSFT");
     });
-    expect(screen.getByText("Exchange")).toBeTruthy();
     expect(screen.getByText("NASDAQ")).toBeTruthy();
-    expect(screen.getByText("EMA 200")).toBeTruthy();
-    expect(document.body.textContent).toContain(formatPrice(145.5, QUOTE_DECIMALS));
+    expect(screen.queryByText("EMA 200")).toBeNull();
+    expect(screen.queryByText("52wk")).toBeNull();
   });
 
-  it("renders a bare dash (not N/A) for empty exchange/industry and a null EMA 200", () => {
+  it("hides missing Country and Sector rows and renders a bare dash for empty Industry/Exchange", () => {
     const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
-      stockDetail.apply(detailSnap(detailPayload("US.MSFT", { exchange: "", industry: "", ema200: null })));
+      stockDetail.apply(detailSnap(detailPayload("US.MSFT", { exchange: "", industry: "", country: "", sector: "" })));
       linkGroups.focus("green", "US.MSFT");
     });
     expect(screen.queryByText(/N\/A/i)).toBeNull();
-    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3); // exchange + industry + ema200
+    expect(screen.queryByText("Country")).toBeNull();
+    expect(screen.queryByText("Sector")).toBeNull();
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2); // exchange + industry
   });
 
   it("does not render an in-body 'Stock Info' header line once a symbol is focused (the dockview tab already shows it)", () => {
@@ -388,35 +378,33 @@ describe("StockInfoPanel details collapse (compact-by-default)", () => {
     expect(screen.queryByText("NOT Tradeable")).toBeNull();
   });
 
-  it("shows the derived SSR marker in the expanded header and omits it when unrestricted", () => {
+  it("omits Symbol and its SSR marker from the expanded header", () => {
     const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.NVDA", { shortSellRestricted: true })));
       linkGroups.focus("green", "US.NVDA");
     });
-    expect(screen.getByText("NVDA**")).toBeTruthy();
-    act(() => stockDetail.apply(detailSnap(detailPayload("US.NVDA", { shortSellRestricted: false }))));
-    expect(screen.getByText("NVDA")).toBeTruthy();
     expect(screen.queryByText("NVDA**")).toBeNull();
+    expect(screen.queryByText("NVDA", { exact: true })).toBeNull();
   });
 
-  it("defaults to a single collapsed row (name · industry · Flt · EMA200) with no price/change and no grid", () => {
+  it("defaults to a single collapsed row (name · sector) with no price/change and no grid", () => {
     const { stockDetail, linkGroups } = renderPanel();
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.AAPL", {
-        industry: "Technology", floatShares: 15_000_000_000, ema200: 198.3, changePct: 5.2,
+        industry: "Software", sector: "Technology", floatShares: 15_000_000_000, ema200: 198.3, changePct: 5.2,
       })));
       linkGroups.focus("green", "US.AAPL");
     });
     expect(screen.getByText("US.AAPL Inc")).toBeTruthy();
     expect(screen.getByText("Technology")).toBeTruthy();
-    expect(screen.getByText("15.0B")).toBeTruthy();
-    expect(document.body.textContent).toContain(formatPrice(198.3, QUOTE_DECIMALS));
-    // Grid-only labels absent when collapsed:
+    expect(screen.queryByText("Software")).toBeNull();
+    // Grid-only labels and removed compact fields absent when collapsed:
     expect(screen.queryByText("Mkt cap")).toBeNull();
     expect(screen.queryByText("Exchange")).toBeNull();
     expect(screen.queryByText("52wk")).toBeNull();
     expect(screen.queryByText("Volume")).toBeNull();
+    expect(screen.queryByText("EMA 200")).toBeNull();
     // No price/change treatment when collapsed:
     expect(document.body.textContent).not.toContain("▲");
     expect(document.body.textContent).not.toContain("▼");
@@ -430,9 +418,9 @@ describe("StockInfoPanel details collapse (compact-by-default)", () => {
     });
     fireEvent.click(screen.getByRole("button", { name: /toggle fundamentals/i }));
 
-    expect(screen.getByText("Mkt cap")).toBeTruthy();
+    expect(screen.getByText("Country")).toBeTruthy();
     expect(screen.getByText("Exchange")).toBeTruthy();
-    expect(screen.getByText("Volume")).toBeTruthy();
+    expect(screen.getByText("Sector")).toBeTruthy();
     expect(document.body.textContent).toContain("▲ 5.20%");
     expect(onConfigChange).toHaveBeenCalledWith({ detailsCollapsed: false });
   });
@@ -443,17 +431,17 @@ describe("StockInfoPanel details collapse (compact-by-default)", () => {
       stockDetail.apply(detailSnap(detailPayload("US.MSFT")));
       linkGroups.focus("green", "US.MSFT");
     });
-    expect(screen.getByText("Mkt cap")).toBeTruthy();
+    expect(screen.getByText("Country")).toBeTruthy();
   });
 
-  it("collapsed row shows a bare dash (not N/A) for empty industry, null free float, and null EMA 200", () => {
+  it("collapsed row omits an unavailable Sector", () => {
     const { stockDetail, linkGroups } = renderPanel();
     act(() => {
-      stockDetail.apply(detailSnap(detailPayload("US.MSFT", { industry: "", floatShares: null, ema200: null })));
+      stockDetail.apply(detailSnap(detailPayload("US.MSFT", { sector: "" })));
       linkGroups.focus("green", "US.MSFT");
     });
     expect(screen.queryByText(/N\/A/i)).toBeNull();
-    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3); // industry + float + ema200
+    expect(screen.queryByText("Sector")).toBeNull();
   });
 
   it.each([

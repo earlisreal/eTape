@@ -1,11 +1,13 @@
-// Package stockinfo is the poll-only stock-fundamentals + industry fetcher
+// Package stockinfo is the poll-only stock-fundamentals + metadata fetcher
 // for the Stock Info panel. It combines three request/
 // response moomoo protocols — Qot_GetSecuritySnapshot (3203: price, market
 // cap, float, PE, EPS, 52-week range), Qot_GetOwnerPlate (3207: industry/
 // sector plate lookup), and Qot_GetStaticInfo (3202: listing exchange) —
 // plus a locally-computed 200-day EMA from the daily bar archive. Alpaca asset
 // metadata is supplemental: boot loads one active-assets snapshot, and each
-// tick applies its in-memory status lookup while building the payload.
+// tick applies its in-memory status lookup while building the payload. Optional
+// Yahoo profile metadata is resolved asynchronously and cached for slow-moving
+// country/sector/industry enrichment.
 //
 // Rate-limit note: one 3203 request per RefreshMs tick per MaxPerReq-sized
 // chunk of symbols (fundamentals refresh every tick, no caching); 3207 and
@@ -99,7 +101,8 @@ type ema200Entry struct {
 // symbol in symbols() every tick, industry/exchange for symbols not yet
 // cached, and EMA-200 at most once per UTC day per symbol (it reads the daily
 // bar archive, which only advances once per session). Alpaca metadata is a
-// startup snapshot looked up in memory while building each payload.
+// startup snapshot looked up in memory while building each payload; Yahoo
+// profile metadata is a slow, optional cache and never runs on the quote path.
 type Poller struct {
 	cfg         config.StockInfo
 	r           requester
@@ -111,6 +114,7 @@ type Poller struct {
 	industry    map[string]string      // symbol -> resolved industry name; "" = known-absent
 	exch        map[string]string      // symbol -> resolved exchange label; "" = known-absent/unresolvable
 	ema         map[string]ema200Entry // symbol -> last-computed EMA-200, day-stamped
+	yahoo       *yahooMetadataCache
 	ssr         shortSellRestrictionResolver
 }
 
@@ -119,11 +123,15 @@ func New(cfg config.StockInfo, r requester, pub Publisher, clk clock.Clock, symb
 	if len(ssr) > 0 {
 		resolver = ssr[0]
 	}
-	return &Poller{
+	p := &Poller{
 		cfg: cfg, r: r, pub: pub, clk: clk, bars: bars, symbols: symbols,
 		assetReader: assetReader, ssr: resolver,
 		industry: map[string]string{}, exch: map[string]string{}, ema: map[string]ema200Entry{},
 	}
+	if cfg.YahooMetadata {
+		p.yahoo = newYahooMetadataCache("", clk, nil)
+	}
+	return p
 }
 
 func (p *Poller) Run(ctx context.Context) error {
@@ -164,6 +172,9 @@ func (p *Poller) fetchTick(ctx context.Context) {
 		payload := snapshotToPayload(snap.GetBasic(), snap.GetEquityExData(), p.industry[sym], refreshedAt)
 		payload.Symbol = sym
 		payload.Exchange = p.exch[sym]
+		if p.yahoo != nil {
+			applyYahooMetadata(&payload, p.yahoo.get(ctx, sym))
+		}
 		if p.ssr != nil && payload.Exchange != "OTC" && snap.GetBasic() != nil {
 			basic := snap.GetBasic()
 			payload.ShortSellRestricted = p.ssr.IsRestricted(sym, now, snapshotObservationTime(basic), basic.GetLowPrice(), basic.GetLastClosePrice())

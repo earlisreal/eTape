@@ -322,6 +322,8 @@ type StockDetailPayload struct {
 	Symbol              string   `json:"symbol"`
 	Name                string   `json:"name"`
 	Industry            string   `json:"industry"`
+	Country             string   `json:"country"`  // best-effort profile country; empty = unavailable
+	Sector              string   `json:"sector"`   // best-effort profile sector; empty = unavailable
 	Exchange            string   `json:"exchange"` // NASDAQ/NYSE/AMEX/OTC via moomoo ExchType; "" = unresolved/unknown
 	Price               *float64 `json:"price" tstype:"number | null,required"`
 	LastClose           *float64 `json:"lastClose" tstype:"number | null,required"`

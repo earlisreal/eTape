@@ -408,6 +408,8 @@ export interface StockDetailPayload {
   symbol: string;
   name: string;
   industry: string;
+  country: string; // best-effort profile country; empty = unavailable
+  sector: string; // best-effort profile sector; empty = unavailable
   exchange: string; // NASDAQ/NYSE/AMEX/OTC via moomoo ExchType; "" = unresolved/unknown
   price: number | null;
   lastClose: number | null;

@@ -2,9 +2,7 @@ import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { PanelProps } from "./registry";
 import { useTheme } from "../ThemeProvider";
 import { formatTapeTime, formatPrice, QUOTE_DECIMALS } from "../../render/format";
-import { appendSsrMarker, formatCompactShares } from "../format";
 import type { Palette } from "../../render/palette";
-import { bareSymbol } from "../exec/orderStatus";
 import { openNewsWindow } from "../windows";
 
 // Mirrors the engine default; classification stays exclusively in the engine.
@@ -49,18 +47,6 @@ function catalystBadge(category: string, palette: Palette): JSX.Element | null {
   return label ? <span className="mono" style={{ fontSize: 9, border: `1px solid ${palette.accent}`, color: palette.accent, padding: "0 3px", marginRight: 4 }}>[{label}]</span> : null;
 }
 
-function fmtCompactOrDash(value: number | null, palette: Palette): JSX.Element {
-  return value == null
-    ? <span className="mono" style={{ color: palette.textMuted }}>—</span>
-    : <span className="mono" style={{ color: palette.text }}>{formatCompactShares(value)}</span>;
-}
-
-function fmtDecimalOrDash(value: number | null, palette: Palette): JSX.Element {
-  return value == null
-    ? <span className="mono" style={{ color: palette.textMuted }}>—</span>
-    : <span className="mono" style={{ color: palette.text }}>{formatPrice(value, QUOTE_DECIMALS)}</span>;
-}
-
 function textOrDash(value: string, palette: Palette): JSX.Element {
   return value
     ? <span className="mono" style={{ color: palette.text }}>{value}</span>
@@ -80,18 +66,6 @@ function nullableBoolean(value: boolean | null | undefined, palette: Palette): J
   return <span className="mono" style={{ color: value == null ? palette.textMuted : palette.text }}>{label}</span>;
 }
 
-/** Combined "52wk low–high" cell — each side dashes independently if null, so a missing
- * high doesn't blank out a known low (or vice versa). */
-function rangeCell(low: number | null, high: number | null, palette: Palette): JSX.Element {
-  return (
-    <span className="mono">
-      {low == null ? <span style={{ color: palette.textMuted }}>—</span> : <span style={{ color: palette.text }}>{formatPrice(low, QUOTE_DECIMALS)}</span>}
-      <span style={{ color: palette.textMuted }}>–</span>
-      {high == null ? <span style={{ color: palette.textMuted }}>—</span> : <span style={{ color: palette.text }}>{formatPrice(high, QUOTE_DECIMALS)}</span>}
-    </span>
-  );
-}
-
 export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, symbol: symbolProp, onConfigChange }: PanelProps): JSX.Element {
   const { palette } = useTheme();
   const snap = useSyncExternalStore((cb) => stores.news.subscribe(cb), () => stores.news.getSnapshot());
@@ -108,8 +82,8 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, s
     return linkGroups.subscribe(apply);
   }, [linkGroups, group, symbolProp, configuredSymbol]);
   const [catalystsOnly, setCatalystsOnly] = useState<boolean>(() => (config.settings.catalystsOnly as boolean) ?? true);
-  // Default collapsed: a compact one-line summary (name · industry · float · EMA200,
-  // no price/change) so the news list starts higher. Persisted per panel like
+  // Default collapsed: a compact one-line summary (name · sector, no price/change)
+  // so the news list starts higher. Persisted per panel like
   // ChartPanel's timeframe/indicators — patch only this key, never spread config.settings.
   const [detailsCollapsed, setDetailsCollapsed] = useState<boolean>(() => (config.settings.detailsCollapsed as boolean) ?? true);
   const toggleDetails = () => {
@@ -130,8 +104,6 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, s
   const hasAlpacaStatus = detail != null && (
     detail.borrowStatus != null || detail.shortable != null || detail.marginable != null || detail.tradable != null
   );
-  const displaySymbol = symbol && detail ? appendSsrMarker(bareSymbol(symbol), detail.shortSellRestricted) : undefined;
-
   return (
     <div style={{ height: "100%", overflow: "auto", background: palette.bg, color: palette.text, fontSize: 12 }}>
       {/* Reserved slot for high-salience halt banners (v2 feed) — empty in v1. */}
@@ -153,14 +125,12 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, s
                 <span style={{ fontWeight: 600, color: detail.name ? palette.text : palette.textMuted }}>
                   {detail.name || "—"}
                 </span>
-                <span style={{ color: palette.textMuted }}>·</span>
-                {textOrDash(detail.industry, palette)}
-                <span style={{ color: palette.textMuted }}>·</span>
-                <span style={{ color: palette.textMuted }}>Flt</span>
-                {fmtCompactOrDash(detail.floatShares, palette)}
-                <span style={{ color: palette.textMuted }}>·</span>
-                <span style={{ color: palette.textMuted }}>EMA200</span>
-                {fmtDecimalOrDash(detail.ema200, palette)}
+                {detail.sector && (
+                  <>
+                    <span style={{ color: palette.textMuted }}>·</span>
+                    {textOrDash(detail.sector, palette)}
+                  </>
+                )}
                 {detail.shortable === false ? (
                   <>
                     <span style={{ color: palette.textMuted }}>·</span>
@@ -186,8 +156,6 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, s
             ) : (
               <>
                 <div style={{ padding: "6px 8px", display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
-                  <span className="mono" title={detail.shortSellRestricted ? "Short Sell Restricted — derived Rule 201 estimate" : undefined}
-                    style={{ fontWeight: 600, color: palette.text }}>{displaySymbol}</span>
                   <span style={{ fontWeight: 600, color: detail.name ? palette.text : palette.textMuted }}>
                     {detail.name || "—"}
                   </span>
@@ -212,25 +180,25 @@ export function StockInfoPanel({ config, stores, linkGroups, group: groupProp, s
                 </div>
                 <div style={{ borderBottom: `1px solid ${palette.border}` }} />
                 <div style={{ display: "grid", gridTemplateColumns: "auto 1fr auto 1fr", gap: "2px 8px", fontSize: 11, padding: "4px 8px" }}>
-                  <span style={{ color: palette.textMuted }}>Mkt cap</span>
-                  {fmtCompactOrDash(detail.marketCap, palette)}
-                  <span style={{ color: palette.textMuted }}>Free float cap</span>
-                  {fmtCompactOrDash(detail.floatMarketCap, palette)}
-
-                  <span style={{ color: palette.textMuted }}>Free Float</span>
-                  {fmtCompactOrDash(detail.floatShares, palette)}
                   <span style={{ color: palette.textMuted }}>Exchange</span>
                   {textOrDash(detail.exchange, palette)}
 
+                  {detail.country && (
+                    <>
+                      <span style={{ color: palette.textMuted }}>Country</span>
+                      {textOrDash(detail.country, palette)}
+                    </>
+                  )}
+
+                  {detail.sector && (
+                    <>
+                      <span style={{ color: palette.textMuted }}>Sector</span>
+                      {textOrDash(detail.sector, palette)}
+                    </>
+                  )}
+
                   <span style={{ color: palette.textMuted }}>Industry</span>
                   {textOrDash(detail.industry, palette)}
-                  <span style={{ color: palette.textMuted }}>52wk</span>
-                  {rangeCell(detail.low52, detail.high52, palette)}
-
-                  <span style={{ color: palette.textMuted }}>Volume</span>
-                  {fmtCompactOrDash(detail.volume, palette)}
-                  <span style={{ color: palette.textMuted }}>EMA 200</span>
-                  {fmtDecimalOrDash(detail.ema200, palette)}
 
                   {hasAlpacaStatus && (
                     <>

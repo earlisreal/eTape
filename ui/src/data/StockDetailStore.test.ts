@@ -7,6 +7,8 @@ const payload = (symbol: string, overrides: Partial<StockDetailPayload> = {}): S
   shortSellRestricted: false,
   name: `${symbol} Inc`,
   industry: "Tech",
+  country: "United States",
+  sector: "Technology",
   exchange: "NASDAQ",
   price: 10,
   lastClose: 9.5,
