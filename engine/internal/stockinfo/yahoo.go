@@ -18,11 +18,12 @@ import (
 )
 
 const (
-	yahooMetadataBase      = "https://query1.finance.yahoo.com"
-	yahooMetadataCookieURL = "https://fc.yahoo.com"
-	yahooMetadataTTL       = 24 * time.Hour
-	yahooMetadataRetry     = time.Hour
-	yahooMetadataUA        = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+	yahooMetadataBase           = "https://query1.finance.yahoo.com"
+	yahooMetadataCookieURL      = "https://fc.yahoo.com"
+	yahooMetadataTTL            = 24 * time.Hour
+	yahooMetadataRetry          = time.Hour
+	yahooMetadataRequestTimeout = 8 * time.Second
+	yahooMetadataUA             = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
 )
 
 type yahooMetadata struct {
@@ -95,9 +96,7 @@ func (c *yahooMetadataCache) get(ctx context.Context, symbol string) yahooMetada
 }
 
 func (c *yahooMetadataCache) refresh(ctx context.Context, symbol string) {
-	requestCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
-	defer cancel()
-	value, err := c.fetch(requestCtx, symbol)
+	value, err := c.fetch(ctx, symbol)
 	now := c.clk.Now()
 	c.mu.Lock()
 	entry := c.entries[symbol]
@@ -142,7 +141,11 @@ func (c *yahooMetadataCache) fetch(ctx context.Context, symbol string) (yahooMet
 	if err := c.bucket.Take(ctx); err != nil {
 		return yahooMetadata{}, err
 	}
-	if err := c.ensureSession(ctx); err != nil {
+	requestCtx, cancel := context.WithTimeout(ctx, yahooMetadataRequestTimeout)
+	defer cancel()
+	// Rate-limit admission can wait for the shared bucket while the actual
+	// Yahoo session/profile request remains bounded below.
+	if err := c.ensureSession(requestCtx); err != nil {
 		return yahooMetadata{}, err
 	}
 	ticker := strings.ReplaceAll(strings.TrimPrefix(symbol, "US."), ".", "-")
@@ -150,16 +153,16 @@ func (c *yahooMetadataCache) fetch(ctx context.Context, symbol string) (yahooMet
 		return yahooMetadata{}, fmt.Errorf("empty Yahoo ticker for %q", symbol)
 	}
 	cookie, crumb := c.session()
-	value, err := c.fetchProfile(ctx, ticker, cookie, crumb)
+	value, err := c.fetchProfile(requestCtx, ticker, cookie, crumb)
 	if err == nil || !strings.Contains(strings.ToLower(err.Error()), "invalid crumb") {
 		return value, err
 	}
 	c.clearSession()
-	if err := c.ensureSession(ctx); err != nil {
+	if err := c.ensureSession(requestCtx); err != nil {
 		return yahooMetadata{}, err
 	}
 	cookie, crumb = c.session()
-	return c.fetchProfile(ctx, ticker, cookie, crumb)
+	return c.fetchProfile(requestCtx, ticker, cookie, crumb)
 }
 
 func (c *yahooMetadataCache) fetchProfile(ctx context.Context, ticker, cookie, crumb string) (yahooMetadata, error) {

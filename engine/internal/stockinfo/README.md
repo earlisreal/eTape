@@ -23,10 +23,12 @@ fails or a symbol is not present.
 
 Yahoo profile metadata is controlled by `[stockinfo].yahoo_metadata` (enabled
 by default). It is fetched in the background at most once per symbol per day,
-with a one-hour retry delay after failures. Cached values are used immediately;
-missing values hide the Country/Sector rows and never delay Moomoo fundamentals.
-The Yahoo endpoint is undocumented, so this path is deliberately optional and
-has no effect on quote polling when disabled or unavailable.
+with a one-hour retry delay after failures. Rate-limit admission may wait for
+the shared Yahoo bucket, while each session/profile request is bounded by an
+8-second timeout. Cached values are used immediately; missing values hide the
+Country/Sector rows and never delay Moomoo fundamentals. The Yahoo endpoint is
+undocumented, so this path is deliberately optional and has no effect on quote
+polling when disabled or unavailable.
 
 SSR reuses the existing Qot_GetSecuritySnapshot response; it does not add a
 market-data request or use Alpaca shortable/borrow fields. New live triggers

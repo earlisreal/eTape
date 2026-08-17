@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
@@ -52,6 +53,35 @@ func TestYahooMetadataFetchAndCache(t *testing.T) {
 	}
 	if calls != 3 {
 		t.Fatalf("cached metadata made %d requests, want session + profile (3)", calls)
+	}
+}
+
+func TestYahooMetadataRefreshWaitsForRateLimitOutsideRequestTimeout(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/fc.yahoo.com":
+			w.Header().Add("Set-Cookie", "A1=test-cookie; Path=/")
+		case "/v1/test/getcrumb":
+			_, _ = w.Write([]byte("test-crumb"))
+		case "/v10/finance/quoteSummary/WETO":
+			_, _ = w.Write([]byte(`{"quoteSummary":{"result":[{"assetProfile":{"country":"United States","sector":"Technology","industry":"Software - Infrastructure"}}],"error":null}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	cache := newYahooMetadataCache(server.URL, clock.System{}, server.Client())
+	// The next token is deliberately more than the old four-second refresh
+	// deadline away; the HTTP server itself is immediate.
+	cache.bucket = netx.NewTokenBucket(clock.System{}, 1.0/5.0, 1)
+	if !cache.bucket.Allow() {
+		t.Fatal("initial token should be available")
+	}
+
+	cache.refresh(context.Background(), "US.WETO")
+	if got := cache.get(context.Background(), "US.WETO"); got.Sector != "Technology" || got.Country != "United States" {
+		t.Fatalf("metadata after rate-limit wait = %+v", got)
 	}
 }
 
