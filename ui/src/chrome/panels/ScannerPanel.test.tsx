@@ -117,10 +117,12 @@ describe("ScannerPanel", () => {
       onSelect: vi.fn(),
       onToggle,
     });
-    expect(screen.getByText("Sync to Following")).toBeTruthy();
+    const label = screen.getByText("Sync to Following");
+    expect(label).toBeTruthy();
     expect(screen.getByText("ON")).toBeTruthy();
     expect(screen.getByText("4/4")).toBeTruthy();
     const toggle = screen.getByRole("button", { name: "Disable Scanner Sync" });
+    expect(label.compareDocumentPosition(toggle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(toggle.getAttribute("aria-pressed")).toBe("true");
     fireEvent.click(toggle);
     expect(onToggle).toHaveBeenCalledOnce();

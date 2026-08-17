@@ -109,13 +109,15 @@ export function ScannerPanel(
       {scannerSync.selected ? (
         <>
           <span className="mono" style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Sync to Following</span>
-          <span style={{ flex: 1, minWidth: 0 }} />
           <button type="button" aria-label={scannerSync.enabled ? "Disable Scanner Sync" : "Enable Scanner Sync"}
             aria-pressed={scannerSync.enabled} title={scannerSync.enabled ? "Disable Scanner Sync" : "Enable Scanner Sync"} onClick={scannerSync.onToggle}
-            style={{ display: "inline-flex", alignItems: "center", gap: 3, border: `1px solid ${scannerSync.enabled ? palette.accent : palette.border}`, borderRadius: 3, background: palette.surface, color: scannerSync.enabled ? palette.accent : palette.textMuted, cursor: "pointer", padding: "2px 5px", fontFamily: FONTS.mono, fontSize: 11, lineHeight: 1, whiteSpace: "nowrap", flex: "0 0 auto" }}>
-            <span aria-hidden="true">{scannerSync.enabled ? "●" : "○"}</span>
+            style={{ display: "inline-flex", alignItems: "center", gap: 4, border: "none", background: "transparent", color: scannerSync.enabled ? palette.accent : palette.textMuted, cursor: "pointer", padding: 0, fontFamily: FONTS.mono, fontSize: 11, lineHeight: 1, whiteSpace: "nowrap", flex: "0 0 auto" }}>
+            <span aria-hidden="true" style={{ display: "inline-flex", alignItems: "center", width: 28, height: 16, padding: 2, boxSizing: "border-box", border: `1px solid ${scannerSync.enabled ? palette.accent : palette.border}`, borderRadius: 8, background: scannerSync.enabled ? palette.accent : palette.surface, transition: "background 120ms ease" }}>
+              <span style={{ width: 10, height: 10, borderRadius: "50%", background: scannerSync.enabled ? palette.bg : palette.textMuted, transform: `translateX(${scannerSync.enabled ? 14 : 0}px)`, transition: "transform 120ms ease" }} />
+            </span>
             <span>{scannerSync.enabled ? "ON" : "OFF"}</span>
           </button>
+          <span style={{ flex: 1, minWidth: 0 }} />
         </>
       ) : (
         <>
