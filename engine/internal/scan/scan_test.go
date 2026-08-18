@@ -493,7 +493,7 @@ func TestRunRepublishesShortInterestAfterWorkerWithoutBlockingRank(t *testing.T)
 	p := New(config.Scan{Enabled: true, PremarketMs: 1, RTHMs: 1}, fr, pub, clk, nil, nil)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	go p.Run(ctx)
+	go func() { _ = p.Run(ctx) }()
 	p.poke <- struct{}{}
 	initial := waitRank(t, pub.ranksCh)
 	if initial.Rows[0].ShortInterest != nil {
