@@ -255,11 +255,13 @@ type LocateListResult struct {
 type ScannerRow struct {
 	Symbol              string   `json:"symbol"`
 	ShortSellRestricted bool     `json:"shortSellRestricted"`
-	ChangePct           *float64 `json:"changePct" tstype:"number | null,required"`   // null = no print yet
-	Last                *float64 `json:"last" tstype:"number | null,required"`        // null = no print yet
-	FloatShares         *float64 `json:"floatShares" tstype:"number | null,required"` // ACTUAL shares (engine converts moomoo thousands); null = unknown
-	Volume              int64    `json:"volume"`                                      // 0 is legitimate
-	VolumeRatio         *float64 `json:"volumeRatio" tstype:"number | null,required"` // provider Volume Ratio; null = unavailable
+	ChangePct           *float64 `json:"changePct" tstype:"number | null,required"`         // null = no print yet
+	Last                *float64 `json:"last" tstype:"number | null,required"`              // null = no print yet
+	FloatShares         *float64 `json:"floatShares" tstype:"number | null,required"`       // ACTUAL shares (engine converts moomoo thousands); null = unknown
+	Volume              int64    `json:"volume"`                                            // 0 is legitimate
+	VolumeRatio         *float64 `json:"volumeRatio" tstype:"number | null,required"`       // provider Volume Ratio; null = unavailable
+	ShortInterest       *float64 `json:"shortInterest" tstype:"number | null,required"`     // raw reported shares; null = unavailable
+	ShortInterestAsOf   *string  `json:"shortInterestAsOf" tstype:"string | null,required"` // provider report date; null = unavailable
 }
 
 type ScannerRankPayload struct {

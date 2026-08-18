@@ -348,6 +348,8 @@ export interface ScannerRow {
   floatShares: number | null; // ACTUAL shares (engine converts moomoo thousands); null = unknown
   volume: number /* int64 */; // 0 is legitimate
   volumeRatio: number | null; // provider Volume Ratio; null = unavailable
+  shortInterest: number | null; // raw reported shares; null = unavailable
+  shortInterestAsOf: string | null; // provider report date; null = unavailable
 }
 export interface ScannerRankPayload {
   refreshedAt: string;

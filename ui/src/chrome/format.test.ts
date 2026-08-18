@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatChangePct, formatCompactShares, msUntilEtMidnight } from "./format";
+import { formatChangePct, formatCompactShares, formatShortInterest, msUntilEtMidnight } from "./format";
 
 describe("formatChangePct — 3-digit-safe, never fabricates 0%", () => {
   it("signs and rounds to one decimal", () => {
@@ -30,6 +30,18 @@ describe("formatCompactShares", () => {
     expect(formatCompactShares(null)).toBe("—");
     expect(formatCompactShares(0)).toBe("0");
   });
+});
+
+describe("formatShortInterest", () => {
+	it("keeps two decimals for reported K/M values", () => {
+		expect(formatShortInterest(547_619)).toBe("547.62K");
+		expect(formatShortInterest(9_067)).toBe("9.07K");
+		expect(formatShortInterest(4_613_535)).toBe("4.61M");
+	});
+	it("keeps unavailable distinct from an explicitly reported zero", () => {
+		expect(formatShortInterest(null)).toBe("—");
+		expect(formatShortInterest(0)).toBe("0");
+	});
 });
 
 describe("msUntilEtMidnight (deterministic in EDT/July, UTC−4)", () => {

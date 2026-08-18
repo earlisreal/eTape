@@ -30,6 +30,7 @@ import (
 
 	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
 	snappb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsecuritysnapshot"
+	shortpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetshortinterest"
 	staticpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetstaticinfo"
 	tmrpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgettopmoversrank"
 	ahpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusafterhoursrank"
@@ -92,6 +93,19 @@ type floatEntry struct {
 	bad    bool
 }
 
+type shortInterestEntry struct {
+	shares    float64
+	asOf      string
+	available bool
+	fetchedAt time.Time
+}
+
+const (
+	shortInterestFreshness = 24 * time.Hour
+	shortInterestPace      = time.Second
+	maxSafeInteger         = uint64(1<<53 - 1)
+)
+
 type Poller struct {
 	cfg                   config.Scan
 	r                     requester
@@ -116,6 +130,10 @@ type Poller struct {
 	phaseSet              bool
 	resetBoard            bool
 	ssr                   shortSellRestrictionResolver
+	shortInterest         map[string]shortInterestEntry
+	shortInterestPending  map[string]bool
+	shortInterestQueue    []string
+	shortInterestWake     chan struct{}
 }
 
 func New(cfg config.Scan, r requester, pub Publisher, clk clock.Clock, feed demandFeed, backfill func(string), ssr ...shortSellRestrictionResolver) *Poller {
@@ -125,7 +143,8 @@ func New(cfg config.Scan, r requester, pub Publisher, clk clock.Clock, feed dema
 		resolver = ssr[0]
 	}
 	return &Poller{cfg: cfg, r: r, pub: pub, clk: clk, feed: feed, backfill: backfill, ssr: resolver, pool: NewPool(),
-		floats: map[string]floatEntry{}, otc: map[string]bool{}, seen: map[string]map[string]bool{}, filters: filters, baseline: true, poke: make(chan struct{}, 1)}
+		floats: map[string]floatEntry{}, otc: map[string]bool{}, seen: map[string]map[string]bool{}, filters: filters, baseline: true, poke: make(chan struct{}, 1),
+		shortInterest: map[string]shortInterestEntry{}, shortInterestPending: map[string]bool{}, shortInterestWake: make(chan struct{}, 1)}
 }
 
 func Defaults(cfg config.Scan) wsmsg.ScannerFilters {
@@ -174,6 +193,7 @@ func (p *Poller) Run(ctx context.Context) error {
 	if !p.cfg.Enabled {
 		return nil
 	}
+	go p.runShortInterestWorker(ctx)
 	// Poll on a short base interval; the effective cadence is session-derived.
 	base := p.clk.NewTicker(time.Duration(p.cfg.PremarketMs) * time.Millisecond)
 	defer base.Stop()
@@ -294,6 +314,7 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 		}
 		return *rows[i].ChangePct > *rows[j].ChangePct
 	})
+	p.overlayShortInterest(rows, now)
 	if !sameFilters(filters, p.Filters()) {
 		return // SetFilters queued a fresh poll; never publish stale authoritative filters.
 	}
@@ -440,6 +461,149 @@ func rankRowsFiltered(items []rankItem, floats map[string]floatEntry, f wsmsg.Sc
 		})
 	}
 	return out
+}
+
+func validShortInterestDate(value string) bool {
+	parsed, err := time.Parse("2006-01-02", value)
+	return err == nil && parsed.Format("2006-01-02") == value
+}
+
+func shortInterestRecord(item *shortpb.UsShortInterestItem) (float64, string, bool) {
+	if item == nil || item.SharesShort == nil || !validShortInterestDate(item.GetTimestampStr()) || item.GetSharesShort() > maxSafeInteger {
+		return 0, "", false
+	}
+	return float64(item.GetSharesShort()), item.GetTimestampStr(), true
+}
+
+func (p *Poller) overlayShortInterest(rows []wsmsg.ScannerRow, now time.Time) {
+	for i := range rows {
+		p.mu.RLock()
+		entry, ok := p.shortInterest[rows[i].Symbol]
+		fresh := ok && now.Before(entry.fetchedAt.Add(shortInterestFreshness))
+		p.mu.RUnlock()
+		if ok && entry.available {
+			value := entry.shares
+			asOf := entry.asOf
+			rows[i].ShortInterest = &value
+			rows[i].ShortInterestAsOf = &asOf
+		}
+		if !fresh {
+			p.enqueueShortInterest(rows[i].Symbol)
+		}
+	}
+}
+
+func (p *Poller) enqueueShortInterest(symbol string) {
+	p.mu.Lock()
+	if p.shortInterestPending[symbol] {
+		p.mu.Unlock()
+		return
+	}
+	p.shortInterestPending[symbol] = true
+	p.shortInterestQueue = append(p.shortInterestQueue, symbol)
+	p.mu.Unlock()
+	select {
+	case p.shortInterestWake <- struct{}{}:
+	default:
+	}
+}
+
+func (p *Poller) nextShortInterest() (string, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.shortInterestQueue) == 0 {
+		return "", false
+	}
+	symbol := p.shortInterestQueue[0]
+	p.shortInterestQueue = p.shortInterestQueue[1:]
+	return symbol, true
+}
+
+func (p *Poller) fetchShortInterest(ctx context.Context, symbol string) (float64, string, bool, error) {
+	num := int32(1)
+	fr, err := p.r.Request(ctx, opend.ProtoQotGetShortInterest, &shortpb.Request{C2S: &shortpb.C2S{
+		Security: &qotcommon.Security{
+			Market: proto.Int32(int32(qotcommon.QotMarket_QotMarket_US_Security)),
+			Code:   proto.String(codeOf(symbol)),
+		},
+		Num: &num,
+	}})
+	if err != nil {
+		return 0, "", false, err
+	}
+	var resp shortpb.Response
+	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
+		return 0, "", false, err
+	}
+	if resp.GetRetType() != 0 {
+		return 0, "", false, fmt.Errorf("short interest retType=%d: %s", resp.GetRetType(), resp.GetRetMsg())
+	}
+	items := resp.GetS2C().GetUsItemList()
+	if len(items) == 0 {
+		return 0, "", false, nil
+	}
+	newest := items[0]
+	for _, item := range items[1:] {
+		if item != nil && (newest == nil || item.GetTimestampStr() > newest.GetTimestampStr()) {
+			newest = item
+		}
+	}
+	shares, asOf, ok := shortInterestRecord(newest)
+	if !ok {
+		return 0, "", false, fmt.Errorf("short interest record is missing a safe share count or ISO report date")
+	}
+	return shares, asOf, true, nil
+}
+
+func (p *Poller) finishShortInterest(symbol string, shares float64, asOf string, available bool, err error) {
+	p.mu.Lock()
+	delete(p.shortInterestPending, symbol)
+	changed := false
+	if err == nil {
+		old, hadOld := p.shortInterest[symbol]
+		switch {
+		case available:
+			changed = !hadOld || !old.available || old.shares != shares || old.asOf != asOf
+			p.shortInterest[symbol] = shortInterestEntry{shares: shares, asOf: asOf, available: true, fetchedAt: p.clk.Now()}
+		case !hadOld || !old.available:
+			p.shortInterest[symbol] = shortInterestEntry{fetchedAt: p.clk.Now()}
+		}
+	}
+	p.mu.Unlock()
+	if changed {
+		select {
+		case p.poke <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (p *Poller) runShortInterestWorker(ctx context.Context) {
+	var lastRequest time.Time
+	for {
+		symbol, ok := p.nextShortInterest()
+		if !ok {
+			select {
+			case <-ctx.Done():
+				return
+			case <-p.shortInterestWake:
+				continue
+			}
+		}
+		if !lastRequest.IsZero() {
+			wait := shortInterestPace - p.clk.Now().Sub(lastRequest)
+			if wait > 0 {
+				select {
+				case <-ctx.Done():
+					return
+				case <-p.clk.After(wait):
+				}
+			}
+		}
+		lastRequest = p.clk.Now()
+		shares, asOf, available, err := p.fetchShortInterest(ctx, symbol)
+		p.finishShortInterest(symbol, shares, asOf, available, err)
+	}
 }
 
 // newHits returns symbols to force-flash. A session's first populated poll

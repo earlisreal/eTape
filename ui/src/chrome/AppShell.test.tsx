@@ -81,6 +81,8 @@ class TargetChannel implements HotkeyTargetChannel {
   close(): void { this.listener = undefined; }
 }
 
+const scannerShortInterestDefaults = { shortInterest: null, shortInterestAsOf: null } as const;
+
 function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApplied?: () => void; onRender?: () => void; hotkeyTargetChannel?: HotkeyTargetChannel }) {
   const stores = makeStores();
   const scheduler = new Scheduler(browserRaf, () => {});
@@ -434,8 +436,8 @@ describe("AppShell Monitoring Scanner Sync", () => {
     act(() => monitor.stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
       refreshedAt: "2026-08-15T08:00:00.000Z",
       rows: [
-        { symbol: "US.A", changePct: 1, last: 30, floatShares: 1, volume: 1 },
-        { symbol: "US.B", changePct: 2, last: 10, floatShares: 1, volume: 1 },
+        { ...scannerShortInterestDefaults, symbol: "US.A", changePct: 1, last: 30, floatShares: 1, volume: 1 },
+        { ...scannerShortInterestDefaults, symbol: "US.B", changePct: 2, last: 10, floatShares: 1, volume: 1 },
       ],
     } }));
     await waitFor(() => expect(docs.get("monitoring")?.panels.find((panel) => panel.id === "m-chart-red")?.settings.symbol).toBe("US.B"));
@@ -456,7 +458,7 @@ describe("AppShell Monitoring Scanner Sync", () => {
     await waitFor(() => expect(within(monitor.container).getByText("Paused").getAttribute("title")).toBe("Paused — Scanner Source unavailable"));
     act(() => monitor.stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
       refreshedAt: "2026-08-15T08:00:30.000Z",
-      rows: [{ symbol: "US.C", changePct: 9, last: 1, floatShares: 1, volume: 1 }],
+      rows: [{ ...scannerShortInterestDefaults, symbol: "US.C", changePct: 9, last: 1, floatShares: 1, volume: 1 }],
     } }));
     await new Promise((resolve) => setTimeout(resolve, 1100));
     expect(docs.get("monitoring")?.panels.find((panel) => panel.id === "m-chart-red")?.settings.symbol).toBe("US.B");
@@ -472,7 +474,7 @@ describe("AppShell Monitoring Scanner Sync", () => {
     const restarted = mountWindow("monitoring");
     act(() => restarted.stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
       refreshedAt: "2026-08-15T08:01:00.000Z",
-      rows: [{ symbol: "US.Z", changePct: 9, last: 1, floatShares: 1, volume: 1 }],
+      rows: [{ ...scannerShortInterestDefaults, symbol: "US.Z", changePct: 9, last: 1, floatShares: 1, volume: 1 }],
     } }));
     await waitFor(() => expect(docs.get("monitoring")?.panels.find((panel) => panel.id === "m-chart-red")?.settings.symbol).toBe("US.Z"));
     replacementWindow.unmount();
@@ -489,10 +491,10 @@ describe("AppShell Monitoring Scanner Sync", () => {
     act(() => stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
       refreshedAt: "2026-08-15T08:00:00.000Z",
       rows: [
-        { symbol: "US.A", changePct: 4, last: 1, floatShares: 1, volume: 1 },
-        { symbol: "US.B", changePct: 3, last: 1, floatShares: 1, volume: 1 },
-        { symbol: "US.C", changePct: 2, last: 1, floatShares: 1, volume: 1 },
-        { symbol: "US.D", changePct: 1, last: 1, floatShares: 1, volume: 1 },
+        { ...scannerShortInterestDefaults, symbol: "US.A", changePct: 4, last: 1, floatShares: 1, volume: 1 },
+        { ...scannerShortInterestDefaults, symbol: "US.B", changePct: 3, last: 1, floatShares: 1, volume: 1 },
+        { ...scannerShortInterestDefaults, symbol: "US.C", changePct: 2, last: 1, floatShares: 1, volume: 1 },
+        { ...scannerShortInterestDefaults, symbol: "US.D", changePct: 1, last: 1, floatShares: 1, volume: 1 },
       ],
     } }));
     await waitFor(() => {
@@ -504,6 +506,32 @@ describe("AppShell Monitoring Scanner Sync", () => {
     await waitFor(() => expect(saved.some((workspace) => workspace.scannerSync?.enabled === false && workspace.scannerSync.sourcePanelId === "m-scanner")).toBe(true));
   });
 
+  it("updates Monitoring Scanner Sync when a later full payload enriches Short Int", async () => {
+    const seed = buildMonitoringWorkspace();
+    seed.panels = seed.panels.map((panel) => panel.id === "m-scanner"
+      ? { ...panel, settings: { sort: { col: "shortInterest", dir: "desc" } } }
+      : panel);
+    const { saved, stores } = mount(seed, { workspaceName: "monitoring" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Use this Scanner as Monitoring Source" })).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: "Use this Scanner as Monitoring Source" }));
+
+    const row = (symbol: string, shortInterest: number | null) => ({
+      symbol, changePct: 1, last: 1, floatShares: 1, volume: 1, volumeRatio: null,
+      shortInterest, shortInterestAsOf: shortInterest === null ? null : "2026-07-31",
+    });
+    act(() => stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      refreshedAt: "2026-08-15T08:00:00.000Z",
+      rows: [row("US.A", 100), row("US.B", 90), row("US.C", 80), row("US.D", 70), row("US.E", null)],
+    } }));
+    await waitFor(() => expect(saved.some((workspace) => workspace.panels.find((panel) => panel.id === "m-chart-yellow")?.settings.symbol === "US.D")).toBe(true));
+
+    act(() => stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      refreshedAt: "2026-08-15T08:00:01.000Z",
+      rows: [row("US.A", 100), row("US.B", 90), row("US.C", 80), row("US.D", 70), row("US.E", 200)],
+    } }));
+    await waitFor(() => expect(saved.some((workspace) => workspace.panels.find((panel) => panel.id === "m-chart-yellow")?.settings.symbol === "US.E")).toBe(true));
+  });
+
   it("excludes linked charts from the target count", async () => {
     const { saved, stores } = mount(buildMonitoringWorkspace(), { workspaceName: "monitoring" });
     await waitFor(() => expect(screen.getByRole("button", { name: "Use this Scanner as Monitoring Source" })).toBeTruthy());
@@ -512,10 +540,10 @@ describe("AppShell Monitoring Scanner Sync", () => {
     act(() => stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
       refreshedAt: "2026-08-15T08:00:00.000Z",
       rows: [
-        { symbol: "US.A", changePct: 4, last: 1, floatShares: 1, volume: 1 },
-        { symbol: "US.B", changePct: 3, last: 1, floatShares: 1, volume: 1 },
-        { symbol: "US.C", changePct: 2, last: 1, floatShares: 1, volume: 1 },
-        { symbol: "US.D", changePct: 1, last: 1, floatShares: 1, volume: 1 },
+        { ...scannerShortInterestDefaults, symbol: "US.A", changePct: 4, last: 1, floatShares: 1, volume: 1 },
+        { ...scannerShortInterestDefaults, symbol: "US.B", changePct: 3, last: 1, floatShares: 1, volume: 1 },
+        { ...scannerShortInterestDefaults, symbol: "US.C", changePct: 2, last: 1, floatShares: 1, volume: 1 },
+        { ...scannerShortInterestDefaults, symbol: "US.D", changePct: 1, last: 1, floatShares: 1, volume: 1 },
       ],
     } }));
     await waitFor(() => expect(saved.some((workspace) => workspace.panels.find((panel) => panel.id === "m-chart-red")?.settings.symbol === "US.A")).toBe(true));

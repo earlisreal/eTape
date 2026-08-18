@@ -5,7 +5,7 @@ import type { ScannerFilters, ScannerSession } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
 import { FONTS } from "../../render/palette";
 import { formatTapeTime } from "../../render/format";
-import { appendSsrMarker, formatChangePct, formatCompactShares, msUntilEtMidnight } from "../format";
+import { appendSsrMarker, formatChangePct, formatCompactShares, formatShortInterest, msUntilEtMidnight } from "../format";
 import { formatFilterSummary } from "./scannerFilter";
 import { toggleSort, sortIndicator, type SortState } from "../sortColumns";
 import { bareSymbol } from "../exec/orderStatus";
@@ -27,6 +27,7 @@ const COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
   { col: "float", label: "Float", align: "right" },
   { col: "vol", label: "Vol", align: "right" },
   { col: "volRatio", label: "Vol Ratio", align: "right" },
+  { col: "shortInterest", label: "Short Int", align: "right" },
 ];
 
 const unitScale = (unit: "K" | "M") => unit === "K" ? 1_000 : 1_000_000;
@@ -210,11 +211,12 @@ export function ScannerPanel(
               <td style={numCell}>{formatCompactShares(r.floatShares)}</td>
               <td style={numCell}>{formatCompactShares(r.volume)}</td>
               <td style={numCell}>{r.volumeRatio == null ? "—" : r.volumeRatio.toFixed(2)}</td>
+              <td style={numCell} title={r.shortInterestAsOf ? `as of ${r.shortInterestAsOf}` : undefined}>{formatShortInterest(r.shortInterest)}</td>
             </tr>
             );
           })}
           {rows.length === 0 && cv.refreshedAt && (
-            <tr><td colSpan={6} style={{ padding: 12, color: palette.textMuted, textAlign: "center" }}>No symbols match current filters.</td></tr>
+            <tr><td colSpan={7} style={{ padding: 12, color: palette.textMuted, textAlign: "center" }}>No symbols match current filters.</td></tr>
           )}
         </tbody>
       </table>

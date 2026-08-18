@@ -15,6 +15,7 @@ import (
 	ownerplatepb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetownerplate"
 	newspb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsearchnews"
 	snappb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsecuritysnapshot"
+	shortpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetshortinterest"
 	staticpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetstaticinfo"
 	tmrpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgettopmoversrank"
 	ahpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusafterhoursrank"
@@ -388,6 +389,50 @@ func TestRequester_Snapshot_MatchesGeneratorFundamentalsAndQuote(t *testing.T) {
 	// symbol must never trip "ex == nil || OutstandingShares <= 0".
 	if ex.GetOutstandingShares() <= 0 {
 		t.Error("OutstandingShares <= 0 - scan.go would mark this symbol's float unresolvable")
+	}
+}
+
+func TestRequester_ShortInterest_UsesRequestedUSSymbolAndQuoteDate(t *testing.T) {
+	g := newSteppedGenerator(14)
+	r := NewRequester(g)
+	code := g.Symbols()[0]
+	q, ok := g.QuoteOf(code)
+	if !ok {
+		t.Fatalf("QuoteOf(%s): not found", code)
+	}
+	f, ok := g.Fundamentals(code)
+	if !ok {
+		t.Fatalf("Fundamentals(%s): not found", code)
+	}
+
+	fr, err := r.Request(context.Background(), opend.ProtoQotGetShortInterest,
+		&shortpb.Request{C2S: &shortpb.C2S{
+			Security: usSecurity(code),
+			Num:      proto.Int32(1),
+		}})
+	if err != nil {
+		t.Fatalf("Request: %v", err)
+	}
+	var resp shortpb.Response
+	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if resp.GetRetType() != 0 {
+		t.Fatalf("retType %d", resp.GetRetType())
+	}
+	items := resp.GetS2C().GetUsItemList()
+	if len(items) != 1 {
+		t.Fatalf("got %d US short-interest items, want 1", len(items))
+	}
+	item := items[0]
+	if item.SharesShort == nil {
+		t.Fatal("SharesShort must be explicitly reported")
+	}
+	if got, want := item.GetSharesShort(), uint64(f.FloatShares/10); got != want {
+		t.Errorf("SharesShort = %d, want %d", got, want)
+	}
+	if got, want := item.GetTimestampStr(), time.UnixMilli(q.TsMs).In(session.Loc()).Format("2006-01-02"); got != want {
+		t.Errorf("TimestampStr = %q, want %q", got, want)
 	}
 }
 

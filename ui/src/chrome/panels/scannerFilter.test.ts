@@ -3,7 +3,7 @@ import type { ScannerRow } from "../../wire/contract";
 import { applyScannerFilters, sortByChangeDesc, formatFilterSummary, type ScannerThresholds } from "./scannerFilter";
 
 const row = (symbol: string, changePct: number | null, floatShares: number | null, volume: number): ScannerRow =>
-  ({ symbol, shortSellRestricted: false, changePct, last: 1, floatShares, volume, volumeRatio: null });
+  ({ symbol, shortSellRestricted: false, changePct, last: 1, floatShares, volume, volumeRatio: null, shortInterest: null, shortInterestAsOf: null });
 
 const OFF: ScannerThresholds = { minChangePct: 0, floatCapShares: null, minVolume: 0, minVolumeRatio: 0 };
 

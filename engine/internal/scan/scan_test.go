@@ -21,6 +21,7 @@ import (
 
 	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
 	snappb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsecuritysnapshot"
+	shortpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetshortinterest"
 	staticpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetstaticinfo"
 	tmrpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgettopmoversrank"
 	ahpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusafterhoursrank"
@@ -261,6 +262,253 @@ func TestNewHitsSeenSet(t *testing.T) {
 	}
 }
 
+func TestFetchShortInterestUsesExactUSRequestAndRawValue(t *testing.T) {
+	fr := &fakeReq{shortInfo: func(code string) (*shortpb.Response, error) {
+		if code != "XOS" {
+			t.Fatalf("short-interest code = %q, want XOS", code)
+		}
+		oldShares := uint64(100)
+		shares := uint64(547_619)
+		return shortResp(shortItem("2026-07-30", &oldShares), shortItem("2026-07-31", &shares)), nil
+	}}
+	p := newTestPoller(config.Scan{}, fr, &capturePub{})
+	shares, asOf, available, err := p.fetchShortInterest(context.Background(), "US.XOS")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !available || shares != 547_619 || asOf != "2026-07-31" {
+		t.Fatalf("got shares=%v asOf=%q available=%v", shares, asOf, available)
+	}
+	if fr.shortCalls != 1 || !reflect.DeepEqual(fr.shortCodes, []string{"XOS"}) || !reflect.DeepEqual(fr.shortNums, []int32{1}) {
+		t.Fatalf("requests codes=%v nums=%v calls=%d, want one US 3249 request with num=1", fr.shortCodes, fr.shortNums, fr.shortCalls)
+	}
+}
+
+func TestFetchShortInterestValidatesReportedRecord(t *testing.T) {
+	zero := uint64(0)
+	tooLarge := maxSafeInteger + 1
+	for _, tc := range []struct {
+		name      string
+		item      *shortpb.UsShortInterestItem
+		wantValue float64
+		wantDate  string
+	}{
+		{name: "explicit zero", item: shortItem("2026-07-31", &zero), wantValue: 0, wantDate: "2026-07-31"},
+		{name: "raw value", item: shortItem("2026-07-31", func() *uint64 { v := uint64(4_613_535); return &v }()), wantValue: 4_613_535, wantDate: "2026-07-31"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newTestPoller(config.Scan{}, &fakeReq{shortInfo: func(string) (*shortpb.Response, error) { return shortResp(tc.item), nil }}, &capturePub{})
+			value, date, available, err := p.fetchShortInterest(context.Background(), "US.SXTC")
+			if err != nil || !available || value != tc.wantValue || date != tc.wantDate {
+				t.Fatalf("got value=%v date=%q available=%v err=%v", value, date, available, err)
+			}
+		})
+	}
+	p := newTestPoller(config.Scan{}, &fakeReq{shortInfo: func(string) (*shortpb.Response, error) { return shortResp(), nil }}, &capturePub{})
+	if _, _, available, err := p.fetchShortInterest(context.Background(), "US.NONE"); err != nil || available {
+		t.Fatalf("empty response returned available=%v err=%v", available, err)
+	}
+	for _, tc := range []struct {
+		name string
+		item *shortpb.UsShortInterestItem
+	}{
+		{name: "missing share count", item: shortItem("2026-07-31", nil)},
+		{name: "malformed date", item: shortItem("2026-02-30", func() *uint64 { v := uint64(10); return &v }())},
+		{name: "unsafe integer", item: shortItem("2026-07-31", &tooLarge)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			p := newTestPoller(config.Scan{}, &fakeReq{shortInfo: func(string) (*shortpb.Response, error) { return shortResp(tc.item), nil }}, &capturePub{})
+			if _, _, available, err := p.fetchShortInterest(context.Background(), "US.SXTC"); err == nil || available {
+				t.Fatalf("malformed record returned available=%v err=%v", available, err)
+			}
+		})
+	}
+}
+
+func waitShortCall(t *testing.T, calls <-chan string, want string) {
+	t.Helper()
+	select {
+	case got := <-calls:
+		if got != want {
+			t.Fatalf("short-interest call = %q, want %q", got, want)
+		}
+	case <-time.After(time.Second):
+		t.Fatalf("timed out waiting for short-interest call %q", want)
+	}
+}
+
+func advanceUntilShortCall(t *testing.T, clk *clock.Fake, calls <-chan string, want string) {
+	t.Helper()
+	for i := 0; i < 4; i++ {
+		select {
+		case got := <-calls:
+			if got != want {
+				t.Fatalf("short-interest call = %q, want %q", got, want)
+			}
+			return
+		default:
+		}
+		clk.Advance(time.Second)
+		time.Sleep(time.Millisecond)
+	}
+	waitShortCall(t, calls, want)
+}
+
+func waitShortCache(t *testing.T, p *Poller, symbol string) shortInterestEntry {
+	t.Helper()
+	deadline := time.NewTimer(time.Second)
+	defer deadline.Stop()
+	for {
+		p.mu.RLock()
+		entry, ok := p.shortInterest[symbol]
+		p.mu.RUnlock()
+		if ok {
+			return entry
+		}
+		select {
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for short-interest cache entry %s", symbol)
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+}
+
+func waitRank(t *testing.T, ranks <-chan wsmsg.ScannerRankPayload) wsmsg.ScannerRankPayload {
+	t.Helper()
+	select {
+	case payload := <-ranks:
+		return payload
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for scanner rank publication")
+		return wsmsg.ScannerRankPayload{}
+	}
+}
+
+func TestShortInterestWorkerDeduplicatesPacesAndRefreshesOnlyBoardSymbols(t *testing.T) {
+	clk := clock.NewFake(et(2026, 7, 8, 8, 0))
+	calls := make(chan string, 8)
+	fr := &fakeReq{shortCallCh: calls, shortInfo: func(code string) (*shortpb.Response, error) {
+		values := map[string]uint64{"A": 547_619, "B": 9_067}
+		value, ok := values[code]
+		if !ok {
+			t.Fatalf("unexpected non-board short-interest symbol %q", code)
+		}
+		return shortResp(shortItem("2026-07-31", &value)), nil
+	}}
+	p := New(config.Scan{}, fr, &capturePub{}, clk, nil, nil)
+	board := []wsmsg.ScannerRow{{Symbol: "US.A"}, {Symbol: "US.B"}}
+	p.overlayShortInterest(board, clk.Now())
+	p.overlayShortInterest(board, clk.Now())
+	p.mu.RLock()
+	queued := append([]string(nil), p.shortInterestQueue...)
+	p.mu.RUnlock()
+	if !reflect.DeepEqual(queued, []string{"US.A", "US.B"}) {
+		t.Fatalf("queued=%v, want only the board symbols once", queued)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go p.runShortInterestWorker(ctx)
+	waitShortCall(t, calls, "A")
+	select {
+	case got := <-calls:
+		t.Fatalf("second request %q ran before the one-second clock interval", got)
+	default:
+	}
+	advanceUntilShortCall(t, clk, calls, "B")
+	if fr.shortCalls != 2 {
+		t.Fatalf("short-interest calls=%d, want 2", fr.shortCalls)
+	}
+
+	rows := []wsmsg.ScannerRow{{Symbol: "US.A"}, {Symbol: "US.B"}}
+	p.overlayShortInterest(rows, clk.Now())
+	if rows[0].ShortInterest == nil || *rows[0].ShortInterest != 547_619 || rows[0].ShortInterestAsOf == nil || *rows[0].ShortInterestAsOf != "2026-07-31" {
+		t.Fatalf("A overlay=%+v", rows[0])
+	}
+	if rows[1].ShortInterest == nil || *rows[1].ShortInterest != 9_067 {
+		t.Fatalf("B overlay=%+v", rows[1])
+	}
+	p.mu.RLock()
+	queued = append([]string(nil), p.shortInterestQueue...)
+	p.mu.RUnlock()
+	if len(queued) != 0 {
+		t.Fatalf("fresh entries were requeued: %v", queued)
+	}
+
+	clk.Advance(shortInterestFreshness)
+	p.overlayShortInterest(rows, clk.Now())
+	advanceUntilShortCall(t, clk, calls, "A")
+	advanceUntilShortCall(t, clk, calls, "B")
+	if fr.shortCalls != 4 {
+		t.Fatalf("stale entries should be refreshed once each, calls=%d", fr.shortCalls)
+	}
+}
+
+func TestShortInterestWorkerRetainsLastSuccessThroughFailure(t *testing.T) {
+	clk := clock.NewFake(et(2026, 7, 8, 8, 0))
+	calls := make(chan string, 4)
+	fr := &fakeReq{shortCallCh: calls}
+	fr.shortInfo = func(_ string) (*shortpb.Response, error) {
+		if fr.shortCalls > 1 {
+			return nil, fmt.Errorf("temporary provider failure")
+		}
+		value := uint64(547_619)
+		return shortResp(shortItem("2026-07-31", &value)), nil
+	}
+	p := New(config.Scan{}, fr, &capturePub{}, clk, nil, nil)
+	p.enqueueShortInterest("US.XOS")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go p.runShortInterestWorker(ctx)
+	waitShortCall(t, calls, "XOS")
+	entry := waitShortCache(t, p, "US.XOS")
+	if !entry.available || entry.shares != 547_619 {
+		t.Fatalf("first result=%+v", entry)
+	}
+
+	clk.Advance(shortInterestFreshness)
+	p.overlayShortInterest([]wsmsg.ScannerRow{{Symbol: "US.XOS"}}, clk.Now())
+	advanceUntilShortCall(t, clk, calls, "XOS")
+	rows := []wsmsg.ScannerRow{{Symbol: "US.XOS"}}
+	p.overlayShortInterest(rows, clk.Now())
+	if rows[0].ShortInterest == nil || *rows[0].ShortInterest != 547_619 || rows[0].ShortInterestAsOf == nil || *rows[0].ShortInterestAsOf != "2026-07-31" {
+		t.Fatalf("failed refresh erased last success: %+v", rows[0])
+	}
+}
+
+func TestRunRepublishesShortInterestAfterWorkerWithoutBlockingRank(t *testing.T) {
+	clk := clock.NewFake(et(2026, 7, 8, 8, 0))
+	calls := make(chan string, 2)
+	fr := &fakeReq{
+		rankResp:    rankResp(rankItem{Symbol: "US.XOS", ChangePct: 5, Last: 1, Volume: 100}),
+		snap:        func([]string) (*snappb.Response, error) { return snapResp(marketSnap("XOS", 1, 1, 1, 100)), nil },
+		shortCallCh: calls,
+		shortInfo: func(string) (*shortpb.Response, error) {
+			value := uint64(547_619)
+			return shortResp(shortItem("2026-07-31", &value)), nil
+		},
+	}
+	pub := &capturePub{ranksCh: make(chan wsmsg.ScannerRankPayload, 2)}
+	p := New(config.Scan{Enabled: true, PremarketMs: 1, RTHMs: 1}, fr, pub, clk, nil, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go p.Run(ctx)
+	p.poke <- struct{}{}
+	initial := waitRank(t, pub.ranksCh)
+	if initial.Rows[0].ShortInterest != nil {
+		t.Fatalf("rank publication should not wait for enrichment: %+v", pub.ranks)
+	}
+
+	waitShortCall(t, calls, "XOS")
+	waitShortCache(t, p, "US.XOS")
+	enriched := waitRank(t, pub.ranksCh)
+	row := enriched.Rows[0]
+	if row.ShortInterest == nil || *row.ShortInterest != 547_619 || row.ShortInterestAsOf == nil || *row.ShortInterestAsOf != "2026-07-31" {
+		t.Fatalf("full payload missing short-interest fields: %+v", row)
+	}
+}
+
 // fakeReq implements the scan.requester interface with canned responses.
 type fakeReq struct {
 	rankResp     *rankpb.Response // 3410 pre-market
@@ -277,6 +525,11 @@ type fakeReq struct {
 	// listed (empty response), matching tests that don't care about OTC.
 	staticInfo  func(codes []string) (*staticpb.Response, error)
 	staticCalls int
+	shortInfo   func(code string) (*shortpb.Response, error)
+	shortCalls  int
+	shortCodes  []string
+	shortNums   []int32
+	shortCallCh chan string
 }
 
 func (f *fakeReq) Request(_ context.Context, protoID uint32, req proto.Message) (opend.Frame, error) {
@@ -322,6 +575,22 @@ func (f *fakeReq) Request(_ context.Context, protoID uint32, req proto.Message) 
 			return opend.Frame{}, err
 		}
 		return frameOf(resp), nil
+	case opend.ProtoQotGetShortInterest:
+		r := req.(*shortpb.Request)
+		f.shortCalls++
+		f.shortCodes = append(f.shortCodes, r.GetC2S().GetSecurity().GetCode())
+		f.shortNums = append(f.shortNums, r.GetC2S().GetNum())
+		if f.shortCallCh != nil {
+			f.shortCallCh <- r.GetC2S().GetSecurity().GetCode()
+		}
+		if f.shortInfo == nil {
+			return frameOf(shortResp()), nil
+		}
+		resp, err := f.shortInfo(r.GetC2S().GetSecurity().GetCode())
+		if err != nil {
+			return opend.Frame{}, err
+		}
+		return frameOf(resp), nil
 	default:
 		return opend.Frame{}, fmt.Errorf("unexpected protoID %d", protoID)
 	}
@@ -334,14 +603,22 @@ func frameOf(m proto.Message) opend.Frame {
 
 // capturePub records published scanner payloads.
 type capturePub struct {
-	ranks []wsmsg.ScannerRankPayload
-	hits  []wsmsg.ScanHitPayload
+	ranks   []wsmsg.ScannerRankPayload
+	hits    []wsmsg.ScanHitPayload
+	ranksCh chan wsmsg.ScannerRankPayload
 }
 
 func (c *capturePub) Publish(topic wsmsg.Topic, _ string, payload any) {
 	switch topic {
 	case wsmsg.TopicScannerRank:
-		c.ranks = append(c.ranks, payload.(wsmsg.ScannerRankPayload))
+		v := payload.(wsmsg.ScannerRankPayload)
+		c.ranks = append(c.ranks, v)
+		if c.ranksCh != nil {
+			select {
+			case c.ranksCh <- v:
+			default:
+			}
+		}
 	case wsmsg.TopicScannerHit:
 		c.hits = append(c.hits, payload.(wsmsg.ScanHitPayload))
 	}
@@ -443,6 +720,14 @@ func snapResp(snaps ...*snappb.Snapshot) *snappb.Response {
 
 func snapErrResp(msg string) *snappb.Response {
 	return &snappb.Response{RetType: proto.Int32(1), RetMsg: proto.String(msg)}
+}
+
+func shortResp(items ...*shortpb.UsShortInterestItem) *shortpb.Response {
+	return &shortpb.Response{RetType: proto.Int32(0), S2C: &shortpb.S2C{UsItemList: items}}
+}
+
+func shortItem(date string, shares *uint64) *shortpb.UsShortInterestItem {
+	return &shortpb.UsShortInterestItem{TimestampStr: proto.String(date), SharesShort: shares}
 }
 
 // staticBasic fills every required SecurityStaticBasic field (dummy values);

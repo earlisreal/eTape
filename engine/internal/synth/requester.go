@@ -32,6 +32,7 @@ import (
 	qotcommon "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
 	newspb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsearchnews"
 	snappb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsecuritysnapshot"
+	shortpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetshortinterest"
 	staticpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetstaticinfo"
 	tmrpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgettopmoversrank"
 	ahpb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetusafterhoursrank"
@@ -83,8 +84,8 @@ func NewRequester(gen *Generator) *Requester {
 // changing. Every handled protoID's response reports RetType 0 (success).
 //
 // An unrecognized protoID (e.g. 3207/Qot_GetOwnerPlate, which stockinfo.go
-// issues but this package doesn't implement - only the 7 protoIDs named in
-// the task brief are handled) returns unknownProtoIDBody: valid wire bytes
+// issues but this package doesn't implement) returns unknownProtoIDBody: valid
+// wire bytes
 // for "{retType: -400}", the shared required-field/default convention every
 // moomoo Response type in this codebase uses for "no real value". A plain
 // empty Body will not do here - google.golang.org/protobuf's proto.Unmarshal
@@ -116,6 +117,8 @@ func (r *Requester) Request(ctx context.Context, protoID uint32, req proto.Messa
 		resp = buildStaticInfoResponse(r.gen, req)
 	case opend.ProtoQotGetSecuritySnapshot:
 		resp = buildSnapshotResponse(r.gen, req)
+	case opend.ProtoQotGetShortInterest:
+		resp = buildShortInterestResponse(r.gen, req)
 	case opend.ProtoQotGetSearchNews:
 		resp = buildSearchNewsResponse(r.gen, req)
 	default:
@@ -373,6 +376,28 @@ func buildSnapshotResponse(g *Generator, req proto.Message) *snappb.Response {
 		})
 	}
 	return &snappb.Response{RetType: proto.Int32(0), S2C: &snappb.S2C{SnapshotList: snaps}}
+}
+
+// buildShortInterestResponse derives a stable demo position from the existing
+// synthetic float and pairs it with the current quote's local calendar date.
+// It intentionally adds no separate short-interest state to Generator.
+func buildShortInterestResponse(g *Generator, req proto.Message) *shortpb.Response {
+	var security *qotcommon.Security
+	if r, ok := req.(*shortpb.Request); ok {
+		security = r.GetC2S().GetSecurity()
+	}
+	code := genCodeOf(security.GetCode())
+	q, qOK := g.QuoteOf(code)
+	f, fOK := g.Fundamentals(code)
+	if !qOK || !fOK || f.FloatShares < 0 {
+		return &shortpb.Response{RetType: proto.Int32(0), S2C: &shortpb.S2C{}}
+	}
+	item := &shortpb.UsShortInterestItem{
+		Timestamp:    proto.Int64(q.TsMs / 1000),
+		TimestampStr: proto.String(time.UnixMilli(q.TsMs).In(session.Loc()).Format("2006-01-02")),
+		SharesShort:  proto.Uint64(uint64(f.FloatShares / 10)),
+	}
+	return &shortpb.Response{RetType: proto.Int32(0), S2C: &shortpb.S2C{UsItemList: []*shortpb.UsShortInterestItem{item}}}
 }
 
 // buildSnapshotBasic populates the fields stockinfo.go's snapshotToPayload

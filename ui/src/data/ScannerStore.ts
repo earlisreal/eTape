@@ -39,7 +39,15 @@ export class ScannerStore extends ReactStore<ScannerState> {
     const view: ScannerRowView[] = rows.map((row) => {
       if (!isBaseline && !known.has(row.symbol)) { unseen.add(row.symbol); newHits.push(row.symbol); }
       const isUnseen = unseen.has(row.symbol);
-      return { ...row, volumeRatio: row.volumeRatio ?? null, isUnseen, isNewHit: isUnseen, muted: false };
+      return {
+        ...row,
+        volumeRatio: row.volumeRatio ?? null,
+        shortInterest: row.shortInterest ?? null,
+        shortInterestAsOf: row.shortInterestAsOf ?? null,
+        isUnseen,
+        isNewHit: isUnseen,
+        muted: false,
+      };
     });
     for (const row of rows) known.add(row.symbol);
     this.setSession(session, { rows: view, refreshedAt, filters });

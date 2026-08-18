@@ -69,12 +69,22 @@ describe("scannerSyncStatusText", () => {
 });
 
 describe("rankScannerRows", () => {
-  it("ranks higher finite Volume Ratios before unavailable rows", () => {
-    const row = (symbol: string, volumeRatio: number | null): ScannerRowView => ({
-      symbol, shortSellRestricted: false, changePct: 1, last: 1, floatShares: null, volume: 1, volumeRatio,
-      isUnseen: false, isNewHit: false, muted: false,
-    });
-    expect(rankScannerRows([row("UNKNOWN", null), row("LOW", 1.2), row("HIGH", 8.4)], { col: "volRatio", dir: "desc" }).map((r) => r.symbol))
-      .toEqual(["HIGH", "LOW", "UNKNOWN"]);
-  });
+	const row = (symbol: string, volumeRatio: number | null, shortInterest: number | null = null): ScannerRowView => ({
+		symbol, shortSellRestricted: false, changePct: 1, last: 1, floatShares: null, volume: 1, volumeRatio,
+		shortInterest, shortInterestAsOf: shortInterest === null ? null : "2026-07-31",
+		isUnseen: false, isNewHit: false, muted: false,
+	});
+
+	it("ranks higher finite Volume Ratios before unavailable rows", () => {
+		expect(rankScannerRows([row("UNKNOWN", null), row("LOW", 1.2), row("HIGH", 8.4)], { col: "volRatio", dir: "desc" }).map((r) => r.symbol))
+			.toEqual(["HIGH", "LOW", "UNKNOWN"]);
+	});
+
+	it("ranks finite Reported Short Interest before unavailable rows in both directions", () => {
+		const rows = [row("UNKNOWN", null), row("LOW", null, 9_067), row("HIGH", null, 547_619)];
+		expect(rankScannerRows(rows, { col: "shortInterest", dir: "desc" }).map((r) => r.symbol))
+			.toEqual(["HIGH", "LOW", "UNKNOWN"]);
+		expect(rankScannerRows(rows, { col: "shortInterest", dir: "asc" }).map((r) => r.symbol))
+			.toEqual(["LOW", "HIGH", "UNKNOWN"]);
+	});
 });
