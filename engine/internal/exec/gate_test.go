@@ -136,6 +136,24 @@ func TestBreachedDayLoss(t *testing.T) {
 	}
 }
 
+func TestBreachedDayLoss_ActiveVenueOnlyPolicy(t *testing.T) {
+	cfg := baseCfg()
+	cfg.DayLossPolicies = map[VenueID]DayLossPolicy{
+		"sim-2": {ActiveVenueOnly: true},
+	}
+	s := armedState()
+	s.SetActiveVenue("sim-1")
+	s.ReconcileAccount(AccountSnapshot{Venue: "sim-1", DayPnL: -200})
+	s.ReconcileAccount(AccountSnapshot{Venue: "sim-2", DayPnL: -900})
+	if BreachedDayLoss(s, cfg) {
+		t.Fatal("inactive active-only venue must not contribute to day loss")
+	}
+	s.SetActiveVenue("sim-2")
+	if !BreachedDayLoss(s, cfg) {
+		t.Fatal("active active-only venue must contribute to day loss")
+	}
+}
+
 func TestGateDayLossBreachBlocksAfterRearm(t *testing.T) {
 	cfg := baseCfg()
 	marks := fakeMarks{"AAPL": 100}

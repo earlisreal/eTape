@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/creds"
@@ -253,20 +252,6 @@ func (a *Adapter) emit(e exec.BrokerEvent) { a.events <- e }
 
 func (a *Adapter) Events() <-chan exec.BrokerEvent { return a.events }
 
-// ProbeRTT times a lightweight read-only GET /v2/clock round trip, giving
-// eTape's health poller a reachability RTT for Alpaca — the same role
-// moomooProbe.ProbeRTT (boot.go) plays for the moomoo OpenD link. This is
-// deliberately a control-plane reachability probe, not an order ack/fill
-// latency measurement (which only exists by placing real orders; see
-// docs/2026-07-06-venue-latency-benchmark.md for that one-off measurement).
-// Wall-clock time.Now() is used (not the injected clock) to match
-// moomooProbe's convention, since a fake clock would make RTT meaningless.
-func (a *Adapter) ProbeRTT(ctx context.Context) (time.Duration, error) {
-	start := time.Now()
-	err := a.rest.ping(ctx)
-	return time.Since(start), err
-}
-
 // LoadActiveAssets fetches Alpaca's active asset directory once and replaces
 // the in-memory snapshot only after the complete response has decoded.
 func (a *Adapter) LoadActiveAssets(ctx context.Context) (int, error) {
@@ -340,7 +325,13 @@ func (a *Adapter) GetLocate(ctx context.Context, id string) (locates.Record, err
 // overnight (Blue Ocean ATS) session support — all true, unlike TradeZero's
 // all-false Capabilities.
 func (a *Adapter) Capabilities() exec.Capabilities {
-	return exec.Capabilities{NativeReplace: true, FlattenAll: true, OvernightSession: true}
+	return exec.Capabilities{
+		NativeReplace:          true,
+		FlattenAll:             true,
+		OvernightSession:       true,
+		AuthoritativeDayPnL:    true,
+		DayLossActiveVenueOnly: true,
+	}
 }
 
 // SubmitOrder POSTs a new order. Unlike TradeZero (whose REST response IS the

@@ -228,6 +228,22 @@ func TestCommandsGetSetConfig(t *testing.T) {
 	}
 }
 
+func TestCommandsSetConfigNotifiesRuntimeAfterPersisting(t *testing.T) {
+	cfg := &spyCfg{}
+	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	called := false
+	cd.onConfigSet = func(key, value string) {
+		called = true
+		if cfg.got[key] != value {
+			t.Fatalf("observer saw config before persistence: %q != %q", cfg.got[key], value)
+		}
+	}
+	ack, _ := cd.handle(context.Background(), "SetConfig", json.RawMessage(`{"key":"orderConfig","value":{"activeVenue":"alpaca-paper"}}`), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != "accepted" || !called {
+		t.Fatalf("SetConfig ack/observer = %+v called=%v", ack, called)
+	}
+}
+
 func TestCommandsDeleteConfig(t *testing.T) {
 	cfg := &spyCfg{}
 	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})

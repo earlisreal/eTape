@@ -19,8 +19,13 @@ type VenueLimits struct {
 }
 
 type GateConfig struct {
-	Global GlobalLimits
-	Venue  map[VenueID]VenueLimits
+	Global          GlobalLimits
+	Venue           map[VenueID]VenueLimits
+	DayLossPolicies map[VenueID]DayLossPolicy
+}
+
+type DayLossPolicy struct {
+	ActiveVenueOnly bool
 }
 
 // signedQty returns the request's signed effect on a position (long +, short -).
@@ -161,5 +166,12 @@ func BreachedDayLoss(s *State, cfg GateConfig) bool {
 	if cfg.Global.MaxDayLoss <= 0 {
 		return false
 	}
-	return s.TotalDayPnL() <= -cfg.Global.MaxDayLoss
+	var total float64
+	for v, vs := range s.Venues {
+		if cfg.DayLossPolicies[v].ActiveVenueOnly && v != s.ActiveVenue {
+			continue
+		}
+		total += vs.Account.DayPnL
+	}
+	return total <= -cfg.Global.MaxDayLoss
 }

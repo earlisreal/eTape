@@ -69,6 +69,7 @@ type Config struct {
 	OutBuf                         int
 	DistDir                        string
 	Demo                           bool
+	OnConfigSet                    func(key, value string)
 }
 
 func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va venueAdmin, vt venueTester, requestRestart func(), startDemo func() error, locateRegistries ...LocateRegistry) (*Hub, *Server) {
@@ -101,6 +102,7 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 		locateRegistry = locateRegistries[0]
 	}
 	cmd := newCommands(ex, st, h, h, va, h.feed, vt, locateRegistry)
+	cmd.onConfigSet = cfg.OnConfigSet
 	h.cmd = cmd
 	cmd.restart = requestRestart
 	cmd.startDemo = startDemo

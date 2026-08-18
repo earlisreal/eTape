@@ -20,6 +20,7 @@ func newVenueState() *VenueState {
 // routing both read it.
 type State struct {
 	MasterArmed bool
+	ActiveVenue VenueID
 	Venues      map[VenueID]*VenueState
 	orderIndex  map[string]VenueID
 }

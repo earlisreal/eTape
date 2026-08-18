@@ -98,6 +98,7 @@ type commands struct {
 	knownSymbol atomic.Pointer[knownSymbolBox]
 	tester      venueTester
 	locates     LocateRegistry
+	onConfigSet func(key, value string)
 	restart     func()
 	startDemo   func() error
 	wl          atomic.Pointer[watchlistBox]
@@ -242,6 +243,9 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked("bad args"), false
 		}
 		cd.cfg.SetConfig(a.Key, string(a.Value))
+		if cd.onConfigSet != nil {
+			cd.onConfigSet(a.Key, string(a.Value))
+		}
 		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "DeleteConfig":
 		var a wsmsg.DeleteConfigArgs

@@ -33,6 +33,8 @@ func (s *State) ReconcileOpenOrders(v VenueID, orders []Order) {
 // disarmed.
 func (s *State) SetMasterArmed(on bool) { s.MasterArmed = on }
 
+func (s *State) SetActiveVenue(v VenueID) { s.ActiveVenue = v }
+
 // IsArmed reports whether trading on a venue is permitted: master armed AND
 // the venue is registered.
 func (s *State) IsArmed(v VenueID) bool {

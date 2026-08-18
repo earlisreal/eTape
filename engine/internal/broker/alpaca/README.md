@@ -22,4 +22,10 @@ rate limiter. Locate providers are registered by exact venue/account ID, so
 multiple Alpaca accounts cannot silently share one account's locates. Locate
 requests never submit short orders.
 
+`AccountPoller` follows the single global active venue. When that venue is
+Alpaca it performs an immediate and then 1 Hz low-priority `GET /v2/account`
+refresh, emits the normal `BrokerAccount` event, and supplies the same
+request RTT to health. It never polls inactive Alpaca accounts and has no
+separate clock probe.
+
 Test: `go test ./internal/broker/alpaca`.

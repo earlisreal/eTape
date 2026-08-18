@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -151,8 +152,8 @@ func liveMoomooDayLossGap(cfg config.Config) bool {
 }
 
 // rttProber is health.New's unexported prober interface, restated here so
-// this package can select an rttProber out of the built brokers without
-// importing health's internals. alpaca.Adapter.ProbeRTT satisfies it.
+// this package can pass the moomoo/OpenD probe without importing health's
+// internals.
 type rttProber interface {
 	ProbeRTT(ctx context.Context) (time.Duration, error)
 }
@@ -210,29 +211,36 @@ func firstAlpacaAssetReader(vbs []venueBroker) stockInfoAssetReader {
 	return nil
 }
 
-// firstAlpacaProber returns the first configured Alpaca adapter's ProbeRTT,
-// for wiring the engine-alpaca health link. This asserts against the
-// CONCRETE *alpaca.Adapter type rather than the generic rttProber
-// interface: both *alpaca.Adapter and *moomoo.Adapter implement ProbeRTT
-// (and so both satisfy rttProber), so an interface-only assertion would
-// pick whichever venue happens to come first in config order regardless of
-// broker — a config with moomoo listed before alpaca would silently
-// mislabel moomoo's OpenD latency as the Alpaca health link. Asserting the
-// concrete type keeps this function alpaca-specific no matter which other
-// broker types pick up rttProber in the future. nil (no alpaca venue
-// configured, or replay mode where every venue is sim) means the
-// engine-alpaca link is omitted entirely rather than shown down — see
-// buildHealth's hasAlpaca gate.
-//
-// A venue list with BOTH a paper and a live Alpaca venue only gets one
-// link's worth of latency; this picks the first in config order. Per-venue
-// latency (keyed by venue id) is a deferred generalization if that split
-// ever matters day to day.
-func firstAlpacaProber(vbs []venueBroker) rttProber {
-	if a := firstAlpacaAdapter(vbs); a != nil {
-		return a
+// resolveActiveVenue and dayLossPolicies are small boot-time runtime wiring
+// helpers. They intentionally use the running venue set, not raw persisted
+// config, so stale UI state cannot target a missing adapter.
+type persistedOrderConfig struct {
+	ActiveVenue string `json:"activeVenue"`
+}
+
+func resolveActiveVenue(raw string, vbs []venueBroker) exec.VenueID {
+	var saved persistedOrderConfig
+	if json.Unmarshal([]byte(raw), &saved) == nil && saved.ActiveVenue != "" {
+		for _, vb := range vbs {
+			if vb.ID == exec.VenueID(saved.ActiveVenue) {
+				return vb.ID
+			}
+		}
 	}
-	return nil
+	if len(vbs) > 0 {
+		return vbs[0].ID
+	}
+	return ""
+}
+
+func dayLossPolicies(vbs []venueBroker) map[exec.VenueID]exec.DayLossPolicy {
+	policies := make(map[exec.VenueID]exec.DayLossPolicy)
+	for _, vb := range vbs {
+		if vb.Broker != nil && vb.Broker.Capabilities().DayLossActiveVenueOnly {
+			policies[vb.ID] = exec.DayLossPolicy{ActiveVenueOnly: true}
+		}
+	}
+	return policies
 }
 
 // errAlpacaLiveCreds is returned by resolveBackfillAlpacaCreds when the
@@ -248,7 +256,7 @@ var errAlpacaLiveCreds = errors.New("refusing alpaca-live creds for read-only hi
 // credentials-store redesign hands out random key names on every Venues-UI
 // edit (e.g. "key-a48b723d"), so a standalone creds_key literal in
 // config.toml drifts out of sync with what's actually stored; this resolves
-// against the configured Alpaca venues instead (mirroring firstAlpacaProber's
+// against the configured Alpaca venues instead (mirroring the configured
 // "scan venues for alpaca" pattern), which the UI keeps in sync by
 // construction.
 //

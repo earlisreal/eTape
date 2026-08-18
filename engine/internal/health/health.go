@@ -18,6 +18,11 @@ type prober interface {
 	ProbeRTT(ctx context.Context) (time.Duration, error)
 }
 
+type AccountHealthSource interface {
+	Latest() (rtt time.Duration, ok, active bool)
+	Changes() <-chan struct{}
+}
+
 type pingSource interface {
 	LastPingRTT() (time.Duration, bool)
 }
@@ -29,19 +34,19 @@ type QuotaSource interface {
 }
 
 type Poller struct {
-	cfg    config.Health
-	pub    Publisher
-	clk    clock.Clock
-	probe  prober
-	alpaca prober // nil when no Alpaca venue is configured; mirrors probe's nil-skip
-	pings  pingSource
-	hasTZ  bool
-	quota  QuotaSource
-	seq    int64
+	cfg     config.Health
+	pub     Publisher
+	clk     clock.Clock
+	probe   prober
+	account AccountHealthSource
+	pings   pingSource
+	hasTZ   bool
+	quota   QuotaSource
+	seq     int64
 }
 
-func New(cfg config.Health, pub Publisher, clk clock.Clock, probe prober, pings pingSource, hasTZ bool, alpaca prober, quota QuotaSource) *Poller {
-	return &Poller{cfg: cfg, pub: pub, clk: clk, probe: probe, pings: pings, hasTZ: hasTZ, alpaca: alpaca, quota: quota}
+func New(cfg config.Health, pub Publisher, clk clock.Clock, probe prober, pings pingSource, hasTZ bool, account AccountHealthSource, quota QuotaSource) *Poller {
+	return &Poller{cfg: cfg, pub: pub, clk: clk, probe: probe, pings: pings, hasTZ: hasTZ, account: account, quota: quota}
 }
 
 func (p *Poller) Run(ctx context.Context) error {
@@ -50,38 +55,58 @@ func (p *Poller) Run(ctx context.Context) error {
 	}
 	tick := p.clk.NewTicker(time.Duration(p.cfg.ProbeMs) * time.Millisecond)
 	defer tick.Stop()
+	var uiRTT, moomooRTT *time.Duration
+	var quotaInfo *wsmsg.QuotaInfo
+	publish := func() {
+		var alpacaRTT *time.Duration
+		hasAlpaca := false
+		if p.account != nil {
+			rtt, ok, active := p.account.Latest()
+			hasAlpaca = active
+			if active && ok {
+				alpacaRTT = &rtt
+			}
+		}
+		p.pub.Publish(wsmsg.TopicSysHealth, "", buildHealth(uiRTT, moomooRTT, alpacaRTT, p.hasTZ, hasAlpaca, quotaInfo))
+	}
+	probeAndPublish := func() {
+		uiRTT = nil
+		if p.pings != nil {
+			if d, ok := p.pings.LastPingRTT(); ok {
+				uiRTT = &d
+			}
+		}
+		moomooRTT = nil
+		if p.probe != nil {
+			if d, err := p.probe.ProbeRTT(ctx); err == nil {
+				moomooRTT = &d
+			}
+		}
+		quotaInfo = nil
+		if p.quota != nil {
+			if qi, ok := p.quota.Latest(); ok {
+				quotaInfo = &qi
+			}
+		}
+		publish()
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-tick.C():
-			var mo *time.Duration
-			if p.probe != nil {
-				if d, err := p.probe.ProbeRTT(ctx); err == nil {
-					mo = &d
-				}
-			}
-			var ui *time.Duration
-			if p.pings != nil {
-				if d, ok := p.pings.LastPingRTT(); ok {
-					ui = &d
-				}
-			}
-			var al *time.Duration
-			if p.alpaca != nil {
-				if d, err := p.alpaca.ProbeRTT(ctx); err == nil {
-					al = &d
-				}
-			}
-			var q *wsmsg.QuotaInfo
-			if p.quota != nil {
-				if qi, ok := p.quota.Latest(); ok {
-					q = &qi
-				}
-			}
-			p.pub.Publish(wsmsg.TopicSysHealth, "", buildHealth(ui, mo, al, p.hasTZ, p.alpaca != nil, q))
+			probeAndPublish()
+		case <-p.accountChanges():
+			publish()
 		}
 	}
+}
+
+func (p *Poller) accountChanges() <-chan struct{} {
+	if p.account == nil {
+		return nil
+	}
+	return p.account.Changes()
 }
 
 // Event appends and publishes a sys.events item. main also persists it via store.

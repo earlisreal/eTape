@@ -545,27 +545,6 @@ func (rc *restClient) cancelOrder(ctx context.Context, brokerID string) error {
 	return nil
 }
 
-// ping issues a lightweight read-only GET /v2/clock, used only to measure
-// Alpaca REST reachability/RTT (Adapter.ProbeRTT below mirrors moomooProbe's
-// Qot_GetGlobalState round trip). The response body is never decoded — only
-// the round trip and status matter here — but a >=400 status still surfaces
-// as a real error via apiError, never a false "reachable" nil.
-func (rc *restClient) ping(ctx context.Context) error {
-	resp, err := rc.do(ctx, http.MethodGet, "/v2/clock", nil)
-	if err != nil {
-		return fmt.Errorf("alpaca: ping transport: %w", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("alpaca: read ping response: %w", err)
-	}
-	if resp.StatusCode >= 400 {
-		return apiError(resp.StatusCode, body)
-	}
-	return nil
-}
-
 // alpacaAccountID is a minimal GET /v2/account decode scoped to
 // verifyAccount only — deliberately separate from alpacaAccount (which has
 // no id field at all: snapshot's equity/buying-power/day-P&L fields have
@@ -778,6 +757,50 @@ type alpacaAccount struct {
 	Multiplier  numString `json:"multiplier"`
 }
 
+func (rc *restClient) decodeAccount(body []byte) (exec.AccountSnapshot, error) {
+	var aa alpacaAccount
+	if err := json.Unmarshal(body, &aa); err != nil {
+		return exec.AccountSnapshot{}, fmt.Errorf("alpaca: decode account: %w", err)
+	}
+	return exec.AccountSnapshot{
+		Equity:        float64(aa.Equity),
+		BuyingPower:   float64(aa.BuyingPower),
+		AvailableCash: float64(aa.Cash),
+		SodEquity:     float64(aa.LastEquity),
+		Leverage:      float64(aa.Multiplier),
+		DayPnL:        float64(aa.Equity) - float64(aa.LastEquity),
+		TsMs:          rc.clk.Now().UnixMilli(),
+	}, nil
+}
+
+func (rc *restClient) readAccountResponse(resp *http.Response) (exec.AccountSnapshot, error) {
+	body, err := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if err != nil {
+		return exec.AccountSnapshot{}, fmt.Errorf("alpaca: read account: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return exec.AccountSnapshot{}, apiError(resp.StatusCode, body)
+	}
+	return rc.decodeAccount(body)
+}
+
+// pollAccount admits one low-priority account request while reserving two
+// pooled tokens for trading and other normal REST work. The admitted request
+// must use doHTTPWithHeaders directly: do/doWithHeaders would take a second
+// token after AllowWithReserve already consumed one.
+func (rc *restClient) pollAccount(ctx context.Context) (exec.AccountSnapshot, bool, error) {
+	if !rc.bucket.AllowWithReserve(2) {
+		return exec.AccountSnapshot{}, false, nil
+	}
+	resp, err := rc.doHTTPWithHeaders(ctx, http.MethodGet, "/v2/account", nil, nil)
+	if err != nil {
+		return exec.AccountSnapshot{}, true, fmt.Errorf("alpaca: fetch account transport: %w", err)
+	}
+	acct, err := rc.readAccountResponse(resp)
+	return acct, true, err
+}
+
 // alpacaPosition is one GET /v2/positions entry. qty is signed for shorts on
 // a real account, but this also tolerates the (undocumented / defensive)
 // case of a positive qty paired with side:"short" by negating it — belt and
@@ -891,17 +914,10 @@ func (rc *restClient) snapshot(ctx context.Context) (exec.AccountSnapshot, []exe
 	if acctResp.StatusCode >= 400 {
 		return exec.AccountSnapshot{}, nil, nil, apiError(acctResp.StatusCode, acctBody)
 	}
-	var aa alpacaAccount
-	if err := json.Unmarshal(acctBody, &aa); err != nil {
-		return exec.AccountSnapshot{}, nil, nil, fmt.Errorf("alpaca: decode account: %w", err)
+	acct, err = rc.decodeAccount(acctBody)
+	if err != nil {
+		return exec.AccountSnapshot{}, nil, nil, err
 	}
-	acct.Equity = float64(aa.Equity)
-	acct.BuyingPower = float64(aa.BuyingPower)
-	acct.AvailableCash = float64(aa.Cash)
-	acct.SodEquity = float64(aa.LastEquity)
-	acct.Leverage = float64(aa.Multiplier)
-	acct.DayPnL = float64(aa.Equity) - float64(aa.LastEquity)
-	acct.TsMs = rc.clk.Now().UnixMilli()
 
 	posResp, err := rc.do(ctx, http.MethodGet, "/v2/positions", nil)
 	if err != nil {

@@ -65,34 +65,67 @@ func TestAccount_DayPnLFromEquityDelta(t *testing.T) {
 	}
 }
 
-// TestPing_Success verifies ping treats a normal GET /v2/clock 200 as
-// reachable — the happy path for the RTT probe (Adapter.ProbeRTT).
-func TestPing_Success(t *testing.T) {
+func TestPollAccount_AdmittedRequestMapsAccountAndConsumesOneToken(t *testing.T) {
+	requests := 0
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v2/clock", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`{"timestamp":"2026-07-09T09:30:00Z","is_open":true,"next_open":"","next_close":""}`))
+	mux.HandleFunc("/v2/account", func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{"equity":"100050","last_equity":"100000","buying_power":"200000","cash":"50000","multiplier":"4"}`))
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
-	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
-	if err := rc.ping(context.Background()); err != nil {
-		t.Fatalf("ping should succeed on 200: %v", err)
+	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(1234)))
+
+	acct, admitted, err := rc.pollAccount(context.Background())
+	if err != nil || !admitted {
+		t.Fatalf("pollAccount = %+v, admitted=%v, err=%v", acct, admitted, err)
+	}
+	if requests != 1 {
+		t.Fatalf("account requests = %d, want 1", requests)
+	}
+	if acct.Equity != 100050 || acct.DayPnL != 50 || acct.BuyingPower != 200000 || acct.AvailableCash != 50000 || acct.SodEquity != 100000 || acct.Leverage != 4 || acct.TsMs != 1234 {
+		t.Fatalf("account mapping = %+v", acct)
+	}
+	for i := 0; i < 4; i++ {
+		if !rc.bucket.Allow() {
+			t.Fatalf("token %d after admitted poll should remain available", i+1)
+		}
+	}
+	if rc.bucket.Allow() {
+		t.Fatal("admitted poll should consume exactly one token")
 	}
 }
 
-// TestPing_StructuredError verifies a >=400 response surfaces as a real
-// error rather than a false "reachable" nil.
-func TestPing_StructuredError(t *testing.T) {
+func TestPollAccount_ReserveSkipIsSilentAndPreservesTokens(t *testing.T) {
+	requests := 0
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v2/clock", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(500)
-		_, _ = w.Write([]byte(`{"code":50000000,"message":"internal error"}`))
+	mux.HandleFunc("/v2/account", func(w http.ResponseWriter, _ *http.Request) {
+		requests++
+		_, _ = w.Write([]byte(`{}`))
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	rc := newRESTClient(srv.URL, "K", "S", clock.NewFake(time.UnixMilli(0)))
-	if err := rc.ping(context.Background()); err == nil {
-		t.Fatal("500 must surface as an error, not a false-reachable nil")
+	for i := 0; i < 3; i++ {
+		if !rc.bucket.Allow() {
+			t.Fatalf("normal token %d should be available", i+1)
+		}
+	}
+
+	_, admitted, err := rc.pollAccount(context.Background())
+	if err != nil || admitted {
+		t.Fatalf("reserve skip = admitted=%v err=%v, want no-op", admitted, err)
+	}
+	if requests != 0 {
+		t.Fatalf("reserve skip made %d HTTP requests", requests)
+	}
+	for i := 0; i < 2; i++ {
+		if !rc.bucket.Allow() {
+			t.Fatalf("reserve skip consumed remaining token %d", i+1)
+		}
+	}
+	if rc.bucket.Allow() {
+		t.Fatal("reserve skip must leave no extra token")
 	}
 }
 

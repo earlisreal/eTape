@@ -51,15 +51,17 @@ type Disarm struct{}
 // reseeds the account to the venue's configured starting balance (Core's
 // booted CoreConfig.StartingBalance, never a value from the command itself).
 type ResetBalance struct{ Venue VenueID }
+type SetActiveVenue struct{ Venue VenueID }
 
-func (SubmitOrder) isCommand()  {}
-func (CancelOrder) isCommand()  {}
-func (ReplaceOrder) isCommand() {}
-func (Flatten) isCommand()      {}
-func (KillSwitch) isCommand()   {}
-func (Arm) isCommand()          {}
-func (Disarm) isCommand()       {}
-func (ResetBalance) isCommand() {}
+func (SubmitOrder) isCommand()    {}
+func (CancelOrder) isCommand()    {}
+func (ReplaceOrder) isCommand()   {}
+func (Flatten) isCommand()        {}
+func (KillSwitch) isCommand()     {}
+func (Arm) isCommand()            {}
+func (Disarm) isCommand()         {}
+func (ResetBalance) isCommand()   {}
+func (SetActiveVenue) isCommand() {}
 
 // CmdAck is the synchronous accepted|blocked ack; order outcomes arrive later as
 // Updates.
@@ -122,6 +124,7 @@ type CoreConfig struct {
 	// boot past a short, fixed deadline. Zero means use
 	// defaultRecoverSnapshotTimeout.
 	RecoverSnapshotTimeout time.Duration
+	ActiveVenue            VenueID
 }
 
 func NewCore(cfg CoreConfig) *Core {
@@ -153,6 +156,7 @@ func NewCore(cfg CoreConfig) *Core {
 		cycles:                 newCycleProjection(),
 		closed:                 newClosedOrders(),
 	}
+	c.state.SetActiveVenue(cfg.ActiveVenue)
 	// Master always boots disarmed — Recover never touches arm state, so a
 	// restart is fully disarmed until a deliberate arm click.
 	return c
@@ -168,6 +172,23 @@ func (c *Core) Do(cmd Command) CmdAck {
 	reply := make(chan CmdAck, 1)
 	c.cmds <- cmdReq{cmd: cmd, reply: reply}
 	return <-reply
+}
+
+// DoContext is the shutdown-safe form used by runtime observers that may be
+// called while the top-level engine context is being canceled.
+func (c *Core) DoContext(ctx context.Context, cmd Command) CmdAck {
+	reply := make(chan CmdAck, 1)
+	select {
+	case c.cmds <- cmdReq{cmd: cmd, reply: reply}:
+	case <-ctx.Done():
+		return CmdAck{Accepted: false, Reason: "execution core stopped"}
+	}
+	select {
+	case ack := <-reply:
+		return ack
+	case <-ctx.Done():
+		return CmdAck{Accepted: false, Reason: "execution core stopped"}
+	}
 }
 
 // FeedMark delivers a last-trade mark; keep-latest, drop-on-full (never blocks
@@ -400,6 +421,9 @@ func (c *Core) rollCycle() {
 
 func (c *Core) emitProjectedAccount(v VenueID) {
 	start, open, realized, day := c.cycles.account(v)
+	if b := c.brokers[v]; b != nil && b.Capabilities().AuthoritativeDayPnL {
+		day = c.state.Venue(v).Account.DayPnL
+	}
 	c.emit(AccountUpdate{Account: c.state.Venue(v).Account, MasterArmed: c.state.MasterArmed,
 		CycleStartMs: start, CycleRealized: realized, DisplayRealized: open, DisplayDayPnL: day})
 }
@@ -475,6 +499,8 @@ func (c *Core) handleCmd(ctx context.Context, cmd Command) CmdAck {
 		return c.handleFlatten(ctx, cm)
 	case ResetBalance:
 		return c.handleResetBalance(ctx, cm)
+	case SetActiveVenue:
+		return c.handleSetActiveVenue(cm)
 	case KillSwitch:
 		return c.handleKill(ctx, cm)
 	case Arm:
@@ -651,7 +677,22 @@ func (c *Core) handleArm(on bool) CmdAck {
 	c.state.SetMasterArmed(on)
 	c.emitStatus()
 	for _, vv := range c.venues {
-		c.emit(AccountUpdate{Account: c.state.Venue(vv).Account, MasterArmed: c.state.MasterArmed})
+		c.emitProjectedAccount(vv)
+	}
+	return CmdAck{Accepted: true}
+}
+
+func (c *Core) handleSetActiveVenue(cm SetActiveVenue) CmdAck {
+	if cm.Venue != "" {
+		if _, ok := c.state.Venues[cm.Venue]; !ok {
+			return CmdAck{Accepted: false, Reason: "unknown venue"}
+		}
+	}
+	c.state.SetActiveVenue(cm.Venue)
+	if BreachedDayLoss(c.state, c.gate) && c.state.MasterArmed {
+		c.state.SetMasterArmed(false)
+		c.syslog("exec.autodisarm", "day-loss breach after active venue change: master disarmed")
+		c.emitStatus()
 	}
 	return CmdAck{Accepted: true}
 }

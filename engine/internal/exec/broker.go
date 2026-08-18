@@ -10,6 +10,13 @@ type Capabilities struct {
 	OvernightSession bool // Alpaca (Blue Ocean), moomoo (OVERNIGHT); TZ false
 	ResetBalance     bool // sim only — a real venue's account can't be reset
 	MarketOutsideRTH bool // sim only — real brokers require limits outside RTH
+	// AuthoritativeDayPnL keeps the broker's account DayPnL in the displayed
+	// account projection; other venues continue using eTape's local cycle
+	// projection.
+	AuthoritativeDayPnL bool
+	// DayLossActiveVenueOnly excludes this venue's DayPnL from MaxDayLoss when
+	// it is not the runtime active venue.
+	DayLossActiveVenueOnly bool
 }
 
 // Broker is the per-venue adapter contract. One instance per configured venue;

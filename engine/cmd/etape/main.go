@@ -368,20 +368,34 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		_ = st.Close()
 		return 1, false, nil
 	}
+	activeConfig, activeConfigOK, activeConfigErr := st.GetConfig("orderConfig")
+	if activeConfigErr != nil {
+		log.Warn("read active venue config (using fallback)", "err", activeConfigErr)
+	}
+	if !activeConfigOK {
+		activeConfig = ""
+	}
+	activeVenue := resolveActiveVenue(activeConfig, vbs)
 	locateProviders := locateRegistry(vbs)
 	brokers := map[exec.VenueID]exec.Broker{}
 	venueIDs := make([]exec.VenueID, 0, len(vbs))
+	gateConfig := buildGateConfig(cfg.Gate)
+	gateConfig.DayLossPolicies = dayLossPolicies(vbs)
+	alpacaAdapterMap := make(map[exec.VenueID]*alpaca.Adapter)
 	var brokerWG sync.WaitGroup
 	for _, vb := range vbs {
 		brokers[vb.ID] = vb.Broker
 		venueIDs = append(venueIDs, vb.ID)
+		if a, ok := vb.Broker.(*alpaca.Adapter); ok {
+			alpacaAdapterMap[vb.ID] = a
+		}
 		if vb.Run != nil {
 			brokerWG.Add(1)
 			go func(run func(context.Context)) { defer brokerWG.Done(); run(ctx) }(vb.Run)
 		}
 	}
 	execCore := exec.NewCore(exec.CoreConfig{
-		Venues: venueIDs, Gate: buildGateConfig(cfg.Gate), Store: st,
+		Venues: venueIDs, Gate: gateConfig, Store: st, ActiveVenue: activeVenue,
 		Brokers: brokers, Clock: execClk, IDGen: exec.NewOrderIDGen(execClk, rand.Reader),
 		SysLog:          st.AppendSysEvent,
 		StartingBalance: startingBalances(cfg),
@@ -391,6 +405,8 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}
 	execDone := make(chan struct{})
 	go func() { defer close(execDone); _ = execCore.Run(ctx) }()
+	accountPoller := alpaca.NewAccountPoller(alpacaAdapterMap, activeVenue, execClk)
+	go func() { _ = accountPoller.Run(ctx) }()
 
 	// Asset metadata is supplemental. Start one-shot loads for every Alpaca
 	// account after execution recovery so locate eligibility is venue-specific;
@@ -439,6 +455,17 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500, TradesCap: 1000,
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
 		Demo: *demo,
+		OnConfigSet: func(key, value string) {
+			if key != "orderConfig" {
+				return
+			}
+			venue := resolveActiveVenue(value, vbs)
+			if ack := execCore.DoContext(ctx, exec.SetActiveVenue{Venue: venue}); !ack.Accepted {
+				log.Warn("set active venue", "venue", venue, "err", ack.Reason)
+				return
+			}
+			accountPoller.SetActiveVenue(venue)
+		},
 	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startDemo, locateProviders)
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
@@ -717,7 +744,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			}
 		}
 	}
-	startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, firstAlpacaProber(vbs), firstAlpacaAssetReader(vbs), backfillOne, !*demo, &scanWG)
+	startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, accountPoller, firstAlpacaAssetReader(vbs), backfillOne, !*demo, &scanWG)
 	mode := "live"
 	if *demo {
 		mode = "demo"
@@ -1043,7 +1070,7 @@ type demandFeeder interface {
 // startQuota gates the quota poller: false in -demo, since the synthetic
 // requester answers Qot_GetSubInfo with the generic "no data" response
 // rather than a real subscription budget, so tracking it would be noise.
-func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, wl *watchlist.List, hasTZ bool, mmProbe rttProber, alpacaProbe rttProber, assetReader stockInfoAssetReader, backfillOne func(string), startQuota bool, scanWG *sync.WaitGroup) {
+func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, wl *watchlist.List, hasTZ bool, mmProbe rttProber, accountHealth health.AccountHealthSource, assetReader stockInfoAssetReader, backfillOne func(string), startQuota bool, scanWG *sync.WaitGroup) {
 	ssrResolver := ssr.New(st)
 	scanPoller := scan.New(cfg.Scan, r, hub, clk, demand, backfillOne, ssrResolver)
 	if raw, ok, err := st.GetConfig("scanner.filters.v1"); err == nil && ok {
@@ -1069,13 +1096,9 @@ func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, dem
 	}
 	// health: mmProbe is the moomoo probe (real OpenD RTT in live/replay, a
 	// constant synthetic RTT in -demo); app-ping RTT source is nil in v1
-	// (ui-engine shows down until ping tracking is wired). alpacaProbe is the
-	// first configured Alpaca adapter (nil if none -- which is always the
-	// case in -demo/replay, since buildBrokers forces every venue to sim
-	// there and sim.Broker doesn't implement rttProber), giving the
-	// engine-alpaca link the same reachability-RTT treatment as moomoo. The
-	// health poller's sys.events are also persisted by main via a store hook
-	// if desired.
+	// (ui-engine shows down until ping tracking is wired). accountHealth is the
+	// active Alpaca account poller's cached result, so health never performs a
+	// second Alpaca REST request.
 	var qsrc health.QuotaSource
 	if startQuota {
 		quotaPoller := quota.New(quota.Config{
@@ -1086,7 +1109,7 @@ func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, dem
 		qsrc = quotaPoller
 	}
 	go func() {
-		_ = health.New(cfg.Health, hub, clk, mmProbe, nil, hasTZ, alpacaProbe, qsrc).Run(ctx)
+		_ = health.New(cfg.Health, hub, clk, mmProbe, nil, hasTZ, accountHealth, qsrc).Run(ctx)
 	}()
 }
 

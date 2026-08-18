@@ -32,6 +32,19 @@ func TestBuildGateConfigMapsVenueAndGlobal(t *testing.T) {
 	}
 }
 
+func TestResolveActiveVenueUsesPersistedRunningVenue(t *testing.T) {
+	vbs := []venueBroker{{ID: "sim-paper"}, {ID: "alpaca-live"}}
+	if got := resolveActiveVenue(`{"activeVenue":"alpaca-live"}`, vbs); got != "alpaca-live" {
+		t.Fatalf("persisted active venue = %q, want alpaca-live", got)
+	}
+	if got := resolveActiveVenue(`{"activeVenue":"missing"}`, vbs); got != "sim-paper" {
+		t.Fatalf("invalid active venue = %q, want first running venue", got)
+	}
+	if got := resolveActiveVenue(``, vbs); got != "sim-paper" {
+		t.Fatalf("missing active venue = %q, want first running venue", got)
+	}
+}
+
 // TestBuildBrokersMoomooConstructsAdapter verifies a moomoo venue with a
 // valid numeric account_id builds a real *moomoo.Adapter with Run bound —
 // the stub venue (reject-all, no Run) this replaces is gone; moomoo is no
@@ -312,10 +325,7 @@ func TestBuildBrokersLiveTradezeroAndAlpacaBindRun(t *testing.T) {
 	}
 }
 
-// TestFirstAlpacaProberFindsAlpacaAdapter verifies firstAlpacaProber picks out
-// the Alpaca adapter (which implements ProbeRTT) from a mixed venue list, for
-// wiring into health.New's alpaca-link probe.
-func TestFirstAlpacaProberFindsAlpacaAdapter(t *testing.T) {
+func TestFirstAlpacaAdapterAndAssetReaderFindsAlpaca(t *testing.T) {
 	cr := creds.File{
 		"tz_creds": {KeyID: "tzkey", SecretKey: "tzsecret"},
 		"al_creds": {KeyID: "alkey", SecretKey: "alsecret"},
@@ -328,12 +338,8 @@ func TestFirstAlpacaProberFindsAlpacaAdapter(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	p := firstAlpacaProber(vbs)
-	if p == nil {
-		t.Fatal("expected a non-nil prober when an alpaca venue is configured")
-	}
-	if _, ok := p.(*alpaca.Adapter); !ok {
-		t.Fatalf("expected the alpaca.Adapter itself, got %T", p)
+	if a := firstAlpacaAdapter(vbs); a == nil {
+		t.Fatal("expected a non-nil adapter when an alpaca venue is configured")
 	}
 	reader := firstAlpacaAssetReader(vbs)
 	if reader == nil {
@@ -344,10 +350,7 @@ func TestFirstAlpacaProberFindsAlpacaAdapter(t *testing.T) {
 	}
 }
 
-// TestFirstAlpacaProberNilWithoutAlpaca verifies no alpaca venue configured
-// means no prober — the engine-alpaca link must not appear at all (not just
-// down) when nothing exists to probe.
-func TestFirstAlpacaProberNilWithoutAlpaca(t *testing.T) {
+func TestFirstAlpacaAdapterNilWithoutAlpaca(t *testing.T) {
 	cr := creds.File{"tz_creds": {KeyID: "tzkey", SecretKey: "tzsecret"}}
 	cfg := config.Config{Venues: []config.Venue{
 		{ID: "tz", Broker: "tradezero", Credentials: "tz_creds", AccountID: "acct1"},
@@ -357,8 +360,8 @@ func TestFirstAlpacaProberNilWithoutAlpaca(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if p := firstAlpacaProber(vbs); p != nil {
-		t.Fatalf("expected nil prober with no alpaca venue, got %T", p)
+	if a := firstAlpacaAdapter(vbs); a != nil {
+		t.Fatalf("expected nil adapter with no alpaca venue, got %T", a)
 	}
 	if reader := firstAlpacaAssetReader(vbs); reader != nil {
 		t.Fatalf("expected nil Stock Info asset reader with no alpaca venue, got %T", reader)
