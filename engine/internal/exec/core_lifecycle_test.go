@@ -117,6 +117,10 @@ func TestCoreVenueKillSwitchDisarmsGlobalMaster(t *testing.T) {
 	if !order.Accepted {
 		t.Fatalf("submit: %+v", order)
 	}
+	waitFor(t, c, func(u exec.Update) bool {
+		o, ok := u.(exec.OrderUpdate)
+		return ok && o.Order.ID == order.OrderID && o.Order.Status == exec.StatusAccepted
+	})
 	if ack := c.Do(exec.KillSwitch{Venue: "sim-1"}); !ack.Accepted {
 		t.Fatalf("venue kill: %+v", ack)
 	}
