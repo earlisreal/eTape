@@ -3,6 +3,7 @@ package scan
 import (
 	"context"
 	"fmt"
+	"math"
 	"reflect"
 	"sort"
 	"testing"
@@ -55,6 +56,40 @@ func TestMostActiveIgnoresChangeThreshold(t *testing.T) {
 	rows := rankRowsFiltered([]rankItem{{Symbol: "US.A", ChangePct: 1, Volume: 101}, {Symbol: "US.B", ChangePct: 99, Volume: 99}}, nil, f)
 	if len(rows) != 1 || rows[0].Symbol != "US.A" {
 		t.Fatalf("got %+v", rows)
+	}
+}
+
+func TestVolumeRatioFilter(t *testing.T) {
+	ratio := func(v float64) *float64 { return &v }
+	items := []rankItem{
+		{Symbol: "US.EQ", VolumeRatio: ratio(2)},
+		{Symbol: "US.LOW", VolumeRatio: ratio(1.99)},
+		{Symbol: "US.UNKNOWN"},
+	}
+	f := Defaults(config.Scan{})
+	f.MinVolumeRatio = 2
+	rows := rankRowsFiltered(items, nil, f)
+	if len(rows) != 1 || rows[0].Symbol != "US.EQ" {
+		t.Fatalf("equality-boundary filter got %+v", rows)
+	}
+	f.MinVolumeRatio = 0
+	if got := rankRowsFiltered(items, nil, f); len(got) != len(items) {
+		t.Fatalf("ratio filter off dropped rows: %+v", got)
+	}
+	for _, value := range []float64{-1, math.NaN(), math.Inf(1)} {
+		f.MinVolumeRatio = value
+		if err := ValidateFilters(f); err == nil {
+			t.Fatalf("invalid minimum ratio %v was accepted", value)
+		}
+	}
+}
+
+func TestInvalidProviderVolumeRatioIsUnavailable(t *testing.T) {
+	for _, value := range []float64{-1, math.NaN(), math.Inf(1)} {
+		got := rankRowsFiltered([]rankItem{{Symbol: "US.A", VolumeRatio: validVolumeRatio(&value)}}, nil, wsmsg.ScannerFilters{Mode: "most_active", MinVolumeRatio: 0})
+		if len(got) != 1 || got[0].VolumeRatio != nil {
+			t.Fatalf("invalid ratio %v should be unavailable: %+v", value, got)
+		}
 	}
 }
 
@@ -377,6 +412,12 @@ func marketSnap(code string, outstanding int64, last, close float64, volume int6
 	return s
 }
 
+func marketSnapRatio(code string, outstanding int64, last, close float64, volume int64, ratio *float64) *snappb.Snapshot {
+	s := marketSnap(code, outstanding, last, close, volume)
+	s.Basic.VolumeRatio = ratio
+	return s
+}
+
 func extendedSnap(code string, phase session.Phase, price, change float64, volume int64) *snappb.Snapshot {
 	s := marketSnap(code, 1, 90, 80, 999)
 	d := &qotcommon.PreAfterMarketData{Price: proto.Float64(price), ChangeRate: proto.Float64(change), Volume: proto.Int64(volume)}
@@ -388,6 +429,11 @@ func extendedSnap(code string, phase session.Phase, price, change float64, volum
 	default:
 		s.Basic.PreMarket = d
 	}
+	return s
+}
+
+func snapshotRatio(s *snappb.Snapshot, ratio *float64) *snappb.Snapshot {
+	s.Basic.VolumeRatio = ratio
 	return s
 }
 
@@ -441,7 +487,7 @@ func rankResp(items ...rankItem) *rankpb.Response {
 func topResp(items ...rankItem) *tmrpb.Response {
 	data := make([]*tmrpb.TopMoversRankItem, 0, len(items))
 	for _, it := range items {
-		data = append(data, &tmrpb.TopMoversRankItem{Security: usSec(codeOf(it.Symbol)), ChangeRatio: proto.Float64(it.ChangePct), CurPrice: proto.Float64(it.Last), Volume: proto.Int64(it.Volume)})
+		data = append(data, &tmrpb.TopMoversRankItem{Security: usSec(codeOf(it.Symbol)), ChangeRatio: proto.Float64(it.ChangePct), CurPrice: proto.Float64(it.Last), Volume: proto.Int64(it.Volume), VolumeRatio: it.VolumeRatio})
 	}
 	return &tmrpb.Response{RetType: proto.Int32(0), S2C: &tmrpb.S2C{DataList: data}}
 }
@@ -815,6 +861,40 @@ func TestRTHFilterResetRepeatsBootstrap(t *testing.T) {
 	}
 }
 
+func TestVolumeRatioAdmissionIsStickyUntilFilterReset(t *testing.T) {
+	ratio := 2.0
+	fr := &fakeReq{rankResp: rankResp(rankItem{Symbol: "US.A", ChangePct: 5}), snap: func([]string) (*snappb.Response, error) {
+		return snapResp(marketSnapRatio("A", 1, 10, 9, 100, proto.Float64(ratio))), nil
+	}}
+	pub := &capturePub{}
+	p := newTestPoller(config.Scan{Enabled: true}, fr, pub)
+	f := p.Filters()
+	f.MinVolumeRatio = 1.5
+	if err := p.SetFilters(f); err != nil {
+		t.Fatal(err)
+	}
+	p.pollOnce(context.Background(), p.clk.Now())
+	if len(pub.ranks) != 1 || len(pub.ranks[0].Rows) != 1 {
+		t.Fatalf("ratio-passing symbol should enter board: %+v", pub.ranks)
+	}
+
+	ratio = 0.5
+	fr.rankResp = rankResp(rankItem{Symbol: "US.A", ChangePct: 5})
+	p.pollOnce(context.Background(), p.clk.Now())
+	if len(pub.ranks) != 2 || len(pub.ranks[1].Rows) != 1 || pub.ranks[1].Rows[0].VolumeRatio == nil || *pub.ranks[1].Rows[0].VolumeRatio != 0.5 {
+		t.Fatalf("later ratio drop should not evict sticky row: %+v", pub.ranks)
+	}
+
+	f.MinVolumeRatio = 1
+	if err := p.SetFilters(f); err != nil {
+		t.Fatal(err)
+	}
+	p.pollOnce(context.Background(), p.clk.Now())
+	if len(pub.ranks) != 3 || len(pub.ranks[2].Rows) != 0 {
+		t.Fatalf("changed threshold should reset and reapply admission: %+v", pub.ranks)
+	}
+}
+
 func TestAccumulatedRowsRefreshAndSurviveSnapshotFailure(t *testing.T) {
 	fail := false
 	fr := &fakeReq{rankResp: rankResp(rankItem{Symbol: "US.A", ChangePct: 5, Last: 1, Volume: 1}), snap: func(codes []string) (*snappb.Response, error) {
@@ -844,10 +924,16 @@ func TestSnapshotRefreshUsesActiveSessionData(t *testing.T) {
 		want   rankItem
 		makeSn func() *snappb.Snapshot
 	}{
-		{"premarket", session.PreMarket, rankItem{Last: 101, ChangePct: 1, Volume: 11}, func() *snappb.Snapshot { return extendedSnap("A", session.PreMarket, 101, 1, 11) }},
-		{"after-hours", session.PostMarket, rankItem{Last: 102, ChangePct: 2, Volume: 22}, func() *snappb.Snapshot { return extendedSnap("A", session.PostMarket, 102, 2, 22) }},
-		{"overnight", session.Overnight, rankItem{Last: 103, ChangePct: 3, Volume: 33}, func() *snappb.Snapshot { return extendedSnap("A", session.Overnight, 103, 3, 33) }},
-		{"rth", session.RTH, rankItem{Last: 90, ChangePct: 12.5, Volume: 999}, func() *snappb.Snapshot { return marketSnap("A", 1, 90, 80, 999) }},
+		{"premarket", session.PreMarket, rankItem{Last: 101, ChangePct: 1, Volume: 11, VolumeRatio: proto.Float64(1.25)}, func() *snappb.Snapshot {
+			return snapshotRatio(extendedSnap("A", session.PreMarket, 101, 1, 11), proto.Float64(1.25))
+		}},
+		{"after-hours", session.PostMarket, rankItem{Last: 102, ChangePct: 2, Volume: 22, VolumeRatio: proto.Float64(1.25)}, func() *snappb.Snapshot {
+			return snapshotRatio(extendedSnap("A", session.PostMarket, 102, 2, 22), proto.Float64(1.25))
+		}},
+		{"overnight", session.Overnight, rankItem{Last: 103, ChangePct: 3, Volume: 33, VolumeRatio: proto.Float64(1.25)}, func() *snappb.Snapshot {
+			return snapshotRatio(extendedSnap("A", session.Overnight, 103, 3, 33), proto.Float64(1.25))
+		}},
+		{"rth", session.RTH, rankItem{Last: 90, ChangePct: 12.5, Volume: 999, VolumeRatio: proto.Float64(1.25)}, func() *snappb.Snapshot { return marketSnapRatio("A", 1, 90, 80, 999, proto.Float64(1.25)) }},
 		{"missing extended data", session.PreMarket, rankItem{Last: 7, ChangePct: 6, Volume: 5}, func() *snappb.Snapshot { return marketSnap("A", 1, 90, 80, 999) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -856,10 +942,73 @@ func TestSnapshotRefreshUsesActiveSessionData(t *testing.T) {
 			items := map[string]rankItem{"US.A": {Symbol: "US.A", Last: 7, ChangePct: 6, Volume: 5}}
 			p.refreshSnapshots(context.Background(), tc.phase, items)
 			got := items["US.A"]
-			if got.Last != tc.want.Last || got.ChangePct != tc.want.ChangePct || got.Volume != tc.want.Volume {
+			if got.Last != tc.want.Last || got.ChangePct != tc.want.ChangePct || got.Volume != tc.want.Volume || (got.VolumeRatio == nil) != (tc.want.VolumeRatio == nil) || got.VolumeRatio != nil && *got.VolumeRatio != *tc.want.VolumeRatio {
 				t.Fatalf("got %+v, want market values %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRTHVolumeRatioRankFallbackAndSnapshotPriority(t *testing.T) {
+	rankRatio := proto.Float64(3.5)
+	fr := &fakeReq{topMoversRsp: topResp(rankItem{Symbol: "US.A", VolumeRatio: rankRatio}), snap: func([]string) (*snappb.Response, error) {
+		return snapResp(marketSnapRatio("A", 1, 10, 9, 100, proto.Float64(7.25))), nil
+	}}
+	p := newTestPoller(config.Scan{}, fr, &capturePub{})
+	items, err := p.fetchRank(context.Background(), session.RTH)
+	if err != nil || len(items) != 1 || items[0].VolumeRatio == nil || *items[0].VolumeRatio != 3.5 {
+		t.Fatalf("RTH rank fallback=%+v err=%v", items, err)
+	}
+	active := map[string]rankItem{"US.A": items[0]}
+	p.refreshSnapshots(context.Background(), session.RTH, active)
+	if got := active["US.A"].VolumeRatio; got == nil || *got != 7.25 {
+		t.Fatalf("snapshot should override rank fallback: %+v", active["US.A"])
+	}
+
+	active["US.A"] = rankItem{Symbol: "US.A", VolumeRatio: proto.Float64(3.5)}
+	fr.snap = func([]string) (*snappb.Response, error) { return snapResp(marketSnap("A", 1, 10, 9, 100)), nil }
+	p.refreshSnapshots(context.Background(), session.RTH, active)
+	if got := active["US.A"].VolumeRatio; got == nil || *got != 3.5 {
+		t.Fatalf("omitted snapshot should retain RTH rank fallback: %+v", active["US.A"])
+	}
+	fr.snap = func([]string) (*snappb.Response, error) { return nil, fmt.Errorf("temporary") }
+	p.refreshSnapshots(context.Background(), session.RTH, active)
+	if got := active["US.A"].VolumeRatio; got == nil || *got != 3.5 {
+		t.Fatalf("failed snapshot should retain RTH rank fallback: %+v", active["US.A"])
+	}
+}
+
+func TestRTHVolumeRatioRefreshesCurrentFallbackOnStickyRows(t *testing.T) {
+	rankRatio := 2.0
+	fr := &fakeReq{topMoversRsp: topResp(rankItem{Symbol: "US.A", VolumeRatio: proto.Float64(rankRatio)}), snap: func([]string) (*snappb.Response, error) {
+		return snapResp(marketSnapRatio("A", 1, 10, 9, 100, proto.Float64(9))), nil
+	}}
+	pub := &capturePub{}
+	p := New(config.Scan{Enabled: true}, fr, pub, clock.NewFake(et(2026, 7, 8, 10, 0)), nil, nil)
+	p.pollOnce(context.Background(), p.clk.Now())
+	if len(pub.ranks) != 1 || len(pub.ranks[0].Rows) != 1 || pub.ranks[0].Rows[0].VolumeRatio == nil || *pub.ranks[0].Rows[0].VolumeRatio != 9 {
+		t.Fatalf("initial snapshot should win: %+v", pub.ranks)
+	}
+
+	fr.topMoversRsp = topResp(rankItem{Symbol: "US.A", VolumeRatio: proto.Float64(3)})
+	fr.snap = func([]string) (*snappb.Response, error) { return snapResp(marketSnap("A", 1, 10, 9, 100)), nil }
+	p.pollOnce(context.Background(), p.clk.Now())
+	if len(pub.ranks) != 2 || len(pub.ranks[1].Rows) != 1 || pub.ranks[1].Rows[0].VolumeRatio == nil || *pub.ranks[1].Rows[0].VolumeRatio != 3 {
+		t.Fatalf("current RTH rank should replace stale fallback: %+v", pub.ranks)
+	}
+}
+
+func TestSnapshotVolumeRatioRejectsInvalidValues(t *testing.T) {
+	for _, value := range []float64{-1, math.NaN(), math.Inf(1)} {
+		fr := &fakeReq{snap: func([]string) (*snappb.Response, error) {
+			return snapResp(marketSnapRatio("A", 1, 10, 9, 100, proto.Float64(value))), nil
+		}}
+		p := newTestPoller(config.Scan{}, fr, &capturePub{})
+		items := map[string]rankItem{"US.A": {Symbol: "US.A"}}
+		p.refreshSnapshots(context.Background(), session.PreMarket, items)
+		if got := items["US.A"].VolumeRatio; got != nil {
+			t.Fatalf("invalid snapshot ratio %v should be unavailable: %v", value, *got)
+		}
 	}
 }
 

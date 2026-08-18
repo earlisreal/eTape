@@ -259,6 +259,7 @@ type ScannerRow struct {
 	Last                *float64 `json:"last" tstype:"number | null,required"`        // null = no print yet
 	FloatShares         *float64 `json:"floatShares" tstype:"number | null,required"` // ACTUAL shares (engine converts moomoo thousands); null = unknown
 	Volume              int64    `json:"volume"`                                      // 0 is legitimate
+	VolumeRatio         *float64 `json:"volumeRatio" tstype:"number | null,required"` // provider Volume Ratio; null = unavailable
 }
 
 type ScannerRankPayload struct {
@@ -273,6 +274,7 @@ type ScannerFilters struct {
 	MinChangePct   float64  `json:"minChangePct"`
 	MaxFloatShares *float64 `json:"maxFloatShares" tstype:"number | null,required"`
 	MinVolume      float64  `json:"minVolume"`
+	MinVolumeRatio float64  `json:"minVolumeRatio"`
 	FloatUnit      string   `json:"floatUnit" tstype:"\"K\" | \"M\""`
 	VolumeUnit     string   `json:"volumeUnit" tstype:"\"K\" | \"M\""`
 }

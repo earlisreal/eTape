@@ -4,6 +4,7 @@ export interface ScannerThresholds {
   minChangePct: number;          // magnitude floor on % change (0 = off)
   floatCapShares: number | null; // max float in shares (null = off)
   minVolume: number;             // min session volume (0 = off)
+  minVolumeRatio: number;        // min provider Volume Ratio (0 = off)
 }
 
 /** Client-side filter atop the engine's coarse server filters. A row with no
@@ -12,6 +13,7 @@ export interface ScannerThresholds {
 export function applyScannerFilters<T extends ScannerRow>(rows: T[], t: ScannerThresholds): T[] {
   return rows.filter((r) => {
     if (r.volume < t.minVolume) return false;
+    if (t.minVolumeRatio > 0 && (r.volumeRatio == null || r.volumeRatio < t.minVolumeRatio)) return false;
     if (t.floatCapShares !== null && r.floatShares !== null && r.floatShares > t.floatCapShares) return false;
     if (t.minChangePct > 0 && (r.changePct === null || Math.abs(r.changePct) < t.minChangePct)) return false;
     return true;
@@ -33,5 +35,6 @@ export function formatFilterSummary(t: ScannerThresholds): string {
   if (t.minChangePct > 0) parts.push(`change magnitude ≥ ${t.minChangePct}%`);
   if (t.floatCapShares !== null) parts.push(`float ≤ ${compact(t.floatCapShares)}`);
   if (t.minVolume > 0) parts.push(`vol ≥ ${compact(t.minVolume)}`);
+  if (t.minVolumeRatio > 0) parts.push(`vol ratio ≥ ${t.minVolumeRatio}`);
   return parts.length ? parts.join(" · ") : "no filters";
 }

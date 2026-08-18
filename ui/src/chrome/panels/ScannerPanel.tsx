@@ -19,13 +19,14 @@ import { rankScannerRows, readScannerSort, scannerModeSort, scannerSyncStatusTex
 const SESSION_LABEL: Record<ScannerSession, string> = {
   premarket: "Pre-market", rth: "RTH", afterhours: "After-hours", overnight: "Overnight",
 };
-const DEFAULT_FILTERS: ScannerFilters = { mode: "gainers", minChangePct: 0, maxFloatShares: null, minVolume: 0, floatUnit: "M", volumeUnit: "K" };
+const DEFAULT_FILTERS: ScannerFilters = { mode: "gainers", minChangePct: 0, maxFloatShares: null, minVolume: 0, minVolumeRatio: 0, floatUnit: "M", volumeUnit: "K" };
 const COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
   { col: "sym", label: "Symbol", align: "left" },
   { col: "changePct", label: "%", align: "right" },
   { col: "last", label: "Last", align: "right" },
   { col: "float", label: "Float", align: "right" },
   { col: "vol", label: "Vol", align: "right" },
+  { col: "volRatio", label: "Vol Ratio", align: "right" },
 ];
 
 const unitScale = (unit: "K" | "M") => unit === "K" ? 1_000 : 1_000_000;
@@ -69,7 +70,7 @@ export function ScannerPanel(
     });
   }, [commands]);
 
-  const filters = cv.filters ?? engineFilters ?? DEFAULT_FILTERS;
+  const filters = { ...DEFAULT_FILTERS, ...(cv.filters ?? engineFilters ?? {}) };
   useEffect(() => {
     if (sortedMode.current === null) { sortedMode.current = filters.mode; return; }
     if (sortedMode.current === filters.mode) return;
@@ -161,6 +162,7 @@ export function ScannerPanel(
             {draft.mode !== "most_active" && <label>{draft.mode === "gainers" ? "min gain %" : "min loss %"} <input aria-label={draft.mode === "gainers" ? "min gain %" : "min loss %"} type="number" min="0" value={draft.minChangePct} onChange={(e) => setDraft({ ...draft, minChangePct: Math.max(0, Number(e.target.value)) })} style={{ width: 60 }} /></label>}
             <label>float ≤ <input aria-label="float cap" type="number" min="0" value={draft.maxFloatShares === null ? "" : draft.maxFloatShares / unitScale(draft.floatUnit)} onChange={(e) => setDraft({ ...draft, maxFloatShares: e.target.value === "" ? null : Number(e.target.value) * unitScale(draft.floatUnit) })} style={{ width: 70 }} /><select aria-label="float unit" value={draft.floatUnit} onChange={(e) => setDraft({ ...draft, floatUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
             <label>vol ≥ <input aria-label="min volume" type="number" min="0" value={draft.minVolume / unitScale(draft.volumeUnit)} onChange={(e) => setDraft({ ...draft, minVolume: Number(e.target.value) * unitScale(draft.volumeUnit) })} style={{ width: 70 }} /><select aria-label="volume unit" value={draft.volumeUnit} onChange={(e) => setDraft({ ...draft, volumeUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
+            <label>vol ratio ≥ <input aria-label="vol ratio ≥" type="number" min="0" step="0.01" value={draft.minVolumeRatio} onChange={(e) => setDraft({ ...draft, minVolumeRatio: Math.max(0, Number(e.target.value)) })} style={{ width: 70 }} /></label>
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
               <Button onClick={resetDefaults}>Reset defaults</Button>
               <Button variant="primary" onClick={applyFilters}>Apply</Button>
@@ -171,7 +173,7 @@ export function ScannerPanel(
       {syncControl}
       {(
         <div data-testid="scanner-filter-summary" className="mono" style={{ padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>
-          {filters.mode === "most_active" ? `Most active${cv.session === "rth" ? "" : " · approximate"}` : filters.mode === "gainers" ? "Top gainers" : "Top losers"} · {formatFilterSummary({ minChangePct: filters.mode === "most_active" ? 0 : filters.minChangePct, floatCapShares: filters.maxFloatShares, minVolume: filters.minVolume })}
+          {filters.mode === "most_active" ? `Most active${cv.session === "rth" ? "" : " · approximate"}` : filters.mode === "gainers" ? "Top gainers" : "Top losers"} · {formatFilterSummary({ minChangePct: filters.mode === "most_active" ? 0 : filters.minChangePct, floatCapShares: filters.maxFloatShares, minVolume: filters.minVolume, minVolumeRatio: filters.minVolumeRatio })}
         </div>
       )}
       <table style={{ width: "100%", borderCollapse: "collapse" }}>
@@ -207,11 +209,12 @@ export function ScannerPanel(
               <td style={numCell}>{r.last === null ? "—" : r.last.toFixed(2)}</td>
               <td style={numCell}>{formatCompactShares(r.floatShares)}</td>
               <td style={numCell}>{formatCompactShares(r.volume)}</td>
+              <td style={numCell}>{r.volumeRatio == null ? "—" : r.volumeRatio.toFixed(2)}</td>
             </tr>
             );
           })}
           {rows.length === 0 && cv.refreshedAt && (
-            <tr><td colSpan={5} style={{ padding: 12, color: palette.textMuted, textAlign: "center" }}>No symbols match current filters.</td></tr>
+            <tr><td colSpan={6} style={{ padding: 12, color: palette.textMuted, textAlign: "center" }}>No symbols match current filters.</td></tr>
           )}
         </tbody>
       </table>

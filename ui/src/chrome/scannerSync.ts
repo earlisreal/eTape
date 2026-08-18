@@ -36,6 +36,7 @@ export const scannerSortAccessors: Record<string, (row: ScannerRowView) => numbe
   last: (row) => row.last,
   float: (row) => row.floatShares,
   vol: (row) => row.volume,
+  volRatio: (row) => row.volumeRatio ?? null,
 };
 
 export function scannerModeSort(mode: ScannerFilters["mode"]): SortState {

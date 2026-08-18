@@ -3,9 +3,9 @@ import type { ScannerRow } from "../../wire/contract";
 import { applyScannerFilters, sortByChangeDesc, formatFilterSummary, type ScannerThresholds } from "./scannerFilter";
 
 const row = (symbol: string, changePct: number | null, floatShares: number | null, volume: number): ScannerRow =>
-  ({ symbol, shortSellRestricted: false, changePct, last: 1, floatShares, volume });
+  ({ symbol, shortSellRestricted: false, changePct, last: 1, floatShares, volume, volumeRatio: null });
 
-const OFF: ScannerThresholds = { minChangePct: 0, floatCapShares: null, minVolume: 0 };
+const OFF: ScannerThresholds = { minChangePct: 0, floatCapShares: null, minVolume: 0, minVolumeRatio: 0 };
 
 describe("applyScannerFilters", () => {
   const rows: ScannerRow[] = [
@@ -29,6 +29,11 @@ describe("applyScannerFilters", () => {
   it("volume floor excludes below the floor", () => {
     expect(applyScannerFilters(rows, { ...OFF, minVolume: 100_000 }).map((r) => r.symbol)).toEqual(["A", "D"]);
   });
+  it("ratio floor keeps equality and excludes unavailable values", () => {
+    const withRatios = rows.map((r, i) => ({ ...r, volumeRatio: i === 0 ? 2 : i === 1 ? 1.99 : null }));
+    expect(applyScannerFilters(withRatios, { ...OFF, minVolumeRatio: 2 }).map((r) => r.symbol)).toEqual(["A"]);
+    expect(applyScannerFilters(rows, OFF).map((r) => r.symbol)).toEqual(["A", "B", "C", "D"]);
+  });
 });
 
 describe("sortByChangeDesc", () => {
@@ -42,9 +47,9 @@ describe("sortByChangeDesc", () => {
 
 describe("formatFilterSummary", () => {
   it("formats set fields with human units, omits nulls/zeros", () => {
-    expect(formatFilterSummary({ minChangePct: 10, floatCapShares: 20_000_000, minVolume: 100_000 }))
-      .toBe("change ≥ 10% · float ≤ 20M · vol ≥ 100k");
-    expect(formatFilterSummary({ minChangePct: 5, floatCapShares: null, minVolume: 0 }))
-      .toBe("change ≥ 5%");
+    expect(formatFilterSummary({ minChangePct: 10, floatCapShares: 20_000_000, minVolume: 100_000, minVolumeRatio: 2.5 }))
+      .toBe("change magnitude ≥ 10% · float ≤ 20M · vol ≥ 100k · vol ratio ≥ 2.5");
+    expect(formatFilterSummary({ minChangePct: 5, floatCapShares: null, minVolume: 0, minVolumeRatio: 0 }))
+      .toBe("change magnitude ≥ 5%");
   });
 });

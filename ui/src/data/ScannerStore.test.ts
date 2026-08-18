@@ -7,9 +7,18 @@ const rank = (kind: "snapshot" | "delta", session: string, payload: ScannerRankP
 const hit = (session: string, payload: ScanHitPayload) =>
   ({ kind: "delta", topic: "scanner.hit", key: session, payload } as DeltaMsg);
 const r = (symbol: string, changePct: number) =>
-  ({ symbol, shortSellRestricted: false, changePct, last: 1, floatShares: 1_000_000, volume: 1000 });
+  ({ symbol, shortSellRestricted: false, changePct, last: 1, floatShares: 1_000_000, volume: 1000, volumeRatio: null });
 
 describe("ScannerStore", () => {
+  it("normalizes legacy rows without Volume Ratio", () => {
+    const s = new ScannerStore();
+    s.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: {
+      refreshedAt: "2026-07-06T13:00:00Z",
+      rows: [{ symbol: "US.LEGACY", shortSellRestricted: false, changePct: 1, last: 1, floatShares: null, volume: 1 }],
+    } } as unknown as SnapshotMsg);
+    expect(s.view("premarket").rows[0].volumeRatio).toBeNull();
+  });
+
   it("snapshot seeds the baseline without flashing", () => {
     const s = new ScannerStore();
     s.apply(rank("snapshot", "premarket", { refreshedAt: "t0", rows: [r("A", 5), r("B", 3)] }));
@@ -79,7 +88,7 @@ describe("ScannerStore", () => {
 // Distinct name to avoid colliding with the file's existing `rank(kind, session, payload)`.
 const rankMsg = (kind: "snapshot" | "delta", symbols: string[]) => ({
   kind, topic: "scanner.rank" as const, key: "premarket",
-  payload: { refreshedAt: "2026-07-06T13:00:00Z", rows: symbols.map((symbol) => ({ symbol, shortSellRestricted: false, changePct: 5, last: 1, floatShares: 1, volume: 1 })) },
+  payload: { refreshedAt: "2026-07-06T13:00:00Z", rows: symbols.map((symbol) => ({ symbol, shortSellRestricted: false, changePct: 5, last: 1, floatShares: 1, volume: 1, volumeRatio: null })) },
 });
 
 describe("ScannerStore.onNewHit", () => {

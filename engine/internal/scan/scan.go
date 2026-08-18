@@ -65,6 +65,14 @@ func snapshotObservationTime(basic *snappb.SnapshotBasicData) time.Time {
 	return time.Unix(int64(ts), 0)
 }
 
+func validVolumeRatio(v *float64) *float64 {
+	if v == nil || math.IsNaN(*v) || math.IsInf(*v, 0) || *v < 0 {
+		return nil
+	}
+	value := *v
+	return &value
+}
+
 // rankItem is the poller-internal normalized form of one rank row (decoupled
 // from the pb type so the transform is unit-testable without protobuf).
 type rankItem struct {
@@ -72,6 +80,7 @@ type rankItem struct {
 	ChangePct           float64
 	Last                float64
 	Volume              int64
+	VolumeRatio         *float64
 	ShortSellRestricted bool
 }
 
@@ -125,7 +134,7 @@ func Defaults(cfg config.Scan) wsmsg.ScannerFilters {
 		v := cfg.MaxFloatShares
 		cap = &v
 	}
-	return wsmsg.ScannerFilters{Mode: "gainers", MinChangePct: cfg.MinChangePct, MaxFloatShares: cap, MinVolume: float64(cfg.MinVolume), FloatUnit: "M", VolumeUnit: "K"}
+	return wsmsg.ScannerFilters{Mode: "gainers", MinChangePct: cfg.MinChangePct, MaxFloatShares: cap, MinVolume: float64(cfg.MinVolume), MinVolumeRatio: 0, FloatUnit: "M", VolumeUnit: "K"}
 }
 
 func ValidateFilters(f wsmsg.ScannerFilters) error {
@@ -135,7 +144,7 @@ func ValidateFilters(f wsmsg.ScannerFilters) error {
 	if (f.FloatUnit != "K" && f.FloatUnit != "M") || (f.VolumeUnit != "K" && f.VolumeUnit != "M") {
 		return fmt.Errorf("invalid unit")
 	}
-	if math.IsNaN(f.MinChangePct) || math.IsInf(f.MinChangePct, 0) || f.MinChangePct < 0 || math.IsNaN(f.MinVolume) || math.IsInf(f.MinVolume, 0) || f.MinVolume < 0 {
+	if math.IsNaN(f.MinChangePct) || math.IsInf(f.MinChangePct, 0) || f.MinChangePct < 0 || math.IsNaN(f.MinVolume) || math.IsInf(f.MinVolume, 0) || f.MinVolume < 0 || math.IsNaN(f.MinVolumeRatio) || math.IsInf(f.MinVolumeRatio, 0) || f.MinVolumeRatio < 0 {
 		return fmt.Errorf("invalid numeric filter")
 	}
 	if f.MaxFloatShares != nil && (math.IsNaN(*f.MaxFloatShares) || math.IsInf(*f.MaxFloatShares, 0) || *f.MaxFloatShares < 0) {
@@ -252,9 +261,14 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 		all[sym] = it
 	}
 	for _, it := range items {
-		if _, retained := all[it.Symbol]; !retained {
-			all[it.Symbol] = it
+		if retained, ok := all[it.Symbol]; ok {
+			if phase == session.RTH && it.VolumeRatio != nil {
+				retained.VolumeRatio = it.VolumeRatio
+				all[it.Symbol] = retained
+			}
+			continue
 		}
+		all[it.Symbol] = it
 	}
 	p.refreshSnapshots(ctx, phase, all)
 	for _, it := range items {
@@ -306,7 +320,7 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 }
 
 func sameFilters(a, b wsmsg.ScannerFilters) bool {
-	if a.Mode != b.Mode || a.MinChangePct != b.MinChangePct || a.MinVolume != b.MinVolume || a.FloatUnit != b.FloatUnit || a.VolumeUnit != b.VolumeUnit {
+	if a.Mode != b.Mode || a.MinChangePct != b.MinChangePct || a.MinVolume != b.MinVolume || a.MinVolumeRatio != b.MinVolumeRatio || a.FloatUnit != b.FloatUnit || a.VolumeUnit != b.VolumeUnit {
 		return false
 	}
 	if a.MaxFloatShares == nil || b.MaxFloatShares == nil {
@@ -402,6 +416,9 @@ func rankRowsFiltered(items []rankItem, floats map[string]floatEntry, f wsmsg.Sc
 		if f.MinVolume > 0 && float64(it.Volume) < f.MinVolume {
 			continue
 		}
+		if f.MinVolumeRatio > 0 && (it.VolumeRatio == nil || *it.VolumeRatio < f.MinVolumeRatio) {
+			continue
+		}
 		var floatPtr *float64
 		if e, ok := floats[it.Symbol]; ok {
 			if e.bad {
@@ -419,7 +436,7 @@ func rankRowsFiltered(items []rankItem, floats map[string]floatEntry, f wsmsg.Sc
 		cp, lp := it.ChangePct, it.Last
 		out = append(out, wsmsg.ScannerRow{
 			Symbol: it.Symbol, ShortSellRestricted: it.ShortSellRestricted,
-			ChangePct: &cp, Last: &lp, FloatShares: floatPtr, Volume: it.Volume,
+			ChangePct: &cp, Last: &lp, FloatShares: floatPtr, Volume: it.Volume, VolumeRatio: it.VolumeRatio,
 		})
 	}
 	return out
@@ -603,7 +620,7 @@ func (p *Poller) fetchTopMovers(ctx context.Context, dir int32) ([]rankItem, err
 	var out []rankItem
 	for _, d := range resp.GetS2C().GetDataList() {
 		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()),
-			ChangePct: d.GetChangeRatio(), Last: d.GetCurPrice(), Volume: d.GetVolume()})
+			ChangePct: d.GetChangeRatio(), Last: d.GetCurPrice(), Volume: d.GetVolume(), VolumeRatio: validVolumeRatio(d.VolumeRatio)})
 	}
 	return out, nil
 }
@@ -847,6 +864,9 @@ func (p *Poller) snapshotBatch(ctx context.Context, phase session.Phase, syms []
 		sym := symbolOf(basic.GetSecurity())
 		got[sym] = true
 		if it, ok := items[sym]; items != nil && ok {
+			if ratio := validVolumeRatio(basic.VolumeRatio); ratio != nil {
+				it.VolumeRatio = ratio
+			}
 			if phase == session.RTH {
 				if basic.GetCurPrice() > 0 {
 					it.Last = basic.GetCurPrice()

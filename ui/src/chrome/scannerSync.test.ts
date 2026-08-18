@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { planScannerSync, scannerSyncStatusText } from "./scannerSync";
+import { planScannerSync, rankScannerRows, scannerSyncStatusText } from "./scannerSync";
+import type { ScannerRowView } from "../data/ScannerStore";
 
 const slots = (symbols: Array<string | undefined>) => symbols.map((symbol, i) => ({ id: `slot-${i}`, symbol }));
 
@@ -64,5 +65,16 @@ describe("planScannerSync", () => {
 describe("scannerSyncStatusText", () => {
   it("reports incomplete coverage", () => {
     expect(scannerSyncStatusText({ kind: "incomplete", availableCount: 2, targetCount: 4 })).toBe("Following 2/4");
+  });
+});
+
+describe("rankScannerRows", () => {
+  it("ranks higher finite Volume Ratios before unavailable rows", () => {
+    const row = (symbol: string, volumeRatio: number | null): ScannerRowView => ({
+      symbol, shortSellRestricted: false, changePct: 1, last: 1, floatShares: null, volume: 1, volumeRatio,
+      isUnseen: false, isNewHit: false, muted: false,
+    });
+    expect(rankScannerRows([row("UNKNOWN", null), row("LOW", 1.2), row("HIGH", 8.4)], { col: "volRatio", dir: "desc" }).map((r) => r.symbol))
+      .toEqual(["HIGH", "LOW", "UNKNOWN"]);
   });
 });

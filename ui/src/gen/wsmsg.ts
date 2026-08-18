@@ -347,6 +347,7 @@ export interface ScannerRow {
   last: number | null; // null = no print yet
   floatShares: number | null; // ACTUAL shares (engine converts moomoo thousands); null = unknown
   volume: number /* int64 */; // 0 is legitimate
+  volumeRatio: number | null; // provider Volume Ratio; null = unavailable
 }
 export interface ScannerRankPayload {
   refreshedAt: string;
@@ -359,6 +360,7 @@ export interface ScannerFilters {
   minChangePct: number /* float64 */;
   maxFloatShares: number | null;
   minVolume: number /* float64 */;
+  minVolumeRatio: number /* float64 */;
   floatUnit: "K" | "M";
   volumeUnit: "K" | "M";
 }
