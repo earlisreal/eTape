@@ -43,4 +43,32 @@ describe("SessionClock", () => {
     expect(screen.getByTestId("session-clock").textContent).toContain("PRE in 2d 07:00:00");
     vi.useRealTimers();
   });
+
+  it("announces PRE and RTH transitions with the configured Google voice", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-09T07:59:59Z"));
+    const speak = vi.fn();
+    const voice = { name: "Google US English", lang: "en-US" } as SpeechSynthesisVoice;
+    class FakeUtterance {
+      voice: SpeechSynthesisVoice | null = null;
+      lang = "";
+      rate = 1;
+      pitch = 1;
+      constructor(readonly text: string) {}
+    }
+    vi.stubGlobal("SpeechSynthesisUtterance", FakeUtterance);
+    vi.stubGlobal("speechSynthesis", { getVoices: () => [voice], speak });
+
+    render(<ThemeProvider><SessionClock /></ThemeProvider>);
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(speak).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      text: "Pre-market is now open.", voice, lang: "en-US", rate: 0.90, pitch: 1.05,
+    }));
+
+    vi.setSystemTime(new Date("2026-07-09T13:29:59Z"));
+    act(() => { vi.advanceTimersByTime(1000); });
+    expect(speak).toHaveBeenNthCalledWith(2, expect.objectContaining({ text: "Market is now open." }));
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
 });

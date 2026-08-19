@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { nextSessionTransition, sessionAt, type Session } from "../render/chart/sessions";
 import { useTheme } from "./ThemeProvider";
 import type { Palette } from "../render/palette";
@@ -12,6 +12,23 @@ const ET_CLOCK = new Intl.DateTimeFormat("en-US", {
 });
 
 const SESSION_LABEL: Record<Session, string> = { pre: "PRE", rth: "RTH", post: "POST", closed: "CLOSED" };
+const SESSION_ANNOUNCEMENT: Partial<Record<Session, string>> = {
+  pre: "Pre-market is now open.",
+  rth: "Market is now open.",
+};
+
+function announceSession(session: Session): void {
+  const text = SESSION_ANNOUNCEMENT[session];
+  if (!text || typeof SpeechSynthesisUtterance === "undefined") return;
+  const synth = window.speechSynthesis;
+  if (!synth) return;
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.voice = synth.getVoices().find((voice) => voice.name === "Google US English" && voice.lang === "en-US") ?? null;
+  utterance.lang = "en-US";
+  utterance.rate = 0.90;
+  utterance.pitch = 1.05;
+  synth.speak(utterance);
+}
 
 function formatSessionCountdown(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -48,6 +65,11 @@ export function SessionClock(): JSX.Element {
   const { palette } = useTheme();
   const now = useEtClock();
   const session = sessionAt(now);
+  const previousSession = useRef<Session | null>(null);
+  useEffect(() => {
+    if (previousSession.current !== null && previousSession.current !== session) announceSession(session);
+    previousSession.current = session;
+  }, [session]);
   const transition = nextSessionTransition(now);
   const countdown = formatSessionCountdown(transition.atMs - now);
   const nextLabel = SESSION_LABEL[transition.session];
