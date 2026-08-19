@@ -48,7 +48,7 @@ func command(goos, url string) *exec.Cmd {
 }
 
 func chromeCommand(chrome, url string) *exec.Cmd {
-	return exec.Command(chrome, "--app="+url)
+	return exec.Command(chrome, "--app="+url, "--start-maximized")
 }
 
 func findChrome() string {

@@ -4,7 +4,7 @@ import { mutateWindows, readWindows, validateName, type CommandClient, type Wind
 import { useTheme } from "./ThemeProvider";
 import { modalTracker } from "./modalTracker";
 import { blankWorkspace, MONITORING_WORKSPACE_ID, MONITORING_WORKSPACE_NAME, type WorkspaceStore } from "./workspace";
-import { openWorkspaceWindow, workspaceUrl } from "./windows";
+import { openWorkspaceWindow, workspaceUrl, workspaceWindowFeatures } from "./windows";
 
 export function NewWindowModal({ open, currentId, commands, workspaceStore, onClose }: { open: boolean; currentId: string; commands: CommandClient; workspaceStore?: WorkspaceStore; onClose: () => void }): JSX.Element | null {
   const [catalog, setCatalog] = useState<WindowCatalogV1>({ version: 1, entries: [] });
@@ -22,7 +22,7 @@ export function NewWindowModal({ open, currentId, commands, workspaceStore, onCl
     ...catalog.entries.filter((entry) => entry.id !== MONITORING_WORKSPACE_ID),
   ];
   const create = async () => {
-    setError(""); const placeholder = window.open("about:blank", "_blank");
+    setError(""); const placeholder = window.open("about:blank", "_blank", workspaceWindowFeatures());
     try {
       const clean = validateName(name, catalog.entries.map((e) => e.name), ["main", MONITORING_WORKSPACE_NAME]); const id = crypto.randomUUID();
       const next = await mutateWindows(commands, (fresh) => ({ ...fresh, entries: [...fresh.entries, { id, name: validateName(clean, fresh.entries.map((e) => e.name), ["main", MONITORING_WORKSPACE_NAME]) }] }));
@@ -53,7 +53,7 @@ export function NewWindowModal({ open, currentId, commands, workspaceStore, onCl
     });
   };
   return <div onClick={onClose} style={{ position: "fixed", inset: 0, zIndex: 10001, background: "rgba(0,0,0,.5)", display: "grid", placeItems: "center" }}><div onClick={(e) => e.stopPropagation()} style={{ width: 460, padding: 18, background: palette.surface }}>
-    <h3>New window</h3>{entries.sort((a,b)=>a.name.localeCompare(b.name)).map((e)=><div key={e.id} style={{display:"flex",gap:8,margin:6}}><Button onClick={()=>e.id === MONITORING_WORKSPACE_ID ? openWorkspaceWindow(e.id) : window.open(workspaceUrl(e.id), "_blank")}>{e.name}</Button>{e.id !== MONITORING_WORKSPACE_ID && <><Button onClick={()=>void rename(e.id,e.name)}>Rename</Button><Button disabled={!navigator.locks || e.id===currentId} onClick={()=>void remove(e.id)}>Delete</Button></>}</div>)}
+    <h3>New window</h3>{entries.sort((a,b)=>a.name.localeCompare(b.name)).map((e)=><div key={e.id} style={{display:"flex",gap:8,margin:6}}><Button onClick={()=>openWorkspaceWindow(e.id)}>{e.name}</Button>{e.id !== MONITORING_WORKSPACE_ID && <><Button onClick={()=>void rename(e.id,e.name)}>Rename</Button><Button disabled={!navigator.locks || e.id===currentId} onClick={()=>void remove(e.id)}>Delete</Button></>}</div>)}
     <div style={{display:"flex",gap:8,marginTop:16}}><input aria-label="Workspace name" value={name} onChange={(e)=>setName(e.target.value)} maxLength={64}/><Button onClick={()=>void create()}>Create new</Button></div>{error&&<p role="alert">{error}</p>}
   </div></div>;
 }

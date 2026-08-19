@@ -93,7 +93,7 @@ func TestChromeCommandPreservesExactURL(t *testing.T) {
 	url := "http://127.0.0.1:8686/?foo=bar"
 	cmd := chromeCommand(chrome, url)
 
-	want := []string{chrome, "--app=" + url}
+	want := []string{chrome, "--app=" + url, "--start-maximized"}
 	if !slices.Equal(cmd.Args, want) {
 		t.Fatalf("chromeCommand() args = %q, want %q", cmd.Args, want)
 	}
@@ -135,7 +135,7 @@ func TestOpenWindowsFallsBackWhenChromeStartFails(t *testing.T) {
 	if len(commands) != 2 {
 		t.Fatalf("started %d commands, want Chrome then fallback", len(commands))
 	}
-	if got, want := commands[0].Args, []string{chrome, "--app=" + url}; !slices.Equal(got, want) {
+	if got, want := commands[0].Args, []string{chrome, "--app=" + url, "--start-maximized"}; !slices.Equal(got, want) {
 		t.Fatalf("Chrome args = %q, want %q", got, want)
 	}
 	if got, want := commands[1].Args, []string{"rundll32", "url.dll,FileProtocolHandler", url}; !slices.Equal(got, want) {

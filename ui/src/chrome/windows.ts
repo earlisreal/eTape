@@ -1,4 +1,5 @@
 const WORKSPACE_ID_RE = /^[a-z0-9-]{1,64}$/;
+const WORKSPACE_WINDOW_POPUP = "popup=yes";
 const NEWS_WINDOW_TARGET = "etape-news-reader";
 const NEWS_WINDOW_WIDTH = 1100;
 const NEWS_WINDOW_HEIGHT = 800;
@@ -24,8 +25,16 @@ export function workspaceUrl(id: string, href = window.location.href): string {
   return target.href;
 }
 
+export function workspaceWindowFeatures(): string {
+  const { availWidth, availHeight } = window.screen;
+  const width = availWidth || window.innerWidth;
+  const height = availHeight || window.innerHeight;
+  if (width <= 0 || height <= 0) return WORKSPACE_WINDOW_POPUP;
+  return `${WORKSPACE_WINDOW_POPUP},width=${width},height=${height}`;
+}
+
 export function openWorkspaceWindow(id: string): Window | null {
-  return window.open(workspaceUrl(id), workspaceWindowTarget(id));
+  return window.open(workspaceUrl(id), workspaceWindowTarget(id), workspaceWindowFeatures());
 }
 
 export function openNewsWindow(url: string): Window | null {
