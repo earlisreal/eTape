@@ -48,9 +48,9 @@ export function TVLegend({ chrome, symbol, timeframe, instances, paneOffsets, ri
         write("state", v.barState === "volumeOnly" ? "volume only" : v.barState === "noTrade" ? "no trade" : "", chrome.muted);
         for (const row of v.indicators) {
           row.values.forEach((val, idx) => write(`ind-${row.instanceId}-${idx}`, fmtPrice(val), row.colors[idx]));
-          // Always write (even blank) so a stale OPEN/CLOSE doesn't linger once the
+          // Always write (even blank) so a stale POSITIVE/NEGATIVE doesn't linger once the
           // signal goes back to null (e.g. scrubbed to a bar with a missing value).
-          write(`sig-${row.instanceId}`, row.signal === "open" ? "OPEN" : row.signal === "close" ? "CLOSE" : "",
+          write(`sig-${row.instanceId}`, row.signal === "open" ? "POSITIVE" : row.signal === "close" ? "NEGATIVE" : "",
             row.signal === "open" ? chrome.up : row.signal === "close" ? chrome.down : undefined);
         }
       },
