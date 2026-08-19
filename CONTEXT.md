@@ -34,6 +34,7 @@ _Avoid_: Monitoring window, monitoring layout
 
 **Scanner Sync**:
 A persistent, toggleable Monitoring Workspace mode driven by one Scanner Source that maintains pinned Chart Panel symbols from ranked Scanner results. Its top set contains as many symbols as the Monitoring Workspace has pinned Chart Panels; a Chart Panel keeps its current symbol until it leaves that set. It remains enabled but pauses when no pinned Chart Panel exists; unmatched Chart Panels retain their current symbols when the Scanner Source returns too few rows.
+The Scanner Source's selected sort order, including Volume Ratio and Reported Short Interest, determines that top set.
 _Avoid_: Auto load, scanner auto-refresh
 
 **Unassigned Chart Panel**:
@@ -71,6 +72,23 @@ _Avoid_: Free-float market cap
 **Free-Float Market Cap**:
 The market value calculated from the share price multiplied by Free Float shares.
 _Avoid_: Free Float
+
+**Reported Short Interest**:
+The aggregate shares held short for a security at a provider's reporting settlement date. eTape preserves the provider-reported share count and its as-of date; it does not adjust it for subsequent stock splits. It is a periodically reported position, not daily short-sale volume, borrow availability, or a short-sell restriction.
+_Avoid_: Short volume, shortable shares, borrow availability
+
+**Reported Short Interest As-of Date**:
+The provider's reporting settlement date associated with a Reported Short Interest value. It describes the delayed position report, not a live quote time or Scanner refresh time.
+_Avoid_: Quote timestamp, live timestamp
+
+**Volume Ratio**:
+The ratio of current average per-minute trading volume since market open to the prior five trading days’ average per-minute trading volume. It is a multiplier, not a percentage or a same-time-of-day cumulative-volume comparison.
+Scanner displays the provider-supplied number without a multiplier suffix during regular and extended sessions when it is available; an unavailable value is not zero.
+_Avoid_: Relative Volume
+
+**Volume Ratio Filter**:
+A Scanner minimum Volume Ratio multiplier. It is off at zero; when active, a row with an unavailable Volume Ratio does not match.
+_Avoid_: Percentage filter, volume filter
 
 ## Order Entry
 
