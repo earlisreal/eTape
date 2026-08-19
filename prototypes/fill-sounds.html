@@ -43,6 +43,7 @@
   button:active { transform: translateY(1px); }
   .controls { display: flex; align-items: center; gap: 10px; margin: 18px 0; }
   input[type=range] { width: 180px; accent-color: #4ade80; }
+  select { background: #2c3342; color: #cbd5e1; border: 1px solid #465064; border-radius: 6px; padding: 7px 10px; }
 </style>
 </head>
 <body>
@@ -78,6 +79,27 @@
   three symbols landing in one refresh through the coalescing gate: one play.
 </p>
 <div id="scanner"></div>
+
+<h2>Session transition alerts (proposal)</h2>
+<p class="note">
+  One-shot alerts for major market-session transitions. These should be clearly distinguishable from fills,
+  rejects, order placement, and scanner hits. “Market Wake” is intentionally subtle for the 04:00 ET start
+  of pre-market; “Exchange Bell” is substantially more prominent for the 09:30 ET regular-session open.
+</p>
+<div id="session"></div>
+
+<h2>Voice announcements (proposal)</h2>
+<p class="note">
+  Uses browser-native speech synthesis and prefers Google US English (en-US) when installed. Available voices
+  vary by browser and operating system; these cards are for auditioning wording, not production integration.
+</p>
+<div class="controls">
+  <label for="voice-select">Voice</label>
+  <select id="voice-select" disabled>
+    <option>Loading browser voices…</option>
+  </select>
+</div>
+<div id="voice"></div>
 
 <script>
 'use strict';
@@ -373,6 +395,149 @@ const SCANNER_SOUNDS = [
   },
 ];
 
+// ---- session-transition alerts (proposal) --------------------------------
+
+function marketWake(c, out, t) {
+  const notes = [
+    [392.00, 0.00, 0.24, 0.006, 0.14],
+    [493.88, 0.10, 0.27, 0.006, 0.16],
+    [587.33, 0.20, 0.31, 0.007, 0.30],
+  ];
+  for (const [freq, offset, peak, attack, decay] of notes) {
+    const at = t + offset;
+    tone(c, 'sine', freq, at, peak, attack, decay, out);
+    tone(c, 'sine', freq * 2, at, 0.03, attack, Math.min(decay, 0.11), out);
+  }
+}
+
+function bellStrike(c, out, t, level = 1, base = 1046.50) {
+  const partials = [
+    [1.00, 0.27, 0.80],
+    [1.52, 0.18, 0.62],
+    [2.16, 0.12, 0.42],
+    [3.70, 0.065, 0.23],
+    [5.40, 0.035, 0.12],
+  ];
+  for (const [ratio, peak, decay] of partials)
+    tone(c, 'sine', base * ratio, t, peak * level, 0.002, decay, out);
+  noiseBurst(c, t, 0.11 * level, 0.013, 'highpass', 3000, 0.7, out);
+}
+
+const SESSION_SOUNDS = [
+  {
+    name: 'Market Wake — Pre-market Open',
+    desc: 'Gentle G4→B4→D5 rising chime. A calm “market waking up” cue for Overnight → Pre-market.',
+    play(c, out, t) {
+      marketWake(c, out, t);
+    },
+  },
+  {
+    name: 'Exchange Bell — Market Open',
+    desc: 'Two ceremonial metallic bell strikes for the 09:30 ET regular-session open. Deliberately more prominent than every other session cue.',
+    play(c, out, t) {
+      bellStrike(c, out, t, 1.0);
+      bellStrike(c, out, t + 0.22, 0.87);
+    },
+  },
+  {
+    name: 'Market Wake — Dawn Duo',
+    desc: 'Softer two-note F4→C5 chime with a wider pause. A quieter alternative for Overnight → Pre-market.',
+    play(c, out, t) {
+      tone(c, 'sine', 349.23, t, 0.20, 0.008, 0.20, out);
+      tone(c, 'sine', 523.25, t + 0.18, 0.25, 0.008, 0.34, out);
+      tone(c, 'sine', 698.46, t + 0.18, 0.025, 0.008, 0.10, out);
+    },
+  },
+  {
+    name: 'Exchange Bell — Deep Twin Gong',
+    desc: 'Lower, darker twin-gong alternative. More weight than Cash Bell without the bright fill-sound “chik”.',
+    play(c, out, t) {
+      bellStrike(c, out, t, 1.0, 783.99);
+      bellStrike(c, out, t + 0.27, 0.84, 783.99);
+    },
+  },
+];
+
+const VOICE_ANNOUNCEMENTS = [
+  {
+    name: 'Feminine voice — Market is now open',
+    text: 'Market is now open.',
+    desc: 'Direct regular-session announcement for 09:30 ET. Auto mode prefers Google US English (en-US).',
+  },
+  {
+    name: 'Feminine voice — Pre-market is now open',
+    text: 'Pre-market is now open.',
+    desc: 'Recommended warm-professional Overnight → Pre-market line. Auto mode prefers Google US English (en-US).',
+  },
+  {
+    name: 'Feminine voice — The market is waking up',
+    text: 'The market is waking up.',
+    desc: 'Softer, more atmospheric alternative for the 04:00 ET transition.',
+  },
+];
+
+// Best-effort name heuristic; it only chooses among voices installed in the browser.
+const FEMALE_VOICE_HINTS = /female|woman|girl|samantha|zira|susan|karen|moira|victoria|ava|allison|aria|jenny|libby|hazel|joanna|serena|siri/i;
+let browserVoices = [];
+const voiceSelect = document.getElementById('voice-select');
+
+function isGoogleUsEnglish(v) {
+  return v.name.trim().toLowerCase() === 'google us english' && v.lang.toLowerCase() === 'en-us';
+}
+
+function refreshBrowserVoices() {
+  const previous = voiceSelect.value;
+  browserVoices = window.speechSynthesis.getVoices();
+  voiceSelect.replaceChildren();
+  if (!browserVoices.length) {
+    const option = document.createElement('option');
+    option.value = 'auto';
+    option.textContent = 'Browser default voice';
+    voiceSelect.appendChild(option);
+    voiceSelect.disabled = true;
+    return;
+  }
+  const auto = document.createElement('option');
+  auto.value = 'auto';
+  auto.textContent = 'Auto — prefer Google US English (en-US)';
+  voiceSelect.appendChild(auto);
+  browserVoices.forEach((v, i) => {
+    const option = document.createElement('option');
+    option.value = String(i);
+    const tags = [];
+    if (isGoogleUsEnglish(v)) tags.push('preferred');
+    if (FEMALE_VOICE_HINTS.test(v.name)) tags.push('name match');
+    option.textContent = v.name + ' — ' + v.lang + (tags.length ? ' (' + tags.join(', ') + ')' : '');
+    voiceSelect.appendChild(option);
+  });
+  const previousIndex = Number(previous);
+  voiceSelect.value = previous === 'auto' || browserVoices[previousIndex] ? previous : 'auto';
+  voiceSelect.disabled = false;
+}
+
+if ('speechSynthesis' in window) {
+  refreshBrowserVoices();
+  window.speechSynthesis.addEventListener('voiceschanged', refreshBrowserVoices);
+}
+
+function speakVoiceLine(text) {
+  if (!('speechSynthesis' in window)) {
+    window.alert('Speech synthesis is not available in this browser.');
+    return;
+  }
+  const english = browserVoices.filter((v) => /^en[-_]/i.test(v.lang));
+  const preferred = english.find(isGoogleUsEnglish) || english.find((v) => FEMALE_VOICE_HINTS.test(v.name));
+  const selected = voiceSelect.value === 'auto' ? preferred || english[0] || browserVoices[0] : browserVoices[Number(voiceSelect.value)] || preferred || english[0] || browserVoices[0];
+  const utterance = new SpeechSynthesisUtterance(text);
+  if (selected) utterance.voice = selected;
+  utterance.lang = selected ? selected.lang : 'en-US';
+  utterance.rate = 0.90;
+  utterance.pitch = 1.05;
+  utterance.volume = master ? master.gain.value : document.getElementById('vol').value / 100;
+  window.speechSynthesis.cancel();
+  window.speechSynthesis.speak(utterance);
+}
+
 // ---- coalescing gate (the logic that would ship) -------------------------
 
 const COALESCE_MS = 200;
@@ -485,6 +650,57 @@ SCANNER_SOUNDS.forEach((s, i) => {
     for (const dt of [0, 30, 60]) gatedHit(t0 + dt);
   });
   scanner.appendChild(card);
+});
+
+const session = document.getElementById('session');
+SESSION_SOUNDS.forEach((s) => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML =
+    '<div class="info"><div class="name">' + s.name + '</div>' +
+    '<div class="desc">' + s.desc + '</div></div>';
+  const b = document.createElement('button');
+  b.textContent = 'Play';
+  b.className = 'burst';
+  b.addEventListener('click', () => {
+    const c = audio();
+    s.play(c, master, c.currentTime);
+  });
+  card.appendChild(b);
+  session.appendChild(card);
+});
+
+{
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML =
+    '<div class="info"><div class="name">Trading Morning Sequence</div>' +
+    '<div class="desc">Plays Market Wake followed shortly by Exchange Bell so their relative prominence and vocabulary can be compared.</div></div>';
+  const b = document.createElement('button');
+  b.textContent = 'Play sequence';
+  b.className = 'burst';
+  b.addEventListener('click', () => {
+    const c = audio();
+    SESSION_SOUNDS[0].play(c, master, c.currentTime);
+    SESSION_SOUNDS[1].play(c, master, c.currentTime + 1.5);
+  });
+  card.appendChild(b);
+  session.appendChild(card);
+}
+
+const voice = document.getElementById('voice');
+VOICE_ANNOUNCEMENTS.forEach((s) => {
+  const card = document.createElement('div');
+  card.className = 'card';
+  card.innerHTML =
+    '<div class="info"><div class="name">' + s.name + '</div>' +
+    '<div class="desc">' + s.desc + '</div></div>';
+  const b = document.createElement('button');
+  b.textContent = 'Play';
+  b.className = 'burst';
+  b.addEventListener('click', () => speakVoiceLine(s.text));
+  card.appendChild(b);
+  voice.appendChild(card);
 });
 </script>
 </body>
