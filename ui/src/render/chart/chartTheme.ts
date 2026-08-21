@@ -173,8 +173,8 @@ export function chartOptions(p: Palette, timeframe: string): DeepChartOptions {
       vertLine: { color: p.crosshair },
       horzLine: { color: p.crosshair },
     },
-    // Let the library size the axis to the labels instead of reserving a fixed gutter.
-    rightPriceScale: { borderColor: p.border, scaleMargins: CANDLE_SCALE_MARGINS, minimumWidth: 0 },
+    // Keep the right-axis gutter stable so changing label widths cannot shift the plot.
+    rightPriceScale: { borderColor: p.border, scaleMargins: CANDLE_SCALE_MARGINS, minimumWidth: 32 },
     localization: { timeFormatter: (time) => timeFormatter(time, timeframe) },
     timeScale: {
       borderColor: p.border, rightOffset: RIGHT_OFFSET_BARS, secondsVisible: true, timeVisible: true,
