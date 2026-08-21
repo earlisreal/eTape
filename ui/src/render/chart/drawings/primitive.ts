@@ -132,12 +132,12 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
       }
       if (this.transient?.ghost) {
         const ghost = this.transient.ghost;
-        const trendline = ghost.kind === "trendline";
-        const style = trendline ? ghost.style : undefined;
-        ctx.setLineDash(trendline ? LINE_DASH[style?.lineStyle ?? DEFAULT_LINE_STYLE] : [4, 3]);
+        const styledGhost = ghost.kind === "trendline" || ghost.kind === "rect";
+        const style = styledGhost ? ghost.style : undefined;
+        ctx.setLineDash(styledGhost ? LINE_DASH[style?.lineStyle ?? DEFAULT_LINE_STYLE] : [4, 3]);
         this.strokeShape(ctx, ghost.kind, ghost.anchors, hr, vr, width,
-          trendline ? style?.color ?? this.palette.text : this.palette.accent,
-          trendline ? style?.width ?? DEFAULT_DRAWING_WIDTH : 1);
+          styledGhost ? style?.color ?? this.palette.text : this.palette.accent,
+          styledGhost ? style?.width ?? DEFAULT_DRAWING_WIDTH : 1);
         ctx.setLineDash([]);
       }
       if (this.transient?.measure) this.measure(ctx, this.transient.measure, hr, vr);

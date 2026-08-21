@@ -295,7 +295,7 @@ export class DrawingInteraction {
     // first click of a 2-anchor tool → start placing, show ghost
     this.gesture = { kind: "placing", anchor0: anchor };
     this.primitive.setTransient({ ghost: { kind, anchors: [anchor, anchor],
-      style: kind === "trendline" ? this.styleForKind?.(kind) : undefined } });
+      style: kind === "trendline" || kind === "rect" ? this.styleForKind?.(kind) : undefined } });
     this.primitive.requestUpdate();
   }
 
@@ -321,7 +321,7 @@ export class DrawingInteraction {
       if (anchor) {
         const kind = this.tool as DrawingKind;
         this.primitive.setTransient({ ghost: { kind, anchors: [g.anchor0, anchor],
-          style: kind === "trendline" ? this.styleForKind?.(kind) : undefined } });
+          style: kind === "trendline" || kind === "rect" ? this.styleForKind?.(kind) : undefined } });
         this.primitive.requestUpdate();
       }
     } else if (g.kind === "measureInitialPress") {
