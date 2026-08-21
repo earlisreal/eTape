@@ -20,7 +20,7 @@ import { Keycap } from "../exec/Keycap";
 
 export interface HotkeyDeckProps {
   venue: VenueID; symbol: string; quote?: Quote | undefined;
-  buyingPower: number; positionQty: number;
+  buyingPower: number; availableCash: number; positionQty: number;
   oc: OrderCommands; toast: ToastApi;
 }
 
@@ -50,7 +50,7 @@ export function resolveDeckRows(config: OrderConfig): Array<{ rowIndex: number; 
 }
 
 export function HotkeyDeck(
-  { venue, symbol, quote, buyingPower, positionQty, oc, toast }: HotkeyDeckProps,
+  { venue, symbol, quote, buyingPower, availableCash, positionQty, oc, toast }: HotkeyDeckProps,
 ): JSX.Element | null {
   const { config } = useOrderConfig();
   const deckRows = resolveDeckRows(config);
@@ -66,7 +66,7 @@ export function HotkeyDeck(
             <button key={t.id} type="button" data-testid={`deck-${t.id}`} className={deckToneClass(t)}
               onClick={() => fireTemplate(
                 t, {
-                  venue, symbol, quote, buyingPower, positionQty, armed: false, nowMs: Date.now(),
+                  venue, symbol, quote, buyingPower, availableCash, positionQty, armed: false, nowMs: Date.now(),
                   extHoursMarketBufferPct: config.extHoursMarketBufferPct ?? 1,
                 },
                 oc, toast, { gateArm: false },

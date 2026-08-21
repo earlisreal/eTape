@@ -21,6 +21,7 @@ const status = (masterArmed: boolean): ExecStatus => ({ masterArmed, global: { m
 // with a local fixture carrying the bindings these tests fire.
 const SAMPLE_TEMPLATES: ActionTemplate[] = [
   { kind: "place", id: "buy-5k", label: "Buy $5k", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, sizing: { mode: "Dollar", dollar: 5000 }, hotkey: "Ctrl+1" },
+  { kind: "place", id: "cash-half", label: "Cash half", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, sizing: { mode: "CashPct", pct: 50 }, hotkey: "Ctrl+2" },
   { kind: "manage", id: "kill", label: "KILL", action: "KillSwitch", hotkey: "Ctrl+Shift+K" },
   { kind: "manage", id: "cancel-last", label: "Cancel Last", action: "CancelLast", hotkey: "Ctrl+Backspace" },
   { kind: "manage", id: "cancel-focused", label: "Cancel Focused", action: "CancelAllFocused", hotkey: "Ctrl+Shift+C" },
@@ -73,6 +74,13 @@ describe("useHotkeys", () => {
     const { sent } = await setup(true);
     await act(async () => { fireEvent.keyDown(window, { key: "1", ctrlKey: true }); await Promise.resolve(); });
     expect(sent.some((s) => s.name === "SubmitOrder")).toBe(true);
+  });
+  it("sizes a Cash % hotkey from the selected venue's available cash", async () => {
+    const { sent } = await setup(true);
+    await act(async () => { fireEvent.keyDown(window, { key: "2", ctrlKey: true }); await Promise.resolve(); });
+    const submit = sent.find((s) => s.name === "SubmitOrder");
+    expect(submit).toBeTruthy();
+    expect((submit!.args as { qty: number }).qty).toBe(14); // 50% of $100 / $3.50
   });
   it("blocks a place-hotkey when disarmed (no send)", async () => {
     const { sent } = await setup(false);
@@ -175,7 +183,7 @@ describe("useHotkeys", () => {
       ],
     };
     stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: twoArmed });
-    stores.exec.apply({ kind: "snapshot", topic: "exec.account" as never, key: "tradezero", payload: { venue: "tradezero", equity: 100, buyingPower: 100000, availableCash: 100, sodEquity: 100, realized: 0, dayPnl: 0, leverage: 4, tsMs: 1 } });
+    stores.exec.apply({ kind: "snapshot", topic: "exec.account" as never, key: "tradezero", payload: { venue: "tradezero", equity: 100, buyingPower: 100000, availableCash: 20, sodEquity: 100, realized: 0, dayPnl: 0, leverage: 4, tsMs: 1 } });
     stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.4, ask: 3.5, last: 3.45, ts: "" } });
     const target: HotkeyTarget = { ...TARGET, venue: "tradezero" };
     await act(async () => {
@@ -186,9 +194,10 @@ describe("useHotkeys", () => {
       );
       await Promise.resolve();
     });
-    await act(async () => { fireEvent.keyDown(window, { key: "1", ctrlKey: true }); await Promise.resolve(); });
+    await act(async () => { fireEvent.keyDown(window, { key: "2", ctrlKey: true }); await Promise.resolve(); });
     const submit = sent.find((s) => s.name === "SubmitOrder");
     expect(submit).toBeTruthy();
-    expect((submit!.args as { venue: string }).venue).toBe("tradezero");
+    expect((submit!.args as { venue: string; qty: number }).venue).toBe("tradezero");
+    expect((submit!.args as { venue: string; qty: number }).qty).toBe(2); // 50% of $20 / $3.50
   });
 });

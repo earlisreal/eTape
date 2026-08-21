@@ -13,7 +13,7 @@ const tmpl = (o: Partial<PlaceOrderTemplate> = {}): PlaceOrderTemplate => ({
 
 describe("resolvePlaceTemplate", () => {
   it("resolves price+qty and builds a venue-tagged SubmitOrderArgs + flash string", () => {
-    const r = resolvePlaceTemplate(tmpl(), { venue: "alpaca-paper", symbol: "US.AAPL", quote: q, buyingPower: 10_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
+    const r = resolvePlaceTemplate(tmpl(), { venue: "alpaca-paper", symbol: "US.AAPL", quote: q, buyingPower: 10_000, availableCash: 5_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
     expect(r.args.venue).toBe("alpaca-paper");
     expect(r.args.qty).toBe(1428);          // floor(5000/3.50)
     expect(r.args.limitPrice).toBeCloseTo(3.50);
@@ -23,36 +23,42 @@ describe("resolvePlaceTemplate", () => {
   it("PositionFraction=all resolves from the live position (flatten)", () => {
     const r = resolvePlaceTemplate(
       tmpl({ side: "SELL", sizing: { mode: "PositionFraction", pct: 100 } }),
-      { venue: "alpaca-paper", symbol: "US.AAPL", quote: q, buyingPower: 0, positionQty: 300, nowMs: RTH, extHoursMarketBufferPct: 1 });
+      { venue: "alpaca-paper", symbol: "US.AAPL", quote: q, buyingPower: 0, availableCash: 0, positionQty: 300, nowMs: RTH, extHoursMarketBufferPct: 1 });
     expect(r.args.qty).toBe(300);
     expect(r.args.side).toBe("SELL");
+  });
+  it("CashPct resolves from available cash rather than buying power", () => {
+    const r = resolvePlaceTemplate(
+      tmpl({ sizing: { mode: "CashPct", pct: 50 }, priceSource: "Ask" }),
+      { venue: "alpaca-paper", symbol: "US.AAPL", quote: { ...q, ask: 10 }, buyingPower: 20_000, availableCash: 5_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
+    expect(r.args.qty).toBe(250);
   });
   it("surfaces pre-check failure without throwing (qty 0 → not ok), with the sizing reason threaded into the error", () => {
     const r = resolvePlaceTemplate(
       tmpl({ sizing: { mode: "Dollar", dollar: 1 } }),
-      { venue: "alpaca-paper", symbol: "US.AAPL", quote: { ...q, ask: 100 }, buyingPower: 0, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
+      { venue: "alpaca-paper", symbol: "US.AAPL", quote: { ...q, ask: 100 }, buyingPower: 0, availableCash: 0, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
     expect(r.args.qty).toBe(0);
     expect(r.preCheck.ok).toBe(false);
     expect(r.preCheck.errors).toContain("$1 is less than one share at $100.00.");
   });
   it("MARKET keeps limitPrice 0 in args and flashes MKT", () => {
-    const r = resolvePlaceTemplate(tmpl({ type: "MARKET" }), { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
+    const r = resolvePlaceTemplate(tmpl({ type: "MARKET" }), { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, availableCash: 5_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
     expect(r.args.type).toBe("MARKET");
     expect(r.args.limitPrice).toBe(0);
     expect(r.flash).toContain("MKT");
   });
   it("threads the template's session into the submitted args", () => {
-    const r = resolvePlaceTemplate(tmpl({ session: "EXTENDED" }), { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
+    const r = resolvePlaceTemplate(tmpl({ session: "EXTENDED" }), { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, availableCash: 5_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
     expect(r.args.session).toBe("EXTENDED");
   });
   it("defaults a template with no session to AUTO", () => {
-    const r = resolvePlaceTemplate(tmpl(), { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
+    const r = resolvePlaceTemplate(tmpl(), { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, availableCash: 5_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
     expect(r.args.session).toBe("AUTO");
   });
   it("converts a MARKET template outside RTH to a buffered LIMIT and flashes the limit price", () => {
     const r = resolvePlaceTemplate(
       tmpl({ type: "MARKET", priceSource: "Ask" }),
-      { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, positionQty: 0, nowMs: PRE, extHoursMarketBufferPct: 1 });
+      { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, availableCash: 5_000, positionQty: 0, nowMs: PRE, extHoursMarketBufferPct: 1 });
     expect(r.args.type).toBe("LIMIT");
     expect(r.args.limitPrice).toBeCloseTo(3.54, 2); // ask 3.50 * 1.01 → tick-up
     expect(r.flash).toContain("3.54 LMT");

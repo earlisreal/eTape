@@ -117,6 +117,27 @@ describe("OrderSettingsSection", () => {
     const saved = onSave.mock.calls[0][0];
     expect(saved.templates.find((t: { id: string }) => t.id === "sell-half").sizing).toEqual({ mode: "PositionFraction", pct: 100 });
   });
+  it("adds Cash % with a 25% default and nudges by one percent", () => {
+    const { onSave } = wrap();
+    fireEvent.change(screen.getByLabelText("size-mode-buy-5k"), { target: { value: "CashPct" } });
+    expect((screen.getByLabelText("size-value-buy-5k") as HTMLInputElement).value).toBe("25");
+    fireEvent.click(screen.getByTestId("size-value-buy-5k-up"));
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].templates.find((t: { id: string }) => t.id === "buy-5k").sizing)
+      .toEqual({ mode: "CashPct", pct: 26 });
+  });
+  it("caps typed Cash % sizing at 100 on blur", () => {
+    const { onSave } = wrap();
+    fireEvent.change(screen.getByLabelText("size-mode-buy-5k"), { target: { value: "CashPct" } });
+    const sizeValue = screen.getByLabelText("size-value-buy-5k") as HTMLInputElement;
+    fireEvent.change(sizeValue, { target: { value: "150" } });
+    expect(sizeValue.value).toBe("150");
+    fireEvent.blur(sizeValue);
+    expect(sizeValue.value).toBe("100");
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].templates.find((t: { id: string }) => t.id === "buy-5k").sizing)
+      .toEqual({ mode: "CashPct", pct: 100 });
+  });
 
   it("shares sizing floors a nudge to a whole share (no upper cap)", () => {
     const { onSave } = wrap();

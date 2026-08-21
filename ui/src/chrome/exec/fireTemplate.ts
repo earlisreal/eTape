@@ -15,7 +15,7 @@ import { bareSymbol } from "./orderStatus";
 
 export interface FireContext {
   venue: VenueID; symbol: string; quote?: Quote | undefined;
-  buyingPower: number; positionQty: number; armed: boolean; nowMs: number;
+  buyingPower: number; availableCash: number; positionQty: number; armed: boolean; nowMs: number;
   extHoursMarketBufferPct: number;
 }
 
@@ -42,7 +42,7 @@ export function fireTemplate(
     }
     const r = resolvePlaceTemplate(t, {
       venue: ctx.venue, symbol: ctx.symbol, quote: ctx.quote,
-      buyingPower: ctx.buyingPower, positionQty: ctx.positionQty, nowMs: ctx.nowMs,
+      buyingPower: ctx.buyingPower, availableCash: ctx.availableCash, positionQty: ctx.positionQty, nowMs: ctx.nowMs,
       extHoursMarketBufferPct: ctx.extHoursMarketBufferPct,
     });
     for (const n of r.preCheck.notices) toast.push({ level: "warn", text: n });

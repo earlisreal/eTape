@@ -281,6 +281,7 @@ function StatsStrip({
 }): JSX.Element {
   const account = stores.exec.accounts().find((a) => a.venue === venue);
   const equity = account?.equity ?? null;
+  const cash = account?.availableCash ?? null;
   const bp = account?.buyingPower ?? null;
   const dayPnl = account?.dayPnl ?? null;
   const realized = account?.realized ?? null;
@@ -290,9 +291,9 @@ function StatsStrip({
 
   // Equity/Buying Power read as "settled" values: freeze them at their last
   // flat (no open position) snapshot while a position is open for this venue,
-  // and resume live updates once the venue goes flat again. Day P&L, Unrealized
-  // (quote-derived), and Realized stay live always — this freeze is scoped to
-  // Equity/BP only.
+  // and resume live updates once the venue goes flat again. Cash, Day P&L,
+  // Unrealized (quote-derived), and Realized stay live always — this freeze is
+  // scoped to Equity/BP only.
   const positionOpen = stores.exec.positions().some((p) => p.venue === venue && p.qty !== 0);
 
   // Held pairs are keyed by venue (not a bare pair of refs) because StatsStrip
@@ -320,6 +321,7 @@ function StatsStrip({
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 4, padding: "4px 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
       {cell("Equity", "acct-equity", money(displayEquity))}
+      {cell("Cash", "acct-cash", money(cash))}
       {cell("Buying Power", "acct-bp", money(displayBp))}
       {cell("Day P&L", "acct-daypnl", money(dayPnl), dayPnl ?? 0)}
       {cell("Unrealized", "acct-unrealized", money(unrealized), unrealized)}
@@ -381,7 +383,7 @@ function PositionsTable({
       type: "MARKET", tif: "DAY", priceSource: long ? "Bid" : "Ask", priceOffset: 0,
       sizing: { mode: "PositionFraction", pct: 100 },
     };
-    const r = resolvePlaceTemplate(t, { venue, symbol: row.symbol, quote, buyingPower: 0, positionQty: row.qty, nowMs: Date.now(), extHoursMarketBufferPct: extBufferPct });
+    const r = resolvePlaceTemplate(t, { venue, symbol: row.symbol, quote, buyingPower: 0, availableCash: 0, positionQty: row.qty, nowMs: Date.now(), extHoursMarketBufferPct: extBufferPct });
     if (!r.preCheck.ok) { toast.push({ level: "danger", text: r.preCheck.errors.join(" ") }); return; }
     void oc.submit(r.args, r.flash);
   };

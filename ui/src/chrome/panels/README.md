@@ -10,6 +10,8 @@ safe retry; definitive broker rejections start a new request. The Account panel 
 Day/Realized P&L and a persisted flat Fills table for the selected venue. It
 backfills `QueryCycleFills` and merges deduplicated live `exec.fills`. Panels
 acquire/release topics and symbol demand; data stays in stores/controllers.
+The Account panel shows live selected-venue Cash between Equity and Buying
+Power; only Equity and Buying Power use the flat-position hold behavior.
 [Account tables](./AccountPanel.tsx) persist independent column widths per
 table; drag a header separator to resize and double-click it to auto-fit. The
 widths are shared when switching the selected venue, then scale proportionally

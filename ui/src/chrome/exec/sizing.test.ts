@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { resolveShares } from "./sizing";
 
-const ctx = { price: 3.5, buyingPower: 10_000, positionQty: 428 };
+const ctx = { price: 3.5, buyingPower: 10_000, availableCash: 10_000, positionQty: 428 };
 
 describe("resolveShares", () => {
   it("Dollar → floor($/price)", () => {
@@ -9,6 +9,9 @@ describe("resolveShares", () => {
   });
   it("BuyingPowerPct → floor(BP*pct%/price)", () => {
     expect(resolveShares({ mode: "BuyingPowerPct", pct: 50 }, ctx).qty).toBe(1428); // floor(5000/3.5)
+  });
+  it("CashPct → floor(cash*pct%/price)", () => {
+    expect(resolveShares({ mode: "CashPct", pct: 50 }, ctx).qty).toBe(1428); // floor(5000/3.5)
   });
   it("Shares → explicit floor, never negative", () => {
     expect(resolveShares({ mode: "Shares", shares: 300 }, ctx).qty).toBe(300);
@@ -57,6 +60,27 @@ describe("resolveShares", () => {
     expect(resolveShares({ mode: "BuyingPowerPct", pct: 1 }, { ...ctx, buyingPower: 100, price: 150 }))
       .toEqual({ qty: 0, reason: "1% of buying power ($1.00) is less than one share at $150.00." });
   });
+  it("CashPct with no cash → reason names cash and does not fall back to buying power", () => {
+    expect(resolveShares({ mode: "CashPct", pct: 50 }, { ...ctx, availableCash: 0 }))
+      .toEqual({ qty: 0, reason: "No cash available to size the order." });
+    expect(resolveShares({ mode: "CashPct", pct: 50 }, { ...ctx, availableCash: -100 }))
+      .toEqual({ qty: 0, reason: "No cash available to size the order." });
+  });
+  it("CashPct pct <= 0 → reason says the pct itself is invalid", () => {
+    expect(resolveShares({ mode: "CashPct", pct: 0 }, ctx))
+      .toEqual({ qty: 0, reason: "Cash % must be greater than 0." });
+  });
+  it("CashPct with no live price → reason says there's no price to size from", () => {
+    expect(resolveShares({ mode: "CashPct", pct: 50 }, { ...ctx, price: 0 }))
+      .toEqual({ qty: 0, reason: "No live price yet to size the order." });
+  });
+  it("CashPct floors to 0 → reason spells out cash dollars vs. price", () => {
+    expect(resolveShares({ mode: "CashPct", pct: 1 }, { ...ctx, availableCash: 100, price: 150 }))
+      .toEqual({ qty: 0, reason: "1% of cash ($1.00) is less than one share at $150.00." });
+  });
+  it("CashPct supports fractional percentages", () => {
+    expect(resolveShares({ mode: "CashPct", pct: 12.5 }, { ...ctx, price: 3.5 }).qty).toBe(357);
+  });
   it("Shares 0 → reason: share size must be at least 1", () => {
     expect(resolveShares({ mode: "Shares", shares: 0 }, ctx))
       .toEqual({ qty: 0, reason: "Share size must be at least 1." });
@@ -64,7 +88,7 @@ describe("resolveShares", () => {
 });
 
 describe("resolveShares PositionFraction reads pct", () => {
-  const ctx2 = { price: 10, buyingPower: 0, positionQty: 300 };
+  const ctx2 = { price: 10, buyingPower: 0, availableCash: 0, positionQty: 300 };
   it("100 pct = full position", () => {
     expect(resolveShares({ mode: "PositionFraction", pct: 100 }, ctx2).qty).toBe(300);
   });

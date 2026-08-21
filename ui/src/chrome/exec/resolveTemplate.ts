@@ -10,14 +10,16 @@ import { sideLabel, bareSymbol, abbrevType } from "./orderStatus";
 
 export interface ResolveContext {
   venue: VenueID; symbol: string; quote: Quote;
-  buyingPower: number; positionQty: number; nowMs: number;
+  buyingPower: number; availableCash: number; positionQty: number; nowMs: number;
   extHoursMarketBufferPct: number;
 }
 export interface ResolvedPlace { args: SubmitOrderArgs; flash: string; preCheck: PreCheckResult }
 
 export function resolvePlaceTemplate(t: PlaceOrderTemplate, ctx: ResolveContext): ResolvedPlace {
   const price = resolvePrice(t.priceSource, t.priceOffset, t.priceOffsetUnit, ctx.quote);
-  const { qty, reason } = resolveShares(t.sizing, { price, buyingPower: ctx.buyingPower, positionQty: ctx.positionQty });
+  const { qty, reason } = resolveShares(t.sizing, {
+    price, buyingPower: ctx.buyingPower, availableCash: ctx.availableCash, positionQty: ctx.positionQty,
+  });
   const draft: DraftOrder = {
     symbol: ctx.symbol, side: t.side, type: t.type, tif: t.tif, session: t.session ?? "AUTO", qty,
     limitPrice: t.type === "MARKET" ? 0 : price,

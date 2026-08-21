@@ -109,6 +109,22 @@ describe("OrderTicketPanel", () => {
     const args = sent.find((s) => s.name === "SubmitOrder")?.args as SubmitOrderArgs;
     expect(args.qty).toBe(100);
   });
+  it("manual Cash % sizes from available cash rather than buying power", async () => {
+    const { props, stores, linkGroups, sent } = mkProps();
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.account" as never, key: "alpaca-paper", payload: { venue: "alpaca-paper", equity: 30_000, buyingPower: 20_000, availableCash: 5_000, sodEquity: 30_000, realized: 0, dayPnl: 0, leverage: 4, tsMs: 1 } });
+      stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 9.9, ask: 10, last: 10, ts: "" } });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    fireEvent.change(screen.getByTestId("mode"), { target: { value: "CashPct" } });
+    fireEvent.change(screen.getByTestId("amount"), { target: { value: "50" } });
+    fireEvent.change(screen.getByTestId("price"), { target: { value: "10" } });
+    fireEvent.click(screen.getByTestId("side-BUY"));
+    await waitFor(() => expect(sent.some((s) => s.name === "SubmitOrder")).toBe(true));
+    expect((sent.find((s) => s.name === "SubmitOrder")?.args as SubmitOrderArgs).qty).toBe(250);
+  });
   it("clicking the header bid/ask fills the price input", () => {
     const { props, stores, linkGroups } = mkProps();
     act(() => {
@@ -222,7 +238,7 @@ describe("OrderTicketPanel", () => {
     const typeOptions = Array.from(screen.getByTestId("order-type").querySelectorAll("option")).map((o) => o.textContent);
     expect(typeOptions).toEqual(["Limit", "Market", "Stop", "Stop Limit"]);
     const modeOptions = Array.from(screen.getByTestId("mode").querySelectorAll("option")).map((o) => o.textContent);
-    expect(modeOptions).toEqual(["Shares", "Dollars", "Buying Power %", "Position"]);
+    expect(modeOptions).toEqual(["Shares", "Dollars", "Cash %", "Buying Power %", "Position"]);
   });
   it("defaults Session to Auto and lists all four options", () => {
     const { props, stores } = mkProps();

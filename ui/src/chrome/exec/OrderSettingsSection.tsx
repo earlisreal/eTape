@@ -3,7 +3,7 @@
 // "Orders & hotkeys" tab. This revision (production redesign) replaces the dense
 // grid table with a card-per-template editor: every template parameter is still
 // editable — including price offset (value + $/%, now with a ±0.05 stepper) and
-// sizing amount (now with a mode-aware stepper, clamped to 100 for the two
+// sizing amount (now with a mode-aware stepper, clamped to 100 for the three
 // percent-based sizing modes) — and management templates can still be created.
 //
 // Cards render in `templates` array order (not grouped by kind) so that
@@ -35,16 +35,16 @@ const TIFS: TIF[] = ["DAY", "GTC", "IOC", "FOK"];
 const SESSIONS: OrderSession[] = ["AUTO", "RTH", "EXTENDED", "OVERNIGHT"];
 const SESSION_LABEL: Record<OrderSession, string> = { AUTO: "Auto", RTH: "Regular", EXTENDED: "Extended", OVERNIGHT: "Overnight" };
 const SOURCES: PriceSource[] = ["Bid", "Ask", "Last", "Mid"];
-const MODES: SizingMode[] = ["Dollar", "BuyingPowerPct", "Shares", "PositionFraction"];
-const MODE_LABEL: Record<SizingMode, string> = { Dollar: "Dollar", BuyingPowerPct: "BP %", Shares: "Shares", PositionFraction: "Pos %" };
+const MODES: SizingMode[] = ["Dollar", "CashPct", "BuyingPowerPct", "Shares", "PositionFraction"];
+const MODE_LABEL: Record<SizingMode, string> = { Dollar: "Dollar", CashPct: "Cash %", BuyingPowerPct: "BP %", Shares: "Shares", PositionFraction: "Pos %" };
 const MANAGE_ACTIONS: ManagementAction[] = ["CancelLast", "CancelAllFocused", "CancelAllEverything", "KillSwitch"];
 
 const OFFSET_STEP = 0.05;
-const SIZE_STEP: Record<SizingMode, number> = { Dollar: 100, BuyingPowerPct: 1, Shares: 1, PositionFraction: 1 };
-// Only the two percent-based modes have a natural ceiling (100% of buying
-// power / position can't be exceeded); Dollar and Shares are unbounded above.
-const SIZE_MAX: Partial<Record<SizingMode, number>> = { BuyingPowerPct: 100, PositionFraction: 100 };
-const isPercentMode = (m: SizingMode): boolean => m === "BuyingPowerPct" || m === "PositionFraction";
+const SIZE_STEP: Record<SizingMode, number> = { Dollar: 100, CashPct: 1, BuyingPowerPct: 1, Shares: 1, PositionFraction: 1 };
+// Percent-based modes have a natural 100% ceiling; Dollar and Shares are
+// unbounded above.
+const SIZE_MAX: Partial<Record<SizingMode, number>> = { CashPct: 100, BuyingPowerPct: 100, PositionFraction: 100 };
+const isPercentMode = (m: SizingMode): boolean => m === "CashPct" || m === "BuyingPowerPct" || m === "PositionFraction";
 
 // Rounds away float drift from repeated ±0.05 additions (e.g. 0.05+0.05 can
 // land on 0.09999999999999999 in double precision).
@@ -65,17 +65,19 @@ function sizingValue(s: SizingSpec): string {
   switch (s.mode) {
     case "Dollar": return String(s.dollar ?? 0);
     case "Shares": return String(s.shares ?? 0);
+    case "CashPct":
     case "BuyingPowerPct":
     case "PositionFraction": return String(s.pct ?? 0);
   }
 }
 // Every commit path — typed or nudged — runs through here, so the 100% cap on
-// Buying-power % / Position % sizing holds no matter how the value was entered.
+// Cash % / Buying-power % / Position % sizing holds no matter how the value was entered.
 function setSizingValue(s: SizingSpec, n: number): SizingSpec {
   const max = SIZE_MAX[s.mode];
   switch (s.mode) {
     case "Dollar": return { mode: "Dollar", dollar: clampNum(n, 0, max) };
     case "Shares": return { mode: "Shares", shares: Math.floor(clampNum(n, 0, max)) };
+    case "CashPct": return { mode: "CashPct", pct: clampNum(n, 0, max) };
     case "BuyingPowerPct": return { mode: "BuyingPowerPct", pct: clampNum(n, 0, max) };
     case "PositionFraction": return { mode: "PositionFraction", pct: clampNum(n, 0, max) };
   }
@@ -87,6 +89,7 @@ function modeToSpec(mode: SizingMode): SizingSpec {
   switch (mode) {
     case "Dollar": return { mode, dollar: 0 };
     case "Shares": return { mode, shares: 100 };
+    case "CashPct": return { mode, pct: 25 };
     case "BuyingPowerPct": return { mode, pct: 25 };
     case "PositionFraction": return { mode, pct: 100 };
   }

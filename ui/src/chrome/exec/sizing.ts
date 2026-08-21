@@ -1,15 +1,15 @@
 // Pure sizing resolution — resolves at trigger time against a live quote/account.
-// (ui-design §Order entry: Dollar → floor($/price); BuyingPowerPct → floor(BP×pct/price);
-//  PositionFraction → from the live position.)
-export type SizingMode = "Dollar" | "BuyingPowerPct" | "Shares" | "PositionFraction";
+// (ui-design §Order entry: Dollar → floor($/price); CashPct → floor(cash×pct/price);
+//  BuyingPowerPct → floor(BP×pct/price); PositionFraction → from the live position.)
+export type SizingMode = "Dollar" | "CashPct" | "BuyingPowerPct" | "Shares" | "PositionFraction";
 export interface SizingSpec {
   mode: SizingMode;
   dollar?: number;                 // Dollar
-  pct?: number;                    // BuyingPowerPct (0–100)
+  pct?: number;                    // CashPct/BuyingPowerPct (0–100)
   shares?: number;                 // Shares
   fraction?: "all" | "half";       // PositionFraction
 }
-export interface SizingContext { price: number; buyingPower: number; positionQty: number }
+export interface SizingContext { price: number; buyingPower: number; availableCash: number; positionQty: number }
 
 // A 0-share result is a legitimate, deterministic outcome (e.g. a $100 Dollar
 // order on a >$100 stock floors to 0) — `reason` says exactly why so callers
@@ -42,6 +42,21 @@ export function resolveShares(spec: SizingSpec, ctx: SizingContext): SizedShares
         : ctx.price <= 0
         ? "No live price yet to size the order."
         : `${pct}% of buying power ($${(ctx.buyingPower * pct / 100).toFixed(2)}) is less than one share at $${ctx.price.toFixed(2)}.`;
+      return { qty, reason };
+    }
+    case "CashPct": {
+      const pct = spec.pct ?? 0;
+      const qty = ctx.price > 0
+        ? Math.max(0, Math.floor((ctx.availableCash * pct / 100) / ctx.price))
+        : 0;
+      if (qty > 0) return { qty };
+      const reason = ctx.availableCash <= 0
+        ? "No cash available to size the order."
+        : pct <= 0
+        ? "Cash % must be greater than 0."
+        : ctx.price <= 0
+        ? "No live price yet to size the order."
+        : `${pct}% of cash ($${(ctx.availableCash * pct / 100).toFixed(2)}) is less than one share at $${ctx.price.toFixed(2)}.`;
       return { qty, reason };
     }
     case "Shares": {

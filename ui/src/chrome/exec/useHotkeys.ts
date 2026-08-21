@@ -70,7 +70,8 @@ export function useHotkeys(opts: { stores: Stores; commands: Cmd; target: Hotkey
       fireTemplate(
         t,
         {
-          venue, symbol, quote, buyingPower: account?.buyingPower ?? 0, positionQty, armed: !!status?.masterArmed, nowMs: Date.now(),
+          venue, symbol, quote, buyingPower: account?.buyingPower ?? 0, availableCash: account?.availableCash ?? 0,
+          positionQty, armed: !!status?.masterArmed, nowMs: Date.now(),
           extHoursMarketBufferPct: config.extHoursMarketBufferPct ?? 1,
         },
         oc, toast, { gateArm: true },

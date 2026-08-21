@@ -2,6 +2,10 @@
 
 Order ticket, hotkeys, sizing, venue selection, and arm/disarm presentation. Inputs: user intent plus account/position stores; outputs: typed wire commands. UI never bypasses engine gates. Test: `npm test -- exec`.
 
+Dollar, Cash %, Buying Power %, Shares, and Position sizing use the selected
+venue's live account and position data; Cash % uses the same available cash
+shown by the Account panel.
+
 The order ticket is optional for hotkey execution. A revisioned, in-memory
 `BroadcastChannel` target follows the most recently user-activated Dockview panel
 across open windows and carries its owner window, panel id, link group, linked symbol,

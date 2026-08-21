@@ -31,7 +31,7 @@ function makeToast(): ToastApi {
 function baseCtx(overrides: Partial<FireContext> = {}): FireContext {
   return {
     venue: "alpaca-paper", symbol: "US.AAPL", quote: QUOTE,
-    buyingPower: 100_000, positionQty: 0, armed: true, nowMs: RTH_NOW,
+    buyingPower: 100_000, availableCash: 50_000, positionQty: 0, armed: true, nowMs: RTH_NOW,
     extHoursMarketBufferPct: 1,
     ...overrides,
   };

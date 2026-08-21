@@ -24,11 +24,11 @@ const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
 const TIFS: TIF[] = ["DAY", "GTC", "IOC", "FOK"];
 const SESSIONS: OrderSession[] = ["AUTO", "RTH", "EXTENDED", "OVERNIGHT"];
-const MODES: SizingMode[] = ["Shares", "Dollar", "BuyingPowerPct", "PositionFraction"];
+const MODES: SizingMode[] = ["Shares", "Dollar", "CashPct", "BuyingPowerPct", "PositionFraction"];
 // Full words in the ticket's own dropdowns — abbrevType (orderStatus.ts) stays
 // abbreviated since it's shared with OpenOrdersPanel and the submit-flash toast.
 const TYPE_LABEL: Record<OrderType, string> = { MARKET: "Market", LIMIT: "Limit", STOP: "Stop", STOP_LIMIT: "Stop Limit" };
-const MODE_LABEL: Record<SizingMode, string> = { Shares: "Shares", Dollar: "Dollars", BuyingPowerPct: "Buying Power %", PositionFraction: "Position" };
+const MODE_LABEL: Record<SizingMode, string> = { Shares: "Shares", Dollar: "Dollars", CashPct: "Cash %", BuyingPowerPct: "Buying Power %", PositionFraction: "Position" };
 // AUTO resolves session-dependent behavior (extended_hours flags, TIF
 // coercion) from the server clock at submit time — today's behavior, kept as
 // the default so nothing changes until the trader picks an explicit session.
@@ -77,6 +77,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
 
   const account = stores.exec.accounts().find((a) => a.venue === venue);
   const buyingPower = account?.buyingPower ?? 0;
+  const availableCash = account?.availableCash ?? 0;
   const positionQty = stores.exec.positions().filter((p) => p.symbol === symbol && p.venue === venue).reduce((s, p) => s + p.qty, 0);
 
   const hasStop = type === "STOP" || type === "STOP_LIMIT";
@@ -87,9 +88,10 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
     const px = Number(price) || 0;
     const spec = mode === "Shares" ? { mode, shares: Number(amount) || 0 }
       : mode === "Dollar" ? { mode, dollar: Number(amount) || 0 }
+      : mode === "CashPct" ? { mode, pct: Number(amount) || 0 }
       : mode === "BuyingPowerPct" ? { mode, pct: Number(amount) || 0 }
       : { mode, pct: Number(amount) || 0 };
-    const { qty, reason } = resolveShares(spec, { price: px, buyingPower, positionQty });
+    const { qty, reason } = resolveShares(spec, { price: px, buyingPower, availableCash, positionQty });
     const draft: DraftOrder = { symbol, side, type, tif, session, qty, limitPrice: type === "MARKET" ? 0 : px, stopPrice: hasStop ? Number(stop) || 0 : 0 };
     const pc = preCheck(draft, quote ?? { bid: 0, ask: 0, last: 0 }, Date.now(), extBufferPct, reason);
     for (const n of pc.notices) toast.push({ level: "warn", text: n });
@@ -227,7 +229,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
           resolves to a current Action Template. */}
       {hasDeck && (
         <div style={{ borderTop: `1px solid ${palette.border}`, paddingTop: 6 }}>
-          <HotkeyDeck venue={venue} symbol={symbol} quote={quote} buyingPower={buyingPower} positionQty={positionQty}
+          <HotkeyDeck venue={venue} symbol={symbol} quote={quote} buyingPower={buyingPower} availableCash={availableCash} positionQty={positionQty}
             oc={oc} toast={toast} />
         </div>
       )}

@@ -56,6 +56,14 @@ describe("normalizeOrderConfig", () => {
     const out = normalizeOrderConfig(raw);
     expect(out.templates[0].kind === "place" && out.templates[0].session).toBe("OVERNIGHT");
   });
+  it("passes CashPct sizing through normalization unchanged", () => {
+    const raw: OrderConfig = {
+      activeVenue: "",
+      templates: [{ kind: "place", id: "cash", label: "Cash", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, sizing: { mode: "CashPct", pct: 50 } }] as OrderConfig["templates"],
+    };
+    const out = normalizeOrderConfig(raw).templates[0];
+    expect(out.kind === "place" && out.sizing).toEqual({ mode: "CashPct", pct: 50 });
+  });
   it("preserves deck and deckColor fields on PlaceOrderTemplate through normalize", () => {
     const deckColors: DeckColor[] = ["auto", "green", "red", "bronze", "neutral", "danger"];
     for (const color of deckColors) {

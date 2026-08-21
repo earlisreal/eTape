@@ -29,7 +29,7 @@ function makeOc(): OrderCommands {
 }
 function makeToast(): ToastApi { return { push: vi.fn(), dismiss: vi.fn() }; }
 
-async function setup(templates: ActionTemplate[], hotkeyDeck?: OrderConfig["hotkeyDeck"]) {
+async function setup(templates: ActionTemplate[], hotkeyDeck?: OrderConfig["hotkeyDeck"], availableCash = 50_000) {
   const config: OrderConfig = { activeVenue: "", templates, ...(hotkeyDeck ? { hotkeyDeck } : {}) };
   const commands = {
     sendCommand: vi.fn(async (n: string): Promise<AckMsg> => {
@@ -43,7 +43,7 @@ async function setup(templates: ActionTemplate[], hotkeyDeck?: OrderConfig["hotk
   await act(async () => {
     const r = render(
       <ThemeProvider><OrderConfigProvider commands={commands}>
-        <HotkeyDeck venue="alpaca-paper" symbol="US.AAPL" quote={QUOTE} buyingPower={100_000} positionQty={0}
+        <HotkeyDeck venue="alpaca-paper" symbol="US.AAPL" quote={QUOTE} buyingPower={100_000} availableCash={availableCash} positionQty={0}
           oc={oc} toast={toast} />
       </OrderConfigProvider></ThemeProvider>,
     );
@@ -125,7 +125,7 @@ describe("HotkeyDeck — click dispatch (real fireTemplate/resolvePlaceTemplate)
     const { oc } = await setup([t]);
     fireEvent.click(screen.getByTestId("deck-buy-ask"));
     const expected = resolvePlaceTemplate(t, {
-      venue: "alpaca-paper", symbol: "US.AAPL", quote: QUOTE, buyingPower: 100_000, positionQty: 0, nowMs: 0,
+      venue: "alpaca-paper", symbol: "US.AAPL", quote: QUOTE, buyingPower: 100_000, availableCash: 50_000, positionQty: 0, nowMs: 0,
       extHoursMarketBufferPct: 1,
     });
     expect(oc.submit).toHaveBeenCalledTimes(1);
@@ -139,6 +139,19 @@ describe("HotkeyDeck — click dispatch (real fireTemplate/resolvePlaceTemplate)
     const { oc } = await setup([t]);
     fireEvent.click(screen.getByTestId("deck-buy-mkt"));
     expect(oc.submit).toHaveBeenCalledTimes(1);
+  });
+  it("sizes a Cash % deck button from available cash", async () => {
+    const t = place({
+      id: "cash-half",
+      label: "Cash half",
+      type: "LIMIT",
+      priceSource: "Ask",
+      sizing: { mode: "CashPct", pct: 50 },
+      deck: true,
+    });
+    const { oc } = await setup([t], undefined, 5_000);
+    fireEvent.click(screen.getByTestId("deck-cash-half"));
+    expect(oc.submit).toHaveBeenCalledWith(expect.objectContaining({ qty: 714 }), expect.any(String)); // floor($2,500 / $3.50)
   });
 
   it("a management template (KillSwitch) with deck:true calls oc.kill() on click without an immediate success toast", async () => {
