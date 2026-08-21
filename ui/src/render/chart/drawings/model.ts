@@ -4,7 +4,7 @@ import type { LineStyleName } from "../lineStyle";
 import { LINE_STYLE_NAMES } from "../lineStyle";
 import { uiLog } from "../../../logging/logger";
 
-export type DrawingKind = "hline" | "trendline" | "extendedline" | "rect";
+export type DrawingKind = "hline" | "trendline" | "extendedline" | "rect" | "measure";
 
 export interface Anchor {
   timeMs: number; // epoch ms (a bar's time on the chart it was drawn)
@@ -27,7 +27,8 @@ export interface Drawing {
 export const DEFAULT_DRAWING_WIDTH = 1;
 export const DEFAULT_LINE_STYLE: LineStyleName = "solid";
 
-const KINDS: ReadonlySet<string> = new Set<DrawingKind>(["hline", "trendline", "extendedline", "rect"]);
+const KINDS: ReadonlySet<string> = new Set<DrawingKind>(["hline", "trendline", "extendedline", "rect", "measure"]);
+const PERSISTED_KINDS: ReadonlySet<DrawingKind> = new Set<DrawingKind>(["hline", "trendline", "extendedline", "rect"]);
 
 export function anchorCount(kind: DrawingKind): 1 | 2 {
   return kind === "hline" ? 1 : 2;
@@ -65,7 +66,7 @@ export function isValidDrawing(x: unknown): x is Drawing {
 // Load-time gate: drops malformed entries so a corrupt config never crashes a chart.
 export function validateDrawings(raw: unknown): Drawing[] {
   if (!Array.isArray(raw)) return [];
-  const out = raw.filter(isValidDrawing);
+  const out = raw.filter(isValidDrawing).filter((d) => PERSISTED_KINDS.has(d.kind));
   const dropped = raw.length - out.length;
   if (dropped > 0) uiLog.warn("malformed drawings dropped", { dropped });
   return out;

@@ -89,6 +89,10 @@ describe("hitTest", () => {
     expect(hitTest("rect", pts, { x: 50, y: 2 }, 400)).toEqual({ type: "body" }); // near top edge
     expect(hitTest("rect", pts, { x: 50, y: 50 }, 400)).toBeNull();               // interior
   });
+  it("hits a Measure anywhere inside its range", () => {
+    const pts = [{ x: 0, y: 0 }, { x: 100, y: 100 }];
+    expect(hitTest("measure", pts, { x: 50, y: 50 }, 400)).toEqual({ type: "body" });
+  });
   it("returns null when the primary anchor is off-screen (null)", () => {
     expect(hitTest("hline", [null], cursor, 400)).toBeNull();
   });

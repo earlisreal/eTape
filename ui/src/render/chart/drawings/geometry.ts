@@ -105,5 +105,15 @@ export function hitTest(kind: DrawingKind, pts: readonly (Px | null)[], cursor: 
       }
       return null;
     }
+    case "measure": {
+      const p1 = pts[1];
+      if (!p1) return null;
+      const minX = Math.min(p0.x, p1.x), maxX = Math.max(p0.x, p1.x);
+      const minY = Math.min(p0.y, p1.y), maxY = Math.max(p0.y, p1.y);
+      if (cursor.x >= minX - seg && cursor.x <= maxX + seg && cursor.y >= minY - seg && cursor.y <= maxY + seg) {
+        return { type: "body" };
+      }
+      return distToSegment(cursor.x, cursor.y, p0.x, p0.y, p1.x, p1.y) <= seg ? { type: "body" } : null;
+    }
   }
 }

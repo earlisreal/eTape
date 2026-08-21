@@ -10,12 +10,16 @@ extrapolate from the newest bar by the nominal timeframe. Placement, handle
 movement, and body movement use the same conversion, so a future anchor remains
 attached to that future chart position as incoming bars consume the buffer.
 
-Measure is transient and never enters DrawingStore. Drag from the first press to
-release for the original drag-to-measure gesture, or click once for a pending
-first point and click again to finish. A moved second press is treated as chart
-navigation; the first point and live preview remain. Escape, a tool or symbol
-change, and right-click cancel a pending first point. A finished Measure remains
-visible until the next Measure attempt or Escape.
+Measure is a session-only drawing layer: it is not written to DrawingStore or
+restored after a reload, symbol switch, or timeframe switch. Drag from the first
+press to release, or click once for a pending first point and click again to
+finish. The Measure tool stays armed so multiple Measures can be created; a
+direction arrow points from the first anchor to the second. A moved second press
+stays chart navigation and leaves the pending preview. Escape, tool changes,
+symbol/timeframe changes, and right-click cancel a pending first point. Select
+mode exposes the normal drawing handles, movement, floating style toolbar,
+clone, and delete actions. Hide all and clear all drawings include session
+Measures.
 
 Drawing Tool Styles are workspace-wide per-kind color, width, and line-style
 defaults. The rail gates persisted-style tools until the asynchronous config

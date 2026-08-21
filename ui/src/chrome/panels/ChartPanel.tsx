@@ -877,6 +877,12 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const next = !hideAll; setHideAll(next); drawingsPrimRef.current?.setHideAll(next);
     drawingsPrimRef.current?.requestUpdate(); persist({ hideAllDrawings: next });
   };
+  const clearAllDrawings = () => {
+    stores.drawings.clearSymbol(chartSymbol);
+    interactionRef.current?.clearSessionDrawings();
+    interactionRef.current?.select(null);
+    forceRepaintRef.current = true;
+  };
   const toggleDrawingTools = () => {
     const next = !drawingToolsVisible;
     if (!next) {
@@ -903,29 +909,24 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     } catch { /* jsdom canvas has no 2d backend; the screenshot API was still exercised */ }
   };
   const patchSelected = (patch: Partial<Pick<Drawing, "color" | "width" | "lineStyle">>) => {
-    const id = interactionRef.current?.selectedId(); if (!id) return;
-    const d = stores.drawings.forSymbol(chartSymbol).find((x) => x.id === id); if (!d) return;
-    stores.drawings.upsert({ ...d, ...patch, updatedMs: Date.now() });
+    const d = interactionRef.current?.selectedDrawing(); if (!d) return;
+    interactionRef.current?.patchSelection(patch);
     // Remember this edit as the tool's new default so the NEXT drawing of the
     // same kind starts with it, instead of only affecting the drawing just edited.
     stores.drawingToolStyles.remember(d.kind, patch);
     forceRepaintRef.current = true;
   };
   const cloneSelected = () => {
-    const id = interactionRef.current?.selectedId(); if (!id) return;
-    const d = stores.drawings.forSymbol(chartSymbol).find((x) => x.id === id); if (!d) return;
-    const now = Date.now();
-    stores.drawings.upsert({ ...d, id: crypto.randomUUID(), anchors: d.anchors.map((a) => ({ ...a })), createdMs: now, updatedMs: now });
-    forceRepaintRef.current = true;
+    if (interactionRef.current?.cloneSelection()) forceRepaintRef.current = true;
   };
   const refreshSelection = () => {
     const di = interactionRef.current;
     const id = di?.selectedId() ?? null;
     if (!id) { setSelection((prev) => (prev ? null : prev)); return; }
     const rect = di!.selectedRect();
-    const d = stores.drawings.forSymbol(chartSymbol).find((x) => x.id === id);
+    const d = di!.selectedDrawing();
     if (!rect || !d) { setSelection((prev) => (prev ? null : prev)); return; }
-    const color = d.color ?? palette.text;
+    const color = d.color ?? (d.kind === "measure" ? palette.accent : palette.text);
     const width = d.width ?? 1;
     const lineStyle = (d.lineStyle ?? "solid") as LineStyleName;
     // Compare style fields too, not just id/rect — moving a drawing's anchors isn't
@@ -963,7 +964,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const price = facadeRef.current?.coordinateToPrice(m.y) ?? null;
     if (price !== null) items.push({ label: `Copy price ${price.toFixed(2)}`, onClick: () => void navigator.clipboard?.writeText(price.toFixed(2)) });
     items.push("separator");
-    items.push({ label: "Remove all drawings", danger: true, onClick: () => stores.drawings.clearSymbol(chartSymbol) });
+    items.push({ label: "Remove all drawings", danger: true, onClick: clearAllDrawings });
     items.push({ label: hideAll ? "Show all drawings" : "Hide all drawings", onClick: toggleHideAll });
     items.push("separator");
     const inWatch = stores.watchlist.has(chartSymbol);
@@ -1015,7 +1016,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
             onToggleHideAll={toggleHideAll}
             hasSelection={() => interactionRef.current?.hasSelection() ?? false}
             onDeleteSelection={() => interactionRef.current?.deleteSelection()}
-            onClearAll={() => stores.drawings.clearSymbol(chartSymbol)}
+            onClearAll={clearAllDrawings}
             initialPos={drawingRailPos} onPosChange={(p) => { setDrawingRailPos(p); persist({ drawingRailPos: p }); }} />}
           <TVLegend chrome={chrome} symbol={chartSymbol} timeframe={timeframe} instances={instances} paneOffsets={paneOffsets}
             rightAxisWidth={rightAxisWidth}

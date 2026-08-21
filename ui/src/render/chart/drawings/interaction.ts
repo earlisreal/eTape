@@ -1,6 +1,6 @@
 import type { Bar } from "../../../gen/wsmsg";
 import { anchorCount, type Anchor, type Drawing, type DrawingKind } from "./model";
-import type { DrawingStore } from "./store";
+import { DrawingStore } from "./store";
 import type { DrawingsPrimitiveHandle } from "./primitive";
 import { hitTest, timeToLogical, type Px } from "./geometry";
 
@@ -59,6 +59,8 @@ export class DrawingInteraction {
   private tool: Tool = "select";
   private gesture: Gesture = { kind: "none" };
   private selectionId: string | null = null;
+  private readonly sessionStore = new DrawingStore();
+  private sessionSymbol: string;
   private readonly newId: () => string;
   private readonly onToolChange: ((t: Tool) => void) | undefined;
   private readonly onSelectionChange: (() => void) | undefined;
@@ -80,6 +82,8 @@ export class DrawingInteraction {
     this.onToolChange = opts?.onToolChange;
     this.onSelectionChange = opts?.onSelectionChange;
     this.styleForKind = opts?.styleForKind;
+    this.sessionSymbol = ctx.symbol();
+    this.syncSessionDrawings();
     host.tabIndex = host.tabIndex >= 0 ? host.tabIndex : 0;
     host.style.outline = "none";
     const on = <K extends keyof HostEventMap>(t: K, cb: (e: HostEventMap[K]) => void) => {
@@ -102,9 +106,12 @@ export class DrawingInteraction {
 
   onSymbolChanged(): void {
     this.cancelGesture();
+    this.sessionStore.clearSymbol(this.sessionSymbol);
+    this.sessionSymbol = this.ctx.symbol();
+    this.syncSessionDrawings();
     this.setSelectionId(null);
-    // A symbol switch always reverts to select mode and hands pan/zoom back — a tool
-    // armed for the old chart shouldn't silently start placing on the new one.
+    // A chart-context switch always reverts to select mode and hands pan/zoom back —
+    // a tool armed for the old chart shouldn't silently start placing on the new one.
     this.tool = "select";
     this.onToolChange?.("select");
     this.facade.setPanZoomEnabled(true);
@@ -117,14 +124,43 @@ export class DrawingInteraction {
 
   deleteSelection(): void {
     if (!this.selectionId) return;
-    this.store.remove(this.selectionId);
+    this.removeDrawing(this.selectionId);
     this.setSelectionId(null);
     this.primitive.requestUpdate();
   }
 
+  clearSessionDrawings(): void {
+    this.sessionStore.clearSymbol(this.sessionSymbol);
+    this.syncSessionDrawings();
+    this.primitive.requestUpdate();
+  }
+
+  selectedDrawing(): Drawing | null {
+    return this.selectionId ? this.currentDrawing(this.selectionId) ?? null : null;
+  }
+
+  patchSelection(patch: Pick<Drawing, "color" | "width" | "lineStyle">): Drawing | null {
+    const d = this.selectedDrawing();
+    if (!d) return null;
+    const next = { ...d, ...patch, updatedMs: Date.now() };
+    this.replaceDrawing(next);
+    this.primitive.requestUpdate();
+    return next;
+  }
+
+  cloneSelection(): Drawing | null {
+    const d = this.selectedDrawing();
+    if (!d) return null;
+    const now = Date.now();
+    const clone = { ...d, id: this.newId(), anchors: d.anchors.map((a) => ({ ...a })), createdMs: now, updatedMs: now };
+    this.replaceDrawing(clone);
+    this.primitive.requestUpdate();
+    return clone;
+  }
+
   // --- context-menu / floating-toolbar API (no pointer side effects) ---
   hitTestAt(p: Px): string | null {
-    const drawings = this.store.forSymbol(this.ctx.symbol());
+    const drawings = this.drawingsForCurrentSymbol();
     for (let i = drawings.length - 1; i >= 0; i--) {
       const d = drawings[i];
       const pts = d.anchors.map((a) => this.project(a));
@@ -144,7 +180,7 @@ export class DrawingInteraction {
 
   selectedRect(): { x: number; y: number; w: number; h: number } | null {
     if (!this.selectionId) return null;
-    const d = this.store.forSymbol(this.ctx.symbol()).find((x) => x.id === this.selectionId);
+    const d = this.currentDrawing(this.selectionId);
     if (!d) return null;
     const pts = d.anchors.map((a) => this.project(a)).filter((q): q is Px => q !== null);
     if (pts.length === 0) return null;
@@ -260,7 +296,7 @@ export class DrawingInteraction {
     if (this.tool !== "select") { this.placeAnchor(anchor); return; }
 
     // select mode: hit-test top-most first
-    const drawings = this.store.forSymbol(this.ctx.symbol());
+    const drawings = this.drawingsForCurrentSymbol();
     for (let i = drawings.length - 1; i >= 0; i--) {
       const d = drawings[i];
       const pts = d.anchors.map((a) => this.project(a));
@@ -342,7 +378,7 @@ export class DrawingInteraction {
       const d = this.currentDrawing(g.id);
       if (anchor && d) {
         const anchors = d.anchors.map((a, i) => (i === g.index ? anchor : a));
-        this.store.upsert({ ...d, anchors, updatedMs: Date.now() });
+        this.replaceDrawing({ ...d, anchors, updatedMs: Date.now() });
         this.primitive.requestUpdate();
       }
     } else if (g.kind === "bodyDrag") {
@@ -357,7 +393,7 @@ export class DrawingInteraction {
           const next = this.anchorAtLogical(timeToLogical(a.timeMs, barsMs, this.ctx.timeframeMs()) + dBars, a.price + dPrice);
           return next ?? { timeMs: a.timeMs, price: a.price + dPrice };
         });
-        this.store.upsert({ ...d, anchors, updatedMs: Date.now() });
+        this.replaceDrawing({ ...d, anchors, updatedMs: Date.now() });
         this.primitive.requestUpdate();
       }
     }
@@ -372,17 +408,18 @@ export class DrawingInteraction {
     } else if (g.kind === "measureInitialPress") {
       const p = this.pos(e);
       if (this.moved(g.down, p)) {
-        this.gesture = { kind: "none" };
-        this.updateMeasure(g.from, p);
+        const to = this.snap(p);
+        if (to) this.commitMeasure(g.from, to);
+        else { this.cancelGesture(); this.facade.setPanZoomEnabled(true); this.primitive.requestUpdate(); }
       } else {
         this.gesture = { kind: "measurePending", from: g.from, to: g.from };
       }
       this.facade.setPanZoomEnabled(true);
       this.primitive.requestUpdate();
     } else if (g.kind === "measuring") {
-      // keep the box visible until the next pointerdown or Esc; just end the drag
-      this.gesture = { kind: "none" };
-      this.facade.setPanZoomEnabled(true);
+      const to = this.snap(this.pos(e));
+      if (to) this.commitMeasure(g.from, to);
+      else { this.cancelGesture(); this.facade.setPanZoomEnabled(true); this.primitive.requestUpdate(); }
     } else if (g.kind === "measureSecondPress") {
       const p = this.pos(e);
       if (this.moved(g.down, p)) {
@@ -390,7 +427,7 @@ export class DrawingInteraction {
         this.gesture = { kind: "measurePending", from: g.from, to };
         this.primitive.setTransient({ measure: { from: g.from, to } });
       } else {
-        this.gesture = { kind: "none" };
+        this.commitMeasure(g.from, g.to);
       }
       this.facade.setPanZoomEnabled(true);
       this.primitive.requestUpdate();
@@ -400,6 +437,15 @@ export class DrawingInteraction {
   private updateMeasure(from: Anchor, p: Px): void {
     const anchor = this.snap(p);
     if (anchor) { this.primitive.setTransient({ measure: { from, to: anchor } }); this.primitive.requestUpdate(); }
+  }
+
+  private commitMeasure(from: Anchor, to: Anchor): void {
+    const now = Date.now();
+    const style = this.styleForKind?.("measure") ?? {};
+    this.sessionStore.upsert({ id: this.newId(), symbol: this.ctx.symbol(), kind: "measure", anchors: [from, to], createdMs: now, updatedMs: now, ...style });
+    this.syncSessionDrawings();
+    this.cancelGesture();
+    this.setSelectionId(null);
   }
 
   private moved(from: Px, to: Px): boolean {
@@ -414,7 +460,7 @@ export class DrawingInteraction {
   private onKeyDown(e: KeyLike): void {
     if (e.key === "Escape") {
       e.preventDefault?.();
-      if (this.gesture.kind === "placing") {
+      if (this.gesture.kind === "placing" || this.tool === "measure") {
         this.cancelGesture();
         this.tool = "select";
         this.onToolChange?.("select");
@@ -429,13 +475,43 @@ export class DrawingInteraction {
     }
     if ((e.key === "Delete" || e.key === "Backspace") && this.selectionId) {
       e.preventDefault?.();
-      this.store.remove(this.selectionId);
+      this.removeDrawing(this.selectionId);
       this.setSelectionId(null);
       this.primitive.requestUpdate();
     }
   }
 
+  private syncSessionDrawings(): void {
+    this.primitive.setSessionDrawings(this.sessionStore.forSymbol(this.ctx.symbol()));
+  }
+
+  private drawingsForCurrentSymbol(): Drawing[] {
+    return [...this.store.forSymbol(this.ctx.symbol()), ...this.sessionStore.forSymbol(this.ctx.symbol())];
+  }
+
   private currentDrawing(id: string): Drawing | undefined {
-    return this.store.forSymbol(this.ctx.symbol()).find((d) => d.id === id);
+    return this.drawingsForCurrentSymbol().find((d) => d.id === id);
+  }
+
+  private isSessionDrawing(id: string): boolean {
+    return this.sessionStore.forSymbol(this.ctx.symbol()).some((d) => d.id === id);
+  }
+
+  private replaceDrawing(d: Drawing): void {
+    if (this.isSessionDrawing(d.id)) {
+      this.sessionStore.upsert(d);
+      this.syncSessionDrawings();
+    } else {
+      this.store.upsert(d);
+    }
+  }
+
+  private removeDrawing(id: string): void {
+    if (this.isSessionDrawing(id)) {
+      this.sessionStore.remove(id);
+      this.syncSessionDrawings();
+    } else {
+      this.store.remove(id);
+    }
   }
 }

@@ -20,6 +20,7 @@ export interface Transient {
 export interface DrawingsPrimitiveHandle {
   setSelection(id: string | null): void;
   setTransient(t: Transient | null): void;
+  setSessionDrawings(d: Drawing[]): void;
   requestUpdate(): void;
 }
 
@@ -30,6 +31,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
   private chartApi: SeriesAttachedParameter<Time>["chart"] | null = null;
   private requestUpdateFn: (() => void) | null = null;
   private drawings: Drawing[] = [];
+  private sessionDrawings: Drawing[] = [];
   private barsMs: readonly number[] = [];
   private timeframeMs = 60_000;
   private selectionId: string | null = null;
@@ -59,6 +61,10 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
     if (this.drawings.length === d.length && this.drawings.every((x, i) => x === d[i])) return;
     this.drawings = d;
     this.syncPriceLines();
+  }
+  setSessionDrawings(d: Drawing[]): void {
+    if (this.sessionDrawings.length === d.length && this.sessionDrawings.every((x, i) => x === d[i])) return;
+    this.sessionDrawings = d;
   }
   setBars(barsMs: readonly number[], timeframeMs: number): void { this.barsMs = barsMs; this.timeframeMs = timeframeMs; }
   setSelection(id: string | null): void { if (this.selectionId !== id) { this.selectionId = id; this.syncPriceLines(); } }
@@ -117,17 +123,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
     target.useBitmapCoordinateSpace(({ context: ctx, bitmapSize, horizontalPixelRatio: hr, verticalPixelRatio: vr }) => {
       const width = bitmapSize.width;
       if (!this.hideAll) {
-        for (const d of this.drawings) {
-          const selected = d.id === this.selectionId;
-          ctx.setLineDash(LINE_DASH[d.lineStyle ?? DEFAULT_LINE_STYLE]);
-          const color = d.color ?? this.palette.text;
-          const lineWidth = d.width ?? DEFAULT_DRAWING_WIDTH;
-          this.strokeShape(ctx, d.kind, d.anchors, hr, vr, width, color, lineWidth);
-          // Handles are always solid squares, regardless of the drawing's own line
-          // style — reset the dash pattern the shape stroke above may have set
-          // (dashed/dotted) before drawing them.
-          if (selected) { ctx.setLineDash([]); this.handles(ctx, d.anchors, hr, vr); }
-        }
+        for (const d of [...this.drawings, ...this.sessionDrawings]) this.drawDrawing(ctx, d, hr, vr, width);
         ctx.setLineDash([]);
       }
       if (this.transient?.ghost) {
@@ -142,6 +138,22 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
       }
       if (this.transient?.measure) this.measure(ctx, this.transient.measure, hr, vr);
     });
+  }
+
+  private drawDrawing(ctx: CanvasRenderingContext2D, d: Drawing, hr: number, vr: number, width: number): void {
+    const selected = d.id === this.selectionId;
+    ctx.setLineDash(LINE_DASH[d.lineStyle ?? DEFAULT_LINE_STYLE]);
+    const color = d.color ?? (d.kind === "measure" ? this.palette.accent : this.palette.text);
+    const lineWidth = d.width ?? DEFAULT_DRAWING_WIDTH;
+    if (d.kind === "measure") {
+      this.measure(ctx, { from: d.anchors[0], to: d.anchors[1] }, hr, vr, color, lineWidth);
+    } else {
+      this.strokeShape(ctx, d.kind, d.anchors, hr, vr, width, color, lineWidth);
+    }
+    // Handles are always solid squares, regardless of the drawing's own line
+    // style — reset the dash pattern the shape stroke above may have set
+    // (dashed/dotted) before drawing them.
+    if (selected) { ctx.setLineDash([]); this.handles(ctx, d.anchors, hr, vr); }
   }
 
   private strokeShape(ctx: CanvasRenderingContext2D, kind: DrawingKind, anchors: Anchor[], hr: number, vr: number, width: number, color: string, lineWidth: number): void {
@@ -182,7 +194,8 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
     }
   }
 
-  private measure(ctx: CanvasRenderingContext2D, m: { from: Anchor; to: Anchor }, hr: number, vr: number): void {
+  private measure(ctx: CanvasRenderingContext2D, m: { from: Anchor; to: Anchor }, hr: number, vr: number,
+    color = this.palette.accent, lineWidth = 1): void {
     const p0 = this.pt(m.from, hr, vr);
     const p1 = this.pt(m.to, hr, vr);
     if (!p0 || !p1) return;
@@ -190,13 +203,17 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
     const y = Math.min(p0.y, p1.y);
     const w = Math.abs(p1.x - p0.x);
     const h = Math.abs(p1.y - p0.y);
-    ctx.fillStyle = this.palette.accent;
+    ctx.fillStyle = color;
     ctx.globalAlpha = 0.12;
     ctx.fillRect(x, y, w, h);
     ctx.globalAlpha = 1;
-    ctx.strokeStyle = this.palette.accent;
-    ctx.lineWidth = 1;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = lineWidth;
     ctx.strokeRect(x, y, w, h);
+    const arrowFrom = { x: (p0.x + p1.x) / 2, y: p0.y };
+    const arrowTo = { x: arrowFrom.x, y: p1.y };
+    this.line(ctx, arrowFrom.x, arrowFrom.y, arrowTo.x, arrowTo.y);
+    this.arrowHead(ctx, arrowFrom, arrowTo, 8 * Math.max(hr, vr));
     const dPts = m.to.price - m.from.price;
     const dPct = m.from.price !== 0 ? (dPts / m.from.price) * 100 : 0;
     const bars = Math.round(timeToLogical(m.to.timeMs, this.barsMs, this.timeframeMs)) - Math.round(timeToLogical(m.from.timeMs, this.barsMs, this.timeframeMs));
@@ -205,5 +222,14 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
     ctx.font = `${12 * vr}px sans-serif`;
     ctx.textBaseline = "bottom";
     ctx.fillText(label, x, y - 2);
+  }
+
+  private arrowHead(ctx: CanvasRenderingContext2D, from: Px, to: Px, size: number): void {
+    if (Math.hypot(to.x - from.x, to.y - from.y) < 1) return;
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    if (!Number.isFinite(angle)) return;
+    const wing = Math.PI / 6;
+    this.line(ctx, to.x, to.y, to.x - size * Math.cos(angle - wing), to.y - size * Math.sin(angle - wing));
+    this.line(ctx, to.x, to.y, to.x - size * Math.cos(angle + wing), to.y - size * Math.sin(angle + wing));
   }
 }

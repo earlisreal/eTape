@@ -6,11 +6,12 @@ const hline: Drawing = { id: "a", symbol: "US.AAPL", kind: "hline", anchors: [{ 
 const rect: Drawing = { id: "b", symbol: "US.AAPL", kind: "rect", anchors: [{ timeMs: 1000, price: 10 }, { timeMs: 2000, price: 20 }], createdMs: 1, updatedMs: 1 };
 
 describe("anchorCount", () => {
-  it("is 1 for hline and 2 for trendline/extendedline/rect", () => {
+  it("is 1 for hline and 2 for other drawings", () => {
     expect(anchorCount("hline")).toBe(1);
     expect(anchorCount("trendline")).toBe(2);
     expect(anchorCount("extendedline")).toBe(2);
     expect(anchorCount("rect")).toBe(2);
+    expect(anchorCount("measure")).toBe(2);
   });
 });
 
@@ -70,6 +71,10 @@ describe("drawing style fields", () => {
 
   it("loads a drawing with no style fields (back-compat)", () => {
     expect(validateDrawings([base])).toHaveLength(1);
+  });
+
+  it("does not load session-only Measures from persisted config", () => {
+    expect(validateDrawings([{ ...rect, kind: "measure" }])).toHaveLength(0);
   });
 
   it("drops a drawing whose style field has the wrong type", () => {

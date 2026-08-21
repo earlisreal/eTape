@@ -168,6 +168,19 @@ describe("DrawingsPrimitive", () => {
     draw(p, ctx);
     expect(calls.some((c) => c[0] === "fillText")).toBe(true);
   });
+
+  it("draws committed Measures with a direction arrow", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    p.setSessionDrawings([{ id: "m", symbol: "US.AAPL", kind: "measure", anchors: [
+      { timeMs: 0, price: 10 }, { timeMs: 60_000, price: 11 },
+    ], createdMs: 1, updatedMs: 1 }]);
+    const { ctx, calls } = recordingCtx();
+    draw(p, ctx);
+    expect(calls).toContainEqual(["lineTo", 5, 989]);
+    expect(calls.filter((c) => c[0] === "lineTo")).toHaveLength(3); // shaft + two arrow wings
+    expect(calls.some((c) => c[0] === "fillText")).toBe(true);
+  });
 });
 
 // Captures strokeStyle / lineWidth / dash at each stroke, which recordingCtx() doesn't.

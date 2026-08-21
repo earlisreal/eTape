@@ -21,7 +21,7 @@ function fakeFacade() {
   };
 }
 function fakePrimitive() {
-  return { setSelection: vi.fn(), setTransient: vi.fn(), requestUpdate: vi.fn() };
+  return { setSelection: vi.fn(), setTransient: vi.fn(), setSessionDrawings: vi.fn(), requestUpdate: vi.fn() };
 }
 function fakeHost() {
   const handlers = new Map<keyof HostEventMap, (e: PointerLike | KeyLike) => void>();
@@ -223,7 +223,7 @@ describe("DrawingInteraction", () => {
     expect(prim.setSelection).toHaveBeenLastCalledWith(null);
   });
 
-  it("measure shows a transient box and never persists a drawing", () => {
+  it("commits a drag Measure to the session drawing layer without persisting it", () => {
     const store = new DrawingStore();
     const prim = fakePrimitive();
     const { host, fire } = fakeHost();
@@ -233,10 +233,11 @@ describe("DrawingInteraction", () => {
     fire("pointermove", { clientX: 10, clientY: 980 });
     fire("pointerup", { clientX: 10, clientY: 980 });
     expect(prim.setTransient).toHaveBeenCalledWith(expect.objectContaining({ measure: expect.anything() }));
+    expect(prim.setSessionDrawings.mock.calls.at(-1)?.[0]).toEqual([expect.objectContaining({ kind: "measure" })]);
     expect(store.forSymbol("US.AAPL")).toHaveLength(0);
   });
 
-  it("supports click-click Measure and keeps the finished result transient", () => {
+  it("keeps multiple click-click Measures in the session drawing layer", () => {
     const store = new DrawingStore();
     const prim = fakePrimitive();
     const { host, fire } = fakeHost();
@@ -248,11 +249,45 @@ describe("DrawingInteraction", () => {
     fire("pointerdown", { clientX: 20, clientY: 980 });
     fire("pointerup", { clientX: 20, clientY: 980 });
 
-    const result = prim.setTransient.mock.calls.at(-1)?.[0];
-    expect(result).toEqual({ measure: {
-      from: { timeMs: 0, price: 10 }, to: { timeMs: 120_000, price: 20 },
-    } });
+    expect(prim.setTransient).toHaveBeenLastCalledWith(null);
+    expect(prim.setSessionDrawings.mock.calls.at(-1)?.[0]).toEqual([expect.objectContaining({
+      kind: "measure", anchors: [
+        { timeMs: 0, price: 10 }, { timeMs: 120_000, price: 20 },
+      ],
+    })]);
+
+    fire("pointerdown", { clientX: 30, clientY: 970 });
+    fire("pointerup", { clientX: 30, clientY: 970 });
+    fire("pointerdown", { clientX: 40, clientY: 960 });
+    fire("pointerup", { clientX: 40, clientY: 960 });
+
+    expect(prim.setSessionDrawings.mock.calls.at(-1)?.[0]).toHaveLength(2);
     expect(store.forSymbol("US.AAPL")).toHaveLength(0);
+  });
+
+  it("selects, moves, styles, and deletes a committed Measure", () => {
+    const store = new DrawingStore();
+    const prim = fakePrimitive();
+    const { host, fire } = fakeHost();
+    const di = new DrawingInteraction(host, fakeFacade(), prim, store, ctx(), { newId });
+    di.setTool("measure");
+    fire("pointerdown", { clientX: 0, clientY: 990 });
+    fire("pointerup", { clientX: 0, clientY: 990 });
+    fire("pointerdown", { clientX: 20, clientY: 980 });
+    fire("pointerup", { clientX: 20, clientY: 980 });
+
+    di.setTool("select");
+    fire("pointerdown", { clientX: 10, clientY: 985 });
+    expect(di.selectedId()).toBe("id1");
+    di.patchSelection({ color: "#2962FF" });
+    fire("pointermove", { clientX: 30, clientY: 975 });
+    fire("pointerup", { clientX: 30, clientY: 975 });
+
+    const moved = prim.setSessionDrawings.mock.calls.at(-1)?.[0][0];
+    expect(moved).toEqual(expect.objectContaining({ color: "#2962FF" }));
+    expect(moved.anchors[0]).toEqual({ timeMs: 120_000, price: 20 });
+    di.deleteSelection();
+    expect(prim.setSessionDrawings.mock.calls.at(-1)?.[0]).toEqual([]);
   });
 
   it("keeps a pending Measure after a moved second press so chart navigation wins", () => {
@@ -335,12 +370,15 @@ describe("DrawingInteraction", () => {
     const store = new DrawingStore();
     const f = fakeFacade();
     const { host, fire } = fakeHost();
-    const di = new DrawingInteraction(host, f, fakePrimitive(), store, ctx(), { newId });
+    const onToolChange = vi.fn();
+    const di = new DrawingInteraction(host, f, fakePrimitive(), store, ctx(), { newId, onToolChange });
     di.setTool("measure");
     fire("pointerdown", { clientX: 0, clientY: 990 }); // starts measuring, locks pan/zoom
     expect(f.setPanZoomEnabled).toHaveBeenLastCalledWith(false);
     fire("keydown", { key: "Escape" });
-    expect(f.setPanZoomEnabled).toHaveBeenLastCalledWith(true); // Escape restores pan/zoom for the current tool (measure → unlocked)
+    expect(f.setPanZoomEnabled).toHaveBeenLastCalledWith(true); // Escape restores pan/zoom and exits Measure.
+    expect(onToolChange).toHaveBeenLastCalledWith("select");
+    expect(di.selectedId()).toBeNull();
   });
 
   it("exposes selection state and deletes the selection imperatively", () => {
@@ -407,7 +445,7 @@ describe("DrawingInteraction context-menu/selection API", () => {
     priceToCoordinate: (p: number) => 1000 - p,
     setPanZoomEnabled: () => {},
   });
-  const mkPrim = () => ({ setSelection: vi.fn(), setTransient: vi.fn(), requestUpdate: vi.fn() });
+  const mkPrim = () => ({ setSelection: vi.fn(), setTransient: vi.fn(), setSessionDrawings: vi.fn(), requestUpdate: vi.fn() });
   const mkCtx = () => ({ symbol: () => "US.AAPL", bars: () => [], timeframeMs: () => 60_000 });
 
   const seedHline = (store: DrawingStore) =>
