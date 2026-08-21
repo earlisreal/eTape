@@ -110,6 +110,7 @@ func TestOwnedChromeCommandUsesPrivateProfile(t *testing.T) {
 		"--app=" + url,
 		"--start-maximized",
 		"--user-data-dir=" + profile,
+		"--remote-debugging-port=0",
 		"--no-first-run",
 		"--no-default-browser-check",
 	}
@@ -118,12 +119,26 @@ func TestOwnedChromeCommandUsesPrivateProfile(t *testing.T) {
 	}
 }
 
+func TestOwnedDevToolsTargetSelectsStartupPageOnly(t *testing.T) {
+	startupURL := "http://127.0.0.1:8686"
+	targets := []devToolsTarget{
+		{ID: "startup", Type: "page", URL: startupURL + "/"},
+		{ID: "workspace", Type: "page", URL: startupURL + "?workspace=child"},
+	}
+
+	got, ok := ownedDevToolsTarget(targets, startupURL)
+	if !ok || got.ID != "startup" {
+		t.Fatalf("ownedDevToolsTarget() = (%+v, %v), want startup page", got, ok)
+	}
+}
+
 func TestOwnedBrowserRelaunchArgsPreserveIdentity(t *testing.T) {
-	browser := &OwnedBrowser{pid: 1234, startToken: 5678, profileDir: `C:\\Temp\\etape-chrome`}
+	browser := &OwnedBrowser{pid: 1234, startToken: 5678, profileDir: `C:\\Temp\\etape-chrome`, url: "http://127.0.0.1:8686"}
 	want := []string{
 		"-owned-browser-pid", "1234",
 		"-owned-browser-start", "5678",
 		"-owned-browser-profile", `C:\\Temp\\etape-chrome`,
+		"-owned-browser-url", "http://127.0.0.1:8686",
 	}
 	if got := browser.RelaunchArgs(); !slices.Equal(got, want) {
 		t.Fatalf("RelaunchArgs() = %q, want %q", got, want)

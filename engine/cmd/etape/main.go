@@ -89,6 +89,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	ownedBrowserPID := flag.Int("owned-browser-pid", 0, "internal: PID of the startup Chrome app handed across restart")
 	ownedBrowserStart := flag.Uint64("owned-browser-start", 0, "internal: startup time token of the handed-off Chrome app")
 	ownedBrowserProfile := flag.String("owned-browser-profile", "", "internal: profile directory of the handed-off Chrome app")
+	ownedBrowserURL := flag.String("owned-browser-url", "", "internal: startup URL of the handed-off Chrome app")
 	logPath := flag.String("log", "", "also write logs to this file")
 	logLevel := flag.String("log-level", os.Getenv("SLOG_LEVEL"), "log level: debug, info, warn, error (default SLOG_LEVEL env)")
 	flag.Parse()
@@ -264,7 +265,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	var startupBrowser *openbrowser.OwnedBrowser
 	if *ownedBrowserPID != 0 || *ownedBrowserStart != 0 || *ownedBrowserProfile != "" {
 		var adoptErr error
-		startupBrowser, adoptErr = openbrowser.AdoptOwned(*ownedBrowserPID, *ownedBrowserStart, *ownedBrowserProfile)
+		adoptURL := *ownedBrowserURL
+		if adoptURL == "" {
+			adoptURL = browserURL(cfg.UIHub.Addr(), handlerLevel == slog.LevelDebug)
+		}
+		startupBrowser, adoptErr = openbrowser.AdoptOwned(*ownedBrowserPID, *ownedBrowserStart, *ownedBrowserProfile, adoptURL)
 		if adoptErr != nil {
 			log.Warn("adopt startup browser", "err", adoptErr)
 		}
