@@ -190,6 +190,10 @@ _Avoid_: Wick trade, outlier trade
 A Price-Forming Print eligible to update consolidated open, close, and last-price state, including the execution mark.
 _Avoid_: Latest print, mark trade
 
+**Estimated LULD Band**:
+A display-only, locally calculated approximation of a U.S. Limit Up-Limit Down price band derived from non-SIP market data. It can be unavailable or frozen; it is never an official LULD band, Limit State, Straddle State, Trading Pause, or order-entry control.
+_Avoid_: Official LULD, halt signal
+
 **Volume-Eligible Print**:
 A Reported Print whose Trade-Report Condition makes its shares eligible for consolidated volume and tick-derived volume statistics, independently of its price eligibility.
 _Avoid_: Price-forming print, valid volume
