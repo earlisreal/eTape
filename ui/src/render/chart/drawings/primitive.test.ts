@@ -202,6 +202,17 @@ describe("DrawingsPrimitive per-drawing style + hide-all", () => {
     expect(strokes[0].dash.length).toBeGreaterThan(0);
   });
 
+  it("keeps the drawing style when selected and only adds selection handles", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    p.setDrawings([{ ...hline, color: "#F23645", width: 3, lineStyle: "dotted" }]);
+    p.setSelection("h");
+    const { ctx, strokes } = styleCtx();
+    draw(p, ctx);
+    expect(strokes[0]).toEqual({ color: "#F23645", width: 3, dash: LINE_DASH.dotted });
+    expect(strokes).toHaveLength(2);
+  });
+
   it("falls back to palette text color and default width when unstyled", () => {
     const p = new DrawingsPrimitive(LIGHT);
     attach(p);

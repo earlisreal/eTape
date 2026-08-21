@@ -97,8 +97,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
     if (this.hideAll) return;
     for (const d of this.drawings) {
       if (d.kind !== "hline" && d.kind !== "trendline") continue;
-      const selected = d.id === this.selectionId;
-      const color = selected ? this.palette.accent : (d.color ?? this.palette.text);
+      const color = d.color ?? this.palette.text;
       for (const [index, anchor] of d.anchors.entries()) {
         this.priceLines.push(this.series.createPriceLine({
           id: `drawing-price-${d.id}-${index}`,
@@ -121,8 +120,8 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
         for (const d of this.drawings) {
           const selected = d.id === this.selectionId;
           ctx.setLineDash(LINE_DASH[d.lineStyle ?? DEFAULT_LINE_STYLE]);
-          const color = selected ? this.palette.accent : (d.color ?? this.palette.text);
-          const lineWidth = selected ? Math.max(2, d.width ?? DEFAULT_DRAWING_WIDTH) : (d.width ?? DEFAULT_DRAWING_WIDTH);
+          const color = d.color ?? this.palette.text;
+          const lineWidth = d.width ?? DEFAULT_DRAWING_WIDTH;
           this.strokeShape(ctx, d.kind, d.anchors, hr, vr, width, color, lineWidth);
           // Handles are always solid squares, regardless of the drawing's own line
           // style — reset the dash pattern the shape stroke above may have set

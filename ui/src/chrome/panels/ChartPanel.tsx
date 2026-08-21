@@ -1027,7 +1027,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
               rightAxisWidth={rightAxisWidth} paneBottom={paneOffsets[1] ?? height} up={lastPriceTag.up} />
           )}
           {selection && (
-            <TVFloatingToolbar chrome={chrome} rect={selection.rect} color={selection.color} width={selection.width} lineStyle={selection.lineStyle}
+            <TVFloatingToolbar key={selection.id} chrome={chrome} rect={selection.rect} color={selection.color} width={selection.width} lineStyle={selection.lineStyle}
               onColor={(c) => patchSelected({ color: c })} onWidth={(w) => patchSelected({ width: w })} onLineStyle={(s) => patchSelected({ lineStyle: s })}
               onClone={cloneSelected} onDelete={() => interactionRef.current?.deleteSelection()} />
           )}

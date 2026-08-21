@@ -22,6 +22,21 @@ const base = {
 };
 
 describe("TVFloatingToolbar", () => {
+  it("starts above the selected drawing and drags via its grip", () => {
+    const { container } = render(<TVFloatingToolbar {...base} />);
+    const toolbar = container.querySelector("[data-drawing-ui]") as HTMLDivElement;
+    expect(toolbar.style.left).toBe("130px");
+    expect(toolbar.style.top).toBe("40px");
+
+    const grip = screen.getByLabelText("move toolbar");
+    // jsdom has no layout, so dragging clamps to the host's 0,0 bounds.
+    fireEvent(grip, new MouseEvent("pointerdown", { bubbles: true, clientX: 100, clientY: 50 }));
+    fireEvent(grip, new MouseEvent("pointermove", { bubbles: true, clientX: 140, clientY: 90 }));
+    fireEvent(grip, new MouseEvent("pointerup", { bubbles: true }));
+    expect(toolbar.style.left).toBe("0px");
+    expect(toolbar.style.top).toBe("0px");
+  });
+
   it("picks a color from the swatch popover", () => {
     render(<TVFloatingToolbar {...base} />);
     fireEvent.click(screen.getByLabelText("color"));

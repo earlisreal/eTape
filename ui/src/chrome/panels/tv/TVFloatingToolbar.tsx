@@ -1,8 +1,9 @@
 // ui/src/chrome/panels/tv/TVFloatingToolbar.tsx
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import { TV_FONT, TV_GEOM, TV_SWATCHES, type TvChrome } from "../../../render/chart/tvTheme";
 import { LINE_STYLE_NAMES, type LineStyleName } from "../../../render/chart/lineStyle";
-import { IconClone, IconTrash } from "./tvIcons";
+import { IconClone, IconGrip, IconTrash } from "./tvIcons";
 import { HoverButton } from "../../controls/HoverButton";
 
 export interface TVFloatingToolbarProps {
@@ -12,8 +13,17 @@ export interface TVFloatingToolbarProps {
   onClone: () => void; onDelete: () => void;
 }
 
+interface ToolbarPos { x: number; y: number }
+
+const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
+
 export function TVFloatingToolbar({ chrome, rect, color, width, lineStyle, onColor, onWidth, onLineStyle, onClone, onDelete }: TVFloatingToolbarProps): JSX.Element {
   const [palette, setPalette] = useState(false);
+  const [pos, setPos] = useState<ToolbarPos>({ x: rect.x + rect.w / 2, y: Math.max(4, rect.y - 40) });
+  const toolbarRef = useRef<HTMLDivElement | null>(null);
+  const dragRef = useRef<{ dx: number; dy: number } | null>(null);
+  const posRef = useRef<ToolbarPos>(pos);
+  const endDragRef = useRef<(() => void) | null>(null);
   // The width control (1-4) carries numeral content — tabular-nums keeps digits from
   // jittering, matching the convention set in ChartHeaderControls/IndicatorSettingsDialog.
   // Radius uses the shared TV_GEOM token so every rounded surface here stays in
@@ -25,13 +35,50 @@ export function TVFloatingToolbar({ chrome, rect, color, width, lineStyle, onCol
   // out, so use an inset ring instead of the standard background/color overlay.
   const swatchHover = { boxShadow: `inset 0 0 0 2px ${chrome.hover}` };
 
+  useEffect(() => () => endDragRef.current?.(), []);
+  const onGripDown = (e: ReactPointerEvent<HTMLDivElement>) => {
+    const toolbar = toolbarRef.current;
+    if (!toolbar) return;
+    const r = toolbar.getBoundingClientRect();
+    const drag = { dx: e.clientX - r.left, dy: e.clientY - r.top };
+    dragRef.current = drag;
+    const move = (ev: PointerEvent) => {
+      const host = toolbarRef.current?.parentElement;
+      if (!toolbarRef.current || !host) return;
+      const hr = host.getBoundingClientRect();
+      const rr = toolbarRef.current.getBoundingClientRect();
+      const next = {
+        x: clamp(ev.clientX - hr.left - drag.dx + rr.width / 2, rr.width / 2, hr.width - rr.width / 2),
+        y: clamp(ev.clientY - hr.top - drag.dy, 0, hr.height - rr.height),
+      };
+      posRef.current = next;
+      setPos(next);
+    };
+    const up = () => {
+      endDragRef.current = null;
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      dragRef.current = null;
+    };
+    endDragRef.current = up;
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    e.preventDefault();
+  };
+
   return (
     // data-drawing-ui: tells DrawingInteraction's raw pointerdown listener on the
     // chart host to ignore this subtree — otherwise the pointerdown deselects the
     // drawing and unmounts this toolbar before any button's click can fire.
-    <div data-drawing-ui="true" style={{ position: "absolute", left: rect.x + rect.w / 2, top: Math.max(4, rect.y - 40), transform: "translateX(-50%)",
+    <div ref={toolbarRef} data-drawing-ui="true" onPointerDown={(e) => e.stopPropagation()}
+      style={{ position: "absolute", left: pos.x, top: pos.y, transform: "translateX(-50%)",
       zIndex: 8, display: "flex", alignItems: "center", gap: 4, padding: "4px 6px", background: chrome.surface,
       border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, boxShadow: "0 4px 16px rgba(0,0,0,.22)", font: `${TV_GEOM.uiFont}px ${TV_FONT}`, fontVariantNumeric: "tabular-nums" }}>
+      <div aria-label="move toolbar" title="Move toolbar" role="button" onPointerDown={onGripDown}
+        style={{ width: 14, height: 24, display: "grid", placeItems: "center", color: chrome.muted,
+          cursor: dragRef.current ? "grabbing" : "grab", touchAction: "none" }}>
+        <IconGrip size={14} />
+      </div>
       <div style={{ position: "relative" }}>
         <HoverButton aria-label="color" title="Color" onClick={() => setPalette((v) => !v)} hoverStyle={swatchHover}
           style={{ width: 20, height: 20, borderRadius: TV_GEOM.radius, border: `1px solid ${chrome.border}`, background: color, cursor: "pointer" }} />
