@@ -17,7 +17,7 @@ import { isIntradayTimeframe, latestEligibleCountdownBar } from "../../render/ch
 import { formatPrice } from "../../render/format";
 import type { Palette } from "../../render/palette";
 import { useTheme } from "../ThemeProvider";
-import type { Drawing } from "../../render/chart/drawings/model";
+import { DEFAULT_RECT_FILL_OPACITY, type Drawing } from "../../render/chart/drawings/model";
 import type { LineStyleName } from "../../render/chart/lineStyle";
 import { getTvPalette, getTvChrome } from "../../render/chart/tvTheme";
 import { PanelHeaderSlotContext } from "./headerSlot";
@@ -201,7 +201,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // anchor and label BarCloseTimer's merged price+countdown badge — null while
   // there's no in-progress bar (nothing live to show) or off-screen.
   const [lastPriceTag, setLastPriceTag] = useState<{ y: number; up: boolean; price: number } | null>(null);
-  const [selection, setSelection] = useState<{ id: string; rect: { x: number; y: number; w: number; h: number }; color: string; width: number; lineStyle: LineStyleName } | null>(null);
+  const [selection, setSelection] = useState<{ id: string; kind: Drawing["kind"]; rect: { x: number; y: number; w: number; h: number }; color: string; width: number; lineStyle: LineStyleName; fill: boolean; fillColor: string; fillOpacity: number } | null>(null);
 
   const legendRef = useRef<TVLegendHandle | null>(null);
   const instancesRef = useRef(instances);
@@ -908,7 +908,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       a.click();
     } catch { /* jsdom canvas has no 2d backend; the screenshot API was still exercised */ }
   };
-  const patchSelected = (patch: Partial<Pick<Drawing, "color" | "width" | "lineStyle">>) => {
+  const patchSelected = (patch: Partial<Pick<Drawing, "color" | "width" | "lineStyle" | "fill" | "fillColor" | "fillOpacity">>) => {
     const d = interactionRef.current?.selectedDrawing(); if (!d) return;
     interactionRef.current?.patchSelection(patch);
     // Remember this edit as the tool's new default so the NEXT drawing of the
@@ -929,15 +929,19 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const color = d.color ?? (d.kind === "measure" ? palette.accent : palette.text);
     const width = d.width ?? 1;
     const lineStyle = (d.lineStyle ?? "solid") as LineStyleName;
+    const fill = d.fill ?? false;
+    const fillColor = d.fillColor ?? color;
+    const fillOpacity = d.fillOpacity ?? DEFAULT_RECT_FILL_OPACITY;
     // Compare style fields too, not just id/rect — moving a drawing's anchors isn't
     // the only way it changes: editing color/width/lineStyle via the floating
     // toolbar leaves rect untouched, and returning the stale `prev` object here
     // (a plain `setSelection(prev)` no-op) left the toolbar's own controls frozen
     // on the pre-edit values even though the canvas repainted correctly.
     setSelection((prev) => (prev && prev.id === id && prev.rect.x === rect.x && prev.rect.y === rect.y && prev.rect.w === rect.w && prev.rect.h === rect.h
-      && prev.color === color && prev.width === width && prev.lineStyle === lineStyle
+      && prev.kind === d.kind && prev.color === color && prev.width === width && prev.lineStyle === lineStyle
+      && prev.fill === fill && prev.fillColor === fillColor && prev.fillOpacity === fillOpacity
       ? prev
-      : { id, rect, color, width, lineStyle }));
+      : { id, kind: d.kind, rect, color, width, lineStyle, fill, fillColor, fillOpacity }));
   };
   useEffect(() => { refreshSelRef.current = refreshSelection; });
 
@@ -1028,8 +1032,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
               rightAxisWidth={rightAxisWidth} paneBottom={paneOffsets[1] ?? height} up={lastPriceTag.up} />
           )}
           {selection && (
-            <TVFloatingToolbar key={selection.id} chrome={chrome} rect={selection.rect} color={selection.color} width={selection.width} lineStyle={selection.lineStyle}
+            <TVFloatingToolbar key={selection.id} chrome={chrome} kind={selection.kind} rect={selection.rect} color={selection.color} width={selection.width} lineStyle={selection.lineStyle}
+              fill={selection.fill} fillColor={selection.fillColor} fillOpacity={selection.fillOpacity}
               onColor={(c) => patchSelected({ color: c })} onWidth={(w) => patchSelected({ width: w })} onLineStyle={(s) => patchSelected({ lineStyle: s })}
+              onFill={(value) => patchSelected({ fill: value })} onFillColor={(c) => patchSelected({ fillColor: c })} onFillOpacity={(value) => patchSelected({ fillOpacity: value })}
               onClone={cloneSelected} onDelete={() => interactionRef.current?.deleteSelection()} />
           )}
           {menu && <TVContextMenu chrome={chrome} x={menu.clientX} y={menu.clientY} items={buildMenuItems(menu)} onClose={() => setMenu(null)} />}

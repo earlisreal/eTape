@@ -132,6 +132,18 @@ describe("DrawingsPrimitive", () => {
     expect(calls).toContainEqual(["strokeRect", 0, 980, 10, 10]);
   });
 
+  it("fills a rectangle before stroking its outline", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    const rect: Drawing = { id: "r", symbol: "US.AAPL", kind: "rect", anchors: [{ timeMs: 0, price: 20 }, { timeMs: 60_000, price: 10 }], createdMs: 1, updatedMs: 1,
+      fill: true, fillColor: "#2962FF", fillOpacity: 20 };
+    p.setDrawings([rect]);
+    const { ctx, calls } = recordingCtx();
+    draw(p, ctx);
+    expect(calls).toContainEqual(["fillRect", 0, 980, 10, 10]);
+    expect(calls.findIndex((c) => c[0] === "fillRect")).toBeLessThan(calls.findIndex((c) => c[0] === "strokeRect"));
+  });
+
   it("draws an extendedline through both anchors to the pane edge in both directions", () => {
     const p = new DrawingsPrimitive(LIGHT);
     attach(p);

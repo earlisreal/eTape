@@ -181,6 +181,17 @@ describe("DrawingInteraction", () => {
     expect(styleForKind).toHaveBeenCalledWith("hline");
   });
 
+  it("initializes a rectangle fill color from its outline style", () => {
+    const store = new DrawingStore();
+    const { host, fire } = fakeHost();
+    const styleForKind = vi.fn(() => ({ color: "#2962FF", fill: true, fillOpacity: 20 }));
+    const di = new DrawingInteraction(host, fakeFacade(), fakePrimitive(), store, ctx(), { newId, styleForKind });
+    di.setTool("rect");
+    fire("pointerdown", { clientX: 0, clientY: 990 });
+    fire("pointerdown", { clientX: 10, clientY: 980 });
+    expect(store.forSymbol("US.AAPL")[0]).toEqual(expect.objectContaining({ color: "#2962FF", fill: true, fillColor: "#2962FF", fillOpacity: 20 }));
+  });
+
   it("without styleForKind, a new drawing has no style fields (palette default)", () => {
     const store = new DrawingStore();
     const { host, fire } = fakeHost();

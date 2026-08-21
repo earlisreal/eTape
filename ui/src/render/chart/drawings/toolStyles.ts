@@ -1,11 +1,11 @@
-// Remembers the last color/width/lineStyle used per drawing tool (global, not
+// Remembers the last color/width/lineStyle/fill settings used per drawing tool (global, not
 // per-symbol) so the next drawing of the same kind starts with the user's own
 // defaults instead of the palette fallback. Mirrors DrawingStore's connect/debounced-
 // flush shape, but persists a single config key rather than one per symbol.
 import type { Drawing, DrawingKind } from "./model";
 import { isValidDrawingStyle } from "./model";
 
-export type ToolStyle = Pick<Drawing, "color" | "width" | "lineStyle">;
+export type ToolStyle = Pick<Drawing, "color" | "width" | "lineStyle" | "fill" | "fillColor" | "fillOpacity">;
 
 const KEY = "drawings.toolStyles";
 
@@ -74,6 +74,9 @@ export class DrawingToolStyleStore {
     if (patch.color !== undefined) next.color = patch.color;
     if (patch.width !== undefined) next.width = patch.width;
     if (patch.lineStyle !== undefined) next.lineStyle = patch.lineStyle;
+    if (patch.fill !== undefined) next.fill = patch.fill;
+    if (patch.fillColor !== undefined) next.fillColor = patch.fillColor;
+    if (patch.fillOpacity !== undefined) next.fillOpacity = patch.fillOpacity;
     this.styles = { ...this.styles, [kind]: next };
     if (!this.ready) {
       const pending = this.pendingEdits[kind] ?? {};
@@ -82,6 +85,9 @@ export class DrawingToolStyleStore {
         ...(patch.color === undefined ? {} : { color: patch.color }),
         ...(patch.width === undefined ? {} : { width: patch.width }),
         ...(patch.lineStyle === undefined ? {} : { lineStyle: patch.lineStyle }),
+        ...(patch.fill === undefined ? {} : { fill: patch.fill }),
+        ...(patch.fillColor === undefined ? {} : { fillColor: patch.fillColor }),
+        ...(patch.fillOpacity === undefined ? {} : { fillOpacity: patch.fillOpacity }),
       } };
     }
     this.scheduleFlush();

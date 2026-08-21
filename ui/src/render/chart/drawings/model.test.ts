@@ -69,6 +69,13 @@ describe("drawing style fields", () => {
     expect(validateDrawings([d])).toHaveLength(1);
   });
 
+  it("accepts rectangle fill fields and rejects invalid opacity", () => {
+    const d = { ...rect, fill: true, fillColor: "#2962FF", fillOpacity: 20 };
+    expect(validateDrawings([d])).toHaveLength(1);
+    expect(isValidDrawing({ ...d, fillOpacity: 101 })).toBe(false);
+    expect(isValidDrawing({ ...base, fill: true })).toBe(false);
+  });
+
   it("loads a drawing with no style fields (back-compat)", () => {
     expect(validateDrawings([base])).toHaveLength(1);
   });
@@ -81,6 +88,7 @@ describe("drawing style fields", () => {
     expect(validateDrawings([{ ...base, width: "thick" }])).toHaveLength(0);
     expect(validateDrawings([{ ...base, lineStyle: "zigzag" }])).toHaveLength(0);
     expect(validateDrawings([{ ...base, color: 42 }])).toHaveLength(0);
+    expect(validateDrawings([{ ...rect, fill: "yes" }])).toHaveLength(0);
   });
 
   it("exposes defaults", () => {

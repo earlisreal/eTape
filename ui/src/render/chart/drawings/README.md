@@ -26,4 +26,6 @@ Drawing Tool Styles are workspace-wide per-kind color, width, and line-style
 defaults. The rail gates persisted-style tools until the asynchronous config
 hydration succeeds or fails; Measure remains available during that wait. A
 completed persisted drawing is selected immediately and opens the floating style
-toolbar; editing it also updates that tool's next default.
+toolbar; editing it also updates that tool's next default. Rectangles additionally
+persist an independent fill toggle, color, and 0–100 opacity; fills render beneath
+the outline and use the same style during placement preview.

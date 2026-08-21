@@ -64,7 +64,7 @@ export class DrawingInteraction {
   private readonly newId: () => string;
   private readonly onToolChange: ((t: Tool) => void) | undefined;
   private readonly onSelectionChange: (() => void) | undefined;
-  private readonly styleForKind: ((k: DrawingKind) => Pick<Drawing, "color" | "width" | "lineStyle">) | undefined;
+  private readonly styleForKind: ((k: DrawingKind) => Pick<Drawing, "color" | "width" | "lineStyle" | "fill" | "fillColor" | "fillOpacity">) | undefined;
   private readonly listeners: [keyof HostEventMap, (e: PointerLike | KeyLike) => void][] = [];
 
   constructor(
@@ -75,7 +75,7 @@ export class DrawingInteraction {
     private readonly ctx: DrawingContext,
     opts?: {
       newId?: () => string; onToolChange?: (t: Tool) => void; onSelectionChange?: () => void;
-      styleForKind?: (k: DrawingKind) => Pick<Drawing, "color" | "width" | "lineStyle">;
+      styleForKind?: (k: DrawingKind) => Pick<Drawing, "color" | "width" | "lineStyle" | "fill" | "fillColor" | "fillOpacity">;
     },
   ) {
     this.newId = opts?.newId ?? (() => crypto.randomUUID());
@@ -139,7 +139,7 @@ export class DrawingInteraction {
     return this.selectionId ? this.currentDrawing(this.selectionId) ?? null : null;
   }
 
-  patchSelection(patch: Pick<Drawing, "color" | "width" | "lineStyle">): Drawing | null {
+  patchSelection(patch: Pick<Drawing, "color" | "width" | "lineStyle" | "fill" | "fillColor" | "fillOpacity">): Drawing | null {
     const d = this.selectedDrawing();
     if (!d) return null;
     const next = { ...d, ...patch, updatedMs: Date.now() };
@@ -338,7 +338,8 @@ export class DrawingInteraction {
   private commit(kind: DrawingKind, anchors: Anchor[]): void {
     const now = Date.now();
     const style = this.styleForKind?.(kind) ?? {};
-    const d: Drawing = { id: this.newId(), symbol: this.ctx.symbol(), kind, anchors, createdMs: now, updatedMs: now, ...style };
+    const d: Drawing = { id: this.newId(), symbol: this.ctx.symbol(), kind, anchors, createdMs: now, updatedMs: now,
+      ...style, ...(kind === "rect" && style.fillColor === undefined && style.color !== undefined ? { fillColor: style.color } : {}) };
     this.store.upsert(d);
     this.setSelectionId(d.id);
     this.cancelGesture();

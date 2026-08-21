@@ -43,6 +43,12 @@ describe("DrawingToolStyleStore in-memory behavior", () => {
     s.remember("trendline", { color: "#F23645" }); // width/lineStyle omitted, not cleared
     expect(s.styleFor("trendline")).toEqual({ color: "#F23645", width: 2, lineStyle: "dashed" });
   });
+
+  it("remembers rectangle fill settings with the other tool style fields", () => {
+    const s = new DrawingToolStyleStore();
+    s.remember("rect", { fill: true, fillColor: "#2962FF", fillOpacity: 20 });
+    expect(s.styleFor("rect")).toEqual({ fill: true, fillColor: "#2962FF", fillOpacity: 20 });
+  });
 });
 
 describe("DrawingToolStyleStore persistence", () => {
@@ -64,11 +70,12 @@ describe("DrawingToolStyleStore persistence", () => {
   });
 
   it("connect loads a previously remembered style from GetConfig", async () => {
-    const cmd = fakeCommands({ get: { status: "accepted", value: { trendline: { color: "#2962FF", width: 2, lineStyle: "solid" } } } });
+    const cmd = fakeCommands({ get: { status: "accepted", value: { trendline: { color: "#2962FF", width: 2, lineStyle: "solid" }, rect: { fill: true, fillColor: "#2962FF", fillOpacity: 20 } } } });
     const s = new DrawingToolStyleStore(0);
     s.connect({ commands: cmd });
     await settle();
     expect(s.styleFor("trendline")).toEqual({ color: "#2962FF", width: 2, lineStyle: "solid" });
+    expect(s.styleFor("rect")).toEqual({ fill: true, fillColor: "#2962FF", fillOpacity: 20 });
   });
 
   it("drops a malformed remembered style on load instead of crashing", async () => {

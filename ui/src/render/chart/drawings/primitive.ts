@@ -6,14 +6,14 @@ import type { Palette } from "../../palette";
 import type { Anchor, Drawing, DrawingKind } from "./model";
 import { extendToEdge, timeToLogical } from "./geometry";
 import { LINE_DASH, LWC_LINE_STYLE } from "../lineStyle";
-import { DEFAULT_DRAWING_WIDTH, DEFAULT_LINE_STYLE } from "./model";
+import { DEFAULT_DRAWING_WIDTH, DEFAULT_LINE_STYLE, DEFAULT_RECT_FILL_OPACITY } from "./model";
 
 // Repo convention: derive the draw target structurally instead of importing
 // fancy-canvas's CanvasRenderingTarget2D directly.
 export type DrawTarget = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 
 export interface Transient {
-  ghost?: { kind: DrawingKind; anchors: Anchor[]; style?: Pick<Drawing, "color" | "width" | "lineStyle"> | undefined };
+  ghost?: { kind: DrawingKind; anchors: Anchor[]; style?: Pick<Drawing, "color" | "width" | "lineStyle" | "fill" | "fillColor" | "fillOpacity"> | undefined };
   measure?: { from: Anchor; to: Anchor };
 }
 
@@ -133,7 +133,10 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
         ctx.setLineDash(styledGhost ? LINE_DASH[style?.lineStyle ?? DEFAULT_LINE_STYLE] : [4, 3]);
         this.strokeShape(ctx, ghost.kind, ghost.anchors, hr, vr, width,
           styledGhost ? style?.color ?? this.palette.text : this.palette.accent,
-          styledGhost ? style?.width ?? DEFAULT_DRAWING_WIDTH : 1);
+          styledGhost ? style?.width ?? DEFAULT_DRAWING_WIDTH : 1,
+          styledGhost ? style?.fill : undefined,
+          styledGhost ? style?.fillColor : undefined,
+          styledGhost ? style?.fillOpacity : undefined);
         ctx.setLineDash([]);
       }
       if (this.transient?.measure) this.measure(ctx, this.transient.measure, hr, vr);
@@ -148,7 +151,7 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
     if (d.kind === "measure") {
       this.measure(ctx, { from: d.anchors[0], to: d.anchors[1] }, hr, vr, color, lineWidth);
     } else {
-      this.strokeShape(ctx, d.kind, d.anchors, hr, vr, width, color, lineWidth);
+      this.strokeShape(ctx, d.kind, d.anchors, hr, vr, width, color, lineWidth, d.fill, d.fillColor, d.fillOpacity);
     }
     // Handles are always solid squares, regardless of the drawing's own line
     // style — reset the dash pattern the shape stroke above may have set
@@ -156,7 +159,8 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
     if (selected) { ctx.setLineDash([]); this.handles(ctx, d.anchors, hr, vr); }
   }
 
-  private strokeShape(ctx: CanvasRenderingContext2D, kind: DrawingKind, anchors: Anchor[], hr: number, vr: number, width: number, color: string, lineWidth: number): void {
+  private strokeShape(ctx: CanvasRenderingContext2D, kind: DrawingKind, anchors: Anchor[], hr: number, vr: number, width: number, color: string, lineWidth: number,
+    fill = false, fillColor?: string, fillOpacity?: number): void {
     ctx.strokeStyle = color;
     ctx.lineWidth = lineWidth;
     const p0 = this.pt(anchors[0], hr, vr);
@@ -171,7 +175,18 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
       this.line(ctx, back.x, back.y, fwd.x, fwd.y);
       return;
     }
-    if (kind === "rect") { ctx.strokeRect(Math.min(p0.x, p1.x), Math.min(p0.y, p1.y), Math.abs(p1.x - p0.x), Math.abs(p1.y - p0.y)); }
+    if (kind === "rect") {
+      const x = Math.min(p0.x, p1.x), y = Math.min(p0.y, p1.y);
+      const w = Math.abs(p1.x - p0.x), h = Math.abs(p1.y - p0.y);
+      if (fill) {
+        ctx.save();
+        ctx.fillStyle = fillColor ?? color;
+        ctx.globalAlpha = (fillOpacity ?? DEFAULT_RECT_FILL_OPACITY) / 100;
+        ctx.fillRect(x, y, w, h);
+        ctx.restore();
+      }
+      ctx.strokeRect(x, y, w, h);
+    }
   }
 
   private line(ctx: CanvasRenderingContext2D, x0: number, y0: number, x1: number, y1: number): void {

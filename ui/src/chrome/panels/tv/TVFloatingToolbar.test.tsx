@@ -17,8 +17,9 @@ const cssColor = (hex: string): string => {
 };
 
 const base = {
-  chrome, rect: { x: 100, y: 80, w: 60, h: 20 }, color: "#2962FF", width: 1, lineStyle: "solid" as const,
-  onColor: vi.fn(), onWidth: vi.fn(), onLineStyle: vi.fn(), onClone: vi.fn(), onDelete: vi.fn(),
+  chrome, kind: "trendline" as const, rect: { x: 100, y: 80, w: 60, h: 20 }, color: "#2962FF", width: 1, lineStyle: "solid" as const,
+  fill: false, fillColor: "#2962FF", fillOpacity: 20,
+  onColor: vi.fn(), onWidth: vi.fn(), onLineStyle: vi.fn(), onFill: vi.fn(), onFillColor: vi.fn(), onFillOpacity: vi.fn(), onClone: vi.fn(), onDelete: vi.fn(),
 };
 
 describe("TVFloatingToolbar", () => {
@@ -54,6 +55,23 @@ describe("TVFloatingToolbar", () => {
     expect(base.onLineStyle).toHaveBeenCalledWith("dashed");
     expect(base.onClone).toHaveBeenCalled();
     expect(base.onDelete).toHaveBeenCalled();
+  });
+
+  it("shows and edits fill settings for rectangles only", () => {
+    const rectBase = { ...base, kind: "rect" as const, onFill: vi.fn(), onFillColor: vi.fn(), onFillOpacity: vi.fn() };
+    render(<TVFloatingToolbar {...rectBase} />);
+    expect(screen.getByLabelText("fill").getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(screen.getByLabelText("fill"));
+    fireEvent.click(screen.getByLabelText("fill color"));
+    fireEvent.click(screen.getByLabelText("fill color #F23645"));
+    fireEvent.change(screen.getByLabelText("fill opacity"), { target: { value: "45" } });
+    expect(rectBase.onFill).toHaveBeenCalledWith(true);
+    expect(rectBase.onFillColor).toHaveBeenCalledWith("#F23645");
+    expect(rectBase.onFillOpacity).toHaveBeenCalledWith(45);
+
+    cleanup();
+    render(<TVFloatingToolbar {...base} />);
+    expect(screen.queryByLabelText("fill")).toBeNull();
   });
 
   it("hovering the color swatch shows a ring, not a background swap", () => {
