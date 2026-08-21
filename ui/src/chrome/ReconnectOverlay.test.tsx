@@ -30,6 +30,12 @@ describe("ReconnectOverlay", () => {
     expect(screen.getByText("content").parentElement?.style.opacity).toBe("1");
   });
 
+  it("shows a terminal stopped state immediately", () => {
+    render(<Wrapped state="stopped" />);
+    expect(screen.getByText("Engine stopped")).toBeTruthy();
+    expect(screen.getByText("content").parentElement?.style.opacity).toBe("0.4");
+  });
+
   it("does not show the dim/overlay UI for a reconnect that recovers within the 600ms grace period", () => {
     const { rerender } = render(<Wrapped state="open" />);
 

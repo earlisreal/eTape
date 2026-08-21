@@ -107,7 +107,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
         const sock: ISocket = { send: (d) => ws.send(d), close: () => ws.close(), onopen: null, onmessage: null, onclose: null };
         ws.onopen = () => sock.onopen?.();
         ws.onmessage = (e) => sock.onmessage?.(String(e.data));
-        ws.onclose = () => sock.onclose?.();
+        ws.onclose = (event) => sock.onclose?.({ code: event.code, reason: event.reason });
         return sock;
       },
       now: () => Date.now(),

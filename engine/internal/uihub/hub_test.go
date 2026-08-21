@@ -17,11 +17,13 @@ import (
 )
 
 type fakeClient struct {
-	mu     sync.Mutex
-	nid    uint64
-	frames [][]byte
-	full   bool
-	closed bool
+	mu          sync.Mutex
+	nid         uint64
+	frames      [][]byte
+	full        bool
+	closed      bool
+	closeCode   int
+	closeReason string
 }
 
 func (c *fakeClient) id() uint64 { return c.nid }
@@ -39,7 +41,14 @@ func (c *fakeClient) enqueue(b []byte, _ string) bool {
 	c.frames = append(c.frames, append([]byte(nil), b...))
 	return true
 }
-func (c *fakeClient) close() { c.mu.Lock(); c.closed = true; c.mu.Unlock() }
+func (c *fakeClient) close() { c.closeWith(1000, "closing") }
+func (c *fakeClient) closeWith(code int, reason string) {
+	c.mu.Lock()
+	c.closed = true
+	c.closeCode = code
+	c.closeReason = reason
+	c.mu.Unlock()
+}
 func (c *fakeClient) got() [][]byte {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -62,6 +71,54 @@ func newTestHub(clk clock.Clock) *Hub {
 		MDInterval: 33 * time.Millisecond, AccountInterval: 250 * time.Millisecond,
 		PositionInterval: 100 * time.Millisecond, Buf: 64,
 	}, m)
+}
+
+func TestHubShutdownUsesCleanCloseReason(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { _ = h.Run(ctx); close(done) }()
+
+	c := &fakeClient{nid: 1}
+	h.Register(c)
+	syncHub(h)
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("hub did not stop")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed || c.closeCode != 1001 || c.closeReason != "engine stopped" {
+		t.Fatalf("close = (%v, %d, %q), want (true, 1001, %q)", c.closed, c.closeCode, c.closeReason, "engine stopped")
+	}
+}
+
+func TestHubRestartUsesReconnectCloseReason(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancelCause(context.Background())
+	done := make(chan struct{})
+	go func() { _ = h.Run(ctx); close(done) }()
+
+	c := &fakeClient{nid: 1}
+	h.Register(c)
+	syncHub(h)
+	cancel(ErrRestarting)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("hub did not stop")
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if !c.closed || c.closeCode != 1000 || c.closeReason != "restarting" {
+		t.Fatalf("close = (%v, %d, %q), want (true, 1000, %q)", c.closed, c.closeCode, c.closeReason, "restarting")
+	}
 }
 
 // syncHub is a test-only barrier: it blocks until the hub's Run loop has

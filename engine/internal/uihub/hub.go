@@ -3,6 +3,7 @@ package uihub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"sync/atomic"
@@ -14,6 +15,10 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
+
+// ErrRestarting marks a self-restart so the UI reconnects to the replacement
+// engine instead of entering the terminal stopped state.
+var ErrRestarting = errors.New("engine restarting")
 
 // client is the hub's view of a connected UI socket (implemented by *conn, Task 7).
 // ck is the outbound coalesce key: "" => the frame is lossless/ordered; a
@@ -537,8 +542,16 @@ func (h *Hub) Run(ctx context.Context) error {
 	for {
 		select {
 		case <-ctx.Done():
+			closeCode, closeReason := 1001, "engine stopped"
+			if errors.Is(context.Cause(ctx), ErrRestarting) {
+				closeCode, closeReason = 1000, "restarting"
+			}
 			for c := range h.clients {
-				c.close()
+				if clean, ok := c.(interface{ closeWith(int, string) }); ok {
+					clean.closeWith(closeCode, closeReason)
+				} else {
+					c.close()
+				}
 			}
 			return ctx.Err()
 		case c := <-h.register:

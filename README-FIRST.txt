@@ -35,7 +35,8 @@ launch it.
 The engine keeps running in the background (look for the eTape icon in your
 system tray) even if you close that browser tab -- reopen
 http://127.0.0.1:8686 at any time to reconnect. Use the tray icon's "Quit" to
-actually stop it.
+actually stop it and close the browser window eTape opened; other browser
+windows/workspaces remain open.
 
 (Power users can also start demo mode from the command line: `etape.exe -demo`
 or, when building from source, `./run.sh demo`.)

@@ -1,4 +1,4 @@
-import type { ISocket } from "../src/wire/WsClient";
+import type { ISocket, SocketCloseEvent } from "../src/wire/WsClient";
 import type { RafLike } from "../src/render/surface";
 import type { LinkBus, LinkMsg } from "../src/chrome/linkGroups";
 import type { DrawingBus, DrawingMsg } from "../src/render/chart/drawings/store";
@@ -9,7 +9,7 @@ export class FakeSocket implements ISocket {
   closed = false;
   onopen: (() => void) | null = null;
   onmessage: ((data: string) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event?: SocketCloseEvent) => void) | null = null;
 
   constructor(public url: string) {
     FakeSocket.instances.push(this);
@@ -20,7 +20,7 @@ export class FakeSocket implements ISocket {
   // test helpers
   open(): void { this.onopen?.(); }
   emit(raw: string): void { this.onmessage?.(raw); }
-  dropFromServer(): void { this.onclose?.(); }
+  dropFromServer(event?: SocketCloseEvent): void { this.onclose?.(event); }
   static last(): FakeSocket { return FakeSocket.instances[FakeSocket.instances.length - 1]; }
   static reset(): void { FakeSocket.instances = []; }
 }

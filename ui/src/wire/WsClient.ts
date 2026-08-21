@@ -11,10 +11,11 @@ export interface ISocket {
   close(): void;
   onopen: (() => void) | null;
   onmessage: ((data: string) => void) | null;
-  onclose: (() => void) | null;
+  onclose: ((event?: SocketCloseEvent) => void) | null;
 }
+export interface SocketCloseEvent { code: number; reason: string }
 export type SetTimeoutLike = (fn: () => void, ms: number) => unknown;
-export type ConnState = "connecting" | "open" | "reconnecting";
+export type ConnState = "connecting" | "open" | "reconnecting" | "stopped";
 type TopicHandler = (m: SnapshotMsg | DeltaMsg) => void;
 interface PendingCommand { command: string; resolve: (ack: AckMsg) => void; sent: boolean }
 interface PendingQuery { resolve: (payload: unknown) => void; reject: (reason: unknown) => void; sent: boolean }
@@ -47,13 +48,14 @@ export class WsClient {
   private readonly outbox: OutboxMessage[] = []; // requests buffered while not open
   private readonly backoff: (attempt: number) => number;
   private malformedFrames = 0;
+  private terminal = false;
 
   constructor(private readonly opts: Opts) {
     this.backoff = opts.backoff ?? DEFAULT_BACKOFF;
   }
 
-  start(): void { this.connect(); }
-  stop(): void { this.socket?.close(); this.socket = null; }
+  start(): void { this.terminal = false; this.connect(); }
+  stop(): void { this.terminal = true; this.socket?.close(); this.socket = null; }
 
   onState(cb: (s: ConnState) => void): void { this.stateCbs.add(cb); cb(this.state); }
   rttMs(): number | null { return this.lastRtt; }
@@ -105,6 +107,7 @@ export class WsClient {
   }
 
   private connect(): void {
+    if (this.terminal) return;
     this.setState("connecting");
     const sock = this.opts.socketFactory(this.opts.url);
     this.socket = sock;
@@ -125,10 +128,16 @@ export class WsClient {
       this.flushOutbox();
     };
     sock.onmessage = (raw) => this.onMessage(raw);
-    sock.onclose = () => {
+    sock.onclose = (event) => {
       if (this.socket !== sock) return;
       this.socket = null;
       this.settleLostRequests();
+      if (event?.code === 1001 && event.reason === "engine stopped") {
+        this.terminal = true;
+        this.setState("stopped");
+        uiLog.info("engine stopped");
+        return;
+      }
       this.setState("reconnecting");
       const reconnectAttempt = this.attempt + 1;
       const delay = this.backoff(this.attempt++);

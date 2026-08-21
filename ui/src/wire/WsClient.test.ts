@@ -91,6 +91,32 @@ describe("WsClient", () => {
     expect(states).toEqual(["connecting", "open", "reconnecting", "connecting", "open"]);
   });
 
+  it("stops reconnecting after a clean engine shutdown", () => {
+    const { client, flushTimers } = makeClient();
+    const states: string[] = [];
+    client.onState((s) => states.push(s));
+    client.start();
+    FakeSocket.last().open();
+    FakeSocket.last().dropFromServer({ code: 1001, reason: "engine stopped" });
+    flushTimers();
+    expect(states).toEqual(["connecting", "open", "stopped"]);
+    expect(FakeSocket.instances).toHaveLength(1);
+  });
+
+  it("reconnects after an engine self-restart", () => {
+    const { client, flushTimers } = makeClient();
+    const states: string[] = [];
+    client.onState((s) => states.push(s));
+    client.start();
+    FakeSocket.last().open();
+    FakeSocket.last().dropFromServer({ code: 1000, reason: "restarting" });
+    flushTimers();
+    FakeSocket.last().open();
+
+    expect(states).toEqual(["connecting", "open", "reconnecting", "connecting", "open"]);
+    expect(FakeSocket.instances).toHaveLength(2);
+  });
+
   it("resolves sendCommand when the matching ack arrives", async () => {
     const { client } = makeClient();
     client.start();

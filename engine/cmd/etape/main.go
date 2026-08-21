@@ -86,6 +86,9 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	demo := flag.Bool("demo", false, "run the built-in synthetic demo market (no OpenD/broker needed)")
 	demoSeed := flag.Int64("demo-seed", 0, "PRNG seed for -demo; 0 = random per launch")
 	noOpen := flag.Bool("no-open", false, "do not auto-open the default browser to the UI")
+	ownedBrowserPID := flag.Int("owned-browser-pid", 0, "internal: PID of the startup Chrome app handed across restart")
+	ownedBrowserStart := flag.Uint64("owned-browser-start", 0, "internal: startup time token of the handed-off Chrome app")
+	ownedBrowserProfile := flag.String("owned-browser-profile", "", "internal: profile directory of the handed-off Chrome app")
 	logPath := flag.String("log", "", "also write logs to this file")
 	logLevel := flag.String("log-level", os.Getenv("SLOG_LEVEL"), "log level: debug, info, warn, error (default SLOG_LEVEL env)")
 	flag.Parse()
@@ -245,8 +248,8 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	defer func() { _ = releaseLock() }()
 	log.Debug("single-instance lock acquired", "lock", dbPath+".lock")
 
-	ctx, stop := context.WithCancel(ctx)
-	defer stop()
+	ctx, stop := context.WithCancelCause(ctx)
+	defer stop(nil)
 
 	// restartRequested/requestRestart back every self-relaunch path -- the
 	// plain "RestartEngine" WS command via restartInPlace below, and the
@@ -257,7 +260,15 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// (run_default.go/run_tray.go) only relaunches once every deferred
 	// cleanup (releaseLock, st.Close, etc.) has actually run.
 	var restartRequested atomic.Bool
-	requestRestart := func() { restartRequested.Store(true); stop() }
+	requestRestart := func() { restartRequested.Store(true); stop(uihub.ErrRestarting) }
+	var startupBrowser *openbrowser.OwnedBrowser
+	if *ownedBrowserPID != 0 || *ownedBrowserStart != 0 || *ownedBrowserProfile != "" {
+		var adoptErr error
+		startupBrowser, adoptErr = openbrowser.AdoptOwned(*ownedBrowserPID, *ownedBrowserStart, *ownedBrowserProfile)
+		if adoptErr != nil {
+			log.Warn("adopt startup browser", "err", adoptErr)
+		}
+	}
 
 	// nextArgs carries a relaunch's flag list from the restartInPlace/startDemo closures (built below, passed into
 	// uihub.New) to boot's final return. atomic.Pointer because it's written
@@ -267,6 +278,12 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// zero-value/no-restart-requested case) -- see relaunch_unix.go /
 	// relaunch_windows.go for how a non-nil argv is applied.
 	var nextArgsPtr atomic.Pointer[[]string]
+	carryStartupBrowser := func(argv []string) []string {
+		if startupBrowser == nil {
+			return argv
+		}
+		return append(argv, startupBrowser.RelaunchArgs()...)
+	}
 
 	live := !*demo
 	uihubClk := clock.System{}
@@ -313,7 +330,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 
 	// startDemo relaunches into -demo.
 	startDemo := func() error {
-		argv := childArgs(base, replayMode{Demo: true})
+		argv := carryStartupBrowser(childArgs(base, replayMode{Demo: true}))
 		time.AfterFunc(relaunchAckFlushDelay, func() {
 			nextArgsPtr.Store(&argv)
 			requestRestart()
@@ -330,6 +347,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// via restartAckFlushDelay before invoking it.
 	restartInPlace := func() {
 		argv := append([]string{"-no-open"}, os.Args[1:]...)
+		argv = carryStartupBrowser(argv)
 		nextArgsPtr.Store(&argv)
 		requestRestart()
 	}
@@ -469,22 +487,16 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startDemo, locateProviders)
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
+	uiCtx, cancelUI := context.WithCancel(context.Background())
+	defer cancelUI()
 	httpSrv := &http.Server{
 		Addr: cfg.UIHub.Addr(), Handler: srv.Handler(), ReadHeaderTimeout: 5 * time.Second,
-		// BaseContext ties every accepted connection's r.Context() to the
-		// top-level shutdown ctx, independently of Hub's own lifecycle. Without
-		// this, a connection accepted (and its conn.run(r.Context()) started)
-		// after Hub.Run has already returned would never be told to close: its
-		// hub.Register call silently no-ops against the already-closed Hub (see
-		// Hub.Register's <-h.closed race), so it never lands in h.clients, and
-		// Hub.Run's <-ctx.Done() teardown loop (which calls c.close() on every
-		// registered client) can never reach it either. That connection's
-		// readLoop would then block forever in ws.Read(r.Context()) waiting on a
-		// client that may never send or disconnect, so srv.Wait() (which has no
-		// timeout) would hang the whole shutdown sequence. Deriving r.Context()
-		// from ctx here unblocks that Read as soon as the top-level ctx is
-		// cancelled, regardless of Hub's state.
-		BaseContext: func(net.Listener) context.Context { return ctx },
+		// BaseContext ties every accepted connection's r.Context() to uiCtx.
+		// Shutdown waits for Hub.Run to issue the clean close reason first, then
+		// cancels uiCtx before Server.Wait. This keeps a clean WebSocket close
+		// distinguishable from a connection context cancellation while still
+		// unblocking connections accepted after Hub.Run has returned.
+		BaseContext: func(net.Listener) context.Context { return uiCtx },
 	}
 	go func() {
 		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -496,11 +508,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		onListening(cfg.UIHub.Addr())
 	}
 	if !*noOpen {
-		go func() {
-			if err := openbrowser.Open(browserURL(cfg.UIHub.Addr(), handlerLevel == slog.LevelDebug)); err != nil {
-				log.Warn("open browser", "err", err)
-			}
-		}()
+		var openErr error
+		startupBrowser, openErr = openbrowser.OpenOwned(browserURL(cfg.UIHub.Addr(), handlerLevel == slog.LevelDebug))
+		if openErr != nil {
+			log.Warn("open browser", "err", openErr)
+		}
 	}
 
 	// --- moomoo auto-config (live boots only) ---
@@ -775,15 +787,13 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// srv.Wait()). brokerWG has no store writes but is joined here too since
 	// broker goroutines feed exec.Core, not the store.
 	//
-	// srv.Wait() must run after httpSrv.Shutdown (which only stops accepting
-	// new connections and returns once in-flight *plain* HTTP requests finish
-	// -- it does NOT wait on hijacked WebSocket connections) and before
-	// pipeWG.Wait(): by the time httpSrv.Shutdown returns, ctx has already
-	// been cancelled (we're past <-ctx.Done()), so Hub.Run's own <-ctx.Done()
-	// branch has told (or is telling) every registered connection to close;
-	// srv.Wait() blocks until each connection's conn.run() goroutine has
-	// actually returned, confirming its dispatch loop -- and therefore any
-	// SetConfig call it could make -- is stopped before st.Close() runs.
+	// Hub.Run must return before cancelUI so clean WebSocket close code/reason
+	// reach every registered client before their request contexts are canceled.
+	// httpSrv.Shutdown then stops accepting new connections, and srv.Wait()
+	// blocks until every conn.run() goroutine has returned -- including a late
+	// connection that raced Hub.Run's shutdown and never entered h.clients --
+	// confirming every dispatch loop, and therefore every SetConfig call it
+	// could make, is stopped before st.Close() runs.
 	//
 	// backfillWG.Add(1) has two producers: the scan poller (pool
 	// admission, joined via scanWG); the Hub goroutine via the hubBackfill
@@ -804,11 +814,12 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// could land after backfillWG.Wait() already observed zero, spawning an
 	// unwaited orch.Backfill goroutine that touches
 	// the store during/after st.Close().
+	<-hubDone  // Hub issued the clean close reason: no more handleEnsureDemand or new backfillWG.Add calls
+	cancelUI() // unblock every conn.run(), including a connection accepted after Hub.Run returned
 	shutCtx, cancelShut := context.WithTimeout(context.Background(), 5*time.Second)
 	_ = httpSrv.Shutdown(shutCtx)
 	cancelShut()
 	srv.Wait()        // every conn.run() returned: no more SetConfig via dispatch
-	<-hubDone         // hub.Run returned: no more handleEnsureDemand, hence no more backfillWG.Add from chart-open demands
 	scanWG.Wait()     // scan poller stopped: no more backfillWG.Add from pool admissions
 	backfillWG.Wait() // boot backfill workers stopped: no more Seed* into the core
 	pipeWG.Wait()     // feed->core pipe stopped: no more RecordEvent
@@ -819,6 +830,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	brokerWG.Wait()
 	if err := st.Close(); err != nil {
 		log.Error("close store", "err", err)
+	}
+	if !restartRequested.Load() && startupBrowser != nil {
+		if err := startupBrowser.Close(); err != nil {
+			log.Warn("close startup browser", "err", err)
+		}
 	}
 	mdDrops := core.DropStats()
 	log.Info("shutdown complete", "mdInboxDrops", mdDrops.Inbox,

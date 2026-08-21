@@ -212,6 +212,10 @@ func (c *conn) enqueue(b []byte, ck string) bool {
 }
 
 func (c *conn) close() {
+	c.closeWith(1000, "closing")
+}
+
+func (c *conn) closeWith(code int, reason string) {
 	c.once.Do(func() {
 		// Close the outbox first so any enqueue racing this teardown (e.g. a
 		// hub broadcast in flight) returns false instead of buffering a frame
@@ -224,7 +228,7 @@ func (c *conn) close() {
 		// caller's goroutine so a client we're forcibly dropping (e.g. via
 		// the Hub's overflow-drop path, which calls close() synchronously
 		// from Hub.Run's single event-loop goroutine) never stalls the Hub.
-		go func() { _ = c.ws.Close(1000, "closing") }()
+		go func() { _ = c.ws.Close(code, reason) }()
 	})
 }
 

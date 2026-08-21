@@ -99,6 +99,37 @@ func TestChromeCommandPreservesExactURL(t *testing.T) {
 	}
 }
 
+func TestOwnedChromeCommandUsesPrivateProfile(t *testing.T) {
+	chrome := filepath.Join(t.TempDir(), "chrome.exe")
+	url := "http://127.0.0.1:8686/?foo=bar"
+	profile := filepath.Join(t.TempDir(), "etape-chrome")
+	cmd := ownedChromeCommand(chrome, url, profile)
+
+	want := []string{
+		chrome,
+		"--app=" + url,
+		"--start-maximized",
+		"--user-data-dir=" + profile,
+		"--no-first-run",
+		"--no-default-browser-check",
+	}
+	if !slices.Equal(cmd.Args, want) {
+		t.Fatalf("ownedChromeCommand() args = %q, want %q", cmd.Args, want)
+	}
+}
+
+func TestOwnedBrowserRelaunchArgsPreserveIdentity(t *testing.T) {
+	browser := &OwnedBrowser{pid: 1234, startToken: 5678, profileDir: `C:\\Temp\\etape-chrome`}
+	want := []string{
+		"-owned-browser-pid", "1234",
+		"-owned-browser-start", "5678",
+		"-owned-browser-profile", `C:\\Temp\\etape-chrome`,
+	}
+	if got := browser.RelaunchArgs(); !slices.Equal(got, want) {
+		t.Fatalf("RelaunchArgs() = %q, want %q", got, want)
+	}
+}
+
 func TestOpenWindowsFallsBackWhenChromeUnavailable(t *testing.T) {
 	url := "http://127.0.0.1:8686/?foo=bar"
 	var got *exec.Cmd

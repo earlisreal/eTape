@@ -17,11 +17,13 @@ import (
 
 // fakeSocket is an in-memory wsSocket: reads pop from `in`, writes append to `out`.
 type fakeSocket struct {
-	in     chan []byte
-	mu     sync.Mutex
-	out    [][]byte
-	closed bool
-	block  bool // when true, Write blocks until its ctx is done (simulates a wedged peer)
+	in          chan []byte
+	mu          sync.Mutex
+	out         [][]byte
+	closed      bool
+	closeCode   int
+	closeReason string
+	block       bool // when true, Write blocks until its ctx is done (simulates a wedged peer)
 }
 
 func newFakeSocket() *fakeSocket { return &fakeSocket{in: make(chan []byte, 16)} }
@@ -52,6 +54,8 @@ func (s *fakeSocket) Write(ctx context.Context, b []byte) error {
 func (s *fakeSocket) Close(code int, reason string) error {
 	s.mu.Lock()
 	s.closed = true
+	s.closeCode = code
+	s.closeReason = reason
 	s.mu.Unlock()
 	return nil
 }
@@ -59,6 +63,30 @@ func (s *fakeSocket) writes() [][]byte {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([][]byte(nil), s.out...)
+}
+
+func TestConnCloseWithPreservesShutdownReason(t *testing.T) {
+	sock := newFakeSocket()
+	c := newConn(1, sock, newTestHub(clock.NewFake(time.UnixMilli(0))), &fakeCmd{}, fakeQuery{}, 8, time.Second)
+	c.closeWith(1001, "engine stopped")
+
+	deadline := time.After(time.Second)
+	for {
+		sock.mu.Lock()
+		closed, code, reason := sock.closed, sock.closeCode, sock.closeReason
+		sock.mu.Unlock()
+		if closed {
+			if code != 1001 || reason != "engine stopped" {
+				t.Fatalf("close = (%d, %q), want (1001, %q)", code, reason, "engine stopped")
+			}
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("conn close was not delivered")
+		case <-time.After(time.Millisecond):
+		}
+	}
 }
 
 type fakeCmd struct{ last string }
