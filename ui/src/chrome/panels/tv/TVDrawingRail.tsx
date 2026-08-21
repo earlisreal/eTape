@@ -102,39 +102,39 @@ export function TVDrawingRail({ chrome, activeTool, hideAll, symbol, stylesReady
       style={{ position: "absolute", ...place, zIndex: 6, display: "flex", flexDirection: "row", alignItems: "center", gap: 2,
         background: chrome.surface, border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, padding: 3,
         font: `${TV_GEOM.uiFont}px ${TV_FONT}`, boxShadow: "0 2px 10px rgba(0,0,0,.12)" }}>
-      <div aria-label="move toolbar" role="button" onPointerDown={onGripDown}
+      <div aria-label="move toolbar" title="Move toolbar" role="button" onPointerDown={onGripDown}
         style={{ width: 14, height: TV_GEOM.iconBtn, display: "grid", placeItems: "center", color: chrome.muted,
           cursor: dragRef.current ? "grabbing" : "grab", touchAction: "none" }}>
         <IconGrip size={14} />
       </div>
 
-      <HoverButton aria-label="trend line" style={btn(activeTool === "trendline")} hoverStyle={toolHover(activeTool === "trendline")}
+      <HoverButton aria-label="trend line" title="Trend line" style={btn(activeTool === "trendline")} hoverStyle={toolHover(activeTool === "trendline")}
         disabled={!stylesReady}
         onClick={() => toggleTool("trendline", activeTool === "trendline")}><IconTrend size={16} /></HoverButton>
-      <HoverButton aria-label="horizontal line" style={btn(activeTool === "hline")} hoverStyle={toolHover(activeTool === "hline")}
+      <HoverButton aria-label="horizontal line" title="Horizontal line" style={btn(activeTool === "hline")} hoverStyle={toolHover(activeTool === "hline")}
         disabled={!stylesReady}
         onClick={() => toggleTool("hline", activeTool === "hline")}><IconHLine size={16} /></HoverButton>
-      <HoverButton aria-label="extended line" style={btn(activeTool === "extendedline")} hoverStyle={toolHover(activeTool === "extendedline")}
+      <HoverButton aria-label="extended line" title="Extended line" style={btn(activeTool === "extendedline")} hoverStyle={toolHover(activeTool === "extendedline")}
         disabled={!stylesReady}
         onClick={() => toggleTool("extendedline", activeTool === "extendedline")}><IconExtended size={16} /></HoverButton>
-      <HoverButton aria-label="rectangle" style={btn(activeTool === "rect")} hoverStyle={toolHover(activeTool === "rect")}
+      <HoverButton aria-label="rectangle" title="Rectangle" style={btn(activeTool === "rect")} hoverStyle={toolHover(activeTool === "rect")}
         disabled={!stylesReady}
         onClick={() => toggleTool("rect", activeTool === "rect")}><IconRect size={16} /></HoverButton>
-      <HoverButton aria-label="measure" style={btn(activeTool === "measure")} hoverStyle={toolHover(activeTool === "measure")}
+      <HoverButton aria-label="measure" title="Measure" style={btn(activeTool === "measure")} hoverStyle={toolHover(activeTool === "measure")}
         onClick={() => toggleTool("measure", activeTool === "measure")}><IconMeasure size={16} /></HoverButton>
       <div style={{ width: 1, height: 20, background: chrome.border, margin: "0 2px" }} />
-      <HoverButton aria-label="hide all drawings" aria-pressed={hideAll} style={btn(hideAll)} hoverStyle={toolHover(hideAll)} onClick={onToggleHideAll}>
+      <HoverButton aria-label="hide all drawings" title={hideAll ? "Show all drawings" : "Hide all drawings"} aria-pressed={hideAll} style={btn(hideAll)} hoverStyle={toolHover(hideAll)} onClick={onToggleHideAll}>
         {hideAll ? <IconEyeOff size={16} /> : <IconEye size={16} />}
       </HoverButton>
       <div style={{ position: "relative" }}>
-        <HoverButton aria-label="delete" style={btn(false)} hoverStyle={toolHover(false)} onClick={onTrash}><IconTrash size={16} /></HoverButton>
+        <HoverButton aria-label="delete" title="Clear all drawings" style={btn(false)} hoverStyle={toolHover(false)} onClick={onTrash}><IconTrash size={16} /></HoverButton>
         {confirm && (
           <div role="dialog" style={{ ...popover, left: "auto", right: 0, padding: 10, width: 200 }}>
             <div style={{ marginBottom: 8 }}>Clear all drawings for {bare}?</div>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-              <HoverButton onClick={() => setConfirm(false)} hoverStyle={{ background: chrome.hover, color: chrome.text }}
+              <HoverButton title="Cancel" onClick={() => setConfirm(false)} hoverStyle={{ background: chrome.hover, color: chrome.text }}
                 style={{ padding: "4px 10px", background: "transparent", border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, color: chrome.text, cursor: "pointer" }}>Cancel</HoverButton>
-              <HoverButton onClick={() => { setConfirm(false); onClearAll(); }}
+              <HoverButton title="Clear" onClick={() => { setConfirm(false); onClearAll(); }}
                 // Danger button — flattening to chrome.hover/chrome.text right
                 // before a destructive click would erase the danger signal, so
                 // hover keeps the red background/white text and adds a ring

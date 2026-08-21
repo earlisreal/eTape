@@ -77,13 +77,13 @@ export function TVLegend({ chrome, symbol, timeframe, instances, paneOffsets, ri
         )}
         {hovered === inst.instanceId && (
           <span style={{ display: "inline-flex", gap: 2 }}>
-            <HoverButton aria-label={`hide ${inst.instanceId}`} onClick={() => onToggleHidden(inst.instanceId)}
+            <HoverButton aria-label={`hide ${inst.instanceId}`} title={inst.hidden ? "Show" : "Hide"} onClick={() => onToggleHidden(inst.instanceId)}
               style={ctrlBtn(chrome)} hoverStyle={{ background: chrome.hover, color: chrome.text }}>
               {inst.hidden ? <IconEyeOff size={13} /> : <IconEye size={13} />}
             </HoverButton>
-            <HoverButton aria-label={`settings ${inst.instanceId}`} onClick={() => onEditIndicator(inst.instanceId)}
+            <HoverButton aria-label={`settings ${inst.instanceId}`} title="Settings" onClick={() => onEditIndicator(inst.instanceId)}
               style={ctrlBtn(chrome)} hoverStyle={{ background: chrome.hover, color: chrome.text }}><IconGear size={13} /></HoverButton>
-            <HoverButton aria-label={`remove ${inst.instanceId}`} onClick={() => onRemoveIndicator(inst.instanceId)}
+            <HoverButton aria-label={`remove ${inst.instanceId}`} title="Remove" onClick={() => onRemoveIndicator(inst.instanceId)}
               style={ctrlBtn(chrome)} hoverStyle={{ background: chrome.hover, color: chrome.text }}><IconClose size={13} /></HoverButton>
           </span>
         )}
@@ -113,14 +113,14 @@ export function TVLegend({ chrome, symbol, timeframe, instances, paneOffsets, ri
               {paneInstances(pane).map(indicatorRow)}
             </div>
             <div style={paneControlBox(paneOffsets[pane] ?? 0)}>
-              <HoverButton aria-label={collapsed ? `expand pane ${pane}` : `collapse pane ${pane}`}
+              <HoverButton aria-label={collapsed ? `expand pane ${pane}` : `collapse pane ${pane}`} title={collapsed ? "Expand pane" : "Collapse pane"}
                 onClick={() => onToggleCollapsePane(pane)} style={ctrlBtn(chrome)}
                 hoverStyle={{ background: chrome.hover, color: chrome.text }}>
                 <span style={{ display: "inline-flex", transform: collapsed ? "rotate(180deg)" : undefined }}>
                   <IconChevronDown size={13} />
                 </span>
               </HoverButton>
-              <HoverButton aria-label={`close pane ${pane}`} onClick={() => onClosePane(pane)} style={ctrlBtn(chrome)}
+              <HoverButton aria-label={`close pane ${pane}`} title="Close pane" onClick={() => onClosePane(pane)} style={ctrlBtn(chrome)}
                 hoverStyle={{ background: chrome.hover, color: chrome.text }}>
                 <IconClose size={13} />
               </HoverButton>

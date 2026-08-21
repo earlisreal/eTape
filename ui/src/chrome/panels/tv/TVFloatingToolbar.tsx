@@ -33,28 +33,28 @@ export function TVFloatingToolbar({ chrome, rect, color, width, lineStyle, onCol
       zIndex: 8, display: "flex", alignItems: "center", gap: 4, padding: "4px 6px", background: chrome.surface,
       border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, boxShadow: "0 4px 16px rgba(0,0,0,.22)", font: `${TV_GEOM.uiFont}px ${TV_FONT}`, fontVariantNumeric: "tabular-nums" }}>
       <div style={{ position: "relative" }}>
-        <HoverButton aria-label="color" onClick={() => setPalette((v) => !v)} hoverStyle={swatchHover}
+        <HoverButton aria-label="color" title="Color" onClick={() => setPalette((v) => !v)} hoverStyle={swatchHover}
           style={{ width: 20, height: 20, borderRadius: TV_GEOM.radius, border: `1px solid ${chrome.border}`, background: color, cursor: "pointer" }} />
         {palette && (
           <div style={{ position: "absolute", top: 26, left: 0, zIndex: 20, display: "grid", gridTemplateColumns: "repeat(4, 20px)", gap: 4,
             padding: 6, background: chrome.surface, border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, boxShadow: "0 6px 20px rgba(0,0,0,.2)" }}>
             {TV_SWATCHES.map((c) => (
-              <HoverButton key={c} aria-label={`color ${c}`} onClick={() => { onColor(c); setPalette(false); }} hoverStyle={swatchHover}
+              <HoverButton key={c} aria-label={`color ${c}`} title={`Color ${c}`} onClick={() => { onColor(c); setPalette(false); }} hoverStyle={swatchHover}
                 style={{ width: 20, height: 20, borderRadius: TV_GEOM.radius, border: `1px solid ${chrome.border}`, background: c, cursor: "pointer" }} />
             ))}
           </div>
         )}
       </div>
       {[1, 2, 3, 4].map((w) => (
-        <HoverButton key={w} aria-label={`width ${w}`} onClick={() => onWidth(w)} hoverStyle={iconHover}
+        <HoverButton key={w} aria-label={`width ${w}`} title={`Width ${w}`} onClick={() => onWidth(w)} hoverStyle={iconHover}
           style={{ ...iconBtn, width: 22, color: w === width ? chrome.accent : chrome.text, fontWeight: w === width ? 700 : 500 }}>{w}</HoverButton>
       ))}
-      <select aria-label="line style" value={lineStyle} onChange={(e) => onLineStyle(e.target.value as LineStyleName)}
+      <select aria-label="line style" title="Line style" value={lineStyle} onChange={(e) => onLineStyle(e.target.value as LineStyleName)}
         style={{ background: chrome.bg, border: `1px solid ${chrome.border}`, borderRadius: TV_GEOM.radius, color: chrome.text, padding: "2px 4px" }}>
         {LINE_STYLE_NAMES.map((n) => <option key={n} value={n}>{n}</option>)}
       </select>
-      <HoverButton aria-label="clone" onClick={onClone} style={iconBtn} hoverStyle={iconHover}><IconClone size={15} /></HoverButton>
-      <HoverButton aria-label="delete drawing" onClick={onDelete} style={iconBtn} hoverStyle={iconHover}><IconTrash size={15} /></HoverButton>
+      <HoverButton aria-label="clone" title="Clone" onClick={onClone} style={iconBtn} hoverStyle={iconHover}><IconClone size={15} /></HoverButton>
+      <HoverButton aria-label="delete drawing" title="Delete" onClick={onDelete} style={iconBtn} hoverStyle={iconHover}><IconTrash size={15} /></HoverButton>
     </div>
   );
 }
