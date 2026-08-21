@@ -80,6 +80,26 @@ describe("DrawingsPrimitive", () => {
     expect(calls).toContainEqual(["lineTo", 400, 990]);
   });
 
+  it("adds label-only price highlights for hlines and trendline anchors", () => {
+    const createPriceLine = vi.fn((options: unknown) => options);
+    const removePriceLine = vi.fn();
+    const p = new DrawingsPrimitive(LIGHT);
+    p.attached({ chart: chartApi, series: { ...series, createPriceLine, removePriceLine } as unknown, requestUpdate: vi.fn() } as unknown as SeriesAttachedParameter<Time>);
+    p.setDrawings([
+      hline,
+      { id: "t", symbol: "US.AAPL", kind: "trendline", anchors: [{ timeMs: 0, price: 20 }, { timeMs: 60_000, price: 30 }], createdMs: 1, updatedMs: 1 },
+    ]);
+
+    expect(createPriceLine).toHaveBeenCalledTimes(3);
+    expect(createPriceLine.mock.calls.map(([options]) => options)).toEqual([
+      expect.objectContaining({ price: 10, lineVisible: false, axisLabelVisible: true, axisLabelColor: LIGHT.text }),
+      expect.objectContaining({ price: 20, lineVisible: false, axisLabelVisible: true, axisLabelColor: LIGHT.text }),
+      expect.objectContaining({ price: 30, lineVisible: false, axisLabelVisible: true, axisLabelColor: LIGHT.text }),
+    ]);
+    p.setHideAll(true);
+    expect(removePriceLine).toHaveBeenCalledTimes(3);
+  });
+
   it("skips a drawing whose price is off-screen (null coordinate)", () => {
     const p = new DrawingsPrimitive(LIGHT);
     p.attached({ chart: chartApi, series: { priceToCoordinate: () => null }, requestUpdate: vi.fn() } as unknown as SeriesAttachedParameter<Time>);

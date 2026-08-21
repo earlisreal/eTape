@@ -1,11 +1,11 @@
 import type {
-  ISeriesApi, ISeriesPrimitive, SeriesAttachedParameter, Time,
+  IPriceLine, ISeriesApi, ISeriesPrimitive, SeriesAttachedParameter, Time,
   IPrimitivePaneView, IPrimitivePaneRenderer, Logical,
 } from "lightweight-charts";
 import type { Palette } from "../../palette";
 import type { Anchor, Drawing, DrawingKind } from "./model";
 import { extendToEdge, timeToLogical } from "./geometry";
-import { LINE_DASH } from "../lineStyle";
+import { LINE_DASH, LWC_LINE_STYLE } from "../lineStyle";
 import { DEFAULT_DRAWING_WIDTH, DEFAULT_LINE_STYLE } from "./model";
 
 // Repo convention: derive the draw target structurally instead of importing
@@ -35,27 +35,35 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
   private selectionId: string | null = null;
   private transient: Transient | null = null;
   private hideAll = false;
+  private priceLines: IPriceLine[] = [];
 
   constructor(private palette: Palette) {}
 
   attached(p: SeriesAttachedParameter<Time>): void {
+    this.clearPriceLines();
     this.series = p.series as ISeriesApi<"Candlestick">;
     this.chartApi = p.chart;
     this.requestUpdateFn = p.requestUpdate;
+    this.syncPriceLines();
   }
   detached(): void {
+    this.clearPriceLines();
     this.series = null;
     this.chartApi = null;
     this.requestUpdateFn = null;
   }
 
   requestUpdate(): void { this.requestUpdateFn?.(); }
-  setPalette(p: Palette): void { this.palette = p; }
-  setDrawings(d: Drawing[]): void { this.drawings = d; }
+  setPalette(p: Palette): void { this.palette = p; this.syncPriceLines(); }
+  setDrawings(d: Drawing[]): void {
+    if (this.drawings.length === d.length && this.drawings.every((x, i) => x === d[i])) return;
+    this.drawings = d;
+    this.syncPriceLines();
+  }
   setBars(barsMs: readonly number[], timeframeMs: number): void { this.barsMs = barsMs; this.timeframeMs = timeframeMs; }
-  setSelection(id: string | null): void { this.selectionId = id; }
+  setSelection(id: string | null): void { if (this.selectionId !== id) { this.selectionId = id; this.syncPriceLines(); } }
   setTransient(t: Transient | null): void { this.transient = t; }
-  setHideAll(hidden: boolean): void { this.hideAll = hidden; }
+  setHideAll(hidden: boolean): void { if (this.hideAll !== hidden) { this.hideAll = hidden; this.syncPriceLines(); } }
 
   paneViews(): readonly IPrimitivePaneView[] {
     const draw = (target: DrawTarget) => this.draw(target);
@@ -76,6 +84,34 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
     const x = this.xOf(a, hr);
     const y = this.yOf(a, vr);
     return x === null || y === null ? null : { x, y };
+  }
+
+  private clearPriceLines(): void {
+    if (this.series?.removePriceLine) for (const line of this.priceLines) this.series.removePriceLine(line);
+    this.priceLines = [];
+  }
+
+  private syncPriceLines(): void {
+    if (!this.series?.createPriceLine || !this.series.removePriceLine) return;
+    this.clearPriceLines();
+    if (this.hideAll) return;
+    for (const d of this.drawings) {
+      if (d.kind !== "hline" && d.kind !== "trendline") continue;
+      const selected = d.id === this.selectionId;
+      const color = selected ? this.palette.accent : (d.color ?? this.palette.text);
+      for (const [index, anchor] of d.anchors.entries()) {
+        this.priceLines.push(this.series.createPriceLine({
+          id: `drawing-price-${d.id}-${index}`,
+          price: anchor.price,
+          color,
+          lineWidth: 1,
+          lineStyle: LWC_LINE_STYLE.solid,
+          lineVisible: false,
+          axisLabelVisible: true,
+          axisLabelColor: color,
+        }));
+      }
+    }
   }
 
   private draw(target: DrawTarget): void {
