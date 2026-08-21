@@ -173,9 +173,8 @@ export function chartOptions(p: Palette, timeframe: string): DeepChartOptions {
       vertLine: { color: p.crosshair },
       horzLine: { color: p.crosshair },
     },
-    // minimumWidth: keeps the right axis column from re-sizing (and shifting the whole
-    // plot area) as tick-label widths change with price digit count.
-    rightPriceScale: { borderColor: p.border, scaleMargins: CANDLE_SCALE_MARGINS, minimumWidth: 64 },
+    // Let the library size the axis to the labels instead of reserving a fixed gutter.
+    rightPriceScale: { borderColor: p.border, scaleMargins: CANDLE_SCALE_MARGINS, minimumWidth: 0 },
     localization: { timeFormatter: (time) => timeFormatter(time, timeframe) },
     timeScale: {
       borderColor: p.border, rightOffset: RIGHT_OFFSET_BARS, secondsVisible: true, timeVisible: true,

@@ -15,7 +15,7 @@ describe("chartTheme", () => {
     expect(o.crosshair?.vertLine?.color).toBe(LIGHT.crosshair);
   });
 
-  it("pads the right edge via rightOffset, locks the left edge, and keeps a stable price-scale width", () => {
+  it("keeps chart padding while letting the price axis use its native width", () => {
     const o = chartOptions(LIGHT, "1m");
     // Regression guard: LWC's TimeScale hardcodes the max right offset to the
     // literal constant 0 whenever fixRightEdge is true, REGARDLESS of
@@ -26,7 +26,7 @@ describe("chartTheme", () => {
     // reintroduced without a compile error.
     expect(o.timeScale?.fixLeftEdge).toBe(false);
     expect(o.timeScale?.rightOffset).toBe(RIGHT_OFFSET_BARS);
-    expect(o.rightPriceScale?.minimumWidth).toBeGreaterThan(0);
+    expect(o.rightPriceScale?.minimumWidth).toBe(0);
   });
 
   it("lets eTape manage 10s/1m follow while retaining native follow elsewhere", () => {
