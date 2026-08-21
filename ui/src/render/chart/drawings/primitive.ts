@@ -13,7 +13,7 @@ import { DEFAULT_DRAWING_WIDTH, DEFAULT_LINE_STYLE } from "./model";
 export type DrawTarget = Parameters<IPrimitivePaneRenderer["draw"]>[0];
 
 export interface Transient {
-  ghost?: { kind: DrawingKind; anchors: Anchor[] };
+  ghost?: { kind: DrawingKind; anchors: Anchor[]; style?: Pick<Drawing, "color" | "width" | "lineStyle"> | undefined };
   measure?: { from: Anchor; to: Anchor };
 }
 
@@ -131,8 +131,13 @@ export class DrawingsPrimitive implements ISeriesPrimitive<Time>, DrawingsPrimit
         ctx.setLineDash([]);
       }
       if (this.transient?.ghost) {
-        ctx.setLineDash([4, 3]);
-        this.strokeShape(ctx, this.transient.ghost.kind, this.transient.ghost.anchors, hr, vr, width, this.palette.accent, 1);
+        const ghost = this.transient.ghost;
+        const trendline = ghost.kind === "trendline";
+        const style = trendline ? ghost.style : undefined;
+        ctx.setLineDash(trendline ? LINE_DASH[style?.lineStyle ?? DEFAULT_LINE_STYLE] : [4, 3]);
+        this.strokeShape(ctx, ghost.kind, ghost.anchors, hr, vr, width,
+          trendline ? style?.color ?? this.palette.text : this.palette.accent,
+          trendline ? style?.width ?? DEFAULT_DRAWING_WIDTH : 1);
         ctx.setLineDash([]);
       }
       if (this.transient?.measure) this.measure(ctx, this.transient.measure, hr, vr);

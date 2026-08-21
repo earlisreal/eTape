@@ -127,6 +127,19 @@ describe("DrawingInteraction", () => {
     expect(drawn[0].anchors).toHaveLength(2);
   });
 
+  it("passes the persisted trendline style to its placement ghost", () => {
+    const store = new DrawingStore();
+    const prim = fakePrimitive();
+    const { host, fire } = fakeHost();
+    const styleForKind = vi.fn(() => ({ color: "#F23645", width: 3, lineStyle: "dotted" as const }));
+    const di = new DrawingInteraction(host, fakeFacade(), prim, store, ctx(), { newId, styleForKind });
+    di.setTool("trendline");
+    fire("pointerdown", { clientX: 0, clientY: 990 });
+    expect(prim.setTransient).toHaveBeenLastCalledWith({ ghost: expect.objectContaining({
+      style: { color: "#F23645", width: 3, lineStyle: "dotted" },
+    }) });
+  });
+
   it("requires two clicks for an extended line, same as trendline", () => {
     const store = new DrawingStore();
     const prim = fakePrimitive();

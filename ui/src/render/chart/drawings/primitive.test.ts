@@ -245,8 +245,21 @@ describe("DrawingsPrimitive per-drawing style + hide-all", () => {
     // Only the ghost's stroke should fire: the committed hline stays hidden behind hideAll,
     // while the in-progress placement preview renders unconditionally.
     expect(strokes).toHaveLength(1);
-    expect(strokes[0].color).toBe(LIGHT.accent);
-    expect(strokes[0].dash).toEqual([4, 3]);
+    expect(strokes[0].color).toBe(LIGHT.text);
+    expect(strokes[0].width).toBe(DEFAULT_DRAWING_WIDTH);
+    expect(strokes[0].dash).toEqual(LINE_DASH[DEFAULT_LINE_STYLE]);
+  });
+
+  it("uses persisted style for a trendline placement ghost", () => {
+    const p = new DrawingsPrimitive(LIGHT);
+    attach(p);
+    p.setTransient({ ghost: {
+      kind: "trendline", anchors: [{ timeMs: 0, price: 20 }, { timeMs: 60_000, price: 10 }],
+      style: { color: "#F23645", width: 3, lineStyle: "dotted" },
+    } });
+    const { ctx, strokes } = styleCtx();
+    draw(p, ctx);
+    expect(strokes[0]).toEqual({ color: "#F23645", width: 3, dash: LINE_DASH.dotted });
   });
 
   it("applies a partial style override (color only) and falls back to defaults for width/lineStyle", () => {
