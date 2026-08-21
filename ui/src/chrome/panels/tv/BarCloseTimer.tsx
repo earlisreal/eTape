@@ -44,8 +44,9 @@ function useNowTick(nowFn: () => number): number {
 // coordinate LWC's tag would have centered on, so LWC's dotted price line (still
 // drawn — only the tag is suppressed) meets the badge exactly where the price row
 // sits. Plain position:absolute DOM over the canvas (same overlay layer as
-// TVLegend) — pointerEvents:none so it never steals clicks/drag from the
-// interactive chart underneath.
+// TVLegend). It stays below LWC's top canvas (z-index 2), so the native
+// crosshair price label remains on top while the timer stays above the series
+// canvas. pointerEvents:none keeps it from stealing chart input.
 export function BarCloseTimer({ now: nowFn = Date.now, chrome, timeframe, price, lastPriceY, rightAxisWidth, paneBottom, up }: BarCloseTimerProps): JSX.Element {
   const now = useNowTick(nowFn);
   const text = formatCountdown(remainingToBarCloseMs(timeframe as Timeframe, now));
@@ -60,7 +61,7 @@ export function BarCloseTimer({ now: nowFn = Date.now, chrome, timeframe, price,
         right: 0,
         top,
         width: rightAxisWidth,
-        zIndex: 5,
+        zIndex: 1,
         pointerEvents: "none",
         textAlign: "center",
         fontVariantNumeric: "tabular-nums",

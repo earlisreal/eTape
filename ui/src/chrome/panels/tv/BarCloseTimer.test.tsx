@@ -111,7 +111,9 @@ describe("BarCloseTimer", () => {
     render(
       <BarCloseTimer chrome={chrome} timeframe="1m" price="205.60" lastPriceY={100} rightAxisWidth={60} paneBottom={400} up={true} />,
     );
-    expect(screen.getByTestId("bar-close-timer").style.pointerEvents).toBe("none");
+    const badge = screen.getByTestId("bar-close-timer");
+    expect(badge.style.pointerEvents).toBe("none");
+    expect(badge.style.zIndex).toBe("1");
     vi.useRealTimers();
   });
 });
