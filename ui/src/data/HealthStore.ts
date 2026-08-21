@@ -1,7 +1,12 @@
 import { ReactStore } from "./store";
 import type { HealthLink, HealthSnapshot, SysEvent, QuotaInfo, SnapshotMsg, DeltaMsg } from "../wire/contract";
 
-interface HealthState { links: HealthLink[]; events: SysEvent[]; quota?: QuotaInfo }
+interface HealthState {
+  links: HealthLink[];
+  events: SysEvent[];
+  feedConnected: boolean | null;
+  quota?: QuotaInfo;
+}
 const MAX_EVENTS = 500;
 
 export class HealthStore extends ReactStore<HealthState> {
@@ -17,7 +22,7 @@ export class HealthStore extends ReactStore<HealthState> {
   // one link once set.
   private uiEngine: HealthLink | null = null;
 
-  constructor() { super({ links: [], events: [] }); }
+  constructor() { super({ links: [], events: [], feedConnected: null }); }
 
   apply(m: SnapshotMsg | DeltaMsg): void {
     const cur = this.getSnapshot();
@@ -39,8 +44,21 @@ export class HealthStore extends ReactStore<HealthState> {
       const incoming =
         m.payload == null ? [] : Array.isArray(m.payload) ? (m.payload as SysEvent[]) : [m.payload as SysEvent];
       const events = [...cur.events, ...incoming];
-      this.set({ ...cur, events: events.slice(Math.max(0, events.length - MAX_EVENTS)) });
+      let feedConnected = cur.feedConnected;
+      for (const event of incoming) {
+        if (event.kind === "feed-up") feedConnected = true;
+        if (event.kind === "feed-down") feedConnected = false;
+      }
+      this.set({ ...cur, events: events.slice(Math.max(0, events.length - MAX_EVENTS)), feedConnected });
     }
+  }
+
+  // A non-empty live tape delta is positive evidence even if the low-frequency
+  // feed transition has not arrived yet. Do not emit React updates per tick.
+  markFeedAlive(): void {
+    const cur = this.getSnapshot();
+    if (cur.feedConnected === true) return;
+    this.set({ ...cur, feedConnected: true });
   }
 
   // Sets (or clears, via null) the UI-computed override for the "ui-engine"
@@ -70,6 +88,6 @@ export class HealthStore extends ReactStore<HealthState> {
     // exactOptionalPropertyTypes forbids assigning `quota: undefined` outright
     // (the optional key must be omitted, not present-with-undefined), so spread
     // it in only when the engine has ever reported a quota reading.
-    this.set({ links, events: cur.events, ...(this.engineQuota === undefined ? {} : { quota: this.engineQuota }) });
+    this.set({ links, events: cur.events, feedConnected: cur.feedConnected, ...(this.engineQuota === undefined ? {} : { quota: this.engineQuota }) });
   }
 }

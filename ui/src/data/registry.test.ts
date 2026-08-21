@@ -31,6 +31,7 @@ describe("routeToStore", () => {
     const spy = vi.spyOn(perf, "countTicks");
     routeToStore(stores, { kind: "delta", topic: "md.tape", payload: ticks });
     expect(spy).toHaveBeenCalledWith(2);
+    expect(stores.health.getSnapshot().feedConnected).toBe(true);
     spy.mockRestore();
   });
 

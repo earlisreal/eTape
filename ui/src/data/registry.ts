@@ -70,10 +70,13 @@ export function routeToStore(stores: Stores, m: SnapshotMsg | DeltaMsg): void {
   switch (m.topic) {
     case "md.quote": stores.quote.apply(m); return;
     case "md.book": stores.book.apply(m); return;
-    case "md.tape":
-      perf.countTicks((m.payload as Tick[]).length); // no-op while perf is disabled (the default)
+    case "md.tape": {
+      const ticks = m.payload as Tick[];
+      perf.countTicks(ticks.length); // no-op while perf is disabled (the default)
+      if (m.kind === "delta" && ticks.length > 0) stores.health.markFeedAlive();
       stores.tape.apply(m);
       return;
+    }
     case "md.tape.status": stores.tapeStatus.apply(m); return;
     case "md.bars": stores.bars.apply(m); return;
     case "md.indicator": stores.indicators.apply(m); return;

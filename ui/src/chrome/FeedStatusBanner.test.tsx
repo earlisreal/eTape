@@ -7,15 +7,20 @@ import { BootStore } from "../data/BootStore";
 import { ThemeProvider } from "./ThemeProvider";
 import type { ConnState } from "../wire/WsClient";
 
-function storeWith(links: unknown[]): HealthStore {
+function storeWith(links: unknown[], feedKind?: "feed-up" | "feed-down"): HealthStore {
   const s = new HealthStore();
   // SnapshotMsg/DeltaMsg carry `payload` (NOT `data`); HealthStore reads m.payload.links
   s.apply({ kind: "snapshot", topic: "sys.health", payload: { links } } as never);
+  if (feedKind) {
+    s.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: "t", kind: feedKind, detail: "moomoo OpenD feed",
+    } } as never);
+  }
   return s;
 }
 
 // Boot store fixed at "ready" (post-boot) for every test below except the
-// dedicated boot-gating test — this file's own scope is the moomoo-link
+// dedicated boot-gating test — this file's own scope is the feed-state
 // gating, which only applies once the boot window is over; BootStatusBanner.test.tsx
 // and the boot-gating test here cover the "connecting"/"sealing" phases.
 function readyBoot(): BootStore {
@@ -36,10 +41,10 @@ function Wrapped(
 }
 
 describe("FeedStatusBanner", () => {
-  it("is visible when engineState is open and engine-moomoo is down", () => {
+  it("is visible when engineState is open and the feed reports down", () => {
     const s = storeWith([
       { link: "engine-moomoo", ms: null, min: null, avg: null, max: null, status: "down" },
-    ]);
+    ], "feed-down");
     render(<Wrapped health={s} engineState="open" onOpenConnection={() => {}} />);
     const banner = screen.getByTestId("feed-status-banner");
     expect(banner).toBeTruthy();
@@ -55,6 +60,22 @@ describe("FeedStatusBanner", () => {
     expect(screen.queryByTestId("feed-status-banner")).toBeNull();
   });
 
+  it("ignores a stale engine-moomoo probe failure without a feed-down event", () => {
+    const s = storeWith([
+      { link: "engine-moomoo", ms: null, min: null, avg: null, max: null, status: "down" },
+    ]);
+    render(<Wrapped health={s} engineState="open" onOpenConnection={() => {}} />);
+    expect(screen.queryByTestId("feed-status-banner")).toBeNull();
+  });
+
+  it("is hidden when the feed reports up even if the RTT probe is down", () => {
+    const s = storeWith([
+      { link: "engine-moomoo", ms: null, min: null, avg: null, max: null, status: "down" },
+    ], "feed-up");
+    render(<Wrapped health={s} engineState="open" onOpenConnection={() => {}} />);
+    expect(screen.queryByTestId("feed-status-banner")).toBeNull();
+  });
+
   it("is hidden when no sys.health snapshot has arrived yet (no engine-moomoo entry)", () => {
     const s = storeWith([]);
     render(<Wrapped health={s} engineState="open" onOpenConnection={() => {}} />);
@@ -64,7 +85,7 @@ describe("FeedStatusBanner", () => {
   it("is hidden when the WS to the engine is not open, even though moomoo is down (ReconnectOverlay precedence)", () => {
     const s = storeWith([
       { link: "engine-moomoo", ms: null, min: null, avg: null, max: null, status: "down" },
-    ]);
+    ], "feed-down");
     render(<Wrapped health={s} engineState="reconnecting" onOpenConnection={() => {}} />);
     expect(screen.queryByTestId("feed-status-banner")).toBeNull();
   });
@@ -90,7 +111,7 @@ describe("FeedStatusBanner", () => {
     const onOpenConnection = vi.fn();
     const s = storeWith([
       { link: "engine-moomoo", ms: null, min: null, avg: null, max: null, status: "down" },
-    ]);
+    ], "feed-down");
     render(<Wrapped health={s} engineState="open" onOpenConnection={onOpenConnection} />);
     fireEvent.click(screen.getByTestId("feed-banner-open-connection"));
     expect(onOpenConnection).toHaveBeenCalled();

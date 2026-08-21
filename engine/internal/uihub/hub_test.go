@@ -201,6 +201,44 @@ func TestHubIndicatorReadyBroadcastsExactInstanceID(t *testing.T) {
 	t.Fatal("subscribed sys.events consumer received no indicator-ready event")
 }
 
+func TestHubConnUpdateBroadcastsFeedState(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	c := &fakeClient{nid: 1}
+	h.Register(c)
+	h.Subscribe(c, wsmsg.TopicSysEvents)
+	syncHub(h)
+	h.PublishMD(md.ConnUpdate{Up: true})
+	h.PublishMD(md.ConnUpdate{Up: false})
+	syncHub(h)
+
+	var got []wsmsg.SysEvent
+	for _, frame := range c.got() {
+		var msg struct {
+			Kind    string          `json:"kind"`
+			Topic   string          `json:"topic"`
+			Payload json.RawMessage `json:"payload"`
+		}
+		if err := json.Unmarshal(frame, &msg); err != nil || msg.Topic != string(wsmsg.TopicSysEvents) || msg.Kind != "delta" {
+			continue
+		}
+		var event wsmsg.SysEvent
+		if err := json.Unmarshal(msg.Payload, &event); err == nil && (event.Kind == "feed-up" || event.Kind == "feed-down") {
+			got = append(got, event)
+		}
+	}
+	if len(got) != 2 || got[0].Kind != "feed-up" || got[1].Kind != "feed-down" {
+		t.Fatalf("feed events = %+v, want feed-up then feed-down", got)
+	}
+	if got[0].Detail != "moomoo OpenD feed connected" || got[1].Detail != "moomoo OpenD feed disconnected" {
+		t.Fatalf("feed event details = %+v", got)
+	}
+}
+
 func TestHubQueryChartWindowSkipBarsReturnsOnlyIndicators(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	h := newTestHub(clk)

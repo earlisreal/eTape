@@ -17,3 +17,7 @@ payload as optional `estimatedLuld`. The mirror caches it by symbol, merges it
 into the cached book, republishes the ordinary book replacement, and includes
 it in snapshots even when the derived update arrived before the first book.
 There is no new WebSocket topic and no client-side market-data merge.
+
+Feed connectivity is surfaced to subscribed UIs as low-frequency `sys.events`
+`feed-up`/`feed-down` transitions. The periodic `sys.health` OpenD RTT probe
+remains diagnostic and does not override the feed state shown to users.

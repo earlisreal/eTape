@@ -5,11 +5,10 @@ import type { ConnState } from "../wire/WsClient";
 import { useTheme } from "./ThemeProvider";
 import { Button } from "./controls/Button";
 
-// Slim, unmissable notice strip shown under the top bar whenever the
-// engine-moomoo link (OpenD's RTT probe) is reported down while the UI's own
-// WebSocket to the engine is genuinely open. If the WS itself isn't open, the
-// app already shows a full-screen ReconnectOverlay for that outage — this
-// banner must stay hidden then to avoid a confusing double-message.
+// Slim, unmissable notice strip shown under the top bar when the OpenD feed
+// explicitly reports down while the UI's own WebSocket is genuinely open. If
+// the WS itself isn't open, the app already shows a full-screen ReconnectOverlay
+// for that outage — this banner must stay hidden then to avoid a double-message.
 export function FeedStatusBanner(
   { health, boot, engineState, onOpenConnection }:
   { health: HealthStore; boot: BootStore; engineState: ConnState; onOpenConnection: () => void },
@@ -20,8 +19,7 @@ export function FeedStatusBanner(
 
   if (bootState.phase !== "ready") return null; // expected boot maintenance — the neutral BootStatusBanner owns this window
   if (engineState !== "open") return null;
-  const moomoo = state.links.find((l) => l.link === "engine-moomoo");
-  if (!moomoo || moomoo.status !== "down") return null;
+  if (state.feedConnected !== false) return null;
 
   return (
     <div

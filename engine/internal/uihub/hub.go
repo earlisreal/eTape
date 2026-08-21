@@ -888,6 +888,17 @@ func (h *Hub) handleMD(u md.Update) {
 	for _, s := range h.m.applyMD(u) {
 		h.stageMD(s)
 	}
+	if conn, ok := u.(md.ConnUpdate); ok {
+		kind := "feed-down"
+		detail := "moomoo OpenD feed disconnected"
+		if conn.Up {
+			kind = "feed-up"
+			detail = "moomoo OpenD feed connected"
+		}
+		event := h.buildSysEvent(kind, detail)
+		h.m.applyPub(event)
+		h.broadcast(event, false)
+	}
 	if ready, ok := u.(md.HistoryReadyUpdate); ok {
 		kind := "history-ready"
 		if ready.Prepared {

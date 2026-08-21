@@ -10,6 +10,10 @@ const eventDelta = (seq: number): DeltaMsg => ({
   kind: "delta", topic: "sys.events",
   payload: { seq, ts: `t${seq}`, kind: "reconnect", detail: `attempt ${seq}` },
 });
+const feedDelta = (kind: "feed-up" | "feed-down"): DeltaMsg => ({
+  kind: "delta", topic: "sys.events",
+  payload: { seq: 1, ts: "t", kind, detail: "moomoo OpenD feed" },
+});
 
 describe("HealthStore", () => {
   it("routes health links and appends events, notifying subscribers", () => {
@@ -23,6 +27,24 @@ describe("HealthStore", () => {
     expect(snap.links[0].link).toBe("ui-engine");
     expect(snap.events.map((e) => e.seq)).toEqual([1, 2]);
     expect(cb).toHaveBeenCalledTimes(3);
+  });
+
+  it("tracks feed transitions and promotes live tape evidence without per-tick updates", () => {
+    const s = new HealthStore();
+    const cb = vi.fn();
+    s.subscribe(cb);
+
+    s.apply(feedDelta("feed-up"));
+    expect(s.getSnapshot().feedConnected).toBe(true);
+
+    s.apply(feedDelta("feed-down"));
+    expect(s.getSnapshot().feedConnected).toBe(false);
+
+    s.markFeedAlive();
+    expect(s.getSnapshot().feedConnected).toBe(true);
+    const calls = cb.mock.calls.length;
+    s.markFeedAlive();
+    expect(cb).toHaveBeenCalledTimes(calls);
   });
 
   it("caps the event log at 500 entries", () => {
