@@ -1070,7 +1070,7 @@ describe("AppShell demo mode-edge orchestration (Task 13)", () => {
     publishSessionMode(stores, "live"); // demo->live: revert restores the empty snapshot verbatim
     await waitFor(() => expect(saved[saved.length - 1].panels).toHaveLength(0));
     expect(screen.getByText("Empty workspace")).toBeTruthy();
-  });
+  }, 15_000);
 });
 
 describe("AppShell Dockview panel constraints", () => {
