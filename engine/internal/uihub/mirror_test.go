@@ -34,6 +34,43 @@ func TestMirrorQuoteJoinsBookBidAsk(t *testing.T) {
 	}
 }
 
+func TestMirrorEstimatedLULDBookOrderingAndSnapshot(t *testing.T) {
+	m := testMirror()
+	value := md.EstimatedLULD{
+		Lower: 95, Upper: 105, Reference: 100, Tier: "T1",
+		State: md.LULDEstimated, RegistryAsOf: "2026-07-01",
+	}
+	if got := m.applyMD(md.EstimatedLULDUpdate{Symbol: "US.AAPL", Value: value}); got != nil {
+		t.Fatalf("derived value before first book staged a frame: %+v", got)
+	}
+	book := md.BookUpdate{Book: feed.Book{Symbol: "US.AAPL", TsMs: 1,
+		Bids: []feed.BookLevel{{Price: 99, Volume: 10}}, Asks: []feed.BookLevel{{Price: 101, Volume: 20}}}}
+	frames := m.applyMD(book)
+	if len(frames) != 1 {
+		t.Fatalf("book frames = %+v", frames)
+	}
+	got := frames[0].Payload.(wsmsg.Book)
+	if got.EstimatedLULD == nil || got.EstimatedLULD.Lower != 95 || got.EstimatedLULD.State != "estimated" {
+		t.Fatalf("book did not merge cached LULD: %+v", got)
+	}
+
+	value.State = md.LULDFrozen
+	value.Reason = "provider_status"
+	frames = m.applyMD(md.EstimatedLULDUpdate{Symbol: "US.AAPL", Value: value})
+	if len(frames) != 1 || frames[0].Topic != wsmsg.TopicBook {
+		t.Fatalf("changed derived value did not replace cached book: %+v", frames)
+	}
+	got = frames[0].Payload.(wsmsg.Book)
+	if got.EstimatedLULD == nil || got.EstimatedLULD.State != "frozen" || got.EstimatedLULD.Reason != "provider_status" {
+		t.Fatalf("replacement book lost LULD: %+v", got)
+	}
+
+	snapshot := m.snapshotFrames(wsmsg.TopicBook)
+	if len(snapshot) != 1 || snapshot[0].Payload.(wsmsg.Book).EstimatedLULD == nil {
+		t.Fatalf("book snapshot lost LULD: %+v", snapshot)
+	}
+}
+
 func TestMirrorBarsSeriesUpsertAndSnapshot(t *testing.T) {
 	m := testMirror()
 	m.applyMD(md.BarUpdate{Bar: md.Bar{Symbol: "US.AAPL", TF: session.TF1m, BucketMs: 60_000, C: 1, InProgress: true}})

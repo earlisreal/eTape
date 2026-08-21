@@ -140,18 +140,42 @@ type Tick struct {
 	RecvTsMs       int64
 }
 
+// ProviderStatus is the source-neutral semantic status of a provider's
+// optional security-status field. Unknown means the provider omitted it;
+// absence is deliberately not treated as normal.
+type ProviderStatus uint8
+
+const (
+	ProviderStatusUnknown ProviderStatus = iota
+	ProviderStatusNormal
+	ProviderStatusNonnormal
+)
+
+func (s ProviderStatus) String() string {
+	switch s {
+	case ProviderStatusNormal:
+		return "normal"
+	case ProviderStatusNonnormal:
+		return "nonnormal"
+	default:
+		return "unknown"
+	}
+}
+
 // Quote is the latest basic quote. moomoo's BasicQot carries no bid/ask —
 // top-of-book comes from Book; the md core composes the two.
 type Quote struct {
-	Symbol    string
-	TsMs      int64
-	Last      float64
-	Open      float64
-	High      float64
-	Low       float64
-	PrevClose float64
-	Volume    int64
-	Turnover  float64
+	Symbol            string
+	TsMs              int64
+	Last              float64
+	Open              float64
+	High              float64
+	Low               float64
+	PrevClose         float64
+	Volume            int64
+	Turnover          float64
+	ProviderSuspended bool
+	ProviderStatus    ProviderStatus
 }
 
 // BookLevel is one price level of one side.

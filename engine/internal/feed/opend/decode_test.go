@@ -296,6 +296,36 @@ func TestDecodePushBasicQot(t *testing.T) {
 	}
 }
 
+func TestDecodeBasicQotProviderStatusPresence(t *testing.T) {
+	cases := []struct {
+		name      string
+		isSusp    *bool
+		secStatus *int32
+		want      feed.ProviderStatus
+		suspended bool
+	}{
+		{name: "absent status is unknown", want: feed.ProviderStatusUnknown},
+		{name: "explicit normal", secStatus: proto.Int32(1), want: feed.ProviderStatusNormal},
+		{name: "explicit unknown is nonnormal", secStatus: proto.Int32(0), want: feed.ProviderStatusNonnormal},
+		{name: "suspended status is nonnormal", secStatus: proto.Int32(9), want: feed.ProviderStatusNonnormal},
+		{name: "unrecognized status is nonnormal", secStatus: proto.Int32(999), want: feed.ProviderStatusNonnormal},
+		{name: "affirmative suspension", isSusp: proto.Bool(true), want: feed.ProviderStatusUnknown, suspended: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			q, err := decodeBasicQot(&qotcommon.BasicQot{
+				Security: sec(11, "AAPL"), IsSuspended: tc.isSusp, SecStatus: tc.secStatus,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if q.ProviderStatus != tc.want || q.ProviderSuspended != tc.suspended {
+				t.Fatalf("provider status = (%v, suspended=%v), want (%v, suspended=%v)", q.ProviderStatus, q.ProviderSuspended, tc.want, tc.suspended)
+			}
+		})
+	}
+}
+
 func TestDecodeBasicQotNoSecurity(t *testing.T) {
 	if _, err := decodeBasicQot(&qotcommon.BasicQot{}); err == nil {
 		t.Fatal("BasicQot without Security must be a decode error")

@@ -37,6 +37,7 @@ type mirror struct {
 	// market data (keyed by symbol unless noted)
 	quotes          map[string]wsmsg.Quote
 	books           map[string]wsmsg.Book
+	luld            map[string]wsmsg.EstimatedLULD
 	tape            map[string][]wsmsg.Tick // bounded recent ring per symbol
 	significance    significanceEngine
 	bars            map[string][]wsmsg.Bar            // key "SYMBOL:TF", sorted by bucketStart
@@ -76,6 +77,7 @@ func newMirror(venues []venueMeta, global wsmsg.GlobalLimitsView, tapeCap, newsC
 		global:       global,
 		quotes:       map[string]wsmsg.Quote{},
 		books:        map[string]wsmsg.Book{},
+		luld:         map[string]wsmsg.EstimatedLULD{},
 		tape:         map[string][]wsmsg.Tick{},
 		significance: newSignificanceEngine(),
 		bars:         map[string][]wsmsg.Bar{},
@@ -114,6 +116,9 @@ func (m *mirror) applyMD(u md.Update) []staged {
 		return []staged{{Topic: wsmsg.TopicQuote, Payload: q}}
 	case md.BookUpdate:
 		b := mapBook(v.Book)
+		if l, ok := m.luld[v.Book.Symbol]; ok {
+			b.EstimatedLULD = &l
+		}
 		m.books[v.Book.Symbol] = b
 		// keep the cached quote's bid/ask fresh (no separate quote delta emitted)
 		if q, ok := m.quotes[v.Book.Symbol]; ok {
@@ -121,6 +126,15 @@ func (m *mirror) applyMD(u md.Update) []staged {
 			m.quotes[v.Book.Symbol] = q
 		}
 		return []staged{{Topic: wsmsg.TopicBook, Payload: b}}
+	case md.EstimatedLULDUpdate:
+		l := mapEstimatedLULD(v.Value)
+		m.luld[v.Symbol] = l
+		if b, ok := m.books[v.Symbol]; ok {
+			b.EstimatedLULD = &l
+			m.books[v.Symbol] = b
+			return []staged{{Topic: wsmsg.TopicBook, Payload: b}}
+		}
+		return nil
 	case md.TapeUpdate:
 		ticks := append([]feed.Tick(nil), v.Ticks...)
 		sort.SliceStable(ticks, func(i, j int) bool {

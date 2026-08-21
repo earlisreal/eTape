@@ -222,16 +222,26 @@ func decodeBasicQot(b *qotcommon.BasicQot) (feed.Quote, error) {
 	if b.GetSecurity() == nil {
 		return feed.Quote{}, fmt.Errorf("opend: BasicQot without security")
 	}
+	providerStatus := feed.ProviderStatusUnknown
+	if b.SecStatus != nil {
+		if b.GetSecStatus() == int32(qotcommon.SecurityStatus_SecurityStatus_Normal) {
+			providerStatus = feed.ProviderStatusNormal
+		} else {
+			providerStatus = feed.ProviderStatusNonnormal
+		}
+	}
 	return feed.Quote{
-		Symbol:    formatSymbol(b.GetSecurity()),
-		TsMs:      tsMs(b.GetUpdateTimestamp()),
-		Last:      b.GetCurPrice(),
-		Open:      b.GetOpenPrice(),
-		High:      b.GetHighPrice(),
-		Low:       b.GetLowPrice(),
-		PrevClose: b.GetLastClosePrice(),
-		Volume:    b.GetVolume(),
-		Turnover:  b.GetTurnover(),
+		Symbol:            formatSymbol(b.GetSecurity()),
+		TsMs:              tsMs(b.GetUpdateTimestamp()),
+		Last:              b.GetCurPrice(),
+		Open:              b.GetOpenPrice(),
+		High:              b.GetHighPrice(),
+		Low:               b.GetLowPrice(),
+		PrevClose:         b.GetLastClosePrice(),
+		Volume:            b.GetVolume(),
+		Turnover:          b.GetTurnover(),
+		ProviderSuspended: b.GetIsSuspended(),
+		ProviderStatus:    providerStatus,
 	}, nil
 }
 

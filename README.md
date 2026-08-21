@@ -40,6 +40,10 @@ and the broker of your choice for execution, and everything else is free and ope
   direction, straight off the tick feed.
 - **A real Level 2 DOM ladder.** Full-depth order book rendered on canvas, fed by
   moomoo's tick-and-depth feed — not a 1-level quote widget.
+- **A clearly labelled local LULD aid.** During regular hours, supported symbols
+  may show an `EST LULD` approximation built from the local eligible-print feed.
+  It is never an official band, halt signal, order control, or risk control;
+  unsupported/expired symbols remain unavailable.
 - **Broker-agnostic execution.** The same order ticket, hotkeys, and risk gates drive
   TradeZero, Alpaca, or the built-in simulator. Fills come back as generic events and
   land on your chart as markers in real time, whatever the venue.
@@ -194,6 +198,9 @@ scanner keeps the day's leading symbols warm automatically.
 Notes:
 - eTape only ever *reads* market data from OpenD. It never sends trade commands to it
   and never touches your moomoo trade password.
+- The DOM's optional `EST LULD` readout is a local approximation, not an official
+  SIP band or trading-pause indicator. It warms from eligible prints, freezes on
+  provider/transport interruptions, and never changes order or risk behavior.
 - US stocks only for now — one market keeps sessions, timezones, and entitlements simple.
 
 ## Connecting brokers

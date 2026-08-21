@@ -34,6 +34,28 @@
 - Historical requests use completed offline-NYSE-calendar horizons and persisted explored-range coverage. A complete archive therefore makes no Alpaca/Yahoo request on weekends, holidays, or unchanged completed sessions; successful provider-empty intervals are also remembered.
 - Focused charts combine the configured archive windows with concurrent OpenD K_1M and K_DAY cache reads in one ordered core seed and one UI snapshot. Scanner/watch warming is archive-only and cannot occupy the focused foreground slot. Alpaca fills uncovered ranges into the archive asynchronously; Yahoo is the optional daily fallback. `intraday_days` applies to focused charts and scanner/watch warming; it and `daily_years` are plain calendar spans, including weekends and holidays, and newly archived bars appear on the next symbol open.
 
+## Estimated LULD boundary
+
+The DOM's Estimated LULD Band is a local, display-only approximation. It does
+not use Alpaca SIP data, does not call an official LULD band endpoint, and must
+not be interpreted as a Limit State, Straddle State, Trading Pause, reopening,
+or order/risk signal. It consumes OpenD's normalized Last-Eligible prints and
+provider-health fields plus Moomoo's previous close; feed differences around
+openings, corrections, reopenings, and halts can produce different values from
+the SIPs.
+
+Tier and ETP treatment come only from the dated checked-in registry at
+`engine/internal/md/luld_registry.json`. The registry records its review date,
+valid-through date, provenance, and explicit multipliers. The initial snapshot
+is reviewed against the [LULD Plan](https://www.luldplan.com/), Nasdaq's [Tier 1
+ETP section](https://www.nasdaqtrader.com/Trader.aspx?id=ETPSection1), and the
+dated Nasdaq [ETP update notice](https://www.nasdaqtrader.com/TraderNews.aspx?id=ETA2026-34).
+It is intentionally an allowlist: unknown or expired symbols show no band,
+and there is no runtime fetch or name-based Tier 2 fallback. Moomoo's
+[real-time quote fields](https://openapi.moomoo.com/moomoo-api-doc/en/quote/get-stock-quote.html)
+and [security status values](https://openapi.moomoo.com/moomoo-api-doc/en/quote/quote.html)
+are provider signals only.
+
 ## Research-only alternatives
 
 Tiger, Polygon, Finnhub, Alpha Vantage, FMP, Benzinga-class feeds, and direct EDGAR/press-wire ingestion were evaluated only. No production runtime depends on them. Historical research remains at `41aa9993777cab4ea59e711775094c516032ebf2^:docs/`.

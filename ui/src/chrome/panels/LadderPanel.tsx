@@ -12,6 +12,7 @@ import {
   buildLadderState,
   clampLadderOffset,
   flashAlpha,
+  luldAccessibleText,
   LADDER_ROW_H,
   maxLadderOffset,
   normalizeLadderLevels,
@@ -122,6 +123,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
     let lastBookRev = -1;
     let lastTapeRev = -1;
     let lastForce = -1;
+    let lastAccessibleText = "";
     const off = scheduler.register({
       id: `ladder:${config.id}`,
       isDirty: () => {
@@ -161,7 +163,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
           maxLadderOffset(book, levelsRef.current, h),
         );
         if (!applyCanvasSize(canvas, ctx, w, h, window.devicePixelRatio || 1)) return;
-        paintLadder(ctx, buildLadderState({
+        const paintState = buildLadderState({
           symbol,
           book,
           orders: stores.exec.workingOrdersFor(symbol),
@@ -173,7 +175,13 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
           palette: paletteRef.current,
           levels: levelsRef.current,
           rowOffset: scrollOffsetRef.current,
-        }));
+        });
+        const accessibleText = luldAccessibleText(symbol, paintState.luld);
+        if (accessibleText !== lastAccessibleText) {
+          canvas.setAttribute("aria-label", accessibleText);
+          lastAccessibleText = accessibleText;
+        }
+        paintLadder(ctx, paintState);
       },
     });
 
@@ -209,7 +217,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
   return (
     <>
       {actionsSlot === undefined ? gearBtn : actionsSlot ? createPortal(gearBtn, actionsSlot) : null}
-      {displaySymbol ? <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "100%" }} />
+      {displaySymbol ? <canvas ref={canvasRef} role="img" style={{ display: "block", width: "100%", height: "100%" }} />
         : <div data-testid="ladder-empty-state" style={{ display: "grid", placeItems: "center", height: "100%", color: palette.textMuted }}>Type a symbol to load</div>}
       {settingsOpen && (
         <LadderSettingsDialog chrome={getTvChrome(mode)} levels={levels}

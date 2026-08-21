@@ -8,23 +8,29 @@ package md
 import (
 	"context"
 	"log/slog"
+	"sort"
 	"sync/atomic"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
 
 // Config sizes the core. Zero values get defaults.
 type Config struct {
-	TapeRing     int       // per-symbol tick ring capacity (default 65536)
-	AnchorSecs   int64     // intraday bucket anchor (default session.AnchorSecsDefault)
-	FinalizedBar func(Bar) // optional lossless sink, called before UI emission
+	TapeRing     int         // per-symbol tick ring capacity (default 65536)
+	AnchorSecs   int64       // intraday bucket anchor (default session.AnchorSecsDefault)
+	FinalizedBar func(Bar)   // optional lossless sink, called before UI emission
+	Clock        clock.Clock // optional injected clock for derived time-driven state
 }
 
 type inMsg interface{ isInMsg() }
 
-type eventMsg struct{ ev feed.Event }
+type eventMsg struct {
+	ev feed.Event
+	at time.Time
+}
 type ensureIndicatorMsg struct {
 	connID uint64
 	id     string
@@ -103,8 +109,11 @@ type Core struct {
 	lastSeq     map[string]int64 // per-symbol tick dedup high-water
 	lastDay     map[string]int64 // ET day of lastSeq (sequences restart daily)
 	eligibility map[string]*eligibilityState
+	luld        map[string]*luldCalculator
+	luldVisible map[string]EstimatedLULD
 	bars        *barEngine    // Task 11
 	inds        *indicatorSet // Task 12
+	now         time.Time
 
 	// seeding is true only while barEngine.seedHistory1m/seedDaily are
 	// looping over a history batch. It suppresses barOut's per-bar fan-out
@@ -123,6 +132,9 @@ func New(cfg Config) *Core {
 	if cfg.AnchorSecs == 0 {
 		cfg.AnchorSecs = session.AnchorSecsDefault
 	}
+	if cfg.Clock == nil {
+		cfg.Clock = clock.System{}
+	}
 	return &Core{
 		cfg:         cfg,
 		inbox:       make(chan inMsg, 1024),
@@ -135,8 +147,11 @@ func New(cfg Config) *Core {
 		lastSeq:     make(map[string]int64),
 		lastDay:     make(map[string]int64),
 		eligibility: make(map[string]*eligibilityState),
+		luld:        make(map[string]*luldCalculator),
+		luldVisible: make(map[string]EstimatedLULD),
 		bars:        newBarEngine(cfg.AnchorSecs),
 		inds:        newIndicatorSet(),
+		now:         cfg.Clock.Now(),
 	}
 }
 
@@ -162,8 +177,9 @@ func (c *Core) DroppedUpdates() uint64 { return c.DropStats().Total() }
 // order is preserved. If inbox saturation recurs under full load, split into
 // separate seedCh + liveCh channels.
 func (c *Core) Feed(ev feed.Event) {
+	at := c.cfg.Clock.Now()
 	select {
-	case c.inbox <- eventMsg{ev: ev}:
+	case c.inbox <- eventMsg{ev: ev, at: at}:
 	default:
 		c.droppedInbox.Add(1)
 	}
@@ -176,8 +192,9 @@ func (c *Core) FeedContext(ctx context.Context, ev feed.Event) {
 		c.Feed(ev)
 		return
 	}
+	at := c.cfg.Clock.Now()
 	select {
-	case c.inbox <- eventMsg{ev: ev}:
+	case c.inbox <- eventMsg{ev: ev, at: at}:
 	case <-ctx.Done():
 	}
 }
@@ -251,10 +268,14 @@ func (c *Core) SyncHistory(symbol string) {
 
 // Run is the single writer. It returns when ctx is done.
 func (c *Core) Run(ctx context.Context) error {
+	tick := c.cfg.Clock.NewTicker(time.Second)
+	defer tick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-tick.C():
+			c.applyTime(c.cfg.Clock.Now())
 		case m := <-c.inbox:
 			c.apply(m)
 		}
@@ -303,7 +324,7 @@ func (c *Core) emitBook(b feed.Book) {
 func (c *Core) apply(m inMsg) {
 	switch msg := m.(type) {
 	case eventMsg:
-		c.applyEvent(msg.ev)
+		c.applyEventAt(msg.ev, msg.at)
 	case ensureIndicatorMsg:
 		c.inds.ensure(c, msg.connID, msg.id, msg.spec) // Task 12
 		// Indicator snapshots stay engine-side; UI pulls matching viewport after
@@ -343,7 +364,11 @@ func (c *Core) apply(m inMsg) {
 	}
 }
 
-func (c *Core) applyEvent(ev feed.Event) {
+func (c *Core) applyEventAt(ev feed.Event, at time.Time) {
+	if at.IsZero() {
+		at = c.currentTime()
+	}
+	c.now = at
 	switch e := ev.(type) {
 	case feed.TicksEvent:
 		if e.Seed && len(e.Ticks) > 0 {
@@ -358,6 +383,8 @@ func (c *Core) applyEvent(ev feed.Event) {
 		quote := c.quotes.set(e.Quote)
 		c.bars.seedAnchor(quote.Symbol, quote.Last, quote.PrevClose, quote.TsMs)
 		c.emit(QuoteUpdate{Quote: quote})
+		c.luldFor(quote.Symbol).onQuote(quote, at)
+		c.publishLULD(quote.Symbol, at)
 	case feed.BookEvent:
 		stored := c.books.set(e.Book)
 		c.emit(BookUpdate{Book: stored})
@@ -370,12 +397,69 @@ func (c *Core) applyEvent(ev feed.Event) {
 			c.bars.apply1m(c, e.Bars) // Task 11
 		}
 	case feed.ConnUpEvent:
+		c.advanceTransport(false, at)
 		c.emit(ConnUpdate{Up: true})
 	case feed.ConnDownEvent:
+		c.advanceTransport(true, at)
 		c.emit(ConnUpdate{Up: false})
 	case feed.ResyncedEvent:
 		c.bars.markGaps() // Task 11: next tick-derived bars carry Gap
 		c.emit(ResyncedUpdate{})
+	}
+}
+
+func (c *Core) currentTime() time.Time {
+	if !c.now.IsZero() {
+		return c.now
+	}
+	return c.cfg.Clock.Now()
+}
+
+func (c *Core) luldFor(symbol string) *luldCalculator {
+	state := c.luld[symbol]
+	if state == nil {
+		state = newLULDCalculator(symbol, defaultLULDRegistry)
+		c.luld[symbol] = state
+	}
+	return state
+}
+
+func (c *Core) publishLULD(symbol string, now time.Time) {
+	if symbol == "" {
+		return
+	}
+	value := c.luldFor(symbol).advance(now)
+	if previous, ok := c.luldVisible[symbol]; ok && previous == value {
+		return
+	}
+	c.luldVisible[symbol] = value
+	c.emit(EstimatedLULDUpdate{Symbol: symbol, Value: value})
+}
+
+func (c *Core) advanceTransport(down bool, now time.Time) {
+	symbols := make([]string, 0, len(c.luld))
+	for symbol := range c.luld {
+		symbols = append(symbols, symbol)
+	}
+	sort.Strings(symbols)
+	for _, symbol := range symbols {
+		c.luld[symbol].onTransport(down, now)
+		c.publishLULD(symbol, now)
+	}
+}
+
+// applyTime is the single core-level time event for sliding windows, warm-up,
+// registry expiry, and RTH transitions. It never creates a publication for an
+// unchanged visible value.
+func (c *Core) applyTime(now time.Time) {
+	c.now = now
+	symbols := make([]string, 0, len(c.luld))
+	for symbol := range c.luld {
+		symbols = append(symbols, symbol)
+	}
+	sort.Strings(symbols)
+	for _, symbol := range symbols {
+		c.publishLULD(symbol, now)
 	}
 }
 
@@ -435,6 +519,14 @@ func (c *Core) applyTicks(e feed.TicksEvent) {
 		tape.append(t)
 	}
 	c.bars.applyTicks(c, accepted) // Task 11 (10s + shadow 1m)
+	touched := make(map[string]bool)
+	for _, t := range accepted {
+		c.luldFor(t.Symbol).onPrint(t, c.currentTime())
+		touched[t.Symbol] = true
+	}
+	for symbol := range touched {
+		c.publishLULD(symbol, c.currentTime())
+	}
 	c.emit(TapeUpdate{Symbol: symbol, Ticks: accepted})
 	for i := len(accepted) - 1; i >= 0; i-- {
 		if accepted[i].LastEligible {
@@ -459,6 +551,16 @@ func (c *Core) seedSessionTicks(symbol string, ticks []feed.Tick) {
 		return
 	}
 	accepted = c.stampEligibility(accepted)
+	now := c.cfg.Clock.Now()
+	c.now = now
+	touched := make(map[string]bool)
+	for _, t := range accepted {
+		c.luldFor(t.Symbol).onPrint(t, now)
+		touched[t.Symbol] = true
+	}
+	for symbol := range touched {
+		c.publishLULD(symbol, now)
+	}
 	c.seeding = true
 	c.bars.applyTicks(c, accepted) // agg10 + shadow; barOut suppressed
 	c.seeding = false

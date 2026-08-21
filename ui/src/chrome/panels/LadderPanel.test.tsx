@@ -166,6 +166,21 @@ describe("LadderPanel", () => {
     expect(() => surface().paint()).not.toThrow();
   });
 
+  it("publishes Estimated LULD state through the canvas accessible name", () => {
+    const { stores, surface, container } = renderLadder();
+    stores.book.apply({
+      kind: "snapshot", topic: "md.book",
+      payload: {
+        symbol: "US.AAPL", bids: [{ price: 99, size: 10 }], asks: [{ price: 101, size: 20 }], ts: "t",
+        estimatedLuld: { lower: 95, upper: 105, reference: 100, tier: "T1", state: "estimated", reason: "", registryAsOf: "2026-07-01" },
+      },
+    });
+    surface().paint();
+    expect(container.querySelector("canvas")?.getAttribute("aria-label")).toContain("values 95.00–105.00");
+    expect(container.querySelector("canvas")?.getAttribute("aria-label")).toContain("tier T1");
+    expect(container.querySelector("canvas")?.getAttribute("aria-label")).toContain("registry as of 2026-07-01");
+  });
+
   it("paints the no-entitlement state for non-US symbols without throwing", () => {
     const { surface, linkGroups } = renderLadder();
     linkGroups.focus("green", "HK.00700");

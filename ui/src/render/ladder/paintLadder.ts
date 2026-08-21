@@ -6,11 +6,13 @@ import { FONTS } from "../palette";
 import { formatPrice, formatSize } from "../format";
 import {
   flashAlpha,
+  formatEstimatedLULD,
   LADDER_HEADER_H,
   LADDER_ROW_H,
   LADDER_SPREAD_H,
   type LadderPaintState,
   type LadderRow,
+  visibleLULDMarkers,
 } from "./ladderState";
 export { LADDER_ROW_H } from "./ladderState";
 
@@ -40,7 +42,8 @@ export function paintLadder(ctx: CanvasRenderingContext2D, s: LadderPaintState):
   ctx.fillStyle = p.textMuted;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  if (s.spread !== null) ctx.fillText(spreadLabel(s), mid, LADDER_SPREAD_H / 2);
+  const strip = s.luld ? formatEstimatedLULD(s.luld, w) : spreadLabel(s);
+  if (strip) ctx.fillText(strip, mid, LADDER_SPREAD_H / 2);
   ctx.strokeStyle = p.border;
   ctx.beginPath();
   ctx.moveTo(0, LADDER_SPREAD_H - 0.5);
@@ -81,6 +84,28 @@ export function paintLadder(ctx: CanvasRenderingContext2D, s: LadderPaintState):
     if (y >= s.height) break;
     drawSide(ctx, s, s.asks[i], "ask", mid, y);
   }
+  drawLULDMarkers(ctx, s);
+}
+
+function drawLULDMarkers(ctx: CanvasRenderingContext2D, s: LadderPaintState): void {
+  const markers = visibleLULDMarkers({ luld: s.luld, asks: s.asks, bids: s.bids, rowOffset: s.rowOffset, height: s.height });
+  if (markers.length === 0) return;
+  ctx.save();
+  ctx.font = `9px ${FONTS.mono}`;
+  ctx.fillStyle = s.palette.warn;
+  ctx.strokeStyle = s.palette.warn;
+  ctx.lineWidth = 1;
+  ctx.setLineDash([4, 3]);
+  for (const marker of markers) {
+    ctx.beginPath();
+    ctx.moveTo(0, marker.y + 0.5);
+    ctx.lineTo(s.width, marker.y + 0.5);
+    ctx.stroke();
+    ctx.textBaseline = "bottom";
+    ctx.textAlign = "left";
+    ctx.fillText(`${marker.label} ${formatPrice(marker.price, s.decimals)}`, PAD, marker.y - 1);
+  }
+  ctx.restore();
 }
 
 function drawSide(

@@ -17,11 +17,22 @@ type BookLevel struct {
 	Size  int64   `json:"size"`
 }
 
+type EstimatedLULD struct {
+	Lower        float64 `json:"lower"`
+	Upper        float64 `json:"upper"`
+	Reference    float64 `json:"reference"`
+	Tier         string  `json:"tier"`
+	State        string  `json:"state"`
+	Reason       string  `json:"reason"`
+	RegistryAsOf string  `json:"registryAsOf"`
+}
+
 type Book struct {
-	Symbol string      `json:"symbol"`
-	Bids   []BookLevel `json:"bids"`
-	Asks   []BookLevel `json:"asks"`
-	Ts     string      `json:"ts"`
+	Symbol        string         `json:"symbol"`
+	Bids          []BookLevel    `json:"bids"`
+	Asks          []BookLevel    `json:"asks"`
+	Ts            string         `json:"ts"`
+	EstimatedLULD *EstimatedLULD `json:"estimatedLuld,omitempty"`
 }
 
 type Tick struct {

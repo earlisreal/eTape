@@ -88,6 +88,7 @@ type IndicatorReadyUpdate struct {
 
 func (QuoteUpdate) isUpdate()          {}
 func (BookUpdate) isUpdate()           {}
+func (EstimatedLULDUpdate) isUpdate()  {}
 func (TapeUpdate) isUpdate()           {}
 func (BarUpdate) isUpdate()            {}
 func (BarSnapshot) isUpdate()          {}

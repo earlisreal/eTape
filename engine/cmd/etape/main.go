@@ -347,7 +347,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			st.ArchiveDaily(stored)
 		}
 	}
-	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs, FinalizedBar: archiveFinalizedBar})
+	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs, FinalizedBar: archiveFinalizedBar, Clock: uihubClk})
 	coreDone := make(chan struct{})
 	go func() {
 		defer close(coreDone)

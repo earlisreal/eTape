@@ -4,7 +4,8 @@ import { getPalette } from "../palette";
 import {
   buildLadderSides, buildLadderState, clampLadderOffset, DEFAULT_LADDER_LEVELS,
   depthFraction, entitledForDepth, flashAlpha, maxLadderOffset, normalizeLadderLevels,
-  workingOrderMarks, FLASH_MS, MAX_LADDER_LEVELS, MIN_LADDER_LEVELS,
+  workingOrderMarks, FLASH_MS, MAX_LADDER_LEVELS, MIN_LADDER_LEVELS, formatEstimatedLULD,
+  luldAccessibleText, visibleLULDMarkers,
 } from "./ladderState";
 
 function book(overrides: Partial<Book> = {}): Book {
@@ -162,5 +163,34 @@ describe("buildLadderState", () => {
     expect(s.bids).toHaveLength(60);
     expect(s.bids[0].sizeFraction).toBe(0.01);
     expect(s.rowOffset).toBe(20);
+  });
+
+  it("formats the compact Estimated LULD readout and preserves EST when narrow", () => {
+    const luld = { lower: 3.32, upper: 3.68, reference: 3.5, tier: "T1", state: "estimated", reason: "", registryAsOf: "2026-07-01" };
+    expect(formatEstimatedLULD(luld)).toBe("EST LULD 3.32–3.68 · T1 · ESTIMATED · REG 2026-07-01");
+    expect(formatEstimatedLULD(luld, 150)).toBe("EST LULD 3.32–3.68 · ESTIMATED");
+    expect(luldAccessibleText("US.AAPL", luld)).toContain("values 3.32–3.68; tier T1; registry as of 2026-07-01");
+  });
+
+  it("keeps unavailable, warming, and frozen states explicit", () => {
+    const base = { lower: 0, upper: 0, reference: 0, tier: "T1", registryAsOf: "2026-07-01" };
+    expect(formatEstimatedLULD({ ...base, state: "unavailable", reason: "outside_rth" })).toBe("EST LULD — · OUTSIDE RTH");
+    expect(formatEstimatedLULD({ ...base, state: "warming", reason: "warming" })).toBe("EST LULD — · WARMING");
+    expect(formatEstimatedLULD({ ...base, state: "frozen", reason: "provider_status" })).toBe("EST LULD — · ESTIMATE FROZEN — PROVIDER STATUS");
+  });
+
+  it("draws only in-range lower and upper marker positions, including interpolation", () => {
+    const luld = { lower: 99.5, upper: 101.5, reference: 100.5, tier: "T1", state: "estimated", reason: "", registryAsOf: "2026-07-01" };
+    const markers = visibleLULDMarkers({
+      luld,
+      bids: [{ price: 100, size: 1, sizeFraction: 0 }, { price: 99, size: 1, sizeFraction: 0 }],
+      asks: [{ price: 101, size: 1, sizeFraction: 0 }, { price: 102, size: 1, sizeFraction: 0 }],
+      rowOffset: 0,
+      height: 36 + 4 * 22,
+    });
+    expect(markers.map((m) => m.label)).toEqual(["L", "U"]);
+    expect(markers[0].y).toBeCloseTo(36 + 22, 6);
+    expect(markers[1].y).toBeCloseTo(36 + 22, 6);
+    expect(visibleLULDMarkers({ luld: { ...luld, lower: 98, upper: 103 }, bids: [{ price: 100, size: 1, sizeFraction: 0 }], asks: [{ price: 101, size: 1, sizeFraction: 0 }], rowOffset: 0, height: 80 })).toEqual([]);
   });
 });

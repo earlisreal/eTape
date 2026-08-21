@@ -174,6 +174,16 @@ func TestMapBookLevelsAndTimestamp(t *testing.T) {
 	}
 }
 
+func TestMapEstimatedLULD(t *testing.T) {
+	w := mapEstimatedLULD(md.EstimatedLULD{
+		Lower: 3.32, Upper: 3.68, Reference: 3.5, Tier: "T1",
+		State: md.LULDEstimated, Reason: "", RegistryAsOf: "2026-07-01",
+	})
+	if w.Lower != 3.32 || w.Upper != 3.68 || w.Reference != 3.5 || w.Tier != "T1" || w.State != "estimated" || w.RegistryAsOf != "2026-07-01" {
+		t.Fatalf("mapped EstimatedLULD = %+v", w)
+	}
+}
+
 func TestMapIndicatorPointFields(t *testing.T) {
 	p := md.Point{TimeMs: 1_783_344_660_000, Value: 42.5}
 	w := mapIndicatorPoint(p)

@@ -122,11 +122,21 @@ export interface BookLevel {
   price: number /* float64 */;
   size: number /* int64 */;
 }
+export interface EstimatedLULD {
+  lower: number /* float64 */;
+  upper: number /* float64 */;
+  reference: number /* float64 */;
+  tier: string;
+  state: string;
+  reason: string;
+  registryAsOf: string;
+}
 export interface Book {
   symbol: string;
   bids: BookLevel[];
   asks: BookLevel[];
   ts: string;
+  estimatedLuld?: EstimatedLULD;
 }
 export interface Tick {
   symbol: string;

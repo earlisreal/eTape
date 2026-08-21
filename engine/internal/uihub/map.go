@@ -227,6 +227,13 @@ func mapBook(b feed.Book) wsmsg.Book {
 	return wsmsg.Book{Symbol: b.Symbol, Bids: bids, Asks: asks, Ts: isoMs(b.TsMs)}
 }
 
+func mapEstimatedLULD(v md.EstimatedLULD) wsmsg.EstimatedLULD {
+	return wsmsg.EstimatedLULD{
+		Lower: v.Lower, Upper: v.Upper, Reference: v.Reference,
+		Tier: v.Tier, State: string(v.State), Reason: v.Reason, RegistryAsOf: v.RegistryAsOf,
+	}
+}
+
 func mapTick(t feed.Tick, level wsmsg.SignificanceLevel) wsmsg.Tick {
 	return wsmsg.Tick{
 		Symbol: t.Symbol, Price: t.Price, Size: t.Volume, Direction: dirToWire(t.Dir),

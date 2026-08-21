@@ -1,6 +1,6 @@
 // Pure paint-state math for the L2 ladder. No DOM, no clocks — nowMs and the
 // palette arrive in the state so painting is deterministic (goldens).
-import type { Book, BookLevel, TickDirection, Order } from "../../wire/contract";
+import type { Book, BookLevel, EstimatedLULD, TickDirection, Order } from "../../wire/contract";
 import type { Palette } from "../palette";
 import { QUOTE_DECIMALS } from "../format";
 import { isWorking, sideIsSell } from "../../wire/orderStatus";
@@ -47,6 +47,7 @@ export interface LadderPaintState {
   bids: LadderRow[];
   decimals: number;
   spread: number | null;
+  luld: EstimatedLULD | null;
   last: LastTrade | null;
   flash: TradeFlash | null;
   orders: OrderMark[];
@@ -139,6 +140,96 @@ export function flashAlpha(flash: TradeFlash | null, nowMs: number): number {
   return 1 - age / FLASH_MS;
 }
 
+function luldReason(reason: string): string {
+  switch (reason) {
+    case "outside_rth": return "OUTSIDE RTH";
+    case "tier_unknown": return "TIER UNKNOWN";
+    case "registry_expired": return "REGISTRY EXPIRED";
+    case "previous_close_unavailable": return "PREV CLOSE UNAVAILABLE";
+    case "transport_interrupted": return "CONNECTION INTERRUPTED";
+    case "provider_status": return "PROVIDER STATUS";
+    default: return reason.replaceAll("_", " ").toUpperCase();
+  }
+}
+
+function luldValues(luld: EstimatedLULD): string {
+  return `${luld.lower.toFixed(2)}–${luld.upper.toFixed(2)}`;
+}
+
+/** Compact fixed-strip copy. The explicit EST qualifier survives narrow widths. */
+export function formatEstimatedLULD(luld: EstimatedLULD | null | undefined, width = Number.POSITIVE_INFINITY): string {
+  if (!luld) return "";
+  if (luld.state === "warming") return "EST LULD — · WARMING";
+  if (luld.state === "estimated") {
+    const values = luldValues(luld);
+    if (width < 160) return `EST LULD ${values} · ESTIMATED`;
+    if (width < 240) return `EST LULD ${values} · ${luld.tier} · ESTIMATED`;
+    return `EST LULD ${values} · ${luld.tier} · ESTIMATED · REG ${luld.registryAsOf}`;
+  }
+  if (luld.state === "frozen" && Number.isFinite(luld.lower) && Number.isFinite(luld.upper) && luld.lower > 0 && luld.upper > 0) {
+    const values = luldValues(luld);
+    const warning = luld.reason === "provider_status" ? "ESTIMATE FROZEN — PROVIDER STATUS" : `ESTIMATE FROZEN — ${luldReason(luld.reason)}`;
+    if (width < 240) return `EST LULD ${values} · ${warning}`;
+    return `EST LULD ${values} · ${luld.tier} · ${warning} · REG ${luld.registryAsOf}`;
+  }
+  if (luld.state === "frozen") return `EST LULD — · ESTIMATE FROZEN — ${luldReason(luld.reason)}`;
+  return `EST LULD — · ${luldReason(luld.reason)}`;
+}
+
+export function luldAccessibleText(symbol: string, luld: EstimatedLULD | null | undefined): string {
+  if (!luld) return `DOM ladder ${symbol}`;
+  const values = luld.state === "estimated" || luld.state === "frozen" ? `; values ${luldValues(luld)}` : "";
+  const registry = luld.registryAsOf ? `; registry as of ${luld.registryAsOf}` : "";
+  const reason = luld.reason ? `; reason ${luldReason(luld.reason)}` : "";
+  return `DOM ladder ${symbol}; Estimated LULD state ${luld.state}${values}; tier ${luld.tier}${registry}${reason}`;
+}
+
+export interface LULDMarker {
+  label: "L" | "U";
+  price: number;
+  y: number;
+}
+
+/** Returns only in-range lower/upper markers for the currently visible rows. */
+export function visibleLULDMarkers(args: {
+  luld: EstimatedLULD | null | undefined;
+  asks: LadderRow[];
+  bids: LadderRow[];
+  rowOffset: number;
+  height: number;
+}): LULDMarker[] {
+  const luld = args.luld;
+  if (!luld || (luld.state !== "estimated" && luld.state !== "frozen")) return [];
+  if (!Number.isFinite(luld.lower) || !Number.isFinite(luld.upper) || luld.lower <= 0 || luld.upper <= 0) return [];
+  const rows = [
+    ...args.bids.map((row, index) => ({ price: row.price, index })),
+    ...args.asks.map((row, index) => ({ price: row.price, index })),
+  ]
+    .filter((row) => row.index >= args.rowOffset && row.index < args.rowOffset + Math.max(1, visibleLadderRows(args.height)))
+    .map((row) => ({ price: row.price, y: LADDER_CHROME_H + (row.index - args.rowOffset) * LADDER_ROW_H + LADDER_ROW_H / 2 }));
+  if (rows.length === 0) return [];
+  rows.sort((a, b) => a.price - b.price);
+  const yFor = (price: number): number | null => {
+    if (price < rows[0].price || price > rows[rows.length - 1].price) return null;
+    for (const row of rows) if (row.price === price) return row.y;
+    for (let i = 1; i < rows.length; i++) {
+      const low = rows[i - 1];
+      const high = rows[i];
+      if (price <= high.price && high.price !== low.price) {
+        return low.y + ((price - low.price) / (high.price - low.price)) * (high.y - low.y);
+      }
+    }
+    return null;
+  };
+  return ([
+    ["L", luld.lower],
+    ["U", luld.upper],
+  ] as const).flatMap(([label, price]) => {
+    const y = yFor(price);
+    return y === null ? [] : [{ label, price, y }];
+  });
+}
+
 export function buildLadderState(args: {
   symbol: string;
   book: Book | undefined;
@@ -162,6 +253,7 @@ export function buildLadderState(args: {
     bids,
     decimals: QUOTE_DECIMALS,
     spread,
+    luld: args.book?.estimatedLuld ?? null,
     last: args.last,
     flash: args.flash,
     orders: workingOrderMarks(args.orders, args.symbol),

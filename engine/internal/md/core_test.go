@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/session"
 )
@@ -375,4 +376,91 @@ func TestSeedDailyAndSeedHistory1mDoNotPanic(t *testing.T) {
 	c.SeedHistory1m("US.AAPL", []feed.Bar{{Symbol: "US.AAPL", BucketMs: t0Ms, O: 1, H: 2, L: 0.5, C: 1.5, Volume: 10}})
 	c.EnsureIndicator(1, "panel-1", IndicatorSpec{Symbol: "US.AAPL", TF: session.TF1m})
 	c.ReleaseIndicator(1, "panel-1")
+}
+
+func TestCorePublishesEstimatedLULDOnlyWhenVisibleStateChanges(t *testing.T) {
+	now := time.UnixMilli(t0Ms)
+	c := New(Config{Clock: clock.NewFake(now)})
+	c.apply(eventMsg{at: now, ev: feed.QuoteEvent{Quote: feed.Quote{
+		Symbol: "US.AAPL", PrevClose: 100, ProviderStatus: feed.ProviderStatusNormal,
+	}}})
+	c.apply(eventMsg{at: now, ev: feed.TicksEvent{Ticks: []feed.Tick{tick(1, 0, 100, 1, feed.Buy)}}})
+	updates := drainLULDUpdates(c)
+	if len(updates) != 1 || updates[0].Value.State != LULDWarming {
+		t.Fatalf("initial LULD updates = %+v, want one warming update", updates)
+	}
+	c.applyTime(now.Add(30 * time.Second))
+	if got := drainLULDUpdates(c); len(got) != 0 {
+		t.Fatalf("unchanged warming state published = %+v", got)
+	}
+	c.applyTime(now.Add(5 * time.Minute))
+	updates = drainLULDUpdates(c)
+	if len(updates) != 1 || updates[0].Value.State != LULDEstimated || updates[0].Value.Lower != 95 || updates[0].Value.Upper != 105 {
+		t.Fatalf("estimated LULD updates = %+v", updates)
+	}
+	c.applyTime(now.Add(5*time.Minute + time.Second))
+	if got := drainLULDUpdates(c); len(got) != 0 {
+		t.Fatalf("unchanged estimated state published = %+v", got)
+	}
+}
+
+func TestCoreReconnectSeedSurvivesResyncedWithoutPrematureReady(t *testing.T) {
+	now := time.UnixMilli(t0Ms)
+	c := New(Config{Clock: clock.NewFake(now)})
+	c.apply(eventMsg{at: now, ev: feed.QuoteEvent{Quote: feed.Quote{
+		Symbol: "US.AAPL", PrevClose: 100, ProviderStatus: feed.ProviderStatusNormal,
+	}}})
+	drainLULDUpdates(c)
+	c.apply(eventMsg{at: now, ev: feed.ConnDownEvent{}})
+	if got := drainLULDUpdates(c); len(got) != 1 || got[0].Value.State != LULDFrozen {
+		t.Fatalf("disconnect LULD state = %+v, want frozen", got)
+	}
+	c.apply(eventMsg{at: now, ev: feed.ConnUpEvent{}})
+	drainLULDUpdates(c)
+	seedAt := now.Add(time.Minute)
+	c.apply(eventMsg{at: seedAt, ev: feed.TicksEvent{Seed: true, Ticks: []feed.Tick{tick(2, 60_000, 100, 1, feed.Buy)}}})
+	if got := drainLULDUpdates(c); len(got) != 0 {
+		t.Fatalf("seed unexpectedly published ready estimate = %+v", got)
+	}
+	c.apply(eventMsg{at: seedAt, ev: feed.ResyncedEvent{}})
+	if got := drainLULDUpdates(c); len(got) != 0 {
+		t.Fatalf("Resynced discarded seed state or published early estimate = %+v", got)
+	}
+	c.applyTime(seedAt.Add(5 * time.Minute))
+	if got := drainLULDUpdates(c); len(got) != 1 || got[0].Value.State != LULDEstimated {
+		t.Fatalf("post-reconnect estimate = %+v, want one estimate after warm-up", got)
+	}
+}
+
+func TestCoreSessionTickSeedUsesCurrentClockForLULDWarmup(t *testing.T) {
+	now := etTime(t, 10, 10)
+	c := New(Config{Clock: clock.NewFake(now)})
+	c.apply(eventMsg{at: now, ev: feed.QuoteEvent{Quote: feed.Quote{
+		Symbol: "US.AAPL", PrevClose: 100, ProviderStatus: feed.ProviderStatusNormal,
+	}}})
+	drainLULDUpdates(c)
+	c.apply(seedSessionTicksMsg{symbol: "US.AAPL", ticks: []feed.Tick{
+		makeLULDPrint(etTime(t, 10, 9), 100),
+	}})
+	if got := drainLULDUpdates(c); len(got) != 0 {
+		t.Fatalf("session seed changed the warming state = %+v", got)
+	}
+	c.applyTime(now.Add(4 * time.Minute))
+	if got := drainLULDUpdates(c); len(got) != 0 {
+		t.Fatalf("historical tick shortened current warm-up = %+v", got)
+	}
+}
+
+func drainLULDUpdates(c *Core) []EstimatedLULDUpdate {
+	var out []EstimatedLULDUpdate
+	for {
+		select {
+		case u := <-c.Updates():
+			if l, ok := u.(EstimatedLULDUpdate); ok {
+				out = append(out, l)
+			}
+		default:
+			return out
+		}
+	}
 }
