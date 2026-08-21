@@ -47,11 +47,18 @@ const newId = () => `id${++ids}`;
 beforeEach(() => { ids = 0; });
 
 describe("DrawingInteraction", () => {
-  it("arming a drawing tool locks pan/zoom", () => {
+  it("arming a locked drawing tool locks pan/zoom", () => {
+    const f = fakeFacade();
+    const di = new DrawingInteraction(fakeHost().host, f, fakePrimitive(), new DrawingStore(), ctx(), { newId });
+    di.setTool("rect");
+    expect(f.setPanZoomEnabled).toHaveBeenLastCalledWith(false);
+  });
+
+  it("keeps pan/zoom enabled while Trend Line preview is pending", () => {
     const f = fakeFacade();
     const di = new DrawingInteraction(fakeHost().host, f, fakePrimitive(), new DrawingStore(), ctx(), { newId });
     di.setTool("trendline");
-    expect(f.setPanZoomEnabled).toHaveBeenLastCalledWith(false);
+    expect(f.setPanZoomEnabled).toHaveBeenLastCalledWith(true);
   });
 
   it("commits an hline on the first click and reverts to select", () => {
@@ -223,11 +230,12 @@ describe("DrawingInteraction", () => {
     expect(prim.setSelection).toHaveBeenLastCalledWith(null);
   });
 
-  it("commits a drag Measure to the session drawing layer without persisting it", () => {
+  it("commits a drag Measure and returns to Select", () => {
     const store = new DrawingStore();
     const prim = fakePrimitive();
     const { host, fire } = fakeHost();
-    const di = new DrawingInteraction(host, fakeFacade(), prim, store, ctx(), { newId });
+    const onToolChange = vi.fn();
+    const di = new DrawingInteraction(host, fakeFacade(), prim, store, ctx(), { newId, onToolChange });
     di.setTool("measure");
     fire("pointerdown", { clientX: 0, clientY: 990 });
     fire("pointermove", { clientX: 10, clientY: 980 });
@@ -235,9 +243,11 @@ describe("DrawingInteraction", () => {
     expect(prim.setTransient).toHaveBeenCalledWith(expect.objectContaining({ measure: expect.anything() }));
     expect(prim.setSessionDrawings.mock.calls.at(-1)?.[0]).toEqual([expect.objectContaining({ kind: "measure" })]);
     expect(store.forSymbol("US.AAPL")).toHaveLength(0);
+    expect(onToolChange).toHaveBeenLastCalledWith("select");
+    expect(di.selectedId()).toBeNull();
   });
 
-  it("keeps multiple click-click Measures in the session drawing layer", () => {
+  it("keeps multiple click-click Measures after rearming the tool", () => {
     const store = new DrawingStore();
     const prim = fakePrimitive();
     const { host, fire } = fakeHost();
@@ -246,6 +256,10 @@ describe("DrawingInteraction", () => {
 
     fire("pointerdown", { clientX: 0, clientY: 990 });
     fire("pointerup", { clientX: 0, clientY: 990 });
+    fire("pointermove", { clientX: 10, clientY: 980 });
+    expect(prim.setTransient).toHaveBeenLastCalledWith({ measure: {
+      from: { timeMs: 0, price: 10 }, to: { timeMs: 60_000, price: 20 },
+    } });
     fire("pointerdown", { clientX: 20, clientY: 980 });
     fire("pointerup", { clientX: 20, clientY: 980 });
 
@@ -256,6 +270,7 @@ describe("DrawingInteraction", () => {
       ],
     })]);
 
+    di.setTool("measure");
     fire("pointerdown", { clientX: 30, clientY: 970 });
     fire("pointerup", { clientX: 30, clientY: 970 });
     fire("pointerdown", { clientX: 40, clientY: 960 });

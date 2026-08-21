@@ -12,14 +12,15 @@ attached to that future chart position as incoming bars consume the buffer.
 
 Measure is a session-only drawing layer: it is not written to DrawingStore or
 restored after a reload, symbol switch, or timeframe switch. Drag from the first
-press to release, or click once for a pending first point and click again to
-finish. The Measure tool stays armed so multiple Measures can be created; a
-direction arrow points from the first anchor to the second. A moved second press
-stays chart navigation and leaves the pending preview. Escape, tool changes,
-symbol/timeframe changes, and right-click cancel a pending first point. Select
-mode exposes the normal drawing handles, movement, floating style toolbar,
-clone, and delete actions. Hide all and clear all drawings include session
-Measures.
+press to release, or click once and move the cursor to preview a measurement;
+click again without moving to finish. A completed Measure returns the toolbar to
+Select; reselect Measure to create another. A direction arrow points from the
+first anchor to the second. Pending Measure and Trend Line previews keep chart
+pan/zoom available. A moved second press stays chart navigation and leaves the
+pending preview. Escape, tool changes, symbol/timeframe changes, and right-click
+cancel a pending first point. Select mode exposes the normal drawing handles,
+movement, floating style toolbar, clone, and delete actions. Hide all and clear
+all drawings include session Measures.
 
 Drawing Tool Styles are workspace-wide per-kind color, width, and line-style
 defaults. The rail gates persisted-style tools until the asynchronous config

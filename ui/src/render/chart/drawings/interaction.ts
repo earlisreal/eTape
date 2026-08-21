@@ -208,9 +208,9 @@ export class DrawingInteraction {
     this.onSelectionChange?.();
   }
 
-  // --- pan/zoom lock: armed tools lock the whole time; select/measure only during a drag ---
+  // --- pan/zoom lock: select/measure/trendline previews remain navigable ---
   private applyPanZoomLock(): void {
-    const armed = this.tool !== "select" && this.tool !== "measure";
+    const armed = this.tool !== "select" && this.tool !== "measure" && this.tool !== "trendline";
     this.facade.setPanZoomEnabled(!armed);
   }
 
@@ -364,6 +364,13 @@ export class DrawingInteraction {
       if (!this.moved(g.down, p)) return;
       this.gesture = { kind: "measuring", from: g.from };
       this.updateMeasure(g.from, p);
+    } else if (g.kind === "measurePending") {
+      const anchor = this.snap(p);
+      if (anchor) {
+        this.gesture = { ...g, to: anchor };
+        this.primitive.setTransient({ measure: { from: g.from, to: anchor } });
+        this.primitive.requestUpdate();
+      }
     } else if (g.kind === "measureSecondPress") {
       const anchor = this.snap(p);
       if (anchor) {
@@ -446,6 +453,9 @@ export class DrawingInteraction {
     this.syncSessionDrawings();
     this.cancelGesture();
     this.setSelectionId(null);
+    this.tool = "select";
+    this.onToolChange?.("select");
+    this.applyPanZoomLock();
   }
 
   private moved(from: Px, to: Px): boolean {
