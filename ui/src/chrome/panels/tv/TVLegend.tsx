@@ -69,7 +69,7 @@ export function TVLegend({ chrome, symbol, timeframe, instances, paneOffsets, ri
     return (
       <div key={inst.instanceId} data-testid={`legend-row-${inst.instanceId}`}
         onMouseEnter={() => setHovered(inst.instanceId)} onMouseLeave={() => setHovered((h) => (h === inst.instanceId ? null : h))}
-        style={{ display: "flex", alignItems: "center", gap: 6, pointerEvents: "auto" }}>
+        style={{ display: "flex", alignItems: "center", alignSelf: "flex-start", gap: 6, pointerEvents: "auto" }}>
         <span style={{ color: chrome.muted }}>{legendLabel(inst)}</span>
         {descs.map((s, idx) => <span key={s.slot} data-testid={`legend-ind-${inst.instanceId}-${idx}`} ref={setCell(`ind-${inst.instanceId}-${idx}`)} />)}
         {inst.type === "MACD" && (

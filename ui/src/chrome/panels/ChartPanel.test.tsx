@@ -735,6 +735,13 @@ describe("ChartPanel", () => {
     }));
   });
 
+  it("keeps an indicator hover target content-sized so blank chart space stays pannable", () => {
+    const { getByRole } = renderChart();
+    fireEvent.click(getByRole("button", { name: "indicators" }));
+    fireEvent.click(screen.getByRole("button", { name: "add VWAP" }));
+    expect((screen.getByTestId("legend-row-c1:VWAP-0") as HTMLElement).style.alignSelf).toBe("flex-start");
+  });
+
   it("hydrates a VWAP added after the chart snapshot is already loaded", async () => {
     const fromMs = Date.parse("2026-07-09T13:30:00.000Z");
     const toMs = Date.parse("2026-07-09T13:31:00.000Z") + 1;
