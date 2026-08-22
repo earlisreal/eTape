@@ -34,3 +34,19 @@ func TestEngineServiceUsesSharedAdmissionGate(t *testing.T) {
 		t.Fatalf("post-stop query error = %v, want %v", err, wailsruntime.ErrStopping)
 	}
 }
+
+func TestEngineServiceMutationUsesSharedAdmissionGate(t *testing.T) {
+	runtime := wailsruntime.New()
+	service := NewEngineService(runtime)
+	ConfigureEngineMutations(service, MutationSources{Watchlist: &mutationWatchlist{}})
+
+	result, err := service.WatchlistAdd(context.Background(), WatchlistMutationArgs{Symbol: "US.AAPL"})
+	if err != nil || result.Status != MutationAccepted || result.Revision != 1 {
+		t.Fatalf("watchlist result = %#v, err=%v", result, err)
+	}
+
+	runtime.BeginStop()
+	if _, err := service.GetScannerFilters(context.Background()); !errors.Is(err, wailsruntime.ErrStopping) {
+		t.Fatalf("post-stop mutation error = %v, want %v", err, wailsruntime.ErrStopping)
+	}
+}

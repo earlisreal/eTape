@@ -41,4 +41,12 @@ describe("WatchlistStore", () => {
     expect(s.getSnapshot().symbols).toEqual([]);
     expect(s.has("US.X")).toBe(false);
   });
+
+  it("ignores a stream snapshot older than a binding mutation result", () => {
+    const s = new WatchlistStore();
+    s.apply(msg({ refreshedAt: "t2", revision: 2, symbols: ["US.AAPL"], rows: [] }));
+    s.applyMutation({ revision: 2, symbols: ["US.TSLA"] });
+    s.apply(msg({ refreshedAt: "t1", revision: 1, symbols: ["US.AAPL"], rows: [] }));
+    expect(s.getSnapshot().symbols).toEqual(["US.TSLA"]);
+  });
 });

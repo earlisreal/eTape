@@ -7,15 +7,20 @@ export {
 };
 
 export {
+    MutationStatus,
     Side
 } from "./models.js";
 
 export type {
     Bar,
     CarriedPosition,
+    DeleteCredentialArgs,
     ExportFillsArgs,
     ExportFillsResult,
     Fill,
+    Gate,
+    GateLimitsView,
+    GlobalLimitsView,
     IndicatorPoint,
     IndicatorSeriesWindow,
     LocateEligibility,
@@ -24,6 +29,8 @@ export type {
     LocateQuoteError,
     LocateQuoteResult,
     LocateRecord,
+    MutationResult,
+    PutCredentialArgs,
     QueryChartWindowArgs,
     QueryChartWindowResult,
     QueryCycleFillsArgs,
@@ -32,5 +39,19 @@ export type {
     QueryLocateArgs,
     QueryLocateEligibilityArgs,
     QueryLocateQuotesArgs,
-    QueryLocatesArgs
+    QueryLocatesArgs,
+    ScannerFilters,
+    ScannerFiltersMutationResult,
+    ScannerFiltersView,
+    SeedView,
+    SetScannerFiltersArgs,
+    SetVenueSetupArgs,
+    TestAccount,
+    TestConnectionArgs,
+    TestConnectionResult,
+    Venue,
+    VenueConfig,
+    VenueSetup,
+    WatchlistMutationArgs,
+    WatchlistMutationResult
 } from "./models.js";

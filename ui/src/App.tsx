@@ -25,6 +25,7 @@ import { PerfHud } from "./perf/PerfHud";
 import { initUiLogFromQuery, uiLog } from "./logging/logger";
 import { isWailsStreamAvailable, makeWailsSocketFactory, WAILS_STREAM_URL } from "./wire/WailsStream";
 import { makeQueryClient, type QueryClient } from "./wire/queries";
+import { makeMutationClient, type MutationClient } from "./wire/mutations";
 
 function EventToastBridge({ client }: { client: WsClient }): null {
   const toast = useToasts();
@@ -98,7 +99,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry, reannounceGate, queries } = useMemo(() => {
+  const { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry, reannounceGate, queries, mutations } = useMemo(() => {
     const stores = makeStores();
     const wails = isWailsStreamAvailable();
     const client = new WsClient({
@@ -118,6 +119,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
       onMarketClockSample: (sample) => stores.marketClock.update(sample),
     });
     const queries: QueryClient = makeQueryClient(wails, (name, args) => client.sendQuery(name, args));
+    const mutations: MutationClient = makeMutationClient(wails, (name, args) => client.sendCommand(name, args));
     const scheduler = new Scheduler(browserRaf, (id, err) => {
       const detail = err instanceof Error ? (err.stack ?? `${err.name}: ${err.message}`) : String(err);
       uiLog.error(`painter crashed painterId=${id}: ${detail}`, { painterId: id, error: err });
@@ -137,7 +139,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     // real mode as a no-op "unchanged" resolve, not a spurious "changed" wait.
     const reannounceGate = new ReannounceGate({ timeoutMs: 5000, initialMode: "pending" });
     const demandRegistry = new DemandRegistry(client, () => reannounceGate.gate());
-    return { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry, reannounceGate, queries };
+    return { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry, reannounceGate, queries, mutations };
   }, [workspaceName]);
 
   useEffect(() => {
@@ -183,7 +185,8 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     sendCommand: (name: string, args: unknown) => client.sendCommand(name, args),
     sendQuery: (name: string, args: unknown) => client.sendQuery(name, args),
     queries,
-  }), [client, queries]);
+    mutations,
+  }), [client, queries, mutations]);
 
   return (
     <ThemeProvider commands={commands}>

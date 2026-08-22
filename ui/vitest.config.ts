@@ -67,7 +67,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'wire',
-          include: ['src/wire/WsClient.test.ts', 'src/wire/WailsStream.test.ts'],
+          include: ['src/wire/WsClient.test.ts', 'src/wire/WailsStream.test.ts', 'src/wire/mutations.test.ts'],
         },
       },
       {

@@ -280,6 +280,7 @@ type ScannerRankPayload struct {
 	Rows        []ScannerRow   `json:"rows"`
 	Filters     ScannerFilters `json:"filters,omitempty"`
 	Baseline    bool           `json:"baseline,omitempty"`
+	Revision    uint64         `json:"revision,omitempty"`
 }
 
 type ScannerFilters struct {
@@ -316,6 +317,7 @@ type WatchlistRowsPayload struct {
 	RefreshedAt *string        `json:"refreshedAt" tstype:"string | null,required"`
 	Symbols     []string       `json:"symbols"`
 	Rows        []WatchlistRow `json:"rows"`
+	Revision    uint64         `json:"revision,omitempty"`
 }
 
 type WatchlistAddArgs struct {

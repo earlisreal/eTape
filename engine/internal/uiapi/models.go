@@ -175,3 +175,140 @@ type QueryLocateArgs struct {
 	Venue    string `json:"venue"`
 	LocateID string `json:"locateId"`
 }
+
+type MutationStatus string
+
+const (
+	MutationAccepted MutationStatus = "accepted"
+	MutationBlocked  MutationStatus = "blocked"
+)
+
+type MutationResult struct {
+	Status   MutationStatus `json:"status"`
+	Reason   string         `json:"reason"`
+	Revision uint64         `json:"revision"`
+}
+
+type ScannerFilters struct {
+	Mode           string   `json:"mode"`
+	MinChangePct   float64  `json:"minChangePct"`
+	MaxFloatShares *float64 `json:"maxFloatShares"`
+	MinVolume      float64  `json:"minVolume"`
+	MinVolumeRatio float64  `json:"minVolumeRatio"`
+	FloatUnit      string   `json:"floatUnit"`
+	VolumeUnit     string   `json:"volumeUnit"`
+}
+
+type ScannerFiltersView struct {
+	Filters  ScannerFilters `json:"filters"`
+	Revision uint64         `json:"revision"`
+}
+
+type SetScannerFiltersArgs struct {
+	Filters ScannerFilters `json:"filters"`
+}
+
+type ScannerFiltersMutationResult struct {
+	Status   MutationStatus `json:"status"`
+	Reason   string         `json:"reason"`
+	Filters  ScannerFilters `json:"filters"`
+	Revision uint64         `json:"revision"`
+}
+
+type WatchlistMutationArgs struct {
+	Symbol string `json:"symbol"`
+}
+
+type WatchlistMutationResult struct {
+	Status   MutationStatus `json:"status"`
+	Reason   string         `json:"reason"`
+	Symbols  []string       `json:"symbols"`
+	Revision uint64         `json:"revision"`
+}
+
+type GlobalLimitsView struct {
+	MaxDayLoss              float64 `json:"maxDayLoss"`
+	MaxSymbolPositionValue  float64 `json:"maxSymbolPositionValue"`
+	MaxSymbolPositionShares float64 `json:"maxSymbolPositionShares"`
+}
+
+type GateLimitsView struct {
+	MaxOrderValue     float64 `json:"maxOrderValue"`
+	MaxPositionValue  float64 `json:"maxPositionValue"`
+	MaxPositionShares float64 `json:"maxPositionShares"`
+	MaxOpenOrders     int     `json:"maxOpenOrders"`
+}
+
+type Venue struct {
+	ID              string  `json:"id"`
+	Broker          string  `json:"broker"`
+	Env             string  `json:"env"`
+	Credentials     string  `json:"credentials"`
+	AccountID       string  `json:"accountId"`
+	StartingBalance float64 `json:"startingBalance"`
+	SlippageBps     float64 `json:"slippageBps"`
+	FillLatencyMs   int     `json:"fillLatencyMs"`
+}
+
+type Gate struct {
+	Global GlobalLimitsView          `json:"global"`
+	Venue  map[string]GateLimitsView `json:"venue"`
+}
+
+type VenueConfig struct {
+	Venues []Venue `json:"venues"`
+	Gate   Gate    `json:"gate"`
+}
+
+type SeedView struct {
+	MoomooAttempted bool `json:"moomooAttempted"`
+}
+
+type VenueSetup struct {
+	File     VenueConfig `json:"file"`
+	Running  VenueConfig `json:"running"`
+	CredKeys []string    `json:"credKeys"`
+	Seed     SeedView    `json:"seed"`
+	Revision uint64      `json:"revision"`
+}
+
+type SetVenueSetupArgs struct {
+	Venues []Venue `json:"venues"`
+	Gate   Gate    `json:"gate"`
+}
+
+type PutCredentialArgs struct {
+	Name      string `json:"name"`
+	KeyID     string `json:"keyId"`
+	SecretKey string `json:"secretKey"`
+}
+
+type DeleteCredentialArgs struct {
+	Name string `json:"name"`
+}
+
+type TestConnectionArgs struct {
+	Broker      string `json:"broker"`
+	Env         string `json:"env"`
+	Credentials string `json:"credentials"`
+	KeyID       string `json:"keyId"`
+	SecretKey   string `json:"secretKey"`
+	AccountID   string `json:"accountId"`
+}
+
+type TestAccount struct {
+	AccountID   string `json:"accountId"`
+	AccountType string `json:"accountType"`
+	Env         string `json:"env"`
+}
+
+type TestConnectionResult struct {
+	Status      MutationStatus `json:"status"`
+	Reason      string         `json:"reason"`
+	OK          bool           `json:"ok"`
+	Env         string         `json:"env"`
+	AccountID   string         `json:"accountId"`
+	AccountType string         `json:"accountType"`
+	Message     string         `json:"message"`
+	Accounts    []TestAccount  `json:"accounts"`
+}

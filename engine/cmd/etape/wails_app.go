@@ -36,6 +36,9 @@ func newWailsApp() (*application.App, error) {
 	lifecycle.setQuerySourcePublisher(func(sources uiapi.QuerySources) {
 		uiapi.ConfigureEngineService(engineService, sources)
 	})
+	lifecycle.setMutationSourcePublisher(func(sources uiapi.MutationSources) {
+		uiapi.ConfigureEngineMutations(engineService, sources)
+	})
 	service := &RuntimeService{runtime: runtime, lifecycle: lifecycle}
 	lifecycle.setStatePublisher(func(state engineBootState) {
 		service.emitHint(RuntimeEvent{

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
-	"strings"
 	"testing"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
-	"github.com/earlisreal/eTape/engine/internal/watchlist"
 )
 
 // mustJSON marshals v to a json.RawMessage, failing the test on error. Used
@@ -298,11 +296,6 @@ func TestCommandsAllReturnNonDeferred(t *testing.T) {
 		{"EnsureSymbol", `{"demandId":"p1","symbol":"US.AAPL","profile":"watch"}`, wsmsg.AckAccepted},
 		{"ReleaseSymbol", `{"demandId":"p1"}`, wsmsg.AckAccepted},
 		{"FocusGroup", `{"group":"blue","symbol":"US.AAPL"}`, wsmsg.AckAccepted},
-		{"GetVenueSetup", `{}`, wsmsg.AckAccepted},
-		{"SetVenueSetup", `{"venues":[],"gate":{"global":{},"venue":{}}}`, wsmsg.AckAccepted},
-		{"PutCredential", `{"name":"a","keyId":"k","secretKey":"s"}`, wsmsg.AckAccepted},
-		{"DeleteCredential", `{"name":"a"}`, wsmsg.AckAccepted},
-		{"TestConnection", `{"broker":"alpaca","env":"paper"}`, wsmsg.AckAccepted},
 		{"Nope", `{}`, wsmsg.AckBlocked}, // unknown command => default branch
 	}
 	for _, tc := range tests {
@@ -564,53 +557,6 @@ func (s *spyVenueAdmin) PutCredential(_, _, sec string) error {
 }
 func (s *spyVenueAdmin) DeleteCredential(string) error { return s.delErr }
 
-func TestGetVenueSetupResultHasNoSecrets(t *testing.T) {
-	va := &spyVenueAdmin{}
-	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil }, &spyVenueTester{})
-	ack, _ := cd.handle(context.Background(), "GetVenueSetup", json.RawMessage(`{}`), 0, func(wsmsg.AckMsg) {})
-	if ack.Status != "accepted" {
-		t.Fatalf("status %v", ack.Status)
-	}
-	b, _ := json.Marshal(ack)
-	if strings.Contains(string(b), "secretKey") || strings.Contains(string(b), "keyId") {
-		t.Fatalf("setup result leaked secret material: %s", b)
-	}
-}
-
-func TestGetVenueSetupExposesSeedMarker(t *testing.T) {
-	va := &spyVenueAdmin{moomooAttempted: true}
-	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil }, &spyVenueTester{})
-	ack, _ := cd.handle(context.Background(), "GetVenueSetup", json.RawMessage(`{}`), 0, func(wsmsg.AckMsg) {})
-	if ack.Status != "accepted" {
-		t.Fatalf("status %v", ack.Status)
-	}
-	setup, ok := ack.Value.(wsmsg.VenueSetup)
-	if !ok {
-		t.Fatalf("ack.Value type = %T, want wsmsg.VenueSetup", ack.Value)
-	}
-	if !setup.Seed.MoomooAttempted {
-		t.Fatalf("seed.moomooAttempted did not pass through: %+v", setup.Seed)
-	}
-}
-
-func TestSetVenueSetupBlocksOnError(t *testing.T) {
-	va := &spyVenueAdmin{setErr: errors.New("venue \"x\": env \"demo\" must be paper or live")}
-	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil }, &spyVenueTester{})
-	ack, _ := cd.handle(context.Background(), "SetVenueSetup", json.RawMessage(`{"venues":[],"gate":{"global":{},"venue":{}}}`), 0, func(wsmsg.AckMsg) {})
-	if ack.Status != "blocked" || ack.Reason == "" {
-		t.Fatalf("want blocked with reason, got %+v", ack)
-	}
-}
-
-func TestPutCredentialRequiresAllFields(t *testing.T) {
-	va := &spyVenueAdmin{}
-	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, va, func() Feed { return nil }, &spyVenueTester{})
-	ack, _ := cd.handle(context.Background(), "PutCredential", json.RawMessage(`{"name":"a","keyId":"","secretKey":"s"}`), 0, func(wsmsg.AckMsg) {})
-	if ack.Status != "blocked" || va.putCalled {
-		t.Fatalf("empty keyId must block before calling admin: %+v", ack)
-	}
-}
-
 // spyVenueTester is the venueTester test double: it records whether it was
 // called and with what args, and returns a caller-configured Result.
 type spyVenueTester struct {
@@ -623,67 +569,6 @@ func (s *spyVenueTester) TestConnection(_ context.Context, broker, env, credName
 	s.called = true
 	s.broker, s.env, s.credName, s.keyID, s.secretKey, s.accountID = broker, env, credName, keyID, secretKey, accountID
 	return s.result
-}
-
-func TestTestConnectionBadArgsBlocksWithoutCallingProbe(t *testing.T) {
-	vt := &spyVenueTester{}
-	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, vt)
-	ack, _ := cd.handle(context.Background(), "TestConnection", json.RawMessage(`not json`), 0, func(wsmsg.AckMsg) {})
-	if ack.Status != "blocked" || ack.Reason != "bad args" {
-		t.Fatalf("want blocked/\"bad args\", got %+v", ack)
-	}
-	if vt.called {
-		t.Fatal("malformed args must never reach the probe")
-	}
-}
-
-func TestTestConnectionAcceptsAndConvertsResult(t *testing.T) {
-	vt := &spyVenueTester{result: venueprobe.Result{
-		OK: true, Env: "live", AccountID: "2TZ1", AccountType: "Live", Message: "",
-		Accounts: []venueprobe.Account{{AccountID: "2TZ2", AccountType: "Paper", Env: "paper"}},
-	}}
-	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, vt)
-	args := `{"broker":"tradezero","env":"live","credentials":"my-cred","keyId":"key-123","secretKey":"secret-456","accountId":"acct-789"}`
-	ack, _ := cd.handle(context.Background(), "TestConnection", json.RawMessage(args), 0, func(wsmsg.AckMsg) {})
-
-	if ack.Status != "accepted" {
-		t.Fatalf("want accepted, got %+v", ack)
-	}
-	if !vt.called {
-		t.Fatal("valid args must reach the probe")
-	}
-	if vt.broker != "tradezero" || vt.env != "live" || vt.credName != "my-cred" ||
-		vt.keyID != "key-123" || vt.secretKey != "secret-456" || vt.accountID != "acct-789" {
-		t.Fatalf("probe args wrong: %+v", vt)
-	}
-
-	res, ok := ack.Value.(wsmsg.TestConnectionResult)
-	if !ok {
-		t.Fatalf("ack.Value must be wsmsg.TestConnectionResult, got %T", ack.Value)
-	}
-	if !res.OK || res.Env != "live" || res.AccountID != "2TZ1" || res.AccountType != "Live" || res.Message != "" {
-		t.Fatalf("top-level fields not carried through: %+v", res)
-	}
-	if len(res.Accounts) != 1 {
-		t.Fatalf("want 1 account, got %d: %+v", len(res.Accounts), res.Accounts)
-	}
-	acct := res.Accounts[0]
-	if acct.AccountID != "2TZ2" || acct.AccountType != "Paper" || acct.Env != "paper" {
-		t.Fatalf("nested account fields wrong: %+v", acct)
-	}
-}
-
-func TestTestConnectionOKFalseStillAccepted(t *testing.T) {
-	vt := &spyVenueTester{result: venueprobe.Result{OK: false, Message: "bad key"}}
-	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, vt)
-	ack, _ := cd.handle(context.Background(), "TestConnection", json.RawMessage(`{"broker":"alpaca","env":"paper"}`), 0, func(wsmsg.AckMsg) {})
-	if ack.Status != "accepted" {
-		t.Fatalf("a transport-successful probe with OK:false must still be accepted, got %+v", ack)
-	}
-	res, ok := ack.Value.(wsmsg.TestConnectionResult)
-	if !ok || res.OK || res.Message != "bad key" {
-		t.Fatalf("result must carry OK:false through: %+v (%T)", ack.Value, ack.Value)
-	}
 }
 
 func TestCommandsStartDemoBlockedWithNoHandler(t *testing.T) {
@@ -713,164 +598,5 @@ func TestCommandsStartDemoBlockedOnHandlerError(t *testing.T) {
 	ack, _ := cd.handle(context.Background(), "StartDemo", mustJSON(t, wsmsg.StartDemoArgs{}), 0, func(wsmsg.AckMsg) {})
 	if ack.Status != wsmsg.AckBlocked {
 		t.Fatalf("want blocked, got %+v", ack)
-	}
-}
-
-// fakeWL is the watchlistCtl test double for WatchlistAdd/WatchlistRemove.
-// Add/Remove record every call (symbol order matters for the assertions
-// below); addAdded/addErr/removed let a test script Add/Remove's return
-// value the way the real *watchlist.List would for duplicates/cap/no-op.
-type fakeWL struct {
-	addAdded bool
-	addErr   error
-	removed  bool
-	adds     []string
-	removes  []string
-	poked    int
-}
-
-func (f *fakeWL) Add(symbol string) (bool, error) {
-	f.adds = append(f.adds, symbol)
-	return f.addAdded, f.addErr
-}
-
-func (f *fakeWL) Remove(symbol string) bool {
-	f.removes = append(f.removes, symbol)
-	return f.removed
-}
-
-func (f *fakeWL) Poke() { f.poked++ }
-
-// TestWatchlistAdd_ProbeRejectionBlocks covers the existence-probe guard
-// shared with EnsureSymbol/FocusGroup: an unknown symbol must block before
-// ever reaching wl.Add, exactly like EnsureSymbol's UnknownSymbolReverts case.
-func TestWatchlistAdd_ProbeRejectionBlocks(t *testing.T) {
-	cd, _, _ := newCmdWith(t, feed.ErrUnknownSymbol, false)
-	fw := &fakeWL{}
-	cd.wl.Store(&watchlistBox{wl: fw})
-	ack, _ := cd.handle(context.Background(), "WatchlistAdd",
-		mustJSON(t, wsmsg.WatchlistAddArgs{Symbol: "US.ZZZZQQ"}), 1, func(wsmsg.AckMsg) {})
-	if ack.Status != "blocked" {
-		t.Fatalf("unknown symbol must block, got %+v", ack)
-	}
-	if len(fw.adds) != 0 {
-		t.Fatalf("probe-rejected symbol must never reach wl.Add, got %v", fw.adds)
-	}
-}
-
-// TestWatchlistAdd_NonUSMarketBlocks covers the final-review fix: the
-// watchlist is US-only end-to-end (watchlist.Normalize only forces a bare
-// symbol to US.<CODE> -- an explicitly-typed HK.700 passes through
-// unnormalized), so WatchlistAdd must reject any non-"US."-prefixed symbol
-// itself rather than deferring to the shared supportedMarket helper (which
-// also accepts HK. for EnsureSymbol/FocusGroup). The reject must happen
-// before the existence probe and before wl.Add, and lowercase input must not
-// slip through Normalize's uppercasing. US-prefixed and bare symbols (which
-// Normalize maps to US.) must still succeed.
-func TestWatchlistAdd_NonUSMarketBlocks(t *testing.T) {
-	for _, sym := range []string{"HK.700", "hk.700"} {
-		cd, _, _ := newCmdWith(t, nil, false)
-		fw := &fakeWL{}
-		cd.wl.Store(&watchlistBox{wl: fw})
-		ack, _ := cd.handle(context.Background(), "WatchlistAdd",
-			mustJSON(t, wsmsg.WatchlistAddArgs{Symbol: sym}), 1, func(wsmsg.AckMsg) {})
-		if ack.Status != "blocked" || ack.Reason != "unsupported market" {
-			t.Fatalf(`WatchlistAdd(%q): want blocked "unsupported market", got %+v`, sym, ack)
-		}
-		if len(fw.adds) != 0 {
-			t.Fatalf("WatchlistAdd(%q): rejected symbol must never reach wl.Add, got %v", sym, fw.adds)
-		}
-	}
-}
-
-// TestWatchlistAdd_USMarketStillAccepted is the happy-path guard for the fix
-// above: a bare symbol (Normalize prefixes it to US.) and an already-
-// US.-prefixed symbol must both still be accepted.
-func TestWatchlistAdd_USMarketStillAccepted(t *testing.T) {
-	for _, sym := range []string{"AAPL", "US.AAPL"} {
-		cd, _, _ := newCmdWith(t, nil, false)
-		fw := &fakeWL{addAdded: true}
-		cd.wl.Store(&watchlistBox{wl: fw})
-		ack, _ := cd.handle(context.Background(), "WatchlistAdd",
-			mustJSON(t, wsmsg.WatchlistAddArgs{Symbol: sym}), 1, func(wsmsg.AckMsg) {})
-		if ack.Status != "accepted" {
-			t.Fatalf("WatchlistAdd(%q): want accepted, got %+v", sym, ack)
-		}
-		if len(fw.adds) != 1 || fw.adds[0] != "US.AAPL" {
-			t.Fatalf("WatchlistAdd(%q): want Add(US.AAPL) called once, got %v", sym, fw.adds)
-		}
-	}
-}
-
-// TestWatchlistAdd_DuplicateAccepted covers List.Add's documented duplicate
-// behavior (added=false, err=nil is a harmless no-op) -- the command must
-// still ack "accepted" and still poke the poller.
-func TestWatchlistAdd_DuplicateAccepted(t *testing.T) {
-	cd, _, _ := newCmdWith(t, nil, false)
-	fw := &fakeWL{addAdded: false, addErr: nil}
-	cd.wl.Store(&watchlistBox{wl: fw})
-	ack, _ := cd.handle(context.Background(), "WatchlistAdd",
-		mustJSON(t, wsmsg.WatchlistAddArgs{Symbol: "US.AAPL"}), 1, func(wsmsg.AckMsg) {})
-	if ack.Status != "accepted" {
-		t.Fatalf("duplicate add must still ack accepted, got %+v", ack)
-	}
-	if fw.poked != 1 {
-		t.Fatalf("want Poke called once, got %d", fw.poked)
-	}
-}
-
-// TestWatchlistAdd_CapExceededBlocks covers wl.Add returning watchlist.ErrFull
-// (the 400-symbol cap): the command must translate it to the specific
-// "watchlist full (400)" block reason and must not poke the poller for a
-// rejected add.
-func TestWatchlistAdd_CapExceededBlocks(t *testing.T) {
-	cd, _, _ := newCmdWith(t, nil, false)
-	fw := &fakeWL{addErr: watchlist.ErrFull}
-	cd.wl.Store(&watchlistBox{wl: fw})
-	ack, _ := cd.handle(context.Background(), "WatchlistAdd",
-		mustJSON(t, wsmsg.WatchlistAddArgs{Symbol: "US.AAPL"}), 1, func(wsmsg.AckMsg) {})
-	if ack.Status != "blocked" || ack.Reason != "watchlist full (400)" {
-		t.Fatalf(`want blocked "watchlist full (400)", got %+v`, ack)
-	}
-	if fw.poked != 0 {
-		t.Fatalf("want Poke not called on a rejected add, got %d", fw.poked)
-	}
-}
-
-// TestWatchlistRemove_AcceptedAndPokes covers the always-accepted, idempotent
-// remove path: it must call wl.Remove with the raw wire symbol and poke the
-// poller regardless of whether the symbol was actually a member.
-func TestWatchlistRemove_AcceptedAndPokes(t *testing.T) {
-	cd, _, _ := newCmdWith(t, nil, false)
-	fw := &fakeWL{}
-	cd.wl.Store(&watchlistBox{wl: fw})
-	ack, _ := cd.handle(context.Background(), "WatchlistRemove",
-		mustJSON(t, wsmsg.WatchlistRemoveArgs{Symbol: "US.AAPL"}), 1, func(wsmsg.AckMsg) {})
-	if ack.Status != "accepted" {
-		t.Fatalf("want accepted, got %+v", ack)
-	}
-	if len(fw.removes) != 1 || fw.removes[0] != "US.AAPL" {
-		t.Fatalf("want Remove(US.AAPL) called once, got %v", fw.removes)
-	}
-	if fw.poked != 1 {
-		t.Fatalf("want Poke called once, got %d", fw.poked)
-	}
-}
-
-// TestWatchlistCommands_NoCtlSetBlocks covers the pre-Task-6 boot window (and
-// every test in this file besides the ones above): cd.wl is a zero-value
-// atomic.Pointer, never Store'd, so cd.watchlist() must return nil cleanly
-// and both commands must block rather than panic.
-func TestWatchlistCommands_NoCtlSetBlocks(t *testing.T) {
-	cd, _, _ := newCmdWith(t, nil, false)
-	addAck, _ := cd.handle(context.Background(), "WatchlistAdd",
-		mustJSON(t, wsmsg.WatchlistAddArgs{Symbol: "US.AAPL"}), 1, func(wsmsg.AckMsg) {})
-	if addAck.Status != "blocked" || addAck.Reason != "watchlist not ready" {
-		t.Fatalf(`WatchlistAdd with no ctl: want blocked "watchlist not ready", got %+v`, addAck)
-	}
-	remAck, _ := cd.handle(context.Background(), "WatchlistRemove",
-		mustJSON(t, wsmsg.WatchlistRemoveArgs{Symbol: "US.AAPL"}), 1, func(wsmsg.AckMsg) {})
-	if remAck.Status != "blocked" || remAck.Reason != "watchlist not ready" {
-		t.Fatalf(`WatchlistRemove with no ctl: want blocked "watchlist not ready", got %+v`, remAck)
 	}
 }

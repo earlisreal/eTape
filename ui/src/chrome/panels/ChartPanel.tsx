@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { createChart, createTextWatermark, CandlestickSeries, BarSeries, HistogramSeries, LineSeries, AreaSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type LogicalRange, type Coordinate } from "lightweight-charts";
 import type { PanelProps } from "./registry";
@@ -33,6 +33,8 @@ import { BarCloseTimer } from "./tv/BarCloseTimer";
 import { perf } from "../../perf/PerfMonitor";
 import { bareSymbol } from "../exec/orderStatus";
 import { queryClient, type QueryChartWindowResult } from "../../wire/queries";
+import { mutationClient } from "../../wire/mutations";
+import { useToasts } from "../Toast";
 import { uiLog } from "../../logging/logger";
 
 const ALL_CHART_BARS = 1_000_000;
@@ -133,6 +135,8 @@ function makeFacade(chart: IChartApi, palette: Palette): {
 }
 
 export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange, group: groupProp, symbol: symbolProp, monitoring }: PanelProps): JSX.Element {
+  const mutations = useMemo(() => mutationClient(commands), [commands.mutations, commands.sendCommand]);
+  const toast = useToasts();
   const hostRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<ChartController | null>(null);
   const setFacadePaletteRef = useRef<((p: Palette) => void) | null>(null);
@@ -975,9 +979,15 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     items.push(
       inWatch
         ? { label: `Remove ${bareSymbol(chartSymbol)} from watchlist`, danger: true,
-            onClick: () => void commands.sendCommand("WatchlistRemove", { symbol: chartSymbol }) }
+            onClick: () => void mutations.WatchlistRemove({ symbol: chartSymbol }).then((result) => {
+              if (result.status === "accepted") stores.watchlist.applyMutation(result);
+              else toast.push({ level: "warn", text: result.reason || "Watchlist update rejected." });
+            }).catch(() => toast.push({ level: "danger", text: "Watchlist update failed (transport)." })) }
         : { label: `Add ${bareSymbol(chartSymbol)} to watchlist`,
-            onClick: () => void commands.sendCommand("WatchlistAdd", { symbol: chartSymbol }) },
+            onClick: () => void mutations.WatchlistAdd({ symbol: chartSymbol }).then((result) => {
+              if (result.status === "accepted") stores.watchlist.applyMutation(result);
+              else toast.push({ level: "warn", text: result.reason || "Watchlist update rejected." });
+            }).catch(() => toast.push({ level: "danger", text: "Watchlist update failed (transport)." })) },
     );
     items.push("separator");
     items.push({ label: "Settings…", onClick: () => setChartSettingsOpen(true) });

@@ -48,24 +48,25 @@ type engineRuntime struct {
 	serverReady chan struct{}
 	serverOnce  sync.Once
 
-	mu                   sync.Mutex
-	started              bool
-	stopping             bool
-	phase                string
-	bootError            string
-	engineContext        context.Context
-	cancelEngine         context.CancelFunc
-	engineDone           chan struct{}
-	restart              bool
-	relaunchArgs         []string
-	statePublisher       func(engineBootState)
-	querySourcePublisher func(uiapi.QuerySources)
-	requestQuit          func()
-	restartOnce          sync.Once
-	restartScheduleOnce  sync.Once
-	stopOnce             sync.Once
-	stopDone             chan struct{}
-	stopError            error
+	mu                      sync.Mutex
+	started                 bool
+	stopping                bool
+	phase                   string
+	bootError               string
+	engineContext           context.Context
+	cancelEngine            context.CancelFunc
+	engineDone              chan struct{}
+	restart                 bool
+	relaunchArgs            []string
+	statePublisher          func(engineBootState)
+	querySourcePublisher    func(uiapi.QuerySources)
+	mutationSourcePublisher func(uiapi.MutationSources)
+	requestQuit             func()
+	restartOnce             sync.Once
+	restartScheduleOnce     sync.Once
+	stopOnce                sync.Once
+	stopDone                chan struct{}
+	stopError               error
 }
 
 func newEngineRuntime(runtime *wailsruntime.Runtime) *engineRuntime {
@@ -105,10 +106,11 @@ func (e *engineRuntime) Start() error {
 
 func (e *engineRuntime) runEngine(ctx context.Context, done chan struct{}, run engineBootRunner) {
 	code, restart, nextArgs := run(ctx, bootOptions{
-		noLegacyHTTP:  true,
-		onHub:         e.setHubServer,
-		onQuerySource: e.setQuerySources,
-		onReady:       e.markReady,
+		noLegacyHTTP:     true,
+		onHub:            e.setHubServer,
+		onQuerySource:    e.setQuerySources,
+		onMutationSource: e.setMutationSources,
+		onReady:          e.markReady,
 	})
 
 	e.mu.Lock()
@@ -167,6 +169,21 @@ func (e *engineRuntime) setQuerySources(sources uiapi.QuerySources) {
 func (e *engineRuntime) setQuerySourcePublisher(publish func(uiapi.QuerySources)) {
 	e.mu.Lock()
 	e.querySourcePublisher = publish
+	e.mu.Unlock()
+}
+
+func (e *engineRuntime) setMutationSources(sources uiapi.MutationSources) {
+	e.mu.Lock()
+	publish := e.mutationSourcePublisher
+	e.mu.Unlock()
+	if publish != nil {
+		publish(sources)
+	}
+}
+
+func (e *engineRuntime) setMutationSourcePublisher(publish func(uiapi.MutationSources)) {
+	e.mu.Lock()
+	e.mutationSourcePublisher = publish
 	e.mu.Unlock()
 }
 

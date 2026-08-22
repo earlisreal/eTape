@@ -37,9 +37,10 @@ import type { HealthStore } from "../../data/HealthStore";
 import type { ExecStore } from "../../data/ExecStore";
 import type { SessionStore } from "../../data/SessionStore";
 import type { AckMsg, Venue, Gate, GateLimitsView, VenueConfig, VenueSetup, TestConnectionResult, TestAccount } from "../../wire/contract";
+import { mutationClient, type MutationClient } from "../../wire/mutations";
 import type { ConnState } from "../../wire/WsClient";
 
-interface Commands { sendCommand(name: string, args: unknown): Promise<AckMsg>; }
+interface Commands { sendCommand(name: string, args: unknown): Promise<AckMsg>; mutations?: MutationClient; }
 
 const BROKER_LABEL: Record<string, string> = { tradezero: "TradeZero", alpaca: "Alpaca", moomoo: "moomoo", sim: "Simulated" };
 const GATE_CAPS = ["maxOrderValue", "maxPositionValue", "maxPositionShares", "maxOpenOrders"] as const;
@@ -105,11 +106,13 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
 }): JSX.Element {
   const { palette } = useTheme();
   const toast = useToasts();
+  const mutations = useMemo(() => mutationClient(commands), [commands.mutations, commands.sendCommand]);
   const sessionMode = useSyncExternalStore(
     (cb) => session?.subscribe(cb) ?? (() => {}),
     () => session?.getSnapshot().mode,
   );
   const [setup, setSetup] = useState<VenueSetup | null>(null);
+  const setupRevisionRef = useRef(0);
   const [draft, setDraft] = useState<VenueConfig>({ venues: [], gate: emptyGate() });
   const [err, setErr] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -134,9 +137,9 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
   const [moomooSelectedAccount, setMoomooSelectedAccount] = useState("");
 
   const refresh = useCallback(() => {
-    void commands.sendCommand("GetVenueSetup", {}).then((ack) => {
-      if (ack.status === "accepted" && ack.value) {
-        const s = ack.value as VenueSetup;
+    void mutations.GetVenueSetup().then((s) => {
+        if (s.revision < setupRevisionRef.current) return;
+        setupRevisionRef.current = s.revision;
         setSetup(s);
         const venues = s.file.venues.map((v) => ({ ...v }));
         // Mirror the write path's env guarantees ("sim is always paper",
@@ -156,9 +159,8 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
         setDirty(false);
         setStaleDraft(false);
         setMoomooProbe(null);
-      }
     }).catch(() => toast.push({ level: "danger", text: "Could not load venue setup." }));
-  }, [commands, toast]);
+  }, [mutations, toast]);
   useEffect(refresh, [refresh]);
 
   const slots = useMemo(() => resolveSlots(draft.venues), [draft.venues]);
@@ -315,12 +317,11 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
     setTestState((s) => ({ ...s, [rowKey]: { status: "testing" } }));
     const typed = secretDrafts[v.credentials] ?? { keyId: "", secret: "" };
     try {
-      const ack = await commands.sendCommand("TestConnection", {
+      const r = await mutations.TestConnection({
         broker: v.broker, env: v.env, credentials: v.credentials,
         keyId: typed.keyId, secretKey: typed.secret, accountId: v.accountId,
       });
-      const r = ack.value as TestConnectionResult | undefined;
-      if (ack.status === "accepted" && r?.ok) {
+      if (r.status === "accepted" && r.ok) {
         if (v.broker === "alpaca" && r.env && r.env !== v.env) {
           const message = v.env === "paper"
             ? "This key belongs to a live account — paste it into the Live slot below."
@@ -334,7 +335,7 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
         setTestState((s) => ({ ...s, [rowKey]: { status: "ok", message, accounts: r.accounts, env: r.env || v.env, accountId: r.accountId || v.accountId } }));
         toast.push({ level: "success", text: message });
       } else {
-        const message = r?.message || ack.reason || "Test failed";
+        const message = r.message || r.reason || "Test failed";
         setTestState((s) => ({ ...s, [rowKey]: { status: "fail", message } }));
         toast.push({ level: "danger", text: message });
       }
@@ -351,11 +352,10 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
     setTestState((s) => ({ ...s, [pendingKey]: { status: "testing" } }));
     const typed = secretDrafts[pendingKey] ?? { keyId: "", secret: "" };
     try {
-      const ack = await commands.sendCommand("TestConnection", {
+      const r = await mutations.TestConnection({
         broker, env, credentials: "", keyId: typed.keyId, secretKey: typed.secret, accountId: "",
       });
-      const r = ack.value as TestConnectionResult | undefined;
-      if (ack.status === "accepted" && r?.ok) {
+      if (r.status === "accepted" && r.ok) {
         if (enforceEnv && r.env && r.env !== env) {
           const message = env === "paper"
             ? "This key belongs to a live account — paste it into the Live slot below."
@@ -369,7 +369,7 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
         setTestState((s) => ({ ...s, [pendingKey]: { status: "ok", message, accounts: r.accounts, env: detectedEnv, accountId: r.accountId } }));
         toast.push({ level: "success", text: message });
       } else {
-        const message = r?.message || ack.reason || "Test failed";
+        const message = r.message || r.reason || "Test failed";
         setTestState((s) => ({ ...s, [pendingKey]: { status: "fail", message } }));
         toast.push({ level: "danger", text: message });
       }
@@ -382,15 +382,14 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
   const probeMoomoo = async () => {
     setMoomooProbing(true);
     try {
-      const ack = await commands.sendCommand("TestConnection", {
+      const r = await mutations.TestConnection({
         broker: "moomoo", env: "live", credentials: "", keyId: "", secretKey: "", accountId: "",
       });
-      const r = ack.value as TestConnectionResult | undefined;
-      if (ack.status === "accepted" && r) {
+      if (r.status === "accepted") {
         setMoomooProbe(r);
         setMoomooSelectedAccount(r.accountId || r.accounts[0]?.accountId || "");
       } else {
-        setMoomooProbe({ ok: false, env: "", accountId: "", accountType: "", message: ack.reason || "Check failed", accounts: [] });
+        setMoomooProbe({ ok: false, env: "", accountId: "", accountType: "", message: r.reason || "Check failed", accounts: [] });
       }
     } catch {
       setMoomooProbe({ ok: false, env: "", accountId: "", accountType: "", message: "Check failed (transport).", accounts: [] });
@@ -484,12 +483,12 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
       for (const v of draft.venues) {
         const typed = secretDrafts[v.credentials];
         if (!typed?.keyId || !typed?.secret) continue;
-        const ack = await commands.sendCommand("PutCredential", { name: v.credentials, keyId: typed.keyId, secretKey: typed.secret });
-        if (ack.status !== "accepted") { setErr(ack.reason || "rejected"); return; }
+        const result = await mutations.PutCredential({ name: v.credentials, keyId: typed.keyId, secretKey: typed.secret });
+        if (result.status !== "accepted") { setErr(result.reason || "rejected"); return; }
       }
       for (const nc of newCreds) {
-        const ack = await commands.sendCommand("PutCredential", { name: nc.credName, keyId: nc.keyId, secretKey: nc.secret });
-        if (ack.status !== "accepted") { setErr(ack.reason || "rejected"); return; }
+        const result = await mutations.PutCredential({ name: nc.credName, keyId: nc.keyId, secretKey: nc.secret });
+        if (result.status !== "accepted") { setErr(result.reason || "rejected"); return; }
       }
 
       // 2. Project capsByRow into the wire's id-keyed Gate.venue shape for
@@ -503,8 +502,9 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
       for (const v of finalVenues) if (!(v.id in venueGate)) venueGate[v.id] = zeroCaps();
       const gate: Gate = { global: draft.gate.global, venue: venueGate };
 
-      const setAck = await commands.sendCommand("SetVenueSetup", { venues: finalVenues, gate });
-      if (setAck.status !== "accepted") { setErr(setAck.reason || "rejected"); return; }
+      const setResult = await mutations.SetVenueSetup({ venues: finalVenues, gate });
+      if (setResult.status !== "accepted") { setErr(setResult.reason || "rejected"); return; }
+      setupRevisionRef.current = Math.max(setupRevisionRef.current, setResult.revision);
 
       // 3. Best-effort cleanup: credential names no longer referenced by the
       //    saved venues (the venue was removed, not renamed) can be deleted.
@@ -512,7 +512,7 @@ export function VenuesSection({ commands, engineState, health, exec, session }: 
       const oldNames = (setup?.file.venues ?? []).map((v) => v.credentials).filter(Boolean);
       for (const name of oldNames) {
         if (kept.has(name)) continue;
-        try { await commands.sendCommand("DeleteCredential", { name }); } catch { /* best-effort */ }
+        try { await mutations.DeleteCredential({ name }); } catch { /* best-effort */ }
       }
 
       // 4. Clear write-only inputs/pending test state and reload.

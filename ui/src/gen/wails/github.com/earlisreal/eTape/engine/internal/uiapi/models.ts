@@ -20,6 +20,10 @@ export interface CarriedPosition {
     "qty": number;
 }
 
+export interface DeleteCredentialArgs {
+    "name": string;
+}
+
 export interface ExportFillsArgs {
     "venue": string;
     "preset": string;
@@ -41,6 +45,24 @@ export interface Fill {
     "qty": number;
     "price": number;
     "tsMs": number;
+}
+
+export interface Gate {
+    "global": GlobalLimitsView;
+    "venue": { [_ in string]?: GateLimitsView } | null;
+}
+
+export interface GateLimitsView {
+    "maxOrderValue": number;
+    "maxPositionValue": number;
+    "maxPositionShares": number;
+    "maxOpenOrders": number;
+}
+
+export interface GlobalLimitsView {
+    "maxDayLoss": number;
+    "maxSymbolPositionValue": number;
+    "maxSymbolPositionShares": number;
 }
 
 export interface IndicatorPoint {
@@ -101,6 +123,28 @@ export interface LocateRecord {
     "totalFee": string;
     "expiresAt": string;
     "error"?: string;
+}
+
+export interface MutationResult {
+    "status": MutationStatus;
+    "reason": string;
+    "revision": number;
+}
+
+export enum MutationStatus {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    MutationAccepted = "accepted",
+    MutationBlocked = "blocked",
+};
+
+export interface PutCredentialArgs {
+    "name": string;
+    "keyId": string;
+    "secretKey": string;
 }
 
 export interface QueryChartWindowArgs {
@@ -164,6 +208,41 @@ export interface QueryLocatesArgs {
     "pageToken": string;
 }
 
+export interface ScannerFilters {
+    "mode": string;
+    "minChangePct": number;
+    "maxFloatShares": number | null;
+    "minVolume": number;
+    "minVolumeRatio": number;
+    "floatUnit": string;
+    "volumeUnit": string;
+}
+
+export interface ScannerFiltersMutationResult {
+    "status": MutationStatus;
+    "reason": string;
+    "filters": ScannerFilters;
+    "revision": number;
+}
+
+export interface ScannerFiltersView {
+    "filters": ScannerFilters;
+    "revision": number;
+}
+
+export interface SeedView {
+    "moomooAttempted": boolean;
+}
+
+export interface SetScannerFiltersArgs {
+    "filters": ScannerFilters;
+}
+
+export interface SetVenueSetupArgs {
+    "venues": Venue[] | null;
+    "gate": Gate;
+}
+
 export enum Side {
     /**
      * The Go zero value for the underlying type of the enum.
@@ -175,3 +254,64 @@ export enum Side {
     SideShort = "SHORT",
     SideCover = "COVER",
 };
+
+export interface TestAccount {
+    "accountId": string;
+    "accountType": string;
+    "env": string;
+}
+
+export interface TestConnectionArgs {
+    "broker": string;
+    "env": string;
+    "credentials": string;
+    "keyId": string;
+    "secretKey": string;
+    "accountId": string;
+}
+
+export interface TestConnectionResult {
+    "status": MutationStatus;
+    "reason": string;
+    "ok": boolean;
+    "env": string;
+    "accountId": string;
+    "accountType": string;
+    "message": string;
+    "accounts": TestAccount[] | null;
+}
+
+export interface Venue {
+    "id": string;
+    "broker": string;
+    "env": string;
+    "credentials": string;
+    "accountId": string;
+    "startingBalance": number;
+    "slippageBps": number;
+    "fillLatencyMs": number;
+}
+
+export interface VenueConfig {
+    "venues": Venue[] | null;
+    "gate": Gate;
+}
+
+export interface VenueSetup {
+    "file": VenueConfig;
+    "running": VenueConfig;
+    "credKeys": string[] | null;
+    "seed": SeedView;
+    "revision": number;
+}
+
+export interface WatchlistMutationArgs {
+    "symbol": string;
+}
+
+export interface WatchlistMutationResult {
+    "status": MutationStatus;
+    "reason": string;
+    "symbols": string[] | null;
+    "revision": number;
+}

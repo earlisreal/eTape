@@ -73,11 +73,12 @@ func envBool(name string) bool {
 }
 
 type bootOptions struct {
-	onListening   func(addr string)
-	onHub         func(*uihub.Server)
-	onQuerySource func(uiapi.QuerySources)
-	noLegacyHTTP  bool
-	onReady       func()
+	onListening      func(addr string)
+	onHub            func(*uihub.Server)
+	onQuerySource    func(uiapi.QuerySources)
+	onMutationSource func(uiapi.MutationSources)
+	noLegacyHTTP     bool
+	onReady          func()
 }
 
 // boot runs the full engine boot sequence -- flags, config, store/md-core/
@@ -805,7 +806,13 @@ func bootWithOptions(ctx context.Context, options bootOptions) (code int, restar
 			}
 		}
 	}
-	startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, accountPoller, firstAlpacaAssetReader(vbs), backfillOne, !*demo, &scanWG)
+	mutationSources := startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, accountPoller, firstAlpacaAssetReader(vbs), backfillOne, !*demo, &scanWG)
+	mutationSources.Venues = venueAdm
+	mutationSources.Connect = venueProbeSource{probe: venueProbe}
+	mutationSources.Symbols = hub
+	if options.onMutationSource != nil {
+		options.onMutationSource(mutationSources)
+	}
 	mode := "live"
 	if *demo {
 		mode = "demo"
@@ -1140,16 +1147,17 @@ type demandFeeder interface {
 // startQuota gates the quota poller: false in -demo, since the synthetic
 // requester answers Qot_GetSubInfo with the generic "no data" response
 // rather than a real subscription budget, so tracking it would be noise.
-func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, wl *watchlist.List, hasTZ bool, mmProbe rttProber, accountHealth health.AccountHealthSource, assetReader stockInfoAssetReader, backfillOne func(string), startQuota bool, scanWG *sync.WaitGroup) {
+func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, wl *watchlist.List, hasTZ bool, mmProbe rttProber, accountHealth health.AccountHealthSource, assetReader stockInfoAssetReader, backfillOne func(string), startQuota bool, scanWG *sync.WaitGroup) uiapi.MutationSources {
+	sources := uiapi.MutationSources{Config: st}
 	ssrResolver := ssr.New(st)
 	scanPoller := scan.New(cfg.Scan, r, hub, clk, demand, backfillOne, ssrResolver)
+	sources.Scanner = scanPoller
 	if raw, ok, err := st.GetConfig("scanner.filters.v1"); err == nil && ok {
 		var saved wsmsg.ScannerFilters
 		if json.Unmarshal([]byte(raw), &saved) == nil && scan.ValidateFilters(saved) == nil {
 			_ = scanPoller.SetFilters(saved)
 		}
 	}
-	hub.SetScanner(scanPoller)
 	newsPlan := func() news.SymbolPlan { return newsSymbolPlan(scanPoller.PoolSymbols(), hub.ActiveDemandSymbols()) }
 	symbols := func() []string { return newsPlan().All() }
 	scanWG.Add(1)
@@ -1161,7 +1169,8 @@ func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, dem
 	if cfg.Watchlist.Enabled {
 		interval := time.Duration(cfg.Watchlist.PollMs) * time.Millisecond
 		wp := watchlist.New(wl, r, hub, clk, interval)
-		hub.SetWatchlist(watchlistAdapter{l: wl, p: wp})
+		adapter := watchlistAdapter{l: wl, p: wp}
+		sources.Watchlist = adapter
 		go func() { _ = wp.Run(ctx) }()
 	}
 	// health: mmProbe is the moomoo probe (real OpenD RTT in live/replay, a
@@ -1181,18 +1190,33 @@ func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, dem
 	go func() {
 		_ = health.New(cfg.Health, hub, clk, mmProbe, nil, hasTZ, accountHealth, qsrc).Run(ctx)
 	}()
+	return sources
 }
 
-// watchlistAdapter satisfies uihub's watchlistCtl: Add/Remove on the List,
+// watchlistAdapter is the typed mutation source: Add/Remove on the List,
 // Poke on the Poller.
 type watchlistAdapter struct {
 	l *watchlist.List
 	p *watchlist.Poller
 }
 
-func (a watchlistAdapter) Add(s string) (bool, error) { return a.l.Add(s) }
-func (a watchlistAdapter) Remove(s string) bool       { return a.l.Remove(s) }
-func (a watchlistAdapter) Poke()                      { a.p.Poke() }
+func (a watchlistAdapter) AddWithRevision(s string) (bool, []string, uint64, error) {
+	return a.l.AddWithRevision(s)
+}
+func (a watchlistAdapter) RemoveWithRevision(s string) (bool, []string, uint64) {
+	return a.l.RemoveWithRevision(s)
+}
+func (a watchlistAdapter) Snapshot() ([]string, uint64) { return a.l.Snapshot() }
+func (a watchlistAdapter) Poke()                        { a.p.Poke() }
+
+type venueProbeSource struct{ probe *venueprobe.Prober }
+
+func (s venueProbeSource) TestConnection(ctx context.Context, broker, env, credName, keyID, secretKey, accountID string) (venueprobe.Result, error) {
+	if s.probe == nil {
+		return venueprobe.Result{}, uiapi.ErrMutationsUnavailable
+	}
+	return s.probe.TestConnection(ctx, broker, env, credName, keyID, secretKey, accountID), nil
+}
 
 func hasTZVenue(cfg config.Config) bool {
 	for _, v := range cfg.Venues {

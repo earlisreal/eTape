@@ -1,6 +1,7 @@
 import type { FC } from "react";
 import type { AckMsg, TopicName } from "../../wire/contract";
 import type { QueryClient } from "../../wire/queries";
+import type { MutationClient } from "../../wire/mutations";
 import type { DemandProfile } from "../../wire/DemandRegistry";
 import type { PanelConfig } from "../workspace";
 import type { Stores } from "../../data/registry";
@@ -27,7 +28,7 @@ export interface PanelProps {
   width: number;
   height: number;
   linkGroups: LinkGroups;
-  commands: { sendCommand(name: string, args: unknown): Promise<AckMsg>; sendQuery(name: string, args: unknown): Promise<unknown>; queries?: QueryClient };
+  commands: { sendCommand(name: string, args: unknown): Promise<AckMsg>; sendQuery(name: string, args: unknown): Promise<unknown>; queries?: QueryClient; mutations?: MutationClient };
   // Persist a PATCH of this panel's settings (send only the keys being changed —
   // e.g. { timeframe } or { indicators }). AppShell merges the patch into the
   // workspace doc's matching panel entry and debounce-saves via WorkspaceStore.
