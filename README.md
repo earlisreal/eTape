@@ -337,8 +337,10 @@ go tool wails3 task package         # unsigned per-user NSIS smoke package
 
 The package installs under `%LOCALAPPDATA%\Programs\eTape`. Keep Wails beta
 upgrades atomic across `engine/go.mod`, `ui/package.json`/lockfile, and generated
-build assets; the full installer and engine-service wiring remain later migration
-work.
+build assets. The current shell includes native `workspace:<id>` window identity,
+tray reopen, second-launch activation, frameless caption controls, and OS-native
+resize/snap behavior with composition hosting disabled; engine-service wiring and
+the full installer remain later migration work.
 
 ### Race tests with MinGW-w64
 

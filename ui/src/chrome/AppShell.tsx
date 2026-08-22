@@ -36,7 +36,7 @@ import { useAutoUnlockOnStartup } from "./exec/useAutoUnlockOnStartup";
 import { useSoundWiring } from "../sound/useSoundWiring";
 import { NewWindowModal } from "./NewWindowModal";
 import { mutateWindows, readWindows } from "./catalogs";
-import { openWorkspaceWindow } from "./windows";
+import { isNativeWindow, openWorkspaceWindow, workspaceWindowTarget } from "./windows";
 import { planDemoEntry, planDemoRevert } from "./demoTransition";
 import { resolveVenue } from "./exec/venueSelection";
 import { PanelHeaderTab } from "./PanelHeaderTab";
@@ -127,7 +127,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const toast = useToasts();
   const oc = useOrderCommands(commands, stores.exec, toast);
   const orderConfig = useOrderConfig();
-  const [windowId] = useState(() => crypto.randomUUID());
+  const [windowId] = useState(() => isNativeWindow() ? workspaceWindowTarget(workspaceName) : crypto.randomUUID());
   const hotkeyCoordinator = useMemo(
     () => new HotkeyTargetCoordinator(windowId, hotkeyTargetChannel),
     [hotkeyTargetChannel, windowId],
@@ -1031,6 +1031,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             <PanelHeaderHostProvider>
               <DockviewReact components={components} onReady={onReady}
                 defaultTabComponent={PanelHeaderTab} singleTabMode="fullwidth"
+                disableFloatingGroups={isNativeWindow()}
                 theme={mode === "light" ? themeLight : themeDark} />
             </PanelHeaderHostProvider>
           )}

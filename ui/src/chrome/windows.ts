@@ -1,8 +1,11 @@
+import { Call } from "@wailsio/runtime";
+
 const WORKSPACE_ID_RE = /^[a-z0-9-]{1,64}$/;
 const WORKSPACE_WINDOW_POPUP = "popup=yes";
 const NEWS_WINDOW_TARGET = "etape-news-reader";
 const NEWS_WINDOW_WIDTH = 1100;
 const NEWS_WINDOW_HEIGHT = 800;
+const OPEN_WORKSPACE_METHOD = "github.com/earlisreal/eTape/engine/internal/desktop.Host.OpenWorkspace";
 
 let newsWindow: Window | null = null;
 
@@ -16,6 +19,11 @@ export function parseWorkspaceName(search: string): string {
 
 export function workspaceWindowTarget(id: string): string {
   return `etape-workspace-${id}`;
+}
+
+export function isNativeWindow(): boolean {
+  const candidate = window as typeof window & { chrome?: { webview?: unknown }; _wails?: { environment?: { OS?: string } } };
+  return !!candidate.chrome?.webview || candidate._wails?.environment?.OS === "windows";
 }
 
 export function workspaceUrl(id: string, href = window.location.href): string {
@@ -33,7 +41,15 @@ export function workspaceWindowFeatures(): string {
   return `${WORKSPACE_WINDOW_POPUP},width=${width},height=${height}`;
 }
 
+export function openWorkspaceWindowNative(id: string): Promise<void> {
+  return Call.ByName(OPEN_WORKSPACE_METHOD, id).then(() => undefined);
+}
+
 export function openWorkspaceWindow(id: string): Window | null {
+  if (isNativeWindow()) {
+    void openWorkspaceWindowNative(id).catch(() => {});
+    return null;
+  }
   return window.open(workspaceUrl(id), workspaceWindowTarget(id), workspaceWindowFeatures());
 }
 

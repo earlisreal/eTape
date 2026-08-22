@@ -33,8 +33,13 @@ body {
 }
 
 /* Global Top Bar: keep the hotkey target readable when the shell narrows. */
+.top-bar { --wails-draggable: drag; }
+.top-bar > * { --wails-draggable: no-drag; }
+.native-window-controls { --wails-draggable: no-drag; display: inline-flex; align-items: center; gap: 2px; }
+.native-window-controls .btn { width: 28px; min-width: 28px; padding-left: 4px; padding-right: 4px; }
 .top-bar-target, .top-bar-target-cue { min-width: 0; overflow: hidden; }
 .top-bar-target-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dockview-theme-light, .dockview-theme-dark, .ledger-header { --wails-draggable: no-drag; }
 @media (max-width: 1100px) {
   .top-bar-workspace, .top-bar-latency { display: none; }
 }
