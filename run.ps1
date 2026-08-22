@@ -1,5 +1,6 @@
 # Convenience launcher for eTape on Windows. Mirrors run.sh. Three modes:
-#   live  - real engine against %USERPROFILE%\.eTape\config.toml (live OpenD feed + venues)
+#   live  - real engine with an isolated profile by default; use
+#           -profile user -allow-real-profile for an explicit user-profile run
 #   demo  - real engine against a live synthetic market (no OpenD/broker needed)
 #   dev   - mock WS engine + Vite dev server, hot reload for UI work
 #
@@ -20,9 +21,10 @@ Usage: run.cmd <mode> [options]     (or: powershell -File run.ps1 <mode> [option
 
 Modes:
   live               Build the UI, then run the real engine against
-                     %USERPROFILE%\.eTape\config.toml (live OpenD feed + real
-                     venues). Requires OpenD already running and logged in. Extra
-                     args are passed through to the engine, e.g.:
+                     an isolated profile by default (live OpenD + no real
+                     credentials). To access the existing user profile, pass:
+                       run.cmd live -profile user -allow-real-profile
+                     Extra args are passed through to the engine, e.g.:
                        run.cmd live -no-open -log C:\temp\etape.log
 
   demo [SEED]        Build the UI, then run the engine against a live

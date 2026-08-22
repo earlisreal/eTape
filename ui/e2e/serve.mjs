@@ -1,4 +1,6 @@
 import { execFileSync, spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,6 +9,9 @@ const e2eDir = path.dirname(fileURLToPath(import.meta.url));
 const uiDir = path.resolve(e2eDir, "..");
 const engineDir = path.resolve(uiDir, "..", "engine");
 const go = process.platform === "win32" ? "go.exe" : "go";
+const dataRoot = mkdtempSync(path.join(tmpdir(), "etape-e2e-"));
+const cleanup = () => rmSync(dataRoot, { recursive: true, force: true });
+process.once("exit", cleanup);
 
 const buildCommand = process.platform === "win32" ? "cmd.exe" : "npm";
 const buildArgs = process.platform === "win32" ? ["/d", "/c", "npm run build"] : ["run", "build"];
@@ -29,7 +34,7 @@ const engine = spawn(
   ],
   {
     cwd: engineDir,
-    env: { ...process.env, ETAPE_UIHUB_PORT: port },
+    env: { ...process.env, ETAPE_UIHUB_PORT: port, ETAPE_PROFILE: "server", ETAPE_DATA_ROOT: dataRoot },
     stdio: "inherit",
   },
 );
@@ -43,5 +48,6 @@ engine.once("error", (error) => {
   process.exitCode = 1;
 });
 engine.once("exit", (code, signal) => {
+  cleanup();
   process.exitCode = code ?? (signal ? 1 : 0);
 });

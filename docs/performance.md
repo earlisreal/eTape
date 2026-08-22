@@ -2,6 +2,29 @@
 
 Measurements describe Earl's network, entitlements, symbols, and market sessions; they are evidence, not service guarantees. Raw scripts and captures remain under [prototypes](../prototypes/README.md).
 
+## Browser-host migration baseline
+
+The reproducible pre-Wails fixture is
+[prototypes/browser-baseline/fixture.json](../prototypes/browser-baseline/fixture.json),
+with its validation and run protocol in
+[the fixture README](../prototypes/browser-baseline/README.md). It fixes a
+Windows 11 x64 host, display setup, demo seed 42, twelve fictional symbols,
+four browser Workspaces, twelve Panels per Workspace, a simulated-only order
+intent, five minutes of warm-up, three fifteen-minute runs, one-second samples,
+and ten open/close recovery cycles.
+
+Each raw result records startup, bridge-to-store and simulated
+order-intent-to-result latency, process-tree CPU/private memory, frame
+intervals, queue high-water marks, coalesces, overflows, disconnects, drops,
+and recovery. Repeat the exact fixture and protocol for the later Wails result;
+compare p95 latency, steady CPU/private memory, frame intervals, queue behavior,
+and recovery without hiding a lossless gap or disconnect inside an average.
+
+The fixture, protocol, and logs contain no credentials, account data, or
+captured private runtime data. Development, test, prototype, replay, demo,
+server, and migration runs resolve isolated roots; the real `%USERPROFILE%\\.eTape` profile is
+available only through the explicit `-profile user -allow-real-profile` opt-in.
+
 ## Market data and quotas
 
 - **2026-07-03 OpenD request benchmark:** US subscribe calls measured 42-49 ms; five-symbol batched TICKER subscribe measured about 50 ms total. Cached one-symbol and six-symbol quote reads both measured about 5 ms. `get_cur_kline` for 1,000 one-minute bars measured about 9 ms. Source: `41aa9993777cab4ea59e711775094c516032ebf2^:docs/2026-07-03-moomoo-latency-benchmark.md`.

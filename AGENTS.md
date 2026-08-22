@@ -32,7 +32,9 @@ Explicit skill paths are authoritative: verify and read the referenced `SKILL.md
 - Go types in `engine/internal/uihub/wsmsg` own WebSocket contract. `ui/src/gen/wsmsg.ts` is generated; never edit it.
 - TICKER ticks build exchange-time 10-second bars. One-minute K-lines feed larger intraday bars. Daily is fetched; weekly/monthly derive from daily.
 - OpenD uses raw TCP plus protobuf at configured address. Trade unlock occurs in OpenD GUI, not engine.
-- Credentials/config/database stay under `~/.eTape/`; never commit sensitive runtime data.
+- Credentials/config/database/logs stay under the selected runtime profile; only
+  an explicit user/migration opt-in may use `~/.eTape/`. Never commit sensitive
+  runtime data.
 - Every executed plan updates relevant READMEs when flow, interfaces, dependencies, invariants, or operations change.
 
 ## Commands

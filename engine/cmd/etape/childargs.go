@@ -4,9 +4,12 @@ import "strconv"
 
 // baseFlags are the launch flags a relaunch must preserve across a mode switch.
 type baseFlags struct {
-	ConfigPath string
-	DistDir    string
-	LogPath    string
+	ConfigPath       string
+	DistDir          string
+	LogPath          string
+	Profile          string
+	DataRoot         string
+	AllowRealProfile bool
 }
 
 // replayMode selects what the relaunched process boots into. Live and Demo
@@ -32,6 +35,15 @@ func childArgs(base baseFlags, mode replayMode) []string {
 	}
 	if base.LogPath != "" {
 		argv = append(argv, "-log", base.LogPath)
+	}
+	if base.Profile != "" {
+		argv = append(argv, "-profile", base.Profile)
+	}
+	if base.DataRoot != "" {
+		argv = append(argv, "-data-root", base.DataRoot)
+	}
+	if base.AllowRealProfile {
+		argv = append(argv, "-allow-real-profile")
 	}
 	argv = append(argv, "-no-open")
 	if mode.Demo {
