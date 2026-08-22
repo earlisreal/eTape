@@ -208,7 +208,12 @@ func (e *engineRuntime) setRequestQuit(requestQuit func()) {
 func (e *engineRuntime) BeginStop() {
 	e.mu.Lock()
 	e.stopping = true
+	restarting := e.restart
 	e.mu.Unlock()
+	if restarting {
+		e.runtime.BeginStopWithReason("restarting")
+		return
+	}
 	e.runtime.BeginStop()
 }
 

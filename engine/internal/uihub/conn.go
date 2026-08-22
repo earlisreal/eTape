@@ -18,6 +18,20 @@ type wsSocket interface {
 	Close(code int, reason string) error
 }
 
+const (
+	// The latest lane has one bounded slot per active coalescing key. Wails'
+	// StreamConn has its own per-session queue, so this keeps the combined
+	// transport bound explicit instead of making unique latest keys unbounded.
+	outboxLatestSlots = 256
+	outboxMaxBytes    = 8 << 20
+)
+
+var (
+	errTransportQueueFull  = errors.New("transport queue full")
+	errTransportFrameLarge = errors.New("transport frame too large")
+	errOutboxOverflow      = errors.New("outbound queue overflow")
+)
+
 type commandHandler interface {
 	handle(ctx context.Context, name string, args json.RawMessage, connID uint64, reply func(wsmsg.AckMsg)) (wsmsg.AckMsg, bool)
 }
@@ -46,10 +60,10 @@ type qitem struct {
 // `chan []byte` with a topic-aware buffer so a slow client sheds stale
 // latest-wins values (quotes/book/bars/account/positions/scanner.rank/health)
 // by superseding them in place, while event/ordered frames stay a lossless
-// FIFO bounded only by a hard cap that -- if ever exceeded -- still drops the
-// connection (a genuinely pathological client). This is the root-cause fix for
-// the "whole-app refresh" reconnect: normal busy-market backpressure now
-// resolves by coalescing instead of dropping the socket.
+// FIFO bounded by a hard cap. Unique latest keys and retained bytes are
+// bounded too, so every overflow is an explicit disconnect. This is the
+// root-cause fix for the "whole-app refresh" reconnect: normal busy-market
+// backpressure now resolves by coalescing instead of dropping the socket.
 //
 // Concurrency: enqueue is called by many producers (the Hub's Run goroutine via
 // broadcast/sendSnapshot, and this conn's own reader via enqueueJSON); pop is
@@ -60,14 +74,20 @@ type qitem struct {
 // on each wake, so a dropped (redundant) wake token can never strand a queued
 // frame.
 type outbox struct {
-	mu     sync.Mutex
-	q      []*qitem          // insertion-ordered; both lanes share one queue
-	head   int               // consume index; q is compacted when fully drained
-	slots  map[string]*qitem // coalesce key -> its currently-queued item
-	events int               // count of live (queued, not-yet-popped) ck=="" items
-	cap    int               // hard cap on the lossless lane (from ServerConfig.OutBuf)
-	notify chan struct{}     // buffered(1); wakes writeLoop
-	closed bool
+	mu        sync.Mutex
+	q         []*qitem          // insertion-ordered; both lanes share one queue
+	head      int               // consume index; q is compacted when fully drained
+	slots     map[string]*qitem // coalesce key -> its currently-queued item
+	events    int               // count of live (queued, not-yet-popped) ck=="" items
+	depth     int               // count of all live queued items across both lanes
+	bytes     int               // bytes retained by all live queued items
+	highDepth int               // high-water live item count, for boundedness tests
+	highBytes int               // high-water retained bytes, for boundedness tests
+	cap       int               // hard cap on the lossless lane (from ServerConfig.OutBuf)
+	latestCap int               // hard cap on unique latest-wins keys
+	maxBytes  int               // hard cap on combined eTape queue bytes
+	notify    chan struct{}     // buffered(1); wakes writeLoop
+	closed    bool
 }
 
 func newOutbox(capHint int) *outbox {
@@ -75,17 +95,19 @@ func newOutbox(capHint int) *outbox {
 		capHint = 1024
 	}
 	return &outbox{
-		slots:  map[string]*qitem{},
-		cap:    capHint,
-		notify: make(chan struct{}, 1),
+		slots:     map[string]*qitem{},
+		cap:       capHint,
+		latestCap: outboxLatestSlots,
+		maxBytes:  outboxMaxBytes,
+		notify:    make(chan struct{}, 1),
 	}
 }
 
 // enqueue adds b to the outbox. It never blocks and does bounded work, so it is
-// safe to call from the Hub's single Run goroutine. Returns false only when the
-// outbox is closed, or when a lossless frame would exceed the hard cap (the one
-// remaining overflow/drop condition -- the caller then drops the client and
-// Task 1's ui-drop instrumentation records it).
+// safe to call from the Hub's single Run goroutine. Returns false when the
+// outbox is closed, or when a lane/depth/byte bound would be exceeded. The
+// caller explicitly drops the client on false; no queued frame is silently
+// discarded.
 func (o *outbox) enqueue(b []byte, ck string) bool {
 	o.mu.Lock()
 	defer o.mu.Unlock()
@@ -94,30 +116,66 @@ func (o *outbox) enqueue(b []byte, ck string) bool {
 	}
 	if ck != "" {
 		if it := o.slots[ck]; it != nil {
+			if !o.fits(len(b), it) {
+				return false
+			}
 			// Supersede in place: keep the key's original queue position (set by
 			// its first enqueue) and just replace the payload with the newest
 			// value. This is what preserves per-topic FIFO for coalesced keys --
 			// a superseded value is never a second entry in q, only an
 			// overwritten field on the one entry already there.
-			it.b = b
+			oldBytes := len(it.b)
+			it.b = cloneFrame(b)
+			o.bytes += len(it.b) - oldBytes
+			o.updateHighWater()
 			o.wake()
 			return true
 		}
-		it := &qitem{b: b, ck: ck}
+		if len(o.slots) >= o.latestCap || !o.fits(len(b), nil) {
+			return false
+		}
+		it := &qitem{b: cloneFrame(b), ck: ck}
 		o.q = append(o.q, it)
 		o.slots[ck] = it
+		o.depth++
+		o.bytes += len(it.b)
+		o.updateHighWater()
 		o.wake()
 		return true
 	}
-	// Lossless/ordered lane: bounded by the hard cap. This is the ONLY remaining
-	// path that drops a connection under backpressure.
-	if o.events >= o.cap {
+	// Lossless/ordered lane: bounded by the hard cap and combined byte budget.
+	// Overflow is reported by the caller as an explicit disconnect.
+	if o.events >= o.cap || !o.fits(len(b), nil) {
 		return false
 	}
-	o.q = append(o.q, &qitem{b: b})
+	o.q = append(o.q, &qitem{b: cloneFrame(b)})
 	o.events++
+	o.depth++
+	o.bytes += len(b)
+	o.updateHighWater()
 	o.wake()
 	return true
+}
+
+func cloneFrame(b []byte) []byte { return append([]byte(nil), b...) }
+
+// fits checks the combined byte budget. Replacements subtract the old value
+// before adding the new value; they never create a second queued frame.
+func (o *outbox) fits(addBytes int, replace *qitem) bool {
+	next := o.bytes + addBytes
+	if replace != nil {
+		next -= len(replace.b)
+	}
+	return next <= o.maxBytes
+}
+
+func (o *outbox) updateHighWater() {
+	if o.depth > o.highDepth {
+		o.highDepth = o.depth
+	}
+	if o.bytes > o.highBytes {
+		o.highBytes = o.bytes
+	}
 }
 
 // wake signals writeLoop without ever blocking a producer: notify is
@@ -155,6 +213,12 @@ func (o *outbox) pop() ([]byte, bool) {
 		// insurance, not a correctness dependency.
 		delete(o.slots, it.ck)
 	}
+	o.depth--
+	o.bytes -= len(it.b)
+	if o.head == len(o.q) {
+		o.q = o.q[:0]
+		o.head = 0
+	}
 	return it.b, true
 }
 
@@ -163,6 +227,12 @@ func (o *outbox) pop() ([]byte, bool) {
 func (o *outbox) markClosed() {
 	o.mu.Lock()
 	o.closed = true
+	o.q = nil
+	o.head = 0
+	o.slots = map[string]*qitem{}
+	o.events = 0
+	o.depth = 0
+	o.bytes = 0
 	o.mu.Unlock()
 }
 
@@ -199,15 +269,15 @@ func (c *conn) id() uint64 { return c.nid }
 
 // enqueue is called by the hub loop (broadcast/snapshot) AND by this conn's own
 // reader (ack/result/pong). Non-blocking. ck is the outbound coalesce key ("" =>
-// lossless/ordered; non-empty => latest-wins). On a false return (lossless lane
-// over the hard cap, or an already-closed outbox) it tears the conn down so the
-// hub drops it; close() is idempotent, so the hub calling close() again on its
-// own drop path is harmless.
+// lossless/ordered; non-empty => latest-wins). On a false return (a lane,
+// combined depth/byte bound, or an already-closed outbox) it tears the conn
+// down so the hub drops it; close() is idempotent, so the hub calling close()
+// again on its own drop path is harmless.
 func (c *conn) enqueue(b []byte, ck string) bool {
 	if c.out.enqueue(b, ck) {
 		return true
 	}
-	c.close()
+	c.closeWith(1008, errOutboxOverflow.Error())
 	return false
 }
 
@@ -262,6 +332,14 @@ func (c *conn) writeLoop(ctx context.Context) {
 			err := c.ws.Write(wctx, b)
 			cancel()
 			if err != nil {
+				if errors.Is(err, errTransportQueueFull) {
+					c.closeWith(1008, "transport queue overflow")
+					return
+				}
+				if errors.Is(err, errTransportFrameLarge) {
+					c.closeWith(1009, "transport frame too large")
+					return
+				}
 				// Distinguish "this write's own deadline elapsed" (wedged
 				// peer -- ctx derives from the parent, so errors.Is only
 				// matches DeadlineExceeded when writeTimeout, not the parent

@@ -70,6 +70,16 @@ func (r *Runtime) EnterContext(ctx context.Context) (context.Context, func(), er
 // all ephemeral transport capabilities. The lifecycle owner calls this from
 // Wails' non-blocking shutdown hook before it waits for admitted work.
 func (r *Runtime) BeginStop() {
+	r.BeginStopWithReason("engine stopped")
+}
+
+// BeginStopWithReason is the restart-aware form of BeginStop. The control
+// frame is sent before the underlying Wails stream is closed so the UI can
+// distinguish a terminal shutdown from a reconnectable self-restart.
+func (r *Runtime) BeginStopWithReason(reason string) {
+	if reason != "restarting" {
+		reason = "engine stopped"
+	}
 	r.stopOnce.Do(func() {
 		r.gate.BeginStop()
 		r.sessions.RevokeAll()
@@ -80,10 +90,17 @@ func (r *Runtime) BeginStop() {
 		}
 		r.streamsMu.Unlock()
 		for _, stream := range streams {
-			sendStreamControl(stream, StreamReply{Type: "stopping", Reason: "engine stopped"})
+			sendStreamControl(stream, streamStopControl(reason))
 			_ = stream.Close()
 		}
 	})
+}
+
+func streamStopControl(reason string) StreamReply {
+	if reason == "restarting" {
+		return StreamReply{Type: "restarting", Reason: "restarting"}
+	}
+	return StreamReply{Type: "stopping", Reason: "engine stopped"}
 }
 
 func sendStreamControl(stream *application.StreamConn, reply StreamReply) {
@@ -197,6 +214,9 @@ func (r *Runtime) HandleStream(c *application.StreamConn) {
 
 	var hello StreamHello
 	if err := c.ReceiveJSON(&hello); err != nil {
+		if c.Context().Err() == nil {
+			_ = c.SendJSON(StreamReply{Type: "rejected", Error: "malformed stream handshake"})
+		}
 		return
 	}
 	defer r.sessions.Revoke(hello.Session)

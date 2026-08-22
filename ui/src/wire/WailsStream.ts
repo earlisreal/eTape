@@ -59,30 +59,50 @@ class WailsSocket implements ISocket {
     Promise.resolve(openSession(workspaceID)).then(
       (session) => this.openTransport(session),
       (error: unknown) => this.notifyClose(1006, errorMessage(error)),
-    );
+    ).catch((error: unknown) => this.notifyClose(1006, errorMessage(error)));
   }
 
   send(data: string): void {
-    if (this.applicationOpen) this.stream?.send(data);
+    if (!this.applicationOpen || !this.stream) return;
+    try {
+      this.stream.send(data);
+    } catch (error: unknown) {
+      this.failTransport(error);
+    }
   }
 
   close(): void {
     this.closed = true;
-    this.stream?.close();
+    this.closeTransport();
   }
 
   private openTransport(session: string): void {
     if (this.closed) return;
-    const stream = this.streamFactory(WAILS_STREAM_NAME);
+    let stream: WailsStreamLike;
+    try {
+      stream = this.streamFactory(WAILS_STREAM_NAME);
+    } catch (error: unknown) {
+      this.failTransport(error);
+      return;
+    }
     this.stream = stream;
-    if (stream.binaryType !== undefined) stream.binaryType = "arraybuffer";
+    try {
+      if (stream.binaryType !== undefined) stream.binaryType = "arraybuffer";
+    } catch (error: unknown) {
+      this.failTransport(error);
+      return;
+    }
     stream.onopen = () => {
       if (this.closed) return;
-      stream.send(JSON.stringify({
-        protocol: STREAM_PROTOCOL,
-        workspaceId: this.workspaceID,
-        session,
-      }));
+      try {
+        stream.send(JSON.stringify({
+          protocol: STREAM_PROTOCOL,
+          workspaceId: this.workspaceID,
+          session,
+        }));
+      } catch (error: unknown) {
+        this.failTransport(error);
+      }
     };
     stream.onmessage = (event) => this.receive(event.data);
     stream.onclose = (event) => {
@@ -105,9 +125,14 @@ class WailsSocket implements ISocket {
     }
     if (typeof Blob !== "undefined" && data instanceof Blob) {
       void data.text().then((text) => this.receiveText(text), (error: unknown) => {
-        this.notifyClose(1006, errorMessage(error));
+        this.failTransport(error);
       });
     }
+  }
+
+  private failTransport(error: unknown): void {
+    this.notifyClose(1006, errorMessage(error));
+    this.closeTransport();
   }
 
   private receiveText(text: string): void {
@@ -130,7 +155,7 @@ class WailsSocket implements ISocket {
         return;
       case "rejected":
         this.notifyClose(1008, control.error === undefined ? "stream rejected" : String(control.error));
-        this.stream?.close();
+        this.closeTransport();
         return;
       case "stopping":
       case "restarting":
@@ -138,7 +163,11 @@ class WailsSocket implements ISocket {
           control.type === "stopping" ? 1001 : 1000,
           String(control.reason ?? (control.type === "stopping" ? "engine stopped" : "restarting")),
         );
-        this.stream?.close();
+        this.closeTransport();
+        return;
+      case "disconnected":
+        this.notifyClose(1008, String(control.reason ?? "stream disconnected"));
+        this.closeTransport();
         return;
       default:
         if (this.applicationOpen && !this.closed) this.onmessage?.(text);
@@ -151,6 +180,15 @@ class WailsSocket implements ISocket {
     this.closed = true;
     this.applicationOpen = false;
     this.onclose?.({ code, reason });
+  }
+
+  private closeTransport(): void {
+    try {
+      this.stream?.close();
+    } catch {
+      // A close failure is already terminal for this adapter. Do not turn an
+      // intentional WsClient.stop() into a reconnect attempt.
+    }
   }
 }
 

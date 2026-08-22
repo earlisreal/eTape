@@ -471,11 +471,11 @@ func TestConnOutboxCoalescesWhileBlocked(t *testing.T) {
 	}
 }
 
-// TestConnOutboxHardCapOverflowDropsConn proves the one remaining drop path:
-// coalesceable deltas never count toward the cap (a slow client sheds them
-// forever), but the lossless/ordered lane is bounded, and the first lossless
-// frame past the cap returns false and tears the conn down. (The hub turns that
-// false into a ui-drop sys.events frame; see hub_test.go's Task 1 coverage.)
+// TestConnOutboxHardCapOverflowDropsConn proves the explicit lossless overflow
+// path: coalesceable deltas do not consume the lossless cap, but their unique
+// keys and combined bytes are bounded separately. The first lossless frame
+// past its cap returns false and tears the conn down. (The hub turns that false
+// into a ui-drop sys.events frame; see hub_test.go's Task 1 coverage.)
 func TestConnOutboxHardCapOverflowDropsConn(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	h := NewHub(clk, HubConfig{MDInterval: time.Second, AccountInterval: time.Second, PositionInterval: time.Second, Buf: 8}, newMirror(nil, wsmsg.GlobalLimitsView{}, 10, 10, 10, 10, 10))
@@ -588,6 +588,74 @@ func TestOutboxCoalesceKeepsPositionAndLatest(t *testing.T) {
 	o.enqueue([]byte("A2"), "a") // supersede A in place -- keeps position 0
 	if got, want := drainOutbox(o), []string{"A2", "B1"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestOutboxCopiesFramesAndBoundsLatestLane(t *testing.T) {
+	o := newOutbox(2)
+	lossless := []byte("lossless")
+	latest := []byte("latest-1")
+	if !o.enqueue(lossless, "") || !o.enqueue(latest, "quote") {
+		t.Fatal("initial frames should enqueue")
+	}
+	lossless[0] = 'X'
+	latest[0] = 'X'
+	if !o.enqueue([]byte("latest-2"), "quote") {
+		t.Fatal("latest replacement should enqueue")
+	}
+	if got, want := drainOutbox(o), []string{"lossless", "latest-2"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("queued frames alias caller memory: got %v, want %v", got, want)
+	}
+
+	bounded := newOutbox(1)
+	for i := 0; i < outboxLatestSlots; i++ {
+		if !bounded.enqueue([]byte("x"), fmt.Sprintf("key-%d", i)) {
+			t.Fatalf("latest slot %d should fit", i)
+		}
+	}
+	if bounded.enqueue([]byte("overflow"), "one-too-many") {
+		t.Fatal("a new latest key past the declared slot bound must be rejected")
+	}
+	bounded.mu.Lock()
+	depth, highDepth, bytes, highBytes := bounded.depth, bounded.highDepth, bounded.bytes, bounded.highBytes
+	bounded.mu.Unlock()
+	if depth > 1+outboxLatestSlots || highDepth > 1+outboxLatestSlots {
+		t.Fatalf("outbox depth exceeded bound: depth=%d high=%d", depth, highDepth)
+	}
+	if bytes > outboxMaxBytes || highBytes > outboxMaxBytes {
+		t.Fatalf("outbox bytes exceeded bound: bytes=%d high=%d", bytes, highBytes)
+	}
+}
+
+func TestOutboxRejectsCombinedByteOverflow(t *testing.T) {
+	o := newOutbox(2)
+	o.maxBytes = 4
+	if !o.enqueue([]byte("1234"), "") {
+		t.Fatal("one frame may fill the byte budget")
+	}
+	if o.enqueue([]byte("x"), "quote") {
+		t.Fatal("combined lossless/latest bytes must stay bounded")
+	}
+}
+
+func TestConnOverflowHasExplicitCloseReason(t *testing.T) {
+	sock := newFakeSocket()
+	c := newConn(1, sock, newTestHub(clock.NewFake(time.UnixMilli(0))), &fakeCmd{}, fakeQuery{}, 2, time.Second)
+	if !c.enqueue([]byte("primer"), "") || !c.enqueue([]byte("full"), "") {
+		t.Fatal("frames within the lossless cap should enqueue")
+	}
+	if c.enqueue([]byte("overflow"), "") {
+		t.Fatal("lossless overflow should reject the frame")
+	}
+	waitFor(t, func() bool {
+		sock.mu.Lock()
+		defer sock.mu.Unlock()
+		return sock.closed
+	})
+	sock.mu.Lock()
+	defer sock.mu.Unlock()
+	if sock.closeCode != 1008 || sock.closeReason != "outbound queue overflow" {
+		t.Fatalf("overflow close = (%d, %q), want (1008, %q)", sock.closeCode, sock.closeReason, "outbound queue overflow")
 	}
 }
 

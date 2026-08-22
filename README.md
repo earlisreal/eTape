@@ -411,6 +411,35 @@ prototypes/ Python research scripts (latency benchmarks, tick aggregation, …)
 | E2E (Playwright, real engine in isolated server profile) | `cd ui && npm run e2e` |
 | Regenerate TS wire types from Go | `mingw32-make -C engine gen-ts` (`gen-ts-check` to verify drift) |
 
+### Wails migration focused gate
+
+While the Wails v3 migration tickets are open, the ticket-07 transport gate is
+the following focused set (use the repository-local Go caches):
+
+```powershell
+$env:GOCACHE = (Join-Path (Get-Location) "engine/.tmp-gocache")
+$env:GOMODCACHE = (Join-Path (Get-Location) "engine/.tmp-gomodcache")
+go -C engine test ./internal/uihub
+go -C engine test -tags wails ./internal/wailsruntime
+go -C engine test -tags wails ./cmd/etape
+go -C engine test -tags "wails,server" ./cmd/etape
+go -C engine test -race -tags wails ./internal/uihub ./internal/wailsruntime ./cmd/etape
+cd ui
+npm exec vitest -- run --project wire
+npm run typecheck
+cd ..
+git diff --check
+```
+
+The server test is test-only: it creates a temporary `server` profile, uses a
+loopback random port, waits for `/health` and binding-level
+`Capabilities.EnginePhase=ready`, and exercises the generated runtime plus
+`etape.runtime` Stream handler. Packaged/native Wails smoke, Playwright E2E,
+synth/demo checks, 100 reloads/100 lifecycle cycles, the four-Stream ten-second
+soak, unrelated UI golden/panel suites, and the full-repository race suite are
+merge-gate checks deferred during migration; they must remain present and
+must not be replaced by the legacy HTTP bridge.
+
 ### CI-equivalent validation on Windows
 
 The executable source of truth is [.github/workflows/ci.yml](.github/workflows/ci.yml).

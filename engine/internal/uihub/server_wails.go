@@ -5,6 +5,7 @@ package uihub
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -18,13 +19,26 @@ func (s wailsStreamSocket) Read(context.Context) ([]byte, error) {
 }
 
 func (s wailsStreamSocket) Write(_ context.Context, b []byte) error {
-	return s.stream.TrySend(b)
+	// StreamConn.TrySend retains the slice asynchronously without copying it.
+	// Give Wails an owned immutable frame so the conn/outbox can release its
+	// buffer immediately after this call returns.
+	err := s.stream.TrySend(append([]byte(nil), b...))
+	switch {
+	case errors.Is(err, application.ErrStreamFull):
+		return errTransportQueueFull
+	case errors.Is(err, application.ErrStreamTooLarge):
+		return errTransportFrameLarge
+	default:
+		return err
+	}
 }
 
 func (s wailsStreamSocket) Close(_ int, reason string) error {
-	if reason == "engine stopped" || reason == "restarting" {
-		kind := "stopping"
-		if reason == "restarting" {
+	if reason != "closing" {
+		kind := "disconnected"
+		if reason == "engine stopped" {
+			kind = "stopping"
+		} else if reason == "restarting" {
 			kind = "restarting"
 		}
 		if frame, err := json.Marshal(struct {

@@ -62,6 +62,9 @@ func newWailsApp() (*application.App, error) {
 		Assets: application.AssetOptions{
 			Handler: application.BundledAssetFileServer(assets),
 		},
+		Server: application.ServerOptions{
+			Host: "127.0.0.1",
+		},
 		Windows: application.WindowsOptions{
 			DisableQuitOnLastWindowClosed: true,
 			UseVisualHosting:              false,

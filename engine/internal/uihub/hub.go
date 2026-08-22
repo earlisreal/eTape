@@ -23,9 +23,8 @@ var ErrRestarting = errors.New("engine restarting")
 // client is the hub's view of a connected UI socket (implemented by *conn, Task 7).
 // ck is the outbound coalesce key: "" => the frame is lossless/ordered; a
 // non-empty ck => a latest-wins delta the conn may supersede in place if the
-// client is slow (see outbox). A false return means the lossless lane
-// overflowed its hard cap (a genuinely pathological client); the hub then
-// closes+drops it.
+// client is slow (see outbox). A false return means an explicit outbound bound
+// was reached; the hub then closes+drops it rather than hiding loss.
 type client interface {
 	id() uint64
 	enqueue(b []byte, ck string) bool

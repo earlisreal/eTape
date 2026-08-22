@@ -44,6 +44,9 @@ func testWailsServerBindingAndStreamCapabilities(t *testing.T) {
 	port := freePort(t)
 	frontend := httptest.NewServer(application.AlphaAssets.Handler)
 	defer frontend.Close()
+	t.Setenv("ETAPE_PROFILE", "server")
+	t.Setenv("ETAPE_DATA_ROOT", t.TempDir())
+	t.Setenv("ETAPE_NO_OPEN", "1")
 	t.Setenv("FRONTEND_DEVSERVER_URL", frontend.URL)
 	t.Setenv("WAILS_SERVER_HOST", "127.0.0.1")
 	t.Setenv("WAILS_SERVER_PORT", strconv.Itoa(port))
@@ -84,11 +87,7 @@ func testWailsServerBindingAndStreamCapabilities(t *testing.T) {
 	baseURL := fmt.Sprintf("http://127.0.0.1:%d", port)
 	waitForHealth(t, baseURL)
 
-	capabilitiesBody := callBinding(t, baseURL, "Capabilities", "capabilities")
-	var capabilities RuntimeCapabilities
-	if err := json.Unmarshal(capabilitiesBody, &capabilities); err != nil {
-		t.Fatalf("decode capabilities: %v", err)
-	}
+	capabilities := waitForRuntimeReady(t, baseURL)
 	if capabilities.ServerMode != wailsruntime.ServerMode || !capabilities.ServerMode {
 		t.Fatalf("server mode = %v, want true", capabilities.ServerMode)
 	}
@@ -112,6 +111,9 @@ func testWailsServerBindingAndStreamCapabilities(t *testing.T) {
 	}
 	mismatchToken := string(callBinding(t, baseURL, "OpenStreamSession", "mismatch-session", "alpha"))
 	testRejectedRuntimeStream(t, baseURL, mismatchToken, "beta")
+	unsupportedToken := string(callBinding(t, baseURL, "OpenStreamSession", "unsupported-session", "alpha"))
+	testRejectedRuntimeProtocol(t, baseURL, unsupportedToken)
+	testMalformedRuntimeStream(t, baseURL)
 	waitForGateIdle(t, service.runtime.Gate())
 	testApplicationEventBroadcast(t, service, baseURL)
 	testRuntimeStopClosesStream(t, service, baseURL)
@@ -173,6 +175,42 @@ func testRejectedRuntimeStream(t *testing.T, baseURL, token, workspaceID string)
 	readJSON(t, ctx, conn, &rejected)
 	if rejected.Type != "rejected" {
 		t.Fatalf("mismatched workspace handshake = %#v, want rejected", rejected)
+	}
+}
+
+func testRejectedRuntimeProtocol(t *testing.T, baseURL, token string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn := dialRuntimeStream(t, ctx, baseURL)
+	defer conn.CloseNow()
+
+	writeJSON(t, ctx, conn, wailsruntime.StreamHello{
+		Protocol:    wailsruntime.StreamProtocol + 1,
+		WorkspaceID: "alpha",
+		Session:     token,
+	})
+	var rejected wailsruntime.StreamReply
+	readJSON(t, ctx, conn, &rejected)
+	if rejected.Type != "rejected" || rejected.Error == "" {
+		t.Fatalf("unsupported protocol handshake = %#v, want explicit rejection", rejected)
+	}
+}
+
+func testMalformedRuntimeStream(t *testing.T, baseURL string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn := dialRuntimeStream(t, ctx, baseURL)
+	defer conn.CloseNow()
+
+	if err := conn.Write(ctx, websocket.MessageText, []byte("{")); err != nil {
+		t.Fatalf("write malformed handshake: %v", err)
+	}
+	var rejected wailsruntime.StreamReply
+	readJSON(t, ctx, conn, &rejected)
+	if rejected.Type != "rejected" || rejected.Error != "malformed stream handshake" {
+		t.Fatalf("malformed handshake = %#v, want explicit rejection", rejected)
 	}
 }
 
@@ -332,6 +370,27 @@ func waitForHealth(t *testing.T, baseURL string) {
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
+}
+
+func waitForRuntimeReady(t *testing.T, baseURL string) RuntimeCapabilities {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		body := callBinding(t, baseURL, "Capabilities", "readiness")
+		var capabilities RuntimeCapabilities
+		if err := json.Unmarshal(body, &capabilities); err != nil {
+			t.Fatalf("decode readiness capabilities: %v", err)
+		}
+		switch capabilities.EnginePhase {
+		case enginePhaseReady:
+			return capabilities
+		case enginePhaseFailure:
+			t.Fatalf("Wails engine failed before readiness: %s", capabilities.EngineError)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatal("Wails engine did not publish ready readiness")
+	return RuntimeCapabilities{}
 }
 
 func waitForGateIdle(t *testing.T, gate *wailsruntime.Gate) {

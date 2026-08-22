@@ -60,19 +60,31 @@ The focused checks are:
 go test -tags wails ./cmd/etape
 go test -tags "wails,server" ./cmd/etape
 go test ./internal/wailsruntime
+go test ./internal/uihub
+go test -race -tags wails ./internal/uihub ./internal/wailsruntime ./cmd/etape
 go tool wails3 generate bindings -ts -i -clean=true -d ../ui/src/gen/wails -f "-tags wails" ./cmd/etape
 ```
 
 Beta.11 exposes the binding caller as `application.WindowKey` and the Stream
 owner as `StreamConn.Window`; the latter is intentionally nil in server mode.
-`Send` transfers immutable buffer ownership and `TrySend` exposes bounded-send
-failure. The pinned Wails Stream implementation owns its per-session and
-application-wide queue limits; eTape does not duplicate those limits. Wails
-events are app-wide broadcasts and beta.11's internal event mailbox is not a
-correctness queue, so the runtime-owned bounded/coalescing hint queue and its
-single dispatcher are the only path to low-rate invalidation events. The queue
-keeps the newest revision per identity. Quotes, targeted Workspace updates,
-persistence, and order-critical work remain outside ordinary events.
+`TrySend` retains the supplied slice and exposes bounded-send failure, so the
+eTape Wails adapter copies each frame before handing it off. The eTape queue
+keeps `OutBuf` lossless frames, at most 256 unique latest-wins keys, and at most
+8 MiB; beta.11 adds a 256-frame/8 MiB per-StreamConn queue. Replacements keep
+their original position, while overflow closes explicitly instead of dropping
+ordered data. Wails events are app-wide broadcasts and beta.11's internal event
+mailbox is not a correctness queue, so the runtime-owned bounded/coalescing
+hint queue and its single dispatcher are the only path to low-rate invalidation
+events. The queue keeps the newest revision per identity. Quotes, targeted
+Workspace updates, persistence, and order-critical work remain outside
+ordinary events.
+
+The server test is authoritative for the test-only path: it uses the same
+services and Stream handler, `ETAPE_PROFILE=server`, a temporary data root,
+loopback random-port binding, `/health`, and `Capabilities.EnginePhase=ready`.
+Packaged/native smoke, Playwright, 100-reload/100-cycle cleanup, and the
+four-Stream ten-second soak remain merge-gate checks; do not substitute the
+legacy HTTP bridge for them.
 
 Shutdown registers the gate's non-blocking stop hook before Wails service
 shutdown. Admitted gate contexts are canceled, session capabilities are

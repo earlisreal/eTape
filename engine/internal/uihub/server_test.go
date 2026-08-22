@@ -171,7 +171,7 @@ func TestServerOverflowDropDoesNotStallHub(t *testing.T) {
 
 	// Flood sys.events: handlePub broadcasts unconditionally (no coalescing),
 	// so every call produces one frame to A. Once A's connection backs up,
-	// the Hub's overflow-drop path (conn.enqueue's `default: c.close()`)
+	// the Hub's explicit overflow-drop path (conn.enqueue returning false)
 	// fires for A synchronously, on the Hub's single event-loop goroutine.
 	floodDone := make(chan struct{})
 	go func() {

@@ -12,3 +12,14 @@ new sessions reannounce only after admission, while Hub owns snapshot ordering,
 coalescing, and session cleanup. High-frequency data still goes directly to
 imperative stores/controllers and the Scheduler, never React state or Wails
 events.
+
+The adapter treats `accepted`, `rejected`, `stopping`, `restarting`, and
+`disconnected` as transport control frames. It does not deliver application
+frames before `accepted`; a rejection or transport exception closes the
+current session and lets `WsClient` apply its existing reconnect policy.
+Synchronous Wails `send`/`close` failures are caught so a renderer reload or
+close race cannot become an unhandled promise or leave a half-open client.
+The Go side copies queued frames before the asynchronous Wails send, bounds
+lossless and latest-wins queues, and disconnects explicitly at overflow;
+latest-wins values may be superseded, but ordered snapshots/events are never
+silently dropped.

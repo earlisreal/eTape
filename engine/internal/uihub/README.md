@@ -22,6 +22,29 @@ so its existing subscription and demand reannounce provides snapshot-before-
 delta behavior without routing high-frequency data through React state or
 ordinary Wails events.
 
+Transport policy is deliberately bounded and loss-aware. `ServerConfig.OutBuf`
+is the lossless FIFO frame cap; the latest-wins lane has at most 256 unique
+keys, and eTape retains at most 8 MiB across both lanes. Frames are copied when
+queued and again at the Wails `TrySend` ownership boundary. A replacement keeps
+its original FIFO position; a new latest key or any lossless/byte overflow
+closes the connection with an explicit overflow reason instead of silently
+dropping an ordered frame. Beta.11 adds a 256-frame/8 MiB per-StreamConn queue,
+so the declared per-session high-water bound is `OutBuf + 512` frame slots and
+16 MiB of transport buffering (subject to Wails' application-wide ceiling).
+Write timeout, frame-too-large, and transport-queue failures are disconnects;
+the Hub remains non-blocking and reports its own lossless drop diagnostic to
+surviving sessions.
+
+The headless Wails server is test-only. `go test -tags "wails,server" ./cmd/etape`
+starts the same bindings and `etape.runtime` handler on a loopback random port
+in a child process with `ETAPE_PROFILE=server` and a temporary `ETAPE_DATA_ROOT`.
+`/health` proves the HTTP listener is accepting requests; the authoritative
+engine readiness signal is `RuntimeService.Capabilities().EnginePhase ==
+"ready"`. The server build is never selected by the packaged desktop build,
+which passes `noLegacyHTTP=true` and starts no historical localhost listener.
+The test registry and stream sessions are process-local and must not be reused
+across profiles or test cases.
+
 The display-only Estimated LULD value is nested in the existing `md.book`
 payload as optional `estimatedLuld`. The mirror caches it by symbol, merges it
 into the cached book, republishes the ordinary book replacement, and includes
