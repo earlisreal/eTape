@@ -53,6 +53,7 @@ import { DEFAULT_CHART_SETTINGS } from "./tv/ChartSettingsDialog";
 import { FakeDrawingBus, FakeDrawingBusHub } from "../../../test/fakes";
 import { perf } from "../../perf/PerfMonitor";
 import { DrawingInteraction } from "../../render/chart/drawings/interaction";
+import { makeQueryClient } from "../../wire/queries";
 
 // jsdom has no ResizeObserver; ChartPanel's resize wiring only needs observe/disconnect.
 class MockResizeObserver {
@@ -80,13 +81,15 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sh
   const stores = sharedStores ?? makeStores();
   const scheduler = sharedScheduler ?? new Scheduler(browserRaf, () => {});
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
+  const sendQuery = vi.fn(async (name: string, args: unknown) => {
+    if (name === "QueryChartWindow" && chartQueryResult) return chartQueryResult;
+	  if (name === "QueryChartWindow") return { ...(args as object), bars: [], indicators: [], historyRevision: 0 };
+    return [];
+  });
   const commands = {
     sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })),
-    sendQuery: vi.fn(async (name: string, args: unknown) => {
-      if (name === "QueryChartWindow" && chartQueryResult) return chartQueryResult;
-	  if (name === "QueryChartWindow") return { ...(args as object), bars: [], indicators: [], historyRevision: 0 };
-      return [];
-    }),
+    sendQuery,
+    queries: makeQueryClient(false, (name, args) => sendQuery(name, args)),
   };
   const config = { id, panelId: "chart", group: "green" as const, settings: { symbol: "US.AAPL", timeframe: "1m", ...settingsOverride } };
   const onConfigChange = vi.fn();

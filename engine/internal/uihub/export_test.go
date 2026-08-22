@@ -27,15 +27,6 @@ func NewCommandsForTest(ex execDoer, c configStore, i indicatorCtl, d demandCtl,
 	return newCommands(ex, c, i, d, va, f, vt, registries...)
 }
 
-// NewQueriesForTest exposes newQueries to external test packages.
-func NewQueriesForTest(f fillsQuerier, clk clock.Clock, registries ...LocateRegistry) queryHandler {
-	q := newQueries(f, clk)
-	if len(registries) > 0 {
-		q.locates = registries[0]
-	}
-	return q
-}
-
 // SpaHandlerForTest exposes spaHandler to external test packages so they can
 // verify the generalized fs.FS-backed SPA fallback directly (e.g. over an
 // in-memory testing/fstest.MapFS), independent of ServerConfig.DistDir.

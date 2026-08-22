@@ -19,6 +19,7 @@ go tool wails3 task dev
 go tool wails3 task build
 go tool wails3 task generate:bindings
 go tool wails3 task generate:wsmsg
+go tool wails3 task generate:contracts
 go tool wails3 task update:build-assets
 go tool wails3 task server-test
 go tool wails3 task package
@@ -90,3 +91,12 @@ Shutdown registers the gate's non-blocking stop hook before Wails service
 shutdown. Admitted gate contexts are canceled, session capabilities are
 revoked, tracked Streams are closed, and `ServiceShutdown` waits before the
 next lifecycle phase drains the engine.
+
+Ticket 08 adds the concrete `EngineService` and `WorkspaceService` singletons.
+Chart, fill/cycle-fill, locate, and export reads use generated EngineService
+methods in Wails mode; the Workspace Stream remains the owner of subscriptions,
+demands, indicators, snapshots, and updates. Go models live in
+`internal/uiapi`, and `ui/src/wire/queries.ts` adapts the generated service to
+the UI stores while keeping browser/server compatibility. Regenerate both
+contracts together with `go tool wails3 task generate:contracts`; verify with
+`make -C engine gen-contracts-check` after the generated files are tracked.

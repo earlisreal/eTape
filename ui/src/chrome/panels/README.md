@@ -8,7 +8,7 @@ for the fee-bearing reservation. It never creates a short order or declares a
 market-data demand. Ambiguous request failures retain the idempotency key for
 safe retry; definitive broker rejections start a new request. The Account panel shows custom NYSE close-to-close
 Day/Realized P&L and a persisted flat Fills table for the selected venue. It
-backfills `QueryCycleFills` and merges deduplicated live `exec.fills`. Panels
+uses the typed `EngineService.QueryCycleFills` client and merges deduplicated live `exec.fills`. Panels
 acquire/release topics and symbol demand; data stays in stores/controllers.
 The Account panel shows live selected-venue Cash between Equity and Buying
 Power; only Equity and Buying Power use the flat-position hold behavior.

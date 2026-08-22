@@ -11,7 +11,7 @@
 # metadata is unavailable (e.g. a source tarball with no .git directory).
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build test test-race lint vet proto vendor-proto run gen-ts gen-ts-check release-windows release-macos embed-ui windows-icon
+.PHONY: build test test-race lint vet proto vendor-proto run gen-ts gen-ts-check gen-bindings gen-contracts gen-contracts-check release-windows release-macos embed-ui windows-icon
 build:
 	go build ./...
 test:
@@ -35,6 +35,17 @@ gen-ts-check: gen-ts
 	  (echo "wsmsg contract drift: ui/src/gen/wsmsg.ts is not tracked by git" && exit 1)
 	git diff --exit-code -- ../ui/src/gen/wsmsg.ts || \
 	  (echo "wsmsg contract drift: ui/src/gen/wsmsg.ts is stale — run 'make gen-ts' and commit" && exit 1)
+
+gen-bindings:
+	go tool wails3 generate bindings -ts -i -clean=true -d ../ui/src/gen/wails -f "-tags wails" ./cmd/etape
+
+gen-contracts: gen-ts gen-bindings
+
+gen-contracts-check: gen-contracts
+	git ls-files --error-unmatch -- ../ui/src/gen/wsmsg.ts ../ui/src/gen/wails > /dev/null 2>&1 || \
+	  (echo "generated contract drift: generated files must be tracked" && exit 1)
+	git diff --exit-code -- ../ui/src/gen/wsmsg.ts ../ui/src/gen/wails || \
+	  (echo "generated contract drift: run 'make gen-contracts' and commit" && exit 1)
 
 # release-windows/release-macos build the real UI, bake it into the binary via
 # the embed_ui build tag (internal/webui/embed.go), and cross-compile with

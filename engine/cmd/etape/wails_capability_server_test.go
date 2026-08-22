@@ -21,6 +21,7 @@ import (
 
 	"github.com/coder/websocket"
 	"github.com/coder/websocket/wsjson"
+	"github.com/earlisreal/eTape/engine/internal/uiapi"
 	"github.com/earlisreal/eTape/engine/internal/wailsruntime"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -57,14 +58,24 @@ func testWailsServerBindingAndStreamCapabilities(t *testing.T) {
 	}
 	services := app.Config().Services
 	var service *RuntimeService
+	var engineService *uiapi.EngineService
+	var workspaceService *uiapi.WorkspaceService
 	for _, candidate := range services {
-		if runtimeService, ok := candidate.Instance().(*RuntimeService); ok {
+		switch typed := candidate.Instance().(type) {
+		case *RuntimeService:
+			runtimeService := typed
 			service = runtimeService
-			break
+		case *uiapi.EngineService:
+			engineService = typed
+		case *uiapi.WorkspaceService:
+			workspaceService = typed
 		}
 	}
 	if service == nil {
 		t.Fatal("RuntimeService was not registered")
+	}
+	if engineService == nil || workspaceService == nil {
+		t.Fatalf("typed services were not registered: engine=%v workspace=%v", engineService != nil, workspaceService != nil)
 	}
 	if err := service.runtime.RegisterWorkspace("alpha"); err != nil {
 		t.Fatalf("register test workspace: %v", err)
@@ -93,6 +104,24 @@ func testWailsServerBindingAndStreamCapabilities(t *testing.T) {
 	}
 	if capabilities.BindingCaller != "application.WindowKey" || capabilities.StreamCaller != "StreamConn.Window" {
 		t.Fatalf("caller capabilities = %#v", capabilities)
+	}
+	var fills []uiapi.Fill
+	if err := json.Unmarshal(callBindingService(t, baseURL, reflect.TypeOf(uiapi.EngineService{}), "QueryFills", "typed-fills", map[string]any{
+		"symbol": "US.NO_SUCH_SYMBOL", "fromMs": 0, "toMs": time.Now().UnixMilli(),
+	}), &fills); err != nil {
+		t.Fatalf("decode typed QueryFills binding: %v", err)
+	}
+	if fills == nil {
+		t.Fatal("typed QueryFills binding returned null instead of an empty array")
+	}
+	var eligibility uiapi.LocateEligibility
+	if err := json.Unmarshal(callBindingService(t, baseURL, reflect.TypeOf(uiapi.EngineService{}), "QueryLocateEligibility", "typed-eligibility", map[string]any{
+		"venue": "sim", "symbol": "US.AAPL",
+	}), &eligibility); err != nil {
+		t.Fatalf("decode typed eligibility binding: %v", err)
+	}
+	if eligibility.Error == "" {
+		t.Fatal("typed eligibility business outcome lost its error")
 	}
 
 	token := string(callBinding(t, baseURL, "OpenStreamSession", "session", "alpha"))
@@ -283,13 +312,18 @@ func testApplicationEventBroadcast(t *testing.T, service *RuntimeService, baseUR
 }
 
 func callBinding(t *testing.T, baseURL, method, callID string, args ...any) []byte {
+	return callBindingService(t, baseURL, reflect.TypeOf(RuntimeService{}), method, callID, args...)
+}
+
+func callBindingService(t *testing.T, baseURL string, serviceType reflect.Type, method, callID string, args ...any) []byte {
 	t.Helper()
+	serviceName := serviceType.PkgPath() + "." + serviceType.Name()
 	payload := map[string]any{
 		"object": 0,
 		"method": 0,
 		"args": map[string]any{
 			"call-id":    callID,
-			"methodName": reflect.TypeOf(RuntimeService{}).PkgPath() + ".RuntimeService." + method,
+			"methodName": serviceName + "." + method,
 			"args":       args,
 		},
 	}

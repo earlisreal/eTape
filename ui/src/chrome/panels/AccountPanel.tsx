@@ -18,6 +18,7 @@ import { TradeHistoryTable } from "./TradeHistoryTable";
 import { PanelHeaderActionsSlotContext } from "./headerSlot";
 import { ExportTradesPopover } from "./ExportTradesPopover";
 import { ColumnGroup, ColumnResizeHandle, useResizableColumns, type ResizableColumn } from "./ResizableColumns";
+import { queryClient } from "../../wire/queries";
 
 // Task 19 merges the old AccountBarPanel (stats strip) and PositionsPanel
 // (sortable positions table, Flatten) into one Account panel. Per-venue arm
@@ -535,11 +536,10 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   const [fillCycleStart, setFillCycleStart] = useState(accountCycleStart);
   useEffect(() => {
     let live = true;
-    void commands.sendQuery("QueryCycleFills", { venue }).then((raw) => {
+    void queryClient(commands).QueryCycleFills({ venue }).then((raw) => {
       if (!live) return;
-      const r = raw as { cycleStartMs?:number; fills?:Fill[] };
-      stores.fills.ingest(r.fills ?? []);
-      setFillCycleStart(r.cycleStartMs ?? accountCycleStart);
+      stores.fills.ingest(raw.fills);
+      setFillCycleStart(raw.cycleStartMs ?? accountCycleStart);
     }).catch(() => { /* reconnect settles the next cycle query */ });
     return () => { live = false; };
   }, [venue, accountCycleStart, commands, stores.fills]);

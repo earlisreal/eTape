@@ -23,3 +23,10 @@ The Go side copies queued frames before the asynchronous Wails send, bounds
 lossless and latest-wins queues, and disconnects explicitly at overflow;
 latest-wins values may be superseded, but ordered snapshots/events are never
 silently dropped.
+
+Low-rate reads are separate from that Stream boundary. `queries.ts` exposes the
+typed `EngineService` surface for chart windows, fills/cycle-fills, locate
+eligibility/quotes/records, and export data. Wails calls use generated bindings;
+the browser compatibility path decodes the same typed result shapes. Callers
+must use this client rather than sending migrated query names through
+`WsClient.sendQuery`. Generated files remain read-only.

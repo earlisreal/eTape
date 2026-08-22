@@ -412,6 +412,9 @@ func (c *conn) dispatch(ctx context.Context, b []byte) {
 			send(ack)
 		}
 	case "query":
+		if c.qry == nil {
+			return
+		}
 		if async, ok := c.qry.(asyncQueryHandler); ok && async.handleAsync(ctx, head.Name, head.Args, func(payload any) {
 			c.enqueueJSON(wsmsg.ResultMsg{Kind: "result", CorrID: head.CorrID, Payload: payload})
 		}) {

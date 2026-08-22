@@ -59,6 +59,12 @@ tasks:
     cmds:
       - task: common:generate:wsmsg
 
+  generate:contracts:
+    summary: Regenerate Wails bindings and the existing Stream contract together
+    cmds:
+      - task: generate:wsmsg
+      - task: generate:bindings
+
   server-test:
     summary: Compile and test the Wails headless server composition root
     cmds:

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, act, fireEvent, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
+import { render, screen, act, cleanup, fireEvent, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { ToastProvider } from "../Toast";
 import { OrderConfigProvider } from "../exec/useOrderConfig";
@@ -11,14 +11,19 @@ import { FakeBus, FakeBusHub } from "../../../test/fakes";
 import type { AckMsg, AccountRow, ClosedOrder, ClosedTradeRow, ExecStatus, Order, PositionRow, SubmitOrderArgs } from "../../wire/contract";
 import type { PanelProps } from "./registry";
 import type { LinkGroup } from "../linkGroups";
+import { makeQueryClient } from "../../wire/queries";
+
+afterEach(cleanup);
 
 function mkProps(group: LinkGroup = null, groupProp?: LinkGroup) {
   const stores = makeStores();
   const sent: Array<{ name: string; args: unknown }> = [];
   const configChanges: Array<Record<string, unknown>> = [];
+  const sendQuery = vi.fn(async (_name: string, _args: unknown): Promise<unknown> => []);
   const commands = {
     sendCommand: vi.fn(async (name: string, args: unknown): Promise<AckMsg> => { sent.push({ name, args }); return { kind: "ack", corrId: "c", status: "accepted" }; }),
-    sendQuery: vi.fn(async () => []),
+    sendQuery,
+    queries: makeQueryClient(false, (name, args) => sendQuery(name, args)),
   };
   const linkGroups = new LinkGroups(new FakeBus(new FakeBusHub()), () => {});
   const focus = vi.fn();
@@ -874,10 +879,12 @@ describe("AccountPanel", () => {
     it("opens the Export popover from the Trade History tab row and downloads for the panel's selected venue", async () => {
       const { props, stores, linkGroups } = mkProps("green");
       const calls: Array<{ name: string; args: unknown }> = [];
-      props.commands.sendQuery = vi.fn(async (name: string, args: unknown) => {
+      const sendQuery = vi.fn(async (name: string, args: unknown) => {
         calls.push({ name, args });
         return { csv: "datetime,symbol,action,price,shares,fees,externalId\n2026-07-10T09:31:05,NVDA,BUY,120.5,100,0,etape:alpaca-paper:1\n", count: 1 };
       });
+      props.commands.sendQuery = sendQuery;
+      props.commands.queries = makeQueryClient(false, (name, args) => sendQuery(name, args));
       const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
       act(() => {
         stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false, "alpaca-paper") });

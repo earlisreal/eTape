@@ -9,6 +9,7 @@ import { ToastProvider } from "../Toast";
 import { OrderConfigProvider } from "../exec/useOrderConfig";
 import type { PanelProps } from "./registry";
 import { LocatesPanel } from "./LocatesPanel";
+import { makeQueryClient } from "../../wire/queries";
 
 afterEach(cleanup);
 
@@ -31,8 +32,7 @@ function mkProps(options: PanelTestOptions = {}) {
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
   const sentQueries: Array<{ name: string; args: unknown }> = [];
   const sentCommands: Array<{ name: string; args: unknown }> = [];
-  const commands = {
-    sendQuery: vi.fn(async (name: string, args: unknown): Promise<unknown> => {
+  const sendQuery = vi.fn(async (name: string, args: unknown): Promise<unknown> => {
       sentQueries.push({ name, args });
       const handled = options.query?.(name, args);
       if (handled !== undefined) return handled;
@@ -42,7 +42,10 @@ function mkProps(options: PanelTestOptions = {}) {
         return options.quote ?? { quotes: [{ symbol, availableQty: 1200, price: "0.0123", quotedAt: "2026-07-06T13:30:00Z" }], errors: [], error: "" };
       }
       return { locates: [], nextPageToken: "", error: "" };
-    }),
+    });
+  const commands = {
+    sendQuery,
+    queries: makeQueryClient(false, (name, args) => sendQuery(name, args)),
     sendCommand: vi.fn(async (name: string, args: unknown): Promise<AckMsg> => {
       sentCommands.push({ name, args });
       if (options.command) return options.command(name, args);

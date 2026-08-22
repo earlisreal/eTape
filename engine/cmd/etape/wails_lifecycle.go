@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/uiapi"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
 	"github.com/earlisreal/eTape/engine/internal/wailsruntime"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -47,23 +48,24 @@ type engineRuntime struct {
 	serverReady chan struct{}
 	serverOnce  sync.Once
 
-	mu                  sync.Mutex
-	started             bool
-	stopping            bool
-	phase               string
-	bootError           string
-	engineContext       context.Context
-	cancelEngine        context.CancelFunc
-	engineDone          chan struct{}
-	restart             bool
-	relaunchArgs        []string
-	statePublisher      func(engineBootState)
-	requestQuit         func()
-	restartOnce         sync.Once
-	restartScheduleOnce sync.Once
-	stopOnce            sync.Once
-	stopDone            chan struct{}
-	stopError           error
+	mu                   sync.Mutex
+	started              bool
+	stopping             bool
+	phase                string
+	bootError            string
+	engineContext        context.Context
+	cancelEngine         context.CancelFunc
+	engineDone           chan struct{}
+	restart              bool
+	relaunchArgs         []string
+	statePublisher       func(engineBootState)
+	querySourcePublisher func(uiapi.QuerySources)
+	requestQuit          func()
+	restartOnce          sync.Once
+	restartScheduleOnce  sync.Once
+	stopOnce             sync.Once
+	stopDone             chan struct{}
+	stopError            error
 }
 
 func newEngineRuntime(runtime *wailsruntime.Runtime) *engineRuntime {
@@ -103,9 +105,10 @@ func (e *engineRuntime) Start() error {
 
 func (e *engineRuntime) runEngine(ctx context.Context, done chan struct{}, run engineBootRunner) {
 	code, restart, nextArgs := run(ctx, bootOptions{
-		noLegacyHTTP: true,
-		onHub:        e.setHubServer,
-		onReady:      e.markReady,
+		noLegacyHTTP:  true,
+		onHub:         e.setHubServer,
+		onQuerySource: e.setQuerySources,
+		onReady:       e.markReady,
 	})
 
 	e.mu.Lock()
@@ -150,6 +153,21 @@ func (e *engineRuntime) setHubServer(server *uihub.Server) {
 	e.server = server
 	e.serverMu.Unlock()
 	e.serverOnce.Do(func() { close(e.serverReady) })
+}
+
+func (e *engineRuntime) setQuerySources(sources uiapi.QuerySources) {
+	e.mu.Lock()
+	publish := e.querySourcePublisher
+	e.mu.Unlock()
+	if publish != nil {
+		publish(sources)
+	}
+}
+
+func (e *engineRuntime) setQuerySourcePublisher(publish func(uiapi.QuerySources)) {
+	e.mu.Lock()
+	e.querySourcePublisher = publish
+	e.mu.Unlock()
 }
 
 func (e *engineRuntime) HandleStream(c *application.StreamConn) {

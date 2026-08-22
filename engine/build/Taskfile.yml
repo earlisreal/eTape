@@ -56,6 +56,12 @@ tasks:
     cmds:
       - go tool tygo generate
 
+  generate:contracts:
+    summary: Regenerate Wails bindings and the existing Stream contract together
+    deps:
+      - generate:bindings
+      - generate:wsmsg
+
   server-test:
     summary: Compile and test the Wails server build
     cmds:

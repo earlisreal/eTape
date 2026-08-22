@@ -46,6 +46,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/stockinfo"
 	"github.com/earlisreal/eTape/engine/internal/store"
 	"github.com/earlisreal/eTape/engine/internal/synth"
+	"github.com/earlisreal/eTape/engine/internal/uiapi"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 	"github.com/earlisreal/eTape/engine/internal/venueadmin"
@@ -72,10 +73,11 @@ func envBool(name string) bool {
 }
 
 type bootOptions struct {
-	onListening  func(addr string)
-	onHub        func(*uihub.Server)
-	noLegacyHTTP bool
-	onReady      func()
+	onListening   func(addr string)
+	onHub         func(*uihub.Server)
+	onQuerySource func(uiapi.QuerySources)
+	noLegacyHTTP  bool
+	onReady       func()
 }
 
 // boot runs the full engine boot sequence -- flags, config, store/md-core/
@@ -507,7 +509,8 @@ func bootWithOptions(ctx context.Context, options bootOptions) (code int, restar
 		Position: time.Duration(cfg.UIHub.PositionMs) * time.Millisecond,
 		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500, TradesCap: 1000,
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
-		Demo: *demo,
+		Demo:                 *demo,
+		DisableLegacyQueries: options.noLegacyHTTP,
 		OnConfigSet: func(key, value string) {
 			if key != "orderConfig" {
 				return
@@ -522,6 +525,9 @@ func bootWithOptions(ctx context.Context, options bootOptions) (code int, restar
 	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startDemo, locateProviders)
 	if options.onHub != nil {
 		options.onHub(srv)
+	}
+	if options.onQuerySource != nil {
+		options.onQuerySource(uiapi.QuerySources{Fills: st, Charts: hub, Locates: locateProviders, Clock: uihubClk})
 	}
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()

@@ -32,7 +32,7 @@ import { computeLegendView } from "./tv/legendView";
 import { BarCloseTimer } from "./tv/BarCloseTimer";
 import { perf } from "../../perf/PerfMonitor";
 import { bareSymbol } from "../exec/orderStatus";
-import type { QueryChartWindowResult } from "../../gen/wsmsg";
+import { queryClient, type QueryChartWindowResult } from "../../wire/queries";
 import { uiLog } from "../../logging/logger";
 
 const ALL_CHART_BARS = 1_000_000;
@@ -290,10 +290,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       pending.querying = true;
       let retry = false;
       try {
-        const result = await commands.sendQuery("QueryChartWindow", {
+        const result = await queryClient(commands).QueryChartWindow({
           symbol, timeframe, fromMs, toMs, tailBars: 0,
           indicatorSeriesKeys: pending.seriesKeys, skipBars: true,
-        }) as QueryChartWindowResult;
+        });
         if (disposed || generation !== chartGenerationRef.current || currentSymbol !== symbol || tfRef.current !== timeframe
           || pendingIndicatorHydrationRef.current.get(instanceId) !== pending) return;
         for (const series of result.indicators ?? []) {
@@ -335,10 +335,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         const generation = ++viewportGeneration;
         const startedAt = performance.now();
         const keys = indicatorReloadPending ? [] : indicatorKeys();
-        const result = await commands.sendQuery("QueryChartWindow", {
+        const result = await queryClient(commands).QueryChartWindow({
           symbol: currentSymbol, timeframe: tfRef.current, fromMs: 0, toMs: 0, tailBars: ALL_CHART_BARS,
           indicatorSeriesKeys: keys,
-        }) as QueryChartWindowResult;
+        });
         if (mergeSnapshot(result, generation)) {
           stores.bars.expandWindow(result.symbol, result.timeframe, result.fromMs, Number.POSITIVE_INFINITY);
           for (const key of keys) stores.indicators.expandWindow(key, result.fromMs, Number.POSITIVE_INFINITY);
@@ -475,8 +475,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
 
     const backfillFills = (sym: string) => {
       controller.setFills(aggregateFillMarkers(stores.fills.forSymbolFills(sym), tfRef.current as Timeframe));
-      void commands.sendQuery("QueryFills", { symbol: sym, fromMs: 0, toMs: Date.now() })
-        .then((payload) => { stores.fills.ingest((payload as Parameters<typeof stores.fills.ingest>[0]) ?? []); })
+      void queryClient(commands).QueryFills({ symbol: sym, fromMs: 0, toMs: Date.now() })
+        .then((payload) => { stores.fills.ingest(payload); })
         .catch(() => { /* reconnect triggers the next chart refresh */ });
     };
     let pendingFirstPaint: { symbol: string; timeframe: string; startedAt: number; sequence: number } | null = null;

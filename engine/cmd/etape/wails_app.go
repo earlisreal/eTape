@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/earlisreal/eTape/engine/internal/desktop"
+	"github.com/earlisreal/eTape/engine/internal/uiapi"
 	"github.com/earlisreal/eTape/engine/internal/wailsruntime"
 	"github.com/earlisreal/eTape/engine/internal/webui"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -30,6 +31,11 @@ func newWailsApp() (*application.App, error) {
 	runtime := wailsruntime.New()
 	_ = runtime.RegisterWorkspace("main")
 	lifecycle := newEngineRuntime(runtime)
+	engineService := uiapi.NewEngineService(runtime)
+	workspaceService := uiapi.NewWorkspaceService(runtime)
+	lifecycle.setQuerySourcePublisher(func(sources uiapi.QuerySources) {
+		uiapi.ConfigureEngineService(engineService, sources)
+	})
 	service := &RuntimeService{runtime: runtime, lifecycle: lifecycle}
 	lifecycle.setStatePublisher(func(state engineBootState) {
 		service.emitHint(RuntimeEvent{
@@ -44,6 +50,8 @@ func newWailsApp() (*application.App, error) {
 		Icon:        wailsTrayIcon,
 		Services: []application.Service{
 			application.NewService(service),
+			application.NewService(engineService),
+			application.NewService(workspaceService),
 		},
 		OnShutdown:     lifecycle.BeginStop,
 		SingleInstance: instance.options,
