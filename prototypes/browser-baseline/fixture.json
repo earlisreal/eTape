@@ -1,0 +1,77 @@
+{
+  "fixture_id": "browser-host-baseline-v1",
+  "platform": "windows-11-x64",
+  "runtime": "browser-host",
+  "demo": {
+    "seed": 42,
+    "symbols": [
+      "US.AXOM",
+      "US.DRGO",
+      "US.ECLP",
+      "US.GLDN",
+      "US.OBSD",
+      "US.OMBR",
+      "US.PLRS",
+      "US.QNTM",
+      "US.THRA",
+      "US.TSVI",
+      "US.VNTA",
+      "US.WYRE"
+    ],
+    "venue": "sim-paper",
+    "orders": "simulated-only"
+  },
+  "display": {
+    "capture": ["monitor_count", "resolution", "scale_percent", "refresh_hz", "work_area"]
+  },
+  "panel_mix": [
+    { "id": "chart-1", "panel": "chart", "symbol": "US.AXOM", "timeframe": "10s" },
+    { "id": "chart-2", "panel": "chart", "symbol": "US.DRGO", "timeframe": "1m" },
+    { "id": "chart-3", "panel": "chart", "symbol": "US.ECLP", "timeframe": "D" },
+    { "id": "ladder-1", "panel": "ladder", "symbol": "US.GLDN" },
+    { "id": "ladder-2", "panel": "ladder", "symbol": "US.OBSD" },
+    { "id": "tape-1", "panel": "tape", "symbol": "US.OMBR" },
+    { "id": "tape-2", "panel": "tape", "symbol": "US.PLRS" },
+    { "id": "scanner-1", "panel": "scanner" },
+    { "id": "watchlist-1", "panel": "watchlist" },
+    { "id": "stock-info-1", "panel": "stock-info", "symbol": "US.QNTM" },
+    { "id": "account-1", "panel": "account" },
+    { "id": "order-ticket-1", "panel": "order-ticket", "symbol": "US.THRA" }
+  ],
+  "workspaces": [
+    { "id": "baseline-main", "panels": "panel_mix" },
+    { "id": "baseline-monitoring", "panels": "panel_mix" },
+    { "id": "baseline-scanner", "panels": "panel_mix" },
+    { "id": "baseline-execution", "panels": "panel_mix" }
+  ],
+  "protocol": {
+    "warmup_seconds": 300,
+    "measurement_runs": 3,
+    "measurement_seconds": 900,
+    "sample_interval_seconds": 1,
+    "open_close_recovery_cycles": 10
+  },
+  "metrics": [
+    "startup_ms",
+    "bridge_to_store_ms",
+    "order_intent_to_result_ms",
+    "process_tree_cpu_percent",
+    "process_tree_private_memory_mb",
+    "frame_interval_ms",
+    "queue_high_water",
+    "coalesces",
+    "overflows",
+    "disconnects",
+    "drops",
+    "open_close_recovery_ms"
+  ],
+  "order_intent": {
+    "venue": "sim-paper",
+    "symbol": "US.AXOM",
+    "side": "BUY",
+    "type": "LIMIT",
+    "quantity": 1,
+    "limit_price": 1.01,
+    "execution": "simulated-only"
+  }
+}

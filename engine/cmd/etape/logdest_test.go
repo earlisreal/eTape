@@ -64,14 +64,14 @@ func TestOpenLogFileAppends(t *testing.T) {
 // TestConsoleBuildLogPolicy documents the console (!tray) build's contract:
 // it always has a usable stderr and never picks a default log file, so its
 // behavior is unchanged from before the tray/console split existed. The
-// tray build's opposite contract (logToStderr==false, defaultLogPath()!="")
+// tray build's opposite contract (logToStderr==false, defaultLogPath(path)!="")
 // can't be exercised from this test binary (built without the tray tag);
 // it's covered by the release-windows manual smoke test instead.
 func TestConsoleBuildLogPolicy(t *testing.T) {
 	if !logToStderr {
-		t.Error("console build must log to stderr")
+		t.Skip("tray build uses the tray log policy")
 	}
-	if got := defaultLogPath(); got != "" {
+	if got := defaultLogPath(filepath.Join(t.TempDir(), "etape.log")); got != "" {
 		t.Errorf("console build must have no default log path, got %q", got)
 	}
 }

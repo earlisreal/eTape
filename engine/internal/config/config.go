@@ -1,4 +1,5 @@
-// Package config loads eTape's bootstrap TOML config (~/.eTape/config.toml).
+// Package config loads eTape's bootstrap TOML config from the runtime profile
+// selected by cmd/etape (the user profile is an explicit opt-in).
 // Only the sections the current plan needs are defined; the struct grows in
 // later plans. A missing file yields defaults; a malformed file is an error.
 package config
@@ -58,7 +59,7 @@ func (m MD) AnchorSecs() (int64, error) {
 
 // Store configures SQLite persistence (journal, bar archives, config, sys_events).
 type Store struct {
-	DBPath        string `toml:"db_path"`        // empty → resolved to ~/.eTape/etape.db by main
+	DBPath        string `toml:"db_path"`        // empty → resolved to the selected profile by main
 	RetentionDays int    `toml:"retention_days"` // 10s bars pruned at boot beyond this many calendar days; 0 disables
 	FlushMs       int    `toml:"flush_ms"`       // writer batch-flush interval
 }
@@ -68,7 +69,7 @@ type Venue struct {
 	ID              string  `toml:"id"`               // slug used in events, topics, commands, gate config
 	Broker          string  `toml:"broker"`           // tradezero | alpaca | moomoo | sim
 	Env             string  `toml:"env"`              // paper | live
-	Credentials     string  `toml:"credentials"`      // key into ~/.eTape/credentials.json
+	Credentials     string  `toml:"credentials"`      // key into the selected profile's credentials.json
 	AccountID       string  `toml:"account_id"`       // broker-specific (TZ accountId, moomoo accID)
 	StartingBalance float64 `toml:"starting_balance"` // sim only; <=0 => DefaultSimStartingBalance
 	SlippageBps     float64 `toml:"slippage_bps"`     // sim only; extra adverse bps applied to marketable fills; <=0 => off

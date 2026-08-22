@@ -62,9 +62,9 @@ and the broker of your choice for execution, and everything else is free and ope
 - **Every session recorded.** An always-on SQLite journal captures the full feed —
   quotes, ticks, books, bars — so any day can be replayed through the same engine
   (the E2E suite runs on this too).
-- **Local-first and private.** Config, credentials, and the journal live in `~/.eTape/`
-  on your disk. The UI is served from `127.0.0.1`. Your API keys talk to your broker
-  and no one else.
+- **Local-first and private.** The explicit user profile stores config, credentials,
+  and the journal in `~/.eTape/` on your disk. Development, demo, replay, and tests
+  use isolated roots by default. The UI is served from `127.0.0.1`.
 
 ## Features
 
@@ -179,11 +179,15 @@ moomoo's [OpenAPI](https://openapi.moomoo.com/) program. One-time setup:
    [OpenAPI portal](https://openapi.moomoo.com/).
 3. **Launch OpenD and log in** with your moomoo credentials. By default it listens on
    `127.0.0.1:11111`, which is where eTape expects it.
-4. Run eTape in live mode:
+4. Run eTape in live mode with an isolated profile:
 
    ```bash
    ./run.sh live          # Windows: run.cmd live
    ```
+
+   To deliberately open the existing user profile, add
+   `-profile user -allow-real-profile`. This opt-in is not used by tests,
+   demos, replay, prototypes, or server mode.
 
 Then just type a ticker in any panel — the engine subscribes on demand, and the
 scanner keeps the day's leading symbols warm automatically.
@@ -217,11 +221,13 @@ The easiest way to add one is in-app: **Settings → Venues** lets you add a ven
 enter API credentials, and test the connection; it writes the config for you (with an
 automatic backup of your previous `config.toml`).
 
-Credentials are stored locally in `~/.eTape/credentials.json` and are only ever sent
-to the broker they belong to. moomoo is the exception — it has no API key/secret at
-all; it authenticates over the same local OpenD connection as market data, keyed by
-account ID, and trade unlock happens once per OpenD restart in the OpenD GUI itself
-(never inside eTape).
+Credentials are stored locally in the selected profile's `credentials.json` and
+are only ever sent to the broker they belong to. An explicitly opted-in user run
+uses `~/.eTape/credentials.json`; isolated development and practice profiles
+cannot read it. moomoo is the exception — it has no API key/secret at all; it
+authenticates over the same local OpenD connection as market data, keyed by
+account ID, and trade unlock happens once per OpenD restart in the OpenD GUI
+itself (never inside eTape).
 
 Before any order reaches a broker it must pass the **two-layer risk gate** — global
 caps (max day loss, per-symbol position value/shares) and per-venue caps (max order
@@ -253,7 +259,11 @@ are deliberately never used for this.
 
 ## Configuration
 
-Everything lives in `~/.eTape/` (`%USERPROFILE%\.eTape\` on Windows):
+An explicitly opted-in user or migration run stores files in `~/.eTape/`
+(`%USERPROFILE%\.eTape\` on Windows). Development and automated runs resolve
+config, credentials, database, and logs inside an isolated profile root:
+`-profile test|prototype|replay|server|migration -data-root <path>` or a fresh temporary
+root when `-data-root` is omitted.
 
 | File | Purpose |
 |---|---|
@@ -275,7 +285,7 @@ daily_years = 0
 A minimal hand-written config with a paper simulator and tight risk caps:
 
 ```toml
-# ~/.eTape/config.toml — every omitted field falls back to a sane default
+# <profile-root>/config.toml — every omitted field falls back to a sane default
 
 [[venue]]
 id = "sim-paper"
@@ -396,7 +406,7 @@ prototypes/ Python research scripts (latency benchmarks, tick aggregation, …)
 | Engine lint / vet | `cd engine && golangci-lint run` / `go vet ./...` |
 | UI unit tests | `cd ui && npm test` |
 | UI typecheck / lint | `cd ui && npm run typecheck` / `npm run lint` |
-| E2E (Playwright, real engine in replay mode) | `cd ui && npm run e2e` |
+| E2E (Playwright, real engine in isolated server profile) | `cd ui && npm run e2e` |
 | Regenerate TS wire types from Go | `mingw32-make -C engine gen-ts` (`gen-ts-check` to verify drift) |
 
 ### CI-equivalent validation on Windows

@@ -29,6 +29,19 @@ func TestChildArgsPreservesLogPath(t *testing.T) {
 	}
 }
 
+func TestChildArgsPreservesProfileOptIn(t *testing.T) {
+	got := childArgs(baseFlags{
+		ConfigPath:       "/profile/config.toml",
+		Profile:          "user",
+		DataRoot:         "/profile",
+		AllowRealProfile: true,
+	}, replayMode{Live: true})
+	want := []string{"-config", "/profile/config.toml", "-profile", "user", "-data-root", "/profile", "-allow-real-profile", "-no-open"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("childArgs profile:\n got=%v\nwant=%v", got, want)
+	}
+}
+
 // TestChildArgsDemo covers the StartDemo relaunch (Task 1): a UI-triggered
 // demo entry takes no knobs (-demo-day/-demo-speed were removed from the
 // synth chunk), so it must produce exactly -demo and nothing else — in

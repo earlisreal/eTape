@@ -11,6 +11,6 @@ const logToStderr = true
 
 // defaultLogPath returns "" -- the console build only writes a log file when
 // -log is explicitly passed, matching its behavior before this file existed.
-func defaultLogPath() string {
+func defaultLogPath(_ string) string {
 	return ""
 }
