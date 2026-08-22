@@ -8,9 +8,36 @@ import (
 )
 
 var (
-	ErrInvalidSession = errors.New("invalid stream session")
-	ErrSessionOwner   = errors.New("stream session owner mismatch")
+	ErrInvalidSession   = errors.New("invalid stream session")
+	ErrSessionOwner     = errors.New("stream session owner mismatch")
+	ErrUnknownWorkspace = errors.New("unknown workspace identity")
 )
+
+type WorkspaceRegistry struct {
+	mu         sync.RWMutex
+	workspaces map[string]struct{}
+}
+
+func NewWorkspaceRegistry() *WorkspaceRegistry {
+	return &WorkspaceRegistry{workspaces: make(map[string]struct{})}
+}
+
+func (r *WorkspaceRegistry) Register(workspaceID string) error {
+	if workspaceID == "" {
+		return ErrInvalidSession
+	}
+	r.mu.Lock()
+	r.workspaces[workspaceID] = struct{}{}
+	r.mu.Unlock()
+	return nil
+}
+
+func (r *WorkspaceRegistry) Contains(workspaceID string) bool {
+	r.mu.RLock()
+	_, ok := r.workspaces[workspaceID]
+	r.mu.RUnlock()
+	return ok
+}
 
 type SessionOwner struct {
 	WorkspaceID string
@@ -65,5 +92,11 @@ func (r *SessionRegistry) Validate(token, workspaceID string, windowID uint64) e
 func (r *SessionRegistry) Revoke(token string) {
 	r.mu.Lock()
 	delete(r.sessions, token)
+	r.mu.Unlock()
+}
+
+func (r *SessionRegistry) RevokeAll() {
+	r.mu.Lock()
+	r.sessions = make(map[string]SessionOwner)
 	r.mu.Unlock()
 }

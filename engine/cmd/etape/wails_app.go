@@ -3,7 +3,6 @@
 package main
 
 import (
-	"context"
 	_ "embed"
 	"fmt"
 	"os"
@@ -29,6 +28,7 @@ func newWailsApp() (*application.App, error) {
 		return nil, err
 	}
 	runtime := wailsruntime.New()
+	_ = runtime.RegisterWorkspace("main")
 	app := application.New(application.Options{
 		Name:        "eTape",
 		Description: "Local-first US-stock trading platform",
@@ -36,6 +36,7 @@ func newWailsApp() (*application.App, error) {
 		Services: []application.Service{
 			application.NewService(&RuntimeService{runtime: runtime}),
 		},
+		OnShutdown:     runtime.Gate().BeginStop,
 		SingleInstance: instance.options,
 		PostShutdown: func() {
 			if instance.release != nil {
@@ -57,15 +58,30 @@ func newWailsApp() (*application.App, error) {
 		return nil, err
 	}
 	app.HandleStream(runtimeStreamName, runtime.HandleStream)
-
-	// App.Context is the earliest public shutdown signal. Stop the application
-	// gate independently of Wails cleanup; ServiceShutdown remains the final
-	// wait so the next lifecycle phase can drain after this gate.
-	go func() {
-		<-app.Context().Done()
-		_ = runtime.Stop(context.Background())
-	}()
-	app.OnShutdown(func() { _ = runtime.Stop(context.Background()) })
+	go dispatchRuntimeHints(app, runtime)
 
 	return app, nil
+}
+
+func dispatchRuntimeHints(app *application.App, runtime *wailsruntime.Runtime) {
+	for {
+		select {
+		case <-app.Context().Done():
+			return
+		case <-runtime.HintWake():
+			for {
+				if app.Context().Err() != nil {
+					return
+				}
+				hint, ok := runtime.PopHint()
+				if !ok {
+					break
+				}
+				event, ok := hint.Data.(RuntimeEvent)
+				if ok {
+					_ = app.Event.Emit(runtimeHintEvent, event)
+				}
+			}
+		}
+	}
 }

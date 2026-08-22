@@ -18,19 +18,24 @@
 ## Accepted beta.11 capability record
 
 - Binding caller identity is available through `application.WindowKey`; the
-  desktop check binds it to a real Wails Native Window. `StreamConn.Window`
-  provides the corresponding desktop owner and is nil in server mode.
+  desktop check binds it to a real Wails Native Window named for its owning
+  Workspace. `StreamConn.Window` provides the corresponding desktop owner and
+  is nil in server mode; server binding/browser identities are normalized to
+  the isolated test registry's windowless owner.
 - The server check obtains an opaque session through the generated binding,
   validates the first Stream frame against the isolated server registry, echoes
   ordered immutable frames with `TrySend`, and revokes the capability on close.
   A mismatched Workspace label is rejected even with a valid token.
-- The application-owned gate rejects new work after context cancellation and
-  waits admitted work independently of Wails' cancellation/cleanup bookkeeping.
+- The application-owned gate rejects new work after the first Wails shutdown
+  hook, cancels admitted gate contexts, closes tracked Streams, revokes
+  capabilities, and waits admitted work independently of Wails' cleanup
+  bookkeeping.
   The next lifecycle ticket must wait on this gate before engine drain/store
   close.
 - Beta.11's Stream implementation is the owner of its documented per-session
   and application-wide queue bounds. The repository check exercises its public
   bounded-send API and keeps a separate bounded/coalescing queue before any
-  ordinary event hint is emitted. Ordinary events remain app-wide hints only;
-  no targeted, high-frequency, persistence-critical, or order-critical path
+  ordinary event hint is emitted. The dispatcher emits only the newest queued
+  revision for each identity. Ordinary events remain app-wide hints only; no
+  targeted, high-frequency, persistence-critical, or order-critical path
   depends on delivery.

@@ -15,6 +15,7 @@ const (
 func EventAllowed(class EventClass) bool { return class == EventApplicationHint }
 
 type Hint struct {
+	Class    EventClass
 	Key      string
 	Revision uint64
 	Data     any
@@ -26,13 +27,18 @@ type HintQueue struct {
 	items   []Hint
 	indices map[string]int
 	dropped uint64
+	wake    chan struct{}
 }
 
 func NewHintQueue(limit int) *HintQueue {
 	if limit < 1 {
 		limit = 1
 	}
-	return &HintQueue{limit: limit, indices: make(map[string]int)}
+	return &HintQueue{
+		limit:   limit,
+		indices: make(map[string]int),
+		wake:    make(chan struct{}, 1),
+	}
 }
 
 func (q *HintQueue) Push(hint Hint) bool {
@@ -40,7 +46,10 @@ func (q *HintQueue) Push(hint Hint) bool {
 	defer q.mu.Unlock()
 
 	if index, ok := q.indices[hint.Key]; ok {
-		q.items[index] = hint
+		if hint.Revision > q.items[index].Revision {
+			q.items[index] = hint
+			q.signalLocked()
+		}
 		return true
 	}
 	if len(q.items) >= q.limit {
@@ -49,8 +58,18 @@ func (q *HintQueue) Push(hint Hint) bool {
 	}
 	q.indices[hint.Key] = len(q.items)
 	q.items = append(q.items, hint)
+	q.signalLocked()
 	return true
 }
+
+func (q *HintQueue) signalLocked() {
+	select {
+	case q.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (q *HintQueue) Wake() <-chan struct{} { return q.wake }
 
 func (q *HintQueue) Pop() (Hint, bool) {
 	q.mu.Lock()

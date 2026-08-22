@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"os/exec"
 	"reflect"
 	"strconv"
 	"testing"
@@ -24,6 +26,21 @@ import (
 )
 
 func TestWailsServerBindingAndStreamCapabilities(t *testing.T) {
+	if os.Getenv("ETAPE_WAILS_SERVER_CHILD") != "1" {
+		childContext, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		command := exec.CommandContext(childContext, os.Args[0], "-test.run", "^TestWailsServerBindingAndStreamCapabilities$", "-test.v")
+		command.Env = append(os.Environ(), "ETAPE_WAILS_SERVER_CHILD=1")
+		output, err := command.CombinedOutput()
+		if err != nil {
+			t.Fatalf("isolated server test: %v\n%s", err, output)
+		}
+		return
+	}
+	testWailsServerBindingAndStreamCapabilities(t)
+}
+
+func testWailsServerBindingAndStreamCapabilities(t *testing.T) {
 	port := freePort(t)
 	frontend := httptest.NewServer(application.AlphaAssets.Handler)
 	defer frontend.Close()
@@ -45,6 +62,9 @@ func TestWailsServerBindingAndStreamCapabilities(t *testing.T) {
 	}
 	if service == nil {
 		t.Fatal("RuntimeService was not registered")
+	}
+	if err := service.runtime.RegisterWorkspace("alpha"); err != nil {
+		t.Fatalf("register test workspace: %v", err)
 	}
 
 	runDone := make(chan error, 1)
@@ -93,7 +113,8 @@ func TestWailsServerBindingAndStreamCapabilities(t *testing.T) {
 	mismatchToken := string(callBinding(t, baseURL, "OpenStreamSession", "mismatch-session", "alpha"))
 	testRejectedRuntimeStream(t, baseURL, mismatchToken, "beta")
 	waitForGateIdle(t, service.runtime.Gate())
-	testApplicationEventBroadcast(t, app, baseURL)
+	testApplicationEventBroadcast(t, service, baseURL)
+	testRuntimeStopClosesStream(t, service, baseURL)
 }
 
 func testRuntimeStream(t *testing.T, baseURL, token string) {
@@ -148,7 +169,39 @@ func testRejectedRuntimeStream(t *testing.T, baseURL, token, workspaceID string)
 	}
 }
 
-func testApplicationEventBroadcast(t *testing.T, app *application.App, baseURL string) {
+func testRuntimeStopClosesStream(t *testing.T, service *RuntimeService, baseURL string) {
+	t.Helper()
+	token := string(callBinding(t, baseURL, "OpenStreamSession", "stop-session", "alpha"))
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	conn := dialRuntimeStream(t, ctx, baseURL)
+	defer conn.CloseNow()
+
+	writeJSON(t, ctx, conn, wailsruntime.StreamHello{
+		Protocol:    wailsruntime.StreamProtocol,
+		WorkspaceID: "alpha",
+		Session:     token,
+	})
+	var accepted wailsruntime.StreamReply
+	readJSON(t, ctx, conn, &accepted)
+	if accepted.Type != "accepted" {
+		t.Fatalf("shutdown stream handshake = %#v, want accepted", accepted)
+	}
+
+	stopped := make(chan error, 1)
+	go func() { stopped <- service.runtime.Stop(context.Background()) }()
+	if _, _, err := conn.Read(ctx); err == nil {
+		t.Fatal("runtime stop left the stream open")
+	}
+	if err := <-stopped; err != nil {
+		t.Fatalf("runtime stop: %v", err)
+	}
+	if service.runtime.Gate().InFlight() != 0 {
+		t.Fatalf("in-flight handlers after runtime stop = %d", service.runtime.Gate().InFlight())
+	}
+}
+
+func testApplicationEventBroadcast(t *testing.T, service *RuntimeService, baseURL string) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -158,8 +211,8 @@ func testApplicationEventBroadcast(t *testing.T, app *application.App, baseURL s
 	second := dialWebSocket(t, ctx, baseURL+"/wails/events?clientId=second")
 	defer second.CloseNow()
 
-	if app.Event.Emit(runtimeHintEvent, RuntimeEvent{WorkspaceID: "alpha", Revision: 7, Kind: "invalidate"}) {
-		t.Fatal("application hint event was canceled")
+	if !service.emitHint(RuntimeEvent{WorkspaceID: "alpha", Revision: 7, Kind: "invalidate"}) {
+		t.Fatal("application hint was rejected before emit")
 	}
 
 	for name, conn := range map[string]*websocket.Conn{"first": first, "second": second} {

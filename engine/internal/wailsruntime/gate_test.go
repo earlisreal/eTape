@@ -50,3 +50,19 @@ func TestGateRejectsCanceledContextWithoutAdmission(t *testing.T) {
 		t.Fatalf("in-flight after canceled enter = %d, want 0", got)
 	}
 }
+
+func TestGateCancelsAdmittedContextWhenStopping(t *testing.T) {
+	gate := NewGate()
+	workCtx, release, err := gate.EnterContext(context.Background())
+	if err != nil {
+		t.Fatalf("enter context: %v", err)
+	}
+	defer release()
+
+	gate.BeginStop()
+	select {
+	case <-workCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("admitted context was not canceled at stop")
+	}
+}

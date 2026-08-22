@@ -41,3 +41,14 @@ func TestOnlyApplicationHintsMayUseOrdinaryEvents(t *testing.T) {
 		t.Fatal("application hints should use ordinary Wails events")
 	}
 }
+
+func TestHintQueueKeepsNewestRevision(t *testing.T) {
+	queue := NewHintQueue(1)
+	queue.Push(Hint{Key: "workspace", Revision: 3})
+	queue.Push(Hint{Key: "workspace", Revision: 2})
+
+	hint, ok := queue.Pop()
+	if !ok || hint.Revision != 3 {
+		t.Fatalf("out-of-order pop = %#v, %v; want revision 3", hint, ok)
+	}
+}

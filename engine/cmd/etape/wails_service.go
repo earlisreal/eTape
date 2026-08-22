@@ -39,7 +39,7 @@ func init() {
 func (s *RuntimeService) ServiceName() string { return "RuntimeService" }
 
 func (s *RuntimeService) Capabilities(ctx context.Context) (RuntimeCapabilities, error) {
-	release, err := s.runtime.Enter(ctx)
+	_, release, err := s.runtime.EnterContext(ctx)
 	if err != nil {
 		return RuntimeCapabilities{}, err
 	}
@@ -52,6 +52,15 @@ func (s *RuntimeService) Capabilities(ctx context.Context) (RuntimeCapabilities,
 		ServerMode:       wailsruntime.ServerMode,
 		EventsScope:      "application-wide hint only",
 	}, nil
+}
+
+func (s *RuntimeService) emitHint(event RuntimeEvent) bool {
+	return s.runtime.EnqueueHint(wailsruntime.Hint{
+		Class:    wailsruntime.EventApplicationHint,
+		Key:      event.WorkspaceID + "\x00" + event.Kind,
+		Revision: event.Revision,
+		Data:     event,
+	})
 }
 
 func (s *RuntimeService) OpenStreamSession(ctx context.Context, workspaceID string) (string, error) {

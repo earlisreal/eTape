@@ -63,6 +63,12 @@ owner as `StreamConn.Window`; the latter is intentionally nil in server mode.
 failure. The pinned Wails Stream implementation owns its per-session and
 application-wide queue limits; eTape does not duplicate those limits. Wails
 events are app-wide broadcasts and beta.11's internal event mailbox is not a
-correctness queue, so only the bounded hint queue may feed low-rate invalidation
-events. Quotes, targeted Workspace updates, persistence, and order-critical
-work remain outside ordinary events.
+correctness queue, so the runtime-owned bounded/coalescing hint queue and its
+single dispatcher are the only path to low-rate invalidation events. The queue
+keeps the newest revision per identity. Quotes, targeted Workspace updates,
+persistence, and order-critical work remain outside ordinary events.
+
+Shutdown registers the gate's non-blocking stop hook before Wails service
+shutdown. Admitted gate contexts are canceled, session capabilities are
+revoked, tracked Streams are closed, and `ServiceShutdown` waits before the
+next lifecycle phase drains the engine.

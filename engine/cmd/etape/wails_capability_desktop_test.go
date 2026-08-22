@@ -40,7 +40,7 @@ func TestWailsDesktopCallerIdentityUsesNativeWindow(t *testing.T) {
 	if service == nil {
 		t.Fatal("RuntimeService was not registered")
 	}
-	window := app.Window.NewWithOptions(application.WebviewWindowOptions{Name: "capability-test"})
+	window := app.Window.NewWithOptions(application.WebviewWindowOptions{Name: "workspace:alpha"})
 	ctx := context.WithValue(context.Background(), application.WindowKey, application.Window(window))
 
 	capabilities, err := service.Capabilities(ctx)
