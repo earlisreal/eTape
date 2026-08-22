@@ -4,6 +4,14 @@ eTape presents live US-market data and trading controls while preserving the tra
 
 ## Workspace Layout
 
+**Workspace**:
+A persistent collection of Panels, Panel Group layout, and workspace-level settings. Its primary Native Window renders the Dockview layout, but the Workspace is not the window and survives after that window closes.
+_Avoid_: Window, layout
+
+**Native Window**:
+An operating-system-level window owned by the Wails host. A Native Window may host a Workspace or, if detachable Panel Groups are added later, a detached Panel Group; it is not itself a Workspace or Panel Group.
+_Avoid_: Workspace, Panel Group, browser window
+
 **Panel Group**:
 A container for one or more eTape panels. A one-panel group presents a full-width Panel Header; a multi-panel group presents Tabs above the active panel's Panel Header.
 _Avoid_: Pane, window
