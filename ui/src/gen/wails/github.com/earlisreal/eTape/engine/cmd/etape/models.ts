@@ -7,10 +7,14 @@ export interface RuntimeCapabilities {
     "streamCaller": string;
     "serverMode": boolean;
     "eventsScope": string;
+    "enginePhase": string;
+    "engineError"?: string;
 }
 
 export interface RuntimeEvent {
     "workspaceId": string;
     "revision": number;
     "kind": string;
+    "phase"?: string;
+    "error"?: string;
 }

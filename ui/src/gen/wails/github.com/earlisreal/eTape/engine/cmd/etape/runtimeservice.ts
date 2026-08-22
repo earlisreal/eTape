@@ -16,3 +16,7 @@ export function Capabilities(): $CancellablePromise<$models.RuntimeCapabilities>
 export function OpenStreamSession(workspaceID: string): $CancellablePromise<string> {
     return $Call.ByID(3296843755, workspaceID);
 }
+
+export function RestartApplication(): $CancellablePromise<string> {
+    return $Call.ByID(3452348362);
+}

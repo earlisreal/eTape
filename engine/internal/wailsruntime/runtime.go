@@ -31,6 +31,7 @@ type Runtime struct {
 	hints      *HintQueue
 	streamsMu  sync.Mutex
 	streams    map[*application.StreamConn]struct{}
+	stopOnce   sync.Once
 }
 
 func New() *Runtime {
@@ -53,18 +54,27 @@ func (r *Runtime) EnterContext(ctx context.Context) (context.Context, func(), er
 	return r.gate.EnterContext(ctx)
 }
 
+// BeginStop synchronously closes the runtime admission boundary and revokes
+// all ephemeral transport capabilities. The lifecycle owner calls this from
+// Wails' non-blocking shutdown hook before it waits for admitted work.
+func (r *Runtime) BeginStop() {
+	r.stopOnce.Do(func() {
+		r.gate.BeginStop()
+		r.sessions.RevokeAll()
+		r.streamsMu.Lock()
+		streams := make([]*application.StreamConn, 0, len(r.streams))
+		for stream := range r.streams {
+			streams = append(streams, stream)
+		}
+		r.streamsMu.Unlock()
+		for _, stream := range streams {
+			_ = stream.Close()
+		}
+	})
+}
+
 func (r *Runtime) Stop(ctx context.Context) error {
-	r.gate.BeginStop()
-	r.sessions.RevokeAll()
-	r.streamsMu.Lock()
-	streams := make([]*application.StreamConn, 0, len(r.streams))
-	for stream := range r.streams {
-		streams = append(streams, stream)
-	}
-	r.streamsMu.Unlock()
-	for _, stream := range streams {
-		_ = stream.Close()
-	}
+	r.BeginStop()
 	return r.gate.Stop(ctx)
 }
 

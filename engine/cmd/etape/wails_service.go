@@ -20,16 +20,21 @@ type RuntimeCapabilities struct {
 	StreamCaller     string `json:"streamCaller"`
 	ServerMode       bool   `json:"serverMode"`
 	EventsScope      string `json:"eventsScope"`
+	EnginePhase      string `json:"enginePhase"`
+	EngineError      string `json:"engineError,omitempty"`
 }
 
 type RuntimeEvent struct {
 	WorkspaceID string `json:"workspaceId"`
 	Revision    uint64 `json:"revision"`
 	Kind        string `json:"kind"`
+	Phase       string `json:"phase,omitempty"`
+	Error       string `json:"error,omitempty"`
 }
 
 type RuntimeService struct {
-	runtime *wailsruntime.Runtime
+	runtime   *wailsruntime.Runtime
+	lifecycle *engineRuntime
 }
 
 func init() {
@@ -38,12 +43,23 @@ func init() {
 
 func (s *RuntimeService) ServiceName() string { return "RuntimeService" }
 
+func (s *RuntimeService) ServiceStartup(context.Context, application.ServiceOptions) error {
+	if s.lifecycle == nil {
+		return nil
+	}
+	return s.lifecycle.Start()
+}
+
 func (s *RuntimeService) Capabilities(ctx context.Context) (RuntimeCapabilities, error) {
 	_, release, err := s.runtime.EnterContext(ctx)
 	if err != nil {
 		return RuntimeCapabilities{}, err
 	}
 	defer release()
+	state := engineBootState{}
+	if s.lifecycle != nil {
+		state = s.lifecycle.State()
+	}
 
 	return RuntimeCapabilities{
 		BindingCaller:    "application.WindowKey",
@@ -51,6 +67,8 @@ func (s *RuntimeService) Capabilities(ctx context.Context) (RuntimeCapabilities,
 		StreamCaller:     "StreamConn.Window",
 		ServerMode:       wailsruntime.ServerMode,
 		EventsScope:      "application-wide hint only",
+		EnginePhase:      state.Phase,
+		EngineError:      state.Error,
 	}, nil
 }
 
@@ -67,6 +85,25 @@ func (s *RuntimeService) OpenStreamSession(ctx context.Context, workspaceID stri
 	return s.runtime.OpenSession(ctx, workspaceID)
 }
 
+func (s *RuntimeService) RestartApplication(ctx context.Context) (string, error) {
+	if s.lifecycle == nil {
+		return "", errEngineNotStart
+	}
+	_, release, err := s.runtime.EnterContext(ctx)
+	if err != nil {
+		return "", err
+	}
+	if err := s.lifecycle.RequestRestart(); err != nil {
+		release()
+		return "", err
+	}
+	release()
+	return "accepted", nil
+}
+
 func (s *RuntimeService) ServiceShutdown() error {
+	if s.lifecycle != nil {
+		return s.lifecycle.Stop(context.Background())
+	}
 	return s.runtime.Stop(context.Background())
 }

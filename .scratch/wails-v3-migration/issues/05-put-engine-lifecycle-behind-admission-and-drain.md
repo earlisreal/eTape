@@ -6,11 +6,11 @@
 
 **Status:** ready-for-agent
 
-- [ ] Engine startup is asynchronous, returns control to the Wails event loop promptly, and exposes loading, ready, or failure state to Main without starting a legacy product listener.
-- [ ] Every binding and Stream entrypoint must acquire the same application-owned admission and in-flight gate before touching engine or storage state.
-- [ ] Stop first rejects new work, revokes ephemeral capabilities, cancels long-running work, and joins all admitted bindings and Stream handlers before invoking the existing ordered engine drain and closing storage exactly once.
-- [ ] Restart intent returns its binding result before asynchronous shutdown starts, and replacement launch is deferred until post-shutdown has released Wails, single-instance, data-root, and database resources.
-- [ ] The lifecycle owner is concrete and not restartable in-process; no generic host interface or parallel engine lifecycle is introduced.
-- [ ] Race tests cover new and long-running bindings and Streams against stop, cancellation, drain, store close, and restart initiation, proving no deadlock, goroutine leak, double close, or store write after close.
-- [ ] Existing engine shutdown ordering and storage tests remain green with the real engine composed beneath Wails.
-- [ ] Lifecycle and operational documentation identifies the single owner, admission boundary, boot-state behavior, and ordered shutdown contract.
+- [x] Engine startup is asynchronous, returns control to the Wails event loop promptly, and exposes loading, ready, or failure state to Main without starting a legacy product listener.
+- [x] Every binding and Stream entrypoint must acquire the same application-owned admission and in-flight gate before touching engine or storage state.
+- [x] Stop first rejects new work, revokes ephemeral capabilities, cancels long-running work, and joins all admitted bindings and Stream handlers before invoking the existing ordered engine drain and closing storage exactly once.
+- [x] Restart intent returns its binding result before asynchronous shutdown starts, and replacement launch is deferred until post-shutdown has released Wails, single-instance, data-root, and database resources.
+- [x] The lifecycle owner is concrete and not restartable in-process; no generic host interface or parallel engine lifecycle is introduced.
+- [x] Race tests cover new and long-running bindings and Streams against stop, cancellation, drain, store close, and restart initiation, proving no deadlock, goroutine leak, double close, or store write after close.
+- [x] Existing engine shutdown ordering and storage tests remain green with the real engine composed beneath Wails.
+- [x] Lifecycle and operational documentation identifies the single owner, admission boundary, boot-state behavior, and ordered shutdown contract.

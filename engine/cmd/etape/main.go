@@ -71,6 +71,12 @@ func envBool(name string) bool {
 	return err == nil && v
 }
 
+type bootOptions struct {
+	onListening  func(addr string)
+	noLegacyHTTP bool
+	onReady      func()
+}
+
 // boot runs the full engine boot sequence -- flags, config, store/md-core/
 // exec-core/uihub construction, feed startup (live OpenD or replay), and the
 // ordered shutdown once ctx is cancelled -- and returns the process exit
@@ -86,6 +92,10 @@ func envBool(name string) bool {
 // entrypoint uses it to learn the address for its "Open eTape" menu action
 // without duplicating any config-resolution logic.
 func boot(ctx context.Context, onListening func(addr string)) (code int, restart bool, nextArgs []string) {
+	return bootWithOptions(ctx, bootOptions{onListening: onListening})
+}
+
+func bootWithOptions(ctx context.Context, options bootOptions) (code int, restart bool, nextArgs []string) {
 	cfgPath := flag.String("config", "", "path to config.toml (defaults inside the selected profile)")
 	dist := flag.String("dist", "", "serve built UI from this dir (overrides [uihub].dist_dir)")
 	demo := flag.Bool("demo", false, "run the built-in synthetic demo market (no OpenD/broker needed)")
@@ -279,7 +289,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	var restartRequested atomic.Bool
 	requestRestart := func() { restartRequested.Store(true); stop(uihub.ErrRestarting) }
 	var startupBrowser *openbrowser.OwnedBrowser
-	if *ownedBrowserPID != 0 || *ownedBrowserStart != 0 || *ownedBrowserProfile != "" {
+	if !options.noLegacyHTTP && (*ownedBrowserPID != 0 || *ownedBrowserStart != 0 || *ownedBrowserProfile != "") {
 		var adoptErr error
 		adoptURL := *ownedBrowserURL
 		if adoptURL == "" {
@@ -511,31 +521,36 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startDemo, locateProviders)
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
-	uiCtx, cancelUI := context.WithCancel(context.Background())
-	defer cancelUI()
-	httpSrv := &http.Server{
-		Addr: cfg.UIHub.Addr(), Handler: srv.Handler(), ReadHeaderTimeout: 5 * time.Second,
-		// BaseContext ties every accepted connection's r.Context() to uiCtx.
-		// Shutdown waits for Hub.Run to issue the clean close reason first, then
-		// cancels uiCtx before Server.Wait. This keeps a clean WebSocket close
-		// distinguishable from a connection context cancellation while still
-		// unblocking connections accepted after Hub.Run has returned.
-		BaseContext: func(net.Listener) context.Context { return uiCtx },
-	}
-	go func() {
-		if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error("uihub listen", "err", err)
+	var cancelUI context.CancelFunc
+	var httpSrv *http.Server
+	if !options.noLegacyHTTP {
+		uiCtx, cancel := context.WithCancel(context.Background())
+		cancelUI = cancel
+		defer cancelUI()
+		httpSrv = &http.Server{
+			Addr: cfg.UIHub.Addr(), Handler: srv.Handler(), ReadHeaderTimeout: 5 * time.Second,
+			// BaseContext ties every accepted connection's r.Context() to uiCtx.
+			// Shutdown waits for Hub.Run to issue the clean close reason first, then
+			// cancels uiCtx before Server.Wait. This keeps a clean WebSocket close
+			// distinguishable from a connection context cancellation while still
+			// unblocking connections accepted after Hub.Run has returned.
+			BaseContext: func(net.Listener) context.Context { return uiCtx },
 		}
-	}()
-	log.Info("uihub up", "addr", cfg.UIHub.Addr(), "dist", cfg.UIHub.DistDir)
-	if onListening != nil {
-		onListening(cfg.UIHub.Addr())
-	}
-	if !*noOpen {
-		var openErr error
-		startupBrowser, openErr = openbrowser.OpenOwned(browserURL(cfg.UIHub.Addr(), handlerLevel == slog.LevelDebug))
-		if openErr != nil {
-			log.Warn("open browser", "err", openErr)
+		go func() {
+			if err := httpSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				log.Error("uihub listen", "err", err)
+			}
+		}()
+		log.Info("uihub up", "addr", cfg.UIHub.Addr(), "dist", cfg.UIHub.DistDir)
+		if options.onListening != nil {
+			options.onListening(cfg.UIHub.Addr())
+		}
+		if !*noOpen {
+			var openErr error
+			startupBrowser, openErr = openbrowser.OpenOwned(browserURL(cfg.UIHub.Addr(), handlerLevel == slog.LevelDebug))
+			if openErr != nil {
+				log.Warn("open browser", "err", openErr)
+			}
 		}
 	}
 
@@ -787,6 +802,9 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}
 	log.Info("etape ready", "version", buildinfo.Version, "mode", mode,
 		"uiAddr", cfg.UIHub.Addr(), "venues", len(cfg.Venues))
+	if options.onReady != nil {
+		options.onReady()
+	}
 
 	<-ctx.Done()
 
@@ -838,11 +856,13 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// could land after backfillWG.Wait() already observed zero, spawning an
 	// unwaited orch.Backfill goroutine that touches
 	// the store during/after st.Close().
-	<-hubDone  // Hub issued the clean close reason: no more handleEnsureDemand or new backfillWG.Add calls
-	cancelUI() // unblock every conn.run(), including a connection accepted after Hub.Run returned
-	shutCtx, cancelShut := context.WithTimeout(context.Background(), 5*time.Second)
-	_ = httpSrv.Shutdown(shutCtx)
-	cancelShut()
+	<-hubDone // Hub issued the clean close reason: no more handleEnsureDemand or new backfillWG.Add calls
+	if !options.noLegacyHTTP {
+		cancelUI() // unblock every conn.run(), including a connection accepted after Hub.Run returned
+		shutCtx, cancelShut := context.WithTimeout(context.Background(), 5*time.Second)
+		_ = httpSrv.Shutdown(shutCtx)
+		cancelShut()
+	}
 	srv.Wait()        // every conn.run() returned: no more SetConfig via dispatch
 	scanWG.Wait()     // scan poller stopped: no more backfillWG.Add from pool admissions
 	backfillWG.Wait() // boot backfill workers stopped: no more Seed* into the core

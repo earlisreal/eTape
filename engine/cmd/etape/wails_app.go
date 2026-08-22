@@ -29,18 +29,34 @@ func newWailsApp() (*application.App, error) {
 	}
 	runtime := wailsruntime.New()
 	_ = runtime.RegisterWorkspace("main")
+	lifecycle := newEngineRuntime(runtime)
+	service := &RuntimeService{runtime: runtime, lifecycle: lifecycle}
+	lifecycle.setStatePublisher(func(state engineBootState) {
+		service.emitHint(RuntimeEvent{
+			Kind:  "engine-boot",
+			Phase: state.Phase,
+			Error: state.Error,
+		})
+	})
 	app := application.New(application.Options{
 		Name:        "eTape",
 		Description: "Local-first US-stock trading platform",
 		Icon:        wailsTrayIcon,
 		Services: []application.Service{
-			application.NewService(&RuntimeService{runtime: runtime}),
+			application.NewService(service),
 		},
-		OnShutdown:     runtime.Gate().BeginStop,
+		OnShutdown:     lifecycle.BeginStop,
 		SingleInstance: instance.options,
 		PostShutdown: func() {
 			if instance.release != nil {
 				_ = instance.release()
+			}
+			if lifecycle.RestartRequested() {
+				if err := relaunch(lifecycle.RelaunchArgs()); err != nil {
+					// The old process is already fully stopped here; keep the
+					// failure visible without starting a second shutdown path.
+					fmt.Fprintf(os.Stderr, "eTape restart: %v\n", err)
+				}
 			}
 		},
 		Assets: application.AssetOptions{
@@ -51,6 +67,7 @@ func newWailsApp() (*application.App, error) {
 			UseVisualHosting:              false,
 		},
 	})
+	lifecycle.setRequestQuit(func() { application.InvokeAsync(app.Quit) })
 	if err := configureWailsHost(app, host, wailsTrayIcon); err != nil {
 		if instance.release != nil {
 			_ = instance.release()
