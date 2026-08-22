@@ -9,7 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/uihub"
 	"github.com/earlisreal/eTape/engine/internal/wailsruntime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 const (
@@ -40,6 +42,11 @@ type engineRuntime struct {
 	runtime *wailsruntime.Runtime
 	run     engineBootRunner
 
+	serverMu    sync.Mutex
+	server      *uihub.Server
+	serverReady chan struct{}
+	serverOnce  sync.Once
+
 	mu                  sync.Mutex
 	started             bool
 	stopping            bool
@@ -61,10 +68,11 @@ type engineRuntime struct {
 
 func newEngineRuntime(runtime *wailsruntime.Runtime) *engineRuntime {
 	return &engineRuntime{
-		runtime:  runtime,
-		run:      bootWithOptions,
-		phase:    enginePhaseLoading,
-		stopDone: make(chan struct{}),
+		runtime:     runtime,
+		run:         bootWithOptions,
+		phase:       enginePhaseLoading,
+		stopDone:    make(chan struct{}),
+		serverReady: make(chan struct{}),
 	}
 }
 
@@ -96,6 +104,7 @@ func (e *engineRuntime) Start() error {
 func (e *engineRuntime) runEngine(ctx context.Context, done chan struct{}, run engineBootRunner) {
 	code, restart, nextArgs := run(ctx, bootOptions{
 		noLegacyHTTP: true,
+		onHub:        e.setHubServer,
 		onReady:      e.markReady,
 	})
 
@@ -133,6 +142,27 @@ func (e *engineRuntime) runEngine(ctx context.Context, done chan struct{}, run e
 	close(done)
 	if restart {
 		e.BeginRestart()
+	}
+}
+
+func (e *engineRuntime) setHubServer(server *uihub.Server) {
+	e.serverMu.Lock()
+	e.server = server
+	e.serverMu.Unlock()
+	e.serverOnce.Do(func() { close(e.serverReady) })
+}
+
+func (e *engineRuntime) HandleStream(c *application.StreamConn) {
+	select {
+	case <-e.serverReady:
+	case <-c.Context().Done():
+		return
+	}
+	e.serverMu.Lock()
+	server := e.server
+	e.serverMu.Unlock()
+	if server != nil {
+		server.HandleWailsStream(c)
 	}
 }
 

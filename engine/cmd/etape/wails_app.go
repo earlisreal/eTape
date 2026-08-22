@@ -67,6 +67,7 @@ func newWailsApp() (*application.App, error) {
 			UseVisualHosting:              false,
 		},
 	})
+	runtime.SetStreamHandler(lifecycle.HandleStream)
 	lifecycle.setRequestQuit(func() { application.InvokeAsync(app.Quit) })
 	if err := configureWailsHost(app, host, wailsTrayIcon); err != nil {
 		if instance.release != nil {

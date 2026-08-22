@@ -136,17 +136,24 @@ func testRuntimeStream(t *testing.T, baseURL, token string) {
 		t.Fatalf("stream handshake = %#v, want accepted", accepted)
 	}
 
-	for _, want := range []string{"one", "two", "three"} {
-		if err := conn.Write(ctx, websocket.MessageBinary, []byte(want)); err != nil {
-			t.Fatalf("write %q: %v", want, err)
-		}
-		_, got, err := conn.Read(ctx)
-		if err != nil {
-			t.Fatalf("read %q: %v", want, err)
-		}
-		if string(got) != want {
-			t.Fatalf("echo = %q, want %q", got, want)
-		}
+	writeJSON(t, ctx, conn, map[string]any{"kind": "subscribe", "topic": "sys.session"})
+	var snapshot struct {
+		Kind  string `json:"kind"`
+		Topic string `json:"topic"`
+	}
+	readJSON(t, ctx, conn, &snapshot)
+	if snapshot.Kind != "snapshot" || snapshot.Topic != "sys.session" {
+		t.Fatalf("stream snapshot = %#v, want sys.session snapshot", snapshot)
+	}
+
+	writeJSON(t, ctx, conn, map[string]any{"kind": "ping", "t": int64(123)})
+	var pong struct {
+		Kind string `json:"kind"`
+		T    int64  `json:"t"`
+	}
+	readJSON(t, ctx, conn, &pong)
+	if pong.Kind != "pong" || pong.T != 123 {
+		t.Fatalf("stream pong = %#v, want t=123", pong)
 	}
 }
 
@@ -190,8 +197,19 @@ func testRuntimeStopClosesStream(t *testing.T, service *RuntimeService, baseURL 
 
 	stopped := make(chan error, 1)
 	go func() { stopped <- service.runtime.Stop(context.Background()) }()
+	if _, frame, err := conn.Read(ctx); err != nil {
+		t.Fatalf("read shutdown control frame: %v", err)
+	} else {
+		var stopping wailsruntime.StreamReply
+		if err := json.Unmarshal(frame, &stopping); err != nil {
+			t.Fatalf("decode shutdown control frame: %v", err)
+		}
+		if stopping.Type != "stopping" || stopping.Reason != "engine stopped" {
+			t.Fatalf("shutdown control frame = %#v", stopping)
+		}
+	}
 	if _, _, err := conn.Read(ctx); err == nil {
-		t.Fatal("runtime stop left the stream open")
+		t.Fatal("runtime stop left the stream open after control frame")
 	}
 	if err := <-stopped; err != nil {
 		t.Fatalf("runtime stop: %v", err)

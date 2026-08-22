@@ -23,6 +23,7 @@ import { connectEventToasts } from "./data/quotaToasts";
 import { perf, initPerfFromQuery } from "./perf/PerfMonitor";
 import { PerfHud } from "./perf/PerfHud";
 import { initUiLogFromQuery, uiLog } from "./logging/logger";
+import { isWailsStreamAvailable, makeWailsSocketFactory, WAILS_STREAM_URL } from "./wire/WailsStream";
 
 function EventToastBridge({ client }: { client: WsClient }): null {
   const toast = useToasts();
@@ -98,9 +99,10 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
 
   const { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry, reannounceGate } = useMemo(() => {
     const stores = makeStores();
+    const wails = isWailsStreamAvailable();
     const client = new WsClient({
-      url: `ws://${location.host}/ws`,
-      socketFactory: (url) => {
+      url: wails ? WAILS_STREAM_URL : `ws://${location.host}/ws`,
+      socketFactory: wails ? makeWailsSocketFactory(workspaceName) : (url) => {
         // The real WebSocket delegates to whatever handlers WsClient assigns to
         // sock.onopen/onmessage/onclose (set just after this returns).
         const ws = new WebSocket(url);
@@ -134,7 +136,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     const reannounceGate = new ReannounceGate({ timeoutMs: 5000, initialMode: "pending" });
     const demandRegistry = new DemandRegistry(client, () => reannounceGate.gate());
     return { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry, reannounceGate };
-  }, []);
+  }, [workspaceName]);
 
   useEffect(() => {
     client.onState((s) => {

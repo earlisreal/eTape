@@ -4,6 +4,7 @@ package wailsruntime
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync"
@@ -20,9 +21,12 @@ type StreamHello struct {
 }
 
 type StreamReply struct {
-	Type  string `json:"type"`
-	Error string `json:"error,omitempty"`
+	Type   string `json:"type"`
+	Error  string `json:"error,omitempty"`
+	Reason string `json:"reason,omitempty"`
 }
+
+type StreamHandler func(*application.StreamConn)
 
 type Runtime struct {
 	gate       *Gate
@@ -31,6 +35,8 @@ type Runtime struct {
 	hints      *HintQueue
 	streamsMu  sync.Mutex
 	streams    map[*application.StreamConn]struct{}
+	handlerMu  sync.RWMutex
+	handler    StreamHandler
 	stopOnce   sync.Once
 }
 
@@ -45,6 +51,12 @@ func New() *Runtime {
 }
 
 func (r *Runtime) Gate() *Gate { return r.gate }
+
+func (r *Runtime) SetStreamHandler(handler StreamHandler) {
+	r.handlerMu.Lock()
+	r.handler = handler
+	r.handlerMu.Unlock()
+}
 
 func (r *Runtime) Enter(ctx context.Context) (func(), error) {
 	return r.gate.Enter(ctx)
@@ -68,9 +80,17 @@ func (r *Runtime) BeginStop() {
 		}
 		r.streamsMu.Unlock()
 		for _, stream := range streams {
+			sendStreamControl(stream, StreamReply{Type: "stopping", Reason: "engine stopped"})
 			_ = stream.Close()
 		}
 	})
+}
+
+func sendStreamControl(stream *application.StreamConn, reply StreamReply) {
+	frame, err := json.Marshal(reply)
+	if err == nil {
+		_ = stream.TrySend(frame)
+	}
 }
 
 func (r *Runtime) Stop(ctx context.Context) error {
@@ -185,6 +205,13 @@ func (r *Runtime) HandleStream(c *application.StreamConn) {
 		return
 	}
 	if err := c.SendJSON(StreamReply{Type: "accepted"}); err != nil {
+		return
+	}
+	r.handlerMu.RLock()
+	handler := r.handler
+	r.handlerMu.RUnlock()
+	if handler != nil {
+		handler(c)
 		return
 	}
 

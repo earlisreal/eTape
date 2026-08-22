@@ -47,6 +47,12 @@ generated read-only bindings live under `ui/src/gen/wails` and its
 `etape.runtime` Stream proves the real desktop and server transport paths.
 `internal/wailsruntime` owns the application admission gate, opaque
 window/session registry, and bounded/coalescing ordinary-event hint queue.
+After the runtime handshake, `cmd/etape` passes the admitted stream to
+`internal/uihub.Server.HandleWailsStream`; that adapter uses the existing Hub
+connection for Workspace subscriptions, snapshots, outbox ordering,
+coalescing, and disconnect cleanup. The UI wrapper exposes it as the existing
+`WsClient` socket seam, so snapshot/delta delivery remains imperative and
+high-frequency data does not use React state or Wails events.
 
 The focused checks are:
 

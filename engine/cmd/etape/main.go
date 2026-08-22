@@ -73,6 +73,7 @@ func envBool(name string) bool {
 
 type bootOptions struct {
 	onListening  func(addr string)
+	onHub        func(*uihub.Server)
 	noLegacyHTTP bool
 	onReady      func()
 }
@@ -519,6 +520,9 @@ func bootWithOptions(ctx context.Context, options bootOptions) (code int, restar
 			accountPoller.SetActiveVenue(venue)
 		},
 	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startDemo, locateProviders)
+	if options.onHub != nil {
+		options.onHub(srv)
+	}
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
 	var cancelUI context.CancelFunc
