@@ -59,6 +59,15 @@ may use proportional subsystem checks. Every handoff must list checks run and
 results, plus every skipped required check and its reason; hosted CI must still
 complete successfully.
 
+### Temporary Wails migration gate
+
+While any ticket under `.scratch/wails-v3-migration/issues/` remains unfinished,
+use focused engine/UI unit, integration, race, typecheck, and generated-contract
+checks. Defer synth/demo tests and `golangci-lint`; record both as intentionally
+skipped in every handoff. When all Wails migration tickets are complete and the
+branch is ready to merge to `main`, restore the full CI-equivalent Windows
+checklist, including synth/demo tests and `golangci-lint`, before merging.
+
 ## Live-order safety
 
 Never place, modify, or cancel real orders unless Earl explicitly authorizes current session and reconfirms live run. Read-only account checks allowed. Authorized live leg: RTH only, cheap liquid symbol, long only, one-share marketable limit, flatten immediately.
