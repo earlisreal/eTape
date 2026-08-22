@@ -175,3 +175,103 @@ type QueryLocateArgs struct {
 	Venue    string `json:"venue"`
 	LocateID string `json:"locateId"`
 }
+
+// WorkspaceStatus is a business outcome. Invalid input, stale revisions,
+// reserved identities, and an already-open Workspace are returned as blocked
+// values; only unavailable storage or bridge failures reject the binding.
+type WorkspaceStatus string
+
+const (
+	WorkspaceAccepted WorkspaceStatus = "accepted"
+	WorkspaceBlocked  WorkspaceStatus = "blocked"
+)
+
+type WorkspaceIDArgs struct {
+	WorkspaceID string `json:"workspaceId"`
+}
+
+type CreateWorkspaceArgs struct {
+	WorkspaceID             string             `json:"workspaceId"`
+	Name                    string             `json:"name"`
+	Document                *WorkspaceDocument `json:"document,omitempty"`
+	ExpectedCatalogRevision int64              `json:"expectedCatalogRevision,omitempty"`
+}
+
+type RenameWorkspaceArgs struct {
+	WorkspaceID             string `json:"workspaceId"`
+	Name                    string `json:"name"`
+	ExpectedCatalogRevision int64  `json:"expectedCatalogRevision,omitempty"`
+}
+
+type DeleteWorkspaceArgs struct {
+	WorkspaceID             string `json:"workspaceId"`
+	ExpectedCatalogRevision int64  `json:"expectedCatalogRevision,omitempty"`
+}
+
+type SaveWorkspaceArgs struct {
+	WorkspaceID      string            `json:"workspaceId"`
+	Document         WorkspaceDocument `json:"document"`
+	ExpectedRevision int64             `json:"expectedRevision,omitempty"`
+}
+
+type WorkspacePanel struct {
+	ID       string         `json:"id"`
+	PanelID  string         `json:"panelId"`
+	Group    *string        `json:"group"`
+	Settings map[string]any `json:"settings"`
+}
+
+type WorkspaceScannerSync struct {
+	Enabled           bool   `json:"enabled"`
+	SourceWorkspaceID string `json:"sourceWorkspaceId,omitempty"`
+	SourcePanelID     string `json:"sourcePanelId,omitempty"`
+}
+
+// WorkspaceDocument keeps Dockview's layout opaque. Go validates its bounded
+// JSON envelope and identity but never interprets Panel Group layout data.
+type WorkspaceDocument struct {
+	Name          string                `json:"name"`
+	LayoutVersion int                   `json:"layoutVersion"`
+	Panels        []WorkspacePanel      `json:"panels"`
+	Layout        any                   `json:"layout"`
+	Groups        map[string]string     `json:"groups,omitempty"`
+	LinkVenues    map[string]string     `json:"linkVenues,omitempty"`
+	ScannerSync   *WorkspaceScannerSync `json:"scannerSync,omitempty"`
+}
+
+type WorkspaceCatalogEntry struct {
+	WorkspaceID string `json:"workspaceId"`
+	Name        string `json:"name"`
+	Open        bool   `json:"open"`
+}
+
+type WorkspaceCatalogResult struct {
+	Status           WorkspaceStatus         `json:"status"`
+	Reason           string                  `json:"reason,omitempty"`
+	Revision         int64                   `json:"revision"`
+	Entries          []WorkspaceCatalogEntry `json:"entries"`
+	OpenWorkspaceIDs []string                `json:"openWorkspaceIds"`
+}
+
+type WorkspaceDocumentResult struct {
+	Status      WorkspaceStatus    `json:"status"`
+	Reason      string             `json:"reason,omitempty"`
+	WorkspaceID string             `json:"workspaceId"`
+	Revision    int64              `json:"revision"`
+	Document    *WorkspaceDocument `json:"document,omitempty"`
+}
+
+type WorkspaceMutationResult struct {
+	Status           WorkspaceStatus         `json:"status"`
+	Reason           string                  `json:"reason,omitempty"`
+	WorkspaceID      string                  `json:"workspaceId,omitempty"`
+	Revision         int64                   `json:"revision"` // document revision; window actions return the current open-set revision
+	CatalogRevision  int64                   `json:"catalogRevision"`
+	Entries          []WorkspaceCatalogEntry `json:"entries,omitempty"`
+	OpenWorkspaceIDs []string                `json:"openWorkspaceIds,omitempty"`
+}
+
+type WorkspaceFlushResult struct {
+	Status WorkspaceStatus `json:"status"`
+	Reason string          `json:"reason,omitempty"`
+}

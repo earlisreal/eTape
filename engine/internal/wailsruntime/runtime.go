@@ -27,17 +27,19 @@ type StreamReply struct {
 }
 
 type StreamHandler func(*application.StreamConn)
+type WorkspaceStreamHandler func(*application.StreamConn, string)
 
 type Runtime struct {
-	gate       *Gate
-	sessions   *SessionRegistry
-	workspaces *WorkspaceRegistry
-	hints      *HintQueue
-	streamsMu  sync.Mutex
-	streams    map[*application.StreamConn]struct{}
-	handlerMu  sync.RWMutex
-	handler    StreamHandler
-	stopOnce   sync.Once
+	gate             *Gate
+	sessions         *SessionRegistry
+	workspaces       *WorkspaceRegistry
+	hints            *HintQueue
+	streamsMu        sync.Mutex
+	streams          map[*application.StreamConn]struct{}
+	handlerMu        sync.RWMutex
+	handler          StreamHandler
+	workspaceHandler WorkspaceStreamHandler
+	stopOnce         sync.Once
 }
 
 func New() *Runtime {
@@ -55,6 +57,12 @@ func (r *Runtime) Gate() *Gate { return r.gate }
 func (r *Runtime) SetStreamHandler(handler StreamHandler) {
 	r.handlerMu.Lock()
 	r.handler = handler
+	r.handlerMu.Unlock()
+}
+
+func (r *Runtime) SetWorkspaceStreamHandler(handler WorkspaceStreamHandler) {
+	r.handlerMu.Lock()
+	r.workspaceHandler = handler
 	r.handlerMu.Unlock()
 }
 
@@ -118,6 +126,8 @@ func (r *Runtime) Stop(ctx context.Context) error {
 func (r *Runtime) RegisterWorkspace(workspaceID string) error {
 	return r.workspaces.Register(workspaceID)
 }
+
+func (r *Runtime) UnregisterWorkspace(workspaceID string) { r.workspaces.Unregister(workspaceID) }
 
 func (r *Runtime) EnqueueHint(hint Hint) bool {
 	if !EventAllowed(hint.Class) || r.gate.Stopping() {
@@ -229,7 +239,12 @@ func (r *Runtime) HandleStream(c *application.StreamConn) {
 	}
 	r.handlerMu.RLock()
 	handler := r.handler
+	workspaceHandler := r.workspaceHandler
 	r.handlerMu.RUnlock()
+	if workspaceHandler != nil {
+		workspaceHandler(c, hello.WorkspaceID)
+		return
+	}
 	if handler != nil {
 		handler(c)
 		return

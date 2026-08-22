@@ -20,6 +20,18 @@ export interface CarriedPosition {
     "qty": number;
 }
 
+export interface CreateWorkspaceArgs {
+    "workspaceId": string;
+    "name": string;
+    "document"?: WorkspaceDocument | null;
+    "expectedCatalogRevision"?: number;
+}
+
+export interface DeleteWorkspaceArgs {
+    "workspaceId": string;
+    "expectedCatalogRevision"?: number;
+}
+
 export interface ExportFillsArgs {
     "venue": string;
     "preset": string;
@@ -164,6 +176,18 @@ export interface QueryLocatesArgs {
     "pageToken": string;
 }
 
+export interface RenameWorkspaceArgs {
+    "workspaceId": string;
+    "name": string;
+    "expectedCatalogRevision"?: number;
+}
+
+export interface SaveWorkspaceArgs {
+    "workspaceId": string;
+    "document": WorkspaceDocument;
+    "expectedRevision"?: number;
+}
+
 export enum Side {
     /**
      * The Go zero value for the underlying type of the enum.
@@ -174,4 +198,91 @@ export enum Side {
     SideSell = "SELL",
     SideShort = "SHORT",
     SideCover = "COVER",
+};
+
+export interface WorkspaceCatalogEntry {
+    "workspaceId": string;
+    "name": string;
+    "open": boolean;
+}
+
+export interface WorkspaceCatalogResult {
+    "status": WorkspaceStatus;
+    "reason"?: string;
+    "revision": number;
+    "entries": WorkspaceCatalogEntry[] | null;
+    "openWorkspaceIds": string[] | null;
+}
+
+/**
+ * WorkspaceDocument keeps Dockview's layout opaque. Go validates its bounded
+ * JSON envelope and identity but never interprets Panel Group layout data.
+ */
+export interface WorkspaceDocument {
+    "name": string;
+    "layoutVersion": number;
+    "panels": WorkspacePanel[] | null;
+    "layout": any;
+    "groups"?: { [_ in string]?: string } | null;
+    "linkVenues"?: { [_ in string]?: string } | null;
+    "scannerSync"?: WorkspaceScannerSync | null;
+}
+
+export interface WorkspaceDocumentResult {
+    "status": WorkspaceStatus;
+    "reason"?: string;
+    "workspaceId": string;
+    "revision": number;
+    "document"?: WorkspaceDocument | null;
+}
+
+export interface WorkspaceFlushResult {
+    "status": WorkspaceStatus;
+    "reason"?: string;
+}
+
+export interface WorkspaceIDArgs {
+    "workspaceId": string;
+}
+
+export interface WorkspaceMutationResult {
+    "status": WorkspaceStatus;
+    "reason"?: string;
+    "workspaceId"?: string;
+
+    /**
+     * document revision; window actions return the current open-set revision
+     */
+    "revision": number;
+    "catalogRevision": number;
+    "entries"?: WorkspaceCatalogEntry[] | null;
+    "openWorkspaceIds"?: string[] | null;
+}
+
+export interface WorkspacePanel {
+    "id": string;
+    "panelId": string;
+    "group": string | null;
+    "settings": { [_ in string]?: any } | null;
+}
+
+export interface WorkspaceScannerSync {
+    "enabled": boolean;
+    "sourceWorkspaceId"?: string;
+    "sourcePanelId"?: string;
+}
+
+/**
+ * WorkspaceStatus is a business outcome. Invalid input, stale revisions,
+ * reserved identities, and an already-open Workspace are returned as blocked
+ * values; only unavailable storage or bridge failures reject the binding.
+ */
+export enum WorkspaceStatus {
+    /**
+     * The Go zero value for the underlying type of the enum.
+     */
+    $zero = "",
+
+    WorkspaceAccepted = "accepted",
+    WorkspaceBlocked = "blocked",
 };

@@ -564,6 +564,15 @@ type DeleteConfigArgs struct {
 	Key string `json:"key"`
 }
 
+// WorkspaceInvalidation is a low-rate revision hint. The owning Workspace
+// Stream receives document changes; an empty WorkspaceID broadcasts catalog
+// changes to every Workspace projection so no browser coordination is needed.
+type WorkspaceInvalidation struct {
+	WorkspaceID string `json:"workspaceId,omitempty"`
+	Kind        string `json:"kind"`
+	Revision    int64  `json:"revision"`
+}
+
 type SetScannerFiltersArgs struct {
 	Filters ScannerFilters `json:"filters"`
 }

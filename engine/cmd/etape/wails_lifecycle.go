@@ -11,6 +11,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/uiapi"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
+	"github.com/earlisreal/eTape/engine/internal/uistate"
 	"github.com/earlisreal/eTape/engine/internal/wailsruntime"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -48,24 +49,26 @@ type engineRuntime struct {
 	serverReady chan struct{}
 	serverOnce  sync.Once
 
-	mu                   sync.Mutex
-	started              bool
-	stopping             bool
-	phase                string
-	bootError            string
-	engineContext        context.Context
-	cancelEngine         context.CancelFunc
-	engineDone           chan struct{}
-	restart              bool
-	relaunchArgs         []string
-	statePublisher       func(engineBootState)
-	querySourcePublisher func(uiapi.QuerySources)
-	requestQuit          func()
-	restartOnce          sync.Once
-	restartScheduleOnce  sync.Once
-	stopOnce             sync.Once
-	stopDone             chan struct{}
-	stopError            error
+	mu                      sync.Mutex
+	started                 bool
+	stopping                bool
+	phase                   string
+	bootError               string
+	engineContext           context.Context
+	cancelEngine            context.CancelFunc
+	engineDone              chan struct{}
+	restart                 bool
+	relaunchArgs            []string
+	statePublisher          func(engineBootState)
+	querySourcePublisher    func(uiapi.QuerySources)
+	workspaceStorePublisher func(uistate.Persistence) error
+	workspaceHubPublisher   func(*uihub.Server)
+	requestQuit             func()
+	restartOnce             sync.Once
+	restartScheduleOnce     sync.Once
+	stopOnce                sync.Once
+	stopDone                chan struct{}
+	stopError               error
 }
 
 func newEngineRuntime(runtime *wailsruntime.Runtime) *engineRuntime {
@@ -105,10 +108,11 @@ func (e *engineRuntime) Start() error {
 
 func (e *engineRuntime) runEngine(ctx context.Context, done chan struct{}, run engineBootRunner) {
 	code, restart, nextArgs := run(ctx, bootOptions{
-		noLegacyHTTP:  true,
-		onHub:         e.setHubServer,
-		onQuerySource: e.setQuerySources,
-		onReady:       e.markReady,
+		noLegacyHTTP:     true,
+		onHub:            e.setHubServer,
+		onQuerySource:    e.setQuerySources,
+		onWorkspaceStore: e.setWorkspaceStore,
+		onReady:          e.markReady,
 	})
 
 	e.mu.Lock()
@@ -152,7 +156,23 @@ func (e *engineRuntime) setHubServer(server *uihub.Server) {
 	e.serverMu.Lock()
 	e.server = server
 	e.serverMu.Unlock()
+	e.mu.Lock()
+	publish := e.workspaceHubPublisher
+	e.mu.Unlock()
+	if publish != nil {
+		publish(server)
+	}
 	e.serverOnce.Do(func() { close(e.serverReady) })
+}
+
+func (e *engineRuntime) setWorkspaceStore(persistence uistate.Persistence) error {
+	e.mu.Lock()
+	publish := e.workspaceStorePublisher
+	e.mu.Unlock()
+	if publish == nil {
+		return nil
+	}
+	return publish(persistence)
 }
 
 func (e *engineRuntime) setQuerySources(sources uiapi.QuerySources) {
@@ -170,7 +190,23 @@ func (e *engineRuntime) setQuerySourcePublisher(publish func(uiapi.QuerySources)
 	e.mu.Unlock()
 }
 
+func (e *engineRuntime) setWorkspaceStorePublisher(publish func(uistate.Persistence) error) {
+	e.mu.Lock()
+	e.workspaceStorePublisher = publish
+	e.mu.Unlock()
+}
+
+func (e *engineRuntime) setWorkspaceHubPublisher(publish func(*uihub.Server)) {
+	e.mu.Lock()
+	e.workspaceHubPublisher = publish
+	e.mu.Unlock()
+}
+
 func (e *engineRuntime) HandleStream(c *application.StreamConn) {
+	e.HandleWorkspaceStream(c, "")
+}
+
+func (e *engineRuntime) HandleWorkspaceStream(c *application.StreamConn, workspaceID string) {
 	select {
 	case <-e.serverReady:
 	case <-c.Context().Done():
@@ -180,7 +216,7 @@ func (e *engineRuntime) HandleStream(c *application.StreamConn) {
 	server := e.server
 	e.serverMu.Unlock()
 	if server != nil {
-		server.HandleWailsStream(c)
+		server.HandleWailsStream(c, workspaceID)
 	}
 }
 

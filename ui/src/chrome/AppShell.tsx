@@ -35,7 +35,7 @@ import { useHotkeys } from "./exec/useHotkeys";
 import { useAutoUnlockOnStartup } from "./exec/useAutoUnlockOnStartup";
 import { useSoundWiring } from "../sound/useSoundWiring";
 import { NewWindowModal } from "./NewWindowModal";
-import { mutateWindows, readWindows } from "./catalogs";
+import { readWindows } from "./catalogs";
 import { isNativeWindow, openWorkspaceWindow, workspaceWindowTarget } from "./windows";
 import { planDemoEntry, planDemoRevert } from "./demoTransition";
 import { resolveVenue } from "./exec/venueSelection";
@@ -274,15 +274,9 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     if (workspaceName === "main") { setWorkspaceLabel("main"); return; }
     if (workspaceName === MONITORING_WORKSPACE_ID) { setWorkspaceLabel(MONITORING_WORKSPACE_NAME); return; }
     const refresh = () => void readWindows(commands).then((c) => setWorkspaceLabel(c.entries.find((e) => e.id === workspaceName)?.name ?? workspaceName));
-    refresh(); const channel = new BroadcastChannel("etape.window-catalog"); channel.onmessage = refresh;
-    return () => channel.close();
-  }, [workspaceName, commands]);
-  useEffect(() => {
-    if (workspaceName === "main" || !navigator.locks) return;
-    const stop = new AbortController();
-    void navigator.locks.request(`etape.workspace.${workspaceName}`, { mode: "shared", signal: stop.signal }, () => new Promise<void>((resolve) => stop.signal.addEventListener("abort", () => resolve(), { once: true }))).catch(() => {});
-    return () => stop.abort();
-  }, [workspaceName]);
+    refresh();
+    return workspaceStore.watchCatalog(refresh);
+  }, [workspaceName, commands, workspaceStore]);
   useEffect(() => {
     if (coordinatorCloseTimerRef.current !== null) {
       clearTimeout(coordinatorCloseTimerRef.current);
@@ -307,16 +301,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       }, 0);
     };
   }, [hotkeyCoordinator, windowId]);
-  useEffect(() => {
-    void commands.sendCommand("GetConfig", { key: "windows.v1" }).then(async (ack) => {
-      if (ack.value !== undefined || localStorage.getItem("etape.windows") == null) return;
-      let legacy: string[]; try { legacy = JSON.parse(localStorage.getItem("etape.windows") ?? "[]"); } catch { legacy = []; }
-      const names = legacy.filter((n) => typeof n === "string" && n !== "main");
-      if (!names.length) { localStorage.removeItem("etape.windows"); return; }
-      await mutateWindows(commands, (fresh) => fresh.entries.length ? fresh : ({ version: 1, entries: [...new Set(names)].map((name) => ({ id: name, name })) }));
-      localStorage.removeItem("etape.windows");
-    }).catch(() => {});
-  }, [commands]);
   useSoundWiring(stores);
   // Task 13: mirror Settings-modal open/close into the module-level modalTracker
   // singleton so every already-mounted PanelFrame (frozen-closure-created, can't

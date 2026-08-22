@@ -1,6 +1,9 @@
 # UI Hub
 
-Config commands include typed `GetConfig`, `SetConfig`, and `DeleteConfig`; the workspace catalog remains a UI-owned versioned document in the existing config store.
+Config commands include typed `GetConfig`, `SetConfig`, and `DeleteConfig` for
+unrelated low-rate settings. Workspace catalog, bounded documents, revisions,
+open identities, and Native Window ownership are canonical in `uistate.Store`
+and exposed through `uiapi.WorkspaceService`.
 
 Locate eligibility, quote, list, and recovery reads are UIHub queries. The
 fee-bearing `RequestLocate` path is a command and returns the broker-confirmed
@@ -21,6 +24,14 @@ frontend application handshake is completed before `WsClient` enters `open`,
 so its existing subscription and demand reannounce provides snapshot-before-
 delta behavior without routing high-frequency data through React state or
 ordinary Wails events.
+
+The `workspace` topic is a low-rate targeted invalidation lane. Document
+revisions go only to the owning Workspace Stream; catalog invalidations go to
+all Workspace Streams. Frontend projections subscribe before fetching their
+snapshot, ignore stale revisions, and refetch the typed service snapshot when
+they detect a gap. Browser `BroadcastChannel`, Web Locks, durable localStorage
+catalog coordination, and browser window naming are not part of the native
+workspace path.
 
 Transport policy is deliberately bounded and loss-aware. `ServerConfig.OutBuf`
 is the lossless FIFO frame cap; the latest-wins lane has at most 256 unique

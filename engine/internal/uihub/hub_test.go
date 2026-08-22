@@ -19,6 +19,7 @@ import (
 type fakeClient struct {
 	mu          sync.Mutex
 	nid         uint64
+	workspace   string
 	frames      [][]byte
 	full        bool
 	closed      bool
@@ -26,7 +27,8 @@ type fakeClient struct {
 	closeReason string
 }
 
-func (c *fakeClient) id() uint64 { return c.nid }
+func (c *fakeClient) id() uint64          { return c.nid }
+func (c *fakeClient) workspaceID() string { return c.workspace }
 
 // enqueue records the frame regardless of ck: outbound coalescing is the real
 // *conn's outbox job (exercised in conn_test.go via a real conn + blockable
@@ -164,6 +166,46 @@ func TestHubSubscribeSendsSnapshotThenCoalescedDelta(t *testing.T) {
 	k, tp = decodeKindTopic(t, after[len(after)-1])
 	if k != "delta" || tp != "md.quote" {
 		t.Fatalf("last frame should be md.quote delta, got %s/%s", k, tp)
+	}
+}
+
+func TestHubWorkspaceNotificationTargetsOwningStream(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	h := newTestHub(clk)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = h.Run(ctx) }()
+
+	desk := &fakeClient{nid: 1, workspace: "desk"}
+	other := &fakeClient{nid: 2, workspace: "other"}
+	main := &fakeClient{nid: 3, workspace: "main"}
+	for _, c := range []*fakeClient{desk, other, main} {
+		h.Register(c)
+		h.Subscribe(c, wsmsg.TopicWorkspace)
+	}
+	syncHub(h)
+	baseDesk, baseOther, baseMain := len(desk.got()), len(other.got()), len(main.got())
+
+	h.NotifyWorkspace("desk", 4, "document")
+	syncHub(h)
+	if len(desk.got()) != baseDesk+1 || len(other.got()) != baseOther || len(main.got()) != baseMain {
+		t.Fatalf("targeted notification counts = desk %d/%d other %d/%d main %d/%d", len(desk.got()), baseDesk, len(other.got()), baseOther, len(main.got()), baseMain)
+	}
+
+	h.NotifyWorkspace("", 5, "catalog")
+	syncHub(h)
+	if len(other.got()) != baseOther+1 || len(main.got()) != baseMain+1 {
+		t.Fatalf("catalog notification did not reach every subscribed stream: other=%d main=%d", len(other.got()), len(main.got()))
+	}
+	var payload wsmsg.WorkspaceInvalidation
+	var frame struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(desk.got()[len(desk.got())-1], &frame); err != nil || json.Unmarshal(frame.Payload, &payload) != nil {
+		t.Fatal("could not decode workspace invalidation")
+	}
+	if payload.WorkspaceID != "" || payload.Kind != "catalog" || payload.Revision != 5 {
+		t.Fatalf("catalog payload = %+v", payload)
 	}
 }
 

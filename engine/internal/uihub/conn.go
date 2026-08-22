@@ -237,14 +237,15 @@ func (o *outbox) markClosed() {
 }
 
 type conn struct {
-	nid  uint64
-	ws   wsSocket
-	hub  *Hub
-	cmd  commandHandler
-	qry  queryHandler
-	out  *outbox
-	once sync.Once
-	done chan struct{}
+	nid       uint64
+	ws        wsSocket
+	hub       *Hub
+	cmd       commandHandler
+	qry       queryHandler
+	workspace string
+	out       *outbox
+	once      sync.Once
+	done      chan struct{}
 
 	// writeTimeout bounds a single ws.Write call (see writeLoop). A peer that
 	// can't accept even one already-queued frame within this window is wedged
@@ -254,18 +255,24 @@ type conn struct {
 	writeTimeout time.Duration
 }
 
-func newConn(id uint64, ws wsSocket, h *Hub, cmd commandHandler, q queryHandler, outBuf int, writeTimeout time.Duration) *conn {
+func newConn(id uint64, ws wsSocket, h *Hub, cmd commandHandler, q queryHandler, outBuf int, writeTimeout time.Duration, workspaceIDs ...string) *conn {
 	if writeTimeout <= 0 {
 		writeTimeout = 5 * time.Second
 	}
+	workspace := ""
+	if len(workspaceIDs) > 0 {
+		workspace = workspaceIDs[0]
+	}
 	return &conn{
 		nid: id, ws: ws, hub: h, cmd: cmd, qry: q,
-		out: newOutbox(outBuf), done: make(chan struct{}),
+		workspace: workspace,
+		out:       newOutbox(outBuf), done: make(chan struct{}),
 		writeTimeout: writeTimeout,
 	}
 }
 
-func (c *conn) id() uint64 { return c.nid }
+func (c *conn) id() uint64          { return c.nid }
+func (c *conn) workspaceID() string { return c.workspace }
 
 // enqueue is called by the hub loop (broadcast/snapshot) AND by this conn's own
 // reader (ack/result/pong). Non-blocking. ck is the outbound coalesce key ("" =>

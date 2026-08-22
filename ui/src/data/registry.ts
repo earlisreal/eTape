@@ -97,6 +97,7 @@ export function routeToStore(stores: Stores, m: SnapshotMsg | DeltaMsg): void {
     case "sys.session": stores.session.apply(m); return;
     case "sys.boot": stores.boot.apply(m); return;
     case "config": return; // handled by workspace.ts, not a store
+    case "workspace": return; // handled by WorkspaceStore, not a high-frequency store
   }
 }
 

@@ -1,11 +1,10 @@
-import { Call } from "@wailsio/runtime";
+import { WorkspaceService } from "../gen/wails/github.com/earlisreal/eTape/engine/internal/uiapi/index.js";
 
 const WORKSPACE_ID_RE = /^[a-z0-9-]{1,64}$/;
 const WORKSPACE_WINDOW_POPUP = "popup=yes";
 const NEWS_WINDOW_TARGET = "etape-news-reader";
 const NEWS_WINDOW_WIDTH = 1100;
 const NEWS_WINDOW_HEIGHT = 800;
-const OPEN_WORKSPACE_METHOD = "github.com/earlisreal/eTape/engine/internal/desktop.Host.OpenWorkspace";
 
 let newsWindow: Window | null = null;
 
@@ -42,7 +41,9 @@ export function workspaceWindowFeatures(): string {
 }
 
 export function openWorkspaceWindowNative(id: string): Promise<void> {
-  return Call.ByName(OPEN_WORKSPACE_METHOD, id).then(() => undefined);
+  return WorkspaceService.OpenWorkspace({ workspaceId: id }).then((result) => {
+    if (String(result.status) !== "accepted") throw new Error(result.reason ?? "Could not open workspace.");
+  });
 }
 
 export function openWorkspaceWindow(id: string): Window | null {

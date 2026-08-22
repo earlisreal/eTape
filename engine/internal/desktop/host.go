@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/url"
 
+	"github.com/earlisreal/eTape/engine/internal/uistate"
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
@@ -17,14 +18,19 @@ const MainWorkspaceID = "main"
 // separate concern: closing a window only removes its runtime identity.
 type Host struct {
 	app      *application.App
-	registry *WorkspaceRegistry
+	state    *uistate.Store
+	registry *uistate.WindowRegistry
 	tray     *application.SystemTray
 	icon     []byte
 }
 
-func NewHost() *Host {
-	host := &Host{}
-	host.registry = NewWorkspaceRegistry(func() {
+func NewHost(states ...*uistate.Store) *Host {
+	state := uistate.NewRuntimeStore()
+	if len(states) > 0 && states[0] != nil {
+		state = states[0]
+	}
+	host := &Host{state: state, registry: state.Windows()}
+	host.registry.SetOnEmpty(func() {
 		if host.tray != nil {
 			host.tray.Show()
 		}
@@ -74,7 +80,7 @@ func (h *Host) OpenWorkspace(id string) error {
 		return errors.New("desktop: host is not attached")
 	}
 
-	_, err := h.registry.Open(id, func() NativeWindow {
+	_, err := h.state.OpenWorkspace(id, func() NativeWindow {
 		window := h.app.Window.NewWithOptions(application.WebviewWindowOptions{
 			Name:      WindowName(id),
 			Title:     fmt.Sprintf("eTape — %s", id),
@@ -91,7 +97,7 @@ func (h *Host) OpenWorkspace(id string) error {
 			},
 		})
 		window.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
-			h.registry.Close(id)
+			h.state.CloseWorkspace(id)
 		})
 		window.OnWindowEvent(events.Common.WindowRuntimeReady, func(*application.WindowEvent) {
 			window.Show().Focus()
@@ -109,11 +115,18 @@ func (h *Host) CloseWorkspace(id string) error {
 		return nil
 	}
 	window.Close()
-	h.registry.Close(id)
+	h.state.CloseWorkspace(id)
 	return nil
 }
 
 func (h *Host) FocusMain() error { return h.OpenWorkspace(MainWorkspaceID) }
+
+func (h *Host) FocusWorkspace(id string) error {
+	if h.app == nil {
+		return errors.New("desktop: host is not attached")
+	}
+	return h.state.FocusWorkspace(id)
+}
 
 func (h *Host) Quit() {
 	if h.app != nil {

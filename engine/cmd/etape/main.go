@@ -49,6 +49,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/uiapi"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
+	"github.com/earlisreal/eTape/engine/internal/uistate"
 	"github.com/earlisreal/eTape/engine/internal/venueadmin"
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
 	"github.com/earlisreal/eTape/engine/internal/venueseed"
@@ -73,11 +74,12 @@ func envBool(name string) bool {
 }
 
 type bootOptions struct {
-	onListening   func(addr string)
-	onHub         func(*uihub.Server)
-	onQuerySource func(uiapi.QuerySources)
-	noLegacyHTTP  bool
-	onReady       func()
+	onListening      func(addr string)
+	onHub            func(*uihub.Server)
+	onQuerySource    func(uiapi.QuerySources)
+	onWorkspaceStore func(uistate.Persistence) error
+	noLegacyHTTP     bool
+	onReady          func()
 }
 
 // boot runs the full engine boot sequence -- flags, config, store/md-core/
@@ -332,6 +334,13 @@ func bootWithOptions(ctx context.Context, options bootOptions) (code int, restar
 	if err != nil {
 		log.Error("open store", "err", err)
 		return 1, false, nil
+	}
+	if options.onWorkspaceStore != nil {
+		if err := options.onWorkspaceStore(st); err != nil {
+			log.Error("configure workspace state", "err", err)
+			_ = st.Close()
+			return 1, false, nil
+		}
 	}
 	if cfg.Store.RetentionDays > 0 {
 		cutoff := bars10sRetentionCutoff(time.Now(), cfg.Store.RetentionDays)

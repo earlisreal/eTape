@@ -7,6 +7,7 @@ import { BroadcastChannelBus, LinkGroups } from "./chrome/linkGroups";
 import { DemandRegistry } from "./wire/DemandRegistry";
 import { ReannounceGate } from "./chrome/reannounceGate";
 import { WorkspaceStore } from "./chrome/workspace";
+import { makeWorkspaceApi } from "./chrome/workspaceApi";
 import { PANELS } from "./chrome/panels/registry";
 import { AppShell } from "./chrome/AppShell";
 import { ReconnectOverlay } from "./chrome/ReconnectOverlay";
@@ -98,7 +99,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry, reannounceGate, queries } = useMemo(() => {
+  const { client, stores, scheduler, workspaceStore, workspaceApi, linkGroups, demandRegistry, reannounceGate, queries } = useMemo(() => {
     const stores = makeStores();
     const wails = isWailsStreamAvailable();
     const client = new WsClient({
@@ -118,11 +119,12 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
       onMarketClockSample: (sample) => stores.marketClock.update(sample),
     });
     const queries: QueryClient = makeQueryClient(wails, (name, args) => client.sendQuery(name, args));
+    const workspaceApi = makeWorkspaceApi(wails, client);
     const scheduler = new Scheduler(browserRaf, (id, err) => {
       const detail = err instanceof Error ? (err.stack ?? `${err.name}: ${err.message}`) : String(err);
       uiLog.error(`painter crashed painterId=${id}: ${detail}`, { painterId: id, error: err });
     });
-    const workspaceStore = new WorkspaceStore(client);
+    const workspaceStore = new WorkspaceStore(client, 500, workspaceApi);
     // Task 13: return the ack promise (rather than discarding it with `void`)
     // so a grouped type-to-load commit can await it via LinkGroups.focusChecked
     // and revert on a rejecting ack instead of moving the group blind.
@@ -137,7 +139,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     // real mode as a no-op "unchanged" resolve, not a spurious "changed" wait.
     const reannounceGate = new ReannounceGate({ timeoutMs: 5000, initialMode: "pending" });
     const demandRegistry = new DemandRegistry(client, () => reannounceGate.gate());
-    return { client, stores, scheduler, workspaceStore, linkGroups, demandRegistry, reannounceGate, queries };
+    return { client, stores, scheduler, workspaceStore, workspaceApi, linkGroups, demandRegistry, reannounceGate, queries };
   }, [workspaceName]);
 
   useEffect(() => {
@@ -182,8 +184,9 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
   const commands = useMemo(() => ({
     sendCommand: (name: string, args: unknown) => client.sendCommand(name, args),
     sendQuery: (name: string, args: unknown) => client.sendQuery(name, args),
+    workspace: workspaceApi,
     queries,
-  }), [client, queries]);
+  }), [client, queries, workspaceApi]);
 
   return (
     <ThemeProvider commands={commands}>

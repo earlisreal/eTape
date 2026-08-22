@@ -69,6 +69,12 @@ type pub struct {
 	payload any
 }
 
+type workspaceNotification struct {
+	workspaceID string
+	revision    int64
+	kind        string
+}
+
 type ensureDemandReq struct {
 	connID uint64
 	d      feed.Demand
@@ -162,6 +168,7 @@ type Hub struct {
 	mdCh               chan md.Update
 	execCh             chan exec.Update
 	pubCh              chan pub
+	workspaceCh        chan workspaceNotification
 	dropCh             chan dropReport     // conn goroutines -> Run: write-timeout drop reports
 	backfillDoneCh     chan backfillResult // backfill goroutines -> Run: daily-fetch outcome
 	syncCh             chan chan struct{}  // test barrier
@@ -221,6 +228,7 @@ func NewHub(clk clock.Clock, cfg HubConfig, m *mirror) *Hub {
 		mdCh:               make(chan md.Update, cfg.Buf),
 		execCh:             make(chan exec.Update, cfg.Buf),
 		pubCh:              make(chan pub, cfg.Buf),
+		workspaceCh:        make(chan workspaceNotification, cfg.Buf),
 		dropCh:             make(chan dropReport, cfg.Buf),
 		backfillDoneCh:     make(chan backfillResult, cfg.Buf),
 		syncCh:             make(chan chan struct{}),
@@ -498,6 +506,16 @@ func (h *Hub) Publish(t wsmsg.Topic, key string, p any) {
 	}
 }
 
+// NotifyWorkspace sends a revision hint to the owning Wails Workspace Stream.
+// An empty workspaceID is the catalog broadcast; both are low-rate lossless
+// frames and never travel through ordinary Wails events.
+func (h *Hub) NotifyWorkspace(workspaceID string, revision int64, kind string) {
+	select {
+	case h.workspaceCh <- workspaceNotification{workspaceID: workspaceID, revision: revision, kind: kind}:
+	case <-h.closed:
+	}
+}
+
 // ReportUIDrop lets a conn's own goroutine (writeLoop, on a write timeout)
 // tell the Hub a client is being dropped, so the resulting ui-drop
 // sys.events frame is still built and emitted from Run's own single
@@ -579,6 +597,8 @@ func (h *Hub) Run(ctx context.Context) error {
 			h.handleExec(u)
 		case p := <-h.pubCh:
 			h.handlePub(p)
+		case n := <-h.workspaceCh:
+			h.handleWorkspaceNotification(n)
 		case r := <-h.dropCh:
 			h.handleDrop(r)
 		case r := <-h.backfillDoneCh:
@@ -639,6 +659,8 @@ func (h *Hub) drain() {
 			h.handleExec(u)
 		case p := <-h.pubCh:
 			h.handlePub(p)
+		case n := <-h.workspaceCh:
+			h.handleWorkspaceNotification(n)
 		case r := <-h.dropCh:
 			h.handleDrop(r)
 		case r := <-h.backfillDoneCh:
@@ -932,6 +954,42 @@ func (h *Hub) handlePub(p pub) {
 	s := staged{Topic: p.topic, Key: p.key, Payload: p.payload}
 	h.m.applyPub(s)
 	h.broadcast(s, false)
+}
+
+func (h *Hub) handleWorkspaceNotification(n workspaceNotification) {
+	b, err := json.Marshal(wsmsg.DeltaMsg{
+		Kind:  "delta",
+		Topic: wsmsg.TopicWorkspace,
+		Key:   n.workspaceID,
+		Payload: wsmsg.WorkspaceInvalidation{
+			WorkspaceID: n.workspaceID,
+			Kind:        n.kind,
+			Revision:    n.revision,
+		},
+	})
+	if err != nil {
+		return
+	}
+	var dead []client
+	for c, subs := range h.clients {
+		if !subs[wsmsg.TopicWorkspace] {
+			continue
+		}
+		if n.workspaceID != "" {
+			owner, ok := c.(interface{ workspaceID() string })
+			if !ok || owner.workspaceID() != n.workspaceID {
+				continue
+			}
+		}
+		if !c.enqueue(b, "") {
+			dead = append(dead, c)
+		}
+	}
+	for _, c := range dead {
+		delete(h.clients, c)
+		c.close()
+		h.emitUIDrop(c.id(), "outbound queue overflow")
+	}
 }
 
 // handleDrop services a dropReport that arrived via dropCh (from a conn's own

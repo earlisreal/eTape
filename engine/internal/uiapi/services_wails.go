@@ -4,8 +4,11 @@ package uiapi
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"sync"
 
+	"github.com/earlisreal/eTape/engine/internal/uistate"
 	"github.com/earlisreal/eTape/engine/internal/wailsruntime"
 )
 
@@ -131,10 +134,372 @@ func (s *EngineService) ExportFills(ctx context.Context, args ExportFillsArgs) (
 // and updates remain owned by the Workspace Stream in ticket 08.
 type WorkspaceService struct {
 	runtime *wailsruntime.Runtime
+	state   *uistate.Store
+	window  WorkspaceWindowController
 }
 
-func NewWorkspaceService(runtime *wailsruntime.Runtime) *WorkspaceService {
-	return &WorkspaceService{runtime: runtime}
+// WorkspaceWindowController is the desktop adapter. The headless Wails
+// server leaves it nil and uses the canonical open set without a Native Window.
+type WorkspaceWindowController interface {
+	OpenWorkspace(string) error
+	FocusWorkspace(string) error
+	CloseWorkspace(string) error
+}
+
+func NewWorkspaceService(runtime *wailsruntime.Runtime, state *uistate.Store, controllers ...WorkspaceWindowController) *WorkspaceService {
+	service := &WorkspaceService{runtime: runtime, state: state}
+	if len(controllers) > 0 {
+		service.window = controllers[0]
+	}
+	return service
 }
 
 func (s *WorkspaceService) ServiceName() string { return "WorkspaceService" }
+
+// ConfigureWorkspaceService attaches the existing SQLite-backed config store.
+// It is called by the engine composition root after the store opens, before
+// Workspace mutations can be admitted by Wails.
+func ConfigureWorkspaceService(service *WorkspaceService, persistence uistate.Persistence) error {
+	if service == nil || service.state == nil {
+		return ErrWorkspaceUnavailable
+	}
+	if err := service.state.ConfigurePersistence(persistence); err != nil {
+		return err
+	}
+	if service.runtime != nil {
+		_ = service.runtime.RegisterWorkspace(uistate.MainWorkspaceID)
+		_ = service.runtime.RegisterWorkspace(uistate.MonitoringWorkspaceID)
+		if catalog, err := service.state.CatalogSnapshot(); err == nil {
+			for _, entry := range catalog.Entries {
+				_ = service.runtime.RegisterWorkspace(entry.ID)
+			}
+		}
+	}
+	return nil
+}
+
+func ConfigureWorkspaceNotifier(service *WorkspaceService, notifier uistate.Listener) {
+	if service != nil {
+		service.setInvalidationNotifier(notifier)
+	}
+}
+
+func (s *WorkspaceService) setInvalidationNotifier(notifier uistate.Listener) {
+	if s != nil && s.state != nil {
+		s.state.SetInvalidationNotifier(notifier)
+	}
+}
+
+var ErrWorkspaceUnavailable = errors.New("workspace service is unavailable")
+
+func (s *WorkspaceService) enter(ctx context.Context) (func(), error) {
+	if s == nil || s.runtime == nil || s.state == nil || !s.state.Ready() {
+		return nil, ErrWorkspaceUnavailable
+	}
+	release, err := s.runtime.Enter(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return release, nil
+}
+
+func (s *WorkspaceService) GetWorkspaceCatalog(ctx context.Context) (WorkspaceCatalogResult, error) {
+	release, err := s.enter(ctx)
+	if err != nil {
+		return WorkspaceCatalogResult{}, err
+	}
+	defer release()
+	catalog, err := s.state.CatalogSnapshot()
+	if err != nil {
+		return WorkspaceCatalogResult{}, err
+	}
+	return catalogResult(catalog), nil
+}
+
+func (s *WorkspaceService) CreateWorkspace(ctx context.Context, args CreateWorkspaceArgs) (WorkspaceMutationResult, error) {
+	release, err := s.enter(ctx)
+	if err != nil {
+		return WorkspaceMutationResult{}, err
+	}
+	defer release()
+	var raw []byte
+	if args.Document != nil {
+		raw, err = json.Marshal(args.Document)
+		if err != nil {
+			return WorkspaceMutationResult{}, err
+		}
+	}
+	catalog, document, err := s.state.CreateWorkspace(args.WorkspaceID, args.Name, raw, args.ExpectedCatalogRevision)
+	if err != nil {
+		if internal := businessError(err); internal != nil {
+			return WorkspaceMutationResult{}, internal
+		}
+		return blockedMutation(args.WorkspaceID, s.catalogSnapshot(catalog), uistate.DocumentSnapshot{}, err), nil
+	}
+	if s.runtime != nil {
+		_ = s.runtime.RegisterWorkspace(args.WorkspaceID)
+	}
+	return mutationResult(args.WorkspaceID, catalog, document), nil
+}
+
+func (s *WorkspaceService) RenameWorkspace(ctx context.Context, args RenameWorkspaceArgs) (WorkspaceMutationResult, error) {
+	release, err := s.enter(ctx)
+	if err != nil {
+		return WorkspaceMutationResult{}, err
+	}
+	defer release()
+	catalog, err := s.state.RenameWorkspace(args.WorkspaceID, args.Name, args.ExpectedCatalogRevision)
+	if err != nil {
+		if internal := businessError(err); internal != nil {
+			return WorkspaceMutationResult{}, internal
+		}
+		return blockedMutation(args.WorkspaceID, s.catalogSnapshot(catalog), uistate.DocumentSnapshot{}, err), nil
+	}
+	return mutationResult(args.WorkspaceID, catalog, uistate.DocumentSnapshot{}), nil
+}
+
+func (s *WorkspaceService) DeleteWorkspace(ctx context.Context, args DeleteWorkspaceArgs) (WorkspaceMutationResult, error) {
+	release, err := s.enter(ctx)
+	if err != nil {
+		return WorkspaceMutationResult{}, err
+	}
+	defer release()
+	catalog, err := s.state.DeleteWorkspace(args.WorkspaceID, args.ExpectedCatalogRevision)
+	if err != nil {
+		if internal := businessError(err); internal != nil {
+			return WorkspaceMutationResult{}, internal
+		}
+		return blockedMutation(args.WorkspaceID, s.catalogSnapshot(catalog), uistate.DocumentSnapshot{}, err), nil
+	}
+	if s.runtime != nil {
+		s.runtime.UnregisterWorkspace(args.WorkspaceID)
+	}
+	return mutationResult(args.WorkspaceID, catalog, uistate.DocumentSnapshot{}), nil
+}
+
+func (s *WorkspaceService) LoadWorkspace(ctx context.Context, args WorkspaceIDArgs) (WorkspaceDocumentResult, error) {
+	release, err := s.enter(ctx)
+	if err != nil {
+		return WorkspaceDocumentResult{}, err
+	}
+	defer release()
+	snapshot, err := s.state.LoadDocument(args.WorkspaceID)
+	if err != nil {
+		if internal := businessError(err); internal != nil {
+			return WorkspaceDocumentResult{}, internal
+		}
+		return blockedDocument(args.WorkspaceID, snapshot, err), nil
+	}
+	if !snapshot.Exists {
+		result := documentResult(args.WorkspaceID, snapshot, nil)
+		result.Status = WorkspaceBlocked
+		result.Reason = "workspace document is missing"
+		return result, nil
+	}
+	document, err := decodeWorkspaceDocument(snapshot.Document)
+	if err != nil {
+		result := documentResult(args.WorkspaceID, snapshot, nil)
+		result.Status = WorkspaceBlocked
+		result.Reason = "workspace document is invalid"
+		return result, nil
+	}
+	return documentResult(args.WorkspaceID, snapshot, document), nil
+}
+
+func (s *WorkspaceService) SaveWorkspace(ctx context.Context, args SaveWorkspaceArgs) (WorkspaceDocumentResult, error) {
+	release, err := s.enter(ctx)
+	if err != nil {
+		return WorkspaceDocumentResult{}, err
+	}
+	defer release()
+	raw, err := json.Marshal(args.Document)
+	if err != nil {
+		return WorkspaceDocumentResult{}, err
+	}
+	snapshot, err := s.state.SaveDocument(args.WorkspaceID, raw, args.ExpectedRevision)
+	if err != nil {
+		if internal := businessError(err); internal != nil {
+			return WorkspaceDocumentResult{}, internal
+		}
+		return blockedDocument(args.WorkspaceID, snapshot, err), nil
+	}
+	document, err := decodeWorkspaceDocument(snapshot.Document)
+	if err != nil {
+		return WorkspaceDocumentResult{}, err
+	}
+	return documentResult(args.WorkspaceID, snapshot, document), nil
+}
+
+func (s *WorkspaceService) FlushWorkspace(ctx context.Context) (WorkspaceFlushResult, error) {
+	release, err := s.enter(ctx)
+	if err != nil {
+		return WorkspaceFlushResult{}, err
+	}
+	defer release()
+	if err := s.state.Flush(); err != nil {
+		return WorkspaceFlushResult{}, err
+	}
+	return WorkspaceFlushResult{Status: WorkspaceAccepted}, nil
+}
+
+func (s *WorkspaceService) OpenWorkspace(ctx context.Context, args WorkspaceIDArgs) (WorkspaceMutationResult, error) {
+	release, err := s.enter(ctx)
+	if err != nil {
+		return WorkspaceMutationResult{}, err
+	}
+	defer release()
+	known, err := s.state.KnownWorkspace(args.WorkspaceID)
+	if err != nil {
+		if internal := businessError(err); internal != nil {
+			return WorkspaceMutationResult{}, internal
+		}
+		return blockedMutation(args.WorkspaceID, uistate.CatalogSnapshot{}, uistate.DocumentSnapshot{}, err), nil
+	}
+	if !known {
+		return blockedMutation(args.WorkspaceID, uistate.CatalogSnapshot{}, uistate.DocumentSnapshot{}, uistate.ErrUnknownWorkspace), nil
+	}
+	if s.window == nil || wailsruntime.ServerMode {
+		if _, err := s.state.OpenWorkspace(args.WorkspaceID, nil); err != nil {
+			if internal := businessError(err); internal != nil {
+				return WorkspaceMutationResult{}, internal
+			}
+			return blockedMutation(args.WorkspaceID, uistate.CatalogSnapshot{}, uistate.DocumentSnapshot{}, err), nil
+		}
+	} else if err := s.window.OpenWorkspace(args.WorkspaceID); err != nil {
+		if internal := businessError(err); internal != nil {
+			return WorkspaceMutationResult{}, internal
+		}
+		return blockedMutation(args.WorkspaceID, uistate.CatalogSnapshot{}, uistate.DocumentSnapshot{}, err), nil
+	}
+	return s.windowResult(args.WorkspaceID, WorkspaceAccepted, ""), nil
+}
+
+func (s *WorkspaceService) FocusWorkspace(ctx context.Context, args WorkspaceIDArgs) (WorkspaceMutationResult, error) {
+	release, err := s.enter(ctx)
+	if err != nil {
+		return WorkspaceMutationResult{}, err
+	}
+	defer release()
+	if s.window == nil || wailsruntime.ServerMode {
+		err = s.state.FocusWorkspace(args.WorkspaceID)
+	} else {
+		err = s.window.FocusWorkspace(args.WorkspaceID)
+	}
+	if err != nil {
+		if internal := businessError(err); internal != nil {
+			return WorkspaceMutationResult{}, internal
+		}
+		return blockedMutation(args.WorkspaceID, uistate.CatalogSnapshot{}, uistate.DocumentSnapshot{}, err), nil
+	}
+	return s.windowResult(args.WorkspaceID, WorkspaceAccepted, ""), nil
+}
+
+func (s *WorkspaceService) CloseWorkspace(ctx context.Context, args WorkspaceIDArgs) (WorkspaceMutationResult, error) {
+	release, err := s.enter(ctx)
+	if err != nil {
+		return WorkspaceMutationResult{}, err
+	}
+	defer release()
+	known, err := s.state.KnownWorkspace(args.WorkspaceID)
+	if err != nil {
+		if internal := businessError(err); internal != nil {
+			return WorkspaceMutationResult{}, internal
+		}
+		return blockedMutation(args.WorkspaceID, uistate.CatalogSnapshot{}, uistate.DocumentSnapshot{}, err), nil
+	}
+	if !known {
+		return blockedMutation(args.WorkspaceID, uistate.CatalogSnapshot{}, uistate.DocumentSnapshot{}, uistate.ErrUnknownWorkspace), nil
+	}
+	if s.window == nil || wailsruntime.ServerMode {
+		s.state.CloseWorkspace(args.WorkspaceID)
+	} else if err := s.window.CloseWorkspace(args.WorkspaceID); err != nil {
+		if internal := businessError(err); internal != nil {
+			return WorkspaceMutationResult{}, internal
+		}
+		return blockedMutation(args.WorkspaceID, uistate.CatalogSnapshot{}, uistate.DocumentSnapshot{}, err), nil
+	}
+	return s.windowResult(args.WorkspaceID, WorkspaceAccepted, ""), nil
+}
+
+func (s *WorkspaceService) windowResult(id string, status WorkspaceStatus, reason string) WorkspaceMutationResult {
+	catalog, _ := s.state.CatalogSnapshot()
+	result := mutationResult(id, catalog, uistate.DocumentSnapshot{})
+	result.Revision = catalog.Revision
+	result.Status, result.Reason = status, reason
+	return result
+}
+
+func (s *WorkspaceService) catalogSnapshot(fallback uistate.CatalogSnapshot) uistate.CatalogSnapshot {
+	if fallback.Revision != 0 || len(fallback.Entries) != 0 {
+		return fallback
+	}
+	current, err := s.state.CatalogSnapshot()
+	if err == nil {
+		return current
+	}
+	return fallback
+}
+
+func catalogResult(catalog uistate.CatalogSnapshot) WorkspaceCatalogResult {
+	entries := make([]WorkspaceCatalogEntry, 0, len(catalog.Entries)+1)
+	entries = append(entries, WorkspaceCatalogEntry{WorkspaceID: uistate.MonitoringWorkspaceID, Name: uistate.MonitoringWorkspaceName, Open: containsWorkspace(catalog.OpenIDs, uistate.MonitoringWorkspaceID)})
+	for _, entry := range catalog.Entries {
+		entries = append(entries, WorkspaceCatalogEntry{WorkspaceID: entry.ID, Name: entry.Name, Open: entry.Open})
+	}
+	return WorkspaceCatalogResult{Status: WorkspaceAccepted, Revision: catalog.Revision, Entries: entries, OpenWorkspaceIDs: catalog.OpenIDs}
+}
+
+func containsWorkspace(ids []string, wanted string) bool {
+	for _, id := range ids {
+		if id == wanted {
+			return true
+		}
+	}
+	return false
+}
+
+func mutationResult(id string, catalog uistate.CatalogSnapshot, document uistate.DocumentSnapshot) WorkspaceMutationResult {
+	result := WorkspaceMutationResult{Status: WorkspaceAccepted, WorkspaceID: id, Revision: document.Revision, CatalogRevision: catalog.Revision, OpenWorkspaceIDs: catalog.OpenIDs}
+	result.Entries = catalogResult(catalog).Entries
+	return result
+}
+
+func documentResult(id string, snapshot uistate.DocumentSnapshot, document *WorkspaceDocument) WorkspaceDocumentResult {
+	result := WorkspaceDocumentResult{Status: WorkspaceAccepted, WorkspaceID: id, Revision: snapshot.Revision, Document: document}
+	return result
+}
+
+func blockedMutation(id string, catalog uistate.CatalogSnapshot, document uistate.DocumentSnapshot, err error) WorkspaceMutationResult {
+	result := mutationResult(id, catalog, document)
+	result.Status = WorkspaceBlocked
+	result.Reason = err.Error()
+	return result
+}
+
+func blockedDocument(id string, snapshot uistate.DocumentSnapshot, err error) WorkspaceDocumentResult {
+	result := documentResult(id, snapshot, nil)
+	result.Status = WorkspaceBlocked
+	result.Reason = err.Error()
+	return result
+}
+
+func decodeWorkspaceDocument(raw []byte) (*WorkspaceDocument, error) {
+	var document WorkspaceDocument
+	if err := json.Unmarshal(raw, &document); err != nil {
+		return nil, err
+	}
+	return &document, nil
+}
+
+func businessError(err error) error {
+	switch {
+	case errors.Is(err, uistate.ErrInvalidWorkspaceID), errors.Is(err, uistate.ErrUnknownWorkspace),
+		errors.Is(err, uistate.ErrWorkspaceConflict), errors.Is(err, uistate.ErrCatalogConflict),
+		errors.Is(err, uistate.ErrReservedWorkspace), errors.Is(err, uistate.ErrDuplicateWorkspace),
+		errors.Is(err, uistate.ErrInvalidWorkspaceName), errors.Is(err, uistate.ErrInvalidDocument),
+		errors.Is(err, uistate.ErrWindowClosed):
+		return nil
+	default:
+		return err
+	}
+}

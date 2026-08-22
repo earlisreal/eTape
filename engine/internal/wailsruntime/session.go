@@ -39,6 +39,12 @@ func (r *WorkspaceRegistry) Contains(workspaceID string) bool {
 	return ok
 }
 
+func (r *WorkspaceRegistry) Unregister(workspaceID string) {
+	r.mu.Lock()
+	delete(r.workspaces, workspaceID)
+	r.mu.Unlock()
+}
+
 type SessionOwner struct {
 	WorkspaceID string
 	WindowID    uint64

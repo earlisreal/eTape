@@ -9,6 +9,8 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/desktop"
 	"github.com/earlisreal/eTape/engine/internal/uiapi"
+	"github.com/earlisreal/eTape/engine/internal/uihub"
+	"github.com/earlisreal/eTape/engine/internal/uistate"
 	"github.com/earlisreal/eTape/engine/internal/wailsruntime"
 	"github.com/earlisreal/eTape/engine/internal/webui"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -23,18 +25,28 @@ func newWailsApp() (*application.App, error) {
 		return nil, fmt.Errorf("embedded UI is missing; run the pinned Wails build or start with `go tool wails3 dev`")
 	}
 
-	host := desktop.NewHost()
+	workspaceState := uistate.NewRuntimeStore()
+	host := desktop.NewHost(workspaceState)
 	instance, err := prepareWailsInstance(func() { _ = host.FocusMain() })
 	if err != nil {
 		return nil, err
 	}
 	runtime := wailsruntime.New()
 	_ = runtime.RegisterWorkspace("main")
+	_ = runtime.RegisterWorkspace("monitoring")
 	lifecycle := newEngineRuntime(runtime)
 	engineService := uiapi.NewEngineService(runtime)
-	workspaceService := uiapi.NewWorkspaceService(runtime)
+	workspaceService := uiapi.NewWorkspaceService(runtime, workspaceState, host)
 	lifecycle.setQuerySourcePublisher(func(sources uiapi.QuerySources) {
 		uiapi.ConfigureEngineService(engineService, sources)
+	})
+	lifecycle.setWorkspaceStorePublisher(func(persistence uistate.Persistence) error {
+		return uiapi.ConfigureWorkspaceService(workspaceService, persistence)
+	})
+	lifecycle.setWorkspaceHubPublisher(func(server *uihub.Server) {
+		uiapi.ConfigureWorkspaceNotifier(workspaceService, func(invalidation uistate.Invalidation) {
+			server.NotifyWorkspace(invalidation.WorkspaceID, invalidation.Revision, invalidation.Kind)
+		})
 	})
 	service := &RuntimeService{runtime: runtime, lifecycle: lifecycle}
 	lifecycle.setStatePublisher(func(state engineBootState) {
@@ -78,7 +90,7 @@ func newWailsApp() (*application.App, error) {
 			UseVisualHosting:              false,
 		},
 	})
-	runtime.SetStreamHandler(lifecycle.HandleStream)
+	runtime.SetWorkspaceStreamHandler(lifecycle.HandleWorkspaceStream)
 	lifecycle.setRequestQuit(func() { application.InvokeAsync(app.Quit) })
 	if err := configureWailsHost(app, host, wailsTrayIcon); err != nil {
 		if instance.release != nil {

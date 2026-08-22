@@ -14,6 +14,10 @@ type wailsStreamSocket struct {
 	stream *application.StreamConn
 }
 
+func (s *Server) NotifyWorkspace(workspaceID string, revision int64, kind string) {
+	s.hub.NotifyWorkspace(workspaceID, revision, kind)
+}
+
 func (s wailsStreamSocket) Read(context.Context) ([]byte, error) {
 	return s.stream.Receive()
 }
@@ -54,9 +58,9 @@ func (s wailsStreamSocket) Close(_ int, reason string) error {
 // HandleWailsStream adapts the already-admitted Wails stream to the same conn
 // used by the legacy localhost WebSocket bridge. Hub owns registration,
 // snapshots, ordering, coalescing, and disconnect cleanup for both transports.
-func (s *Server) HandleWailsStream(stream *application.StreamConn) {
+func (s *Server) HandleWailsStream(stream *application.StreamConn, workspaceID string) {
 	id := s.nextID.Add(1)
-	conn := newConn(id, wailsStreamSocket{stream: stream}, s.hub, s.cmd, s.qry, s.cfg.OutBuf, defaultWriteTimeout)
+	conn := newConn(id, wailsStreamSocket{stream: stream}, s.hub, s.cmd, s.qry, s.cfg.OutBuf, defaultWriteTimeout, workspaceID)
 	s.hub.Register(conn)
 	conn.run(stream.Context())
 }

@@ -53,7 +53,7 @@ packages:
         | "watchlist.rows"
         | "exec.account" | "exec.positions" | "exec.orders" | "exec.closedOrders" | "exec.fills" | "exec.status" | "exec.trades"
         | "sys.health" | "sys.session" | "sys.events" | "sys.boot"
-        | "config";
+        | "config" | "workspace";
 
       // ---- wire enums (mirrors wsmsg.go's typed string consts) ----
       export type Side = "BUY" | "SELL" | "SHORT" | "COVER";
