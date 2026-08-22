@@ -62,11 +62,16 @@ complete successfully.
 ### Temporary Wails migration gate
 
 While any ticket under `.scratch/wails-v3-migration/issues/` remains unfinished,
-use focused engine/UI unit, integration, race, typecheck, and generated-contract
-checks. Defer synth/demo tests and `golangci-lint`; record both as intentionally
-skipped in every handoff. When all Wails migration tickets are complete and the
-branch is ready to merge to `main`, restore the full CI-equivalent Windows
-checklist, including synth/demo tests and `golangci-lint`, before merging.
+use focused engine/UI unit, integration, affected-package race, typecheck, and
+generated-contract checks. Defer synth/demo tests, `golangci-lint`, Playwright
+E2E, packaged/native Wails smoke, the ticket-07 high-volume soak checks (100
+WebView reloads, 100 lifecycle cycles, and four-stream ten-second stalls),
+unrelated UI golden/panel suites, and the full-repository race suite. Replace
+these with deterministic affected-package tests, targeted race tests, and
+affected UI tests; record every deferral in each handoff. When all Wails
+migration tickets are complete and the branch is ready to merge to `main`, run
+the full CI-equivalent Windows checklist plus every deferred E2E, package,
+golden, soak, and full-race check before merging.
 
 ## Live-order safety
 
