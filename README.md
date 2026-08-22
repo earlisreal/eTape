@@ -313,6 +313,23 @@ same for macOS (arm64). The engine is pure Go (no cgo), so cross-compiling from 
 just works. Prebuilt binaries for both platforms are attached to the
 [latest release](https://github.com/earlisreal/eTape/releases/latest).
 
+### Native Wails shell (migration path)
+
+The pinned Wails v3 shell is built from the `engine` module with no global CLI:
+
+```text
+cd engine
+go tool wails3 task dev             # Wails + Vite development shell
+go tool wails3 task build           # Windows 11 x64 embedded shell
+go tool wails3 task server-test     # headless Wails composition check
+go tool wails3 task package         # unsigned per-user NSIS smoke package
+```
+
+The package installs under `%LOCALAPPDATA%\Programs\eTape`. Keep Wails beta
+upgrades atomic across `engine/go.mod`, `ui/package.json`/lockfile, and generated
+build assets; the full installer and engine-service wiring remain later migration
+work.
+
 ### Race tests with MinGW-w64
 
 The regular Windows build and tests do not need cgo, but `go test -race` does.

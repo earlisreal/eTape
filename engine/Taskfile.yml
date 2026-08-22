@@ -1,0 +1,70 @@
+version: '3'
+
+vars:
+  APP_NAME: eTape
+  BIN_DIR: bin
+  VITE_PORT: '{{.WAILS_VITE_PORT | default "9245"}}'
+  GOOS: '{{.GOOS | default "windows"}}'
+
+includes:
+  common: ./build/Taskfile.yml
+  windows: ./build/windows/Taskfile.yml
+
+tasks:
+  build:
+    summary: Build the pinned Wails desktop shell
+    cmds:
+      - task: common:frontend:build
+      - task: common:copy:ui
+      - task: windows:prepare:assets
+      - task: '{{.GOOS}}:build'
+
+  build:dev:
+    summary: Build the Wails development shell without embedded assets
+    cmds:
+      - task: '{{.GOOS}}:build:dev'
+
+  package:
+    summary: Build the unsigned per-user Windows NSIS package
+    cmds:
+      - task: build
+      - task: '{{.GOOS}}:package'
+
+  dev:
+    summary: Run the Wails shell against the Vite development server
+    preconditions:
+      - sh: go tool wails3 version
+        msg: "The pinned Wails CLI is unavailable; use Go's repo-owned tool with Go 1.24+."
+    cmds:
+      - task: common:frontend:install
+      - go tool wails3 dev -config ./build/config.yml -port {{.VITE_PORT}}
+
+  run:dev:
+    summary: Run the development shell binary
+    cmds:
+      - task: '{{.GOOS}}:run:dev'
+
+  generate:bindings:
+    summary: Generate Wails TypeScript bindings into the UI source tree
+    cmds:
+      - task: common:generate:bindings
+
+  update:build-assets:
+    summary: Refresh checked-in Wails build assets after a reviewed pin change
+    cmds:
+      - task: common:update:build-assets
+
+  generate:wsmsg:
+    summary: Generate the existing WebSocket contract
+    cmds:
+      - task: common:generate:wsmsg
+
+  server-test:
+    summary: Compile and test the Wails headless server composition root
+    cmds:
+      - task: common:server-test
+
+  build:server:
+    summary: Build the Wails headless server with embedded UI assets
+    cmds:
+      - task: common:build:server
