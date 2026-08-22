@@ -34,7 +34,6 @@ func newWailsApp() (*application.App, error) {
 		Description: "Local-first US-stock trading platform",
 		Icon:        wailsTrayIcon,
 		Services: []application.Service{
-			application.NewService(host),
 			application.NewService(&RuntimeService{runtime: runtime}),
 		},
 		SingleInstance: instance.options,
