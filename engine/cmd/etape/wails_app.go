@@ -32,6 +32,7 @@ func newWailsApp() (*application.App, error) {
 		return nil, err
 	}
 	runtime := wailsruntime.New()
+	host.SetWorkspaceCleanup(runtime.CloseWorkspace)
 	_ = runtime.RegisterWorkspace("main")
 	_ = runtime.RegisterWorkspace("monitoring")
 	lifecycle := newEngineRuntime(runtime)

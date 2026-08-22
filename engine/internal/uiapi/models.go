@@ -190,6 +190,11 @@ type WorkspaceIDArgs struct {
 	WorkspaceID string `json:"workspaceId"`
 }
 
+type WorkspaceCloseArgs struct {
+	WorkspaceID string `json:"workspaceId"`
+	RequestID   string `json:"requestId"`
+}
+
 type CreateWorkspaceArgs struct {
 	WorkspaceID             string             `json:"workspaceId"`
 	Name                    string             `json:"name"`

@@ -63,6 +63,7 @@ export type {
     WatchlistMutationResult,
     WorkspaceCatalogEntry,
     WorkspaceCatalogResult,
+    WorkspaceCloseArgs,
     WorkspaceDocument,
     WorkspaceDocumentResult,
     WorkspaceFlushResult,

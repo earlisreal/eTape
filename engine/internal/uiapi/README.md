@@ -12,7 +12,9 @@ filters, watchlist membership, venue setup, credentials, and read-only
 connection tests.
 `WorkspaceService` is registered as the workspace-scoped singleton. It owns
 typed catalog/document snapshots plus create, rename, delete, load, save,
-open, focus, close, and durable-flush operations. Stream subscriptions,
+open, focus, close, durable close completion, and durable-flush operations.
+Native close completion is admitted only after the frontend has serialized its
+live Dockview document. Stream subscriptions,
 subscriptions, demands, indicators, snapshots, and updates remain on
 `uihub.Server.HandleWailsStream`.
 

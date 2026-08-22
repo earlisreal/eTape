@@ -354,6 +354,11 @@ export interface WorkspaceCatalogResult {
     "openWorkspaceIds": string[] | null;
 }
 
+export interface WorkspaceCloseArgs {
+    "workspaceId": string;
+    "requestId": string;
+}
+
 /**
  * WorkspaceDocument keeps Dockview's layout opaque. Go validates its bounded
  * JSON envelope and identity but never interprets Panel Group layout data.

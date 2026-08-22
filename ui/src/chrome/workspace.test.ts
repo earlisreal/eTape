@@ -36,6 +36,45 @@ describe("WorkspaceStore", () => {
     vi.useRealTimers();
   });
 
+  it("flush waits for an in-flight save before writing newer state", async () => {
+    vi.useFakeTimers();
+    try {
+      let releaseFirst!: () => void;
+      const firstSave = new Promise<void>((resolve) => { releaseFirst = resolve; });
+      const first = { name: "main", layoutVersion: 8, panels: [], layout: { first: true } };
+      const latest = { ...first, layout: { latest: true } };
+      let saves = 0;
+      const api: WorkspaceApi = {
+        getCatalog: vi.fn(async () => ({ revision: 0, entries: [], openWorkspaceIds: [] })),
+        create: vi.fn(), rename: vi.fn(), remove: vi.fn(), open: vi.fn(), focus: vi.fn(), close: vi.fn(),
+        load: vi.fn(async (workspaceId) => ({ status: "accepted" as const, workspaceId, revision: 0, document: first })),
+        save: vi.fn(async ({ workspaceId, document }) => {
+          saves++;
+          if (saves === 1) await firstSave;
+          return { status: "accepted" as const, workspaceId, revision: saves, document };
+        }),
+        flush: vi.fn(async () => ({ status: "accepted" as const })),
+      };
+      const store = new WorkspaceStore({ sendCommand: vi.fn(), workspace: api }, 0);
+      store.save(first);
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+      expect(api.save).toHaveBeenCalledTimes(1);
+
+      store.save(latest);
+      vi.advanceTimersByTime(1);
+      expect(api.save).toHaveBeenCalledTimes(1);
+      releaseFirst();
+      await vi.waitFor(() => expect(api.save).toHaveBeenCalledTimes(2));
+
+      expect(api.save).toHaveBeenLastCalledWith({ workspaceId: "main", document: latest, expectedRevision: 1 });
+      await store.flush();
+      expect(api.flush).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("keeps pending writes for different workspace identities independent", async () => {
     vi.useFakeTimers();
     try {

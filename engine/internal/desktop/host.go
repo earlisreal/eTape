@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sync"
+	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/uistate"
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -14,14 +16,19 @@ import (
 
 const MainWorkspaceID = "main"
 
+const workspaceCloseTimeout = 3 * time.Second
+
 // Host owns Wails-specific native lifecycle. Workspace persistence remains a
-// separate concern: closing a window only removes its runtime identity.
+// separate concern: the native close hook holds disposal until the renderer
+// confirms a durable save or the user explicitly chooses force close.
 type Host struct {
 	app      *application.App
 	state    *uistate.Store
 	registry *uistate.WindowRegistry
 	tray     *application.SystemTray
 	icon     []byte
+	close    *closeHandshake
+	cleanup  func(string)
 }
 
 func NewHost(states ...*uistate.Store) *Host {
@@ -29,7 +36,7 @@ func NewHost(states ...*uistate.Store) *Host {
 	if len(states) > 0 && states[0] != nil {
 		state = states[0]
 	}
-	host := &Host{state: state, registry: state.Windows()}
+	host := &Host{state: state, registry: state.Windows(), close: newCloseHandshake(workspaceCloseTimeout)}
 	host.registry.SetOnEmpty(func() {
 		if host.tray != nil {
 			host.tray.Show()
@@ -37,6 +44,10 @@ func NewHost(states ...*uistate.Store) *Host {
 	})
 	return host
 }
+
+// SetWorkspaceCleanup installs the runtime cleanup that follows native window
+// disposal. The persistent Workspace identity is intentionally retained.
+func (h *Host) SetWorkspaceCleanup(cleanup func(string)) { h.cleanup = cleanup }
 
 func (h *Host) Attach(app *application.App, icon []byte) error {
 	if app == nil {
@@ -96,8 +107,25 @@ func (h *Host) OpenWorkspace(id string) error {
 				WebView2CompositionHosting: false,
 			},
 		})
+		var closeOnce sync.Once
+		window.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
+			// App shutdown closes native windows after cancelling the app context;
+			// that path must not be trapped by the workspace handshake.
+			if h.app.Context().Err() != nil {
+				return
+			}
+			h.close.intercept(id, window, func(force, keep func()) {
+				h.showCloseTimeoutDialog(window, force, keep)
+			}, event)
+		})
 		window.OnWindowEvent(events.Common.WindowClosing, func(*application.WindowEvent) {
-			h.state.CloseWorkspace(id)
+			h.close.finished(id)
+			closeOnce.Do(func() {
+				h.state.CloseWorkspace(id)
+				if h.cleanup != nil {
+					h.cleanup(id)
+				}
+			})
 		})
 		window.OnWindowEvent(events.Common.WindowRuntimeReady, func(*application.WindowEvent) {
 			window.Show().Focus()
@@ -107,16 +135,32 @@ func (h *Host) OpenWorkspace(id string) error {
 	return err
 }
 
-// CloseWorkspace is intentionally idempotent; a native close event may have
-// already removed the registry entry before a UI action reaches this method.
+// CloseWorkspace starts the same guarded native close path used by Alt+F4.
+// Persistence is finalized by the WindowClosing hook after the UI ack.
 func (h *Host) CloseWorkspace(id string) error {
 	window, ok := h.registry.Get(id)
 	if !ok {
 		return nil
 	}
 	window.Close()
-	h.state.CloseWorkspace(id)
 	return nil
+}
+
+func (h *Host) CompleteWorkspaceClose(id, requestID string) error {
+	return h.close.complete(id, requestID)
+}
+
+func (h *Host) showCloseTimeoutDialog(window *application.WebviewWindow, force, keep func()) {
+	if h.app == nil {
+		keep()
+		return
+	}
+	dialog := h.app.Dialog.Question().
+		SetTitle("Workspace close is waiting").
+		SetMessage(closeRequestTimeoutMessage(h.close.timeout))
+	dialog.AddButton("Force close").OnClick(force)
+	keepButton := dialog.AddButton("Keep open").OnClick(keep)
+	dialog.SetDefaultButton(keepButton).SetCancelButton(keepButton).AttachToWindow(window).Show()
 }
 
 func (h *Host) FocusMain() error { return h.OpenWorkspace(MainWorkspaceID) }

@@ -20,6 +20,14 @@ export function CloseWorkspace(args: $models.WorkspaceIDArgs): $CancellablePromi
     return $Call.ByID(649471755, args);
 }
 
+/**
+ * CompleteWorkspaceClose releases the native WindowClosing hook only after
+ * the renderer has serialized the live Dockview document and flushed storage.
+ */
+export function CompleteWorkspaceClose(args: $models.WorkspaceCloseArgs): $CancellablePromise<$models.WorkspaceMutationResult> {
+    return $Call.ByID(4202920002, args);
+}
+
 export function CreateWorkspace(args: $models.CreateWorkspaceArgs): $CancellablePromise<$models.WorkspaceMutationResult> {
     return $Call.ByID(3941886747, args);
 }

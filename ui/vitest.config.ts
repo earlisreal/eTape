@@ -119,6 +119,7 @@ export default defineConfig({
             'src/chrome/panels/registry.test.tsx',
             'src/chrome/panels/ScannerPanel.test.tsx',
             'src/chrome/scannerSync.test.ts',
+            'src/chrome/workspaceClose.test.ts',
             'src/chrome/workspace.test.ts',
           ],
           pool: 'forks',

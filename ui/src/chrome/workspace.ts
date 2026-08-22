@@ -59,6 +59,7 @@ export class WorkspaceStore {
   private readonly changeListeners = new Map<string, Set<WorkspaceChangeListener>>();
   private readonly catalogListeners = new Set<CatalogChangeListener>();
   private readonly revisions = new Map<string, number>();
+  private readonly inFlight = new Map<string, Promise<void>>();
   private catalogRevision = 0;
   private readonly disposeStream: (() => void) | undefined;
   private connected = false;
@@ -105,7 +106,7 @@ export class WorkspaceStore {
     if (timer) clearTimeout(timer);
     this.timers.set(ws.name, setTimeout(() => {
       this.timers.delete(ws.name);
-      void this.writeNow(ws.name);
+      void this.writeNow(ws.name).catch(() => {});
     }, this.debounceMs));
   }
 
@@ -137,10 +138,15 @@ export class WorkspaceStore {
   async flush(): Promise<void> {
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
-    while (this.pending.size > 0) await Promise.all([...this.pending.keys()].map((name) => this.writeNow(name)));
-    if (this.api) {
+    for (;;) {
+      while (this.pending.size > 0 || this.inFlight.size > 0) {
+        const names = new Set([...this.pending.keys(), ...this.inFlight.keys()]);
+        await Promise.all([...names].map((name) => this.writeNow(name)));
+      }
+      if (!this.api) return;
       const result = await this.api.flush();
       if (result.status !== "accepted") throw new Error(result.reason ?? "Could not durably flush workspace state.");
+      if (this.pending.size === 0 && this.inFlight.size === 0) return;
     }
   }
 
@@ -162,17 +168,40 @@ export class WorkspaceStore {
   }
 
   private async writeNow(name: string): Promise<void> {
+    const inFlight = this.inFlight.get(name);
+    if (inFlight) {
+      return inFlight.then(() => {
+        if (this.inFlight.get(name) === inFlight) this.inFlight.delete(name);
+        if (this.pending.has(name)) return this.writeNow(name);
+      });
+    }
+    const write = this.performWrite(name);
+    this.inFlight.set(name, write);
+    void write.finally(() => {
+      if (this.inFlight.get(name) === write) this.inFlight.delete(name);
+    }).catch(() => {});
+    return write;
+  }
+
+  private async performWrite(name: string): Promise<void> {
     const ws = this.pending.get(name);
     if (!ws) return;
     this.pending.delete(name);
-    if (!this.api) {
-      const ack = await this.client.sendCommand("SetConfig", { key: `workspace.${ws.name}`, value: ws });
-      if (ack.status === "accepted") this.notifyWorkspace(ws.name);
-      return;
+    try {
+      if (!this.api) {
+        const ack = await this.client.sendCommand("SetConfig", { key: `workspace.${ws.name}`, value: ws });
+        if (ack.status !== "accepted") throw new Error(ack.reason ?? "Could not save workspace.");
+        this.notifyWorkspace(ws.name);
+        return;
+      }
+      const result = await this.api.save({ workspaceId: ws.name, document: ws, expectedRevision: this.revisions.get(name) ?? 0 });
+      if (result.status !== "accepted") throw new Error(result.reason ?? "Could not save workspace.");
+      this.recordDocument(result);
+      this.notifyWorkspace(ws.name);
+    } catch (error) {
+      if (!this.pending.has(name)) this.pending.set(name, ws);
+      throw error;
     }
-    const result = await this.api.save({ workspaceId: ws.name, document: ws, expectedRevision: this.revisions.get(name) ?? 0 });
-    this.recordDocument(result);
-    this.notifyWorkspace(ws.name);
   }
 
   private onMessage(message: WorkspaceMessage): void {

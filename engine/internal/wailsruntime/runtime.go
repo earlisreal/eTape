@@ -129,6 +129,26 @@ func (r *Runtime) RegisterWorkspace(workspaceID string) error {
 
 func (r *Runtime) UnregisterWorkspace(workspaceID string) { r.workspaces.Unregister(workspaceID) }
 
+// CloseWorkspace revokes the workspace's ephemeral session and closes its
+// stream. The durable Workspace document and catalog identity remain intact.
+func (r *Runtime) CloseWorkspace(workspaceID string) {
+	if workspaceID == "" {
+		return
+	}
+	r.sessions.RevokeWorkspace(workspaceID)
+	r.streamsMu.Lock()
+	streams := make([]*application.StreamConn, 0)
+	for stream := range r.streams {
+		if ServerMode || CallerWorkspaceID(stream.Window()) == workspaceID {
+			streams = append(streams, stream)
+		}
+	}
+	r.streamsMu.Unlock()
+	for _, stream := range streams {
+		_ = stream.Close()
+	}
+}
+
 func (r *Runtime) EnqueueHint(hint Hint) bool {
 	if !EventAllowed(hint.Class) || r.gate.Stopping() {
 		return false

@@ -101,6 +101,16 @@ func (r *SessionRegistry) Revoke(token string) {
 	r.mu.Unlock()
 }
 
+func (r *SessionRegistry) RevokeWorkspace(workspaceID string) {
+	r.mu.Lock()
+	for token, owner := range r.sessions {
+		if owner.WorkspaceID == workspaceID {
+			delete(r.sessions, token)
+		}
+	}
+	r.mu.Unlock()
+}
+
 func (r *SessionRegistry) RevokeAll() {
 	r.mu.Lock()
 	r.sessions = make(map[string]SessionOwner)

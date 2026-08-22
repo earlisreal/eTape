@@ -253,6 +253,7 @@ type WorkspaceWindowController interface {
 	OpenWorkspace(string) error
 	FocusWorkspace(string) error
 	CloseWorkspace(string) error
+	CompleteWorkspaceClose(string, string) error
 }
 
 func NewWorkspaceService(runtime *wailsruntime.Runtime, state *uistate.Store, controllers ...WorkspaceWindowController) *WorkspaceService {
@@ -526,6 +527,34 @@ func (s *WorkspaceService) CloseWorkspace(ctx context.Context, args WorkspaceIDA
 			return WorkspaceMutationResult{}, internal
 		}
 		return blockedMutation(args.WorkspaceID, uistate.CatalogSnapshot{}, uistate.DocumentSnapshot{}, err), nil
+	}
+	return s.windowResult(args.WorkspaceID, WorkspaceAccepted, ""), nil
+}
+
+// CompleteWorkspaceClose releases the native WindowClosing hook only after
+// the renderer has serialized the live Dockview document and flushed storage.
+func (s *WorkspaceService) CompleteWorkspaceClose(ctx context.Context, args WorkspaceCloseArgs) (WorkspaceMutationResult, error) {
+	release, err := s.enter(ctx)
+	if err != nil {
+		return WorkspaceMutationResult{}, err
+	}
+	defer release()
+	known, err := s.state.KnownWorkspace(args.WorkspaceID)
+	if err != nil {
+		if internal := businessError(err); internal != nil {
+			return WorkspaceMutationResult{}, internal
+		}
+		return blockedMutation(args.WorkspaceID, uistate.CatalogSnapshot{}, uistate.DocumentSnapshot{}, err), nil
+	}
+	if !known {
+		return blockedMutation(args.WorkspaceID, uistate.CatalogSnapshot{}, uistate.DocumentSnapshot{}, uistate.ErrUnknownWorkspace), nil
+	}
+	if s.window == nil || wailsruntime.ServerMode {
+		s.state.CloseWorkspace(args.WorkspaceID)
+		return s.windowResult(args.WorkspaceID, WorkspaceAccepted, ""), nil
+	}
+	if err := s.window.CompleteWorkspaceClose(args.WorkspaceID, args.RequestID); err != nil {
+		return blockedMutation(args.WorkspaceID, s.catalogSnapshot(uistate.CatalogSnapshot{}), uistate.DocumentSnapshot{}, err), nil
 	}
 	return s.windowResult(args.WorkspaceID, WorkspaceAccepted, ""), nil
 }

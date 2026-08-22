@@ -33,6 +33,7 @@ import { useOrderCommands } from "./exec/useOrderCommands";
 import { useOrderConfig } from "./exec/useOrderConfig";
 import { useHotkeys } from "./exec/useHotkeys";
 import { useAutoUnlockOnStartup } from "./exec/useAutoUnlockOnStartup";
+import { Events } from "@wailsio/runtime";
 import { useSoundWiring } from "../sound/useSoundWiring";
 import { NewWindowModal } from "./NewWindowModal";
 import { readWindows } from "./catalogs";
@@ -42,6 +43,7 @@ import { resolveVenue } from "./exec/venueSelection";
 import { PanelHeaderTab } from "./PanelHeaderTab";
 import { PanelHeaderHostProvider } from "./panels/headerSlot";
 import { PanelSymbolRuntime, planScannerSync, rankScannerRows, readScannerSort, ScannerSyncRuntime, type ScannerSyncPanelState, type ScannerSyncPlan } from "./scannerSync";
+import { completeDurableWorkspaceClose, parseWorkspaceCloseRequest, WORKSPACE_CLOSE_REQUESTED } from "./workspaceClose";
 
 // Task 3: permanent "don't show again" flag for the first-run venue-setup
 // prompt, set only when the user ticks the checkbox on either action.
@@ -174,6 +176,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const syncConfigRef = useRef<ScannerSyncConfig | undefined>(undefined);
   const monitoringWorkspaceRef = useRef<Workspace | null>(null);
   const sourceWorkspaceRef = useRef<Workspace | null>(null);
+  const closeRequestRef = useRef<string | null>(null);
   wsRef.current = ws;
   sourceWorkspaceRef.current = sourceWorkspace;
   const observeScannerSync = useCallback((next: ScannerSyncConfig | undefined) => {
@@ -216,6 +219,33 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     if (!current || !current.sourcePanelId || sourceId !== workspaceName) return;
     updateScannerSync({ enabled: !current.enabled });
   }, [updateScannerSync, workspaceName]);
+  useEffect(() => {
+    const complete = commands.workspace?.completeClose;
+    if (!isNativeWindow() || !complete) return;
+    const dispose = Events.On(WORKSPACE_CLOSE_REQUESTED, (event) => {
+      if (event.sender !== `workspace:${workspaceName}`) return;
+      const request = parseWorkspaceCloseRequest(event.data);
+      if (!request || request.workspaceId !== workspaceName || closeRequestRef.current === request.requestId) return;
+      closeRequestRef.current = request.requestId;
+      void completeDurableWorkspaceClose({
+        workspaceId: request.workspaceId,
+        requestId: request.requestId,
+        getCurrentDocument: () => {
+          const current = wsRef.current;
+          if (!current) return null;
+          const api = apiRef.current;
+          return api ? reconcileToGrid(current, api.toJSON()) : current;
+        },
+        save: (document) => workspaceStore.save(document),
+        flush: () => workspaceStore.flush(),
+        complete,
+      }).catch((error: unknown) => {
+        const reason = error instanceof Error ? error.message : "unknown storage error";
+        toast.push({ level: "danger", sticky: true, text: `Workspace close is waiting for a durable save: ${reason}` });
+      });
+    });
+    return dispose;
+  }, [commands.workspace, toast, workspaceName, workspaceStore]);
   useEffect(() => {
     let alive = true;
     setWs(null);

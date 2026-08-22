@@ -15,5 +15,6 @@ reserved; closing removes only the runtime open identity, while deleting an
 open Workspace is rejected.
 
 The store emits catalog/document invalidations for `uihub`'s owning-stream
-lane. Durable close acknowledgement, window geometry, and crash restoration
-remain later lifecycle tickets.
+lane. Native close uses `Flush` as its durable barrier before the desktop host
+removes the open identity; window geometry and crash restoration remain later
+lifecycle tickets.

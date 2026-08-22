@@ -4,6 +4,13 @@ Production/demo/replay entry point. Boot resolves mode and runtime-profile paths
 
 With the `wails` build tag, `newWailsApp` owns one concrete `engineRuntime`. Wails service startup returns immediately after publishing `loading`; the runtime calls `bootWithOptions` asynchronously with `noLegacyHTTP`, then publishes `ready` or `failure` through the low-rate application hint queue. `RuntimeService` bindings and `Runtime.HandleStream` share `wailsruntime.Gate`. Wails `OnShutdown` closes admission and revokes sessions/Streams; service shutdown waits for the gate, cancels the engine context, and lets `bootWithOptions` perform its existing Hub, worker, and store drain once. Restart records intent synchronously, schedules quit after the binding acknowledgement window, and relaunches only from `PostShutdown` after Wails and data-lock cleanup.
 
+The desktop host cancels each Native Window's first close event, asks the owning
+WebView to persist its current Workspace document, and releases the event only
+after `FlushWorkspace` succeeds. The timeout dialog's explicit Force close
+path skips the durable acknowledgement; the final window event still removes
+the runtime open identity and closes that Workspace's stream/session resources
+exactly once.
+
 The `wails,server` build is an automated-test composition only. Its capability
 test starts a fresh app in a temporary `server` profile, binds Wails to
 `127.0.0.1` on a random port, waits for `/health` and then the binding-level

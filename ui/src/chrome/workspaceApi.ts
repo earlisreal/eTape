@@ -48,6 +48,7 @@ export interface WorkspaceApi {
   open(workspaceId: string): Promise<WorkspaceMutationResult>;
   focus(workspaceId: string): Promise<WorkspaceMutationResult>;
   close(workspaceId: string): Promise<WorkspaceMutationResult>;
+  completeClose?(args: { workspaceId: string; requestId: string }): Promise<WorkspaceMutationResult>;
   flush(): Promise<WorkspaceFlushResult>;
 }
 
@@ -70,6 +71,7 @@ function wailsWorkspaceApi(): WorkspaceApi {
     open: async (workspaceId) => mutation(await WorkspaceService.OpenWorkspace({ workspaceId })),
     focus: async (workspaceId) => mutation(await WorkspaceService.FocusWorkspace({ workspaceId })),
     close: async (workspaceId) => mutation(await WorkspaceService.CloseWorkspace({ workspaceId })),
+    completeClose: async (args) => mutation(await WorkspaceService.CompleteWorkspaceClose(args as Generated.WorkspaceCloseArgs)),
     flush: async () => flush(await WorkspaceService.FlushWorkspace()),
   };
 }

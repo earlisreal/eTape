@@ -40,6 +40,11 @@ into silent loss. The handler and the Hub own cleanup of their respective
 registrations, while the shared admission gate prevents late bindings or
 Streams from mutating state after stop begins.
 
+Native Workspace disposal uses the same runtime owner boundary: after the Go
+store removes a closed Native Window, `Runtime.CloseWorkspace` revokes that
+Workspace's sessions and closes its tracked Stream. The Stream handler then
+releases its subscriptions, demands, indicators, watchers, and backfill once.
+
 The server test waits for both Wails `/health` and the binding-level
 `Capabilities.EnginePhase == "ready"`. It uses a loopback random port,
 `ETAPE_PROFILE=server`, a temporary data root, and a fresh identity registry.
