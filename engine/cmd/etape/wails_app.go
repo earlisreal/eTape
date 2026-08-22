@@ -3,11 +3,13 @@
 package main
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"os"
 
 	"github.com/earlisreal/eTape/engine/internal/desktop"
+	"github.com/earlisreal/eTape/engine/internal/wailsruntime"
 	"github.com/earlisreal/eTape/engine/internal/webui"
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -26,11 +28,15 @@ func newWailsApp() (*application.App, error) {
 	if err != nil {
 		return nil, err
 	}
+	runtime := wailsruntime.New()
 	app := application.New(application.Options{
-		Name:           "eTape",
-		Description:    "Local-first US-stock trading platform",
-		Icon:           wailsTrayIcon,
-		Services:       []application.Service{application.NewService(host)},
+		Name:        "eTape",
+		Description: "Local-first US-stock trading platform",
+		Icon:        wailsTrayIcon,
+		Services: []application.Service{
+			application.NewService(host),
+			application.NewService(&RuntimeService{runtime: runtime}),
+		},
 		SingleInstance: instance.options,
 		PostShutdown: func() {
 			if instance.release != nil {
@@ -51,5 +57,16 @@ func newWailsApp() (*application.App, error) {
 		}
 		return nil, err
 	}
+	app.HandleStream(runtimeStreamName, runtime.HandleStream)
+
+	// App.Context is the earliest public shutdown signal. Stop the application
+	// gate independently of Wails cleanup; ServiceShutdown remains the final
+	// wait so the next lifecycle phase can drain after this gate.
+	go func() {
+		<-app.Context().Done()
+		_ = runtime.Stop(context.Background())
+	}()
+	app.OnShutdown(func() { _ = runtime.Stop(context.Background()) })
+
 	return app, nil
 }

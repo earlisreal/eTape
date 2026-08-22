@@ -8,4 +8,4 @@ Built-in and newly added symbol-bearing panels start unassigned. General Layout 
 
 The 10-second chart renders missing weekday 04:00–20:00 ET buckets as client-only synthetic flat bars at the preceding real close, with empty volume. These marked display bars are not stored or included in indicators, and generation pauses at the session close until another real bar arrives.
 
-Children: [application source](src/README.md), [mock engine](mock-engine/README.md), [E2E](e2e/README.md), [test support](test/README.md). Fixtures/assets/generated output excluded from guide leaves. Commands: `npm test`, `npm run typecheck`, `npm run lint`, `npm run e2e`.
+Wails service bindings and event models are generated, committed, and read-only under `src/gen/wails`; regenerate them from the pinned Go module with `go tool wails3 task generate:bindings`. Fixtures/assets/generated output excluded from guide leaves. Children: [application source](src/README.md), [mock engine](mock-engine/README.md), [E2E](e2e/README.md), [test support](test/README.md). Commands: `npm test`, `npm run typecheck`, `npm run lint`, `npm run e2e`.

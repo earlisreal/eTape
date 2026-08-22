@@ -39,3 +39,30 @@ Wails beta upgrades are a single reviewed change: update the Go module, npm runt
 lockfile, generated Wails assets, and these commands together. The existing
 `go test ./...` and `go build ./cmd/etape` commands remain the legacy engine path
 until its later engine-service migration ticket.
+
+### Beta.11 capability proof
+
+`cmd/etape/wails_service.go` is the small pinned-runtime capability seam. Its
+generated read-only bindings live under `ui/src/gen/wails` and its
+`etape.runtime` Stream proves the real desktop and server transport paths.
+`internal/wailsruntime` owns the application admission gate, opaque
+window/session registry, and bounded/coalescing ordinary-event hint queue.
+
+The focused checks are:
+
+```text
+go test -tags wails ./cmd/etape
+go test -tags "wails,server" ./cmd/etape
+go test ./internal/wailsruntime
+go tool wails3 generate bindings -ts -i -clean=true -d ../ui/src/gen/wails -f "-tags wails" ./cmd/etape
+```
+
+Beta.11 exposes the binding caller as `application.WindowKey` and the Stream
+owner as `StreamConn.Window`; the latter is intentionally nil in server mode.
+`Send` transfers immutable buffer ownership and `TrySend` exposes bounded-send
+failure. The pinned Wails Stream implementation owns its per-session and
+application-wide queue limits; eTape does not duplicate those limits. Wails
+events are app-wide broadcasts and beta.11's internal event mailbox is not a
+correctness queue, so only the bounded hint queue may feed low-rate invalidation
+events. Quotes, targeted Workspace updates, persistence, and order-critical
+work remain outside ordinary events.
