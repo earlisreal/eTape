@@ -30,9 +30,12 @@ go tool wails3 task package
 unsigned per-user NSIS smoke installer at `bin/eTape-amd64-installer.exe`, whose
 default install location is `%LOCALAPPDATA%\Programs\eTape`.
 
-The Wails composition root is selected by the `wails` build tag and creates the
-`main` window without calling the legacy browser/HTTP boot path. Wails beta
-upgrades are a single reviewed change: update the Go module, npm runtime, lockfile,
-generated Wails assets, and these commands together. The existing `go test ./...`
-and `go build ./cmd/etape` commands remain the legacy engine path until its later
-migration ticket.
+The Wails composition root is selected by the `wails` build tag and creates one
+frameless Native Window per `workspace:<id>` identity without calling the legacy
+browser/HTTP boot path. The desktop host owns idempotent open/focus/close cleanup,
+the tray Open Main/Quit menu, and second-launch activation. The final window close
+leaves the Wails process in the tray; Workspace documents are not deleted.
+Wails beta upgrades are a single reviewed change: update the Go module, npm runtime,
+lockfile, generated Wails assets, and these commands together. The existing
+`go test ./...` and `go build ./cmd/etape` commands remain the legacy engine path
+until its later engine-service migration ticket.

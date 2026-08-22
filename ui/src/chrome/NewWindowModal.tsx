@@ -4,7 +4,7 @@ import { mutateWindows, readWindows, validateName, type CommandClient, type Wind
 import { useTheme } from "./ThemeProvider";
 import { modalTracker } from "./modalTracker";
 import { blankWorkspace, MONITORING_WORKSPACE_ID, MONITORING_WORKSPACE_NAME, type WorkspaceStore } from "./workspace";
-import { openWorkspaceWindow, workspaceUrl, workspaceWindowFeatures } from "./windows";
+import { isNativeWindow, openWorkspaceWindow, openWorkspaceWindowNative, workspaceUrl, workspaceWindowFeatures } from "./windows";
 
 export function NewWindowModal({ open, currentId, commands, workspaceStore, onClose }: { open: boolean; currentId: string; commands: CommandClient; workspaceStore?: WorkspaceStore; onClose: () => void }): JSX.Element | null {
   const [catalog, setCatalog] = useState<WindowCatalogV1>({ version: 1, entries: [] });
@@ -22,7 +22,8 @@ export function NewWindowModal({ open, currentId, commands, workspaceStore, onCl
     ...catalog.entries.filter((entry) => entry.id !== MONITORING_WORKSPACE_ID),
   ];
   const create = async () => {
-    setError(""); const placeholder = window.open("about:blank", "_blank", workspaceWindowFeatures());
+    setError(""); const native = isNativeWindow();
+    const placeholder = native ? null : window.open("about:blank", "_blank", workspaceWindowFeatures());
     try {
       const clean = validateName(name, catalog.entries.map((e) => e.name), ["main", MONITORING_WORKSPACE_NAME]); const id = crypto.randomUUID();
       const next = await mutateWindows(commands, (fresh) => ({ ...fresh, entries: [...fresh.entries, { id, name: validateName(clean, fresh.entries.map((e) => e.name), ["main", MONITORING_WORKSPACE_NAME]) }] }));
@@ -32,7 +33,9 @@ export function NewWindowModal({ open, currentId, commands, workspaceStore, onCl
         throw new Error(saved.reason ?? "Could not create empty workspace.");
       }
       setCatalog(next); const url = workspaceUrl(id);
-      if (placeholder) placeholder.location.href = url; else setError(`Popup blocked — open ${url} manually.`);
+      if (native) await openWorkspaceWindowNative(id);
+      else if (placeholder) placeholder.location.href = url;
+      else setError(`Popup blocked — open ${url} manually.`);
       setName("");
     } catch (e) { placeholder?.close(); setError(e instanceof Error ? e.message : "Could not create window."); }
   };

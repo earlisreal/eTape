@@ -1,9 +1,24 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { TopBar, targetCueFor } from "./TopBar";
 import { HealthStore } from "../data/HealthStore";
 import { ThemeProvider } from "./ThemeProvider";
+
+const here = dirname(fileURLToPath(import.meta.url));
+
+const wailsWindow = vi.hoisted(() => ({
+  Minimise: vi.fn(async () => {}),
+  ToggleMaximise: vi.fn(async () => {}),
+  Close: vi.fn(async () => {}),
+}));
+vi.mock("@wailsio/runtime", () => ({
+  Window: wailsWindow,
+  Call: { ByName: vi.fn(async () => undefined) },
+}));
 
 const base = {
   workspaceName: "main", health: new HealthStore(), armed: false,
@@ -59,5 +74,30 @@ describe("TopBar", () => {
       expect(element.tagName).toBe("SPAN");
       view.unmount();
     }
+  });
+  it("exposes accessible native caption controls without making them draggable", async () => {
+    Object.defineProperty(window, "chrome", { configurable: true, value: { webview: {} } });
+    try {
+      render(<ThemeProvider><TopBar {...base} /></ThemeProvider>);
+      expect(screen.getByRole("button", { name: "Minimise window" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Maximise or restore window" })).toBeTruthy();
+      expect(screen.getByRole("button", { name: "Close window" })).toBeTruthy();
+      expect(screen.getByTestId("native-window-controls").className).toContain("native-window-controls");
+
+      fireEvent.click(screen.getByRole("button", { name: "Minimise window" }));
+      fireEvent.click(screen.getByRole("button", { name: "Close window" }));
+      expect(wailsWindow.Minimise).toHaveBeenCalled();
+      expect(wailsWindow.Close).toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Maximise or restore window" }));
+      await waitFor(() => expect(wailsWindow.ToggleMaximise).toHaveBeenCalled());
+    } finally {
+      delete (window as typeof window & { chrome?: unknown }).chrome;
+    }
+  });
+  it("keeps only unused Top Bar surfaces draggable", () => {
+    const css = readFileSync(join(here, "..", "global.css"), "utf8");
+    expect(css).toMatch(/\.top-bar \{[^}]*--wails-draggable:\s*drag/);
+    expect(css).toMatch(/\.top-bar > \* \{[^}]*--wails-draggable:\s*no-drag/);
+    expect(css).toMatch(/\.dockview-theme-light, \.dockview-theme-dark, \.ledger-header \{[^}]*--wails-draggable:\s*no-drag/);
   });
 });

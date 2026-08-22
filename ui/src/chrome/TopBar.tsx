@@ -1,3 +1,4 @@
+import { Window as WailsWindow } from "@wailsio/runtime";
 import { LatencyReadout } from "./LatencyReadout";
 import { SessionClock } from "./SessionClock";
 import type { HealthStore } from "../data/HealthStore";
@@ -7,6 +8,7 @@ import type { LinkGroup } from "./linkGroups";
 import type { HotkeyTarget } from "./hotkeyTarget";
 import type { VenueID } from "../wire/contract";
 import { bareSymbol } from "./exec/orderStatus";
+import { isNativeWindow } from "./windows";
 
 // Padlock state icon for the arm/disarm chip. stroke="currentColor" so it
 // inherits the chip's state color automatically (no separate color prop) —
@@ -89,6 +91,21 @@ function TargetCue({ cue, palette }: { cue: HotkeyTargetCue; palette: ReturnType
   );
 }
 
+function NativeWindowControls(): JSX.Element | null {
+  const native = isNativeWindow();
+  if (!native) return null;
+  return (
+    <div className="native-window-controls" data-testid="native-window-controls">
+      <Button iconOnly aria-label="Minimise window" title="Minimise window" onClick={() => { void WailsWindow.Minimise().catch(() => {}); }}>−</Button>
+      <Button iconOnly aria-label="Maximise or restore window" title="Maximise or restore window"
+        onClick={() => { void WailsWindow.ToggleMaximise().catch(() => {}); }}>
+        □
+      </Button>
+      <Button iconOnly aria-label="Close window" title="Close window" onClick={() => { void WailsWindow.Close().catch(() => {}); }}>×</Button>
+    </div>
+  );
+}
+
 // Daylight Ledger top bar: eTape wordmark + workspace name + connection latency +
 // live ET clock/countdown on the left, the hotkey target dead-center, and shell
 // actions (add panel / new window / settings) + the arm/disarm chip on the right.
@@ -138,6 +155,7 @@ export function TopBar(p: TopBarProps): JSX.Element {
             {p.armed ? "LOCK TRADING" : "UNLOCK TRADING"}
           </span>
         </Button>
+        <NativeWindowControls />
       </div>
     </div>
   );
