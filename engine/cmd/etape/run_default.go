@@ -1,4 +1,4 @@
-//go:build !tray
+//go:build !tray && !wails
 
 // This file supplies the default (console) entrypoint for cmd/etape. It is
 // excluded from tray builds (see run_tray.go, //go:build tray) so exactly

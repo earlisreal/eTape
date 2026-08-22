@@ -23,6 +23,7 @@
     "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
+    "@wailsio/runtime": "3.0.0-beta.11",
     "dockview": "^8.1.0",
     "dockview-react": "^8.1.0",
     "lightweight-charts": "^5.2.0",

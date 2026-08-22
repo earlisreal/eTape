@@ -1,0 +1,41 @@
+version: '3'
+
+tasks:
+  prepare:assets:
+    summary: Reuse the existing application icon for Wails build assets
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -Command "Copy-Item -LiteralPath 'cmd/etape/assets/etape.ico' -Destination 'build/windows/icon.ico' -Force"
+
+  build:
+    summary: Build the production Wails shell for Windows x64
+    cmds:
+      - go tool wails3 generate syso -arch amd64 -icon build/windows/icon.ico -manifest build/windows/wails.exe.manifest -info build/windows/info.json -out wails_windows_amd64.syso
+      - go build -tags "wails,production,embed_ui" -trimpath -buildvcs=false -ldflags "-w -s -H windowsgui" -o "{{.BIN_DIR}}/{{.APP_NAME}}.exe" ./cmd/etape
+      - powershell -NoProfile -ExecutionPolicy Bypass -Command "Remove-Item -LiteralPath 'wails_windows_amd64.syso' -Force -ErrorAction SilentlyContinue"
+    env:
+      GOOS: windows
+      GOARCH: amd64
+      CGO_ENABLED: '0'
+
+  build:dev:
+    summary: Build the Wails development shell for Windows
+    cmds:
+      - go build -tags "wails" -buildvcs=false -o "{{.BIN_DIR}}/{{.APP_NAME}}.exe" ./cmd/etape
+    env:
+      GOOS: windows
+      GOARCH: amd64
+      CGO_ENABLED: '0'
+
+  run:dev:
+    summary: Run the Wails development shell
+    cmds:
+      - '{{.BIN_DIR}}/{{.APP_NAME}}.exe'
+
+  package:
+    summary: Create an unsigned per-user NSIS package
+    preconditions:
+      - sh: makensis -VERSION
+        msg: "NSIS is required for packaging; install makensis and retry."
+    cmds:
+      - go tool wails3 generate webview2bootstrapper -dir "{{.ROOT_DIR}}/build/windows/nsis"
+      - makensis -DWAILS_INSTALL_SCOPE=user -DREQUEST_EXECUTION_LEVEL=user -DARG_WAILS_AMD64_BINARY="{{.ROOT_DIR}}\\{{.BIN_DIR}}\\{{.APP_NAME}}.exe" build/windows/nsis/project.nsi

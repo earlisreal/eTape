@@ -35,6 +35,11 @@ docs/tradezero/
 # engine/cmd/etape/assets/etape.ico (not committed -- regenerated at release time)
 engine/cmd/etape/*.syso
 
+# Wails Windows assets generated from the existing application icon/package step
+engine/build/windows/icon.ico
+engine/build/windows/nsis/MicrosoftEdgeWebview2Setup.exe
+engine/wails_windows_*.syso
+
 .pi-subagents/
 
 *.exe

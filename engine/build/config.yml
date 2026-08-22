@@ -1,0 +1,34 @@
+version: '3'
+
+info:
+  companyName: "Earlisreal"
+  productName: "eTape"
+  productIdentifier: "com.earlisreal.etape"
+  description: "Local-first US-stock trading platform"
+  copyright: "(c) 2026 Earlisreal"
+  comments: "eTape Wails v3 desktop shell"
+  version: "0.1.0"
+
+dev_mode:
+  root_path: .
+  log_level: warn
+  debounce: 1000
+  ignore:
+    dir:
+      - .git
+      - bin
+      - build
+    file:
+      - .DS_Store
+      - .gitignore
+      - "*_test.go"
+    watched_extension:
+      - "*.go"
+    git_ignore: true
+  executes:
+    - cmd: go tool wails3 task build:dev
+      type: blocking
+    - cmd: go tool wails3 task common:dev:frontend
+      type: background
+    - cmd: go tool wails3 task run:dev
+      type: primary

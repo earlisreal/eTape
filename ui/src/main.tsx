@@ -1,3 +1,4 @@
+import "@wailsio/runtime";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 // dockview's own stylesheet must load BEFORE global.css: both define

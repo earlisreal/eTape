@@ -1,0 +1,69 @@
+version: '3'
+
+tasks:
+  frontend:install:
+    summary: Install the locked UI dependency tree
+    dir: ../ui
+    preconditions:
+      - sh: npm --version
+        msg: "npm is required; install the Node.js version declared by ui/package.json."
+      - sh: node -e "if (Number(process.versions.node.split('.')[0]) < 24) process.exit(1)"
+        msg: "Node.js 24 or newer is required by ui/package.json."
+    cmds:
+      - npm ci
+
+  frontend:build:
+    summary: Build the current React/Vite UI
+    deps:
+      - frontend:install
+    dir: ../ui
+    cmds:
+      - npm run build
+
+  dev:frontend:
+    summary: Serve the current React/Vite UI for Wails development
+    dir: ../ui
+    cmds:
+      - npm run dev -- --port {{.VITE_PORT}} --strictPort
+
+  copy:ui:
+    summary: Populate the existing embedded-distribution contract
+    preconditions:
+      - sh: test -d ../ui/dist
+        msg: "../ui/dist is missing; run the frontend build first."
+    cmds:
+      - powershell -NoProfile -ExecutionPolicy Bypass -Command "Remove-Item -LiteralPath 'internal/webui/dist' -Recurse -Force -ErrorAction SilentlyContinue; Copy-Item -LiteralPath '../ui/dist' -Destination 'internal/webui/dist' -Recurse -Force"
+
+  update:build-assets:
+    summary: Generate Wails build assets with the pinned CLI
+    dir: build
+    preconditions:
+      - sh: go tool wails3 version
+        msg: "The pinned Wails CLI is unavailable; run this task from the engine module."
+    cmds:
+      - go tool wails3 update build-assets -name "{{.APP_NAME}}" -binaryname "{{.APP_NAME}}" -config config.yml -dir .
+
+  generate:bindings:
+    summary: Generate Wails bindings into ui/src/gen/wails
+    preconditions:
+      - sh: go tool wails3 version
+        msg: "The pinned Wails CLI is unavailable."
+    cmds:
+      - go tool wails3 generate bindings -ts -i -clean=true -d ../ui/src/gen/wails -f "-tags wails" ./cmd/etape
+
+  generate:wsmsg:
+    summary: Generate the existing WebSocket contract through tygo
+    cmds:
+      - go tool tygo generate
+
+  server-test:
+    summary: Compile and test the Wails server build
+    cmds:
+      - go test -tags "wails,server" ./cmd/etape
+
+  build:server:
+    summary: Build the Wails server with embedded UI assets
+    cmds:
+      - task: frontend:build
+      - task: copy:ui
+      - go build -tags "wails,server,production,embed_ui" -trimpath -buildvcs=false -ldflags "-w -s" -o "{{.BIN_DIR}}/{{.APP_NAME}}-server.exe" ./cmd/etape
