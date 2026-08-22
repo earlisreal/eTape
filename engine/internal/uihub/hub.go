@@ -150,9 +150,8 @@ type Hub struct {
 	m   *mirror
 	// cmd is a back-reference to the commands value New builds alongside this
 	// Hub, set exactly once in New before Run (or any conn goroutine) starts —
-	// see New's `h.cmd = cmd` and SetWatchlist's doc comment. Never reassigned
-	// after that, so reading it from SetWatchlist (called later, from boot's
-	// goroutine) is race-free without its own atomic slot.
+	// see New's `h.cmd = cmd` and the command handler setup. Never reassigned
+	// after that, so reading it from the connection goroutines is race-free.
 	cmd *commands
 
 	register           chan client
@@ -407,20 +406,11 @@ func (h *Hub) cachedDaily() func(string) {
 
 func (h *Hub) backfill() *backfillBox { return h.backfillSlot.Load() }
 
-// SetWatchlist wires the watchlist add/remove commands once the poller exists
-// (called from startPollers, after uihub.New). Stores atomically into the
-// commands' wl slot — same late-binding + race-safety as SetFeed. h.cmd is set
-// once in New before any goroutine, so reading it here is race-free.
-func (h *Hub) SetWatchlist(c watchlistCtl) {
-	if h.cmd != nil {
-		h.cmd.wl.Store(&watchlistBox{wl: c})
+func (h *Hub) ValidateSymbol(ctx context.Context, symbol string) error {
+	if h == nil || h.cmd == nil {
+		return nil
 	}
-}
-
-func (h *Hub) SetScanner(c scannerCtl) {
-	if h.cmd != nil && c != nil {
-		h.cmd.scanner.Store(&scannerBox{scanner: c})
-	}
+	return h.cmd.validateSymbol(ctx, symbol)
 }
 
 // reportBackfill returns worker completion to Run's own goroutine.

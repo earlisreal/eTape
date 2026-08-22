@@ -83,15 +83,15 @@ func (p *Poller) Poke() {
 // publishMembership publishes the current membership with whatever rows are
 // cached (unknown symbols render as dashes UI-side).
 func (p *Poller) publishMembership() {
-	syms := p.list.Symbols()
-	p.pub.Publish(wsmsg.TopicWatchlistRows, watchlistKey, p.buildPayload(syms))
+	syms, revision := p.list.Snapshot()
+	p.pub.Publish(wsmsg.TopicWatchlistRows, watchlistKey, p.buildPayload(syms, revision))
 }
 
 // pollAndPublish issues one batched 3203 (binary-split on batch failure),
 // updates the row cache, stamps RefreshedAt, and publishes. Empty list → zero
 // requests but still publishes an empty snapshot.
 func (p *Poller) pollAndPublish(ctx context.Context) {
-	syms := p.list.Symbols()
+	syms, revision := p.list.Snapshot()
 	if len(syms) > 0 {
 		got := map[string]*snappb.Snapshot{}
 		p.snapshotBatch(ctx, syms, got)
@@ -109,13 +109,13 @@ func (p *Poller) pollAndPublish(ctx context.Context) {
 		ref := p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00")
 		p.lastRef = &ref
 	}
-	p.pub.Publish(wsmsg.TopicWatchlistRows, watchlistKey, p.buildPayload(syms))
+	p.pub.Publish(wsmsg.TopicWatchlistRows, watchlistKey, p.buildPayload(syms, revision))
 }
 
 // buildPayload assembles the snapshot: Symbols is always the full membership;
 // Rows carries only symbols with a cached row (Symbols/Rows split is
 // deliberate — membership is instantly correct, rows may lag).
-func (p *Poller) buildPayload(syms []string) wsmsg.WatchlistRowsPayload {
+func (p *Poller) buildPayload(syms []string, revision uint64) wsmsg.WatchlistRowsPayload {
 	rows := make([]wsmsg.WatchlistRow, 0, len(syms))
 	live := map[string]bool{}
 	for _, s := range syms {
@@ -130,7 +130,7 @@ func (p *Poller) buildPayload(syms []string) wsmsg.WatchlistRowsPayload {
 			delete(p.rows, s)
 		}
 	}
-	return wsmsg.WatchlistRowsPayload{RefreshedAt: p.lastRef, Symbols: syms, Rows: rows}
+	return wsmsg.WatchlistRowsPayload{RefreshedAt: p.lastRef, Symbols: syms, Rows: rows, Revision: revision}
 }
 
 // snapshotBatch resolves one batch via a single 3203, recursing with a binary

@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { PanelProps } from "./registry";
+import { mutationClient } from "../../wire/mutations";
 import type { WatchlistRow } from "../../gen/wsmsg";
 import { useTheme } from "../ThemeProvider";
 import { FONTS } from "../../render/palette";
@@ -49,6 +50,7 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, group: gr
   // ChartPanel/LadderPanel/TapePanel/etc.
   const group = groupProp ?? config.group;
   const toast = useToasts();
+  const mutations = useMemo(() => mutationClient(commands), [commands.mutations, commands.sendCommand]);
   const snap = useSyncExternalStore((cb) => stores.watchlist.subscribe(cb), () => stores.watchlist.getSnapshot());
   const [sort, setSort] = useState<SortState>(null);
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
@@ -77,18 +79,22 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, group: gr
   const submitAdd = () => {
     const symbol = addValue.trim();
     if (!symbol) return;
-    void commands.sendCommand("WatchlistAdd", { symbol }).then((ack) => {
-      if (ack.status === "accepted") {
+    void mutations.WatchlistAdd({ symbol }).then((result) => {
+      if (result.status === "accepted") {
+        stores.watchlist.applyMutation(result);
         setAddValue("");
       } else {
-        toast.push({ level: "warn", text: ack.reason ?? "rejected" });
+        toast.push({ level: "warn", text: result.reason ?? "rejected" });
       }
-    });
+    }).catch(() => toast.push({ level: "danger", text: "Watchlist update failed (transport)." }));
   };
 
   const buildRowMenuItems = (sym: string): MenuEntry[] => [
     { label: `Remove ${bareSymbol(sym)} from watchlist`, danger: true,
-      onClick: () => void commands.sendCommand("WatchlistRemove", { symbol: sym }) },
+      onClick: () => void mutations.WatchlistRemove({ symbol: sym }).then((result) => {
+        if (result.status === "accepted") stores.watchlist.applyMutation(result);
+        else toast.push({ level: "warn", text: result.reason ?? "rejected" });
+      }).catch(() => toast.push({ level: "danger", text: "Watchlist update failed (transport)." })) },
   ];
 
   const th = { padding: "2px 8px", position: "sticky" as const, top: 0, background: palette.surface };

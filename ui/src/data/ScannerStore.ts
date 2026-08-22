@@ -16,6 +16,8 @@ export interface CurrentScannerView { session: ScannerSession | null; rows: Scan
 export class ScannerStore extends ReactStore<ScannerState> {
   private readonly known = new Map<ScannerSession, Set<string>>();
   private readonly unseen = new Map<ScannerSession, Set<string>>();
+  private readonly revisions = new Map<ScannerSession, number>();
+  private filterRevision = 0;
   private readonly hitListeners = new Set<(symbol: string) => void>();
   constructor() { super({ sessions: {} }); }
 
@@ -27,7 +29,11 @@ export class ScannerStore extends ReactStore<ScannerState> {
   apply(m: SnapshotMsg | DeltaMsg): void {
     const session = (m.key ?? "premarket") as ScannerSession;
     if (m.topic === "scanner.hit") return; // rank payload owns baseline/unseen semantics
-    const { refreshedAt, rows, filters, baseline } = m.payload as ScannerRankPayload;
+    const payload = m.payload as ScannerRankPayload;
+    const { refreshedAt, rows, filters, baseline } = payload;
+    const revision = payload.revision ?? 0;
+    const current = this.getSnapshot().sessions[session];
+    if (revision < this.filterRevision || (current && revision < (this.revisions.get(session) ?? 0))) return;
     const known = this.setFor(this.known, session);
     const unseen = this.setFor(this.unseen, session);
     if (m.kind === "snapshot" || baseline) { known.clear(); unseen.clear(); }
@@ -50,6 +56,7 @@ export class ScannerStore extends ReactStore<ScannerState> {
       };
     });
     for (const row of rows) known.add(row.symbol);
+    this.revisions.set(session, revision);
     this.setSession(session, { rows: view, refreshedAt, filters });
     // fired after the map (not inside it) so the row-view build stays a pure transform
     for (const symbol of newHits) {
@@ -79,6 +86,20 @@ export class ScannerStore extends ReactStore<ScannerState> {
     if (!best) return { session: null, rows: [], refreshedAt: null, filters: null };
     const v = sessions[best]!;
     return { session: best, rows: v.rows, refreshedAt: v.refreshedAt, filters: v.filters };
+  }
+
+  setFilters(filters: ScannerRankPayload["filters"], revision: number): void {
+    if (revision < this.filterRevision) return;
+    this.filterRevision = revision;
+    const sessions = { ...this.getSnapshot().sessions };
+    for (const session of Object.keys(sessions) as ScannerSession[]) {
+      const view = sessions[session];
+      if (view && revision >= (this.revisions.get(session) ?? 0)) {
+        this.revisions.set(session, revision);
+        sessions[session] = { ...view, filters };
+      }
+    }
+    this.set({ sessions });
   }
 
   resetSeen(session?: ScannerSession): void {

@@ -24,9 +24,16 @@ lossless and latest-wins queues, and disconnects explicitly at overflow;
 latest-wins values may be superseded, but ordered snapshots/events are never
 silently dropped.
 
-Low-rate reads are separate from that Stream boundary. `queries.ts` exposes the
-typed `EngineService` surface for chart windows, fills/cycle-fills, locate
-eligibility/quotes/records, and export data. Wails calls use generated bindings;
-the browser compatibility path decodes the same typed result shapes. Callers
-must use this client rather than sending migrated query names through
-`WsClient.sendQuery`. Generated files remain read-only.
+Low-rate reads and non-execution mutations are separate from that Stream
+boundary. `queries.ts` and `mutations.ts` expose the typed `EngineService`
+surface for chart windows, fills/cycle-fills, locate eligibility/quotes/
+records, export data, scanner filters, watchlist membership, venue setup,
+credentials, and connection tests. Wails calls use generated bindings; the
+clients normalize nullable generated slices at the React boundary. Scanner
+and watchlist stores compare mutation revisions before applying Stream
+payloads, so either lane may arrive first. Callers must use these clients
+rather than sending migrated names through `WsClient.sendCommand` or
+`sendQuery`. Generated files remain read-only.
+The native App supplies the mutation client; non-Wails construction fails
+closed for these operations. The small command decoder remains only for direct
+legacy component test fixtures during the migration.

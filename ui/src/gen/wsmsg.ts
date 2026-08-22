@@ -366,6 +366,7 @@ export interface ScannerRankPayload {
   rows: ScannerRow[];
   filters?: ScannerFilters;
   baseline?: boolean;
+  revision?: number /* uint64 */;
 }
 export interface ScannerFilters {
   mode: "gainers" | "losers" | "most_active";
@@ -402,6 +403,7 @@ export interface WatchlistRowsPayload {
   refreshedAt: string | null;
   symbols: string[];
   rows: WatchlistRow[];
+  revision?: number /* uint64 */;
 }
 export interface WatchlistAddArgs {
   symbol: string;

@@ -21,7 +21,6 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
-	"github.com/earlisreal/eTape/engine/internal/watchlist"
 )
 
 type execDoer interface {
@@ -64,25 +63,12 @@ type venueTester interface {
 	TestConnection(ctx context.Context, broker, env, credName, keyID, secretKey, accountID string) venueprobe.Result
 }
 
-// watchlistCtl is the watchlist surface the add/remove commands drive
-// (satisfied by a *watchlist.List + *watchlist.Poller adapter, wired in
-// startPollers). Nil until SetWatchlist runs — guard in the handler.
-type watchlistCtl interface {
-	Add(symbol string) (added bool, err error)
-	Remove(symbol string) (removed bool)
-	Poke()
-}
-type scannerCtl interface {
-	Filters() wsmsg.ScannerFilters
-	SetFilters(wsmsg.ScannerFilters) error
-}
-
-// watchlistBox boxes watchlistCtl for atomic.Pointer storage — same reason
-// feedBox boxes Feed (hub.go): an interface value can't be atomically stored
-// directly, and boxing sidesteps nil-pointer-vs-nil-interface ambiguity on Load.
-type watchlistBox struct{ wl watchlistCtl }
-type scannerBox struct{ scanner scannerCtl }
 type knownSymbolBox struct{ fn func(string) bool }
+
+type symbolBusinessError struct{ reason string }
+
+func (e symbolBusinessError) Error() string       { return e.reason }
+func (e symbolBusinessError) BusinessError() bool { return true }
 
 // commands.tester holds the venueTester dependency; it is named "tester"
 // rather than "probe" because *commands already has an unrelated probe
@@ -101,8 +87,6 @@ type commands struct {
 	onConfigSet func(key, value string)
 	restart     func()
 	startDemo   func() error
-	wl          atomic.Pointer[watchlistBox]
-	scanner     atomic.Pointer[scannerBox]
 }
 
 func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, va venueAdmin, feed func() Feed, tester venueTester, locateRegistries ...LocateRegistry) *commands {
@@ -111,15 +95,6 @@ func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, 
 		locateRegistry = locateRegistries[0]
 	}
 	return &commands{ex: ex, cfg: cfg, ind: ind, dem: dem, va: va, feed: feed, tester: tester, locates: locateRegistry}
-}
-
-// watchlist loads the late-bound watchlistCtl (nil-safe: unset until
-// SetWatchlist runs, e.g. in every test that doesn't wire one).
-func (cd *commands) watchlist() watchlistCtl {
-	if b := cd.wl.Load(); b != nil {
-		return b.wl
-	}
-	return nil
 }
 
 // restartAckFlushDelay defers the actual restart trigger past the moment
@@ -254,26 +229,6 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		}
 		cd.cfg.DeleteConfig(a.Key)
 		return wsmsg.AckMsg{Status: "accepted"}, false
-	case "GetScannerFilters":
-		if b := cd.scanner.Load(); b != nil {
-			return wsmsg.AckMsg{Status: "accepted", Value: b.scanner.Filters()}, false
-		}
-		return blocked("scanner unavailable"), false
-	case "SetScannerFilters":
-		var a wsmsg.SetScannerFiltersArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args"), false
-		}
-		b := cd.scanner.Load()
-		if b == nil {
-			return blocked("scanner unavailable"), false
-		}
-		if err := b.scanner.SetFilters(a.Filters); err != nil {
-			return blocked(err.Error()), false
-		}
-		raw, _ := json.Marshal(a.Filters)
-		cd.cfg.SetConfig("scanner.filters.v1", string(raw))
-		return wsmsg.AckMsg{Status: "accepted", Value: a.Filters}, false
 	case "SubscribeIndicator":
 		var a struct {
 			InstanceID string             `json:"instanceId"`
@@ -316,43 +271,6 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		}
 		cd.dem.EnsureDemand(connID, d)
 		return wsmsg.AckMsg{Status: "accepted"}, false
-	case "WatchlistAdd":
-		var a wsmsg.WatchlistAddArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args"), false
-		}
-		wl := cd.watchlist()
-		if wl == nil {
-			return blocked("watchlist not ready"), false
-		}
-		sym := watchlist.Normalize(a.Symbol)
-		if !strings.HasPrefix(sym, "US.") {
-			return blocked("unsupported market"), false
-		}
-		if reason := cd.probe(ctx, sym); reason != "" {
-			return blocked(reason), false
-		}
-		_, err := wl.Add(sym)
-		if errors.Is(err, watchlist.ErrFull) {
-			return blocked("watchlist full (400)"), false
-		}
-		if err != nil {
-			return blocked("watchlist error"), false
-		}
-		wl.Poke()
-		return wsmsg.AckMsg{Status: "accepted"}, false
-	case "WatchlistRemove":
-		var a wsmsg.WatchlistRemoveArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args"), false
-		}
-		wl := cd.watchlist()
-		if wl == nil {
-			return blocked("watchlist not ready"), false
-		}
-		wl.Remove(a.Symbol) // idempotent — always accepted
-		wl.Poke()
-		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "ReleaseSymbol":
 		var a wsmsg.ReleaseSymbolArgs
 		if err := json.Unmarshal(args, &a); err != nil || a.DemandID == "" {
@@ -373,54 +291,6 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		}
 		// Registers no demand — demands arrive from member panels as they follow.
 		return wsmsg.AckMsg{Status: "accepted"}, false
-	case "GetVenueSetup":
-		file, running, keys, moomooAttempted, err := cd.va.GetVenueSetup()
-		if err != nil {
-			return blocked("venue read error"), false
-		}
-		return wsmsg.AckMsg{Status: "accepted", Value: wsmsg.VenueSetup{
-			File: venueConfigToWire(file), Running: venueConfigToWire(running), CredKeys: keys,
-			Seed: wsmsg.SeedView{MoomooAttempted: moomooAttempted},
-		}}, false
-	case "SetVenueSetup":
-		var a wsmsg.SetVenueSetupArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args"), false
-		}
-		if err := cd.va.SetVenueSetup(venueConfigFromWire(a.Venues, a.Gate)); err != nil {
-			return blocked(err.Error()), false
-		}
-		return wsmsg.AckMsg{Status: "accepted"}, false
-	case "PutCredential":
-		var a wsmsg.PutCredentialArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args"), false
-		}
-		if a.Name == "" || a.KeyID == "" || a.SecretKey == "" {
-			return blocked("name, keyId, and secretKey are required"), false
-		}
-		if err := cd.va.PutCredential(a.Name, a.KeyID, a.SecretKey); err != nil {
-			return blocked(err.Error()), false
-		}
-		return wsmsg.AckMsg{Status: "accepted"}, false
-	case "DeleteCredential":
-		var a wsmsg.DeleteCredentialArgs
-		if err := json.Unmarshal(args, &a); err != nil || a.Name == "" {
-			return blocked("bad args"), false
-		}
-		if err := cd.va.DeleteCredential(a.Name); err != nil {
-			return blocked(err.Error()), false
-		}
-		return wsmsg.AckMsg{Status: "accepted"}, false
-	case "TestConnection":
-		var a wsmsg.TestConnectionArgs
-		if err := json.Unmarshal(args, &a); err != nil {
-			return blocked("bad args"), false
-		}
-		pctx, cancel := context.WithTimeout(ctx, 8*time.Second)
-		defer cancel()
-		r := cd.tester.TestConnection(pctx, a.Broker, a.Env, a.Credentials, a.KeyID, a.SecretKey, a.AccountID)
-		return wsmsg.AckMsg{Status: "accepted", Value: resultToWire(r)}, false
 	case "RestartEngine":
 		if cd.restart == nil {
 			return blocked("restart not supported"), false
@@ -443,21 +313,28 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 // probe validates a symbol exists; returns "" to accept, else a block reason.
 // Skipped when the feed is nil (replay/tests) so those paths accept.
 func (cd *commands) probe(ctx context.Context, symbol string) string {
+	if err := cd.validateSymbol(ctx, symbol); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
+func (cd *commands) validateSymbol(ctx context.Context, symbol string) error {
 	if known := cd.knownSymbol.Load(); known != nil && known.fn(symbol) {
-		return ""
+		return nil
 	}
 	f := cd.feed()
 	if f == nil {
-		return ""
+		return nil
 	}
 	err := f.Validate(ctx, symbol)
 	switch {
 	case err == nil:
-		return ""
+		return nil
 	case errors.Is(err, feed.ErrUnknownSymbol):
-		return "unknown symbol " + symbol
+		return symbolBusinessError{reason: "unknown symbol " + symbol}
 	default:
-		return "feed unavailable"
+		return errors.New("feed unavailable")
 	}
 }
 

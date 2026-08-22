@@ -16,8 +16,24 @@ import { Call as $Call, CancellablePromise as $CancellablePromise } from "@wails
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+export function DeleteCredential(args: $models.DeleteCredentialArgs): $CancellablePromise<$models.MutationResult> {
+    return $Call.ByID(20880799, args);
+}
+
 export function ExportFills(args: $models.ExportFillsArgs): $CancellablePromise<$models.ExportFillsResult> {
     return $Call.ByID(3349149675, args);
+}
+
+export function GetScannerFilters(): $CancellablePromise<$models.ScannerFiltersView> {
+    return $Call.ByID(1011940158);
+}
+
+export function GetVenueSetup(): $CancellablePromise<$models.VenueSetup> {
+    return $Call.ByID(368621159);
+}
+
+export function PutCredential(args: $models.PutCredentialArgs): $CancellablePromise<$models.MutationResult> {
+    return $Call.ByID(2958503859, args);
 }
 
 export function QueryChartWindow(args: $models.QueryChartWindowArgs): $CancellablePromise<$models.QueryChartWindowResult> {
@@ -46,4 +62,24 @@ export function QueryLocateQuotes(args: $models.QueryLocateQuotesArgs): $Cancell
 
 export function QueryLocates(args: $models.QueryLocatesArgs): $CancellablePromise<$models.LocateListResult> {
     return $Call.ByID(2147311378, args);
+}
+
+export function SetScannerFilters(args: $models.SetScannerFiltersArgs): $CancellablePromise<$models.ScannerFiltersMutationResult> {
+    return $Call.ByID(1501295746, args);
+}
+
+export function SetVenueSetup(args: $models.SetVenueSetupArgs): $CancellablePromise<$models.MutationResult> {
+    return $Call.ByID(2550657907, args);
+}
+
+export function TestConnection(args: $models.TestConnectionArgs): $CancellablePromise<$models.TestConnectionResult> {
+    return $Call.ByID(3358021601, args);
+}
+
+export function WatchlistAdd(args: $models.WatchlistMutationArgs): $CancellablePromise<$models.WatchlistMutationResult> {
+    return $Call.ByID(2780807787, args);
+}
+
+export function WatchlistRemove(args: $models.WatchlistMutationArgs): $CancellablePromise<$models.WatchlistMutationResult> {
+    return $Call.ByID(3467439968, args);
 }

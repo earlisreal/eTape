@@ -63,6 +63,7 @@ type engineRuntime struct {
 	querySourcePublisher    func(uiapi.QuerySources)
 	workspaceStorePublisher func(uistate.Persistence) error
 	workspaceHubPublisher   func(*uihub.Server)
+	mutationSourcePublisher func(uiapi.MutationSources)
 	requestQuit             func()
 	restartOnce             sync.Once
 	restartScheduleOnce     sync.Once
@@ -112,6 +113,7 @@ func (e *engineRuntime) runEngine(ctx context.Context, done chan struct{}, run e
 		onHub:            e.setHubServer,
 		onQuerySource:    e.setQuerySources,
 		onWorkspaceStore: e.setWorkspaceStore,
+		onMutationSource: e.setMutationSources,
 		onReady:          e.markReady,
 	})
 
@@ -199,6 +201,21 @@ func (e *engineRuntime) setWorkspaceStorePublisher(publish func(uistate.Persiste
 func (e *engineRuntime) setWorkspaceHubPublisher(publish func(*uihub.Server)) {
 	e.mu.Lock()
 	e.workspaceHubPublisher = publish
+	e.mu.Unlock()
+}
+
+func (e *engineRuntime) setMutationSources(sources uiapi.MutationSources) {
+	e.mu.Lock()
+	publish := e.mutationSourcePublisher
+	e.mu.Unlock()
+	if publish != nil {
+		publish(sources)
+	}
+}
+
+func (e *engineRuntime) setMutationSourcePublisher(publish func(uiapi.MutationSources)) {
+	e.mu.Lock()
+	e.mutationSourcePublisher = publish
 	e.mu.Unlock()
 }
 

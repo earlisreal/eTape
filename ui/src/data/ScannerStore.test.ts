@@ -85,6 +85,20 @@ describe("ScannerStore", () => {
   it("view of an unknown session is empty", () => {
     expect(new ScannerStore().view("afterhours")).toEqual({ rows: [], refreshedAt: null });
   });
+
+  it("ignores a rank update with an older mutation revision", () => {
+    const s = new ScannerStore();
+    s.apply(rank("snapshot", "premarket", { refreshedAt: "t2", revision: 2, rows: [r("A", 5)] }));
+    s.apply(rank("delta", "premarket", { refreshedAt: "t1", revision: 1, rows: [r("B", 9)] }));
+    expect(s.view("premarket").rows.map((row) => row.symbol)).toEqual(["A"]);
+  });
+
+  it("keeps the binding revision floor before the first rank snapshot", () => {
+    const s = new ScannerStore();
+    s.setFilters(undefined, 2);
+    s.apply(rank("snapshot", "premarket", { refreshedAt: "t1", revision: 1, rows: [r("A", 5)] }));
+    expect(s.view("premarket").rows).toEqual([]);
+  });
 });
 
 // Distinct name to avoid colliding with the file's existing `rank(kind, session, payload)`.
