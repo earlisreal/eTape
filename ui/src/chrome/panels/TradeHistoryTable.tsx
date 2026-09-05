@@ -29,9 +29,9 @@ function readSort(s: Record<string, unknown>): SortState {
 
 const COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
   { col: "symbol", label: "Symbol", defaultWidth: 84, minWidth: 68, align: "left", sortable: true },
-  { col: "venue", label: "Venue", defaultWidth: 92, minWidth: 72, align: "right", sortable: true },
   { col: "qty", label: "Qty", defaultWidth: 56, minWidth: 48, align: "right", sortable: true },
   { col: "entryPrice", label: "Entry", defaultWidth: 72, minWidth: 60, align: "right", sortable: true },
+  { col: "diff", label: "Diff", defaultWidth: 72, minWidth: 60, align: "right", sortable: true },
   { col: "exitPrice", label: "Exit", defaultWidth: 72, minWidth: 60, align: "right", sortable: true },
   { col: "realized", label: "Realized", defaultWidth: 84, minWidth: 72, align: "right", sortable: true },
   { col: "openMs", label: "Opened", defaultWidth: 84, minWidth: 72, align: "right", sortable: true },
@@ -40,9 +40,9 @@ const COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean }
 ];
 const SORT_ACCESSORS: Record<string, (r: ClosedTradeRow) => number | string | null> = {
   symbol: (r) => bareSymbol(r.symbol),
-  venue: (r) => r.venue,
   qty: (r) => r.qty,
   entryPrice: (r) => r.entryPrice,
+  diff: (r) => r.exitPrice - r.entryPrice,
   exitPrice: (r) => r.exitPrice,
   realized: (r) => r.realized,
   openMs: (r) => r.openMs,
@@ -100,9 +100,9 @@ export function TradeHistoryTable({
             {rows.map((r) => (
               <tr key={r.seq} data-testid={`trade-${r.seq}`} style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
                 <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
-                <td data-column="venue" style={{ color: palette.textMuted }}>{r.venue}</td>
                 <td data-column="qty">{formatSize(r.qty)}</td>
                 <td data-column="entryPrice">{formatPrice(r.entryPrice, 2)}</td>
+                <td data-column="diff">{formatPrice(r.exitPrice - r.entryPrice, 2)}</td>
                 <td data-column="exitPrice">{formatPrice(r.exitPrice, 2)}</td>
                 <td data-column="realized" style={{ color: r.realized >= 0 ? palette.up : palette.down }}>{formatPrice(r.realized, 2)}</td>
                 <td data-column="openMs" style={{ color: palette.textMuted }}>{formatClock(r.openMs)}</td>

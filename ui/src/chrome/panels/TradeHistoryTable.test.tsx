@@ -50,6 +50,19 @@ function renderHarness(props: ReturnType<typeof mkProps>["props"], venue: string
 }
 
 describe("TradeHistoryTable", () => {
+  it("shows Diff as Exit minus Entry immediately before Exit and removes Venue", () => {
+    const { props, stores } = mkProps();
+    act(() => stores.trades.apply(snap([row({ seq: 1, entryPrice: 100, exitPrice: 104.5 })])));
+    renderHarness(props, "alpaca-paper");
+    const table = screen.getByTestId("trade-history-table");
+
+    expect([...table.querySelectorAll("thead th")].map((th) => th.getAttribute("data-column"))).toEqual([
+      "symbol", "qty", "entryPrice", "diff", "exitPrice", "realized", "openMs", "closeMs", "duration",
+    ]);
+    expect(table.querySelector("[data-column='venue']")).toBeNull();
+    expect(table.querySelector("tbody tr [data-column='diff']")?.textContent).toBe("4.50");
+  });
+
   it("renders rows sorted by closeMs descending by default", () => {
     const { props, stores } = mkProps();
     act(() => {
