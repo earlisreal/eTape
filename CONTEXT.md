@@ -36,6 +36,24 @@ _Avoid_: Panel group, tab group
 A configured broker account and environment (paper or live) that receives an order. A Link Group owns its selected Execution Venue; there is no global venue fallback, and existing orders remain owned by the venue selected when they were submitted.
 _Avoid_: Active venue, global broker
 
+## Venue Eligibility
+
+**Venue Instrument Eligibility**:
+A selected Execution Venue's asset-level classification of whether a symbol is Tradable, Marginable, or Shortable. It does not express immediate order readiness or account-level permission.
+_Avoid_: Order readiness, trading permission, asset status
+
+**Tradable**:
+A Venue Instrument Eligibility state indicating that the selected Execution Venue generally supports orders in the symbol. It does not account for market sessions, trading locks, or risk gates.
+_Avoid_: Tradeable, order-ready
+
+**Marginable**:
+A Venue Instrument Eligibility state indicating that the selected Execution Venue classifies the symbol as eligible to be bought on margin. It does not indicate account margin authorization or available buying power.
+_Avoid_: Margin-enabled account, margin available
+
+**Shortable**:
+A Venue Instrument Eligibility state indicating that the selected Execution Venue classifies the symbol as eligible for short selling. It does not indicate current borrow availability, locate status, or authorization to submit a short order.
+_Avoid_: Borrowable, easy to borrow, short-authorized
+
 ## Positions
 
 **Open Position**:
