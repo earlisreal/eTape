@@ -227,13 +227,15 @@ type Fill struct {
 }
 
 // Position mirrors the broker's authoritative per-symbol position; Qty is signed
-// (positive long, negative short).
+// (positive long, negative short). OpenedMs is the exact opening fill time when
+// known; zero means the position predates observed fills or its history is unavailable.
 type Position struct {
 	Venue    VenueID
 	Symbol   string
 	Qty      float64
 	AvgPrice float64
 	DayBasis float64
+	OpenedMs int64
 }
 
 type AccountSnapshot struct {

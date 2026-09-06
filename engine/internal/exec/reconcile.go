@@ -12,6 +12,7 @@ func (s *State) ReconcilePositions(v VenueID, ps []Position) {
 	vs := s.Venue(v)
 	vs.Positions = make(map[string]Position, len(ps))
 	for _, p := range ps {
+		p.Venue = v
 		vs.Positions[p.Symbol] = p
 	}
 }

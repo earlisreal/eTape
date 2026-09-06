@@ -264,6 +264,7 @@ export interface PositionRow {
   avgPrice: number /* float64 */;
   unrealizedPnl: number /* float64 */;
   dayBasis: number /* float64 */;
+  openedMs: number /* int64 */;
 }
 export interface AccountRow {
   venue: string;

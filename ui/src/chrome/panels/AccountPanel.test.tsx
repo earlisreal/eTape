@@ -39,7 +39,7 @@ const status = (masterArmed: boolean, ...venueIds: string[]): ExecStatus => ({
     note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 },
   })),
 });
-const pos = (o: Partial<PositionRow>): PositionRow => ({ venue: "alpaca-paper", symbol: "US.AAPL", qty: 300, avgPrice: 3.4, unrealizedPnl: 30, dayBasis: 3.4, ...o });
+const pos = (o: Partial<PositionRow>): PositionRow => ({ venue: "alpaca-paper", symbol: "US.AAPL", qty: 300, avgPrice: 3.4, unrealizedPnl: 30, dayBasis: 3.4, openedMs: 0, ...o });
 
 function wrap(props: PanelProps) {
   return render(
@@ -202,6 +202,25 @@ describe("AccountPanel", () => {
     expect(screen.queryByTestId("pos-net")).toBeNull();
     expect(screen.getByText("AAPL")).toBeTruthy();
     expect(screen.queryByText("MSFT")).toBeNull();
+  });
+
+  it("replaces Venue with Opened Date Time after unrealized P&L", () => {
+    const { props, stores, linkGroups } = mkProps("green");
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false, "alpaca-paper") });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [
+        pos({ openedMs: Date.parse("2026-08-15T13:31:42Z") }),
+        pos({ symbol: "US.MSFT", openedMs: 0 }),
+      ] });
+      linkGroups.focusVenue("green", "alpaca-paper");
+    });
+    wrap(props);
+    const row = screen.getByTestId("pos-row-alpaca-paper-US.AAPL");
+    expect(Array.from(row.querySelectorAll("[data-column]")).map((cell) => cell.getAttribute("data-column"))).toEqual([
+      "symbol", "qty", "avgPrice", "unrealizedPnl", "openedMs", "flatten",
+    ]);
+    expect(row.querySelector('[data-column="openedMs"]')?.textContent).toBe("08/15 09:31:42");
+    expect(screen.getByTestId("pos-row-alpaca-paper-US.MSFT").querySelector('[data-column="openedMs"]')?.textContent).toBe("—");
   });
 
   it("drops flat (0-qty) positions from the table and its count", () => {

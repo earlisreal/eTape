@@ -34,7 +34,7 @@ func TestOrderJSONFieldNames(t *testing.T) {
 
 func TestEnvelopeAndPositionNullVenue(t *testing.T) {
 	snap := wsmsg.SnapshotMsg{Kind: "snapshot", Topic: wsmsg.TopicExecPositions,
-		Payload: []wsmsg.PositionRow{{Venue: nil, Symbol: "US.AAPL", Qty: 50, AvgPrice: 3.5}}}
+		Payload: []wsmsg.PositionRow{{Venue: nil, Symbol: "US.AAPL", Qty: 50, AvgPrice: 3.5, OpenedMs: 1_700_000_000_000}}}
 	b, _ := json.Marshal(snap)
 	var got map[string]any
 	_ = json.Unmarshal(b, &got)
@@ -45,6 +45,9 @@ func TestEnvelopeAndPositionNullVenue(t *testing.T) {
 	row := rows[0].(map[string]any)
 	if v, ok := row["venue"]; !ok || v != nil {
 		t.Fatalf("cross-venue row must serialize venue:null, got %v (present=%v)", v, ok)
+	}
+	if row["openedMs"] != float64(1_700_000_000_000) {
+		t.Fatalf("position opening time must serialize, got %v", row["openedMs"])
 	}
 }
 

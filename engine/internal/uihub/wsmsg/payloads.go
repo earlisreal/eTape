@@ -165,6 +165,7 @@ type PositionRow struct {
 	AvgPrice      float64 `json:"avgPrice"`
 	UnrealizedPnl float64 `json:"unrealizedPnl"`
 	DayBasis      float64 `json:"dayBasis"`
+	OpenedMs      int64   `json:"openedMs"`
 }
 
 type AccountRow struct {

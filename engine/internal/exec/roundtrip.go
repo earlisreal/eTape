@@ -61,6 +61,105 @@ func NewRoundTripAggregator() *RoundTripAggregator {
 	return &RoundTripAggregator{trips: map[roundTripKey]*openTrip{}}
 }
 
+// OpenMs returns the opening fill time for the current (venue,symbol) trip.
+// Zero means the position was seeded without an observed opening fill.
+func (a *RoundTripAggregator) OpenMs(venue VenueID, symbol string) int64 {
+	if t := a.trips[roundTripKey{Venue: venue, Symbol: symbol}]; t != nil {
+		return t.openMs
+	}
+	return 0
+}
+
+// seedPosition seeds an existing broker position without inventing an opening
+// time. It is used by the position-time tracker, not Trade History.
+func (a *RoundTripAggregator) seedPosition(p Position) {
+	if p.Qty == 0 {
+		return
+	}
+	qty := math.Abs(p.Qty)
+	a.trips[roundTripKey{Venue: p.Venue, Symbol: p.Symbol}] = &openTrip{
+		isLong:       p.Qty > 0,
+		openMs:       p.OpenedMs,
+		openQty:      qty,
+		openNotional: qty * p.AvgPrice,
+		running:      p.Qty,
+	}
+}
+
+// reconcilePositions keeps the tracker aligned with a broker's full snapshot.
+// Existing same-direction rows retain their opening time; new or direction-
+// changed rows start unknown unless the broker supplied an exact timestamp.
+func (a *RoundTripAggregator) reconcilePositions(venue VenueID, ps []Position) {
+	seen := map[roundTripKey]struct{}{}
+	for _, p := range ps {
+		if p.Qty == 0 {
+			continue
+		}
+		key := roundTripKey{Venue: venue, Symbol: p.Symbol}
+		p.Venue = venue
+		seen[key] = struct{}{}
+		t := a.trips[key]
+		if t == nil || (t.running > 0) != (p.Qty > 0) {
+			a.seedPosition(p)
+			continue
+		}
+		t.running = p.Qty
+		if t.openMs == 0 && p.OpenedMs > 0 {
+			t.openMs = p.OpenedMs
+		}
+	}
+	for key := range a.trips {
+		if key.Venue != venue {
+			continue
+		}
+		if _, ok := seen[key]; !ok {
+			delete(a.trips, key)
+		}
+	}
+}
+
+// rebuildOpenPositions reconstructs active opening times from a final broker
+// snapshot plus the persisted fills in chronological order. The reverse pass
+// recovers the unknown starting quantity so carried positions stay unknown.
+// ponytail: this assumes the queried fills cover the snapshot's changes; a
+// native broker opening-time field is the upgrade path for unobserved fills.
+func (a *RoundTripAggregator) rebuildOpenPositions(positions []Position, fills []Fill) {
+	a.trips = map[roundTripKey]*openTrip{}
+	current := map[roundTripKey]Position{}
+	qty := map[roundTripKey]float64{}
+	for _, p := range positions {
+		if p.Qty == 0 {
+			continue
+		}
+		key := roundTripKey{Venue: p.Venue, Symbol: p.Symbol}
+		current[key] = p
+		qty[key] = p.Qty
+	}
+	for i := len(fills) - 1; i >= 0; i-- {
+		f := fills[i]
+		key := roundTripKey{Venue: f.Venue, Symbol: f.Symbol}
+		qty[key] -= signedFillQty(f)
+	}
+	for key, q := range qty {
+		if q == 0 {
+			continue
+		}
+		p := current[key]
+		p.Venue, p.Symbol, p.Qty = key.Venue, key.Symbol, q
+		a.seedPosition(p)
+	}
+	for _, f := range fills {
+		a.Apply(f.Venue, f.Symbol, f.Side, f.Qty, f.Price, f.TsMs)
+	}
+}
+
+func signedFillQty(f Fill) float64 {
+	if longward(f.Side) {
+		return f.Qty
+	}
+	return -f.Qty
+}
+
 // cashSign is the fill's contribution sign to cash flow: SELL/SHORT receive
 // cash (+1), BUY/COVER pay cash (-1).
 func cashSign(side Side) float64 {

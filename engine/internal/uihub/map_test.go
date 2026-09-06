@@ -46,13 +46,16 @@ func TestMapQuoteJoinsBidAskAndISOTime(t *testing.T) {
 }
 
 func TestMapPositionUnrealizedFromMark(t *testing.T) {
-	p := exec.Position{Venue: "sim", Symbol: "US.AAPL", Qty: 100, AvgPrice: 3.50}
+	p := exec.Position{Venue: "sim", Symbol: "US.AAPL", Qty: 100, AvgPrice: 3.50, OpenedMs: 1_700_000_000_000}
 	w := mapPosition(p, 3.60) // long 100 @ 3.50, mark 3.60 => +10.00
 	if w.Venue == nil || *w.Venue != "sim" {
 		t.Fatalf("venue must be set for a venue-scoped row: %+v", w)
 	}
 	if w.UnrealizedPnl < 9.999 || w.UnrealizedPnl > 10.001 {
 		t.Fatalf("unrealized pnl = %v, want ~10", w.UnrealizedPnl)
+	}
+	if w.OpenedMs != 1_700_000_000_000 {
+		t.Fatalf("opened time = %d, want %d", w.OpenedMs, int64(1_700_000_000_000))
 	}
 }
 

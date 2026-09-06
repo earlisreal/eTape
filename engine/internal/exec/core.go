@@ -102,9 +102,10 @@ type Core struct {
 	state *State
 	marks markState
 
-	trades *RoundTripAggregator
-	cycles *cycleProjection
-	closed *closedOrders
+	trades        *RoundTripAggregator
+	positionOpens *RoundTripAggregator
+	cycles        *cycleProjection
+	closed        *closedOrders
 }
 
 // CoreConfig configures NewCore.
@@ -153,6 +154,7 @@ func NewCore(cfg CoreConfig) *Core {
 		state:                  NewState(cfg.Venues),
 		marks:                  markState{},
 		trades:                 NewRoundTripAggregator(),
+		positionOpens:          NewRoundTripAggregator(),
 		cycles:                 newCycleProjection(),
 		closed:                 newClosedOrders(),
 	}
@@ -278,6 +280,7 @@ func (c *Core) Recover(ctx context.Context) error {
 			continue
 		}
 		c.state.ReconcileAccount(acct)
+		c.positionOpens.reconcilePositions(v, pos)
 		c.state.ReconcilePositions(v, pos)
 		for _, o := range orders {
 			o.Venue = v
@@ -305,6 +308,11 @@ func (c *Core) Recover(ctx context.Context) error {
 	}
 	c.recoverCycles(ctx)
 	c.seedTrades(ctx)
+	for _, v := range c.venues {
+		for _, p := range c.state.Venue(v).Positions {
+			c.emitProjectedPosition(p)
+		}
+	}
 	return nil
 }
 
@@ -366,13 +374,24 @@ func (c *Core) seedTrades(ctx context.Context) {
 		c.syslog("exec.recover", "seed trades: "+err.Error())
 		return
 	}
+	parsed := make([]Fill, 0, len(fills))
 	for _, f := range fills {
 		side, ok := sideFromString(f.Side)
 		if !ok {
 			c.syslog("exec.recover", "seed trades: unparseable Side "+f.Side+" for "+f.Symbol+"@"+string(f.Venue))
 			continue
 		}
-		for _, t := range c.trades.Apply(VenueID(f.Venue), f.Symbol, side, f.Qty, f.Price, f.TsMs) {
+		parsed = append(parsed, Fill{Venue: VenueID(f.Venue), OrderID: f.OrderID, Symbol: f.Symbol, Side: side, Qty: f.Qty, Price: f.Price, TsMs: f.TsMs})
+	}
+	positions := make([]Position, 0)
+	for _, v := range c.venues {
+		for _, p := range c.state.Venue(v).Positions {
+			positions = append(positions, p)
+		}
+	}
+	c.positionOpens.rebuildOpenPositions(positions, parsed)
+	for _, f := range parsed {
+		for _, t := range c.trades.Apply(f.Venue, f.Symbol, f.Side, f.Qty, f.Price, f.TsMs) {
 			c.emit(TradeUpdate{Trade: t})
 		}
 	}
@@ -450,6 +469,9 @@ func (c *Core) emitProjectedAccount(v VenueID) {
 
 func (c *Core) emitProjectedPosition(p Position) {
 	p.DayBasis = c.cycles.position(p.Venue, p.Symbol).Basis
+	if opened := c.positionOpens.OpenMs(p.Venue, p.Symbol); opened > 0 {
+		p.OpenedMs = opened
+	}
 	c.emit(PositionUpdate{Position: p})
 }
 
@@ -493,6 +515,7 @@ func (c *Core) appendAndFold(ev Event, src Source) error {
 // emitForEvent pushes the Update(s) an event implies.
 func (c *Core) emitForEvent(ev Event) {
 	if f, ok := ev.(OrderFilled); ok {
+		c.positionOpens.Apply(f.F.Venue, f.F.Symbol, f.F.Side, f.F.Qty, f.F.Price, f.F.TsMs)
 		c.cycles.applyFill(f.F)
 		c.emit(FillUpdate{Fill: f.F})
 		for _, t := range c.trades.Apply(f.F.Venue, f.F.Symbol, f.F.Side, f.F.Qty, f.F.Price, f.F.TsMs) {
@@ -751,8 +774,10 @@ func (c *Core) handleBrokerEvent(_ context.Context, be BrokerEvent) {
 			c.emitStatus()
 		}
 	case BrokerPositions:
+		c.positionOpens.reconcilePositions(e.V, e.Positions)
 		c.state.ReconcilePositions(e.V, e.Positions)
 		for _, p := range e.Positions {
+			p.Venue = e.V
 			c.emitProjectedPosition(p)
 		}
 	case BrokerConnUp:

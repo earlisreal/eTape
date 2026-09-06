@@ -1,6 +1,9 @@
 package exec
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestReconcileOverwrites(t *testing.T) {
 	s := NewState([]VenueID{"sim-1"})
@@ -16,6 +19,21 @@ func TestReconcileOverwrites(t *testing.T) {
 	s.ReconcileAccount(AccountSnapshot{Venue: "sim-1", Equity: 10000, DayPnL: -250})
 	if s.Venue("sim-1").Account.DayPnL != -250 {
 		t.Fatalf("account not reconciled: %+v", s.Venue("sim-1").Account)
+	}
+}
+
+func TestCoreBrokerPositionsNormalizesVenue(t *testing.T) {
+	c := NewCore(CoreConfig{Venues: []VenueID{"sim-1"}})
+	c.handleBrokerEvent(context.Background(), BrokerPositions{V: "sim-1", Positions: []Position{{
+		Symbol: "AAPL", Qty: 10, AvgPrice: 100, OpenedMs: 1234,
+	}}})
+	u := <-c.Updates()
+	p, ok := u.(PositionUpdate)
+	if !ok {
+		t.Fatalf("update = %T, want PositionUpdate", u)
+	}
+	if p.Position.Venue != "sim-1" || p.Position.OpenedMs != 1234 {
+		t.Fatalf("position = %+v, want venue and opening time from broker scope", p.Position)
 	}
 }
 

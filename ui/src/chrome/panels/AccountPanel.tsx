@@ -40,18 +40,18 @@ function readSort(s: Record<string, unknown>): SortState {
 
 const COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
   { col: "symbol", label: "Symbol", defaultWidth: 84, minWidth: 68, align: "left", sortable: true },
-  { col: "venue", label: "Venue", defaultWidth: 92, minWidth: 72, align: "right", sortable: true },
   { col: "qty", label: "Qty", defaultWidth: 58, minWidth: 48, align: "right", sortable: true },
   { col: "avgPrice", label: "Avg", defaultWidth: 72, minWidth: 60, align: "right", sortable: true },
   { col: "unrealizedPnl", label: "Unrl P&L", defaultWidth: 88, minWidth: 72, align: "right", sortable: true },
+  { col: "openedMs", label: "Opened Date Time", defaultWidth: 128, minWidth: 108, align: "left", sortable: true },
   { col: "flatten", label: "", defaultWidth: 64, minWidth: 60, align: "right", sortable: false },
 ];
 const SORT_ACCESSORS: Record<string, (r: PositionRow) => number | string | null> = {
   symbol: (r) => bareSymbol(r.symbol),
-  venue: (r) => r.venue ?? "NET",
   qty: (r) => r.qty,
   avgPrice: (r) => r.avgPrice,
   unrealizedPnl: (r) => r.unrealizedPnl,
+  openedMs: (r) => r.openedMs,
 };
 
 // Live mark price from quote: long → bid, short → ask, fallback → last.
@@ -430,7 +430,6 @@ function PositionsTable({
                     background: selected ? "rgba(154,106,27,.16)" : hoveredPosition === positionKey ? "rgba(154,106,27,.06)" : "transparent",
                     boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : "none", transition: "background 120ms ease" }}>
                   <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
-                  <td data-column="venue" style={{ color: palette.textMuted }}>{net ? "NET" : r.venue}</td>
                   <td data-column="qty" style={{ color: r.qty >= 0 ? palette.up : palette.down }}>{formatSize(r.qty)}</td>
                   <td data-column="avgPrice">{formatPrice(r.avgPrice, 2)}</td>
                   {(() => {
@@ -438,6 +437,7 @@ function PositionsTable({
                     const dUnrealized = displayUnrealized(quote, r.avgPrice, r.qty, r.unrealizedPnl);
                     return <td data-column="unrealizedPnl" style={{ color: dUnrealized >= 0 ? palette.up : palette.down }}>{formatPrice(dUnrealized, 2)}</td>;
                   })()}
+                  <td data-column="openedMs" style={{ textAlign: "left" }}>{r.openedMs > 0 ? formatEtDateTime(r.openedMs) : "—"}</td>
                   <td data-column="flatten">{net ? null : (
                     <HoverButton data-testid={`flatten-${r.venue}-${r.symbol}`} data-armed={masterArmed}
                       title={masterArmed ? "Flatten position" : "Master disarmed — flatten still allowed (exposure-reducing)"}

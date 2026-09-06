@@ -56,7 +56,7 @@ function applyEntryBook(stores: ReturnType<typeof makeStores>): void {
 }
 
 function position(overrides: Partial<PositionRow> = {}): PositionRow {
-  return { venue: "alpaca-paper", symbol: "US.AAPL", qty: 100, avgPrice: 3.49, unrealizedPnl: 0, dayBasis: 0, ...overrides };
+  return { venue: "alpaca-paper", symbol: "US.AAPL", qty: 100, avgPrice: 3.49, unrealizedPnl: 0, dayBasis: 0, openedMs: 0, ...overrides };
 }
 
 function publishPositions(stores: ReturnType<typeof makeStores>, rows: PositionRow[]): void {

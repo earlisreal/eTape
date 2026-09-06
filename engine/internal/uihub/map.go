@@ -194,7 +194,7 @@ func mapPosition(p exec.Position, mark float64) wsmsg.PositionRow {
 	if basis == 0 {
 		basis = p.AvgPrice
 	}
-	return wsmsg.PositionRow{Venue: &v, Symbol: p.Symbol, Qty: p.Qty, AvgPrice: p.AvgPrice, UnrealizedPnl: upl, DayBasis: basis}
+	return wsmsg.PositionRow{Venue: &v, Symbol: p.Symbol, Qty: p.Qty, AvgPrice: p.AvgPrice, UnrealizedPnl: upl, DayBasis: basis, OpenedMs: p.OpenedMs}
 }
 
 func mapAccount(a exec.AccountSnapshot) wsmsg.AccountRow {

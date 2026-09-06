@@ -74,6 +74,42 @@ func TestRoundTripScaleInThenFullExit(t *testing.T) {
 	}
 }
 
+func TestRoundTripOpenMsTracksSeededAndObservedPositions(t *testing.T) {
+	a := NewRoundTripAggregator()
+	a.reconcilePositions("sim-1", []Position{{Venue: "sim-1", Symbol: "AAPL", Qty: 10, AvgPrice: 100}})
+	a.Apply("sim-1", "AAPL", SideSell, 4, 105, 1500)
+	if got := a.OpenMs("sim-1", "AAPL"); got != 0 {
+		t.Fatalf("seeded position must remain unknown after partial close, got %d", got)
+	}
+	a.Apply("sim-1", "AAPL", SideSell, 6, 105, 2000)
+	if got := a.OpenMs("sim-1", "AAPL"); got != 0 {
+		t.Fatalf("flattened position must have no opening time, got %d", got)
+	}
+	a.Apply("sim-1", "AAPL", SideBuy, 3, 110, 3000)
+	if got := a.OpenMs("sim-1", "AAPL"); got != 3000 {
+		t.Fatalf("reopened position time = %d, want 3000", got)
+	}
+}
+
+func TestRoundTripRebuildOpenPositionsSeparatesCarriedAndObserved(t *testing.T) {
+	a := NewRoundTripAggregator()
+	a.rebuildOpenPositions(
+		[]Position{{Venue: "sim-1", Symbol: "AAPL", Qty: 6, AvgPrice: 100}},
+		[]Fill{{Venue: "sim-1", Symbol: "AAPL", Side: SideSell, Qty: 4, Price: 105, TsMs: 1500}},
+	)
+	if got := a.OpenMs("sim-1", "AAPL"); got != 0 {
+		t.Fatalf("carried position must stay unknown, got %d", got)
+	}
+
+	a.rebuildOpenPositions(
+		[]Position{{Venue: "sim-1", Symbol: "AAPL", Qty: 6, AvgPrice: 100}},
+		[]Fill{{Venue: "sim-1", Symbol: "AAPL", Side: SideBuy, Qty: 6, Price: 100, TsMs: 2500}},
+	)
+	if got := a.OpenMs("sim-1", "AAPL"); got != 2500 {
+		t.Fatalf("observed opening time = %d, want 2500", got)
+	}
+}
+
 func TestRoundTripPartialScaleOutThenFullExit(t *testing.T) {
 	a := NewRoundTripAggregator()
 	a.Apply("sim-1", "AAPL", SideBuy, 10, 100, 1000)

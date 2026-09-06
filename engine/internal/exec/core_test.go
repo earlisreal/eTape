@@ -147,6 +147,9 @@ func TestCoreArmSubmitFill(t *testing.T) {
 	if pu.Position.Qty != 10 {
 		t.Fatalf("position qty = %v, want 10", pu.Position.Qty)
 	}
+	if pu.Position.OpenedMs != 1_700_000_000_000 {
+		t.Fatalf("position opened time = %d, want %d", pu.Position.OpenedMs, int64(1_700_000_000_000))
+	}
 }
 
 // TestCoreAppendFailureBlocksSubmit verifies the append-blocks-submit safety
