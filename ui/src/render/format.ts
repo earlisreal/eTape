@@ -35,6 +35,10 @@ export function formatPrice(price: number, decimals: number): string {
  */
 export const QUOTE_DECIMALS = 3;
 
+export function quoteDecimals(price: number | null | undefined): number {
+  return typeof price === "number" && Number.isFinite(price) && price > 0 && price < 1 ? 4 : QUOTE_DECIMALS;
+}
+
 // Module-level Intl formatter singletons. These surfaces (ladder, tape) call
 // their formatXxx helper on every visible row on every paint -- up to a few
 // hundred calls/sec during active trading -- and constructing an

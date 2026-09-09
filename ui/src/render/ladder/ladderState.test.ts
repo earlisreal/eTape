@@ -201,6 +201,13 @@ describe("buildLadderState", () => {
     expect(s.spread).toBeCloseTo(0.02, 9);
     expect(s.decimals).toBe(3);
   });
+  it("uses four decimals for a sub-dollar latest trade", () => {
+    expect(buildLadderState({ ...base, last: { price: 0.5, direction: "BUY" } }).decimals).toBe(4);
+  });
+  it("keeps the three-decimal fallback at exactly one dollar and without a trade", () => {
+    expect(buildLadderState({ ...base, last: { price: 1, direction: "BUY" } }).decimals).toBe(3);
+    expect(buildLadderState(base).decimals).toBe(3);
+  });
   it("has null spread when a side is empty", () => {
     const s = buildLadderState({ ...base, book: book({ asks: [] }) });
     expect(s.spread).toBeNull();
@@ -289,7 +296,30 @@ describe("buildLadderState", () => {
 
   it("keeps LULD state and metadata in accessible text", () => {
     expect(luldAccessibleText("US.AAPL", luld({ state: "frozen", reason: "provider_status" })))
-      .toContain("state frozen; values 3.48–3.52; tier T1; registry as of 2026-07-01; reason PROVIDER STATUS");
+      .toContain("state frozen; values 3.475–3.515; tier T1; registry as of 2026-07-01; reason PROVIDER STATUS");
+  });
+  it("uses the selected precision for sub-dollar LULD accessibility values", () => {
+    expect(luldAccessibleText("US.PENNY", luld({ lower: 0.3475, upper: 0.3515 }), false, 4))
+      .toContain("values 0.3475–0.3515");
+  });
+
+  it("uses one selected precision for rows, spread, and LULD fallbacks", () => {
+    const testBook = book({
+      bids: [{ price: 0.349, size: 10 }],
+      asks: [{ price: 0.351, size: 20 }],
+      estimatedLuld: luld({ lower: 0.3, upper: 0.4 }),
+    });
+    const texts: string[] = [];
+    const ctx = {
+      clearRect() {}, fillRect() {}, fillText(text: string) { texts.push(text); },
+      beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, setLineDash() {},
+    } as unknown as CanvasRenderingContext2D;
+    paintLadder(ctx, buildLadderState({
+      ...base, book: testBook, last: { price: 0.5, direction: "BUY" }, height: 80, levels: 1,
+    }));
+    expect(texts).toContain("0.3490 × 0.3510 · spread 0.0020");
+    expect(texts).toContain("0.3000");
+    expect(texts).toContain("0.4000");
   });
 
   it("keeps the BBO strip and omits dashed markers", () => {

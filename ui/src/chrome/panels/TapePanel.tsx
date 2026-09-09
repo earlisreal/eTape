@@ -150,8 +150,10 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
         setHover(null);
         return;
       }
+      const symbol = symbolRef.current;
       const { rows } = buildTapeRows(stores.tape.source(symbolRef.current), viewRef.current, {
-        symbol: symbolRef.current, minSize: minSizeRef.current, maxRows: Math.ceil(canvasH / TAPE_ROW_H) + 1,
+        symbol, minSize: minSizeRef.current, maxRows: Math.ceil(canvasH / TAPE_ROW_H) + 1,
+        latestPrice: stores.tape.lastTick(symbol)?.price ?? null,
       });
       const row = rows[rowIndex];
       if (!row) {
@@ -194,10 +196,12 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
         // 26px back to the canvas the rest of the time.
         const canvasH = h - (pausedRef.current ? HEADER_H : 0) - COLHEAD_H;
         if (!applyCanvasSize(canvas, ctx, w, canvasH, window.devicePixelRatio || 1)) return;
+        const symbol = symbolRef.current;
         const { rows, paused: p, scanned } = buildTapeRows(stores.tape.source(symbolRef.current), viewRef.current, {
-          symbol: symbolRef.current,
+          symbol,
           minSize: minSizeRef.current,
           maxRows: Math.ceil(canvasH / TAPE_ROW_H) + 1,
+          latestPrice: stores.tape.lastTick(symbol)?.price ?? null,
         });
         // Guard here, not just inside recordScan: skipping the call avoids
         // building the template-literal id on every paint while disabled.

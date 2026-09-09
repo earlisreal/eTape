@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { axisDecimals, priceDecimals, formatPrice, formatSize, formatTapeTime, formatClock, formatEtDateTime, formatDuration } from "./format";
+import { axisDecimals, priceDecimals, quoteDecimals, formatPrice, formatSize, formatTapeTime, formatClock, formatEtDateTime, formatDuration } from "./format";
 
 describe("axisDecimals (wickplot CandlestickChartMath port)", () => {
   it.each([
@@ -27,6 +27,22 @@ describe("priceDecimals", () => {
   });
   it("defaults to 2 on empty input", () => {
     expect(priceDecimals([])).toBe(2);
+  });
+});
+
+describe("quoteDecimals", () => {
+  it.each([
+    [0.9999, 4],
+    [1, 3],
+    [12.34, 3],
+    [0, 3],
+    [-0.5, 3],
+    [Number.NaN, 3],
+    [Number.POSITIVE_INFINITY, 3],
+    [Number.NEGATIVE_INFINITY, 3],
+    [undefined, 3],
+  ] as const)("uses %i decimals for %s", (price, want) => {
+    expect(quoteDecimals(price)).toBe(want);
   });
 });
 

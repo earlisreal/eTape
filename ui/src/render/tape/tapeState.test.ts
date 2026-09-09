@@ -86,6 +86,40 @@ describe("buildTapeRows", () => {
     expect(rows[0]).toMatchObject({ time: "09:30:05", price: "3.500", size: "1,428" });
   });
 
+  it("uses four fixed places for every row when the live latest price is sub-dollar", () => {
+    const one = srcFrom([
+      mkTick(1, { price: 2.5 }),
+      mkTick(2, { price: 0.25 }),
+    ]);
+    const { rows } = buildTapeRows(one, liveView(one), {
+      symbol: "US.AAPL", minSize: 0, maxRows: 2, latestPrice: 0.25,
+    });
+    expect(rows.map((row) => row.price)).toEqual(["0.2500", "2.5000"]);
+  });
+
+  it("keeps paused filtered history tied to the live latest price", () => {
+    const source = srcFrom([
+      mkTick(1, { price: 2.5, size: 300 }),
+      mkTick(2, { price: 0.25, size: 100 }),
+      mkTick(3, { price: 3, size: 300 }),
+    ]);
+    const { rows, paused } = buildTapeRows(source, { anchorSeq: 1, generation: 1 }, {
+      symbol: "US.AAPL", minSize: 300, maxRows: 1, latestPrice: 0.5,
+    });
+    expect(paused).toBe(true);
+    expect(rows[0].price).toBe("2.5000");
+  });
+
+  it("falls back to three places at one dollar or without a live latest price", () => {
+    const one = srcFrom([mkTick(1, { price: 1 })]);
+    expect(buildTapeRows(one, liveView(one), {
+      symbol: "US.AAPL", minSize: 0, maxRows: 1, latestPrice: 1,
+    }).rows[0].price).toBe("1.000");
+    expect(buildTapeRows(one, liveView(one), {
+      symbol: "US.AAPL", minSize: 0, maxRows: 1,
+    }).rows[0].price).toBe("1.000");
+  });
+
   it("is empty (not crashing) on an empty ring", () => {
     const empty = srcFrom([]);
     const { rows, paused } = buildTapeRows(empty, liveView(empty), { symbol: "US.AAPL", minSize: 0, maxRows: 5 });

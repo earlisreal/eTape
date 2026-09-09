@@ -193,7 +193,7 @@ describe("LadderPanel", () => {
       },
     });
     surface().paint();
-    expect(container.querySelector("canvas")?.getAttribute("aria-label")).toContain("values 95.00–105.00");
+    expect(container.querySelector("canvas")?.getAttribute("aria-label")).toContain("values 95.000–105.000");
     expect(container.querySelector("canvas")?.getAttribute("aria-label")).toContain("tier T1");
     expect(container.querySelector("canvas")?.getAttribute("aria-label")).toContain("registry as of 2026-07-01");
   });

@@ -1620,6 +1620,87 @@ describe("ChartController.setChartType", () => {
   });
 });
 
+describe("ChartController native price precision", () => {
+  it("mounts and keeps a cold chart at three decimals", () => {
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: barReaderOf([]), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    const main = facade.created[0].series;
+    expect(facade.created[0].options).toMatchObject({
+      priceFormat: { type: "price", precision: 3, minMove: 0.001 },
+    });
+    c.sync();
+    expect(main.optionCalls).toEqual([]);
+  });
+
+  it("follows raw closes, caches unchanged precision, and treats one dollar as three decimals", () => {
+    const reader = mutableBarReader([bar("2026-07-08T13:30:00Z", 0.5)]);
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.sync();
+    const main = facade.created[0].series;
+    expect(main.optionCalls.at(-1)).toMatchObject({
+      priceFormat: { type: "price", precision: 4, minMove: 0.0001 },
+    });
+    const fourDecimalCalls = main.optionCalls.length;
+
+    reader.set([bar("2026-07-08T13:30:00Z", 0.75)]);
+    c.sync();
+    expect(main.optionCalls).toHaveLength(fourDecimalCalls);
+
+    reader.set([bar("2026-07-08T13:30:00Z", 1)]);
+    c.sync();
+    expect(main.optionCalls.at(-1)).toMatchObject({
+      priceFormat: { type: "price", precision: 3, minMove: 0.001 },
+    });
+    const threeDecimalCalls = main.optionCalls.length;
+
+    reader.set([bar("2026-07-08T13:30:00Z", 2)]);
+    c.sync();
+    expect(main.optionCalls).toHaveLength(threeDecimalCalls);
+  });
+
+  it("uses the newest valid raw close when a trailing raw bar is invalid", () => {
+    const reader = barReaderOf([
+      bar("2026-07-08T13:30:00Z", 0.5),
+      bar("2026-07-08T13:31:00Z", Number.NaN),
+    ]);
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.sync();
+    expect(facade.created[0].series.optionCalls.at(-1)).toMatchObject({
+      priceFormat: { type: "price", precision: 4, minMove: 0.0001 },
+    });
+  });
+
+  it("resets on symbol reload and carries the active format to a recreated series", () => {
+    const reader = mutableBarReader([bar("2026-07-08T13:30:00Z", 0.5)]);
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
+      { bars: reader, indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.sync();
+    const oldMain = facade.created[0].series;
+
+    c.setSymbol("US.NVDA");
+    expect(oldMain.optionCalls.at(-1)).toMatchObject({
+      priceFormat: { type: "price", precision: 3, minMove: 0.001 },
+    });
+
+    reader.set([bar("2026-07-08T13:30:00Z", 0.5)]);
+    c.sync();
+    c.setChartType("line");
+    expect(facade.created.at(-1)?.options).toMatchObject({
+      priceFormat: { type: "price", precision: 4, minMove: 0.0001 },
+    });
+  });
+});
+
 describe("ChartController indicator hidden + style", () => {
   it("creates a hidden indicator series with visible:false", () => {
     const facade = fakeFacade();

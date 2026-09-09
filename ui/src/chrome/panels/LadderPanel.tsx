@@ -183,7 +183,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
           levels: levelsRef.current,
           rowOffset: scrollOffsetRef.current,
         });
-        const accessibleText = luldAccessibleText(symbol, paintState.luld, paintState.averageEntryRowVisible);
+        const accessibleText = luldAccessibleText(symbol, paintState.luld, paintState.averageEntryRowVisible, paintState.decimals);
         if (accessibleText !== lastAccessibleText) {
           canvas.setAttribute("aria-label", accessibleText);
           lastAccessibleText = accessibleText;

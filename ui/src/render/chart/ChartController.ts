@@ -1,6 +1,7 @@
 import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
 import type { Palette } from "../palette";
 import type { Bar } from "../../wire/contract";
+import { quoteDecimals, QUOTE_DECIMALS } from "../format";
 import {
   chartOptions, candleOptions, volumeOptions, mainSeriesOptions, CANDLE_SCALE_MARGINS,
   CANDLE_SCALE_MARGINS_WITHOUT_VOLUME, NO_VOLUME_SCALE_MARGINS, VOLUME_SCALE_MARGINS,
@@ -46,6 +47,16 @@ interface Deps {
 // LWC wants seconds (UTCTimestamp); our bucketStart is an ISO string.
 const toLwcTime = (bucketStart: string): number => Math.floor(Date.parse(bucketStart) / 1000);
 const toLwcTimeMs = (ms: number): number => Math.floor(ms / 1000);
+const nativePriceFormat = (decimals: number): { type: "price"; precision: number; minMove: number } => ({
+  type: "price", precision: decimals, minMove: decimals === 4 ? 0.0001 : 0.001,
+});
+function latestValidClose(bars: Bar[]): number | undefined {
+  for (let i = bars.length - 1; i >= 0; i--) {
+    const close = bars[i].c;
+    if (Number.isFinite(close) && close > 0) return close;
+  }
+  return undefined;
+}
 
 // Kept exported for compatibility with chart tests/consumers. Left padding is
 // intentionally zero; unrestricted negative logical indexes drive older loads.
@@ -126,6 +137,7 @@ export class ChartController {
   // belongs at the read/report site (ChartPanel.tsx), mirroring buildTapeRows'
   // always-returned `scanned` count.
   private daySegmentBuildsThisSync = 0;
+  private appliedPriceDecimals = QUOTE_DECIMALS;
   private chartType: ChartType = "candle";
   private showSessions = true;
   private gridVisible = true;
@@ -151,13 +163,16 @@ export class ChartController {
 
   mount(): void {
     this.facade.applyOptions(chartOptions(this.palette, this.config.timeframe));
-    this.candle = this.facade.setMainSeries("candle", candleOptions(this.palette));
+    this.candle = this.facade.setMainSeries("candle", {
+      ...candleOptions(this.palette), priceFormat: nativePriceFormat(this.appliedPriceDecimals),
+    });
     this.setVolumeGeometry(false);
   }
 
   sync(nowMs = Date.now()): void {
     this.daySegmentBuildsThisSync = 0;
     const bars = this.deps.bars.series(this.config.symbol, this.config.timeframe);
+    this.applyPriceFormat(quoteDecimals(latestValidClose(bars)));
     const openDDown = this.deps.isOpenDDown?.() === true;
     if (this.config.timeframe === "10s") {
       if (openDDown) {
@@ -897,6 +912,12 @@ export class ChartController {
     this.resetForReload();
   }
 
+  private applyPriceFormat(decimals: number): void {
+    if (decimals === this.appliedPriceDecimals) return;
+    this.appliedPriceDecimals = decimals;
+    this.candle.applyOptions({ priceFormat: nativePriceFormat(decimals) });
+  }
+
   private resetForReload(): void {
     this.backfilled = false;
     this.lastAppliedCount = 0;
@@ -924,6 +945,7 @@ export class ChartController {
     // switch to a series that's empty or slow to arrive (e.g. Daily -> a cold
     // 1m symbol) leaves the old timeframe's candles frozen on screen forever
     // (applyBars early-returns on an empty series, so it would never clear them).
+    this.applyPriceFormat(QUOTE_DECIMALS);
     this.candle.setData([]);
     this.volume?.setData([]);
     this.facade.setSessionBands([]);
@@ -988,7 +1010,9 @@ export class ChartController {
   setChartType(type: ChartType): void {
     if (type === this.chartType) return;
     this.chartType = type;
-    this.candle = this.facade.setMainSeries(type, mainSeriesOptions(type, this.palette));
+    this.candle = this.facade.setMainSeries(type, {
+      ...mainSeriesOptions(type, this.palette), priceFormat: nativePriceFormat(this.appliedPriceDecimals),
+    });
     this.candle.applyOptions({ lastValueVisible: this.lastValueVisible });
     // Force a full re-seed of the new series on the next sync().
     this.backfilled = false;

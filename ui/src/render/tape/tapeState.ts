@@ -7,7 +7,7 @@ import type {
   SignificanceLevel, Tick, TickDeliverySource, TickDirection, TickTradeReportCondition,
 } from "../../wire/contract";
 import type { Palette } from "../palette";
-import { formatPrice, formatSize, formatTapeTime, QUOTE_DECIMALS } from "../format";
+import { formatPrice, formatSize, formatTapeTime, quoteDecimals } from "../format";
 
 export const TAPE_ROW_H = 18;
 
@@ -108,7 +108,7 @@ export function liveView(src: TapeSource): TapeView {
 export function buildTapeRows(
   src: TapeSource,
   view: TapeView,
-  opts: { symbol: string; minSize: number; maxRows: number },
+  opts: { symbol: string; minSize: number; maxRows: number; latestPrice?: number | null | undefined },
 ): { rows: TapeRow[]; paused: boolean; scanned: number } {
   const last = src.lastSeq();
   // An anchor is only meaningful if it is still within the retained window:
@@ -138,6 +138,7 @@ export function buildTapeRows(
     raw.push(t);
     seqs.push(s);
   }
+  const decimals = quoteDecimals(opts.latestPrice);
   const rows = raw.map((t, i) => {
     const condition = t.condition;
     const rangeEligible = t.rangeEligible;
@@ -146,7 +147,7 @@ export function buildTapeRows(
     return {
       seq: seqs[i],
       time: formatTapeTime(t.ts),
-      price: formatPrice(t.price, QUOTE_DECIMALS),
+      price: formatPrice(t.price, decimals),
       size: formatSize(t.size),
       direction: t.direction,
       significance: t.significance ?? "none",
