@@ -204,7 +204,7 @@ describe("AccountPanel", () => {
     expect(screen.queryByText("MSFT")).toBeNull();
   });
 
-  it("replaces Venue with Opened Date Time after unrealized P&L", () => {
+  it("renders Opened after unrealized P&L", () => {
     const { props, stores, linkGroups } = mkProps("green");
     act(() => {
       stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false, "alpaca-paper") });
@@ -215,6 +215,8 @@ describe("AccountPanel", () => {
       linkGroups.focusVenue("green", "alpaca-paper");
     });
     wrap(props);
+    expect(screen.getByTestId("positions-resize-openedMs").parentElement?.textContent).toContain("Opened");
+    expect(screen.getByTestId("positions-resize-openedMs").parentElement?.textContent).not.toContain("Opened Date Time");
     const row = screen.getByTestId("pos-row-alpaca-paper-US.AAPL");
     expect(Array.from(row.querySelectorAll("[data-column]")).map((cell) => cell.getAttribute("data-column"))).toEqual([
       "symbol", "qty", "avgPrice", "unrealizedPnl", "openedMs", "flatten",
@@ -768,6 +770,24 @@ describe("AccountPanel", () => {
       expect(symbols).toEqual(["TSLA", "MSFT", "AAPL"]);
     });
 
+    it("falls back from a saved Venue sort after the Venue column is removed", () => {
+      const { props, stores, linkGroups } = mkProps("green");
+      props.config.settings = { closedOrdersSort: { col: "venue", dir: "asc" } };
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [
+          closed({ id: "a", symbol: "US.AAPL", updatedMs: 1 }),
+          closed({ id: "m", symbol: "US.MSFT", updatedMs: 2 }),
+        ] });
+        linkGroups.focusVenue("green", "alpaca-paper");
+      });
+      wrap(props);
+      fireEvent.click(screen.getByTestId("closed-orders-tab"));
+      const table = screen.getByTestId("closed-orders-table");
+      expect(table.querySelector('[data-column="venue"]')).toBeNull();
+      expect([...table.querySelectorAll("tbody tr td:nth-child(2)")].map((td) => td.textContent)).toEqual(["MSFT", "AAPL"]);
+    });
+
     it("renders the closed columns, ET timestamp, instruction prices, reasons, and read-only state", () => {
       const { props, stores } = mkProps();
       wrap(props);
@@ -782,6 +802,7 @@ describe("AccountPanel", () => {
       });
       fireEvent.click(screen.getByTestId("closed-orders-tab"));
       const table = screen.getByTestId("closed-orders-table");
+      expect(table.querySelector('[data-column="venue"]')).toBeNull();
       expect(Number.parseFloat(table.style.minWidth)).toBeCloseTo(800, 5);
       expect((table.querySelector("th") as HTMLElement).style.position).toBe("sticky");
       expect(table.textContent).toContain("08/15 09:31:42");
@@ -803,7 +824,7 @@ describe("AccountPanel", () => {
         stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [] });
       });
       fireEvent.click(screen.getByTestId("closed-orders-tab"));
-      expect(screen.getByTestId("closed-orders-table").querySelectorAll("thead th")).toHaveLength(10);
+      expect(screen.getByTestId("closed-orders-table").querySelectorAll("thead th")).toHaveLength(9);
       expect(screen.getByTestId("closed-orders-table").querySelectorAll("tbody tr")).toHaveLength(0);
       expect(screen.getByTestId("closed-orders-tab").textContent).toBe("Closed Orders (0)");
     });

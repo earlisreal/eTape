@@ -43,7 +43,7 @@ const COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean }
   { col: "qty", label: "Qty", defaultWidth: 58, minWidth: 48, align: "right", sortable: true },
   { col: "avgPrice", label: "Avg", defaultWidth: 72, minWidth: 60, align: "right", sortable: true },
   { col: "unrealizedPnl", label: "Unrl P&L", defaultWidth: 88, minWidth: 72, align: "right", sortable: true },
-  { col: "openedMs", label: "Opened Date Time", defaultWidth: 128, minWidth: 108, align: "left", sortable: true },
+  { col: "openedMs", label: "Opened", defaultWidth: 128, minWidth: 108, align: "left", sortable: true },
   { col: "flatten", label: "", defaultWidth: 64, minWidth: 60, align: "right", sortable: false },
 ];
 const SORT_ACCESSORS: Record<string, (r: PositionRow) => number | string | null> = {
@@ -120,7 +120,6 @@ const CLOSED_COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: bo
   { col: "avgFillPrice", label: "Avg Fill", defaultWidth: 84, minWidth: 68, align: "right", sortable: true },
   { col: "state", label: "State", defaultWidth: 72, minWidth: 64, align: "left", sortable: true },
   { col: "reason", label: "Reason", defaultWidth: 120, minWidth: 96, align: "left", sortable: false },
-  { col: "venue", label: "Venue", defaultWidth: 84, minWidth: 68, align: "left", sortable: true },
 ];
 const CLOSED_SORT_ACCESSORS: Record<string, (r: ClosedOrder) => number | string | null> = {
   updatedMs: (r) => r.updatedMs,
@@ -130,12 +129,12 @@ const CLOSED_SORT_ACCESSORS: Record<string, (r: ClosedOrder) => number | string 
   executedQty: (r) => r.executedQty,
   avgFillPrice: (r) => r.executedQty > 0 ? r.avgFillPrice : null,
   state: (r) => STATUS_LABEL[r.status],
-  venue: (r) => r.venue,
 };
 
 function readClosedSort(s: Record<string, unknown>): SortState {
   const raw = s.closedOrdersSort as { col?: unknown; dir?: unknown } | undefined;
-  if (raw && typeof raw.col === "string" && (raw.dir === "asc" || raw.dir === "desc")) {
+  if (raw && typeof raw.col === "string" && CLOSED_COLUMNS.some((column) => column.col === raw.col)
+    && (raw.dir === "asc" || raw.dir === "desc")) {
     return { col: raw.col, dir: raw.dir };
   }
   return CLOSED_DEFAULT_SORT;
@@ -260,7 +259,6 @@ function OrdersTable({
               <td data-column="state">{danger ? <span className="chip chip-rejected" data-chip="rejected">{STATUS_LABEL[order.status]}</span>
                 : <span style={{ color: muted ? palette.textMuted : palette.text }}>{STATUS_LABEL[order.status]}</span>}</td>
               <td data-column="reason" style={{ maxWidth: 180 }}><span title={order.rejectReason || undefined} style={{ display: "block", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{reason}</span></td>
-              <td data-column="venue" style={{ color: palette.textMuted }}>{order.venue}</td>
             </tr>;
           })}</tbody>
         </table>
