@@ -526,7 +526,7 @@ func TestTailFailUsesDeepUntrimmed(t *testing.T) {
 	}
 }
 
-// TestNilTailSkipsTailStep: replay/demo (no OpenD) — tail nil, deep untrimmed.
+// TestNilTailSkipsTailStep: demo (no OpenD) — tail nil, deep untrimmed.
 func TestNilTailSkipsTailStep(t *testing.T) {
 	deep := &fakeFetcher{m1: []feed.Bar{bar(940), bar(1000)}}
 	seeder := &fakeSeeder{}

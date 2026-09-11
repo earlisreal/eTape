@@ -20,7 +20,7 @@ func newVenueState() *VenueState {
 // routing both read it.
 type State struct {
 	MasterArmed bool
-	// ActiveVenue is legacy state kept only so old replay fixtures can decode;
+	// ActiveVenue is legacy state kept so old state fixtures can decode;
 	// venue routing is now owned by LinkGroups and never reads this field.
 	ActiveVenue VenueID
 	Venues      map[VenueID]*VenueState

@@ -51,7 +51,7 @@ test.describe("ticketless cross-window hotkeys", () => {
     await page.getByTestId("arm-chip").click();
     await expect(page.getByTestId("arm-chip")).toHaveText("LOCK TRADING");
 
-    // A newly opened blank workspace requests/replays the target. Bringing it
+    // A newly opened blank workspace requests/restores the target. Bringing it
     // frontmost supplies OS focus for the keyboard path but does not activate
     // any Dockview panel in that window.
     const other = await context.newPage();

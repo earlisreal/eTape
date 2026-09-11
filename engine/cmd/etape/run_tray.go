@@ -64,8 +64,8 @@ func onReady() {
 	// This goroutine is the sole owner of systray.Quit(): it only tears down
 	// the tray after boot has actually returned, whether that's because Quit
 	// (below) cancelled ctx and boot ran its ordered shutdown, boot
-	// self-terminated on its own (non-`-replay-hold` replay mode), or boot
-	// failed outright. That keeps shutdown to exactly one path, so the
+	// requested a restart, or boot failed outright. That keeps shutdown to
+	// exactly one path, so the
 	// process never exits mid-shutdown and never leaves a ghost tray icon
 	// behind on a failure exit.
 	go func() {

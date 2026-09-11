@@ -11,7 +11,7 @@ export function EmptyState({ onAddPanel, onApplyPreset, onOpenMonitoring, showTr
   onApplyPreset: (id: string) => void;
   onOpenMonitoring: () => void;
   // Task 6 (U4): AppShell computes this off sessionMode.mode — hidden while
-  // already inside a demo/replay session (see AppShell's showTryDemo).
+  // already inside a demo session (see AppShell's showTryDemo).
   showTryDemo: boolean;
   onTryDemo: () => void;
   // A direct entry point into the same import machinery BackupSection uses

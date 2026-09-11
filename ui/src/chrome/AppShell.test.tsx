@@ -609,11 +609,10 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
     "does not show during a confirmed %s session, even with no real venue",
     async (mode) => {
       // Nudging toward configuring a broker "to trade live" makes no sense
-      // mid-replay/demo — venue edits need an engine restart anyway, which
+      // mid-demo — venue edits need an engine restart anyway, which
       // would kill the session. Regression: this modal blocked
-      // e2e/replay-launcher's later assertions because it showed
-      // unconditionally off "no real venue". "demo" mirrors "replay" here
-      // (Task 3: widened SessionState.mode + AppShell's showVenueSetup gate).
+      // the practice launcher's later assertions because it showed
+      // unconditionally off "no real venue".
       const { stores } = mount(seed);
       await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
       act(() => stores.session.apply({ kind: "snapshot", topic: "sys.session", payload: { mode } }));
@@ -878,7 +877,7 @@ describe("AppShell Alpaca-1m-history hint banner", () => {
   it.each(["demo"] as const)(
     "does not show during a confirmed %s session, even with no Alpaca venue",
     async (mode) => {
-      // Venue edits need an engine restart, which would kill a replay/demo
+      // Venue edits need an engine restart, which would kill a demo
       // session -- mirrors showVenueSetup's same guard. Uses a real non-sim
       // venue so showVenueSetup's own gate is already false here, isolating
       // this assertion to showAlpacaHint's own sessionMode guard.

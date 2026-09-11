@@ -9,7 +9,7 @@ const shot = (page: Page, name: string) => page.screenshot({ path: `${ART}/${nam
 // empty (no auto-seed). Reaching a populated layout means applying a preset
 // card from the empty-state Catalog. Each helper below uses a workspace name
 // unique to its caller so parallel-looking test runs never bleed state into
-// each other (the whole suite shares one long-lived replay engine + config
+// each other (the whole suite shares one long-lived demo engine + config
 // store for the run — see e2e/serve.sh).
 async function gotoAndApplyPreset(page: Page, workspace: string, presetName: "Trading" | "Monitoring"): Promise<void> {
   await page.goto(`/?workspace=${workspace}`);
@@ -30,7 +30,7 @@ test.describe("trading workspace", () => {
 
   test("a paper MARKET order walks to Filled and paints a fill diamond", async ({ page }) => {
     // preChecks.ts coerces MARKET->LIMIT-at-last outside real-wall-clock RTH
-    // (client-side safety rule, independent of the replay day's simulated
+    // (client-side safety rule, independent of the demo day's simulated
     // clock — the engine itself has no RTH gate, verified in exec/gate.go and
     // broker/sim/sim.go). Pin Date.now() to a weekday RTH instant so the
     // order actually submits as MARKET and crosses the spread immediately,
@@ -71,7 +71,7 @@ test.describe("monitoring workspace", () => {
     await expect(page.locator(".dv-tabs-overflow-dropdown-root")).toBeHidden();
   });
 
-  test("loads; scanner/news show their empty state (no pollers in replay)", async ({ page }) => {
+  test("loads; scanner/news show their empty state (no pollers in demo)", async ({ page }) => {
     await gotoAndApplyPreset(page, "e2e-monitoring", "Monitoring");
     // Charts are canvas; assert a deterministic empty-state text + screenshot.
     // Matches ScannerPanel.tsx ("No symbols match the current filters.") /

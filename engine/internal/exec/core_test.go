@@ -1113,7 +1113,7 @@ func TestCore_SubmitOrder_MarketDuringRTH_NotBackstopped(t *testing.T) {
 }
 
 // A sim (capable) venue is exempt: a MARKET outside RTH is accepted and fills
-// off the seeded book (replay/practice sessions run at night by definition).
+// off the seeded book (demo/practice sessions run at night by definition).
 func TestCore_SubmitOrder_MarketOutsideRTH_SimExempt(t *testing.T) {
 	c, _, _ := newTestCore(t, "sim-1") // default fake clock = PostMarket (outside RTH)
 	c.Do(exec.Arm{})

@@ -28,7 +28,7 @@ export class HealthStore extends ReactStore<HealthState> {
     const cur = this.getSnapshot();
     if (m.topic === "sys.health") {
       // The engine's zero-value HealthSnapshot (before the first health poll,
-      // e.g. every subscriber during a -replay boot) marshals a nil Go slice
+      // e.g. every subscriber during a -demo boot) marshals a nil Go slice
       // as JSON null. Normalize to [] so state.links is always an array.
       const snap = m.payload as HealthSnapshot;
       this.engineLinks = snap.links ?? [];
@@ -39,7 +39,7 @@ export class HealthStore extends ReactStore<HealthState> {
     if (m.topic === "sys.events") {
       // Same zero-value story as sys.health: the engine's nil `events` slice
       // (before the first event is ever recorded, e.g. every subscriber during
-      // a -replay boot with no sys events) marshals as JSON null. Normalize to
+      // a -demo boot with no sys events) marshals as JSON null. Normalize to
       // [] rather than wrapping it as a single (null) event.
       const incoming =
         m.payload == null ? [] : Array.isArray(m.payload) ? (m.payload as SysEvent[]) : [m.payload as SysEvent];

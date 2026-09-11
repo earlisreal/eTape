@@ -1,6 +1,6 @@
 // Package feed defines the broker-agnostic market-data domain: tick, quote,
 // book and bar types, the Event union, subscription demands, and the Feed
-// interface implemented by feed/opend (live) and replay (Plan 3, journal).
+// interface implemented by feed/opend (live) and the synthetic demo feed.
 // It sits at the bottom of the domain graph and imports nothing but stdlib.
 package feed
 
@@ -250,7 +250,7 @@ const (
 )
 
 // Feed is the adapter-agnostic market-data source. Events() is the single
-// stream the md core consumes and the journal (Plan 3) tees; queries are
+// stream the md core consumes and the journal tees; queries are
 // blocking request/response.
 type Feed interface {
 	Events() <-chan Event

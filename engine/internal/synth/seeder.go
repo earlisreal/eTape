@@ -124,7 +124,7 @@ func (g *Generator) Seed(st SeedStore, nowMs int64) {
 		// pendingTicks/pendingBars are left empty by this pass (see
 		// seedIntraday's doc comment): forwardDailyBars' first poll should
 		// only ever see a day that closed during live running, not this
-		// warm-history pass replayed as if it just happened.
+		// warm-history pass processed as if it just happened.
 		rt.pendingDailies = nil
 	}
 

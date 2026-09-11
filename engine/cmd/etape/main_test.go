@@ -332,9 +332,8 @@ func TestForwardDailyBars_PersistsNewlyClosedDaysAndStopsOnCancel(t *testing.T) 
 }
 
 // A venue configured with Broker: "sim" runs a real sim.Broker in live mode
-// too (a practice venue against live marks), not only in replay. simSinksOf
-// must pick it up either way — there is no live/replay distinction to make;
-// the type-assertion alone identifies sim brokers correctly in both modes.
+// too (a practice venue against live marks). simSinksOf must pick it up;
+// the type assertion identifies sim brokers correctly.
 func TestSimSinksOfSelectsLiveSimVenue(t *testing.T) {
 	simBroker := sim.New("simulator", clock.System{}, 100_000, sim.Options{})
 	// alpacaBroker is a non-sim exec.Broker double: constructing it does no

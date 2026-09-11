@@ -275,7 +275,7 @@ func TestHubDemand_FocusedWithoutBackfillEmitsChartReady(t *testing.T) {
 	}
 }
 
-func TestHubDemand_FocusedBeforeHistoryConfiguredWaitsAndReplays(t *testing.T) {
+func TestHubDemand_FocusedBeforeHistoryConfiguredWaitsAndReissues(t *testing.T) {
 	h, cancel := runHub(t)
 	defer cancel()
 	c := &fakeClient{nid: 10}
@@ -291,7 +291,7 @@ func TestHubDemand_FocusedBeforeHistoryConfiguredWaitsAndReplays(t *testing.T) {
 	h.SetHistoryWarm(bf.trigger, nil)
 	h.sync()
 	if got := bf.snapshot(); !reflect.DeepEqual(got, []string{"US.AAPL"}) {
-		t.Fatalf("replayed focused demands = %v, want [US.AAPL]", got)
+		t.Fatalf("reissued focused demands = %v, want [US.AAPL]", got)
 	}
 }
 
@@ -421,7 +421,7 @@ func countStrings(values []string) map[string]int {
 }
 
 // TestHubResyncNoopWithoutBackfill confirms a resync with no backfill fn
-// injected (replay / backfill-disabled) never panics.
+// injected (demo / backfill-disabled) never panics.
 func TestHubResyncNoopWithoutBackfill(t *testing.T) {
 	h, cancel := runHub(t)
 	defer cancel()

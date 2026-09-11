@@ -17,7 +17,7 @@ describe("EmptyState", () => {
     expect(screen.getByText(/new here\?/i)).toBeTruthy();
   });
 
-  it("hides the 'Try demo' CTA when showTryDemo is false (e.g. already in a demo/replay session)", () => {
+  it("hides the 'Try demo' CTA when showTryDemo is false (e.g. already in demo)", () => {
     render(<AppProviders><EmptyState onAddPanel={() => {}} onApplyPreset={() => {}} onOpenMonitoring={() => {}} showTryDemo={false} onTryDemo={() => {}} onImportLayoutFile={() => {}} /></AppProviders>);
     expect(screen.queryByRole("button", { name: "Try demo" })).toBeNull();
   });

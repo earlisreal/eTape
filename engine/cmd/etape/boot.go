@@ -82,9 +82,8 @@ type venueBroker struct {
 	Run    func(ctx context.Context) // nil for sim; adapters' Run(ctx) returns no error (Plan 5)
 }
 
-// buildBrokers constructs one exec.Broker per configured venue. In replay mode
-// every venue is a SimBroker (a recorded day has no live broker). In live mode it
-// dispatches on Venue.Broker.
+// buildBrokers constructs one exec.Broker per configured venue and dispatches
+// on Venue.Broker.
 func buildBrokers(cfg config.Config, cr creds.File, clk clock.Clock) ([]venueBroker, error) {
 	out := make([]venueBroker, 0, len(cfg.Venues))
 	for _, v := range cfg.Venues {
@@ -199,7 +198,7 @@ func firstAlpacaAssetReader(vbs []venueBroker) stockInfoAssetReader {
 	return nil
 }
 
-// resolveActiveVenue is retained for old boot/replay tests and persisted-state
+// resolveActiveVenue is retained for older boot tests and persisted-state
 // decoding. Production routing no longer reads the legacy global value.
 type persistedOrderConfig struct {
 	ActiveVenue string `json:"activeVenue"`

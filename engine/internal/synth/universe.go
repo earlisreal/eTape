@@ -1,6 +1,6 @@
 // Package synth generates a live synthetic market-data feed for eTape's demo
 // mode: a fictional trading universe, price/order-book simulation, and
-// tick/bar emission, replacing the toy replay-journal demo. This file
+// tick/bar emission, replacing the old journal demo. This file
 // establishes the universe: a fixed name pool, per-symbol personality
 // (runner / large-cap / mid-cap), and the immutable per-run parameters
 // ("spec") that later synth stages (price, book, ticks, bars) consume.

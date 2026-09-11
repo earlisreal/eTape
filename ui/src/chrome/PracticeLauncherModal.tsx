@@ -44,7 +44,7 @@ export function PracticeLauncherModal({ open, onClose, commands }: {
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 10000 }}>
-      <div data-testid="replay-launcher" onClick={(e) => e.stopPropagation()} style={{ background: palette.surface, border: `1px solid ${palette.borderStrong}`, borderRadius: 6, width: 440, padding: 20 }}>
+      <div data-testid="practice-launcher" onClick={(e) => e.stopPropagation()} style={{ background: palette.surface, border: `1px solid ${palette.borderStrong}`, borderRadius: 6, width: 440, padding: 20 }}>
         <h3 style={{ marginTop: 0, marginBottom: 4 }}>Practice</h3>
         <p style={{ marginTop: 0, marginBottom: 18, color: palette.textMuted, fontSize: 12 }}>
           Nothing here touches real orders.

@@ -58,13 +58,10 @@ and the broker of your choice for execution, and everything else is free and ope
   explicitly armed.
 - **A live demo that actually feels live.** No account, no setup: a synthetic market
   with a warm year of history, a breathing DOM, and a moving scanner board,
-  streaming indefinitely — not a 20-minute canned replay. The universe (which
+  streaming indefinitely — not a fixed prerecorded session. The universe (which
   symbols run, which gap, which crash) reshuffles every launch, so spotting the
   mover is part of the practice, not something you memorize.
-- **Every session recorded.** An always-on SQLite journal captures the full feed —
-  quotes, ticks, books, bars — so any day can be replayed through the same engine
-  (the E2E suite runs on this too).
-- **Local-first and private.** Config, credentials, and the journal live in `~/.eTape/`
+- **Local-first and private.** Config, credentials, and local state live in `~/.eTape/`
   on your disk. The UI is served from `127.0.0.1`. Your API keys talk to your broker
   and no one else.
 
@@ -111,7 +108,7 @@ flowchart TB
 
     subgraph MACHINE["Your machine — everything runs locally"]
         OPEND["moomoo OpenD — local gateway"]
-        ENGINE["eTape engine — Go<br/>order books · bars · indicators · scanner<br/>SQLite journal & replay · risk gate<br/>broker adapters · built-in simulator"]
+        ENGINE["eTape engine — Go<br/>order books · bars · indicators · scanner<br/>SQLite journal · risk gate<br/>broker adapters · built-in simulator"]
         UI["eTape UI — React + TypeScript<br/>chart · L2 DOM ladder · time & sales<br/>order ticket · hotkeys · panels"]
     end
 
@@ -125,7 +122,7 @@ flowchart TB
 ```
 
 The engine speaks OpenD's wire protocol natively in Go (no Python SDK required),
-builds books/bars/indicators, journals everything to SQLite, and serves the UI over a
+builds books/bars/indicators, persists bars and execution state to SQLite, and serves the UI over a
 localhost WebSocket. TypeScript types for the wire contract are generated from the Go
 structs, so the two sides can't silently drift.
 
@@ -270,7 +267,7 @@ Everything lives in `~/.eTape/` (`%USERPROFILE%\.eTape\` on Windows):
 |---|---|
 | `config.toml` | Engine config — optional; a missing file means built-in defaults |
 | `credentials.json` | Broker API keys (managed by Settings → Venues) |
-| `etape.db` | SQLite feed journal + bar archives (created automatically) |
+| `etape.db` | SQLite execution state + bar archives (created automatically) |
 
 Chart-history limits are calendar spans. The default 10-second limit keeps the
 current trading cycle only, beginning at the latest NYSE close/post-market start.
@@ -392,7 +389,7 @@ prototypes/ Python research scripts (latency benchmarks, tick aggregation, …)
 | Engine lint / vet | `cd engine && golangci-lint run` / `go vet ./...` |
 | UI unit tests | `cd ui && npm test` |
 | UI typecheck / lint | `cd ui && npm run typecheck` / `npm run lint` |
-| E2E (Playwright, real engine in replay mode) | `cd ui && npm run e2e` |
+| E2E (Playwright, real engine in demo mode) | `cd ui && npm run e2e` |
 | Regenerate TS wire types from Go | `mingw32-make -C engine gen-ts` (`gen-ts-check` to verify drift) |
 
 ### CI-equivalent validation on Windows
@@ -446,7 +443,6 @@ The Go structs are the single source of truth for the engine↔UI protocol —
 
 ## Roadmap
 
-- Interactive practice mode: trade any recorded day against the simulator on replay
 - Desktop packaging (Wails)
 - Smarter extended-hours order handling
 

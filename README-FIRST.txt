@@ -29,7 +29,7 @@ market" -- same destination, different door.) This starts a live,
 self-generated synthetic market -- no moomoo OpenD, no broker account, no
 credentials required. You get a year of warm chart history, a breathing DOM
 ladder, and a moving scanner board -- streaming continuously, not a
-one-time replay. Which symbols move (and how) reshuffles every time you
+fixed prerecorded session. Which symbols move (and how) reshuffles every time you
 launch it.
 
 The engine keeps running in the background (look for the eTape icon in your
@@ -47,7 +47,7 @@ eTape stores everything under your user profile, never anywhere else:
 
     %USERPROFILE%\.eTape\config.toml       -- settings (venues, gates, etc.)
     %USERPROFILE%\.eTape\credentials.json  -- broker API keys (kept local, never synced)
-    %USERPROFILE%\.eTape\etape.db          -- local market-data / order journal (SQLite)
+    %USERPROFILE%\.eTape\etape.db          -- local execution state / bar database (SQLite)
 
 Deleting the whole %USERPROFILE%\.eTape\ folder resets eTape to a clean
 first-run state.
@@ -62,8 +62,8 @@ The demo above uses no live data. To trade or watch real quotes:
      own UI, not in eTape.
   b. Run etape.exe by itself (no "-demo" flag) -- it boots straight into
      live mode, backed by OpenD, at http://127.0.0.1:8686. Already inside a
-     demo or replay session? Click "Return to live" on the banner at the top
-     of the screen instead of relaunching.
+     demo session? Click "Return to live" on the banner at the top of the
+     screen instead of relaunching.
   c. Open the Venues & credentials settings panel inside the eTape UI and
      enter your broker API keys there (TradeZero / Alpaca / moomoo). Keys are
      written to %USERPROFILE%\.eTape\credentials.json and are never sent

@@ -3,7 +3,7 @@ package feed
 // Event is the sealed union of everything a Feed emits. Seed=true marks
 // backfill-derived events (cache reads on subscribe/reconnect) — the md core
 // applies them through the identical path as live events (dedup handles
-// overlap), and the journal (Plan 3) records the flag.
+// overlap).
 type Event interface{ isEvent() }
 
 // TicksEvent carries one push (or seed batch) of trade prints, oldest first.

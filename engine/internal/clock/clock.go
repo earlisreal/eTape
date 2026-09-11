@@ -1,5 +1,5 @@
 // Package clock abstracts wall-clock time behind an interface so time-dependent
-// components (keepalive tickers, request timeouts, pollers, coalescing, replay)
+// components (keepalive tickers, request timeouts, pollers, and coalescing)
 // are deterministic under test. It is deliberately dependency-free so every
 // domain and adapter package can import it without cycles.
 //

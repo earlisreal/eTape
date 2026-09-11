@@ -541,11 +541,11 @@ func TestEnsureSymbol_FeedUnavailableBlocks(t *testing.T) {
 }
 
 func TestEnsureSymbol_NilFeedAcceptsNoProbe(t *testing.T) {
-	cd, dem, _ := newCmdWith(t, nil, true) // feed getter returns nil (replay)
+	cd, dem, _ := newCmdWith(t, nil, true) // feed getter returns nil (demo)
 	ack, _ := cd.handle(context.Background(), "EnsureSymbol",
 		[]byte(`{"demandId":"p8","symbol":"US.AAPL","profile":"watch"}`), 1, func(wsmsg.AckMsg) {})
 	if ack.Status != "accepted" || len(dem.ensured) != 1 {
-		t.Fatalf("replay must accept and still track: %q ensured=%d", ack.Status, len(dem.ensured))
+		t.Fatalf("demo must accept and still track: %q ensured=%d", ack.Status, len(dem.ensured))
 	}
 }
 

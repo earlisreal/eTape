@@ -57,7 +57,7 @@ export interface Palette {
   warn: string;
   danger: string;
   demo: string; // DemoBanner accent — deliberately a magenta/plum hue, distinct from
-                 // warn's amber (ReplayBanner), ok's green, and danger's red, and
+                 // warn's amber, ok's green, and danger's red, and
                  // offset from the blue family (linkBlue/shortFill/indEma) so it never
                  // echoes an existing status meaning. See DemoBanner.tsx.
 }

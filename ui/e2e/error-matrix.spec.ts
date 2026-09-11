@@ -61,7 +61,7 @@ test.describe("error-handling matrix", () => {
 
   test("submitting a MARKET order while disarmed surfaces the gate block", async ({ page }) => {
     // preChecks.ts coerces MARKET->LIMIT-at-last outside real-wall-clock RTH (a
-    // genuine client-side safety feature, independent of the replay day's
+    // genuine client-side safety feature, independent of the demo day's
     // simulated clock). An un-pinned clock would get the order silently rewritten
     // to an unmarketable LIMIT before it ever reaches the wire, so this test would
     // never see the real engine gate block. Pin to a weekday RTH instant so the

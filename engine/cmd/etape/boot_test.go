@@ -137,7 +137,7 @@ func TestBuildBrokersLiveSim(t *testing.T) {
 // $0 equity/buying power into Core.State regardless of starting_balance —
 // only the separate, manually-triggered ResetBalance command ever funded the
 // account. Covers both an explicit config value and the unset/default case,
-// and both the "sim" broker branch and the replay-forces-sim branch.
+// and the "sim" broker branch.
 func TestBuildBrokersSimSeedsConfiguredStartingBalance(t *testing.T) {
 	cfg := config.Config{Venues: []config.Venue{
 		{ID: "sim-1", Broker: "sim", StartingBalance: 25_000},
@@ -164,7 +164,7 @@ func TestBuildBrokersSimSeedsConfiguredStartingBalance(t *testing.T) {
 // above: a venue's configured slippage_bps must actually reach the
 // constructed sim broker via sim.Options, not just default to off. Verified
 // indirectly through a fill's price (Broker exposes no slippage getter), for
-// both the "sim" broker branch and the replay-forces-sim branch.
+// the "sim" broker branch.
 func TestBuildBrokersSimAppliesConfiguredSlippage(t *testing.T) {
 	cfg := config.Config{Venues: []config.Venue{{ID: "sim", Broker: "sim", SlippageBps: 100}}}
 	vbs, err := buildBrokers(cfg, creds.File{}, clock.System{})
@@ -206,7 +206,7 @@ drain:
 // constructed sim broker via sim.Options, not just default to off. Uses a
 // fake clock (clock.NewFake, advanced explicitly) rather than a wall-clock
 // sleep to prove the fill is genuinely deferred by event time, for both the
-// "sim" broker branch and the replay-forces-sim branch.
+// "sim" broker branch.
 func TestBuildBrokersSimAppliesConfiguredFillLatency(t *testing.T) {
 	cfg := config.Config{Venues: []config.Venue{{ID: "sim", Broker: "sim", FillLatencyMs: 500}}}
 	clk := clock.NewFake(time.UnixMilli(1000))
@@ -263,7 +263,7 @@ func TestVenueMetasMissingGateEntryIsZeroLimits(t *testing.T) {
 }
 
 func TestBuildBrokersLiveMissingCredsErrors(t *testing.T) {
-	// When replay=false with a tradezero/alpaca venue but empty creds.File,
+	// When running without demo with a tradezero/alpaca venue but empty creds.File,
 	// buildBrokers should return an error (no partial broker slice).
 	cfg := config.Config{Venues: []config.Venue{
 		{ID: "tz", Broker: "tradezero", Credentials: "mykey", AccountID: "acct1"},
@@ -290,7 +290,7 @@ func TestBuildBrokersLiveMissingCredsErrors(t *testing.T) {
 }
 
 func TestBuildBrokersLiveTradezeroAndAlpacaBindRun(t *testing.T) {
-	// When replay=false with tradezero/alpaca venues and valid creds,
+	// When running without demo with tradezero/alpaca venues and valid creds,
 	// buildBrokers should construct real adapters with Run bound (not nil).
 	cr := creds.File{
 		"tz_creds": {KeyID: "tzkey", SecretKey: "tzsecret"},

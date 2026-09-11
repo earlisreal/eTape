@@ -6,52 +6,30 @@ import { test, expect, type Page, type Locator } from "@playwright/test";
 //
 // This file runs LAST alphabetically in the shared `npm run e2e` invocation
 // (error-matrix -> settings-redesign -> smoke -> trade-history), against the
-// SAME long-lived replay engine process the other three files already used.
+// SAME long-lived demo engine process the other three files already used.
 // Two things follow from that:
 //   1. smoke.spec.ts buys 100 US.AAPL and never sells; settings-redesign.spec.ts
 //      also trades US.AAPL (via hotkeys). This file trades US.NVDA exclusively
 //      to avoid inheriting any position/order state from those runs (NVDA and
-//      AAPL are the only two symbols genjournal writes into the synthetic
-//      replay day, so NVDA is the only alternative available).
+//      AAPL and NVDA are kept separate so this file does not inherit AAPL's
+//      position/order state from those runs.
 //   2. smoke.spec.ts's paper-order test arms the master chip and never
 //      disarms; settings-redesign.spec.ts's own arm test ends by disarming
 //      it. Whichever ran most recently determines the arm state this file
 //      inherits — never assume either state; check first (see ensureArmed
 //      below).
 //
-// -replay-hold means the engine keeps serving the LAST replayed mark forever
-// once the synthetic day finishes, so by the time this file runs the mark has
-// already drifted from NVDA's $140.00 open. Never hardcode an assumed mark —
-// read the ticket's live bid/ask at test time and compute order prices/
-// expected realized P&L from those same read values (mirrors the convention
-// settings-redesign.spec.ts already uses for the live `ask` readout).
+// Never hardcode an assumed mark — read the ticket's live bid/ask at test time
+// and compute order prices/expected realized P&L from those same read values.
 //
 // Fill mechanics (engine/internal/broker/sim/sim.go): MARKET fills at the
-// frozen mark, which would make every fill on a symbol land at the same
+// current mark, which would make every fill on a symbol land at the same
 // price and realized P&L always exactly 0 — useless for this test. LIMIT
 // orders fill at their OWN limit price as long as they're "marketable"
 // against the mark (BUY/COVER limit >= mark; SELL/SHORT limit <= mark).
 //
-// Discovery #1 (deviates from the task brief's assumption): the ticket's
-// bid/ask readout does NOT track the mark that governs marketability here.
-// genjournal (engine/cmd/genjournal/main.go) writes exactly one
-// feed.QuoteEvent + one feed.BookEvent per symbol at session open, then only
-// feed.TicksEvent for the rest of the day — so the book (and the top-of-book
-// bid/ask the ticket displays) stays frozen at the open price for the whole
-// replay, while the broker's "mark" (engine/internal/md: applyTicks ->
-// c.mark(...) on every accepted tick, wired to every sim broker's SetMark in
-// cmd/etape/main.go's markBridge) drifts upward with the ticks: 20 bars x 6
-// ticks/min x a net +0.27/min drift = +5.40 by the last bar. A +/-5 offset
-// off the (stale) bid/ask is therefore NOT reliably marketable for BUY/COVER
-// once the mark has drifted past it — verified empirically (a first pass at
-// this file with a +/-5 offset left the BUY order resting at "Accepted",
-// never filling). +/-20 comfortably clears the known +5.40 max drift with
-// real margin, while keeping qty x price two orders of magnitude under the
-// $100k gate limit (existing specs already submit ~$19k orders fine; this
-// file's orders are ~$1.2k-2.4k). This is still a live-read offset from the
-// ticket's bid/ask, per the brief's rule against hardcoding an absolute mark
-// — just widened to account for the bid/ask feed's staleness relative to the
-// tick-driven mark.
+// A generous offset keeps the orders marketable while remaining well below
+// the $100k gate limit.
 const MARKETABLE_OFFSET = 20;
 
 // Discovery #2: closed-trade history (like positions/orders) is engine-side
@@ -64,8 +42,8 @@ const MARKETABLE_OFFSET = 20;
 // when the SECOND test starts. A first pass at this file asserted an
 // absolute "N closed trades" count per test and failed the second test: it
 // actually saw 3 rows (1 leftover from the first test + 2 of its own), and a
-// naive qty-based row filter mismatched because the frozen bid/ask (per
-// Discovery #1) makes both tests compute IDENTICAL prices, so the leftover
+// naive qty-based row filter mismatched because both tests can compute the
+// same prices, so the leftover
 // row and the new "long" row were indistinguishable by value alone. Fix:
 // read a BASELINE (existing row testids + the footer's current realized
 // total) before submitting any of this test's own orders, then identify
@@ -171,7 +149,7 @@ test.describe("trade history", () => {
     await expect(page.getByTestId("order-type")).toHaveValue("LIMIT"); // ticket's own default; asserted, not relied on blindly
 
     // Order 1: BUY 10 @ ask+MARKETABLE_OFFSET (comfortably marketable; see
-    // Discovery #1 above) opens the long.
+    // opens the long.
     const ask1 = await readQuote(page, "ask");
     const buyPrice = Number((ask1 + MARKETABLE_OFFSET).toFixed(3));
     await submitLimit(page, "side-BUY", buyPrice, 10);
@@ -189,7 +167,7 @@ test.describe("trade history", () => {
 
     // Order 2: SELL 10 @ bid-MARKETABLE_OFFSET — same qty fully flattens the
     // position. Re-read bid rather than reusing a stale value (cheap to guard
-    // even though the bid readout itself never moves under -replay-hold).
+    // even if the bid readout has not moved).
     const bid2 = await readQuote(page, "bid");
     const sellPrice = Number((bid2 - MARKETABLE_OFFSET).toFixed(3));
     await submitLimit(page, "side-SELL", sellPrice, 10);
@@ -242,7 +220,7 @@ test.describe("trade history", () => {
     await waitForTotalTradeCount(page, baselineIds.length + 1);
 
     // Order 3: COVER 5 @ p3 = ask+MARKETABLE_OFFSET (re-read; harmless even
-    // though the ask readout itself never moves under -replay-hold) -> closes
+    // though the ask readout has not moved) -> closes
     // the flip's short remainder (trade #2: entry=p2, the FLIP price per
     // roundtrip.go, exit=p3).
     const ask3 = await readQuote(page, "ask");

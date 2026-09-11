@@ -2,7 +2,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, act, fireEvent, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
-import { LIGHT } from "../../render/palette";
 import { ToastProvider } from "../Toast";
 import { OrderConfigProvider } from "../exec/useOrderConfig";
 import { OrderTicketPanel } from "./OrderTicketPanel";
@@ -174,7 +173,7 @@ describe("OrderTicketPanel", () => {
     fireEvent.click(screen.getByTestId("stop-up"));
     expect((screen.getByTestId("stop") as HTMLInputElement).value).toBe("0.100");
   });
-  it("shows a PRACTICE badge in the header only during replay (safety signal)", () => {
+  it("shows a PRACTICE badge in the header only during demo (safety signal)", () => {
     const { props, stores } = mkProps();
     act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
     wrap(props);
@@ -185,29 +184,9 @@ describe("OrderTicketPanel", () => {
     act(() => { stores.session.apply({ kind: "snapshot", topic: "sys.session" as never, payload: { mode: "live" } }); });
     expect(screen.queryByTestId("practice-badge")).toBeNull();
     expect(screen.queryByTestId("session-pending-badge")).toBeNull();
-    act(() => { stores.session.apply({ kind: "snapshot", topic: "sys.session" as never, payload: { mode: "replay", day: "2026-07-06", speed: 4 } }); });
+    act(() => { stores.session.apply({ kind: "snapshot", topic: "sys.session" as never, payload: { mode: "demo" } }); });
     expect(screen.getByTestId("practice-badge").textContent).toBe("PRACTICE");
     expect(screen.queryByTestId("session-pending-badge")).toBeNull();
-  });
-  it("shows a PRACTICE badge during demo too, with a distinct color from replay's (safety signal)", () => {
-    const { props, stores } = mkProps();
-    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
-    wrap(props);
-    act(() => { stores.session.apply({ kind: "snapshot", topic: "sys.session" as never, payload: { mode: "replay", day: "2026-07-06", speed: 4 } }); });
-    const replayBackground = (screen.getByTestId("practice-badge") as HTMLElement).style.background;
-    act(() => { stores.session.apply({ kind: "snapshot", topic: "sys.session" as never, payload: { mode: "demo" } }); });
-    const demoBadge = screen.getByTestId("practice-badge") as HTMLElement;
-    expect(demoBadge.textContent).toBe("PRACTICE");
-    expect(screen.queryByTestId("session-pending-badge")).toBeNull();
-    // Same badge/testid, but demo must render with palette.demo, not
-    // palette.warn — mirrors the DemoBanner/ReplayBanner color split so a
-    // demo session's ticket is never silently painted the replay color.
-    // jsdom normalizes inline hex to rgb() on read, so normalize the
-    // expected palette token the same way rather than comparing hex to rgb.
-    const probe = document.createElement("span");
-    probe.style.background = LIGHT.demo;
-    expect(demoBadge.style.background).not.toBe(replayBackground);
-    expect(demoBadge.style.background).toBe(probe.style.background);
   });
   it("changing the venue dropdown writes the group's focused venue", () => {
     const { props, stores, linkGroups } = mkProps();

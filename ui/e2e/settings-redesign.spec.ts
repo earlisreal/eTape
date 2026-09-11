@@ -27,7 +27,7 @@ test.describe("settings redesign", () => {
     // silently no-op with a "no venue/quote for hotkey" toast, even though the
     // ticket/DOM/tape already display a live AAPL quote. Mirrors smoke.spec.ts's
     // "link groups" test. Round-trips through a decoy symbol (US.MSFT —
-    // accepted by the engine's FocusGroup probe, a no-op in replay mode since
+    // accepted by the engine's FocusGroup probe, a no-op in demo mode since
     // there's no live feed to validate against; never actually traded) so each
     // commit produces an observable header-text change to wait on: typing
     // "AAPL" while the header already reads "AAPL" would give Playwright
@@ -68,9 +68,7 @@ test.describe("settings redesign", () => {
     // priceOffset 0 — see OrderSettingsSection.tsx) already match the old
     // "Buy $5k" template, so the fired qty is floor(dollarAmount / ask). Read
     // the ticket's own ask readout (OrderTicketPanel's `ask` testid) to compute
-    // the expected qty independently of this test rather than guessing a price
-    // — replay runs with -speed 0 -replay-hold, so the quote is static for the
-    // whole suite.
+    // the expected qty independently of this test rather than guessing a price.
     const askLocator = page.getByTestId("ask");
     await expect(askLocator).not.toHaveText("—", { timeout: 15_000 });
     const ask = Number(await askLocator.innerText());
@@ -154,8 +152,8 @@ test.describe("settings redesign", () => {
     await expect(page.getByTestId("sim-startingbalance")).toBeVisible();
     await expect(page.getByTestId("other-venues")).toHaveCount(0);
 
-    // No OpenD reachable in this replay-mode boot (venueseed itself isn't
-    // even constructed on a -replay boot — see §A) — the moomoo card sits in
+    // No OpenD reachable in this demo-mode boot (venueseed itself isn't
+    // constructed on a demo boot) — the moomoo card sits in
     // its deterministic pre-venue "waiting" state with no probe button.
     await expect(page.getByTestId("moomoo-body")).toContainText(/waiting for opend/i);
     await expect(page.getByTestId("moomoo-probe")).toHaveCount(0);

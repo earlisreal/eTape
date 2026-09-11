@@ -42,7 +42,7 @@ const (
 // TestSynthDemoBoot_EnsureSymbolWarmHistoryAndScannerConsistent is Task 11's
 // boot-integration check for the -demo path's warm-history and scanner wiring
 // (cmd/etape/main.go's *demo branch: synth.New -> gen.Seed(st, now) ->
-// synth.NewFeed/synth.NewRequester), mirroring replay_smoke_test.go's own
+// synth.NewFeed/synth.NewRequester), following the demo integration
 // precedent of reconstructing (not reimplementing) main's fan-in wiring
 // against real components rather than importing package main.
 //
@@ -265,12 +265,11 @@ func TestSynthDemoBoot_EnsureSymbolWarmHistoryAndScannerConsistent(t *testing.T)
 
 // TestSynthDemoBoot_SimFillsPriceAgainstSyntheticBook is Task 11's third
 // checklist item: a sim order fills against the LIVE synthetic book via the
-// book-walk path, mirroring replay_smoke_test.go's own
-// TestE2EReplayDemoJournal_SimFillsPriceAgainstReplayedBook structure
-// (including reconstructing the markBridge goroutine inline, per that test's
+// book-walk path, following the same synthetic-feed fill-path structure
+// (including reconstructing the markBridge goroutine inline, per the
 // documented precedent for why uihubtest can't import it from package main)
 // -- substituted here with synth.New/synth.NewFeed driving md.Core instead of
-// a replayed journal.
+// a recorded feed.
 //
 // Unlike the boot/warm-history test above, this one needs the generator
 // actually ticking live (Feed.Run's StepTo/Drain loop) so a fresh BookEvent
@@ -328,10 +327,9 @@ func TestSynthDemoBoot_SimFillsPriceAgainstSyntheticBook(t *testing.T) {
 	go forwardMD(ctx, mdCore, hub)
 
 	// markAndBookBridge: main.go's markBridge, reconstructed here exactly as
-	// replay_smoke_test.go's own copy does (see that file's doc comment) --
+	// the main boot path does --
 	// copies mdCore.Marks()/mdCore.Books() into execCore.FeedMark and the sim
-	// broker's SetMark/SetBook, feeding from the synth Feed instead of a
-	// replayed journal.
+	// broker's SetMark/SetBook, feeding from the synth Feed.
 	go func() {
 		for {
 			select {
@@ -350,7 +348,7 @@ func TestSynthDemoBoot_SimFillsPriceAgainstSyntheticBook(t *testing.T) {
 	// main.go's -demo branch uses -- into md.Core, exactly like main.go's
 	// pipe() (unexported, package main; reconstructed here per this
 	// package's established precedent, same as fd.Events() is consumed in
-	// replay_smoke_test.go/e2e_test.go).
+	// e2e_test.go).
 	sf := synth.NewFeed(gen, st, clk)
 	go func() { _ = sf.Run(ctx) }()
 	go func() {

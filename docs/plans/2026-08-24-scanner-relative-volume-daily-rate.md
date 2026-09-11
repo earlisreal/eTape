@@ -157,7 +157,7 @@ Extend `engine/internal/scan/scan.go` using the existing short-interest worker
 pattern, but local-only:
 
 - Inject a narrow `ReadBars1m(symbol, fromMs, toMs)` function into `scan.New`.
-  Pass `st.ReadBars1m` from `engine/cmd/etape/main.go`; pass `nil` in replay or
+  Pass `st.ReadBars1m` from `engine/cmd/etape/main.go`; pass `nil` in demo or
   tests that do not need REL VOL. Do not add a broad new provider interface.
 - Add Poller-owned profile cache, pending-symbol set, FIFO queue, wake channel,
   and a single worker. Cache entries are keyed by symbol plus ET date and

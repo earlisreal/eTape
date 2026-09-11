@@ -1,6 +1,6 @@
 # eTape Command
 
-Production/demo/replay entry point. Boot resolves mode and paths, opens the
+Production/demo entry point. Boot resolves mode and paths, opens the
 store/feed/brokers, starts one engine-wide account poller, and serves the UI
 hub. Live venues are always polled for risk; non-risk accounts are polled only
 when an Account panel demands them. Link Groups own order routing; persisted

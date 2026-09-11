@@ -128,8 +128,8 @@ func (s *Store) commitExecAppend(op execAppendOp) execAppendResult {
 	return execAppendResult{seq: seq}
 }
 
-// ReadExecEventsSince returns events with ts >= fromMs, ordered by seq (the boot-
-// replay order). Payload bytes are copied out of the row scan.
+// ReadExecEventsSince returns events with ts >= fromMs, ordered by seq (the boot
+// recovery order). Payload bytes are copied out of the row scan.
 func (s *Store) ReadExecEventsSince(fromMs int64) ([]exec.EventEnvelope, error) {
 	rows, err := s.db.Query(
 		`SELECT seq, ts, source, venue, type, order_id, payload

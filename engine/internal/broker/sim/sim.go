@@ -1,4 +1,4 @@
-// Package sim is a deterministic in-memory exec.Broker used for tests, replay,
+// Package sim is a deterministic in-memory exec.Broker used for tests, demo,
 // and (v1.5) practice mode. Fill PRICING is book-walk based (fillAgainstBook):
 // a market or marketable-limit order consumes price levels on the opposite
 // side of its L2 book (SetBook), size-weighted across every level consumed,
@@ -228,7 +228,7 @@ func (b *Broker) markEligibilityLocked(o *exec.Order, submitMs int64) {
 // fillLatencyMs<=0 (never populated) and an order that has already left
 // b.orders (nothing left to gate) — either way there is no deadline to
 // enforce. Time in this broker only ever moves forward (b.clk is either the
-// real system clock or, in tests/replay, a clock.Fake advanced monotonically
+// real system clock or, in tests/demo, a clock.Fake advanced monotonically
 // via Advance/AdvanceTo), so once this returns true for an order it stays
 // true for the rest of that order's life; the entry is removed only when the
 // order itself is removed (clearEligibilityLocked), not when it first

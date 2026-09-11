@@ -46,8 +46,8 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   // yet mounted) renders nothing for that tick.
   const actionsSlot = useContext(PanelHeaderActionsSlotContext);
   useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
-  // Safety signal (mirrors ReplayBanner.tsx/DemoBanner.tsx): practice/replay/demo
-  // orders must never be visually confusable with live ones, so surface it right
+  // Safety signal (mirrors DemoBanner.tsx): demo orders must never be visually
+  // confusable with live ones, so surface it right
   // on the ticket header too — not just the top-of-app banner — in case a
   // trader's eyes are on the ticket while placing an order.
   const sessionMode = useSyncExternalStore((cb) => stores.session.subscribe(cb), () => stores.session.getSnapshot());
@@ -134,10 +134,10 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   // TapePanel's lone header gear, extended with the venue picker.
   const headerActions = (
     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-      {(sessionMode.mode === "demo" || sessionMode.mode === "replay") && (
+      {sessionMode.mode === "demo" && (
         <span data-testid="practice-badge" style={{
           padding: "1px 6px", borderRadius: 3,
-          background: sessionMode.mode === "demo" ? palette.demo : palette.warn,
+          background: palette.demo,
           color: "#fff", fontWeight: 700, fontSize: 10, letterSpacing: 0.5,
         }}>
           PRACTICE
@@ -145,8 +145,8 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
       )}
       {/* sys.session is snapshot-only (set once at engine boot, re-delivered on
           every resubscribe, never pushed as a delta) — SessionStore seeds to
-          "pending" until the first snapshot lands so a reload during
-          replay/demo never renders a confident "live" posture. This ghost
+          "pending" until the first snapshot lands so a reload during demo
+          never renders a confident "live" posture. This ghost
           chip is the ticket's honest placeholder for that sub-frame window:
           outline (not filled), muted (not bold) — the visual opposite of
           PRACTICE's alarm treatment, on purpose. */}

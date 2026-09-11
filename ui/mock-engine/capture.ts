@@ -1,5 +1,5 @@
 // Captures live engine frames into the mock-engine Fixture format. Point it at a
-// running engine (e.g. `etape -replay 2026-01-02 -speed 0 -replay-hold`):
+// running demo engine (e.g. `etape -demo -demo-seed 4242`):
 //   tsx mock-engine/capture.ts session-e2e
 // It subscribes to every topic in the wire contract, records the first snapshot
 // per (topic,key) and a bounded set of subsequent deltas, then writes

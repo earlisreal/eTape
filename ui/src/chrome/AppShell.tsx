@@ -110,8 +110,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const [newWindowOpen, setNewWindowOpen] = useState(false);
   const [workspaceLabel, setWorkspaceLabel] = useState(workspaceName);
   // Task 9 (unified into the Task 5/U3 Practice launcher): opened from
-  // TopBar's "Practice" button, offers a synthetic demo market or replaying
-  // a recorded day.
+  // TopBar's "Practice" button offers a synthetic demo market.
   const [practiceOpen, setPracticeOpen] = useState(false);
   // Task 3 (venues/creds redesign): first-run venue-setup prompt. Separate from
   // the `etape.venueSetupHidden` localStorage flag below — this only silences
@@ -374,9 +373,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // snapshot has arrived (execStatus !== null — gates the connect-window flash)
   // and only while no real broker venue is configured, the user hasn't
   // dismissed it THIS session, and hasn't permanently silenced it via the
-  // checkbox. Also suppressed during a confirmed replay/demo session
-  // (sessionMode.mode === "replay" or "demo") — nudging toward configuring a
-  // broker "to trade live" makes no sense mid-replay/demo, and venue edits
+  // checkbox. Also suppressed during a confirmed demo session — nudging toward
+  // configuring a broker "to trade live" makes no sense mid-demo, and venue edits
   // need an engine restart anyway, which would kill the session. "pending"
   // (mode unconfirmed yet) intentionally still allows it through, same as the
   // prior unconditional "live" default — this only needs to suppress the
@@ -411,12 +409,12 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       toast.push({ level: "danger", text: `Try demo failed: ${err instanceof Error ? err.message : "unknown error"}` });
     });
   };
-  // Gates EmptyState's CTA: hidden once already inside a confirmed demo or
-  // replay session (offering "Try demo" while already IN demo mode would be
+  // Gates EmptyState's CTA: hidden once already inside a confirmed demo
+  // session (offering "Try demo" while already IN demo mode would be
   // confusing) — "pending" (mode unconfirmed yet) still allows it through,
   // same as the prior unconditional "live" default and showVenueSetup's
   // "pending" treatment above. VenueSetupPrompt doesn't need an equivalent
-  // gate: it's already suppressed during replay/demo by showVenueSetup itself.
+  // gate: it's already suppressed during demo by showVenueSetup itself.
   const showTryDemo = sessionMode.mode === "live" || sessionMode.mode === "pending";
   // Alpaca-1m-history hint: shown whenever the engine is open and no Alpaca
   // venue is configured — including the sim-only/no-venue case, since that's
@@ -424,7 +422,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // quota-guarded history fetch instead of the quota-free Alpaca SIP path
   // (see AlpacaBackfillBanner.tsx for the detail). Suppressed while the
   // venue-setup modal is up (it covers first-run and would otherwise double
-  // up) and during replay/demo (venue edits need an engine restart, pointless
+  // up) and during demo (venue edits need an engine restart, pointless
   // mid-practice) — this is the persistent reminder that takes over once the
   // one-shot modal is dismissed.
   const hasAlpaca = execStatus?.venues.some((v) => v.broker === "alpaca") ?? false;
@@ -494,7 +492,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // addPanel/onConfigChange/etc. once ws is already loaded.
   const wsLoaded = ws !== null;
   const prevModeRef = useRef(sessionMode.mode);
-  // Pre-demo workspace doc, captured on live/replay->demo and restored
+  // Pre-demo workspace doc, captured on live->demo and restored
   // verbatim on demo->live. A ref (not a module-level `let`) is enough: it
   // only needs to survive across renders of this ONE mounted AppShell, and a
   // demo relaunch (StartDemo while already live, or GoLive) never remounts
@@ -539,7 +537,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       return; // synchronous — nothing to await, nothing to clean up
     }
 
-    // Entry edge (live/replay/pending -> demo): snapshot BEFORE anything else,
+    // Entry edge (live/pending -> demo): snapshot BEFORE anything else,
     // per edge kind — a pending->demo entry (the engine was already in demo
     // when this UI (re)connected) has no real pre-demo doc to snapshot.
     demoSnapshotRef.current = prev === "live" ? structuredClone(wsNow) : null;

@@ -18,7 +18,7 @@ export function VenueSetupPrompt({ onConfigure, onDismiss, onTryDemo }: {
   onConfigure: (dontShowAgain: boolean) => void;
   onDismiss: (dontShowAgain: boolean) => void;
   // Task 6 (U4): same onTryDemo callback threaded into EmptyState — this
-  // prompt only ever shows while sessionMode.mode isn't "replay"/"demo" (see
+  // prompt only ever shows while sessionMode.mode isn't "demo" (see
   // AppShell's showVenueSetup), so unlike EmptyState there's no separate
   // gating boolean needed here; the button is always offered.
   onTryDemo: () => void;

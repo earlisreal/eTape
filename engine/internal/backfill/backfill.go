@@ -48,7 +48,7 @@ type Source struct {
 }
 
 // TailFetcher pulls the quota-free recent K-line caches. Implemented by
-// *opend.OpenDFeed; nil in replay/demo (no OpenD), where the tail step is
+// *opend.OpenDFeed; nil in demo (no OpenD), where the tail step is
 // skipped.
 type TailFetcher interface {
 	Tail1m(ctx context.Context, symbol string) ([]feed.Bar, error)

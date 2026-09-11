@@ -464,7 +464,7 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 }
 
 // probe validates a symbol exists; returns "" to accept, else a block reason.
-// Skipped when the feed is nil (replay/tests) so those paths accept.
+// Skipped when the feed is nil (demo/tests) so those paths accept.
 func (cd *commands) probe(ctx context.Context, symbol string) string {
 	if known := cd.knownSymbol.Load(); known != nil && known.fn(symbol) {
 		return ""

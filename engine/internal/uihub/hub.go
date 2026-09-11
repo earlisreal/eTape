@@ -42,7 +42,7 @@ type HubConfig struct {
 // MarketClockSample is a validated estimate of the OpenD upstream market
 // clock relative to the engine clock. SampledAt is the engine time at which
 // the request completed; the Hub derives the current sample age when it sends
-// a pong. The source is optional so demo/replay and older feeds keep the local
+// a pong. The source is optional so demo and older feeds keep the local
 // browser-clock fallback.
 type MarketClockSample struct {
 	OffsetMs  int64
@@ -165,7 +165,7 @@ type Hub struct {
 	pubCh              chan pub
 	dropCh             chan dropReport     // conn goroutines -> Run: write-timeout drop reports
 	backfillDoneCh     chan backfillResult // backfill goroutines -> Run: daily-fetch outcome
-	historyWiredCh     chan struct{}       // boot goroutine -> Run: replay demands after history wiring
+	historyWiredCh     chan struct{}       // boot goroutine -> Run: queued demands after history wiring
 	syncCh             chan chan struct{}  // test barrier
 	closed             chan struct{}       // closed when Run returns; unblocks stuck senders
 
@@ -299,13 +299,13 @@ func (h *Hub) QueryChartWindow(a wsmsg.QueryChartWindowArgs) wsmsg.QueryChartWin
 func (h *Hub) SetIndicators(i Indicators) { h.ind = i }
 
 // SetFeed injects the market-data control surface after the hub is running.
-// Safe to call once from boot; nil until then (replay/tests never call it).
+// Safe to call once from boot; nil until then (demo/tests never call it).
 func (h *Hub) SetFeed(f Feed) { h.feedSlot.Store(&feedBox{f: f}) }
 
 // SetMarketClockSource publishes the optional upstream-clock source. It is
 // installed after the Hub is already running in live mode, so the atomic slot
 // keeps concurrent ping dispatches race-free. Passing nil restores local-clock
-// fallback for demo/replay or after a feed teardown.
+// fallback for demo or after a feed teardown.
 func (h *Hub) SetMarketClockSource(source MarketClockSource) {
 	if source == nil {
 		h.marketClockSlot.Store(nil)
@@ -358,7 +358,7 @@ func (h *Hub) feed() Feed {
 }
 
 // SetBackfill injects one worker for both focused preparation and archive
-// warming. Demands received before this boot-time configuration are replayed.
+// warming. Demands received before this boot-time configuration are reissued.
 func (h *Hub) SetBackfill(fn func(sym string, done func(ok bool))) {
 	h.SetHistoryWarm(fn, fn)
 }
@@ -832,7 +832,7 @@ func (h *Hub) forEachDemand(fn func(demandInfo)) {
 // Focused demands win over archive-only watch demands for a shared symbol.
 func (h *Hub) rearmBackfill() {
 	if !h.historyWired || h.backfill() == nil {
-		return // no backfill trigger injected (replay / backfill disabled)
+		return // no backfill trigger injected (demo / backfill disabled)
 	}
 	for sym, target := range h.historyTargets() {
 		h.triggerBackfill(sym, target.wantsHistory, target.focused)

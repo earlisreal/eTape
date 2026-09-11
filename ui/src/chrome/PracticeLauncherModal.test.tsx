@@ -29,13 +29,13 @@ describe("PracticeLauncherModal", () => {
   it("renders nothing when closed", () => {
     const { commands } = fakeCommands();
     render(<Wrapped open={false} onClose={vi.fn()} commands={commands} />);
-    expect(screen.queryByTestId("replay-launcher")).toBeNull();
+    expect(screen.queryByTestId("practice-launcher")).toBeNull();
   });
 
   it("renders synthetic demo launcher", () => {
     const { commands } = fakeCommands();
     render(<Wrapped open onClose={vi.fn()} commands={commands} />);
-    expect(screen.getByTestId("replay-launcher")).toBeTruthy();
+    expect(screen.getByTestId("practice-launcher")).toBeTruthy();
     expect(screen.getByText("Synthetic demo market")).toBeTruthy();
     expect(screen.getByTestId("demo-start")).toBeTruthy();
   });

@@ -48,7 +48,7 @@ type requester interface {
 }
 
 // demandFeed is the subscription-control surface the pool drives. Satisfied by
-// *opend.OpenDFeed. A nil demandFeed disables the pool (tests/replay).
+// *opend.OpenDFeed. A nil demandFeed disables the pool (tests/demo).
 type demandFeed interface {
 	Ensure(d feed.Demand)
 	Release(id string)
@@ -438,7 +438,7 @@ func scanDemandID(symbol string) string { return "scan:" + symbol }
 // delta: Release evicted symbols, Ensure admitted symbols at watch tier, and
 // trigger an async deep-history backfill on first admission. Release runs before
 // Ensure so a symbol re-admitted on a pool-day reset ends up subscribed. A nil
-// feed disables the pool entirely (tests/replay).
+// feed disables the pool entirely (tests/demo).
 func (p *Poller) updatePool(now time.Time, rows []wsmsg.ScannerRow) {
 	if p.feed == nil {
 		return

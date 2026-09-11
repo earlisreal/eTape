@@ -68,7 +68,7 @@ func openLogFile(path string) (*os.File, error) {
 }
 
 // boot runs the full engine boot sequence -- flags, config, store/md-core/
-// exec-core/uihub construction, feed startup (live OpenD or replay), and the
+// exec-core/uihub construction, feed startup (live OpenD or synthetic demo), and the
 // ordered shutdown once ctx is cancelled -- and returns the process exit
 // code. It is a plain top-level function (not a closure or method) taking
 // only a context, so a later entrypoint (e.g. a system-tray build) can call
@@ -181,17 +181,13 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	} else {
 		// First run of a live boot with no config.toml: seed one so a fresh
 		// install comes up with a ready-to-use paper sim practice venue
-		// instead of zero configured venues. Gated to live only
-		// (*replayDay == "") -- -demo (above) has its own injected sim venue
-		// and its own temp config, and an explicit -replay forces every venue
-		// to sim regardless, so neither needs (or should trigger) a write to
-		// the real ~/.eTape/config.toml.
-		if true {
-			if seeded, serr := config.SeedDefaultIfMissing(*cfgPath); serr != nil {
-				log.Warn("seed first-run config (continuing with empty venues)", "path", *cfgPath, "err", serr)
-			} else if seeded {
-				log.Info("first run: seeded config with a paper sim practice venue", "path", *cfgPath)
-			}
+		// instead of zero configured venues. Demo (above) has its own injected
+		// sim venue, temp config, and database, so it never writes to the real
+		// ~/.eTape/config.toml.
+		if seeded, serr := config.SeedDefaultIfMissing(*cfgPath); serr != nil {
+			log.Warn("seed first-run config (continuing with empty venues)", "path", *cfgPath, "err", serr)
+		} else if seeded {
+			log.Info("first run: seeded config with a paper sim practice venue", "path", *cfgPath)
 		}
 		var err error
 		cfg, err = config.Load(*cfgPath)
@@ -256,7 +252,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 
 	// restartRequested/requestRestart back every self-relaunch path -- the
 	// plain "RestartEngine" WS command via restartInPlace below, and the
-	// mode-switch closures (startReplay/goLive/startDemo) directly: calling
+	// mode-switch closures (startDemo) directly: calling
 	// requestRestart flags the restart and cancels ctx via stop -- reusing the
 	// exact ordered shutdown drain below. boot's named `restart` return value
 	// picks up the flag after the drain completes, so the caller
@@ -331,13 +327,12 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// reach the client before ctx cancellation starts tearing down the connection.
 	const relaunchAckFlushDelay = 200 * time.Millisecond
 
-	// base carries the launch flags a mode-switch relaunch must preserve
-	// (see childArgs, Task 1) -- built once here so both closures share it.
+	// base carries the launch flags the demo relaunch must preserve.
 	base := baseFlags{ConfigPath: *cfgPath, DistDir: *dist, LogPath: *logPath}
 
 	// startDemo relaunches into -demo.
 	startDemo := func() error {
-		argv := carryStartupBrowser(childArgs(base, replayMode{Demo: true}))
+		argv := carryStartupBrowser(childArgs(base, true))
 		time.AfterFunc(relaunchAckFlushDelay, func() {
 			nextArgsPtr.Store(&argv)
 			requestRestart()
@@ -519,9 +514,9 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	}
 
 	// --- moomoo auto-config (live boots only) ---
-	// Gated on `live` (never -demo/-replay), the same gate config.
-	// SeedDefaultIfMissing above uses -- a synthetic/replayed feed never
-	// really connects to OpenD, so there is no real account list to probe,
+	// Gated on `live` (never -demo), the same gate config.
+	// A synthetic feed never really connects to OpenD, so there is no real
+	// account list to probe,
 	// and demo's OpenD-free session must never write to the real
 	// ~/.eTape/config.toml. venueAdm is the same instance uihub's commands
 	// already use, satisfying venueseed.Admin without a second config seam.
@@ -546,15 +541,15 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	go func() { defer forwardWG.Done(); forwardMD(ctx, core, hub, seeder) }()
 	go forwardExec(ctx, execCore, hub)
 
-	// Forward marks + books into every sim broker so submitted orders fill: in
-	// replay every venue is forced to SimBroker, and in live mode a venue
-	// explicitly configured with Broker: "sim" (a practice venue) is one too.
+	// Forward marks + books into every configured sim broker so submitted orders
+	// fill. A live venue explicitly configured with Broker: "sim" is a practice
+	// venue; non-sim venues are fed by their own broker connection.
 	// Non-sim live venues (tradezero/alpaca/moomoo) are fed by their own
-	// broker connection and don't implement simSink, so the type-assertion in
-	// simSinksOf alone selects the right set in either mode.
+	// broker connection and don't implement simSink, so the type assertion in
+	// simSinksOf selects the right set.
 	go markBridge(ctx, core, execCore, simSinksOf(vbs))
 
-	// --- feed (live OpenD, synthetic demo, or replay) ---
+	// --- feed (live OpenD or synthetic demo) ---
 	var pipeWG sync.WaitGroup
 	var backfillWG sync.WaitGroup
 	var orch *backfill.Orchestrator
@@ -971,8 +966,8 @@ func hz(rate float64) time.Duration {
 
 // forwardMD drains md.Core.Updates(), publishes each to the hub, and, on
 // every feed-up transition, kicks the
-// moomoo auto-config probe. seeder is nil outside a real live boot (replay,
-// -demo, or the auto-config already run this process) — see boot's own
+// moomoo auto-config probe. seeder is nil outside a real live boot (-demo or
+// the auto-config already ran this process) — see boot's own
 // venueseed.New call site for the exact gate; forwardMD only ever guards
 // against nil, it doesn't decide when a Seeder exists.
 func forwardMD(ctx context.Context, core *md.Core, hub *uihub.Hub, seeder *venueseed.Seeder) {
@@ -1001,8 +996,7 @@ func forwardExec(ctx context.Context, execCore *exec.Core, hub *uihub.Hub) {
 }
 
 // simSink receives last-trade marks and L2 book snapshots. Implemented by
-// *sim.Broker (SetMark/SetBook) — every replay venue, plus any live venue
-// explicitly configured as Broker: "sim" — so a submitted order fills
+// *sim.Broker (SetMark/SetBook) — any configured sim venue, so a submitted order fills
 // against the fed marks and (from Task 2 onward) prices against the fed
 // book. Named simSink rather than markSink now that it carries both.
 type simSink interface {
@@ -1010,10 +1004,8 @@ type simSink interface {
 	SetBook(symbol string, book feed.Book)
 }
 
-// simSinksOf returns every configured broker that is a simSink. No live/
-// replay branch is needed: buildBrokers forces every venue to sim.Broker in
-// replay, and only venues configured with Broker: "sim" are sim.Broker in
-// live mode, so the type-assertion alone selects the correct set either way.
+// simSinksOf returns every configured broker that is a simSink. The
+// type assertion selects the configured sim venues.
 func simSinksOf(vbs []venueBroker) []simSink {
 	var sinks []simSink
 	for _, vb := range vbs {
@@ -1063,18 +1055,18 @@ func demoSeedValue(flagSeed int64) int64 {
 
 // pollerRequester is the request/response seam scan/news/stockinfo/quota's
 // own local `requester` interfaces already require (identical method set on
-// all four): satisfied by *opend.Client in live/replay and *synth.Requester
-// in -demo, so startPollers doesn't need to know which one it was handed.
+// all four): satisfied by *opend.Client in live mode and *synth.Requester in
+// -demo, so startPollers doesn't need to know which one it was handed.
 type pollerRequester interface {
 	Request(ctx context.Context, protoID uint32, req proto.Message) (opend.Frame, error)
 }
 
 // demandFeeder is the subscription-control surface the scan pool drives:
-// satisfied by *opend.OpenDFeed in live/replay. In -demo it is left nil
+// satisfied by *opend.OpenDFeed in live mode. In -demo it is left nil
 // (*synth.Feed's Ensure/Release are no-ops -- the synthetic universe
 // simulates every symbol unconditionally), which cleanly disables the pool
 // via scan.go's own `if p.feed == nil { return }` guard -- the same
-// mechanism tests/replay already rely on.
+// mechanism tests already rely on.
 type demandFeeder interface {
 	Ensure(d feed.Demand)
 	Release(id string)
@@ -1179,7 +1171,7 @@ func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, dem
 		hub.SetWatchlist(watchlistAdapter{l: wl, p: wp})
 		go func() { _ = wp.Run(ctx) }()
 	}
-	// health: mmProbe is the moomoo probe (real OpenD RTT in live/replay, a
+	// health: mmProbe is the moomoo probe (real OpenD RTT in live mode, a
 	// constant synthetic RTT in -demo); app-ping RTT source is nil in v1
 	// (ui-engine shows down until ping tracking is wired). accountHealth is the
 	// engine-wide poller's cached live-Alpaca result, so health never performs a

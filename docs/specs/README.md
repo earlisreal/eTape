@@ -6,7 +6,7 @@ Current durable domain decisions:
 - UI keeps high-frequency data in imperative stores and canvas/chart controllers, outside React state.
 - Go WebSocket structs are source of truth; generated TypeScript is read-only.
 - Symbol demand is centralized, reference-counted, and quota-aware. Snapshot-on-subscribe prevents blank panels.
-- Feed journal records normalized event flow; replay and synthetic feeds enter same market-data core.
+- Live and synthetic feeds enter the same market-data core; bars and execution state persist locally.
 - Execution remains broker-agnostic above adapters, with global/per-venue gates and explicit venue arming.
 - Demo state must not poison persisted live workspace or symbols.
 - Exchange timestamps control bar buckets. Ticks create live 10-second bars; finalized one-minute K-lines conservatively bound completed 10-second highs/lows when open and close remain valid, and feed larger intraday resolutions. Daily history feeds daily/weekly/monthly.

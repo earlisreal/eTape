@@ -590,7 +590,7 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 	// (TradeZero hard-rejects with R78; Alpaca silently queues it to the next
 	// open — worse). The UI converts these to marketable limits before they get
 	// here; this is the backstop for a bug or a bypassing client. Sim venues are
-	// exempt (Capabilities.MarketOutsideRTH) so replay/practice at night fill.
+	// exempt (Capabilities.MarketOutsideRTH) so demo/practice at night fill.
 	if req.Type == TypeMarket && session.PhaseAt(c.clk.Now()) != session.RTH &&
 		(b == nil || !b.Capabilities().MarketOutsideRTH) {
 		reason := "market order outside regular hours (UI converts these to marketable limits)"
