@@ -451,10 +451,11 @@ export class DrawingInteraction {
   private commitMeasure(from: Anchor, to: Anchor): void {
     const now = Date.now();
     const style = this.styleForKind?.("measure") ?? {};
-    this.sessionStore.upsert({ id: this.newId(), symbol: this.ctx.symbol(), kind: "measure", anchors: [from, to], createdMs: now, updatedMs: now, ...style });
+    const id = this.newId();
+    this.sessionStore.upsert({ id, symbol: this.ctx.symbol(), kind: "measure", anchors: [from, to], createdMs: now, updatedMs: now, ...style });
     this.syncSessionDrawings();
     this.cancelGesture();
-    this.setSelectionId(null);
+    this.setSelectionId(id);
     this.tool = "select";
     this.onToolChange?.("select");
     this.applyPanZoomLock();

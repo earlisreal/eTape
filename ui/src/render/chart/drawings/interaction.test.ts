@@ -255,7 +255,7 @@ describe("DrawingInteraction", () => {
     expect(prim.setSessionDrawings.mock.calls.at(-1)?.[0]).toEqual([expect.objectContaining({ kind: "measure" })]);
     expect(store.forSymbol("US.AAPL")).toHaveLength(0);
     expect(onToolChange).toHaveBeenLastCalledWith("select");
-    expect(di.selectedId()).toBeNull();
+    expect(di.selectedId()).toBe("id1");
   });
 
   it("keeps multiple click-click Measures after rearming the tool", () => {
@@ -280,6 +280,7 @@ describe("DrawingInteraction", () => {
         { timeMs: 0, price: 10 }, { timeMs: 120_000, price: 20 },
       ],
     })]);
+    expect(di.selectedId()).toBe("id1");
 
     di.setTool("measure");
     fire("pointerdown", { clientX: 30, clientY: 970 });
@@ -289,6 +290,7 @@ describe("DrawingInteraction", () => {
 
     expect(prim.setSessionDrawings.mock.calls.at(-1)?.[0]).toHaveLength(2);
     expect(store.forSymbol("US.AAPL")).toHaveLength(0);
+    expect(di.selectedId()).toBe("id2");
   });
 
   it("selects, moves, styles, and deletes a committed Measure", () => {

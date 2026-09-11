@@ -634,6 +634,40 @@ describe("ChartPanel", () => {
     expect(getByRole("button", { name: "width 1" })).toBeTruthy();
   });
 
+  it("opens the floating style toolbar after either Measure completion gesture", async () => {
+    const bars: Bar[] = [
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:30:00.000Z", o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false },
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:31:00.000Z", o: 100.5, h: 102, l: 100, c: 101.5, v: 120, inProgress: true },
+    ];
+    const { stores, getByRole, getByTestId, queryByRole } = renderChart("c1", undefined, undefined, { timeframe: "1m" }, {
+      symbol: "US.AAPL", timeframe: "1m", fromMs: Date.parse(bars[0].bucketStart), toMs: Date.parse(bars[1].bucketStart) + 60_000,
+      bars, indicators: [], historyRevision: 1,
+    });
+    await act(async () => {
+      stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+        seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+      } });
+      await Promise.resolve(); await Promise.resolve();
+    });
+
+    const host = getByTestId("chart-host");
+    fireEvent.click(getByRole("button", { name: "measure" }));
+    fireEvent.pointerDown(host, { button: 0, clientX: 0, clientY: 0 });
+    fireEvent.pointerMove(host, { clientX: 10, clientY: 10 });
+    fireEvent.pointerUp(host, { clientX: 10, clientY: 10 });
+    expect(getByRole("button", { name: "delete drawing" })).toBeTruthy();
+
+    fireEvent.click(getByRole("button", { name: "measure" }));
+    expect(queryByRole("button", { name: "delete drawing" })).toBeNull();
+    fireEvent.pointerDown(host, { button: 0, clientX: 0, clientY: 0 });
+    fireEvent.pointerUp(host, { clientX: 0, clientY: 0 });
+    expect(queryByRole("button", { name: "delete drawing" })).toBeNull();
+    fireEvent.pointerMove(host, { clientX: 10, clientY: 10 });
+    fireEvent.pointerDown(host, { button: 0, clientX: 20, clientY: 20 });
+    fireEvent.pointerUp(host, { clientX: 20, clientY: 20 });
+    expect(getByRole("button", { name: "delete drawing" })).toBeTruthy();
+  });
+
   it("keeps a 10s trendline anchor in blank space before the first loaded bar", async () => {
     const bars: Bar[] = ["2026-09-03T08:00:00.000Z", "2026-09-03T08:00:10.000Z"].map((bucketStart) => ({
       symbol: "US.AAPL", timeframe: "10s", bucketStart, o: 0.11, h: 0.11, l: 0.11, c: 0.11, v: 1, inProgress: false,

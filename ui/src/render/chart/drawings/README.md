@@ -14,9 +14,10 @@ the viewport changes.
 Measure is a session-only drawing layer: it is not written to DrawingStore or
 restored after a reload, symbol switch, or timeframe switch. Drag from the first
 press to release, or click once and move the cursor to preview a measurement;
-click again without moving to finish. A completed Measure returns the toolbar to
-Select; reselect Measure to create another. A direction arrow points from the
-first anchor to the second. Pending Measure and Trend Line previews keep chart
+click again without moving to finish. Completion selects the Measure, opens the
+floating style toolbar, and returns the tool to Select; reselect Measure to
+create another. A direction arrow points from the first anchor to the second.
+Pending Measure and Trend Line previews keep chart
 pan/zoom available. A moved second press stays chart navigation and leaves the
 pending preview. Escape, tool changes, symbol/timeframe changes, and right-click
 cancel a pending first point. Select mode exposes the normal drawing handles,
