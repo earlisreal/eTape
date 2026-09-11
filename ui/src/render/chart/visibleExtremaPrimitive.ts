@@ -156,7 +156,7 @@ export class VisibleExtremaPrimitive implements ISeriesPrimitive<Time> {
     ctx.fillText(placement.text, placement.x, placement.top);
   }
 
-  private font(vr: number): string { return `600 ${FONT_SIZE * vr}px ${FONTS.mono}`; }
+  private font(vr: number): string { return `400 ${FONT_SIZE * vr}px ${FONTS.mono}`; }
   private clamp(value: number, min: number, max: number): number { return Math.min(Math.max(value, min), max); }
 }
 
