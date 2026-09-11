@@ -15,6 +15,28 @@ describe("IndicatorStore", () => {
     ]);
   });
 
+  it("sorts snapshots, keeps the latest duplicate, and inserts late deltas", () => {
+    const s = new IndicatorStore();
+    s.apply(snap("vwap-1", [
+      { timeMs: 2000, value: 20 }, { timeMs: 1000, value: 10 }, { timeMs: 2000, value: 21 },
+    ]));
+    s.apply(delta("vwap-1", { timeMs: 1500, value: 15 }));
+    expect(s.series("vwap-1")).toEqual([
+      { timeMs: 1000, value: 10 }, { timeMs: 1500, value: 15 }, { timeMs: 2000, value: 21 },
+    ]);
+  });
+
+  it("upserts a late non-tail delta without duplicating its timestamp", () => {
+    const s = new IndicatorStore();
+    s.apply(snap("vwap-1", [
+      { timeMs: 1000, value: 10 }, { timeMs: 2000, value: 20 }, { timeMs: 3000, value: 30 },
+    ]));
+    s.apply(delta("vwap-1", { timeMs: 2000, value: 25 }));
+    expect(s.series("vwap-1")).toEqual([
+      { timeMs: 1000, value: 10 }, { timeMs: 2000, value: 25 }, { timeMs: 3000, value: 30 },
+    ]);
+  });
+
   it("delta with same timeMs upserts the last point in place (in-progress value)", () => {
     const s = new IndicatorStore();
     s.apply(snap("vwap-1", [{ timeMs: 1000, value: 10 }]));

@@ -31,7 +31,10 @@ export interface IndicatorReader { series(instanceId: string): { timeMs: number;
 // wipe the previous symbol's points instead of leaving them stranded in the shared
 // store (see resetForReload). Kept separate from IndicatorReader so read-only
 // consumers (e.g. legendView) aren't forced to implement reset().
-export interface IndicatorController extends IndicatorReader { reset(instanceId: string): void }
+export interface IndicatorController extends IndicatorReader {
+  reset(instanceId: string): void;
+  getRev(instanceId: string): number;
+}
 export interface CommandSender { sendCommand(name: string, args: unknown): Promise<{ status: string; value?: unknown }> }
 
 export interface ChartConfig { symbol: string; timeframe: string }
@@ -95,6 +98,7 @@ export class ChartController {
   // identity check independent of value, so a same-point value revision (branch 3
   // below) doesn't look like a generation swap. See applyIndicators.
   private indicatorLastAppliedTimeMs = new Map<string, number>();
+  private indicatorLastRevision = new Map<string, number>();
   private backfilled = false;
   // --- Per-call memoization (Task 3) -----------------------------------
   // applyBars' outcome for the bars it was just given — set exclusively inside
@@ -736,6 +740,8 @@ export class ChartController {
         const applied = this.indicatorApplied.get(d.key) ?? 0;
         const last = points[points.length - 1];
         const lastKey = last ? `${last.timeMs}|${last.value}` : "";
+        const appliedRevision = this.indicatorLastRevision.get(d.key);
+        const revision = this.deps.indicators.getRev(d.key);
         // The store is keyed purely by instanceId, not (instanceId, symbol, timeframe)
         // — a rapid re-subscribe (e.g. clicking 1m/5m repeatedly) can land a snapshot
         // for a whole different bucket grid while `applied` still reflects the
@@ -750,7 +756,13 @@ export class ChartController {
         // session used to eventually lose the candles too.
         const continues = applied > 0 && points.length >= applied
           && points[applied - 1]?.timeMs === this.indicatorLastAppliedTimeMs.get(d.key);
-        if (applied === 0 || points.length < applied || !continues) {
+        // A late correction can leave both the length and tail timestamp unchanged.
+        // The store revision is the cheap signal for that case; setData is the only
+        // safe way to reconcile an already-applied historical point.
+        const historicalCorrection = appliedRevision !== undefined && revision !== appliedRevision
+          && points.length === applied && continues
+          && lastKey === this.indicatorLastKey.get(d.key);
+        if (applied === 0 || points.length < applied || !continues || historicalCorrection) {
           // First application, the series shrank (e.g. a full recompute produced
           // fewer points), or the store handed back a different generation —
           // only setData() is safe.
@@ -771,6 +783,7 @@ export class ChartController {
         }
         this.indicatorApplied.set(d.key, points.length);
         this.indicatorLastKey.set(d.key, lastKey);
+        this.indicatorLastRevision.set(d.key, revision);
         if (last) this.indicatorLastAppliedTimeMs.set(d.key, last.timeMs);
         else this.indicatorLastAppliedTimeMs.delete(d.key);
       }
@@ -892,6 +905,7 @@ export class ChartController {
       this.indicatorApplied.delete(k);
       this.indicatorLastKey.delete(k);
       this.indicatorLastAppliedTimeMs.delete(k);
+      this.indicatorLastRevision.delete(k);
     }
     this.indicators.delete(instanceId);
     if (entry.inst.type === "VOLUME") {
@@ -976,6 +990,7 @@ export class ChartController {
     this.indicatorApplied.clear();
     this.indicatorLastKey.clear();
     this.indicatorLastAppliedTimeMs.clear();
+    this.indicatorLastRevision.clear();
     // Wipe the previous (symbol, timeframe)'s bars immediately — otherwise a
     // switch to a series that's empty or slow to arrive (e.g. Daily -> a cold
     // 1m symbol) leaves the old timeframe's candles frozen on screen forever

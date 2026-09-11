@@ -8,6 +8,7 @@ import { LIGHT, DARK } from "../palette";
 import type { Bar } from "../../wire/contract";
 import { defaultVolumeIndicator, withDefaultParams } from "./indicatorSeries";
 import type { Band } from "./sessions";
+import { IndicatorStore } from "../../data/IndicatorStore";
 
 function fakeSeries(onAppend?: () => void): LwcSeries & { calls: string[]; updates: unknown[]; setDataCalls: unknown[][]; orderCalls: number[]; optionCalls: unknown[] } {
   const calls: string[] = [];
@@ -29,6 +30,7 @@ function fakeSeries(onAppend?: () => void): LwcSeries & { calls: string[]; updat
     },
     update: (bar) => {
       const time = timeOf(bar);
+      if (time !== null && time < lastTime) throw new Error("Cannot update oldest data");
       if (time !== null && time > lastTime) { onAppend?.(); lastTime = time; }
       calls.push("update"); updates.push(bar);
     },
@@ -109,10 +111,10 @@ function mutableBarReader(initial: Bar[]): BarReader & { set: (b: Bar[]) => void
 function barReaderByTf(byTf: Record<string, Bar[]>): BarReader {
   return { series: (_symbol, tf) => byTf[tf] ?? [] };
 }
-const emptyIndicators: IndicatorController = { series: () => [], reset: () => {} };
+const emptyIndicators: IndicatorController = { series: () => [], reset: () => {}, getRev: () => 0 };
 const addVolume = (ctrl: ChartController): void => { ctrl.addIndicator(defaultVolumeIndicator("c1")); };
 function indicatorReaderOf(points: { timeMs: number; value: number }[]): IndicatorController {
-  return { series: () => points, reset: () => {} };
+  return { series: () => points, reset: () => {}, getRev: () => 0 };
 }
 // A reader whose series() result can be swapped between sync() calls — simulates
 // IndicatorStore handing back a fresh generation (e.g. a snapshot for a different
@@ -120,7 +122,13 @@ function indicatorReaderOf(points: { timeMs: number; value: number }[]): Indicat
 // IndicatorStore.reset: drops the points, so a post-reset sync() can't redraw them.
 function mutableIndicatorReader(initial: { timeMs: number; value: number }[]): IndicatorController & { set: (pts: { timeMs: number; value: number }[]) => void } {
   let points = initial;
-  return { series: () => points, set: (next) => { points = next; }, reset: () => { points = []; } };
+  let revision = 0;
+  return {
+    series: () => points,
+    set: (next) => { points = next; revision++; },
+    reset: () => { points = []; revision++; },
+    getRev: () => revision,
+  };
 }
 function commandSpy(): CommandSender & { names: string[]; calls: Array<{ name: string; args: unknown }> } {
   const names: string[] = [];
@@ -1273,6 +1281,51 @@ describe("ChartController", () => {
     expect(ind.calls.filter((c) => c === "setData")).toHaveLength(3); // full setData again post-reload
   });
 
+  it("keeps a 10s indicator chronological through a premarket opening burst", () => {
+    const open = Date.parse("2026-09-11T08:00:00Z"); // 04:00 ET
+    const key = "vwap-1";
+    const indicators = new IndicatorStore();
+    indicators.apply({ kind: "snapshot", topic: "md.indicator", key, payload: [
+      { timeMs: open - 10_000, value: 1 },
+    ] });
+    const facade = fakeFacade();
+    const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "10s" }, {
+      bars: barReaderOf([tenSecondBar(new Date(open - 10_000).toISOString(), 1)]),
+      indicators, commands: commandSpy(),
+    });
+    ctrl.mount();
+    addVolume(ctrl);
+    ctrl.addIndicator({ instanceId: key, type: "VWAP", params: {} });
+    const line = facade.created.find((c) => c.kind === "line")!.series;
+
+    ctrl.sync();
+    indicators.apply({ kind: "delta", topic: "md.indicator", key, payload: { timeMs: open + 10_000, value: 2 } });
+    ctrl.sync();
+
+    const setDataBeforeLate = line.setDataCalls.length;
+    indicators.apply({ kind: "delta", topic: "md.indicator", key, payload: { timeMs: open, value: 1.5 } });
+    ctrl.sync();
+    expect(line.setDataCalls).toHaveLength(setDataBeforeLate + 1);
+    expect(line.setDataCalls.at(-1)).toEqual([
+      { time: (open - 10_000) / 1000, value: 1 },
+      { time: open / 1000, value: 1.5 },
+      { time: (open + 10_000) / 1000, value: 2 },
+    ]);
+
+    indicators.apply({ kind: "delta", topic: "md.indicator", key, payload: { timeMs: open, value: 1.75 } });
+    ctrl.sync();
+    expect(line.setDataCalls.at(-1)).toEqual([
+      { time: (open - 10_000) / 1000, value: 1 },
+      { time: open / 1000, value: 1.75 },
+      { time: (open + 10_000) / 1000, value: 2 },
+    ]);
+
+    indicators.apply({ kind: "delta", topic: "md.indicator", key, payload: { timeMs: open + 20_000, value: 3 } });
+    ctrl.sync();
+    expect(line.setDataCalls).toHaveLength(setDataBeforeLate + 2);
+    expect(line.updates.at(-1)).toEqual({ time: (open + 20_000) / 1000, value: 3 });
+  });
+
   it("setSymbol clears the previous symbol's indicator points from the shared store, not just the LWC series", () => {
     // Regression test: resetForReload used to clear the candle/Volume series but
     // leave each indicator's LWC series AND its IndicatorStore entry (keyed by
@@ -1908,6 +1961,7 @@ describe("ChartController chart settings", () => {
     const indicators: IndicatorController = {
       series: () => { storeReads++; return []; },
       reset: () => { throw new Error("local Volume must not reset the indicator store"); },
+      getRev: () => 0,
     };
     const ctrl = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },
       { bars: barReaderOf([bar("2026-07-08T13:30:00Z", 11)]), indicators, commands: cmd });

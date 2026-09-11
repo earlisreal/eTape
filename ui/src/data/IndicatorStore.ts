@@ -3,9 +3,9 @@ import type { SnapshotMsg, DeltaMsg } from "../wire/contract";
 
 export interface IndicatorPoint { timeMs: number; value: number }
 
-// One series per indicator instanceId (delivered as the message `key`). Snapshot
-// replaces the whole series (backfill); delta appends a new point, or upserts the
-// last point in place when timeMs matches (the current in-progress bar's value).
+// One strictly ascending, unique series per indicator instanceId (delivered as the
+// message `key`). Snapshot replaces the whole series (backfill); delta appends a
+// new point, or inserts/upserts at its chronological position when it arrives late.
 export class IndicatorStore extends PaintStore {
   private readonly byInstance = new Map<string, IndicatorPoint[]>();
   // Bumped per instanceId on every apply()/reset() for that id — backs the
@@ -20,7 +20,9 @@ export class IndicatorStore extends PaintStore {
   apply(m: SnapshotMsg | DeltaMsg): void {
     const id = m.key ?? "";
     if (m.kind === "snapshot") {
-      const pts = (m.payload as IndicatorPoint[]).slice().sort((a, b) => a.timeMs - b.timeMs);
+      const byTime = new Map<number, IndicatorPoint>();
+      for (const point of m.payload as IndicatorPoint[]) byTime.set(point.timeMs, point);
+      const pts = [...byTime.values()].sort((a, b) => a.timeMs - b.timeMs);
       this.byInstance.set(id, pts);
       this.bumpRev(id);
       this.markDirty();
@@ -29,8 +31,14 @@ export class IndicatorStore extends PaintStore {
     const pt = m.payload as IndicatorPoint;
     const arr = this.byInstance.get(id) ?? [];
     const last = arr[arr.length - 1];
-    if (last && last.timeMs === pt.timeMs) arr[arr.length - 1] = pt;
-    else arr.push(pt);
+    if (!last || pt.timeMs > last.timeMs) {
+      arr.push(pt); // common case: a genuinely newer point at the tail
+    } else {
+      let i = arr.length - 1;
+      while (i >= 0 && arr[i].timeMs > pt.timeMs) i--;
+      if (i >= 0 && arr[i].timeMs === pt.timeMs) arr[i] = pt;
+      else arr.splice(i + 1, 0, pt);
+    }
     this.byInstance.set(id, arr);
     this.bumpRev(id);
     this.markDirty();

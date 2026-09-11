@@ -39,6 +39,7 @@ export default defineConfig({
           include: [
             'src/data/MarketClock.test.ts',
             'src/data/BarStore.test.ts',
+            'src/data/IndicatorStore.test.ts',
             'src/render/chart/barClose.test.ts',
             'src/render/chart/ChartController.test.ts',
             'src/render/chart/visibleExtremaPrimitive.test.ts',
