@@ -17,7 +17,7 @@ import { timeframeToMs } from "../../render/chart/drawings/geometry";
 import { bucketStartMs, type Timeframe } from "../../render/chart/barBucket";
 import { aggregateFillMarkers } from "../../render/chart/fillAggregate";
 import { isIntradayTimeframe, latestEligibleCountdownBar } from "../../render/chart/barClose";
-import { formatPrice } from "../../render/format";
+import { formatPrice, quoteDecimals } from "../../render/format";
 import type { Palette } from "../../render/palette";
 import { useTheme } from "../ThemeProvider";
 import { DEFAULT_RECT_FILL_OPACITY, type Drawing } from "../../render/chart/drawings/model";
@@ -1089,7 +1089,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
             onClosePane={closePane} onToggleCollapsePane={togglePaneCollapsed}
             legendRef={legendRef} />
           {showBarCloseTimer && lastPriceTag && (
-            <BarCloseTimer now={stores.marketClock.nowMs} chrome={chrome} timeframe={timeframe} price={formatPrice(lastPriceTag.price, 2)} lastPriceY={lastPriceTag.y}
+            <BarCloseTimer now={stores.marketClock.nowMs} chrome={chrome} timeframe={timeframe} price={formatPrice(lastPriceTag.price, quoteDecimals(lastPriceTag.price))} lastPriceY={lastPriceTag.y}
               rightAxisWidth={rightAxisWidth} paneBottom={paneOffsets[1] ?? height} up={lastPriceTag.up} />
           )}
           {selection && (

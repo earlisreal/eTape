@@ -1359,10 +1359,10 @@ describe("ChartPanel", () => {
         seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
       } }));
       await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-      pushLiveBar(stores, "US.AAPL", "10s", 100, 100.5);
+      pushLiveBar(stores, "US.AAPL", "10s", 0.1234, 0.1234);
       act(() => { getSurface().paint(); });
       expect(getByTestId("bar-close-timer")).toBeTruthy();
-      expect(getByTestId("bar-close-timer-price").textContent).toBe("100.50");
+      expect(getByTestId("bar-close-timer-price").textContent).toBe("0.1234");
     } finally {
       now.mockRestore();
     }
@@ -1379,7 +1379,7 @@ describe("ChartPanel", () => {
       pushLiveBar(stores, "US.AAPL", "10s", 100, 101.25, true, "2026-07-09T13:31:10.000Z");
       act(() => { getSurface().paint(); });
       expect(getByTestId("bar-close-timer")).toBeTruthy();
-      expect(getByTestId("bar-close-timer-price").textContent).toBe("101.25");
+      expect(getByTestId("bar-close-timer-price").textContent).toBe("101.250");
     } finally {
       now.mockRestore();
     }
@@ -1413,7 +1413,7 @@ describe("ChartPanel", () => {
       pushLiveBar(stores, "US.AAPL", "10s", 101, 101.25, true, "2026-07-09T13:31:20.000Z");
       act(() => { getSurface().paint(); });
       expect(getByTestId("bar-close-timer")).toBeTruthy();
-      expect(getByTestId("bar-close-timer-price").textContent).toBe("100.00");
+      expect(getByTestId("bar-close-timer-price").textContent).toBe("100.000");
     } finally {
       now.mockRestore();
     }
