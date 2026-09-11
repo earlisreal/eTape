@@ -41,6 +41,7 @@ export default defineConfig({
             'src/data/BarStore.test.ts',
             'src/render/chart/barClose.test.ts',
             'src/render/chart/ChartController.test.ts',
+            'src/render/chart/visibleExtremaPrimitive.test.ts',
             'src/render/chart/chartTheme.test.ts',
             'src/render/chart/indicatorSeries.test.ts',
             'src/render/chart/sessions.test.ts',

@@ -21,6 +21,11 @@ import { uiLog } from "../../logging/logger";
 export interface BarReader { series(symbol: string, timeframe: string): Bar[] }
 // Display-only extension. This never enters BarStore or engine-facing paths.
 export type DisplayBar = Bar & { synthetic?: true; dataGap?: true };
+export interface VisibleExtremaAnchor { logical: number; price: number }
+export interface VisibleExtremaProjection {
+  high: VisibleExtremaAnchor | null;
+  low: VisibleExtremaAnchor | null;
+}
 export interface IndicatorReader { series(instanceId: string): { timeMs: number; value: number }[] }
 // IndicatorReader plus the ability to drop a series — resetForReload uses this to
 // wipe the previous symbol's points instead of leaving them stranded in the shared
@@ -562,6 +567,36 @@ export class ChartController {
   barsMs(): readonly number[] { return this.barsMsCache; }
   displayBars(): readonly DisplayBar[] { return this.displayedBars; }
 
+  visibleExtrema(): VisibleExtremaProjection {
+    const range = this.facade.getVisibleLogicalRange();
+    const bars = this.displayedBars;
+    if (!range || !Number.isFinite(range.from) || !Number.isFinite(range.to) || bars.length === 0) {
+      return { high: null, low: null };
+    }
+    const from = Math.max(0, Math.floor(range.from));
+    const to = Math.min(bars.length - 1, Math.ceil(range.to));
+    if (from > to) return { high: null, low: null };
+
+    const closeOnly = this.usesCloseValues();
+    let high: VisibleExtremaAnchor | null = null;
+    let low: VisibleExtremaAnchor | null = null;
+    for (let logical = from; logical <= to; logical++) {
+      const bar = bars[logical];
+      if (bar.synthetic || bar.dataGap) continue;
+      if (closeOnly) {
+        if (!Number.isFinite(bar.c)) continue;
+        if (!high || bar.c >= high.price) high = { logical, price: bar.c };
+        if (!low || bar.c <= low.price) low = { logical, price: bar.c };
+        continue;
+      }
+      if (Number.isFinite(bar.h) && (!high || bar.h >= high.price)) high = { logical, price: bar.h };
+      if (Number.isFinite(bar.l) && (!low || bar.l <= low.price)) low = { logical, price: bar.l };
+    }
+    return { high, low };
+  }
+
+  priceFormatDecimals(): number { return this.appliedPriceDecimals; }
+
   // bars.length as of the last refreshBarCaches call — a bookkeeping cursor kept
   // in sync with lastAppliedCount, exposed so tests can assert the caches never
   // silently fall behind the applied series (no branch decision consults it —
@@ -993,10 +1028,12 @@ export class ChartController {
   // single close value for line/area (LWC line/area series read `.value`).
   private mainPoint(b: DisplayBar): object {
     if (b.dataGap) return { time: toLwcTime(b.bucketStart) };
-    return this.chartType === "line" || this.chartType === "area"
+    return this.usesCloseValues()
       ? { time: toLwcTime(b.bucketStart), value: b.c }
       : toCandle(b);
   }
+
+  private usesCloseValues(): boolean { return this.chartType === "line" || this.chartType === "area"; }
 
   private visibleCandleRange(): PriceRange | null {
     const range = this.facade.getVisibleLogicalRange();

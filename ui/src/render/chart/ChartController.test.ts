@@ -2259,3 +2259,74 @@ describe("ChartController.lastSyncDaySegmentBuilds (Task 6 diagnostic probe)", (
     expect(ctrl.lastSyncDaySegmentBuilds()).toBe(0);
   });
 });
+
+describe("ChartController.visibleExtrema", () => {
+  const extremaBar = (bucketStart: string, o: number, h: number, l: number, c: number,
+    extras: { synthetic?: true; dataGap?: true } = {}): Bar => ({
+    symbol: "US.AAPL", timeframe: "1m", bucketStart, o, h, l, c, v: 100, inProgress: false, ...extras,
+  });
+
+  it("selects candle highs/lows, includes clipped edge bars, and keeps the rightmost tie", () => {
+    const bars = [
+      extremaBar("2026-07-06T13:30:00Z", 10, 20, 8, 12),
+      extremaBar("2026-07-06T13:31:00Z", 11, 30, 7, 13),
+      extremaBar("2026-07-06T13:32:00Z", 12, 30, 6, 14),
+    ];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    facade.visibleLogicalRange = { from: 0.25, to: 2.25 };
+    ctrl.sync();
+
+    expect(ctrl.visibleExtrema()).toEqual({
+      high: { logical: 2, price: 30 },
+      low: { logical: 2, price: 6 },
+    });
+  });
+
+  it("uses wick highs/lows for bar charts and includes displayed extended-hours bars", () => {
+    const bars = [
+      extremaBar("2026-07-06T09:00:00Z", 10, 40, 4, 15),
+      extremaBar("2026-07-06T13:30:00Z", 10, 20, 8, 12),
+    ];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    facade.visibleLogicalRange = { from: 0, to: 1 };
+    ctrl.setChartType("bar");
+    ctrl.sync();
+
+    expect(ctrl.visibleExtrema()).toEqual({
+      high: { logical: 0, price: 40 },
+      low: { logical: 0, price: 4 },
+    });
+  });
+
+  it("uses close values for line and area charts and ignores data gaps and No-Trade Bars", () => {
+    const bars = [
+      extremaBar("2026-07-06T13:30:00Z", 10, 50, 1, 12),
+      extremaBar("2026-07-06T13:31:00Z", 10, 99, 0, 99, { synthetic: true }),
+      extremaBar("2026-07-06T13:32:00Z", 10, 98, 2, 98, { dataGap: true }),
+      extremaBar("2026-07-06T13:33:00Z", 10, 40, 4, 15),
+    ];
+    for (const chartType of ["line", "area"] as const) {
+      const { facade, ctrl } = make(barReaderOf(bars));
+      facade.visibleLogicalRange = { from: 0, to: 3 };
+      ctrl.setChartType(chartType);
+      ctrl.sync();
+
+      expect(ctrl.visibleExtrema()).toEqual({
+        high: { logical: 3, price: 15 },
+        low: { logical: 0, price: 12 },
+      });
+    }
+  });
+
+  it("returns no anchors when the visible range has no eligible price point", () => {
+    const bars = [
+      extremaBar("2026-07-06T13:30:00Z", 10, 10, 10, 10, { synthetic: true }),
+      extremaBar("2026-07-06T13:31:00Z", 10, 10, 10, 10, { dataGap: true }),
+    ];
+    const { facade, ctrl } = make(barReaderOf(bars));
+    facade.visibleLogicalRange = { from: 0, to: 1 };
+    ctrl.sync();
+
+    expect(ctrl.visibleExtrema()).toEqual({ high: null, low: null });
+  });
+});

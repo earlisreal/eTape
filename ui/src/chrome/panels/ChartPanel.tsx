@@ -6,6 +6,7 @@ import { ChartController, type ManagedViewportMode } from "../../render/chart/Ch
 import { clampRightScroll, RIGHT_OFFSET_BARS, usesBoundaryManagedFollow, type ChartType } from "../../render/chart/chartTheme";
 import type { ChartApiFacade, LwcSeries } from "../../render/chart/ChartApiFacade";
 import { DiamondFillPrimitive } from "../../render/chart/diamondPrimitive";
+import { VisibleExtremaPrimitive } from "../../render/chart/visibleExtremaPrimitive";
 import { SessionShadingPrimitive } from "../../render/chart/sessionPrimitive";
 import {
   CHART_INDICATOR_MODEL_VERSION, INDICATOR_CATALOG, normalizeChartIndicators, volumeInstanceId,
@@ -53,7 +54,7 @@ type PendingIndicatorHydration = {
 
 // Adapts a real LWC v5 IChartApi to the controller's minimal ChartApiFacade.
 function makeFacade(chart: IChartApi, palette: Palette): {
-  facade: ChartApiFacade; setPalette: (p: Palette) => void; drawings: DrawingsPrimitive;
+  facade: ChartApiFacade; setPalette: (p: Palette) => void; drawings: DrawingsPrimitive; visibleExtrema: VisibleExtremaPrimitive;
 } {
   let main: ISeriesApi<"Candlestick" | "Bar" | "Line" | "Area"> | null = null;
   let sessionAttached = false;
@@ -61,6 +62,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
   const session = new SessionShadingPrimitive(palette);
   const diamonds = new DiamondFillPrimitive(palette);
   const drawings = new DrawingsPrimitive(palette);
+  const visibleExtrema = new VisibleExtremaPrimitive(palette);
 
   const facade: ChartApiFacade = {
     setMainSeries: (kind, options) => {
@@ -78,6 +80,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
       // they survive a chart-type swap; the session pane-primitive attaches once.
       main.attachPrimitive(diamonds);
       main.attachPrimitive(drawings);
+      main.attachPrimitive(visibleExtrema);
       if (!sessionAttached) { chart.panes()[0]?.attachPrimitive?.(session); sessionAttached = true; }
       return s as unknown as LwcSeries;
     },
@@ -134,7 +137,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     priceScaleWidth: () => chart.priceScale("right").width(),
     remove: () => chart.remove(),
   };
-  return { facade, setPalette: (p) => { session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); }, drawings };
+  return { facade, setPalette: (p) => { session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); visibleExtrema.setPalette(p); }, drawings, visibleExtrema };
 }
 
 export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange, group: groupProp, symbol: symbolProp, monitoring }: PanelProps): JSX.Element {
@@ -233,6 +236,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const refreshSelRef = useRef<() => void>(() => {});
   const facadeRef = useRef<ChartApiFacade | null>(null);
   const drawingsPrimRef = useRef<DrawingsPrimitive | null>(null);
+  const visibleExtremaPrimRef = useRef<VisibleExtremaPrimitive | null>(null);
+  const refreshExtremaRef = useRef<() => void>(() => {});
 
   useEffect(() => { tfRef.current = timeframe; }, [timeframe]);
   useEffect(() => {
@@ -284,12 +289,13 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       if (selectionFrame !== null) return;
       selectionFrame = requestAnimationFrame(() => { selectionFrame = null; refreshSelRef.current?.(); });
     };
-    const { facade, setPalette, drawings } = makeFacade(chart, palette);
+    const { facade, setPalette, drawings, visibleExtrema } = makeFacade(chart, palette);
     let viewportGeneration = 0;
     let indicatorReloadPending = false;
     let chartSnapshotLoaded = false;
     let chartSnapshotPending = false;
     let disposed = false;
+    let extremaDirty = true;
 
     const indicatorKeys = () => instancesRef.current
       .filter((inst) => inst.type !== "VOLUME")
@@ -393,12 +399,16 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         const width = range.to - range.from;
         timeScale.setVisibleLogicalRange({ from: (-0.5 - width) as Logical, to: -0.5 as Logical });
         scheduleRefreshSelection();
+        extremaDirty = true;
+        forceRepaintRef.current = true;
         return;
       }
       const visibleBars = range ? range.to - range.from : RIGHT_OFFSET_BARS;
       const target = clampRightScroll(timeScale.scrollPosition(), visibleBars);
       if (target !== null) timeScale.scrollToPosition(target, false);
       scheduleRefreshSelection();
+      extremaDirty = true;
+      forceRepaintRef.current = true;
     };
     timeScale.subscribeVisibleLogicalRangeChange(clampRight);
     const getVisibleLogicalRange = (timeScale as { getVisibleLogicalRange?: () => LogicalRange | null }).getVisibleLogicalRange;
@@ -416,6 +426,17 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       });
     controller.mount();
     controllerRef.current = controller;
+    visibleExtremaPrimRef.current = visibleExtrema;
+    visibleExtrema.setVisible(chartSettingsRef.current.visibleExtrema);
+    const refreshVisibleExtrema = () => {
+      if (!extremaDirty) return;
+      extremaDirty = false;
+      visibleExtrema.setProjection(
+        chartSettingsRef.current.visibleExtrema ? controller.visibleExtrema() : { high: null, low: null },
+        controller.priceFormatDecimals(),
+      );
+    };
+    refreshExtremaRef.current = () => { extremaDirty = true; refreshVisibleExtrema(); };
 
     // LWC's visible-range callback has no source marker, so it cannot tell a
     // user pan from a setData/update or a range restoration. Record intent only
@@ -543,6 +564,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       chartSnapshotLoaded = false;
 	  chartSnapshotPending = false;
       controller.setSymbol(currentSymbol);
+      refreshExtremaRef.current?.();
       backfillFills(currentSymbol);
       stores.drawings.ensureLoaded(currentSymbol);
       interactionRef.current?.onSymbolChanged();
@@ -678,6 +700,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         const browserNowMs = Date.now();
         const nowMs = stores.marketClock.nowMs();
         if (chartSnapshotLoaded) controller.sync(nowMs);
+        refreshExtremaRef.current?.();
         const paintedBars = chartSnapshotLoaded ? stores.bars.series(currentSymbol, tfRef.current) : [];
         if (pendingFirstPaint && pendingFirstPaint.symbol === currentSymbol && pendingFirstPaint.timeframe === tfRef.current && paintedBars.length > 0) {
           const timing = pendingFirstPaint;
@@ -777,6 +800,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       if (legendFrame !== null) cancelAnimationFrame(legendFrame);
       if (selectionFrame !== null) cancelAnimationFrame(selectionFrame);
       if (firstPaintLogFrame !== null) cancelAnimationFrame(firstPaintLogFrame);
+      refreshExtremaRef.current = () => {};
+      visibleExtremaPrimRef.current = null;
       interaction.dispose(); controller.dispose(); controllerRef.current = null; interactionRef.current = null;
     };
     // Intentionally keyed only by panel identity and symbol availability:
@@ -850,7 +875,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     // ref authoritative now; otherwise Weekly switch resubscribes engine to W
     // while the snapshot query still requests stale D (and vice versa).
     tfRef.current = tf;
-    setTf(tf); controllerRef.current?.setTimeframe(tf); applySymbolRef.current?.(); forceRepaintRef.current = true; persist({ timeframe: tf });
+    setTf(tf); controllerRef.current?.setTimeframe(tf); refreshExtremaRef.current?.(); applySymbolRef.current?.(); forceRepaintRef.current = true; persist({ timeframe: tf });
   };
   // Every mutation goes through instancesRef (updated synchronously here, not
   // just by the post-render effect below): two mutations in the same tick would
@@ -955,6 +980,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     setChartSettings(s);
     const c = controllerRef.current;
     c?.setShowSessions(s.sessionShading); c?.setGrid(s.grid); c?.setWatermark(s.watermark);
+    visibleExtremaPrimRef.current?.setVisible(s.visibleExtrema);
+    refreshExtremaRef.current?.();
     forceRepaintRef.current = true;
     persist({ chartSettings: chartSettingsRollbackProjection(rawChartSettingsRef.current, s), chartIndicatorModelVersion: CHART_INDICATOR_MODEL_VERSION });
   };

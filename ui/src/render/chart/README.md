@@ -77,3 +77,11 @@ through imperative store/controller updates. Preserve chronological merge/dedupe
 and controller disposal. Focused tests run with `npm exec vitest -- run
 --project chart-core src/render/chart/ChartController.test.ts`; the full UI suite
 runs with `npm test`.
+
+## Visible high/low
+
+The chart controller projects the eligible high/low anchors from its displayed
+bars and current visible logical range. `VisibleExtremaPrimitive` renders the
+projection imperatively on the main price series, so live updates and viewport
+changes do not enter React state; synthetic No-Trade Bars and Data Gaps are
+excluded.

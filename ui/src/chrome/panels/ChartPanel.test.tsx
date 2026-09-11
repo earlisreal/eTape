@@ -53,6 +53,7 @@ import { DEFAULT_CHART_SETTINGS } from "./tv/ChartSettingsDialog";
 import { FakeDrawingBus, FakeDrawingBusHub } from "../../../test/fakes";
 import { perf } from "../../perf/PerfMonitor";
 import { DrawingInteraction } from "../../render/chart/drawings/interaction";
+import { VisibleExtremaPrimitive } from "../../render/chart/visibleExtremaPrimitive";
 
 // jsdom has no ResizeObserver; ChartPanel's resize wiring only needs observe/disconnect.
 class MockResizeObserver {
@@ -490,6 +491,33 @@ describe("ChartPanel", () => {
     const { getByRole, onConfigChange } = renderChart();
     fireEvent.click(getByRole("button", { name: "timeframe 5m" }));
     expect(onConfigChange).toHaveBeenCalledWith(expect.objectContaining({ timeframe: "5m" }));
+  });
+
+  it("defaults visible high/low on and persists immediate off/on changes", () => {
+    const setVisible = vi.spyOn(VisibleExtremaPrimitive.prototype, "setVisible");
+    try {
+      const { getByRole, onConfigChange } = renderChart("c1", undefined, undefined, { chartSettings: { grid: true } });
+      expect(setVisible).toHaveBeenCalledWith(true);
+
+      fireEvent.click(getByRole("button", { name: "chart settings" }));
+      fireEvent.click(screen.getByLabelText("show visible high/low"));
+      fireEvent.click(getByRole("button", { name: "Ok" }));
+      expect(setVisible).toHaveBeenLastCalledWith(false);
+      expect(onConfigChange).toHaveBeenLastCalledWith(expect.objectContaining({
+        chartSettings: expect.objectContaining({ visibleExtrema: false }),
+      }));
+
+      fireEvent.click(getByRole("button", { name: "chart settings" }));
+      expect((screen.getByLabelText("show visible high/low") as HTMLInputElement).checked).toBe(false);
+      fireEvent.click(screen.getByLabelText("show visible high/low"));
+      fireEvent.click(getByRole("button", { name: "Ok" }));
+      expect(setVisible).toHaveBeenLastCalledWith(true);
+      expect(onConfigChange).toHaveBeenLastCalledWith(expect.objectContaining({
+        chartSettings: expect.objectContaining({ visibleExtrema: true }),
+      }));
+    } finally {
+      setVisible.mockRestore();
+    }
   });
 
   it("queries the newly selected timeframe synchronously", async () => {
