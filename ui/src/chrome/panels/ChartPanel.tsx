@@ -509,7 +509,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       stores.drawings,
       {
         symbol: () => currentSymbol,
-        bars: () => stores.bars.series(currentSymbol, tfRef.current),
+        bars: () => controller.displayBars().length ? controller.displayBars() : stores.bars.series(currentSymbol, tfRef.current),
         timeframeMs: () => timeframeToMs(tfRef.current as Timeframe),
       },
       {

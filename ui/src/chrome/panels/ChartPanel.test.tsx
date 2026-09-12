@@ -695,6 +695,34 @@ describe("ChartPanel", () => {
     ]);
   });
 
+  it("maps a 10s drawing anchor to the displayed No-Trade slot under the pointer", async () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-07-09T13:30:20Z"));
+    try {
+      const bars: Bar[] = ["2026-07-09T13:30:00Z", "2026-07-09T13:30:20Z"].map((bucketStart) => ({
+        symbol: "US.AAPL", timeframe: "10s", bucketStart, o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false,
+      }));
+      const { stores, getSurface, getByRole, getByTestId } = renderChartCapturingSurface({ timeframe: "10s" }, {
+        symbol: "US.AAPL", timeframe: "10s", fromMs: Date.parse(bars[0].bucketStart), toMs: Date.parse(bars[1].bucketStart) + 10_000,
+        bars, indicators: [], historyRevision: 1,
+      });
+      await act(async () => {
+        stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+          seq: 1, ts: "2026-07-09T13:30:20Z", kind: "chart-ready", detail: "US.AAPL",
+        } });
+        await Promise.resolve(); await Promise.resolve();
+      });
+      act(() => getSurface().paint());
+
+      timeScaleApi.coordinateToLogical.mockReturnValueOnce(1);
+      fireEvent.click(getByRole("button", { name: "horizontal line" }));
+      fireEvent.pointerDown(getByTestId("chart-host"), { button: 0, clientX: 10, clientY: 100 });
+
+      expect(stores.drawings.forSymbol("US.AAPL")[0].anchors[0].timeMs).toBe(Date.parse("2026-07-09T13:30:10Z"));
+    } finally {
+      now.mockRestore();
+    }
+  });
+
   it("does not reset a loaded VWAP when the linked group focuses the displayed symbol", async () => {
     const key = "c1:VWAP-0";
     const point = { timeMs: 1, value: 100.5 };
