@@ -26,7 +26,7 @@ describe("chartTheme", () => {
     // reintroduced without a compile error.
     expect(o.timeScale?.fixLeftEdge).toBe(false);
     expect(o.timeScale?.rightOffset).toBe(RIGHT_OFFSET_BARS);
-    expect(o.rightPriceScale?.minimumWidth).toBe(32);
+    expect(o.rightPriceScale?.minimumWidth).toBe(52);
   });
 
   it("lets eTape manage 10s/1m follow while retaining native follow elsewhere", () => {

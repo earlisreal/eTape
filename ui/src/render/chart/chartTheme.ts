@@ -177,7 +177,7 @@ export function chartOptions(p: Palette, timeframe: string): DeepChartOptions {
       horzLine: { color: p.crosshair },
     },
     // Keep the right-axis gutter stable so changing label widths cannot shift the plot.
-    rightPriceScale: { borderColor: p.border, scaleMargins: CANDLE_SCALE_MARGINS_WITHOUT_VOLUME, minimumWidth: 32 },
+    rightPriceScale: { borderColor: p.border, scaleMargins: CANDLE_SCALE_MARGINS_WITHOUT_VOLUME, minimumWidth: 52 },
     localization: { timeFormatter: (time) => timeFormatter(time, timeframe) },
     timeScale: {
       borderColor: p.border, rightOffset: RIGHT_OFFSET_BARS, secondsVisible: true, timeVisible: true,
