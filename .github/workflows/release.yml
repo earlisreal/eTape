@@ -77,7 +77,7 @@ jobs:
               --mount "type=bind,source=$PWD/$archive,target=/tmp/etape-release.tar.gz,readonly" \
               --mount "type=bind,source=$PWD/scripts/smoke-linux-release.sh,target=/tmp/smoke-linux-release.sh,readonly" \
               "ubuntu:${ubuntu}" \
-              bash -c 'set -euo pipefail; apt-get update; apt-get install -y --no-install-recommends ca-certificates curl procps; bash /tmp/smoke-linux-release.sh /tmp/etape-release.tar.gz'
+              bash -c 'set -euo pipefail; apt-get update; apt-get install -y --no-install-recommends ca-certificates curl procps; cp /tmp/etape-release.tar.gz "/tmp/$1"; bash /tmp/smoke-linux-release.sh "/tmp/$1"' bash "$archive"
           done
 
       - name: Upload build artifacts
