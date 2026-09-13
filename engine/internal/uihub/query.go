@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/buildinfo"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/locates"
@@ -96,6 +97,8 @@ func isAsyncQuery(name string) bool {
 
 func (q *queries) handleContext(ctx context.Context, name string, args json.RawMessage) any {
 	switch name {
+	case "QueryAppInfo":
+		return wsmsg.AppInfo{Version: buildinfo.Version}
 	case "QueryChartWindow":
 		var a wsmsg.QueryChartWindowArgs
 		if json.Unmarshal(args, &a) != nil || q.charts == nil || a.Symbol == "" || a.Timeframe == "" || (a.TailBars > 0) == (a.FromMs < a.ToMs) {

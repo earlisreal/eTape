@@ -23,7 +23,7 @@ describe("SettingsModal", () => {
     const { container } = render(<AppProviders><SettingsModal open={false} section="general" onSection={() => {}} onClose={() => {}} commands={mkCommands()} getWorkspace={mkWorkspace} onImportWorkspace={() => {}} toast={mkToast()} /></AppProviders>);
     expect(container.firstChild).toBeNull();
   });
-  it("shows the three sections and switches", () => {
+  it("shows the four sections and switches", () => {
     const onSection = vi.fn();
     render(<AppProviders><SettingsModal open section="general" onSection={onSection} onClose={() => {}} commands={mkCommands()} getWorkspace={mkWorkspace} onImportWorkspace={() => {}} toast={mkToast()} /></AppProviders>);
     // Codebase convention (see TopBar.test.tsx / Catalog.test.tsx) is plain
@@ -37,7 +37,7 @@ describe("SettingsModal", () => {
     fireEvent.click(screen.getByLabelText(/dark/i));
     expect(document.documentElement.dataset.theme).toBe("dark");
   });
-  it("has three nav items, routes to Venues & creds, and threads commands through to fire GetVenueSetup", async () => {
+  it("has four nav items, routes to Venues & creds, and threads commands through to fire GetVenueSetup", async () => {
     const commands = mkCommands();
     // A tiny stateful wrapper so clicking a nav item actually re-renders with
     // the new section — SettingsModal itself is controlled by its parent. Wrapped
@@ -51,7 +51,7 @@ describe("SettingsModal", () => {
     const { container } = render(<Wrapper />);
 
     const nav = screen.getByRole("navigation");
-    expect(within(nav).getAllByRole("button")).toHaveLength(3);
+    expect(within(nav).getAllByRole("button")).toHaveLength(4);
 
     const panel = (container.firstChild as HTMLElement).firstChild as HTMLElement;
     expect(panel.style.width).toBe("920px");

@@ -524,6 +524,9 @@ export interface SessionSnapshot {
 export interface BootStatus {
   phase: string;
 }
+export interface AppInfo {
+  version: string;
+}
 export interface SysEvent {
   seq: number /* int64 */;
   ts: string;

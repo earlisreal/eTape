@@ -47,6 +47,15 @@ func TestQueryFillsReturnsFills(t *testing.T) {
 	}
 }
 
+func TestQueryAppInfoReturnsVersion(t *testing.T) {
+	q := newQueries(&spyFills{}, clock.NewFake(time.Now()))
+	out := q.handle("QueryAppInfo", json.RawMessage(`{}`))
+	info, ok := out.(wsmsg.AppInfo)
+	if !ok || info.Version == "" {
+		t.Fatalf("expected app info with version, got %T %+v", out, out)
+	}
+}
+
 func TestQueryFillsEmptyOnError(t *testing.T) {
 	q := newQueries(&spyFills{err: errors.New("boom")}, clock.NewFake(time.Now()))
 	out := q.handle("QueryFills", json.RawMessage(`{"symbol":"X","fromMs":0,"toMs":1}`))

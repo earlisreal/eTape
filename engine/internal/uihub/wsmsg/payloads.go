@@ -442,6 +442,10 @@ type BootStatus struct {
 	Phase string `json:"phase"`
 }
 
+type AppInfo struct {
+	Version string `json:"version"`
+}
+
 type SysEvent struct {
 	Seq    int64  `json:"seq"`
 	Ts     string `json:"ts"`

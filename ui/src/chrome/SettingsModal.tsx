@@ -1,4 +1,5 @@
 import { GeneralSection } from "./GeneralSection";
+import { AboutSection } from "./AboutSection";
 import { OrderSettingsSection } from "./exec/OrderSettingsSection";
 import { VenuesSection } from "./exec/VenuesSection";
 import { BackupPanel } from "./BackupPanel";
@@ -13,17 +14,21 @@ import type { HealthStore } from "../data/HealthStore";
 import type { ExecStore } from "../data/ExecStore";
 import type { SessionStore } from "../data/SessionStore";
 
-export type SettingsSection = "general" | "orders" | "venues";
+export type SettingsSection = "general" | "orders" | "venues" | "about";
 const NAV: { id: SettingsSection; label: string }[] = [
   { id: "general", label: "General" },
   { id: "orders", label: "Orders & hotkeys" },
   { id: "venues", label: "Venues & creds" },
+  { id: "about", label: "About" },
 ];
 
 export function SettingsModal({ open, section, onSection, onClose, commands, getWorkspace, onImportWorkspace, toast, engineState, health, exec, session }:
   {
     open: boolean; section: SettingsSection; onSection: (s: SettingsSection) => void; onClose: () => void;
-    commands: { sendCommand(name: string, args: unknown): Promise<AckMsg> };
+    commands: {
+      sendCommand(name: string, args: unknown): Promise<AckMsg>;
+      sendQuery?(name: string, args: unknown): Promise<unknown>;
+    };
     getWorkspace: () => Workspace; onImportWorkspace: (ws: Workspace) => void; toast: ToastApi;
     // Optional (not required, unlike FeedStatusBanner's engineState) so
     // existing tests that render SettingsModal without it keep compiling;
@@ -85,6 +90,7 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
             </>
           )}
           {section === "venues" && <VenuesSection commands={commands} engineState={engineState} health={health} exec={exec} session={session} />}
+          {section === "about" && <AboutSection commands={commands} />}
         </section>
       </div>
     </div>
