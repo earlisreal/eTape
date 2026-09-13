@@ -18,11 +18,11 @@ Implementation completed on 2026-09-13; first-release manual checks remain.
 
 ## Current-code evidence
 
-- [Release workflow](../../.github/workflows/release.yml) builds Windows amd64
-  and macOS arm64, uploads archives, and publishes them for `v*` tags. Manual
-  dispatch uploads artifacts without publishing a release.
+- [Release workflow](../../.github/workflows/release.yml) builds Windows amd64,
+  macOS arm64, and Linux amd64, uploads archives, and publishes them for `v*`
+  tags. Manual dispatch uploads artifacts without publishing a release.
 - [Makefile](../../engine/Makefile) shares the UI embedding step and disables
-  CGO for release builds; there is no Linux release target yet.
+  CGO for release builds, including the Linux release target.
 - [CI](../../.github/workflows/ci.yml) already runs engine tests on Linux.
 - Linux uses the console entrypoint, Unix single-instance locking and restart,
   and `xdg-open` for the browser. Runtime state stays under `~/.eTape/`.
@@ -42,9 +42,10 @@ for file-level steps, acceptance checks, rollout, and risks.
 - The cross-compiled Linux amd64 archive passed the smoke check in Ubuntu 24.04
   WSL: executable mode, isolated demo boot, version/readiness logs, embedded
   index and JavaScript asset, and clean SIGTERM shutdown.
-- Ubuntu 26.04 container execution, Ubuntu Desktop browser/Ctrl+C checks, and a
-  manual GitHub release workflow run remain pre-release checks; this local host
-  has no running Docker daemon or Ubuntu 26.04/Desktop session.
+- The manual [GitHub release workflow run](https://github.com/earlisreal/eTape/actions/runs/34742374398)
+  passed build, staging, artifact upload, and Linux smoke checks on Ubuntu
+  24.04 and 26.04. Ubuntu Desktop browser/Ctrl+C checks remain pre-release
+  manual checks.
 
 ## Comments
 
