@@ -639,6 +639,33 @@ func TestMirrorNewsAndEventsCapBounded(t *testing.T) {
 	}
 }
 
+func TestMirrorEventsSnapshotRetainsLatestFeedState(t *testing.T) {
+	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 200, 2, 500, 2, 2)
+	assertFeedState := func(want string) {
+		t.Helper()
+		events := m.snapshotFrames(wsmsg.TopicSysEvents)[0].Payload.([]wsmsg.SysEvent)
+		var got []string
+		for _, event := range events {
+			if event.Kind == "feed-up" || event.Kind == "feed-down" {
+				got = append(got, event.Kind)
+			}
+		}
+		if len(got) != 1 || got[0] != want {
+			t.Fatalf("feed states in snapshot = %v, want [%s]", got, want)
+		}
+	}
+
+	m.applyPub(staged{Topic: wsmsg.TopicSysEvents, Payload: wsmsg.SysEvent{Seq: 1, Kind: "feed-down"}})
+	m.applyPub(staged{Topic: wsmsg.TopicSysEvents, Payload: wsmsg.SysEvent{Seq: 2, Kind: "gap"}})
+	m.applyPub(staged{Topic: wsmsg.TopicSysEvents, Payload: wsmsg.SysEvent{Seq: 3, Kind: "resync"}})
+	assertFeedState("feed-down")
+
+	m.applyPub(staged{Topic: wsmsg.TopicSysEvents, Payload: wsmsg.SysEvent{Seq: 4, Kind: "feed-up"}})
+	m.applyPub(staged{Topic: wsmsg.TopicSysEvents, Payload: wsmsg.SysEvent{Seq: 5, Kind: "gap"}})
+	m.applyPub(staged{Topic: wsmsg.TopicSysEvents, Payload: wsmsg.SysEvent{Seq: 6, Kind: "resync"}})
+	assertFeedState("feed-up")
+}
+
 func TestMirrorNewsUpsertsByID(t *testing.T) {
 	m := newMirror(nil, wsmsg.GlobalLimitsView{}, 200, 2, 500, 2, 2)
 	m.applyPub(staged{Topic: wsmsg.TopicNews, Payload: wsmsg.NewsItem{ID: "one", Symbols: []string{"US.AAPL"}, Headline: "shared"}})

@@ -282,6 +282,7 @@ func (c *Client) emit(s ConnState) {
 // until ctx is cancelled. It blocks; callers run it in a goroutine.
 func (c *Client) Run(ctx context.Context) error {
 	bo := newBackoff(c.opt.ReconnectMin, c.opt.ReconnectMax)
+	downReported := false
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -296,6 +297,12 @@ func (c *Client) Run(ctx context.Context) error {
 		}
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+		if established {
+			downReported = true // serveConn already emitted ConnDown on exit
+		} else if !downReported {
+			c.emit(ConnDown)
+			downReported = true
 		}
 		delay := bo.next()
 		if established && serveErr != nil {

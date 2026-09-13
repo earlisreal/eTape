@@ -245,6 +245,33 @@ func TestReconnectResubscribesReseedsAndEmitsResynced(t *testing.T) {
 	}
 }
 
+func TestInitialConnectionFailureEmitsDownOnce(t *testing.T) {
+	cli := New(Options{
+		Addr: "127.0.0.1:0", Clock: clock.System{},
+		DialTimeout: 50 * time.Millisecond, ReconnectMin: time.Millisecond, ReconnectMax: time.Millisecond,
+	})
+	f := NewOpenDFeed(cli, FeedOptions{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() { _ = cli.Run(ctx) }()
+	go func() { _ = f.Run(ctx) }()
+
+	select {
+	case ev := <-f.Events():
+		if _, ok := ev.(feed.ConnDownEvent); !ok {
+			t.Fatalf("first event = %#v, want ConnDownEvent", ev)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no ConnDownEvent after initial OpenD connection failure")
+	}
+
+	select {
+	case ev := <-f.Events():
+		t.Fatalf("duplicate event during the same outage: %#v", ev)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func countQotSubs(m *mockOpenD) int {
 	n := 0
 	for _, f := range m.snapshotRequests() {

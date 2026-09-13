@@ -137,13 +137,8 @@ func VerifyAccount(ctx context.Context, addr string, accountID uint64, env strin
 	client := opend.New(opend.Options{Addr: addr, ClientID: "etape-trade-probe", Clock: clk})
 	go func() { _ = client.Run(pctx) }()
 
-	select {
-	case st, ok := <-client.State():
-		if !ok || st != opend.ConnUp {
-			return nil, fmt.Errorf("moomoo: probe: connection failed")
-		}
-	case <-pctx.Done():
-		return nil, pctx.Err()
+	if err := waitForConnUp(pctx, client.State()); err != nil {
+		return nil, err
 	}
 
 	tc := newTrdClient(client, accountID, env, clk)
@@ -171,16 +166,27 @@ func ListAccounts(ctx context.Context, addr, clientID string, clk clock.Clock) (
 	client := opend.New(opend.Options{Addr: addr, ClientID: clientID, Clock: clk})
 	go func() { _ = client.Run(pctx) }()
 
-	select {
-	case st, ok := <-client.State():
-		if !ok || st != opend.ConnUp {
-			return nil, fmt.Errorf("moomoo: list accounts: connection failed")
-		}
-	case <-pctx.Done():
-		return nil, pctx.Err()
+	if err := waitForConnUp(pctx, client.State()); err != nil {
+		return nil, err
 	}
 
 	return fetchAccList(ctx, client)
+}
+
+func waitForConnUp(ctx context.Context, states <-chan opend.ConnState) error {
+	for {
+		select {
+		case state, ok := <-states:
+			if !ok {
+				return errors.New("moomoo: OpenD connection state closed")
+			}
+			if state == opend.ConnUp {
+				return nil
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 // EligibleLiveUS reports whether acc can back eTape's live-only moomoo

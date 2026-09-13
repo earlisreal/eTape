@@ -64,10 +64,11 @@ type mirror struct {
 	masterArmed  bool
 
 	// system
-	health  wsmsg.HealthSnapshot
-	session wsmsg.SessionSnapshot
-	boot    wsmsg.BootStatus
-	events  []wsmsg.SysEvent // bounded recent
+	health    wsmsg.HealthSnapshot
+	session   wsmsg.SessionSnapshot
+	boot      wsmsg.BootStatus
+	events    []wsmsg.SysEvent // bounded recent
+	feedEvent *wsmsg.SysEvent  // latest lifecycle state, retained beyond the event ring
 
 	tapeCap, newsCap, fillsCap, eventsCap, tradesCap int
 	venueOrder                                       []string // stable venue order for exec.status
@@ -412,6 +413,9 @@ func (m *mirror) appendNews(it wsmsg.NewsItem) {
 }
 
 func (m *mirror) appendEvent(e wsmsg.SysEvent) {
+	if e.Kind == "feed-up" || e.Kind == "feed-down" {
+		m.feedEvent = &e
+	}
 	m.events = append(m.events, e)
 	if len(m.events) > m.eventsCap {
 		m.events = m.events[len(m.events)-m.eventsCap:]
@@ -509,7 +513,11 @@ func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
 		// not `null` -- already null-guarded on the UI side, but kept
 		// consistent with the other four sites in this function.
 		events := make([]wsmsg.SysEvent, 0, len(m.events))
-		out = append(out, staged{Topic: topic, Payload: append(events, m.events...)})
+		events = append(events, m.events...)
+		if m.feedEvent != nil && !slices.Contains(events, *m.feedEvent) {
+			events = append([]wsmsg.SysEvent{*m.feedEvent}, events...)
+		}
+		out = append(out, staged{Topic: topic, Payload: events})
 	}
 	// scanner.hit and config have no snapshot.
 	return out

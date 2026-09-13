@@ -110,6 +110,15 @@ func TestListAccounts_ConnectionFailure(t *testing.T) {
 	}
 }
 
+func TestWaitForConnUpIgnoresInitialDown(t *testing.T) {
+	states := make(chan opend.ConnState, 2)
+	states <- opend.ConnDown
+	states <- opend.ConnUp
+	if err := waitForConnUp(context.Background(), states); err != nil {
+		t.Fatalf("waitForConnUp: %v", err)
+	}
+}
+
 // TestListAccounts_NoConnectionLeak mirrors TestVerifyAccount_NoConnectionLeak:
 // N back-to-back calls against the same mock server (no intervening
 // closeConns()) must grow connCount by exactly N -- proof that ListAccounts
