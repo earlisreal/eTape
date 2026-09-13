@@ -13,6 +13,7 @@ Local-first US-stock trading platform: Go engine plus TypeScript/React/Vite UI. 
 ### Issue tracker
 
 Issues are tracked as local Markdown files under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+`.scratch/` is versioned project history. Before handoff, commit every tracker file created or changed by the current task; leave unrelated tracker files untouched.
 
 ### Triage labels
 
