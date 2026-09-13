@@ -1,6 +1,6 @@
 # Linux package release
 
-Draft: design interview in progress; implementation is not approved.
+Scope agreed; implementation has not started.
 
 ## Settled decisions
 
@@ -9,6 +9,12 @@ Draft: design interview in progress; implementation is not approved.
   [Ubuntu release cycle](https://ubuntu.com/about/release-cycle).
 - Ship a portable `.tar.gz` archive containing the executable with its UI
   embedded, following the existing macOS release approach.
+- Target amd64 only.
+- Run from a terminal, open the default browser, and stop with Ctrl+C.
+- Keep OpenD separately installed and configured; demo needs no OpenD.
+- Add Linux to existing version-tag releases, gated by smoke tests on both
+  supported Ubuntu versions. Advance the two-LTS window only after validating
+  the new LTS.
 
 ## Current-code evidence
 
@@ -22,14 +28,10 @@ Draft: design interview in progress; implementation is not approved.
   and `xdg-open` for the browser. Runtime state stays under `~/.eTape/`.
 - OpenD is a separate market-data dependency; demo mode requires no broker.
 
-## Open decisions
+## Implementation plan
 
-- CPU architectures: amd64 only or amd64 plus arm64.
-- Launch experience: existing terminal process and default browser, or added
-  desktop integration.
-- Whether OpenD remains separately installed/configured by the user.
-- Publication and validation requirements, including tests on both LTS versions.
-- How the supported versions advance when a future Ubuntu LTS is released.
+See [Linux package release](../../docs/plans/2026-09-13-linux-package-release.md)
+for file-level steps, acceptance checks, rollout, and risks.
 
 ## Validation so far
 
@@ -42,3 +44,5 @@ Draft: design interview in progress; implementation is not approved.
 
 - 2026-09-13: User selected the last two Ubuntu LTS releases and accepted the
   recommendation to ship a portable archive.
+- 2026-09-13: User accepted amd64, terminal/default-browser launch, separate
+  OpenD, existing version-tag publication, and validation on both LTS releases.
