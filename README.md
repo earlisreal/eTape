@@ -136,6 +136,11 @@ no Go or Node toolchain required.
 |---|---|---|
 | Windows (x64) | `eTape-<version>-windows-amd64.zip` | Unzip and run `etape.exe`. Click "Try demo" in the app to start with a synthetic market (no setup needed) — or configure OpenD + venues in settings for live mode. `README-FIRST.txt` inside covers the details. |
 | macOS (Apple Silicon) | `eTape-<version>-macos-arm64.tar.gz` | `tar xzf` it, then run `./etape-darwin-arm64`. Click "Try demo" in the app for a synthetic market, or configure settings for live mode. (Developers: `./etape-darwin-arm64 -demo` is equivalent.) |
+| Linux (Ubuntu 24.04 or 26.04 LTS, x64) | `eTape-<version>-linux-amd64.tar.gz` | `tar xzf` it, then run `./etape-linux-amd64` in a terminal. It opens the default browser; if that fails, open `http://127.0.0.1:8686` manually. Press Ctrl+C to stop it. Use `./etape-linux-amd64 -demo` for a session without OpenD; live mode needs OpenD installed and configured separately. |
+
+The Linux archive is portable and does not install a desktop launcher or OpenD.
+To upgrade, stop eTape with Ctrl+C, replace the extracted executable, and start
+it again; leave `~/.eTape/` in place so settings and local state remain intact.
 
 The binaries aren't code-signed (personal-use release, no certificate), so expect a
 one-time warning on first launch: Windows SmartScreen says "unrecognized app" —
@@ -319,8 +324,16 @@ cd engine && make release-windows
 
 which produces `dist/etape-windows-amd64.exe` — a single binary with the UI embedded
 and a system-tray icon, no console window, no installer. `make release-macos` does the
-same for macOS (arm64). The engine is pure Go (no cgo), so cross-compiling from any OS
-just works. Prebuilt binaries for both platforms are attached to the
+same for macOS (arm64), and `make release-linux` produces
+`dist/etape-linux-amd64` for the supported Ubuntu LTS releases. The engine is pure Go
+(no cgo), so cross-compiling from any OS just works. From the repository root, the
+Linux release smoke check is:
+
+```bash
+bash scripts/smoke-linux-release.sh eTape-<version>-linux-amd64.tar.gz
+```
+
+Prebuilt binaries for all three platforms are attached to the
 [latest release](https://github.com/earlisreal/eTape/releases/latest).
 
 ### Race tests with MinGW-w64

@@ -1,6 +1,6 @@
 # Linux package release
 
-Scope agreed; implementation has not started.
+Implementation completed on 2026-09-13; first-release manual checks remain.
 
 ## Settled decisions
 
@@ -35,10 +35,16 @@ for file-level steps, acceptance checks, rollout, and risks.
 
 ## Validation so far
 
-- Read-only repository inspection; no implementation changes or runtime tests.
-- Investigator attempted a Linux amd64 cross-build but the local Go environment
-  failed before compilation (missing `internal/runtime/cgroup` and build-cache
-  access denied). Linux build success remains unverified.
+- Added the Linux release target, version-safe release workflow staging, Ubuntu
+  LTS smoke checks, and packaging documentation.
+- Engine full tests, short race tests, vet, pinned lint, generated-contract
+  drift check, UI clean install/lint/tests/build, and the engine build pass.
+- The cross-compiled Linux amd64 archive passed the smoke check in Ubuntu 24.04
+  WSL: executable mode, isolated demo boot, version/readiness logs, embedded
+  index and JavaScript asset, and clean SIGTERM shutdown.
+- Ubuntu 26.04 container execution, Ubuntu Desktop browser/Ctrl+C checks, and a
+  manual GitHub release workflow run remain pre-release checks; this local host
+  has no running Docker daemon or Ubuntu 26.04/Desktop session.
 
 ## Comments
 

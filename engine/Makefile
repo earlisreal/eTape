@@ -1,7 +1,7 @@
 # Toolchain (record exact versions used):
 #   go 1.26.5, protoc 35.1 (libprotoc), protoc-gen-go v1.36.11, golangci-lint 2.12.2
 #
-# .github/workflows/release.yml builds release-windows/release-macos on tag push;
+# .github/workflows/release.yml builds release-windows/release-macos/release-linux on tag push;
 # .github/workflows/ci.yml runs `make -C engine gen-ts-check` as part of the PR/push
 # gate, alongside go test/vet/lint and the UI suite. The `gen-ts`/`gen-ts-check`
 # targets remain usable locally to regenerate or verify before pushing.
@@ -11,7 +11,7 @@
 # metadata is unavailable (e.g. a source tarball with no .git directory).
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 
-.PHONY: build test test-race lint vet proto vendor-proto run gen-ts gen-ts-check release-windows release-macos embed-ui windows-icon
+.PHONY: build test test-race lint vet proto vendor-proto run gen-ts gen-ts-check release-windows release-macos release-linux embed-ui windows-icon
 build:
 	go build ./...
 test:
@@ -50,6 +50,7 @@ gen-ts-check: gen-ts
 # UI build + embed copy, shared by both release targets (built once per `make` run).
 embed-ui:
 	cd ../ui && npm run build
+	mkdir -p ../dist
 	rm -rf internal/webui/dist && cp -r ../ui/dist internal/webui/dist
 
 # Generates the Windows PE icon resource from assets/etape.ico +
@@ -77,3 +78,7 @@ release-macos: embed-ui
 	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go build -tags embed_ui \
 	  -ldflags "-s -w -X github.com/earlisreal/eTape/engine/internal/buildinfo.Version=$(VERSION)" \
 	  -o ../dist/etape-darwin-arm64 ./cmd/etape
+release-linux: embed-ui
+	GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -tags embed_ui \
+	  -ldflags "-s -w -X github.com/earlisreal/eTape/engine/internal/buildinfo.Version=$(VERSION)" \
+	  -o ../dist/etape-linux-amd64 ./cmd/etape

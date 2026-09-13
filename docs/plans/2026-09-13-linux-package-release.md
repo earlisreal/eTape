@@ -1,6 +1,7 @@
 # Linux package release
 
-Scope agreed on 2026-09-13; implementation has not started.
+Scope agreed on 2026-09-13; implementation completed, with first-release
+manual checks still required.
 Source: [design interview](../../.scratch/linux-package-release/spec.md).
 
 ## Goal and scope

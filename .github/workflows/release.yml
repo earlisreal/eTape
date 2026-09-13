@@ -1,9 +1,9 @@
 name: Release
 
 # Push a version tag (git tag v1.0.0 && git push origin v1.0.0) to build the
-# Windows .exe and macOS arm64 binary and publish a GitHub Release with them
-# attached. Both targets cross-compile with CGO disabled, so one Linux runner
-# builds both. Can also run manually (workflow_dispatch) to produce artifacts
+# Windows .exe, macOS arm64 binary, and Linux amd64 binary, then publish a
+# GitHub Release with them attached. All targets cross-compile with CGO
+# disabled, so one Linux runner builds them. Manual dispatch produces artifacts
 # without publishing a release.
 
 on:
@@ -18,6 +18,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      RELEASE_REF: ${{ github.ref_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -32,7 +34,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: npm
           cache-dependency-path: ui/package-lock.json
 
@@ -40,21 +42,43 @@ jobs:
         working-directory: ui
         run: npm ci
 
-      # Builds the UI once (embed-ui prereq) then cross-compiles both binaries
-      # into repo-root dist/ (etape-windows-amd64.exe, etape-darwin-arm64).
+      # Builds the UI once (embed-ui prereq) then cross-compiles all binaries
+      # into repo-root dist/. VERSION keeps the archive name and startup log
+      # aligned for both tag pushes and manual branch builds.
       - name: Build release binaries
-        run: make -C engine release-windows release-macos
+        run: |
+          set -euo pipefail
+          version="${RELEASE_REF//\//-}"
+          make -C engine VERSION="$version" release-windows release-macos release-linux
 
       - name: Stage release artifacts
         run: |
           set -euo pipefail
-          ver="${{ github.ref_name }}"
+          version="${RELEASE_REF//\//-}"
           mkdir -p staging/win
           cp dist/etape-windows-amd64.exe staging/win/etape.exe
           cp README-FIRST.txt staging/win/
-          (cd staging/win && zip -r "../../eTape-${ver}-windows-amd64.zip" .)
+          (cd staging/win && zip -r "../../eTape-${version}-windows-amd64.zip" .)
           chmod +x dist/etape-darwin-arm64
-          tar -C dist -czf "eTape-${ver}-macos-arm64.tar.gz" etape-darwin-arm64
+          tar -C dist -czf "eTape-${version}-macos-arm64.tar.gz" etape-darwin-arm64
+          mkdir -p staging/linux
+          cp dist/etape-linux-amd64 staging/linux/etape-linux-amd64
+          chmod +x staging/linux/etape-linux-amd64
+          tar -C staging/linux -czf "eTape-${version}-linux-amd64.tar.gz" etape-linux-amd64
+
+      - name: Smoke test Linux release on Ubuntu LTS versions
+        run: |
+          set -euo pipefail
+          version="${RELEASE_REF//\//-}"
+          archive="eTape-${version}-linux-amd64.tar.gz"
+          for ubuntu in 24.04 26.04; do
+            echo "Smoke testing ${archive} on Ubuntu ${ubuntu}"
+            docker run --rm --platform linux/amd64 \
+              --mount "type=bind,source=$PWD/$archive,target=/tmp/etape-release.tar.gz,readonly" \
+              --mount "type=bind,source=$PWD/scripts/smoke-linux-release.sh,target=/tmp/smoke-linux-release.sh,readonly" \
+              "ubuntu:${ubuntu}" \
+              bash -c 'set -euo pipefail; apt-get update; apt-get install -y --no-install-recommends ca-certificates curl procps; bash /tmp/smoke-linux-release.sh /tmp/etape-release.tar.gz'
+          done
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -63,6 +87,7 @@ jobs:
           path: |
             eTape-*-windows-amd64.zip
             eTape-*-macos-arm64.tar.gz
+            eTape-*-linux-amd64.tar.gz
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -73,3 +98,4 @@ jobs:
           files: |
             eTape-*-windows-amd64.zip
             eTape-*-macos-arm64.tar.gz
+            eTape-*-linux-amd64.tar.gz
