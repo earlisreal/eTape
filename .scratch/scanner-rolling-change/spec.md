@@ -2,8 +2,9 @@
 
 Status: needs-info
 
-Brainstorming draft. Accepted decisions below are requirements; open decisions
-remain unapproved. This is not authorization to implement the feature.
+Product decisions are accepted; awaiting final shared-understanding confirmation.
+This is not authorization to implement the feature. Technical checks below
+belong to implementation planning, not silently relaxed requirements.
 
 ## Accepted decisions
 
@@ -21,9 +22,28 @@ remain unapproved. This is not authorization to implement the feature.
   alerts; remaining above the threshold does not. Dropping below rearms it.
   Apply this rule to Previous close as well as rolling comparisons.
 - Enforce at least 60 seconds between alerts for a symbol.
+- Discard crossings during cooldown; never queue a delayed alert. Remaining
+  qualified when cooldown expires does not alert. Another fresh crossing is
+  required after cooldown.
 - Startup, reconnect and applying filters establish a silent baseline.
 - Missing rolling history means unavailable, with qualification and alerts
   suppressed. Never substitute a shorter comparison window.
+- Build rolling history from successful fresh Scanner snapshot observations
+  for tracked candidates and retained rows. Newly tracked symbols need the
+  selected full 1/5/60-minute window, regardless of engine uptime. Display a
+  visible warming-up state. No historical backfill in the first version.
+- Rolling Change uses sampled prices at Scanner polling cadence, not exact
+  tick-time prices. Do not represent extended-session polling observation
+  timestamps as exchange trade timestamps.
+- Continuous rolling history crosses session boundaries: at 09:32 ET, a
+  five-minute comparison can use 09:27 premarket observations. A session change
+  alone neither clears rolling history nor generates an alert. Actual data
+  gaps suppress alerts; recovery establishes a fresh silent baseline.
+- Mirror directional crossings for Top losers: reaching a loss of at least
+  the configured magnitude qualifies. Most active retains new-arrival alerts.
+  At a zero percentage threshold, use new-arrival alerts only.
+- Repeat alerts restore the unread/highlight state and use the same sound
+  and visual treatment as a new hit. Never select the row automatically.
 - On startup, merge earlier-session candidates from the same trading cycle
   with the current session's candidates. During premarket this includes
   after-hours, overnight and premarket; refresh prices before filtering.
@@ -63,29 +83,44 @@ Read-only OpenD requests on 2026-09-14/15:
 Sources: [Premarket rank](https://openapi.moomoo.com/moomoo-api-doc/en/quote/get-us-pre-market-rank.html),
 [After-hours rank](https://openapi.moomoo.com/moomoo-api-doc/en/quote/get-us-after-hours-rank.html).
 
-## Open decisions and investigation
+## Technical checks for implementation planning
 
-- Simplest history option: record only successful fresh Scanner snapshots for
-  all tracked candidates and retained rows. This requires 1/5/60-minute warmup
-  for newly tracked symbols and is sampled at polling cadence. Extended-session
-  snapshot blocks lack their own exchange timestamp, so observation time must
-  be identified honestly. This option is proposed, not yet accepted.
 - Existing snapshot batching supports 400 symbols per request and at most
   eight requests per poll. Increasing rank count to 100 fits a single batch
   initially; accumulated rows, errors and shared provider limits still need
-  capacity validation. Existing chart history does not universally cover
-  candidates; cached Moomoo 1-minute bars require subscriptions, and the current
-  Alpaca history path stops 16 minutes before now.
-- Rolling history source, startup warmup, timestamp precision and gap handling
-  across all candidates and retained rows; do not assume chart subscriptions
-  cover the Scanner universe.
-- Crossing during cooldown: discard it, or defer notification until cooldown
-  expiry if still qualifying?
-- Behavior for Top losers, Most active, and a zero percentage threshold.
-- Whether repeated hits restore the existing unread/highlight indicator.
-- Handling rolling windows across session boundaries and the trading-cycle
-  reset, including symbols without a current-session trade.
-- Confirm full shared understanding after resolving the decision frontier.
+  capacity validation. Rank count does not bound the accumulated board size.
+- Set a bounded baseline-sample tolerance and gap detection policy consistent
+  with observed polling cadence. Never bridge a known feed interruption or
+  append retained stale values as fresh observations. A successful unchanged
+  quote must be distinguished from a failed refresh.
+- Verify current-session price availability and baseline dating for bootstrap
+  candidates, especially symbols with no current-session trade. A historical
+  session price must not masquerade as a current-session observation.
+- Preserve rolling observations across session changes independently of the
+  existing board's trading-cycle reset. A baseline rollover must not fabricate
+  a Previous close price-movement alert.
+- Existing chart history does not universally cover candidates; cached Moomoo
+  minute bars require subscriptions and the current Alpaca history path ends
+  16 minutes before now. The accepted sampled-history design avoids depending
+  on those sources for immediate rolling readiness.
+
+## Acceptance examples
+
+- With minimum gain 5%, 4% -> 6% alerts, while 6% -> 10% does not. A later
+  3% -> 6% alerts again once the 60-second cooldown has elapsed.
+- A crossing at 30 seconds after the last alert is discarded. Still being
+  above 5% at 60 seconds does not replay it; a later fresh crossing can alert.
+- With minimum loss 5%, -4% -> -6% alerts and -6% -> -10% does not; recovery
+  to -3% rearms the symbol for a later qualifying decline.
+- An already-highlighted or already-read row can produce a repeat hit. Reading
+  a row does not itself rearm its threshold or reset its cooldown.
+- A newly tracked symbol in one-hour mode remains unavailable while it has
+  only 20 minutes of observations. Never label its 20-minute change as one hour.
+- A valid five-minute window can span the premarket/RTH boundary. A known data
+  gap cannot be replaced by fabricated quiet-price observations.
+- A retained row remains visible after falling below the minimum; its next
+  eligible crossing can alert without removing and reinserting the symbol.
+- Outside click and Escape dismiss changed drafts without sending an Apply.
 
 ## Validation required for implementation
 
