@@ -90,6 +90,12 @@ Sources: [Premarket rank](https://openapi.moomoo.com/moomoo-api-doc/en/quote/get
   and unbounded aggregate retry rates. Freshness gating and paced/bounded shared
   snapshot work are required before shipping; the healthy probe is not blanket
   approval of the current retry behavior.
+- A subsequent bounded premarket probe passed at one-second polling and
+  observed additional price changes compared with two-second sampling. A
+  one-second target is a supported proposal, not yet an accepted cadence
+  change; it requires shared pacing and slower refresh under increased batch
+  load. The existing timer rounds default three-second RTH polling to roughly
+  four seconds and must be corrected before promising precise session cadence.
 - Existing snapshot batching supports 400 symbols per request and at most
   eight requests per poll. Increasing rank count to 100 fits a single batch
   initially; accumulated rows, errors and shared provider limits still need

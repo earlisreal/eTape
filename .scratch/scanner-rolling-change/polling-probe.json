@@ -1,0 +1,72 @@
+{
+  "utc": "2026-09-15T10:41:52.129179+00:00",
+  "stages": [
+    {
+      "interval_seconds": 2,
+      "polls": 16,
+      "elapsed_seconds": 30.004,
+      "cycle_seconds": {
+        "median": 0.1568,
+        "p95": 0.192,
+        "max": 0.192
+      },
+      "rank_seconds": {
+        "median": 0.0379,
+        "p95": 0.0394,
+        "max": 0.0394
+      },
+      "snapshot_seconds": {
+        "median": 0.1111,
+        "p95": 0.1441,
+        "max": 0.1441
+      },
+      "start_interval_seconds": {
+        "median": 2.0003,
+        "p95": 2.0006,
+        "max": 2.0006
+      },
+      "overrun_cycles": 0,
+      "refreshes_with_price_changes": 15,
+      "symbol_price_transitions": 117,
+      "rank_order_or_membership_changes": 5,
+      "missing_pre_price_last": 54
+    },
+    {
+      "interval_seconds": 1,
+      "polls": 61,
+      "elapsed_seconds": 60.017,
+      "cycle_seconds": {
+        "median": 0.1761,
+        "p95": 0.1931,
+        "max": 0.2048
+      },
+      "rank_seconds": {
+        "median": 0.0533,
+        "p95": 0.0708,
+        "max": 0.0737
+      },
+      "snapshot_seconds": {
+        "median": 0.112,
+        "p95": 0.1328,
+        "max": 0.1433
+      },
+      "start_interval_seconds": {
+        "median": 1.0003,
+        "p95": 1.0005,
+        "max": 1.0006
+      },
+      "overrun_cycles": 0,
+      "refreshes_with_price_changes": 58,
+      "symbol_price_transitions": 274,
+      "rank_order_or_membership_changes": 12,
+      "missing_pre_price_last": 54,
+      "same_stream_2s_price_transitions": 199,
+      "intermediate_1s_changed_prices": 132,
+      "intermediate_changes_reverted_by_2s": 12
+    }
+  ],
+  "errors": [],
+  "scope": "SDK rank + fixed merged snapshots, not full engine loop",
+  "snapshot_symbols": 243,
+  "completed": true
+}
