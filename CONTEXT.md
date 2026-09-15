@@ -145,6 +145,14 @@ _Avoid_: Volume Ratio
 A Scanner minimum Relative Volume (Daily Rate) multiplier. It is off at zero; when active, a row with an unavailable value does not match.
 _Avoid_: Percentage filter, volume filter
 
+**Rolling Change**:
+The percentage price change from a selected duration ago to now, with the comparison window advancing over time. It is distinct from the change within the last completed candle.
+_Avoid_: Previous-candle change
+
+**Scanner Previous Close**:
+The regular-session closing price preceding the Scanner's trading cycle. After-hours belongs to the next trading day's cycle, so Monday after-hours and Tuesday premarket both use Monday's regular-session close.
+_Avoid_: Previous extended-session close
+
 ## Order Entry
 
 **Action Template**:
