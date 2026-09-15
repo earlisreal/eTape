@@ -13,7 +13,7 @@ Local-first US-stock trading platform: Go engine plus TypeScript/React/Vite UI. 
 ### Issue tracker
 
 Issues are tracked as local Markdown files under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
-`.scratch/` is versioned project history. Before handoff, commit every tracker file created or changed by the current task; leave unrelated tracker files untouched.
+`.scratch/` is versioned project history. Before handoff, commit every tracker file created or changed by the current task, subject to the spec/plan approval gate below; leave unrelated tracker files untouched.
 
 ### Triage labels
 
@@ -65,5 +65,7 @@ Never place, modify, or cancel real orders unless Earl explicitly authorizes cur
 ## Git
 
 Keep commits scoped. Main hook escape only when task explicitly authorizes it. Preserve unrelated changes. Approved specs use `docs(specs):`; plans use `docs(plans):`.
+
+Keep specs and plans as uncommitted drafts during grilling and revision. Commit them only after all open decisions are settled and Earl explicitly approves the final version; answers to individual grilling questions are not final approval. This gate applies regardless of file location and takes precedence over tracker handoff and automatic commit/push rules.
 
 After executing a plan or addressing review comments, automatically commit the resulting changes and push directly to main branch. Skip this auto-commit and auto-push rule for small, specific tasks unless explicitly requested. Whenever the rule applies, push immediately after the commit succeeds.
