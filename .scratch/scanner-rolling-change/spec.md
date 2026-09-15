@@ -1,10 +1,13 @@
 # Scanner comparison windows and repeat alerts
 
-Status: needs-info
+Status: ready-for-agent
 
-Product decisions are accepted; awaiting final shared-understanding confirmation.
-This is not authorization to implement the feature. Technical checks below
-belong to implementation planning, not silently relaxed requirements.
+Approved by Earl on 2026-09-16. All product decisions below are settled.
+Approval authorizes committing this specification and preparing a detailed
+implementation plan. Earl will implement in a separate Codex Luna Max session;
+no feature implementation is authorized in this brainstorming session.
+Technical checks below belong to implementation planning, not silently relaxed
+requirements. The implementation plan requires its own final approval.
 
 ## Accepted decisions
 
@@ -26,6 +29,13 @@ belong to implementation planning, not silently relaxed requirements.
   qualified when cooldown expires does not alert. Another fresh crossing is
   required after cooldown.
 - Startup, reconnect and applying filters establish a silent baseline.
+- During normal operation, a newly discovered symbol whose first valid
+  comparison after healthy initial warmup meets all filters emits one
+  new-arrival alert. This does not override silent startup snapshots or recovery
+  after interruptions; healthy initial warmup and gap recovery are distinct.
+- Every repeat alert must satisfy all enabled filters at the time of the
+  percentage crossing, including volume, float and relative volume. Remaining
+  on the sticky board is not enough to qualify for a repeat alert.
 - Missing rolling history means unavailable, with qualification and alerts
   suppressed. Never substitute a shorter comparison window.
 - Build rolling history from successful fresh Scanner snapshot observations
@@ -39,6 +49,12 @@ belong to implementation planning, not silently relaxed requirements.
   five-minute comparison can use 09:27 premarket observations. A session change
   alone neither clears rolling history nor generates an alert. Actual data
   gaps suppress alerts; recovery establishes a fresh silent baseline.
+- Suppress alerts immediately when a current refresh fails. More than five
+  seconds without a successful usable observation invalidates continuous
+  rolling history; a confirmed disconnect invalidates it immediately. Rebuild
+  the full selected window after a confirmed gap and resume silently, including
+  a full hour of warmup in one-hour mode. A successful unchanged current-session
+  quote is a quiet observation, not by itself a gap.
 - Mirror directional crossings for Top losers: reaching a loss of at least
   the configured magnitude qualifies. Most active retains new-arrival alerts.
   At a zero percentage threshold, use new-arrival alerts only.
@@ -50,6 +66,11 @@ belong to implementation planning, not silently relaxed requirements.
   Ongoing discovery polls the current session and refreshes retained rows.
 - Request 100 candidates per ranking consistently, subject to verification of
   snapshot refresh capacity. This is a discovery count, not a display limit.
+- Target a one-second polling interval in premarket, RTH, after-hours and
+  overnight. This is a scheduling target, not a guarantee of one fresh
+  provider observation per second. Respect shared request limits; slow refresh
+  when batch count or other callers require it. Do not overlap polls or issue
+  catch-up bursts. Correct the existing session-timer rounding behavior.
 - Clicking outside settings or pressing Escape closes settings and discards
   unapplied edits. Apply remains explicit.
 
@@ -91,17 +112,17 @@ Sources: [Premarket rank](https://openapi.moomoo.com/moomoo-api-doc/en/quote/get
   snapshot work are required before shipping; the healthy probe is not blanket
   approval of the current retry behavior.
 - A subsequent bounded premarket probe passed at one-second polling and
-  observed additional price changes compared with two-second sampling. A
-  one-second target is a supported proposal, not yet an accepted cadence
-  change; it requires shared pacing and slower refresh under increased batch
-  load. The existing timer rounds default three-second RTH polling to roughly
-  four seconds and must be corrected before promising precise session cadence.
+  observed additional price changes compared with two-second sampling. The
+  accepted one-second target requires shared pacing and slower refresh under
+  increased batch load. The existing timer rounds default three-second RTH
+  polling to roughly four seconds and must be corrected before promising
+  precise session cadence.
 - Existing snapshot batching supports 400 symbols per request and at most
   eight requests per poll. Increasing rank count to 100 fits a single batch
   initially; accumulated rows, errors and shared provider limits still need
   capacity validation. Rank count does not bound the accumulated board size.
-- Set a bounded baseline-sample tolerance and gap detection policy consistent
-  with observed polling cadence. Never bridge a known feed interruption or
+- Set a bounded baseline-sample tolerance consistent with observed polling
+  cadence and the accepted five-second gap rule. Never bridge a known feed interruption or
   append retained stale values as fresh observations. A successful unchanged
   quote must be distinguished from a failed refresh.
 - Verify current-session price availability and baseline dating for bootstrap
@@ -131,6 +152,14 @@ Sources: [Premarket rank](https://openapi.moomoo.com/moomoo-api-doc/en/quote/get
   gap cannot be replaced by fabricated quiet-price observations.
 - A retained row remains visible after falling below the minimum; its next
   eligible crossing can alert without removing and reinserting the symbol.
+- A new symbol first becomes ready during normal operation at +6% versus five
+  minutes ago with a 5% threshold and all filters passing: alert once on
+  admission. An interrupted symbol becoming ready again at +6% resumes silently.
+- A repeat crossing to +6% while below the required relative volume is silent;
+  the existing row remains on the board.
+- A gap exceeding five seconds invalidates one-hour rolling history. Recovery
+  needs a new continuous hour; its first qualifying value establishes a silent
+  baseline. A confirmed disconnect has the same effect without waiting five seconds.
 - Outside click and Escape dismiss changed drafts without sending an Apply.
 
 ## Validation required for implementation
