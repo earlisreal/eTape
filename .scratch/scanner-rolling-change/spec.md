@@ -85,6 +85,11 @@ Sources: [Premarket rank](https://openapi.moomoo.com/moomoo-api-doc/en/quote/get
 
 ## Technical checks for implementation planning
 
+- [Live capacity verification](verification.md) passed for 100 per ranking and
+  merged startup snapshot batches. It also found missing current-session prices
+  and unbounded aggregate retry rates. Freshness gating and paced/bounded shared
+  snapshot work are required before shipping; the healthy probe is not blanket
+  approval of the current retry behavior.
 - Existing snapshot batching supports 400 symbols per request and at most
   eight requests per poll. Increasing rank count to 100 fits a single batch
   initially; accumulated rows, errors and shared provider limits still need
