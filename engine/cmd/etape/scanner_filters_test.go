@@ -41,6 +41,17 @@ func TestRestoreScannerFiltersV2WinsOverLegacyV1(t *testing.T) {
 	}
 }
 
+func TestRestoreScannerFiltersPreservesFractionalTurnover(t *testing.T) {
+	defaults := scan.Defaults(config.Scan{})
+	spy := &scannerFilterConfigSpy{values: map[string]string{
+		"scanner.filters.v2": `{"mode":"gainers","minChangePct":0,"maxFloatShares":null,"minVolume":0,"minTurnover":12345678.9,"minRelativeVolume":0,"floatUnit":"M","volumeUnit":"K"}`,
+	}}
+	got := restoreScannerFilters(spy, defaults)
+	if got.MinTurnover != 12_345_678.9 {
+		t.Fatalf("turnover threshold = %v, want 12345678.9", got.MinTurnover)
+	}
+}
+
 func TestRestoreScannerFiltersMigratesV1AndResetsThreshold(t *testing.T) {
 	defaults := scan.Defaults(config.Scan{})
 	spy := &scannerFilterConfigSpy{values: map[string]string{

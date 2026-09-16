@@ -125,6 +125,9 @@ type rankItem struct {
 	ChangePct           float64
 	Last                float64
 	Volume              int64
+	Turnover            *float64
+	turnoverPhase       session.Phase
+	turnoverPoolDay     int64
 	RelativeVolume      *float64
 	ShortSellRestricted bool
 	cumulativeVolume    *int64
@@ -226,7 +229,7 @@ func Defaults(cfg config.Scan) wsmsg.ScannerFilters {
 		v := cfg.MaxFloatShares
 		cap = &v
 	}
-	return wsmsg.ScannerFilters{Mode: "gainers", MinChangePct: cfg.MinChangePct, MaxFloatShares: cap, MinVolume: float64(cfg.MinVolume), MinRelativeVolume: 0, FloatUnit: "M", VolumeUnit: "K"}
+	return wsmsg.ScannerFilters{Mode: "gainers", MinChangePct: cfg.MinChangePct, MaxFloatShares: cap, MinVolume: float64(cfg.MinVolume), MinTurnover: 0, MinRelativeVolume: 0, FloatUnit: "M", VolumeUnit: "K"}
 }
 
 func ValidateFilters(f wsmsg.ScannerFilters) error {
@@ -236,7 +239,7 @@ func ValidateFilters(f wsmsg.ScannerFilters) error {
 	if (f.FloatUnit != "K" && f.FloatUnit != "M") || (f.VolumeUnit != "K" && f.VolumeUnit != "M") {
 		return fmt.Errorf("invalid unit")
 	}
-	if math.IsNaN(f.MinChangePct) || math.IsInf(f.MinChangePct, 0) || f.MinChangePct < 0 || math.IsNaN(f.MinVolume) || math.IsInf(f.MinVolume, 0) || f.MinVolume < 0 || math.IsNaN(f.MinRelativeVolume) || math.IsInf(f.MinRelativeVolume, 0) || f.MinRelativeVolume < 0 {
+	if math.IsNaN(f.MinChangePct) || math.IsInf(f.MinChangePct, 0) || f.MinChangePct < 0 || math.IsNaN(f.MinVolume) || math.IsInf(f.MinVolume, 0) || f.MinVolume < 0 || math.IsNaN(f.MinTurnover) || math.IsInf(f.MinTurnover, 0) || f.MinTurnover < 0 || math.IsNaN(f.MinRelativeVolume) || math.IsInf(f.MinRelativeVolume, 0) || f.MinRelativeVolume < 0 {
 		return fmt.Errorf("invalid numeric filter")
 	}
 	if f.MaxFloatShares != nil && (math.IsNaN(*f.MaxFloatShares) || math.IsInf(*f.MaxFloatShares, 0) || *f.MaxFloatShares < 0) {
@@ -318,6 +321,7 @@ func sessionKey(phase session.Phase) string {
 func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 	filters := p.Filters()
 	phase := session.PhaseAt(now)
+	poolDay := session.PoolDay(now)
 	p.mu.Lock()
 	if p.board == nil || p.resetBoard || (phase == session.PostMarket && p.phaseSet && p.lastPhase != session.PostMarket) {
 		p.board = map[string]rankItem{}
@@ -326,6 +330,9 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 	}
 	p.lastPhase, p.phaseSet = phase, true
 	bootstrapped := p.premarketBootstrapped
+	for sym, item := range p.board {
+		p.board[sym] = currentSessionItem(item, phase, poolDay)
+	}
 	p.mu.Unlock()
 
 	var items []rankItem
@@ -354,28 +361,40 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 	p.resetIfNewDay(now)
 	p.resolveExch(ctx, items) // populate the exchange-type cache before dropping OTC
 	items = dropOTC(items, p.otc)
+	for i := range items {
+		if items[i].Turnover != nil {
+			items[i].turnoverPoolDay = poolDay
+		}
+	}
 	all := make(map[string]rankItem, len(p.board)+len(items))
 	for sym, it := range p.board {
 		all[sym] = it
 	}
 	for _, it := range items {
-		if _, ok := all[it.Symbol]; ok {
+		if old, ok := all[it.Symbol]; ok {
+			if it.Turnover != nil {
+				old.Turnover = it.Turnover
+				old.turnoverPhase = it.turnoverPhase
+				old.turnoverPoolDay = it.turnoverPoolDay
+			}
+			all[it.Symbol] = old
 			continue
 		}
 		all[it.Symbol] = it
 	}
-	p.refreshSnapshots(ctx, phase, all)
+	p.refreshSnapshots(ctx, phase, all, poolDay)
 	p.applyRelativeVolumes(now, all)
 	for _, it := range items {
-		it = all[it.Symbol]
+		it = currentSessionItem(all[it.Symbol], phase, poolDay)
 		if len(rankRowsFiltered([]rankItem{it}, p.floats, filters)) != 0 {
 			p.board[it.Symbol] = it
 		}
 	}
 	rows := make([]wsmsg.ScannerRow, 0, len(p.board))
 	for sym := range p.board {
-		p.board[sym] = all[sym]
-		rows = append(rows, rankRowsFiltered([]rankItem{all[sym]}, p.floats, wsmsg.ScannerFilters{Mode: "most_active", FloatUnit: filters.FloatUnit, VolumeUnit: filters.VolumeUnit})...)
+		item := currentSessionItem(all[sym], phase, poolDay)
+		p.board[sym] = item
+		rows = append(rows, rankRowsFiltered([]rankItem{item}, p.floats, wsmsg.ScannerFilters{Mode: "most_active", FloatUnit: filters.FloatUnit, VolumeUnit: filters.VolumeUnit})...)
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if filters.Mode == "most_active" {
@@ -402,7 +421,7 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 	if filters.MinRelativeVolume > 0 {
 		poolFilters := filters
 		poolFilters.MinRelativeVolume = 0
-		poolRows = rankRowsFiltered(items, p.floats, poolFilters)
+		poolRows = rankRowsFiltered(currentSessionItems(items, phase, poolDay), p.floats, poolFilters)
 	}
 	p.updatePool(now, poolRows)
 	p.enqueueRelativeVolumeForPool(now)
@@ -423,7 +442,7 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 }
 
 func sameFilters(a, b wsmsg.ScannerFilters) bool {
-	if a.Mode != b.Mode || a.MinChangePct != b.MinChangePct || a.MinVolume != b.MinVolume || a.MinRelativeVolume != b.MinRelativeVolume || a.FloatUnit != b.FloatUnit || a.VolumeUnit != b.VolumeUnit {
+	if a.Mode != b.Mode || a.MinChangePct != b.MinChangePct || a.MinVolume != b.MinVolume || a.MinTurnover != b.MinTurnover || a.MinRelativeVolume != b.MinRelativeVolume || a.FloatUnit != b.FloatUnit || a.VolumeUnit != b.VolumeUnit {
 		return false
 	}
 	if a.MaxFloatShares == nil || b.MaxFloatShares == nil {
@@ -510,6 +529,59 @@ func rankRows(items []rankItem, floats map[string]floatEntry, cfg config.Scan) [
 	return rankRowsFiltered(items, floats, Defaults(cfg))
 }
 
+func validTurnover(value *float64) *float64 {
+	if value == nil || math.IsNaN(*value) || math.IsInf(*value, 0) || *value < 0 {
+		return nil
+	}
+	v := *value
+	return &v
+}
+
+func currentSessionItem(it rankItem, phase session.Phase, poolDay int64) rankItem {
+	if it.Turnover != nil && (it.turnoverPhase != phase || it.turnoverPoolDay != poolDay) {
+		it.Turnover = nil
+		it.turnoverPhase = session.Closed
+		it.turnoverPoolDay = 0
+	}
+	return it
+}
+
+func currentSessionItems(items []rankItem, phase session.Phase, poolDay int64) []rankItem {
+	out := make([]rankItem, len(items))
+	for i, it := range items {
+		out[i] = currentSessionItem(it, phase, poolDay)
+	}
+	return out
+}
+
+func snapshotTurnover(basic *snappb.SnapshotBasicData, phase session.Phase) *float64 {
+	if basic == nil {
+		return nil
+	}
+	var value *float64
+	switch phase {
+	case session.RTH:
+		value = basic.Turnover
+	case session.PreMarket:
+		if data := basic.GetPreMarket(); data != nil {
+			value = data.Turnover
+		}
+	case session.PostMarket:
+		if data := basic.GetAfterMarket(); data != nil {
+			value = data.Turnover
+		}
+	case session.Overnight:
+		if data := basic.GetOvernight(); data != nil {
+			value = data.Turnover
+		}
+	}
+	return validTurnover(value)
+}
+
+func turnoverMatches(value *float64, minimum float64) bool {
+	return minimum <= 0 || value != nil && !math.IsNaN(*value) && !math.IsInf(*value, 0) && *value >= minimum
+}
+
 func rankRowsFiltered(items []rankItem, floats map[string]floatEntry, f wsmsg.ScannerFilters) []wsmsg.ScannerRow {
 	out := make([]wsmsg.ScannerRow, 0, len(items))
 	for _, it := range items {
@@ -517,6 +589,9 @@ func rankRowsFiltered(items []rankItem, floats map[string]floatEntry, f wsmsg.Sc
 			continue
 		}
 		if f.MinVolume > 0 && float64(it.Volume) < f.MinVolume {
+			continue
+		}
+		if !turnoverMatches(it.Turnover, f.MinTurnover) {
 			continue
 		}
 		if f.MinRelativeVolume > 0 && (it.RelativeVolume == nil || *it.RelativeVolume < f.MinRelativeVolume) {
@@ -537,9 +612,14 @@ func rankRowsFiltered(items []rankItem, floats map[string]floatEntry, f wsmsg.Sc
 			}
 		}
 		cp, lp := it.ChangePct, it.Last
+		var turnover *float64
+		if it.Turnover != nil && !math.IsNaN(*it.Turnover) && !math.IsInf(*it.Turnover, 0) && *it.Turnover >= 0 {
+			value := *it.Turnover
+			turnover = &value
+		}
 		out = append(out, wsmsg.ScannerRow{
 			Symbol: it.Symbol, ShortSellRestricted: it.ShortSellRestricted,
-			ChangePct: &cp, Last: &lp, FloatShares: floatPtr, Volume: it.Volume, RelativeVolume: it.RelativeVolume,
+			ChangePct: &cp, Last: &lp, FloatShares: floatPtr, Volume: it.Volume, Turnover: turnover, RelativeVolume: it.RelativeVolume,
 		})
 	}
 	return out
@@ -1002,7 +1082,8 @@ func (p *Poller) fetchPreMarket(ctx context.Context, dir int32) ([]rankItem, err
 	var out []rankItem
 	for _, d := range resp.GetS2C().GetDataList() {
 		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()),
-			ChangePct: d.GetPreMarketChangeRatio(), Last: d.GetPreMarketPrice(), Volume: d.GetPreMarketVolume()})
+			ChangePct: d.GetPreMarketChangeRatio(), Last: d.GetPreMarketPrice(), Volume: d.GetPreMarketVolume(),
+			Turnover: validTurnover(d.PreMarketTurnover), turnoverPhase: session.PreMarket})
 	}
 	return out, nil
 }
@@ -1025,7 +1106,8 @@ func (p *Poller) fetchTopMovers(ctx context.Context, dir int32) ([]rankItem, err
 	var out []rankItem
 	for _, d := range resp.GetS2C().GetDataList() {
 		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()),
-			ChangePct: d.GetChangeRatio(), Last: d.GetCurPrice(), Volume: d.GetVolume()})
+			ChangePct: d.GetChangeRatio(), Last: d.GetCurPrice(), Volume: d.GetVolume(),
+			Turnover: validTurnover(d.Turnover), turnoverPhase: session.RTH})
 	}
 	return out, nil
 }
@@ -1046,7 +1128,8 @@ func (p *Poller) fetchAfterHours(ctx context.Context, dir int32) ([]rankItem, er
 	var out []rankItem
 	for _, d := range resp.GetS2C().GetDataList() {
 		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()),
-			ChangePct: d.GetAfterHoursChangeRatio(), Last: d.GetAfterHoursPrice(), Volume: d.GetAfterHoursVolume()})
+			ChangePct: d.GetAfterHoursChangeRatio(), Last: d.GetAfterHoursPrice(), Volume: d.GetAfterHoursVolume(),
+			Turnover: validTurnover(d.AfterHoursTurnover), turnoverPhase: session.PostMarket})
 	}
 	return out, nil
 }
@@ -1067,7 +1150,8 @@ func (p *Poller) fetchOvernight(ctx context.Context, dir int32) ([]rankItem, err
 	var out []rankItem
 	for _, d := range resp.GetS2C().GetDataList() {
 		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()),
-			ChangePct: d.GetOvernightChangeRatio(), Last: d.GetOvernightPrice(), Volume: d.GetOvernightVolume()})
+			ChangePct: d.GetOvernightChangeRatio(), Last: d.GetOvernightPrice(), Volume: d.GetOvernightVolume(),
+			Turnover: validTurnover(d.OvernightTurnover), turnoverPhase: session.Overnight})
 	}
 	return out, nil
 }
@@ -1196,25 +1280,29 @@ func (p *Poller) resolveFloats(ctx context.Context, items []rankItem) {
 		if end > len(missing) {
 			end = len(missing)
 		}
-		p.snapshotBatch(ctx, session.Closed, missing[start:end], &reqs, nil)
+		p.snapshotBatch(ctx, session.Closed, missing[start:end], &reqs, nil, session.PoolDay(p.clk.Now()))
 	}
 }
 
 // refreshSnapshots refreshes every accumulated row in the same quota-free
 // batch used for float enrichment. Failed or omitted symbols keep their prior
 // rank values.
-func (p *Poller) refreshSnapshots(ctx context.Context, phase session.Phase, items map[string]rankItem) {
+func (p *Poller) refreshSnapshots(ctx context.Context, phase session.Phase, items map[string]rankItem, poolDays ...int64) {
 	syms := make([]string, 0, len(items))
 	for sym := range items {
 		syms = append(syms, sym)
 	}
 	reqs := 0
+	poolDay := session.PoolDay(p.clk.Now())
+	if len(poolDays) > 0 {
+		poolDay = poolDays[0]
+	}
 	for start := 0; start < len(syms); start += snapshotChunkSize {
 		end := start + snapshotChunkSize
 		if end > len(syms) {
 			end = len(syms)
 		}
-		p.snapshotBatch(ctx, phase, syms[start:end], &reqs, items)
+		p.snapshotBatch(ctx, phase, syms[start:end], &reqs, items, poolDay)
 	}
 }
 
@@ -1222,7 +1310,7 @@ func (p *Poller) refreshSnapshots(ctx context.Context, phase session.Phase, item
 // recursing with a binary split when OpenD errors the whole batch (the "one
 // bad code fails the batch" case — e.g. an OTC code without quote rights).
 // *reqs tracks the per-poll request budget across chunks and recursion.
-func (p *Poller) snapshotBatch(ctx context.Context, phase session.Phase, syms []string, reqs *int, items map[string]rankItem) {
+func (p *Poller) snapshotBatch(ctx context.Context, phase session.Phase, syms []string, reqs *int, items map[string]rankItem, poolDay int64) {
 	if len(syms) == 0 {
 		return
 	}
@@ -1258,8 +1346,8 @@ func (p *Poller) snapshotBatch(ctx context.Context, phase session.Phase, syms []
 			return
 		}
 		mid := len(syms) / 2
-		p.snapshotBatch(ctx, phase, syms[:mid], reqs, items)
-		p.snapshotBatch(ctx, phase, syms[mid:], reqs, items)
+		p.snapshotBatch(ctx, phase, syms[:mid], reqs, items, poolDay)
+		p.snapshotBatch(ctx, phase, syms[mid:], reqs, items, poolDay)
 		return
 	}
 	// Success: record each returned security; anything requested-but-absent is bad.
@@ -1298,6 +1386,11 @@ func (p *Poller) snapshotBatch(ctx context.Context, phase session.Phase, syms []
 					it.ChangePct = extended.GetChangeRate()
 					it.Volume = extended.GetVolume()
 				}
+			}
+			if turnover := snapshotTurnover(basic, phase); turnover != nil {
+				it.Turnover = turnover
+				it.turnoverPhase = phase
+				it.turnoverPoolDay = poolDay
 			}
 			if cumulative, ok := snapshotCumulativeVolume(basic, phase); ok {
 				it.cumulativeVolume = &cumulative

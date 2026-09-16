@@ -91,6 +91,9 @@ func TestRequester_PreMarketRank_UnmarshalsWithUniverseRows(t *testing.T) {
 		if got := row.GetPreMarketVolume(); got != want.Volume {
 			t.Errorf("%s: PreMarketVolume = %v, want %v", code, got, want.Volume)
 		}
+		if got := row.GetPreMarketTurnover(); got != want.Turnover {
+			t.Errorf("%s: PreMarketTurnover = %v, want %v", code, got, want.Turnover)
+		}
 	}
 }
 
@@ -134,6 +137,9 @@ func TestRequester_TopMoversRank_MatchesGeneratorRankRows(t *testing.T) {
 		}
 		if got := row.GetVolume(); got != want.Volume {
 			t.Errorf("%s: Volume = %v, want %v", code, got, want.Volume)
+		}
+		if got := row.GetTurnover(); got != want.Turnover {
+			t.Errorf("%s: Turnover = %v, want %v", code, got, want.Turnover)
 		}
 	}
 }
@@ -180,6 +186,9 @@ func TestRequester_AfterHoursRank_MatchesGeneratorRankRows(t *testing.T) {
 		if got := row.GetAfterHoursVolume(); got != want.Volume {
 			t.Errorf("%s: AfterHoursVolume = %v, want %v", code, got, want.Volume)
 		}
+		if got := row.GetAfterHoursTurnover(); got != want.Turnover {
+			t.Errorf("%s: AfterHoursTurnover = %v, want %v", code, got, want.Turnover)
+		}
 	}
 }
 
@@ -224,6 +233,9 @@ func TestRequester_OvernightRank_MatchesGeneratorRankRows(t *testing.T) {
 		}
 		if got := row.GetOvernightVolume(); got != want.Volume {
 			t.Errorf("%s: OvernightVolume = %v, want %v", code, got, want.Volume)
+		}
+		if got := row.GetOvernightTurnover(); got != want.Turnover {
+			t.Errorf("%s: OvernightTurnover = %v, want %v", code, got, want.Turnover)
 		}
 	}
 }
@@ -347,6 +359,9 @@ func TestRequester_Snapshot_MatchesGeneratorFundamentalsAndQuote(t *testing.T) {
 	}
 	if got := basic.GetVolume(); got != wantQ.Volume {
 		t.Errorf("Volume = %v, want %v", got, wantQ.Volume)
+	}
+	if got := basic.GetTurnover(); got != wantQ.Turnover {
+		t.Errorf("Turnover = %v, want %v", got, wantQ.Turnover)
 	}
 	if got := basic.GetHighest52WeeksPrice(); got != wantF.High52Wk {
 		t.Errorf("Highest52WeeksPrice = %v, want %v", got, wantF.High52Wk)

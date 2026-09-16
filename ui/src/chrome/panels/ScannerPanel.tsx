@@ -5,7 +5,7 @@ import type { ScannerFilters, ScannerSession } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
 import { FONTS } from "../../render/palette";
 import { formatTapeTime } from "../../render/format";
-import { appendSsrMarker, formatChangePct, formatCompactShares, formatRelativeVolume, formatShortInterest, msUntilEtMidnight } from "../format";
+import { appendSsrMarker, formatChangePct, formatCompactShares, formatDollarTurnover, formatRelativeVolume, formatShortInterest, msUntilEtMidnight } from "../format";
 import { formatFilterSummary } from "./scannerFilter";
 import { toggleSort, sortIndicator, type SortState } from "../sortColumns";
 import { bareSymbol } from "../exec/orderStatus";
@@ -19,13 +19,14 @@ import { rankScannerRows, readScannerSort, scannerModeSort, scannerSyncStatusTex
 const SESSION_LABEL: Record<ScannerSession, string> = {
   premarket: "Pre-market", rth: "RTH", afterhours: "After-hours", overnight: "Overnight",
 };
-const DEFAULT_FILTERS: ScannerFilters = { mode: "gainers", minChangePct: 0, maxFloatShares: null, minVolume: 0, minRelativeVolume: 0, floatUnit: "M", volumeUnit: "K" };
+const DEFAULT_FILTERS: ScannerFilters = { mode: "gainers", minChangePct: 0, maxFloatShares: null, minVolume: 0, minTurnover: 0, minRelativeVolume: 0, floatUnit: "M", volumeUnit: "K" };
 const COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
   { col: "sym", label: "Symbol", align: "left" },
   { col: "changePct", label: "%", align: "right" },
   { col: "last", label: "Last", align: "right" },
   { col: "float", label: "Float", align: "right" },
   { col: "vol", label: "Vol", align: "right" },
+  { col: "turnover", label: "Turnover", align: "right" },
   { col: "relVol", label: "REL VOL", align: "right" },
   { col: "shortInterest", label: "Short Int", align: "right" },
 ];
@@ -163,6 +164,7 @@ export function ScannerPanel(
             {draft.mode !== "most_active" && <label>{draft.mode === "gainers" ? "min gain %" : "min loss %"} <input aria-label={draft.mode === "gainers" ? "min gain %" : "min loss %"} type="number" min="0" value={draft.minChangePct} onChange={(e) => setDraft({ ...draft, minChangePct: Math.max(0, Number(e.target.value)) })} style={{ width: 60 }} /></label>}
             <label>float ≤ <input aria-label="float cap" type="number" min="0" value={draft.maxFloatShares === null ? "" : draft.maxFloatShares / unitScale(draft.floatUnit)} onChange={(e) => setDraft({ ...draft, maxFloatShares: e.target.value === "" ? null : Number(e.target.value) * unitScale(draft.floatUnit) })} style={{ width: 70 }} /><select aria-label="float unit" value={draft.floatUnit} onChange={(e) => setDraft({ ...draft, floatUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
             <label>vol ≥ <input aria-label="min volume" type="number" min="0" value={draft.minVolume / unitScale(draft.volumeUnit)} onChange={(e) => setDraft({ ...draft, minVolume: Number(e.target.value) * unitScale(draft.volumeUnit) })} style={{ width: 70 }} /><select aria-label="volume unit" value={draft.volumeUnit} onChange={(e) => setDraft({ ...draft, volumeUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
+            <label>turnover ≥ <input aria-label="min turnover" type="number" min="0" step="0.01" value={draft.minTurnover / 1_000_000} onChange={(e) => setDraft({ ...draft, minTurnover: Math.max(0, Number(e.target.value) * 1_000_000) })} style={{ width: 70 }} />$M</label>
             <label>rel vol ≥ <input aria-label="rel vol ≥" type="number" min="0" step="0.01" value={draft.minRelativeVolume} onChange={(e) => setDraft({ ...draft, minRelativeVolume: Math.max(0, Number(e.target.value)) })} style={{ width: 70 }} /></label>
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
               <Button onClick={resetDefaults}>Reset defaults</Button>
@@ -174,7 +176,7 @@ export function ScannerPanel(
       {syncControl}
       {(
         <div data-testid="scanner-filter-summary" className="mono" style={{ padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>
-          {filters.mode === "most_active" ? `Most active${cv.session === "rth" ? "" : " · approximate"}` : filters.mode === "gainers" ? "Top gainers" : "Top losers"} · {formatFilterSummary({ minChangePct: filters.mode === "most_active" ? 0 : filters.minChangePct, floatCapShares: filters.maxFloatShares, minVolume: filters.minVolume, minRelativeVolume: filters.minRelativeVolume })}
+          {filters.mode === "most_active" ? `Most active${cv.session === "rth" ? "" : " · approximate"}` : filters.mode === "gainers" ? "Top gainers" : "Top losers"} · {formatFilterSummary({ minChangePct: filters.mode === "most_active" ? 0 : filters.minChangePct, floatCapShares: filters.maxFloatShares, minVolume: filters.minVolume, minTurnover: filters.minTurnover, minRelativeVolume: filters.minRelativeVolume })}
         </div>
       )}
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
@@ -211,13 +213,14 @@ export function ScannerPanel(
                 <td style={numCell}>{r.last === null ? "—" : r.last.toFixed(2)}</td>
                 <td style={numCell}>{formatCompactShares(r.floatShares)}</td>
                 <td style={numCell}>{formatCompactShares(r.volume)}</td>
+                <td style={numCell} title="Dollar value traded in the current session.">{formatDollarTurnover(r.turnover)}</td>
                 <td style={numCell}>{formatRelativeVolume(r.relativeVolume)}</td>
                 <td style={numCell} title={r.shortInterestAsOf ? `as of ${r.shortInterestAsOf}` : undefined}>{formatShortInterest(r.shortInterest)}</td>
               </tr>
               );
             })}
             {rows.length === 0 && cv.refreshedAt && (
-              <tr><td colSpan={7} style={{ padding: 12, color: palette.textMuted, textAlign: "center" }}>No symbols match current filters.</td></tr>
+              <tr><td colSpan={8} style={{ padding: 12, color: palette.textMuted, textAlign: "center" }}>No symbols match current filters.</td></tr>
             )}
           </tbody>
         </table>

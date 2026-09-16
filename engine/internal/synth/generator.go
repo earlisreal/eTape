@@ -520,6 +520,7 @@ type RankRow struct {
 	Last        float64
 	PctChange   float64
 	Volume      int64
+	Turnover    float64
 	FloatShares int64
 }
 
@@ -545,6 +546,7 @@ func (g *Generator) RankRows() []RankRow {
 			Last:        last,
 			PctChange:   pct,
 			Volume:      rt.sess.Vol,
+			Turnover:    rt.sess.Turnover,
 			FloatShares: rt.spec.FloatShares,
 		})
 	}

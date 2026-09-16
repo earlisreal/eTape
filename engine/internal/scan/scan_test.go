@@ -51,6 +51,34 @@ func TestRankRowsThresholds(t *testing.T) {
 	}
 }
 
+func TestRankRowsTurnoverFilter(t *testing.T) {
+	zero, low, exact := 0.0, 999_999.0, 1_000_000.0
+	items := []rankItem{
+		{Symbol: "US.ZERO", Turnover: &zero},
+		{Symbol: "US.LOW", Turnover: &low},
+		{Symbol: "US.EXACT", Turnover: &exact},
+		{Symbol: "US.NONE"},
+	}
+	f := Defaults(config.Scan{})
+	f.MinTurnover = 1_000_000
+	got := rankRowsFiltered(items, nil, f)
+	if len(got) != 1 || got[0].Symbol != "US.EXACT" || got[0].Turnover == nil || *got[0].Turnover != exact {
+		t.Fatalf("turnover threshold got %+v", got)
+	}
+	f.MinTurnover = 0
+	got = rankRowsFiltered(items, nil, f)
+	if len(got) != len(items) || got[0].Turnover == nil || *got[0].Turnover != 0 {
+		t.Fatalf("zero/off turnover got %+v", got)
+	}
+	for _, value := range []float64{-1, math.NaN(), math.Inf(1)} {
+		v := value
+		f.MinTurnover = 1
+		if got := rankRowsFiltered([]rankItem{{Symbol: "US.BAD", Turnover: &v}}, nil, f); len(got) != 0 {
+			t.Fatalf("invalid turnover %v admitted: %+v", value, got)
+		}
+	}
+}
+
 func TestMostActiveIgnoresChangeThreshold(t *testing.T) {
 	f := Defaults(config.Scan{})
 	f.Mode, f.MinChangePct, f.MinVolume = "most_active", 50, 100
@@ -81,6 +109,10 @@ func TestRelativeVolumeFilter(t *testing.T) {
 		f.MinRelativeVolume = value
 		if err := ValidateFilters(f); err == nil {
 			t.Fatalf("invalid minimum ratio %v was accepted", value)
+		}
+		f.MinTurnover = value
+		if err := ValidateFilters(f); err == nil {
+			t.Fatalf("invalid turnover floor %v was accepted", value)
 		}
 	}
 }
@@ -193,6 +225,33 @@ func TestMostActiveRTHUsesVolumeSortedStockFilter(t *testing.T) {
 	got, err := p.fetchRank(context.Background(), session.RTH, "most_active")
 	if err != nil || len(got) != 1 || got[0] != (rankItem{Symbol: "US.A", Last: 12.5, ChangePct: 4.5, Volume: 1234}) {
 		t.Fatalf("got=%+v err=%v", got, err)
+	}
+}
+
+func TestFetchRankCarriesSessionTurnover(t *testing.T) {
+	pre := 11.0
+	after := 22.0
+	overnight := 33.0
+	fr := &fakeReq{
+		rankResp:     rankResp(rankItem{Symbol: "US.PRE", ChangePct: 1, Last: 1, Volume: 1, Turnover: &pre}),
+		topMoversRsp: topResp(rankItem{Symbol: "US.RTH", ChangePct: 2, Last: 2, Volume: 2, Turnover: &pre}),
+		afterHrsRsp:  &ahpb.Response{RetType: proto.Int32(0), S2C: &ahpb.S2C{DataList: []*ahpb.AfterHoursRankItem{{Security: usSec("AH"), AfterHoursChangeRatio: proto.Float64(3), AfterHoursPrice: proto.Float64(3), AfterHoursVolume: proto.Int64(3), AfterHoursTurnover: &after}}}},
+		overnightRsp: &onpb.Response{RetType: proto.Int32(0), S2C: &onpb.S2C{DataList: []*onpb.OvernightRankItem{{Security: usSec("ON"), OvernightChangeRatio: proto.Float64(4), OvernightPrice: proto.Float64(4), OvernightVolume: proto.Int64(4), OvernightTurnover: &overnight}}}},
+	}
+	p := newTestPoller(config.Scan{}, fr, &capturePub{})
+	cases := []struct {
+		phase  session.Phase
+		symbol string
+		want   float64
+	}{
+		{session.PreMarket, "US.PRE", pre}, {session.RTH, "US.RTH", pre},
+		{session.PostMarket, "US.AH", after}, {session.Overnight, "US.ON", overnight},
+	}
+	for _, tc := range cases {
+		items, err := p.fetchRank(context.Background(), tc.phase)
+		if err != nil || len(items) != 1 || items[0].Symbol != tc.symbol || items[0].Turnover == nil || *items[0].Turnover != tc.want || items[0].turnoverPhase != tc.phase {
+			t.Fatalf("phase %v got=%+v err=%v", tc.phase, items, err)
+		}
 	}
 }
 
@@ -785,6 +844,7 @@ func rankResp(items ...rankItem) *rankpb.Response {
 			PreMarketChangeRatio: proto.Float64(it.ChangePct),
 			PreMarketPrice:       proto.Float64(it.Last),
 			PreMarketVolume:      proto.Int64(it.Volume),
+			PreMarketTurnover:    it.Turnover,
 		})
 	}
 	return &rankpb.Response{RetType: proto.Int32(0), S2C: &rankpb.S2C{DataList: data}}
@@ -793,7 +853,7 @@ func rankResp(items ...rankItem) *rankpb.Response {
 func topResp(items ...rankItem) *tmrpb.Response {
 	data := make([]*tmrpb.TopMoversRankItem, 0, len(items))
 	for _, it := range items {
-		data = append(data, &tmrpb.TopMoversRankItem{Security: usSec(codeOf(it.Symbol)), ChangeRatio: proto.Float64(it.ChangePct), CurPrice: proto.Float64(it.Last), Volume: proto.Int64(it.Volume)})
+		data = append(data, &tmrpb.TopMoversRankItem{Security: usSec(codeOf(it.Symbol)), ChangeRatio: proto.Float64(it.ChangePct), CurPrice: proto.Float64(it.Last), Volume: proto.Int64(it.Volume), Turnover: it.Turnover})
 	}
 	return &tmrpb.Response{RetType: proto.Int32(0), S2C: &tmrpb.S2C{DataList: data}}
 }
@@ -1097,6 +1157,62 @@ func TestPollOnceEndToEnd(t *testing.T) {
 	}
 }
 
+func TestPollOnceTurnoverUsesSnapshotThenClearsAtRTH(t *testing.T) {
+	rankTurnover := 10.0
+	snapshotTurnover := 20.0
+	clk := clock.NewFake(et(2026, 7, 8, 8, 0))
+	fr := &fakeReq{
+		rankResp:     rankResp(rankItem{Symbol: "US.A", ChangePct: 5, Last: 1, Volume: 1, Turnover: &rankTurnover}),
+		topMoversRsp: topResp(rankItem{Symbol: "US.A", ChangePct: 5, Last: 1, Volume: 1}),
+		snap: func([]string) (*snappb.Response, error) {
+			if session.PhaseAt(clk.Now()) == session.PreMarket {
+				s := extendedSnap("A", session.PreMarket, 1, 5, 1)
+				s.Basic.PreMarket.Turnover = proto.Float64(snapshotTurnover)
+				return snapResp(s), nil
+			}
+			s := marketSnap("A", 1, 1, 1, 1)
+			s.Basic.Turnover = nil
+			return snapResp(s), nil
+		},
+	}
+	pub := &capturePub{}
+	p := New(config.Scan{Enabled: true}, fr, pub, clk, nil, nil, nil)
+	p.pollOnce(context.Background(), clk.Now())
+	if got := pub.ranks[0].Rows[0].Turnover; got == nil || *got != snapshotTurnover {
+		t.Fatalf("premarket snapshot should win over rank turnover: %+v", pub.ranks[0].Rows)
+	}
+
+	clk.Advance(2 * time.Hour)
+	p.pollOnce(context.Background(), clk.Now())
+	if got := pub.ranks[1].Rows[0].Turnover; got != nil {
+		t.Fatalf("RTH should clear premarket turnover when snapshot block is missing: %+v", pub.ranks[1].Rows)
+	}
+}
+
+func TestPollOnceClearsTurnoverBeforeFailedSessionRank(t *testing.T) {
+	value := 12.0
+	clk := clock.NewFake(et(2026, 7, 8, 8, 0))
+	fr := &fakeReq{
+		rankResp: rankResp(rankItem{Symbol: "US.A", ChangePct: 5, Last: 1, Volume: 1, Turnover: &value}),
+		snap: func([]string) (*snappb.Response, error) {
+			s := extendedSnap("A", session.PreMarket, 1, 5, 1)
+			s.Basic.PreMarket.Turnover = proto.Float64(value)
+			return snapResp(s), nil
+		},
+	}
+	p := New(config.Scan{Enabled: true}, fr, &capturePub{}, clk, nil, nil, nil)
+	p.pollOnce(context.Background(), clk.Now())
+	fr.topErr = fmt.Errorf("temporary rank failure")
+	clk.Advance(2 * time.Hour)
+	p.pollOnce(context.Background(), clk.Now())
+	p.mu.RLock()
+	got := p.board["US.A"].Turnover
+	p.mu.RUnlock()
+	if got != nil {
+		t.Fatalf("failed RTH rank left premarket turnover cached: %v", *got)
+	}
+}
+
 func TestRTHBootstrapIsStickyAndRunsOnce(t *testing.T) {
 	fr := &fakeReq{
 		rankResp:     rankResp(rankItem{Symbol: "US.PRE", ChangePct: 8, Last: 2, Volume: 10}),
@@ -1194,24 +1310,32 @@ func TestSnapshotRefreshUsesActiveSessionData(t *testing.T) {
 		name           string
 		phase          session.Phase
 		want           rankItem
+		wantTurnover   *float64
 		makeSn         func() *snappb.Snapshot
 		wantCumulative *int64
 	}{
-		{"premarket", session.PreMarket, rankItem{Last: 101, ChangePct: 1, Volume: 11}, func() *snappb.Snapshot {
-			return extendedSnap("A", session.PreMarket, 101, 1, 11)
+		{"premarket", session.PreMarket, rankItem{Last: 101, ChangePct: 1, Volume: 11}, proto.Float64(111), func() *snappb.Snapshot {
+			s := extendedSnap("A", session.PreMarket, 101, 1, 11)
+			s.Basic.PreMarket.Turnover = proto.Float64(111)
+			return s
 		}, proto.Int64(11)},
-		{"after-hours", session.PostMarket, rankItem{Last: 102, ChangePct: 2, Volume: 22}, func() *snappb.Snapshot {
-			return extendedSnap("A", session.PostMarket, 102, 2, 22)
+		{"after-hours", session.PostMarket, rankItem{Last: 102, ChangePct: 2, Volume: 22}, proto.Float64(222), func() *snappb.Snapshot {
+			s := extendedSnap("A", session.PostMarket, 102, 2, 22)
+			s.Basic.AfterMarket.Turnover = proto.Float64(222)
+			return s
 		}, proto.Int64(1028)},
-		{"overnight", session.Overnight, rankItem{Last: 103, ChangePct: 3, Volume: 33}, func() *snappb.Snapshot {
-			return extendedSnap("A", session.Overnight, 103, 3, 33)
+		{"overnight", session.Overnight, rankItem{Last: 103, ChangePct: 3, Volume: 33}, proto.Float64(333), func() *snappb.Snapshot {
+			s := extendedSnap("A", session.Overnight, 103, 3, 33)
+			s.Basic.Overnight.Turnover = proto.Float64(333)
+			return s
 		}, nil},
-		{"rth", session.RTH, rankItem{Last: 90, ChangePct: 12.5, Volume: 999}, func() *snappb.Snapshot {
+		{"rth", session.RTH, rankItem{Last: 90, ChangePct: 12.5, Volume: 999}, proto.Float64(444), func() *snappb.Snapshot {
 			s := marketSnap("A", 1, 90, 80, 999)
 			s.Basic.PreMarket = &qotcommon.PreAfterMarketData{Volume: proto.Int64(11)}
+			s.Basic.Turnover = proto.Float64(444)
 			return s
 		}, proto.Int64(1010)},
-		{"missing extended data", session.PreMarket, rankItem{Last: 7, ChangePct: 6, Volume: 5}, func() *snappb.Snapshot { return marketSnap("A", 1, 90, 80, 999) }, nil},
+		{"missing extended data", session.PreMarket, rankItem{Last: 7, ChangePct: 6, Volume: 5}, nil, func() *snappb.Snapshot { return marketSnap("A", 1, 90, 80, 999) }, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fr := &fakeReq{snap: func([]string) (*snappb.Response, error) { return snapResp(tc.makeSn()), nil }}
@@ -1219,10 +1343,55 @@ func TestSnapshotRefreshUsesActiveSessionData(t *testing.T) {
 			items := map[string]rankItem{"US.A": {Symbol: "US.A", Last: 7, ChangePct: 6, Volume: 5}}
 			p.refreshSnapshots(context.Background(), tc.phase, items)
 			got := items["US.A"]
-			if got.Last != tc.want.Last || got.ChangePct != tc.want.ChangePct || got.Volume != tc.want.Volume || (got.cumulativeVolume == nil) != (tc.wantCumulative == nil) || got.cumulativeVolume != nil && *got.cumulativeVolume != *tc.wantCumulative {
+			if got.Last != tc.want.Last || got.ChangePct != tc.want.ChangePct || got.Volume != tc.want.Volume || (got.Turnover == nil) != (tc.wantTurnover == nil) || got.Turnover != nil && *got.Turnover != *tc.wantTurnover || (got.cumulativeVolume == nil) != (tc.wantCumulative == nil) || got.cumulativeVolume != nil && *got.cumulativeVolume != *tc.wantCumulative {
 				t.Fatalf("got %+v, want market values %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSnapshotTurnoverRejectsInvalidValues(t *testing.T) {
+	value := func(v float64) *float64 { return proto.Float64(v) }
+	for _, tc := range []struct {
+		name  string
+		phase session.Phase
+		make  func(*snappb.SnapshotBasicData)
+		want  *float64
+	}{
+		{"rth zero", session.RTH, func(b *snappb.SnapshotBasicData) { b.Turnover = value(0) }, value(0)},
+		{"rth valid", session.RTH, func(b *snappb.SnapshotBasicData) { b.Turnover = value(42.5) }, value(42.5)},
+		{"premarket", session.PreMarket, func(b *snappb.SnapshotBasicData) { b.PreMarket = &qotcommon.PreAfterMarketData{Turnover: value(7)} }, value(7)},
+		{"after-hours", session.PostMarket, func(b *snappb.SnapshotBasicData) { b.AfterMarket = &qotcommon.PreAfterMarketData{Turnover: value(8)} }, value(8)},
+		{"overnight", session.Overnight, func(b *snappb.SnapshotBasicData) { b.Overnight = &qotcommon.PreAfterMarketData{Turnover: value(9)} }, value(9)},
+		{"missing", session.RTH, func(*snappb.SnapshotBasicData) {}, nil},
+		{"negative", session.RTH, func(b *snappb.SnapshotBasicData) { b.Turnover = value(-1) }, nil},
+		{"nan", session.RTH, func(b *snappb.SnapshotBasicData) { b.Turnover = value(math.NaN()) }, nil},
+		{"infinite", session.RTH, func(b *snappb.SnapshotBasicData) { b.Turnover = value(math.Inf(1)) }, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			basic := snapshotBasic("A")
+			basic.Turnover = nil
+			tc.make(basic)
+			got := snapshotTurnover(basic, tc.phase)
+			if (got == nil) != (tc.want == nil) || got != nil && *got != *tc.want {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCurrentSessionTurnoverRequiresPhaseAndPoolDay(t *testing.T) {
+	value := 12.0
+	day := session.PoolDay(et(2026, 7, 8, 10, 0))
+	item := rankItem{Turnover: &value, turnoverPhase: session.RTH, turnoverPoolDay: day}
+	if got := currentSessionItem(item, session.RTH, day); got.Turnover == nil {
+		t.Fatal("matching phase and pool day cleared turnover")
+	}
+	if got := currentSessionItem(item, session.PreMarket, day); got.Turnover != nil {
+		t.Fatalf("phase transition retained stale turnover: %+v", got)
+	}
+	if got := currentSessionItem(item, session.RTH, day+1); got.Turnover != nil {
+		t.Fatalf("new pool day retained stale turnover: %+v", got)
 	}
 }
 

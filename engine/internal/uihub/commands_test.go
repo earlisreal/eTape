@@ -260,7 +260,7 @@ func TestCommandsSetScannerFiltersPersistsV2(t *testing.T) {
 	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
 	cd.scanner.Store(&scannerBox{scanner: scanner})
 
-	want := wsmsg.ScannerFilters{Mode: "gainers", MinRelativeVolume: 2.5, FloatUnit: "M", VolumeUnit: "K"}
+	want := wsmsg.ScannerFilters{Mode: "gainers", MinTurnover: 12_345_678.9, MinRelativeVolume: 2.5, FloatUnit: "M", VolumeUnit: "K"}
 	ack, _ := cd.handle(context.Background(), "SetScannerFilters", mustJSON(t, wsmsg.SetScannerFiltersArgs{Filters: want}), 0, func(wsmsg.AckMsg) {})
 	if ack.Status != wsmsg.AckAccepted || !reflect.DeepEqual(scanner.filters, want) {
 		t.Fatalf("SetScannerFilters ack/filters = %+v / %+v", ack, scanner.filters)

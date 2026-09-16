@@ -69,8 +69,8 @@ describe("scannerSyncStatusText", () => {
 });
 
 describe("rankScannerRows", () => {
-	const row = (symbol: string, relativeVolume: number | null, shortInterest: number | null = null): ScannerRowView => ({
-		symbol, shortSellRestricted: false, changePct: 1, last: 1, floatShares: null, volume: 1, relativeVolume,
+	const row = (symbol: string, relativeVolume: number | null, shortInterest: number | null = null, turnover: number | null = null): ScannerRowView => ({
+		symbol, shortSellRestricted: false, changePct: 1, last: 1, floatShares: null, volume: 1, turnover, relativeVolume,
 		shortInterest, shortInterestAsOf: shortInterest === null ? null : "2026-07-31",
 		isUnseen: false, isNewHit: false, muted: false,
 	});
@@ -85,6 +85,14 @@ describe("rankScannerRows", () => {
 		expect(rankScannerRows(rows, { col: "shortInterest", dir: "desc" }).map((r) => r.symbol))
 			.toEqual(["HIGH", "LOW", "UNKNOWN"]);
 		expect(rankScannerRows(rows, { col: "shortInterest", dir: "asc" }).map((r) => r.symbol))
+			.toEqual(["LOW", "HIGH", "UNKNOWN"]);
+	});
+
+	it("ranks finite Dollar Turnover before unavailable values in both directions", () => {
+		const rows = [row("UNKNOWN", null), row("LOW", null, null, 9_067), row("HIGH", null, null, 547_619)];
+		expect(rankScannerRows(rows, { col: "turnover", dir: "desc" }).map((r) => r.symbol))
+			.toEqual(["HIGH", "LOW", "UNKNOWN"]);
+		expect(rankScannerRows(rows, { col: "turnover", dir: "asc" }).map((r) => r.symbol))
 			.toEqual(["LOW", "HIGH", "UNKNOWN"]);
 	});
 });

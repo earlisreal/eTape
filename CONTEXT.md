@@ -145,6 +145,10 @@ _Avoid_: Volume Ratio
 A Scanner minimum Relative Volume (Daily Rate) multiplier. It is off at zero; when active, a row with an unavailable value does not match.
 _Avoid_: Percentage filter, volume filter
 
+**Dollar Turnover**:
+The total US-dollar value of shares traded over a specified period; the Scanner uses the current trading session. It measures traded value, rather than shares traded or the fraction of Free Float traded.
+_Avoid_: Turnover rate, float rotation
+
 **Rolling Change**:
 The percentage price change from a selected duration ago to now, with the comparison window advancing over time. It is distinct from the change within the last completed candle.
 _Avoid_: Previous-candle change

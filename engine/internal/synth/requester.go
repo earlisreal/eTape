@@ -205,7 +205,7 @@ func genCodeOf(wire string) string {
 // --- rank protocols: 3410 pre-market, 3413 top movers/RTH, 3411 after
 // hours, 3412 overnight. All four share the same shape: per RankRow,
 // Security + this session's change-ratio/price/volume triple. Rank rows
-// never carry float/name/turnover (scan.go gets float separately via 3203).
+// never carry float/name; turnover is the existing synthetic session aggregate.
 
 func rankRequestRows(g *Generator, dir, count int32) []RankRow {
 	rows := g.RankRows()
@@ -233,6 +233,7 @@ func buildPreMarketRankResponse(g *Generator, message ...proto.Message) *rankpb.
 			PreMarketChangeRatio: proto.Float64(row.PctChange),
 			PreMarketPrice:       proto.Float64(row.Last),
 			PreMarketVolume:      proto.Int64(row.Volume),
+			PreMarketTurnover:    proto.Float64(row.Turnover),
 		})
 	}
 	return &rankpb.Response{RetType: proto.Int32(0), S2C: &rankpb.S2C{DataList: items}}
@@ -253,6 +254,7 @@ func buildTopMoversRankResponse(g *Generator, message ...proto.Message) *tmrpb.R
 			ChangeRatio: proto.Float64(row.PctChange),
 			CurPrice:    proto.Float64(row.Last),
 			Volume:      proto.Int64(row.Volume),
+			Turnover:    proto.Float64(row.Turnover),
 		})
 	}
 	return &tmrpb.Response{RetType: proto.Int32(0), S2C: &tmrpb.S2C{DataList: items}}
@@ -273,6 +275,7 @@ func buildAfterHoursRankResponse(g *Generator, message ...proto.Message) *ahpb.R
 			AfterHoursChangeRatio: proto.Float64(row.PctChange),
 			AfterHoursPrice:       proto.Float64(row.Last),
 			AfterHoursVolume:      proto.Int64(row.Volume),
+			AfterHoursTurnover:    proto.Float64(row.Turnover),
 		})
 	}
 	return &ahpb.Response{RetType: proto.Int32(0), S2C: &ahpb.S2C{DataList: items}}
@@ -293,6 +296,7 @@ func buildOvernightRankResponse(g *Generator, message ...proto.Message) *onpb.Re
 			OvernightChangeRatio: proto.Float64(row.PctChange),
 			OvernightPrice:       proto.Float64(row.Last),
 			OvernightVolume:      proto.Int64(row.Volume),
+			OvernightTurnover:    proto.Float64(row.Turnover),
 		})
 	}
 	return &onpb.Response{RetType: proto.Int32(0), S2C: &onpb.S2C{DataList: items}}
@@ -405,8 +409,8 @@ func buildShortInterestResponse(g *Generator, req proto.Message) *shortpb.Respon
 // LastClosePrice, Volume, Highest52WeeksPrice, Lowest52WeeksPrice) plus the
 // proto2-required singular fields that go unread but still need a value for
 // proto.Marshal to succeed (Type, IsSuspend, ListTime, LotSize, PriceSpread,
-// UpdateTime, HighPrice, OpenPrice, LowPrice, Turnover, TurnoverRate) - all
-// zero-valued wire-format filler, not fabricated data.
+// UpdateTime, HighPrice, OpenPrice, LowPrice, TurnoverRate). Turnover comes
+// from the generator's existing current-session aggregate.
 func buildSnapshotBasic(code string, q feed.Quote, f Fundamentals) *snappb.SnapshotBasicData {
 	return &snappb.SnapshotBasicData{
 		Security:            usSecurity(code),
@@ -427,7 +431,7 @@ func buildSnapshotBasic(code string, q feed.Quote, f Fundamentals) *snappb.Snaps
 		HighPrice:    proto.Float64(0),
 		OpenPrice:    proto.Float64(0),
 		LowPrice:     proto.Float64(0),
-		Turnover:     proto.Float64(0),
+		Turnover:     proto.Float64(q.Turnover),
 		TurnoverRate: proto.Float64(0),
 	}
 }
