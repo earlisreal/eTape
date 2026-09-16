@@ -4,6 +4,7 @@
 // flush shape, but persists a single config key rather than one per symbol.
 import type { Drawing, DrawingKind } from "./model";
 import { isValidDrawingStyle } from "./model";
+import { openConfigSync, type ConfigSync } from "../../../configSync";
 
 export type ToolStyle = Pick<Drawing, "color" | "width" | "lineStyle" | "fill" | "fillColor" | "fillOpacity">;
 
@@ -23,6 +24,7 @@ export class DrawingToolStyleStore {
   private readonly listeners = new Set<() => void>();
   private pendingEdits: Partial<Record<DrawingKind, ToolStyle>> = {};
   private timer: ReturnType<typeof setTimeout> | null = null;
+  private sync: ConfigSync | null = null;
 
   constructor(private readonly debounceMs = 500) {}
 
@@ -34,12 +36,12 @@ export class DrawingToolStyleStore {
   connect(deps: Deps): () => void {
     this.deps = deps;
     this.connected = true;
-    if (!this.loaded) {
-      this.loaded = true;
-      this.ready = false;
-      this.notify();
-      void deps.commands.sendCommand("GetConfig", { key: KEY })
+    const reload = (initial: boolean) => {
+      const active = this.deps;
+      if (!active) return;
+      void active.commands.sendCommand("GetConfig", { key: KEY })
         .then((ack) => {
+          if (this.deps !== active) return;
           if (ack.status === "accepted" && ack.value && typeof ack.value === "object" && !Array.isArray(ack.value)) {
             const raw = ack.value as Record<string, unknown>;
             const next: Partial<Record<DrawingKind, ToolStyle>> = {};
@@ -50,12 +52,21 @@ export class DrawingToolStyleStore {
             }
             this.styles = this.withPendingEdits(next);
           }
-          this.finishHydration();
+          if (initial) this.finishHydration(); else this.notify();
         })
-        .catch(() => { this.finishHydration(); });
+        .catch(() => { if (initial && this.deps === active) this.finishHydration(); });
+    };
+    this.sync = openConfigSync(KEY, () => reload(false));
+    if (!this.loaded) {
+      this.loaded = true;
+      this.ready = false;
+      this.notify();
+      reload(true);
     }
     return () => {
       if (this.timer) { clearTimeout(this.timer); this.timer = null; }
+      this.sync?.close();
+      this.sync = null;
       this.deps = null;
       this.connected = false;
     };
@@ -120,6 +131,7 @@ export class DrawingToolStyleStore {
   async flush(): Promise<void> {
     this.timer = null;
     if (!this.deps) return;
-    await this.deps.commands.sendCommand("SetConfig", { key: KEY, value: this.styles });
+    const ack = await this.deps.commands.sendCommand("SetConfig", { key: KEY, value: this.styles });
+    if (ack.status === "accepted") this.sync?.notify();
   }
 }

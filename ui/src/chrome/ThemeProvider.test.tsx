@@ -3,13 +3,13 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ThemeProvider, useTheme } from "./ThemeProvider";
 
-function Probe() {
+function Probe({ id = "one" }: { id?: string }) {
   const { mode, palette, setMode } = useTheme();
   return (
     <div>
-      <span data-testid="mode">{mode}</span>
-      <span data-testid="bg">{palette.bg}</span>
-      <button onClick={() => setMode(mode === "light" ? "dark" : "light")}>toggle</button>
+      <span data-testid={`mode-${id}`}>{mode}</span>
+      <span data-testid={`bg-${id}`}>{palette.bg}</span>
+      <button data-testid={`toggle-${id}`} onClick={() => setMode(mode === "light" ? "dark" : "light")}>toggle</button>
     </div>
   );
 }
@@ -17,22 +17,43 @@ function Probe() {
 describe("ThemeProvider", () => {
   it("defaults to light", () => {
     render(<ThemeProvider><Probe /></ThemeProvider>);
-    expect(screen.getByTestId("mode").textContent).toBe("light");
+    expect(screen.getByTestId("mode-one").textContent).toBe("light");
   });
 
   it("loads the persisted mode from the config store", async () => {
     const commands = { sendCommand: vi.fn(async (n: string) =>
       n === "GetConfig" ? { status: "accepted", value: "dark" } : { status: "accepted" }) };
     render(<ThemeProvider commands={commands}><Probe /></ThemeProvider>);
-    await waitFor(() => expect(screen.getByTestId("mode").textContent).toBe("dark"));
+    await waitFor(() => expect(screen.getByTestId("mode-one").textContent).toBe("dark"));
   });
 
   it("toggling persists via SetConfig and swaps the palette", async () => {
     const commands = { sendCommand: vi.fn(async () => ({ status: "accepted" })) };
     render(<ThemeProvider commands={commands}><Probe /></ThemeProvider>);
-    fireEvent.click(screen.getByText("toggle"));
-    await waitFor(() => expect(screen.getByTestId("mode").textContent).toBe("dark"));
+    fireEvent.click(screen.getByTestId("toggle-one"));
+    await waitFor(() => expect(screen.getByTestId("mode-one").textContent).toBe("dark"));
     expect(commands.sendCommand).toHaveBeenCalledWith("SetConfig", { key: "theme", value: "dark" });
+  });
+
+  it("applies a theme change made by another window", async () => {
+    let stored = "light";
+    const makeCommands = () => ({
+      sendCommand: vi.fn(async (name: string, args: unknown) => {
+        if (name === "SetConfig") stored = (args as { value: string }).value;
+        return { status: "accepted", value: name === "GetConfig" ? stored : undefined };
+      }),
+    });
+    const first = makeCommands();
+    const second = makeCommands();
+    render(
+      <>
+        <ThemeProvider commands={first}><Probe id="one" /></ThemeProvider>
+        <ThemeProvider commands={second}><Probe id="two" /></ThemeProvider>
+      </>,
+    );
+    await waitFor(() => expect(screen.getByTestId("mode-two").textContent).toBe("light"));
+    fireEvent.click(screen.getByTestId("toggle-one"));
+    await waitFor(() => expect(screen.getByTestId("mode-two").textContent).toBe("dark"));
   });
 
   it("mirrors the palette onto :root and sets data-theme", async () => {

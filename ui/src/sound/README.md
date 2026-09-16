@@ -11,4 +11,5 @@ Announcements also use the existing Enable sounds setting and master volume, wit
 runtime speech service. A muted, locked, loading, or failed player drops the
 announcement without queuing it; only a workspace that starts playback claims
 the shared transition token. Clips are copied into the Vite build and embedded
-in release builds. Recording details are in [the audio README](../../public/audio/README.md).
+in release builds. Sound preference edits broadcast their config key so every
+open workspace reloads the same settings. Recording details are in [the audio README](../../public/audio/README.md).

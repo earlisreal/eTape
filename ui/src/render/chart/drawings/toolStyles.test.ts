@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { DrawingToolStyleStore } from "./toolStyles";
 
 interface FakeAck { status: string; value?: unknown; reason?: string }
@@ -13,6 +13,12 @@ function fakeCommands(overrides?: Partial<{ get: FakeAck; set: FakeAck }>) {
   });
   return { sendCommand, calls };
 }
+
+const cleanups: Array<() => void> = [];
+function connect(s: DrawingToolStyleStore, commands: { sendCommand(name: string, args: unknown): Promise<FakeAck> }): void {
+  cleanups.push(s.connect({ commands }));
+}
+afterEach(() => { cleanups.splice(0).forEach((off) => off()); });
 
 // vi.fn-wrapped async mocks resolve a couple microtask ticks later than a plain
 // async function (see store.test.ts's ensureLoaded test for the same note), so
@@ -61,7 +67,7 @@ describe("DrawingToolStyleStore persistence", () => {
     const ready = vi.fn();
     s.subscribe(ready);
     expect(s.isReady()).toBe(false);
-    s.connect({ commands: { sendCommand } });
+    connect(s, { sendCommand });
     expect(s.isReady()).toBe(false);
     resolveGet({ status: "accepted", value: {} });
     await settle();
@@ -72,7 +78,7 @@ describe("DrawingToolStyleStore persistence", () => {
   it("connect loads a previously remembered style from GetConfig", async () => {
     const cmd = fakeCommands({ get: { status: "accepted", value: { trendline: { color: "#2962FF", width: 2, lineStyle: "solid" }, rect: { fill: true, fillColor: "#2962FF", fillOpacity: 20 } } } });
     const s = new DrawingToolStyleStore(0);
-    s.connect({ commands: cmd });
+    connect(s, cmd);
     await settle();
     expect(s.styleFor("trendline")).toEqual({ color: "#2962FF", width: 2, lineStyle: "solid" });
     expect(s.styleFor("rect")).toEqual({ fill: true, fillColor: "#2962FF", fillOpacity: 20 });
@@ -81,7 +87,7 @@ describe("DrawingToolStyleStore persistence", () => {
   it("drops a malformed remembered style on load instead of crashing", async () => {
     const cmd = fakeCommands({ get: { status: "accepted", value: { trendline: { width: "thick" }, hline: { color: "#2962FF" } } } });
     const s = new DrawingToolStyleStore(0);
-    s.connect({ commands: cmd });
+    connect(s, cmd);
     await settle();
     expect(s.styleFor("trendline")).toEqual({});
     expect(s.styleFor("hline")).toEqual({ color: "#2962FF" });
@@ -91,7 +97,7 @@ describe("DrawingToolStyleStore persistence", () => {
     const missing = new DrawingToolStyleStore(0);
     const missingReady = vi.fn();
     missing.subscribe(missingReady);
-    missing.connect({ commands: fakeCommands({ get: { status: "accepted" } }) });
+    connect(missing, fakeCommands({ get: { status: "accepted" } }));
     await settle();
     expect(missing.isReady()).toBe(true);
     expect(missingReady).toHaveBeenCalledTimes(2);
@@ -100,7 +106,7 @@ describe("DrawingToolStyleStore persistence", () => {
     const failed = new DrawingToolStyleStore(0);
     const failedReady = vi.fn();
     failed.subscribe(failedReady);
-    failed.connect({ commands: { sendCommand } });
+    connect(failed, { sendCommand });
     await settle();
     expect(failed.isReady()).toBe(true);
     expect(failedReady).toHaveBeenCalledTimes(2);
@@ -112,7 +118,7 @@ describe("DrawingToolStyleStore persistence", () => {
       ? new Promise<FakeAck>((resolve) => { resolveGet = resolve; })
       : Promise.resolve<FakeAck>({ status: "accepted" }));
     const s = new DrawingToolStyleStore(0);
-    s.connect({ commands: { sendCommand } });
+    connect(s, { sendCommand });
     s.remember("trendline", { color: "#LOCAL" });
     resolveGet({ status: "accepted", value: { trendline: { color: "#REMOTE", width: 2 } } });
     await settle();
@@ -122,13 +128,32 @@ describe("DrawingToolStyleStore persistence", () => {
   it("remember schedules a debounced SetConfig write of the whole map", async () => {
     const cmd = fakeCommands();
     const s = new DrawingToolStyleStore(0); // debounceMs 0
-    s.connect({ commands: cmd });
+    connect(s, cmd);
     await settle(); // let the initial GetConfig settle first
     s.remember("trendline", { color: "#2962FF" });
     await new Promise((resolve) => setTimeout(resolve, 5));
     const set = cmd.calls.find((c) => c.name === "SetConfig");
     expect(set?.args.key).toBe("drawings.toolStyles");
     expect(set?.args.value).toEqual({ trendline: { color: "#2962FF" } });
+  });
+
+  it("reloads remembered styles changed by another window", async () => {
+    let stored: unknown = {};
+    const makeCommands = () => ({
+      sendCommand: vi.fn(async (name: string, args: unknown): Promise<FakeAck> => {
+        if (name === "SetConfig") stored = (args as { value: unknown }).value;
+        return { status: "accepted", value: name === "GetConfig" ? stored : undefined };
+      }),
+    });
+    const first = new DrawingToolStyleStore(0);
+    const second = new DrawingToolStyleStore(0);
+    connect(first, makeCommands());
+    connect(second, makeCommands());
+    await settle();
+    first.remember("trendline", { color: "#2962FF" });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    await settle();
+    expect(second.styleFor("trendline")).toEqual({ color: "#2962FF" });
   });
 
   it("remember before connect still works in-memory and never persists", async () => {

@@ -25,7 +25,7 @@ movement, floating style toolbar, clone, and delete actions. Hide all and clear
 all drawings include session Measures.
 
 Drawing Tool Styles are workspace-wide per-kind color, width, and line-style
-defaults. The rail gates persisted-style tools until the asynchronous config
+defaults and synchronize across open workspace windows. The rail gates persisted-style tools until the asynchronous config
 hydration succeeds or fails; Measure remains available during that wait. A
 completed persisted drawing is selected immediately and opens the floating style
 toolbar; editing it also updates that tool's next default. Rectangles additionally

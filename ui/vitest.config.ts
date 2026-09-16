@@ -116,6 +116,8 @@ export default defineConfig({
           name: 'chrome-regressions',
           include: [
             'src/sound/**/*.test.{ts,tsx}',
+            'src/chrome/ThemeProvider.test.tsx',
+            'src/chrome/exec/useOrderConfig.test.tsx',
             'src/chrome/AppShell.test.tsx',
             'src/chrome/AboutSection.test.tsx',
             'src/chrome/Catalog.test.tsx',
@@ -132,6 +134,7 @@ export default defineConfig({
             'src/chrome/scannerSync.test.ts',
             'src/data/ScannerStore.test.ts',
             'src/chrome/workspace.test.ts',
+            'src/render/chart/drawings/toolStyles.test.ts',
           ],
           pool: 'forks',
         },

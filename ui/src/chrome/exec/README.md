@@ -40,4 +40,6 @@ migrate into one row, then remain only as a compatibility membership
 projection. Hotkeys exports carry the Deck Layout but never `activeVenue`, and
 imports regenerate template ids before remapping row references. Deck Button
 clicks still use the shared `fireTemplate` path with `gateArm: false`; engine
-arm and risk gates remain authoritative.
+arm and risk gates remain authoritative. Order configuration changes are
+rebroadcast by key so open workspace windows reload templates, hotkeys, venue,
+and safety preferences together.
