@@ -52,7 +52,7 @@ describe("sortByChangeDesc", () => {
 describe("formatFilterSummary", () => {
   it("formats set fields with human units, omits nulls/zeros", () => {
     expect(formatFilterSummary({ minChangePct: 10, floatCapShares: 20_000_000, minVolume: 100_000, minTurnover: 12_500_000, minRelativeVolume: 2.5 }))
-      .toBe("change magnitude ≥ 10% · float ≤ 20M · vol ≥ 100k · turnover ≥ $12.5M · rel vol ≥ 2.5");
+      .toBe("change magnitude ≥ 10% · float ≤ 20M · vol ≥ 100k · turnover ≥ 12.5M · rel vol ≥ 2.5");
     expect(formatFilterSummary({ minChangePct: 5, floatCapShares: null, minVolume: 0, minTurnover: 0, minRelativeVolume: 0 }))
       .toBe("change magnitude ≥ 5%");
   });

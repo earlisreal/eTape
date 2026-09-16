@@ -61,15 +61,15 @@ describe("formatShortInterest", () => {
 
 describe("formatDollarTurnover", () => {
 	it("formats compact dollar values and keeps suffix boundaries readable", () => {
-		expect(formatDollarTurnover(850_000)).toBe("$850K");
-		expect(formatDollarTurnover(12_500_000)).toBe("$12.5M");
-		expect(formatDollarTurnover(1_200_000_000)).toBe("$1.2B");
-		expect(formatDollarTurnover(999_950)).toBe("$1M");
-		expect(formatDollarTurnover(12.345)).toBe("$12.35");
-		expect(formatDollarTurnover(999.999)).toBe("$1K");
+		expect(formatDollarTurnover(850_000)).toBe("850K");
+		expect(formatDollarTurnover(12_500_000)).toBe("12.5M");
+		expect(formatDollarTurnover(1_200_000_000)).toBe("1.2B");
+		expect(formatDollarTurnover(999_950)).toBe("1M");
+		expect(formatDollarTurnover(12.345)).toBe("12.35");
+		expect(formatDollarTurnover(999.999)).toBe("1K");
 	});
 	it("keeps zero distinct from unavailable values", () => {
-		expect(formatDollarTurnover(0)).toBe("$0");
+		expect(formatDollarTurnover(0)).toBe("0");
 		expect(formatDollarTurnover(null)).toBe("—");
 		expect(formatDollarTurnover(Number.NaN)).toBe("—");
 		expect(formatDollarTurnover(-1)).toBe("—");

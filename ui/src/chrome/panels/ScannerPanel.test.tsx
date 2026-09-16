@@ -448,9 +448,9 @@ describe("ScannerPanel", () => {
         { ...scannerShortInterestDefaults, symbol: "US.LOW", changePct: 40, last: 1, floatShares: 1, volume: 1, turnover: 850_000, relativeVolume: null },
         { ...scannerShortInterestDefaults, symbol: "US.HIGH", changePct: 3, last: 1, floatShares: 1, volume: 1, turnover: 12_500_000, relativeVolume: null },
       ] } }));
-    expect(screen.getByText("$850K")).toBeTruthy();
-    expect(screen.getByText("$12.5M")).toBeTruthy();
-    expect(screen.getByText("$12.5M").closest("td")?.getAttribute("title")).toBe("Dollar value traded in the current session.");
+    expect(screen.getByText("850K")).toBeTruthy();
+    expect(screen.getByText("12.5M")).toBeTruthy();
+    expect(screen.getByText("12.5M").closest("td")?.getAttribute("title")).toBe("Dollar value traded in the current session.");
     fireEvent.click(screen.getByRole("columnheader", { name: /Turnover/ }));
     expect(onConfigChange).toHaveBeenCalledWith({ sort: { col: "turnover", dir: "desc" } });
     expect([...document.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent)).toEqual(["HIGH", "LOW", "UNKNOWN"]);

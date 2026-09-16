@@ -36,7 +36,7 @@ export function formatRelativeVolume(n: number | null): string {
 /** Current-session dollar turnover: compact USD with one decimal suffix. */
 export function formatDollarTurnover(n: number | null): string {
 	if (n === null || !Number.isFinite(n) || n < 0) return "—";
-	if (n === 0) return "$0";
+	if (n === 0) return "0";
 	const units = [
 		{ value: 1e12, suffix: "T" },
 		{ value: 1e9, suffix: "B" },
@@ -46,7 +46,7 @@ export function formatDollarTurnover(n: number | null): string {
 	let index = units.findIndex((unit) => n >= unit.value);
 	if (index < 0) {
 		const rounded = Number(n.toFixed(2));
-		return rounded >= 1000 ? "$1K" : `$${rounded}`;
+		return rounded >= 1000 ? "1K" : `${rounded}`;
 	}
 	let scaled = n / units[index].value;
 	let rounded = Number(scaled.toFixed(1));
@@ -55,7 +55,7 @@ export function formatDollarTurnover(n: number | null): string {
 		scaled = n / units[index].value;
 		rounded = Number(scaled.toFixed(1));
 	}
-	return `$${rounded}${units[index].suffix}`;
+	return `${rounded}${units[index].suffix}`;
 }
 
 /** Reported short-interest shares with two decimals per compact suffix. */

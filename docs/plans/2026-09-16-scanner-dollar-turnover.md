@@ -37,11 +37,11 @@ Do not change other Scanner fields' fallback behavior as part of this task. Prov
 
 Add `minTurnover` in raw USD to shared Scanner filters. Zero disables it. A positive threshold admits only candidates with available turnover greater than or equal to the threshold; compare raw values. Existing admitted rows remain sticky if turnover later becomes unavailable or falls below the threshold. Applying a changed threshold clears/rebuilds the board through the existing filter path.
 
-Use `Min turnover ($M)` with decimal input, converting millions to raw dollars at the UI boundary. Validate finite non-negative input at the engine boundary. Save via the existing v2 filter record; missing fields from older settings mean zero. Reset Defaults disables it. Keep the existing filter scope across Scanner panels.
+Use `Min turnover (M)` with decimal input, converting millions to raw dollars at the UI boundary. Validate finite non-negative input at the engine boundary. Save via the existing v2 filter record; missing fields from older settings mean zero. Reset Defaults disables it. Keep the existing filter scope across Scanner panels.
 
 ### Display and sorting
 
-Place `Turnover` immediately after `Vol`. Tooltip: `Dollar value traded in the current session.` Display compact USD with up to one decimal and no trailing `.0`: `$850K`, `$12.5M`, `$1.2B`; below $1K show dollars with up to two decimals. Handle suffix-rounding boundaries consistently. Zero is `$0`; unavailable is `—`.
+Place `Turnover` immediately after `Vol`. Tooltip: `Dollar value traded in the current session.` Display compact USD with up to one decimal and no trailing `.0`: `850K`, `12.5M`, `1.2B`; below 1K show dollars with up to two decimals. Handle suffix-rounding boundaries consistently. Zero is `0`; unavailable is `—`.
 
 Sort numeric, unrounded values with nulls last in either direction and existing tie behavior. Preserve existing default sorts and mode-change behavior. Persist the selected turnover sort in panel settings; Scanner Sync consumes the same accessor. Show an active threshold in the existing filter summary.
 
