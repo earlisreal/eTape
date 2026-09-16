@@ -62,10 +62,9 @@ type Client struct {
 	serial  serialGen
 	pending *pending
 
-	pushes       chan Frame
-	state        chan ConnState
-	pushDrops    atomic.Uint64
-	snapshotGate requestGate
+	pushes    chan Frame
+	state     chan ConnState
+	pushDrops atomic.Uint64
 }
 
 const opendPushDropLogEvery uint64 = 1000
@@ -94,12 +93,11 @@ func New(opt Options) *Client {
 		opt.ClientID = "etape-engine"
 	}
 	return &Client{
-		opt:          opt,
-		clk:          opt.Clock,
-		pending:      newPending(),
-		pushes:       make(chan Frame, 1024),
-		state:        make(chan ConnState, 8),
-		snapshotGate: requestGate{clk: opt.Clock, spacing: 550 * time.Millisecond},
+		opt:     opt,
+		clk:     opt.Clock,
+		pending: newPending(),
+		pushes:  make(chan Frame, 1024),
+		state:   make(chan ConnState, 8),
 	}
 }
 
@@ -135,15 +133,8 @@ func (c *Client) Request(ctx context.Context, protoID uint32, req proto.Message)
 	ch := c.pending.register(serial, protoID)
 	defer c.pending.cancel(serial) // no-op if already resolved
 
-	frame := Encode(protoID, serial, body)
-	var sendErr error
-	if protoID == ProtoQotGetSecuritySnapshot {
-		sendErr = c.sendSnapshot(ctx, frame)
-	} else {
-		sendErr = c.send(frame)
-	}
-	if sendErr != nil {
-		return Frame{}, sendErr
+	if err := c.send(Encode(protoID, serial, body)); err != nil {
+		return Frame{}, err
 	}
 
 	select {
@@ -170,29 +161,6 @@ func (c *Client) send(frame []byte) error {
 	defer c.sendMu.Unlock()
 	_, err := conn.Write(frame)
 	return err
-}
-
-func (c *Client) sendSnapshot(ctx context.Context, frame []byte) error {
-	for {
-		if err := c.snapshotGate.waitUntil(ctx); err != nil {
-			return err
-		}
-		c.sendMu.Lock()
-		if !c.snapshotGate.take(c.clk.Now()) {
-			c.sendMu.Unlock()
-			continue
-		}
-		c.mu.Lock()
-		conn := c.conn
-		c.mu.Unlock()
-		if conn == nil {
-			c.sendMu.Unlock()
-			return ErrNotConnected
-		}
-		_, err := conn.Write(frame)
-		c.sendMu.Unlock()
-		return err
-	}
 }
 
 // serveConn runs one connection to completion: it spawns the reader, performs the

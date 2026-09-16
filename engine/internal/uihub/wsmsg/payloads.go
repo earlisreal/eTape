@@ -282,28 +282,24 @@ type LocateListResult struct {
 type ScannerRow struct {
 	Symbol              string   `json:"symbol"`
 	ShortSellRestricted bool     `json:"shortSellRestricted"`
-	ChangePct           *float64 `json:"changePct" tstype:"number | null,required"`                                 // null = no print yet
-	ChangeStatus        string   `json:"changeStatus,omitempty" tstype:"\"ready\" | \"warming\" | \"unavailable\""` // rolling basis state
-	AlertSeq            int64    `json:"alertSeq,omitempty"`                                                        // process-local alert revision; zero = no alert
-	Last                *float64 `json:"last" tstype:"number | null,required"`                                      // null = no print yet
-	FloatShares         *float64 `json:"floatShares" tstype:"number | null,required"`                               // ACTUAL shares (engine converts moomoo thousands); null = unknown
-	Volume              int64    `json:"volume"`                                                                    // 0 is legitimate
-	RelativeVolume      *float64 `json:"relativeVolume" tstype:"number | null,required"`                            // eTape Relative Volume (Daily Rate); null = unavailable
-	ShortInterest       *float64 `json:"shortInterest" tstype:"number | null,required"`                             // raw reported shares; null = unavailable
-	ShortInterestAsOf   *string  `json:"shortInterestAsOf" tstype:"string | null,required"`                         // provider report date; null = unavailable
+	ChangePct           *float64 `json:"changePct" tstype:"number | null,required"`         // null = no print yet
+	Last                *float64 `json:"last" tstype:"number | null,required"`              // null = no print yet
+	FloatShares         *float64 `json:"floatShares" tstype:"number | null,required"`       // ACTUAL shares (engine converts moomoo thousands); null = unknown
+	Volume              int64    `json:"volume"`                                            // 0 is legitimate
+	RelativeVolume      *float64 `json:"relativeVolume" tstype:"number | null,required"`    // eTape Relative Volume (Daily Rate); null = unavailable
+	ShortInterest       *float64 `json:"shortInterest" tstype:"number | null,required"`     // raw reported shares; null = unavailable
+	ShortInterestAsOf   *string  `json:"shortInterestAsOf" tstype:"string | null,required"` // provider report date; null = unavailable
 }
 
 type ScannerRankPayload struct {
-	RefreshedAt  string         `json:"refreshedAt"`
-	Rows         []ScannerRow   `json:"rows"`
-	Filters      ScannerFilters `json:"filters,omitempty"`
-	Baseline     bool           `json:"baseline,omitempty"`
-	WarmingCount int            `json:"warmingCount,omitempty"` // tracked candidates not yet admitted while history warms
+	RefreshedAt string         `json:"refreshedAt"`
+	Rows        []ScannerRow   `json:"rows"`
+	Filters     ScannerFilters `json:"filters,omitempty"`
+	Baseline    bool           `json:"baseline,omitempty"`
 }
 
 type ScannerFilters struct {
 	Mode              string   `json:"mode" tstype:"\"gainers\" | \"losers\" | \"most_active\""`
-	ChangeBasis       string   `json:"changeBasis,omitempty" tstype:"\"previous_close\" | \"1m\" | \"5m\" | \"1h\""`
 	MinChangePct      float64  `json:"minChangePct"`
 	MaxFloatShares    *float64 `json:"maxFloatShares" tstype:"number | null,required"`
 	MinVolume         float64  `json:"minVolume"`

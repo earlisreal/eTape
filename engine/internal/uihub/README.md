@@ -26,9 +26,4 @@ There is no new WebSocket topic and no client-side market-data merge.
 
 Feed connectivity is surfaced to subscribed UIs as low-frequency `sys.events`
 `feed-up`/`feed-down` transitions. The periodic `sys.health` OpenD RTT probe
-remains diagnostic and does not override the feed state shown to users. The
-same existing `md.ConnUpdate` path forwards the transition to Scanner's
-minimal lifecycle mailbox; it does not add another reader to OpenD Client
-state or perform provider work in the hub callback. Scanner invalidates its
-rolling continuity synchronously at the generation boundary and completes map
-cleanup on its poller owner thread.
+remains diagnostic and does not override the feed state shown to users.

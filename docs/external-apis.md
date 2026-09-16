@@ -23,22 +23,6 @@
   existing `US.<ticker>` symbol convention and is never part of the quote
   path. See [news](../engine/internal/news/README.md), [history provider](../engine/internal/hist/yahoo/README.md), and [Stock Info](../engine/internal/stockinfo/README.md).
 
-Scanner rank and quote observations use the installed moomoo OpenD protobuf
-adapter rather than a new SDK client. The scanner requests up to 100 rows per
-rank direction, normalizes the active pre-market/overnight/after-hours block
-or regular current price, and marks missing or inactive-session observations
-unavailable. Previous-close and sampled rolling comparisons are calculated in
-eTape from successful poll-time observations. Extended-session previous-close
-values come from each rank endpoint's explicit prior-close field; RTH uses the
-snapshot's previous-close field only when the observation timestamp is current
-and at/after that day's regular open. Security snapshots (protocol 3203) share
-a 550 ms minimum send-start gate across Scanner, Watchlist, and Stock Info
-within the same engine Client; this does not coordinate separate engine
-processes or independently running SDK clients. See moomoo's [market
-snapshot fields](https://openapi.moomoo.com/moomoo-api-doc/en/quote/get-market-snapshot.html)
-and [US after-hours rank](https://openapi.moomoo.com/moomoo-api-doc/en/quote/get-us-after-hours-rank.html)
-for provider field definitions.
-
 ## Contract facts
 
 - Symbols crossing OpenD use `US.<ticker>` form.

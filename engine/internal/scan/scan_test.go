@@ -674,18 +674,14 @@ func snap(code string, outstanding int64, equity bool) *snappb.Snapshot {
 
 func marketSnap(code string, outstanding int64, last, close float64, volume int64) *snappb.Snapshot {
 	s := snap(code, outstanding, true)
-	s.Basic.UpdateTimestamp = proto.Float64(float64(et(2026, 7, 8, 10, 0).Unix()))
 	s.Basic.CurPrice = proto.Float64(last)
 	s.Basic.LastClosePrice = proto.Float64(close)
 	s.Basic.Volume = proto.Int64(volume)
-	s.Basic.PreMarket = &qotcommon.PreAfterMarketData{Price: proto.Float64(last), ChangeRate: proto.Float64((last/close - 1) * 100), Volume: proto.Int64(volume)}
 	return s
 }
 
 func extendedSnap(code string, phase session.Phase, price, change float64, volume int64) *snappb.Snapshot {
 	s := marketSnap(code, 1, 90, 80, 999)
-	s.Basic.UpdateTimestamp = proto.Float64(float64(et(2026, 7, 8, 8, 0).Unix()))
-	s.Basic.LastClosePrice = proto.Float64(price / (1 + change/100))
 	s.Basic.PreMarket = &qotcommon.PreAfterMarketData{Volume: proto.Int64(7)}
 	d := &qotcommon.PreAfterMarketData{Price: proto.Float64(price), ChangeRate: proto.Float64(change), Volume: proto.Int64(volume)}
 	switch phase {
@@ -744,16 +740,11 @@ func staticErrResp(msg string) *staticpb.Response {
 func rankResp(items ...rankItem) *rankpb.Response {
 	var data []*rankpb.PreMarketRankItem
 	for _, it := range items {
-		closePrice := it.rankClosePrice
-		if closePrice == nil && it.Last > 0 && it.ChangePct > -100 {
-			closePrice = closePricePtr(it.Last / (1 + it.ChangePct/100))
-		}
 		data = append(data, &rankpb.PreMarketRankItem{
 			Security:             usSec(codeOf(it.Symbol)),
 			PreMarketChangeRatio: proto.Float64(it.ChangePct),
 			PreMarketPrice:       proto.Float64(it.Last),
 			PreMarketVolume:      proto.Int64(it.Volume),
-			ClosePrice:           closePrice,
 		})
 	}
 	return &rankpb.Response{RetType: proto.Int32(0), S2C: &rankpb.S2C{DataList: data}}
@@ -810,7 +801,7 @@ func TestResolveFloatsSplitRetryIsolatesBadCode(t *testing.T) {
 	fr := &fakeReq{snap: func(codes []string) (*snappb.Response, error) {
 		for _, c := range codes {
 			if c == "BAD" {
-				return snapErrResp("US.BAD OTC market quote is not available"), nil
+				return snapErrResp("US OTC market quote is not available"), nil
 			}
 		}
 		snaps := make([]*snappb.Snapshot, 0, len(codes))
@@ -833,8 +824,8 @@ func TestResolveFloatsSplitRetryIsolatesBadCode(t *testing.T) {
 }
 
 func TestResolveFloatsRequestCap(t *testing.T) {
-	// An unknown whole-batch error is not evidence of a bad symbol; it must not
-	// trigger a recursive retry burst.
+	// Every batch fails as a whole -> pathological split explosion; must stop
+	// at maxSnapshotReqs requests, leaving the rest absent.
 	fr := &fakeReq{snap: func(codes []string) (*snappb.Response, error) {
 		return snapErrResp("all bad"), nil
 	}}
@@ -844,8 +835,8 @@ func TestResolveFloatsRequestCap(t *testing.T) {
 		items = append(items, rankItem{Symbol: fmt.Sprintf("US.S%d", i)})
 	}
 	p.resolveFloats(context.Background(), items)
-	if fr.snapCalls != 1 {
-		t.Fatalf("snapshot requests = %d, want one global-error attempt", fr.snapCalls)
+	if fr.snapCalls != maxSnapshotReqs {
+		t.Fatalf("snapshot requests = %d, want cap %d", fr.snapCalls, maxSnapshotReqs)
 	}
 }
 
@@ -932,7 +923,7 @@ func TestResolveExchSplitRetryIsolatesBadCode(t *testing.T) {
 	fr := &fakeReq{staticInfo: func(codes []string) (*staticpb.Response, error) {
 		for _, c := range codes {
 			if c == "BAD" {
-				return staticErrResp("US.BAD no permission for this symbol"), nil
+				return staticErrResp("no permission"), nil
 			}
 		}
 		var infos []*qotcommon.SecurityStaticInfo
@@ -960,7 +951,7 @@ func TestResolveExchIsolatedFailureCachedNoRepeatedRequests(t *testing.T) {
 	fr := &fakeReq{staticInfo: func(codes []string) (*staticpb.Response, error) {
 		for _, c := range codes {
 			if c == "BAD" {
-				return staticErrResp("US.BAD no permission for this symbol"), nil
+				return staticErrResp("no permission"), nil
 			}
 		}
 		return staticInfoResp(staticInfoOf("A", int32(qotcommon.ExchType_ExchType_US_Nasdaq))), nil
@@ -1108,10 +1099,6 @@ func TestRTHBootstrapFailureRetriesWithoutBlocking(t *testing.T) {
 	}
 	fr.rankErr = nil
 	p.pollOnce(context.Background(), clk.Now())
-	if fr.preCalls != 1 {
-		t.Fatalf("failed bootstrap retried before its backoff expired: calls=%d", fr.preCalls)
-	}
-	clk.Advance(scanRetryMin)
 	p.pollOnce(context.Background(), clk.Now())
 	if fr.preCalls != 2 || len(pub.ranks[2].Rows) != 2 {
 		t.Fatalf("bootstrap retry/stop failed: calls=%d rows=%+v", fr.preCalls, pub.ranks[2].Rows)
@@ -1142,7 +1129,7 @@ func TestRTHFilterResetRepeatsBootstrap(t *testing.T) {
 
 func TestAccumulatedRowsRefreshAndSurviveSnapshotFailure(t *testing.T) {
 	fail := false
-	fr := &fakeReq{rankResp: rankResp(rankItem{Symbol: "US.A", ChangePct: 5, Last: 1, Volume: 1, rankClosePrice: closePricePtr(10)}), snap: func(codes []string) (*snappb.Response, error) {
+	fr := &fakeReq{rankResp: rankResp(rankItem{Symbol: "US.A", ChangePct: 5, Last: 1, Volume: 1}), snap: func(codes []string) (*snappb.Response, error) {
 		if fail {
 			return nil, fmt.Errorf("temporary")
 		}
@@ -1154,16 +1141,11 @@ func TestAccumulatedRowsRefreshAndSurviveSnapshotFailure(t *testing.T) {
 	p.pollOnce(context.Background(), clk.Now())
 	fail = true
 	p.pollOnce(context.Background(), clk.Now())
-	first := pub.ranks[0].Rows[0]
-	if first.Last == nil || *first.Last != 12 || first.ChangePct == nil || *first.ChangePct != 20 || first.Volume != 321 {
-		t.Fatalf("initial refresh missing values: %+v", first)
-	}
-	if len(pub.ranks) != 2 {
-		t.Fatalf("a global snapshot failure must publish unavailable state, got %d publications", len(pub.ranks))
-	}
-	failed := pub.ranks[1].Rows[0]
-	if failed.Last != nil || failed.ChangePct != nil || failed.ChangeStatus != "unavailable" {
-		t.Fatalf("failed refresh reused quote data: %+v", failed)
+	for i := range pub.ranks {
+		r := pub.ranks[i].Rows[0]
+		if r.Last == nil || *r.Last != 12 || r.ChangePct == nil || *r.ChangePct != 20 || r.Volume != 321 {
+			t.Fatalf("poll %d did not preserve refreshed values: %+v", i, r)
+		}
 	}
 }
 
@@ -1175,13 +1157,13 @@ func TestSnapshotRefreshUsesActiveSessionData(t *testing.T) {
 		makeSn         func() *snappb.Snapshot
 		wantCumulative *int64
 	}{
-		{"premarket", session.PreMarket, rankItem{Last: 101, ChangePct: 1, Volume: 11, rankClosePrice: closePricePtr(100)}, func() *snappb.Snapshot {
+		{"premarket", session.PreMarket, rankItem{Last: 101, ChangePct: 1, Volume: 11}, func() *snappb.Snapshot {
 			return extendedSnap("A", session.PreMarket, 101, 1, 11)
 		}, proto.Int64(11)},
-		{"after-hours", session.PostMarket, rankItem{Last: 102, ChangePct: 2, Volume: 22, rankClosePrice: closePricePtr(100)}, func() *snappb.Snapshot {
+		{"after-hours", session.PostMarket, rankItem{Last: 102, ChangePct: 2, Volume: 22}, func() *snappb.Snapshot {
 			return extendedSnap("A", session.PostMarket, 102, 2, 22)
 		}, proto.Int64(1028)},
-		{"overnight", session.Overnight, rankItem{Last: 103, ChangePct: 3, Volume: 33, rankClosePrice: closePricePtr(100)}, func() *snappb.Snapshot {
+		{"overnight", session.Overnight, rankItem{Last: 103, ChangePct: 3, Volume: 33}, func() *snappb.Snapshot {
 			return extendedSnap("A", session.Overnight, 103, 3, 33)
 		}, nil},
 		{"rth", session.RTH, rankItem{Last: 90, ChangePct: 12.5, Volume: 999}, func() *snappb.Snapshot {
@@ -1189,11 +1171,7 @@ func TestSnapshotRefreshUsesActiveSessionData(t *testing.T) {
 			s.Basic.PreMarket = &qotcommon.PreAfterMarketData{Volume: proto.Int64(11)}
 			return s
 		}, proto.Int64(1010)},
-		{"missing extended data", session.PreMarket, rankItem{Last: 7, ChangePct: 6, Volume: 5}, func() *snappb.Snapshot {
-			s := marketSnap("A", 1, 90, 80, 999)
-			s.Basic.PreMarket = nil
-			return s
-		}, nil},
+		{"missing extended data", session.PreMarket, rankItem{Last: 7, ChangePct: 6, Volume: 5}, func() *snappb.Snapshot { return marketSnap("A", 1, 90, 80, 999) }, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fr := &fakeReq{snap: func([]string) (*snappb.Response, error) { return snapResp(tc.makeSn()), nil }}
@@ -1205,100 +1183,6 @@ func TestSnapshotRefreshUsesActiveSessionData(t *testing.T) {
 				t.Fatalf("got %+v, want market values %+v", got, tc.want)
 			}
 		})
-	}
-}
-
-func TestSnapshotRefreshRotatesOversizedUniverse(t *testing.T) {
-	var firstCodes []string
-	r := requesterFunc(func(_ context.Context, id uint32, req proto.Message) (opend.Frame, error) {
-		if id != opend.ProtoQotGetSecuritySnapshot {
-			return opend.Frame{}, fmt.Errorf("unexpected protoID %d", id)
-		}
-		var codes []string
-		for _, security := range req.(*snappb.Request).GetC2S().GetSecurityList() {
-			codes = append(codes, security.GetCode())
-		}
-		firstCodes = append(firstCodes, codes[0])
-		snaps := make([]*snappb.Snapshot, 0, len(codes))
-		for _, code := range codes {
-			snaps = append(snaps, marketSnap(code, 1, 2, 1, 100))
-		}
-		return frameOf(snapResp(snaps...)), nil
-	})
-	p := New(config.Scan{}, r, nil, clock.NewFake(et(2026, 7, 8, 8, 0)), nil, nil, nil)
-	items := make(map[string]rankItem, maxSnapshotReqs*snapshotChunkSize+1)
-	for i := 0; i < maxSnapshotReqs*snapshotChunkSize+1; i++ {
-		symbol := fmt.Sprintf("US.%04d", i)
-		items[symbol] = rankItem{Symbol: symbol}
-	}
-	p.refreshSnapshots(context.Background(), session.PreMarket, items)
-	first := firstCodes[0]
-	p.refreshSnapshots(context.Background(), session.PreMarket, items)
-	if len(firstCodes) != maxSnapshotReqs*2 || firstCodes[maxSnapshotReqs] == first {
-		t.Fatalf("snapshot batches did not rotate: first=%q next=%q calls=%d", first, firstCodes[maxSnapshotReqs], len(firstCodes))
-	}
-}
-
-func TestSnapshotGlobalFailureUsesCappedRetryBackoff(t *testing.T) {
-	clk := clock.NewFake(et(2026, 7, 8, 8, 0))
-	calls := 0
-	fr := requesterFunc(func(_ context.Context, id uint32, _ proto.Message) (opend.Frame, error) {
-		if id != opend.ProtoQotGetSecuritySnapshot {
-			t.Fatalf("unexpected protoID %d", id)
-		}
-		calls++
-		if calls == 1 {
-			return opend.Frame{}, fmt.Errorf("temporary provider failure")
-		}
-		return frameOf(snapResp(snap("A", 1_000_000, true))), nil
-	})
-	p := New(config.Scan{}, fr, &capturePub{}, clk, nil, nil, nil)
-	reqs := 0
-	if p.snapshotBatch(context.Background(), session.PreMarket, []string{"US.A"}, &reqs, nil) {
-		t.Fatal("first global failure should fail the batch")
-	}
-	if p.snapshotBatch(context.Background(), session.PreMarket, []string{"US.A"}, &reqs, nil) {
-		t.Fatal("backoff should suppress an immediate retry")
-	}
-	if calls != 1 {
-		t.Fatalf("immediate retry made %d provider calls, want 1", calls)
-	}
-	clk.Advance(scanRetryMin)
-	if !p.snapshotBatch(context.Background(), session.PreMarket, []string{"US.A"}, &reqs, nil) {
-		t.Fatal("retry after backoff should recover")
-	}
-	if calls != 2 || p.retry.active(clk.Now()) {
-		t.Fatalf("calls=%d retry=%+v, want recovered backoff", calls, p.retry)
-	}
-}
-
-func TestPollOnceDiscardsResponseCrossingTradingCycle(t *testing.T) {
-	clk := clock.NewFake(et(2026, 7, 8, 15, 59).Add(59 * time.Second))
-	r := requesterFunc(func(_ context.Context, id uint32, _ proto.Message) (opend.Frame, error) {
-		switch id {
-		case opend.ProtoQotGetUSAfterHoursRank:
-			return frameOf(&ahpb.Response{RetType: proto.Int32(0), S2C: &ahpb.S2C{}}), nil
-		case opend.ProtoQotGetUSOvernightRank:
-			return frameOf(&onpb.Response{RetType: proto.Int32(0), S2C: &onpb.S2C{}}), nil
-		case opend.ProtoQotGetUSPreMarketRank:
-			return frameOf(rankResp()), nil
-		case opend.ProtoQotGetTopMoversRank:
-			return frameOf(topResp(rankItem{Symbol: "US.A", ChangePct: 8, Last: 2, Volume: 100})), nil
-		case opend.ProtoQotGetStaticInfo:
-			return frameOf(staticInfoResp()), nil
-		case opend.ProtoQotGetSecuritySnapshot:
-			clk.Advance(2 * time.Second)
-			return frameOf(snapResp(marketSnap("A", 1_000_000, 2, 1, 100))), nil
-		default:
-			t.Fatalf("unexpected protoID %d", id)
-			return opend.Frame{}, nil
-		}
-	})
-	pub := &capturePub{}
-	p := New(config.Scan{Enabled: true}, r, pub, clk, nil, nil, nil)
-	p.pollOnce(context.Background(), clk.Now())
-	if len(pub.ranks) != 0 || len(pub.hits) != 0 || len(p.history) != 0 {
-		t.Fatalf("cycle-crossing poll published or retained state: ranks=%d hits=%d history=%v", len(pub.ranks), len(pub.hits), p.history)
 	}
 }
 
@@ -1399,34 +1283,28 @@ func TestSnapshotRefreshEnrichesDerivedSSRWithoutChangingCanonicalSymbol(t *test
 }
 
 func TestBoardSurvivesCycleUntilPostMarketTransition(t *testing.T) {
-	clk := clock.NewFake(et(2026, 7, 8, 2, 0))
 	fr := &fakeReq{
-		overnightRsp: &onpb.Response{RetType: proto.Int32(0), S2C: &onpb.S2C{DataList: []*onpb.OvernightRankItem{{Security: usSec("ON"), OvernightChangeRatio: proto.Float64(5), OvernightPrice: proto.Float64(2), OvernightVolume: proto.Int64(10), ClosePrice: proto.Float64(1)}}}},
-		rankResp:     rankResp(rankItem{Symbol: "US.PRE", ChangePct: 6, Last: 2, Volume: 10}),
+		overnightRsp: &onpb.Response{RetType: proto.Int32(0), S2C: &onpb.S2C{DataList: []*onpb.OvernightRankItem{{Security: usSec("ON"), OvernightChangeRatio: proto.Float64(5), OvernightPrice: proto.Float64(2), OvernightVolume: proto.Int64(10)}}}},
+		rankResp:     rankResp(rankItem{Symbol: "US.PRE", ChangePct: 6}),
 		topMoversRsp: topResp(rankItem{Symbol: "US.RTH", ChangePct: 7}),
-		afterHrsRsp:  &ahpb.Response{RetType: proto.Int32(0), S2C: &ahpb.S2C{DataList: []*ahpb.AfterHoursRankItem{{Security: usSec("POST"), AfterHoursChangeRatio: proto.Float64(8), AfterHoursPrice: proto.Float64(2), AfterHoursVolume: proto.Int64(10), ClosePrice: proto.Float64(1)}}}},
+		afterHrsRsp:  &ahpb.Response{RetType: proto.Int32(0), S2C: &ahpb.S2C{DataList: []*ahpb.AfterHoursRankItem{{Security: usSec("POST"), AfterHoursChangeRatio: proto.Float64(8), AfterHoursPrice: proto.Float64(2), AfterHoursVolume: proto.Int64(10)}}}},
 		snap: func(codes []string) (*snappb.Response, error) {
 			out := make([]*snappb.Snapshot, 0, len(codes))
 			for _, code := range codes {
-				s := marketSnap(code, 1, 2, 1, 100)
-				s.Basic.UpdateTimestamp = proto.Float64(float64(clk.Now().Unix()))
-				s.Basic.Overnight = &qotcommon.PreAfterMarketData{Price: proto.Float64(2), ChangeRate: proto.Float64(1), Volume: proto.Int64(100)}
-				s.Basic.AfterMarket = &qotcommon.PreAfterMarketData{Price: proto.Float64(2), ChangeRate: proto.Float64(1), Volume: proto.Int64(100)}
-				out = append(out, s)
+				out = append(out, marketSnap(code, 1, 2, 1, 100))
 			}
 			return snapResp(out...), nil
 		},
 	}
 	pub := &capturePub{}
+	clk := clock.NewFake(et(2026, 7, 8, 2, 0))
 	p := New(config.Scan{Enabled: true}, fr, pub, clk, nil, nil, nil)
-	p.pollOnce(context.Background(), clk.Now())
-	clk.Advance(8 * time.Hour)
-	p.pollOnce(context.Background(), clk.Now())
-	if got := len(pub.ranks[1].Rows); got != 4 {
+	p.pollOnce(context.Background(), et(2026, 7, 8, 2, 0))
+	p.pollOnce(context.Background(), et(2026, 7, 8, 10, 0))
+	if got := len(pub.ranks[1].Rows); got != 3 {
 		t.Fatalf("overnight/pre/RTH board rows=%d: %+v", got, pub.ranks[1].Rows)
 	}
-	clk.Advance(6 * time.Hour)
-	p.pollOnce(context.Background(), clk.Now())
+	p.pollOnce(context.Background(), et(2026, 7, 8, 16, 0))
 	if got := pub.ranks[2].Rows; len(got) != 1 || got[0].Symbol != "US.POST" {
 		t.Fatalf("post-market reset rows=%+v", got)
 	}
@@ -1597,69 +1475,6 @@ func TestPollOnceDrivesPool(t *testing.T) {
 
 	if len(sf.ensured) != 1 || sf.ensured[0].ID != "scan:US.LOWF" {
 		t.Fatalf("pollOnce should Ensure the filtered top row via the pool: %+v", sf.ensured)
-	}
-}
-
-func TestPollOncePublishesOnlyThresholdCrossingRevisions(t *testing.T) {
-	price := 106.0
-	fr := &fakeReq{
-		rankResp: rankResp(rankItem{Symbol: "US.A", ChangePct: 6, Last: price, Volume: 100}),
-		snap: func([]string) (*snappb.Response, error) {
-			return snapResp(marketSnap("A", 1, price, 100, 100)), nil
-		},
-	}
-	pub := &capturePub{}
-	clk := clock.NewFake(et(2026, 7, 8, 8, 0))
-	p := New(config.Scan{Enabled: true, MinChangePct: 5}, fr, pub, clk, nil, nil, nil)
-	for _, next := range []float64{106, 96, 106} {
-		price = next
-		p.pollOnce(context.Background(), clk.Now())
-	}
-	if len(pub.hits) != 0 {
-		t.Fatalf("scanner.hit must not be published: %+v", pub.hits)
-	}
-	if len(pub.ranks) != 3 || pub.ranks[0].Rows[0].AlertSeq != 0 || pub.ranks[1].Rows[0].AlertSeq != 0 || pub.ranks[2].Rows[0].AlertSeq != 1 {
-		t.Fatalf("alert revisions=%+v, want silent/silent/1", pub.ranks)
-	}
-}
-
-func TestPollOnceReportsRollingWarmupBeforeAdmission(t *testing.T) {
-	fr := &fakeReq{
-		rankResp: rankResp(rankItem{Symbol: "US.A", ChangePct: 6, Last: 2, Volume: 100}),
-		snap: func([]string) (*snappb.Response, error) {
-			return snapResp(marketSnap("A", 1, 2, 1, 100)), nil
-		},
-	}
-	pub := &capturePub{}
-	clk := clock.NewFake(et(2026, 7, 8, 8, 0))
-	p := New(config.Scan{Enabled: true}, fr, pub, clk, nil, nil, nil)
-	f := p.Filters()
-	f.ChangeBasis = "1m"
-	if err := p.SetFilters(f); err != nil {
-		t.Fatal(err)
-	}
-	p.pollOnce(context.Background(), clk.Now())
-	if len(pub.ranks) != 1 || len(pub.ranks[0].Rows) != 0 || pub.ranks[0].WarmingCount != 1 {
-		t.Fatalf("rolling candidate should warm before admission: %+v", pub.ranks)
-	}
-}
-
-func TestFeedDisconnectInvalidatesHistoryOnPollerOwner(t *testing.T) {
-	p := New(config.Scan{}, &fakeReq{}, &capturePub{}, clock.NewFake(et(2026, 7, 8, 8, 0)), nil, nil, nil)
-	h := &rollingHistory{}
-	h.observe(p.clk.Now(), 10)
-	p.history["US.A"] = h
-	p.OnFeedState(false)
-	if p.feedGeneration.Load() != 1 || !p.feedDown.Load() {
-		t.Fatalf("disconnect was not synchronous: generation=%d down=%v", p.feedGeneration.Load(), p.feedDown.Load())
-	}
-	p.handleFeedEvents()
-	if !h.last.IsZero() || len(h.samples) != 0 || !h.silent {
-		t.Fatalf("owner cleanup did not invalidate history: %+v", h)
-	}
-	p.OnFeedState(true)
-	if p.feedDown.Load() {
-		t.Fatal("feed-up did not clear the fast rejection flag")
 	}
 }
 

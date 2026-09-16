@@ -909,13 +909,6 @@ func (h *Hub) handleMD(u md.Update) {
 		h.stageMD(s)
 	}
 	if conn, ok := u.(md.ConnUpdate); ok {
-		if h.cmd != nil {
-			if b := h.cmd.scanner.Load(); b != nil {
-				if lifecycle, ok := b.scanner.(scannerLifecycle); ok {
-					lifecycle.OnFeedState(conn.Up)
-				}
-			}
-		}
 		kind := "feed-down"
 		detail := "moomoo OpenD feed disconnected"
 		if conn.Up {

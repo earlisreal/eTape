@@ -1,7 +1,6 @@
-import { describe, it, expect, afterEach, vi } from "vitest";
+import { describe, it, expect, afterEach } from "vitest";
 import { WebSocket } from "ws";
 import { startMockEngine, type Fixture } from "./server";
-import { makeStores, routeToStore } from "../src/data/registry";
 
 const PORT = 8699;
 let handle: { close: () => Promise<void> } | null = null;
@@ -95,33 +94,5 @@ describe("mock engine", () => {
     const got = collect(ws, 1);
     ws.send(JSON.stringify({ kind: "query", corrId: "q9", name: "QueryFills", args: {} }));
     expect((await got)[0]).toMatchObject({ kind: "result", corrId: "q9", payload: [] });
-  });
-
-  it("delivers one scanner alert revision through the mock wire", async () => {
-    handle = startMockEngine({
-      port: PORT,
-      fixture: {
-        snapshots: [{
-          topic: "scanner.rank", key: "rth",
-          payload: { refreshedAt: "2026-07-08T13:00:00.000Z", baseline: true, rows: [{ symbol: "US.A", shortSellRestricted: false, changePct: 4, alertSeq: 0, last: 1, floatShares: null, volume: 10, relativeVolume: null, shortInterest: null, shortInterestAsOf: null }] },
-        }],
-        deltas: [
-          { afterMs: 10, topic: "scanner.rank", key: "rth", payload: { refreshedAt: "2026-07-08T13:00:01.000Z", rows: [{ symbol: "US.A", shortSellRestricted: false, changePct: 6, alertSeq: 1, last: 1, floatShares: null, volume: 10, relativeVolume: null, shortInterest: null, shortInterestAsOf: null }] } },
-          { afterMs: 20, topic: "scanner.rank", key: "rth", payload: { refreshedAt: "2026-07-08T13:00:02.000Z", rows: [{ symbol: "US.A", shortSellRestricted: false, changePct: 6, alertSeq: 1, last: 1, floatShares: null, volume: 10, relativeVolume: null, shortInterest: null, shortInterestAsOf: null }] } },
-        ],
-      },
-    });
-    const stores = makeStores();
-    const onHit = vi.fn();
-    stores.scanner.onNewHit(onHit);
-    const ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
-    await new Promise<void>((r) => ws.on("open", () => r()));
-    const msgs = collect(ws, 3);
-    ws.send(JSON.stringify({ kind: "subscribe", topic: "scanner.rank" }));
-    for (const msg of await msgs) routeToStore(stores, msg as never);
-    expect(onHit).toHaveBeenCalledOnce();
-    expect(onHit).toHaveBeenCalledWith("US.A");
-    expect(stores.scanner.view("rth").rows[0]).toMatchObject({ alertSeq: 1, isUnseen: true });
-    ws.close();
   });
 });

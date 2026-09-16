@@ -153,7 +153,7 @@ export const PANELS: Record<string, PanelDef> = {
   },
   "scanner": {
     component: ScannerPanel,
-    topics: ["scanner.rank"],
+    topics: ["scanner.rank", "scanner.hit"],
     title: "Scanner",
     glyph: "%",
     description: "Live gappers, all sessions, filters",

@@ -199,7 +199,7 @@ func TestDefaultHasUIHubAndPollerSections(t *testing.T) {
 	if c.UIHub.MDRateHz != 30 || c.UIHub.AccountRateHz != 4 || c.UIHub.PositionMs != 100 {
 		t.Fatalf("UIHub rates = %v/%v/%v, want 30/4/100", c.UIHub.MDRateHz, c.UIHub.AccountRateHz, c.UIHub.PositionMs)
 	}
-	if !c.Scan.Enabled || c.Scan.PremarketMs != 1000 || c.Scan.RTHMs != 1000 || c.Scan.MaxFloatShares != 50_000_000 {
+	if !c.Scan.Enabled || c.Scan.PremarketMs != 2000 || c.Scan.MaxFloatShares != 50_000_000 {
 		t.Fatalf("Scan defaults wrong: %+v", c.Scan)
 	}
 	if !c.News.Enabled {

@@ -33,7 +33,7 @@ func TestRestoreScannerFiltersV2WinsOverLegacyV1(t *testing.T) {
 		"scanner.filters.v1": `{"mode":"gainers","minChangePct":1,"maxFloatShares":null,"minVolume":1,"minVolumeRatio":99,"floatUnit":"K","volumeUnit":"M"}`,
 	}}
 	got := restoreScannerFilters(spy, defaults)
-	if got.Mode != "losers" || got.ChangeBasis != "previous_close" || got.MinRelativeVolume != 3.5 || got.MinChangePct != 7 || got.MinVolume != 2000 {
+	if got.Mode != "losers" || got.MinRelativeVolume != 3.5 || got.MinChangePct != 7 || got.MinVolume != 2000 {
 		t.Fatalf("v2 was not authoritative: %+v", got)
 	}
 	if len(spy.set) != 0 {
@@ -47,7 +47,7 @@ func TestRestoreScannerFiltersMigratesV1AndResetsThreshold(t *testing.T) {
 		"scanner.filters.v1": `{"mode":"losers","minChangePct":7,"maxFloatShares":1000000,"minVolume":2000,"minVolumeRatio":3.5,"floatUnit":"M","volumeUnit":"K"}`,
 	}}
 	got := restoreScannerFilters(spy, defaults)
-	if got.Mode != "losers" || got.ChangeBasis != "previous_close" || got.MinChangePct != 7 || got.MaxFloatShares == nil || *got.MaxFloatShares != 1000000 || got.MinVolume != 2000 || got.MinRelativeVolume != 0 || got.FloatUnit != "M" || got.VolumeUnit != "K" {
+	if got.Mode != "losers" || got.MinChangePct != 7 || got.MaxFloatShares == nil || *got.MaxFloatShares != 1000000 || got.MinVolume != 2000 || got.MinRelativeVolume != 0 || got.FloatUnit != "M" || got.VolumeUnit != "K" {
 		t.Fatalf("v1 migration changed unrelated filters: %+v", got)
 	}
 	var saved wsmsg.ScannerFilters
@@ -59,9 +59,8 @@ func TestRestoreScannerFiltersMigratesV1AndResetsThreshold(t *testing.T) {
 func TestRestoreScannerFiltersMalformedDataFallsBackToDefaults(t *testing.T) {
 	defaults := scan.Defaults(config.Scan{MinChangePct: 5})
 	for name, values := range map[string]string{
-		"bad v2":        `{"mode":"gainers","minVolumeRatio":99}`,
-		"unknown basis": `{"mode":"gainers","changeBasis":"10m","minChangePct":0,"maxFloatShares":null,"minVolume":0,"minRelativeVolume":0,"floatUnit":"M","volumeUnit":"K"}`,
-		"bad v1":        `{"mode":"gainers","minVolumeRatio":-1,"floatUnit":"M","volumeUnit":"K"}`,
+		"bad v2": `{"mode":"gainers","minVolumeRatio":99}`,
+		"bad v1": `{"mode":"gainers","minVolumeRatio":-1,"floatUnit":"M","volumeUnit":"K"}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			spy := &scannerFilterConfigSpy{values: map[string]string{"scanner.filters.v2": values}}

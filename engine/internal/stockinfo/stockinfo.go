@@ -13,8 +13,11 @@
 // chunk of symbols (fundamentals refresh every tick, no caching); 3207 and
 // 3202 fire only for symbols not yet in their respective caches, so in
 // steady state each is issued at most once per symbol for the life of the
-// process. The shared OpenD client paces 3203 requests, while this poller
-// caps all recursive refresh attempts at a small per-refresh budget.
+// process. Like scan.go and news.go, no explicit rate limiter is
+// implemented here — tick cadence plus the caches keep all protocols well
+// under moomoo's documented limits (60 req/30s for 3203; 3207/3202's limits
+// aren't documented anywhere in this repo, but the once-per-symbol caches
+// make any reasonable limit a non-issue).
 package stockinfo
 
 import (
@@ -41,8 +44,6 @@ import (
 
 // ema200Period is the fixed window for the Stock Info panel's EMA-200 field.
 const ema200Period = 200
-
-const maxRefreshRequests = 8
 
 type Publisher interface {
 	Publish(topic wsmsg.Topic, key string, payload any)
@@ -160,10 +161,9 @@ func (p *Poller) fetchTick(ctx context.Context) {
 	}
 	now := p.clk.Now()
 	refreshedAt := now.UTC().Format("2006-01-02T15:04:05.000Z07:00")
-	reqs := 0
-	snapshots := p.fetchSnapshotsBudget(ctx, syms, &reqs)
-	p.resolveIndustriesBudget(ctx, syms, &reqs)
-	p.resolveExchangesBudget(ctx, syms, &reqs)
+	snapshots := p.fetchSnapshots(ctx, syms)
+	p.resolveIndustries(ctx, syms)
+	p.resolveExchanges(ctx, syms)
 	for _, sym := range syms {
 		snap, ok := snapshots[sym]
 		if !ok {
@@ -198,76 +198,65 @@ func (p *Poller) fetchTick(ctx context.Context) {
 // to any single symbol's data, so it is logged and that chunk is skipped for
 // this tick (retried whole on the next tick). A whole-batch application
 // failure (RetType != 0) is isolated via the same binary-split retry as
-// scan.go's snapshotBatch: one bad/unentitled code no
+// scan.go's snapshotBatch (see snapshotChunk): one bad/unentitled code no
 // longer blanks out every other symbol that happened to share its chunk. A
 // symbol isolated down to size 1 that still fails simply gets no entry in
 // out this tick — fetchSnapshots has no cache (fundamentals refresh every
 // tick by design), so there is nothing to "give up" on; it is retried fresh
 // next tick like any other missing symbol.
 func (p *Poller) fetchSnapshots(ctx context.Context, syms []string) map[string]*snappb.Snapshot {
-	reqs := 0
-	return p.fetchSnapshotsBudget(ctx, syms, &reqs)
-}
-
-func (p *Poller) fetchSnapshotsBudget(ctx context.Context, syms []string, reqs *int) map[string]*snappb.Snapshot {
 	out := make(map[string]*snappb.Snapshot, len(syms))
 	for _, ch := range chunk(syms, p.maxPerReq()) {
-		if !p.snapshotChunkBudget(ctx, ch, out, reqs) {
-			break
-		}
+		p.snapshotChunk(ctx, ch, out)
 	}
 	return out
 }
 
-func (p *Poller) snapshotChunkBudget(ctx context.Context, ch []string, out map[string]*snappb.Snapshot, reqs *int) bool {
-	if len(ch) == 0 || *reqs >= maxRefreshRequests {
-		return false
-	}
-	*reqs++
+// snapshotChunk resolves one chunk of syms via a single 3203 request, adding
+// each returned Snapshot to out. On a whole-batch RetType != 0 failure (the
+// "one bad code fails the batch" case — e.g. an OTC code without quote
+// rights) it recurses with a binary split instead of dropping the whole
+// chunk, exactly like scan.go's snapshotBatch: split at the midpoint, retry
+// each half, and keep splitting until either a half succeeds or is narrowed
+// to the single offending symbol.
+func (p *Poller) snapshotChunk(ctx context.Context, ch []string, out map[string]*snappb.Snapshot) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetSecuritySnapshot,
 		&snappb.Request{C2S: &snappb.C2S{SecurityList: securitiesFor(ch)}})
 	if err != nil {
 		slog.Warn("stockinfo: snapshot transport failed", "err", err, "n", len(ch))
-		return false
+		return
 	}
 	var resp snappb.Response
 	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
 		slog.Warn("stockinfo: snapshot decode failed", "err", err)
-		return false
+		return
 	}
 	if resp.GetRetType() != 0 {
-		if !opend.SymbolSpecificFailure(resp.GetRetMsg(), ch) {
-			return false
-		}
 		if len(ch) == 1 {
 			slog.Info("stockinfo: snapshot unresolvable this tick", "symbol", ch[0], "reason", resp.GetRetMsg())
-			return true
+			return
 		}
 		mid := len(ch) / 2
-		return p.snapshotChunkBudget(ctx, ch[:mid], out, reqs) && p.snapshotChunkBudget(ctx, ch[mid:], out, reqs)
+		p.snapshotChunk(ctx, ch[:mid], out)
+		p.snapshotChunk(ctx, ch[mid:], out)
+		return
 	}
 	for _, sn := range resp.GetS2C().GetSnapshotList() {
 		out[symbolOf(sn.GetBasic().GetSecurity())] = sn
 	}
-	return true
 }
 
 // resolveIndustries fetches Qot_GetOwnerPlate for symbols not yet in the
 // industry cache and records the result — caching "" when a symbol has no
 // industry plate (or was omitted from an otherwise-successful response), or
 // when it is isolated down to a single symbol that still fails on its own
-// (see ownerPlateChunkBudget) — so it is never re-requested for the life of the
+// (see ownerPlateChunk) — so it is never re-requested for the life of the
 // process. A transport error or decode error is chunk-wide and left
 // uncached, so it is retried on the next tick. A whole-batch application
 // failure (RetType != 0) is isolated via the same binary-split retry as
 // fetchSnapshots/scan.go's snapshotBatch, so one bad/unentitled code no
 // longer leaves every other symbol in its chunk permanently unresolved.
 func (p *Poller) resolveIndustries(ctx context.Context, syms []string) {
-	reqs := 0
-	p.resolveIndustriesBudget(ctx, syms, &reqs)
-}
-
-func (p *Poller) resolveIndustriesBudget(ctx context.Context, syms []string, reqs *int) {
 	var missing []string
 	for _, s := range syms {
 		if _, ok := p.industry[s]; !ok {
@@ -275,9 +264,7 @@ func (p *Poller) resolveIndustriesBudget(ctx context.Context, syms []string, req
 		}
 	}
 	for _, ch := range chunk(missing, p.maxPerReq()) {
-		if !p.ownerPlateChunkBudget(ctx, ch, reqs) {
-			break
-		}
+		p.ownerPlateChunk(ctx, ch)
 	}
 }
 
@@ -291,33 +278,28 @@ func (p *Poller) resolveIndustriesBudget(ctx context.Context, syms []string, req
 // stays uncached" rule, it is cached as "" here and never retried again,
 // converging to the same steady state as a symbol that resolves successfully
 // with no industry.
-func (p *Poller) ownerPlateChunkBudget(ctx context.Context, ch []string, reqs *int) bool {
-	if len(ch) == 0 || *reqs >= maxRefreshRequests {
-		return false
-	}
-	*reqs++
+func (p *Poller) ownerPlateChunk(ctx context.Context, ch []string) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetOwnerPlate,
 		&ownerplatepb.Request{C2S: &ownerplatepb.C2S{SecurityList: securitiesFor(ch)}})
 	if err != nil {
 		slog.Warn("stockinfo: owner-plate transport failed", "err", err, "n", len(ch))
-		return false
+		return
 	}
 	var resp ownerplatepb.Response
 	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
 		slog.Warn("stockinfo: owner-plate decode failed", "err", err)
-		return false
+		return
 	}
 	if resp.GetRetType() != 0 {
-		if !opend.SymbolSpecificFailure(resp.GetRetMsg(), ch) {
-			return false
-		}
 		if len(ch) == 1 {
 			p.industry[ch[0]] = ""
 			slog.Info("stockinfo: owner-plate unresolvable, caching absent industry", "symbol", ch[0], "reason", resp.GetRetMsg())
-			return true
+			return
 		}
 		mid := len(ch) / 2
-		return p.ownerPlateChunkBudget(ctx, ch[:mid], reqs) && p.ownerPlateChunkBudget(ctx, ch[mid:], reqs)
+		p.ownerPlateChunk(ctx, ch[:mid])
+		p.ownerPlateChunk(ctx, ch[mid:])
+		return
 	}
 	got := make(map[string]bool, len(ch))
 	for _, op := range resp.GetS2C().GetOwnerPlateList() {
@@ -330,7 +312,6 @@ func (p *Poller) ownerPlateChunkBudget(ctx context.Context, ch []string, reqs *i
 			p.industry[s] = "" // succeeded but no row for this symbol: cache absent
 		}
 	}
-	return true
 }
 
 // resolveExchanges fetches Qot_GetStaticInfo for symbols not yet in the
@@ -342,11 +323,6 @@ func (p *Poller) ownerPlateChunkBudget(ctx context.Context, ch []string, reqs *i
 // and left uncached, retried next tick; a whole-batch RetType != 0 failure
 // is isolated via binary split).
 func (p *Poller) resolveExchanges(ctx context.Context, syms []string) {
-	reqs := 0
-	p.resolveExchangesBudget(ctx, syms, &reqs)
-}
-
-func (p *Poller) resolveExchangesBudget(ctx context.Context, syms []string, reqs *int) {
 	var missing []string
 	for _, s := range syms {
 		if _, ok := p.exch[s]; !ok {
@@ -354,9 +330,7 @@ func (p *Poller) resolveExchangesBudget(ctx context.Context, syms []string, reqs
 		}
 	}
 	for _, ch := range chunk(missing, p.maxPerReq()) {
-		if !p.staticInfoChunkBudget(ctx, ch, reqs) {
-			break
-		}
+		p.staticInfoChunk(ctx, ch)
 	}
 }
 
@@ -364,33 +338,28 @@ func (p *Poller) resolveExchangesBudget(ctx context.Context, syms []string, reqs
 // caching each returned symbol's exchange label (or "" when a symbol
 // succeeded but had no row in the response). On a whole-batch RetType != 0
 // failure it recurses with a binary split, same shape as ownerPlateChunk.
-func (p *Poller) staticInfoChunkBudget(ctx context.Context, ch []string, reqs *int) bool {
-	if len(ch) == 0 || *reqs >= maxRefreshRequests {
-		return false
-	}
-	*reqs++
+func (p *Poller) staticInfoChunk(ctx context.Context, ch []string) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetStaticInfo,
 		&staticpb.Request{C2S: &staticpb.C2S{SecurityList: securitiesFor(ch)}})
 	if err != nil {
 		slog.Warn("stockinfo: static-info transport failed", "err", err, "n", len(ch))
-		return false
+		return
 	}
 	var resp staticpb.Response
 	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
 		slog.Warn("stockinfo: static-info decode failed", "err", err)
-		return false
+		return
 	}
 	if resp.GetRetType() != 0 {
-		if !opend.SymbolSpecificFailure(resp.GetRetMsg(), ch) {
-			return false
-		}
 		if len(ch) == 1 {
 			p.exch[ch[0]] = ""
 			slog.Info("stockinfo: static-info unresolvable, caching absent exchange", "symbol", ch[0], "reason", resp.GetRetMsg())
-			return true
+			return
 		}
 		mid := len(ch) / 2
-		return p.staticInfoChunkBudget(ctx, ch[:mid], reqs) && p.staticInfoChunkBudget(ctx, ch[mid:], reqs)
+		p.staticInfoChunk(ctx, ch[:mid])
+		p.staticInfoChunk(ctx, ch[mid:])
+		return
 	}
 	got := make(map[string]bool, len(ch))
 	for _, info := range resp.GetS2C().GetStaticInfoList() {
@@ -404,7 +373,6 @@ func (p *Poller) staticInfoChunkBudget(ctx context.Context, ch []string, reqs *i
 			p.exch[s] = "" // succeeded but no row for this symbol: cache absent
 		}
 	}
-	return true
 }
 
 // exchLabel maps a moomoo qotcommon.ExchType value to the label the Stock

@@ -314,7 +314,7 @@ describe("ScannerPanel", () => {
     act(() => scanner.apply({ kind: "delta", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:05.000Z", rows: [
         { ...scannerShortInterestDefaults, symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1, relativeVolume: null },
-        { ...scannerShortInterestDefaults, symbol: "US.NEW", changePct: 9, alertSeq: 1, last: 1, floatShares: 1, volume: 1, relativeVolume: null },
+        { ...scannerShortInterestDefaults, symbol: "US.NEW", changePct: 9, last: 1, floatShares: 1, volume: 1, relativeVolume: null },
       ] } }));
     const row = screen.getByText("NEW").closest("tr") as HTMLElement;
     const newHitBackground = row.style.background;
@@ -335,67 +335,6 @@ describe("ScannerPanel", () => {
     expect(screen.getByLabelText("float cap")).toBeTruthy();
     expect(screen.getByLabelText("min volume")).toBeTruthy();
     expect(screen.getByLabelText("rel vol ≥")).toBeTruthy();
-  });
-
-  it("offers all comparison windows and labels the selected window", () => {
-    const { scanner, commands } = renderPanel();
-    fireEvent.click(screen.getByRole("button", { name: /filters/i }));
-    const comparison = screen.getByLabelText("comparison basis") as HTMLSelectElement;
-    expect([...comparison.options].map((option) => option.textContent)).toEqual([
-      "DAY % — previous regular close", "1 MIN % — sampled one minute ago",
-      "5 MIN % — sampled five minutes ago", "1 HOUR % — sampled one hour ago",
-    ]);
-    fireEvent.change(comparison, { target: { value: "5m" } });
-    expect(comparison.value).toBe("5m");
-    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-    expect(commands.sendCommand).toHaveBeenCalledWith("SetScannerFilters", { filters: expect.objectContaining({ changeBasis: "5m" }) });
-
-    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: {
-      refreshedAt: "2026-07-08T13:00:00.000Z", rows: [], filters: { mode: "gainers", changeBasis: "5m", minChangePct: 0, maxFloatShares: null, minVolume: 0, minRelativeVolume: 0, floatUnit: "M", volumeUnit: "K" },
-    } }));
-    expect(screen.getByRole("columnheader", { name: /5 MIN %/ })).toBeTruthy();
-    expect(screen.getByTestId("scanner-filter-summary").textContent).toContain("5 MIN %");
-  });
-
-  it("exposes sortable headers as keyboard-focusable controls", () => {
-    renderPanel();
-    const header = screen.getByRole("columnheader", { name: /DAY %/ });
-    expect(header.getAttribute("aria-sort")).toBe("descending");
-    const sortButton = within(header).getByRole("button", { name: "Sort by DAY %" });
-    expect(sortButton.tabIndex).toBe(0);
-    fireEvent.click(sortButton);
-    expect(header.getAttribute("aria-sort")).toBe("ascending");
-  });
-
-  it("dismisses unapplied settings on Escape or outside click and keeps inside clicks open", () => {
-    const { commands } = renderPanel();
-    commands.sendCommand.mockClear();
-    const gear = screen.getByRole("button", { name: "filters" });
-    fireEvent.click(gear);
-    fireEvent.change(screen.getByLabelText("min gain %"), { target: { value: "7" } });
-    fireEvent.mouseDown(screen.getByLabelText("comparison basis"));
-    expect(screen.getByLabelText("min gain %")).toBeTruthy();
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(screen.queryByLabelText("min gain %")).toBeNull();
-    expect(commands.sendCommand).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(gear);
-
-    fireEvent.click(gear);
-    fireEvent.change(screen.getByLabelText("min gain %"), { target: { value: "8" } });
-    fireEvent.mouseDown(document.body);
-    expect(screen.queryByLabelText("min gain %")).toBeNull();
-    expect(commands.sendCommand).not.toHaveBeenCalled();
-  });
-
-  it("shows rolling warmup and unavailable state without inventing a percentage", () => {
-    const { scanner } = renderPanel();
-    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: {
-      refreshedAt: "2026-07-08T13:00:00.000Z", warmingCount: 1, rows: [{ ...scannerShortInterestDefaults, symbol: "US.WARM", changePct: null, changeStatus: "warming", last: null, floatShares: null, volume: 0, relativeVolume: null }],
-    } }));
-    expect(screen.getByTestId("scanner-filter-summary").textContent).toContain("warming 1");
-    const change = screen.getByText("WARM").closest("tr")!.querySelectorAll("td")[1];
-    expect(change.textContent).toBe("—");
-    expect(change.getAttribute("title")).toBe("Waiting for the selected rolling window");
   });
 
   it("the summary line reflects the active thresholds", () => {

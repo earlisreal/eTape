@@ -5,7 +5,7 @@ import type { ScannerFilters, ScannerSession } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
 import { FONTS } from "../../render/palette";
 import { formatTapeTime } from "../../render/format";
-import { appendSsrMarker, formatChangePct, formatCompactShares, formatRelativeVolume, formatShortInterest } from "../format";
+import { appendSsrMarker, formatChangePct, formatCompactShares, formatRelativeVolume, formatShortInterest, msUntilEtMidnight } from "../format";
 import { formatFilterSummary } from "./scannerFilter";
 import { toggleSort, sortIndicator, type SortState } from "../sortColumns";
 import { bareSymbol } from "../exec/orderStatus";
@@ -19,7 +19,7 @@ import { rankScannerRows, readScannerSort, scannerModeSort, scannerSyncStatusTex
 const SESSION_LABEL: Record<ScannerSession, string> = {
   premarket: "Pre-market", rth: "RTH", afterhours: "After-hours", overnight: "Overnight",
 };
-const DEFAULT_FILTERS: ScannerFilters = { mode: "gainers", changeBasis: "previous_close", minChangePct: 0, maxFloatShares: null, minVolume: 0, minRelativeVolume: 0, floatUnit: "M", volumeUnit: "K" };
+const DEFAULT_FILTERS: ScannerFilters = { mode: "gainers", minChangePct: 0, maxFloatShares: null, minVolume: 0, minRelativeVolume: 0, floatUnit: "M", volumeUnit: "K" };
 const COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
   { col: "sym", label: "Symbol", align: "left" },
   { col: "changePct", label: "%", align: "right" },
@@ -29,9 +29,6 @@ const COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
   { col: "relVol", label: "REL VOL", align: "right" },
   { col: "shortInterest", label: "Short Int", align: "right" },
 ];
-
-const comparisonLabel = (basis: ScannerFilters["changeBasis"]): string =>
-  basis === "1m" ? "1 MIN %" : basis === "5m" ? "5 MIN %" : basis === "1h" ? "1 HOUR %" : "DAY %";
 
 const unitScale = (unit: "K" | "M") => unit === "K" ? 1_000 : 1_000_000;
 
@@ -53,13 +50,20 @@ export function ScannerPanel(
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [draft, setDraft] = useState<ScannerFilters>(DEFAULT_FILTERS);
   const [engineFilters, setEngineFilters] = useState<ScannerFilters | null>(null);
-  const gearRef = useRef<HTMLButtonElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
   // Single click only highlights a row; double-click is the "load it" gesture — a
   // stray single click while scanning the list should never reassign the linked
   // group's live symbol.
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
+
+  // ET-midnight dedup reset: clear the per-session seen-sets so the next session's
+  // first prints flash fresh. Re-arms after each fire.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout>;
+    const arm = () => { timer = setTimeout(() => { stores.scanner.resetSeen(); arm(); }, msUntilEtMidnight(new Date())); };
+    arm();
+    return () => clearTimeout(timer);
+  }, [stores.scanner]);
 
   useEffect(() => {
     void commands.sendCommand("GetScannerFilters", {}).then((ack) => {
@@ -67,29 +71,7 @@ export function ScannerPanel(
     });
   }, [commands]);
 
-  useEffect(() => {
-    if (!filtersOpen) return;
-    const doc = gearRef.current?.ownerDocument ?? document;
-    const closeOutside = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (target && (gearRef.current?.contains(target) || popoverRef.current?.contains(target))) return;
-      setFiltersOpen(false);
-    };
-    const closeEscape = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setFiltersOpen(false);
-      gearRef.current?.focus();
-    };
-    doc.addEventListener("mousedown", closeOutside);
-    doc.addEventListener("keydown", closeEscape);
-    return () => {
-      doc.removeEventListener("mousedown", closeOutside);
-      doc.removeEventListener("keydown", closeEscape);
-    };
-  }, [filtersOpen]);
-
-  const filters: ScannerFilters = { ...DEFAULT_FILTERS, ...(cv.filters ?? engineFilters ?? {}) };
+  const filters = { ...DEFAULT_FILTERS, ...(cv.filters ?? engineFilters ?? {}) };
   useEffect(() => {
     if (sortedMode.current === null) { sortedMode.current = filters.mode; return; }
     if (sortedMode.current === filters.mode) return;
@@ -157,7 +139,7 @@ export function ScannerPanel(
       <span className="serif" style={{ fontWeight: 600, whiteSpace: "nowrap" }}>Scanner</span>
       {sessionLabel && <span className="mono" style={{ color: palette.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>· <span>{sessionLabel}</span></span>}
       <span style={{ flex: 1 }} />
-      <button ref={gearRef} type="button" aria-label="filters" aria-expanded={filtersOpen} title="Filters"
+      <button type="button" aria-label="filters" aria-expanded={filtersOpen} title="Filters"
         onClick={() => (filtersOpen ? setFiltersOpen(false) : openFilters())}
         style={{ position: "relative", display: "inline-flex", border: "none", background: "transparent", color: palette.textMuted, cursor: "pointer", padding: 3, flex: "0 0 auto" }}>
         <IconGear size={13} />
@@ -174,11 +156,10 @@ export function ScannerPanel(
       {headerSlot === undefined ? headerControls : headerSlot ? createPortal(headerControls, headerSlot) : null}
       {!cv.refreshedAt && <div style={{ padding: "6px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>Waiting for scanner data…</div>}
       {filtersOpen && (
-        <div ref={popoverRef} className="popover" style={{ top: headerSlot === undefined ? 30 : 6, left: headerSlot === undefined ? 8 : undefined, right: headerSlot === undefined ? undefined : 8, width: 220 }}>
+        <div className="popover" style={{ top: headerSlot === undefined ? 30 : 6, left: headerSlot === undefined ? 8 : undefined, right: headerSlot === undefined ? undefined : 8, width: 220 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {cv.refreshedAt && <div className="mono" style={{ color: palette.textMuted }}>updated {formatTapeTime(cv.refreshedAt)}</div>}
             <label>rank <select aria-label="rank mode" value={draft.mode} onChange={(e) => setDraft({ ...draft, mode: e.target.value as ScannerFilters["mode"] })}><option value="gainers">Top gainers</option><option value="losers">Top losers</option><option value="most_active">Most active</option></select></label>
-            <label>comparison <select aria-label="comparison basis" value={draft.changeBasis ?? "previous_close"} onChange={(e) => setDraft({ ...draft, changeBasis: e.target.value as NonNullable<ScannerFilters["changeBasis"]> })}><option value="previous_close">DAY % — previous regular close</option><option value="1m">1 MIN % — sampled one minute ago</option><option value="5m">5 MIN % — sampled five minutes ago</option><option value="1h">1 HOUR % — sampled one hour ago</option></select></label>
             {draft.mode !== "most_active" && <label>{draft.mode === "gainers" ? "min gain %" : "min loss %"} <input aria-label={draft.mode === "gainers" ? "min gain %" : "min loss %"} type="number" min="0" value={draft.minChangePct} onChange={(e) => setDraft({ ...draft, minChangePct: Math.max(0, Number(e.target.value)) })} style={{ width: 60 }} /></label>}
             <label>float ≤ <input aria-label="float cap" type="number" min="0" value={draft.maxFloatShares === null ? "" : draft.maxFloatShares / unitScale(draft.floatUnit)} onChange={(e) => setDraft({ ...draft, maxFloatShares: e.target.value === "" ? null : Number(e.target.value) * unitScale(draft.floatUnit) })} style={{ width: 70 }} /><select aria-label="float unit" value={draft.floatUnit} onChange={(e) => setDraft({ ...draft, floatUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
             <label>vol ≥ <input aria-label="min volume" type="number" min="0" value={draft.minVolume / unitScale(draft.volumeUnit)} onChange={(e) => setDraft({ ...draft, minVolume: Number(e.target.value) * unitScale(draft.volumeUnit) })} style={{ width: 70 }} /><select aria-label="volume unit" value={draft.volumeUnit} onChange={(e) => setDraft({ ...draft, volumeUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
@@ -193,27 +174,19 @@ export function ScannerPanel(
       {syncControl}
       {(
         <div data-testid="scanner-filter-summary" className="mono" style={{ padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>
-          {filters.mode === "most_active" ? `Most active${cv.session === "rth" ? "" : " · approximate"}` : filters.mode === "gainers" ? "Top gainers" : "Top losers"} · {filters.changeBasis === "1m" ? "1 MIN %" : filters.changeBasis === "5m" ? "5 MIN %" : filters.changeBasis === "1h" ? "1 HOUR %" : "DAY %"} · {formatFilterSummary({ minChangePct: filters.mode === "most_active" ? 0 : filters.minChangePct, floatCapShares: filters.maxFloatShares, minVolume: filters.minVolume, minRelativeVolume: filters.minRelativeVolume })}{cv.warmingCount > 0 ? ` · warming ${cv.warmingCount}` : ""}
+          {filters.mode === "most_active" ? `Most active${cv.session === "rth" ? "" : " · approximate"}` : filters.mode === "gainers" ? "Top gainers" : "Top losers"} · {formatFilterSummary({ minChangePct: filters.mode === "most_active" ? 0 : filters.minChangePct, floatCapShares: filters.maxFloatShares, minVolume: filters.minVolume, minRelativeVolume: filters.minRelativeVolume })}
         </div>
       )}
       <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead>
             <tr style={{ color: palette.textMuted, textAlign: "right" }}>
-              {COLUMNS.map((c) => {
-                const label = c.col === "changePct" ? comparisonLabel(filters.changeBasis) : c.label;
-                const active = sort?.col === c.col;
-                return (
-                  <th key={c.col} style={{ ...th, textAlign: c.align }} aria-sort={active ? sort?.dir === "asc" ? "ascending" : "descending" : "none"}
-                    onClick={() => clickSort(c.col)}
-                    className={`col-head sortable${active ? " sort-active" : ""}`}>
-                    <button type="button" aria-label={`Sort by ${label}`}
-                      style={{ width: "100%", border: "none", background: "transparent", color: "inherit", cursor: "pointer", padding: 0, font: "inherit", textAlign: c.align }}>
-                      {label} {sortIndicator(sort, c.col)}
-                    </button>
-                  </th>
-                );
-              })}
+              {COLUMNS.map((c) => (
+                <th key={c.col} style={{ ...th, textAlign: c.align, cursor: "pointer" }} onClick={() => clickSort(c.col)}
+                  className={`col-head sortable${sort?.col === c.col ? " sort-active" : ""}`}>
+                  {c.label} {sortIndicator(sort, c.col)}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -234,7 +207,7 @@ export function ScannerPanel(
                 <td style={symCell} title={r.shortSellRestricted ? "Short Sell Restricted — derived Rule 201 estimate" : undefined}>
                   {appendSsrMarker(bareSymbol(r.symbol), r.shortSellRestricted)}
                 </td>
-                <td style={{ ...numCell, color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }} title={r.changeStatus === "warming" ? "Waiting for the selected rolling window" : r.changeStatus === "unavailable" ? "Current observation unavailable" : undefined}>{formatChangePct(r.changePct)}</td>
+                <td style={{ ...numCell, color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>{formatChangePct(r.changePct)}</td>
                 <td style={numCell}>{r.last === null ? "—" : r.last.toFixed(2)}</td>
                 <td style={numCell}>{formatCompactShares(r.floatShares)}</td>
                 <td style={numCell}>{formatCompactShares(r.volume)}</td>

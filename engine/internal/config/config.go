@@ -238,7 +238,7 @@ func Default() Config {
 			OutboundQueue: 4096, MDRateHz: 30, AccountRateHz: 4, PositionMs: 100, TapeSnapshot: 200,
 		},
 		Scan: Scan{
-			Enabled: true, PremarketMs: 1000, RTHMs: 1000, RankPages: 2,
+			Enabled: true, PremarketMs: 2000, RTHMs: 3000, RankPages: 2,
 			MinChangePct: 5, MaxFloatShares: 50_000_000, MinVolume: 100_000,
 		},
 		News:      News{Enabled: true, YahooEnabled: false, WatchMs: 3100, ActiveRefreshMs: 10000, ScannerRefreshMs: 60000, MaxPerReq: 50, MaxAgeHours: 96, CatalystMinScore: 50},

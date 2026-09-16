@@ -42,8 +42,6 @@ type Poller struct {
 	lastRef  *string                       // RFC3339 of last successful poll; nil until first
 }
 
-const maxSnapshotReqs = 8
-
 func New(list *List, r requester, pub Publisher, clk clock.Clock, interval time.Duration) *Poller {
 	if interval <= 0 {
 		interval = 3 * time.Second
@@ -96,8 +94,7 @@ func (p *Poller) pollAndPublish(ctx context.Context) {
 	syms := p.list.Symbols()
 	if len(syms) > 0 {
 		got := map[string]*snappb.Snapshot{}
-		reqs := 0
-		p.snapshotBatch(ctx, syms, got, &reqs)
+		p.snapshotBatch(ctx, syms, got)
 		for sym, sn := range got {
 			b := sn.GetBasic()
 			row := wsmsg.WatchlistRow{Symbol: sym, Volume: b.GetVolume()}
@@ -140,39 +137,31 @@ func (p *Poller) buildPayload(syms []string) wsmsg.WatchlistRowsPayload {
 // split on a whole-batch RetType != 0 failure (lifted from
 // stockinfo.snapshotChunk / scan.snapshotBatch). Probe-at-add makes this a
 // delisting/edge safety net, not a hot path.
-
-func (p *Poller) snapshotBatch(ctx context.Context, syms []string, out map[string]*snappb.Snapshot, reqs *int) bool {
-	if len(syms) == 0 || *reqs >= maxSnapshotReqs {
-		return false
-	}
-	*reqs++
+func (p *Poller) snapshotBatch(ctx context.Context, syms []string, out map[string]*snappb.Snapshot) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetSecuritySnapshot,
 		&snappb.Request{C2S: &snappb.C2S{SecurityList: securitiesFor(syms)}})
 	if err != nil {
 		slog.Warn("watchlist: snapshot transport failed", "err", err, "n", len(syms))
-		return false
+		return
 	}
 	var resp snappb.Response
 	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
 		slog.Warn("watchlist: snapshot decode failed", "err", err)
-		return false
+		return
 	}
 	if resp.GetRetType() != 0 {
-		if !opend.SymbolSpecificFailure(resp.GetRetMsg(), syms) {
-			return false
-		}
 		if len(syms) == 1 {
 			slog.Info("watchlist: snapshot unresolvable this tick", "symbol", syms[0], "reason", resp.GetRetMsg())
-			return true
+			return
 		}
 		mid := len(syms) / 2
-		return p.snapshotBatch(ctx, syms[:mid], out, reqs) &&
-			p.snapshotBatch(ctx, syms[mid:], out, reqs)
+		p.snapshotBatch(ctx, syms[:mid], out)
+		p.snapshotBatch(ctx, syms[mid:], out)
+		return
 	}
 	for _, sn := range resp.GetS2C().GetSnapshotList() {
 		out[symbolOf(sn.GetBasic().GetSecurity())] = sn
 	}
-	return true
 }
 
 func securitiesFor(syms []string) []*qotcommon.Security {

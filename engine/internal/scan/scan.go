@@ -1,13 +1,11 @@
-// Package scan is the session-aware rank scanner poller. It issues request/
+// Package scan is the pre-market/RTH rank scanner poller. It issues request/
 // response protoIDs (3410/3413/3411/3412 per-session rank, 3202 static info,
 // 3203 snapshot) through the OpenD client — no subscription quota — and
-// publishes scanner.rank. Exchange type is resolved on demand (3202) to drop
-// OTC/Pink codes before they rank (moomoo's US quote entitlement doesn't cover
-// OTC — subscribing one fails at Qot_Sub). Float is resolved on demand for the
-// surviving symbols (3203) and cached for the ET day; there is no low-float
-// "universe" (3215 never echoes float). Rows carry normalized current
-// observations, selected comparisons, and durable alert revisions; failed
-// observations are unavailable rather than stale.
+// publishes scanner.rank/scanner.hit. Exchange type is resolved on demand
+// (3202) to drop OTC/Pink codes before they rank (moomoo's US quote
+// entitlement doesn't cover OTC — subscribing one fails at Qot_Sub). Float
+// is resolved on demand for the surviving symbols (3203) and cached for the
+// ET day; there is no low-float "universe" (3215 never echoes float).
 package scan
 
 import (
@@ -132,16 +130,6 @@ type rankItem struct {
 	cumulativeVolume    *int64
 	cumulativePhase     session.Phase
 	cumulativeDay       int64
-	snapshotAttempted   bool
-	snapshotUsable      bool
-	observedPrice       *float64
-	observedChange      *float64
-	observedVolume      *int64
-	changeStatus        string
-	rankClosePrice      *float64
-	closePrice          *float64
-	closeCycle          int64
-	alertSeq            int64
 }
 
 // floatEntry is a resolved float-cache entry. bad = definitively unresolvable
@@ -181,55 +169,9 @@ const (
 	shortInterestFreshness = 24 * time.Hour
 	shortInterestPace      = time.Second
 	maxSafeInteger         = uint64(1<<53 - 1)
-	scanRetryMin           = time.Second
-	scanRetryMax           = 30 * time.Second
 )
 
 var relativeVolumeRetryDelays = [...]time.Duration{time.Minute, 5 * time.Minute, 15 * time.Minute, 30 * time.Minute}
-
-type scanRetryBackoff struct {
-	delay time.Duration
-	until time.Time
-}
-
-func (b *scanRetryBackoff) active(now time.Time) bool {
-	return !b.until.IsZero() && now.Before(b.until)
-}
-
-func (b *scanRetryBackoff) fail(now time.Time) {
-	if b.delay < scanRetryMin {
-		b.delay = scanRetryMin
-	} else if b.delay < scanRetryMax {
-		b.delay *= 2
-		if b.delay > scanRetryMax {
-			b.delay = scanRetryMax
-		}
-	}
-	b.until = now.Add(b.delay)
-}
-
-func (b *scanRetryBackoff) clear() { b.delay, b.until = 0, time.Time{} }
-
-func (p *Poller) rankRetryActive(phase session.Phase, now time.Time) bool {
-	b := p.rankRetry[phase]
-	return b.active(now)
-}
-
-func (p *Poller) failRank(phase session.Phase, now time.Time) {
-	if p.rankRetry == nil {
-		p.rankRetry = map[session.Phase]scanRetryBackoff{}
-	}
-	b := p.rankRetry[phase]
-	b.fail(now)
-	p.rankRetry[phase] = b
-}
-
-func (p *Poller) clearRank(phase session.Phase) {
-	if b, ok := p.rankRetry[phase]; ok {
-		b.clear()
-		p.rankRetry[phase] = b
-	}
-}
 
 type Poller struct {
 	cfg                   config.Scan
@@ -250,25 +192,10 @@ type Poller struct {
 	poke                  chan struct{}
 	lastStockFilter       time.Time
 	board                 map[string]rankItem
+	premarketBootstrapped bool
 	lastPhase             session.Phase
 	phaseSet              bool
 	resetBoard            bool
-	bootstrap             map[int64]map[session.Phase]bool
-	cycleCandidates       map[int64]map[string]rankItem
-	lastCycle             int64
-	currentCandidates     []rankItem
-	currentCandidateCycle int64
-	currentCandidatePhase session.Phase
-	snapshotOffset        int
-	history               map[string]*rollingHistory
-	alerts                alertEngine
-	feedEvents            chan bool
-	feedResetPending      atomic.Bool
-	feedGeneration        atomic.Uint64
-	feedDown              atomic.Bool
-	filtersChanged        atomic.Bool
-	retry                 scanRetryBackoff
-	rankRetry             map[session.Phase]scanRetryBackoff
 	ssr                   shortSellRestrictionResolver
 	shortInterest         map[string]shortInterestEntry
 	shortInterestPending  map[string]bool
@@ -289,8 +216,6 @@ func New(cfg config.Scan, r requester, pub Publisher, clk clock.Clock, feed dema
 	}
 	return &Poller{cfg: cfg, r: r, pub: pub, clk: clk, feed: feed, backfill: backfill, relativeVolumeFetcher: relativeVolumeFetcher, ssr: resolver, pool: NewPool(),
 		floats: map[string]floatEntry{}, otc: map[string]bool{}, seen: map[string]map[string]bool{}, filters: filters, baseline: true, poke: make(chan struct{}, 1),
-		history: map[string]*rollingHistory{}, bootstrap: map[int64]map[session.Phase]bool{}, cycleCandidates: map[int64]map[string]rankItem{}, alerts: newAlertEngine(), feedEvents: make(chan bool, 4),
-		rankRetry:     map[session.Phase]scanRetryBackoff{},
 		shortInterest: map[string]shortInterestEntry{}, shortInterestPending: map[string]bool{}, shortInterestWake: make(chan struct{}, 1),
 		relativeVolumeCache: map[relativeVolumeCacheKey]relativeVolumeCacheEntry{}, relativeVolumePending: map[relativeVolumeCacheKey]bool{}, relativeVolumeWake: make(chan struct{}, 1)}
 }
@@ -301,23 +226,12 @@ func Defaults(cfg config.Scan) wsmsg.ScannerFilters {
 		v := cfg.MaxFloatShares
 		cap = &v
 	}
-	return wsmsg.ScannerFilters{Mode: "gainers", ChangeBasis: "previous_close", MinChangePct: cfg.MinChangePct, MaxFloatShares: cap, MinVolume: float64(cfg.MinVolume), MinRelativeVolume: 0, FloatUnit: "M", VolumeUnit: "K"}
-}
-
-func normalizeFilters(f wsmsg.ScannerFilters) wsmsg.ScannerFilters {
-	if f.ChangeBasis == "" {
-		f.ChangeBasis = "previous_close"
-	}
-	return f
+	return wsmsg.ScannerFilters{Mode: "gainers", MinChangePct: cfg.MinChangePct, MaxFloatShares: cap, MinVolume: float64(cfg.MinVolume), MinRelativeVolume: 0, FloatUnit: "M", VolumeUnit: "K"}
 }
 
 func ValidateFilters(f wsmsg.ScannerFilters) error {
-	f = normalizeFilters(f)
 	if f.Mode != "gainers" && f.Mode != "losers" && f.Mode != "most_active" {
 		return fmt.Errorf("invalid mode")
-	}
-	if f.ChangeBasis != "previous_close" && f.ChangeBasis != "1m" && f.ChangeBasis != "5m" && f.ChangeBasis != "1h" {
-		return fmt.Errorf("invalid change basis")
 	}
 	if (f.FloatUnit != "K" && f.FloatUnit != "M") || (f.VolumeUnit != "K" && f.VolumeUnit != "M") {
 		return fmt.Errorf("invalid unit")
@@ -333,7 +247,6 @@ func ValidateFilters(f wsmsg.ScannerFilters) error {
 
 func (p *Poller) Filters() wsmsg.ScannerFilters { p.mu.RLock(); defer p.mu.RUnlock(); return p.filters }
 func (p *Poller) SetFilters(f wsmsg.ScannerFilters) error {
-	f = normalizeFilters(f)
 	if err := ValidateFilters(f); err != nil {
 		return err
 	}
@@ -342,7 +255,6 @@ func (p *Poller) SetFilters(f wsmsg.ScannerFilters) error {
 	p.baseline = true
 	p.resetBoard = true
 	p.mu.Unlock()
-	p.filtersChanged.Store(true)
 	select {
 	case p.poke <- struct{}{}:
 	default:
@@ -360,78 +272,32 @@ func (p *Poller) Run(ctx context.Context) error {
 	} else {
 		slog.Debug("scan: REL VOL unavailable", "reason", "no SIP history fetcher")
 	}
-	next := p.clk.Now()
+	// Poll on a short base interval; the effective cadence is session-derived.
+	base := p.clk.NewTicker(time.Duration(p.cfg.PremarketMs) * time.Millisecond)
+	defer base.Stop()
+	var last time.Time
 	for {
-		p.handleFeedEvents()
-		now := p.clk.Now()
-		if !next.After(now) {
-			p.pollOnce(ctx, now)
-			next = p.clk.Now().Add(p.pollInterval(p.clk.Now()))
-			continue
-		}
-		wait := p.clk.After(next.Sub(now))
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-wait:
-			continue
+		case now := <-base.C():
+			interval := p.pollInterval(now)
+			if now.Sub(last) < interval {
+				continue
+			}
+			last = now
+			p.pollOnce(ctx, now)
 		case <-p.poke:
 			p.pollOnce(ctx, p.clk.Now())
-			next = p.clk.Now().Add(p.pollInterval(p.clk.Now()))
-		case <-p.feedEvents:
-			p.handleFeedEvents()
 		}
 	}
 }
 
 func (p *Poller) pollInterval(now time.Time) time.Duration {
-	interval := time.Duration(p.cfg.PremarketMs) * time.Millisecond
 	if session.PhaseAt(now) == session.RTH {
-		interval = time.Duration(p.cfg.RTHMs) * time.Millisecond
+		return time.Duration(p.cfg.RTHMs) * time.Millisecond
 	}
-	if interval <= 0 {
-		return time.Second
-	}
-	return interval
-}
-
-// OnFeedState is called by the Hub's MD event loop. It only changes atomics
-// and queues owner-thread cleanup; the poller's maps remain single-writer.
-func (p *Poller) OnFeedState(up bool) {
-	if !up {
-		p.feedGeneration.Add(1)
-		p.feedDown.Store(true)
-		p.feedResetPending.Store(true)
-	} else {
-		p.feedDown.Store(false)
-	}
-	select {
-	case p.feedEvents <- up:
-	default:
-	}
-	if up {
-		select {
-		case p.poke <- struct{}{}:
-		default:
-		}
-	}
-}
-
-func (p *Poller) handleFeedEvents() {
-	for {
-		select {
-		case <-p.feedEvents:
-		default:
-			if p.feedResetPending.Swap(false) {
-				for _, h := range p.history {
-					h.invalidate()
-				}
-				p.alerts.reset(true)
-				p.baseline = true
-			}
-			return
-		}
-	}
+	return time.Duration(p.cfg.PremarketMs) * time.Millisecond
 }
 
 // sessionKey maps a session phase to the scanner.rank message key. Closed
@@ -450,143 +316,66 @@ func sessionKey(phase session.Phase) string {
 }
 
 func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
-	p.handleFeedEvents()
-	if p.feedDown.Load() || ctx.Err() != nil {
-		return
-	}
-	generation := p.feedGeneration.Load()
 	filters := p.Filters()
-	filtersReset := p.filtersChanged.Load()
 	phase := session.PhaseAt(now)
-	cycle := session.TradingCycleStart(now).UnixMilli()
-	if p.retry.active(p.clk.Now()) {
-		return
-	}
-
-	type stageResult struct {
-		phase session.Phase
-		items []rankItem
-	}
-	results := make([]stageResult, 0, len(discoveryStages(phase)))
-	for _, stage := range discoveryStages(phase) {
-		if !filtersReset && stage != phase && p.stageBootstrapped(cycle, stage) {
-			continue
-		}
-		if !filtersReset && p.rankRetryActive(stage, p.clk.Now()) {
-			continue
-		}
-		stageItems, err := p.fetchRank(ctx, stage, filters.Mode)
-		if err != nil {
-			if ctx.Err() == nil {
-				p.failRank(stage, p.clk.Now())
-			}
-			slog.Warn("scan: rank fetch failed", "phase", stage.String(), "err", err)
-			continue
-		}
-		p.clearRank(stage)
-		if p.pollStale(ctx, generation, cycle, phase, filters) {
-			return
-		}
-		results = append(results, stageResult{phase: stage, items: stageItems})
-	}
-	if p.pollStale(ctx, generation, cycle, phase, filters) {
-		return
-	}
-	filtersReset = filtersReset || p.filtersChanged.Swap(false)
-	if filtersReset {
-		p.alerts.reset(true)
-		p.bootstrap = map[int64]map[session.Phase]bool{}
-		p.cycleCandidates = map[int64]map[string]rankItem{}
-		p.currentCandidates = nil
-		p.currentCandidateCycle = 0
-	}
-	p.pruneCycleState(cycle)
-	if p.phaseSet && p.lastPhase != phase && p.lastCycle == cycle && p.currentCandidateCycle == cycle && p.currentCandidatePhase == p.lastPhase {
-		p.rememberCycleCandidates(cycle, p.currentCandidates)
-	}
 	p.mu.Lock()
 	if p.board == nil || p.resetBoard || (phase == session.PostMarket && p.phaseSet && p.lastPhase != session.PostMarket) {
 		p.board = map[string]rankItem{}
-		if phase == session.PostMarket && p.phaseSet && p.lastPhase != session.PostMarket {
-			p.alerts.reset(true)
-			p.baseline = true
-		}
+		p.premarketBootstrapped = false
 		p.resetBoard = false
 	}
 	p.lastPhase, p.phaseSet = phase, true
-	p.lastCycle = cycle
+	bootstrapped := p.premarketBootstrapped
 	p.mu.Unlock()
 
-	var currentItems []rankItem
-	for _, result := range results {
-		if result.phase == phase {
-			currentItems = append(currentItems, result.items...)
-			p.replaceCurrentCandidates(cycle, phase, result.items, !filtersReset)
+	var items []rankItem
+	bootstrapOK := false
+	if phase == session.RTH && !bootstrapped {
+		pre, err := p.fetchRank(ctx, session.PreMarket, filters.Mode)
+		if err != nil {
+			slog.Warn("scan: premarket bootstrap failed", "err", err)
 		} else {
-			p.rememberCycleCandidates(cycle, result.items)
-			p.markStageBootstrapped(cycle, result.phase)
+			items = append(items, pre...)
+			bootstrapOK = true
 		}
 	}
-	items := make([]rankItem, 0, len(p.cycleCandidates[cycle])+len(currentItems))
-	for _, it := range p.cycleCandidates[cycle] {
-		items = append(items, it)
+	current, err := p.fetchRank(ctx, phase, filters.Mode)
+	if err != nil {
+		slog.Warn("scan: rank fetch failed", "err", err)
+		if len(items) == 0 {
+			return // transient; next tick retries
+		}
+	} else {
+		items = append(items, current...)
+		if phase == session.PreMarket {
+			bootstrapOK = true
+		}
 	}
-	items = append(items, currentItems...)
-	if p.pollStale(ctx, generation, cycle, phase, filters) {
-		return
-	}
-	p.resetIfNewDay(p.clk.Now())
-	if !p.resolveExch(ctx, items) { // populate the exchange-type cache before dropping OTC
-		return
-	}
-	if p.pollStale(ctx, generation, cycle, phase, filters) {
-		return
-	}
+	p.resetIfNewDay(now)
+	p.resolveExch(ctx, items) // populate the exchange-type cache before dropping OTC
 	items = dropOTC(items, p.otc)
 	all := make(map[string]rankItem, len(p.board)+len(items))
 	for sym, it := range p.board {
 		all[sym] = it
 	}
 	for _, it := range items {
-		all[it.Symbol] = it // later stages override earlier bootstrap values
+		if _, ok := all[it.Symbol]; ok {
+			continue
+		}
+		all[it.Symbol] = it
 	}
-	snapshotNow := p.clk.Now()
-	p.refreshSnapshotsAt(ctx, phase, all, snapshotNow)
-	if p.pollStale(ctx, generation, cycle, phase, filters) {
-		return
-	}
-	observationNow := p.clk.Now()
-	if p.pollStale(ctx, generation, cycle, phase, filters) {
-		return
-	}
-	p.updateObservations(observationNow, phase, all, filters)
-	if p.pollStale(ctx, generation, cycle, phase, filters) {
-		return
-	}
-	p.applyRelativeVolumes(observationNow, all)
-	wasBoard := make(map[string]bool, len(p.board))
-	for sym := range p.board {
-		wasBoard[sym] = true
-	}
+	p.refreshSnapshots(ctx, phase, all)
+	p.applyRelativeVolumes(now, all)
 	for _, it := range items {
 		it = all[it.Symbol]
 		if len(rankRowsFiltered([]rankItem{it}, p.floats, filters)) != 0 {
 			p.board[it.Symbol] = it
 		}
 	}
-	p.retireCandidates(items, observationNow)
-	if p.pollStale(ctx, generation, cycle, phase, filters) {
-		return
-	}
-	p.evaluateAlerts(observationNow, filters, all, wasBoard)
 	rows := make([]wsmsg.ScannerRow, 0, len(p.board))
 	for sym := range p.board {
-		it, ok := all[sym]
-		if !ok {
-			continue
-		}
-		p.board[sym] = it
-		rows = append(rows, rankRowsFiltered([]rankItem{it}, p.floats, wsmsg.ScannerFilters{Mode: "most_active", ChangeBasis: filters.ChangeBasis, FloatUnit: filters.FloatUnit, VolumeUnit: filters.VolumeUnit})...)
+		p.board[sym] = all[sym]
+		rows = append(rows, rankRowsFiltered([]rankItem{all[sym]}, p.floats, wsmsg.ScannerFilters{Mode: "most_active", FloatUnit: filters.FloatUnit, VolumeUnit: filters.VolumeUnit})...)
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if filters.Mode == "most_active" {
@@ -600,9 +389,14 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 		}
 		return *rows[i].ChangePct > *rows[j].ChangePct
 	})
-	p.overlayShortInterest(rows, observationNow)
-	if p.pollStale(ctx, generation, cycle, phase, filters) || !sameFilters(filters, p.Filters()) {
+	p.overlayShortInterest(rows, now)
+	if !sameFilters(filters, p.Filters()) {
 		return // SetFilters queued a fresh poll; never publish stale authoritative filters.
+	}
+	if bootstrapOK {
+		p.mu.Lock()
+		p.premarketBootstrapped = true
+		p.mu.Unlock()
 	}
 	poolRows := rows
 	if filters.MinRelativeVolume > 0 {
@@ -610,36 +404,26 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 		poolFilters.MinRelativeVolume = 0
 		poolRows = rankRowsFiltered(items, p.floats, poolFilters)
 	}
-	p.updatePool(observationNow, poolRows)
-	p.enqueueRelativeVolumeForPool(observationNow)
-	if p.pollStale(ctx, generation, cycle, phase, filters) {
-		return
-	}
+	p.updatePool(now, poolRows)
+	p.enqueueRelativeVolumeForPool(now)
 	sess := sessionKey(phase)
 	p.mu.Lock()
 	baseline := p.baseline
 	p.baseline = false
 	p.mu.Unlock()
 	p.pub.Publish(wsmsg.TopicScannerRank, sess, wsmsg.ScannerRankPayload{
-		RefreshedAt: observationNow.UTC().Format("2006-01-02T15:04:05.000Z07:00"),
-		Rows:        rows, Filters: filters, Baseline: baseline, WarmingCount: p.warmingCount(all, filters),
+		RefreshedAt: p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+		Rows:        rows, Filters: filters, Baseline: baseline,
 	})
-}
-
-func (p *Poller) pollStale(ctx context.Context, generation uint64, cycle int64, phase session.Phase, filters wsmsg.ScannerFilters) bool {
-	if ctx.Err() != nil || p.feedDown.Load() || generation != p.feedGeneration.Load() {
-		return true
+	for _, sym := range p.newHits(sess, rows) {
+		p.pub.Publish(wsmsg.TopicScannerHit, sess, wsmsg.ScanHitPayload{
+			Symbol: sym, At: p.clk.Now().UTC().Format("2006-01-02T15:04:05.000Z07:00"),
+		})
 	}
-	now := p.clk.Now()
-	return session.PhaseAt(now) != phase || session.TradingCycleStart(now).UnixMilli() != cycle || !sameFilters(filters, p.Filters())
 }
 
 func sameFilters(a, b wsmsg.ScannerFilters) bool {
-	a, b = normalizeFilters(a), normalizeFilters(b)
 	if a.Mode != b.Mode || a.MinChangePct != b.MinChangePct || a.MinVolume != b.MinVolume || a.MinRelativeVolume != b.MinRelativeVolume || a.FloatUnit != b.FloatUnit || a.VolumeUnit != b.VolumeUnit {
-		return false
-	}
-	if a.ChangeBasis != b.ChangeBasis {
 		return false
 	}
 	if a.MaxFloatShares == nil || b.MaxFloatShares == nil {
@@ -729,18 +513,10 @@ func rankRows(items []rankItem, floats map[string]floatEntry, cfg config.Scan) [
 func rankRowsFiltered(items []rankItem, floats map[string]floatEntry, f wsmsg.ScannerFilters) []wsmsg.ScannerRow {
 	out := make([]wsmsg.ScannerRow, 0, len(items))
 	for _, it := range items {
-		change, status := it.changeValue()
-		if f.Mode == "gainers" && (change == nil || *change < f.MinChangePct) {
+		if (f.Mode == "gainers" && it.ChangePct < f.MinChangePct) || (f.Mode == "losers" && it.ChangePct > -f.MinChangePct) {
 			continue
 		}
-		if f.Mode == "losers" && (change == nil || *change > -f.MinChangePct) {
-			continue
-		}
-		volume := it.Volume
-		if it.snapshotAttempted {
-			volume = it.rowVolume()
-		}
-		if f.MinVolume > 0 && float64(volume) < f.MinVolume {
+		if f.MinVolume > 0 && float64(it.Volume) < f.MinVolume {
 			continue
 		}
 		if f.MinRelativeVolume > 0 && (it.RelativeVolume == nil || *it.RelativeVolume < f.MinRelativeVolume) {
@@ -760,19 +536,10 @@ func rankRowsFiltered(items []rankItem, floats map[string]floatEntry, f wsmsg.Sc
 				floatPtr = &fv
 			}
 		}
-		var cp *float64
-		if change != nil {
-			v := *change
-			cp = &v
-		}
-		lp := it.rowLast()
-		if !it.snapshotAttempted {
-			v := it.Last
-			lp = &v
-		}
+		cp, lp := it.ChangePct, it.Last
 		out = append(out, wsmsg.ScannerRow{
 			Symbol: it.Symbol, ShortSellRestricted: it.ShortSellRestricted,
-			ChangePct: cp, ChangeStatus: status, AlertSeq: it.alertSeq, Last: lp, FloatShares: floatPtr, Volume: volume, RelativeVolume: it.RelativeVolume,
+			ChangePct: &cp, Last: &lp, FloatShares: floatPtr, Volume: it.Volume, RelativeVolume: it.RelativeVolume,
 		})
 	}
 	return out
@@ -1221,7 +988,7 @@ func (p *Poller) fetchMostActiveRTH(ctx context.Context) ([]rankItem, error) {
 
 func (p *Poller) fetchPreMarket(ctx context.Context, dir int32) ([]rankItem, error) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSPreMarketRank,
-		&rankpb.Request{C2S: &rankpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(100)}})
+		&rankpb.Request{C2S: &rankpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(35)}})
 	if err != nil {
 		return nil, err
 	}
@@ -1235,7 +1002,7 @@ func (p *Poller) fetchPreMarket(ctx context.Context, dir int32) ([]rankItem, err
 	var out []rankItem
 	for _, d := range resp.GetS2C().GetDataList() {
 		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()),
-			ChangePct: d.GetPreMarketChangeRatio(), Last: d.GetPreMarketPrice(), Volume: d.GetPreMarketVolume(), rankClosePrice: closePricePtr(d.GetClosePrice())})
+			ChangePct: d.GetPreMarketChangeRatio(), Last: d.GetPreMarketPrice(), Volume: d.GetPreMarketVolume()})
 	}
 	return out, nil
 }
@@ -1265,7 +1032,7 @@ func (p *Poller) fetchTopMovers(ctx context.Context, dir int32) ([]rankItem, err
 
 func (p *Poller) fetchAfterHours(ctx context.Context, dir int32) ([]rankItem, error) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSAfterHoursRank,
-		&ahpb.Request{C2S: &ahpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(100)}})
+		&ahpb.Request{C2S: &ahpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(35)}})
 	if err != nil {
 		return nil, err
 	}
@@ -1279,14 +1046,14 @@ func (p *Poller) fetchAfterHours(ctx context.Context, dir int32) ([]rankItem, er
 	var out []rankItem
 	for _, d := range resp.GetS2C().GetDataList() {
 		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()),
-			ChangePct: d.GetAfterHoursChangeRatio(), Last: d.GetAfterHoursPrice(), Volume: d.GetAfterHoursVolume(), rankClosePrice: closePricePtr(d.GetClosePrice())})
+			ChangePct: d.GetAfterHoursChangeRatio(), Last: d.GetAfterHoursPrice(), Volume: d.GetAfterHoursVolume()})
 	}
 	return out, nil
 }
 
 func (p *Poller) fetchOvernight(ctx context.Context, dir int32) ([]rankItem, error) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSOvernightRank,
-		&onpb.Request{C2S: &onpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(100)}})
+		&onpb.Request{C2S: &onpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(35)}})
 	if err != nil {
 		return nil, err
 	}
@@ -1300,7 +1067,7 @@ func (p *Poller) fetchOvernight(ctx context.Context, dir int32) ([]rankItem, err
 	var out []rankItem
 	for _, d := range resp.GetS2C().GetDataList() {
 		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()),
-			ChangePct: d.GetOvernightChangeRatio(), Last: d.GetOvernightPrice(), Volume: d.GetOvernightVolume(), rankClosePrice: closePricePtr(d.GetClosePrice())})
+			ChangePct: d.GetOvernightChangeRatio(), Last: d.GetOvernightPrice(), Volume: d.GetOvernightVolume()})
 	}
 	return out, nil
 }
@@ -1321,7 +1088,7 @@ const (
 // per poll; symbols left unresolved stay absent and are retried on the next
 // poll. Steady state is zero requests (board symbols persist cached
 // poll-to-poll).
-func (p *Poller) resolveExch(ctx context.Context, items []rankItem) bool {
+func (p *Poller) resolveExch(ctx context.Context, items []rankItem) {
 	var missing []string
 	for _, it := range items {
 		if _, ok := p.otc[it.Symbol]; !ok {
@@ -1334,29 +1101,20 @@ func (p *Poller) resolveExch(ctx context.Context, items []rankItem) bool {
 		if end > len(missing) {
 			end = len(missing)
 		}
-		if !p.staticInfoBatch(ctx, missing[start:end], &reqs) {
-			if p.retry.active(p.clk.Now()) {
-				return false
-			}
-			break // request budget exhausted or context canceled
-		}
+		p.staticInfoBatch(ctx, missing[start:end], &reqs)
 	}
-	return true
 }
 
 // staticInfoBatch resolves one batch of symbols via a single 3202 request,
 // recursing with a binary split when OpenD errors the whole batch — the same
 // "one bad code fails the batch" isolation as snapshotBatch. *reqs tracks the
 // per-poll request budget across chunks and recursion.
-func (p *Poller) staticInfoBatch(ctx context.Context, syms []string, reqs *int) bool {
+func (p *Poller) staticInfoBatch(ctx context.Context, syms []string, reqs *int) {
 	if len(syms) == 0 {
-		return true
-	}
-	if p.retry.active(p.clk.Now()) {
-		return false
+		return
 	}
 	if *reqs >= maxStaticInfoReqs {
-		return false // budget exhausted; leave the rest unresolved for the next poll
+		return // budget exhausted; leave the rest unresolved for the next poll
 	}
 	*reqs++
 
@@ -1370,33 +1128,32 @@ func (p *Poller) staticInfoBatch(ctx context.Context, syms []string, reqs *int) 
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetStaticInfo,
 		&staticpb.Request{C2S: &staticpb.C2S{SecurityList: secs}})
 	if err != nil {
-		if ctx.Err() == nil {
-			p.retry.fail(p.clk.Now())
-		}
+		// Transport/context error: leave symbols unresolved; the next poll retries.
 		slog.Warn("scan: static info transport failed", "err", err, "n", len(syms))
-		return false
+		return
 	}
 	var resp staticpb.Response
 	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
-		p.retry.fail(p.clk.Now())
 		slog.Warn("scan: static info decode failed", "err", err)
-		return false
+		return
 	}
 	if resp.GetRetType() != 0 {
-		// Only a response that names one of the requested symbols is safe to
-		// isolate. Unknown and account-wide failures terminate this refresh.
-		if !opend.SymbolSpecificFailure(resp.GetRetMsg(), syms) {
-			p.retry.fail(p.clk.Now())
-			return false
-		}
+		// Application error — the whole batch failed. Isolate the offending
+		// code by binary split; a code that fails in isolation is cached
+		// not-OTC (never assumed OTC — the error may be unrelated), so it
+		// stays visible to the scanner but, matching snapshotBatch's bad-mark
+		// convention, isn't re-requested every poll (steady state stays zero
+		// requests). dropOTC's absent-symbol case and subman's quarantine
+		// remain the backstop if it's actually OTC.
 		if len(syms) == 1 {
 			p.otc[syms[0]] = false
-			p.retry.clear()
 			slog.Info("scan: exchange type unresolvable", "symbol", syms[0], "reason", resp.GetRetMsg())
-			return true
+			return
 		}
 		mid := len(syms) / 2
-		return p.staticInfoBatch(ctx, syms[:mid], reqs) && p.staticInfoBatch(ctx, syms[mid:], reqs)
+		p.staticInfoBatch(ctx, syms[:mid], reqs)
+		p.staticInfoBatch(ctx, syms[mid:], reqs)
+		return
 	}
 	// Success: record each returned security's exchange type. Anything
 	// requested-but-omitted from the response is cached not-OTC for the same
@@ -1414,8 +1171,6 @@ func (p *Poller) staticInfoBatch(ctx context.Context, syms []string, reqs *int) 
 			slog.Info("scan: exchange type unresolvable", "symbol", s, "reason", "omitted from static info response")
 		}
 	}
-	p.retry.clear()
-	return true
 }
 
 const (
@@ -1441,58 +1196,17 @@ func (p *Poller) resolveFloats(ctx context.Context, items []rankItem) {
 		if end > len(missing) {
 			end = len(missing)
 		}
-		if !p.snapshotBatch(ctx, session.Closed, missing[start:end], &reqs, nil) {
-			break
-		}
+		p.snapshotBatch(ctx, session.Closed, missing[start:end], &reqs, nil)
 	}
 }
 
 // refreshSnapshots refreshes every accumulated row in the same quota-free
-// batch used for float enrichment. Failed or omitted symbols are explicitly
-// unavailable in the passed map; callers may still publish that state.
+// batch used for float enrichment. Failed or omitted symbols keep their prior
+// rank values.
 func (p *Poller) refreshSnapshots(ctx context.Context, phase session.Phase, items map[string]rankItem) {
-	p.refreshSnapshotsAt(ctx, phase, items, p.clk.Now())
-}
-
-func (p *Poller) refreshSnapshotsAt(ctx context.Context, phase session.Phase, items map[string]rankItem, now time.Time) bool {
 	syms := make([]string, 0, len(items))
-	for sym, it := range items {
+	for sym := range items {
 		syms = append(syms, sym)
-		it.snapshotAttempted = true
-		it.snapshotUsable = false
-		it.observedPrice = nil
-		it.observedChange = nil
-		it.observedVolume = nil
-		it.changeStatus = "unavailable"
-		it.closePrice = nil
-		it.closeCycle = 0
-		it.RelativeVolume = nil
-		it.cumulativeVolume = nil
-		it.cumulativePhase = session.Closed
-		it.cumulativeDay = 0
-		items[sym] = it
-	}
-	sort.Strings(syms)
-	if len(syms) == 0 {
-		return true
-	}
-	limit := len(syms)
-	maxSymbols := maxSnapshotReqs * snapshotChunkSize
-	if limit > maxSymbols {
-		limit = maxSymbols
-	}
-	total := len(syms)
-	start := 0
-	if len(syms) > maxSymbols {
-		start = p.snapshotOffset % total
-		ordered := make([]string, 0, limit)
-		for i := 0; i < limit; i++ {
-			ordered = append(ordered, syms[(start+i)%total])
-		}
-		syms = ordered
-		p.snapshotOffset = (start + limit) % total
-	} else {
-		p.snapshotOffset = 0
 	}
 	reqs := 0
 	for start := 0; start < len(syms); start += snapshotChunkSize {
@@ -1500,33 +1214,20 @@ func (p *Poller) refreshSnapshotsAt(ctx context.Context, phase session.Phase, it
 		if end > len(syms) {
 			end = len(syms)
 		}
-		if !p.snapshotBatchAt(ctx, phase, syms[start:end], &reqs, items, now) {
-			if p.retry.active(p.clk.Now()) {
-				return false
-			}
-			break // request budget exhausted or context canceled
-		}
+		p.snapshotBatch(ctx, phase, syms[start:end], &reqs, items)
 	}
-	return true
 }
 
 // snapshotBatch resolves one batch of symbols via a single 3203 request,
 // recursing with a binary split when OpenD errors the whole batch (the "one
 // bad code fails the batch" case — e.g. an OTC code without quote rights).
 // *reqs tracks the per-poll request budget across chunks and recursion.
-func (p *Poller) snapshotBatch(ctx context.Context, phase session.Phase, syms []string, reqs *int, items map[string]rankItem) bool {
-	return p.snapshotBatchAt(ctx, phase, syms, reqs, items, p.clk.Now())
-}
-
-func (p *Poller) snapshotBatchAt(ctx context.Context, phase session.Phase, syms []string, reqs *int, items map[string]rankItem, now time.Time) bool {
+func (p *Poller) snapshotBatch(ctx context.Context, phase session.Phase, syms []string, reqs *int, items map[string]rankItem) {
 	if len(syms) == 0 {
-		return true
-	}
-	if p.retry.active(p.clk.Now()) {
-		return false
+		return
 	}
 	if *reqs >= maxSnapshotReqs {
-		return false // budget exhausted; leave the rest absent for the next poll
+		return // budget exhausted; leave the rest absent for the next poll
 	}
 	*reqs++
 
@@ -1540,71 +1241,69 @@ func (p *Poller) snapshotBatchAt(ctx context.Context, phase session.Phase, syms 
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetSecuritySnapshot,
 		&snappb.Request{C2S: &snappb.C2S{SecurityList: secs}})
 	if err != nil {
-		if ctx.Err() == nil {
-			p.retry.fail(p.clk.Now())
-		}
+		// Transport/context error: leave symbols absent; the next poll retries.
 		slog.Warn("scan: snapshot transport failed", "err", err, "n", len(syms))
-		return false
+		return
 	}
 	var resp snappb.Response
 	if err := proto.Unmarshal(fr.Body, &resp); err != nil {
-		p.retry.fail(p.clk.Now())
 		slog.Warn("scan: snapshot decode failed", "err", err)
-		return false
+		return
 	}
 	if resp.GetRetType() != 0 {
-		if !opend.SymbolSpecificFailure(resp.GetRetMsg(), syms) {
-			p.retry.fail(p.clk.Now())
-			return false
-		}
+		// Application error — the whole batch failed. Isolate the offending
+		// code by binary split; a single failing code is marked bad.
 		if len(syms) == 1 {
 			p.floats[syms[0]] = floatEntry{bad: true}
-			p.retry.clear()
-			return true
+			return
 		}
 		mid := len(syms) / 2
-		return p.snapshotBatchAt(ctx, phase, syms[:mid], reqs, items, now) && p.snapshotBatchAt(ctx, phase, syms[mid:], reqs, items, now)
+		p.snapshotBatch(ctx, phase, syms[:mid], reqs, items)
+		p.snapshotBatch(ctx, phase, syms[mid:], reqs, items)
+		return
 	}
 	// Success: record each returned security; anything requested-but-absent is bad.
 	got := make(map[string]bool, len(syms))
 	for _, sn := range resp.GetS2C().GetSnapshotList() {
 		basic := sn.GetBasic()
-		if basic == nil {
-			continue
-		}
 		sym := symbolOf(basic.GetSecurity())
 		got[sym] = true
 		if it, ok := items[sym]; items != nil && ok {
-			values := normalizeSnapshotWithClose(basic, phase, now, it.rankClosePrice)
 			it.RelativeVolume = nil
 			it.cumulativeVolume = nil
 			it.cumulativePhase = phase
-			it.cumulativeDay = session.DayMs(now.UnixMilli())
-			it.snapshotUsable = values.usable
-			if values.usable {
-				it.Last = values.price
-				it.observedPrice = &values.price
-				if values.hasVolume {
-					it.Volume = values.volume
-					it.observedVolume = &values.volume
+			it.cumulativeDay = session.DayMs(p.clk.Now().UnixMilli())
+			if phase == session.RTH {
+				if basic.GetCurPrice() > 0 {
+					it.Last = basic.GetCurPrice()
+					if basic.GetLastClosePrice() > 0 {
+						it.ChangePct = (it.Last - basic.GetLastClosePrice()) / basic.GetLastClosePrice() * 100
+					}
 				}
-				if values.hasChange {
-					it.ChangePct = values.change
-					it.observedChange = &values.change
+				if basic.Volume != nil {
+					it.Volume = basic.GetVolume()
 				}
-			}
-			if values.hasClose {
-				it.closePrice = &values.close
-				it.closeCycle = session.TradingCycleStart(now).UnixMilli()
-			}
-			if values.hasChange {
-				it.changeStatus = "ready"
+			} else {
+				var extended *qotcommon.PreAfterMarketData
+				switch phase {
+				case session.PostMarket:
+					extended = basic.GetAfterMarket()
+				case session.Overnight:
+					extended = basic.GetOvernight()
+				default:
+					extended = basic.GetPreMarket()
+				}
+				if extended != nil {
+					it.Last = extended.GetPrice()
+					it.ChangePct = extended.GetChangeRate()
+					it.Volume = extended.GetVolume()
+				}
 			}
 			if cumulative, ok := snapshotCumulativeVolume(basic, phase); ok {
 				it.cumulativeVolume = &cumulative
 			}
 			if p.ssr != nil {
-				it.ShortSellRestricted = p.ssr.IsRestricted(sym, now, snapshotObservationTime(basic), basic.GetLowPrice(), basic.GetLastClosePrice())
+				it.ShortSellRestricted = p.ssr.IsRestricted(sym, p.clk.Now(), snapshotObservationTime(basic), basic.GetLowPrice(), basic.GetLastClosePrice())
 			}
 			items[sym] = it
 		}
@@ -1617,18 +1316,10 @@ func (p *Poller) snapshotBatchAt(ctx context.Context, phase session.Phase, syms 
 	}
 	for _, s := range syms {
 		if !got[s] {
-			if it, ok := items[s]; items != nil && ok {
-				it.snapshotUsable = false
-				it.observedPrice, it.observedChange, it.observedVolume = nil, nil, nil
-				it.changeStatus = "unavailable"
-				items[s] = it
-			}
 			p.floats[s] = floatEntry{bad: true}
 			slog.Debug("scan: float unresolvable", "symbol", s, "reason", "omitted from snapshot response")
 		}
 	}
-	p.retry.clear()
-	return true
 }
 
 // codeOf is symbolOf's inverse: eTape "US.<code>" -> the bare moomoo code.

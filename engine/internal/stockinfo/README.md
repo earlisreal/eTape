@@ -36,10 +36,4 @@ require the provider's latest-price update timestamp to be on the current ET
 date and at or after that day's regular-session open; incomplete archive reads
 use a temporary retryable cache.
 
-Each refresh shares a small request budget across 3203 fundamentals, 3207
-industry, and 3202 exchange calls. The OpenD client applies the shared 550 ms
-3203 spacing gate. Only provider errors that identify particular symbols are
-binary-split; transport, decode, permission, throttle, and unknown failures
-stop the remaining work and are retried on a later refresh.
-
 Test: `go test ./internal/stockinfo`.
