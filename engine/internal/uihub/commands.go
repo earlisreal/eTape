@@ -82,6 +82,10 @@ type scannerCtl interface {
 	SetFilters(wsmsg.ScannerFilters) error
 }
 
+type scannerLifecycle interface {
+	OnFeedState(up bool)
+}
+
 // watchlistBox boxes watchlistCtl for atomic.Pointer storage — same reason
 // feedBox boxes Feed (hub.go): an interface value can't be atomically stored
 // directly, and boxing sidesteps nil-pointer-vs-nil-interface ambiguity on Load.
@@ -294,9 +298,10 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		if err := b.scanner.SetFilters(a.Filters); err != nil {
 			return blocked(err.Error()), false
 		}
-		raw, _ := json.Marshal(a.Filters)
+		filters := b.scanner.Filters()
+		raw, _ := json.Marshal(filters)
 		cd.cfg.SetConfig("scanner.filters.v2", string(raw))
-		return wsmsg.AckMsg{Status: "accepted", Value: a.Filters}, false
+		return wsmsg.AckMsg{Status: "accepted", Value: filters}, false
 	case "SubscribeIndicator":
 		var a struct {
 			InstanceID string             `json:"instanceId"`

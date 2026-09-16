@@ -206,9 +206,9 @@ func TestBinarySplitOnBatchFailure(t *testing.T) {
 	fc := clock.NewFake(time.Unix(0, 0))
 	p := New(l, r, pb, fc, 3*time.Second)
 	p.pollAndPublish(context.Background())
-	// 2 syms → fail → split into [A],[B] → 1 top + 2 leaves = 3 calls.
-	if r.calls != 3 {
-		t.Fatalf("binary split calls=%d want 3", r.calls)
+	// Unknown whole-batch failures are not safely attributable to a symbol.
+	if r.calls != 1 {
+		t.Fatalf("global-error calls=%d want 1", r.calls)
 	}
 	// Symbols still complete even though rows are empty (all bad).
 	if len(pb.last().Symbols) != 2 {

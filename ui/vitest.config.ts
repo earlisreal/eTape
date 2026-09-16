@@ -68,7 +68,7 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'news',
-          include: ['src/data/NewsStore.test.ts', 'src/chrome/panels/StockInfoPanel.test.tsx', 'fixtures/monitoring.test.ts'],
+          include: ['src/data/NewsStore.test.ts', 'src/chrome/panels/StockInfoPanel.test.tsx', 'fixtures/monitoring.test.ts', 'mock-engine/server.test.ts'],
         },
       },
       {
@@ -130,6 +130,7 @@ export default defineConfig({
             'src/chrome/panels/registry.test.tsx',
             'src/chrome/panels/ScannerPanel.test.tsx',
             'src/chrome/scannerSync.test.ts',
+            'src/data/ScannerStore.test.ts',
             'src/chrome/workspace.test.ts',
           ],
           pool: 'forks',

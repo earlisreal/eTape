@@ -371,6 +371,8 @@ export interface ScannerRow {
   symbol: string;
   shortSellRestricted: boolean;
   changePct: number | null; // null = no print yet
+  changeStatus?: "ready" | "warming" | "unavailable"; // rolling basis state
+  alertSeq?: number /* int64 */; // process-local alert revision; zero = no alert
   last: number | null; // null = no print yet
   floatShares: number | null; // ACTUAL shares (engine converts moomoo thousands); null = unknown
   volume: number /* int64 */; // 0 is legitimate
@@ -383,9 +385,11 @@ export interface ScannerRankPayload {
   rows: ScannerRow[];
   filters?: ScannerFilters;
   baseline?: boolean;
+  warmingCount?: number /* int */; // tracked candidates not yet admitted while history warms
 }
 export interface ScannerFilters {
   mode: "gainers" | "losers" | "most_active";
+  changeBasis?: "previous_close" | "1m" | "5m" | "1h";
   minChangePct: number /* float64 */;
   maxFloatShares: number | null;
   minVolume: number /* float64 */;

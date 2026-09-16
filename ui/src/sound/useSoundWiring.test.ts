@@ -28,10 +28,14 @@ describe("useSoundWiring", () => {
 
     stores.fills.apply({ kind: "delta", topic: "exec.fills", payload: { venue: "alpaca", orderId: "o1", symbol: "AAPL", side: "BUY", qty: 1, price: 1, tsMs: 1 } });
     stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { venue: "alpaca", id: "o1", symbol: "AAPL", side: "BUY", type: "LIMIT", tif: "DAY", qty: 1, limitPrice: 1, stopPrice: 0, status: "REJECTED", executedQty: 0, leavesQty: 1, avgFillPrice: 0, rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1 } });
+    stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "2026-07-08T13:00:00Z", rows: [{ symbol: "A", shortSellRestricted: false, changePct: 5, alertSeq: 1, last: 1, floatShares: null, volume: 1, relativeVolume: null, shortInterest: null, shortInterestAsOf: null }] } });
+    stores.scanner.apply({ kind: "delta", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "2026-07-08T13:00:01Z", rows: [{ symbol: "A", shortSellRestricted: false, changePct: 6, alertSeq: 2, last: 1, floatShares: null, volume: 1, relativeVolume: null, shortInterest: null, shortInterestAsOf: null }] } });
+    stores.scanner.apply({ kind: "delta", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "2026-07-08T13:00:02Z", rows: [{ symbol: "A", shortSellRestricted: false, changePct: 7, alertSeq: 2, last: 1, floatShares: null, volume: 1, relativeVolume: null, shortInterest: null, shortInterestAsOf: null }] } });
     window.dispatchEvent(new Event("pointerdown"));
 
     expect(engine.calls).toContain("fill");
     expect(engine.calls).toContain("reject");
+    expect(engine.calls.filter((call) => call === "scanner")).toHaveLength(1);
     expect(engine.calls).toContain("unlock");
   });
 

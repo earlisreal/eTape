@@ -602,7 +602,7 @@ func batchOrPoison(poisonCode string) func(codes []string) *snappb.Response {
 	return func(codes []string) *snappb.Response {
 		for _, c := range codes {
 			if c == poisonCode {
-				return &snappb.Response{RetType: proto.Int32(-1), RetMsg: proto.String("no quote rights: " + poisonCode)}
+				return &snappb.Response{RetType: proto.Int32(-1), RetMsg: proto.String("no quote rights: US." + poisonCode)}
 			}
 		}
 		list := make([]*snappb.Snapshot, 0, len(codes))
@@ -620,7 +620,7 @@ func ownerPlateBatchOrPoison(poisonCode string) func(codes []string) *ownerplate
 	return func(codes []string) *ownerplatepb.Response {
 		for _, c := range codes {
 			if c == poisonCode {
-				return &ownerplatepb.Response{RetType: proto.Int32(-1), RetMsg: proto.String("no quote rights: " + poisonCode)}
+				return &ownerplatepb.Response{RetType: proto.Int32(-1), RetMsg: proto.String("no quote rights: US." + poisonCode)}
 			}
 		}
 		list := make([]*ownerplatepb.SecurityOwnerPlate, 0, len(codes))
@@ -963,7 +963,7 @@ func staticInfoBatchOrPoison(poisonCode string) func(codes []string) *staticpb.R
 	return func(codes []string) *staticpb.Response {
 		for _, c := range codes {
 			if c == poisonCode {
-				return &staticpb.Response{RetType: proto.Int32(-1), RetMsg: proto.String("no static info: " + poisonCode)}
+				return &staticpb.Response{RetType: proto.Int32(-1), RetMsg: proto.String("no static info: US." + poisonCode)}
 			}
 		}
 		list := make([]*qotcommon.SecurityStaticInfo, 0, len(codes))

@@ -81,8 +81,8 @@ and the broker of your choice for execution, and everything else is free and ope
 - Time & Sales tape with buy/sell coloring, virtualized over a ring buffer
 
 **Scanning & context**
-- Pre-market gap scanner with float, volume, REL VOL (Daily Rate), and %-change filters, plus Reported Short Interest context
-- Session-aware scanner (gainers, losers, and most active)
+- Pre-market gap scanner with float, volume, REL VOL (Daily Rate), Reported Short Interest, and selectable DAY/1 MIN/5 MIN/1 HOUR comparisons
+- Session-aware scanner (gainers, losers, most active, sticky cycle candidates, and repeat threshold-crossing alerts)
 - Stock Info panel: fundamentals grid plus a de-duplicated live news feed with
   publish times and type badges; headlines open in an unmaximized reusable reader
 
