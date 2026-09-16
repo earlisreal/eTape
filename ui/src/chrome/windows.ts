@@ -87,6 +87,17 @@ export function openNewsWindow(url: string): Window | null {
   return newsWindow;
 }
 
+export function closeNewsWindow(): void {
+  const popup = newsWindow;
+  newsWindow = null;
+  if (!popup) return;
+  try {
+    if (!popup.closed) popup.close();
+  } catch {
+    // Browsers may reject controls on a cross-origin popup.
+  }
+}
+
 /** Lowest free `window-N` (N starts at 2; `main` is window 1). */
 export function nextWindowName(existing: string[]): string {
   const taken = new Set(existing);

@@ -7,6 +7,7 @@ import { BroadcastChannelBus, LinkGroups } from "./chrome/linkGroups";
 import { DemandRegistry } from "./wire/DemandRegistry";
 import { ReannounceGate } from "./chrome/reannounceGate";
 import { WorkspaceStore } from "./chrome/workspace";
+import { closeNewsWindow } from "./chrome/windows";
 import { PANELS } from "./chrome/panels/registry";
 import { AppShell } from "./chrome/AppShell";
 import { ReconnectOverlay } from "./chrome/ReconnectOverlay";
@@ -70,6 +71,7 @@ export function makeEngineLink(state: ConnState, rtt: number | null): HealthLink
 
 export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
   const [state, setState] = useState<ConnState>("connecting");
+  const restartPendingRef = useRef(false);
   // Read by the ping-interval callback below, which is created once inside the
   // mount effect and must not read `state` directly — that would close over
   // whatever value `state` held at effect-creation time (a stale-closure bug
@@ -113,6 +115,16 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
       now: () => Date.now(),
       setTimeout: (fn, ms) => window.setTimeout(fn, ms),
       onMarketClockSample: (sample) => stores.marketClock.update(sample),
+      onEngineLifecycle: (event) => {
+        closeNewsWindow();
+        if (event === "restarting") {
+          restartPendingRef.current = true;
+          return;
+        }
+        // ponytail: fallback browser windows are best effort; own the browser
+        // process/job if hard-kill cleanup becomes a requirement.
+        try { window.close(); } catch { /* browser may refuse a non-script-opened window */ }
+      },
     });
     const scheduler = new Scheduler(browserRaf, (id, err) => {
       const detail = err instanceof Error ? (err.stack ?? `${err.name}: ${err.message}`) : String(err);
@@ -141,6 +153,10 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
       stateRef.current = s;
       setState(s);
       stores.health.setUiEngine(makeEngineLink(s, client.rttMs()));
+      if (s === "open" && restartPendingRef.current) {
+        restartPendingRef.current = false;
+        window.setTimeout(() => window.location.reload(), 0);
+      }
     });
     client.start();
     scheduler.start();

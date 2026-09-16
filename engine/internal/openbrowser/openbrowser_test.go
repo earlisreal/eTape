@@ -109,25 +109,11 @@ func TestOwnedChromeCommandUsesPrivateProfile(t *testing.T) {
 		chrome,
 		"--app=" + url,
 		"--user-data-dir=" + profile,
-		"--remote-debugging-port=0",
 		"--no-first-run",
 		"--no-default-browser-check",
 	}
 	if !slices.Equal(cmd.Args, want) {
 		t.Fatalf("ownedChromeCommand() args = %q, want %q; --start-maximized also maximizes News Reader popups", cmd.Args, want)
-	}
-}
-
-func TestOwnedDevToolsTargetSelectsStartupPageOnly(t *testing.T) {
-	startupURL := "http://127.0.0.1:8686"
-	targets := []devToolsTarget{
-		{ID: "startup", Type: "page", URL: startupURL + "/"},
-		{ID: "workspace", Type: "page", URL: startupURL + "?workspace=child"},
-	}
-
-	got, ok := ownedDevToolsTarget(targets, startupURL)
-	if !ok || got.ID != "startup" {
-		t.Fatalf("ownedDevToolsTarget() = (%+v, %v), want startup page", got, ok)
 	}
 }
 

@@ -2,12 +2,13 @@
 
 Platform adapter opening the local UI URL after server readiness. Windows startup
 uses an isolated Chrome app profile whose PID/start token and startup URL are
-handed across engine restarts. Final clean exit closes only the startup page
-through Chrome's loopback DevTools endpoint; child workspace pages remain open.
+handed across engine restarts. Final clean exit terminates that private Chrome
+process tree, closing the startup, workspace, and News Reader windows together.
 The owned adapter maximizes only the startup app window after launch; it does not
 use Chrome's process-wide maximize flag, so child News Reader popups honor their size.
 The temporary profile is removed after the owned Chrome process exits. The
 tray's manual “Open eTape” action remains unowned. If Chrome is unavailable,
 startup falls back to the Windows URL handler; macOS uses `open`, and other
-Unix systems use `xdg-open`. Failure is non-fatal and logged. Test:
-`go test ./internal/openbrowser`.
+Unix systems use `xdg-open`. The UI closes its own eTape windows on a clean
+engine-stop signal; fallback-browser control is best effort. Failure is
+non-fatal and logged. Test: `go test ./internal/openbrowser`.

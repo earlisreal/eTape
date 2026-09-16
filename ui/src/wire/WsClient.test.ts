@@ -4,7 +4,7 @@ import { FakeSocket } from "../../test/fakes";
 import { perf } from "../perf/PerfMonitor";
 import { uiLog } from "../logging/logger";
 
-function makeClient() {
+function makeClient(onEngineLifecycle?: (event: "stopped" | "restarting") => void) {
   const timers: Array<() => void> = [];
   const setTimeoutLike = (fn: () => void) => { timers.push(fn); return timers.length; };
   const client = new WsClient({
@@ -13,6 +13,7 @@ function makeClient() {
     now: () => 1000,
     setTimeout: setTimeoutLike as unknown as typeof setTimeout,
     backoff: () => 5,
+    ...(onEngineLifecycle ? { onEngineLifecycle } : {}),
   });
   return { client, flushTimers: () => { const t = timers.splice(0); t.forEach((f) => f()); } };
 }
@@ -115,6 +116,21 @@ describe("WsClient", () => {
 
     expect(states).toEqual(["connecting", "open", "reconnecting", "connecting", "open"]);
     expect(FakeSocket.instances).toHaveLength(2);
+  });
+
+  it("reports explicit engine restart and stop lifecycle events", () => {
+    const onEngineLifecycle = vi.fn();
+    const { client, flushTimers } = makeClient(onEngineLifecycle);
+    client.start();
+    FakeSocket.last().open();
+
+    FakeSocket.last().dropFromServer({ code: 1000, reason: "restarting" });
+    expect(onEngineLifecycle).toHaveBeenCalledWith("restarting");
+    flushTimers();
+    FakeSocket.last().open();
+
+    FakeSocket.last().dropFromServer({ code: 1001, reason: "engine stopped" });
+    expect(onEngineLifecycle).toHaveBeenLastCalledWith("stopped");
   });
 
   it("resolves sendCommand when the matching ack arrives", async () => {

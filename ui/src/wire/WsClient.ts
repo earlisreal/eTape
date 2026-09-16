@@ -16,6 +16,7 @@ export interface ISocket {
 export interface SocketCloseEvent { code: number; reason: string }
 export type SetTimeoutLike = (fn: () => void, ms: number) => unknown;
 export type ConnState = "connecting" | "open" | "reconnecting" | "stopped";
+export type EngineLifecycle = "stopped" | "restarting";
 type TopicHandler = (m: SnapshotMsg | DeltaMsg) => void;
 interface PendingCommand { command: string; resolve: (ack: AckMsg) => void; sent: boolean }
 interface PendingQuery { resolve: (payload: unknown) => void; reject: (reason: unknown) => void; sent: boolean }
@@ -28,6 +29,7 @@ interface Opts {
   setTimeout: SetTimeoutLike;
   backoff?: (attempt: number) => number;
   onMarketClockSample?: (sample: MarketClockUpdate) => void;
+  onEngineLifecycle?: (event: EngineLifecycle) => void;
 }
 
 const DEFAULT_BACKOFF = (attempt: number) => {
@@ -133,11 +135,13 @@ export class WsClient {
       this.socket = null;
       this.settleLostRequests();
       if (event?.code === 1001 && event.reason === "engine stopped") {
+        this.opts.onEngineLifecycle?.("stopped");
         this.terminal = true;
         this.setState("stopped");
         uiLog.info("engine stopped");
         return;
       }
+      if (event?.code === 1000 && event.reason === "restarting") this.opts.onEngineLifecycle?.("restarting");
       this.setState("reconnecting");
       const reconnectAttempt = this.attempt + 1;
       const delay = this.backoff(this.attempt++);
