@@ -1372,11 +1372,25 @@ func TestSnapshotTurnoverRejectsInvalidValues(t *testing.T) {
 			basic := snapshotBasic("A")
 			basic.Turnover = nil
 			tc.make(basic)
-			got := snapshotTurnover(basic, tc.phase)
+			got := snapshotTurnover(basic, tc.phase, session.PoolDay(et(2026, 7, 8, 10, 0)))
 			if (got == nil) != (tc.want == nil) || got != nil && *got != *tc.want {
 				t.Fatalf("got %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSnapshotTurnoverRejectsStaleTimestamp(t *testing.T) {
+	now := et(2026, 7, 8, 10, 0)
+	basic := snapshotBasic("A")
+	basic.Turnover = proto.Float64(42)
+	basic.UpdateTimestamp = proto.Float64(float64(et(2026, 7, 7, 10, 0).Unix()))
+	if got := snapshotTurnover(basic, session.RTH, session.PoolDay(now)); got != nil {
+		t.Fatalf("stale snapshot timestamp accepted: %v", *got)
+	}
+	basic.UpdateTimestamp = nil
+	if got := snapshotTurnover(basic, session.RTH, session.PoolDay(now)); got == nil || *got != 42 {
+		t.Fatalf("missing timestamp should remain usable, got %v", got)
 	}
 }
 

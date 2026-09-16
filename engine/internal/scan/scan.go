@@ -554,8 +554,11 @@ func currentSessionItems(items []rankItem, phase session.Phase, poolDay int64) [
 	return out
 }
 
-func snapshotTurnover(basic *snappb.SnapshotBasicData, phase session.Phase) *float64 {
+func snapshotTurnover(basic *snappb.SnapshotBasicData, phase session.Phase, poolDay int64) *float64 {
 	if basic == nil {
+		return nil
+	}
+	if observed := snapshotObservationTime(basic); !observed.IsZero() && (session.PhaseAt(observed) != phase || session.PoolDay(observed) != poolDay) {
 		return nil
 	}
 	var value *float64
@@ -1387,7 +1390,7 @@ func (p *Poller) snapshotBatch(ctx context.Context, phase session.Phase, syms []
 					it.Volume = extended.GetVolume()
 				}
 			}
-			if turnover := snapshotTurnover(basic, phase); turnover != nil {
+			if turnover := snapshotTurnover(basic, phase, poolDay); turnover != nil {
 				it.Turnover = turnover
 				it.turnoverPhase = phase
 				it.turnoverPoolDay = poolDay
