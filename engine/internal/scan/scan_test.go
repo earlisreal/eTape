@@ -132,6 +132,46 @@ func TestMostActiveExtendedRejectsHalfBoard(t *testing.T) {
 	}
 }
 
+func TestExtendedRankRequestsAskFor100(t *testing.T) {
+	tests := []struct {
+		name     string
+		phase    session.Phase
+		protoID  uint32
+		count    func(proto.Message) int32
+		response proto.Message
+	}{
+		{"pre-market", session.PreMarket, opend.ProtoQotGetUSPreMarketRank,
+			func(m proto.Message) int32 { return m.(*rankpb.Request).GetC2S().GetCount() },
+			&rankpb.Response{RetType: proto.Int32(0), S2C: &rankpb.S2C{}},
+		},
+		{"after-hours", session.PostMarket, opend.ProtoQotGetUSAfterHoursRank,
+			func(m proto.Message) int32 { return m.(*ahpb.Request).GetC2S().GetCount() },
+			&ahpb.Response{RetType: proto.Int32(0), S2C: &ahpb.S2C{}},
+		},
+		{"overnight", session.Overnight, opend.ProtoQotGetUSOvernightRank,
+			func(m proto.Message) int32 { return m.(*onpb.Request).GetC2S().GetCount() },
+			&onpb.Response{RetType: proto.Int32(0), S2C: &onpb.S2C{}},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := requesterFunc(func(_ context.Context, id uint32, req proto.Message) (opend.Frame, error) {
+				if id != tc.protoID {
+					t.Fatalf("proto=%d, want %d", id, tc.protoID)
+				}
+				if got := tc.count(req); got != 100 {
+					t.Fatalf("count=%d, want 100", got)
+				}
+				return frameOf(tc.response), nil
+			})
+			p := New(config.Scan{}, r, nil, clock.System{}, nil, nil, nil)
+			if _, err := p.fetchRank(context.Background(), tc.phase); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestMostActiveRTHUsesVolumeSortedStockFilter(t *testing.T) {
 	r := requesterFunc(func(_ context.Context, id uint32, msg proto.Message) (opend.Frame, error) {
 		if id != opend.ProtoQotStockFilter {

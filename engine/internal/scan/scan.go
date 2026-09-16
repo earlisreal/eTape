@@ -988,7 +988,7 @@ func (p *Poller) fetchMostActiveRTH(ctx context.Context) ([]rankItem, error) {
 
 func (p *Poller) fetchPreMarket(ctx context.Context, dir int32) ([]rankItem, error) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSPreMarketRank,
-		&rankpb.Request{C2S: &rankpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(35)}})
+		&rankpb.Request{C2S: &rankpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(100)}})
 	if err != nil {
 		return nil, err
 	}
@@ -1032,7 +1032,7 @@ func (p *Poller) fetchTopMovers(ctx context.Context, dir int32) ([]rankItem, err
 
 func (p *Poller) fetchAfterHours(ctx context.Context, dir int32) ([]rankItem, error) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSAfterHoursRank,
-		&ahpb.Request{C2S: &ahpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(35)}})
+		&ahpb.Request{C2S: &ahpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(100)}})
 	if err != nil {
 		return nil, err
 	}
@@ -1053,7 +1053,7 @@ func (p *Poller) fetchAfterHours(ctx context.Context, dir int32) ([]rankItem, er
 
 func (p *Poller) fetchOvernight(ctx context.Context, dir int32) ([]rankItem, error) {
 	fr, err := p.r.Request(ctx, opend.ProtoQotGetUSOvernightRank,
-		&onpb.Request{C2S: &onpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(35)}})
+		&onpb.Request{C2S: &onpb.C2S{SortDir: proto.Int32(dir), Offset: proto.Int32(0), Count: proto.Int32(100)}})
 	if err != nil {
 		return nil, err
 	}
