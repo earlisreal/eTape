@@ -25,9 +25,9 @@ const COLUMNS: { col: string; label: string; align: "left" | "right" }[] = [
   { col: "changePct", label: "%", align: "right" },
   { col: "last", label: "Last", align: "right" },
   { col: "float", label: "Float", align: "right" },
+  { col: "relVol", label: "REL VOL", align: "right" },
   { col: "vol", label: "Vol", align: "right" },
   { col: "turnover", label: "Turnover", align: "right" },
-  { col: "relVol", label: "REL VOL", align: "right" },
   { col: "shortInterest", label: "Short Int", align: "right" },
 ];
 
@@ -212,9 +212,9 @@ export function ScannerPanel(
                 <td style={{ ...numCell, color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>{formatChangePct(r.changePct)}</td>
                 <td style={numCell}>{r.last === null ? "—" : r.last.toFixed(2)}</td>
                 <td style={numCell}>{formatCompactShares(r.floatShares)}</td>
+                <td style={numCell} title="Latest daily volume divided by the mean of up to 50 preceding daily bars.">{formatRelativeVolume(r.relativeVolume)}</td>
                 <td style={numCell} title="Latest reported base daily volume.">{formatCompactShares(r.volume)}</td>
                 <td style={numCell} title="Latest reported base daily dollar turnover.">{formatDollarTurnover(r.turnover)}</td>
-                <td style={numCell} title="Latest daily volume divided by the mean of up to 50 preceding daily bars.">{formatRelativeVolume(r.relativeVolume)}</td>
                 <td style={numCell} title={r.shortInterestAsOf ? `as of ${r.shortInterestAsOf}` : undefined}>{formatShortInterest(r.shortInterest)}</td>
               </tr>
               );

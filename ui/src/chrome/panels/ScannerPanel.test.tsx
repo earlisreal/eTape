@@ -54,6 +54,15 @@ describe("ScannerPanel", () => {
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
   });
 
+  it("renders columns in the compact scanner order", () => {
+    const { scanner } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+      payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [] } }));
+    expect(screen.getAllByRole("columnheader").map((header) => header.textContent?.replace(/[▴▾]/g, "").trim())).toEqual([
+      "Symbol", "%", "Last", "Float", "REL VOL", "Vol", "Turnover", "Short Int",
+    ]);
+  });
+
   it("keeps session and the icon-only Filters button in the panel header", () => {
     const slot = document.body.appendChild(document.createElement("div"));
     const { scanner, container, unmount } = renderPanel({}, undefined, slot, {
