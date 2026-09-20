@@ -61,7 +61,8 @@ func TestQuoteAndScannerNullables(t *testing.T) {
 			t.Errorf("Quote missing %q", k)
 		}
 	}
-	row := wsmsg.ScannerRow{Symbol: "US.XYZ", ChangePct: nil, Last: nil, FloatShares: nil, Volume: 0}
+	volume := int64(0)
+	row := wsmsg.ScannerRow{Symbol: "US.XYZ", ChangePct: nil, Last: nil, FloatShares: nil, Volume: &volume}
 	rb, _ := json.Marshal(row)
 	var rm map[string]any
 	_ = json.Unmarshal(rb, &rm)

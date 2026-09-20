@@ -149,6 +149,31 @@ func TestDailyBarsSkipsEmptyCappedRange(t *testing.T) {
 	}
 }
 
+func TestScannerDailyBarsUsesRawAdjustmentAndFullRequestedRange(t *testing.T) {
+	var gotTF, gotAdj, gotStart, gotEnd string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v2/stocks/AAPL/bars", func(w http.ResponseWriter, r *http.Request) {
+		gotTF = r.URL.Query().Get("timeframe")
+		gotAdj = r.URL.Query().Get("adjustment")
+		gotStart = r.URL.Query().Get("start")
+		gotEnd = r.URL.Query().Get("end")
+		_, _ = w.Write([]byte(`{"bars":[{"t":"2026-07-07T13:30:00Z","o":1,"h":1,"l":1,"c":1,"v":123}],"next_page_token":null}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	from := time.Date(2026, 7, 7, 0, 0, 0, 0, time.FixedZone("ET", -4*60*60))
+	to := from.Add(24 * time.Hour)
+	c := New(srv.URL, "K", "S", "sip", clock.NewFake(time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)))
+	bars, err := c.ScannerDailyBars(context.Background(), "US.AAPL", from, to)
+	if err != nil || len(bars) != 1 {
+		t.Fatalf("bars=%v err=%v", bars, err)
+	}
+	if gotTF != "1Day" || gotAdj != "raw" || gotStart == "" || gotEnd == "" {
+		t.Fatalf("request tf=%q adjustment=%q start=%q end=%q", gotTF, gotAdj, gotStart, gotEnd)
+	}
+}
+
 func TestBarsPaginateViaNextPageToken(t *testing.T) {
 	var gotAdj string
 	mux := http.NewServeMux()

@@ -65,6 +65,16 @@ func (c *Client) DailyBars(ctx context.Context, symbol string, from, to time.Tim
 	return c.bars(ctx, symbol, "1Day", "all", from, to)
 }
 
+// ScannerDailyBars returns raw daily volumes for Scanner's REL VOL baseline.
+// Chart history keeps the adjusted DailyBars path above; Scanner must preserve
+// provider-reported share counts across splits.
+func (c *Client) ScannerDailyBars(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error) {
+	if !to.After(from) {
+		return nil, nil
+	}
+	return c.bars(ctx, symbol, "1Day", "raw", from, to)
+}
+
 // recentSIPClampBuffer backs off the 1m window end when Alpaca returns a 403
 // for too-recent SIP data. The free SIP feed's 15-minute recency rule is
 // normally enforced by silent server-side clamping (HTTP 200, last bar at
@@ -156,6 +166,9 @@ func (c *Client) bars(ctx context.Context, symbol, timeframe, adjustment string,
 		}
 		if br.NextPageToken == nil || *br.NextPageToken == "" {
 			break
+		}
+		if page == maxPages-1 {
+			return nil, fmt.Errorf("alpaca data: pagination exceeded %d pages", maxPages)
 		}
 		pageToken = *br.NextPageToken
 	}

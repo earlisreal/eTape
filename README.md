@@ -256,13 +256,14 @@ keys for deep chart history.
 As a bonus, once a paper Alpaca venue is configured the engine automatically reuses
 its keys (read-only) for historical chart data — full daily history plus deep
 1-minute backfill from Alpaca's free market-data API — no extra setup. The Scanner's
-`REL VOL` column also uses Alpaca SIP history independently of the chart window: it
-builds a 15-session same-time profile for the sticky Scanner pool, so a short
-`intraday_days` setting such as `2` does not prevent REL VOL from populating. Raw
-profile bars are temporary and are not added to the chart archive. REL VOL requires
-Alpaca SIP historical access; with IEX, missing credentials, or an unavailable
-historical client the column remains `—`. Live keys are deliberately never used for
-this.
+`Vol` and `Turnover` columns use the latest base daily totals from the Moomoo
+snapshot. `REL VOL` uses that daily volume divided by the arithmetic mean of up to
+50 preceding raw Alpaca SIP daily bars; it is a full-day ratio at every time of day.
+Short listing histories use the available contiguous days, while missing or
+unavailable history leaves REL VOL as `—`. Raw profile bars are temporary and are
+not added to the chart archive. REL VOL requires Alpaca SIP historical access;
+with IEX, missing credentials, or an unavailable historical client the column
+remains `—`. Live keys are deliberately never used for this.
 
 ## Configuration
 
@@ -277,7 +278,7 @@ Everything lives in `~/.eTape/` (`%USERPROFILE%\.eTape\` on Windows):
 Chart-history limits are calendar spans. The default 10-second limit keeps the
 current trading cycle only, beginning at the latest NYSE close/post-market start.
 `intraday_days` applies to focused charts and generic scanner/watch archive warming;
-it is not the Scanner REL VOL lookback, which always requests the prior 15 NYSE
+it is not the Scanner REL VOL lookback, which requests up to the prior 50 NYSE
 sessions from Alpaca SIP:
 
 ```toml

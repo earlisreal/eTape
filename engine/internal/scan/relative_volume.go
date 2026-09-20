@@ -2,6 +2,7 @@ package scan
 
 import (
 	"math"
+	"sort"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/feed"
@@ -9,66 +10,52 @@ import (
 )
 
 const (
-	relativeVolumeLookback   = 15
-	relativeVolumeStartHour  = 4
-	relativeVolumeMaxMinutes = 16 * 60
+	relativeVolumeLookback = 50
 )
 
-// relativeVolumeProfile is built once for an ET date and never mutated after
-// publication to the poller cache. counts is separate from means because an
-// early-close day may have no sample at a later minute.
+// relativeVolumeProfile is a compact full-day baseline for one represented
+// snapshot date.
 type relativeVolumeProfile struct {
 	day      int64
 	complete bool
-	means    [relativeVolumeMaxMinutes]float64
-	counts   [relativeVolumeMaxMinutes]int
+	mean     float64
+	count    int
 }
 
-func relativeVolumeSessionStart(day time.Time) time.Time {
-	et := day.In(session.Loc())
-	return time.Date(et.Year(), et.Month(), et.Day(), relativeVolumeStartHour, 0, 0, 0, session.Loc())
-}
-
+// relativeVolumePhase identifies periods where a base daily snapshot can be
+// displayed. Overnight belongs to the preceding exchange date for the base
+// daily total, but remains valid for the scanner cache.
 func relativeVolumePhase(phase session.Phase) bool {
-	return phase == session.PreMarket || phase == session.RTH || phase == session.PostMarket
+	return phase == session.PreMarket || phase == session.RTH || phase == session.PostMarket || phase == session.Overnight
 }
 
-// relativeVolumeMinute returns the wall-clock minute since 04:00 ET. It uses
-// the NYSE schedule for the upper boundary so early-close days and DST stay in
-// the session package's calendar model.
-func relativeVolumeMinute(now time.Time) (int, bool) {
+// scannerMetricDate returns the ET trading date represented by the base
+// snapshot. Before the regular open, Moomoo can still report the prior day's
+// completed daily total; after-hours and overnight keep the completed current
+// trading date until the next premarket rollover.
+func scannerMetricDate(now time.Time) (time.Time, bool) {
 	et := now.In(session.Loc())
 	s := session.Schedule(et)
-	if !s.TradingDay || !relativeVolumePhase(session.PhaseAt(et)) {
-		return 0, false
+	phase := session.PhaseAt(et)
+	if !s.TradingDay {
+		return session.PreviousTradingDay(s.Date), true
 	}
-	start := relativeVolumeSessionStart(s.Date)
-	if et.Before(start) || !et.Before(s.DataClose) {
-		return 0, false
+	if !relativeVolumePhase(phase) {
+		return time.Time{}, false
 	}
-	minutes := (et.Hour()-relativeVolumeStartHour)*60 + et.Minute()
-	if minutes < 0 || minutes >= relativeVolumeMaxMinutes {
-		return 0, false
+	if phase == session.PreMarket || (phase == session.Overnight && et.Hour() < 4) {
+		return session.PreviousTradingDay(s.Date), true
 	}
-	return minutes, true
-}
-
-func relativeVolumeBarMinute(bucketMs int64, schedule session.DaySchedule) (int, bool) {
-	et := time.UnixMilli(bucketMs).In(session.Loc())
-	if !schedule.TradingDay || et.Year() != schedule.Date.Year() || et.Month() != schedule.Date.Month() || et.Day() != schedule.Date.Day() || et.Second() != 0 || et.Nanosecond() != 0 {
-		return 0, false
-	}
-	minute := (et.Hour()-relativeVolumeStartHour)*60 + et.Minute()
-	start := relativeVolumeSessionStart(schedule.Date)
-	if minute < 0 || minute >= relativeVolumeMaxMinutes || et.Before(start) || !et.Before(schedule.DataClose) {
-		return 0, false
-	}
-	return minute, true
+	return s.Date, true
 }
 
 func relativeVolumeDays(now time.Time) []time.Time {
+	metric, ok := scannerMetricDate(now)
+	if !ok {
+		return nil
+	}
 	days := make([]time.Time, relativeVolumeLookback)
-	day := session.PreviousTradingDay(now)
+	day := session.PreviousTradingDay(metric)
 	for i := len(days) - 1; i >= 0; i-- {
 		days[i] = day
 		day = session.PreviousTradingDay(day)
@@ -77,14 +64,23 @@ func relativeVolumeDays(now time.Time) []time.Time {
 }
 
 func relativeVolumeHistoryRange(now time.Time) (from, to time.Time, ok bool) {
-	et := now.In(session.Loc())
-	if !relativeVolumePhase(session.PhaseAt(et)) {
+	days := relativeVolumeDays(now)
+	if len(days) == 0 {
 		return time.Time{}, time.Time{}, false
 	}
-	days := relativeVolumeDays(et)
-	from = relativeVolumeSessionStart(days[0])
-	to = session.Schedule(days[len(days)-1]).DataClose
+	from = days[0].In(session.Loc())
+	to = session.NextTradingDay(days[len(days)-1]).In(session.Loc())
 	return from, to, true
+}
+
+func firstTradingDayOnOrAfter(day time.Time) time.Time {
+	day = day.In(session.Loc())
+	for {
+		if schedule := session.Schedule(day); schedule.TradingDay {
+			return schedule.Date
+		}
+		day = day.AddDate(0, 0, 1)
+	}
 }
 
 func addRelativeVolume(a, b int64) (int64, bool) {
@@ -94,92 +90,105 @@ func addRelativeVolume(a, b int64) (int64, bool) {
 	return a + b, true
 }
 
-// buildRelativeVolumeProfile accepts exactly the 15 requested historical
-// dates. A missing minute inside a qualifying date is a zero-volume minute;
-// an entirely empty date makes the profile unavailable.
-func buildRelativeVolumeProfile(now time.Time, bars []feed.Bar) (*relativeVolumeProfile, bool) {
-	et := now.In(session.Loc())
-	current := session.Schedule(et)
-	if !current.TradingDay || !relativeVolumePhase(session.PhaseAt(et)) {
+func dateKey(t time.Time) int64 {
+	et := t.In(session.Loc())
+	return time.Date(et.Year(), et.Month(), et.Day(), 0, 0, 0, 0, session.Loc()).UnixMilli()
+}
+
+// buildRelativeVolumeProfile accepts bars for the requested completed trading
+// dates. A contiguous suffix is valid for genuinely short listing histories;
+// missing dates inside that suffix are unavailable and retryable.
+func buildRelativeVolumeProfile(now time.Time, bars []feed.Bar, listingDates ...time.Time) (*relativeVolumeProfile, bool) {
+	metric, ok := scannerMetricDate(now)
+	if !ok {
 		return nil, false
 	}
-	days := relativeVolumeDays(et)
-	targets := make(map[int64]map[int]int64, len(days))
-	for _, day := range days {
-		s := session.Schedule(day)
-		key := s.Date.UnixMilli()
-		targets[key] = map[int]int64{}
+	days := relativeVolumeDays(now)
+	if len(days) == 0 {
+		return nil, false
 	}
-	invalid := make(map[int64]bool, len(days))
-	validDay := make(map[int64]bool, len(days))
-	for _, bar := range bars {
-		etBar := time.UnixMilli(bar.BucketMs).In(session.Loc())
-		key := time.Date(etBar.Year(), etBar.Month(), etBar.Day(), 0, 0, 0, 0, session.Loc()).UnixMilli()
-		buckets, wanted := targets[key]
-		if !wanted || invalid[key] {
-			continue
-		}
-		s := session.Schedule(etBar)
-		minute, inSession := relativeVolumeBarMinute(bar.BucketMs, s)
-		if !inSession {
-			continue
-		}
-		if _, duplicate := buckets[minute]; duplicate || bar.Volume < 0 {
-			invalid[key] = true
-			continue
-		}
-		buckets[minute] = bar.Volume
-	}
-
-	var sums [relativeVolumeMaxMinutes]float64
+	wanted := make(map[int64]bool, len(days))
 	for _, day := range days {
-		s := session.Schedule(day)
-		key := s.Date.UnixMilli()
-		buckets := targets[key]
-		expected := int(s.DataClose.Sub(relativeVolumeSessionStart(s.Date)) / time.Minute)
-		if invalid[key] || expected <= 0 || len(buckets) == 0 {
+		wanted[dateKey(day)] = true
+	}
+	var listingDate time.Time
+	if len(listingDates) > 0 {
+		listingDate = listingDates[0].In(session.Loc())
+		if !listingDate.IsZero() && listingDate.After(metric) {
 			return nil, false
 		}
-		var cumulative int64
-		var daySums [relativeVolumeMaxMinutes]float64
-		for minute := 0; minute < expected; minute++ {
-			daySums[minute] = float64(cumulative)
-			if math.IsInf(daySums[minute], 0) {
-				return nil, false
-			}
-			volume := buckets[minute] // absent minute is an authoritative zero
-			next, ok := addRelativeVolume(cumulative, volume)
-			if !ok {
-				return nil, false
-			}
-			cumulative = next
+	}
+	volumes := make(map[int64]int64, len(days))
+	for _, bar := range bars {
+		key := dateKey(time.UnixMilli(bar.BucketMs))
+		if !wanted[key] {
+			continue
 		}
-		validDay[key] = true
-		for minute := 0; minute < expected; minute++ {
-			sums[minute] += daySums[minute]
-			if math.IsInf(sums[minute], 0) {
-				return nil, false
-			}
+		if bar.Volume < 0 {
+			return nil, false
+		}
+		if _, duplicate := volumes[key]; duplicate {
+			return nil, false
+		}
+		volumes[key] = bar.Volume
+	}
+	if len(volumes) == 0 {
+		return nil, false
+	}
+	// A complete response must include the newest requested date. A shorter
+	// response is valid only when snapshot listing metadata proves that the
+	// symbol was listed after the oldest requested date.
+	newest := dateKey(days[len(days)-1])
+	if _, ok := volumes[newest]; !ok {
+		return nil, false
+	}
+	keys := make([]int64, 0, len(volumes))
+	for key := range volumes {
+		keys = append(keys, key)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	for i := 1; i < len(keys); i++ {
+		if dateKey(session.NextTradingDay(time.UnixMilli(keys[i-1]))) != keys[i] {
+			return nil, false
 		}
 	}
-	profile := &relativeVolumeProfile{day: current.Date.UnixMilli(), complete: true}
-	for minute := 0; minute < relativeVolumeMaxMinutes; minute++ {
-		// counts are the number of qualifying historical days whose schedule
-		// reaches this minute. An early-close day contributes no later sample.
-		for _, day := range days {
-			s := session.Schedule(day)
-			expected := int(s.DataClose.Sub(relativeVolumeSessionStart(s.Date)) / time.Minute)
-			if expected > minute && validDay[s.Date.UnixMilli()] {
-				profile.counts[minute]++
-			}
+	firstExpected := days[0]
+	if !listingDate.IsZero() {
+		firstExpected = firstTradingDayOnOrAfter(listingDate)
+		if firstExpected.Before(days[0]) {
+			firstExpected = days[0]
 		}
-		if profile.counts[minute] > 0 {
-			profile.means[minute] = sums[minute] / float64(profile.counts[minute])
-			if profile.means[minute] <= 0 || math.IsNaN(profile.means[minute]) || math.IsInf(profile.means[minute], 0) {
-				profile.means[minute] = 0
-				profile.counts[minute] = 0
-			}
+	}
+	if len(keys) < len(days) {
+		if listingDate.IsZero() || dateKey(firstExpected) != keys[0] {
+			return nil, false
 		}
+		expectedCount := 0
+		for day := firstExpected; !day.After(days[len(days)-1]); day = session.NextTradingDay(day) {
+			expectedCount++
+		}
+		if expectedCount != len(keys) {
+			return nil, false
+		}
+	} else if len(keys) != len(days) || dateKey(firstExpected) != keys[0] {
+		return nil, false
+	}
+	var sum int64
+	for _, key := range keys {
+		var addOK bool
+		sum, addOK = addRelativeVolume(sum, volumes[key])
+		if !addOK {
+			return nil, false
+		}
+	}
+	profile := &relativeVolumeProfile{
+		day:      metric.UnixMilli(),
+		complete: true,
+		count:    len(keys),
+		mean:     float64(sum) / float64(len(keys)),
+	}
+	if profile.mean <= 0 || math.IsNaN(profile.mean) || math.IsInf(profile.mean, 0) {
+		profile.mean = 0
 	}
 	return profile, true
 }
@@ -188,13 +197,22 @@ func relativeVolumeAt(profile *relativeVolumeProfile, now time.Time, currentVolu
 	if profile == nil || currentVolume < 0 {
 		return nil
 	}
-	et := now.In(session.Loc())
-	s := session.Schedule(et)
-	minute, ok := relativeVolumeMinute(et)
-	if !ok || profile.day != s.Date.UnixMilli() || profile.counts[minute] == 0 || profile.means[minute] <= 0 {
+	metric, ok := scannerMetricDate(now)
+	if !ok {
 		return nil
 	}
-	value := float64(currentVolume) / profile.means[minute]
+	return relativeVolumeAtDate(profile, metric.UnixMilli(), currentVolume)
+}
+
+func relativeVolumeAtDate(profile *relativeVolumeProfile, metricDay int64, currentVolume int64) *float64 {
+	if profile == nil || currentVolume < 0 || metricDay == 0 || profile.day != metricDay {
+		return nil
+	}
+	mean := profile.mean
+	if mean <= 0 || math.IsNaN(mean) || math.IsInf(mean, 0) {
+		return nil
+	}
+	value := float64(currentVolume) / mean
 	if math.IsNaN(value) || math.IsInf(value, 0) {
 		return nil
 	}
@@ -205,10 +223,5 @@ func relativeVolumeProfileHasBaseline(profile *relativeVolumeProfile) bool {
 	if profile == nil {
 		return false
 	}
-	for minute := range profile.means {
-		if profile.counts[minute] > 0 && profile.means[minute] > 0 {
-			return true
-		}
-	}
-	return false
+	return profile.count > 0 && profile.mean > 0 && !math.IsNaN(profile.mean) && !math.IsInf(profile.mean, 0)
 }

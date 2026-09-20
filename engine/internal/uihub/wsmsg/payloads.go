@@ -285,9 +285,9 @@ type ScannerRow struct {
 	ChangePct           *float64 `json:"changePct" tstype:"number | null,required"`         // null = no print yet
 	Last                *float64 `json:"last" tstype:"number | null,required"`              // null = no print yet
 	FloatShares         *float64 `json:"floatShares" tstype:"number | null,required"`       // ACTUAL shares (engine converts moomoo thousands); null = unknown
-	Volume              int64    `json:"volume"`                                            // 0 is legitimate
-	Turnover            *float64 `json:"turnover" tstype:"number | null,required"`          // current-session dollar value traded; null = unavailable
-	RelativeVolume      *float64 `json:"relativeVolume" tstype:"number | null,required"`    // eTape Relative Volume (Daily Rate); null = unavailable
+	Volume              *int64   `json:"volume" tstype:"number | null,required"`            // latest base daily total; nil = unavailable, zero is valid
+	Turnover            *float64 `json:"turnover" tstype:"number | null,required"`          // latest base daily dollar total; null = unavailable
+	RelativeVolume      *float64 `json:"relativeVolume" tstype:"number | null,required"`    // latest daily volume / historical daily mean; null = unavailable
 	ShortInterest       *float64 `json:"shortInterest" tstype:"number | null,required"`     // raw reported shares; null = unavailable
 	ShortInterestAsOf   *string  `json:"shortInterestAsOf" tstype:"string | null,required"` // provider report date; null = unavailable
 }
@@ -304,7 +304,7 @@ type ScannerFilters struct {
 	MinChangePct      float64  `json:"minChangePct"`
 	MaxFloatShares    *float64 `json:"maxFloatShares" tstype:"number | null,required"`
 	MinVolume         float64  `json:"minVolume"`
-	MinTurnover       float64  `json:"minTurnover"` // current-session dollar turnover floor; 0 = off
+	MinTurnover       float64  `json:"minTurnover"` // latest daily dollar turnover floor; 0 = off
 	MinRelativeVolume float64  `json:"minRelativeVolume"`
 	FloatUnit         string   `json:"floatUnit" tstype:"\"K\" | \"M\""`
 	VolumeUnit        string   `json:"volumeUnit" tstype:"\"K\" | \"M\""`

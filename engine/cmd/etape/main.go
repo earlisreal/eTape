@@ -1149,7 +1149,7 @@ func scannerRELVolFetcher(client *histalpaca.Client, feedName string, demo bool)
 	if demo || client == nil || !strings.EqualFold(strings.TrimSpace(feedName), "sip") {
 		return nil
 	}
-	return client.Intraday1m
+	return client.ScannerDailyBars
 }
 
 func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, wl *watchlist.List, hasTZ bool, mmProbe rttProber, accountHealth health.AccountHealthSource, assetReader stockInfoAssetReader, backfillOne func(string), relativeVolumeFetch func(context.Context, string, time.Time, time.Time) ([]feed.Bar, error), startQuota bool, scanWG *sync.WaitGroup) {

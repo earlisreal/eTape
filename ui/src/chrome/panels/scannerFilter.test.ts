@@ -29,6 +29,11 @@ describe("applyScannerFilters", () => {
   it("volume floor excludes below the floor", () => {
     expect(applyScannerFilters(rows, { ...OFF, minVolume: 100_000 }).map((r) => r.symbol)).toEqual(["A", "D"]);
   });
+  it("positive volume floor excludes an unavailable daily volume", () => {
+    const unknown = { ...rows[0], symbol: "UNKNOWN", volume: null };
+    expect(applyScannerFilters([...rows, unknown], { ...OFF, minVolume: 1 }).map((r) => r.symbol)).not.toContain("UNKNOWN");
+    expect(applyScannerFilters([unknown], OFF)).toEqual([unknown]);
+  });
   it("REL VOL floor keeps equality and excludes unavailable values", () => {
     const withRatios = rows.map((r, i) => ({ ...r, relativeVolume: i === 0 ? 2 : i === 1 ? 1.99 : null }));
     expect(applyScannerFilters(withRatios, { ...OFF, minRelativeVolume: 2 }).map((r) => r.symbol)).toEqual(["A"]);

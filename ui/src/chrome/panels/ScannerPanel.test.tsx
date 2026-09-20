@@ -450,7 +450,7 @@ describe("ScannerPanel", () => {
       ] } }));
     expect(screen.getByText("850K")).toBeTruthy();
     expect(screen.getByText("12.5M")).toBeTruthy();
-    expect(screen.getByText("12.5M").closest("td")?.getAttribute("title")).toBe("Dollar value traded in the current session.");
+    expect(screen.getByText("12.5M").closest("td")?.getAttribute("title")).toBe("Latest reported base daily dollar turnover.");
     fireEvent.click(screen.getByRole("columnheader", { name: /Turnover/ }));
     expect(onConfigChange).toHaveBeenCalledWith({ sort: { col: "turnover", dir: "desc" } });
     expect([...document.querySelectorAll("tbody tr td:first-child")].map((td) => td.textContent)).toEqual(["HIGH", "LOW", "UNKNOWN"]);

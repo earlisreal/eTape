@@ -23,6 +23,11 @@ General Layout downloads are structural: they keep panel arrangement, Link Group
 
 Monitoring Scanner Sync persists its enabled intent and the Scanner Source workspace/panel identity in the Monitoring workspace. Any Scanner header can select the source; AppShell reads the source workspace's persisted sort through workspace-change notifications, so closing its host window does not retarget or stop the relationship, while deleting the source pauses it. Its pure planner retains ranked symbols in their chart slots, fills departed slots from the source's visible sort, and leaves unmatched chart symbols in place when rows are scarce. Turnover, REL VOL, and Short Int are Scanner Source sorts, so Monitoring Sync follows the selected `turnover`, `relVol`, or `shortInterest` ranking automatically. AppShell coalesces successful symbol applications to one batch per second and patches only each chart's symbol; the panel-symbol runtime keeps mounted charts and their settings alive.
 
+Scanner `Vol` and `Turnover` display the latest base daily totals reported by the
+snapshot, including valid zeroes and showing `—` when unavailable. `REL VOL` is a
+full-day ratio against the mean of up to 50 preceding raw daily bars, so it has no
+same-time-of-day adjustment and does not add separate session fields.
+
 The shell owns the ephemeral cross-window hotkey target coordinator. It listens
 only to Dockview user-origin panel activation, seeds a restored active panel
 only in the OS-focused window, and republishes the owning panel's group, symbol,

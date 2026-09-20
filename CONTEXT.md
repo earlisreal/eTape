@@ -137,8 +137,12 @@ _Avoid_: Short volume, shortable shares, borrow availability
 The provider's reporting settlement date associated with a Reported Short Interest value. It describes the delayed position report, not a live quote time or Scanner refresh time.
 _Avoid_: Quote timestamp, live timestamp
 
+**Scanner Metric Day**:
+The trading date represented by the latest reported daily volume and Dollar Turnover used by Scanner. It can be the previous trading date during premarket and is independent of the Scanner board's trading cycle.
+_Avoid_: Current session, Scanner board cycle
+
 **Relative Volume (Daily Rate)**:
-A Scanner multiplier intended to reproduce Warrior Trading's Relative Volume (Daily Rate): current cumulative volume from 04:00 through 20:00 ET divided by the arithmetic mean of cumulative volume through that same ET minute across the prior 15 complete trading days. A quiet minute contributes zero volume, but a historical day with no trading data does not qualify; an early-close day contributes only through its own data close. The value is unavailable until all 15 qualifying days and a positive baseline exist. The Scanner column is labelled `REL VOL`; it replaces the legacy provider Volume Ratio and is not a percentage.
+A Scanner multiplier of the latest reported daily volume divided by the arithmetic mean raw daily volume of up to 50 completed trading days preceding the Scanner Metric Day, using shorter history when fewer days genuinely exist. It has no time-of-day adjustment or separately added overnight volume; the Scanner column is labelled `REL VOL` and is not a percentage.
 _Avoid_: Volume Ratio
 
 **Relative Volume (Daily Rate) Filter**:
@@ -146,7 +150,7 @@ A Scanner minimum Relative Volume (Daily Rate) multiplier. It is off at zero; wh
 _Avoid_: Percentage filter, volume filter
 
 **Dollar Turnover**:
-The total US-dollar value of shares traded over a specified period; the Scanner uses the current trading session. It measures traded value, rather than shares traded or the fraction of Free Float traded.
+The total US-dollar value of shares traded over a specified period; the Scanner uses the Scanner Metric Day. It measures traded value, rather than shares traded or the fraction of Free Float traded.
 _Avoid_: Turnover rate, float rotation
 
 **Rolling Change**:

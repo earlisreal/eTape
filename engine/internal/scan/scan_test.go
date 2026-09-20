@@ -51,6 +51,25 @@ func TestRankRowsThresholds(t *testing.T) {
 	}
 }
 
+func TestRankRowsUsesSnapshotDailyMetrics(t *testing.T) {
+	dailyVolume := int64(80)
+	dailyTurnover := 5.0
+	item := rankItem{Symbol: "US.DAILY", Volume: 9_999, Turnover: func() *float64 { v := 9_000.0; return &v }(), dailyRequired: true, dailyVolume: &dailyVolume, dailyTurnover: &dailyTurnover}
+	rows := rankRowsFiltered([]rankItem{item}, nil, Defaults(config.Scan{}))
+	if len(rows) != 1 || rows[0].Volume == nil || *rows[0].Volume != dailyVolume || rows[0].Turnover == nil || *rows[0].Turnover != dailyTurnover {
+		t.Fatalf("snapshot metrics not projected: %+v", rows)
+	}
+	f := Defaults(config.Scan{})
+	f.MinVolume = 81
+	if got := rankRowsFiltered([]rankItem{item}, nil, f); len(got) != 0 {
+		t.Fatalf("daily volume threshold used rank volume: %+v", got)
+	}
+	item.dailyVolume = nil
+	if got := rankRowsFiltered([]rankItem{item}, nil, Defaults(config.Scan{})); len(got) != 1 || got[0].Volume != nil {
+		t.Fatalf("unavailable daily volume should remain visible as null: %+v", got)
+	}
+}
+
 func TestRankRowsTurnoverFilter(t *testing.T) {
 	zero, low, exact := 0.0, 999_999.0, 1_000_000.0
 	items := []rankItem{
@@ -223,7 +242,7 @@ func TestMostActiveRTHUsesVolumeSortedStockFilter(t *testing.T) {
 	})
 	p := New(config.Scan{}, r, nil, clock.System{}, nil, nil, nil)
 	got, err := p.fetchRank(context.Background(), session.RTH, "most_active")
-	if err != nil || len(got) != 1 || got[0] != (rankItem{Symbol: "US.A", Last: 12.5, ChangePct: 4.5, Volume: 1234}) {
+	if err != nil || len(got) != 1 || got[0] != (rankItem{Symbol: "US.A", Last: 12.5, ChangePct: 4.5, Volume: 1234, dailyRequired: true}) {
 		t.Fatalf("got=%+v err=%v", got, err)
 	}
 }
@@ -335,6 +354,26 @@ func TestResetIfNewDayClearsFloatCacheAndSeen(t *testing.T) {
 	}
 	if len(p.seen) != 0 {
 		t.Fatalf("seen-sets should clear on new day: %+v", p.seen)
+	}
+}
+
+func TestResetIfNewDayKeepsRelativeVolumeForSameMetricDate(t *testing.T) {
+	friday := et(2026, 7, 10, 21, 0)
+	day, ok := relativeVolumeCacheDay(friday)
+	if !ok {
+		t.Fatal("after-hours should have a metric date")
+	}
+	p := &Poller{
+		seenDay:           session.DayMs(friday.UnixMilli()),
+		relativeVolumeDay: day,
+		relativeVolumeCache: map[relativeVolumeCacheKey]relativeVolumeCacheEntry{
+			{symbol: "US.A", day: day}: {complete: true},
+		},
+		relativeVolumePending: map[relativeVolumeCacheKey]bool{},
+	}
+	p.resetIfNewDay(et(2026, 7, 11, 0, 30))
+	if len(p.relativeVolumeCache) != 1 {
+		t.Fatalf("same represented date should retain REL VOL cache: %+v", p.relativeVolumeCache)
 	}
 }
 
@@ -1167,7 +1206,7 @@ func TestPollOnceTurnoverUsesSnapshotThenClearsAtRTH(t *testing.T) {
 		snap: func([]string) (*snappb.Response, error) {
 			if session.PhaseAt(clk.Now()) == session.PreMarket {
 				s := extendedSnap("A", session.PreMarket, 1, 5, 1)
-				s.Basic.PreMarket.Turnover = proto.Float64(snapshotTurnover)
+				s.Basic.Turnover = proto.Float64(snapshotTurnover)
 				return snapResp(s), nil
 			}
 			s := marketSnap("A", 1, 1, 1, 1)
@@ -1299,7 +1338,7 @@ func TestAccumulatedRowsRefreshAndSurviveSnapshotFailure(t *testing.T) {
 	p.pollOnce(context.Background(), clk.Now())
 	for i := range pub.ranks {
 		r := pub.ranks[i].Rows[0]
-		if r.Last == nil || *r.Last != 12 || r.ChangePct == nil || *r.ChangePct != 20 || r.Volume != 321 {
+		if r.Last == nil || *r.Last != 12 || r.ChangePct == nil || *r.ChangePct != 20 || r.Volume == nil || *r.Volume != 999 {
 			t.Fatalf("poll %d did not preserve refreshed values: %+v", i, r)
 		}
 	}
@@ -1314,17 +1353,17 @@ func TestSnapshotRefreshUsesActiveSessionData(t *testing.T) {
 		makeSn         func() *snappb.Snapshot
 		wantCumulative *int64
 	}{
-		{"premarket", session.PreMarket, rankItem{Last: 101, ChangePct: 1, Volume: 11}, proto.Float64(111), func() *snappb.Snapshot {
+		{"premarket", session.PreMarket, rankItem{Last: 101, ChangePct: 1, Volume: 5}, proto.Float64(111), func() *snappb.Snapshot {
 			s := extendedSnap("A", session.PreMarket, 101, 1, 11)
 			s.Basic.PreMarket.Turnover = proto.Float64(111)
 			return s
 		}, proto.Int64(11)},
-		{"after-hours", session.PostMarket, rankItem{Last: 102, ChangePct: 2, Volume: 22}, proto.Float64(222), func() *snappb.Snapshot {
+		{"after-hours", session.PostMarket, rankItem{Last: 102, ChangePct: 2, Volume: 5}, proto.Float64(222), func() *snappb.Snapshot {
 			s := extendedSnap("A", session.PostMarket, 102, 2, 22)
 			s.Basic.AfterMarket.Turnover = proto.Float64(222)
 			return s
 		}, proto.Int64(1028)},
-		{"overnight", session.Overnight, rankItem{Last: 103, ChangePct: 3, Volume: 33}, proto.Float64(333), func() *snappb.Snapshot {
+		{"overnight", session.Overnight, rankItem{Last: 103, ChangePct: 3, Volume: 5}, proto.Float64(333), func() *snappb.Snapshot {
 			s := extendedSnap("A", session.Overnight, 103, 3, 33)
 			s.Basic.Overnight.Turnover = proto.Float64(333)
 			return s
@@ -1343,10 +1382,23 @@ func TestSnapshotRefreshUsesActiveSessionData(t *testing.T) {
 			items := map[string]rankItem{"US.A": {Symbol: "US.A", Last: 7, ChangePct: 6, Volume: 5}}
 			p.refreshSnapshots(context.Background(), tc.phase, items)
 			got := items["US.A"]
-			if got.Last != tc.want.Last || got.ChangePct != tc.want.ChangePct || got.Volume != tc.want.Volume || (got.Turnover == nil) != (tc.wantTurnover == nil) || got.Turnover != nil && *got.Turnover != *tc.wantTurnover || (got.cumulativeVolume == nil) != (tc.wantCumulative == nil) || got.cumulativeVolume != nil && *got.cumulativeVolume != *tc.wantCumulative {
+			if got.Last != tc.want.Last || got.ChangePct != tc.want.ChangePct || got.Volume != tc.want.Volume || (got.Turnover == nil) != (tc.wantTurnover == nil) || got.Turnover != nil && *got.Turnover != *tc.wantTurnover {
 				t.Fatalf("got %+v, want market values %+v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSnapshotOmissionRetainsSameDayDailyMetrics(t *testing.T) {
+	fr := &fakeReq{snap: func([]string) (*snappb.Response, error) { return snapResp(), nil }}
+	p := New(config.Scan{}, fr, &capturePub{}, clock.NewFake(et(2026, 7, 8, 10, 0)), nil, nil, nil)
+	volume := int64(123)
+	turnover := 456.0
+	items := map[string]rankItem{"US.A": {Symbol: "US.A", dailyRequired: true, dailyVolume: &volume, dailyTurnover: &turnover, dailyDate: session.Schedule(et(2026, 7, 8, 10, 0)).Date.UnixMilli()}}
+	p.refreshSnapshots(context.Background(), session.RTH, items)
+	got := items["US.A"]
+	if got.dailyVolume == nil || *got.dailyVolume != volume || got.dailyTurnover == nil || *got.dailyTurnover != turnover {
+		t.Fatalf("partial snapshot erased valid same-day metrics: %+v", got)
 	}
 }
 
@@ -1389,8 +1441,48 @@ func TestSnapshotTurnoverRejectsStaleTimestamp(t *testing.T) {
 		t.Fatalf("stale snapshot timestamp accepted: %v", *got)
 	}
 	basic.UpdateTimestamp = nil
+	basic.UpdateTime = nil
 	if got := snapshotTurnover(basic, session.RTH, session.PoolDay(now)); got == nil || *got != 42 {
 		t.Fatalf("missing timestamp should remain usable, got %v", got)
+	}
+}
+
+func TestSnapshotMetricDateRejectsMismatchedObservation(t *testing.T) {
+	rth := et(2026, 7, 8, 10, 0)
+	basic := snapshotBasic("A")
+	basic.UpdateTimestamp = proto.Float64(float64(et(2026, 7, 7, 20, 0).Unix()))
+	if got, ok := snapshotMetricDate(rth, basic); ok || !got.IsZero() {
+		t.Fatalf("stale RTH observation accepted: %v/%v", got, ok)
+	}
+	premarket := et(2026, 7, 8, 8, 0)
+	basic.UpdateTimestamp = proto.Float64(float64(premarket.Unix()))
+	if got, ok := snapshotMetricDate(premarket, basic); !ok || !got.Equal(session.PreviousTradingDay(session.Schedule(premarket).Date)) {
+		t.Fatalf("premarket observation should retain prior base date: %v/%v", got, ok)
+	}
+	basic.UpdateTimestamp = nil
+	basic.UpdateTime = nil
+	if got, ok := snapshotMetricDate(rth, basic); ok || !got.IsZero() {
+		t.Fatalf("missing observation timestamp accepted=%v/%v", got, ok)
+	}
+}
+
+func TestFinishRelativeVolumeIncompleteRetries(t *testing.T) {
+	now := et(2026, 7, 8, 10, 0)
+	day, ok := relativeVolumeCacheDay(now)
+	if !ok {
+		t.Fatal("RTH must have a metric date")
+	}
+	p := New(config.Scan{}, nil, nil, clock.NewFake(now), nil, nil, nil)
+	key := relativeVolumeCacheKey{symbol: "US.A", day: day}
+	p.mu.Lock()
+	p.relativeVolumePending[key] = true
+	p.mu.Unlock()
+	p.finishRelativeVolume(relativeVolumeRequest{key: key, now: now}, nil, false, nil)
+	p.mu.RLock()
+	entry := p.relativeVolumeCache[key]
+	p.mu.RUnlock()
+	if entry.complete || entry.terminal || entry.nextAttempt.IsZero() {
+		t.Fatalf("incomplete history must stay retryable: %+v", entry)
 	}
 }
 
@@ -1409,71 +1501,24 @@ func TestCurrentSessionTurnoverRequiresPhaseAndPoolDay(t *testing.T) {
 	}
 }
 
-func TestSnapshotCumulativeVolumeRequiresPhaseFields(t *testing.T) {
-	volume := func(value int64) *snappb.SnapshotBasicData {
-		return &snappb.SnapshotBasicData{
-			PreMarket: &qotcommon.PreAfterMarketData{Volume: proto.Int64(value)},
-			Volume:    proto.Int64(10),
-			AfterMarket: &qotcommon.PreAfterMarketData{
-				Volume: proto.Int64(20),
-			},
-		}
-	}
-	for _, tc := range []struct {
-		name  string
-		phase session.Phase
-		basic *snappb.SnapshotBasicData
-		want  *int64
-	}{
-		{"pre zero is valid", session.PreMarket, volume(0), proto.Int64(0)},
-		{"rth adds regular", session.RTH, volume(3), proto.Int64(13)},
-		{"post adds after-hours", session.PostMarket, volume(3), proto.Int64(33)},
-		{"overnight unavailable", session.Overnight, volume(3), nil},
-		{"missing premarket unavailable", session.RTH, &snappb.SnapshotBasicData{Volume: proto.Int64(10)}, nil},
-		{"missing after-hours unavailable", session.PostMarket, &snappb.SnapshotBasicData{PreMarket: &qotcommon.PreAfterMarketData{Volume: proto.Int64(3)}, Volume: proto.Int64(10)}, nil},
-		{"negative unavailable", session.PreMarket, volume(-1), nil},
-		{"overflow unavailable", session.RTH, volume(int64(1<<63 - 1)), nil},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, ok := snapshotCumulativeVolume(tc.basic, tc.phase)
-			if tc.want == nil {
-				if ok {
-					t.Fatalf("got %d, want unavailable", got)
-				}
-				return
-			}
-			if !ok || got != *tc.want {
-				t.Fatalf("got %d/%v, want %d/true", got, ok, *tc.want)
-			}
-		})
-	}
-}
-
-func TestApplyRelativeVolumeClearsAcrossPhaseRollover(t *testing.T) {
-	now := et(2026, 7, 8, 8, 0)
+func TestApplyRelativeVolumeUsesDailySnapshotDate(t *testing.T) {
+	now := et(2026, 7, 8, 10, 0)
 	p := New(config.Scan{}, nil, nil, clock.NewFake(now), nil, nil, nil)
 	day := session.Schedule(now).Date.UnixMilli()
-	minute, ok := relativeVolumeMinute(now)
-	if !ok {
-		t.Fatal("test time must be in a relative-volume phase")
-	}
 	p.mu.Lock()
-	profile := &relativeVolumeProfile{day: day}
-	profile.counts[minute] = 1
-	profile.means[minute] = 1
 	p.relativeVolumeCache[relativeVolumeCacheKey{symbol: "US.A", day: day}] = relativeVolumeCacheEntry{
-		profile: profile,
+		profile: &relativeVolumeProfile{day: day, complete: true, mean: 100, count: 1},
 	}
 	p.mu.Unlock()
-	cumulative := int64(2)
-	items := map[string]rankItem{"US.A": {Symbol: "US.A", cumulativeVolume: &cumulative, cumulativePhase: session.PreMarket, cumulativeDay: day}}
+	daily := int64(50)
+	items := map[string]rankItem{"US.A": {Symbol: "US.A", dailyRequired: true, dailyVolume: &daily, dailyDate: day}}
 	p.applyRelativeVolumes(now, items)
-	if items["US.A"].RelativeVolume == nil || *items["US.A"].RelativeVolume != 2 {
-		t.Fatalf("premarket relative volume=%v, want 2", valueOfRelativeVolume(items["US.A"].RelativeVolume))
+	if items["US.A"].RelativeVolume == nil || *items["US.A"].RelativeVolume != 0.5 {
+		t.Fatalf("daily relative volume=%v, want 0.5", items["US.A"].RelativeVolume)
 	}
-	p.applyRelativeVolumes(et(2026, 7, 8, 17, 0), items)
+	p.applyRelativeVolumes(et(2026, 7, 8, 8, 0), items)
 	if items["US.A"].RelativeVolume != nil {
-		t.Fatalf("stale premarket cumulative volume survived phase rollover: %v", valueOfRelativeVolume(items["US.A"].RelativeVolume))
+		t.Fatalf("previous day's daily snapshot survived represented-date rollover: %v", items["US.A"].RelativeVolume)
 	}
 }
 
