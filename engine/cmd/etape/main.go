@@ -505,9 +505,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	if onListening != nil {
 		onListening(cfg.UIHub.Addr())
 	}
-	if !*noOpen {
+	if !*noOpen && startupBrowser == nil {
 		var openErr error
-		startupBrowser, openErr = openbrowser.OpenOwned(browserURL(cfg.UIHub.Addr(), handlerLevel == slog.LevelDebug))
+		mainURL := browserURL(cfg.UIHub.Addr(), handlerLevel == slog.LevelDebug)
+		restored := restoredWindowSpecs(st, cfg.UIHub.Addr(), handlerLevel == slog.LevelDebug)
+		startupBrowser, openErr = openbrowser.OpenOwned(mainURL, restored...)
 		if openErr != nil {
 			log.Warn("open browser", "err", openErr)
 		}

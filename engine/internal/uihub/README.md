@@ -1,6 +1,6 @@
 # UI Hub
 
-Config commands include typed `GetConfig`, `SetConfig`, and `DeleteConfig`; the workspace catalog remains a UI-owned versioned document in the existing config store.
+Config commands include typed `GetConfig`, `SetConfig`, and `DeleteConfig`; the workspace catalog remains a UI-owned versioned document in the existing config store. `SetWindowState` records each browser workspace's changed-only bounds in the per-database `window-state.v1` document. Connection ownership removes a manually disconnected workspace only after its last connection closes; engine shutdown leaves the final open set available for the next cold launch.
 
 Venue instrument eligibility, locate, quote, list, and recovery reads are UIHub
 queries. Venue instrument eligibility is an optional exact-venue capability

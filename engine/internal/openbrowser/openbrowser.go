@@ -6,6 +6,7 @@ package openbrowser
 
 import (
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -15,6 +16,13 @@ import (
 )
 
 const ownedChromeProfilePrefix = "etape-chrome-"
+
+// WindowSpec describes the initial normal bounds for one restored workspace.
+type WindowSpec struct {
+	URL           string
+	X, Y          int
+	Width, Height int
+}
 
 // OwnedBrowser is the auto-opened Windows Chrome app and its private profile.
 // The process identity is carried across Windows engine restarts so the same
@@ -42,35 +50,40 @@ func Open(url string) error {
 	return open(runtime.GOOS, url, findChrome, (*exec.Cmd).Start)
 }
 
-// OpenOwned opens the startup UI in an isolated Windows Chrome app. If Chrome
+// OpenOwned opens the startup UI in an isolated Windows Chrome app and forwards
+// optional restored workspace specs through the same private profile. If Chrome
 // is unavailable, it preserves Open's default-browser fallback and returns no
 // owned handle. Non-Windows launches remain unchanged.
-func OpenOwned(url string) (*OwnedBrowser, error) {
+func OpenOwned(url string, restored ...WindowSpec) (*OwnedBrowser, error) {
 	if runtime.GOOS != "windows" {
 		return nil, Open(url)
 	}
 	chrome := findChrome()
 	if chrome == "" {
+		slog.Warn("owned Chrome unavailable; using default browser", "restoredWindows", len(restored))
 		return nil, Open(url)
 	}
 	profileDir, err := os.MkdirTemp("", ownedChromeProfilePrefix)
 	if err != nil {
+		slog.Warn("create owned Chrome profile; using default browser", "err", err, "restoredWindows", len(restored))
 		return nil, openDefault(url)
 	}
 	cmd := ownedChromeCommand(chrome, url, profileDir)
 	if err := cmd.Start(); err != nil {
+		slog.Warn("start owned Chrome; using default browser", "err", err, "restoredWindows", len(restored))
 		_ = os.RemoveAll(profileDir)
 		return nil, openDefault(url)
 	}
 	startToken, err := ownedProcessStartTime(cmd.Process.Pid)
 	if err != nil {
+		slog.Warn("identify owned Chrome process; using default browser", "err", err, "restoredWindows", len(restored))
 		_ = stopOwnedProcess(cmd.Process.Pid, 0, true)
 		_ = os.RemoveAll(profileDir)
 		return nil, openDefault(url)
 	}
-	go maximizeOwnedProcessWindow(cmd.Process.Pid, startToken)
 	done := make(chan struct{})
 	owned := &OwnedBrowser{pid: cmd.Process.Pid, startToken: startToken, profileDir: profileDir, url: url, done: done}
+	go restoreOwnedProcessWindows(cmd.Process.Pid, startToken, chrome, profileDir, restored)
 	go func() {
 		_ = cmd.Wait()
 		close(done)
@@ -189,6 +202,17 @@ func ownedChromeCommand(chrome, url, profileDir string) *exec.Cmd {
 		"--user-data-dir="+profileDir,
 		"--no-first-run",
 		"--no-default-browser-check",
+	)
+}
+
+func ownedChromeWindowCommand(chrome, url, profileDir string, spec WindowSpec) *exec.Cmd {
+	return exec.Command(chrome,
+		"--app="+url,
+		"--user-data-dir="+profileDir,
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--window-position="+strconv.Itoa(spec.X)+","+strconv.Itoa(spec.Y),
+		"--window-size="+strconv.Itoa(spec.Width)+","+strconv.Itoa(spec.Height),
 	)
 }
 

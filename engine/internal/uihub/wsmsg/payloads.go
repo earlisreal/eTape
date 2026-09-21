@@ -596,6 +596,32 @@ type DeleteConfigArgs struct {
 	Key string `json:"key"`
 }
 
+// WindowStateV1 is the machine-local set of workspace windows that were open
+// for the active eTape database. Bounds are browser CSS pixels; negative
+// coordinates are valid for a monitor positioned left/above the primary one.
+type WindowStateV1 struct {
+	Version int                `json:"version"`
+	Entries []WindowStateEntry `json:"entries"`
+}
+
+type WindowStateEntry struct {
+	WorkspaceID string `json:"workspaceId"`
+	X           int    `json:"x"`
+	Y           int    `json:"y"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+}
+
+// SetWindowStateArgs registers the calling browser connection as an open
+// workspace and updates its last known normal bounds.
+type SetWindowStateArgs struct {
+	WorkspaceID string `json:"workspaceId"`
+	X           int    `json:"x"`
+	Y           int    `json:"y"`
+	Width       int    `json:"width"`
+	Height      int    `json:"height"`
+}
+
 type SetAccountDemandArgs struct {
 	PanelID string `json:"panelId"`
 	Venue   string `json:"venue"`

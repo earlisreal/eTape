@@ -111,6 +111,7 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	}
 	cmd := newCommands(ex, st, h, h, va, h.feed, vt, locateRegistry)
 	cmd.setAccountDemandRegistry(cfg.AccountDemand)
+	cmd.setWindowStateRegistry(newWindowStateRegistry(st))
 	cmd.onConfigSet = cfg.OnConfigSet
 	h.cmd = cmd
 	cmd.restart = requestRestart

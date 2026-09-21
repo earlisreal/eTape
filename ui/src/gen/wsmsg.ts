@@ -662,6 +662,33 @@ export interface SetConfigArgs {
 export interface DeleteConfigArgs {
   key: string;
 }
+/**
+ * WindowStateV1 is the machine-local set of workspace windows that were open
+ * for the active eTape database. Bounds are browser CSS pixels; negative
+ * coordinates are valid for a monitor positioned left/above the primary one.
+ */
+export interface WindowStateV1 {
+  version: number /* int */;
+  entries: WindowStateEntry[];
+}
+export interface WindowStateEntry {
+  workspaceId: string;
+  x: number /* int */;
+  y: number /* int */;
+  width: number /* int */;
+  height: number /* int */;
+}
+/**
+ * SetWindowStateArgs registers the calling browser connection as an open
+ * workspace and updates its last known normal bounds.
+ */
+export interface SetWindowStateArgs {
+  workspaceId: string;
+  x: number /* int */;
+  y: number /* int */;
+  width: number /* int */;
+  height: number /* int */;
+}
 export interface SetAccountDemandArgs {
   panelId: string;
   venue: string;

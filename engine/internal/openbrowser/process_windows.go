@@ -5,6 +5,7 @@ package openbrowser
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strconv"
 	"sync"
@@ -15,40 +16,92 @@ import (
 
 var (
 	showWindowAsync     = windows.NewLazySystemDLL("user32.dll").NewProc("ShowWindowAsync")
+	setForegroundWindow = windows.NewLazySystemDLL("user32.dll").NewProc("SetForegroundWindow")
 	processWindowLookup struct {
 		sync.Mutex
-		pid  uint32
-		hwnd windows.HWND
+		pid   uint32
+		hwnd  windows.HWND
+		count int
 	}
 	enumProcessWindow = windows.NewCallback(func(hwnd windows.HWND, _ uintptr) uintptr {
 		var pid uint32
 		_, err := windows.GetWindowThreadProcessId(hwnd, &pid)
 		if err == nil && pid == processWindowLookup.pid && windows.IsWindowVisible(hwnd) {
-			processWindowLookup.hwnd = hwnd
-			return 0
+			if processWindowLookup.hwnd == 0 {
+				processWindowLookup.hwnd = hwnd
+			}
+			processWindowLookup.count++
 		}
 		return 1
 	})
 )
 
-func visibleProcessWindow(pid uint32) windows.HWND {
+func visibleProcessWindows(pid uint32) (windows.HWND, int) {
 	processWindowLookup.Lock()
 	defer processWindowLookup.Unlock()
 	processWindowLookup.pid = pid
 	processWindowLookup.hwnd = 0
+	processWindowLookup.count = 0
 	_ = windows.EnumWindows(enumProcessWindow, nil)
-	return processWindowLookup.hwnd
+	return processWindowLookup.hwnd, processWindowLookup.count
 }
 
-func maximizeOwnedProcessWindow(pid int, startToken uint64) {
-	deadline := time.Now().Add(10 * time.Second)
+func visibleProcessWindow(pid uint32) windows.HWND {
+	hwnd, _ := visibleProcessWindows(pid)
+	return hwnd
+}
+
+func visibleProcessWindowCount(pid uint32) int {
+	_, count := visibleProcessWindows(pid)
+	return count
+}
+
+func waitVisibleProcessWindow(pid int, startToken uint64, timeout time.Duration) (windows.HWND, bool) {
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		exists, err := ownedProcessExists(pid, startToken)
 		if err != nil || !exists {
-			return
+			return 0, false
 		}
 		if hwnd := visibleProcessWindow(uint32(pid)); hwnd != 0 {
-			_, _, _ = showWindowAsync.Call(uintptr(hwnd), windows.SW_MAXIMIZE)
+			return hwnd, true
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	return 0, false
+}
+
+func restoreOwnedProcessWindows(pid int, startToken uint64, chrome, profile string, specs []WindowSpec) {
+	hwnd, ok := waitVisibleProcessWindow(pid, startToken, 10*time.Second)
+	if !ok {
+		slog.Warn("owned Chrome main window not found while restoring workspaces")
+		return
+	}
+	_, _, _ = showWindowAsync.Call(uintptr(hwnd), windows.SW_MAXIMIZE)
+	launched := 0
+	for _, spec := range specs {
+		cmd := ownedChromeWindowCommand(chrome, spec.URL, profile, spec)
+		if err := cmd.Start(); err != nil {
+			slog.Warn("restore owned Chrome workspace", "url", spec.URL, "err", err)
+			continue
+		}
+		launched++
+		go func() { _ = cmd.Wait() }()
+	}
+	if expected := launched + 1; expected > 1 {
+		waitVisibleProcessWindows(pid, startToken, expected, 2*time.Second)
+	}
+	// Reuse the original HWND so the mandatory main window finishes in front of
+	// restored secondary windows when the OS permits foreground activation.
+	_, _, _ = showWindowAsync.Call(uintptr(hwnd), windows.SW_SHOW)
+	_, _, _ = setForegroundWindow.Call(uintptr(hwnd))
+}
+
+func waitVisibleProcessWindows(pid int, startToken uint64, expected int, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		exists, err := ownedProcessExists(pid, startToken)
+		if err != nil || !exists || visibleProcessWindowCount(uint32(pid)) >= expected {
 			return
 		}
 		time.Sleep(25 * time.Millisecond)

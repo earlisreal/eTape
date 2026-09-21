@@ -4,7 +4,7 @@ package openbrowser
 
 import "fmt"
 
-func maximizeOwnedProcessWindow(int, uint64) {}
+func restoreOwnedProcessWindows(int, uint64, string, string, []WindowSpec) {}
 
 func ownedProcessStartTime(int) (uint64, error) {
 	return 0, fmt.Errorf("owned Chrome is supported only on Windows")

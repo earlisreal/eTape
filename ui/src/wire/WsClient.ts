@@ -59,7 +59,7 @@ export class WsClient {
   start(): void { this.terminal = false; this.connect(); }
   stop(): void { this.terminal = true; this.socket?.close(); this.socket = null; }
 
-  onState(cb: (s: ConnState) => void): void { this.stateCbs.add(cb); cb(this.state); }
+  onState(cb: (s: ConnState) => void): () => void { this.stateCbs.add(cb); cb(this.state); return () => this.stateCbs.delete(cb); }
   rttMs(): number | null { return this.lastRtt; }
 
   subscribe(topic: TopicName, onMessage: TopicHandler): () => void {

@@ -24,6 +24,7 @@ import { connectEventToasts } from "./data/quotaToasts";
 import { perf, initPerfFromQuery } from "./perf/PerfMonitor";
 import { PerfHud } from "./perf/PerfHud";
 import { initUiLogFromQuery, uiLog } from "./logging/logger";
+import { trackWindowState } from "./chrome/windowState";
 
 function EventToastBridge({ client }: { client: WsClient }): null {
   const toast = useToasts();
@@ -149,7 +150,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
   }, []);
 
   useEffect(() => {
-    client.onState((s) => {
+    const removeState = client.onState((s) => {
       stateRef.current = s;
       setState(s);
       stores.health.setUiEngine(makeEngineLink(s, client.rttMs()));
@@ -179,7 +180,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
       // live connection state.
       stores.health.setUiEngine(makeEngineLink(stateRef.current, client.rttMs()));
     }, 2000);
-    return () => { window.clearInterval(ping); disposeStores(); scheduler.stop(); client.stop(); };
+    return () => { removeState(); window.clearInterval(ping); disposeStores(); scheduler.stop(); client.stop(); };
   }, [client, stores, scheduler]);
 
   // Task 13: feed every sys.session snapshot into the gate — the gate itself
@@ -195,6 +196,8 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
     sendCommand: (name: string, args: unknown) => client.sendCommand(name, args),
     sendQuery: (name: string, args: unknown) => client.sendQuery(name, args),
   }), [client]);
+
+  useEffect(() => trackWindowState(workspaceName, client), [workspaceName, client]);
 
   return (
     <ThemeProvider commands={commands}>

@@ -6,7 +6,7 @@ The global Top Bar places the browser-derived ET clock and weekday session-trans
 
 The main workspace registers the stable browsing-context name `etape-workspace-main`. A Scanner double-click in any secondary workspace updates its Link Group, then resolves and focuses that named main window; a missing main context is opened once and reused. The browser and OS control whether focus restores a minimized or obscured window. The behavior is best effort on platforms/browsers that decline focus, and the owned Windows Chrome app is the release-gated target.
 
-Every workspace reloads in place after an engine self-restart, so all windows rebuild from persisted state together. A clean engine stop closes each eTape window and any News Reader popup owned by that window; browsers may refuse to close a manually opened fallback window.
+Every workspace reloads in place after an engine self-restart, so all windows rebuild from persisted state together. Each workspace reports changed-only screen bounds outside React state; the owned Windows Chrome launch restores valid secondary workspaces on the next cold start and leaves main focused last. Manual secondary closes remove that workspace from the saved open set, while self-restarts keep existing windows in place. A clean engine stop closes each eTape window and any News Reader popup owned by that window; browsers may refuse to close a manually opened fallback window.
 
 At PRE and RTH transitions, SessionClock asks the shared sound engine to play the
 selected bundled female-voice recording. These Session Transition Announcements respect

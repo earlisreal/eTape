@@ -42,6 +42,7 @@ type spyCfg struct {
 	got     map[string]string
 	values  map[string]string
 	deleted string
+	sets    int
 }
 
 func (s *spyCfg) GetConfig(k string) (string, bool, error) {
@@ -49,6 +50,7 @@ func (s *spyCfg) GetConfig(k string) (string, bool, error) {
 	return v, ok, nil
 }
 func (s *spyCfg) SetConfig(k, v string) {
+	s.sets++
 	if s.got == nil {
 		s.got = map[string]string{}
 	}
@@ -77,6 +79,27 @@ func TestCommandsSubmitOrderMapsEnums(t *testing.T) {
 	}
 	if so.Qty != 80 || so.LimitPrice != 3.55 || so.StopPrice != 3.6 || string(so.Venue) != "sim" {
 		t.Fatalf("field copy wrong: %+v", so)
+	}
+}
+
+func TestCommandsSetWindowStateTracksConnection(t *testing.T) {
+	cfg := &spyCfg{values: map[string]string{}}
+	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	cd.setWindowStateRegistry(newWindowStateRegistry(cfg))
+	ack, _ := cd.handle(context.Background(), "SetWindowState", mustJSON(t, wsmsg.SetWindowStateArgs{
+		WorkspaceID: "monitoring", X: 1920, Y: 0, Width: 1200, Height: 900,
+	}), 42, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckAccepted {
+		t.Fatalf("ack = %+v", ack)
+	}
+	doc, err := decodeWindowState(cfg.got[WindowStateConfigKey])
+	if err != nil || len(doc.Entries) != 1 || doc.Entries[0].WorkspaceID != "monitoring" {
+		t.Fatalf("saved state = %+v, err=%v", doc, err)
+	}
+	cd.releaseWindowState(42)
+	doc, err = decodeWindowState(cfg.got[WindowStateConfigKey])
+	if err != nil || len(doc.Entries) != 0 {
+		t.Fatalf("released state = %+v, err=%v", doc, err)
 	}
 }
 

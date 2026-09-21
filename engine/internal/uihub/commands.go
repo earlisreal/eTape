@@ -104,6 +104,7 @@ type commands struct {
 	tester         venueTester
 	locates        LocateRegistry
 	accountDemands accountDemandCtl
+	windowState    *windowStateRegistry
 	onConfigSet    func(key, value string)
 	restart        func()
 	startDemo      func() error
@@ -113,9 +114,17 @@ type commands struct {
 
 func (cd *commands) setAccountDemandRegistry(r accountDemandCtl) { cd.accountDemands = r }
 
+func (cd *commands) setWindowStateRegistry(r *windowStateRegistry) { cd.windowState = r }
+
 func (cd *commands) releaseAccountDemand(connID uint64) {
 	if cd.accountDemands != nil {
 		cd.accountDemands.ReleaseConnection(connID)
+	}
+}
+
+func (cd *commands) releaseWindowState(connID uint64) {
+	if cd.windowState != nil {
+		cd.windowState.release(connID)
 	}
 }
 
@@ -268,6 +277,12 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		}
 		cd.cfg.DeleteConfig(a.Key)
 		return wsmsg.AckMsg{Status: "accepted"}, false
+	case "SetWindowState":
+		var a wsmsg.SetWindowStateArgs
+		if err := json.Unmarshal(args, &a); err != nil || cd.windowState == nil {
+			return blocked("bad args"), false
+		}
+		return cd.windowState.set(connID, a), false
 	case "SetAccountDemand":
 		var a wsmsg.SetAccountDemandArgs
 		if err := json.Unmarshal(args, &a); err != nil || strings.TrimSpace(a.PanelID) == "" {

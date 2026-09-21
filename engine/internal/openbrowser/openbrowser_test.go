@@ -117,6 +117,25 @@ func TestOwnedChromeCommandUsesPrivateProfile(t *testing.T) {
 	}
 }
 
+func TestOwnedChromeWindowCommandUsesSavedBounds(t *testing.T) {
+	chrome := filepath.Join(t.TempDir(), "chrome.exe")
+	profile := filepath.Join(t.TempDir(), "etape-chrome")
+	spec := WindowSpec{URL: "http://127.0.0.1:8686/?workspace=monitoring", X: -1920, Y: 20, Width: 1200, Height: 900}
+	cmd := ownedChromeWindowCommand(chrome, spec.URL, profile, spec)
+	want := []string{
+		chrome,
+		"--app=" + spec.URL,
+		"--user-data-dir=" + profile,
+		"--no-first-run",
+		"--no-default-browser-check",
+		"--window-position=-1920,20",
+		"--window-size=1200,900",
+	}
+	if !slices.Equal(cmd.Args, want) {
+		t.Fatalf("ownedChromeWindowCommand() args = %q, want %q", cmd.Args, want)
+	}
+}
+
 func TestOwnedBrowserRelaunchArgsPreserveIdentity(t *testing.T) {
 	browser := &OwnedBrowser{pid: 1234, startToken: 5678, profileDir: `C:\\Temp\\etape-chrome`, url: "http://127.0.0.1:8686"}
 	want := []string{

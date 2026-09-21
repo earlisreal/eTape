@@ -662,6 +662,7 @@ func (h *Hub) handleUnregister(c client) {
 	id := c.id()
 	if h.cmd != nil {
 		h.cmd.releaseAccountDemand(id)
+		h.cmd.releaseWindowState(id)
 	}
 	if m := h.demands[id]; m != nil {
 		if f := h.feed(); f != nil {
