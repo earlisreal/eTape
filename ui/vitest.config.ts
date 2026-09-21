@@ -129,6 +129,7 @@ export default defineConfig({
             'src/chrome/SettingsModal.test.tsx',
             'src/chrome/TopBar.test.tsx',
             'src/chrome/backup.test.ts',
+            'src/chrome/windows.test.ts',
             'src/chrome/panels/registry.test.tsx',
             'src/chrome/panels/ScannerPanel.test.tsx',
             'src/chrome/scannerSync.test.ts',

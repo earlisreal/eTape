@@ -15,6 +15,7 @@ import { menuChrome } from "../menuChrome";
 import { PanelHeaderSlotContext } from "./headerSlot";
 import { IconGear } from "./tv/tvIcons";
 import { rankScannerRows, readScannerSort, scannerModeSort, scannerSyncStatusText } from "../scannerSync";
+import { focusMainWorkspace } from "../windows";
 
 const SESSION_LABEL: Record<ScannerSession, string> = {
   premarket: "Pre-market", rth: "RTH", afterhours: "After-hours", overnight: "Overnight",
@@ -339,7 +340,7 @@ export function ScannerPanel(
               return (
               <tr key={r.symbol}
                 onClick={() => { setSelectedSymbol(r.symbol); if (cv.session) stores.scanner.markSeen(cv.session, r.symbol); }}
-                onDoubleClick={() => { if (cv.session) stores.scanner.markSeen(cv.session, r.symbol); linkGroups.focus(group ?? "green", r.symbol); }}
+                onDoubleClick={() => { if (cv.session) stores.scanner.markSeen(cv.session, r.symbol); linkGroups.focus(group ?? "green", r.symbol); focusMainWorkspace(); }}
                 onContextMenu={(e) => { e.preventDefault(); if (cv.session) stores.scanner.markSeen(cv.session, r.symbol); setMenu({ clientX: e.clientX, clientY: e.clientY, symbol: r.symbol }); }}
                 onMouseEnter={() => setHoveredSymbol(r.symbol)}
                 onMouseLeave={() => setHoveredSymbol((h) => (h === r.symbol ? null : h))}

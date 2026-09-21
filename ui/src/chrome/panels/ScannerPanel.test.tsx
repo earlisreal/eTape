@@ -307,6 +307,25 @@ describe("ScannerPanel", () => {
     expect(focus).toHaveBeenCalledWith("blue", "US.KO");
   });
 
+  it("row double-click focuses main when the Scanner is in a secondary workspace", () => {
+    const before = window.location.href;
+    window.history.pushState({}, "", "?workspace=window-2");
+    const main = { location: { href: `${window.location.origin}/?workspace=main` }, focus: vi.fn() };
+    const open = vi.spyOn(window, "open").mockReturnValue(main as unknown as Window);
+    try {
+      const { scanner, focus } = renderPanel({ group: "blue" });
+      act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+        payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ ...scannerShortInterestDefaults, symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1, relativeVolume: null }] } }));
+      fireEvent.doubleClick(screen.getByText("KO"));
+      expect(focus).toHaveBeenCalledWith("blue", "US.KO");
+      expect(open).toHaveBeenCalledWith("", "etape-workspace-main", expect.any(String));
+      expect(main.focus).toHaveBeenCalledOnce();
+    } finally {
+      open.mockRestore();
+      window.history.replaceState({}, "", before);
+    }
+  });
+
   it("row double-click falls back to green when the panel is pinned (no linked group)", () => {
     const { scanner, focus } = renderPanel({ group: null });
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",

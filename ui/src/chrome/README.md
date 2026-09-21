@@ -4,6 +4,8 @@ Workspace shell, dock layout, settings, controls, and execution surfaces. Inputs
 
 The global Top Bar places the browser-derived ET clock and weekday session-transition countdown immediately after connection latency, centers the active hotkey target (Link Group dot, symbol, venue, and the non-interactive T-M-S Venue Instrument Eligibility group), and keeps shell actions on the right in every workspace window. Eligibility is queried for the exact ready target, refreshed every 60 seconds, and hidden when unsupported, unknown, or failed. Workspace launches request Chromium popup windows sized to the current monitor's available bounds so additional workspaces open app-like and maximized instead of as tabs.
 
+The main workspace registers the stable browsing-context name `etape-workspace-main`. A Scanner double-click in any secondary workspace updates its Link Group, then resolves and focuses that named main window; a missing main context is opened once and reused. The browser and OS control whether focus restores a minimized or obscured window. The behavior is best effort on platforms/browsers that decline focus, and the owned Windows Chrome app is the release-gated target.
+
 Every workspace reloads in place after an engine self-restart, so all windows rebuild from persisted state together. A clean engine stop closes each eTape window and any News Reader popup owned by that window; browsers may refuse to close a manually opened fallback window.
 
 At PRE and RTH transitions, SessionClock asks the shared sound engine to play the

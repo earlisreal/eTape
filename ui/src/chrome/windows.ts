@@ -45,6 +45,19 @@ export function openWorkspaceWindow(id: string): Window | null {
   return window.open(workspaceUrl(id), workspaceWindowTarget(id), workspaceWindowFeatures());
 }
 
+/** Focus the main workspace without reloading an existing window. */
+export function focusMainWorkspace(): void {
+  if (parseWorkspaceName(window.location.search) === "main") return;
+  const main = window.open("", workspaceWindowTarget("main"), workspaceWindowFeatures());
+  if (!main) return;
+  try {
+    if (main.location.href === "about:blank") main.location.href = workspaceUrl("main");
+    main.focus();
+  } catch {
+    // Browsers may reject window controls; symbol activation still succeeds.
+  }
+}
+
 export function openNewsWindow(url: string): Window | null {
   let parsed: URL;
   try {
