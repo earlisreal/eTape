@@ -264,7 +264,7 @@ func TestCommandsSetScannerFiltersPersistsV2(t *testing.T) {
 	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
 	cd.scanner.Store(&scannerBox{scanner: scanner})
 
-	want := wsmsg.ScannerFilters{Mode: "gainers", MinSessionVolume: 2_500, MinTurnover: 12_345_678.9, MinRelativeVolume: 2.5, MinPrice: 1.25, MaxPrice: 20, FloatUnit: "M", VolumeUnit: "K"}
+	want := wsmsg.ScannerFilters{Mode: "gainers", MinSessionVolume: 2_500, MinTurnover: 12_345_678.9, MinRelativeVolume: 2.5, MinPrice: 1.25, MaxPrice: 20, FloatUnit: "M", VolumeUnit: "K", SessionVolumeUnit: "M"}
 	ack, _ := cd.handle(context.Background(), "SetScannerFilters", mustJSON(t, wsmsg.SetScannerFiltersArgs{Filters: want}), 0, func(wsmsg.AckMsg) {})
 	if ack.Status != wsmsg.AckAccepted || !reflect.DeepEqual(scanner.filters, want) {
 		t.Fatalf("SetScannerFilters ack/filters = %+v / %+v", ack, scanner.filters)
@@ -275,6 +275,20 @@ func TestCommandsSetScannerFiltersPersistsV2(t *testing.T) {
 	}
 	if _, ok := cfg.got["scanner.filters.v1"]; ok {
 		t.Fatal("SetScannerFilters must not write legacy v1")
+	}
+}
+
+func TestCommandsSetScannerFiltersDefaultsMissingSessionVolumeUnit(t *testing.T) {
+	cfg := &spyCfg{}
+	scanner := &scannerCtlTestSpy{filters: scan.Defaults(config.Scan{})}
+	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	cd.scanner.Store(&scannerBox{scanner: scanner})
+
+	filters := scanner.Filters()
+	filters.SessionVolumeUnit = ""
+	ack, _ := cd.handle(context.Background(), "SetScannerFilters", mustJSON(t, wsmsg.SetScannerFiltersArgs{Filters: filters}), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckAccepted || scanner.filters.SessionVolumeUnit != "K" {
+		t.Fatalf("missing session volume unit was not defaulted: %+v / %+v", ack, scanner.filters)
 	}
 }
 

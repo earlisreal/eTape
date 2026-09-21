@@ -291,6 +291,9 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		if b == nil {
 			return blocked("scanner unavailable"), false
 		}
+		if a.Filters.SessionVolumeUnit == "" {
+			a.Filters.SessionVolumeUnit = "K"
+		}
 		if err := b.scanner.SetFilters(a.Filters); err != nil {
 			return blocked(err.Error()), false
 		}

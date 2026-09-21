@@ -263,14 +263,14 @@ func Defaults(cfg config.Scan) wsmsg.ScannerFilters {
 		v := cfg.MaxFloatShares
 		cap = &v
 	}
-	return wsmsg.ScannerFilters{Mode: "gainers", MinChangePct: cfg.MinChangePct, MaxFloatShares: cap, MinVolume: float64(cfg.MinVolume), MinSessionVolume: 0, MinTurnover: 0, MinRelativeVolume: 0, MinPrice: 0, MaxPrice: 0, FloatUnit: "M", VolumeUnit: "K"}
+	return wsmsg.ScannerFilters{Mode: "gainers", MinChangePct: cfg.MinChangePct, MaxFloatShares: cap, MinVolume: float64(cfg.MinVolume), MinSessionVolume: 0, MinTurnover: 0, MinRelativeVolume: 0, MinPrice: 0, MaxPrice: 0, FloatUnit: "M", VolumeUnit: "K", SessionVolumeUnit: "K"}
 }
 
 func ValidateFilters(f wsmsg.ScannerFilters) error {
 	if f.Mode != "gainers" && f.Mode != "losers" && f.Mode != "most_active" {
 		return fmt.Errorf("invalid mode")
 	}
-	if (f.FloatUnit != "K" && f.FloatUnit != "M") || (f.VolumeUnit != "K" && f.VolumeUnit != "M") {
+	if (f.FloatUnit != "K" && f.FloatUnit != "M") || (f.VolumeUnit != "K" && f.VolumeUnit != "M") || (f.SessionVolumeUnit != "K" && f.SessionVolumeUnit != "M") {
 		return fmt.Errorf("invalid unit")
 	}
 	if math.IsNaN(f.MinChangePct) || math.IsInf(f.MinChangePct, 0) || f.MinChangePct < 0 || math.IsNaN(f.MinVolume) || math.IsInf(f.MinVolume, 0) || f.MinVolume < 0 || math.IsNaN(f.MinSessionVolume) || math.IsInf(f.MinSessionVolume, 0) || f.MinSessionVolume < 0 || math.IsNaN(f.MinTurnover) || math.IsInf(f.MinTurnover, 0) || f.MinTurnover < 0 || math.IsNaN(f.MinRelativeVolume) || math.IsInf(f.MinRelativeVolume, 0) || f.MinRelativeVolume < 0 || math.IsNaN(f.MinPrice) || math.IsInf(f.MinPrice, 0) || f.MinPrice < 0 || math.IsNaN(f.MaxPrice) || math.IsInf(f.MaxPrice, 0) || f.MaxPrice < 0 {
@@ -501,7 +501,7 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 }
 
 func sameFilters(a, b wsmsg.ScannerFilters) bool {
-	if a.Mode != b.Mode || a.MinChangePct != b.MinChangePct || a.MinVolume != b.MinVolume || a.MinSessionVolume != b.MinSessionVolume || a.MinTurnover != b.MinTurnover || a.MinRelativeVolume != b.MinRelativeVolume || a.MinPrice != b.MinPrice || a.MaxPrice != b.MaxPrice || a.FloatUnit != b.FloatUnit || a.VolumeUnit != b.VolumeUnit {
+	if a.Mode != b.Mode || a.MinChangePct != b.MinChangePct || a.MinVolume != b.MinVolume || a.MinSessionVolume != b.MinSessionVolume || a.MinTurnover != b.MinTurnover || a.MinRelativeVolume != b.MinRelativeVolume || a.MinPrice != b.MinPrice || a.MaxPrice != b.MaxPrice || a.FloatUnit != b.FloatUnit || a.VolumeUnit != b.VolumeUnit || a.SessionVolumeUnit != b.SessionVolumeUnit {
 		return false
 	}
 	if a.MaxFloatShares == nil || b.MaxFloatShares == nil {

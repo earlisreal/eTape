@@ -398,6 +398,7 @@ export interface ScannerFilters {
   maxPrice: number /* float64 */; // Scanner Last ceiling; 0 = off
   floatUnit: "K" | "M";
   volumeUnit: "K" | "M";
+  sessionVolumeUnit: "K" | "M";
 }
 export interface ScanHitPayload {
   symbol: string;

@@ -1096,7 +1096,13 @@ func decodeScannerFiltersV2(raw string) (wsmsg.ScannerFilters, bool) {
 		return wsmsg.ScannerFilters{}, false
 	}
 	var filters wsmsg.ScannerFilters
-	if json.Unmarshal([]byte(raw), &filters) != nil || scan.ValidateFilters(filters) != nil {
+	if json.Unmarshal([]byte(raw), &filters) != nil {
+		return wsmsg.ScannerFilters{}, false
+	}
+	if _, ok := fields["sessionVolumeUnit"]; !ok {
+		filters.SessionVolumeUnit = "K"
+	}
+	if scan.ValidateFilters(filters) != nil {
 		return wsmsg.ScannerFilters{}, false
 	}
 	return filters, true
@@ -1116,7 +1122,7 @@ func decodeLegacyScannerFilters(raw string) (wsmsg.ScannerFilters, bool) {
 	}
 	filters := wsmsg.ScannerFilters{
 		Mode: legacy.Mode, MinChangePct: legacy.MinChangePct, MaxFloatShares: legacy.MaxFloatShares,
-		MinVolume: legacy.MinVolume, MinRelativeVolume: 0, FloatUnit: legacy.FloatUnit, VolumeUnit: legacy.VolumeUnit,
+		MinVolume: legacy.MinVolume, MinRelativeVolume: 0, FloatUnit: legacy.FloatUnit, VolumeUnit: legacy.VolumeUnit, SessionVolumeUnit: "K",
 	}
 	if scan.ValidateFilters(filters) != nil || math.IsNaN(legacy.MinVolumeRatio) || math.IsInf(legacy.MinVolumeRatio, 0) || legacy.MinVolumeRatio < 0 {
 		return wsmsg.ScannerFilters{}, false

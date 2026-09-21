@@ -101,12 +101,13 @@ new session use only that session's value.
 Validate the threshold as finite and non-negative at the engine boundary and
 include it in filter equality. Save it in `scanner.filters.v2`; older records
 default it to zero. Do not add a config-file default. Reset Defaults sets it to
-zero.
+zero. Older records without `sessionVolumeUnit` default that display preference
+to K. Reset Defaults sets both volume-unit selectors to K.
 
-In the filter popover, add `session vol ≥` using the existing K/M selector.
-Both daily and session thresholds remain raw shares and share `volumeUnit`; do
-not add a second unit preference. The filter summary includes an active Session
-Volume threshold even when `SESSION VOL` is hidden.
+In the filter popover, add `session vol ≥` with its own K/M selector. Both daily
+and session thresholds remain raw shares; persist independent `volumeUnit` and
+`sessionVolumeUnit` display preferences. The filter summary includes an active
+Session Volume threshold even when `SESSION VOL` is hidden.
 
 ### Display, sorting, and Scanner Sync
 
@@ -223,9 +224,9 @@ Add the smallest focused checks that cover each new branch:
   retention after admission.
 - Prove negative/NaN/infinite command rejection, `sameFilters` detection, old v2
   JSON defaulting to zero, raw-share round trip, and Reset Defaults.
-- UI checks cover shared K/M conversion, filter submission and summary while the
-  column is hidden, nullable rendering, compact formatting, manual sorting,
-  null-last behavior, and Scanner Sync order.
+- UI checks cover independent daily/session K/M conversion, filter submission and
+  summary while the column is hidden, nullable rendering, compact formatting,
+  manual sorting, null-last behavior, and Scanner Sync order.
 - Column checks cover the default order, fixed `SYMBOL`, hide/show, Move Up/Down
   edge states, all-metrics-hidden rendering, Reset, immediate settings patches,
   malformed/duplicate/unknown saved IDs, automatic inclusion of missing known

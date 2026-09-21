@@ -67,7 +67,7 @@ describe("ScannerPanel", () => {
     const { scanner, onConfigChange } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: {
       refreshedAt: "2026-07-08T13:00:00.000Z",
-      filters: { mode: "gainers", minChangePct: 0, maxFloatShares: null, minVolume: 0, minSessionVolume: 1_000, minTurnover: 0, minRelativeVolume: 0, minPrice: 0, maxPrice: 0, floatUnit: "M", volumeUnit: "K" },
+      filters: { mode: "gainers", minChangePct: 0, maxFloatShares: null, minVolume: 0, minSessionVolume: 1_000, minTurnover: 0, minRelativeVolume: 0, minPrice: 0, maxPrice: 0, floatUnit: "M", volumeUnit: "K", sessionVolumeUnit: "K" },
       rows: [{ ...scannerShortInterestDefaults, symbol: "US.A", changePct: 5, last: 1, floatShares: 1, volume: 2_000, sessionVolume: 1_000, relativeVolume: null }],
     } }));
     fireEvent.click(screen.getByRole("button", { name: "columns" }));
@@ -409,7 +409,7 @@ describe("ScannerPanel", () => {
 
   it("the summary line reflects the active thresholds", () => {
     const { scanner } = renderPanel();
-    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [], filters: { mode: "gainers", minChangePct: 10, maxFloatShares: 20_000_000, minVolume: 100_000, minSessionVolume: 250_000, minTurnover: 0, minRelativeVolume: 2.5, minPrice: 1.25, maxPrice: 20, floatUnit: "M", volumeUnit: "K" } } }));
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [], filters: { mode: "gainers", minChangePct: 10, maxFloatShares: 20_000_000, minVolume: 100_000, minSessionVolume: 250_000, minTurnover: 0, minRelativeVolume: 2.5, minPrice: 1.25, maxPrice: 20, floatUnit: "M", volumeUnit: "K", sessionVolumeUnit: "K" } } }));
     expect(screen.getByText(/change magnitude ≥ 10% · float ≤ 20M · vol ≥ 100k · session vol ≥ 250k · rel vol ≥ 2\.5 · price ≥ \$1\.25 · price ≤ \$20/)).toBeTruthy();
   });
 
@@ -454,13 +454,13 @@ describe("ScannerPanel", () => {
     expect(commands.sendCommand).toHaveBeenCalledWith("SetScannerFilters", { filters: expect.objectContaining({ minTurnover: 12_500_000 }) });
   });
 
-  it("submits a shared-unit Session Volume threshold", () => {
+  it("submits an independent Session Volume unit", () => {
     const { commands } = renderPanel();
     fireEvent.click(screen.getByRole("button", { name: /filters/i }));
-    fireEvent.change(screen.getByLabelText("volume unit"), { target: { value: "M" } });
+    fireEvent.change(screen.getByLabelText("session volume unit"), { target: { value: "M" } });
     fireEvent.change(screen.getByLabelText("min session volume"), { target: { value: "2.5" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
-    expect(commands.sendCommand).toHaveBeenCalledWith("SetScannerFilters", expect.objectContaining({ filters: expect.objectContaining({ minSessionVolume: 2_500_000 }) }));
+    expect(commands.sendCommand).toHaveBeenCalledWith("SetScannerFilters", expect.objectContaining({ filters: expect.objectContaining({ minSessionVolume: 2_500_000, volumeUnit: "K", sessionVolumeUnit: "M" }) }));
   });
 
   it("submits arbitrary decimal price bounds", () => {
@@ -516,7 +516,7 @@ describe("ScannerPanel", () => {
   it("labels extended-hours Most active as approximate", () => {
     const { scanner } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "afterhours", payload: {
-      refreshedAt: "2026-07-08T21:00:00.000Z", rows: [], filters: { mode: "most_active", minChangePct: 99, maxFloatShares: null, minVolume: 0, minTurnover: 0, minRelativeVolume: 0, minPrice: 0, maxPrice: 0, floatUnit: "M", volumeUnit: "K" },
+      refreshedAt: "2026-07-08T21:00:00.000Z", rows: [], filters: { mode: "most_active", minChangePct: 99, maxFloatShares: null, minVolume: 0, minTurnover: 0, minRelativeVolume: 0, minPrice: 0, maxPrice: 0, floatUnit: "M", volumeUnit: "K", sessionVolumeUnit: "K" },
     } }));
     expect(screen.getByText(/Most active · approximate/)).toBeTruthy();
     expect(screen.queryByText(/change/)).toBeNull();

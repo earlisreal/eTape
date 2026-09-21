@@ -197,11 +197,12 @@ func TestPriceFilter(t *testing.T) {
 func TestValidatePriceFilters(t *testing.T) {
 	base := Defaults(config.Scan{})
 	for name, mutate := range map[string]func(*wsmsg.ScannerFilters){
-		"negative minimum": func(f *wsmsg.ScannerFilters) { f.MinPrice = -1 },
-		"negative maximum": func(f *wsmsg.ScannerFilters) { f.MaxPrice = -1 },
-		"nan minimum":      func(f *wsmsg.ScannerFilters) { f.MinPrice = math.NaN() },
-		"infinite maximum": func(f *wsmsg.ScannerFilters) { f.MaxPrice = math.Inf(1) },
-		"reversed range":   func(f *wsmsg.ScannerFilters) { f.MinPrice, f.MaxPrice = 10, 5 },
+		"negative minimum":            func(f *wsmsg.ScannerFilters) { f.MinPrice = -1 },
+		"negative maximum":            func(f *wsmsg.ScannerFilters) { f.MaxPrice = -1 },
+		"nan minimum":                 func(f *wsmsg.ScannerFilters) { f.MinPrice = math.NaN() },
+		"infinite maximum":            func(f *wsmsg.ScannerFilters) { f.MaxPrice = math.Inf(1) },
+		"invalid session volume unit": func(f *wsmsg.ScannerFilters) { f.SessionVolumeUnit = "" },
+		"reversed range":              func(f *wsmsg.ScannerFilters) { f.MinPrice, f.MaxPrice = 10, 5 },
 	} {
 		t.Run(name, func(t *testing.T) {
 			f := base
@@ -249,6 +250,11 @@ func TestSameFiltersIncludesSessionVolume(t *testing.T) {
 	b.MinSessionVolume = 1
 	if sameFilters(a, b) {
 		t.Fatal("session volume change was ignored")
+	}
+	b = a
+	b.SessionVolumeUnit = "M"
+	if sameFilters(a, b) {
+		t.Fatal("session volume unit change was ignored")
 	}
 }
 

@@ -30,8 +30,9 @@ same-time-of-day adjustment and does not add separate session fields. `SESSION
 VOL` displays the matching provider-reported volume for the active pre-market,
 RTH, after-hours, or overnight session; it never adds session fields together and
 is unavailable when that session block is missing. Scanner's Session Volume
-minimum is independent of daily `Vol`, and a hidden metric column remains
-filterable. Scanner metric column visibility/order is saved per panel and carried
+minimum is independent of daily `Vol`, and each threshold has its own K/M
+selector; a hidden metric column remains filterable. Scanner metric
+column visibility/order is saved per panel and carried
 by layout export/import; `SYMBOL` stays first and visible.
 
 The shell owns the ephemeral cross-window hotkey target coordinator. It listens

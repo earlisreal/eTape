@@ -312,6 +312,7 @@ type ScannerFilters struct {
 	MaxPrice          float64  `json:"maxPrice"` // Scanner Last ceiling; 0 = off
 	FloatUnit         string   `json:"floatUnit" tstype:"\"K\" | \"M\""`
 	VolumeUnit        string   `json:"volumeUnit" tstype:"\"K\" | \"M\""`
+	SessionVolumeUnit string   `json:"sessionVolumeUnit" tstype:"\"K\" | \"M\""`
 }
 
 type ScanHitPayload struct {
