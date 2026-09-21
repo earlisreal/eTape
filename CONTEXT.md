@@ -97,6 +97,14 @@ _Avoid_: Workspace backup, symbol-free preset
 The Scanner Panel, in any Workspace, explicitly selected to drive Scanner Sync for the Monitoring Workspace. Only one Scanner Source is active at a time. Its identity survives closing its host window; deleting it pauses Scanner Sync.
 _Avoid_: Active scanner, selected scanner
 
+**Scanner Sound**:
+An audible cue emitted by each open workspace window that contains at least one unmuted Scanner Panel when Scanner reports a new hit. Multiple eligible Scanner Panels in one window produce one cue; separate windows may each produce a cue. Silent intervals never replay.
+_Avoid_: Global Scanner alert, Scanner Sync sound
+
+**Scanner Panel Mute**:
+A saved per-Scanner Panel preference that excludes that panel from making its workspace window eligible for Scanner Sound. It defaults to unmuted and remains subordinate to the global sound controls.
+_Avoid_: Global Scanner mute, sound off
+
 **Stock Info Panel**:
 A symbol-bearing panel that displays fundamentals and news for the focused symbol of its selected Link Group. It is not a Scanner Sync target.
 _Avoid_: News panel

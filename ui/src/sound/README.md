@@ -13,3 +13,12 @@ announcement without queuing it; only a workspace that starts playback claims
 the shared transition token. Clips are copied into the Vite build and embedded
 in release builds. Sound preference edits broadcast their config key so every
 open workspace reloads the same settings. Recording details are in [the audio README](../../public/audio/README.md).
+
+Scanner Sound is owned by mounted Scanner Panels, not by the window-global
+sound hook. Each unmuted Scanner Panel subscribes to its local ScannerStore;
+the existing 200 ms scanner-channel coalescing reduces multiple panels in one
+workspace window to one cue, while separate windows may each play their local
+cue. The Scanner Panel Header's persisted `scannerSoundMuted` setting removes
+that panel from eligibility and defaults to unmuted. It does not change the
+global Enable sounds, Scanner sound selection, volume, or General-settings
+previews. Muted or absent panels never queue or replay missed hits.

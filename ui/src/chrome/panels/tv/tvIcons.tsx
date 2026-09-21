@@ -38,3 +38,5 @@ export const IconChevronDown = ({ size }: P) => <Svg size={size}><path d="M6 9l6
 export const IconClose = ({ size }: P) => <Svg size={size}><path d="M6 6l12 12M18 6L6 18" /></Svg>;
 export const IconMore = ({ size }: P) => <Svg size={size}><circle cx="5" cy="12" r="1.4" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.4" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.4" fill="currentColor" stroke="none" /></Svg>;
 export const IconClone = ({ size }: P) => <Svg size={size}><rect x="8" y="8" width="11" height="11" rx="1" /><path d="M5 15V6a1 1 0 011-1h9" /></Svg>;
+export const IconVolume = ({ size }: P) => <Svg size={size}><path d="M4 10v4h4l5 4V6l-5 4H4z" /><path d="M16 9.5a4 4 0 010 5M18.5 7a7.5 7.5 0 010 10" /></Svg>;
+export const IconVolumeOff = ({ size }: P) => <Svg size={size}><path d="M4 10v4h4l5 4V6l-5 4H4z" /><path d="M17 9l4 6M21 9l-4 6" /></Svg>;

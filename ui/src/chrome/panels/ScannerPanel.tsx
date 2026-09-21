@@ -13,9 +13,10 @@ import { Button } from "../controls/Button";
 import { TVContextMenu, type MenuEntry } from "./tv/TVContextMenu";
 import { menuChrome } from "../menuChrome";
 import { PanelHeaderSlotContext } from "./headerSlot";
-import { IconGear } from "./tv/tvIcons";
+import { IconGear, IconVolume, IconVolumeOff } from "./tv/tvIcons";
 import { rankScannerRows, readScannerSort, scannerModeSort, scannerSyncStatusText } from "../scannerSync";
 import { focusMainWorkspace } from "../windows";
+import { soundEngine } from "../../sound/SoundEngine";
 
 const SESSION_LABEL: Record<ScannerSession, string> = {
   premarket: "Pre-market", rth: "RTH", afterhours: "After-hours", overnight: "Overnight",
@@ -102,6 +103,18 @@ export function ScannerPanel(
   // group's live symbol.
   const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
   const [hoveredSymbol, setHoveredSymbol] = useState<string | null>(null);
+  const [scannerSoundMuted, setScannerSoundMuted] = useState(() => config.settings.scannerSoundMuted === true);
+
+  useEffect(() => {
+    if (scannerSoundMuted) return;
+    return stores.scanner.onNewHit(() => soundEngine.scannerHit());
+  }, [stores.scanner, scannerSoundMuted]);
+
+  const toggleScannerSound = () => {
+    const next = !scannerSoundMuted;
+    setScannerSoundMuted(next);
+    onConfigChange({ scannerSoundMuted: next });
+  };
 
   // ET-midnight dedup reset: clear the per-session seen-sets so the next session's
   // first prints flash fresh. Re-arms after each fire.
@@ -247,6 +260,12 @@ export function ScannerPanel(
       <span className="serif" style={{ fontWeight: 600, whiteSpace: "nowrap" }}>Scanner</span>
       {sessionLabel && <span className="mono" style={{ color: palette.textMuted, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>· <span>{sessionLabel}</span></span>}
       <span style={{ flex: 1 }} />
+      <button type="button" aria-label={scannerSoundMuted ? "Unmute Scanner sounds" : "Mute Scanner sounds"}
+        aria-pressed={scannerSoundMuted} title={scannerSoundMuted ? "Unmute Scanner sounds" : "Mute Scanner sounds"}
+        onClick={toggleScannerSound}
+        style={{ display: "inline-flex", border: "none", background: "transparent", color: scannerSoundMuted ? palette.textMuted : palette.text, cursor: "pointer", padding: 3, flex: "0 0 auto" }}>
+        {scannerSoundMuted ? <IconVolumeOff size={13} /> : <IconVolume size={13} />}
+      </button>
       <button type="button" aria-label="filters" aria-expanded={filtersOpen} title="Filters"
         ref={filterTriggerRef}
         onClick={() => (filtersOpen ? setFiltersOpen(false) : openFilters())}

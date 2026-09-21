@@ -15,7 +15,6 @@ function sink(): SoundSink & { calls: string[] } {
   const s = { calls: [] as string[],
     orderFilled: () => s.calls.push("fill"),
     orderRejected: () => s.calls.push("reject"),
-    scannerHit: () => s.calls.push("scanner"),
     unlock: () => s.calls.push("unlock") };
   return s;
 }
@@ -42,5 +41,18 @@ describe("useSoundWiring", () => {
     unmount();
     stores.fills.apply({ kind: "delta", topic: "exec.fills", payload: { venue: "alpaca", orderId: "z", symbol: "AAPL", side: "BUY", qty: 1, price: 1, tsMs: 1 } });
     expect(engine.calls).not.toContain("fill");
+  });
+
+  it("does not forward Scanner hits from the window-global hook", () => {
+    const stores = stubStores();
+    const engine = sink();
+    renderHook(() => useSoundWiring(stores, engine));
+
+    stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "t0", rows: [] } } as never);
+    stores.scanner.apply({ kind: "delta", topic: "scanner.rank", key: "premarket", payload: {
+      refreshedAt: "t1", rows: [{ symbol: "US.A", changePct: 1, last: 1, floatShares: 1, volume: 1 }],
+    } } as never);
+
+    expect(engine.calls).not.toContain("scanner");
   });
 });

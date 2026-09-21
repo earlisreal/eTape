@@ -37,6 +37,14 @@ selector; a hidden metric column remains filterable. Scanner metric
 column visibility/order is saved per panel and carried
 by layout export/import; `SYMBOL` stays first and visible.
 
+Scanner Sound is produced by each unmuted Scanner Panel that remains mounted
+in a workspace window, including inactive tabs and background or minimized
+windows. The Panel Header exposes a persisted `scannerSoundMuted` toggle;
+missing settings default to unmuted, and closing the panel removes its
+eligibility without replaying missed hits. The global sound controls remain the
+master gate, and multiple eligible panels in one window rely on the shared
+sound engine's existing coalescing to emit one cue.
+
 The shell owns the ephemeral cross-window hotkey target coordinator. It listens
 only to Dockview user-origin panel activation, seeds a restored active panel
 only in the OS-focused window, and republishes the owning panel's group, symbol,

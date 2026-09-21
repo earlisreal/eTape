@@ -6,10 +6,11 @@ import { LinkGroups } from "../linkGroups";
 import { makeStores } from "../../data/registry";
 import { ScannerPanel } from "./ScannerPanel";
 import { PanelHeaderSlotContext } from "./headerSlot";
+import { soundEngine } from "../../sound/SoundEngine";
 import type { PanelProps } from "./registry";
 import type { PanelConfig } from "../workspace";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
 function fakeBus() {
   const subs = new Set<(m: unknown) => void>();
@@ -40,6 +41,42 @@ function renderPanel(
 }
 
 describe("ScannerPanel", () => {
+  it("owns Scanner Sound while unmuted and persists a panel-local mute", () => {
+    const scannerSound = vi.spyOn(soundEngine, "scannerHit").mockImplementation(() => {});
+    const { scanner, onConfigChange, unmount } = renderPanel();
+
+    act(() => {
+      scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "t0", rows: [{ ...scannerShortInterestDefaults, symbol: "US.A", changePct: 1, last: 1, floatShares: 1, volume: 1 }] } } as never);
+      scanner.apply({ kind: "delta", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "t1", rows: [{ ...scannerShortInterestDefaults, symbol: "US.A", changePct: 1, last: 1, floatShares: 1, volume: 1 }, { ...scannerShortInterestDefaults, symbol: "US.B", changePct: 2, last: 1, floatShares: 1, volume: 1 }] } } as never);
+    });
+    expect(scannerSound).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Mute Scanner sounds" }));
+    expect(onConfigChange).toHaveBeenLastCalledWith({ scannerSoundMuted: true });
+    act(() => scanner.apply({ kind: "delta", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "t2", rows: [{ ...scannerShortInterestDefaults, symbol: "US.A", changePct: 1, last: 1, floatShares: 1, volume: 1 }, { ...scannerShortInterestDefaults, symbol: "US.B", changePct: 2, last: 1, floatShares: 1, volume: 1 }, { ...scannerShortInterestDefaults, symbol: "US.C", changePct: 3, last: 1, floatShares: 1, volume: 1 }] } } as never));
+    expect(scannerSound).toHaveBeenCalledOnce();
+
+    fireEvent.click(screen.getByRole("button", { name: "Unmute Scanner sounds" }));
+    expect(onConfigChange).toHaveBeenLastCalledWith({ scannerSoundMuted: false });
+    act(() => scanner.apply({ kind: "delta", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "t3", rows: [{ ...scannerShortInterestDefaults, symbol: "US.A", changePct: 1, last: 1, floatShares: 1, volume: 1 }, { ...scannerShortInterestDefaults, symbol: "US.B", changePct: 2, last: 1, floatShares: 1, volume: 1 }, { ...scannerShortInterestDefaults, symbol: "US.C", changePct: 3, last: 1, floatShares: 1, volume: 1 }, { ...scannerShortInterestDefaults, symbol: "US.D", changePct: 4, last: 1, floatShares: 1, volume: 1 }] } } as never));
+    expect(scannerSound).toHaveBeenCalledTimes(2);
+
+    unmount();
+    act(() => scanner.apply({ kind: "delta", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "t4", rows: [{ ...scannerShortInterestDefaults, symbol: "US.A", changePct: 1, last: 1, floatShares: 1, volume: 1 }, { ...scannerShortInterestDefaults, symbol: "US.B", changePct: 2, last: 1, floatShares: 1, volume: 1 }, { ...scannerShortInterestDefaults, symbol: "US.C", changePct: 3, last: 1, floatShares: 1, volume: 1 }, { ...scannerShortInterestDefaults, symbol: "US.D", changePct: 4, last: 1, floatShares: 1, volume: 1 }, { ...scannerShortInterestDefaults, symbol: "US.E", changePct: 5, last: 1, floatShares: 1, volume: 1 }] } } as never));
+    expect(scannerSound).toHaveBeenCalledTimes(2);
+  });
+
+  it("defaults legacy panels to unmuted and keeps a muted panel silent", () => {
+    const scannerSound = vi.spyOn(soundEngine, "scannerHit").mockImplementation(() => {});
+    const { scanner } = renderPanel({ settings: { scannerSoundMuted: true } });
+    expect(screen.getByRole("button", { name: "Unmute Scanner sounds" })).toBeTruthy();
+    act(() => {
+      scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "t0", rows: [{ ...scannerShortInterestDefaults, symbol: "US.A", changePct: 1, last: 1, floatShares: 1, volume: 1 }] } } as never);
+      scanner.apply({ kind: "delta", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "t1", rows: [{ ...scannerShortInterestDefaults, symbol: "US.A", changePct: 1, last: 1, floatShares: 1, volume: 1 }, { ...scannerShortInterestDefaults, symbol: "US.B", changePct: 2, last: 1, floatShares: 1, volume: 1 }] } } as never);
+    });
+    expect(scannerSound).not.toHaveBeenCalled();
+  });
+
   it("waits before data, then renders ranked rows", () => {
     const { scanner } = renderPanel();
     expect(screen.getByText(/waiting/i)).toBeTruthy();

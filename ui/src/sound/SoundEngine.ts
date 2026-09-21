@@ -24,7 +24,6 @@ export interface SoundApi {
 export interface SoundSink {
   orderFilled(side: Side, tsMs: number): void;
   orderRejected(): void;
-  scannerHit(): void;
   unlock(): void;
 }
 

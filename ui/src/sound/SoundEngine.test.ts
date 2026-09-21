@@ -45,6 +45,14 @@ describe("SoundEngine", () => {
     expect(player.played).toHaveLength(2);
   });
 
+  it("coalesces Scanner calls within 200ms and plays again after", () => {
+    const { eng, player } = make(now);
+    eng.scannerHit();
+    t += 150; eng.scannerHit();
+    t += 100; eng.scannerHit();
+    expect(player.played).toHaveLength(2);
+  });
+
   it("freshness guard: a fill older than 10s is silent, a fresh one chimes", () => {
     const { eng, player } = make(now);
     eng.orderFilled("BUY", t - 10_001);   // stale
