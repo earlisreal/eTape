@@ -36,6 +36,7 @@ export const scannerSortAccessors: Record<string, (row: ScannerRowView) => numbe
   last: (row) => row.last,
   float: (row) => row.floatShares,
   vol: (row) => row.volume,
+  sessionVol: (row) => row.sessionVolume,
   turnover: (row) => row.turnover ?? null,
   relVol: (row) => row.relativeVolume ?? null,
   shortInterest: (row) => row.shortInterest ?? null,

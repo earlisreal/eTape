@@ -42,6 +42,7 @@ export class ScannerStore extends ReactStore<ScannerState> {
       return {
         ...row,
         volume: row.volume ?? null,
+        sessionVolume: row.sessionVolume ?? null,
         turnover: row.turnover ?? null,
         relativeVolume: row.relativeVolume ?? null,
         shortInterest: row.shortInterest ?? null,

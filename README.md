@@ -81,7 +81,7 @@ and the broker of your choice for execution, and everything else is free and ope
 - Time & Sales tape with buy/sell coloring, virtualized over a ring buffer
 
 **Scanning & context**
-- Session-aware gap scanner with float, volume, Dollar Turnover, REL VOL (Daily Rate), and inclusive Last-price bounds using the session-aware displayed price (zero disables, unknown/non-positive values fail active bounds, and admissions stay sticky), plus %-change filters and Reported Short Interest context
+- Session-aware gap scanner with float, daily Vol, Session Volume, Dollar Turnover, REL VOL (Daily Rate), and inclusive Last-price bounds using the session-aware displayed price (zero disables, unknown/non-positive values fail active bounds, and admissions stay sticky), plus %-change filters, Reported Short Interest context, and per-Scanner column visibility/order
 - Session-aware scanner (gainers, losers, and most active)
 - Stock Info panel: fundamentals grid plus a de-duplicated live news feed with
   publish times and type badges; headlines open in an unmaximized reusable reader

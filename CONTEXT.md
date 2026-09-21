@@ -141,6 +141,10 @@ _Avoid_: Quote timestamp, live timestamp
 The trading date represented by the latest reported daily volume and Dollar Turnover used by Scanner. It can be the previous trading date during premarket and is independent of the Scanner board's trading cycle.
 _Avoid_: Current session, Scanner board cycle
 
+**Session Volume**:
+The provider-reported share volume for the active Scanner session: pre-market, RTH, after-hours, or overnight. It is kept separate from the latest daily `Vol`, is nullable when the matching session field is unavailable, and is filtered as a raw-share minimum; session fields are never added together.
+_Avoid_: Daily volume, pre-market volume (when referring to the active session generally)
+
 **Relative Volume (Daily Rate)**:
 A Scanner multiplier of the latest reported daily volume divided by the arithmetic mean raw daily volume of up to 50 completed trading days preceding the Scanner Metric Day, using shorter history when fewer days genuinely exist. It has no time-of-day adjustment or separately added overnight volume; the Scanner column is labelled `REL VOL` and is not a percentage.
 _Avoid_: Volume Ratio

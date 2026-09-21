@@ -135,14 +135,25 @@ func nonNegativeSnapshotVolume(value *int64) (int64, bool) {
 	return *value, true
 }
 
+func sessionVolumeValue(value *int64) *int64 {
+	v, ok := nonNegativeSnapshotVolume(value)
+	if !ok {
+		return nil
+	}
+	return &v
+}
+
 // rankItem is the poller-internal normalized form of one rank row (decoupled
 // from the pb type so the transform is unit-testable without protobuf).
 type rankItem struct {
-	Symbol    string
-	ChangePct float64
-	Last      float64
-	Volume    int64
-	Turnover  *float64
+	Symbol               string
+	ChangePct            float64
+	Last                 float64
+	Volume               int64
+	sessionVolume        *int64
+	sessionVolumePhase   session.Phase
+	sessionVolumePoolDay int64
+	Turnover             *float64
 	// dailyRequired marks rank values as discovery-only until the batched
 	// snapshot supplies the base daily metrics used by Scanner filters.
 	dailyRequired       bool
@@ -252,7 +263,7 @@ func Defaults(cfg config.Scan) wsmsg.ScannerFilters {
 		v := cfg.MaxFloatShares
 		cap = &v
 	}
-	return wsmsg.ScannerFilters{Mode: "gainers", MinChangePct: cfg.MinChangePct, MaxFloatShares: cap, MinVolume: float64(cfg.MinVolume), MinTurnover: 0, MinRelativeVolume: 0, MinPrice: 0, MaxPrice: 0, FloatUnit: "M", VolumeUnit: "K"}
+	return wsmsg.ScannerFilters{Mode: "gainers", MinChangePct: cfg.MinChangePct, MaxFloatShares: cap, MinVolume: float64(cfg.MinVolume), MinSessionVolume: 0, MinTurnover: 0, MinRelativeVolume: 0, MinPrice: 0, MaxPrice: 0, FloatUnit: "M", VolumeUnit: "K"}
 }
 
 func ValidateFilters(f wsmsg.ScannerFilters) error {
@@ -262,7 +273,7 @@ func ValidateFilters(f wsmsg.ScannerFilters) error {
 	if (f.FloatUnit != "K" && f.FloatUnit != "M") || (f.VolumeUnit != "K" && f.VolumeUnit != "M") {
 		return fmt.Errorf("invalid unit")
 	}
-	if math.IsNaN(f.MinChangePct) || math.IsInf(f.MinChangePct, 0) || f.MinChangePct < 0 || math.IsNaN(f.MinVolume) || math.IsInf(f.MinVolume, 0) || f.MinVolume < 0 || math.IsNaN(f.MinTurnover) || math.IsInf(f.MinTurnover, 0) || f.MinTurnover < 0 || math.IsNaN(f.MinRelativeVolume) || math.IsInf(f.MinRelativeVolume, 0) || f.MinRelativeVolume < 0 || math.IsNaN(f.MinPrice) || math.IsInf(f.MinPrice, 0) || f.MinPrice < 0 || math.IsNaN(f.MaxPrice) || math.IsInf(f.MaxPrice, 0) || f.MaxPrice < 0 {
+	if math.IsNaN(f.MinChangePct) || math.IsInf(f.MinChangePct, 0) || f.MinChangePct < 0 || math.IsNaN(f.MinVolume) || math.IsInf(f.MinVolume, 0) || f.MinVolume < 0 || math.IsNaN(f.MinSessionVolume) || math.IsInf(f.MinSessionVolume, 0) || f.MinSessionVolume < 0 || math.IsNaN(f.MinTurnover) || math.IsInf(f.MinTurnover, 0) || f.MinTurnover < 0 || math.IsNaN(f.MinRelativeVolume) || math.IsInf(f.MinRelativeVolume, 0) || f.MinRelativeVolume < 0 || math.IsNaN(f.MinPrice) || math.IsInf(f.MinPrice, 0) || f.MinPrice < 0 || math.IsNaN(f.MaxPrice) || math.IsInf(f.MaxPrice, 0) || f.MaxPrice < 0 {
 		return fmt.Errorf("invalid numeric filter")
 	}
 	if f.MinPrice > 0 && f.MaxPrice > 0 && f.MinPrice > f.MaxPrice {
@@ -397,6 +408,9 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 		if items[i].Turnover != nil {
 			items[i].turnoverPoolDay = poolDay
 		}
+		if items[i].sessionVolume != nil {
+			items[i].sessionVolumePoolDay = poolDay
+		}
 	}
 	all := make(map[string]rankItem, len(p.board)+len(items))
 	for sym, it := range p.board {
@@ -404,6 +418,11 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 	}
 	for _, it := range items {
 		if old, ok := all[it.Symbol]; ok {
+			if it.sessionVolume != nil {
+				old.sessionVolume = it.sessionVolume
+				old.sessionVolumePhase = it.sessionVolumePhase
+				old.sessionVolumePoolDay = it.sessionVolumePoolDay
+			}
 			if it.Turnover != nil {
 				old.Turnover = it.Turnover
 				old.turnoverPhase = it.turnoverPhase
@@ -482,7 +501,7 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 }
 
 func sameFilters(a, b wsmsg.ScannerFilters) bool {
-	if a.Mode != b.Mode || a.MinChangePct != b.MinChangePct || a.MinVolume != b.MinVolume || a.MinTurnover != b.MinTurnover || a.MinRelativeVolume != b.MinRelativeVolume || a.MinPrice != b.MinPrice || a.MaxPrice != b.MaxPrice || a.FloatUnit != b.FloatUnit || a.VolumeUnit != b.VolumeUnit {
+	if a.Mode != b.Mode || a.MinChangePct != b.MinChangePct || a.MinVolume != b.MinVolume || a.MinSessionVolume != b.MinSessionVolume || a.MinTurnover != b.MinTurnover || a.MinRelativeVolume != b.MinRelativeVolume || a.MinPrice != b.MinPrice || a.MaxPrice != b.MaxPrice || a.FloatUnit != b.FloatUnit || a.VolumeUnit != b.VolumeUnit {
 		return false
 	}
 	if a.MaxFloatShares == nil || b.MaxFloatShares == nil {
@@ -578,6 +597,11 @@ func validTurnover(value *float64) *float64 {
 }
 
 func currentSessionItem(it rankItem, phase session.Phase, poolDay int64) rankItem {
+	if it.sessionVolume != nil && (it.sessionVolumePhase != phase || it.sessionVolumePoolDay != poolDay) {
+		it.sessionVolume = nil
+		it.sessionVolumePhase = session.Closed
+		it.sessionVolumePoolDay = 0
+	}
 	if it.Turnover != nil && (it.turnoverPhase != phase || it.turnoverPoolDay != poolDay) {
 		it.Turnover = nil
 		it.turnoverPhase = session.Closed
@@ -646,6 +670,33 @@ func snapshotTurnover(basic *snappb.SnapshotBasicData, phase session.Phase, pool
 	return validTurnover(value)
 }
 
+func snapshotSessionVolume(basic *snappb.SnapshotBasicData, phase session.Phase, poolDay int64) *int64 {
+	if basic == nil {
+		return nil
+	}
+	if observed := snapshotTimestamp(basic); !observed.IsZero() && (session.PhaseAt(observed) != phase || session.PoolDay(observed) != poolDay) {
+		return nil
+	}
+	var value *int64
+	switch phase {
+	case session.RTH:
+		value = basic.Volume
+	case session.PreMarket:
+		if data := basic.GetPreMarket(); data != nil {
+			value = data.Volume
+		}
+	case session.PostMarket:
+		if data := basic.GetAfterMarket(); data != nil {
+			value = data.Volume
+		}
+	case session.Overnight:
+		if data := basic.GetOvernight(); data != nil {
+			value = data.Volume
+		}
+	}
+	return sessionVolumeValue(value)
+}
+
 func snapshotDailyTurnover(basic *snappb.SnapshotBasicData) *float64 {
 	if basic == nil {
 		return nil
@@ -673,6 +724,9 @@ func rankRowsFiltered(items []rankItem, floats map[string]floatEntry, f wsmsg.Sc
 			}
 		}
 		if f.MinVolume > 0 && (!volumeOK || float64(volume) < f.MinVolume) {
+			continue
+		}
+		if f.MinSessionVolume > 0 && (it.sessionVolume == nil || float64(*it.sessionVolume) < f.MinSessionVolume) {
 			continue
 		}
 		turnoverValue := it.Turnover
@@ -715,9 +769,14 @@ func rankRowsFiltered(items []rankItem, floats map[string]floatEntry, f wsmsg.Sc
 			value := volume
 			volumePtr = &value
 		}
+		var sessionVolumePtr *int64
+		if it.sessionVolume != nil {
+			value := *it.sessionVolume
+			sessionVolumePtr = &value
+		}
 		out = append(out, wsmsg.ScannerRow{
 			Symbol: it.Symbol, ShortSellRestricted: it.ShortSellRestricted,
-			ChangePct: &cp, Last: &lp, FloatShares: floatPtr, Volume: volumePtr, Turnover: turnover, RelativeVolume: it.RelativeVolume,
+			ChangePct: &cp, Last: &lp, FloatShares: floatPtr, Volume: volumePtr, SessionVolume: sessionVolumePtr, Turnover: turnover, RelativeVolume: it.RelativeVolume,
 		})
 	}
 	return out
@@ -1182,6 +1241,10 @@ func (p *Poller) fetchMostActiveRTH(ctx context.Context) ([]rankItem, error) {
 			switch v.GetFieldName() {
 			case volume:
 				it.Volume = int64(v.GetValue())
+				value := int64(v.GetValue())
+				if it.sessionVolume = sessionVolumeValue(&value); it.sessionVolume != nil {
+					it.sessionVolumePhase = session.RTH
+				}
 			case change:
 				it.ChangePct = v.GetValue()
 			}
@@ -1208,6 +1271,7 @@ func (p *Poller) fetchPreMarket(ctx context.Context, dir int32) ([]rankItem, err
 	for _, d := range resp.GetS2C().GetDataList() {
 		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()), dailyRequired: true,
 			ChangePct: d.GetPreMarketChangeRatio(), Last: d.GetPreMarketPrice(), Volume: d.GetPreMarketVolume(),
+			sessionVolume: sessionVolumeValue(d.PreMarketVolume), sessionVolumePhase: session.PreMarket,
 			Turnover: validTurnover(d.PreMarketTurnover), turnoverPhase: session.PreMarket})
 	}
 	return out, nil
@@ -1232,6 +1296,7 @@ func (p *Poller) fetchTopMovers(ctx context.Context, dir int32) ([]rankItem, err
 	for _, d := range resp.GetS2C().GetDataList() {
 		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()), dailyRequired: true,
 			ChangePct: d.GetChangeRatio(), Last: d.GetCurPrice(), Volume: d.GetVolume(),
+			sessionVolume: sessionVolumeValue(d.Volume), sessionVolumePhase: session.RTH,
 			Turnover: validTurnover(d.Turnover), turnoverPhase: session.RTH})
 	}
 	return out, nil
@@ -1254,6 +1319,7 @@ func (p *Poller) fetchAfterHours(ctx context.Context, dir int32) ([]rankItem, er
 	for _, d := range resp.GetS2C().GetDataList() {
 		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()), dailyRequired: true,
 			ChangePct: d.GetAfterHoursChangeRatio(), Last: d.GetAfterHoursPrice(), Volume: d.GetAfterHoursVolume(),
+			sessionVolume: sessionVolumeValue(d.AfterHoursVolume), sessionVolumePhase: session.PostMarket,
 			Turnover: validTurnover(d.AfterHoursTurnover), turnoverPhase: session.PostMarket})
 	}
 	return out, nil
@@ -1276,6 +1342,7 @@ func (p *Poller) fetchOvernight(ctx context.Context, dir int32) ([]rankItem, err
 	for _, d := range resp.GetS2C().GetDataList() {
 		out = append(out, rankItem{Symbol: symbolOf(d.GetSecurity()), dailyRequired: true,
 			ChangePct: d.GetOvernightChangeRatio(), Last: d.GetOvernightPrice(), Volume: d.GetOvernightVolume(),
+			sessionVolume: sessionVolumeValue(d.OvernightVolume), sessionVolumePhase: session.Overnight,
 			Turnover: validTurnover(d.OvernightTurnover), turnoverPhase: session.Overnight})
 	}
 	return out, nil
@@ -1540,6 +1607,11 @@ func (p *Poller) snapshotBatch(ctx context.Context, phase session.Phase, syms []
 				it.Turnover = turnover
 				it.turnoverPhase = phase
 				it.turnoverPoolDay = poolDay
+			}
+			if sessionVolume := snapshotSessionVolume(basic, phase, poolDay); sessionVolume != nil {
+				it.sessionVolume = sessionVolume
+				it.sessionVolumePhase = phase
+				it.sessionVolumePoolDay = poolDay
 			}
 			if p.ssr != nil {
 				it.ShortSellRestricted = p.ssr.IsRestricted(sym, p.clk.Now(), snapshotObservationTime(basic), basic.GetLowPrice(), basic.GetLastClosePrice())

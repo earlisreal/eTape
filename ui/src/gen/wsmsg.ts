@@ -374,6 +374,7 @@ export interface ScannerRow {
   last: number | null; // null = no print yet
   floatShares: number | null; // ACTUAL shares (engine converts moomoo thousands); null = unknown
   volume: number | null; // latest base daily total; nil = unavailable, zero is valid
+  sessionVolume: number | null; // active Scanner session total; nil = unavailable, zero is valid
   turnover: number | null; // latest base daily dollar total; null = unavailable
   relativeVolume: number | null; // latest daily volume / historical daily mean; null = unavailable
   shortInterest: number | null; // raw reported shares; null = unavailable
@@ -390,6 +391,7 @@ export interface ScannerFilters {
   minChangePct: number /* float64 */;
   maxFloatShares: number | null;
   minVolume: number /* float64 */;
+  minSessionVolume: number /* float64 */; // active Scanner session share floor; 0 = off
   minTurnover: number /* float64 */; // latest daily dollar turnover floor; 0 = off
   minRelativeVolume: number /* float64 */;
   minPrice: number /* float64 */; // Scanner Last floor; 0 = off

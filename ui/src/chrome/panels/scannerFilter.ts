@@ -5,6 +5,7 @@ export interface ScannerThresholds {
   minChangePct: number;          // magnitude floor on % change (0 = off)
   floatCapShares: number | null; // max float in shares (null = off)
   minVolume: number;             // min latest daily volume (0 = off)
+  minSessionVolume: number;      // min active-session volume (0 = off)
   minTurnover: number;           // min latest daily dollar turnover (0 = off)
   minRelativeVolume: number;     // min full-day Relative Volume (0 = off)
   minPrice: number;              // min Scanner Last (0 = off)
@@ -17,6 +18,7 @@ export interface ScannerThresholds {
 export function applyScannerFilters<T extends ScannerRow>(rows: T[], t: ScannerThresholds): T[] {
   return rows.filter((r) => {
     if (t.minVolume > 0 && (r.volume == null || r.volume < t.minVolume)) return false;
+    if (t.minSessionVolume > 0 && (r.sessionVolume == null || r.sessionVolume < t.minSessionVolume)) return false;
     if (t.minTurnover > 0 && (r.turnover == null || !Number.isFinite(r.turnover) || r.turnover < t.minTurnover)) return false;
     if (t.minRelativeVolume > 0 && (r.relativeVolume == null || r.relativeVolume < t.minRelativeVolume)) return false;
     if ((t.minPrice > 0 || t.maxPrice > 0) && (r.last == null || !Number.isFinite(r.last) || r.last <= 0 || t.minPrice > 0 && r.last < t.minPrice || t.maxPrice > 0 && r.last > t.maxPrice)) return false;
@@ -43,6 +45,7 @@ export function formatFilterSummary(t: ScannerThresholds): string {
   if (t.minChangePct > 0) parts.push(`change magnitude ≥ ${t.minChangePct}%`);
   if (t.floatCapShares !== null) parts.push(`float ≤ ${compact(t.floatCapShares)}`);
   if (t.minVolume > 0) parts.push(`vol ≥ ${compact(t.minVolume)}`);
+  if (t.minSessionVolume > 0) parts.push(`session vol ≥ ${compact(t.minSessionVolume)}`);
   if (t.minTurnover > 0) parts.push(`turnover ≥ ${formatDollarTurnover(t.minTurnover)}`);
   if (t.minRelativeVolume > 0) parts.push(`rel vol ≥ ${t.minRelativeVolume}`);
   if (t.minPrice > 0) parts.push(`price ≥ ${price(t.minPrice)}`);

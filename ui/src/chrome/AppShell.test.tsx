@@ -81,7 +81,7 @@ class TargetChannel implements HotkeyTargetChannel {
   close(): void { this.listener = undefined; }
 }
 
-const scannerShortInterestDefaults = { turnover: null, shortInterest: null, shortInterestAsOf: null } as const;
+const scannerShortInterestDefaults = { turnover: null, sessionVolume: null, shortInterest: null, shortInterestAsOf: null } as const;
 
 function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApplied?: () => void; onRender?: () => void; hotkeyTargetChannel?: HotkeyTargetChannel }) {
   const stores = makeStores();

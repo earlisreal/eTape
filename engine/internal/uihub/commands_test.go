@@ -264,7 +264,7 @@ func TestCommandsSetScannerFiltersPersistsV2(t *testing.T) {
 	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
 	cd.scanner.Store(&scannerBox{scanner: scanner})
 
-	want := wsmsg.ScannerFilters{Mode: "gainers", MinTurnover: 12_345_678.9, MinRelativeVolume: 2.5, MinPrice: 1.25, MaxPrice: 20, FloatUnit: "M", VolumeUnit: "K"}
+	want := wsmsg.ScannerFilters{Mode: "gainers", MinSessionVolume: 2_500, MinTurnover: 12_345_678.9, MinRelativeVolume: 2.5, MinPrice: 1.25, MaxPrice: 20, FloatUnit: "M", VolumeUnit: "K"}
 	ack, _ := cd.handle(context.Background(), "SetScannerFilters", mustJSON(t, wsmsg.SetScannerFiltersArgs{Filters: want}), 0, func(wsmsg.AckMsg) {})
 	if ack.Status != wsmsg.AckAccepted || !reflect.DeepEqual(scanner.filters, want) {
 		t.Fatalf("SetScannerFilters ack/filters = %+v / %+v", ack, scanner.filters)
@@ -295,6 +295,23 @@ func TestCommandsSetScannerFiltersRejectsInvalidPriceRange(t *testing.T) {
 	}
 	if scanner.Filters().MinPrice != 0 || scanner.Filters().MaxPrice != 0 {
 		t.Fatalf("invalid price range changed scanner filters: %+v", scanner.Filters())
+	}
+}
+
+func TestCommandsSetScannerFiltersRejectsInvalidSessionVolume(t *testing.T) {
+	cfg := &spyCfg{}
+	scanner := &scannerCtlTestSpy{filters: scan.Defaults(config.Scan{})}
+	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	cd.scanner.Store(&scannerBox{scanner: scanner})
+
+	bad := scanner.Filters()
+	bad.MinSessionVolume = -1
+	ack, _ := cd.handle(context.Background(), "SetScannerFilters", mustJSON(t, wsmsg.SetScannerFiltersArgs{Filters: bad}), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckBlocked {
+		t.Fatalf("invalid session volume accepted: %+v", ack)
+	}
+	if _, ok := cfg.got["scanner.filters.v2"]; ok {
+		t.Fatal("invalid session volume was persisted")
 	}
 }
 

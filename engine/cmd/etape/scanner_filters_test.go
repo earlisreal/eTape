@@ -29,11 +29,11 @@ func (s *scannerFilterConfigSpy) SetConfig(key, value string) {
 func TestRestoreScannerFiltersV2WinsOverLegacyV1(t *testing.T) {
 	defaults := scan.Defaults(config.Scan{})
 	spy := &scannerFilterConfigSpy{values: map[string]string{
-		"scanner.filters.v2": `{"mode":"losers","minChangePct":7,"maxFloatShares":1000000,"minVolume":2000,"minRelativeVolume":3.5,"floatUnit":"M","volumeUnit":"K"}`,
+		"scanner.filters.v2": `{"mode":"losers","minChangePct":7,"maxFloatShares":1000000,"minVolume":2000,"minSessionVolume":750,"minRelativeVolume":3.5,"floatUnit":"M","volumeUnit":"K"}`,
 		"scanner.filters.v1": `{"mode":"gainers","minChangePct":1,"maxFloatShares":null,"minVolume":1,"minVolumeRatio":99,"floatUnit":"K","volumeUnit":"M"}`,
 	}}
 	got := restoreScannerFilters(spy, defaults)
-	if got.Mode != "losers" || got.MinRelativeVolume != 3.5 || got.MinChangePct != 7 || got.MinVolume != 2000 {
+	if got.Mode != "losers" || got.MinRelativeVolume != 3.5 || got.MinChangePct != 7 || got.MinVolume != 2000 || got.MinSessionVolume != 750 {
 		t.Fatalf("v2 was not authoritative: %+v", got)
 	}
 	if got.MinPrice != 0 || got.MaxPrice != 0 {
@@ -47,11 +47,14 @@ func TestRestoreScannerFiltersV2WinsOverLegacyV1(t *testing.T) {
 func TestRestoreScannerFiltersPreservesFractionalTurnover(t *testing.T) {
 	defaults := scan.Defaults(config.Scan{})
 	spy := &scannerFilterConfigSpy{values: map[string]string{
-		"scanner.filters.v2": `{"mode":"gainers","minChangePct":0,"maxFloatShares":null,"minVolume":0,"minTurnover":12345678.9,"minRelativeVolume":0,"floatUnit":"M","volumeUnit":"K"}`,
+		"scanner.filters.v2": `{"mode":"gainers","minChangePct":0,"maxFloatShares":null,"minVolume":0,"minSessionVolume":2500,"minTurnover":12345678.9,"minRelativeVolume":0,"floatUnit":"M","volumeUnit":"K"}`,
 	}}
 	got := restoreScannerFilters(spy, defaults)
 	if got.MinTurnover != 12_345_678.9 {
 		t.Fatalf("turnover threshold = %v, want 12345678.9", got.MinTurnover)
+	}
+	if got.MinSessionVolume != 2_500 {
+		t.Fatalf("session volume threshold = %v, want 2500", got.MinSessionVolume)
 	}
 	if got.MinPrice != 0 || got.MaxPrice != 0 {
 		t.Fatalf("omitted price bounds should default off: %+v", got)

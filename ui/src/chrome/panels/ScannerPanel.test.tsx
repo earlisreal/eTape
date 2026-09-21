@@ -16,7 +16,7 @@ function fakeBus() {
   return { post: (m: unknown) => subs.forEach((cb) => cb(m)), onMessage: (cb: (m: unknown) => void) => { subs.add(cb); return () => subs.delete(cb); }, close: () => {} };
 }
 
-const scannerShortInterestDefaults = { turnover: null, shortInterest: null, shortInterestAsOf: null } as const;
+const scannerShortInterestDefaults = { turnover: null, sessionVolume: null, shortInterest: null, shortInterestAsOf: null } as const;
 
 function renderPanel(
   over: Partial<PanelConfig> = {},
@@ -59,7 +59,60 @@ describe("ScannerPanel", () => {
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [] } }));
     expect(screen.getAllByRole("columnheader").map((header) => header.textContent?.replace(/[▴▾]/g, "").trim())).toEqual([
-      "Symbol", "%", "Last", "Float", "REL VOL", "Vol", "Turnover", "Short Int",
+      "Symbol", "%", "Last", "Float", "REL VOL", "Vol", "Session Vol", "Turnover", "Short Int",
+    ]);
+  });
+
+  it("hides and reorders metric columns while keeping Session Volume filterable", () => {
+    const { scanner, onConfigChange } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: {
+      refreshedAt: "2026-07-08T13:00:00.000Z",
+      filters: { mode: "gainers", minChangePct: 0, maxFloatShares: null, minVolume: 0, minSessionVolume: 1_000, minTurnover: 0, minRelativeVolume: 0, minPrice: 0, maxPrice: 0, floatUnit: "M", volumeUnit: "K" },
+      rows: [{ ...scannerShortInterestDefaults, symbol: "US.A", changePct: 5, last: 1, floatShares: 1, volume: 2_000, sessionVolume: 1_000, relativeVolume: null }],
+    } }));
+    fireEvent.click(screen.getByRole("button", { name: "columns" }));
+    fireEvent.click(screen.getByLabelText("show Session Vol"));
+    expect(screen.queryByRole("columnheader", { name: /Session Vol/ })).toBeNull();
+    expect(screen.getByText(/session vol ≥ 1k/)).toBeTruthy();
+    expect(onConfigChange).toHaveBeenCalledWith(expect.objectContaining({ scannerColumns: expect.objectContaining({ hidden: ["sessionVol"] }) }));
+  });
+
+  it("moves columns with accessible controls and resets the layout", () => {
+    const { onConfigChange } = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: "columns" }));
+    fireEvent.click(screen.getByRole("button", { name: "move Session Vol up" }));
+    expect(screen.getAllByRole("columnheader").map((header) => header.textContent?.replace(/[▴▾]/g, "").trim())).toEqual([
+      "Symbol", "%", "Last", "Float", "REL VOL", "Session Vol", "Vol", "Turnover", "Short Int",
+    ]);
+    fireEvent.click(screen.getByRole("button", { name: "Reset columns" }));
+    expect(onConfigChange).toHaveBeenLastCalledWith(expect.objectContaining({ scannerColumns: { order: ["changePct", "last", "float", "relVol", "vol", "sessionVol", "turnover", "shortInterest"], hidden: [] } }));
+  });
+
+  it("falls back from a hidden active sort to the mode default", () => {
+    const { onConfigChange } = renderPanel({ settings: { sort: { col: "sessionVol", dir: "desc" } } });
+    fireEvent.click(screen.getByRole("button", { name: "columns" }));
+    fireEvent.click(screen.getByLabelText("show Session Vol"));
+    expect(onConfigChange).toHaveBeenCalledWith({ sort: { col: "changePct", dir: "desc" } });
+  });
+
+  it("repairs an initially hidden persisted sort", () => {
+    const { onConfigChange } = renderPanel({ settings: { sort: { col: "sessionVol", dir: "desc" }, scannerColumns: { hidden: ["sessionVol"] } } });
+    expect(onConfigChange).toHaveBeenCalledWith({ sort: { col: "changePct", dir: "desc" } });
+  });
+
+  it("falls back to Symbol when the mode default is also hidden", () => {
+    const { onConfigChange } = renderPanel({ settings: { sort: { col: "sessionVol", dir: "desc" } } });
+    fireEvent.click(screen.getByRole("button", { name: "columns" }));
+    fireEvent.click(screen.getByLabelText("show Session Vol"));
+    fireEvent.click(screen.getByLabelText("show %"));
+    expect(onConfigChange).toHaveBeenLastCalledWith({ sort: { col: "sym", dir: "asc" } });
+  });
+
+  it("repairs malformed saved column settings", () => {
+    const { scanner } = renderPanel({ settings: { scannerColumns: { order: ["sessionVol", "sessionVol", "unknown", "vol"], hidden: ["sessionVol", "sessionVol", "unknown"] } } });
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [] } }));
+    expect(screen.getAllByRole("columnheader").map((header) => header.textContent?.replace(/[▴▾]/g, "").trim())).toEqual([
+      "Symbol", "Vol", "%", "Last", "Float", "REL VOL", "Turnover", "Short Int",
     ]);
   });
 
@@ -340,6 +393,7 @@ describe("ScannerPanel", () => {
     expect(screen.queryByLabelText("min gain %")).toBeNull();
     expect(screen.queryByLabelText("float cap")).toBeNull();
     expect(screen.queryByLabelText("min volume")).toBeNull();
+    expect(screen.queryByLabelText("min session volume")).toBeNull();
     expect(screen.queryByLabelText("rel vol ≥")).toBeNull();
     expect(screen.queryByLabelText("price ≥")).toBeNull();
     expect(screen.queryByLabelText("price ≤")).toBeNull();
@@ -347,6 +401,7 @@ describe("ScannerPanel", () => {
     expect(screen.getByLabelText("min gain %")).toBeTruthy();
     expect(screen.getByLabelText("float cap")).toBeTruthy();
     expect(screen.getByLabelText("min volume")).toBeTruthy();
+    expect(screen.getByLabelText("min session volume")).toBeTruthy();
     expect(screen.getByLabelText("rel vol ≥")).toBeTruthy();
     expect(screen.getByLabelText("price ≥")).toBeTruthy();
     expect(screen.getByLabelText("price ≤")).toBeTruthy();
@@ -354,8 +409,8 @@ describe("ScannerPanel", () => {
 
   it("the summary line reflects the active thresholds", () => {
     const { scanner } = renderPanel();
-    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [], filters: { mode: "gainers", minChangePct: 10, maxFloatShares: 20_000_000, minVolume: 100_000, minTurnover: 0, minRelativeVolume: 2.5, minPrice: 1.25, maxPrice: 20, floatUnit: "M", volumeUnit: "K" } } }));
-    expect(screen.getByText(/change magnitude ≥ 10% · float ≤ 20M · vol ≥ 100k · rel vol ≥ 2.5 · price ≥ \$1\.25 · price ≤ \$20/)).toBeTruthy();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [], filters: { mode: "gainers", minChangePct: 10, maxFloatShares: 20_000_000, minVolume: 100_000, minSessionVolume: 250_000, minTurnover: 0, minRelativeVolume: 2.5, minPrice: 1.25, maxPrice: 20, floatUnit: "M", volumeUnit: "K" } } }));
+    expect(screen.getByText(/change magnitude ≥ 10% · float ≤ 20M · vol ≥ 100k · session vol ≥ 250k · rel vol ≥ 2\.5 · price ≥ \$1\.25 · price ≤ \$20/)).toBeTruthy();
   });
 
   it("summary line reads 'no filters' when thresholds are off", () => {
@@ -397,6 +452,15 @@ describe("ScannerPanel", () => {
     fireEvent.change(screen.getByLabelText("min turnover"), { target: { value: "12.5" } });
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(commands.sendCommand).toHaveBeenCalledWith("SetScannerFilters", { filters: expect.objectContaining({ minTurnover: 12_500_000 }) });
+  });
+
+  it("submits a shared-unit Session Volume threshold", () => {
+    const { commands } = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /filters/i }));
+    fireEvent.change(screen.getByLabelText("volume unit"), { target: { value: "M" } });
+    fireEvent.change(screen.getByLabelText("min session volume"), { target: { value: "2.5" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(commands.sendCommand).toHaveBeenCalledWith("SetScannerFilters", expect.objectContaining({ filters: expect.objectContaining({ minSessionVolume: 2_500_000 }) }));
   });
 
   it("submits arbitrary decimal price bounds", () => {
@@ -519,11 +583,11 @@ describe("ScannerPanel", () => {
     const { scanner } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [
-        { symbol: "US.XOS", changePct: 5, last: 1, floatShares: 1, volume: 1, relativeVolume: null, shortInterest: 547_619, shortInterestAsOf: "2026-07-31" },
-        { symbol: "US.SGLY", changePct: 4, last: 1, floatShares: 1, volume: 1, relativeVolume: null, shortInterest: 9_067, shortInterestAsOf: "2026-07-31" },
-        { symbol: "US.SXTC", changePct: 3, last: 1, floatShares: 1, volume: 1, relativeVolume: null, shortInterest: 4_613_535, shortInterestAsOf: "2026-07-31" },
-        { symbol: "US.ZERO", changePct: 2, last: 1, floatShares: 1, volume: 1, relativeVolume: null, shortInterest: 0, shortInterestAsOf: "2026-07-31" },
-        { symbol: "US.NONE", changePct: 1, last: 1, floatShares: 1, volume: 1, relativeVolume: null, shortInterest: null, shortInterestAsOf: null },
+        { symbol: "US.XOS", changePct: 5, last: 1, floatShares: 1, volume: 1, sessionVolume: 1, relativeVolume: null, shortInterest: 547_619, shortInterestAsOf: "2026-07-31" },
+        { symbol: "US.SGLY", changePct: 4, last: 1, floatShares: 1, volume: 1, sessionVolume: 1, relativeVolume: null, shortInterest: 9_067, shortInterestAsOf: "2026-07-31" },
+        { symbol: "US.SXTC", changePct: 3, last: 1, floatShares: 1, volume: 1, sessionVolume: 1, relativeVolume: null, shortInterest: 4_613_535, shortInterestAsOf: "2026-07-31" },
+        { symbol: "US.ZERO", changePct: 2, last: 1, floatShares: 1, volume: 1, sessionVolume: 1, relativeVolume: null, shortInterest: 0, shortInterestAsOf: "2026-07-31" },
+        { symbol: "US.NONE", changePct: 1, last: 1, floatShares: 1, volume: 1, sessionVolume: 1, relativeVolume: null, shortInterest: null, shortInterestAsOf: null },
       ] } }));
     expect(screen.getByText("547.62K")).toBeTruthy();
     expect(screen.getByText("9.07K")).toBeTruthy();
@@ -537,9 +601,9 @@ describe("ScannerPanel", () => {
     const { scanner, onConfigChange } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [
-        { symbol: "US.UNKNOWN", changePct: 2, last: 1, floatShares: 1, volume: 1, relativeVolume: null, shortInterest: null, shortInterestAsOf: null },
-        { symbol: "US.LOW", changePct: 40, last: 1, floatShares: 1, volume: 1, relativeVolume: null, shortInterest: 9_067, shortInterestAsOf: "2026-07-31" },
-        { symbol: "US.HIGH", changePct: 3, last: 1, floatShares: 1, volume: 1, relativeVolume: null, shortInterest: 547_619, shortInterestAsOf: "2026-07-31" },
+        { symbol: "US.UNKNOWN", changePct: 2, last: 1, floatShares: 1, volume: 1, sessionVolume: null, relativeVolume: null, shortInterest: null, shortInterestAsOf: null },
+        { symbol: "US.LOW", changePct: 40, last: 1, floatShares: 1, volume: 1, sessionVolume: 1, relativeVolume: null, shortInterest: 9_067, shortInterestAsOf: "2026-07-31" },
+        { symbol: "US.HIGH", changePct: 3, last: 1, floatShares: 1, volume: 1, sessionVolume: 1, relativeVolume: null, shortInterest: 547_619, shortInterestAsOf: "2026-07-31" },
       ] } }));
     fireEvent.click(screen.getByRole("columnheader", { name: /Short Int/ }));
     expect(onConfigChange).toHaveBeenCalledWith({ sort: { col: "shortInterest", dir: "desc" } });
