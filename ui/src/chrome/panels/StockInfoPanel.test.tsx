@@ -319,53 +319,25 @@ describe("StockInfoPanel fundamentals section", () => {
     expect(screen.queryByText(/stock info/i)).toBeNull();
   });
 
-  it("renders Alpaca borrow status and preserves explicit boolean false values", () => {
-    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
+  it("does not render Alpaca eligibility in compact or expanded details", () => {
+    const { stockDetail, linkGroups } = renderPanel();
     act(() => {
       stockDetail.apply(detailSnap(detailPayload("US.TSLA", {
         borrowStatus: "hard_to_borrow", shortable: true, marginable: false, tradable: false,
       })));
       linkGroups.focus("green", "US.TSLA");
     });
-    expect(screen.getByText("Borrow status")).toBeTruthy();
-    expect(screen.getByText("HTB")).toBeTruthy();
-    expect(screen.getByText("Shortable")).toBeTruthy();
-    expect(screen.getByText("Marginable")).toBeTruthy();
-    expect(screen.getByText("Tradable")).toBeTruthy();
-    expect(screen.getByText("Yes")).toBeTruthy();
-    expect(screen.getAllByText("No")).toHaveLength(2);
-  });
-
-  it("renders ETB and keeps nullable booleans unknown instead of turning them into No", () => {
-    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
-    act(() => {
-      stockDetail.apply(detailSnap(detailPayload("US.AAPL", { borrowStatus: "easy_to_borrow" })));
-      linkGroups.focus("green", "US.AAPL");
-    });
-    expect(screen.getByText("ETB")).toBeTruthy();
-    expect(screen.queryByText("No")).toBeNull();
-    expect(screen.getByText("Shortable")).toBeTruthy();
-  });
-
-  it("hides Alpaca rows when every Alpaca field is null", () => {
-    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
-    act(() => {
-      stockDetail.apply(detailSnap(detailPayload("US.MSFT")));
-      linkGroups.focus("green", "US.MSFT");
-    });
-    expect(screen.queryByText("Borrow status")).toBeNull();
-    expect(screen.queryByText("Shortable")).toBeNull();
-    expect(screen.queryByText("Marginable")).toBeNull();
-    expect(screen.queryByText("Tradable")).toBeNull();
-  });
-
-  it("humanizes an unknown future borrow status without crashing", () => {
-    const { stockDetail, linkGroups } = renderPanel({ settings: { detailsCollapsed: false } });
-    act(() => {
-      stockDetail.apply(detailSnap(detailPayload("US.NVDA", { borrowStatus: "special_borrow" })));
-      linkGroups.focus("green", "US.NVDA");
-    });
-    expect(screen.getByText("Special borrow")).toBeTruthy();
+    const expectNoEligibility = () => {
+      for (const label of ["Borrow status", "Shortable", "Marginable", "Tradable"]) {
+        expect(screen.queryByText(label, { exact: true })).toBeNull();
+      }
+      for (const value of ["HTB", "Yes", "No", "NOT Tradeable"]) {
+        expect(screen.queryByText(value, { exact: true })).toBeNull();
+      }
+    };
+    expectNoEligibility();
+    fireEvent.click(screen.getByRole("button", { name: /toggle fundamentals/i }));
+    expectNoEligibility();
   });
 });
 
@@ -377,33 +349,6 @@ describe("StockInfoPanel details collapse (compact-by-default)", () => {
       linkGroups.focus("green", "US.NVDA");
     });
     expect(screen.queryByText("NVDA**")).toBeNull();
-  });
-
-  it("shows shortable and tradable in the collapsed summary", () => {
-    const { stockDetail, linkGroups } = renderPanel();
-    act(() => {
-      stockDetail.apply(detailSnap(detailPayload("US.NVDA", { borrowStatus: "hard_to_borrow", shortable: true, tradable: false })));
-      linkGroups.focus("green", "US.NVDA");
-    });
-    expect(screen.getByText("HTB")).toBeTruthy();
-    expect(screen.queryByText("Shortable")).toBeNull();
-    expect(screen.getByText("NOT Tradeable")).toBeTruthy();
-    expect(screen.queryByText("Tradable")).toBeNull();
-    expect(screen.queryByText("Yes")).toBeNull();
-    expect(screen.queryByText("No")).toBeNull();
-  });
-
-  it("replaces borrow status with Not Shortable when the asset is not shortable", () => {
-    const { stockDetail, linkGroups } = renderPanel();
-    act(() => {
-      stockDetail.apply(detailSnap(detailPayload("US.NVDA", { borrowStatus: "easy_to_borrow", shortable: false, tradable: true })));
-      linkGroups.focus("green", "US.NVDA");
-    });
-    expect(screen.getByText("Not Shortable")).toBeTruthy();
-    expect(screen.queryByText("ETB")).toBeNull();
-    expect(screen.queryByText("HTB")).toBeNull();
-    expect(screen.getByText("Tradable")).toBeTruthy();
-    expect(screen.queryByText("NOT Tradeable")).toBeNull();
   });
 
   it("omits Symbol and its SSR marker from the expanded header", () => {
@@ -472,28 +417,6 @@ describe("StockInfoPanel details collapse (compact-by-default)", () => {
     expect(screen.queryByText("Sector")).toBeNull();
   });
 
-  it.each([
-    ["hard_to_borrow", "HTB"],
-    ["easy_to_borrow", "ETB"],
-  ])("collapsed row shows %s as %s", (borrowStatus, label) => {
-    const { stockDetail, linkGroups } = renderPanel();
-    act(() => {
-      stockDetail.apply(detailSnap(detailPayload("US.AAPL", { borrowStatus })));
-      linkGroups.focus("green", "US.AAPL");
-    });
-    expect(screen.getByText(label)).toBeTruthy();
-    expect(screen.queryByText("Shortable")).toBeNull();
-  });
-
-  it("collapsed row is unchanged when borrow status is null", () => {
-    const { stockDetail, linkGroups } = renderPanel();
-    act(() => {
-      stockDetail.apply(detailSnap(detailPayload("US.AAPL", { borrowStatus: null })));
-      linkGroups.focus("green", "US.AAPL");
-    });
-    expect(screen.queryByText("HTB")).toBeNull();
-    expect(screen.queryByText("ETB")).toBeNull();
-  });
 });
 
 describe("StockInfoPanel news list enhancements", () => {
