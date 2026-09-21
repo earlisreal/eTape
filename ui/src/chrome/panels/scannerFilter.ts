@@ -7,6 +7,8 @@ export interface ScannerThresholds {
   minVolume: number;             // min latest daily volume (0 = off)
   minTurnover: number;           // min latest daily dollar turnover (0 = off)
   minRelativeVolume: number;     // min full-day Relative Volume (0 = off)
+  minPrice: number;              // min Scanner Last (0 = off)
+  maxPrice: number;              // max Scanner Last (0 = off)
 }
 
 /** Client-side filter atop the engine's coarse server filters. A row with no
@@ -17,6 +19,7 @@ export function applyScannerFilters<T extends ScannerRow>(rows: T[], t: ScannerT
     if (t.minVolume > 0 && (r.volume == null || r.volume < t.minVolume)) return false;
     if (t.minTurnover > 0 && (r.turnover == null || !Number.isFinite(r.turnover) || r.turnover < t.minTurnover)) return false;
     if (t.minRelativeVolume > 0 && (r.relativeVolume == null || r.relativeVolume < t.minRelativeVolume)) return false;
+    if ((t.minPrice > 0 || t.maxPrice > 0) && (r.last == null || !Number.isFinite(r.last) || r.last <= 0 || t.minPrice > 0 && r.last < t.minPrice || t.maxPrice > 0 && r.last > t.maxPrice)) return false;
     if (t.floatCapShares !== null && r.floatShares !== null && r.floatShares > t.floatCapShares) return false;
     if (t.minChangePct > 0 && (r.changePct === null || Math.abs(r.changePct) < t.minChangePct)) return false;
     return true;
@@ -31,6 +34,8 @@ export function sortByChangeDesc<T extends ScannerRow>(rows: T[]): T[] {
 const compact = (n: number): string =>
   n >= 1_000_000 ? `${+(n / 1_000_000).toFixed(1)}M` : n >= 1_000 ? `${+(n / 1_000).toFixed(0)}k` : `${n}`;
 
+const price = (n: number): string => `$${String(n)}`;
+
 /** One-line mono summary of active thresholds for the panel header, e.g.
  *  "change ≥ 10% · float ≤ 20M · vol ≥ 100k". Off fields (0 / null) are omitted. */
 export function formatFilterSummary(t: ScannerThresholds): string {
@@ -40,5 +45,7 @@ export function formatFilterSummary(t: ScannerThresholds): string {
   if (t.minVolume > 0) parts.push(`vol ≥ ${compact(t.minVolume)}`);
   if (t.minTurnover > 0) parts.push(`turnover ≥ ${formatDollarTurnover(t.minTurnover)}`);
   if (t.minRelativeVolume > 0) parts.push(`rel vol ≥ ${t.minRelativeVolume}`);
+  if (t.minPrice > 0) parts.push(`price ≥ ${price(t.minPrice)}`);
+  if (t.maxPrice > 0) parts.push(`price ≤ ${price(t.maxPrice)}`);
   return parts.length ? parts.join(" · ") : "no filters";
 }

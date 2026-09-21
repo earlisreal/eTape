@@ -252,7 +252,7 @@ func Defaults(cfg config.Scan) wsmsg.ScannerFilters {
 		v := cfg.MaxFloatShares
 		cap = &v
 	}
-	return wsmsg.ScannerFilters{Mode: "gainers", MinChangePct: cfg.MinChangePct, MaxFloatShares: cap, MinVolume: float64(cfg.MinVolume), MinTurnover: 0, MinRelativeVolume: 0, FloatUnit: "M", VolumeUnit: "K"}
+	return wsmsg.ScannerFilters{Mode: "gainers", MinChangePct: cfg.MinChangePct, MaxFloatShares: cap, MinVolume: float64(cfg.MinVolume), MinTurnover: 0, MinRelativeVolume: 0, MinPrice: 0, MaxPrice: 0, FloatUnit: "M", VolumeUnit: "K"}
 }
 
 func ValidateFilters(f wsmsg.ScannerFilters) error {
@@ -262,8 +262,11 @@ func ValidateFilters(f wsmsg.ScannerFilters) error {
 	if (f.FloatUnit != "K" && f.FloatUnit != "M") || (f.VolumeUnit != "K" && f.VolumeUnit != "M") {
 		return fmt.Errorf("invalid unit")
 	}
-	if math.IsNaN(f.MinChangePct) || math.IsInf(f.MinChangePct, 0) || f.MinChangePct < 0 || math.IsNaN(f.MinVolume) || math.IsInf(f.MinVolume, 0) || f.MinVolume < 0 || math.IsNaN(f.MinTurnover) || math.IsInf(f.MinTurnover, 0) || f.MinTurnover < 0 || math.IsNaN(f.MinRelativeVolume) || math.IsInf(f.MinRelativeVolume, 0) || f.MinRelativeVolume < 0 {
+	if math.IsNaN(f.MinChangePct) || math.IsInf(f.MinChangePct, 0) || f.MinChangePct < 0 || math.IsNaN(f.MinVolume) || math.IsInf(f.MinVolume, 0) || f.MinVolume < 0 || math.IsNaN(f.MinTurnover) || math.IsInf(f.MinTurnover, 0) || f.MinTurnover < 0 || math.IsNaN(f.MinRelativeVolume) || math.IsInf(f.MinRelativeVolume, 0) || f.MinRelativeVolume < 0 || math.IsNaN(f.MinPrice) || math.IsInf(f.MinPrice, 0) || f.MinPrice < 0 || math.IsNaN(f.MaxPrice) || math.IsInf(f.MaxPrice, 0) || f.MaxPrice < 0 {
 		return fmt.Errorf("invalid numeric filter")
+	}
+	if f.MinPrice > 0 && f.MaxPrice > 0 && f.MinPrice > f.MaxPrice {
+		return fmt.Errorf("invalid price range")
 	}
 	if f.MaxFloatShares != nil && (math.IsNaN(*f.MaxFloatShares) || math.IsInf(*f.MaxFloatShares, 0) || *f.MaxFloatShares < 0) {
 		return fmt.Errorf("invalid float cap")
@@ -479,7 +482,7 @@ func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
 }
 
 func sameFilters(a, b wsmsg.ScannerFilters) bool {
-	if a.Mode != b.Mode || a.MinChangePct != b.MinChangePct || a.MinVolume != b.MinVolume || a.MinTurnover != b.MinTurnover || a.MinRelativeVolume != b.MinRelativeVolume || a.FloatUnit != b.FloatUnit || a.VolumeUnit != b.VolumeUnit {
+	if a.Mode != b.Mode || a.MinChangePct != b.MinChangePct || a.MinVolume != b.MinVolume || a.MinTurnover != b.MinTurnover || a.MinRelativeVolume != b.MinRelativeVolume || a.MinPrice != b.MinPrice || a.MaxPrice != b.MaxPrice || a.FloatUnit != b.FloatUnit || a.VolumeUnit != b.VolumeUnit {
 		return false
 	}
 	if a.MaxFloatShares == nil || b.MaxFloatShares == nil {
@@ -682,6 +685,11 @@ func rankRowsFiltered(items []rankItem, floats map[string]floatEntry, f wsmsg.Sc
 		if f.MinRelativeVolume > 0 && (it.RelativeVolume == nil || *it.RelativeVolume < f.MinRelativeVolume) {
 			continue
 		}
+		if f.MinPrice > 0 || f.MaxPrice > 0 {
+			if !finitePositive(it.Last) || f.MinPrice > 0 && it.Last < f.MinPrice || f.MaxPrice > 0 && it.Last > f.MaxPrice {
+				continue
+			}
+		}
 		var floatPtr *float64
 		if e, ok := floats[it.Symbol]; ok {
 			if e.bad {
@@ -714,6 +722,8 @@ func rankRowsFiltered(items []rankItem, floats map[string]floatEntry, f wsmsg.Sc
 	}
 	return out
 }
+
+func finitePositive(v float64) bool { return v > 0 && !math.IsNaN(v) && !math.IsInf(v, 0) }
 
 func relativeVolumeCacheDay(now time.Time) (int64, bool) {
 	day, ok := scannerMetricDate(now)

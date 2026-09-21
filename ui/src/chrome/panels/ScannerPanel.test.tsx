@@ -89,6 +89,8 @@ describe("ScannerPanel", () => {
       const table = within(container).getByRole("table");
       expect(sync.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(summary.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      fireEvent.click(filters);
+      expect(within(container).queryByText(/updated/i)).toBeNull();
     } finally {
       unmount();
       slot.remove();
@@ -339,17 +341,21 @@ describe("ScannerPanel", () => {
     expect(screen.queryByLabelText("float cap")).toBeNull();
     expect(screen.queryByLabelText("min volume")).toBeNull();
     expect(screen.queryByLabelText("rel vol ≥")).toBeNull();
+    expect(screen.queryByLabelText("price ≥")).toBeNull();
+    expect(screen.queryByLabelText("price ≤")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /filters/i }));
     expect(screen.getByLabelText("min gain %")).toBeTruthy();
     expect(screen.getByLabelText("float cap")).toBeTruthy();
     expect(screen.getByLabelText("min volume")).toBeTruthy();
     expect(screen.getByLabelText("rel vol ≥")).toBeTruthy();
+    expect(screen.getByLabelText("price ≥")).toBeTruthy();
+    expect(screen.getByLabelText("price ≤")).toBeTruthy();
   });
 
   it("the summary line reflects the active thresholds", () => {
     const { scanner } = renderPanel();
-    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [], filters: { mode: "gainers", minChangePct: 10, maxFloatShares: 20_000_000, minVolume: 100_000, minTurnover: 0, minRelativeVolume: 2.5, floatUnit: "M", volumeUnit: "K" } } }));
-    expect(screen.getByText(/change magnitude ≥ 10% · float ≤ 20M · vol ≥ 100k · rel vol ≥ 2.5/)).toBeTruthy();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [], filters: { mode: "gainers", minChangePct: 10, maxFloatShares: 20_000_000, minVolume: 100_000, minTurnover: 0, minRelativeVolume: 2.5, minPrice: 1.25, maxPrice: 20, floatUnit: "M", volumeUnit: "K" } } }));
+    expect(screen.getByText(/change magnitude ≥ 10% · float ≤ 20M · vol ≥ 100k · rel vol ≥ 2.5 · price ≥ \$1\.25 · price ≤ \$20/)).toBeTruthy();
   });
 
   it("summary line reads 'no filters' when thresholds are off", () => {
@@ -372,6 +378,8 @@ describe("ScannerPanel", () => {
     expect((screen.getByLabelText("min gain %") as HTMLInputElement).value).toBe("0");
     expect((screen.getByLabelText("min turnover") as HTMLInputElement).value).toBe("0");
     expect((screen.getByLabelText("rel vol ≥") as HTMLInputElement).value).toBe("0");
+    expect((screen.getByLabelText("price ≥") as HTMLInputElement).value).toBe("");
+    expect((screen.getByLabelText("price ≤") as HTMLInputElement).value).toBe("");
     expect(onConfigChange).not.toHaveBeenCalled();
   });
 
@@ -391,6 +399,46 @@ describe("ScannerPanel", () => {
     expect(commands.sendCommand).toHaveBeenCalledWith("SetScannerFilters", { filters: expect.objectContaining({ minTurnover: 12_500_000 }) });
   });
 
+  it("submits arbitrary decimal price bounds", () => {
+    const { commands } = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /filters/i }));
+    fireEvent.change(screen.getByLabelText("price ≥"), { target: { value: "1.2345" } });
+    fireEvent.change(screen.getByLabelText("price ≤"), { target: { value: "20.25" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(commands.sendCommand).toHaveBeenCalledWith("SetScannerFilters", { filters: expect.objectContaining({ minPrice: 1.2345, maxPrice: 20.25 }) });
+  });
+
+  it("keeps invalid price ranges open and does not send them", () => {
+    const { commands } = renderPanel();
+    commands.sendCommand.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: /filters/i }));
+    fireEvent.change(screen.getByLabelText("price ≥"), { target: { value: "10" } });
+    fireEvent.change(screen.getByLabelText("price ≤"), { target: { value: "5" } });
+    expect(screen.getByText("Minimum price must be no greater than maximum price")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Apply" })).toHaveProperty("disabled", true);
+    expect(commands.sendCommand).not.toHaveBeenCalled();
+  });
+
+  it("closes settings outside or on Escape and discards the draft", () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /filters/i }));
+    fireEvent.change(screen.getByLabelText("price ≥"), { target: { value: "1.25" } });
+    fireEvent.mouseDown(screen.getByTestId("scanner-filter-summary"));
+    expect(screen.queryByLabelText("price ≥")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: /filters/i }));
+    expect((screen.getByLabelText("price ≥") as HTMLInputElement).value).toBe("");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByLabelText("price ≥")).toBeNull();
+  });
+
+  it("does not close when clicking inside the settings popover", () => {
+    renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /filters/i }));
+    fireEvent.mouseDown(screen.getByLabelText("price ≥"));
+    expect(screen.getByLabelText("price ≥")).toBeTruthy();
+  });
+
   it("offers Most active, hides change threshold, persists it, and resets sort to volume descending", () => {
     const { commands, onConfigChange } = renderPanel();
     fireEvent.click(screen.getByRole("button", { name: /filters/i }));
@@ -404,7 +452,7 @@ describe("ScannerPanel", () => {
   it("labels extended-hours Most active as approximate", () => {
     const { scanner } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "afterhours", payload: {
-      refreshedAt: "2026-07-08T21:00:00.000Z", rows: [], filters: { mode: "most_active", minChangePct: 99, maxFloatShares: null, minVolume: 0, minTurnover: 0, minRelativeVolume: 0, floatUnit: "M", volumeUnit: "K" },
+      refreshedAt: "2026-07-08T21:00:00.000Z", rows: [], filters: { mode: "most_active", minChangePct: 99, maxFloatShares: null, minVolume: 0, minTurnover: 0, minRelativeVolume: 0, minPrice: 0, maxPrice: 0, floatUnit: "M", volumeUnit: "K" },
     } }));
     expect(screen.getByText(/Most active · approximate/)).toBeTruthy();
     expect(screen.queryByText(/change/)).toBeNull();

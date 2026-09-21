@@ -8,6 +8,8 @@ The board is sticky for one trading cycle: post-market movers accumulate with ov
 
 Scanner rows also expose the provider-reported base daily Dollar Turnover represented by the latest snapshot. It is independent of the board's session cycle; premarket may therefore show the previous trading day's completed total. `MinTurnover` is a raw-dollar admission floor; existing board rows stay sticky when later refreshes are unavailable or below the floor, and pool warming keeps its existing REL VOL behavior.
 
+Scanner price filters use the same session-aware provider price published in the `Last` column: premarket, RTH, after-hours, or overnight as applicable. `MinPrice` and `MaxPrice` are inclusive raw-price admission bounds; zero disables each bound, an active bound excludes missing/non-positive prices, and existing board rows remain sticky after admission until the normal cycle reset.
+
 Reported Short Interest is a board-only asynchronous 3249 enrichment. The worker requests one US symbol at a time, paces requests at least one second apart, keeps a process-local 24-hour cache, and preserves the provider's raw `sharesShort` plus `timestampStr` report date without split adjustment. Missing or failed refreshes stay unavailable or retain the last successful value; enrichment never blocks rank polling and successful results republish the complete `scanner.rank` payload.
 
 Test: `go test ./internal/scan`.

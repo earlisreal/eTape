@@ -36,6 +36,9 @@ func TestRestoreScannerFiltersV2WinsOverLegacyV1(t *testing.T) {
 	if got.Mode != "losers" || got.MinRelativeVolume != 3.5 || got.MinChangePct != 7 || got.MinVolume != 2000 {
 		t.Fatalf("v2 was not authoritative: %+v", got)
 	}
+	if got.MinPrice != 0 || got.MaxPrice != 0 {
+		t.Fatalf("older v2 settings should leave price bounds off: %+v", got)
+	}
 	if len(spy.set) != 0 {
 		t.Fatalf("v2 load should not rewrite settings: %+v", spy.set)
 	}
@@ -50,6 +53,20 @@ func TestRestoreScannerFiltersPreservesFractionalTurnover(t *testing.T) {
 	if got.MinTurnover != 12_345_678.9 {
 		t.Fatalf("turnover threshold = %v, want 12345678.9", got.MinTurnover)
 	}
+	if got.MinPrice != 0 || got.MaxPrice != 0 {
+		t.Fatalf("omitted price bounds should default off: %+v", got)
+	}
+}
+
+func TestRestoreScannerFiltersPreservesPriceBounds(t *testing.T) {
+	defaults := scan.Defaults(config.Scan{})
+	spy := &scannerFilterConfigSpy{values: map[string]string{
+		"scanner.filters.v2": `{"mode":"gainers","minChangePct":0,"maxFloatShares":null,"minVolume":0,"minTurnover":0,"minRelativeVolume":0,"minPrice":1.25,"maxPrice":20,"floatUnit":"M","volumeUnit":"K"}`,
+	}}
+	got := restoreScannerFilters(spy, defaults)
+	if got.MinPrice != 1.25 || got.MaxPrice != 20 {
+		t.Fatalf("price bounds = %v/%v, want 1.25/20", got.MinPrice, got.MaxPrice)
+	}
 }
 
 func TestRestoreScannerFiltersMigratesV1AndResetsThreshold(t *testing.T) {
@@ -58,7 +75,7 @@ func TestRestoreScannerFiltersMigratesV1AndResetsThreshold(t *testing.T) {
 		"scanner.filters.v1": `{"mode":"losers","minChangePct":7,"maxFloatShares":1000000,"minVolume":2000,"minVolumeRatio":3.5,"floatUnit":"M","volumeUnit":"K"}`,
 	}}
 	got := restoreScannerFilters(spy, defaults)
-	if got.Mode != "losers" || got.MinChangePct != 7 || got.MaxFloatShares == nil || *got.MaxFloatShares != 1000000 || got.MinVolume != 2000 || got.MinRelativeVolume != 0 || got.FloatUnit != "M" || got.VolumeUnit != "K" {
+	if got.Mode != "losers" || got.MinChangePct != 7 || got.MaxFloatShares == nil || *got.MaxFloatShares != 1000000 || got.MinVolume != 2000 || got.MinRelativeVolume != 0 || got.MinPrice != 0 || got.MaxPrice != 0 || got.FloatUnit != "M" || got.VolumeUnit != "K" {
 		t.Fatalf("v1 migration changed unrelated filters: %+v", got)
 	}
 	var saved wsmsg.ScannerFilters

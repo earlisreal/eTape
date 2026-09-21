@@ -5,7 +5,7 @@ import { applyScannerFilters, sortByChangeDesc, formatFilterSummary, type Scanne
 const row = (symbol: string, changePct: number | null, floatShares: number | null, volume: number): ScannerRow =>
   ({ symbol, shortSellRestricted: false, changePct, last: 1, floatShares, volume, turnover: null, relativeVolume: null, shortInterest: null, shortInterestAsOf: null });
 
-const OFF: ScannerThresholds = { minChangePct: 0, floatCapShares: null, minVolume: 0, minTurnover: 0, minRelativeVolume: 0 };
+const OFF: ScannerThresholds = { minChangePct: 0, floatCapShares: null, minVolume: 0, minTurnover: 0, minRelativeVolume: 0, minPrice: 0, maxPrice: 0 };
 
 describe("applyScannerFilters", () => {
   const rows: ScannerRow[] = [
@@ -43,6 +43,19 @@ describe("applyScannerFilters", () => {
     const withTurnover = rows.map((r, i) => ({ ...r, turnover: i === 0 ? 2_000_000 : i === 1 ? 1_999_999 : null }));
     expect(applyScannerFilters(withTurnover, { ...OFF, minTurnover: 2_000_000 }).map((r) => r.symbol)).toEqual(["A"]);
   });
+  it("price bounds keep inclusive boundaries and exclude unavailable prices", () => {
+    const withPrices = [
+      { ...rows[0], symbol: "LOW", last: 0.99 },
+      { ...rows[0], symbol: "MIN", last: 1 },
+      { ...rows[0], symbol: "MID", last: 5.25 },
+      { ...rows[0], symbol: "MAX", last: 10 },
+      { ...rows[0], symbol: "HIGH", last: 10.01 },
+      { ...rows[0], symbol: "UNKNOWN", last: null },
+    ];
+    expect(applyScannerFilters(withPrices, { ...OFF, minPrice: 1, maxPrice: 10 }).map((r) => r.symbol))
+      .toEqual(["MIN", "MID", "MAX"]);
+    expect(applyScannerFilters(withPrices, OFF).map((r) => r.symbol)).toEqual(withPrices.map((r) => r.symbol));
+  });
 });
 
 describe("sortByChangeDesc", () => {
@@ -56,9 +69,9 @@ describe("sortByChangeDesc", () => {
 
 describe("formatFilterSummary", () => {
   it("formats set fields with human units, omits nulls/zeros", () => {
-    expect(formatFilterSummary({ minChangePct: 10, floatCapShares: 20_000_000, minVolume: 100_000, minTurnover: 12_500_000, minRelativeVolume: 2.5 }))
-      .toBe("change magnitude ≥ 10% · float ≤ 20M · vol ≥ 100k · turnover ≥ 12.5M · rel vol ≥ 2.5");
-    expect(formatFilterSummary({ minChangePct: 5, floatCapShares: null, minVolume: 0, minTurnover: 0, minRelativeVolume: 0 }))
+    expect(formatFilterSummary({ minChangePct: 10, floatCapShares: 20_000_000, minVolume: 100_000, minTurnover: 12_500_000, minRelativeVolume: 2.5, minPrice: 1.25, maxPrice: 20 }))
+      .toBe("change magnitude ≥ 10% · float ≤ 20M · vol ≥ 100k · turnover ≥ 12.5M · rel vol ≥ 2.5 · price ≥ $1.25 · price ≤ $20");
+    expect(formatFilterSummary({ minChangePct: 5, floatCapShares: null, minVolume: 0, minTurnover: 0, minRelativeVolume: 0, minPrice: 0, maxPrice: 0 }))
       .toBe("change magnitude ≥ 5%");
   });
 });

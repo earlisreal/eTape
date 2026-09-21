@@ -392,6 +392,8 @@ export interface ScannerFilters {
   minVolume: number /* float64 */;
   minTurnover: number /* float64 */; // latest daily dollar turnover floor; 0 = off
   minRelativeVolume: number /* float64 */;
+  minPrice: number /* float64 */; // Scanner Last floor; 0 = off
+  maxPrice: number /* float64 */; // Scanner Last ceiling; 0 = off
   floatUnit: "K" | "M";
   volumeUnit: "K" | "M";
 }

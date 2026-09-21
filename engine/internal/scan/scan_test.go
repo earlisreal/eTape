@@ -136,6 +136,91 @@ func TestRelativeVolumeFilter(t *testing.T) {
 	}
 }
 
+func TestPriceFilter(t *testing.T) {
+	items := []rankItem{
+		{Symbol: "US.BELOW", Last: 0.99},
+		{Symbol: "US.MIN", Last: 1},
+		{Symbol: "US.MID", Last: 5.25},
+		{Symbol: "US.MAX", Last: 10},
+		{Symbol: "US.ABOVE", Last: 10.01},
+		{Symbol: "US.ZERO", Last: 0},
+		{Symbol: "US.NAN", Last: math.NaN()},
+		{Symbol: "US.INF", Last: math.Inf(1)},
+	}
+	f := Defaults(config.Scan{})
+	f.MinPrice, f.MaxPrice = 1, 10
+	got := rankRowsFiltered(items, nil, f)
+	if symbols := scannerSymbols(got); !reflect.DeepEqual(symbols, []string{"US.MIN", "US.MID", "US.MAX"}) {
+		t.Fatalf("price range got %v", symbols)
+	}
+	f.MinPrice, f.MaxPrice = 0, 0
+	if got := rankRowsFiltered(items, nil, f); len(got) != len(items) {
+		t.Fatalf("off price bounds changed eligibility: got %d rows", len(got))
+	}
+	f.MinPrice, f.MaxPrice = 5, 0
+	if symbols := scannerSymbols(rankRowsFiltered(items, nil, f)); !reflect.DeepEqual(symbols, []string{"US.MID", "US.MAX", "US.ABOVE"}) {
+		t.Fatalf("minimum-only price filter got %v", symbols)
+	}
+	f.MinPrice, f.MaxPrice = 0, 5.25
+	if symbols := scannerSymbols(rankRowsFiltered(items, nil, f)); !reflect.DeepEqual(symbols, []string{"US.BELOW", "US.MIN", "US.MID"}) {
+		t.Fatalf("maximum-only price filter got %v", symbols)
+	}
+}
+
+func TestValidatePriceFilters(t *testing.T) {
+	base := Defaults(config.Scan{})
+	for name, mutate := range map[string]func(*wsmsg.ScannerFilters){
+		"negative minimum": func(f *wsmsg.ScannerFilters) { f.MinPrice = -1 },
+		"negative maximum": func(f *wsmsg.ScannerFilters) { f.MaxPrice = -1 },
+		"nan minimum":      func(f *wsmsg.ScannerFilters) { f.MinPrice = math.NaN() },
+		"infinite maximum": func(f *wsmsg.ScannerFilters) { f.MaxPrice = math.Inf(1) },
+		"reversed range":   func(f *wsmsg.ScannerFilters) { f.MinPrice, f.MaxPrice = 10, 5 },
+	} {
+		t.Run(name, func(t *testing.T) {
+			f := base
+			mutate(&f)
+			if err := ValidateFilters(f); err == nil {
+				t.Fatalf("ValidateFilters accepted %+v", f)
+			}
+		})
+	}
+	for _, f := range []wsmsg.ScannerFilters{
+		base,
+		func() wsmsg.ScannerFilters { f := base; f.MinPrice = 1; return f }(),
+		func() wsmsg.ScannerFilters { f := base; f.MaxPrice = 10; return f }(),
+		func() wsmsg.ScannerFilters { f := base; f.MinPrice, f.MaxPrice = 1, 10; return f }(),
+	} {
+		if err := ValidateFilters(f); err != nil {
+			t.Fatalf("ValidateFilters rejected valid bounds %+v: %v", f, err)
+		}
+	}
+}
+
+func TestSameFiltersIncludesPriceBounds(t *testing.T) {
+	a := Defaults(config.Scan{})
+	b := a
+	if !sameFilters(a, b) {
+		t.Fatal("identical filters differ")
+	}
+	b.MinPrice = 1
+	if sameFilters(a, b) {
+		t.Fatal("minimum price change was ignored")
+	}
+	b = a
+	b.MaxPrice = 10
+	if sameFilters(a, b) {
+		t.Fatal("maximum price change was ignored")
+	}
+}
+
+func scannerSymbols(rows []wsmsg.ScannerRow) []string {
+	got := make([]string, 0, len(rows))
+	for _, row := range rows {
+		got = append(got, row.Symbol)
+	}
+	return got
+}
+
 type requesterFunc func(context.Context, uint32, proto.Message) (opend.Frame, error)
 
 func (f requesterFunc) Request(ctx context.Context, id uint32, req proto.Message) (opend.Frame, error) {
@@ -1193,6 +1278,32 @@ func TestPollOnceEndToEnd(t *testing.T) {
 	}
 	if fr.snapCalls != 2 {
 		t.Fatalf("each poll should refresh accumulated rows: snapCalls=%d", fr.snapCalls)
+	}
+}
+
+func TestPriceFilterAdmissionsRemainSticky(t *testing.T) {
+	fr := &fakeReq{rankResp: rankResp(rankItem{Symbol: "US.A", ChangePct: 5, Last: 1, Volume: 1})}
+	fr.snap = func([]string) (*snappb.Response, error) {
+		price := 10.0
+		if fr.snapCalls > 1 {
+			price = 1
+		}
+		return snapResp(extendedSnap("A", session.PreMarket, price, 5, 1)), nil
+	}
+	pub := &capturePub{}
+	p := New(config.Scan{Enabled: true}, fr, pub, clock.NewFake(et(2026, 7, 8, 8, 0)), nil, nil, nil)
+	filters := p.Filters()
+	filters.MinPrice = 5
+	if err := p.SetFilters(filters); err != nil {
+		t.Fatal(err)
+	}
+	p.pollOnce(context.Background(), p.clk.Now())
+	if len(pub.ranks) != 1 || len(pub.ranks[0].Rows) != 1 || pub.ranks[0].Rows[0].Last == nil || *pub.ranks[0].Rows[0].Last != 10 {
+		t.Fatalf("first price-qualified admission = %+v", pub.ranks)
+	}
+	p.pollOnce(context.Background(), p.clk.Now())
+	if len(pub.ranks) != 2 || len(pub.ranks[1].Rows) != 1 || pub.ranks[1].Rows[0].Symbol != "US.A" || pub.ranks[1].Rows[0].Last == nil || *pub.ranks[1].Rows[0].Last != 1 {
+		t.Fatalf("admitted row should remain sticky after price falls below bound: %+v", pub.ranks)
 	}
 }
 

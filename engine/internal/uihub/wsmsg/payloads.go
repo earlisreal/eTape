@@ -306,6 +306,8 @@ type ScannerFilters struct {
 	MinVolume         float64  `json:"minVolume"`
 	MinTurnover       float64  `json:"minTurnover"` // latest daily dollar turnover floor; 0 = off
 	MinRelativeVolume float64  `json:"minRelativeVolume"`
+	MinPrice          float64  `json:"minPrice"` // Scanner Last floor; 0 = off
+	MaxPrice          float64  `json:"maxPrice"` // Scanner Last ceiling; 0 = off
 	FloatUnit         string   `json:"floatUnit" tstype:"\"K\" | \"M\""`
 	VolumeUnit        string   `json:"volumeUnit" tstype:"\"K\" | \"M\""`
 }
