@@ -121,17 +121,15 @@ func newWindowStateRegistry(cfg configStore) *windowStateRegistry {
 }
 
 func (r *windowStateRegistry) set(connID uint64, args wsmsg.SetWindowStateArgs) wsmsg.AckMsg {
-	entry := wsmsg.WindowStateEntry{
-		WorkspaceID: args.WorkspaceID,
-		X:           args.X, Y: args.Y, Width: args.Width, Height: args.Height,
-	}
+	entry := wsmsg.WindowStateEntry(args)
 	if !validWindowStateEntry(entry) {
 		return wsmsg.AckMsg{Status: wsmsg.AckBlocked, Reason: "invalid workspace window state"}
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	changed := false
-	if oldID := r.owners[connID]; oldID != "" && oldID != entry.WorkspaceID {
+	oldID := r.owners[connID]
+	if oldID != "" && oldID != entry.WorkspaceID {
 		delete(r.owners, connID)
 		if !r.hasOwnerLocked(oldID) {
 			if _, ok := r.entries[oldID]; ok {
@@ -141,6 +139,9 @@ func (r *windowStateRegistry) set(connID uint64, args wsmsg.SetWindowStateArgs) 
 		}
 	}
 	r.owners[connID] = entry.WorkspaceID
+	if saved, ok := r.entries[entry.WorkspaceID]; oldID == "" && ok {
+		return wsmsg.AckMsg{Status: wsmsg.AckAccepted, Value: saved}
+	}
 	if old, ok := r.entries[entry.WorkspaceID]; !ok || old != entry {
 		r.entries[entry.WorkspaceID] = entry
 		changed = true

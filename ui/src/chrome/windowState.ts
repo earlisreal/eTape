@@ -3,6 +3,8 @@ export interface WindowStateWindow {
   readonly screenY: number;
   readonly outerWidth: number;
   readonly outerHeight: number;
+  moveTo(x: number, y: number): void;
+  resizeTo(width: number, height: number): void;
   addEventListener(type: "resize", listener: () => void): void;
   removeEventListener(type: "resize", listener: () => void): void;
 }
@@ -22,6 +24,15 @@ export interface WindowStateBounds {
 
 const RESIZE_DEBOUNCE_MS = 150;
 const POSITION_POLL_MS = 1000;
+
+function restoredBounds(ack: unknown, workspaceId: string): WindowStateBounds | undefined {
+  if (!ack || typeof ack !== "object" || !("value" in ack)) return undefined;
+  const value = ack.value;
+  if (!value || typeof value !== "object") return undefined;
+  const bounds = value as Partial<WindowStateBounds>;
+  if (bounds.workspaceId !== workspaceId || ![bounds.x, bounds.y, bounds.width, bounds.height].every(Number.isFinite)) return undefined;
+  return bounds as WindowStateBounds;
+}
 
 export function readWindowState(workspaceId: string, win: WindowStateWindow = window): WindowStateBounds {
   return {
@@ -43,11 +54,27 @@ export function trackWindowState(workspaceId: string, client: WindowStateClient,
   let resizeTimer: ReturnType<typeof setTimeout> | undefined;
   let opened = false;
 
-  const send = (force = false): void => {
+  const send = (force = false, restore = false): void => {
     const next = readWindowState(workspaceId, win);
     if (!force && sameBounds(lastSent, next)) return;
     lastSent = next;
-    void client.sendCommand("SetWindowState", next);
+    const sent = client.sendCommand("SetWindowState", next);
+    if (!restore) return void sent;
+    void sent.then((ack) => {
+      const saved = restoredBounds(ack, workspaceId);
+      if (!saved) return;
+      if (workspaceId === "main") {
+        lastSent = undefined;
+        send(true);
+        return;
+      }
+      try {
+        win.resizeTo(saved.width, saved.height);
+        win.moveTo(saved.x, saved.y);
+      } catch {
+        // Chromium may reject window controls; keep the persisted bounds for the next launch.
+      }
+    });
   };
   const onResize = (): void => {
     if (resizeTimer !== undefined) clearTimeout(resizeTimer);
@@ -61,7 +88,7 @@ export function trackWindowState(workspaceId: string, client: WindowStateClient,
   };
 
   const removeState = client.onState?.(onState);
-  send(true);
+  send(true, true);
   win.addEventListener("resize", onResize);
   const poll = setInterval(send, POSITION_POLL_MS);
   return () => {

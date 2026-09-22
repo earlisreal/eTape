@@ -17,43 +17,38 @@ import (
 var (
 	showWindowAsync     = windows.NewLazySystemDLL("user32.dll").NewProc("ShowWindowAsync")
 	setForegroundWindow = windows.NewLazySystemDLL("user32.dll").NewProc("SetForegroundWindow")
+	setWindowPos        = windows.NewLazySystemDLL("user32.dll").NewProc("SetWindowPos")
+	setWindowPosCall    = setWindowPos.Call
 	processWindowLookup struct {
 		sync.Mutex
-		pid   uint32
-		hwnd  windows.HWND
-		count int
+		pid     uint32
+		handles []windows.HWND
 	}
 	enumProcessWindow = windows.NewCallback(func(hwnd windows.HWND, _ uintptr) uintptr {
 		var pid uint32
 		_, err := windows.GetWindowThreadProcessId(hwnd, &pid)
 		if err == nil && pid == processWindowLookup.pid && windows.IsWindowVisible(hwnd) {
-			if processWindowLookup.hwnd == 0 {
-				processWindowLookup.hwnd = hwnd
-			}
-			processWindowLookup.count++
+			processWindowLookup.handles = append(processWindowLookup.handles, hwnd)
 		}
 		return 1
 	})
 )
 
-func visibleProcessWindows(pid uint32) (windows.HWND, int) {
+func visibleProcessWindows(pid uint32) []windows.HWND {
 	processWindowLookup.Lock()
 	defer processWindowLookup.Unlock()
 	processWindowLookup.pid = pid
-	processWindowLookup.hwnd = 0
-	processWindowLookup.count = 0
+	processWindowLookup.handles = processWindowLookup.handles[:0]
 	_ = windows.EnumWindows(enumProcessWindow, nil)
-	return processWindowLookup.hwnd, processWindowLookup.count
+	return append([]windows.HWND(nil), processWindowLookup.handles...)
 }
 
 func visibleProcessWindow(pid uint32) windows.HWND {
-	hwnd, _ := visibleProcessWindows(pid)
-	return hwnd
-}
-
-func visibleProcessWindowCount(pid uint32) int {
-	_, count := visibleProcessWindows(pid)
-	return count
+	handles := visibleProcessWindows(pid)
+	if len(handles) == 0 {
+		return 0
+	}
+	return handles[0]
 }
 
 func waitVisibleProcessWindow(pid int, startToken uint64, timeout time.Duration) (windows.HWND, bool) {
@@ -78,18 +73,26 @@ func restoreOwnedProcessWindows(pid int, startToken uint64, chrome, profile stri
 		return
 	}
 	_, _, _ = showWindowAsync.Call(uintptr(hwnd), windows.SW_MAXIMIZE)
-	launched := 0
 	for _, spec := range specs {
+		before := make(map[windows.HWND]struct{})
+		for _, existing := range visibleProcessWindows(uint32(pid)) {
+			before[existing] = struct{}{}
+		}
 		cmd := ownedChromeWindowCommand(chrome, spec.URL, profile, spec)
 		if err := cmd.Start(); err != nil {
 			slog.Warn("restore owned Chrome workspace", "url", spec.URL, "err", err)
 			continue
 		}
-		launched++
 		go func() { _ = cmd.Wait() }()
-	}
-	if expected := launched + 1; expected > 1 {
-		waitVisibleProcessWindows(pid, startToken, expected, 2*time.Second)
+		restored, ok := waitNewVisibleProcessWindow(pid, startToken, before, 10*time.Second)
+		if !ok {
+			slog.Warn("restored Chrome workspace window not found", "url", spec.URL)
+			continue
+		}
+		_, _, _ = showWindowAsync.Call(uintptr(restored), windows.SW_RESTORE)
+		if err := setRestoredWindowBounds(restored, spec); err != nil {
+			slog.Warn("place restored Chrome workspace", "url", spec.URL, "err", err)
+		}
 	}
 	// Reuse the original HWND so the mandatory main window finishes in front of
 	// restored secondary windows when the OS permits foreground activation.
@@ -97,15 +100,37 @@ func restoreOwnedProcessWindows(pid int, startToken uint64, chrome, profile stri
 	_, _, _ = setForegroundWindow.Call(uintptr(hwnd))
 }
 
-func waitVisibleProcessWindows(pid int, startToken uint64, expected int, timeout time.Duration) {
+func waitNewVisibleProcessWindow(pid int, startToken uint64, before map[windows.HWND]struct{}, timeout time.Duration) (windows.HWND, bool) {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		exists, err := ownedProcessExists(pid, startToken)
-		if err != nil || !exists || visibleProcessWindowCount(uint32(pid)) >= expected {
-			return
+		if err != nil || !exists {
+			return 0, false
+		}
+		for _, hwnd := range visibleProcessWindows(uint32(pid)) {
+			if _, existed := before[hwnd]; !existed {
+				return hwnd, true
+			}
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
+	return 0, false
+}
+
+func setRestoredWindowBounds(hwnd windows.HWND, spec WindowSpec) error {
+	const swpNoZOrder = 0x0004
+	const swpNoActivate = 0x0010
+	ok, _, err := setWindowPosCall(
+		uintptr(hwnd), 0, uintptr(spec.X), uintptr(spec.Y), uintptr(spec.Width), uintptr(spec.Height),
+		swpNoZOrder|swpNoActivate,
+	)
+	if ok != 0 {
+		return nil
+	}
+	if err != nil && !errors.Is(err, windows.ERROR_SUCCESS) {
+		return err
+	}
+	return errors.New("SetWindowPos returned false")
 }
 
 func ownedProcessStartTime(pid int) (uint64, error) {

@@ -25,6 +25,7 @@ import { perf, initPerfFromQuery } from "./perf/PerfMonitor";
 import { PerfHud } from "./perf/PerfHud";
 import { initUiLogFromQuery, uiLog } from "./logging/logger";
 import { trackWindowState } from "./chrome/windowState";
+import { registerMainWorkspaceFocus } from "./chrome/windows";
 
 function EventToastBridge({ client }: { client: WsClient }): null {
   const toast = useToasts();
@@ -198,6 +199,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
   }), [client]);
 
   useEffect(() => trackWindowState(workspaceName, client), [workspaceName, client]);
+  useEffect(() => workspaceName === "main" ? registerMainWorkspaceFocus() : undefined, [workspaceName]);
 
   return (
     <ThemeProvider commands={commands}>

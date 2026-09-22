@@ -3,6 +3,9 @@ const WORKSPACE_WINDOW_POPUP = "popup=yes";
 const NEWS_WINDOW_TARGET = "etape-news-reader";
 const NEWS_WINDOW_WIDTH = 1100;
 const NEWS_WINDOW_HEIGHT = 800;
+const MAIN_FOCUS_CHANNEL = "etape.workspace-focus";
+const MAIN_PRESENCE_KEY = "etape.main-workspace";
+const MAIN_PRESENCE_MS = 3000;
 
 let newsWindow: Window | null = null;
 
@@ -45,9 +48,54 @@ export function openWorkspaceWindow(id: string): Window | null {
   return window.open(workspaceUrl(id), workspaceWindowTarget(id), workspaceWindowFeatures());
 }
 
+function mainWorkspacePresent(): boolean {
+  try {
+    const presence = JSON.parse(localStorage.getItem(MAIN_PRESENCE_KEY) ?? "null") as { at?: unknown } | null;
+    return typeof presence?.at === "number" && Math.abs(Date.now() - presence.at) <= MAIN_PRESENCE_MS;
+  } catch {
+    return false;
+  }
+}
+
+/** Advertise and focus main even when Chrome restored it as an unrelated app window. */
+export function registerMainWorkspaceFocus(): () => void {
+  const main = window;
+  const token = `${Date.now()}-${Math.random()}`;
+  const mark = (): void => {
+    try { localStorage.setItem(MAIN_PRESENCE_KEY, JSON.stringify({ token, at: Date.now() })); } catch { /* unavailable storage */ }
+  };
+  const channel = typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel(MAIN_FOCUS_CHANNEL);
+  if (channel) channel.onmessage = (event) => {
+    if (event.data !== "focus-main") return;
+    try { main.focus(); } catch { /* best-effort browser focus */ }
+  };
+  mark();
+  const heartbeat = main.setInterval(mark, 1000);
+  let stopped = false;
+  const stop = (): void => {
+    if (stopped) return;
+    stopped = true;
+    main.clearInterval(heartbeat);
+    channel?.close();
+    try {
+      const presence = JSON.parse(localStorage.getItem(MAIN_PRESENCE_KEY) ?? "null") as { token?: unknown } | null;
+      if (presence?.token === token) localStorage.removeItem(MAIN_PRESENCE_KEY);
+    } catch { /* unavailable storage */ }
+    main.removeEventListener("pagehide", stop);
+  };
+  main.addEventListener("pagehide", stop, { once: true });
+  return stop;
+}
+
 /** Focus the main workspace without reloading an existing window. */
 export function focusMainWorkspace(): void {
   if (parseWorkspaceName(window.location.search) === "main") return;
+  if (mainWorkspacePresent() && typeof BroadcastChannel !== "undefined") {
+    const channel = new BroadcastChannel(MAIN_FOCUS_CHANNEL);
+    channel.postMessage("focus-main");
+    channel.close();
+    return;
+  }
   const main = window.open("", workspaceWindowTarget("main"), workspaceWindowFeatures());
   if (!main) return;
   try {

@@ -1,18 +1,45 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { focusMainWorkspace, parseWorkspaceName, nextWindowName } from "./windows";
+import { focusMainWorkspace, parseWorkspaceName, nextWindowName, registerMainWorkspaceFocus } from "./windows";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
-function stubBrowser(search = "?workspace=window-2") {
+function stubBrowser(search = "?workspace=window-2", storage = new Map<string, string>()) {
   const open = vi.fn();
+  const focus = vi.fn();
   vi.stubGlobal("window", {
     location: { search, href: "http://localhost:8686?debug=1" },
     screen: { availWidth: 1920, availHeight: 1080 },
     innerWidth: 1280,
     innerHeight: 720,
     open,
+    focus,
+    setInterval,
+    clearInterval,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
   });
-  return { open };
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+  });
+  return { focus, open };
+}
+
+class FakeBroadcastChannel {
+  static channels: FakeBroadcastChannel[] = [];
+  onmessage: ((event: { data: unknown }) => void) | null = null;
+
+  constructor(readonly name: string) { FakeBroadcastChannel.channels.push(this); }
+  postMessage(data: unknown): void {
+    for (const channel of FakeBroadcastChannel.channels) {
+      if (channel !== this && channel.name === this.name) channel.onmessage?.({ data });
+    }
+  }
+  close(): void { FakeBroadcastChannel.channels = FakeBroadcastChannel.channels.filter((channel) => channel !== this); }
 }
 describe("parseWorkspaceName", () => {
   it("defaults to main when absent", () => expect(parseWorkspaceName("")).toBe("main"));
@@ -26,6 +53,22 @@ describe("nextWindowName", () => {
 });
 
 describe("focusMainWorkspace", () => {
+  it("focuses an independently restored main without opening a duplicate", () => {
+    vi.useFakeTimers();
+    FakeBroadcastChannel.channels = [];
+    vi.stubGlobal("BroadcastChannel", FakeBroadcastChannel);
+    const storage = new Map<string, string>();
+    const main = stubBrowser("?workspace=main", storage);
+    const stop = registerMainWorkspaceFocus();
+    const monitoring = stubBrowser("?workspace=monitoring", storage);
+
+    focusMainWorkspace();
+
+    expect(monitoring.open).not.toHaveBeenCalled();
+    expect(main.focus).toHaveBeenCalledOnce();
+    stop();
+  });
+
   it("does nothing when the Scanner already lives in main", () => {
     const { open } = stubBrowser("?workspace=main");
     focusMainWorkspace();

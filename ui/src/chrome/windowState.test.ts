@@ -10,6 +10,8 @@ class FakeWindow implements WindowStateWindow {
 
   addEventListener(_type: "resize", listener: () => void): void { this.listeners.add(listener); }
   removeEventListener(_type: "resize", listener: () => void): void { this.listeners.delete(listener); }
+  moveTo(x: number, y: number): void { this.screenX = x; this.screenY = y; }
+  resizeTo(width: number, height: number): void { this.outerWidth = width; this.outerHeight = height; }
   resize(): void { this.listeners.forEach((listener) => listener()); }
 }
 
@@ -50,5 +52,29 @@ describe("trackWindowState", () => {
     win.resize();
     vi.advanceTimersByTime(2000);
     expect(client.sendCommand).toHaveBeenCalledTimes(4);
+  });
+
+  it("applies persisted monitoring bounds before resaving startup geometry", async () => {
+    vi.useFakeTimers();
+    const win = new FakeWindow();
+    const client = {
+      sendCommand: vi.fn()
+        .mockResolvedValueOnce({
+          status: "accepted",
+          value: { workspaceId: "monitoring", x: 1920, y: 0, width: 1000, height: 800 },
+        })
+        .mockResolvedValue({ status: "accepted" }),
+    };
+
+    const stop = trackWindowState("monitoring", client, win);
+    await Promise.resolve();
+    await Promise.resolve();
+    vi.advanceTimersByTime(1000);
+
+    expect(win).toMatchObject({ screenX: 1920, screenY: 0, outerWidth: 1000, outerHeight: 800 });
+    expect(client.sendCommand).toHaveBeenLastCalledWith("SetWindowState", {
+      workspaceId: "monitoring", x: 1920, y: 0, width: 1000, height: 800,
+    });
+    stop();
   });
 });

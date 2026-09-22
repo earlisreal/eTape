@@ -54,6 +54,22 @@ func TestWindowStateRegistryReleasesOnlyLastOwner(t *testing.T) {
 	}
 }
 
+func TestWindowStateRegistryReturnsPersistedBoundsBeforeFirstUpdate(t *testing.T) {
+	saved := wsmsg.WindowStateEntry{WorkspaceID: "monitoring", X: 1920, Y: 0, Width: 1000, Height: 800}
+	cfg := &spyCfg{values: map[string]string{
+		WindowStateConfigKey: encodeWindowState(wsmsg.WindowStateV1{Version: 1, Entries: []wsmsg.WindowStateEntry{saved}}),
+	}}
+	r := newWindowStateRegistry(cfg)
+	ack := r.set(7, wsmsg.SetWindowStateArgs{WorkspaceID: "monitoring", X: 0, Y: 0, Width: 960, Height: 540})
+
+	if ack.Status != wsmsg.AckAccepted || ack.Value != saved {
+		t.Fatalf("first set ack = %+v, want persisted bounds %+v", ack, saved)
+	}
+	if got := r.entries["monitoring"]; got != saved || cfg.sets != 0 {
+		t.Fatalf("first set stored=%+v writes=%d, want saved bounds and no write", got, cfg.sets)
+	}
+}
+
 func TestWindowStateRegistryRejectsBadBounds(t *testing.T) {
 	r := newWindowStateRegistry(&spyCfg{values: map[string]string{}})
 	ack := r.set(1, wsmsg.SetWindowStateArgs{WorkspaceID: "main", Width: 0, Height: 800})
