@@ -92,6 +92,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	ownedBrowserStart := flag.Uint64("owned-browser-start", 0, "internal: startup time token of the handed-off Chrome app")
 	ownedBrowserProfile := flag.String("owned-browser-profile", "", "internal: profile directory of the handed-off Chrome app")
 	ownedBrowserURL := flag.String("owned-browser-url", "", "internal: startup URL of the handed-off Chrome app")
+	ownedBrowserMainHWND := flag.Uint64("owned-browser-main-hwnd", 0, "internal: native main window handed across restart")
 	logPath := flag.String("log", "", "also write logs to this file")
 	logLevel := flag.String("log-level", os.Getenv("SLOG_LEVEL"), "log level: debug, info, warn, error (default SLOG_LEVEL env)")
 	flag.Parse()
@@ -260,14 +261,18 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// cleanup (releaseLock, st.Close, etc.) has actually run.
 	var restartRequested atomic.Bool
 	requestRestart := func() { restartRequested.Store(true); stop(uihub.ErrRestarting) }
-	var startupBrowser *openbrowser.OwnedBrowser
+	var startupBrowser atomic.Pointer[openbrowser.OwnedBrowser]
 	if *ownedBrowserPID != 0 || *ownedBrowserStart != 0 || *ownedBrowserProfile != "" {
 		var adoptErr error
 		adoptURL := *ownedBrowserURL
 		if adoptURL == "" {
 			adoptURL = browserURL(cfg.UIHub.Addr(), handlerLevel == slog.LevelDebug)
 		}
-		startupBrowser, adoptErr = openbrowser.AdoptOwned(*ownedBrowserPID, *ownedBrowserStart, *ownedBrowserProfile, adoptURL)
+		adopted, err := openbrowser.AdoptOwned(*ownedBrowserPID, *ownedBrowserStart, *ownedBrowserProfile, adoptURL, uintptr(*ownedBrowserMainHWND))
+		if adopted != nil {
+			startupBrowser.Store(adopted)
+		}
+		adoptErr = err
 		if adoptErr != nil {
 			log.Warn("adopt startup browser", "err", adoptErr)
 		}
@@ -282,10 +287,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	// relaunch_windows.go for how a non-nil argv is applied.
 	var nextArgsPtr atomic.Pointer[[]string]
 	carryStartupBrowser := func(argv []string) []string {
-		if startupBrowser == nil {
+		browser := startupBrowser.Load()
+		if browser == nil {
 			return argv
 		}
-		return append(argv, startupBrowser.RelaunchArgs()...)
+		return append(argv, browser.RelaunchArgs()...)
 	}
 
 	live := !*demo
@@ -352,6 +358,23 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		argv = carryStartupBrowser(argv)
 		nextArgsPtr.Store(&argv)
 		requestRestart()
+	}
+	focusPending := atomic.Bool{}
+	focusMainWorkspace := func() bool {
+		browser := startupBrowser.Load()
+		if browser == nil {
+			return false
+		}
+		if !focusPending.CompareAndSwap(false, true) {
+			return true
+		}
+		go func() {
+			defer focusPending.Store(false)
+			if err := browser.FocusMain(); err != nil {
+				log.Warn("focus owned Chrome main workspace", "err", err)
+			}
+		}()
+		return true
 	}
 
 	// --- md core ---
@@ -479,9 +502,10 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		Position: time.Duration(cfg.UIHub.PositionMs) * time.Millisecond,
 		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500, TradesCap: 1000,
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
-		Demo:          *demo,
-		AccountDemand: demands,
-		Eligibility:   venueEligibilityRegistry(vbs),
+		Demo:               *demo,
+		AccountDemand:      demands,
+		Eligibility:        venueEligibilityRegistry(vbs),
+		FocusMainWorkspace: focusMainWorkspace,
 	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startDemo, locateProviders)
 	hubDone := make(chan struct{})
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
@@ -505,11 +529,14 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	if onListening != nil {
 		onListening(cfg.UIHub.Addr())
 	}
-	if !*noOpen && startupBrowser == nil {
+	if !*noOpen && startupBrowser.Load() == nil {
 		var openErr error
 		mainURL := browserURL(cfg.UIHub.Addr(), handlerLevel == slog.LevelDebug)
 		restored := restoredWindowSpecs(st, cfg.UIHub.Addr(), handlerLevel == slog.LevelDebug)
-		startupBrowser, openErr = openbrowser.OpenOwned(mainURL, restored...)
+		browser, openErr := openbrowser.OpenOwned(mainURL, restored...)
+		if browser != nil {
+			startupBrowser.Store(browser)
+		}
 		if openErr != nil {
 			log.Warn("open browser", "err", openErr)
 		}
@@ -825,9 +852,11 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	if err := st.Close(); err != nil {
 		log.Error("close store", "err", err)
 	}
-	if !restartRequested.Load() && startupBrowser != nil {
-		if err := startupBrowser.Close(); err != nil {
-			log.Warn("close startup browser", "err", err)
+	if !restartRequested.Load() {
+		if browser := startupBrowser.Load(); browser != nil {
+			if err := browser.Close(); err != nil {
+				log.Warn("close startup browser", "err", err)
+			}
 		}
 	}
 	mdDrops := core.DropStats()

@@ -4,7 +4,11 @@ package openbrowser
 
 import "fmt"
 
-func restoreOwnedProcessWindows(int, uint64, string, string, []WindowSpec) {}
+func restoreOwnedProcessWindows(int, uint64, string, string, []WindowSpec, func(uintptr)) {}
+
+func focusOwnedMainLocked(*OwnedBrowser) error {
+	return fmt.Errorf("owned Chrome focus is supported only on Windows")
+}
 
 func ownedProcessStartTime(int) (uint64, error) {
 	return 0, fmt.Errorf("owned Chrome is supported only on Windows")

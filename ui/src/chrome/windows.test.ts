@@ -53,6 +53,31 @@ describe("nextWindowName", () => {
 });
 
 describe("focusMainWorkspace", () => {
+  it("uses native focus when the engine accepts the request", async () => {
+    const { open } = stubBrowser();
+    const commands = { sendCommand: vi.fn().mockResolvedValue({ status: "accepted" }) };
+
+    focusMainWorkspace(commands);
+    await Promise.resolve();
+
+    expect(commands.sendCommand).toHaveBeenCalledWith("FocusMainWorkspace", {});
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("falls back to browser focus when native focus is unavailable", async () => {
+    const { open } = stubBrowser();
+    const main = { location: { href: "http://localhost:8686?debug=1" }, focus: vi.fn() };
+    open.mockReturnValue(main);
+    const commands = { sendCommand: vi.fn().mockResolvedValue({ status: "blocked" }) };
+
+    focusMainWorkspace(commands);
+    await Promise.resolve();
+
+    expect(commands.sendCommand).toHaveBeenCalledWith("FocusMainWorkspace", {});
+    expect(open).toHaveBeenCalledWith("", "etape-workspace-main", expect.any(String));
+    expect(main.focus).toHaveBeenCalledOnce();
+  });
+
   it("focuses an independently restored main without opening a duplicate", () => {
     vi.useFakeTimers();
     FakeBroadcastChannel.channels = [];

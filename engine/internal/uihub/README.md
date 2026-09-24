@@ -12,6 +12,12 @@ requests run off the connection reader with correlation-preserving deferred
 replies, so a slow external call cannot delay unrelated commands.
 
 Local HTTP/WebSocket bridge. Publishes topic snapshots/updates; dispatches typed commands. Go `wsmsg/` structs own contract; generated TypeScript follows generator. The `exec.positions` payload carries `openedMs` when a position's opening fill is known, and `0` when it is unavailable. Mirror supplies snapshot-on-subscribe and forwards the core-stamped Reported Print condition, raw type symbol, delivery source, and eligibility permissions unchanged; Significant Print remains the existing classifier. `md.tape.status` is a separate low-frequency per-symbol read model for pool, warmup, thresholds, and closed state. WebSocket pongs optionally carry the latest OpenD upstream-clock offset, sample age, and request RTT so managed charts can share one boundary clock; clients without that source fall back to browser time. On final clean engine shutdown, live WebSockets receive close code `1001` with reason `engine stopped`; self-restarts use `1000/restarting` so the preserved startup window reconnects; crashes and forced termination retain the normal reconnect behavior. Test: `go test ./internal/uihub`; `make gen-ts-check`.
+The empty-argument `FocusMainWorkspace` command is accepted only when the
+engine owns the Windows Chrome startup profile and has queued native activation;
+otherwise it is blocked so the UI can use its browser-controlled fallback. The
+owned adapter retains and validates main's native HWND, restores minimized state,
+flashes the taskbar when foregrounding is denied, and serializes replacement
+launches so a closed main produces one window.
 The `SetAccountDemand` command is connection- and panel-scoped: Account panels
 announce their selected Link Group venue and release it on venue change,
 unmount, or disconnect. The engine deduplicates these demands before polling;

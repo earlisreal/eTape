@@ -137,12 +137,13 @@ func TestOwnedChromeWindowCommandUsesSavedBounds(t *testing.T) {
 }
 
 func TestOwnedBrowserRelaunchArgsPreserveIdentity(t *testing.T) {
-	browser := &OwnedBrowser{pid: 1234, startToken: 5678, profileDir: `C:\\Temp\\etape-chrome`, url: "http://127.0.0.1:8686"}
+	browser := &OwnedBrowser{pid: 1234, startToken: 5678, profileDir: `C:\\Temp\\etape-chrome`, url: "http://127.0.0.1:8686", mainWindow: 42}
 	want := []string{
 		"-owned-browser-pid", "1234",
 		"-owned-browser-start", "5678",
 		"-owned-browser-profile", `C:\\Temp\\etape-chrome`,
 		"-owned-browser-url", "http://127.0.0.1:8686",
+		"-owned-browser-main-hwnd", "42",
 	}
 	if got := browser.RelaunchArgs(); !slices.Equal(got, want) {
 		t.Fatalf("RelaunchArgs() = %q, want %q", got, want)

@@ -87,23 +87,41 @@ export function registerMainWorkspaceFocus(): () => void {
   return stop;
 }
 
+type MainFocusCommands = { sendCommand(name: string, args: unknown): Promise<{ status: string }> };
+
 /** Focus the main workspace without reloading an existing window. */
-export function focusMainWorkspace(): void {
+export function focusMainWorkspace(commands?: MainFocusCommands): void {
   if (parseWorkspaceName(window.location.search) === "main") return;
-  if (mainWorkspacePresent() && typeof BroadcastChannel !== "undefined") {
-    const channel = new BroadcastChannel(MAIN_FOCUS_CHANNEL);
-    channel.postMessage("focus-main");
-    channel.close();
+
+  const browserFallback = (): void => {
+    if (mainWorkspacePresent() && typeof BroadcastChannel !== "undefined") {
+      const channel = new BroadcastChannel(MAIN_FOCUS_CHANNEL);
+      channel.postMessage("focus-main");
+      channel.close();
+      return;
+    }
+    const main = window.open("", workspaceWindowTarget("main"), workspaceWindowFeatures());
+    if (!main) return;
+    try {
+      if (main.location.href === "about:blank") main.location.href = workspaceUrl("main");
+      main.focus();
+    } catch {
+      // Browsers may reject window controls; symbol activation still succeeds.
+    }
+  };
+
+  if (commands) {
+    try {
+      void commands.sendCommand("FocusMainWorkspace", {}).then((ack) => {
+        if (ack.status !== "accepted") browserFallback();
+      }, browserFallback);
+    } catch {
+      browserFallback();
+    }
     return;
   }
-  const main = window.open("", workspaceWindowTarget("main"), workspaceWindowFeatures());
-  if (!main) return;
-  try {
-    if (main.location.href === "about:blank") main.location.href = workspaceUrl("main");
-    main.focus();
-  } catch {
-    // Browsers may reject window controls; symbol activation still succeeds.
-  }
+
+  browserFallback();
 }
 
 export function openNewsWindow(url: string): Window | null {

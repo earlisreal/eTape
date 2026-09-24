@@ -78,6 +78,7 @@ type Config struct {
 	AccountDemand                  *exec.AccountDemandRegistry
 	Eligibility                    EligibilityRegistry
 	OnConfigSet                    func(key, value string)
+	FocusMainWorkspace             func() bool
 }
 
 func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va venueAdmin, vt venueTester, requestRestart func(), startDemo func() error, locateRegistries ...LocateRegistry) (*Hub, *Server) {
@@ -113,6 +114,7 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	cmd.setAccountDemandRegistry(cfg.AccountDemand)
 	cmd.setWindowStateRegistry(newWindowStateRegistry(st))
 	cmd.onConfigSet = cfg.OnConfigSet
+	cmd.focusMain = cfg.FocusMainWorkspace
 	h.cmd = cmd
 	cmd.restart = requestRestart
 	cmd.startDemo = startDemo

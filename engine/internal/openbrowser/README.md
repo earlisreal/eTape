@@ -17,3 +17,10 @@ startup falls back to the Windows URL handler; macOS uses `open`, and other
 Unix systems use `xdg-open`. The UI closes its own eTape windows on a clean
 engine-stop signal; fallback-browser control is best effort. Failure is
 non-fatal and logged. Test: `go test ./internal/openbrowser`.
+
+Native Scanner focus retains and validates the main HWND across engine
+self-restarts, restores minimized state without changing geometry, requests
+foreground activation, flashes the taskbar when Windows declines ownership, and
+opens exactly one replacement in the same profile when main was closed. Fallback
+browsers, tray launches, and non-Windows platforms keep best-effort browser
+focus.

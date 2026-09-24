@@ -5,6 +5,7 @@
 package openbrowser
 
 import (
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -13,9 +14,13 @@ import (
 	"runtime"
 	"strconv"
 	"sync"
+	"time"
 )
 
-const ownedChromeProfilePrefix = "etape-chrome-"
+const (
+	ownedChromeProfilePrefix = "etape-chrome-"
+	mainWindowCaptureTimeout = 10 * time.Second
+)
 
 // WindowSpec describes the initial normal bounds for one restored workspace.
 type WindowSpec struct {
@@ -32,7 +37,14 @@ type OwnedBrowser struct {
 	startToken uint64
 	profileDir string
 	url        string
+	chrome     string
 	done       <-chan struct{}
+
+	focusMu             sync.Mutex
+	mainWindow          uintptr
+	mainWindowReady     chan struct{}
+	mainWindowReadyOnce sync.Once
+	closed              bool
 
 	closeOnce sync.Once
 	closeErr  error
@@ -82,8 +94,11 @@ func OpenOwned(url string, restored ...WindowSpec) (*OwnedBrowser, error) {
 		return nil, openDefault(url)
 	}
 	done := make(chan struct{})
-	owned := &OwnedBrowser{pid: cmd.Process.Pid, startToken: startToken, profileDir: profileDir, url: url, done: done}
-	go restoreOwnedProcessWindows(cmd.Process.Pid, startToken, chrome, profileDir, restored)
+	owned := &OwnedBrowser{pid: cmd.Process.Pid, startToken: startToken, profileDir: profileDir, url: url, chrome: chrome, done: done, mainWindowReady: make(chan struct{})}
+	go func() {
+		defer owned.markMainWindowReady()
+		restoreOwnedProcessWindows(cmd.Process.Pid, startToken, chrome, profileDir, restored, owned.setMainWindow)
+	}()
 	go func() {
 		_ = cmd.Wait()
 		close(done)
@@ -94,7 +109,7 @@ func OpenOwned(url string, restored ...WindowSpec) (*OwnedBrowser, error) {
 
 // AdoptOwned reconnects a Windows engine restart to the startup Chrome app
 // launched by the previous engine process.
-func AdoptOwned(pid int, startToken uint64, profileDir, url string) (*OwnedBrowser, error) {
+func AdoptOwned(pid int, startToken uint64, profileDir, url string, mainWindow uintptr) (*OwnedBrowser, error) {
 	if runtime.GOOS != "windows" {
 		return nil, fmt.Errorf("owned Chrome is supported only on Windows")
 	}
@@ -104,7 +119,7 @@ func AdoptOwned(pid int, startToken uint64, profileDir, url string) (*OwnedBrows
 	if err := verifyOwnedProcess(pid, startToken); err != nil {
 		return nil, err
 	}
-	return &OwnedBrowser{pid: pid, startToken: startToken, profileDir: profileDir, url: url}, nil
+	return &OwnedBrowser{pid: pid, startToken: startToken, profileDir: profileDir, url: url, chrome: findChrome(), mainWindow: mainWindow}, nil
 }
 
 // RelaunchArgs carries ownership to the replacement Windows engine process.
@@ -112,12 +127,65 @@ func (b *OwnedBrowser) RelaunchArgs() []string {
 	if b == nil {
 		return nil
 	}
-	return []string{
+	b.waitMainWindowReady()
+	b.focusMu.Lock()
+	mainWindow := b.mainWindow
+	b.focusMu.Unlock()
+	args := []string{
 		"-owned-browser-pid", strconv.Itoa(b.pid),
 		"-owned-browser-start", strconv.FormatUint(b.startToken, 10),
 		"-owned-browser-profile", b.profileDir,
 		"-owned-browser-url", b.url,
 	}
+	if mainWindow != 0 {
+		args = append(args, "-owned-browser-main-hwnd", strconv.FormatUint(uint64(mainWindow), 10))
+	}
+	return args
+}
+
+func (b *OwnedBrowser) setMainWindow(hwnd uintptr) {
+	b.focusMu.Lock()
+	if !b.closed {
+		b.mainWindow = hwnd
+	}
+	b.focusMu.Unlock()
+	b.markMainWindowReady()
+}
+
+func (b *OwnedBrowser) markMainWindowReady() {
+	if b.mainWindowReady != nil {
+		b.mainWindowReadyOnce.Do(func() { close(b.mainWindowReady) })
+	}
+}
+
+func (b *OwnedBrowser) waitMainWindowReady() {
+	b.focusMu.Lock()
+	ready, captured := b.mainWindowReady, b.mainWindow != 0
+	b.focusMu.Unlock()
+	if ready == nil || captured {
+		return
+	}
+	timer := time.NewTimer(mainWindowCaptureTimeout)
+	defer timer.Stop()
+	select {
+	case <-ready:
+	case <-timer.C:
+	}
+}
+
+// FocusMain restores and foregrounds the owned main workspace. Native
+// behavior is supplied by the platform adapter; the mutex serializes focus,
+// replacement, and shutdown so concurrent requests cannot create duplicates.
+func (b *OwnedBrowser) FocusMain() error {
+	if b == nil {
+		return errors.New("owned browser unavailable")
+	}
+	b.focusMu.Lock()
+	defer b.focusMu.Unlock()
+	if b.closed {
+		return errors.New("owned browser closed")
+	}
+	return focusOwnedMainLocked(b)
 }
 
 // Close terminates the private Chrome process tree, closing every window owned
@@ -133,6 +201,10 @@ func (b *OwnedBrowser) Close() error {
 }
 
 func (b *OwnedBrowser) close() error {
+	b.focusMu.Lock()
+	b.closed = true
+	b.focusMu.Unlock()
+	b.markMainWindowReady()
 	if done, err := ownedProcessExited(b.pid, b.startToken, b.done); err != nil {
 		return err
 	} else if !done {

@@ -350,13 +350,14 @@ describe("ScannerPanel", () => {
     const main = { location: { href: `${window.location.origin}/?workspace=main` }, focus: vi.fn() };
     const open = vi.spyOn(window, "open").mockReturnValue(main as unknown as Window);
     try {
-      const { scanner, focus } = renderPanel({ group: "blue" });
+      const { scanner, focus, commands } = renderPanel({ group: "blue" });
       act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
         payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ ...scannerShortInterestDefaults, symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1, relativeVolume: null }] } }));
       fireEvent.doubleClick(screen.getByText("KO"));
       expect(focus).toHaveBeenCalledWith("blue", "US.KO");
-      expect(open).toHaveBeenCalledWith("", "etape-workspace-main", expect.any(String));
-      expect(main.focus).toHaveBeenCalledOnce();
+      expect(commands.sendCommand).toHaveBeenCalledWith("FocusMainWorkspace", {});
+      expect(open).not.toHaveBeenCalled();
+      expect(main.focus).not.toHaveBeenCalled();
     } finally {
       open.mockRestore();
       window.history.replaceState({}, "", before);

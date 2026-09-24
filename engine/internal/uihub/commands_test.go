@@ -197,6 +197,22 @@ func TestCommandsRestartEngineAcksThenTriggers(t *testing.T) {
 	}
 }
 
+func TestCommandsFocusMainWorkspaceQueuesOnlyWhenSupported(t *testing.T) {
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	called := 0
+	cd.focusMain = func() bool { called++; return true }
+	ack, deferred := cd.handle(context.Background(), "FocusMainWorkspace", json.RawMessage(`{}`), 0, func(wsmsg.AckMsg) {})
+	if deferred || ack.Status != wsmsg.AckAccepted || called != 1 {
+		t.Fatalf("supported focus: ack=%+v deferred=%v called=%d", ack, deferred, called)
+	}
+
+	cd.focusMain = func() bool { called++; return false }
+	ack, deferred = cd.handle(context.Background(), "FocusMainWorkspace", json.RawMessage(`{}`), 0, func(wsmsg.AckMsg) {})
+	if deferred || ack.Status != wsmsg.AckBlocked || called != 2 {
+		t.Fatalf("unsupported focus: ack=%+v deferred=%v called=%d", ack, deferred, called)
+	}
+}
+
 func TestVenueWireRoundTripsStartingBalance(t *testing.T) {
 	v := config.Venue{ID: "sim-1", Broker: "sim", Env: "paper", StartingBalance: 25_000}
 	wire := venueToWire(v)
@@ -411,7 +427,8 @@ func TestCommandsAllReturnNonDeferred(t *testing.T) {
 		{"PutCredential", `{"name":"a","keyId":"k","secretKey":"s"}`, wsmsg.AckAccepted},
 		{"DeleteCredential", `{"name":"a"}`, wsmsg.AckAccepted},
 		{"TestConnection", `{"broker":"alpaca","env":"paper"}`, wsmsg.AckAccepted},
-		{"Nope", `{}`, wsmsg.AckBlocked}, // unknown command => default branch
+		{"FocusMainWorkspace", `{}`, wsmsg.AckBlocked}, // native focus is unavailable in this command fixture
+		{"Nope", `{}`, wsmsg.AckBlocked},               // unknown command => default branch
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

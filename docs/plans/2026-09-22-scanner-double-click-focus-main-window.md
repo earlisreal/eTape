@@ -1,6 +1,6 @@
 # Scanner double-click focuses the main window
 
-Status: Implemented; Windows owned-Chrome manual gate pending.
+Status: Browser path implemented; Windows owned-Chrome gate failed. Superseded by [the native-focus plan](2026-09-24-scanner-double-click-native-main-window-focus.md).
 
 ## Goal
 

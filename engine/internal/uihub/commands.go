@@ -108,6 +108,7 @@ type commands struct {
 	onConfigSet    func(key, value string)
 	restart        func()
 	startDemo      func() error
+	focusMain      func() bool
 	wl             atomic.Pointer[watchlistBox]
 	scanner        atomic.Pointer[scannerBox]
 }
@@ -462,6 +463,11 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		defer cancel()
 		r := cd.tester.TestConnection(pctx, a.Broker, a.Env, a.Credentials, a.KeyID, a.SecretKey, a.AccountID)
 		return wsmsg.AckMsg{Status: "accepted", Value: resultToWire(r)}, false
+	case "FocusMainWorkspace":
+		if cd.focusMain == nil || !cd.focusMain() {
+			return blocked("native main focus unavailable"), false
+		}
+		return wsmsg.AckMsg{Status: wsmsg.AckAccepted}, false
 	case "RestartEngine":
 		if cd.restart == nil {
 			return blocked("restart not supported"), false
