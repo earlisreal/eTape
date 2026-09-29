@@ -24,6 +24,7 @@ const paneApis = [
 ];
 const chartApi = {
   addSeries: vi.fn(() => ({ setData: vi.fn(), update: vi.fn(), applyOptions: vi.fn(), setSeriesOrder: vi.fn(),
+    createPriceLine: vi.fn(() => ({ applyOptions: vi.fn() })), removePriceLine: vi.fn(),
     attachPrimitive: vi.fn(), priceToCoordinate: vi.fn(() => 0), coordinateToPrice: vi.fn(() => 0) })),
   removeSeries: vi.fn(),
   panes: vi.fn(() => paneApis),
@@ -1554,6 +1555,23 @@ describe("ChartPanel", () => {
     now.mockReturnValue(Date.parse("2026-07-06T13:30:11Z"));
     expect(getSurface().isDirty()).toBe(true);
     now.mockRestore();
+  });
+
+  it("dirties a Daily chart for its own 1m updates and post-market clock boundary", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(Date.parse("2026-09-30T19:59:30Z"));
+    try {
+      const { stores, getSurface } = renderChartCapturingSurface({ timeframe: "D" });
+      getSurface().isDirty();
+      expect(getSurface().isDirty()).toBe(false);
+      pushLiveBar(stores, "US.NVDA", "1m", 1, 2);
+      expect(getSurface().isDirty()).toBe(false);
+      pushLiveBar(stores, "US.AAPL", "1m", 1, 2);
+      expect(getSurface().isDirty()).toBe(true);
+      now.mockReturnValue(Date.parse("2026-09-30T20:00:00Z"));
+      expect(getSurface().isDirty()).toBe(true);
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it("dirties a 10s chart when OpenD health changes", () => {

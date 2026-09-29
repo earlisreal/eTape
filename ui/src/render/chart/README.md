@@ -4,6 +4,10 @@
 the chart derives its display series imperatively. High-frequency updates do
 not flow through React state.
 
+On the Daily chart, a dashed `Post` price line follows the latest live 1-minute
+close during the chart's 16:00–20:00 ET post-market window. It disappears when that window
+ends or the symbol/timeframe changes. The official Daily bar remains unchanged.
+
 ## 10-second display
 
 The `10s` display contains real bars, explicit Volume-Only Bars, and completed No-Trade Bars, plus explicit

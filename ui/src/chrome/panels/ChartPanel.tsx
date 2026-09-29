@@ -658,7 +658,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     const off = scheduler.register({
       id: `chart:${config.id}`,
       isDirty: () => {
-        const barsRev = stores.bars.getRev(currentSymbol, tfRef.current);
+        const barsRev = stores.bars.getRev(currentSymbol, tfRef.current)
+          + (tfRef.current === "D" ? stores.bars.getRev(currentSymbol, "1m") : 0);
         // Recomputed fresh every call (not cached via the `[instances]` effect
         // below): instancesRef.current is kept synchronously authoritative by
         // setInstancesNow specifically to avoid a same-tick double-mutation bug
@@ -681,8 +682,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           ? stores.health.getSnapshot().links.find((link) => link.link === "engine-moomoo")?.status ?? ""
           : "";
         const paneSig = `${facade.paneHeights().join(",")}|${facade.priceScaleWidth()}`;
-        const wallBucket = usesBoundaryManagedFollow(tfRef.current)
-          ? Math.floor(stores.marketClock.nowMs() / timeframeToMs(tfRef.current as Timeframe))
+        const wallBucket = usesBoundaryManagedFollow(tfRef.current) || tfRef.current === "D"
+          ? Math.floor(stores.marketClock.nowMs() / (tfRef.current === "D" ? 60_000 : timeframeToMs(tfRef.current as Timeframe)))
           : -1;
         const changed = barsRev !== lastBarsRev || indicatorsRev !== lastIndicatorsRev || fillsRev !== lastFillsRev || drawingsRev !== lastDrawingsRev
           || paneSig !== lastPaneSig || wallBucket !== lastWallBucket || openDStatus !== lastOpenDStatus || forceRepaintRef.current;

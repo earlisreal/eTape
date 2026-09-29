@@ -69,6 +69,10 @@ export class BarStore extends PaintStore {
     return all.filter((b) => { const ms = Date.parse(b.bucketStart); return ms >= range.fromMs && ms < range.toMs; });
   }
 
+  latestBar(symbol: string, timeframe: string): Bar | undefined {
+    return this.series_.get(this.key(symbol, timeframe))?.at(-1);
+  }
+
   mergeWindow(symbol: string, timeframe: string, bars: Bar[], fromMs: number, toMs: number, select = true): void {
     const k = this.key(symbol, timeframe);
     const byTime = new Map((this.series_.get(k) ?? []).map((b) => [b.bucketStart, b]));

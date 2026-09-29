@@ -10,19 +10,21 @@ import { defaultVolumeIndicator, withDefaultParams } from "./indicatorSeries";
 import type { Band } from "./sessions";
 import { IndicatorStore } from "../../data/IndicatorStore";
 
-function fakeSeries(onAppend?: () => void): LwcSeries & { calls: string[]; updates: unknown[]; setDataCalls: unknown[][]; orderCalls: number[]; optionCalls: unknown[] } {
+function fakeSeries(onAppend?: () => void): LwcSeries & { calls: string[]; updates: unknown[]; setDataCalls: unknown[][]; orderCalls: number[]; optionCalls: unknown[];
+  priceLines: Array<{ options: Record<string, unknown>; removed: boolean }> } {
   const calls: string[] = [];
   const updates: unknown[] = [];
   const setDataCalls: unknown[][] = [];
   const orderCalls: number[] = [];
   const optionCalls: unknown[] = [];
+  const priceLines: Array<{ options: Record<string, unknown>; removed: boolean; applyOptions: (options: unknown) => void }> = [];
   let lastTime = -Infinity;
   const timeOf = (value: unknown): number | null => {
     const time = (value as { time?: unknown } | null)?.time;
     return typeof time === "number" && Number.isFinite(time) ? time : null;
   };
   return {
-    calls, updates, setDataCalls, orderCalls, optionCalls,
+    calls, updates, setDataCalls, orderCalls, optionCalls, priceLines,
     setData: (data) => {
       calls.push("setData");
       setDataCalls.push(data as unknown[]);
@@ -35,6 +37,13 @@ function fakeSeries(onAppend?: () => void): LwcSeries & { calls: string[]; updat
       calls.push("update"); updates.push(bar);
     },
     applyOptions: (o) => { calls.push("applyOptions"); optionCalls.push(o); },
+    createPriceLine: (options) => {
+      const line = { options: options as Record<string, unknown>, removed: false,
+        applyOptions: (next: unknown) => { line.options = { ...line.options, ...next as object }; } };
+      priceLines.push(line);
+      return line;
+    },
+    removePriceLine: (line) => { const found = priceLines.find((candidate) => candidate === line); if (found) found.removed = true; },
     setSeriesOrder: (order) => { calls.push("setSeriesOrder"); orderCalls.push(order); },
   };
 }
@@ -1610,6 +1619,38 @@ describe("ChartController", () => {
   });
 });
 describe("ChartController main series + facade capabilities", () => {
+  it("tracks the current post-market 1m close on Daily without changing the official bar", () => {
+    const daily = { ...bar("2026-09-30T04:00:00Z", 1.1), timeframe: "D" };
+    const minute: Bar[] = [bar("2026-09-29T20:00:00Z", 1.5)];
+    const facade = fakeFacade();
+    const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "D" },
+      { bars: barReaderByTf({ D: [daily], "1m": minute }), indicators: emptyIndicators, commands: commandSpy() });
+    c.mount();
+    c.sync(Date.parse("2026-09-30T19:59:30Z"));
+    expect(facade.created[0].series.priceLines).toHaveLength(0);
+    c.sync(Date.parse("2026-09-30T20:00:10Z"));
+    expect(facade.created[0].series.priceLines).toHaveLength(0); // yesterday's close is stale
+
+    minute.push(bar("2026-09-30T20:00:00Z", 1.23, true));
+    c.sync(Date.parse("2026-09-30T20:00:30Z"));
+    const main = facade.created[0].series;
+    expect(main.priceLines[0].options).toMatchObject({ price: 1.23, title: "Post", axisLabelVisible: true });
+    expect(main.setDataCalls.at(-1)).toMatchObject([{ close: 1.1 }]);
+
+    minute[1] = bar("2026-09-30T20:00:00Z", 1.25, true);
+    c.sync(Date.parse("2026-09-30T20:00:40Z"));
+    expect(main.priceLines[0].options.price).toBe(1.25);
+    const autoscale = (facade.created[0].options as { autoscaleInfoProvider: (base: () => { priceRange: { minValue: number; maxValue: number } }) => { priceRange: { minValue: number; maxValue: number } } }).autoscaleInfoProvider;
+    const base = () => ({ priceRange: { minValue: 1, maxValue: 1.2 } });
+    expect(autoscale(base).priceRange.maxValue).toBe(1.25);
+    facade.visibleLogicalRange = { from: -2, to: -1 };
+    expect(autoscale(base).priceRange.maxValue).toBe(1.2); // historical viewport keeps its scale
+    c.setPalette(DARK);
+    expect(main.priceLines[0].options.color).toBe(DARK.accent);
+    c.sync(Date.parse("2026-10-01T00:00:00Z"));
+    expect(main.priceLines[0].removed).toBe(true);
+  });
+
   it("mount creates the main series via setMainSeries (kind 'candle')", () => {
     const facade = fakeFacade();
     const c = new ChartController(facade, LIGHT, { symbol: "US.AAPL", timeframe: "1m" },

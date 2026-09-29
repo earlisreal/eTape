@@ -5,10 +5,14 @@ export interface LwcSeries {
   setData(data: unknown[]): void;
   update(bar: unknown): void;
   applyOptions(options: unknown): void;
+  createPriceLine(options: unknown): LwcPriceLine;
+  removePriceLine(line: LwcPriceLine): void;
   // Zero-based draw-order index within the series' pane — higher renders on top.
   // Used to keep the candle painted over overlay indicator lines (LWC v5.0.6+).
   setSeriesOrder(order: number): void;
 }
+
+export interface LwcPriceLine { applyOptions(options: unknown): void }
 
 export type MainKind = "candle" | "bar" | "line" | "area";
 

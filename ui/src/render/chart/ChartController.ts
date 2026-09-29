@@ -1,4 +1,5 @@
-import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
+import type { ChartApiFacade, LwcPriceLine, LwcSeries } from "./ChartApiFacade";
+import type { AutoscaleInfo } from "lightweight-charts";
 import type { Palette } from "../palette";
 import type { Bar } from "../../wire/contract";
 import { quoteDecimals, QUOTE_DECIMALS } from "../format";
@@ -18,7 +19,10 @@ import type { FillMarker } from "./diamondMarker";
 import { bucketStartMs } from "./barBucket";
 import { uiLog } from "../../logging/logger";
 
-export interface BarReader { series(symbol: string, timeframe: string): Bar[] }
+export interface BarReader {
+  series(symbol: string, timeframe: string): Bar[];
+  latestBar?(symbol: string, timeframe: string): Bar | undefined;
+}
 // Display-only extension. This never enters BarStore or engine-facing paths.
 export type DisplayBar = Bar & { synthetic?: true; dataGap?: true };
 export interface VisibleExtremaAnchor { logical: number; price: number }
@@ -76,6 +80,8 @@ export const COLLAPSED_STRETCH = 0.06;
 
 export class ChartController {
   private candle!: LwcSeries;
+  private postMarketLine: LwcPriceLine | null = null;
+  private postMarketPrice: number | null = null;
   private volume: LwcSeries | null = null;
   private lastAppliedCount = 0;             // bars applied via setData/update
   private lastAppliedKey = "";              // last bar's bucketStart|close, to detect in-progress change
@@ -174,6 +180,7 @@ export class ChartController {
     this.facade.applyOptions(chartOptions(this.palette, this.config.timeframe));
     this.candle = this.facade.setMainSeries("candle", {
       ...candleOptions(this.palette), priceFormat: nativePriceFormat(this.appliedPriceDecimals),
+      autoscaleInfoProvider: this.postMarketAutoscale,
     });
     this.setVolumeGeometry(false);
   }
@@ -200,12 +207,61 @@ export class ChartController {
       ? fillEmptyTenSecondSlots(bars, nowMs, openDDown || this.noTradeSuspended)
       : bars;
     this.applyBars(displayBars, bars, nowMs);
+    this.syncPostMarketLine(nowMs, bars.length > 0);
     this.reconcilePendingBoundaryFollow(nowMs);
     this.displayedBars = displayBars;
     this.refreshBarCaches(displayBars);
     this.applyIndicators();
     this.applySessions(displayBars);
   }
+
+  private syncPostMarketLine(nowMs: number, hasDailyBars: boolean): void {
+    if (this.config.timeframe !== "D" || !hasDailyBars) {
+      this.clearPostMarketLine();
+      return;
+    }
+    const day = buildDaySegment(nowMs);
+    if (classify(nowMs, day) !== "post") {
+      this.clearPostMarketLine();
+      return;
+    }
+    const latest = this.deps.bars.latestBar
+      ? this.deps.bars.latestBar(this.config.symbol, "1m")
+      : this.deps.bars.series(this.config.symbol, "1m").at(-1);
+    const barMs = Date.parse(latest?.bucketStart ?? "");
+    if (!latest || latest.gap || !Number.isFinite(barMs) || !Number.isFinite(latest.c) || latest.c <= 0
+      || barMs < day.postMs || barMs > nowMs || barMs >= day.closeMs) {
+      this.clearPostMarketLine();
+      return;
+    }
+    if (!this.postMarketLine) {
+      this.postMarketLine = this.candle.createPriceLine({
+        price: latest.c, color: this.palette.accent, lineWidth: 1,
+        lineStyle: LWC_LINE_STYLE.dashed, axisLabelVisible: true, title: "Post",
+      });
+    } else if (latest.c !== this.postMarketPrice) {
+      this.postMarketLine.applyOptions({ price: latest.c });
+    }
+    this.postMarketPrice = latest.c;
+  }
+
+  private clearPostMarketLine(): void {
+    if (this.postMarketLine) this.candle.removePriceLine(this.postMarketLine);
+    this.postMarketLine = null;
+    this.postMarketPrice = null;
+  }
+
+  // LWC's custom price lines do not expand autoscale on their own.
+  private readonly postMarketAutoscale = (base: () => AutoscaleInfo | null): AutoscaleInfo | null => {
+    const info = base();
+    const price = this.postMarketPrice;
+    const visible = this.facade.getVisibleLogicalRange();
+    if (!info?.priceRange || price === null || (visible && visible.to < this.displayedBars.length - 1)) return info;
+    return { ...info, priceRange: {
+      minValue: Math.min(info.priceRange.minValue, price),
+      maxValue: Math.max(info.priceRange.maxValue, price),
+    } };
+  };
 
   private applyBars(bars: DisplayBar[], rawBars: Bar[], nowMs: number): void {
     if (bars.length === 0) return; // cold symbol — panel shows the hint, not an error
@@ -968,6 +1024,7 @@ export class ChartController {
   }
 
   private resetForReload(): void {
+    this.clearPostMarketLine();
     this.backfilled = false;
     this.lastAppliedCount = 0;
     this.lastAppliedKey = "";
@@ -1021,6 +1078,7 @@ export class ChartController {
 
   setPalette(p: Palette): void {
     this.palette = p;
+    this.postMarketLine?.applyOptions({ color: p.accent });
     this.facade.applyOptions(chartOptions(p, this.config.timeframe));
     this.candle.applyOptions(mainSeriesOptions(this.chartType, p));
     this.candle.applyOptions({ lastValueVisible: this.lastValueVisible });
@@ -1061,9 +1119,11 @@ export class ChartController {
 
   setChartType(type: ChartType): void {
     if (type === this.chartType) return;
+    this.clearPostMarketLine();
     this.chartType = type;
     this.candle = this.facade.setMainSeries(type, {
       ...mainSeriesOptions(type, this.palette), priceFormat: nativePriceFormat(this.appliedPriceDecimals),
+      autoscaleInfoProvider: this.postMarketAutoscale,
     });
     this.candle.applyOptions({ lastValueVisible: this.lastValueVisible });
     // Force a full re-seed of the new series on the next sync().
@@ -1142,6 +1202,7 @@ export class ChartController {
   resetZoom(): void { this.setViewportMode("live"); this.facade.resetTimeScale(); this.facade.resetPriceScale(); }
   dispose(): void {
     this.pendingBoundaryFollowMs = null;
+    this.clearPostMarketLine();
     for (const id of [...this.indicators.keys()]) this.removeIndicator(id);
     this.facade.remove();
   }
