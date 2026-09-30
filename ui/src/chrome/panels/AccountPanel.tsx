@@ -85,25 +85,24 @@ function chipVariant(ds: DisplayStatus): ChipVariant | null {
 }
 
 const ORDERS_DEFAULT_SORT: SortState = { col: "createdMs", dir: "desc" };
-const ORDER_PRICE_COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
-  { col: "price", label: "Price", defaultWidth: 76, minWidth: 68, align: "right", sortable: true },
-  { col: "stopPrice", label: "Stop Price", defaultWidth: 96, minWidth: 92, align: "right", sortable: true },
-  { col: "stopLimitPrice", label: "Stop Limit", defaultWidth: 96, minWidth: 92, align: "right", sortable: true },
-  { col: "type", label: "Type", defaultWidth: 76, minWidth: 72, align: "left", sortable: true },
+type OrderColumn = ResizableColumn & { align: "left" | "right"; sortable: boolean; title?: string };
+const ORDER_PRICE_COLUMNS: OrderColumn[] = [
+  { col: "price", label: "PRICE", title: "Limit price", defaultWidth: 76, minWidth: 68, align: "right", sortable: true },
+  { col: "stopPrice", label: "STOP", title: "Stop trigger price", defaultWidth: 76, minWidth: 68, align: "right", sortable: true },
+  { col: "type", label: "TYPE", title: "Order type", defaultWidth: 68, minWidth: 64, align: "left", sortable: true },
 ];
 const ORDER_PRICE_ACCESSORS: Record<string, (o: Pick<Order, "type" | "limitPrice" | "stopPrice">) => number | string | null> = {
-  price: (o) => o.type === "LIMIT" ? o.limitPrice : null,
+  price: (o) => o.type === "LIMIT" || o.type === "STOP_LIMIT" ? o.limitPrice : null,
   stopPrice: (o) => o.type === "STOP" || o.type === "STOP_LIMIT" ? o.stopPrice : null,
-  stopLimitPrice: (o) => o.type === "STOP_LIMIT" ? o.limitPrice : null,
   type: (o) => abbrevType(o.type),
 };
-const ORDERS_COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
-  { col: "createdMs", label: "Submitted", defaultWidth: 96, minWidth: 88, align: "left", sortable: true },
-  { col: "symbol", label: "Symbol", defaultWidth: 84, minWidth: 68, align: "left", sortable: true },
-  { col: "side", label: "Side", defaultWidth: 56, minWidth: 48, align: "left", sortable: true },
-  { col: "qty", label: "Qty", defaultWidth: 56, minWidth: 48, align: "right", sortable: true },
+const ORDERS_COLUMNS: OrderColumn[] = [
+  { col: "createdMs", label: "TIME", title: "Submitted (US Eastern)", defaultWidth: 96, minWidth: 88, align: "left", sortable: true },
+  { col: "symbol", label: "SYM", title: "Symbol", defaultWidth: 68, minWidth: 60, align: "left", sortable: true },
+  { col: "side", label: "SIDE", title: "Side", defaultWidth: 56, minWidth: 48, align: "left", sortable: true },
+  { col: "qty", label: "QTY", title: "Remaining quantity", defaultWidth: 56, minWidth: 48, align: "right", sortable: true },
   ...ORDER_PRICE_COLUMNS,
-  { col: "state", label: "State", defaultWidth: 96, minWidth: 88, align: "left", sortable: true },
+  { col: "state", label: "STATE", title: "Order status", defaultWidth: 96, minWidth: 88, align: "left", sortable: true },
   { col: "actions", label: "", defaultWidth: 64, minWidth: 60, align: "right", sortable: false },
 ];
 const ORDERS_SORT_ACCESSORS: Record<string, (r: OrderView) => number | string | null> = {
@@ -113,30 +112,31 @@ const ORDERS_SORT_ACCESSORS: Record<string, (r: OrderView) => number | string | 
   qty: (r) => (r.order.leavesQty > 0 ? r.order.leavesQty : r.order.qty),
   price: (r) => ORDER_PRICE_ACCESSORS.price(r.order),
   stopPrice: (r) => ORDER_PRICE_ACCESSORS.stopPrice(r.order),
-  stopLimitPrice: (r) => ORDER_PRICE_ACCESSORS.stopLimitPrice(r.order),
   type: (r) => ORDER_PRICE_ACCESSORS.type(r.order),
   state: (r) => STATUS_LABEL[displayStatus(r.order, r.optimistic)],
 };
 
 function readOrdersSort(s: Record<string, unknown>): SortState {
   const raw = s.ordersSort as { col?: unknown; dir?: unknown } | undefined;
-  if (raw && typeof raw.col === "string" && (raw.dir === "asc" || raw.dir === "desc")) {
-    return { col: raw.col, dir: raw.dir };
+  const col = raw?.col === "stopLimitPrice" ? "price" : raw?.col;
+  if (raw && typeof col === "string" && ORDERS_COLUMNS.some((column) => column.col === col && column.sortable)
+    && (raw.dir === "asc" || raw.dir === "desc")) {
+    return { col, dir: raw.dir };
   }
   return ORDERS_DEFAULT_SORT;
 }
 
 const CLOSED_DEFAULT_SORT: SortState = { col: "updatedMs", dir: "desc" };
-const CLOSED_COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
-  { col: "updatedMs", label: "Closed", defaultWidth: 96, minWidth: 88, align: "left", sortable: true },
-  { col: "symbol", label: "Symbol", defaultWidth: 84, minWidth: 68, align: "left", sortable: true },
-  { col: "side", label: "Side", defaultWidth: 56, minWidth: 48, align: "left", sortable: true },
-  { col: "qty", label: "Qty", defaultWidth: 56, minWidth: 48, align: "right", sortable: true },
-  { col: "executedQty", label: "Filled", defaultWidth: 56, minWidth: 48, align: "right", sortable: true },
+const CLOSED_COLUMNS: OrderColumn[] = [
+  { col: "updatedMs", label: "TIME", title: "Closed (US Eastern)", defaultWidth: 96, minWidth: 88, align: "left", sortable: true },
+  { col: "symbol", label: "SYM", title: "Symbol", defaultWidth: 68, minWidth: 60, align: "left", sortable: true },
+  { col: "side", label: "SIDE", title: "Side", defaultWidth: 56, minWidth: 48, align: "left", sortable: true },
+  { col: "qty", label: "QTY", title: "Original quantity", defaultWidth: 56, minWidth: 48, align: "right", sortable: true },
+  { col: "executedQty", label: "FILLED", title: "Filled quantity", defaultWidth: 56, minWidth: 48, align: "right", sortable: true },
   ...ORDER_PRICE_COLUMNS,
-  { col: "avgFillPrice", label: "Avg Fill", defaultWidth: 84, minWidth: 68, align: "right", sortable: true },
-  { col: "state", label: "State", defaultWidth: 72, minWidth: 64, align: "left", sortable: true },
-  { col: "reason", label: "Reason", defaultWidth: 120, minWidth: 96, align: "left", sortable: false },
+  { col: "avgFillPrice", label: "AVG FILL", title: "Average fill price", defaultWidth: 84, minWidth: 68, align: "right", sortable: true },
+  { col: "state", label: "STATE", title: "Order status", defaultWidth: 72, minWidth: 64, align: "left", sortable: true },
+  { col: "reason", label: "REASON", title: "Reason", defaultWidth: 120, minWidth: 96, align: "left", sortable: false },
 ];
 const CLOSED_SORT_ACCESSORS: Record<string, (r: ClosedOrder) => number | string | null> = {
   ...ORDER_PRICE_ACCESSORS,
@@ -151,9 +151,10 @@ const CLOSED_SORT_ACCESSORS: Record<string, (r: ClosedOrder) => number | string 
 
 function readClosedSort(s: Record<string, unknown>): SortState {
   const raw = s.closedOrdersSort as { col?: unknown; dir?: unknown } | undefined;
-  if (raw && typeof raw.col === "string" && CLOSED_COLUMNS.some((column) => column.col === raw.col)
+  const col = raw?.col === "stopLimitPrice" ? "price" : raw?.col;
+  if (raw && typeof col === "string" && CLOSED_COLUMNS.some((column) => column.col === col && column.sortable)
     && (raw.dir === "asc" || raw.dir === "desc")) {
-    return { col: raw.col, dir: raw.dir };
+    return { col, dir: raw.dir };
   }
   return CLOSED_DEFAULT_SORT;
 }
@@ -242,7 +243,7 @@ function OrdersTable({
         <table ref={openResize.tableRef} data-testid="open-orders-table" style={{ width: "100%", minWidth: openResize.totalWidth, tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
           <ColumnGroup columns={openColumns} widths={openResize.widths} />
           <thead><tr style={{ color: palette.textMuted, textAlign: "center" }}>
-            {openColumns.map((c) => <th key={c.col} data-column={c.col} style={{ ...th, textAlign: "center", cursor: c.sortable ? "pointer" : "default" }} onClick={() => clickOpenSort(c.col, c.sortable)}
+            {openColumns.map((c) => <th key={c.col} data-column={c.col} title={c.title} aria-label={c.title} style={{ ...th, textAlign: "center", cursor: c.sortable ? "pointer" : "default" }} onClick={() => clickOpenSort(c.col, c.sortable)}
               className={`col-head${c.sortable && openSort?.col === c.col && !(c.col === "createdMs" && openSort.dir === "desc") ? " sort-active" : ""}`}>
               {c.label} {c.sortable && openSort?.col === c.col && !(c.col === "createdMs" && openSort.dir === "desc") ? sortIndicator(openSort, c.col) : ""}
               <ColumnResizeHandle column={c} width={openResize.widths[c.col]} testId={`open-orders-resize-${c.col}`}
@@ -271,7 +272,7 @@ function OrdersTable({
         <table ref={closedResize.tableRef} data-testid="closed-orders-table" style={{ width: "100%", minWidth: closedResize.totalWidth, tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
           <ColumnGroup columns={closedColumns} widths={closedResize.widths} />
           <thead><tr style={{ color: palette.textMuted, textAlign: "center" }}>
-            {closedColumns.map((c) => <th key={c.col} data-column={c.col} style={{ ...th, textAlign: "center", cursor: c.sortable ? "pointer" : "default" }}
+            {closedColumns.map((c) => <th key={c.col} data-column={c.col} title={c.title} aria-label={c.title} style={{ ...th, textAlign: "center", cursor: c.sortable ? "pointer" : "default" }}
               onClick={() => clickClosedSort(c.col, c.sortable)} className={`col-head${c.sortable && closedSort?.col === c.col && !(c.col === "updatedMs" && closedSort.dir === "desc") ? " sort-active" : ""}`}>
               {c.label} {c.sortable && closedSort?.col === c.col && !(c.col === "updatedMs" && closedSort.dir === "desc") ? sortIndicator(closedSort, c.col) : ""}
               <ColumnResizeHandle column={c} width={closedResize.widths[c.col]} testId={`closed-orders-resize-${c.col}`}

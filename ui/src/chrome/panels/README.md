@@ -17,11 +17,16 @@ table; drag a header separator to resize and double-click it to auto-fit. The
 widths are shared when switching the selected venue, then scale proportionally
 to the panel width with per-column minimums before horizontal scrolling is
 needed.
-Open Orders and Closed Orders separate Qty, Price, Stop Price, Stop Limit, and
-Type. Price holds ordinary limit prices; stop-limit orders use Stop Price and
-Stop Limit, with unused price fields shown as `—`. Type uses MKT/LMT/STP/STPLMT.
-Open Qty remains the remaining share count when available; Closed Qty is the
-original quantity alongside Filled and Avg Fill. Submitted and Closed show
+Open Orders and Closed Orders use compact uppercase headers: TIME, SYM, SIDE,
+QTY, PRICE, STOP, TYPE, and STATE. Closed Orders also shows FILLED, AVG FILL,
+and REASON. Header tooltips and accessible names provide the full meanings.
+PRICE holds the limit price for both LIMIT and STOP_LIMIT; STOP holds the
+trigger for STOP and STOP_LIMIT. Unused price fields show `—`.
+TYPE uses MKT/LMT/STP/STPLMT. Saved Stop Limit sorting maps to PRICE with its
+direction preserved; existing widths for surviving columns remain in use.
+Open QTY remains the remaining share count when available; Closed QTY is the
+original quantity alongside FILLED and AVG FILL. TIME shows submitted time
+for Open Orders and closed time for Closed Orders. Both show
 `HH:MM:SS` for the current US Eastern calendar date and `MM/DD HH:MM:SS`
 otherwise, with the full timestamp on hover. The date display refreshes at
 minute boundaries; timestamp columns widen when dates are needed, including

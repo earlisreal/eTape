@@ -231,7 +231,7 @@ describe("AppShell onConfigChange", () => {
     // Wait for the initial (pre-existing) panel's content to actually mount inside
     // dockview's portal target before doing anything else.
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
-    await waitFor(() => expect(screen.getAllByText("Symbol")[0]).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId("open-orders-table").querySelector('th[data-column="symbol"]')).toBeTruthy());
 
     // Add a second panel via the "+ Add panel" popover — this changes `ws` in
     // AppShell's React state AFTER the open-orders PanelFrame factory (and the
@@ -244,11 +244,11 @@ describe("AppShell onConfigChange", () => {
     // the active tab's content) before touching its sort header. dockview's tab
     // activates on `pointerdown`, not `click`.
     act(() => clickTab(screen.getByTestId("panel-tab-orders-1")));
-    await waitFor(() => expect(screen.getAllByText("Symbol")[0]).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId("open-orders-table").querySelector('th[data-column="symbol"]')).toBeTruthy());
 
     // Trigger the pre-existing open-orders panel's onConfigChange path (sort-by
     // symbol persists via onConfigChange — see OpenOrdersPanel/AccountPanel).
-    fireEvent.click(screen.getAllByText("Symbol")[0]);
+    fireEvent.click(screen.getByTestId("open-orders-table").querySelector('th[data-column="symbol"]')!);
 
     await waitFor(() => expect(saved.length).toBeGreaterThan(0));
     const last = saved[saved.length - 1];
@@ -276,12 +276,10 @@ describe("AppShell onConfigChange", () => {
     };
     const { saved } = mount(seed);
     await waitFor(() => expect(screen.queryByText(/loading workspace/i)).toBeNull());
-    await waitFor(() => expect(screen.getAllByText("Symbol")[0]).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId("open-orders-table").querySelector('th[data-column="symbol"]')).toBeTruthy());
 
-    // Sort-by-symbol on the Orders table (index 0 — it renders first, ahead of
-    // the Positions/Trade-History tabs, both of which also have a "Symbol"
-    // column) persists via onConfigChange with an `{ ordersSort }` patch.
-    fireEvent.click(screen.getAllByText("Symbol")[0]);
+    // The Orders symbol column persists an ordersSort patch.
+    fireEvent.click(screen.getByTestId("open-orders-table").querySelector('th[data-column="symbol"]')!);
 
     await waitFor(() => expect(saved.length).toBeGreaterThan(0));
     const settings = saved[saved.length - 1].panels[0].settings;

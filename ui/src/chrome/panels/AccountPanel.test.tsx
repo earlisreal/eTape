@@ -505,10 +505,8 @@ describe("AccountPanel", () => {
         stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({ symbol: "US.AAPL" })] });
         stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: [order()] });
       });
-      // Both tables render a "Symbol" header; OrdersTable's is first in DOM
-      // order (it's rendered above the tab body). toggleSort always lands on
-      // "desc" the first time a different column is clicked (sortColumns.ts).
-      fireEvent.click(screen.getAllByText("Symbol")[0]);
+      // toggleSort lands on "desc" the first time a different column is clicked.
+      fireEvent.click(screen.getByTestId("open-orders-table").querySelector('th[data-column="symbol"]')!);
       expect(configChanges.at(-1)).toEqual({ ordersSort: { col: "symbol", dir: "desc" } });
 
       fireEvent.click(screen.getByTestId("positions-resize-qty").parentElement!);
@@ -539,7 +537,7 @@ describe("AccountPanel", () => {
       venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: true, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }],
     });
 
-    it("separates order prices and sorts numeric fields with unused prices last in both tables", () => {
+    it("merges limit prices under compact headers and sorts unused prices last in both tables", () => {
       const { props, stores, configChanges } = mkProps();
       const orders = [
         order("market", { type: "MARKET", limitPrice: 999, stopPrice: 999 }),
@@ -559,26 +557,68 @@ describe("AccountPanel", () => {
         const table = screen.getByTestId(`${tab}-orders-table`);
         const cells = (column: string) => [...table.querySelectorAll(`tbody [data-column="${column}"]`)].map((cell) => cell.textContent);
         expect([...table.querySelectorAll("thead [data-column]")].map((cell) => cell.getAttribute("data-column"))).toEqual(tab === "open"
-          ? ["createdMs", "symbol", "side", "qty", "price", "stopPrice", "stopLimitPrice", "type", "state", "actions"]
-          : ["updatedMs", "symbol", "side", "qty", "executedQty", "price", "stopPrice", "stopLimitPrice", "type", "avgFillPrice", "state", "reason"]);
-        const stopLimitRow = [...table.querySelectorAll("tbody tr")].find((row) => row.querySelector('[data-column="stopLimitPrice"]')?.textContent === "4.000")!;
-        expect(stopLimitRow.querySelector('[data-column="price"]')?.textContent).toBe("—");
+          ? ["createdMs", "symbol", "side", "qty", "price", "stopPrice", "type", "state", "actions"]
+          : ["updatedMs", "symbol", "side", "qty", "executedQty", "price", "stopPrice", "type", "avgFillPrice", "state", "reason"]);
+        expect([...table.querySelectorAll("thead th")].map((cell) => cell.textContent?.trim())).toEqual(tab === "open"
+          ? ["TIME", "SYM", "SIDE", "QTY", "PRICE", "STOP", "TYPE", "STATE", ""]
+          : ["TIME", "SYM", "SIDE", "QTY", "FILLED", "PRICE", "STOP", "TYPE", "AVG FILL", "STATE", "REASON"]);
+        expect(table.querySelector("th")?.getAttribute("title")).toBe(tab === "open" ? "Submitted (US Eastern)" : "Closed (US Eastern)");
+        expect(table.querySelector('th[data-column="stopPrice"]')?.getAttribute("title")).toBe("Stop trigger price");
+        expect(table.querySelector('[data-column="stopLimitPrice"]')).toBeNull();
+        const stopLimitRow = [...table.querySelectorAll("tbody tr")].find((row) => row.querySelector('[data-column="price"]')?.textContent === "4.000")!;
+        expect(stopLimitRow.querySelector('[data-column="price"]')?.textContent).toBe("4.000");
         expect(stopLimitRow.querySelector('[data-column="stopPrice"]')?.textContent).toBe("3.000");
         expect(stopLimitRow.querySelector('[data-column="type"]')?.textContent).toBe("STPLMT");
         expect(stopLimitRow.querySelector('[data-column="qty"]')?.textContent).toBe(tab === "open" ? "6" : "10");
         for (const [column, descending] of [
-          ["price", ["12.000", "3.000", "—", "—", "—", "—", "—"]],
+          ["price", ["13.000", "12.000", "4.000", "3.000", "—", "—", "—"]],
           ["stopPrice", ["12.000", "12.000", "3.000", "3.000", "—", "—", "—"]],
-          ["stopLimitPrice", ["13.000", "4.000", "—", "—", "—", "—", "—"]],
         ] as const) {
           fireEvent.click(table.querySelector(`th[data-column="${column}"]`)!);
           expect(cells(column)).toEqual(descending);
           expect(configChanges.at(-1)).toEqual({ [tab === "open" ? "ordersSort" : "closedOrdersSort"]: { col: column, dir: "desc" } });
           fireEvent.click(table.querySelector(`th[data-column="${column}"]`)!);
-          expect(cells(column).filter((value) => value !== "—")).toEqual([...descending].filter((value) => value !== "—").reverse());
+          expect(cells(column)).toEqual([...descending.filter((value) => value !== "—").reverse(), ...descending.filter((value) => value === "—")]);
         }
         fireEvent.click(table.querySelector('th[data-column="type"]')!);
         expect(cells("type")).toEqual(["STPLMT", "STPLMT", "STP", "STP", "MKT", "LMT", "LMT"]);
+      }
+    });
+
+    it.each(["asc", "desc"] as const)("restores the removed Stop Limit sort as PRICE %s in both tables", (dir) => {
+      const { props, stores, configChanges } = mkProps();
+      props.config.settings = { ordersSort: { col: "stopLimitPrice", dir }, closedOrdersSort: { col: "stopLimitPrice", dir } };
+      const orders = [order("high", { type: "STOP_LIMIT", limitPrice: 12 }), order("market", { type: "MARKET" }), order("low", { limitPrice: 3 })];
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: orders });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: orders.map((o) => closed({ ...o, status: "CANCELED" })) });
+      wrap(props);
+      for (const tab of ["open", "closed"] as const) {
+        fireEvent.click(screen.getByTestId(`${tab}-orders-tab`));
+        const table = screen.getByTestId(`${tab}-orders-table`);
+        const header = table.querySelector('th[data-column="price"]')!;
+        expect(header.className).toContain("sort-active");
+        expect([...table.querySelectorAll('tbody [data-column="price"]')].map((cell) => cell.textContent))
+          .toEqual(dir === "asc" ? ["3.000", "12.000", "—"] : ["12.000", "3.000", "—"]);
+        fireEvent.click(header);
+        expect(configChanges.at(-1)).toEqual({ [tab === "open" ? "ordersSort" : "closedOrdersSort"]: { col: "price", dir: dir === "asc" ? "desc" : "asc" } });
+      }
+    });
+
+    it("preserves surviving saved order widths and ignores the removed Stop Limit width", () => {
+      const { props } = mkProps();
+      props.width = 360;
+      props.config.settings = {
+        openOrdersColumnWidths: { price: 137, stopPrice: 114, stopLimitPrice: 999 },
+        closedOrdersColumnWidths: { price: 153, stopPrice: 126, stopLimitPrice: 999 },
+      };
+      wrap(props);
+      for (const [tab, price, stop] of [["open", "137", "114"], ["closed", "153", "126"]] as const) {
+        fireEvent.click(screen.getByTestId(`${tab}-orders-tab`));
+        expect(screen.getByTestId(`${tab}-orders-resize-price`).getAttribute("aria-valuenow")).toBe(price);
+        expect(screen.getByTestId(`${tab}-orders-resize-stopPrice`).getAttribute("aria-valuenow")).toBe(stop);
+        expect(screen.queryByTestId(`${tab}-orders-resize-stopLimitPrice`)).toBeNull();
+        expect(Number.parseFloat(screen.getByTestId(`${tab}-orders-table`).style.minWidth)).toBeLessThan(999);
       }
     });
 
@@ -853,11 +893,14 @@ describe("AccountPanel", () => {
       expect(symbols).toEqual(["TSLA", "MSFT", "AAPL"]);
     });
 
-    it("falls back from a saved Venue sort after the Venue column is removed", () => {
+    it.each(["venue", "actions", "reason"])("falls back from an unavailable saved %s sort in both tables", (col) => {
       const { props, stores, linkGroups } = mkProps("green");
-      props.config.settings = { closedOrdersSort: { col: "venue", dir: "asc" } };
+      props.config.settings = { ordersSort: { col, dir: "asc" }, closedOrdersSort: { col, dir: "asc" } };
       act(() => {
         stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: [
+          order("a", { symbol: "US.AAPL", createdMs: 1 }), order("m", { symbol: "US.MSFT", createdMs: 2 }),
+        ] });
         stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [
           closed({ id: "a", symbol: "US.AAPL", updatedMs: 1 }),
           closed({ id: "m", symbol: "US.MSFT", updatedMs: 2 }),
@@ -865,14 +908,17 @@ describe("AccountPanel", () => {
         linkGroups.focusVenue("green", "alpaca-paper");
       });
       wrap(props);
-      fireEvent.click(screen.getByTestId("closed-orders-tab"));
-      const table = screen.getByTestId("closed-orders-table");
-      expect(table.querySelector('[data-column="venue"]')).toBeNull();
-      expect([...table.querySelectorAll("tbody tr td:nth-child(2)")].map((td) => td.textContent)).toEqual(["MSFT", "AAPL"]);
+      for (const tab of ["open", "closed"] as const) {
+        fireEvent.click(screen.getByTestId(`${tab}-orders-tab`));
+        const table = screen.getByTestId(`${tab}-orders-table`);
+        expect(table.querySelector(".sort-active")).toBeNull();
+        expect([...table.querySelectorAll('tbody [data-column="symbol"]')].map((td) => td.textContent)).toEqual(["MSFT", "AAPL"]);
+      }
     });
 
     it("renders the closed columns, ET timestamp, instruction prices, reasons, and read-only state", () => {
       const { props, stores } = mkProps();
+      props.width = 490;
       wrap(props);
       const reason = "R78: market order in extended hours with a long explanation";
       act(() => {
@@ -892,7 +938,7 @@ describe("AccountPanel", () => {
       expect(table.textContent).toContain("MKT");
       const stopLimitRow = [...table.querySelectorAll("tbody tr")].find((row) => row.querySelector('[data-column="type"]')?.textContent === "STPLMT")!;
       expect(stopLimitRow.querySelector('[data-column="stopPrice"]')?.textContent).toBe("2.500");
-      expect(stopLimitRow.querySelector('[data-column="stopLimitPrice"]')?.textContent).toBe("2.450");
+      expect(stopLimitRow.querySelector('[data-column="price"]')?.textContent).toBe("2.450");
       expect(table.textContent).toContain("2.123");
       expect(table.textContent).toContain("—");
       expect(screen.getAllByText("Rejected").some((el) => el.className.includes("chip-rejected"))).toBe(true);
@@ -908,7 +954,7 @@ describe("AccountPanel", () => {
         stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [] });
       });
       fireEvent.click(screen.getByTestId("closed-orders-tab"));
-      expect(screen.getByTestId("closed-orders-table").querySelectorAll("thead th")).toHaveLength(12);
+      expect(screen.getByTestId("closed-orders-table").querySelectorAll("thead th")).toHaveLength(11);
       expect(screen.getByTestId("closed-orders-table").querySelectorAll("tbody tr")).toHaveLength(0);
       expect(screen.getByTestId("closed-orders-tab").textContent).toBe("Closed Orders (0)");
     });

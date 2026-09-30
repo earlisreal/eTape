@@ -19,7 +19,7 @@ async function addAccountPanel(page: Page, waitForLatency = true): Promise<void>
 
 test("account columns do not create horizontal overflow when they fit", async ({ page }) => {
   await addAccountPanel(page);
-  for (const column of ["qty", "price", "stopPrice", "stopLimitPrice", "type"]) {
+  for (const column of ["qty", "price", "stopPrice", "type"]) {
     await expect(page.getByTestId("open-orders-table").locator(`th[data-column="${column}"]`)).toBeVisible();
   }
   await expectNoHorizontalOverflow(page.getByTestId("open-orders-table"), "open orders");
@@ -32,7 +32,7 @@ test("account columns do not create horizontal overflow when they fit", async ({
   await expectNoHorizontalOverflow(page.getByTestId("trade-history-table"), "trade history");
 
   await page.getByTestId("closed-orders-tab").click();
-  for (const column of ["qty", "price", "stopPrice", "stopLimitPrice", "type"]) {
+  for (const column of ["qty", "price", "stopPrice", "type"]) {
     await expect(page.getByTestId("closed-orders-table").locator(`th[data-column="${column}"]`)).toBeVisible();
   }
   await expectNoHorizontalOverflow(page.getByTestId("closed-orders-table"), "closed orders");
@@ -58,12 +58,12 @@ test("account columns remain adjustable when a narrow panel starts at minimum wi
   const overflow = await orders.evaluate((table) => table.parentElement!.scrollWidth > table.parentElement!.clientWidth);
   expect(overflow).toBe(true);
   const stopPrice = page.getByTestId("open-orders-resize-stopPrice");
-  await expect(stopPrice).toHaveAttribute("aria-valuenow", "92");
+  await expect(stopPrice).toHaveAttribute("aria-valuenow", "68");
   await stopPrice.press("ArrowRight");
-  await expect(stopPrice).toHaveAttribute("aria-valuenow", "102");
+  await expect(stopPrice).toHaveAttribute("aria-valuenow", "78");
 });
 
-test("account order columns show separate prices and compact ET dates in both tabs", async ({ page }) => {
+test("account order columns merge limit prices with compact headers and ET dates in both tabs", async ({ page }) => {
   const today = Date.parse("2026-09-30T13:30:00Z");
   await page.addInitScript((now) => { Date.now = () => now; }, today);
   const base: Order = {
@@ -96,16 +96,21 @@ test("account order columns show separate prices and compact ET dates in both ta
     await page.getByTestId(`${tab}-orders-tab`).click();
     const table = page.getByTestId(`${tab}-orders-table`);
     await expect(table.locator("tbody tr")).toHaveCount(4);
+    await expect(table.locator("thead th")).toHaveText(tab === "open"
+      ? ["TIME", "SYM", "SIDE", "QTY", "PRICE", "STOP", "TYPE", "STATE", ""]
+      : ["TIME", "SYM", "SIDE", "QTY", "FILLED", "PRICE", "STOP", "TYPE", "AVG FILL", "STATE", "REASON"]);
+    await expect(table.locator("[data-column='stopLimitPrice']")).toHaveCount(0);
+    await expect(table.locator("thead th").first()).toHaveAttribute("title", tab === "open" ? "Submitted (US Eastern)" : "Closed (US Eastern)");
     const stopLimit = table.locator("tbody tr").filter({ hasText: "STPLMT" });
-    for (const [column, text] of [["qty", tab === "open" ? "60" : "100"], ["price", "—"], ["stopPrice", "2.070"], ["stopLimitPrice", "2.370"]]) {
+    for (const [column, text] of [["qty", tab === "open" ? "60" : "100"], ["price", "2.370"], ["stopPrice", "2.070"]]) {
       await expect(stopLimit.locator(`[data-column="${column}"]`)).toHaveText(text);
     }
     const timeColumn = tab === "open" ? "createdMs" : "updatedMs";
     await expect(stopLimit.locator(`[data-column="${timeColumn}"]`)).toHaveText("09:30:00");
     const market = table.locator("tbody tr").filter({ hasText: "MKT" });
     await expect(market.locator(`[data-column="${timeColumn}"]`)).toHaveText("09/29 09:30:00");
-    for (const column of ["price", "stopPrice", "stopLimitPrice"]) await expect(market.locator(`[data-column="${column}"]`)).toHaveText("—");
+    for (const column of ["price", "stopPrice"]) await expect(market.locator(`[data-column="${column}"]`)).toHaveText("—");
     await expectNoHorizontalOverflow(table, `${tab} orders with historical dates`);
-    await page.getByTestId("orders-table").screenshot({ path: `.playwright-mcp/account-${tab}-orders.png` });
+    await table.screenshot({ path: `.playwright-mcp/account-price-${tab}-orders.png` });
   }
 });
