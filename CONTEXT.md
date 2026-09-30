@@ -179,6 +179,10 @@ _Avoid_: Previous extended-session close
 A conditional order retained by eTape until a Last-Eligible Price reaches its stop price, when it creates a linked Limit Order at its Execution Venue. Before triggering, no broker order exists and no broker protection applies.
 _Avoid_: Synthetic stop-limit, broker stop-limit, local stop order
 
+**Live Held Stop-Limit Acknowledgement**:
+A trader's explicit acceptance that Engine-Held Stop-Limits provide no broker protection before triggering, scoped to one Execution Venue's live account identity. It enables that custody across all order-entry methods without placing an order.
+_Avoid_: Gesture acknowledgement, global stop-limit enablement
+
 **Effective Order Session**:
 The order session used to determine custody and venue behavior after resolving an AUTO request against the authoritative market-session clock. An explicitly selected session is already effective.
 _Avoid_: Requested session, displayed session
