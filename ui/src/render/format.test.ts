@@ -83,6 +83,21 @@ describe("formatEtDateTime", () => {
   it("keeps the existing invalid timestamp convention", () => {
     expect(formatEtDateTime(Number.NaN)).toBe("Invalid Date");
   });
+  it.each([
+    ["2026-09-30T13:30:05Z", "2026-09-30T20:00:00Z", "09:30:05"],
+    ["2026-09-30T03:59:59Z", "2026-09-30T04:00:00Z", "09/29 23:59:59"],
+    ["2026-09-30T01:30:05Z", "2026-09-29T18:00:00Z", "21:30:05"],
+    ["2025-09-30T13:30:05Z", "2026-09-30T13:30:05Z", "09/30 09:30:05"],
+    ["2026-10-01T13:30:05Z", "2026-09-30T13:30:05Z", "10/01 09:30:05"],
+    ["2026-03-08T07:00:00Z", "2026-03-08T18:00:00Z", "03:00:00"],
+    ["2026-11-01T06:30:00Z", "2026-11-01T18:00:00Z", "01:30:00"],
+  ])("compacts %s only on the same ET date as %s", (iso, today, want) => {
+    expect(formatEtDateTime(Date.parse(iso), Date.parse(today))).toBe(want);
+  });
+  it("preserves invalid-date handling with a compact reference date", () => {
+    expect(formatEtDateTime(Number.NaN, Date.now())).toBe("Invalid Date");
+    expect(formatEtDateTime(Date.parse("2026-09-30T13:30:05Z"), Number.NaN)).toBe("09/30 09:30:05");
+  });
 });
 
 describe("formatDuration", () => {

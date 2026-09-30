@@ -140,6 +140,8 @@ export default defineConfig({
             'src/chrome/windows.test.ts',
             'src/chrome/windowState.test.ts',
             'src/chrome/panels/registry.test.tsx',
+            'src/chrome/panels/AccountPanel.test.tsx', 'src/chrome/panels/ResizableColumns.test.tsx',
+            'src/render/format.test.ts',
             'src/chrome/panels/ScannerPanel.test.tsx',
             'src/chrome/scannerSync.test.ts',
             'src/chrome/workspace.test.ts',

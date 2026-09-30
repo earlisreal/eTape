@@ -17,6 +17,15 @@ table; drag a header separator to resize and double-click it to auto-fit. The
 widths are shared when switching the selected venue, then scale proportionally
 to the panel width with per-column minimums before horizontal scrolling is
 needed.
+Open Orders and Closed Orders separate Qty, Price, Stop Price, Stop Limit, and
+Type. Price holds ordinary limit prices; stop-limit orders use Stop Price and
+Stop Limit, with unused price fields shown as `—`. Type uses MKT/LMT/STP/STPLMT.
+Open Qty remains the remaining share count when available; Closed Qty is the
+original quantity alongside Filled and Avg Fill. Submitted and Closed show
+`HH:MM:SS` for the current US Eastern calendar date and `MM/DD HH:MM:SS`
+otherwise, with the full timestamp on hover. The date display refreshes at
+minute boundaries; timestamp columns widen when dates are needed, including
+across midnight, while narrow panels scroll horizontally.
 [TradingView integration](tv/README.md) backs chart surface. Test: `npm test -- panels`.
 
 The Order Ticket embeds the Hotkey Deck beneath its manual action row. It

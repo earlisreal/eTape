@@ -60,7 +60,7 @@ const ET_TIME_FMT = new Intl.DateTimeFormat("en-US", {
   hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false, timeZone: "America/New_York",
 });
 const ET_DATE_TIME_FMT = new Intl.DateTimeFormat("en-US", {
-  month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
+  year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit",
   hourCycle: "h23", timeZone: "America/New_York",
 });
 
@@ -91,12 +91,17 @@ export function formatClock(ms: number): string {
   return formatTime(new Date(ms));
 }
 
-/** Epoch-ms timestamp → exact ET MM/DD HH:MM:SS for order lifecycle rows. */
-export function formatEtDateTime(ms: number): string {
+/** ET MM/DD HH:MM:SS; supplying todayMs omits the date on that ET calendar day. */
+export function formatEtDateTime(ms: number, todayMs?: number): string {
   const d = new Date(ms);
   if (Number.isNaN(d.getTime())) return "Invalid Date";
   const parts = Object.fromEntries(ET_DATE_TIME_FMT.formatToParts(d).map((p) => [p.type, p.value]));
-  return `${parts.month}/${parts.day} ${parts.hour}:${parts.minute}:${parts.second}`;
+  const time = `${parts.hour}:${parts.minute}:${parts.second}`;
+  if (todayMs !== undefined && !Number.isNaN(new Date(todayMs).getTime())) {
+    const today = Object.fromEntries(ET_DATE_TIME_FMT.formatToParts(todayMs).map((p) => [p.type, p.value]));
+    if (parts.year === today.year && parts.month === today.month && parts.day === today.day) return time;
+  }
+  return `${parts.month}/${parts.day} ${time}`;
 }
 
 /** Duration in ms → a compact human string: hours+minutes once >= 1h ("1h 04m"),

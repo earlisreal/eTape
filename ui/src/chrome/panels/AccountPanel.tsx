@@ -12,7 +12,7 @@ import { useOrderConfig } from "../exec/useOrderConfig";
 import { resolvePlaceTemplate } from "../exec/resolveTemplate";
 import type { PlaceOrderTemplate } from "../exec/actionTemplate";
 import { formatClock, formatEtDateTime, formatPrice, formatSize } from "../../render/format";
-import { displayStatus, STATUS_LABEL, sideLabel, bareSymbol, isTerminal, isWorking, type DisplayStatus } from "../exec/orderStatus";
+import { displayStatus, STATUS_LABEL, sideLabel, bareSymbol, abbrevType, isTerminal, isWorking, type DisplayStatus } from "../exec/orderStatus";
 import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
 import type { OrderView } from "../../data/ExecStore";
 import { TradeHistoryTable } from "./TradeHistoryTable";
@@ -85,12 +85,25 @@ function chipVariant(ds: DisplayStatus): ChipVariant | null {
 }
 
 const ORDERS_DEFAULT_SORT: SortState = { col: "createdMs", dir: "desc" };
+const ORDER_PRICE_COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
+  { col: "price", label: "Price", defaultWidth: 76, minWidth: 68, align: "right", sortable: true },
+  { col: "stopPrice", label: "Stop Price", defaultWidth: 96, minWidth: 92, align: "right", sortable: true },
+  { col: "stopLimitPrice", label: "Stop Limit", defaultWidth: 96, minWidth: 92, align: "right", sortable: true },
+  { col: "type", label: "Type", defaultWidth: 76, minWidth: 72, align: "left", sortable: true },
+];
+const ORDER_PRICE_ACCESSORS: Record<string, (o: Pick<Order, "type" | "limitPrice" | "stopPrice">) => number | string | null> = {
+  price: (o) => o.type === "LIMIT" ? o.limitPrice : null,
+  stopPrice: (o) => o.type === "STOP" || o.type === "STOP_LIMIT" ? o.stopPrice : null,
+  stopLimitPrice: (o) => o.type === "STOP_LIMIT" ? o.limitPrice : null,
+  type: (o) => abbrevType(o.type),
+};
 const ORDERS_COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
-  { col: "createdMs", label: "Submitted", defaultWidth: 128, minWidth: 108, align: "left", sortable: true },
+  { col: "createdMs", label: "Submitted", defaultWidth: 96, minWidth: 88, align: "left", sortable: true },
   { col: "symbol", label: "Symbol", defaultWidth: 84, minWidth: 68, align: "left", sortable: true },
   { col: "side", label: "Side", defaultWidth: 56, minWidth: 48, align: "left", sortable: true },
-  { col: "qty", label: "Qty@Px", defaultWidth: 96, minWidth: 80, align: "right", sortable: true },
-  { col: "state", label: "State", defaultWidth: 76, minWidth: 64, align: "left", sortable: true },
+  { col: "qty", label: "Qty", defaultWidth: 56, minWidth: 48, align: "right", sortable: true },
+  ...ORDER_PRICE_COLUMNS,
+  { col: "state", label: "State", defaultWidth: 96, minWidth: 88, align: "left", sortable: true },
   { col: "actions", label: "", defaultWidth: 64, minWidth: 60, align: "right", sortable: false },
 ];
 const ORDERS_SORT_ACCESSORS: Record<string, (r: OrderView) => number | string | null> = {
@@ -98,6 +111,10 @@ const ORDERS_SORT_ACCESSORS: Record<string, (r: OrderView) => number | string | 
   symbol: (r) => r.order.symbol,
   side: (r) => r.order.side,
   qty: (r) => (r.order.leavesQty > 0 ? r.order.leavesQty : r.order.qty),
+  price: (r) => ORDER_PRICE_ACCESSORS.price(r.order),
+  stopPrice: (r) => ORDER_PRICE_ACCESSORS.stopPrice(r.order),
+  stopLimitPrice: (r) => ORDER_PRICE_ACCESSORS.stopLimitPrice(r.order),
+  type: (r) => ORDER_PRICE_ACCESSORS.type(r.order),
   state: (r) => STATUS_LABEL[displayStatus(r.order, r.optimistic)],
 };
 
@@ -111,17 +128,18 @@ function readOrdersSort(s: Record<string, unknown>): SortState {
 
 const CLOSED_DEFAULT_SORT: SortState = { col: "updatedMs", dir: "desc" };
 const CLOSED_COLUMNS: (ResizableColumn & { align: "left" | "right"; sortable: boolean })[] = [
-  { col: "updatedMs", label: "Closed", defaultWidth: 120, minWidth: 104, align: "left", sortable: true },
+  { col: "updatedMs", label: "Closed", defaultWidth: 96, minWidth: 88, align: "left", sortable: true },
   { col: "symbol", label: "Symbol", defaultWidth: 84, minWidth: 68, align: "left", sortable: true },
   { col: "side", label: "Side", defaultWidth: 56, minWidth: 48, align: "left", sortable: true },
   { col: "qty", label: "Qty", defaultWidth: 56, minWidth: 48, align: "right", sortable: true },
   { col: "executedQty", label: "Filled", defaultWidth: 56, minWidth: 48, align: "right", sortable: true },
-  { col: "price", label: "Price", defaultWidth: 82, minWidth: 64, align: "right", sortable: false },
+  ...ORDER_PRICE_COLUMNS,
   { col: "avgFillPrice", label: "Avg Fill", defaultWidth: 84, minWidth: 68, align: "right", sortable: true },
   { col: "state", label: "State", defaultWidth: 72, minWidth: 64, align: "left", sortable: true },
   { col: "reason", label: "Reason", defaultWidth: 120, minWidth: 96, align: "left", sortable: false },
 ];
 const CLOSED_SORT_ACCESSORS: Record<string, (r: ClosedOrder) => number | string | null> = {
+  ...ORDER_PRICE_ACCESSORS,
   updatedMs: (r) => r.updatedMs,
   symbol: (r) => bareSymbol(r.symbol),
   side: (r) => r.side,
@@ -140,11 +158,12 @@ function readClosedSort(s: Record<string, unknown>): SortState {
   return CLOSED_DEFAULT_SORT;
 }
 
-function orderInstructionPrice(order: Pick<Order, "type" | "limitPrice" | "stopPrice"> | Pick<ClosedOrder, "type" | "limitPrice" | "stopPrice">): string {
-  if (order.type === "MARKET") return "MKT";
-  if (order.type === "LIMIT") return `${formatPrice(order.limitPrice, 3)} LMT`;
-  if (order.type === "STOP") return `${formatPrice(order.stopPrice, 3)} STP`;
-  return `${formatPrice(order.stopPrice, 3)} / ${formatPrice(order.limitPrice, 3)} STPLMT`;
+function OrderPriceCells({ order }: { order: Pick<Order, "type" | "limitPrice" | "stopPrice"> }): JSX.Element {
+  return <>{ORDER_PRICE_COLUMNS.map((column) => {
+    const value = ORDER_PRICE_ACCESSORS[column.col](order);
+    const text = value === null ? "—" : typeof value === "number" ? formatPrice(value, 3) : value;
+    return <td key={column.col} data-column={column.col} title={text} style={{ padding: "2px 8px", overflow: "hidden", textOverflow: "ellipsis" }}>{text}</td>;
+  })}</>;
 }
 
 type UpperOrdersTab = "open" | "closed";
@@ -164,10 +183,25 @@ function OrdersTable({
   const [tab, setTab] = useState<UpperOrdersTab>("open");
   const [openSort, setOpenSort] = useState<SortState>(() => readOrdersSort(config.settings));
   const [closedSort, setClosedSort] = useState<SortState>(() => readClosedSort(config.settings));
-  const openResize = useResizableColumns(config.settings, "openOrdersColumnWidths", ORDERS_COLUMNS, onConfigChange, availableWidth);
-  const closedResize = useResizableColumns(config.settings, "closedOrdersColumnWidths", CLOSED_COLUMNS, onConfigChange, availableWidth);
+  const [todayMs, setTodayMs] = useState(Date.now);
+  useEffect(() => {
+    let timer = 0;
+    const refresh = () => {
+      const now = Date.now();
+      setTodayMs(now);
+      timer = window.setTimeout(refresh, 60_000 - now % 60_000);
+    };
+    refresh();
+    return () => window.clearTimeout(timer);
+  }, []);
   const views = sortRows(stores.exec.orders().filter((v) => v.order.venue === venue && (v.optimistic || isWorking(v.order.status))), openSort, ORDERS_SORT_ACCESSORS);
   const closedRows = sortRows(stores.exec.closedOrders().filter((o) => o.venue === venue && isTerminal(o.status)), closedSort, CLOSED_SORT_ACCESSORS);
+  const openHasDates = views.some(({ order }) => formatEtDateTime(order.createdMs, todayMs).includes(" "));
+  const closedHasDates = closedRows.some((order) => formatEtDateTime(order.updatedMs, todayMs).includes(" "));
+  const openColumns = useMemo(() => openHasDates ? ORDERS_COLUMNS.map((c) => c.col === "createdMs" ? { ...c, minWidth: 128 } : c) : ORDERS_COLUMNS, [openHasDates]);
+  const closedColumns = useMemo(() => closedHasDates ? CLOSED_COLUMNS.map((c) => c.col === "updatedMs" ? { ...c, minWidth: 128 } : c) : CLOSED_COLUMNS, [closedHasDates]);
+  const openResize = useResizableColumns(config.settings, "openOrdersColumnWidths", openColumns, onConfigChange, availableWidth);
+  const closedResize = useResizableColumns(config.settings, "closedOrdersColumnWidths", closedColumns, onConfigChange, availableWidth);
   const reconciling = (stores.exec.status()?.venues ?? []).some((v) => v.reconcilePending);
 
   const clickOpenSort = (col: string, sortable: boolean) => {
@@ -206,9 +240,9 @@ function OrdersTable({
       </div>
       {tab === "open" ? <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <table ref={openResize.tableRef} data-testid="open-orders-table" style={{ width: "100%", minWidth: openResize.totalWidth, tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
-          <ColumnGroup columns={ORDERS_COLUMNS} widths={openResize.widths} />
+          <ColumnGroup columns={openColumns} widths={openResize.widths} />
           <thead><tr style={{ color: palette.textMuted, textAlign: "center" }}>
-            {ORDERS_COLUMNS.map((c) => <th key={c.col} data-column={c.col} style={{ ...th, textAlign: "center", cursor: c.sortable ? "pointer" : "default" }} onClick={() => clickOpenSort(c.col, c.sortable)}
+            {openColumns.map((c) => <th key={c.col} data-column={c.col} style={{ ...th, textAlign: "center", cursor: c.sortable ? "pointer" : "default" }} onClick={() => clickOpenSort(c.col, c.sortable)}
               className={`col-head${c.sortable && openSort?.col === c.col && !(c.col === "createdMs" && openSort.dir === "desc") ? " sort-active" : ""}`}>
               {c.label} {c.sortable && openSort?.col === c.col && !(c.col === "createdMs" && openSort.dir === "desc") ? sortIndicator(openSort, c.col) : ""}
               <ColumnResizeHandle column={c} width={openResize.widths[c.col]} testId={`open-orders-resize-${c.col}`}
@@ -221,10 +255,11 @@ function OrdersTable({
             const variant = chipVariant(ds);
             const working = !optimistic && isWorking(order.status);
             return <tr key={order.id} style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
-              <td data-column="createdMs" style={{ padding: "2px 8px" }}>{formatEtDateTime(order.createdMs)}</td>
+              <td data-column="createdMs" style={{ padding: "2px 8px" }} title={formatEtDateTime(order.createdMs)}>{formatEtDateTime(order.createdMs, todayMs)}</td>
               <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
               <td data-column="side" style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
-              <td data-column="qty">{formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)} @ {orderInstructionPrice(order)}</td>
+              <td data-column="qty">{formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)}</td>
+              <OrderPriceCells order={order} />
               <td data-column="state">{variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
                 : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}</td>
               <td data-column="actions">{(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
@@ -234,9 +269,9 @@ function OrdersTable({
         </table>
       </div> : <div style={{ flex: 1, minHeight: 0, overflow: "auto" }}>
         <table ref={closedResize.tableRef} data-testid="closed-orders-table" style={{ width: "100%", minWidth: closedResize.totalWidth, tableLayout: "fixed", borderCollapse: "collapse", whiteSpace: "nowrap" }}>
-          <ColumnGroup columns={CLOSED_COLUMNS} widths={closedResize.widths} />
+          <ColumnGroup columns={closedColumns} widths={closedResize.widths} />
           <thead><tr style={{ color: palette.textMuted, textAlign: "center" }}>
-            {CLOSED_COLUMNS.map((c) => <th key={c.col} data-column={c.col} style={{ ...th, textAlign: "center", cursor: c.sortable ? "pointer" : "default" }}
+            {closedColumns.map((c) => <th key={c.col} data-column={c.col} style={{ ...th, textAlign: "center", cursor: c.sortable ? "pointer" : "default" }}
               onClick={() => clickClosedSort(c.col, c.sortable)} className={`col-head${c.sortable && closedSort?.col === c.col && !(c.col === "updatedMs" && closedSort.dir === "desc") ? " sort-active" : ""}`}>
               {c.label} {c.sortable && closedSort?.col === c.col && !(c.col === "updatedMs" && closedSort.dir === "desc") ? sortIndicator(closedSort, c.col) : ""}
               <ColumnResizeHandle column={c} width={closedResize.widths[c.col]} testId={`closed-orders-resize-${c.col}`}
@@ -249,12 +284,12 @@ function OrdersTable({
             const muted = order.status === "CANCELED" || order.status === "EXPIRED" || order.status === "REPLACED";
             const reason = order.rejectReason || "—";
             return <tr key={order.id} style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
-              <td data-column="updatedMs" style={{ padding: "2px 8px" }}>{formatEtDateTime(order.updatedMs)}</td>
+              <td data-column="updatedMs" style={{ padding: "2px 8px" }} title={formatEtDateTime(order.updatedMs)}>{formatEtDateTime(order.updatedMs, todayMs)}</td>
               <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
               <td data-column="side" style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
               <td data-column="qty">{formatSize(order.qty)}</td>
               <td data-column="executedQty">{formatSize(order.executedQty)}</td>
-              <td data-column="price">{orderInstructionPrice(order)}</td>
+              <OrderPriceCells order={order} />
               <td data-column="avgFillPrice">{order.executedQty > 0 ? formatPrice(order.avgFillPrice, 3) : "—"}</td>
               <td data-column="state">{danger ? <span className="chip chip-rejected" data-chip="rejected">{STATUS_LABEL[order.status]}</span>
                 : <span style={{ color: muted ? palette.textMuted : palette.text }}>{STATUS_LABEL[order.status]}</span>}</td>

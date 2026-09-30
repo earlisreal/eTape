@@ -27,6 +27,7 @@ function readWidths(settings: Record<string, unknown>, settingsKey: string, colu
 }
 
 function fitWidths(baseWidths: ColumnWidths, availableWidth: number | undefined, columns: readonly ResizableColumn[], preserveOverflow: boolean): ColumnWidths {
+  baseWidths = Object.fromEntries(columns.map((column) => [column.col, Math.max(minWidth(column), baseWidths[column.col])]));
   const baseTotal = columns.reduce((sum, column) => sum + baseWidths[column.col], 0);
   if (!Number.isFinite(availableWidth) || (availableWidth ?? 0) <= 0 || baseTotal <= 0) return { ...baseWidths };
 

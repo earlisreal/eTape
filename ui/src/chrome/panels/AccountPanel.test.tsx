@@ -12,7 +12,7 @@ import type { AckMsg, AccountRow, ClosedOrder, ClosedTradeRow, ExecStatus, Order
 import type { PanelProps } from "./registry";
 import type { LinkGroup } from "../linkGroups";
 
-function mkProps(group: LinkGroup = null, groupProp?: LinkGroup) {
+function mkProps(group: LinkGroup = "green", groupProp?: LinkGroup) {
   const stores = makeStores();
   const sent: Array<{ name: string; args: unknown }> = [];
   const configChanges: Array<Record<string, unknown>> = [];
@@ -21,6 +21,8 @@ function mkProps(group: LinkGroup = null, groupProp?: LinkGroup) {
     sendQuery: vi.fn(async () => []),
   };
   const linkGroups = new LinkGroups(new FakeBus(new FakeBusHub()), () => {});
+  const selectedGroup = groupProp === undefined ? group : groupProp;
+  if (selectedGroup !== null) linkGroups.focusVenue(selectedGroup, "alpaca-paper");
   const focus = vi.fn();
   vi.spyOn(linkGroups, "focus").mockImplementation(focus);
   const props = {
@@ -270,7 +272,7 @@ describe("AccountPanel", () => {
     expect(focus).toHaveBeenCalledWith("blue", "US.AAPL");
   });
 
-  it("falls back to green when ungrouped", () => {
+  it("keeps an ungrouped panel unassigned", () => {
     const { props, stores, focus, linkGroups } = mkProps(null);
     act(() => {
       stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false) });
@@ -278,11 +280,12 @@ describe("AccountPanel", () => {
     });
     wrap(props);
     act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({})] }));
-    fireEvent.doubleClick(screen.getByTestId("pos-row-alpaca-paper-US.AAPL"));
-    expect(focus).toHaveBeenCalledWith("green", "US.AAPL");
+    expect(screen.queryByTestId("pos-row-alpaca-paper-US.AAPL")).toBeNull();
+    expect(screen.getByTestId("acct-venue").hasAttribute("disabled")).toBe(true);
+    expect(focus).not.toHaveBeenCalled();
   });
 
-  it("uses green fallback after a colored panel is reassigned to null", () => {
+  it("keeps a panel unassigned after its group is set to null", () => {
     const { props, stores, focus, linkGroups } = mkProps("blue", null);
     act(() => {
       stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(false) });
@@ -290,8 +293,9 @@ describe("AccountPanel", () => {
     });
     wrap(props);
     act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.positions" as never, payload: [pos({})] }));
-    fireEvent.doubleClick(screen.getByTestId("pos-row-alpaca-paper-US.AAPL"));
-    expect(focus).toHaveBeenCalledWith("green", "US.AAPL");
+    expect(screen.queryByTestId("pos-row-alpaca-paper-US.AAPL")).toBeNull();
+    expect(screen.getByTestId("acct-venue").hasAttribute("disabled")).toBe(true);
+    expect(focus).not.toHaveBeenCalled();
   });
 
   // --- ported from PositionsPanel.test.tsx ---
@@ -364,7 +368,7 @@ describe("AccountPanel", () => {
         ],
       });
     });
-    fireEvent.click(screen.getByText("Qty"));
+    fireEvent.click(screen.getByTestId("positions-resize-qty").parentElement!);
     const rows = screen.getAllByRole("row").slice(2); // drop OrdersTable's + PositionsTable's header rows
     expect(rows[0].textContent).toContain("MSFT"); // desc by qty: 300 before 10
     // Task 7 renamed PositionsTable's persisted sort key to posSort (avoids
@@ -507,7 +511,7 @@ describe("AccountPanel", () => {
       fireEvent.click(screen.getAllByText("Symbol")[0]);
       expect(configChanges.at(-1)).toEqual({ ordersSort: { col: "symbol", dir: "desc" } });
 
-      fireEvent.click(screen.getByText("Qty")); // PositionsTable's Qty header — OrdersTable's is "Qty@Px", not ambiguous
+      fireEvent.click(screen.getByTestId("positions-resize-qty").parentElement!);
       expect(configChanges.at(-1)).toEqual({ posSort: { col: "qty", dir: "desc" } });
     });
   });
@@ -533,6 +537,85 @@ describe("AccountPanel", () => {
     const statusReconciling = (): ExecStatus => ({
       masterArmed: true, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
       venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: true, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }],
+    });
+
+    it("separates order prices and sorts numeric fields with unused prices last in both tables", () => {
+      const { props, stores, configChanges } = mkProps();
+      const orders = [
+        order("market", { type: "MARKET", limitPrice: 999, stopPrice: 999 }),
+        order("limit-low", { limitPrice: 3 }), order("limit-high", { limitPrice: 12 }),
+        order("stop-low", { type: "STOP", stopPrice: 3 }), order("stop-high", { type: "STOP", stopPrice: 12 }),
+        order("stop-limit-low", { type: "STOP_LIMIT", stopPrice: 3, limitPrice: 4, qty: 10, leavesQty: 6, executedQty: 4 }),
+        order("stop-limit-high", { type: "STOP_LIMIT", stopPrice: 12, limitPrice: 13 }),
+      ];
+      wrap(props);
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: orders });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: orders.map((o) => closed({ ...o, status: "CANCELED" })) });
+      });
+      for (const tab of ["open", "closed"] as const) {
+        fireEvent.click(screen.getByTestId(`${tab}-orders-tab`));
+        const table = screen.getByTestId(`${tab}-orders-table`);
+        const cells = (column: string) => [...table.querySelectorAll(`tbody [data-column="${column}"]`)].map((cell) => cell.textContent);
+        expect([...table.querySelectorAll("thead [data-column]")].map((cell) => cell.getAttribute("data-column"))).toEqual(tab === "open"
+          ? ["createdMs", "symbol", "side", "qty", "price", "stopPrice", "stopLimitPrice", "type", "state", "actions"]
+          : ["updatedMs", "symbol", "side", "qty", "executedQty", "price", "stopPrice", "stopLimitPrice", "type", "avgFillPrice", "state", "reason"]);
+        const stopLimitRow = [...table.querySelectorAll("tbody tr")].find((row) => row.querySelector('[data-column="stopLimitPrice"]')?.textContent === "4.000")!;
+        expect(stopLimitRow.querySelector('[data-column="price"]')?.textContent).toBe("—");
+        expect(stopLimitRow.querySelector('[data-column="stopPrice"]')?.textContent).toBe("3.000");
+        expect(stopLimitRow.querySelector('[data-column="type"]')?.textContent).toBe("STPLMT");
+        expect(stopLimitRow.querySelector('[data-column="qty"]')?.textContent).toBe(tab === "open" ? "6" : "10");
+        for (const [column, descending] of [
+          ["price", ["12.000", "3.000", "—", "—", "—", "—", "—"]],
+          ["stopPrice", ["12.000", "12.000", "3.000", "3.000", "—", "—", "—"]],
+          ["stopLimitPrice", ["13.000", "4.000", "—", "—", "—", "—", "—"]],
+        ] as const) {
+          fireEvent.click(table.querySelector(`th[data-column="${column}"]`)!);
+          expect(cells(column)).toEqual(descending);
+          expect(configChanges.at(-1)).toEqual({ [tab === "open" ? "ordersSort" : "closedOrdersSort"]: { col: column, dir: "desc" } });
+          fireEvent.click(table.querySelector(`th[data-column="${column}"]`)!);
+          expect(cells(column).filter((value) => value !== "—")).toEqual([...descending].filter((value) => value !== "—").reverse());
+        }
+        fireEvent.click(table.querySelector('th[data-column="type"]')!);
+        expect(cells("type")).toEqual(["STPLMT", "STPLMT", "STP", "STP", "MKT", "LMT", "LMT"]);
+      }
+    });
+
+    it.each([
+      ["2026-09-30T03:59:59.500Z", "09/29 23:59:59"],
+      ["2026-01-01T04:59:59.500Z", "12/31 23:59:59"],
+      ["2026-03-09T03:59:59.500Z", "03/08 23:59:59"],
+      ["2026-11-02T04:59:59.500Z", "11/01 23:59:59"],
+    ])("restores dates and widens saved columns across ET midnight at %s without order updates", async (iso, datedTime) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(Date.parse(iso));
+      const { props, stores } = mkProps();
+      props.width = 490;
+      props.config.settings = { openOrdersColumnWidths: { createdMs: 88 }, closedOrdersColumnWidths: { updatedMs: 88 } };
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: [order("today", { createdMs: Date.now() })] });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [closed({ updatedMs: Date.now() })] });
+      const view = wrap(props);
+      try {
+        const submitted = screen.getByTestId("open-orders-table").querySelector('tbody [data-column="createdMs"]')!;
+        expect(submitted.textContent).toBe("23:59:59");
+        expect(submitted.getAttribute("title")).toBe(datedTime);
+        expect(screen.getByTestId("open-orders-resize-createdMs").getAttribute("aria-valuenow")).toBe("88");
+        fireEvent.click(screen.getByTestId("closed-orders-tab"));
+        expect(screen.getByTestId("closed-orders-table").querySelector('tbody [data-column="updatedMs"]')?.textContent).toBe("23:59:59");
+        fireEvent.click(screen.getByTestId("open-orders-tab"));
+        await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+        expect(screen.getByTestId("open-orders-table").querySelector('tbody [data-column="createdMs"]')?.textContent).toBe(datedTime);
+        expect(screen.getByTestId("open-orders-resize-createdMs").getAttribute("aria-valuenow")).toBe("128");
+        fireEvent.click(screen.getByTestId("closed-orders-tab"));
+        expect(screen.getByTestId("closed-orders-table").querySelector('tbody [data-column="updatedMs"]')?.textContent).toBe(datedTime);
+        expect(screen.getByTestId("closed-orders-resize-updatedMs").getAttribute("aria-valuenow")).toBe("128");
+      } finally {
+        view.unmount();
+        expect(vi.getTimerCount()).toBe(0);
+        vi.useRealTimers();
+      }
     });
 
     it("shows an optimistic order as a Pending chip (bronze .chip-pending)", () => {
@@ -803,12 +886,13 @@ describe("AccountPanel", () => {
       fireEvent.click(screen.getByTestId("closed-orders-tab"));
       const table = screen.getByTestId("closed-orders-table");
       expect(table.querySelector('[data-column="venue"]')).toBeNull();
-      expect(Number.parseFloat(table.style.minWidth)).toBeCloseTo(800, 5);
+      expect(Number.parseFloat(table.style.minWidth)).toBeGreaterThan(props.width);
       expect((table.querySelector("th") as HTMLElement).style.position).toBe("sticky");
       expect(table.textContent).toContain("08/15 09:31:42");
       expect(table.textContent).toContain("MKT");
-      expect(table.textContent).toContain("2.500 STP");
-      expect(table.textContent).toContain("2.500 / 2.450 STPLMT");
+      const stopLimitRow = [...table.querySelectorAll("tbody tr")].find((row) => row.querySelector('[data-column="type"]')?.textContent === "STPLMT")!;
+      expect(stopLimitRow.querySelector('[data-column="stopPrice"]')?.textContent).toBe("2.500");
+      expect(stopLimitRow.querySelector('[data-column="stopLimitPrice"]')?.textContent).toBe("2.450");
       expect(table.textContent).toContain("2.123");
       expect(table.textContent).toContain("—");
       expect(screen.getAllByText("Rejected").some((el) => el.className.includes("chip-rejected"))).toBe(true);
@@ -824,7 +908,7 @@ describe("AccountPanel", () => {
         stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [] });
       });
       fireEvent.click(screen.getByTestId("closed-orders-tab"));
-      expect(screen.getByTestId("closed-orders-table").querySelectorAll("thead th")).toHaveLength(9);
+      expect(screen.getByTestId("closed-orders-table").querySelectorAll("thead th")).toHaveLength(12);
       expect(screen.getByTestId("closed-orders-table").querySelectorAll("tbody tr")).toHaveLength(0);
       expect(screen.getByTestId("closed-orders-tab").textContent).toBe("Closed Orders (0)");
     });
@@ -844,8 +928,7 @@ describe("AccountPanel", () => {
       // Computed: (4.0 - 3.4) * 300 = 180.00
       await waitFor(() => {
         const row = screen.getByRole("row", { name: /AAPL/ });
-        const cells = row.querySelectorAll("td");
-        expect(cells[4].textContent).toBe("180.00");
+        expect(row.querySelector('[data-column="unrealizedPnl"]')?.textContent).toBe("180.00");
       });
     });
 
@@ -862,8 +945,7 @@ describe("AccountPanel", () => {
       // Short: mark = ask = 3.5 → (3.5 - 3.4) * (-300) = -30.00
       await waitFor(() => {
         const row = screen.getByRole("row", { name: /AAPL/ });
-        const cells = row.querySelectorAll("td");
-        expect(cells[4].textContent).toBe("-30.00");
+        expect(row.querySelector('[data-column="unrealizedPnl"]')?.textContent).toBe("-30.00");
       });
     });
 
@@ -880,8 +962,7 @@ describe("AccountPanel", () => {
       // Fallback: last = 3.95 → (3.95 - 3.4) * 300 = 165.00
       await waitFor(() => {
         const row = screen.getByRole("row", { name: /AAPL/ });
-        const cells = row.querySelectorAll("td");
-        expect(cells[4].textContent).toBe("165.00");
+        expect(row.querySelector('[data-column="unrealizedPnl"]')?.textContent).toBe("165.00");
       });
     });
   });
