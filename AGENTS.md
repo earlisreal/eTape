@@ -68,4 +68,10 @@ Keep commits scoped. Main hook escape only when task explicitly authorizes it. P
 
 Keep specs and plans as uncommitted drafts while they are being grilled or revised. After a plan is implemented, commit it with the resulting changes unless Earl explicitly asks to keep it as a draft; no separate final-approval gate applies to an executed plan.
 
-After executing a plan or addressing review comments, automatically commit the resulting changes and push directly to main branch. Skip this auto-commit and auto-push rule for small, specific tasks unless explicitly requested. Whenever the rule applies, push immediately after the commit succeeds.
+After completing any task that changes repository files, including small tasks and review fixes, automatically:
+
+1. Run the required validation and commit only the task's changes in its branch or worktree.
+2. Fetch `origin/main`, integrate upstream changes if needed, and merge the task branch or detached worktree HEAD into local `main`, preserving unrelated work.
+3. Push `main` to `origin` immediately after merging. Before handoff, verify that local and remote `main` contain the task commit and that hosted CI passes.
+
+This is standing authorization for commit, merge, and push; no further confirmation is needed. Explicit requests to keep work as a draft, leave changes uncommitted, or defer merging or pushing override this rule.

@@ -9,4 +9,4 @@ Create one focused Markdown file per approved change. Name `YYYY-MM-DD-short-fea
 - Generated sources regenerated from owners, never hand-edited.
 - Markdown links and code references validated.
 - No credentials, account identifiers, balances, live keys, or capture secrets added.
-- `git diff --check` clean; commits scoped; no push by agents.
+- `git diff --check` clean; commits scoped; complete main integration and push per [AGENTS.md](../../AGENTS.md#git).
