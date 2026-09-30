@@ -243,6 +243,7 @@ func setRestoredWindowBounds(hwnd windows.HWND, spec WindowSpec) error {
 		swpNoZOrder|swpNoActivate,
 	)
 	if ok != 0 {
+		_, _, _ = showWindowAsyncCall(uintptr(hwnd), windows.SW_MAXIMIZE)
 		return nil
 	}
 	if err != nil && !errors.Is(err, windows.ERROR_SUCCESS) {

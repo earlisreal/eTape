@@ -7,8 +7,9 @@ process tree, closing the startup, workspace, and News Reader windows together.
 The owned adapter maximizes only the startup app window after launch; it does not
 use Chrome's process-wide maximize flag, so child News Reader popups honor their size.
 On a cold Windows launch it forwards each saved workspace app URL through the
-same private profile, captures the new native window, and reapplies its saved bounds
-with `SetWindowPos` after Chrome's initial position/size flags. It then focuses the
+same private profile, captures the new native window, reapplies its saved bounds
+with `SetWindowPos` after Chrome's initial position/size flags, and maximizes it
+on that monitor. It then focuses the
 captured main window last. State restoration is not attempted for fallback browsers, tray launches,
 non-Windows platforms, or adopted self-restarts.
 The temporary profile is removed after the owned Chrome process exits. The
