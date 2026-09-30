@@ -1124,10 +1124,6 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
             onToggleHidden={toggleIndicatorHidden} onEditIndicator={setSettingsInstanceId} onRemoveIndicator={removeIndicator}
             onClosePane={closePane} onToggleCollapsePane={togglePaneCollapsed}
             legendRef={legendRef} />
-          {showBarCloseTimer && lastPriceTag && (
-            <BarCloseTimer now={stores.marketClock.nowMs} chrome={chrome} timeframe={timeframe} price={formatPrice(lastPriceTag.price, quoteDecimals(lastPriceTag.price))} lastPriceY={lastPriceTag.y}
-              rightAxisWidth={rightAxisWidth} paneBottom={paneOffsets[1] ?? height} up={lastPriceTag.up} />
-          )}
           <ChartOrderMarkers orders={execSnapshot.orders.values()} venue={linkGroups.venueFor(group) ?? ""} symbol={chartSymbol}
             pinned={group === null} sendCommand={commands.sendCommand} hostRef={hostRef} facadeRef={facadeRef}
             rightAxisWidth={rightAxisWidth} layoutRef={orderMarkerLayoutRef} chooserOpenRef={orderChooserOpenRef} />
@@ -1142,6 +1138,12 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
               onClone={cloneSelected} onDelete={() => interactionRef.current?.deleteSelection()} />
           )}
           {menu && <TVContextMenu chrome={chrome} x={menu.clientX} y={menu.clientY} items={buildMenuItems(menu)} onClose={() => setMenu(null)} />}
+          {/* Keep this last so React appends it after LWC's native DOM. At z-index 1,
+              it must follow the base canvas while staying below the crosshair canvas (2). */}
+          {showBarCloseTimer && lastPriceTag && (
+            <BarCloseTimer now={stores.marketClock.nowMs} chrome={chrome} timeframe={timeframe} price={formatPrice(lastPriceTag.price, quoteDecimals(lastPriceTag.price))} lastPriceY={lastPriceTag.y}
+              rightAxisWidth={rightAxisWidth} paneBottom={paneOffsets[1] ?? height} up={lastPriceTag.up} />
+          )}
         </> : (
           <div data-testid="chart-empty-state" style={{ height: "100%", display: "grid", placeItems: "center", color: chrome.muted, fontFamily: '"IBM Plex Sans", system-ui, sans-serif', fontSize: 12 }}>
             {monitoring ? "Waiting for Scanner Sync" : "Type a symbol to load"}

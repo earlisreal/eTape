@@ -69,6 +69,11 @@ a valid sample, charts use browser time and retain the last valid offset across
 a failed probe. A rate-limited `chart market clock boundary` trace records the
 clock inputs used for diagnostics.
 
+The merged price/countdown badge is the last React child in the chart host, so
+React appends it after Lightweight Charts' native DOM. Its z-index 1 then paints
+above the base axis canvas at the same level while the native crosshair canvas
+at z-index 2 remains above it.
+
 Chart drawings consume the Future Buffer as future chart positions. Their future
 Drawing Anchors are not clamped to the newest loaded bar; incoming displayed bars
 eventually align with those anchors.
