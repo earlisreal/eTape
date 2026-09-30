@@ -202,6 +202,26 @@ export interface Order {
   replacesId: string;
   createdMs: number /* int64 */;
   updatedMs: number /* int64 */;
+  held?: HeldOrder;
+  action?: OrderAction;
+}
+export interface HeldOrder {
+  phase: string;
+  deadlineMs: number /* int64 */;
+  childClientId?: string;
+  childBrokerId?: string;
+  pausedReason?: string;
+  cancelRequested?: boolean;
+}
+export interface OrderAction {
+  kind: string;
+  phase: string;
+  previousLimitPrice?: number /* float64 */;
+  previousStopPrice?: number /* float64 */;
+  requestedLimitPrice?: number /* float64 */;
+  requestedStopPrice?: number /* float64 */;
+  requestedQty?: number /* float64 */;
+  reason?: string;
 }
 /**
  * ClosedOrder is a read-only historical order-leg projection. ID is the
@@ -227,6 +247,8 @@ export interface ClosedOrder {
   replacesId: string;
   createdMs: number /* int64 */;
   updatedMs: number /* int64 */;
+  held?: HeldOrder;
+  action?: OrderAction;
 }
 export interface Fill {
   venue: string;
@@ -301,6 +323,7 @@ export interface VenueStatus {
   note: string;
   lastReconcileMs: number | null;
   gate: GateLimitsView;
+  heldStopLimitAcknowledged?: boolean;
 }
 export interface ExecStatus {
   masterArmed: boolean;
@@ -555,10 +578,14 @@ export interface SubmitOrderArgs {
   qty: number /* float64 */;
   limitPrice: number /* float64 */;
   stopPrice: number /* float64 */;
+  routeExpected?: string;
 }
 export interface CancelOrderArgs {
   venue: string;
   orderId: string;
+}
+export interface AcknowledgeHeldStopLimitArgs {
+  venue: string;
 }
 export interface ReplaceOrderArgs {
   venue: string;
@@ -587,6 +614,20 @@ export interface QueryFillsArgs {
   symbol: string;
   fromMs: number /* int64 */;
   toMs: number /* int64 */;
+}
+export interface QueryStopLimitRouteArgs {
+  tif: TIF;
+  session: OrderSession;
+  symbol?: string;
+}
+export interface StopLimitRoutePreview {
+  route: string;
+  effectiveSession: OrderSession;
+  phase: string;
+  deadlineMs: number /* int64 */;
+  hasTrustedEligiblePrint?: boolean;
+  lastEligiblePrice?: number /* float64 */;
+  lastEligibleTsMs?: number /* int64 */;
 }
 export interface QueryVenueInstrumentEligibilityArgs {
   venue: string;

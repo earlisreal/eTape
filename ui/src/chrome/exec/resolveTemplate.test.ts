@@ -51,6 +51,32 @@ describe("resolvePlaceTemplate", () => {
     const r = resolvePlaceTemplate(tmpl({ session: "EXTENDED" }), { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, availableCash: 5_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
     expect(r.args.session).toBe("EXTENDED");
   });
+  it("uses a dollar Limit Cushion to resolve the stop-limit and size from its limit", () => {
+    const r = resolvePlaceTemplate(
+      tmpl({ type: "STOP_LIMIT", limitCushion: 0.05, limitCushionUnit: "$" }),
+      { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, availableCash: 5_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 },
+    );
+    expect(r.args.stopPrice).toBe(3.5);
+    expect(r.args.limitPrice).toBe(3.55);
+    expect(r.args.qty).toBe(1408);
+    expect(r.flash).toContain("3.50→3.55 STPLMT");
+  });
+  it("rounds the percent Limit Cushion outward for a short-side trigger", () => {
+    const r = resolvePlaceTemplate(
+      tmpl({ side: "SHORT", type: "STOP_LIMIT", priceSource: "Last", limitCushion: 5, limitCushionUnit: "%", sizing: { mode: "Shares", shares: 10 } }),
+      { venue: "v", symbol: "US.AAPL", quote: { ...q, last: 3.51 }, buyingPower: 10_000, availableCash: 5_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 },
+    );
+    expect(r.args.stopPrice).toBe(3.51);
+    expect(r.args.limitPrice).toBe(3.33);
+    expect(r.preCheck.ok).toBe(true);
+  });
+  it("uses sub-dollar tick size when rounding the stop-limit cushion", () => {
+    const r = resolvePlaceTemplate(
+      tmpl({ type: "STOP_LIMIT", priceSource: "Last", limitCushion: 1, limitCushionUnit: "%", sizing: { mode: "Shares", shares: 1 } }),
+      { venue: "v", symbol: "US.AAPL", quote: { ...q, last: 0.986 }, buyingPower: 10_000, availableCash: 5_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 },
+    );
+    expect(r.args.limitPrice).toBe(0.9959);
+  });
   it("defaults a template with no session to AUTO", () => {
     const r = resolvePlaceTemplate(tmpl(), { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, availableCash: 5_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
     expect(r.args.session).toBe("AUTO");

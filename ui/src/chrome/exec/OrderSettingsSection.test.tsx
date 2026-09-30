@@ -171,6 +171,28 @@ describe("OrderSettingsSection", () => {
     expect(tmpl.priceOffset).toBe(0.05);
     expect(tmpl.priceOffsetUnit).toBe("%");
   });
+  it("edits a STOP_LIMIT cushion and chart modifier binding", () => {
+    const { onSave } = wrap();
+    fireEvent.change(screen.getByLabelText("type-buy-5k"), { target: { value: "STOP_LIMIT" } });
+    fireEvent.change(screen.getByLabelText("limit-cushion-buy-5k"), { target: { value: "0.05" } });
+    fireEvent.change(screen.getByLabelText("limit-cushion-unit-buy-5k"), { target: { value: "%" } });
+    fireEvent.change(screen.getByLabelText("chart-binding-buy-5k"), { target: { value: "Shift" } });
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k")).toMatchObject({
+      type: "STOP_LIMIT", limitCushion: 0.05, limitCushionUnit: "%", chartBinding: "Shift",
+    });
+  });
+  it("clears STOP_LIMIT-only settings when changing the order type", () => {
+    const { onSave } = wrap();
+    fireEvent.change(screen.getByLabelText("type-buy-5k"), { target: { value: "STOP_LIMIT" } });
+    fireEvent.change(screen.getByLabelText("chart-binding-buy-5k"), { target: { value: "Ctrl+Alt" } });
+    fireEvent.change(screen.getByLabelText("type-buy-5k"), { target: { value: "LIMIT" } });
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0].templates.find((t: { id: string }) => t.id === "buy-5k");
+    expect(saved).not.toHaveProperty("chartBinding");
+    expect(saved).not.toHaveProperty("limitCushion");
+  });
 
   // Regression: both numeric cells are fully-controlled inputs whose displayed
   // value is re-derived from the numeric model on every render. A raw

@@ -101,12 +101,17 @@ drainLoop:
 	for {
 		select {
 		case ev := <-f.Events():
-			switch ev.(type) {
+			switch event := ev.(type) {
 			case feed.ConnUpEvent:
 				sawConnUp++
 			case feed.ResyncedEvent:
 				t.Fatal("synth feed must never emit ResyncedEvent")
 			case feed.TicksEvent:
+				for _, tick := range event.Ticks {
+					if tick.Delivery != feed.DeliveryRealtime {
+						t.Errorf("live demo tick delivery = %s, want realtime", tick.Delivery)
+					}
+				}
 				sawTicks = true
 			case feed.QuoteEvent:
 				sawQuote = true

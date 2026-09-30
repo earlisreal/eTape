@@ -99,8 +99,10 @@ export class ExecStore extends ReactStore<ExecState> {
 
   closedOrders(): ClosedOrder[] { return [...this.getSnapshot().closedOrders.values()]; }
 
-  workingOrdersFor(symbol?: string): Order[] {
+  workingOrdersFor(symbol?: string, venue?: string): Order[] {
     return [...this.getSnapshot().orders.values()]
-      .filter((o) => isWorking(o.status) && (symbol === undefined || o.symbol === symbol));
+      .filter((o) => isWorking(o.status) && (symbol === undefined || o.symbol === symbol)
+        && (venue === undefined || o.venue === venue) && !o.held?.cancelRequested
+        && !(o.action?.kind === "CANCEL" && (o.action.phase === "REQUESTED" || o.action.phase === "UNKNOWN")));
   }
 }

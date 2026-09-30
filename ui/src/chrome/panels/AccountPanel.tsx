@@ -196,7 +196,7 @@ function OrdersTable({
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
         {upperTab(`Open Orders (${views.length})`, tab === "open", () => setTab("open"), "open-orders-tab")}
         {upperTab(`Closed Orders (${closedRows.length})`, tab === "closed", () => setTab("closed"), "closed-orders-tab")}
-        {tab === "open" && <HoverButton data-testid="cancel-all" onClick={() => void oc.cancelAll("everything")}
+        {tab === "open" && <HoverButton data-testid="cancel-all" onClick={() => void oc.cancelAll("venue", undefined, { venue })}
           style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.warn}`, background: "transparent", color: palette.warn, cursor: "pointer" }}>Cancel All</HoverButton>}
         {reconciling && (
           <span data-testid="reconcile-badge" className="chip chip-pending" style={{ marginLeft: "auto" }}>

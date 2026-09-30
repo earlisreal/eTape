@@ -3,7 +3,7 @@ import { useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
 import type { CSSProperties } from "react";
 import type { PanelProps } from "./registry";
-import type { Side, OrderType, TIF, OrderSession, SubmitOrderArgs } from "../../wire/contract";
+import type { Side, OrderType, TIF, OrderSession, StopLimitRoutePreview, SubmitOrderArgs } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
@@ -19,6 +19,7 @@ import { StepperInput } from "./StepperInput";
 import { PanelHeaderActionsSlotContext } from "./headerSlot";
 import { IconGear } from "./tv/tvIcons";
 import { HotkeyDeck, resolveDeckRows } from "./HotkeyDeck";
+import { stopLimitRouteLabel } from "../exec/resolveChartStopLimit";
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
@@ -33,6 +34,10 @@ const MODE_LABEL: Record<SizingMode, string> = { Shares: "Shares", Dollar: "Doll
 // coercion) from the server clock at submit time — today's behavior, kept as
 // the default so nothing changes until the trader picks an explicit session.
 const SESSION_LABEL: Record<OrderSession, string> = { AUTO: "Auto", RTH: "Regular", EXTENDED: "Extended", OVERNIGHT: "Overnight" };
+
+function timeET(ms: number): string {
+  return new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(ms);
+}
 
 export function OrderTicketPanel({ config, stores, commands, linkGroups, group: groupProp, symbol: symbolProp }: PanelProps): JSX.Element {
   const { palette } = useTheme();
@@ -77,6 +82,20 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const [amount, setAmount] = useState("100");
   const [price, setPrice] = useState("");
   const [stop, setStop] = useState("");
+  const [stopLimitRoute, setStopLimitRoute] = useState<StopLimitRoutePreview | null>(null);
+
+  useEffect(() => {
+    if (type !== "STOP_LIMIT") { setStopLimitRoute(null); return; }
+    let current = true;
+    setStopLimitRoute(null);
+    void commands.sendQuery("QueryStopLimitRoute", { tif, session, symbol })
+      .then((raw) => {
+        const route = raw as StopLimitRoutePreview;
+        if (current && (route?.route === "NATIVE" || route?.route === "ENGINE_HELD")) setStopLimitRoute(route);
+      })
+      .catch(() => { if (current) setStopLimitRoute(null); });
+    return () => { current = false; };
+  }, [commands, type, tif, session, symbol]);
 
   const account = stores.exec.accounts().find((a) => a.venue === venue);
   const buyingPower = account?.buyingPower ?? 0;
@@ -84,6 +103,21 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const positionQty = stores.exec.positions().filter((p) => p.symbol === symbol && p.venue === venue).reduce((s, p) => s + p.qty, 0);
 
   const hasStop = type === "STOP" || type === "STOP_LIMIT";
+  const venueStatus = status?.venues.find((v) => v.venue === venue);
+  const liveHeldNeedsAck = type === "STOP_LIMIT" && stopLimitRoute?.route === "ENGINE_HELD" &&
+    venueStatus?.env?.toLowerCase() === "live" && !venueStatus.heldStopLimitAcknowledged;
+
+  const acknowledgeHeldStopLimit = async () => {
+    if (!venue) return;
+    try {
+      const ack = await commands.sendCommand("AcknowledgeHeldStopLimit", { venue });
+      if (ack.ambiguous) toast.push({ level: "warn", text: "Acknowledgement outcome unknown — recheck venue status before placing." });
+      else if (ack.status !== "accepted") toast.push({ level: "danger", text: `Acknowledgement blocked: ${ack.reason ?? "unknown reason"}` });
+      else toast.push({ level: "warn", text: "Held stop-limit acknowledged for this account. Review and submit the order again." });
+    } catch {
+      toast.push({ level: "warn", text: "Acknowledgement outcome unknown — recheck venue status before placing." });
+    }
+  };
 
   const submitManual = (side: Side) => {
     if (venue === "") { toast.push({ level: "danger", text: "no execution venue — set one up in Settings › Venues & creds" }); return; }
@@ -227,6 +261,22 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
           </select>
         ))}
       </div>
+      {type === "STOP_LIMIT" && (
+        <div data-testid="stop-limit-custody-preview" style={{ color: stopLimitRoute?.route === "ENGINE_HELD" ? palette.warn : palette.textMuted, fontSize: 11 }}>
+          {stopLimitRoute
+            ? `${stopLimitRouteLabel(stopLimitRoute)} · ${stopLimitRoute.effectiveSession}${stopLimitRoute.deadlineMs ? ` · expires ${timeET(stopLimitRoute.deadlineMs)}` : ""}`
+            : "Checking stop-limit custody…"}
+          {stopLimitRoute?.route === "ENGINE_HELD" && " · Held by eTape — no broker protection; venue LIMIT only after trigger."}
+        </div>
+      )}
+      {liveHeldNeedsAck && (
+        <div data-testid="stop-limit-live-disclosure" style={{ border: `1px solid ${palette.warn}`, padding: 6, color: palette.text, fontSize: 11 }}>
+          <div>eTape watches primary moomoo OpenD Last-Eligible Prints; engine or feed loss pauses trigger evaluation. No broker order or protection exists before trigger.</div>
+          <button type="button" data-testid="ack-held-stop-limit" onClick={() => void acknowledgeHeldStopLimit()} style={{ marginTop: 5 }}>
+            I understand — enable for this account
+          </button>
+        </div>
+      )}
       {/* Strip 4 — action row: each button submits its side directly */}
       <div style={{ display: "flex", gap: 3 }}>
         {SIDES.map((s) => (

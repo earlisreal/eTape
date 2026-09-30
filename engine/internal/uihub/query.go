@@ -26,6 +26,10 @@ type cycleFillsQuerier interface {
 	QueryVenueFillsSince(context.Context, string, int64) ([]exec.FillRow, error)
 }
 
+type eligiblePrintPreviewer interface {
+	PreviewEligiblePrint(context.Context, string) exec.EligiblePrintPreview
+}
+
 type queries struct {
 	fills  fillsQuerier
 	charts interface {
@@ -33,6 +37,7 @@ type queries struct {
 	}
 	clk     clock.Clock
 	locates LocateRegistry
+	preview eligiblePrintPreviewer
 
 	eligibility         EligibilityRegistry
 	eligibilityMu       sync.Mutex
@@ -88,7 +93,7 @@ func (q *queries) handleAsync(ctx context.Context, name string, args json.RawMes
 
 func isAsyncQuery(name string) bool {
 	switch name {
-	case "QueryVenueInstrumentEligibility", "QueryLocateEligibility", "QueryLocateQuotes", "QueryLocates", "QueryLocate":
+	case "QueryStopLimitRoute", "QueryVenueInstrumentEligibility", "QueryLocateEligibility", "QueryLocateQuotes", "QueryLocates", "QueryLocate":
 		return true
 	default:
 		return false
@@ -119,6 +124,25 @@ func (q *queries) handleContext(ctx context.Context, name string, args json.RawM
 			out = append(out, fillRowToWire(r))
 		}
 		return out
+	case "QueryStopLimitRoute":
+		var a wsmsg.QueryStopLimitRouteArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return wsmsg.StopLimitRoutePreview{Route: string(exec.RouteNative), EffectiveSession: a.Session, Phase: session.PhaseAt(q.clk.Now()).String()}
+		}
+		now := q.clk.Now()
+		route, effective, deadline := exec.ResolveStopLimitRoute(now, tifFromWire(a.TIF), sessionFromWire(a.Session))
+		preview := wsmsg.StopLimitRoutePreview{Route: string(route), EffectiveSession: sessionToWire(effective), Phase: session.PhaseAt(now).String()}
+		if !deadline.IsZero() {
+			preview.DeadlineMs = deadline.UnixMilli()
+		}
+		if q.preview != nil && a.Symbol != "" {
+			print := q.preview.PreviewEligiblePrint(ctx, a.Symbol)
+			preview.HasTrustedEligiblePrint = print.Trusted
+			if print.Trusted {
+				preview.LastEligiblePrice, preview.LastEligibleTsMs = print.Price, print.TsMs
+			}
+		}
+		return preview
 	case "QueryCycleFills":
 		var a wsmsg.QueryCycleFillsArgs
 		cq, ok := q.fills.(cycleFillsQuerier)

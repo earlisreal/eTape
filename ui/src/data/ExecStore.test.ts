@@ -58,6 +58,15 @@ describe("ExecStore", () => {
     expect(s.workingOrdersFor("US.AAPL").map((o) => o.id)).toEqual(["ET1"]);
     expect(s.workingOrdersFor().map((o) => o.id).sort()).toEqual(["ET1", "ET3"]);
   });
+  it("does not offer cancel-requested intents to Cancel Last or Cancel All", () => {
+    const s = new ExecStore();
+    s.apply(snap("exec.orders", [
+      order("ET1"),
+      order("ET2", { held:{phase:"CANCEL_REQUESTED", deadlineMs:3, cancelRequested:true} }),
+      order("ET3", { action:{kind:"CANCEL", phase:"UNKNOWN"} }),
+    ]));
+    expect(s.workingOrdersFor().map((o) => o.id)).toEqual(["ET1"]);
+  });
 });
 
 describe("ExecStore.onOrderRejected", () => {

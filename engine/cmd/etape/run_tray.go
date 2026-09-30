@@ -13,10 +13,12 @@ import (
 	"context"
 	_ "embed"
 	"log/slog"
+	"os"
 	"sync"
 
 	"fyne.io/systray"
 
+	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/openbrowser"
 )
 
@@ -69,7 +71,8 @@ func onReady() {
 	// process never exits mid-shutdown and never leaves a ghost tray icon
 	// behind on a failure exit.
 	go func() {
-		code, restart, nextArgs := boot(ctx, captureAddr)
+		var held exec.HeldShutdownSummary
+		code, restart, nextArgs := boot(ctx, captureAddr, func(s exec.HeldShutdownSummary) { held = s })
 		if code != 0 {
 			// boot() already called slog.SetDefault with a handler writing
 			// to stderr (and the -log file, if one was given) before
@@ -89,6 +92,10 @@ func onReady() {
 			// overlap while the new tray starts up is an accepted tradeoff.
 			if err := relaunch(nextArgs); err != nil {
 				slog.Default().Error("relaunch failed", "err", err)
+			}
+		} else if held.Unconfirmed > 0 && !confirmForceExitHeldOrders(held) {
+			if err := relaunch(os.Args[1:]); err != nil {
+				slog.Default().Error("restart for held-order reconciliation failed", "err", err)
 			}
 		}
 		systray.Quit()

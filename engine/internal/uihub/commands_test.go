@@ -82,6 +82,25 @@ func TestCommandsSubmitOrderMapsEnums(t *testing.T) {
 	}
 }
 
+func TestAcknowledgeHeldStopLimitPersistsCurrentLiveIdentity(t *testing.T) {
+	ex := &spyExec{ack: exec.CmdAck{Accepted: true}}
+	cfg := &spyCfg{}
+	cd := newCommands(ex, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	cd.setHeldStopLimitIdentities([]venueMeta{{ID: "live-a", Env: "live", HeldStopLimitIdentity: "identity-hash"}})
+	ack, _ := cd.handle(context.Background(), "AcknowledgeHeldStopLimit", json.RawMessage(`{"venue":"live-a"}`), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != "accepted" || cfg.got[heldStopLimitAckKey("live-a")] != "identity-hash" {
+		t.Fatalf("ack=%+v stored=%v", ack, cfg.got)
+	}
+	cmd, ok := ex.last.(exec.AcknowledgeHeldStopLimit)
+	if !ok || cmd.Venue != "live-a" || cmd.Identity != "identity-hash" {
+		t.Fatalf("core command=%+v", ex.last)
+	}
+	ack, _ = cd.handle(context.Background(), "AcknowledgeHeldStopLimit", json.RawMessage(`{"venue":"paper"}`), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != "blocked" {
+		t.Fatalf("unconfigured/non-live acknowledgement was accepted: %+v", ack)
+	}
+}
+
 func TestCommandsSetWindowStateTracksConnection(t *testing.T) {
 	cfg := &spyCfg{values: map[string]string{}}
 	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})

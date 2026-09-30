@@ -13,7 +13,7 @@ import { WORKSPACE_LAYOUT_VERSION, type Workspace } from "./workspace";
 import type { ActionTemplate, HotkeyDeckConfig, OrderConfig } from "./exec/actionTemplate";
 import {
   buildExport, parseImport, prepareImportedWorkspace, prepareImportedOrderConfig,
-  detectHotkeyConflicts, isCurrentLayout, isPresentLayout, type SettingsExport,
+  detectChartBindingConflicts, detectHotkeyConflicts, isCurrentLayout, isPresentLayout, type SettingsExport,
 } from "./backup";
 
 export type BackupPanelProps =
@@ -96,8 +96,13 @@ export function BackupPanel(props: BackupPanelProps): JSX.Element {
       props.toast.push({ level: "info", text: "Imported layout." });
     } else {
       if (!window.confirm("Replace your current hotkeys with the imported ones?")) return;
+      const incomingTemplates = importData.hotkeys?.templates ?? [];
+      const chartConflicts = detectChartBindingConflicts(incomingTemplates);
       const next = prepareImportedOrderConfig(importData.hotkeys as { templates: ActionTemplate[]; hotkeyDeck?: unknown }, props.orderConfig);
       props.onImportOrderConfig(next);
+      if (chartConflicts.length > 0) {
+        props.toast.push({ level: "warn", text: `Imported chart bindings were cleared after the first duplicate: ${chartConflicts.join(", ")}` });
+      }
       const conflicts = detectHotkeyConflicts(next.templates);
       if (conflicts.length > 0) {
         props.toast.push({ level: "warn", text: `Imported hotkeys have conflicting bindings: ${conflicts.join(", ")}` });

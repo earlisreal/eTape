@@ -3,6 +3,8 @@ package exec
 import (
 	"context"
 	"log/slog"
+	"math"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -21,15 +23,16 @@ const defaultRecoverSnapshotTimeout = 5 * time.Second
 type Command interface{ isCommand() }
 
 type SubmitOrder struct {
-	Venue      VenueID
-	Symbol     string
-	Side       Side
-	Type       OrderType
-	TIF        TIF
-	Session    OrderSession
-	Qty        float64
-	LimitPrice float64
-	StopPrice  float64
+	Venue         VenueID
+	Symbol        string
+	Side          Side
+	Type          OrderType
+	TIF           TIF
+	Session       OrderSession
+	Qty           float64
+	LimitPrice    float64
+	StopPrice     float64
+	RouteExpected HeldRoute
 }
 type CancelOrder struct {
 	Venue   VenueID
@@ -46,6 +49,15 @@ type Flatten struct{ Venue VenueID }
 type KillSwitch struct{ Venue VenueID }
 type Arm struct{}
 type Disarm struct{}
+type ConfigureHeldDemand struct{ Demand HeldDemandController }
+type ResumeHeldOrder struct {
+	Venue   VenueID
+	OrderID string
+}
+type AcknowledgeHeldStopLimit struct {
+	Venue    VenueID
+	Identity string
+}
 
 // ResetBalance is sim-only: cancels resting orders, flattens positions, and
 // reseeds the account to the venue's configured starting balance (Core's
@@ -53,15 +65,18 @@ type Disarm struct{}
 type ResetBalance struct{ Venue VenueID }
 type SetActiveVenue struct{ Venue VenueID }
 
-func (SubmitOrder) isCommand()    {}
-func (CancelOrder) isCommand()    {}
-func (ReplaceOrder) isCommand()   {}
-func (Flatten) isCommand()        {}
-func (KillSwitch) isCommand()     {}
-func (Arm) isCommand()            {}
-func (Disarm) isCommand()         {}
-func (ResetBalance) isCommand()   {}
-func (SetActiveVenue) isCommand() {}
+func (SubmitOrder) isCommand()              {}
+func (CancelOrder) isCommand()              {}
+func (ReplaceOrder) isCommand()             {}
+func (Flatten) isCommand()                  {}
+func (KillSwitch) isCommand()               {}
+func (Arm) isCommand()                      {}
+func (Disarm) isCommand()                   {}
+func (ConfigureHeldDemand) isCommand()      {}
+func (ResumeHeldOrder) isCommand()          {}
+func (AcknowledgeHeldStopLimit) isCommand() {}
+func (ResetBalance) isCommand()             {}
+func (SetActiveVenue) isCommand()           {}
 
 // CmdAck is the synchronous accepted|blocked ack; order outcomes arrive later as
 // Updates.
@@ -74,6 +89,11 @@ type CmdAck struct {
 type cmdReq struct {
 	cmd   Command
 	reply chan CmdAck
+}
+
+type eligiblePreviewReq struct {
+	symbol string
+	reply  chan EligiblePrintPreview
 }
 
 // markState is the Core's latest-mark map; implements MarkSource.
@@ -96,16 +116,27 @@ type Core struct {
 	cmds    chan cmdReq
 	bevents chan BrokerEvent
 	markCh  chan Mark
+	printCh chan EligiblePrint
+	preview chan eligiblePreviewReq
 	updates chan Update
 	dropped atomic.Uint64
 
 	state *State
 	marks markState
 
-	trades        *RoundTripAggregator
-	positionOpens *RoundTripAggregator
-	cycles        *cycleProjection
-	closed        *closedOrders
+	trades           *RoundTripAggregator
+	positionOpens    *RoundTripAggregator
+	cycles           *cycleProjection
+	closed           *closedOrders
+	heldDemand       HeldDemandController
+	printHealthy     bool
+	lastPrintGapMs   int64
+	lastPrintSeq     map[string]int64
+	lastPrintDay     map[string]int64
+	lastEligible     map[string]EligiblePrint
+	heldLiveIdentity map[VenueID]string
+	heldLiveAck      map[VenueID]string
+	shutdownHeld     HeldShutdownSummary
 }
 
 // CoreConfig configures NewCore.
@@ -124,8 +155,10 @@ type CoreConfig struct {
 	// Recover, so one misconfigured/unreachable venue can't stall the whole
 	// boot past a short, fixed deadline. Zero means use
 	// defaultRecoverSnapshotTimeout.
-	RecoverSnapshotTimeout time.Duration
-	ActiveVenue            VenueID
+	RecoverSnapshotTimeout    time.Duration
+	ActiveVenue               VenueID
+	HeldStopLimitLiveIdentity map[VenueID]string
+	HeldStopLimitAcknowledged map[VenueID]string
 }
 
 func NewCore(cfg CoreConfig) *Core {
@@ -150,6 +183,8 @@ func NewCore(cfg CoreConfig) *Core {
 		cmds:                   make(chan cmdReq),
 		bevents:                make(chan BrokerEvent, 1024),
 		markCh:                 make(chan Mark, 256),
+		printCh:                make(chan EligiblePrint, 8192),
+		preview:                make(chan eligiblePreviewReq),
 		updates:                make(chan Update, 4096),
 		state:                  NewState(cfg.Venues),
 		marks:                  markState{},
@@ -157,6 +192,11 @@ func NewCore(cfg CoreConfig) *Core {
 		positionOpens:          NewRoundTripAggregator(),
 		cycles:                 newCycleProjection(),
 		closed:                 newClosedOrders(),
+		lastPrintSeq:           make(map[string]int64),
+		lastPrintDay:           make(map[string]int64),
+		lastEligible:           make(map[string]EligiblePrint),
+		heldLiveIdentity:       cloneVenueStrings(cfg.HeldStopLimitLiveIdentity),
+		heldLiveAck:            cloneVenueStrings(cfg.HeldStopLimitAcknowledged),
 	}
 	for v := range cfg.Gate.AccountRequired {
 		// The stale transition is emitted only after the poller's five-failure
@@ -169,9 +209,21 @@ func NewCore(cfg CoreConfig) *Core {
 	return c
 }
 
+func cloneVenueStrings(src map[VenueID]string) map[VenueID]string {
+	dst := make(map[VenueID]string, len(src))
+	for venue, value := range src {
+		dst[venue] = value
+	}
+	return dst
+}
+
 func (c *Core) Updates() <-chan Update { return c.updates }
 
 func (c *Core) DroppedUpdates() uint64 { return c.dropped.Load() }
+
+// ShutdownHeldSummary is read after Run returns and summarizes the held-order
+// safeguards performed during clean shutdown.
+func (c *Core) ShutdownHeldSummary() HeldShutdownSummary { return c.shutdownHeld }
 
 // Do submits a command and blocks for its accepted|blocked ack. Safe from any
 // goroutine.
@@ -204,6 +256,32 @@ func (c *Core) FeedMark(m Mark) {
 	select {
 	case c.markCh <- m:
 	default:
+	}
+}
+
+// FeedEligiblePrint is intentionally lossless: dropping a trigger print would
+// make locally-held custody unsafe, so this lane backpressures at capacity.
+func (c *Core) FeedEligiblePrint(ctx context.Context, p EligiblePrint) {
+	select {
+	case c.printCh <- p:
+	case <-ctx.Done():
+	}
+}
+
+// PreviewEligiblePrint reads the same single-writer trust state used for
+// trigger evaluation. It never treats cached quote/snapshot prices as live.
+func (c *Core) PreviewEligiblePrint(ctx context.Context, symbol string) EligiblePrintPreview {
+	reply := make(chan EligiblePrintPreview, 1)
+	select {
+	case c.preview <- eligiblePreviewReq{symbol: symbol, reply: reply}:
+	case <-ctx.Done():
+		return EligiblePrintPreview{}
+	}
+	select {
+	case preview := <-reply:
+		return preview
+	case <-ctx.Done():
+		return EligiblePrintPreview{}
 	}
 }
 
@@ -246,6 +324,18 @@ func (c *Core) Recover(ctx context.Context) error {
 		}
 		c.state.Apply(ev)
 	}
+	for v, vs := range c.state.Venues {
+		for id, o := range vs.Orders {
+			if !o.Working() || o.Action == nil || o.Action.Phase != ActionRequested {
+				continue
+			}
+			action := *o.Action
+			action.Phase, action.Reason = ActionUnknown, "engine restarted before venue confirmation"
+			if err := c.appendAndFold(OrderActionChanged{V: v, OID: id, Action: action, Ts: c.now()}, SrcReconcile); err != nil {
+				return err
+			}
+		}
+	}
 	cutoffMs := session.PoolDay(c.clk.Now()) * 1000
 	var history []EventEnvelope
 	if hs, ok := c.store.(closedHistoryStore); ok {
@@ -267,6 +357,7 @@ func (c *Core) Recover(ctx context.Context) error {
 		c.closed.apply(ev, env.Seq)
 	}
 	c.closed.seedState(c.state)
+	foundBrokerOrders := make(map[string]bool)
 	for _, v := range c.venues {
 		b, ok := c.brokers[v]
 		if !ok {
@@ -284,6 +375,7 @@ func (c *Core) Recover(ctx context.Context) error {
 		c.state.ReconcilePositions(v, pos)
 		for _, o := range orders {
 			o.Venue = v
+			foundBrokerOrders[o.ID] = true
 			if _, exists := c.state.OrderVenue(o.ID); !exists && !c.closed.hasSeed(o.ID) {
 				if err := c.appendAndFold(OrderSubmitted{Order: o}, SrcReconcile); err != nil {
 					c.syslog("exec.recover", "persist adopted order "+o.ID+": "+err.Error())
@@ -293,6 +385,111 @@ func (c *Core) Recover(ctx context.Context) error {
 			} else {
 				c.state.ReconcileOpenOrders(v, []Order{o})
 				c.closed.adopt(o)
+			}
+		}
+	}
+	if hs, ok := c.store.(orderHistoryByIDStore); ok {
+		ids := make([]string, 0)
+		for _, vs := range c.state.Venues {
+			for id, o := range vs.Orders {
+				if o.Working() {
+					ids = append(ids, id)
+				}
+			}
+		}
+		sort.Strings(ids)
+		envs, err := hs.ReadExecOrderHistoriesFor(ids)
+		if err != nil {
+			return err
+		}
+		actions := make(map[string]OrderAction)
+		for _, env := range envs {
+			ev, err := DecodeEvent(env.Kind, env.Payload)
+			if err != nil {
+				return err
+			}
+			if action, ok := ev.(OrderActionChanged); ok {
+				actions[action.OID] = action.Action
+			}
+		}
+		for _, id := range ids {
+			venue, ok := c.state.OrderVenue(id)
+			if !ok {
+				continue
+			}
+			action, ok := actions[id]
+			if !ok {
+				continue
+			}
+			if action.Phase == ActionRequested {
+				action.Phase, action.Reason = ActionUnknown, "engine restarted before venue confirmation"
+			}
+			current := c.order(id)
+			if current.Action == nil || *current.Action != action {
+				if err := c.appendAndFold(OrderActionChanged{V: venue, OID: id, Action: action, Ts: c.now()}, SrcReconcile); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	for _, id := range c.heldOrderIDs() {
+		o := c.order(id)
+		if o.Held == nil {
+			continue
+		}
+		h := *o.Held
+		switch h.Phase {
+		case HeldWaiting, HeldArmed:
+			h.Phase, h.PausedReason = HeldPaused, "engine restarted; resume manually"
+		case HeldActivating:
+			if foundBrokerOrders[id] {
+				h.Phase, h.PausedReason = HeldWorking, ""
+			} else {
+				h.Phase, h.PausedReason = HeldUnknown, "restart during activation; reconcile manually, no repost"
+			}
+		case HeldCancelRequested:
+			h.CancelRequested = true
+			if foundBrokerOrders[id] {
+				h.CancelSent, h.PausedReason = true, "cancel resubmitted for reconciliation"
+			} else {
+				h.Phase, h.PausedReason = HeldUnknown, "cancel outcome unknown after restart"
+			}
+		default:
+			continue
+		}
+		if err := c.appendAndFold(HeldOrderChanged{V: o.Venue, OID: o.ID, Held: h, Ts: c.now()}, SrcReconcile); err != nil {
+			c.syslog("exec.recover", "persist held recovery "+id+": "+err.Error())
+		}
+		if h.Phase == HeldCancelRequested && foundBrokerOrders[id] {
+			if b := c.brokers[o.Venue]; b != nil {
+				c.startVenueAction(ctx, b, o.Venue, id, ActionCancel, ReplaceRequest{})
+			}
+		}
+	}
+	for v, vs := range c.state.Venues {
+		for id, o := range vs.Orders {
+			if !o.Working() || !foundBrokerOrders[id] || o.Action == nil || o.Action.Phase != ActionUnknown {
+				continue
+			}
+			switch o.Action.Kind {
+			case ActionCancel:
+				if o.Held == nil {
+					if b := c.brokers[v]; b != nil {
+						c.startVenueAction(ctx, b, v, id, ActionCancel, ReplaceRequest{})
+					}
+				}
+			case ActionReplace:
+				a := o.Action
+				limitMatches := a.RequestedLimitPrice == 0 || math.Abs(o.LimitPrice-a.RequestedLimitPrice) < 1e-8
+				stopMatches := a.RequestedStopPrice == 0 || math.Abs(o.StopPrice-a.RequestedStopPrice) < 1e-8
+				qtyMatches := a.RequestedQty == 0 || math.Abs(o.Qty-a.RequestedQty) < 1e-8
+				if limitMatches && stopMatches && qtyMatches {
+					confirmed := *a
+					confirmed.Phase, confirmed.Reason = ActionConfirmed, ""
+					if err := c.appendAndFold(OrderActionChanged{V: v, OID: id, Action: confirmed, Ts: c.now()}, SrcReconcile); err != nil {
+						c.syslog("exec.recover", "persist replace confirmation "+id+": "+err.Error())
+					}
+				}
 			}
 		}
 	}
@@ -411,9 +608,12 @@ func (c *Core) Run(ctx context.Context) error {
 		go c.pump(ctx, v, b)
 	}
 	cycleTimer := c.clk.After(time.Until(session.NextTradingCycleStart(c.clk.Now())))
+	heldTimer := c.clk.NewTicker(time.Second)
+	defer heldTimer.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			c.shutdownHeldOrders()
 			return ctx.Err()
 		case req := <-c.cmds:
 			req.reply <- c.handleCmd(ctx, req.cmd)
@@ -425,6 +625,17 @@ func (c *Core) Run(ctx context.Context) error {
 			for _, v := range c.venues {
 				c.emitProjectedAccount(v)
 			}
+		case p := <-c.printCh:
+			c.handleEligiblePrint(ctx, p)
+		case req := <-c.preview:
+			p, ok := c.lastEligible[req.symbol]
+			preview := EligiblePrintPreview{}
+			if ok && c.printHealthy && c.freshEligiblePrint(p) {
+				preview = EligiblePrintPreview{Price: p.Price, TsMs: p.TsMs, Trusted: true}
+			}
+			req.reply <- preview
+		case <-heldTimer.C():
+			c.expireHeldOrders(ctx)
 		case <-cycleTimer:
 			c.rollCycle()
 			cycleTimer = c.clk.After(session.NextTradingCycleStart(c.clk.Now()).Sub(c.clk.Now()))
@@ -544,12 +755,25 @@ func (c *Core) handleCmd(ctx context.Context, cmd Command) CmdAck {
 		return c.handleResetBalance(ctx, cm)
 	case SetActiveVenue:
 		return c.handleSetActiveVenue(cm)
+	case ConfigureHeldDemand:
+		c.heldDemand = cm.Demand
+		return CmdAck{Accepted: true}
+	case ResumeHeldOrder:
+		return c.handleResumeHeld(ctx, cm)
+	case AcknowledgeHeldStopLimit:
+		identity := c.heldLiveIdentity[cm.Venue]
+		if identity == "" || identity != cm.Identity {
+			return CmdAck{Accepted: false, Reason: "live account identity changed; restart before acknowledging"}
+		}
+		c.heldLiveAck[cm.Venue] = identity
+		c.emit(HeldStopLimitAckUpdate{Venue: cm.Venue, Acknowledged: true})
+		return CmdAck{Accepted: true}
 	case KillSwitch:
 		return c.handleKill(ctx, cm)
 	case Arm:
-		return c.handleArm(true)
+		return c.handleArm(ctx, true)
 	case Disarm:
-		return c.handleArm(false)
+		return c.handleArm(ctx, false)
 	default:
 		return CmdAck{Accepted: false, Reason: "unknown command"}
 	}
@@ -565,6 +789,31 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 	if err := req.Validate(); err != nil {
 		return CmdAck{Accepted: false, Reason: err.Error(), OrderID: req.ClientOrderID}
 	}
+	route := RouteNative
+	var deadline time.Time
+	if req.Type == TypeStopLimit {
+		var effective OrderSession
+		route, effective, deadline = ResolveStopLimitRoute(c.clk.Now(), req.TIF, req.Session)
+		if cm.RouteExpected != "" && cm.RouteExpected != route {
+			return CmdAck{Accepted: false, Reason: "order route changed; review custody and retry", OrderID: req.ClientOrderID}
+		}
+		if route == RouteEngineHeld {
+			if identity := c.heldLiveIdentity[req.Venue]; identity != "" && c.heldLiveAck[req.Venue] != identity {
+				return CmdAck{Accepted: false, Reason: "live engine-held stop-limit requires account acknowledgement"}
+			}
+			req.Session = effective
+			switch req.Side {
+			case SideBuy, SideCover:
+				if req.LimitPrice < req.StopPrice {
+					return CmdAck{Accepted: false, Reason: "buy stop-limit requires limit at or above trigger", OrderID: req.ClientOrderID}
+				}
+			case SideSell, SideShort:
+				if req.LimitPrice > req.StopPrice {
+					return CmdAck{Accepted: false, Reason: "sell stop-limit requires limit at or below trigger", OrderID: req.ClientOrderID}
+				}
+			}
+		}
+	}
 	if ok, reason := Evaluate(c.state, c.gate, req, c.marks); !ok {
 		ev := OrderBlocked{V: req.Venue, OID: req.ClientOrderID, Req: req, Reason: reason, Ts: c.now()}
 		if err := c.appendAndFold(ev, SrcLocal); err != nil {
@@ -573,6 +822,9 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 		return CmdAck{Accepted: false, Reason: reason, OrderID: req.ClientOrderID}
 	}
 	b := c.brokers[req.Venue]
+	if b == nil {
+		return CmdAck{Accepted: false, Reason: "unknown venue", OrderID: req.ClientOrderID}
+	}
 	// An explicit Overnight session requires the venue's broker to support it
 	// natively (Alpaca's Blue Ocean ATS); TradeZero/sim do not. Block here rather
 	// than let the adapter silently fall back to a different session than the
@@ -600,17 +852,38 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 		}
 		return CmdAck{Accepted: false, Reason: reason, OrderID: req.ClientOrderID}
 	}
+	if route == RouteEngineHeld {
+		if c.heldDemand == nil {
+			return CmdAck{Accepted: false, Reason: "execution ticker demand unavailable for held stop-limit", OrderID: req.ClientOrderID}
+		}
+		if err := c.heldDemand.Acquire(ctx, req.ClientOrderID, req.Symbol); err != nil {
+			return CmdAck{Accepted: false, Reason: "execution ticker unavailable: " + err.Error(), OrderID: req.ClientOrderID}
+		}
+		o := newOrderFromRequest(req, c.now())
+		o.Held = &HeldOrder{Phase: HeldWaiting, DeadlineMs: deadline.UnixMilli()}
+		if err := c.appendAndFold(OrderSubmitted{Order: o}, SrcLocal); err != nil {
+			c.heldDemand.Release(req.ClientOrderID)
+			return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: req.ClientOrderID}
+		}
+		if last, ok := c.lastEligible[req.Symbol]; ok && c.freshEligiblePrint(last) && StopLimitTriggered(o.Side, last.Price, o.StopPrice) {
+			c.activateHeld(ctx, c.order(o.ID))
+		}
+		return CmdAck{Accepted: true, OrderID: req.ClientOrderID}
+	}
 	// Append OrderSubmitted BEFORE the POST (crash-recovery rule). Append failure
 	// blocks submission.
-	o := Order{Venue: req.Venue, ID: req.ClientOrderID, Symbol: req.Symbol, Side: req.Side,
-		Type: req.Type, TIF: req.TIF, Session: req.Session, Qty: req.Qty, LimitPrice: req.LimitPrice,
-		StopPrice: req.StopPrice, Status: StatusSubmitted, LeavesQty: req.Qty,
-		CreatedMs: c.now(), UpdatedMs: c.now()}
+	o := newOrderFromRequest(req, c.now())
 	if err := c.appendAndFold(OrderSubmitted{Order: o}, SrcLocal); err != nil {
 		return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: req.ClientOrderID}
 	}
 	go c.postSubmit(ctx, b, req)
 	return CmdAck{Accepted: true, OrderID: req.ClientOrderID}
+}
+
+func newOrderFromRequest(req OrderRequest, now int64) Order {
+	return Order{Venue: req.Venue, ID: req.ClientOrderID, Symbol: req.Symbol, Side: req.Side,
+		Type: req.Type, TIF: req.TIF, Session: req.Session, Qty: req.Qty, LimitPrice: req.LimitPrice,
+		StopPrice: req.StopPrice, Status: StatusSubmitted, LeavesQty: req.Qty, CreatedMs: now, UpdatedMs: now}
 }
 
 // postSubmit performs the broker POST off the writer loop; a transport error is
@@ -629,34 +902,142 @@ func (c *Core) postSubmit(ctx context.Context, b Broker, req OrderRequest) {
 }
 
 func (c *Core) handleCancel(ctx context.Context, cm CancelOrder) CmdAck {
-	if _, ok := c.state.OrderVenue(cm.OrderID); !ok {
+	v, ok := c.state.OrderVenue(cm.OrderID)
+	if !ok || v != cm.Venue {
 		return CmdAck{Accepted: false, Reason: "unknown order", OrderID: cm.OrderID}
 	}
-	b := c.brokers[cm.Venue]
-	go func() {
-		if b != nil {
-			if err := b.CancelOrder(ctx, cm.OrderID); err != nil {
-				slog.Warn("exec: cancel failed", "order", cm.OrderID, "err", err)
-			}
+	o := c.state.Venue(v).Orders[cm.OrderID]
+	if o.Action != nil && o.Action.Kind == ActionCancel &&
+		(o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+		return CmdAck{Accepted: false, Reason: "cancel outcome is still unresolved", OrderID: o.ID}
+	}
+	if o.Held != nil {
+		if o.Held.CancelRequested || o.Held.Phase == HeldCancelRequested {
+			return CmdAck{Accepted: false, Reason: "cancel already requested", OrderID: o.ID}
 		}
-	}()
+		switch o.Held.Phase {
+		case HeldWaiting, HeldArmed, HeldPaused:
+			if err := c.appendAndFold(OrderCanceled{V: o.Venue, OID: o.ID, Ts: c.now()}, SrcLocal); err != nil {
+				return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: o.ID}
+			}
+			c.releaseHeld(o.ID)
+			return CmdAck{Accepted: true, OrderID: o.ID}
+		}
+		c.requestHeldVenueCancel(ctx, o, "cancel requested")
+		return CmdAck{Accepted: true, OrderID: o.ID}
+	}
+	b := c.brokers[cm.Venue]
+	if b == nil {
+		return CmdAck{Accepted: false, Reason: "unknown venue", OrderID: o.ID}
+	}
+	action := OrderAction{Kind: ActionCancel, Phase: ActionRequested, PreviousLimitPrice: o.LimitPrice, PreviousStopPrice: o.StopPrice}
+	if err := c.appendAndFold(OrderActionChanged{V: o.Venue, OID: o.ID, Action: action, Ts: c.now()}, SrcLocal); err != nil {
+		return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: o.ID}
+	}
+	c.startVenueAction(ctx, b, o.Venue, o.ID, ActionCancel, ReplaceRequest{})
 	return CmdAck{Accepted: true, OrderID: cm.OrderID}
 }
 
 func (c *Core) handleReplace(ctx context.Context, cm ReplaceOrder) CmdAck {
-	if _, ok := c.state.OrderVenue(cm.OrderID); !ok {
+	v, ok := c.state.OrderVenue(cm.OrderID)
+	if !ok || v != cm.Venue {
 		return CmdAck{Accepted: false, Reason: "unknown order", OrderID: cm.OrderID}
 	}
-	b := c.brokers[cm.Venue]
-	rr := ReplaceRequest{Qty: cm.Qty, LimitPrice: cm.LimitPrice, StopPrice: cm.StopPrice}
-	go func() {
-		if b != nil {
-			if err := b.ReplaceOrder(ctx, cm.OrderID, rr); err != nil {
-				slog.Warn("exec: replace failed", "order", cm.OrderID, "err", err)
+	o := c.state.Venue(v).Orders[cm.OrderID]
+	if o.Action != nil && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+		return CmdAck{Accepted: false, Reason: "order action outcome is still unresolved", OrderID: o.ID}
+	}
+	if o.Held != nil {
+		if o.Held.Phase == HeldPaused || o.Held.CancelRequested || o.Held.Phase == HeldCancelRequested || o.Held.Phase == HeldUnknown {
+			return CmdAck{Accepted: false, Reason: "held order is not modifiable in its current state", OrderID: o.ID}
+		}
+		if o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed {
+			stop := cm.StopPrice
+			if stop <= 0 {
+				stop = o.StopPrice
 			}
+			if (o.Side == SideBuy || o.Side == SideCover) && o.LimitPrice < stop || (o.Side == SideSell || o.Side == SideShort) && o.LimitPrice > stop {
+				return CmdAck{Accepted: false, Reason: "stop change would put limit on the wrong side of trigger", OrderID: o.ID}
+			}
+			qty := cm.Qty
+			if qty <= 0 {
+				qty = o.ExecutedQty + o.LeavesQty
+			}
+			if qty <= o.ExecutedQty {
+				return CmdAck{Accepted: false, Reason: "replacement quantity must exceed executed quantity", OrderID: o.ID}
+			}
+			req := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Type: TypeStopLimit, TIF: o.TIF, Session: o.Session,
+				Qty: qty, LimitPrice: o.LimitPrice, StopPrice: stop, ClientOrderID: o.ID}
+			if good, reason := c.heldGate(req, o.ID); !good {
+				return CmdAck{Accepted: false, Reason: reason, OrderID: o.ID}
+			}
+			if err := c.appendAndFold(OrderReplaced{V: o.Venue, OID: o.ID, NewQty: qty, NewStop: stop, Ts: c.now()}, SrcLocal); err != nil {
+				return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: o.ID}
+			}
+			if last, ok := c.lastEligible[o.Symbol]; ok && c.freshEligiblePrint(last) && StopLimitTriggered(o.Side, last.Price, stop) {
+				c.activateHeld(ctx, c.order(o.ID))
+			}
+			return CmdAck{Accepted: true, OrderID: o.ID}
+		}
+		if o.Held.Phase != HeldWorking {
+			return CmdAck{Accepted: false, Reason: "held order is not modifiable in its current state", OrderID: o.ID}
+		}
+		if cm.Qty <= 0 {
+			cm.Qty = o.ExecutedQty + o.LeavesQty
+		}
+		if cm.Qty <= o.ExecutedQty {
+			return CmdAck{Accepted: false, Reason: "replacement quantity must exceed executed quantity", OrderID: o.ID}
+		}
+		cm.StopPrice = o.StopPrice // a triggered child is a LIMIT; never move its trigger.
+	}
+	b := c.brokers[cm.Venue]
+	if b == nil {
+		return CmdAck{Accepted: false, Reason: "unknown venue", OrderID: cm.OrderID}
+	}
+	if cm.Qty <= 0 {
+		cm.Qty = o.ExecutedQty + o.LeavesQty
+		if cm.Qty <= 0 {
+			cm.Qty = o.Qty
+		}
+	}
+	if cm.Qty <= o.ExecutedQty {
+		return CmdAck{Accepted: false, Reason: "replacement quantity must exceed executed quantity", OrderID: o.ID}
+	}
+	if cm.LimitPrice <= 0 {
+		cm.LimitPrice = o.LimitPrice
+	}
+	if cm.StopPrice <= 0 {
+		cm.StopPrice = o.StopPrice
+	}
+	if cm.LimitPrice <= 0 && o.Type != TypeMarket {
+		return CmdAck{Accepted: false, Reason: "replacement limit price must be positive", OrderID: o.ID}
+	}
+	rr := ReplaceRequest{Qty: cm.Qty, LimitPrice: cm.LimitPrice, StopPrice: cm.StopPrice}
+	action := OrderAction{Kind: ActionReplace, Phase: ActionRequested, PreviousLimitPrice: o.LimitPrice,
+		PreviousStopPrice: o.StopPrice, RequestedLimitPrice: cm.LimitPrice, RequestedStopPrice: cm.StopPrice, RequestedQty: cm.Qty}
+	if err := c.appendAndFold(OrderActionChanged{V: o.Venue, OID: o.ID, Action: action, Ts: c.now()}, SrcLocal); err != nil {
+		return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: o.ID}
+	}
+	c.startVenueAction(ctx, b, o.Venue, o.ID, ActionReplace, rr)
+	return CmdAck{Accepted: true, OrderID: cm.OrderID}
+}
+
+func (c *Core) startVenueAction(ctx context.Context, b Broker, venue VenueID, orderID string, kind OrderActionKind, req ReplaceRequest) {
+	go func() {
+		var err error
+		if kind == ActionCancel {
+			err = b.CancelOrder(ctx, orderID)
+		} else {
+			err = b.ReplaceOrder(ctx, orderID, req)
+		}
+		if err == nil {
+			return // only the authoritative broker order event confirms an action.
+		}
+		select {
+		case c.bevents <- BrokerActionOutcome{V: venue, OID: orderID, Kind: kind, Reason: err.Error()}:
+		case <-ctx.Done():
 		}
 	}()
-	return CmdAck{Accepted: true, OrderID: cm.OrderID}
 }
 
 func (c *Core) handleFlatten(ctx context.Context, cm Flatten) CmdAck {
@@ -693,31 +1074,37 @@ func (c *Core) handleResetBalance(ctx context.Context, cm ResetBalance) CmdAck {
 }
 
 func (c *Core) handleKill(ctx context.Context, cm KillSwitch) CmdAck {
-	// Kill never places orders: cancel-all on the targeted venue(s) + disarm.
+	// Kill never places orders: durably request cancellation for every working
+	// order on the target venue(s), then disarm.
 	// MasterArmed is global, so a venue-scoped kill still locks all trading.
 	c.state.SetMasterArmed(false)
+	c.disarmHeld(ctx, cm.Venue, true)
 	targets := c.venues
 	if cm.Venue != "" {
 		targets = []VenueID{cm.Venue}
 	}
 	for _, v := range targets {
-		b := c.brokers[v]
-		if b == nil {
-			continue
-		}
-		go func(b Broker, v VenueID) {
-			if err := b.CancelAll(ctx, ""); err != nil {
-				slog.Warn("exec: kill cancel-all failed", "venue", v, "err", err)
+		ids := make([]string, 0, len(c.state.Venue(v).Orders))
+		for id, o := range c.state.Venue(v).Orders {
+			if o.Working() {
+				ids = append(ids, id)
 			}
-		}(b, v)
+		}
+		sort.Strings(ids)
+		for _, id := range ids {
+			c.handleCancel(ctx, CancelOrder{Venue: v, OrderID: id})
+		}
 	}
 	c.syslog("exec.kill", "kill switch: venue="+string(cm.Venue))
 	c.emitStatus()
 	return CmdAck{Accepted: true}
 }
 
-func (c *Core) handleArm(on bool) CmdAck {
+func (c *Core) handleArm(ctx context.Context, on bool) CmdAck {
 	c.state.SetMasterArmed(on)
+	if !on {
+		c.disarmHeld(ctx, "", false)
+	}
 	c.emitStatus()
 	for _, vv := range c.venues {
 		c.emitProjectedAccount(vv)
@@ -746,11 +1133,68 @@ func (c *Core) emitStatus() {
 	}
 }
 
-func (c *Core) handleBrokerEvent(_ context.Context, be BrokerEvent) {
+func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 	switch e := be.(type) {
+	case HeldActivationOutcome:
+		before := c.order(e.OID)
+		if before.Held == nil || before.Held.ChildClientID == "" ||
+			(before.Held.Phase != HeldActivating && before.Held.Phase != HeldCancelRequested) {
+			return
+		}
+		h := *before.Held
+		h.Phase, h.PausedReason = HeldUnknown, "activation outcome unknown: "+e.Reason
+		cancelNow := h.CancelRequested && !h.CancelSent
+		if cancelNow {
+			h.CancelSent = true
+		}
+		if err := c.appendAndFold(HeldOrderChanged{V: e.V, OID: e.OID, Held: h, Ts: c.now()}, SrcLocal); err != nil {
+			c.syslog("exec.held", "persist activation uncertainty "+e.OID+": "+err.Error())
+		}
+		if cancelNow {
+			if b := c.brokers[e.V]; b != nil {
+				c.startVenueAction(ctx, b, e.V, e.OID, ActionCancel, ReplaceRequest{})
+			}
+		}
+	case BrokerActionOutcome:
+		o := c.order(e.OID)
+		if o.Action == nil || o.Action.Kind != e.Kind || o.Action.Phase != ActionRequested {
+			return
+		}
+		action := *o.Action
+		action.Phase, action.Reason = ActionUnknown, e.Reason
+		if err := c.appendAndFold(OrderActionChanged{V: e.V, OID: e.OID, Action: action, Ts: c.now()}, SrcLocal); err != nil {
+			c.syslog("exec.order-action", "persist unknown outcome "+e.OID+": "+err.Error())
+		}
 	case Event: // order-lifecycle or StreamGap — persist + fold + emit
+		before := c.order(e.OrderID())
 		if err := c.appendAndFold(e, SrcWS); err != nil {
 			slog.Error("exec: append broker event failed", "kind", e.Kind(), "err", err)
+			return
+		}
+		if accepted, ok := e.(OrderAccepted); ok && before.Held != nil && before.Held.ChildClientID != "" &&
+			(before.Held.Phase == HeldActivating || before.Held.Phase == HeldCancelRequested || before.Held.CancelRequested) {
+			h := *before.Held
+			wasCancelRequested := before.Held.CancelRequested || before.Held.Phase == HeldCancelRequested
+			cancelUnknown := before.Action != nil && before.Action.Kind == ActionCancel && before.Action.Phase == ActionUnknown
+			sendCancel := wasCancelRequested && (!before.Held.CancelSent || cancelUnknown)
+			h.Phase, h.PausedReason, h.ChildBrokerID = HeldWorking, "", accepted.BrokerOrderID
+			if wasCancelRequested {
+				h.Phase, h.PausedReason, h.CancelRequested, h.CancelSent = HeldCancelRequested, "cancel requested", true, true
+			}
+			if err := c.appendAndFold(HeldOrderChanged{V: before.Venue, OID: before.ID, Held: h, Ts: c.now()}, SrcLocal); err != nil {
+				c.syslog("exec.held", "persist child acceptance "+before.ID+": "+err.Error())
+			}
+			if sendCancel {
+				if b := c.brokers[before.Venue]; b != nil {
+					c.startVenueAction(ctx, b, before.Venue, before.ID, ActionCancel, ReplaceRequest{})
+				}
+			}
+		}
+		if id := e.OrderID(); id != "" {
+			after := c.order(id)
+			if before.Held != nil && (after.Status == StatusCanceled || after.Status == StatusRejected || after.Status == StatusExpired || after.Status == StatusFilled) {
+				c.releaseHeld(id)
+			}
 		}
 	case BrokerAccount:
 		if b := c.brokers[e.Account.Venue]; b != nil && b.Capabilities().CalculatedDayPnL && e.Account.DayPnLSource == "" {
@@ -783,6 +1227,8 @@ func (c *Core) handleBrokerEvent(_ context.Context, be BrokerEvent) {
 	case BrokerConnUp:
 		c.emit(StatusUpdate{Venue: e.V, Connected: true, MasterArmed: c.state.MasterArmed})
 	case BrokerConnDown:
+		c.printHealthy = false
+		c.pausePretrigger("venue connection lost; resume manually")
 		c.emit(StatusUpdate{Venue: e.V, Connected: false, MasterArmed: c.state.MasterArmed, Note: e.Note})
 	}
 }

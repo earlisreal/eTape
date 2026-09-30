@@ -48,6 +48,24 @@ type Broker interface {
 // reconcile snapshots (which are not persisted).
 type BrokerEvent interface{ isBrokerEvent() }
 
+// BrokerActionOutcome reports an adapter call that returned without an
+// authoritative order event. Errors are conservatively unknown: a timeout may
+// occur after the venue applied the action.
+type BrokerActionOutcome struct {
+	V      VenueID
+	OID    string
+	Kind   OrderActionKind
+	Reason string
+}
+
+// HeldActivationOutcome is kept separate from OrderRejected because a failed
+// child POST may have reached the venue even when its response was lost.
+type HeldActivationOutcome struct {
+	V      VenueID
+	OID    string
+	Reason string
+}
+
 // Order-lifecycle events are emitted by adapters AND persisted.
 func (OrderAccepted) isBrokerEvent() {}
 func (OrderRejected) isBrokerEvent() {}
@@ -83,11 +101,13 @@ type BrokerPositions struct {
 	Positions []Position
 }
 
-func (BrokerConnUp) isBrokerEvent()       {}
-func (BrokerConnDown) isBrokerEvent()     {}
-func (BrokerAccount) isBrokerEvent()      {}
-func (BrokerAccountFresh) isBrokerEvent() {}
-func (BrokerPositions) isBrokerEvent()    {}
+func (BrokerConnUp) isBrokerEvent()          {}
+func (BrokerConnDown) isBrokerEvent()        {}
+func (BrokerAccount) isBrokerEvent()         {}
+func (BrokerAccountFresh) isBrokerEvent()    {}
+func (BrokerPositions) isBrokerEvent()       {}
+func (BrokerActionOutcome) isBrokerEvent()   {}
+func (HeldActivationOutcome) isBrokerEvent() {}
 
 // Mark is a last-trade price the gate values market orders against and the Core
 // marks positions with. Its shape matches md.Mark; Plan 6 bridges the two.
@@ -119,4 +139,8 @@ type EventStore interface {
 // including that order's pre-cutoff submission history.
 type closedHistoryStore interface {
 	ReadExecOrderHistoriesSince(fromMs int64) ([]EventEnvelope, error)
+}
+
+type orderHistoryByIDStore interface {
+	ReadExecOrderHistoriesFor(orderIDs []string) ([]EventEnvelope, error)
 }

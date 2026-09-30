@@ -213,6 +213,9 @@ func (g *Generator) stepSymbol(rt *symRuntime, fromMs, nowMs int64) {
 	if len(ticks) == 0 {
 		return
 	}
+	for i := range ticks {
+		ticks[i].Delivery = feed.DeliveryRealtime
+	}
 	rt.lastSeq = ticks[len(ticks)-1].Seq
 
 	for _, tk := range ticks {

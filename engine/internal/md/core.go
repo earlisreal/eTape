@@ -98,6 +98,7 @@ type Core struct {
 	inbox          chan inMsg
 	updates        chan Update
 	marks          chan Mark
+	eligiblePrints chan EligiblePrint
 	bookOut        chan feed.Book
 	droppedInbox   atomic.Uint64
 	droppedUpdates atomic.Uint64
@@ -136,28 +137,30 @@ func New(cfg Config) *Core {
 		cfg.Clock = clock.System{}
 	}
 	return &Core{
-		cfg:         cfg,
-		inbox:       make(chan inMsg, 1024),
-		updates:     make(chan Update, 8192),
-		marks:       make(chan Mark, 1024),
-		bookOut:     make(chan feed.Book, 1024),
-		books:       newBookStore(),
-		quotes:      newQuoteStore(),
-		tapes:       make(map[string]*ring),
-		lastSeq:     make(map[string]int64),
-		lastDay:     make(map[string]int64),
-		eligibility: make(map[string]*eligibilityState),
-		luld:        make(map[string]*luldCalculator),
-		luldVisible: make(map[string]EstimatedLULD),
-		bars:        newBarEngine(cfg.AnchorSecs),
-		inds:        newIndicatorSet(),
-		now:         cfg.Clock.Now(),
+		cfg:            cfg,
+		inbox:          make(chan inMsg, 1024),
+		updates:        make(chan Update, 8192),
+		marks:          make(chan Mark, 1024),
+		eligiblePrints: make(chan EligiblePrint, 8192),
+		bookOut:        make(chan feed.Book, 1024),
+		books:          newBookStore(),
+		quotes:         newQuoteStore(),
+		tapes:          make(map[string]*ring),
+		lastSeq:        make(map[string]int64),
+		lastDay:        make(map[string]int64),
+		eligibility:    make(map[string]*eligibilityState),
+		luld:           make(map[string]*luldCalculator),
+		luldVisible:    make(map[string]EstimatedLULD),
+		bars:           newBarEngine(cfg.AnchorSecs),
+		inds:           newIndicatorSet(),
+		now:            cfg.Clock.Now(),
 	}
 }
 
-func (c *Core) Updates() <-chan Update  { return c.updates }
-func (c *Core) Marks() <-chan Mark      { return c.marks }
-func (c *Core) Books() <-chan feed.Book { return c.bookOut }
+func (c *Core) Updates() <-chan Update               { return c.updates }
+func (c *Core) Marks() <-chan Mark                   { return c.marks }
+func (c *Core) EligiblePrints() <-chan EligiblePrint { return c.eligiblePrints }
+func (c *Core) Books() <-chan feed.Book              { return c.bookOut }
 
 // DropStats returns a race-safe snapshot of the two lossy MD paths.
 func (c *Core) DropStats() DropStats {
@@ -182,6 +185,9 @@ func (c *Core) Feed(ev feed.Event) {
 	case c.inbox <- eventMsg{ev: ev, at: at}:
 	default:
 		c.droppedInbox.Add(1)
+		if _, ticks := ev.(feed.TicksEvent); ticks {
+			c.eligiblePrints <- EligiblePrint{Gap: true, RecvTsMs: at.UnixMilli()}
+		}
 	}
 }
 
@@ -401,9 +407,11 @@ func (c *Core) applyEventAt(ev feed.Event, at time.Time) {
 		c.emit(ConnUpdate{Up: true})
 	case feed.ConnDownEvent:
 		c.advanceTransport(true, at)
+		c.eligiblePrints <- EligiblePrint{Gap: true, RecvTsMs: at.UnixMilli()}
 		c.emit(ConnUpdate{Up: false})
 	case feed.ResyncedEvent:
 		c.bars.markGaps() // Task 11: next tick-derived bars carry Gap
+		c.eligiblePrints <- EligiblePrint{Gap: true, RecvTsMs: at.UnixMilli()}
 		c.emit(ResyncedUpdate{})
 	}
 }
@@ -517,6 +525,9 @@ func (c *Core) applyTicks(e feed.TicksEvent) {
 	}
 	for _, t := range accepted {
 		tape.append(t)
+		if !e.Seed && t.LastEligible && t.Delivery == feed.DeliveryRealtime && t.Seq > 0 {
+			c.eligiblePrints <- EligiblePrint{Symbol: t.Symbol, Price: t.Price, TsMs: t.TsMs, RecvTsMs: t.RecvTsMs, Seq: t.Seq}
+		}
 	}
 	c.bars.applyTicks(c, accepted) // Task 11 (10s + shadow 1m)
 	touched := make(map[string]bool)

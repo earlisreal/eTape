@@ -2,15 +2,18 @@
 // submit registers the optimistic PendingNew row (keyed by the ack's orderId) and
 // raises the flash/block/unknown-outcome toast. Cancel-all/last are composed from CancelOrder over
 // the working set — the engine's token buckets pace the burst.
-import type { AckMsg, SubmitOrderArgs, ReplaceOrderArgs, VenueID } from "../../wire/contract";
+import type { AckMsg, StopLimitRoutePreview, SubmitOrderArgs, ReplaceOrderArgs, VenueID } from "../../wire/contract";
 import type { ExecStore } from "../../data/ExecStore";
 import type { ToastApi } from "../Toast";
 import type { SoundApi } from "../../sound/SoundEngine";
 import { bareSymbol } from "./orderStatus";
 
-export interface CommandAdapter { sendCommand(name: string, args: unknown): Promise<AckMsg> }
+export interface CommandAdapter {
+  sendCommand(name: string, args: unknown): Promise<AckMsg>;
+  sendQuery?(name: string, args: unknown): Promise<unknown>;
+}
 export interface OrderCommandsDeps { cmd: CommandAdapter; exec: ExecStore; toast: ToastApi; now: () => number; sound?: SoundApi }
-export interface CancelOptions { feedback?: "action" }
+export interface CancelOptions { feedback?: "action"; venue?: VenueID }
 
 type CancelResult =
   | { status: "accepted"; venue: VenueID }
@@ -36,7 +39,34 @@ export class OrderCommands {
   constructor(private readonly d: OrderCommandsDeps) {}
 
   async submit(args: SubmitOrderArgs, flash: string): Promise<void> {
-    const ack = await this.d.cmd.sendCommand("SubmitOrder", args);
+    let request = args;
+    let custody = "";
+    if (args.type === "STOP_LIMIT") {
+      if (!this.d.cmd.sendQuery) {
+        this.d.toast.push({ level: "danger", text: "Stop-limit route preview unavailable — order not sent." });
+        return;
+      }
+      let route: StopLimitRoutePreview;
+      try {
+        route = await this.d.cmd.sendQuery("QueryStopLimitRoute", { tif: args.tif, session: args.session, symbol: args.symbol }) as StopLimitRoutePreview;
+      } catch {
+        this.d.toast.push({ level: "danger", text: "Stop-limit route preview unavailable — order not sent." });
+        return;
+      }
+      if (route?.route !== "ENGINE_HELD" && route?.route !== "NATIVE") {
+        this.d.toast.push({ level: "danger", text: "Stop-limit route preview unavailable — order not sent." });
+        return;
+      }
+      if (args.routeExpected && args.routeExpected !== route.route) {
+        this.d.toast.push({ level: "warn", text: "Stop-limit custody changed — review the order and retry." });
+        return;
+      }
+      request = { ...args, routeExpected: route.route };
+      custody = route.route === "ENGINE_HELD"
+        ? "Held by eTape — no broker protection; venue LIMIT only after trigger"
+        : "broker-native stop-limit";
+    }
+    const ack = await this.d.cmd.sendCommand("SubmitOrder", request);
     if (ack.ambiguous) {
       this.d.toast.push({ level: "warn", text: ambiguousText(args.venue) });
       return;
@@ -47,9 +77,9 @@ export class OrderCommands {
       this.d.sound?.orderRejected();
       return;
     }
-    if (ack.orderId) this.d.exec.addOptimistic({ args, id: ack.orderId, createdMs: this.d.now() });
+    if (ack.orderId) this.d.exec.addOptimistic({ args: request, id: ack.orderId, createdMs: this.d.now() });
     this.d.sound?.orderPlaced(args.side);
-    this.d.toast.push({ level: "info", text: flash });
+    this.d.toast.push({ level: "info", text: custody ? `${flash} · ${custody}` : flash });
   }
 
   async cancel(venue: VenueID, orderId: string): Promise<void> {
@@ -108,12 +138,16 @@ export class OrderCommands {
 
   async cancelLast(symbol?: string, options?: CancelOptions): Promise<void> {
     const action = options?.feedback === "action";
-    const working = this.d.exec.workingOrdersFor(action && symbol === "" ? undefined : symbol);
+    if (action && (!options?.venue || !symbol)) {
+      this.d.toast.push({ level: "info", text: "Cancel Last — choose a Link Group venue and symbol" });
+      return;
+    }
+    const working = this.d.exec.workingOrdersFor(action && symbol === "" ? undefined : symbol, options?.venue);
     if (working.length === 0) {
       if (action) this.d.toast.push({ level: "info", text: "Cancel Last — no working order" });
       return;
     }
-    const last = working.reduce((a, b) => (b.createdMs > a.createdMs ? b : a));
+    const last = working.reduce((a, b) => b.createdMs > a.createdMs || b.createdMs === a.createdMs && b.id > a.id ? b : a);
     if (!action) {
       await this.cancel(last.venue, last.id);
       return;
@@ -128,10 +162,19 @@ export class OrderCommands {
     }
   }
 
-  async cancelAll(scope: "focused" | "everything", symbol?: string, options?: CancelOptions): Promise<void> {
+  async cancelAll(scope: "focused" | "venue" | "everything", symbol?: string, options?: CancelOptions): Promise<void> {
     const action = options?.feedback === "action";
+    if (scope === "venue" && !options?.venue) {
+      if (action) this.d.toast.push({ level: "info", text: "Cancel All — choose a venue" });
+      return;
+    }
+    if (action && scope === "focused" && (!options?.venue || !symbol)) {
+      this.d.toast.push({ level: "info", text: "Cancel All — choose a Link Group venue and symbol" });
+      return;
+    }
     const workingSymbol = action && symbol === "" ? undefined : symbol;
-    const working = this.d.exec.workingOrdersFor(scope === "focused" ? workingSymbol : undefined);
+    const working = this.d.exec.workingOrdersFor(scope === "focused" ? workingSymbol : undefined,
+      scope === "venue" || (scope === "focused" && options?.venue !== undefined) ? options?.venue : undefined);
     if (!action) {
       await Promise.all(working.map((o) => this.cancel(o.venue, o.id)));
       return;
@@ -142,7 +185,8 @@ export class OrderCommands {
     }
     const count = working.length;
     const countText = `${count} order${count === 1 ? "" : "s"}`;
-    const scopeText = scope === "focused" && workingSymbol !== undefined ? `${bareSymbol(workingSymbol)} (${countText})` : countText;
+    const scopeText = scope === "focused" && workingSymbol !== undefined ? `${bareSymbol(workingSymbol)} (${countText})`
+      : scope === "venue" && options?.venue ? `${options.venue} (${countText})` : countText;
     this.d.toast.push({ level: "info", text: `Cancel All requested — ${scopeText}` });
 
     const results = await Promise.all(working.map((o) => this.cancelRequest(o.venue, o.id, true)));

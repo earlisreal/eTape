@@ -213,6 +213,12 @@ func (f *OpenDFeed) emitPush(ctx context.Context, ev feed.Event) {
 
 func (f *OpenDFeed) Release(id string) { f.sub.Release(id) }
 
+// WaitTickerActive waits for OpenD to acknowledge this symbol's ticker
+// subscription. Callers must Ensure a focused ticker demand first.
+func (f *OpenDFeed) WaitTickerActive(ctx context.Context, symbol string) error {
+	return f.sub.WaitActive(ctx, subKey{Symbol: symbol, Sub: feed.SubTicker})
+}
+
 // Run blocks until ctx is done, supervising the pump, state, seed, and
 // subscription-manager goroutines. The caller runs Client.Run separately.
 func (f *OpenDFeed) Run(ctx context.Context) error {

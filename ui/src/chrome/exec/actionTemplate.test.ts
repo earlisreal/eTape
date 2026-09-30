@@ -101,6 +101,28 @@ describe("normalizeOrderConfig", () => {
   it("preserves an in-range extHoursMarketBufferPct", () => {
     expect(normalizeOrderConfig({ activeVenue: "", templates: [], extHoursMarketBufferPct: 2.5 }).extHoursMarketBufferPct).toBe(2.5);
   });
+  it("defaults STOP_LIMIT cushion to zero dollars and removes it from other types", () => {
+    const out = normalizeOrderConfig({
+      activeVenue: "",
+      templates: [
+        { kind: "place", id: "sl", label: "SL", side: "BUY", type: "STOP_LIMIT", tif: "DAY", priceSource: "Last", priceOffset: 0, sizing: { mode: "Shares", shares: 1 } },
+        { kind: "place", id: "lmt", label: "LMT", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Last", priceOffset: 0, sizing: { mode: "Shares", shares: 1 }, limitCushion: 1, chartBinding: "Shift" },
+      ] as OrderConfig["templates"],
+    });
+    expect(out.templates[0]).toMatchObject({ limitCushion: 0, limitCushionUnit: "$" });
+    expect(out.templates[1]).not.toHaveProperty("chartBinding");
+    expect(out.templates[1]).not.toHaveProperty("limitCushion");
+  });
+  it("keeps the first unique STOP_LIMIT chart binding and clears invalid or duplicate bindings", () => {
+    const out = normalizeOrderConfig({
+      activeVenue: "",
+      templates: ["a", "b", "c", "d"].map((id, i) => ({
+        kind: "place", id, label: id, side: "BUY", type: "STOP_LIMIT", tif: "DAY", priceSource: "Last", priceOffset: 0,
+        sizing: { mode: "Shares", shares: 1 }, chartBinding: ["Shift", "Shift", "Meta", "Ctrl+Shift"][i],
+      })) as OrderConfig["templates"],
+    });
+    expect(out.templates.map((t) => t.kind === "place" ? t.chartBinding : undefined)).toEqual(["Shift", undefined, undefined, "Ctrl+Shift"]);
+  });
   it("migrates legacy deck flags into one row and defaults labels off", () => {
     const out = normalizeOrderConfig({
       activeVenue: "",

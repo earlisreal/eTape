@@ -43,3 +43,12 @@ clicks still use the shared `fireTemplate` path with `gateArm: false`; engine
 arm and risk gates remain authoritative. Order configuration changes are
 rebroadcast by key so open workspace windows reload templates, hotkeys, venue,
 and safety preferences together.
+
+Action Templates may carry a dollar or percent Limit Cushion for STOP_LIMIT;
+the final limit is directionally rounded to the venue tick and revalidated by
+Core. An exact one- or two-modifier Chart Order Gesture can bind to one
+STOP_LIMIT template. Hotkeys, Deck, ticket, and chart entry all use the same
+route preview and submit path. Eligible EXTENDED DAY stop-limits in pre/post
+are explicitly shown as held by eTape (no broker protection); only a fresh
+Last-Eligible print submits the linked venue LIMIT child. UI preview is not
+execution authority and cannot silently change the resolved Link Group venue.

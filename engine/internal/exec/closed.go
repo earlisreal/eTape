@@ -48,6 +48,8 @@ func (p *closedOrders) apply(ev Event, seq int64) []ClosedOrder {
 		return p.terminal(e.V, e.OID, e.Ts, StatusExpired, "")
 	case OrderReplaced:
 		return p.replace(e, seq)
+	case OrderActionChanged:
+		p.mutate(e.V, e.OID, e.Ts, func(o *Order) { action := e.Action; o.Action = &action })
 	}
 	return nil
 }
@@ -69,6 +71,11 @@ func (p *closedOrders) terminal(v VenueID, id string, ts int64, status OrderStat
 	}
 	o.Status = status
 	o.UpdatedMs = ts
+	if status == StatusCanceled && o.Action != nil && o.Action.Kind == ActionCancel && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+		a := *o.Action
+		a.Phase, a.Reason = ActionConfirmed, ""
+		o.Action = &a
+	}
 	if reason != "" {
 		o.RejectReason = reason
 	}
@@ -106,6 +113,11 @@ func (p *closedOrders) replace(e OrderReplaced, seq int64) []ClosedOrder {
 	old := o
 	old.Status = StatusReplaced
 	old.UpdatedMs = e.Ts
+	if old.Action != nil && old.Action.Kind == ActionReplace && (old.Action.Phase == ActionRequested || old.Action.Phase == ActionUnknown) {
+		a := *old.Action
+		a.Phase, a.Reason = ActionConfirmed, ""
+		old.Action = &a
+	}
 	rowID := fmt.Sprintf("%s#replace-%d", old.ID, seq)
 	if seq <= 0 {
 		p.replacementSerial++
@@ -120,6 +132,11 @@ func (p *closedOrders) replace(e OrderReplaced, seq int64) []ClosedOrder {
 	}
 	if e.NewStop > 0 {
 		o.StopPrice = e.NewStop
+	}
+	if o.Action != nil && o.Action.Kind == ActionReplace && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+		a := *o.Action
+		a.Phase, a.Reason = ActionConfirmed, ""
+		o.Action = &a
 	}
 	o.LeavesQty = o.Qty - o.ExecutedQty
 	o.Status = StatusAccepted

@@ -21,6 +21,9 @@ import { isIntradayTimeframe, latestEligibleCountdownBar } from "../../render/ch
 import { formatPrice, quoteDecimals } from "../../render/format";
 import type { Palette } from "../../render/palette";
 import { useTheme } from "../ThemeProvider";
+import { useOptionalOrderConfig } from "../exec/useOrderConfig";
+import { ChartOrderMarkers } from "./tv/ChartOrderMarkers";
+import { ChartStopLimitEntry } from "./tv/ChartStopLimitEntry";
 import { DEFAULT_RECT_FILL_OPACITY, type Drawing } from "../../render/chart/drawings/model";
 import type { LineStyleName } from "../../render/chart/lineStyle";
 import { getTvPalette, getTvChrome } from "../../render/chart/tvTheme";
@@ -153,6 +156,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const palette = getTvPalette(mode);
   const chrome = getTvChrome(mode);
   const headerSlot = useContext(PanelHeaderSlotContext);
+  const orderConfig = useOptionalOrderConfig();
+  const execSnapshot = useSyncExternalStore((cb) => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
   const symbol = symbolProp ?? (typeof config.settings.symbol === "string" ? config.settings.symbol : "");
   const timeframe0 = (config.settings.timeframe as string) ?? "1m";
   const chartType0 = (config.settings.chartType as ChartType) ?? "candle";
@@ -235,6 +240,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const crosshairLogicalRef = useRef<number | null>(null);
   const refreshSelRef = useRef<() => void>(() => {});
   const facadeRef = useRef<ChartApiFacade | null>(null);
+  const orderMarkerLayoutRef = useRef<() => void>(() => {});
+  const orderChooserOpenRef = useRef(false);
   const drawingsPrimRef = useRef<DrawingsPrimitive | null>(null);
   const visibleExtremaPrimRef = useRef<VisibleExtremaPrimitive | null>(null);
   const refreshExtremaRef = useRef<() => void>(() => {});
@@ -774,6 +781,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         const next = candidate && y != null && Number.isFinite(y) ? { y, up: candidate.c >= candidate.o, price: candidate.c } : null;
         setLastPriceTag((prev) =>
           prev === next || (prev && next && prev.y === next.y && prev.up === next.up && prev.price === next.price) ? prev : next);
+        orderMarkerLayoutRef.current();
       },
     });
 
@@ -1120,6 +1128,12 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
             <BarCloseTimer now={stores.marketClock.nowMs} chrome={chrome} timeframe={timeframe} price={formatPrice(lastPriceTag.price, quoteDecimals(lastPriceTag.price))} lastPriceY={lastPriceTag.y}
               rightAxisWidth={rightAxisWidth} paneBottom={paneOffsets[1] ?? height} up={lastPriceTag.up} />
           )}
+          <ChartOrderMarkers orders={execSnapshot.orders.values()} venue={linkGroups.venueFor(group) ?? ""} symbol={chartSymbol}
+            pinned={group === null} sendCommand={commands.sendCommand} hostRef={hostRef} facadeRef={facadeRef}
+            rightAxisWidth={rightAxisWidth} layoutRef={orderMarkerLayoutRef} chooserOpenRef={orderChooserOpenRef} />
+          <ChartStopLimitEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
+            symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={activeTool} chooserOpenRef={orderChooserOpenRef}
+            sendCommand={commands.sendCommand} sendQuery={commands.sendQuery} />
           {selection && (
             <TVFloatingToolbar key={selection.id} chrome={chrome} kind={selection.kind} rect={selection.rect} color={selection.color} width={selection.width} lineStyle={selection.lineStyle}
               fill={selection.fill} fillColor={selection.fillColor} fillOpacity={selection.fillOpacity}

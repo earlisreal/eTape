@@ -114,21 +114,21 @@ describe("fireTemplate — management templates", () => {
     const oc = makeOc();
     const toast = makeToast();
     fireTemplate(manage("CancelLast"), baseCtx({ armed: false, symbol: "US.AAPL" }), oc, toast, { gateArm: true });
-    expect(oc.cancelLast).toHaveBeenCalledWith("US.AAPL", { feedback: "action" });
+    expect(oc.cancelLast).toHaveBeenCalledWith("US.AAPL", { feedback: "action", venue: "alpaca-paper" });
   });
 
   it("CancelLast passes undefined for an empty symbol and opts into action feedback", () => {
     const oc = makeOc();
     const toast = makeToast();
     fireTemplate(manage("CancelLast"), baseCtx({ symbol: "" }), oc, toast, { gateArm: true });
-    expect(oc.cancelLast).toHaveBeenCalledWith(undefined, { feedback: "action" });
+    expect(oc.cancelLast).toHaveBeenCalledWith(undefined, { feedback: "action", venue: "alpaca-paper" });
   });
 
   it("CancelAllFocused opts into action feedback, even when disarmed", () => {
     const oc = makeOc();
     const toast = makeToast();
     fireTemplate(manage("CancelAllFocused"), baseCtx({ armed: false, symbol: "US.AAPL" }), oc, toast, { gateArm: true });
-    expect(oc.cancelAll).toHaveBeenCalledWith("focused", "US.AAPL", { feedback: "action" });
+    expect(oc.cancelAll).toHaveBeenCalledWith("focused", "US.AAPL", { feedback: "action", venue: "alpaca-paper" });
   });
 
   it("CancelAllEverything opts into action feedback, even when disarmed", () => {

@@ -22,12 +22,17 @@ type StatusUpdate struct {
 	MasterArmed bool
 	Note        string
 }
+type HeldStopLimitAckUpdate struct {
+	Venue        VenueID
+	Acknowledged bool
+}
 type TradeUpdate struct{ Trade ClosedTrade }
 
-func (OrderUpdate) isExecUpdate()       {}
-func (ClosedOrderUpdate) isExecUpdate() {}
-func (FillUpdate) isExecUpdate()        {}
-func (AccountUpdate) isExecUpdate()     {}
-func (PositionUpdate) isExecUpdate()    {}
-func (StatusUpdate) isExecUpdate()      {}
-func (TradeUpdate) isExecUpdate()       {}
+func (OrderUpdate) isExecUpdate()            {}
+func (ClosedOrderUpdate) isExecUpdate()      {}
+func (FillUpdate) isExecUpdate()             {}
+func (AccountUpdate) isExecUpdate()          {}
+func (PositionUpdate) isExecUpdate()         {}
+func (StatusUpdate) isExecUpdate()           {}
+func (HeldStopLimitAckUpdate) isExecUpdate() {}
+func (TradeUpdate) isExecUpdate()            {}

@@ -22,7 +22,7 @@ import type { ToastApi } from "../Toast";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 import type { SizingSpec, SizingMode } from "./sizing";
 import {
-  DEFAULT_TEMPLATES, normalizeOrderConfig, type ActionTemplate, type DeckColor, type ManagementAction,
+  CHART_BINDINGS, DEFAULT_TEMPLATES, normalizeOrderConfig, type ActionTemplate, type ChartBinding, type DeckColor, type ManagementAction,
   type HotkeyDeckConfig, type OrderConfig, type PlaceOrderTemplate,
 } from "./actionTemplate";
 import { normalizeCombo } from "./hotkeys";
@@ -40,6 +40,7 @@ const MODE_LABEL: Record<SizingMode, string> = { Dollar: "Dollar", CashPct: "Cas
 const MANAGE_ACTIONS: ManagementAction[] = ["CancelLast", "CancelAllFocused", "CancelAllEverything", "KillSwitch"];
 
 const OFFSET_STEP = 0.05;
+const CUSHION_STEP = 0.05;
 const SIZE_STEP: Record<SizingMode, number> = { Dollar: 100, CashPct: 1, BuyingPowerPct: 1, Shares: 1, PositionFraction: 1 };
 // Percent-based modes have a natural 100% ceiling; Dollar and Shares are
 // unbounded above.
@@ -50,6 +51,9 @@ const isPercentMode = (m: SizingMode): boolean => m === "CashPct" || m === "Buyi
 // land on 0.09999999999999999 in double precision).
 function round2(n: number): number {
   return Math.round(n * 100) / 100;
+}
+function round4(n: number): number {
+  return Math.round(n * 10000) / 10000;
 }
 function clampNum(n: number, min: number, max?: number): number {
   const v = Math.max(min, n);
@@ -245,12 +249,14 @@ interface TemplateCardProps {
   t: ActionTemplate;
   palette: Palette;
   dup: boolean;
+  chartBindingDup: boolean;
   isFirst: boolean;
   isLast: boolean;
   rawEdits: Record<string, string>;
   setRawEdit: (key: string, v: string) => void;
   clearRawEdit: (key: string) => void;
   patch: (id: string, over: Partial<ActionTemplate>) => void;
+  clearChartBinding: (id: string) => void;
   isPlaced: boolean;
   onToggleDeck: (id: string, placed: boolean) => void;
   onRemove: (id: string) => void;
@@ -261,7 +267,7 @@ interface TemplateCardProps {
 // across renders — a component defined inside another component's body gets a
 // fresh type every render, forcing React to unmount+remount every card (and
 // drop input focus) on each keystroke.
-function TemplateCard({ t, palette, dup, isFirst, isLast, rawEdits, setRawEdit, clearRawEdit, patch, isPlaced, onToggleDeck, onRemove, onMove }: TemplateCardProps): JSX.Element {
+function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEdits, setRawEdit, clearRawEdit, patch, clearChartBinding, isPlaced, onToggleDeck, onRemove, onMove }: TemplateCardProps): JSX.Element {
   const card: CSSProperties = { border: `1px solid ${palette.border}`, borderRadius: 6, background: palette.surface, padding: "8px 10px 10px", marginBottom: 8 };
   const eyebrow: CSSProperties = { fontSize: 9.5, letterSpacing: "0.08em", textTransform: "uppercase", color: palette.textMuted, marginBottom: 4 };
   const headerRow: CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 };
@@ -330,7 +336,13 @@ function TemplateCard({ t, palette, dup, isFirst, isLast, rawEdits, setRawEdit, 
             </div>
             <div style={fieldGroup}>
               <span style={fieldLabel}>Type</span>
-              <select aria-label={`type-${t.id}`} className="field" value={t.type} onChange={(e) => patch(t.id, { type: e.target.value as OrderType })} style={{ width: 108 }}>
+              <select aria-label={`type-${t.id}`} className="field" value={t.type} onChange={(e) => {
+                const type = e.target.value as OrderType;
+                if (type !== "STOP_LIMIT") clearRawEdit(`${t.id}:cushion`);
+                patch(t.id, type === "STOP_LIMIT"
+                  ? { type, limitCushion: t.limitCushion ?? 0, limitCushionUnit: t.limitCushionUnit ?? "$" }
+                  : { type });
+              }} style={{ width: 108 }}>
                 {TYPES.map((x) => <option key={x}>{x}</option>)}
               </select>
             </div>
@@ -347,6 +359,49 @@ function TemplateCard({ t, palette, dup, isFirst, isLast, rawEdits, setRawEdit, 
               </select>
             </div>
           </div>
+
+          {t.type === "STOP_LIMIT" ? (
+            <div style={fieldRow}>
+              <div style={fieldGroup}>
+                <span style={fieldLabel}>Limit cushion</span>
+                <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+                  <StepField
+                    ariaLabel={`limit-cushion-${t.id}`}
+                    testid={`limit-cushion-${t.id}`}
+                    value={rawEdits[`${t.id}:cushion`] ?? String(t.limitCushion ?? 0)}
+                    onType={(v) => {
+                      setRawEdit(`${t.id}:cushion`, v);
+                      const n = Number(v);
+                      if (!Number.isNaN(n)) patch(t.id, { limitCushion: Math.max(0, n) });
+                    }}
+                    onStep={(dir) => {
+                      patch(t.id, { limitCushion: round4(Math.max(0, (t.limitCushion ?? 0) + dir * CUSHION_STEP)) });
+                      clearRawEdit(`${t.id}:cushion`);
+                    }}
+                    onBlur={() => {
+                      clearRawEdit(`${t.id}:cushion`);
+                      patch(t.id, { limitCushion: Math.max(0, t.limitCushion ?? 0) });
+                    }}
+                    style={{ width: 92 }}
+                  />
+                  <select aria-label={`limit-cushion-unit-${t.id}`} className="field" value={t.limitCushionUnit ?? "$"} onChange={(e) => patch(t.id, { limitCushionUnit: e.target.value as PriceOffsetUnit })} style={{ width: 44 }}>
+                    <option value="$">$</option><option value="%">%</option>
+                  </select>
+                </div>
+              </div>
+              <div style={fieldGroup}>
+                <span style={fieldLabel}>Chart gesture</span>
+                <select aria-label={`chart-binding-${t.id}`} className="field" value={t.chartBinding ?? ""} onChange={(e) => {
+                  const binding = e.target.value as ChartBinding | "";
+                  if (binding) patch(t.id, { chartBinding: binding }); else clearChartBinding(t.id);
+                }} style={{ width: 132, borderColor: chartBindingDup ? palette.danger : palette.border }}>
+                  <option value="">Unbound</option>
+                  {CHART_BINDINGS.map((binding) => <option key={binding} value={binding}>{binding}+Click</option>)}
+                </select>
+                {chartBindingDup ? <span style={{ color: palette.danger, fontSize: 10 }}>duplicate chart binding</span> : null}
+              </div>
+            </div>
+          ) : null}
 
           <div style={fieldRow}>
             <div style={fieldGroup}>
@@ -509,7 +564,24 @@ export function OrderSettingsSection({ config, onSave, toast, onClose }: {
   });
 
   const patch = (id: string, over: Partial<ActionTemplate>) =>
-    setTemplates((ts) => ts.map((t) => (t.id === id ? ({ ...t, ...over } as ActionTemplate) : t)));
+    setTemplates((ts) => ts.map((t) => {
+      if (t.id !== id) return t;
+      const next = { ...t, ...over } as ActionTemplate;
+      if (next.kind === "place" && next.type !== "STOP_LIMIT") {
+        const withoutStopLimitFields = { ...next };
+        delete withoutStopLimitFields.chartBinding;
+        delete withoutStopLimitFields.limitCushion;
+        delete withoutStopLimitFields.limitCushionUnit;
+        return withoutStopLimitFields;
+      }
+      return next;
+    }));
+  const clearChartBinding = (id: string) => setTemplates((ts) => ts.map((t) => {
+    if (t.id !== id || t.kind !== "place") return t;
+    const withoutBinding = { ...t };
+    delete withoutBinding.chartBinding;
+    return withoutBinding;
+  }));
   // Removing a row must also drop its rawEdits entries. uid() below is
   // deterministic in templates.length alone, so an add-then-remove that
   // returns the array to a prior length reuses the exact same id on the
@@ -522,6 +594,7 @@ export function OrderSettingsSection({ config, onSave, toast, onClose }: {
     setDeck((d) => ({ ...d, rows: removeDeckPlacement(d.rows, id) }));
     clearRawEdit(`${id}:offset`);
     clearRawEdit(`${id}:size`);
+    clearRawEdit(`${id}:cushion`);
   };
   // Reorder (4a): swap two adjacent templates by id. Bounds-checked so the
   // move buttons are simple no-ops (never throw) if somehow clicked past the
@@ -570,7 +643,9 @@ export function OrderSettingsSection({ config, onSave, toast, onClose }: {
   const combos = templates.map((t) => t.hotkey ?? "").filter((c) => c !== "");
   const dupes = new Set(combos.filter((c, i) => combos.indexOf(c) !== i));
   const isDup = (t: ActionTemplate) => !!t.hotkey && dupes.has(t.hotkey);
-  const hasConflict = dupes.size > 0;
+  const chartBindings = places.map((t) => t.chartBinding ?? "").filter(Boolean);
+  const duplicateChartBindings = new Set(chartBindings.filter((binding, i) => chartBindings.indexOf(binding) !== i));
+  const hasConflict = dupes.size > 0 || duplicateChartBindings.size > 0;
   const manages = templates.filter((t) => t.kind === "manage");
 
   const sectionLabel: CSSProperties = { color: palette.textMuted, fontSize: 10, letterSpacing: 0.4, margin: "2px 0 6px" };
@@ -603,9 +678,10 @@ export function OrderSettingsSection({ config, onSave, toast, onClose }: {
       {templates.map((t, i) => (
         <TemplateCard
           key={t.id} t={t} palette={palette} dup={isDup(t)}
+          chartBindingDup={t.kind === "place" && !!t.chartBinding && duplicateChartBindings.has(t.chartBinding)}
           isFirst={i === 0} isLast={i === templates.length - 1}
           rawEdits={rawEdits} setRawEdit={setRawEdit} clearRawEdit={clearRawEdit}
-          patch={patch} isPlaced={isPlaced(t.id)} onToggleDeck={toggleDeck}
+          patch={patch} clearChartBinding={clearChartBinding} isPlaced={isPlaced(t.id)} onToggleDeck={toggleDeck}
           onRemove={removeTemplate} onMove={moveTemplate}
         />
       ))}

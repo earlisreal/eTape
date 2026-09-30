@@ -13,6 +13,10 @@ interface Cmd { sendCommand(name: string, args: unknown): Promise<AckMsg> }
 export interface OrderConfigApi { config: OrderConfig; loaded: boolean; save(next: OrderConfig): void; setActiveVenue(v: VenueID): void }
 
 const Ctx = createContext<OrderConfigApi | null>(null);
+const EMPTY_ORDER_CONFIG: OrderConfigApi = {
+  config: normalizeOrderConfig(DEFAULT_ORDER_CONFIG), loaded: false,
+  save: () => {}, setActiveVenue: () => {},
+};
 
 export function OrderConfigProvider({ commands, children }: { commands: Cmd; children: ReactNode }): JSX.Element {
   const [config, setConfig] = useState<OrderConfig>(() => normalizeOrderConfig(DEFAULT_ORDER_CONFIG));
@@ -59,4 +63,10 @@ export function useOrderConfig(): OrderConfigApi {
   const ctx = useContext(Ctx);
   if (!ctx) throw new Error("useOrderConfig must be used within an OrderConfigProvider");
   return ctx;
+}
+
+// Optional form for panels which are also mounted in isolation in tests or
+// lightweight embeds. The application provider remains the sole config owner.
+export function useOptionalOrderConfig(): OrderConfigApi {
+  return useContext(Ctx) ?? EMPTY_ORDER_CONFIG;
 }

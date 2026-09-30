@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   SETTINGS_EXPORT_VERSION, buildExport, parseImport,
-  prepareImportedWorkspace, prepareImportedOrderConfig, detectHotkeyConflicts, isCurrentLayout, isPresentLayout,
+  prepareImportedWorkspace, prepareImportedOrderConfig, detectHotkeyConflicts, detectChartBindingConflicts, isCurrentLayout, isPresentLayout,
   collectPanelIds, orderedPanelIds, reconcileToGrid, applyPanelConstraintsToLayout, structuralWorkspace,
 } from "./backup";
 import type { Workspace } from "./workspace";
@@ -190,6 +190,17 @@ describe("backup: prepareImportedOrderConfig", () => {
     const result = prepareImportedOrderConfig(imported, current);
     const sizing = result.templates[0].kind === "place" ? result.templates[0].sizing : null;
     expect(sizing).toMatchObject({ mode: "PositionFraction", pct: 50 });
+  });
+});
+
+describe("chart binding conflicts", () => {
+  it("reports duplicate normalized bindings only for STOP_LIMIT templates", () => {
+    const templates: ActionTemplate[] = [
+      { kind: "place", id: "a", label: "A", side: "BUY", type: "STOP_LIMIT", tif: "DAY", priceSource: "Last", priceOffset: 0, sizing: { mode: "Shares", shares: 1 }, chartBinding: "Shift" },
+      { kind: "place", id: "b", label: "B", side: "SELL", type: "STOP_LIMIT", tif: "DAY", priceSource: "Last", priceOffset: 0, sizing: { mode: "Shares", shares: 1 }, chartBinding: "Shift" },
+      { kind: "place", id: "c", label: "C", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Last", priceOffset: 0, sizing: { mode: "Shares", shares: 1 }, chartBinding: "Shift" } as ActionTemplate,
+    ];
+    expect(detectChartBindingConflicts(templates)).toEqual(["Shift"]);
   });
 });
 

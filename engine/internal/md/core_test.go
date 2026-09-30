@@ -216,6 +216,40 @@ func TestDropStatsDistinguishesInboxAndUpdates(t *testing.T) {
 	}
 }
 
+func TestTickInboxOverflowTimestampsGapAheadOfQueuedPrints(t *testing.T) {
+	at := time.UnixMilli(t0Ms)
+	c := New(Config{Clock: clock.NewFake(at)})
+	queued := tick(1, 0, 100, 1, feed.Buy)
+	queued.RecvTsMs, queued.Delivery = at.Add(-time.Millisecond).UnixMilli(), feed.DeliveryRealtime
+	c.Feed(feed.TicksEvent{Ticks: []feed.Tick{queued}})
+	for len(c.inbox) < cap(c.inbox) {
+		c.inbox <- eventMsg{ev: feed.ConnUpEvent{}, at: at}
+	}
+	c.Feed(feed.TicksEvent{Ticks: []feed.Tick{tick(2, 1, 101, 1, feed.Buy)}})
+	gap := <-c.EligiblePrints()
+	if !gap.Gap || gap.RecvTsMs != at.UnixMilli() {
+		t.Fatalf("overflow gap = %+v, want timestamped gap at %d", gap, at.UnixMilli())
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); _ = c.Run(ctx) }()
+	select {
+	case print := <-c.EligiblePrints():
+		if print.Gap || print.RecvTsMs != queued.RecvTsMs || print.RecvTsMs >= gap.RecvTsMs {
+			t.Fatalf("queued pre-gap print = %+v, gap = %+v", print, gap)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("queued print was not delivered")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("market-data core did not stop")
+	}
+}
+
 func TestFeedContextBlocksUntilSeedFitsInbox(t *testing.T) {
 	c := New(Config{})
 	for i := 0; i < cap(c.inbox); i++ {

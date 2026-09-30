@@ -38,6 +38,21 @@ describe("OrderCommands", () => {
     expect(exec.orders().find((v) => v.order.id === "ET7")?.optimistic).toBe(true);
     expect(pushed).toContainEqual({ level: "info", text: "BUY 10 AAPL @ 3.50 LMT" });
   });
+  it("preflights stop-limit custody and makes local protection explicit", async () => {
+    const { sent, cmd, pushed, oc } = fakes({ orderId: "ET-held" });
+    cmd.sendQuery = vi.fn(async () => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "PRE", deadlineMs: 1 }));
+    await oc.submit({ ...args, type: "STOP_LIMIT", session: "EXTENDED", stopPrice: 3.5 }, "BUY 10 AAPL @ 3.50 STP LMT");
+    expect(cmd.sendQuery).toHaveBeenCalledWith("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol: "US.AAPL" });
+    expect(sent[0]).toMatchObject({ name: "SubmitOrder", args: { routeExpected: "ENGINE_HELD", type: "STOP_LIMIT" } });
+    expect(pushed.at(-1)?.text).toContain("Held by eTape — no broker protection");
+  });
+  it("does not submit a stop-limit without a route preview", async () => {
+    const { sent, pushed, oc } = fakes();
+    const unavailable = { ...args, type: "STOP_LIMIT" as const, stopPrice: 3.5 };
+    await oc.submit(unavailable, "flash");
+    expect(sent).toEqual([]);
+    expect(pushed.at(-1)?.text).toBe("Stop-limit route preview unavailable — order not sent.");
+  });
   it("submit blocked → danger toast names the venue, verbatim reason when unmapped, no optimistic row", async () => {
     const { exec, pushed, oc } = fakes({ status: "blocked", reason: "venue disarmed" });
     await oc.submit(args, "flash");
@@ -85,7 +100,7 @@ describe("OrderCommands", () => {
     let resolveAck!: (ack: AckMsg) => void;
     vi.mocked(cmd.sendCommand).mockImplementation(() => new Promise<AckMsg>((resolve) => { resolveAck = resolve; }));
 
-    const pending = oc.cancelLast("US.AAPL", { feedback: "action" });
+    const pending = oc.cancelLast("US.AAPL", { feedback: "action", venue: "alpaca-paper" });
     expect(pushed).toEqual([{ level: "info", text: "Cancel Last requested — AAPL" }]);
 
     resolveAck({ kind: "ack", corrId: "c1", status: "accepted" });
@@ -94,14 +109,14 @@ describe("OrderCommands", () => {
   });
   it("action Cancel Last reports an empty working set without sending", async () => {
     const { sent, pushed, oc } = fakes();
-    await oc.cancelLast("US.AAPL", { feedback: "action" });
+    await oc.cancelLast("US.AAPL", { feedback: "action", venue: "alpaca-paper" });
     expect(sent).toHaveLength(0);
     expect(pushed).toEqual([{ level: "info", text: "Cancel Last — no working order" }]);
   });
   it("action Cancel Last reports blocked and ambiguous outcomes once", async () => {
     const blocked = fakes({ status: "blocked", reason: "master disarmed" });
     blocked.exec.apply(snap([order("ET1")]));
-    await blocked.oc.cancelLast("US.AAPL", { feedback: "action" });
+    await blocked.oc.cancelLast("US.AAPL", { feedback: "action", venue: "alpaca-paper" });
     expect(blocked.pushed).toEqual([
       { level: "info", text: "Cancel Last requested — AAPL" },
       { level: "danger", text: "Cancel failed (alpaca-paper): master disarmed" },
@@ -109,21 +124,21 @@ describe("OrderCommands", () => {
 
     const ambiguous = fakes({ ambiguous: true });
     ambiguous.exec.apply(snap([order("ET2")]));
-    await ambiguous.oc.cancelLast("US.AAPL", { feedback: "action" });
+    await ambiguous.oc.cancelLast("US.AAPL", { feedback: "action", venue: "alpaca-paper" });
     expect(ambiguous.pushed).toEqual([
       { level: "info", text: "Cancel Last requested — AAPL" },
       { level: "warn", text: "Cancel outcome uncertain — AAPL" },
     ]);
   });
-  it("action Cancel Last uses the newest order's display symbol when no symbol is supplied", async () => {
+  it("action Cancel Last refuses to guess a symbol when one is missing", async () => {
     const { sent, exec, pushed, oc } = fakes();
     exec.apply(snap([
       order("ET1", { symbol: "US.AAPL", createdMs: 10 }),
       order("ET2", { symbol: "US.TSLA", createdMs: 20 }),
     ]));
-    await oc.cancelLast("", { feedback: "action" });
-    expect(sent.at(-1)?.args).toEqual({ venue: "alpaca-paper", orderId: "ET2" });
-    expect(pushed[0]).toEqual({ level: "info", text: "Cancel Last requested — TSLA" });
+    await oc.cancelLast("", { feedback: "action", venue: "alpaca-paper" });
+    expect(sent).toHaveLength(0);
+    expect(pushed[0]).toEqual({ level: "info", text: "Cancel Last — choose a Link Group venue and symbol" });
   });
 });
 
@@ -136,18 +151,18 @@ describe("OrderCommands action Cancel All feedback", () => {
 
     const plural = fakes();
     plural.exec.apply(snap([order("ET1", { createdMs: 1 }), order("ET2", { createdMs: 2 })]));
-    await plural.oc.cancelAll("focused", "US.AAPL", { feedback: "action" });
+    await plural.oc.cancelAll("focused", "US.AAPL", { feedback: "action", venue: "alpaca-paper" });
     expect(plural.pushed[0]).toEqual({ level: "info", text: "Cancel All requested — AAPL (2 orders)" });
     plural.pushed.length = 0;
     await plural.oc.cancelAll("everything", undefined, { feedback: "action" });
     expect(plural.pushed[0]).toEqual({ level: "info", text: "Cancel All requested — 2 orders" });
     plural.pushed.length = 0;
-    await plural.oc.cancelAll("focused", "", { feedback: "action" });
-    expect(plural.pushed[0]).toEqual({ level: "info", text: "Cancel All requested — 2 orders" });
+    await plural.oc.cancelAll("focused", "", { feedback: "action", venue: "alpaca-paper" });
+    expect(plural.pushed[0]).toEqual({ level: "info", text: "Cancel All — choose a Link Group venue and symbol" });
 
     const singular = fakes();
     singular.exec.apply(snap([order("ET3")]));
-    await singular.oc.cancelAll("focused", "US.AAPL", { feedback: "action" });
+    await singular.oc.cancelAll("focused", "US.AAPL", { feedback: "action", venue: "alpaca-paper" });
     expect(singular.pushed[0]).toEqual({ level: "info", text: "Cancel All requested — AAPL (1 order)" });
   });
   it("freezes the target count before requests complete", async () => {

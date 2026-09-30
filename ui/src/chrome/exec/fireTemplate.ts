@@ -53,8 +53,8 @@ export function fireTemplate(
 
   // management — fires regardless of armed state (closing exposure is never gated)
   switch (t.action) {
-    case "CancelLast": void oc.cancelLast(ctx.symbol || undefined, { feedback: "action" }); break;
-    case "CancelAllFocused": void oc.cancelAll("focused", ctx.symbol || undefined, { feedback: "action" }); break;
+    case "CancelLast": void oc.cancelLast(ctx.symbol || undefined, { feedback: "action", venue: ctx.venue }); break;
+    case "CancelAllFocused": void oc.cancelAll("focused", ctx.symbol || undefined, { feedback: "action", venue: ctx.venue }); break;
     case "CancelAllEverything": void oc.cancelAll("everything", undefined, { feedback: "action" }); break;
     case "KillSwitch": void oc.kill(); break;
   }

@@ -84,60 +84,82 @@ type OrderReplaced struct {
 	NewStop  float64
 	Ts       int64
 }
+type HeldOrderChanged struct {
+	V    VenueID
+	OID  string
+	Held HeldOrder
+	Ts   int64
+}
+type OrderActionChanged struct {
+	V      VenueID
+	OID    string
+	Action OrderAction
+	Ts     int64
+}
 type StreamGap struct {
 	V  VenueID
 	Ts int64
 }
 
-func (OrderSubmitted) isExecEvent() {}
-func (OrderAccepted) isExecEvent()  {}
-func (OrderRejected) isExecEvent()  {}
-func (OrderBlocked) isExecEvent()   {}
-func (OrderFilled) isExecEvent()    {}
-func (OrderCanceled) isExecEvent()  {}
-func (OrderExpired) isExecEvent()   {}
-func (OrderReplaced) isExecEvent()  {}
-func (StreamGap) isExecEvent()      {}
+func (OrderSubmitted) isExecEvent()     {}
+func (OrderAccepted) isExecEvent()      {}
+func (OrderRejected) isExecEvent()      {}
+func (OrderBlocked) isExecEvent()       {}
+func (OrderFilled) isExecEvent()        {}
+func (OrderCanceled) isExecEvent()      {}
+func (OrderExpired) isExecEvent()       {}
+func (OrderReplaced) isExecEvent()      {}
+func (HeldOrderChanged) isExecEvent()   {}
+func (OrderActionChanged) isExecEvent() {}
+func (StreamGap) isExecEvent()          {}
 
-func (OrderSubmitted) Kind() string { return "order_submitted" }
-func (OrderAccepted) Kind() string  { return "order_accepted" }
-func (OrderRejected) Kind() string  { return "order_rejected" }
-func (OrderBlocked) Kind() string   { return "order_blocked" }
-func (OrderFilled) Kind() string    { return "order_filled" }
-func (OrderCanceled) Kind() string  { return "order_canceled" }
-func (OrderExpired) Kind() string   { return "order_expired" }
-func (OrderReplaced) Kind() string  { return "order_replaced" }
-func (StreamGap) Kind() string      { return "stream_gap" }
+func (OrderSubmitted) Kind() string     { return "order_submitted" }
+func (OrderAccepted) Kind() string      { return "order_accepted" }
+func (OrderRejected) Kind() string      { return "order_rejected" }
+func (OrderBlocked) Kind() string       { return "order_blocked" }
+func (OrderFilled) Kind() string        { return "order_filled" }
+func (OrderCanceled) Kind() string      { return "order_canceled" }
+func (OrderExpired) Kind() string       { return "order_expired" }
+func (OrderReplaced) Kind() string      { return "order_replaced" }
+func (HeldOrderChanged) Kind() string   { return "held_order_changed" }
+func (OrderActionChanged) Kind() string { return "order_action_changed" }
+func (StreamGap) Kind() string          { return "stream_gap" }
 
-func (e OrderSubmitted) Venue() VenueID { return e.Order.Venue }
-func (e OrderAccepted) Venue() VenueID  { return e.V }
-func (e OrderRejected) Venue() VenueID  { return e.V }
-func (e OrderBlocked) Venue() VenueID   { return e.V }
-func (e OrderFilled) Venue() VenueID    { return e.F.Venue }
-func (e OrderCanceled) Venue() VenueID  { return e.V }
-func (e OrderExpired) Venue() VenueID   { return e.V }
-func (e OrderReplaced) Venue() VenueID  { return e.V }
-func (e StreamGap) Venue() VenueID      { return e.V }
+func (e OrderSubmitted) Venue() VenueID     { return e.Order.Venue }
+func (e OrderAccepted) Venue() VenueID      { return e.V }
+func (e OrderRejected) Venue() VenueID      { return e.V }
+func (e OrderBlocked) Venue() VenueID       { return e.V }
+func (e OrderFilled) Venue() VenueID        { return e.F.Venue }
+func (e OrderCanceled) Venue() VenueID      { return e.V }
+func (e OrderExpired) Venue() VenueID       { return e.V }
+func (e OrderReplaced) Venue() VenueID      { return e.V }
+func (e HeldOrderChanged) Venue() VenueID   { return e.V }
+func (e OrderActionChanged) Venue() VenueID { return e.V }
+func (e StreamGap) Venue() VenueID          { return e.V }
 
-func (e OrderSubmitted) OrderID() string { return e.Order.ID }
-func (e OrderAccepted) OrderID() string  { return e.OID }
-func (e OrderRejected) OrderID() string  { return e.OID }
-func (e OrderBlocked) OrderID() string   { return e.OID }
-func (e OrderFilled) OrderID() string    { return e.F.OrderID }
-func (e OrderCanceled) OrderID() string  { return e.OID }
-func (e OrderExpired) OrderID() string   { return e.OID }
-func (e OrderReplaced) OrderID() string  { return e.OID }
-func (e StreamGap) OrderID() string      { return "" }
+func (e OrderSubmitted) OrderID() string     { return e.Order.ID }
+func (e OrderAccepted) OrderID() string      { return e.OID }
+func (e OrderRejected) OrderID() string      { return e.OID }
+func (e OrderBlocked) OrderID() string       { return e.OID }
+func (e OrderFilled) OrderID() string        { return e.F.OrderID }
+func (e OrderCanceled) OrderID() string      { return e.OID }
+func (e OrderExpired) OrderID() string       { return e.OID }
+func (e OrderReplaced) OrderID() string      { return e.OID }
+func (e HeldOrderChanged) OrderID() string   { return e.OID }
+func (e OrderActionChanged) OrderID() string { return e.OID }
+func (e StreamGap) OrderID() string          { return "" }
 
-func (e OrderSubmitted) TsMs() int64 { return e.Order.UpdatedMs }
-func (e OrderAccepted) TsMs() int64  { return e.Ts }
-func (e OrderRejected) TsMs() int64  { return e.Ts }
-func (e OrderBlocked) TsMs() int64   { return e.Ts }
-func (e OrderFilled) TsMs() int64    { return e.F.TsMs }
-func (e OrderCanceled) TsMs() int64  { return e.Ts }
-func (e OrderExpired) TsMs() int64   { return e.Ts }
-func (e OrderReplaced) TsMs() int64  { return e.Ts }
-func (e StreamGap) TsMs() int64      { return e.Ts }
+func (e OrderSubmitted) TsMs() int64     { return e.Order.UpdatedMs }
+func (e OrderAccepted) TsMs() int64      { return e.Ts }
+func (e OrderRejected) TsMs() int64      { return e.Ts }
+func (e OrderBlocked) TsMs() int64       { return e.Ts }
+func (e OrderFilled) TsMs() int64        { return e.F.TsMs }
+func (e OrderCanceled) TsMs() int64      { return e.Ts }
+func (e OrderExpired) TsMs() int64       { return e.Ts }
+func (e OrderReplaced) TsMs() int64      { return e.Ts }
+func (e HeldOrderChanged) TsMs() int64   { return e.Ts }
+func (e OrderActionChanged) TsMs() int64 { return e.Ts }
+func (e StreamGap) TsMs() int64          { return e.Ts }
 
 // EncodeEvent serializes an event to its kind + JSON payload (the concrete
 // struct; sealed unions carry no struct tags, matching the feed/md convention).
@@ -196,6 +218,18 @@ func DecodeEvent(kind string, payload []byte) (Event, error) {
 		return v, nil
 	case "order_replaced":
 		var v OrderReplaced
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, fmt.Errorf("exec: decode %s: %w", kind, err)
+		}
+		return v, nil
+	case "held_order_changed":
+		var v HeldOrderChanged
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, fmt.Errorf("exec: decode %s: %w", kind, err)
+		}
+		return v, nil
+	case "order_action_changed":
+		var v OrderActionChanged
 		if err := json.Unmarshal(payload, &v); err != nil {
 			return nil, fmt.Errorf("exec: decode %s: %w", kind, err)
 		}

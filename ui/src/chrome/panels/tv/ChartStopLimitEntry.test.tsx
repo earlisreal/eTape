@@ -1,0 +1,95 @@
+// @vitest-environment jsdom
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { makeStores } from "../../../data/registry";
+import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
+import type { ExecStatus } from "../../../wire/contract";
+import { LinkGroups } from "../../linkGroups";
+import type { OrderConfig } from "../../exec/actionTemplate";
+import { ChartStopLimitEntry } from "./ChartStopLimitEntry";
+
+const config: OrderConfig = {
+  activeVenue:"sim",
+  templates:[{kind:"place", id:"stop", label:"Stop", side:"BUY", type:"STOP_LIMIT", tif:"DAY", session:"EXTENDED",
+    priceSource:"Last", priceOffset:0, limitCushion:0, limitCushionUnit:"$", chartBinding:"Shift", sizing:{mode:"Shares", shares:1}}],
+};
+const route = {route:"ENGINE_HELD", effectiveSession:"EXTENDED", deadlineMs:1_800_000_000_000, phase:"PRE",
+  hasTrustedEligiblePrint:true, lastEligiblePrice:101} as const;
+
+function mount(env:"paper"|"live" = "paper") {
+  const stores = makeStores();
+  const status: ExecStatus = {masterArmed:true, global:{maxDayLoss:0,maxSymbolPositionValue:0,maxSymbolPositionShares:0}, venues:[{
+    venue:"sim", broker:env === "paper" ? "sim" : "alpaca", env, connected:true, reconcilePending:false, note:"", lastReconcileMs:null,
+    gate:{maxOrderValue:10000,maxPositionValue:10000,maxPositionShares:100,maxOpenOrders:10}, heldStopLimitAcknowledged:false,
+  }]};
+  stores.exec.apply({kind:"snapshot",topic:"exec.status",payload:status});
+  stores.exec.apply({kind:"snapshot",topic:"exec.account",key:"sim",payload:{venue:"sim",equity:10000,buyingPower:10000,availableCash:10000,sodEquity:10000,realized:0,dayPnl:0,leverage:1,tsMs:1,cycleStartMs:0,cycleRealized:0}});
+  const linkGroups = new LinkGroups({post:() => {}, onMessage:() => () => {}, close:() => {}}, () => {});
+  linkGroups.focusVenue("green", "sim");
+  const host = document.createElement("div");
+  host.getBoundingClientRect = () => ({x:0,y:0,top:0,left:0,right:500,bottom:400,width:500,height:400,toJSON:() => ({})});
+  document.body.append(host);
+  const hostRef = {current:host};
+  const facadeRef = {current:{priceScaleWidth:() => 60, paneHeights:() => [400], coordinateToPrice:(y:number) => 120-y/10,
+    priceToCoordinate:(price:number) => (120-price)*10} as ChartApiFacade};
+  const chooserOpenRef = {current:false};
+  const sendCommand = vi.fn(async (name:string) => ({kind:"ack" as const,corrId:"c1",status:"accepted" as const, ...(name === "SubmitOrder" ? {orderId:"ET1"} : {})}));
+  const sendQuery = vi.fn(async () => route);
+  const utils = render(<ChartStopLimitEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups}
+    group="green" symbol="US.AAPL" config={config} configLoaded activeTool="select" chooserOpenRef={chooserOpenRef}
+    sendCommand={sendCommand} sendQuery={sendQuery} />, {container:host});
+  return { ...utils, host, stores, sendCommand, sendQuery };
+}
+
+function focusChart(): void { vi.spyOn(document, "hasFocus").mockReturnValue(true); }
+function moveToChart(host:HTMLElement, shiftKey = true, ctrlKey = false): void {
+  fireEvent.pointerMove(host, {pointerId:1,button:0,clientX:100,clientY:200,shiftKey,ctrlKey});
+}
+async function placeClick(host:HTMLElement): Promise<void> {
+  fireEvent.pointerDown(host, {pointerId:1,button:0,clientX:100,clientY:200,shiftKey:true});
+  fireEvent.pointerUp(window, {pointerId:1,button:0,clientX:101,clientY:201,shiftKey:true});
+}
+
+beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.restoreAllMocks();
+  vi.stubGlobal("requestAnimationFrame", (cb:FrameRequestCallback) => {cb(0);return 0;});
+  vi.stubGlobal("cancelAnimationFrame", () => {});
+});
+
+describe("ChartStopLimitEntry", () => {
+  it("uses exact Shift+click as the stop trigger and submits the previewed route snapshot", async () => {
+    focusChart();
+    const {host,sendCommand,sendQuery} = mount();
+    moveToChart(host);
+    await waitFor(() => expect(sendQuery).toHaveBeenCalledWith("QueryStopLimitRoute", {tif:"DAY",session:"EXTENDED",symbol:"US.AAPL"}));
+    await waitFor(() => expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("WILL TRIGGER NOW"));
+    await placeClick(host);
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitOrder", expect.objectContaining({
+      venue:"sim",symbol:"US.AAPL",type:"STOP_LIMIT",stopPrice:100,limitPrice:100,qty:1,routeExpected:"ENGINE_HELD",
+    })));
+  });
+
+  it("does not submit when extra modifiers are held", async () => {
+    focusChart();
+    const {host,sendCommand,sendQuery} = mount();
+    moveToChart(host);
+    await waitFor(() => expect(sendQuery).toHaveBeenCalled());
+    fireEvent.pointerDown(host, {pointerId:1,button:0,clientX:100,clientY:200,shiftKey:true,ctrlKey:true});
+    fireEvent.pointerUp(window, {pointerId:1,button:0,clientX:100,clientY:200,shiftKey:true,ctrlKey:true});
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitOrder", expect.anything());
+  });
+
+  it("requires the live custody disclosure and does not auto-submit after acknowledgement", async () => {
+    focusChart();
+    const {host,sendCommand,sendQuery,stores} = mount("live");
+    moveToChart(host);
+    await waitFor(() => expect(sendQuery).toHaveBeenCalled());
+    await placeClick(host);
+    const disclosure = await screen.findByRole("dialog", {name:"Live engine-held stop-limit disclosure"});
+    expect(disclosure.textContent).toContain("no broker protection");
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitOrder", expect.anything());
+    fireEvent.click(screen.getByRole("button", {name:"I understand — enable"}));
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("AcknowledgeHeldStopLimit", {venue:"sim"}));
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitOrder", expect.anything());
+    stores.exec.apply({kind:"delta",topic:"exec.status",payload:{...stores.exec.status()!,venues:[{...stores.exec.status()!.venues[0],heldStopLimitAcknowledged:true}]}});
+  });
+});

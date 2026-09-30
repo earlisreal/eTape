@@ -25,3 +25,12 @@ within-row order, renders each row as a non-wrapping horizontal scroller, and
 omits stale or empty placements. Bound hotkeys appear as Keycap badges only
 when Hotkey Label Visibility is enabled. Deck Buttons remain references to
 the shared Action Template execution path, not a separate action surface.
+
+Grouped charts overlay working LIMITs in yellow and pretrigger STOP_LIMITs in
+cyan, filtered to the chart's exact symbol and venue. Price-axis chips expose
+cancel; dragging the order label modifies price only after release, while
+Escape/right-click cancels the drag. Engine-held stop-limit markers switch to
+the child LIMIT after trigger; paused parents stay visible and require explicit
+Resume. The Order Ticket shows local-vs-native custody and the session deadline
+before submit, including the no-broker-protection disclosure for live local
+custody.

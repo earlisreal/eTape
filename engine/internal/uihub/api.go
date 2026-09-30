@@ -58,11 +58,13 @@ type GlobalLimits struct {
 }
 
 type VenueMeta struct {
-	ID     string
-	Broker string
-	Env    string
-	Note   string
-	Gate   GateLimits
+	ID                        string
+	Broker                    string
+	Env                       string
+	Note                      string
+	HeldStopLimitIdentity     string
+	HeldStopLimitAcknowledged bool
+	Gate                      GateLimits
 }
 
 type Config struct {
@@ -87,7 +89,8 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 		vms = append(vms, venueMeta{
 			ID: v.ID, Env: v.Env,
 			Broker: wsmsg.Broker(v.Broker),
-			Note:   v.Note,
+			Note:   v.Note, HeldStopLimitIdentity: v.HeldStopLimitIdentity,
+			HeldStopLimitAcknowledged: v.HeldStopLimitAcknowledged,
 			Gate: wsmsg.GateLimitsView{
 				MaxOrderValue: v.Gate.MaxOrderValue, MaxPositionValue: v.Gate.MaxPositionValue,
 				MaxPositionShares: v.Gate.MaxPositionShares, MaxOpenOrders: v.Gate.MaxOpenOrders,
@@ -112,6 +115,7 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	}
 	cmd := newCommands(ex, st, h, h, va, h.feed, vt, locateRegistry)
 	cmd.setAccountDemandRegistry(cfg.AccountDemand)
+	cmd.setHeldStopLimitIdentities(vms)
 	cmd.setWindowStateRegistry(newWindowStateRegistry(st))
 	cmd.onConfigSet = cfg.OnConfigSet
 	cmd.focusMain = cfg.FocusMainWorkspace
@@ -119,6 +123,9 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	cmd.restart = requestRestart
 	cmd.startDemo = startDemo
 	qry := newQueries(st, clk, h)
+	if previewer, ok := ex.(eligiblePrintPreviewer); ok {
+		qry.preview = previewer
+	}
 	qry.locates = locateRegistry
 	qry.eligibility = cfg.Eligibility
 	srv := NewServer(h, cmd, qry, ServerConfig{DistDir: cfg.DistDir, OutBuf: cfg.OutBuf})

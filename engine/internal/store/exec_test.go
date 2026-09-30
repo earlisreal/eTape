@@ -79,6 +79,26 @@ func TestReadExecOrderHistoriesSinceReturnsCompleteCandidateHistories(t *testing
 	}
 }
 
+func TestReadExecOrderHistoriesForRestoresOnlyRequestedLiveOrders(t *testing.T) {
+	s := openTestStore(t)
+	for _, env := range []exec.EventEnvelope{
+		{TsMs: 10, Source: "local", Venue: "sim", OrderID: "ET1", Kind: "order_submitted", Payload: []byte(`{}`)},
+		{TsMs: 11, Source: "local", Venue: "sim", OrderID: "ET2", Kind: "order_submitted", Payload: []byte(`{}`)},
+		{TsMs: 12, Source: "local", Venue: "sim", OrderID: "ET1", Kind: "order_action_changed", Payload: []byte(`{}`)},
+	} {
+		if _, err := s.AppendExecEvent(env, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.ReadExecOrderHistoriesFor([]string{"ET1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].OrderID != "ET1" || got[1].Kind != "order_action_changed" {
+		t.Fatalf("order history = %+v, want ET1 submit and action events only", got)
+	}
+}
+
 func TestAppendExecEventFillProjection(t *testing.T) {
 	s := openTestStore(t)
 	env := exec.EventEnvelope{TsMs: 2000, Source: "ws", Venue: "sim-1", OrderID: "ETc", Kind: "order_filled", Payload: []byte(`{}`)}

@@ -44,6 +44,7 @@ export default defineConfig({
             'src/render/chart/ChartController.test.ts',
             'src/render/chart/visibleExtremaPrimitive.test.ts',
             'src/render/chart/chartTheme.test.ts',
+            'src/render/chart/orderMarkers.test.ts',
             'src/render/chart/indicatorSeries.test.ts',
             'src/render/chart/sessions.test.ts',
             'src/render/ladder/ladderState.test.ts',
@@ -58,6 +59,8 @@ export default defineConfig({
           name: 'chart-panel',
           include: [
             'src/chrome/panels/ChartPanel.test.tsx', 'src/chrome/panels/tv/BarCloseTimer.test.tsx',
+            'src/chrome/panels/tv/ChartOrderMarkers.test.tsx',
+            'src/chrome/panels/tv/ChartStopLimitEntry.test.tsx',
             'src/chrome/panels/tv/ChartHeaderControls.test.tsx', 'src/chrome/panels/tv/ChartSettingsDialog.test.tsx',
             'src/chrome/panels/tv/IndicatorPickerPopover.test.tsx', 'src/chrome/panels/tv/IndicatorSettingsDialog.test.tsx',
             'src/chrome/panels/tv/TVLegend.test.tsx',
@@ -82,7 +85,12 @@ export default defineConfig({
         extends: true,
         test: {
           name: 'exec',
-          include: ['src/chrome/exec/commands.test.ts', 'src/chrome/exec/fireTemplate.test.ts', 'src/chrome/exec/useHotkeys.test.tsx'],
+          include: [
+            'src/chrome/exec/actionTemplate.test.ts', 'src/chrome/exec/commands.test.ts',
+            'src/chrome/exec/fireTemplate.test.ts', 'src/chrome/exec/OrderSettingsSection.test.tsx',
+            'src/chrome/exec/resolveTemplate.test.ts', 'src/chrome/exec/useHotkeys.test.tsx',
+            'src/chrome/exec/resolveChartStopLimit.test.ts',
+          ],
         },
       },
       {

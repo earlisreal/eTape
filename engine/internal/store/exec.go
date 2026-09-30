@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"strings"
 
 	"github.com/earlisreal/eTape/engine/internal/exec"
 )
@@ -167,6 +168,36 @@ func (s *Store) ReadExecOrderHistoriesSince(fromMs int64) ([]exec.EventEnvelope,
 		FROM exec_events e
 		JOIN touched t ON t.order_id = e.order_id
 		ORDER BY e.seq`, fromMs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []exec.EventEnvelope
+	for rows.Next() {
+		var e exec.EventEnvelope
+		var payload string
+		if err := rows.Scan(&e.Seq, &e.TsMs, &e.Source, &e.Venue, &e.Kind, &e.OrderID, &payload); err != nil {
+			return nil, err
+		}
+		e.Payload = []byte(payload)
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ReadExecOrderHistoriesFor reads full event histories for the supplied live
+// order IDs, so recovery can restore durable action state without replaying the
+// entire event log.
+func (s *Store) ReadExecOrderHistoriesFor(orderIDs []string) ([]exec.EventEnvelope, error) {
+	if len(orderIDs) == 0 {
+		return nil, nil
+	}
+	marks, args := make([]string, len(orderIDs)), make([]any, len(orderIDs))
+	for i, id := range orderIDs {
+		marks[i], args[i] = "?", id
+	}
+	rows, err := s.db.Query(`SELECT seq, ts, source, venue, type, order_id, payload
+		FROM exec_events WHERE order_id IN (`+strings.Join(marks, ",")+") ORDER BY seq", args...)
 	if err != nil {
 		return nil, err
 	}

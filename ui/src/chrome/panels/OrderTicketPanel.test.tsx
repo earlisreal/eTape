@@ -80,6 +80,21 @@ describe("OrderTicketPanel", () => {
     const args = sent.find((s) => s.name === "SubmitOrder")?.args as SubmitOrderArgs;
     expect(args).toMatchObject({ side: "BUY", session: "EXTENDED" });
   });
+  it("previews held stop-limit custody and submits with the preview expectation", async () => {
+    const { props, stores, linkGroups, sent } = mkProps();
+    props.commands.sendQuery = vi.fn(async () => ({ route:"ENGINE_HELD", effectiveSession:"EXTENDED", phase:"PRE", deadlineMs:1_800_000_000_000 }));
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.4, ask: 3.5, last: 3.45, ts: "" } }); linkGroups.focus("green", "US.AAPL"); });
+    wrap(props);
+    fireEvent.change(screen.getByTestId("order-type"), { target: { value: "STOP_LIMIT" } });
+    fireEvent.change(screen.getByTestId("amount"), { target: { value: "10" } });
+    fireEvent.change(screen.getByTestId("price"), { target: { value: "3.5" } });
+    fireEvent.change(screen.getByTestId("stop"), { target: { value: "3.5" } });
+    await waitFor(() => expect(screen.getByTestId("stop-limit-custody-preview").textContent).toContain("Held by eTape — no broker protection"));
+    fireEvent.change(screen.getByTestId("session"), { target: { value: "EXTENDED" } });
+    fireEvent.click(screen.getByTestId("side-BUY"));
+    await waitFor(() => expect(sent.some((s) => s.name === "SubmitOrder")).toBe(true));
+    expect(sent.find((s) => s.name === "SubmitOrder")?.args).toMatchObject({ type:"STOP_LIMIT", routeExpected:"ENGINE_HELD" });
+  });
   it("clicking SELL submits that side directly, without a separate select step", async () => {
     const { props, stores, linkGroups, sent } = mkProps();
     act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.4, ask: 3.5, last: 3.45, ts: "" } }); linkGroups.focus("green", "US.AAPL"); });

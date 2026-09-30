@@ -6,6 +6,12 @@ Flow: OpenD/broker/history inputs enter `internal`; `cmd/etape` composes service
 
 Invariants: one normalized domain boundary; high-rate paths avoid UI framework state; live orders pass execution gates. Children: [commands](cmd/README.md), [internal packages](internal/README.md), [scripts](scripts/README.md). Test: `go test ./...`; build: `go build ./cmd/etape`.
 
+Eligible EXTENDED DAY stop-limits in pre/postmarket remain engine-held until a
+fresh Last-Eligible print triggers one linked venue LIMIT child. The engine
+persists the parent lifecycle, pauses pretrigger orders across restart/feed
+loss, and reconciles uncertain child outcomes without resubmitting. See the
+[execution core guide](internal/exec/README.md).
+
 ## Release builds
 
 The release targets build the UI, embed it, and cross-compile with CGO disabled:

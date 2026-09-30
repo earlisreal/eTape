@@ -4,7 +4,7 @@
 // here (envelope shape, id regeneration, activeVenue scrubbing) is directly
 // unit-testable; BackupSection.tsx (Task 2) is a thin UI shell around this.
 import { WORKSPACE_LAYOUT_VERSION, isCurrentWorkspace, type PanelConfig, type Workspace } from "./workspace";
-import { normalizeOrderConfig, type ActionTemplate, type HotkeyDeckConfig, type OrderConfig } from "./exec/actionTemplate";
+import { normalizeChartBinding, normalizeOrderConfig, type ActionTemplate, type HotkeyDeckConfig, type OrderConfig } from "./exec/actionTemplate";
 
 export const SETTINGS_EXPORT_VERSION = 1;
 
@@ -249,4 +249,13 @@ function remapImportedDeck(raw: unknown, idMap: Map<string, string>): unknown {
 export function detectHotkeyConflicts(templates: ActionTemplate[]): string[] {
   const combos = templates.map((t) => t.hotkey ?? "").filter((c) => c !== "");
   return [...new Set(combos.filter((c, i) => combos.indexOf(c) !== i))];
+}
+
+export function detectChartBindingConflicts(templates: ActionTemplate[]): string[] {
+  const bindings = templates.flatMap((template) => {
+    if (template.kind !== "place" || template.type !== "STOP_LIMIT") return [];
+    const binding = normalizeChartBinding(template.chartBinding);
+    return binding ? [binding] : [];
+  });
+  return [...new Set(bindings.filter((binding, i) => bindings.indexOf(binding) !== i))];
 }

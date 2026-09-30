@@ -175,8 +175,28 @@ _Avoid_: Previous extended-session close
 
 ## Order Entry
 
+**Engine-Held Stop-Limit**:
+A conditional order retained by eTape until a Last-Eligible Price reaches its stop price, when it creates a linked Limit Order at its Execution Venue. Before triggering, no broker order exists and no broker protection applies.
+_Avoid_: Synthetic stop-limit, broker stop-limit, local stop order
+
+**Effective Order Session**:
+The order session used to determine custody and venue behavior after resolving an AUTO request against the authoritative market-session clock. An explicitly selected session is already effective.
+_Avoid_: Requested session, displayed session
+
+**Held Phase**:
+The current pre-terminal stage of an Engine-Held Stop-Limit: Waiting, Armed, Paused, Activating, or Working. It is distinct from the Order's accepted, filled, canceled, expired, or rejected status.
+_Avoid_: Order status, broker status
+
+**Limit Cushion**:
+The non-negative distance from a stop-limit trigger price to its resulting limit price, added for BUY/COVER and subtracted for SELL/SHORT.
+_Avoid_: Price offset, slippage
+
+**Chart Order Gesture**:
+An exact keyboard-modifier and primary-click binding that invokes one STOP_LIMIT Action Template, using the clicked chart price as its trigger. One modifier press can create at most one order.
+_Avoid_: Click trading, modifier click
+
 **Action Template**:
-A trader-authored saved recipe for placing or managing an order, available through a hotkey and/or a Deck Button.
+A trader-authored saved recipe for placing or managing an order, available through a hotkey, Deck Button, and/or Chart Order Gesture.
 _Avoid_: Macro, preset action
 
 **Hotkey Deck**:

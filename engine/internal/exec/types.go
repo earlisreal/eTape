@@ -188,6 +188,55 @@ func (s OrderStatus) String() string {
 	}
 }
 
+type HeldPhase string
+
+const (
+	HeldWaiting         HeldPhase = "WAITING"
+	HeldArmed           HeldPhase = "ARMED"
+	HeldPaused          HeldPhase = "PAUSED"
+	HeldActivating      HeldPhase = "ACTIVATING"
+	HeldWorking         HeldPhase = "WORKING"
+	HeldUnknown         HeldPhase = "UNKNOWN"
+	HeldCancelRequested HeldPhase = "CANCEL_REQUESTED"
+)
+
+// HeldOrder is durable engine-side trigger state attached to the visible
+// parent order. ChildClientID is persisted before the first venue POST.
+type HeldOrder struct {
+	Phase           HeldPhase `json:"phase"`
+	DeadlineMs      int64     `json:"deadlineMs"`
+	ResumeAfterMs   int64     `json:"resumeAfterMs,omitempty"`
+	ChildClientID   string    `json:"childClientId,omitempty"`
+	ChildBrokerID   string    `json:"childBrokerId,omitempty"`
+	PausedReason    string    `json:"pausedReason,omitempty"`
+	CancelRequested bool      `json:"cancelRequested,omitempty"`
+	CancelSent      bool      `json:"cancelSent,omitempty"`
+}
+
+type OrderActionKind string
+type OrderActionPhase string
+
+const (
+	ActionCancel    OrderActionKind  = "CANCEL"
+	ActionReplace   OrderActionKind  = "REPLACE"
+	ActionRequested OrderActionPhase = "REQUESTED"
+	ActionConfirmed OrderActionPhase = "CONFIRMED"
+	ActionFailed    OrderActionPhase = "FAILED"
+	ActionUnknown   OrderActionPhase = "UNKNOWN"
+)
+
+// OrderAction keeps venue-side cancel/replace uncertainty on the durable order row.
+type OrderAction struct {
+	Kind                OrderActionKind  `json:"kind"`
+	Phase               OrderActionPhase `json:"phase"`
+	PreviousLimitPrice  float64          `json:"previousLimitPrice,omitempty"`
+	PreviousStopPrice   float64          `json:"previousStopPrice,omitempty"`
+	RequestedLimitPrice float64          `json:"requestedLimitPrice,omitempty"`
+	RequestedStopPrice  float64          `json:"requestedStopPrice,omitempty"`
+	RequestedQty        float64          `json:"requestedQty,omitempty"`
+	Reason              string           `json:"reason,omitempty"`
+}
+
 // Order is one order's full lifecycle state. Working = Status in
 // {Submitted, Accepted, PartiallyFilled}.
 type Order struct {
@@ -209,6 +258,8 @@ type Order struct {
 	ReplacesID   string
 	CreatedMs    int64
 	UpdatedMs    int64
+	Held         *HeldOrder
+	Action       *OrderAction
 }
 
 // Working reports whether the order can still fill or be canceled.
@@ -316,6 +367,31 @@ type ReplaceRequest struct {
 	Qty        float64
 	LimitPrice float64
 	StopPrice  float64
+}
+
+// EligiblePrint is fed only from newly accepted real-time last-eligible
+// prints. Gap suspends held-order evaluation until explicit Resume.
+type EligiblePrint struct {
+	Symbol   string
+	Price    float64
+	TsMs     int64
+	RecvTsMs int64
+	Seq      int64
+	Gap      bool
+}
+
+// EligiblePrintPreview is exposed only while a recent, newly received print
+// is trusted for held-order evaluation. Cached and stale values stay hidden.
+type EligiblePrintPreview struct {
+	Price   float64
+	TsMs    int64
+	Trusted bool
+}
+
+type HeldShutdownSummary struct {
+	Paused          int
+	CancelRequested int
+	Unconfirmed     int
 }
 
 type OrderAck struct {

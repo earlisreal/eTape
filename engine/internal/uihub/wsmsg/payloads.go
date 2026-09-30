@@ -105,6 +105,28 @@ type Order struct {
 	ReplacesID   string       `json:"replacesId"`
 	CreatedMs    int64        `json:"createdMs"`
 	UpdatedMs    int64        `json:"updatedMs"`
+	Held         *HeldOrder   `json:"held,omitempty"`
+	Action       *OrderAction `json:"action,omitempty"`
+}
+
+type HeldOrder struct {
+	Phase           string `json:"phase"`
+	DeadlineMs      int64  `json:"deadlineMs"`
+	ChildClientID   string `json:"childClientId,omitempty"`
+	ChildBrokerID   string `json:"childBrokerId,omitempty"`
+	PausedReason    string `json:"pausedReason,omitempty"`
+	CancelRequested bool   `json:"cancelRequested,omitempty"`
+}
+
+type OrderAction struct {
+	Kind                string  `json:"kind"`
+	Phase               string  `json:"phase"`
+	PreviousLimitPrice  float64 `json:"previousLimitPrice,omitempty"`
+	PreviousStopPrice   float64 `json:"previousStopPrice,omitempty"`
+	RequestedLimitPrice float64 `json:"requestedLimitPrice,omitempty"`
+	RequestedStopPrice  float64 `json:"requestedStopPrice,omitempty"`
+	RequestedQty        float64 `json:"requestedQty,omitempty"`
+	Reason              string  `json:"reason,omitempty"`
 }
 
 // ClosedOrder is a read-only historical order-leg projection. ID is the
@@ -129,6 +151,8 @@ type ClosedOrder struct {
 	ReplacesID   string       `json:"replacesId"`
 	CreatedMs    int64        `json:"createdMs"`
 	UpdatedMs    int64        `json:"updatedMs"`
+	Held         *HeldOrder   `json:"held,omitempty"`
+	Action       *OrderAction `json:"action,omitempty"`
 }
 
 type Fill struct {
@@ -198,14 +222,15 @@ type GlobalLimitsView struct {
 }
 
 type VenueStatus struct {
-	Venue            string         `json:"venue"`
-	Broker           Broker         `json:"broker"`
-	Env              string         `json:"env,omitempty"`
-	Connected        bool           `json:"connected"`
-	ReconcilePending bool           `json:"reconcilePending"`
-	Note             string         `json:"note"`
-	LastReconcileMs  *int64         `json:"lastReconcileMs" tstype:"number | null,required"`
-	Gate             GateLimitsView `json:"gate"`
+	Venue                     string         `json:"venue"`
+	Broker                    Broker         `json:"broker"`
+	Env                       string         `json:"env,omitempty"`
+	Connected                 bool           `json:"connected"`
+	ReconcilePending          bool           `json:"reconcilePending"`
+	Note                      string         `json:"note"`
+	LastReconcileMs           *int64         `json:"lastReconcileMs" tstype:"number | null,required"`
+	Gate                      GateLimitsView `json:"gate"`
+	HeldStopLimitAcknowledged bool           `json:"heldStopLimitAcknowledged,omitempty"`
 }
 
 type ExecStatus struct {
@@ -467,20 +492,25 @@ type SysEvent struct {
 // generate them while wsmsg.go itself is excluded — see tygo.yaml) ----
 
 type SubmitOrderArgs struct {
-	Venue      string       `json:"venue"`
-	Symbol     string       `json:"symbol"`
-	Side       Side         `json:"side"`
-	Type       OrderType    `json:"type"`
-	TIF        TIF          `json:"tif"`
-	Session    OrderSession `json:"session"`
-	Qty        float64      `json:"qty"`
-	LimitPrice float64      `json:"limitPrice"`
-	StopPrice  float64      `json:"stopPrice"`
+	Venue         string       `json:"venue"`
+	Symbol        string       `json:"symbol"`
+	Side          Side         `json:"side"`
+	Type          OrderType    `json:"type"`
+	TIF           TIF          `json:"tif"`
+	Session       OrderSession `json:"session"`
+	Qty           float64      `json:"qty"`
+	LimitPrice    float64      `json:"limitPrice"`
+	StopPrice     float64      `json:"stopPrice"`
+	RouteExpected string       `json:"routeExpected,omitempty"`
 }
 
 type CancelOrderArgs struct {
 	Venue   string `json:"venue"`
 	OrderID string `json:"orderId"`
+}
+
+type AcknowledgeHeldStopLimitArgs struct {
+	Venue string `json:"venue"`
 }
 
 type ReplaceOrderArgs struct {
@@ -512,6 +542,22 @@ type QueryFillsArgs struct {
 	Symbol string `json:"symbol"`
 	FromMs int64  `json:"fromMs"`
 	ToMs   int64  `json:"toMs"`
+}
+
+type QueryStopLimitRouteArgs struct {
+	TIF     TIF          `json:"tif"`
+	Session OrderSession `json:"session"`
+	Symbol  string       `json:"symbol,omitempty"`
+}
+
+type StopLimitRoutePreview struct {
+	Route                   string       `json:"route"`
+	EffectiveSession        OrderSession `json:"effectiveSession"`
+	Phase                   string       `json:"phase"`
+	DeadlineMs              int64        `json:"deadlineMs"`
+	HasTrustedEligiblePrint bool         `json:"hasTrustedEligiblePrint,omitempty"`
+	LastEligiblePrice       float64      `json:"lastEligiblePrice,omitempty"`
+	LastEligibleTsMs        int64        `json:"lastEligibleTsMs,omitempty"`
 }
 
 type QueryVenueInstrumentEligibilityArgs struct {

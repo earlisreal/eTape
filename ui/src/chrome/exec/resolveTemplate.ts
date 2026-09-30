@@ -4,7 +4,7 @@
 import type { Quote, SubmitOrderArgs, VenueID } from "../../wire/contract";
 import type { PlaceOrderTemplate } from "./actionTemplate";
 import { resolveShares } from "./sizing";
-import { resolvePrice } from "./priceSource";
+import { resolveLimitCushionPrice, resolvePrice } from "./priceSource";
 import { preCheck, type PreCheckResult, type DraftOrder } from "./preChecks";
 import { sideLabel, bareSymbol, abbrevType } from "./orderStatus";
 
@@ -15,15 +15,21 @@ export interface ResolveContext {
 }
 export interface ResolvedPlace { args: SubmitOrderArgs; flash: string; preCheck: PreCheckResult }
 
+function displayPrice(price: number): string { return price < 1 ? price.toFixed(4) : price.toFixed(2); }
+
 export function resolvePlaceTemplate(t: PlaceOrderTemplate, ctx: ResolveContext): ResolvedPlace {
-  const price = resolvePrice(t.priceSource, t.priceOffset, t.priceOffsetUnit, ctx.quote);
+  const sourcePrice = resolvePrice(t.priceSource, t.priceOffset, t.priceOffsetUnit, ctx.quote);
+  const limitPrice = t.type === "STOP_LIMIT"
+    ? resolveLimitCushionPrice(t.side, sourcePrice, t.limitCushion ?? 0, t.limitCushionUnit)
+    : sourcePrice;
+  const sizingPrice = t.type === "STOP_LIMIT" ? limitPrice : sourcePrice;
   const { qty, reason } = resolveShares(t.sizing, {
-    price, buyingPower: ctx.buyingPower, availableCash: ctx.availableCash, positionQty: ctx.positionQty,
+    price: sizingPrice, buyingPower: ctx.buyingPower, availableCash: ctx.availableCash, positionQty: ctx.positionQty,
   });
   const draft: DraftOrder = {
     symbol: ctx.symbol, side: t.side, type: t.type, tif: t.tif, session: t.session ?? "AUTO", qty,
-    limitPrice: t.type === "MARKET" ? 0 : price,
-    stopPrice: t.type === "STOP" || t.type === "STOP_LIMIT" ? price : 0,
+    limitPrice: t.type === "MARKET" ? 0 : limitPrice,
+    stopPrice: t.type === "STOP" || t.type === "STOP_LIMIT" ? sourcePrice : 0,
   };
   const pc = preCheck(draft, ctx.quote, ctx.nowMs, ctx.extHoursMarketBufferPct, reason);
   const o = pc.order;
@@ -31,7 +37,9 @@ export function resolvePlaceTemplate(t: PlaceOrderTemplate, ctx: ResolveContext)
     venue: ctx.venue, symbol: ctx.symbol, side: o.side, type: o.type, tif: o.tif, session: o.session,
     qty: o.qty, limitPrice: o.limitPrice, stopPrice: o.stopPrice,
   };
-  const tail = o.type === "MARKET" ? "MKT" : `${o.limitPrice.toFixed(2)} ${abbrevType(o.type)}`;
+  const tail = o.type === "MARKET" ? "MKT" : o.type === "STOP_LIMIT"
+    ? `${displayPrice(o.stopPrice)}→${displayPrice(o.limitPrice)} ${abbrevType(o.type)}`
+    : `${o.limitPrice.toFixed(2)} ${abbrevType(o.type)}`;
   const flash = `${sideLabel(o.side)} ${o.qty.toLocaleString("en-US")} ${bareSymbol(ctx.symbol)} @ ${tail}`;
   return { args, flash, preCheck: pc };
 }

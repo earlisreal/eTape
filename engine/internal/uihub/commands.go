@@ -94,23 +94,24 @@ type knownSymbolBox struct{ fn func(string) bool }
 // method (symbol-existence validation for EnsureSymbol/FocusGroup) — a
 // field and a method can't share a name on the same type.
 type commands struct {
-	ex             execDoer
-	cfg            configStore
-	ind            indicatorCtl
-	dem            demandCtl
-	va             venueAdmin
-	feed           func() Feed
-	knownSymbol    atomic.Pointer[knownSymbolBox]
-	tester         venueTester
-	locates        LocateRegistry
-	accountDemands accountDemandCtl
-	windowState    *windowStateRegistry
-	onConfigSet    func(key, value string)
-	restart        func()
-	startDemo      func() error
-	focusMain      func() bool
-	wl             atomic.Pointer[watchlistBox]
-	scanner        atomic.Pointer[scannerBox]
+	ex                    execDoer
+	cfg                   configStore
+	ind                   indicatorCtl
+	dem                   demandCtl
+	va                    venueAdmin
+	feed                  func() Feed
+	knownSymbol           atomic.Pointer[knownSymbolBox]
+	tester                venueTester
+	locates               LocateRegistry
+	heldStopLimitIdentity map[string]string
+	accountDemands        accountDemandCtl
+	windowState           *windowStateRegistry
+	onConfigSet           func(key, value string)
+	restart               func()
+	startDemo             func() error
+	focusMain             func() bool
+	wl                    atomic.Pointer[watchlistBox]
+	scanner               atomic.Pointer[scannerBox]
 }
 
 func (cd *commands) setAccountDemandRegistry(r accountDemandCtl) { cd.accountDemands = r }
@@ -134,7 +135,16 @@ func newCommands(ex execDoer, cfg configStore, ind indicatorCtl, dem demandCtl, 
 	if len(locateRegistries) > 0 {
 		locateRegistry = locateRegistries[0]
 	}
-	return &commands{ex: ex, cfg: cfg, ind: ind, dem: dem, va: va, feed: feed, tester: tester, locates: locateRegistry}
+	return &commands{ex: ex, cfg: cfg, ind: ind, dem: dem, va: va, feed: feed, tester: tester,
+		locates: locateRegistry, heldStopLimitIdentity: make(map[string]string)}
+}
+
+func (cd *commands) setHeldStopLimitIdentities(vms []venueMeta) {
+	for _, v := range vms {
+		if strings.EqualFold(v.Env, "live") && v.HeldStopLimitIdentity != "" {
+			cd.heldStopLimitIdentity[v.ID] = v.HeldStopLimitIdentity
+		}
+	}
 }
 
 // watchlist loads the late-bound watchlistCtl (nil-safe: unset until
@@ -154,6 +164,8 @@ func (cd *commands) watchlist() watchlistCtl {
 const restartAckFlushDelay = 200 * time.Millisecond
 
 func blocked(reason string) wsmsg.AckMsg { return wsmsg.AckMsg{Status: "blocked", Reason: reason} }
+
+func heldStopLimitAckKey(venue string) string { return "held_stop_limit_ack:" + venue }
 
 func ackFromCmd(a exec.CmdAck) wsmsg.AckMsg {
 	status := wsmsg.AckStatus("accepted")
@@ -175,7 +187,28 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			Side: sideFromWire(a.Side), Type: orderTypeFromWire(a.Type), TIF: tifFromWire(a.TIF),
 			Session: sessionFromWire(a.Session),
 			Qty:     a.Qty, LimitPrice: a.LimitPrice, StopPrice: a.StopPrice,
+			RouteExpected: exec.HeldRoute(a.RouteExpected),
 		})), false
+	case "ResumeHeldOrder":
+		var a wsmsg.CancelOrderArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return blocked("bad args"), false
+		}
+		return ackFromCmd(cd.ex.Do(exec.ResumeHeldOrder{Venue: exec.VenueID(a.Venue), OrderID: a.OrderID})), false
+	case "AcknowledgeHeldStopLimit":
+		var a wsmsg.AcknowledgeHeldStopLimitArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return blocked("bad args"), false
+		}
+		identity := cd.heldStopLimitIdentity[a.Venue]
+		if identity == "" {
+			return blocked("live engine-held stop-limit is unavailable for this venue"), false
+		}
+		cd.cfg.SetConfig(heldStopLimitAckKey(a.Venue), identity)
+		if flush, ok := cd.cfg.(interface{ Flush() }); ok {
+			flush.Flush()
+		}
+		return ackFromCmd(cd.ex.Do(exec.AcknowledgeHeldStopLimit{Venue: exec.VenueID(a.Venue), Identity: identity})), false
 	case "CancelOrder":
 		var a wsmsg.CancelOrderArgs
 		if err := json.Unmarshal(args, &a); err != nil {

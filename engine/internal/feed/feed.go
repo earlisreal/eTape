@@ -99,7 +99,7 @@ func (c TradeReportCondition) String() string {
 	return conditions[0]
 }
 
-// DeliverySource describes how OpenD delivered a Reported Print. It is
+// DeliverySource describes how a feed delivered a reported print. It is
 // provenance only and never changes statistical eligibility.
 type DeliverySource uint8
 
@@ -119,7 +119,7 @@ func (s DeliverySource) String() string {
 }
 
 // Tick is one trade print. TsMs is the exchange timestamp (authoritative for
-// bucketing); RecvTsMs is OpenD receive time, used only for latency metrics.
+// bucketing); RecvTsMs is feed-local receipt time, used only for latency.
 type Tick struct {
 	Symbol         string
 	Seq            int64

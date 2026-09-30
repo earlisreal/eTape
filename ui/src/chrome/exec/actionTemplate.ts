@@ -6,6 +6,8 @@ import type { SizingSpec } from "./sizing";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 
 export type DeckColor = "auto" | "green" | "red" | "bronze" | "neutral" | "danger";
+export type ChartBinding = "Ctrl" | "Alt" | "Shift" | "Ctrl+Alt" | "Ctrl+Shift" | "Alt+Shift";
+export const CHART_BINDINGS: ChartBinding[] = ["Ctrl", "Alt", "Shift", "Ctrl+Alt", "Ctrl+Shift", "Alt+Shift"];
 
 export interface HotkeyDeckConfig {
   rows: string[][];
@@ -19,6 +21,9 @@ export interface PlaceOrderTemplate {
   session?: OrderSession;   // absent => "AUTO" (every persisted config is already valid)
   priceSource: PriceSource; priceOffset: number;
   priceOffsetUnit?: PriceOffsetUnit;   // absent => "$" (every persisted config is already valid)
+  limitCushion?: number;               // STOP_LIMIT only; absent => 0
+  limitCushionUnit?: PriceOffsetUnit;  // STOP_LIMIT only; absent => "$"
+  chartBinding?: ChartBinding;         // STOP_LIMIT only; unique exact modifier+click binding
   sizing: SizingSpec;
   hotkey?: string;   // normalized combo, e.g. "Ctrl+1" (see hotkeys.ts)
   deck?: boolean;   // absent => hotkey-only, not shown in deck
@@ -64,7 +69,28 @@ function normalizeTemplate(t: ActionTemplate): ActionTemplate {
   if (sizing.mode === "PositionFraction" && sizing.pct === undefined) {
     sizing = { ...sizing, pct: sizing.fraction === "half" ? 50 : 100 };
   }
-  return { ...t, priceOffsetUnit: t.priceOffsetUnit ?? "$", session: t.session ?? "AUTO", sizing };
+  const base = { ...t };
+  delete base.chartBinding;
+  delete base.limitCushion;
+  delete base.limitCushionUnit;
+  if (t.type !== "STOP_LIMIT") return { ...base, priceOffsetUnit: t.priceOffsetUnit ?? "$", session: t.session ?? "AUTO", sizing };
+  const cushion = Number.isFinite(t.limitCushion) ? Math.max(0, t.limitCushion ?? 0) : 0;
+  const binding = normalizeChartBinding(t.chartBinding);
+  return {
+    ...base,
+    priceOffsetUnit: t.priceOffsetUnit ?? "$", session: t.session ?? "AUTO", sizing,
+    limitCushion: cushion, limitCushionUnit: t.limitCushionUnit === "%" ? "%" : "$",
+    ...(binding ? { chartBinding: binding } : {}),
+  };
+}
+
+export function normalizeChartBinding(value: unknown): ChartBinding | undefined {
+  if (typeof value !== "string") return undefined;
+  const modifiers = value.split("+");
+  if (modifiers.length < 1 || modifiers.length > 2 || modifiers.some((modifier) => !["Ctrl", "Alt", "Shift"].includes(modifier))) return undefined;
+  if (new Set(modifiers).size !== modifiers.length) return undefined;
+  const canonical = ["Ctrl", "Alt", "Shift"].filter((modifier) => modifiers.includes(modifier)).join("+");
+  return CHART_BINDINGS.includes(canonical as ChartBinding) ? canonical as ChartBinding : undefined;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -97,7 +123,18 @@ function normalizeHotkeyDeck(raw: unknown, templates: ActionTemplate[]): HotkeyD
 export function normalizeOrderConfig(config: OrderConfig): OrderConfig {
   const raw = config.extHoursMarketBufferPct;
   const extHoursMarketBufferPct = raw === undefined || Number.isNaN(raw) ? 1.0 : Math.min(EXT_BUFFER_MAX, Math.max(EXT_BUFFER_MIN, raw));
-  const templates = config.templates.map(normalizeTemplate);
+  const normalized = config.templates.map(normalizeTemplate);
+  const usedChartBindings = new Set<ChartBinding>();
+  const templates = normalized.map((template) => {
+    if (template.kind !== "place" || !template.chartBinding) return template;
+    if (usedChartBindings.has(template.chartBinding)) {
+      const withoutBinding = { ...template };
+      delete withoutBinding.chartBinding;
+      return withoutBinding;
+    }
+    usedChartBindings.add(template.chartBinding);
+    return template;
+  });
   const hotkeyDeck = normalizeHotkeyDeck((config as { hotkeyDeck?: unknown }).hotkeyDeck, templates);
   const placed = new Set(hotkeyDeck.rows.flat());
   return {

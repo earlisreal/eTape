@@ -25,6 +25,12 @@ func (s *State) ReconcileOpenOrders(v VenueID, orders []Order) {
 	vs := s.Venue(v)
 	for _, o := range orders {
 		o.Venue = v
+		if parent, ok := vs.Orders[o.ID]; ok && parent.Held != nil {
+			o.Type, o.StopPrice, o.Held = parent.Type, parent.StopPrice, parent.Held
+		}
+		if parent, ok := vs.Orders[o.ID]; ok && parent.Action != nil {
+			o.Action = parent.Action
+		}
 		vs.Orders[o.ID] = o
 		s.orderIndex[o.ID] = v
 	}

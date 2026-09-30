@@ -144,6 +144,14 @@ func deliverySourceToWire(s feed.DeliverySource) wsmsg.TickDeliverySource {
 }
 
 func mapOrder(o exec.Order) wsmsg.Order {
+	var held *wsmsg.HeldOrder
+	if o.Held != nil {
+		held = mapHeldOrder(*o.Held)
+	}
+	var action *wsmsg.OrderAction
+	if o.Action != nil {
+		action = mapOrderAction(*o.Action)
+	}
 	return wsmsg.Order{
 		Venue: string(o.Venue), ID: o.ID, Symbol: o.Symbol,
 		Side: sideToWire(o.Side), Type: orderTypeToWire(o.Type), TIF: tifToWire(o.TIF),
@@ -151,19 +159,38 @@ func mapOrder(o exec.Order) wsmsg.Order {
 		Qty:     o.Qty, LimitPrice: o.LimitPrice, StopPrice: o.StopPrice,
 		Status: statusToWire(o.Status), ExecutedQty: o.ExecutedQty, LeavesQty: o.LeavesQty,
 		AvgFillPrice: o.AvgFillPrice, RejectReason: o.RejectReason, ReplacesID: o.ReplacesID,
-		CreatedMs: o.CreatedMs, UpdatedMs: o.UpdatedMs,
+		CreatedMs: o.CreatedMs, UpdatedMs: o.UpdatedMs, Held: held, Action: action,
 	}
+}
+
+func mapOrderAction(a exec.OrderAction) *wsmsg.OrderAction {
+	return &wsmsg.OrderAction{Kind: string(a.Kind), Phase: string(a.Phase), PreviousLimitPrice: a.PreviousLimitPrice,
+		PreviousStopPrice: a.PreviousStopPrice, RequestedLimitPrice: a.RequestedLimitPrice,
+		RequestedStopPrice: a.RequestedStopPrice, RequestedQty: a.RequestedQty, Reason: a.Reason}
+}
+
+func mapHeldOrder(h exec.HeldOrder) *wsmsg.HeldOrder {
+	return &wsmsg.HeldOrder{Phase: string(h.Phase), DeadlineMs: h.DeadlineMs, ChildClientID: h.ChildClientID,
+		ChildBrokerID: h.ChildBrokerID, PausedReason: h.PausedReason, CancelRequested: h.CancelRequested}
 }
 
 func mapClosedOrder(row exec.ClosedOrder) wsmsg.ClosedOrder {
 	o := row.Order
+	var held *wsmsg.HeldOrder
+	if o.Held != nil {
+		held = mapHeldOrder(*o.Held)
+	}
+	var action *wsmsg.OrderAction
+	if o.Action != nil {
+		action = mapOrderAction(*o.Action)
+	}
 	return wsmsg.ClosedOrder{
 		Venue: string(o.Venue), ID: row.RowID, Symbol: o.Symbol,
 		Side: sideToWire(o.Side), Type: orderTypeToWire(o.Type), TIF: tifToWire(o.TIF),
 		Session: sessionToWire(o.Session), Qty: o.Qty, LimitPrice: o.LimitPrice, StopPrice: o.StopPrice,
 		Status: statusToWire(o.Status), ExecutedQty: o.ExecutedQty, LeavesQty: o.LeavesQty,
 		AvgFillPrice: o.AvgFillPrice, RejectReason: o.RejectReason, ReplacesID: o.ReplacesID,
-		CreatedMs: o.CreatedMs, UpdatedMs: o.UpdatedMs,
+		CreatedMs: o.CreatedMs, UpdatedMs: o.UpdatedMs, Held: held, Action: action,
 	}
 }
 

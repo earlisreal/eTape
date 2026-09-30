@@ -24,6 +24,16 @@ type spyFills struct {
 	exportFromMs, exportToMs int64
 }
 
+type spyEligiblePreview struct {
+	symbol string
+	value  exec.EligiblePrintPreview
+}
+
+func (s *spyEligiblePreview) PreviewEligiblePrint(_ context.Context, symbol string) exec.EligiblePrintPreview {
+	s.symbol = symbol
+	return s.value
+}
+
 func (s *spyFills) QueryFills(symbol string, _, _ int64) ([]exec.FillRow, error) {
 	s.sym = symbol
 	return s.rows, s.err
@@ -80,6 +90,24 @@ func TestQueryUnknownReturnsEmptySlice(t *testing.T) {
 	b, _ := json.Marshal(out)
 	if string(b) != "[]" {
 		t.Fatalf("unknown query must resolve to []; marshaled to %s", b)
+	}
+}
+
+func TestQueryStopLimitRouteIncludesOnlyTrustedEligiblePrint(t *testing.T) {
+	clk := clock.NewFake(time.Date(2026, 9, 30, 10, 0, 0, 0, time.UTC))
+	eligible := &spyEligiblePreview{value: exec.EligiblePrintPreview{Price: 101.25, TsMs: 1234, Trusted: true}}
+	q := newQueries(&spyFills{}, clk)
+	q.preview = eligible
+	out := q.handleContext(context.Background(), "QueryStopLimitRoute", json.RawMessage(`{"tif":"DAY","session":"EXTENDED","symbol":"US.AAPL"}`))
+	preview, ok := out.(wsmsg.StopLimitRoutePreview)
+	if !ok || !preview.HasTrustedEligiblePrint || preview.LastEligiblePrice != 101.25 || preview.LastEligibleTsMs != 1234 || eligible.symbol != "US.AAPL" {
+		t.Fatalf("trusted stop-limit preview = %T %+v (symbol %q)", out, out, eligible.symbol)
+	}
+	eligible.value.Trusted = false
+	out = q.handleContext(context.Background(), "QueryStopLimitRoute", json.RawMessage(`{"tif":"DAY","session":"EXTENDED","symbol":"US.AAPL"}`))
+	preview = out.(wsmsg.StopLimitRoutePreview)
+	if preview.HasTrustedEligiblePrint || preview.LastEligiblePrice != 0 || preview.LastEligibleTsMs != 0 {
+		t.Fatalf("untrusted print leaked into stop-limit preview: %+v", preview)
 	}
 }
 

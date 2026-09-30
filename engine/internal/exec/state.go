@@ -80,7 +80,14 @@ func (s *State) Apply(ev Event) {
 	case OrderAccepted:
 		s.mutate(e.V, e.OID, e.Ts, func(o *Order) { o.Status = StatusAccepted })
 	case OrderRejected:
-		s.mutate(e.V, e.OID, e.Ts, func(o *Order) { o.Status = StatusRejected; o.RejectReason = e.Reason })
+		s.mutate(e.V, e.OID, e.Ts, func(o *Order) {
+			o.Status, o.RejectReason = StatusRejected, e.Reason
+			if o.Action != nil && o.Action.Phase != ActionConfirmed && o.Action.Phase != ActionFailed {
+				a := *o.Action
+				a.Phase, a.Reason = ActionFailed, e.Reason
+				o.Action = &a
+			}
+		})
 	case OrderFilled:
 		s.applyFill(e)
 	case OrderCanceled:
@@ -88,11 +95,21 @@ func (s *State) Apply(ev Event) {
 			if o.Working() {
 				o.Status = StatusCanceled
 			}
+			if o.Action != nil && o.Action.Kind == ActionCancel && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+				a := *o.Action
+				a.Phase, a.Reason = ActionConfirmed, ""
+				o.Action = &a
+			}
 		})
 	case OrderExpired:
 		s.mutate(e.V, e.OID, e.Ts, func(o *Order) {
 			if o.Working() {
 				o.Status = StatusExpired
+			}
+			if o.Action != nil && o.Action.Phase != ActionConfirmed && o.Action.Phase != ActionFailed {
+				a := *o.Action
+				a.Phase, a.Reason = ActionFailed, "order expired before action confirmation"
+				o.Action = &a
 			}
 		})
 	case OrderReplaced:
@@ -100,16 +117,29 @@ func (s *State) Apply(ev Event) {
 			if !o.Working() {
 				return
 			}
-			o.Qty = e.NewQty
+			qty := e.NewQty
+			if qty <= 0 {
+				qty = o.Qty
+			}
+			o.Qty = qty
 			if e.NewLimit > 0 {
 				o.LimitPrice = e.NewLimit
 			}
 			if e.NewStop > 0 {
 				o.StopPrice = e.NewStop
 			}
-			o.LeavesQty = e.NewQty - o.ExecutedQty
+			o.LeavesQty = qty - o.ExecutedQty
 			o.Status = StatusAccepted
+			if o.Action != nil && o.Action.Kind == ActionReplace && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+				a := *o.Action
+				a.Phase, a.Reason = ActionConfirmed, ""
+				o.Action = &a
+			}
 		})
+	case HeldOrderChanged:
+		s.mutate(e.V, e.OID, e.Ts, func(o *Order) { held := e.Held; o.Held = &held })
+	case OrderActionChanged:
+		s.mutate(e.V, e.OID, e.Ts, func(o *Order) { action := e.Action; o.Action = &action })
 	case StreamGap:
 		// A gap marker: reconcile (Core) resolves state against a fresh snapshot.
 		// The fold records nothing here; the marker exists for audit + replay.

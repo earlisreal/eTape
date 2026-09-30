@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +11,7 @@ import (
 	"math"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -47,12 +50,19 @@ func buildGateConfig(g config.Gate) exec.GateConfig {
 }
 
 func venueMetas(cfg config.Config) []uihub.VenueMeta {
+	return venueMetasWithHeldStopLimitAck(cfg, nil, nil)
+}
+
+func venueMetasWithHeldStopLimitAck(cfg config.Config, identities, acknowledged map[exec.VenueID]string) []uihub.VenueMeta {
 	out := make([]uihub.VenueMeta, 0, len(cfg.Venues))
 	for _, v := range cfg.Venues {
 		gv := cfg.Gate.Venue[v.ID]
 		note := ""
 		out = append(out, uihub.VenueMeta{
 			ID: v.ID, Broker: v.Broker, Env: v.Env, Note: note,
+			HeldStopLimitIdentity: identities[exec.VenueID(v.ID)],
+			HeldStopLimitAcknowledged: identities[exec.VenueID(v.ID)] != "" &&
+				acknowledged[exec.VenueID(v.ID)] == identities[exec.VenueID(v.ID)],
 			Gate: uihub.GateLimits{
 				MaxOrderValue: gv.MaxOrderValue, MaxPositionValue: gv.MaxPositionValue,
 				MaxPositionShares: gv.MaxPositionShares, MaxOpenOrders: gv.MaxOpenOrders,
@@ -60,6 +70,25 @@ func venueMetas(cfg config.Config) []uihub.VenueMeta {
 		})
 	}
 	return out
+}
+
+// heldStopLimitIdentities fingerprints the actual configured venue account,
+// environment, credential material, and primary trigger-source endpoint without
+// storing or exposing the credentials themselves.
+func heldStopLimitIdentities(cfg config.Config, credentialFile creds.File) map[exec.VenueID]string {
+	identities := make(map[exec.VenueID]string)
+	for _, venue := range cfg.Venues {
+		if !strings.EqualFold(venue.Env, "live") {
+			continue
+		}
+		fields := []string{venue.ID, venue.Broker, venue.Env, venue.AccountID, cfg.OpenD.Addr(), venue.Credentials}
+		if pair, err := credentialFile.Get(venue.Credentials); err == nil {
+			fields = append(fields, pair.KeyID, pair.SecretKey)
+		}
+		digest := sha256.Sum256([]byte(strings.Join(fields, "\x00")))
+		identities[exec.VenueID(venue.ID)] = hex.EncodeToString(digest[:])
+	}
+	return identities
 }
 
 // startingBalances maps venue id -> the resolved starting balance for every

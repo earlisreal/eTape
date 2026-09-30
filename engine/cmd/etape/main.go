@@ -81,7 +81,7 @@ func openLogFile(path string) (*os.File, error) {
 // default (!tray) entrypoint has no use for it and passes nil; the tray
 // entrypoint uses it to learn the address for its "Open eTape" menu action
 // without duplicating any config-resolution logic.
-func boot(ctx context.Context, onListening func(addr string)) (code int, restart bool, nextArgs []string) {
+func boot(ctx context.Context, onListening func(addr string), onShutdownSummary ...func(exec.HeldShutdownSummary)) (code int, restart bool, nextArgs []string) {
 	home, _ := os.UserHomeDir()
 	cfgPath := flag.String("config", filepath.Join(home, ".eTape", "config.toml"), "path to config.toml")
 	dist := flag.String("dist", "", "serve built UI from this dir (overrides [uihub].dist_dir)")
@@ -405,6 +405,26 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			credsFile = creds.File{}
 		}
 	}
+	heldStopLimitIdentity := heldStopLimitIdentities(cfg, credsFile)
+	heldStopLimitAck := make(map[exec.VenueID]string)
+	staleAckRemoved := false
+	for venue, identity := range heldStopLimitIdentity {
+		key := "held_stop_limit_ack:" + string(venue)
+		stored, ok, readErr := st.GetConfig(key)
+		if readErr != nil {
+			log.Warn("read held stop-limit acknowledgement", "venue", venue, "err", readErr)
+			continue
+		}
+		if ok && stored == identity {
+			heldStopLimitAck[venue] = identity
+		} else if ok {
+			st.DeleteConfig(key)
+			staleAckRemoved = true
+		}
+	}
+	if staleAckRemoved {
+		st.Flush()
+	}
 	vbs, err := buildBrokers(cfg, credsFile, execClk)
 	if err != nil {
 		log.Error("build brokers", "err", err)
@@ -439,8 +459,10 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	execCore := exec.NewCore(exec.CoreConfig{
 		Venues: venueIDs, Gate: gateConfig, Store: st,
 		Brokers: brokers, Clock: execClk, IDGen: exec.NewOrderIDGen(execClk, rand.Reader),
-		SysLog:          st.AppendSysEvent,
-		StartingBalance: startingBalances(cfg),
+		SysLog:                    st.AppendSysEvent,
+		StartingBalance:           startingBalances(cfg),
+		HeldStopLimitLiveIdentity: heldStopLimitIdentity,
+		HeldStopLimitAcknowledged: heldStopLimitAck,
 	})
 	if err := execCore.Recover(ctx); err != nil {
 		log.Warn("exec recover (continuing; reactive reconcile will catch up)", "err", err)
@@ -494,7 +516,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	venueAdm := venueadmin.New(*cfgPath, creds.DefaultPath(), config.VenueConfig{Venues: cfg.Venues, Gate: cfg.Gate})
 	venueProbe := venueprobe.New(creds.DefaultPath(), cfg.OpenD.Addr(), uihubClk)
 	hub, srv := uihub.New(uihubClk, uihub.Config{
-		Venues: venueMetas(cfg), Global: uihub.GlobalLimits{
+		Venues: venueMetasWithHeldStopLimitAck(cfg, heldStopLimitIdentity, heldStopLimitAck), Global: uihub.GlobalLimits{
 			MaxDayLoss: cfg.Gate.Global.MaxDayLoss, MaxSymbolPositionValue: cfg.Gate.Global.MaxSymbolPositionValue,
 			MaxSymbolPositionShares: cfg.Gate.Global.MaxSymbolPositionShares,
 		},
@@ -621,6 +643,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 		wl.Seed(gen.Symbols())                         // synth universe; trusted, no probe; into throwaway demo.db
 		sf := synth.NewFeed(gen, st, clock.System{})
 		req := synth.NewRequester(gen)
+		execCore.Do(exec.ConfigureHeldDemand{Demand: engineHeldDemand{feed: sf}})
 		go func() { _ = sf.Run(ctx) }()
 		pipeWG.Add(1)
 		go pipe(ctx, &pipeWG, sf.Events(), core)
@@ -639,6 +662,7 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 			Budget: cfg.Feed.QuotaSlots, Hysteresis: time.Duration(cfg.Feed.UnsubHysteresisSecs) * time.Second,
 			DisableExtendedTime: !cfg.Feed.ExtendedTime,
 		})
+		execCore.Do(exec.ConfigureHeldDemand{Demand: engineHeldDemand{feed: fd, wait: fd.WaitTickerActive}})
 		go func() { _ = client.Run(ctx) }()
 		go func() { _ = fd.Run(ctx) }()
 		pipeWG.Add(1)
@@ -847,7 +871,10 @@ func boot(ctx context.Context, onListening func(addr string)) (code int, restart
 	forwardWG.Wait()  // forwardMD + demo's forwardDailyBars stopped: no more ArchiveDaily
 	dropWG.Wait()     // dropped-updates watcher stopped: no more AppendSysEvent from it
 	<-execDone        // exec.Core.Run returned: no more AppendExecEvent
-	<-accountDone     // account poller stopped: no more baseline SetConfig writes
+	if len(onShutdownSummary) > 0 {
+		onShutdownSummary[0](execCore.ShutdownHeldSummary())
+	}
+	<-accountDone // account poller stopped: no more baseline SetConfig writes
 	brokerWG.Wait()
 	if err := st.Close(); err != nil {
 		log.Error("close store", "err", err)
@@ -1064,6 +1091,8 @@ func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks [
 			for _, s := range sinks {
 				s.SetMark(m.Symbol, m.Price)
 			}
+		case p := <-core.EligiblePrints():
+			execCore.FeedEligiblePrint(ctx, exec.EligiblePrint{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs, RecvTsMs: p.RecvTsMs, Seq: p.Seq, Gap: p.Gap})
 		case bk := <-core.Books():
 			for _, s := range sinks {
 				s.SetBook(bk.Symbol, bk)
@@ -1102,6 +1131,28 @@ type demandFeeder interface {
 	Ensure(d feed.Demand)
 	Release(id string)
 }
+
+type engineHeldDemand struct {
+	feed demandFeeder
+	wait func(context.Context, string) error
+}
+
+func (d engineHeldDemand) Acquire(ctx context.Context, orderID, symbol string) error {
+	id := "held-stop/" + orderID
+	d.feed.Ensure(feed.Demand{ID: id, Symbol: symbol, Subs: []feed.SubType{feed.SubTicker}, Focused: true})
+	if d.wait == nil {
+		return nil
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := d.wait(waitCtx, symbol); err != nil {
+		d.feed.Release(id)
+		return err
+	}
+	return nil
+}
+
+func (d engineHeldDemand) Release(orderID string) { d.feed.Release("held-stop/" + orderID) }
 
 type scannerFilterConfig interface {
 	GetConfig(string) (string, bool, error)
