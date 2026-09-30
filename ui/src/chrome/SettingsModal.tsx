@@ -82,7 +82,8 @@ export function SettingsModal({ open, section, onSection, onClose, commands, get
           {section === "general" && <GeneralSection getWorkspace={getWorkspace} onImportWorkspace={onImportWorkspace} toast={toast} />}
           {section === "orders" && (
             <>
-              <OrderSettingsSection config={oc.config} onSave={oc.save} toast={toast} onClose={onClose} />
+              <OrderSettingsSection config={oc.config} onSave={oc.save} toast={toast} onClose={onClose}
+                commands={commands} exec={exec} />
               <div style={{ borderTop: `1px solid ${palette.border}`, marginTop: 14, paddingTop: 14 }}>
                 <div className="col-head serif" style={{ marginBottom: 8 }}>Import & export hotkeys & deck</div>
                 <BackupPanel part="hotkeys" orderConfig={oc.config} onImportOrderConfig={oc.save} toast={toast} />

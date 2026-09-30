@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { makeStores } from "../../../data/registry";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
 import type { ExecStatus } from "../../../wire/contract";
@@ -78,18 +78,30 @@ describe("ChartStopLimitEntry", () => {
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitOrder", expect.anything());
   });
 
-  it("requires the live custody disclosure and does not auto-submit after acknowledgement", async () => {
+  it("directs an unacknowledged live engine-held gesture to Settings without hiding its preview", async () => {
     focusChart();
     const {host,sendCommand,sendQuery,stores} = mount("live");
     moveToChart(host);
     await waitFor(() => expect(sendQuery).toHaveBeenCalled());
+    const preview = screen.getByTestId("chart-order-entry-preview");
+    await waitFor(() => expect(preview.style.opacity).toBe("1"));
     await placeClick(host);
-    const disclosure = await screen.findByRole("dialog", {name:"Live engine-held stop-limit disclosure"});
-    expect(disclosure.textContent).toContain("no broker protection");
+    expect(screen.queryByRole("dialog", {name:"Live engine-held stop-limit disclosure"})).toBeNull();
+    expect(preview.style.opacity).toBe("1");
+    expect(preview.querySelector("[data-entry-detail]")?.textContent).toContain("LOCAL · eTape-held");
+    expect(preview.querySelector("[data-entry-detail]")?.textContent).toContain("Settings → Orders & hotkeys → Review / enable live accounts");
+    expect(preview.querySelector("[data-entry-announcement]")?.textContent).toContain("Settings → Orders & hotkeys → Review / enable live accounts");
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitOrder", expect.anything());
-    fireEvent.click(screen.getByRole("button", {name:"I understand — enable"}));
-    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("AcknowledgeHeldStopLimit", {venue:"sim"}));
+    expect(sendCommand).not.toHaveBeenCalledWith("AcknowledgeHeldStopLimit", expect.anything());
+
+    act(() => stores.exec.apply({ kind: "delta", topic: "exec.status", payload: {
+      ...stores.exec.status()!,
+      venues: stores.exec.status()!.venues.map((v) => ({ ...v, heldStopLimitAcknowledged: true })),
+    } }));
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitOrder", expect.anything());
-    stores.exec.apply({kind:"delta",topic:"exec.status",payload:{...stores.exec.status()!,venues:[{...stores.exec.status()!.venues[0],heldStopLimitAcknowledged:true}]}});
+    fireEvent.keyUp(window, { key: "Shift" });
+    moveToChart(host);
+    await placeClick(host);
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitOrder", expect.anything()));
   });
 });

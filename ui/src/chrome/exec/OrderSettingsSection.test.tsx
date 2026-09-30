@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent, act } from "@testing-library/react";
+import { render, screen, fireEvent, act, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { ToastProvider } from "../Toast";
 import { OrderConfigProvider } from "./useOrderConfig";
@@ -177,12 +177,212 @@ describe("OrderSettingsSection", () => {
     fireEvent.change(screen.getByLabelText("limit-cushion-buy-5k"), { target: { value: "0.05" } });
     fireEvent.change(screen.getByLabelText("limit-cushion-unit-buy-5k"), { target: { value: "%" } });
     fireEvent.change(screen.getByLabelText("chart-binding-buy-5k"), { target: { value: "Shift" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue setup" }));
     fireEvent.click(screen.getByTestId("save"));
     const saved = onSave.mock.calls[0][0];
     expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k")).toMatchObject({
       type: "STOP_LIMIT", limitCushion: 0.05, limitCushionUnit: "%", chartBinding: "Shift",
     });
   });
+
+  it("explains live held-order custody before saving a chart gesture", () => {
+    const onSave = vi.fn();
+    const config: OrderConfig = {
+      ...SAMPLE_ORDER_CONFIG,
+      templates: SAMPLE_ORDER_CONFIG.templates.map((t) =>
+        t.id === "buy-5k" && t.kind === "place" ? { ...t, type: "STOP_LIMIT" as const } : t),
+    };
+    render(<ThemeProvider><OrderSettingsSection config={config} onSave={onSave} /></ThemeProvider>);
+    fireEvent.change(screen.getByLabelText("chart-binding-buy-5k"), { target: { value: "Shift" } });
+
+    const disclosure = screen.getByRole("dialog", { name: "Chart Order Gesture disclosure" });
+    expect(disclosure.textContent).toContain("no broker order or protection before the trigger");
+    expect(disclosure.textContent).toContain("Link Group");
+    expect(disclosure.textContent).toContain("Settings acknowledges each named live account separately");
+    expect(disclosure.textContent).toContain("Paper/sim");
+    expect(disclosure.textContent).toContain("closing Settings without saving");
+    expect(onSave).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Continue setup" }));
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].templates.find((t: { id: string }) => t.id === "buy-5k").chartBinding).toBe("Shift");
+  });
+
+  it("keeps the previous gesture when the disclosure is canceled", () => {
+    const onSave = vi.fn();
+    const config: OrderConfig = {
+      ...SAMPLE_ORDER_CONFIG,
+      templates: SAMPLE_ORDER_CONFIG.templates.map((t) =>
+        t.id === "buy-5k" && t.kind === "place" ? { ...t, type: "STOP_LIMIT" as const, chartBinding: "Shift" as const } : t),
+    };
+    render(<ThemeProvider><OrderSettingsSection config={config} onSave={onSave} /></ThemeProvider>);
+    fireEvent.change(screen.getByLabelText("chart-binding-buy-5k"), { target: { value: "Ctrl+Alt" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+    expect((screen.getByLabelText("chart-binding-buy-5k") as HTMLSelectElement).value).toBe("Shift");
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].templates.find((t: { id: string }) => t.id === "buy-5k").chartBinding).toBe("Shift");
+  });
+
+  it("keeps focus in the disclosure and Escape cancels the staged gesture", () => {
+    const config: OrderConfig = {
+      ...SAMPLE_ORDER_CONFIG,
+      templates: SAMPLE_ORDER_CONFIG.templates.map((t) =>
+        t.id === "buy-5k" && t.kind === "place" ? { ...t, type: "STOP_LIMIT" as const } : t),
+    };
+    render(<ThemeProvider><OrderSettingsSection config={config} onSave={vi.fn()} /></ThemeProvider>);
+    const binding = screen.getByLabelText("chart-binding-buy-5k");
+    fireEvent.change(binding, { target: { value: "Shift" } });
+    const continueSetup = screen.getByRole("button", { name: "Continue setup" });
+    continueSetup.focus();
+    fireEvent.keyDown(continueSetup, { key: "Tab" });
+    const cancel = screen.getByRole("button", { name: "Not now" });
+    expect(document.activeElement).toBe(cancel);
+    fireEvent.keyDown(cancel, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Chart Order Gesture disclosure" })).toBeNull();
+    expect((binding as HTMLSelectElement).value).toBe("");
+  });
+
+  it("clears a gesture without opening the disclosure when set to Unbound", () => {
+    const onSave = vi.fn();
+    const config: OrderConfig = {
+      ...SAMPLE_ORDER_CONFIG,
+      templates: SAMPLE_ORDER_CONFIG.templates.map((t) =>
+        t.id === "buy-5k" && t.kind === "place" ? { ...t, type: "STOP_LIMIT" as const, chartBinding: "Shift" as const } : t),
+    };
+    render(<ThemeProvider><OrderSettingsSection config={config} onSave={onSave} /></ThemeProvider>);
+    fireEvent.change(screen.getByLabelText("chart-binding-buy-5k"), { target: { value: "" } });
+    expect(screen.queryByRole("dialog", { name: "Chart Order Gesture disclosure" })).toBeNull();
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0].templates.find((t: { id: string }) => t.id === "buy-5k").chartBinding).toBeUndefined();
+  });
+
+  it("shows rejected and unknown account acknowledgements and allows retry", async () => {
+    const exec = makeStores().exec;
+    const venue = { ...status.venues[0], venue: "alpaca-live", env: "live" };
+    exec.apply({ kind: "snapshot", topic: "exec.status", payload: { ...status, venues: [venue] } });
+    const config: OrderConfig = {
+      ...SAMPLE_ORDER_CONFIG,
+      templates: SAMPLE_ORDER_CONFIG.templates.map((t) =>
+        t.id === "buy-5k" && t.kind === "place" ? { ...t, type: "STOP_LIMIT" as const, chartBinding: "Shift" as const } : t),
+    };
+    const sendCommand = vi.fn()
+      .mockResolvedValueOnce({ kind: "ack" as const, corrId: "ack1", status: "rejected" as const, reason: "offline" })
+      .mockResolvedValueOnce({ kind: "ack" as const, corrId: "ack2", status: "accepted" as const, ambiguous: true });
+    const toast = { push: vi.fn(), dismiss: vi.fn() };
+    render(<ThemeProvider><OrderSettingsSection config={config} onSave={vi.fn()} commands={{ sendCommand }} exec={exec} toast={toast} /></ThemeProvider>);
+    fireEvent.click(screen.getByTestId("review-chart-binding-buy-5k"));
+    const enable = () => screen.getByRole("button", { name: "I understand — enable for alpaca-live" }) as HTMLButtonElement;
+    fireEvent.click(enable());
+    await waitFor(() => expect(toast.push).toHaveBeenCalledWith(expect.objectContaining({
+      level: "danger", text: expect.stringContaining("Acknowledgement blocked for alpaca-live: offline"),
+    })));
+    expect(enable().disabled).toBe(false);
+    fireEvent.click(enable());
+    await waitFor(() => expect(toast.push).toHaveBeenCalledWith(expect.objectContaining({
+      level: "warn", text: expect.stringContaining("Acknowledgement outcome unknown for alpaca-live"),
+    })));
+    expect(sendCommand).toHaveBeenCalledTimes(2);
+  });
+
+  it("enables each named live account immediately and waits for venue status", async () => {
+    const exec = makeStores().exec;
+    const config: OrderConfig = {
+      ...SAMPLE_ORDER_CONFIG,
+      templates: SAMPLE_ORDER_CONFIG.templates.map((t) =>
+        t.id === "buy-5k" && t.kind === "place" ? { ...t, type: "STOP_LIMIT" as const, chartBinding: "Shift" as const } : t),
+    };
+    const baseVenue = status.venues[0];
+    const venues = [
+      baseVenue,
+      { ...baseVenue, venue: "alpaca-live", env: "live", heldStopLimitAcknowledged: false },
+      { ...baseVenue, venue: "moomoo-live", broker: "moomoo" as const, env: "live", heldStopLimitAcknowledged: true },
+    ];
+    exec.apply({ kind: "snapshot", topic: "exec.status", payload: { ...status, venues } });
+    const sendCommand = vi.fn(async () => ({ kind: "ack" as const, corrId: "ack1", status: "accepted" as const }));
+    render(<ThemeProvider><OrderSettingsSection config={config} onSave={vi.fn()} commands={{ sendCommand }} exec={exec} /></ThemeProvider>);
+    fireEvent.click(screen.getByTestId("review-chart-binding-buy-5k"));
+
+    expect(screen.getByText("alpaca live · alpaca-live")).toBeTruthy();
+    expect(screen.getByText("moomoo live · moomoo-live")).toBeTruthy();
+    expect(screen.getByText("Enabled for this account")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "I understand — enable for alpaca-live" }));
+    await screen.findByRole("button", { name: "Waiting for account status…" });
+    expect(sendCommand).toHaveBeenCalledWith("AcknowledgeHeldStopLimit", { venue: "alpaca-live" });
+    expect(screen.getAllByText("Enabled for this account")).toHaveLength(1);
+
+    act(() => exec.apply({ kind: "delta", topic: "exec.status", payload: { ...status, venues: [
+      baseVenue,
+      { ...venues[1], heldStopLimitAcknowledged: true },
+      venues[2],
+    ] } }));
+    expect(await screen.findAllByText("Enabled for this account")).toHaveLength(2);
+  });
+
+  it("keeps an accepted acknowledgement pending across Settings unmounts", async () => {
+    const exec = makeStores().exec;
+    const venue = { ...status.venues[0], venue: "alpaca-live", env: "live", heldStopLimitAcknowledged: false };
+    exec.apply({ kind: "snapshot", topic: "exec.status", payload: { ...status, venues: [venue] } });
+    const config: OrderConfig = {
+      ...SAMPLE_ORDER_CONFIG,
+      templates: SAMPLE_ORDER_CONFIG.templates.map((t) =>
+        t.id === "buy-5k" && t.kind === "place" ? { ...t, type: "STOP_LIMIT" as const, chartBinding: "Shift" as const } : t),
+    };
+    const sendCommand = vi.fn(async () => ({ kind: "ack" as const, corrId: "ack1", status: "accepted" as const }));
+    const props = { config, onSave: vi.fn(), commands: { sendCommand }, exec };
+    const first = render(<ThemeProvider><OrderSettingsSection {...props} /></ThemeProvider>);
+    fireEvent.click(screen.getByTestId("review-chart-binding-buy-5k"));
+    fireEvent.click(screen.getByRole("button", { name: "I understand — enable for alpaca-live" }));
+    await screen.findByRole("button", { name: "Waiting for account status…" });
+    first.unmount();
+
+    render(<ThemeProvider><OrderSettingsSection {...props} /></ThemeProvider>);
+    fireEvent.click(screen.getByTestId("review-chart-binding-buy-5k"));
+    const waiting = await screen.findByRole("button", { name: "Waiting for account status…" });
+    expect((waiting as HTMLButtonElement).disabled).toBe(true);
+    expect(sendCommand).toHaveBeenCalledTimes(1);
+
+    act(() => exec.apply({ kind: "delta", topic: "exec.status", payload: {
+      ...status, venues: [{ ...venue, note: "account identity refreshed" }],
+    } }));
+    expect((screen.getByRole("button", { name: "Waiting for account status…" }) as HTMLButtonElement).disabled).toBe(true);
+
+    act(() => exec.apply({ kind: "snapshot", topic: "exec.status", payload: {
+      ...status, venues: [{ ...venue, note: "account identity refreshed" }],
+    } }));
+    await waitFor(() => expect((screen.getByRole("button", {
+      name: "I understand — enable for alpaca-live",
+    }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("updates reopened Settings when a pending acknowledgement is rejected", async () => {
+    const exec = makeStores().exec;
+    const venue = { ...status.venues[0], venue: "alpaca-live", env: "live", heldStopLimitAcknowledged: false };
+    exec.apply({ kind: "snapshot", topic: "exec.status", payload: { ...status, venues: [venue] } });
+    const config: OrderConfig = {
+      ...SAMPLE_ORDER_CONFIG,
+      templates: SAMPLE_ORDER_CONFIG.templates.map((t) =>
+        t.id === "buy-5k" && t.kind === "place" ? { ...t, type: "STOP_LIMIT" as const, chartBinding: "Shift" as const } : t),
+    };
+    let resolveCommand!: (ack: AckMsg) => void;
+    const sendCommand = vi.fn(() => new Promise<AckMsg>((resolve) => { resolveCommand = resolve; }));
+    const props = { config, onSave: vi.fn(), commands: { sendCommand }, exec };
+    const first = render(<ThemeProvider><OrderSettingsSection {...props} /></ThemeProvider>);
+    fireEvent.click(screen.getByTestId("review-chart-binding-buy-5k"));
+    fireEvent.click(screen.getByRole("button", { name: "I understand — enable for alpaca-live" }));
+    await screen.findByRole("button", { name: "Waiting for account status…" });
+    first.unmount();
+
+    render(<ThemeProvider><OrderSettingsSection {...props} /></ThemeProvider>);
+    fireEvent.click(screen.getByTestId("review-chart-binding-buy-5k"));
+    expect((screen.getByRole("button", { name: "Waiting for account status…" }) as HTMLButtonElement).disabled).toBe(true);
+
+    await act(async () => resolveCommand({ kind: "ack", corrId: "ack1", status: "blocked", reason: "offline" }));
+    await waitFor(() => expect((screen.getByRole("button", {
+      name: "I understand — enable for alpaca-live",
+    }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
   it("clears STOP_LIMIT-only settings when changing the order type", () => {
     const { onSave } = wrap();
     fireEvent.change(screen.getByLabelText("type-buy-5k"), { target: { value: "STOP_LIMIT" } });

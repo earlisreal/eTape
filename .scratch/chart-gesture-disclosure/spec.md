@@ -1,6 +1,6 @@
 # Chart Order Gesture disclosure in Settings
 
-Status: ready-for-agent — design approved by Earl on 2026-09-30.
+Status: implemented — design approved by Earl on 2026-09-30.
 
 ## Problem
 
@@ -127,6 +127,27 @@ test seams. After implementation, update relevant execution/panel READMEs and
 run the repository's required Windows validation checklist with proportional
 behavioral coverage. No live-order activity is authorized by this specification.
 
+## Implementation and validation
+
+The Settings disclosure now stages chart-gesture edits until Save and offers
+per-live-account enablement from every bound template. Account status is shown
+as enabled only after ExecStore confirms it. The chart blocks unacknowledged
+live Engine-Held routes with a visible Settings instruction and custody label;
+acknowledgement does not replay the blocked gesture. The execution and chart
+panel READMEs were updated. No live-order activity was used.
+
+Pending acknowledgement guards survive closing and reopening Settings in the
+same ExecStore. False status deltas keep the request pending; confirmed status,
+account removal, rejection, or an unknown command result clears it. A newer
+status snapshot that still reports false also clears stale pending state after
+an engine reconnect, allowing the current account identity to be acknowledged.
+
+Passed checks: `go test ./...`, `go test -race -short ./...`, `go vet ./...`,
+`golangci-lint run`, `mingw32-make -C engine gen-ts-check`, `npm ci`,
+`npm run lint`, `npm test`, and `npm run build`. Focused Settings and chart-entry
+regression tests also passed. Hosted CI must still complete successfully after
+the change is pushed.
+
 ## Design verification
 
 The original symptom was reproduced through the actual ChartStopLimitEntry:
@@ -142,7 +163,7 @@ dialog stayed mounted, ruling out disclosure-state clearing; movement occurred
 after pointerup, ruling out drag cancellation. Temporary probes were removed,
 and the restored ChartStopLimitEntry suite passed all three tests.
 
-The design and glossary passed documentation-link and git diff checks. Full CI
-is not required for these documentation-only changes; feature acceptance checks
-above remain pending implementation. Earl accepted all five recommendations
-across the two grilling rounds, completing shared understanding.
+The design and glossary passed documentation-link and git diff checks. Earl
+accepted all five recommendations across the two grilling rounds, completing
+shared understanding; the implementation and validation above complete that
+approved design.

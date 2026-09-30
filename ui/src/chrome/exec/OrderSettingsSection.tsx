@@ -12,13 +12,14 @@
 // reorder a newly-added card ahead of the other kind's trailing cards, breaking
 // the "last remove button = most recently added template" invariant the
 // stale-raw-edit-on-reused-id regression test relies on.
-import { useEffect, useState, type CSSProperties, type DragEvent } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type DragEvent } from "react";
 import { useTheme } from "../ThemeProvider";
 import { FONTS, type Palette } from "../../render/palette";
 import { HoverButton } from "../controls/HoverButton";
 import { Button } from "../controls/Button";
-import type { Side, OrderType, TIF, OrderSession } from "../../wire/contract";
+import type { AckMsg, Side, OrderType, TIF, OrderSession } from "../../wire/contract";
 import type { ToastApi } from "../Toast";
+import type { ExecStore } from "../../data/ExecStore";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 import type { SizingSpec, SizingMode } from "./sizing";
 import {
@@ -28,6 +29,30 @@ import {
 import { normalizeCombo } from "./hotkeys";
 import { Keycap } from "./Keycap";
 import { StepField } from "./StepField";
+
+interface PendingAcknowledgements {
+  venues: Set<string>;
+  listeners: Set<() => void>;
+}
+
+const pendingAcknowledgementsByExec = new WeakMap<ExecStore, PendingAcknowledgements>();
+const acknowledgementSnapshotByExec = new WeakMap<ExecStore, Map<string, number>>();
+const noPendingAcknowledgements = new Set<string>();
+
+function pendingAcknowledgements(exec: ExecStore): PendingAcknowledgements {
+  let state = pendingAcknowledgementsByExec.get(exec);
+  if (!state) {
+    state = { venues: new Set(), listeners: new Set() };
+    pendingAcknowledgementsByExec.set(exec, state);
+  }
+  return state;
+}
+
+function publishPendingAcknowledgements(exec: ExecStore, venues: Set<string>): void {
+  const state = pendingAcknowledgements(exec);
+  state.venues = venues;
+  state.listeners.forEach((listener) => listener());
+}
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
 const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
@@ -257,6 +282,8 @@ interface TemplateCardProps {
   clearRawEdit: (key: string) => void;
   patch: (id: string, over: Partial<ActionTemplate>) => void;
   clearChartBinding: (id: string) => void;
+  requestChartBinding: (id: string, binding: ChartBinding, trigger: HTMLElement) => void;
+  reviewChartBinding: (id: string, trigger: HTMLElement) => void;
   isPlaced: boolean;
   onToggleDeck: (id: string, placed: boolean) => void;
   onRemove: (id: string) => void;
@@ -267,7 +294,7 @@ interface TemplateCardProps {
 // across renders — a component defined inside another component's body gets a
 // fresh type every render, forcing React to unmount+remount every card (and
 // drop input focus) on each keystroke.
-function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEdits, setRawEdit, clearRawEdit, patch, clearChartBinding, isPlaced, onToggleDeck, onRemove, onMove }: TemplateCardProps): JSX.Element {
+function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEdits, setRawEdit, clearRawEdit, patch, clearChartBinding, requestChartBinding, reviewChartBinding, isPlaced, onToggleDeck, onRemove, onMove }: TemplateCardProps): JSX.Element {
   const card: CSSProperties = { border: `1px solid ${palette.border}`, borderRadius: 6, background: palette.surface, padding: "8px 10px 10px", marginBottom: 8 };
   const eyebrow: CSSProperties = { fontSize: 9.5, letterSpacing: "0.08em", textTransform: "uppercase", color: palette.textMuted, marginBottom: 4 };
   const headerRow: CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 };
@@ -393,12 +420,14 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
                 <span style={fieldLabel}>Chart gesture</span>
                 <select aria-label={`chart-binding-${t.id}`} className="field" value={t.chartBinding ?? ""} onChange={(e) => {
                   const binding = e.target.value as ChartBinding | "";
-                  if (binding) patch(t.id, { chartBinding: binding }); else clearChartBinding(t.id);
+                  if (binding) requestChartBinding(t.id, binding, e.currentTarget); else clearChartBinding(t.id);
                 }} style={{ width: 132, borderColor: chartBindingDup ? palette.danger : palette.border }}>
                   <option value="">Unbound</option>
                   {CHART_BINDINGS.map((binding) => <option key={binding} value={binding}>{binding}+Click</option>)}
                 </select>
                 {chartBindingDup ? <span style={{ color: palette.danger, fontSize: 10 }}>duplicate chart binding</span> : null}
+                {t.chartBinding ? <Button type="button" data-testid={`review-chart-binding-${t.id}`}
+                  onClick={(e) => reviewChartBinding(t.id, e.currentTarget)}>Review / enable live accounts</Button> : null}
               </div>
             </div>
           ) : null}
@@ -500,10 +529,46 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
   );
 }
 
-export function OrderSettingsSection({ config, onSave, toast, onClose }: {
+export function OrderSettingsSection({ config, onSave, toast, onClose, commands, exec }: {
   config: OrderConfig; onSave: (next: OrderConfig) => void; toast?: ToastApi; onClose?: () => void;
+  commands?: { sendCommand(name: string, args: unknown): Promise<AckMsg> } | undefined; exec?: ExecStore | undefined;
 }): JSX.Element {
   const { palette } = useTheme();
+  const execSnapshot = useSyncExternalStore((cb) => exec?.subscribe(cb) ?? (() => {}), () => exec?.getSnapshot() ?? null, () => null);
+  const venueStatuses = execSnapshot?.status?.venues;
+  const statusSnapshotRevision = execSnapshot?.statusSnapshotRevision ?? 0;
+  const liveVenues = venueStatuses?.filter((v) => v.env?.toLowerCase() === "live") ?? [];
+  const pending = useSyncExternalStore((listener) => {
+    if (!exec) return () => {};
+    const state = pendingAcknowledgements(exec);
+    state.listeners.add(listener);
+    return () => state.listeners.delete(listener);
+  }, () => exec ? pendingAcknowledgements(exec).venues : noPendingAcknowledgements,
+  () => noPendingAcknowledgements);
+  const savePendingAcknowledgements = (pending: Set<string>) => {
+    if (exec) publishPendingAcknowledgements(exec, pending);
+  };
+  const [chartDisclosure, setChartDisclosure] = useState<{ templateId: string; binding: ChartBinding | null } | null>(null);
+  const disclosureCancelRef = useRef<HTMLButtonElement>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (chartDisclosure) disclosureCancelRef.current?.focus();
+    else if (returnFocusRef.current?.isConnected) returnFocusRef.current.focus();
+  }, [chartDisclosure]);
+  useEffect(() => {
+    if (!venueStatuses) return;
+    const pending = exec ? pendingAcknowledgements(exec).venues : noPendingAcknowledgements;
+    const acceptedSnapshots = exec ? acknowledgementSnapshotByExec.get(exec) : undefined;
+    const next = new Set([...pending].filter((id) => {
+      const venue = venueStatuses.find((v) => v.venue === id);
+      return !!venue && !venue.heldStopLimitAcknowledged
+        && (!acceptedSnapshots?.has(id) || acceptedSnapshots.get(id) === statusSnapshotRevision);
+    }));
+    if (next.size !== pending.size) {
+      for (const id of pending) if (!next.has(id)) acceptedSnapshots?.delete(id);
+      savePendingAcknowledgements(next);
+    }
+  }, [venueStatuses, statusSnapshotRevision, exec]);
   const [templates, setTemplates] = useState<ActionTemplate[]>(() => normalizeOrderConfig(config).templates.map((t) => ({ ...t })));
   const [deck, setDeck] = useState<HotkeyDeckConfig>(() => cloneHotkeyDeck(normalizeOrderConfig(config).hotkeyDeck));
   const [addOpen, setAddOpen] = useState(false);
@@ -582,6 +647,50 @@ export function OrderSettingsSection({ config, onSave, toast, onClose }: {
     delete withoutBinding.chartBinding;
     return withoutBinding;
   }));
+  const requestChartBinding = (templateId: string, binding: ChartBinding, trigger: HTMLElement) => {
+    returnFocusRef.current = trigger;
+    setChartDisclosure({ templateId, binding });
+  };
+  const reviewChartBinding = (templateId: string, trigger: HTMLElement) => {
+    returnFocusRef.current = trigger;
+    setChartDisclosure({ templateId, binding: null });
+  };
+  const closeChartDisclosure = (continueSetup: boolean) => {
+    if (continueSetup && chartDisclosure?.binding) patch(chartDisclosure.templateId, { chartBinding: chartDisclosure.binding });
+    setChartDisclosure(null);
+  };
+  const acknowledgeVenue = async (venue: string) => {
+    const pending = exec ? pendingAcknowledgements(exec).venues : noPendingAcknowledgements;
+    if (!commands || !exec || !venueStatuses || pending.has(venue)) return;
+    savePendingAcknowledgements(new Set(pendingAcknowledgements(exec).venues).add(venue));
+    let waitingForStatus = false;
+    try {
+      const result = await commands.sendCommand("AcknowledgeHeldStopLimit", { venue });
+      if (result.ambiguous) toast?.push({ level: "warn", text: `Acknowledgement outcome unknown for ${venue}; verify venue status.` });
+      else if (result.status !== "accepted") toast?.push({ level: "danger", text: `Acknowledgement blocked for ${venue}: ${result.reason ?? "unknown reason"}.` });
+      else {
+        waitingForStatus = true;
+        const status = exec?.status();
+        const venueStatus = status?.venues.find((v) => v.venue === venue);
+        const pending = exec ? pendingAcknowledgements(exec).venues : noPendingAcknowledgements;
+        if (exec && pending.has(venue) && venueStatus) {
+          const acceptedSnapshots = acknowledgementSnapshotByExec.get(exec) ?? new Map<string, number>();
+          acceptedSnapshots.set(venue, exec.getSnapshot().statusSnapshotRevision);
+          acknowledgementSnapshotByExec.set(exec, acceptedSnapshots);
+        }
+        toast?.push({ level: "warn", text: `Acknowledgement accepted for ${venue}; waiting for live venue status.` });
+      }
+    } catch {
+      toast?.push({ level: "warn", text: `Acknowledgement outcome unknown for ${venue}; verify venue status.` });
+    } finally {
+      if (!waitingForStatus) {
+        if (exec) acknowledgementSnapshotByExec.get(exec)?.delete(venue);
+        const pending = exec ? pendingAcknowledgements(exec).venues : noPendingAcknowledgements;
+        const next = new Set(pending); next.delete(venue);
+        savePendingAcknowledgements(next);
+      }
+    }
+  };
   // Removing a row must also drop its rawEdits entries. uid() below is
   // deterministic in templates.length alone, so an add-then-remove that
   // returns the array to a prior length reuses the exact same id on the
@@ -681,7 +790,8 @@ export function OrderSettingsSection({ config, onSave, toast, onClose }: {
           chartBindingDup={t.kind === "place" && !!t.chartBinding && duplicateChartBindings.has(t.chartBinding)}
           isFirst={i === 0} isLast={i === templates.length - 1}
           rawEdits={rawEdits} setRawEdit={setRawEdit} clearRawEdit={clearRawEdit}
-          patch={patch} clearChartBinding={clearChartBinding} isPlaced={isPlaced(t.id)} onToggleDeck={toggleDeck}
+          patch={patch} clearChartBinding={clearChartBinding} requestChartBinding={requestChartBinding} reviewChartBinding={reviewChartBinding}
+          isPlaced={isPlaced(t.id)} onToggleDeck={toggleDeck}
           onRemove={removeTemplate} onMove={moveTemplate}
         />
       ))}
@@ -710,6 +820,56 @@ export function OrderSettingsSection({ config, onSave, toast, onClose }: {
           Save
         </Button>
       </div>
+      {chartDisclosure && <div onClick={() => closeChartDisclosure(false)} style={{ position: "fixed", inset: 0, zIndex: 10001,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 16, background: "rgba(0,0,0,.55)" }}>
+        <section role="dialog" aria-modal="true" aria-labelledby="chart-gesture-disclosure-title" data-drawing-ui="true"
+          onClick={(e) => e.stopPropagation()} onKeyDown={(e) => {
+            if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeChartDisclosure(false); }
+            if (e.key === "Tab") {
+              const focusable = Array.from(e.currentTarget.querySelectorAll<HTMLElement>(
+                'button:not(:disabled), a[href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+              ));
+              const first = focusable[0];
+              const last = focusable[focusable.length - 1];
+              if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+              else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+            }
+          }}
+          style={{ boxSizing: "border-box", width: "min(540px, 100%)", maxHeight: "85vh", overflowY: "auto", padding: 18,
+            border: `1px solid ${palette.borderStrong}`, borderRadius: 6, background: palette.surface, color: palette.text, boxShadow: "0 8px 30px #000a" }}>
+          <h2 id="chart-gesture-disclosure-title" style={{ fontFamily: FONTS.serif, fontSize: 17, margin: "0 0 10px" }}>Chart Order Gesture disclosure</h2>
+          <p style={{ fontSize: 12, lineHeight: 1.5, color: palette.textMuted }}>
+            The selected modifier + click places this STOP_LIMIT Action Template at the clicked chart price using the chart&apos;s Link Group Execution Venue.
+            When a live order is held by eTape, there is no broker order or protection before the trigger. eTape watches primary moomoo OpenD
+            Last-Eligible Prints; if the engine or feed disconnects, trigger evaluation pauses and requires manual Resume.
+          </p>
+          <p style={{ fontSize: 12, lineHeight: 1.5, color: palette.textMuted }}>
+            Settings acknowledges each named live account separately. Enablement applies to every order-entry method for that account and does not place an order.
+            Paper/sim accounts and broker-native routes do not require this acknowledgement. Enabling an account is immediate and remains enabled after closing
+            Settings without saving template edits; template changes still require Save.
+          </p>
+          <div role="group" aria-label="Live accounts" style={{ display: "flex", flexDirection: "column", gap: 6, margin: "12px 0" }}>
+            {!venueStatuses ? <p role="status">Live account status unavailable. Reconnect to view accounts.</p>
+              : liveVenues.length === 0 ? <p>No configured live accounts. Chart gestures can still be saved.</p>
+                : liveVenues.map((v) => <div key={v.venue} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12,
+                    padding: 8, border: `1px solid ${palette.border}`, borderRadius: 4 }}>
+                  <span>{v.broker} live · {v.venue}</span>
+                  {v.heldStopLimitAcknowledged
+                    ? <span role="status">Enabled for this account</span>
+                    : <Button type="button" disabled={!commands || pending.has(v.venue)}
+                        onClick={() => void acknowledgeVenue(v.venue)}>
+                        {pending.has(v.venue) ? "Waiting for account status…" : `I understand — enable for ${v.venue}`}
+                      </Button>}
+                </div>)}
+          </div>
+          <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+            <Button ref={disclosureCancelRef} type="button" onClick={() => closeChartDisclosure(false)}>Not now</Button>
+            <Button type="button" variant="primary" onClick={() => closeChartDisclosure(true)}>
+              {chartDisclosure.binding ? "Continue setup" : "Done"}
+            </Button>
+          </div>
+        </section>
+      </div>}
     </div>
   );
 }

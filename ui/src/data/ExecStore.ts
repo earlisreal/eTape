@@ -12,6 +12,7 @@ interface ExecState {
   closedOrders: Map<string, ClosedOrder>;
   optimistic: Map<string, OptimisticOrder>;
   status: ExecStatus | null;
+  statusSnapshotRevision: number;
 }
 
 function synthOptimistic(o: OptimisticOrder): Order {
@@ -27,7 +28,7 @@ function synthOptimistic(o: OptimisticOrder): Order {
 export class ExecStore extends ReactStore<ExecState> {
   private readonly rejectListeners = new Set<(order: Order) => void>();
 
-  constructor() { super({ accounts: new Map(), positions: [], orders: new Map(), closedOrders: new Map(), optimistic: new Map(), status: null }); }
+  constructor() { super({ accounts: new Map(), positions: [], orders: new Map(), closedOrders: new Map(), optimistic: new Map(), status: null, statusSnapshotRevision: 0 }); }
 
   onOrderRejected(cb: (order: Order) => void): () => void {
     this.rejectListeners.add(cb);
@@ -71,7 +72,8 @@ export class ExecStore extends ReactStore<ExecState> {
         return;
       }
       case "exec.status":
-        this.set({ ...cur, status: m.payload as ExecStatus }); // full replace
+        this.set({ ...cur, status: m.payload as ExecStatus,
+          statusSnapshotRevision: cur.statusSnapshotRevision + (m.kind === "snapshot" ? 1 : 0) }); // full replace
         return;
       default:
         return; // exec.fills is routed to FillStore (Task 14)

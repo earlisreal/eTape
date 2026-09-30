@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type CSSProperties, type MutableRefObject } from "react";
+import { useEffect, useRef, type CSSProperties, type MutableRefObject } from "react";
 import type { AckMsg, StopLimitRoutePreview, SubmitOrderArgs } from "../../../wire/contract";
 import type { Stores } from "../../../data/registry";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
@@ -56,11 +56,13 @@ function deadlineCountdown(deadlineMs: number): string {
   return remaining <= 60_000 ? ` · ${Math.ceil(remaining / 1000)}s remaining` : "";
 }
 
+function settingsAckInstruction(venue: string): string {
+  return `Live engine-held Stop-Limit for ${venue} is not enabled. Open Settings → Orders & hotkeys → Review / enable live accounts.`;
+}
+
 export function ChartStopLimitEntry(props: Props): JSX.Element {
-  const [ackPrompt, setAckPrompt] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const latest = useRef(props); latest.current = props;
-  const snapshotRef = useRef<PreviewSnapshot | null>(null);
   const pointRef = useRef<{ x: number; y: number; event: PointerEvent } | null>(null);
   const gestureRef = useRef<Gesture | null>(null);
   const routeCache = useRef(new Map<string, RouteCache>());
@@ -75,7 +77,6 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
   const hide = () => {
     const root = rootRef.current;
     if (root) { root.style.opacity = "0"; root.style.pointerEvents = "none"; }
-    snapshotRef.current = null;
   };
   const renderSnapshot = (snapshot: PreviewSnapshot, y: number) => {
     const root = rootRef.current;
@@ -84,18 +85,21 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
     const line = root.querySelector<HTMLElement>("[data-entry-line]");
     const chip = root.querySelector<HTMLElement>("[data-entry-chip]");
     const detail = root.querySelector<HTMLElement>("[data-entry-detail]");
-    const color = snapshot.invalid ? "#ff6877" : "#34c6dc";
+    const color = snapshot.invalid || snapshot.needsAck ? "#ff6877" : "#34c6dc";
     root.style.opacity = "1";
     root.style.setProperty("--entry-color", color);
     root.style.setProperty("--entry-y", `${Math.round(y)}px`);
     if (line) { line.style.top = `${Math.round(y)}px`; line.style.right = `${facade.priceScaleWidth()}px`; }
-    if (chip) { chip.textContent = `${snapshot.stopPrice.toFixed(snapshot.stopPrice < 1 ? 4 : 2)}${snapshot.invalid ? " !" : ""}`; chip.style.borderColor = color; chip.style.color = color; }
+    if (chip) { chip.textContent = `${snapshot.stopPrice.toFixed(snapshot.stopPrice < 1 ? 4 : 2)}${snapshot.invalid || snapshot.needsAck ? " !" : ""}`; chip.style.borderColor = color; chip.style.color = color; }
     if (detail) {
       detail.style.borderColor = color; detail.style.color = color;
-      detail.textContent = snapshot.invalid ?? snapshot.detail;
-      detail.title = snapshot.detail;
+      const instruction = snapshot.needsAck ? settingsAckInstruction(snapshot.args.venue) : "";
+      detail.textContent = snapshot.invalid ?? (instruction ? `${snapshot.detail}\n${instruction}` : snapshot.detail);
+      detail.title = instruction ? `${snapshot.detail}\n${instruction}` : snapshot.detail;
+      detail.style.whiteSpace = instruction ? "pre-wrap" : "nowrap";
+      detail.style.textOverflow = instruction ? "clip" : "ellipsis";
+      detail.style.overflow = instruction ? "visible" : "hidden";
     }
-    snapshotRef.current = snapshot;
   };
 
   const activeTemplate = (event: PointerEvent) => {
@@ -208,6 +212,12 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
       if (!route || Date.now() - routeEntry.at >= 250) { schedule(event); return; }
       const snapshot = buildSnapshot(event, resolved, route);
       if (!snapshot || snapshot.invalid) return;
+      if (snapshot.needsAck) {
+        consumedBindings.current.add(resolved.binding);
+        event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
+        announce(settingsAckInstruction(snapshot.args.venue));
+        return;
+      }
       const hostNow = latest.current.hostRef.current;
       if (!hostNow) return;
       gestureRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, snapshot };
@@ -224,12 +234,6 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
       if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) >= 4 || submittedRef.current) { hide(); return; }
       submittedRef.current = true;
       const snapshot = gesture.snapshot;
-      if (snapshot.needsAck) {
-        setAckPrompt(snapshot.args.venue);
-        hide();
-        announce("Read and acknowledge the live engine-held stop-limit disclosure before placing.");
-        return;
-      }
       announce(`Submitting ${snapshot.detail}`);
       void latest.current.sendCommand("SubmitOrder", snapshot.args).then((ack) => {
         if (ack.ambiguous) announce("Order outcome unknown. Verify Open Orders before retrying.");
@@ -282,41 +286,16 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
     gestureRef.current = null;
     pointRef.current = null;
     routeCache.current.clear();
-    setAckPrompt(null);
   }, [props.group, props.symbol, props.linkGroups.venueFor(props.group), props.config.templates]);
 
-  const acknowledgeLiveHeldRisk = async () => {
-    const venue = ackPrompt;
-    if (!venue) return;
-    try {
-      const ack = await latest.current.sendCommand("AcknowledgeHeldStopLimit", { venue });
-      if (ack.ambiguous) { announce("Acknowledgement outcome unknown. Recheck the venue status before placing."); return; }
-      if (ack.status !== "accepted") { announce(`Acknowledgement blocked: ${ack.reason ?? "unknown reason"}.`); return; }
-      setAckPrompt(null);
-      announce("Live engine-held stop-limit acknowledged for this account. Repeat the chart gesture to place.");
-    } catch {
-      announce("Acknowledgement outcome unknown. Recheck the venue status before placing.");
-    }
-  };
-
-  return <div ref={rootRef} data-testid="chart-order-entry-preview" style={{ position: "absolute", inset: 0, opacity: ackPrompt ? 1 : 0,
-    zIndex: 9, pointerEvents: ackPrompt ? "auto" : "none", overflow: "hidden", "--entry-color": "#34c6dc" } as CSSProperties}>
+  return <div ref={rootRef} data-testid="chart-order-entry-preview" style={{ position: "absolute", inset: 0, opacity: 0,
+    zIndex: 9, pointerEvents: "none", overflow: "hidden", "--entry-color": "#34c6dc" } as CSSProperties}>
     <div data-entry-line="true" style={{ position: "absolute", left: 0, right: 0, height: 2,
       background: "repeating-linear-gradient(90deg,var(--entry-color) 0 8px,transparent 8px 13px)" }} />
     <div data-entry-chip="true" style={{ position: "absolute", right: 0, top: "var(--entry-y)", transform: "translateY(-50%)",
       padding: "2px 5px", border: "1px solid #34c6dc", borderRadius: 3, background: "#0c1017", font: "600 10px ui-monospace,monospace" }} />
     <div data-entry-detail="true" style={{ position: "absolute", left: 10, top: 10, maxWidth: "75%", padding: "5px 7px", border: "1px solid #34c6dc",
       borderRadius: 3, background: "rgba(12,16,23,.94)", font: "600 10px ui-monospace,monospace", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }} />
-    {ackPrompt && <div role="dialog" aria-modal="true" aria-label="Live engine-held stop-limit disclosure" data-drawing-ui="true"
-      style={{ position: "absolute", left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: "min(420px, 90%)", padding: 14,
-        border: "1px solid #ffb84d", borderRadius: 6, background: "#111821", color: "#f0f3f8", boxShadow: "0 8px 30px #000a", pointerEvents: "auto", font: "12px system-ui,sans-serif" }}>
-      <strong style={{ display:"block", color:"#ffcf70", marginBottom:8 }}>Held by eTape — no broker protection</strong>
-      <p style={{ margin:"0 0 12px", lineHeight:1.5 }}>eTape watches primary moomoo OpenD Last-Eligible Prints and sends a venue LIMIT only after the trigger. If the engine or feed disconnects, trigger evaluation pauses and needs manual Resume. This acknowledgement is tied to {ackPrompt} and its current account credentials.</p>
-      <div style={{ display:"flex", justifyContent:"flex-end", gap:8 }}>
-        <button type="button" onClick={() => setAckPrompt(null)} style={{ padding:"5px 9px", background:"#202b38", color:"#dce3ec", border:"1px solid #526174", borderRadius:4, cursor:"pointer" }}>Not now</button>
-        <button type="button" onClick={() => void acknowledgeLiveHeldRisk()} style={{ padding:"5px 9px", background:"#6d4c11", color:"#fff2d3", border:"1px solid #ffcf70", borderRadius:4, cursor:"pointer" }}>I understand — enable</button>
-      </div>
-    </div>}
     <span data-entry-announcement="true" aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clipPath: "inset(50%)" }} />
   </div>;
 }

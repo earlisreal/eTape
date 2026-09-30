@@ -52,3 +52,10 @@ route preview and submit path. Eligible EXTENDED DAY stop-limits in pre/post
 are explicitly shown as held by eTape (no broker protection); only a fresh
 Last-Eligible print submits the linked venue LIMIT child. UI preview is not
 execution authority and cannot silently change the resolved Link Group venue.
+
+Adding or changing a Chart Order Gesture opens a Settings disclosure; continuing
+stages the binding until Save. Bound templates expose **Review / enable live
+accounts** so each live account can be acknowledged separately. Account
+enablement applies across order-entry methods and appears enabled only after
+ExecStore receives authoritative venue status; paper/sim and broker-native
+routes do not require this acknowledgement.
