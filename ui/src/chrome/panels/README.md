@@ -47,4 +47,6 @@ Escape/right-click cancels the drag. Engine-held stop-limit markers switch to
 the child LIMIT after trigger; paused parents stay visible and require explicit
 Resume. The Order Ticket shows local-vs-native custody and the session deadline
 before submit, including the no-broker-protection disclosure for live local
-custody.
+custody. The order overlay and clipped live announcement stay absolutely
+positioned in every state so they do not move the native chart origin or
+invalidate host-relative price coordinates.

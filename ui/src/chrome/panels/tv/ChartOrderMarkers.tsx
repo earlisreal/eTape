@@ -239,7 +239,6 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     void sendReplace(marker, snapOrderMarkerPrice(marker.price + (event.key === "ArrowUp" ? tick : -tick)));
   };
 
-  if (groups.length === 0) return <span aria-live="polite" className="chart-order-announcement">{announcement}</span>;
   const sorted = [...groups].sort((a, b) => a.price - b.price || a.kind.localeCompare(b.kind));
   const stack = new Map<string, number>();
   return <div data-testid="chart-order-markers" data-drawing-ui="true" style={{ position:"absolute", inset:0, zIndex:8, pointerEvents:"none", overflow:"hidden" }}>

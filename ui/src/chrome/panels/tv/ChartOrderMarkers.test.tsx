@@ -56,4 +56,13 @@ describe("ChartOrderMarkers", () => {
     fireEvent.click(screen.getByRole("button", { name:"Cancel BUY 10 LIMIT" }));
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("CancelOrder", { venue:"sim", orderId:"o1" }));
   });
+
+  it("keeps an absolute chart overlay mounted with no working orders", () => {
+    const { host } = mount([]);
+    const overlay = host.querySelector<HTMLElement>("[data-testid='chart-order-markers']");
+    const liveRegion = overlay?.querySelector<HTMLElement>(".chart-order-announcement");
+    expect(overlay?.style.position).toBe("absolute");
+    expect(liveRegion?.getAttribute("aria-live")).toBe("polite");
+    expect(liveRegion?.style.clipPath).toBe("inset(50%)");
+  });
 });
