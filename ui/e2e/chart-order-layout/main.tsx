@@ -3,8 +3,14 @@ import { createRoot } from "react-dom/client";
 import { createChart, CandlestickSeries } from "lightweight-charts";
 import { ChartOrderMarkers } from "../../src/chrome/panels/tv/ChartOrderMarkers";
 import { ChartStopLimitEntry } from "../../src/chrome/panels/tv/ChartStopLimitEntry";
+import { OrderConfigProvider, useOrderConfig } from "../../src/chrome/exec/useOrderConfig";
+import { ThemeProvider } from "../../src/chrome/ThemeProvider";
+import { ToastProvider } from "../../src/chrome/Toast";
+import { PanelFrame } from "../../src/chrome/PanelFrame";
 import { makeStores } from "../../src/data/registry";
 import { LinkGroups } from "../../src/chrome/linkGroups";
+import { Scheduler } from "../../src/render/Scheduler";
+import { browserRaf } from "../../src/render/surface";
 import "../../src/global.css";
 
 // This harness never creates a socket, broker adapter, or engine connection.
@@ -22,29 +28,65 @@ stores.exec.apply({ kind: "snapshot", topic: "exec.account", key: "sim", payload
   realized: 0, dayPnl: 0, leverage: 1, tsMs: 1, cycleStartMs: 0, cycleRealized: 0,
 } });
 const config = { activeVenue: "sim", templates: [{ kind: "place", id: "stop", label: "Stop", side: "BUY", type: "STOP_LIMIT",
-  tif: "DAY", session: "EXTENDED", priceSource: "Last", priceOffset: 0, limitCushion: 0, limitCushionUnit: "$",
+  tif: "DAY", session: "EXTENDED", priceSource: "Last", priceOffset: 0, limitCushion: 0.05, limitCushionUnit: "$",
   chartBinding: "Shift", sizing: { mode: "Shares", shares: 1 } }] };
 let serial = 0;
+let nextCancelBehavior = "accepted";
+let pendingCancelResolve = null;
 const sendCommand = async (name, args) => {
+  if (name === "GetConfig") return { kind: "ack", corrId: "config", status: "accepted", value: config };
+  if (name === "SetConfig") return { kind: "ack", corrId: "config", status: "accepted" };
   if (args.venue !== "sim") throw new Error("Only simulated orders are accepted");
   if (name === "SubmitOrder") {
     const id = `sim-${++serial}`;
-    window.repro.lastSubmitted = args;
+    if (window.repro) window.repro.lastSubmitted = args;
     stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
       ...args, id, status: "ACCEPTED", executedQty: 0, leavesQty: args.qty, avgFillPrice: 0,
       rejectReason: "", replacesId: "", createdMs: 1, updatedMs: 1, held: { phase: "WAITING", deadlineMs: Date.now() + 3600000 },
     } });
     return { kind: "ack", corrId: id, status: "accepted", orderId: id };
   }
+  if (name === "ReplaceOrder") {
+    window.repro.lastReplace = args;
+    const order = stores.exec.getSnapshot().orders.get(args.orderId);
+    stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
+      ...order, limitPrice: args.limitPrice, stopPrice: args.stopPrice, updatedMs: order.updatedMs + 1,
+    } });
+    return { kind: "ack", corrId: args.orderId, status: "accepted" };
+  }
   if (name === "CancelOrder") {
+    const behavior = nextCancelBehavior;
+    nextCancelBehavior = "accepted";
+    if (behavior === "pending") return new Promise(resolve => {
+      pendingCancelResolve = () => {
+        const order = stores.exec.getSnapshot().orders.get(args.orderId);
+        stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { ...order, status: "CANCELED" } });
+        pendingCancelResolve = null;
+        resolve({ kind: "ack", corrId: args.orderId, status: "accepted" });
+      };
+    });
+    if (behavior === "rejected") return { kind: "ack", corrId: args.orderId, status: "rejected", reason: "simulated rejection" };
+    if (behavior === "unknown") return { kind: "ack", corrId: args.orderId, status: "accepted", ambiguous: true };
     const order = stores.exec.getSnapshot().orders.get(args.orderId);
     stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { ...order, status: "CANCELED" } });
     return { kind: "ack", corrId: args.orderId, status: "accepted" };
   }
   throw new Error(`Unsupported simulated command: ${name}`);
 };
-const sendQuery = async () => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", deadlineMs: Date.now() + 3600000,
-  phase: "PRE", hasTrustedEligiblePrint: true, lastEligiblePrice: 4.4 });
+const chartBars = Array.from({ length: 80 }, (_, i) => {
+  const bucketStart = new Date(Date.parse("2026-10-01T13:30:00.000Z") + i * 60_000).toISOString();
+  const close = 5.3 - i * 0.01;
+  return { symbol: "US.AAPL", timeframe: "1m", bucketStart, o: close + 0.03, h: close + 0.1,
+    l: close - 0.1, c: close, v: 100 + i, inProgress: false };
+});
+const sendQuery = async (name, args) => {
+  if (name === "QueryChartWindow") return { ...(args ?? {}), symbol: "US.AAPL", timeframe: "1m",
+    fromMs: Date.parse(chartBars[0].bucketStart), toMs: Date.parse(chartBars.at(-1).bucketStart) + 60_000,
+    bars: chartBars, indicators: [], historyRevision: 1 };
+  if (name === "QueryFills") return [];
+  return { route: "ENGINE_HELD", effectiveSession: "EXTENDED", deadlineMs: Date.now() + 3600000,
+    phase: "PRE", hasTrustedEligiblePrint: true, lastEligiblePrice: 4.4 };
+};
 
 function App() {
   const hostRef = useRef(null), facadeRef = useRef(null), layoutRef = useRef(() => {}), chooserOpenRef = useRef(false);
@@ -65,7 +107,7 @@ function App() {
     };
     const observer = new ResizeObserver(([e]) => chart.resize(Math.floor(e.contentRect.width), Math.floor(e.contentRect.height)));
     observer.observe(host);
-    window.repro = { lastSubmitted: null, ready: true, measure(cursorY = 280) {
+    window.repro = { lastSubmitted: null, lastReplace: null, ready: true, measure(cursorY = 280) {
       const hostBox = host.getBoundingClientRect(), panelBox = host.closest("[data-testid='panel-body']").getBoundingClientRect();
       const nativeBox = host.querySelector(".tv-lightweight-charts").getBoundingClientRect();
       const table = host.querySelector(".tv-lightweight-charts table"), axisBox = table.rows[table.rows.length - 1].getBoundingClientRect();
@@ -80,9 +122,28 @@ function App() {
         stopDrawnY: nativeBox.top + series.priceToCoordinate(actualStop), ghostY: ghostBox?.top,
         announcement: host.querySelector(".chart-order-announcement")?.textContent,
         previewStopText: host.querySelector("[data-entry-chip]")?.textContent,
+        previewDetailText: host.querySelector("[data-entry-detail]")?.textContent,
         submittedStop: window.repro.lastSubmitted?.stopPrice,
+        submittedLimit: window.repro.lastSubmitted?.limitPrice,
         markers: host.querySelectorAll("[data-order-group]").length,
         range: chart.timeScale().getVisibleLogicalRange(), candleY: series.priceToCoordinate(4.8) };
+    }, addOrder(id, type, price) {
+      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
+        venue: "sim", id, symbol: "US.AAPL", side: "BUY", type, tif: "DAY", session: "EXTENDED", qty: 1,
+        limitPrice: type === "LIMIT" ? price : price - 0.05, stopPrice: type === "STOP_LIMIT" ? price : 0,
+        status: "ACCEPTED", executedQty: 0, leavesQty: 1, avgFillPrice: 0, rejectReason: "", replacesId: "",
+        createdMs: 1, updatedMs: 1, ...(type === "STOP_LIMIT" ? { held: { phase: "WAITING", deadlineMs: Date.now() + 3600000 } } : {}),
+      } });
+    }, setNextCancelBehavior(behavior) { nextCancelBehavior = behavior; },
+    resolvePendingCancel() { pendingCancelResolve?.(); },
+    finishOrder(id) {
+      const order = stores.exec.getSnapshot().orders.get(id);
+      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { ...order, status: "CANCELED" } });
+    },
+    setZoom(range) { chart.timeScale().setVisibleLogicalRange(range); },
+    resizePanel(width, height) {
+      const panel = host.closest("[data-testid='panel-body']");
+      panel.style.width = `${width}px`; panel.style.height = `${height}px`;
     } };
     requestAnimationFrame(() => { layoutRef.current(); setAxisWidth(chart.priceScale("right").width()); });
     return () => { observer.disconnect(); chart.remove(); };
@@ -99,4 +160,36 @@ function App() {
     </div>
   </div>;
 }
-createRoot(document.getElementById("root")).render(<App />);
+
+function ConfigReadyProbe() {
+  const { loaded } = useOrderConfig();
+  useEffect(() => {
+    window.chartPanelProbe = { isReady: () => loaded && stores.bars.series("US.AAPL", "1m").length === chartBars.length
+      && !!document.querySelector("[data-testid='chart-host'] .tv-lightweight-charts"),
+      errors: [] };
+    if (loaded) setTimeout(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+      seq: 1, ts: new Date().toISOString(), kind: "chart-ready", detail: "US.AAPL",
+    } }), 0);
+  }, [loaded]);
+  return null;
+}
+
+function ProductionChartPanel() {
+  const [scheduler] = useState(() => new Scheduler(browserRaf, (_id, error) => {
+    window.chartPanelProbe?.errors.push(String(error));
+  }));
+  useEffect(() => { scheduler.start(); return () => scheduler.stop(); }, [scheduler]);
+  const chartConfig = { id: "chart-order-layout", panelId: "chart", group: "green",
+    settings: { symbol: "US.AAPL", timeframe: "1m" } };
+  const demandRegistry = { ensure: async () => ({ kind: "ack", corrId: "demand", status: "accepted" }), release() {} };
+  const panelApi = { isActive: true, onDidActiveChange: () => ({ dispose() {} }) };
+  return <div data-testid="panel-shell" style={{ position: "absolute", left: 80, top: 100, width: 760, height: 560 }}>
+    <ThemeProvider><ToastProvider><OrderConfigProvider commands={{ sendCommand }}>
+      <ConfigReadyProbe />
+      <PanelFrame config={chartConfig} stores={stores} scheduler={scheduler} linkGroups={linkGroups} demandRegistry={demandRegistry}
+        commands={{ sendCommand, sendQuery }} onConfigChange={() => {}} onGroupChange={() => {}} onClose={() => {}} api={panelApi} />
+    </OrderConfigProvider></ToastProvider></ThemeProvider>
+  </div>;
+}
+
+createRoot(document.getElementById("root")).render(location.search === "?production" ? <ProductionChartPanel /> : <App />);

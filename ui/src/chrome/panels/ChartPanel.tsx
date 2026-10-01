@@ -60,6 +60,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
   facade: ChartApiFacade; setPalette: (p: Palette) => void; drawings: DrawingsPrimitive; visibleExtrema: VisibleExtremaPrimitive;
 } {
   let main: ISeriesApi<"Candlestick" | "Bar" | "Line" | "Area"> | null = null;
+  let volumeScale: ISeriesApi<"Histogram"> | null = null;
   let sessionAttached = false;
   let watermark: { detach: () => void } | null = null;
   const session = new SessionShadingPrimitive(palette);
@@ -90,10 +91,21 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     addSeries: (kind, options, paneIndex) => {
       const s = kind === "line" ? chart.addSeries(LineSeries, options as object, paneIndex)
         : chart.addSeries(HistogramSeries, options as object, paneIndex);
+      if (kind === "histogram" && (options as { priceScaleId?: string }).priceScaleId === "") {
+        volumeScale = s as ISeriesApi<"Histogram">;
+      }
       return s as unknown as LwcSeries;
     },
-    removeSeries: (s) => chart.removeSeries(s as unknown as ISeriesApi<"Line">),
-    setPriceScaleMargins: (id, margins) => chart.priceScale(id).applyOptions({ scaleMargins: margins }),
+    removeSeries: (s) => {
+      const series = s as unknown as ISeriesApi<"Line">;
+      if ((series as unknown as object) === (volumeScale as unknown as object)) volumeScale = null;
+      chart.removeSeries(series);
+    },
+    setPriceScaleMargins: (id, margins) => {
+      // Lightweight Charts creates the empty volume scale with its first series.
+      if (id === "" && !volumeScale) return;
+      chart.priceScale(id).applyOptions({ scaleMargins: margins });
+    },
     setSessionBands: (bands) => session.setBands(bands),
     setFillMarkers: (m) => diamonds.setMarkers(m),
     timeToCoordinate: (ms) => chart.timeScale().timeToCoordinate((Math.floor(ms / 1000)) as unknown as Time),
