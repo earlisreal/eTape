@@ -277,6 +277,69 @@ func (a *Adapter) currentLegRows(orders []exec.Order) map[string]exec.Order {
 	return best
 }
 
+// restoreOrderStateLocked reconstructs the adapter's process-local replace
+// state from TZ's today-order blotter. Snapshot seeds every leg; reconcile
+// preserves the current leg's previous counter so it can synthesize fills
+// missed during a reconnect.
+func (a *Adapter) restoreOrderStateLocked(orders []exec.Order, currentLegs map[string]exec.Order, preserveCurrentExec bool) {
+	for _, o := range orders {
+		domainOID := a.domainID(o.ID)
+		if n := replaceSuffixNum(o.ID); n > a.replaceSeq[domainOID] {
+			a.replaceSeq[domainOID] = n
+		}
+		current := currentLegs[domainOID]
+		if current.ID != o.ID && o.ExecutedQty > a.seenExecuted[o.ID] {
+			a.seenExecuted[o.ID] = o.ExecutedQty
+		} else if current.ID == o.ID {
+			if !preserveCurrentExec && o.ExecutedQty > a.seenExecuted[o.ID] {
+				a.seenExecuted[o.ID] = o.ExecutedQty
+			} else if _, seen := a.seenExecuted[o.ID]; !seen {
+				a.seenExecuted[o.ID] = o.ExecutedQty
+			}
+		}
+	}
+
+	for domainOID, current := range currentLegs {
+		a.tzIDByDomain[domainOID] = current.ID
+		if _, exists := a.orderReq[domainOID]; exists {
+			continue
+		}
+		if current.Type > exec.TypeStopLimit || current.TIF > exec.TIFFOK || current.Qty <= 0 {
+			continue
+		}
+		var priorExec float64
+		for _, leg := range orders {
+			if a.domainID(leg.ID) == domainOID && leg.ID != current.ID {
+				priorExec += a.seenExecuted[leg.ID]
+			}
+		}
+		a.orderReq[domainOID] = exec.OrderRequest{
+			Venue: a.venue, Symbol: current.Symbol, Side: current.Side,
+			Type: current.Type, TIF: current.TIF, Session: current.Session,
+			Qty: priorExec + current.Qty, LimitPrice: current.LimitPrice,
+			StopPrice: current.StopPrice, ClientOrderID: domainOID,
+		}
+	}
+}
+
+// domainOrderLocked folds a selected TZ leg back into its stable eTape order,
+// including fills on superseded legs. Callers hold a.mu.
+func (a *Adapter) domainOrderLocked(o exec.Order) exec.Order {
+	tzCID := o.ID
+	domainOID := a.domainID(tzCID)
+	legExec := max(o.ExecutedQty, a.seenExecuted[tzCID])
+	domainExec := a.executedForDomainLocked(domainOID) - a.seenExecuted[tzCID] + legExec
+	if req, ok := a.orderReq[domainOID]; ok {
+		o.Qty, o.Type, o.TIF, o.Session = req.Qty, req.Type, req.TIF, req.Session
+	} else {
+		o.Qty += domainExec - legExec
+	}
+	o.ID = domainOID
+	o.ExecutedQty = domainExec
+	o.LeavesQty = max(0, o.Qty-domainExec)
+	return o
+}
+
 // legTier ranks a row's status for pickColdStartLeg's tie-break, reusing the
 // existing exec.Order.Working() and exec.OrderStatus classification rather
 // than inventing a new one:
@@ -350,6 +413,20 @@ func replaceSuffixNum(tzCID string) int {
 // resolves to "oid".
 func (a *Adapter) domainID(tzCID string) string {
 	return reReplaceSuffix.ReplaceAllString(tzCID, "")
+}
+
+// executedForDomainLocked sums the final/current fill counters of all TZ legs
+// that make up one stable eTape order. Callers hold a.mu.
+// ponytail: O(known TZ legs) per fill/replace; maintain per-domain totals if
+// adapter-lock contention makes this scan measurable.
+func (a *Adapter) executedForDomainLocked(domainOID string) float64 {
+	var executed float64
+	for tzCID, qty := range a.seenExecuted {
+		if a.domainID(tzCID) == domainOID {
+			executed += qty
+		}
+	}
+	return executed
 }
 
 // now returns the current time in epoch milliseconds via the injected clock.
@@ -511,13 +588,22 @@ func (a *Adapter) ReplaceOrder(ctx context.Context, domainOID string, req exec.R
 	}
 
 	a.mu.Lock()
+	totalQty := orig.Qty
+	if req.Qty > 0 {
+		totalQty = req.Qty
+	}
+	remainingQty := totalQty - a.executedForDomainLocked(domainOID)
+	if remainingQty <= 0 {
+		delete(a.replacing, domainOID)
+		a.mu.Unlock()
+		a.emit(exec.OrderCanceled{V: a.venue, OID: domainOID, Ts: a.now()})
+		return fmt.Errorf("tradezero: replace: no remaining quantity after fills for %s", domainOID)
+	}
 	n := a.replaceSeq[domainOID] + 1
 	a.replaceSeq[domainOID] = n
 	newTZID := fmt.Sprintf("%s-r%d", domainOID, n)
 	newReq := orig
-	if req.Qty > 0 {
-		newReq.Qty = req.Qty
-	}
+	newReq.Qty = remainingQty
 	if req.LimitPrice > 0 {
 		newReq.LimitPrice = req.LimitPrice
 	}
@@ -525,6 +611,9 @@ func (a *Adapter) ReplaceOrder(ctx context.Context, domainOID string, req exec.R
 		newReq.StopPrice = req.StopPrice
 	}
 	newReq.ClientOrderID = newTZID
+	domainReq := newReq
+	domainReq.Qty = totalQty
+	a.orderReq[domainOID] = domainReq
 	a.mu.Unlock()
 
 	ok2, rejText, err := a.rest.submitOrder(ctx, newReq, newTZID, a.pickRoute())
@@ -545,13 +634,12 @@ func (a *Adapter) ReplaceOrder(ctx context.Context, domainOID string, req exec.R
 
 	a.mu.Lock()
 	a.tzIDByDomain[domainOID] = newTZID
-	a.orderReq[domainOID] = newReq
 	delete(a.replacing, domainOID)
 	a.mu.Unlock()
 
 	a.emit(exec.OrderReplaced{
 		V: a.venue, OID: domainOID,
-		NewQty: newReq.Qty, NewLimit: newReq.LimitPrice, NewStop: newReq.StopPrice,
+		NewQty: totalQty, NewLimit: newReq.LimitPrice, NewStop: newReq.StopPrice,
 		Ts: a.now(),
 	})
 	return nil
@@ -606,14 +694,15 @@ func (a *Adapter) Snapshot(ctx context.Context) (exec.AccountSnapshot, []exec.Po
 
 	a.mu.Lock()
 	currentLegs := a.currentLegRows(orders)
+	a.restoreOrderStateLocked(orders, currentLegs, false)
 	filtered := make([]exec.Order, 0, len(currentLegs))
 	for _, o := range orders {
 		domainOID := a.domainID(o.ID)
 		if cur, ok := currentLegs[domainOID]; !ok || cur.ID != o.ID {
 			continue // superseded leg from an earlier replace; not a live order
 		}
+		o = a.domainOrderLocked(o)
 		o.Venue = a.venue
-		o.ID = domainOID
 		filtered = append(filtered, o)
 	}
 	a.mu.Unlock()
@@ -651,6 +740,9 @@ func (a *Adapter) handleOrder(o tzOrder) {
 	order := externalOrder(o)
 	order.Venue = a.venue
 	if order.ID != "" {
+		a.mu.Lock()
+		order = a.domainOrderLocked(order)
+		a.mu.Unlock()
 		events = append(events, exec.BrokerExternalOrder{Venue: a.venue, Order: order, Working: order.Working()})
 	}
 	for _, e := range events {
@@ -717,6 +809,7 @@ func (a *Adapter) reconcile() {
 	a.positions = posMap
 
 	currentLegs := a.currentLegRows(orders)
+	a.restoreOrderStateLocked(orders, currentLegs, true)
 	var gapEvents []exec.BrokerEvent
 	var openOrders []exec.Order
 	for _, o := range orders {
@@ -731,8 +824,8 @@ func (a *Adapter) reconcile() {
 			continue
 		}
 		if o.Working() {
-			current := o
-			current.ID, current.Venue = domainOID, a.venue
+			current := a.domainOrderLocked(o)
+			current.Venue = a.venue
 			openOrders = append(openOrders, current)
 		}
 		prevStatus, seen := a.lastKnownStatus[domainOID]
@@ -780,11 +873,20 @@ func (a *Adapter) synthesizeTransitionLocked(domainOID string, o exec.Order) []e
 		prevExec := a.seenExecuted[o.ID]
 		if o.ExecutedQty > prevExec {
 			qty := o.ExecutedQty - prevExec
+			domainCumQty := a.executedForDomainLocked(domainOID) + qty
+			domainQty := a.orderReq[domainOID].Qty
+			if domainQty <= 0 {
+				domainQty = domainCumQty - o.ExecutedQty + o.Qty
+			}
+			domainLeavesQty := domainQty - domainCumQty
+			if domainLeavesQty < 0 {
+				domainLeavesQty = 0
+			}
 			execID := o.ID + ":" + strconv.FormatFloat(o.ExecutedQty, 'g', -1, 64)
 			if strings.HasPrefix(domainOID, "ET") {
 				out = append(out, exec.OrderFilled{
 					F:              exec.Fill{Venue: a.venue, OrderID: domainOID, Symbol: o.Symbol, Side: o.Side, Qty: qty, Price: o.AvgFillPrice, TsMs: ts},
-					PositionExecID: execID, CumQty: o.ExecutedQty, LeavesQty: o.LeavesQty, AvgPrice: o.AvgFillPrice,
+					PositionExecID: execID, CumQty: domainCumQty, LeavesQty: domainLeavesQty, AvgPrice: o.AvgFillPrice,
 				})
 			} else {
 				out = append(out, exec.BrokerPositionEffect{Venue: a.venue, Symbol: o.Symbol, Side: o.Side, Qty: qty, Price: o.AvgFillPrice, ExecID: execID})

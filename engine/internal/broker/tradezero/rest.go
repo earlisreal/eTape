@@ -191,10 +191,15 @@ func (o tzRestOrder) status() string {
 // shape used by Snapshot. Venue is left zero-value here; the Adapter (Task
 // 10) stamps it when merging per-venue snapshots.
 func (o tzRestOrder) domain() exec.Order {
+	typ, _ := orderTypeDomain(o.OrderType)
+	tif, _ := tifDomain(o.TimeInForce)
 	return exec.Order{
 		ID:           o.ClientOrderID,
 		Symbol:       domainSymbol(o.Symbol),
 		Side:         sideDomain(o.Side, o.OpenClose),
+		Type:         typ,
+		TIF:          tif,
+		Session:      sessionDomain(o.TimeInForce),
 		Qty:          o.OrderQuantity,
 		LimitPrice:   o.LimitPrice,
 		StopPrice:    o.PriceStop,

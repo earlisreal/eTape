@@ -153,31 +153,37 @@ func (s *State) VenueSellCommittedShares(v VenueID, symbol, excludeID string) fl
 	}
 	var qty float64
 	for id, o := range vs.Orders {
-		if id == excludeID || o.Symbol != symbol || o.Side != SideSell || !o.Working() {
-			continue
-		}
-		if o.Held != nil && o.Held.ChildClientID == "" &&
-			(o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed || o.Held.Phase == HeldPaused) {
-			continue
-		}
-		leaves := o.LeavesQty
-		if o.Action != nil && o.Action.Kind == ActionReplace &&
-			(o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
-			requested := o.Action.RequestedQty - o.ExecutedQty
-			if requested > leaves {
-				leaves = requested
-			}
-		}
-		if leaves > 0 {
-			qty += leaves
+		if id != excludeID && o.Symbol == symbol {
+			qty += sellCommitmentLeaves(o)
 		}
 	}
 	for _, o := range vs.ExternalOrders {
-		if o.Symbol == symbol && o.Side == SideSell && o.Working() && o.LeavesQty > 0 {
-			qty += o.LeavesQty
+		if o.Symbol == symbol {
+			qty += sellCommitmentLeaves(o)
 		}
 	}
 	return qty
+}
+
+func sellCommitmentLeaves(o Order) float64 {
+	if o.Side != SideSell || !o.Working() {
+		return 0
+	}
+	if o.Held != nil && o.Held.ChildClientID == "" &&
+		(o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed || o.Held.Phase == HeldPaused) {
+		return 0
+	}
+	leaves := o.LeavesQty
+	if o.Action != nil && o.Action.Kind == ActionReplace &&
+		(o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+		if requested := o.Action.RequestedQty - o.ExecutedQty; requested > leaves {
+			leaves = requested
+		}
+	}
+	if leaves > 0 {
+		return leaves
+	}
+	return 0
 }
 
 func (s *State) VenueHasSellCommitments(v VenueID) bool {
@@ -186,12 +192,12 @@ func (s *State) VenueHasSellCommitments(v VenueID) bool {
 		return false
 	}
 	for _, o := range vs.Orders {
-		if o.Side == SideSell && o.Working() && s.VenueSellCommittedShares(v, o.Symbol, "") > 0 {
+		if sellCommitmentLeaves(o) > 0 {
 			return true
 		}
 	}
 	for _, o := range vs.ExternalOrders {
-		if o.Side == SideSell && o.Working() && o.LeavesQty > 0 {
+		if sellCommitmentLeaves(o) > 0 {
 			return true
 		}
 	}

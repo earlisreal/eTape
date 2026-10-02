@@ -83,11 +83,7 @@ func (s *State) Apply(ev Event) {
 	case OrderAccepted:
 		s.mutate(e.V, e.OID, e.Ts, func(o *Order) {
 			o.Status = StatusAccepted
-			if o.Action != nil && o.Action.Kind == ActionSubmit && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
-				a := *o.Action
-				a.Phase, a.Reason = ActionConfirmed, ""
-				o.Action = &a
-			}
+			confirmSubmitAction(o)
 		})
 	case OrderRejected:
 		s.mutate(e.V, e.OID, e.Ts, func(o *Order) {
@@ -105,11 +101,7 @@ func (s *State) Apply(ev Event) {
 			if o.Working() {
 				o.Status = StatusCanceled
 			}
-			if o.Action != nil && o.Action.Kind == ActionSubmit && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
-				a := *o.Action
-				a.Phase, a.Reason = ActionConfirmed, ""
-				o.Action = &a
-			}
+			confirmSubmitAction(o)
 			if o.Action != nil && o.Action.Kind == ActionCancel && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
 				a := *o.Action
 				a.Phase, a.Reason = ActionConfirmed, ""
@@ -121,11 +113,7 @@ func (s *State) Apply(ev Event) {
 			if o.Working() {
 				o.Status = StatusExpired
 			}
-			if o.Action != nil && o.Action.Kind == ActionSubmit && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
-				a := *o.Action
-				a.Phase, a.Reason = ActionConfirmed, ""
-				o.Action = &a
-			}
+			confirmSubmitAction(o)
 			if o.Action != nil && o.Action.Phase != ActionConfirmed && o.Action.Phase != ActionFailed {
 				a := *o.Action
 				a.Phase, a.Reason = ActionFailed, "order expired before action confirmation"
@@ -201,11 +189,7 @@ func (s *State) applyFill(e OrderFilled) {
 	o.ExecutedQty = e.CumQty
 	o.LeavesQty = e.LeavesQty
 	o.AvgFillPrice = e.AvgPrice
-	if o.Action != nil && o.Action.Kind == ActionSubmit && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
-		a := *o.Action
-		a.Phase, a.Reason = ActionConfirmed, ""
-		o.Action = &a
-	}
+	confirmSubmitAction(&o)
 	if e.LeavesQty <= 0 {
 		o.Status = StatusFilled
 	} else {

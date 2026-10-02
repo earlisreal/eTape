@@ -255,6 +255,8 @@ function OrdersTable({
             const ds = displayStatus(order, optimistic);
             const variant = chipVariant(ds);
             const working = !optimistic && isWorking(order.status);
+            const deferredCustody = order.deferredPositionPct !== undefined && !order.held?.resolvedQty && order.held?.deadlineMs
+              ? `eTape-held · expires ${formatEtDateTime(order.held.deadlineMs, todayMs)} ET` : null;
             return <tr key={order.id} style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
               <td data-column="createdMs" style={{ padding: "2px 8px" }} title={formatEtDateTime(order.createdMs)}>{formatEtDateTime(order.createdMs, todayMs)}</td>
               <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
@@ -263,7 +265,8 @@ function OrdersTable({
                 ? `${order.deferredPositionPct}% position` : formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)}</td>
               <OrderPriceCells order={order} />
               <td data-column="state">{variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
-                : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}</td>
+                : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}
+                {deferredCustody && <div style={{ color: palette.textMuted, fontSize: 10 }}>{deferredCustody}</div>}</td>
               <td data-column="actions">{(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
                 style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</HoverButton> : null}</td>
             </tr>;

@@ -331,14 +331,24 @@ type OrderRequest struct {
 // Validate enforces the "a request without a valid venue is malformed" rule and
 // basic field sanity. The gate performs the risk checks; this is structural.
 func (r OrderRequest) Validate() error {
+	if err := r.ValidateStructure(); err != nil {
+		return err
+	}
+	if r.Qty <= 0 {
+		return fmt.Errorf("exec: order request qty %v must be > 0", r.Qty)
+	}
+	return nil
+}
+
+// ValidateStructure checks the required identity and price fields without
+// requiring a resolved quantity. Engine-held percentage orders use this before
+// trigger; adapters still receive only requests that pass Validate.
+func (r OrderRequest) ValidateStructure() error {
 	if r.Venue == "" {
 		return errors.New("exec: order request missing venue")
 	}
 	if r.Symbol == "" {
 		return errors.New("exec: order request missing symbol")
-	}
-	if r.Qty <= 0 {
-		return fmt.Errorf("exec: order request qty %v must be > 0", r.Qty)
 	}
 	// Validate is *structural* — it checks that a type's required prices are present,
 	// not that they are directionally coherent (e.g., a buy stop-limit whose limit sits

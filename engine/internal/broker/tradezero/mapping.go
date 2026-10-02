@@ -39,6 +39,21 @@ func orderTypeWire(t exec.OrderType) (string, error) {
 	}
 }
 
+func orderTypeDomain(wire string) (exec.OrderType, bool) {
+	switch wire {
+	case "Market":
+		return exec.TypeMarket, true
+	case "Limit":
+		return exec.TypeLimit, true
+	case "Stop":
+		return exec.TypeStop, true
+	case "StopLimit":
+		return exec.TypeStopLimit, true
+	default:
+		return 0, false
+	}
+}
+
 // sideWire maps a trader action to TZ side+openClose. Never sends "SellShort".
 func sideWire(s exec.Side) (side, openClose string) {
 	switch s {
@@ -99,6 +114,28 @@ func tifWire(t exec.TIF, extendedHours bool, ot exec.OrderType) string {
 	default:
 		return "Day"
 	}
+}
+
+func tifDomain(wire string) (exec.TIF, bool) {
+	switch wire {
+	case "Day", "Day_Plus":
+		return exec.TIFDay, true
+	case "GoodTillCancel", "GTC", "GTC_Plus":
+		return exec.TIFGTC, true
+	case "ImmediateOrCancel":
+		return exec.TIFIOC, true
+	case "FillOrKill":
+		return exec.TIFFOK, true
+	default:
+		return 0, false
+	}
+}
+
+func sessionDomain(wireTIF string) exec.OrderSession {
+	if strings.HasSuffix(wireTIF, "_Plus") {
+		return exec.SessionExtended
+	}
+	return exec.SessionRTH
 }
 
 func isExtendedHours(clk clock.Clock) bool {

@@ -43,6 +43,7 @@ type mockTZFull struct {
 	conn         *websocket.Conn
 	connCtx      context.Context
 	lastCID      string
+	lastQty      float64
 	lastDeleteID string
 }
 
@@ -82,14 +83,16 @@ func newMockTZFull(t *testing.T) *mockTZFull {
 
 	mux.HandleFunc("/v1/api/accounts/2TZ00001/order", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			ClientOrderID string `json:"clientOrderId"`
-			Symbol        string `json:"symbol"`
+			ClientOrderID string  `json:"clientOrderId"`
+			Symbol        string  `json:"symbol"`
+			Qty           float64 `json:"orderQuantity"`
 		}
 		b, _ := io.ReadAll(r.Body)
 		_ = json.Unmarshal(b, &body)
 
 		m.mu.Lock()
 		m.lastCID = body.ClientOrderID
+		m.lastQty = body.Qty
 		m.mu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
@@ -171,6 +174,12 @@ func (m *mockTZFull) lastClientOrderID() string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.lastCID
+}
+
+func (m *mockTZFull) lastOrderQuantity() float64 {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.lastQty
 }
 
 func (m *mockTZFull) lastDeletedID() string {
@@ -260,6 +269,48 @@ func TestAdapter_EmulatedReplace_StableDomainID(t *testing.T) {
 	})
 	if last := rec.lastClientOrderID(); last != oid+"-r1" {
 		t.Fatalf("resubmit clientOrderId = %q, want %q", last, oid+"-r1")
+	}
+}
+
+func TestAdapter_EmulatedReplace_SubmitsOnlyUnfilledRemainder(t *testing.T) {
+	rec := newMockTZFull(t)
+	defer rec.Close()
+
+	a, err := New(Config{Venue: "tz", AccountID: "2TZ00001", RESTBase: rec.httpURL, WSURL: rec.wsURL,
+		Route: "SMART", Creds: creds.Pair{KeyID: "K", SecretKey: "S"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	go a.Run(ctx)
+
+	oid := "ET01J0000000000000000000A1"
+	if _, err := a.SubmitOrder(ctx, exec.OrderRequest{Venue: "tz", Symbol: "AAPL", Side: exec.SideSell,
+		Type: exec.TypeLimit, TIF: exec.TIFDay, Qty: 10, LimitPrice: 100, ClientOrderID: oid}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool {
+		oa, ok := e.(exec.OrderAccepted)
+		return ok && oa.OID == oid
+	})
+
+	// Model a confirmed two-share fill on the old leg before its cancel.
+	a.mu.Lock()
+	a.seenExecuted[oid] = 2
+	a.mu.Unlock()
+	if err := a.ReplaceOrder(ctx, oid, exec.ReplaceRequest{Qty: 10, LimitPrice: 101}); err != nil {
+		t.Fatal(err)
+	}
+	if got := rec.lastOrderQuantity(); got != 8 {
+		t.Fatalf("replacement broker quantity = %v, want unfilled remainder 8", got)
+	}
+	replaced := waitFor(t, a.Events(), func(e exec.BrokerEvent) bool {
+		or, ok := e.(exec.OrderReplaced)
+		return ok && or.OID == oid
+	}).(exec.OrderReplaced)
+	if replaced.NewQty != 10 {
+		t.Fatalf("domain replacement total = %v, want 10", replaced.NewQty)
 	}
 }
 
@@ -955,6 +1006,58 @@ func TestAdapter_Snapshot_PicksHighestReplaceSuffixOnColdStart(t *testing.T) {
 	}
 	if orders[0].ID != oid || orders[0].Status != exec.StatusAccepted {
 		t.Fatalf("orders[0] = %+v, want the live leg (ID %q, StatusAccepted) picked via the highest replace suffix", orders[0], oid)
+	}
+}
+
+func TestAdapter_ColdStartReplaceUsesCumulativeDomainQuantity(t *testing.T) {
+	var a *Adapter
+	var submitted struct {
+		ClientOrderID string  `json:"clientOrderId"`
+		OrderType     string  `json:"orderType"`
+		TimeInForce   string  `json:"timeInForce"`
+		OrderQuantity float64 `json:"orderQuantity"`
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/api/account/2TZ00001", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) })
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/pnl", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) })
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/positions", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`[]`)) })
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/orders", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[
+			{"clientOrderId":"ET1","symbol":"AAPL","side":"Buy","openClose":"Open","orderType":"Limit","timeInForce":"Day","orderQuantity":10,"executed":2,"limitPrice":100,"orderStatus":"Canceled"},
+			{"clientOrderId":"ET1-r1","symbol":"AAPL","side":"Buy","openClose":"Open","orderType":"Limit","timeInForce":"Day","orderQuantity":8,"executed":1,"limitPrice":100,"orderStatus":"New"}
+		]`))
+	})
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/orders/ET1-r1", func(w http.ResponseWriter, _ *http.Request) {
+		a.handleOrder(tzOrder{UserOrderID: "2TZ00001:ET1-r1", Symbol: "AAPL", Side: "Buy", OpenClose: "Open", OrderStatus: "Canceled"})
+		_, _ = w.Write([]byte(`{"clientOrderId":"ET1-r1","orderStatus":"PendingCancel"}`))
+	})
+	mux.HandleFunc("/v1/api/accounts/2TZ00001/order", func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&submitted); err != nil {
+			t.Errorf("decode resubmit: %v", err)
+		}
+		_, _ = w.Write([]byte(`{"orderStatus":"New"}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	var err error
+	a, err = New(Config{Venue: "tz", AccountID: "2TZ00001", RESTBase: srv.URL, Creds: creds.Pair{KeyID: "K", SecretKey: "S"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.replaceCancelTimeout = time.Second
+	_, _, orders, err := a.Snapshot(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 || orders[0].Qty != 10 || orders[0].ExecutedQty != 3 || orders[0].LeavesQty != 7 {
+		t.Fatalf("restored domain order = %+v, want total 10, executed 3, leaves 7", orders)
+	}
+	if err := a.ReplaceOrder(context.Background(), "ET1", exec.ReplaceRequest{Qty: 10, LimitPrice: 101}); err != nil {
+		t.Fatal(err)
+	}
+	if submitted.ClientOrderID != "ET1-r2" || submitted.OrderQuantity != 7 || submitted.OrderType != "Limit" || submitted.TimeInForce != "Day" {
+		t.Fatalf("resubmitted leg = %+v, want ET1-r2 Limit Day with 7 shares (10 total less 3 cumulative fills)", submitted)
 	}
 }
 

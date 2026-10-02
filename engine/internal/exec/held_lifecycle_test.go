@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"math/rand"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -395,6 +396,60 @@ func TestDeferredPositionStopSellHitWhileFlatRejectsPermanently(t *testing.T) {
 	case req := <-broker.submits:
 		t.Fatalf("flat stop was submitted to broker: %+v", req)
 	default:
+	}
+}
+
+func TestDeferredPositionStopRejectsMissingRequiredPrices(t *testing.T) {
+	now := time.Date(2026, 9, 30, 10, 0, 0, 0, session.Loc())
+	tests := []struct {
+		name, want  string
+		stop, limit float64
+	}{
+		{name: "stop", want: "missing stop price", limit: 98.5},
+		{name: "limit", want: "missing limit price", stop: 99},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, _, _, _ := newHeldCore(t, now)
+			ack := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideSell, Type: TypeStopLimit, TIF: TIFDay,
+				Session: SessionRTH, DeferredPositionPct: 100, StopPrice: tt.stop, LimitPrice: tt.limit, RouteExpected: RouteEngineHeld})
+			if ack.Accepted || !strings.Contains(ack.Reason, tt.want) {
+				t.Fatalf("malformed deferred stop should fail structural validation: %+v", ack)
+			}
+		})
+	}
+}
+
+func TestBrokerReconnectInvalidatesRecoveredPositionCacheUntilBaseline(t *testing.T) {
+	now := time.Date(2026, 9, 30, 10, 0, 0, 0, session.Loc())
+	c, _, broker, _ := newHeldCore(t, now)
+	if !c.state.PositionsReady("v") {
+		t.Fatal("recovery snapshot should initialize the position cache")
+	}
+	deferred := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideSell, Type: TypeStopLimit, TIF: TIFDay,
+		Session: SessionRTH, DeferredPositionPct: 100, StopPrice: 99, LimitPrice: 98.5, RouteExpected: RouteEngineHeld})
+	if !deferred.Accepted {
+		t.Fatalf("deferred stop: %+v", deferred)
+	}
+	waitHeldOrder(t, c, deferred.OrderID, HeldWaiting)
+	broker.ev <- BrokerConnUp{V: "v"}
+	waitPositionReadiness(t, c, "v", false)
+	paused := waitHeldOrder(t, c, deferred.OrderID, HeldPaused)
+	if paused.Held.PausedReason != "venue connection is reconciling; reconcile and resume manually" {
+		t.Fatalf("reconnect pause reason = %q", paused.Held.PausedReason)
+	}
+	if got := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideSell, Type: TypeLimit, TIF: TIFDay, Qty: 1, LimitPrice: 99}); got.Accepted ||
+		got.Reason != "position data unavailable; reconcile the venue before selling" {
+		t.Fatalf("SELL during reconnect reconciliation = %+v", got)
+	}
+	broker.ev <- BrokerPositions{V: "v", Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 40, AvgPrice: 100}}}
+	broker.ev <- BrokerOpenOrders{V: "v"}
+	waitPositionReadiness(t, c, "v", true)
+	if got := c.order(deferred.OrderID); got.Held == nil || got.Held.Phase != HeldPaused {
+		t.Fatalf("reconnect baseline auto-resumed held stop: %+v", got)
+	}
+	if got := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideSell, Type: TypeLimit, TIF: TIFDay, Qty: 1, LimitPrice: 99}); !got.Accepted {
+		t.Fatalf("SELL should resume after reconnect baseline: %+v", got)
 	}
 }
 

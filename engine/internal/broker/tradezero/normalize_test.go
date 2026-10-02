@@ -68,6 +68,19 @@ func TestNormalizeOrder_PartialFillEmitsOneFill(t *testing.T) {
 	}
 }
 
+func TestNormalizeOrder_ReplacementFillKeepsDomainCumulativeQuantity(t *testing.T) {
+	a := newTestAdapter(t, "tz")
+	a.orderReq = map[string]exec.OrderRequest{"ET1": {Qty: 10}}
+	a.seenExecuted["ET1"] = 2 // first leg filled two before it was replaced
+	o := tzOrder{UserOrderID: "2TZ00001:ET1-r1", Symbol: "AAPL", Side: "Sell", OpenClose: "Close",
+		OrderQuantity: 8, Executed: 1, LastQty: 1, PriceAvg: 100, Status: "PartiallyFilled"}
+	evs := a.normalizeOrder("tz", o)
+	fills := fills2(evs)
+	if len(fills) != 1 || fills[0].CumQty != 3 || fills[0].LeavesQty != 7 {
+		t.Fatalf("replacement fill = %+v, want domain cumulative 3 and remaining 7", fills)
+	}
+}
+
 // TestNormalizeOrder_Fill_AddsUSPrefixToSymbol proves a Portfolio-WS fill
 // (which carries TZ's bare symbol, e.g. "AAPL") gets tagged with eTape's
 // domain "US." prefix, matching the REST snapshot path's fix in rest_test.go.

@@ -537,6 +537,22 @@ describe("AccountPanel", () => {
       venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: true, positionDataReady: false, flattenPending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }],
     });
 
+    it("shows unresolved percentage sizing, eTape custody and its deadline", () => {
+      const { props, stores } = mkProps();
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: [order("ET-stop", {
+          side: "SELL", type: "STOP_LIMIT", qty: 0, leavesQty: 0, deferredPositionPct: 100,
+          held: { phase: "WAITING", deadlineMs: Date.parse("2026-09-30T13:30:00Z") },
+        })] });
+      });
+      wrap(props);
+      const row = screen.getByTestId("open-orders-table").querySelector("tbody tr")!;
+      expect(row.querySelector('[data-column="qty"]')?.textContent).toBe("100% position");
+      expect(row.querySelector('[data-column="state"]')?.textContent).toContain("eTape-held · expires");
+      expect(row.querySelector('[data-column="state"]')?.textContent).toContain("09:30:00 ET");
+    });
+
     it("merges limit prices under compact headers and sorts unused prices last in both tables", () => {
       const { props, stores, configChanges } = mkProps();
       const orders = [

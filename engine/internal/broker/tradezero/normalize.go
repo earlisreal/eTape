@@ -15,6 +15,7 @@ type tzOrder struct {
 	UserOrderID   string  `json:"userOrderId"`
 	Symbol        string  `json:"symbol"`
 	OrderType     string  `json:"orderType"`
+	TimeInForce   string  `json:"timeInForce"`
 	Side          string  `json:"side"`
 	OpenClose     string  `json:"openClose"`
 	OrderQuantity float64 `json:"orderQuantity"`
@@ -69,21 +70,14 @@ func statusDomain(s string) exec.OrderStatus {
 
 func externalOrder(o tzOrder) exec.Order {
 	_, clientID := splitUserOrderID(o.UserOrderID)
-	typ := exec.TypeLimit
-	switch o.OrderType {
-	case "Market":
-		typ = exec.TypeMarket
-	case "Stop":
-		typ = exec.TypeStop
-	case "StopLimit":
-		typ = exec.TypeStopLimit
-	}
+	typ, _ := orderTypeDomain(o.OrderType)
+	tif, _ := tifDomain(o.TimeInForce)
 	leaves := o.OrderQuantity - o.Executed
 	if leaves < 0 {
 		leaves = 0
 	}
 	return exec.Order{ID: clientID, Symbol: domainSymbol(o.Symbol), Side: sideDomain(o.Side, o.OpenClose),
-		Type: typ, Qty: o.OrderQuantity, ExecutedQty: o.Executed, LeavesQty: leaves,
+		Type: typ, TIF: tif, Session: sessionDomain(o.TimeInForce), Qty: o.OrderQuantity, ExecutedQty: o.Executed, LeavesQty: leaves,
 		LimitPrice: o.LimitPrice, StopPrice: o.StopPrice, AvgFillPrice: o.PriceAvg, Status: statusDomain(o.status())}
 }
 
@@ -100,8 +94,18 @@ func (a *Adapter) normalizeOrder(venue exec.VenueID, o tzOrder) []exec.BrokerEve
 	a.mu.Lock()
 	prev := a.seenExecuted[tzCID]
 	newFill := o.LastQty > 0 && o.Executed > prev
+	var domainCumQty, domainLeavesQty float64
 	if newFill {
 		a.seenExecuted[tzCID] = o.Executed
+		domainCumQty = a.executedForDomainLocked(oid)
+		domainQty := a.orderReq[oid].Qty
+		if domainQty <= 0 {
+			domainQty = domainCumQty - o.Executed + o.OrderQuantity
+		}
+		domainLeavesQty = domainQty - domainCumQty
+		if domainLeavesQty < 0 {
+			domainLeavesQty = 0
+		}
 	}
 	a.mu.Unlock()
 	if newFill {
@@ -110,7 +114,7 @@ func (a *Adapter) normalizeOrder(venue exec.VenueID, o tzOrder) []exec.BrokerEve
 			out = append(out, exec.OrderFilled{
 				F: exec.Fill{Venue: venue, OrderID: oid, Symbol: domainSymbol(o.Symbol),
 					Side: sideDomain(o.Side, o.OpenClose), Qty: o.LastQty, Price: o.PriceAvg, TsMs: ts},
-				PositionExecID: positionExecID, CumQty: o.Executed, LeavesQty: o.OrderQuantity - o.Executed, AvgPrice: o.PriceAvg,
+				PositionExecID: positionExecID, CumQty: domainCumQty, LeavesQty: domainLeavesQty, AvgPrice: o.PriceAvg,
 			})
 		} else {
 			out = append(out, exec.BrokerPositionEffect{Venue: venue, Symbol: domainSymbol(o.Symbol),

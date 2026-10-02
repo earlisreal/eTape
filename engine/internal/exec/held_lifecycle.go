@@ -236,7 +236,7 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 		}
 	}
 	if child.Side == SideSell {
-		if ok, reason := c.checkSellQuantity(child, o.ID); !ok {
+		if ok, reason := c.checkSellLeaves(child, child.Qty, o.ID); !ok {
 			if err := c.appendAndFold(OrderRejected{V: o.Venue, OID: o.ID, Reason: "trigger gate: " + reason, Ts: c.now()}, SrcLocal); err != nil {
 				c.syslog("exec.held", "persist sell availability rejection "+o.ID+": "+err.Error())
 			}

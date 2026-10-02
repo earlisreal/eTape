@@ -782,38 +782,41 @@ func (c *Core) applyPositionFill(e OrderFilled, prior Order, hadPrior bool) {
 	// Use the order's cumulative delta, not the push's last-fill quantity. A
 	// reconnect snapshot can already include a queued fill; the next fill push
 	// then reports a cumulative quantity whose delta is smaller than F.Qty.
-	c.applyPositionEffect(e.F.Venue, e.F.Symbol, e.F.Side, e.CumQty-prior.ExecutedQty, e.F.Price, "")
+	c.applyPositionEffect(BrokerPositionEffect{
+		Venue: e.F.Venue, Symbol: e.F.Symbol, Side: e.F.Side,
+		Qty: e.CumQty - prior.ExecutedQty, Price: e.F.Price,
+	})
 }
 
-func (c *Core) applyPositionEffect(v VenueID, symbol string, side Side, qty, price float64, execID string) bool {
-	if !c.state.PositionsReady(v) || symbol == "" || qty <= 0 {
+func (c *Core) applyPositionEffect(e BrokerPositionEffect) bool {
+	if !c.state.PositionsReady(e.Venue) || e.Symbol == "" || e.Qty <= 0 {
 		return false
 	}
-	if execID != "" {
-		key := positionExecKey(v, execID)
+	if e.ExecID != "" {
+		key := positionExecKey(e.Venue, e.ExecID)
 		if c.positionExecIDs[key] {
 			return false
 		}
 		c.positionExecIDs[key] = true
 	}
-	delta := qty
-	if !longward(side) {
+	delta := e.Qty
+	if !longward(e.Side) {
 		delta = -delta
 	}
-	vs := c.state.Venue(v)
-	p := vs.Positions[symbol]
+	vs := c.state.Venue(e.Venue)
+	p := vs.Positions[e.Symbol]
 	newQty := p.Qty + delta
 	switch {
 	case p.Qty == 0 || p.Qty*newQty < 0:
-		p.AvgPrice = price
+		p.AvgPrice = e.Price
 	case p.Qty*delta > 0:
-		p.AvgPrice = (math.Abs(p.Qty)*p.AvgPrice + math.Abs(delta)*price) / math.Abs(newQty)
+		p.AvgPrice = (math.Abs(p.Qty)*p.AvgPrice + math.Abs(delta)*e.Price) / math.Abs(newQty)
 	}
-	p.Venue, p.Symbol, p.Qty = v, symbol, newQty
+	p.Venue, p.Symbol, p.Qty = e.Venue, e.Symbol, newQty
 	if newQty == 0 {
-		delete(vs.Positions, symbol)
+		delete(vs.Positions, e.Symbol)
 	} else {
-		vs.Positions[symbol] = p
+		vs.Positions[e.Symbol] = p
 	}
 	return true
 }
@@ -892,6 +895,9 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 		} else {
 			return CmdAck{Accepted: false, Reason: "deferred position sizing requires a zero-quantity DAY SELL stop-limit with position % in (0, 100]", OrderID: req.ClientOrderID}
 		}
+		if err := req.ValidateStructure(); err != nil {
+			return CmdAck{Accepted: false, Reason: err.Error(), OrderID: req.ClientOrderID}
+		}
 	} else if err := req.Validate(); err != nil {
 		return CmdAck{Accepted: false, Reason: err.Error(), OrderID: req.ClientOrderID}
 	}
@@ -946,7 +952,7 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 		return CmdAck{Accepted: false, Reason: reason, OrderID: req.ClientOrderID}
 	}
 	if req.Side == SideSell && !deferred {
-		if good, why := c.checkSellQuantity(req, ""); !good {
+		if good, why := c.checkSellLeaves(req, req.Qty, ""); !good {
 			return CmdAck{Accepted: false, Reason: why, OrderID: req.ClientOrderID}
 		}
 	}
@@ -1019,27 +1025,6 @@ func newOrderFromRequest(req OrderRequest, now int64) Order {
 	return Order{Venue: req.Venue, ID: req.ClientOrderID, Symbol: req.Symbol, Side: req.Side,
 		Type: req.Type, TIF: req.TIF, Session: req.Session, Qty: req.Qty, LimitPrice: req.LimitPrice,
 		StopPrice: req.StopPrice, Status: StatusSubmitted, LeavesQty: req.Qty, CreatedMs: now, UpdatedMs: now}
-}
-
-func (c *Core) checkSellQuantity(req OrderRequest, excludeID string) (bool, string) {
-	if c.state.Venue(req.Venue).FlattenPending {
-		return false, "venue flatten is awaiting authoritative reconciliation"
-	}
-	if !c.state.PositionsReady(req.Venue) {
-		return false, "position data unavailable; reconcile the venue before selling"
-	}
-	long := c.state.VenuePositionShares(req.Venue, req.Symbol)
-	if long <= 0 {
-		return false, "no open long position to sell"
-	}
-	available := long - c.state.VenueSellCommittedShares(req.Venue, req.Symbol, excludeID)
-	if available < 0 {
-		available = 0
-	}
-	if req.Qty > available+1e-9 {
-		return false, "sell quantity exceeds uncommitted long position"
-	}
-	return true, ""
 }
 
 func (c *Core) checkSellLeaves(req OrderRequest, leaves float64, excludeID string) (bool, string) {
@@ -1498,7 +1483,7 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		c.emitProjectedPosition(p)
 		c.maybeClearFlattenPending(p.Venue)
 	case BrokerPositionEffect:
-		if c.applyPositionEffect(e.Venue, e.Symbol, e.Side, e.Qty, e.Price, e.ExecID) {
+		if c.applyPositionEffect(e) {
 			position := c.state.Venue(e.Venue).Positions[e.Symbol]
 			position.Venue, position.Symbol = e.Venue, e.Symbol
 			c.emitProjectedPosition(position)
@@ -1574,6 +1559,8 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		c.setPositionsReady(v, true)
 		c.maybeClearFlattenPending(v)
 	case BrokerConnUp:
+		c.setPositionsReady(e.V, false)
+		c.pauseHeldVenue(e.V, "venue connection is reconciling; reconcile and resume manually")
 		c.emit(StatusUpdate{Venue: e.V, Connected: true, MasterArmed: c.state.MasterArmed})
 	case BrokerConnDown:
 		c.printHealthy = false
