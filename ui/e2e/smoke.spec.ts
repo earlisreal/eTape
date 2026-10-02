@@ -81,15 +81,18 @@ test.describe("monitoring workspace", () => {
   });
 
   test("keeps chart header actions clickable when narrow", async ({ page }) => {
+    await gotoAndApplyPreset(page, "e2e-crosshair-narrow-header", "Trading");
     await page.setViewportSize({ width: 900, height: 700 });
-    await gotoAndApplyPreset(page, "e2e-monitoring-narrow-header", "Monitoring");
-    const chartFrame = page.getByTestId("chart-host").first().locator("xpath=../../..");
-    const drawings = chartFrame.getByRole("button", { name: "drawing tools" });
+    const crosshairSync = page.getByRole("button", { name: "Crosshair Sync" }).first();
+    const drawings = page.getByRole("button", { name: "drawing tools" }).first();
+    await expect(crosshairSync).toBeVisible({ timeout: 15_000 });
+    await crosshairSync.click();
+    await expect(crosshairSync).toHaveAttribute("aria-pressed", "true");
     await expect(drawings).toBeVisible({ timeout: 15_000 });
     await drawings.click();
-    await chartFrame.getByRole("button", { name: "screenshot" }).click();
-    await chartFrame.getByRole("button", { name: "chart settings" }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
+    await page.getByRole("button", { name: "screenshot" }).first().click();
+    await page.getByRole("button", { name: "chart settings" }).first().click();
+    await expect(page.getByTestId("tv-dialog-box")).toBeVisible();
   });
 });
 

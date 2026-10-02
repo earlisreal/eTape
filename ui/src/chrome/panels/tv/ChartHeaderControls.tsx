@@ -1,18 +1,20 @@
 // ui/src/chrome/panels/tv/ChartHeaderControls.tsx
 import { useRef, useState, type CSSProperties } from "react";
 import type { Palette } from "../../../render/palette";
+import { TIMEFRAMES } from "../../../render/chart/barBucket";
 import type { IndicatorType } from "../../../render/chart/indicatorSeries";
-import { IconIndicators, IconCamera, IconGear, IconTrend } from "./tvIcons";
+import { IconIndicators, IconCamera, IconGear, IconTrend, IconCrosshair } from "./tvIcons";
 import { IndicatorPickerPopover } from "./IndicatorPickerPopover";
 import { HoverButton } from "../../controls/HoverButton";
 
-export const TIMEFRAMES = ["10s", "1m", "5m", "15m", "30m", "60m", "D", "W", "M"] as const;
+export { TIMEFRAMES } from "../../../render/chart/barBucket";
 
 export interface ChartHeaderControlsProps {
   palette: Palette; timeframe: string;
   onTimeframe: (tf: string) => void;
   onAddIndicator: (type: IndicatorType) => void; onScreenshot: () => void; onOpenSettings: () => void;
   volumeAvailable?: boolean;
+  crosshairSyncEnabled: boolean; onToggleCrosshairSync: () => void; crosshairSyncDisabledReason?: string;
   drawingToolsVisible: boolean; onToggleDrawingTools: () => void;
 }
 
@@ -23,7 +25,9 @@ export interface ChartHeaderControlsProps {
 // header already shows — no separate symbol button here, and styled with the app
 // Daylight-Ledger palette + sans font so it reads as chrome, not canvas.
 export function ChartHeaderControls(
-  { palette, timeframe, onTimeframe, onAddIndicator, onScreenshot, onOpenSettings, volumeAvailable = true, drawingToolsVisible, onToggleDrawingTools }: ChartHeaderControlsProps,
+  { palette, timeframe, onTimeframe, onAddIndicator, onScreenshot, onOpenSettings, volumeAvailable = true,
+    crosshairSyncEnabled, onToggleCrosshairSync, crosshairSyncDisabledReason,
+    drawingToolsVisible, onToggleDrawingTools }: ChartHeaderControlsProps,
 ): JSX.Element {
   const [pickerOpen, setPickerOpen] = useState(false);
   const indicatorsBtnRef = useRef<HTMLButtonElement | null>(null);
@@ -74,6 +78,13 @@ export function ChartHeaderControls(
       </div>
       <span style={{ flex: 1 }} />
       <div style={{ display: "flex", alignItems: "center", gap: 2, flex: "0 0 auto" }}>
+        <HoverButton type="button" aria-label="Crosshair Sync" aria-pressed={crosshairSyncEnabled}
+          title={crosshairSyncDisabledReason ?? `${crosshairSyncEnabled ? "Disable" : "Enable"} Crosshair Sync`}
+          disabled={Boolean(crosshairSyncDisabledReason)} onClick={onToggleCrosshairSync}
+          style={{ ...iconBtn, color: crosshairSyncEnabled ? palette.accent : palette.textMuted }}
+          hoverStyle={{ background: palette.surface, color: crosshairSyncEnabled ? palette.accent : palette.text }}>
+          <IconCrosshair size={14} />
+        </HoverButton>
         <HoverButton type="button" aria-label="screenshot" onClick={onScreenshot} style={iconBtn}
           hoverStyle={{ background: palette.surface, color: palette.text }}><IconCamera size={14} /></HoverButton>
         <HoverButton type="button" aria-label="chart settings" onClick={onOpenSettings} style={iconBtn}

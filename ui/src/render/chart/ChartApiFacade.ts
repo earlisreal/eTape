@@ -16,6 +16,13 @@ export interface LwcPriceLine { applyOptions(options: unknown): void }
 
 export type MainKind = "candle" | "bar" | "line" | "area";
 
+export interface CrosshairMove {
+  logical: number | null;
+  timeMs: number | null;
+  point: { x: number; y: number } | null;
+  paneIndex: number;
+}
+
 // The minimal slice of Lightweight Charts v5 the controller drives. ChartPanel
 // implements this over a real IChartApi; ChartController.test.ts implements a fake.
 export interface ChartApiFacade {
@@ -46,7 +53,10 @@ export interface ChartApiFacade {
   setWatermark(text: string | null): void; // symbol watermark on the main pane (null clears)
   // TV chrome additions:
   takeScreenshot(): HTMLCanvasElement;               // PNG export (camera button)
-  subscribeCrosshairMove(cb: (logical: number | null) => void): () => void; // legend value tracking
+  setCrosshairPosition(timeMs: number, price: number, showHorizontalLine: boolean): void;
+  clearCrosshairPosition(): void;
+  setCrosshairHorizontalLineVisible(visible: boolean): void;
+  subscribeCrosshairMove(cb: (event: CrosshairMove) => void): () => void; // legend value tracking
   paneHeights(): number[];                            // legend per-pane vertical offsets
   paneStretchFactor(paneIndex: number): number;       // relative pane size (LWC default 1) — collapse/expand
   setPaneStretchFactor(paneIndex: number, factor: number): void;

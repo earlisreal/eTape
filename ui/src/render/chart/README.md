@@ -94,3 +94,15 @@ bars and current visible logical range. `VisibleExtremaPrimitive` renders the
 projection imperatively on the main price series, so live updates and viewport
 changes do not enter React state; synthetic No-Trade Bars and Data Gaps are
 excluded.
+
+## Crosshair Sync
+
+The chart facade publishes native pointer time and exact main-pane stock price
+to the UI-only cross-window coordinator. Receivers map that time to their own
+display bars and use Lightweight Charts' imperative crosshair API; their view,
+scales, and history remain unchanged. Indicator-pane pointers share time only.
+The receiver legend selects its mapped candle, and clears back to latest when
+the cursor leaves, its matching candle is absent, or the position is off-screen.
+No-Trade Bars and Volume-Only Bars are eligible; Data Gaps and empty Future
+Buffer positions are not. Cursor movement stays outside React state and legend
+work remains frame-coalesced.

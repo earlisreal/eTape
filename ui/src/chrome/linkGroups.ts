@@ -1,4 +1,5 @@
 import type { AckMsg, VenueID } from "../wire/contract";
+import { CrosshairSync } from "./crosshairSync";
 
 export type LinkGroup = "red" | "green" | "blue" | "yellow" | null; // null = pinned
 export interface LinkMsg { group: LinkGroup; symbol?: string; venue?: VenueID }
@@ -24,6 +25,7 @@ export class BroadcastChannelBus implements LinkBus {
 // Per-group focused symbol. Local focus publishes cross-window + echoes to the
 // engine; remote focus (from the bus) updates state but never re-publishes.
 export class LinkGroups {
+  readonly crosshairSync = new CrosshairSync();
   private readonly focused = new Map<Exclude<LinkGroup, null>, string>();
   private readonly focusedVenues = new Map<Exclude<LinkGroup, null>, VenueID>();
   private readonly previousVenues = new Map<Exclude<LinkGroup, null>, VenueID>();

@@ -26,6 +26,7 @@ export const IconGear = ({ size }: P) => <Svg size={size}><circle cx="12" cy="12
 export const IconGrip = ({ size }: P) => <Svg size={size}>{[6, 12, 18].flatMap((y) => [9, 15].map((x) => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.3" fill="currentColor" stroke="none" />))}</Svg>;
 export const IconTrend = ({ size }: P) => <Svg size={size}><path d="M4 19L20 5" /><circle cx="5" cy="18" r="1.6" /><circle cx="19" cy="6" r="1.6" /></Svg>;
 export const IconHLine = ({ size }: P) => <Svg size={size}><path d="M3 12h18" /><circle cx="12" cy="12" r="1.6" /></Svg>;
+export const IconCrosshair = ({ size }: P) => <Svg size={size}><path d="M12 3v5M12 16v5M3 12h5M16 12h5" /><circle cx="12" cy="12" r="3.3" /></Svg>;
 // Arrowheads on both ends (vs. IconTrend's dots) — signals the line extends past its
 // two anchors to the pane edge in both directions.
 export const IconExtended = ({ size }: P) => <Svg size={size}><path d="M4 19L20 5" /><path d="M4 19l3-1M4 19l1-3" /><path d="M20 5l-3 1M20 5l-1 3" /></Svg>;

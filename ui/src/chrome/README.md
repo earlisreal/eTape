@@ -51,3 +51,10 @@ only in the OS-focused window, and republishes the owning panel's group, symbol,
 and resolved venue as those contexts change. It clears the owner on panel/window
 removal and never persists the target. The injectable channel seam is local to
 the UI; it does not change the WebSocket or workspace contracts.
+
+Each Chart Panel has an independent, persisted Crosshair Sync toggle. Enabled
+charts share a transient time/price cursor only with enabled charts in the same
+Link Group showing the same symbol, including across workspace windows. Pointer
+leave, panel deactivation, or a context change clears that chart's published
+cursor; pinned charts retain their preference but cannot participate until
+linked.
