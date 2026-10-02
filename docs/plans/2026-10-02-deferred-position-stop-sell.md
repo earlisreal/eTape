@@ -323,9 +323,11 @@ must preserve existing broker-cost and local P&L semantics.
   `ui/src/gen/wsmsg.ts`. The `mingw32-make -C engine gen-ts-check` wrapper could
   not finish because Cygwin `sh.exe` failed to create its signal pipe with
   Win32 error 5; direct generator and drift checks passed.
-- `git diff --check` and the tracked-Go LF check passed. Final plan commit,
-  merge to local `main`, push, and hosted CI verification remain in progress
-  under the repository handoff workflow.
+- `git diff --check` and the tracked-Go LF check passed. The integrated
+  implementation passed all hosted CI jobs on `main` at `4b3df091`:
+  [run 36983988308](https://github.com/earlisreal/eTape/actions/runs/36983988308).
+  The final plan-record commit is documentation-only and triggers its own CI
+  run after push.
 
 ## Rollout, rollback and known limits
 
