@@ -84,6 +84,13 @@ function chipVariant(ds: DisplayStatus): ChipVariant | null {
   return null;
 }
 
+function litCustodyLabel(order: Pick<Order, "type" | "held" | "action">, todayMs: number): string | null {
+  if (order.type !== "LIMIT_IF_TOUCHED" || !order.held) return null;
+  const action = order.action ? `${order.action.kind} ${order.action.phase}` : "idle";
+  const deadline = order.held.deadlineMs ? ` · expires ${formatEtDateTime(order.held.deadlineMs, todayMs)} ET` : "";
+  return `eTape LIT · ${order.held.phase} · action ${action}${deadline}`;
+}
+
 const ORDERS_DEFAULT_SORT: SortState = { col: "createdMs", dir: "desc" };
 type OrderColumn = ResizableColumn & { align: "left" | "right"; sortable: boolean; title?: string };
 const ORDER_PRICE_COLUMNS: OrderColumn[] = [
@@ -92,8 +99,8 @@ const ORDER_PRICE_COLUMNS: OrderColumn[] = [
   { col: "type", label: "TYPE", title: "Order type", defaultWidth: 68, minWidth: 64, align: "left", sortable: true },
 ];
 const ORDER_PRICE_ACCESSORS: Record<string, (o: Pick<Order, "type" | "limitPrice" | "stopPrice">) => number | string | null> = {
-  price: (o) => o.type === "LIMIT" || o.type === "STOP_LIMIT" ? o.limitPrice : null,
-  stopPrice: (o) => o.type === "STOP" || o.type === "STOP_LIMIT" ? o.stopPrice : null,
+  price: (o) => o.type === "LIMIT" || o.type === "STOP_LIMIT" || o.type === "LIMIT_IF_TOUCHED" ? o.limitPrice : null,
+  stopPrice: (o) => o.type === "STOP" || o.type === "STOP_LIMIT" || o.type === "LIMIT_IF_TOUCHED" ? o.stopPrice : null,
   type: (o) => abbrevType(o.type),
 };
 const ORDERS_COLUMNS: OrderColumn[] = [
@@ -255,8 +262,9 @@ function OrdersTable({
             const ds = displayStatus(order, optimistic);
             const variant = chipVariant(ds);
             const working = !optimistic && isWorking(order.status);
-            const deferredCustody = order.deferredPositionPct !== undefined && !order.held?.resolvedQty && order.held?.deadlineMs
-              ? `eTape-held · expires ${formatEtDateTime(order.held.deadlineMs, todayMs)} ET` : null;
+            const custody = litCustodyLabel(order, todayMs) ??
+              (order.deferredPositionPct !== undefined && !order.held?.resolvedQty && order.held?.deadlineMs
+                ? `eTape-held · expires ${formatEtDateTime(order.held.deadlineMs, todayMs)} ET` : null);
             return <tr key={order.id} style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
               <td data-column="createdMs" style={{ padding: "2px 8px" }} title={formatEtDateTime(order.createdMs)}>{formatEtDateTime(order.createdMs, todayMs)}</td>
               <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
@@ -266,7 +274,7 @@ function OrdersTable({
               <OrderPriceCells order={order} />
               <td data-column="state">{variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
                 : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}
-                {deferredCustody && <div style={{ color: palette.textMuted, fontSize: 10 }}>{deferredCustody}</div>}</td>
+                {custody && <div style={{ color: palette.textMuted, fontSize: 10 }}>{custody}</div>}</td>
               <td data-column="actions">{(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
                 style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</HoverButton> : null}</td>
             </tr>;
@@ -288,6 +296,7 @@ function OrdersTable({
             const danger = order.status === "REJECTED" || order.status === "BLOCKED";
             const muted = order.status === "CANCELED" || order.status === "EXPIRED" || order.status === "REPLACED";
             const reason = order.rejectReason || "—";
+            const custody = litCustodyLabel(order, todayMs);
             return <tr key={order.id} style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
               <td data-column="updatedMs" style={{ padding: "2px 8px" }} title={formatEtDateTime(order.updatedMs)}>{formatEtDateTime(order.updatedMs, todayMs)}</td>
               <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
@@ -298,7 +307,8 @@ function OrdersTable({
               <OrderPriceCells order={order} />
               <td data-column="avgFillPrice">{order.executedQty > 0 ? formatPrice(order.avgFillPrice, 3) : "—"}</td>
               <td data-column="state">{danger ? <span className="chip chip-rejected" data-chip="rejected">{STATUS_LABEL[order.status]}</span>
-                : <span style={{ color: muted ? palette.textMuted : palette.text }}>{STATUS_LABEL[order.status]}</span>}</td>
+                : <span style={{ color: muted ? palette.textMuted : palette.text }}>{STATUS_LABEL[order.status]}</span>}
+                {custody && <div style={{ color: palette.textMuted, fontSize: 10 }}>{custody}</div>}</td>
               <td data-column="reason" style={{ maxWidth: 180 }}><span title={order.rejectReason || undefined} style={{ display: "block", maxWidth: 180, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{reason}</span></td>
             </tr>;
           })}</tbody>

@@ -2,8 +2,11 @@ import type { Quote, Side, StopLimitRoutePreview, SubmitOrderArgs, TIF, OrderSes
 import { CHART_BINDINGS, type ChartBinding, type PlaceOrderTemplate } from "./actionTemplate";
 import { resolvePlaceTemplate, type ResolveContext } from "./resolveTemplate";
 
-export function chartStopLimitTemplate(templates: PlaceOrderTemplate[], binding: string): PlaceOrderTemplate | undefined {
-  return templates.find((t) => t.type === "STOP_LIMIT" && t.chartBinding === binding);
+export type ChartConditionalTemplate = PlaceOrderTemplate & { type: "STOP_LIMIT" | "LIMIT_IF_TOUCHED" };
+
+export function chartConditionalTemplate(templates: PlaceOrderTemplate[], binding: string): ChartConditionalTemplate | undefined {
+  return templates.find((t): t is ChartConditionalTemplate =>
+    (t.type === "STOP_LIMIT" || t.type === "LIMIT_IF_TOUCHED") && t.chartBinding === binding);
 }
 
 export function chartBindingForModifiers(modifiers: { ctrlKey: boolean; altKey: boolean; shiftKey: boolean }): ChartBinding | undefined {
@@ -13,7 +16,7 @@ export function chartBindingForModifiers(modifiers: { ctrlKey: boolean; altKey: 
   });
 }
 
-export function resolveChartStopLimit(
+export function resolveChartConditionalOrder(
   template: PlaceOrderTemplate,
   ctx: Omit<ResolveContext, "quote"> & { quote?: Quote },
   stopPrice: number,
@@ -23,17 +26,18 @@ export function resolveChartStopLimit(
   return { args: resolved.args, flash: resolved.flash, errors: resolved.preCheck.errors };
 }
 
-export function chartStopLimitRouteKey(tif: TIF, session: OrderSession, symbol = "", deferred = false): string {
-	return `${tif}:${session}:${symbol}:${deferred ? "deferred" : "fixed"}`;
+export function chartConditionalRouteKey(tif: TIF, session: OrderSession, symbol = "", deferred = false, type: "STOP_LIMIT" | "LIMIT_IF_TOUCHED" = "STOP_LIMIT"): string {
+	return `${type}:${tif}:${session}:${symbol}:${deferred ? "deferred" : "fixed"}`;
 }
 
-export function chartStopLimitWillTrigger(side: Side, stopPrice: number, route?: StopLimitRoutePreview): boolean {
+export function chartConditionalOrderWillTrigger(side: Side, stopPrice: number, route?: StopLimitRoutePreview, type: "STOP_LIMIT" | "LIMIT_IF_TOUCHED" = "STOP_LIMIT"): boolean {
 	if (!route?.hasTrustedEligiblePrint || route.lastEligiblePrice === undefined) return false;
-	return side === "BUY" || side === "COVER"
-		? route.lastEligiblePrice >= stopPrice
-		: route.lastEligiblePrice <= stopPrice;
+	const buyish = side === "BUY" || side === "COVER";
+	return type === "LIMIT_IF_TOUCHED"
+		? buyish ? route.lastEligiblePrice <= stopPrice : route.lastEligiblePrice >= stopPrice
+		: buyish ? route.lastEligiblePrice >= stopPrice : route.lastEligiblePrice <= stopPrice;
 }
 
-export function stopLimitRouteLabel(route: StopLimitRoutePreview): string {
+export function conditionalRouteLabel(route: StopLimitRoutePreview): string {
 	return route.route === "ENGINE_HELD" ? "LOCAL · eTape-held" : route.route === "UNSUPPORTED" ? "UNSUPPORTED" : "NATIVE · venue stop";
 }

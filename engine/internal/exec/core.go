@@ -35,6 +35,7 @@ type SubmitOrder struct {
 	LimitPrice          float64
 	StopPrice           float64
 	RouteExpected       HeldRoute
+	RouteDeadlineMs     int64
 }
 type CancelOrder struct {
 	Venue   VenueID
@@ -60,6 +61,10 @@ type AcknowledgeHeldStopLimit struct {
 	Venue    VenueID
 	Identity string
 }
+type AcknowledgeHeldLimitIfTouched struct {
+	Venue    VenueID
+	Identity string
+}
 
 // ResetBalance is sim-only: cancels resting orders, flattens positions, and
 // reseeds the account to the venue's configured starting balance (Core's
@@ -67,18 +72,19 @@ type AcknowledgeHeldStopLimit struct {
 type ResetBalance struct{ Venue VenueID }
 type SetActiveVenue struct{ Venue VenueID }
 
-func (SubmitOrder) isCommand()              {}
-func (CancelOrder) isCommand()              {}
-func (ReplaceOrder) isCommand()             {}
-func (Flatten) isCommand()                  {}
-func (KillSwitch) isCommand()               {}
-func (Arm) isCommand()                      {}
-func (Disarm) isCommand()                   {}
-func (ConfigureHeldDemand) isCommand()      {}
-func (ResumeHeldOrder) isCommand()          {}
-func (AcknowledgeHeldStopLimit) isCommand() {}
-func (ResetBalance) isCommand()             {}
-func (SetActiveVenue) isCommand()           {}
+func (SubmitOrder) isCommand()                   {}
+func (CancelOrder) isCommand()                   {}
+func (ReplaceOrder) isCommand()                  {}
+func (Flatten) isCommand()                       {}
+func (KillSwitch) isCommand()                    {}
+func (Arm) isCommand()                           {}
+func (Disarm) isCommand()                        {}
+func (ConfigureHeldDemand) isCommand()           {}
+func (ResumeHeldOrder) isCommand()               {}
+func (AcknowledgeHeldStopLimit) isCommand()      {}
+func (AcknowledgeHeldLimitIfTouched) isCommand() {}
+func (ResetBalance) isCommand()                  {}
+func (SetActiveVenue) isCommand()                {}
 
 // CmdAck is the synchronous accepted|blocked ack; order outcomes arrive later as
 // Updates.
@@ -138,6 +144,7 @@ type Core struct {
 	lastEligible     map[string]EligiblePrint
 	heldLiveIdentity map[VenueID]string
 	heldLiveAck      map[VenueID]string
+	heldLiveLITAck   map[VenueID]string
 	shutdownHeld     HeldShutdownSummary
 	positionExecIDs  map[string]bool
 }
@@ -158,10 +165,11 @@ type CoreConfig struct {
 	// Recover, so one misconfigured/unreachable venue can't stall the whole
 	// boot past a short, fixed deadline. Zero means use
 	// defaultRecoverSnapshotTimeout.
-	RecoverSnapshotTimeout    time.Duration
-	ActiveVenue               VenueID
-	HeldStopLimitLiveIdentity map[VenueID]string
-	HeldStopLimitAcknowledged map[VenueID]string
+	RecoverSnapshotTimeout         time.Duration
+	ActiveVenue                    VenueID
+	HeldStopLimitLiveIdentity      map[VenueID]string
+	HeldStopLimitAcknowledged      map[VenueID]string
+	HeldLimitIfTouchedAcknowledged map[VenueID]string
 }
 
 func NewCore(cfg CoreConfig) *Core {
@@ -201,6 +209,7 @@ func NewCore(cfg CoreConfig) *Core {
 		positionExecIDs:        make(map[string]bool),
 		heldLiveIdentity:       cloneVenueStrings(cfg.HeldStopLimitLiveIdentity),
 		heldLiveAck:            cloneVenueStrings(cfg.HeldStopLimitAcknowledged),
+		heldLiveLITAck:         cloneVenueStrings(cfg.HeldLimitIfTouchedAcknowledged),
 	}
 	for v := range cfg.Gate.AccountRequired {
 		// The stale transition is emitted only after the poller's five-failure
@@ -869,6 +878,14 @@ func (c *Core) handleCmd(ctx context.Context, cmd Command) CmdAck {
 		c.heldLiveAck[cm.Venue] = identity
 		c.emit(HeldStopLimitAckUpdate{Venue: cm.Venue, Acknowledged: true})
 		return CmdAck{Accepted: true}
+	case AcknowledgeHeldLimitIfTouched:
+		identity := c.heldLiveIdentity[cm.Venue]
+		if identity == "" || identity != cm.Identity {
+			return CmdAck{Accepted: false, Reason: "live account identity changed; restart before acknowledging"}
+		}
+		c.heldLiveLITAck[cm.Venue] = identity
+		c.emit(HeldLimitIfTouchedAckUpdate{Venue: cm.Venue, Acknowledged: true})
+		return CmdAck{Accepted: true}
 	case KillSwitch:
 		return c.handleKill(ctx, cm)
 	case Arm:
@@ -906,13 +923,18 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 	}
 	route := RouteNative
 	var deadline time.Time
-	if req.Type == TypeStopLimit {
+	if req.Type == TypeStopLimit || req.Type == TypeLimitIfTouched {
 		var effective OrderSession
 		var routeReason string
-		if deferred {
-			route, effective, deadline, routeReason = ResolveDeferredStopSellRoute(c.clk.Now(), req.TIF, req.Session)
-		} else {
-			route, effective, deadline = ResolveStopLimitRoute(c.clk.Now(), req.TIF, req.Session)
+		switch req.Type {
+		case TypeLimitIfTouched:
+			route, effective, deadline, routeReason = ResolveLimitIfTouchedRoute(c.clk.Now(), req.TIF, req.Session)
+		case TypeStopLimit:
+			if deferred {
+				route, effective, deadline, routeReason = ResolveDeferredStopSellRoute(c.clk.Now(), req.TIF, req.Session)
+			} else {
+				route, effective, deadline = ResolveStopLimitRoute(c.clk.Now(), req.TIF, req.Session)
+			}
 		}
 		if route == RouteUnsupported {
 			return CmdAck{Accepted: false, Reason: routeReason, OrderID: req.ClientOrderID}
@@ -920,19 +942,31 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 		if cm.RouteExpected != "" && cm.RouteExpected != route {
 			return CmdAck{Accepted: false, Reason: "order route changed; review custody and retry", OrderID: req.ClientOrderID}
 		}
+		if req.Type == TypeLimitIfTouched && route == RouteEngineHeld && cm.RouteDeadlineMs <= 0 {
+			return CmdAck{Accepted: false, Reason: "limit-if-touched route preview is required; review custody and retry", OrderID: req.ClientOrderID}
+		}
+		if req.Type == TypeLimitIfTouched && cm.RouteDeadlineMs != 0 &&
+			(route != RouteEngineHeld || deadline.UnixMilli() != cm.RouteDeadlineMs) {
+			return CmdAck{Accepted: false, Reason: "order session deadline changed; review custody and retry", OrderID: req.ClientOrderID}
+		}
 		if route == RouteEngineHeld {
-			if identity := c.heldLiveIdentity[req.Venue]; identity != "" && c.heldLiveAck[req.Venue] != identity {
-				return CmdAck{Accepted: false, Reason: "live engine-held stop-limit requires account acknowledgement"}
+			if identity := c.heldLiveIdentity[req.Venue]; req.Type == TypeStopLimit && identity != "" && c.heldLiveAck[req.Venue] != identity {
+				return CmdAck{Accepted: false, Reason: "live engine-held stop-limit requires account acknowledgement", OrderID: req.ClientOrderID}
+			}
+			if req.Type == TypeLimitIfTouched && c.heldLiveIdentity[req.Venue] != "" && c.heldLiveLITAck[req.Venue] != c.heldLiveIdentity[req.Venue] {
+				return CmdAck{Accepted: false, Reason: "live engine-held limit-if-touched requires account acknowledgement", OrderID: req.ClientOrderID}
 			}
 			req.Session = effective
-			switch req.Side {
-			case SideBuy, SideCover:
-				if req.LimitPrice < req.StopPrice {
-					return CmdAck{Accepted: false, Reason: "buy stop-limit requires limit at or above trigger", OrderID: req.ClientOrderID}
-				}
-			case SideSell, SideShort:
-				if req.LimitPrice > req.StopPrice {
-					return CmdAck{Accepted: false, Reason: "sell stop-limit requires limit at or below trigger", OrderID: req.ClientOrderID}
+			if req.Type == TypeStopLimit {
+				switch req.Side {
+				case SideBuy, SideCover:
+					if req.LimitPrice < req.StopPrice {
+						return CmdAck{Accepted: false, Reason: "buy stop-limit requires limit at or above trigger", OrderID: req.ClientOrderID}
+					}
+				case SideSell, SideShort:
+					if req.LimitPrice > req.StopPrice {
+						return CmdAck{Accepted: false, Reason: "sell stop-limit requires limit at or below trigger", OrderID: req.ClientOrderID}
+					}
 				}
 			}
 		}
@@ -1003,7 +1037,7 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 			c.heldDemand.Release(req.ClientOrderID)
 			return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: req.ClientOrderID}
 		}
-		if last, ok := c.lastEligible[req.Symbol]; ok && c.freshEligiblePrint(last) && StopLimitTriggered(o.Side, last.Price, o.StopPrice) {
+		if last, ok := c.lastEligible[req.Symbol]; ok && c.freshEligiblePrint(last) && HeldOrderTriggered(o.Type, o.Side, last.Price, o.StopPrice) {
 			c.activateHeld(ctx, c.order(o.ID))
 		}
 		return CmdAck{Accepted: true, OrderID: req.ClientOrderID}
@@ -1135,7 +1169,7 @@ func (c *Core) handleReplace(ctx context.Context, cm ReplaceOrder) CmdAck {
 			if stop <= 0 {
 				stop = o.StopPrice
 			}
-			if (o.Side == SideBuy || o.Side == SideCover) && o.LimitPrice < stop || (o.Side == SideSell || o.Side == SideShort) && o.LimitPrice > stop {
+			if o.Type == TypeStopLimit && ((o.Side == SideBuy || o.Side == SideCover) && o.LimitPrice < stop || (o.Side == SideSell || o.Side == SideShort) && o.LimitPrice > stop) {
 				return CmdAck{Accepted: false, Reason: "stop change would put limit on the wrong side of trigger", OrderID: o.ID}
 			}
 			deferred := o.DeferredPositionPct > 0
@@ -1149,7 +1183,7 @@ func (c *Core) handleReplace(ctx context.Context, cm ReplaceOrder) CmdAck {
 			if deferred && !c.state.PositionsReady(o.Venue) {
 				return CmdAck{Accepted: false, Reason: "position data unavailable; reconcile the venue before editing this stop", OrderID: o.ID}
 			}
-			req := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Type: TypeStopLimit, TIF: o.TIF, Session: o.Session,
+			req := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Type: o.Type, TIF: o.TIF, Session: o.Session,
 				Qty: qty, LimitPrice: o.LimitPrice, StopPrice: stop, ClientOrderID: o.ID}
 			if good, reason := c.heldGate(req, o.ID); !good {
 				return CmdAck{Accepted: false, Reason: reason, OrderID: o.ID}
@@ -1157,7 +1191,7 @@ func (c *Core) handleReplace(ctx context.Context, cm ReplaceOrder) CmdAck {
 			if err := c.appendAndFold(OrderReplaced{V: o.Venue, OID: o.ID, NewQty: qty, NewStop: stop, Ts: c.now()}, SrcLocal); err != nil {
 				return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: o.ID}
 			}
-			if last, ok := c.lastEligible[o.Symbol]; ok && c.freshEligiblePrint(last) && StopLimitTriggered(o.Side, last.Price, stop) {
+			if last, ok := c.lastEligible[o.Symbol]; ok && c.freshEligiblePrint(last) && HeldOrderTriggered(o.Type, o.Side, last.Price, stop) {
 				c.activateHeld(ctx, c.order(o.ID))
 			}
 			return CmdAck{Accepted: true, OrderID: o.ID}

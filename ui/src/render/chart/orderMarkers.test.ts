@@ -34,6 +34,18 @@ describe("chart order markers", () => {
     expect(marker.draggable).toBe(false);
   });
 
+  it("projects a held LIT trigger before activation and its limit after", () => {
+    const waiting: Order = { ...base, type: "LIMIT_IF_TOUCHED", stopPrice: 99, limitPrice: 101,
+      held: { phase: "WAITING", deadlineMs: 2 } };
+    expect(chartOrderMarkers([waiting], "sim", "US.AAPL", false)[0]).toMatchObject({
+      price: 99, kind: "limit-if-touched", draggable: true,
+    });
+    const activating = { ...waiting, held: { phase: "ACTIVATING" as const, deadlineMs: 2, childClientId: "child" } };
+    expect(chartOrderMarkers([activating], "sim", "US.AAPL", false)[0]).toMatchObject({
+      price: 101, kind: "limit", draggable: false,
+    });
+  });
+
   it("snaps to cents above one dollar and ten-thousandths below", () => {
     expect(snapOrderMarkerPrice(2.567)).toBe(2.57);
     expect(snapOrderMarkerPrice(0.98676)).toBe(0.9868);

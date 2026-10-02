@@ -48,6 +48,7 @@ func signedQty(req OrderRequest) float64 {
 //
 //	Limit      -> limit price
 //	StopLimit  -> limit price (it triggers into a limit at that price)
+//	LimitIfTouched -> limit price (it triggers into a limit at that price)
 //	Stop       -> stop price (triggers into a market ~at the stop; always priced)
 //	Market     -> last-trade mark (ok=false when there is no mark -> must block)
 func orderValue(req OrderRequest, marks MarkSource) (float64, bool) {
@@ -60,7 +61,7 @@ func orderValue(req OrderRequest, marks MarkSource) (float64, bool) {
 		return req.Qty * m, true
 	case TypeStop:
 		return req.Qty * req.StopPrice, true
-	default: // Limit, StopLimit
+	default: // Limit, StopLimit, LimitIfTouched
 		return req.Qty * req.LimitPrice, true
 	}
 }

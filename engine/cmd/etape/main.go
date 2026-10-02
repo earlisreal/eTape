@@ -407,6 +407,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	}
 	heldStopLimitIdentity := heldStopLimitIdentities(cfg, credsFile)
 	heldStopLimitAck := make(map[exec.VenueID]string)
+	heldLITAck := make(map[exec.VenueID]string)
 	staleAckRemoved := false
 	for venue, identity := range heldStopLimitIdentity {
 		key := "held_stop_limit_ack:" + string(venue)
@@ -419,6 +420,16 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			heldStopLimitAck[venue] = identity
 		} else if ok {
 			st.DeleteConfig(key)
+			staleAckRemoved = true
+		}
+		litKey := "held_limit_if_touched_ack:" + string(venue)
+		litStored, litOK, litReadErr := st.GetConfig(litKey)
+		if litReadErr != nil {
+			log.Warn("read held limit-if-touched acknowledgement", "venue", venue, "err", litReadErr)
+		} else if litOK && litStored == identity {
+			heldLITAck[venue] = identity
+		} else if litOK {
+			st.DeleteConfig(litKey)
 			staleAckRemoved = true
 		}
 	}
@@ -459,10 +470,11 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	execCore := exec.NewCore(exec.CoreConfig{
 		Venues: venueIDs, Gate: gateConfig, Store: st,
 		Brokers: brokers, Clock: execClk, IDGen: exec.NewOrderIDGen(execClk, rand.Reader),
-		SysLog:                    st.AppendSysEvent,
-		StartingBalance:           startingBalances(cfg),
-		HeldStopLimitLiveIdentity: heldStopLimitIdentity,
-		HeldStopLimitAcknowledged: heldStopLimitAck,
+		SysLog:                         st.AppendSysEvent,
+		StartingBalance:                startingBalances(cfg),
+		HeldStopLimitLiveIdentity:      heldStopLimitIdentity,
+		HeldStopLimitAcknowledged:      heldStopLimitAck,
+		HeldLimitIfTouchedAcknowledged: heldLITAck,
 	})
 	if err := execCore.Recover(ctx); err != nil {
 		log.Warn("exec recover (continuing; reactive reconcile will catch up)", "err", err)
@@ -516,7 +528,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	venueAdm := venueadmin.New(*cfgPath, creds.DefaultPath(), config.VenueConfig{Venues: cfg.Venues, Gate: cfg.Gate})
 	venueProbe := venueprobe.New(creds.DefaultPath(), cfg.OpenD.Addr(), uihubClk)
 	hub, srv := uihub.New(uihubClk, uihub.Config{
-		Venues: venueMetasWithHeldStopLimitAck(cfg, heldStopLimitIdentity, heldStopLimitAck), Global: uihub.GlobalLimits{
+		Venues: venueMetasWithHeldStopLimitAck(cfg, heldStopLimitIdentity, heldStopLimitAck, heldLITAck), Global: uihub.GlobalLimits{
 			MaxDayLoss: cfg.Gate.Global.MaxDayLoss, MaxSymbolPositionValue: cfg.Gate.Global.MaxSymbolPositionValue,
 			MaxSymbolPositionShares: cfg.Gate.Global.MaxSymbolPositionShares,
 		},

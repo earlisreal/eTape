@@ -1,6 +1,6 @@
 // Client-side pre-checks before the wire (ui-design §Trigger flow step 2):
 //   qty > 0; stop/stop-limit price coherence (TZ does not validate — inverted
-//   stop-limits sit unfilled); Market outside RTH auto-converted to an
+//   stop-limits sit unfilled); LIT prices independently finite/tick-valid; Market outside RTH auto-converted to an
 //   aggressive marketable limit (ask/bid ± a buffer%, tick-rounded) + a
 //   visible notice (avoids TZ R78). Pure; nowMs decides the ET session.
 //
@@ -97,6 +97,16 @@ export function preCheck(
       if (!buyish && order.limitPrice > order.stopPrice) errors.push("Inverted sell stop-limit: limit is above stop (would sit unfilled).");
     }
   }
+  if (order.type === "LIMIT_IF_TOUCHED") {
+    if (!validLimitIfTouchedPrice(order.stopPrice)) errors.push("Trigger price must be finite, positive, and tick-valid.");
+    if (!validLimitIfTouchedPrice(order.limitPrice)) errors.push("Limit price must be finite, positive, and tick-valid.");
+  }
 
   return { ok: errors.length === 0, order, errors, notices };
+}
+
+function validLimitIfTouchedPrice(price: number): boolean {
+  if (!Number.isFinite(price) || price <= 0) return false;
+  const tick = price >= 1 ? 0.01 : 0.0001;
+  return Math.abs(price / tick - Math.round(price / tick)) <= 1e-7;
 }

@@ -5,11 +5,11 @@ Named workspaces are cataloged in engine config (`windows.v1`) by stable UUID; `
 React/Vite shell around imperative market-data stores and renderers. Wire messages enter `src/wire`, route into `src/data`, then panels/controllers schedule chart or canvas work. The Account panel keeps live Open Orders and the read-only Closed Orders projection in the imperative execution store; the upper tab is session-local while each table's sort preference is persisted. Time & Sales ticks retain the engine-stamped Significant Print level in the imperative tape ring; the separate `md.tape.status` read model feeds read-only settings text. React owns layout/settings, never high-frequency payload state.
 
 Grouped charts also project open orders into an imperative overlay: yellow
-LIMIT and cyan pretrigger STOP_LIMIT lines, price-axis chips, and per-order
+LIMIT and cyan pretrigger STOP_LIMIT/LIT lines, price-axis chips, and per-order
 drag/cancel controls. The overlay follows the ordinary execution store; market
-ticks remain outside React state. Engine-held STOP_LIMIT is labeled as local
-custody before trigger and becomes a venue LIMIT only after a fresh eligible
-print.
+ticks remain outside React state. Engine-held STOP_LIMIT and LIT are labeled
+as local custody before trigger and become venue LIMITs only after a fresh
+eligible print.
 
 Built-in and newly added symbol-bearing panels start unassigned. General Layout downloads preserve workspace structure and non-symbol settings while removing panel and Link Group focused symbols; Monitoring Sync intent remains enabled but imports paused without a portable Scanner Source. Existing saved workspaces and downloaded files are left untouched.
 

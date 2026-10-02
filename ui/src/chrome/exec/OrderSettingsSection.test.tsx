@@ -272,7 +272,7 @@ describe("OrderSettingsSection", () => {
     const toast = { push: vi.fn(), dismiss: vi.fn() };
     render(<ThemeProvider><OrderSettingsSection config={config} onSave={vi.fn()} commands={{ sendCommand }} exec={exec} toast={toast} /></ThemeProvider>);
     fireEvent.click(screen.getByTestId("review-chart-binding-buy-5k"));
-    const enable = () => screen.getByRole("button", { name: "I understand — enable for alpaca-live" }) as HTMLButtonElement;
+    const enable = () => screen.getByRole("button", { name: "I understand — enable Stop-Limit for alpaca-live" }) as HTMLButtonElement;
     fireEvent.click(enable());
     await waitFor(() => expect(toast.push).toHaveBeenCalledWith(expect.objectContaining({
       level: "danger", text: expect.stringContaining("Acknowledgement blocked for alpaca-live: offline"),
@@ -305,18 +305,42 @@ describe("OrderSettingsSection", () => {
 
     expect(screen.getByText("alpaca live · alpaca-live")).toBeTruthy();
     expect(screen.getByText("moomoo live · moomoo-live")).toBeTruthy();
-    expect(screen.getByText("Enabled for this account")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "I understand — enable for alpaca-live" }));
+    expect(screen.getByText("Stop-Limit enabled")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "I understand — enable Stop-Limit for alpaca-live" }));
     await screen.findByRole("button", { name: "Waiting for account status…" });
     expect(sendCommand).toHaveBeenCalledWith("AcknowledgeHeldStopLimit", { venue: "alpaca-live" });
-    expect(screen.getAllByText("Enabled for this account")).toHaveLength(1);
+    expect(screen.getAllByText("Stop-Limit enabled")).toHaveLength(1);
 
     act(() => exec.apply({ kind: "delta", topic: "exec.status", payload: { ...status, venues: [
       baseVenue,
       { ...venues[1], heldStopLimitAcknowledged: true },
       venues[2],
     ] } }));
-    expect(await screen.findAllByText("Enabled for this account")).toHaveLength(2);
+    expect(await screen.findAllByText("Stop-Limit enabled")).toHaveLength(2);
+  });
+
+  it("acknowledges LIT separately from stop-limit for the same account", async () => {
+    const exec = makeStores().exec;
+    const venue = { ...status.venues[0], venue: "alpaca-live", env: "live", heldStopLimitAcknowledged: false, heldLimitIfTouchedAcknowledged: false };
+    exec.apply({ kind: "snapshot", topic: "exec.status", payload: { ...status, venues: [venue] } });
+    const config: OrderConfig = {
+      ...SAMPLE_ORDER_CONFIG,
+      templates: SAMPLE_ORDER_CONFIG.templates.map((t) =>
+        t.id === "buy-5k" && t.kind === "place" ? { ...t, type: "LIMIT_IF_TOUCHED" as const, chartBinding: "Shift" as const } : t),
+    };
+    const sendCommand = vi.fn(async () => ({ kind: "ack" as const, corrId: "lit-ack", status: "accepted" as const }));
+    render(<ThemeProvider><OrderSettingsSection config={config} onSave={vi.fn()} commands={{ sendCommand }} exec={exec} /></ThemeProvider>);
+    fireEvent.click(screen.getByTestId("review-chart-binding-buy-5k"));
+    fireEvent.click(screen.getByRole("button", { name: "I understand — enable LIT for alpaca-live" }));
+    await screen.findByRole("button", { name: "Waiting for account status…" });
+    expect(sendCommand).toHaveBeenCalledWith("AcknowledgeHeldLimitIfTouched", { venue: "alpaca-live" });
+    expect(screen.getByRole("button", { name: "I understand — enable Stop-Limit for alpaca-live" })).toBeTruthy();
+
+    act(() => exec.apply({ kind: "snapshot", topic: "exec.status", payload: { ...status, venues: [{
+      ...venue, heldLimitIfTouchedAcknowledged: true,
+    }] } }));
+    expect(await screen.findByText("LIT enabled")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "I understand — enable Stop-Limit for alpaca-live" })).toBeTruthy();
   });
 
   it("keeps an accepted acknowledgement pending across Settings unmounts", async () => {
@@ -332,7 +356,7 @@ describe("OrderSettingsSection", () => {
     const props = { config, onSave: vi.fn(), commands: { sendCommand }, exec };
     const first = render(<ThemeProvider><OrderSettingsSection {...props} /></ThemeProvider>);
     fireEvent.click(screen.getByTestId("review-chart-binding-buy-5k"));
-    fireEvent.click(screen.getByRole("button", { name: "I understand — enable for alpaca-live" }));
+    fireEvent.click(screen.getByRole("button", { name: "I understand — enable Stop-Limit for alpaca-live" }));
     await screen.findByRole("button", { name: "Waiting for account status…" });
     first.unmount();
 
@@ -351,7 +375,7 @@ describe("OrderSettingsSection", () => {
       ...status, venues: [{ ...venue, note: "account identity refreshed" }],
     } }));
     await waitFor(() => expect((screen.getByRole("button", {
-      name: "I understand — enable for alpaca-live",
+      name: "I understand — enable Stop-Limit for alpaca-live",
     }) as HTMLButtonElement).disabled).toBe(false));
   });
 
@@ -369,7 +393,7 @@ describe("OrderSettingsSection", () => {
     const props = { config, onSave: vi.fn(), commands: { sendCommand }, exec };
     const first = render(<ThemeProvider><OrderSettingsSection {...props} /></ThemeProvider>);
     fireEvent.click(screen.getByTestId("review-chart-binding-buy-5k"));
-    fireEvent.click(screen.getByRole("button", { name: "I understand — enable for alpaca-live" }));
+    fireEvent.click(screen.getByRole("button", { name: "I understand — enable Stop-Limit for alpaca-live" }));
     await screen.findByRole("button", { name: "Waiting for account status…" });
     first.unmount();
 
@@ -379,7 +403,7 @@ describe("OrderSettingsSection", () => {
 
     await act(async () => resolveCommand({ kind: "ack", corrId: "ack1", status: "blocked", reason: "offline" }));
     await waitFor(() => expect((screen.getByRole("button", {
-      name: "I understand — enable for alpaca-live",
+      name: "I understand — enable Stop-Limit for alpaca-live",
     }) as HTMLButtonElement).disabled).toBe(false));
   });
 

@@ -87,7 +87,7 @@ and the broker of your choice for execution, and everything else is free and ope
   publish times and type badges; headlines open in an unmaximized reusable reader
 
 **Execution**
-- Order ticket with market / limit / stop / stop-limit
+- Order ticket with market / limit / stop / stop-limit / limit-if-touched (LIT)
 - Hotkey deck: configurable one-keystroke order templates with price offsets and
   position sizing by buying-power % or position %
 - Account, positions, open/closed orders, and trade-history panels

@@ -12,6 +12,11 @@ persists the parent lifecycle, pauses pretrigger orders across restart/feed
 loss, and reconciles uncertain child outcomes without resubmitting. See the
 [execution core guide](internal/exec/README.md).
 
+DAY Limit-if-Touched orders are engine-held during the active PRE, RTH, or
+POST segment. BUY/COVER triggers at or below the trigger; SELL/SHORT at or
+above. A fresh Last-Eligible print creates one linked venue LIMIT child, and
+the live-account acknowledgement is separate from stop-limit enablement.
+
 ## Release builds
 
 The release targets build the UI, embed it, and cross-compile with CGO disabled:

@@ -1,6 +1,9 @@
 package exec
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestSideString(t *testing.T) {
 	for s, want := range map[Side]string{SideBuy: "BUY", SideSell: "SELL", SideShort: "SHORT", SideCover: "COVER"} {
@@ -39,10 +42,11 @@ func TestOrderRequestValidate(t *testing.T) {
 
 func TestOrderType_String_Stops(t *testing.T) {
 	cases := map[OrderType]string{
-		TypeMarket:    "MARKET",
-		TypeLimit:     "LIMIT",
-		TypeStop:      "STOP",
-		TypeStopLimit: "STOP_LIMIT",
+		TypeMarket:         "MARKET",
+		TypeLimit:          "LIMIT",
+		TypeStop:           "STOP",
+		TypeStopLimit:      "STOP_LIMIT",
+		TypeLimitIfTouched: "LIMIT_IF_TOUCHED",
 	}
 	for ot, want := range cases {
 		if got := ot.String(); got != want {
@@ -63,6 +67,12 @@ func TestOrderRequest_Validate_Stops(t *testing.T) {
 		{"stop-limit missing limit", func(r *OrderRequest) { r.Type = TypeStopLimit; r.StopPrice = 5 }, true},
 		{"stop-limit missing stop", func(r *OrderRequest) { r.Type = TypeStopLimit; r.LimitPrice = 5 }, true},
 		{"stop-limit ok", func(r *OrderRequest) { r.Type = TypeStopLimit; r.StopPrice = 5; r.LimitPrice = 6 }, false},
+		{"LIT missing limit", func(r *OrderRequest) { r.Type = TypeLimitIfTouched; r.StopPrice = 5 }, true},
+		{"LIT missing trigger", func(r *OrderRequest) { r.Type = TypeLimitIfTouched; r.LimitPrice = 5 }, true},
+		{"LIT permits limit either side", func(r *OrderRequest) { r.Type = TypeLimitIfTouched; r.StopPrice = 5; r.LimitPrice = 4 }, false},
+		{"LIT rejects non-finite trigger", func(r *OrderRequest) { r.Type = TypeLimitIfTouched; r.StopPrice = math.NaN(); r.LimitPrice = 5 }, true},
+		{"LIT rejects non-finite limit", func(r *OrderRequest) { r.Type = TypeLimitIfTouched; r.StopPrice = 5; r.LimitPrice = math.Inf(1) }, true},
+		{"LIT rejects invalid tick", func(r *OrderRequest) { r.Type = TypeLimitIfTouched; r.StopPrice = 5.001; r.LimitPrice = 5 }, true},
 		{"limit still requires price", func(r *OrderRequest) { r.Type = TypeLimit }, true},
 	}
 	for _, tc := range tests {

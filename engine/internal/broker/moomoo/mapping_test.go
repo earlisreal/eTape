@@ -52,6 +52,25 @@ func TestOrderTypeWire(t *testing.T) {
 	}
 }
 
+func TestOrderTypeDomainPreservesNativeLIT(t *testing.T) {
+	got := orderTypeDomain(trdcommon.OrderType_OrderType_LimitifTouched)
+	if got != exec.TypeLimitIfTouched {
+		t.Fatalf("native LIT mapped to %s, want LIMIT_IF_TOUCHED", got)
+	}
+	if _, err := orderTypeWire(exec.TypeLimitIfTouched); err == nil {
+		t.Fatal("engine-held LIT must not be sent as a native moomoo order")
+	}
+}
+
+func TestOrderDomainPreservesNativeLITAuxPrice(t *testing.T) {
+	wireType := int32(trdcommon.OrderType_OrderType_LimitifTouched)
+	auxPrice := 12.34
+	got := orderDomain(&trdcommon.Order{OrderType: &wireType, AuxPrice: &auxPrice})
+	if got.Type != exec.TypeLimitIfTouched || got.StopPrice != auxPrice {
+		t.Fatalf("native LIT mapped to type=%s trigger=%v, want type=%s trigger=%v", got.Type, got.StopPrice, exec.TypeLimitIfTouched, auxPrice)
+	}
+}
+
 // TestSideWire covers moomoo's rule that the client only ever sends Buy or
 // Sell (never SellShort/BuyBack) -- the real Short/Cover distinction rides
 // back in on the inbound side, unlike Alpaca/TradeZero which need extra

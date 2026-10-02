@@ -24,7 +24,7 @@ import type { Palette } from "../../render/palette";
 import { useTheme } from "../ThemeProvider";
 import { useOptionalOrderConfig } from "../exec/useOrderConfig";
 import { ChartOrderMarkers } from "./tv/ChartOrderMarkers";
-import { ChartStopLimitEntry } from "./tv/ChartStopLimitEntry";
+import { ChartConditionalOrderEntry } from "./tv/ChartConditionalOrderEntry";
 import { DEFAULT_RECT_FILL_OPACITY, type Drawing } from "../../render/chart/drawings/model";
 import type { LineStyleName } from "../../render/chart/lineStyle";
 import { getTvPalette, getTvChrome } from "../../render/chart/tvTheme";
@@ -1275,7 +1275,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           <ChartOrderMarkers orders={execSnapshot.orders.values()} venue={linkGroups.venueFor(group) ?? ""} symbol={chartSymbol}
             pinned={group === null} sendCommand={commands.sendCommand} hostRef={hostRef} facadeRef={facadeRef}
             rightAxisWidth={rightAxisWidth} layoutRef={orderMarkerLayoutRef} chooserOpenRef={orderChooserOpenRef} />
-          <ChartStopLimitEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
+          <ChartConditionalOrderEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
             symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={activeTool} chooserOpenRef={orderChooserOpenRef}
             sendCommand={commands.sendCommand} sendQuery={commands.sendQuery} />
           {selection && (

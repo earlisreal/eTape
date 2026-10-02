@@ -251,7 +251,7 @@ it does not wait for a future BUY fill or query the broker to bridge that delay.
 | Other venue events | `engine/internal/broker/alpaca/{normalize,alpaca}.go` and `engine/internal/broker/tradezero/{normalize,tradezero}.go`: absolute position updates, raw replacement-leg identity and coherent reconnect cutover; sim uses the same cache contract. |
 | Held orders and guards | `engine/internal/exec/{types,events,gate,core,held_route,held_lifecycle,closed}.go`: percent intent, deferred validation, session deadlines, share commitments, uncertain submits/replaces, durable quantity resolution and history; native Flatten coordination. |
 | UI contract | `engine/internal/uihub/{commands,query,mirror}.go` and `engine/internal/uihub/wsmsg/payloads.go`: percent submission, sizing-aware route preview, cache readiness and order projections; regenerate `ui/src/gen/wsmsg.ts`. |
-| Template entry | `ui/src/chrome/exec/{resolveTemplate,resolveChartStopLimit,preChecks,commands}.ts` and `ui/src/chrome/panels/tv/ChartStopLimitEntry.tsx`: deferred intent, exact preview snapshot and consistent chart/hotkey/Deck behavior. |
+| Template entry | `ui/src/chrome/exec/{resolveTemplate,resolveChartConditionalOrder,preChecks,commands}.ts` and `ui/src/chrome/panels/tv/ChartConditionalOrderEntry.tsx`: deferred intent, exact preview snapshot and consistent chart/hotkey/Deck behavior. |
 | Order presentation | `ui/src/chrome/panels/{AccountPanel.tsx,tv/ChartOrderMarkers.tsx}` and existing ExecStore/toast wiring: percentage before resolution, actual shares afterward, distinct unavailable/flat feedback and delta-only rejection toasts. |
 | Guides | Relevant engine execution, UI execution and chart panel READMEs: cache trust, supported custody, sizing, expiry and Resume behavior. |
 

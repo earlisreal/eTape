@@ -23,6 +23,7 @@ function mkProps(orderConfig?: OrderConfig) {
     return { kind: "ack", corrId: "c", status: "accepted", orderId: "ETX", value: undefined };
   }), sendQuery: vi.fn(async () => []) };
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
+  linkGroups.focusVenue("green", "alpaca-paper");
   const props = { config: { id: "t-ticket", panelId: "order-ticket", group: "green", settings: {} }, stores, scheduler: {} as never, width: 320, height: 400, linkGroups, commands, onConfigChange: () => {} } as PanelProps;
   return { props, stores, sent, linkGroups };
 }
@@ -89,11 +90,46 @@ describe("OrderTicketPanel", () => {
     fireEvent.change(screen.getByTestId("amount"), { target: { value: "10" } });
     fireEvent.change(screen.getByTestId("price"), { target: { value: "3.5" } });
     fireEvent.change(screen.getByTestId("stop"), { target: { value: "3.5" } });
-    await waitFor(() => expect(screen.getByTestId("stop-limit-custody-preview").textContent).toContain("Held by eTape — no broker protection"));
+    await waitFor(() => expect(screen.getByTestId("conditional-custody-preview").textContent).toContain("Held by eTape — no broker protection"));
     fireEvent.change(screen.getByTestId("session"), { target: { value: "EXTENDED" } });
     fireEvent.click(screen.getByTestId("side-BUY"));
     await waitFor(() => expect(sent.some((s) => s.name === "SubmitOrder")).toBe(true));
     expect(sent.find((s) => s.name === "SubmitOrder")?.args).toMatchObject({ type:"STOP_LIMIT", routeExpected:"ENGINE_HELD" });
+  });
+  it("submits LIT with a distinct live-preview type and trigger field", async () => {
+    const { props, stores, linkGroups, sent } = mkProps();
+    props.commands.sendQuery = vi.fn(async () => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "PRE", deadlineMs: 1_800_000_000_000,
+      hasTrustedEligiblePrint: true, lastEligiblePrice: 3.4 }));
+    act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); stores.quote.apply({ kind: "snapshot", topic: "md.quote" as never, payload: { symbol: "US.AAPL", bid: 3.4, ask: 3.5, last: 3.45, ts: "" } }); linkGroups.focus("green", "US.AAPL"); });
+    const { container } = wrap(props);
+    fireEvent.change(screen.getByTestId("order-type"), { target: { value: "LIMIT_IF_TOUCHED" } });
+    fireEvent.change(screen.getByTestId("amount"), { target: { value: "10" } });
+    fireEvent.change(screen.getByTestId("price"), { target: { value: "3.3" } });
+    fireEvent.change(screen.getByTestId("stop"), { target: { value: "3.4" } });
+    const captions = Array.from(container.querySelectorAll(".col-head")).map((el) => el.textContent);
+    expect(captions).toContain("Limit");
+    expect(captions).toContain("Trigger");
+    await waitFor(() => expect(screen.getByTestId("conditional-custody-preview").textContent).toContain("Will trigger now for BUY/COVER"));
+    expect(screen.getByTestId("conditional-custody-preview").textContent).toContain("Last-Eligible price 3.4");
+    expect(screen.getByTestId("conditional-custody-preview").textContent).toContain("no broker order before trigger");
+    expect(screen.getByTestId("conditional-custody-preview").textContent).toContain("primary moomoo OpenD Last-Eligible Prints");
+    expect(screen.getByTestId("conditional-custody-preview").textContent).toContain("feed loss pauses evaluation");
+    fireEvent.click(screen.getByTestId("side-BUY"));
+    await waitFor(() => expect(sent.some((s) => s.name === "SubmitOrder")).toBe(true));
+    expect(sent.find((s) => s.name === "SubmitOrder")?.args).toMatchObject({
+      type: "LIMIT_IF_TOUCHED", stopPrice: 3.4, limitPrice: 3.3, routeExpected: "ENGINE_HELD", routeDeadlineMs: 1_800_000_000_000,
+    });
+  });
+  it("shows an unsupported LIT route reason in the custody preview", async () => {
+    const { props, stores, linkGroups } = mkProps();
+    props.commands.sendQuery = vi.fn(async () => ({ route: "UNSUPPORTED", reason: "LIT requires DAY" }));
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() });
+      linkGroups.focus("green", "US.AAPL");
+    });
+    wrap(props);
+    fireEvent.change(screen.getByTestId("order-type"), { target: { value: "LIMIT_IF_TOUCHED" } });
+    await waitFor(() => expect(screen.getByTestId("conditional-custody-preview").textContent).toContain("LIT requires DAY"));
   });
   it("clicking SELL submits that side directly, without a separate select step", async () => {
     const { props, stores, linkGroups, sent } = mkProps();
@@ -230,7 +266,7 @@ describe("OrderTicketPanel", () => {
     act(() => { stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status() }); });
     wrap(props);
     const typeOptions = Array.from(screen.getByTestId("order-type").querySelectorAll("option")).map((o) => o.textContent);
-    expect(typeOptions).toEqual(["Limit", "Market", "Stop", "Stop Limit"]);
+    expect(typeOptions).toEqual(["Limit", "Market", "Stop", "Stop Limit", "Limit If Touched"]);
     const modeOptions = Array.from(screen.getByTestId("mode").querySelectorAll("option")).map((o) => o.textContent);
     expect(modeOptions).toEqual(["Shares", "Dollars", "Cash %", "Buying Power %", "Position"]);
   });

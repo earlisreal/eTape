@@ -3,7 +3,7 @@ import type { AckMsg, StopLimitRoutePreview, SubmitOrderArgs } from "../../../wi
 import type { Stores } from "../../../data/registry";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
 import type { ChartBinding, OrderConfig, PlaceOrderTemplate } from "../../exec/actionTemplate";
-import { chartBindingForModifiers, chartStopLimitRouteKey, chartStopLimitTemplate, chartStopLimitWillTrigger, resolveChartStopLimit, stopLimitRouteLabel } from "../../exec/resolveChartStopLimit";
+import { chartBindingForModifiers, chartConditionalRouteKey, chartConditionalTemplate, chartConditionalOrderWillTrigger, resolveChartConditionalOrder, conditionalRouteLabel, type ChartConditionalTemplate } from "../../exec/resolveChartConditionalOrder";
 import { snapOrderMarkerPrice } from "../../../render/chart/orderMarkers";
 import type { LinkGroup, LinkGroups } from "../../linkGroups";
 import type { Tool } from "../../../render/chart/drawings/interaction";
@@ -24,7 +24,7 @@ interface Props {
 }
 
 interface PreviewSnapshot {
-  template: PlaceOrderTemplate;
+  template: ChartConditionalTemplate;
   binding: ChartBinding;
   args: SubmitOrderArgs;
   stopPrice: number;
@@ -56,11 +56,11 @@ function deadlineCountdown(deadlineMs: number): string {
   return remaining <= 60_000 ? ` · ${Math.ceil(remaining / 1000)}s remaining` : "";
 }
 
-function settingsAckInstruction(venue: string): string {
-  return `Live engine-held Stop-Limit for ${venue} is not enabled. Open Settings → Orders & hotkeys → Review / enable live accounts.`;
+function settingsAckInstruction(venue: string, type: PlaceOrderTemplate["type"]): string {
+	return `Live engine-held ${type === "LIMIT_IF_TOUCHED" ? "LIT" : "Stop-Limit"} for ${venue} is not enabled. Open Settings → Orders & hotkeys → Review / enable live accounts.`;
 }
 
-export function ChartStopLimitEntry(props: Props): JSX.Element {
+export function ChartConditionalOrderEntry(props: Props): JSX.Element {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const latest = useRef(props); latest.current = props;
   const pointRef = useRef<{ x: number; y: number; event: PointerEvent } | null>(null);
@@ -93,7 +93,7 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
     if (chip) { chip.textContent = `${snapshot.stopPrice.toFixed(snapshot.stopPrice < 1 ? 4 : 2)}${snapshot.invalid || snapshot.needsAck ? " !" : ""}`; chip.style.borderColor = color; chip.style.color = color; }
     if (detail) {
       detail.style.borderColor = color; detail.style.color = color;
-      const instruction = snapshot.needsAck ? settingsAckInstruction(snapshot.args.venue) : "";
+      const instruction = snapshot.needsAck ? settingsAckInstruction(snapshot.args.venue, snapshot.template.type) : "";
       detail.textContent = snapshot.invalid ?? (instruction ? `${snapshot.detail}\n${instruction}` : snapshot.detail);
       detail.title = instruction ? `${snapshot.detail}\n${instruction}` : snapshot.detail;
       detail.style.whiteSpace = instruction ? "pre-wrap" : "nowrap";
@@ -107,19 +107,20 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
     if (!binding || consumedBindings.current.has(binding)) return null;
     const config = latest.current.config;
     if (!latest.current.configLoaded || latest.current.activeTool !== "select" || latest.current.chooserOpenRef.current) return null;
-    const template = chartStopLimitTemplate(config.templates.filter((t): t is PlaceOrderTemplate => t.kind === "place"), binding);
+    const template = chartConditionalTemplate(config.templates.filter((t): t is PlaceOrderTemplate => t.kind === "place"), binding);
     return template ? { binding, template } : null;
   };
 
-  const requestRoute = (template: PlaceOrderTemplate, symbol: string): Promise<StopLimitRoutePreview | null> => {
+  const requestRoute = (template: ChartConditionalTemplate, symbol: string): Promise<StopLimitRoutePreview | null> => {
     const deferred = template.side === "SELL" && template.sizing.mode === "PositionFraction";
-    const key = chartStopLimitRouteKey(template.tif, template.session ?? "AUTO", symbol, deferred);
+	const key = chartConditionalRouteKey(template.tif, template.session ?? "AUTO", symbol, deferred, template.type);
     const old = routeCache.current.get(key);
     if (old?.route && Date.now() - old.at < 250) return Promise.resolve(old.route);
     if (old?.pending) return old.pending;
     const entry: RouteCache = { at: Date.now(), pending: null };
     entry.pending = latest.current.sendQuery("QueryStopLimitRoute", {
-      tif: template.tif, session: template.session ?? "AUTO", symbol, deferredPositionSizing: deferred,
+		tif: template.tif, session: template.session ?? "AUTO", symbol, deferredPositionSizing: deferred,
+		...(template.type === "LIMIT_IF_TOUCHED" ? { type: template.type } : {}),
     })
       .then((raw) => {
         const route = raw as StopLimitRoutePreview;
@@ -132,7 +133,7 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
     return entry.pending;
   };
 
-  const buildSnapshot = (event: PointerEvent, resolved: { binding: ChartBinding; template: PlaceOrderTemplate }, route?: StopLimitRoutePreview): PreviewSnapshot | null => {
+  const buildSnapshot = (event: PointerEvent, resolved: { binding: ChartBinding; template: ChartConditionalTemplate }, route?: StopLimitRoutePreview): PreviewSnapshot | null => {
     const host = latest.current.hostRef.current;
     const facade = latest.current.facadeRef.current;
     if (!host || !facade) return null;
@@ -150,19 +151,23 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
     const account = stores.exec.accounts().find((a) => a.venue === venue);
     const positionQty = stores.exec.positions().filter((p) => p.symbol === latest.current.symbol && p.venue === venue).reduce((sum, p) => sum + p.qty, 0);
     const quote = stores.quote.get(latest.current.symbol);
-    const resolvedPlace = resolveChartStopLimit(resolved.template, {
+    const resolvedPlace = resolveChartConditionalOrder(resolved.template, {
       venue, symbol: latest.current.symbol, ...(quote ? { quote } : {}), buyingPower: account?.buyingPower ?? 0, availableCash: account?.availableCash ?? 0,
       positionQty, nowMs: Date.now(), extHoursMarketBufferPct: latest.current.config.extHoursMarketBufferPct ?? 1,
     }, stopPrice);
-    const args: SubmitOrderArgs = { ...resolvedPlace.args, ...(route ? { routeExpected: route.route } : {}) };
-    const routeText = route ? stopLimitRouteLabel(route) : "Checking engine route…";
+	const args: SubmitOrderArgs = { ...resolvedPlace.args, ...(route ? { routeExpected: route.route,
+		...(resolved.template.type === "LIMIT_IF_TOUCHED" ? { routeDeadlineMs: route.deadlineMs } : {}) } : {}) };
+    const routeText = route ? conditionalRouteLabel(route) : "Checking engine route…";
     const env = venueStatus?.broker?.toUpperCase() === "SIM" ? "SIM" : venueStatus?.env?.toUpperCase() || "UNKNOWN";
     const deadline = route?.deadlineMs ? ` · deadline ${timeET(route.deadlineMs)}${deadlineCountdown(route.deadlineMs)}` : "";
-    const triggerNow = chartStopLimitWillTrigger(resolved.template.side, stopPrice, route);
+	const triggerNow = chartConditionalOrderWillTrigger(resolved.template.side, stopPrice, route, resolved.template.type);
     const noPositionAtTrigger = triggerNow && args.deferredPositionPct !== undefined && venueStatus?.positionDataReady && positionQty <= 0;
     const trigger = triggerNow ? noPositionAtTrigger ? " · WILL TRIGGER NOW — NO OPEN POSITION" : " · WILL TRIGGER NOW" : "";
     const size = args.deferredPositionPct === undefined ? args.qty : `${args.deferredPositionPct}% position`;
-    const detail = `${resolved.template.side} ${size} ${latest.current.symbol} · stop ${stopPrice.toFixed(stopPrice < 1 ? 4 : 2)} → limit ${args.limitPrice.toFixed(args.limitPrice < 1 ? 4 : 2)} · ${args.tif}/${route?.effectiveSession ?? args.session} · ${routeText}${trigger}${deadline} · ${venue || "no venue"} · ${env}`;
+	const litCustody = route?.route === "ENGINE_HELD" && resolved.template.type === "LIMIT_IF_TOUCHED"
+		? " · Held by eTape — no broker order before activation; trigger source: primary moomoo OpenD Last-Eligible Prints; engine or feed loss pauses evaluation."
+		: "";
+	const detail = `${resolved.template.side} ${size} ${latest.current.symbol} · ${resolved.template.type === "LIMIT_IF_TOUCHED" ? "LIT trigger" : "stop"} ${stopPrice.toFixed(stopPrice < 1 ? 4 : 2)} → limit ${args.limitPrice.toFixed(args.limitPrice < 1 ? 4 : 2)} · ${args.tif}/${route?.effectiveSession ?? args.session} · ${routeText}${trigger}${deadline}${litCustody} · ${venue || "no venue"} · ${env}`;
     const invalid = latest.current.group === null ? "Pin a Link Group to enable chart orders."
       : !venue ? "Choose an execution venue for this Link Group."
       : !latest.current.symbol ? "Choose a symbol."
@@ -171,13 +176,14 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
       : venueStatus.reconcilePending ? "Execution venue is reconciling."
       : args.deferredPositionPct !== undefined && venueStatus.flattenPending ? "Venue flatten is awaiting reconciliation."
       : !route ? "Engine route preview unavailable."
-      : route.route === "UNSUPPORTED" ? route.reason || "This stop-limit session is unsupported."
+		: route.route === "UNSUPPORTED" ? route.reason || `This ${resolved.template.type === "LIMIT_IF_TOUCHED" ? "LIT" : "stop-limit"} session is unsupported.`
       : args.deferredPositionPct !== undefined && !venueStatus.positionDataReady ? "Position cache is reconciling; percentage stop-sell is unavailable."
-      : route.route === "ENGINE_HELD" && route.deadlineMs > 0 && route.deadlineMs <= Date.now() ? "Engine-held stop-limit deadline passed."
+		: route.route === "ENGINE_HELD" && route.deadlineMs > 0 && route.deadlineMs <= Date.now() ? "Engine-held order deadline passed."
       : resolvedPlace.errors[0];
     return { template: resolved.template, binding: resolved.binding, args, stopPrice, limitPrice: args.limitPrice, detail,
       ...(invalid ? { invalid } : {}), ...(route ? { route } : {}),
-      ...(route?.route === "ENGINE_HELD" && venueStatus?.env?.toLowerCase() === "live" && !venueStatus.heldStopLimitAcknowledged ? { needsAck: true } : {}) };
+		...(route?.route === "ENGINE_HELD" && venueStatus?.env?.toLowerCase() === "live" &&
+			(resolved.template.type === "LIMIT_IF_TOUCHED" ? !venueStatus.heldLimitIfTouchedAcknowledged : !venueStatus.heldStopLimitAcknowledged) ? { needsAck: true } : {}) };
   };
 
   const updateFromPoint = async () => {
@@ -217,7 +223,7 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
       const resolved = activeTemplate(event);
       if (!resolved) return;
       const deferred = resolved.template.side === "SELL" && resolved.template.sizing.mode === "PositionFraction";
-      const routeEntry = routeCache.current.get(chartStopLimitRouteKey(resolved.template.tif, resolved.template.session ?? "AUTO", latest.current.symbol, deferred));
+      const routeEntry = routeCache.current.get(chartConditionalRouteKey(resolved.template.tif, resolved.template.session ?? "AUTO", latest.current.symbol, deferred, resolved.template.type));
       const route = routeEntry?.route;
       if (!route || Date.now() - routeEntry.at >= 250) { schedule(event); return; }
       const snapshot = buildSnapshot(event, resolved, route);
@@ -225,7 +231,7 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
       if (snapshot.needsAck) {
         consumedBindings.current.add(resolved.binding);
         event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
-        announce(settingsAckInstruction(snapshot.args.venue));
+		announce(settingsAckInstruction(snapshot.args.venue, resolved.template.type));
         return;
       }
       const hostNow = latest.current.hostRef.current;

@@ -35,7 +35,9 @@ Feed connectivity is surfaced to subscribed UIs as low-frequency `sys.events`
 remains diagnostic and does not override the feed state shown to users.
 
 `QueryStopLimitRoute` previews custody and session deadline for the exact
-venue/symbol request. With a symbol, it may also return the current price of a
+venue/symbol/order type; omitting type preserves STOP_LIMIT behavior for older
+clients. LIT submit carries the preview deadline so Core rejects a PRE/RTH/POST
+boundary race. With a symbol, the query may also return the current price of a
 recent, trusted Last-Eligible print; it is only a preview and Core validates
 route and trigger again on submit. Order payloads carry optional held lifecycle
 and durable cancel/replace action status on the same parent row. Generated

@@ -34,15 +34,20 @@ type HeldStopLimitAckUpdate struct {
 	Venue        VenueID
 	Acknowledged bool
 }
+type HeldLimitIfTouchedAckUpdate struct {
+	Venue        VenueID
+	Acknowledged bool
+}
 type TradeUpdate struct{ Trade ClosedTrade }
 
-func (OrderUpdate) isExecUpdate()             {}
-func (ClosedOrderUpdate) isExecUpdate()       {}
-func (FillUpdate) isExecUpdate()              {}
-func (AccountUpdate) isExecUpdate()           {}
-func (PositionUpdate) isExecUpdate()          {}
-func (PositionReadinessUpdate) isExecUpdate() {}
-func (FlattenPendingUpdate) isExecUpdate()    {}
-func (StatusUpdate) isExecUpdate()            {}
-func (HeldStopLimitAckUpdate) isExecUpdate()  {}
-func (TradeUpdate) isExecUpdate()             {}
+func (OrderUpdate) isExecUpdate()                 {}
+func (ClosedOrderUpdate) isExecUpdate()           {}
+func (FillUpdate) isExecUpdate()                  {}
+func (AccountUpdate) isExecUpdate()               {}
+func (PositionUpdate) isExecUpdate()              {}
+func (PositionReadinessUpdate) isExecUpdate()     {}
+func (FlattenPendingUpdate) isExecUpdate()        {}
+func (StatusUpdate) isExecUpdate()                {}
+func (HeldStopLimitAckUpdate) isExecUpdate()      {}
+func (HeldLimitIfTouchedAckUpdate) isExecUpdate() {}
+func (TradeUpdate) isExecUpdate()                 {}

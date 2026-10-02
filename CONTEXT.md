@@ -175,9 +175,21 @@ _Avoid_: Previous extended-session close
 
 ## Order Entry
 
+**Limit-if-Touched (LIT)**:
+A conditional order that activates a Limit Order when the trigger price is reached or passed: at or below for BUY/COVER, at or above for SELL/SHORT. Its trigger price and execution limit are distinct; activation does not guarantee a fill.
+_Avoid_: Limit if touch, stop-limit, market-if-touched
+
 **Engine-Held Stop-Limit**:
 A conditional order retained by eTape until a Last-Eligible Price reaches its stop price, when it creates a linked Limit Order at its Execution Venue. Before triggering, no broker order exists and no broker protection applies.
 _Avoid_: Synthetic stop-limit, broker stop-limit, local stop order
+
+**Engine-Held Limit-if-Touched**:
+A Limit-if-Touched instruction retained by eTape until a Last-Eligible Price satisfies its trigger, when it creates a linked Limit Order at its Execution Venue. Before activation, no broker order exists.
+_Avoid_: Native LIT, broker-held LIT
+
+**Live Held LIT Acknowledgement**:
+A trader's explicit acceptance that an Engine-Held Limit-if-Touched has no broker order or protection before activation, scoped to one live Execution Venue account identity. It is separate from Stop-Limit acknowledgement.
+_Avoid_: Stop-Limit acknowledgement, global LIT enablement
 
 **Live Held Stop-Limit Acknowledgement**:
 A trader's explicit acceptance that Engine-Held Stop-Limits provide no broker protection before triggering, scoped to one Execution Venue's live account identity. It enables that custody across all order-entry methods without placing an order.
@@ -188,7 +200,7 @@ The order session used to determine custody and venue behavior after resolving a
 _Avoid_: Requested session, displayed session
 
 **Held Phase**:
-The current pre-terminal stage of an Engine-Held Stop-Limit: Waiting, Armed, Paused, Activating, or Working. It is distinct from the Order's accepted, filled, canceled, expired, or rejected status.
+The current pre-terminal stage of an Engine-Held Stop-Limit or LIT: Waiting, Armed, Paused, Activating, or Working. It is distinct from the Order's accepted, filled, canceled, expired, or rejected status.
 _Avoid_: Order status, broker status
 
 **Deferred Position Sizing**:
@@ -196,11 +208,11 @@ A stop-sell size expressed as a percentage of the latest broker-confirmed long p
 _Avoid_: Planned buy quantity, linked entry sizing
 
 **Limit Cushion**:
-The non-negative distance from a stop-limit trigger price to its resulting limit price, added for BUY/COVER and subtracted for SELL/SHORT.
+The non-negative distance from a Stop-Limit or Limit-if-Touched template's trigger price to its resulting limit price, added for BUY/COVER and subtracted for SELL/SHORT.
 _Avoid_: Price offset, slippage
 
 **Chart Order Gesture**:
-An exact keyboard-modifier and primary-click binding that invokes one STOP_LIMIT Action Template, using the clicked chart price as its trigger. One modifier press can create at most one order.
+An exact keyboard-modifier and primary-click binding that invokes one Stop-Limit or Limit-if-Touched Action Template, using the clicked chart price as its trigger. One modifier press can create at most one order.
 _Avoid_: Click trading, modifier click
 
 **Action Template**:

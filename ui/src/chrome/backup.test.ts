@@ -194,10 +194,10 @@ describe("backup: prepareImportedOrderConfig", () => {
 });
 
 describe("chart binding conflicts", () => {
-  it("reports duplicate normalized bindings only for STOP_LIMIT templates", () => {
+  it("shares normalized bindings between STOP_LIMIT and LIT templates", () => {
     const templates: ActionTemplate[] = [
       { kind: "place", id: "a", label: "A", side: "BUY", type: "STOP_LIMIT", tif: "DAY", priceSource: "Last", priceOffset: 0, sizing: { mode: "Shares", shares: 1 }, chartBinding: "Shift" },
-      { kind: "place", id: "b", label: "B", side: "SELL", type: "STOP_LIMIT", tif: "DAY", priceSource: "Last", priceOffset: 0, sizing: { mode: "Shares", shares: 1 }, chartBinding: "Shift" },
+      { kind: "place", id: "b", label: "B", side: "SELL", type: "LIMIT_IF_TOUCHED", tif: "DAY", priceSource: "Last", priceOffset: 0, sizing: { mode: "Shares", shares: 1 }, chartBinding: "Shift" },
       { kind: "place", id: "c", label: "C", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Last", priceOffset: 0, sizing: { mode: "Shares", shares: 1 }, chartBinding: "Shift" } as ActionTemplate,
     ];
     expect(detectChartBindingConflicts(templates)).toEqual(["Shift"]);

@@ -4,7 +4,7 @@ import { isWorking } from "../../wire/orderStatus";
 export interface ChartOrderMarker {
   order: Order;
   price: number;
-  kind: "limit" | "stop-limit";
+  kind: "limit" | "stop-limit" | "limit-if-touched";
   draggable: boolean;
   phase: string;
 }
@@ -14,7 +14,7 @@ export function orderActionPending(marker: ChartOrderMarker): { kind: "replace" 
   if (!action || (action.phase !== "REQUESTED" && action.phase !== "UNKNOWN")) return undefined;
   const outcome = action.phase === "UNKNOWN" ? "unknown" : "requested";
   if (action.kind === "CANCEL") return { kind: "cancel", stop: false, outcome };
-  const stop = marker.kind === "stop-limit";
+  const stop = marker.kind !== "limit";
   const price = stop ? action.requestedStopPrice : action.requestedLimitPrice;
   if (price == null || price <= 0) return undefined;
   const confirmedPrice = stop ? action.previousStopPrice : action.previousLimitPrice;
@@ -39,13 +39,13 @@ export function chartOrderMarkers(orders: Iterable<Order>, venue: string, symbol
       out.push({ order, price: order.limitPrice, kind: "limit", draggable: !order.held?.cancelRequested && !actionPending, phase: order.held?.phase ?? "" });
       continue;
     }
-    if (order.type !== "STOP_LIMIT") continue;
+    if (order.type !== "STOP_LIMIT" && order.type !== "LIMIT_IF_TOUCHED") continue;
     const held = order.held;
     const childExists = !!held?.childClientId || held?.phase === "WORKING" || held?.phase === "ACTIVATING";
     const paused = held?.phase === "PAUSED";
     const price = childExists ? order.limitPrice : order.stopPrice;
     out.push({
-      order, price, kind: childExists ? "limit" : "stop-limit",
+      order, price, kind: childExists ? "limit" : order.type === "LIMIT_IF_TOUCHED" ? "limit-if-touched" : "stop-limit",
       draggable: !paused && !held?.cancelRequested && order.action?.phase !== "REQUESTED" && order.action?.phase !== "UNKNOWN" && (held?.phase === "WORKING" || held?.phase === "WAITING" || held?.phase === "ARMED"),
       phase: held?.phase ?? "NATIVE",
     });

@@ -25,5 +25,5 @@ export const STATUS_LABEL: Record<DisplayStatus, string> = {
 export function sideLabel(side: Side): string { return side; } // BUY/SELL/SHORT/COVER already display-ready
 export function bareSymbol(symbol: string): string { const i = symbol.indexOf("."); return i >= 0 ? symbol.slice(i + 1) : symbol; }
 export function abbrevType(t: OrderType): string {
-  return t === "MARKET" ? "MKT" : t === "LIMIT" ? "LMT" : t === "STOP" ? "STP" : "STPLMT";
+  return t === "MARKET" ? "MKT" : t === "LIMIT" ? "LMT" : t === "STOP" ? "STP" : t === "STOP_LIMIT" ? "STPLMT" : "LIT";
 }

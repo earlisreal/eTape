@@ -8,6 +8,12 @@ preview alongside its eTape custody label. It does not open a chart disclosure,
 acknowledge the account, or replay the gesture after enablement; a fresh gesture
 is required after Settings shows authoritative acknowledgement status.
 
+LIT chart gestures share modifier bindings with STOP_LIMIT, use the clicked
+price as their trigger, preview the current trusted Last-Eligible Price, and
+submit the previewed segment deadline. Trigger direction is inverse to
+STOP_LIMIT; the pretrigger marker shows the trigger and switches to the child
+LIMIT only after durable activation.
+
 A position-% SELL STOP_LIMIT gesture may be staged while flat. The preview keeps
 the percentage intent and says **WILL TRIGGER NOW — NO OPEN POSITION** when a
 trusted eligible price has already hit the stop and the venue cache is confirmed

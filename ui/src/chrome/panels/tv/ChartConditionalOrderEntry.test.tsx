@@ -6,7 +6,7 @@ import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
 import type { ExecStatus, StopLimitRoutePreview } from "../../../wire/contract";
 import { LinkGroups } from "../../linkGroups";
 import type { OrderConfig } from "../../exec/actionTemplate";
-import { ChartStopLimitEntry } from "./ChartStopLimitEntry";
+import { ChartConditionalOrderEntry } from "./ChartConditionalOrderEntry";
 
 const config: OrderConfig = {
   activeVenue:"sim",
@@ -36,7 +36,7 @@ function mount(env:"paper"|"live" = "paper", orderConfig: OrderConfig = config,
   const chooserOpenRef = {current:false};
   const sendCommand = vi.fn(async (name:string) => ({kind:"ack" as const,corrId:"c1",status:"accepted" as const, ...(name === "SubmitOrder" ? {orderId:"ET1"} : {})}));
   const sendQuery = vi.fn(async () => routePreview);
-  const utils = render(<ChartStopLimitEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups}
+  const utils = render(<ChartConditionalOrderEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups}
     group="green" symbol="US.AAPL" config={orderConfig} configLoaded activeTool="select" chooserOpenRef={chooserOpenRef}
     sendCommand={sendCommand} sendQuery={sendQuery} />, {container:host});
   return { ...utils, host, stores, sendCommand, sendQuery };
@@ -56,7 +56,7 @@ beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.restoreAllMock
   vi.stubGlobal("cancelAnimationFrame", () => {});
 });
 
-describe("ChartStopLimitEntry", () => {
+describe("ChartConditionalOrderEntry", () => {
   it("uses exact Shift+click as the stop trigger and submits the previewed route snapshot", async () => {
     focusChart();
     const {host,sendCommand,sendQuery} = mount();
@@ -66,6 +66,26 @@ describe("ChartStopLimitEntry", () => {
     await placeClick(host);
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitOrder", expect.objectContaining({
       venue:"sim",symbol:"US.AAPL",type:"STOP_LIMIT",stopPrice:100,limitPrice:100,qty:1,routeExpected:"ENGINE_HELD",
+    })));
+  });
+
+  it("uses the inverse LIT trigger direction, includes the exact deadline, and says when equality will trigger", async () => {
+    focusChart();
+    const lit = { ...config.templates[0], type: "LIMIT_IF_TOUCHED" as const, limitCushion: 0.1 };
+    const litConfig = { ...config, templates: [lit] };
+    const { host, sendCommand, sendQuery } = mount("paper", litConfig, { ...route, lastEligiblePrice: 100 });
+    moveToChart(host);
+    await waitFor(() => expect(sendQuery).toHaveBeenCalledWith("QueryStopLimitRoute", {
+      tif: "DAY", session: "EXTENDED", symbol: "US.AAPL", deferredPositionSizing: false, type: "LIMIT_IF_TOUCHED",
+    }));
+    await waitFor(() => expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("WILL TRIGGER NOW"));
+    expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("no broker order before activation");
+    expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("primary moomoo OpenD Last-Eligible Prints");
+    expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("feed loss pauses evaluation");
+    await placeClick(host);
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitOrder", expect.objectContaining({
+      venue: "sim", symbol: "US.AAPL", type: "LIMIT_IF_TOUCHED", stopPrice: 100, limitPrice: 100.1,
+      qty: 1, routeExpected: "ENGINE_HELD", routeDeadlineMs: route.deadlineMs,
     })));
   });
 

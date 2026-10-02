@@ -70,6 +70,15 @@ describe("resolvePlaceTemplate", () => {
     expect(r.args.qty).toBe(1408);
     expect(r.flash).toContain("3.50→3.55 STPLMT");
   });
+  it("resolves LIT trigger and limit independently and sizes cash from the limit", () => {
+    const r = resolvePlaceTemplate(
+      tmpl({ type: "LIMIT_IF_TOUCHED", limitCushion: 0.05, limitCushionUnit: "$", sizing: { mode: "Dollar", dollar: 1000 } }),
+      { venue: "v", symbol: "US.AAPL", quote: q, buyingPower: 10_000, availableCash: 5_000, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 },
+    );
+    expect(r.args).toMatchObject({ type: "LIMIT_IF_TOUCHED", stopPrice: 3.5, limitPrice: 3.55, qty: 281 });
+    expect(r.flash).toContain("3.50→3.55 LIT");
+    expect(r.preCheck.ok).toBe(true);
+  });
   it("rounds the percent Limit Cushion outward for a short-side trigger", () => {
     const r = resolvePlaceTemplate(
       tmpl({ side: "SHORT", type: "STOP_LIMIT", priceSource: "Last", limitCushion: 5, limitCushionUnit: "%", sizing: { mode: "Shares", shares: 10 } }),

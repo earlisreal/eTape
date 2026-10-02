@@ -156,10 +156,10 @@ func (d *heldDemandStub) Acquire(_ context.Context, id, symbol string) error {
 func (d *heldDemandStub) Release(id string) { d.mu.Lock(); defer d.mu.Unlock(); delete(d.held, id) }
 
 func newHeldCore(t *testing.T, at time.Time) (*Core, *clock.Fake, *heldTestBroker, context.Context) {
-	return newHeldCoreWithLiveAck(t, at, nil, nil)
+	return newHeldCoreWithLiveAck(t, at, nil, nil, nil)
 }
 
-func newHeldCoreWithLiveAck(t *testing.T, at time.Time, identity, acknowledged map[VenueID]string) (*Core, *clock.Fake, *heldTestBroker, context.Context) {
+func newHeldCoreWithLiveAck(t *testing.T, at time.Time, identity, acknowledged, litAcknowledged map[VenueID]string) (*Core, *clock.Fake, *heldTestBroker, context.Context) {
 	t.Helper()
 	clk := clock.NewFake(at)
 	broker := newHeldTestBroker()
@@ -170,6 +170,7 @@ func newHeldCoreWithLiveAck(t *testing.T, at time.Time, identity, acknowledged m
 		},
 		Store: &heldTestStore{}, Brokers: map[VenueID]Broker{"v": broker}, Clock: clk, IDGen: NewOrderIDGen(clk, rand.New(rand.NewSource(1))),
 		HeldStopLimitLiveIdentity: identity, HeldStopLimitAcknowledged: acknowledged,
+		HeldLimitIfTouchedAcknowledged: litAcknowledged,
 	})
 	ctx, cancel := context.WithCancel(context.Background())
 	if err := c.Recover(ctx); err != nil {
@@ -198,7 +199,7 @@ func waitHeldOrder(t *testing.T, c *Core, id string, phase HeldPhase) Order {
 				return got.Order
 			}
 		case <-deadline:
-			t.Fatalf("timed out waiting for held %s phase", phase)
+			t.Fatalf("timed out waiting for held %s phase: %+v", phase, c.order(id))
 			return Order{}
 		}
 	}
@@ -318,6 +319,266 @@ func TestEngineHeldStopLimitPostsOneLimitOnlyAfterEligibleTrigger(t *testing.T) 
 	terminal := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.Status == StatusFilled })
 	if terminal.Held == nil || terminal.ExecutedQty != parent.Qty || terminal.LeavesQty != 0 {
 		t.Fatalf("terminal child fill lost parent lifecycle: %+v", terminal)
+	}
+}
+
+func TestEngineHeldLITActivatesAtAdmissionWhenFreshPriceAlreadyTouched(t *testing.T) {
+	now := time.Date(2026, 9, 30, 8, 0, 0, 0, session.Loc())
+	c, _, broker, ctx := newHeldCore(t, now)
+	c.FeedEligiblePrint(ctx, eligible(1, now, 9))
+	deadline := time.After(time.Second)
+	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
+		select {
+		case <-deadline:
+			t.Fatal("fresh eligible price was not accepted")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	ack := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideBuy, Type: TypeLimitIfTouched,
+		TIF: TIFDay, Session: SessionAuto, Qty: 2, StopPrice: 10, LimitPrice: 8,
+		RouteExpected: RouteEngineHeld, RouteDeadlineMs: session.Schedule(now).Open.UnixMilli()})
+	if !ack.Accepted {
+		t.Fatalf("held LIT submit: %+v", ack)
+	}
+	parent := waitHeldOrder(t, c, ack.OrderID, HeldActivating)
+	if parent.Type != TypeLimitIfTouched || parent.Session != SessionExtended || parent.LimitPrice != 8 {
+		t.Fatalf("LIT parent changed intent or rejected independent limit: %+v", parent)
+	}
+	select {
+	case req := <-broker.submits:
+		if req.Type != TypeLimit || req.ClientOrderID != ack.OrderID || req.Qty != 2 || req.LimitPrice != 8 {
+			t.Fatalf("LIT activation child = %+v", req)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("already-satisfied LIT did not activate immediately")
+	}
+}
+
+func TestEngineHeldLITActivatesOnDirectionalEligiblePrintWithOneLimitChild(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		side   Side
+		before float64
+		after  float64
+		limit  float64
+	}{
+		{name: "BUY dip", side: SideBuy, before: 11, after: 9, limit: 8},
+		{name: "SELL rise", side: SideSell, before: 9, after: 11, limit: 12},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Date(2026, 9, 30, 8, 0, 0, 0, session.Loc())
+			c, clk, broker, ctx := newHeldCore(t, now)
+			if tc.side == SideSell {
+				broker.ev <- BrokerPositions{V: "v", Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 5, AvgPrice: 10}}}
+				waitPosition(t, c, "AAPL", 5)
+			}
+			ack := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: tc.side, Type: TypeLimitIfTouched,
+				TIF: TIFDay, Session: SessionAuto, Qty: 2, StopPrice: 10, LimitPrice: tc.limit,
+				RouteExpected: RouteEngineHeld, RouteDeadlineMs: session.Schedule(now).Open.UnixMilli()})
+			if !ack.Accepted {
+				t.Fatalf("held LIT submit: %+v", ack)
+			}
+			parent := waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
+			clk.Advance(time.Millisecond)
+			c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), tc.before))
+			armed := waitHeldOrder(t, c, ack.OrderID, HeldArmed)
+			if armed.Type != TypeLimitIfTouched || armed.LimitPrice != tc.limit {
+				t.Fatalf("armed LIT parent lost intent or fixed limit: %+v", armed)
+			}
+			select {
+			case req := <-broker.submits:
+				t.Fatalf("untouched LIT submitted early: %+v", req)
+			default:
+			}
+
+			clk.Advance(time.Millisecond)
+			c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), tc.after))
+			activating := waitHeldOrder(t, c, ack.OrderID, HeldActivating)
+			if activating.Held.ChildClientID != ack.OrderID || activating.Type != TypeLimitIfTouched || activating.LimitPrice != parent.LimitPrice {
+				t.Fatalf("trigger changed parent identity or fixed limit: %+v", activating)
+			}
+			select {
+			case req := <-broker.submits:
+				if req.Type != TypeLimit || req.ClientOrderID != ack.OrderID || req.Qty != 2 || req.LimitPrice != tc.limit {
+					t.Fatalf("activation child = %+v", req)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("LIT trigger did not submit its linked LIMIT")
+			}
+		})
+	}
+}
+
+func TestEngineHeldLITTriggerEditActivatesFromFreshEligiblePrice(t *testing.T) {
+	now := time.Date(2026, 9, 30, 8, 0, 0, 0, session.Loc())
+	c, clk, broker, ctx := newHeldCore(t, now)
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 9))
+	deadline := time.After(time.Second)
+	for preview := c.PreviewEligiblePrint(ctx, "AAPL"); !preview.Trusted || preview.TsMs != clk.Now().UnixMilli(); preview = c.PreviewEligiblePrint(ctx, "AAPL") {
+		select {
+		case <-deadline:
+			t.Fatal("fresh eligible price was not available for trigger edit")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	ack := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideBuy, Type: TypeLimitIfTouched,
+		TIF: TIFDay, Session: SessionAuto, Qty: 2, StopPrice: 8, LimitPrice: 12,
+		RouteExpected: RouteEngineHeld, RouteDeadlineMs: session.Schedule(now).Open.UnixMilli()})
+	if !ack.Accepted {
+		t.Fatalf("held LIT submit: %+v", ack)
+	}
+	waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
+	if edited := c.Do(ReplaceOrder{Venue: "v", OrderID: ack.OrderID, StopPrice: 9}); !edited.Accepted {
+		t.Fatalf("trigger edit: %+v", edited)
+	}
+	activating := waitHeldOrder(t, c, ack.OrderID, HeldActivating)
+	if activating.StopPrice != 9 || activating.LimitPrice != 12 {
+		t.Fatalf("trigger edit changed the wrong price: %+v", activating)
+	}
+	select {
+	case req := <-broker.submits:
+		if req.Type != TypeLimit || req.LimitPrice != 12 || req.ClientOrderID != ack.OrderID {
+			t.Fatalf("edited-trigger child = %+v", req)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fresh already-satisfied trigger edit did not activate")
+	}
+}
+
+func TestEngineHeldLITRechecksSellAvailabilityAtTrigger(t *testing.T) {
+	now := time.Date(2026, 9, 30, 8, 0, 0, 0, session.Loc())
+	c, clk, broker, ctx := newHeldCore(t, now)
+	broker.ev <- BrokerPositions{V: "v", Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 5, AvgPrice: 10}}}
+	waitPosition(t, c, "AAPL", 5)
+	ack := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideSell, Type: TypeLimitIfTouched,
+		TIF: TIFDay, Session: SessionAuto, Qty: 4, StopPrice: 10, LimitPrice: 12,
+		RouteExpected: RouteEngineHeld, RouteDeadlineMs: session.Schedule(now).Open.UnixMilli()})
+	if !ack.Accepted {
+		t.Fatalf("held LIT submit: %+v", ack)
+	}
+	waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 9))
+	waitHeldOrder(t, c, ack.OrderID, HeldArmed)
+	broker.ev <- BrokerPositions{V: "v", Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 3, AvgPrice: 10}}}
+	waitPosition(t, c, "AAPL", 3)
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 11))
+	rejected := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.Status == StatusRejected })
+	if !strings.Contains(rejected.RejectReason, "sell quantity exceeds uncommitted long position") {
+		t.Fatalf("changed SELL availability rejection = %q", rejected.RejectReason)
+	}
+	select {
+	case req := <-broker.submits:
+		t.Fatalf("LIT activated after available shares fell below its quantity: %+v", req)
+	default:
+	}
+}
+
+func TestEngineHeldLITIgnoresStalePriceAndPausesAcrossFeedGap(t *testing.T) {
+	now := time.Date(2026, 9, 30, 8, 0, 0, 0, session.Loc())
+	c, clk, broker, ctx := newHeldCore(t, now)
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 9))
+	deadline := time.After(time.Second)
+	for preview := c.PreviewEligiblePrint(ctx, "AAPL"); !preview.Trusted || preview.TsMs != clk.Now().UnixMilli(); preview = c.PreviewEligiblePrint(ctx, "AAPL") {
+		select {
+		case <-deadline:
+			t.Fatal("eligible price did not become available")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	clk.Advance(3 * time.Second)
+	ack := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideBuy, Type: TypeLimitIfTouched,
+		TIF: TIFDay, Session: SessionAuto, Qty: 1, StopPrice: 10, LimitPrice: 10,
+		RouteExpected: RouteEngineHeld, RouteDeadlineMs: session.Schedule(now).Open.UnixMilli()})
+	if !ack.Accepted {
+		t.Fatalf("stale-mark LIT submit: %+v", ack)
+	}
+	waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
+	if got := c.PreviewEligiblePrint(ctx, "AAPL"); got.Trusted {
+		t.Fatalf("stale LIT trigger mark was trusted: %+v", got)
+	}
+	select {
+	case req := <-broker.submits:
+		t.Fatalf("stale mark activated LIT: %+v", req)
+	default:
+	}
+
+	c.FeedEligiblePrint(ctx, EligiblePrint{Gap: true})
+	paused := waitHeldOrder(t, c, ack.OrderID, HeldPaused)
+	if paused.Held.PausedReason != "eligible-print gap; resume manually" {
+		t.Fatalf("gap pause reason = %q", paused.Held.PausedReason)
+	}
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 9))
+	previewDeadline := time.After(time.Second)
+	for preview := c.PreviewEligiblePrint(ctx, "AAPL"); !preview.Trusted; preview = c.PreviewEligiblePrint(ctx, "AAPL") {
+		select {
+		case <-previewDeadline:
+			t.Fatal("feed did not recover after gap")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	if resume := c.Do(ResumeHeldOrder{Venue: "v", OrderID: ack.OrderID}); !resume.Accepted {
+		t.Fatalf("resume LIT after feed recovery: %+v", resume)
+	}
+	waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
+	select {
+	case req := <-broker.submits:
+		t.Fatalf("resume reused a stale/pre-resume price: %+v", req)
+	default:
+	}
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9))
+	if got := waitHeldOrder(t, c, ack.OrderID, HeldActivating); got.Held.ChildClientID != ack.OrderID {
+		t.Fatalf("fresh post-resume print did not activate LIT parent: %+v", got.Held)
+	}
+}
+
+func TestEngineHeldLITUsesSeparateLiveAcknowledgement(t *testing.T) {
+	now := time.Date(2026, 9, 30, 8, 0, 0, 0, session.Loc())
+	c, _, _, _ := newHeldCoreWithLiveAck(t, now, map[VenueID]string{"v": "account-a"}, nil, nil)
+	request := SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideBuy, Type: TypeLimitIfTouched,
+		TIF: TIFDay, Session: SessionAuto, Qty: 1, StopPrice: 9, LimitPrice: 10, RouteExpected: RouteEngineHeld,
+		RouteDeadlineMs: session.Schedule(now).Open.UnixMilli()}
+	withoutPreview := request
+	withoutPreview.RouteDeadlineMs = 0
+	if ack := c.Do(withoutPreview); ack.Accepted || ack.Reason != "limit-if-touched route preview is required; review custody and retry" {
+		t.Fatalf("LIT submit without preview deadline = %+v", ack)
+	}
+	if ack := c.Do(request); ack.Accepted || ack.Reason != "live engine-held limit-if-touched requires account acknowledgement" {
+		t.Fatalf("unacknowledged LIT submit = %+v", ack)
+	}
+	if ack := c.Do(AcknowledgeHeldStopLimit{Venue: "v", Identity: "account-a"}); !ack.Accepted {
+		t.Fatalf("stop-limit acknowledgement: %+v", ack)
+	}
+	if ack := c.Do(request); ack.Accepted || ack.Reason != "live engine-held limit-if-touched requires account acknowledgement" {
+		t.Fatalf("stop-limit acknowledgement must not enable LIT: %+v", ack)
+	}
+	if ack := c.Do(AcknowledgeHeldLimitIfTouched{Venue: "v", Identity: "account-a"}); !ack.Accepted {
+		t.Fatalf("LIT acknowledgement: %+v", ack)
+	}
+	if ack := c.Do(request); !ack.Accepted {
+		t.Fatalf("acknowledged LIT submit: %+v", ack)
+	}
+}
+
+func TestEngineHeldLITRejectsPreviewDeadlineRace(t *testing.T) {
+	now := time.Date(2026, 9, 30, 8, 0, 0, 0, session.Loc())
+	c, clk, _, _ := newHeldCore(t, now)
+	request := SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideBuy, Type: TypeLimitIfTouched,
+		TIF: TIFDay, Session: SessionAuto, Qty: 1, StopPrice: 10, LimitPrice: 9,
+		RouteExpected: RouteEngineHeld, RouteDeadlineMs: session.Schedule(now).Open.UnixMilli()}
+	clk.Advance(90 * time.Minute) // the preview's PRE deadline is now RTH's open
+	ack := c.Do(request)
+	if ack.Accepted || ack.Reason != "order session deadline changed; review custody and retry" {
+		t.Fatalf("LIT boundary-race submit = %+v", ack)
 	}
 }
 
@@ -840,7 +1101,7 @@ func TestCancelDuringHeldActivationWaitsForChildAcceptance(t *testing.T) {
 
 func TestLiveHeldStopLimitRequiresIdentityScopedAcknowledgement(t *testing.T) {
 	now := time.Date(2026, 9, 30, 8, 0, 0, 0, session.Loc())
-	c, _, _, _ := newHeldCoreWithLiveAck(t, now, map[VenueID]string{"v": "account-a"}, nil)
+	c, _, _, _ := newHeldCoreWithLiveAck(t, now, map[VenueID]string{"v": "account-a"}, nil, nil)
 	request := SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideBuy, Type: TypeStopLimit, TIF: TIFDay,
 		Session: SessionExtended, Qty: 1, StopPrice: 101, LimitPrice: 101, RouteExpected: RouteEngineHeld}
 	if ack := c.Do(request); ack.Accepted || ack.Reason != "live engine-held stop-limit requires account acknowledgement" {
@@ -905,9 +1166,11 @@ func TestCleanShutdownPersistsCancelIntentThroughActivationRestart(t *testing.T)
 	if ack := c.Do(Arm{}); !ack.Accepted {
 		t.Fatal(ack)
 	}
-	waiting := c.Do(SubmitOrder{Venue: "v", Symbol: "MSFT", Side: SideBuy, Type: TypeStopLimit, TIF: TIFDay, Session: SessionExtended, Qty: 1, StopPrice: 101, LimitPrice: 101, RouteExpected: RouteEngineHeld})
+	waiting := c.Do(SubmitOrder{Venue: "v", Symbol: "MSFT", Side: SideBuy, Type: TypeLimitIfTouched, TIF: TIFDay, Session: SessionExtended,
+		Qty: 1, StopPrice: 101, LimitPrice: 100, RouteExpected: RouteEngineHeld, RouteDeadlineMs: session.Schedule(now).Open.UnixMilli()})
 	working := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideBuy, Type: TypeStopLimit, TIF: TIFDay, Session: SessionExtended, Qty: 1, StopPrice: 101, LimitPrice: 101, RouteExpected: RouteEngineHeld})
-	activating := c.Do(SubmitOrder{Venue: "v", Symbol: "TSLA", Side: SideBuy, Type: TypeStopLimit, TIF: TIFDay, Session: SessionExtended, Qty: 1, StopPrice: 101, LimitPrice: 101, RouteExpected: RouteEngineHeld})
+	activating := c.Do(SubmitOrder{Venue: "v", Symbol: "TSLA", Side: SideBuy, Type: TypeLimitIfTouched, TIF: TIFDay, Session: SessionExtended,
+		Qty: 1, StopPrice: 103, LimitPrice: 101, RouteExpected: RouteEngineHeld, RouteDeadlineMs: session.Schedule(now).Open.UnixMilli()})
 	if !waiting.Accepted || !working.Accepted || !activating.Accepted {
 		t.Fatalf("held admission: waiting=%+v working=%+v activating=%+v", waiting, working, activating)
 	}
@@ -944,14 +1207,14 @@ func TestCleanShutdownPersistsCancelIntentThroughActivationRestart(t *testing.T)
 	}
 	pre := c.order(waiting.OrderID)
 	child := c.order(working.OrderID)
-	if pre.Held == nil || pre.Held.Phase != HeldPaused {
+	if pre.Type != TypeLimitIfTouched || pre.Held == nil || pre.Held.Phase != HeldPaused || pre.Held.PausedReason != "engine shutdown; resume manually" {
 		t.Fatalf("pretrigger order after shutdown = %+v", pre.Held)
 	}
 	if child.Held == nil || child.Held.Phase != HeldCancelRequested || child.Action == nil || child.Action.Phase != ActionRequested || broker.cancelCount() != 1 {
 		t.Fatalf("child shutdown cancel not durably requested: order=%+v cancelCalls=%d", child, broker.cancelCount())
 	}
 	inFlight := c.order(activating.OrderID)
-	if inFlight.Held == nil || inFlight.Held.Phase != HeldCancelRequested || inFlight.Held.CancelSent || inFlight.Action == nil || inFlight.Action.Phase != ActionRequested || broker.cancelCount() != 1 {
+	if inFlight.Type != TypeLimitIfTouched || inFlight.Held == nil || inFlight.Held.Phase != HeldCancelRequested || inFlight.Held.CancelSent || inFlight.Action == nil || inFlight.Action.Phase != ActionRequested || broker.cancelCount() != 1 {
 		t.Fatalf("shutdown raced the in-flight child POST: order=%+v cancelCalls=%d", inFlight, broker.cancelCount())
 	}
 	close(releaseSubmit)
@@ -975,14 +1238,14 @@ func TestCleanShutdownPersistsCancelIntentThroughActivationRestart(t *testing.T)
 	}
 
 	recoveredBroker := newHeldTestBroker() // Snapshot initially reports the child absent.
-	recovered := NewCore(CoreConfig{Venues: []VenueID{"v"}, Store: store,
+	recovered := NewCore(CoreConfig{Venues: []VenueID{"v"}, Gate: c.gate, Store: store,
 		Brokers: map[VenueID]Broker{"v": recoveredBroker}, Clock: clk,
 		IDGen: NewOrderIDGen(clk, rand.New(rand.NewSource(5)))})
 	if err := recovered.Recover(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	restored := recovered.order(activating.OrderID)
-	if restored.Held == nil || restored.Held.Phase != HeldUnknown || !restored.Held.CancelRequested || restored.Held.CancelSent ||
+	if restored.Type != TypeLimitIfTouched || restored.Held == nil || restored.Held.Phase != HeldUnknown || !restored.Held.CancelRequested || restored.Held.CancelSent ||
 		restored.Action == nil || restored.Action.Phase != ActionUnknown || recoveredBroker.cancelCount() != 0 {
 		t.Fatalf("restart did not preserve unresolved activation without resubmit: order=%+v cancelCalls=%d", restored, recoveredBroker.cancelCount())
 	}
@@ -995,6 +1258,46 @@ func TestCleanShutdownPersistsCancelIntentThroughActivationRestart(t *testing.T)
 	recoveryCtx, stopRecovery := context.WithCancel(context.Background())
 	recoveryDone := make(chan struct{})
 	go func() { defer close(recoveryDone); _ = recovered.Run(recoveryCtx) }()
+	if ack := recovered.Do(ConfigureHeldDemand{Demand: &heldDemandStub{}}); !ack.Accepted {
+		t.Fatal(ack)
+	}
+	if ack := recovered.Do(Arm{}); !ack.Accepted {
+		t.Fatal(ack)
+	}
+	clk.Advance(time.Millisecond)
+	recoveryPrint := eligible(1, clk.Now(), 102)
+	recoveryPrint.Symbol = "MSFT"
+	recovered.FeedEligiblePrint(recoveryCtx, recoveryPrint)
+	printDeadline := time.After(time.Second)
+	for preview := recovered.PreviewEligiblePrint(recoveryCtx, "MSFT"); !preview.Trusted || preview.TsMs != clk.Now().UnixMilli(); preview = recovered.PreviewEligiblePrint(recoveryCtx, "MSFT") {
+		select {
+		case <-printDeadline:
+			t.Fatal("recovery print was not accepted before manual resume")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	if paused := recovered.order(waiting.OrderID); paused.Held == nil || paused.Held.Phase != HeldPaused {
+		t.Fatalf("restart print activated the held LIT before manual resume: %+v", paused)
+	}
+	if ack := recovered.Do(ResumeHeldOrder{Venue: "v", OrderID: waiting.OrderID}); !ack.Accepted {
+		t.Fatalf("manual resume after restart: %+v", ack)
+	}
+	clk.Advance(time.Millisecond)
+	resumePrint := eligible(2, clk.Now(), 100)
+	resumePrint.Symbol = "MSFT"
+	recovered.FeedEligiblePrint(recoveryCtx, resumePrint)
+	if activated := waitHeldOrder(t, recovered, waiting.OrderID, HeldActivating); activated.Type != TypeLimitIfTouched {
+		t.Fatalf("manually resumed LIT activation = %+v", activated)
+	}
+	select {
+	case req := <-recoveredBroker.submits:
+		if req.Type != TypeLimit || req.ClientOrderID != waiting.OrderID || req.LimitPrice != 100 {
+			t.Fatalf("recovered LIT child = %+v", req)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("manually resumed LIT did not submit its LIMIT child")
+	}
 	recoveredBroker.ev <- OrderAccepted{V: "v", OID: activating.OrderID, BrokerOrderID: "late-child", Ts: clk.Now().UnixMilli()}
 	final := waitOrder(t, recovered, activating.OrderID, func(o Order) bool {
 		return o.Status == StatusCanceled && o.Action != nil && o.Action.Phase == ActionConfirmed

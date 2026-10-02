@@ -553,6 +553,43 @@ describe("AccountPanel", () => {
       expect(row.querySelector('[data-column="state"]')?.textContent).toContain("09:30:00 ET");
     });
 
+    it("shows fixed-size LIT custody, phase, action state and deadline", () => {
+      const { props, stores } = mkProps();
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.orders" as never, payload: [order("ET-lit", {
+          type: "LIMIT_IF_TOUCHED", qty: 10, leavesQty: 10, limitPrice: 3.3, stopPrice: 3.4,
+          held: { phase: "WAITING", deadlineMs: Date.parse("2026-09-30T13:30:00Z") },
+          action: { kind: "CANCEL", phase: "UNKNOWN" },
+        })] });
+      });
+      wrap(props);
+      const row = screen.getByTestId("open-orders-table").querySelector("tbody tr")!;
+      const state = row.querySelector('[data-column="state"]')?.textContent ?? "";
+      expect(state).toContain("eTape LIT · WAITING");
+      expect(state).toContain("CANCEL UNKNOWN");
+      expect(state).toContain("09:30:00 ET");
+    });
+
+    it("retains LIT custody, terminal phase, action and deadline in Closed Orders", () => {
+      const { props, stores } = mkProps();
+      act(() => {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: status(true) });
+        stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders" as never, payload: [closed({
+          id: "ET-lit-history", type: "LIMIT_IF_TOUCHED", stopPrice: 3.4, limitPrice: 3.3,
+          held: { phase: "CANCELED", deadlineMs: Date.parse("2026-09-30T13:30:00Z") },
+          action: { kind: "CANCEL", phase: "CONFIRMED" },
+        })] });
+      });
+      wrap(props);
+      fireEvent.click(screen.getByTestId("closed-orders-tab"));
+      const state = screen.getByTestId("closed-orders-table").querySelector('tbody [data-column="state"]')?.textContent ?? "";
+      expect(state).toContain("eTape LIT · CANCELED");
+      expect(state).toContain("CANCEL CONFIRMED");
+      expect(state).toContain("expires");
+      expect(state).toContain("ET");
+    });
+
     it("merges limit prices under compact headers and sorts unused prices last in both tables", () => {
       const { props, stores, configChanges } = mkProps();
       const orders = [

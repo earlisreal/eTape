@@ -165,7 +165,8 @@ const restartAckFlushDelay = 200 * time.Millisecond
 
 func blocked(reason string) wsmsg.AckMsg { return wsmsg.AckMsg{Status: "blocked", Reason: reason} }
 
-func heldStopLimitAckKey(venue string) string { return "held_stop_limit_ack:" + venue }
+func heldStopLimitAckKey(venue string) string      { return "held_stop_limit_ack:" + venue }
+func heldLimitIfTouchedAckKey(venue string) string { return "held_limit_if_touched_ack:" + venue }
 
 func ackFromCmd(a exec.CmdAck) wsmsg.AckMsg {
 	status := wsmsg.AckStatus("accepted")
@@ -187,7 +188,7 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			Side: sideFromWire(a.Side), Type: orderTypeFromWire(a.Type), TIF: tifFromWire(a.TIF),
 			Session: sessionFromWire(a.Session),
 			Qty:     a.Qty, DeferredPositionPct: a.DeferredPositionPct, LimitPrice: a.LimitPrice, StopPrice: a.StopPrice,
-			RouteExpected: exec.HeldRoute(a.RouteExpected),
+			RouteExpected: exec.HeldRoute(a.RouteExpected), RouteDeadlineMs: a.RouteDeadlineMs,
 		})), false
 	case "ResumeHeldOrder":
 		var a wsmsg.CancelOrderArgs
@@ -209,6 +210,20 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			flush.Flush()
 		}
 		return ackFromCmd(cd.ex.Do(exec.AcknowledgeHeldStopLimit{Venue: exec.VenueID(a.Venue), Identity: identity})), false
+	case "AcknowledgeHeldLimitIfTouched":
+		var a wsmsg.AcknowledgeHeldLimitIfTouchedArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return blocked("bad args"), false
+		}
+		identity := cd.heldStopLimitIdentity[a.Venue]
+		if identity == "" {
+			return blocked("live engine-held limit-if-touched is unavailable for this venue"), false
+		}
+		cd.cfg.SetConfig(heldLimitIfTouchedAckKey(a.Venue), identity)
+		if flush, ok := cd.cfg.(interface{ Flush() }); ok {
+			flush.Flush()
+		}
+		return ackFromCmd(cd.ex.Do(exec.AcknowledgeHeldLimitIfTouched{Venue: exec.VenueID(a.Venue), Identity: identity})), false
 	case "CancelOrder":
 		var a wsmsg.CancelOrderArgs
 		if err := json.Unmarshal(args, &a); err != nil {
@@ -588,6 +603,8 @@ func orderTypeFromWire(t wsmsg.OrderType) exec.OrderType {
 		return exec.TypeStop
 	case wsmsg.OrderStopLimit:
 		return exec.TypeStopLimit
+	case wsmsg.OrderLimitIfTouched:
+		return exec.TypeLimitIfTouched
 	default:
 		return exec.TypeMarket
 	}

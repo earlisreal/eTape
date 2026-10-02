@@ -198,7 +198,8 @@ export function workingOrderMarks(orders: Order[], symbol: string): OrderMark[] 
   const marks: OrderMark[] = [];
   for (const o of orders) {
     if (o.symbol !== symbol || !isWorking(o.status)) continue;
-    const price = o.type === "STOP" ? o.stopPrice : o.limitPrice;
+    const hasChild = !!o.held?.childClientId || o.held?.phase === "WORKING" || o.held?.phase === "ACTIVATING";
+    const price = o.type === "STOP" || o.type === "LIMIT_IF_TOUCHED" && !hasChild ? o.stopPrice : o.limitPrice;
     if (!Number.isFinite(price) || price <= 0) continue;
     const qty = o.leavesQty > 0 ? o.leavesQty : o.qty;
     if (!Number.isFinite(qty) || qty <= 0) continue;

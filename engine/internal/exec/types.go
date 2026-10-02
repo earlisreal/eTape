@@ -8,6 +8,7 @@ package exec
 import (
 	"errors"
 	"fmt"
+	"math"
 )
 
 type VenueID string
@@ -61,6 +62,7 @@ const (
 	TypeLimit
 	TypeStop
 	TypeStopLimit
+	TypeLimitIfTouched
 )
 
 func (t OrderType) String() string {
@@ -73,6 +75,8 @@ func (t OrderType) String() string {
 		return "STOP"
 	case TypeStopLimit:
 		return "STOP_LIMIT"
+	case TypeLimitIfTouched:
+		return "LIMIT_IF_TOUCHED"
 	default:
 		return fmt.Sprintf("OrderType(%d)", uint8(t))
 	}
@@ -372,8 +376,27 @@ func (r OrderRequest) ValidateStructure() error {
 		if r.LimitPrice <= 0 {
 			return errors.New("exec: stop-limit order missing limit price")
 		}
+	case TypeLimitIfTouched:
+		if !validLimitIfTouchedPrice(r.StopPrice) {
+			return errors.New("exec: limit-if-touched order missing trigger price")
+		}
+		if !validLimitIfTouchedPrice(r.LimitPrice) {
+			return errors.New("exec: limit-if-touched order missing limit price")
+		}
 	}
 	return nil
+}
+
+func validLimitIfTouchedPrice(price float64) bool {
+	if price <= 0 || math.IsNaN(price) || math.IsInf(price, 0) {
+		return false
+	}
+	tick := 0.0001
+	if price >= 1 {
+		tick = 0.01
+	}
+	units := price / tick
+	return math.Abs(units-math.Round(units)) <= 1e-7
 }
 
 type ReplaceRequest struct {

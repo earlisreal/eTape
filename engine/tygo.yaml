@@ -57,7 +57,7 @@ packages:
 
       // ---- wire enums (mirrors wsmsg.go's typed string consts) ----
       export type Side = "BUY" | "SELL" | "SHORT" | "COVER";
-      export type OrderType = "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT";
+      export type OrderType = "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT" | "LIMIT_IF_TOUCHED";
       export type TIF = "DAY" | "GTC" | "IOC" | "FOK";
       export type OrderSession = "AUTO" | "RTH" | "EXTENDED" | "OVERNIGHT";
       export type OrderStatus =

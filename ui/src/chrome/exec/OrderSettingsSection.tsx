@@ -31,9 +31,11 @@ import { Keycap } from "./Keycap";
 import { StepField } from "./StepField";
 
 interface PendingAcknowledgements {
-  venues: Set<string>;
+  keys: Set<string>;
   listeners: Set<() => void>;
 }
+type HeldAckKind = "STOP_LIMIT" | "LIMIT_IF_TOUCHED";
+const ackKey = (venue: string, kind: HeldAckKind) => `${venue}|${kind}`;
 
 const pendingAcknowledgementsByExec = new WeakMap<ExecStore, PendingAcknowledgements>();
 const acknowledgementSnapshotByExec = new WeakMap<ExecStore, Map<string, number>>();
@@ -42,20 +44,20 @@ const noPendingAcknowledgements = new Set<string>();
 function pendingAcknowledgements(exec: ExecStore): PendingAcknowledgements {
   let state = pendingAcknowledgementsByExec.get(exec);
   if (!state) {
-    state = { venues: new Set(), listeners: new Set() };
+    state = { keys: new Set(), listeners: new Set() };
     pendingAcknowledgementsByExec.set(exec, state);
   }
   return state;
 }
 
-function publishPendingAcknowledgements(exec: ExecStore, venues: Set<string>): void {
+function publishPendingAcknowledgements(exec: ExecStore, keys: Set<string>): void {
   const state = pendingAcknowledgements(exec);
-  state.venues = venues;
+  state.keys = keys;
   state.listeners.forEach((listener) => listener());
 }
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
-const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
+const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT", "LIMIT_IF_TOUCHED"];
 const TIFS: TIF[] = ["DAY", "GTC", "IOC", "FOK"];
 const SESSIONS: OrderSession[] = ["AUTO", "RTH", "EXTENDED", "OVERNIGHT"];
 const SESSION_LABEL: Record<OrderSession, string> = { AUTO: "Auto", RTH: "Regular", EXTENDED: "Extended", OVERNIGHT: "Overnight" };
@@ -365,8 +367,8 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
               <span style={fieldLabel}>Type</span>
               <select aria-label={`type-${t.id}`} className="field" value={t.type} onChange={(e) => {
                 const type = e.target.value as OrderType;
-                if (type !== "STOP_LIMIT") clearRawEdit(`${t.id}:cushion`);
-                patch(t.id, type === "STOP_LIMIT"
+                if (type !== "STOP_LIMIT" && type !== "LIMIT_IF_TOUCHED") clearRawEdit(`${t.id}:cushion`);
+                patch(t.id, type === "STOP_LIMIT" || type === "LIMIT_IF_TOUCHED"
                   ? { type, limitCushion: t.limitCushion ?? 0, limitCushionUnit: t.limitCushionUnit ?? "$" }
                   : { type });
               }} style={{ width: 108 }}>
@@ -387,7 +389,7 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
             </div>
           </div>
 
-          {t.type === "STOP_LIMIT" ? (
+          {t.type === "STOP_LIMIT" || t.type === "LIMIT_IF_TOUCHED" ? (
             <div style={fieldRow}>
               <div style={fieldGroup}>
                 <span style={fieldLabel}>Limit cushion</span>
@@ -543,7 +545,7 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
     const state = pendingAcknowledgements(exec);
     state.listeners.add(listener);
     return () => state.listeners.delete(listener);
-  }, () => exec ? pendingAcknowledgements(exec).venues : noPendingAcknowledgements,
+  }, () => exec ? pendingAcknowledgements(exec).keys : noPendingAcknowledgements,
   () => noPendingAcknowledgements);
   const savePendingAcknowledgements = (pending: Set<string>) => {
     if (exec) publishPendingAcknowledgements(exec, pending);
@@ -557,11 +559,13 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
   }, [chartDisclosure]);
   useEffect(() => {
     if (!venueStatuses) return;
-    const pending = exec ? pendingAcknowledgements(exec).venues : noPendingAcknowledgements;
+    const pending = exec ? pendingAcknowledgements(exec).keys : noPendingAcknowledgements;
     const acceptedSnapshots = exec ? acknowledgementSnapshotByExec.get(exec) : undefined;
     const next = new Set([...pending].filter((id) => {
-      const venue = venueStatuses.find((v) => v.venue === id);
-      return !!venue && !venue.heldStopLimitAcknowledged
+      const [venueId, kind] = id.split("|") as [string, HeldAckKind];
+      const venue = venueStatuses.find((v) => v.venue === venueId);
+      const acknowledged = kind === "LIMIT_IF_TOUCHED" ? venue?.heldLimitIfTouchedAcknowledged : venue?.heldStopLimitAcknowledged;
+      return !!venue && !acknowledged
         && (!acceptedSnapshots?.has(id) || acceptedSnapshots.get(id) === statusSnapshotRevision);
     }));
     if (next.size !== pending.size) {
@@ -632,7 +636,7 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
     setTemplates((ts) => ts.map((t) => {
       if (t.id !== id) return t;
       const next = { ...t, ...over } as ActionTemplate;
-      if (next.kind === "place" && next.type !== "STOP_LIMIT") {
+      if (next.kind === "place" && next.type !== "STOP_LIMIT" && next.type !== "LIMIT_IF_TOUCHED") {
         const withoutStopLimitFields = { ...next };
         delete withoutStopLimitFields.chartBinding;
         delete withoutStopLimitFields.limitCushion;
@@ -659,23 +663,24 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
     if (continueSetup && chartDisclosure?.binding) patch(chartDisclosure.templateId, { chartBinding: chartDisclosure.binding });
     setChartDisclosure(null);
   };
-  const acknowledgeVenue = async (venue: string) => {
-    const pending = exec ? pendingAcknowledgements(exec).venues : noPendingAcknowledgements;
-    if (!commands || !exec || !venueStatuses || pending.has(venue)) return;
-    savePendingAcknowledgements(new Set(pendingAcknowledgements(exec).venues).add(venue));
+  const acknowledgeVenue = async (venue: string, kind: HeldAckKind) => {
+    const pending = exec ? pendingAcknowledgements(exec).keys : noPendingAcknowledgements;
+    const key = ackKey(venue, kind);
+    if (!commands || !exec || !venueStatuses || pending.has(key)) return;
+    savePendingAcknowledgements(new Set(pendingAcknowledgements(exec).keys).add(key));
     let waitingForStatus = false;
     try {
-      const result = await commands.sendCommand("AcknowledgeHeldStopLimit", { venue });
+      const result = await commands.sendCommand(kind === "LIMIT_IF_TOUCHED" ? "AcknowledgeHeldLimitIfTouched" : "AcknowledgeHeldStopLimit", { venue });
       if (result.ambiguous) toast?.push({ level: "warn", text: `Acknowledgement outcome unknown for ${venue}; verify venue status.` });
       else if (result.status !== "accepted") toast?.push({ level: "danger", text: `Acknowledgement blocked for ${venue}: ${result.reason ?? "unknown reason"}.` });
       else {
         waitingForStatus = true;
         const status = exec?.status();
         const venueStatus = status?.venues.find((v) => v.venue === venue);
-        const pending = exec ? pendingAcknowledgements(exec).venues : noPendingAcknowledgements;
-        if (exec && pending.has(venue) && venueStatus) {
+        const pending = exec ? pendingAcknowledgements(exec).keys : noPendingAcknowledgements;
+        if (exec && pending.has(key) && venueStatus) {
           const acceptedSnapshots = acknowledgementSnapshotByExec.get(exec) ?? new Map<string, number>();
-          acceptedSnapshots.set(venue, exec.getSnapshot().statusSnapshotRevision);
+          acceptedSnapshots.set(key, exec.getSnapshot().statusSnapshotRevision);
           acknowledgementSnapshotByExec.set(exec, acceptedSnapshots);
         }
         toast?.push({ level: "warn", text: `Acknowledgement accepted for ${venue}; waiting for live venue status.` });
@@ -684,9 +689,9 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
       toast?.push({ level: "warn", text: `Acknowledgement outcome unknown for ${venue}; verify venue status.` });
     } finally {
       if (!waitingForStatus) {
-        if (exec) acknowledgementSnapshotByExec.get(exec)?.delete(venue);
-        const pending = exec ? pendingAcknowledgements(exec).venues : noPendingAcknowledgements;
-        const next = new Set(pending); next.delete(venue);
+        if (exec) acknowledgementSnapshotByExec.get(exec)?.delete(key);
+        const pending = exec ? pendingAcknowledgements(exec).keys : noPendingAcknowledgements;
+        const next = new Set(pending); next.delete(key);
         savePendingAcknowledgements(next);
       }
     }
@@ -839,13 +844,13 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
             border: `1px solid ${palette.borderStrong}`, borderRadius: 6, background: palette.surface, color: palette.text, boxShadow: "0 8px 30px #000a" }}>
           <h2 id="chart-gesture-disclosure-title" style={{ fontFamily: FONTS.serif, fontSize: 17, margin: "0 0 10px" }}>Chart Order Gesture disclosure</h2>
           <p style={{ fontSize: 12, lineHeight: 1.5, color: palette.textMuted }}>
-            The selected modifier + click places this STOP_LIMIT Action Template at the clicked chart price using the chart&apos;s Link Group Execution Venue.
+            The selected modifier + click places this STOP_LIMIT or LIT Action Template at the clicked chart price using the chart&apos;s Link Group Execution Venue.
             When a live order is held by eTape, there is no broker order or protection before the trigger. eTape watches primary moomoo OpenD
             Last-Eligible Prints; if the engine or feed disconnects, trigger evaluation pauses and requires manual Resume.
           </p>
           <p style={{ fontSize: 12, lineHeight: 1.5, color: palette.textMuted }}>
             Settings acknowledges each named live account separately. Enablement applies to every order-entry method for that account and does not place an order.
-            Paper/sim accounts and broker-native routes do not require this acknowledgement. Enabling an account is immediate and remains enabled after closing
+            Paper/sim accounts do not require an acknowledgement. Stop-Limit and LIT each require a separate account acknowledgement. Enabling is immediate and remains enabled after closing
             Settings without saving template edits; template changes still require Save.
           </p>
           <div role="group" aria-label="Live accounts" style={{ display: "flex", flexDirection: "column", gap: 6, margin: "12px 0" }}>
@@ -854,12 +859,18 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
                 : liveVenues.map((v) => <div key={v.venue} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12,
                     padding: 8, border: `1px solid ${palette.border}`, borderRadius: 4 }}>
                   <span>{v.broker} live · {v.venue}</span>
-                  {v.heldStopLimitAcknowledged
-                    ? <span role="status">Enabled for this account</span>
-                    : <Button type="button" disabled={!commands || pending.has(v.venue)}
-                        onClick={() => void acknowledgeVenue(v.venue)}>
-                        {pending.has(v.venue) ? "Waiting for account status…" : `I understand — enable for ${v.venue}`}
-                      </Button>}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {(["STOP_LIMIT", "LIMIT_IF_TOUCHED"] as const).map((kind) => {
+                      const key = ackKey(v.venue, kind);
+                      const enabled = kind === "STOP_LIMIT" ? v.heldStopLimitAcknowledged : v.heldLimitIfTouchedAcknowledged;
+                      return enabled
+                        ? <span role="status" key={kind}>{kind === "LIMIT_IF_TOUCHED" ? "LIT enabled" : "Stop-Limit enabled"}</span>
+                        : <Button key={kind} type="button" disabled={!commands || pending.has(key)}
+                            onClick={() => void acknowledgeVenue(v.venue, kind)}>
+                            {pending.has(key) ? "Waiting for account status…" : `I understand — enable ${kind === "LIMIT_IF_TOUCHED" ? "LIT" : "Stop-Limit"} for ${v.venue}`}
+                          </Button>;
+                    })}
+                  </div>
                 </div>)}
           </div>
           <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>

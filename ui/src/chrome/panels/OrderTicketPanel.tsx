@@ -19,16 +19,16 @@ import { StepperInput } from "./StepperInput";
 import { PanelHeaderActionsSlotContext } from "./headerSlot";
 import { IconGear } from "./tv/tvIcons";
 import { HotkeyDeck, resolveDeckRows } from "./HotkeyDeck";
-import { stopLimitRouteLabel } from "../exec/resolveChartStopLimit";
+import { chartConditionalOrderWillTrigger, conditionalRouteLabel } from "../exec/resolveChartConditionalOrder";
 
 const SIDES: Side[] = ["BUY", "SELL", "SHORT", "COVER"];
-const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT"];
+const TYPES: OrderType[] = ["LIMIT", "MARKET", "STOP", "STOP_LIMIT", "LIMIT_IF_TOUCHED"];
 const TIFS: TIF[] = ["DAY", "GTC", "IOC", "FOK"];
 const SESSIONS: OrderSession[] = ["AUTO", "RTH", "EXTENDED", "OVERNIGHT"];
 const MODES: SizingMode[] = ["Shares", "Dollar", "CashPct", "BuyingPowerPct", "PositionFraction"];
 // Full words in the ticket's own dropdowns — abbrevType (orderStatus.ts) stays
 // abbreviated since it's shared with OpenOrdersPanel and the submit-flash toast.
-const TYPE_LABEL: Record<OrderType, string> = { MARKET: "Market", LIMIT: "Limit", STOP: "Stop", STOP_LIMIT: "Stop Limit" };
+const TYPE_LABEL: Record<OrderType, string> = { MARKET: "Market", LIMIT: "Limit", STOP: "Stop", STOP_LIMIT: "Stop Limit", LIMIT_IF_TOUCHED: "Limit If Touched" };
 const MODE_LABEL: Record<SizingMode, string> = { Shares: "Shares", Dollar: "Dollars", CashPct: "Cash %", BuyingPowerPct: "Buying Power %", PositionFraction: "Position" };
 // AUTO resolves session-dependent behavior (extended_hours flags, TIF
 // coercion) from the server clock at submit time — today's behavior, kept as
@@ -82,18 +82,18 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const [amount, setAmount] = useState("100");
   const [price, setPrice] = useState("");
   const [stop, setStop] = useState("");
-  const [stopLimitRoute, setStopLimitRoute] = useState<StopLimitRoutePreview | null>(null);
+  const [conditionalRoute, setConditionalRoute] = useState<StopLimitRoutePreview | null>(null);
 
   useEffect(() => {
-    if (type !== "STOP_LIMIT") { setStopLimitRoute(null); return; }
+    if (type !== "STOP_LIMIT" && type !== "LIMIT_IF_TOUCHED") { setConditionalRoute(null); return; }
     let current = true;
-    setStopLimitRoute(null);
-    void commands.sendQuery("QueryStopLimitRoute", { tif, session, symbol })
+    setConditionalRoute(null);
+    void commands.sendQuery("QueryStopLimitRoute", { tif, session, symbol, ...(type === "LIMIT_IF_TOUCHED" ? { type } : {}) })
       .then((raw) => {
         const route = raw as StopLimitRoutePreview;
-        if (current && (route?.route === "NATIVE" || route?.route === "ENGINE_HELD")) setStopLimitRoute(route);
+        if (current && (route?.route === "NATIVE" || route?.route === "ENGINE_HELD" || route?.route === "UNSUPPORTED")) setConditionalRoute(route);
       })
-      .catch(() => { if (current) setStopLimitRoute(null); });
+      .catch(() => { if (current) setConditionalRoute(null); });
     return () => { current = false; };
   }, [commands, type, tif, session, symbol]);
 
@@ -102,18 +102,25 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   const availableCash = account?.availableCash ?? 0;
   const positionQty = stores.exec.positions().filter((p) => p.symbol === symbol && p.venue === venue).reduce((s, p) => s + p.qty, 0);
 
-  const hasStop = type === "STOP" || type === "STOP_LIMIT";
+  const hasStop = type === "STOP" || type === "STOP_LIMIT" || type === "LIMIT_IF_TOUCHED";
+  const litWillTriggerSides = type === "LIMIT_IF_TOUCHED" && Number(stop) > 0
+    ? [
+      ...(chartConditionalOrderWillTrigger("BUY", Number(stop), conditionalRoute ?? undefined, type) ? ["BUY/COVER"] : []),
+      ...(chartConditionalOrderWillTrigger("SELL", Number(stop), conditionalRoute ?? undefined, type) ? ["SELL/SHORT"] : []),
+    ] : [];
   const venueStatus = status?.venues.find((v) => v.venue === venue);
-  const liveHeldNeedsAck = type === "STOP_LIMIT" && stopLimitRoute?.route === "ENGINE_HELD" &&
-    venueStatus?.env?.toLowerCase() === "live" && !venueStatus.heldStopLimitAcknowledged;
+  const liveHeldNeedsAck = (type === "STOP_LIMIT" && !venueStatus?.heldStopLimitAcknowledged ||
+    type === "LIMIT_IF_TOUCHED" && !venueStatus?.heldLimitIfTouchedAcknowledged) &&
+    conditionalRoute?.route === "ENGINE_HELD" && venueStatus?.env?.toLowerCase() === "live";
 
   const acknowledgeHeldStopLimit = async () => {
     if (!venue) return;
     try {
-      const ack = await commands.sendCommand("AcknowledgeHeldStopLimit", { venue });
+      const isLIT = type === "LIMIT_IF_TOUCHED";
+      const ack = await commands.sendCommand(isLIT ? "AcknowledgeHeldLimitIfTouched" : "AcknowledgeHeldStopLimit", { venue });
       if (ack.ambiguous) toast.push({ level: "warn", text: "Acknowledgement outcome unknown — recheck venue status before placing." });
       else if (ack.status !== "accepted") toast.push({ level: "danger", text: `Acknowledgement blocked: ${ack.reason ?? "unknown reason"}` });
-      else toast.push({ level: "warn", text: "Held stop-limit acknowledged for this account. Review and submit the order again." });
+      else toast.push({ level: "warn", text: `${isLIT ? "Held LIT" : "Held stop-limit"} acknowledged for this account. Review and submit the order again.` });
     } catch {
       toast.push({ level: "warn", text: "Acknowledgement outcome unknown — recheck venue status before placing." });
     }
@@ -233,10 +240,10 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
             {TYPES.map((t) => <option key={t} value={t}>{TYPE_LABEL[t]}</option>)}
           </select>
         ))}
-        {field("Price", (
+        {field(type === "LIMIT_IF_TOUCHED" ? "Limit" : "Price", (
           <StepperInput testid="price" value={price} onChange={setPrice} disabled={type === "MARKET"} placeholder="price" style={full} />
         ))}
-        {field("Stop", (
+        {field(type === "LIMIT_IF_TOUCHED" ? "Trigger" : "Stop", (
           <StepperInput testid="stop" value={stop} onChange={setStop} disabled={!hasStop} placeholder="stop" style={{ ...full, opacity: hasStop ? 1 : 0.4 }} />
         ))}
       </div>
@@ -261,18 +268,28 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
           </select>
         ))}
       </div>
-      {type === "STOP_LIMIT" && (
-        <div data-testid="stop-limit-custody-preview" style={{ color: stopLimitRoute?.route === "ENGINE_HELD" ? palette.warn : palette.textMuted, fontSize: 11 }}>
-          {stopLimitRoute
-            ? `${stopLimitRouteLabel(stopLimitRoute)} · ${stopLimitRoute.effectiveSession}${stopLimitRoute.deadlineMs ? ` · expires ${timeET(stopLimitRoute.deadlineMs)}` : ""}`
-            : "Checking stop-limit custody…"}
-          {stopLimitRoute?.route === "ENGINE_HELD" && " · Held by eTape — no broker protection; venue LIMIT only after trigger."}
+      {(type === "STOP_LIMIT" || type === "LIMIT_IF_TOUCHED") && (
+        <div data-testid="conditional-custody-preview" style={{ color: conditionalRoute?.route === "ENGINE_HELD" ? palette.warn : palette.textMuted, fontSize: 11 }}>
+          {conditionalRoute?.route === "UNSUPPORTED"
+            ? `UNSUPPORTED · ${conditionalRoute.reason ?? "Route unavailable"}`
+            : conditionalRoute
+            ? `${conditionalRouteLabel(conditionalRoute)} · ${conditionalRoute.effectiveSession}${conditionalRoute.deadlineMs ? ` · expires ${timeET(conditionalRoute.deadlineMs)}` : ""}`
+            : `Checking ${type === "LIMIT_IF_TOUCHED" ? "LIT" : "stop-limit"} custody…`}
+          {conditionalRoute?.route === "ENGINE_HELD" && (type === "LIMIT_IF_TOUCHED"
+            ? " · Held by eTape — no broker order before trigger; primary moomoo OpenD Last-Eligible Prints; engine or feed loss pauses evaluation."
+            : " · Held by eTape — no broker protection; venue LIMIT only after trigger.")}
+          {type === "LIMIT_IF_TOUCHED" && conditionalRoute?.route === "ENGINE_HELD" && (conditionalRoute.hasTrustedEligiblePrint && conditionalRoute.lastEligiblePrice !== undefined
+            ? ` · Last-Eligible price ${conditionalRoute.lastEligiblePrice}.`
+            : " · Waiting for a trusted Last-Eligible print.")}
+          {litWillTriggerSides.length > 0 && ` · Will trigger now for ${litWillTriggerSides.join(" and ")}.`}
         </div>
       )}
       {liveHeldNeedsAck && (
         <div data-testid="stop-limit-live-disclosure" style={{ border: `1px solid ${palette.warn}`, padding: 6, color: palette.text, fontSize: 11 }}>
-          <div>eTape watches primary moomoo OpenD Last-Eligible Prints; engine or feed loss pauses trigger evaluation. No broker order or protection exists before trigger.</div>
-          <button type="button" data-testid="ack-held-stop-limit" onClick={() => void acknowledgeHeldStopLimit()} style={{ marginTop: 5 }}>
+          <div>{type === "LIMIT_IF_TOUCHED"
+            ? "Acknowledge that eTape-custodied LIT activates into a venue LIMIT after the trigger."
+            : "eTape watches primary moomoo OpenD Last-Eligible Prints; engine or feed loss pauses trigger evaluation. No broker order or protection exists before trigger."}</div>
+          <button type="button" data-testid={type === "LIMIT_IF_TOUCHED" ? "ack-held-lit" : "ack-held-stop-limit"} onClick={() => void acknowledgeHeldStopLimit()} style={{ marginTop: 5 }}>
             I understand — enable for this account
           </button>
         </div>

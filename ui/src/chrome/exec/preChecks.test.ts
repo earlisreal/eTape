@@ -98,4 +98,12 @@ describe("preCheck", () => {
   it("accepts a coherent sell stop-limit", () => {
     expect(preCheck(draft({ type: "STOP_LIMIT", side: "SELL", stopPrice: 3.5, limitPrice: 3.4 }), q(), RTH, 1).ok).toBe(true);
   });
+  it("allows an LIT limit on either side of its trigger", () => {
+    expect(preCheck(draft({ type: "LIMIT_IF_TOUCHED", side: "BUY", stopPrice: 3.5, limitPrice: 3.4 }), q(), RTH, 1).ok).toBe(true);
+    expect(preCheck(draft({ type: "LIMIT_IF_TOUCHED", side: "SELL", stopPrice: 3.5, limitPrice: 3.6 }), q(), RTH, 1).ok).toBe(true);
+  });
+  it("requires finite, positive, tick-valid LIT trigger and limit prices", () => {
+    expect(preCheck(draft({ type: "LIMIT_IF_TOUCHED", stopPrice: Number.NaN, limitPrice: 3.5 }), q(), RTH, 1).errors.join(" ")).toMatch(/Trigger price must be finite/);
+    expect(preCheck(draft({ type: "LIMIT_IF_TOUCHED", stopPrice: 3.5, limitPrice: 3.501 }), q(), RTH, 1).errors.join(" ")).toMatch(/Limit price must be finite/);
+  });
 });

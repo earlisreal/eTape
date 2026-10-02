@@ -20,7 +20,7 @@ export type Topic =
 
 // ---- wire enums (mirrors wsmsg.go's typed string consts) ----
 export type Side = "BUY" | "SELL" | "SHORT" | "COVER";
-export type OrderType = "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT";
+export type OrderType = "MARKET" | "LIMIT" | "STOP" | "STOP_LIMIT" | "LIMIT_IF_TOUCHED";
 export type TIF = "DAY" | "GTC" | "IOC" | "FOK";
 export type OrderSession = "AUTO" | "RTH" | "EXTENDED" | "OVERNIGHT";
 export type OrderStatus =
@@ -329,6 +329,7 @@ export interface VenueStatus {
   lastReconcileMs: number | null;
   gate: GateLimitsView;
   heldStopLimitAcknowledged?: boolean;
+  heldLimitIfTouchedAcknowledged?: boolean;
 }
 export interface ExecStatus {
   masterArmed: boolean;
@@ -585,12 +586,16 @@ export interface SubmitOrderArgs {
   limitPrice: number /* float64 */;
   stopPrice: number /* float64 */;
   routeExpected?: string;
+  routeDeadlineMs?: number /* int64 */;
 }
 export interface CancelOrderArgs {
   venue: string;
   orderId: string;
 }
 export interface AcknowledgeHeldStopLimitArgs {
+  venue: string;
+}
+export interface AcknowledgeHeldLimitIfTouchedArgs {
   venue: string;
 }
 export interface ReplaceOrderArgs {
@@ -624,6 +629,7 @@ export interface QueryFillsArgs {
 export interface QueryStopLimitRouteArgs {
   tif: TIF;
   session: OrderSession;
+  type?: OrderType;
   symbol?: string;
   deferredPositionSizing?: boolean;
 }
@@ -636,6 +642,7 @@ export interface StopLimitRoutePreview {
   lastEligiblePrice?: number /* float64 */;
   lastEligibleTsMs?: number /* int64 */;
   reason?: string;
+  orderType?: OrderType;
 }
 export interface QueryVenueInstrumentEligibilityArgs {
   venue: string;

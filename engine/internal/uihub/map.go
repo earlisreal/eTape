@@ -40,6 +40,8 @@ func orderTypeToWire(t exec.OrderType) wsmsg.OrderType {
 		return wsmsg.OrderStop
 	case exec.TypeStopLimit:
 		return wsmsg.OrderStopLimit
+	case exec.TypeLimitIfTouched:
+		return wsmsg.OrderLimitIfTouched
 	default:
 		return wsmsg.OrderMarket
 	}

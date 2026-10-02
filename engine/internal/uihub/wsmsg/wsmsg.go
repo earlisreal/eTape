@@ -61,10 +61,11 @@ const (
 type OrderType string
 
 const (
-	OrderMarket    OrderType = "MARKET"
-	OrderLimit     OrderType = "LIMIT"
-	OrderStop      OrderType = "STOP"
-	OrderStopLimit OrderType = "STOP_LIMIT"
+	OrderMarket         OrderType = "MARKET"
+	OrderLimit          OrderType = "LIMIT"
+	OrderStop           OrderType = "STOP"
+	OrderStopLimit      OrderType = "STOP_LIMIT"
+	OrderLimitIfTouched OrderType = "LIMIT_IF_TOUCHED"
 )
 
 type TIF string

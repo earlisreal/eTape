@@ -50,10 +50,10 @@ func buildGateConfig(g config.Gate) exec.GateConfig {
 }
 
 func venueMetas(cfg config.Config) []uihub.VenueMeta {
-	return venueMetasWithHeldStopLimitAck(cfg, nil, nil)
+	return venueMetasWithHeldStopLimitAck(cfg, nil, nil, nil)
 }
 
-func venueMetasWithHeldStopLimitAck(cfg config.Config, identities, acknowledged map[exec.VenueID]string) []uihub.VenueMeta {
+func venueMetasWithHeldStopLimitAck(cfg config.Config, identities, acknowledged, litAcknowledged map[exec.VenueID]string) []uihub.VenueMeta {
 	out := make([]uihub.VenueMeta, 0, len(cfg.Venues))
 	for _, v := range cfg.Venues {
 		gv := cfg.Gate.Venue[v.ID]
@@ -63,6 +63,8 @@ func venueMetasWithHeldStopLimitAck(cfg config.Config, identities, acknowledged 
 			HeldStopLimitIdentity: identities[exec.VenueID(v.ID)],
 			HeldStopLimitAcknowledged: identities[exec.VenueID(v.ID)] != "" &&
 				acknowledged[exec.VenueID(v.ID)] == identities[exec.VenueID(v.ID)],
+			HeldLimitIfTouchedAcknowledged: identities[exec.VenueID(v.ID)] != "" &&
+				litAcknowledged[exec.VenueID(v.ID)] == identities[exec.VenueID(v.ID)],
 			Gate: uihub.GateLimits{
 				MaxOrderValue: gv.MaxOrderValue, MaxPositionValue: gv.MaxPositionValue,
 				MaxPositionShares: gv.MaxPositionShares, MaxOpenOrders: gv.MaxOpenOrders,

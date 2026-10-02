@@ -58,13 +58,14 @@ type GlobalLimits struct {
 }
 
 type VenueMeta struct {
-	ID                        string
-	Broker                    string
-	Env                       string
-	Note                      string
-	HeldStopLimitIdentity     string
-	HeldStopLimitAcknowledged bool
-	Gate                      GateLimits
+	ID                             string
+	Broker                         string
+	Env                            string
+	Note                           string
+	HeldStopLimitIdentity          string
+	HeldStopLimitAcknowledged      bool
+	HeldLimitIfTouchedAcknowledged bool
+	Gate                           GateLimits
 }
 
 type Config struct {
@@ -90,7 +91,8 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 			ID: v.ID, Env: v.Env,
 			Broker: wsmsg.Broker(v.Broker),
 			Note:   v.Note, HeldStopLimitIdentity: v.HeldStopLimitIdentity,
-			HeldStopLimitAcknowledged: v.HeldStopLimitAcknowledged,
+			HeldStopLimitAcknowledged:      v.HeldStopLimitAcknowledged,
+			HeldLimitIfTouchedAcknowledged: v.HeldLimitIfTouchedAcknowledged,
 			Gate: wsmsg.GateLimitsView{
 				MaxOrderValue: v.Gate.MaxOrderValue, MaxPositionValue: v.Gate.MaxPositionValue,
 				MaxPositionShares: v.Gate.MaxPositionShares, MaxOpenOrders: v.Gate.MaxOpenOrders,

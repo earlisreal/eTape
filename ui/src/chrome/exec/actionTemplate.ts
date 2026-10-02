@@ -21,9 +21,9 @@ export interface PlaceOrderTemplate {
   session?: OrderSession;   // absent => "AUTO" (every persisted config is already valid)
   priceSource: PriceSource; priceOffset: number;
   priceOffsetUnit?: PriceOffsetUnit;   // absent => "$" (every persisted config is already valid)
-  limitCushion?: number;               // STOP_LIMIT only; absent => 0
-  limitCushionUnit?: PriceOffsetUnit;  // STOP_LIMIT only; absent => "$"
-  chartBinding?: ChartBinding;         // STOP_LIMIT only; unique exact modifier+click binding
+  limitCushion?: number;               // STOP_LIMIT/LIT; absent => 0
+  limitCushionUnit?: PriceOffsetUnit;  // STOP_LIMIT/LIT; absent => "$"
+  chartBinding?: ChartBinding;         // conditional orders only; unique exact modifier+click binding
   sizing: SizingSpec;
   hotkey?: string;   // normalized combo, e.g. "Ctrl+1" (see hotkeys.ts)
   deck?: boolean;   // absent => hotkey-only, not shown in deck
@@ -73,7 +73,7 @@ function normalizeTemplate(t: ActionTemplate): ActionTemplate {
   delete base.chartBinding;
   delete base.limitCushion;
   delete base.limitCushionUnit;
-  if (t.type !== "STOP_LIMIT") return { ...base, priceOffsetUnit: t.priceOffsetUnit ?? "$", session: t.session ?? "AUTO", sizing };
+  if (t.type !== "STOP_LIMIT" && t.type !== "LIMIT_IF_TOUCHED") return { ...base, priceOffsetUnit: t.priceOffsetUnit ?? "$", session: t.session ?? "AUTO", sizing };
   const cushion = Number.isFinite(t.limitCushion) ? Math.max(0, t.limitCushion ?? 0) : 0;
   const binding = normalizeChartBinding(t.chartBinding);
   return {

@@ -34,6 +34,15 @@ func TestMapOrderEnumsAndTimestamps(t *testing.T) {
 	}
 }
 
+func TestMapLimitIfTouchedOrderType(t *testing.T) {
+	o := exec.Order{Venue: "sim", ID: "ET-LIT", Symbol: "US.AAPL", Side: exec.SideBuy,
+		Type: exec.TypeLimitIfTouched, TIF: exec.TIFDay, Qty: 2, LimitPrice: 99,
+		StopPrice: 100, Status: exec.StatusSubmitted, LeavesQty: 2}
+	if got := mapOrder(o).Type; got != wsmsg.OrderLimitIfTouched {
+		t.Fatalf("LIT type = %s, want %s", got, wsmsg.OrderLimitIfTouched)
+	}
+}
+
 func TestMapQuoteJoinsBidAskAndISOTime(t *testing.T) {
 	q := feed.Quote{Symbol: "US.AAPL", Last: 3.47, TsMs: 1_783_344_660_000} // 2026-07-06T13:31:00Z
 	w := mapQuote(q, 3.46, 3.48)

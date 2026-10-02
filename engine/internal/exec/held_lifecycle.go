@@ -129,7 +129,7 @@ func (c *Core) handleEligiblePrint(ctx context.Context, p EligiblePrint) {
 			c.expireHeld(o)
 			continue
 		}
-		if StopLimitTriggered(o.Side, p.Price, o.StopPrice) {
+		if HeldOrderTriggered(o.Type, o.Side, p.Price, o.StopPrice) {
 			c.activateHeld(ctx, o)
 		} else {
 			c.changeHeld(o, HeldArmed, "", false)

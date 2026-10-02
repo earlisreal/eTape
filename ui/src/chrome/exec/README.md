@@ -51,18 +51,20 @@ arm and risk gates remain authoritative. Order configuration changes are
 rebroadcast by key so open workspace windows reload templates, hotkeys, venue,
 and safety preferences together.
 
-Action Templates may carry a dollar or percent Limit Cushion for STOP_LIMIT;
-the final limit is directionally rounded to the venue tick and revalidated by
-Core. An exact one- or two-modifier Chart Order Gesture can bind to one
-STOP_LIMIT template. Hotkeys, Deck, ticket, and chart entry all use the same
-route preview and submit path. Eligible EXTENDED DAY stop-limits in pre/post
-are explicitly shown as held by eTape (no broker protection); only a fresh
-Last-Eligible print submits the linked venue LIMIT child. UI preview is not
-execution authority and cannot silently change the resolved Link Group venue.
+Action Templates may carry a dollar or percent Limit Cushion for STOP_LIMIT or
+LIT; the final limit is directionally rounded to the venue tick and revalidated
+by Core. For LIT, the source price is the trigger and sizing uses the resulting
+limit. An exact one- or two-modifier Chart Order Gesture can bind to one
+STOP_LIMIT or LIT template, with bindings shared between the two types.
+Hotkeys, Deck, ticket, and chart entry use the same route preview and submit
+path. Engine-held orders are shown as having no broker order before activation;
+only a fresh Last-Eligible print submits the linked venue LIMIT child. UI
+preview is not execution authority and cannot silently change the resolved
+Link Group venue.
 
 Adding or changing a Chart Order Gesture opens a Settings disclosure; continuing
 stages the binding until Save. Bound templates expose **Review / enable live
-accounts** so each live account can be acknowledged separately. Account
-enablement applies across order-entry methods and appears enabled only after
-ExecStore receives authoritative venue status; paper/sim and broker-native
-routes do not require this acknowledgement.
+accounts** so each live account can be acknowledged separately. STOP_LIMIT and
+LIT acknowledgements are independent; account enablement applies across all
+order-entry methods and appears enabled only after ExecStore receives
+authoritative venue status. Paper/sim routes do not require acknowledgement.

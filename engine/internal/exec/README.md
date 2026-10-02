@@ -28,6 +28,13 @@ pause pretrigger custody for manual Resume; clean exit also persists cancel
 intent for working children and asks before forcing exit if cancellation cannot
 be confirmed. Live custody requires explicit per-account acknowledgement.
 
+DAY Limit-if-Touched uses the same held-parent lifecycle in whichever PRE, RTH,
+or POST segment is currently active. BUY/COVER activates at or below its
+trigger; SELL/SHORT at or above. The trigger and limit are independent, sizing
+is fixed at submission, and the child is always LIMIT. A previewed segment
+deadline is checked again at submit; live LIT requires a separate identity-
+scoped acknowledgement.
+
 Venue cancel/replace results remain pending until an authoritative broker
 event confirms them. Rejections restore the prior confirmed price; ambiguous
 outcomes retain the requested value and block another replace until

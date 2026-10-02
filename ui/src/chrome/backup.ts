@@ -253,7 +253,7 @@ export function detectHotkeyConflicts(templates: ActionTemplate[]): string[] {
 
 export function detectChartBindingConflicts(templates: ActionTemplate[]): string[] {
   const bindings = templates.flatMap((template) => {
-    if (template.kind !== "place" || template.type !== "STOP_LIMIT") return [];
+    if (template.kind !== "place" || (template.type !== "STOP_LIMIT" && template.type !== "LIMIT_IF_TOUCHED")) return [];
     const binding = normalizeChartBinding(template.chartBinding);
     return binding ? [binding] : [];
   });

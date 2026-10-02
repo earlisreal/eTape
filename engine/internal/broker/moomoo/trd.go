@@ -533,6 +533,8 @@ func orderTypeDomain(t trdcommon.OrderType) exec.OrderType {
 		return exec.TypeStop
 	case trdcommon.OrderType_OrderType_StopLimit:
 		return exec.TypeStopLimit
+	case trdcommon.OrderType_OrderType_LimitifTouched:
+		return exec.TypeLimitIfTouched
 	default: // Market, and any order type eTape never itself sends.
 		return exec.TypeMarket
 	}

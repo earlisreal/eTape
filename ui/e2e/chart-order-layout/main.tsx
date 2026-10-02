@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { createChart, CandlestickSeries } from "lightweight-charts";
 import { ChartOrderMarkers } from "../../src/chrome/panels/tv/ChartOrderMarkers";
-import { ChartStopLimitEntry } from "../../src/chrome/panels/tv/ChartStopLimitEntry";
+import { ChartConditionalOrderEntry } from "../../src/chrome/panels/tv/ChartConditionalOrderEntry";
 import { OrderConfigProvider, useOrderConfig } from "../../src/chrome/exec/useOrderConfig";
 import { ThemeProvider } from "../../src/chrome/ThemeProvider";
 import { ToastProvider } from "../../src/chrome/Toast";
@@ -155,7 +155,7 @@ function App() {
       <div style={{ position: "absolute", zIndex: 5 }}>AAPL · Vol</div>
       <ChartOrderMarkers orders={snapshot.orders.values()} venue="sim" symbol="US.AAPL" pinned={false} sendCommand={sendCommand}
         hostRef={hostRef} facadeRef={facadeRef} rightAxisWidth={axisWidth} layoutRef={layoutRef} chooserOpenRef={chooserOpenRef} />
-      <ChartStopLimitEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group="green" symbol="US.AAPL"
+      <ChartConditionalOrderEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group="green" symbol="US.AAPL"
         config={config} configLoaded activeTool="select" chooserOpenRef={chooserOpenRef} sendCommand={sendCommand} sendQuery={sendQuery} />
     </div>
   </div>;

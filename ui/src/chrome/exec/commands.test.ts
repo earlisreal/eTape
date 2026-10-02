@@ -46,6 +46,27 @@ describe("OrderCommands", () => {
     expect(sent[0]).toMatchObject({ name: "SubmitOrder", args: { routeExpected: "ENGINE_HELD", type: "STOP_LIMIT" } });
     expect(pushed.at(-1)?.text).toContain("Held by eTape — no broker protection");
   });
+  it("previews LIT segment deadlines and retains them through submit", async () => {
+    const { sent, cmd, pushed, oc } = fakes({ orderId: "ET-lit" });
+    cmd.sendQuery = vi.fn(async () => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "PRE", deadlineMs: 1234 }));
+    await oc.submit({ ...args, type: "LIMIT_IF_TOUCHED", session: "EXTENDED", stopPrice: 3.4, limitPrice: 3.3 }, "BUY 10 AAPL @ 3.40→3.30 LIT");
+    expect(cmd.sendQuery).toHaveBeenCalledWith("QueryStopLimitRoute", {
+      tif: "DAY", session: "EXTENDED", symbol: "US.AAPL", deferredPositionSizing: false, type: "LIMIT_IF_TOUCHED",
+    });
+    expect(sent[0]).toMatchObject({ name: "SubmitOrder", args: {
+      type: "LIMIT_IF_TOUCHED", routeExpected: "ENGINE_HELD", routeDeadlineMs: 1234,
+    } });
+    expect(pushed.at(-1)?.text).toContain("LIT held by eTape — no broker order before trigger");
+  });
+  it("warns that an already-touched LIT will activate before sending", async () => {
+    const { sent, cmd, pushed, oc } = fakes({ orderId: "ET-lit-now" });
+    cmd.sendQuery = vi.fn(async () => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "PRE", deadlineMs: 1234,
+      hasTrustedEligiblePrint: true, lastEligiblePrice: 3.4 }));
+    await oc.submit({ ...args, type: "LIMIT_IF_TOUCHED", stopPrice: 3.5, limitPrice: 3.3 }, "BUY 10 AAPL @ 3.50→3.30 LIT");
+    expect(pushed[0]?.text).toContain("Will trigger now");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.name).toBe("SubmitOrder");
+  });
   it("routes percentage SELL stop-limits through deferred engine custody", async () => {
     const { sent, cmd, pushed, oc } = fakes({ orderId: "ET-deferred" });
     cmd.sendQuery = vi.fn(async () => ({ route: "ENGINE_HELD", effectiveSession: "RTH", phase: "RTH", deadlineMs: 1_800_000_000_000 }));

@@ -19,10 +19,10 @@ function displayPrice(price: number): string { return price < 1 ? price.toFixed(
 
 export function resolvePlaceTemplate(t: PlaceOrderTemplate, ctx: ResolveContext): ResolvedPlace {
   const sourcePrice = resolvePrice(t.priceSource, t.priceOffset, t.priceOffsetUnit, ctx.quote);
-  const limitPrice = t.type === "STOP_LIMIT"
+  const limitPrice = t.type === "STOP_LIMIT" || t.type === "LIMIT_IF_TOUCHED"
     ? resolveLimitCushionPrice(t.side, sourcePrice, t.limitCushion ?? 0, t.limitCushionUnit)
     : sourcePrice;
-  const sizingPrice = t.type === "STOP_LIMIT" ? limitPrice : sourcePrice;
+  const sizingPrice = t.type === "STOP_LIMIT" || t.type === "LIMIT_IF_TOUCHED" ? limitPrice : sourcePrice;
   const deferredPositionPct = t.side === "SELL" && t.type === "STOP_LIMIT" && t.sizing.mode === "PositionFraction"
     ? t.sizing.pct ?? (t.sizing.fraction === "half" ? 50 : 100)
     : undefined;
@@ -35,7 +35,7 @@ export function resolvePlaceTemplate(t: PlaceOrderTemplate, ctx: ResolveContext)
     symbol: ctx.symbol, side: t.side, type: t.type, tif: t.tif, session: t.session ?? "AUTO", qty,
     ...(deferredPositionPct !== undefined ? { deferredPositionPct } : {}),
     limitPrice: t.type === "MARKET" ? 0 : limitPrice,
-    stopPrice: t.type === "STOP" || t.type === "STOP_LIMIT" ? sourcePrice : 0,
+    stopPrice: t.type === "STOP" || t.type === "STOP_LIMIT" || t.type === "LIMIT_IF_TOUCHED" ? sourcePrice : 0,
   };
   const pc = preCheck(draft, ctx.quote, ctx.nowMs, ctx.extHoursMarketBufferPct, reason);
   const o = pc.order;
@@ -44,7 +44,7 @@ export function resolvePlaceTemplate(t: PlaceOrderTemplate, ctx: ResolveContext)
     qty: o.qty, limitPrice: o.limitPrice, stopPrice: o.stopPrice,
     ...(o.deferredPositionPct !== undefined ? { deferredPositionPct: o.deferredPositionPct } : {}),
   };
-  const tail = o.type === "MARKET" ? "MKT" : o.type === "STOP_LIMIT"
+  const tail = o.type === "MARKET" ? "MKT" : o.type === "STOP_LIMIT" || o.type === "LIMIT_IF_TOUCHED"
     ? `${displayPrice(o.stopPrice)}→${displayPrice(o.limitPrice)} ${abbrevType(o.type)}`
     : `${o.limitPrice.toFixed(2)} ${abbrevType(o.type)}`;
   const size = o.deferredPositionPct === undefined

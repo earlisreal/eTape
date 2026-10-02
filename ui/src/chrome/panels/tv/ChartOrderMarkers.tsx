@@ -21,11 +21,12 @@ interface Props {
   chooserOpenRef: MutableRefObject<boolean>;
 }
 
-interface Group { key: string; price: number; kind: "limit" | "stop-limit"; markers: ChartOrderMarker[]; pending?: Pending }
+interface Group { key: string; price: number; kind: ChartOrderMarker["kind"]; markers: ChartOrderMarker[]; pending?: Pending }
 
 function priceText(price: number): string { return price < 1 ? price.toFixed(4) : price.toFixed(2); }
 function orderTitle(marker: ChartOrderMarker): string {
-  return `${marker.order.side} ${marker.order.leavesQty.toLocaleString("en-US")} ${marker.kind === "limit" ? "LIMIT" : "STOP-LIMIT"}`;
+  const type = marker.order.type === "LIMIT_IF_TOUCHED" ? "LIT" : marker.kind === "limit" ? "LIMIT" : "STOP-LIMIT";
+  return `${marker.order.side} ${marker.order.leavesQty.toLocaleString("en-US")} ${type}`;
 }
 
 export function ChartOrderMarkers(props: Props): JSX.Element {
@@ -124,7 +125,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
   };
 
   const sendReplace = async (marker: ChartOrderMarker, price: number) => {
-    const stop = marker.kind === "stop-limit";
+    const stop = marker.kind !== "limit";
     const args: ReplaceOrderArgs = {
       venue: marker.order.venue, orderId: marker.order.id,
       qty: 0, // price-only chart edits preserve the broker-authoritative total quantity in Core.
@@ -265,7 +266,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
           aria-label={group.markers.length > 1 ? `${group.markers.length} orders at ${priceText(group.price)}; choose an order` : `${orderTitle(first)} at ${priceText(group.price)}; drag or use arrow keys to adjust`}
           style={{ position:"absolute", left:8, top:stackIndex * 2 - 10, height:20, padding:"0 7px", border:`1px solid ${warningColor}`,
             borderRadius:3, background:"rgba(12,16,23,.94)", color:warningColor, font:"600 10px ui-monospace,monospace", cursor:first.draggable ? "ns-resize" : "pointer", pointerEvents:"auto", whiteSpace:"nowrap" }}>
-          {group.markers.length > 1 ? `${group.markers.length} ${group.kind === "limit" ? "LIMITS" : "STOPS"}` : orderTitle(first)}
+          {group.markers.length > 1 ? `${group.markers.length} ${group.kind === "limit" ? "LIMITS" : group.kind === "limit-if-touched" ? "LITS" : "STOPS"}` : orderTitle(first)}
           {phaseWarning && <span style={{ marginLeft:5 }}>{first.phase}</span>}
           {action && <span style={{ marginLeft:5 }}>{action.outcome === "unknown" ? "UNKNOWN" : action.kind === "cancel" ? "CANCEL REQUESTED" : "MODIFY REQUESTED"}</span>}
         </button>

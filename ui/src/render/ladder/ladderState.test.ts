@@ -180,6 +180,12 @@ describe("workingOrderMarks (typed Order, Plan 5)", () => {
     expect(workingOrderMarks([ord({ type: "STOP", stopPrice: 3.0, limitPrice: 0, leavesQty: 50 })], "US.AAPL"))
       .toEqual([{ price: 3.0, side: "buy", qty: 50 }]);
   });
+  it("projects held LIT trigger before activation and limit after", () => {
+    const waiting = ord({ type: "LIMIT_IF_TOUCHED", stopPrice: 3.4, limitPrice: 3.6, held: { phase: "WAITING", deadlineMs: 2 } });
+    const workingChild = { ...waiting, held: { phase: "WORKING" as const, deadlineMs: 2, childClientId: "child" } };
+    expect(workingOrderMarks([waiting], "US.AAPL")).toEqual([{ price: 3.4, side: "buy", qty: 100 }]);
+    expect(workingOrderMarks([workingChild], "US.AAPL")).toEqual([{ price: 3.6, side: "buy", qty: 100 }]);
+  });
 });
 
 describe("flashAlpha", () => {

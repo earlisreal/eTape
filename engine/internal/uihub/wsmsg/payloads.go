@@ -225,17 +225,18 @@ type GlobalLimitsView struct {
 }
 
 type VenueStatus struct {
-	Venue                     string         `json:"venue"`
-	Broker                    Broker         `json:"broker"`
-	Env                       string         `json:"env,omitempty"`
-	Connected                 bool           `json:"connected"`
-	ReconcilePending          bool           `json:"reconcilePending"`
-	PositionDataReady         bool           `json:"positionDataReady"`
-	FlattenPending            bool           `json:"flattenPending"`
-	Note                      string         `json:"note"`
-	LastReconcileMs           *int64         `json:"lastReconcileMs" tstype:"number | null,required"`
-	Gate                      GateLimitsView `json:"gate"`
-	HeldStopLimitAcknowledged bool           `json:"heldStopLimitAcknowledged,omitempty"`
+	Venue                          string         `json:"venue"`
+	Broker                         Broker         `json:"broker"`
+	Env                            string         `json:"env,omitempty"`
+	Connected                      bool           `json:"connected"`
+	ReconcilePending               bool           `json:"reconcilePending"`
+	PositionDataReady              bool           `json:"positionDataReady"`
+	FlattenPending                 bool           `json:"flattenPending"`
+	Note                           string         `json:"note"`
+	LastReconcileMs                *int64         `json:"lastReconcileMs" tstype:"number | null,required"`
+	Gate                           GateLimitsView `json:"gate"`
+	HeldStopLimitAcknowledged      bool           `json:"heldStopLimitAcknowledged,omitempty"`
+	HeldLimitIfTouchedAcknowledged bool           `json:"heldLimitIfTouchedAcknowledged,omitempty"`
 }
 
 type ExecStatus struct {
@@ -508,6 +509,7 @@ type SubmitOrderArgs struct {
 	LimitPrice          float64      `json:"limitPrice"`
 	StopPrice           float64      `json:"stopPrice"`
 	RouteExpected       string       `json:"routeExpected,omitempty"`
+	RouteDeadlineMs     int64        `json:"routeDeadlineMs,omitempty"`
 }
 
 type CancelOrderArgs struct {
@@ -516,6 +518,10 @@ type CancelOrderArgs struct {
 }
 
 type AcknowledgeHeldStopLimitArgs struct {
+	Venue string `json:"venue"`
+}
+
+type AcknowledgeHeldLimitIfTouchedArgs struct {
 	Venue string `json:"venue"`
 }
 
@@ -553,6 +559,7 @@ type QueryFillsArgs struct {
 type QueryStopLimitRouteArgs struct {
 	TIF                    TIF          `json:"tif"`
 	Session                OrderSession `json:"session"`
+	Type                   OrderType    `json:"type,omitempty"`
 	Symbol                 string       `json:"symbol,omitempty"`
 	DeferredPositionSizing bool         `json:"deferredPositionSizing,omitempty"`
 }
@@ -566,6 +573,7 @@ type StopLimitRoutePreview struct {
 	LastEligiblePrice       float64      `json:"lastEligiblePrice,omitempty"`
 	LastEligibleTsMs        int64        `json:"lastEligibleTsMs,omitempty"`
 	Reason                  string       `json:"reason,omitempty"`
+	OrderType               OrderType    `json:"orderType,omitempty"`
 }
 
 type QueryVenueInstrumentEligibilityArgs struct {

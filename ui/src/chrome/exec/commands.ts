@@ -7,6 +7,7 @@ import type { ExecStore } from "../../data/ExecStore";
 import type { ToastApi } from "../Toast";
 import type { SoundApi } from "../../sound/SoundEngine";
 import { bareSymbol } from "./orderStatus";
+import { chartConditionalOrderWillTrigger } from "./resolveChartConditionalOrder";
 
 export interface CommandAdapter {
   sendCommand(name: string, args: unknown): Promise<AckMsg>;
@@ -41,7 +42,7 @@ export class OrderCommands {
   async submit(args: SubmitOrderArgs, flash: string): Promise<void> {
     let request = args;
     let custody = "";
-    if (args.type === "STOP_LIMIT") {
+    if (args.type === "STOP_LIMIT" || args.type === "LIMIT_IF_TOUCHED") {
       if (!this.d.cmd.sendQuery) {
         this.d.toast.push({ level: "danger", text: "Stop-limit route preview unavailable — order not sent." });
         return;
@@ -50,6 +51,7 @@ export class OrderCommands {
       try {
         route = await this.d.cmd.sendQuery("QueryStopLimitRoute", {
           tif: args.tif, session: args.session, symbol: args.symbol, deferredPositionSizing: args.deferredPositionPct !== undefined,
+          ...(args.type === "LIMIT_IF_TOUCHED" ? { type: args.type } : {}),
         }) as StopLimitRoutePreview;
       } catch {
         this.d.toast.push({ level: "danger", text: "Stop-limit route preview unavailable — order not sent." });
@@ -63,9 +65,12 @@ export class OrderCommands {
         this.d.toast.push({ level: "warn", text: "Stop-limit custody changed — review the order and retry." });
         return;
       }
-      request = { ...args, routeExpected: route.route };
+      request = { ...args, routeExpected: route.route, ...(args.type === "LIMIT_IF_TOUCHED" ? { routeDeadlineMs: route.deadlineMs } : {}) };
+      if (args.type === "LIMIT_IF_TOUCHED" && chartConditionalOrderWillTrigger(args.side, args.stopPrice, route, args.type)) {
+        this.d.toast.push({ level: "warn", text: `Will trigger now — trusted Last-Eligible ${route.lastEligiblePrice} satisfies ${args.side} trigger ${args.stopPrice}.` });
+      }
       custody = route.route === "ENGINE_HELD"
-        ? "Held by eTape — no broker protection; venue LIMIT only after trigger"
+        ? args.type === "LIMIT_IF_TOUCHED" ? "LIT held by eTape — no broker order before trigger" : "Held by eTape — no broker protection; venue LIMIT only after trigger"
         : "broker-native stop-limit";
     }
     const ack = await this.d.cmd.sendCommand("SubmitOrder", request);
