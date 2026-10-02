@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"regexp"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -646,7 +647,13 @@ func (a *Adapter) handleConn(up bool) {
 
 // handleOrder is the wsClient onOrder callback: normalize and emit.
 func (a *Adapter) handleOrder(o tzOrder) {
-	for _, e := range a.normalizeOrder(a.venue, o) {
+	events := a.normalizeOrder(a.venue, o)
+	order := externalOrder(o)
+	order.Venue = a.venue
+	if order.ID != "" {
+		events = append(events, exec.BrokerExternalOrder{Venue: a.venue, Order: order, Working: order.Working()})
+	}
+	for _, e := range events {
 		a.emit(e)
 	}
 }
@@ -711,6 +718,7 @@ func (a *Adapter) reconcile() {
 
 	currentLegs := a.currentLegRows(orders)
 	var gapEvents []exec.BrokerEvent
+	var openOrders []exec.Order
 	for _, o := range orders {
 		domainOID := a.domainID(o.ID)
 		if cur, ok := currentLegs[domainOID]; !ok || cur.ID != o.ID {
@@ -721,6 +729,11 @@ func (a *Adapter) reconcile() {
 			// diffing it here would synthesize a spurious domain event for
 			// an order that is actually still fine under its current leg.
 			continue
+		}
+		if o.Working() {
+			current := o
+			current.ID, current.Venue = domainOID, a.venue
+			openOrders = append(openOrders, current)
 		}
 		prevStatus, seen := a.lastKnownStatus[domainOID]
 		a.lastKnownStatus[domainOID] = o.Status
@@ -743,14 +756,15 @@ func (a *Adapter) reconcile() {
 	}
 	a.mu.Unlock()
 
-	a.emit(exec.BrokerAccount{Account: acct})
-	a.emit(exec.BrokerPositions{V: a.venue, Positions: positions})
-	for _, e := range gapEvents {
-		a.emit(e)
-	}
 	if reconnect {
 		a.emit(exec.StreamGap{V: a.venue, Ts: a.now()})
 	}
+	a.emit(exec.BrokerAccount{Account: acct})
+	for _, e := range gapEvents {
+		a.emit(e)
+	}
+	a.emit(exec.BrokerPositions{V: a.venue, Positions: positions})
+	a.emit(exec.BrokerOpenOrders{V: a.venue, Orders: openOrders})
 }
 
 // synthesizeTransitionLocked builds the domain event(s) implied by an order
@@ -765,13 +779,16 @@ func (a *Adapter) synthesizeTransitionLocked(domainOID string, o exec.Order) []e
 	if o.ExecutedQty > 0 {
 		prevExec := a.seenExecuted[o.ID]
 		if o.ExecutedQty > prevExec {
-			out = append(out, exec.OrderFilled{
-				F: exec.Fill{
-					Venue: a.venue, OrderID: domainOID, Symbol: o.Symbol, Side: o.Side,
-					Qty: o.ExecutedQty - prevExec, Price: o.AvgFillPrice, TsMs: ts,
-				},
-				CumQty: o.ExecutedQty, LeavesQty: o.LeavesQty, AvgPrice: o.AvgFillPrice,
-			})
+			qty := o.ExecutedQty - prevExec
+			execID := o.ID + ":" + strconv.FormatFloat(o.ExecutedQty, 'g', -1, 64)
+			if strings.HasPrefix(domainOID, "ET") {
+				out = append(out, exec.OrderFilled{
+					F:              exec.Fill{Venue: a.venue, OrderID: domainOID, Symbol: o.Symbol, Side: o.Side, Qty: qty, Price: o.AvgFillPrice, TsMs: ts},
+					PositionExecID: execID, CumQty: o.ExecutedQty, LeavesQty: o.LeavesQty, AvgPrice: o.AvgFillPrice,
+				})
+			} else {
+				out = append(out, exec.BrokerPositionEffect{Venue: a.venue, Symbol: o.Symbol, Side: o.Side, Qty: qty, Price: o.AvgFillPrice, ExecID: execID})
+			}
 		}
 	}
 	switch o.Status {

@@ -37,6 +37,40 @@ func TestResolveHeldStopLimitRoute(t *testing.T) {
 	}
 }
 
+func TestResolveDeferredStopSellRoute(t *testing.T) {
+	pre := time.Date(2026, 9, 30, 8, 0, 0, 0, session.Loc())
+	rth := time.Date(2026, 9, 30, 10, 0, 0, 0, session.Loc())
+	post := time.Date(2026, 9, 30, 17, 0, 0, 0, session.Loc())
+	closed := time.Date(2026, 9, 30, 22, 0, 0, 0, session.Loc())
+	tests := []struct {
+		name      string
+		now       time.Time
+		tif       TIF
+		session   OrderSession
+		want      HeldRoute
+		effective OrderSession
+		deadline  time.Time
+		blocked   string
+	}{
+		{"premarket AUTO", pre, TIFDay, SessionAuto, RouteEngineHeld, SessionExtended, session.Schedule(pre).Open, ""},
+		{"RTH AUTO", rth, TIFDay, SessionAuto, RouteEngineHeld, SessionRTH, session.Schedule(rth).Close, ""},
+		{"RTH EXTENDED", rth, TIFDay, SessionExtended, RouteEngineHeld, SessionExtended, session.Schedule(rth).Close, ""},
+		{"postmarket EXTENDED", post, TIFDay, SessionExtended, RouteEngineHeld, SessionExtended, session.Schedule(post).DataClose, ""},
+		{"pre-market explicit RTH", pre, TIFDay, SessionRTH, RouteUnsupported, SessionRTH, time.Time{}, "deferred RTH orders can only be placed during RTH"},
+		{"postmarket explicit RTH", post, TIFDay, SessionRTH, RouteUnsupported, SessionRTH, time.Time{}, "deferred RTH orders can only be placed during RTH"},
+		{"GTC", rth, TIFGTC, SessionRTH, RouteUnsupported, SessionRTH, time.Time{}, "deferred position sizing requires a DAY order"},
+		{"closed", closed, TIFDay, SessionAuto, RouteUnsupported, SessionAuto, time.Time{}, "deferred stop-sell is unavailable outside market sessions"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, effective, deadline, blocked := ResolveDeferredStopSellRoute(tt.now, tt.tif, tt.session)
+			if got != tt.want || effective != tt.effective || !deadline.Equal(tt.deadline) || blocked != tt.blocked {
+				t.Fatalf("route = %s/%s/%v/%q, want %s/%s/%v/%q", got, effective, deadline, blocked, tt.want, tt.effective, tt.deadline, tt.blocked)
+			}
+		})
+	}
+}
+
 func TestStopTriggerCrossing(t *testing.T) {
 	for _, tt := range []struct {
 		side        Side

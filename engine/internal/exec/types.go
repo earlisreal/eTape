@@ -211,12 +211,14 @@ type HeldOrder struct {
 	PausedReason    string    `json:"pausedReason,omitempty"`
 	CancelRequested bool      `json:"cancelRequested,omitempty"`
 	CancelSent      bool      `json:"cancelSent,omitempty"`
+	ResolvedQty     float64   `json:"resolvedQty,omitempty"`
 }
 
 type OrderActionKind string
 type OrderActionPhase string
 
 const (
+	ActionSubmit    OrderActionKind  = "SUBMIT"
 	ActionCancel    OrderActionKind  = "CANCEL"
 	ActionReplace   OrderActionKind  = "REPLACE"
 	ActionRequested OrderActionPhase = "REQUESTED"
@@ -225,7 +227,7 @@ const (
 	ActionUnknown   OrderActionPhase = "UNKNOWN"
 )
 
-// OrderAction keeps venue-side cancel/replace uncertainty on the durable order row.
+// OrderAction keeps venue-side submit/cancel/replace uncertainty on the durable order row.
 type OrderAction struct {
 	Kind                OrderActionKind  `json:"kind"`
 	Phase               OrderActionPhase `json:"phase"`
@@ -240,26 +242,27 @@ type OrderAction struct {
 // Order is one order's full lifecycle state. Working = Status in
 // {Submitted, Accepted, PartiallyFilled}.
 type Order struct {
-	Venue        VenueID
-	ID           string
-	Symbol       string
-	Side         Side
-	Type         OrderType
-	TIF          TIF
-	Session      OrderSession
-	Qty          float64
-	LimitPrice   float64
-	StopPrice    float64
-	Status       OrderStatus
-	ExecutedQty  float64
-	LeavesQty    float64
-	AvgFillPrice float64
-	RejectReason string
-	ReplacesID   string
-	CreatedMs    int64
-	UpdatedMs    int64
-	Held         *HeldOrder
-	Action       *OrderAction
+	Venue               VenueID
+	ID                  string
+	Symbol              string
+	Side                Side
+	Type                OrderType
+	TIF                 TIF
+	Session             OrderSession
+	Qty                 float64
+	DeferredPositionPct float64
+	LimitPrice          float64
+	StopPrice           float64
+	Status              OrderStatus
+	ExecutedQty         float64
+	LeavesQty           float64
+	AvgFillPrice        float64
+	RejectReason        string
+	ReplacesID          string
+	CreatedMs           int64
+	UpdatedMs           int64
+	Held                *HeldOrder
+	Action              *OrderAction
 }
 
 // Working reports whether the order can still fill or be canceled.

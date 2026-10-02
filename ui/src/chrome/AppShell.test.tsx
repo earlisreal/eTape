@@ -125,7 +125,7 @@ describe("AppShell execution subscription", () => {
     layout: null,
   };
   const venue = (over: Partial<VenueStatus> = {}): VenueStatus => ({
-    venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: false,
+    venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: false, positionDataReady: true, flattenPending: false,
     note: "", lastReconcileMs: null,
     gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 },
     ...over,
@@ -566,7 +566,7 @@ describe("AppShell venue-setup prompt (Task 3: venues/creds redesign)", () => {
 
   const emptyGate = { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 };
   const venueStatus = (id: string, broker: VenueStatus["broker"] = "alpaca"): VenueStatus => ({
-    venue: id, broker, connected: true, reconcilePending: false,
+    venue: id, broker, connected: true, reconcilePending: false, positionDataReady: true, flattenPending: false,
     note: "", lastReconcileMs: null, gate: emptyGate,
   });
   const status = (venues: VenueStatus[]): ExecStatus => ({
@@ -776,7 +776,7 @@ describe("AppShell Alpaca-1m-history hint banner", () => {
 
   const emptyGate = { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 };
   const venueStatus = (id: string, broker: VenueStatus["broker"]): VenueStatus => ({
-    venue: id, broker, connected: true, reconcilePending: false,
+    venue: id, broker, connected: true, reconcilePending: false, positionDataReady: true, flattenPending: false,
     note: "", lastReconcileMs: null, gate: emptyGate,
   });
   const status = (venues: VenueStatus[]): ExecStatus => ({

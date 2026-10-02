@@ -879,8 +879,12 @@ func restOrderSideDomain(wireSide string) exec.Side {
 // Adapter stamps it, mirroring tzRestOrder.domain() in the tradezero
 // package.
 func (o auOrder) domain() exec.Order {
+	id := o.ClientOrderID
+	if id == "" && o.ID != "" {
+		id = "alpaca:" + o.ID
+	}
 	return exec.Order{
-		ID:           o.ClientOrderID,
+		ID:           id,
 		Symbol:       domainSymbol(o.Symbol),
 		Side:         restOrderSideDomain(o.Side),
 		Type:         orderTypeDomain(o.OrderType),

@@ -34,3 +34,19 @@ outcomes retain the requested value and block another replace until
 reconciliation. Chart price changes update price only; allowable remaining
 quantity stays governed by Core and the adapter. `Cancel Last Order` treats a
 held parent and its child as one intention in the selected venue+symbol scope.
+
+Position-% SELL STOP_LIMIT Action Templates from chart gestures, hotkeys and
+Deck Buttons use a local DAY engine-held parent in RTH and pre/postmarket. The
+parent holds no broker quantity until an eligible trigger; Core resolves the
+configured percentage against the current long position in its ready venue
+cache, then freezes that share count for the child LIMIT. A ready flat position
+rejects the parent permanently; unavailable position or open-order data pauses
+it until a fresh broker baseline and manual Resume. Every SELL submission and
+held SELL activation reserves shares against local and external working exits.
+Ambiguous SELL submits remain reserved until an ACK, lifecycle event or broker
+snapshot resolves them. Account Flatten pauses held SELL parents and blocks new
+SELLs until a ready snapshot confirms the venue flat. Explicit RTH is accepted
+only during RTH; supported parents expire at regular open, scheduled regular
+close (including early close), or DataClose for premarket, RTH, and postmarket
+custody respectively. Deferred sizing is not available for GTC/overnight routes;
+the manual ticket retains immediate sizing.

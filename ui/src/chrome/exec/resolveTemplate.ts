@@ -23,11 +23,17 @@ export function resolvePlaceTemplate(t: PlaceOrderTemplate, ctx: ResolveContext)
     ? resolveLimitCushionPrice(t.side, sourcePrice, t.limitCushion ?? 0, t.limitCushionUnit)
     : sourcePrice;
   const sizingPrice = t.type === "STOP_LIMIT" ? limitPrice : sourcePrice;
-  const { qty, reason } = resolveShares(t.sizing, {
-    price: sizingPrice, buyingPower: ctx.buyingPower, availableCash: ctx.availableCash, positionQty: ctx.positionQty,
-  });
+  const deferredPositionPct = t.side === "SELL" && t.type === "STOP_LIMIT" && t.sizing.mode === "PositionFraction"
+    ? t.sizing.pct ?? (t.sizing.fraction === "half" ? 50 : 100)
+    : undefined;
+  const { qty, reason } = deferredPositionPct === undefined
+    ? resolveShares(t.sizing, {
+      price: sizingPrice, buyingPower: ctx.buyingPower, availableCash: ctx.availableCash, positionQty: ctx.positionQty,
+    })
+    : { qty: 0 };
   const draft: DraftOrder = {
     symbol: ctx.symbol, side: t.side, type: t.type, tif: t.tif, session: t.session ?? "AUTO", qty,
+    ...(deferredPositionPct !== undefined ? { deferredPositionPct } : {}),
     limitPrice: t.type === "MARKET" ? 0 : limitPrice,
     stopPrice: t.type === "STOP" || t.type === "STOP_LIMIT" ? sourcePrice : 0,
   };
@@ -36,10 +42,14 @@ export function resolvePlaceTemplate(t: PlaceOrderTemplate, ctx: ResolveContext)
   const args: SubmitOrderArgs = {
     venue: ctx.venue, symbol: ctx.symbol, side: o.side, type: o.type, tif: o.tif, session: o.session,
     qty: o.qty, limitPrice: o.limitPrice, stopPrice: o.stopPrice,
+    ...(o.deferredPositionPct !== undefined ? { deferredPositionPct: o.deferredPositionPct } : {}),
   };
   const tail = o.type === "MARKET" ? "MKT" : o.type === "STOP_LIMIT"
     ? `${displayPrice(o.stopPrice)}→${displayPrice(o.limitPrice)} ${abbrevType(o.type)}`
     : `${o.limitPrice.toFixed(2)} ${abbrevType(o.type)}`;
-  const flash = `${sideLabel(o.side)} ${o.qty.toLocaleString("en-US")} ${bareSymbol(ctx.symbol)} @ ${tail}`;
+  const size = o.deferredPositionPct === undefined
+    ? o.qty.toLocaleString("en-US")
+    : `${o.deferredPositionPct}% position`;
+  const flash = `${sideLabel(o.side)} ${size} ${bareSymbol(ctx.symbol)} @ ${tail}`;
   return { args, flash, preCheck: pc };
 }

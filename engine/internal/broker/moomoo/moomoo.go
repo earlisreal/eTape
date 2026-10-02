@@ -582,7 +582,7 @@ func (a *Adapter) onConnUp(ctx context.Context) {
 // trip at (re)connect time -- an accepted, rare-path cost, chosen over
 // reopening Task 3's already-approved trdClient.snapshot signature.
 func (a *Adapter) reconcile(ctx context.Context) {
-	acct, positions, _, err := a.Snapshot(ctx)
+	acct, positions, orders, err := a.Snapshot(ctx)
 	if err != nil {
 		slog.Warn("moomoo: reconcile: snapshot failed", "err", err)
 		return
@@ -607,8 +607,10 @@ func (a *Adapter) reconcile(ctx context.Context) {
 	}
 	a.mu.Unlock()
 
+	if reconnect {
+		a.emit(exec.StreamGap{V: a.venue, Ts: a.now()})
+	}
 	a.emit(exec.BrokerAccount{Account: acct})
-	a.emit(exec.BrokerPositions{V: a.venue, Positions: positions})
 
 	for _, o := range rawOrders {
 		for _, e := range a.push.reconcileOrder(a.venue, o) {
@@ -616,7 +618,6 @@ func (a *Adapter) reconcile(ctx context.Context) {
 		}
 	}
 
-	if reconnect {
-		a.emit(exec.StreamGap{V: a.venue, Ts: a.now()})
-	}
+	a.emit(exec.BrokerPositions{V: a.venue, Positions: positions})
+	a.emit(exec.BrokerOpenOrders{V: a.venue, Orders: orders})
 }

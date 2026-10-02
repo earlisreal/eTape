@@ -40,22 +40,23 @@ func fills(evs []exec.BrokerEvent) []exec.OrderFilled {
 	return out
 }
 
-func positions(evs []exec.BrokerEvent) []exec.BrokerPositions {
-	var out []exec.BrokerPositions
+func positions(evs []exec.BrokerEvent) []exec.Position {
+	var out []exec.Position
 	for _, e := range evs {
-		if p, ok := e.(exec.BrokerPositions); ok {
-			out = append(out, p)
+		switch p := e.(type) {
+		case exec.BrokerPosition:
+			out = append(out, p.Position)
+		case exec.BrokerPositions:
+			out = append(out, p.Positions...)
 		}
 	}
 	return out
 }
 
 func hasPosition(evs []exec.BrokerEvent, symbol string, qty float64) bool {
-	for _, bp := range positions(evs) {
-		for _, p := range bp.Positions {
-			if p.Symbol == symbol && p.Qty == qty {
-				return true
-			}
+	for _, p := range positions(evs) {
+		if p.Symbol == symbol && p.Qty == qty {
+			return true
 		}
 	}
 	return false
@@ -206,11 +207,11 @@ func TestNormalizeUpdate_FillBasis_SameDirectionAdd(t *testing.T) {
 	// First fill: opens position.
 	tu := loadUpdate(t, "fill.json") // buy 40, position_qty=40
 	evs := a.normalizeUpdate("alpaca", tu)
-	p := positions(evs)[0]
-	if len(p.Positions) != 1 {
-		t.Fatalf("want 1 position, got %d", len(p.Positions))
+	p := positions(evs)
+	if len(p) != 1 {
+		t.Fatalf("want 1 position, got %d", len(p))
 	}
-	pos := p.Positions[0]
+	pos := p[0]
 	if pos.Qty != 40 {
 		t.Fatalf("qty = %v, want 40", pos.Qty)
 	}
@@ -221,8 +222,8 @@ func TestNormalizeUpdate_FillBasis_SameDirectionAdd(t *testing.T) {
 	// Second fill: same direction add.
 	tu2 := loadUpdate(t, "partial_fill.json") // buy 20, position_qty=60
 	evs2 := a.normalizeUpdate("alpaca", tu2)
-	p2 := positions(evs2)[0]
-	pos2 := p2.Positions[0]
+	p2 := positions(evs2)
+	pos2 := p2[0]
 	if pos2.Qty != 60 {
 		t.Fatalf("qty = %v, want 60", pos2.Qty)
 	}
@@ -255,8 +256,8 @@ func TestNormalizeUpdate_FillBasis_PartialExit(t *testing.T) {
 		},
 	}
 	evs := a.normalizeUpdate("alpaca", tu)
-	p := positions(evs)[0]
-	pos := p.Positions[0]
+	p := positions(evs)
+	pos := p[0]
 	if pos.Qty != 40 {
 		t.Fatalf("qty = %v, want 40", pos.Qty)
 	}
@@ -288,8 +289,8 @@ func TestNormalizeUpdate_FillBasis_DirectionReversal(t *testing.T) {
 		},
 	}
 	evs := a.normalizeUpdate("alpaca", tu)
-	p := positions(evs)[0]
-	pos := p.Positions[0]
+	p := positions(evs)
+	pos := p[0]
 	if pos.Qty != 20 {
 		t.Fatalf("qty = %v, want 20", pos.Qty)
 	}
@@ -321,8 +322,8 @@ func TestNormalizeUpdate_FillBasis_FlatDeletesEntry(t *testing.T) {
 		},
 	}
 	evs := a.normalizeUpdate("alpaca", tu)
-	p := positions(evs)[0]
-	pos := p.Positions[0]
+	p := positions(evs)
+	pos := p[0]
 	if pos.Qty != 0 {
 		t.Fatalf("qty = %v, want 0", pos.Qty)
 	}

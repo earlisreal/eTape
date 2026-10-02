@@ -119,6 +119,7 @@ func (a *Adapter) normalizeUpdate(venue exec.VenueID, tu tradeUpdate) []exec.Bro
 		}
 		side, tracked := a.sideByID[oid]
 		a.mu.Unlock()
+		localOrder := tracked || strings.HasPrefix(oid, "ET")
 		if !tracked {
 			// positionQtyBefore = position_qty (after this execution) undone
 			// by this execution's signed delta: a buy added +qty, a sell
@@ -166,6 +167,10 @@ func (a *Adapter) normalizeUpdate(venue exec.VenueID, tu tradeUpdate) []exec.Bro
 			a.posBasis[domainSym] = posBasisEntry{qty: positionQtyAfter, avgAvg: avgPrice}
 		}
 		a.posMu.Unlock()
+		position := exec.Position{Venue: venue, Symbol: domainSym, Qty: positionQtyAfter, AvgPrice: avgPrice}
+		if !localOrder {
+			return []exec.BrokerEvent{exec.BrokerPosition{Position: position}}
+		}
 
 		return []exec.BrokerEvent{
 			exec.OrderFilled{
@@ -173,16 +178,12 @@ func (a *Adapter) normalizeUpdate(venue exec.VenueID, tu tradeUpdate) []exec.Bro
 					Venue: venue, OrderID: oid, Symbol: domainSym,
 					Side: side, Qty: float64(tu.Qty), Price: fillPrice, TsMs: ts,
 				},
-				CumQty:    float64(tu.Order.FilledQty),
-				LeavesQty: float64(tu.Order.Qty) - float64(tu.Order.FilledQty),
-				AvgPrice:  float64(tu.Order.FilledAvgPrice),
+				PositionExecID: tu.ExecutionID,
+				CumQty:         float64(tu.Order.FilledQty),
+				LeavesQty:      float64(tu.Order.Qty) - float64(tu.Order.FilledQty),
+				AvgPrice:       float64(tu.Order.FilledAvgPrice),
 			},
-			exec.BrokerPositions{
-				V: venue,
-				Positions: []exec.Position{
-					{Venue: venue, Symbol: domainSym, Qty: positionQtyAfter, AvgPrice: avgPrice},
-				},
-			},
+			exec.BrokerPosition{Position: position},
 		}
 
 	case "canceled":

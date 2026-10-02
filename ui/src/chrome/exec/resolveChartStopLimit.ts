@@ -23,8 +23,8 @@ export function resolveChartStopLimit(
   return { args: resolved.args, flash: resolved.flash, errors: resolved.preCheck.errors };
 }
 
-export function chartStopLimitRouteKey(tif: TIF, session: OrderSession, symbol = ""): string {
-	return `${tif}:${session}:${symbol}`;
+export function chartStopLimitRouteKey(tif: TIF, session: OrderSession, symbol = "", deferred = false): string {
+	return `${tif}:${session}:${symbol}:${deferred ? "deferred" : "fixed"}`;
 }
 
 export function chartStopLimitWillTrigger(side: Side, stopPrice: number, route?: StopLimitRoutePreview): boolean {
@@ -35,5 +35,5 @@ export function chartStopLimitWillTrigger(side: Side, stopPrice: number, route?:
 }
 
 export function stopLimitRouteLabel(route: StopLimitRoutePreview): string {
-  return route.route === "ENGINE_HELD" ? "LOCAL · eTape-held" : "NATIVE · venue stop";
+	return route.route === "ENGINE_HELD" ? "LOCAL · eTape-held" : route.route === "UNSUPPORTED" ? "UNSUPPORTED" : "NATIVE · venue stop";
 }

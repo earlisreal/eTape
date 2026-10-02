@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { makeStores } from "../../../data/registry";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
-import type { ExecStatus } from "../../../wire/contract";
+import type { ExecStatus, StopLimitRoutePreview } from "../../../wire/contract";
 import { LinkGroups } from "../../linkGroups";
 import type { OrderConfig } from "../../exec/actionTemplate";
 import { ChartStopLimitEntry } from "./ChartStopLimitEntry";
@@ -13,13 +13,14 @@ const config: OrderConfig = {
   templates:[{kind:"place", id:"stop", label:"Stop", side:"BUY", type:"STOP_LIMIT", tif:"DAY", session:"EXTENDED",
     priceSource:"Last", priceOffset:0, limitCushion:0, limitCushionUnit:"$", chartBinding:"Shift", sizing:{mode:"Shares", shares:1}}],
 };
-const route = {route:"ENGINE_HELD", effectiveSession:"EXTENDED", deadlineMs:1_800_000_000_000, phase:"PRE",
-  hasTrustedEligiblePrint:true, lastEligiblePrice:101} as const;
+const route: StopLimitRoutePreview = {route:"ENGINE_HELD", effectiveSession:"EXTENDED", deadlineMs:1_800_000_000_000, phase:"PRE",
+  hasTrustedEligiblePrint:true, lastEligiblePrice:101};
 
-function mount(env:"paper"|"live" = "paper") {
+function mount(env:"paper"|"live" = "paper", orderConfig: OrderConfig = config,
+  routePreview: typeof route = route, positionDataReady = true) {
   const stores = makeStores();
   const status: ExecStatus = {masterArmed:true, global:{maxDayLoss:0,maxSymbolPositionValue:0,maxSymbolPositionShares:0}, venues:[{
-    venue:"sim", broker:env === "paper" ? "sim" : "alpaca", env, connected:true, reconcilePending:false, note:"", lastReconcileMs:null,
+    venue:"sim", broker:env === "paper" ? "sim" : "alpaca", env, connected:true, reconcilePending:false, positionDataReady, flattenPending:false, note:"", lastReconcileMs:null,
     gate:{maxOrderValue:10000,maxPositionValue:10000,maxPositionShares:100,maxOpenOrders:10}, heldStopLimitAcknowledged:false,
   }]};
   stores.exec.apply({kind:"snapshot",topic:"exec.status",payload:status});
@@ -34,9 +35,9 @@ function mount(env:"paper"|"live" = "paper") {
     priceToCoordinate:(price:number) => (120-price)*10} as ChartApiFacade};
   const chooserOpenRef = {current:false};
   const sendCommand = vi.fn(async (name:string) => ({kind:"ack" as const,corrId:"c1",status:"accepted" as const, ...(name === "SubmitOrder" ? {orderId:"ET1"} : {})}));
-  const sendQuery = vi.fn(async () => route);
+  const sendQuery = vi.fn(async () => routePreview);
   const utils = render(<ChartStopLimitEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups}
-    group="green" symbol="US.AAPL" config={config} configLoaded activeTool="select" chooserOpenRef={chooserOpenRef}
+    group="green" symbol="US.AAPL" config={orderConfig} configLoaded activeTool="select" chooserOpenRef={chooserOpenRef}
     sendCommand={sendCommand} sendQuery={sendQuery} />, {container:host});
   return { ...utils, host, stores, sendCommand, sendQuery };
 }
@@ -60,12 +61,40 @@ describe("ChartStopLimitEntry", () => {
     focusChart();
     const {host,sendCommand,sendQuery} = mount();
     moveToChart(host);
-    await waitFor(() => expect(sendQuery).toHaveBeenCalledWith("QueryStopLimitRoute", {tif:"DAY",session:"EXTENDED",symbol:"US.AAPL"}));
+    await waitFor(() => expect(sendQuery).toHaveBeenCalledWith("QueryStopLimitRoute", {tif:"DAY",session:"EXTENDED",symbol:"US.AAPL",deferredPositionSizing:false}));
     await waitFor(() => expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("WILL TRIGGER NOW"));
     await placeClick(host);
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitOrder", expect.objectContaining({
       venue:"sim",symbol:"US.AAPL",type:"STOP_LIMIT",stopPrice:100,limitPrice:100,qty:1,routeExpected:"ENGINE_HELD",
     })));
+  });
+
+  it("previews and submits a flat percentage stop-sell with immediate-hit feedback", async () => {
+    focusChart();
+    const template = { ...config.templates[0], side:"SELL" as const, sizing:{mode:"PositionFraction" as const,pct:100} };
+    const deferredConfig = { ...config, templates:[template] };
+    const {host,sendCommand,sendQuery} = mount("paper", deferredConfig, { ...route, lastEligiblePrice:99 });
+    moveToChart(host);
+    await waitFor(() => expect(sendQuery).toHaveBeenCalledWith("QueryStopLimitRoute", {
+      tif:"DAY",session:"EXTENDED",symbol:"US.AAPL",deferredPositionSizing:true,
+    }));
+    const preview = screen.getByTestId("chart-order-entry-preview");
+    await waitFor(() => expect(preview.textContent).toContain("WILL TRIGGER NOW — NO OPEN POSITION"));
+    await placeClick(host);
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitOrder", expect.objectContaining({
+      venue:"sim",symbol:"US.AAPL",side:"SELL",type:"STOP_LIMIT",qty:0,deferredPositionPct:100,routeExpected:"ENGINE_HELD",
+    })));
+  });
+
+  it("does not label an untrusted flat cache as confirmed no-position", async () => {
+    focusChart();
+    const template = { ...config.templates[0], side:"SELL" as const, sizing:{mode:"PositionFraction" as const,pct:100} };
+    const deferredConfig = { ...config, templates:[template] };
+    const {host} = mount("paper", deferredConfig, { ...route, lastEligiblePrice:99 }, false);
+    moveToChart(host);
+    const preview = screen.getByTestId("chart-order-entry-preview");
+    await waitFor(() => expect(preview.textContent).toContain("Position cache is reconciling"));
+    expect(preview.textContent).not.toContain("WILL TRIGGER NOW — NO OPEN POSITION");
   });
 
   it("does not submit when extra modifiers are held", async () => {

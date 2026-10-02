@@ -16,6 +16,14 @@ type AccountUpdate struct {
 	DisplayDayPnL   float64
 }
 type PositionUpdate struct{ Position Position }
+type PositionReadinessUpdate struct {
+	Venue VenueID
+	Ready bool
+}
+type FlattenPendingUpdate struct {
+	Venue   VenueID
+	Pending bool
+}
 type StatusUpdate struct {
 	Venue       VenueID
 	Connected   bool
@@ -28,11 +36,13 @@ type HeldStopLimitAckUpdate struct {
 }
 type TradeUpdate struct{ Trade ClosedTrade }
 
-func (OrderUpdate) isExecUpdate()            {}
-func (ClosedOrderUpdate) isExecUpdate()      {}
-func (FillUpdate) isExecUpdate()             {}
-func (AccountUpdate) isExecUpdate()          {}
-func (PositionUpdate) isExecUpdate()         {}
-func (StatusUpdate) isExecUpdate()           {}
-func (HeldStopLimitAckUpdate) isExecUpdate() {}
-func (TradeUpdate) isExecUpdate()            {}
+func (OrderUpdate) isExecUpdate()             {}
+func (ClosedOrderUpdate) isExecUpdate()       {}
+func (FillUpdate) isExecUpdate()              {}
+func (AccountUpdate) isExecUpdate()           {}
+func (PositionUpdate) isExecUpdate()          {}
+func (PositionReadinessUpdate) isExecUpdate() {}
+func (FlattenPendingUpdate) isExecUpdate()    {}
+func (StatusUpdate) isExecUpdate()            {}
+func (HeldStopLimitAckUpdate) isExecUpdate()  {}
+func (TradeUpdate) isExecUpdate()             {}

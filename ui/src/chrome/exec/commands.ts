@@ -48,13 +48,15 @@ export class OrderCommands {
       }
       let route: StopLimitRoutePreview;
       try {
-        route = await this.d.cmd.sendQuery("QueryStopLimitRoute", { tif: args.tif, session: args.session, symbol: args.symbol }) as StopLimitRoutePreview;
+        route = await this.d.cmd.sendQuery("QueryStopLimitRoute", {
+          tif: args.tif, session: args.session, symbol: args.symbol, deferredPositionSizing: args.deferredPositionPct !== undefined,
+        }) as StopLimitRoutePreview;
       } catch {
         this.d.toast.push({ level: "danger", text: "Stop-limit route preview unavailable — order not sent." });
         return;
       }
       if (route?.route !== "ENGINE_HELD" && route?.route !== "NATIVE") {
-        this.d.toast.push({ level: "danger", text: "Stop-limit route preview unavailable — order not sent." });
+        this.d.toast.push({ level: "danger", text: route?.reason || "Stop-limit route preview unavailable — order not sent." });
         return;
       }
       if (args.routeExpected && args.routeExpected !== route.route) {

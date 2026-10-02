@@ -283,18 +283,23 @@ func TestPushDecoder_OrderPushEdgeCases(t *testing.T) {
 	}
 }
 
-// TestPushDecoder_UnknownOrderPushIsIgnored covers an order push with no
+// TestPushDecoder_UnknownOrderPushIsTracked covers an order push with no
 // Remark at all (an order placed via the moomoo app or another client, not
-// by eTape) -- it must be ignored, not crash, and must not pollute
-// lastKnownStatus/domainOIDByOrderID for anything.
+// by eTape). It must enter the external-order baseline so SELL sizing counts
+// its committed shares.
 func TestPushDecoder_UnknownOrderPushIsIgnored(t *testing.T) {
 	frames := loadGoldenFrames(t, "trd_update_order.jsonl")
 	resp := decodeOrderPushFrame(t, frames[0])
 	resp.S2C.Order.Remark = nil // simulate: no Remark on the wire
 
 	p := newPushDecoder()
-	if evs := p.decodeOrderPush(testVenue, resp); evs != nil {
-		t.Fatalf("order push with no Remark: got %d events, want 0: %+v", len(evs), evs)
+	evs := p.decodeOrderPush(testVenue, resp)
+	if len(evs) != 1 {
+		t.Fatalf("order push with no Remark: got %d events, want 1: %+v", len(evs), evs)
+	}
+	external, ok := evs[0].(exec.BrokerExternalOrder)
+	if !ok || external.Order.ID != "moomoo:8476557239106489402" || !external.Working || external.Order.Qty != 1 {
+		t.Fatalf("unknown order push = %+v, want a working external-order snapshot", evs[0])
 	}
 }
 
@@ -314,9 +319,14 @@ func TestPushDecoder_FillPushGoldenFrames(t *testing.T) {
 	p := newPushDecoder()
 
 	// The unknown-correlation fill (frame 3), tried FIRST -- before this
-	// decoder has processed any order push at all. Must not panic.
-	if evs := p.decodeFillPush(testVenue, decodeFillPushFrame(t, fillFrames[3])); evs != nil {
-		t.Fatalf("unknown-correlation fill (pre-seed): got %d events, want 0: %+v", len(evs), evs)
+	// decoder has processed any order push. Its position effect still updates
+	// the cache even though no local order can be correlated.
+	unknown := p.decodeFillPush(testVenue, decodeFillPushFrame(t, fillFrames[3]))
+	if len(unknown) != 1 {
+		t.Fatalf("unknown-correlation fill (pre-seed): got %d events, want 1: %+v", len(unknown), unknown)
+	}
+	if effect, ok := unknown[0].(exec.BrokerPositionEffect); !ok || effect.Symbol != "US.NVDA" || effect.Qty != 10 || effect.Side != exec.SideBuy {
+		t.Fatalf("unknown-correlation fill effect = %+v", unknown[0])
 	}
 
 	// Learn OrderA's numeric OrderID -> (domain OID, total qty=100) via a

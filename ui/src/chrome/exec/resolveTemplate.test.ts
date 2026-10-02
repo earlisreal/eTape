@@ -27,6 +27,15 @@ describe("resolvePlaceTemplate", () => {
     expect(r.args.qty).toBe(300);
     expect(r.args.side).toBe("SELL");
   });
+  it("keeps a percentage stop-sell unresolved and valid while flat", () => {
+    const r = resolvePlaceTemplate(
+      tmpl({ side: "SELL", type: "STOP_LIMIT", sizing: { mode: "PositionFraction", pct: 100 } }),
+      { venue: "alpaca-paper", symbol: "US.AAPL", quote: q, buyingPower: 0, availableCash: 0, positionQty: 0, nowMs: RTH, extHoursMarketBufferPct: 1 });
+    expect(r.args.qty).toBe(0);
+    expect(r.args.deferredPositionPct).toBe(100);
+    expect(r.preCheck.ok).toBe(true);
+    expect(r.flash).toBe("SELL 100% position AAPL @ 3.50→3.50 STPLMT");
+  });
   it("CashPct resolves from available cash rather than buying power", () => {
     const r = resolvePlaceTemplate(
       tmpl({ sizing: { mode: "CashPct", pct: 50 }, priceSource: "Ask" }),

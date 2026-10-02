@@ -551,6 +551,11 @@ func (a *Adapter) handleConn(up bool) {
 // always sees brokerIDByClientID already populated.
 func (a *Adapter) handleUpdate(tu tradeUpdate) {
 	evs := a.normalizeUpdate(a.venue, tu)
+	order := tu.Order.domain()
+	order.Venue = a.venue
+	if order.ID != "" {
+		evs = append(evs, exec.BrokerExternalOrder{Venue: a.venue, Order: order, Working: order.Working()})
+	}
 
 	if oid := tu.Order.ClientOrderID; oid != "" {
 		a.mu.Lock()
@@ -642,20 +647,21 @@ func (a *Adapter) reconcile() {
 	}
 	a.mu.Unlock()
 
-	a.seedPositions(positions)
-	a.emit(exec.BrokerAccount{Account: acct})
-	a.emit(exec.BrokerPositions{V: a.venue, Positions: positions})
-	for _, e := range gapEvents {
-		a.emit(e)
-	}
+	var catchUp []exec.BrokerEvent
+	catchUp = append(catchUp, gapEvents...)
 	if reconnect {
 		for _, oid := range missingTracked {
-			for _, e := range a.resolveMissingOrder(ctx, oid) {
-				a.emit(e)
-			}
+			catchUp = append(catchUp, a.resolveMissingOrder(ctx, oid)...)
 		}
 		a.emit(exec.StreamGap{V: a.venue, Ts: a.now()})
 	}
+	a.seedPositions(positions)
+	a.emit(exec.BrokerAccount{Account: acct})
+	for _, e := range catchUp {
+		a.emit(e)
+	}
+	a.emit(exec.BrokerPositions{V: a.venue, Positions: positions})
+	a.emit(exec.BrokerOpenOrders{V: a.venue, Orders: orders})
 }
 
 // isWorkingStatus reports whether an OrderStatus implies the order could

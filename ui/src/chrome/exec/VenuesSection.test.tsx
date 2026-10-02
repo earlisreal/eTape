@@ -211,7 +211,7 @@ describe("VenuesSection — moomoo card (state machine)", () => {
     const setup = baseSetup({ file: cfg, running: cfg, seed: { moomooAttempted: true } });
     const commands = makeCommands([setup]);
     const exec = new ExecStore();
-    exec.apply({ kind: "snapshot", topic: "exec.status", payload: execStatusFor([{ venue: "moomoo", broker: "moomoo", connected: false, reconcilePending: false, note: "OpenD unreachable", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }]) });
+    exec.apply({ kind: "snapshot", topic: "exec.status", payload: execStatusFor([{ venue: "moomoo", broker: "moomoo", connected: false, reconcilePending: false, positionDataReady: false, flattenPending: false, note: "OpenD unreachable", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }]) });
     wrap(commands, { exec });
     await waitFor(() => expect(screen.getByTestId("moomoo-connection-chip")).toBeTruthy());
     expect(screen.getByTestId("moomoo-connection-chip").textContent).toBe("Disconnected");

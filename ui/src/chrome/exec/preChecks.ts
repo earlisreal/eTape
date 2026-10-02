@@ -18,7 +18,7 @@ import { sessionAt } from "../../render/chart/sessions";
 
 export interface DraftOrder {
   symbol: string; side: Side; type: OrderType; tif: TIF; session: OrderSession;
-  qty: number; limitPrice: number; stopPrice: number;
+  qty: number; limitPrice: number; stopPrice: number; deferredPositionPct?: number;
 }
 export interface PreCheckResult {
   ok: boolean;
@@ -53,7 +53,14 @@ export function preCheck(
   const notices: string[] = [];
   let order: DraftOrder = { ...draft };
 
-  if (!(order.qty > 0)) errors.push(sizeReason ?? "Quantity must be greater than 0.");
+  if (order.deferredPositionPct !== undefined) {
+    if (!Number.isFinite(order.deferredPositionPct) || order.deferredPositionPct <= 0 || order.deferredPositionPct > 100) {
+      errors.push("Position % must be greater than 0 and at most 100.");
+    }
+    if (order.side !== "SELL" || order.type !== "STOP_LIMIT" || order.qty !== 0) {
+      errors.push("Deferred position sizing requires a zero-quantity SELL stop-limit.");
+    }
+  } else if (!(order.qty > 0)) errors.push(sizeReason ?? "Quantity must be greater than 0.");
 
   // Market outside RTH → aggressive marketable limit (ask×(1+pct) buys /
   // bid×(1−pct) sells), tick-rounded. Falls back to last for a one-sided book.

@@ -7,3 +7,10 @@ announces **Settings → Orders & hotkeys → Review / enable live accounts** in
 preview alongside its eTape custody label. It does not open a chart disclosure,
 acknowledge the account, or replay the gesture after enablement; a fresh gesture
 is required after Settings shows authoritative acknowledgement status.
+
+A position-% SELL STOP_LIMIT gesture may be staged while flat. The preview keeps
+the percentage intent and says **WILL TRIGGER NOW — NO OPEN POSITION** when a
+trusted eligible price has already hit the stop and the venue cache is confirmed
+flat. Unavailable cache data is shown separately and cannot claim confirmed flat.
+The engine resolves shares from its cached position only when the stop triggers;
+this is an independent stop order, not a bracket linked to an entry.

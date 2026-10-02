@@ -150,6 +150,34 @@ func Evaluate(s *State, cfg GateConfig, req OrderRequest, marks MarkSource) (boo
 	return true, ""
 }
 
+// EvaluateDeferredAdmission checks the controls that do not depend on a
+// resolved share quantity. Value and resulting-position caps run at activation.
+func EvaluateDeferredAdmission(s *State, cfg GateConfig, req OrderRequest) (bool, string) {
+	if !s.MasterArmed {
+		return false, "master disarmed"
+	}
+	if _, ok := s.Venues[req.Venue]; !ok {
+		return false, "unknown venue"
+	}
+	if _, dup := s.orderIndex[req.ClientOrderID]; dup {
+		return false, "duplicate order id"
+	}
+	if AnyRequiredAccountStale(s, cfg) {
+		return false, "account data stale"
+	}
+	if BreachedDayLoss(s, cfg) {
+		return false, "day-loss breached"
+	}
+	vl, ok := cfg.Venue[req.Venue]
+	if !ok {
+		return false, "no gate config for venue"
+	}
+	if vl.MaxOpenOrders > 0 && workingCount(s.Venue(req.Venue), req.Symbol) >= vl.MaxOpenOrders {
+		return false, "max open orders on venue"
+	}
+	return true, ""
+}
+
 // directional signs a same-direction working-exposure magnitude by side.
 func directional(mag float64, side Side) float64 {
 	if longward(side) {

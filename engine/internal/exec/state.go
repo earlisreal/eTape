@@ -4,14 +4,17 @@ package exec
 // (this file); Positions + Account are broker-reconciled (reconcile.go). Arming
 // is master-only now (State.MasterArmed) — no per-venue arm switch.
 type VenueState struct {
-	Orders    map[string]Order
-	Fills     []Fill
-	Positions map[string]Position
-	Account   AccountSnapshot
+	Orders         map[string]Order
+	ExternalOrders map[string]Order
+	Fills          []Fill
+	Positions      map[string]Position
+	PositionsReady bool
+	FlattenPending bool
+	Account        AccountSnapshot
 }
 
 func newVenueState() *VenueState {
-	return &VenueState{Orders: map[string]Order{}, Positions: map[string]Position{}}
+	return &VenueState{Orders: map[string]Order{}, ExternalOrders: map[string]Order{}, Positions: map[string]Position{}}
 }
 
 // State is the whole multi-venue execution state, owned by the single Core
@@ -78,7 +81,14 @@ func (s *State) Apply(ev Event) {
 			CreatedMs: e.Ts, UpdatedMs: e.Ts}
 		s.orderIndex[e.OID] = e.V
 	case OrderAccepted:
-		s.mutate(e.V, e.OID, e.Ts, func(o *Order) { o.Status = StatusAccepted })
+		s.mutate(e.V, e.OID, e.Ts, func(o *Order) {
+			o.Status = StatusAccepted
+			if o.Action != nil && o.Action.Kind == ActionSubmit && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+				a := *o.Action
+				a.Phase, a.Reason = ActionConfirmed, ""
+				o.Action = &a
+			}
+		})
 	case OrderRejected:
 		s.mutate(e.V, e.OID, e.Ts, func(o *Order) {
 			o.Status, o.RejectReason = StatusRejected, e.Reason
@@ -95,6 +105,11 @@ func (s *State) Apply(ev Event) {
 			if o.Working() {
 				o.Status = StatusCanceled
 			}
+			if o.Action != nil && o.Action.Kind == ActionSubmit && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+				a := *o.Action
+				a.Phase, a.Reason = ActionConfirmed, ""
+				o.Action = &a
+			}
 			if o.Action != nil && o.Action.Kind == ActionCancel && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
 				a := *o.Action
 				a.Phase, a.Reason = ActionConfirmed, ""
@@ -105,6 +120,11 @@ func (s *State) Apply(ev Event) {
 		s.mutate(e.V, e.OID, e.Ts, func(o *Order) {
 			if o.Working() {
 				o.Status = StatusExpired
+			}
+			if o.Action != nil && o.Action.Kind == ActionSubmit && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+				a := *o.Action
+				a.Phase, a.Reason = ActionConfirmed, ""
+				o.Action = &a
 			}
 			if o.Action != nil && o.Action.Phase != ActionConfirmed && o.Action.Phase != ActionFailed {
 				a := *o.Action
@@ -137,12 +157,23 @@ func (s *State) Apply(ev Event) {
 			}
 		})
 	case HeldOrderChanged:
-		s.mutate(e.V, e.OID, e.Ts, func(o *Order) { held := e.Held; o.Held = &held })
+		s.mutate(e.V, e.OID, e.Ts, func(o *Order) {
+			held := e.Held
+			o.Held = &held
+			if held.ResolvedQty > 0 {
+				o.Qty, o.LeavesQty = held.ResolvedQty, held.ResolvedQty-o.ExecutedQty
+				if o.LeavesQty < 0 {
+					o.LeavesQty = 0
+				}
+			}
+		})
 	case OrderActionChanged:
 		s.mutate(e.V, e.OID, e.Ts, func(o *Order) { action := e.Action; o.Action = &action })
 	case StreamGap:
 		// A gap marker: reconcile (Core) resolves state against a fresh snapshot.
 		// The fold records nothing here; the marker exists for audit + replay.
+	case FlattenPendingChanged:
+		s.SetFlattenPending(e.V, e.Pending)
 	}
 }
 
@@ -170,6 +201,11 @@ func (s *State) applyFill(e OrderFilled) {
 	o.ExecutedQty = e.CumQty
 	o.LeavesQty = e.LeavesQty
 	o.AvgFillPrice = e.AvgPrice
+	if o.Action != nil && o.Action.Kind == ActionSubmit && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+		a := *o.Action
+		a.Phase, a.Reason = ActionConfirmed, ""
+		o.Action = &a
+	}
 	if e.LeavesQty <= 0 {
 		o.Status = StatusFilled
 	} else {

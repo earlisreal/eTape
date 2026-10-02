@@ -13,7 +13,7 @@ import { modalTracker } from "../modalTracker";
 
 // Real parameter type — casting a function's own param as `never` fails typecheck.
 function Harness(props: Parameters<typeof useHotkeys>[0]) { useHotkeys(props); return null; }
-const status = (masterArmed: boolean): ExecStatus => ({ masterArmed, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 }, venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }] });
+const status = (masterArmed: boolean): ExecStatus => ({ masterArmed, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 }, venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: false, positionDataReady: true, flattenPending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }] });
 
 // This suite exercises useHotkeys' own dispatch behavior, not eTape's actual
 // defaults — DEFAULT_ORDER_CONFIG ships blank (no default templates/hotkeys),
@@ -178,8 +178,8 @@ describe("useHotkeys", () => {
     const twoArmed: ExecStatus = {
       masterArmed: true, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
       venues: [
-        { venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } },
-        { venue: "tradezero", broker: "tradezero", connected: true, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } },
+        { venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: false, positionDataReady: true, flattenPending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } },
+        { venue: "tradezero", broker: "tradezero", connected: true, reconcilePending: false, positionDataReady: true, flattenPending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } },
       ],
     };
     stores.exec.apply({ kind: "snapshot", topic: "exec.status" as never, payload: twoArmed });

@@ -196,6 +196,33 @@ func waitFor(t *testing.T, ch <-chan exec.BrokerEvent, pred func(exec.BrokerEven
 	}
 }
 
+func collectReconcile(t *testing.T, ch <-chan exec.BrokerEvent) []exec.BrokerEvent {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	var events []exec.BrokerEvent
+	for {
+		select {
+		case e := <-ch:
+			events = append(events, e)
+			if _, ok := e.(exec.BrokerOpenOrders); ok {
+				return events
+			}
+		case <-deadline:
+			t.Fatalf("timed out collecting reconcile events: %+v", events)
+			return events
+		}
+	}
+}
+
+func hasEvent[T any](events []exec.BrokerEvent) bool {
+	for _, e := range events {
+		if _, ok := e.(T); ok {
+			return true
+		}
+	}
+	return false
+}
+
 func TestAdapter_EmulatedReplace_StableDomainID(t *testing.T) {
 	rec := newMockTZFull(t)
 	defer rec.Close()
@@ -656,25 +683,28 @@ func TestAdapter_Reconcile_ReconnectSynthesizesFillAndStreamGap(t *testing.T) {
 	a.handleConn(false)
 	a.handleConn(true)
 
-	fillEv := waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.OrderFilled); return ok })
-	fill := fillEv.(exec.OrderFilled)
+	catchUp := collectReconcile(t, a.Events())
+	var fill exec.OrderFilled
+	for _, e := range catchUp {
+		if f, ok := e.(exec.OrderFilled); ok {
+			fill = f
+			break
+		}
+	}
+	if fill.F.OrderID == "" || !hasEvent[exec.StreamGap](catchUp) {
+		t.Fatalf("reconnect missing catch-up fill or StreamGap: %+v", catchUp)
+	}
 	if fill.F.OrderID != "ET1" || fill.F.Qty != 10 || fill.CumQty != 10 {
 		t.Fatalf("synthesized fill = %+v", fill)
 	}
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
-	drainNonBlocking(a.Events())
 
 	// Third connect with an unchanged snapshot: must not re-emit the fill
 	// (seenExecuted dedup) even though it's again a "reconnect".
 	a.handleConn(false)
 	a.handleConn(true)
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
-	select {
-	case e := <-a.Events():
-		if _, ok := e.(exec.OrderFilled); ok {
-			t.Fatalf("fill re-emitted on an unchanged reconcile snapshot: %+v", e)
-		}
-	case <-time.After(200 * time.Millisecond):
+	unchanged := collectReconcile(t, a.Events())
+	if hasEvent[exec.OrderFilled](unchanged) {
+		t.Fatalf("fill re-emitted on an unchanged reconcile snapshot: %+v", unchanged)
 	}
 }
 
@@ -727,13 +757,20 @@ func TestAdapter_Reconcile_CatchesUpFillOnUnchangedStatus(t *testing.T) {
 	a.handleConn(false)
 	a.handleConn(true)
 
-	fillEv := waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.OrderFilled); return ok })
-	fill := fillEv.(exec.OrderFilled)
+	catchUp := collectReconcile(t, a.Events())
+	var fill exec.OrderFilled
+	for _, e := range catchUp {
+		if f, ok := e.(exec.OrderFilled); ok {
+			fill = f
+			break
+		}
+	}
+	if fill.F.OrderID == "" || !hasEvent[exec.StreamGap](catchUp) {
+		t.Fatalf("reconnect missing catch-up fill or StreamGap: %+v", catchUp)
+	}
 	if fill.F.OrderID != "ET1" || fill.F.Qty != 3 || fill.CumQty != 7 {
 		t.Fatalf("catch-up fill = %+v, want a delta of 3 (7-4) with CumQty 7", fill)
 	}
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
-
 	a.mu.Lock()
 	got := a.seenExecuted["ET1"]
 	a.mu.Unlock()
@@ -808,8 +845,10 @@ func TestAdapter_Reconcile_SkipsSupersededLegAfterReplace(t *testing.T) {
 	a.connectedOnce = true // this reconcile() call is a reconnect, not the first connect
 
 	a.handleConn(true) // BrokerConnUp -> reconcile -> (gap events) -> StreamGap
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.BrokerAccount); return ok })
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
+	reconciled := collectReconcile(t, a.Events())
+	if !hasEvent[exec.StreamGap](reconciled) {
+		t.Fatalf("reconnect missing StreamGap: %+v", reconciled)
+	}
 
 	grace := time.After(300 * time.Millisecond)
 loop:

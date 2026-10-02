@@ -455,20 +455,23 @@ func TestAdapter_Run_FirstConnect_NoStreamGap(t *testing.T) {
 	installStdResponders(m, "paper", mo)
 	a := runAdapter(t, m, "paper")
 
-	// Deterministic first-connect order: ConnUp, Account, Positions, then the
-	// working order's OrderAccepted.
+	// Deterministic first-connect order: ConnUp, Account, the working order's
+	// OrderAccepted, then the complete position and open-order baseline.
 	if _, ok := nextEvent(t, a, 2*time.Second).(exec.BrokerConnUp); !ok {
 		t.Fatal("want BrokerConnUp first")
 	}
 	if _, ok := nextEvent(t, a, time.Second).(exec.BrokerAccount); !ok {
 		t.Fatal("want BrokerAccount")
 	}
-	if _, ok := nextEvent(t, a, time.Second).(exec.BrokerPositions); !ok {
-		t.Fatal("want BrokerPositions")
-	}
 	acc, ok := nextEvent(t, a, time.Second).(exec.OrderAccepted)
 	if !ok || acc.OID != "first-oid" {
 		t.Fatalf("want OrderAccepted for first-oid, got %+v", acc)
+	}
+	if _, ok := nextEvent(t, a, time.Second).(exec.BrokerPositions); !ok {
+		t.Fatal("want BrokerPositions")
+	}
+	if _, ok := nextEvent(t, a, time.Second).(exec.BrokerOpenOrders); !ok {
+		t.Fatal("want BrokerOpenOrders")
 	}
 	// No StreamGap on the very first connect.
 	assertNoEvent(t, a, 150*time.Millisecond)
@@ -492,13 +495,22 @@ func TestAdapter_Run_Reconnect_StreamGapAndFillCatchUp(t *testing.T) {
 	installStdResponders(m, "paper", mo)
 	a := runAdapter(t, m, "paper")
 
-	// Drain the first-connect events up to the working order's Accept.
+	// Drain the complete first-connect baseline.
 	first, _ := collectUntil(t, a, func(e exec.BrokerEvent) bool {
-		acc, ok := e.(exec.OrderAccepted)
-		return ok && acc.OID == oid
+		_, ok := e.(exec.BrokerOpenOrders)
+		return ok
 	}, 2*time.Second)
 	if containsStreamGap(first) {
 		t.Fatalf("first connect must not emit StreamGap: %+v", first)
+	}
+	accepted := false
+	for _, e := range first {
+		if acc, ok := e.(exec.OrderAccepted); ok && acc.OID == oid {
+			accepted = true
+		}
+	}
+	if !accepted {
+		t.Fatalf("first connect missing working-order accept: %+v", first)
 	}
 	assertNoEvent(t, a, 100*time.Millisecond)
 
@@ -506,14 +518,15 @@ func TestAdapter_Run_Reconnect_StreamGapAndFillCatchUp(t *testing.T) {
 	mo.set([]*trdcommon.Order{reconcileOrderFixture(orderID, oid, "AAPL", trdcommon.OrderStatus_OrderStatus_Filled_Part, 100, 40, 150.10)})
 	m.closeConns()
 
-	// Second connect: expect a StreamGap, and somewhere before it the catch-up
-	// OrderFilled for the missed 40 -- and, first of all, the BrokerConnDown
-	// that the forced disconnect above triggers, carrying the human-readable
-	// note the uihub mirror threads into VenueStatus.note.
+	// Second connect: the StreamGap marks the cache untrusted before the
+	// catch-up fill and authoritative position/order baselines arrive.
 	second, _ := collectUntil(t, a, func(e exec.BrokerEvent) bool {
-		_, ok := e.(exec.StreamGap)
+		_, ok := e.(exec.BrokerOpenOrders)
 		return ok
 	}, 3*time.Second)
+	if !containsStreamGap(second) {
+		t.Fatalf("reconnect missing StreamGap: %+v", second)
+	}
 
 	var connDown *exec.BrokerConnDown
 	for _, e := range second {
@@ -540,6 +553,18 @@ func TestAdapter_Run_Reconnect_StreamGapAndFillCatchUp(t *testing.T) {
 	}
 	if catchUp == nil {
 		t.Fatalf("reconnect missing catch-up OrderFilled: %+v", second)
+	}
+	gapIndex, fillIndex := -1, -1
+	for i, e := range second {
+		if _, ok := e.(exec.StreamGap); ok {
+			gapIndex = i
+		}
+		if _, ok := e.(exec.OrderFilled); ok {
+			fillIndex = i
+		}
+	}
+	if gapIndex < 0 || fillIndex < gapIndex {
+		t.Fatalf("StreamGap must precede catch-up fill: %+v", second)
 	}
 	if catchUp.F.Qty != 40 || catchUp.CumQty != 40 || catchUp.LeavesQty != 60 {
 		t.Fatalf("catch-up fill = qty%v cum%v leaves%v, want 40/40/60", catchUp.F.Qty, catchUp.CumQty, catchUp.LeavesQty)

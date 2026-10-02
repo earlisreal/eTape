@@ -259,7 +259,8 @@ function OrdersTable({
               <td data-column="createdMs" style={{ padding: "2px 8px" }} title={formatEtDateTime(order.createdMs)}>{formatEtDateTime(order.createdMs, todayMs)}</td>
               <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
               <td data-column="side" style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
-              <td data-column="qty">{formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)}</td>
+              <td data-column="qty">{order.deferredPositionPct !== undefined && !order.held?.resolvedQty
+                ? `${order.deferredPositionPct}% position` : formatSize(order.leavesQty > 0 ? order.leavesQty : order.qty)}</td>
               <OrderPriceCells order={order} />
               <td data-column="state">{variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
                 : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}</td>
@@ -288,7 +289,8 @@ function OrdersTable({
               <td data-column="updatedMs" style={{ padding: "2px 8px" }} title={formatEtDateTime(order.updatedMs)}>{formatEtDateTime(order.updatedMs, todayMs)}</td>
               <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(order.symbol)}</td>
               <td data-column="side" style={{ color: order.side === "BUY" || order.side === "COVER" ? palette.up : palette.down }}>{sideLabel(order.side)}</td>
-              <td data-column="qty">{formatSize(order.qty)}</td>
+              <td data-column="qty">{order.deferredPositionPct !== undefined && !order.held?.resolvedQty
+                ? `${order.deferredPositionPct}% position` : formatSize(order.qty)}</td>
               <td data-column="executedQty">{formatSize(order.executedQty)}</td>
               <OrderPriceCells order={order} />
               <td data-column="avgFillPrice">{order.executedQty > 0 ? formatPrice(order.avgFillPrice, 3) : "—"}</td>

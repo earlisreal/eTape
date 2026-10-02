@@ -58,6 +58,15 @@ type BrokerActionOutcome struct {
 	Reason string
 }
 
+// BrokerSubmitOutcome resolves a SELL submit request without converting an
+// ambiguous transport error into a terminal rejection that releases shares.
+type BrokerSubmitOutcome struct {
+	V        VenueID
+	OID      string
+	Accepted bool
+	Reason   string
+}
+
 // HeldActivationOutcome is kept separate from OrderRejected because a failed
 // child POST may have reached the venue even when its response was lost.
 type HeldActivationOutcome struct {
@@ -100,13 +109,42 @@ type BrokerPositions struct {
 	V         VenueID
 	Positions []Position
 }
+type BrokerPosition struct{ Position Position }
+type BrokerPositionEffect struct {
+	Venue      VenueID
+	Symbol     string
+	Side       Side
+	Qty, Price float64
+	ExecID     string
+}
+type BrokerExternalOrder struct {
+	Venue   VenueID
+	Order   Order
+	Working bool
+}
+type BrokerOpenOrders struct {
+	V      VenueID
+	Orders []Order
+}
+type BrokerSnapshot struct {
+	V         VenueID
+	Account   AccountSnapshot
+	Positions []Position
+	Orders    []Order
+}
 
 func (BrokerConnUp) isBrokerEvent()          {}
 func (BrokerConnDown) isBrokerEvent()        {}
 func (BrokerAccount) isBrokerEvent()         {}
 func (BrokerAccountFresh) isBrokerEvent()    {}
 func (BrokerPositions) isBrokerEvent()       {}
+func (BrokerPosition) isBrokerEvent()        {}
+func (BrokerPositionEffect) isBrokerEvent()  {}
+func (BrokerExternalOrder) isBrokerEvent()   {}
+func (BrokerOpenOrders) isBrokerEvent()      {}
+func (BrokerSnapshot) isBrokerEvent()        {}
 func (BrokerActionOutcome) isBrokerEvent()   {}
+func (BrokerSubmitOutcome) isBrokerEvent()   {}
 func (HeldActivationOutcome) isBrokerEvent() {}
 
 // Mark is a last-trade price the gate values market orders against and the Core

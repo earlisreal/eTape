@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"math"
 	"sort"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -23,16 +24,17 @@ const defaultRecoverSnapshotTimeout = 5 * time.Second
 type Command interface{ isCommand() }
 
 type SubmitOrder struct {
-	Venue         VenueID
-	Symbol        string
-	Side          Side
-	Type          OrderType
-	TIF           TIF
-	Session       OrderSession
-	Qty           float64
-	LimitPrice    float64
-	StopPrice     float64
-	RouteExpected HeldRoute
+	Venue               VenueID
+	Symbol              string
+	Side                Side
+	Type                OrderType
+	TIF                 TIF
+	Session             OrderSession
+	Qty                 float64
+	DeferredPositionPct float64
+	LimitPrice          float64
+	StopPrice           float64
+	RouteExpected       HeldRoute
 }
 type CancelOrder struct {
 	Venue   VenueID
@@ -137,6 +139,7 @@ type Core struct {
 	heldLiveIdentity map[VenueID]string
 	heldLiveAck      map[VenueID]string
 	shutdownHeld     HeldShutdownSummary
+	positionExecIDs  map[string]bool
 }
 
 // CoreConfig configures NewCore.
@@ -195,6 +198,7 @@ func NewCore(cfg CoreConfig) *Core {
 		lastPrintSeq:           make(map[string]int64),
 		lastPrintDay:           make(map[string]int64),
 		lastEligible:           make(map[string]EligiblePrint),
+		positionExecIDs:        make(map[string]bool),
 		heldLiveIdentity:       cloneVenueStrings(cfg.HeldStopLimitLiveIdentity),
 		heldLiveAck:            cloneVenueStrings(cfg.HeldStopLimitAcknowledged),
 	}
@@ -307,6 +311,8 @@ func (c *Core) emit(u Update) {
 
 func (c *Core) now() int64 { return c.clk.Now().UnixMilli() }
 
+func isEngineOrderID(id string) bool { return strings.HasPrefix(id, "ET") }
+
 // Recover rebuilds state at boot: replay today's persisted events, then seed
 // account/positions/open-orders from each venue's broker snapshot. Call before
 // Run.
@@ -323,6 +329,9 @@ func (c *Core) Recover(ctx context.Context) error {
 			return err
 		}
 		c.state.Apply(ev)
+		if fill, ok := ev.(OrderFilled); ok && fill.PositionExecID != "" {
+			c.positionExecIDs[positionExecKey(fill.F.Venue, fill.PositionExecID)] = true
+		}
 	}
 	for v, vs := range c.state.Venues {
 		for id, o := range vs.Orders {
@@ -373,20 +382,27 @@ func (c *Core) Recover(ctx context.Context) error {
 		c.state.ReconcileAccount(acct)
 		c.positionOpens.reconcilePositions(v, pos)
 		c.state.ReconcilePositions(v, pos)
+		c.state.SetPositionsReady(v, true)
+		externalOrders := make([]Order, 0, len(orders))
 		for _, o := range orders {
 			o.Venue = v
 			foundBrokerOrders[o.ID] = true
 			if _, exists := c.state.OrderVenue(o.ID); !exists && !c.closed.hasSeed(o.ID) {
-				if err := c.appendAndFold(OrderSubmitted{Order: o}, SrcReconcile); err != nil {
-					c.syslog("exec.recover", "persist adopted order "+o.ID+": "+err.Error())
-					c.state.ReconcileOpenOrders(v, []Order{o})
-					c.closed.adopt(o)
+				if isEngineOrderID(o.ID) {
+					if err := c.appendAndFold(OrderSubmitted{Order: o}, SrcReconcile); err != nil {
+						c.syslog("exec.recover", "persist adopted order "+o.ID+": "+err.Error())
+						externalOrders = append(externalOrders, o)
+					}
+				} else {
+					externalOrders = append(externalOrders, o)
 				}
 			} else {
 				c.state.ReconcileOpenOrders(v, []Order{o})
 				c.closed.adopt(o)
 			}
 		}
+		c.state.ReconcileExternalOpenOrders(v, externalOrders)
+		c.maybeClearFlattenPending(v)
 	}
 	if hs, ok := c.store.(orderHistoryByIDStore); ok {
 		ids := make([]string, 0)
@@ -472,6 +488,12 @@ func (c *Core) Recover(ctx context.Context) error {
 				continue
 			}
 			switch o.Action.Kind {
+			case ActionSubmit:
+				confirmed := *o.Action
+				confirmed.Phase, confirmed.Reason = ActionConfirmed, ""
+				if err := c.appendAndFold(OrderActionChanged{V: v, OID: id, Action: confirmed, Ts: c.now()}, SrcReconcile); err != nil {
+					c.syslog("exec.recover", "persist submit confirmation "+id+": "+err.Error())
+				}
 			case ActionCancel:
 				if o.Held == nil {
 					if b := c.brokers[v]; b != nil {
@@ -505,6 +527,11 @@ func (c *Core) Recover(ctx context.Context) error {
 	}
 	c.recoverCycles(ctx)
 	c.seedTrades(ctx)
+	for _, v := range c.venues {
+		if c.state.PositionsReady(v) {
+			c.emit(PositionReadinessUpdate{Venue: v, Ready: true})
+		}
+	}
 	for _, v := range c.venues {
 		for _, p := range c.state.Venue(v).Positions {
 			c.emitProjectedPosition(p)
@@ -715,16 +742,87 @@ func (c *Core) appendAndFold(ev Event, src Source) error {
 	if err != nil {
 		return err
 	}
+	var prior Order
+	var hadPrior bool
+	if filled, ok := ev.(OrderFilled); ok {
+		prior = c.order(filled.F.OrderID)
+		_, hadPrior = c.state.OrderVenue(filled.F.OrderID)
+	}
 	c.state.Apply(ev)
+	if filled, ok := ev.(OrderFilled); ok {
+		c.applyPositionFill(filled, prior, hadPrior)
+	}
 	for _, row := range c.closed.apply(ev, seq) {
 		c.emit(ClosedOrderUpdate{ClosedOrder: row})
 	}
 	c.emitForEvent(ev)
+	if filled, ok := ev.(OrderFilled); ok {
+		if p, found := c.state.Venue(filled.F.Venue).Positions[filled.F.Symbol]; found {
+			c.emitProjectedPosition(p)
+		} else {
+			c.emitProjectedPosition(Position{Venue: filled.F.Venue, Symbol: filled.F.Symbol})
+		}
+	}
 	return nil
+}
+
+func positionExecKey(v VenueID, id string) string { return string(v) + "\x00" + id }
+
+func (c *Core) applyPositionFill(e OrderFilled, prior Order, hadPrior bool) {
+	if !c.state.PositionsReady(e.F.Venue) || e.F.Symbol == "" || !hadPrior || e.CumQty <= prior.ExecutedQty {
+		return
+	}
+	if e.PositionExecID != "" {
+		key := positionExecKey(e.F.Venue, e.PositionExecID)
+		if c.positionExecIDs[key] {
+			return
+		}
+		c.positionExecIDs[key] = true
+	}
+	// Use the order's cumulative delta, not the push's last-fill quantity. A
+	// reconnect snapshot can already include a queued fill; the next fill push
+	// then reports a cumulative quantity whose delta is smaller than F.Qty.
+	c.applyPositionEffect(e.F.Venue, e.F.Symbol, e.F.Side, e.CumQty-prior.ExecutedQty, e.F.Price, "")
+}
+
+func (c *Core) applyPositionEffect(v VenueID, symbol string, side Side, qty, price float64, execID string) bool {
+	if !c.state.PositionsReady(v) || symbol == "" || qty <= 0 {
+		return false
+	}
+	if execID != "" {
+		key := positionExecKey(v, execID)
+		if c.positionExecIDs[key] {
+			return false
+		}
+		c.positionExecIDs[key] = true
+	}
+	delta := qty
+	if !longward(side) {
+		delta = -delta
+	}
+	vs := c.state.Venue(v)
+	p := vs.Positions[symbol]
+	newQty := p.Qty + delta
+	switch {
+	case p.Qty == 0 || p.Qty*newQty < 0:
+		p.AvgPrice = price
+	case p.Qty*delta > 0:
+		p.AvgPrice = (math.Abs(p.Qty)*p.AvgPrice + math.Abs(delta)*price) / math.Abs(newQty)
+	}
+	p.Venue, p.Symbol, p.Qty = v, symbol, newQty
+	if newQty == 0 {
+		delete(vs.Positions, symbol)
+	} else {
+		vs.Positions[symbol] = p
+	}
+	return true
 }
 
 // emitForEvent pushes the Update(s) an event implies.
 func (c *Core) emitForEvent(ev Event) {
+	if flatten, ok := ev.(FlattenPendingChanged); ok {
+		c.emit(FlattenPendingUpdate{Venue: flatten.V, Pending: flatten.Pending})
+	}
 	if f, ok := ev.(OrderFilled); ok {
 		c.positionOpens.Apply(f.F.Venue, f.F.Symbol, f.F.Side, f.F.Qty, f.F.Price, f.F.TsMs)
 		c.cycles.applyFill(f.F)
@@ -786,14 +884,33 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 		Qty:     cm.Qty, LimitPrice: cm.LimitPrice, StopPrice: cm.StopPrice,
 		ClientOrderID: c.idgen.Next(),
 	}
-	if err := req.Validate(); err != nil {
+	deferred := cm.DeferredPositionPct != 0
+	if deferred {
+		if !math.IsNaN(cm.DeferredPositionPct) && !math.IsInf(cm.DeferredPositionPct, 0) && cm.DeferredPositionPct > 0 && cm.DeferredPositionPct <= 100 &&
+			cm.Side == SideSell && cm.Type == TypeStopLimit && cm.TIF == TIFDay && cm.Qty == 0 {
+			// The held parent deliberately has no broker quantity until its trigger.
+		} else {
+			return CmdAck{Accepted: false, Reason: "deferred position sizing requires a zero-quantity DAY SELL stop-limit with position % in (0, 100]", OrderID: req.ClientOrderID}
+		}
+	} else if err := req.Validate(); err != nil {
 		return CmdAck{Accepted: false, Reason: err.Error(), OrderID: req.ClientOrderID}
+	}
+	if deferred && !c.state.PositionsReady(req.Venue) {
+		return CmdAck{Accepted: false, Reason: "position data unavailable; reconcile the venue before placing a deferred stop-sell", OrderID: req.ClientOrderID}
 	}
 	route := RouteNative
 	var deadline time.Time
 	if req.Type == TypeStopLimit {
 		var effective OrderSession
-		route, effective, deadline = ResolveStopLimitRoute(c.clk.Now(), req.TIF, req.Session)
+		var routeReason string
+		if deferred {
+			route, effective, deadline, routeReason = ResolveDeferredStopSellRoute(c.clk.Now(), req.TIF, req.Session)
+		} else {
+			route, effective, deadline = ResolveStopLimitRoute(c.clk.Now(), req.TIF, req.Session)
+		}
+		if route == RouteUnsupported {
+			return CmdAck{Accepted: false, Reason: routeReason, OrderID: req.ClientOrderID}
+		}
 		if cm.RouteExpected != "" && cm.RouteExpected != route {
 			return CmdAck{Accepted: false, Reason: "order route changed; review custody and retry", OrderID: req.ClientOrderID}
 		}
@@ -814,12 +931,24 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 			}
 		}
 	}
-	if ok, reason := Evaluate(c.state, c.gate, req, c.marks); !ok {
+	var ok bool
+	var reason string
+	if deferred {
+		ok, reason = EvaluateDeferredAdmission(c.state, c.gate, req)
+	} else {
+		ok, reason = Evaluate(c.state, c.gate, req, c.marks)
+	}
+	if !ok {
 		ev := OrderBlocked{V: req.Venue, OID: req.ClientOrderID, Req: req, Reason: reason, Ts: c.now()}
 		if err := c.appendAndFold(ev, SrcLocal); err != nil {
 			slog.Error("exec: append OrderBlocked failed", "err", err)
 		}
 		return CmdAck{Accepted: false, Reason: reason, OrderID: req.ClientOrderID}
+	}
+	if req.Side == SideSell && !deferred {
+		if good, why := c.checkSellQuantity(req, ""); !good {
+			return CmdAck{Accepted: false, Reason: why, OrderID: req.ClientOrderID}
+		}
 	}
 	b := c.brokers[req.Venue]
 	if b == nil {
@@ -860,6 +989,9 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 			return CmdAck{Accepted: false, Reason: "execution ticker unavailable: " + err.Error(), OrderID: req.ClientOrderID}
 		}
 		o := newOrderFromRequest(req, c.now())
+		if deferred {
+			o.DeferredPositionPct = cm.DeferredPositionPct
+		}
 		o.Held = &HeldOrder{Phase: HeldWaiting, DeadlineMs: deadline.UnixMilli()}
 		if err := c.appendAndFold(OrderSubmitted{Order: o}, SrcLocal); err != nil {
 			c.heldDemand.Release(req.ClientOrderID)
@@ -873,6 +1005,9 @@ func (c *Core) handleSubmit(ctx context.Context, cm SubmitOrder) CmdAck {
 	// Append OrderSubmitted BEFORE the POST (crash-recovery rule). Append failure
 	// blocks submission.
 	o := newOrderFromRequest(req, c.now())
+	if req.Side == SideSell {
+		o.Action = &OrderAction{Kind: ActionSubmit, Phase: ActionRequested}
+	}
 	if err := c.appendAndFold(OrderSubmitted{Order: o}, SrcLocal); err != nil {
 		return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error(), OrderID: req.ClientOrderID}
 	}
@@ -886,17 +1021,72 @@ func newOrderFromRequest(req OrderRequest, now int64) Order {
 		StopPrice: req.StopPrice, Status: StatusSubmitted, LeavesQty: req.Qty, CreatedMs: now, UpdatedMs: now}
 }
 
-// postSubmit performs the broker POST off the writer loop; a transport error is
-// fed back as an OrderRejected event (Plan 5 adds the retry-once-same-ID probe).
+func (c *Core) checkSellQuantity(req OrderRequest, excludeID string) (bool, string) {
+	if c.state.Venue(req.Venue).FlattenPending {
+		return false, "venue flatten is awaiting authoritative reconciliation"
+	}
+	if !c.state.PositionsReady(req.Venue) {
+		return false, "position data unavailable; reconcile the venue before selling"
+	}
+	long := c.state.VenuePositionShares(req.Venue, req.Symbol)
+	if long <= 0 {
+		return false, "no open long position to sell"
+	}
+	available := long - c.state.VenueSellCommittedShares(req.Venue, req.Symbol, excludeID)
+	if available < 0 {
+		available = 0
+	}
+	if req.Qty > available+1e-9 {
+		return false, "sell quantity exceeds uncommitted long position"
+	}
+	return true, ""
+}
+
+func (c *Core) checkSellLeaves(req OrderRequest, leaves float64, excludeID string) (bool, string) {
+	if c.state.Venue(req.Venue).FlattenPending {
+		return false, "venue flatten is awaiting authoritative reconciliation"
+	}
+	if !c.state.PositionsReady(req.Venue) {
+		return false, "position data unavailable; reconcile the venue before selling"
+	}
+	long := c.state.VenuePositionShares(req.Venue, req.Symbol)
+	if long <= 0 {
+		return false, "no open long position to sell"
+	}
+	available := long - c.state.VenueSellCommittedShares(req.Venue, req.Symbol, excludeID)
+	if available < 0 {
+		available = 0
+	}
+	if leaves > available+1e-9 {
+		return false, "sell quantity exceeds uncommitted long position"
+	}
+	return true, ""
+}
+
+// postSubmit performs the broker POST off the writer loop. A SELL transport
+// error is ambiguous, so its share reservation stays working until reconciliation.
 func (c *Core) postSubmit(ctx context.Context, b Broker, req OrderRequest) {
 	if b == nil {
 		return
 	}
-	if _, err := b.SubmitOrder(ctx, req); err != nil {
+	ack, err := b.SubmitOrder(ctx, req)
+	if req.Side == SideSell {
+		outcome := BrokerSubmitOutcome{V: req.Venue, OID: req.ClientOrderID, Accepted: err == nil && ack.Accepted}
+		if err != nil {
+			outcome.Reason = "transport: " + err.Error()
+		} else if !ack.Accepted {
+			outcome.Reason = "submit acknowledgement did not confirm acceptance"
+		}
+		select {
+		case c.bevents <- outcome:
+		case <-ctx.Done():
+		}
+		return
+	}
+	if err != nil {
 		select {
 		case c.bevents <- OrderRejected{V: req.Venue, OID: req.ClientOrderID, Reason: "transport: " + err.Error(), Ts: c.now()}:
 		case <-ctx.Done():
-			return
 		}
 	}
 }
@@ -910,6 +1100,10 @@ func (c *Core) handleCancel(ctx context.Context, cm CancelOrder) CmdAck {
 	if o.Action != nil && o.Action.Kind == ActionCancel &&
 		(o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
 		return CmdAck{Accepted: false, Reason: "cancel outcome is still unresolved", OrderID: o.ID}
+	}
+	if o.Action != nil && o.Action.Kind == ActionSubmit &&
+		(o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+		return CmdAck{Accepted: false, Reason: "submit outcome is still unresolved", OrderID: o.ID}
 	}
 	if o.Held != nil {
 		if o.Held.CancelRequested || o.Held.Phase == HeldCancelRequested {
@@ -959,12 +1153,16 @@ func (c *Core) handleReplace(ctx context.Context, cm ReplaceOrder) CmdAck {
 			if (o.Side == SideBuy || o.Side == SideCover) && o.LimitPrice < stop || (o.Side == SideSell || o.Side == SideShort) && o.LimitPrice > stop {
 				return CmdAck{Accepted: false, Reason: "stop change would put limit on the wrong side of trigger", OrderID: o.ID}
 			}
+			deferred := o.DeferredPositionPct > 0
 			qty := cm.Qty
-			if qty <= 0 {
+			if qty <= 0 && !deferred {
 				qty = o.ExecutedQty + o.LeavesQty
 			}
-			if qty <= o.ExecutedQty {
+			if !deferred && qty <= o.ExecutedQty {
 				return CmdAck{Accepted: false, Reason: "replacement quantity must exceed executed quantity", OrderID: o.ID}
+			}
+			if deferred && !c.state.PositionsReady(o.Venue) {
+				return CmdAck{Accepted: false, Reason: "position data unavailable; reconcile the venue before editing this stop", OrderID: o.ID}
 			}
 			req := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Type: TypeStopLimit, TIF: o.TIF, Session: o.Session,
 				Qty: qty, LimitPrice: o.LimitPrice, StopPrice: stop, ClientOrderID: o.ID}
@@ -1002,6 +1200,12 @@ func (c *Core) handleReplace(ctx context.Context, cm ReplaceOrder) CmdAck {
 	}
 	if cm.Qty <= o.ExecutedQty {
 		return CmdAck{Accepted: false, Reason: "replacement quantity must exceed executed quantity", OrderID: o.ID}
+	}
+	if o.Side == SideSell && cm.Qty-o.ExecutedQty > o.LeavesQty+1e-9 {
+		req := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Qty: cm.Qty}
+		if good, reason := c.checkSellLeaves(req, cm.Qty-o.ExecutedQty, o.ID); !good {
+			return CmdAck{Accepted: false, Reason: reason, OrderID: o.ID}
+		}
 	}
 	if cm.LimitPrice <= 0 {
 		cm.LimitPrice = o.LimitPrice
@@ -1048,9 +1252,36 @@ func (c *Core) handleFlatten(ctx context.Context, cm Flatten) CmdAck {
 	if !b.Capabilities().FlattenAll {
 		return CmdAck{Accepted: false, Reason: "flatten unsupported on venue"}
 	}
+	if !c.state.PositionsReady(cm.Venue) {
+		return CmdAck{Accepted: false, Reason: "position data unavailable; reconcile the venue before flattening"}
+	}
+	vs := c.state.Venue(cm.Venue)
+	if vs.FlattenPending {
+		return CmdAck{Accepted: false, Reason: "venue flatten is awaiting authoritative reconciliation"}
+	}
+	if c.state.VenueHasSellCommitments(cm.Venue) {
+		return CmdAck{Accepted: false, Reason: "cancel or resolve working SELL orders before flattening"}
+	}
+	c.pauseHeldSellVenue(cm.Venue, "venue flatten requested; resume manually after reconciliation")
+	if err := c.appendAndFold(FlattenPendingChanged{V: cm.Venue, Pending: true, Ts: c.now()}, SrcLocal); err != nil {
+		return CmdAck{Accepted: false, Reason: "event append failed: " + err.Error()}
+	}
+	c.setPositionsReady(cm.Venue, false)
 	go func() {
 		if err := b.Flatten(ctx); err != nil {
 			slog.Warn("exec: flatten failed", "venue", cm.Venue, "err", err)
+		}
+		reconcileCtx, cancel := context.WithTimeout(ctx, c.recoverSnapshotTimeout)
+		defer cancel()
+		account, positions, orders, err := b.Snapshot(reconcileCtx)
+		if err != nil {
+			slog.Warn("exec: flatten reconciliation failed", "venue", cm.Venue, "err", err)
+			return
+		}
+		account.Venue = cm.Venue
+		select {
+		case c.bevents <- BrokerSnapshot{V: cm.Venue, Account: account, Positions: positions, Orders: orders}:
+		case <-ctx.Done():
 		}
 	}()
 	return CmdAck{Accepted: true}
@@ -1165,11 +1396,30 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		if err := c.appendAndFold(OrderActionChanged{V: e.V, OID: e.OID, Action: action, Ts: c.now()}, SrcLocal); err != nil {
 			c.syslog("exec.order-action", "persist unknown outcome "+e.OID+": "+err.Error())
 		}
+	case BrokerSubmitOutcome:
+		o := c.order(e.OID)
+		if !o.Working() || o.Venue != e.V || o.Side != SideSell || o.Action == nil || o.Action.Kind != ActionSubmit ||
+			(o.Action.Phase != ActionRequested && o.Action.Phase != ActionUnknown) {
+			return
+		}
+		action := *o.Action
+		if e.Accepted {
+			action.Phase, action.Reason = ActionConfirmed, ""
+		} else {
+			action.Phase, action.Reason = ActionUnknown, e.Reason
+		}
+		if err := c.appendAndFold(OrderActionChanged{V: e.V, OID: e.OID, Action: action, Ts: c.now()}, SrcLocal); err != nil {
+			c.syslog("exec.order-action", "persist submit outcome "+e.OID+": "+err.Error())
+		}
 	case Event: // order-lifecycle or StreamGap — persist + fold + emit
 		before := c.order(e.OrderID())
 		if err := c.appendAndFold(e, SrcWS); err != nil {
 			slog.Error("exec: append broker event failed", "kind", e.Kind(), "err", err)
 			return
+		}
+		if gap, ok := e.(StreamGap); ok {
+			c.setPositionsReady(gap.V, false)
+			c.pauseHeldVenue(gap.V, "broker stream gap; reconcile and resume manually")
 		}
 		if accepted, ok := e.(OrderAccepted); ok && before.Held != nil && before.Held.ChildClientID != "" &&
 			(before.Held.Phase == HeldActivating || before.Held.Phase == HeldCancelRequested || before.Held.CancelRequested) {
@@ -1191,11 +1441,15 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 			}
 		}
 		if id := e.OrderID(); id != "" {
+			if _, rejected := e.(OrderRejected); !rejected {
+				c.confirmSellSubmit(e.Venue(), id)
+			}
 			after := c.order(id)
 			if before.Held != nil && (after.Status == StatusCanceled || after.Status == StatusRejected || after.Status == StatusExpired || after.Status == StatusFilled) {
 				c.releaseHeld(id)
 			}
 		}
+		c.maybeClearFlattenPending(e.Venue())
 	case BrokerAccount:
 		if b := c.brokers[e.Account.Venue]; b != nil && b.Capabilities().CalculatedDayPnL && e.Account.DayPnLSource == "" {
 			previous := c.state.Venue(e.Account.Venue).Account
@@ -1218,17 +1472,143 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 			c.emitStatus()
 		}
 	case BrokerPositions:
+		previous := make(map[string]Position, len(c.state.Venue(e.V).Positions))
+		for symbol, p := range c.state.Venue(e.V).Positions {
+			previous[symbol] = p
+		}
 		c.positionOpens.reconcilePositions(e.V, e.Positions)
 		c.state.ReconcilePositions(e.V, e.Positions)
+		seen := make(map[string]bool, len(e.Positions))
 		for _, p := range e.Positions {
 			p.Venue = e.V
+			seen[p.Symbol] = true
 			c.emitProjectedPosition(p)
 		}
+		for symbol := range previous {
+			if !seen[symbol] {
+				c.emitProjectedPosition(Position{Venue: e.V, Symbol: symbol})
+			}
+		}
+	case BrokerPosition:
+		p := e.Position
+		if p.Venue == "" || !c.state.PositionsReady(p.Venue) {
+			return
+		}
+		c.state.ReconcilePosition(p)
+		c.emitProjectedPosition(p)
+		c.maybeClearFlattenPending(p.Venue)
+	case BrokerPositionEffect:
+		if c.applyPositionEffect(e.Venue, e.Symbol, e.Side, e.Qty, e.Price, e.ExecID) {
+			position := c.state.Venue(e.Venue).Positions[e.Symbol]
+			position.Venue, position.Symbol = e.Venue, e.Symbol
+			c.emitProjectedPosition(position)
+		}
+	case BrokerExternalOrder:
+		if e.Order.ID == "" {
+			return
+		}
+		if _, known := c.state.OrderVenue(e.Order.ID); !known && !c.closed.hasSeed(e.Order.ID) && !isEngineOrderID(e.Order.ID) {
+			c.state.SetExternalOrder(e.Venue, e.Order, e.Working)
+		}
+		c.maybeClearFlattenPending(e.Venue)
+	case BrokerOpenOrders:
+		local, external := make([]Order, 0, len(e.Orders)), make([]Order, 0, len(e.Orders))
+		for _, o := range e.Orders {
+			o.Venue = e.V
+			if _, known := c.state.OrderVenue(o.ID); known || c.closed.hasSeed(o.ID) {
+				local = append(local, o)
+			} else if isEngineOrderID(o.ID) {
+				if err := c.appendAndFold(OrderSubmitted{Order: o}, SrcReconcile); err != nil {
+					c.syslog("exec.reconcile", "persist adopted order "+o.ID+": "+err.Error())
+					external = append(external, o)
+				}
+			} else {
+				external = append(external, o)
+			}
+		}
+		c.state.ReconcileOpenOrders(e.V, local)
+		c.state.ReconcileExternalOpenOrders(e.V, external)
+		for _, o := range local {
+			c.confirmSellSubmit(e.V, o.ID)
+		}
+		c.setPositionsReady(e.V, true)
+		c.maybeClearFlattenPending(e.V)
+	case BrokerSnapshot:
+		v := e.V
+		if v == "" {
+			v = e.Account.Venue
+		}
+		acct := e.Account
+		acct.Venue = v
+		c.state.ReconcileAccount(acct)
+		c.positionOpens.reconcilePositions(v, e.Positions)
+		previous := make(map[string]Position, len(c.state.Venue(v).Positions))
+		for symbol, p := range c.state.Venue(v).Positions {
+			previous[symbol] = p
+		}
+		c.state.ReconcilePositions(v, e.Positions)
+		local, external := make([]Order, 0, len(e.Orders)), make([]Order, 0, len(e.Orders))
+		for _, o := range e.Orders {
+			o.Venue = v
+			if _, known := c.state.OrderVenue(o.ID); known || c.closed.hasSeed(o.ID) || isEngineOrderID(o.ID) {
+				local = append(local, o)
+				c.closed.adopt(o)
+			} else {
+				external = append(external, o)
+			}
+		}
+		c.state.ReconcileOpenOrders(v, local)
+		c.state.ReconcileExternalOpenOrders(v, external)
+		for _, o := range local {
+			c.confirmSellSubmit(v, o.ID)
+		}
+		for _, p := range e.Positions {
+			p.Venue = v
+			delete(previous, p.Symbol)
+			c.emitProjectedPosition(p)
+		}
+		for symbol := range previous {
+			c.emitProjectedPosition(Position{Venue: v, Symbol: symbol})
+		}
+		c.emitProjectedAccount(v)
+		c.setPositionsReady(v, true)
+		c.maybeClearFlattenPending(v)
 	case BrokerConnUp:
 		c.emit(StatusUpdate{Venue: e.V, Connected: true, MasterArmed: c.state.MasterArmed})
 	case BrokerConnDown:
 		c.printHealthy = false
-		c.pausePretrigger("venue connection lost; resume manually")
+		c.setPositionsReady(e.V, false)
+		c.pauseHeldVenue(e.V, "venue connection lost; reconcile and resume manually")
 		c.emit(StatusUpdate{Venue: e.V, Connected: false, MasterArmed: c.state.MasterArmed, Note: e.Note})
+	}
+}
+
+func (c *Core) setPositionsReady(v VenueID, ready bool) {
+	if c.state.PositionsReady(v) == ready {
+		return
+	}
+	c.state.SetPositionsReady(v, ready)
+	c.emit(PositionReadinessUpdate{Venue: v, Ready: ready})
+}
+
+func (c *Core) maybeClearFlattenPending(v VenueID) {
+	if !c.state.Venue(v).FlattenPending || !c.state.FlattenReconciled(v) {
+		return
+	}
+	if err := c.appendAndFold(FlattenPendingChanged{V: v, Pending: false, Ts: c.now()}, SrcReconcile); err != nil {
+		c.syslog("exec.flatten", "persist reconciled flatten "+string(v)+": "+err.Error())
+	}
+}
+
+func (c *Core) confirmSellSubmit(v VenueID, id string) {
+	o := c.order(id)
+	if !o.Working() || o.Venue != v || o.Side != SideSell || o.Action == nil || o.Action.Kind != ActionSubmit ||
+		(o.Action.Phase != ActionRequested && o.Action.Phase != ActionUnknown) {
+		return
+	}
+	action := *o.Action
+	action.Phase, action.Reason = ActionConfirmed, ""
+	if err := c.appendAndFold(OrderActionChanged{V: v, OID: id, Action: action, Ts: c.now()}, SrcReconcile); err != nil {
+		c.syslog("exec.reconcile", "persist submit confirmation "+id+": "+err.Error())
 	}
 }

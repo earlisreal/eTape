@@ -192,6 +192,7 @@ export interface Order {
   tif: TIF;
   session: OrderSession;
   qty: number /* float64 */;
+  deferredPositionPct?: number /* float64 */;
   limitPrice: number /* float64 */;
   stopPrice: number /* float64 */;
   status: OrderStatus;
@@ -212,6 +213,7 @@ export interface HeldOrder {
   childBrokerId?: string;
   pausedReason?: string;
   cancelRequested?: boolean;
+  resolvedQty?: number /* float64 */;
 }
 export interface OrderAction {
   kind: string;
@@ -237,6 +239,7 @@ export interface ClosedOrder {
   tif: TIF;
   session: OrderSession;
   qty: number /* float64 */;
+  deferredPositionPct?: number /* float64 */;
   limitPrice: number /* float64 */;
   stopPrice: number /* float64 */;
   status: OrderStatus;
@@ -320,6 +323,8 @@ export interface VenueStatus {
   env?: string;
   connected: boolean;
   reconcilePending: boolean;
+  positionDataReady: boolean;
+  flattenPending: boolean;
   note: string;
   lastReconcileMs: number | null;
   gate: GateLimitsView;
@@ -576,6 +581,7 @@ export interface SubmitOrderArgs {
   tif: TIF;
   session: OrderSession;
   qty: number /* float64 */;
+  deferredPositionPct?: number /* float64 */;
   limitPrice: number /* float64 */;
   stopPrice: number /* float64 */;
   routeExpected?: string;
@@ -619,6 +625,7 @@ export interface QueryStopLimitRouteArgs {
   tif: TIF;
   session: OrderSession;
   symbol?: string;
+  deferredPositionSizing?: boolean;
 }
 export interface StopLimitRoutePreview {
   route: string;
@@ -628,6 +635,7 @@ export interface StopLimitRoutePreview {
   hasTrustedEligiblePrint?: boolean;
   lastEligiblePrice?: number /* float64 */;
   lastEligibleTsMs?: number /* int64 */;
+  reason?: string;
 }
 export interface QueryVenueInstrumentEligibilityArgs {
   venue: string;

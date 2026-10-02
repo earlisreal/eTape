@@ -317,6 +317,11 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     }).catch(() => {});
   }, [commands]);
   useSoundWiring(stores);
+  useEffect(() => stores.exec.onOrderRejected((order) => {
+    if (order.deferredPositionPct === undefined) return;
+    const detail = order.rejectReason || "position data unavailable";
+    toast.push({ level: "danger", text: `${order.symbol} (${order.venue}) ${order.deferredPositionPct}% stop-sell rejected: ${detail}` });
+  }), [stores.exec, toast]);
   // Task 13: mirror Settings-modal open/close into the module-level modalTracker
   // singleton so every already-mounted PanelFrame (frozen-closure-created, can't
   // receive this as a live prop — see modalTracker.ts) can suppress type-to-load

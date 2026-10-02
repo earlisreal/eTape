@@ -585,6 +585,14 @@ func orderDomain(o *trdcommon.Order) exec.Order {
 	}
 }
 
+func externalOrderDomain(o *trdcommon.Order) exec.Order {
+	order := orderDomain(o)
+	if order.ID == "" {
+		order.ID = fmt.Sprintf("moomoo:%d", o.GetOrderID())
+	}
+	return order
+}
+
 // snapshot composes getFunds + getPositionList + getOrderList(refreshCache=
 // true -- a full reconcile always wants fresh data, mirroring Alpaca's own
 // snapshot) into the broker-agnostic (AccountSnapshot, []Position, []Order)
@@ -631,7 +639,7 @@ func (tc *trdClient) snapshot(ctx context.Context) (exec.AccountSnapshot, []exec
 
 	ords := make([]exec.Order, 0, len(orders))
 	for _, o := range orders {
-		ords = append(ords, orderDomain(o))
+		ords = append(ords, externalOrderDomain(o))
 	}
 
 	return acct, pos, ords, nil

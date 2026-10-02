@@ -39,15 +39,31 @@ func waitFor(t *testing.T, ch <-chan exec.BrokerEvent, pred func(exec.BrokerEven
 	}
 }
 
-// drainNonBlocking discards whatever is currently queued without blocking.
-func drainNonBlocking(ch <-chan exec.BrokerEvent) {
+func collectReconcile(t *testing.T, ch <-chan exec.BrokerEvent) []exec.BrokerEvent {
+	t.Helper()
+	deadline := time.After(3 * time.Second)
+	var events []exec.BrokerEvent
 	for {
 		select {
-		case <-ch:
-		default:
-			return
+		case e := <-ch:
+			events = append(events, e)
+			if _, ok := e.(exec.BrokerOpenOrders); ok {
+				return events
+			}
+		case <-deadline:
+			t.Fatalf("timed out collecting reconcile events: %+v", events)
+			return events
 		}
 	}
+}
+
+func hasEvent[T any](events []exec.BrokerEvent) bool {
+	for _, e := range events {
+		if _, ok := e.(T); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // mockOrder is one order tracked by mockAlpacaFull, holding just enough state
@@ -776,52 +792,49 @@ func TestAdapter_Reconcile_NoDuplicateOnUnchangedSnapshot(t *testing.T) {
 	}
 	a.runCtx = context.Background()
 
-	// First connect: seeds state, no StreamGap.
+	// First connect seeds state; the position/order snapshots are the readiness
+	// boundary, and this first connect has no StreamGap.
 	a.handleConn(true)
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.BrokerAccount); return ok })
-	select {
-	case e := <-a.Events():
-		if _, ok := e.(exec.StreamGap); ok {
-			t.Fatal("StreamGap fired on the very first connect")
-		}
-	case <-time.After(150 * time.Millisecond):
+	first := collectReconcile(t, a.Events())
+	if hasEvent[exec.StreamGap](first) {
+		t.Fatalf("StreamGap fired on the very first connect: %+v", first)
 	}
-	drainNonBlocking(a.Events())
 
-	// Reconnect with an UNCHANGED snapshot: only the reconcile boilerplate,
-	// no fill/cancel.
+	// Reconnect with an UNCHANGED snapshot: gap plus baseline snapshots, no
+	// spurious fill/cancel.
 	a.handleConn(false)
 	a.handleConn(true)
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
-	select {
-	case e := <-a.Events():
-		t.Fatalf("unexpected event on an unchanged reconcile: %+v", e)
-	case <-time.After(150 * time.Millisecond):
+	unchanged := collectReconcile(t, a.Events())
+	if !hasEvent[exec.StreamGap](unchanged) || hasEvent[exec.OrderFilled](unchanged) || hasEvent[exec.OrderCanceled](unchanged) {
+		t.Fatalf("unchanged reconcile events = %+v; want StreamGap and no fill/cancel", unchanged)
 	}
 
 	// The order partially filled while "disconnected".
 	setOrders(`[{"id":"b-1","client_order_id":"ET1","symbol":"AAPL","side":"buy","order_type":"limit","qty":"10","filled_qty":"4","filled_avg_price":"100.5","status":"partially_filled"}]`)
 	a.handleConn(false)
 	a.handleConn(true)
-	fillEv := waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.OrderFilled); return ok })
-	fill := fillEv.(exec.OrderFilled)
+	filled := collectReconcile(t, a.Events())
+	var fill exec.OrderFilled
+	for _, e := range filled {
+		if f, ok := e.(exec.OrderFilled); ok {
+			fill = f
+			break
+		}
+	}
+	if fill.F.OrderID == "" || !hasEvent[exec.StreamGap](filled) {
+		t.Fatalf("changed reconcile missing catch-up fill or StreamGap: %+v", filled)
+	}
 	if fill.F.OrderID != "ET1" || fill.F.Qty != 4 || fill.CumQty != 4 {
 		t.Fatalf("synthesized catch-up fill = %+v", fill)
 	}
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
-	drainNonBlocking(a.Events())
 
 	// Another reconnect with the SAME (now-unchanged) snapshot: the fill
 	// must not re-fire.
 	a.handleConn(false)
 	a.handleConn(true)
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
-	select {
-	case e := <-a.Events():
-		if _, ok := e.(exec.OrderFilled); ok {
-			t.Fatalf("fill re-emitted on an unchanged reconcile snapshot: %+v", e)
-		}
-	case <-time.After(150 * time.Millisecond):
+	unchanged = collectReconcile(t, a.Events())
+	if hasEvent[exec.OrderFilled](unchanged) {
+		t.Fatalf("fill re-emitted on an unchanged reconcile snapshot: %+v", unchanged)
 	}
 }
 
@@ -862,20 +875,27 @@ func TestAdapter_Reconcile_MissingOrderResolvesTerminalStatus(t *testing.T) {
 	a.mu.Unlock()
 
 	a.handleConn(true)
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.BrokerAccount); return ok })
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { oc, ok := e.(exec.OrderCanceled); return ok && oc.OID == "ET9" })
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
-	drainNonBlocking(a.Events())
+	first := collectReconcile(t, a.Events())
+	if !hasEvent[exec.StreamGap](first) {
+		t.Fatalf("reconnect missing StreamGap: %+v", first)
+	}
+	canceled := false
+	for _, e := range first {
+		if oc, ok := e.(exec.OrderCanceled); ok && oc.OID == "ET9" {
+			canceled = true
+		}
+	}
+	if !canceled {
+		t.Fatalf("reconnect missing terminal cancellation: %+v", first)
+	}
 
 	// A second reconnect must NOT re-resolve (lastKnownStatus["ET9"] is now
 	// Canceled, no longer Working()) -- no second lookup, no second event.
 	a.handleConn(false)
 	a.handleConn(true)
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
-	select {
-	case e := <-a.Events():
-		t.Fatalf("unexpected event on the second reconnect: %+v", e)
-	case <-time.After(150 * time.Millisecond):
+	second := collectReconcile(t, a.Events())
+	if hasEvent[exec.OrderCanceled](second) || hasEvent[exec.OrderRejected](second) {
+		t.Fatalf("terminal order was re-emitted on the second reconnect: %+v", second)
 	}
 	if lookupCount != 1 {
 		t.Fatalf("orderByClientID called %d times, want exactly 1 (no re-resolution of an already-terminal order)", lookupCount)
@@ -928,14 +948,23 @@ func TestAdapter_Reconcile_MissingOrderAfterReplaceStillResolvesTerminalStatus(t
 	a.mu.Unlock()
 
 	a.handleConn(true)
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.BrokerAccount); return ok })
-	fillEv := waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.OrderFilled); return ok })
-	fill := fillEv.(exec.OrderFilled)
+	first := collectReconcile(t, a.Events())
+	var fill exec.OrderFilled
+	for _, e := range first {
+		if f, ok := e.(exec.OrderFilled); ok {
+			fill = f
+			break
+		}
+	}
+	if fill.F.OrderID == "" {
+		t.Fatalf("reconnect missing catch-up fill: %+v", first)
+	}
 	if fill.F.OrderID != "ET9" || fill.CumQty != 25 {
 		t.Fatalf("resolved catch-up fill = %+v, want the fill that happened while disconnected after the replace", fill)
 	}
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
-	drainNonBlocking(a.Events())
+	if !hasEvent[exec.StreamGap](first) {
+		t.Fatalf("reconnect missing StreamGap: %+v", first)
+	}
 
 	if lookupCount != 1 {
 		t.Fatalf("orderByClientID called %d times, want exactly 1", lookupCount)
@@ -952,11 +981,9 @@ func TestAdapter_Reconcile_MissingOrderAfterReplaceStillResolvesTerminalStatus(t
 	// second lookup, no second event.
 	a.handleConn(false)
 	a.handleConn(true)
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
-	select {
-	case e := <-a.Events():
-		t.Fatalf("unexpected event on the second reconnect: %+v", e)
-	case <-time.After(150 * time.Millisecond):
+	second := collectReconcile(t, a.Events())
+	if hasEvent[exec.OrderFilled](second) {
+		t.Fatalf("fill re-emitted on an unchanged reconcile snapshot: %+v", second)
 	}
 	if lookupCount != 1 {
 		t.Fatalf("orderByClientID called %d times after the second reconnect, want still exactly 1", lookupCount)
@@ -1000,12 +1027,9 @@ func TestAdapter_Reconcile_MissingOrderStillMidReplaceIsRetriedNotDropped(t *tes
 	// First reconnect: orderByClientID answers "pending_replace" -- no
 	// terminal event, but the id must remain trackable.
 	a.handleConn(true)
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.BrokerAccount); return ok })
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
-	select {
-	case e := <-a.Events():
-		t.Fatalf("unexpected terminal event while still mid-replace: %+v", e)
-	case <-time.After(150 * time.Millisecond):
+	first := collectReconcile(t, a.Events())
+	if !hasEvent[exec.StreamGap](first) || hasEvent[exec.OrderCanceled](first) || hasEvent[exec.OrderRejected](first) {
+		t.Fatalf("mid-replace reconcile events = %+v", first)
 	}
 	if lookupCount != 1 {
 		t.Fatalf("orderByClientID called %d times after first reconnect, want 1", lookupCount)
@@ -1015,7 +1039,10 @@ func TestAdapter_Reconcile_MissingOrderStillMidReplaceIsRetriedNotDropped(t *tes
 	// dropped) -- a second lookup call proves it wasn't abandoned.
 	a.handleConn(false)
 	a.handleConn(true)
-	waitFor(t, a.Events(), func(e exec.BrokerEvent) bool { _, ok := e.(exec.StreamGap); return ok })
+	second := collectReconcile(t, a.Events())
+	if !hasEvent[exec.StreamGap](second) {
+		t.Fatalf("second reconnect missing StreamGap: %+v", second)
+	}
 	if lookupCount != 2 {
 		t.Fatalf("orderByClientID called %d times after second reconnect, want 2 (still working, must be retried)", lookupCount)
 	}

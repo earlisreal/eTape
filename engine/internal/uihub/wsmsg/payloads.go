@@ -87,35 +87,37 @@ type IndicatorPoint struct {
 // ---- execution payloads (timestamps are epoch-ms numbers) ----
 
 type Order struct {
-	Venue        string       `json:"venue"`
-	ID           string       `json:"id"`
-	Symbol       string       `json:"symbol"`
-	Side         Side         `json:"side"`
-	Type         OrderType    `json:"type"`
-	TIF          TIF          `json:"tif"`
-	Session      OrderSession `json:"session"`
-	Qty          float64      `json:"qty"`
-	LimitPrice   float64      `json:"limitPrice"`
-	StopPrice    float64      `json:"stopPrice"`
-	Status       OrderStatus  `json:"status"`
-	ExecutedQty  float64      `json:"executedQty"`
-	LeavesQty    float64      `json:"leavesQty"`
-	AvgFillPrice float64      `json:"avgFillPrice"`
-	RejectReason string       `json:"rejectReason"`
-	ReplacesID   string       `json:"replacesId"`
-	CreatedMs    int64        `json:"createdMs"`
-	UpdatedMs    int64        `json:"updatedMs"`
-	Held         *HeldOrder   `json:"held,omitempty"`
-	Action       *OrderAction `json:"action,omitempty"`
+	Venue               string       `json:"venue"`
+	ID                  string       `json:"id"`
+	Symbol              string       `json:"symbol"`
+	Side                Side         `json:"side"`
+	Type                OrderType    `json:"type"`
+	TIF                 TIF          `json:"tif"`
+	Session             OrderSession `json:"session"`
+	Qty                 float64      `json:"qty"`
+	DeferredPositionPct float64      `json:"deferredPositionPct,omitempty"`
+	LimitPrice          float64      `json:"limitPrice"`
+	StopPrice           float64      `json:"stopPrice"`
+	Status              OrderStatus  `json:"status"`
+	ExecutedQty         float64      `json:"executedQty"`
+	LeavesQty           float64      `json:"leavesQty"`
+	AvgFillPrice        float64      `json:"avgFillPrice"`
+	RejectReason        string       `json:"rejectReason"`
+	ReplacesID          string       `json:"replacesId"`
+	CreatedMs           int64        `json:"createdMs"`
+	UpdatedMs           int64        `json:"updatedMs"`
+	Held                *HeldOrder   `json:"held,omitempty"`
+	Action              *OrderAction `json:"action,omitempty"`
 }
 
 type HeldOrder struct {
-	Phase           string `json:"phase"`
-	DeadlineMs      int64  `json:"deadlineMs"`
-	ChildClientID   string `json:"childClientId,omitempty"`
-	ChildBrokerID   string `json:"childBrokerId,omitempty"`
-	PausedReason    string `json:"pausedReason,omitempty"`
-	CancelRequested bool   `json:"cancelRequested,omitempty"`
+	Phase           string  `json:"phase"`
+	DeadlineMs      int64   `json:"deadlineMs"`
+	ChildClientID   string  `json:"childClientId,omitempty"`
+	ChildBrokerID   string  `json:"childBrokerId,omitempty"`
+	PausedReason    string  `json:"pausedReason,omitempty"`
+	CancelRequested bool    `json:"cancelRequested,omitempty"`
+	ResolvedQty     float64 `json:"resolvedQty,omitempty"`
 }
 
 type OrderAction struct {
@@ -133,26 +135,27 @@ type OrderAction struct {
 // projection row key; it may differ from the live domain order ID for a
 // replaced leg.
 type ClosedOrder struct {
-	Venue        string       `json:"venue"`
-	ID           string       `json:"id"`
-	Symbol       string       `json:"symbol"`
-	Side         Side         `json:"side"`
-	Type         OrderType    `json:"type"`
-	TIF          TIF          `json:"tif"`
-	Session      OrderSession `json:"session"`
-	Qty          float64      `json:"qty"`
-	LimitPrice   float64      `json:"limitPrice"`
-	StopPrice    float64      `json:"stopPrice"`
-	Status       OrderStatus  `json:"status"`
-	ExecutedQty  float64      `json:"executedQty"`
-	LeavesQty    float64      `json:"leavesQty"`
-	AvgFillPrice float64      `json:"avgFillPrice"`
-	RejectReason string       `json:"rejectReason"`
-	ReplacesID   string       `json:"replacesId"`
-	CreatedMs    int64        `json:"createdMs"`
-	UpdatedMs    int64        `json:"updatedMs"`
-	Held         *HeldOrder   `json:"held,omitempty"`
-	Action       *OrderAction `json:"action,omitempty"`
+	Venue               string       `json:"venue"`
+	ID                  string       `json:"id"`
+	Symbol              string       `json:"symbol"`
+	Side                Side         `json:"side"`
+	Type                OrderType    `json:"type"`
+	TIF                 TIF          `json:"tif"`
+	Session             OrderSession `json:"session"`
+	Qty                 float64      `json:"qty"`
+	DeferredPositionPct float64      `json:"deferredPositionPct,omitempty"`
+	LimitPrice          float64      `json:"limitPrice"`
+	StopPrice           float64      `json:"stopPrice"`
+	Status              OrderStatus  `json:"status"`
+	ExecutedQty         float64      `json:"executedQty"`
+	LeavesQty           float64      `json:"leavesQty"`
+	AvgFillPrice        float64      `json:"avgFillPrice"`
+	RejectReason        string       `json:"rejectReason"`
+	ReplacesID          string       `json:"replacesId"`
+	CreatedMs           int64        `json:"createdMs"`
+	UpdatedMs           int64        `json:"updatedMs"`
+	Held                *HeldOrder   `json:"held,omitempty"`
+	Action              *OrderAction `json:"action,omitempty"`
 }
 
 type Fill struct {
@@ -227,6 +230,8 @@ type VenueStatus struct {
 	Env                       string         `json:"env,omitempty"`
 	Connected                 bool           `json:"connected"`
 	ReconcilePending          bool           `json:"reconcilePending"`
+	PositionDataReady         bool           `json:"positionDataReady"`
+	FlattenPending            bool           `json:"flattenPending"`
 	Note                      string         `json:"note"`
 	LastReconcileMs           *int64         `json:"lastReconcileMs" tstype:"number | null,required"`
 	Gate                      GateLimitsView `json:"gate"`
@@ -492,16 +497,17 @@ type SysEvent struct {
 // generate them while wsmsg.go itself is excluded — see tygo.yaml) ----
 
 type SubmitOrderArgs struct {
-	Venue         string       `json:"venue"`
-	Symbol        string       `json:"symbol"`
-	Side          Side         `json:"side"`
-	Type          OrderType    `json:"type"`
-	TIF           TIF          `json:"tif"`
-	Session       OrderSession `json:"session"`
-	Qty           float64      `json:"qty"`
-	LimitPrice    float64      `json:"limitPrice"`
-	StopPrice     float64      `json:"stopPrice"`
-	RouteExpected string       `json:"routeExpected,omitempty"`
+	Venue               string       `json:"venue"`
+	Symbol              string       `json:"symbol"`
+	Side                Side         `json:"side"`
+	Type                OrderType    `json:"type"`
+	TIF                 TIF          `json:"tif"`
+	Session             OrderSession `json:"session"`
+	Qty                 float64      `json:"qty"`
+	DeferredPositionPct float64      `json:"deferredPositionPct,omitempty"`
+	LimitPrice          float64      `json:"limitPrice"`
+	StopPrice           float64      `json:"stopPrice"`
+	RouteExpected       string       `json:"routeExpected,omitempty"`
 }
 
 type CancelOrderArgs struct {
@@ -545,9 +551,10 @@ type QueryFillsArgs struct {
 }
 
 type QueryStopLimitRouteArgs struct {
-	TIF     TIF          `json:"tif"`
-	Session OrderSession `json:"session"`
-	Symbol  string       `json:"symbol,omitempty"`
+	TIF                    TIF          `json:"tif"`
+	Session                OrderSession `json:"session"`
+	Symbol                 string       `json:"symbol,omitempty"`
+	DeferredPositionSizing bool         `json:"deferredPositionSizing,omitempty"`
 }
 
 type StopLimitRoutePreview struct {
@@ -558,6 +565,7 @@ type StopLimitRoutePreview struct {
 	HasTrustedEligiblePrint bool         `json:"hasTrustedEligiblePrint,omitempty"`
 	LastEligiblePrice       float64      `json:"lastEligiblePrice,omitempty"`
 	LastEligibleTsMs        int64        `json:"lastEligibleTsMs,omitempty"`
+	Reason                  string       `json:"reason,omitempty"`
 }
 
 type QueryVenueInstrumentEligibilityArgs struct {

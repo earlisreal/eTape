@@ -1,6 +1,7 @@
 package tradezero
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/earlisreal/eTape/engine/internal/exec"
@@ -66,6 +67,26 @@ func statusDomain(s string) exec.OrderStatus {
 	}
 }
 
+func externalOrder(o tzOrder) exec.Order {
+	_, clientID := splitUserOrderID(o.UserOrderID)
+	typ := exec.TypeLimit
+	switch o.OrderType {
+	case "Market":
+		typ = exec.TypeMarket
+	case "Stop":
+		typ = exec.TypeStop
+	case "StopLimit":
+		typ = exec.TypeStopLimit
+	}
+	leaves := o.OrderQuantity - o.Executed
+	if leaves < 0 {
+		leaves = 0
+	}
+	return exec.Order{ID: clientID, Symbol: domainSymbol(o.Symbol), Side: sideDomain(o.Side, o.OpenClose),
+		Type: typ, Qty: o.OrderQuantity, ExecutedQty: o.Executed, LeavesQty: leaves,
+		LimitPrice: o.LimitPrice, StopPrice: o.StopPrice, AvgFillPrice: o.PriceAvg, Status: statusDomain(o.status())}
+}
+
 // normalizeOrder turns one order object into the domain events it implies. The
 // domain client-order-id is recovered by splitting userOrderId and stripping any
 // "-rN" replace suffix (Task 10) so a replace-chain reports as one domain order.
@@ -84,13 +105,17 @@ func (a *Adapter) normalizeOrder(venue exec.VenueID, o tzOrder) []exec.BrokerEve
 	}
 	a.mu.Unlock()
 	if newFill {
-		out = append(out, exec.OrderFilled{
-			F: exec.Fill{
-				Venue: venue, OrderID: oid, Symbol: domainSymbol(o.Symbol),
-				Side: sideDomain(o.Side, o.OpenClose), Qty: o.LastQty, Price: o.PriceAvg, TsMs: ts,
-			},
-			CumQty: o.Executed, LeavesQty: o.OrderQuantity - o.Executed, AvgPrice: o.PriceAvg,
-		})
+		positionExecID := tzCID + ":" + strconv.FormatFloat(o.Executed, 'g', -1, 64)
+		if strings.HasPrefix(oid, "ET") {
+			out = append(out, exec.OrderFilled{
+				F: exec.Fill{Venue: venue, OrderID: oid, Symbol: domainSymbol(o.Symbol),
+					Side: sideDomain(o.Side, o.OpenClose), Qty: o.LastQty, Price: o.PriceAvg, TsMs: ts},
+				PositionExecID: positionExecID, CumQty: o.Executed, LeavesQty: o.OrderQuantity - o.Executed, AvgPrice: o.PriceAvg,
+			})
+		} else {
+			out = append(out, exec.BrokerPositionEffect{Venue: venue, Symbol: domainSymbol(o.Symbol),
+				Side: sideDomain(o.Side, o.OpenClose), Qty: o.LastQty, Price: o.PriceAvg, ExecID: positionExecID})
+		}
 	}
 
 	switch statusDomain(o.status()) {

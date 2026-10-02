@@ -37,7 +37,10 @@ func (p *closedOrders) apply(ev Event, seq int64) []ClosedOrder {
 			RejectReason: e.Reason, CreatedMs: e.Ts, UpdatedMs: e.Ts}
 		return []ClosedOrder{p.close(o, o.ID)}
 	case OrderAccepted:
-		p.mutate(e.V, e.OID, e.Ts, func(o *Order) { o.Status = StatusAccepted })
+		p.mutate(e.V, e.OID, e.Ts, func(o *Order) {
+			o.Status = StatusAccepted
+			confirmSubmitAction(o)
+		})
 	case OrderRejected:
 		return p.terminal(e.V, e.OID, e.Ts, StatusRejected, e.Reason)
 	case OrderFilled:
@@ -71,6 +74,15 @@ func (p *closedOrders) terminal(v VenueID, id string, ts int64, status OrderStat
 	}
 	o.Status = status
 	o.UpdatedMs = ts
+	if o.Action != nil && o.Action.Kind == ActionSubmit && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+		a := *o.Action
+		if status == StatusRejected {
+			a.Phase, a.Reason = ActionFailed, reason
+		} else {
+			a.Phase, a.Reason = ActionConfirmed, ""
+		}
+		o.Action = &a
+	}
 	if status == StatusCanceled && o.Action != nil && o.Action.Kind == ActionCancel && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
 		a := *o.Action
 		a.Phase, a.Reason = ActionConfirmed, ""
@@ -91,6 +103,7 @@ func (p *closedOrders) fill(e OrderFilled) []ClosedOrder {
 	o.ExecutedQty = e.CumQty
 	o.LeavesQty = e.LeavesQty
 	o.AvgFillPrice = e.AvgPrice
+	confirmSubmitAction(&o)
 	o.UpdatedMs = e.F.TsMs
 	if e.LeavesQty > 0 {
 		o.Status = StatusPartiallyFilled
@@ -103,6 +116,14 @@ func (p *closedOrders) fill(e OrderFilled) []ClosedOrder {
 	o.Status = StatusFilled
 	delete(p.active, o.ID)
 	return []ClosedOrder{p.close(o, o.ID)}
+}
+
+func confirmSubmitAction(o *Order) {
+	if o.Action != nil && o.Action.Kind == ActionSubmit && (o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+		a := *o.Action
+		a.Phase, a.Reason = ActionConfirmed, ""
+		o.Action = &a
+	}
 }
 
 func (p *closedOrders) replace(e OrderReplaced, seq int64) []ClosedOrder {

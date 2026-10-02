@@ -191,6 +191,10 @@ _Avoid_: Requested session, displayed session
 The current pre-terminal stage of an Engine-Held Stop-Limit: Waiting, Armed, Paused, Activating, or Working. It is distinct from the Order's accepted, filled, canceled, expired, or rejected status.
 _Avoid_: Order status, broker status
 
+**Deferred Position Sizing**:
+A stop-sell size expressed as a percentage of the latest broker-confirmed long position at its Execution Venue when its stop triggers. It is independent of any particular entry order.
+_Avoid_: Planned buy quantity, linked entry sizing
+
 **Limit Cushion**:
 The non-negative distance from a stop-limit trigger price to its resulting limit price, added for BUY/COVER and subtracted for SELL/SHORT.
 _Avoid_: Price offset, slippage

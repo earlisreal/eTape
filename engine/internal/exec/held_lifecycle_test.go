@@ -58,6 +58,8 @@ type heldTestBroker struct {
 	submits       chan OrderRequest
 	mu            sync.Mutex
 	orders        map[string]Order
+	positions     []Position
+	flattenErr    error
 	submitErr     error
 	submitBlockID string
 	submitRelease <-chan struct{}
@@ -69,8 +71,13 @@ type heldTestBroker struct {
 func newHeldTestBroker() *heldTestBroker {
 	return &heldTestBroker{ev: make(chan BrokerEvent, 16), submits: make(chan OrderRequest, 8), orders: map[string]Order{}}
 }
-func (b *heldTestBroker) cancelCount() int         { b.mu.Lock(); defer b.mu.Unlock(); return b.cancelCalls }
-func (*heldTestBroker) Capabilities() Capabilities { return Capabilities{} }
+func (b *heldTestBroker) cancelCount() int { b.mu.Lock(); defer b.mu.Unlock(); return b.cancelCalls }
+func (b *heldTestBroker) setPositions(positions []Position) {
+	b.mu.Lock()
+	b.positions = append([]Position(nil), positions...)
+	b.mu.Unlock()
+}
+func (*heldTestBroker) Capabilities() Capabilities { return Capabilities{FlattenAll: true} }
 func (b *heldTestBroker) SubmitOrder(_ context.Context, req OrderRequest) (OrderAck, error) {
 	b.mu.Lock()
 	block := b.submitBlockID == req.ClientOrderID
@@ -112,8 +119,12 @@ func (b *heldTestBroker) CancelOrder(_ context.Context, id string) error {
 	b.ev <- OrderCanceled{V: "v", OID: id, Ts: time.Now().UnixMilli()}
 	return nil
 }
-func (*heldTestBroker) CancelAll(context.Context, string) error     { return nil }
-func (*heldTestBroker) Flatten(context.Context) error               { return nil }
+func (*heldTestBroker) CancelAll(context.Context, string) error { return nil }
+func (b *heldTestBroker) Flatten(context.Context) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.flattenErr
+}
 func (*heldTestBroker) ResetBalance(context.Context, float64) error { return nil }
 func (b *heldTestBroker) Snapshot(context.Context) (AccountSnapshot, []Position, []Order, error) {
 	b.mu.Lock()
@@ -122,7 +133,8 @@ func (b *heldTestBroker) Snapshot(context.Context) (AccountSnapshot, []Position,
 	for _, o := range b.orders {
 		orders = append(orders, o)
 	}
-	return AccountSnapshot{Venue: "v", BuyingPower: 100_000, AvailableCash: 100_000, TsMs: time.Now().UnixMilli()}, nil, orders, nil
+	positions := append([]Position(nil), b.positions...)
+	return AccountSnapshot{Venue: "v", BuyingPower: 100_000, AvailableCash: 100_000, TsMs: time.Now().UnixMilli()}, positions, orders, nil
 }
 func (b *heldTestBroker) Events() <-chan BrokerEvent { return b.ev }
 
@@ -207,6 +219,51 @@ func waitOrder(t *testing.T, c *Core, id string, match func(Order) bool) Order {
 	}
 }
 
+func waitPosition(t *testing.T, c *Core, symbol string, qty float64) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case update := <-c.Updates():
+			if got, ok := update.(PositionUpdate); ok && got.Position.Symbol == symbol && got.Position.Qty == qty {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for %s position quantity %v", symbol, qty)
+		}
+	}
+}
+
+func waitPositionReadiness(t *testing.T, c *Core, venue VenueID, ready bool) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case update := <-c.Updates():
+			if got, ok := update.(PositionReadinessUpdate); ok && got.Venue == venue && got.Ready == ready {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for position readiness %v on %s", ready, venue)
+		}
+	}
+}
+
+func waitFlattenPending(t *testing.T, c *Core, venue VenueID, pending bool) {
+	t.Helper()
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case update := <-c.Updates():
+			if got, ok := update.(FlattenPendingUpdate); ok && got.Venue == venue && got.Pending == pending {
+				return
+			}
+		case <-deadline:
+			t.Fatalf("timed out waiting for flatten pending %v on %s", pending, venue)
+		}
+	}
+}
+
 func eligible(seq int64, at time.Time, price float64) EligiblePrint {
 	return EligiblePrint{Symbol: "AAPL", Price: price, TsMs: at.UnixMilli(), RecvTsMs: at.UnixMilli(), Seq: seq}
 }
@@ -260,6 +317,226 @@ func TestEngineHeldStopLimitPostsOneLimitOnlyAfterEligibleTrigger(t *testing.T) 
 	terminal := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.Status == StatusFilled })
 	if terminal.Held == nil || terminal.ExecutedQty != parent.Qty || terminal.LeavesQty != 0 {
 		t.Fatalf("terminal child fill lost parent lifecycle: %+v", terminal)
+	}
+}
+
+func TestDeferredPositionStopSellSizesAtTriggerAndGuardsLaterSells(t *testing.T) {
+	now := time.Date(2026, 9, 30, 10, 0, 0, 0, session.Loc())
+	c, clk, broker, ctx := newHeldCore(t, now)
+	ack := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideSell, Type: TypeStopLimit, TIF: TIFDay,
+		Session: SessionRTH, Qty: 0, DeferredPositionPct: 50, StopPrice: 99, LimitPrice: 98.5, RouteExpected: RouteEngineHeld})
+	if !ack.Accepted {
+		t.Fatalf("deferred submit while flat: %+v", ack)
+	}
+	parent := waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
+	if parent.Qty != 0 || parent.DeferredPositionPct != 50 || parent.Session != SessionRTH || parent.Held.DeadlineMs != session.Schedule(now).Close.UnixMilli() {
+		t.Fatalf("unresolved RTH parent = %+v", parent)
+	}
+	select {
+	case req := <-broker.submits:
+		t.Fatalf("deferred sell submitted before trigger: %+v", req)
+	default:
+	}
+
+	broker.ev <- BrokerPositions{V: "v", Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 40, AvgPrice: 100}}}
+	waitPosition(t, c, "AAPL", 40)
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 100))
+	waitHeldOrder(t, c, ack.OrderID, HeldArmed)
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 98))
+	activated := waitHeldOrder(t, c, ack.OrderID, HeldActivating)
+	if activated.Qty != 20 || activated.Held.ResolvedQty != 20 {
+		t.Fatalf("trigger-time 50%% size = %+v, want 20 shares", activated)
+	}
+	select {
+	case req := <-broker.submits:
+		if req.Qty != 20 || req.Side != SideSell || req.Session != SessionRTH || req.Type != TypeLimit {
+			t.Fatalf("activated child = %+v", req)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("trigger did not submit resolved child")
+	}
+
+	broker.ev <- OrderAccepted{V: "v", OID: ack.OrderID, Ts: clk.Now().UnixMilli()}
+	waitHeldOrder(t, c, ack.OrderID, HeldWorking)
+	broker.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: ack.OrderID, Symbol: "AAPL", Side: SideSell, Qty: 10, Price: 98.5,
+		TsMs: clk.Now().UnixMilli()}, PositionExecID: "partial-1", CumQty: 10, LeavesQty: 10, AvgPrice: 98.5}
+	waitPosition(t, c, "AAPL", 30)
+	if got := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideSell, Type: TypeLimit, TIF: TIFDay, Qty: 21, LimitPrice: 98}); got.Accepted || got.Reason != "sell quantity exceeds uncommitted long position" {
+		t.Fatalf("SELL overlapping the active stop commitment = %+v", got)
+	}
+}
+
+func TestDeferredPositionStopSellHitWhileFlatRejectsPermanently(t *testing.T) {
+	now := time.Date(2026, 9, 30, 10, 0, 0, 0, session.Loc())
+	c, clk, broker, ctx := newHeldCore(t, now)
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 10))
+	deadline := time.After(time.Second)
+	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
+		select {
+		case <-deadline:
+			t.Fatal("eligible print did not become trusted")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	ack := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideSell, Type: TypeStopLimit, TIF: TIFDay,
+		Session: SessionRTH, Qty: 0, DeferredPositionPct: 100, StopPrice: 10.5, LimitPrice: 10.4, RouteExpected: RouteEngineHeld})
+	if !ack.Accepted {
+		t.Fatalf("already-hit deferred stop placement: %+v", ack)
+	}
+	rejected := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.Status == StatusRejected })
+	if rejected.RejectReason != "no open position to size stop-sell" {
+		t.Fatalf("flat trigger rejection reason = %q", rejected.RejectReason)
+	}
+	select {
+	case req := <-broker.submits:
+		t.Fatalf("flat stop was submitted to broker: %+v", req)
+	default:
+	}
+}
+
+func TestDeferredPositionStopPausesUntilReconcileAndManualResume(t *testing.T) {
+	now := time.Date(2026, 9, 30, 10, 0, 0, 0, session.Loc())
+	c, clk, broker, ctx := newHeldCore(t, now)
+	ack := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideSell, Type: TypeStopLimit, TIF: TIFDay,
+		Session: SessionRTH, Qty: 0, DeferredPositionPct: 100, StopPrice: 99, LimitPrice: 98.5, RouteExpected: RouteEngineHeld})
+	if !ack.Accepted {
+		t.Fatalf("deferred submit: %+v", ack)
+	}
+	waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
+	broker.ev <- StreamGap{V: "v", Ts: clk.Now().UnixMilli()}
+	waitPositionReadiness(t, c, "v", false)
+	paused := waitHeldOrder(t, c, ack.OrderID, HeldPaused)
+	if paused.Held.PausedReason != "broker stream gap; reconcile and resume manually" {
+		t.Fatalf("cache-gap pause reason = %q", paused.Held.PausedReason)
+	}
+	if got := c.Do(ResumeHeldOrder{Venue: "v", OrderID: ack.OrderID}); got.Accepted || got.Reason != "position data unavailable; reconcile the venue before resuming" {
+		t.Fatalf("resume with untrusted cache = %+v", got)
+	}
+
+	broker.ev <- BrokerPositions{V: "v", Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 40, AvgPrice: 100}}}
+	broker.ev <- BrokerOpenOrders{V: "v"}
+	waitPosition(t, c, "AAPL", 40)
+	waitPositionReadiness(t, c, "v", true)
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 100))
+	deadline := time.After(time.Second)
+	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
+		select {
+		case <-deadline:
+			t.Fatal("fresh eligible print did not restore trigger health")
+		default:
+			time.Sleep(time.Millisecond)
+		}
+	}
+	if got := c.Do(ResumeHeldOrder{Venue: "v", OrderID: ack.OrderID}); !got.Accepted {
+		t.Fatalf("manual resume after reconciliation: %+v", got)
+	}
+	resumed := waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
+	if resumed.Held.PausedReason != "" {
+		t.Fatalf("resume retained pause reason: %+v", resumed.Held)
+	}
+	select {
+	case req := <-broker.submits:
+		t.Fatalf("held stop auto-submitted after reconciliation/resume: %+v", req)
+	default:
+	}
+}
+
+func TestFlattenStaysPendingUntilSnapshotCoversLongShares(t *testing.T) {
+	now := time.Date(2026, 9, 30, 10, 0, 0, 0, session.Loc())
+	c, _, broker, _ := newHeldCore(t, now)
+	broker.setPositions([]Position{{Venue: "v", Symbol: "AAPL", Qty: 40, AvgPrice: 100}})
+	broker.ev <- BrokerPositions{V: "v", Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 40, AvgPrice: 100}}}
+	waitPosition(t, c, "AAPL", 40)
+	if ack := c.Do(Flatten{Venue: "v"}); !ack.Accepted {
+		t.Fatalf("flatten: %+v", ack)
+	}
+	waitFlattenPending(t, c, "v", true)
+	waitPositionReadiness(t, c, "v", true)
+	if ack := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideSell, Type: TypeLimit, TIF: TIFDay, Qty: 1, LimitPrice: 99}); ack.Accepted || ack.Reason != "venue flatten is awaiting authoritative reconciliation" {
+		t.Fatalf("SELL during unresolved flatten = %+v", ack)
+	}
+
+	// A later full position and open-order baseline proves the account is flat;
+	// only then may Core release the durable flatten lock.
+	broker.ev <- BrokerPositions{V: "v"}
+	broker.ev <- BrokerOpenOrders{V: "v"}
+	waitPosition(t, c, "AAPL", 0)
+	waitFlattenPending(t, c, "v", false)
+}
+
+func TestFlattenReconciliationRequiresFlatPosition(t *testing.T) {
+	s := NewState([]VenueID{"v"})
+	s.SetPositionsReady("v", true)
+	s.ReconcilePosition(Position{Venue: "v", Symbol: "AAPL", Qty: 40})
+	s.SetFlattenPending("v", true)
+	s.Apply(OrderSubmitted{Order: Order{Venue: "v", ID: "ET1", Symbol: "AAPL", Side: SideSell,
+		Qty: 40, LeavesQty: 40, Status: StatusAccepted}})
+	if s.FlattenReconciled("v") {
+		t.Fatal("an open SELL commitment must not stand in for a confirmed-flat snapshot")
+	}
+	s.ReconcilePosition(Position{Venue: "v", Symbol: "AAPL", Qty: 0})
+	if !s.FlattenReconciled("v") {
+		t.Fatal("a ready, flat position snapshot should resolve the flatten lock")
+	}
+}
+
+func TestSellTransportErrorKeepsShareCommitmentUntilReconciled(t *testing.T) {
+	now := time.Date(2026, 9, 30, 10, 0, 0, 0, session.Loc())
+	c, _, broker, _ := newHeldCore(t, now)
+	broker.ev <- BrokerPositions{V: "v", Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 40}}}
+	waitPosition(t, c, "AAPL", 40)
+	broker.mu.Lock()
+	broker.submitErr = errors.New("response lost")
+	broker.mu.Unlock()
+	ack := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideSell, Type: TypeLimit, TIF: TIFDay, Qty: 40, LimitPrice: 99})
+	if !ack.Accepted {
+		t.Fatalf("SELL submission: %+v", ack)
+	}
+	unknown := waitOrder(t, c, ack.OrderID, func(o Order) bool {
+		return o.Action != nil && o.Action.Kind == ActionSubmit && o.Action.Phase == ActionUnknown
+	})
+	if unknown.Status == StatusRejected {
+		t.Fatalf("ambiguous submit became terminal: %+v", unknown)
+	}
+	if next := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideSell, Type: TypeLimit, TIF: TIFDay, Qty: 1, LimitPrice: 99}); next.Accepted || next.Reason != "sell quantity exceeds uncommitted long position" {
+		t.Fatalf("SELL reused shares reserved by uncertain submit: %+v", next)
+	}
+	if cancel := c.Do(CancelOrder{Venue: "v", OrderID: ack.OrderID}); cancel.Accepted || cancel.Reason != "submit outcome is still unresolved" {
+		t.Fatalf("cancel overwrote unresolved submit outcome: %+v", cancel)
+	}
+
+	broker.ev <- OrderAccepted{V: "v", OID: ack.OrderID, BrokerOrderID: "child", Ts: time.Now().UnixMilli()}
+	confirmed := waitOrder(t, c, ack.OrderID, func(o Order) bool {
+		return o.Action != nil && o.Action.Kind == ActionSubmit && o.Action.Phase == ActionConfirmed
+	})
+	if confirmed.Status != StatusAccepted {
+		t.Fatalf("confirmed submit order = %+v", confirmed)
+	}
+}
+
+func TestPositionFillUsesCumulativeDeltaAfterSnapshotCatchUp(t *testing.T) {
+	c := NewCore(CoreConfig{Venues: []VenueID{"v"}})
+	c.state.SetPositionsReady("v", true)
+	c.state.ReconcilePosition(Position{Venue: "v", Symbol: "AAPL", Qty: 40, AvgPrice: 100})
+	prior := Order{Venue: "v", ID: "ET1", Symbol: "AAPL", Side: SideSell, ExecutedQty: 80}
+	c.applyPositionFill(OrderFilled{
+		F:              Fill{Venue: "v", OrderID: "ET1", Symbol: "AAPL", Side: SideSell, Qty: 40, Price: 99},
+		PositionExecID: "overlap", CumQty: 100,
+	}, prior, true)
+	if got := c.state.VenuePositionShares("v", "AAPL"); got != 20 {
+		t.Fatalf("cached shares = %v, want the 20-share cumulative delta after an 80-share snapshot", got)
+	}
+	c.applyPositionFill(OrderFilled{
+		F:              Fill{Venue: "v", OrderID: "ET1", Symbol: "AAPL", Side: SideSell, Qty: 40, Price: 99},
+		PositionExecID: "overlap", CumQty: 100,
+	}, prior, true)
+	if got := c.state.VenuePositionShares("v", "AAPL"); got != 20 {
+		t.Fatalf("duplicate execution changed cached shares to %v", got)
 	}
 }
 

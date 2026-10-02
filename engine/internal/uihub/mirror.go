@@ -101,6 +101,7 @@ func newMirror(venues []venueMeta, global wsmsg.GlobalLimitsView, tapeCap, newsC
 		m.venueStatus[v.ID] = &wsmsg.VenueStatus{
 			Venue: v.ID, Broker: v.Broker, Env: v.Env, Gate: v.Gate,
 			Note: v.Note, HeldStopLimitAcknowledged: v.HeldStopLimitAcknowledged,
+			PositionDataReady: false,
 		}
 		m.venueOrder = append(m.venueOrder, v.ID)
 	}
@@ -336,6 +337,16 @@ func (m *mirror) applyExec(u exec.Update) []staged {
 			if v.Note != "" {
 				vs.Note = v.Note
 			}
+		}
+		return []staged{{Topic: wsmsg.TopicExecStatus, Payload: m.execStatus()}}
+	case exec.PositionReadinessUpdate:
+		if vs := m.venueStatus[string(v.Venue)]; vs != nil {
+			vs.PositionDataReady = v.Ready
+		}
+		return []staged{{Topic: wsmsg.TopicExecStatus, Payload: m.execStatus()}}
+	case exec.FlattenPendingUpdate:
+		if vs := m.venueStatus[string(v.Venue)]; vs != nil {
+			vs.FlattenPending = v.Pending
 		}
 		return []staged{{Topic: wsmsg.TopicExecStatus, Payload: m.execStatus()}}
 	case exec.HeldStopLimitAckUpdate:

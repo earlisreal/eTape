@@ -13,7 +13,7 @@ import type { AckMsg, ExecStatus } from "../../wire/contract";
 // Seeds the hotkeys engine's exec store in the kill-leak regression below —
 // unrelated to OrderSettingsSection's own props (it no longer takes `status`).
 const status: ExecStatus = { masterArmed: true, global: { maxDayLoss: 500, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
-  venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 1000, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 5 } }] };
+  venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: false, positionDataReady: true, flattenPending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 1000, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 5 } }] };
 
 // This suite exercises the editor's behavior (labels, hotkeys, sizing,
 // add/remove, reset), not eTape's actual defaults — DEFAULT_ORDER_CONFIG now

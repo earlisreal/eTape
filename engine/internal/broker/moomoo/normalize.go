@@ -205,9 +205,8 @@ func (p *pushDecoder) decodeOrderPush(venue exec.VenueID, resp *trdupdateorder.R
 	}
 	oid := o.GetRemark()
 	if oid == "" {
-		// Not placed by eTape (e.g. via the moomoo app or another client) --
-		// no domain correlation, nothing to do.
-		return nil
+		order := externalOrderDomain(o)
+		return []exec.BrokerEvent{exec.BrokerExternalOrder{Venue: venue, Order: order, Working: order.Working()}}
 	}
 
 	p.mu.Lock()
@@ -317,9 +316,8 @@ func (p *pushDecoder) decodeFillPush(venue exec.VenueID, resp *trdupdateorderfil
 
 	domainOID, known := p.domainOIDByOrderID[orderID]
 	if !known {
-		slog.Warn("moomoo: Trd_UpdateOrderFill push arrived before any Trd_UpdateOrder push for this OrderID; dropping fill (cannot correlate to a domain order id)",
-			"orderID", orderID, "fillID", fillID)
-		return nil
+		return []exec.BrokerEvent{exec.BrokerPositionEffect{Venue: venue, Symbol: domainSymbol(f.GetCode()),
+			Side: sideDomain(trdcommon.TrdSide(f.GetTrdSide())), Qty: f.GetQty(), Price: f.GetPrice(), ExecID: fmt.Sprint(fillID)}}
 	}
 
 	qty, price := f.GetQty(), f.GetPrice()
@@ -371,9 +369,10 @@ func (p *pushDecoder) decodeFillPush(venue exec.VenueID, resp *trdupdateorderfil
 			Venue: venue, OrderID: domainOID, Symbol: domainSymbol(f.GetCode()),
 			Side: sideDomain(trdcommon.TrdSide(f.GetTrdSide())), Qty: qty, Price: price, TsMs: ts,
 		},
-		CumQty:    cumQty,
-		LeavesQty: leavesQty,
-		AvgPrice:  avgPrice,
+		PositionExecID: fmt.Sprint(fillID),
+		CumQty:         cumQty,
+		LeavesQty:      leavesQty,
+		AvgPrice:       avgPrice,
 	}}
 }
 

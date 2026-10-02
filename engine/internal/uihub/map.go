@@ -156,7 +156,7 @@ func mapOrder(o exec.Order) wsmsg.Order {
 		Venue: string(o.Venue), ID: o.ID, Symbol: o.Symbol,
 		Side: sideToWire(o.Side), Type: orderTypeToWire(o.Type), TIF: tifToWire(o.TIF),
 		Session: sessionToWire(o.Session),
-		Qty:     o.Qty, LimitPrice: o.LimitPrice, StopPrice: o.StopPrice,
+		Qty:     o.Qty, DeferredPositionPct: o.DeferredPositionPct, LimitPrice: o.LimitPrice, StopPrice: o.StopPrice,
 		Status: statusToWire(o.Status), ExecutedQty: o.ExecutedQty, LeavesQty: o.LeavesQty,
 		AvgFillPrice: o.AvgFillPrice, RejectReason: o.RejectReason, ReplacesID: o.ReplacesID,
 		CreatedMs: o.CreatedMs, UpdatedMs: o.UpdatedMs, Held: held, Action: action,
@@ -171,7 +171,7 @@ func mapOrderAction(a exec.OrderAction) *wsmsg.OrderAction {
 
 func mapHeldOrder(h exec.HeldOrder) *wsmsg.HeldOrder {
 	return &wsmsg.HeldOrder{Phase: string(h.Phase), DeadlineMs: h.DeadlineMs, ChildClientID: h.ChildClientID,
-		ChildBrokerID: h.ChildBrokerID, PausedReason: h.PausedReason, CancelRequested: h.CancelRequested}
+		ChildBrokerID: h.ChildBrokerID, PausedReason: h.PausedReason, CancelRequested: h.CancelRequested, ResolvedQty: h.ResolvedQty}
 }
 
 func mapClosedOrder(row exec.ClosedOrder) wsmsg.ClosedOrder {
@@ -187,7 +187,7 @@ func mapClosedOrder(row exec.ClosedOrder) wsmsg.ClosedOrder {
 	return wsmsg.ClosedOrder{
 		Venue: string(o.Venue), ID: row.RowID, Symbol: o.Symbol,
 		Side: sideToWire(o.Side), Type: orderTypeToWire(o.Type), TIF: tifToWire(o.TIF),
-		Session: sessionToWire(o.Session), Qty: o.Qty, LimitPrice: o.LimitPrice, StopPrice: o.StopPrice,
+		Session: sessionToWire(o.Session), Qty: o.Qty, DeferredPositionPct: o.DeferredPositionPct, LimitPrice: o.LimitPrice, StopPrice: o.StopPrice,
 		Status: statusToWire(o.Status), ExecutedQty: o.ExecutedQty, LeavesQty: o.LeavesQty,
 		AvgFillPrice: o.AvgFillPrice, RejectReason: o.RejectReason, ReplacesID: o.ReplacesID,
 		CreatedMs: o.CreatedMs, UpdatedMs: o.UpdatedMs, Held: held, Action: action,

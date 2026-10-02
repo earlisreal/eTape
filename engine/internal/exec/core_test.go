@@ -670,7 +670,7 @@ func (b *reconcileBroker) Snapshot(context.Context) (exec.AccountSnapshot, []exe
 
 func TestCoreRecoverDurablyAdoptsUnknownWorkingOrderOnce(t *testing.T) {
 	now := time.Date(2026, time.August, 15, 10, 0, 0, 0, session.Loc())
-	order := testOrder("external-open", time.Date(2026, time.August, 14, 18, 0, 0, 0, session.Loc()).UnixMilli())
+	order := testOrder("ET-external-open", time.Date(2026, time.August, 14, 18, 0, 0, 0, session.Loc()).UnixMilli())
 	order.Status = exec.StatusAccepted
 	fs := &persistingEventStore{}
 	broker := &reconcileBroker{orders: []exec.Order{order}}
@@ -901,7 +901,7 @@ func TestRecoverBoundsSnapshotPerVenue(t *testing.T) {
 	}
 	if _, err := fast.SubmitOrder(context.Background(), exec.OrderRequest{
 		Venue: "fast", Symbol: "AAPL", Side: exec.SideBuy, Type: exec.TypeLimit, TIF: exec.TIFDay,
-		Qty: 5, LimitPrice: 50, ClientOrderID: "seed-resting",
+		Qty: 5, LimitPrice: 50, ClientOrderID: "ET-seed-resting",
 	}); err != nil {
 		t.Fatalf("seed resting order: %v", err)
 	}
@@ -951,7 +951,7 @@ func TestRecoverBoundsSnapshotPerVenue(t *testing.T) {
 	if pos, ok := fastVS.Positions["AAPL"]; !ok || pos != wantPos[0] {
 		t.Fatalf("fast venue position not reconciled: got %+v, want %+v", fastVS.Positions, wantPos[0])
 	}
-	if o, ok := fastVS.Orders["seed-resting"]; !ok || !o.Working() {
+	if o, ok := fastVS.Orders["ET-seed-resting"]; !ok || !o.Working() {
 		t.Fatalf("fast venue resting order not reconciled: %+v", fastVS.Orders)
 	}
 

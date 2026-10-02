@@ -17,6 +17,23 @@ func (s *State) ReconcilePositions(v VenueID, ps []Position) {
 	}
 }
 
+// ReconcilePosition applies one absolute symbol update without clearing sibling positions.
+func (s *State) ReconcilePosition(p Position) {
+	vs := s.Venue(p.Venue)
+	if p.Qty == 0 {
+		delete(vs.Positions, p.Symbol)
+	} else {
+		vs.Positions[p.Symbol] = p
+	}
+}
+
+func (s *State) SetPositionsReady(v VenueID, ready bool) { s.Venue(v).PositionsReady = ready }
+
+func (s *State) PositionsReady(v VenueID) bool {
+	vs, ok := s.Venues[v]
+	return ok && vs.PositionsReady
+}
+
 // ReconcileOpenOrders adopts the broker's working-order set on boot/reconnect.
 // Orders the broker reports that the log did not are inserted; log orders the
 // broker no longer reports as working are left as-is (their terminal transition,
@@ -27,6 +44,10 @@ func (s *State) ReconcileOpenOrders(v VenueID, orders []Order) {
 		o.Venue = v
 		if parent, ok := vs.Orders[o.ID]; ok && parent.Held != nil {
 			o.Type, o.StopPrice, o.Held = parent.Type, parent.StopPrice, parent.Held
+			o.DeferredPositionPct = parent.DeferredPositionPct
+			if parent.Held.ResolvedQty > 0 {
+				o.Qty = parent.Qty
+			}
 		}
 		if parent, ok := vs.Orders[o.ID]; ok && parent.Action != nil {
 			o.Action = parent.Action
@@ -35,6 +56,33 @@ func (s *State) ReconcileOpenOrders(v VenueID, orders []Order) {
 		s.orderIndex[o.ID] = v
 	}
 }
+
+func (s *State) ReconcileExternalOpenOrders(v VenueID, orders []Order) {
+	vs := s.Venue(v)
+	vs.ExternalOrders = make(map[string]Order, len(orders))
+	for _, o := range orders {
+		if o.ID == "" || !o.Working() {
+			continue
+		}
+		o.Venue = v
+		vs.ExternalOrders[o.ID] = o
+	}
+}
+
+func (s *State) SetExternalOrder(v VenueID, order Order, working bool) {
+	vs := s.Venue(v)
+	if order.ID == "" {
+		return
+	}
+	if !working {
+		delete(vs.ExternalOrders, order.ID)
+		return
+	}
+	order.Venue = v
+	vs.ExternalOrders[order.ID] = order
+}
+
+func (s *State) SetFlattenPending(v VenueID, pending bool) { s.Venue(v).FlattenPending = pending }
 
 // SetMasterArmed flips the master switch. Not persisted — boot is always
 // disarmed.
@@ -94,6 +142,73 @@ func (s *State) VenueWorkingSameDir(v VenueID, symbol string, side Side) float64
 		}
 	}
 	return q
+}
+
+// VenueSellCommittedShares sums broker-bound SELL leaves; a local held parent
+// does not reserve shares until it has an activating child.
+func (s *State) VenueSellCommittedShares(v VenueID, symbol, excludeID string) float64 {
+	vs, ok := s.Venues[v]
+	if !ok {
+		return 0
+	}
+	var qty float64
+	for id, o := range vs.Orders {
+		if id == excludeID || o.Symbol != symbol || o.Side != SideSell || !o.Working() {
+			continue
+		}
+		if o.Held != nil && o.Held.ChildClientID == "" &&
+			(o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed || o.Held.Phase == HeldPaused) {
+			continue
+		}
+		leaves := o.LeavesQty
+		if o.Action != nil && o.Action.Kind == ActionReplace &&
+			(o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
+			requested := o.Action.RequestedQty - o.ExecutedQty
+			if requested > leaves {
+				leaves = requested
+			}
+		}
+		if leaves > 0 {
+			qty += leaves
+		}
+	}
+	for _, o := range vs.ExternalOrders {
+		if o.Symbol == symbol && o.Side == SideSell && o.Working() && o.LeavesQty > 0 {
+			qty += o.LeavesQty
+		}
+	}
+	return qty
+}
+
+func (s *State) VenueHasSellCommitments(v VenueID) bool {
+	vs, ok := s.Venues[v]
+	if !ok {
+		return false
+	}
+	for _, o := range vs.Orders {
+		if o.Side == SideSell && o.Working() && s.VenueSellCommittedShares(v, o.Symbol, "") > 0 {
+			return true
+		}
+	}
+	for _, o := range vs.ExternalOrders {
+		if o.Side == SideSell && o.Working() && o.LeavesQty > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *State) FlattenReconciled(v VenueID) bool {
+	vs, ok := s.Venues[v]
+	if !ok || !vs.PositionsReady {
+		return false
+	}
+	for _, p := range vs.Positions {
+		if p.Qty > 1e-9 || p.Qty < -1e-9 {
+			return false
+		}
+	}
+	return true
 }
 
 // SymbolWorkingSameDir is VenueWorkingSameDir summed across venues.

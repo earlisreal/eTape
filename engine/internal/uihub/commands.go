@@ -186,7 +186,7 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			Venue: exec.VenueID(a.Venue), Symbol: a.Symbol,
 			Side: sideFromWire(a.Side), Type: orderTypeFromWire(a.Type), TIF: tifFromWire(a.TIF),
 			Session: sessionFromWire(a.Session),
-			Qty:     a.Qty, LimitPrice: a.LimitPrice, StopPrice: a.StopPrice,
+			Qty:     a.Qty, DeferredPositionPct: a.DeferredPositionPct, LimitPrice: a.LimitPrice, StopPrice: a.StopPrice,
 			RouteExpected: exec.HeldRoute(a.RouteExpected),
 		})), false
 	case "ResumeHeldOrder":

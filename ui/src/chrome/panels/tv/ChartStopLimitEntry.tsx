@@ -112,15 +112,18 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
   };
 
   const requestRoute = (template: PlaceOrderTemplate, symbol: string): Promise<StopLimitRoutePreview | null> => {
-    const key = chartStopLimitRouteKey(template.tif, template.session ?? "AUTO", symbol);
+    const deferred = template.side === "SELL" && template.sizing.mode === "PositionFraction";
+    const key = chartStopLimitRouteKey(template.tif, template.session ?? "AUTO", symbol, deferred);
     const old = routeCache.current.get(key);
     if (old?.route && Date.now() - old.at < 250) return Promise.resolve(old.route);
     if (old?.pending) return old.pending;
     const entry: RouteCache = { at: Date.now(), pending: null };
-    entry.pending = latest.current.sendQuery("QueryStopLimitRoute", { tif: template.tif, session: template.session ?? "AUTO", symbol })
+    entry.pending = latest.current.sendQuery("QueryStopLimitRoute", {
+      tif: template.tif, session: template.session ?? "AUTO", symbol, deferredPositionSizing: deferred,
+    })
       .then((raw) => {
         const route = raw as StopLimitRoutePreview;
-        if (route?.route !== "NATIVE" && route?.route !== "ENGINE_HELD") return null;
+        if (route?.route !== "NATIVE" && route?.route !== "ENGINE_HELD" && route?.route !== "UNSUPPORTED") return null;
         entry.route = route; entry.at = Date.now(); return route;
       })
       .catch(() => null)
@@ -155,15 +158,21 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
     const routeText = route ? stopLimitRouteLabel(route) : "Checking engine route…";
     const env = venueStatus?.broker?.toUpperCase() === "SIM" ? "SIM" : venueStatus?.env?.toUpperCase() || "UNKNOWN";
     const deadline = route?.deadlineMs ? ` · deadline ${timeET(route.deadlineMs)}${deadlineCountdown(route.deadlineMs)}` : "";
-    const trigger = chartStopLimitWillTrigger(resolved.template.side, stopPrice, route) ? " · WILL TRIGGER NOW" : "";
-    const detail = `${resolved.template.side} ${args.qty} ${latest.current.symbol} · stop ${stopPrice.toFixed(stopPrice < 1 ? 4 : 2)} → limit ${args.limitPrice.toFixed(args.limitPrice < 1 ? 4 : 2)} · ${args.tif}/${args.session} · ${routeText}${trigger}${deadline} · ${venue || "no venue"} · ${env}`;
+    const triggerNow = chartStopLimitWillTrigger(resolved.template.side, stopPrice, route);
+    const noPositionAtTrigger = triggerNow && args.deferredPositionPct !== undefined && venueStatus?.positionDataReady && positionQty <= 0;
+    const trigger = triggerNow ? noPositionAtTrigger ? " · WILL TRIGGER NOW — NO OPEN POSITION" : " · WILL TRIGGER NOW" : "";
+    const size = args.deferredPositionPct === undefined ? args.qty : `${args.deferredPositionPct}% position`;
+    const detail = `${resolved.template.side} ${size} ${latest.current.symbol} · stop ${stopPrice.toFixed(stopPrice < 1 ? 4 : 2)} → limit ${args.limitPrice.toFixed(args.limitPrice < 1 ? 4 : 2)} · ${args.tif}/${route?.effectiveSession ?? args.session} · ${routeText}${trigger}${deadline} · ${venue || "no venue"} · ${env}`;
     const invalid = latest.current.group === null ? "Pin a Link Group to enable chart orders."
       : !venue ? "Choose an execution venue for this Link Group."
       : !latest.current.symbol ? "Choose a symbol."
       : !status?.masterArmed ? "Trading is locked. Arm the engine first."
       : !venueStatus?.connected ? "Execution venue is disconnected."
       : venueStatus.reconcilePending ? "Execution venue is reconciling."
+      : args.deferredPositionPct !== undefined && venueStatus.flattenPending ? "Venue flatten is awaiting reconciliation."
       : !route ? "Engine route preview unavailable."
+      : route.route === "UNSUPPORTED" ? route.reason || "This stop-limit session is unsupported."
+      : args.deferredPositionPct !== undefined && !venueStatus.positionDataReady ? "Position cache is reconciling; percentage stop-sell is unavailable."
       : route.route === "ENGINE_HELD" && route.deadlineMs > 0 && route.deadlineMs <= Date.now() ? "Engine-held stop-limit deadline passed."
       : resolvedPlace.errors[0];
     return { template: resolved.template, binding: resolved.binding, args, stopPrice, limitPrice: args.limitPrice, detail,
@@ -207,7 +216,8 @@ export function ChartStopLimitEntry(props: Props): JSX.Element {
       if (event.button !== 0 || gestureRef.current || inEditableOrUi(event.target) || !document.hasFocus()) return;
       const resolved = activeTemplate(event);
       if (!resolved) return;
-      const routeEntry = routeCache.current.get(chartStopLimitRouteKey(resolved.template.tif, resolved.template.session ?? "AUTO", latest.current.symbol));
+      const deferred = resolved.template.side === "SELL" && resolved.template.sizing.mode === "PositionFraction";
+      const routeEntry = routeCache.current.get(chartStopLimitRouteKey(resolved.template.tif, resolved.template.session ?? "AUTO", latest.current.symbol, deferred));
       const route = routeEntry?.route;
       if (!route || Date.now() - routeEntry.at >= 250) { schedule(event); return; }
       const snapshot = buildSnapshot(event, resolved, route);

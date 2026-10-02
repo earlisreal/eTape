@@ -42,8 +42,22 @@ describe("OrderCommands", () => {
     const { sent, cmd, pushed, oc } = fakes({ orderId: "ET-held" });
     cmd.sendQuery = vi.fn(async () => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "PRE", deadlineMs: 1 }));
     await oc.submit({ ...args, type: "STOP_LIMIT", session: "EXTENDED", stopPrice: 3.5 }, "BUY 10 AAPL @ 3.50 STP LMT");
-    expect(cmd.sendQuery).toHaveBeenCalledWith("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol: "US.AAPL" });
+    expect(cmd.sendQuery).toHaveBeenCalledWith("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol: "US.AAPL", deferredPositionSizing: false });
     expect(sent[0]).toMatchObject({ name: "SubmitOrder", args: { routeExpected: "ENGINE_HELD", type: "STOP_LIMIT" } });
+    expect(pushed.at(-1)?.text).toContain("Held by eTape — no broker protection");
+  });
+  it("routes percentage SELL stop-limits through deferred engine custody", async () => {
+    const { sent, cmd, pushed, oc } = fakes({ orderId: "ET-deferred" });
+    cmd.sendQuery = vi.fn(async () => ({ route: "ENGINE_HELD", effectiveSession: "RTH", phase: "RTH", deadlineMs: 1_800_000_000_000 }));
+    const deferred = { ...args, side: "SELL" as const, type: "STOP_LIMIT" as const, qty: 0, stopPrice: 3.5,
+      deferredPositionPct: 100 };
+    await oc.submit(deferred, "SELL 100% position AAPL @ 3.50 STPLMT");
+    expect(cmd.sendQuery).toHaveBeenCalledWith("QueryStopLimitRoute", {
+      tif: "DAY", session: "AUTO", symbol: "US.AAPL", deferredPositionSizing: true,
+    });
+    expect(sent[0]).toMatchObject({ name: "SubmitOrder", args: {
+      side: "SELL", qty: 0, deferredPositionPct: 100, routeExpected: "ENGINE_HELD",
+    } });
     expect(pushed.at(-1)?.text).toContain("Held by eTape — no broker protection");
   });
   it("does not submit a stop-limit without a route preview", async () => {

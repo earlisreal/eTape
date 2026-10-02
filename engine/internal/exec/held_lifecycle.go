@@ -3,6 +3,7 @@ package exec
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"time"
 
@@ -188,6 +189,9 @@ func (c *Core) heldGate(req OrderRequest, orderID string) (bool, string) {
 			copyState.orderIndex[id] = v
 		}
 	}
+	if req.Qty == 0 {
+		return EvaluateDeferredAdmission(&copyState, c.gate, req)
+	}
 	return Evaluate(&copyState, c.gate, req, c.marks)
 }
 
@@ -195,8 +199,51 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 	if o.Held == nil || o.Held.Phase == HeldActivating || o.Held.Phase == HeldWorking || o.Held.CancelRequested {
 		return
 	}
-	child := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Type: TypeLimit, TIF: TIFDay, Session: SessionExtended,
+	if o.Side == SideSell && !c.state.PositionsReady(o.Venue) {
+		c.changeHeld(o, HeldPaused, "position data unavailable; reconcile and resume manually", false)
+		return
+	}
+	if o.Side == SideSell && c.state.Venue(o.Venue).FlattenPending {
+		c.changeHeld(o, HeldPaused, "venue flatten is awaiting authoritative reconciliation; resume manually", false)
+		return
+	}
+	child := OrderRequest{Venue: o.Venue, Symbol: o.Symbol, Side: o.Side, Type: TypeLimit, TIF: o.TIF, Session: o.Session,
 		Qty: o.LeavesQty, LimitPrice: o.LimitPrice, ClientOrderID: o.ID}
+	if o.DeferredPositionPct > 0 {
+		if !c.state.PositionsReady(o.Venue) {
+			c.changeHeld(o, HeldPaused, "position data unavailable; reconcile and resume manually", false)
+			return
+		}
+		long := c.state.VenuePositionShares(o.Venue, o.Symbol)
+		if long <= 0 {
+			reason := "no open position to size stop-sell"
+			if long < 0 {
+				reason = "percentage stop-sell requires a long position"
+			}
+			if err := c.appendAndFold(OrderRejected{V: o.Venue, OID: o.ID, Reason: reason, Ts: c.now()}, SrcLocal); err != nil {
+				c.syslog("exec.held", "persist flat position rejection "+o.ID+": "+err.Error())
+			}
+			c.releaseHeld(o.ID)
+			return
+		}
+		child.Qty = math.Floor(long * o.DeferredPositionPct / 100)
+		if child.Qty <= 0 {
+			if err := c.appendAndFold(OrderRejected{V: o.Venue, OID: o.ID, Reason: "position % rounds to 0 shares", Ts: c.now()}, SrcLocal); err != nil {
+				c.syslog("exec.held", "persist rounded-zero rejection "+o.ID+": "+err.Error())
+			}
+			c.releaseHeld(o.ID)
+			return
+		}
+	}
+	if child.Side == SideSell {
+		if ok, reason := c.checkSellQuantity(child, o.ID); !ok {
+			if err := c.appendAndFold(OrderRejected{V: o.Venue, OID: o.ID, Reason: "trigger gate: " + reason, Ts: c.now()}, SrcLocal); err != nil {
+				c.syslog("exec.held", "persist sell availability rejection "+o.ID+": "+err.Error())
+			}
+			c.releaseHeld(o.ID)
+			return
+		}
+	}
 	if ok, reason := c.heldGate(child, o.ID); !ok {
 		if err := c.appendAndFold(OrderRejected{V: o.Venue, OID: o.ID, Reason: "trigger gate: " + reason, Ts: c.now()}, SrcLocal); err != nil {
 			c.syslog("exec.held", "persist trigger gate rejection "+o.ID+": "+err.Error())
@@ -206,6 +253,9 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 	}
 	h := *o.Held
 	h.Phase, h.PausedReason, h.CancelRequested = HeldActivating, "", false
+	if o.DeferredPositionPct > 0 {
+		h.ResolvedQty = child.Qty
+	}
 	h.ChildClientID = o.ID
 	if err := c.appendAndFold(HeldOrderChanged{V: o.Venue, OID: o.ID, Held: h, Ts: c.now()}, SrcLocal); err != nil {
 		c.syslog("exec.held", "persist activation intent "+o.ID+": "+err.Error())
@@ -287,10 +337,20 @@ func (c *Core) requestHeldVenueCancel(ctx context.Context, o Order, reason strin
 	}
 }
 
-func (c *Core) pausePretrigger(reason string) {
+func (c *Core) pauseHeldVenue(venue VenueID, reason string) {
 	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
-		if o.Held != nil && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
+		if o.Venue == venue && o.Held != nil && (o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
+			c.changeHeld(o, HeldPaused, reason, false)
+		}
+	}
+}
+
+func (c *Core) pauseHeldSellVenue(venue VenueID, reason string) {
+	for _, id := range c.heldOrderIDs() {
+		o := c.order(id)
+		if o.Venue == venue && o.Side == SideSell && o.Held != nil &&
+			(o.Held.Phase == HeldWaiting || o.Held.Phase == HeldArmed) {
 			c.changeHeld(o, HeldPaused, reason, false)
 		}
 	}
@@ -330,6 +390,12 @@ func (c *Core) handleResumeHeld(ctx context.Context, cm ResumeHeldOrder) CmdAck 
 	}
 	if !c.state.MasterArmed {
 		return CmdAck{Accepted: false, Reason: "master disarmed", OrderID: o.ID}
+	}
+	if o.Side == SideSell && c.state.Venue(o.Venue).FlattenPending {
+		return CmdAck{Accepted: false, Reason: "venue flatten is awaiting authoritative reconciliation", OrderID: o.ID}
+	}
+	if o.Side == SideSell && !c.state.PositionsReady(o.Venue) {
+		return CmdAck{Accepted: false, Reason: "position data unavailable; reconcile the venue before resuming", OrderID: o.ID}
 	}
 	if !c.printHealthy {
 		return CmdAck{Accepted: false, Reason: "waiting for a new eligible real-time print", OrderID: o.ID}

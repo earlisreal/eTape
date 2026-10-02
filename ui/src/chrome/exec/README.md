@@ -15,6 +15,13 @@ Dollar, Cash %, Buying Power %, Shares, and Position sizing use the selected
 venue's live account and position data; Cash % uses the same available cash
 shown by the Account panel.
 
+Position-% SELL STOP_LIMIT templates defer share sizing through Chart Order
+Gestures, hotkeys and Deck Buttons. Their DAY held parent shows percentage
+intent before trigger and the resolved shares after activation; a ready flat
+cache rejects on trigger with a symbol/venue/reason toast. An unready cache is
+shown as unavailable and prevents admission or Resume. The manual Order Ticket
+keeps its existing immediate sizing behavior.
+
 The order ticket is optional for hotkey execution. A revisioned, in-memory
 `BroadcastChannel` target follows the most recently user-activated Dockview panel
 across open windows and carries its owner window, panel id, link group, linked symbol,

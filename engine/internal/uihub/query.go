@@ -130,8 +130,16 @@ func (q *queries) handleContext(ctx context.Context, name string, args json.RawM
 			return wsmsg.StopLimitRoutePreview{Route: string(exec.RouteNative), EffectiveSession: a.Session, Phase: session.PhaseAt(q.clk.Now()).String()}
 		}
 		now := q.clk.Now()
-		route, effective, deadline := exec.ResolveStopLimitRoute(now, tifFromWire(a.TIF), sessionFromWire(a.Session))
-		preview := wsmsg.StopLimitRoutePreview{Route: string(route), EffectiveSession: sessionToWire(effective), Phase: session.PhaseAt(now).String()}
+		var route exec.HeldRoute
+		var effective exec.OrderSession
+		var deadline time.Time
+		var reason string
+		if a.DeferredPositionSizing {
+			route, effective, deadline, reason = exec.ResolveDeferredStopSellRoute(now, tifFromWire(a.TIF), sessionFromWire(a.Session))
+		} else {
+			route, effective, deadline = exec.ResolveStopLimitRoute(now, tifFromWire(a.TIF), sessionFromWire(a.Session))
+		}
+		preview := wsmsg.StopLimitRoutePreview{Route: string(route), EffectiveSession: sessionToWire(effective), Phase: session.PhaseAt(now).String(), Reason: reason}
 		if !deadline.IsZero() {
 			preview.DeadlineMs = deadline.UnixMilli()
 		}
