@@ -308,19 +308,24 @@ must preserve existing broker-cost and local P&L semantics.
   legacy fixed-quantity behavior have focused existing-suite coverage.
 ## Validation record
 
-- `go test ./...`, `go test -race -short ./...`, `go vet ./...`, and
-  `golangci-lint run` passed.
-- `npm run typecheck`, `npm run lint`, `npm test`, and `npm run build` passed.
-- `npm run e2e:chart-layout` passed all 17 simulated overlay states and 3
-  `PanelFrame`/`ChartPanel` states. The full `npm run e2e` run had 11 passes,
-  17 failures, and 1 stop-limit skip; failures timed out across Settings,
-  reconnect, and demo-workspace scenarios while Yahoo metadata requests timed out.
-- `go tool tygo generate` was run twice and produced the same tracked
-  `ui/src/gen/wsmsg.ts`. The `mingw32-make gen-ts-check` wrapper could not finish
-  because Cygwin `sh.exe` failed to create its signal pipe with Win32 error 5;
-  the generator and tracked-file checks were run directly.
-- `git diff --check`, final commit/integration, hosted CI, and push remain in
-  progress under the repository handoff workflow.
+- After merging `origin/main` into the task branch, `go test ./...`,
+  `go test -race -short ./...`, `go vet ./...`, and `golangci-lint run`
+  (v2.12.2) passed.
+- `npm ci`, `npm run typecheck`, `npm run lint`, `npm test`, and
+  `npm run build` passed. The install reported 5 dependency audit findings;
+  no dependencies were changed. The build emitted a large-chunk advisory.
+- After upstream integration, `npm run e2e:chart-layout` passed all 17
+  simulated overlay states and 3 `PanelFrame`/`ChartPanel` states. The full
+  `npm run e2e` run had 11 passes, 17 failures, and 1 stop-limit skip; failures
+  timed out across Settings, reconnect, and demo-workspace scenarios while
+  Yahoo metadata requests timed out.
+- `go tool tygo generate` was run twice and produced no tracked change to
+  `ui/src/gen/wsmsg.ts`. The `mingw32-make -C engine gen-ts-check` wrapper could
+  not finish because Cygwin `sh.exe` failed to create its signal pipe with
+  Win32 error 5; direct generator and drift checks passed.
+- `git diff --check` and the tracked-Go LF check passed. Final plan commit,
+  merge to local `main`, push, and hosted CI verification remain in progress
+  under the repository handoff workflow.
 
 ## Rollout, rollback and known limits
 
