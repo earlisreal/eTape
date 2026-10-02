@@ -1,10 +1,11 @@
 import { useContext, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
-import { createChart, createTextWatermark, CandlestickSeries, BarSeries, HistogramSeries, LineSeries, AreaSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type LogicalRange, type Coordinate } from "lightweight-charts";
+import { createChart, createTextWatermark, CandlestickSeries, BarSeries, HistogramSeries, LineSeries, AreaSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type LogicalRange, type Coordinate, type MouseEventParams } from "lightweight-charts";
 import type { PanelProps } from "./registry";
 import { ChartController, type ManagedViewportMode } from "../../render/chart/ChartController";
 import { clampRightScroll, RIGHT_OFFSET_BARS, usesBoundaryManagedFollow, type ChartType } from "../../render/chart/chartTheme";
-import type { ChartApiFacade, LwcSeries } from "../../render/chart/ChartApiFacade";
+import type { ChartApiFacade, CrosshairMove, LwcSeries } from "../../render/chart/ChartApiFacade";
+import { mapCrosshairBar } from "../../render/chart/crosshairSync";
 import { DiamondFillPrimitive } from "../../render/chart/diamondPrimitive";
 import { VisibleExtremaPrimitive } from "../../render/chart/visibleExtremaPrimitive";
 import { SessionShadingPrimitive } from "../../render/chart/sessionPrimitive";
@@ -28,6 +29,7 @@ import { DEFAULT_RECT_FILL_OPACITY, type Drawing } from "../../render/chart/draw
 import type { LineStyleName } from "../../render/chart/lineStyle";
 import { getTvPalette, getTvChrome } from "../../render/chart/tvTheme";
 import { PanelHeaderSlotContext } from "./headerSlot";
+import type { CrosshairCursor, CrosshairSyncHandle } from "../crosshairSync";
 import { ChartHeaderControls } from "./tv/ChartHeaderControls";
 import { TVDrawingRail, type RailPos } from "./tv/TVDrawingRail";
 import { TVContextMenu, type MenuEntry } from "./tv/TVContextMenu";
@@ -61,6 +63,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
 } {
   let main: ISeriesApi<"Candlestick" | "Bar" | "Line" | "Area"> | null = null;
   let volumeScale: ISeriesApi<"Histogram"> | null = null;
+  let crosshairHorizontalVisible = true;
   let sessionAttached = false;
   let watermark: { detach: () => void } | null = null;
   const session = new SessionShadingPrimitive(palette);
@@ -141,8 +144,26 @@ function makeFacade(chart: IChartApi, palette: Palette): {
       }
     },
     takeScreenshot: () => chart.takeScreenshot(),
+    setCrosshairPosition: (timeMs, price, showHorizontalLine) => {
+      facade.setCrosshairHorizontalLineVisible(showHorizontalLine);
+      if (main) chart.setCrosshairPosition(price, Math.floor(timeMs / 1000) as unknown as Time, main);
+    },
+    clearCrosshairPosition: () => {
+      chart.clearCrosshairPosition();
+      facade.setCrosshairHorizontalLineVisible(true);
+    },
+    setCrosshairHorizontalLineVisible: (visible) => {
+      if (crosshairHorizontalVisible === visible) return;
+      crosshairHorizontalVisible = visible;
+      chart.applyOptions({ crosshair: { horzLine: { visible, labelVisible: visible } } });
+    },
     subscribeCrosshairMove: (cb) => {
-      const handler = (param: { logical?: number }) => cb(typeof param.logical === "number" ? param.logical : null);
+      const handler = (param: MouseEventParams<Time>) => cb({
+        logical: typeof param.logical === "number" ? param.logical : null,
+        timeMs: typeof param.time === "number" ? param.time * 1000 : null,
+        point: param.point ? { x: param.point.x, y: param.point.y } : null,
+        paneIndex: param.paneIndex ?? 0,
+      });
       chart.subscribeCrosshairMove(handler);
       return () => chart.unsubscribeCrosshairMove(handler);
     },
@@ -155,7 +176,7 @@ function makeFacade(chart: IChartApi, palette: Palette): {
   return { facade, setPalette: (p) => { session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); visibleExtrema.setPalette(p); }, drawings, visibleExtrema };
 }
 
-export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange, group: groupProp, symbol: symbolProp, monitoring }: PanelProps): JSX.Element {
+export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange, group: groupProp, symbol: symbolProp, monitoring, active }: PanelProps): JSX.Element {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<ChartController | null>(null);
   const setFacadePaletteRef = useRef<((p: Palette) => void) | null>(null);
@@ -199,6 +220,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // Config surfaces (timeframe + indicators) ARE low-rate chrome, so React state is
   // fine here (the hard rule is about market data, not per-chart config).
   const [timeframe, setTf] = useState(timeframe0);
+  const [crosshairSyncEnabled, setCrosshairSyncEnabled] = useState(() => config.settings.crosshairSync === true);
   const [instances, setInstances] = useState<IndicatorInstance[]>(normalizedIndicators.instances);
 
   const interactionRef = useRef<DrawingInteraction | null>(null);
@@ -250,6 +272,11 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const pendingIndicatorHydrationRef = useRef<Map<string, PendingIndicatorHydration>>(new Map());
   const chartGenerationRef = useRef(0);
   const crosshairLogicalRef = useRef<number | null>(null);
+  const crosshairSyncEnabledRef = useRef(crosshairSyncEnabled);
+  crosshairSyncEnabledRef.current = crosshairSyncEnabled;
+  const crosshairSyncHandleRef = useRef<CrosshairSyncHandle | null>(null);
+  const remoteCursorRef = useRef<CrosshairCursor | null>(null);
+  const remoteCrosshairRenderedRef = useRef(false);
   const refreshSelRef = useRef<() => void>(() => {});
   const facadeRef = useRef<ChartApiFacade | null>(null);
   const orderMarkerLayoutRef = useRef<() => void>(() => {});
@@ -481,6 +508,9 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       viewportGesture = true;
       controller.noteUserViewportInteraction(true);
     };
+    let localPointerSequence = 0;
+    let remoteCrosshairPointerSequence = -1;
+    const onLocalCrosshairInput = () => { localPointerSequence++; };
     const onViewportPointerUp = () => {
       if (viewportGesture && wheelEndTimer === null) controller.noteUserViewportInteraction(false);
       pointerStart = null;
@@ -500,6 +530,12 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     };
     host.addEventListener("pointerdown", onViewportPointerDown);
     host.addEventListener("pointermove", onViewportPointerMove);
+    host.addEventListener("pointermove", onLocalCrosshairInput, true);
+    host.addEventListener("mousemove", onLocalCrosshairInput, true);
+    host.addEventListener("pointerenter", onLocalCrosshairInput, true);
+    host.addEventListener("mouseenter", onLocalCrosshairInput, true);
+    host.addEventListener("pointerleave", onLocalCrosshairInput, true);
+    host.addEventListener("mouseleave", onLocalCrosshairInput, true);
     window.addEventListener("pointerup", onViewportPointerUp);
     window.addEventListener("pointercancel", onViewportPointerUp);
     host.addEventListener("wheel", onViewportWheel);
@@ -643,10 +679,85 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     // the crosshair position is cheap and stays synchronous; the expensive
     // recompute is deferred to once per frame, same rAF-batching pattern.
     let legendFrame: number | null = null;
-    const offCrosshair = facade.subscribeCrosshairMove((logical) => {
-      crosshairLogicalRef.current = logical;
+    const scheduleLegendUpdate = () => {
       if (legendFrame !== null) return;
       legendFrame = requestAnimationFrame(() => { legendFrame = null; updateLegend(); });
+    };
+    const renderRemoteCrosshair = (cursor: CrosshairCursor | null) => {
+      const previousCursor = remoteCursorRef.current;
+      remoteCursorRef.current = cursor;
+      if (!cursor) {
+        if (!remoteCrosshairRenderedRef.current && !previousCursor) return;
+        remoteCrosshairRenderedRef.current = false;
+        remoteCrosshairPointerSequence = localPointerSequence;
+        facade.clearCrosshairPosition();
+        crosshairLogicalRef.current = null;
+        scheduleLegendUpdate();
+        return;
+      }
+      const bars = controller.displayBars();
+      const index = mapCrosshairBar(cursor.timeMs, cursor.timeframe, bars, tfRef.current as Timeframe);
+      const visible = facade.getVisibleLogicalRange();
+      if (index === null || !visible || index < visible.from || index > visible.to) {
+        if (remoteCrosshairRenderedRef.current) {
+          remoteCrosshairPointerSequence = localPointerSequence;
+          facade.clearCrosshairPosition();
+        }
+        remoteCrosshairRenderedRef.current = false;
+        crosshairLogicalRef.current = null;
+        scheduleLegendUpdate();
+        return;
+      }
+      const bar = bars[index];
+      if (!bar) return;
+      remoteCrosshairPointerSequence = localPointerSequence;
+      facade.setCrosshairPosition(Date.parse(bar.bucketStart), cursor.price ?? bar.c, cursor.price !== null);
+      remoteCrosshairRenderedRef.current = true;
+      crosshairLogicalRef.current = index;
+      scheduleLegendUpdate();
+    };
+    const syncHandle = linkGroups.crosshairSync.register(
+      () => ({ group: groupRef.current, symbol: ownSymbolRef.current, enabled: crosshairSyncEnabledRef.current }),
+      renderRemoteCrosshair,
+    );
+    crosshairSyncHandleRef.current = syncHandle;
+    const offCrosshair = facade.subscribeCrosshairMove((event: CrosshairMove) => {
+      crosshairLogicalRef.current = event.logical;
+      // A remote API update may also notify this subscription; only fresh local input owns publication.
+      if (remoteCrosshairPointerSequence === localPointerSequence) {
+        scheduleLegendUpdate();
+        return;
+      }
+      if (event.point !== null) {
+        remoteCrosshairPointerSequence = -1;
+        remoteCursorRef.current = null;
+        remoteCrosshairRenderedRef.current = false;
+        facade.setCrosshairHorizontalLineVisible(true);
+      }
+      scheduleLegendUpdate();
+
+      if (event.point === null) {
+        syncHandle.clear();
+        syncHandle.refresh();
+        return;
+      }
+      if (event.timeMs === null || groupRef.current === null || !ownSymbolRef.current) {
+        syncHandle.clear();
+        return;
+      }
+      const sourceTimeframe = tfRef.current as Timeframe;
+      if (mapCrosshairBar(event.timeMs, sourceTimeframe, controller.displayBars(), sourceTimeframe) === null) {
+        syncHandle.clear();
+        return;
+      }
+      const price = event.paneIndex === 0 ? facade.coordinateToPrice(event.point.y) : null;
+      syncHandle.publish({
+        group: groupRef.current,
+        symbol: ownSymbolRef.current,
+        timeframe: sourceTimeframe,
+        timeMs: event.timeMs,
+        price: price !== null && Number.isFinite(price) ? price : null,
+      });
     });
 
     // Each chart panel tracks its own last-seen revision per store, rather than
@@ -777,6 +888,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         drawings.setDrawings(stores.drawings.forSymbol(currentSymbol));
         drawings.setBars(controller.barsMs(), timeframeToMs(tfRef.current as Timeframe));
         drawings.requestUpdate();
+        if (remoteCursorRef.current) renderRemoteCrosshair(remoteCursorRef.current);
         updateLegend();
         refreshSelRef.current?.();
         const heights = facade.paneHeights();
@@ -808,9 +920,18 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       viewportGeneration++;
       chartGenerationRef.current++;
       pendingIndicatorHydrationRef.current.clear();
-      off(); offLink(); offHistoryReady(); offCrosshair(); ro.disconnect();
+      off(); offLink(); offHistoryReady(); offCrosshair(); syncHandle.dispose(); ro.disconnect();
+      if (crosshairSyncHandleRef.current === syncHandle) crosshairSyncHandleRef.current = null;
+      remoteCursorRef.current = null;
+      remoteCrosshairRenderedRef.current = false;
       host.removeEventListener("pointerdown", onViewportPointerDown);
       host.removeEventListener("pointermove", onViewportPointerMove);
+      host.removeEventListener("pointermove", onLocalCrosshairInput, true);
+      host.removeEventListener("mousemove", onLocalCrosshairInput, true);
+      host.removeEventListener("pointerenter", onLocalCrosshairInput, true);
+      host.removeEventListener("mouseenter", onLocalCrosshairInput, true);
+      host.removeEventListener("pointerleave", onLocalCrosshairInput, true);
+      host.removeEventListener("mouseleave", onLocalCrosshairInput, true);
       window.removeEventListener("pointerup", onViewportPointerUp);
       window.removeEventListener("pointercancel", onViewportPointerUp);
       host.removeEventListener("wheel", onViewportWheel);
@@ -851,6 +972,13 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     if (groupRef.current === null) applySymbolRef.current?.();
   }, [symbolProp]);
 
+  useEffect(() => {
+    const handle = crosshairSyncHandleRef.current;
+    if (!handle) return;
+    handle.clear();
+    handle.refresh();
+  }, [group, chartSymbol, timeframe, crosshairSyncEnabled, active]);
+
   // Theme switch: re-apply palette to chart, series and the custom primitives.
   useEffect(() => {
     controllerRef.current?.setPalette(palette);
@@ -866,6 +994,12 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // state here would clobber newer values with stale closures (this `config` is
   // frozen at panel creation — dockview never re-invokes the factory).
   const persist = (patch: Record<string, unknown>) => onConfigChange(patch);
+  const toggleCrosshairSync = () => {
+    const next = !crosshairSyncEnabledRef.current;
+    crosshairSyncEnabledRef.current = next;
+    setCrosshairSyncEnabled(next);
+    persist({ crosshairSync: next });
+  };
   const persistIndicatorModel = (next: IndicatorInstance[]) => persist({
     indicators: next,
     chartIndicatorModelVersion: CHART_INDICATOR_MODEL_VERSION,
@@ -1112,6 +1246,8 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     onTimeframe={changeTimeframe} onAddIndicator={addIndicator}
     volumeAvailable={!instances.some((inst) => inst.type === "VOLUME")}
     onScreenshot={onScreenshot} onOpenSettings={() => setChartSettingsOpen(true)}
+    crosshairSyncEnabled={crosshairSyncEnabled} onToggleCrosshairSync={toggleCrosshairSync}
+    {...(group === null ? { crosshairSyncDisabledReason: "Link this chart to a Link Group to enable Crosshair Sync" } : {})}
     drawingToolsVisible={drawingToolsVisible} onToggleDrawingTools={toggleDrawingTools} />;
 
   return (

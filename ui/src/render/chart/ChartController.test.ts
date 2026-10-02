@@ -3,7 +3,7 @@ import {
   ChartController, LEFT_PAD_BARS, bandsFromBars, fillEmptyTenSecondSlots,
   type BarReader, type IndicatorController, type CommandSender,
 } from "./ChartController";
-import type { ChartApiFacade, LwcSeries } from "./ChartApiFacade";
+import type { ChartApiFacade, CrosshairMove, LwcSeries } from "./ChartApiFacade";
 import { LIGHT, DARK } from "../palette";
 import type { Bar } from "../../wire/contract";
 import { defaultVolumeIndicator, withDefaultParams } from "./indicatorSeries";
@@ -56,7 +56,7 @@ function fakeFacade() {
   const setVisibleLogicalRangeCalls: Array<{ from: number; to: number }> = [];
   const scroll = { value: 0 };
   const facade: ChartApiFacade & { created: typeof created; scrolls: number; resets: number; priceResets: number; bands: number; lastBands: unknown[]; scaleMargins: typeof scaleMargins }
-    & { mainKind: string; screenshots: number; crosshairCb: ((l: number | null) => void) | null }
+    & { mainKind: string; screenshots: number; crosshairCb: ((event: CrosshairMove) => void) | null }
     & { watermark: string | null; lastOptions: unknown; stretchFactors: typeof stretchFactors }
     & { visibleRange: { from: number; to: number } | null; setVisibleRangeCalls: typeof setVisibleRangeCalls }
     & { visibleLogicalRange: { from: number; to: number } | null; setVisibleLogicalRangeCalls: typeof setVisibleLogicalRangeCalls; scrollPosition: number } = {
@@ -66,6 +66,7 @@ function fakeFacade() {
     visibleRange: null, setVisibleRangeCalls, visibleLogicalRange: null, setVisibleLogicalRangeCalls,
     setMainSeries: (kind, o) => { const s = fakeSeries(() => { scroll.value--; }); created.push({ kind, pane: 0, options: o, series: s }); facade.mainKind = kind; return s; },
     takeScreenshot: () => { facade.screenshots++; return {} as unknown as HTMLCanvasElement; },
+    setCrosshairPosition: () => {}, clearCrosshairPosition: () => {}, setCrosshairHorizontalLineVisible: () => {},
     subscribeCrosshairMove: (cb) => { facade.crosshairCb = cb; return () => { facade.crosshairCb = null; }; },
     paneHeights: () => [400, 120],
     paneStretchFactor: (i) => stretchFactors.get(i) ?? 1,

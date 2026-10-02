@@ -32,6 +32,8 @@ const chartApi = {
   timeScale: vi.fn(() => timeScaleApi),
   applyOptions: vi.fn(), resize: vi.fn(), remove: vi.fn(),
   takeScreenshot: vi.fn(() => document.createElement("canvas")),
+  setCrosshairPosition: vi.fn(), clearCrosshairPosition: vi.fn(),
+  setCrosshairHorizontalLineVisible: vi.fn(),
   subscribeCrosshairMove: vi.fn(),
   unsubscribeCrosshairMove: vi.fn(),
 };
@@ -78,10 +80,10 @@ vi.stubGlobal("cancelAnimationFrame", () => {});
 beforeEach(() => { vi.clearAllMocks(); cleanup(); });
 
 function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sharedScheduler?: Scheduler,
-  settingsOverride?: Record<string, unknown>, chartQueryResult?: unknown, monitoring = false) {
+  settingsOverride?: Record<string, unknown>, chartQueryResult?: unknown, monitoring = false, sharedLinkGroups?: LinkGroups) {
   const stores = sharedStores ?? makeStores();
   const scheduler = sharedScheduler ?? new Scheduler(browserRaf, () => {});
-  const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
+  const linkGroups = sharedLinkGroups ?? new LinkGroups(new BroadcastChannelBus(), () => {});
   const commands = {
     sendCommand: vi.fn(async (): Promise<AckMsg> => ({ kind: "ack", corrId: "c", status: "accepted" })),
     sendQuery: vi.fn(async (name: string, args: unknown) => {
@@ -914,6 +916,79 @@ describe("ChartPanel", () => {
     const { getByRole } = renderChart();
     fireEvent.click(getByRole("button", { name: "screenshot" }));
     expect(chartApi.takeScreenshot).toHaveBeenCalled();
+  });
+
+  it("persists Crosshair Sync per chart and preserves its preference while pinned", () => {
+    const { getByRole, onConfigChange, rerenderPinnedSymbol } = renderChart();
+    const toggle = getByRole("button", { name: "Crosshair Sync" }) as HTMLButtonElement;
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(toggle);
+    expect(onConfigChange).toHaveBeenCalledWith({ crosshairSync: true });
+
+    act(() => rerenderPinnedSymbol("US.AAPL"));
+    const pinnedToggle = getByRole("button", { name: "Crosshair Sync" }) as HTMLButtonElement;
+    expect(pinnedToggle.disabled).toBe(true);
+    expect(pinnedToggle.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("updates a same-group receiver without rebroadcasting its synchronized crosshair", async () => {
+    const bars: Bar[] = [
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:30:00.000Z", o: 100, h: 101, l: 99, c: 100.5, v: 100, inProgress: false },
+      { symbol: "US.AAPL", timeframe: "1m", bucketStart: "2026-07-09T13:31:00.000Z", o: 200, h: 202, l: 199, c: 201.5, v: 200, inProgress: false },
+    ];
+    const result = { symbol: "US.AAPL", timeframe: "1m", fromMs: Date.parse(bars[0].bucketStart),
+      toMs: Date.parse(bars[1].bucketStart) + 60_000, bars, indicators: [], historyRevision: 1 };
+    const stores = makeStores();
+    const scheduler = new Scheduler(browserRaf, () => {});
+    const surfaces: Surface[] = [];
+    vi.spyOn(scheduler, "register").mockImplementation((surface) => { surfaces.push(surface); return vi.fn(); });
+    const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
+    const source = renderChart("source", stores, scheduler, { crosshairSync: true }, result, false, linkGroups);
+    const receiver = renderChart("receiver", stores, scheduler, { crosshairSync: true }, result, false, linkGroups);
+    const posted: unknown[] = [];
+    const postMessage = BroadcastChannel.prototype.postMessage;
+    const postSpy = vi.spyOn(BroadcastChannel.prototype, "postMessage").mockImplementation(function (this: BroadcastChannel, message: unknown) {
+      if (this.name === "etape.crosshair") posted.push(message);
+      return postMessage.call(this, message);
+    });
+    timeScaleApi.getVisibleLogicalRange.mockReturnValue({ from: -1, to: 5 });
+    try {
+      act(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
+        seq: 1, ts: "2026-08-03T01:00:00Z", kind: "chart-ready", detail: "US.AAPL",
+      } }));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      act(() => surfaces.forEach((surface) => surface.paint()));
+
+      const onMove = chartApi.subscribeCrosshairMove.mock.calls[0][0] as (param: object) => void;
+      const receiverMove = chartApi.subscribeCrosshairMove.mock.calls[1][0] as (param: object) => void;
+      act(() => onMove({ time: Date.parse(bars[0].bucketStart) / 1000, logical: 0,
+        point: { x: 120, y: 24 }, paneIndex: 0, sourceEvent: {} }));
+
+      expect(chartApi.setCrosshairPosition).toHaveBeenCalledWith(0, Date.parse(bars[0].bucketStart) / 1000, expect.any(Object));
+      expect(posted).toHaveLength(1);
+      act(() => receiverMove({ time: Date.parse(bars[0].bucketStart) / 1000, logical: 0,
+        point: { x: 120, y: 24 }, paneIndex: 0 }));
+      expect(posted).toHaveLength(1);
+      expect(within(receiver.container).getByTestId("legend-c").textContent).toContain("100.5");
+      expect(within(source.container).getByTestId("legend-c").textContent).toContain("100.5");
+
+      chartApi.applyOptions.mockClear();
+      act(() => onMove({ time: Date.parse(bars[0].bucketStart) / 1000, logical: 0,
+        point: { x: 120, y: 24 }, paneIndex: 1, sourceEvent: {} }));
+      expect(chartApi.setCrosshairPosition).toHaveBeenLastCalledWith(100.5, Date.parse(bars[0].bucketStart) / 1000, expect.any(Object));
+      expect(chartApi.applyOptions).toHaveBeenCalledWith({ crosshair: { horzLine: { visible: false, labelVisible: false } } });
+
+      chartApi.clearCrosshairPosition.mockClear();
+      timeScaleApi.getVisibleLogicalRange.mockReturnValue({ from: 1, to: 1 });
+      act(() => onMove({ time: Date.parse(bars[0].bucketStart) / 1000, logical: 0,
+        point: { x: 120, y: 24 }, paneIndex: 0, sourceEvent: {} }));
+      act(() => surfaces.forEach((surface) => surface.paint()));
+      expect(chartApi.clearCrosshairPosition).toHaveBeenCalledOnce();
+      expect(within(receiver.container).getByTestId("legend-c").textContent).toContain("201.5");
+    } finally {
+      timeScaleApi.getVisibleLogicalRange.mockReturnValue(null);
+      postSpy.mockRestore();
+    }
   });
 
   it("adding an indicator via the picker persists it", () => {

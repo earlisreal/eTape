@@ -2,7 +2,8 @@
 // are anchored to 09:30 ET (TradingView-style), NOT to midnight. Used to validate
 // fixtures and to let the chart controller reason about in-progress vs new buckets
 // without depending on message arrival order. ET conversion via Intl (DST-correct).
-export type Timeframe = "10s" | "1m" | "5m" | "15m" | "30m" | "60m" | "D" | "W" | "M";
+export const TIMEFRAMES = ["10s", "1m", "5m", "15m", "30m", "60m", "D", "W", "M"] as const;
+export type Timeframe = typeof TIMEFRAMES[number];
 
 const ET = new Intl.DateTimeFormat("en-US", {
   timeZone: "America/New_York", hour12: false,

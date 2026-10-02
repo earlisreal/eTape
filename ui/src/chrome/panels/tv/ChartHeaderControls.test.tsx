@@ -9,6 +9,7 @@ afterEach(cleanup);
 const base = {
   palette: LIGHT, timeframe: "1m",
   onTimeframe: vi.fn(), onAddIndicator: vi.fn(), onScreenshot: vi.fn(), onOpenSettings: vi.fn(),
+  crosshairSyncEnabled: false, onToggleCrosshairSync: vi.fn(),
   drawingToolsVisible: true, onToggleDrawingTools: vi.fn(),
 };
 
@@ -41,6 +42,23 @@ describe("ChartHeaderControls", () => {
     expect(base.onTimeframe).toHaveBeenCalledWith("5m");
     expect(base.onScreenshot).toHaveBeenCalled();
     expect(base.onOpenSettings).toHaveBeenCalled();
+  });
+
+  it("exposes Crosshair Sync state and keeps the toggle disabled for pinned charts", () => {
+    const onToggle = vi.fn();
+    const { rerender } = render(<ChartHeaderControls {...base} onToggleCrosshairSync={onToggle} />);
+    const toggle = screen.getByRole("button", { name: "Crosshair Sync" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(toggle.getAttribute("title")).toBe("Enable Crosshair Sync");
+    fireEvent.click(toggle);
+    expect(onToggle).toHaveBeenCalledOnce();
+
+    rerender(<ChartHeaderControls {...base} crosshairSyncEnabled
+      crosshairSyncDisabledReason="Link this chart to a color group to enable Crosshair Sync" />);
+    const pinnedToggle = screen.getByRole("button", { name: "Crosshair Sync" }) as HTMLButtonElement;
+    expect(pinnedToggle.disabled).toBe(true);
+    expect(pinnedToggle.getAttribute("aria-pressed")).toBe("true");
+    expect(pinnedToggle.title).toBe("Link this chart to a color group to enable Crosshair Sync");
   });
 
   it("fires the timeframe callback from the narrow-layout dropdown", () => {
