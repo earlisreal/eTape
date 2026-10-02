@@ -10,6 +10,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/trdcommon"
+	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/trdgetacclist"
 )
 
 // acc builds a TrdAcc with every field EligibleLiveUS/getAccList inspect,
@@ -79,7 +80,16 @@ func TestListAccounts_Success(t *testing.T) {
 	m := newMockTrdOpenD(t)
 	eligible := acc(testAccID)
 	master := acc(testAccID+1, withRole(trdcommon.TrdAccRole_TrdAccRole_Master))
-	m.setRespond(opend.ProtoTrdGetAccList, func(opend.Frame) proto.Message { return accListResp(eligible, master) })
+	m.setRespond(opend.ProtoTrdGetAccList, func(fr opend.Frame) proto.Message {
+		var req trdgetacclist.Request
+		if err := proto.Unmarshal(fr.Body, &req); err != nil {
+			t.Error(err)
+		}
+		if !req.GetC2S().GetNeedGeneralSecAccount() {
+			return accListResp() // Universal accounts are omitted unless explicitly requested.
+		}
+		return accListResp(eligible, master)
+	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

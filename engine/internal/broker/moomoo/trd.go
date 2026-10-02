@@ -291,7 +291,10 @@ func orderStillWorking(o *trdcommon.Order) bool {
 // interpret the response identically -- only the accID/eligibility logic that
 // each caller layers on top can differ.
 func fetchAccList(ctx context.Context, c *opend.Client) ([]*trdcommon.TrdAcc, error) {
-	req := &trdgetacclist.Request{C2S: &trdgetacclist.C2S{UserID: proto.Uint64(0)}} // required-but-deprecated proto2 field, see boot.go's ProbeRTT precedent
+	req := &trdgetacclist.Request{C2S: &trdgetacclist.C2S{
+		UserID:                proto.Uint64(0),  // Required-but-deprecated proto2 field.
+		NeedGeneralSecAccount: proto.Bool(true), // Include universal securities accounts.
+	}}
 	fr, err := c.Request(ctx, opend.ProtoTrdGetAccList, req)
 	if err != nil {
 		return nil, fmt.Errorf("moomoo: get acc list transport: %w", err)
