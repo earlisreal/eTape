@@ -229,6 +229,10 @@ _Avoid_: Per-button shortcut display, keycap setting
 
 ## Chart Viewport
 
+**Crosshair Sync**:
+A saved, opt-in Chart Panel preference for sharing crosshair time and stock-price positions across open workspaces with other enabled Chart Panels in the same Link Group displaying the same symbol.
+_Avoid_: Scanner Sync, symbol sync
+
 **Live View**:
 The chart state in which incoming bars keep the newest displayed bar visible while preserving the trader's chosen zoom. Its default position has four empty bar-widths of right padding.
 _Avoid_: Live edge, auto-scroll mode
