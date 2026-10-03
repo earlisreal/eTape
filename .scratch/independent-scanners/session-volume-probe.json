@@ -1,0 +1,24 @@
+{
+  "observed_utc": "2026-10-03T06:07:17.330455+08:00",
+  "sdk_version": "10.09.6908",
+  "scope": "One attempted US V2 request and one read-only subscription-counter read. Packing failed before V2 was sent; no subscriptions, snapshots, history, settings changes or orders.",
+  "request": {
+    "protocol": 3252,
+    "market": "US",
+    "volume_field": 2409,
+    "sort": "DESC",
+    "page_from": 0,
+    "page_count": 200
+  },
+  "errors": [
+    "'google._upb._message.FieldDescriptor' object has no attribute 'label'"
+  ],
+  "subscription_before": {
+    "total_used": 31,
+    "remain": 269,
+    "own_used": 0
+  },
+  "latency_seconds": 0.0,
+  "completed": false,
+  "v2_request_sent": false
+}

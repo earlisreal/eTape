@@ -1,0 +1,1267 @@
+{
+  "all_count": 12143,
+  "client": "eTape native Go protobuf",
+  "completed": true,
+  "descending_volume": true,
+  "last_page": false,
+  "latency_seconds": 0.1610686,
+  "observed_utc": "2026-10-02T22:10:58.2054779Z",
+  "request": {
+    "market": "US",
+    "page_count": 200,
+    "page_from": 0,
+    "protocol": 3252,
+    "sort": "DESC",
+    "volume_field": 2409
+  },
+  "ret_message": "",
+  "ret_type": 0,
+  "returned": 200,
+  "rows": [
+    {
+      "session_price": 30.94,
+      "session_volume": 26871936,
+      "symbol": "WBD",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 10.6,
+      "session_volume": 11714048,
+      "symbol": "NOK",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 3.09,
+      "session_volume": 11056154,
+      "symbol": "GRAB",
+      "session_change_fraction": 0.00324
+    },
+    {
+      "session_price": 24.3,
+      "session_volume": 10401214,
+      "symbol": "T",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 142.13,
+      "session_volume": 10373225,
+      "symbol": "ORCL",
+      "session_change_fraction": -0.00119
+    },
+    {
+      "session_price": 15.751,
+      "session_volume": 10328032,
+      "symbol": "SOFI",
+      "session_change_fraction": -0.00121
+    },
+    {
+      "session_price": 0,
+      "session_volume": 9493333,
+      "symbol": "SEII",
+      "session_change_fraction": -0.05
+    },
+    {
+      "session_price": 8.23,
+      "session_volume": 8696289,
+      "symbol": "SDEV",
+      "session_change_fraction": 0.10029
+    },
+    {
+      "session_price": 0.845,
+      "session_volume": 8662283,
+      "symbol": "SCKT",
+      "session_change_fraction": 0.19496
+    },
+    {
+      "session_price": 33.83,
+      "session_volume": 7464761,
+      "symbol": "NKE",
+      "session_change_fraction": -0.00118
+    },
+    {
+      "session_price": 0.001,
+      "session_volume": 6771770,
+      "symbol": "FRTG",
+      "session_change_fraction": -0.04333
+    },
+    {
+      "session_price": 0.088,
+      "session_volume": 6607562,
+      "symbol": "SDST",
+      "session_change_fraction": 0.04004
+    },
+    {
+      "session_price": 104.28,
+      "session_volume": 6393105,
+      "symbol": "WMT",
+      "session_change_fraction": 0.00019
+    },
+    {
+      "session_price": 117.88,
+      "session_volume": 5983256,
+      "symbol": "TD",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 233.88,
+      "session_volume": 5289416,
+      "symbol": "NVDA",
+      "session_change_fraction": -0.00029
+    },
+    {
+      "session_price": 0.63,
+      "session_volume": 5029441,
+      "symbol": "FLUX",
+      "session_change_fraction": -0.01562
+    },
+    {
+      "session_price": 76.97,
+      "session_volume": 4930883,
+      "symbol": "NEE",
+      "session_change_fraction": 0.00182
+    },
+    {
+      "session_price": 12.108,
+      "session_volume": 4878976,
+      "symbol": "F",
+      "session_change_fraction": 0.00067
+    },
+    {
+      "session_price": 59.07,
+      "session_volume": 4793961,
+      "symbol": "TRP",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 0.408,
+      "session_volume": 4649989,
+      "symbol": "AUID",
+      "session_change_fraction": -0.07108
+    },
+    {
+      "session_price": 333.212,
+      "session_volume": 4322472,
+      "symbol": "AAPL",
+      "session_change_fraction": -0.00143
+    },
+    {
+      "session_price": 48.93,
+      "session_volume": 4164408,
+      "symbol": "SLB",
+      "session_change_fraction": 0.00389
+    },
+    {
+      "session_price": 25.19,
+      "session_volume": 3991859,
+      "symbol": "GME",
+      "session_change_fraction": 0.01983
+    },
+    {
+      "session_price": 2.659,
+      "session_volume": 3987375,
+      "symbol": "SAIQ",
+      "session_change_fraction": 0.43751
+    },
+    {
+      "session_price": 256.03,
+      "session_volume": 3780224,
+      "symbol": "JNJ",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 43.582,
+      "session_volume": 3741965,
+      "symbol": "SMCI",
+      "session_change_fraction": -0.00248
+    },
+    {
+      "session_price": 86.97,
+      "session_volume": 3658675,
+      "symbol": "APH",
+      "session_change_fraction": 0.00011
+    },
+    {
+      "session_price": 27.1,
+      "session_volume": 3408008,
+      "symbol": "RF",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 112.1,
+      "session_volume": 3372715,
+      "symbol": "CSCO",
+      "session_change_fraction": -0.00089
+    },
+    {
+      "session_price": 40.89,
+      "session_volume": 3294839,
+      "symbol": "EXC",
+      "session_change_fraction": 0.00392
+    },
+    {
+      "session_price": 343.2,
+      "session_volume": 3289257,
+      "symbol": "GOOGL",
+      "session_change_fraction": -0.00087
+    },
+    {
+      "session_price": 42.54,
+      "session_volume": 3216622,
+      "symbol": "SW",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 31.09,
+      "session_volume": 3210619,
+      "symbol": "TSCO",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 0.231,
+      "session_volume": 3180437,
+      "symbol": "FNGR",
+      "session_change_fraction": -0.06895
+    },
+    {
+      "session_price": 27.809,
+      "session_volume": 3146756,
+      "symbol": "PFE",
+      "session_change_fraction": 0.00033
+    },
+    {
+      "session_price": 46.45,
+      "session_volume": 2827904,
+      "symbol": "TFC",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 114.17,
+      "session_volume": 2788546,
+      "symbol": "QRVO",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 1.35,
+      "session_volume": 2723175,
+      "symbol": "VCIG",
+      "session_change_fraction": -0.01459
+    },
+    {
+      "session_price": 185.2,
+      "session_volume": 2687537,
+      "symbol": "QCOM",
+      "session_change_fraction": 0.00178
+    },
+    {
+      "session_price": 272.65,
+      "session_volume": 2685685,
+      "symbol": "MRVL",
+      "session_change_fraction": 0.00132
+    },
+    {
+      "session_price": 251.08,
+      "session_volume": 2624646,
+      "symbol": "AMZN",
+      "session_change_fraction": -0.00174
+    },
+    {
+      "session_price": 3.37,
+      "session_volume": 2586403,
+      "symbol": "AMOD",
+      "session_change_fraction": -0.03438
+    },
+    {
+      "session_price": 85.78,
+      "session_volume": 2573731,
+      "symbol": "KO",
+      "session_change_fraction": 0.00151
+    },
+    {
+      "session_price": 0.13,
+      "session_volume": 2533722,
+      "symbol": "NIVF",
+      "session_change_fraction": 0.0093
+    },
+    {
+      "session_price": 144.3,
+      "session_volume": 2527889,
+      "symbol": "MRK",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 5.17,
+      "session_volume": 2520377,
+      "symbol": "RIG",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 17.71,
+      "session_volume": 2513858,
+      "symbol": "AEO",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 83.504,
+      "session_volume": 2510990,
+      "symbol": "SO",
+      "session_change_fraction": -0.00258
+    },
+    {
+      "session_price": 370.9,
+      "session_volume": 2491507,
+      "symbol": "TSLA",
+      "session_change_fraction": 0.00083
+    },
+    {
+      "session_price": 61.17,
+      "session_volume": 2465452,
+      "symbol": "BMY",
+      "session_change_fraction": 0.00032
+    },
+    {
+      "session_price": 336.419,
+      "session_volume": 2404861,
+      "symbol": "COHR",
+      "session_change_fraction": -0.00184
+    },
+    {
+      "session_price": 0.169,
+      "session_volume": 2316959,
+      "symbol": "GPUS",
+      "session_change_fraction": -0.00235
+    },
+    {
+      "session_price": 86.66,
+      "session_volume": 2315485,
+      "symbol": "MDT",
+      "session_change_fraction": 0.00324
+    },
+    {
+      "session_price": 8.049,
+      "session_volume": 2130512,
+      "symbol": "ALHC",
+      "session_change_fraction": 0.01377
+    },
+    {
+      "session_price": 119.24,
+      "session_volume": 2113636,
+      "symbol": "INTC",
+      "session_change_fraction": -0.00075
+    },
+    {
+      "session_price": 59.79,
+      "session_volume": 2070573,
+      "symbol": "VMRK",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 517.21,
+      "session_volume": 2068743,
+      "symbol": "MSFT",
+      "session_change_fraction": -0.00061
+    },
+    {
+      "session_price": 1071.15,
+      "session_volume": 2061532,
+      "symbol": "MU",
+      "session_change_fraction": -0.00347
+    },
+    {
+      "session_price": 1.053,
+      "session_volume": 2046324,
+      "symbol": "QTEX",
+      "session_change_fraction": -0.04309
+    },
+    {
+      "session_price": 31.127,
+      "session_volume": 1997411,
+      "symbol": "KMI",
+      "session_change_fraction": 0.00184
+    },
+    {
+      "session_price": 31.36,
+      "session_volume": 1938355,
+      "symbol": "GEO",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 3.38,
+      "session_volume": 1920091,
+      "symbol": "NIO",
+      "session_change_fraction": 0.00296
+    },
+    {
+      "session_price": 7.59,
+      "session_volume": 1891280,
+      "symbol": "HOS",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 222.59,
+      "session_volume": 1869382,
+      "symbol": "IBM",
+      "session_change_fraction": -0.00022
+    },
+    {
+      "session_price": 16.76,
+      "session_volume": 1772743,
+      "symbol": "PBI",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 12.23,
+      "session_volume": 1760971,
+      "symbol": "PCG",
+      "session_change_fraction": -0.0073
+    },
+    {
+      "session_price": 45.959,
+      "session_volume": 1716168,
+      "symbol": "VZ",
+      "session_change_fraction": 0.00084
+    },
+    {
+      "session_price": 30.78,
+      "session_volume": 1705678,
+      "symbol": "ONON",
+      "session_change_fraction": -0.00226
+    },
+    {
+      "session_price": 31.9,
+      "session_volume": 1662302,
+      "symbol": "HAL",
+      "session_change_fraction": 0.00156
+    },
+    {
+      "session_price": 15.69,
+      "session_volume": 1660019,
+      "symbol": "CIFR",
+      "session_change_fraction": -0.00127
+    },
+    {
+      "session_price": 12.949,
+      "session_volume": 1622958,
+      "symbol": "AAL",
+      "session_change_fraction": 0.00065
+    },
+    {
+      "session_price": 27.31,
+      "session_volume": 1604429,
+      "symbol": "CPRT",
+      "session_change_fraction": 0.0033
+    },
+    {
+      "session_price": 57.59,
+      "session_volume": 1601259,
+      "symbol": "STM",
+      "session_change_fraction": 0.00576
+    },
+    {
+      "session_price": 194.28,
+      "session_volume": 1588057,
+      "symbol": "SKHY",
+      "session_change_fraction": -0.00435
+    },
+    {
+      "session_price": 194.72,
+      "session_volume": 1585629,
+      "symbol": "COF",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 51.12,
+      "session_volume": 1563436,
+      "symbol": "FAST",
+      "session_change_fraction": 0.00729
+    },
+    {
+      "session_price": 14.291,
+      "session_volume": 1561827,
+      "symbol": "RIVN",
+      "session_change_fraction": -0.00064
+    },
+    {
+      "session_price": 38.09,
+      "session_volume": 1508688,
+      "symbol": "TCOM",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 67.09,
+      "session_volume": 1484849,
+      "symbol": "NFLX",
+      "session_change_fraction": 0.00044
+    },
+    {
+      "session_price": 489.11,
+      "session_volume": 1469271,
+      "symbol": "SNPS",
+      "session_change_fraction": -0.00161
+    },
+    {
+      "session_price": 68.04,
+      "session_volume": 1452408,
+      "symbol": "UBER",
+      "session_change_fraction": -0.00102
+    },
+    {
+      "session_price": 64.05,
+      "session_volume": 1446636,
+      "symbol": "OTIS",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 188.48,
+      "session_volume": 1438867,
+      "symbol": "PLTR",
+      "session_change_fraction": -0.00143
+    },
+    {
+      "session_price": 21.99,
+      "session_volume": 1435268,
+      "symbol": "GEN",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 15.369,
+      "session_volume": 1433911,
+      "symbol": "HBAN",
+      "session_change_fraction": 0.00253
+    },
+    {
+      "session_price": 0.147,
+      "session_volume": 1398456,
+      "symbol": "GNS",
+      "session_change_fraction": -0.0193
+    },
+    {
+      "session_price": 7.78,
+      "session_volume": 1387076,
+      "symbol": "SMR",
+      "session_change_fraction": 0.00387
+    },
+    {
+      "session_price": 75.444,
+      "session_volume": 1367506,
+      "symbol": "PDD",
+      "session_change_fraction": 0.00084
+    },
+    {
+      "session_price": 21.582,
+      "session_volume": 1367124,
+      "symbol": "CMCSA",
+      "session_change_fraction": 0.00053
+    },
+    {
+      "session_price": 22.56,
+      "session_volume": 1361613,
+      "symbol": "HST",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 89.359,
+      "session_volume": 1344122,
+      "symbol": "CRWV",
+      "session_change_fraction": -0.00291
+    },
+    {
+      "session_price": 58.62,
+      "session_volume": 1337266,
+      "symbol": "CTSH",
+      "session_change_fraction": 0.00188
+    },
+    {
+      "session_price": 354.826,
+      "session_volume": 1331105,
+      "symbol": "AVGO",
+      "session_change_fraction": -0.00088
+    },
+    {
+      "session_price": 9.02,
+      "session_volume": 1321429,
+      "symbol": "PAGS",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 53.76,
+      "session_volume": 1320424,
+      "symbol": "BAC",
+      "session_change_fraction": 0.00018
+    },
+    {
+      "session_price": 156,
+      "session_volume": 1306595,
+      "symbol": "TGT",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 131.69,
+      "session_volume": 1298345,
+      "symbol": "PODD",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 339.98,
+      "session_volume": 1295421,
+      "symbol": "GOOG",
+      "session_change_fraction": -0.00108
+    },
+    {
+      "session_price": 94.71,
+      "session_volume": 1294329,
+      "symbol": "SBUX",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 7.05,
+      "session_volume": 1291078,
+      "symbol": "TDAY",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 403.04,
+      "session_volume": 1273048,
+      "symbol": "AMGN",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 5.1,
+      "session_volume": 1264652,
+      "symbol": "AQN",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 36.86,
+      "session_volume": 1260757,
+      "symbol": "TAP",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 84.024,
+      "session_volume": 1258219,
+      "symbol": "DAL",
+      "session_change_fraction": -0.00078
+    },
+    {
+      "session_price": 0.213,
+      "session_volume": 1255266,
+      "symbol": "DDC",
+      "session_change_fraction": -0.03142
+    },
+    {
+      "session_price": 7.43,
+      "session_volume": 1254135,
+      "symbol": "BRBR",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 14.701,
+      "session_volume": 1247720,
+      "symbol": "BZ",
+      "session_change_fraction": -0.00867
+    },
+    {
+      "session_price": 19.07,
+      "session_volume": 1215893,
+      "symbol": "PEB",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 27.52,
+      "session_volume": 1212491,
+      "symbol": "IBN",
+      "session_change_fraction": 0.00291
+    },
+    {
+      "session_price": 111.02,
+      "session_volume": 1202353,
+      "symbol": "CM",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 8.25,
+      "session_volume": 1191770,
+      "symbol": "GNL",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 262.82,
+      "session_volume": 1184349,
+      "symbol": "ABBV",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 38.28,
+      "session_volume": 1184199,
+      "symbol": "VSH",
+      "session_change_fraction": 0.00261
+    },
+    {
+      "session_price": 727.266,
+      "session_volume": 1176786,
+      "symbol": "META",
+      "session_change_fraction": -0.00111
+    },
+    {
+      "session_price": 20.3,
+      "session_volume": 1173644,
+      "symbol": "AMRX",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 67.35,
+      "session_volume": 1165776,
+      "symbol": "MO",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 17.55,
+      "session_volume": 1165328,
+      "symbol": "SNDX",
+      "session_change_fraction": -0.00284
+    },
+    {
+      "session_price": 156.9,
+      "session_volume": 1151619,
+      "symbol": "AZN",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 96.23,
+      "session_volume": 1127379,
+      "symbol": "SHEL",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 71.77,
+      "session_volume": 1126751,
+      "symbol": "SYF",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 58.21,
+      "session_volume": 1081736,
+      "symbol": "MDLZ",
+      "session_change_fraction": 0.00034
+    },
+    {
+      "session_price": 64.33,
+      "session_volume": 1059015,
+      "symbol": "CFG",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 26.278,
+      "session_volume": 1037388,
+      "symbol": "BMNR",
+      "session_change_fraction": 0.00029
+    },
+    {
+      "session_price": 53.64,
+      "session_volume": 1031404,
+      "symbol": "FER",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 164.058,
+      "session_volume": 1029735,
+      "symbol": "XOM",
+      "session_change_fraction": 0.00029
+    },
+    {
+      "session_price": 41.79,
+      "session_volume": 1011162,
+      "symbol": "IREN",
+      "session_change_fraction": 0.00071
+    },
+    {
+      "session_price": 35.85,
+      "session_volume": 998709,
+      "symbol": "WKC",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 17.67,
+      "session_volume": 986063,
+      "symbol": "NWG",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 45.89,
+      "session_volume": 970554,
+      "symbol": "PBA",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 84.26,
+      "session_volume": 960110,
+      "symbol": "CL",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 73,
+      "session_volume": 957799,
+      "symbol": "TARS",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 13.66,
+      "session_volume": 948852,
+      "symbol": "CNH",
+      "session_change_fraction": 0.0141
+    },
+    {
+      "session_price": 0.042,
+      "session_volume": 945371,
+      "symbol": "GETY",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 539.762,
+      "session_volume": 943740,
+      "symbol": "AMAT",
+      "session_change_fraction": -0.00051
+    },
+    {
+      "session_price": 7.74,
+      "session_volume": 935687,
+      "symbol": "TME",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 3.71,
+      "session_volume": 925960,
+      "symbol": "GTM",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 4.63,
+      "session_volume": 914967,
+      "symbol": "TSHA",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 7.34,
+      "session_volume": 902835,
+      "symbol": "BULL",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 9.12,
+      "session_volume": 896866,
+      "symbol": "XERS",
+      "session_change_fraction": 0.00441
+    },
+    {
+      "session_price": 632.97,
+      "session_volume": 891441,
+      "symbol": "AMD",
+      "session_change_fraction": -0.00148
+    },
+    {
+      "session_price": 13.77,
+      "session_volume": 883254,
+      "symbol": "CPNG",
+      "session_change_fraction": -0.00072
+    },
+    {
+      "session_price": 158.752,
+      "session_volume": 880434,
+      "symbol": "SPCX",
+      "session_change_fraction": -0.00131
+    },
+    {
+      "session_price": 4.898,
+      "session_volume": 879262,
+      "symbol": "ACHR",
+      "session_change_fraction": 0.00155
+    },
+    {
+      "session_price": 27.39,
+      "session_volume": 875136,
+      "symbol": "BRX",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 22.73,
+      "session_volume": 872975,
+      "symbol": "VICI",
+      "session_change_fraction": 0.00353
+    },
+    {
+      "session_price": 0.156,
+      "session_volume": 871814,
+      "symbol": "HODO",
+      "session_change_fraction": 0.07793
+    },
+    {
+      "session_price": 3.42,
+      "session_volume": 871407,
+      "symbol": "SITC",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 144.74,
+      "session_volume": 865792,
+      "symbol": "GILD",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 64.33,
+      "session_volume": 849747,
+      "symbol": "LNT",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 58.41,
+      "session_volume": 827913,
+      "symbol": "TXNM",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 2.12,
+      "session_volume": 827650,
+      "symbol": "NAUT",
+      "session_change_fraction": 0.08163
+    },
+    {
+      "session_price": 77.49,
+      "session_volume": 823928,
+      "symbol": "SYY",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 234.27,
+      "session_volume": 821980,
+      "symbol": "CRM",
+      "session_change_fraction": -0.00178
+    },
+    {
+      "session_price": 12.33,
+      "session_volume": 814036,
+      "symbol": "VIPS",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 158.91,
+      "session_volume": 813147,
+      "symbol": "BKNG",
+      "session_change_fraction": -0.00069
+    },
+    {
+      "session_price": 19.36,
+      "session_volume": 807028,
+      "symbol": "PINS",
+      "session_change_fraction": 0.00519
+    },
+    {
+      "session_price": 8.05,
+      "session_volume": 804803,
+      "symbol": "TU",
+      "session_change_fraction": 0.00124
+    },
+    {
+      "session_price": 56,
+      "session_volume": 794016,
+      "symbol": "BKR",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 94.21,
+      "session_volume": 792960,
+      "symbol": "RIO",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 21.5,
+      "session_volume": 789590,
+      "symbol": "XP",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 2.07,
+      "session_volume": 786146,
+      "symbol": "RETO",
+      "session_change_fraction": 0.33535
+    },
+    {
+      "session_price": 29.75,
+      "session_volume": 783032,
+      "symbol": "TOST",
+      "session_change_fraction": -0.00134
+    },
+    {
+      "session_price": 97.23,
+      "session_volume": 779565,
+      "symbol": "ABT",
+      "session_change_fraction": -0.00276
+    },
+    {
+      "session_price": 415.7,
+      "session_volume": 762217,
+      "symbol": "WDC",
+      "session_change_fraction": 0.00098
+    },
+    {
+      "session_price": 58.58,
+      "session_volume": 754379,
+      "symbol": "LYB",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 68.04,
+      "session_volume": 749784,
+      "symbol": "PEG",
+      "session_change_fraction": -0.00044
+    },
+    {
+      "session_price": 14.51,
+      "session_volume": 749613,
+      "symbol": "IRT",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 53.8,
+      "session_volume": 749578,
+      "symbol": "EIX",
+      "session_change_fraction": -0.00167
+    },
+    {
+      "session_price": 50.31,
+      "session_volume": 748801,
+      "symbol": "EQT",
+      "session_change_fraction": 0.00279
+    },
+    {
+      "session_price": 91.34,
+      "session_volume": 747935,
+      "symbol": "SWK",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 8.92,
+      "session_volume": 741932,
+      "symbol": "LBTYA",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 22.34,
+      "session_volume": 741099,
+      "symbol": "HDB",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 55.44,
+      "session_volume": 727872,
+      "symbol": "EDU",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 102,
+      "session_volume": 720544,
+      "symbol": "DIS",
+      "session_change_fraction": -0.00185
+    },
+    {
+      "session_price": 0.155,
+      "session_volume": 717653,
+      "symbol": "SCNX",
+      "session_change_fraction": -0.02707
+    },
+    {
+      "session_price": 35,
+      "session_volume": 712848,
+      "symbol": "MDLN",
+      "session_change_fraction": -0.01713
+    },
+    {
+      "session_price": 288.44,
+      "session_volume": 709772,
+      "symbol": "VRSN",
+      "session_change_fraction": 0.00041
+    },
+    {
+      "session_price": 5.8,
+      "session_volume": 707940,
+      "symbol": "SATL",
+      "session_change_fraction": 0.01225
+    },
+    {
+      "session_price": 43.38,
+      "session_volume": 706490,
+      "symbol": "BKU",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 5.54,
+      "session_volume": 703394,
+      "symbol": "TDOC",
+      "session_change_fraction": 0.00362
+    },
+    {
+      "session_price": 93.6,
+      "session_volume": 702285,
+      "symbol": "ACGL",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 8.45,
+      "session_volume": 697698,
+      "symbol": "FMC",
+      "session_change_fraction": 0.00118
+    },
+    {
+      "session_price": 7.73,
+      "session_volume": 697381,
+      "symbol": "DHC",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 226.27,
+      "session_volume": 673173,
+      "symbol": "NTAP",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 2.64,
+      "session_volume": 667079,
+      "symbol": "BBAI",
+      "session_change_fraction": -0.00369
+    },
+    {
+      "session_price": 58,
+      "session_volume": 664005,
+      "symbol": "TVTX",
+      "session_change_fraction": 0.01879
+    },
+    {
+      "session_price": 141.39,
+      "session_volume": 662820,
+      "symbol": "EOG",
+      "session_change_fraction": 7E-05
+    },
+    {
+      "session_price": 13.76,
+      "session_volume": 654157,
+      "symbol": "VALE",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 12.65,
+      "session_volume": 649077,
+      "symbol": "NMRK",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 160.18,
+      "session_volume": 646231,
+      "symbol": "MSTR",
+      "session_change_fraction": 0.00106
+    },
+    {
+      "session_price": 1.43,
+      "session_volume": 645297,
+      "symbol": "SMTK",
+      "session_change_fraction": -0.13333
+    },
+    {
+      "session_price": 47.68,
+      "session_volume": 644855,
+      "symbol": "CSX",
+      "session_change_fraction": 0.00527
+    },
+    {
+      "session_price": 1.45,
+      "session_volume": 637678,
+      "symbol": "SILO",
+      "session_change_fraction": -0.00548
+    },
+    {
+      "session_price": 278.64,
+      "session_volume": 635385,
+      "symbol": "UNP",
+      "session_change_fraction": 0.00129
+    },
+    {
+      "session_price": 40.418,
+      "session_volume": 635344,
+      "symbol": "NNN",
+      "session_change_fraction": -0.013
+    },
+    {
+      "session_price": 80.95,
+      "session_volume": 628532,
+      "symbol": "PBF",
+      "session_change_fraction": 0.0021
+    },
+    {
+      "session_price": 9,
+      "session_volume": 627230,
+      "symbol": "PDM",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 30.94,
+      "session_volume": 624783,
+      "symbol": "OSCR",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 11.88,
+      "session_volume": 623174,
+      "symbol": "TAL",
+      "session_change_fraction": -0.01491
+    },
+    {
+      "session_price": 12.4,
+      "session_volume": 620000,
+      "symbol": "FSNUY",
+      "session_change_fraction": -0.00201
+    }
+  ],
+  "scope": "One US V2 after-hours volume ranking and two subscription-counter reads; no subscription, snapshot, history, configuration, or trading requests",
+  "subscription_after": {
+    "own_used": 0,
+    "remain": 273,
+    "total_used": 27
+  },
+  "subscription_before": {
+    "own_used": 0,
+    "remain": 273,
+    "total_used": 27
+  },
+  "volume_values_present": 200,
+  "change_unit_note": "V2 change values are raw fractions (0.00324 = 0.324%); snapshot change fields use percentage points. Numeric responses are unchanged.",
+  "flat_price_high_volume_examples": [
+    {
+      "session_price": 30.94,
+      "session_volume": 26871936,
+      "symbol": "WBD",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 10.6,
+      "session_volume": 11714048,
+      "symbol": "NOK",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 24.3,
+      "session_volume": 10401214,
+      "symbol": "T",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 117.88,
+      "session_volume": 5983256,
+      "symbol": "TD",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 59.07,
+      "session_volume": 4793961,
+      "symbol": "TRP",
+      "session_change_fraction": 0
+    }
+  ]
+}

@@ -1,0 +1,104 @@
+{
+  "observed_utc": "2026-10-02T22:04:20.596495+00:00",
+  "sdk_version": "10.09.6908",
+  "scope": "Three sparse after-hours rank pages and two subscription counter reads; no subscriptions, snapshots, history, configuration, or trading calls",
+  "pages": [
+    {
+      "offset": 0,
+      "requested": 200,
+      "returned": 200,
+      "all_count": 18178,
+      "latency_seconds": 0.0915,
+      "positive_session_volume_rows": 200,
+      "positive_volume_outside_first_100": 100,
+      "near_flat_outside_first_100": 0,
+      "examples": [
+        {
+          "symbol": "US.HODO",
+          "session_volume": 375917,
+          "session_change_pct": 3.034
+        },
+        {
+          "symbol": "US.ORBS",
+          "session_volume": 214626,
+          "session_change_pct": 3.879
+        },
+        {
+          "symbol": "US.SVV",
+          "session_volume": 195000,
+          "session_change_pct": 2.918
+        }
+      ]
+    },
+    {
+      "offset": 200,
+      "requested": 200,
+      "returned": 200,
+      "all_count": 18178,
+      "latency_seconds": 0.0968,
+      "positive_session_volume_rows": 200,
+      "positive_volume_outside_first_100": 200,
+      "near_flat_outside_first_100": 0,
+      "examples": [
+        {
+          "symbol": "US.GME",
+          "session_volume": 3988172,
+          "session_change_pct": 1.9429999999999998
+        },
+        {
+          "symbol": "US.ZYME",
+          "session_volume": 267160,
+          "session_change_pct": 1.9480000000000002
+        },
+        {
+          "symbol": "US.AXG",
+          "session_volume": 252587,
+          "session_change_pct": 2.521
+        }
+      ]
+    },
+    {
+      "offset": 9000,
+      "requested": 200,
+      "returned": 200,
+      "all_count": 18178,
+      "latency_seconds": 0.0953,
+      "positive_session_volume_rows": 122,
+      "positive_volume_outside_first_100": 122,
+      "near_flat_outside_first_100": 122,
+      "examples": [
+        {
+          "symbol": "US.MTEN",
+          "session_volume": 816,
+          "session_change_pct": 0.0
+        },
+        {
+          "symbol": "US.USB.PRP",
+          "session_volume": 104,
+          "session_change_pct": 0.0
+        },
+        {
+          "symbol": "US.SF.PRD",
+          "session_volume": 99,
+          "session_change_pct": 0.0
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "subscription_before": {
+    "total_used": 29,
+    "remain": 271,
+    "own_used": 0
+  },
+  "subscription_after": {
+    "total_used": 29,
+    "remain": 271,
+    "own_used": 0
+  },
+  "calls": {
+    "query_subscription": 2,
+    "get_us_after_hours_rank": 3
+  },
+  "completed": true
+}

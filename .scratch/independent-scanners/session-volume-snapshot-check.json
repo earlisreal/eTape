@@ -1,0 +1,86 @@
+{
+  "completed": true,
+  "latency_seconds": 0.046267,
+  "observed_utc": "2026-10-02T22:12:35.3127982Z",
+  "scope": "One five-symbol market snapshot to verify V2 session factor semantics; no subscriptions, history, settings, or trading calls",
+  "snapshot_rows": [
+    {
+      "after_change_pct": 0,
+      "after_price": 30.94,
+      "after_volume": 26871936,
+      "after_volume_present": true,
+      "daily_volume": 59649552,
+      "symbol": "WBD",
+      "update_time": "2026-10-02 18:07:33.366"
+    },
+    {
+      "after_change_pct": 0,
+      "after_price": 10.6,
+      "after_volume": 11714056,
+      "after_volume_present": true,
+      "daily_volume": 75753961,
+      "symbol": "NOK",
+      "update_time": "2026-10-02 18:12:10.978"
+    },
+    {
+      "after_change_pct": 0.344,
+      "after_price": 3.0906,
+      "after_volume": 11057207,
+      "after_volume_present": true,
+      "daily_volume": 64513528,
+      "symbol": "GRAB",
+      "update_time": "2026-10-02 18:12:35.004"
+    },
+    {
+      "after_change_pct": 0,
+      "after_price": 24.3,
+      "after_volume": 10401214,
+      "after_volume_present": true,
+      "daily_volume": 29137439,
+      "symbol": "T",
+      "update_time": "2026-10-02 18:07:33.182"
+    },
+    {
+      "after_change_pct": -0.091,
+      "after_price": 142.17,
+      "after_volume": 10373259,
+      "after_volume_present": true,
+      "daily_volume": 35330134,
+      "symbol": "ORCL",
+      "update_time": "2026-10-02 18:12:01.862"
+    }
+  ],
+  "v2_top5": [
+    {
+      "session_price": 30.94,
+      "session_volume": 26871936,
+      "symbol": "WBD",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 10.6,
+      "session_volume": 11714048,
+      "symbol": "NOK",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 3.09,
+      "session_volume": 11056154,
+      "symbol": "GRAB",
+      "session_change_fraction": 0.00324
+    },
+    {
+      "session_price": 24.3,
+      "session_volume": 10401214,
+      "symbol": "T",
+      "session_change_fraction": 0
+    },
+    {
+      "session_price": 142.13,
+      "session_volume": 10373225,
+      "symbol": "ORCL",
+      "session_change_fraction": -0.00119
+    }
+  ],
+  "change_unit_note": "V2 top-five changes are raw fractions; snapshot after_change_pct values are percentage points. Numeric responses are unchanged."
+}
