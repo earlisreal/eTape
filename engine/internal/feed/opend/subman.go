@@ -64,10 +64,12 @@ func (m *subManager) WaitActive(ctx context.Context, key subKey) error {
 }
 
 type subOptions struct {
-	Budget       int           // quota slots (default 100)
-	MinHold      time.Duration // default 60s  (moomoo rule)
-	Hysteresis   time.Duration // default 5m   (release delay)
-	ExtendedTime bool          // default true (US pre/post)
+	Budget        int // quota slots (default 100)
+	QuotaHeadroom int
+	RequireQuota  bool
+	MinHold       time.Duration // default 60s  (moomoo rule)
+	Hysteresis    time.Duration // default 5m   (release delay)
+	ExtendedTime  bool          // default true (US pre/post)
 }
 
 // subQuarantineThreshold is the number of consecutive hard (business-level)
@@ -117,13 +119,25 @@ type subManager struct {
 	clk clock.Clock
 	opt subOptions
 
-	mu         sync.Mutex
-	demands    map[string]*demandState
-	active     map[subKey]*subState
-	starved    map[string]bool
-	quarantine map[subKey]bool // hard-failed keys excluded from desired(); cleared on reconnect
-	subFail    map[subKey]int  // consecutive business-error count, toward subQuarantineThreshold
-	kick       chan struct{}
+	mu                   sync.Mutex
+	demands              map[string]*demandState
+	active               map[subKey]*subState
+	starved              map[string]bool
+	quarantine           map[subKey]bool // hard-failed keys excluded from desired(); cleared on reconnect
+	subFail              map[subKey]int  // consecutive business-error count, toward subQuarantineThreshold
+	quotaKnown           bool
+	quotaRemain          int
+	quotaAt              time.Time
+	quotaSpentSinceRead  int
+	quotaPending         int
+	quotaHolds           int
+	quotaPendingDone     chan struct{}
+	quotaChanged         chan struct{}
+	connectionGeneration uint64
+	connectionDown       bool
+	connectionCtx        context.Context
+	connectionCancel     context.CancelFunc
+	kick                 chan struct{}
 }
 
 func newSubManager(r rpc, clk clock.Clock, o subOptions) *subManager {
@@ -136,14 +150,20 @@ func newSubManager(r rpc, clk clock.Clock, o subOptions) *subManager {
 	if o.Hysteresis == 0 {
 		o.Hysteresis = 5 * time.Minute
 	}
+	if o.QuotaHeadroom < 0 {
+		o.QuotaHeadroom = 0
+	}
+	connectionCtx, connectionCancel := context.WithCancel(context.Background())
 	return &subManager{
 		rpc: r, clk: clk, opt: o,
-		demands:    make(map[string]*demandState),
-		active:     make(map[subKey]*subState),
-		starved:    make(map[string]bool),
-		quarantine: make(map[subKey]bool),
-		subFail:    make(map[subKey]int),
-		kick:       make(chan struct{}, 1),
+		demands:       make(map[string]*demandState),
+		active:        make(map[subKey]*subState),
+		starved:       make(map[string]bool),
+		quarantine:    make(map[subKey]bool),
+		subFail:       make(map[subKey]int),
+		quotaChanged:  make(chan struct{}),
+		connectionCtx: connectionCtx, connectionCancel: connectionCancel,
+		kick: make(chan struct{}, 1),
 	}
 }
 
@@ -173,6 +193,108 @@ func (m *subManager) Ensure(d feed.Demand) {
 func (m *subManager) Release(id string) {
 	m.mu.Lock()
 	delete(m.demands, id)
+	m.mu.Unlock()
+	m.kickWorker()
+}
+
+func (m *subManager) SetSubscriptionQuota(remain int, observedAt time.Time) {
+	if remain < 0 || observedAt.IsZero() {
+		return
+	}
+	m.mu.Lock()
+	m.quotaKnown, m.quotaRemain, m.quotaAt = true, remain, observedAt
+	// The normal quota poll brackets this update with Begin/End below, which
+	// waits for in-flight admissions. Preserve local spend if a caller updates
+	// the counter without that barrier while requests are pending.
+	if m.quotaPending == 0 {
+		m.quotaSpentSinceRead = 0
+	}
+	m.signalQuotaChangeLocked()
+	m.mu.Unlock()
+	m.kickWorker()
+}
+
+// BeginSubscriptionQuotaRefresh pauses new admissions and waits for every
+// reserved Qot_Sub batch to settle before GetSubInfo is sent. This keeps a
+// counter response from racing an admission and erasing its local debit.
+func (m *subManager) BeginSubscriptionQuotaRefresh(ctx context.Context) error {
+	m.mu.Lock()
+	m.quotaHolds++
+	for m.quotaPending > 0 {
+		done := m.quotaPendingDone
+		m.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			m.EndSubscriptionQuotaRefresh()
+			return ctx.Err()
+		case <-done:
+		}
+		m.mu.Lock()
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+func (m *subManager) EndSubscriptionQuotaRefresh() {
+	m.mu.Lock()
+	if m.quotaHolds > 0 {
+		m.quotaHolds--
+	}
+	m.signalQuotaChangeLocked()
+	m.mu.Unlock()
+	m.kickWorker()
+}
+
+func (m *subManager) signalQuotaChangeLocked() {
+	if m.quotaChanged != nil {
+		close(m.quotaChanged)
+	}
+	m.quotaChanged = make(chan struct{})
+}
+
+func (m *subManager) reserveQuotaAdmissionsLocked(count int) {
+	if count <= 0 {
+		return
+	}
+	if m.quotaPending == 0 {
+		m.quotaPendingDone = make(chan struct{})
+	}
+	m.quotaPending += count
+}
+
+func (m *subManager) finishQuotaAdmissions(keys []subKey) {
+	m.mu.Lock()
+	for _, key := range keys {
+		if _, active := m.active[key]; active && m.opt.RequireQuota {
+			m.quotaSpentSinceRead++
+		}
+	}
+	m.quotaPending -= len(keys)
+	if m.quotaPending < 0 {
+		m.quotaPending = 0
+	}
+	if m.quotaPending == 0 && m.quotaPendingDone != nil {
+		close(m.quotaPendingDone)
+		m.quotaPendingDone = nil
+	}
+	m.signalQuotaChangeLocked()
+	m.mu.Unlock()
+}
+
+// ConnectionDown marks retained active slots for guarded replay. Demands remain
+// intact, but the manager refuses new admissions until a fresh account-wide
+// quota read arrives on the next connection.
+func (m *subManager) ConnectionDown() {
+	m.mu.Lock()
+	if m.connectionCancel != nil {
+		m.connectionCancel()
+	}
+	m.connectionCtx, m.connectionCancel = context.WithCancel(context.Background())
+	m.connectionGeneration++
+	m.connectionDown = true
+	m.quotaKnown = false
+	m.quotaSpentSinceRead = 0
+	m.signalQuotaChangeLocked()
 	m.mu.Unlock()
 	m.kickWorker()
 }
@@ -273,21 +395,66 @@ func (m *subManager) pass(ctx context.Context) {
 		}
 	}
 
-	want, starved := m.desired(m.opt.Budget - pinned)
-	newStarved := make(map[string]bool, len(starved))
-	for _, s := range starved { // log starvation transitions once per change
-		newStarved[s] = true
-		if !m.starved[s] {
-			slog.Warn("subscription quota pressure: symbol starved", "symbol", s, "budget", m.opt.Budget)
+	quotaFree := m.opt.Budget
+	if m.opt.RequireQuota {
+		quotaFree = 0
+		if m.quotaKnown && now.Sub(m.quotaAt) <= 75*time.Second {
+			quotaFree = m.quotaRemain - m.opt.QuotaHeadroom - m.quotaSpentSinceRead - m.quotaPending
+			if quotaFree < 0 {
+				quotaFree = 0
+			}
 		}
 	}
-	m.starved = newStarved
+	if m.quotaHolds > 0 || m.connectionDown {
+		quotaFree = 0
+	}
+	capSlots := len(m.active) + quotaFree
+	if capSlots > m.opt.Budget {
+		capSlots = m.opt.Budget
+	}
+	capSlots -= pinned
+	if capSlots < 0 {
+		capSlots = 0
+	}
+	want, starved := m.desired(capSlots)
 
 	var adds []subKey
 	for k := range want {
 		if _, ok := m.active[k]; !ok {
 			adds = append(adds, k)
 		}
+	}
+	type priority struct {
+		focused bool
+		latest  time.Time
+	}
+	bySymbol := map[string]priority{}
+	for _, ds := range m.demands {
+		current := bySymbol[ds.d.Symbol]
+		current.focused = current.focused || ds.d.Focused
+		if ds.lastEnsure.After(current.latest) {
+			current.latest = ds.lastEnsure
+		}
+		bySymbol[ds.d.Symbol] = current
+	}
+	sort.Slice(adds, func(i, j int) bool {
+		a, b := bySymbol[adds[i].Symbol], bySymbol[adds[j].Symbol]
+		if a.focused != b.focused {
+			return a.focused
+		}
+		if !a.latest.Equal(b.latest) {
+			return a.latest.After(b.latest)
+		}
+		if adds[i].Symbol != adds[j].Symbol {
+			return adds[i].Symbol < adds[j].Symbol
+		}
+		return adds[i].Sub < adds[j].Sub
+	})
+	if m.opt.RequireQuota && len(adds) > quotaFree {
+		for _, deferred := range adds[quotaFree:] {
+			starved = append(starved, deferred.Symbol)
+		}
+		adds = adds[:quotaFree]
 	}
 	var removes []subKey
 	removed := make(map[subKey]bool)
@@ -330,11 +497,18 @@ func (m *subManager) pass(ctx context.Context) {
 			projected--
 		}
 	}
+	newStarved := make(map[string]bool, len(starved))
+	for _, symbol := range starved {
+		newStarved[symbol] = true
+		if !m.starved[symbol] {
+			slog.Warn("subscription quota pressure: symbol starved", "symbol", symbol, "budget", m.opt.Budget)
+		}
+	}
+	m.starved = newStarved
+	generation := m.connectionGeneration
+	m.reserveQuotaAdmissionsLocked(len(adds))
 	m.mu.Unlock()
 
-	for _, group := range groupBySubTypeSet(adds) {
-		m.trySubscribe(ctx, group.symbols, group.subs, now)
-	}
 	for _, group := range groupBySubTypeSet(removes) {
 		if err := m.qotSub(ctx, group.symbols, group.subs, false); err != nil {
 			slog.Warn("unsubscribe failed; will retry next pass", "symbols", group.symbols, "err", err)
@@ -345,6 +519,15 @@ func (m *subManager) pass(ctx context.Context) {
 			delete(m.active, k)
 		}
 		m.mu.Unlock()
+	}
+	for _, group := range groupBySubTypeSet(adds) {
+		m.mu.Lock()
+		room := !m.opt.RequireQuota || len(m.active)+len(group.keys) <= m.opt.Budget
+		m.mu.Unlock()
+		if room {
+			m.trySubscribe(ctx, group.symbols, group.subs, now, generation)
+		}
+		m.finishQuotaAdmissions(group.keys)
 	}
 }
 
@@ -357,18 +540,36 @@ func (m *subManager) pass(ctx context.Context) {
 // once it reaches subQuarantineThreshold it is quarantined (excluded from
 // desired(), so it stops being retried) and logged once. A transport/decode
 // error is treated as transient: no split, no count, just retry next pass.
-func (m *subManager) trySubscribe(ctx context.Context, symbols []string, subs []feed.SubType, now time.Time) {
+func (m *subManager) trySubscribe(ctx context.Context, symbols []string, subs []feed.SubType, now time.Time, generation uint64) {
 	if len(symbols) == 0 {
 		return
 	}
-	err := m.qotSub(ctx, symbols, subs, true)
+	m.mu.Lock()
+	if generation != m.connectionGeneration {
+		m.mu.Unlock()
+		return
+	}
+	connectionCtx := m.connectionCtx
+	m.mu.Unlock()
+	requestCtx, cancel := context.WithCancel(ctx)
+	stop := context.AfterFunc(connectionCtx, cancel)
+	defer func() {
+		stop()
+		cancel()
+	}()
+	if err := requestCtx.Err(); err != nil {
+		return
+	}
+	err := m.qotSub(requestCtx, symbols, subs, true)
 	if err == nil {
 		m.mu.Lock()
-		for _, s := range symbols {
-			for _, sub := range subs {
-				k := subKey{Symbol: s, Sub: sub}
-				m.active[k] = &subState{subscribedAt: now}
-				delete(m.subFail, k)
+		if generation == m.connectionGeneration {
+			for _, s := range symbols {
+				for _, sub := range subs {
+					k := subKey{Symbol: s, Sub: sub}
+					m.active[k] = &subState{subscribedAt: now}
+					delete(m.subFail, k)
+				}
 			}
 		}
 		m.mu.Unlock()
@@ -380,10 +581,14 @@ func (m *subManager) trySubscribe(ctx context.Context, symbols []string, subs []
 		slog.Warn("subscribe failed; will retry next pass", "symbols", symbols, "err", err)
 		return
 	}
+	if !IsSymbolSpecificRequestError(biz.msg) {
+		slog.Warn("subscribe deferred after provider rejection", "symbols", symbols, "retType", biz.retType, "reason", biz.msg)
+		return
+	}
 	if len(symbols) > 1 {
 		mid := len(symbols) / 2
-		m.trySubscribe(ctx, symbols[:mid], subs, now)
-		m.trySubscribe(ctx, symbols[mid:], subs, now)
+		m.trySubscribe(ctx, symbols[:mid], subs, now, generation)
+		m.trySubscribe(ctx, symbols[mid:], subs, now, generation)
 		return
 	}
 
@@ -491,32 +696,97 @@ func (m *subManager) qotSub(ctx context.Context, symbols []string, subs []feed.S
 	return nil
 }
 
-// ResubscribeAll reissues the full active set (reconnect path), refreshes
-// subscribedAt so MinHold restarts on the new session, and clears the
-// quarantine: a reconnect is a clean session boundary (entitlements may
-// differ, or the failure may have been server-side), so every previously
-// hard-failed symbol gets exactly one fresh retry on the next pass.
+// ResubscribeAll waits for a post-reconnect account-wide quota reading, then
+// replays the highest-priority retained subscriptions that fit while preserving
+// configured headroom. Remaining demand is left to the normal priority pass.
 func (m *subManager) ResubscribeAll(ctx context.Context) error {
-	m.mu.Lock()
-	keys := make([]subKey, 0, len(m.active))
-	for k := range m.active {
-		keys = append(keys, k)
-	}
-	m.quarantine = make(map[subKey]bool)
-	m.subFail = make(map[subKey]int)
-	m.mu.Unlock()
-	now := m.clk.Now()
-	for _, group := range groupBySubTypeSet(keys) {
-		if err := m.qotSub(ctx, group.symbols, group.subs, true); err != nil {
-			return err
+	for {
+		m.mu.Lock()
+		wanted := make(map[subKey]bool)
+		for _, demand := range m.demands {
+			for _, sub := range demand.d.Subs {
+				wanted[subKey{Symbol: demand.d.Symbol, Sub: sub}] = true
+			}
+		}
+		var keys []subKey
+		for key := range m.active {
+			if wanted[key] {
+				keys = append(keys, key)
+			}
+		}
+		hasDemand := len(wanted) > 0
+		fresh := !m.opt.RequireQuota || m.quotaKnown && m.quotaHolds == 0 && m.clk.Now().Sub(m.quotaAt) <= 75*time.Second
+		available := m.opt.Budget
+		if m.opt.RequireQuota {
+			available = m.quotaRemain - m.opt.QuotaHeadroom - m.quotaSpentSinceRead - m.quotaPending
+		}
+		if available < 0 {
+			available = 0
+		}
+		if !hasDemand {
+			m.active = make(map[subKey]*subState)
+			m.connectionDown = false
+			m.quarantine = make(map[subKey]bool)
+			m.subFail = make(map[subKey]int)
+			m.signalQuotaChangeLocked()
+			m.mu.Unlock()
+			return nil
+		}
+		if fresh {
+			if m.opt.RequireQuota && len(keys) > 0 {
+				selected, _ := m.desired(available)
+				kept := keys[:0]
+				for _, key := range keys {
+					if selected[key] {
+						kept = append(kept, key)
+					}
+				}
+				keys = kept
+			}
+			m.quarantine = make(map[subKey]bool)
+			m.subFail = make(map[subKey]int)
+			if len(keys) == 0 {
+				m.active = make(map[subKey]*subState)
+				m.connectionDown = false
+				m.signalQuotaChangeLocked()
+				m.mu.Unlock()
+				m.pass(ctx)
+				return nil
+			}
+			m.quotaHolds++
+			m.reserveQuotaAdmissionsLocked(len(keys))
+			m.active = make(map[subKey]*subState)
+			generation := m.connectionGeneration
+			m.mu.Unlock()
+
+			now := m.clk.Now()
+			for _, group := range groupBySubTypeSet(keys) {
+				m.trySubscribe(ctx, group.symbols, group.subs, now, generation)
+				m.finishQuotaAdmissions(group.keys)
+			}
+			m.mu.Lock()
+			stillCurrent := generation == m.connectionGeneration
+			if stillCurrent {
+				m.connectionDown = false
+			}
+			m.quotaHolds--
+			m.signalQuotaChangeLocked()
+			m.mu.Unlock()
+			if !stillCurrent {
+				return context.Canceled
+			}
+			m.kickWorker()
+			m.pass(ctx) // use any remaining budget for demands added while reconnecting
+			return nil
+		}
+		changed := m.quotaChanged
+		m.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-changed:
 		}
 	}
-	m.mu.Lock()
-	for _, st := range m.active {
-		st.subscribedAt = now
-	}
-	m.mu.Unlock()
-	return nil
 }
 
 // ActiveSymbols returns the live subscription map (symbol → subtypes),
@@ -530,6 +800,34 @@ func (m *subManager) ActiveSymbols() map[string][]feed.SubType {
 	}
 	for _, subs := range out {
 		sort.Slice(subs, func(i, j int) bool { return subs[i] < subs[j] })
+	}
+	return out
+}
+
+// DesiredSymbols returns the retained demand union, independent of whether
+// the current connection has enough account quota to activate every entry.
+func (m *subManager) DesiredSymbols() map[string][]feed.SubType {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	bySymbol := make(map[string]map[feed.SubType]bool)
+	for _, demand := range m.demands {
+		for _, sub := range demand.d.Subs {
+			key := subKey{Symbol: demand.d.Symbol, Sub: sub}
+			if m.quarantine[key] {
+				continue
+			}
+			if bySymbol[demand.d.Symbol] == nil {
+				bySymbol[demand.d.Symbol] = make(map[feed.SubType]bool)
+			}
+			bySymbol[demand.d.Symbol][sub] = true
+		}
+	}
+	out := make(map[string][]feed.SubType, len(bySymbol))
+	for symbol, set := range bySymbol {
+		for sub := range set {
+			out[symbol] = append(out[symbol], sub)
+		}
+		sort.Slice(out[symbol], func(i, j int) bool { return out[symbol][i] < out[symbol][j] })
 	}
 	return out
 }

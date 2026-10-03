@@ -325,14 +325,18 @@ type ScannerRow struct {
 }
 
 type ScannerRankPayload struct {
+	ScannerID   string         `json:"scannerId" tstype:"string"`
+	Session     string         `json:"session" tstype:"string"`
 	RefreshedAt string         `json:"refreshedAt"`
+	DiscoveryAt string         `json:"discoveryAt"`
+	Status      string         `json:"status" tstype:"\"ready\" | \"delayed\" | \"paused\" | \"deleted\""`
 	Rows        []ScannerRow   `json:"rows"`
 	Filters     ScannerFilters `json:"filters,omitempty"`
 	Baseline    bool           `json:"baseline,omitempty"`
 }
 
 type ScannerFilters struct {
-	Mode              string   `json:"mode" tstype:"\"gainers\" | \"losers\" | \"most_active\""`
+	Mode              string   `json:"mode" tstype:"\"gainers\" | \"losers\" | \"most_active\" | \"session_volume\""`
 	MinChangePct      float64  `json:"minChangePct"`
 	MaxFloatShares    *float64 `json:"maxFloatShares" tstype:"number | null,required"`
 	MinVolume         float64  `json:"minVolume"`
@@ -347,8 +351,10 @@ type ScannerFilters struct {
 }
 
 type ScanHitPayload struct {
-	Symbol string `json:"symbol"`
-	At     string `json:"at"`
+	ScannerID string `json:"scannerId" tstype:"string"`
+	Session   string `json:"session" tstype:"string"`
+	Symbol    string `json:"symbol"`
+	At        string `json:"at"`
 }
 
 // WatchlistRow is one row of the user-pinned watchlist. Last/ChangePct are
@@ -690,7 +696,30 @@ type SetAccountDemandArgs struct {
 }
 
 type SetScannerFiltersArgs struct {
+	WorkspaceID string         `json:"workspaceId,omitempty" tstype:"string | null,required"`
+	PanelID     string         `json:"panelId,omitempty" tstype:"string | null,required"`
+	Filters     ScannerFilters `json:"filters"`
+}
+
+type ScannerPanelSettings struct {
+	PanelID string         `json:"panelId"`
 	Filters ScannerFilters `json:"filters"`
+}
+
+// SetScannerWorkspaceArgs reports one open workspace's scanner definitions and
+// the optional source kept active for Monitoring while this connection is open.
+type SetScannerWorkspaceArgs struct {
+	WorkspaceID       string                 `json:"workspaceId"`
+	Panels            []ScannerPanelSettings `json:"panels"`
+	SourceEnabled     bool                   `json:"sourceEnabled"`
+	SourceWorkspaceID string                 `json:"sourceWorkspaceId,omitempty"`
+	SourcePanelID     string                 `json:"sourcePanelId,omitempty"`
+	SourceFilters     *ScannerFilters        `json:"sourceFilters,omitempty"`
+}
+
+// ScannerIdentity is stable across every source of the same saved panel.
+func ScannerIdentity(workspaceID, panelID string) string {
+	return workspaceID + "/" + panelID
 }
 
 // EnsureSymbolArgs subscribes a panel's symbol on demand. profile is one of

@@ -28,9 +28,12 @@ func testBarDemand(id, symbol string) feed.Demand {
 type fakeRPC struct {
 	mu       sync.Mutex
 	calls    []*qotsub.C2S
-	failNext int             // remaining calls to fail with a transport error
-	retType  int32           // non-zero RetType to return instead of success
+	failNext int   // remaining calls to fail with a transport error
+	retType  int32 // non-zero RetType to return instead of success
+	retMsg   string
 	failSyms map[string]bool // bare codes (no "US." prefix) that force retType!=0
+	entered  chan struct{}
+	release  <-chan struct{}
 }
 
 func (f *fakeRPC) Request(_ context.Context, protoID uint32, req proto.Message) (Frame, error) {
@@ -45,17 +48,115 @@ func (f *fakeRPC) Request(_ context.Context, protoID uint32, req proto.Message) 
 		f.failNext--
 	}
 	retType := f.retType
+	retMsg := f.retMsg
 	for _, sec := range c2s.GetSecurityList() {
 		if f.failSyms[sec.GetCode()] && retType == 0 {
 			retType = 1
+			retMsg = "invalid security: " + sec.GetCode()
 		}
 	}
 	f.mu.Unlock()
+	if f.entered != nil {
+		f.entered <- struct{}{}
+	}
+	if f.release != nil {
+		<-f.release
+	}
 	if failNow {
 		return Frame{}, errors.New("fake rpc transport error")
 	}
-	body, _ := proto.Marshal(&qotsub.Response{RetType: proto.Int32(retType), S2C: &qotsub.S2C{}})
+	body, _ := proto.Marshal(&qotsub.Response{RetType: proto.Int32(retType), RetMsg: proto.String(retMsg), S2C: &qotsub.S2C{}})
 	return Frame{ProtoID: ProtoQotSub, Body: body}, nil
+}
+
+func TestQuotaRefreshWaitsForReservedSubscriptions(t *testing.T) {
+	clk := clock.NewFake(time.Unix(1_782_000_000, 0))
+	release := make(chan struct{})
+	rpc := &fakeRPC{entered: make(chan struct{}, 1), release: release}
+	m := newSubManager(rpc, clk, subOptions{Budget: 4, RequireQuota: true, MinHold: time.Minute})
+	m.SetSubscriptionQuota(2, clk.Now())
+	m.Ensure(feed.Demand{ID: "one", Symbol: "US.ONE", Subs: []feed.SubType{feed.SubQuote}})
+	passDone := make(chan struct{})
+	go func() { m.pass(context.Background()); close(passDone) }()
+	select {
+	case <-rpc.entered:
+	case <-time.After(time.Second):
+		t.Fatal("subscription request did not start")
+	}
+
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- m.BeginSubscriptionQuotaRefresh(context.Background()) }()
+	select {
+	case err := <-refreshDone:
+		t.Fatalf("quota refresh crossed an in-flight admission: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(release)
+	<-passDone
+	if err := <-refreshDone; err != nil {
+		t.Fatal(err)
+	}
+	// The counter is read only after the admission settles, so it can safely
+	// become the new authority while the refresh barrier is held.
+	m.SetSubscriptionQuota(1, clk.Now())
+	m.EndSubscriptionQuotaRefresh()
+	if m.quotaPending != 0 || m.quotaSpentSinceRead != 0 {
+		t.Fatalf("quota accounting after refreshed counter: pending=%d spent=%d", m.quotaPending, m.quotaSpentSinceRead)
+	}
+}
+
+func TestReconnectWaitsForFreshQuotaAndPacesResubscription(t *testing.T) {
+	m, rpc, clk := newTestManager(t, 8)
+	m.opt.RequireQuota, m.opt.QuotaHeadroom = true, 1
+	m.SetSubscriptionQuota(3, clk.Now())
+	m.Ensure(testBarDemand("chart", "US.AAPL"))
+	m.pass(context.Background())
+	before := len(rpc.snapshot())
+	m.ConnectionDown()
+	done := make(chan error, 1)
+	go func() { done <- m.ResubscribeAll(context.Background()) }()
+	select {
+	case err := <-done:
+		t.Fatalf("reconnect proceeded without fresh quota: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	if len(rpc.snapshot()) != before {
+		t.Fatal("reconnect sent a subscription before quota refresh")
+	}
+	m.SetSubscriptionQuota(3, clk.Now()) // two slots available after headroom
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reconnect did not resume after a fresh quota reading")
+	}
+	if len(rpc.snapshot()) != before+1 {
+		t.Fatalf("reconnect calls=%d, want one paced replay", len(rpc.snapshot())-before)
+	}
+}
+
+func TestReconnectRestoresPrioritySubsetWhenQuotaShrinks(t *testing.T) {
+	m, _, clk := newTestManager(t, 8)
+	m.opt.RequireQuota, m.opt.QuotaHeadroom = true, 1
+	m.SetSubscriptionQuota(8, clk.Now())
+	m.Ensure(feed.Demand{ID: "scanner", Symbol: "US.SCANNER", Subs: []feed.SubType{feed.SubTicker, feed.SubKL1m}})
+	m.Ensure(feed.Demand{ID: "chart", Symbol: "US.CHART", Subs: []feed.SubType{feed.SubTicker, feed.SubKL1m}, Focused: true})
+	m.pass(context.Background())
+	if got := len(m.ActiveSymbols()); got != 2 {
+		t.Fatalf("pre-disconnect active symbols = %d, want 2", got)
+	}
+
+	m.ConnectionDown()
+	m.SetSubscriptionQuota(3, clk.Now()) // one slot remains reserved; one two-sub chart fits
+	if err := m.ResubscribeAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	active := m.ActiveSymbols()
+	if len(active) != 1 || len(active["US.CHART"]) != 2 || len(active["US.SCANNER"]) != 0 {
+		t.Fatalf("restored subscriptions = %+v, want focused chart only", active)
+	}
 }
 
 func (f *fakeRPC) snapshot() []*qotsub.C2S {
@@ -109,6 +210,52 @@ func TestEnsureBatchesAndRefcounts(t *testing.T) {
 	m.pass(context.Background())
 	if got := m.Slots(); got != 4 {
 		t.Fatalf("Slots after partial release = %d, want 4", got)
+	}
+}
+
+func TestBackgroundAdmissionsRequireFreshQuotaAndHeadroom(t *testing.T) {
+	rpc := &fakeRPC{}
+	clk := clock.NewFake(time.Unix(1_782_000_000, 0))
+	m := newSubManager(rpc, clk, subOptions{Budget: 10, QuotaHeadroom: 2, RequireQuota: true, MinHold: time.Minute, Hysteresis: time.Minute})
+	for _, symbol := range []string{"US.A", "US.B", "US.C", "US.D", "US.E"} {
+		m.Ensure(feed.Demand{ID: symbol, Symbol: symbol, Subs: []feed.SubType{feed.SubQuote}})
+	}
+	m.pass(context.Background())
+	if len(rpc.snapshot()) != 0 {
+		t.Fatal("subscription sent before an authoritative quota reading")
+	}
+
+	m.SetSubscriptionQuota(5, clk.Now()) // 3 admissions after two reserved slots
+	m.pass(context.Background())
+	if got := m.Slots(); got != 3 {
+		t.Fatalf("admitted %d slots, want exactly the 3 above configured headroom", got)
+	}
+	calls := len(rpc.snapshot())
+	clk.Advance(time.Second)
+	m.Ensure(feed.Demand{ID: "US.F", Symbol: "US.F", Subs: []feed.SubType{feed.SubQuote}})
+	m.pass(context.Background())
+	if len(rpc.snapshot()) != calls {
+		t.Fatal("reused quota from the same reading after already spending the reserved slots")
+	}
+	clk.Advance(76 * time.Second)
+	m.Ensure(feed.Demand{ID: "US.G", Symbol: "US.G", Subs: []feed.SubType{feed.SubQuote}})
+	m.pass(context.Background())
+	if len(rpc.snapshot()) != calls {
+		t.Fatal("subscription sent using a stale account quota reading")
+	}
+}
+
+func TestAccountWidePermissionFailureDoesNotSplitOrQuarantine(t *testing.T) {
+	m, rpc, _ := newTestManager(t, 10)
+	rpc.retType, rpc.retMsg = 1, "permission denied"
+	m.Ensure(feed.Demand{ID: "A", Symbol: "US.A", Subs: []feed.SubType{feed.SubQuote}})
+	m.Ensure(feed.Demand{ID: "B", Symbol: "US.B", Subs: []feed.SubType{feed.SubQuote}})
+	m.pass(context.Background())
+	if calls := len(rpc.snapshot()); calls != 1 {
+		t.Fatalf("global provider failure was split into %d requests, want one", calls)
+	}
+	if quarantined := m.Quarantined(); len(quarantined) != 0 {
+		t.Fatalf("account-wide permission failure quarantined symbols: %v", quarantined)
 	}
 }
 

@@ -21,6 +21,7 @@ import { TAPE_MIN_WIDTH } from "../../render/tape/tapeLayout";
 
 export interface PanelProps {
   config: PanelConfig;
+  scannerId?: string;
   stores: Stores;
   scheduler: Scheduler;
   width: number;

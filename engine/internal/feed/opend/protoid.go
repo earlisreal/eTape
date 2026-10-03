@@ -30,6 +30,7 @@ const (
 	ProtoQotGetOwnerPlate         uint32 = 3207
 	ProtoQotGetShortInterest      uint32 = 3249
 	ProtoQotStockFilter           uint32 = 3215
+	ProtoQotGetStockScreen        uint32 = 3252
 	ProtoQotGetSearchNews         uint32 = 3263
 	ProtoQotGetUSPreMarketRank    uint32 = 3410
 	ProtoQotGetUSAfterHoursRank   uint32 = 3411

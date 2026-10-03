@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, act, fireEvent, cleanup, within } from "@testing-library/react";
+import { render, screen, act, fireEvent, cleanup, within, waitFor } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
 import { LinkGroups } from "../linkGroups";
 import { makeStores } from "../../data/registry";
@@ -24,6 +24,7 @@ function renderPanel(
   groupProp?: PanelConfig["group"],
   headerSlot?: HTMLElement,
   scannerSync?: PanelProps["scannerSync"],
+  scannerId = "legacy",
 ) {
   const stores = makeStores();
   const scanner = stores.scanner;
@@ -34,7 +35,7 @@ function renderPanel(
   const config: PanelConfig = { id: "m-scanner", panelId: "scanner", group: null,
     settings: {}, ...over };
   const commands = { sendCommand: vi.fn(async () => ({ status: "accepted" })) };
-  const props = { config, stores, linkGroups, onConfigChange, scheduler: {} as never,
+  const props = { config, scannerId, stores, linkGroups, onConfigChange, scheduler: {} as never,
     width: 400, height: 300, commands, group: groupProp, scannerSync } as unknown as PanelProps;
   const view = render(<ThemeProvider><PanelHeaderSlotContext.Provider value={headerSlot}><ScannerPanel {...props} /></PanelHeaderSlotContext.Provider></ThemeProvider>);
   return { scanner, focus, onConfigChange, commands, ...view };
@@ -89,6 +90,16 @@ describe("ScannerPanel", () => {
     expect(screen.getByText("+18.4%")).toBeTruthy();
     expect(screen.getByText("19.47")).toBeTruthy();
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+  });
+
+  it("shows rows while their first quote snapshot is pending", () => {
+    const { scanner } = renderPanel();
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth",
+      payload: { refreshedAt: "", status: "ready", rows: [
+        { ...scannerShortInterestDefaults, symbol: "US.WXYZ", changePct: null, last: null, floatShares: 21_000_000, volume: 0, relativeVolume: null },
+      ] } }));
+    expect(screen.getByText("WXYZ")).toBeTruthy();
+    expect(screen.getByText(/quote snapshots pending for visible symbols/i)).toBeTruthy();
   });
 
   it("renders columns in the compact scanner order", () => {
@@ -180,7 +191,7 @@ describe("ScannerPanel", () => {
       expect(sync.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(summary.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       fireEvent.click(filters);
-      expect(within(container).queryByText(/updated/i)).toBeNull();
+      expect(within(container).getByText(/updated/i)).toBeTruthy();
     } finally {
       unmount();
       slot.remove();
@@ -483,6 +494,17 @@ describe("ScannerPanel", () => {
     expect(commands.sendCommand).toHaveBeenCalledWith("SetScannerFilters", { filters: expect.objectContaining({ minChangePct: 7 }) });
   });
 
+  it("routes filter edits to this workspace panel and saves the accepted panel settings", async () => {
+    const { commands, onConfigChange } = renderPanel({}, undefined, undefined, undefined, "main/scanner-lowfloat");
+    fireEvent.click(screen.getByRole("button", { name: /filters/i }));
+    fireEvent.change(screen.getByLabelText("float cap"), { target: { value: "20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(commands.sendCommand).toHaveBeenCalledWith("SetScannerFilters", expect.objectContaining({
+      workspaceId: "main", panelId: "scanner-lowfloat", filters: expect.objectContaining({ maxFloatShares: 20_000_000 }),
+    }));
+    await waitFor(() => expect(onConfigChange).toHaveBeenCalledWith({ scannerFilters: expect.objectContaining({ maxFloatShares: 20_000_000 }) }));
+  });
+
   it("Reset defaults clears the draft inputs without persisting until Apply", () => {
     const { onConfigChange } = renderPanel({ settings: { thresholds: { minChangePct: 10, floatCapShares: null, minVolume: 0 } } });
     fireEvent.click(screen.getByRole("button", { name: /filters/i }));
@@ -568,6 +590,17 @@ describe("ScannerPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: "Apply" }));
     expect(commands.sendCommand).toHaveBeenCalledWith("SetScannerFilters", { filters: expect.objectContaining({ mode: "most_active" }) });
     expect(onConfigChange).toHaveBeenCalledWith({ sort: { col: "vol", dir: "desc" } });
+  });
+
+  it("offers Session Volume without a price-change floor and explains the candidate cutoff", async () => {
+    const { commands, onConfigChange } = renderPanel();
+    fireEvent.click(screen.getByRole("button", { name: /filters/i }));
+    fireEvent.change(screen.getByLabelText("rank mode"), { target: { value: "session_volume" } });
+    expect(screen.queryByLabelText("min gain %")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+    expect(commands.sendCommand).toHaveBeenCalledWith("SetScannerFilters", { filters: expect.objectContaining({ mode: "session_volume" }) });
+    expect(onConfigChange).toHaveBeenCalledWith({ sort: { col: "sessionVol", dir: "desc" } });
+    await waitFor(() => expect(within(screen.getByTestId("scanner-filter-summary")).getByText(/Session Volume · top 200 candidates/)).toBeTruthy());
   });
 
   it("labels extended-hours Most active as approximate", () => {

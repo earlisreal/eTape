@@ -16,11 +16,14 @@ import (
 // note DisableExtendedTime is inverted so the zero value means extended
 // hours ON (eTape is a pre-market-first product).
 type FeedOptions struct {
-	Budget              int
-	Hysteresis          time.Duration
-	DisableExtendedTime bool
-	EventBuf            int
-	Clock               clock.Clock
+	Budget               int
+	QuotaHeadroom        int
+	RequireQuota         bool
+	HistoryQuotaHeadroom int
+	Hysteresis           time.Duration
+	DisableExtendedTime  bool
+	EventBuf             int
+	Clock                clock.Clock
 }
 
 // OpenDFeed implements feed.Feed over the low-level Client: pushes are decoded
@@ -36,13 +39,14 @@ type OpenDFeed struct {
 	foregroundSeedq chan seedJob
 	backgroundSeedq chan seedJob
 
-	mu          sync.Mutex
-	fetched     map[string]time.Time // history-quota dedup window (30 days)
-	validated   map[string]struct{}  // process-lifetime positive existence cache
-	seedStates  map[seedKey]seedState
-	tickerGated map[string]bool
-	tickerLive  map[string][]feed.TicksEvent
-	decodeFails uint64
+	mu                  sync.Mutex
+	fetched             map[string]time.Time // history-quota dedup window (seven days)
+	validated           map[string]struct{}  // process-lifetime positive existence cache
+	seedStates          map[seedKey]seedState
+	tickerGated         map[string]bool
+	tickerLive          map[string][]feed.TicksEvent
+	decodeFails         uint64
+	quotaRefreshRequest func()
 
 	// hbGroup coalesces concurrent HistoryBars calls for the same
 	// symbol+resolution into a single fetch. Deep-backfill can now be
@@ -52,6 +56,12 @@ type OpenDFeed struct {
 	// the fetched-map check below before either updates it, each spending a
 	// real history-quota slot for what should be one fetch.
 	hbGroup         singleflight.Group
+	historyMu       sync.Mutex
+	historyGate     chan struct{} // serializes quota snapshots with slot-spending history fetches
+	historyHeadroom int
+	historyRemain   int
+	historyObserved time.Time
+	historySpent    int
 	validateGroup   singleflight.Group
 	dailyCacheGroup singleflight.Group
 }
@@ -74,9 +84,9 @@ type seedState struct {
 	completedAt time.Time
 }
 
-// fetchDedupWindow mirrors moomoo's 30-day rule: re-requesting a symbol's
-// history within 30 days consumes no quota, so only new symbols are guarded.
-const fetchDedupWindow = 30 * 24 * time.Hour
+// fetchDedupWindow mirrors the provider's seven-day unique-symbol history
+// quota window.
+const fetchDedupWindow = 7 * 24 * time.Hour
 
 // seedDedupWindow collapses the burst of overlapping chart/ladder/tape
 // demands emitted when a linked symbol changes. Live pushes keep the stores
@@ -92,15 +102,22 @@ func NewOpenDFeed(cli *Client, opt FeedOptions) *OpenDFeed {
 	if opt.Clock == nil {
 		opt.Clock = clock.System{}
 	}
+	if opt.HistoryQuotaHeadroom < 0 {
+		opt.HistoryQuotaHeadroom = 0
+	}
+	historyGate := make(chan struct{}, 1)
+	historyGate <- struct{}{}
 	return &OpenDFeed{
 		cli: cli,
 		sub: newSubManager(cli, opt.Clock, subOptions{
-			Budget:       opt.Budget,
+			Budget: opt.Budget, QuotaHeadroom: opt.QuotaHeadroom, RequireQuota: opt.RequireQuota,
 			Hysteresis:   opt.Hysteresis,
 			ExtendedTime: !opt.DisableExtendedTime,
 		}),
 		bf:              newBackfill(cli),
 		clk:             opt.Clock,
+		historyGate:     historyGate,
+		historyHeadroom: opt.HistoryQuotaHeadroom,
 		events:          make(chan feed.Event, opt.EventBuf),
 		foregroundSeedq: make(chan seedJob, 64),
 		backgroundSeedq: make(chan seedJob, 64),
@@ -113,6 +130,50 @@ func NewOpenDFeed(cli *Client, opt FeedOptions) *OpenDFeed {
 }
 
 func (f *OpenDFeed) Events() <-chan feed.Event { return f.events }
+
+func (f *OpenDFeed) SetSubscriptionQuota(remain int, observedAt time.Time) {
+	f.sub.SetSubscriptionQuota(remain, observedAt)
+}
+
+func (f *OpenDFeed) SetHistoryQuota(remain int, observedAt time.Time) {
+	if remain < 0 || observedAt.IsZero() {
+		return
+	}
+	f.historyMu.Lock()
+	if f.historyObserved.IsZero() || !observedAt.Before(f.historyObserved) {
+		f.historyRemain, f.historyObserved, f.historySpent = remain, observedAt, 0
+	}
+	f.historyMu.Unlock()
+}
+
+// BeginHistoryQuotaRefresh waits for in-flight history work to settle, then
+// blocks new quota-spending history calls until an account-wide counter has
+// been read and published.
+func (f *OpenDFeed) BeginHistoryQuotaRefresh(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-f.historyGate:
+		return nil
+	}
+}
+
+func (f *OpenDFeed) EndHistoryQuotaRefresh() { f.historyGate <- struct{}{} }
+
+func (f *OpenDFeed) SetQuotaRefreshRequest(refresh func()) {
+	f.mu.Lock()
+	f.quotaRefreshRequest = refresh
+	f.mu.Unlock()
+}
+
+func (f *OpenDFeed) requestQuotaRefresh() {
+	f.mu.Lock()
+	refresh := f.quotaRefreshRequest
+	f.mu.Unlock()
+	if refresh != nil {
+		refresh()
+	}
+}
 
 func (f *OpenDFeed) Ensure(d feed.Demand) {
 	if len(d.Subs) == 0 {
@@ -268,6 +329,12 @@ func (f *OpenDFeed) pump(ctx context.Context) {
 
 func (f *OpenDFeed) stateLoop(ctx context.Context) {
 	hadConnection := false
+	var resyncCancel context.CancelFunc
+	defer func() {
+		if resyncCancel != nil {
+			resyncCancel()
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -275,37 +342,77 @@ func (f *OpenDFeed) stateLoop(ctx context.Context) {
 		case st := <-f.cli.State():
 			switch st {
 			case ConnDown:
+				if resyncCancel != nil {
+					resyncCancel()
+					resyncCancel = nil
+				}
+				f.sub.ConnectionDown()
 				f.emit(ctx, feed.ConnDownEvent{})
 			case ConnUp:
 				reconnect := hadConnection
 				hadConnection = true
 				started := f.clk.Now()
-				active := f.sub.ActiveSymbols()
-				f.mu.Lock()
-				for symbol, subs := range active {
-					for _, sub := range subs {
-						if sub == feed.SubTicker {
-							f.tickerGated[symbol] = true
-						}
-					}
+				if resyncCancel != nil {
+					resyncCancel()
 				}
-				f.mu.Unlock()
+				resyncCtx, cancel := context.WithCancel(ctx)
+				resyncCancel = cancel
 				f.emit(ctx, feed.ConnUpEvent{})
-				if err := f.sub.ResubscribeAll(ctx); err != nil {
-					slog.Error("resubscribe after reconnect failed", "err", err)
-					continue // client will cycle the connection; next ConnUp retries
-				}
-				for symbol, subs := range active {
-					f.seed(ctx, seedJob{symbol: symbol, subs: subs, enqueuedAt: f.clk.Now(), force: true})
-				}
-				f.emit(ctx, feed.ResyncedEvent{})
-				if reconnect && ctx.Err() == nil {
-					slog.Info("opend resynced", "symbols", len(active),
-						"elapsed", f.clk.Now().Sub(started).Round(time.Millisecond))
-				}
+				go f.resyncConnection(resyncCtx, started, reconnect)
 			}
 		}
 	}
+}
+
+func (f *OpenDFeed) resyncConnection(ctx context.Context, started time.Time, reconnect bool) {
+	desired := f.sub.DesiredSymbols()
+	f.mu.Lock()
+	for symbol, subs := range desired {
+		if containsSub(subs, feed.SubTicker) {
+			f.tickerGated[symbol] = true
+		}
+	}
+	f.mu.Unlock()
+	f.requestQuotaRefresh()
+	if err := f.sub.ResubscribeAll(ctx); err != nil {
+		if ctx.Err() == nil {
+			slog.Error("resubscribe after reconnect failed", "err", err)
+		}
+		return
+	}
+	active := f.sub.ActiveSymbols()
+	f.mu.Lock()
+	for symbol, subs := range desired {
+		if containsSub(subs, feed.SubTicker) && !containsSub(active[symbol], feed.SubTicker) {
+			delete(f.tickerGated, symbol)
+			delete(f.tickerLive, symbol)
+		}
+	}
+	for symbol, subs := range active {
+		if containsSub(subs, feed.SubTicker) {
+			f.tickerGated[symbol] = true
+		}
+	}
+	f.mu.Unlock()
+	for symbol, subs := range active {
+		f.seed(ctx, seedJob{symbol: symbol, subs: subs, enqueuedAt: f.clk.Now(), force: true})
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	f.emit(ctx, feed.ResyncedEvent{})
+	if reconnect {
+		slog.Info("opend resynced", "symbols", len(active), "elapsed", f.clk.Now().Sub(started).Round(time.Millisecond))
+	}
+}
+
+func containsSub(subs []feed.SubType, want feed.SubType) bool {
+	for _, sub := range subs {
+		if sub == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (f *OpenDFeed) seedWorker(ctx context.Context, queue <-chan seedJob) {
@@ -473,8 +580,8 @@ func (f *OpenDFeed) CachedDaily(ctx context.Context, symbol string) ([]feed.Bar,
 	return v.([]feed.Bar), nil
 }
 
-// HistoryBars spends history quota; guard new symbols against exhaustion.
-// Symbols fetched within the 30-day dedup window are free re-requests.
+// HistoryBars spends history quota; guard new symbols against exhaustion and
+// the configured history reserve. Symbols fetched within seven days are free.
 // Concurrent calls for the same symbol+resolution (e.g. scanner-pool
 // admission and a UI chart-open demand racing on the same symbol) coalesce
 // into a single fetch via hbGroup, so quota is spent at most once per
@@ -482,18 +589,30 @@ func (f *OpenDFeed) CachedDaily(ctx context.Context, symbol string) ([]feed.Bar,
 func (f *OpenDFeed) HistoryBars(ctx context.Context, symbol string, res feed.Resolution, from, to time.Time) ([]feed.Bar, error) {
 	key := fmt.Sprintf("%s|%d", symbol, res)
 	v, err, _ := f.hbGroup.Do(key, func() (any, error) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-f.historyGate:
+		}
+		defer func() { f.historyGate <- struct{}{} }()
+		f.historyMu.Lock()
+		defer f.historyMu.Unlock()
 		f.mu.Lock()
 		last, ok := f.fetched[symbol]
 		f.mu.Unlock()
 		if !ok || f.clk.Now().Sub(last) > fetchDedupWindow {
-			_, remain, err := f.bf.historyQuota(ctx)
-			if err != nil {
-				return nil, err
+			if f.historyObserved.IsZero() || f.clk.Now().Sub(f.historyObserved) > 75*time.Second || f.historyRemain-f.historySpent <= f.historyHeadroom {
+				_, remain, err := f.bf.historyQuota(ctx)
+				if err != nil {
+					return nil, err
+				}
+				f.historyRemain, f.historyObserved, f.historySpent = remain, f.clk.Now(), 0
 			}
-			if remain == 0 {
-				slog.Warn("history quota exhausted; deep backfill degraded to cache depth", "symbol", symbol)
+			if f.historyRemain-f.historySpent <= f.historyHeadroom {
+				slog.Warn("history quota reserve reached; deep backfill deferred", "symbol", symbol, "remain", f.historyRemain-f.historySpent, "reserve", f.historyHeadroom)
 				return nil, ErrHistoryQuotaExhausted
 			}
+			f.historySpent++
 		}
 		bars, err := f.bf.historyBars(ctx, symbol, res, from, to)
 		if err != nil {

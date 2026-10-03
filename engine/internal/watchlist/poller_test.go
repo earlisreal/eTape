@@ -76,7 +76,7 @@ func (r *fakeReq) Request(ctx context.Context, protoID uint32, req proto.Message
 	if r.failAll {
 		rt := int32(1)
 		resp.RetType = &rt
-		msg := "batch fail"
+		msg := "invalid security"
 		resp.RetMsg = &msg
 		b, _ := proto.Marshal(&resp)
 		return opend.Frame{Body: b}, nil

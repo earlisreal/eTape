@@ -4,6 +4,14 @@ Named workspaces are cataloged in engine config (`windows.v1`) by stable UUID; `
 
 React/Vite shell around imperative market-data stores and renderers. Wire messages enter `src/wire`, route into `src/data`, then panels/controllers schedule chart or canvas work. The Account panel keeps live Open Orders and the read-only Closed Orders projection in the imperative execution store; the upper tab is session-local while each table's sort preference is persisted. Time & Sales ticks retain the engine-stamped Significant Print level in the imperative tape ring; the separate `md.tape.status` read model feeds read-only settings text. React owns layout/settings, never high-frequency payload state.
 
+Each Scanner Panel persists its own filters with its workspace document and
+keeps a separate sticky board, sorting, seen state and sound eligibility in
+`ScannerStore`. The engine shares discovery and request budgets across panels.
+Closing a workspace pauses its Scanner demand; an enabled Monitoring workspace
+keeps following its selected Scanner Source, including when that source window
+is closed. Session Volume sorts by current session shares and reports the age
+of its shared top-200 discovery page.
+
 Grouped charts also project open orders into an imperative overlay: yellow
 LIMIT and cyan pretrigger STOP_LIMIT/LIT lines, price-axis chips, and per-order
 drag/cancel controls. The overlay follows the ordinary execution store; market

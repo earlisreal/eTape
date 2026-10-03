@@ -29,6 +29,24 @@ func nextEvent(t *testing.T, ch <-chan feed.Event) feed.Event {
 	}
 }
 
+func TestHistoryQuotaRefreshBlocksNewHistorySpending(t *testing.T) {
+	f := NewOpenDFeed(nil, FeedOptions{})
+	if err := f.BeginHistoryQuotaRefresh(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := f.HistoryBars(ctx, "US.AAPL", feed.Res1m, time.Unix(0, 0), time.Unix(1, 0))
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("HistoryBars while quota refresh held = %v, want deadline", err)
+	}
+	f.SetHistoryQuota(10, time.Now()) // observer is safe while the refresh owns the gate
+	f.EndHistoryQuotaRefresh()
+	if f.historyRemain != 10 || f.historySpent != 0 {
+		t.Fatalf("history quota after refresh = remain %d spent %d", f.historyRemain, f.historySpent)
+	}
+}
+
 func TestEnsureSubscribesAndSeeds(t *testing.T) {
 	m := newMockOpenD(t)
 	m.setData("US.AAPL", &qotData{

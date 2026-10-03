@@ -669,10 +669,12 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		log.Info("engine up (demo synth feed)", "seed", seed, "symbols", gen.Symbols())
 		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
 	} else {
-		client := opend.New(opend.Options{Addr: cfg.OpenD.Addr(), Clock: clock.System{}})
+		client := opend.New(opend.Options{Addr: cfg.OpenD.Addr(), Clock: clock.System{}, RateLimitMarketData: true})
 		fd := opend.NewOpenDFeed(client, opend.FeedOptions{
-			Budget: cfg.Feed.QuotaSlots, Hysteresis: time.Duration(cfg.Feed.UnsubHysteresisSecs) * time.Second,
-			DisableExtendedTime: !cfg.Feed.ExtendedTime,
+			Budget: cfg.Feed.QuotaSlots, QuotaHeadroom: cfg.Feed.QuotaWarnHeadroom, RequireQuota: true,
+			HistoryQuotaHeadroom: cfg.Feed.HistQuotaWarnRemain,
+			Hysteresis:           time.Duration(cfg.Feed.UnsubHysteresisSecs) * time.Second,
+			DisableExtendedTime:  !cfg.Feed.ExtendedTime,
 		})
 		execCore.Do(exec.ConfigureHeldDemand{Demand: engineHeldDemand{feed: fd, wait: fd.WaitTickerActive}})
 		go func() { _ = client.Run(ctx) }()
@@ -774,9 +776,18 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			}()
 		}
 	}
-	var backfillOne func(string)
+	var backfillOne func(context.Context, string)
 	if warmArchive != nil {
-		backfillOne = func(sym string) { warmArchive(sym, nil) }
+		backfillOne = func(workCtx context.Context, sym string) {
+			warmSeen.Store(sym, struct{}{})
+			backfillWG.Add(1)
+			go func() {
+				defer backfillWG.Done()
+				if err := orch.WarmArchive(workCtx, sym); err != nil && workCtx.Err() == nil {
+					log.Warn("scanner history warm failed", "symbol", sym, "err", err)
+				}
+			}()
+		}
 		scanWG.Add(1)
 		go func() {
 			defer scanWG.Done()
@@ -1252,7 +1263,7 @@ func scannerRELVolFetcher(client *histalpaca.Client, feedName string, demo bool)
 	return client.ScannerDailyBars
 }
 
-func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, wl *watchlist.List, hasTZ bool, mmProbe rttProber, accountHealth health.AccountHealthSource, assetReader stockInfoAssetReader, backfillOne func(string), relativeVolumeFetch func(context.Context, string, time.Time, time.Time) ([]feed.Bar, error), startQuota bool, scanWG *sync.WaitGroup) {
+func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, demand demandFeeder, hub *uihub.Hub, clk clock.Clock, st *store.Store, wl *watchlist.List, hasTZ bool, mmProbe rttProber, accountHealth health.AccountHealthSource, assetReader stockInfoAssetReader, backfillOne func(context.Context, string), relativeVolumeFetch func(context.Context, string, time.Time, time.Time) ([]feed.Bar, error), startQuota bool, scanWG *sync.WaitGroup) {
 	ssrResolver := ssr.New(st)
 	scanPoller := scan.New(cfg.Scan, r, hub, clk, demand, backfillOne, relativeVolumeFetch, ssrResolver)
 	_ = scanPoller.SetFilters(restoreScannerFilters(st, scan.Defaults(cfg.Scan)))
@@ -1282,6 +1293,27 @@ func startPollers(ctx context.Context, cfg config.Config, r pollerRequester, dem
 			SubWarnHeadroom: cfg.Feed.QuotaWarnHeadroom,
 			HistWarnRemain:  cfg.Feed.HistQuotaWarnRemain,
 		}, r, hub, clk)
+		if quotaPoke, ok := demand.(interface{ SetQuotaRefreshRequest(func()) }); ok {
+			quotaPoke.SetQuotaRefreshRequest(quotaPoller.Poke)
+		}
+		if barrier, ok := demand.(interface {
+			BeginSubscriptionQuotaRefresh(context.Context) error
+			EndSubscriptionQuotaRefresh()
+		}); ok {
+			quotaPoller.SetSubscriptionQuotaRefresh(barrier.BeginSubscriptionQuotaRefresh, barrier.EndSubscriptionQuotaRefresh)
+		}
+		if barrier, ok := demand.(interface {
+			BeginHistoryQuotaRefresh(context.Context) error
+			EndHistoryQuotaRefresh()
+		}); ok {
+			quotaPoller.SetHistoryQuotaRefresh(barrier.BeginHistoryQuotaRefresh, barrier.EndHistoryQuotaRefresh)
+		}
+		if subscriptionQuota, ok := demand.(interface{ SetSubscriptionQuota(int, time.Time) }); ok {
+			quotaPoller.SetSubscriptionQuotaObserver(subscriptionQuota.SetSubscriptionQuota)
+		}
+		if historyQuota, ok := demand.(interface{ SetHistoryQuota(int, time.Time) }); ok {
+			quotaPoller.SetHistoryQuotaObserver(historyQuota.SetHistoryQuota)
+		}
 		go func() { _ = quotaPoller.Run(ctx) }()
 		qsrc = quotaPoller
 	}

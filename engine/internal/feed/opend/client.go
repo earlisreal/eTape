@@ -36,21 +36,23 @@ var (
 
 // Options configures a Client. Zero values are filled with defaults in New.
 type Options struct {
-	Addr           string
-	ClientID       string
-	ClientVer      int32
-	RequestTimeout time.Duration
-	DialTimeout    time.Duration
-	ReconnectMin   time.Duration
-	ReconnectMax   time.Duration
-	Clock          clock.Clock
+	Addr                string
+	ClientID            string
+	ClientVer           int32
+	RequestTimeout      time.Duration
+	DialTimeout         time.Duration
+	ReconnectMin        time.Duration
+	ReconnectMax        time.Duration
+	Clock               clock.Clock
+	RateLimitMarketData bool
 }
 
 // Client is the OpenD connection: a supervised TCP session with request/response
 // correlation and push dispatch. It holds no market-data domain state.
 type Client struct {
-	opt Options
-	clk clock.Clock
+	opt   Options
+	clk   clock.Clock
+	pacer *requestPacer
 
 	mu        sync.Mutex
 	conn      net.Conn // current live conn; nil when down
@@ -92,13 +94,17 @@ func New(opt Options) *Client {
 	if opt.ClientID == "" {
 		opt.ClientID = "etape-engine"
 	}
-	return &Client{
+	c := &Client{
 		opt:     opt,
 		clk:     opt.Clock,
 		pending: newPending(),
 		pushes:  make(chan Frame, 1024),
 		state:   make(chan ConnState, 8),
 	}
+	if opt.RateLimitMarketData {
+		c.pacer = newRequestPacer(opt.Clock)
+	}
+	return c
 }
 
 // Pushes yields frames with no matching in-flight request (dispatched by protoID
@@ -127,6 +133,19 @@ func (c *Client) ServerVer() int32 {
 func (c *Client) Request(ctx context.Context, protoID uint32, req proto.Message) (Frame, error) {
 	body, err := proto.Marshal(req)
 	if err != nil {
+		return Frame{}, err
+	}
+	if c.pacer != nil {
+		if bucket, spacing := marketDataRequestPacing(protoID); spacing > 0 {
+			if err := c.pacer.waitPriority(ctx, bucket, spacing, isBackgroundRequest(ctx)); err != nil {
+				return Frame{}, err
+			}
+		}
+	}
+	// The request may have waited in a rate-limit queue. Recheck cancellation
+	// immediately before registering and writing it so reconnect-canceled work
+	// cannot leak onto the replacement connection.
+	if err := ctx.Err(); err != nil {
 		return Frame{}, err
 	}
 	serial := c.serial.next()

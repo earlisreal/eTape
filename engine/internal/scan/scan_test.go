@@ -1070,7 +1070,7 @@ func TestResolveFloatsSplitRetryIsolatesBadCode(t *testing.T) {
 	fr := &fakeReq{snap: func(codes []string) (*snappb.Response, error) {
 		for _, c := range codes {
 			if c == "BAD" {
-				return snapErrResp("US OTC market quote is not available"), nil
+				return snapErrResp("invalid security: US.BAD"), nil
 			}
 		}
 		snaps := make([]*snappb.Snapshot, 0, len(codes))
@@ -1096,7 +1096,7 @@ func TestResolveFloatsRequestCap(t *testing.T) {
 	// Every batch fails as a whole -> pathological split explosion; must stop
 	// at maxSnapshotReqs requests, leaving the rest absent.
 	fr := &fakeReq{snap: func(codes []string) (*snappb.Response, error) {
-		return snapErrResp("all bad"), nil
+		return snapErrResp("invalid security batch"), nil
 	}}
 	p := newTestPoller(config.Scan{}, fr, &capturePub{})
 	var items []rankItem
@@ -1192,7 +1192,7 @@ func TestResolveExchSplitRetryIsolatesBadCode(t *testing.T) {
 	fr := &fakeReq{staticInfo: func(codes []string) (*staticpb.Response, error) {
 		for _, c := range codes {
 			if c == "BAD" {
-				return staticErrResp("no permission"), nil
+				return staticErrResp("invalid security: US.BAD"), nil
 			}
 		}
 		var infos []*qotcommon.SecurityStaticInfo
@@ -1542,6 +1542,9 @@ func TestSnapshotRefreshUsesActiveSessionData(t *testing.T) {
 			items := map[string]rankItem{"US.A": {Symbol: "US.A", Last: 7, ChangePct: 6, Volume: 5}}
 			p.refreshSnapshots(context.Background(), tc.phase, items)
 			got := items["US.A"]
+			if got.snapshotAt.IsZero() || !got.snapshotAt.Equal(p.clk.Now()) {
+				t.Fatalf("snapshot timestamp = %v, want %v", got.snapshotAt, p.clk.Now())
+			}
 			if got.Last != tc.want.Last || got.ChangePct != tc.want.ChangePct || got.Volume != tc.want.Volume || (got.Turnover == nil) != (tc.wantTurnover == nil) || got.Turnover != nil && *got.Turnover != *tc.wantTurnover || (got.sessionVolume == nil) != (tc.wantSessionVolume == nil) || got.sessionVolume != nil && *got.sessionVolume != *tc.wantSessionVolume {
 				t.Fatalf("got %+v, want market values %+v", got, tc.want)
 			}
@@ -1835,7 +1838,7 @@ func TestUpdatePoolEnsuresWatchDemandsAndBackfills(t *testing.T) {
 	sf := &spyFeed{}
 	backfillCh := make(chan string, 2)
 	clk := clock.NewFake(et(2026, 7, 8, 14, 0)) // RTH, well inside a pool day
-	p := New(config.Scan{}, &fakeReq{}, &capturePub{}, clk, sf, func(s string) { backfillCh <- s }, nil)
+	p := New(config.Scan{}, &fakeReq{}, &capturePub{}, clk, sf, func(_ context.Context, s string) { backfillCh <- s }, nil)
 
 	p.updatePool(clk.Now(), rows("US.A", "US.B"))
 
@@ -1867,6 +1870,61 @@ func TestUpdatePoolEnsuresWatchDemandsAndBackfills(t *testing.T) {
 	}
 	if !reflect.DeepEqual(p.PoolSymbols(), []string{"US.A", "US.B"}) {
 		t.Fatalf("PoolSymbols()=%v, want [US.A US.B]", p.PoolSymbols())
+	}
+}
+
+func TestClosingLastScannerCancelsQueuedHistoryWork(t *testing.T) {
+	clk := clock.NewFake(et(2026, 7, 8, 14, 0))
+	backfillStarted := make(chan string, 2)
+	backfillCanceled := make(chan string, 2)
+	p := New(config.Scan{}, nil, nil, clk, &spyFeed{}, func(ctx context.Context, symbol string) {
+		backfillStarted <- symbol
+		go func() {
+			<-ctx.Done()
+			backfillCanceled <- symbol
+		}()
+	}, nil)
+	p.updatePool(clk.Now(), rows("US.A", "US.B"))
+	if got := <-backfillStarted; got != "US.A" {
+		t.Fatalf("immediate backfill = %s, want US.A", got)
+	}
+	p.clearPool()
+	select {
+	case got := <-backfillCanceled:
+		if got != "US.A" {
+			t.Fatalf("canceled backfill = %s, want US.A", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("closing the scanner did not cancel active backfill")
+	}
+	select {
+	case got := <-backfillStarted:
+		t.Fatalf("delayed backfill %s started after the scanner closed", got)
+	case <-time.After(350 * time.Millisecond):
+	}
+
+	started := make(chan struct{})
+	fetchCanceled := make(chan struct{})
+	workerCtx, cancelWorker := context.WithCancel(context.Background())
+	defer cancelWorker()
+	p.relativeVolumeFetcher = func(ctx context.Context, _ string, _, _ time.Time) ([]feed.Bar, error) {
+		close(started)
+		<-ctx.Done()
+		close(fetchCanceled)
+		return nil, ctx.Err()
+	}
+	go p.runRelativeVolumeWorker(workerCtx)
+	p.enqueueRelativeVolumeAt("US.C", clk.Now(), clk.Now().UnixMilli())
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("REL VOL fetch did not start")
+	}
+	p.clearPool()
+	select {
+	case <-fetchCanceled:
+	case <-time.After(time.Second):
+		t.Fatal("closing the scanner did not cancel REL VOL history")
 	}
 }
 

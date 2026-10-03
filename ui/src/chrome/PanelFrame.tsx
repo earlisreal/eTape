@@ -74,8 +74,9 @@ function ResponsivePanelTitle({ title, shortTitle, className, style }: {
 }
 
 export function PanelFrame(
-  { config, stores, scheduler, linkGroups, demandRegistry, commands, onConfigChange, onGroupChange, onClose, monitoring, scannerSyncRuntime, panelSymbols, api }: {
+  { config, workspaceId, stores, scheduler, linkGroups, demandRegistry, commands, onConfigChange, onGroupChange, onClose, monitoring, scannerSyncRuntime, panelSymbols, api }: {
     config: PanelConfig; stores: Stores; scheduler: Scheduler;
+    workspaceId?: string;
     linkGroups: LinkGroups; demandRegistry: DemandRegistry; commands: PanelProps["commands"];
     onConfigChange: (settings: Record<string, unknown>) => void;
     onGroupChange: (group: LinkGroup) => void;
@@ -229,6 +230,7 @@ export function PanelFrame(
   // creation — full live editing of it is Task 13's type-to-load work.
   const props: PanelProps = { config, stores, scheduler, width: size.width, height: size.height,
     linkGroups, commands, onConfigChange, active, onGroupChange, group,
+    ...(config.panelId === "scanner" ? { scannerId: `${workspaceId ?? "legacy"}/${config.id}` } : {}),
     ...(monitoring === undefined ? {} : { monitoring }), ...(scannerSync ? { scannerSync } : {}), ...(rawSymbol ? { symbol: rawSymbol } : {}) };
   useEffect(() => { symbolRef.current = rawSymbol; }, [rawSymbol]);
 

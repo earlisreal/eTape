@@ -432,6 +432,7 @@ describe("AppShell Monitoring Scanner Sync", () => {
 
     sourceWindow.unmount();
     act(() => monitor.stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      scannerId: "source-window/source-scanner", session: "rth", discoveryAt: "2026-08-15T08:00:00.000Z", status: "ready",
       refreshedAt: "2026-08-15T08:00:00.000Z",
       rows: [
         { ...scannerShortInterestDefaults, symbol: "US.A", changePct: 1, last: 30, floatShares: 1, volume: 1 },
@@ -455,6 +456,7 @@ describe("AppShell Monitoring Scanner Sync", () => {
     expect(docs.get("monitoring")?.scannerSync?.sourceWorkspaceId).toBe("source-window");
     await waitFor(() => expect(within(monitor.container).getByText("Paused").getAttribute("title")).toBe("Paused — Scanner Source unavailable"));
     act(() => monitor.stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      scannerId: "source-window/source-scanner", session: "rth", discoveryAt: "2026-08-15T08:00:30.000Z", status: "ready",
       refreshedAt: "2026-08-15T08:00:30.000Z",
       rows: [{ ...scannerShortInterestDefaults, symbol: "US.C", changePct: 9, last: 1, floatShares: 1, volume: 1 }],
     } }));
@@ -471,6 +473,7 @@ describe("AppShell Monitoring Scanner Sync", () => {
     monitor.unmount();
     const restarted = mountWindow("monitoring");
     act(() => restarted.stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      scannerId: "replacement-window/replacement-scanner", session: "rth", discoveryAt: "2026-08-15T08:01:00.000Z", status: "ready",
       refreshedAt: "2026-08-15T08:01:00.000Z",
       rows: [{ ...scannerShortInterestDefaults, symbol: "US.Z", changePct: 9, last: 1, floatShares: 1, volume: 1 }],
     } }));
@@ -487,6 +490,7 @@ describe("AppShell Monitoring Scanner Sync", () => {
     await waitFor(() => expect(saved.some((workspace) => workspace.scannerSync?.enabled && workspace.scannerSync.sourcePanelId === "m-scanner")).toBe(true));
 
     act(() => stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      scannerId: "monitoring/m-scanner", session: "rth", discoveryAt: "2026-08-15T08:00:00.000Z", status: "ready",
       refreshedAt: "2026-08-15T08:00:00.000Z",
       rows: [
         { ...scannerShortInterestDefaults, symbol: "US.A", changePct: 4, last: 1, floatShares: 1, volume: 1 },
@@ -524,12 +528,14 @@ describe("AppShell Monitoring Scanner Sync", () => {
       shortInterest, shortInterestAsOf: shortInterest === null ? null : "2026-07-31",
     });
     act(() => stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      scannerId: "monitoring/m-scanner", session: "rth", discoveryAt: "2026-08-15T08:00:00.000Z", status: "ready",
       refreshedAt: "2026-08-15T08:00:00.000Z",
       rows: [row("US.A", 100), row("US.B", 90), row("US.C", 80), row("US.D", 70), row("US.E", null)],
     } }));
     await waitFor(() => expect(saved.some((workspace) => workspace.panels.find((panel) => panel.id === "m-chart-yellow")?.settings.symbol === "US.D")).toBe(true));
 
     act(() => stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      scannerId: "monitoring/m-scanner", session: "rth", discoveryAt: "2026-08-15T08:00:01.000Z", status: "ready",
       refreshedAt: "2026-08-15T08:00:01.000Z",
       rows: [row("US.A", 100), row("US.B", 90), row("US.C", 80), row("US.D", 70), row("US.E", 200)],
     } }));
@@ -542,6 +548,7 @@ describe("AppShell Monitoring Scanner Sync", () => {
     fireEvent.click(screen.getByRole("button", { name: "Use this Scanner as Monitoring Source" }));
 
     act(() => stores.scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "rth", payload: {
+      scannerId: "monitoring/m-scanner", session: "rth", discoveryAt: "2026-08-15T08:00:00.000Z", status: "ready",
       refreshedAt: "2026-08-15T08:00:00.000Z",
       rows: [
         { ...scannerShortInterestDefaults, symbol: "US.A", changePct: 4, last: 1, floatShares: 1, volume: 1 },

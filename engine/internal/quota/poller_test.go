@@ -2,6 +2,8 @@ package quota
 
 import (
 	"context"
+	"errors"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -157,5 +159,60 @@ func TestPollFailureHoldsStateAndSkips(t *testing.T) {
 	}
 	if len(pub.evs) != 0 {
 		t.Fatalf("failed poll must emit nothing: %+v", pub.evs)
+	}
+}
+
+func TestHistoryQuotaFailureDoesNotBlockSubscriptionQuota(t *testing.T) {
+	f := &fakeReq{
+		bodies: map[uint32][]byte{
+			opend.ProtoQotGetSubInfo: subInfoBody(t, 8, 92, conn(true, 8)),
+		},
+		errs: map[uint32]error{opend.ProtoQotRequestHistoryKLQuota: errors.New("history quota unavailable")},
+	}
+	p := New(Config{}, f, &capPub{}, clock.NewFake(time.Now()))
+	var gotSubRemain int
+	refreshBegun, refreshEnded := 0, 0
+	p.SetSubscriptionQuotaObserver(func(remain int, _ time.Time) { gotSubRemain = remain })
+	p.SetSubscriptionQuotaRefresh(func(context.Context) error { refreshBegun++; return nil }, func() { refreshEnded++ })
+	p.poll(context.Background())
+	if gotSubRemain != 92 {
+		t.Fatalf("subscription quota observer received %d, want 92 despite history read failure", gotSubRemain)
+	}
+	if refreshBegun != 1 || refreshEnded != 1 {
+		t.Fatalf("subscription refresh barrier begin/end = %d/%d, want 1/1", refreshBegun, refreshEnded)
+	}
+	if _, ok := p.Latest(); ok {
+		t.Fatal("failed full quota poll should not publish a partial panel snapshot")
+	}
+}
+
+type quotaTraceReq struct {
+	*fakeReq
+	order *[]string
+}
+
+func (r quotaTraceReq) Request(ctx context.Context, protoID uint32, req proto.Message) (opend.Frame, error) {
+	if protoID == opend.ProtoQotRequestHistoryKLQuota {
+		*r.order = append(*r.order, "history-read")
+	}
+	return r.fakeReq.Request(ctx, protoID, req)
+}
+
+func TestHistoryQuotaRefreshBracketsCounterReadAndObserver(t *testing.T) {
+	order := []string{}
+	r := quotaTraceReq{fakeReq: &fakeReq{bodies: map[uint32][]byte{
+		opend.ProtoQotGetSubInfo:            subInfoBody(t, 1, 99, conn(true, 1)),
+		opend.ProtoQotRequestHistoryKLQuota: histBody(t, 2, 98),
+	}}, order: &order}
+	p := New(Config{}, r, &capPub{}, clock.NewFake(time.Now()))
+	p.SetHistoryQuotaRefresh(func(context.Context) error {
+		order = append(order, "begin")
+		return nil
+	}, func() { order = append(order, "end") })
+	p.SetHistoryQuotaObserver(func(int, time.Time) { order = append(order, "observe") })
+	p.poll(context.Background())
+	want := []string{"begin", "history-read", "observe", "end"}
+	if !reflect.DeepEqual(order, want) {
+		t.Fatalf("history refresh order = %v, want %v", order, want)
 	}
 }

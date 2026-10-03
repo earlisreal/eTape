@@ -17,11 +17,11 @@ import { IconGear, IconVolume, IconVolumeOff } from "./tv/tvIcons";
 import { rankScannerRows, readScannerSort, scannerModeSort, scannerSyncStatusText } from "../scannerSync";
 import { focusMainWorkspace } from "../windows";
 import { soundEngine } from "../../sound/SoundEngine";
+import { DEFAULT_SCANNER_FILTERS, scannerFiltersFromSettings } from "../scannerFilters";
 
 const SESSION_LABEL: Record<ScannerSession, string> = {
   premarket: "Pre-market", rth: "RTH", afterhours: "After-hours", overnight: "Overnight",
 };
-const DEFAULT_FILTERS: ScannerFilters = { mode: "gainers", minChangePct: 0, maxFloatShares: null, minVolume: 0, minSessionVolume: 0, minTurnover: 0, minRelativeVolume: 0, minPrice: 0, maxPrice: 0, floatUnit: "M", volumeUnit: "K", sessionVolumeUnit: "K" };
 type ScannerColumn = "sym" | "changePct" | "last" | "float" | "relVol" | "vol" | "sessionVol" | "turnover" | "shortInterest";
 type MetricColumn = Exclude<ScannerColumn, "sym">;
 type ColumnSettings = { order: MetricColumn[]; hidden: MetricColumn[] };
@@ -75,7 +75,7 @@ const defaultSortForVisibleColumns = (mode: ScannerFilters["mode"], settings: Co
 const unitScale = (unit: "K" | "M") => unit === "K" ? 1_000 : 1_000_000;
 
 export function ScannerPanel(
-  { config, stores, linkGroups, commands, onConfigChange, group: groupProp, scannerSync }: PanelProps,
+  { config, scannerId = "legacy", stores, linkGroups, commands, onConfigChange, group: groupProp, scannerSync }: PanelProps,
 ): JSX.Element {
   const { palette } = useTheme();
   const headerSlot = useContext(PanelHeaderSlotContext);
@@ -86,14 +86,22 @@ export function ScannerPanel(
   const group = groupProp ?? config.group;
   const [menu, setMenu] = useState<{ clientX: number; clientY: number; symbol: string } | null>(null);
   const snap = useSyncExternalStore((cb) => stores.scanner.subscribe(cb), () => stores.scanner.getSnapshot());
-  const cv = useMemo(() => stores.scanner.currentView(), [snap, stores.scanner]);
+  const cv = useMemo(() => stores.scanner.currentView(scannerId), [snap, stores.scanner, scannerId]);
   const [sort, setSort] = useState<SortState>(() => readScannerSort(config.settings));
   const [columnSettings, setColumnSettings] = useState<ColumnSettings>(() => readColumnSettings(config.settings));
   const sortedMode = useRef<ScannerFilters["mode"] | null>(null);
+  const [appliedFilters, setAppliedFilters] = useState<ScannerFilters | null>(null);
+  const engineFiltersRef = useRef(cv.filters);
+  useEffect(() => {
+    const previous = engineFiltersRef.current;
+    if (previous === cv.filters) return;
+    engineFiltersRef.current = cv.filters;
+    if (appliedFilters && (JSON.stringify(cv.filters) === JSON.stringify(appliedFilters)
+      || JSON.stringify(previous) !== JSON.stringify(cv.filters))) setAppliedFilters(null);
+  }, [appliedFilters, cv.filters]);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [columnsOpen, setColumnsOpen] = useState(false);
-  const [draft, setDraft] = useState<ScannerFilters>(DEFAULT_FILTERS);
-  const [engineFilters, setEngineFilters] = useState<ScannerFilters | null>(null);
+  const [draft, setDraft] = useState<ScannerFilters>(() => scannerFiltersFromSettings(config.settings));
   const filtersRef = useRef<HTMLDivElement>(null);
   const filterTriggerRef = useRef<HTMLButtonElement>(null);
   const columnsRef = useRef<HTMLDivElement>(null);
@@ -107,8 +115,8 @@ export function ScannerPanel(
 
   useEffect(() => {
     if (scannerSoundMuted) return;
-    return stores.scanner.onNewHit(() => soundEngine.scannerHit());
-  }, [stores.scanner, scannerSoundMuted]);
+    return stores.scanner.onNewHit(() => soundEngine.scannerHit(), scannerId);
+  }, [stores.scanner, scannerSoundMuted, scannerId]);
 
   const toggleScannerSound = () => {
     const next = !scannerSoundMuted;
@@ -119,19 +127,13 @@ export function ScannerPanel(
   // ET-midnight dedup reset: clear the per-session seen-sets so the next session's
   // first prints flash fresh. Re-arms after each fire.
   useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    const arm = () => { timer = setTimeout(() => { stores.scanner.resetSeen(); arm(); }, msUntilEtMidnight(new Date())); };
+      let timer: ReturnType<typeof setTimeout>;
+    const arm = () => { timer = setTimeout(() => { stores.scanner.resetSeen(undefined, scannerId); arm(); }, msUntilEtMidnight(new Date())); };
     arm();
     return () => clearTimeout(timer);
-  }, [stores.scanner]);
+  }, [stores.scanner, scannerId]);
 
-  useEffect(() => {
-    void commands.sendCommand("GetScannerFilters", {}).then((ack) => {
-      if (ack.status === "accepted" && ack.value) setEngineFilters(ack.value as ScannerFilters);
-    });
-  }, [commands]);
-
-  const filters = { ...DEFAULT_FILTERS, ...(cv.filters ?? engineFilters ?? {}) };
+  const filters = { ...scannerFiltersFromSettings(config.settings), ...(cv.filters ?? {}), ...(appliedFilters ?? {}) };
   useEffect(() => {
     const sortHidden = sort !== null && columnSettings.hidden.includes(sort.col as MetricColumn);
     if (sortedMode.current === null) {
@@ -177,7 +179,14 @@ export function ScannerPanel(
     || draft.minPrice > 0 && draft.maxPrice > 0 && draft.minPrice > draft.maxPrice;
   const applyFilters = () => {
     if (invalidPriceRange) return;
-    void commands.sendCommand("SetScannerFilters", { filters: draft });
+    const [workspaceId, panelId, ...extra] = scannerId.split("/");
+    const identity = panelId && extra.length === 0 ? { workspaceId, panelId } : {};
+    void commands.sendCommand("SetScannerFilters", { ...identity, filters: draft });
+    // Persist locally as soon as Apply is pressed. During engine startup the
+    // scanner service may not be installed yet; AppShell retries workspace
+    // registration and sends this latest saved filter set when it becomes ready.
+    setAppliedFilters(draft);
+    onConfigChange({ scannerFilters: draft });
     if (draft.mode !== filters.mode) {
       const next = defaultSortForVisibleColumns(draft.mode, columnSettings);
       setSort(next);
@@ -185,7 +194,7 @@ export function ScannerPanel(
     }
     setFiltersOpen(false);
   };
-  const resetDefaults = () => setDraft(DEFAULT_FILTERS);
+  const resetDefaults = () => setDraft(DEFAULT_SCANNER_FILTERS);
   const clickSort = (col: string) => {
     const next = toggleSort(sort, col);
     setSort(next);
@@ -288,13 +297,13 @@ export function ScannerPanel(
   return (
     <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden", position: "relative", background: palette.bg, color: palette.text, fontSize: 12 }}>
       {headerSlot === undefined ? headerControls : headerSlot ? createPortal(headerControls, headerSlot) : null}
-      {!cv.refreshedAt && <div style={{ padding: "6px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>Waiting for scanner data…</div>}
+      {!cv.refreshedAt && cv.rows.length === 0 && <div style={{ padding: "6px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>Waiting for scanner data…</div>}
+      {!cv.refreshedAt && cv.rows.length > 0 && <div role="status" style={{ padding: "6px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>Quote snapshots pending for visible symbols…</div>}
       {filtersOpen && (
         <div ref={filtersRef} className="popover" style={{ top: headerSlot === undefined ? 30 : 6, left: headerSlot === undefined ? 8 : undefined, right: headerSlot === undefined ? undefined : 8, width: 220 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {cv.refreshedAt && <div className="mono" style={{ color: palette.textMuted }}>updated {formatTapeTime(cv.refreshedAt)}</div>}
-            <label>rank <select aria-label="rank mode" value={draft.mode} onChange={(e) => setDraft({ ...draft, mode: e.target.value as ScannerFilters["mode"] })}><option value="gainers">Top gainers</option><option value="losers">Top losers</option><option value="most_active">Most active</option></select></label>
-            {draft.mode !== "most_active" && <label>{draft.mode === "gainers" ? "min gain %" : "min loss %"} <input aria-label={draft.mode === "gainers" ? "min gain %" : "min loss %"} type="number" min="0" value={draft.minChangePct} onChange={(e) => setDraft({ ...draft, minChangePct: Math.max(0, Number(e.target.value)) })} style={{ width: 60 }} /></label>}
+            <label>rank <select aria-label="rank mode" value={draft.mode} onChange={(e) => setDraft({ ...draft, mode: e.target.value as ScannerFilters["mode"] })}><option value="gainers">Top gainers</option><option value="losers">Top losers</option><option value="most_active">Most active</option><option value="session_volume">Session Volume</option></select></label>
+            {draft.mode !== "most_active" && draft.mode !== "session_volume" && <label>{draft.mode === "gainers" ? "min gain %" : "min loss %"} <input aria-label={draft.mode === "gainers" ? "min gain %" : "min loss %"} type="number" min="0" value={draft.minChangePct} onChange={(e) => setDraft({ ...draft, minChangePct: Math.max(0, Number(e.target.value)) })} style={{ width: 60 }} /></label>}
             <label>float ≤ <input aria-label="float cap" type="number" min="0" value={draft.maxFloatShares === null ? "" : draft.maxFloatShares / unitScale(draft.floatUnit)} onChange={(e) => setDraft({ ...draft, maxFloatShares: e.target.value === "" ? null : Number(e.target.value) * unitScale(draft.floatUnit) })} style={{ width: 70 }} /><select aria-label="float unit" value={draft.floatUnit} onChange={(e) => setDraft({ ...draft, floatUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
             <label>vol ≥ <input aria-label="min volume" type="number" min="0" value={draft.minVolume / unitScale(draft.volumeUnit)} onChange={(e) => setDraft({ ...draft, minVolume: Number(e.target.value) * unitScale(draft.volumeUnit) })} style={{ width: 70 }} /><select aria-label="volume unit" value={draft.volumeUnit} onChange={(e) => setDraft({ ...draft, volumeUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
             <label>session vol ≥ <input aria-label="min session volume" type="number" min="0" value={draft.minSessionVolume / unitScale(draft.sessionVolumeUnit)} onChange={(e) => setDraft({ ...draft, minSessionVolume: Number(e.target.value) * unitScale(draft.sessionVolumeUnit) })} style={{ width: 70 }} /><select aria-label="session volume unit" value={draft.sessionVolumeUnit} onChange={(e) => setDraft({ ...draft, sessionVolumeUnit: e.target.value as "K" | "M" })}><option>K</option><option>M</option></select></label>
@@ -312,10 +321,16 @@ export function ScannerPanel(
       )}
       {syncControl}
       {(
-        <div data-testid="scanner-filter-summary" className="mono" style={{ padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>
-          {filters.mode === "most_active" ? `Most active${cv.session === "rth" ? "" : " · approximate"}` : filters.mode === "gainers" ? "Top gainers" : "Top losers"} · {formatFilterSummary({ minChangePct: filters.mode === "most_active" ? 0 : filters.minChangePct, floatCapShares: filters.maxFloatShares, minVolume: filters.minVolume, minSessionVolume: filters.minSessionVolume, minTurnover: filters.minTurnover, minRelativeVolume: filters.minRelativeVolume, minPrice: filters.minPrice, maxPrice: filters.maxPrice })}
+        <div data-testid="scanner-filter-summary" className="mono" style={{ display: "flex", gap: 8, alignItems: "center", padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {filters.mode === "most_active" ? `Most active${cv.session === "rth" ? "" : " · approximate"}` : filters.mode === "session_volume" ? "Session Volume · top 200 candidates" : filters.mode === "gainers" ? "Top gainers" : "Top losers"} · {formatFilterSummary({ minChangePct: filters.mode === "most_active" || filters.mode === "session_volume" ? 0 : filters.minChangePct, floatCapShares: filters.maxFloatShares, minVolume: filters.minVolume, minSessionVolume: filters.minSessionVolume, minTurnover: filters.minTurnover, minRelativeVolume: filters.minRelativeVolume, minPrice: filters.minPrice, maxPrice: filters.maxPrice })}
+          </span>
+          <span style={{ flex: 1 }} />
+          {cv.refreshedAt && <span title={cv.rows.length > 0 ? "Oldest visible row's latest successful quote snapshot" : cv.discoveryAt ? `Candidate discovery updated ${formatTapeTime(cv.discoveryAt)}` : "Candidate discovery time unavailable"} style={{ whiteSpace: "nowrap" }}>{cv.rows.length > 0 ? "oldest quote" : "updated"} {formatTapeTime(cv.refreshedAt)}</span>}
         </div>
       )}
+      {cv.status === "delayed" && <div role="status" className="mono" style={{ padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>Data delayed · shared request budget</div>}
+      {cv.status === "paused" && <div role="status" className="mono" style={{ padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>Scanner paused · workspace closed</div>}
       {columnsOpen && (
         <div ref={columnsRef} className="popover" style={{ top: headerSlot === undefined ? 30 : 6, right: headerSlot === undefined ? 8 : 8, width: 230 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>

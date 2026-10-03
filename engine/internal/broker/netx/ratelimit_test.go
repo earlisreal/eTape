@@ -45,6 +45,48 @@ func TestTokenBucket_AllowWithReservePreservesCapacity(t *testing.T) {
 	}
 }
 
+func TestTokenBucket_TakeWithReservePreservesForegroundToken(t *testing.T) {
+	clk := clock.NewFake(time.UnixMilli(0))
+	tb := NewTokenBucket(clk, 1, 2)
+	if err := tb.TakeWithReserve(context.Background(), 1); err != nil {
+		t.Fatal(err)
+	}
+	if !tb.Allow() {
+		t.Fatal("foreground request should retain the reserved token")
+	}
+	if tb.Allow() {
+		t.Fatal("background request consumed more than its admitted token")
+	}
+}
+
+func TestTokenBucket_ProviderBudgetAndReset(t *testing.T) {
+	clk := clock.NewFake(time.Unix(1_800_000_000, 0))
+	tb := NewTokenBucket(clk, 2.5, 1)
+	reset := clk.Now().Add(time.Minute)
+	tb.ObserveBudget(5, reset)
+	if tb.rate >= tb.baseRate {
+		t.Fatalf("rate = %v, want lower than base rate %v", tb.rate, tb.baseRate)
+	}
+	clk.Advance(time.Minute)
+	tb.mu.Lock()
+	tb.refillLocked()
+	got := tb.rate
+	tb.mu.Unlock()
+	if got != tb.baseRate {
+		t.Fatalf("rate after provider reset = %v, want %v", got, tb.baseRate)
+	}
+}
+
+func TestTokenBucket_ProviderZeroBudgetDefers(t *testing.T) {
+	clk := clock.NewFake(time.Unix(1_800_000_000, 0))
+	tb := NewTokenBucket(clk, 2.5, 1)
+	reset := clk.Now().Add(10 * time.Second)
+	tb.ObserveBudget(0, reset)
+	if got := tb.waitLocked(); got != 10*time.Second {
+		t.Fatalf("wait = %v, want provider reset at %v", got, reset)
+	}
+}
+
 func TestTokenBucket_RefundRestoresOneToken(t *testing.T) {
 	clk := clock.NewFake(time.UnixMilli(0))
 	tb := NewTokenBucket(clk, 1, 1)

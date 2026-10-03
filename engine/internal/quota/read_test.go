@@ -16,12 +16,16 @@ import (
 type fakeReq struct {
 	bodies     map[uint32][]byte
 	err        error
+	errs       map[uint32]error
 	gotAllConn *bool
 }
 
 func (f *fakeReq) Request(_ context.Context, protoID uint32, req proto.Message) (opend.Frame, error) {
 	if f.err != nil {
 		return opend.Frame{}, f.err
+	}
+	if err := f.errs[protoID]; err != nil {
+		return opend.Frame{}, err
 	}
 	if protoID == opend.ProtoQotGetSubInfo {
 		f.gotAllConn = req.(*getsubinfo.Request).GetC2S().IsReqAllConn

@@ -2,10 +2,12 @@ import { describe, it, expect, vi } from "vitest";
 import { ScannerStore } from "./ScannerStore";
 import type { ScannerRankPayload, ScanHitPayload, SnapshotMsg, DeltaMsg } from "../wire/contract";
 
-const rank = (kind: "snapshot" | "delta", session: string, payload: ScannerRankPayload) =>
-  ({ kind, topic: "scanner.rank", key: session, payload } as SnapshotMsg | DeltaMsg);
-const hit = (session: string, payload: ScanHitPayload) =>
-  ({ kind: "delta", topic: "scanner.hit", key: session, payload } as DeltaMsg);
+const rank = (kind: "snapshot" | "delta", session: string, payload: Partial<ScannerRankPayload>, scannerId = "legacy") =>
+  ({ kind, topic: "scanner.rank", key: `${scannerId}/${session}`, payload: {
+    scannerId, session, refreshedAt: "", discoveryAt: "", status: "ready", rows: [], ...payload,
+  } } as SnapshotMsg | DeltaMsg);
+const hit = (session: string, payload: Partial<ScanHitPayload>, scannerId = "legacy") =>
+  ({ kind: "delta", topic: "scanner.hit", key: `${scannerId}/${session}`, payload: { scannerId, session, symbol: "", at: "", ...payload } } as DeltaMsg);
 const r = (symbol: string, changePct: number) =>
   ({ symbol, shortSellRestricted: false, changePct, last: 1, floatShares: 1_000_000, volume: 1000, sessionVolume: 1000, turnover: null, relativeVolume: null, shortInterest: null, shortInterestAsOf: null });
 
@@ -76,6 +78,41 @@ describe("ScannerStore", () => {
     expect(s.view("premarket").rows[0].isNewHit).toBe(false); // premarket untouched
   });
 
+  it("keeps each panel board, seen-set, and new-hit listener independent", () => {
+    const s = new ScannerStore();
+    const aHit = vi.fn();
+    const bHit = vi.fn();
+    s.onNewHit(aHit, "main/scanner-a");
+    s.onNewHit(bHit, "main/scanner-b");
+    s.apply(rank("snapshot", "rth", { refreshedAt: "t0", rows: [r("A", 5)] }, "main/scanner-a"));
+    s.apply(rank("snapshot", "rth", { refreshedAt: "t0", rows: [r("A", 5)] }, "main/scanner-b"));
+    s.apply(rank("delta", "rth", { refreshedAt: "t1", rows: [r("A", 6), r("B", 9)] }, "main/scanner-a"));
+    expect(aHit).toHaveBeenCalledWith("B");
+    expect(bHit).not.toHaveBeenCalled();
+    expect(s.view("rth", "main/scanner-a").rows.map((row) => row.symbol)).toEqual(["A", "B"]);
+    expect(s.view("rth", "main/scanner-b").rows.map((row) => row.symbol)).toEqual(["A"]);
+  });
+
+  it("removes only the deleted panel's cached boards", () => {
+    const s = new ScannerStore();
+    s.apply(rank("snapshot", "rth", { refreshedAt: "2026-10-03T13:00:00Z", rows: [r("A", 5)] }, "main/scanner-a"));
+    s.apply(rank("snapshot", "rth", { refreshedAt: "2026-10-03T13:00:00Z", rows: [r("B", 5)] }, "main/scanner-b"));
+    s.apply({ kind: "delta", topic: "scanner.rank", key: "main/scanner-a", payload: {
+      scannerId: "main/scanner-a", session: "", refreshedAt: "", discoveryAt: "", status: "deleted", rows: [],
+    } } as DeltaMsg);
+    expect(s.currentView("main/scanner-a").session).toBeNull();
+    expect(s.currentView("main/scanner-b").rows.map((row) => row.symbol)).toEqual(["B"]);
+  });
+
+  it("clears a closed panel board on its paused baseline", () => {
+    const s = new ScannerStore();
+    s.apply(rank("snapshot", "rth", { refreshedAt: "t0", rows: [r("A", 5)] }, "main/scanner-a"));
+    s.apply(rank("delta", "rth", { status: "paused", baseline: true, rows: [] }, "main/scanner-a"));
+    expect(s.view("rth", "main/scanner-a").rows).toEqual([]);
+    expect(s.view("rth", "main/scanner-a").status).toBe("paused");
+    expect(s.currentView("main/scanner-a").status).toBe("paused");
+  });
+
   it("a reconnect re-snapshot is a clean baseline (no flash, no stale mute)", () => {
     const s = new ScannerStore();
     s.apply(rank("snapshot", "premarket", { refreshedAt: "t0", rows: [r("A", 5)] }));
@@ -85,15 +122,15 @@ describe("ScannerStore", () => {
   });
 
   it("view of an unknown session is empty", () => {
-    expect(new ScannerStore().view("afterhours")).toEqual({ rows: [], refreshedAt: null });
+    expect(new ScannerStore().view("afterhours")).toEqual({ rows: [], refreshedAt: null, discoveryAt: null, status: null, filters: null });
   });
 });
 
 // Distinct name to avoid colliding with the file's existing `rank(kind, session, payload)`.
 const rankMsg = (kind: "snapshot" | "delta", symbols: string[]) => ({
   kind, topic: "scanner.rank" as const, key: "premarket",
-  payload: { refreshedAt: "2026-07-06T13:00:00Z", rows: symbols.map((symbol) => ({ symbol, shortSellRestricted: false, changePct: 5, last: 1, floatShares: 1, volume: 1, sessionVolume: 1, turnover: null, relativeVolume: null, shortInterest: null, shortInterestAsOf: null })) },
-});
+  payload: { scannerId: "legacy", session: "premarket", refreshedAt: "2026-07-06T13:00:00Z", discoveryAt: "2026-07-06T13:00:00Z", status: "ready" as const, rows: symbols.map((symbol) => ({ symbol, shortSellRestricted: false, changePct: 5, last: 1, floatShares: 1, volume: 1, sessionVolume: 1, turnover: null, relativeVolume: null, shortInterest: null, shortInterestAsOf: null })) },
+} as SnapshotMsg | DeltaMsg);
 
 describe("ScannerStore.onNewHit", () => {
   it("first delta is a silent baseline; genuinely-new later rows fire", () => {
@@ -119,7 +156,7 @@ describe("ScannerStore.onNewHit", () => {
     const cb = vi.fn();
     s.onNewHit(cb);
     s.apply(rankMsg("snapshot", ["AAA"]));  // AAA now seen, silent
-    s.apply({ kind: "delta", topic: "scanner.hit", key: "premarket", payload: { symbol: "AAA", at: "2026-07-06T13:01:00Z" } });
+    s.apply({ kind: "delta", topic: "scanner.hit", key: "premarket", payload: { scannerId: "legacy", session: "premarket", symbol: "AAA", at: "2026-07-06T13:01:00Z" } });
     expect(cb).toHaveBeenCalledWith("AAA");
   });
 });
@@ -128,7 +165,7 @@ describe("ScannerStore.currentView", () => {
   const iso = (h: number) => `2026-07-08T${String(h).padStart(2, "0")}:00:00.000Z`;
 
   it("returns null session when no data has arrived", () => {
-    expect(new ScannerStore().currentView()).toEqual({ session: null, rows: [], refreshedAt: null });
+    expect(new ScannerStore().currentView()).toEqual({ session: null, rows: [], refreshedAt: null, discoveryAt: null, status: null, filters: null });
   });
 
   it("returns the session with the freshest refreshedAt", () => {
@@ -137,6 +174,14 @@ describe("ScannerStore.currentView", () => {
     s.apply(rank("snapshot", "rth", { refreshedAt: iso(10), rows: [r("B", 9)] }));
     expect(s.currentView().session).toBe("rth");
     expect(s.currentView().rows[0].symbol).toBe("B");
+  });
+
+  it("keeps visible rows while their first quote snapshot is pending", () => {
+    const s = new ScannerStore();
+    s.apply(rank("snapshot", "rth", { refreshedAt: "", rows: [r("B", 9)] }));
+    expect(s.currentView().session).toBe("rth");
+    expect(s.currentView().rows[0].symbol).toBe("B");
+    expect(s.currentView().refreshedAt).toBe("");
   });
 
   it("follows the rollover as a newer session overtakes", () => {

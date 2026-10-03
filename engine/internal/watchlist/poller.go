@@ -150,6 +150,10 @@ func (p *Poller) snapshotBatch(ctx context.Context, syms []string, out map[strin
 		return
 	}
 	if resp.GetRetType() != 0 {
+		if !opend.IsSymbolSpecificRequestError(resp.GetRetMsg()) {
+			slog.Warn("watchlist: snapshot batch deferred", "retType", resp.GetRetType(), "reason", resp.GetRetMsg(), "n", len(syms))
+			return
+		}
 		if len(syms) == 1 {
 			slog.Info("watchlist: snapshot unresolvable this tick", "symbol", syms[0], "reason", resp.GetRetMsg())
 			return

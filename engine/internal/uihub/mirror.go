@@ -390,7 +390,16 @@ func (m *mirror) execStatus() wsmsg.ExecStatus {
 func (m *mirror) applyPub(s staged) {
 	switch s.Topic {
 	case wsmsg.TopicScannerRank:
-		m.rank[s.Key] = s.Payload.(wsmsg.ScannerRankPayload)
+		payload := s.Payload.(wsmsg.ScannerRankPayload)
+		if payload.Status == "deleted" {
+			for key, old := range m.rank {
+				if old.ScannerID == payload.ScannerID || key == s.Key {
+					delete(m.rank, key)
+				}
+			}
+		} else {
+			m.rank[s.Key] = payload
+		}
 	case wsmsg.TopicStockDetail:
 		m.detail[s.Key] = s.Payload.(wsmsg.StockDetailPayload)
 	case wsmsg.TopicWatchlistRows:

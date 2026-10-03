@@ -663,6 +663,11 @@ func (h *Hub) handleUnregister(c client) {
 	if h.cmd != nil {
 		h.cmd.releaseAccountDemand(id)
 		h.cmd.releaseWindowState(id)
+		if b := h.cmd.scanner.Load(); b != nil {
+			if ctl, ok := b.scanner.(scannerWorkspaceCtl); ok {
+				ctl.ReleaseScannerConnection(id)
+			}
+		}
 	}
 	if m := h.demands[id]; m != nil {
 		if f := h.feed(); f != nil {

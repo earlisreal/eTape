@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -216,6 +217,31 @@ func TestBarsErrorStatusSurfaces(t *testing.T) {
 	_, err := c.Intraday1m(context.Background(), "US.AAPL", time.UnixMilli(0), time.UnixMilli(1<<40))
 	if err == nil || !strings.Contains(err.Error(), "403") {
 		t.Fatalf("want a 403 error, got %v", err)
+	}
+}
+
+func TestBarsUsesProviderRemainingBudget(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	reset := now.Add(time.Minute).Unix()
+	budget := alpacaResponseBudget(http.Header{
+		"X-Ratelimit-Remaining": {"5"},
+		"X-Ratelimit-Reset":     {strconv.FormatInt(reset, 10)},
+	}, http.StatusOK, now)
+	if budget.remaining != 5 || !budget.resetAt.Equal(time.Unix(reset, 0)) {
+		t.Fatalf("provider budget = %+v, want remaining 5 through reset %v", budget, time.Unix(reset, 0))
+	}
+}
+
+func TestBarsDefersAfterRateLimitResponse(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	budget := alpacaResponseBudget(http.Header{"Retry-After": {"3"}}, http.StatusTooManyRequests, now)
+	if !budget.deferUntil.Equal(now.Add(3 * time.Second)) {
+		t.Fatalf("defer until %v, want Retry-After at %v", budget.deferUntil, now.Add(3*time.Second))
+	}
+	date := now.Add(5 * time.Second).UTC().Format(http.TimeFormat)
+	budget = alpacaResponseBudget(http.Header{"Retry-After": {date}}, http.StatusTooManyRequests, now)
+	if !budget.deferUntil.Equal(now.Add(5 * time.Second)) {
+		t.Fatalf("HTTP-date defer until %v, want %v", budget.deferUntil, now.Add(5*time.Second))
 	}
 }
 

@@ -11,6 +11,7 @@ import type { Scheduler } from "../render/Scheduler";
 import type { LinkGroup, LinkGroups } from "./linkGroups";
 import { HotkeyTargetCoordinator, type HotkeyTargetChannel, type HotkeyTargetInput } from "./hotkeyTarget";
 import type { DemandRegistry } from "../wire/DemandRegistry";
+import type { ScannerFilters } from "../wire/contract";
 import type { ConnState } from "../wire/WsClient";
 import { PANELS, dockviewPanelConstraints, type PanelProps } from "./panels/registry";
 import { buildMonitoringWorkspace, PRESETS } from "./presets";
@@ -42,6 +43,7 @@ import { resolveVenue } from "./exec/venueSelection";
 import { PanelHeaderTab } from "./PanelHeaderTab";
 import { PanelHeaderHostProvider } from "./panels/headerSlot";
 import { PanelSymbolRuntime, planScannerSync, rankScannerRows, readScannerSort, ScannerSyncRuntime, type ScannerSyncPanelState, type ScannerSyncPlan } from "./scannerSync";
+import { DEFAULT_SCANNER_FILTERS, scannerFiltersFromSettings } from "./scannerFilters";
 
 // Task 3: permanent "don't show again" flag for the first-run venue-setup
 // prompt, set only when the user ticks the checkbox on either action.
@@ -96,6 +98,20 @@ interface Props {
   // *different* session mode doesn't re-announce demands until this mode's
   // panel/symbol state is actually in place.
   onTransitionApplied?: () => void;
+}
+
+async function migrateScannerSettings(workspace: Workspace, commands: PanelProps["commands"]): Promise<Workspace> {
+  const scanners = workspace.panels.filter((panel) => panel.panelId === "scanner");
+  if (scanners.length === 0 || scanners.every((panel) => panel.settings.scannerFilters !== undefined)) return workspace;
+  const ack = await commands.sendCommand("GetScannerFilters", {});
+  const legacy = ack.status === "accepted" && ack.value ? ack.value as ScannerFilters : DEFAULT_SCANNER_FILTERS;
+  const inheritedFilters = scannerFiltersFromSettings({ scannerFilters: legacy });
+  return {
+    ...workspace,
+    panels: workspace.panels.map((panel) => panel.panelId !== "scanner" || panel.settings.scannerFilters !== undefined
+      ? panel
+      : { ...panel, settings: { ...panel.settings, scannerFilters: inheritedFilters } }),
+  };
 }
 
 export function AppShell({ workspaceName, stores, scheduler, workspaceStore, linkGroups, demandRegistry, commands, engineState, hotkeyTargetChannel, onTransitionApplied }: Props): JSX.Element {
@@ -220,7 +236,12 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     setWs(null);
     setSourceWorkspace(null);
     if (workspaceName === MONITORING_WORKSPACE_ID) observeScannerSync(undefined);
-    void workspaceStore.load(workspaceName, workspaceName === MONITORING_WORKSPACE_ID ? buildMonitoringWorkspace() : undefined).then((w) => {
+    void workspaceStore.load(workspaceName, workspaceName === MONITORING_WORKSPACE_ID ? buildMonitoringWorkspace() : undefined)
+      .then(async (loaded) => {
+        const migrated = await migrateScannerSettings(loaded, commands);
+        if (migrated !== loaded) workspaceStore.save(migrated);
+        return migrated;
+      }).then((w) => {
       if (!alive) return;
       // Hydrate LinkGroups' per-group focused symbol BEFORE setWs: panels read
       // linkGroups.symbolFor(group) on their very first mount, and mounting
@@ -237,10 +258,14 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       setWs(w);
     });
     return () => { alive = false; };
-  }, [workspaceName, workspaceStore, linkGroups, observeScannerSync]);
+  }, [workspaceName, workspaceStore, linkGroups, observeScannerSync, commands]);
   useEffect(() => {
     let alive = true;
-    const refresh = () => void workspaceStore.load(MONITORING_WORKSPACE_ID).then((w) => {
+    const refresh = () => void workspaceStore.load(MONITORING_WORKSPACE_ID).then(async (loaded) => {
+      const migrated = await migrateScannerSettings(loaded, commands);
+      if (migrated !== loaded) workspaceStore.save(migrated);
+      return migrated;
+    }).then((w) => {
       if (!alive) return;
       monitoringWorkspaceRef.current = w;
       observeScannerSync(w.scannerSync);
@@ -254,7 +279,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     const unwatch = workspaceStore.watch(MONITORING_WORKSPACE_ID, refresh);
     if (workspaceName !== MONITORING_WORKSPACE_ID) refresh();
     return () => { alive = false; unwatch(); };
-  }, [workspaceName, workspaceStore, linkGroups, observeScannerSync]);
+  }, [workspaceName, workspaceStore, linkGroups, observeScannerSync, commands]);
   useEffect(() => {
     const sourceId = syncConfig?.sourceWorkspaceId ?? MONITORING_WORKSPACE_ID;
     if (!syncConfig?.sourcePanelId || sourceId === MONITORING_WORKSPACE_ID) {
@@ -262,13 +287,15 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
       return;
     }
     let alive = true;
-    const refresh = () => void workspaceStore.load(sourceId).then((w) => {
-      if (alive) setSourceWorkspace(w);
-    });
+    const refresh = () => void workspaceStore.load(sourceId).then(async (loaded) => {
+      const migrated = await migrateScannerSettings(loaded, commands);
+      if (migrated !== loaded) workspaceStore.save(migrated);
+      return migrated;
+    }).then((w) => { if (alive) setSourceWorkspace(w); });
     const unwatch = workspaceStore.watch(sourceId, refresh);
     refresh();
     return () => { alive = false; unwatch(); };
-  }, [syncConfig?.sourcePanelId, syncConfig?.sourceWorkspaceId, workspaceStore]);
+  }, [syncConfig?.sourcePanelId, syncConfig?.sourceWorkspaceId, workspaceStore, commands]);
   useEffect(() => {
     if (workspaceName === "main") { setWorkspaceLabel("main"); return; }
     if (workspaceName === MONITORING_WORKSPACE_ID) { setWorkspaceLabel(MONITORING_WORKSPACE_NAME); return; }
@@ -605,14 +632,15 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     () => stores.scanner.getSnapshot(),
     () => stores.scanner.getSnapshot(),
   );
-  const scannerView = useMemo(() => stores.scanner.currentView(), [scannerSnapshot, stores.scanner]);
+  const sourceWorkspaceId = syncConfig?.sourceWorkspaceId ?? MONITORING_WORKSPACE_ID;
+  const selectedSourceWorkspace = sourceWorkspaceId === MONITORING_WORKSPACE_ID ? ws : sourceWorkspace;
+  const selectedSource = selectedSourceWorkspace?.panels.find((panel) =>
+    panel.id === syncConfig?.sourcePanelId && panel.panelId === "scanner");
+  const selectedSourceScannerId = selectedSource ? `${sourceWorkspaceId}/${selectedSource.id}` : "legacy";
+  const scannerView = useMemo(() => stores.scanner.currentView(selectedSourceScannerId), [scannerSnapshot, stores.scanner, selectedSourceScannerId]);
   const scannerPlan = useMemo<ScannerSyncPlan>(() => {
     const current = ws;
     const sync = syncConfig;
-    const sourceId = sync?.sourceWorkspaceId ?? MONITORING_WORKSPACE_ID;
-    const sourceWorkspaceDoc = sourceId === MONITORING_WORKSPACE_ID ? current : sourceWorkspace;
-    const source = sourceWorkspaceDoc?.panels.find((panel) =>
-      panel.id === sync?.sourcePanelId && panel.panelId === "scanner");
     const panelsById = new Map(current?.panels.map((panel) => [panel.id, panel]) ?? []);
     const layoutOrder = orderedPanelIds(current?.layout);
     const panelOrder = [...layoutOrder, ...(current?.panels.map((panel) => panel.id) ?? [])];
@@ -625,16 +653,55 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
         ? [{ id: panel.id, symbol: typeof panel.settings.symbol === "string" ? panel.settings.symbol : undefined }]
         : [];
     }) : [];
-    const rankedSymbols = source
-      ? rankScannerRows(scannerView.rows, readScannerSort(source.settings)).map((row) => row.symbol)
+    const rankedSymbols = selectedSource
+      ? rankScannerRows(scannerView.rows, readScannerSort(selectedSource.settings)).map((row) => row.symbol)
       : [];
     return planScannerSync({
       slots,
       rankedSymbols,
       enabled: workspaceName === MONITORING_WORKSPACE_ID && sync?.enabled === true,
-      sourceAvailable: source !== undefined,
+      sourceAvailable: selectedSource !== undefined,
     });
-  }, [scannerView, sourceWorkspace, syncConfig, workspaceName, ws]);
+  }, [scannerView, selectedSource, syncConfig, workspaceName, ws]);
+
+  const scannerRegistration = useMemo(() => {
+    if (!ws) return null;
+    const panels = ws.panels.filter((panel) => panel.panelId === "scanner").map((panel) => ({
+      panelId: panel.id,
+      filters: scannerFiltersFromSettings(panel.settings),
+    }));
+    const sourceFilters = selectedSource ? scannerFiltersFromSettings(selectedSource.settings) : undefined;
+    return {
+      workspaceId: workspaceName,
+      panels,
+      sourceEnabled: workspaceName === MONITORING_WORKSPACE_ID && syncConfig?.enabled === true && sourceFilters !== undefined,
+      ...(selectedSource && sourceFilters ? {
+        sourceWorkspaceId,
+        sourcePanelId: selectedSource.id,
+        sourceFilters,
+      } : {}),
+    };
+  }, [selectedSource, sourceWorkspaceId, syncConfig?.enabled, workspaceName, ws]);
+  const scannerRegistrationSignature = JSON.stringify(scannerRegistration);
+  useEffect(() => {
+    if (engineState !== "open" || scannerRegistrationSignature === "null") return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let retryDelayMs = 250;
+    const register = async () => {
+      const ack = await commands.sendCommand("SetScannerWorkspace", JSON.parse(scannerRegistrationSignature));
+      if (cancelled || ack.status === "accepted" || ack.reason !== "scanner unavailable") return;
+      timer = setTimeout(() => {
+        retryDelayMs = Math.min(retryDelayMs * 2, 2_000);
+        void register();
+      }, retryDelayMs);
+    };
+    void register();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [commands, engineState, scannerRegistrationSignature]);
   const applyScannerPlan = useCallback((plan: ScannerSyncPlan) => {
     if (workspaceName !== MONITORING_WORKSPACE_ID || plan.patches.length === 0) return;
     const current = wsRef.current;
@@ -760,7 +827,8 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     const def = PANELS[panelId];
     if (!def) return;
     const id = `${panelId}-${crypto.randomUUID().slice(0, 8)}`;
-    const settings: Record<string, unknown> = panelId === "chart" ? { timeframe: "1m" } : {};
+    const settings: Record<string, unknown> = panelId === "chart" ? { timeframe: "1m" }
+      : panelId === "scanner" ? { scannerFilters: { ...DEFAULT_SCANNER_FILTERS } } : {};
     const config: PanelConfig = { id, panelId, group: null, settings };
     const current = wsRef.current ?? ws;
     const next = { ...current, panels: [...current.panels, config] };
@@ -944,7 +1012,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   const components = Object.fromEntries(
     ws.panels.map((p) => [
       p.id,
-      (panelProps: IDockviewPanelProps) => <PanelFrame config={p} stores={stores} scheduler={scheduler}
+      (panelProps: IDockviewPanelProps) => <PanelFrame config={p} workspaceId={workspaceName} stores={stores} scheduler={scheduler}
         linkGroups={linkGroups} demandRegistry={demandRegistry} commands={commands}
         onConfigChange={(settings) => onConfigChange(p.id, settings)}
         onGroupChange={(group) => onGroupChange(p.id, group)}

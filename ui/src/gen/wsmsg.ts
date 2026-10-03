@@ -410,13 +410,17 @@ export interface ScannerRow {
   shortInterestAsOf: string | null; // provider report date; null = unavailable
 }
 export interface ScannerRankPayload {
+  scannerId: string;
+  session: string;
   refreshedAt: string;
+  discoveryAt: string;
+  status: "ready" | "delayed" | "paused" | "deleted";
   rows: ScannerRow[];
   filters?: ScannerFilters;
   baseline?: boolean;
 }
 export interface ScannerFilters {
-  mode: "gainers" | "losers" | "most_active";
+  mode: "gainers" | "losers" | "most_active" | "session_volume";
   minChangePct: number /* float64 */;
   maxFloatShares: number | null;
   minVolume: number /* float64 */;
@@ -430,6 +434,8 @@ export interface ScannerFilters {
   sessionVolumeUnit: "K" | "M";
 }
 export interface ScanHitPayload {
+  scannerId: string;
+  session: string;
   symbol: string;
   at: string;
 }
@@ -750,7 +756,25 @@ export interface SetAccountDemandArgs {
   venue: string;
 }
 export interface SetScannerFiltersArgs {
+  workspaceId?: string | null;
+  panelId?: string | null;
   filters: ScannerFilters;
+}
+export interface ScannerPanelSettings {
+  panelId: string;
+  filters: ScannerFilters;
+}
+/**
+ * SetScannerWorkspaceArgs reports one open workspace's scanner definitions and
+ * the optional source kept active for Monitoring while this connection is open.
+ */
+export interface SetScannerWorkspaceArgs {
+  workspaceId: string;
+  panels: ScannerPanelSettings[];
+  sourceEnabled: boolean;
+  sourceWorkspaceId?: string;
+  sourcePanelId?: string;
+  sourceFilters?: ScannerFilters;
 }
 /**
  * EnsureSymbolArgs subscribes a panel's symbol on demand. profile is one of

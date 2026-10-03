@@ -93,12 +93,24 @@ _Avoid_: Blank chart, default chart
 A portable Workspace Layout export that preserves panel arrangement, panel settings unrelated to symbol selection, Link Group membership, and Scanner Sync's enabled intent, but omits every panel symbol, every Link Group focused symbol, and the non-portable Scanner Source reference. An imported enabled Scanner Sync is paused until its user selects a Scanner Source. It never alters an already saved Workspace.
 _Avoid_: Workspace backup, symbol-free preset
 
+**Scanner Panel**:
+A Workspace panel with its own scan criteria and resulting ranked rows. Its settings and results are independent of other Scanner Panels.
+_Avoid_: Scanner engine, Scanner Source (unless selected to drive Scanner Sync)
+
+**Scanner Board**:
+The stocks admitted by one Scanner Panel during its trading cycle. Admitted stocks remain on that board until the panel's criteria change or the cycle resets.
+_Avoid_: Shared Scanner results, subscription pool
+
+**Session Volume Ranking**:
+A Scanner ranking ordered by the active session's reported share volume. Stocks can rank highly even with little or no price change.
+_Avoid_: Daily volume ranking, most-active movers
+
 **Scanner Source**:
 The Scanner Panel, in any Workspace, explicitly selected to drive Scanner Sync for the Monitoring Workspace. Only one Scanner Source is active at a time. Its identity survives closing its host window; deleting it pauses Scanner Sync.
 _Avoid_: Active scanner, selected scanner
 
 **Scanner Sound**:
-An audible cue emitted by each open workspace window that contains at least one unmuted Scanner Panel when Scanner reports a new hit. Multiple eligible Scanner Panels in one window produce one cue; separate windows may each produce a cue. Silent intervals never replay.
+An audible cue emitted by an open workspace window when one of its unmuted Scanner Panels reports a new hit. Multiple eligible Scanner Panels in one window produce one cue; separate windows may each produce a cue. Silent intervals never replay.
 _Avoid_: Global Scanner alert, Scanner Sync sound
 
 **Scanner Panel Mute**:

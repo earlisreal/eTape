@@ -316,6 +316,87 @@ func (s *scannerCtlTestSpy) SetFilters(filters wsmsg.ScannerFilters) error {
 	return nil
 }
 
+type scannerWorkspaceCtlTestSpy struct {
+	scannerCtlTestSpy
+	connID       uint64
+	workspace    wsmsg.SetScannerWorkspaceArgs
+	panelFilters wsmsg.ScannerFilters
+	panelID      string
+	workspaceID  string
+	released     []uint64
+	removed      string
+}
+
+func (s *scannerWorkspaceCtlTestSpy) SetScannerWorkspace(connID uint64, args wsmsg.SetScannerWorkspaceArgs) error {
+	s.connID, s.workspace = connID, args
+	return nil
+}
+func (s *scannerWorkspaceCtlTestSpy) SetPanelFilters(workspaceID, panelID string, filters wsmsg.ScannerFilters) error {
+	s.workspaceID, s.panelID, s.panelFilters = workspaceID, panelID, filters
+	return nil
+}
+func (s *scannerWorkspaceCtlTestSpy) ReleaseScannerConnection(connID uint64) {
+	s.released = append(s.released, connID)
+}
+func (s *scannerWorkspaceCtlTestSpy) RemoveScannerWorkspace(workspaceID string) {
+	s.removed = workspaceID
+}
+
+func TestCommandsSetScannerFiltersRoutesToPanelWithoutGlobalPersistence(t *testing.T) {
+	cfg := &spyCfg{}
+	scanner := &scannerWorkspaceCtlTestSpy{}
+	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	cd.scanner.Store(&scannerBox{scanner: scanner})
+	want := wsmsg.ScannerFilters{Mode: "session_volume", MinSessionVolume: 500_000, FloatUnit: "M", VolumeUnit: "K", SessionVolumeUnit: "K"}
+	ack, _ := cd.handle(context.Background(), "SetScannerFilters", mustJSON(t, wsmsg.SetScannerFiltersArgs{
+		WorkspaceID: "main", PanelID: "scanner-a", Filters: want,
+	}), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckAccepted || scanner.workspaceID != "main" || scanner.panelID != "scanner-a" || !reflect.DeepEqual(scanner.panelFilters, want) {
+		t.Fatalf("panel-scoped filter route: ack=%+v workspace=%q panel=%q filters=%+v", ack, scanner.workspaceID, scanner.panelID, scanner.panelFilters)
+	}
+	if cfg.sets != 0 {
+		t.Fatalf("panel-scoped filter edit wrote %d global config values", cfg.sets)
+	}
+}
+
+func TestCommandsSetScannerWorkspaceCarriesConnectionIdentity(t *testing.T) {
+	scanner := &scannerWorkspaceCtlTestSpy{}
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	cd.scanner.Store(&scannerBox{scanner: scanner})
+	args := wsmsg.SetScannerWorkspaceArgs{WorkspaceID: "main", Panels: []wsmsg.ScannerPanelSettings{{
+		PanelID: "scanner-a", Filters: scan.Defaults(config.Scan{}),
+	}}}
+	ack, _ := cd.handle(context.Background(), "SetScannerWorkspace", mustJSON(t, args), 42, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckAccepted || scanner.connID != 42 || !reflect.DeepEqual(scanner.workspace, args) {
+		t.Fatalf("SetScannerWorkspace route: ack=%+v connID=%d args=%+v", ack, scanner.connID, scanner.workspace)
+	}
+}
+
+func TestCommandsValidateWorkspaceScannerFiltersBeforePersist(t *testing.T) {
+	cfg := &spyCfg{}
+	cd := newCommands(&spyExec{}, cfg, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	valid := json.RawMessage(`{"name":"main","panels":[{"id":"scanner-a","panelId":"scanner","settings":{"scannerFilters":{"mode":"session_volume","floatUnit":"M","volumeUnit":"K","sessionVolumeUnit":"K"}}}]}`)
+	ack, _ := cd.handle(context.Background(), "SetConfig", mustJSON(t, wsmsg.SetConfigArgs{Key: "workspace.main", Value: valid}), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckAccepted || cfg.sets != 1 {
+		t.Fatalf("valid workspace was not persisted: ack=%+v sets=%d", ack, cfg.sets)
+	}
+	invalid := json.RawMessage(`{"name":"main","panels":[{"id":"scanner-a","panelId":"scanner","settings":{"scannerFilters":{"mode":"unknown","floatUnit":"M","volumeUnit":"K","sessionVolumeUnit":"K"}}}]}`)
+	ack, _ = cd.handle(context.Background(), "SetConfig", mustJSON(t, wsmsg.SetConfigArgs{Key: "workspace.main", Value: invalid}), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckBlocked || cfg.sets != 1 {
+		t.Fatalf("invalid workspace scanner filters persisted: ack=%+v sets=%d", ack, cfg.sets)
+	}
+}
+
+func TestCommandsDeleteWorkspaceReleasesScannerState(t *testing.T) {
+	scanner := &scannerWorkspaceCtlTestSpy{}
+	cd := newCommands(&spyExec{}, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	cd.scanner.Store(&scannerBox{scanner: scanner})
+	ack, _ := cd.handle(context.Background(), "DeleteConfig", json.RawMessage(`{"key":"workspace.main"}`), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != wsmsg.AckAccepted || scanner.removed != "main" {
+		t.Fatalf("workspace deletion did not reconcile Scanner state: ack=%+v removed=%q", ack, scanner.removed)
+	}
+}
+
 func TestCommandsSetScannerFiltersPersistsV2(t *testing.T) {
 	cfg := &spyCfg{}
 	scanner := &scannerCtlTestSpy{}

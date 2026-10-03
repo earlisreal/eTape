@@ -43,9 +43,9 @@ export const scannerSortAccessors: Record<string, (row: ScannerRowView) => numbe
 };
 
 export function scannerModeSort(mode: ScannerFilters["mode"]): SortState {
-  return mode === "most_active"
-    ? { col: "vol", dir: "desc" }
-    : { col: "changePct", dir: mode === "losers" ? "asc" : "desc" };
+  if (mode === "most_active") return { col: "vol", dir: "desc" };
+  if (mode === "session_volume") return { col: "sessionVol", dir: "desc" };
+  return { col: "changePct", dir: mode === "losers" ? "asc" : "desc" };
 }
 
 export function readScannerSort(settings: Record<string, unknown>): SortState {

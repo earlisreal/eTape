@@ -149,6 +149,7 @@ type rankItem struct {
 	Symbol               string
 	ChangePct            float64
 	Last                 float64
+	snapshotAt           time.Time
 	Volume               int64
 	sessionVolume        *int64
 	sessionVolumePhase   session.Phase
@@ -198,6 +199,8 @@ type relativeVolumeRequest struct {
 	key         relativeVolumeCacheKey
 	now         time.Time
 	listingDate time.Time
+	ctx         context.Context
+	epoch       uint64
 }
 
 const (
@@ -213,20 +216,28 @@ type Poller struct {
 	r                     requester
 	pub                   Publisher
 	clk                   clock.Clock
-	feed                  demandFeed   // nil => pool disabled
-	backfill              func(string) // async per-symbol deep-history seed; nil => no backfill
+	feed                  demandFeed                    // nil => pool disabled
+	backfill              func(context.Context, string) // async per-symbol deep-history seed; nil => no backfill
 	pool                  *Pool
 	poolSyms              atomic.Pointer[[]string]   // lock-free snapshot for the news set
 	floats                map[string]floatEntry      // symbol -> resolved float; absent = unknown
 	otc                   map[string]bool            // symbol -> resolved exchange type (true = OTC/Pink); absent = unknown
 	seen                  map[string]map[string]bool // session -> symbol -> seen
 	seenDay               int64                      // ET day of the current seen-sets + float cache
+	scannerLifecycleMu    sync.Mutex                 // serializes panel ownership with final poll publication
 	mu                    sync.RWMutex
 	filters               wsmsg.ScannerFilters
 	baseline              bool
 	poke                  chan struct{}
-	lastStockFilter       time.Time
 	board                 map[string]rankItem
+	snapshotCursor        int
+	lastSnapshotAt        time.Time
+	lastSnapshotAttempt   time.Time
+	panelPollCancel       context.CancelFunc
+	panelPollID           uint64
+	lastStaticInfoAttempt time.Time
+	staticInfoCursor      int
+	panelRankCache        map[string]scannerRankCache
 	premarketBootstrapped bool
 	lastPhase             session.Phase
 	phaseSet              bool
@@ -241,12 +252,22 @@ type Poller struct {
 	relativeVolumePending map[relativeVolumeCacheKey]bool
 	relativeVolumeQueue   []relativeVolumeRequest
 	relativeVolumeWake    chan struct{}
+	workCtx               context.Context
+	workCancel            context.CancelFunc
+	workEpoch             uint64
 	listingDates          map[string]time.Time
 	relativeVolumeDay     int64
+	scannerPanels         map[string]*scannerPanelState
+	scannerWorkspaces     map[string]map[string]wsmsg.ScannerFilters
+	scannerConnections    map[uint64]scannerConnection
+	managedPanels         bool
 }
 
-func New(cfg config.Scan, r requester, pub Publisher, clk clock.Clock, feed demandFeed, backfill func(string), relativeVolumeFetcher func(context.Context, string, time.Time, time.Time) ([]feed.Bar, error), ssr ...shortSellRestrictionResolver) *Poller {
+func New(cfg config.Scan, r requester, pub Publisher, clk clock.Clock, feed demandFeed, backfill func(context.Context, string), relativeVolumeFetcher func(context.Context, string, time.Time, time.Time) ([]feed.Bar, error), ssr ...shortSellRestrictionResolver) *Poller {
 	filters := Defaults(cfg)
+	if r != nil {
+		r = backgroundRequester{r}
+	}
 	var resolver shortSellRestrictionResolver
 	if len(ssr) > 0 {
 		resolver = ssr[0]
@@ -254,7 +275,8 @@ func New(cfg config.Scan, r requester, pub Publisher, clk clock.Clock, feed dema
 	return &Poller{cfg: cfg, r: r, pub: pub, clk: clk, feed: feed, backfill: backfill, relativeVolumeFetcher: relativeVolumeFetcher, ssr: resolver, pool: NewPool(),
 		floats: map[string]floatEntry{}, otc: map[string]bool{}, seen: map[string]map[string]bool{}, filters: filters, baseline: true, poke: make(chan struct{}, 1),
 		shortInterest: map[string]shortInterestEntry{}, shortInterestPending: map[string]bool{}, shortInterestWake: make(chan struct{}, 1),
-		relativeVolumeCache: map[relativeVolumeCacheKey]relativeVolumeCacheEntry{}, relativeVolumePending: map[relativeVolumeCacheKey]bool{}, relativeVolumeWake: make(chan struct{}, 1), listingDates: map[string]time.Time{}}
+		relativeVolumeCache: map[relativeVolumeCacheKey]relativeVolumeCacheEntry{}, relativeVolumePending: map[relativeVolumeCacheKey]bool{}, relativeVolumeWake: make(chan struct{}, 1), listingDates: map[string]time.Time{},
+		scannerPanels: map[string]*scannerPanelState{}, scannerWorkspaces: map[string]map[string]wsmsg.ScannerFilters{}, scannerConnections: map[uint64]scannerConnection{}, panelRankCache: map[string]scannerRankCache{}}
 }
 
 func Defaults(cfg config.Scan) wsmsg.ScannerFilters {
@@ -267,7 +289,7 @@ func Defaults(cfg config.Scan) wsmsg.ScannerFilters {
 }
 
 func ValidateFilters(f wsmsg.ScannerFilters) error {
-	if f.Mode != "gainers" && f.Mode != "losers" && f.Mode != "most_active" {
+	if f.Mode != "gainers" && f.Mode != "losers" && f.Mode != "most_active" && f.Mode != "session_volume" {
 		return fmt.Errorf("invalid mode")
 	}
 	if (f.FloatUnit != "K" && f.FloatUnit != "M") || (f.VolumeUnit != "K" && f.VolumeUnit != "M") || (f.SessionVolumeUnit != "K" && f.SessionVolumeUnit != "M") {
@@ -356,6 +378,20 @@ func sessionKey(phase session.Phase) string {
 }
 
 func (p *Poller) pollOnce(ctx context.Context, now time.Time) {
+	p.mu.RLock()
+	managedPanels := p.managedPanels
+	p.mu.RUnlock()
+	if managedPanels {
+		panels := p.activeScannerPanels()
+		if len(panels) == 0 {
+			p.clearPool()
+			return
+		}
+		p.ensureScannerWork(ctx)
+		p.pollPanelsOnce(ctx, now, panels)
+		return
+	}
+	p.ensureScannerWork(ctx)
 	filters := p.Filters()
 	phase := session.PhaseAt(now)
 	poolDay := session.PoolDay(now)
@@ -535,21 +571,84 @@ func (p *Poller) updatePool(now time.Time, rows []wsmsg.ScannerRow) {
 		p.feed.Ensure(demand)
 	}
 	if p.backfill != nil {
+		workCtx := p.scannerWorkContext()
+		if workCtx == nil {
+			workCtx = p.ensureScannerWork(context.Background())
+		}
 		for i, s := range d.Backfill {
 			sym := s
 			delay := time.Duration(i) * 300 * time.Millisecond
 			if delay == 0 {
-				p.backfill(sym)
+				if workCtx.Err() == nil {
+					p.backfill(workCtx, sym)
+				}
 			} else {
-				go func() {
-					time.Sleep(delay)
-					p.backfill(sym)
-				}()
+				go func(ctx context.Context) {
+					timer := time.NewTimer(delay)
+					defer timer.Stop()
+					select {
+					case <-ctx.Done():
+						return
+					case <-timer.C:
+					}
+					if ctx.Err() == nil {
+						p.backfill(ctx, sym)
+					}
+				}(workCtx)
 			}
 		}
 	}
 	snap := p.pool.Symbols()
 	p.poolSyms.Store(&snap)
+}
+
+// clearPool releases scanner-only subscription demand once no open workspace
+// or selected Monitoring source needs a board. Saved scanner definitions stay
+// intact; the ordinary window registration will repopulate the shared pool.
+func (p *Poller) clearPool() {
+	p.stopScannerWork()
+	if p.feed != nil {
+		for _, symbol := range p.pool.Symbols() {
+			p.feed.Release(scanDemandID(symbol))
+		}
+	}
+	p.pool = NewPool()
+	empty := []string{}
+	p.poolSyms.Store(&empty)
+}
+
+func (p *Poller) ensureScannerWork(parent context.Context) context.Context {
+	p.mu.Lock()
+	if p.workCtx == nil || p.workCtx.Err() != nil {
+		p.workCtx, p.workCancel = context.WithCancel(parent)
+		p.workEpoch++
+	}
+	ctx := p.workCtx
+	p.mu.Unlock()
+	return ctx
+}
+
+func (p *Poller) scannerWorkContext() context.Context {
+	p.mu.RLock()
+	ctx := p.workCtx
+	p.mu.RUnlock()
+	if ctx == nil || ctx.Err() != nil {
+		return nil
+	}
+	return ctx
+}
+
+func (p *Poller) stopScannerWork() {
+	p.mu.Lock()
+	cancel := p.workCancel
+	p.workCtx, p.workCancel = nil, nil
+	p.workEpoch++
+	p.relativeVolumeQueue = nil
+	p.relativeVolumePending = map[relativeVolumeCacheKey]bool{}
+	p.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // PoolSymbols returns a snapshot of the current pool members (sorted), or nil
@@ -825,7 +924,14 @@ func (p *Poller) enqueueRelativeVolumeForPool(now time.Time) {
 	for _, symbol := range p.pool.Symbols() {
 		metricDay := int64(0)
 		p.mu.RLock()
-		if item, ok := p.board[symbol]; ok {
+		if p.managedPanels {
+			for _, panel := range p.scannerPanels {
+				if item, ok := panel.board[symbol]; ok && item.dailyDate != 0 {
+					metricDay = item.dailyDate
+					break
+				}
+			}
+		} else if item, ok := p.board[symbol]; ok {
 			metricDay = item.dailyDate
 		}
 		p.mu.RUnlock()
@@ -845,7 +951,15 @@ func (p *Poller) enqueueRelativeVolumeAt(symbol string, now time.Time, metricDay
 		metricDay = day
 	}
 	key := relativeVolumeCacheKey{symbol: symbol, day: metricDay}
+	workCtx := p.scannerWorkContext()
+	if workCtx == nil {
+		workCtx = p.ensureScannerWork(context.Background())
+	}
 	p.mu.Lock()
+	if workCtx.Err() != nil {
+		p.mu.Unlock()
+		return
+	}
 	entry := p.relativeVolumeCache[key]
 	listingDate := p.listingDates[symbol]
 	if entry.complete || entry.terminal || p.relativeVolumePending[key] || (!entry.nextAttempt.IsZero() && now.Before(entry.nextAttempt)) {
@@ -859,7 +973,7 @@ func (p *Poller) enqueueRelativeVolumeAt(symbol string, now time.Time, metricDay
 		et := time.UnixMilli(metricDay).In(session.Loc())
 		requestNow = time.Date(et.Year(), et.Month(), et.Day(), 12, 0, 0, 0, session.Loc())
 	}
-	p.relativeVolumeQueue = append(p.relativeVolumeQueue, relativeVolumeRequest{key: key, now: requestNow, listingDate: listingDate})
+	p.relativeVolumeQueue = append(p.relativeVolumeQueue, relativeVolumeRequest{key: key, now: requestNow, listingDate: listingDate, ctx: workCtx, epoch: p.workEpoch})
 	p.mu.Unlock()
 	slog.Debug("scan: REL VOL history queued", "state", "queued", "symbol", symbol, "day", key.day)
 	select {
@@ -881,7 +995,15 @@ func (p *Poller) nextRelativeVolume() (relativeVolumeRequest, bool) {
 
 func (p *Poller) finishRelativeVolume(request relativeVolumeRequest, profile *relativeVolumeProfile, complete bool, err error) {
 	p.mu.Lock()
+	if request.epoch != p.workEpoch {
+		p.mu.Unlock()
+		return
+	}
 	delete(p.relativeVolumePending, request.key)
+	if request.ctx != nil && request.ctx.Err() != nil {
+		p.mu.Unlock()
+		return
+	}
 	day, validDay := relativeVolumeCacheDay(p.clk.Now())
 	if !validDay || day != request.key.day {
 		p.mu.Unlock()
@@ -950,7 +1072,15 @@ func (p *Poller) runRelativeVolumeWorker(ctx context.Context) {
 			p.finishRelativeVolume(request, nil, false, nil)
 			continue
 		}
-		bars, err := p.relativeVolumeFetcher(ctx, request.key.symbol, from, to)
+		requestCtx := request.ctx
+		if requestCtx == nil {
+			requestCtx = ctx
+		}
+		if requestCtx.Err() != nil {
+			p.finishRelativeVolume(request, nil, false, requestCtx.Err())
+			continue
+		}
+		bars, err := p.relativeVolumeFetcher(requestCtx, request.key.symbol, from, to)
 		if err != nil {
 			p.finishRelativeVolume(request, nil, false, err)
 			continue
@@ -1201,14 +1331,6 @@ func (p *Poller) fetchMostActiveExtended(ctx context.Context, phase session.Phas
 }
 
 func (p *Poller) fetchMostActiveRTH(ctx context.Context) ([]rankItem, error) {
-	if wait := 3100*time.Millisecond - p.clk.Now().Sub(p.lastStockFilter); !p.lastStockFilter.IsZero() && wait > 0 {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-p.clk.After(wait):
-		}
-	}
-	p.lastStockFilter = p.clk.Now()
 	volume := int32(filterpb.AccumulateField_AccumulateField_Volume)
 	desc := int32(filterpb.SortDir_SortDir_Descend)
 	change := int32(filterpb.AccumulateField_AccumulateField_ChangeRate)
@@ -1371,14 +1493,23 @@ func (p *Poller) resolveExch(ctx context.Context, items []rankItem) {
 			missing = append(missing, it.Symbol)
 		}
 	}
-	reqs := 0
-	for start := 0; start < len(missing); start += staticInfoChunkSize {
-		end := start + staticInfoChunkSize
-		if end > len(missing) {
-			end = len(missing)
-		}
-		p.staticInfoBatch(ctx, missing[start:end], &reqs)
+	if len(missing) == 0 || !p.lastStaticInfoAttempt.IsZero() && p.clk.Now().Sub(p.lastStaticInfoAttempt) < 5*time.Second {
+		return
 	}
+	sort.Strings(missing)
+	start := p.staticInfoCursor % len(missing)
+	end := start + staticInfoChunkSize
+	if end > len(missing) {
+		end = len(missing)
+	}
+	batch := append([]string{}, missing[start:end]...)
+	if len(batch) < staticInfoChunkSize && end == len(missing) && start > 0 {
+		batch = append(batch, missing[:minInt(start, staticInfoChunkSize-len(batch))]...)
+	}
+	p.staticInfoCursor = (start + len(batch)) % len(missing)
+	p.lastStaticInfoAttempt = p.clk.Now()
+	reqs := 0
+	p.staticInfoBatch(ctx, batch, &reqs)
 }
 
 // staticInfoBatch resolves one batch of symbols via a single 3202 request,
@@ -1414,13 +1545,10 @@ func (p *Poller) staticInfoBatch(ctx context.Context, syms []string, reqs *int) 
 		return
 	}
 	if resp.GetRetType() != 0 {
-		// Application error — the whole batch failed. Isolate the offending
-		// code by binary split; a code that fails in isolation is cached
-		// not-OTC (never assumed OTC — the error may be unrelated), so it
-		// stays visible to the scanner but, matching snapshotBatch's bad-mark
-		// convention, isn't re-requested every poll (steady state stays zero
-		// requests). dropOTC's absent-symbol case and subman's quarantine
-		// remain the backstop if it's actually OTC.
+		if !opend.IsSymbolSpecificRequestError(resp.GetRetMsg()) {
+			slog.Warn("scan: static info batch deferred", "retType", resp.GetRetType(), "reason", resp.GetRetMsg())
+			return
+		}
 		if len(syms) == 1 {
 			p.otc[syms[0]] = false
 			slog.Info("scan: exchange type unresolvable", "symbol", syms[0], "reason", resp.GetRetMsg())
@@ -1531,8 +1659,10 @@ func (p *Poller) snapshotBatch(ctx context.Context, phase session.Phase, syms []
 		return
 	}
 	if resp.GetRetType() != 0 {
-		// Application error — the whole batch failed. Isolate the offending
-		// code by binary split; a single failing code is marked bad.
+		if !opend.IsSymbolSpecificRequestError(resp.GetRetMsg()) {
+			slog.Warn("scan: snapshot batch deferred", "retType", resp.GetRetType(), "reason", resp.GetRetMsg(), "n", len(syms))
+			return
+		}
 		if len(syms) == 1 {
 			p.floats[syms[0]] = floatEntry{bad: true}
 			return
@@ -1548,12 +1678,15 @@ func (p *Poller) snapshotBatch(ctx context.Context, phase session.Phase, syms []
 		basic := sn.GetBasic()
 		sym := symbolOf(basic.GetSecurity())
 		got[sym] = true
+		snapshotAt := p.clk.Now()
+		p.lastSnapshotAt = snapshotAt
 		if listingDate := snapshotListingDate(basic); !listingDate.IsZero() {
 			p.mu.Lock()
 			p.listingDates[sym] = listingDate
 			p.mu.Unlock()
 		}
 		if it, ok := items[sym]; items != nil && ok {
+			it.snapshotAt = snapshotAt
 			it.RelativeVolume = nil
 			metricDate, metricOK := snapshotMetricDate(p.clk.Now(), basic)
 			metricDay := int64(0)

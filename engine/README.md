@@ -6,6 +6,17 @@ Flow: OpenD/broker/history inputs enter `internal`; `cmd/etape` composes service
 
 Invariants: one normalized domain boundary; high-rate paths avoid UI framework state; live orders pass execution gates. Children: [commands](cmd/README.md), [internal packages](internal/README.md), [scripts](scripts/README.md). Test: `go test ./...`; build: `go build ./cmd/etape`.
 
+Scanner Panels share one engine poller, discovery cache, enrichment workers,
+subscription warm pool and provider budgets. Each `(workspaceId, panelId)` owns
+its filters and sticky board. Session Volume uses one shared page of 200
+provider-ranked current-session-volume candidates outside the mover lists.
+Closed workspaces release scanner-only warm demand; the panel selected as
+Monitoring's Scanner Source stays active while Monitoring is open. OpenD
+requests pass through per-family pacing with foreground calls ahead of Scanner
+work, and subscription admissions require fresh account-wide quota with
+configured headroom. See [external API limits](../docs/external-apis.md) and
+the [executed plan](../docs/plans/2026-10-03-independent-scanners.md).
+
 Eligible EXTENDED DAY stop-limits in pre/postmarket remain engine-held until a
 fresh Last-Eligible print triggers one linked venue LIMIT child. The engine
 persists the parent lifecycle, pauses pretrigger orders across restart/feed

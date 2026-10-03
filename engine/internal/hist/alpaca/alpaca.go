@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,13 +29,14 @@ const maxPages = 50
 
 // Client is the Alpaca historical-bars transport.
 type Client struct {
-	base   string
-	keyID  string
-	secret string
-	feed   string
-	hc     *http.Client
-	clk    clock.Clock
-	bucket *netx.TokenBucket
+	base    string
+	keyID   string
+	secret  string
+	feed    string
+	hc      *http.Client
+	clk     clock.Clock
+	bucket  *netx.TokenBucket
+	readyAt time.Time
 }
 
 // New builds a Client. base defaults to the production data host; feedName
@@ -47,12 +49,18 @@ func New(base, keyID, secret, feedName string, clk clock.Clock) *Client {
 	if feedName == "" {
 		feedName = "sip"
 	}
-	return &Client{
+	client := &Client{
 		base: base, keyID: keyID, secret: secret, feed: feedName,
-		hc:     netx.NewHTTPClient(15 * time.Second),
-		clk:    clk,
-		bucket: netx.NewTokenBucket(clk, 200.0/60.0, 5),
+		hc:  netx.NewHTTPClient(15 * time.Second),
+		clk: clk,
+		// Two tokens let Scanner history spend one while reserving one for
+		// foreground chart history through TakeWithReserve(ctx, 1).
+		bucket: netx.NewTokenBucket(clk, 150.0/60.0, 2),
 	}
+	if base == defaultDataBase {
+		client.readyAt = clk.Now().Add(time.Minute)
+	}
+	return client
 }
 
 func (c *Client) DailyBars(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error) {
@@ -62,7 +70,7 @@ func (c *Client) DailyBars(ctx context.Context, symbol string, from, to time.Tim
 	if !to.After(from) {
 		return nil, nil
 	}
-	return c.bars(ctx, symbol, "1Day", "all", from, to)
+	return c.bars(ctx, symbol, "1Day", "all", from, to, false)
 }
 
 // ScannerDailyBars returns raw daily volumes for Scanner's REL VOL baseline.
@@ -72,7 +80,7 @@ func (c *Client) ScannerDailyBars(ctx context.Context, symbol string, from, to t
 	if !to.After(from) {
 		return nil, nil
 	}
-	return c.bars(ctx, symbol, "1Day", "raw", from, to)
+	return c.bars(ctx, symbol, "1Day", "raw", from, to, true)
 }
 
 // recentSIPClampBuffer backs off the 1m window end when Alpaca returns a 403
@@ -88,7 +96,7 @@ func (c *Client) Intraday1m(ctx context.Context, symbol string, from, to time.Ti
 	if !to.After(from) {
 		return nil, nil
 	}
-	return c.bars(ctx, symbol, "1Min", "raw", from, to)
+	return c.bars(ctx, symbol, "1Min", "raw", from, to, false)
 }
 
 type barJSON struct {
@@ -116,7 +124,21 @@ type barsResp struct {
 // intraday would scale pre-split bars up by the split ratio, corrupting
 // anything computed over a window straddling a reverse split (moomoo mirrors
 // this split — see opend/backfill.go's historyBars).
-func (c *Client) bars(ctx context.Context, symbol, timeframe, adjustment string, from, to time.Time) ([]feed.Bar, error) {
+func (c *Client) waitStartup(ctx context.Context) error {
+	if delay := c.readyAt.Sub(c.clk.Now()); delay > 0 {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-c.clk.After(delay):
+		}
+	}
+	return ctx.Err()
+}
+
+func (c *Client) bars(ctx context.Context, symbol, timeframe, adjustment string, from, to time.Time, background bool) ([]feed.Bar, error) {
+	if err := c.waitStartup(ctx); err != nil {
+		return nil, err
+	}
 	sym := strings.TrimPrefix(symbol, "US.")
 	var out []feed.Bar
 	pageToken := ""
@@ -131,7 +153,13 @@ func (c *Client) bars(ctx context.Context, symbol, timeframe, adjustment string,
 		if pageToken != "" {
 			q.Set("page_token", pageToken)
 		}
-		if err := c.bucket.Take(ctx); err != nil {
+		var err error
+		if background {
+			err = c.bucket.TakeWithReserve(ctx, 1)
+		} else {
+			err = c.bucket.Take(ctx)
+		}
+		if err != nil {
 			return nil, err
 		}
 		reqURL := c.base + "/v2/stocks/" + url.PathEscape(sym) + "/bars?" + q.Encode()
@@ -144,6 +172,13 @@ func (c *Client) bars(ctx context.Context, symbol, timeframe, adjustment string,
 		resp, err := c.hc.Do(req)
 		if err != nil {
 			return nil, err
+		}
+		budget := alpacaResponseBudget(resp.Header, resp.StatusCode, c.clk.Now())
+		if budget.remaining >= 0 && !budget.resetAt.IsZero() {
+			c.bucket.ObserveBudget(budget.remaining, budget.resetAt)
+		}
+		if !budget.deferUntil.IsZero() {
+			c.bucket.DeferUntil(budget.deferUntil)
 		}
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
@@ -173,4 +208,51 @@ func (c *Client) bars(ctx context.Context, symbol, timeframe, adjustment string,
 		pageToken = *br.NextPageToken
 	}
 	return out, nil
+}
+
+type alpacaBudget struct {
+	remaining  int
+	resetAt    time.Time
+	deferUntil time.Time
+}
+
+func alpacaResponseBudget(headers http.Header, status int, now time.Time) alpacaBudget {
+	budget := alpacaBudget{remaining: -1}
+	if remaining, err := strconv.Atoi(headers.Get("X-RateLimit-Remaining")); err == nil && remaining >= 0 {
+		budget.remaining = remaining
+	}
+	budget.resetAt = alpacaResetAt(headers.Get("X-RateLimit-Reset"))
+	if budget.remaining == 0 {
+		budget.deferUntil = budget.resetAt
+	}
+	if status == http.StatusTooManyRequests {
+		budget.deferUntil = alpacaRetryAt(headers.Get("Retry-After"), now)
+		if budget.resetAt.After(budget.deferUntil) {
+			budget.deferUntil = budget.resetAt
+		}
+		if budget.deferUntil.IsZero() {
+			budget.deferUntil = now.Add(time.Second)
+		}
+	}
+	return budget
+}
+
+func alpacaResetAt(value string) time.Time {
+	seconds, err := strconv.ParseFloat(value, 64)
+	if err != nil || seconds <= 0 {
+		return time.Time{}
+	}
+	whole := int64(seconds)
+	nanos := int64((seconds - float64(whole)) * float64(time.Second))
+	return time.Unix(whole, nanos)
+}
+
+func alpacaRetryAt(value string, now time.Time) time.Time {
+	if seconds, err := strconv.Atoi(value); err == nil && seconds > 0 {
+		return now.Add(time.Duration(seconds) * time.Second)
+	}
+	if retryAt, err := http.ParseTime(value); err == nil && retryAt.After(now) {
+		return retryAt
+	}
+	return time.Time{}
 }

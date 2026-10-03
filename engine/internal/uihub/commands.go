@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/locates"
 	"github.com/earlisreal/eTape/engine/internal/md"
+	"github.com/earlisreal/eTape/engine/internal/scan"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 	"github.com/earlisreal/eTape/engine/internal/venueprobe"
@@ -80,6 +82,48 @@ type watchlistCtl interface {
 type scannerCtl interface {
 	Filters() wsmsg.ScannerFilters
 	SetFilters(wsmsg.ScannerFilters) error
+}
+
+type scannerWorkspaceCtl interface {
+	SetScannerWorkspace(uint64, wsmsg.SetScannerWorkspaceArgs) error
+	SetPanelFilters(string, string, wsmsg.ScannerFilters) error
+	ReleaseScannerConnection(uint64)
+	RemoveScannerWorkspace(string)
+}
+
+var workspaceIdentityPart = regexp.MustCompile(`^[a-z0-9-]{1,64}$`)
+
+func validateScannerWorkspaceConfig(workspaceID string, raw json.RawMessage) error {
+	if !workspaceIdentityPart.MatchString(workspaceID) {
+		return errors.New("invalid workspace identity")
+	}
+	var doc struct {
+		Name   string `json:"name"`
+		Panels []struct {
+			ID       string `json:"id"`
+			PanelID  string `json:"panelId"`
+			Settings struct {
+				ScannerFilters *wsmsg.ScannerFilters `json:"scannerFilters"`
+			} `json:"settings"`
+		} `json:"panels"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil || doc.Name != workspaceID {
+		return errors.New("invalid workspace document")
+	}
+	for _, panel := range doc.Panels {
+		if panel.PanelID != "scanner" {
+			continue
+		}
+		if !workspaceIdentityPart.MatchString(panel.ID) {
+			return errors.New("invalid scanner panel identity")
+		}
+		if panel.Settings.ScannerFilters != nil {
+			if err := scan.ValidateFilters(*panel.Settings.ScannerFilters); err != nil {
+				return fmt.Errorf("invalid scanner filters: %w", err)
+			}
+		}
+	}
+	return nil
 }
 
 // watchlistBox boxes watchlistCtl for atomic.Pointer storage — same reason
@@ -314,6 +358,11 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		if err := json.Unmarshal(args, &a); err != nil {
 			return blocked("bad args"), false
 		}
+		if strings.HasPrefix(a.Key, "workspace.") {
+			if err := validateScannerWorkspaceConfig(strings.TrimPrefix(a.Key, "workspace."), a.Value); err != nil {
+				return blocked(err.Error()), false
+			}
+		}
 		cd.cfg.SetConfig(a.Key, string(a.Value))
 		if cd.onConfigSet != nil {
 			cd.onConfigSet(a.Key, string(a.Value))
@@ -325,6 +374,13 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked("bad args"), false
 		}
 		cd.cfg.DeleteConfig(a.Key)
+		if strings.HasPrefix(a.Key, "workspace.") {
+			if b := cd.scanner.Load(); b != nil {
+				if ctl, ok := b.scanner.(scannerWorkspaceCtl); ok {
+					ctl.RemoveScannerWorkspace(strings.TrimPrefix(a.Key, "workspace."))
+				}
+			}
+		}
 		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "SetWindowState":
 		var a wsmsg.SetWindowStateArgs
@@ -358,12 +414,42 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 		if a.Filters.SessionVolumeUnit == "" {
 			a.Filters.SessionVolumeUnit = "K"
 		}
+		if a.WorkspaceID != "" || a.PanelID != "" {
+			if a.WorkspaceID == "" || a.PanelID == "" {
+				return blocked("invalid scanner identity"), false
+			}
+			ctl, ok := b.scanner.(scannerWorkspaceCtl)
+			if !ok {
+				return blocked("scanner workspace unavailable"), false
+			}
+			if err := ctl.SetPanelFilters(a.WorkspaceID, a.PanelID, a.Filters); err != nil {
+				return blocked(err.Error()), false
+			}
+			return wsmsg.AckMsg{Status: "accepted", Value: a.Filters}, false
+		}
 		if err := b.scanner.SetFilters(a.Filters); err != nil {
 			return blocked(err.Error()), false
 		}
 		raw, _ := json.Marshal(a.Filters)
 		cd.cfg.SetConfig("scanner.filters.v2", string(raw))
 		return wsmsg.AckMsg{Status: "accepted", Value: a.Filters}, false
+	case "SetScannerWorkspace":
+		var a wsmsg.SetScannerWorkspaceArgs
+		if err := json.Unmarshal(args, &a); err != nil {
+			return blocked("bad args"), false
+		}
+		b := cd.scanner.Load()
+		if b == nil {
+			return blocked("scanner unavailable"), false
+		}
+		ctl, ok := b.scanner.(scannerWorkspaceCtl)
+		if !ok {
+			return blocked("scanner workspace unavailable"), false
+		}
+		if err := ctl.SetScannerWorkspace(connID, a); err != nil {
+			return blocked(err.Error()), false
+		}
+		return wsmsg.AckMsg{Status: "accepted"}, false
 	case "SubscribeIndicator":
 		var a struct {
 			InstanceID string             `json:"instanceId"`

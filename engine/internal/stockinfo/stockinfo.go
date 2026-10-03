@@ -232,6 +232,10 @@ func (p *Poller) snapshotChunk(ctx context.Context, ch []string, out map[string]
 		return
 	}
 	if resp.GetRetType() != 0 {
+		if !opend.IsSymbolSpecificRequestError(resp.GetRetMsg()) {
+			slog.Warn("stockinfo: snapshot batch deferred", "retType", resp.GetRetType(), "reason", resp.GetRetMsg(), "n", len(ch))
+			return
+		}
 		if len(ch) == 1 {
 			slog.Info("stockinfo: snapshot unresolvable this tick", "symbol", ch[0], "reason", resp.GetRetMsg())
 			return
@@ -291,6 +295,10 @@ func (p *Poller) ownerPlateChunk(ctx context.Context, ch []string) {
 		return
 	}
 	if resp.GetRetType() != 0 {
+		if !opend.IsSymbolSpecificRequestError(resp.GetRetMsg()) {
+			slog.Warn("stockinfo: owner-plate batch deferred", "retType", resp.GetRetType(), "reason", resp.GetRetMsg(), "n", len(ch))
+			return
+		}
 		if len(ch) == 1 {
 			p.industry[ch[0]] = ""
 			slog.Info("stockinfo: owner-plate unresolvable, caching absent industry", "symbol", ch[0], "reason", resp.GetRetMsg())
@@ -351,6 +359,10 @@ func (p *Poller) staticInfoChunk(ctx context.Context, ch []string) {
 		return
 	}
 	if resp.GetRetType() != 0 {
+		if !opend.IsSymbolSpecificRequestError(resp.GetRetMsg()) {
+			slog.Warn("stockinfo: static-info batch deferred", "retType", resp.GetRetType(), "reason", resp.GetRetMsg(), "n", len(ch))
+			return
+		}
 		if len(ch) == 1 {
 			p.exch[ch[0]] = ""
 			slog.Info("stockinfo: static-info unresolvable, caching absent exchange", "symbol", ch[0], "reason", resp.GetRetMsg())
