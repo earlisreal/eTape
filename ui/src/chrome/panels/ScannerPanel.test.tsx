@@ -396,14 +396,65 @@ describe("ScannerPanel", () => {
     expect(focus).toHaveBeenCalledWith("blue", "US.KO");
   });
 
-  it("a single row click only highlights the row — it never loads the symbol into the group", () => {
+  it.each(["legacy", "main/scanner"])("acknowledges new arrivals only on %s", (scannerId) => {
+    const { scanner, focus } = renderPanel({}, undefined, undefined, undefined, scannerId);
+    const baseline = { ...scannerShortInterestDefaults, symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1, relativeVolume: null };
+    const newcomer = { ...baseline, symbol: "US.NEW" };
+    const boards = [scannerId, "monitoring/scanner"];
+    act(() => {
+      for (const id of boards) {
+        scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+          payload: { scannerId: id, refreshedAt: "2026-07-08T13:00:00.000Z", rows: [baseline] } });
+        scanner.apply({ kind: "delta", topic: "scanner.rank", key: "premarket",
+          payload: { scannerId: id, refreshedAt: "2026-07-08T13:00:05.000Z", rows: [baseline, newcomer] } });
+      }
+    });
+    const row = screen.getByText("NEW").closest("tr") as HTMLElement;
+    expect(row.style.background).toBe("rgba(154, 106, 27, 0.1)");
+    fireEvent.mouseEnter(row);
+    fireEvent.click(row);
+    expect(scanner.currentView(scannerId).rows.find((r) => r.symbol === "US.NEW")?.isUnseen).toBe(false);
+    expect(scanner.currentView("monitoring/scanner").rows.find((r) => r.symbol === "US.NEW")?.isUnseen).toBe(true);
+    expect(row.style.fontWeight).toBe("");
+    expect(row.style.background).toBe("transparent");
+    expect(row.style.boxShadow).toContain("inset 0 0 0 1px");
+    expect(focus).not.toHaveBeenCalled();
+    act(() => scanner.apply({ kind: "delta", topic: "scanner.rank", key: "premarket",
+      payload: { scannerId, refreshedAt: "2026-07-08T13:00:10.000Z", rows: [baseline, newcomer] } }));
+    expect(scanner.currentView(scannerId).rows.find((r) => r.symbol === "US.NEW")?.isUnseen).toBe(false);
+    expect(row.style.background).toBe("transparent");
+    fireEvent.click(screen.getByText("KO"));
+    fireEvent.mouseLeave(row);
+    expect(row.style.boxShadow).toBe("none");
+    expect(row.style.background).toBe("transparent");
+  });
+
+  it.each(["double-click", "context-menu"])("acknowledges a named Scanner's new arrival on %s", (gesture) => {
+    const scannerId = "main/scanner";
+    const { scanner } = renderPanel({}, undefined, undefined, undefined, scannerId);
+    const baseline = { ...scannerShortInterestDefaults, symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1, relativeVolume: null };
+    act(() => {
+      scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
+        payload: { scannerId, refreshedAt: "2026-07-08T13:00:00.000Z", rows: [baseline] } });
+      scanner.apply({ kind: "delta", topic: "scanner.rank", key: "premarket",
+        payload: { scannerId, refreshedAt: "2026-07-08T13:00:05.000Z", rows: [baseline, { ...baseline, symbol: "US.NEW" }] } });
+    });
+    const row = screen.getByText("NEW").closest("tr") as HTMLElement;
+    if (gesture === "double-click") fireEvent.doubleClick(row);
+    else fireEvent.contextMenu(row);
+    expect(scanner.currentView(scannerId).rows.find((r) => r.symbol === "US.NEW")?.isUnseen).toBe(false);
+    expect(row.style.background).toBe("transparent");
+  });
+
+  it("a single row click only outlines the row — it never loads the symbol into the group", () => {
     const { scanner, focus } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ ...scannerShortInterestDefaults, symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1, relativeVolume: null }] } }));
     fireEvent.click(screen.getByText("KO"));
     expect(focus).not.toHaveBeenCalled();
     const row = screen.getByText("KO").closest("tr") as HTMLElement;
-    expect(row.style.background).toBe("rgba(154, 106, 27, 0.16)");
+    expect(row.style.background).toBe("transparent");
+    expect(row.style.boxShadow).toContain("inset 0 0 0 1px");
   });
 
   it("right-click on a row shows an unconditional 'Add ... to watchlist' entry; clicking it sends WatchlistAdd for that row's symbol", () => {
@@ -430,15 +481,15 @@ describe("ScannerPanel", () => {
     expect(row.style.background).toBe("transparent");
   });
 
-  it("hovering a selected row leaves the selection background unchanged", () => {
+  it("hovering a selected row leaves the background transparent", () => {
     const { scanner } = renderPanel();
     act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
       payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ ...scannerShortInterestDefaults, symbol: "US.KO", changePct: 5, last: 1, floatShares: 1, volume: 1, relativeVolume: null }] } }));
     const row = screen.getByText("KO").closest("tr") as HTMLElement;
     fireEvent.click(row);
-    expect(row.style.background).toBe("rgba(154, 106, 27, 0.16)");
+    expect(row.style.background).toBe("transparent");
     fireEvent.mouseEnter(row);
-    expect(row.style.background).toBe("rgba(154, 106, 27, 0.16)");
+    expect(row.style.background).toBe("transparent");
   });
 
   it("hovering a new-hit row leaves the flash background unchanged", () => {

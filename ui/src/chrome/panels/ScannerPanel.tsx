@@ -372,13 +372,13 @@ export function ScannerPanel(
               const selected = r.symbol === selectedSymbol;
               return (
               <tr key={r.symbol}
-                onClick={() => { setSelectedSymbol(r.symbol); if (cv.session) stores.scanner.markSeen(cv.session, r.symbol); }}
-                onDoubleClick={() => { if (cv.session) stores.scanner.markSeen(cv.session, r.symbol); linkGroups.focus(group ?? "green", r.symbol); focusMainWorkspace(commands); }}
-                onContextMenu={(e) => { e.preventDefault(); if (cv.session) stores.scanner.markSeen(cv.session, r.symbol); setMenu({ clientX: e.clientX, clientY: e.clientY, symbol: r.symbol }); }}
+                onClick={() => { setSelectedSymbol(r.symbol); if (cv.session) stores.scanner.markSeen(cv.session, r.symbol, scannerId); }}
+                onDoubleClick={() => { if (cv.session) stores.scanner.markSeen(cv.session, r.symbol, scannerId); linkGroups.focus(group ?? "green", r.symbol); focusMainWorkspace(commands); }}
+                onContextMenu={(e) => { e.preventDefault(); if (cv.session) stores.scanner.markSeen(cv.session, r.symbol, scannerId); setMenu({ clientX: e.clientX, clientY: e.clientY, symbol: r.symbol }); }}
                 onMouseEnter={() => setHoveredSymbol(r.symbol)}
                 onMouseLeave={() => setHoveredSymbol((h) => (h === r.symbol ? null : h))}
                 style={{ cursor: "pointer", textAlign: "right", userSelect: "none", fontWeight: r.isUnseen ? 700 : undefined,
-                  background: selected ? "rgba(154,106,27,.16)" : r.isUnseen ? "rgba(154,106,27,.10)"
+                  background: r.isUnseen ? "rgba(154,106,27,.10)" : selected ? "transparent"
                     : hoveredSymbol === r.symbol ? "rgba(154,106,27,.06)" : "transparent",
                   boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : r.isUnseen ? `inset 2px 0 0 ${palette.accent}` : "none",
                   transition: "background 120ms ease" }}>
