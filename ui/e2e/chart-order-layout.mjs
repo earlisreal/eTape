@@ -36,6 +36,7 @@ try {
     await page.mouse.move(350, 280);
     await page.waitForFunction(() => document.querySelector('[data-testid="chart-order-entry-preview"]').style.opacity === "1");
     const preview = await measure();
+    if (cycle === 0) await page.waitForTimeout(350); // Let the 250ms route preview expire before clicking.
     await page.mouse.click(350, 280);
     await page.keyboard.up("Shift");
     await page.locator("[data-order-group]").waitFor({ state: "attached" });
@@ -156,11 +157,22 @@ try {
   const productionStates = [await measureProduction()];
   const hostBox = await productionPage.locator('[data-testid="chart-host"]').boundingBox();
   const cursor = { x: hostBox.x + hostBox.width * 0.55, y: hostBox.y + hostBox.height * 0.55 };
+  await productionPage.mouse.move(cursor.x, cursor.y);
+  await productionPage.keyboard.down("Shift");
+  await productionPage.mouse.click(cursor.x, cursor.y); // No hover preview before the first click.
+  await productionPage.keyboard.up("Shift");
+  await productionPage.locator("[data-order-group]").waitFor({ state: "attached" });
+  assert.equal(await productionPage.locator("[data-order-group]").count(), 1, "First Shift-click must submit exactly one order");
+  productionStates.push(await measureProduction());
+  await productionPage.getByRole("button", { name: "Cancel BUY 1 STOP-LIMIT" }).click();
+  await productionPage.waitForFunction(() => document.querySelectorAll("[data-order-group]").length === 0);
+  productionStates.push(await measureProduction());
   await productionPage.keyboard.down("Shift");
   await productionPage.mouse.move(cursor.x, cursor.y);
   await productionPage.waitForFunction(() => document.querySelector('[data-testid="chart-order-entry-preview"]')?.style.opacity === "1");
   const productionPreview = await measureProduction();
   assert(Math.abs(productionPreview.stopDrawnY - cursor.y) <= 8, "ChartPanel STOP preview must remain under the cursor");
+  await productionPage.waitForTimeout(350);
   await productionPage.mouse.click(cursor.x, cursor.y);
   await productionPage.keyboard.up("Shift");
   await productionPage.locator("[data-order-group]").waitFor({ state: "attached" });

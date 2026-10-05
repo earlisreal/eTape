@@ -39,7 +39,7 @@ function mount(env:"paper"|"live" = "paper", orderConfig: OrderConfig = config,
   const utils = render(<ChartConditionalOrderEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups}
     group="green" symbol="US.AAPL" config={orderConfig} configLoaded activeTool="select" chooserOpenRef={chooserOpenRef}
     sendCommand={sendCommand} sendQuery={sendQuery} />, {container:host});
-  return { ...utils, host, stores, sendCommand, sendQuery };
+  return { ...utils, host, stores, sendCommand, sendQuery, facadeRef };
 }
 
 function focusChart(): void { vi.spyOn(document, "hasFocus").mockReturnValue(true); }
@@ -57,6 +57,89 @@ beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.restoreAllMock
 });
 
 describe("ChartConditionalOrderEntry", () => {
+  it("submits the first Shift-click without waiting for a hover preview", async () => {
+    focusChart();
+    const {host,sendCommand} = mount();
+    await placeClick(host);
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitOrder", expect.objectContaining({
+      type:"STOP_LIMIT",stopPrice:100,limitPrice:100,qty:1,routeExpected:"ENGINE_HELD",
+    })));
+  });
+
+  it("submits one Shift-click after the hover route preview expires", async () => {
+    focusChart();
+    const {host,sendCommand} = mount();
+    moveToChart(host);
+    await waitFor(() => expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("WILL TRIGGER NOW"));
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now + 300);
+    await placeClick(host);
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitOrder", expect.anything()));
+    expect(sendCommand).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for a slow route query, preserves the clicked price, and submits once per modifier press", async () => {
+    focusChart();
+    const {host,sendCommand,sendQuery,facadeRef} = mount();
+    let resolveRoute!: (preview: typeof route) => void;
+    sendQuery.mockImplementationOnce(() => new Promise(resolve => { resolveRoute = resolve; }));
+    await placeClick(host);
+    await placeClick(host);
+    expect(sendCommand).not.toHaveBeenCalled();
+    facadeRef.current.coordinateToPrice = () => 80;
+    await act(async () => { resolveRoute(route); });
+    expect(sendCommand).toHaveBeenCalledWith("SubmitOrder", expect.objectContaining({stopPrice:100,limitPrice:100}));
+    await placeClick(host);
+    expect(sendCommand).toHaveBeenCalledTimes(1);
+    fireEvent.keyUp(window, {key:"Shift"});
+    await placeClick(host);
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledTimes(2));
+  });
+
+  it.each(["escape", "blur", "pointercancel", "leave", "unmount"])("does not submit after %s while the route query is pending", async (cancel) => {
+    focusChart();
+    const {host,sendCommand,sendQuery,unmount} = mount();
+    let resolveRoute!: (preview: typeof route) => void;
+    sendQuery.mockImplementationOnce(() => new Promise(resolve => { resolveRoute = resolve; }));
+    await placeClick(host);
+    if (cancel === "escape") fireEvent.keyDown(window, {key:"Escape"});
+    if (cancel === "blur") fireEvent.blur(window);
+    if (cancel === "pointercancel") fireEvent.pointerCancel(window);
+    if (cancel === "leave") fireEvent.pointerLeave(host);
+    if (cancel === "unmount") unmount();
+    await act(async () => { resolveRoute(route); });
+    expect(sendCommand).not.toHaveBeenCalled();
+  });
+
+  it("rechecks the trading lock after a pending route query", async () => {
+    focusChart();
+    const {host,sendCommand,sendQuery,stores} = mount();
+    let resolveRoute!: (preview: typeof route) => void;
+    sendQuery.mockImplementationOnce(() => new Promise(resolve => { resolveRoute = resolve; }));
+    await placeClick(host);
+    act(() => stores.exec.apply({kind:"delta",topic:"exec.status",payload:{...stores.exec.status()!,masterArmed:false}}));
+    await act(async () => { resolveRoute(route); });
+    expect(sendCommand).not.toHaveBeenCalled();
+    expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("Trading is locked");
+  });
+
+  it("blocks a cold live gesture until the held account is acknowledged", async () => {
+    focusChart();
+    const {host,sendCommand} = mount("live");
+    await placeClick(host);
+    await waitFor(() => expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("Review / enable live accounts"));
+    expect(sendCommand).not.toHaveBeenCalled();
+  });
+
+  it("blocks and announces a failed route query", async () => {
+    focusChart();
+    const {host,sendCommand,sendQuery} = mount();
+    sendQuery.mockRejectedValueOnce(new Error("Route query failed"));
+    await placeClick(host);
+    await waitFor(() => expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("Engine route preview unavailable"));
+    expect(sendCommand).not.toHaveBeenCalled();
+  });
+
   it("uses exact Shift+click as the stop trigger and submits the previewed route snapshot", async () => {
     focusChart();
     const {host,sendCommand,sendQuery} = mount();

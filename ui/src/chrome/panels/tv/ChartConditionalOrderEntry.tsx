@@ -34,7 +34,7 @@ interface PreviewSnapshot {
   route?: StopLimitRoutePreview;
   needsAck?: boolean;
 }
-interface Gesture { pointerId: number; x: number; y: number; snapshot: PreviewSnapshot }
+interface Gesture { pointerId: number; x: number; y: number; event: PointerEvent; snapshot: PreviewSnapshot }
 interface RouteCache { at: number; route?: StopLimitRoutePreview; pending: Promise<StopLimitRoutePreview | null> | null }
 
 function exactBinding(event: PointerEvent): ChartBinding | undefined {
@@ -133,7 +133,7 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
     return entry.pending;
   };
 
-  const buildSnapshot = (event: PointerEvent, resolved: { binding: ChartBinding; template: ChartConditionalTemplate }, route?: StopLimitRoutePreview): PreviewSnapshot | null => {
+  const buildSnapshot = (event: PointerEvent, resolved: { binding: ChartBinding; template: ChartConditionalTemplate }, route?: StopLimitRoutePreview, clickedPrice?: number): PreviewSnapshot | null => {
     const host = latest.current.hostRef.current;
     const facade = latest.current.facadeRef.current;
     if (!host || !facade) return null;
@@ -141,7 +141,7 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
     const x = event.clientX - rect.left, y = event.clientY - rect.top;
     const paneHeight = facade.paneHeights()[0] ?? 0;
     if (x < 0 || y < 0 || x >= rect.width - facade.priceScaleWidth() || y >= paneHeight) return null;
-    const price = facade.coordinateToPrice(y);
+    const price = clickedPrice ?? facade.coordinateToPrice(y);
     if (price == null || !Number.isFinite(price) || price <= 0) return null;
     const stopPrice = snapOrderMarkerPrice(price);
     const stores = latest.current.stores;
@@ -224,10 +224,9 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
       if (!resolved) return;
       const deferred = resolved.template.side === "SELL" && resolved.template.sizing.mode === "PositionFraction";
       const routeEntry = routeCache.current.get(chartConditionalRouteKey(resolved.template.tif, resolved.template.session ?? "AUTO", latest.current.symbol, deferred, resolved.template.type));
-      const route = routeEntry?.route;
-      if (!route || Date.now() - routeEntry.at >= 250) { schedule(event); return; }
+      const route = routeEntry && Date.now() - routeEntry.at < 250 ? routeEntry.route : undefined;
       const snapshot = buildSnapshot(event, resolved, route);
-      if (!snapshot || snapshot.invalid) return;
+      if (!snapshot || (route && snapshot.invalid)) return;
       if (snapshot.needsAck) {
         consumedBindings.current.add(resolved.binding);
         event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
@@ -236,20 +235,29 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
       }
       const hostNow = latest.current.hostRef.current;
       if (!hostNow) return;
-      gestureRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, snapshot };
+      gestureRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, event, snapshot };
       consumedBindings.current.add(resolved.binding);
       submittedRef.current = false;
       try { hostNow.setPointerCapture(event.pointerId); } catch { /* window listeners still complete the gesture */ }
       event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
     };
-    const up = (event: PointerEvent) => {
+    const up = async (event: PointerEvent) => {
       const gesture = gestureRef.current;
-      if (!gesture || gesture.pointerId !== event.pointerId) return;
-      gestureRef.current = null;
+      if (!gesture || gesture.pointerId !== event.pointerId || submittedRef.current) return;
       event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
-      if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) >= 4 || submittedRef.current) { hide(); return; }
+      if (Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) >= 4) { gestureRef.current = null; hide(); return; }
       submittedRef.current = true;
-      const snapshot = gesture.snapshot;
+      // A cold or expired preview must refresh the route, not discard the click.
+      const route = await requestRoute(gesture.snapshot.template, gesture.snapshot.args.symbol);
+      if (gestureRef.current !== gesture) return;
+      gestureRef.current = null;
+      const snapshot = buildSnapshot(gesture.event, gesture.snapshot, route ?? undefined, gesture.snapshot.stopPrice);
+      if (!snapshot || !document.hasFocus()) { hide(); return; }
+      if (snapshot.invalid || snapshot.needsAck) {
+        renderSnapshot(snapshot, latest.current.facadeRef.current?.priceToCoordinate(snapshot.stopPrice) ?? gesture.y);
+        announce(snapshot.invalid ?? settingsAckInstruction(snapshot.args.venue, snapshot.template.type));
+        return;
+      }
       announce(`Submitting ${snapshot.detail}`);
       void latest.current.sendCommand("SubmitOrder", snapshot.args).then((ack) => {
         if (ack.ambiguous) announce("Order outcome unknown. Verify Open Orders before retrying.");
@@ -302,6 +310,7 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
     gestureRef.current = null;
     pointRef.current = null;
     routeCache.current.clear();
+    return () => { gestureRef.current = null; pointRef.current = null; };
   }, [props.group, props.symbol, props.linkGroups.venueFor(props.group), props.config.templates]);
 
   return <div ref={rootRef} data-testid="chart-order-entry-preview" style={{ position: "absolute", inset: 0, opacity: 0,
