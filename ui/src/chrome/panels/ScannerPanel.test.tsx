@@ -164,7 +164,7 @@ describe("ScannerPanel", () => {
     ]);
   });
 
-  it("keeps session and the icon-only Filters button in the panel header", () => {
+  it("keeps session in the header and quote freshness in settings", () => {
     const slot = document.body.appendChild(document.createElement("div"));
     const { scanner, container, unmount } = renderPanel({}, undefined, slot, {
       selected: true,
@@ -175,23 +175,25 @@ describe("ScannerPanel", () => {
     });
     try {
       act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket",
-        payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [] } }));
+        payload: { refreshedAt: "2026-07-08T13:00:00.000Z", rows: [{ ...scannerShortInterestDefaults, symbol: "US.A", changePct: 1, last: 1, floatShares: 1, volume: 1 }] } }));
       expect(within(slot).getByText("Scanner")).toBeTruthy();
       expect(within(slot).getByText("Pre-market")).toBeTruthy();
       expect(within(slot).queryByText("Sync to Following")).toBeNull();
       expect(within(slot).queryByText("4/4")).toBeNull();
-      expect(within(slot).queryByText(/updated/i)).toBeNull();
+      expect(within(slot).queryByText(/oldest quote/i)).toBeNull();
+      expect(within(container).queryByText(/oldest quote/i)).toBeNull();
       const filters = within(slot).getByRole("button", { name: "filters" });
       expect(filters.textContent).toBe("");
       fireEvent.click(filters);
-      expect(within(container).getByText(/updated/i)).toBeTruthy();
+      expect(within(container).getByText(/oldest quote/i)).toBeTruthy();
       const sync = within(container).getByTestId("scanner-sync-control");
       const summary = within(container).getByTestId("scanner-filter-summary");
+      expect(within(summary).queryByText(/oldest quote/i)).toBeNull();
       const table = within(container).getByRole("table");
       expect(sync.compareDocumentPosition(summary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(summary.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       fireEvent.click(filters);
-      expect(within(container).getByText(/updated/i)).toBeTruthy();
+      expect(within(container).queryByText(/oldest quote/i)).toBeNull();
     } finally {
       unmount();
       slot.remove();

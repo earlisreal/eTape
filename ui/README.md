@@ -11,6 +11,7 @@ Closing a workspace pauses its Scanner demand; an enabled Monitoring workspace
 keeps following its selected Scanner Source, including when that source window
 is closed. Session Volume sorts by current session shares and reports the age
 of its shared top-200 discovery page.
+The oldest quote timestamp appears inside the Scanner's filter settings.
 
 Grouped charts also project open orders into an imperative overlay: yellow
 LIMIT and cyan pretrigger STOP_LIMIT/LIT lines, price-axis chips, and per-order

@@ -312,6 +312,7 @@ export function ScannerPanel(
             <label>price ≥ <input aria-label="price ≥" type="number" min="0" step="any" value={draft.minPrice === 0 ? "" : draft.minPrice} onChange={(e) => setDraft({ ...draft, minPrice: e.target.value === "" ? 0 : Math.max(0, Number(e.target.value)) })} style={{ width: 70 }} /></label>
             <label>price ≤ <input aria-label="price ≤" type="number" min="0" step="any" value={draft.maxPrice === 0 ? "" : draft.maxPrice} onChange={(e) => setDraft({ ...draft, maxPrice: e.target.value === "" ? 0 : Math.max(0, Number(e.target.value)) })} style={{ width: 70 }} /></label>
             {invalidPriceRange && <div role="alert" style={{ color: palette.down }}>Minimum price must be no greater than maximum price</div>}
+            {cv.refreshedAt && <span className="mono" title={cv.rows.length > 0 ? "Oldest visible row's latest successful quote snapshot" : cv.discoveryAt ? `Candidate discovery updated ${formatTapeTime(cv.discoveryAt)}` : "Candidate discovery time unavailable"} style={{ color: palette.textMuted, whiteSpace: "nowrap" }}>{cv.rows.length > 0 ? "oldest quote" : "updated"} {formatTapeTime(cv.refreshedAt)}</span>}
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
               <Button onClick={resetDefaults}>Reset defaults</Button>
               <Button variant="primary" disabled={invalidPriceRange} onClick={applyFilters}>Apply</Button>
@@ -325,8 +326,6 @@ export function ScannerPanel(
           <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {filters.mode === "most_active" ? `Most active${cv.session === "rth" ? "" : " · approximate"}` : filters.mode === "session_volume" ? "Session Volume · top 200 candidates" : filters.mode === "gainers" ? "Top gainers" : "Top losers"} · {formatFilterSummary({ minChangePct: filters.mode === "most_active" || filters.mode === "session_volume" ? 0 : filters.minChangePct, floatCapShares: filters.maxFloatShares, minVolume: filters.minVolume, minSessionVolume: filters.minSessionVolume, minTurnover: filters.minTurnover, minRelativeVolume: filters.minRelativeVolume, minPrice: filters.minPrice, maxPrice: filters.maxPrice })}
           </span>
-          <span style={{ flex: 1 }} />
-          {cv.refreshedAt && <span title={cv.rows.length > 0 ? "Oldest visible row's latest successful quote snapshot" : cv.discoveryAt ? `Candidate discovery updated ${formatTapeTime(cv.discoveryAt)}` : "Candidate discovery time unavailable"} style={{ whiteSpace: "nowrap" }}>{cv.rows.length > 0 ? "oldest quote" : "updated"} {formatTapeTime(cv.refreshedAt)}</span>}
         </div>
       )}
       {cv.status === "delayed" && <div role="status" className="mono" style={{ padding: "3px 8px", color: palette.textMuted, borderBottom: `1px solid ${palette.border}` }}>Data delayed · shared request budget</div>}
