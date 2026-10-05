@@ -123,6 +123,16 @@ describe("ChartConditionalOrderEntry", () => {
     expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("Trading is locked");
   });
 
+  it("does not queue a cold click made while trading is locked", async () => {
+    focusChart();
+    const {host,sendCommand,sendQuery,stores} = mount();
+    act(() => stores.exec.apply({kind:"delta",topic:"exec.status",payload:{...stores.exec.status()!,masterArmed:false}}));
+    await placeClick(host);
+    act(() => stores.exec.apply({kind:"delta",topic:"exec.status",payload:{...stores.exec.status()!,masterArmed:true}}));
+    expect(sendQuery).not.toHaveBeenCalled();
+    expect(sendCommand).not.toHaveBeenCalled();
+  });
+
   it("blocks a cold live gesture until the held account is acknowledged", async () => {
     focusChart();
     const {host,sendCommand} = mount("live");

@@ -133,7 +133,7 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
     return entry.pending;
   };
 
-  const buildSnapshot = (event: PointerEvent, resolved: { binding: ChartBinding; template: ChartConditionalTemplate }, route?: StopLimitRoutePreview, clickedPrice?: number): PreviewSnapshot | null => {
+  const buildSnapshot = (event: PointerEvent, resolved: { binding: ChartBinding; template: ChartConditionalTemplate }, route?: StopLimitRoutePreview, clickedPrice?: number, routePending = false): PreviewSnapshot | null => {
     const host = latest.current.hostRef.current;
     const facade = latest.current.facadeRef.current;
     if (!host || !facade) return null;
@@ -175,10 +175,10 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
       : !venueStatus?.connected ? "Execution venue is disconnected."
       : venueStatus.reconcilePending ? "Execution venue is reconciling."
       : args.deferredPositionPct !== undefined && venueStatus.flattenPending ? "Venue flatten is awaiting reconciliation."
-      : !route ? "Engine route preview unavailable."
-		: route.route === "UNSUPPORTED" ? route.reason || `This ${resolved.template.type === "LIMIT_IF_TOUCHED" ? "LIT" : "stop-limit"} session is unsupported.`
+      : !route && !routePending ? "Engine route preview unavailable."
+		: route?.route === "UNSUPPORTED" ? route.reason || `This ${resolved.template.type === "LIMIT_IF_TOUCHED" ? "LIT" : "stop-limit"} session is unsupported.`
       : args.deferredPositionPct !== undefined && !venueStatus.positionDataReady ? "Position cache is reconciling; percentage stop-sell is unavailable."
-		: route.route === "ENGINE_HELD" && route.deadlineMs > 0 && route.deadlineMs <= Date.now() ? "Engine-held order deadline passed."
+		: route?.route === "ENGINE_HELD" && route.deadlineMs > 0 && route.deadlineMs <= Date.now() ? "Engine-held order deadline passed."
       : resolvedPlace.errors[0];
     return { template: resolved.template, binding: resolved.binding, args, stopPrice, limitPrice: args.limitPrice, detail,
       ...(invalid ? { invalid } : {}), ...(route ? { route } : {}),
@@ -225,8 +225,8 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
       const deferred = resolved.template.side === "SELL" && resolved.template.sizing.mode === "PositionFraction";
       const routeEntry = routeCache.current.get(chartConditionalRouteKey(resolved.template.tif, resolved.template.session ?? "AUTO", latest.current.symbol, deferred, resolved.template.type));
       const route = routeEntry && Date.now() - routeEntry.at < 250 ? routeEntry.route : undefined;
-      const snapshot = buildSnapshot(event, resolved, route);
-      if (!snapshot || (route && snapshot.invalid)) return;
+      const snapshot = buildSnapshot(event, resolved, route, undefined, true);
+      if (!snapshot || snapshot.invalid) return;
       if (snapshot.needsAck) {
         consumedBindings.current.add(resolved.binding);
         event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation();
