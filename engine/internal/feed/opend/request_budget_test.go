@@ -65,11 +65,30 @@ func TestRequestBudgetKeepsQuotaCountersAvailableDuringStartupQuiet(t *testing.T
 	start := time.Date(2026, 10, 3, 4, 0, 0, 0, time.UTC)
 	pacer := newRequestPacer(clock.NewFake(start))
 	family, spacing := marketDataRequestPacing(ProtoQotGetSubInfo)
-	if family != "opend-unpublished" {
-		t.Fatalf("quota counter family = %q, want opend-unpublished", family)
+	if family != "opend-subscription-quota" {
+		t.Fatalf("quota counter family = %q, want opend-subscription-quota", family)
 	}
 	if got := pacer.reserve(family, spacing); !got.Equal(start) {
 		t.Fatalf("quota counter waited until %v, want immediate read at %v", got, start)
+	}
+	for _, id := range []uint32{ProtoQotGetStaticInfo, ProtoQotRequestHistoryKLQuota} {
+		other, pace := marketDataRequestPacing(id)
+		if got := pacer.reserve(other, pace); !got.Equal(start) {
+			t.Fatalf("protocol %d waited behind unrelated quota counter until %v", id, got)
+		}
+	}
+	if got := pacer.reserve(family, spacing); !got.Equal(start.Add(spacing)) {
+		t.Fatalf("same quota endpoint lost its spacing: %v", got)
+	}
+}
+
+func TestSubscriptionStartsDuringRollingWindowCooldown(t *testing.T) {
+	pacer := newRequestPacer(clock.NewFake(time.Now()))
+	family, spacing := marketDataRequestPacing(ProtoQotSub)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if err := pacer.wait(ctx, family, spacing); err != nil {
+		t.Fatalf("initial subscription waited for unrelated rolling budgets: %v", err)
 	}
 }
 

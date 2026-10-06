@@ -4,9 +4,9 @@
 
 - **moomoo OpenD:** primary US quote, ticker, order-book, K-line, scanner, news, stock-info, quota, and moomoo execution gateway. Engine uses raw TCP framing plus protobuf at `127.0.0.1:11111`; `InitConnect` and keepalive establish session. Trade unlock stays in OpenD GUI. See [OpenD package](../engine/internal/feed/opend/README.md).
 - **Alpaca:** paper/live REST and trade-update WebSocket execution, plus
-  read-only asset eligibility/borrow metadata used by Stock Info. The first
-  configured Alpaca adapter loads the active asset directory once at engine
-  startup with `GET /v2/assets?status=active`; Stock Info then uses in-memory
+  read-only asset eligibility/borrow metadata used by Stock Info. Each
+  configured Alpaca adapter loads its active asset directory concurrently at engine
+  startup with `GET /v2/assets?status=active`, without blocking pollers; Stock Info uses in-memory
   lookups for the rest of the process. Paper credentials may also provide
   daily and one-minute history; live credentials are not reused for history.
   Alpaca SIP raw daily history also supplies the Scanner's process-local
@@ -38,14 +38,24 @@
   existing volume-ranked source. See [Stock Screening V2](https://openapi.moomoo.com/moomoo-api-doc/en/quote/get-stock-screen.html).
 - The live OpenD market-data client paces rate-limited request families at a
   shared seam across Scanner, chart, Watchlist, Stock Info, quota, and retry
-  callers. It uses margins below published maxima, a 31-second startup quiet
-  period for rate-limited families, and foreground-first scheduling when
+  callers. It uses margins below published maxima, restores the remaining
+  31-second request window from a durable checkpoint beside the database,
+  retains the full startup wait when previous state is unknown, and uses foreground-first scheduling when
   Scanner requests compete for the same family. `Qot_Sub` has a separate
   one-second local spacing guard; the provider documents subscription slot
   quotas and the one-minute minimum before unsubscribe, but its subscription
-  page publishes no call-frequency maximum. The local gate bounds eTape's own
-  calls; requests from other OpenD clients can still consume account-wide
-  quota or frequency capacity. See [provider frequency and quota rules](https://openapi.moomoo.com/moomoo-api-doc/en/intro/authority.html), [subscriptions](https://openapi.moomoo.com/moomoo-api-doc/en/quote/sub.html), and [subscription status](https://openapi.moomoo.com/moomoo-api-doc/en/quote/query-subscription.html).
+  page publishes no call-frequency maximum. Subscriptions and caches are exempt
+  from the initial rolling-request wait. Static info and the two quota counters
+  retain independent five-second local gates. Checkpoints cover eTape's own
+  requests; other clients can consume shared quota or provider capacity. The
+  documentation does not establish frequency-counter ownership across connections.
+  See [provider frequency and quota rules](https://openapi.moomoo.com/moomoo-api-doc/en/intro/authority.html), [subscriptions](https://openapi.moomoo.com/moomoo-api-doc/en/quote/sub.html), and [subscription status](https://openapi.moomoo.com/moomoo-api-doc/en/quote/query-subscription.html).
+- Alpaca history restores the remainder of its one-minute request window and
+  any observed longer reset/Retry-After from a durable checkpoint scoped to a
+  hash of the paper key ID. Expired state permits immediate history/REL VOL
+  work; unknown state retains the conservative minute. Runtime pacing remains
+  150/minute with a reserved foreground token and response-header backoff.
+  See [Alpaca market-data limits](https://docs.alpaca.markets/us/docs/about-market-data-api).
 - TICKER ticks drive time-and-sales and live exchange-time-bucketed 10-second bars. K-line data drives one-minute and larger intraday bars. Once both versions of a minute finalize, a mismatch remains diagnostic and the K_1M range becomes a conservative envelope for its completed 10-second bars: highs/lows outside it are trimmed only when that candle's open and close already lie inside it. Open, close, volume, and unsafe candles remain untouched. The same rule applies when archived 10-second history loads after finalized K_1M history. Daily history is fetched; weekly/monthly derive from daily.
 - OpenD `TickerType` is preserved as an exact raw value plus a stable `Trade-Report Condition` enum at the feed boundary. The single-writer market-data core stamps independent Range-Eligible, Last-Eligible, and Volume-Eligible permissions from the US condition matrix; unknown and unsupported values fail closed while remaining visible. `typeSign` and `PushDataType` are retained as diagnostics/provenance, and delivery source never changes eligibility. The UI-hub Significant Print classifier keeps its existing transaction-category rules; Aggressor Direction remains the feed's liquidity-taking side, not participant identity.
 - Cached OpenD ticker seeds are decoded and ordered chronologically before entering the same normalized tick path as live pushes. The startup seed is capped at 1,000 prints.

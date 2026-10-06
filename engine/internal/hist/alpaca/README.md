@@ -1,3 +1,5 @@
 # Alpaca History
 
+Historical requests retain 150/minute pacing, a foreground token reservation, and provider header/429 backoff. Startup restores the remaining one-minute request window and any observed longer Retry-After/reset from an atomic checkpoint beside the engine database, scoped to a hash of the paper key ID. An expired checkpoint permits immediate requests; unknown or invalid state retains the conservative minute. A request is withheld if its checkpoint cannot be saved. This covers this engine's restarts, not other clients using the same credentials.
+
 Fetches daily and one-minute market-data history. Chart daily requests retain their `now - 24h` safety cap; chart one-minute requests retain `now - 16m`. Scanner REL VOL uses the raw daily entry point for one bounded range covering up to the prior 50 NYSE sessions, excludes the represented snapshot date, and discards raw bars after profile construction. Only paper credentials may be reused automatically; live execution keys stay isolated. Normalize pagination, ordering, sessions. Test: `go test ./internal/hist/alpaca`.

@@ -11,11 +11,57 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend"
+	snappb "github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsecuritysnapshot"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotstockscreen"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
+
+func TestManagedRelativeVolumeFilterWarmsBeforeAdmission(t *testing.T) {
+	clk := clock.NewFake(et(2026, 7, 8, 8, 0))
+	fr := &fakeReq{
+		rankResp: rankResp(
+			rankItem{Symbol: "US.LOWF", ChangePct: 12.5, Last: 4.2, Volume: 300_000},
+			rankItem{Symbol: "US.EXCLUDE", ChangePct: 1, Last: 4.2, Volume: 300_000}),
+		snap: func([]string) (*snappb.Response, error) {
+			item := marketSnap("LOWF", 20_000_000, 4.2, 3.5, 300_000)
+			item.Basic.UpdateTimestamp = proto.Float64(float64(clk.Now().Unix()))
+			return snapResp(item), nil
+		},
+	}
+	sf, pub := &spyFeed{}, &capturePub{}
+	p := New(config.Scan{Enabled: true}, fr, pub, clk, sf, nil, func(context.Context, string, time.Time, time.Time) ([]feed.Bar, error) { return nil, nil })
+	filters := p.Filters()
+	filters.MinRelativeVolume, filters.MinChangePct = 2, 10
+	if err := p.SetScannerWorkspace(1, wsmsg.SetScannerWorkspaceArgs{WorkspaceID: "main", Panels: []wsmsg.ScannerPanelSettings{{PanelID: "scanner-a", Filters: filters}}}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-p.poke:
+	default:
+		t.Fatal("registering a scanner must wake discovery without waiting for its timer")
+	}
+	p.pollOnce(context.Background(), clk.Now())
+	if len(sf.ensured) != 1 || sf.ensured[0].ID != "scan:US.LOWF" {
+		t.Fatalf("REL VOL warming must retain other admission filters: %+v", sf.ensured)
+	}
+	if len(pub.ranks) != 1 || len(pub.ranks[0].Rows) != 0 {
+		t.Fatalf("missing REL VOL must still prevent board admission: %+v", pub.ranks)
+	}
+	request, ok := p.nextRelativeVolume()
+	if !ok || request.key.symbol != "US.LOWF" {
+		t.Fatalf("candidate history was not queued: %+v", request)
+	}
+	p.finishRelativeVolume(request, &relativeVolumeProfile{day: request.key.day, complete: true, mean: 100_000, count: 20}, true, nil)
+	clk.Advance(3 * time.Second)
+	p.pollOnce(context.Background(), clk.Now())
+	rows := pub.ranks[len(pub.ranks)-1].Rows
+	if len(rows) != 1 || rows[0].Symbol != "US.LOWF" || rows[0].RelativeVolume == nil || *rows[0].RelativeVolume != 3 {
+		t.Fatalf("warmed candidate did not reach board: %+v", rows)
+	}
+}
 
 func TestFetchSessionVolumeUsesUSSessionFieldAndKeepsFlatStocks(t *testing.T) {
 	var captured *qotstockscreen.Request

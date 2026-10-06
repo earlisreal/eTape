@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/backfill"
 	"github.com/earlisreal/eTape/engine/internal/broker/alpaca"
+	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/buildinfo"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/config"
@@ -491,37 +493,18 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	go func() { defer close(accountDone); _ = accountPoller.Run(ctx) }()
 
 	// Asset metadata is supplemental. Start one-shot loads for every Alpaca
-	// account after execution recovery so locate eligibility is venue-specific;
-	// wait for them immediately before Stock Info starts below.
-	type activeAssetsResult struct {
-		venue exec.VenueID
-		count int
-		err   error
-	}
-	var activeAssetsDone <-chan []activeAssetsResult
-	alpacaAdapters := make([]struct {
-		venue   exec.VenueID
-		adapter *alpaca.Adapter
-	}, 0)
+	// account after execution recovery. Pollers can use the metadata as it arrives.
 	for _, vb := range vbs {
 		if a, ok := vb.Broker.(*alpaca.Adapter); ok {
-			alpacaAdapters = append(alpacaAdapters, struct {
-				venue   exec.VenueID
-				adapter *alpaca.Adapter
-			}{venue: vb.ID, adapter: a})
+			brokerWG.Go(func() {
+				count, err := a.LoadActiveAssets(ctx)
+				if err != nil {
+					log.Warn("alpaca active assets load failed", "venue", vb.ID, "err", err)
+				} else {
+					log.Info("alpaca active assets loaded", "venue", vb.ID, "count", count)
+				}
+			})
 		}
-	}
-	if len(alpacaAdapters) > 0 {
-		results := make(chan []activeAssetsResult, 1)
-		activeAssetsDone = results
-		go func() {
-			out := make([]activeAssetsResult, 0, len(alpacaAdapters))
-			for _, item := range alpacaAdapters {
-				count, err := item.adapter.LoadActiveAssets(ctx)
-				out = append(out, activeAssetsResult{venue: item.venue, count: count, err: err})
-			}
-			results <- out
-		}()
 	}
 
 	// --- uihub (listening BEFORE OpenD is dialed) ---
@@ -669,7 +652,10 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		log.Info("engine up (demo synth feed)", "seed", seed, "symbols", gen.Symbols())
 		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
 	} else {
-		client := opend.New(opend.Options{Addr: cfg.OpenD.Addr(), Clock: clock.System{}, RateLimitMarketData: true})
+		client := opend.New(opend.Options{
+			Addr: cfg.OpenD.Addr(), Clock: clock.System{}, RateLimitMarketData: true,
+			RestartCooldown: netx.NewRestartCooldown(dbPath+".opend-cooldown.json", cfg.OpenD.Addr(), 31*time.Second, clock.System{}),
+		})
 		fd := opend.NewOpenDFeed(client, opend.FeedOptions{
 			Budget: cfg.Feed.QuotaSlots, QuotaHeadroom: cfg.Feed.QuotaWarnHeadroom, RequireQuota: true,
 			HistoryQuotaHeadroom: cfg.Feed.HistQuotaWarnRemain,
@@ -690,6 +676,8 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		if cfg.Backfill.Alpaca.Enabled {
 			if p, label, err := resolveBackfillAlpacaCreds(cfg, credsFile); err == nil {
 				alpacaSrc = histalpaca.New("", p.KeyID, p.SecretKey, cfg.Backfill.Alpaca.Feed, clock.System{})
+				scope := fmt.Sprintf("%x", sha256.Sum256([]byte(p.KeyID)))
+				alpacaSrc.SetRestartCooldown(netx.NewRestartCooldown(dbPath+".alpaca-cooldown.json", scope, time.Minute, clock.System{}))
 				log.Info("backfill: alpaca provider resolved", "from", label, "feed", cfg.Backfill.Alpaca.Feed)
 			} else if errors.Is(err, errAlpacaLiveCreds) {
 				log.Warn("backfill: refusing alpaca-live creds for read-only historical provider", "key", cfg.Backfill.Alpaca.CredsKey)
@@ -813,15 +801,6 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 				}
 			}()
 		})
-	}
-	if activeAssetsDone != nil {
-		for _, result := range <-activeAssetsDone {
-			if result.err != nil {
-				log.Warn("alpaca active assets load failed", "venue", result.venue, "err", result.err)
-			} else {
-				log.Info("alpaca active assets loaded", "venue", result.venue, "count", result.count)
-			}
-		}
 	}
 	startPollers(ctx, cfg, pollReq, demand, hub, uihubClk, st, wl, hasTZVenue(cfg), mmProbe, accountPoller, firstAlpacaAssetReader(vbs), backfillOne, scannerHistoryFetch, !*demo, &scanWG)
 	mode := "live"

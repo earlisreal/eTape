@@ -3,6 +3,7 @@ package opend
 import (
 	"context"
 	"net"
+	"path/filepath"
 	"runtime"
 	"sync/atomic"
 	"testing"
@@ -10,14 +11,48 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/initconnect"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/keepalive"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotcommon"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetbasicqot"
+	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotgetsecuritysnapshot"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotsub"
 	"github.com/earlisreal/eTape/engine/internal/feed/opend/pb/qotupdateticker"
 )
+
+func TestLimitedRequestRestoresExpiredCooldownBeforeSending(t *testing.T) {
+	clk := clock.NewFake(time.Now())
+	path := filepath.Join(t.TempDir(), "cooldown.json")
+	guard := netx.NewRestartCooldown(path, "opend", openDStartupQuiet, clk)
+	if err := guard.Record(); err != nil {
+		t.Fatal(err)
+	}
+	clk.Advance(openDStartupQuiet + time.Second)
+	m := newMockOpenD(t)
+	m.handler = func(mm *mockOpenD, conn net.Conn, frame Frame) {
+		if frame.ProtoID == ProtoQotGetSecuritySnapshot {
+			if got := netx.NewRestartCooldown(path, "opend", openDStartupQuiet, clk).ReadyAt(); !got.Equal(clk.Now().Add(openDStartupQuiet)) {
+				t.Error("limited request escaped before durable checkpoint")
+			}
+			mm.reply(conn, frame, &qotgetsecuritysnapshot.Response{RetType: proto.Int32(0)})
+			return
+		}
+		mm.defaultHandler(mm, conn, frame)
+	}
+	c := New(Options{Addr: m.addr(), Clock: clk, RateLimitMarketData: true, RestartCooldown: netx.NewRestartCooldown(path, "opend", openDStartupQuiet, clk)})
+	runCtx, stop := context.WithCancel(context.Background())
+	defer stop()
+	go func() { _ = c.Run(runCtx) }()
+	waitForState(t, c, ConnUp)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := c.Request(ctx, ProtoQotGetSecuritySnapshot, &qotgetsecuritysnapshot.Request{C2S: &qotgetsecuritysnapshot.C2S{SecurityList: []*qotcommon.Security{sec(11, "AAPL")}}})
+	if err != nil {
+		t.Fatalf("expired cooldown blocked a normal startup: %v", err)
+	}
+}
 
 func dialClient(t *testing.T, m *mockOpenD) (*Client, net.Conn) {
 	t.Helper()

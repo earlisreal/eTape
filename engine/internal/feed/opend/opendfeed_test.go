@@ -66,12 +66,20 @@ func TestEnsureSubscribesAndSeeds(t *testing.T) {
 
 	f.Ensure(testBarDemand("w", "US.AAPL"))
 
-	// Watch profile seeds bars then ticks (per-subtype order: KL, Ticker).
-	if ev, ok := nextEvent(t, f.Events()).(feed.Bars1mEvent); !ok || !ev.Seed || len(ev.Bars) != 1 {
-		t.Fatalf("first event = %#v, want seed Bars1mEvent", ev)
+	// Independent caches may finish in either order.
+	var barsSeeded, ticksSeeded bool
+	for range 2 {
+		switch ev := nextEvent(t, f.Events()).(type) {
+		case feed.Bars1mEvent:
+			barsSeeded = ev.Seed && len(ev.Bars) == 1
+		case feed.TicksEvent:
+			ticksSeeded = ev.Seed && len(ev.Ticks) == 1 && ev.Ticks[0].Seq == 1
+		default:
+			t.Fatalf("unexpected seed event: %#v", ev)
+		}
 	}
-	if ev, ok := nextEvent(t, f.Events()).(feed.TicksEvent); !ok || !ev.Seed || ev.Ticks[0].Seq != 1 {
-		t.Fatalf("second event = %#v, want seed TicksEvent", ev)
+	if !barsSeeded || !ticksSeeded {
+		t.Fatalf("missing cache seed: bars=%v ticks=%v", barsSeeded, ticksSeeded)
 	}
 
 	// A live push now flows through as a non-seed event.
@@ -140,6 +148,52 @@ func TestTickerSeedPrecedesPushArrivingDuringGetTicker(t *testing.T) {
 	live, ok := nextEvent(t, f.Events()).(feed.TicksEvent)
 	if !ok || live.Seed || live.Ticks[0].Seq != 2 {
 		t.Fatalf("second event = %#v, want live seq=2", live)
+	}
+}
+
+func TestSlowCandleSeedDoesNotDelayBookOrTape(t *testing.T) {
+	m := newMockOpenD(t)
+	m.setData("US.AAPL", &qotData{
+		bids: []*qotcommon.OrderBook{{Price: proto.Float64(100), Volume: proto.Int64(10), OrederCount: proto.Int32(1)}},
+		ticks: []*qotcommon.Ticker{{Time: proto.String("2026-07-05 09:30:00"), Sequence: proto.Int64(1),
+			Timestamp: proto.Float64(1782146400), Price: proto.Float64(100), Volume: proto.Int64(1), Turnover: proto.Float64(100), Dir: proto.Int32(1)}},
+	})
+	m.handler = func(mm *mockOpenD, conn net.Conn, frame Frame) {
+		if frame.ProtoID != ProtoQotGetKL { // Leave the candle reply pending, while serving other caches.
+			mm.defaultHandler(mm, conn, frame)
+		}
+	}
+	f := NewOpenDFeed(liveClient(t, m), FeedOptions{})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f.seed(ctx, seedJob{symbol: "US.AAPL", subs: []feed.SubType{feed.SubKL1m, feed.SubBook, feed.SubTicker}})
+	}()
+	defer func() { cancel(); <-done }()
+	book, tape := false, false
+	timer := time.NewTimer(500 * time.Millisecond)
+	defer timer.Stop()
+	for !book || !tape {
+		select {
+		case ev := <-f.Events():
+			switch ev.(type) {
+			case feed.BookEvent:
+				book = true
+			case feed.TicksEvent:
+				tape = true
+			}
+		case <-timer.C:
+			m.mu.Lock()
+			var requests []uint32
+			for _, request := range m.requests {
+				requests = append(requests, request.ProtoID)
+			}
+			m.mu.Unlock()
+			t.Logf("provider requests: %v", requests)
+			t.Fatalf("pending candles blocked independent caches: book=%v tape=%v", book, tape)
+		}
 	}
 }
 

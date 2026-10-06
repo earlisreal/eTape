@@ -11,6 +11,7 @@ import (
 
 	"google.golang.org/protobuf/proto"
 
+	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 )
 
@@ -45,6 +46,7 @@ type Options struct {
 	ReconnectMax        time.Duration
 	Clock               clock.Clock
 	RateLimitMarketData bool
+	RestartCooldown     *netx.RestartCooldown
 }
 
 // Client is the OpenD connection: a supervised TCP session with request/response
@@ -103,6 +105,9 @@ func New(opt Options) *Client {
 	}
 	if opt.RateLimitMarketData {
 		c.pacer = newRequestPacer(opt.Clock)
+		if opt.RestartCooldown != nil {
+			c.pacer.readyAt = opt.RestartCooldown.ReadyAt()
+		}
 	}
 	return c
 }
@@ -145,6 +150,14 @@ func (c *Client) Request(ctx context.Context, protoID uint32, req proto.Message)
 	// The request may have waited in a rate-limit queue. Recheck cancellation
 	// immediately before registering and writing it so reconnect-canceled work
 	// cannot leak onto the replacement connection.
+	if err := ctx.Err(); err != nil {
+		return Frame{}, err
+	}
+	if bucket, _ := marketDataRequestPacing(protoID); c.pacer != nil && c.opt.RestartCooldown != nil && hasRollingRequestLimit(bucket) {
+		if err := c.opt.RestartCooldown.Record(); err != nil {
+			return Frame{}, err
+		}
+	}
 	if err := ctx.Err(); err != nil {
 		return Frame{}, err
 	}

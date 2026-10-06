@@ -464,8 +464,8 @@ func seedRetry[T any](ctx context.Context, clk clock.Clock, fn func() (T, error)
 	return v, err
 }
 
-// seed replays OpenD's local caches as Seed events, per subtype, in a fixed
-// order (bars, book, ticks, quote). Each read goes through seedRetry: it's a
+// seed replays independent OpenD caches concurrently so a slow candle read
+// cannot hold back book or ticker readiness. Each read goes through seedRetry: it's a
 // quota-free real-time-cache lookup that can lose the subscribe-ack race (see
 // seedRetryAttempts above). Failures that survive every retry log and
 // continue — a partial seed beats none, and the md core's dedup makes
@@ -475,6 +475,7 @@ func (f *OpenDFeed) seed(ctx context.Context, job seedJob) {
 	startedAt := f.clk.Now()
 	queueWait := startedAt.Sub(job.enqueuedAt)
 	var barsDuration, bookDuration, ticksDuration, quoteDuration time.Duration
+	var reads sync.WaitGroup
 	has := func(want feed.SubType) bool {
 		for _, s := range subs {
 			if s == want {
@@ -501,55 +502,64 @@ func (f *OpenDFeed) seed(ctx context.Context, job seedJob) {
 		}
 	}
 	if claimed[feed.SubKL1m] {
-		start := f.clk.Now()
-		bars, err := seedRetry(ctx, f.clk, func() ([]feed.Bar, error) {
-			return f.bf.cachedBars1m(ctx, symbol, maxAPIRows)
+		reads.Go(func() {
+			start := f.clk.Now()
+			bars, err := seedRetry(ctx, f.clk, func() ([]feed.Bar, error) {
+				return f.bf.cachedBars1m(ctx, symbol, maxAPIRows)
+			})
+			barsDuration = f.clk.Now().Sub(start)
+			f.finishSeed(symbol, feed.SubKL1m, err == nil)
+			if err != nil {
+				slog.Warn("seed bars1m failed", "symbol", symbol, "err", err)
+			} else if len(bars) > 0 {
+				f.emit(ctx, feed.Bars1mEvent{Bars: bars, Seed: true})
+			}
 		})
-		barsDuration = f.clk.Now().Sub(start)
-		f.finishSeed(symbol, feed.SubKL1m, err == nil)
-		if err != nil {
-			slog.Warn("seed bars1m failed", "symbol", symbol, "err", err)
-		} else if len(bars) > 0 {
-			f.emit(ctx, feed.Bars1mEvent{Bars: bars, Seed: true})
-		}
 	}
 	if claimed[feed.SubBook] {
-		start := f.clk.Now()
-		book, err := seedRetry(ctx, f.clk, func() (feed.Book, error) {
-			return f.bf.bookSnapshot(ctx, symbol)
+		reads.Go(func() {
+			start := f.clk.Now()
+			book, err := seedRetry(ctx, f.clk, func() (feed.Book, error) {
+				return f.bf.bookSnapshot(ctx, symbol)
+			})
+			bookDuration = f.clk.Now().Sub(start)
+			f.finishSeed(symbol, feed.SubBook, err == nil)
+			if err != nil {
+				slog.Warn("seed book failed", "symbol", symbol, "err", err)
+			} else {
+				f.emit(ctx, feed.BookEvent{Book: book, Seed: true})
+			}
 		})
-		bookDuration = f.clk.Now().Sub(start)
-		f.finishSeed(symbol, feed.SubBook, err == nil)
-		if err != nil {
-			slog.Warn("seed book failed", "symbol", symbol, "err", err)
-		} else {
-			f.emit(ctx, feed.BookEvent{Book: book, Seed: true})
-		}
 	}
 	if claimed[feed.SubTicker] {
-		start := f.clk.Now()
-		ticks, err := seedRetry(ctx, f.clk, func() ([]feed.Tick, error) {
-			return f.bf.recentTicks(ctx, symbol, maxAPIRows)
+		reads.Go(func() {
+			start := f.clk.Now()
+			ticks, err := seedRetry(ctx, f.clk, func() ([]feed.Tick, error) {
+				return f.bf.recentTicks(ctx, symbol, maxAPIRows)
+			})
+			ticksDuration = f.clk.Now().Sub(start)
+			if err != nil {
+				slog.Warn("seed ticks failed", "symbol", symbol, "err", err)
+			}
+			f.finishTickerSeed(ctx, symbol, ticks, err == nil)
 		})
-		ticksDuration = f.clk.Now().Sub(start)
-		if err != nil {
-			slog.Warn("seed ticks failed", "symbol", symbol, "err", err)
-		}
-		f.finishTickerSeed(ctx, symbol, ticks, err == nil)
 	}
 	if claimed[feed.SubQuote] {
-		start := f.clk.Now()
-		q, err := seedRetry(ctx, f.clk, func() (feed.Quote, error) {
-			return f.bf.quoteSnapshot(ctx, symbol)
+		reads.Go(func() {
+			start := f.clk.Now()
+			q, err := seedRetry(ctx, f.clk, func() (feed.Quote, error) {
+				return f.bf.quoteSnapshot(ctx, symbol)
+			})
+			quoteDuration = f.clk.Now().Sub(start)
+			f.finishSeed(symbol, feed.SubQuote, err == nil)
+			if err != nil {
+				slog.Warn("seed quote failed", "symbol", symbol, "err", err)
+			} else {
+				f.emit(ctx, feed.QuoteEvent{Quote: q, Seed: true})
+			}
 		})
-		quoteDuration = f.clk.Now().Sub(start)
-		f.finishSeed(symbol, feed.SubQuote, err == nil)
-		if err != nil {
-			slog.Warn("seed quote failed", "symbol", symbol, "err", err)
-		} else {
-			f.emit(ctx, feed.QuoteEvent{Quote: q, Seed: true})
-		}
 	}
+	reads.Wait()
 	if barsDuration == 0 && bookDuration == 0 && ticksDuration == 0 && quoteDuration == 0 {
 		return
 	}

@@ -29,14 +29,15 @@ const maxPages = 50
 
 // Client is the Alpaca historical-bars transport.
 type Client struct {
-	base    string
-	keyID   string
-	secret  string
-	feed    string
-	hc      *http.Client
-	clk     clock.Clock
-	bucket  *netx.TokenBucket
-	readyAt time.Time
+	base     string
+	keyID    string
+	secret   string
+	feed     string
+	hc       *http.Client
+	clk      clock.Clock
+	bucket   *netx.TokenBucket
+	readyAt  time.Time
+	cooldown *netx.RestartCooldown
 }
 
 // New builds a Client. base defaults to the production data host; feedName
@@ -61,6 +62,12 @@ func New(base, keyID, secret, feedName string, clk clock.Clock) *Client {
 		client.readyAt = clk.Now().Add(time.Minute)
 	}
 	return client
+}
+
+// SetRestartCooldown must be called before the client is used.
+func (c *Client) SetRestartCooldown(cooldown *netx.RestartCooldown) {
+	c.cooldown = cooldown
+	c.readyAt = cooldown.ReadyAt()
 }
 
 func (c *Client) DailyBars(ctx context.Context, symbol string, from, to time.Time) ([]feed.Bar, error) {
@@ -169,6 +176,11 @@ func (c *Client) bars(ctx context.Context, symbol, timeframe, adjustment string,
 		}
 		req.Header.Set("APCA-API-KEY-ID", c.keyID)
 		req.Header.Set("APCA-API-SECRET-KEY", c.secret)
+		if c.cooldown != nil {
+			if err := c.cooldown.Record(); err != nil {
+				return nil, err
+			}
+		}
 		resp, err := c.hc.Do(req)
 		if err != nil {
 			return nil, err
@@ -182,6 +194,11 @@ func (c *Client) bars(ctx context.Context, symbol, timeframe, adjustment string,
 		}
 		body, _ := io.ReadAll(resp.Body)
 		_ = resp.Body.Close()
+		if c.cooldown != nil && !budget.deferUntil.IsZero() {
+			if err := c.cooldown.DeferUntil(budget.deferUntil); err != nil {
+				return nil, err
+			}
+		}
 		if resp.StatusCode >= 400 {
 			return nil, fmt.Errorf("alpaca data: status=%d body=%s", resp.StatusCode, body)
 		}

@@ -4,13 +4,62 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/clock"
 )
+
+func TestHistoricalRequestsRestoreCooldownAndPersistRetryAfter(t *testing.T) {
+	clk := clock.NewFake(time.Date(2026, 10, 7, 12, 0, 0, 0, time.UTC))
+	path := filepath.Join(t.TempDir(), "cooldown.json")
+	guard := netx.NewRestartCooldown(path, "paper", time.Minute, clk)
+	if err := guard.Record(); err != nil {
+		t.Fatal(err)
+	}
+	clk.Advance(61 * time.Second)
+	called := make(chan struct{}, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if got := netx.NewRestartCooldown(path, "paper", time.Minute, clk).ReadyAt(); !got.Equal(clk.Now().Add(time.Minute)) {
+			t.Error("request was sent before its durable checkpoint")
+		}
+		called <- struct{}{}
+		w.Header().Set("Retry-After", "120")
+		w.WriteHeader(http.StatusTooManyRequests)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "K", "S", "sip", clk)
+	c.SetRestartCooldown(netx.NewRestartCooldown(path, "paper", time.Minute, clk))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_, err := c.DailyBars(ctx, "US.AAPL", clk.Now().Add(-72*time.Hour), clk.Now().Add(-48*time.Hour))
+	if err == nil || !strings.Contains(err.Error(), "429") {
+		t.Fatalf("expired checkpoint should allow request immediately, err=%v", err)
+	}
+	select {
+	case <-called:
+	default:
+		t.Fatal("historical request was not sent")
+	}
+	if got := netx.NewRestartCooldown(path, "paper", time.Minute, clk).ReadyAt(); !got.Equal(clk.Now().Add(120 * time.Second)) {
+		t.Fatalf("provider retry cooldown lost on restart: %v", got)
+	}
+	blocked := New(srv.URL, "K", "S", "sip", clk)
+	blocked.SetRestartCooldown(netx.NewRestartCooldown(filepath.Join(t.TempDir(), "missing", "state.json"), "paper", time.Minute, clk))
+	clk.Advance(time.Minute)
+	if _, err := blocked.DailyBars(ctx, "US.AAPL", clk.Now().Add(-72*time.Hour), clk.Now().Add(-48*time.Hour)); err == nil || !strings.Contains(err.Error(), "cooldown") {
+		t.Fatalf("checkpoint failure must prevent the request: %v", err)
+	}
+	select {
+	case <-called:
+		t.Fatal("provider request escaped failed persistence")
+	default:
+	}
+}
 
 func TestIntraday1mParsesStripsPrefixAndMapsTime(t *testing.T) {
 	var gotPath, gotTF, gotAdj, gotFeed string
