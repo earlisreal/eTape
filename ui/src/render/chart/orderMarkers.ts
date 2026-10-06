@@ -57,3 +57,16 @@ export function snapOrderMarkerPrice(price: number): number {
   const tick = price >= 1 ? 0.01 : 0.0001;
   return Math.round((price + Number.EPSILON) / tick) * tick;
 }
+
+// Keep chips apart without moving their price lines or changing the chart scale.
+// ponytail: 22px per group; use a combined chooser if groups outgrow the pane.
+export function orderMarkerChipYs(ys: number[], paneHeight: number): number[] {
+  const sorted = ys.map((y, index) => ({ y, index })).sort((a, b) => a.y - b.y);
+  let edge = 10;
+  for (const item of sorted) { item.y = Math.max(edge, item.y); edge = item.y + 22; }
+  edge = paneHeight - 10;
+  for (const item of [...sorted].reverse()) { item.y = Math.min(edge, item.y); edge = item.y - 22; }
+  const result = [...ys];
+  for (const item of sorted) result[item.index] = item.y;
+  return result;
+}

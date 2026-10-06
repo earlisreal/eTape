@@ -1,8 +1,10 @@
 # End-to-End Tests
 
-The chart layout regression also verifies the transparent, button-free Chart Risk
-Entry bar in light and dark themes, narrow panels with a lower MACD pane, and
-Enter/Escape submission and cancellation. Screenshots are saved in `.report/`.
+The chart layout regression verifies compact side-colored axis chips, hover
+retention, separate BUY/SELL groups, same-side choosers and nearby-price spacing.
+Risk setup covers native tooltips without risk amounts, theme colors, axis
+dragging, Enter submission and draft cancellation in light/dark and narrow
+multi-pane charts. Screenshots are saved in `.report/`.
 
 Crosshair Sync's browser scenario opens two same-origin Trading workspaces and verifies cursor delivery, clear-on-leave, and a usable narrow-header toggle. ChartPanel tests verify that receiver callbacks are not republished.
 

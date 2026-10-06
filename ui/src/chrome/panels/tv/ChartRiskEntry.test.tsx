@@ -40,9 +40,13 @@ it("previews two clicks and sends one risk-sized pair on Enter", async () => {
     fireEvent.pointerUp(window, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
     fireEvent.pointerDown(host, { pointerId: 2, button: 0, clientX: 100, clientY: 220 });
     fireEvent.pointerUp(window, { pointerId: 2, button: 0, clientX: 100, clientY: 220 });
-    await waitFor(() => expect(screen.getByTestId("chart-risk-entry").textContent).toContain("500 shares"));
-    expect(screen.getByTestId("chart-risk-entry").textContent).toContain("notional $5000.00 · est. risk $100.00");
-    expect(screen.getByTestId("chart-risk-entry").textContent).toContain("Enter send · Esc cancel");
+    const buy = host.querySelector<HTMLButtonElement>("[data-risk-price='buy']")!;
+    await waitFor(() => expect(buy.title).toContain("500 planned shares"));
+    expect(buy.textContent).toBe("B 10.00");
+    expect(buy.title).toContain("Enter send · Esc cancel");
+    expect(buy.title).not.toContain("$100.00");
+    expect(host.querySelector("[data-risk-detail]")?.textContent).toBe("");
+    expect(screen.getByTestId("chart-risk-entry").textContent).not.toContain("notional");
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
     fireEvent.keyDown(window, { key: "Enter" });
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry", expect.objectContaining({ buyStop: 10, sellStop: 9.8, maxQty: 500, value: 100, mode: "Dollar" })));
@@ -66,7 +70,7 @@ it("auto-sends one drag on release and cancels another setup on Escape", async (
     fireEvent.pointerUp(window, { pointerId: 2, clientX: 100, clientY: 220 });
     expect(sendCommand).not.toHaveBeenCalled();
 });
-it("keeps blockers and uncertain submission outcomes visible without buttons", async () => {
+it("keeps blockers and uncertain submission outcomes visible", async () => {
     const { host, sendCommand, sendQuery } = mount();
     sendQuery.mockRejectedValueOnce(new Error("offline"));
     initiateChartRiskEntry(template);
@@ -82,8 +86,27 @@ it("keeps blockers and uncertain submission outcomes visible without buttons", a
     fireEvent.pointerUp(window, { pointerId: 2, clientX: 100, clientY: 220 });
     fireEvent.keyDown(window, { key: "Enter" });
     await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toContain("Submit outcome unknown"));
-    expect(host.querySelector("[data-risk-detail]")?.textContent).toContain("500 shares");
-    expect(host.querySelector("[data-risk-detail]")?.textContent).not.toContain("Enter send");
+    expect(host.querySelector<HTMLButtonElement>("[data-risk-price='buy']")?.title).toContain("500 planned shares");
+    expect(host.querySelector<HTMLButtonElement>("[data-risk-price='buy']")?.title).not.toContain("Enter send");
     fireEvent.keyDown(window, { key: "Enter" });
     expect(sendCommand.mock.calls.filter(([name]) => name === "SubmitRiskEntry")).toHaveLength(1);
+});
+it("drags a draft price on the axis and discards the pair from either X", async () => {
+    const {host,sendCommand} = mount();
+    initiateChartRiskEntry(template);
+    fireEvent.pointerDown(host,{pointerId:1,button:0,clientX:100,clientY:200});
+    fireEvent.pointerUp(window,{pointerId:1,clientX:100,clientY:200});
+    fireEvent.pointerDown(host,{pointerId:2,button:0,clientX:100,clientY:220});
+    fireEvent.pointerUp(window,{pointerId:2,clientX:100,clientY:220});
+    const buy = host.querySelector<HTMLButtonElement>("[data-risk-price='buy']")!;
+    fireEvent.pointerDown(buy,{pointerId:3,button:0,clientX:470,clientY:200});
+    fireEvent.pointerMove(window,{pointerId:3,clientX:470,clientY:190});
+    fireEvent.pointerUp(window,{pointerId:3,clientX:470,clientY:190});
+    await waitFor(() => expect(buy.title).toContain("333 planned shares"));
+    expect(buy.textContent).toBe("B 10.10");
+    const cancel = screen.getAllByRole("button",{name:"Discard risk setup"})[1];
+    fireEvent.keyDown(cancel,{key:"Enter"});
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry",expect.anything());
+    fireEvent.click(cancel);
+    expect(screen.getByTestId("chart-risk-entry").style.display).toBe("none");
 });

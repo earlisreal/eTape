@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { chartOrderMarkers, orderActionPending, snapOrderMarkerPrice } from "./orderMarkers";
+import { chartOrderMarkers, orderActionPending, orderMarkerChipYs, snapOrderMarkerPrice } from "./orderMarkers";
 import type { Order } from "../../wire/contract";
 
 const base: Order = {
@@ -9,6 +9,10 @@ const base: Order = {
 };
 
 describe("chart order markers", () => {
+  it("keeps neighboring axis chips apart and inside the price pane", () => {
+    expect(orderMarkerChipYs([3, 4, 390, 397], 400)).toEqual([10, 32, 368, 390]);
+    expect(orderMarkerChipYs([200, 200, 201], 400)).toEqual([200, 222, 244]);
+  });
   it("filters confirmed working limit and stop-limit orders to the grouped venue and symbol", () => {
     const held: Order = { ...base, id:"held", type:"STOP_LIMIT", stopPrice:101, held:{phase:"WAITING", deadlineMs:2} };
     const nativeBase = { ...held };

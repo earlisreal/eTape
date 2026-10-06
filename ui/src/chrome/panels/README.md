@@ -40,10 +40,13 @@ omits stale or empty placements. Bound hotkeys appear as Keycap badges only
 when Hotkey Label Visibility is enabled. Deck Buttons remain references to
 the shared Action Template execution path, not a separate action surface.
 
-Grouped charts overlay working LIMITs in yellow and pretrigger STOP_LIMITs and
-LITs in cyan, filtered to the chart's exact symbol and venue. Price-axis chips expose
-cancel; dragging the order label modifies price only after release, while
-Escape/right-click cancels the drag. Engine-held stop-limit markers switch to
+Grouped charts overlay working LIMITs and pretrigger STOP_LIMITs/LITs, filtered
+to the chart's exact symbol and venue. Compact price-axis chips use chart green
+for BUY/COVER and red for SELL/SHORT, exposing shares and order details on hover.
+Risk amounts and routine left-edge labels are hidden; actionable warnings remain
+visible. The chip's × cancels its existing target. Dragging sends the modification
+on release; arrow keys send one price step. Escape/right-click cancels the drag.
+Engine-held stop-limit markers switch to
 the child LIMIT after trigger; LIT uses the same phase-dependent price. Paused
 parents stay visible and require explicit Resume. The Order Ticket shows local
 custody and the session deadline before submit, including the no-broker-order

@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import type { AckMsg, Order } from "../../../wire/contract";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
 import { ChartOrderMarkers } from "./ChartOrderMarkers";
+import { getTvChrome } from "../../../render/chart/tvTheme";
 
 const base: Order = {
   venue:"sim", id:"o1", symbol:"US.AAPL", side:"BUY", type:"LIMIT", tif:"DAY", session:"AUTO",
@@ -20,7 +21,7 @@ function mount(orders: Order[] = [base]) {
   const chooserOpenRef = { current:false };
   const sendCommand = vi.fn(async ():Promise<AckMsg> => ({ kind:"ack", corrId:"c1", status:"accepted" }));
   document.body.append(host);
-  const utils = render(<ChartOrderMarkers orders={orders} venue="sim" symbol="US.AAPL" pinned={false}
+  const utils = render(<ChartOrderMarkers chrome={getTvChrome("light")} orders={orders} venue="sim" symbol="US.AAPL" pinned={false}
     availableCash={100000} buyingPower={100000}
     sendCommand={sendCommand} hostRef={hostRef} facadeRef={facadeRef} rightAxisWidth={60}
     layoutRef={layoutRef} chooserOpenRef={chooserOpenRef} />, { container:host });
@@ -30,14 +31,46 @@ function mount(orders: Order[] = [base]) {
 beforeEach(() => { cleanup(); document.body.replaceChildren(); });
 
 describe("ChartOrderMarkers", () => {
+  it("uses compact side-colored axis chips, shares tooltips, and a same-side chooser", async () => {
+    const { host, sendCommand } = mount([base, {...base,id:"o2"}, {...base,id:"sell",side:"SELL"}]);
+    const groups = host.querySelectorAll<HTMLElement>("[data-order-group]");
+    expect(groups).toHaveLength(2);
+    expect(groups[0].style.right).toBe("0px");
+    expect(groups[0].style.getPropertyValue("--order-color")).toBe(getTvChrome("light").up);
+    expect(groups[1].style.getPropertyValue("--order-color")).toBe(getTvChrome("light").down);
+    const buy = screen.getByTestId("order-label-o1");
+    expect(buy.textContent).toBe("B 100.00 (2)");
+    expect(buy.title).toContain("10 shares\nBUY LIMIT · limit 100.00");
+    expect(screen.getByTestId("order-label-sell").textContent).toBe("S 100.00");
+    expect(host.querySelector("[data-order-risk]")).toBeNull();
+    fireEvent.click(buy);
+    fireEvent.click(screen.getAllByRole("button", {name:"Cancel BUY 10 LIMIT"})[1]);
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("CancelOrder", {venue:"sim",orderId:"o2"}));
+  });
+  it("keeps keyboard price adjustment on the axis chip", async () => {
+    const {sendCommand} = mount();
+    fireEvent.keyDown(screen.getByTestId("order-label-o1"), {key:"ArrowUp"});
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("ReplaceOrder", expect.objectContaining({qty:0,limitPrice:100.01})));
+  });
+  it("does not pull offscreen order chips into the visible price pane", () => {
+    const {host} = mount([{...base,id:"offscreen",limitPrice:500},base]);
+    expect(host.querySelector<HTMLElement>("[data-order-ids='offscreen']")?.style.display).toBe("none");
+    expect(host.querySelector<HTMLElement>("[data-order-ids='o1']")?.style.display).toBe("block");
+    expect(host.querySelector<HTMLElement>("[data-order-ids='o1'] [data-order-chip]")?.style.top).toBe("-10px");
+  });
   it("sends the observed phase when dragging a linked trigger",async()=>{
     const order:Order={...base,type:"STOP_LIMIT",stopPrice:100,limitPrice:100.05,held:{phase:"WAITING",deadlineMs:9999999999999},
       riskEntry:{stopId:"s",budget:100,mode:"Dollar",buyCushion:{value:0.05,unit:"$"},sellCushion:{value:0,unit:"$"}}};
     const stop:Order={...order,id:"s",side:"SELL",qty:0,leavesQty:0,stopPrice:98,limitPrice:98,riskEntryId:"o1"};
     delete stop.riskEntry;
     const {sendCommand}=mount([order,stop]);
+    expect(screen.getByTestId("order-label-s").title).toContain("10 planned shares");
+    expect(screen.getByTestId("order-label-s").title).toContain("Held by eTape");
     fireEvent.pointerDown(screen.getByTestId("order-label-o1"),{button:0,pointerId:1,clientX:20,clientY:200});
-    fireEvent.pointerMove(window,{pointerId:1,clientX:20,clientY:190});fireEvent.pointerUp(window,{pointerId:1,clientX:20,clientY:190});
+    fireEvent.pointerMove(window,{pointerId:1,clientX:20,clientY:190});
+    expect(screen.getByTestId("order-label-o1").title).toContain("8 planned shares");
+    expect(screen.getByTestId("order-label-o1").title).not.toContain("estimated risk");
+    fireEvent.pointerUp(window,{pointerId:1,clientX:20,clientY:190});
     await waitFor(()=>expect(sendCommand).toHaveBeenCalledWith("ReplaceOrder",expect.objectContaining({stopPrice:110,qty:8,expectedHeldPhase:"WAITING",expectedRiskEntryPhase:"WAITING"})));
   });
   it("previews the snapped price during drag and sends a price-only replace on release", async () => {

@@ -37,6 +37,11 @@ try {
     await page.mouse.move(350, 280);
     await page.waitForFunction(() => document.querySelector('[data-testid="chart-order-entry-preview"]').style.opacity === "1");
     const preview = await measure();
+    const ghost = await page.locator("[data-entry-price]").boundingBox();
+    await page.mouse.move(ghost.x + ghost.width / 2, ghost.y + ghost.height / 2);
+    assert.equal(await page.getByTestId("chart-order-entry-preview").evaluate(el => el.style.opacity), "1", "The axis preview must remain visible for its tooltip");
+    assert((await page.locator("[data-entry-price]").getAttribute("title")).includes("1 shares"), "Gesture tooltip must show its share quantity");
+    await page.mouse.move(350, 280);
     if (cycle === 0) await page.waitForTimeout(350); // Let the 250ms route preview expire before clicking.
     await page.mouse.click(350, 280);
     await page.keyboard.up("Shift");
@@ -51,7 +56,7 @@ try {
     if (cycle === 1) {
       assert.equal(submitted.submittedStop, Number(preview.previewStopText), "Submitted STOP must match its displayed preview");
       assert(Math.abs(submitted.submittedLimit - submitted.submittedStop - 0.05) < 0.001, "LIMIT must retain the template's $0.05 cushion");
-      assert(preview.previewDetailText.includes("→ limit 5.12"), "Preview must show the cushion-adjusted LIMIT");
+      assert(preview.previewDetailText.includes("limit 5.12"), "Preview tooltip must show the cushion-adjusted LIMIT");
     }
   }
 
@@ -83,6 +88,30 @@ try {
   await page.getByRole("button", { name: "Cancel BUY 1 STOP-LIMIT" }).click();
   await page.waitForFunction(() => document.querySelectorAll("[data-order-group]").length === 0);
   states.push(await measure());
+
+  await page.evaluate(() => {
+    window.repro.addOrder("same-buy-a", "STOP_LIMIT", 5.0);
+    window.repro.addOrder("same-buy-b", "STOP_LIMIT", 5.0);
+    window.repro.addOrder("same-sell", "STOP_LIMIT", 5.0, "SELL");
+    window.repro.addOrder("nearby-sell", "LIMIT", 5.01, "SELL");
+  });
+  await page.waitForFunction(() => document.querySelectorAll("[data-order-group]").length === 3);
+  const chips = await page.locator("[data-order-chip]").evaluateAll(nodes => nodes.map(node => {
+    const box = node.getBoundingClientRect();
+    return { top:box.top,bottom:box.bottom,right:box.right,color:getComputedStyle(node).color,text:node.innerText };
+  }).sort((a,b) => a.top-b.top));
+  assert(chips.every((chip,index) => !index || chip.top >= chips[index-1].bottom), "Same and neighboring price chips must remain individually clickable");
+  assert(chips.some(chip => chip.text.includes("B 5.00 (2)") && chip.color === "rgb(8, 153, 129)"), "BUY chips must group only BUY orders and use chart green");
+  assert(chips.some(chip => chip.text.includes("S 5.00") && chip.color === "rgb(242, 54, 69)"), "SELL chips must remain separate and use chart red");
+  const axisHost = await page.getByTestId("chart-host").boundingBox();
+  assert(chips.every(chip => Math.abs(chip.right - axisHost.x - axisHost.width) <= 1), "Working chips must sit on the right price axis");
+  await page.getByTestId("order-label-same-buy-a").click();
+  assert.equal(await page.getByRole("dialog",{name:"Choose chart order"}).count(),1,"Same-side count chip must retain its individual-order chooser");
+  await page.getByRole("button",{name:"Close order chooser"}).click();
+  await mkdir(path.resolve(root, "../.report"), { recursive: true });
+  await page.screenshot({path:path.resolve(root,"../.report/chart-orders-compact.png")});
+  await page.evaluate(() => ["same-buy-a","same-buy-b","same-sell","nearby-sell"].forEach(id => window.repro.finishOrder(id)));
+  await page.waitForFunction(() => document.querySelectorAll("[data-order-group]").length === 0);
 
   await page.evaluate(() => window.repro.addOrder("pending-cancel", "LIMIT", 5.0));
   await page.locator('[data-testid="order-label-pending-cancel"]').waitFor();
@@ -195,7 +224,11 @@ try {
       paneTop: paneBox.top, paneBottom: paneBox.bottom, hostBottom: host.getBoundingClientRect().bottom,
       gutterLeft: pane.cells[pane.cells.length - 1].getBoundingClientRect().left,
       background: style.backgroundColor, border: style.borderTopWidth, pointerEvents: style.pointerEvents, color: style.color,
-      buttons: bar.querySelectorAll("button").length, fitsText: bar.scrollWidth <= bar.clientWidth, text: bar.innerText };
+      buttons: bar.querySelectorAll("button").length, fitsText: bar.scrollWidth <= bar.clientWidth, text: bar.innerText,
+      chips:[...host.querySelectorAll("[data-risk-chip]")].filter(chip => getComputedStyle(chip).display !== "none").map(chip => {
+        const box = chip.getBoundingClientRect(), button = chip.querySelector("[data-risk-price]");
+        return {top:box.top,bottom:box.bottom,right:box.right,text:button.innerText,title:button.title,color:getComputedStyle(chip).color};
+      }) };
   });
   const checkRisk = async () => {
     const risk = await measureRisk();
@@ -204,9 +237,10 @@ try {
     assert.equal(risk.background, "rgba(0, 0, 0, 0)", "Risk bar must be transparent");
     assert.equal(risk.border, "0px", "Risk bar must have no border");
     assert.equal(risk.pointerEvents, "none", "Risk bar must let chart pointer input pass through");
-    assert.equal(risk.buttons, 0, "Enter/Escape replace the action buttons");
+    assert.equal(risk.buttons, 0, "Routine instructions must not add a separate action bar");
     assert(risk.fitsText, "Risk text must wrap within a narrow chart");
-    assert(risk.text.includes("Held by eTape") && risk.text.includes("fees/execution risk excluded"), "Custody and risk caveat must stay visible");
+    assert(!risk.text.includes("notional") && !risk.text.includes("est. risk"), "Risk figures must stay out of the chart");
+    assert(risk.chips.every(chip => Math.abs(chip.right - hostBox.x - hostBox.width) <= 1), "Risk chips must align with the price axis");
     const geometry = await measureProduction();
     assert(geometry.nativeOffset === 0 && geometry.axisClippedPx === 0 && geometry.panelAxisClippedPx === 0,
       "Risk setup must preserve the native chart origin and full time axis");
@@ -223,10 +257,11 @@ try {
     assert.equal(setup.color, theme === "light" ? "rgb(19, 23, 34)" : "rgb(209, 212, 220)", "Risk text must follow the chart theme");
     await productionPage.mouse.click(cursor.x, hostBox.y + hostBox.height * 0.30);
     await productionPage.mouse.click(cursor.x, hostBox.y + hostBox.height * 0.50);
-    await productionPage.waitForFunction(() => document.querySelector("[data-risk-detail]").textContent.includes("shares"));
+    await productionPage.waitForFunction(() => document.querySelector("[data-risk-price='buy']").title.includes("planned shares"));
     const preview = await checkRisk();
-    assert(preview.height <= 42 && preview.text.includes("buy LMT") && preview.text.includes("sell LMT")
-      && preview.text.includes("notional") && preview.text.includes("est. risk"), "Compact preview must retain all trade figures");
+    assert(preview.chips.length === 2 && preview.chips[0].title.includes("BUY STOP-LIMIT") && preview.chips[1].title.includes("SELL STOP-LIMIT"), "Both compact risk chips must expose order details on hover");
+    assert(preview.chips.every(chip => chip.title.includes("planned shares") && chip.title.includes("Held by eTape") && chip.title.includes("fees/execution risk excluded") && !chip.title.includes("est. risk")), "Tooltips must retain shares and custody without risk amounts");
+    assert.deepEqual(preview.chips.map(chip => chip.color),["rgb(8, 153, 129)","rgb(242, 54, 69)"],"Risk draft colors must match submitted BUY/SELL chips");
     await productionPage.screenshot({ path: path.resolve(root, `../.report/chart-risk-entry-${theme}.png`) });
     await productionPage.keyboard.press("Enter");
     await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "hidden" });
@@ -242,6 +277,7 @@ try {
     shell.style.height = "640px";
   });
   await productionPage.waitForFunction(() => document.querySelector('[data-testid="chart-host"]').clientWidth === 320);
+  await productionPage.waitForTimeout(1100); // Risk layout also follows asynchronously resized indicator panes.
   await productionPage.waitForFunction(() => {
     const bar = document.querySelector("[data-risk-bar]").getBoundingClientRect();
     const pane = document.querySelector(".tv-lightweight-charts table").rows[0].getBoundingClientRect();
@@ -249,8 +285,21 @@ try {
   });
   const narrow = await checkRisk();
   assert(narrow.hostBottom - narrow.paneBottom > 100, "The narrow scenario must include a lower indicator pane");
+  const narrowHost = await productionPage.getByTestId("chart-host").boundingBox();
+  await productionPage.mouse.click(narrowHost.x + 100,narrow.paneTop + 100);
+  await productionPage.mouse.click(narrowHost.x + 100,narrow.paneTop + 103);
+  await productionPage.waitForFunction(() => document.querySelector("[data-risk-price='buy']").title.includes("planned shares"));
+  const narrowChips = (await measureRisk()).chips.sort((a,b) => a.top-b.top);
+  assert(narrowChips[1].top >= narrowChips[0].bottom,"Nearby draft prices must retain separate axis controls");
+  const draftBuy = await productionPage.locator("[data-risk-price='buy']").boundingBox();
+  const originalBuy = await productionPage.locator("[data-risk-price='buy']").textContent();
+  await productionPage.mouse.move(draftBuy.x + draftBuy.width/2,draftBuy.y + draftBuy.height/2);
+  await productionPage.mouse.down();
+  await productionPage.mouse.move(draftBuy.x + draftBuy.width/2,draftBuy.y + draftBuy.height/2 - 10);
+  await productionPage.mouse.up();
+  assert.notEqual(await productionPage.locator("[data-risk-price='buy']").textContent(),originalBuy,"Risk axis handles must remain draggable when spaced apart");
   await productionPage.screenshot({ path: path.resolve(root, "../.report/chart-risk-entry-narrow.png") });
-  await productionPage.keyboard.press("Escape");
+  await productionPage.getByRole("button",{name:"Discard risk setup"}).first().click();
   await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "hidden" });
   assert.equal(productionErrors.length, 0, productionErrors.join("\n"));
   assert.equal(await productionPage.evaluate(() => window.chartPanelProbe.errors.length), 0, "Risk setup must not report chart paint errors");

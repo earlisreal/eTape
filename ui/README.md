@@ -17,23 +17,33 @@ in that Scanner Panel and clears its amber fill and bold text. Single-click
 selection keeps a thin outline without an amber fill; double-click loads the
 symbol into the linked group.
 
-Grouped charts also project open orders into an imperative overlay: yellow
-LIMIT and cyan pretrigger STOP_LIMIT/LIT lines, price-axis chips, and per-order
-drag/cancel controls. The overlay follows the ordinary execution store; market
-ticks remain outside React state. Engine-held STOP_LIMIT and LIT are labeled
-as local custody before trigger and become venue LIMITs only after a fresh
-eligible print.
+Grouped charts project open orders into an imperative overlay with compact
+`B price ×` / `S price ×` controls on the right price axis. BUY/COVER uses chart
+green and SELL/SHORT chart red across LIMIT, STOP_LIMIT, LIT and draft previews.
+Hover the price for shares, order type, execution limit and current status;
+routine left-edge labels and risk amounts are hidden. Same-side, same-type
+orders at one price share a count chip and individual-order chooser; opposing
+sides stay separate. Nearby chips are spaced without moving their price lines.
+Drag a working price or use its arrow keys to adjust; × keeps the existing cancel
+target. The overlay follows the execution store; market ticks stay outside React
+state. Engine-held orders expose local custody in the tooltip before triggering
+and become venue LIMITs only after a fresh eligible print. Chart Order Gestures
+retain modifier-click submission; their hoverable chip's × discards the preview
+until the modifier is released. Blockers and uncertain outcomes remain visible.
 
 Settings → Orders & hotkeys → Add → Chart Risk Entry creates a risk preset and
 hotkey. Focus a grouped chart, press the hotkey, then click the buy trigger and
-sell stop or drag between them. A compact, transparent bar floats over the bottom
-Volume area of the main chart pane, keeping the time axis and chart dimensions
-unchanged. It shows whole shares, execution limits, notional and estimated risk
-after cushions, plus custody, expiry and warnings. Drag either endpoint to adjust;
-Enter submits and Escape cancels. Right-click, focus loss and context changes cancel.
+sell stop or drag between them. Only brief setup instructions and actionable
+warnings float over the bottom Volume area. The two axis chips expose planned
+shares, execution limits, custody, expiry and Enter/Escape shortcuts on hover;
+risk amounts and notional stay hidden. Drag either endpoint or its axis chip to
+adjust; Enter submits and Escape or either draft × discards the entire setup.
+Right-click, focus loss and context changes cancel.
 The global auto-send setting defaults off and applies only to initial setup.
-Submitted linked markers always request edits on release, showing before/after
-risk and an above-budget warning after activation. Cancel Protection leaves
+Submitted linked markers always request edits on release, showing updated shares
+on hover and an above-budget warning after activation. Waiting linked protection
+shows planned shares; deferred position sizing shows its percentage until the
+trigger determines actual shares. Cancel Protection leaves
 filled shares open; interruptions and expiry appear as chart warnings.
 Cash % and BP % configure loss budgets, excluding fees and execution risk.
 

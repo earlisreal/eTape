@@ -6,6 +6,7 @@ import { ChartConditionalOrderEntry } from "../../src/chrome/panels/tv/ChartCond
 import { OrderConfigProvider, useOrderConfig } from "../../src/chrome/exec/useOrderConfig";
 import { ThemeProvider, useTheme } from "../../src/chrome/ThemeProvider";
 import { initiateChartRiskEntry } from "../../src/chrome/exec/actionTemplate";
+import { getTvChrome } from "../../src/render/chart/tvTheme";
 import { ToastProvider } from "../../src/chrome/Toast";
 import { PanelFrame } from "../../src/chrome/PanelFrame";
 import { makeStores } from "../../src/data/registry";
@@ -133,15 +134,15 @@ function App() {
         panelAxisClippedPx: Math.max(0, axisBox.bottom - panelBox.bottom),
         stopDrawnY: nativeBox.top + series.priceToCoordinate(actualStop), ghostY: ghostBox?.top,
         announcement: host.querySelector(".chart-order-announcement")?.textContent,
-        previewStopText: host.querySelector("[data-entry-chip]")?.textContent,
-        previewDetailText: host.querySelector("[data-entry-detail]")?.textContent,
+        previewStopText: host.querySelector("[data-entry-price]")?.textContent.slice(2),
+        previewDetailText: host.querySelector("[data-entry-price]")?.title,
         submittedStop: window.repro.lastSubmitted?.stopPrice,
         submittedLimit: window.repro.lastSubmitted?.limitPrice,
         markers: host.querySelectorAll("[data-order-group]").length,
         range: chart.timeScale().getVisibleLogicalRange(), candleY: series.priceToCoordinate(4.8) };
-    }, addOrder(id, type, price) {
+    }, addOrder(id, type, price, side = "BUY") {
       stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
-        venue: "sim", id, symbol: "US.AAPL", side: "BUY", type, tif: "DAY", session: "EXTENDED", qty: 1,
+        venue: "sim", id, symbol: "US.AAPL", side, type, tif: "DAY", session: "EXTENDED", qty: 1,
         limitPrice: type === "LIMIT" ? price : price - 0.05, stopPrice: type === "STOP_LIMIT" ? price : 0,
         status: "ACCEPTED", executedQty: 0, leavesQty: 1, avgFillPrice: 0, rejectReason: "", replacesId: "",
         createdMs: 1, updatedMs: 1, ...(type === "STOP_LIMIT" ? { held: { phase: "WAITING", deadlineMs: Date.now() + 3600000 } } : {}),
@@ -165,9 +166,9 @@ function App() {
     <div style={{ height: 26, flexShrink: 0 }}>Sim-only AAPL chart · Shift+click</div>
     <div data-testid="chart-host" ref={hostRef} tabIndex={0} style={{ flex: 1, minHeight: 0, position: "relative" }}>
       <div style={{ position: "absolute", zIndex: 5 }}>AAPL · Vol</div>
-      <ChartOrderMarkers orders={snapshot.orders.values()} venue="sim" symbol="US.AAPL" pinned={false} sendCommand={sendCommand}
+      <ChartOrderMarkers chrome={getTvChrome("light")} orders={snapshot.orders.values()} venue="sim" symbol="US.AAPL" pinned={false} sendCommand={sendCommand}
         hostRef={hostRef} facadeRef={facadeRef} rightAxisWidth={axisWidth} layoutRef={layoutRef} chooserOpenRef={chooserOpenRef} />
-      <ChartConditionalOrderEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group="green" symbol="US.AAPL"
+      <ChartConditionalOrderEntry chrome={getTvChrome("light")} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group="green" symbol="US.AAPL"
         config={config} configLoaded activeTool="select" chooserOpenRef={chooserOpenRef} sendCommand={sendCommand} sendQuery={sendQuery} />
     </div>
   </div>;

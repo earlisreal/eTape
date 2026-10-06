@@ -7,6 +7,7 @@ import type { ExecStatus, StopLimitRoutePreview } from "../../../wire/contract";
 import { LinkGroups } from "../../linkGroups";
 import type { OrderConfig } from "../../exec/actionTemplate";
 import { ChartConditionalOrderEntry } from "./ChartConditionalOrderEntry";
+import { getTvChrome } from "../../../render/chart/tvTheme";
 
 const config: OrderConfig = {
   activeVenue:"sim",
@@ -36,7 +37,7 @@ function mount(env:"paper"|"live" = "paper", orderConfig: OrderConfig = config,
   const chooserOpenRef = {current:false};
   const sendCommand = vi.fn(async (name:string) => ({kind:"ack" as const,corrId:"c1",status:"accepted" as const, ...(name === "SubmitOrder" ? {orderId:"ET1"} : {})}));
   const sendQuery = vi.fn(async () => routePreview);
-  const utils = render(<ChartConditionalOrderEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups}
+  const utils = render(<ChartConditionalOrderEntry chrome={getTvChrome("light")} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups}
     group="green" symbol="US.AAPL" config={orderConfig} configLoaded activeTool="select" chooserOpenRef={chooserOpenRef}
     sendCommand={sendCommand} sendQuery={sendQuery} />, {container:host});
   return { ...utils, host, stores, sendCommand, sendQuery, facadeRef };
@@ -57,6 +58,35 @@ beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.restoreAllMock
 });
 
 describe("ChartConditionalOrderEntry", () => {
+  it("retains a compact hoverable axis preview and discards it without submitting", async () => {
+    focusChart();
+    const {host,sendCommand} = mount("paper",config,{...route,lastEligiblePrice:99});
+    moveToChart(host);
+    const preview = screen.getByTestId("chart-order-entry-preview");
+    await waitFor(() => expect(preview.style.opacity).toBe("1"));
+    const chip = preview.querySelector<HTMLButtonElement>("[data-entry-price]")!;
+    expect(chip.textContent).toBe("B 100.00");
+    expect(chip.title).toContain("1 shares\nBUY STOP-LIMIT · limit 100.00");
+    expect(preview.querySelector("[data-entry-detail]")?.textContent).toBe("");
+    expect(preview.style.getPropertyValue("--entry-color")).toBe(getTvChrome("light").up);
+    fireEvent.pointerMove(chip,{pointerId:1,clientX:470,clientY:200,shiftKey:true});
+    expect(preview.style.opacity).toBe("1");
+    fireEvent.click(screen.getByRole("button",{name:"Discard chart order preview"}));
+    expect(preview.style.visibility).toBe("hidden");
+    await placeClick(host);
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitOrder",expect.anything());
+    fireEvent.keyUp(window,{key:"Shift"});
+    await placeClick(host);
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitOrder",expect.anything()));
+  });
+  it("keeps an uncertain submit outcome visible after hiding the gesture preview", async () => {
+    focusChart();
+    const {host,sendCommand} = mount();
+    sendCommand.mockResolvedValueOnce({kind:"ack",corrId:"c1",status:"accepted",ambiguous:true} as Awaited<ReturnType<typeof sendCommand>>);
+    await placeClick(host);
+    await waitFor(() => expect(host.querySelector("[data-entry-status]")?.textContent).toContain("Order outcome unknown"));
+    expect(host.querySelector<HTMLElement>("[data-entry-status]")?.style.display).toBe("block");
+  });
   it("submits the first Shift-click without waiting for a hover preview", async () => {
     focusChart();
     const {host,sendCommand} = mount();
@@ -172,9 +202,10 @@ describe("ChartConditionalOrderEntry", () => {
       tif: "DAY", session: "EXTENDED", symbol: "US.AAPL", deferredPositionSizing: false, type: "LIMIT_IF_TOUCHED",
     }));
     await waitFor(() => expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("WILL TRIGGER NOW"));
-    expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("no broker order before activation");
-    expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("primary moomoo OpenD Last-Eligible Prints");
-    expect(screen.getByTestId("chart-order-entry-preview").textContent).toContain("feed loss pauses evaluation");
+    const tooltip = screen.getByTestId("chart-order-entry-preview").querySelector<HTMLButtonElement>("[data-entry-price]")!.title;
+    expect(tooltip).toContain("no broker order before activation");
+    expect(tooltip).toContain("primary moomoo OpenD Last-Eligible Prints");
+    expect(tooltip).toContain("feed loss pauses evaluation");
     await placeClick(host);
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitOrder", expect.objectContaining({
       venue: "sim", symbol: "US.AAPL", type: "LIMIT_IF_TOUCHED", stopPrice: 100, limitPrice: 100.1,
@@ -193,6 +224,8 @@ describe("ChartConditionalOrderEntry", () => {
     }));
     const preview = screen.getByTestId("chart-order-entry-preview");
     await waitFor(() => expect(preview.textContent).toContain("WILL TRIGGER NOW — NO OPEN POSITION"));
+    expect(preview.querySelector<HTMLButtonElement>("[data-entry-price]")?.title).toContain("100% position · shares determined on trigger");
+    expect(preview.style.getPropertyValue("--entry-color")).toBe(getTvChrome("light").down);
     await placeClick(host);
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitOrder", expect.objectContaining({
       venue:"sim",symbol:"US.AAPL",side:"SELL",type:"STOP_LIMIT",qty:0,deferredPositionPct:100,routeExpected:"ENGINE_HELD",
@@ -230,7 +263,7 @@ describe("ChartConditionalOrderEntry", () => {
     await placeClick(host);
     expect(screen.queryByRole("dialog", {name:"Live engine-held stop-limit disclosure"})).toBeNull();
     expect(preview.style.opacity).toBe("1");
-    expect(preview.querySelector("[data-entry-detail]")?.textContent).toContain("LOCAL · eTape-held");
+    expect(preview.querySelector<HTMLButtonElement>("[data-entry-price]")?.title).toContain("LOCAL · eTape-held");
     expect(preview.querySelector("[data-entry-detail]")?.textContent).toContain("Settings → Orders & hotkeys → Review / enable live accounts");
     expect(preview.querySelector("[data-entry-announcement]")?.textContent).toContain("Settings → Orders & hotkeys → Review / enable live accounts");
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitOrder", expect.anything());

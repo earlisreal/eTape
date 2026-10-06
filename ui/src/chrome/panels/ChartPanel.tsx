@@ -1273,11 +1273,11 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
             onToggleHidden={toggleIndicatorHidden} onEditIndicator={setSettingsInstanceId} onRemoveIndicator={removeIndicator}
             onClosePane={closePane} onToggleCollapsePane={togglePaneCollapsed}
             legendRef={legendRef} />
-          <ChartOrderMarkers orders={execSnapshot.orders.values()} venue={linkGroups.venueFor(group) ?? ""} symbol={chartSymbol}
+          <ChartOrderMarkers chrome={chrome} orders={execSnapshot.orders.values()} venue={linkGroups.venueFor(group) ?? ""} symbol={chartSymbol}
             availableCash={execSnapshot.accounts.get(linkGroups.venueFor(group) ?? "")?.availableCash ?? 0} buyingPower={execSnapshot.accounts.get(linkGroups.venueFor(group) ?? "")?.buyingPower ?? 0}
             pinned={group === null} sendCommand={commands.sendCommand} hostRef={hostRef} facadeRef={facadeRef}
             rightAxisWidth={rightAxisWidth} layoutRef={orderMarkerLayoutRef} chooserOpenRef={orderChooserOpenRef} />
-          <ChartConditionalOrderEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
+          <ChartConditionalOrderEntry chrome={chrome} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
             symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={activeTool} chooserOpenRef={orderChooserOpenRef}
             sendCommand={commands.sendCommand} sendQuery={commands.sendQuery} />
           <ChartRiskEntry chrome={chrome} panelId={config.id} active={!!active} contextKey={timeframe} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
