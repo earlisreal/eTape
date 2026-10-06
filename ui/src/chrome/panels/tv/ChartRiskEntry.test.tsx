@@ -54,26 +54,56 @@ beforeEach(() => {
     vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
 });
-it("colors selection, hides the unselected SELL preview, and edits the first BUY without completing or sending", async () => {
+it("shows a plain preview price, retains selected pills, and edits the first BUY without completing or sending", async () => {
     const {host,sendCommand,facadeRef} = mount(true);
+    fireEvent.pointerMove(host,{pointerId:1,clientX:100,clientY:200});
     initiateChartRiskEntry(template);
-    expect(facadeRef.current.setOrderCrosshair).toHaveBeenLastCalledWith(getTvChrome("light").up);
+    expect(facadeRef.current.setOrderCrosshair).toHaveBeenLastCalledWith(getTvChrome("light").up,expect.any(MouseEvent));
+    expect(host.querySelector("[data-risk-preview-price]")?.textContent).toBe("10.00");
+    expect(host.querySelector<HTMLElement>("[data-risk-chip='buy']")?.style.display).toBe("none");
     fireEvent.pointerDown(host,{pointerId:1,button:0,clientX:100,clientY:200});
     fireEvent.pointerUp(window,{pointerId:1});
     fireEvent.pointerMove(host,{pointerId:1,clientX:100,clientY:220});
     flushFrames();
-    expect(facadeRef.current.setOrderCrosshair).toHaveBeenLastCalledWith(getTvChrome("light").down);
-    expect(host.querySelector<HTMLElement>("[data-risk-sell]")?.style.display).toBe("none");
+    expect(facadeRef.current.setOrderCrosshair).toHaveBeenLastCalledWith(getTvChrome("light").down,expect.any(MouseEvent));
+    expect(host.querySelector<HTMLElement>("[data-risk-sell]")?.style.display).toBe("block");
+    expect(parseFloat(host.querySelector<HTMLElement>("[data-risk-sell]")!.style.top)).toBeCloseTo(220);
+    expect(host.querySelector("[data-risk-preview-price]")?.textContent).toBe("9.80");
+    expect(host.querySelector("[data-risk-preview-price] button")).toBeNull();
+    expect(host.querySelector<HTMLElement>("[data-risk-chip='buy']")?.style.display).toBe("flex");
     expect(host.querySelector<HTMLElement>("[data-risk-chip='sell']")?.style.display).toBe("none");
     fireEvent.pointerDown(host,{pointerId:2,button:0,clientX:100,clientY:200});
     fireEvent.pointerMove(window,{pointerId:2,clientX:100,clientY:190});
     fireEvent.pointerUp(window,{pointerId:2});
     expect(host.querySelector("[data-risk-price='buy']")?.textContent).toBe("B 10.10");
     expect(host.querySelector<HTMLElement>("[data-risk-chip='sell']")?.style.display).toBe("none");
+    expect(facadeRef.current.setOrderCrosshair).toHaveBeenLastCalledWith(null);
     fireEvent.keyDown(window,{key:"Enter"});
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry",expect.anything());
     fireEvent.keyDown(window,{key:"Escape"});
     expect(facadeRef.current.setOrderCrosshair).toHaveBeenLastCalledWith(null);
+});
+it("moves the SELL line and plain price during a captured initial drag, then restores placed controls on release", () => {
+    const {host,facadeRef,sendCommand} = mount();
+    initiateChartRiskEntry(template);
+    fireEvent.pointerDown(host,{pointerId:1,button:0,clientX:100,clientY:200});
+    for (const [y,price] of [[220,"9.80"],[230,"9.70"]] as const) {
+        fireEvent.pointerMove(window,{pointerId:1,clientX:200,clientY:y}); flushFrames();
+        expect(parseFloat(host.querySelector<HTMLElement>("[data-risk-sell]")!.style.top)).toBeCloseTo(y);
+        expect(host.querySelector("[data-risk-preview-price]")?.textContent).toBe(price);
+        expect(host.querySelector<HTMLElement>("[data-risk-chip='sell']")?.style.display).toBe("none");
+        expect(facadeRef.current.setOrderCrosshair).toHaveBeenLastCalledWith(getTvChrome("light").down,expect.objectContaining({clientY:y}));
+    }
+    fireEvent.pointerMove(window,{pointerId:1,clientX:450,clientY:230}); flushFrames();
+    expect(host.querySelector<HTMLElement>("[data-risk-preview-price]")?.style.display).toBe("none");
+    expect(host.querySelector<HTMLElement>("[data-risk-sell]")?.style.display).toBe("none");
+    expect(host.querySelector<HTMLElement>("[data-risk-chip='buy']")?.style.display).toBe("flex");
+    fireEvent.pointerMove(window,{pointerId:1,clientX:200,clientY:230}); flushFrames();
+    fireEvent.pointerUp(window,{pointerId:1});
+    expect(host.querySelector<HTMLElement>("[data-risk-preview-price]")?.style.display).toBe("none");
+    expect(host.querySelector<HTMLElement>("[data-risk-chip='sell']")?.style.display).toBe("flex");
+    expect(facadeRef.current.setOrderCrosshair).toHaveBeenLastCalledWith(null);
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry",expect.anything());
 });
 it("previews two clicks and sends one risk-sized pair on Enter", async () => {
     const { host, sendCommand } = mount();
@@ -309,6 +339,10 @@ it("drags a draft price on the axis and discards the pair from either X", async 
     const buy = host.querySelector<HTMLButtonElement>("[data-risk-price='buy']")!;
     fireEvent.pointerDown(buy,{pointerId:3,button:0,clientX:470,clientY:200});
     fireEvent.pointerMove(window,{pointerId:3,clientX:470,clientY:190});
+    flushFrames();
+    expect(host.querySelector("[data-risk-preview-price]")?.textContent).toBe("10.10");
+    expect(host.querySelector<HTMLElement>("[data-risk-preview-price]")?.style.display).toBe("block");
+    expect(host.querySelector<HTMLElement>("[data-risk-chip='buy']")?.style.display).toBe("flex");
     fireEvent.pointerUp(window,{pointerId:3,clientX:470,clientY:190});
     await waitFor(() => expect(buy.title).toContain("333 planned shares"));
     expect(buy.textContent).toBe("B 10.10");
@@ -331,6 +365,7 @@ it("uses sub-dollar order ticks and outward cushion rounding in the visible esti
     fireEvent.pointerUp(window,{pointerId:1});
     fireEvent.pointerMove(host,{pointerId:1,clientX:200,clientY:220}); flushFrames();
     expect(host.querySelector("[data-risk-readout]")?.textContent).toBe("100,000 shares · Est. risk $50.00");
+    expect(host.querySelector("[data-risk-preview-price]")?.textContent).toBe("0.9995");
     fireEvent.pointerDown(host,{pointerId:2,button:0,clientX:200,clientY:220});
     fireEvent.pointerUp(window,{pointerId:2});
     fireEvent.keyDown(window,{key:"Enter"});

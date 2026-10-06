@@ -65,7 +65,6 @@ function makeFacade(chart: IChartApi, palette: Palette, host: HTMLElement): {
 } {
   let main: ISeriesApi<"Candlestick" | "Bar" | "Line" | "Area"> | null = null;
   let volumeScale: ISeriesApi<"Histogram"> | null = null;
-  let crosshairHorizontalVisible = true;
   let sessionAttached = false;
   let watermark: { detach: () => void } | null = null;
   const session = new SessionShadingPrimitive(palette);
@@ -137,7 +136,7 @@ function makeFacade(chart: IChartApi, palette: Palette, host: HTMLElement): {
       chart.timeScale().setVisibleLogicalRange({ from: range.from as Logical, to: range.to as Logical }),
     resize: (w, h) => chart.resize(w, h),
     applyOptions: (o) => { chart.applyOptions(o as object); orderCrosshair.refresh(); },
-    setOrderCrosshair: (color) => orderCrosshair.set(color),
+    setOrderCrosshair: (color, pointer) => orderCrosshair.set(color, pointer),
     setWatermark: (text) => {
       if (watermark) { watermark.detach(); watermark = null; }
       if (text) {
@@ -155,11 +154,7 @@ function makeFacade(chart: IChartApi, palette: Palette, host: HTMLElement): {
       chart.clearCrosshairPosition();
       facade.setCrosshairHorizontalLineVisible(true);
     },
-    setCrosshairHorizontalLineVisible: (visible) => {
-      if (crosshairHorizontalVisible === visible) return;
-      crosshairHorizontalVisible = visible;
-      chart.applyOptions({ crosshair: { horzLine: { visible, labelVisible: visible } } });
-    },
+    setCrosshairHorizontalLineVisible: (visible) => orderCrosshair.setHorizontalVisible(visible),
     subscribeCrosshairMove: (cb) => {
       const handler = (param: MouseEventParams<Time>) => cb({
         logical: typeof param.logical === "number" ? param.logical : null,

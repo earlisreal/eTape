@@ -27,14 +27,20 @@ flat. Unavailable cache data is shown separately and cannot claim confirmed flat
 The engine resolves shares from its cached position only when the stop triggers;
 this is an independent stop order, not a bracket linked to an entry.
 
-Chart Order Gesture and unselected Risk Entry prices use the native crosshair
-and price label, green for BUY/COVER and red for SELL/SHORT, snapped to the
-actual order tick. Bound modifiers activate feedback without another pointer
-move. The moving duplicate line and chip are absent. Hover the chart for order
-details; blockers, immediate-trigger warnings and unknown outcomes stay visible.
+Chart Order Gestures and Risk Entry selection use an Order Preview Line, green
+for BUY/COVER and red for SELL/SHORT, at the actual snapped trigger price. Risk
+Entry also shows a read-only Preview Price Label without ×; modifier gestures
+show only the line. Bound modifiers activate feedback without another pointer
+move. The native horizontal crosshair and Native Crosshair Price Label hide
+during selection, while the vertical crosshair/time label keep normal styling
+and follow captured risk drags. Placement or edit completion restores the normal
+crosshair. Hover the chart for order details; blockers, immediate-trigger warnings
+and unknown outcomes stay visible.
 Escape consumes the current modifier press; release modifiers to rearm.
 
-Selected risk draft prices and working orders retain compact right-axis chips.
+Selected risk draft prices and working orders retain compact right-axis Order
+Price Pills. Risk preview labels share the existing axis spacing so they stay
+clear of placed pills, while lines remain at actual trigger prices.
 Risk Entry additionally shows a centered vertical red arrow from BUY to the
 candidate protective SELL, without a filled or outlined rectangle. Beside the
 arrow, whole shares and estimated dollar risk update on mouse movement before

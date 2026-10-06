@@ -28,14 +28,22 @@ Drag a working price or use its arrow keys to adjust; × keeps the existing canc
 target. The overlay follows the execution store; market ticks stay outside React
 state. Engine-held orders expose local custody in the tooltip before triggering
 and become venue LIMITs only after a fresh eligible print. Chart Order Gestures
-retain modifier-click submission; their hoverable chip's × discards the preview
-until the modifier is released. Blockers and uncertain outcomes remain visible.
+retain modifier-click submission. Holding a bound modifier shows a side-colored
+Order Preview Line without a price label or pill; clicking restores the normal
+crosshair and uses the existing submitted Order Price Pill. Escape discards the
+preview until modifiers are released. Selection hides the native horizontal
+crosshair and Native Crosshair Price Label, while vertical/time feedback stays
+normal. Blockers and uncertain outcomes remain visible.
 
 Settings → Orders & hotkeys → Add → Chart Risk Entry creates a risk preset and
 hotkey. Focus a grouped chart, press the hotkey, then click the buy trigger and
 sell stop or drag between them. Only brief setup instructions and actionable
 warnings float over the bottom Volume area. The two axis chips expose planned
 shares, execution limits, custody, expiry and Enter/Escape shortcuts on hover.
+A green BUY or red SELL Order Preview Line follows the proposed risk trigger,
+with a read-only Preview Price Label and no × action. Selected draft endpoints
+retain their Order Price Pills, including while another price is being selected
+or edited. Fixing the pair or finishing an edit restores the normal crosshair.
 A centered red arrow connects the BUY and protective SELL trigger levels without
 a shaded rectangle. Whole shares and estimated dollar risk update beside it as
 SELL follows the mouse and remain through draft review and edits. The estimate

@@ -21,6 +21,24 @@ try {
   await page.waitForFunction(() => window.repro?.ready);
   await page.waitForTimeout(100);
   const measure = () => page.evaluate(() => window.repro.measure(280));
+  const measureCrosshair = target => target.evaluate(async () => {
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const row = document.querySelector(".tv-lightweight-charts table").rows[0];
+    const canvases = [...row.querySelectorAll("canvas")];
+    const width = Math.max(...canvases.map(canvas => canvas.width));
+    const canvas = canvases.findLast(canvas => canvas.width === width);
+    const { data } = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height);
+    const columns = new Array(canvas.width).fill(0);
+    let maxRow = 0;
+    for (let y = 0; y < canvas.height; y++) {
+      let count = 0;
+      for (let x = 0; x < canvas.width; x++) if (data[(y * canvas.width + x) * 4 + 3]) { count++; columns[x]++; }
+      maxRow = Math.max(maxRow, count);
+    }
+    const maxColumn = Math.max(...columns), box = canvas.getBoundingClientRect();
+    return { horizontal: maxRow > canvas.width / 3,
+      verticalX: maxColumn > canvas.height / 5 ? box.left + columns.indexOf(maxColumn) * box.width / canvas.width : null };
+  });
   const states = [await measure()];
 
   await page.evaluate(() => window.repro.setZoom({ from: 10, to: 70 }));
@@ -37,13 +55,16 @@ try {
     await page.mouse.move(350, 280);
     await page.waitForFunction(() => document.querySelector('[data-testid="chart-order-entry-preview"]').style.opacity === "1");
     const preview = await measure();
-    assert.equal(await page.locator("[data-entry-line],[data-entry-chip]").count(),0,"Selection must use the native crosshair without duplicate previews");
+    assert.equal(await page.locator("[data-entry-line]").count(),1,"Modifier selection must show its own horizontal preview line");
+    assert.equal(await page.locator("[data-entry-chip]").count(),0,"Modifier selection must have no preview price pill");
     assert((await page.getByTestId("chart-host").getAttribute("title")).includes("1 shares"),"Hover must expose order details");
     assert.equal(await page.getByTestId("chart-host").getAttribute("data-order-cursor-color"),"#089981");
-    assert.equal(await page.evaluate(() => window.repro.crosshairOptions().horzLine.color),"#089981");
-    assert.equal(await page.evaluate(() => window.repro.crosshairOptions().horzLine.labelBackgroundColor),"#089981");
+    assert.equal(await page.evaluate(() => window.repro.crosshairOptions().horzLine.visible),false);
+    assert.equal(await page.evaluate(() => window.repro.crosshairOptions().horzLine.labelVisible),false);
+    assert.equal(await page.evaluate(() => window.repro.crosshairOptions().vertLine.color),"#787B86");
     if (cycle === 0) await page.waitForTimeout(350); // Let the 250ms route preview expire before clicking.
     await page.mouse.click(350, 280);
+    assert.equal(await page.evaluate(() => window.repro.crosshairOptions().horzLine.visible),true,"Placement must restore the horizontal crosshair before modifier release");
     await page.keyboard.up("Shift");
     await page.locator("[data-order-group]").waitFor({ state: "attached" });
     const submitted = await measure();
@@ -221,6 +242,7 @@ try {
     const box = bar.getBoundingClientRect(), paneBox = pane.getBoundingClientRect(), style = getComputedStyle(bar);
     const readout = host.querySelector("[data-risk-readout]"), readoutBox = readout.getBoundingClientRect(), readoutStyle = getComputedStyle(readout);
     const arrow = host.querySelector("[data-risk-arrow]"), arrowPath = arrow.querySelector("path");
+    const label = host.querySelector("[data-risk-preview-price]"), labelBox = label.getBoundingClientRect();
     const coordinates = (arrowPath.getAttribute("d") ?? "").split(" ");
     return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, height: box.height,
       paneTop: paneBox.top, paneBottom: paneBox.bottom, hostBottom: host.getBoundingClientRect().bottom,hostRight:host.getBoundingClientRect().right,
@@ -231,6 +253,8 @@ try {
         background:readoutStyle.backgroundColor,border:readoutStyle.borderTopWidth,pointerEvents:readoutStyle.pointerEvents},
       arrow:{visible:getComputedStyle(arrow).display !== "none",x:Number(coordinates[1]),fromY:Number(coordinates[2]),toY:Number(coordinates[4]),fill:arrowPath.getAttribute("fill"),rectangles:arrow.querySelectorAll("rect").length},
       lineYs:["buy","sell"].map(side=>parseFloat(host.querySelector(`[data-risk-${side}]`).style.top)),
+      label:{visible:getComputedStyle(label).display !== "none",text:label.textContent,color:getComputedStyle(label).color,
+        top:labelBox.top,bottom:labelBox.bottom,right:labelBox.right,buttons:label.querySelectorAll("button").length},
       chips:[...host.querySelectorAll("[data-risk-chip]")].filter(chip => getComputedStyle(chip).display !== "none").map(chip => {
         const box = chip.getBoundingClientRect(), button = chip.querySelector("[data-risk-price]");
         return {top:box.top,bottom:box.bottom,right:box.right,text:button.innerText,title:button.title,color:getComputedStyle(chip).color};
@@ -256,6 +280,11 @@ try {
       if (risk.chips.length === 2) assert(Math.abs(risk.arrow.toY - risk.lineYs[1]) <= 1, "Risk arrow must end at the actual SELL trigger, independently of spaced chips");
     }
     assert(risk.chips.every(chip => Math.abs(chip.right - risk.hostRight) <= 1), "Risk chips must align with the price axis");
+    if (risk.label.visible) {
+      assert(Math.abs(risk.label.right - risk.hostRight) <= 1 && risk.label.top >= risk.paneTop && risk.label.bottom <= risk.paneBottom,
+        "The plain preview price must stay on the axis inside the main pane");
+      assert(risk.chips.every(chip => risk.label.bottom <= chip.top || risk.label.top >= chip.bottom), "Preview prices and placed pills must not overlap");
+    }
     const geometry = await measureProduction();
     assert(geometry.nativeOffset === 0 && geometry.axisClippedPx === 0 && geometry.panelAxisClippedPx === 0,
       "Risk setup must preserve the native chart origin and full time axis");
@@ -265,24 +294,40 @@ try {
   for (const theme of ["light", "dark"]) {
     await productionPage.evaluate(theme => window.chartPanelProbe.setTheme(theme), theme);
     await productionPage.waitForFunction(theme => document.documentElement.dataset.theme === theme, theme);
+    await productionPage.mouse.move(cursor.x, hostBox.y + hostBox.height * 0.30);
     assert(await productionPage.evaluate(() => window.chartPanelProbe.startRisk()), "Risk setup must start in the active chart");
     await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "visible" });
     const setup = await checkRisk();
     assert(setup.height <= 28, "Wide-chart setup should use two compact rows");
     assert.equal(setup.color, theme === "light" ? "rgb(19, 23, 34)" : "rgb(209, 212, 220)", "Risk text must follow the chart theme");
-    await productionPage.mouse.click(cursor.x, hostBox.y + hostBox.height * 0.30);
+    assert(setup.label.visible && setup.label.buttons === 0 && setup.chips.length === 0,"Initial BUY must have a plain price label and no placed pill");
+    assert.equal(setup.label.color,"rgb(8, 153, 129)");
+    if (theme === "dark") await productionPage.mouse.down();
+    else await productionPage.mouse.click(cursor.x, hostBox.y + hostBox.height * 0.30);
     await productionPage.mouse.move(cursor.x + 40, hostBox.y + hostBox.height * 0.50);
     await productionPage.waitForFunction(() => document.querySelector("[data-risk-readout]").innerText.includes("shares · Est. risk $"));
     const moving = await checkRisk();
     assert.equal(moving.chips.length,1,"Live risk sizing must appear before selecting SELL");
+    assert(moving.label.visible && moving.label.buttons === 0 && moving.label.color === "rgb(242, 54, 69)","SELL must preview a plain red price while retaining the selected BUY pill");
+    assert(Math.abs(moving.lineYs[1] - hostBox.height * 0.50) <= 3,"The moving SELL line must follow its snapped trigger during both placement gestures");
+    const crosshair = await measureCrosshair(productionPage);
+    assert(!crosshair.horizontal,"Risk selection must hide the native horizontal crosshair");
+    assert(Math.abs(crosshair.verticalX - cursor.x - 40) <= 2,"The native vertical crosshair must follow captured risk pointer moves");
+    if (theme === "dark") await productionPage.screenshot({path:path.resolve(root,"../.report/chart-risk-entry-drag-preview.png")});
     assert(Math.abs(moving.arrow.x - (cursor.x - hostBox.x + 20)) <= 1,"Risk arrow must be centered between the BUY and candidate SELL X positions");
     await productionPage.mouse.move(cursor.x + 40, hostBox.y + hostBox.height * 0.60);
     await productionPage.waitForFunction(previous => document.querySelector("[data-risk-readout]").innerText !== previous,moving.readout.text);
     await productionPage.mouse.move(hostBox.x + hostBox.width - 5, hostBox.y + hostBox.height * 0.60);
     await productionPage.waitForFunction(() => document.querySelector("[data-risk-readout]").style.display === "none");
-    await productionPage.mouse.click(cursor.x + 40, hostBox.y + hostBox.height * 0.50);
+    assert.equal((await measureRisk()).label.visible,false,"The moving price label must hide outside the price pane");
+    if (theme === "dark") {
+      await productionPage.mouse.move(cursor.x + 40, hostBox.y + hostBox.height * 0.50);
+      await productionPage.mouse.up();
+    } else await productionPage.mouse.click(cursor.x + 40, hostBox.y + hostBox.height * 0.50);
     await productionPage.waitForFunction(() => document.querySelector("[data-risk-price='buy']").title.includes("planned shares"));
     const preview = await checkRisk();
+    assert.equal(preview.label.visible,false,"Placed risk prices must use their pills instead of the plain preview label");
+    assert((await measureCrosshair(productionPage)).horizontal,"Completing the risk pair must restore the native horizontal crosshair");
     assert(preview.readout.visible && preview.arrow.toY > preview.arrow.fromY,"Completed draft must retain its downward protective-SELL arrow and readout");
     assert.equal(preview.readout.color,setup.color,"Live risk text must follow the chart theme");
     assert(preview.chips.length === 2 && preview.chips[0].title.includes("BUY STOP-LIMIT") && preview.chips[1].title.includes("SELL STOP-LIMIT"), "Both compact risk chips must expose order details on hover");

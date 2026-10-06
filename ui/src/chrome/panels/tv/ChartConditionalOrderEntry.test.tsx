@@ -58,7 +58,7 @@ beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.restoreAllMock
 });
 
 describe("ChartConditionalOrderEntry", () => {
-  it("colors the native crosshair on modifier press without another move and cancels until rearmed", async () => {
+  it("previews a colored line without a price pill on modifier press and cancels until rearmed", async () => {
     focusChart();
     const {host,sendCommand,facadeRef} = mount("paper",config,{...route,lastEligiblePrice:99});
     const setColor = vi.fn();
@@ -67,10 +67,12 @@ describe("ChartConditionalOrderEntry", () => {
     fireEvent.keyDown(window,{key:"Shift",shiftKey:true});
     const preview = screen.getByTestId("chart-order-entry-preview");
     await waitFor(() => expect(preview.style.opacity).toBe("1"));
-    expect(preview.querySelector("[data-entry-line],[data-entry-chip]")).toBeNull();
+    expect(preview.querySelector<HTMLElement>("[data-entry-line]")?.style.top).toBe("200px");
+    expect(preview.querySelector<HTMLElement>("[data-entry-line]")?.style.right).toBe("60px");
+    expect(preview.querySelector("[data-entry-chip],button")).toBeNull();
     expect(host.title).toContain("1 shares\nBUY STOP-LIMIT · limit 100.00");
     expect(host.dataset.orderCursorPrice).toBe("100");
-    expect(setColor).toHaveBeenLastCalledWith(getTvChrome("light").up);
+    expect(setColor).toHaveBeenLastCalledWith(getTvChrome("light").up, expect.any(MouseEvent));
     fireEvent.keyDown(window,{key:"Escape",shiftKey:true});
     expect(setColor).toHaveBeenLastCalledWith(null);
     await placeClick(host);

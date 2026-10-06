@@ -1,6 +1,9 @@
 # Chart order preview lines and price labels
 
-Status: approved — Earl confirmed the complete design on 2026-10-07. Implementation pending.
+Status: implemented on 2026-10-07 after Earl approved the complete design.
+
+Execution: [plan](../../docs/plans/2026-10-07-chart-order-preview.md) and
+[validation](validation.md).
 
 ## Vocabulary
 

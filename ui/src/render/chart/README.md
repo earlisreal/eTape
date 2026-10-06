@@ -107,9 +107,12 @@ No-Trade Bars and Volume-Only Bars are eligible; Data Gaps and empty Future
 Buffer positions are not. Cursor movement stays outside React state and legend
 work remains frame-coalesced.
 
-`orderCrosshair.ts` temporarily colors the native crosshair for chart order
-selection and snaps native mouse Y to the order tick while preserving pointer
-X, including future blank space. It restores normal formatting and theme on
-release/cancellation; action colors are local and are not sent through Crosshair
-Sync. Full-line order hit testing uses `nearestPriceLines` with an eight-pixel
+`orderCrosshair.ts` hides native horizontal feedback while risk/gesture overlays
+paint their Order Preview Lines. Its setter accepts the current pointer event
+so captured Risk Entry input still moves the normal vertical crosshair/time
+label, including future blank space. Horizontal suppression composes with
+Crosshair Sync visibility requests and restores on placement/cancellation.
+Working-order drags retain native side coloring and order-tick snapping; normal
+formatting/theme return on release. Action colors remain local to the active
+chart. Full-line order hit testing uses `nearestPriceLines` with an eight-pixel
 tolerance and returns all exact nearest ties for explicit selection.
