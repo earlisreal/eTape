@@ -231,6 +231,22 @@ _Avoid_: Price offset, slippage
 An exact keyboard-modifier and primary-click binding that invokes one Stop-Limit or Limit-if-Touched Action Template, using the clicked chart price as its trigger. One modifier press can create at most one order.
 _Avoid_: Click trading, modifier click
 
+**Native Crosshair Price Label**:
+The chart's price-axis label for its horizontal crosshair position, independent of order selection.
+_Avoid_: Preview price label, order price pill
+
+**Order Preview Line**:
+A temporary buy- or sell-colored horizontal guide at the prospective trigger price during Chart Order Gesture or Chart Risk Entry price selection or adjustment.
+_Avoid_: Horizontal crosshair, placed order line
+
+**Preview Price Label**:
+A read-only price-axis label for the prospective Chart Risk Entry trigger price, colored to match its Order Preview Line and without a × action.
+_Avoid_: Native crosshair price label, price pill
+
+**Order Price Pill**:
+The side-and-price control on the chart's price axis for a selected Chart Risk Entry draft endpoint or an existing order, with a × action scoped to that draft or order.
+_Avoid_: Preview price label, chip
+
 **Action Template**:
 A trader-authored saved recipe for placing or managing an order, available through a hotkey, Deck Button, and/or Chart Order Gesture.
 _Avoid_: Macro, preset action
