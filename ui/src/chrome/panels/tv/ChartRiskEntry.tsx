@@ -24,6 +24,7 @@ interface Props {
     configLoaded: boolean;
     activeTool: Tool;
     chooserOpenRef: MutableRefObject<boolean>;
+    layoutRef: MutableRefObject<() => void>;
     sendCommand(name: string, args: unknown): Promise<AckMsg>;
     sendQuery(name: string, args: unknown): Promise<unknown>;
 }
@@ -31,6 +32,8 @@ type Draft = {
     template: RiskEntryTemplate;
     buy?: number;
     sell?: number;
+    buyX?: number;
+    sellX?: number;
     complete: boolean;
     busy: boolean;
     unknown: boolean;
@@ -88,9 +91,21 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             const a = latest.current.stores.exec.accounts().find(a => a.venue === venue);
             return draft && riskEntrySize(draft.template, draft.buy ?? 0, draft.sell ?? 0, a?.availableCash ?? 0, a?.buyingPower ?? 0);
         };
+        const sizingError = () => {
+            const a = latest.current.stores.exec.accounts().find(a => a.venue === venue);
+            if (!a || a.tsMs <= 0 || Date.now() - a.tsMs > 30000 || a.tsMs > Date.now() + 1000)
+                return "Fresh account data required.";
+            if (!draft) return "";
+            if (!Number.isFinite(draft.template.value) || draft.template.value <= 0 || (draft.template.mode !== "Dollar" && draft.template.value > 100))
+                return "Positive risk value required (percentages at most 100).";
+            if (draft.buy !== undefined && draft.sell !== undefined) {
+                if (draft.sell >= draft.buy) return "Sell trigger must be below buy trigger.";
+                if (!size()?.qty || (draft.complete && !draft.maxQty)) return "Risk or funding budget rounds to zero shares.";
+            }
+            return "";
+        };
         const invalid = () => {
             const p = latest.current, status = p.stores.exec.status(), v = status?.venues.find(v => v.venue === venue);
-            const a = p.stores.exec.accounts().find(a => a.venue === venue);
             if (!p.active || !document.hasFocus() || modalTracker.isOpen() || editable())
                 return "Focus the chart to continue.";
             if (!status?.masterArmed)
@@ -99,8 +114,8 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return "Venue or position data unavailable; reconcile first.";
             if (v.env === "live" && !v.heldStopLimitAcknowledged)
                 return "Review / enable live accounts in Settings → Orders & hotkeys.";
-            if (!a || a.tsMs <= 0 || Date.now() - a.tsMs > 30000 || a.tsMs > Date.now() + 1000)
-                return "Fresh account data required.";
+            const sizing = sizingError();
+            if (sizing) return sizing;
             if (p.stores.exec.positions().some(pos => pos.venue === venue && pos.symbol === p.symbol && pos.qty !== 0))
                 return "Risk entry requires a flat symbol.";
             if (p.stores.exec.workingOrdersFor(p.symbol, venue).length)
@@ -111,12 +126,6 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return draft.route.reason;
             if (!draft.route.hasTrustedEligiblePrint || !draft.route.lastEligibleTsMs || Date.now() - draft.route.lastEligibleTsMs > 2000)
                 return "Fresh eligible market data required.";
-            if (!Number.isFinite(draft.template.value) || draft.template.value <= 0 || (draft.template.mode !== "Dollar" && draft.template.value > 100))
-                return "Positive risk value required (percentages at most 100).";
-            if (draft.buy !== undefined && draft.sell !== undefined && draft.sell >= draft.buy)
-                return "Sell trigger must be below buy trigger.";
-            if (draft.complete && !size()?.qty)
-                return "Risk or funding budget rounds to zero shares.";
             return "";
         };
         const paint = () => {
@@ -131,6 +140,32 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 bar.style.right = `${(facade?.priceScaleWidth() ?? 60) + 8}px`;
             }
             const s = size(), error = invalid();
+            const qty = s ? draft.complete ? Math.min(draft.maxQty, s.qty) : s.qty : 0;
+            const paneHeight = facade?.paneHeights()[0] ?? host.clientHeight;
+            const plotWidth = Math.max(0, host.getBoundingClientRect().width - (facade?.priceScaleWidth() ?? 60));
+            const buyY = draft.buy === undefined ? null : facade?.priceToCoordinate(draft.buy);
+            const sellY = draft.sell === undefined ? null : facade?.priceToCoordinate(draft.sell);
+            const visible = buyY != null && sellY != null && Number.isFinite(buyY) && Number.isFinite(sellY)
+                && buyY >= 0 && sellY >= 0 && buyY < paneHeight && sellY < paneHeight
+                && draft.buyX !== undefined && draft.sellX !== undefined
+                && (draft.complete || (hover && priceAt(hover) != null));
+            const arrow = rootRef.current.querySelector<SVGSVGElement>("[data-risk-arrow]");
+            const readout = rootRef.current.querySelector<HTMLElement>("[data-risk-readout]");
+            if (arrow) arrow.style.display = visible ? "block" : "none";
+            if (readout) readout.style.display = visible ? "block" : "none";
+            if (visible && arrow && readout) {
+                const x = Math.max(4, Math.min(plotWidth - 4, (draft.buyX! + draft.sellX!) / 2));
+                const direction = sellY >= buyY ? 1 : -1;
+                const headY = sellY - direction * Math.min(6, Math.abs(sellY - buyY));
+                arrow.style.width = `${plotWidth}px`;
+                arrow.style.height = `${paneHeight}px`;
+                arrow.querySelector("path")?.setAttribute("d", `M ${x} ${buyY} V ${sellY} M ${x - 4} ${headY} L ${x} ${sellY} L ${x + 4} ${headY}`);
+                readout.textContent = sizingError() || !s ? "— shares · Est. risk —" :
+                    `${qty.toLocaleString("en-US")} shares · Est. risk ${(s.qty ? s.risk * qty / s.qty : 0).toLocaleString("en-US", { style: "currency", currency: "USD" })}`;
+                readout.style.maxWidth = `${Math.max(0, plotWidth - 16)}px`;
+                readout.style.left = `${Math.max(4, Math.min(x + 10, plotWidth - readout.offsetWidth - 12))}px`;
+                readout.style.top = `${Math.max(4, Math.min((buyY + sellY) / 2 - readout.offsetHeight / 2, paneHeight - readout.offsetHeight - 4))}px`;
+            }
             const deadline = draft.route?.deadlineMs ? new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(draft.route.deadlineMs) : "checking";
             const endpoints = (["buy", "sell"] as const).filter(endpoint => draft![endpoint] !== undefined && (endpoint === "buy" || draft!.complete));
             const chipYs = orderMarkerChipYs(endpoints.map(endpoint => facade?.priceToCoordinate(draft![endpoint]!) ?? -10000), facade?.paneHeights()[0] ?? host.clientHeight);
@@ -150,7 +185,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     if (button && price !== undefined) {
                         button.textContent = `${endpoint === "buy" ? "B" : "S"} ${price.toFixed(price < 1 ? 4 : 2)}`;
                         const limit = endpoint === "buy" ? s?.buyLimit : s?.sellLimit;
-                        button.title = `${draft.complete ? `${s?.qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${endpoint === "buy" ? "BUY" : "SELL"} STOP-LIMIT · limit ${limit?.toFixed(limit < 1 ? 4 : 2) ?? "pending"}\nHeld by eTape · DAY ${deadline} · fees/execution risk excluded\n${draft.busy || draft.unknown ? "" : "Enter send · "}Esc cancel`;
+                        button.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${endpoint === "buy" ? "BUY" : "SELL"} STOP-LIMIT · limit ${limit?.toFixed(limit < 1 ? 4 : 2) ?? "pending"}\nHeld by eTape · DAY ${deadline} · fees/execution risk excluded\n${draft.busy || draft.unknown ? "" : "Enter send · "}Esc cancel`;
                         button.setAttribute("aria-label", `${endpoint === "buy" ? "Buy" : "Sell"} trigger ${price.toFixed(price < 1 ? 4 : 2)}; drag or use arrow keys to adjust`);
                         button.disabled = draft.busy || draft.unknown;
                     }
@@ -166,7 +201,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 if (endpoint) {
                     const candidate = pointer ? draft[endpoint] : hover && priceAt(hover);
                     const limit = endpoint === "buy" ? s?.buyLimit : s?.sellLimit;
-                    host.title = `${draft.complete ? `${s?.qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${endpoint === "buy" ? "BUY" : "SELL"} STOP-LIMIT · trigger ${candidate ?? "pending"} · limit ${limit ?? "pending"}\nHeld by eTape · DAY ${deadline}\n${venue} · fees/execution risk excluded\nEsc cancel`;
+                    host.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${endpoint === "buy" ? "BUY" : "SELL"} STOP-LIMIT · trigger ${candidate ?? "pending"} · limit ${limit ?? "pending"}\nHeld by eTape · DAY ${deadline}\n${venue} · fees/execution risk excluded\nEsc cancel`;
                 }
             }
             const status = rootRef.current.querySelector<HTMLElement>("[data-risk-status]");
@@ -304,9 +339,13 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             else if (draft.buy === undefined) {
                 endpoint = "buy";
                 draft.buy = price;
+                draft.buyX = e.clientX - host.getBoundingClientRect().left;
             }
-            else
+            else {
                 draft.sell = price;
+                draft.sellX = e.clientX - host.getBoundingClientRect().left;
+            }
+            hover = e;
             pointer = { id: e.pointerId, x: e.clientX, y: e.clientY, endpoint, moved: false, second: !editing && endpoint === "sell", axis: editing, price: editing ? draft[endpoint]! : price, editing };
             paint();
         };
@@ -316,21 +355,25 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (pointer && e.pointerId !== pointer.id)
                 return;
             hover = e;
-            if (!pointer && (e.target as Element)?.closest?.("[data-drawing-ui],button,input,select,textarea")) { cursor(null); return; }
+            if (!pointer && (e.target as Element)?.closest?.("[data-drawing-ui],button,input,select,textarea")) { hover = null; cursor(null); schedule(); return; }
             const facade = latest.current.facadeRef.current;
             const raw = pointer?.axis ? facade?.coordinateToPrice((facade.priceToCoordinate(pointer.price) ?? pointer.y - host.getBoundingClientRect().top) + e.clientY - pointer.y) : priceAt(e);
             const price = raw != null && Number.isFinite(raw) && raw > 0 ? snapOrderMarkerPrice(raw) : null;
-            if (price == null) { cursor(null); return; }
+            if (price == null) { cursor(null); schedule(); return; }
             if (pointer) {
                 consume(e);
                 if (Math.hypot(e.clientX - pointer.x, e.clientY - pointer.y) >= 3)
                     pointer.moved = true;
                 const endpoint = pointer.endpoint === "buy" && !draft.complete && !pointer.editing ? "sell" : pointer.endpoint;
-                if (pointer.moved)
+                if (pointer.moved) {
                     draft[endpoint] = price;
+                    if (!pointer.editing) draft.sellX = e.clientX - host.getBoundingClientRect().left;
+                }
             }
-            else if (draft.buy !== undefined && !draft.complete)
+            else if (draft.buy !== undefined && !draft.complete) {
                 draft.sell = price;
+                draft.sellX = e.clientX - host.getBoundingClientRect().left;
+            }
             if (!pointer) {
                 const hits = nearestPriceLines((["buy", "sell"] as const).filter(endpoint => draft![endpoint] !== undefined && (endpoint === "buy" || draft!.complete)).map(endpoint => ({ price: draft![endpoint]! })),
                     e.clientY - host.getBoundingClientRect().top, p => facade?.priceToCoordinate(p) ?? null);
@@ -382,8 +425,10 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             }
         };
         const click = (e: MouseEvent) => { if ((e.target as Element)?.closest?.("[data-risk-cancel]")) clear(); };
+        const leave = () => { hover = null; cursor(null); schedule(); };
         window.addEventListener(CHART_RISK_ENTRY_EVENT, initiate);
         host.addEventListener("pointerdown", down, true);
+        host.addEventListener("pointerleave", leave);
         window.addEventListener("pointermove", move, true);
         window.addEventListener("pointerup", up, true);
         window.addEventListener("keydown", key, true);
@@ -392,11 +437,13 @@ export function ChartRiskEntry(props: Props): JSX.Element {
         rootRef.current?.addEventListener("click", click);
         const resize = new ResizeObserver(schedule);
         resize.observe(host);
+        props.layoutRef.current = paint;
         const unsubscribe = latest.current.stores.exec.subscribe(schedule);
         const timer = setInterval(() => { if (draft)
             paint(); }, 1000);
         return () => {
             clear();
+            if (props.layoutRef.current === paint) props.layoutRef.current = () => {};
             if (frame !== null)
                 cancelAnimationFrame(frame);
             clearInterval(timer);
@@ -404,6 +451,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             unsubscribe();
             window.removeEventListener(CHART_RISK_ENTRY_EVENT, initiate);
             host.removeEventListener("pointerdown", down, true);
+            host.removeEventListener("pointerleave", leave);
             window.removeEventListener("pointermove", move, true);
             window.removeEventListener("pointerup", up, true);
             window.removeEventListener("keydown", key, true);
@@ -411,10 +459,14 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             window.removeEventListener("pointercancel", clear);
             rootRef.current?.removeEventListener("click", click);
         };
-    }, [props.active, props.group, props.symbol, props.contextKey, props.activeTool, props.config.templates, venue]);
+    }, [props.active, props.group, props.symbol, props.contextKey, props.activeTool, props.config.templates, props.layoutRef, venue]);
     return <div ref={rootRef} data-testid="chart-risk-entry" style={{ display: "none", position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none" }}>
     <div data-risk-buy style={{ position: "absolute", left: 0, borderTop: `2px dashed ${props.chrome.up}` }}/>
     <div data-risk-sell style={{ position: "absolute", left: 0, borderTop: `2px dashed ${props.chrome.down}` }}/>
+    <svg data-risk-arrow aria-hidden="true" style={{ display: "none", position: "absolute", left: 0, top: 0, overflow: "hidden", pointerEvents: "none" }}>
+      <path fill="none" stroke={props.chrome.down} strokeWidth={1.5} />
+    </svg>
+    <div data-risk-readout style={{ display: "none", position: "absolute", color: props.chrome.text, fontFamily: TV_FONT, fontSize: 12, lineHeight: "16px", textShadow: `0 0 2px ${props.chrome.bg}, 0 0 4px ${props.chrome.bg}`, pointerEvents: "none", overflowWrap: "anywhere" }} />
     <div data-risk-chooser role="dialog" aria-label="Choose draft price" style={{ display:"none",position:"absolute",right:70,pointerEvents:"auto",background:props.chrome.bg,border:`1px solid ${props.chrome.muted}`,padding:4,gap:4 }}>
       <button type="button" data-risk-choice="buy">BUY</button><button type="button" data-risk-choice="sell">SELL</button>
     </div>

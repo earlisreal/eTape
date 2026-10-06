@@ -35,8 +35,14 @@ Settings → Orders & hotkeys → Add → Chart Risk Entry creates a risk preset
 hotkey. Focus a grouped chart, press the hotkey, then click the buy trigger and
 sell stop or drag between them. Only brief setup instructions and actionable
 warnings float over the bottom Volume area. The two axis chips expose planned
-shares, execution limits, custody, expiry and Enter/Escape shortcuts on hover;
-risk amounts and notional stay hidden. Drag either endpoint or its axis chip to
+shares, execution limits, custody, expiry and Enter/Escape shortcuts on hover.
+A centered red arrow connects the BUY and protective SELL trigger levels without
+a shaded rectangle. Whole shares and estimated dollar risk update beside it as
+SELL follows the mouse and remain through draft review and edits. The estimate
+uses cushion-adjusted limits, funding constraints and the completed preview's
+submission quantity cap; invalid or stale sizing shows a placeholder and blocker.
+The readout stays inside the main price pane, follows price-scale changes and
+passes pointer input through. Notional stays hidden. Drag either endpoint or its axis chip to
 adjust; Enter submits and Escape or either draft × discards the entire setup.
 Right-click, focus loss and context changes cancel.
 The global auto-send setting defaults off and applies only to initial setup.

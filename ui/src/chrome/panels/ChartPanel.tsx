@@ -284,6 +284,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const refreshSelRef = useRef<() => void>(() => {});
   const facadeRef = useRef<ChartApiFacade | null>(null);
   const orderMarkerLayoutRef = useRef<() => void>(() => {});
+  const riskEntryLayoutRef = useRef<() => void>(() => {});
   const orderChooserOpenRef = useRef(false);
   const drawingsPrimRef = useRef<DrawingsPrimitive | null>(null);
   const visibleExtremaPrimRef = useRef<VisibleExtremaPrimitive | null>(null);
@@ -910,6 +911,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         setLastPriceTag((prev) =>
           prev === next || (prev && next && prev.y === next.y && prev.up === next.up && prev.price === next.price) ? prev : next);
         orderMarkerLayoutRef.current();
+        riskEntryLayoutRef.current();
       },
     });
 
@@ -1284,7 +1286,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
             symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={activeTool} chooserOpenRef={orderChooserOpenRef}
             sendCommand={commands.sendCommand} sendQuery={commands.sendQuery} />
           <ChartRiskEntry chrome={chrome} panelId={config.id} active={!!active} contextKey={timeframe} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
-            symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={activeTool} chooserOpenRef={orderChooserOpenRef}
+            symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={activeTool} chooserOpenRef={orderChooserOpenRef} layoutRef={riskEntryLayoutRef}
             sendCommand={commands.sendCommand} sendQuery={commands.sendQuery} />
           {selection && (
             <TVFloatingToolbar key={selection.id} chrome={chrome} kind={selection.kind} rect={selection.rect} color={selection.color} width={selection.width} lineStyle={selection.lineStyle}

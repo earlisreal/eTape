@@ -8,7 +8,7 @@ import { getTvChrome } from "../../../render/chart/tvTheme";
 import { initiateChartRiskEntry, type RiskEntryTemplate } from "../../exec/actionTemplate";
 import { ChartRiskEntry } from "./ChartRiskEntry";
 const template: RiskEntryTemplate = { kind: "risk", id: "r", label: "Risk", mode: "Dollar", value: 100, buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } };
-function mount(auto = false) {
+function mount(auto = false, preset = template) {
     const stores = makeStores();
     stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: true, venues: [{ venue: "sim", broker: "sim", connected: true, positionDataReady: true }] } });
     stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { venue: "sim", buyingPower: 100000, availableCash: 100000, tsMs: Date.now() } });
@@ -20,17 +20,26 @@ function mount(auto = false) {
     const facadeRef = { current: { setOrderCrosshair: vi.fn(), priceScaleWidth: () => 60, paneHeights: () => [400], coordinateToPrice: (y: number) => 12 - y / 100, priceToCoordinate: (p: number) => (12 - p) * 100 } as unknown as ChartApiFacade };
     const sendCommand = vi.fn(async (name: string, args: unknown) => { void name; void args; return { kind: "ack" as const, corrId: "1", status: "accepted" as const, orderId: "E1" }; });
     const sendQuery = vi.fn(async () => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "RTH", deadlineMs: Date.now() + 100000, hasTrustedEligiblePrint: true, lastEligiblePrice: 9, lastEligibleTsMs: Date.now() }));
-    const result = render(<ChartRiskEntry chrome={getTvChrome("light")} panelId="chart" active group="green" symbol="AAPL" contextKey="1m" hostRef={{ current: host }} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} config={{ activeVenue: "sim", templates: [template], chartRiskAutoSend: auto }} configLoaded activeTool="select" chooserOpenRef={{ current: false }} sendCommand={sendCommand} sendQuery={sendQuery}/>, { container: host });
+    const layoutRef = { current: () => {} };
+    const result = render(<ChartRiskEntry chrome={getTvChrome("light")} panelId="chart" active group="green" symbol="AAPL" contextKey="1m" hostRef={{ current: host }} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} config={{ activeVenue: "sim", templates: [preset], chartRiskAutoSend: auto }} configLoaded activeTool="select" chooserOpenRef={{ current: false }} layoutRef={layoutRef} sendCommand={sendCommand} sendQuery={sendQuery}/>, { container: host });
     sendCommand.mockClear();
-    return { ...result, host, sendCommand, sendQuery, facadeRef };
+    return { ...result, host, sendCommand, sendQuery, facadeRef, layoutRef, stores };
+}
+let frames: Map<number, FrameRequestCallback>;
+function flushFrames() {
+    const pending = [...frames.values()];
+    frames.clear();
+    pending.forEach(cb => cb(0));
 }
 beforeEach(() => {
     cleanup();
     document.body.replaceChildren();
     vi.restoreAllMocks();
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 0; });
-    vi.stubGlobal("cancelAnimationFrame", () => { });
+    frames = new Map();
+    let frameId = 0;
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { frames.set(++frameId, cb); return frameId; });
+    vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
 });
 it("colors selection, hides the unselected SELL preview, and edits the first BUY without completing or sending", async () => {
@@ -40,6 +49,7 @@ it("colors selection, hides the unselected SELL preview, and edits the first BUY
     fireEvent.pointerDown(host,{pointerId:1,button:0,clientX:100,clientY:200});
     fireEvent.pointerUp(window,{pointerId:1});
     fireEvent.pointerMove(host,{pointerId:1,clientX:100,clientY:220});
+    flushFrames();
     expect(facadeRef.current.setOrderCrosshair).toHaveBeenLastCalledWith(getTvChrome("light").down);
     expect(host.querySelector<HTMLElement>("[data-risk-sell]")?.style.display).toBe("none");
     expect(host.querySelector<HTMLElement>("[data-risk-chip='sell']")?.style.display).toBe("none");
@@ -67,11 +77,82 @@ it("previews two clicks and sends one risk-sized pair on Enter", async () => {
     expect(buy.title).not.toContain("$100.00");
     expect(host.querySelector("[data-risk-detail]")?.textContent).toBe("");
     expect(screen.getByTestId("chart-risk-entry").textContent).not.toContain("notional");
+    expect(host.querySelector("[data-risk-readout]")?.textContent).toBe("500 shares · Est. risk $100.00");
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
     fireEvent.keyDown(window, { key: "Enter" });
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry", expect.objectContaining({ buyStop: 10, sellStop: 9.8, maxQty: 500, value: 100, mode: "Dollar" })));
     fireEvent.keyDown(window, { key: "Enter" });
     expect(sendCommand.mock.calls.filter(([name]) => name === "SubmitRiskEntry")).toHaveLength(1);
+});
+it("updates the provisional arrow and sizing on successive mouse frames, hides outside the pane, and relayouts without a mouse move", () => {
+    const {host,sendCommand,facadeRef,layoutRef} = mount();
+    initiateChartRiskEntry(template);
+    fireEvent.pointerDown(host,{pointerId:1,button:0,clientX:100,clientY:200});
+    fireEvent.pointerUp(window,{pointerId:1});
+    const arrow = host.querySelector<SVGSVGElement>("[data-risk-arrow]")!;
+    const readout = host.querySelector<HTMLElement>("[data-risk-readout]")!;
+    for (const [x,y,text] of [[200,220,"500 shares · Est. risk $100.00"], [300,230,"333 shares · Est. risk $99.90"]] as const) {
+        fireEvent.pointerMove(host,{pointerId:1,clientX:x,clientY:y});
+        flushFrames();
+        expect(readout.textContent).toBe(text);
+        const path = arrow.querySelector("path")!.getAttribute("d")!.split(" ");
+        expect(Number(path[1])).toBe((100+x)/2);
+        expect(Number(path[2])).toBeCloseTo(200);
+        expect(Number(path[4])).toBeCloseTo(y);
+    }
+    fireEvent.pointerMove(window,{pointerId:1,clientX:450,clientY:230});
+    flushFrames();
+    expect(arrow.style.display).toBe("none");
+    expect(readout.style.display).toBe("none");
+    fireEvent.pointerMove(host,{pointerId:1,clientX:300,clientY:230});
+    flushFrames();
+    expect(arrow.style.display).toBe("block");
+    facadeRef.current.priceToCoordinate = p => (12-p)*100 + 10;
+    layoutRef.current();
+    const path = arrow.querySelector("path")!.getAttribute("d")!.split(" ");
+    expect(Number(path[1])).toBe(200);
+    expect(Number(path[2])).toBeCloseTo(210);
+    expect(Number(path[4])).toBeCloseTo(240);
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
+    fireEvent.keyDown(window,{key:"Escape"});
+    expect(screen.getByTestId("chart-risk-entry").style.display).toBe("none");
+});
+it("uses cushions and funding caps, preserves the completed quantity cap, and sends the displayed quantity", async () => {
+    const preset: RiskEntryTemplate = {...template, mode:"CashPct",value:10,buyCushion:{value:0.1,unit:"$"},sellCushion:{value:1,unit:"%"}};
+    const {host,stores,sendCommand,layoutRef} = mount(false,preset);
+    const account = (cash: number, tsMs = Date.now()) => stores.exec.apply({kind:"snapshot",topic:"exec.account",payload:{venue:"sim",availableCash:cash,buyingPower:cash,tsMs}});
+    account(1000);
+    initiateChartRiskEntry(preset);
+    fireEvent.pointerDown(host,{pointerId:1,button:0,clientX:100,clientY:200});
+    fireEvent.pointerUp(window,{pointerId:1});
+    fireEvent.pointerMove(host,{pointerId:1,clientX:200,clientY:220});
+    flushFrames();
+    const readout = host.querySelector<HTMLElement>("[data-risk-readout]")!;
+    expect(readout.textContent).toBe("99 shares · Est. risk $39.60");
+    fireEvent.pointerDown(host,{pointerId:2,button:0,clientX:200,clientY:220});
+    fireEvent.pointerUp(window,{pointerId:2});
+    account(2000); flushFrames();
+    expect(readout.textContent).toBe("99 shares · Est. risk $39.60");
+    account(500); flushFrames();
+    expect(readout.textContent).toBe("49 shares · Est. risk $19.60");
+    account(2000,Date.now()-31000); layoutRef.current();
+    expect(readout.textContent).toBe("— shares · Est. risk —");
+    expect(host.querySelector("[data-risk-status]")?.textContent).toContain("Fresh account data required");
+    account(2000); flushFrames();
+    fireEvent.keyDown(window,{key:"Enter"});
+    await waitFor(()=>expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry",expect.objectContaining({maxQty:99})));
+});
+it("shows blocked sizing while selecting an invalid SELL or a zero-share setup", () => {
+    const {host,stores} = mount();
+    initiateChartRiskEntry(template);
+    fireEvent.pointerDown(host,{pointerId:1,button:0,clientX:100,clientY:200});
+    fireEvent.pointerUp(window,{pointerId:1});
+    fireEvent.pointerMove(host,{pointerId:1,clientX:200,clientY:190}); flushFrames();
+    expect(host.querySelector("[data-risk-readout]")?.textContent).toBe("— shares · Est. risk —");
+    expect(host.querySelector("[data-risk-status]")?.textContent).toContain("Sell trigger must be below buy trigger");
+    stores.exec.apply({kind:"snapshot",topic:"exec.account",payload:{venue:"sim",availableCash:1,buyingPower:1,tsMs:Date.now()}});
+    fireEvent.pointerMove(host,{pointerId:1,clientX:200,clientY:220}); flushFrames();
+    expect(host.querySelector("[data-risk-status]")?.textContent).toContain("zero shares");
 });
 it("auto-sends one drag on release and cancels another setup on Escape", async () => {
     const { host, sendCommand } = mount(true);
@@ -124,9 +205,27 @@ it("drags a draft price on the axis and discards the pair from either X", async 
     fireEvent.pointerUp(window,{pointerId:3,clientX:470,clientY:190});
     await waitFor(() => expect(buy.title).toContain("333 planned shares"));
     expect(buy.textContent).toBe("B 10.10");
+    expect(host.querySelector("[data-risk-readout]")?.textContent).toBe("333 shares · Est. risk $99.90");
+    fireEvent.keyDown(buy,{key:"ArrowUp"});
+    expect(host.querySelector("[data-risk-readout]")?.textContent).toBe("322 shares · Est. risk $99.82");
     const cancel = screen.getAllByRole("button",{name:"Discard risk setup"})[1];
     fireEvent.keyDown(cancel,{key:"Enter"});
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry",expect.anything());
     fireEvent.click(cancel);
     expect(screen.getByTestId("chart-risk-entry").style.display).toBe("none");
+});
+it("uses sub-dollar order ticks and outward cushion rounding in the visible estimate and wire command", async () => {
+    const preset: RiskEntryTemplate = {...template,buyCushion:{value:0.00003,unit:"$"}};
+    const {host,facadeRef,sendCommand} = mount(false,preset);
+    facadeRef.current.coordinateToPrice = y => 0.99994 - (y-200)*0.00002;
+    facadeRef.current.priceToCoordinate = price => 200 + (0.99994-price)/0.00002;
+    initiateChartRiskEntry(preset);
+    fireEvent.pointerDown(host,{pointerId:1,button:0,clientX:100,clientY:200});
+    fireEvent.pointerUp(window,{pointerId:1});
+    fireEvent.pointerMove(host,{pointerId:1,clientX:200,clientY:220}); flushFrames();
+    expect(host.querySelector("[data-risk-readout]")?.textContent).toBe("100,000 shares · Est. risk $50.00");
+    fireEvent.pointerDown(host,{pointerId:2,button:0,clientX:200,clientY:220});
+    fireEvent.pointerUp(window,{pointerId:2});
+    fireEvent.keyDown(window,{key:"Enter"});
+    await waitFor(()=>expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry",expect.objectContaining({buyStop:expect.closeTo(0.9999,4),sellStop:expect.closeTo(0.9995,4),maxQty:100000})));
 });

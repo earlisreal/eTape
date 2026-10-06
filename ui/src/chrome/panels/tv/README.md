@@ -35,6 +35,15 @@ details; blockers, immediate-trigger warnings and unknown outcomes stay visible.
 Escape consumes the current modifier press; release modifiers to rearm.
 
 Selected risk draft prices and working orders retain compact right-axis chips.
+Risk Entry additionally shows a centered vertical red arrow from BUY to the
+candidate protective SELL, without a filled or outlined rectangle. Beside the
+arrow, whole shares and estimated dollar risk update on mouse movement before
+SELL is fixed and remain during draft edits. Completed estimates use the same
+quantity cap as submission; invalid/stale sizing shows a placeholder and visible
+blocker. The transparent readout stays within the main pane, tracks chart paint
+and resize, and passes input through. The moving preview hides outside the main
+price pane. Risk Entry retains its existing navigation lock and Enter/auto-send
+rules; submitted-order marker presentation is unchanged.
 Drag either an editable line in the main pane or its price chip; the nearest
 line wins, with a chooser for exact ties. A bound new-order gesture takes
 priority over working-line dragging, and an active risk draft owns its input.

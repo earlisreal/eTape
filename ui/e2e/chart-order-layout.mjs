@@ -219,11 +219,18 @@ try {
     const pane = host.querySelector(".tv-lightweight-charts table").rows[0];
     const bar = host.querySelector("[data-risk-bar]");
     const box = bar.getBoundingClientRect(), paneBox = pane.getBoundingClientRect(), style = getComputedStyle(bar);
+    const readout = host.querySelector("[data-risk-readout]"), readoutBox = readout.getBoundingClientRect(), readoutStyle = getComputedStyle(readout);
+    const arrow = host.querySelector("[data-risk-arrow]"), arrowPath = arrow.querySelector("path");
+    const coordinates = (arrowPath.getAttribute("d") ?? "").split(" ");
     return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, height: box.height,
-      paneTop: paneBox.top, paneBottom: paneBox.bottom, hostBottom: host.getBoundingClientRect().bottom,
+      paneTop: paneBox.top, paneBottom: paneBox.bottom, hostBottom: host.getBoundingClientRect().bottom,hostRight:host.getBoundingClientRect().right,
       gutterLeft: pane.cells[pane.cells.length - 1].getBoundingClientRect().left,
       background: style.backgroundColor, border: style.borderTopWidth, pointerEvents: style.pointerEvents, color: style.color,
       buttons: bar.querySelectorAll("button").length, fitsText: bar.scrollWidth <= bar.clientWidth, text: bar.innerText,
+      readout:{visible:readoutStyle.display !== "none",text:readout.innerText,left:readoutBox.left,right:readoutBox.right,top:readoutBox.top,bottom:readoutBox.bottom,color:readoutStyle.color,
+        background:readoutStyle.backgroundColor,border:readoutStyle.borderTopWidth,pointerEvents:readoutStyle.pointerEvents},
+      arrow:{visible:getComputedStyle(arrow).display !== "none",x:Number(coordinates[1]),fromY:Number(coordinates[2]),toY:Number(coordinates[4]),fill:arrowPath.getAttribute("fill"),rectangles:arrow.querySelectorAll("rect").length},
+      lineYs:["buy","sell"].map(side=>parseFloat(host.querySelector(`[data-risk-${side}]`).style.top)),
       chips:[...host.querySelectorAll("[data-risk-chip]")].filter(chip => getComputedStyle(chip).display !== "none").map(chip => {
         const box = chip.getBoundingClientRect(), button = chip.querySelector("[data-risk-price]");
         return {top:box.top,bottom:box.bottom,right:box.right,text:button.innerText,title:button.title,color:getComputedStyle(chip).color};
@@ -238,8 +245,17 @@ try {
     assert.equal(risk.pointerEvents, "none", "Risk bar must let chart pointer input pass through");
     assert.equal(risk.buttons, 0, "Routine instructions must not add a separate action bar");
     assert(risk.fitsText, "Risk text must wrap within a narrow chart");
-    assert(!risk.text.includes("notional") && !risk.text.includes("est. risk"), "Risk figures must stay out of the chart");
-    assert(risk.chips.every(chip => Math.abs(chip.right - hostBox.x - hostBox.width) <= 1), "Risk chips must align with the price axis");
+    assert(!risk.text.includes("notional") && !risk.text.includes("Est. risk"), "Routine bottom instructions must stay compact");
+    if (risk.readout.visible) {
+      assert(risk.arrow.visible && risk.arrow.rectangles === 0 && risk.arrow.fill === "none", "Risk preview must use an unfilled arrow without a rectangle");
+      assert(risk.readout.text.includes("shares · Est. risk"), "Shares and estimated risk must be visible beside the arrow");
+      assert(risk.readout.left >= hostBox.x && risk.readout.right < risk.gutterLeft && risk.readout.top >= risk.paneTop && risk.readout.bottom <= risk.paneBottom,
+        "Risk readout must stay within the main price pane");
+      assert(risk.readout.background === "rgba(0, 0, 0, 0)" && risk.readout.border === "0px" && risk.readout.pointerEvents === "none", "Risk readout must remain transparent and pass pointer input through");
+      assert(Math.abs(risk.arrow.fromY - risk.lineYs[0]) <= 1, "Risk arrow must begin at the actual BUY trigger");
+      if (risk.chips.length === 2) assert(Math.abs(risk.arrow.toY - risk.lineYs[1]) <= 1, "Risk arrow must end at the actual SELL trigger, independently of spaced chips");
+    }
+    assert(risk.chips.every(chip => Math.abs(chip.right - risk.hostRight) <= 1), "Risk chips must align with the price axis");
     const geometry = await measureProduction();
     assert(geometry.nativeOffset === 0 && geometry.axisClippedPx === 0 && geometry.panelAxisClippedPx === 0,
       "Risk setup must preserve the native chart origin and full time axis");
@@ -255,9 +271,20 @@ try {
     assert(setup.height <= 28, "Wide-chart setup should use two compact rows");
     assert.equal(setup.color, theme === "light" ? "rgb(19, 23, 34)" : "rgb(209, 212, 220)", "Risk text must follow the chart theme");
     await productionPage.mouse.click(cursor.x, hostBox.y + hostBox.height * 0.30);
-    await productionPage.mouse.click(cursor.x, hostBox.y + hostBox.height * 0.50);
+    await productionPage.mouse.move(cursor.x + 40, hostBox.y + hostBox.height * 0.50);
+    await productionPage.waitForFunction(() => document.querySelector("[data-risk-readout]").innerText.includes("shares · Est. risk $"));
+    const moving = await checkRisk();
+    assert.equal(moving.chips.length,1,"Live risk sizing must appear before selecting SELL");
+    assert(Math.abs(moving.arrow.x - (cursor.x - hostBox.x + 20)) <= 1,"Risk arrow must be centered between the BUY and candidate SELL X positions");
+    await productionPage.mouse.move(cursor.x + 40, hostBox.y + hostBox.height * 0.60);
+    await productionPage.waitForFunction(previous => document.querySelector("[data-risk-readout]").innerText !== previous,moving.readout.text);
+    await productionPage.mouse.move(hostBox.x + hostBox.width - 5, hostBox.y + hostBox.height * 0.60);
+    await productionPage.waitForFunction(() => document.querySelector("[data-risk-readout]").style.display === "none");
+    await productionPage.mouse.click(cursor.x + 40, hostBox.y + hostBox.height * 0.50);
     await productionPage.waitForFunction(() => document.querySelector("[data-risk-price='buy']").title.includes("planned shares"));
     const preview = await checkRisk();
+    assert(preview.readout.visible && preview.arrow.toY > preview.arrow.fromY,"Completed draft must retain its downward protective-SELL arrow and readout");
+    assert.equal(preview.readout.color,setup.color,"Live risk text must follow the chart theme");
     assert(preview.chips.length === 2 && preview.chips[0].title.includes("BUY STOP-LIMIT") && preview.chips[1].title.includes("SELL STOP-LIMIT"), "Both compact risk chips must expose order details on hover");
     assert(preview.chips.every(chip => chip.title.includes("planned shares") && chip.title.includes("Held by eTape") && chip.title.includes("fees/execution risk excluded") && !chip.title.includes("est. risk")), "Tooltips must retain shares and custody without risk amounts");
     assert.deepEqual(preview.chips.map(chip => chip.color),["rgb(8, 153, 129)","rgb(242, 54, 69)"],"Risk draft colors must match submitted BUY/SELL chips");
@@ -289,6 +316,7 @@ try {
   await productionPage.mouse.click(narrowHost.x + 100,narrow.paneTop + 115);
   await productionPage.waitForFunction(() => document.querySelector("[data-risk-price='buy']").title.includes("planned shares"));
   const narrowChips = (await measureRisk()).chips.sort((a,b) => a.top-b.top);
+  await checkRisk();
   assert(narrowChips[1].top >= narrowChips[0].bottom,"Nearby draft prices must retain separate axis controls");
   const draftBuy = await productionPage.locator("[data-risk-price='buy']").boundingBox();
   const originalBuy = await productionPage.locator("[data-risk-price='buy']").textContent();
