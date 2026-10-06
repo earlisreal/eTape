@@ -187,6 +187,10 @@ _Avoid_: Previous extended-session close
 
 ## Order Entry
 
+**Chart Risk Entry**:
+A long entry sized to a loss budget from two chart-selected prices, with a linked protective sell stop.
+_Avoid_: Risk confirmation, bracket (when referring to this entry tool)
+
 **Limit-if-Touched (LIT)**:
 A conditional order that activates a Limit Order when the trigger price is reached or passed: at or below for BUY/COVER, at or above for SELL/SHORT. Its trigger price and execution limit are distinct; activation does not guarantee a fill.
 _Avoid_: Limit if touch, stop-limit, market-if-touched
