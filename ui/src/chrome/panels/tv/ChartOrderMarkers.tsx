@@ -1,13 +1,16 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 import type { AckMsg, Order, ReplaceOrderArgs } from "../../../wire/contract";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
-import { chartOrderMarkers, orderActionPending, orderMarkerChipYs, snapOrderMarkerPrice, type ChartOrderMarker } from "../../../render/chart/orderMarkers";
+import { chartOrderMarkers, nearestPriceLines, orderActionPending, orderMarkerChipYs, snapOrderMarkerPrice, type ChartOrderMarker } from "../../../render/chart/orderMarkers";
+import type { OrderConfig, PlaceOrderTemplate } from "../../exec/actionTemplate";
+import { chartBindingForModifiers, chartConditionalTemplate } from "../../exec/resolveChartConditionalOrder";
+import type { Tool } from "../../../render/chart/drawings/interaction";
 import {riskEntrySize} from "../../exec/riskEntry";
 import {resolveLimitCushionPrice} from "../../exec/priceSource";
 import type { TvChrome } from "../../../render/chart/tvTheme";
 
 type Pending = { kind: "replace" | "cancel"; price?: number; stop: boolean; confirmedPrice?: number; outcome: "requested" | "unknown" };
-type Drag = { id: string; marker: ChartOrderMarker; startX: number; startY: number; startPrice: number; price: number; moved: boolean; entryPhase:string; previewQty:number };
+type Drag = { id: string; pointerId: number; marker: ChartOrderMarker; startX: number; startY: number; startPrice: number; price: number; moved: boolean; entryPhase:string; previewQty:number };
 
 interface Props {
   chrome: TvChrome;
@@ -23,6 +26,8 @@ interface Props {
   rightAxisWidth: number;
   layoutRef: MutableRefObject<() => void>;
   chooserOpenRef: MutableRefObject<boolean>;
+  config?: OrderConfig;
+  activeTool?: Tool;
 }
 
 interface Group { key: string; price: number; kind: ChartOrderMarker["kind"]; markers: ChartOrderMarker[]; pending?: Pending }
@@ -54,8 +59,10 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
   latest.current = {...props,orders};
   const drag = useRef<Drag | null>(null);
   const [chooser, setChooser] = useState<string | null>(null);
-  const chooserLatest = useRef(chooser); chooserLatest.current = chooser;
-  props.chooserOpenRef.current = chooser !== null;
+  const [lineChooser, setLineChooser] = useState<string[] | null>(null);
+  const chooserLatest = useRef(false); chooserLatest.current = chooser !== null || lineChooser !== null;
+  props.chooserOpenRef.current = chooserLatest.current;
+  const groupsLatest = useRef(groups); groupsLatest.current = groups;
   const [announcement, setAnnouncement] = useState("");
 
   const riskProposal=(marker:ChartOrderMarker,price:number):{detail:string;qty:number;plannedQty?:number;aboveBudget?:boolean;limit?:number}=>{
@@ -174,6 +181,8 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     if (row) { delete row.dataset.proposedPrice; row.querySelector<HTMLElement>("[data-order-price]")?.style.removeProperty("border-color");
       const confirmed = row.querySelector<HTMLElement>("[data-order-confirmed-line]"); if (confirmed) confirmed.style.display = "none"; }
     drag.current = null;
+    const hostMode = latest.current.hostRef.current;
+    if (hostMode?.dataset.orderEntryMode === "order-drag") { delete hostMode.dataset.orderEntryMode; hostMode.style.cursor = ""; hostMode.title = ""; latest.current.facadeRef.current?.setOrderCrosshair?.(null); latest.current.facadeRef.current?.setPanZoomEnabled?.(!latest.current.activeTool || latest.current.activeTool === "select"); }
     setAnnouncement("Price change canceled.");
   };
 
@@ -207,10 +216,10 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     }
   };
 
-  const startDrag = (event: ReactPointerEvent<HTMLElement>, marker: ChartOrderMarker) => {
+  const startDrag = (event: ReactPointerEvent<HTMLElement> | PointerEvent, marker: ChartOrderMarker) => {
     if (!marker.draggable || event.button !== 0) return;
     event.preventDefault(); event.stopPropagation();
-    drag.current = { id: marker.order.id, marker, startX: event.clientX, startY: event.clientY,
+    drag.current = { id: marker.order.id, pointerId: event.pointerId, marker, startX: event.clientX, startY: event.clientY,
       startPrice: marker.price, price: marker.price, moved: false,
       entryPhase:(marker.order.riskEntry ? marker.order : Array.from(latest.current.orders).find(o=>o.id===marker.order.riskEntryId))?.held?.childClientId?"ACTIVATED":"WAITING",previewQty:riskProposal(marker,marker.price).qty };
     const row = [...(latest.current.hostRef.current?.querySelectorAll<HTMLElement>("[data-order-group]") ?? [])]
@@ -220,13 +229,55 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     if (confirmedLine && confirmedY != null && Number.isFinite(confirmedY)) {
       confirmedLine.style.display = "block"; confirmedLine.style.top = "0px";
     }
-    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* window listeners cover browsers without capture */ }
+    const host = latest.current.hostRef.current;
+    if (host) { host.dataset.orderEntryMode = "order-drag"; host.style.cursor = "ns-resize"; host.title = tooltip(marker); }
+    latest.current.facadeRef.current?.setOrderCrosshair?.(sideText(marker) === "B" ? latest.current.chrome.up : latest.current.chrome.down);
+    latest.current.facadeRef.current?.setPanZoomEnabled?.(false);
+    try { (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId); } catch { /* window listeners cover browsers without capture */ }
   };
 
   useEffect(() => {
+    const closeChooser = () => { setChooser(null); setLineChooser(null); };
+    const lineHits = (event: PointerEvent) => {
+      const p = latest.current, host = p.hostRef.current, facade = p.facadeRef.current;
+      if (!host || !facade || (p.activeTool && p.activeTool !== "select") || host.dataset.riskEntryActive || chooserLatest.current
+        || host.dataset.orderEntryMode === "gesture" || (event.target as Element)?.closest?.("[data-drawing-ui],button,input,select,textarea,[contenteditable='true']")) return [];
+      const binding = chartBindingForModifiers(event);
+      if (binding && p.config && chartConditionalTemplate(p.config.templates.filter((t): t is PlaceOrderTemplate => t.kind === "place"), binding)) return [];
+      const rect = host.getBoundingClientRect(), x = event.clientX - rect.left, y = event.clientY - rect.top;
+      const height = facade.paneHeights?.()[0] ?? rect.height;
+      if (x < 0 || x >= rect.width - p.rightAxisWidth || y < 0 || y >= height) return [];
+      return nearestPriceLines(groupsLatest.current.flatMap(group => group.markers), y, price => facade.priceToCoordinate(price));
+    };
+    const onLineDown = (event: PointerEvent) => {
+      if (event.button !== 0 || drag.current || !document.hasFocus()) return;
+      const hits = lineHits(event);
+      if (!hits.length) return;
+      event.preventDefault(); event.stopImmediatePropagation();
+      if (hits.length > 1) { setLineChooser(hits.map(marker => marker.order.id)); return; }
+      startDrag(event, hits[0]);
+    };
+    const onLineHover = (event: PointerEvent) => {
+      if (drag.current) return;
+      const host = latest.current.hostRef.current;
+      if (!host) return;
+      const hits = lineHits(event);
+      if (host.dataset.orderEntryMode && host.dataset.orderEntryMode !== "order-hover") return;
+      if (hits.length) {
+        host.dataset.orderEntryMode = "order-hover";
+        host.style.cursor = hits.some(marker => marker.draggable) ? "ns-resize" : "";
+        host.title = hits.map(marker => tooltip(marker)).join("\n\n");
+      } else if (host.dataset.orderEntryMode === "order-hover") {
+        delete host.dataset.orderEntryMode; host.style.cursor = ""; host.title = "";
+      }
+    };
+    const leave = () => {
+      const host = latest.current.hostRef.current;
+      if (host?.dataset.orderEntryMode === "order-hover") { delete host.dataset.orderEntryMode; host.style.cursor = ""; host.title = ""; }
+    };
     const onMove = (event: PointerEvent) => {
       const current = drag.current;
-      if (!current) return;
+      if (!current || event.pointerId !== current.pointerId) return;
       const distance = Math.hypot(event.clientX - current.startX, event.clientY - current.startY);
       if (distance < 3) return;
       const host = latest.current.hostRef.current;
@@ -237,12 +288,14 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       if (raw == null || !Number.isFinite(raw) || raw <= 0) return;
       current.moved = true; current.price = snapOrderMarkerPrice(raw);
       paintProposal(current.id, current.price, true);
+      if (host) host.title = tooltip(current.marker, current.price, true);
     };
-    const onUp = () => {
+    const onUp = (event: PointerEvent) => {
       const current = drag.current;
-      if (!current) return;
+      if (!current || event.pointerId !== current.pointerId) return;
       drag.current = null;
       const host = latest.current.hostRef.current;
+      if (host?.dataset.orderEntryMode === "order-drag") { delete host.dataset.orderEntryMode; host.style.cursor = ""; host.title = ""; latest.current.facadeRef.current?.setOrderCrosshair?.(null); latest.current.facadeRef.current?.setPanZoomEnabled?.(!latest.current.activeTool || latest.current.activeTool === "select"); }
       const row = [...(host?.querySelectorAll<HTMLElement>("[data-order-group]") ?? [])]
         .find((el) => el.dataset.orderIds?.split(",").includes(current.id));
       if (row) { delete row.dataset.proposedPrice; row.querySelector<HTMLElement>("[data-order-price]")?.style.removeProperty("border-color");
@@ -253,15 +306,19 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       if (drag.current) { event.preventDefault(); cancelDrag(); }
-      else if (chooserLatest.current !== null) { event.preventDefault(); setChooser(null); }
+      else if (chooserLatest.current) { event.preventDefault(); closeChooser(); }
     };
     const onRightDown = (event: PointerEvent) => { if (event.button === 2 && drag.current) { event.preventDefault(); cancelDrag(); } };
     const onContext = (event: MouseEvent) => { if (drag.current) { event.preventDefault(); cancelDrag(); } };
     const onOutside = (event: PointerEvent) => {
-      if (chooserLatest.current === null) return;
+      if (!chooserLatest.current) return;
       const target = event.target as Element | null;
-      if (!target?.closest?.("[role='dialog'][aria-label='Choose chart order']")) setChooser(null);
+      if (!target?.closest?.("[role='dialog'][aria-label='Choose chart order']")) closeChooser();
     };
+    const host = latest.current.hostRef.current;
+    host?.addEventListener("pointerdown", onLineDown, true);
+    host?.addEventListener("pointermove", onLineHover, true);
+    host?.addEventListener("pointerleave", leave);
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointerdown", onRightDown, true);
@@ -271,6 +328,10 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     window.addEventListener("blur",cancelDrag);
     window.addEventListener("pointercancel",cancelDrag);
     return () => {
+      cancelDrag(); leave();
+      host?.removeEventListener("pointerdown", onLineDown, true);
+      host?.removeEventListener("pointermove", onLineHover, true);
+      host?.removeEventListener("pointerleave", leave);
       window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointerdown", onRightDown, true); window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("pointerdown", onOutside, true);
@@ -279,7 +340,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     };
   }, []);
 
-  useEffect(()=>{cancelDrag();setChooser(null);},[props.venue,props.symbol,props.pinned]);
+  useEffect(()=>{cancelDrag();setChooser(null);setLineChooser(null);},[props.venue,props.symbol,props.pinned,props.activeTool]);
 
   const cancelOrder = async (marker: ChartOrderMarker) => {
     setPending((current) => new Map(current).set(marker.order.id, { kind: "cancel", stop: false, outcome: "requested" }));
@@ -320,7 +381,8 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       const status = action ? action.outcome === "unknown" ? "UNKNOWN — verify Orders" : action.kind === "cancel" ? "CANCEL REQUESTED" : "MODIFY REQUESTED"
         : phaseWarning || first.phase === "PAUSED" ? first.phase : riskProposal(first, first.price).aboveBudget ? "ABOVE ORIGINAL BUDGET" : "";
       const ids = group.markers.map((m) => m.order.id);
-      const chosen = chooser === group.key;
+      const chosen = chooser === group.key || !!lineChooser?.includes(first.order.id) && lineChooser[0] === first.order.id;
+      const choices = lineChooser ? groups.flatMap(g => g.markers).filter(marker => lineChooser.includes(marker.order.id)) : group.markers;
       return <div key={group.key} data-order-group="true" data-order-ids={ids.join(",")} data-price={group.price}
         data-confirmed-price={group.pending?.confirmedPrice ?? ""} data-kind={group.kind}
         style={{ position:"absolute", left:0, right:0, top:0, height:0, opacity, pointerEvents:"none", "--order-color":color } as CSSProperties}>
@@ -331,7 +393,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
         <div data-order-chip style={{ position:"absolute", top:stackIndex * 20 - 10, right:0, display:"flex", alignItems:"center", height:20,
           boxSizing:"border-box",border:`1px solid ${color}`, borderRadius:3, background:"rgba(12,16,23,.96)", color, pointerEvents:"auto", font:"600 10px ui-monospace,monospace", whiteSpace:"nowrap" }}>
           <button type="button" data-testid={`order-label-${first.order.id}`} data-order-price="true" onPointerDown={(e) => group.markers.length === 1 && startDrag(e, first)}
-            onClick={() => group.markers.length > 1 && setChooser(chosen ? null : group.key)}
+            onClick={() => { if (group.markers.length > 1) { setLineChooser(null); setChooser(chosen ? null : group.key); } }}
             onKeyDown={(e) => group.markers.length === 1 && adjustByKey(e, first)}
             title={`${group.markers.map(marker => tooltip(marker, marker.price, !!group.pending)).join("\n\n")}${status ? `\n${status}` : ""}`}
             aria-label={group.markers.length > 1 ? `${group.markers.length} ${first.order.side} orders at ${priceText(group.price)}; choose an order` : `${orderTitle(first)} at ${priceText(group.price)}; drag or use arrow keys to adjust`}
@@ -343,9 +405,9 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
             style={{ border:0, borderLeft:`1px solid ${color}`, background:"transparent", color:"inherit", height:"100%", padding:"0 5px", cursor:"pointer", font:"bold 12px system-ui" }}>×</button>}
         </div>
         <div data-order-status data-status={status} style={{display:status ? "block" : "none",position:"absolute",right:props.rightAxisWidth + 4,top:stackIndex * 20 + 12,color:"#ff9d72",background:"#0c1017",fontSize:10}}>{status}</div>
-        {chosen && group.markers.length > 1 && <div role="dialog" aria-label="Choose chart order" style={{ position:"absolute", right:props.rightAxisWidth + 6, top:stackIndex * 18 + 14,
+        {chosen && choices.length > 1 && <div role="dialog" aria-label="Choose chart order" style={{ position:"absolute", right:props.rightAxisWidth + 6, top:stackIndex * 18 + 14,
           minWidth:185, padding:5, border:`1px solid ${color}`, borderRadius:4, background:"#111821", boxShadow:"0 4px 18px #0008", pointerEvents:"auto" }}>
-          {group.markers.map((marker) => <div key={marker.order.id} style={{ display:"flex", gap:4, alignItems:"center", marginBottom:3 }}>
+          {choices.map((marker) => <div key={marker.order.id} style={{ display:"flex", gap:4, alignItems:"center", marginBottom:3 }}>
             <button type="button" onPointerDown={(e) => startDrag(e, marker)} onKeyDown={(e) => adjustByKey(e, marker)}
               aria-label={`${orderTitle(marker)} at ${priceText(marker.price)}; drag or use arrow keys to adjust`}
               style={{ flex:1, border:`1px solid ${color}`, borderRadius:3, background:"#0c1017", color, padding:"4px 6px", cursor:marker.draggable ? "ns-resize" : "pointer", textAlign:"left", font:"10px ui-monospace,monospace" }}>
@@ -354,7 +416,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
             <button type="button" aria-label={`Cancel ${orderTitle(marker)}`} onClick={() => void cancelOrder(marker)}
               style={{ border:`1px solid ${color}`, borderRadius:3, background:"#0c1017", color, padding:"3px 7px", cursor:"pointer" }}>×</button>
           </div>)}
-          <button type="button" aria-label="Close order chooser" onClick={() => setChooser(null)} style={{ marginTop:2, border:0, background:"transparent", color:"#ddd", cursor:"pointer", fontSize:10 }}>Close</button>
+          <button type="button" aria-label="Close order chooser" onClick={() => { setChooser(null); setLineChooser(null); }} style={{ marginTop:2, border:0, background:"transparent", color:"#ddd", cursor:"pointer", fontSize:10 }}>Close</button>
         </div>}
       </div>;
     })}

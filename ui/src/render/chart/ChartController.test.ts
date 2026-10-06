@@ -83,6 +83,7 @@ function fakeFacade() {
     coordinateToLogical: () => 0,
     coordinateToPrice: () => 0,
     setPanZoomEnabled: () => {},
+    setOrderCrosshair: () => {},
     scrollToRealTime: () => { facade.scrolls++; scroll.value = 4; },
     get scrollPosition() { return scroll.value; },
     set scrollPosition(value: number) { scroll.value = value; },

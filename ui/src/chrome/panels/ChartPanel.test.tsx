@@ -23,6 +23,7 @@ const paneApis = [
   { attachPrimitive: vi.fn(), getHeight: vi.fn(() => 120), getStretchFactor: vi.fn(() => 1), setStretchFactor: vi.fn() },
 ];
 const chartApi = {
+  options: vi.fn(() => ({ crosshair: { horzLine: { labelBackgroundColor: "#4c525e" } }, localization: {} })),
   addSeries: vi.fn(() => ({ setData: vi.fn(), update: vi.fn(), applyOptions: vi.fn(), setSeriesOrder: vi.fn(),
     createPriceLine: vi.fn(() => ({ applyOptions: vi.fn() })), removePriceLine: vi.fn(),
     attachPrimitive: vi.fn(), priceToCoordinate: vi.fn(() => 0), coordinateToPrice: vi.fn(() => 0) })),

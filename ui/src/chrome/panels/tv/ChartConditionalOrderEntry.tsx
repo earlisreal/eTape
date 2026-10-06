@@ -4,7 +4,7 @@ import type { Stores } from "../../../data/registry";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
 import type { ChartBinding, OrderConfig, PlaceOrderTemplate } from "../../exec/actionTemplate";
 import { chartBindingForModifiers, chartConditionalRouteKey, chartConditionalTemplate, chartConditionalOrderWillTrigger, resolveChartConditionalOrder, conditionalRouteLabel, type ChartConditionalTemplate } from "../../exec/resolveChartConditionalOrder";
-import { orderMarkerChipYs, snapOrderMarkerPrice } from "../../../render/chart/orderMarkers";
+import { snapOrderMarkerPrice } from "../../../render/chart/orderMarkers";
 import type { LinkGroup, LinkGroups } from "../../linkGroups";
 import type { Tool } from "../../../render/chart/drawings/interaction";
 import type { TvChrome } from "../../../render/chart/tvTheme";
@@ -68,6 +68,7 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
   const statusRef = useRef<HTMLDivElement | null>(null);
   const latest = useRef(props); latest.current = props;
   const pointRef = useRef<{ x: number; y: number; event: PointerEvent } | null>(null);
+  const hoverRef = useRef<{ x: number; y: number; event: PointerEvent } | null>(null);
   const gestureRef = useRef<Gesture | null>(null);
   const routeCache = useRef(new Map<string, RouteCache>());
   const consumedBindings = useRef(new Set<ChartBinding>());
@@ -82,13 +83,17 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
   const hide = () => {
     const root = rootRef.current;
     if (root) { root.style.opacity = "0"; root.style.visibility = "hidden"; }
+    const host = latest.current.hostRef.current;
+    if (host?.dataset.orderEntryMode === "gesture") {
+      delete host.dataset.orderEntryMode; delete host.dataset.orderCursorPrice;
+      host.title = "";
+      latest.current.facadeRef.current?.setOrderCrosshair?.(null);
+    }
   };
   const renderSnapshot = (snapshot: PreviewSnapshot, y: number) => {
     const root = rootRef.current;
     const facade = latest.current.facadeRef.current;
     if (!root || !facade) return;
-    const line = root.querySelector<HTMLElement>("[data-entry-line]");
-    const chip = root.querySelector<HTMLElement>("[data-entry-price]");
     const detail = root.querySelector<HTMLElement>("[data-entry-detail]");
     const color = snapshot.template.side === "BUY" || snapshot.template.side === "COVER" ? latest.current.chrome.up : latest.current.chrome.down;
     const instruction = snapshot.needsAck ? settingsAckInstruction(snapshot.args.venue, snapshot.template.type) : "";
@@ -96,13 +101,15 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
     root.style.opacity = "1";
     root.style.visibility = "visible";
     root.style.setProperty("--entry-color", color);
-    root.style.setProperty("--entry-y", `${Math.round(orderMarkerChipYs([y], facade.paneHeights()[0])[0])}px`);
-    if (line) { line.style.top = `${Math.round(y)}px`; line.style.right = `${facade.priceScaleWidth()}px`; }
-    if (chip) {
-      chip.textContent = `${snapshot.template.side === "BUY" || snapshot.template.side === "COVER" ? "B" : "S"} ${snapshot.stopPrice.toFixed(snapshot.stopPrice < 1 ? 4 : 2)}`;
-      chip.title = `${snapshot.detail}${warning ? `\n${warning}` : ""}`;
-      chip.setAttribute("aria-label", chip.title);
+    const host = latest.current.hostRef.current;
+    if (host) {
+      host.dataset.orderEntryMode = "gesture";
+      host.dataset.orderCursorPrice = String(snapshot.stopPrice);
+      host.title = `${snapshot.detail}${warning ? `\n${warning}` : ""}`;
+      facade.setOrderCrosshair?.(color);
     }
+    root.dataset.price = String(snapshot.stopPrice);
+    root.dataset.y = String(y);
     if (detail) {
       detail.textContent = warning;
       detail.style.display = warning ? "block" : "none";
@@ -113,7 +120,8 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
     const binding = exactBinding(event);
     if (!binding || consumedBindings.current.has(binding)) return null;
     const config = latest.current.config;
-    if (!latest.current.configLoaded || latest.current.activeTool !== "select" || latest.current.chooserOpenRef.current) return null;
+    if (!latest.current.configLoaded || latest.current.activeTool !== "select" || latest.current.chooserOpenRef.current
+      || latest.current.hostRef.current?.dataset.riskEntryActive || latest.current.hostRef.current?.dataset.orderEntryMode === "order-drag") return null;
     const template = chartConditionalTemplate(config.templates.filter((t): t is PlaceOrderTemplate => t.kind === "place"), binding);
     return template ? { binding, template } : null;
   };
@@ -198,8 +206,12 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
     if (!point) return;
     const resolved = activeTemplate(point.event);
     if (!resolved || !document.hasFocus() || inEditableOrUi(point.event.target)) { hide(); return; }
+    const pendingSnapshot = buildSnapshot(point.event, resolved, undefined, undefined, true);
+    const pendingY = pendingSnapshot && latest.current.facadeRef.current?.priceToCoordinate(pendingSnapshot.stopPrice);
+    if (!pendingSnapshot || pendingY == null) { hide(); return; }
+    renderSnapshot(pendingSnapshot, pendingY);
     const route = await requestRoute(resolved.template, latest.current.symbol);
-    if (pointRef.current !== point) return;
+    if (pointRef.current !== point || !activeTemplate(point.event)) return;
     const snapshot = buildSnapshot(point.event, resolved, route ?? undefined);
     const host = latest.current.hostRef.current;
     const facade = latest.current.facadeRef.current;
@@ -221,8 +233,8 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
     if (!host) return;
     let frame = 0;
     const schedule = (event: PointerEvent) => {
-      if ((event.target as Element)?.closest?.("[data-entry-chip]")) return;
       pointRef.current = { x: event.clientX, y: event.clientY, event };
+      hoverRef.current = pointRef.current;
       if (frame) return;
       frame = requestAnimationFrame(() => { frame = 0; void updateFromPoint(); });
     };
@@ -276,23 +288,33 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
       hide();
     };
     const cancel = (message: string, event?: Event) => {
-      if (!gestureRef.current) return;
+      if (!gestureRef.current && host.dataset.orderEntryMode !== "gesture") return;
+      const binding = pointRef.current && exactBinding(pointRef.current.event);
+      if (binding) consumedBindings.current.add(binding);
       gestureRef.current = null;
+      pointRef.current = null;
       if (event) { event.preventDefault(); event.stopPropagation(); event.stopImmediatePropagation(); }
       hide(); announce(message);
     };
     const cancelOnRight = (event: PointerEvent) => { if (event.button === 2) cancel("Chart order canceled.", event); };
     const cancelOnContext = (event: MouseEvent) => { if (gestureRef.current) cancel("Chart order canceled.", event); };
-    const cancelOnKey = (event: KeyboardEvent) => { if (event.key === "Escape") cancel("Chart order canceled.", event); };
-    const onKeyUp = (event: KeyboardEvent) => { if (!event.ctrlKey && !event.altKey && !event.shiftKey) { consumedBindings.current.clear(); pointRef.current = null; hide(); } };
-    const dismiss = (event: MouseEvent) => {
-      if (!(event.target as Element)?.closest?.("[data-entry-cancel]")) return;
-      const binding = pointRef.current && exactBinding(pointRef.current.event);
-      if (binding) consumedBindings.current.add(binding);
-      gestureRef.current = null; pointRef.current = null;
-      hide(); announce("Chart order preview canceled.");
+    const refreshModifiers = (event: KeyboardEvent) => {
+      const point = hoverRef.current;
+      if (!point) return;
+      const next = new PointerEvent("pointermove", { clientX: point.x, clientY: point.y,
+        ctrlKey: event.ctrlKey, altKey: event.altKey, shiftKey: event.shiftKey });
+      Object.defineProperty(next, "target", { value: point.event.target });
+      schedule(next);
     };
-    const onLeave = () => { if (!gestureRef.current) { pointRef.current = null; hide(); } else cancel("Chart order canceled — pointer left the chart."); };
+    const cancelOnKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") cancel("Chart order canceled.", event);
+      else if (["Shift", "Control", "Alt"].includes(event.key)) refreshModifiers(event);
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (!event.ctrlKey && !event.altKey && !event.shiftKey) { consumedBindings.current.clear(); hide(); }
+      refreshModifiers(event);
+    };
+    const onLeave = () => { hoverRef.current = null; if (!gestureRef.current) { pointRef.current = null; hide(); } else cancel("Chart order canceled — pointer left the chart."); };
     const onBlur = () => cancel("Chart order canceled — window lost focus.");
     const unsubscribeQuote = latest.current.stores.quote.subscribe(() => {
       if (pointRef.current) schedule(pointRef.current.event);
@@ -303,7 +325,6 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
     host.addEventListener("pointermove", schedule, true);
     host.addEventListener("pointerdown", down, true);
     host.addEventListener("pointerleave", onLeave);
-    rootRef.current?.addEventListener("click", dismiss);
     window.addEventListener("pointerup", up, true);
     window.addEventListener("pointercancel", onLeave, true);
     window.addEventListener("pointerdown", cancelOnRight, true);
@@ -314,7 +335,6 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
     return () => {
       host.removeEventListener("pointermove", schedule, true); host.removeEventListener("pointerdown", down, true);
       host.removeEventListener("pointerleave", onLeave); window.removeEventListener("pointerup", up, true);
-      rootRef.current?.removeEventListener("click", dismiss);
       window.removeEventListener("pointercancel", onLeave, true); window.removeEventListener("pointerdown", cancelOnRight, true);
       window.removeEventListener("contextmenu", cancelOnContext, true); window.removeEventListener("keydown", cancelOnKey, true);
       window.removeEventListener("keyup", onKeyUp, true); window.removeEventListener("blur", onBlur);
@@ -327,20 +347,14 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
     hide();
     gestureRef.current = null;
     pointRef.current = null;
+    hoverRef.current = null;
     routeCache.current.clear();
     announce("");
     return () => { gestureRef.current = null; pointRef.current = null; };
-  }, [props.group, props.symbol, props.linkGroups.venueFor(props.group), props.config.templates]);
+  }, [props.group, props.symbol, props.linkGroups.venueFor(props.group), props.config.templates, props.activeTool]);
 
   return <><div ref={rootRef} data-testid="chart-order-entry-preview" style={{ position: "absolute", inset: 0, opacity: 0, visibility:"hidden",
     zIndex: 9, pointerEvents: "none", overflow: "hidden", "--entry-color": "#34c6dc" } as CSSProperties}>
-    <div data-entry-line="true" style={{ position: "absolute", left: 0, right: 0, height: 2,
-      background: "repeating-linear-gradient(90deg,var(--entry-color) 0 8px,transparent 8px 13px)" }} />
-    <div data-entry-chip="true" data-drawing-ui style={{ position: "absolute", right: 0, top: "var(--entry-y)", transform: "translateY(-50%)",display:"flex",height:20,
-      boxSizing:"border-box",border: "1px solid var(--entry-color)",color:"var(--entry-color)", borderRadius: 3, background: "#0c1017",pointerEvents:"auto",font: "600 10px ui-monospace,monospace",whiteSpace:"nowrap" }}>
-      <button type="button" data-entry-price style={{border:0,background:"transparent",color:"inherit",font:"inherit",padding:"0 5px",cursor:"default"}} />
-      <button type="button" data-entry-cancel aria-label="Discard chart order preview" title="Discard preview until the modifier is released" style={{border:0,borderLeft:"1px solid currentColor",background:"transparent",color:"inherit",font:"bold 12px system-ui",padding:"0 5px",cursor:"pointer"}}>×</button>
-    </div>
     <div data-entry-detail="true" role="status" style={{ position: "absolute", left: 10, bottom:35, maxWidth: "75%", padding: "3px 5px",
       background: "rgba(12,16,23,.94)",color:"#ff9d72", font: "600 10px ui-monospace,monospace",whiteSpace:"pre-wrap" }} />
     <span data-entry-announcement="true" aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clipPath: "inset(50%)" }} />

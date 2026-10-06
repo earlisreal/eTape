@@ -58,6 +58,21 @@ export function snapOrderMarkerPrice(price: number): number {
   return Math.round((price + Number.EPSILON) / tick) * tick;
 }
 
+export function nearestPriceLines<T extends { price: number }>(lines: T[], y: number,
+  priceToY: (price: number) => number | null): T[] {
+  let distance = 8;
+  let nearest: T[] = [];
+  for (const line of lines) {
+    const lineY = priceToY(line.price);
+    if (lineY == null || !Number.isFinite(lineY)) continue;
+    const delta = Math.abs(lineY - y);
+    if (delta > distance) continue;
+    if (delta < distance) { distance = delta; nearest = []; }
+    nearest.push(line);
+  }
+  return nearest;
+}
+
 // Keep chips apart without moving their price lines or changing the chart scale.
 // ponytail: 22px per group; use a combined chooser if groups outgrow the pane.
 export function orderMarkerChipYs(ys: number[], paneHeight: number): number[] {

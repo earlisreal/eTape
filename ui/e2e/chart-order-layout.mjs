@@ -37,11 +37,11 @@ try {
     await page.mouse.move(350, 280);
     await page.waitForFunction(() => document.querySelector('[data-testid="chart-order-entry-preview"]').style.opacity === "1");
     const preview = await measure();
-    const ghost = await page.locator("[data-entry-price]").boundingBox();
-    await page.mouse.move(ghost.x + ghost.width / 2, ghost.y + ghost.height / 2);
-    assert.equal(await page.getByTestId("chart-order-entry-preview").evaluate(el => el.style.opacity), "1", "The axis preview must remain visible for its tooltip");
-    assert((await page.locator("[data-entry-price]").getAttribute("title")).includes("1 shares"), "Gesture tooltip must show its share quantity");
-    await page.mouse.move(350, 280);
+    assert.equal(await page.locator("[data-entry-line],[data-entry-chip]").count(),0,"Selection must use the native crosshair without duplicate previews");
+    assert((await page.getByTestId("chart-host").getAttribute("title")).includes("1 shares"),"Hover must expose order details");
+    assert.equal(await page.getByTestId("chart-host").getAttribute("data-order-cursor-color"),"#089981");
+    assert.equal(await page.evaluate(() => window.repro.crosshairOptions().horzLine.color),"#089981");
+    assert.equal(await page.evaluate(() => window.repro.crosshairOptions().horzLine.labelBackgroundColor),"#089981");
     if (cycle === 0) await page.waitForTimeout(350); // Let the 250ms route preview expire before clicking.
     await page.mouse.click(350, 280);
     await page.keyboard.up("Shift");
@@ -69,10 +69,10 @@ try {
   const kinds = await page.locator("[data-order-group]").evaluateAll(nodes => nodes.map(node => node.dataset.kind).sort());
   assert.deepEqual(kinds, ["limit", "stop-limit"], "Both LIMIT and STOP_LIMIT overlays must be covered");
   states.push(multipleOrders);
-  const limitLabel = page.getByTestId("order-label-layout-limit");
-  const limitBox = await limitLabel.boundingBox();
-  const dragX = limitBox.x + limitBox.width / 2, dragY = limitBox.y + limitBox.height / 2;
+  const linePoint = await page.evaluate(() => window.repro.pointForPrice(4.7));
+  const dragX = linePoint.x, dragY = linePoint.y;
   await page.mouse.move(dragX, dragY);
+  assert.equal(await page.evaluate(({x,y}) => getComputedStyle(document.elementFromPoint(x,y)).cursor,{x:dragX,y:dragY}),"ns-resize","An editable line must expose a resize cursor");
   await page.mouse.down();
   await page.mouse.move(dragX, dragY - 16);
   await page.mouse.up();
@@ -177,11 +177,10 @@ try {
     const axis = tables[tables.length - 1].rows[tables[tables.length - 1].rows.length - 1];
     const hostBox = host.getBoundingClientRect(), nativeBox = native.getBoundingClientRect();
     const axisBox = axis.getBoundingClientRect(), panelBox = panel.getBoundingClientRect();
-    const line = host.querySelector("[data-entry-line]");
     return { nativeOffset: nativeBox.top - hostBox.top,
       axisClippedPx: Math.max(0, axisBox.bottom - hostBox.bottom),
       panelAxisClippedPx: Math.max(0, axisBox.bottom - panelBox.bottom),
-      stopDrawnY: line?.getBoundingClientRect().top ?? null,
+      stopDrawnY: hostBox.top + Number(host.dataset.orderCursorY),
       markers: host.querySelectorAll("[data-order-group]").length };
   });
   const productionStates = [await measureProduction()];
@@ -287,7 +286,7 @@ try {
   assert(narrow.hostBottom - narrow.paneBottom > 100, "The narrow scenario must include a lower indicator pane");
   const narrowHost = await productionPage.getByTestId("chart-host").boundingBox();
   await productionPage.mouse.click(narrowHost.x + 100,narrow.paneTop + 100);
-  await productionPage.mouse.click(narrowHost.x + 100,narrow.paneTop + 103);
+  await productionPage.mouse.click(narrowHost.x + 100,narrow.paneTop + 115);
   await productionPage.waitForFunction(() => document.querySelector("[data-risk-price='buy']").title.includes("planned shares"));
   const narrowChips = (await measureRisk()).chips.sort((a,b) => a.top-b.top);
   assert(narrowChips[1].top >= narrowChips[0].bottom,"Nearby draft prices must retain separate axis controls");

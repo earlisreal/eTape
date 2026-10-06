@@ -5,6 +5,7 @@ import type { AckMsg, Order } from "../../../wire/contract";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
 import { ChartOrderMarkers } from "./ChartOrderMarkers";
 import { getTvChrome } from "../../../render/chart/tvTheme";
+import type { OrderConfig } from "../../exec/actionTemplate";
 
 const base: Order = {
   venue:"sim", id:"o1", symbol:"US.AAPL", side:"BUY", type:"LIMIT", tif:"DAY", session:"AUTO",
@@ -12,7 +13,7 @@ const base: Order = {
   avgFillPrice:0, rejectReason:"", replacesId:"", createdMs:1, updatedMs:1,
 };
 
-function mount(orders: Order[] = [base]) {
+function mount(orders: Order[] = [base], config?: OrderConfig) {
   const host = document.createElement("div");
   host.getBoundingClientRect = () => ({ x:0, y:0, top:0, left:0, right:500, bottom:400, width:500, height:400, toJSON:() => ({}) });
   const hostRef = { current:host };
@@ -24,13 +25,51 @@ function mount(orders: Order[] = [base]) {
   const utils = render(<ChartOrderMarkers chrome={getTvChrome("light")} orders={orders} venue="sim" symbol="US.AAPL" pinned={false}
     availableCash={100000} buyingPower={100000}
     sendCommand={sendCommand} hostRef={hostRef} facadeRef={facadeRef} rightAxisWidth={60}
-    layoutRef={layoutRef} chooserOpenRef={chooserOpenRef} />, { container:host });
+    layoutRef={layoutRef} chooserOpenRef={chooserOpenRef} {...(config ? {config} : {})} />, { container:host });
   return { ...utils, host, sendCommand };
 }
 
-beforeEach(() => { cleanup(); document.body.replaceChildren(); });
+beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.spyOn(document, "hasFocus").mockReturnValue(true); });
 
 describe("ChartOrderMarkers", () => {
+  it("drags the nearest plot line through the existing replace path and ignores other pointers", async () => {
+    const {host,sendCommand} = mount([base,{...base,id:"near",side:"SELL",limitPrice:105}]);
+    fireEvent.pointerMove(host,{pointerId:1,clientX:100,clientY:194});
+    expect(host.title).toContain("SELL LIMIT");
+    expect(host.style.cursor).toBe("ns-resize");
+    fireEvent.pointerDown(host,{button:0,pointerId:1,clientX:100,clientY:194});
+    fireEvent.pointerMove(window,{pointerId:2,clientX:100,clientY:180});
+    fireEvent.pointerUp(window,{pointerId:2});
+    expect(sendCommand).not.toHaveBeenCalled();
+    fireEvent.pointerMove(window,{pointerId:1,clientX:100,clientY:184});
+    fireEvent.pointerUp(window,{pointerId:1});
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("ReplaceOrder",expect.objectContaining({orderId:"near",limitPrice:115})));
+    expect(sendCommand).toHaveBeenCalledTimes(1);
+  });
+  it("offers a cross-side chooser for exact line ties", () => {
+    const {host,sendCommand} = mount([base,{...base,id:"sell",side:"SELL"}]);
+    fireEvent.pointerDown(host,{button:0,pointerId:1,clientX:100,clientY:200});
+    expect(screen.getByRole("dialog",{name:"Choose chart order"}).textContent).toContain("SELL");
+    expect(sendCommand).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button",{name:"Close order chooser"}));
+    fireEvent.pointerDown(host,{button:0,pointerId:1,clientX:100,clientY:190});
+    expect(sendCommand).not.toHaveBeenCalled();
+  });
+  it("lets a bound gesture win over line grabbing and cancels ordinary line changes", () => {
+    const config: OrderConfig = {activeVenue:"sim",templates:[{kind:"place",id:"stop",label:"Stop",side:"SELL",type:"STOP_LIMIT",tif:"DAY",session:"EXTENDED",priceSource:"Last",priceOffset:0,
+      chartBinding:"Shift",limitCushion:0,limitCushionUnit:"$",sizing:{mode:"Shares",shares:1}}]};
+    const {host,sendCommand} = mount([base],config);
+    fireEvent.pointerDown(host,{button:0,pointerId:1,clientX:100,clientY:200,shiftKey:true});
+    fireEvent.pointerMove(window,{pointerId:1,clientX:100,clientY:190,shiftKey:true});
+    fireEvent.pointerUp(window,{pointerId:1});
+    expect(sendCommand).not.toHaveBeenCalled();
+    fireEvent.pointerDown(host,{button:0,pointerId:1,clientX:100,clientY:200});
+    fireEvent.pointerMove(window,{pointerId:1,clientX:100,clientY:190});
+    fireEvent.keyDown(window,{key:"Escape"});
+    fireEvent.pointerUp(window,{pointerId:1});
+    expect(sendCommand).not.toHaveBeenCalled();
+    expect(screen.getByTestId("order-label-o1").textContent).toBe("B 100.00");
+  });
   it("uses compact side-colored axis chips, shares tooltips, and a same-side chooser", async () => {
     const { host, sendCommand } = mount([base, {...base,id:"o2"}, {...base,id:"sell",side:"SELL"}]);
     const groups = host.querySelectorAll<HTMLElement>("[data-order-group]");

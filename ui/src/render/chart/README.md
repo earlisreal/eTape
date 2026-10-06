@@ -106,3 +106,10 @@ the cursor leaves, its matching candle is absent, or the position is off-screen.
 No-Trade Bars and Volume-Only Bars are eligible; Data Gaps and empty Future
 Buffer positions are not. Cursor movement stays outside React state and legend
 work remains frame-coalesced.
+
+`orderCrosshair.ts` temporarily colors the native crosshair for chart order
+selection and snaps native mouse Y to the order tick while preserving pointer
+X, including future blank space. It restores normal formatting and theme on
+release/cancellation; action colors are local and are not sent through Crosshair
+Sync. Full-line order hit testing uses `nearestPriceLines` with an eight-pixel
+tolerance and returns all exact nearest ties for explicit selection.

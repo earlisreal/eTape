@@ -50,6 +50,7 @@ export interface ChartApiFacade {
   resetPriceScale(): void; // re-enable the right price scale's autoScale (undo a manual vertical drag)
   resize(width: number, height: number): void;
   applyOptions(options: unknown): void;
+  setOrderCrosshair(color: string | null): void;
   setWatermark(text: string | null): void; // symbol watermark on the main pane (null clears)
   // TV chrome additions:
   takeScreenshot(): HTMLCanvasElement;               // PNG export (camera button)

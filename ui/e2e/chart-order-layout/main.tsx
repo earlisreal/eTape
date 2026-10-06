@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { createChart, CandlestickSeries } from "lightweight-charts";
+import { installOrderCrosshair } from "../../src/render/chart/orderCrosshair";
 import { ChartOrderMarkers } from "../../src/chrome/panels/tv/ChartOrderMarkers";
 import { ChartConditionalOrderEntry } from "../../src/chrome/panels/tv/ChartConditionalOrderEntry";
 import { OrderConfigProvider, useOrderConfig } from "../../src/chrome/exec/useOrderConfig";
@@ -118,6 +119,9 @@ function App() {
       priceScaleWidth: () => chart.priceScale("right").width(), paneHeights: () => chart.panes().map(p => p.getHeight()),
       priceToCoordinate: p => series.priceToCoordinate(p), coordinateToPrice: y => series.coordinateToPrice(y),
     };
+    const cursor = installOrderCrosshair(chart, host, facadeRef.current, () => "#787B86");
+    facadeRef.current.setOrderCrosshair = cursor.set;
+    facadeRef.current.setPanZoomEnabled = on => chart.applyOptions({handleScroll:on,handleScale:on});
     const observer = new ResizeObserver(([e]) => chart.resize(Math.floor(e.contentRect.width), Math.floor(e.contentRect.height)));
     observer.observe(host);
     window.repro = { lastSubmitted: null, lastReplace: null, ready: true, measure(cursorY = 280) {
@@ -134,13 +138,13 @@ function App() {
         panelAxisClippedPx: Math.max(0, axisBox.bottom - panelBox.bottom),
         stopDrawnY: nativeBox.top + series.priceToCoordinate(actualStop), ghostY: ghostBox?.top,
         announcement: host.querySelector(".chart-order-announcement")?.textContent,
-        previewStopText: host.querySelector("[data-entry-price]")?.textContent.slice(2),
-        previewDetailText: host.querySelector("[data-entry-price]")?.title,
+        previewStopText: host.querySelector("[data-testid=chart-order-entry-preview]")?.dataset.price,
+        previewDetailText: host.title,
         submittedStop: window.repro.lastSubmitted?.stopPrice,
         submittedLimit: window.repro.lastSubmitted?.limitPrice,
         markers: host.querySelectorAll("[data-order-group]").length,
         range: chart.timeScale().getVisibleLogicalRange(), candleY: series.priceToCoordinate(4.8) };
-    }, addOrder(id, type, price, side = "BUY") {
+    }, pointForPrice(price) { const rect=host.getBoundingClientRect(); return {x:rect.left+200,y:rect.top+series.priceToCoordinate(price)}; }, crosshairOptions() { return chart.options().crosshair; }, addOrder(id, type, price, side = "BUY") {
       stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: {
         venue: "sim", id, symbol: "US.AAPL", side, type, tif: "DAY", session: "EXTENDED", qty: 1,
         limitPrice: type === "LIMIT" ? price : price - 0.05, stopPrice: type === "STOP_LIMIT" ? price : 0,
@@ -159,7 +163,7 @@ function App() {
       panel.style.width = `${width}px`; panel.style.height = `${height}px`;
     } };
     requestAnimationFrame(() => { layoutRef.current(); setAxisWidth(chart.priceScale("right").width()); });
-    return () => { observer.disconnect(); chart.remove(); };
+    return () => { observer.disconnect(); cursor.dispose(); chart.remove(); };
   }, []);
   useEffect(() => { requestAnimationFrame(() => layoutRef.current()); });
   return <div data-testid="panel-body" style={{ position: "absolute", left: 80, top: 100, width: 760, height: 560, overflow: "hidden", display: "flex", flexDirection: "column" }}>
@@ -167,7 +171,7 @@ function App() {
     <div data-testid="chart-host" ref={hostRef} tabIndex={0} style={{ flex: 1, minHeight: 0, position: "relative" }}>
       <div style={{ position: "absolute", zIndex: 5 }}>AAPL · Vol</div>
       <ChartOrderMarkers chrome={getTvChrome("light")} orders={snapshot.orders.values()} venue="sim" symbol="US.AAPL" pinned={false} sendCommand={sendCommand}
-        hostRef={hostRef} facadeRef={facadeRef} rightAxisWidth={axisWidth} layoutRef={layoutRef} chooserOpenRef={chooserOpenRef} />
+        config={config} activeTool="select" hostRef={hostRef} facadeRef={facadeRef} rightAxisWidth={axisWidth} layoutRef={layoutRef} chooserOpenRef={chooserOpenRef} />
       <ChartConditionalOrderEntry chrome={getTvChrome("light")} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group="green" symbol="US.AAPL"
         config={config} configLoaded activeTool="select" chooserOpenRef={chooserOpenRef} sendCommand={sendCommand} sendQuery={sendQuery} />
     </div>

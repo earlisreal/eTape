@@ -17,12 +17,12 @@ function mount(auto = false) {
     const host = document.createElement("div");
     document.body.append(host);
     host.getBoundingClientRect = () => ({ x: 0, y: 0, top: 0, left: 0, right: 500, bottom: 400, width: 500, height: 400, toJSON: () => ({}) });
-    const facadeRef = { current: { priceScaleWidth: () => 60, paneHeights: () => [400], coordinateToPrice: (y: number) => 12 - y / 100, priceToCoordinate: (p: number) => (12 - p) * 100 } as ChartApiFacade };
+    const facadeRef = { current: { setOrderCrosshair: vi.fn(), priceScaleWidth: () => 60, paneHeights: () => [400], coordinateToPrice: (y: number) => 12 - y / 100, priceToCoordinate: (p: number) => (12 - p) * 100 } as unknown as ChartApiFacade };
     const sendCommand = vi.fn(async (name: string, args: unknown) => { void name; void args; return { kind: "ack" as const, corrId: "1", status: "accepted" as const, orderId: "E1" }; });
     const sendQuery = vi.fn(async () => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "RTH", deadlineMs: Date.now() + 100000, hasTrustedEligiblePrint: true, lastEligiblePrice: 9, lastEligibleTsMs: Date.now() }));
     const result = render(<ChartRiskEntry chrome={getTvChrome("light")} panelId="chart" active group="green" symbol="AAPL" contextKey="1m" hostRef={{ current: host }} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} config={{ activeVenue: "sim", templates: [template], chartRiskAutoSend: auto }} configLoaded activeTool="select" chooserOpenRef={{ current: false }} sendCommand={sendCommand} sendQuery={sendQuery}/>, { container: host });
     sendCommand.mockClear();
-    return { ...result, host, sendCommand, sendQuery };
+    return { ...result, host, sendCommand, sendQuery, facadeRef };
 }
 beforeEach(() => {
     cleanup();
@@ -32,6 +32,26 @@ beforeEach(() => {
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 0; });
     vi.stubGlobal("cancelAnimationFrame", () => { });
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+});
+it("colors selection, hides the unselected SELL preview, and edits the first BUY without completing or sending", async () => {
+    const {host,sendCommand,facadeRef} = mount(true);
+    initiateChartRiskEntry(template);
+    expect(facadeRef.current.setOrderCrosshair).toHaveBeenLastCalledWith(getTvChrome("light").up);
+    fireEvent.pointerDown(host,{pointerId:1,button:0,clientX:100,clientY:200});
+    fireEvent.pointerUp(window,{pointerId:1});
+    fireEvent.pointerMove(host,{pointerId:1,clientX:100,clientY:220});
+    expect(facadeRef.current.setOrderCrosshair).toHaveBeenLastCalledWith(getTvChrome("light").down);
+    expect(host.querySelector<HTMLElement>("[data-risk-sell]")?.style.display).toBe("none");
+    expect(host.querySelector<HTMLElement>("[data-risk-chip='sell']")?.style.display).toBe("none");
+    fireEvent.pointerDown(host,{pointerId:2,button:0,clientX:100,clientY:200});
+    fireEvent.pointerMove(window,{pointerId:2,clientX:100,clientY:190});
+    fireEvent.pointerUp(window,{pointerId:2});
+    expect(host.querySelector("[data-risk-price='buy']")?.textContent).toBe("B 10.10");
+    expect(host.querySelector<HTMLElement>("[data-risk-chip='sell']")?.style.display).toBe("none");
+    fireEvent.keyDown(window,{key:"Enter"});
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry",expect.anything());
+    fireEvent.keyDown(window,{key:"Escape"});
+    expect(facadeRef.current.setOrderCrosshair).toHaveBeenLastCalledWith(null);
 });
 it("previews two clicks and sends one risk-sized pair on Enter", async () => {
     const { host, sendCommand } = mount();

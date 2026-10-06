@@ -27,12 +27,20 @@ flat. Unavailable cache data is shown separately and cannot claim confirmed flat
 The engine resolves shares from its cached position only when the stop triggers;
 this is an independent stop order, not a bracket linked to an entry.
 
-Risk drafts, Chart Order Gesture previews and working orders use compact side
-and price chips on the right axis, green for BUY/COVER and red for SELL/SHORT.
-Native hover tooltips carry shares, type, execution limit, custody and status;
-risk amounts and routine left-edge labels are absent. Gesture previews stay
-visible when entering their chip; its × consumes that modifier press without
-submitting. Working price chips retain drag and arrow-key edits, and their ×
-retains existing cancellation semantics. Risk draft × discards both prices.
-Price lines remain exact while nearby chips are spaced within the main pane.
-Blockers, pending/unknown actions and missing protection remain visible.
+Chart Order Gesture and unselected Risk Entry prices use the native crosshair
+and price label, green for BUY/COVER and red for SELL/SHORT, snapped to the
+actual order tick. Bound modifiers activate feedback without another pointer
+move. The moving duplicate line and chip are absent. Hover the chart for order
+details; blockers, immediate-trigger warnings and unknown outcomes stay visible.
+Escape consumes the current modifier press; release modifiers to rearm.
+
+Selected risk draft prices and working orders retain compact right-axis chips.
+Drag either an editable line in the main pane or its price chip; the nearest
+line wins, with a chooser for exact ties. A bound new-order gesture takes
+priority over working-line dragging, and an active risk draft owns its input.
+The first selected BUY can be adjusted before choosing SELL without completing
+or sending the pair. Working-line drags reuse the existing amendment preview
+and send one replacement on release; Escape/right-click/focus loss cancel.
+Price chips retain arrow-key edits, hover details and existing × behavior.
+Nearby chips remain spaced while lines stay at their actual prices. Pending,
+unknown and non-editable order states retain their existing restrictions.

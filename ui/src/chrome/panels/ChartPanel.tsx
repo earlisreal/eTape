@@ -6,6 +6,7 @@ import { ChartController, type ManagedViewportMode } from "../../render/chart/Ch
 import { clampRightScroll, RIGHT_OFFSET_BARS, usesBoundaryManagedFollow, type ChartType } from "../../render/chart/chartTheme";
 import type { ChartApiFacade, CrosshairMove, LwcSeries } from "../../render/chart/ChartApiFacade";
 import { mapCrosshairBar } from "../../render/chart/crosshairSync";
+import { installOrderCrosshair } from "../../render/chart/orderCrosshair";
 import { DiamondFillPrimitive } from "../../render/chart/diamondPrimitive";
 import { VisibleExtremaPrimitive } from "../../render/chart/visibleExtremaPrimitive";
 import { SessionShadingPrimitive } from "../../render/chart/sessionPrimitive";
@@ -59,7 +60,7 @@ type PendingIndicatorHydration = {
 };
 
 // Adapts a real LWC v5 IChartApi to the controller's minimal ChartApiFacade.
-function makeFacade(chart: IChartApi, palette: Palette): {
+function makeFacade(chart: IChartApi, palette: Palette, host: HTMLElement): {
   facade: ChartApiFacade; setPalette: (p: Palette) => void; drawings: DrawingsPrimitive; visibleExtrema: VisibleExtremaPrimitive;
 } {
   let main: ISeriesApi<"Candlestick" | "Bar" | "Line" | "Area"> | null = null;
@@ -135,7 +136,8 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     setVisibleLogicalRange: (range) =>
       chart.timeScale().setVisibleLogicalRange({ from: range.from as Logical, to: range.to as Logical }),
     resize: (w, h) => chart.resize(w, h),
-    applyOptions: (o) => chart.applyOptions(o as object),
+    applyOptions: (o) => { chart.applyOptions(o as object); orderCrosshair.refresh(); },
+    setOrderCrosshair: (color) => orderCrosshair.set(color),
     setWatermark: (text) => {
       if (watermark) { watermark.detach(); watermark = null; }
       if (text) {
@@ -172,9 +174,10 @@ function makeFacade(chart: IChartApi, palette: Palette): {
     paneStretchFactor: (i) => chart.panes()[i]?.getStretchFactor() ?? 1,
     setPaneStretchFactor: (i, f) => chart.panes()[i]?.setStretchFactor(f),
     priceScaleWidth: () => chart.priceScale("right").width(),
-    remove: () => chart.remove(),
+    remove: () => { orderCrosshair.dispose(); chart.remove(); },
   };
-  return { facade, setPalette: (p) => { session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); visibleExtrema.setPalette(p); }, drawings, visibleExtrema };
+  const orderCrosshair = installOrderCrosshair(chart, host, facade, () => palette.crosshair);
+  return { facade, setPalette: (p) => { palette = p; session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); visibleExtrema.setPalette(p); orderCrosshair.refresh(); }, drawings, visibleExtrema };
 }
 
 export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange, group: groupProp, symbol: symbolProp, monitoring, active }: PanelProps): JSX.Element {
@@ -336,7 +339,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       if (selectionFrame !== null) return;
       selectionFrame = requestAnimationFrame(() => { selectionFrame = null; refreshSelRef.current?.(); });
     };
-    const { facade, setPalette, drawings, visibleExtrema } = makeFacade(chart, palette);
+    const { facade, setPalette, drawings, visibleExtrema } = makeFacade(chart, palette, host);
     let viewportGeneration = 0;
     let indicatorReloadPending = false;
     let chartSnapshotLoaded = false;
@@ -1276,7 +1279,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           <ChartOrderMarkers chrome={chrome} orders={execSnapshot.orders.values()} venue={linkGroups.venueFor(group) ?? ""} symbol={chartSymbol}
             availableCash={execSnapshot.accounts.get(linkGroups.venueFor(group) ?? "")?.availableCash ?? 0} buyingPower={execSnapshot.accounts.get(linkGroups.venueFor(group) ?? "")?.buyingPower ?? 0}
             pinned={group === null} sendCommand={commands.sendCommand} hostRef={hostRef} facadeRef={facadeRef}
-            rightAxisWidth={rightAxisWidth} layoutRef={orderMarkerLayoutRef} chooserOpenRef={orderChooserOpenRef} />
+            rightAxisWidth={rightAxisWidth} layoutRef={orderMarkerLayoutRef} chooserOpenRef={orderChooserOpenRef} config={orderConfig.config} activeTool={activeTool} />
           <ChartConditionalOrderEntry chrome={chrome} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
             symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={activeTool} chooserOpenRef={orderChooserOpenRef}
             sendCommand={commands.sendCommand} sendQuery={commands.sendQuery} />
