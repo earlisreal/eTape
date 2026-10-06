@@ -125,8 +125,8 @@ func (p *Poller) SetScannerWorkspace(connID uint64, args wsmsg.SetScannerWorkspa
 	p.mu.Unlock()
 	if idle {
 		p.stopScannerWork()
-		p.pokeScannerPoll()
 	}
+	p.pokeScannerPoll()
 	publishPausedScannerPanels(p.pub, paused)
 	p.publishDeletedPanels(deleted)
 	return nil
@@ -166,6 +166,7 @@ func (p *Poller) SetPanelFilters(workspaceID, panelID string, filters wsmsg.Scan
 		p.scannerWorkspaces[workspaceID] = map[string]wsmsg.ScannerFilters{}
 	}
 	p.scannerWorkspaces[workspaceID][panelID] = filters
+	p.pokeScannerPoll()
 	return nil
 }
 
@@ -570,12 +571,18 @@ func (p *Poller) pollPanelsOnce(ctx context.Context, now time.Time, panels []act
 				state.board[sym] = currentSessionItem(updated, phase, poolDay)
 			}
 		}
+		poolFilters := panel.filters
+		poolFilters.MinRelativeVolume = 0
+		var warmingRows []wsmsg.ScannerRow
 		for _, item := range source[panel.filters.Mode] {
 			item, ok := all[item.Symbol]
 			if !ok {
 				continue
 			}
 			item = currentSessionItem(item, phase, poolDay)
+			if panel.filters.MinRelativeVolume > 0 {
+				warmingRows = append(warmingRows, rankRowsFiltered([]rankItem{item}, p.floats, poolFilters)...)
+			}
 			if len(rankRowsFiltered([]rankItem{item}, p.floats, panel.filters)) > 0 {
 				state.board[item.Symbol] = item
 			}
@@ -607,7 +614,11 @@ func (p *Poller) pollPanelsOnce(ctx context.Context, now time.Time, panels []act
 			DiscoveryAt: formatScannerTime(state.discoveryAt), Status: state.status,
 			Rows: rows, Filters: panel.filters, Baseline: baseline,
 		}})
-		for _, row := range rows {
+		// REL VOL needs history before admission. Warm otherwise-eligible
+		// candidates through the same bounded pool as admitted board rows.
+		warmingRows = append(warmingRows, rows...)
+		sortPanelRows(warmingRows, panel.filters.Mode)
+		for _, row := range warmingRows {
 			if !poolSeen[row.Symbol] {
 				poolSeen[row.Symbol] = true
 				poolRows = append(poolRows, row)

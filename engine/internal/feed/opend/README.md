@@ -1,5 +1,7 @@
 # OpenD Feed
 
+Subscriptions and quota-free caches start without the rolling-request startup cooldown. Subscription batches retain one-second spacing, quota admission, headroom, and unsubscribe hysteresis. Static info, subscription quota, and history quota keep separate five-second local gates so metadata cannot delay quota admission. Rate-limited requests restore the remaining 31-second window from an atomic checkpoint beside the engine database; missing, corrupt, changed-provider, or clock-rollback state keeps the full conservative wait. The checkpoint covers this engine's requests, not other OpenD clients. Candle, book, ticker, and quote cache seeds run independently; cached ticker prints still precede buffered live ticker pushes.
+
 BasicQot preserves provider health separately from price data: `isSuspended`
 is an affirmative suspension signal, while optional `secStatus` maps to the
 source-neutral `ProviderStatusUnknown`, `ProviderStatusNormal`, or

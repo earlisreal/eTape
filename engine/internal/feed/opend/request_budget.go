@@ -66,10 +66,23 @@ func marketDataRequestPacing(protoID uint32) (string, time.Duration) {
 		return "opend-short-interest", 1500 * time.Millisecond
 	case ProtoQotGetSearchNews:
 		return "opend-search-news", 5 * time.Second
-	case ProtoQotGetStaticInfo, ProtoQotGetSubInfo, ProtoQotRequestHistoryKLQuota:
+	case ProtoQotGetStaticInfo:
 		return "opend-unpublished", 5 * time.Second
+	case ProtoQotGetSubInfo:
+		return "opend-subscription-quota", 5 * time.Second
+	case ProtoQotRequestHistoryKLQuota:
+		return "opend-history-quota", 5 * time.Second
 	default:
 		return "", 0
+	}
+}
+
+func hasRollingRequestLimit(bucket string) bool {
+	switch bucket {
+	case "", "opend-unpublished", "opend-subscription", "opend-subscription-quota", "opend-history-quota":
+		return false
+	default:
+		return true
 	}
 }
 
@@ -78,7 +91,7 @@ func (p *requestPacer) reserve(bucket string, spacing time.Duration) time.Time {
 	defer p.mu.Unlock()
 	now := p.clk.Now()
 	slot := now
-	if bucket != "opend-unpublished" && p.readyAt.After(slot) {
+	if hasRollingRequestLimit(bucket) && p.readyAt.After(slot) {
 		slot = p.readyAt
 	}
 	if next := p.next[bucket]; next.After(slot) {
@@ -124,7 +137,7 @@ func (p *requestPacer) waitPriority(ctx context.Context, bucket string, spacing 
 		p.queues[bucket] = queue
 		now := p.clk.Now()
 		slot := now
-		if bucket != "opend-unpublished" && p.readyAt.After(slot) {
+		if hasRollingRequestLimit(bucket) && p.readyAt.After(slot) {
 			slot = p.readyAt
 		}
 		if next := p.next[bucket]; next.After(slot) {
