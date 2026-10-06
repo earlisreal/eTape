@@ -21,6 +21,7 @@ function mount(orders: Order[] = [base]) {
   const sendCommand = vi.fn(async ():Promise<AckMsg> => ({ kind:"ack", corrId:"c1", status:"accepted" }));
   document.body.append(host);
   const utils = render(<ChartOrderMarkers orders={orders} venue="sim" symbol="US.AAPL" pinned={false}
+    availableCash={100000} buyingPower={100000}
     sendCommand={sendCommand} hostRef={hostRef} facadeRef={facadeRef} rightAxisWidth={60}
     layoutRef={layoutRef} chooserOpenRef={chooserOpenRef} />, { container:host });
   return { ...utils, host, sendCommand };
@@ -32,10 +33,12 @@ describe("ChartOrderMarkers", () => {
   it("sends the observed phase when dragging a linked trigger",async()=>{
     const order:Order={...base,type:"STOP_LIMIT",stopPrice:100,limitPrice:100.05,held:{phase:"WAITING",deadlineMs:9999999999999},
       riskEntry:{stopId:"s",budget:100,mode:"Dollar",buyCushion:{value:0.05,unit:"$"},sellCushion:{value:0,unit:"$"}}};
-    const {sendCommand}=mount([order]);
+    const stop:Order={...order,id:"s",side:"SELL",qty:0,leavesQty:0,stopPrice:98,limitPrice:98,riskEntryId:"o1"};
+    delete stop.riskEntry;
+    const {sendCommand}=mount([order,stop]);
     fireEvent.pointerDown(screen.getByTestId("order-label-o1"),{button:0,pointerId:1,clientX:20,clientY:200});
     fireEvent.pointerMove(window,{pointerId:1,clientX:20,clientY:190});fireEvent.pointerUp(window,{pointerId:1,clientX:20,clientY:190});
-    await waitFor(()=>expect(sendCommand).toHaveBeenCalledWith("ReplaceOrder",expect.objectContaining({stopPrice:110,expectedHeldPhase:"WAITING"})));
+    await waitFor(()=>expect(sendCommand).toHaveBeenCalledWith("ReplaceOrder",expect.objectContaining({stopPrice:110,qty:8,expectedHeldPhase:"WAITING",expectedRiskEntryPhase:"WAITING"})));
   });
   it("previews the snapped price during drag and sends a price-only replace on release", async () => {
     const { sendCommand } = mount();

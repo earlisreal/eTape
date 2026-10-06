@@ -207,7 +207,7 @@ func (c *Core) activateHeld(ctx context.Context, o Order) {
 	if o.RiskEntry != nil {
 		defer func() {
 			if !c.order(o.ID).Working() {
-				c.syncRiskProtection(ctx, c.order(o.ID))
+				c.syncRiskProtection(ctx, c.order(o.ID), false)
 			}
 		}()
 	}

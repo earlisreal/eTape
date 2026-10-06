@@ -65,7 +65,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
         let frame: number | null = null;
         const message = (text: string) => { const el = rootRef.current?.querySelector<HTMLElement>("[data-risk-detail]"); if (el)
             el.textContent = text; };
-        const clear = () => { draft = null; pointer = null; latest.current.facadeRef.current?.setPanZoomEnabled?.(true); if (rootRef.current)
+        const clear = () => { if (draft && latest.current.activeTool === "select") latest.current.facadeRef.current?.setPanZoomEnabled?.(true); draft = null; pointer = null; if (rootRef.current)
             rootRef.current.style.display = "none"; };
         const editable = () => !!document.activeElement?.closest("input,textarea,select,[contenteditable='true']");
         const size = () => {

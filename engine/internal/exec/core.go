@@ -526,12 +526,13 @@ func (c *Core) Recover(ctx context.Context) error {
 			}
 		}
 	}
+	c.syncRiskVenue(ctx, "")
 	for _, row := range c.closed.snapshotSince(cutoffMs) {
 		c.emit(ClosedOrderUpdate{ClosedOrder: row})
 	}
 	for _, vs := range c.state.Venues {
 		for _, o := range vs.Orders {
-			if o.Working() {
+			if o.Working() || o.RiskEntry != nil || o.RiskEntryID != "" {
 				c.emit(OrderUpdate{Order: o})
 			}
 		}
@@ -1128,7 +1129,7 @@ func (c *Core) handleCancel(ctx context.Context, cm CancelOrder) CmdAck {
 	}
 	o := c.state.Venue(v).Orders[cm.OrderID]
 	if o.RiskEntry != nil {
-		defer func() { c.syncRiskProtection(ctx, c.order(o.ID)) }()
+		defer func() { c.syncRiskProtection(ctx, c.order(o.ID), false) }()
 	}
 	if o.RiskEntryID != "" {
 		entry := c.riskOwner(o)
@@ -1600,6 +1601,7 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 			c.confirmSellSubmit(e.V, o.ID)
 		}
 		c.setPositionsReady(e.V, true)
+		c.syncRiskVenue(ctx, e.V)
 		c.maybeClearFlattenPending(e.V)
 	case BrokerSnapshot:
 		v := e.V
@@ -1640,6 +1642,7 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		}
 		c.emitProjectedAccount(v)
 		c.setPositionsReady(v, true)
+		c.syncRiskVenue(ctx, v)
 		c.maybeClearFlattenPending(v)
 	case BrokerConnUp:
 		c.setPositionsReady(e.V, false)

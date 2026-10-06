@@ -23,7 +23,8 @@ was using.
   Existing orders and positions remain attached to their original venue; the
   UI keeps a warning while working orders remain there.
 - The engine polls every configured live venue for risk and polls a paper (or
-  otherwise non-risk) venue only while an Account panel demands it. Demands are
+  otherwise non-risk) venue only while an Account panel or a grouped Chart Risk
+  Entry panel demands it for account display or sizing. Demands are
   connection/panel scoped and deduplicated by venue.
 - Alpaca's broker Day P&L is authoritative. Moomoo's Day P&L is calculated
   from current equity minus the persisted prior-close equity and signed
@@ -40,6 +41,6 @@ was using.
 
 Account display, hotkeys, and order entry now agree on the same visible Link
 Group context. A user must deliberately group a pinned panel before using it,
-and an account panel's close/unmount releases its display polling demand. The
+and an account or Chart Risk Entry panel's close/unmount releases its polling demand. The
 legacy field and compatibility command remain only to read old state safely;
 new code must not use them for routing or risk selection.

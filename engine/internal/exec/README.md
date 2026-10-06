@@ -3,7 +3,8 @@
 Broker-neutral lifecycle, gates, routing, reconciliation, and round-trip
 tracking. Link Groups choose the execution venue; there is no runtime global
 venue fallback. The account poller requests every configured live venue for
-risk and each venue demanded by an open Account panel, deduplicated per venue.
+risk and each venue demanded by an open Account or grouped Chart Risk Entry
+panel, deduplicated per venue.
 Account failures retain the last snapshot and become stale after five
 intervals; stale live data blocks new openings until the user unlocks again,
 while reductions remain allowed. Max Day Loss aggregates configured live
@@ -32,8 +33,10 @@ reservations for paused protection. Disarm/day-loss cancel further buying while
 healthy reducing linked exits remain enabled. Cancel Protection cancels every
 linked leg and leaves shares open. Restart/feed/broker gaps pause local custody
 for reconciliation and manual Resume; ambiguous children are never reposted.
+Snapshots and recovery update protection from confirmed fills; newly uncovered
+late fills discovered by reconciliation require manual Resume even with healthy quotes.
 Marker edits retain cushions, resize only before buy activation against the
-original dollar budget, and lock quantities thereafter. Commands carry observed
+original dollar budget with the reviewed quantity as a ceiling, and lock quantities thereafter. Commands carry observed
 held and entry phases so activation during a drag rejects a stale amendment.
 Protection failures and DAY expiry can leave shares open; the UI reports them.
 

@@ -201,6 +201,16 @@ func (c *Core) riskOwner(o Order) Order {
 	return Order{}
 }
 
+func (c *Core) syncRiskVenue(ctx context.Context, venue VenueID) {
+	for _, vs := range c.state.Venues {
+		for _, entry := range vs.Orders {
+			if entry.RiskEntry != nil && (venue == "" || entry.Venue == venue) {
+				c.syncRiskProtection(ctx, entry, true)
+			}
+		}
+	}
+}
+
 func (c *Core) persistRisk(entry Order, risk RiskEntry) error {
 	entry.RiskEntry = &risk
 	entry.UpdatedMs = c.now()
@@ -208,7 +218,7 @@ func (c *Core) persistRisk(entry Order, risk RiskEntry) error {
 }
 
 // Protection is scoped to confirmed fills from this entry, never the whole position.
-func (c *Core) syncRiskProtection(ctx context.Context, entry Order) {
+func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling bool) {
 	if entry.RiskEntry == nil {
 		return
 	}
@@ -260,7 +270,7 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order) {
 		Qty: qty, LimitPrice: stop.LimitPrice, StopPrice: stop.StopPrice, ClientOrderID: c.idgen.Next()}, c.now())
 	late.RiskEntryID = entry.ID
 	late.Held = &HeldOrder{Phase: HeldWaiting, DeadlineMs: stop.Held.DeadlineMs}
-	if stop.Held.Phase == HeldPaused || !c.printHealthy || !c.state.PositionsReady(entry.Venue) {
+	if reconciling || stop.Held.Phase == HeldPaused || !c.printHealthy || !c.state.PositionsReady(entry.Venue) {
 		late.Held.Phase = HeldPaused
 		late.Held.PausedReason = "late entry fill; reconcile and resume protection"
 	}
@@ -305,7 +315,7 @@ func (c *Core) riskBrokerEvent(ctx context.Context, id string) {
 	if o.RiskEntryID != "" && (o.Status == StatusRejected || o.Status == StatusCanceled && !entry.RiskEntry.ProtectionCanceled || o.Held != nil && o.Held.Phase == HeldUnknown || o.Action != nil && (o.Action.Phase == ActionUnknown || o.Action.Phase == ActionFailed)) {
 		c.failRisk(ctx, entry, "protection interrupted; verify "+o.ID)
 	}
-	c.syncRiskProtection(ctx, c.order(entry.ID))
+	c.syncRiskProtection(ctx, c.order(entry.ID), false)
 }
 
 func (c *Core) cancelRiskProtection(ctx context.Context, entry Order) error {
@@ -392,6 +402,9 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 		stop.LimitPrice = price
 	}
 	if entry.Held.ChildClientID == "" {
+		if !finitePositive(cm.Qty) {
+			return blocked("positive reviewed share quantity required before buy activation")
+		}
 		if stop.StopPrice >= entry.StopPrice {
 			return blocked("sell trigger must be below buy trigger")
 		}
@@ -403,7 +416,7 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 		if risk.Mode == "CashPct" {
 			funds = account.AvailableCash
 		}
-		qty := riskShares(risk.Budget, entry.LimitPrice, stop.LimitPrice, funds)
+		qty := math.Min(riskShares(risk.Budget, entry.LimitPrice, stop.LimitPrice, funds), math.Floor(cm.Qty))
 		if !finitePositive(qty) {
 			return blocked("risk or funding budget rounds to zero shares")
 		}

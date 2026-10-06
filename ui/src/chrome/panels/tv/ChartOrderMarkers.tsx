@@ -8,7 +8,7 @@ import {resolveLimitCushionPrice} from "../../exec/priceSource";
 const LIMIT = "#f4c84a";
 const STOP = "#34c6dc";
 type Pending = { kind: "replace" | "cancel"; price?: number; stop: boolean; confirmedPrice?: number; outcome: "requested" | "unknown" };
-type Drag = { id: string; marker: ChartOrderMarker; startX: number; startY: number; startPrice: number; price: number; moved: boolean; entryPhase:string };
+type Drag = { id: string; marker: ChartOrderMarker; startX: number; startY: number; startPrice: number; price: number; moved: boolean; entryPhase:string; previewQty:number };
 
 interface Props {
   availableCash?: number;
@@ -58,11 +58,11 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
   props.chooserOpenRef.current = chooser !== null;
   const [announcement, setAnnouncement] = useState("");
 
-  const riskProposal=(marker:ChartOrderMarker,price:number):string=>{
+  const riskProposal=(marker:ChartOrderMarker,price:number):{detail:string;qty:number}=>{
     const all=Array.from(latest.current.orders);
     const entry=marker.order.riskEntry ? marker.order : all.find(o=>o.id===marker.order.riskEntryId);
     const risk=entry?.riskEntry,stop=risk && all.find(o=>o.id===risk.stopId);
-    if(!entry || !risk || !stop)return "";
+    if(!entry || !risk || !stop)return {detail:"",qty:0};
     let buy=entry.limitPrice,sell=stop.limitPrice;
     const trigger=marker.kind!=="limit";
     const cushion=marker.order.side === "BUY"?risk.buyCushion:risk.sellCushion;
@@ -73,7 +73,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       marker.order.id===entry.id && trigger?price:entry.stopPrice,marker.order.id!==entry.id && trigger?price:stop.stopPrice,latest.current.availableCash ?? 0,latest.current.buyingPower ?? 0,risk.budget);
     const qty=locked?entry.qty:sized.qty;
     const before=entry.qty*Math.max(0,entry.limitPrice-stop.limitPrice),after=qty*Math.max(0,buy-sell);
-    return `${qty} shares · estimated risk $${before.toFixed(2)} → $${after.toFixed(2)}${after>risk.budget+0.005?" · ABOVE ORIGINAL BUDGET":""}`;
+    return {qty,detail:`${qty} shares · estimated risk $${before.toFixed(2)} → $${after.toFixed(2)}${after>risk.budget+0.005?" · ABOVE ORIGINAL BUDGET":""}`};
   };
 
   const layout = () => {
@@ -133,7 +133,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     const chip = row.querySelector<HTMLElement>("[data-order-price]");
     if (chip) { chip.textContent = priceText(price); chip.style.borderColor = color; }
     const riskDetail=row.querySelector<HTMLElement>("[data-order-risk]");
-    if(riskDetail && drag.current)riskDetail.textContent=riskProposal(drag.current.marker,price);
+    if(riskDetail && drag.current){const proposal=riskProposal(drag.current.marker,price);riskDetail.textContent=proposal.detail;drag.current.previewQty=proposal.qty;}
   };
 
   const cancelDrag = () => {
@@ -149,19 +149,21 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     setAnnouncement("Price change canceled.");
   };
 
-  const sendReplace = async (marker: ChartOrderMarker, price: number, observedEntryPhase?:string) => {
+  const sendReplace = async (marker: ChartOrderMarker, price: number, observedEntryPhase?:string,approvedQty?:number) => {
     const stop = marker.kind !== "limit";
     const entry=marker.order.riskEntry ? marker.order : Array.from(latest.current.orders).find(o=>o.id===marker.order.riskEntryId);
+    const proposal=riskProposal(marker,price);
+    const waitingRisk=!!entry?.riskEntry && (observedEntryPhase ?? (entry.held?.childClientId?"ACTIVATED":"WAITING"))==="WAITING";
+    if(waitingRisk && !(approvedQty ?? proposal.qty)){setAnnouncement("Risk preview unavailable or zero shares; no modification sent.");return;}
     const args: ReplaceOrderArgs = {
       venue: marker.order.venue, orderId: marker.order.id,
-      qty: 0, // price-only chart edits preserve the broker-authoritative total quantity in Core.
+      qty: waitingRisk ? approvedQty ?? proposal.qty : 0, // waiting pairs cap the approved preview; activated orders preserve quantity.
       limitPrice: stop ? marker.order.limitPrice : price,
       stopPrice: stop ? price : marker.order.stopPrice,
       ...((marker.order.riskEntry || marker.order.riskEntryId) ? {expectedHeldPhase:marker.phase,expectedRiskEntryPhase:observedEntryPhase ?? (entry?.held?.childClientId?"ACTIVATED":"WAITING")} : {}),
     };
-    const proposal=riskProposal(marker,price);
     setPending((current) => new Map(current).set(marker.order.id, { kind: "replace", price, confirmedPrice: marker.price, stop, outcome: "requested" }));
-    setAnnouncement(`Modify requested at ${priceText(price)}.${proposal ? ` ${proposal}`:""}`);
+    setAnnouncement(`Modify requested at ${priceText(price)}.${proposal.detail ? ` ${proposal.detail}`:""}`);
     try {
       const ack = await latest.current.sendCommand("ReplaceOrder", args);
       if (ack.ambiguous) {
@@ -182,7 +184,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     event.preventDefault(); event.stopPropagation();
     drag.current = { id: marker.order.id, marker, startX: event.clientX, startY: event.clientY,
       startPrice: marker.price, price: marker.price, moved: false,
-      entryPhase:(marker.order.riskEntry ? marker.order : Array.from(latest.current.orders).find(o=>o.id===marker.order.riskEntryId))?.held?.childClientId?"ACTIVATED":"WAITING" };
+      entryPhase:(marker.order.riskEntry ? marker.order : Array.from(latest.current.orders).find(o=>o.id===marker.order.riskEntryId))?.held?.childClientId?"ACTIVATED":"WAITING",previewQty:riskProposal(marker,marker.price).qty };
     const row = [...(latest.current.hostRef.current?.querySelectorAll<HTMLElement>("[data-order-group]") ?? [])]
       .find((el) => el.dataset.orderIds?.split(",").includes(marker.order.id));
     const confirmedLine = row?.querySelector<HTMLElement>("[data-order-confirmed-line]");
@@ -215,7 +217,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
         .find((el) => el.dataset.orderIds?.split(",").includes(current.id));
       if (row) { delete row.dataset.proposedPrice; row.querySelector<HTMLElement>("[data-order-price]")?.style.removeProperty("border-color");
         if (!current.moved || current.price === current.startPrice) { const confirmed = row.querySelector<HTMLElement>("[data-order-confirmed-line]"); if (confirmed) confirmed.style.display = "none"; } }
-      if (current.moved && current.price !== current.startPrice) void sendReplace(current.marker, current.price,current.entryPhase);
+      if (current.moved && current.price !== current.startPrice) void sendReplace(current.marker, current.price,current.entryPhase,current.previewQty);
       else paintProposal(current.id, current.startPrice, false);
     };
     const onKey = (event: KeyboardEvent) => {
@@ -316,7 +318,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
             aria-label={first.order.riskEntryId?"Cancel Protection":`Cancel ${orderTitle(first)}`} title={first.order.riskEntryId?"Cancel Protection — cancels remaining buy and linked sells; leaves shares open":`Cancel ${orderTitle(first)}`} onClick={() => void cancelOrder(first)}
             style={{ border:0, borderLeft:`1px solid ${warningColor}`, background:"transparent", color:"inherit", height:"100%", padding:"0 5px", cursor:"pointer", font:"bold 12px system-ui" }}>×</button>}
         </div>
-        {(first.order.riskEntry || first.order.riskEntryId) && <div data-order-risk style={{position:"absolute",left:8,top:12,color:warningColor,background:"#0c1017",fontSize:10}}>{riskProposal(first,first.price)}</div>}
+        {(first.order.riskEntry || first.order.riskEntryId) && <div data-order-risk style={{position:"absolute",left:8,top:12,color:warningColor,background:"#0c1017",fontSize:10}}>{riskProposal(first,first.price).detail}</div>}
         {chosen && group.markers.length > 1 && <div role="dialog" aria-label="Choose chart order" style={{ position:"absolute", right:props.rightAxisWidth + 6, top:stackIndex * 18 + 14,
           minWidth:185, padding:5, border:`1px solid ${color}`, borderRadius:4, background:"#111821", boxShadow:"0 4px 18px #0008", pointerEvents:"auto" }}>
           {group.markers.map((marker) => <div key={marker.order.id} style={{ display:"flex", gap:4, alignItems:"center", marginBottom:3 }}>

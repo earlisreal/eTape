@@ -155,7 +155,7 @@ func TestRiskEntryDragRevalidatesEntryActivation(t *testing.T) {
 	if entry.Qty != 400 {
 		t.Fatalf("cushion risk size: %+v", entry)
 	}
-	edit := c.Do(ReplaceOrder{Venue: "v", OrderID: entry.ID, StopPrice: 10.2, ExpectedHeldPhase: HeldWaiting, ExpectedRiskEntryPhase: "WAITING"})
+	edit := c.Do(ReplaceOrder{Venue: "v", OrderID: entry.ID, Qty: 222, StopPrice: 10.2, ExpectedHeldPhase: HeldWaiting, ExpectedRiskEntryPhase: "WAITING"})
 	if !edit.Accepted {
 		t.Fatalf("waiting edit: %+v", edit)
 	}
@@ -195,5 +195,106 @@ func TestRiskEntryRecoveryKeepsPairPausedWithoutBrokerReplay(t *testing.T) {
 	case req := <-broker.submits:
 		t.Fatalf("restart replayed order: %+v", req)
 	default:
+	}
+}
+
+func TestRiskEntryReconciledFillsGrowPausedProtection(t *testing.T) {
+	c, clk, broker, ctx := newRiskCore(t)
+	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500})
+	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
+	stop := waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.Held != nil })
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	<-broker.submits
+	broker.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
+	waitHeldOrder(t, c, entry.ID, HeldWorking)
+	broker.ev <- BrokerConnDown{V: "v"}
+	waitHeldOrder(t, c, stop.ID, HeldPaused)
+	entry.Type = TypeLimit
+	entry.Held = nil
+	entry.RiskEntry = nil
+	entry.ExecutedQty = 100
+	entry.LeavesQty = 400
+	entry.Status = StatusPartiallyFilled
+	broker.ev <- BrokerSnapshot{V: "v", Account: AccountSnapshot{Venue: "v", BuyingPower: 100000, AvailableCash: 100000, TsMs: clk.Now().UnixMilli()}, Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 100, AvgPrice: 10}}, Orders: []Order{entry}}
+	updated := waitOrder(t, c, stop.ID, func(o Order) bool { return o.Qty == 100 })
+	if updated.Held.Phase != HeldPaused {
+		t.Fatal("reconciliation automatically resumed protection")
+	}
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.9))
+	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
+		time.Sleep(time.Millisecond)
+	}
+	if resume := c.Do(ResumeHeldOrder{Venue: "v", OrderID: stop.ID}); !resume.Accepted {
+		t.Fatalf("resume: %+v", resume)
+	}
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(4, clk.Now(), 9.8))
+	select {
+	case req := <-broker.submits:
+		if req.Side != SideSell || req.Qty != 100 {
+			t.Fatalf("reconciled protection: %+v", req)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("resumed protection missing")
+	}
+}
+
+func TestRiskEntryWaitingEditCapsReviewedQuantity(t *testing.T) {
+	c, _, _, _ := newRiskCore(t)
+	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500})
+	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
+	if edit := c.Do(ReplaceOrder{Venue: "v", OrderID: entry.ID, Qty: 100, StopPrice: 10, ExpectedHeldPhase: HeldWaiting, ExpectedRiskEntryPhase: "WAITING"}); !edit.Accepted {
+		t.Fatalf("edit: %+v", edit)
+	}
+	updated := waitOrder(t, c, entry.ID, func(o Order) bool { return o.RiskEntry != nil })
+	if updated.Qty != 100 {
+		t.Fatalf("entry grew above reviewed preview: %+v", updated)
+	}
+}
+
+func TestRiskEntryReconciledLateFillRequiresResume(t *testing.T) {
+	c, clk, broker, ctx := newRiskCore(t)
+	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500})
+	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
+	stop := waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.Held != nil })
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	<-broker.submits
+	broker.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
+	broker.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 100, Price: 10, TsMs: clk.Now().UnixMilli()}, CumQty: 100, AvgPrice: 10}
+	waitOrder(t, c, stop.ID, func(o Order) bool { return o.Qty == 100 })
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.8))
+	<-broker.submits
+	broker.ev <- OrderAccepted{V: "v", OID: stop.ID, Ts: clk.Now().UnixMilli()}
+	stop = waitHeldOrder(t, c, stop.ID, HeldWorking)
+	broker.ev <- BrokerConnDown{V: "v"}
+	for c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
+		time.Sleep(time.Millisecond)
+	}
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(4, clk.Now(), 9.8))
+	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
+		time.Sleep(time.Millisecond)
+	}
+	entry.Type, entry.Held, entry.RiskEntry = TypeLimit, nil, nil
+	entry.ExecutedQty, entry.LeavesQty, entry.Status = 120, 380, StatusPartiallyFilled
+	stop.Type, stop.Held, stop.RiskEntryID = TypeLimit, nil, ""
+	broker.ev <- BrokerSnapshot{V: "v", Account: AccountSnapshot{Venue: "v", BuyingPower: 100000, AvailableCash: 100000, TsMs: clk.Now().UnixMilli()}, Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 120, AvgPrice: 10}}, Orders: []Order{entry, stop}}
+	deadline := time.After(time.Second)
+	for {
+		select {
+		case u := <-c.Updates():
+			if update, ok := u.(OrderUpdate); ok && update.Order.RiskEntryID == entry.ID && update.Order.ID != stop.ID {
+				if update.Order.Qty != 20 || update.Order.Held.Phase != HeldPaused {
+					t.Fatalf("reconciled late protection must await Resume: %+v", update.Order)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatal("reconciled late protection missing")
+		}
 	}
 }
