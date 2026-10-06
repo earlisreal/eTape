@@ -225,10 +225,16 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 current.route = await latest.current.sendQuery("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol: latest.current.symbol, riskEntry: true }) as StopLimitRoutePreview;
             }
             catch {
-                current.error = "Engine preview unavailable.";
+                if (draft === current) {
+                    current.busy = false;
+                    current.error = "Engine preview unavailable.";
+                    paint();
+                }
+                return;
             }
             if (draft !== current)
                 return;
+            delete current.error;
             const error = invalid();
             const s = size();
             if (error || !s || !s.qty) {
@@ -392,7 +398,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 draft.complete = true;
                 draft.maxQty = size()?.qty ?? 0;
                 paint();
-                if (latest.current.config.chartRiskAutoSend && !invalid())
+                if (latest.current.config.chartRiskAutoSend)
                     void submit();
             }
             else

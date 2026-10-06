@@ -46,6 +46,9 @@ passes pointer input through. Notional stays hidden. Drag either endpoint or its
 adjust; Enter submits and Escape or either draft × discards the entire setup.
 Right-click, focus loss and context changes cancel.
 The global auto-send setting defaults off and applies only to initial setup.
+Enter and initial auto-send both refresh eligible market data before validating
+and submitting. A failed refresh or a current blocker leaves the draft available
+for review and an explicit Enter retry; it never retries automatically.
 Submitted linked markers always request edits on release, showing updated shares
 on hover and an above-budget warning after activation. Waiting linked protection
 shows planned shares; deferred position sizing shows its percentage until the
