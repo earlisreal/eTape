@@ -195,6 +195,29 @@ it.each(["drag", "click"] as const)("refreshes an expired initial preview before
     expect(sendCommand.mock.calls.filter(([name]) => name === "SubmitRiskEntry")).toHaveLength(1);
     expect(screen.getByTestId("chart-risk-entry").style.display).toBe("none");
 });
+it.each(["expired", "untrusted"])("keeps an %s setup preview quiet but shows a failed send-time freshness check", async state => {
+    const clock = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
+    const { host, sendCommand, sendQuery, layoutRef } = mount();
+    const preview = sendQuery.getMockImplementation()!;
+    if (state === "untrusted") sendQuery.mockImplementationOnce(async () => ({ ...await preview(), hasTrustedEligiblePrint: false }));
+    initiateChartRiskEntry(template);
+    const initial = await sendQuery.mock.results[0].value;
+    clock.mockReturnValue(Date.now() + 2001);
+    layoutRef.current();
+    expect(host.querySelector("[data-risk-status]")?.textContent).toBe("");
+    placeRiskPair(host);
+    expect(host.querySelector("[data-risk-status]")?.textContent).toBe("");
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
+    sendQuery.mockResolvedValueOnce(initial);
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe("Fresh eligible market data required."));
+    layoutRef.current();
+    expect(host.querySelector("[data-risk-status]")?.textContent).toBe("Fresh eligible market data required.");
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry", expect.anything()));
+    expect(screen.getByTestId("chart-risk-entry").style.display).toBe("none");
+});
 it("blocks a failed submission refresh even when the initial preview is fresh, and allows an explicit retry", async () => {
     vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
     const { host, sendCommand, sendQuery } = mount(true);

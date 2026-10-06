@@ -104,7 +104,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             }
             return "";
         };
-        const invalid = () => {
+        const invalid = (requireFreshPrint = true) => {
             const p = latest.current, status = p.stores.exec.status(), v = status?.venues.find(v => v.venue === venue);
             if (!p.active || !document.hasFocus() || modalTracker.isOpen() || editable())
                 return "Focus the chart to continue.";
@@ -124,7 +124,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return draft?.error ?? "Checking engine trigger source…";
             if (draft.route.reason)
                 return draft.route.reason;
-            if (!draft.route.hasTrustedEligiblePrint || !draft.route.lastEligibleTsMs || Date.now() - draft.route.lastEligibleTsMs > 2000)
+            if (requireFreshPrint && (!draft.route.hasTrustedEligiblePrint || !draft.route.lastEligibleTsMs || Date.now() - draft.route.lastEligibleTsMs > 2000))
                 return "Fresh eligible market data required.";
             return "";
         };
@@ -139,7 +139,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 bar.style.top = `${Math.max(0, (facade?.paneHeights()[0] ?? host.clientHeight) - 6)}px`;
                 bar.style.right = `${(facade?.priceScaleWidth() ?? 60) + 8}px`;
             }
-            const s = size(), error = invalid();
+            const s = size(), error = invalid(false);
             const qty = s ? draft.complete ? Math.min(draft.maxQty, s.qty) : s.qty : 0;
             const paneHeight = facade?.paneHeights()[0] ?? host.clientHeight;
             const plotWidth = Math.max(0, host.getBoundingClientRect().width - (facade?.priceScaleWidth() ?? 60));
