@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { mkdir } from "node:fs/promises";
 import { chromium } from "playwright";
 import { createServer } from "vite";
 
@@ -185,7 +186,76 @@ try {
   assert(productionStates.every(state => state.nativeOffset === 0), "The production ChartPanel must keep its native chart at the host origin");
   assert(productionStates.every(state => state.axisClippedPx === 0 && state.panelAxisClippedPx === 0), "The production ChartPanel must keep its full time axis inside the panel");
 
-  console.log(`chart-order-layout passed: ${states.length} simulated overlay states and ${productionStates.length} PanelFrame/ChartPanel states`);
+  const measureRisk = () => productionPage.evaluate(() => {
+    const host = document.querySelector('[data-testid="chart-host"]');
+    const pane = host.querySelector(".tv-lightweight-charts table").rows[0];
+    const bar = host.querySelector("[data-risk-bar]");
+    const box = bar.getBoundingClientRect(), paneBox = pane.getBoundingClientRect(), style = getComputedStyle(bar);
+    return { top: box.top, bottom: box.bottom, left: box.left, right: box.right, height: box.height,
+      paneTop: paneBox.top, paneBottom: paneBox.bottom, hostBottom: host.getBoundingClientRect().bottom,
+      gutterLeft: pane.cells[pane.cells.length - 1].getBoundingClientRect().left,
+      background: style.backgroundColor, border: style.borderTopWidth, pointerEvents: style.pointerEvents, color: style.color,
+      buttons: bar.querySelectorAll("button").length, fitsText: bar.scrollWidth <= bar.clientWidth, text: bar.innerText };
+  });
+  const checkRisk = async () => {
+    const risk = await measureRisk();
+    assert(Math.abs(risk.bottom - (risk.paneBottom - 6)) <= 2, "Risk bar must float at the main pane bottom");
+    assert(risk.top >= risk.paneTop && risk.right < risk.gutterLeft, "Risk bar must stay inside the plot and clear its price gutter");
+    assert.equal(risk.background, "rgba(0, 0, 0, 0)", "Risk bar must be transparent");
+    assert.equal(risk.border, "0px", "Risk bar must have no border");
+    assert.equal(risk.pointerEvents, "none", "Risk bar must let chart pointer input pass through");
+    assert.equal(risk.buttons, 0, "Enter/Escape replace the action buttons");
+    assert(risk.fitsText, "Risk text must wrap within a narrow chart");
+    assert(risk.text.includes("Held by eTape") && risk.text.includes("fees/execution risk excluded"), "Custody and risk caveat must stay visible");
+    const geometry = await measureProduction();
+    assert(geometry.nativeOffset === 0 && geometry.axisClippedPx === 0 && geometry.panelAxisClippedPx === 0,
+      "Risk setup must preserve the native chart origin and full time axis");
+    return risk;
+  };
+  await mkdir(path.resolve(root, "../.report"), { recursive: true });
+  for (const theme of ["light", "dark"]) {
+    await productionPage.evaluate(theme => window.chartPanelProbe.setTheme(theme), theme);
+    await productionPage.waitForFunction(theme => document.documentElement.dataset.theme === theme, theme);
+    assert(await productionPage.evaluate(() => window.chartPanelProbe.startRisk()), "Risk setup must start in the active chart");
+    await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "visible" });
+    const setup = await checkRisk();
+    assert(setup.height <= 28, "Wide-chart setup should use two compact rows");
+    assert.equal(setup.color, theme === "light" ? "rgb(19, 23, 34)" : "rgb(209, 212, 220)", "Risk text must follow the chart theme");
+    await productionPage.mouse.click(cursor.x, hostBox.y + hostBox.height * 0.30);
+    await productionPage.mouse.click(cursor.x, hostBox.y + hostBox.height * 0.50);
+    await productionPage.waitForFunction(() => document.querySelector("[data-risk-detail]").textContent.includes("shares"));
+    const preview = await checkRisk();
+    assert(preview.height <= 42 && preview.text.includes("buy LMT") && preview.text.includes("sell LMT")
+      && preview.text.includes("notional") && preview.text.includes("est. risk"), "Compact preview must retain all trade figures");
+    await productionPage.screenshot({ path: path.resolve(root, `../.report/chart-risk-entry-${theme}.png`) });
+    await productionPage.keyboard.press("Enter");
+    await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "hidden" });
+    assert((await productionPage.evaluate(() => window.chartPanelProbe.lastRiskSubmitted)).maxQty > 0, "Enter must submit the simulated pair");
+  }
+  await productionPage.getByRole("button", { name: "indicators", exact: true }).click();
+  await productionPage.getByRole("button", { name: "add MACD", exact: true }).click();
+  await productionPage.evaluate(() => window.chartPanelProbe.startRisk());
+  await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "visible" });
+  await productionPage.evaluate(() => {
+    const shell = document.querySelector('[data-testid="panel-shell"]');
+    shell.style.width = "320px";
+    shell.style.height = "640px";
+  });
+  await productionPage.waitForFunction(() => document.querySelector('[data-testid="chart-host"]').clientWidth === 320);
+  await productionPage.waitForFunction(() => {
+    const bar = document.querySelector("[data-risk-bar]").getBoundingClientRect();
+    const pane = document.querySelector(".tv-lightweight-charts table").rows[0].getBoundingClientRect();
+    return Math.abs(bar.bottom - (pane.bottom - 6)) <= 2;
+  });
+  const narrow = await checkRisk();
+  assert(narrow.hostBottom - narrow.paneBottom > 100, "The narrow scenario must include a lower indicator pane");
+  await productionPage.screenshot({ path: path.resolve(root, "../.report/chart-risk-entry-narrow.png") });
+  await productionPage.keyboard.press("Escape");
+  await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "hidden" });
+  assert.equal(productionErrors.length, 0, productionErrors.join("\n"));
+  assert.equal(await productionPage.evaluate(() => window.chartPanelProbe.errors.length), 0, "Risk setup must not report chart paint errors");
+
+  console.log(`chart-order-layout passed: ${states.length} simulated overlay states, ${productionStates.length} PanelFrame/ChartPanel states, light/dark risk preview and narrow multi-pane risk setup`);
 } finally {
   await browser?.close();
   await server.close();

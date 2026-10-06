@@ -1280,7 +1280,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           <ChartConditionalOrderEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
             symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={activeTool} chooserOpenRef={orderChooserOpenRef}
             sendCommand={commands.sendCommand} sendQuery={commands.sendQuery} />
-          <ChartRiskEntry panelId={config.id} active={!!active} contextKey={timeframe} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
+          <ChartRiskEntry chrome={chrome} panelId={config.id} active={!!active} contextKey={timeframe} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
             symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={activeTool} chooserOpenRef={orderChooserOpenRef}
             sendCommand={commands.sendCommand} sendQuery={commands.sendQuery} />
           {selection && (

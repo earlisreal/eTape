@@ -4,7 +4,8 @@ import { createChart, CandlestickSeries } from "lightweight-charts";
 import { ChartOrderMarkers } from "../../src/chrome/panels/tv/ChartOrderMarkers";
 import { ChartConditionalOrderEntry } from "../../src/chrome/panels/tv/ChartConditionalOrderEntry";
 import { OrderConfigProvider, useOrderConfig } from "../../src/chrome/exec/useOrderConfig";
-import { ThemeProvider } from "../../src/chrome/ThemeProvider";
+import { ThemeProvider, useTheme } from "../../src/chrome/ThemeProvider";
+import { initiateChartRiskEntry } from "../../src/chrome/exec/actionTemplate";
 import { ToastProvider } from "../../src/chrome/Toast";
 import { PanelFrame } from "../../src/chrome/PanelFrame";
 import { makeStores } from "../../src/data/registry";
@@ -20,23 +21,34 @@ linkGroups.focusVenue("green", "sim");
 stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: {
   masterArmed: true, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
   venues: [{ venue: "sim", broker: "sim", env: "paper", connected: true, reconcilePending: false, note: "",
-    lastReconcileMs: null, heldStopLimitAcknowledged: true,
+    lastReconcileMs: null, heldStopLimitAcknowledged: true, positionDataReady: true,
     gate: { maxOrderValue: 10000, maxPositionValue: 10000, maxPositionShares: 100, maxOpenOrders: 10 } }],
 } });
 stores.exec.apply({ kind: "snapshot", topic: "exec.account", key: "sim", payload: {
   venue: "sim", equity: 10000, buyingPower: 10000, availableCash: 10000, sodEquity: 10000,
-  realized: 0, dayPnl: 0, leverage: 1, tsMs: 1, cycleStartMs: 0, cycleRealized: 0,
+  realized: 0, dayPnl: 0, leverage: 1, tsMs: Date.now(), cycleStartMs: 0, cycleRealized: 0,
 } });
+const riskTemplate = { kind: "risk", id: "risk", label: "Chart Risk Entry", mode: "Dollar", value: 100,
+  buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } };
 const config = { activeVenue: "sim", templates: [{ kind: "place", id: "stop", label: "Stop", side: "BUY", type: "STOP_LIMIT",
   tif: "DAY", session: "EXTENDED", priceSource: "Last", priceOffset: 0, limitCushion: 0.05, limitCushionUnit: "$",
-  chartBinding: "Shift", sizing: { mode: "Shares", shares: 1 } }] };
+  chartBinding: "Shift", sizing: { mode: "Shares", shares: 1 } }, riskTemplate] };
 let serial = 0;
 let nextCancelBehavior = "accepted";
 let pendingCancelResolve = null;
 const sendCommand = async (name, args) => {
   if (name === "GetConfig") return { kind: "ack", corrId: "config", status: "accepted", value: config };
   if (name === "SetConfig") return { kind: "ack", corrId: "config", status: "accepted" };
+  if (name === "SubscribeIndicator" || name === "UnsubscribeIndicator") return { kind: "ack", corrId: "indicator", status: "accepted" };
+  if (name === "SetAccountDemand") {
+    if (args.venue && args.venue !== "sim") throw new Error("Only simulated account demand is accepted");
+    return { kind: "ack", corrId: "demand", status: "accepted" };
+  }
   if (args.venue !== "sim") throw new Error("Only simulated orders are accepted");
+  if (name === "SubmitRiskEntry") {
+    window.chartPanelProbe.lastRiskSubmitted = args;
+    return { kind: "ack", corrId: "risk", status: "accepted", orderId: "sim-risk" };
+  }
   if (name === "SubmitOrder") {
     const id = `sim-${++serial}`;
     if (window.repro) window.repro.lastSubmitted = args;
@@ -85,7 +97,7 @@ const sendQuery = async (name, args) => {
     bars: chartBars, indicators: [], historyRevision: 1 };
   if (name === "QueryFills") return [];
   return { route: "ENGINE_HELD", effectiveSession: "EXTENDED", deadlineMs: Date.now() + 3600000,
-    phase: "PRE", hasTrustedEligiblePrint: true, lastEligiblePrice: 4.4 };
+    phase: "PRE", hasTrustedEligiblePrint: true, lastEligiblePrice: 4.4, lastEligibleTsMs: Date.now() };
 };
 
 function App() {
@@ -163,14 +175,18 @@ function App() {
 
 function ConfigReadyProbe() {
   const { loaded } = useOrderConfig();
+  const { setMode } = useTheme();
   useEffect(() => {
     window.chartPanelProbe = { isReady: () => loaded && stores.bars.series("US.AAPL", "1m").length === chartBars.length
       && !!document.querySelector("[data-testid='chart-host'] .tv-lightweight-charts"),
-      errors: [] };
+      errors: [], setTheme: setMode, startRisk() {
+        stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { ...stores.exec.accounts()[0], tsMs: Date.now() } });
+        return initiateChartRiskEntry(riskTemplate);
+      } };
     if (loaded) setTimeout(() => stores.health.apply({ kind: "delta", topic: "sys.events", payload: {
       seq: 1, ts: new Date().toISOString(), kind: "chart-ready", detail: "US.AAPL",
     } }), 0);
-  }, [loaded]);
+  }, [loaded, setMode]);
   return null;
 }
 

@@ -3,12 +3,14 @@ import type { AckMsg, StopLimitRoutePreview, SubmitRiskEntryArgs } from "../../.
 import type { Stores } from "../../../data/registry";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
 import { snapOrderMarkerPrice } from "../../../render/chart/orderMarkers";
+import { TV_FONT, type TvChrome } from "../../../render/chart/tvTheme";
 import type { Tool } from "../../../render/chart/drawings/interaction";
 import { CHART_RISK_ENTRY_EVENT, type OrderConfig, type RiskEntryTemplate } from "../../exec/actionTemplate";
 import { riskEntrySize } from "../../exec/riskEntry";
 import type { LinkGroup, LinkGroups } from "../../linkGroups";
 import { modalTracker } from "../../modalTracker";
 interface Props {
+    chrome: TvChrome;
     panelId: string;
     active: boolean;
     group: LinkGroup;
@@ -108,6 +110,12 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return;
             rootRef.current.style.display = "block";
             const facade = latest.current.facadeRef.current;
+            const bar = rootRef.current.querySelector<HTMLElement>("[data-risk-bar]");
+            if (bar) {
+                // Volume shares the main pane; indicator panes and the time axis sit below it.
+                bar.style.top = `${Math.max(0, (facade?.paneHeights()[0] ?? host.clientHeight) - 6)}px`;
+                bar.style.right = `${(facade?.priceScaleWidth() ?? 60) + 8}px`;
+            }
             for (const endpoint of ["buy", "sell"] as const) {
                 const line = rootRef.current.querySelector<HTMLElement>(`[data-risk-${endpoint}]`);
                 const price = draft[endpoint], y = price === undefined ? null : facade?.priceToCoordinate(price);
@@ -120,9 +128,15 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             }
             const s = size(), error = invalid();
             const deadline = draft.route?.deadlineMs ? new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(draft.route.deadlineMs) : "checking";
-            message(draft.unknown ? "Submit outcome unknown. Verify Orders; this setup cannot be resent." : draft.busy ? "Submitting linked pair…" :
-                `${draft.template.label} · ${venue} · ${latest.current.symbol}\n${draft.buy === undefined ? "Click BUY trigger, then SELL stop; or drag between them." : draft.sell === undefined ? "Choose SELL stop below BUY." :
-                    `${s?.qty} shares · buy limit ${s?.buyLimit.toFixed(4)} · sell limit ${s?.sellLimit.toFixed(4)} · notional $${s?.notional.toFixed(2)} · estimated risk $${s?.risk.toFixed(2)}`}\nHeld by eTape · DAY through ${deadline} · fees / execution risk excluded${draft.route?.lastEligiblePrice && draft.buy !== undefined && draft.route.lastEligiblePrice >= draft.buy ? " · BUY WILL TRIGGER NOW" : ""}\n${error || (draft.complete ? "Drag either line to adjust. Enter / Send to submit; Escape cancels." : "Escape cancels.")}${draft.error ? `\n${draft.error}` : ""}`);
+            message(`${draft.template.label} · ${venue} · ${latest.current.symbol} · ${draft.buy === undefined ? "Click BUY, then SELL; or drag." : draft.sell === undefined ? "Choose SELL below BUY." :
+                `${s?.qty} shares · buy LMT ${s?.buyLimit.toFixed(4)} · sell LMT ${s?.sellLimit.toFixed(4)} · notional $${s?.notional.toFixed(2)} · est. risk $${s?.risk.toFixed(2)}`}\nHeld by eTape · DAY ${deadline} · fees/execution risk excluded · ${draft.busy || draft.unknown ? "" : "Enter send · "}Esc cancel`);
+            const status = rootRef.current.querySelector<HTMLElement>("[data-risk-status]");
+            if (status) {
+                status.textContent = draft.unknown ? "Submit outcome unknown. Verify Orders; this setup cannot be resent." : draft.busy ? "Submitting linked pair…" :
+                    [error, draft.error !== error ? draft.error : "", draft.route?.lastEligiblePrice && draft.buy !== undefined && draft.route.lastEligiblePrice >= draft.buy ? "BUY WILL TRIGGER NOW" : ""].filter(Boolean).join(" · ");
+                status.style.display = status.textContent ? "block" : "none";
+                status.style.color = draft.busy ? latest.current.chrome.text : latest.current.chrome.down;
+            }
         };
         const schedule = () => { if (frame === null)
             frame = requestAnimationFrame(() => { frame = null; paint(); }); };
@@ -292,9 +306,6 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 void submit();
             }
         };
-        const click = (e: MouseEvent) => { if ((e.target as Element)?.closest("[data-risk-send]"))
-            void submit(); if ((e.target as Element)?.closest("[data-risk-cancel]"))
-            clear(); };
         window.addEventListener(CHART_RISK_ENTRY_EVENT, initiate);
         host.addEventListener("pointerdown", down, true);
         window.addEventListener("pointermove", move, true);
@@ -302,7 +313,8 @@ export function ChartRiskEntry(props: Props): JSX.Element {
         window.addEventListener("keydown", key, true);
         window.addEventListener("blur", clear);
         window.addEventListener("pointercancel", clear);
-        rootRef.current?.addEventListener("click", click);
+        const resize = new ResizeObserver(schedule);
+        resize.observe(host);
         const unsubscribe = latest.current.stores.exec.subscribe(schedule);
         const timer = setInterval(() => { if (draft)
             paint(); }, 1000);
@@ -311,6 +323,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (frame !== null)
                 cancelAnimationFrame(frame);
             clearInterval(timer);
+            resize.disconnect();
             unsubscribe();
             window.removeEventListener(CHART_RISK_ENTRY_EVENT, initiate);
             host.removeEventListener("pointerdown", down, true);
@@ -319,15 +332,14 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             window.removeEventListener("keydown", key, true);
             window.removeEventListener("blur", clear);
             window.removeEventListener("pointercancel", clear);
-            rootRef.current?.removeEventListener("click", click);
         };
     }, [props.active, props.group, props.symbol, props.contextKey, props.activeTool, props.config.templates, venue]);
     return <div ref={rootRef} data-testid="chart-risk-entry" style={{ display: "none", position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none" }}>
     <div data-risk-buy style={{ position: "absolute", left: 0, borderTop: "2px dashed #34c6dc", color: "#34c6dc", fontSize: 11 }}/>
     <div data-risk-sell style={{ position: "absolute", left: 0, borderTop: "2px dashed #ff6877", color: "#ff6877", fontSize: 11 }}/>
-    <div data-drawing-ui style={{ position: "absolute", top: 10, left: 10, maxWidth: "80%", padding: 8, background: "#0c1017", color: "#ddd", border: "1px solid #34c6dc", fontSize: 11, pointerEvents: "auto" }}>
-      <div data-risk-detail aria-live="polite" style={{ whiteSpace: "pre-wrap" }}/>
-      <button data-risk-send type="button">Send pair</button> <button data-risk-cancel type="button">Cancel setup</button>
+    <div data-risk-bar aria-live="polite" style={{ position: "absolute", left: 44, transform: "translateY(-100%)", color: props.chrome.text, fontFamily: TV_FONT, fontSize: 11, lineHeight: "14px", textShadow: `0 0 2px ${props.chrome.bg}, 0 0 4px ${props.chrome.bg}`, pointerEvents: "none", overflowWrap: "anywhere" }}>
+      <div data-risk-detail style={{ whiteSpace: "pre-wrap" }}/>
+      <div data-risk-status />
     </div>
   </div>;
 }

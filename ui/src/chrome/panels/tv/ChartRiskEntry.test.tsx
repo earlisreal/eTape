@@ -4,6 +4,7 @@ import { render, fireEvent, cleanup, waitFor, screen } from "@testing-library/re
 import { makeStores } from "../../../data/registry";
 import { LinkGroups } from "../../linkGroups";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
+import { getTvChrome } from "../../../render/chart/tvTheme";
 import { initiateChartRiskEntry, type RiskEntryTemplate } from "../../exec/actionTemplate";
 import { ChartRiskEntry } from "./ChartRiskEntry";
 const template: RiskEntryTemplate = { kind: "risk", id: "r", label: "Risk", mode: "Dollar", value: 100, buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } };
@@ -19,7 +20,7 @@ function mount(auto = false) {
     const facadeRef = { current: { priceScaleWidth: () => 60, paneHeights: () => [400], coordinateToPrice: (y: number) => 12 - y / 100, priceToCoordinate: (p: number) => (12 - p) * 100 } as ChartApiFacade };
     const sendCommand = vi.fn(async (name: string, args: unknown) => { void name; void args; return { kind: "ack" as const, corrId: "1", status: "accepted" as const, orderId: "E1" }; });
     const sendQuery = vi.fn(async () => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "RTH", deadlineMs: Date.now() + 100000, hasTrustedEligiblePrint: true, lastEligiblePrice: 9, lastEligibleTsMs: Date.now() }));
-    const result = render(<ChartRiskEntry panelId="chart" active group="green" symbol="AAPL" contextKey="1m" hostRef={{ current: host }} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} config={{ activeVenue: "sim", templates: [template], chartRiskAutoSend: auto }} configLoaded activeTool="select" chooserOpenRef={{ current: false }} sendCommand={sendCommand} sendQuery={sendQuery}/>, { container: host });
+    const result = render(<ChartRiskEntry chrome={getTvChrome("light")} panelId="chart" active group="green" symbol="AAPL" contextKey="1m" hostRef={{ current: host }} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} config={{ activeVenue: "sim", templates: [template], chartRiskAutoSend: auto }} configLoaded activeTool="select" chooserOpenRef={{ current: false }} sendCommand={sendCommand} sendQuery={sendQuery}/>, { container: host });
     sendCommand.mockClear();
     return { ...result, host, sendCommand, sendQuery };
 }
@@ -30,6 +31,7 @@ beforeEach(() => {
     vi.spyOn(document, "hasFocus").mockReturnValue(true);
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { cb(0); return 0; });
     vi.stubGlobal("cancelAnimationFrame", () => { });
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
 });
 it("previews two clicks and sends one risk-sized pair on Enter", async () => {
     const { host, sendCommand } = mount();
@@ -39,6 +41,8 @@ it("previews two clicks and sends one risk-sized pair on Enter", async () => {
     fireEvent.pointerDown(host, { pointerId: 2, button: 0, clientX: 100, clientY: 220 });
     fireEvent.pointerUp(window, { pointerId: 2, button: 0, clientX: 100, clientY: 220 });
     await waitFor(() => expect(screen.getByTestId("chart-risk-entry").textContent).toContain("500 shares"));
+    expect(screen.getByTestId("chart-risk-entry").textContent).toContain("notional $5000.00 · est. risk $100.00");
+    expect(screen.getByTestId("chart-risk-entry").textContent).toContain("Enter send · Esc cancel");
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
     fireEvent.keyDown(window, { key: "Enter" });
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry", expect.objectContaining({ buyStop: 10, sellStop: 9.8, maxQty: 500, value: 100, mode: "Dollar" })));
@@ -57,7 +61,29 @@ it("auto-sends one drag on release and cancels another setup on Escape", async (
     initiateChartRiskEntry(template);
     fireEvent.pointerDown(host, { pointerId: 2, button: 0, clientX: 100, clientY: 200 });
     fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.getByTestId("chart-risk-entry").style.display).toBe("none");
     fireEvent.pointerMove(window, { pointerId: 2, clientX: 100, clientY: 220 });
     fireEvent.pointerUp(window, { pointerId: 2, clientX: 100, clientY: 220 });
     expect(sendCommand).not.toHaveBeenCalled();
+});
+it("keeps blockers and uncertain submission outcomes visible without buttons", async () => {
+    const { host, sendCommand, sendQuery } = mount();
+    sendQuery.mockRejectedValueOnce(new Error("offline"));
+    initiateChartRiskEntry(template);
+    await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe("Engine preview unavailable."));
+    expect(screen.queryByRole("button")).toBeNull();
+    fireEvent.keyDown(window, { key: "Escape" });
+
+    sendCommand.mockImplementation(async () => ({ kind: "ack", corrId: "1", status: "accepted", orderId: "E1", ambiguous: true }));
+    initiateChartRiskEntry(template);
+    fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 100, clientY: 200 });
+    fireEvent.pointerDown(host, { pointerId: 2, button: 0, clientX: 100, clientY: 220 });
+    fireEvent.pointerUp(window, { pointerId: 2, clientX: 100, clientY: 220 });
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toContain("Submit outcome unknown"));
+    expect(host.querySelector("[data-risk-detail]")?.textContent).toContain("500 shares");
+    expect(host.querySelector("[data-risk-detail]")?.textContent).not.toContain("Enter send");
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(sendCommand.mock.calls.filter(([name]) => name === "SubmitRiskEntry")).toHaveLength(1);
 });

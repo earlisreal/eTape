@@ -26,9 +26,11 @@ eligible print.
 
 Settings → Orders & hotkeys → Add → Chart Risk Entry creates a risk preset and
 hotkey. Focus a grouped chart, press the hotkey, then click the buy trigger and
-sell stop or drag between them. The preview shows whole shares, execution limits,
-notional and estimated risk after cushions. Drag either endpoint to adjust; Enter
-or Send pair submits. Escape, right-click, focus loss and context changes cancel.
+sell stop or drag between them. A compact, transparent bar floats over the bottom
+Volume area of the main chart pane, keeping the time axis and chart dimensions
+unchanged. It shows whole shares, execution limits, notional and estimated risk
+after cushions, plus custody, expiry and warnings. Drag either endpoint to adjust;
+Enter submits and Escape cancels. Right-click, focus loss and context changes cancel.
 The global auto-send setting defaults off and applies only to initial setup.
 Submitted linked markers always request edits on release, showing before/after
 risk and an above-budget warning after activation. Cancel Protection leaves
