@@ -24,7 +24,7 @@ import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 import type { SizingSpec, SizingMode } from "./sizing";
 import {
   CHART_BINDINGS, DEFAULT_TEMPLATES, normalizeOrderConfig, type ActionTemplate, type ChartBinding, type DeckColor, type ManagementAction,
-  type HotkeyDeckConfig, type OrderConfig, type PlaceOrderTemplate,
+  type HotkeyDeckConfig, type OrderConfig, type PlaceOrderTemplate, type RiskEntryTemplate,
 } from "./actionTemplate";
 import { normalizeCombo } from "./hotkeys";
 import { Keycap } from "./Keycap";
@@ -311,7 +311,7 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
 
   return (
     <div style={card} data-testid={`tmpl-card-${t.id}`}>
-      <div style={eyebrow}>{t.kind === "place" ? "Place order" : "Management"}</div>
+      <div style={eyebrow}>{t.kind === "place" ? "Place order" : t.kind === "risk" ? "Chart Risk Entry" : "Management"}</div>
       <div style={headerRow}>
         <input
           className="field" data-testid={`tmpl-label-${t.id}`} value={t.label}
@@ -354,7 +354,31 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
         </div>
       </div>
 
-      {t.kind === "place" ? (
+      {t.kind === "risk" ? (
+        <div style={fieldRow}>
+          <label style={fieldGroup}>Risk budget
+            <select aria-label={`risk-mode-${t.id}`} className="field" value={t.mode}
+              onChange={(e) => patch(t.id,{mode:e.target.value as RiskEntryTemplate["mode"]})}>
+              <option value="Dollar">Dollar risk</option><option value="CashPct">Risk Cash %</option><option value="BuyingPowerPct">Risk BP %</option>
+            </select>
+          </label>
+          <label style={fieldGroup}>Risk value
+            <input aria-label={`risk-value-${t.id}`} className="field" type="number" min="0" step="any" max={t.mode === "Dollar" ? undefined : 100}
+              value={rawEdits[`${t.id}:risk`] ?? t.value} onBlur={() => clearRawEdit(`${t.id}:risk`)}
+              onChange={(e) => {setRawEdit(`${t.id}:risk`,e.target.value); patch(t.id,{value:Number(e.target.value)});}} />
+          </label>
+          {(["buyCushion","sellCushion"] as const).map((key) => <label key={key} style={fieldGroup}>
+            {key === "buyCushion" ? "Buy" : "Sell"} Limit Cushion
+            <input className="field" aria-label={`${key}-${t.id}`} type="number" min="0" step="any"
+              value={rawEdits[`${t.id}:${key}`] ?? t[key].value} onBlur={() => clearRawEdit(`${t.id}:${key}`)}
+              onChange={(e) => {setRawEdit(`${t.id}:${key}`,e.target.value); patch(t.id,{[key]:{...t[key],value:Number(e.target.value)}});}} />
+            <select className="field" aria-label={`${key}-unit-${t.id}`} value={t[key].unit} onChange={(e) => patch(t.id,{[key]:{...t[key],unit:e.target.value}})}>
+              <option>$</option><option>%</option>
+            </select>
+          </label>)}
+          <small>Loss budget, excluding fees and execution risk. Whole shares; DAY until market data close. Both triggers are held by eTape.</small>
+        </div>
+      ) : t.kind === "place" ? (
         <>
           <div style={fieldRow}>
             <div style={fieldGroup}>
@@ -575,6 +599,7 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
   }, [venueStatuses, statusSnapshotRevision, exec]);
   const [templates, setTemplates] = useState<ActionTemplate[]>(() => normalizeOrderConfig(config).templates.map((t) => ({ ...t })));
   const [deck, setDeck] = useState<HotkeyDeckConfig>(() => cloneHotkeyDeck(normalizeOrderConfig(config).hotkeyDeck));
+  const [riskAutoSend,setRiskAutoSend] = useState(config.chartRiskAutoSend === true);
   const [addOpen, setAddOpen] = useState(false);
   // Offset and size-value are fully-controlled numeric fields whose display
   // is re-derived from the numeric model every render. Without this, typing
@@ -622,8 +647,9 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
     const normalized = normalizeOrderConfig(config);
     setTemplates(normalized.templates.map((t) => ({ ...t })));
     setDeck(cloneHotkeyDeck(normalized.hotkeyDeck));
+    setRiskAutoSend(normalized.chartRiskAutoSend === true);
     setRawEdits({});
-  }, [config.templates, config.hotkeyDeck]);
+  }, [config.templates, config.hotkeyDeck, config.chartRiskAutoSend]);
   const setRawEdit = (key: string, v: string) => setRawEdits((r) => ({ ...r, [key]: v }));
   const clearRawEdit = (key: string) => setRawEdits((r) => {
     if (!(key in r)) return r;
@@ -725,6 +751,7 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
   const uid = (p: string) => `${p}-${templates.length + 1}-${Math.max(0, ...templates.map((_, i) => i)) + 1}`;
   const addPlace = () => setTemplates((ts) => [...ts, { kind: "place", id: uid("tmpl"), label: "New", side: "BUY", type: "LIMIT", tif: "DAY", session: "AUTO", priceSource: "Ask", priceOffset: 0, priceOffsetUnit: "$", sizing: { mode: "Shares", shares: 100 } } as PlaceOrderTemplate]);
   const addManage = () => setTemplates((ts) => [...ts, { kind: "manage", id: uid("mng"), label: "New action", action: "CancelLast" }]);
+  const addRisk = () => setTemplates((ts) => [...ts, {kind:"risk",id:uid("risk"),label:"Chart Risk Entry",mode:"Dollar",value:100,buyCushion:{value:0,unit:"$"},sellCushion:{value:0,unit:"$"}}]);
   // Reset replaces every template wholesale, so any live rawEdits entry —
   // even for an id that still exists after reset (default ids are fixed
   // strings, not uid()-generated) — must not survive it; otherwise the
@@ -769,7 +796,7 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
     <div style={{ color: palette.text }}>
       <div data-testid="cheat-sheet" style={{ border: `1px solid ${palette.border}`, borderRadius: 4, padding: "6px 8px", marginBottom: 10 }}>
         <div style={{ color: palette.textMuted, fontSize: 10, letterSpacing: 0.4, marginBottom: 4 }}>CHEAT SHEET</div>
-        {[{ label: "Place", rows: places }, { label: "Manage", rows: manages }].map((grp) => (
+        {[{ label: "Place", rows: places }, { label: "Manage", rows: manages },{label:"Risk",rows:templates.filter(t=>t.kind === "risk")}].map((grp) => (
           <div key={grp.label} style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center", marginBottom: 2 }}>
             <span style={{ width: 52, color: palette.textMuted }}>{grp.label}</span>
             {grp.rows.filter((t) => t.hotkey).map((t) => (
@@ -807,16 +834,18 @@ export function OrderSettingsSection({ config, onSave, toast, onClose, commands,
           <>
             <Button data-testid="add-place" onClick={() => { addPlace(); setAddOpen(false); }} style={actionBtn}>Order template</Button>
             <Button data-testid="add-manage" onClick={() => { addManage(); setAddOpen(false); }} style={actionBtn}>Management action</Button>
+            <Button data-testid="add-risk" onClick={() => { addRisk(); setAddOpen(false); }} style={actionBtn}>Chart Risk Entry</Button>
           </>
         )}
         <Button variant="danger" confirm confirmLabel="Confirm reset" data-testid="reset-defaults" onClick={doReset} style={actionBtn}>Reset to defaults</Button>
       </div>
 
+      <label style={{display:"block",marginTop:12}}><input type="checkbox" checked={riskAutoSend} onChange={(e) => setRiskAutoSend(e.target.checked)} /> Auto-send Chart Risk Entry on release / second click without preview confirmation</label>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 12 }}>
         <Button
           variant="primary" size="md" data-testid="save" disabled={hasConflict}
           onClick={() => {
-            onSave(normalizeOrderConfig({ ...config, templates, hotkeyDeck: deck }));
+            onSave(normalizeOrderConfig({ ...config, templates, hotkeyDeck: deck, chartRiskAutoSend:riskAutoSend }));
             toast?.push({ level: "success", text: "Order templates & hotkeys saved." });
             onClose?.();
           }}

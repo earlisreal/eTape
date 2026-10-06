@@ -13,6 +13,12 @@ describe("action templates", () => {
 });
 
 describe("normalizeOrderConfig", () => {
+	 it("persists risk presets and defaults auto-send off", () => {
+	   const raw: OrderConfig = { activeVenue: "v", templates: [{kind:"risk",id:"r",label:"Risk",mode:"CashPct",value:1,hotkey:"Ctrl+R",buyCushion:{value:0.05,unit:"$"},sellCushion:{value:0.1,unit:"%"}}] };
+	   expect(normalizeOrderConfig(raw).chartRiskAutoSend).toBe(false);
+	   expect(normalizeOrderConfig(raw).templates[0]).toMatchObject(raw.templates[0]);
+	   expect(normalizeOrderConfig({...raw,chartRiskAutoSend:true}).chartRiskAutoSend).toBe(true);
+	 });
   it("migrates fraction all/half to pct 100/50 and defaults offset unit", () => {
     const raw: OrderConfig = {
       activeVenue: "",

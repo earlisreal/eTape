@@ -65,6 +65,13 @@ func (s *State) OrderVenue(orderID string) (VenueID, bool) {
 // ApplyReconcile (reconcile.go), not here.
 func (s *State) Apply(ev Event) {
 	switch e := ev.(type) {
+	case RiskEntryChanged:
+		for _, o := range []Order{e.Entry, e.Stop} {
+			if o.ID != "" {
+				s.Venue(o.Venue).Orders[o.ID] = o
+				s.orderIndex[o.ID] = o.Venue
+			}
+		}
 	case OrderSubmitted:
 		o := e.Order
 		if o.LeavesQty == 0 && o.ExecutedQty == 0 {
@@ -130,6 +137,11 @@ func (s *State) Apply(ev Event) {
 				qty = o.Qty
 			}
 			o.Qty = qty
+			if o.Held != nil && o.Held.ResolvedQty > 0 {
+				h := *o.Held
+				h.ResolvedQty = qty
+				o.Held = &h
+			}
 			if e.NewLimit > 0 {
 				o.LimitPrice = e.NewLimit
 			}

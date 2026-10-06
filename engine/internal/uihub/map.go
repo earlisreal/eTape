@@ -154,6 +154,13 @@ func mapOrder(o exec.Order) wsmsg.Order {
 	if o.Action != nil {
 		action = mapOrderAction(*o.Action)
 	}
+	var risk *wsmsg.RiskEntry
+	if r := o.RiskEntry; r != nil {
+		risk = &wsmsg.RiskEntry{StopID: r.StopID, Budget: r.Budget, Mode: r.Mode,
+			BuyCushion:  wsmsg.LimitCushion{Value: r.BuyCushion.Value, Unit: r.BuyCushion.Unit},
+			SellCushion: wsmsg.LimitCushion{Value: r.SellCushion.Value, Unit: r.SellCushion.Unit},
+			Closing:     r.Closing, ProtectionCanceled: r.ProtectionCanceled, Failure: r.Failure}
+	}
 	return wsmsg.Order{
 		Venue: string(o.Venue), ID: o.ID, Symbol: o.Symbol,
 		Side: sideToWire(o.Side), Type: orderTypeToWire(o.Type), TIF: tifToWire(o.TIF),
@@ -162,6 +169,7 @@ func mapOrder(o exec.Order) wsmsg.Order {
 		Status: statusToWire(o.Status), ExecutedQty: o.ExecutedQty, LeavesQty: o.LeavesQty,
 		AvgFillPrice: o.AvgFillPrice, RejectReason: o.RejectReason, ReplacesID: o.ReplacesID,
 		CreatedMs: o.CreatedMs, UpdatedMs: o.UpdatedMs, Held: held, Action: action,
+		RiskEntry: risk, RiskEntryID: o.RiskEntryID,
 	}
 }
 

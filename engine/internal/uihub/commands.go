@@ -222,6 +222,17 @@ func ackFromCmd(a exec.CmdAck) wsmsg.AckMsg {
 
 func (cd *commands) handle(ctx context.Context, name string, args json.RawMessage, connID uint64, reply func(wsmsg.AckMsg)) (wsmsg.AckMsg, bool) {
 	switch name {
+	case "SubmitRiskEntry":
+		var a wsmsg.SubmitRiskEntryArgs
+		if json.Unmarshal(args, &a) != nil {
+			return blocked("bad args"), false
+		}
+		return ackFromCmd(cd.ex.Do(exec.SubmitRiskEntry{
+			Venue: exec.VenueID(a.Venue), Symbol: a.Symbol, BuyStop: a.BuyStop, SellStop: a.SellStop,
+			Mode: a.Mode, Value: a.Value, MaxQty: a.MaxQty,
+			BuyCushion:  exec.LimitCushion{Value: a.BuyCushion.Value, Unit: a.BuyCushion.Unit},
+			SellCushion: exec.LimitCushion{Value: a.SellCushion.Value, Unit: a.SellCushion.Unit},
+		})), false
 	case "SubmitOrder":
 		var a wsmsg.SubmitOrderArgs
 		if err := json.Unmarshal(args, &a); err != nil {
@@ -280,7 +291,9 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked("bad args"), false
 		}
 		return ackFromCmd(cd.ex.Do(exec.ReplaceOrder{
-			Venue: exec.VenueID(a.Venue), OrderID: a.OrderID,
+			ExpectedRiskEntryPhase: a.ExpectedRiskEntryPhase,
+			ExpectedHeldPhase:      exec.HeldPhase(a.ExpectedHeldPhase),
+			Venue:                  exec.VenueID(a.Venue), OrderID: a.OrderID,
 			Qty: a.Qty, LimitPrice: a.LimitPrice, StopPrice: a.StopPrice,
 		})), false
 	case "Flatten":

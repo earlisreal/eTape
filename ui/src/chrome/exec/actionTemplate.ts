@@ -1,7 +1,7 @@
 // Action templates: one saved recipe, two triggers (a hotkey binding and a ticket
 // preset button), edited in one settings screen and stored engine-side under the
 // config key `orderConfig`. (ui-design §Order entry & hotkeys.)
-import type { Side, OrderType, TIF, OrderSession, VenueID } from "../../wire/contract";
+import type { Side, OrderType, TIF, OrderSession, VenueID, LimitCushion } from "../../wire/contract";
 import type { SizingSpec } from "./sizing";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 
@@ -31,10 +31,23 @@ export interface PlaceOrderTemplate {
 }
 export type ManagementAction = "CancelLast" | "CancelAllFocused" | "CancelAllEverything" | "KillSwitch";
 export interface ManagementTemplate { kind: "manage"; id: string; label: string; action: ManagementAction; hotkey?: string; deck?: boolean; deckColor?: DeckColor }
-export type ActionTemplate = PlaceOrderTemplate | ManagementTemplate;
+export interface RiskEntryTemplate {
+  kind: "risk"; id: string; label: string; hotkey?: string; deck?: boolean; deckColor?: DeckColor;
+  mode: "Dollar" | "CashPct" | "BuyingPowerPct"; value: number;
+  buyCushion: LimitCushion; sellCushion: LimitCushion;
+}
+export type ActionTemplate = PlaceOrderTemplate | ManagementTemplate | RiskEntryTemplate;
+
+export const CHART_RISK_ENTRY_EVENT = "etape-chart-risk-entry";
+export function initiateChartRiskEntry(template: RiskEntryTemplate): boolean {
+  const detail = { template, handled: false };
+  window.dispatchEvent(new CustomEvent(CHART_RISK_ENTRY_EVENT, { detail }));
+  return detail.handled;
+}
 
 // The whole editable order-entry config; persisted as one blob (fewer round-trips).
 export interface OrderConfig {
+  chartRiskAutoSend?: boolean;
   templates: ActionTemplate[];
   activeVenue: VenueID;
   extHoursMarketBufferPct?: number;   // absent => 1.0; clamped [0.1, 10] in normalizeOrderConfig
@@ -64,6 +77,12 @@ export const DEFAULT_ORDER_CONFIG: OrderConfig = { templates: DEFAULT_TEMPLATES,
 // submit behavior), and defaults a missing `extHoursMarketBufferPct` to 1.0
 // (clamped [0.1, 10]). Idempotent; manage templates pass through.
 function normalizeTemplate(t: ActionTemplate): ActionTemplate {
+  if (t.kind === "risk") {
+    const cushion = (c: LimitCushion | undefined): LimitCushion => ({value: Number.isFinite(c?.value) ? Math.max(0,c!.value) : 0, unit: c?.unit === "%" ? "%" : "$"});
+    return {...t, mode: t.mode === "CashPct" || t.mode === "BuyingPowerPct" ? t.mode : "Dollar",
+      value: Number.isFinite(t.value) ? Math.max(0, t.mode === "Dollar" ? t.value : Math.min(100,t.value)) : 0,
+      buyCushion: cushion(t.buyCushion), sellCushion: cushion(t.sellCushion)};
+  }
   if (t.kind !== "place") return t;
   let sizing = t.sizing;
   if (sizing.mode === "PositionFraction" && sizing.pct === undefined) {
@@ -139,6 +158,7 @@ export function normalizeOrderConfig(config: OrderConfig): OrderConfig {
   const placed = new Set(hotkeyDeck.rows.flat());
   return {
     ...config,
+    chartRiskAutoSend: config.chartRiskAutoSend === true,
     extHoursMarketBufferPct,
     templates: templates.map((t) => ({ ...t, deck: placed.has(t.id) })),
     hotkeyDeck,

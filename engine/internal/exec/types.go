@@ -267,6 +267,8 @@ type Order struct {
 	UpdatedMs           int64
 	Held                *HeldOrder
 	Action              *OrderAction
+	RiskEntry           *RiskEntry
+	RiskEntryID         string
 }
 
 // Working reports whether the order can still fill or be canceled.

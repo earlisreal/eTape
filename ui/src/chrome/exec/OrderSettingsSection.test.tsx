@@ -52,6 +52,12 @@ function wrapWithToastAndClose(onSave = vi.fn(), toast = { push: vi.fn(), dismis
 }
 
 describe("OrderSettingsSection", () => {
+  it("saves a risk preset and the explicit auto-send setting together",()=>{
+    const {onSave}=wrap();fireEvent.click(screen.getByTestId("add-template"));fireEvent.click(screen.getByTestId("add-risk"));
+    fireEvent.click(screen.getByLabelText("Auto-send Chart Risk Entry on release / second click without preview confirmation"));
+    fireEvent.click(screen.getByTestId("save"));
+    expect(onSave.mock.calls[0][0]).toMatchObject({chartRiskAutoSend:true,templates:expect.arrayContaining([expect.objectContaining({kind:"risk",mode:"Dollar",value:100,buyCushion:{value:0,unit:"$"},sellCushion:{value:0,unit:"$"}})])});
+  });
   it("lists templates and saves an edited label", () => {
     const { onSave } = wrap();
     const label = screen.getByTestId("tmpl-label-buy-5k") as HTMLInputElement;

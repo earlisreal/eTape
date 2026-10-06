@@ -5,7 +5,7 @@ import { ThemeProvider } from "../ThemeProvider";
 import { ToastProvider } from "../Toast";
 import { OrderConfigProvider } from "./useOrderConfig";
 import { useHotkeys } from "./useHotkeys";
-import type { ActionTemplate, OrderConfig } from "./actionTemplate";
+import {CHART_RISK_ENTRY_EVENT,type ActionTemplate,type OrderConfig} from "./actionTemplate";
 import { makeStores } from "../../data/registry";
 import type { AckMsg, ExecStatus } from "../../wire/contract";
 import type { HotkeyTarget } from "../hotkeyTarget";
@@ -20,6 +20,7 @@ const status = (masterArmed: boolean): ExecStatus => ({ masterArmed, global: { m
 // so seed the shared OrderConfigProvider context (via its GetConfig read)
 // with a local fixture carrying the bindings these tests fire.
 const SAMPLE_TEMPLATES: ActionTemplate[] = [
+  {kind:"risk",id:"risk",label:"Risk",hotkey:"Ctrl+R",mode:"Dollar",value:100,buyCushion:{value:0,unit:"$"},sellCushion:{value:0,unit:"$"}},
   { kind: "place", id: "buy-5k", label: "Buy $5k", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, sizing: { mode: "Dollar", dollar: 5000 }, hotkey: "Ctrl+1" },
   { kind: "place", id: "cash-half", label: "Cash half", side: "BUY", type: "LIMIT", tif: "DAY", priceSource: "Ask", priceOffset: 0, sizing: { mode: "CashPct", pct: 50 }, hotkey: "Ctrl+2" },
   { kind: "manage", id: "kill", label: "KILL", action: "KillSwitch", hotkey: "Ctrl+Shift+K" },
@@ -70,6 +71,17 @@ beforeEach(() => { vi.spyOn(document, "hasFocus").mockReturnValue(true); });
 afterEach(() => { modalTracker.setOpen(false); vi.restoreAllMocks(); });
 
 describe("useHotkeys", () => {
+  it("initiates a local chart tool without placing an order or using the cross-window target",async()=>{
+    const {sent}=await setup(true,null);
+    const events:Event[]=[];const handler=(event:Event)=>{events.push(event);(event as CustomEvent).detail.handled=true;};
+    window.addEventListener(CHART_RISK_ENTRY_EVENT,handler);
+    try {
+      fireEvent.keyDown(window,{key:"r",ctrlKey:true});expect(events).toHaveLength(1);
+      fireEvent.keyDown(window,{key:"r",ctrlKey:true,repeat:true});expect(events).toHaveLength(1);
+      modalTracker.setOpen(true);fireEvent.keyDown(window,{key:"r",ctrlKey:true});expect(events).toHaveLength(1);
+      expect(sent.some(s=>s.name==="SubmitOrder" || s.name==="SubmitRiskEntry")).toBe(false);
+    } finally {window.removeEventListener(CHART_RISK_ENTRY_EVENT,handler);}
+  });
   it("fires a place-hotkey when armed", async () => {
     const { sent } = await setup(true);
     await act(async () => { fireEvent.keyDown(window, { key: "1", ctrlKey: true }); await Promise.resolve(); });

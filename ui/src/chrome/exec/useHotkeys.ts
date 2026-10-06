@@ -8,11 +8,12 @@ import { useOrderCommands } from "./useOrderCommands";
 import { useOrderConfig } from "./useOrderConfig";
 import { normalizeCombo, matchTemplate } from "./hotkeys";
 import { fireTemplate } from "./fireTemplate";
+import { initiateChartRiskEntry } from "./actionTemplate";
 
 interface Cmd { sendCommand(name: string, args: unknown): Promise<AckMsg> }
 
 function isScoped(t: ReturnType<typeof matchTemplate>): boolean {
-  return t?.kind === "place" || t?.action === "CancelLast" || t?.action === "CancelAllFocused";
+  return t?.kind === "place" || t?.kind === "risk" || t?.kind === "manage" && (t.action === "CancelLast" || t.action === "CancelAllFocused");
 }
 
 function isEditableFocus(): boolean {
@@ -35,6 +36,12 @@ export function useHotkeys(opts: { stores: Stores; commands: Cmd; target: Hotkey
       e.preventDefault();
       e.stopPropagation();
       if (e.repeat) return;
+
+      if (t.kind === "risk") {
+        if (modalTracker.isOpen() || isEditableFocus() || !document.hasFocus()) return;
+        if (!initiateChartRiskEntry(t)) toast.push({level:"warn",text:"Risk entry requires an active grouped Chart Panel in this window."});
+        return;
+      }
 
       if (isScoped(t)) {
         // Scoped bindings are deliberately quiet while the user is working in

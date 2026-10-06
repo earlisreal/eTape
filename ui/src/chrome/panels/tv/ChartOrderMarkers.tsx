@@ -2,13 +2,17 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type Keyboard
 import type { AckMsg, Order, ReplaceOrderArgs } from "../../../wire/contract";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
 import { chartOrderMarkers, orderActionPending, snapOrderMarkerPrice, type ChartOrderMarker } from "../../../render/chart/orderMarkers";
+import {riskEntrySize} from "../../exec/riskEntry";
+import {resolveLimitCushionPrice} from "../../exec/priceSource";
 
 const LIMIT = "#f4c84a";
 const STOP = "#34c6dc";
 type Pending = { kind: "replace" | "cancel"; price?: number; stop: boolean; confirmedPrice?: number; outcome: "requested" | "unknown" };
-type Drag = { id: string; marker: ChartOrderMarker; startX: number; startY: number; startPrice: number; price: number; moved: boolean };
+type Drag = { id: string; marker: ChartOrderMarker; startX: number; startY: number; startPrice: number; price: number; moved: boolean; entryPhase:string };
 
 interface Props {
+  availableCash?: number;
+  buyingPower?: number;
   orders: Iterable<Order>;
   venue: string;
   symbol: string;
@@ -26,12 +30,13 @@ interface Group { key: string; price: number; kind: ChartOrderMarker["kind"]; ma
 function priceText(price: number): string { return price < 1 ? price.toFixed(4) : price.toFixed(2); }
 function orderTitle(marker: ChartOrderMarker): string {
   const type = marker.order.type === "LIMIT_IF_TOUCHED" ? "LIT" : marker.kind === "limit" ? "LIMIT" : "STOP-LIMIT";
-  return `${marker.order.side} ${marker.order.leavesQty.toLocaleString("en-US")} ${type}`;
+  return `${marker.order.side} ${marker.order.leavesQty.toLocaleString("en-US")} ${type}${marker.order.riskEntry ? ` · Risk Entry ${marker.phase}` : marker.order.riskEntryId ? ` · Linked Protection ${marker.phase}` : ""}`;
 }
 
 export function ChartOrderMarkers(props: Props): JSX.Element {
-  const markers = useMemo(() => chartOrderMarkers(props.orders, props.venue, props.symbol, props.pinned),
-    [props.orders, props.venue, props.symbol, props.pinned]);
+  const orders=useMemo(()=>Array.from(props.orders),[props.orders]);
+  const markers = useMemo(() => chartOrderMarkers(orders, props.venue, props.symbol, props.pinned),
+    [orders, props.venue, props.symbol, props.pinned]);
   const [pending, setPending] = useState<Map<string, Pending>>(() => new Map());
   const groups = useMemo(() => {
     const map = new Map<string, Group>();
@@ -46,12 +51,30 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     return [...map.values()];
   }, [markers, pending]);
   const latest = useRef(props);
-  latest.current = props;
+  latest.current = {...props,orders};
   const drag = useRef<Drag | null>(null);
   const [chooser, setChooser] = useState<string | null>(null);
   const chooserLatest = useRef(chooser); chooserLatest.current = chooser;
   props.chooserOpenRef.current = chooser !== null;
   const [announcement, setAnnouncement] = useState("");
+
+  const riskProposal=(marker:ChartOrderMarker,price:number):string=>{
+    const all=Array.from(latest.current.orders);
+    const entry=marker.order.riskEntry ? marker.order : all.find(o=>o.id===marker.order.riskEntryId);
+    const risk=entry?.riskEntry,stop=risk && all.find(o=>o.id===risk.stopId);
+    if(!entry || !risk || !stop)return "";
+    let buy=entry.limitPrice,sell=stop.limitPrice;
+    const trigger=marker.kind!=="limit";
+    const cushion=marker.order.side === "BUY"?risk.buyCushion:risk.sellCushion;
+    const limit=trigger?resolveLimitCushionPrice(marker.order.side,price,cushion.value,cushion.unit === "%"?"%":"$"):price;
+    if(marker.order.side === "BUY")buy=limit;else sell=limit;
+    const locked=!!entry.held?.childClientId;
+    const sized=riskEntrySize({kind:"risk",id:entry.id,label:"Risk",mode:risk.mode === "CashPct" ? "CashPct" : risk.mode === "BuyingPowerPct" ? "BuyingPowerPct" : "Dollar",value:risk.budget,buyCushion:risk.buyCushion,sellCushion:risk.sellCushion},
+      marker.order.id===entry.id && trigger?price:entry.stopPrice,marker.order.id!==entry.id && trigger?price:stop.stopPrice,latest.current.availableCash ?? 0,latest.current.buyingPower ?? 0,risk.budget);
+    const qty=locked?entry.qty:sized.qty;
+    const before=entry.qty*Math.max(0,entry.limitPrice-stop.limitPrice),after=qty*Math.max(0,buy-sell);
+    return `${qty} shares · estimated risk $${before.toFixed(2)} → $${after.toFixed(2)}${after>risk.budget+0.005?" · ABOVE ORIGINAL BUDGET":""}`;
+  };
 
   const layout = () => {
     const host = latest.current.hostRef.current;
@@ -109,6 +132,8 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     row.style.setProperty("--order-color", color);
     const chip = row.querySelector<HTMLElement>("[data-order-price]");
     if (chip) { chip.textContent = priceText(price); chip.style.borderColor = color; }
+    const riskDetail=row.querySelector<HTMLElement>("[data-order-risk]");
+    if(riskDetail && drag.current)riskDetail.textContent=riskProposal(drag.current.marker,price);
   };
 
   const cancelDrag = () => {
@@ -124,16 +149,19 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     setAnnouncement("Price change canceled.");
   };
 
-  const sendReplace = async (marker: ChartOrderMarker, price: number) => {
+  const sendReplace = async (marker: ChartOrderMarker, price: number, observedEntryPhase?:string) => {
     const stop = marker.kind !== "limit";
+    const entry=marker.order.riskEntry ? marker.order : Array.from(latest.current.orders).find(o=>o.id===marker.order.riskEntryId);
     const args: ReplaceOrderArgs = {
       venue: marker.order.venue, orderId: marker.order.id,
       qty: 0, // price-only chart edits preserve the broker-authoritative total quantity in Core.
       limitPrice: stop ? marker.order.limitPrice : price,
       stopPrice: stop ? price : marker.order.stopPrice,
+      ...((marker.order.riskEntry || marker.order.riskEntryId) ? {expectedHeldPhase:marker.phase,expectedRiskEntryPhase:observedEntryPhase ?? (entry?.held?.childClientId?"ACTIVATED":"WAITING")} : {}),
     };
+    const proposal=riskProposal(marker,price);
     setPending((current) => new Map(current).set(marker.order.id, { kind: "replace", price, confirmedPrice: marker.price, stop, outcome: "requested" }));
-    setAnnouncement(`Modify requested at ${priceText(price)}.`);
+    setAnnouncement(`Modify requested at ${priceText(price)}.${proposal ? ` ${proposal}`:""}`);
     try {
       const ack = await latest.current.sendCommand("ReplaceOrder", args);
       if (ack.ambiguous) {
@@ -153,7 +181,8 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     if (!marker.draggable || event.button !== 0) return;
     event.preventDefault(); event.stopPropagation();
     drag.current = { id: marker.order.id, marker, startX: event.clientX, startY: event.clientY,
-      startPrice: marker.price, price: marker.price, moved: false };
+      startPrice: marker.price, price: marker.price, moved: false,
+      entryPhase:(marker.order.riskEntry ? marker.order : Array.from(latest.current.orders).find(o=>o.id===marker.order.riskEntryId))?.held?.childClientId?"ACTIVATED":"WAITING" };
     const row = [...(latest.current.hostRef.current?.querySelectorAll<HTMLElement>("[data-order-group]") ?? [])]
       .find((el) => el.dataset.orderIds?.split(",").includes(marker.order.id));
     const confirmedLine = row?.querySelector<HTMLElement>("[data-order-confirmed-line]");
@@ -186,7 +215,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
         .find((el) => el.dataset.orderIds?.split(",").includes(current.id));
       if (row) { delete row.dataset.proposedPrice; row.querySelector<HTMLElement>("[data-order-price]")?.style.removeProperty("border-color");
         if (!current.moved || current.price === current.startPrice) { const confirmed = row.querySelector<HTMLElement>("[data-order-confirmed-line]"); if (confirmed) confirmed.style.display = "none"; } }
-      if (current.moved && current.price !== current.startPrice) void sendReplace(current.marker, current.price);
+      if (current.moved && current.price !== current.startPrice) void sendReplace(current.marker, current.price,current.entryPhase);
       else paintProposal(current.id, current.startPrice, false);
     };
     const onKey = (event: KeyboardEvent) => {
@@ -207,13 +236,18 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     window.addEventListener("pointerdown", onOutside, true);
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("contextmenu", onContext, true);
+    window.addEventListener("blur",cancelDrag);
+    window.addEventListener("pointercancel",cancelDrag);
     return () => {
       window.removeEventListener("pointermove", onMove); window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointerdown", onRightDown, true); window.removeEventListener("keydown", onKey, true);
       window.removeEventListener("pointerdown", onOutside, true);
       window.removeEventListener("contextmenu", onContext, true);
+      window.removeEventListener("blur",cancelDrag);window.removeEventListener("pointercancel",cancelDrag);
     };
   }, []);
+
+  useEffect(()=>{cancelDrag();setChooser(null);},[props.venue,props.symbol,props.pinned]);
 
   const cancelOrder = async (marker: ChartOrderMarker) => {
     setPending((current) => new Map(current).set(marker.order.id, { kind: "cancel", stop: false, outcome: "requested" }));
@@ -279,9 +313,10 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
             {priceText(group.price)}{group.markers.length > 1 ? ` ×${group.markers.length}` : ""}
           </button>
           {group.markers.length === 1 && <button type="button" disabled={action?.kind === "cancel"}
-            aria-label={`Cancel ${orderTitle(first)}`} title={`Cancel ${orderTitle(first)}`} onClick={() => void cancelOrder(first)}
+            aria-label={first.order.riskEntryId?"Cancel Protection":`Cancel ${orderTitle(first)}`} title={first.order.riskEntryId?"Cancel Protection — cancels remaining buy and linked sells; leaves shares open":`Cancel ${orderTitle(first)}`} onClick={() => void cancelOrder(first)}
             style={{ border:0, borderLeft:`1px solid ${warningColor}`, background:"transparent", color:"inherit", height:"100%", padding:"0 5px", cursor:"pointer", font:"bold 12px system-ui" }}>×</button>}
         </div>
+        {(first.order.riskEntry || first.order.riskEntryId) && <div data-order-risk style={{position:"absolute",left:8,top:12,color:warningColor,background:"#0c1017",fontSize:10}}>{riskProposal(first,first.price)}</div>}
         {chosen && group.markers.length > 1 && <div role="dialog" aria-label="Choose chart order" style={{ position:"absolute", right:props.rightAxisWidth + 6, top:stackIndex * 18 + 14,
           minWidth:185, padding:5, border:`1px solid ${color}`, borderRadius:4, background:"#111821", boxShadow:"0 4px 18px #0008", pointerEvents:"auto" }}>
           {group.markers.map((marker) => <div key={marker.order.id} style={{ display:"flex", gap:4, alignItems:"center", marginBottom:3 }}>
@@ -296,6 +331,13 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
           <button type="button" aria-label="Close order chooser" onClick={() => setChooser(null)} style={{ marginTop:2, border:0, background:"transparent", color:"#ddd", cursor:"pointer", fontSize:10 }}>Close</button>
         </div>}
       </div>;
+    })}
+    {orders.filter(o=>o.venue===props.venue && o.symbol===props.symbol && o.riskEntry).map(entry=>{
+      const risk=entry.riskEntry!,stop=orders.find(o=>o.id===risk.stopId);
+      const remaining=Math.max(0,entry.executedQty-orders.filter(o=>o.riskEntryId===entry.id).reduce((sum,o)=>sum+o.executedQty,0));
+      if(!remaining || (!risk.failure && !risk.protectionCanceled && stop && !["EXPIRED","CANCELED","REJECTED"].includes(stop.status) && stop.held?.phase!=="PAUSED"))return null;
+      return <div key={entry.id} role="alert" style={{position:"absolute",left:10,bottom:35,maxWidth:"80%",padding:6,color:"#ff9d72",background:"#0c1017",fontSize:11}}>
+        {remaining} shares remain · {risk.failure || (risk.protectionCanceled ? "Protection canceled" : stop?.held?.phase==="PAUSED" ? "Protection paused — reconcile / Resume in Orders" : "DAY protection ended")}. Verify Orders and positions.</div>;
     })}
     <span aria-live="polite" className="chart-order-announcement" style={{ position:"absolute", width:1, height:1, overflow:"hidden", clipPath:"inset(50%)" }}>{announcement}</span>
   </div>;

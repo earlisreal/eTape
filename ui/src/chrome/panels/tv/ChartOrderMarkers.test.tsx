@@ -29,6 +29,14 @@ function mount(orders: Order[] = [base]) {
 beforeEach(() => { cleanup(); document.body.replaceChildren(); });
 
 describe("ChartOrderMarkers", () => {
+  it("sends the observed phase when dragging a linked trigger",async()=>{
+    const order:Order={...base,type:"STOP_LIMIT",stopPrice:100,limitPrice:100.05,held:{phase:"WAITING",deadlineMs:9999999999999},
+      riskEntry:{stopId:"s",budget:100,mode:"Dollar",buyCushion:{value:0.05,unit:"$"},sellCushion:{value:0,unit:"$"}}};
+    const {sendCommand}=mount([order]);
+    fireEvent.pointerDown(screen.getByTestId("order-label-o1"),{button:0,pointerId:1,clientX:20,clientY:200});
+    fireEvent.pointerMove(window,{pointerId:1,clientX:20,clientY:190});fireEvent.pointerUp(window,{pointerId:1,clientX:20,clientY:190});
+    await waitFor(()=>expect(sendCommand).toHaveBeenCalledWith("ReplaceOrder",expect.objectContaining({stopPrice:110,expectedHeldPhase:"WAITING"})));
+  });
   it("previews the snapped price during drag and sends a price-only replace on release", async () => {
     const { sendCommand } = mount();
     const label = screen.getByTestId("order-label-o1");

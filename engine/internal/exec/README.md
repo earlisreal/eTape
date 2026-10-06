@@ -18,6 +18,25 @@ from its persisted equity baseline and cash-flow adjustment. Realized P&L is
 the local cycle ledger and remains visible after flattening. Test:
 `go test ./internal/exec`.
 
+Chart Risk Entry admits a linked BUY/SELL STOP_LIMIT pair as one durable local
+event. Both triggers stay engine-held through PRE/RTH/POST until scheduled
+DataClose. `SubmitRiskEntry` uses fixed dollars, Cash %, or BP % as a loss budget;
+whole-share sizing uses cushion-adjusted execution limits and the funding cap,
+and `MaxQty` prevents increasing the approved preview. Admission requires fresh
+account/eligible-print data, confirmed flat positions, no other working orders,
+opening gates, and the live held-stop acknowledgement.
+
+The exit covers only this entry's confirmed fills. Stop activation cancels the
+remaining buy; late fills receive separate durable exit children, including
+reservations for paused protection. Disarm/day-loss cancel further buying while
+healthy reducing linked exits remain enabled. Cancel Protection cancels every
+linked leg and leaves shares open. Restart/feed/broker gaps pause local custody
+for reconciliation and manual Resume; ambiguous children are never reposted.
+Marker edits retain cushions, resize only before buy activation against the
+original dollar budget, and lock quantities thereafter. Commands carry observed
+held and entry phases so activation during a drag rejects a stale amendment.
+Protection failures and DAY expiry can leave shares open; the UI reports them.
+
 An EXTENDED DAY STOP_LIMIT submitted during pre/postmarket is persisted as one
 engine-held parent order; no venue order or buying-power reservation exists
 before trigger. Only fresh Last-Eligible prints can trigger it. On trigger, the

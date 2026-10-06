@@ -185,6 +185,12 @@ func EncodeEvent(ev Event) (string, []byte, error) {
 // DecodeEvent reconstructs a typed event from its kind + JSON payload.
 func DecodeEvent(kind string, payload []byte) (Event, error) {
 	switch kind {
+	case "risk_entry_changed":
+		var v RiskEntryChanged
+		if err := json.Unmarshal(payload, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "order_submitted":
 		var v OrderSubmitted
 		if err := json.Unmarshal(payload, &v); err != nil {

@@ -42,11 +42,13 @@ type CancelOrder struct {
 	OrderID string
 }
 type ReplaceOrder struct {
-	Venue      VenueID
-	OrderID    string
-	Qty        float64
-	LimitPrice float64
-	StopPrice  float64
+	ExpectedRiskEntryPhase string
+	Venue                  VenueID
+	OrderID                string
+	Qty                    float64
+	LimitPrice             float64
+	StopPrice              float64
+	ExpectedHeldPhase      HeldPhase
 }
 type Flatten struct{ Venue VenueID }
 type KillSwitch struct{ Venue VenueID }
@@ -832,6 +834,13 @@ func (c *Core) applyPositionEffect(e BrokerPositionEffect) bool {
 
 // emitForEvent pushes the Update(s) an event implies.
 func (c *Core) emitForEvent(ev Event) {
+	if pair, ok := ev.(RiskEntryChanged); ok {
+		c.emit(OrderUpdate{Order: pair.Entry})
+		if pair.Stop.ID != "" {
+			c.emit(OrderUpdate{Order: pair.Stop})
+		}
+		return
+	}
 	if flatten, ok := ev.(FlattenPendingChanged); ok {
 		c.emit(FlattenPendingUpdate{Venue: flatten.V, Pending: flatten.Pending})
 	}
@@ -853,6 +862,8 @@ func (c *Core) emitForEvent(ev Event) {
 
 func (c *Core) handleCmd(ctx context.Context, cmd Command) CmdAck {
 	switch cm := cmd.(type) {
+	case SubmitRiskEntry:
+		return c.handleRiskEntry(ctx, cm)
 	case SubmitOrder:
 		return c.handleSubmit(ctx, cm)
 	case CancelOrder:
@@ -1116,6 +1127,18 @@ func (c *Core) handleCancel(ctx context.Context, cm CancelOrder) CmdAck {
 		return CmdAck{Accepted: false, Reason: "unknown order", OrderID: cm.OrderID}
 	}
 	o := c.state.Venue(v).Orders[cm.OrderID]
+	if o.RiskEntry != nil {
+		defer func() { c.syncRiskProtection(ctx, c.order(o.ID)) }()
+	}
+	if o.RiskEntryID != "" {
+		entry := c.riskOwner(o)
+		if entry.RiskEntry != nil && !entry.RiskEntry.ProtectionCanceled {
+			if err := c.cancelRiskProtection(ctx, entry); err != nil {
+				return CmdAck{Reason: "cannot persist protection cancellation: " + err.Error(), OrderID: o.ID}
+			}
+			return CmdAck{Accepted: true, OrderID: o.ID}
+		}
+	}
 	if o.Action != nil && o.Action.Kind == ActionCancel &&
 		(o.Action.Phase == ActionRequested || o.Action.Phase == ActionUnknown) {
 		return CmdAck{Accepted: false, Reason: "cancel outcome is still unresolved", OrderID: o.ID}
@@ -1152,6 +1175,14 @@ func (c *Core) handleCancel(ctx context.Context, cm CancelOrder) CmdAck {
 }
 
 func (c *Core) handleReplace(ctx context.Context, cm ReplaceOrder) CmdAck {
+	o := c.order(cm.OrderID)
+	if o.Venue == cm.Venue && (o.RiskEntry != nil || o.RiskEntryID != "") {
+		return c.replaceRisk(ctx, cm, o)
+	}
+	return c.handleReplaceSingle(ctx, cm)
+}
+
+func (c *Core) handleReplaceSingle(ctx context.Context, cm ReplaceOrder) CmdAck {
 	v, ok := c.state.OrderVenue(cm.OrderID)
 	if !ok || v != cm.Venue {
 		return CmdAck{Accepted: false, Reason: "unknown order", OrderID: cm.OrderID}
@@ -1264,6 +1295,7 @@ func (c *Core) startVenueAction(ctx context.Context, b Broker, venue VenueID, or
 }
 
 func (c *Core) handleFlatten(ctx context.Context, cm Flatten) CmdAck {
+	c.disarmRiskEntries(ctx, cm.Venue, true)
 	b := c.brokers[cm.Venue]
 	if b == nil {
 		return CmdAck{Accepted: false, Reason: "unknown venue"}
@@ -1324,6 +1356,7 @@ func (c *Core) handleResetBalance(ctx context.Context, cm ResetBalance) CmdAck {
 }
 
 func (c *Core) handleKill(ctx context.Context, cm KillSwitch) CmdAck {
+	c.disarmRiskEntries(ctx, cm.Venue, true)
 	// Kill never places orders: durably request cancellation for every working
 	// order on the target venue(s), then disarm.
 	// MasterArmed is global, so a venue-scoped kill still locks all trading.
@@ -1351,6 +1384,9 @@ func (c *Core) handleKill(ctx context.Context, cm KillSwitch) CmdAck {
 }
 
 func (c *Core) handleArm(ctx context.Context, on bool) CmdAck {
+	if !on {
+		c.disarmRiskEntries(ctx, "", false)
+	}
 	c.state.SetMasterArmed(on)
 	if !on {
 		c.disarmHeld(ctx, "", false)
@@ -1370,6 +1406,7 @@ func (c *Core) handleSetActiveVenue(cm SetActiveVenue) CmdAck {
 	}
 	c.state.SetActiveVenue(cm.Venue)
 	if BreachedDayLoss(c.state, c.gate) && c.state.MasterArmed {
+		c.disarmRiskEntries(context.Background(), "", false)
 		c.state.SetMasterArmed(false)
 		c.syslog("exec.autodisarm", "day-loss breach after active venue change: master disarmed")
 		c.emitStatus()
@@ -1384,6 +1421,16 @@ func (c *Core) emitStatus() {
 }
 
 func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
+	defer func() {
+		switch e := be.(type) {
+		case Event:
+			c.riskBrokerEvent(ctx, e.OrderID())
+		case HeldActivationOutcome:
+			c.riskBrokerEvent(ctx, e.OID)
+		case BrokerActionOutcome:
+			c.riskBrokerEvent(ctx, e.OID)
+		}
+	}()
 	switch e := be.(type) {
 	case HeldActivationOutcome:
 		before := c.order(e.OID)
@@ -1478,6 +1525,7 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		}
 		c.state.ReconcileAccount(e.Account)
 		if BreachedDayLoss(c.state, c.gate) && c.state.MasterArmed {
+			c.disarmRiskEntries(ctx, "", false)
 			c.state.SetMasterArmed(false)
 			c.syslog("exec.autodisarm", "day-loss breach: master disarmed")
 			c.emitStatus()
@@ -1486,6 +1534,7 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 	case BrokerAccountFresh:
 		c.state.SetAccountFresh(e.V, e.Fresh)
 		if !e.Fresh && c.state.MasterArmed {
+			c.disarmRiskEntries(ctx, "", false)
 			c.state.SetMasterArmed(false)
 			c.syslog("exec.autodisarm", "account data stale: master disarmed")
 			c.emitStatus()

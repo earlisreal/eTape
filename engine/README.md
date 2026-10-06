@@ -28,6 +28,11 @@ POST segment. BUY/COVER triggers at or below the trigger; SELL/SHORT at or
 above. A fresh Last-Eligible print creates one linked venue LIMIT child, and
 the live-account acknowledgement is separate from stop-limit enablement.
 
+Chart Risk Entry links two engine-held STOP_LIMITs through scheduled DataClose,
+sizes shares from a saved risk budget, and protects only confirmed entry fills.
+See the [execution core guide](internal/exec/README.md) for partial/late fills,
+disarm, cancellation, recovery and phase-checked chart amendments.
+
 ## Release builds
 
 The release targets build the UI, embed it, and cross-compile with CGO disabled:

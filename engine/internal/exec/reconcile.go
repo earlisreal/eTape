@@ -43,6 +43,7 @@ func (s *State) ReconcileOpenOrders(v VenueID, orders []Order) {
 	for _, o := range orders {
 		o.Venue = v
 		if parent, ok := vs.Orders[o.ID]; ok && parent.Held != nil {
+			o.RiskEntry, o.RiskEntryID = parent.RiskEntry, parent.RiskEntryID
 			o.Type, o.StopPrice, o.Held = parent.Type, parent.StopPrice, parent.Held
 			o.DeferredPositionPct = parent.DeferredPositionPct
 			if parent.Held.ResolvedQty > 0 {

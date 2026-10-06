@@ -7,7 +7,7 @@
 // point of a deck button is a deliberate, already-confirmed click).
 // Management actions (cancel/kill) are never gated by armed, in either mode.
 import type { Quote, VenueID } from "../../wire/contract";
-import type { ActionTemplate } from "./actionTemplate";
+import { initiateChartRiskEntry, type ActionTemplate } from "./actionTemplate";
 import { resolvePlaceTemplate } from "./resolveTemplate";
 import type { OrderCommands } from "./commands";
 import type { ToastApi } from "../Toast";
@@ -26,6 +26,10 @@ export function fireTemplate(
   toast: ToastApi,
   opts: { gateArm: boolean },
 ): void {
+  if (t.kind === "risk") {
+    if (!initiateChartRiskEntry(t)) toast.push({level:"warn",text:"Risk entry requires an active grouped Chart Panel."});
+    return;
+  }
   if (t.kind === "place") {
     if (opts.gateArm && !ctx.armed) { toast.push({ level: "warn", text: "locked — hotkey blocked" }); return; }
     if (ctx.venue === "") {

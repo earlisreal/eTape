@@ -62,6 +62,7 @@ export default defineConfig({
             'src/chrome/panels/ChartPanel.test.tsx', 'src/chrome/panels/tv/BarCloseTimer.test.tsx',
             'src/chrome/panels/tv/ChartOrderMarkers.test.tsx',
             'src/chrome/panels/tv/ChartConditionalOrderEntry.test.tsx',
+            'src/chrome/panels/tv/ChartRiskEntry.test.tsx',
             'src/chrome/panels/tv/ChartHeaderControls.test.tsx', 'src/chrome/panels/tv/ChartSettingsDialog.test.tsx',
             'src/chrome/panels/tv/IndicatorPickerPopover.test.tsx', 'src/chrome/panels/tv/IndicatorSettingsDialog.test.tsx',
             'src/chrome/panels/tv/TVLegend.test.tsx',

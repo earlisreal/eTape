@@ -36,6 +36,7 @@ export function deckToneClass(t: ActionTemplate): string {
   if (c === "neutral") return "side side-neutral";
   if (c === "danger") return "side side-danger";
   if (t.kind === "manage") return t.action === "KillSwitch" ? "side side-danger" : "side side-neutral";
+  if (t.kind === "risk") return "side side-buy";
   return t.side === "BUY" || t.side === "COVER" ? "side side-buy" : "side side-sell";
 }
 

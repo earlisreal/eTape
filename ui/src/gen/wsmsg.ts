@@ -205,6 +205,33 @@ export interface Order {
   updatedMs: number /* int64 */;
   held?: HeldOrder;
   action?: OrderAction;
+  riskEntry?: RiskEntry;
+  riskEntryId?: string;
+}
+export interface LimitCushion {
+  value: number /* float64 */;
+  unit: string;
+}
+export interface RiskEntry {
+  stopId: string;
+  budget: number /* float64 */;
+  mode: string;
+  buyCushion: LimitCushion;
+  sellCushion: LimitCushion;
+  closing?: boolean;
+  protectionCanceled?: boolean;
+  failure?: string;
+}
+export interface SubmitRiskEntryArgs {
+  venue: string;
+  symbol: string;
+  buyStop: number /* float64 */;
+  sellStop: number /* float64 */;
+  mode: string;
+  value: number /* float64 */;
+  maxQty: number /* float64 */;
+  buyCushion: LimitCushion;
+  sellCushion: LimitCushion;
 }
 export interface HeldOrder {
   phase: string;
@@ -605,6 +632,8 @@ export interface AcknowledgeHeldLimitIfTouchedArgs {
   venue: string;
 }
 export interface ReplaceOrderArgs {
+  expectedRiskEntryPhase?: string;
+  expectedHeldPhase?: string;
   venue: string;
   orderId: string;
   qty: number /* float64 */;
@@ -633,6 +662,7 @@ export interface QueryFillsArgs {
   toMs: number /* int64 */;
 }
 export interface QueryStopLimitRouteArgs {
+  riskEntry?: boolean;
   tif: TIF;
   session: OrderSession;
   type?: OrderType;

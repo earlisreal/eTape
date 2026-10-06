@@ -108,6 +108,36 @@ type Order struct {
 	UpdatedMs           int64        `json:"updatedMs"`
 	Held                *HeldOrder   `json:"held,omitempty"`
 	Action              *OrderAction `json:"action,omitempty"`
+	RiskEntry           *RiskEntry   `json:"riskEntry,omitempty"`
+	RiskEntryID         string       `json:"riskEntryId,omitempty"`
+}
+
+type LimitCushion struct {
+	Value float64 `json:"value"`
+	Unit  string  `json:"unit"`
+}
+
+type RiskEntry struct {
+	StopID             string       `json:"stopId"`
+	Budget             float64      `json:"budget"`
+	Mode               string       `json:"mode"`
+	BuyCushion         LimitCushion `json:"buyCushion"`
+	SellCushion        LimitCushion `json:"sellCushion"`
+	Closing            bool         `json:"closing,omitempty"`
+	ProtectionCanceled bool         `json:"protectionCanceled,omitempty"`
+	Failure            string       `json:"failure,omitempty"`
+}
+
+type SubmitRiskEntryArgs struct {
+	Venue       string       `json:"venue"`
+	Symbol      string       `json:"symbol"`
+	BuyStop     float64      `json:"buyStop"`
+	SellStop    float64      `json:"sellStop"`
+	Mode        string       `json:"mode"`
+	Value       float64      `json:"value"`
+	MaxQty      float64      `json:"maxQty"`
+	BuyCushion  LimitCushion `json:"buyCushion"`
+	SellCushion LimitCushion `json:"sellCushion"`
 }
 
 type HeldOrder struct {
@@ -532,11 +562,13 @@ type AcknowledgeHeldLimitIfTouchedArgs struct {
 }
 
 type ReplaceOrderArgs struct {
-	Venue      string  `json:"venue"`
-	OrderID    string  `json:"orderId"`
-	Qty        float64 `json:"qty"`
-	LimitPrice float64 `json:"limitPrice"`
-	StopPrice  float64 `json:"stopPrice"`
+	ExpectedRiskEntryPhase string  `json:"expectedRiskEntryPhase,omitempty"`
+	ExpectedHeldPhase      string  `json:"expectedHeldPhase,omitempty"`
+	Venue                  string  `json:"venue"`
+	OrderID                string  `json:"orderId"`
+	Qty                    float64 `json:"qty"`
+	LimitPrice             float64 `json:"limitPrice"`
+	StopPrice              float64 `json:"stopPrice"`
 }
 
 type FlattenArgs struct {
@@ -563,6 +595,7 @@ type QueryFillsArgs struct {
 }
 
 type QueryStopLimitRouteArgs struct {
+	RiskEntry              bool         `json:"riskEntry,omitempty"`
 	TIF                    TIF          `json:"tif"`
 	Session                OrderSession `json:"session"`
 	Type                   OrderType    `json:"type,omitempty"`

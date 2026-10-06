@@ -11,6 +11,14 @@ paper accounts in addition to its live risk venues. The Account strip exposes
 the single broker/calculated Day P&L, eTape cycle Realized P&L, source label,
 and stale timestamp. Test: `npm test -- exec`.
 
+Risk Action Templates save dollar risk, Risk Cash %, or Risk BP %, separate buy
+and sell Limit Cushions, and a hotkey. The hotkey starts only the active grouped
+Chart Panel in the foreground window. The chart publishes account demand for
+paper sizing without an Account panel. Settings saves the default-off initial
+auto-send toggle together with presets; normal chart marker amendments always
+send on release. Both custody triggers are linked to the entry's fills, and
+before/after estimated-risk previews do not guarantee execution or a loss cap.
+
 Dollar, Cash %, Buying Power %, Shares, and Position sizing use the selected
 venue's live account and position data; Cash % uses the same available cash
 shown by the Account panel.

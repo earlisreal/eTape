@@ -24,6 +24,17 @@ ticks remain outside React state. Engine-held STOP_LIMIT and LIT are labeled
 as local custody before trigger and become venue LIMITs only after a fresh
 eligible print.
 
+Settings → Orders & hotkeys → Add → Chart Risk Entry creates a risk preset and
+hotkey. Focus a grouped chart, press the hotkey, then click the buy trigger and
+sell stop or drag between them. The preview shows whole shares, execution limits,
+notional and estimated risk after cushions. Drag either endpoint to adjust; Enter
+or Send pair submits. Escape, right-click, focus loss and context changes cancel.
+The global auto-send setting defaults off and applies only to initial setup.
+Submitted linked markers always request edits on release, showing before/after
+risk and an above-budget warning after activation. Cancel Protection leaves
+filled shares open; interruptions and expiry appear as chart warnings.
+Cash % and BP % configure loss budgets, excluding fees and execution risk.
+
 Built-in and newly added symbol-bearing panels start unassigned. General Layout downloads preserve workspace structure and non-symbol settings while removing panel and Link Group focused symbols; Monitoring Sync intent remains enabled but imports paused without a portable Scanner Source. Existing saved workspaces and downloaded files are left untouched.
 
 The 10-second chart renders missing weekday 04:00–20:00 ET buckets as client-only synthetic flat bars at the preceding real close, with empty volume. These marked display bars are not stored or included in engine-computed indicators. The local Volume Indicator reads the same display stream, so it omits synthetic bars while retaining real Volume-Only bars; generation pauses at the session close until another real bar arrives.

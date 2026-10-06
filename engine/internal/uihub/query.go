@@ -138,7 +138,13 @@ func (q *queries) handleContext(ctx context.Context, name string, args json.RawM
 		var effective exec.OrderSession
 		var deadline time.Time
 		var reason string
-		if orderType == exec.TypeLimitIfTouched {
+		if a.RiskEntry {
+			route, effective, deadline = exec.RouteEngineHeld, exec.SessionExtended, session.Schedule(now).DataClose
+			phase := session.PhaseAt(now)
+			if phase != session.PreMarket && phase != session.RTH && phase != session.PostMarket {
+				reason = "risk entry is unavailable outside PRE/RTH/POST"
+			}
+		} else if orderType == exec.TypeLimitIfTouched {
 			route, effective, deadline, reason = exec.ResolveLimitIfTouchedRoute(now, tifFromWire(a.TIF), sessionFromWire(a.Session))
 		} else if a.DeferredPositionSizing {
 			route, effective, deadline, reason = exec.ResolveDeferredStopSellRoute(now, tifFromWire(a.TIF), sessionFromWire(a.Session))

@@ -171,6 +171,11 @@ func (c *Core) changeHeld(o Order, phase HeldPhase, reason string, cancelRequest
 
 func (c *Core) heldGate(req OrderRequest, orderID string) (bool, string) {
 	copyState := *c.state
+	gate := c.gate
+	if o := c.order(orderID); o.RiskEntryID != "" && req.Side == SideSell && reducesPosition(c.state, req) {
+		copyState.MasterArmed = true
+		gate.Global.MaxDayLoss = 0
+	}
 	copyVenue := *c.state.Venue(req.Venue)
 	copyVenue.Orders = make(map[string]Order, len(c.state.Venue(req.Venue).Orders))
 	for id, o := range c.state.Venue(req.Venue).Orders {
@@ -190,14 +195,44 @@ func (c *Core) heldGate(req OrderRequest, orderID string) (bool, string) {
 		}
 	}
 	if req.Qty == 0 {
-		return EvaluateDeferredAdmission(&copyState, c.gate, req)
+		return EvaluateDeferredAdmission(&copyState, gate, req)
 	}
-	return Evaluate(&copyState, c.gate, req, c.marks)
+	return Evaluate(&copyState, gate, req, c.marks)
 }
 
 func (c *Core) activateHeld(ctx context.Context, o Order) {
 	if o.Held == nil || o.Held.Phase == HeldActivating || o.Held.Phase == HeldWorking || o.Held.CancelRequested {
 		return
+	}
+	if o.RiskEntry != nil {
+		defer func() {
+			if !c.order(o.ID).Working() {
+				c.syncRiskProtection(ctx, c.order(o.ID))
+			}
+		}()
+	}
+	if o.RiskEntryID != "" {
+		entry := c.riskOwner(o)
+		if entry.RiskEntry == nil || entry.RiskEntry.ProtectionCanceled || entry.RiskEntry.Failure != "" || o.Qty <= 0 {
+			return
+		}
+		defer func() {
+			current := c.order(o.ID)
+			if current.Status == StatusRejected {
+				c.failRisk(ctx, c.riskOwner(current), "protection trigger rejected: "+current.RejectReason)
+			}
+		}()
+		if !entry.RiskEntry.Closing {
+			risk := *entry.RiskEntry
+			risk.Closing = true
+			if err := c.persistRisk(entry, risk); err != nil {
+				c.syslog("exec.risk", err.Error())
+				return
+			}
+			if entry.Working() {
+				c.requestHeldVenueCancel(ctx, c.order(entry.ID), "linked stop triggered; cancel remaining buy")
+			}
+		}
 	}
 	if o.Side == SideSell && !c.state.PositionsReady(o.Venue) {
 		c.changeHeld(o, HeldPaused, "position data unavailable; reconcile and resume manually", false)
@@ -359,6 +394,9 @@ func (c *Core) pauseHeldSellVenue(venue VenueID, reason string) {
 func (c *Core) disarmHeld(ctx context.Context, venue VenueID, cancelPretrigger bool) {
 	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
+		if !cancelPretrigger && (o.RiskEntryID != "" || o.RiskEntry != nil) {
+			continue
+		}
 		if venue != "" && o.Venue != venue {
 			continue
 		}
@@ -388,7 +426,7 @@ func (c *Core) handleResumeHeld(ctx context.Context, cm ResumeHeldOrder) CmdAck 
 	if o.Held.Phase != HeldPaused {
 		return CmdAck{Accepted: false, Reason: "held order is not paused", OrderID: o.ID}
 	}
-	if !c.state.MasterArmed {
+	if !c.state.MasterArmed && o.RiskEntryID == "" {
 		return CmdAck{Accepted: false, Reason: "master disarmed", OrderID: o.ID}
 	}
 	if o.Side == SideSell && c.state.Venue(o.Venue).FlattenPending {

@@ -25,6 +25,7 @@ import { useTheme } from "../ThemeProvider";
 import { useOptionalOrderConfig } from "../exec/useOrderConfig";
 import { ChartOrderMarkers } from "./tv/ChartOrderMarkers";
 import { ChartConditionalOrderEntry } from "./tv/ChartConditionalOrderEntry";
+import { ChartRiskEntry } from "./tv/ChartRiskEntry";
 import { DEFAULT_RECT_FILL_OPACITY, type Drawing } from "../../render/chart/drawings/model";
 import type { LineStyleName } from "../../render/chart/lineStyle";
 import { getTvPalette, getTvChrome } from "../../render/chart/tvTheme";
@@ -1273,9 +1274,13 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
             onClosePane={closePane} onToggleCollapsePane={togglePaneCollapsed}
             legendRef={legendRef} />
           <ChartOrderMarkers orders={execSnapshot.orders.values()} venue={linkGroups.venueFor(group) ?? ""} symbol={chartSymbol}
+            availableCash={execSnapshot.accounts.get(linkGroups.venueFor(group) ?? "")?.availableCash ?? 0} buyingPower={execSnapshot.accounts.get(linkGroups.venueFor(group) ?? "")?.buyingPower ?? 0}
             pinned={group === null} sendCommand={commands.sendCommand} hostRef={hostRef} facadeRef={facadeRef}
             rightAxisWidth={rightAxisWidth} layoutRef={orderMarkerLayoutRef} chooserOpenRef={orderChooserOpenRef} />
           <ChartConditionalOrderEntry hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
+            symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={activeTool} chooserOpenRef={orderChooserOpenRef}
+            sendCommand={commands.sendCommand} sendQuery={commands.sendQuery} />
+          <ChartRiskEntry panelId={config.id} active={!!active} contextKey={timeframe} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
             symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={activeTool} chooserOpenRef={orderChooserOpenRef}
             sendCommand={commands.sendCommand} sendQuery={commands.sendQuery} />
           {selection && (

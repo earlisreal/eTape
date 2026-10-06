@@ -52,6 +52,9 @@ and the broker of your choice for execution, and everything else is free and ope
   user-activated grouped Dockview panel across open windows. The target is ephemeral,
   never saved in a workspace or restored across a full restart, and its read-only cue
   shows the linked symbol and resolved venue.
+- **Chart Risk Entry.** A preset hotkey starts a two-point buy/stop tool on the
+  active grouped chart. Dollar, Cash %, or BP % loss budgets size linked
+  engine-held stop-limit orders; both prices can be adjusted from the chart.
 - **Safety-gated by default.** Zero venues are configured out of the box. Every order
   must pass a two-layer risk gate (global caps + per-venue caps: max day loss, order
   value, position size, open orders), and the eTape master execution switch must be

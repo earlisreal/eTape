@@ -27,6 +27,21 @@ func newClosedOrders() *closedOrders {
 
 func (p *closedOrders) apply(ev Event, seq int64) []ClosedOrder {
 	switch e := ev.(type) {
+	case RiskEntryChanged:
+		var rows []ClosedOrder
+		for _, o := range []Order{e.Entry, e.Stop} {
+			if o.ID == "" {
+				continue
+			}
+			p.seeded[o.ID] = true
+			if o.Working() {
+				p.active[o.ID] = o
+			} else {
+				delete(p.active, o.ID)
+				rows = append(rows, p.close(o, o.ID))
+			}
+		}
+		return rows
 	case OrderSubmitted:
 		p.active[e.Order.ID] = e.Order
 		p.seeded[e.Order.ID] = true
