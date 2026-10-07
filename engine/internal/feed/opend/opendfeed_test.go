@@ -3,6 +3,7 @@ package opend
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"sync"
 	"testing"
@@ -97,6 +98,64 @@ func TestEnsureSubscribesAndSeeds(t *testing.T) {
 	})
 	if ev, ok := nextEvent(t, f.Events()).(feed.TicksEvent); !ok || ev.Seed || ev.Ticks[0].Seq != 2 {
 		t.Fatalf("push event = %#v, want live TicksEvent seq=2", ev)
+	}
+}
+
+func TestEnsureSeedsOnlyAfterSubscriptionAck(t *testing.T) {
+	for _, background := range []bool{false, true} {
+		t.Run(fmt.Sprint(background), func(t *testing.T) {
+			m := newMockOpenD(t)
+			m.setData("US.AAPL", &qotData{
+				bars1m: []*qotcommon.KLine{kl(1782146460, 309.1, 1000)},
+				ticks: []*qotcommon.Ticker{{Time: proto.String("2026-07-05 09:30:00"), Sequence: proto.Int64(1),
+					Timestamp: proto.Float64(1782146400), Price: proto.Float64(309), Volume: proto.Int64(100),
+					Turnover: proto.Float64(30900), Dir: proto.Int32(1)}},
+			})
+			reads := make(chan uint32, 10)
+			m.handler = func(mm *mockOpenD, conn net.Conn, frame Frame) {
+				if frame.ProtoID == ProtoQotGetKL || frame.ProtoID == ProtoQotGetTicker {
+					reads <- frame.ProtoID
+				}
+				mm.defaultHandler(mm, conn, frame)
+			}
+			f := NewOpenDFeed(liveClient(t, m), FeedOptions{})
+			release := make(chan struct{})
+			var once sync.Once
+			unblock := func() { once.Do(func() { close(release) }) }
+			f.sub.rpc = &fakeRPC{entered: make(chan struct{}, 1), release: release}
+			ctx, cancel := context.WithCancel(context.Background())
+			workerDone, passDone := make(chan struct{}), make(chan struct{})
+			queue := f.foregroundSeedq
+			if background {
+				queue = f.backgroundSeedq
+			}
+			go func() { f.seedWorker(ctx, queue); close(workerDone) }()
+			f.Ensure(feed.Demand{ID: "chart", Symbol: "US.AAPL", Subs: []feed.SubType{feed.SubKL1m, feed.SubTicker}, BackgroundSeed: background})
+			go func() { f.sub.pass(ctx); close(passDone) }()
+			t.Cleanup(func() { unblock(); cancel(); <-passDone; <-workerDone })
+			<-f.sub.rpc.(*fakeRPC).entered
+			select {
+			case protoID := <-reads:
+				t.Fatalf("cache read %d preceded subscription acknowledgement", protoID)
+			case <-time.After(1500 * time.Millisecond):
+			}
+			unblock()
+			<-passDone
+			for range 2 {
+				switch ev := nextEvent(t, f.Events()).(type) {
+				case feed.Bars1mEvent:
+					if !ev.Seed || len(ev.Bars) != 1 {
+						t.Fatalf("candle seed = %#v", ev)
+					}
+				case feed.TicksEvent:
+					if !ev.Seed || len(ev.Ticks) != 1 {
+						t.Fatalf("ticker seed = %#v", ev)
+					}
+				default:
+					t.Fatalf("unexpected seed = %#v", ev)
+				}
+			}
+		})
 	}
 }
 
@@ -197,12 +256,9 @@ func TestSlowCandleSeedDoesNotDelayBookOrTape(t *testing.T) {
 	}
 }
 
-// TestSeedRetriesTransientGetKLFailure covers the race Ensure's doc comment
-// describes: the KL_1Min subscribe and the seed job fire with no ordering
-// between them, so the seed's Qot_GetKL can reach OpenD before the subscribe
-// acks and get rejected ("please subscribe to KL_1Min data first."). The mock
-// fails the first Qot_GetKL for the symbol, then succeeds; seed must retry
-// and still emit the seeded Bars1mEvent.
+// TestSeedRetriesTransientGetKLFailure covers cache propagation after the
+// subscription ack. The mock fails the first Qot_GetKL, then succeeds; seed
+// must retry and still emit the seeded Bars1mEvent.
 //
 // The retry sleeps via clk.After, and that call happens inside the
 // seedWorker goroutine at some point after Ensure returns — the test
@@ -446,6 +502,9 @@ func TestEnsureDoesNotBlockWhenSeedQueueFull(t *testing.T) {
 	m := newMockOpenD(t)
 	cli := liveClient(t, m)
 	f := NewOpenDFeed(cli, FeedOptions{})
+	f.sub.Ensure(testBarDemand("w", "US.AAPL"))
+	f.sub.pass(context.Background())
+	<-f.foregroundSeedq
 	// Fill the seed queue to capacity without a seed worker draining it
 	// (Run is deliberately not started), then confirm Ensure still returns.
 	for i := 0; i < cap(f.foregroundSeedq); i++ {
@@ -467,13 +526,16 @@ func TestEnsureDoesNotBlockWhenSeedQueueFull(t *testing.T) {
 func TestEnsureDoesNotBlockWhenBackgroundSeedQueueFull(t *testing.T) {
 	m := newMockOpenD(t)
 	f := NewOpenDFeed(liveClient(t, m), FeedOptions{})
+	d := testBarDemand("scan:AAPL", "US.AAPL")
+	d.BackgroundSeed = true
+	f.sub.Ensure(d)
+	f.sub.pass(context.Background())
+	<-f.backgroundSeedq
 	for i := 0; i < cap(f.backgroundSeedq); i++ {
 		f.backgroundSeedq <- seedJob{symbol: "US.FILL", background: true}
 	}
 	done := make(chan struct{})
 	go func() {
-		d := testBarDemand("scan:AAPL", "US.AAPL")
-		d.BackgroundSeed = true
 		f.Ensure(d)
 		close(done)
 	}()
@@ -490,6 +552,57 @@ func TestEnsureSkipsEmptyInterestSeed(t *testing.T) {
 	f.Ensure(feed.Demand{ID: "interest", Symbol: "US.AAPL"})
 	if len(f.foregroundSeedq) != 0 || len(f.backgroundSeedq) != 0 {
 		t.Fatal("interest-only demand enqueued an empty seed job")
+	}
+}
+
+func TestEnsureSeedsWhenQuotaAdmitsPendingDemand(t *testing.T) {
+	f := NewOpenDFeed(nil, FeedOptions{RequireQuota: true})
+	f.sub.rpc = &fakeRPC{}
+	d := testBarDemand("chart", "US.AAPL")
+	f.Ensure(d)
+	f.sub.pass(context.Background())
+	if len(f.foregroundSeedq) != 0 {
+		t.Fatal("quota-starved demand occupied the seed queue")
+	}
+	f.SetSubscriptionQuota(10, f.clk.Now())
+	f.sub.pass(context.Background())
+	select {
+	case job := <-f.foregroundSeedq:
+		if job.symbol != d.Symbol || len(job.subs) != len(d.Subs) || job.background {
+			t.Fatalf("admitted seed = %#v", job)
+		}
+	default:
+		t.Fatal("admitted demand never queued its seed")
+	}
+}
+
+func TestAdmittedSeedWaitsForQueueSpace(t *testing.T) {
+	f := NewOpenDFeed(nil, FeedOptions{})
+	f.sub.rpc = &fakeRPC{}
+	for range cap(f.foregroundSeedq) {
+		f.foregroundSeedq <- seedJob{symbol: "US.FILL"}
+	}
+	f.Ensure(testBarDemand("chart", "US.AAPL"))
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	done := make(chan struct{})
+	go func() { f.sub.pass(ctx); close(done) }()
+	if err := f.sub.WaitActive(ctx, subKey{Symbol: "US.AAPL", Sub: feed.SubTicker}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+		t.Fatal("admitted seed was dropped instead of waiting for queue space")
+	case <-time.After(20 * time.Millisecond):
+	}
+	<-f.foregroundSeedq
+	<-done
+	found := false
+	for range len(f.foregroundSeedq) {
+		found = (<-f.foregroundSeedq).symbol == "US.AAPL" || found
+	}
+	if !found {
+		t.Fatal("admitted seed was dropped after queue space became available")
 	}
 }
 

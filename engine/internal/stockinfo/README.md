@@ -36,4 +36,9 @@ require the provider's latest-price update timestamp to be on the current ET
 date and at or after that day's regular-session open; incomplete archive reads
 use a temporary retryable cache.
 
+Owner-plate ETF rejections split the batch to isolate unsupported ETFs, cache
+their absent Industry for the process lifetime, and resolve the remaining
+stocks. Quota, permission, rate, and unknown errors remain retryable batch
+failures and never cache absent metadata.
+
 Test: `go test ./internal/stockinfo`.

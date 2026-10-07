@@ -138,6 +138,7 @@ type subManager struct {
 	connectionCtx        context.Context
 	connectionCancel     context.CancelFunc
 	kick                 chan struct{}
+	activated            func(context.Context, feed.Demand) // queues cache seeds after acknowledgement
 }
 
 func newSubManager(r rpc, clk clock.Clock, o subOptions) *subManager {
@@ -183,11 +184,20 @@ func (m *subManager) Run(ctx context.Context) {
 	}
 }
 
-func (m *subManager) Ensure(d feed.Demand) {
+// Ensure registers demand and returns its already-acknowledged subtypes under
+// the same lock. Later acknowledgements are delivered through activated.
+func (m *subManager) Ensure(d feed.Demand) []feed.SubType {
 	m.mu.Lock()
 	m.demands[d.ID] = &demandState{d: d, lastEnsure: m.clk.Now()}
+	var active []feed.SubType
+	for _, sub := range d.Subs {
+		if _, ok := m.active[subKey{Symbol: d.Symbol, Sub: sub}]; ok {
+			active = append(active, sub)
+		}
+	}
 	m.mu.Unlock()
 	m.kickWorker()
+	return active
 }
 
 func (m *subManager) Release(id string) {
@@ -528,6 +538,30 @@ func (m *subManager) pass(ctx context.Context) {
 			m.trySubscribe(ctx, group.symbols, group.subs, now, generation)
 		}
 		m.finishQuotaAdmissions(group.keys)
+		if m.activated != nil {
+			admitted := make(map[subKey]bool, len(group.keys))
+			var seeds []feed.Demand
+			m.mu.Lock()
+			for _, key := range group.keys {
+				_, admitted[key] = m.active[key]
+			}
+			for _, demand := range m.demands {
+				seed := demand.d
+				seed.Subs = nil
+				for _, sub := range demand.d.Subs {
+					if admitted[subKey{Symbol: seed.Symbol, Sub: sub}] {
+						seed.Subs = append(seed.Subs, sub)
+					}
+				}
+				if len(seed.Subs) > 0 {
+					seeds = append(seeds, seed)
+				}
+			}
+			m.mu.Unlock()
+			for _, seed := range seeds {
+				m.activated(ctx, seed)
+			}
+		}
 	}
 }
 

@@ -1,9 +1,11 @@
 package backfill
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"reflect"
 	"sync"
 	"sync/atomic"
@@ -558,6 +560,30 @@ func TestChainWalkAdvancesOnErrorThenEmptyThenServes(t *testing.T) {
 	if errF.dCalls.Load() != 1 || emptyF.dCalls.Load() != 1 || goodF.dCalls.Load() != 1 {
 		t.Fatalf("chain not walked in order: err=%d empty=%d good=%d", errF.dCalls.Load(), emptyF.dCalls.Load(), goodF.dCalls.Load())
 	}
+}
+
+func TestWalkChainStopsQuietlyOnCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	first := &cancelingFetcher{cancel: cancel}
+	fallback := &fakeFetcher{daily: []feed.Bar{bar(1)}}
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+	_, _, err := walkChain(ctx, "US.AAPL", fixedNow(), fixedNow(), chain(first, fallback), dailyBars, true)
+	if !errors.Is(err, context.Canceled) || fallback.dCalls.Load() != 0 || logs.Len() != 0 {
+		t.Fatalf("cancellation: err=%v fallback calls=%d logs=%s", err, fallback.dCalls.Load(), &logs)
+	}
+}
+
+type cancelingFetcher struct {
+	fakeFetcher
+	cancel context.CancelFunc
+}
+
+func (f *cancelingFetcher) DailyBars(ctx context.Context, _ string, _, _ time.Time) ([]feed.Bar, error) {
+	f.cancel()
+	return nil, ctx.Err()
 }
 
 // TestDailyChainAllErrorReturnsError pins the uihub re-arm signal: a daily

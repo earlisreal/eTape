@@ -107,7 +107,7 @@ func NewOpenDFeed(cli *Client, opt FeedOptions) *OpenDFeed {
 	}
 	historyGate := make(chan struct{}, 1)
 	historyGate <- struct{}{}
-	return &OpenDFeed{
+	f := &OpenDFeed{
 		cli: cli,
 		sub: newSubManager(cli, opt.Clock, subOptions{
 			Budget: opt.Budget, QuotaHeadroom: opt.QuotaHeadroom, RequireQuota: opt.RequireQuota,
@@ -127,6 +127,8 @@ func NewOpenDFeed(cli *Client, opt FeedOptions) *OpenDFeed {
 		tickerGated:     make(map[string]bool),
 		tickerLive:      make(map[string][]feed.TicksEvent),
 	}
+	f.sub.activated = f.enqueueAdmittedSeed
+	return f
 }
 
 func (f *OpenDFeed) Events() <-chan feed.Event { return f.events }
@@ -176,8 +178,40 @@ func (f *OpenDFeed) requestQuotaRefresh() {
 }
 
 func (f *OpenDFeed) Ensure(d feed.Demand) {
+	// Register and gate under the feed lock so an acknowledgement cannot
+	// finish its ticker seed before this demand establishes the live gate.
+	f.mu.Lock()
+	active := f.sub.Ensure(d)
+	if containsSub(d.Subs, feed.SubTicker) && !containsSub(active, feed.SubTicker) {
+		f.tickerGated[d.Symbol] = true
+	}
+	f.mu.Unlock()
+	seed := d
+	seed.Subs = active
+	f.enqueueSeed(seed)
+}
+
+// New admissions wait for queue space outside the locks. Active-demand refresh
+// stays nonblocking in enqueueSeed so UI callers never wait for cache I/O.
+func (f *OpenDFeed) enqueueAdmittedSeed(ctx context.Context, d feed.Demand) {
+	queue := f.foregroundSeedq
+	if d.BackgroundSeed {
+		queue = f.backgroundSeedq
+	}
+	if containsSub(d.Subs, feed.SubTicker) {
+		f.mu.Lock()
+		f.tickerGated[d.Symbol] = true
+		f.mu.Unlock()
+	}
+	select {
+	case queue <- seedJob{symbol: d.Symbol, subs: d.Subs, enqueuedAt: f.clk.Now(), background: d.BackgroundSeed}:
+	case <-ctx.Done():
+	}
+}
+
+// enqueueSeed receives only acknowledged subscription subtypes.
+func (f *OpenDFeed) enqueueSeed(d feed.Demand) {
 	if len(d.Subs) == 0 {
-		f.sub.Ensure(d)
 		return
 	}
 	lane := "foreground"
@@ -201,7 +235,6 @@ func (f *OpenDFeed) Ensure(d feed.Demand) {
 		slog.Warn("seed queue full; symbol will seed on next resync", "symbol", d.Symbol, "lane", lane)
 	}
 	f.mu.Unlock()
-	f.sub.Ensure(d)
 }
 
 func (f *OpenDFeed) claimSeed(symbol string, sub feed.SubType, force bool) bool {
@@ -427,12 +460,8 @@ func (f *OpenDFeed) seedWorker(ctx context.Context, queue <-chan seedJob) {
 }
 
 // seedRetryAttempts and seedRetryDelay bound seed's retry-on-error window.
-// Ensure fires the KL_1Min subscribe and enqueues the seed job with no
-// ordering between them, so a seed's Qot_GetKL can reach OpenD before the
-// subscribe acks — OpenD rejects that with "please subscribe to KL_1Min data
-// first." Even after the ack, the real-time cache can briefly lack data (a
-// second, narrower race window). A few short retries ride out both without
-// requiring a subManager API change to gate the seed on the ack.
+// Seeds are queued after subscription acknowledgement, but the real-time
+// cache can still briefly lack data. Short retries cover that remaining window.
 const (
 	seedRetryAttempts = 5
 	seedRetryDelay    = 300 * time.Millisecond
@@ -466,9 +495,9 @@ func seedRetry[T any](ctx context.Context, clk clock.Clock, fn func() (T, error)
 
 // seed replays independent OpenD caches concurrently so a slow candle read
 // cannot hold back book or ticker readiness. Each read goes through seedRetry: it's a
-// quota-free real-time-cache lookup that can lose the subscribe-ack race (see
-// seedRetryAttempts above). Failures that survive every retry log and
-// continue — a partial seed beats none, and the md core's dedup makes
+// quota-free real-time-cache lookup that can briefly lack data after the ack.
+// Failures that survive every retry log and continue — a partial seed beats
+// none, and the md core's dedup makes
 // overlap harmless.
 func (f *OpenDFeed) seed(ctx context.Context, job seedJob) {
 	symbol, subs := job.symbol, job.subs

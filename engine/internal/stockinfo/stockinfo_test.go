@@ -705,6 +705,33 @@ func TestResolveIndustriesIsolatesBadSymbolAndCachesEmptyOnPersistentFailure(t *
 	}
 }
 
+func TestResolveIndustriesIsolatesETFAndStopsRetrying(t *testing.T) {
+	syms := []string{"US.AAA", "US.SPY", "US.CCC"}
+	fr := newFakeRequester()
+	good := ownerPlateBatchOrPoison("SPY")
+	fr.ownerPlateFn = func(codes []string) *ownerplatepb.Response {
+		for _, code := range codes {
+			if code == "SPY" {
+				return &ownerplatepb.Response{RetType: proto.Int32(-1), RetMsg: proto.String("Get Stock's Sector interface does not support ETFs type.")}
+			}
+		}
+		return good(codes)
+	}
+	p := New(config.StockInfo{MaxPerReq: 400}, fr, nil, clock.NewFake(time.Now()), nil, nil, nil)
+	p.resolveIndustries(context.Background(), syms)
+	if p.industry["US.AAA"] != "AAA Industry" || p.industry["US.CCC"] != "CCC Industry" {
+		t.Fatalf("ETF blocked stock industries: %v", p.industry)
+	}
+	if industry, ok := p.industry["US.SPY"]; !ok || industry != "" {
+		t.Fatalf("unsupported ETF industry = %q, cached = %v", industry, ok)
+	}
+	calls := fr.calls[opend.ProtoQotGetOwnerPlate]
+	p.resolveIndustries(context.Background(), syms)
+	if fr.calls[opend.ProtoQotGetOwnerPlate] != calls {
+		t.Fatal("cached ETF retried on the next tick")
+	}
+}
+
 func TestFetchTickPublishesGoodSymbolsWhenOneSnapshotBatchIsPoisoned(t *testing.T) {
 	syms := []string{"US.AAA", "US.BBB", "US.CCC"}
 	fr := newFakeRequester()

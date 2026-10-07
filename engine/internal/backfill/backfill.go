@@ -783,7 +783,13 @@ func intraday1m(s Source) func(context.Context, string, time.Time, time.Time) ([
 func walkChain(ctx context.Context, symbol string, from, to time.Time, chain []Source, pick fetchFunc, daily bool) ([]feed.Bar, string, error) {
 	var lastErr error
 	for _, s := range chain {
+		if err := ctx.Err(); err != nil {
+			return nil, "", err
+		}
 		bars, err := pick(s)(ctx, symbol, from, to)
+		if err := ctx.Err(); err != nil {
+			return nil, "", err
+		}
 		if err != nil {
 			slog.Warn("backfill: provider failed", "symbol", symbol, "provider", s.Name, "err", err)
 			lastErr = err
