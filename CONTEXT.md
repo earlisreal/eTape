@@ -240,7 +240,7 @@ A temporary buy- or sell-colored horizontal guide at the prospective trigger pri
 _Avoid_: Horizontal crosshair, placed order line
 
 **Preview Price Label**:
-A read-only price-axis label for the prospective Chart Risk Entry trigger price, colored to match its Order Preview Line and without a × action.
+A read-only price-axis label for the prospective Chart Order Gesture or Chart Risk Entry trigger price, colored to match its Order Preview Line and without a × action.
 _Avoid_: Native crosshair price label, price pill
 
 **Order Price Pill**:

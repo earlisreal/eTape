@@ -28,12 +28,20 @@ try {
     assert.equal(await label.textContent(), Number(price).toFixed(Number(price) < 1 ? 4 : 2), "Preview label must show the snapped trigger price");
     const geometry = await label.evaluate(el => {
       const box = el.getBoundingClientRect(), host = el.closest('[data-testid="chart-host"]'), hostBox = host.getBoundingClientRect();
-      return { top: box.top - hostBox.top, bottom: box.bottom - hostBox.top, right: box.right - hostBox.right,
-        center: (box.top + box.bottom) / 2 - hostBox.top, y: Number(host.dataset.orderCursorY), color: getComputedStyle(el).color };
+      const row = host.querySelector(".tv-lightweight-charts table").rows[0], style = getComputedStyle(el);
+      return { top: box.top - hostBox.top, bottom: box.bottom - hostBox.top, left: box.left, right: box.right, hostRight: hostBox.right,
+        gutterLeft: row.cells[row.cells.length - 1].getBoundingClientRect().left,
+        height: box.height, fontSize: style.fontSize, fontWeight: style.fontWeight, paddingLeft: style.paddingLeft,
+        center: (box.top + box.bottom) / 2 - hostBox.top, y: Number(host.dataset.orderCursorY), color: style.color, background: style.backgroundColor };
     });
     assert(geometry.top >= 0 && geometry.bottom <= (await target.getByTestId("chart-host").boundingBox()).height, "Preview price must stay inside the chart");
-    assert(Math.abs(geometry.right) < 1 && Math.abs(geometry.center - geometry.y) < 1, "Preview price must align with its line on the right axis");
-    assert.equal(geometry.color, "rgb(8, 153, 129)", "BUY preview price must use its side color");
+    assert(Math.abs(geometry.left - geometry.gutterLeft) < 1 && geometry.right <= geometry.hostRight && Math.abs(geometry.center - geometry.y) < 1, "Preview price must align with its line at the left edge of the price axis");
+    assert.equal(geometry.color, "rgb(255, 255, 255)", "Preview price text must stay white");
+    assert.equal(geometry.background, "rgb(8, 153, 129)", "BUY preview background must use its side color");
+    assert.equal(geometry.fontSize, "12px");
+    assert.equal(geometry.fontWeight, "400");
+    assert.equal(geometry.height, 21);
+    assert.equal(geometry.paddingLeft, "10px");
   };
   const measureCrosshair = target => target.evaluate(async () => {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -271,6 +279,8 @@ try {
       arrow:{visible:getComputedStyle(arrow).display !== "none",x:Number(coordinates[1]),fromY:Number(coordinates[2]),toY:Number(coordinates[4]),fill:arrowPath.getAttribute("fill"),rectangles:arrow.querySelectorAll("rect").length},
       lineYs:["buy","sell"].map(side=>parseFloat(host.querySelector(`[data-risk-${side}]`).style.top)),
       label:{visible:getComputedStyle(label).display !== "none",text:label.textContent,color:getComputedStyle(label).color,
+        background:getComputedStyle(label).backgroundColor,fontSize:getComputedStyle(label).fontSize,fontWeight:getComputedStyle(label).fontWeight,
+        paddingLeft:getComputedStyle(label).paddingLeft,height:labelBox.height,left:labelBox.left,
         top:labelBox.top,bottom:labelBox.bottom,right:labelBox.right,buttons:label.querySelectorAll("button").length},
       chips:[...host.querySelectorAll("[data-risk-chip]")].filter(chip => getComputedStyle(chip).display !== "none").map(chip => {
         const box = chip.getBoundingClientRect(), button = chip.querySelector("[data-risk-price]");
@@ -298,9 +308,14 @@ try {
     }
     assert(risk.chips.every(chip => Math.abs(chip.right - risk.hostRight) <= 1), "Risk chips must align with the price axis");
     if (risk.label.visible) {
-      assert(Math.abs(risk.label.right - risk.hostRight) <= 1 && risk.label.top >= risk.paneTop && risk.label.bottom <= risk.paneBottom,
+      assert(Math.abs(risk.label.left - risk.gutterLeft) <= 1 && risk.label.right <= risk.hostRight && risk.label.top >= risk.paneTop && risk.label.bottom <= risk.paneBottom,
         "The plain preview price must stay on the axis inside the main pane");
       assert(risk.chips.every(chip => risk.label.bottom <= chip.top || risk.label.top >= chip.bottom), "Preview prices and placed pills must not overlap");
+      assert.equal(risk.label.color, "rgb(255, 255, 255)");
+      assert.equal(risk.label.fontSize, "12px");
+      assert.equal(risk.label.fontWeight, "400");
+      assert.equal(risk.label.height, 21);
+      assert.equal(risk.label.paddingLeft, "10px");
     }
     const geometry = await measureProduction();
     assert(geometry.nativeOffset === 0 && geometry.axisClippedPx === 0 && geometry.panelAxisClippedPx === 0,
@@ -311,6 +326,11 @@ try {
   for (const theme of ["light", "dark"]) {
     await productionPage.evaluate(theme => window.chartPanelProbe.setTheme(theme), theme);
     await productionPage.waitForFunction(theme => document.documentElement.dataset.theme === theme, theme);
+    await productionPage.mouse.move(cursor.x, cursor.y);
+    await productionPage.keyboard.down("Shift");
+    await productionPage.waitForFunction(() => document.querySelector('[data-testid="chart-order-entry-preview"]')?.style.opacity === "1");
+    await checkGesturePrice(productionPage);
+    await productionPage.keyboard.up("Shift");
     await productionPage.mouse.move(cursor.x, hostBox.y + hostBox.height * 0.30);
     assert(await productionPage.evaluate(() => window.chartPanelProbe.startRisk()), "Risk setup must start in the active chart");
     await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "visible" });
@@ -318,14 +338,20 @@ try {
     assert(setup.height <= 28, "Wide-chart setup should use two compact rows");
     assert.equal(setup.color, theme === "light" ? "rgb(19, 23, 34)" : "rgb(209, 212, 220)", "Risk text must follow the chart theme");
     assert(setup.label.visible && setup.label.buttons === 0 && setup.chips.length === 0,"Initial BUY must have a plain price label and no placed pill");
-    assert.equal(setup.label.color,"rgb(8, 153, 129)");
+    assert.equal(setup.label.background,"rgb(8, 153, 129)");
+    for (const y of [setup.paneTop + 1, setup.paneBottom - 1]) {
+      await productionPage.mouse.move(cursor.x, y);
+      await productionPage.waitForTimeout(30);
+      await checkRisk();
+    }
+    await productionPage.mouse.move(cursor.x, hostBox.y + hostBox.height * 0.30);
     if (theme === "dark") await productionPage.mouse.down();
     else await productionPage.mouse.click(cursor.x, hostBox.y + hostBox.height * 0.30);
     await productionPage.mouse.move(cursor.x + 40, hostBox.y + hostBox.height * 0.50);
     await productionPage.waitForFunction(() => document.querySelector("[data-risk-readout]").innerText.includes("shares · Est. risk $"));
     const moving = await checkRisk();
     assert.equal(moving.chips.length,1,"Live risk sizing must appear before selecting SELL");
-    assert(moving.label.visible && moving.label.buttons === 0 && moving.label.color === "rgb(242, 54, 69)","SELL must preview a plain red price while retaining the selected BUY pill");
+    assert(moving.label.visible && moving.label.buttons === 0 && moving.label.background === "rgb(242, 54, 69)","SELL must preview a plain red price while retaining the selected BUY pill");
     assert(Math.abs(moving.lineYs[1] - hostBox.height * 0.50) <= 3,"The moving SELL line must follow its snapped trigger during both placement gestures");
     const crosshair = await measureCrosshair(productionPage);
     assert(!crosshair.horizontal,"Risk selection must hide the native horizontal crosshair");

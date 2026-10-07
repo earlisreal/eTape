@@ -213,8 +213,9 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 label.style.display = previewVisible ? "block" : "none";
                 if (previewVisible && candidate != null) {
                     label.textContent = candidate.toFixed(candidate < 1 ? 4 : 2);
-                    label.style.top = `${chipYs[endpoints.length]}px`;
-                    label.style.color = endpoint === "buy" ? latest.current.chrome.up : latest.current.chrome.down;
+                    label.style.top = `${Math.max(10.5, Math.min(chipYs[endpoints.length], paneHeight - 10.5))}px`;
+                    label.style.left = `calc(100% - ${facade?.priceScaleWidth() ?? 60}px)`;
+                    label.style.background = endpoint === "buy" ? latest.current.chrome.up : latest.current.chrome.down;
                     label.style.maxWidth = `${facade?.priceScaleWidth() ?? 60}px`;
                 }
             }
@@ -493,8 +494,9 @@ export function ChartRiskEntry(props: Props): JSX.Element {
     return <div ref={rootRef} data-testid="chart-risk-entry" style={{ display: "none", position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none" }}>
     <div data-risk-buy style={{ position: "absolute", left: 0, borderTop: `2px dashed ${props.chrome.up}` }}/>
     <div data-risk-sell style={{ position: "absolute", left: 0, borderTop: `2px dashed ${props.chrome.down}` }}/>
-    <div data-risk-preview-price aria-hidden="true" style={{ display: "none", position: "absolute", right: 0, transform: "translateY(-50%)", height: 20,
-      boxSizing: "border-box", padding: "0 4px", background: "#0c1017", font: "600 10px/20px ui-monospace,monospace", whiteSpace: "nowrap", pointerEvents: "none" }} />
+    <div data-risk-preview-price aria-hidden="true" style={{ display: "none", position: "absolute", transform: "translateY(-50%)", height: 21,
+      boxSizing: "border-box", padding: "0 6px 0 10px", borderRadius: "0 2px 2px 0", color: "#fff",
+      font: `12px/21px ${TV_FONT}`, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", pointerEvents: "none" }} />
     <svg data-risk-arrow aria-hidden="true" style={{ display: "none", position: "absolute", left: 0, top: 0, overflow: "hidden", pointerEvents: "none" }}>
       <path fill="none" stroke={props.chrome.down} strokeWidth={1.5} />
     </svg>

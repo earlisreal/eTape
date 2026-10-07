@@ -7,7 +7,7 @@ import { chartBindingForModifiers, chartConditionalRouteKey, chartConditionalTem
 import { snapOrderMarkerPrice } from "../../../render/chart/orderMarkers";
 import type { LinkGroup, LinkGroups } from "../../linkGroups";
 import type { Tool } from "../../../render/chart/drawings/interaction";
-import type { TvChrome } from "../../../render/chart/tvTheme";
+import { TV_FONT, type TvChrome } from "../../../render/chart/tvTheme";
 
 interface Props {
   chrome: TvChrome;
@@ -100,7 +100,8 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
     if (line) { line.style.top = `${y}px`; line.style.right = `${facade.priceScaleWidth()}px`; }
     if (label) {
       label.textContent = snapshot.stopPrice.toFixed(snapshot.stopPrice < 1 ? 4 : 2);
-      label.style.top = `${Math.max(10, Math.min(y, (facade.paneHeights()[0] ?? 0) - 10))}px`;
+      label.style.top = `${Math.max(10.5, Math.min(y, (facade.paneHeights()[0] ?? 0) - 10.5))}px`;
+      label.style.left = `calc(100% - ${facade.priceScaleWidth()}px)`;
       label.style.maxWidth = `${facade.priceScaleWidth()}px`;
     }
     const color = snapshot.template.side === "BUY" || snapshot.template.side === "COVER" ? latest.current.chrome.up : latest.current.chrome.down;
@@ -365,9 +366,9 @@ export function ChartConditionalOrderEntry(props: Props): JSX.Element {
   return <><div ref={rootRef} data-testid="chart-order-entry-preview" style={{ position: "absolute", inset: 0, opacity: 0, visibility:"hidden",
     zIndex: 9, pointerEvents: "none", overflow: "hidden", "--entry-color": "#34c6dc" } as CSSProperties}>
     <div data-entry-line style={{ position: "absolute", left: 0, borderTop: "2px dashed var(--entry-color)" }} />
-    <div data-entry-preview-price aria-hidden="true" style={{ position: "absolute", right: 0, transform: "translateY(-50%)", height: 20,
-      boxSizing: "border-box", padding: "0 4px", background: "#0c1017", color: "var(--entry-color)",
-      font: "600 10px/20px ui-monospace,monospace", whiteSpace: "nowrap" }} />
+    <div data-entry-preview-price aria-hidden="true" style={{ position: "absolute", transform: "translateY(-50%)", height: 21,
+      boxSizing: "border-box", padding: "0 6px 0 10px", borderRadius: "0 2px 2px 0", background: "var(--entry-color)", color: "#fff",
+      font: `12px/21px ${TV_FONT}`, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden" }} />
     <div data-entry-detail="true" role="status" style={{ position: "absolute", left: 10, bottom:35, maxWidth: "75%", padding: "3px 5px",
       background: "rgba(12,16,23,.94)",color:"#ff9d72", font: "600 10px ui-monospace,monospace",whiteSpace:"pre-wrap" }} />
     <span data-entry-announcement="true" aria-live="polite" style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clipPath: "inset(50%)" }} />
