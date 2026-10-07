@@ -28,9 +28,9 @@ The engine resolves shares from its cached position only when the stop triggers;
 this is an independent stop order, not a bracket linked to an entry.
 
 Chart Order Gestures and Risk Entry selection use an Order Preview Line, green
-for BUY/COVER and red for SELL/SHORT, at the actual snapped trigger price. Risk
-Entry also shows a read-only Preview Price Label without ×; modifier gestures
-show only the line. Bound modifiers activate feedback without another pointer
+for BUY/COVER and red for SELL/SHORT, at the actual snapped trigger price. Both
+show a read-only Preview Price Label without × on the right axis. Bound modifiers
+activate feedback without another pointer
 move. The native horizontal crosshair and Native Crosshair Price Label hide
 during selection, while the vertical crosshair/time label keep normal styling
 and follow captured risk drags. Placement or edit completion restores the normal

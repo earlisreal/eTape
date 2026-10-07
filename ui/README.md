@@ -29,7 +29,7 @@ target. The overlay follows the execution store; market ticks stay outside React
 state. Engine-held orders expose local custody in the tooltip before triggering
 and become venue LIMITs only after a fresh eligible print. Chart Order Gestures
 retain modifier-click submission. Holding a bound modifier shows a side-colored
-Order Preview Line without a price label or pill; clicking restores the normal
+Order Preview Line and a read-only Preview Price Label; clicking restores the normal
 crosshair and uses the existing submitted Order Price Pill. Escape discards the
 preview until modifiers are released. Selection hides the native horizontal
 crosshair and Native Crosshair Price Label, while vertical/time feedback stays

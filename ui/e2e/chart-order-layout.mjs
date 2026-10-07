@@ -21,6 +21,20 @@ try {
   await page.waitForFunction(() => window.repro?.ready);
   await page.waitForTimeout(100);
   const measure = () => page.evaluate(() => window.repro.measure(280));
+  const checkGesturePrice = async target => {
+    const label = target.locator("[data-entry-preview-price]");
+    assert(await label.isVisible(), "Holding the bound modifier must display the preview price");
+    const price = await target.getByTestId("chart-order-entry-preview").getAttribute("data-price");
+    assert.equal(await label.textContent(), Number(price).toFixed(Number(price) < 1 ? 4 : 2), "Preview label must show the snapped trigger price");
+    const geometry = await label.evaluate(el => {
+      const box = el.getBoundingClientRect(), host = el.closest('[data-testid="chart-host"]'), hostBox = host.getBoundingClientRect();
+      return { top: box.top - hostBox.top, bottom: box.bottom - hostBox.top, right: box.right - hostBox.right,
+        center: (box.top + box.bottom) / 2 - hostBox.top, y: Number(host.dataset.orderCursorY), color: getComputedStyle(el).color };
+    });
+    assert(geometry.top >= 0 && geometry.bottom <= (await target.getByTestId("chart-host").boundingBox()).height, "Preview price must stay inside the chart");
+    assert(Math.abs(geometry.right) < 1 && Math.abs(geometry.center - geometry.y) < 1, "Preview price must align with its line on the right axis");
+    assert.equal(geometry.color, "rgb(8, 153, 129)", "BUY preview price must use its side color");
+  };
   const measureCrosshair = target => target.evaluate(async () => {
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
     const row = document.querySelector(".tv-lightweight-charts table").rows[0];
@@ -57,6 +71,7 @@ try {
     const preview = await measure();
     assert.equal(await page.locator("[data-entry-line]").count(),1,"Modifier selection must show its own horizontal preview line");
     assert.equal(await page.locator("[data-entry-chip]").count(),0,"Modifier selection must have no preview price pill");
+    await checkGesturePrice(page);
     assert((await page.getByTestId("chart-host").getAttribute("title")).includes("1 shares"),"Hover must expose order details");
     assert.equal(await page.getByTestId("chart-host").getAttribute("data-order-cursor-color"),"#089981");
     assert.equal(await page.evaluate(() => window.repro.crosshairOptions().horzLine.visible),false);
@@ -220,6 +235,8 @@ try {
   await productionPage.keyboard.down("Shift");
   await productionPage.mouse.move(cursor.x, cursor.y);
   await productionPage.waitForFunction(() => document.querySelector('[data-testid="chart-order-entry-preview"]')?.style.opacity === "1");
+  await checkGesturePrice(productionPage);
+  await productionPage.screenshot({ path: path.resolve(root, "../.report/chart-gesture-price-preview.png") });
   const productionPreview = await measureProduction();
   assert(Math.abs(productionPreview.stopDrawnY - cursor.y) <= 8, "ChartPanel STOP preview must remain under the cursor");
   await productionPage.waitForTimeout(350);

@@ -9,11 +9,11 @@ import type { OrderConfig } from "../../exec/actionTemplate";
 import { ChartConditionalOrderEntry } from "./ChartConditionalOrderEntry";
 import { getTvChrome } from "../../../render/chart/tvTheme";
 
-const config: OrderConfig = {
+const config = {
   activeVenue:"sim",
   templates:[{kind:"place", id:"stop", label:"Stop", side:"BUY", type:"STOP_LIMIT", tif:"DAY", session:"EXTENDED",
     priceSource:"Last", priceOffset:0, limitCushion:0, limitCushionUnit:"$", chartBinding:"Shift", sizing:{mode:"Shares", shares:1}}],
-};
+} satisfies OrderConfig;
 const route: StopLimitRoutePreview = {route:"ENGINE_HELD", effectiveSession:"EXTENDED", deadlineMs:1_800_000_000_000, phase:"PRE",
   hasTrustedEligiblePrint:true, lastEligiblePrice:101};
 
@@ -58,7 +58,7 @@ beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.restoreAllMock
 });
 
 describe("ChartConditionalOrderEntry", () => {
-  it("previews a colored line without a price pill on modifier press and cancels until rearmed", async () => {
+  it("previews a colored line and price label on modifier press and cancels until rearmed", async () => {
     focusChart();
     const {host,sendCommand,facadeRef} = mount("paper",config,{...route,lastEligiblePrice:99});
     const setColor = vi.fn();
@@ -69,17 +69,38 @@ describe("ChartConditionalOrderEntry", () => {
     await waitFor(() => expect(preview.style.opacity).toBe("1"));
     expect(preview.querySelector<HTMLElement>("[data-entry-line]")?.style.top).toBe("200px");
     expect(preview.querySelector<HTMLElement>("[data-entry-line]")?.style.right).toBe("60px");
+    expect(preview.querySelector("[data-entry-preview-price]")?.textContent).toBe("100.00");
+    expect(preview.querySelector<HTMLElement>("[data-entry-preview-price]")?.style.top).toBe("200px");
     expect(preview.querySelector("[data-entry-chip],button")).toBeNull();
     expect(host.title).toContain("1 shares\nBUY STOP-LIMIT · limit 100.00");
     expect(host.dataset.orderCursorPrice).toBe("100");
     expect(setColor).toHaveBeenLastCalledWith(getTvChrome("light").up, expect.any(MouseEvent));
     fireEvent.keyDown(window,{key:"Escape",shiftKey:true});
+    expect(preview.style.visibility).toBe("hidden");
     expect(setColor).toHaveBeenLastCalledWith(null);
     await placeClick(host);
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitOrder",expect.anything());
     fireEvent.keyUp(window,{key:"Shift"});
     await placeClick(host);
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitOrder",expect.anything()));
+  });
+  it.each([
+    ["BUY", "STOP_LIMIT", 100.006, "100.01"],
+    ["SELL", "STOP_LIMIT", 0.13364, "0.1336"],
+    ["COVER", "LIMIT_IF_TOUCHED", 0.45004, "0.4500"],
+    ["SHORT", "LIMIT_IF_TOUCHED", 100.004, "100.00"],
+  ] as const)("shows the snapped %s %s preview price and hides it on release", async (side, type, price, text) => {
+    focusChart();
+    const {host,facadeRef,sendCommand} = mount("paper", {...config, templates:[{...config.templates[0], side, type}]});
+    facadeRef.current.coordinateToPrice = () => price;
+    facadeRef.current.priceToCoordinate = () => 200;
+    moveToChart(host);
+    const preview = screen.getByTestId("chart-order-entry-preview");
+    await waitFor(() => expect(preview.querySelector("[data-entry-preview-price]")?.textContent).toBe(text));
+    expect(preview.style.getPropertyValue("--entry-color")).toBe(side === "BUY" || side === "COVER" ? getTvChrome("light").up : getTvChrome("light").down);
+    expect(sendCommand).not.toHaveBeenCalled();
+    fireEvent.keyUp(window,{key:"Shift"});
+    expect(preview.style.visibility).toBe("hidden");
   });
   it("keeps an uncertain submit outcome visible after hiding the gesture preview", async () => {
     focusChart();
