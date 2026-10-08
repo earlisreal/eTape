@@ -10,10 +10,15 @@ import (
 // tickBucket keeps eligibility dimensions separate until the bar snapshot is
 // materialized. Ineligible Reported Prints never reach this state.
 type tickBucket struct {
-	symbol   string
-	tf       session.Timeframe
-	bucketMs int64
-	gap      bool
+	anchorTime                                     int64
+	anchorOrigin                                   string
+	anchorSource                                   feed.SourceRef
+	highReport, lowReport, firstReport, lastReport feed.Tick
+	basisDirty                                     bool
+	symbol                                         string
+	tf                                             session.Timeframe
+	bucketMs                                       int64
+	gap                                            bool
 
 	hasAnchor bool
 	anchor    float64
@@ -34,8 +39,12 @@ type tickBucket struct {
 // use exchange timestamps and close on next-bucket evidence; the same path is
 // used for live pushes and cache reconstruction.
 type tickAgg struct {
-	symbol string
-	tf     session.Timeframe
+	record                    func(feed.Recording)
+	recordSource              feed.SourceRef
+	seedSource, trustedSource feed.SourceRef
+	seedOrigin, trustedOrigin string
+	symbol                    string
+	tf                        session.Timeframe
 
 	open           map[int64]*tickBucket
 	finalizedAfter int64
@@ -69,6 +78,8 @@ func (a *tickAgg) seedAnchorAt(price, fallback float64, tsMs int64) {
 		return
 	}
 	a.trustedClose = price
+	a.trustedSource = a.seedSource
+	a.trustedOrigin = a.seedOrigin
 	a.hasTrusted = true
 	if tsMs > 0 {
 		a.trustedCloseTs = tsMs
@@ -76,6 +87,11 @@ func (a *tickAgg) seedAnchorAt(price, fallback float64, tsMs int64) {
 	for _, b := range a.open {
 		if !b.hasAnchor {
 			b.anchor, b.hasAnchor = price, true
+			b.anchorTime = tsMs
+			b.anchorSource = a.seedSource
+			b.anchorOrigin = a.seedOrigin
+			a.recordSource = a.seedSource
+			a.recordBasis(b)
 		}
 	}
 }
@@ -98,6 +114,7 @@ func (a *tickAgg) openBar(bucketMs int64) *Bar {
 // in-progress bar. An accepted but fully ineligible Reported Print can still
 // provide next-bucket evidence, but it cannot create a bar or change one.
 func (a *tickAgg) addTick(t feed.Tick, gapFlag bool) []Bar {
+	a.recordSource = t.SourceRef()
 	bucket := session.BucketStartMs(t.TsMs, a.tf)
 	if a.finalizedAfter >= 0 && bucket <= a.finalizedAfter {
 		a.late++
@@ -122,6 +139,14 @@ func (a *tickAgg) addTick(t feed.Tick, gapFlag bool) []Bar {
 				break
 			}
 			out = append(out, fin)
+			if a.record != nil {
+				a.record(feed.Recording{Kind: "bucket_final", Source: t.SourceRef(), Symbol: a.symbol, TimeMs: fin.BucketMs, Timeframe: string(a.tf), Data: struct {
+					Bar       Bar
+					Trigger   feed.Tick
+					Watermark int64
+					Basis     bucketBasis
+				}{fin, t, k, a.basisSnapshot(a.open[k])}})
+			}
 			delete(a.open, k)
 			if k > a.finalizedAfter {
 				a.finalizedAfter = k
@@ -133,32 +158,47 @@ func (a *tickAgg) addTick(t feed.Tick, gapFlag bool) []Bar {
 		return out
 	}
 	b := a.open[bucket]
+	created := b == nil
 	if b == nil {
 		b = &tickBucket{
 			symbol: a.symbol, tf: a.tf, bucketMs: bucket, gap: gapFlag,
 			anchor: a.trustedClose, hasAnchor: a.hasTrusted,
+			anchorTime: a.trustedCloseTs, anchorOrigin: a.trustedOrigin, anchorSource: a.trustedSource,
 		}
 		a.open[bucket] = b
 	}
+	basisChanged := created
+	b.basisDirty = true
 
 	if t.RangeEligible {
 		if !b.hasRange {
 			b.rangeHigh, b.rangeLow, b.hasRange = t.Price, t.Price, true
+			b.highReport, b.lowReport = t, t
+			basisChanged = true
 		} else {
 			if t.Price > b.rangeHigh {
 				b.rangeHigh = t.Price
+				b.highReport = t
+				basisChanged = true
 			}
 			if t.Price < b.rangeLow {
 				b.rangeLow = t.Price
+				b.lowReport = t
+				basisChanged = true
 			}
 		}
 	}
 	if t.LastEligible {
 		if !b.hasLast {
 			b.firstLast, b.hasLast = t.Price, true
+			b.firstReport = t
+			basisChanged = true
 		}
 		b.last = t.Price
+		b.lastReport = t
 		a.trustedClose, a.hasTrusted = t.Price, true
+		a.trustedSource = t.SourceRef()
+		a.trustedOrigin = "last_eligible_report"
 		if t.TsMs > 0 {
 			a.trustedCloseTs = t.TsMs
 		}
@@ -172,6 +212,9 @@ func (a *tickAgg) addTick(t feed.Tick, gapFlag bool) []Bar {
 		case feed.Sell:
 			b.sellV += t.Volume
 		}
+	}
+	if basisChanged {
+		a.recordBasis(b)
 	}
 	if snapshot, ok := a.snapshot(b, true); ok {
 		out = append(out, snapshot)

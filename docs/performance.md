@@ -4,6 +4,27 @@ Measurements describe Earl's network, entitlements, symbols, and market sessions
 
 ## Market data and quotas
 
+- **2026-10-09 tick recording fixture (Windows):** 50 symbols, 500 Reported
+  Prints/second for ten seconds, then a 500-print burst; 5,500 prints total.
+  This is one demonstrated healthy workload, not a maximum-capacity guarantee.
+  Recording on: maximum receipt-to-commit 252 ms, accounted work peak 7.8 MB,
+  zero source losses and MD inbox drops. Maximum core chart barrier was 2.85 ms
+  versus 0.80 ms off; execution-journal flush was 0.53 ms versus 0.33 ms off.
+  Go user+GC CPU estimate was 0.425 seconds versus 0.194 seconds off, over
+  roughly ten seconds. Allocations were 416 MB versus 348 MB, and final Go heap
+  in-use was 413 MB versus 351 MB; those whole-process figures include the
+  50-symbol tape/series fixture and are not recorder RSS. Sharing immutable
+  source references reduced the disabled fixture's allocations from about
+  480 MB to 348 MB compared with inline provenance.
+  Sealed capture files plus metadata occupied 15.34 MB. Straight-line scaling
+  at this fixture's bytes/print and a continuous 500 prints/second reaches
+  10 GiB in about 2.1 hours, well before 30 calendar dates; real retention
+  depends on report mix, sparse/periodic basis records, BOOK and symbol churn.
+  This fixture measures core readiness, not browser painting or order latency,
+  and uses synthetic frames and temporary local SQLite journals. Reproduce
+  with `go test ./internal/tickstore -run TestRecordingLoadComparison -count=1 -v`
+  from `engine/`; see [archive operations](../engine/internal/tickstore/README.md).
+
 - **2026-07-03 OpenD request benchmark:** US subscribe calls measured 42-49 ms; five-symbol batched TICKER subscribe measured about 50 ms total. Cached one-symbol and six-symbol quote reads both measured about 5 ms. `get_cur_kline` for 1,000 one-minute bars measured about 9 ms. Source: `41aa9993777cab4ea59e711775094c516032ebf2^:docs/2026-07-03-moomoo-latency-benchmark.md`.
 - **2026-07-03 quota probe:** repeated history requests for the same symbols consumed no additional history slot. The account then reported 100 subscription slots and 100 historical K-line slots. Same source and `prototypes/moomoo_latency_bench*.py`.
 - **2026-08-31 quota recheck:** OpenD reported 300 total stock subscription slots and 300 historical K-line slots. The 14-slot live subscription total exactly matched its per-subtype entries, including separate `K_DAY` and `K_1M` slots for the same symbol. Current moomoo v10.10 documentation defines stock history as one slot per symbol across periods in a rolling seven-day window and documents tier totals of 100, 300, 1,000, and 2,000. See [quota rules](https://openapi.moomoo.com/moomoo-api-doc/en/intro/authority.html), [subscription status](https://openapi.moomoo.com/moomoo-api-doc/en/quote/query-subscription.html), and [historical quota](https://openapi.moomoo.com/moomoo-api-doc/en/quote/get-history-kl-quota.html). eTape's runtime setting and built-in `feed.quota_slots` default were raised from 100 to the observed 300-slot entitlement after this recheck.

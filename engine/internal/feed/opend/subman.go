@@ -64,6 +64,8 @@ func (m *subManager) WaitActive(ctx context.Context, key subKey) error {
 }
 
 type subOptions struct {
+	OptionalBook  bool
+	Recorder      feed.Recorder
 	Budget        int // quota slots (default 100)
 	QuotaHeadroom int
 	RequireQuota  bool
@@ -115,9 +117,17 @@ type demandState struct {
 // most-recently-demanded). Unsubscribes are delayed by MinHold (moomoo's 60 s
 // rule) and Hysteresis (symbol-flipping must not churn quota).
 type subManager struct {
-	rpc rpc
-	clk clock.Clock
-	opt subOptions
+	optional          map[subKey]bool
+	optionalFailed    map[subKey]int
+	optionalWake      chan struct{}
+	optionalCancel    context.CancelFunc
+	optionalRelease   subKey
+	optionalActivated func(string)
+	quotaRefresh      func()
+	bookCoverage      map[string]string
+	rpc               rpc
+	clk               clock.Clock
+	opt               subOptions
 
 	mu                   sync.Mutex
 	demands              map[string]*demandState
@@ -156,6 +166,7 @@ func newSubManager(r rpc, clk clock.Clock, o subOptions) *subManager {
 	}
 	connectionCtx, connectionCancel := context.WithCancel(context.Background())
 	return &subManager{
+		optional: make(map[subKey]bool), optionalFailed: make(map[subKey]int), optionalWake: make(chan struct{}, 1), bookCoverage: make(map[string]string),
 		rpc: r, clk: clk, opt: o,
 		demands:       make(map[string]*demandState),
 		active:        make(map[subKey]*subState),
@@ -171,6 +182,13 @@ func newSubManager(r rpc, clk clock.Clock, o subOptions) *subManager {
 // Run is the worker loop: reconcile on every kick and once per second (so
 // hysteresis deadlines fire without kicks).
 func (m *subManager) Run(ctx context.Context) {
+	ctx, cancel := context.WithCancel(ctx)
+	var optionalWG sync.WaitGroup
+	if m.opt.OptionalBook {
+		optionalWG.Add(1)
+		go func() { defer optionalWG.Done(); m.runOptionalBooks(ctx) }()
+	}
+	defer func() { cancel(); optionalWG.Wait() }()
 	tick := m.clk.NewTicker(time.Second)
 	defer tick.Stop()
 	for {
@@ -189,6 +207,10 @@ func (m *subManager) Run(ctx context.Context) {
 func (m *subManager) Ensure(d feed.Demand) []feed.SubType {
 	m.mu.Lock()
 	m.demands[d.ID] = &demandState{d: d, lastEnsure: m.clk.Now()}
+	var cancelOptional context.CancelFunc
+	if m.pendingOrdinaryLocked() || m.optionalRelease.Symbol != "" && m.ordinaryWantedLocked(m.optionalRelease) {
+		cancelOptional = m.optionalCancel
+	}
 	var active []feed.SubType
 	for _, sub := range d.Subs {
 		if _, ok := m.active[subKey{Symbol: d.Symbol, Sub: sub}]; ok {
@@ -196,6 +218,9 @@ func (m *subManager) Ensure(d feed.Demand) []feed.SubType {
 		}
 	}
 	m.mu.Unlock()
+	if cancelOptional != nil {
+		cancelOptional()
+	}
 	m.kickWorker()
 	return active
 }
@@ -295,7 +320,17 @@ func (m *subManager) finishQuotaAdmissions(keys []subKey) {
 // intact, but the manager refuses new admissions until a fresh account-wide
 // quota read arrives on the next connection.
 func (m *subManager) ConnectionDown() {
+	defer m.kickOptional()
 	m.mu.Lock()
+	m.optional = make(map[subKey]bool)
+	m.optionalFailed = make(map[subKey]int)
+	for symbol := range m.bookCoverage {
+		m.bookCoverageLocked(symbol, "connection_down")
+	}
+	m.bookCoverage = make(map[string]string)
+	if m.optionalCancel != nil {
+		m.optionalCancel()
+	}
 	if m.connectionCancel != nil {
 		m.connectionCancel()
 	}
@@ -381,6 +416,7 @@ func (m *subManager) desired(capSlots int) (map[subKey]bool, []string) {
 // can't fit while slots are pinned stay starved and retry as holds expire.
 // Exposed as a method (not inlined in Run) so tests drive passes synchronously.
 func (m *subManager) pass(ctx context.Context) {
+	defer m.kickOptional()
 	now := m.clk.Now()
 
 	m.mu.Lock()
@@ -395,6 +431,10 @@ func (m *subManager) pass(ctx context.Context) {
 	for k, st := range m.active {
 		if rawWant[k] {
 			st.droppedAt = time.Time{} // re-desired: cancel pending unsubscribe
+			continue
+		}
+		if m.optional[k] {
+			pinned++
 			continue
 		}
 		if st.droppedAt.IsZero() {
@@ -469,6 +509,9 @@ func (m *subManager) pass(ctx context.Context) {
 	var removes []subKey
 	removed := make(map[subKey]bool)
 	for k, st := range m.active {
+		if m.optional[k] {
+			continue
+		}
 		if want[k] || st.droppedAt.IsZero() {
 			continue
 		}
@@ -481,6 +524,9 @@ func (m *subManager) pass(ctx context.Context) {
 	if projected := len(m.active) - len(removes) + len(adds); projected > m.opt.Budget {
 		var lingering []subKey
 		for k, st := range m.active {
+			if m.optional[k] {
+				continue
+			}
 			if want[k] || removed[k] || st.droppedAt.IsZero() {
 				continue
 			}
@@ -527,6 +573,7 @@ func (m *subManager) pass(ctx context.Context) {
 		m.mu.Lock()
 		for _, k := range group.keys {
 			delete(m.active, k)
+			m.recordCoverageLocked(k, "released", "ordinary")
 		}
 		m.mu.Unlock()
 	}
@@ -602,6 +649,7 @@ func (m *subManager) trySubscribe(ctx context.Context, symbols []string, subs []
 				for _, sub := range subs {
 					k := subKey{Symbol: s, Sub: sub}
 					m.active[k] = &subState{subscribedAt: now}
+					m.recordCoverageLocked(k, "admitted", "ordinary")
 					delete(m.subFail, k)
 				}
 			}
@@ -830,6 +878,9 @@ func (m *subManager) ActiveSymbols() map[string][]feed.SubType {
 	defer m.mu.Unlock()
 	out := make(map[string][]feed.SubType)
 	for k := range m.active {
+		if m.optional[k] && !m.ordinaryWantedLocked(k) {
+			continue
+		}
 		out[k.Symbol] = append(out[k.Symbol], k.Sub)
 	}
 	for _, subs := range out {

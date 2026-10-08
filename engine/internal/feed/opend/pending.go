@@ -1,6 +1,10 @@
 package opend
 
-import "sync"
+import (
+	"sync"
+
+	"github.com/earlisreal/eTape/engine/internal/feed"
+)
 
 // pending correlates responses to in-flight requests by serial number AND
 // protoID. Every method removes its entry from the map under the lock before
@@ -12,19 +16,33 @@ type pending struct {
 }
 
 type waiter struct {
-	protoID uint32
-	ch      chan Frame
+	descriptor feed.SourceMessage
+	protoID    uint32
+	ch         chan Frame
 }
 
 func newPending() *pending { return &pending{m: make(map[uint32]waiter)} }
 
 // register reserves a slot for serial and returns the (buffered) delivery channel.
 func (p *pending) register(serial, protoID uint32) chan Frame {
+	return p.registerSource(serial, protoID, feed.SourceMessage{})
+}
+
+func (p *pending) registerSource(serial, protoID uint32, descriptor feed.SourceMessage) chan Frame {
 	ch := make(chan Frame, 1)
 	p.mu.Lock()
-	p.m[serial] = waiter{protoID: protoID, ch: ch}
+	p.m[serial] = waiter{protoID: protoID, ch: ch, descriptor: descriptor}
 	p.mu.Unlock()
 	return ch
+}
+
+func (p *pending) descriptor(f Frame) feed.SourceMessage {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if w, ok := p.m[f.SerialNo]; ok && w.protoID == f.ProtoID {
+		return w.descriptor
+	}
+	return feed.SourceMessage{Protocol: f.ProtoID, Origin: "unmatched", Matched: false}
 }
 
 // resolve delivers f to the waiter for f.SerialNo, but only when the waiter's

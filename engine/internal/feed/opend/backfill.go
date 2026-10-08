@@ -82,7 +82,11 @@ func (b *backfill) cachedBars1m(ctx context.Context, symbol string, n int) ([]fe
 	if resp.GetRetType() != 0 {
 		return nil, retErr(ProtoQotGetKL, resp.GetRetType(), resp.GetRetMsg())
 	}
-	return decodeKLines(symbol, resp.GetS2C().GetKlList(), feed.Res1m)
+	bars, err := decodeKLines(symbol, resp.GetS2C().GetKlList(), feed.Res1m)
+	for i := range bars {
+		bars[i].Source = f.sourceAt(i)
+	}
+	return bars, err
 }
 
 func (b *backfill) cachedDaily(ctx context.Context, symbol string) ([]feed.Bar, error) {
@@ -143,8 +147,10 @@ func (b *backfill) recentTicks(ctx context.Context, symbol string, n int) ([]fee
 		return nil, retErr(ProtoQotGetTicker, resp.GetRetType(), resp.GetRetMsg())
 	}
 	ticks := make([]feed.Tick, 0, len(resp.GetS2C().GetTickerList()))
-	for _, t := range resp.GetS2C().GetTickerList() {
-		ticks = append(ticks, decodeTicker(symbol, t, feed.DeliveryCache))
+	for i, t := range resp.GetS2C().GetTickerList() {
+		tick := decodeTicker(symbol, t, feed.DeliveryCache)
+		tick.Source = f.tickSourceAt(i)
+		ticks = append(ticks, tick)
 	}
 	sort.SliceStable(ticks, func(i, j int) bool {
 		if ticks[i].TsMs != ticks[j].TsMs {
@@ -183,6 +189,7 @@ func (b *backfill) bookSnapshot(ctx context.Context, symbol string) (feed.Book, 
 	}
 	s2c := resp.GetS2C()
 	return feed.Book{
+		Source: f.Source,
 		Symbol: symbol,
 		TsMs:   tsMs(max(s2c.GetSvrRecvTimeBidTimestamp(), s2c.GetSvrRecvTimeAskTimestamp())),
 		Bids:   decodeBookLevels(s2c.GetOrderBookBidList()),
@@ -214,7 +221,9 @@ func (b *backfill) quoteSnapshot(ctx context.Context, symbol string) (feed.Quote
 	if len(list) == 0 {
 		return feed.Quote{}, fmt.Errorf("opend: no basic quote returned for %s", symbol)
 	}
-	return decodeBasicQot(list[0])
+	quote, err := decodeBasicQot(list[0])
+	quote.Source = f.sourceAt(0)
+	return quote, err
 }
 
 // historyBars pulls deep history through the quota-tracked API, paging via

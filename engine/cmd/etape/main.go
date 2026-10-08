@@ -49,6 +49,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/stockinfo"
 	"github.com/earlisreal/eTape/engine/internal/store"
 	"github.com/earlisreal/eTape/engine/internal/synth"
+	"github.com/earlisreal/eTape/engine/internal/tickstore"
 	"github.com/earlisreal/eTape/engine/internal/uihub"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 	"github.com/earlisreal/eTape/engine/internal/venueadmin"
@@ -380,6 +381,37 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	}
 
 	// --- md core ---
+	var recorder *tickstore.Store
+	var recordingSink feed.Recorder
+	var recordingBootError error
+	var recordingHub atomic.Pointer[uihub.Hub]
+	var recordingEventSeq atomic.Int64
+	var recordingHealthMu sync.Mutex
+	recordingHealthEnabled := true
+	reportRecording := func(err error) {
+		recordingHealthMu.Lock()
+		defer recordingHealthMu.Unlock()
+		if !recordingHealthEnabled {
+			return
+		}
+		kind, detail, level := "recording-recovered", "Tick recording resumed; missing intervals are marked in the archive.", "info"
+		if err != nil {
+			kind, detail, level = "recording-unavailable", fmt.Sprintf("Tick recording unavailable: %v", err), "warn"
+			log.Warn("tick recording unavailable", "err", err)
+		} else {
+			log.Info("tick recording resumed")
+		}
+		st.AppendSysEvent(kind, detail)
+		if h := recordingHub.Load(); h != nil {
+			h.Publish(wsmsg.TopicSysEvents, "", wsmsg.SysEvent{Seq: recordingEventSeq.Add(1), Ts: time.Now().UTC().Format(time.RFC3339Nano), Kind: kind, Detail: detail, Level: level})
+		}
+	}
+	if live && cfg.TickRecording.Enabled {
+		recorder, recordingBootError = tickstore.Open(tickstore.Options{Directory: filepath.Join(home, ".eTape", "ticks"), RetentionDays: cfg.TickRecording.RetentionDays, MaxBytes: cfg.TickRecording.MaxBytes, MinFreeBytes: uint64(cfg.TickRecording.MinFreeBytes), AnchorSecs: anchorSecs, Decode: opend.DecodeRecording, Health: reportRecording})
+		if recorder != nil {
+			recordingSink = recorder
+		}
+	}
 	archiveFinalizedBar := func(b md.Bar) {
 		stored := feed.Bar{Symbol: b.Symbol, BucketMs: b.BucketMs,
 			O: b.O, H: b.H, L: b.L, C: b.C, Volume: b.V}
@@ -392,11 +424,25 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			st.ArchiveDaily(stored)
 		}
 	}
-	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs, FinalizedBar: archiveFinalizedBar, Clock: uihubClk})
+	core := md.New(md.Config{TapeRing: cfg.MD.TapeRing, AnchorSecs: anchorSecs, FinalizedBar: archiveFinalizedBar, Clock: uihubClk, Recorder: recordingSink})
 	coreDone := make(chan struct{})
 	go func() {
 		defer close(coreDone)
 		_ = core.Run(ctx)
+	}()
+	defer func() {
+		if recorder != nil {
+			stop(nil)
+			<-coreDone
+			closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := recorder.Close(closeCtx); err != nil {
+				log.Error("close tick recorder", "err", err)
+			}
+			recordingHealthMu.Lock()
+			recordingHealthEnabled = false
+			recordingHealthMu.Unlock()
+		}
 	}()
 
 	// --- exec subsystem (Recover -> Run) ---
@@ -525,7 +571,11 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		FocusMainWorkspace: focusMainWorkspace,
 	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startDemo, locateProviders)
 	hubDone := make(chan struct{})
+	recordingHub.Store(hub)
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
+	if recordingBootError != nil {
+		reportRecording(recordingBootError)
+	}
 	uiCtx, cancelUI := context.WithCancel(context.Background())
 	defer cancelUI()
 	httpSrv := &http.Server{
@@ -597,6 +647,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 
 	// --- feed (live OpenD or synthetic demo) ---
 	var pipeWG sync.WaitGroup
+	var recordingProducers sync.WaitGroup
 	var backfillWG sync.WaitGroup
 	var orch *backfill.Orchestrator
 	var scanWG sync.WaitGroup
@@ -653,7 +704,8 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
 	} else {
 		client := opend.New(opend.Options{
-			Addr: cfg.OpenD.Addr(), Clock: clock.System{}, RateLimitMarketData: true,
+			Recorder: recordingSink,
+			Addr:     cfg.OpenD.Addr(), Clock: clock.System{}, RateLimitMarketData: true,
 			RestartCooldown: netx.NewRestartCooldown(dbPath+".opend-cooldown.json", cfg.OpenD.Addr(), 31*time.Second, clock.System{}),
 		})
 		fd := opend.NewOpenDFeed(client, opend.FeedOptions{
@@ -663,8 +715,8 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 			DisableExtendedTime:  !cfg.Feed.ExtendedTime,
 		})
 		execCore.Do(exec.ConfigureHeldDemand{Demand: engineHeldDemand{feed: fd, wait: fd.WaitTickerActive}})
-		go func() { _ = client.Run(ctx) }()
-		go func() { _ = fd.Run(ctx) }()
+		recordingProducers.Go(func() { _ = client.Run(ctx) })
+		recordingProducers.Go(func() { _ = fd.Run(ctx) })
 		pipeWG.Add(1)
 		go pipe(ctx, &pipeWG, fd.Events(), core)
 		hub.Publish(wsmsg.TopicSysBoot, "", wsmsg.BootStatus{Phase: "ready"})
@@ -870,9 +922,22 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	backfillWG.Wait() // boot backfill workers stopped: no more Seed* into the core
 	pipeWG.Wait()     // feed->core pipe stopped: no more RecordEvent
 	<-coreDone        // md core stopped: no more finalized-bar archive callbacks
-	forwardWG.Wait()  // forwardMD + demo's forwardDailyBars stopped: no more ArchiveDaily
-	dropWG.Wait()     // dropped-updates watcher stopped: no more AppendSysEvent from it
-	<-execDone        // exec.Core.Run returned: no more AppendExecEvent
+	recordingProducers.Wait()
+	if recorder != nil {
+		closeCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := recorder.Close(closeCtx); err != nil {
+			log.Error("close tick recorder", "err", err)
+			st.AppendSysEvent("recording-incomplete", err.Error())
+		}
+		cancel()
+		recordingHealthMu.Lock()
+		recordingHealthEnabled = false
+		recordingHealthMu.Unlock()
+		recorder = nil
+	}
+	forwardWG.Wait() // forwardMD + demo's forwardDailyBars stopped: no more ArchiveDaily
+	dropWG.Wait()    // dropped-updates watcher stopped: no more AppendSysEvent from it
+	<-execDone       // exec.Core.Run returned: no more AppendExecEvent
 	if len(onShutdownSummary) > 0 {
 		onShutdownSummary[0](execCore.ShutdownHeldSummary())
 	}

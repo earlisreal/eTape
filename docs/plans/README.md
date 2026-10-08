@@ -2,7 +2,7 @@
 
 Create one focused Markdown file per approved change. Name `YYYY-MM-DD-short-feature.md`. Include goal, non-goals, current-code evidence, design decisions, file-level steps, tests, rollout/rollback, and risks. Remove completed task narration; move durable outcomes into subsystem guides or [specifications](../specs/README.md).
 
-Approved and awaiting implementation:
+Implemented:
 
 - [Tick recording for wick investigations and future order-flow charts](2026-10-08-tick-recording.md)
 

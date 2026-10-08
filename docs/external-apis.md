@@ -1,5 +1,14 @@
 # External API Dependencies
 
+Tick recording uses received OpenD TICKER and K_1M data, plus best-effort BOOK
+for existing US TICKER subscriptions. BOOK is provider-specific, not certified
+NBBO; retain independent bid/ask clocks and optional presence. Cached reports
+do not acquire a fabricated historical BBO match. Recorder-owned BOOK has
+separate admission/seeds, shares account subscription quota and minimum hold,
+and yields to ordinary demand. See [recording contract](../engine/internal/tickstore/README.md).
+No new provider, external storage service, depth archive or subscription tier
+is introduced.
+
 ## Runtime dependencies
 
 - **moomoo OpenD:** primary US quote, ticker, order-book, K-line, scanner, news, stock-info, quota, and moomoo execution gateway. Engine uses raw TCP framing plus protobuf at `127.0.0.1:11111`; `InitConnect` and keepalive establish session. Trade unlock stays in OpenD GUI. See [OpenD package](../engine/internal/feed/opend/README.md).

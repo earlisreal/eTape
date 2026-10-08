@@ -305,8 +305,10 @@ func DecodePush(f Frame) ([]feed.Event, error) {
 		}
 		symbol := formatSymbol(s2c.GetSecurity())
 		ticks := make([]feed.Tick, 0, len(s2c.GetTickerList()))
-		for _, t := range s2c.GetTickerList() {
-			ticks = append(ticks, decodeTicker(symbol, t, decodeDeliverySource(t.GetPushDataType())))
+		for i, t := range s2c.GetTickerList() {
+			tick := decodeTicker(symbol, t, decodeDeliverySource(t.GetPushDataType()))
+			tick.Source = f.tickSourceAt(i)
+			ticks = append(ticks, tick)
 		}
 		if len(ticks) == 0 {
 			return nil, nil
@@ -327,6 +329,7 @@ func DecodePush(f Frame) ([]feed.Event, error) {
 			if err != nil {
 				return nil, err
 			}
+			q.Source = f.Source
 			evs = append(evs, feed.QuoteEvent{Quote: q})
 		}
 		return evs, nil
@@ -344,6 +347,7 @@ func DecodePush(f Frame) ([]feed.Event, error) {
 			return nil, fmt.Errorf("opend: book push without security")
 		}
 		book := feed.Book{
+			Source: f.Source,
 			Symbol: formatSymbol(s2c.GetSecurity()),
 			TsMs:   tsMs(math.Max(s2c.GetSvrRecvTimeBidTimestamp(), s2c.GetSvrRecvTimeAskTimestamp())),
 			Bids:   decodeBookLevels(s2c.GetOrderBookBidList()),
@@ -369,11 +373,12 @@ func DecodePush(f Frame) ([]feed.Event, error) {
 		}
 		symbol := formatSymbol(s2c.GetSecurity())
 		bars := make([]feed.Bar, 0, len(s2c.GetKlList()))
-		for _, k := range s2c.GetKlList() {
+		for i, k := range s2c.GetKlList() {
 			b, err := decodeKLine(symbol, k, feed.Res1m)
 			if err != nil {
 				return nil, err
 			}
+			b.Source = f.sourceAt(i)
 			bars = append(bars, b)
 		}
 		if len(bars) == 0 {

@@ -13,6 +13,7 @@ import (
 
 	"github.com/earlisreal/eTape/engine/internal/broker/netx"
 	"github.com/earlisreal/eTape/engine/internal/clock"
+	"github.com/earlisreal/eTape/engine/internal/feed"
 )
 
 // ConnState is the connection lifecycle signal on State().
@@ -37,6 +38,7 @@ var (
 
 // Options configures a Client. Zero values are filled with defaults in New.
 type Options struct {
+	Recorder            feed.Recorder
 	Addr                string
 	ClientID            string
 	ClientVer           int32
@@ -66,9 +68,11 @@ type Client struct {
 	serial  serialGen
 	pending *pending
 
-	pushes    chan Frame
-	state     chan ConnState
-	pushDrops atomic.Uint64
+	pushes            chan Frame
+	state             chan ConnState
+	pushDrops         atomic.Uint64
+	captureGeneration atomic.Uint64
+	captureOrdinal    atomic.Uint64
 }
 
 const opendPushDropLogEvery uint64 = 1000
@@ -135,7 +139,17 @@ func (c *Client) ServerVer() int32 {
 }
 
 // Request sends req as protoID and waits for the correlated response.
-func (c *Client) Request(ctx context.Context, protoID uint32, req proto.Message) (Frame, error) {
+func (c *Client) Request(ctx context.Context, protoID uint32, req proto.Message) (result Frame, requestErr error) {
+	if c.opt.Recorder != nil && captureProtocol(protoID) && captureDescriptor(requestSource(protoID, req)) {
+		defer func() {
+			if requestErr != nil {
+				c.opt.Recorder.Record(feed.Recording{Kind: "request_gap", Source: feed.SourceRef{Connection: c.captureGeneration.Load(), Index: -1, ReceiptMs: c.clk.Now().UnixMilli()}, Data: struct {
+					Request feed.SourceMessage
+					Reason  string
+				}{requestSource(protoID, req), "request failed, timed out, or was canceled; no successful response delivered"}})
+			}
+		}()
+	}
 	body, err := proto.Marshal(req)
 	if err != nil {
 		return Frame{}, err
@@ -162,7 +176,7 @@ func (c *Client) Request(ctx context.Context, protoID uint32, req proto.Message)
 		return Frame{}, err
 	}
 	serial := c.serial.next()
-	ch := c.pending.register(serial, protoID)
+	ch := c.pending.registerSource(serial, protoID, requestSource(protoID, req))
 	defer c.pending.cancel(serial) // no-op if already resolved
 
 	if err := c.send(Encode(protoID, serial, body)); err != nil {
@@ -205,23 +219,47 @@ func (c *Client) serveConn(ctx context.Context, conn net.Conn) (error, bool) {
 	defer cancel()
 
 	c.setConn(conn)
+	generation := c.captureGeneration.Add(1)
 	// Close the socket on every exit path (ctx cancel, readErr, kaErr, or a
 	// handshake/keepalive timeout where OpenD keeps TCP open but stops replying).
 	// Without this the reader goroutine stays blocked in ReadFrame (io.ReadFull,
 	// no deadline) and both it and the fd leak; closing unblocks ReadFrame, which
 	// then returns an error and the reader exits. Single close on the way out —
 	// no double-close.
-	defer func() { _ = conn.Close() }()
 	defer c.clearConn()
 
 	readErr := make(chan error, 1)
+	readerDone := make(chan struct{})
 	fr := NewFrameReader(conn)
 	go func() {
+		defer close(readerDone)
 		for {
 			f, err := fr.ReadFrame()
 			if err != nil {
+				if c.opt.Recorder != nil {
+					kind := "transport_gap"
+					if ctx.Err() != nil {
+						kind = "connection_stop"
+					}
+					c.opt.Recorder.Record(feed.Recording{Kind: kind, Source: feed.SourceRef{Run: c.opt.Recorder.RunID(), Connection: generation, Index: -1, ReceiptMs: c.clk.Now().UnixMilli()}, Data: struct{ Reason string }{"connection reader stopped"}})
+				}
 				readErr <- err
 				return
+			}
+			if c.opt.Recorder != nil {
+				f.Source = feed.SourceRef{Run: c.opt.Recorder.RunID(), Connection: generation, Ingress: c.captureOrdinal.Add(1), Index: -1, ReceiptMs: c.clk.Now().UnixMilli()}
+				if captureProtocol(f.ProtoID) {
+					d := c.pending.descriptor(f)
+					d.Format = f.FmtType
+					d.Version = f.ProtoVer
+					d.Serial = f.SerialNo
+					if IsPushProtoID(f.ProtoID) {
+						d.Origin = "push"
+					}
+					if captureDescriptor(d) {
+						c.opt.Recorder.Record(feed.Recording{Kind: "source", Source: f.Source, Body: f.Body, Data: d})
+					}
+				}
 			}
 			if IsPushProtoID(f.ProtoID) || !c.pending.resolve(f) {
 				select {
@@ -232,15 +270,25 @@ func (c *Client) serveConn(ctx context.Context, conn net.Conn) (error, bool) {
 					// push buffer full: drop. Plan 2's feed wrapper owns
 					// coalescing/backpressure and forces a re-snapshot instead.
 					c.notePushDrop(f.ProtoID)
+					if c.opt.Recorder != nil && captureProtocol(f.ProtoID) {
+						c.opt.Recorder.Lost(feed.RecordingRouting, f.Source, 1)
+					}
 				}
 			}
 		}
 	}()
+	defer func() { _ = conn.Close(); <-readerDone }()
 
 	if err := c.initConnect(sctx); err != nil {
 		return err, false
 	}
 	c.emit(ConnUp)
+	if c.opt.Recorder != nil {
+		c.opt.Recorder.Record(feed.Recording{Kind: "connection_up", Source: feed.SourceRef{Connection: generation, Index: -1, ReceiptMs: c.clk.Now().UnixMilli()}, Data: struct {
+			ProviderConnection uint64
+			ServerVersion      int32
+		}{c.ConnID(), c.ServerVer()}})
+	}
 	defer c.emit(ConnDown)
 
 	kaErr := make(chan error, 1)

@@ -19,6 +19,7 @@ import (
 
 // Config sizes the core. Zero values get defaults.
 type Config struct {
+	Recorder     feed.Recorder
 	TapeRing     int         // per-symbol tick ring capacity (default 65536)
 	AnchorSecs   int64       // intraday bucket anchor (default session.AnchorSecsDefault)
 	FinalizedBar func(Bar)   // optional lossless sink, called before UI emission
@@ -94,14 +95,16 @@ func (historyBarrierMsg) isInMsg()   {}
 
 // Core is the single-writer market-data state machine.
 type Core struct {
-	cfg            Config
-	inbox          chan inMsg
-	updates        chan Update
-	marks          chan Mark
-	eligiblePrints chan EligiblePrint
-	bookOut        chan feed.Book
-	droppedInbox   atomic.Uint64
-	droppedUpdates atomic.Uint64
+	processingOrdinal uint64
+	recordingSeed     bool
+	cfg               Config
+	inbox             chan inMsg
+	updates           chan Update
+	marks             chan Mark
+	eligiblePrints    chan EligiblePrint
+	bookOut           chan feed.Book
+	droppedInbox      atomic.Uint64
+	droppedUpdates    atomic.Uint64
 
 	// Domain state — touched ONLY inside Run's goroutine.
 	books       *bookStore
@@ -136,7 +139,7 @@ func New(cfg Config) *Core {
 	if cfg.Clock == nil {
 		cfg.Clock = clock.System{}
 	}
-	return &Core{
+	c := &Core{
 		cfg:            cfg,
 		inbox:          make(chan inMsg, 1024),
 		updates:        make(chan Update, 8192),
@@ -155,6 +158,10 @@ func New(cfg Config) *Core {
 		inds:           newIndicatorSet(),
 		now:            cfg.Clock.Now(),
 	}
+	if cfg.Recorder != nil {
+		c.bars.record = c.record
+	}
+	return c
 }
 
 func (c *Core) Updates() <-chan Update               { return c.updates }
@@ -185,6 +192,9 @@ func (c *Core) Feed(ev feed.Event) {
 	case c.inbox <- eventMsg{ev: ev, at: at}:
 	default:
 		c.droppedInbox.Add(1)
+		if c.cfg.Recorder != nil {
+			c.cfg.Recorder.Lost(feed.RecordingProcessing, feed.EventSource(ev), 1)
+		}
 		if _, ticks := ev.(feed.TicksEvent); ticks {
 			c.eligiblePrints <- EligiblePrint{Gap: true, RecvTsMs: at.UnixMilli()}
 		}
@@ -202,6 +212,9 @@ func (c *Core) FeedContext(ctx context.Context, ev feed.Event) {
 	select {
 	case c.inbox <- eventMsg{ev: ev, at: at}:
 	case <-ctx.Done():
+		if c.cfg.Recorder != nil {
+			c.cfg.Recorder.Lost(feed.RecordingProcessing, feed.EventSource(ev), 1)
+		}
 	}
 }
 
@@ -276,6 +289,15 @@ func (c *Core) SyncHistory(symbol string) {
 func (c *Core) Run(ctx context.Context) error {
 	tick := c.cfg.Clock.NewTicker(time.Second)
 	defer tick.Stop()
+	defer func() {
+		if c.cfg.Recorder != nil {
+			c.recordOpenBases()
+			c.record(feed.Recording{Kind: "processing_stop", Data: struct {
+				PendingEvents int
+				Reason        string
+			}{len(c.inbox), "MD stopped; missing processing traces are not dedup rejections"}})
+		}
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -387,7 +409,8 @@ func (c *Core) applyEventAt(ev feed.Event, at time.Time) {
 		}
 	case feed.QuoteEvent:
 		quote := c.quotes.set(e.Quote)
-		c.bars.seedAnchor(quote.Symbol, quote.Last, quote.PrevClose, quote.TsMs)
+		c.bars.anchorSource = e.Quote.Source
+		c.bars.seedAnchor(quote.Symbol, quote.Last, quote.PrevClose, quote.TsMs, "quote")
 		c.emit(QuoteUpdate{Quote: quote})
 		c.luldFor(quote.Symbol).onQuote(quote, at)
 		c.publishLULD(quote.Symbol, at)
@@ -461,6 +484,7 @@ func (c *Core) advanceTransport(down bool, now time.Time) {
 // unchanged visible value.
 func (c *Core) applyTime(now time.Time) {
 	c.now = now
+	c.recordOpenBases()
 	symbols := make([]string, 0, len(c.luld))
 	for symbol := range c.luld {
 		symbols = append(symbols, symbol)
@@ -476,12 +500,17 @@ func (c *Core) applyTime(now time.Time) {
 func (c *Core) dedupTicks(symbol string, ticks []feed.Tick) []feed.Tick {
 	accepted := make([]feed.Tick, 0, len(ticks))
 	for _, t := range ticks {
+		if c.cfg.Recorder != nil {
+			c.processingOrdinal++
+			t.ProcessingOrdinal = c.processingOrdinal
+		}
 		day := session.DayMs(t.TsMs)
 		if day != c.lastDay[t.Symbol] {
 			c.lastDay[t.Symbol] = day
 			c.lastSeq[t.Symbol] = 0
 		}
 		if t.Seq != 0 && t.Seq <= c.lastSeq[t.Symbol] {
+			c.recordTick(t, false, false, false)
 			continue // seed/live overlap or duplicate push
 		}
 		c.lastSeq[t.Symbol] = t.Seq
@@ -509,6 +538,7 @@ func (c *Core) stampEligibility(ticks []feed.Tick) []feed.Tick {
 // applyTicks dedups by (day, seq), appends to the tape, drives tick-derived
 // bars, and emits one TapeUpdate + one Mark per accepted batch.
 func (c *Core) applyTicks(e feed.TicksEvent) {
+	c.recordingSeed = e.Seed
 	if len(e.Ticks) == 0 {
 		return
 	}
@@ -554,6 +584,7 @@ func (c *Core) applyTicks(e feed.TicksEvent) {
 // one BarSnapshot per touched timeframe replaces it, matching the
 // seedHistory1m/seedDaily pattern.
 func (c *Core) seedSessionTicks(symbol string, ticks []feed.Tick) {
+	c.recordingSeed = true
 	if len(ticks) == 0 {
 		return
 	}

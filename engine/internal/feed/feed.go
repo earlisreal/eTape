@@ -121,23 +121,25 @@ func (s DeliverySource) String() string {
 // Tick is one trade print. TsMs is the exchange timestamp (authoritative for
 // bucketing); RecvTsMs is feed-local receipt time, used only for latency.
 type Tick struct {
-	Symbol         string
-	Seq            int64
-	TsMs           int64
-	Price          float64
-	Volume         int64
-	Turnover       float64
-	Dir            Direction
-	Type           TransactionType
-	Condition      TradeReportCondition
-	RawType        int32
-	TypeSign       int32
-	PushDataType   int32
-	Delivery       DeliverySource
-	RangeEligible  bool
-	LastEligible   bool
-	VolumeEligible bool
-	RecvTsMs       int64
+	ProcessingOrdinal uint64
+	Source            *SourceRef
+	Symbol            string
+	Seq               int64
+	TsMs              int64
+	Price             float64
+	Volume            int64
+	Turnover          float64
+	Dir               Direction
+	Type              TransactionType
+	Condition         TradeReportCondition
+	RawType           int32
+	TypeSign          int32
+	PushDataType      int32
+	Delivery          DeliverySource
+	RangeEligible     bool
+	LastEligible      bool
+	VolumeEligible    bool
+	RecvTsMs          int64
 }
 
 // ProviderStatus is the source-neutral semantic status of a provider's
@@ -165,6 +167,7 @@ func (s ProviderStatus) String() string {
 // Quote is the latest basic quote. moomoo's BasicQot carries no bid/ask —
 // top-of-book comes from Book; the md core composes the two.
 type Quote struct {
+	Source            SourceRef
 	Symbol            string
 	TsMs              int64
 	Last              float64
@@ -188,6 +191,7 @@ type BookLevel struct {
 // Book is a full replacement snapshot of the visible depth (10 levels on US
 // LV3). TsMs is OpenD's server receive time — display only, never bucketing.
 type Book struct {
+	Source SourceRef
 	Symbol string
 	TsMs   int64
 	Bids   []BookLevel
@@ -197,6 +201,7 @@ type Book struct {
 // Bar is a raw OHLCV bar keyed by its bucket START (epoch ms). The adapter
 // normalizes moomoo's end-labeled intraday K-lines before they reach here.
 type Bar struct {
+	Source     SourceRef
 	Symbol     string
 	BucketMs   int64
 	O, H, L, C float64

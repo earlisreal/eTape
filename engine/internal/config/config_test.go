@@ -19,6 +19,32 @@ func TestLoadMissingFileReturnsDefaults(t *testing.T) {
 	}
 }
 
+func TestTickRecordingDefaultsDisableAndLimits(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config.toml")
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.TickRecording.Enabled || cfg.TickRecording.RetentionDays != 30 || cfg.TickRecording.MaxBytes != 10<<30 || cfg.TickRecording.MinFreeBytes != 2<<30 {
+		t.Fatalf("recording defaults = %+v", cfg.TickRecording)
+	}
+	if err := os.WriteFile(path, []byte("[tick_recording]\nenabled = false\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err = Load(path)
+	if err != nil || cfg.TickRecording.Enabled {
+		t.Fatalf("disabled recording = %+v, %v", cfg.TickRecording, err)
+	}
+	for _, invalid := range []string{"retention_days = 0", "max_bytes = 1", "min_free_bytes = -1"} {
+		if err := os.WriteFile(path, []byte("[tick_recording]\n"+invalid+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := Load(path); err == nil {
+			t.Fatalf("accepted %s", invalid)
+		}
+	}
+}
+
 func TestLoadOverridesOpenD(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "config.toml")
 	if err := os.WriteFile(p, []byte("[opend]\nhost = \"10.0.0.5\"\nport = 22222\n"), 0o600); err != nil {

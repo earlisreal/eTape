@@ -35,9 +35,10 @@ type OpenDFeed struct {
 	bf  *backfill
 	clk clock.Clock
 
-	events          chan feed.Event
-	foregroundSeedq chan seedJob
-	backgroundSeedq chan seedJob
+	events            chan feed.Event
+	foregroundSeedq   chan seedJob
+	backgroundSeedq   chan seedJob
+	optionalBookSeedq chan string
 
 	mu                  sync.Mutex
 	fetched             map[string]time.Time // history-quota dedup window (seven days)
@@ -114,21 +115,38 @@ func NewOpenDFeed(cli *Client, opt FeedOptions) *OpenDFeed {
 			Hysteresis:   opt.Hysteresis,
 			ExtendedTime: !opt.DisableExtendedTime,
 		}),
-		bf:              newBackfill(cli),
-		clk:             opt.Clock,
-		historyGate:     historyGate,
-		historyHeadroom: opt.HistoryQuotaHeadroom,
-		events:          make(chan feed.Event, opt.EventBuf),
-		foregroundSeedq: make(chan seedJob, 64),
-		backgroundSeedq: make(chan seedJob, 64),
-		fetched:         make(map[string]time.Time),
-		validated:       make(map[string]struct{}),
-		seedStates:      make(map[seedKey]seedState),
-		tickerGated:     make(map[string]bool),
-		tickerLive:      make(map[string][]feed.TicksEvent),
+		bf:                newBackfill(cli),
+		clk:               opt.Clock,
+		historyGate:       historyGate,
+		historyHeadroom:   opt.HistoryQuotaHeadroom,
+		events:            make(chan feed.Event, opt.EventBuf),
+		foregroundSeedq:   make(chan seedJob, 64),
+		backgroundSeedq:   make(chan seedJob, 64),
+		optionalBookSeedq: make(chan string, 16),
+		fetched:           make(map[string]time.Time),
+		validated:         make(map[string]struct{}),
+		seedStates:        make(map[seedKey]seedState),
+		tickerGated:       make(map[string]bool),
+		tickerLive:        make(map[string][]feed.TicksEvent),
 	}
 	f.sub.activated = f.enqueueAdmittedSeed
+	if cli != nil {
+		f.sub.opt.OptionalBook = cli.opt.Recorder != nil
+		f.sub.opt.Recorder = cli.opt.Recorder
+	}
+	f.sub.optionalActivated = f.enqueueOptionalBook
+	f.sub.quotaRefresh = f.requestQuotaRefresh
 	return f
+}
+
+func (f *OpenDFeed) enqueueOptionalBook(symbol string) {
+	select {
+	case f.optionalBookSeedq <- symbol:
+	default:
+		if f.cli != nil && f.cli.opt.Recorder != nil {
+			f.cli.opt.Recorder.Record(feed.Recording{Kind: "book_seed_gap", Symbol: symbol, Data: struct{ Reason string }{"optional cache queue full"}})
+		}
+	}
 }
 
 func (f *OpenDFeed) Events() <-chan feed.Event { return f.events }
@@ -298,6 +316,7 @@ func (f *OpenDFeed) emitPush(ctx context.Context, ev feed.Event) {
 	f.mu.Lock()
 	if f.tickerGated[symbol] {
 		f.tickerLive[symbol] = append(f.tickerLive[symbol], ticks)
+		f.recordRoute(ev, "held_for_cache_seed")
 		f.mu.Unlock()
 		return
 	}
@@ -317,13 +336,14 @@ func (f *OpenDFeed) WaitTickerActive(ctx context.Context, symbol string) error {
 // subscription-manager goroutines. The caller runs Client.Run separately.
 func (f *OpenDFeed) Run(ctx context.Context) error {
 	var wg sync.WaitGroup
-	wg.Add(5)
+	wg.Add(6)
 	go func() { defer wg.Done(); f.sub.Run(ctx) }()
 	go func() { defer wg.Done(); f.pump(ctx) }()
 	for range 2 {
 		go func() { defer wg.Done(); f.seedWorker(ctx, f.foregroundSeedq) }()
 	}
 	go func() { defer wg.Done(); f.seedWorker(ctx, f.backgroundSeedq) }()
+	go func() { defer wg.Done(); f.optionalBookSeedWorker(ctx) }()
 	f.stateLoop(ctx)
 	wg.Wait()
 	return ctx.Err()
@@ -332,8 +352,31 @@ func (f *OpenDFeed) Run(ctx context.Context) error {
 func (f *OpenDFeed) emit(ctx context.Context, ev feed.Event) {
 	select {
 	case f.events <- ev:
+		f.recordRoute(ev, "delivered_to_feed")
 	case <-ctx.Done():
+		f.recordRoute(ev, "canceled_before_feed_delivery")
 	}
+}
+
+func (f *OpenDFeed) recordRoute(ev feed.Event, disposition string) {
+	if f.cli == nil || f.cli.opt.Recorder == nil {
+		return
+	}
+	ref := feed.EventSource(ev)
+	if ref.Run == "" {
+		return
+	}
+	count := 1
+	seed := false
+	if ticks, ok := ev.(feed.TicksEvent); ok {
+		count = len(ticks.Ticks)
+		seed = ticks.Seed
+	}
+	f.cli.opt.Recorder.Record(feed.Recording{Kind: "routing", Source: ref, Data: struct {
+		Disposition string
+		Count       int
+		Seed        bool
+	}{disposition, count, seed}})
 }
 
 func (f *OpenDFeed) pump(ctx context.Context) {
@@ -344,6 +387,9 @@ func (f *OpenDFeed) pump(ctx context.Context) {
 		case frame := <-f.cli.Pushes():
 			evs, err := DecodePush(frame)
 			if err != nil {
+				if f.cli.opt.Recorder != nil {
+					f.cli.opt.Recorder.Record(feed.Recording{Kind: "routing", Source: frame.Source, Data: struct{ Disposition string }{"push_decode_failed"}})
+				}
 				f.mu.Lock()
 				f.decodeFails++
 				n := f.decodeFails
@@ -362,11 +408,13 @@ func (f *OpenDFeed) pump(ctx context.Context) {
 
 func (f *OpenDFeed) stateLoop(ctx context.Context) {
 	hadConnection := false
+	var resyncWG sync.WaitGroup
 	var resyncCancel context.CancelFunc
 	defer func() {
 		if resyncCancel != nil {
 			resyncCancel()
 		}
+		resyncWG.Wait()
 	}()
 	for {
 		select {
@@ -391,7 +439,7 @@ func (f *OpenDFeed) stateLoop(ctx context.Context) {
 				resyncCtx, cancel := context.WithCancel(ctx)
 				resyncCancel = cancel
 				f.emit(ctx, feed.ConnUpEvent{})
-				go f.resyncConnection(resyncCtx, started, reconnect)
+				resyncWG.Go(func() { f.resyncConnection(resyncCtx, started, reconnect) })
 			}
 		}
 	}
@@ -455,6 +503,26 @@ func (f *OpenDFeed) seedWorker(ctx context.Context, queue <-chan seedJob) {
 			return
 		case job := <-queue:
 			f.seed(ctx, job)
+		}
+	}
+}
+
+func (f *OpenDFeed) optionalBookSeedWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case symbol := <-f.optionalBookSeedq:
+			// Separate admission and seed state keep ordinary BOOK work free
+			// to run at foreground priority while this background read waits.
+			book, err := seedRetry(WithBackgroundRequest(ctx), f.clk, func() (feed.Book, error) { return f.bf.bookSnapshot(WithBackgroundRequest(ctx), symbol) })
+			if err != nil {
+				if f.cli.opt.Recorder != nil {
+					f.cli.opt.Recorder.Record(feed.Recording{Kind: "book_seed_gap", Symbol: symbol, Data: struct{ Reason string }{"optional snapshot failed or canceled"}})
+				}
+				continue
+			}
+			f.emit(ctx, feed.BookEvent{Book: book, Seed: true})
 		}
 	}
 }

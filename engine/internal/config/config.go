@@ -64,6 +64,14 @@ type Store struct {
 	FlushMs       int    `toml:"flush_ms"`       // writer batch-flush interval
 }
 
+// TickRecording controls the isolated market-data evidence archive at boot.
+type TickRecording struct {
+	Enabled       bool  `toml:"enabled"`
+	RetentionDays int   `toml:"retention_days"`
+	MaxBytes      int64 `toml:"max_bytes"`
+	MinFreeBytes  int64 `toml:"min_free_bytes"`
+}
+
 // Venue is one configured execution venue.  ->  [[venue]]
 type Venue struct {
 	ID              string  `toml:"id"`               // slug used in events, topics, commands, gate config
@@ -209,26 +217,28 @@ type BackfillYahoo struct {
 
 // Config is the engine's bootstrap configuration.
 type Config struct {
-	OpenD     OpenD      `toml:"opend"`
-	Feed      Feed       `toml:"feed"`
-	MD        MD         `toml:"md"`
-	Store     Store      `toml:"store"`
-	Venues    []Venue    `toml:"venue"`
-	Gate      Gate       `toml:"gate"`
-	Seed      SeedConfig `toml:"seed"`
-	UIHub     UIHub      `toml:"uihub"`
-	Scan      Scan       `toml:"scan"`
-	News      News       `toml:"news"`
-	StockInfo StockInfo  `toml:"stockinfo"`
-	Watchlist Watchlist  `toml:"watchlist"`
-	Health    Health     `toml:"health"`
-	Backfill  Backfill   `toml:"backfill"`
+	TickRecording TickRecording `toml:"tick_recording"`
+	OpenD         OpenD         `toml:"opend"`
+	Feed          Feed          `toml:"feed"`
+	MD            MD            `toml:"md"`
+	Store         Store         `toml:"store"`
+	Venues        []Venue       `toml:"venue"`
+	Gate          Gate          `toml:"gate"`
+	Seed          SeedConfig    `toml:"seed"`
+	UIHub         UIHub         `toml:"uihub"`
+	Scan          Scan          `toml:"scan"`
+	News          News          `toml:"news"`
+	StockInfo     StockInfo     `toml:"stockinfo"`
+	Watchlist     Watchlist     `toml:"watchlist"`
+	Health        Health        `toml:"health"`
+	Backfill      Backfill      `toml:"backfill"`
 }
 
 // Default returns the built-in defaults used when a field or the whole file is absent.
 func Default() Config {
 	return Config{
-		OpenD: OpenD{Host: "127.0.0.1", Port: 11111},
+		TickRecording: TickRecording{Enabled: true, RetentionDays: 30, MaxBytes: 10 << 30, MinFreeBytes: 2 << 30},
+		OpenD:         OpenD{Host: "127.0.0.1", Port: 11111},
 		Feed: Feed{ExtendedTime: true, UnsubHysteresisSecs: 300, QuotaSlots: 300,
 			QuotaWarnHeadroom: 12, HistQuotaWarnRemain: 10},
 		MD:    MD{TapeRing: 65536, SessionAnchor: "09:30"},
@@ -269,6 +279,9 @@ func Load(path string) (Config, error) {
 	}
 	if cfg.Store.RetentionDays < 0 {
 		return Config{}, fmt.Errorf("config %s: store.retention_days must be >= 0", path)
+	}
+	if r := cfg.TickRecording; r.RetentionDays < 1 || r.MaxBytes < 2<<20 || r.MinFreeBytes < 1 {
+		return Config{}, fmt.Errorf("config %s: tick_recording requires retention_days >= 1, max_bytes >= 2097152, min_free_bytes >= 1", path)
 	}
 	if n := cfg.News; n.WatchMs < 3100 || n.ActiveRefreshMs < n.WatchMs || n.ScannerRefreshMs < n.WatchMs || n.MaxPerReq < 1 || n.MaxPerReq > 100 || n.MaxAgeHours <= 0 || n.CatalystMinScore < 0 || n.CatalystMinScore > 100 {
 		return Config{}, fmt.Errorf("config %s: news requires watch_ms >= 3100, refresh intervals >= watch_ms, max_per_req 1..100, max_age_hours > 0, and catalyst_min_score 0..100", path)

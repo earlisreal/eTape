@@ -281,6 +281,16 @@ Everything lives in `~/.eTape/` (`%USERPROFILE%\.eTape\` on Windows):
 | `config.toml` | Engine config — optional; a missing file means built-in defaults |
 | `credentials.json` | Broker API keys (managed by Settings → Venues) |
 | `etape.db` | SQLite execution state + bar archives (created automatically) |
+| `ticks/` | Separate bounded tick/BBO/MD-evidence SQLite archive |
+
+Real-feed launches automatically record existing TICKER subscriptions, including
+Scanner warm-pool activity. Recording does not change candle filters. Optional
+BOOK captures available top bid/ask observations; it yields to ordinary demand
+and may be unavailable. Failures warn through existing sys.events while the
+live feed continues. Defaults retain up to 30 ET dates within a 10 GiB physical
+cap and a 2 GiB free-disk reserve; heavy traffic can retain much less history.
+See [archive operation and backup guidance](engine/internal/tickstore/README.md)
+and [bootstrap settings](engine/internal/config/README.md). `-demo` is excluded.
 
 Chart-history limits are calendar spans. The default 10-second limit keeps the
 current trading cycle only, beginning at the latest NYSE close/post-market start.

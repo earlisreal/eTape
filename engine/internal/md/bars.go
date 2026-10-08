@@ -86,9 +86,10 @@ func (s *series) finalized() []Bar {
 
 // symbolBars is all bar state for one symbol.
 type symbolBars struct {
-	symbol string
-	agg10  *tickAgg
-	shadow *tickAgg
+	authSources map[int64]feed.SourceRef
+	symbol      string
+	agg10       *tickAgg
+	shadow      *tickAgg
 
 	series map[session.Timeframe]*series
 
@@ -102,8 +103,10 @@ type symbolBars struct {
 // barEngine owns every derived bar series. It is called only from the Core's
 // single writer goroutine — no locks, no clock, event timestamps only.
 type barEngine struct {
-	anchorSecs int64
-	symbols    map[string]*symbolBars
+	record       func(feed.Recording)
+	anchorSource feed.SourceRef
+	anchorSecs   int64
+	symbols      map[string]*symbolBars
 }
 
 func newBarEngine(anchorSecs int64) *barEngine {
@@ -114,6 +117,7 @@ func (e *barEngine) sym(symbol string) *symbolBars {
 	sb := e.symbols[symbol]
 	if sb == nil {
 		sb = &symbolBars{
+			authSources:   make(map[int64]feed.SourceRef),
 			symbol:        symbol,
 			agg10:         newTickAgg(symbol, session.TF10s),
 			shadow:        newTickAgg(symbol, session.TF1m),
@@ -122,6 +126,8 @@ func (e *barEngine) sym(symbol string) *symbolBars {
 			compared:      make(map[int64]bool),
 			dailyOfficial: make(map[int64]bool),
 		}
+		sb.agg10.record = e.record
+		sb.shadow.record = e.record
 		for _, tf := range []session.Timeframe{session.TF10s, session.TF1m, session.TF5m,
 			session.TF15m, session.TF30m, session.TF60m, session.TFDay, session.TFWeek, session.TFMonth} {
 			sb.series[tf] = &series{}
@@ -137,7 +143,8 @@ func (e *barEngine) markGaps() {
 	}
 }
 
-func (e *barEngine) seedAnchor(symbol string, price, fallback float64, tsMs int64) {
+func (e *barEngine) seedAnchor(symbol string, price, fallback float64, tsMs int64, origin ...string) {
+	defer func() { e.anchorSource = feed.SourceRef{} }()
 	if price <= 0 {
 		price = fallback
 	}
@@ -145,6 +152,13 @@ func (e *barEngine) seedAnchor(symbol string, price, fallback float64, tsMs int6
 		return
 	}
 	sb := e.sym(symbol)
+	for _, a := range []*tickAgg{sb.agg10, sb.shadow} {
+		a.seedSource = e.anchorSource
+		a.seedOrigin = "engine_history"
+		if len(origin) > 0 {
+			a.seedOrigin = origin[0]
+		}
+	}
 	sb.agg10.seedAnchorAt(price, 0, tsMs)
 	sb.shadow.seedAnchorAt(price, 0, tsMs)
 }
@@ -165,6 +179,7 @@ func (e *barEngine) applyTicks(c *Core, ticks []feed.Tick) {
 	}
 	sb := e.sym(ticks[0].Symbol)
 	for _, t := range ticks {
+		c.recordTick(t, true, sb.agg10.finalizedAfter >= 0 && sb.agg10.finalizedAfter >= session.BucketStartMs(t.TsMs, session.TF10s), sb.shadow.finalizedAfter >= 0 && sb.shadow.finalizedAfter >= session.BucketStartMs(t.TsMs, session.TF1m))
 		if day := session.DayMs(t.TsMs); day != sb.curDay {
 			sb.curDay = day
 			sb.shadowFinals = make(map[int64]Bar)
@@ -214,7 +229,9 @@ func (e *barEngine) apply1m(c *Core, bars []feed.Bar) {
 	sb := e.sym(bars[0].Symbol)
 	oneM := sb.series[session.TF1m]
 	for _, raw := range bars {
-		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs)
+		e.anchorSource = raw.Source
+		e.rememberAuth(sb, raw)
+		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs, "authoritative_1m")
 		nb := Bar{
 			Symbol: raw.Symbol, TF: session.TF1m, BucketMs: raw.BucketMs,
 			O: raw.O, H: raw.H, L: raw.L, C: raw.C, V: raw.Volume,
@@ -308,7 +325,9 @@ func (e *barEngine) seedHistory1m(c *Core, symbol string, bars []feed.Bar) {
 		if raw.BucketMs == forming {
 			continue // the live stream owns the forming bar
 		}
-		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs)
+		e.rememberAuth(sb, raw)
+		e.anchorSource = raw.Source
+		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs, "engine_history_1m")
 		nb := Bar{
 			Symbol: symbol, TF: session.TF1m, BucketMs: raw.BucketMs,
 			O: raw.O, H: raw.H, L: raw.L, C: raw.C, V: raw.Volume,
@@ -350,10 +369,16 @@ func (e *barEngine) seedHistory10s(c *Core, symbol string, bars []feed.Bar) {
 			O: raw.O, H: raw.H, L: raw.L, C: raw.C, V: raw.Volume,
 		}
 		if auth := sb.series[session.TF1m].get(session.BucketStartMs(raw.BucketMs, session.TF1m)); auth != nil && !auth.InProgress {
-			nb, _ = trim10sBarToAuthRange(nb, *auth)
+			original := nb
+			var changed bool
+			nb, changed = trim10sBarToAuthRange(nb, *auth)
+			if changed {
+				c.recordClamp(original, nb, *auth, sb.authSources[auth.BucketMs], "archive_10s")
+			}
 		}
 		s10.upsert(nb)
-		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs)
+		e.anchorSource = raw.Source
+		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs, "engine_archive_10s")
 	}
 	c.seeding = false
 	e.emitSeedSnapshots(c, sb, []session.Timeframe{session.TF10s})
@@ -404,7 +429,9 @@ func (e *barEngine) seedOlder1m(c *Core, symbol string, bars []feed.Bar) {
 			Symbol: symbol, TF: session.TF1m, BucketMs: raw.BucketMs,
 			O: raw.O, H: raw.H, L: raw.L, C: raw.C, V: raw.Volume,
 		}
-		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs)
+		e.rememberAuth(sb, raw)
+		e.anchorSource = raw.Source
+		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs, "engine_older_history_1m")
 		e.fillDelta(sb, &nb)
 		if oneM.upsert(nb) {
 			c.barOut(nb) // suppressed while seeding
@@ -621,6 +648,7 @@ func (e *barEngine) trim10sToAuthRange(c *Core, sb *symbolBars, auth Bar) {
 	ten := sb.series[session.TF10s]
 	for _, original := range ten.rangeBars(auth.BucketMs, auth.BucketMs+60_000) {
 		if trimmed, changed := trim10sBarToAuthRange(original, auth); changed && ten.upsert(trimmed) {
+			c.recordClamp(original, trimmed, auth, sb.authSources[auth.BucketMs], "authoritative_1m")
 			c.barOut(trimmed)
 		}
 	}

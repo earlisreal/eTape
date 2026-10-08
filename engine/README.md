@@ -1,5 +1,11 @@
 # Engine
 
+Enabled real-feed launches automatically start the separate
+[tick archive](internal/tickstore/README.md) under `~/.eTape/ticks/`.
+Startup/storage failure warns through existing sys.events while market data
+continues. Shutdown joins recording producers before draining the archive;
+execution SQLite schema and persistence remain independent.
+
 Startup launches pollers while optional per-venue Alpaca asset directories load concurrently. OpenD subscriptions and independent candle/book/ticker/quote seeds can start immediately; only rate-limited requests retain restart cooldowns. OpenD and Alpaca history save atomic request timestamps beside the database to reuse expired windows on ordinary launches and preserve remaining waits on rapid restarts. Unknown state retains the initial 31-second OpenD / one-minute Alpaca history fallback. Level 2 and Time & Sales have no chart-history readiness dependency.
 
 Go process owns external connections, normalized market state, persistence, scanning, execution, and UI transport.

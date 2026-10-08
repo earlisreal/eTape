@@ -1,5 +1,12 @@
 # Market Data Core
 
+An optional recorder observes existing MD decisions: dedup rejection, stamped
+eligibility, independent 10s/shadow lateness, sparse bucket basis/finalization
+and actual K_1M clamps. Evidence includes source references and engine-history
+origins; it does not change price, candle, eligibility or dedup rules. Inbox
+loss and shutdown boundaries keep missing processing coverage distinct from
+rejected reports. See [tick archive](../tickstore/README.md).
+
 `EstimatedLULD` is a display-only derived value. It uses only stamped
 Last-Eligible prints, a bounded five-minute local window, the injected core
 clock, Moomoo's previous close for the documented price bucket, and the dated

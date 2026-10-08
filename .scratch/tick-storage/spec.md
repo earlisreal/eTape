@@ -1,6 +1,6 @@
 # Tick recording for wick investigations and future order-flow charts
 
-Status: ready-for-agent — approved on 2026-10-08; implementation not started
+Status: implemented on 2026-10-09 — approved on 2026-10-08
 
 Approved implementation plan:
 [tick recording plan](../../docs/plans/2026-10-08-tick-recording.md).

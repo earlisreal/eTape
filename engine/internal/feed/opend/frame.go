@@ -8,6 +8,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
+
+	"github.com/earlisreal/eTape/engine/internal/feed"
 )
 
 // HeaderLen is the fixed OpenD frame header size (verified from the SDK:
@@ -36,6 +38,7 @@ var (
 
 // Frame is one decoded OpenD message: header identity + raw protobuf body.
 type Frame struct {
+	Source   feed.SourceRef
 	ProtoID  uint32
 	FmtType  uint8
 	ProtoVer uint8

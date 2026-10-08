@@ -1,6 +1,9 @@
 # Tick recording for wick investigations and future order-flow charts
 
-Status: approved on 2026-10-08 — implementation has not started.
+Status: implemented on 2026-10-09 (approved on 2026-10-08).
+
+Runtime contract: [tick archive](../../engine/internal/tickstore/README.md).
+Measured capacity: [performance evidence](../performance.md).
 
 Decision record and code/provider evidence:
 [tick recording spec](../../.scratch/tick-storage/spec.md).

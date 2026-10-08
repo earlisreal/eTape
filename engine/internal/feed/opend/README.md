@@ -1,5 +1,22 @@
 # OpenD Feed
 
+Enabled recording observes market-data frames before pending-response routing
+or raw push admission. The archive writer indexes original TICKER/K_1M lists;
+cache sorting preserves original source indexes. Request descriptors classify
+GetKL replies, including unmatched/timeout gaps. BOOK stores top sides and
+their separate clocks, without full depth payloads.
+
+Recorder-only BOOK uses a separate admission worker, bounded snapshot queue
+and snapshot worker. It reuses ordinary BOOK ownership, never enlarges ordinary
+profiles, and admits only existing US TICKER symbols when fresh account quota
+exceeds headroom and local budget allows. Ordinary pending work has priority.
+BOOK-only rejection has its own retry/quarantine accounting. Minimum hold still
+applies; acknowledged releases request authoritative quota refresh instead of
+inventing free slots. Coverage records expose active/shared/unavailable,
+connection-down and delayed/uncertain release states. This best-effort coverage
+does not guarantee a bid/ask observation for every tick. No Level 2 replay is
+retained. See [tick archive](../../tickstore/README.md).
+
 Subscriptions and quota-free caches start without the rolling-request startup cooldown. Subscription batches retain one-second spacing, quota admission, headroom, and unsubscribe hysteresis. Static info, subscription quota, and history quota keep separate five-second local gates so metadata cannot delay quota admission. Rate-limited requests restore the remaining 31-second window from an atomic checkpoint beside the engine database; missing, corrupt, changed-provider, or clock-rollback state keeps the full conservative wait. The checkpoint covers this engine's requests, not other OpenD clients. Candle, book, ticker, and quote cache seeds run independently; cached ticker prints still precede buffered live ticker pushes.
 
 Cache seeds are queued after the matching subscription acknowledgement. Pending
