@@ -163,6 +163,26 @@ func TestCrashWALRetainsCommittedEvidenceAndMarksRestart(t *testing.T) {
 	if !errors.As(err, &exit) || exit.ExitCode() != 19 {
 		t.Fatalf("crash fixture: %v %s", err, output)
 	}
+	before := make(map[string]string)
+	for _, path := range archiveFiles(t, dir) {
+		for _, suffix := range []string{"", "-wal", "-shm"} {
+			data, err := os.ReadFile(path + suffix)
+			if err != nil {
+				t.Fatal(err)
+			}
+			before[path+suffix] = string(data)
+		}
+	}
+	if rejected, err := tickstore.Open(tickstore.Options{Directory: dir, MinFreeBytes: 1, FreeSpace: func(string) (uint64, error) { return 1, nil }}); err == nil {
+		closeArchive(t, rejected)
+		t.Fatal("recovery accepted insufficient reserve")
+	}
+	for path, want := range before {
+		got, err := os.ReadFile(path)
+		if err != nil || string(got) != want {
+			t.Fatalf("rejected recovery changed %s: %v", path, err)
+		}
+	}
 	s, err := tickstore.Open(tickstore.Options{Directory: dir, MinFreeBytes: 1})
 	if err != nil {
 		t.Fatal(err)

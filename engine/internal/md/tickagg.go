@@ -13,6 +13,7 @@ type tickBucket struct {
 	anchorTime                                     int64
 	anchorOrigin                                   string
 	anchorSource                                   feed.SourceRef
+	anchorBar                                      *feed.Bar
 	highReport, lowReport, firstReport, lastReport feed.Tick
 	basisDirty                                     bool
 	symbol                                         string
@@ -42,6 +43,7 @@ type tickAgg struct {
 	record                    func(feed.Recording)
 	recordSource              feed.SourceRef
 	seedSource, trustedSource feed.SourceRef
+	seedBar, trustedBar       *feed.Bar
 	seedOrigin, trustedOrigin string
 	symbol                    string
 	tf                        session.Timeframe
@@ -79,6 +81,7 @@ func (a *tickAgg) seedAnchorAt(price, fallback float64, tsMs int64) {
 	}
 	a.trustedClose = price
 	a.trustedSource = a.seedSource
+	a.trustedBar = a.seedBar
 	a.trustedOrigin = a.seedOrigin
 	a.hasTrusted = true
 	if tsMs > 0 {
@@ -89,6 +92,7 @@ func (a *tickAgg) seedAnchorAt(price, fallback float64, tsMs int64) {
 			b.anchor, b.hasAnchor = price, true
 			b.anchorTime = tsMs
 			b.anchorSource = a.seedSource
+			b.anchorBar = a.seedBar
 			b.anchorOrigin = a.seedOrigin
 			a.recordSource = a.seedSource
 			a.recordBasis(b)
@@ -163,7 +167,7 @@ func (a *tickAgg) addTick(t feed.Tick, gapFlag bool) []Bar {
 		b = &tickBucket{
 			symbol: a.symbol, tf: a.tf, bucketMs: bucket, gap: gapFlag,
 			anchor: a.trustedClose, hasAnchor: a.hasTrusted,
-			anchorTime: a.trustedCloseTs, anchorOrigin: a.trustedOrigin, anchorSource: a.trustedSource,
+			anchorTime: a.trustedCloseTs, anchorOrigin: a.trustedOrigin, anchorSource: a.trustedSource, anchorBar: a.trustedBar,
 		}
 		a.open[bucket] = b
 	}
@@ -199,6 +203,7 @@ func (a *tickAgg) addTick(t feed.Tick, gapFlag bool) []Bar {
 		a.trustedClose, a.hasTrusted = t.Price, true
 		a.trustedSource = t.SourceRef()
 		a.trustedOrigin = "last_eligible_report"
+		a.trustedBar = nil
 		if t.TsMs > 0 {
 			a.trustedCloseTs = t.TsMs
 		}

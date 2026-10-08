@@ -51,6 +51,7 @@ type bucketBasis struct {
 	AnchorTimeMs                  int64
 	AnchorOrigin                  string
 	AnchorSource                  feed.SourceRef
+	AnchorBar                     *feed.Bar
 	HasRange                      bool
 	High, Low                     feed.Tick
 	HasLast                       bool
@@ -82,7 +83,7 @@ func (a *tickAgg) recordBasis(b *tickBucket) {
 }
 
 func (a *tickAgg) basisSnapshot(b *tickBucket) bucketBasis {
-	return bucketBasis{Symbol: a.symbol, Timeframe: a.tf, BucketMs: b.bucketMs, HasAnchor: b.hasAnchor, Anchor: b.anchor, AnchorTimeMs: b.anchorTime, AnchorOrigin: b.anchorOrigin, AnchorSource: b.anchorSource, HasRange: b.hasRange, High: b.highReport, Low: b.lowReport, HasLast: b.hasLast, First: b.firstReport, Last: b.lastReport, Volume: b.v, BuyVolume: b.buyV, SellVolume: b.sellV, VolumeReports: b.ticks}
+	return bucketBasis{Symbol: a.symbol, Timeframe: a.tf, BucketMs: b.bucketMs, HasAnchor: b.hasAnchor, Anchor: b.anchor, AnchorTimeMs: b.anchorTime, AnchorOrigin: b.anchorOrigin, AnchorSource: b.anchorSource, AnchorBar: b.anchorBar, HasRange: b.hasRange, High: b.highReport, Low: b.lowReport, HasLast: b.hasLast, First: b.firstReport, Last: b.lastReport, Volume: b.v, BuyVolume: b.buyV, SellVolume: b.sellV, VolumeReports: b.ticks}
 }
 
 func (c *Core) recordOpenBases() {

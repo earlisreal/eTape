@@ -1,7 +1,7 @@
 # Implement the approved tick recording plan
 
 Type: task
-Status: claimed
+Status: resolved
 
 Implement [the approved plan](../../../docs/plans/2026-10-08-tick-recording.md).
 Recording only; no candle-policy changes, investigation UI/export, or order-flow renderer.
@@ -32,3 +32,22 @@ and simulated protocol traffic; no live orders or live-engine relaunch.
   UI E2E omitted because UI/wire behavior is unchanged; existing full UI/golden
   suite and isolated demo smoke cover compatibility. No live orders/feed restart
   or actual disk fill; storage/transport failures use fixtures.
+
+## Standards review
+
+Review of `6ec6a124` found recovery reserve checks after writable SQLite open
+and orphan files after failed segment initialization. Both are fixed and
+verified by crash-WAL byte-preservation and failed-initialization fixtures.
+Follow-up review found no remaining material standards concerns.
+
+## Spec review
+
+Review found history anchors lacked full OHLCV evidence. Bucket bases now embed
+the immutable full input bar, and report-based anchor transitions clear it.
+A source-less history fixture checks both retention and the transition.
+No candle policy change or material scope creep was found. Broader recorded
+AEHL/late-anchor fixtures remain narrower than the plan; existing candle
+regressions plus the focused evidence fixtures pass.
+
+Review fixes passed focused normal/race tests, Go vet/lint/build and generated
+contract validation. Local validation is complete; main integration and hosted CI are delivery gates.

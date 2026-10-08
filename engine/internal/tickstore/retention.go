@@ -67,6 +67,9 @@ func (s *Store) recoverSegments() error {
 		if _, err := segmentSize(path); err != nil {
 			return err
 		}
+		if err := s.checkpointBudget(path); err != nil {
+			return err
+		}
 		db, err := openDB(path)
 		if err != nil {
 			return err
@@ -78,17 +81,6 @@ func (s *Store) recoverSegments() error {
 		if err != nil || version != 1 || owner != "etape.tickstore" || !strings.Contains(entry.Name(), "-"+run+"-") {
 			_ = db.Close()
 			continue
-		}
-		// Recovery can copy WAL pages into the database before truncating WAL.
-		var reserve int64 = 128 << 10
-		if info, statErr := os.Stat(path + "-wal"); statErr == nil {
-			reserve += info.Size()
-		}
-		total, budgetErr := s.physicalBytes()
-		free, freeErr := s.opt.FreeSpace(s.opt.Directory)
-		if budgetErr != nil || freeErr != nil || total+reserve > s.opt.MaxBytes || free < s.opt.MinFreeBytes+uint64(reserve) {
-			_ = db.Close()
-			return errors.Join(errors.New("tickstore: recovery reserve unavailable; previous evidence retained"), budgetErr, freeErr)
 		}
 		s.segments[path] = created
 		if err = checkpoint(db); err == nil && clean == 0 {
@@ -149,6 +141,9 @@ func (s *Store) ensureBudget(growth int64) error {
 			continue
 		}
 		if _, err := segmentSize(path); err != nil {
+			continue
+		}
+		if err := s.checkpointBudget(path); err != nil {
 			continue
 		}
 		db, err := openDB(path)
@@ -214,6 +209,20 @@ func (s *Store) ensureBudget(growth int64) error {
 	}
 	if free < s.opt.MinFreeBytes || free-s.opt.MinFreeBytes < uint64(growth) {
 		return errors.New("tickstore: free disk reserve reached")
+	}
+	return nil
+}
+
+func (s *Store) checkpointBudget(path string) error {
+	// Recovery can copy WAL pages into the database before truncating WAL.
+	var reserve int64 = 128 << 10
+	if info, statErr := os.Stat(path + "-wal"); statErr == nil {
+		reserve += info.Size()
+	}
+	total, budgetErr := s.physicalBytes()
+	free, freeErr := s.opt.FreeSpace(s.opt.Directory)
+	if budgetErr != nil || freeErr != nil || total+reserve > s.opt.MaxBytes || free < s.opt.MinFreeBytes+uint64(reserve) {
+		return errors.Join(errors.New("tickstore: recovery reserve unavailable; previous evidence retained"), budgetErr, freeErr)
 	}
 	return nil
 }

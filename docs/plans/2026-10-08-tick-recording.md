@@ -265,9 +265,8 @@ UI/demo checks for existing warning presentation if that behavior is touched.
 Validate links, generated-contract drift and `git diff --check`. Commit only
 task files, integrate/push main and verify hosted CI per
 [AGENTS.md](../../AGENTS.md#git). Earl approved the completed recording-only plan
-after accepting Q1–Q8 and confirming shared understanding in Q9. Implementation
-remains a separate request; commit this approved plan and its decision record
-under the repository's standing documentation workflow.
+after accepting Q1–Q8 and confirming shared understanding in Q9. Implementation was subsequently requested and completed on 2026-10-09; this
+plan and its decision record accompany the resulting implementation.
 
 ## Rollout, rollback and remaining limits
 

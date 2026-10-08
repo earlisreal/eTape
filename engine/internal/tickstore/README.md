@@ -96,3 +96,7 @@ restart is part of rollout.
 Tests: `go test ./internal/tickstore`; capacity comparison:
 `go test ./internal/tickstore -run TestRecordingLoadComparison -count=1 -v`.
 See [performance evidence](../../../docs/performance.md).
+
+History and archive anchors embed the full input bar (including source reference)
+in bucket basis snapshots, even when no raw OpenD source payload exists. A later
+report-based anchor clears that history evidence.

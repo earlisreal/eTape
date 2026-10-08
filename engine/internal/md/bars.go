@@ -105,6 +105,7 @@ type symbolBars struct {
 type barEngine struct {
 	record       func(feed.Recording)
 	anchorSource feed.SourceRef
+	anchorBar    *feed.Bar
 	anchorSecs   int64
 	symbols      map[string]*symbolBars
 }
@@ -144,7 +145,7 @@ func (e *barEngine) markGaps() {
 }
 
 func (e *barEngine) seedAnchor(symbol string, price, fallback float64, tsMs int64, origin ...string) {
-	defer func() { e.anchorSource = feed.SourceRef{} }()
+	defer func() { e.anchorSource = feed.SourceRef{}; e.anchorBar = nil }()
 	if price <= 0 {
 		price = fallback
 	}
@@ -154,6 +155,7 @@ func (e *barEngine) seedAnchor(symbol string, price, fallback float64, tsMs int6
 	sb := e.sym(symbol)
 	for _, a := range []*tickAgg{sb.agg10, sb.shadow} {
 		a.seedSource = e.anchorSource
+		a.seedBar = e.anchorBar
 		a.seedOrigin = "engine_history"
 		if len(origin) > 0 {
 			a.seedOrigin = origin[0]
@@ -230,6 +232,10 @@ func (e *barEngine) apply1m(c *Core, bars []feed.Bar) {
 	oneM := sb.series[session.TF1m]
 	for _, raw := range bars {
 		e.anchorSource = raw.Source
+		if e.record != nil {
+			evidence := raw
+			e.anchorBar = &evidence
+		}
 		e.rememberAuth(sb, raw)
 		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs, "authoritative_1m")
 		nb := Bar{
@@ -327,6 +333,10 @@ func (e *barEngine) seedHistory1m(c *Core, symbol string, bars []feed.Bar) {
 		}
 		e.rememberAuth(sb, raw)
 		e.anchorSource = raw.Source
+		if e.record != nil {
+			evidence := raw
+			e.anchorBar = &evidence
+		}
 		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs, "engine_history_1m")
 		nb := Bar{
 			Symbol: symbol, TF: session.TF1m, BucketMs: raw.BucketMs,
@@ -378,6 +388,10 @@ func (e *barEngine) seedHistory10s(c *Core, symbol string, bars []feed.Bar) {
 		}
 		s10.upsert(nb)
 		e.anchorSource = raw.Source
+		if e.record != nil {
+			evidence := raw
+			e.anchorBar = &evidence
+		}
 		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs, "engine_archive_10s")
 	}
 	c.seeding = false
@@ -431,6 +445,10 @@ func (e *barEngine) seedOlder1m(c *Core, symbol string, bars []feed.Bar) {
 		}
 		e.rememberAuth(sb, raw)
 		e.anchorSource = raw.Source
+		if e.record != nil {
+			evidence := raw
+			e.anchorBar = &evidence
+		}
 		e.seedAnchor(raw.Symbol, raw.C, 0, raw.BucketMs, "engine_older_history_1m")
 		e.fillDelta(sb, &nb)
 		if oneM.upsert(nb) {

@@ -129,3 +129,30 @@ func TestRecordingDistinguishesDedupRejectionAndIndependentBucketLateness(t *tes
 		}
 	}
 }
+
+func TestHistoryAnchorRetainsFullMinuteWithoutRawSource(t *testing.T) {
+	sink := &evidenceSink{changed: make(chan struct{}, 1)}
+	c := New(Config{Recorder: sink})
+	raw := feed.Bar{Symbol: "US.AIXI", BucketMs: t0Ms, O: 2.01, H: 2.67, L: 1.90, C: 2.37, Volume: 1234}
+	c.bars.seedHistory1m(c, raw.Symbol, []feed.Bar{raw})
+	a := c.bars.sym(raw.Symbol).agg10
+	r := tick(1, 70000, 2.39, 10, feed.Neutral)
+	r.Symbol = raw.Symbol
+	r.RangeEligible, r.LastEligible, r.VolumeEligible = true, true, true
+	a.addTick(r, false)
+	r.TsMs += 10000
+	a.addTick(r, false)
+	later := a.open[session.BucketStartMs(r.TsMs, session.TF10s)]
+	if later.anchorBar != nil || later.anchorOrigin != "last_eligible_report" {
+		t.Fatalf("stale history evidence on report anchor: %+v", later)
+	}
+	for _, row := range sink.rows {
+		if basis, ok := row.Data.(bucketBasis); ok && basis.AnchorBar != nil {
+			if *basis.AnchorBar != raw || basis.AnchorOrigin != "engine_history_1m" {
+				t.Fatalf("history evidence=%+v", basis)
+			}
+			return
+		}
+	}
+	t.Fatal("full history minute missing from bucket basis")
+}

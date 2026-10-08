@@ -569,6 +569,16 @@ func (s *Store) newSegment() error {
 	if err != nil {
 		return err
 	}
+	initialized := false
+	defer func() {
+		if !initialized {
+			for _, suffix := range []string{"-wal", "-shm", ""} {
+				if info, err := os.Lstat(path + suffix); err == nil && info.Mode().IsRegular() {
+					_ = os.Remove(path + suffix)
+				}
+			}
+		}
+	}()
 	if err = file.Close(); err != nil {
 		return err
 	}
@@ -612,6 +622,7 @@ func (s *Store) newSegment() error {
 		_ = db.Close()
 		return err
 	}
+	initialized = true
 	s.db = db
 	s.path = path
 	s.segments[path] = s.opt.Now().UnixMilli()
