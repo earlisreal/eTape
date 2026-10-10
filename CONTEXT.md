@@ -301,6 +301,42 @@ _Avoid_: Jump to live, reset zoom
 The single, default Chart Indicator that displays each bar's traded share volume. Its compact Chart Panel legend label is `Vol`; other surfaces use `Volume`.
 _Avoid_: Built-in Vol, Volume overlay
 
+**Volume Profile**:
+A distribution of traded share volume across price rows over a defined time range, distinct from the Volume Indicator's volume per time bar.
+_Avoid_: Volume Indicator, order book, liquidity profile
+
+**Visible Range Volume Profile**:
+A Volume Profile whose time range follows the bars intersecting a Chart Panel's current viewport.
+_Avoid_: Session profile, fixed-range profile
+
+**Partial Volume Profile**:
+A Volume Profile for a range whose capture coverage is missing or uncertain. Its total volume, POC and Value Area describe the available captured prints.
+_Avoid_: Complete session volume, zero-volume gap
+
+**Captured Volume**:
+The total shares included in a Volume Profile after report selection and deduplication. It describes available captured prints within the selected range rather than provider-reported full-session volume.
+_Avoid_: Session Volume, total market volume
+
+**Volume Profile Row**:
+A price interval that groups the Captured Volume of included prints in a Volume Profile.
+_Avoid_: DOM Ladder row, single trade price
+
+**Point of Control (POC)**:
+The price row with the greatest total share volume in a Volume Profile.
+_Avoid_: Highest price, average price
+
+**Value Area**:
+A contiguous set of Volume Profile price rows around its POC selected to represent a chosen percentage of the profile's total share volume.
+_Avoid_: Price range, buy/sell imbalance
+
+**Value Area High (VAH)**:
+The upper price boundary of a Volume Profile's Value Area.
+_Avoid_: Profile high, session high
+
+**Value Area Low (VAL)**:
+The lower price boundary of a Volume Profile's Value Area.
+_Avoid_: Profile low, session low
+
 **No-Trade Bar**:
 A completed 10-second interval with no statistically eligible price or volume activity, displayed as a flat candle at the previous close with zero volume. A delayed eligible bar replaces it in place.
 _Avoid_: Blank bar, empty placeholder, synthetic candle
