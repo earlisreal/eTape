@@ -114,6 +114,9 @@ func (r *ProfileReader) Read(ctx context.Context, symbol string, from, to int64)
 			snapshot.segments[path] = boundary
 		}
 	}
+	if err := ctx.Err(); err != nil {
+		return out, err
+	}
 	if snapshot == nil || len(snapshot.segments) == 0 {
 		out.addReason("missing_capture")
 		return out, nil
@@ -132,7 +135,10 @@ func (r *ProfileReader) Read(ctx context.Context, symbol string, from, to int64)
 			}
 			count, err := r.readChunk(ctx, path, boundary.ID, symbol, dayFrom, dayTo, &cursor, &out)
 			if err != nil {
-				if errors.Is(err, md.ErrVolumeProfileTooLarge) || errors.Is(err, ErrProfileBusy) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || ctx.Err() != nil {
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return out, ctxErr
+				}
+				if errors.Is(err, md.ErrVolumeProfileTooLarge) || errors.Is(err, ErrProfileBusy) || errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 					return out, err
 				}
 				out.addReason("unreadable_segment")
@@ -155,7 +161,7 @@ func (r *ProfileReader) Read(ctx context.Context, symbol string, from, to int64)
 		}
 	}
 	slices.Sort(out.Reasons)
-	return out, nil
+	return out, ctx.Err()
 }
 
 func (p *ProfileRead) addReason(reason string) {
@@ -200,7 +206,7 @@ func readProfileMetadata(ctx context.Context, db *sql.DB, path string, sealed bo
 	return b, incomplete != 0, err
 }
 
-func (r *ProfileReader) readChunk(ctx context.Context, path string, maxID int64, symbol string, from, to int64, cursor *profileCursor, out *ProfileRead) (int, error) {
+func (r *ProfileReader) readChunk(ctx context.Context, path string, maxID int64, symbol string, from, to int64, cursor *profileCursor, out *ProfileRead) (count int, err error) {
 	if r.owner != nil {
 		// Avoid permanent timer-phase collisions without opening a handle or
 		// delaying the writer while maintenance owns the gate.
@@ -219,6 +225,13 @@ func (r *ProfileReader) readChunk(ctx context.Context, path string, maxID int64,
 	}
 	ctx, cancel := context.WithTimeout(ctx, 50*time.Millisecond)
 	defer cancel()
+	// SQLite may return its own error when cancellation interrupts a query.
+	// Preserve the deadline/cancellation so callers never publish a prefix.
+	defer func() {
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			err = ctxErr
+		}
+	}()
 	db, err := r.openReadDB(path)
 	if err != nil {
 		return 0, err
@@ -247,7 +260,7 @@ func (r *ProfileReader) readChunk(ctx context.Context, path string, maxID int64,
 		return 0, err
 	}
 	defer rows.Close()
-	count := 0
+	count = 0
 	for rows.Next() {
 		if err := ctx.Err(); err != nil {
 			return count, err
