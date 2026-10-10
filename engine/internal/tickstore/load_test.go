@@ -37,7 +37,7 @@ func TestRecordingLoadComparison(t *testing.T) {
 			if enabled {
 				var err error
 				segmentBytes := int64(256 << 20)
-				if mode == "profiles" {
+				if mode == "profiles" && os.Getenv("ETAPE_PROFILE_ROTATION_STRESS") == "1" {
 					segmentBytes = 1 << 20
 				}
 				archive, err = tickstore.Open(tickstore.Options{Directory: filepath.Join(dir, "ticks"), MinFreeBytes: 1, SegmentBytes: segmentBytes, Decode: opend.DecodeRecording})

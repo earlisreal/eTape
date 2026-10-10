@@ -6,6 +6,7 @@ import (
 	"errors"
 	"path/filepath"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -46,6 +47,52 @@ func TestProfileReaderUsesCommittedNormalizedReportsAndSealedHistory(t *testing.
 	got, err = readProfileEventually(tickstore.NewProfileReader(dir, nil), want.Symbol, ts, ts+1000)
 	if err != nil || len(got.Prints) != 1 {
 		t.Fatalf("sealed history: %+v, %v", got, err)
+	}
+}
+
+func TestProfileReaderConcurrentRotationAndPruningDoNotLoseRecording(t *testing.T) {
+	dir := t.TempDir()
+	const ts int64 = 1791540000000
+	var now atomic.Int64
+	now.Store(ts)
+	s, err := tickstore.Open(tickstore.Options{Directory: dir, RetentionDays: 2, MinFreeBytes: 1, FlushInterval: time.Millisecond, Now: func() time.Time { return time.UnixMilli(now.Load()) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { closeArchive(t, s) })
+	reader := tickstore.NewProfileReader(dir, s)
+	ctx, cancel := context.WithCancel(context.Background())
+	var workers sync.WaitGroup
+	for range 2 {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for ctx.Err() == nil {
+				_, err := reader.Read(ctx, "US.TEST", ts, ts+100)
+				if err != nil && !errors.Is(err, tickstore.ErrProfileBusy) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
+					t.Errorf("concurrent read: %v", err)
+					return
+				}
+			}
+		}()
+	}
+	t.Cleanup(func() { cancel(); workers.Wait() })
+	for i := range 8 {
+		now.Add(24 * 60 * 60 * 1000)
+		tick := feed.Tick{Symbol: "US.TEST", Seq: int64(i + 1), TsMs: ts + int64(i), Price: 10, Volume: 10, Condition: feed.TradeConditionAutomaticMatch}
+		if !s.Record(feed.Recording{Kind: "print", Symbol: tick.Symbol, TimeMs: tick.TsMs, Data: struct{ Normalized feed.Tick }{tick}}) {
+			t.Fatal("record rejected during reads")
+		}
+		waitArchive(t, func() bool { return s.Stats().Committed >= uint64(i+1) })
+	}
+	cancel()
+	workers.Wait()
+	if stats := s.Stats(); stats.Paused || stats.Lost != [feed.RecordingLaneCount]uint64{} {
+		t.Fatalf("maintenance recording: %+v", stats)
+	}
+	got, err := readProfileEventually(reader, "US.TEST", ts, ts+100)
+	if err != nil || len(got.Prints) == 0 || len(got.Prints) > 2 || !slices.Contains(got.Reasons, "coverage_unproven") {
+		t.Fatalf("retained evidence after pruning: %+v %v", got, err)
 	}
 }
 
