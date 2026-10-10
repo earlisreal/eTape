@@ -204,7 +204,7 @@ func (r *ProfileReader) readChunk(ctx context.Context, path string, maxID int64,
 	if r.owner != nil {
 		// Avoid permanent timer-phase collisions without opening a handle or
 		// delaying the writer while maintenance owns the gate.
-		deadline := time.Now().Add(100 * time.Millisecond)
+		deadline := time.Now().Add(250 * time.Millisecond)
 		for !r.owner.profileGate.TryRLock() {
 			if time.Now().After(deadline) {
 				return 0, ErrProfileBusy

@@ -150,11 +150,13 @@ func CalculateVolumeProfile(ctx context.Context, ticks []feed.Tick, from, to int
 		}
 		out.Rows[index].Volume += tick.Volume
 	}
-	mid := lo + (hi-lo)/2
 	center := func(i int) float64 { return out.Rows[i].Lower + (out.Rows[i].Upper-out.Rows[i].Lower)/2 }
+	// Equal-width rows have exact midpoint distances in row units; comparing
+	// rounded price coordinates can turn a lower-price tie into an upper win.
+	distance := func(i int) float64 { return math.Abs(float64(2*i + 1 - rowCount)) }
 	poc := 0
 	for i := 1; i < rowCount; i++ {
-		if out.Rows[i].Volume > out.Rows[poc].Volume || (out.Rows[i].Volume == out.Rows[poc].Volume && math.Abs(center(i)-mid) < math.Abs(center(poc)-mid)) {
+		if out.Rows[i].Volume > out.Rows[poc].Volume || (out.Rows[i].Volume == out.Rows[poc].Volume && distance(i) < distance(poc)) {
 			poc = i
 		}
 	}

@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"runtime/metrics"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -89,34 +90,52 @@ func TestRecordingLoadComparison(t *testing.T) {
 			var profileLatency atomic.Int64
 			var profileQueries atomic.Int64
 			var profileResults atomic.Int64
+			var profileBusy atomic.Int64
+			var profileTimeouts atomic.Int64
 			if mode == "profiles" {
 				profileDone = make(chan struct{})
 				reader := tickstore.NewProfileReader(filepath.Join(dir, "ticks"), archive)
-				go func() {
-					defer close(profileDone)
-					timer := time.NewTicker(250 * time.Millisecond)
-					defer timer.Stop()
-					for n := 0; ; n++ {
-						select {
-						case <-ctx.Done():
-							return
-						case <-timer.C:
-						}
-						queryStart := time.Now()
-						r, err := reader.Read(ctx, fmt.Sprintf("US.LOAD%02d", n%4), 1791446772000, 1791446792000)
-						if err == nil {
-							_, err = md.CalculateVolumeProfile(ctx, r.Prints, 1791446772000, 1791446792000, 100, 70)
-							if err == nil && len(r.Prints) > 0 {
-								profileResults.Add(1)
+				var workers sync.WaitGroup
+				for chart := range 4 {
+					workers.Add(1)
+					go func() {
+						defer workers.Done()
+						timer := time.NewTicker(time.Second)
+						defer timer.Stop()
+						for {
+							select {
+							case <-ctx.Done():
+								return
+							case <-timer.C:
 							}
+							queryStart := time.Now()
+							r, err := reader.Read(ctx, fmt.Sprintf("US.LOAD%02d", chart), 1791446772000, 1791446792000)
+							if err == nil {
+								_, err = md.CalculateVolumeProfile(ctx, r.Prints, 1791446772000, 1791446792000, 100, 70)
+								if err == nil && len(r.Prints) > 0 {
+									profileResults.Add(1)
+								}
+							}
+							if errors.Is(err, tickstore.ErrProfileBusy) {
+								profileBusy.Add(1)
+							}
+							if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, md.ErrVolumeProfileTooLarge) {
+								profileTimeouts.Add(1)
+							}
+							if err != nil && !errors.Is(err, tickstore.ErrProfileBusy) && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, md.ErrVolumeProfileTooLarge) {
+								t.Errorf("profile query: %v", err)
+							}
+							elapsed := time.Since(queryStart).Microseconds()
+							for old := profileLatency.Load(); elapsed > old; old = profileLatency.Load() {
+								if profileLatency.CompareAndSwap(old, elapsed) {
+									break
+								}
+							}
+							profileQueries.Add(1)
 						}
-						if err != nil && !errors.Is(err, tickstore.ErrProfileBusy) && !errors.Is(err, context.Canceled) {
-							t.Errorf("profile query: %v", err)
-						}
-						profileLatency.Store(max(profileLatency.Load(), time.Since(queryStart).Microseconds()))
-						profileQueries.Add(1)
-					}
-				}()
+					}()
+				}
+				go func() { workers.Wait(); close(profileDone) }()
 			}
 			var maxWork, maxChart, maxJournal int64
 			for frame := range 550 {
@@ -203,10 +222,13 @@ func TestRecordingLoadComparison(t *testing.T) {
 			}
 			t.Logf("50 symbols; sustained 500 prints/s for 10s + 500-print burst; elapsed=%s Go-user+GC-CPU=%.3fs allocated=%d heap=%d work_peak=%d receipt_commit_max=%dms MD-chart-barrier_max=%dus execution-journal-flush_max=%dus physical=%d", time.Since(start).Round(time.Millisecond), cpuSeconds, after.TotalAlloc-before.TotalAlloc, after.HeapInuse, maxWork, commitLag, maxChart, maxJournal, physical)
 			if mode == "profiles" {
+				t.Logf("four concurrent charts at 1Hz: queries=%d populated_results=%d busy=%d timeouts=%d latency_max=%dus", profileQueries.Load(), profileResults.Load(), profileBusy.Load(), profileTimeouts.Load(), profileLatency.Load())
 				if profileResults.Load() == 0 {
 					t.Fatal("profile requests never obtained committed prints")
 				}
-				t.Logf("four charts at 1Hz: queries=%d populated_results=%d latency_max=%dus", profileQueries.Load(), profileResults.Load(), profileLatency.Load())
+				if profileBusy.Load() == 0 {
+					t.Fatal("concurrent fixture never exercised reader admission")
+				}
 			}
 		})
 	}

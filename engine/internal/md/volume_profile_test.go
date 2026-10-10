@@ -104,3 +104,23 @@ func TestVolumeProfileTiesZeroRowsAndCancellation(t *testing.T) {
 		t.Fatalf("bound: %v", err)
 	}
 }
+
+func TestVolumeProfilePOCTieUsesLowerRowDespiteFloatingPointRounding(t *testing.T) {
+	const start int64 = 1791540000000
+	var ticks []feed.Tick
+	for i, price := range []float64{10.01, 10.01495, 10.01505, 10.02} {
+		volume := int64(10)
+		if i == 0 || i == 3 {
+			volume = 1
+		}
+		ticks = append(ticks, feed.Tick{Symbol: "US.TEST", Seq: int64(i + 1), TsMs: start, Price: price, Volume: volume, Condition: feed.TradeConditionAutomaticMatch})
+	}
+	got, err := CalculateVolumeProfile(context.Background(), ticks, start, start+1, 100, 70)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := got.Rows[49].Lower + (got.Rows[49].Upper-got.Rows[49].Lower)/2
+	if *got.POC != want {
+		t.Fatalf("equal midpoint-distance tie: got %.17g want %.17g", *got.POC, want)
+	}
+}
