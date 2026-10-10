@@ -23,3 +23,5 @@ execution lane of normalized Last-Eligible prints, preserving sequence and gap
 provenance. A detected gap invalidates the cached trigger mark and pauses
 pretrigger orders; coalesced chart bars and stale/replayed prices are never
 used to trigger orders.
+
+`CalculateVolumeProfile` is a pure captured-report calculation. It reuses the Volume-Eligible condition matrix independently of live candle acceptance. Symbol + ET date + positive int64 sequence identifies a report; identical time/price/size/eligibility repeats count once, direction changes do not matter, and conflicts or missing identities are excluded with Partial reasons. Equally spaced raw-price rows conserve safe-integer share volume. POC ties choose the nearest price midpoint then the lower row; a contiguous Value Area expands by larger adjacent volume, then nearest POC/lower price. Flat prices use one row; empty evidence has no levels. Tests: `go test ./internal/md -run TestVolumeProfile`.

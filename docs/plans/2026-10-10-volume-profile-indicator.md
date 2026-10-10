@@ -1,6 +1,6 @@
 # Volume Profile Indicator
 
-Status: approved on 2026-10-10 — implementation is a separate request.
+Status: implemented on 2026-10-10 following explicit implementation authorization.
 
 Decision source: [Volume Profile spec](../../.scratch/volume-profile/spec.md).
 
@@ -277,3 +277,9 @@ approval does not authorize application implementation. Publish the planning
 documents according to repository Git rules. Implementation later must satisfy
 the specified tests, README updates, generated-contract checks and main/hosted-CI
 handoff; this planning task validates and publishes the approved documents.
+
+## Implementation validation (2026-10-10)
+
+Implemented captured-profile reader/calculator/query and panel-private controller/primitive, settings normalization, singleton picker and range-wide legend. Relevant engine/UI/query/archive guides were updated; no dependency, archive-schema, ordinary subscription or execution-policy change. Local validation: full Go tests, race/short tests, vet, golangci-lint 2.12.2, generated-contract drift check, npm ci, UI lint, all 1,324 UI tests including goldens, production build/typechecks and the sim-only Volume Profile browser scenario. Focused follow-up checks covered bounded maintenance waits and compact calculation memory. [Performance evidence](../performance.md#captured-volume-profile-2026-10-10-windows) records writer/read measurements and the busy-date limit.
+
+The browser fixture verifies production chart rendering, settings, wheel interaction, subscription bypass, daily and demo unavailability; a screenshot was inspected. Exhaustive manual combinations of every chart type/theme and live-provider captures were not run. No live order or broker action was performed. Standards/Spec review and hosted CI remain required before handoff under repository rules.

@@ -116,3 +116,9 @@ Working-order drags retain native side coloring and order-tick snapping; normal
 formatting/theme return on release. Action colors remain local to the active
 chart. Full-line order hit testing uses `nearestPriceLines` with an eight-pixel
 tolerance and returns all exact nearest ties for explicit selection.
+
+## Volume Profile Indicator
+
+The optional singleton `VOLUME_PROFILE` uses whole displayed buckets intersecting the viewport, including clipped edges; the last bucket ends at its nominal duration. Synthetic slots select time only, and Future Buffer-only views contribute no interval. It supports intraday raw prices across all sessions and is unavailable on D/W/M and in demo.
+
+`VolumeProfileController` owns panel-private imperative snapshots, coalesces changes for 50 ms and refreshes committed data about once per second while visible and connected. New selections clear old graphics with Loading; same-selection failures retain Stale data; obsolete responses are ignored. There is no `IndicatorStore` key, ordinary subscription or React market-data state. `VolumeProfilePrimitive` draws a passive edge histogram inward to 20% width and POC/VAH/VAL pane guides; it supplies no autoscale or hit-test contribution. Placement defaults left and can be right; rows default 100 and Value Area 70%. Saved/imported inputs and styles normalize and collapse duplicate profiles. Tests cover selection, controller lifecycle, bitmap/DPR placement, coincident labels and subscription bypass.

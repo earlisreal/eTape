@@ -83,6 +83,15 @@ func (s *Store) recoverSegments() error {
 			continue
 		}
 		s.segments[path] = created
+		var boundary profileBoundary
+		if err = db.QueryRow("SELECT COALESCE(MAX(id),0) FROM observations").Scan(&boundary.ID); err == nil {
+			err = db.QueryRow("SELECT COALESCE(last_commit_ms,0) FROM tickstore_meta").Scan(&boundary.AsOfMs)
+		}
+		if err != nil {
+			_ = db.Close()
+			return err
+		}
+		s.profileBounds[path] = boundary
 		if err = checkpoint(db); err == nil && clean == 0 {
 			s.incomplete = true
 			if !slices.Contains(s.recovered, run) {
@@ -194,6 +203,7 @@ func (s *Store) ensureBudget(growth int64) error {
 			continue
 		}
 		delete(s.segments, path)
+		delete(s.profileBounds, path)
 		s.incomplete = true // surviving references may name deleted original payloads
 		total, err = s.physicalBytes()
 		if err != nil {

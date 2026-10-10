@@ -57,3 +57,5 @@ OpenD, or configure OpenD separately for live mode. The default browser opens th
 local UI; if it cannot be opened, use `http://127.0.0.1:8686`. Ctrl+C stops the
 process. The package smoke check lives at
 `../scripts/smoke-linux-release.sh` and validates an extracted archive.
+
+Visible-range Volume Profile reads the existing tick archive through a bounded owner-coordinated read-only reader and asynchronous UI query. It adds no market-data subscription or capture-schema change. Recording-disabled sessions can read retained clean sealed history; demo exposes no archive reader. See [tickstore reads](internal/tickstore/README.md#volume-profile-reads) and [UI query behavior](internal/uihub/README.md).

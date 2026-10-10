@@ -100,3 +100,9 @@ See [performance evidence](../../../docs/performance.md).
 History and archive anchors embed the full input bar (including source reference)
 in bucket basis snapshots, even when no raw OpenD source payload exists. A later
 report-based anchor clears that history evidence.
+
+## Volume Profile reads
+
+`ProfileReader` reads captured normalized prints from separate read-only SQLite connections. The writer publishes immutable committed row-ID boundaries after each batch; receipt filenames never filter exchange-time selection. Reads release every handle and the owner read lock after at most 1,024 rows, with a 50 ms chunk deadline. Writer maintenance takes the exclusive lock before writes, checkpointing, rotation or pruning; readers wait without SQLite handles for at most 100 ms, then yield Busy if maintenance still owns it. Two reads, a two-second overall deadline and 96,000 retained reports bound work; large selections fail explicitly without a prefix result. Source references are discarded from the working projection.
+
+With recording disabled, the reader takes the archive owner lock and reads only validated clean sealed files with immutable connections. It never recovers, checkpoints or writes archive evidence. Another active owner yields Busy. Missing, evicted, unreadable and uncoordinated segments remain Partial evidence. Existing subscription history cannot prove continuous capture, so every result carries `coverage_unproven`; gap markers and archive attribution failures add reasons. First/last print times describe observed evidence, not a coverage percentage. All relevant ET dates are checked for identity conflicts, including reports outside the viewport; a very busy exchange date can exceed the bound even for a narrow viewport.

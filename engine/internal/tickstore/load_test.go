@@ -2,11 +2,13 @@ package tickstore_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
 	"runtime/metrics"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -25,14 +27,19 @@ func TestRecordingLoadComparison(t *testing.T) {
 	if testing.Short() {
 		t.Skip("wall-clock capacity measurement; run without -short")
 	}
-	for _, enabled := range []bool{false, true} {
-		t.Run(fmt.Sprintf("recording=%v", enabled), func(t *testing.T) {
+	for _, mode := range []string{"disabled", "recording", "profiles"} {
+		enabled := mode != "disabled"
+		t.Run(mode, func(t *testing.T) {
 			dir := t.TempDir()
 			var archive *tickstore.Store
 			var recorder feed.Recorder
 			if enabled {
 				var err error
-				archive, err = tickstore.Open(tickstore.Options{Directory: filepath.Join(dir, "ticks"), MinFreeBytes: 1, Decode: opend.DecodeRecording})
+				segmentBytes := int64(256 << 20)
+				if mode == "profiles" {
+					segmentBytes = 1 << 20
+				}
+				archive, err = tickstore.Open(tickstore.Options{Directory: filepath.Join(dir, "ticks"), MinFreeBytes: 1, SegmentBytes: segmentBytes, Decode: opend.DecodeRecording})
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -78,6 +85,39 @@ func TestRecordingLoadComparison(t *testing.T) {
 			metrics.Read(cpu)
 			cpuBefore := cpu[0].Value.Float64() + cpu[1].Value.Float64()
 			start := time.Now()
+			var profileDone chan struct{}
+			var profileLatency atomic.Int64
+			var profileQueries atomic.Int64
+			var profileResults atomic.Int64
+			if mode == "profiles" {
+				profileDone = make(chan struct{})
+				reader := tickstore.NewProfileReader(filepath.Join(dir, "ticks"), archive)
+				go func() {
+					defer close(profileDone)
+					timer := time.NewTicker(250 * time.Millisecond)
+					defer timer.Stop()
+					for n := 0; ; n++ {
+						select {
+						case <-ctx.Done():
+							return
+						case <-timer.C:
+						}
+						queryStart := time.Now()
+						r, err := reader.Read(ctx, fmt.Sprintf("US.LOAD%02d", n%4), 1791446772000, 1791446792000)
+						if err == nil {
+							_, err = md.CalculateVolumeProfile(ctx, r.Prints, 1791446772000, 1791446792000, 100, 70)
+							if err == nil && len(r.Prints) > 0 {
+								profileResults.Add(1)
+							}
+						}
+						if err != nil && !errors.Is(err, tickstore.ErrProfileBusy) && !errors.Is(err, context.Canceled) {
+							t.Errorf("profile query: %v", err)
+						}
+						profileLatency.Store(max(profileLatency.Load(), time.Since(queryStart).Microseconds()))
+						profileQueries.Add(1)
+					}
+				}()
+			}
 			var maxWork, maxChart, maxJournal int64
 			for frame := range 550 {
 				if frame < 500 {
@@ -127,11 +167,14 @@ func TestRecordingLoadComparison(t *testing.T) {
 			if archive != nil {
 				waitArchive(t, func() bool { return archive.Stats().WorkingItems == 0 })
 				stats := archive.Stats()
-				if stats.MaxCommitLagMs > 1000 || stats.Lost != [feed.RecordingLaneCount]uint64{} {
+				if stats.Paused || stats.MaxCommitLagMs > 1000 || stats.Lost != [feed.RecordingLaneCount]uint64{} {
 					t.Fatalf("healthy capacity: %+v", stats)
 				}
 			}
 			cancel()
+			if profileDone != nil {
+				<-profileDone
+			}
 			<-done
 			<-drainDone
 			if archive != nil {
@@ -159,6 +202,12 @@ func TestRecordingLoadComparison(t *testing.T) {
 				commitLag = archive.Stats().MaxCommitLagMs
 			}
 			t.Logf("50 symbols; sustained 500 prints/s for 10s + 500-print burst; elapsed=%s Go-user+GC-CPU=%.3fs allocated=%d heap=%d work_peak=%d receipt_commit_max=%dms MD-chart-barrier_max=%dus execution-journal-flush_max=%dus physical=%d", time.Since(start).Round(time.Millisecond), cpuSeconds, after.TotalAlloc-before.TotalAlloc, after.HeapInuse, maxWork, commitLag, maxChart, maxJournal, physical)
+			if mode == "profiles" {
+				if profileResults.Load() == 0 {
+					t.Fatal("profile requests never obtained committed prints")
+				}
+				t.Logf("four charts at 1Hz: queries=%d populated_results=%d latency_max=%dus", profileQueries.Load(), profileResults.Load(), profileLatency.Load())
+			}
 		})
 	}
 }

@@ -9,10 +9,12 @@ import { mapCrosshairBar } from "../../render/chart/crosshairSync";
 import { installOrderCrosshair } from "../../render/chart/orderCrosshair";
 import { DiamondFillPrimitive } from "../../render/chart/diamondPrimitive";
 import { VisibleExtremaPrimitive } from "../../render/chart/visibleExtremaPrimitive";
+import { VolumeProfilePrimitive } from "../../render/chart/volumeProfilePrimitive";
+import { VolumeProfileController } from "../../render/chart/volumeProfileController";
 import { SessionShadingPrimitive } from "../../render/chart/sessionPrimitive";
 import {
   CHART_INDICATOR_MODEL_VERSION, INDICATOR_CATALOG, normalizeChartIndicators, volumeInstanceId,
-  volumeIsVisible, withDefaultParams, describeIndicator, type IndicatorInstance, type IndicatorType,
+  volumeIsVisible, withDefaultParams, describeIndicator, isLocalIndicator, normalizeProfile, profileInstanceId, type IndicatorInstance, type IndicatorType,
 } from "../../render/chart/indicatorSeries";
 import { DrawingsPrimitive } from "../../render/chart/drawings/primitive";
 import { DrawingInteraction, type Tool } from "../../render/chart/drawings/interaction";
@@ -45,7 +47,7 @@ import { computeLegendView } from "./tv/legendView";
 import { BarCloseTimer } from "./tv/BarCloseTimer";
 import { perf } from "../../perf/PerfMonitor";
 import { bareSymbol } from "../exec/orderStatus";
-import type { QueryChartWindowResult } from "../../gen/wsmsg";
+import type { QueryChartWindowResult, QueryVolumeProfileResult } from "../../gen/wsmsg";
 import { uiLog } from "../../logging/logger";
 
 const ALL_CHART_BARS = 1_000_000;
@@ -61,7 +63,7 @@ type PendingIndicatorHydration = {
 
 // Adapts a real LWC v5 IChartApi to the controller's minimal ChartApiFacade.
 function makeFacade(chart: IChartApi, palette: Palette, host: HTMLElement): {
-  facade: ChartApiFacade; setPalette: (p: Palette) => void; drawings: DrawingsPrimitive; visibleExtrema: VisibleExtremaPrimitive;
+  facade: ChartApiFacade; setPalette: (p: Palette) => void; drawings: DrawingsPrimitive; visibleExtrema: VisibleExtremaPrimitive; volumeProfile: VolumeProfilePrimitive;
 } {
   let main: ISeriesApi<"Candlestick" | "Bar" | "Line" | "Area"> | null = null;
   let volumeScale: ISeriesApi<"Histogram"> | null = null;
@@ -71,6 +73,7 @@ function makeFacade(chart: IChartApi, palette: Palette, host: HTMLElement): {
   const diamonds = new DiamondFillPrimitive(palette);
   const drawings = new DrawingsPrimitive(palette);
   const visibleExtrema = new VisibleExtremaPrimitive(palette);
+  const volumeProfile = new VolumeProfilePrimitive(palette);
 
   const facade: ChartApiFacade = {
     setMainSeries: (kind, options) => {
@@ -89,6 +92,7 @@ function makeFacade(chart: IChartApi, palette: Palette, host: HTMLElement): {
       main.attachPrimitive(diamonds);
       main.attachPrimitive(drawings);
       main.attachPrimitive(visibleExtrema);
+      main.attachPrimitive(volumeProfile);
       if (!sessionAttached) { chart.panes()[0]?.attachPrimitive?.(session); sessionAttached = true; }
       return s as unknown as LwcSeries;
     },
@@ -172,7 +176,7 @@ function makeFacade(chart: IChartApi, palette: Palette, host: HTMLElement): {
     remove: () => { orderCrosshair.dispose(); chart.remove(); },
   };
   const orderCrosshair = installOrderCrosshair(chart, host, facade, () => palette.crosshair);
-  return { facade, setPalette: (p) => { palette = p; session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); visibleExtrema.setPalette(p); orderCrosshair.refresh(); }, drawings, visibleExtrema };
+  return { facade, setPalette: (p) => { palette = p; session.setPalette(p); diamonds.setPalette(p); drawings.setPalette(p); visibleExtrema.setPalette(p); volumeProfile.setPalette(p); orderCrosshair.refresh(); }, drawings, visibleExtrema, volumeProfile };
 }
 
 export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange, group: groupProp, symbol: symbolProp, monitoring, active }: PanelProps): JSX.Element {
@@ -284,6 +288,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const drawingsPrimRef = useRef<DrawingsPrimitive | null>(null);
   const visibleExtremaPrimRef = useRef<VisibleExtremaPrimitive | null>(null);
   const refreshExtremaRef = useRef<() => void>(() => {});
+  const refreshProfileRef = useRef<() => void>(() => {});
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  useEffect(() => { refreshProfileRef.current(); }, [active]);
 
   useEffect(() => { tfRef.current = timeframe; }, [timeframe]);
   useEffect(() => {
@@ -335,7 +343,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       if (selectionFrame !== null) return;
       selectionFrame = requestAnimationFrame(() => { selectionFrame = null; refreshSelRef.current?.(); });
     };
-    const { facade, setPalette, drawings, visibleExtrema } = makeFacade(chart, palette, host);
+    const { facade, setPalette, drawings, visibleExtrema, volumeProfile } = makeFacade(chart, palette, host);
     let viewportGeneration = 0;
     let indicatorReloadPending = false;
     let chartSnapshotLoaded = false;
@@ -344,7 +352,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     let extremaDirty = true;
 
     const indicatorKeys = () => instancesRef.current
-      .filter((inst) => inst.type !== "VOLUME")
+      .filter((inst) => !isLocalIndicator(inst.type))
       .flatMap((inst) => describeIndicator(inst, paletteRef.current).map((series) => series.key));
     const queryIndicatorHydration = async (instanceId: string) => {
       const pending = pendingIndicatorHydrationRef.current.get(instanceId);
@@ -455,6 +463,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       scheduleRefreshSelection();
       extremaDirty = true;
       forceRepaintRef.current = true;
+      refreshProfileRef.current();
     };
     timeScale.subscribeVisibleLogicalRangeChange(clampRight);
     const getVisibleLogicalRange = (timeScale as { getVisibleLogicalRange?: () => LogicalRange | null }).getVisibleLogicalRange;
@@ -472,6 +481,25 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       });
     controller.mount();
     controllerRef.current = controller;
+    const profile = new VolumeProfileController(
+      (selection) => commands.sendQuery("QueryVolumeProfile", selection) as Promise<QueryVolumeProfileResult>,
+      () => commands.isConnected?.() ?? true,
+      (projection) => { volumeProfile.setProjection(projection, Math.max(4, controller.priceFormatDecimals())); forceRepaintRef.current = true; },
+    );
+    const refreshProfile = () => {
+      const inst = instancesRef.current.find((candidate) => candidate.type === "VOLUME_PROFILE") ?? null;
+      volumeProfile.setInstance(inst);
+      if (!inst || inst.hidden || activeRef.current === false || INDICATOR_CATALOG.VOLUME_PROFILE.slots.every((slot) => inst.styles?.[slot.slot]?.hidden)) { profile.setSelection(null); return; }
+      const mode = stores.session.getSnapshot().mode;
+      if (mode !== "live") { profile.setSelection(null, mode === "demo" ? "Unavailable in demo mode" : "Waiting for session"); return; }
+      if (!isIntradayTimeframe(tfRef.current as Timeframe)) { profile.setSelection(null, "Intraday charts only"); return; }
+      const range = chartSnapshotLoaded ? controller.visibleProfileRange() : null;
+      profile.setSelection(range ? { symbol: currentSymbol, timeframe: tfRef.current, ...range,
+        rows: withDefaultParams("VOLUME_PROFILE", inst.params).rows,
+        valueArea: withDefaultParams("VOLUME_PROFILE", inst.params).valueArea } : null);
+    };
+    refreshProfileRef.current = refreshProfile;
+    const offProfileSession = stores.session.subscribe(refreshProfile);
     visibleExtremaPrimRef.current = visibleExtrema;
     visibleExtrema.setVisible(chartSettingsRef.current.visibleExtrema);
     const refreshVisibleExtrema = () => {
@@ -619,6 +647,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       chartSnapshotLoaded = false;
 	  chartSnapshotPending = false;
       controller.setSymbol(currentSymbol);
+      refreshProfile();
       refreshExtremaRef.current?.();
       backfillFills(currentSymbol);
       stores.drawings.ensureLoaded(currentSymbol);
@@ -669,7 +698,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
 
     const updateLegend = () => {
       const bars = controller.displayBars();
-      const view = computeLegendView(bars, stores.indicators, instancesRef.current, paletteRef.current, crosshairLogicalRef.current);
+      const view = computeLegendView(bars, stores.indicators, instancesRef.current, paletteRef.current, crosshairLogicalRef.current, profile.snapshot());
       legendRef.current?.update(view);
     };
     // subscribeCrosshairMove has the same unthrottled-input-rate shape as
@@ -803,7 +832,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         // no meaningful cost.
         let indicatorsRev = 0;
         for (const inst of instancesRef.current) {
-          if (inst.type === "VOLUME") continue;
+          if (isLocalIndicator(inst.type)) continue;
           for (const d of describeIndicator(inst, paletteRef.current)) indicatorsRev += stores.indicators.getRev(d.key);
         }
         const fillsRev = stores.fills.getRev();
@@ -831,6 +860,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         const browserNowMs = Date.now();
         const nowMs = stores.marketClock.nowMs();
         if (chartSnapshotLoaded) controller.sync(nowMs);
+        refreshProfile();
         refreshExtremaRef.current?.();
         const paintedBars = chartSnapshotLoaded ? stores.bars.series(currentSymbol, tfRef.current) : [];
         if (pendingFirstPaint && pendingFirstPaint.symbol === currentSymbol && pendingFirstPaint.timeframe === tfRef.current && paintedBars.length > 0) {
@@ -921,6 +951,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
       viewportGeneration++;
       chartGenerationRef.current++;
       pendingIndicatorHydrationRef.current.clear();
+      profile.dispose(); offProfileSession(); refreshProfileRef.current = () => {};
       off(); offLink(); offHistoryReady(); offCrosshair(); syncHandle.dispose(); ro.disconnect();
       if (crosshairSyncHandleRef.current === syncHandle) crosshairSyncHandleRef.current = null;
       remoteCursorRef.current = null;
@@ -1013,7 +1044,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     persistIndicatorModel(normalized.instances);
   }, [config.id, onConfigChange]);
   const queueIndicatorHydration = (inst: IndicatorInstance) => {
-    if (inst.type === "VOLUME") return;
+    if (isLocalIndicator(inst.type)) return;
     const previous = pendingIndicatorHydrationRef.current.get(inst.instanceId);
     const readyDebt = previous?.generation === chartGenerationRef.current ? previous.readyDebt + 1 : 1;
     pendingIndicatorHydrationRef.current.set(inst.instanceId, {
@@ -1032,6 +1063,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     // while the snapshot query still requests stale D (and vice versa).
     tfRef.current = tf;
     setTf(tf); controllerRef.current?.setTimeframe(tf); refreshExtremaRef.current?.(); applySymbolRef.current?.(); forceRepaintRef.current = true; persist({ timeframe: tf });
+    refreshProfileRef.current();
   };
   // Every mutation goes through instancesRef (updated synchronously here, not
   // just by the post-render effect below): two mutations in the same tick would
@@ -1040,26 +1072,29 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   // the controller drew but whose legend row/persisted entry vanished).
   const setInstancesNow = (next: IndicatorInstance[]) => {
     instancesRef.current = next;
+    refreshProfileRef.current();
     setInstances(next);
     forceRepaintRef.current = true;
     persistIndicatorModel(next);
   };
   const addIndicator = (type: IndicatorType) => {
-    if (type === "VOLUME" && instancesRef.current.some((i) => i.type === "VOLUME")) return;
+    if (isLocalIndicator(type) && instancesRef.current.some((i) => i.type === type)) return;
     const inst: IndicatorInstance = type === "VOLUME"
       ? { instanceId: volumeInstanceId(config.id), type, params: withDefaultParams(type), hidden: false }
+      : type === "VOLUME_PROFILE" ? normalizeProfile({ instanceId: profileInstanceId(config.id), type, params: {} }, config.id)
       : { instanceId: `${config.id}:${type}-${idSeq.current++}`, type, params: withDefaultParams(type) };
     queueIndicatorHydration(inst);
     controllerRef.current?.addIndicator(inst);
     setInstancesNow([...instancesRef.current, inst]);
   };
-  const updateIndicator = (inst: IndicatorInstance) => {
+  const updateIndicator = (raw: IndicatorInstance) => {
+    const inst = raw.type === "VOLUME_PROFILE" ? normalizeProfile(raw, config.id) : raw;
     const previous = instancesRef.current.find((i) => i.instanceId === inst.instanceId);
     const paramsChanged = previous !== undefined
       && JSON.stringify(withDefaultParams(previous.type, previous.params))
         !== JSON.stringify(withDefaultParams(inst.type, inst.params));
     if (paramsChanged) {
-      if (inst.type !== "VOLUME") {
+      if (!isLocalIndicator(inst.type)) {
         for (const series of describeIndicator(inst, paletteRef.current)) stores.indicators.reset(series.key);
       }
       queueIndicatorHydration(inst);
@@ -1246,6 +1281,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const headerControls = <ChartHeaderControls palette={appPalette} timeframe={timeframe}
     onTimeframe={changeTimeframe} onAddIndicator={addIndicator}
     volumeAvailable={!instances.some((inst) => inst.type === "VOLUME")}
+    profileAvailable={!instances.some((inst) => inst.type === "VOLUME_PROFILE")}
     onScreenshot={onScreenshot} onOpenSettings={() => setChartSettingsOpen(true)}
     crosshairSyncEnabled={crosshairSyncEnabled} onToggleCrosshairSync={toggleCrosshairSync}
     {...(group === null ? { crosshairSyncDisabledReason: "Link this chart to a Link Group to enable Crosshair Sync" } : {})}

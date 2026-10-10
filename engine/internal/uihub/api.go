@@ -10,6 +10,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/locates"
 	"github.com/earlisreal/eTape/engine/internal/md"
+	"github.com/earlisreal/eTape/engine/internal/tickstore"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
 
@@ -78,6 +79,7 @@ type Config struct {
 	OutBuf                         int
 	DistDir                        string
 	Demo                           bool
+	VolumeProfiles                 *tickstore.ProfileReader
 	AccountDemand                  *exec.AccountDemandRegistry
 	Eligibility                    EligibilityRegistry
 	OnConfigSet                    func(key, value string)
@@ -125,6 +127,9 @@ func New(clk clock.Clock, cfg Config, ex ExecCore, st Stores, ind Indicators, va
 	cmd.restart = requestRestart
 	cmd.startDemo = startDemo
 	qry := newQueries(st, clk, h)
+	if !cfg.Demo {
+		qry.profileReader = cfg.VolumeProfiles
+	}
 	if previewer, ok := ex.(eligiblePrintPreviewer); ok {
 		qry.preview = previewer
 	}

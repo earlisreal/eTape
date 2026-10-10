@@ -108,3 +108,5 @@ are provider signals only.
 ## Research-only alternatives
 
 Tiger, Polygon, Finnhub, Alpha Vantage, FMP, Benzinga-class feeds, and direct EDGAR/press-wire ingestion were evaluated only. No production runtime depends on them. Historical research remains at `41aa9993777cab4ea59e711775094c516032ebf2^:docs/`.
+
+Volume Profile introduces no provider call or subscription. It reads retained normalized OpenD ticker observations, applies the existing Volume-Eligible condition matrix and conservatively deduplicates symbol/ET-date/sequence identities. It does not infer linked corrections/cancellations or treat candle history as proof of print coverage. Captured share volume and raw-price levels may differ from provider totals; neutral direction is included. See the [archive reader](../engine/internal/tickstore/README.md#volume-profile-reads).

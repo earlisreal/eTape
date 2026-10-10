@@ -42,3 +42,5 @@ recent, trusted Last-Eligible print; it is only a preview and Core validates
 route and trigger again on submit. Order payloads carry optional held lifecycle
 and durable cancel/replace action status on the same parent row. Generated
 TypeScript types remain derived from `wsmsg/`.
+
+`QueryVolumeProfile` is an asynchronous, cancellable request with typed `wsmsg` selection/result DTOs, not a topic or indicator subscription. It accepts US symbols on six intraday timeframes, whole half-open bar spans, 1–200 rows and 1–100% Value Area. Two query slots cover both read and calculation, with a two-second deadline. Results echo the selection and report captured volume, raw-price bins, optional POC/VAH/VAL, committed freshness, first/last prints and Partial reasons. Busy, oversized/timed-out, invalid, unavailable and error results contain no prefix bins. Live selections are clipped through now; demo configuration supplies no archive reader. Contract regeneration: `go tool tygo generate`.

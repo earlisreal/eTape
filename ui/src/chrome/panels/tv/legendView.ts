@@ -2,6 +2,7 @@
 import type { Bar } from "../../../wire/contract";
 import type { IndicatorReader } from "../../../render/chart/ChartController";
 import type { Palette } from "../../../render/palette";
+import type { VolumeProfileProjection } from "../../../render/chart/volumeProfileController";
 import {
   INDICATOR_CATALOG, volumeColorFor, volumeIsVisible, withDefaultParams, describeIndicator,
   type IndicatorInstance,
@@ -10,6 +11,7 @@ import {
 export interface LegendIndicatorRow {
   instanceId: string; label: string; paneIndex: number; values: (number | null)[]; colors: string[];
   hidden?: boolean; slotHidden?: boolean[];
+  profile?: VolumeProfileProjection;
   // MACD only: "open" when the fast (macd) line is at/above the slow (signal)
   // line at this bar, "close" when below, null when either value is missing
   // or the indicator isn't MACD.
@@ -46,6 +48,7 @@ function labelOf(inst: IndicatorInstance): string {
 
 export function computeLegendView(
   bars: readonly LegendBar[], reader: IndicatorReader, instances: IndicatorInstance[], palette: Palette, logical: number | null,
+  profile?: VolumeProfileProjection,
 ): LegendView {
   const has = bars.length > 0;
   const i = !has ? -1 : logical === null ? bars.length - 1 : Math.max(0, Math.min(bars.length - 1, Math.round(logical)));
@@ -57,6 +60,11 @@ export function computeLegendView(
   const volumeInst = instances.find((inst) => inst.type === "VOLUME");
   const indicators: LegendIndicatorRow[] = instances.filter((inst) => inst.type !== "VOLUME").map((inst) => {
     const descs = describeIndicator(inst, palette);
+    if (inst.type === "VOLUME_PROFILE") return {
+      instanceId: inst.instanceId, label: labelOf(inst), paneIndex: 0, values: [], colors: [],
+      hidden: !!inst.hidden || descs.every((d) => d.hidden),
+      profile: profile ?? { status: "idle", result: null, detail: "" },
+    };
     const values = descs.map((d) => (b ? valueAt(reader.series(d.key), barMs) : null));
     const slotHidden = descs.map((d) => d.hidden);
     // Slot order is fixed by INDICATOR_CATALOG.MACD: [0]=macd (fast), [1]=signal (slow).

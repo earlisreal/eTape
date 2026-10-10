@@ -82,40 +82,43 @@ type Stats struct {
 }
 
 type Store struct {
-	opt         Options
-	run         string
-	started     time.Time
-	release     func() error
-	db          *sql.DB
-	path        string
-	day         string
-	segment     uint64
-	queue       chan queued
-	wake        chan struct{}
-	stop        chan struct{}
-	done        chan struct{}
-	gate        sync.Mutex
-	closed      bool
-	closing     atomic.Bool
-	submissions atomic.Int64
-	closeCtx    context.Context
-	closeErr    error // read only after done closes
-	bytes       atomic.Int64
-	items       atomic.Int64
-	committed   atomic.Uint64
-	lag         atomic.Int64
-	paused      atomic.Bool
-	loss        [feed.RecordingLaneCount]atomic.Uint64
-	totalLoss   [feed.RecordingLaneCount]atomic.Uint64
-	firstLoss   [feed.RecordingLaneCount]atomic.Pointer[feed.SourceRef]
-	lastLoss    [feed.RecordingLaneCount]atomic.Pointer[feed.SourceRef]
-	basisWork   atomic.Int64
-	basis       map[string]string
-	segments    map[string]int64
-	basisBytes  int64
-	incomplete  bool
-	lastFailure error
-	recovered   []string
+	opt             Options
+	run             string
+	started         time.Time
+	release         func() error
+	db              *sql.DB
+	path            string
+	day             string
+	segment         uint64
+	queue           chan queued
+	wake            chan struct{}
+	stop            chan struct{}
+	done            chan struct{}
+	gate            sync.Mutex
+	closed          bool
+	closing         atomic.Bool
+	submissions     atomic.Int64
+	closeCtx        context.Context
+	closeErr        error // read only after done closes
+	bytes           atomic.Int64
+	items           atomic.Int64
+	committed       atomic.Uint64
+	lag             atomic.Int64
+	paused          atomic.Bool
+	loss            [feed.RecordingLaneCount]atomic.Uint64
+	totalLoss       [feed.RecordingLaneCount]atomic.Uint64
+	firstLoss       [feed.RecordingLaneCount]atomic.Pointer[feed.SourceRef]
+	lastLoss        [feed.RecordingLaneCount]atomic.Pointer[feed.SourceRef]
+	basisWork       atomic.Int64
+	basis           map[string]string
+	segments        map[string]int64
+	basisBytes      int64
+	incomplete      bool
+	lastFailure     error
+	recovered       []string
+	profileGate     sync.RWMutex
+	profileSnapshot atomic.Pointer[profileSnapshot]
+	profileBounds   map[string]profileBoundary
 }
 
 func Open(o Options) (*Store, error) {
@@ -174,6 +177,7 @@ func Open(o Options) (*Store, error) {
 		return nil, err
 	}
 	s := &Store{opt: o, run: hex.EncodeToString(token[:]), started: o.Now(), release: release, queue: make(chan queued, o.QueueItems), wake: make(chan struct{}, 1), stop: make(chan struct{}), done: make(chan struct{}), basis: make(map[string]string), segments: make(map[string]int64)}
+	s.profileBounds = make(map[string]profileBoundary)
 	if err = s.recoverRun(); err != nil {
 		_ = release()
 		return nil, err
@@ -319,6 +323,8 @@ func (s *Store) Close(ctx context.Context) error {
 func (s *Store) runWriter() {
 	defer close(s.done)
 	defer func() {
+		s.profileGate.Lock()
+		defer s.profileGate.Unlock()
 		if s.db != nil {
 			s.closeErr = errors.Join(s.closeErr, s.db.Close())
 		}
@@ -344,7 +350,9 @@ func (s *Store) runWriter() {
 				s.closeErr = errors.Join(errors.New("tickstore: incomplete recording tail"), s.lastFailure, s.closeCtx.Err())
 				return
 			}
+			s.profileGate.Lock()
 			s.closeErr = s.seal(true)
+			s.profileGate.Unlock()
 			if s.closeErr == nil {
 				s.closeErr = s.writeRun(false)
 			}
@@ -423,6 +431,8 @@ drained:
 		growth += int64(len(data)+len(r.Body))*8 + 128<<10
 		encodedRows = append(encodedRows, encoded{r, string(data)})
 	}
+	s.profileGate.Lock()
+	defer s.profileGate.Unlock()
 	err := s.ensureBudget(growth)
 	if err == nil && s.path != "" {
 		size, statErr := segmentSize(s.path)
@@ -480,6 +490,7 @@ func (s *Store) commit(rows []encoded) error {
 	basis := maps.Clone(s.basis)
 	basisBytes := s.basisBytes
 	incomplete := s.incomplete
+	var lastID int64
 	for _, row := range rows {
 		r := row.record
 		if r.Kind == "bucket_basis" {
@@ -506,7 +517,11 @@ func (s *Store) commit(rows []encoded) error {
 		if r.ObservationMs == 0 {
 			r.ObservationMs = s.opt.Now().UnixMilli()
 		}
-		if _, err = stmt.ExecContext(ctx, r.Kind, r.Source.Run, r.Source.Connection, r.Source.Ingress, r.Source.Index, r.Source.ReceiptMs, r.Symbol, r.Timeframe, r.TimeMs, r.Sequence, r.Price, r.Volume, r.Direction, r.Condition, r.ProcessingOrdinal, r.ObservationMs, r.Body, row.data); err != nil {
+		var result sql.Result
+		if result, err = stmt.ExecContext(ctx, r.Kind, r.Source.Run, r.Source.Connection, r.Source.Ingress, r.Source.Index, r.Source.ReceiptMs, r.Symbol, r.Timeframe, r.TimeMs, r.Sequence, r.Price, r.Volume, r.Direction, r.Condition, r.ProcessingOrdinal, r.ObservationMs, r.Body, row.data); err != nil {
+			return err
+		}
+		if lastID, err = result.LastInsertId(); err != nil {
 			return err
 		}
 	}
@@ -542,6 +557,10 @@ func (s *Store) commit(rows []encoded) error {
 	}
 	s.committed.Add(uint64(len(rows)))
 	s.basisWork.Store(s.basisBytes)
+	if lastID > 0 {
+		s.profileBounds[s.path] = profileBoundary{ID: lastID, AsOfMs: s.opt.Now().UnixMilli()}
+	}
+	s.publishProfileSnapshot()
 	return nil
 }
 
@@ -626,6 +645,8 @@ func (s *Store) newSegment() error {
 	s.db = db
 	s.path = path
 	s.segments[path] = s.opt.Now().UnixMilli()
+	s.profileBounds[path] = profileBoundary{}
+	s.publishProfileSnapshot()
 	return nil
 }
 

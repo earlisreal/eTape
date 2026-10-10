@@ -55,6 +55,15 @@ export function TVLegend({ chrome, symbol, timeframe, instances, floatShares, bo
         write("chg", v.changePct === null ? "" : `${v.changePct >= 0 ? "+" : ""}${v.changePct.toFixed(2)}%`, tint);
         write("vol", v.volumeHidden ? "" : fmtVol(v.volume), tint);
         for (const row of v.indicators) {
+          if (row.profile) {
+            const { status, result, detail } = row.profile;
+            const state = status === "ready" ? result?.partial ? "Partial" : "" : status === "empty" ? "No captured prints" : status === "idle" ? "No visible bars" : status.replaceAll("_", " ");
+            const levels = result?.poc !== undefined ? ` · POC ${result.poc.toFixed(4)} · VAH ${result.vah?.toFixed(4)} · VAL ${result.val?.toFixed(4)}` : "";
+            write(`profile-${row.instanceId}`, row.hidden ? "" : `${state}${result ? ` · Captured ${fmtVol(result.capturedVolume)}${levels}` : ""}`);
+            const cell = cells.current.get(`profile-${row.instanceId}`);
+            if (cell) cell.title = [detail, result && `Selected [${new Date(result.selection.fromMs).toISOString()}, ${new Date(result.selection.toMs).toISOString()})`, result && `Committed through ${new Date(result.asOfMs).toISOString()}`, result?.firstPrintMs && result.lastPrintMs && `First/last captured print: ${new Date(result.firstPrintMs).toISOString()} / ${new Date(result.lastPrintMs).toISOString()}; continuous coverage is unproven`].filter(Boolean).join("\n");
+            continue;
+          }
           row.values.forEach((val, idx) => write(
             `ind-${row.instanceId}-${idx}`,
             row.hidden || row.slotHidden?.[idx] ? "" : fmtPrice(val),
@@ -86,7 +95,7 @@ export function TVLegend({ chrome, symbol, timeframe, instances, floatShares, bo
         onMouseEnter={() => setHovered(inst.instanceId)} onMouseLeave={() => setHovered((h) => (h === inst.instanceId ? null : h))}
         style={{ display: "flex", alignItems: "center", alignSelf: "flex-start", gap: 6, pointerEvents: "auto" }}>
         <span style={{ color: hidden ? chrome.muted : chrome.text }}>{compactLabel ?? legendLabel(inst)}</span>
-        {descs.map((s, idx) => <span key={s.slot} data-testid={volume ? "legend-vol" : `legend-ind-${inst.instanceId}-${idx}`}
+        {inst.type === "VOLUME_PROFILE" ? val(`profile-${inst.instanceId}`) : descs.map((s, idx) => <span key={s.slot} data-testid={volume ? "legend-vol" : `legend-ind-${inst.instanceId}-${idx}`}
           ref={setCell(volume ? "vol" : `ind-${inst.instanceId}-${idx}`)} />)}
         {inst.type === "MACD" && (
           <span data-testid={`legend-sig-${inst.instanceId}`} ref={setCell(`sig-${inst.instanceId}`)} style={{ fontWeight: 600 }} />

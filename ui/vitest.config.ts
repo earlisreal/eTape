@@ -43,6 +43,8 @@ export default defineConfig({
             'src/render/chart/barClose.test.ts',
             'src/render/chart/ChartController.test.ts',
             'src/render/chart/visibleExtremaPrimitive.test.ts',
+            'src/render/chart/volumeProfileController.test.ts',
+            'src/render/chart/volumeProfilePrimitive.test.ts',
             'src/render/chart/chartTheme.test.ts',
             'src/render/chart/crosshairSync.test.ts',
             'src/render/chart/orderMarkers.test.ts',

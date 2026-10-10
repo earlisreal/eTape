@@ -802,6 +802,37 @@ type QueryChartWindowResult struct {
 	HistoryRevision int64                   `json:"historyRevision"`
 }
 
+type QueryVolumeProfileArgs struct {
+	Symbol    string `json:"symbol"`
+	Timeframe string `json:"timeframe"`
+	FromMs    int64  `json:"fromMs"`
+	ToMs      int64  `json:"toMs"`
+	Rows      int    `json:"rows"`
+	ValueArea int    `json:"valueArea"`
+}
+
+type VolumeProfileRow struct {
+	Lower  float64 `json:"lower"`
+	Upper  float64 `json:"upper"`
+	Volume int64   `json:"volume"`
+}
+
+type QueryVolumeProfileResult struct {
+	Selection      QueryVolumeProfileArgs `json:"selection"`
+	Status         string                 `json:"status"`
+	Source         string                 `json:"source"`
+	Partial        bool                   `json:"partial"`
+	Reasons        []string               `json:"reasons"`
+	Rows           []VolumeProfileRow     `json:"rows"`
+	CapturedVolume int64                  `json:"capturedVolume"`
+	POC            *float64               `json:"poc,omitempty"`
+	VAH            *float64               `json:"vah,omitempty"`
+	VAL            *float64               `json:"val,omitempty"`
+	AsOfMs         int64                  `json:"asOfMs"`
+	FirstPrintMs   int64                  `json:"firstPrintMs,omitempty"`
+	LastPrintMs    int64                  `json:"lastPrintMs,omitempty"`
+}
+
 // ---- venue & credentials config DTOs (settings "Venues & credentials") ----
 
 // Venue mirrors config.Venue (no secret material — Credentials is a key NAME).

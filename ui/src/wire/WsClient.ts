@@ -61,6 +61,7 @@ export class WsClient {
 
   onState(cb: (s: ConnState) => void): () => void { this.stateCbs.add(cb); cb(this.state); return () => this.stateCbs.delete(cb); }
   rttMs(): number | null { return this.lastRtt; }
+  isConnected(): boolean { return this.state === "open"; }
 
   subscribe(topic: TopicName, onMessage: TopicHandler): () => void {
     let set = this.handlers.get(topic);

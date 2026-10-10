@@ -196,6 +196,7 @@ export function App({ workspaceName }: { workspaceName: string }): JSX.Element {
   const commands = useMemo(() => ({
     sendCommand: (name: string, args: unknown) => client.sendCommand(name, args),
     sendQuery: (name: string, args: unknown) => client.sendQuery(name, args),
+    isConnected: () => client.isConnected(),
   }), [client]);
 
   useEffect(() => trackWindowState(workspaceName, client), [workspaceName, client]);

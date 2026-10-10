@@ -855,6 +855,34 @@ export interface QueryChartWindowResult {
   indicators: IndicatorSeriesWindow[];
   historyRevision: number /* int64 */;
 }
+export interface QueryVolumeProfileArgs {
+  symbol: string;
+  timeframe: string;
+  fromMs: number /* int64 */;
+  toMs: number /* int64 */;
+  rows: number /* int */;
+  valueArea: number /* int */;
+}
+export interface VolumeProfileRow {
+  lower: number /* float64 */;
+  upper: number /* float64 */;
+  volume: number /* int64 */;
+}
+export interface QueryVolumeProfileResult {
+  selection: QueryVolumeProfileArgs;
+  status: string;
+  source: string;
+  partial: boolean;
+  reasons: string[];
+  rows: VolumeProfileRow[];
+  capturedVolume: number /* int64 */;
+  poc?: number /* float64 */;
+  vah?: number /* float64 */;
+  val?: number /* float64 */;
+  asOfMs: number /* int64 */;
+  firstPrintMs?: number /* int64 */;
+  lastPrintMs?: number /* int64 */;
+}
 /**
  * Venue mirrors config.Venue (no secret material — Credentials is a key NAME).
  */

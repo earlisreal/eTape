@@ -1,6 +1,6 @@
 # Volume Profile Indicator
 
-Status: ready-for-agent — plan approved on 2026-10-10; implementation is a separate request.
+Status: implemented — explicitly requested after plan approval on 2026-10-10.
 
 Approved implementation plan: [Volume Profile](../../docs/plans/2026-10-10-volume-profile-indicator.md).
 
@@ -8,7 +8,7 @@ Approved implementation plan: [Volume Profile](../../docs/plans/2026-10-10-volum
 
 Add a Visible Range Volume Profile Chart Indicator showing total traded share
 volume by price, Point of Control (POC), and Value Area High/Low (VAH/VAL).
-The decisions below define the first version. Implementation remains a separate request.
+The decisions below define the implemented first version.
 
 ## Existing constraints and evidence
 

@@ -17,6 +17,16 @@ const volume: IndicatorInstance = { instanceId: "v1", type: "VOLUME", params: {}
 const volumeResolved = describeIndicator(volume, LIGHT);
 
 describe("IndicatorSettingsDialog", () => {
+  it("applies bounded profile inputs and left/right placement", () => {
+    const profile: IndicatorInstance = { instanceId: "vp", type: "VOLUME_PROFILE", params: {} };
+    const onApply = vi.fn();
+    render(<IndicatorSettingsDialog chrome={chrome} instance={profile} resolved={describeIndicator(profile, LIGHT)} onClose={() => {}} onApply={onApply} />);
+    expect((screen.getByLabelText("Placement") as HTMLSelectElement).value).toBe("left");
+    fireEvent.change(screen.getByLabelText("Placement"), { target: { value: "right" } });
+    fireEvent.change(screen.getByLabelText("Rows"), { target: { value: "999" } });
+    fireEvent.click(screen.getByRole("button", { name: "Ok" }));
+    expect(onApply).toHaveBeenCalledWith(expect.objectContaining({ placement: "right", params: { rows: 200, valueArea: 70 } }));
+  });
   it("shows an Inputs tab with a number input per param", () => {
     render(<IndicatorSettingsDialog chrome={chrome} instance={ema} resolved={resolved} onClose={() => {}} onApply={() => {}} />);
     const period = screen.getByLabelText("Period") as HTMLInputElement;

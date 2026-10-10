@@ -1,7 +1,7 @@
 // ui/src/chrome/panels/tv/IndicatorSettingsDialog.tsx
 import { useState } from "react";
 import { TVDialog } from "./TVDialog";
-import { INDICATOR_CATALOG, withDefaultParams, type IndicatorInstance, type SeriesDescriptor, type SlotStyle } from "../../../render/chart/indicatorSeries";
+import { INDICATOR_CATALOG, withDefaultParams, normalizeProfile, type IndicatorInstance, type SeriesDescriptor, type SlotStyle } from "../../../render/chart/indicatorSeries";
 import { LINE_STYLE_NAMES, type LineStyleName } from "../../../render/chart/lineStyle";
 import { TV_FONT, TV_GEOM, TV_SWATCHES, type TvChrome } from "../../../render/chart/tvTheme";
 
@@ -15,6 +15,7 @@ export function IndicatorSettingsDialog({ chrome, instance, resolved, onClose, o
   const [tab, setTab] = useState("Inputs");
   const [params, setParams] = useState<Record<string, number>>({ ...withDefaultParams(instance.type, instance.params) });
   const [styles, setStyles] = useState<Record<string, SlotStyle>>({ ...(instance.styles ?? {}) });
+  const [placement, setPlacement] = useState<"left" | "right">(instance.placement ?? "left");
 
   const setStyle = (slot: string, patch: Partial<SlotStyle>) =>
     setStyles((s) => ({ ...s, [slot]: { ...s[slot], ...patch } }));
@@ -41,6 +42,12 @@ export function IndicatorSettingsDialog({ chrome, instance, resolved, onClose, o
   const body = tab === "Inputs" ? (
     <div style={{ fontVariantNumeric: "tabular-nums" }}>
       {entry.params.length === 0 && <div style={{ color: chrome.muted }}>No inputs</div>}
+      {instance.type === "VOLUME_PROFILE" && <div style={rowStyle}>
+        <label htmlFor="profile-placement">Placement</label>
+        <select id="profile-placement" aria-label="Placement" style={selectInput} value={placement} onChange={(e) => setPlacement(e.target.value === "right" ? "right" : "left")}>
+          <option value="left">Left</option><option value="right">Right</option>
+        </select>
+      </div>}
       {entry.params.map((p) => (
         <div key={p.key} style={rowStyle}>
           <label htmlFor={`p-${p.key}`}>{p.label}</label>
@@ -102,8 +109,8 @@ export function IndicatorSettingsDialog({ chrome, instance, resolved, onClose, o
     <TVDialog title={entry.label} chrome={chrome} onClose={onClose} width={320}
       tabs={["Inputs", "Style"]} activeTab={tab} onTab={setTab}
       footer={{
-        onDefaults: () => { setParams(withDefaultParams(instance.type, {})); setStyles({}); },
-        onOk: () => { onApply({ ...instance, params, styles }); onClose(); },
+        onDefaults: () => { setParams(withDefaultParams(instance.type, {})); setStyles({}); setPlacement("left"); },
+        onOk: () => { const next = { ...instance, params, styles, ...(instance.type === "VOLUME_PROFILE" ? { placement } : {}) }; onApply(instance.type === "VOLUME_PROFILE" ? normalizeProfile(next) : next); onClose(); },
       }}>
       {body}
     </TVDialog>

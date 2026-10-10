@@ -13,6 +13,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/exec"
 	"github.com/earlisreal/eTape/engine/internal/locates"
 	"github.com/earlisreal/eTape/engine/internal/session"
+	"github.com/earlisreal/eTape/engine/internal/tickstore"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
 )
 
@@ -35,9 +36,11 @@ type queries struct {
 	charts interface {
 		QueryChartWindow(wsmsg.QueryChartWindowArgs) wsmsg.QueryChartWindowResult
 	}
-	clk     clock.Clock
-	locates LocateRegistry
-	preview eligiblePrintPreviewer
+	clk           clock.Clock
+	locates       LocateRegistry
+	preview       eligiblePrintPreviewer
+	profileReader *tickstore.ProfileReader
+	profileSlots  chan struct{}
 
 	eligibility         EligibilityRegistry
 	eligibilityMu       sync.Mutex
@@ -65,7 +68,7 @@ type venueEligibilityCall struct {
 func newQueries(f fillsQuerier, clk clock.Clock, charts ...interface {
 	QueryChartWindow(wsmsg.QueryChartWindowArgs) wsmsg.QueryChartWindowResult
 }) *queries {
-	q := &queries{fills: f, clk: clk}
+	q := &queries{fills: f, clk: clk, profileSlots: make(chan struct{}, 2)}
 	if len(charts) > 0 {
 		q.charts = charts[0]
 	}
@@ -93,7 +96,7 @@ func (q *queries) handleAsync(ctx context.Context, name string, args json.RawMes
 
 func isAsyncQuery(name string) bool {
 	switch name {
-	case "QueryStopLimitRoute", "QueryVenueInstrumentEligibility", "QueryLocateEligibility", "QueryLocateQuotes", "QueryLocates", "QueryLocate":
+	case "QueryVolumeProfile", "QueryStopLimitRoute", "QueryVenueInstrumentEligibility", "QueryLocateEligibility", "QueryLocateQuotes", "QueryLocates", "QueryLocate":
 		return true
 	default:
 		return false
@@ -102,6 +105,8 @@ func isAsyncQuery(name string) bool {
 
 func (q *queries) handleContext(ctx context.Context, name string, args json.RawMessage) any {
 	switch name {
+	case "QueryVolumeProfile":
+		return q.volumeProfile(ctx, args)
 	case "QueryAppInfo":
 		return wsmsg.AppInfo{Version: buildinfo.Version}
 	case "QueryChartWindow":

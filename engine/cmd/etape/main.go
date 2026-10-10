@@ -556,6 +556,10 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	// --- uihub (listening BEFORE OpenD is dialed) ---
 	venueAdm := venueadmin.New(*cfgPath, creds.DefaultPath(), config.VenueConfig{Venues: cfg.Venues, Gate: cfg.Gate})
 	venueProbe := venueprobe.New(creds.DefaultPath(), cfg.OpenD.Addr(), uihubClk)
+	var volumeProfiles *tickstore.ProfileReader
+	if !*demo {
+		volumeProfiles = tickstore.NewProfileReader(filepath.Join(home, ".eTape", "ticks"), recorder)
+	}
 	hub, srv := uihub.New(uihubClk, uihub.Config{
 		Venues: venueMetasWithHeldStopLimitAck(cfg, heldStopLimitIdentity, heldStopLimitAck, heldLITAck), Global: uihub.GlobalLimits{
 			MaxDayLoss: cfg.Gate.Global.MaxDayLoss, MaxSymbolPositionValue: cfg.Gate.Global.MaxSymbolPositionValue,
@@ -566,6 +570,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		Buf:      4096, TapeCap: cfg.UIHub.TapeSnapshot, NewsCap: 500, FillsCap: 1000, EventsCap: 500, TradesCap: 1000,
 		OutBuf: cfg.UIHub.OutboundQueue, DistDir: cfg.UIHub.DistDir,
 		Demo:               *demo,
+		VolumeProfiles:     volumeProfiles,
 		AccountDemand:      demands,
 		Eligibility:        venueEligibilityRegistry(vbs),
 		FocusMainWorkspace: focusMainWorkspace,

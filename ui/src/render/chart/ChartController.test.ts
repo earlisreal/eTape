@@ -2427,3 +2427,19 @@ describe("ChartController.visibleExtrema", () => {
     expect(ctrl.visibleExtrema()).toEqual({ high: null, low: null });
   });
 });
+it("profiles whole intersecting buckets without future padding or stretching across a gap", () => {
+  const bars: Bar[] = ["2026-07-06T13:30:00Z", "2026-07-06T13:35:00Z"].map((bucketStart) => ({ symbol: "US.AAPL", timeframe: "1m", bucketStart, o: 10, h: 11, l: 9, c: 10, v: 100, inProgress: false }));
+  const { facade, ctrl, cmd } = make(barReaderOf(bars));
+  ctrl.sync();
+  facade.visibleLogicalRange = { from: 0, to: 0 };
+  expect(ctrl.visibleProfileRange()).toEqual({ fromMs: Date.parse("2026-07-06T13:30:00Z"), toMs: Date.parse("2026-07-06T13:31:00Z") });
+  facade.visibleLogicalRange = { from: 0.25, to: 1.25 };
+  expect(ctrl.visibleProfileRange()).toEqual({ fromMs: Date.parse("2026-07-06T13:30:00Z"), toMs: Date.parse("2026-07-06T13:36:00Z") });
+  facade.visibleLogicalRange = { from: 2, to: 10 };
+  expect(ctrl.visibleProfileRange()).toBeNull();
+  ctrl.addIndicator({ instanceId: "vp", type: "VOLUME_PROFILE", params: { rows: 100, valueArea: 70 } });
+  ctrl.setTimeframe("5m");
+  ctrl.removeIndicator("vp");
+  expect(cmd.calls.filter((call) => call.name.includes("Indicator"))).toEqual([]);
+  ctrl.dispose();
+});

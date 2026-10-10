@@ -1,12 +1,14 @@
 import type { Palette } from "../palette";
-import type { LineStyleName } from "./lineStyle";
+import { LINE_STYLE_NAMES, type LineStyleName } from "./lineStyle";
 import { INDICATOR_LINE_WIDTH } from "./chartTheme";
 
-export type IndicatorType = "VWAP" | "EMA" | "SMA" | "MACD" | "VOLUME";
+export type IndicatorType = "VWAP" | "EMA" | "SMA" | "MACD" | "VOLUME" | "VOLUME_PROFILE";
 
 export const CHART_INDICATOR_MODEL_VERSION = 1;
 
 export function volumeInstanceId(panelId: string): string { return `${panelId}:VOLUME`; }
+export function profileInstanceId(panelId: string): string { return `${panelId}:VOLUME_PROFILE`; }
+export function isLocalIndicator(type: IndicatorType): boolean { return type === "VOLUME" || type === "VOLUME_PROFILE"; }
 
 // A per-chart indicator instance. `params` and `colors` are the customizable state,
 // persisted with the workspace (Task 9). `colors` is keyed by slot; unset slots use
@@ -15,6 +17,7 @@ export interface IndicatorInstance {
   instanceId: string;
   type: IndicatorType;
   params: Record<string, number>;
+  placement?: "left" | "right";
   colors?: Record<string, string>;
   styles?: Record<string, SlotStyle>; // per-slot style overrides (color/width/lineStyle/hidden)
   hidden?: boolean;                    // legend 👁 toggle — mapped to LWC series `visible`
@@ -48,6 +51,15 @@ const MAIN = 0, SUBPANE = 1;
 // drawable slots (with the palette key each defaults to). The management UI (Task 9)
 // renders inputs from `params` and color pickers from `slots`.
 export const INDICATOR_CATALOG: Record<IndicatorType, CatalogEntry> = {
+  VOLUME_PROFILE: { type: "VOLUME_PROFILE", label: "Volume Profile",
+    params: [{ key: "rows", label: "Rows", default: 100, min: 1, max: 200 }, { key: "valueArea", label: "Value Area (%)", default: 70, min: 1, max: 100 }],
+    slots: [
+      { slot: "hist", kind: "histogram", paneIndex: MAIN, paletteKey: "indMacdHist" },
+      { slot: "valueArea", kind: "histogram", paneIndex: MAIN, paletteKey: "indVwap" },
+      { slot: "poc", kind: "line", paneIndex: MAIN, paletteKey: "indVwap" },
+      { slot: "vah", kind: "line", paneIndex: MAIN, paletteKey: "indEma" },
+      { slot: "val", kind: "line", paneIndex: MAIN, paletteKey: "indSma" },
+    ] },
   VWAP:   { type: "VWAP",   label: "VWAP",       params: [], slots: [{ slot: "line", kind: "line", paneIndex: MAIN, paletteKey: "indVwap" }] },
   EMA:    { type: "EMA",    label: "EMA",        params: [{ key: "period", label: "Period", default: 9,  min: 1, max: 400 }], slots: [{ slot: "line", kind: "line", paneIndex: MAIN, paletteKey: "indEma" }] },
   SMA:    { type: "SMA",    label: "SMA",        params: [{ key: "period", label: "Period", default: 20, min: 1, max: 400 }], slots: [{ slot: "line", kind: "line", paneIndex: MAIN, paletteKey: "indSma" }] },
@@ -111,13 +123,38 @@ function canonicalVolume(inst: IndicatorInstance, panelId: string): IndicatorIns
   };
 }
 
+export function normalizeProfile(inst: IndicatorInstance, panelId?: string): IndicatorInstance {
+  const styles: Record<string, SlotStyle> = {};
+  for (const { slot } of INDICATOR_CATALOG.VOLUME_PROFILE.slots) {
+    const raw = inst.styles?.[slot];
+    const style: SlotStyle = {};
+    const color = raw?.color ?? inst.colors?.[slot];
+    if (validColor(color)) style.color = color;
+    if (typeof raw?.hidden === "boolean") style.hidden = raw.hidden;
+    if (typeof raw?.width === "number" && Number.isFinite(raw.width)) style.width = Math.max(1, Math.min(4, Math.trunc(raw.width)));
+    if (raw?.lineStyle && LINE_STYLE_NAMES.includes(raw.lineStyle)) style.lineStyle = raw.lineStyle;
+    if (Object.keys(style).length) styles[slot] = style;
+  }
+  return { instanceId: panelId ? profileInstanceId(panelId) : inst.instanceId, type: "VOLUME_PROFILE",
+    params: withDefaultParams("VOLUME_PROFILE", inst.params), placement: inst.placement === "right" ? "right" : "left",
+    ...(typeof inst.hidden === "boolean" ? { hidden: inst.hidden } : {}),
+    ...(Object.keys(styles).length ? { styles } : {}) };
+}
+
 // Normalizes persisted chart indicators at the Chart Panel boundary. The
 // unversioned branch unions the old built-in toggle with any catalog Volume
 // instances; the current branch only enforces the singleton and stable ID.
 export function normalizeChartIndicators(
   panelId: string, raw: unknown, modelVersion: unknown, legacyVolumeVisible: unknown,
 ): NormalizedChartIndicators {
-  const source = Array.isArray(raw) ? raw.filter(isKnownInstance) : [];
+  const known = Array.isArray(raw) ? raw.filter(isKnownInstance) : [];
+  let foundProfile = false;
+  const source = known.flatMap((inst) => {
+    if (inst.type !== "VOLUME_PROFILE") return [inst];
+    if (foundProfile) return [];
+    foundProfile = true;
+    return [normalizeProfile(inst, panelId)];
+  });
   const volumes = source.filter((inst) => inst.type === "VOLUME");
   const generic = source.filter((inst) => inst.type !== "VOLUME");
   const firstVolumeIndex = source.findIndex((inst) => inst.type === "VOLUME");
@@ -140,11 +177,15 @@ export function normalizeChartIndicators(
   const currentVolume = volumes.find((inst) => inst.instanceId === volumeInstanceId(panelId)) ?? volumes[0];
   const canonical = currentVolume ? canonicalVolume(currentVolume, panelId) : null;
   const instances = canonical ? insertVolume(canonical) : generic;
-  return { instances, changed: JSON.stringify(instances) !== JSON.stringify(source) };
+  return { instances, changed: JSON.stringify(instances) !== JSON.stringify(known) };
 }
 
 // Fill any params the user hasn't set with the catalog defaults.
 export function withDefaultParams(type: IndicatorType, params: Record<string, number> = {}): Record<string, number> {
+  if (type === "VOLUME_PROFILE") return Object.fromEntries(INDICATOR_CATALOG[type].params.map((p) => {
+    const value = params?.[p.key];
+    return [p.key, Number.isFinite(value) ? Math.max(p.min, Math.min(p.max, Math.trunc(value))) : p.default];
+  }));
   const out = { ...params };
   for (const p of INDICATOR_CATALOG[type].params) if (out[p.key] === undefined) out[p.key] = p.default;
   return out;

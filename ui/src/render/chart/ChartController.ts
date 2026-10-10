@@ -12,11 +12,14 @@ import {
 import { sessionAt, buildDaySegment, classify } from "./sessions";
 import type { Band, DaySegment } from "./sessions";
 import {
-  describeIndicator, volumeColorFor, volumeIsVisible, withDefaultParams, type IndicatorInstance,
+  describeIndicator, volumeColorFor, volumeIsVisible, withDefaultParams, isLocalIndicator, type IndicatorInstance,
 } from "./indicatorSeries";
 import { LWC_LINE_STYLE } from "./lineStyle";
 import type { FillMarker } from "./diamondMarker";
 import { bucketStartMs } from "./barBucket";
+import type { Timeframe } from "./barBucket";
+import { timeframeToMs } from "./drawings/geometry";
+import { isIntradayTimeframe } from "./barClose";
 import { uiLog } from "../../logging/logger";
 
 export interface BarReader {
@@ -627,6 +630,15 @@ export class ChartController {
   barsMs(): readonly number[] { return this.barsMsCache; }
   displayBars(): readonly DisplayBar[] { return this.displayedBars; }
 
+  visibleProfileRange(): { fromMs: number; toMs: number } | null {
+    const range = this.facade.getVisibleLogicalRange();
+    if (!isIntradayTimeframe(this.config.timeframe as Timeframe) || !range || !Number.isFinite(range.from) || !Number.isFinite(range.to)) return null;
+    const from = Math.max(0, Math.floor(range.from));
+    const to = Math.min(this.barsMsCache.length-1, Math.ceil(range.to));
+    if (from > to) return null;
+    return { fromMs: this.barsMsCache[from], toMs: this.barsMsCache[to]+timeframeToMs(this.config.timeframe as Timeframe) };
+  }
+
   visibleExtrema(): VisibleExtremaProjection {
     const range = this.facade.getVisibleLogicalRange();
     const bars = this.displayedBars;
@@ -785,7 +797,7 @@ export class ChartController {
 
   private applyIndicators(): void {
     for (const { inst, series } of this.indicators.values()) {
-      if (inst.type === "VOLUME") continue;
+      if (isLocalIndicator(inst.type)) continue;
       const descriptors = describeIndicator(inst, this.palette);
       for (const d of descriptors) {
         const s = series.get(d.key);
@@ -886,6 +898,11 @@ export class ChartController {
     // Resolve any unset params to catalog defaults so the engine always gets a
     // complete param set (and the stored instance matches what's rendered).
     const resolved: IndicatorInstance = { ...inst, params: withDefaultParams(inst.type, inst.params) };
+    if (resolved.type === "VOLUME_PROFILE") {
+      if ([...this.indicators.values()].some((entry) => entry.inst.type === "VOLUME_PROFILE")) return;
+      this.indicators.set(resolved.instanceId, { inst: resolved, series: new Map() });
+      return;
+    }
     if (resolved.type === "VOLUME") {
       if (this.volumeIndicator()) return;
       const series = new Map<string, LwcSeries>();
@@ -967,7 +984,7 @@ export class ChartController {
     if (entry.inst.type === "VOLUME") {
       this.volume = null;
       this.setVolumeGeometry(false);
-    } else {
+    } else if (!isLocalIndicator(entry.inst.type)) {
       void this.deps.commands.sendCommand("UnsubscribeIndicator", { instanceId });
     }
     this.liftCandleToTop();
@@ -1072,7 +1089,7 @@ export class ChartController {
       }
     }
     // Re-subscribe every live indicator for the new (symbol, timeframe).
-    for (const { inst } of this.indicators.values()) if (inst.type !== "VOLUME") this.subscribeIndicator(inst);
+    for (const { inst } of this.indicators.values()) if (!isLocalIndicator(inst.type)) this.subscribeIndicator(inst);
     if (this.watermarkOn) this.facade.setWatermark(bareSymbol(this.config.symbol));
   }
 

@@ -148,3 +148,11 @@ describe("normalizeChartIndicators", () => {
     expect(out.instances).toEqual([{ instanceId: volumeInstanceId("c1"), type: "VOLUME", params: {}, hidden: true }]);
   });
 });
+test("normalizes one opt-in profile with bounded inputs and left placement", () => {
+  const got = normalizeChartIndicators("chart", [
+    { instanceId: "vp1", type: "VOLUME_PROFILE", params: { rows: Infinity, valueArea: 0 }, placement: "invalid" },
+    { instanceId: "vp2", type: "VOLUME_PROFILE", params: { rows: 20, valueArea: 80 }, placement: "right" },
+  ], CHART_INDICATOR_MODEL_VERSION, true);
+  expect(got.instances).toEqual([{ instanceId: "chart:VOLUME_PROFILE", type: "VOLUME_PROFILE", params: { rows: 100, valueArea: 1 }, placement: "left" }]);
+  expect(got.changed).toBe(true);
+});

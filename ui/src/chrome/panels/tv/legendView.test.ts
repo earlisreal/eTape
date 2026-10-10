@@ -12,6 +12,13 @@ const emptyReader: IndicatorReader = { series: () => [] };
 const volume = { instanceId: "v1", type: "VOLUME" as const, params: {} };
 
 describe("computeLegendView", () => {
+  it("keeps the profile independent of the crosshair and IndicatorStore", () => {
+    const profile = { status: "loading", result: null, detail: "" };
+    const reader: IndicatorReader = { series: () => { throw new Error("local profile read IndicatorStore"); } };
+    const instances = [{ instanceId: "vp", type: "VOLUME_PROFILE" as const, params: {} }];
+    expect(computeLegendView(bars, reader, instances, LIGHT, 0, profile).indicators[0].profile).toBe(profile);
+    expect(computeLegendView(bars, reader, instances, LIGHT, 1, profile).indicators[0].profile).toBe(profile);
+  });
   it("uses the last bar when logical is null", () => {
     const v = computeLegendView(bars, emptyReader, [], LIGHT, null);
     expect(v.c).toBe(10.5);

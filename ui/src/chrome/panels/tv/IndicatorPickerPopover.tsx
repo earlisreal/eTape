@@ -7,6 +7,7 @@ import type { Palette } from "../../../render/palette";
 export interface IndicatorPickerPopoverProps {
   palette: Palette; anchor: HTMLElement | null; onClose: () => void; onAdd: (type: IndicatorType) => void;
   volumeAvailable?: boolean;
+  profileAvailable?: boolean;
 }
 
 const WIDTH = 200;
@@ -18,11 +19,11 @@ const WIDTH = 200;
 // `overflow: hidden` containers (PanelFrame's header slot, ChartHeaderControls'
 // root), so an absolute-positioned child would be clipped to the header row —
 // same reason TVContextMenu portals/fixed-positions instead of nesting.
-export function IndicatorPickerPopover({ palette, anchor, onClose, onAdd, volumeAvailable = true }: IndicatorPickerPopoverProps): JSX.Element | null {
+export function IndicatorPickerPopover({ palette, anchor, onClose, onAdd, volumeAvailable = true, profileAvailable = true }: IndicatorPickerPopoverProps): JSX.Element | null {
   const ref = useRef<HTMLDivElement | null>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
   const entries = useMemo(() => Object.values(INDICATOR_CATALOG)
-    .filter((entry) => entry.type !== "VOLUME" || volumeAvailable), [volumeAvailable]);
+    .filter((entry) => (entry.type !== "VOLUME" || volumeAvailable) && (entry.type !== "VOLUME_PROFILE" || profileAvailable)), [volumeAvailable, profileAvailable]);
 
   useLayoutEffect(() => {
     if (!anchor) { setPos(null); return; }
