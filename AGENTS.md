@@ -49,14 +49,21 @@ cd ui && npm run e2e
 
 ## Validation
 
-After an approved plan, a substantial change, changes spanning engine and UI,
+After implementing an approved plan, a substantial change, changes spanning engine and UI,
 or changes to CI, build configuration, dependencies, or generated contracts,
 run the CI-equivalent Windows checklist in [README.md](README.md#ci-equivalent-validation-on-windows).
 The workflow at [.github/workflows/ci.yml](.github/workflows/ci.yml) is the
 executable source of truth if the command lists drift. Small isolated changes
 may use proportional subsystem checks. Every handoff must list checks run and
-results, plus every skipped required check and its reason; hosted CI must still
-complete successfully.
+results, plus every skipped required check and its reason. Hosted CI must
+complete successfully except for prose-only documentation changes below.
+
+For prose-only documentation changes, including approved plans, specs, and
+tracker files, validate Markdown links and run `git diff --check`. Skip
+engine/UI checks and hand off without waiting for hosted CI; report it as
+pending if it is still running. Changes to executable inputs, code, CI, build
+configuration, dependencies, or generated contracts follow normal validation
+regardless of file extension.
 
 ## Live-order safety
 
@@ -72,6 +79,6 @@ After completing any task that changes repository files, including small tasks a
 
 1. Run the required validation and commit only the task's changes in its branch or worktree.
 2. Fetch `origin/main`, integrate upstream changes if needed, and merge the task branch or detached worktree HEAD into local `main`, preserving unrelated work.
-3. Push `main` to `origin` immediately after merging. Before handoff, verify that local and remote `main` contain the task commit and that hosted CI passes.
+3. Push `main` to `origin` immediately after merging. Before handoff, verify that local and remote `main` contain the task commit and that hosted CI passes, unless the prose-only documentation exception in [Validation](#validation) applies.
 
 This is standing authorization for commit, merge, and push; no further confirmation is needed. Explicit requests to keep work as a draft, leave changes uncommitted, or defer merging or pushing override this rule.
