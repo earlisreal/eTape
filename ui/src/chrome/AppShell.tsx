@@ -382,6 +382,18 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     }
     hotkeyCoordinator.updateOwned(current.panel, input);
   }, [hotkeyCoordinator, hotkeyTargetInputForPanel, windowId]);
+  const activatePanelTarget = useCallback((panelId: string) => {
+    const input = hotkeyTargetInputForPanel(panelId);
+    if (input) hotkeyCoordinator.activate(input);
+  }, [hotkeyCoordinator, hotkeyTargetInputForPanel]);
+  useEffect(() => {
+    const activateFocusedPanel = () => {
+      const panel = apiRef.current?.activePanel;
+      if (panel) activatePanelTarget(panel.id);
+    };
+    window.addEventListener("focus", activateFocusedPanel);
+    return () => window.removeEventListener("focus", activateFocusedPanel);
+  }, [activatePanelTarget]);
   useHotkeys({ stores, commands, target: hotkeyTarget });
   // Auto-unlock-on-startup (fire-once latch — see the hook's own comment):
   // arms trading automatically once the engine connection is up, if the user
@@ -771,11 +783,6 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   }, [scannerPlan, scannerSyncRuntime, selectScannerSource, syncConfig, toggleScannerSync, workspaceName, ws]);
 
   if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
-
-  const activatePanelTarget = (panelId: string) => {
-    const input = hotkeyTargetInputForPanel(panelId);
-    if (input) hotkeyCoordinator.activate(input);
-  };
 
   // A stable per-panel onConfigChange MERGES a settings patch into
   // ws.panels[i].settings then saves. Merge, not replace: the panels below and

@@ -74,6 +74,7 @@ class TargetChannel implements HotkeyTargetChannel {
   readonly messages: HotkeyTargetMessage[] = [];
   private listener: ((event: MessageEvent<HotkeyTargetMessage>) => void) | undefined;
   postMessage(message: HotkeyTargetMessage): void { this.messages.push(message); }
+  emit(message: HotkeyTargetMessage): void { this.listener?.({ data: message } as MessageEvent<HotkeyTargetMessage>); }
   addEventListener(_type: "message", listener: (event: MessageEvent<HotkeyTargetMessage>) => void): void { this.listener = listener; }
   removeEventListener(_type: "message", listener: (event: MessageEvent<HotkeyTargetMessage>) => void): void {
     if (this.listener === listener) this.listener = undefined;
@@ -1143,6 +1144,13 @@ describe("AppShell hotkey target lifecycle", () => {
       await waitFor(() => expect(channel.messages.some((m) => m.type === "target")).toBe(true));
       const seeded = channel.messages.filter((m): m is Extract<HotkeyTargetMessage, { type: "target" }> => m.type === "target").at(-1);
       expect(seeded?.target.panel).toBe("news-a");
+
+      channel.messages.length = 0;
+      act(() => channel.emit({ type: "target", target: { ownerWindow: "other-window", panel: "chart-a", group: null, revision: 100 } }));
+      await waitFor(() => expect(screen.getByTestId("hotkey-target-cue").getAttribute("data-state")).toBe("ungrouped"));
+      act(() => fireEvent.focus(window));
+      await waitFor(() => expect(channel.messages.some((m) => m.type === "target" && m.target.panel === "news-a" && m.target.revision > 100)).toBe(true));
+      await waitFor(() => expect(screen.getByTestId("hotkey-target-cue").getAttribute("data-state")).not.toBe("ungrouped"));
 
       channel.messages.length = 0;
       fireEvent.click(screen.getByText("+ Add panel"));
