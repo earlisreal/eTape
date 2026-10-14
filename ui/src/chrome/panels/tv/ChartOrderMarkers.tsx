@@ -421,13 +421,6 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       </div>;
     })}
     {/unknown|rejected|unavailable|zero shares/i.test(announcement) && <div role="status" style={{position:"absolute",left:10,bottom:10,maxWidth:"80%",color:"#ff9d72",background:"#0c1017",fontSize:11}}>{announcement}</div>}
-    {orders.filter(o=>o.venue===props.venue && o.symbol===props.symbol && o.riskEntry).map(entry=>{
-      const risk=entry.riskEntry!,stop=orders.find(o=>o.id===risk.stopId);
-      const remaining=Math.max(0,entry.executedQty-orders.filter(o=>o.riskEntryId===entry.id).reduce((sum,o)=>sum+o.executedQty,0));
-      if(!remaining || (!risk.failure && !risk.protectionCanceled && stop && !["EXPIRED","CANCELED","REJECTED"].includes(stop.status) && stop.held?.phase!=="PAUSED"))return null;
-      return <div key={entry.id} role="alert" style={{position:"absolute",left:10,bottom:35,maxWidth:"80%",padding:6,color:"#ff9d72",background:"#0c1017",fontSize:11}}>
-        {remaining} shares remain · {risk.failure || (risk.protectionCanceled ? "Protection canceled" : stop?.held?.phase==="PAUSED" ? "Protection paused — reconcile / Resume in Orders" : "DAY protection ended")}. Verify Orders and positions.</div>;
-    })}
     <span aria-live="polite" className="chart-order-announcement" style={{ position:"absolute", width:1, height:1, overflow:"hidden", clipPath:"inset(50%)" }}>{announcement}</span>
   </div>;
 }

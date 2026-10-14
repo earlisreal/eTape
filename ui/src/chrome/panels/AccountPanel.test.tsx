@@ -52,6 +52,35 @@ function wrap(props: PanelProps) {
 }
 
 describe("AccountPanel", () => {
+  it("shows verified protection warnings once in the selected Account across tabs", () => {
+    const { props, stores, linkGroups } = mkProps();
+    const st = status(false, "alpaca-paper", "alpaca-live");
+    st.venues[0].protectionWarnings = [{ symbol:"US.AAPL", qty:2, reason:"Protection interrupted", state:"open" }];
+    st.venues[1].protectionWarnings = [{ symbol:"US.MSFT", qty:1, reason:"Protection canceled", state:"open" }];
+    stores.exec.apply({kind:"snapshot",topic:"exec.status",payload:st});
+    wrap(props);
+    expect(screen.getAllByTestId("account-protection-warning")).toHaveLength(1);
+    expect(screen.getByRole("alert").textContent).toContain("AAPL · 2 shares open");
+    fireEvent.click(screen.getByText("Trade History"));
+    expect(screen.getByRole("alert").textContent).toContain("Protection interrupted");
+    act(() => linkGroups.focusVenue("green", "alpaca-live"));
+    expect(screen.getByRole("alert").textContent).toContain("MSFT · 1 shares open");
+    act(() => stores.exec.apply({kind:"delta",topic:"exec.status",payload:status(false,"alpaca-paper","alpaca-live")}));
+    expect(screen.queryByTestId("account-protection-warning")).toBeNull();
+  });
+
+  it("keeps failed verification and unavailable position counts visibly unknown", () => {
+    const { props, stores } = mkProps();
+    const st = status(false);
+    st.venues[0].positionDataReady = false;
+    st.venues[0].protectionWarnings = [{ symbol:"US.AAPL", qty:3, reason:"Protection interrupted", state:"unverified" }];
+    stores.exec.apply({kind:"snapshot",topic:"exec.status",payload:st});
+    wrap(props);
+    expect(screen.getByText("Positions (?)")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain("Position unverified; retrying automatically");
+    expect(screen.getByRole("alert").textContent).not.toContain("3 shares open");
+    expect(screen.queryByRole("button", {name:/refresh/i})).toBeNull();
+  });
   // --- ported from AccountBarPanel.test.tsx ---
   it("shows — for equity before any account snapshot arrives", () => {
     const { props } = mkProps();

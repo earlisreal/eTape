@@ -346,6 +346,16 @@ func (m *mirror) applyExec(u exec.Update) []staged {
 			vs.PositionDataReady = v.Ready
 		}
 		return []staged{{Topic: wsmsg.TopicExecStatus, Payload: m.execStatus()}}
+	case exec.ProtectionWarningsUpdate:
+		if vs := m.venueStatus[string(v.Venue)]; vs != nil {
+			vs.ProtectionWarnings = make([]wsmsg.ProtectionWarning, 0, len(v.Warnings))
+			for _, warning := range v.Warnings {
+				vs.ProtectionWarnings = append(vs.ProtectionWarnings, wsmsg.ProtectionWarning{
+					Symbol: warning.Symbol, Qty: warning.Qty, Reason: warning.Reason, State: warning.State,
+				})
+			}
+		}
+		return []staged{{Topic: wsmsg.TopicExecStatus, Payload: m.execStatus()}}
 	case exec.FlattenPendingUpdate:
 		if vs := m.venueStatus[string(v.Venue)]; vs != nil {
 			vs.FlattenPending = v.Pending

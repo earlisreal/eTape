@@ -19,6 +19,18 @@ func testMirror() *mirror {
 	)
 }
 
+func TestMirrorProtectionWarningsRemainInStatusSnapshots(t *testing.T) {
+	m := testMirror()
+	frames := m.applyExec(exec.ProtectionWarningsUpdate{Venue: "sim", Warnings: []exec.ProtectionWarning{{Symbol: "US.AAPL", Qty: 2, Reason: "Protection interrupted", State: "open"}}})
+	if len(frames) != 1 || frames[0].Topic != wsmsg.TopicExecStatus || len(m.execStatus().Venues[0].ProtectionWarnings) != 1 {
+		t.Fatal("protection warnings were not published and retained in venue status")
+	}
+	m.applyExec(exec.ProtectionWarningsUpdate{Venue: "sim"})
+	if len(m.execStatus().Venues[0].ProtectionWarnings) != 0 {
+		t.Fatal("resolved warnings remained in late-subscriber status")
+	}
+}
+
 func TestMirrorQuoteJoinsBookBidAsk(t *testing.T) {
 	m := testMirror()
 	m.applyMD(md.BookUpdate{Book: feed.Book{Symbol: "US.AAPL", TsMs: 1,

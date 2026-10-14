@@ -255,18 +255,26 @@ type GlobalLimitsView struct {
 }
 
 type VenueStatus struct {
-	Venue                          string         `json:"venue"`
-	Broker                         Broker         `json:"broker"`
-	Env                            string         `json:"env,omitempty"`
-	Connected                      bool           `json:"connected"`
-	ReconcilePending               bool           `json:"reconcilePending"`
-	PositionDataReady              bool           `json:"positionDataReady"`
-	FlattenPending                 bool           `json:"flattenPending"`
-	Note                           string         `json:"note"`
-	LastReconcileMs                *int64         `json:"lastReconcileMs" tstype:"number | null,required"`
-	Gate                           GateLimitsView `json:"gate"`
-	HeldStopLimitAcknowledged      bool           `json:"heldStopLimitAcknowledged,omitempty"`
-	HeldLimitIfTouchedAcknowledged bool           `json:"heldLimitIfTouchedAcknowledged,omitempty"`
+	Venue                          string              `json:"venue"`
+	Broker                         Broker              `json:"broker"`
+	Env                            string              `json:"env,omitempty"`
+	Connected                      bool                `json:"connected"`
+	ReconcilePending               bool                `json:"reconcilePending"`
+	PositionDataReady              bool                `json:"positionDataReady"`
+	ProtectionWarnings             []ProtectionWarning `json:"protectionWarnings,omitempty"`
+	FlattenPending                 bool                `json:"flattenPending"`
+	Note                           string              `json:"note"`
+	LastReconcileMs                *int64              `json:"lastReconcileMs" tstype:"number | null,required"`
+	Gate                           GateLimitsView      `json:"gate"`
+	HeldStopLimitAcknowledged      bool                `json:"heldStopLimitAcknowledged,omitempty"`
+	HeldLimitIfTouchedAcknowledged bool                `json:"heldLimitIfTouchedAcknowledged,omitempty"`
+}
+
+type ProtectionWarning struct {
+	Symbol string  `json:"symbol"`
+	Qty    float64 `json:"qty"`
+	Reason string  `json:"reason"`
+	State  string  `json:"state"`
 }
 
 type ExecStatus struct {

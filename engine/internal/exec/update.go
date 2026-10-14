@@ -20,6 +20,18 @@ type PositionReadinessUpdate struct {
 	Venue VenueID
 	Ready bool
 }
+
+type ProtectionWarning struct {
+	Symbol string
+	Qty    float64
+	Reason string
+	State  string // checking, unverified, or open
+}
+
+type ProtectionWarningsUpdate struct {
+	Venue    VenueID
+	Warnings []ProtectionWarning
+}
 type FlattenPendingUpdate struct {
 	Venue   VenueID
 	Pending bool
@@ -46,6 +58,7 @@ func (FillUpdate) isExecUpdate()                  {}
 func (AccountUpdate) isExecUpdate()               {}
 func (PositionUpdate) isExecUpdate()              {}
 func (PositionReadinessUpdate) isExecUpdate()     {}
+func (ProtectionWarningsUpdate) isExecUpdate()    {}
 func (FlattenPendingUpdate) isExecUpdate()        {}
 func (StatusUpdate) isExecUpdate()                {}
 func (HeldStopLimitAckUpdate) isExecUpdate()      {}

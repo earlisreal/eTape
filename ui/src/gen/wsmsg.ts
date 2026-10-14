@@ -351,12 +351,19 @@ export interface VenueStatus {
   connected: boolean;
   reconcilePending: boolean;
   positionDataReady: boolean;
+  protectionWarnings?: ProtectionWarning[];
   flattenPending: boolean;
   note: string;
   lastReconcileMs: number | null;
   gate: GateLimitsView;
   heldStopLimitAcknowledged?: boolean;
   heldLimitIfTouchedAcknowledged?: boolean;
+}
+export interface ProtectionWarning {
+  symbol: string;
+  qty: number /* float64 */;
+  reason: string;
+  state: string;
 }
 export interface ExecStatus {
   masterArmed: boolean;

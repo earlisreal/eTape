@@ -40,6 +40,18 @@ original dollar budget with the reviewed quantity as a ceiling, and lock quantit
 held and entry phases so activation during a drag rejects a stale amendment.
 Protection failures and DAY expiry can leave shares open; the UI reports them.
 
+Protection warnings live in the selected Account panel, once per symbol.
+They use current broker-verified positions, rather than the historical entry
+minus linked-exit sum. Unresolved problems trigger a five-second, read-only
+broker snapshot, coalesced per venue and retried/rechecked every 15 seconds.
+Concurrent order/position changes invalidate a result; failed checks remain
+unverified. These observational snapshots never synchronize, resume, or
+activate risk protection or restore a disrupted broker stream's readiness gate.
+A confirmed flat or reversed position durably records
+the entry's cumulative filled quantity, preserving its failure details while
+retiring that exposure's warning. A later trade cannot revive it; additional
+late entry fills can create a fresh warning.
+
 An EXTENDED DAY STOP_LIMIT submitted during pre/postmarket is persisted as one
 engine-held parent order; no venue order or buying-power reservation exists
 before trigger. Only fresh Last-Eligible prints can trigger it. On trigger, the

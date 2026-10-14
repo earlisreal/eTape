@@ -63,7 +63,12 @@ Submitted linked markers always request edits on release, showing updated shares
 on hover and an above-budget warning after activation. Waiting linked protection
 shows planned shares; deferred position sizing shows its percentage until the
 trigger determines actual shares. Cancel Protection leaves
-filled shares open; interruptions and expiry appear as chart warnings.
+filled shares open. Current protection problems appear once per symbol in the
+selected Account panel across its tabs, using broker-verified position quantities.
+The engine automatically checks unresolved problems; pending/failed checks show
+checking/unverified text and retry automatically. Confirmed-flat exposure stays
+resolved through restart and later trades, while new late fills remain visible.
+Unavailable position data shows `Positions (?)`. No manual Refresh is required.
 Cash % and BP % configure loss budgets, excluding fees and execution risk.
 
 Built-in and newly added symbol-bearing panels start unassigned. General Layout downloads preserve workspace structure and non-symbol settings while removing panel and Link Group focused symbols; Monitoring Sync intent remains enabled but imports paused without a portable Scanner Source. Existing saved workspaces and downloaded files are left untouched.

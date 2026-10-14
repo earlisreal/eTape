@@ -32,6 +32,12 @@ function mount(orders: Order[] = [base], config?: OrderConfig) {
 beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.spyOn(document, "hasFocus").mockReturnValue(true); });
 
 describe("ChartOrderMarkers", () => {
+  it("does not show historical protection warnings over charts", () => {
+    mount([{ ...base, status:"FILLED", executedQty:3, leavesQty:0,
+      riskEntry:{stopId:"closed-stop",budget:10,mode:"Dollar",buyCushion:{value:0,unit:"$"},sellCushion:{value:0,unit:"$"},failure:"protection interrupted"} }]);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText(/shares remain/)).toBeNull();
+  });
   it("drags the nearest plot line through the existing replace path and ignores other pointers", async () => {
     const {host,sendCommand} = mount([base,{...base,id:"near",side:"SELL",limitPrice:105}]);
     fireEvent.pointerMove(host,{pointerId:1,clientX:100,clientY:194});

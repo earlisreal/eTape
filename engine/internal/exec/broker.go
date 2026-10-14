@@ -131,6 +131,8 @@ type BrokerSnapshot struct {
 	Account   AccountSnapshot
 	Positions []Position
 	Orders    []Order
+	// Observational checks must not synchronize or activate risk protection.
+	observational bool
 }
 
 func (BrokerConnUp) isBrokerEvent()          {}

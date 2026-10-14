@@ -8,6 +8,7 @@ Approved, implementation pending:
 
 Implemented:
 
+- [Account protection verification](2026-10-14-account-protection-verification.md)
 - [Tick recording for wick investigations and future order-flow charts](2026-10-08-tick-recording.md)
 
 ## Completion checklist

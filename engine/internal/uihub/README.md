@@ -1,5 +1,11 @@
 # UI Hub
 
+`exec.status` includes optional per-venue `protectionWarnings`, projected by
+Core with verified current quantities or checking/unverified state. Account
+renders this single projection without joining independently coalesced order
+and position frames. Empty warning lists retire resolved alerts for current
+and late subscribers.
+
 Config commands include typed `GetConfig`, `SetConfig`, and `DeleteConfig`; the workspace catalog remains a UI-owned versioned document in the existing config store. `SetWindowState` records each browser workspace's changed-only bounds in the per-database `window-state.v1` document. A connection's first registration returns existing saved bounds before accepting later geometry updates, so a cold-restored browser cannot overwrite its intended monitor placement with Chromium's startup position. Connection ownership removes a manually disconnected workspace only after its last connection closes; engine shutdown leaves the final open set available for the next cold launch.
 
 Venue instrument eligibility, locate, quote, list, and recovery reads are UIHub

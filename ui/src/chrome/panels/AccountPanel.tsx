@@ -559,6 +559,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   const { venue, venues, selectVenue } = useVenueSelection(group, linkGroups, stores);
   useAccountDemand(commands, config.id, group === null ? "" : venue);
   const status = stores.exec.status();
+  const venueStatus = status?.venues.find((v) => v.venue === venue);
   const { config: orderConfig } = useOrderConfig();
   const extBufferPct = orderConfig.extHoursMarketBufferPct ?? 1;
   // Portaled into PanelFrame's ledger-header actions slot, beside the close
@@ -650,12 +651,18 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
       {actionsSlot === undefined ? headerActions : actionsSlot ? createPortal(headerActions, actionsSlot) : null}
       {oldOrders > 0 && <div data-testid="venue-switch-warning" style={{ padding: "3px 8px", color: palette.warn, fontSize: 11 }}>Working orders remain on {previousVenue} ({oldOrders}).</div>}
       <StatsStrip stores={stores} palette={palette} venue={venue} />
+      {(venueStatus?.protectionWarnings ?? []).map((warning) => <div key={warning.symbol} role="alert" data-testid="account-protection-warning"
+        style={{ padding:"4px 8px", fontSize:11, color:palette.warn, borderBottom:`1px solid ${palette.border}` }}>
+        {bareSymbol(warning.symbol)} · {warning.state === "open" && venueStatus?.positionDataReady
+          ? `${formatSize(warning.qty)} shares open`
+          : warning.state === "unverified" ? "Position unverified; retrying automatically" : "Checking broker positions"} · {warning.reason}
+      </div>)}
       <OrdersTable stores={stores} oc={oc} palette={palette} config={config} onConfigChange={onConfigChange} venue={venue} height={ordersHeight} availableWidth={width} />
       <div data-testid="orders-resize-handle" onMouseDown={startResize}
         style={{ height: 4, cursor: "row-resize", background: palette.border, flexShrink: 0 }} />
       <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
         <div style={{ display: "flex", alignItems: "center", borderBottom: `1px solid ${palette.border}`, background: palette.surface }}>
-          {tabBtn(`Positions (${positionsCount})`, activeTab === "positions", () => selectTab("positions"))}
+          {tabBtn(`Positions (${venue && !venueStatus?.positionDataReady ? "?" : positionsCount})`, activeTab === "positions", () => selectTab("positions"))}
           {tabBtn("Trade History", activeTab === "history", () => selectTab("history"))}
           {tabBtn("Fills", activeTab === "fills", () => selectTab("fills"))}
           <div style={{ flex: 1 }} />

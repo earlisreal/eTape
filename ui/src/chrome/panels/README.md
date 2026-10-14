@@ -12,6 +12,11 @@ backfills `QueryCycleFills` and merges deduplicated live `exec.fills`. Panels
 acquire/release topics and symbol demand; data stays in stores/controllers.
 The Account panel shows live selected-venue Cash between Equity and Buying
 Power; only Equity and Buying Power use the flat-position hold behavior.
+Account also shows the engine's venue-scoped protection warnings across every
+tab. Verified warnings use the current broker position quantity; pending or
+failed automatic checks remain visibly checking/unverified. Position counts
+show `?` while their baseline is unavailable. Charts omit historical protection
+quantity banners; normal order markers and immediate action feedback remain.
 [Account tables](./AccountPanel.tsx) persist independent column widths per
 table; drag a header separator to resize and double-click it to auto-fit. The
 widths are shared when switching the selected venue, then scale proportionally

@@ -23,6 +23,7 @@ type RiskEntry struct {
 	Closing            bool         `json:"closing,omitempty"`
 	ProtectionCanceled bool         `json:"protectionCanceled,omitempty"`
 	Failure            string       `json:"failure,omitempty"`
+	FlatConfirmedQty   float64      `json:"flatConfirmedQty,omitempty"`
 }
 
 type SubmitRiskEntry struct {

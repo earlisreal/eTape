@@ -1,5 +1,10 @@
 # End-to-End Tests
 
+Account scenarios cover compact columns and protection warning status frames.
+Verified warnings remain visible across Account tabs, failed verification shows
+unverified text, and a resolved exposure removes the warning. These fixtures use
+the isolated demo server and intercepted WebSocket frames.
+
 The chart layout regression verifies compact side-colored axis chips, hover
 retention, separate BUY/SELL groups, same-side choosers and nearby-price spacing.
 Risk setup covers native tooltips without risk amounts, theme colors, axis

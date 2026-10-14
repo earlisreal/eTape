@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import type { Order } from "../src/wire/contract";
+import type { Order, ProtectionWarning } from "../src/wire/contract";
 
 async function expectNoHorizontalOverflow(locator: Locator, name: string): Promise<void> {
   const metrics = await locator.evaluate((table) => ({
@@ -12,10 +12,47 @@ async function expectNoHorizontalOverflow(locator: Locator, name: string): Promi
 async function addAccountPanel(page: Page, waitForLatency = true): Promise<void> {
   await page.goto("/?workspace=e2e-account-columns");
   if (waitForLatency) await expect(page.getByTestId("latency-readout")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId("demo-banner")).toBeVisible();
+  await expect(page.getByTestId("boot-status-banner")).toHaveCount(0, { timeout:15_000 });
   await page.getByRole("button", { name: "+ Add panel" }).click();
   await page.getByRole("button", { name: /Account Equity, BP, day P&L/ }).last().click();
   await expect(page.getByTestId("acct-equity")).toBeVisible({ timeout: 15_000 });
 }
+
+test("Account keeps protection warnings visible across tabs and clears resolved exposure", async ({ page }) => {
+  let warnings: ProtectionWarning[] = [{ symbol:"US.AAPL", qty:2, reason:"Protection interrupted", state:"open" }];
+  let publishWarnings: (() => void) | undefined;
+  await page.routeWebSocket("**/ws", (socket) => {
+    const server = socket.connectToServer();
+    server.onMessage((message) => {
+      if (typeof message !== "string") { socket.send(message); return; }
+      const frame = JSON.parse(message);
+      if (frame.topic === "exec.status") {
+        const publish = () => {
+          const venues = frame.payload.venues.map((v: { venue:string }) => ({ ...v, protectionWarnings:v.venue === "sim-paper" ? warnings : [] }));
+          socket.send(JSON.stringify({ ...frame, payload:{ ...frame.payload, venues } }));
+        };
+        publishWarnings = publish;
+        publish();
+      } else socket.send(message);
+    });
+  });
+  await addAccountPanel(page);
+  await page.getByRole("button", { name:"link group", exact:true }).click();
+  await page.getByRole("button", { name:"Blue group", exact:true }).click();
+  await page.getByTestId("acct-venue").selectOption("sim-paper");
+  const alert = page.getByTestId("account-protection-warning");
+  await expect(alert).toHaveText("AAPL · 2 shares open · Protection interrupted");
+  await page.getByRole("button", { name:"Trade History", exact:true }).click();
+  await expect(alert).toBeVisible();
+  await page.screenshot({ path:".playwright-mcp/account-protection-warning.png" });
+  warnings = [{ symbol:"US.AAPL", qty:0, reason:"Protection interrupted", state:"unverified" }];
+  publishWarnings?.();
+  await expect(alert).toContainText("Position unverified; retrying automatically");
+  warnings = [];
+  publishWarnings?.();
+  await expect(alert).toHaveCount(0);
+});
 
 test("account columns do not create horizontal overflow when they fit", async ({ page }) => {
   await addAccountPanel(page);

@@ -134,21 +134,23 @@ type Core struct {
 	state *State
 	marks markState
 
-	trades           *RoundTripAggregator
-	positionOpens    *RoundTripAggregator
-	cycles           *cycleProjection
-	closed           *closedOrders
-	heldDemand       HeldDemandController
-	printHealthy     bool
-	lastPrintGapMs   int64
-	lastPrintSeq     map[string]int64
-	lastPrintDay     map[string]int64
-	lastEligible     map[string]EligiblePrint
-	heldLiveIdentity map[VenueID]string
-	heldLiveAck      map[VenueID]string
-	heldLiveLITAck   map[VenueID]string
-	shutdownHeld     HeldShutdownSummary
-	positionExecIDs  map[string]bool
+	trades             *RoundTripAggregator
+	positionOpens      *RoundTripAggregator
+	cycles             *cycleProjection
+	closed             *closedOrders
+	heldDemand         HeldDemandController
+	printHealthy       bool
+	lastPrintGapMs     int64
+	lastPrintSeq       map[string]int64
+	lastPrintDay       map[string]int64
+	lastEligible       map[string]EligiblePrint
+	heldLiveIdentity   map[VenueID]string
+	heldLiveAck        map[VenueID]string
+	heldLiveLITAck     map[VenueID]string
+	shutdownHeld       HeldShutdownSummary
+	positionExecIDs    map[string]bool
+	protectionChecks   map[VenueID]*protectionCheck
+	protectionRevision map[VenueID]uint64
 }
 
 // CoreConfig configures NewCore.
@@ -209,6 +211,8 @@ func NewCore(cfg CoreConfig) *Core {
 		lastPrintDay:           make(map[string]int64),
 		lastEligible:           make(map[string]EligiblePrint),
 		positionExecIDs:        make(map[string]bool),
+		protectionChecks:       make(map[VenueID]*protectionCheck),
+		protectionRevision:     make(map[VenueID]uint64),
 		heldLiveIdentity:       cloneVenueStrings(cfg.HeldStopLimitLiveIdentity),
 		heldLiveAck:            cloneVenueStrings(cfg.HeldStopLimitAcknowledged),
 		heldLiveLITAck:         cloneVenueStrings(cfg.HeldLimitIfTouchedAcknowledged),
@@ -413,6 +417,9 @@ func (c *Core) Recover(ctx context.Context) error {
 			}
 		}
 		c.state.ReconcileExternalOpenOrders(v, externalOrders)
+		if err := c.confirmFlatRiskEntries(v, ""); err != nil {
+			return err
+		}
 		c.maybeClearFlattenPending(v)
 	}
 	if hs, ok := c.store.(orderHistoryByIDStore); ok {
@@ -527,6 +534,12 @@ func (c *Core) Recover(ctx context.Context) error {
 		}
 	}
 	c.syncRiskVenue(ctx, "")
+	for _, v := range c.venues {
+		if c.state.PositionsReady(v) {
+			c.protectionChecks[v] = &protectionCheck{verified: true, revision: c.protectionRevision[v], nextMs: c.now() + protectionCheckInterval.Milliseconds()}
+		}
+	}
+	c.refreshProtectionWarnings(ctx)
 	for _, row := range c.closed.snapshotSince(cutoffMs) {
 		c.emit(ClosedOrderUpdate{ClosedOrder: row})
 	}
@@ -656,6 +669,7 @@ func (c *Core) Run(ctx context.Context) error {
 			return ctx.Err()
 		case req := <-c.cmds:
 			req.reply <- c.handleCmd(ctx, req.cmd)
+			c.refreshProtectionWarnings(ctx)
 		case be := <-c.bevents:
 			c.handleBrokerEvent(ctx, be)
 		case m := <-c.markCh:
@@ -675,6 +689,7 @@ func (c *Core) Run(ctx context.Context) error {
 			req.reply <- preview
 		case <-heldTimer.C():
 			c.expireHeldOrders(ctx)
+			c.refreshProtectionWarnings(ctx)
 		case <-cycleTimer:
 			c.rollCycle()
 			cycleTimer = c.clk.After(session.NextTradingCycleStart(c.clk.Now()).Sub(c.clk.Now()))
@@ -761,6 +776,7 @@ func (c *Core) appendAndFold(ev Event, src Source) error {
 		_, hadPrior = c.state.OrderVenue(filled.F.OrderID)
 	}
 	c.state.Apply(ev)
+	c.protectionRevision[ev.Venue()]++
 	if filled, ok := ev.(OrderFilled); ok {
 		c.applyPositionFill(filled, prior, hadPrior)
 	}
@@ -1431,8 +1447,11 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		case BrokerActionOutcome:
 			c.riskBrokerEvent(ctx, e.OID)
 		}
+		c.refreshProtectionWarnings(ctx)
 	}()
 	switch e := be.(type) {
+	case protectionCheckResult:
+		c.finishProtectionCheck(ctx, e)
 	case HeldActivationOutcome:
 		before := c.order(e.OID)
 		if before.Held == nil || before.Held.ChildClientID == "" ||
@@ -1541,12 +1560,16 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 			c.emitStatus()
 		}
 	case BrokerPositions:
+		c.protectionRevision[e.V]++
 		previous := make(map[string]Position, len(c.state.Venue(e.V).Positions))
 		for symbol, p := range c.state.Venue(e.V).Positions {
 			previous[symbol] = p
 		}
 		c.positionOpens.reconcilePositions(e.V, e.Positions)
 		c.state.ReconcilePositions(e.V, e.Positions)
+		if err := c.confirmFlatRiskEntries(e.V, ""); err != nil {
+			c.syslog("exec.protection", err.Error())
+		}
 		seen := make(map[string]bool, len(e.Positions))
 		for _, p := range e.Positions {
 			p.Venue = e.V
@@ -1564,10 +1587,15 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 			return
 		}
 		c.state.ReconcilePosition(p)
+		c.protectionRevision[p.Venue]++
+		if err := c.confirmFlatRiskEntries(p.Venue, p.Symbol); err != nil {
+			c.syslog("exec.protection", err.Error())
+		}
 		c.emitProjectedPosition(p)
 		c.maybeClearFlattenPending(p.Venue)
 	case BrokerPositionEffect:
 		if c.applyPositionEffect(e) {
+			c.protectionRevision[e.Venue]++
 			position := c.state.Venue(e.Venue).Positions[e.Symbol]
 			position.Venue, position.Symbol = e.Venue, e.Symbol
 			c.emitProjectedPosition(position)
@@ -1576,11 +1604,13 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		if e.Order.ID == "" {
 			return
 		}
+		c.protectionRevision[e.Venue]++
 		if _, known := c.state.OrderVenue(e.Order.ID); !known && !c.closed.hasSeed(e.Order.ID) && !isEngineOrderID(e.Order.ID) {
 			c.state.SetExternalOrder(e.Venue, e.Order, e.Working)
 		}
 		c.maybeClearFlattenPending(e.Venue)
 	case BrokerOpenOrders:
+		c.protectionRevision[e.V]++
 		local, external := make([]Order, 0, len(e.Orders)), make([]Order, 0, len(e.Orders))
 		for _, o := range e.Orders {
 			o.Venue = e.V
@@ -1608,6 +1638,7 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		if v == "" {
 			v = e.Account.Venue
 		}
+		c.protectionRevision[v]++
 		acct := e.Account
 		acct.Venue = v
 		c.state.ReconcileAccount(acct)
@@ -1631,6 +1662,9 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		c.state.ReconcileExternalOpenOrders(v, external)
 		for _, o := range local {
 			c.confirmSellSubmit(v, o.ID)
+			if e.observational {
+				c.emit(OrderUpdate{Order: c.order(o.ID)})
+			}
 		}
 		for _, p := range e.Positions {
 			p.Venue = v
@@ -1641,14 +1675,21 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 			c.emitProjectedPosition(Position{Venue: v, Symbol: symbol})
 		}
 		c.emitProjectedAccount(v)
-		c.setPositionsReady(v, true)
-		c.syncRiskVenue(ctx, v)
+		if !e.observational {
+			c.setPositionsReady(v, true)
+			if err := c.confirmFlatRiskEntries(v, ""); err != nil {
+				c.syslog("exec.protection", err.Error())
+			}
+			c.syncRiskVenue(ctx, v)
+		}
 		c.maybeClearFlattenPending(v)
 	case BrokerConnUp:
+		c.protectionRevision[e.V]++
 		c.setPositionsReady(e.V, false)
 		c.pauseHeldVenue(e.V, "venue connection is reconciling; reconcile and resume manually")
 		c.emit(StatusUpdate{Venue: e.V, Connected: true, MasterArmed: c.state.MasterArmed})
 	case BrokerConnDown:
+		c.protectionRevision[e.V]++
 		c.printHealthy = false
 		c.setPositionsReady(e.V, false)
 		c.pauseHeldVenue(e.V, "venue connection lost; reconcile and resume manually")
