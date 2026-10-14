@@ -61,7 +61,8 @@ only the first BUY, clicking an endpoint without moving it, and keyboard draft
 edits do not auto-send. Enter remains available for manual submission.
 Both paths refresh the route and revalidate account, position and execution
 checks. Missing or stale eligible trades allow the engine to accept the pair;
-its chart marker shows `Waiting for market data` until a fresh trade arrives.
+its chart marker's hover details show `Waiting for market data` until a fresh
+trade arrives; no waiting label covers the chart.
 A trusted fresh trade that already meets BUY can activate immediately. Otherwise
 the accepted entry waits for a qualifying fresh trade until normal expiry or
 cancellation. A failed route query or another admission blocker retains the

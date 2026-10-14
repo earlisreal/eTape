@@ -57,10 +57,11 @@ Auto-send applies to completing placement and releasing a moved endpoint of a
 completed draft. An unchanged click, incomplete pair, or keyboard draft edit does
 not auto-send. Enter and auto-send share route refresh and execution validation;
 eligible-print age does not block acceptance. Missing or stale trades leave the
-durable pair waiting in the engine; the chart marker and tooltip expose its
-`Waiting for market data` reason. Only a trusted recent trade can produce the
-immediate-trigger warning or activate the entry. Accepted orders keep waiting
-for a fresh qualifying trade until normal expiry or cancellation.
+durable pair waiting in the engine; the chart marker's tooltip exposes its
+`Waiting for market data` reason without a label over the chart. Only a trusted
+recent trade can produce the immediate-trigger warning or activate the entry.
+Accepted orders keep waiting for a fresh qualifying trade until normal expiry
+or cancellation.
 Failed route refreshes and other blockers retain the draft with a visible reason
 for Enter or a completed price correction. Busy or unknown outcomes cannot submit
 again. Store updates do not retry submissions, and feed/restart pauses retain
