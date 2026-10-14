@@ -47,4 +47,23 @@ Risk Entry previews remain at the actual candidate price, bounded at pane edges.
   browser coverage for this presentation change.
 - Hosted CI is a post-push gate; its final run/result is reported in the handoff.
 
+## Hosted CI repair
+
+The first implementation run passed UI and Windows engine jobs, but Linux's
+race-enabled `TestForegroundRequestOvertakesQueuedScannerWork` timed out while
+waiting for a background request after fake-clock advancement. Engine code and
+workflow configuration were unchanged from the previously green plan commit.
+The same failure reproduced locally twice in 30 race-enabled repetitions.
+
+The test advanced its fake clock concurrently with the pacer's separate `Now`
+and `After` calls. Advancing between those calls registers a timer relative to
+the later fake time, beyond the test's final advance. Test clock advancement now
+holds the pacer mutex, matching the timer-registration critical section. Its
+foreground precedence and reserved-spacing assertions remain intact.
+
+The repaired test passed 1,000 race-enabled repetitions, followed by the full
+engine suite, race-enabled short suite, vet, and lint. Standards and spec reviews
+found no remaining issues. This CI repair is a separate test-only commit;
+the final hosted CI result is reported in the handoff.
+
 All order commands used by validation are simulated. No live orders are involved.

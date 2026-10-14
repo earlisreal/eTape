@@ -106,6 +106,12 @@ func TestForegroundRequestOvertakesQueuedScannerWork(t *testing.T) {
 	start := time.Date(2026, 10, 3, 4, 0, 0, 0, time.UTC)
 	clk := clock.NewFake(start)
 	pacer := newRequestPacer(clk)
+	advance := func(d time.Duration) {
+		// Keep advancement outside the pacer's Now/After timer-registration gap.
+		pacer.mu.Lock()
+		clk.Advance(d)
+		pacer.mu.Unlock()
+	}
 	pacer.readyAt = start.Add(10 * time.Second)
 	backgroundDone := make(chan error, 1)
 	go func() {
@@ -115,7 +121,7 @@ func TestForegroundRequestOvertakesQueuedScannerWork(t *testing.T) {
 	foregroundDone := make(chan error, 1)
 	go func() { foregroundDone <- pacer.waitPriority(context.Background(), "snapshot", time.Second, false) }()
 	waitForPacerQueue(t, pacer, 2)
-	clk.Advance(10 * time.Second)
+	advance(10 * time.Second)
 	select {
 	case err := <-foregroundDone:
 		if err != nil {
@@ -129,7 +135,7 @@ func TestForegroundRequestOvertakesQueuedScannerWork(t *testing.T) {
 		t.Fatalf("Scanner request passed the foreground request: %v", err)
 	default:
 	}
-	clk.Advance(time.Second)
+	advance(time.Second)
 	select {
 	case err := <-backgroundDone:
 		if err != nil {
