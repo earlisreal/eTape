@@ -426,8 +426,11 @@ prototypes/ Python research scripts (latency benchmarks, tick aggregation, …)
 ### CI-equivalent validation on Windows
 
 The executable source of truth is [.github/workflows/ci.yml](.github/workflows/ci.yml).
-Use the checklist below for the same locally applicable checks; if this list
-drifts from the workflow, follow the workflow and update this guide.
+Follow [AGENTS.md](AGENTS.md#validation) for focused local checks and hosted CI
+requirements. Full hosted CI continues to run on every push to `main` and
+every pull request. The checklist below is available for broader local
+verification and CI failure diagnosis; if it drifts from the workflow, follow
+the workflow and update this guide.
 
 Install the pinned linter once, then verify it before using the fast command:
 
@@ -437,8 +440,8 @@ Get-Command golangci-lint
 golangci-lint version
 ```
 
-The reported version must be `2.12.2`. From the repository root, run the
-CI-equivalent suite:
+The reported version must be `2.12.2`. To run the full local CI-equivalent suite,
+start from the repository root:
 
 ```powershell
 Set-Location engine
@@ -461,13 +464,15 @@ git diff --check
 
 Native Windows `go test -race` requires the existing [MSYS2 UCRT64
 toolchain](#race-tests-with-mingw-w64). The UI E2E suite (`npm run e2e`) is an
-additional proportional check, not a step in the current CI workflow. Before
-handoff, verify that `git ls-files --eol '*.go'` reports LF worktree files,
-`ui/src/gen/wsmsg.ts` has no generated drift, and no credentials or runtime
-data were introduced. List every check run and every skipped required check
-with its reason; hosted CI remains authoritative for the exact Ubuntu
-environment, and one complete hosted run must pass after pushing recovery
-changes.
+additional proportional check, not a step in the current CI workflow. For Go
+changes, verify that changed files use LF line endings; for WebSocket contract
+changes, verify that `ui/src/gen/wsmsg.ts` has no generated drift. Before every
+handoff, run `git diff --check`, verify that no credentials or runtime data were
+introduced, and list checks run and results plus every skipped required check
+and its reason. Hosted CI remains authoritative for its Ubuntu and Windows
+environments. Prose-only documentation changes need Markdown link validation
+and `git diff --check`; they may be handed off while hosted CI is pending, as
+described in [AGENTS.md](AGENTS.md#validation).
 
 The Go structs are the single source of truth for the engine↔UI protocol —
 `ui/src/gen/wsmsg.ts` is generated, never hand-edited.
