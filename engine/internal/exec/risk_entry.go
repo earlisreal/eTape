@@ -110,13 +110,6 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 	if !riskAccountFresh(c.state, cm.Venue) || account.TsMs <= 0 || c.now()-account.TsMs > 30_000 || account.TsMs > c.now()+1000 {
 		return blocked("fresh account data required")
 	}
-	if !c.printHealthy {
-		return blocked("fresh eligible market data required")
-	}
-	last, hasLast := c.lastEligible[cm.Symbol]
-	if !hasLast || !c.freshEligiblePrint(last) {
-		return blocked("fresh eligible market data required")
-	}
 	if identity := c.heldLiveIdentity[cm.Venue]; identity != "" && c.heldLiveAck[cm.Venue] != identity {
 		return blocked("live engine-held stop-limit requires account acknowledgement")
 	}
@@ -179,12 +172,28 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 			return blocked("execution ticker unavailable: " + err.Error())
 		}
 	}
+	if deadline <= c.now() {
+		c.releaseHeld(entry.ID)
+		c.releaseHeld(stop.ID)
+		return blocked("risk entry session expired while acquiring ticker")
+	}
+	if c.now()-account.TsMs > 30_000 {
+		c.releaseHeld(entry.ID)
+		c.releaseHeld(stop.ID)
+		return blocked("fresh account data required")
+	}
+	// Subscription acquisition can outlast a cached trade's freshness window.
+	last, hasLast := c.lastEligible[cm.Symbol]
+	fresh := c.printHealthy && hasLast && c.freshEligiblePrint(last)
+	if !fresh {
+		entry.Held.PausedReason = "Waiting for market data"
+	}
 	if err := c.appendAndFold(RiskEntryChanged{Entry: entry, Stop: stop}, SrcLocal); err != nil {
 		c.releaseHeld(entry.ID)
 		c.releaseHeld(stop.ID)
 		return blocked("event append failed: " + err.Error())
 	}
-	if StopLimitTriggered(SideBuy, last.Price, entry.StopPrice) {
+	if fresh && c.freshEligiblePrint(last) && deadline > c.now() && StopLimitTriggered(SideBuy, last.Price, entry.StopPrice) {
 		c.activateHeld(ctx, entry)
 	}
 	return CmdAck{Accepted: true, OrderID: entry.ID}

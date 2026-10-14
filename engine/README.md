@@ -38,6 +38,9 @@ the live-account acknowledgement is separate from stop-limit enablement.
 
 Chart Risk Entry links two engine-held STOP_LIMITs through scheduled DataClose,
 sizes shares from a saved risk budget, and protects only confirmed entry fills.
+Acceptance requires fresh account data and successful ticker subscriptions;
+missing or stale trades leave the accepted entry waiting for a fresh eligible
+trigger print. Immediate activation rechecks print freshness after subscription.
 See the [execution core guide](internal/exec/README.md) for partial/late fills,
 disarm, cancellation, recovery and phase-checked chart amendments.
 

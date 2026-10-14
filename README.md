@@ -55,6 +55,8 @@ and the broker of your choice for execution, and everything else is free and ope
 - **Chart Risk Entry.** A preset hotkey starts a two-point buy/stop tool on the
   active grouped chart. Dollar, Cash %, or BP % loss budgets size linked
   engine-held stop-limit orders; both prices can be adjusted from the chart.
+  Optional auto-send accepts the pair on placement or a completed draft drag;
+  missing recent trades leave it waiting in the engine for a fresh trigger.
 - **Safety-gated by default.** Zero venues are configured out of the box. Every order
   must pass a two-layer risk gate (global caps + per-venue caps: max day loss, order
   value, position size, open orders), and the eTape master execution switch must be

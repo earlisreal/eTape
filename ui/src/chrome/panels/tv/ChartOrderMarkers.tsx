@@ -101,7 +101,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
         : `${marker.order.leavesQty.toLocaleString("en-US")} shares`;
     const limit = risk.limit ?? (marker.kind === "limit" ? price : marker.order.limitPrice);
     const type = marker.kind === "limit" ? "LIMIT" : marker.kind === "limit-if-touched" ? "LIT" : "STOP-LIMIT";
-    return `${quantity}\n${marker.order.side} ${type} · limit ${priceText(limit)}\n${marker.order.held && marker.kind !== "limit" ? "Held by eTape · " : ""}${marker.order.riskEntry ? "Risk Entry · " : marker.order.riskEntryId ? "Linked Protection · " : ""}${marker.phase || marker.order.status}`;
+    return `${quantity}\n${marker.order.side} ${type} · limit ${priceText(limit)}\n${marker.order.held && marker.kind !== "limit" ? "Held by eTape · " : ""}${marker.order.riskEntry ? "Risk Entry · " : marker.order.riskEntryId ? "Linked Protection · " : ""}${marker.phase || marker.order.status}${marker.order.held?.pausedReason ? ` · ${marker.order.held.pausedReason}` : ""}`;
   };
 
   const layout = () => {
@@ -395,7 +395,8 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       const opacity = first.phase === "PAUSED" || action?.kind === "cancel" ? 0.48 : 1;
       const phaseWarning = first.phase === "ACTIVATING" || first.phase === "UNKNOWN" || first.phase === "CANCEL_REQUESTED";
       const status = action ? action.outcome === "unknown" ? "UNKNOWN — verify Orders" : action.kind === "cancel" ? "CANCEL REQUESTED" : "MODIFY REQUESTED"
-        : phaseWarning || first.phase === "PAUSED" ? first.phase : riskProposal(first, first.price).aboveBudget ? "ABOVE ORIGINAL BUDGET" : "";
+        : phaseWarning || first.phase === "PAUSED" ? first.phase : riskProposal(first, first.price).aboveBudget ? "ABOVE ORIGINAL BUDGET"
+          : first.order.riskEntry && first.phase === "WAITING" ? first.order.held?.pausedReason ?? "" : "";
       const ids = group.markers.map((m) => m.order.id);
       const chosen = chooser === group.key || !!lineChooser?.includes(first.order.id) && lineChooser[0] === first.order.id;
       const choices = lineChooser ? groups.flatMap(g => g.markers).filter(marker => lineChooser.includes(marker.order.id)) : group.markers;
@@ -420,7 +421,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
             aria-label={first.order.riskEntryId?"Cancel Protection":`Cancel ${orderTitle(first)}`} title={first.order.riskEntryId?"Cancel Protection — cancels remaining buy and linked sells; leaves shares open":`Cancel ${orderTitle(first)}`} onClick={() => void cancelOrder(first)}
             style={{ border:0, borderLeft:`1px solid ${color}`, background:"transparent", color:"inherit", height:"100%", padding:"0 5px", cursor:"pointer", font:"bold 12px system-ui" }}>×</button>}
         </div>
-        <div data-order-status data-status={status} style={{display:status ? "block" : "none",position:"absolute",right:props.rightAxisWidth + 4,top:stackIndex * 20 + 12,color:"#ff9d72",background:"#0c1017",fontSize:10}}>{status}</div>
+        <div data-order-status data-status={status} style={{display:status ? "block" : "none",position:"absolute",right:props.rightAxisWidth + 4,top:stackIndex * 20 + 12,color:first.phase === "WAITING" && status === first.order.held?.pausedReason ? props.chrome.text : "#ff9d72",background:"#0c1017",fontSize:10}}>{status}</div>
         {chosen && choices.length > 1 && <div role="dialog" aria-label="Choose chart order" style={{ position:"absolute", right:props.rightAxisWidth + 6, top:stackIndex * 18 + 14,
           minWidth:185, padding:5, border:`1px solid ${color}`, borderRadius:4, background:"#111821", boxShadow:"0 4px 18px #0008", pointerEvents:"auto" }}>
           {choices.map((marker) => <div key={marker.order.id} style={{ display:"flex", gap:4, alignItems:"center", marginBottom:3 }}>

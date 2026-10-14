@@ -253,7 +253,7 @@ it.each(["drag", "click"] as const)("refreshes an expired initial preview before
     expect(sendCommand.mock.calls.filter(([name]) => name === "SubmitRiskEntry")).toHaveLength(1);
     expect(screen.getByTestId("chart-risk-entry").style.display).toBe("none");
 });
-it.each(["expired", "untrusted"])("keeps an %s setup preview quiet but shows a failed send-time freshness check", async state => {
+it.each(["expired", "untrusted"])("submits an %s market preview on Enter without a freshness blocker", async state => {
     const clock = vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
     const { host, sendCommand, sendQuery, layoutRef } = mount();
     const preview = sendQuery.getMockImplementation()!;
@@ -267,11 +267,6 @@ it.each(["expired", "untrusted"])("keeps an %s setup preview quiet but shows a f
     expect(host.querySelector("[data-risk-status]")?.textContent).toBe("");
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
     sendQuery.mockResolvedValueOnce(initial);
-    fireEvent.keyDown(window, { key: "Enter" });
-    await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe("Fresh eligible market data required."));
-    layoutRef.current();
-    expect(host.querySelector("[data-risk-status]")?.textContent).toBe("Fresh eligible market data required.");
-    expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
     fireEvent.keyDown(window, { key: "Enter" });
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry", expect.anything()));
     expect(screen.getByTestId("chart-risk-entry").style.display).toBe("none");
@@ -291,20 +286,69 @@ it("blocks a failed submission refresh even when the initial preview is fresh, a
     expect(sendQuery).toHaveBeenCalledTimes(3);
     expect(sendCommand.mock.calls.filter(([name]) => name === "SubmitRiskEntry")).toHaveLength(1);
 });
-it.each(["untrusted", "stale"])("blocks %s refreshed market data without retrying automatically", async state => {
+it.each(["missing", "untrusted", "stale"])("auto-sends once with %s refreshed market data", async state => {
     vi.spyOn(Date, "now").mockReturnValue(1_800_000_000_000);
     const { host, sendCommand, sendQuery, stores } = mount(true);
     initiateChartRiskEntry(template);
     await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe(""));
     const initial = await sendQuery.mock.results[0].value;
-    sendQuery.mockResolvedValueOnce({ ...initial, hasTrustedEligiblePrint: state !== "untrusted", lastEligibleTsMs: state === "stale" ? Date.now() - 2001 : Date.now() });
+    sendQuery.mockResolvedValueOnce({ ...initial, hasTrustedEligiblePrint: state === "stale", lastEligibleTsMs: state === "missing" ? 0 : state === "stale" ? Date.now() - 2001 : Date.now() });
     placeRiskPair(host);
-    await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe("Fresh eligible market data required."));
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry", expect.objectContaining({ buyStop: 10, sellStop: 9.8, maxQty: 500 })));
     stores.exec.apply({ kind: "snapshot", topic: "exec.account", payload: { venue: "sim", buyingPower: 100000, availableCash: 100000, tsMs: Date.now() } });
     flushFrames();
     expect(sendQuery).toHaveBeenCalledTimes(2);
+    expect(sendCommand.mock.calls.filter(([name]) => name === "SubmitRiskEntry")).toHaveLength(1);
+    expect(screen.getByTestId("chart-risk-entry").style.display).toBe("none");
+});
+it.each(["buy", "sell"] as const)("auto-sends a completed %s correction only after a moved release", async endpoint => {
+    const { host, stores, sendCommand, sendQuery } = mount(true);
+    initiateChartRiskEntry(template);
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: false, venues: [{ venue: "sim", connected: true, positionDataReady: true }] } });
+    placeRiskPair(host);
+    await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe("Trading is locked. Arm the engine first."));
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { masterArmed: true, venues: [{ venue: "sim", connected: true, positionDataReady: true }] } });
+    flushFrames();
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
-    expect(host.querySelector<HTMLButtonElement>("[data-risk-price='buy']")?.disabled).toBe(false);
+    const pill = host.querySelector(`[data-risk-price='${endpoint}']`)!;
+    const startY = endpoint === "buy" ? 200 : 220, endY = endpoint === "buy" ? 190 : 225;
+    fireEvent.pointerDown(pill, { pointerId: 2, button: 0, clientX: 480, clientY: startY });
+    fireEvent.pointerUp(window, { pointerId: 2 });
+    expect(sendQuery).toHaveBeenCalledTimes(2);
+    fireEvent.pointerDown(pill, { pointerId: 3, button: 0, clientX: 480, clientY: startY });
+    fireEvent.pointerMove(window, { pointerId: 3, clientX: 490, clientY: startY });
+    fireEvent.pointerUp(window, { pointerId: 3 });
+    expect(sendQuery).toHaveBeenCalledTimes(2);
+    fireEvent.pointerDown(pill, { pointerId: 4, button: 0, clientX: 480, clientY: startY });
+    fireEvent.pointerMove(window, { pointerId: 4, clientX: 480, clientY: endY });
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
+    fireEvent.pointerUp(window, { pointerId: 4 });
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry", expect.objectContaining(endpoint === "buy" ? { buyStop: 10.1, sellStop: 9.8, maxQty: 333 } : { buyStop: 10, sellStop: 9.75, maxQty: 400 })));
+    expect(sendCommand.mock.calls.filter(([name]) => name === "SubmitRiskEntry")).toHaveLength(1);
+});
+it("auto-sends after correcting a completed zero-quantity pair to valid prices", async () => {
+    const { host, sendCommand } = mount(true);
+    initiateChartRiskEntry(template);
+    fireEvent.pointerDown(host, { pointerId: 1, button: 0, clientX: 100, clientY: 200 });
+    fireEvent.pointerUp(window, { pointerId: 1 });
+    fireEvent.pointerDown(host, { pointerId: 2, button: 0, clientX: 100, clientY: 190 });
+    fireEvent.pointerUp(window, { pointerId: 2 });
+    await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe("Sell trigger must be below buy trigger."));
+    const pill = host.querySelector("[data-risk-price='sell']")!;
+    fireEvent.pointerDown(pill, { pointerId: 3, button: 0, clientX: 480, clientY: 190 });
+    fireEvent.pointerMove(window, { pointerId: 3, clientX: 480, clientY: 220 });
+    fireEvent.pointerUp(window, { pointerId: 3 });
+    await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry", expect.objectContaining({ buyStop: 10, sellStop: 9.8, maxQty: 500 })));
+});
+it.each(["untrusted", "stale"])("does not claim immediate activation from an %s cached trade", async state => {
+    const { host, sendQuery, layoutRef } = mount();
+    sendQuery.mockResolvedValueOnce({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "RTH", deadlineMs: Date.now() + 100000,
+        hasTrustedEligiblePrint: state !== "untrusted", lastEligiblePrice: 10.1, lastEligibleTsMs: state === "stale" ? Date.now() - 2001 : Date.now() });
+    initiateChartRiskEntry(template);
+    await sendQuery.mock.results[0].value;
+    placeRiskPair(host);
+    layoutRef.current();
+    expect(host.querySelector("[data-risk-status]")?.textContent).not.toContain("BUY WILL TRIGGER NOW");
 });
 it("clears an earlier preview error after a successful refresh", async () => {
     const { host, sendCommand, sendQuery, stores } = mount(true);

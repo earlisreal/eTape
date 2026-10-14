@@ -55,10 +55,18 @@ The readout stays inside the main price pane, follows price-scale changes and
 passes pointer input through. Notional stays hidden. Drag either endpoint or its axis chip to
 adjust; Enter submits and Escape or either draft × discards the entire setup.
 Right-click, focus loss and context changes cancel.
-The global auto-send setting defaults off and applies only to initial setup.
-Enter and initial auto-send both refresh eligible market data before validating
-and submitting. A failed refresh or a current blocker leaves the draft available
-for review and an explicit Enter retry; it never retries automatically.
+The global auto-send setting defaults off. When enabled, completing placement or
+releasing a moved endpoint of a completed draft submits automatically. Adjusting
+only the first BUY, clicking an endpoint without moving it, and keyboard draft
+edits do not auto-send. Enter remains available for manual submission.
+Both paths refresh the route and revalidate account, position and execution
+checks. Missing or stale eligible trades allow the engine to accept the pair;
+its chart marker shows `Waiting for market data` until a fresh trade arrives.
+A trusted fresh trade that already meets BUY can activate immediately. Otherwise
+the accepted entry waits for a qualifying fresh trade until normal expiry or
+cancellation. A failed route query or another admission blocker retains the
+draft with its reason; Enter or a completed price correction starts another
+attempt. Unknown outcomes cannot be resent, and there is no UI retry loop.
 Submitted linked markers always request edits on release, showing updated shares
 on hover and an above-budget warning after activation. Waiting linked protection
 shows planned shares; deferred position sizing shows its percentage until the

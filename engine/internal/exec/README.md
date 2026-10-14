@@ -24,8 +24,14 @@ event. Both triggers stay engine-held through PRE/RTH/POST until scheduled
 DataClose. `SubmitRiskEntry` uses fixed dollars, Cash %, or BP % as a loss budget;
 whole-share sizing uses cushion-adjusted execution limits and the funding cap,
 and `MaxQty` prevents increasing the approved preview. Admission requires fresh
-account/eligible-print data, confirmed flat positions, no other working orders,
-opening gates, and the live held-stop acknowledgement.
+account data, confirmed flat positions, no other working orders, opening gates,
+the live held-stop acknowledgement, and successful ticker subscriptions. Missing
+or stale eligible trades do not block acceptance: the durable entry stays
+WAITING with `Waiting for market data` until a fresh trade arms or activates it.
+Immediate activation requires a healthy, fresh eligible trade checked after
+subscription acquisition; account age and DataClose are rechecked after that
+acquisition too. Existing DataClose expiry and feed/restart pauses
+still apply; no UI retry is needed for a quiet symbol.
 
 The exit covers only this entry's confirmed fills. Stop activation cancels the
 remaining buy; late fills receive separate durable exit children, including

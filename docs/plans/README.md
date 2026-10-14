@@ -8,6 +8,7 @@ Approved, implementation pending:
 
 Implemented:
 
+- [Chart Risk Entry acceptance without a recent trade](2026-10-15-chart-risk-accept-without-ticks.md)
 - [Chart price-label priority](2026-10-14-chart-price-label-priority.md)
 - [Account protection verification](2026-10-14-account-protection-verification.md)
 - [Tick recording for wick investigations and future order-flow charts](2026-10-08-tick-recording.md)

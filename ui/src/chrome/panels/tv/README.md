@@ -52,15 +52,19 @@ SELL is fixed and remain during draft edits. Completed estimates use the same
 quantity cap as submission; invalid/stale sizing shows a placeholder and visible
 blocker. The transparent readout stays within the main pane, tracks chart paint
 and resize, and passes input through. The moving preview hides outside the main
-price pane. Risk Entry retains its existing navigation lock and Enter/auto-send
-rules; submitted-order marker presentation is unchanged.
-Enter and initial auto-send share the submission-time market-data refresh and
-validation path. An expired initial preview cannot prevent that refresh. Failed
-refreshes and current blockers retain the draft with a visible reason, requiring
-an explicit Enter retry. Busy or unknown outcomes cannot submit again.
-The saved preview's eligible-print freshness does not show a warning during
-setup. A failed refreshed send-time check displays the freshness blocker and
-keeps it visible through repaints until the trader explicitly retries.
+price pane. Risk Entry retains its navigation lock and Enter submission.
+Auto-send applies to completing placement and releasing a moved endpoint of a
+completed draft. An unchanged click, incomplete pair, or keyboard draft edit does
+not auto-send. Enter and auto-send share route refresh and execution validation;
+eligible-print age does not block acceptance. Missing or stale trades leave the
+durable pair waiting in the engine; the chart marker and tooltip expose its
+`Waiting for market data` reason. Only a trusted recent trade can produce the
+immediate-trigger warning or activate the entry. Accepted orders keep waiting
+for a fresh qualifying trade until normal expiry or cancellation.
+Failed route refreshes and other blockers retain the draft with a visible reason
+for Enter or a completed price correction. Busy or unknown outcomes cannot submit
+again. Store updates do not retry submissions, and feed/restart pauses retain
+manual Resume.
 Drag either an editable line in the main pane or its price chip; the nearest
 line wins, with a chooser for exact ties. A bound new-order gesture takes
 priority over working-line dragging, and an active risk draft owns its input.

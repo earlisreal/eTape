@@ -32,6 +32,12 @@ function mount(orders: Order[] = [base], config?: OrderConfig) {
 beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.spyOn(document, "hasFocus").mockReturnValue(true); });
 
 describe("ChartOrderMarkers", () => {
+  it("shows an accepted risk entry waiting for market data", () => {
+    const {host} = mount([{...base,type:"STOP_LIMIT",stopPrice:100,held:{phase:"WAITING",deadlineMs:9999999999999,pausedReason:"Waiting for market data"},
+      riskEntry:{stopId:"s",budget:100,mode:"Dollar",buyCushion:{value:0,unit:"$"},sellCushion:{value:0,unit:"$"}}}]);
+    expect(host.querySelector("[data-order-status]")?.textContent).toBe("Waiting for market data");
+    expect(host.querySelector<HTMLButtonElement>("[data-order-price]")?.title).toContain("Waiting for market data");
+  });
   it("keeps resting pill graphics behind cursor labels without duplicating interactive controls", async () => {
     const {host} = mount();
     await waitFor(() => expect(host.querySelector("[data-order-pill-visual]")?.textContent).toBe("B 100.00×"));

@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"errors"
 	"math"
 	"testing"
 	"time"
@@ -9,7 +10,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/clock"
 )
 
-func newRiskCore(t *testing.T) (*Core, *clock.Fake, *heldTestBroker, context.Context) {
+func newRiskCoreWithoutPrint(t *testing.T) (*Core, *clock.Fake, *heldTestBroker, context.Context) {
 	t.Helper()
 	c, clk, b, ctx := newHeldCore(t, time.Date(2026, 10, 6, 14, 0, 0, 0, time.UTC))
 	c.PublishBrokerEvent(BrokerAccount{Account: AccountSnapshot{Venue: "v", BuyingPower: 100000, AvailableCash: 100000, TsMs: clk.Now().UnixMilli()}})
@@ -25,6 +26,12 @@ func newRiskCore(t *testing.T) (*Core, *clock.Fake, *heldTestBroker, context.Con
 			t.Fatal("account refresh missing")
 		}
 	}
+	return c, clk, b, ctx
+}
+
+func newRiskCore(t *testing.T) (*Core, *clock.Fake, *heldTestBroker, context.Context) {
+	t.Helper()
+	c, clk, b, ctx := newRiskCoreWithoutPrint(t)
 	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 9))
 	until := time.Now().Add(time.Second)
 	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
@@ -34,6 +41,193 @@ func newRiskCore(t *testing.T) (*Core, *clock.Fake, *heldTestBroker, context.Con
 		time.Sleep(time.Millisecond)
 	}
 	return c, clk, b, ctx
+}
+
+func TestRiskEntryWaitsForFreshPrint(t *testing.T) {
+	for _, state := range []string{"missing", "stale"} {
+		t.Run(state, func(t *testing.T) {
+			c, clk, broker, ctx := newRiskCoreWithoutPrint(t)
+			if state == "stale" {
+				c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 10.1))
+				until := time.Now().Add(time.Second)
+				for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
+					if time.Now().After(until) {
+						t.Fatal("eligible preview missing")
+					}
+					time.Sleep(time.Millisecond)
+				}
+				clk.Advance(2001 * time.Millisecond)
+			}
+			ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500})
+			if !ack.Accepted {
+				t.Fatalf("%s trade blocked acceptance: %+v", state, ack)
+			}
+			entry := waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
+			if entry.Qty != 500 || entry.Held.PausedReason != "Waiting for market data" {
+				t.Fatalf("waiting risk entry: %+v", entry)
+			}
+			select {
+			case req := <-broker.submits:
+				t.Fatalf("submitted before a fresh trade: %+v", req)
+			default:
+			}
+			clk.Advance(time.Millisecond)
+			c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+			entry = waitHeldOrder(t, c, entry.ID, HeldActivating)
+			if entry.Held.PausedReason != "" {
+				t.Fatalf("waiting reason survived activation: %+v", entry.Held)
+			}
+			select {
+			case req := <-broker.submits:
+				if req.ClientOrderID != entry.ID || req.Type != TypeLimit || req.Qty != 500 {
+					t.Fatalf("triggered child: %+v", req)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("fresh qualifying trade did not activate")
+			}
+		})
+	}
+}
+
+type riskEntryTestDemand struct {
+	heldDemandStub
+	beforeAcquire func()
+	err           error
+}
+
+func (d *riskEntryTestDemand) Acquire(ctx context.Context, id, symbol string) error {
+	if d.beforeAcquire != nil {
+		d.beforeAcquire()
+	}
+	if d.err != nil {
+		return d.err
+	}
+	return d.heldDemandStub.Acquire(ctx, id, symbol)
+}
+
+func TestRiskEntryRechecksFreshPrintAfterTickerAcquisition(t *testing.T) {
+	for _, state := range []string{"fresh", "expired"} {
+		t.Run(state, func(t *testing.T) {
+			c, clk, broker, _ := newRiskCore(t)
+			if state == "expired" {
+				demand := &riskEntryTestDemand{beforeAcquire: func() { clk.Advance(1500 * time.Millisecond) }}
+				if ack := c.Do(ConfigureHeldDemand{Demand: demand}); !ack.Accepted {
+					t.Fatalf("configure delayed subscription: %+v", ack)
+				}
+			}
+			ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 8.9, SellStop: 8.7, Mode: "Dollar", Value: 100, MaxQty: 500})
+			if !ack.Accepted {
+				t.Fatalf("admission: %+v", ack)
+			}
+			if state == "expired" {
+				if current := c.order(ack.OrderID); current.Held.Phase != HeldWaiting {
+					t.Fatalf("expired print activated entry: %+v", current.Held)
+				}
+				entry := waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
+				if entry.Held.PausedReason != "Waiting for market data" {
+					t.Fatalf("expired print did not wait: %+v", entry.Held)
+				}
+				select {
+				case req := <-broker.submits:
+					t.Fatalf("print expired during subscription activated entry: %+v", req)
+				default:
+				}
+			} else {
+				waitHeldOrder(t, c, ack.OrderID, HeldActivating)
+				select {
+				case <-broker.submits:
+				case <-time.After(time.Second):
+					t.Fatal("fresh already-satisfied BUY did not activate")
+				}
+			}
+		})
+	}
+}
+
+func TestRiskEntryWaitingForDataPausesOnFeedGap(t *testing.T) {
+	c, clk, broker, ctx := newRiskCoreWithoutPrint(t)
+	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500})
+	if !ack.Accepted {
+		t.Fatalf("admission: %+v", ack)
+	}
+	waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, EligiblePrint{Gap: true, RecvTsMs: clk.Now().UnixMilli()})
+	paused := waitHeldOrder(t, c, ack.OrderID, HeldPaused)
+	if paused.Held.PausedReason != "eligible-print gap; resume manually" {
+		t.Fatalf("feed gap did not pause custody: %+v", paused.Held)
+	}
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 10.1))
+	until := time.Now().Add(time.Second)
+	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
+		if time.Now().After(until) {
+			t.Fatal("feed did not recover")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	select {
+	case req := <-broker.submits:
+		t.Fatalf("feed recovery silently resumed paused risk entry: %+v", req)
+	default:
+	}
+}
+
+func TestRiskEntryStillRequiresAccountAndTicker(t *testing.T) {
+	for _, blocker := range []string{"account", "ticker"} {
+		t.Run(blocker, func(t *testing.T) {
+			c, clk, broker, _ := newRiskCoreWithoutPrint(t)
+			reason := "fresh account data required"
+			if blocker == "account" {
+				clk.Advance(31 * time.Second)
+			} else {
+				reason = "execution ticker unavailable: offline"
+				if ack := c.Do(ConfigureHeldDemand{Demand: &riskEntryTestDemand{err: errors.New("offline")}}); !ack.Accepted {
+					t.Fatalf("configure failed subscription: %+v", ack)
+				}
+			}
+			ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500})
+			if ack.Accepted || ack.Reason != reason {
+				t.Fatalf("%s gate: %+v", blocker, ack)
+			}
+			select {
+			case req := <-broker.submits:
+				t.Fatalf("blocked risk entry reached broker: %+v", req)
+			default:
+			}
+		})
+	}
+}
+
+func TestRiskEntryRevalidatesAfterTickerAcquisition(t *testing.T) {
+	for _, blocker := range []string{"account", "session"} {
+		t.Run(blocker, func(t *testing.T) {
+			c, clk, broker, _ := newRiskCoreWithoutPrint(t)
+			delay, reason := 16*time.Second, "fresh account data required"
+			if blocker == "session" {
+				delay, reason = 6*time.Hour, "risk entry session expired while acquiring ticker"
+			}
+			demand := &riskEntryTestDemand{beforeAcquire: func() { clk.Advance(delay) }}
+			if ack := c.Do(ConfigureHeldDemand{Demand: demand}); !ack.Accepted {
+				t.Fatalf("configure delayed subscription: %+v", ack)
+			}
+			ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500})
+			if ack.Accepted || ack.Reason != reason {
+				t.Fatalf("%s expired during subscription: %+v", blocker, ack)
+			}
+			demand.mu.Lock()
+			held := len(demand.held)
+			demand.mu.Unlock()
+			if held != 0 {
+				t.Fatalf("failed admission retained %d ticker leases", held)
+			}
+			select {
+			case req := <-broker.submits:
+				t.Fatalf("expired admission reached broker: %+v", req)
+			default:
+			}
+		})
+	}
 }
 
 func TestRiskEntryAdmission(t *testing.T) {

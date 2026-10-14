@@ -115,7 +115,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             }
             return "";
         };
-        const invalid = (requireFreshPrint = true) => {
+        const invalid = () => {
             const p = latest.current, status = p.stores.exec.status(), v = status?.venues.find(v => v.venue === venue);
             if (!p.active || !document.hasFocus() || modalTracker.isOpen() || editable())
                 return "Focus the chart to continue.";
@@ -135,8 +135,6 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return draft?.error ?? "Checking engine trigger source…";
             if (draft.route.reason)
                 return draft.route.reason;
-            if (requireFreshPrint && (!draft.route.hasTrustedEligiblePrint || !draft.route.lastEligibleTsMs || Date.now() - draft.route.lastEligibleTsMs > 2000))
-                return "Fresh eligible market data required.";
             return "";
         };
         const paint = () => {
@@ -150,7 +148,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 bar.style.top = `${Math.max(0, (facade?.paneHeights()[0] ?? host.clientHeight) - 6)}px`;
                 bar.style.right = `${(facade?.priceScaleWidth() ?? 60) + 8}px`;
             }
-            const s = size(), error = invalid(false);
+            const s = size(), error = invalid();
             const qty = s ? draft.complete ? Math.min(draft.maxQty, s.qty) : s.qty : 0;
             const paneHeight = facade?.paneHeights()[0] ?? host.clientHeight;
             const rect = host.getBoundingClientRect();
@@ -236,8 +234,10 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             }
             const status = rootRef.current.querySelector<HTMLElement>("[data-risk-status]");
             if (status) {
+                const route = draft.route, age = route?.lastEligibleTsMs ? Date.now() - route.lastEligibleTsMs : Infinity;
+                const willTrigger = route?.hasTrustedEligiblePrint && age >= 0 && age <= 2000 && draft.buy !== undefined && (route.lastEligiblePrice ?? 0) >= draft.buy;
                 status.textContent = draft.unknown ? "Submit outcome unknown. Verify Orders; this setup cannot be resent." : draft.busy ? "Submitting linked pair…" :
-                    [error, draft.error !== error ? draft.error : "", draft.route?.lastEligiblePrice && draft.buy !== undefined && draft.route.lastEligiblePrice >= draft.buy ? "BUY WILL TRIGGER NOW" : ""].filter(Boolean).join(" · ");
+                    [error, draft.error !== error ? draft.error : "", willTrigger ? "BUY WILL TRIGGER NOW" : ""].filter(Boolean).join(" · ");
                 status.style.display = status.textContent ? "block" : "none";
                 status.style.color = draft.busy ? latest.current.chrome.text : latest.current.chrome.down;
             }
@@ -250,7 +250,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (!draft?.complete || draft.busy || draft.unknown || draft.buy === undefined || draft.sell === undefined)
                 return;
             const current = draft;
-            // Re-query at submit; a stale preview never authorizes a delayed send.
+            // Refresh custody/session at submit; eligible trades govern activation.
             current.busy = true;
             paint();
             try {
@@ -426,17 +426,16 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 return;
             consume(e);
             const completed = !pointer.editing && (pointer.second || pointer.moved);
+            const corrected = pointer.editing && pointer.moved && draft.complete && draft[pointer.endpoint] !== pointer.price;
             if (pointer.editing) hover = null;
             pointer = null;
             if (completed && draft.sell !== undefined) {
                 draft.complete = true;
-                draft.maxQty = size()?.qty ?? 0;
-                paint();
-                if (latest.current.config.chartRiskAutoSend)
-                    void submit();
             }
-            else
-                { draft.maxQty = size()?.qty ?? 0; paint(); }
+            draft.maxQty = size()?.qty ?? 0;
+            paint();
+            if ((completed || corrected) && draft.complete && latest.current.config.chartRiskAutoSend)
+                void submit();
         };
         const key = (e: KeyboardEvent) => {
             if (!draft || editable() || modalTracker.isOpen())
