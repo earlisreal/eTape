@@ -49,14 +49,22 @@ cd ui && npm run e2e
 
 ## Validation
 
-After implementing an approved plan, a substantial change, changes spanning engine and UI,
-or changes to CI, build configuration, dependencies, or generated contracts,
-run the CI-equivalent Windows checklist in [README.md](README.md#ci-equivalent-validation-on-windows).
-The workflow at [.github/workflows/ci.yml](.github/workflows/ci.yml) is the
-executable source of truth if the command lists drift. Small isolated changes
-may use proportional subsystem checks. Every handoff must list checks run and
-results, plus every skipped required check and its reason. Hosted CI must
-complete successfully except for prose-only documentation changes below.
+Use focused local validation for code and executable-input changes, including
+approved plans and substantial changes. Select tests and applicable lint,
+type, and build checks for the affected behavior and callers. Include race
+tests for concurrency/lifecycle changes, `gen-ts-check` for WebSocket contract
+changes, and relevant install/build checks for dependency or build changes.
+Broaden local checks when impact is unclear or failures reveal wider regressions.
+Run `git diff --check` for every task.
+
+Full hosted CI continues to run on every push to `main` and every pull request.
+Before handing off code or executable-input changes, wait for a successful full
+run on the pushed `main` commit and resolve failures. Releases and tags do not
+replace this gate. [.github/workflows/ci.yml](.github/workflows/ci.yml) remains
+the executable source of truth for the full suite; the
+[Windows checklist](README.md#ci-equivalent-validation-on-windows) is available
+for broader local verification and CI failure diagnosis. Every handoff must
+list checks run and results, plus every skipped required check and its reason.
 
 For prose-only documentation changes, including approved plans, specs, and
 tracker files, validate Markdown links and run `git diff --check`. Skip
@@ -79,6 +87,6 @@ After completing any task that changes repository files, including small tasks a
 
 1. Run the required validation and commit only the task's changes in its branch or worktree.
 2. Fetch `origin/main`, integrate upstream changes if needed, and merge the task branch or detached worktree HEAD into local `main`, preserving unrelated work.
-3. Push `main` to `origin` immediately after merging. Before handoff, verify that local and remote `main` contain the task commit and that hosted CI passes, unless the prose-only documentation exception in [Validation](#validation) applies.
+3. Push `main` to `origin` immediately after merging. Before handoff, verify that local and remote `main` contain the task commit and satisfy the hosted CI requirements in [Validation](#validation).
 
 This is standing authorization for commit, merge, and push; no further confirmation is needed. Explicit requests to keep work as a draft, leave changes uncommitted, or defer merging or pushing override this rule.
