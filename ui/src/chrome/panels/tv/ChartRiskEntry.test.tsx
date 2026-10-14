@@ -54,6 +54,16 @@ beforeEach(() => {
     vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
 });
+it("keeps a nearby colored preview at the actual price instead of shifting around a selected pill", async () => {
+    const {host} = mount();
+    initiateChartRiskEntry(template);
+    fireEvent.pointerDown(host, {pointerId:1,button:0,clientX:100,clientY:200});
+    fireEvent.pointerUp(window, {pointerId:1});
+    fireEvent.pointerMove(host, {pointerId:1,clientX:100,clientY:209});
+    flushFrames();
+    expect(host.querySelector<HTMLElement>("[data-risk-preview-price]")?.style.top).toBe("209px");
+    await waitFor(() => expect(host.querySelector("[data-order-pill-visual='buy']")?.textContent).toBe("B 10.00×"));
+});
 it("shows a plain preview price, retains selected pills, and edits the first BUY without completing or sending", async () => {
     const {host,sendCommand,facadeRef} = mount(true);
     fireEvent.pointerMove(host,{pointerId:1,clientX:100,clientY:200});
@@ -82,6 +92,24 @@ it("shows a plain preview price, retains selected pills, and edits the first BUY
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry",expect.anything());
     fireEvent.keyDown(window,{key:"Escape"});
     expect(facadeRef.current.setOrderCrosshair).toHaveBeenLastCalledWith(null);
+});
+it("promotes only the edited draft pill and clears its graphics on context change and disposal", async () => {
+    const {host,changeSymbol,unmount} = mount();
+    initiateChartRiskEntry(template);
+    placeRiskPair(host);
+    await waitFor(() => expect(host.querySelectorAll("[data-order-pill-visual]")).toHaveLength(2));
+    const buy = host.querySelector("[data-risk-price='buy']")!;
+    fireEvent.pointerDown(buy,{pointerId:2,button:0,clientX:480,clientY:200});
+    fireEvent.pointerMove(window,{pointerId:2,clientX:480,clientY:190});
+    flushFrames();
+    expect(host.querySelector<HTMLElement>("[data-order-pill-visual='buy']")?.style.zIndex).toBe("11");
+    expect(host.querySelector<HTMLElement>("[data-order-pill-visual='sell']")?.style.zIndex).toBe("1");
+    fireEvent.pointerUp(window,{pointerId:2});
+    expect(host.querySelector<HTMLElement>("[data-order-pill-visual='buy']")?.style.zIndex).toBe("1");
+    changeSymbol("MSFT");
+    expect([...host.querySelectorAll<HTMLElement>("[data-order-pill-visual]")].every(el => el.style.display === "none")).toBe(true);
+    unmount();
+    expect(host.querySelector("[data-order-pill-layer]")).toBeNull();
 });
 it("moves the SELL line and plain price during a captured initial drag, then restores placed controls on release", () => {
     const {host,facadeRef,sendCommand} = mount();

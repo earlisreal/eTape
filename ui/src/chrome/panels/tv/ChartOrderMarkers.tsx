@@ -8,6 +8,7 @@ import type { Tool } from "../../../render/chart/drawings/interaction";
 import {riskEntrySize} from "../../exec/riskEntry";
 import {resolveLimitCushionPrice} from "../../exec/priceSource";
 import type { TvChrome } from "../../../render/chart/tvTheme";
+import { attachOrderPillLayer } from "./orderPillLayer";
 
 type Pending = { kind: "replace" | "cancel"; price?: number; stop: boolean; confirmedPrice?: number; outcome: "requested" | "unknown" };
 type Drag = { id: string; pointerId: number; marker: ChartOrderMarker; startX: number; startY: number; startPrice: number; price: number; moved: boolean; entryPhase:string; previewQty:number };
@@ -39,6 +40,14 @@ function orderTitle(marker: ChartOrderMarker): string {
 }
 
 export function ChartOrderMarkers(props: Props): JSX.Element {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const pillLayer = useRef<ReturnType<typeof attachOrderPillLayer> | null>(null);
+  useEffect(() => {
+    if (!props.hostRef.current || !rootRef.current) return;
+    const owner = attachOrderPillLayer(props.hostRef.current, rootRef.current);
+    pillLayer.current = owner;
+    return () => { owner.dispose(); pillLayer.current = null; };
+  }, [props.hostRef]);
   const orders=useMemo(()=>Array.from(props.orders),[props.orders]);
   const markers = useMemo(() => chartOrderMarkers(orders, props.venue, props.symbol, props.pinned),
     [orders, props.venue, props.symbol, props.pinned]);
@@ -121,6 +130,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
         confirmedLine.style.top = confirmedY != null && Number.isFinite(confirmedY) && y != null ? `${Math.round(confirmedY - y)}px` : "-10000px";
       }
     }
+    pillLayer.current?.sync();
   };
 
   useEffect(() => {
@@ -169,6 +179,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       const status = row.querySelector<HTMLElement>("[data-order-status]");
       if (status) { status.textContent = proposal.aboveBudget ? "ABOVE ORIGINAL BUDGET" : status.dataset.status ?? ""; status.style.display = status.textContent ? "block" : "none"; }
     }
+    pillLayer.current?.sync();
   };
 
   const cancelDrag = () => {
@@ -181,6 +192,8 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     if (row) { delete row.dataset.proposedPrice; row.querySelector<HTMLElement>("[data-order-price]")?.style.removeProperty("border-color");
       const confirmed = row.querySelector<HTMLElement>("[data-order-confirmed-line]"); if (confirmed) confirmed.style.display = "none"; }
     drag.current = null;
+    pillLayer.current?.drag(null);
+    pillLayer.current?.sync();
     const hostMode = latest.current.hostRef.current;
     if (hostMode?.dataset.orderEntryMode === "order-drag") { delete hostMode.dataset.orderEntryMode; hostMode.style.cursor = ""; hostMode.title = ""; latest.current.facadeRef.current?.setOrderCrosshair?.(null); latest.current.facadeRef.current?.setPanZoomEnabled?.(!latest.current.activeTool || latest.current.activeTool === "select"); }
     setAnnouncement("Price change canceled.");
@@ -224,6 +237,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       entryPhase:(marker.order.riskEntry ? marker.order : Array.from(latest.current.orders).find(o=>o.id===marker.order.riskEntryId))?.held?.childClientId?"ACTIVATED":"WAITING",previewQty:riskProposal(marker,marker.price).qty };
     const row = [...(latest.current.hostRef.current?.querySelectorAll<HTMLElement>("[data-order-group]") ?? [])]
       .find((el) => el.dataset.orderIds?.split(",").includes(marker.order.id));
+    pillLayer.current?.drag(row?.querySelector<HTMLElement>("[data-order-chip]") ?? null);
     const confirmedLine = row?.querySelector<HTMLElement>("[data-order-confirmed-line]");
     const confirmedY = latest.current.facadeRef.current?.priceToCoordinate(marker.price);
     if (confirmedLine && confirmedY != null && Number.isFinite(confirmedY)) {
@@ -294,6 +308,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       const current = drag.current;
       if (!current || event.pointerId !== current.pointerId) return;
       drag.current = null;
+      pillLayer.current?.drag(null);
       const host = latest.current.hostRef.current;
       if (host?.dataset.orderEntryMode === "order-drag") { delete host.dataset.orderEntryMode; host.style.cursor = ""; host.title = ""; latest.current.facadeRef.current?.setOrderCrosshair?.(null); latest.current.facadeRef.current?.setPanZoomEnabled?.(!latest.current.activeTool || latest.current.activeTool === "select"); }
       const row = [...(host?.querySelectorAll<HTMLElement>("[data-order-group]") ?? [])]
@@ -302,6 +317,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
         if (!current.moved || current.price === current.startPrice) { const confirmed = row.querySelector<HTMLElement>("[data-order-confirmed-line]"); if (confirmed) confirmed.style.display = "none"; } }
       if (current.moved && current.price !== current.startPrice) void sendReplace(current.marker, current.price,current.entryPhase,current.previewQty);
       else paintProposal(current.id, current.startPrice, false);
+      pillLayer.current?.sync();
     };
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
@@ -340,7 +356,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     };
   }, []);
 
-  useEffect(()=>{cancelDrag();setChooser(null);setLineChooser(null);},[props.venue,props.symbol,props.pinned,props.activeTool]);
+  useEffect(()=>{cancelDrag();pillLayer.current?.clear();setChooser(null);setLineChooser(null);},[props.venue,props.symbol,props.pinned,props.activeTool]);
 
   const cancelOrder = async (marker: ChartOrderMarker) => {
     setPending((current) => new Map(current).set(marker.order.id, { kind: "cancel", stop: false, outcome: "requested" }));
@@ -369,7 +385,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
 
   const sorted = [...groups].sort((a, b) => a.price - b.price || a.kind.localeCompare(b.kind));
   const stack = new Map<string, number>();
-  return <div data-testid="chart-order-markers" data-drawing-ui="true" style={{ position:"absolute", inset:0, zIndex:8, pointerEvents:"none", overflow:"hidden" }}>
+  return <div ref={rootRef} data-testid="chart-order-markers" data-drawing-ui="true" style={{ position:"absolute", inset:0, zIndex:8, pointerEvents:"none", overflow:"hidden" }}>
     {sorted.map((group) => {
       const stackKey = group.price.toFixed(4);
       const stackIndex = stack.get(stackKey) ?? 0; stack.set(stackKey, stackIndex + 1);
@@ -390,7 +406,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
           background:"repeating-linear-gradient(90deg,var(--order-color) 0 8px,transparent 8px 13px)", pointerEvents:"none" }} />
         <div aria-hidden="true" style={{ position:"absolute", left:0, right:props.rightAxisWidth, top:stackIndex, height:2,
           background:"repeating-linear-gradient(90deg,var(--order-color) 0 8px,transparent 8px 13px)", pointerEvents:"none" }} />
-        <div data-order-chip style={{ position:"absolute", top:stackIndex * 20 - 10, right:0, display:"flex", alignItems:"center", height:20,
+        <div data-order-chip style={{ position:"absolute", opacity:0, top:stackIndex * 20 - 10, right:0, display:"flex", alignItems:"center", height:20,
           boxSizing:"border-box",border:`1px solid ${color}`, borderRadius:3, background:"rgba(12,16,23,.96)", color, pointerEvents:"auto", font:"600 10px ui-monospace,monospace", whiteSpace:"nowrap" }}>
           <button type="button" data-testid={`order-label-${first.order.id}`} data-order-price="true" onPointerDown={(e) => group.markers.length === 1 && startDrag(e, first)}
             onClick={() => { if (group.markers.length > 1) { setLineChooser(null); setChooser(chosen ? null : group.key); } }}

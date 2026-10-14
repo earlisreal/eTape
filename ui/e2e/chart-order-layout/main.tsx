@@ -4,6 +4,7 @@ import { createChart, CandlestickSeries } from "lightweight-charts";
 import { installOrderCrosshair } from "../../src/render/chart/orderCrosshair";
 import { ChartOrderMarkers } from "../../src/chrome/panels/tv/ChartOrderMarkers";
 import { ChartConditionalOrderEntry } from "../../src/chrome/panels/tv/ChartConditionalOrderEntry";
+import { BarCloseTimer } from "../../src/chrome/panels/tv/BarCloseTimer";
 import { OrderConfigProvider, useOrderConfig } from "../../src/chrome/exec/useOrderConfig";
 import { ThemeProvider, useTheme } from "../../src/chrome/ThemeProvider";
 import { initiateChartRiskEntry } from "../../src/chrome/exec/actionTemplate";
@@ -106,11 +107,12 @@ function App() {
   const hostRef = useRef(null), facadeRef = useRef(null), layoutRef = useRef(() => {}), chooserOpenRef = useRef(false);
   const snapshot = useSyncExternalStore(cb => stores.exec.subscribe(cb), () => stores.exec.getSnapshot());
   const [axisWidth, setAxisWidth] = useState(56);
+  const [timer, setTimer] = useState(null);
   useEffect(() => {
     const host = hostRef.current;
     const chart = createChart(host, { width: host.clientWidth, height: host.clientHeight,
       layout: { background: { color: "#f6f7f8" }, textColor: "#111" },
-      rightPriceScale: { minimumWidth: 56 }, timeScale: { timeVisible: true, secondsVisible: true } });
+      crosshair: { mode: 0 }, rightPriceScale: { minimumWidth: 56 }, timeScale: { timeVisible: true, secondsVisible: true } });
     const series = chart.addSeries(CandlestickSeries);
     series.setData(Array.from({ length: 80 }, (_, i) => ({ time: 1790840000 + i * 10, open: 5.3 - i * .01,
       high: 5.4 - i * .01, low: 5.2 - i * .01, close: 5.25 - i * .01 })));
@@ -157,6 +159,7 @@ function App() {
       const order = stores.exec.getSnapshot().orders.get(id);
       stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { ...order, status: "CANCELED" } });
     },
+    setTimerPrice(price) { setTimer(price == null ? null : { price, y:series.priceToCoordinate(price), bottom:chart.panes()[0].getHeight() }); },
     setZoom(range) { chart.timeScale().setVisibleLogicalRange(range); },
     resizePanel(width, height) {
       const panel = host.closest("[data-testid='panel-body']");
@@ -174,6 +177,8 @@ function App() {
         config={config} activeTool="select" hostRef={hostRef} facadeRef={facadeRef} rightAxisWidth={axisWidth} layoutRef={layoutRef} chooserOpenRef={chooserOpenRef} />
       <ChartConditionalOrderEntry chrome={getTvChrome("light")} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group="green" symbol="US.AAPL"
         config={config} configLoaded activeTool="select" chooserOpenRef={chooserOpenRef} sendCommand={sendCommand} sendQuery={sendQuery} />
+      {timer && <BarCloseTimer now={() => 0} chrome={getTvChrome("light")} timeframe="1m" price={timer.price.toFixed(4)}
+        lastPriceY={timer.y} rightAxisWidth={axisWidth} paneBottom={timer.bottom} up={false} />}
     </div>
   </div>;
 }

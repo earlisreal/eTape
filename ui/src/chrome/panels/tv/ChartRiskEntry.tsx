@@ -9,6 +9,7 @@ import { CHART_RISK_ENTRY_EVENT, type OrderConfig, type RiskEntryTemplate } from
 import { riskEntrySize } from "../../exec/riskEntry";
 import type { LinkGroup, LinkGroups } from "../../linkGroups";
 import { modalTracker } from "../../modalTracker";
+import { attachOrderPillLayer } from "./orderPillLayer";
 interface Props {
     chrome: TvChrome;
     panelId: string;
@@ -43,6 +44,13 @@ type Draft = {
 };
 export function ChartRiskEntry(props: Props): JSX.Element {
     const rootRef = useRef<HTMLDivElement | null>(null);
+    const pillLayer = useRef<ReturnType<typeof attachOrderPillLayer> | null>(null);
+    useEffect(() => {
+        if (!props.hostRef.current || !rootRef.current) return;
+        const owner = attachOrderPillLayer(props.hostRef.current, rootRef.current);
+        pillLayer.current = owner;
+        return () => { owner.dispose(); pillLayer.current = null; };
+    }, [props.hostRef]);
     const latest = useRef(props);
     latest.current = props;
     const venue = props.linkGroups.venueFor(props.group) ?? "";
@@ -88,7 +96,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             delete host.dataset.riskEntryActive; cursor(null); latest.current.chooserOpenRef.current = false;
             const chooser = rootRef.current?.querySelector<HTMLElement>("[data-risk-chooser]"); if (chooser) chooser.style.display = "none";
             if (rootRef.current)
-            rootRef.current.style.display = "none"; };
+            rootRef.current.style.display = "none"; pillLayer.current?.clear(); pillLayer.current?.sync(); };
         const editable = () => !!document.activeElement?.closest("input,textarea,select,[contenteditable='true']");
         const size = () => {
             const a = latest.current.stores.exec.accounts().find(a => a.venue === venue);
@@ -181,8 +189,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             }
             const deadline = draft.route?.deadlineMs ? new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "numeric", minute: "2-digit", timeZoneName: "short" }).format(draft.route.deadlineMs) : "checking";
             const endpoints = (["buy", "sell"] as const).filter(endpoint => draft![endpoint] !== undefined && (endpoint === "buy" || draft!.complete));
-            const chipYs = orderMarkerChipYs([...endpoints.map(endpoint => facade?.priceToCoordinate(draft![endpoint]!) ?? -10000),
-                ...(previewVisible ? [candidateY!] : [])], paneHeight);
+            const chipYs = orderMarkerChipYs(endpoints.map(endpoint => facade?.priceToCoordinate(draft![endpoint]!) ?? -10000), paneHeight);
             for (const side of ["buy", "sell"] as const) {
                 const line = rootRef.current.querySelector<HTMLElement>(`[data-risk-${side}]`);
                 const chip = rootRef.current.querySelector<HTMLElement>(`[data-risk-chip='${side}']`);
@@ -213,7 +220,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 label.style.display = previewVisible ? "block" : "none";
                 if (previewVisible && candidate != null) {
                     label.textContent = candidate.toFixed(candidate < 1 ? 4 : 2);
-                    label.style.top = `${Math.max(10.5, Math.min(chipYs[endpoints.length], paneHeight - 10.5))}px`;
+                    label.style.top = `${Math.max(10.5, Math.min(candidateY!, paneHeight - 10.5))}px`;
                     label.style.left = `calc(100% - ${facade?.priceScaleWidth() ?? 60}px)`;
                     label.style.background = endpoint === "buy" ? latest.current.chrome.up : latest.current.chrome.down;
                     label.style.maxWidth = `${facade?.priceScaleWidth() ?? 60}px`;
@@ -234,6 +241,8 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                 status.style.display = status.textContent ? "block" : "none";
                 status.style.color = draft.busy ? latest.current.chrome.text : latest.current.chrome.down;
             }
+            pillLayer.current?.sync();
+            pillLayer.current?.drag(pointer?.editing ? rootRef.current.querySelector<HTMLElement>(`[data-risk-chip='${pointer.endpoint}']`) : null);
         };
         const schedule = () => { if (frame === null)
             frame = requestAnimationFrame(() => { frame = null; paint(); }); };
@@ -504,7 +513,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
     <div data-risk-chooser role="dialog" aria-label="Choose draft price" style={{ display:"none",position:"absolute",right:70,pointerEvents:"auto",background:props.chrome.bg,border:`1px solid ${props.chrome.muted}`,padding:4,gap:4 }}>
       <button type="button" data-risk-choice="buy">BUY</button><button type="button" data-risk-choice="sell">SELL</button>
     </div>
-    {(["buy", "sell"] as const).map(endpoint => <div key={endpoint} data-risk-chip={endpoint} data-drawing-ui style={{ display:"none",position:"absolute",right:0,transform:"translateY(-50%)",height:20,boxSizing:"border-box",border:`1px solid ${endpoint === "buy" ? props.chrome.up : props.chrome.down}`,borderRadius:3,background:"#0c1017",color:endpoint === "buy" ? props.chrome.up : props.chrome.down,pointerEvents:"auto",font:"600 10px ui-monospace,monospace",whiteSpace:"nowrap" }}>
+    {(["buy", "sell"] as const).map(endpoint => <div key={endpoint} data-risk-chip={endpoint} data-drawing-ui style={{ display:"none",opacity:0,position:"absolute",right:0,transform:"translateY(-50%)",height:20,boxSizing:"border-box",border:`1px solid ${endpoint === "buy" ? props.chrome.up : props.chrome.down}`,borderRadius:3,background:"#0c1017",color:endpoint === "buy" ? props.chrome.up : props.chrome.down,pointerEvents:"auto",font:"600 10px ui-monospace,monospace",whiteSpace:"nowrap" }}>
       <button type="button" data-risk-price={endpoint} style={{border:0,background:"transparent",color:"inherit",font:"inherit",padding:"0 5px",cursor:"ns-resize"}} />
       <button type="button" data-risk-cancel aria-label="Discard risk setup" title="Discard both draft prices" style={{border:0,borderLeft:"1px solid currentColor",background:"transparent",color:"inherit",font:"bold 12px system-ui",padding:"0 5px",cursor:"pointer"}}>×</button>
     </div>)}

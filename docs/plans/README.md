@@ -4,11 +4,11 @@ Create one focused Markdown file per approved change. Name `YYYY-MM-DD-short-fea
 
 Approved, implementation pending:
 
-- [Chart price-label priority](2026-10-14-chart-price-label-priority.md)
 - [Visible Range Volume Profile Indicator](2026-10-10-volume-profile-indicator.md)
 
 Implemented:
 
+- [Chart price-label priority](2026-10-14-chart-price-label-priority.md)
 - [Account protection verification](2026-10-14-account-protection-verification.md)
 - [Tick recording for wick investigations and future order-flow charts](2026-10-08-tick-recording.md)
 

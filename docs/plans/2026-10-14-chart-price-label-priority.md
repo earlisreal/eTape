@@ -1,6 +1,8 @@
 # Chart price-label priority
 
-Status: approved on 2026-10-14; implementation pending. Earl approved the plan only.
+Status: implemented on 2026-10-15.
+
+Results: [validation](../../.scratch/chart-price-label-priority/validation.md).
 
 ## Goal
 
@@ -76,8 +78,8 @@ Use the current interactive pill buttons above the native canvas, and render
 their visible graphics separately in a host-level layer. This lets the graphics
 interleave with the native labels without sacrificing the existing input targets.
 
-1. In ChartPanel, create a passive host visual slot after native chart
-   initialization, ordered after its native DOM and before Bar Close Timer.
+1. After ChartPanel initializes the native chart, position the pill owners'
+   passive host visual slot after its native DOM and before Bar Close Timer.
    The slot itself must not create a stacking context. Handle assigned-symbol
    mounts, later chart creation, absent timer, rebuild and disposal explicitly.
 2. In ChartOrderMarkers and ChartRiskEntry, keep real controls, keyboard/drag/
@@ -107,9 +109,8 @@ interleave with the native labels without sacrificing the existing input targets
 
 ## Validation
 
-For the approved plan-only change, validate local Markdown links and run
-`git diff --check`. Engine/UI checks and waiting for hosted CI are excluded under
-the repository's prose-only documentation exception.
+Validate local Markdown links and run `git diff --check` alongside the
+implementation checks below.
 
 For implementation, reuse
 [the chart layout harness](../../ui/e2e/chart-order-layout.mjs) and

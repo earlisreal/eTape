@@ -39,8 +39,12 @@ and unknown outcomes stay visible.
 Escape consumes the current modifier press; release modifiers to rearm.
 
 Selected risk draft prices and working orders retain compact right-axis Order
-Price Pills. Risk preview labels share the existing axis spacing so they stay
-clear of placed pills, while lines remain at actual trigger prices.
+Price Pills. Resting pills share collision spacing; Risk preview labels follow
+their actual candidate price with pane-edge bounds and may cover a resting pill.
+Pill graphics sit behind the timer and cursor/preview price labels. One pill comes
+forward for drag, then hover, then keyboard focus; release restores hover/focus
+priority immediately. Passive graphics mirror the original accessible controls,
+which retain their existing input targets above the native canvas.
 Risk Entry additionally shows a centered vertical red arrow from BUY to the
 candidate protective SELL, without a filled or outlined rectangle. Beside the
 arrow, whole shares and estimated dollar risk update on mouse movement before

@@ -45,6 +45,7 @@ import {
 } from "./tv/ChartSettingsDialog";
 import { computeLegendView } from "./tv/legendView";
 import { BarCloseTimer } from "./tv/BarCloseTimer";
+import { positionOrderPillLayer } from "./tv/orderPillLayer";
 import { perf } from "../../perf/PerfMonitor";
 import { bareSymbol } from "../exec/orderStatus";
 import type { QueryChartWindowResult, QueryVolumeProfileResult } from "../../gen/wsmsg";
@@ -317,6 +318,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     ownSymbolRef.current = symbol;
     viewportModeRef.current = "live";
     const chart = createChart(host, { width, height });
+    positionOrderPillLayer(host);
     // Right-edge pan cap: LWC has no native "capped but non-zero" right-edge option
     // (fixRightEdge hardcodes the margin to 0 — see chartTheme's rightOffset comment),
     // so bound it here. TradingView-style: the user can pan right until the latest

@@ -74,6 +74,17 @@ React appends it after Lightweight Charts' native DOM. Its z-index 1 then paints
 above the base axis canvas at the same level while the native crosshair canvas
 at z-index 2 remains above it.
 
+Order Price Pill graphics share a passive host slot after the native chart DOM
+and before the countdown badge. Resting graphics at level 1 sit behind the
+timer, native crosshair price and colored Preview Price Label. One pill rises
+above those labels during drag, hover or keyboard focus, in that priority order;
+release restores hover/focus priority without waiting for acknowledgement.
+The original transparent DOM buttons retain drag, ×, keyboard and chooser
+behavior above the native canvas. Graphics mirror their content and bounds
+imperatively, are inert and hidden from accessibility, and add no focus stops.
+Risk Entry preview labels follow the actual snapped candidate price with only
+pane-edge bounds; collision spacing applies to resting pills alone.
+
 Chart drawings consume the Future Buffer as future chart positions. Their future
 Drawing Anchors are not clamped to the newest loaded bar; incoming displayed bars
 eventually align with those anchors.

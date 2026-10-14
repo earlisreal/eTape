@@ -32,11 +32,49 @@ function mount(orders: Order[] = [base], config?: OrderConfig) {
 beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.spyOn(document, "hasFocus").mockReturnValue(true); });
 
 describe("ChartOrderMarkers", () => {
+  it("keeps resting pill graphics behind cursor labels without duplicating interactive controls", async () => {
+    const {host} = mount();
+    await waitFor(() => expect(host.querySelector("[data-order-pill-visual]")?.textContent).toBe("B 100.00×"));
+    const visual = host.querySelector<HTMLElement>("[data-order-pill-visual]")!;
+    expect(visual.style.zIndex).toBe("1");
+    expect(visual.getAttribute("aria-hidden")).toBe("true");
+    expect(visual.hasAttribute("inert")).toBe(true);
+    expect(visual.style.pointerEvents).toBe("none");
+    expect(screen.getAllByRole("button", {name:"Cancel BUY 10 LIMIT"})).toHaveLength(1);
+    fireEvent.pointerOver(screen.getByTestId("order-label-o1"));
+    expect(visual.style.zIndex).toBe("11");
+    fireEvent.pointerOut(screen.getByTestId("order-label-o1"), {relatedTarget:host});
+    expect(visual.style.zIndex).toBe("1");
+  });
   it("does not show historical protection warnings over charts", () => {
     mount([{ ...base, status:"FILLED", executedQty:3, leavesQty:0,
       riskEntry:{stopId:"closed-stop",budget:10,mode:"Dollar",buyCushion:{value:0,unit:"$"},sellCushion:{value:0,unit:"$"},failure:"protection interrupted"} }]);
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByText(/shares remain/)).toBeNull();
+  });
+  it("gives drag priority over hover and focus, then restores focus or resting priority and disposes graphics", () => {
+    const {host,unmount} = mount([base,{...base,id:"sell",side:"SELL",limitPrice:105}]);
+    const buy = screen.getByTestId("order-label-o1"), sell = screen.getByTestId("order-label-sell");
+    const front = () => [...host.querySelectorAll<HTMLElement>("[data-order-pill-visual]")]
+      .filter(el => el.style.zIndex === "11").map(el => el.dataset.orderPillVisual);
+    buy.focus();
+    expect(front()).toEqual(["o1"]);
+    fireEvent.pointerOver(sell);
+    expect(front()).toEqual(["sell"]);
+    fireEvent.pointerDown(buy,{button:0,pointerId:1,clientX:20,clientY:200});
+    fireEvent.pointerOver(sell);
+    expect(front()).toEqual(["o1"]);
+    fireEvent.keyDown(buy,{key:"Tab"});
+    fireEvent.pointerUp(window,{pointerId:1,clientX:20,clientY:200});
+    expect(front()).toEqual(["o1"]);
+    buy.blur();
+    expect(front()).toEqual([]);
+    fireEvent.pointerDown(host,{button:0,pointerId:2,clientX:100,clientY:200});
+    expect(front()).toEqual(["o1"]);
+    fireEvent.pointerCancel(window,{pointerId:2});
+    expect(front()).toEqual([]);
+    unmount();
+    expect(host.querySelector("[data-order-pill-layer]")).toBeNull();
   });
   it("drags the nearest plot line through the existing replace path and ignores other pointers", async () => {
     const {host,sendCommand} = mount([base,{...base,id:"near",side:"SELL",limitPrice:105}]);
@@ -128,6 +166,7 @@ describe("ChartOrderMarkers", () => {
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("ReplaceOrder", {
       venue:"sim", orderId:"o1", qty:0, limitPrice:111, stopPrice:0,
     }));
+    expect(document.querySelector<HTMLElement>("[data-order-pill-visual='o1']")?.style.zIndex).toBe("1");
   });
 
   it("cancels a drag on Escape without sending a replace", () => {

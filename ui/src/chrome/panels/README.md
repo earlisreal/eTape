@@ -51,6 +51,13 @@ for BUY/COVER and red for SELL/SHORT, exposing shares and order details on hover
 Risk amounts and routine left-edge labels are hidden; actionable warnings remain
 visible. The chip's × cancels its existing target. Dragging sends the modification
 on release; arrow keys send one price step. Escape/right-click cancels the drag.
+Resting pill graphics paint behind the Bar Close Timer and cursor/preview price
+labels. Only the dragged, otherwise hovered, otherwise keyboard-focused pill
+comes forward, including its ×. Release ends drag priority immediately and
+reapplies hover/focus priority. Original buttons stay above the canvas for input;
+their passive, inert graphics mirror the same prices, geometry and styling in
+a shared chart-host layer. Draft pills use the same priority; the Risk Entry
+Preview Price Label stays at its prospective price even when a pill is nearby.
 Engine-held stop-limit markers switch to
 the child LIMIT after trigger; LIT uses the same phase-dependent price. Paused
 parents stay visible and require explicit Resume. The Order Ticket shows local

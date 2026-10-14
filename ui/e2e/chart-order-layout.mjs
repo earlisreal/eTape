@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { mkdir } from "node:fs/promises";
 import { chromium } from "playwright";
 import { createServer } from "vite";
+import { PNG } from "pngjs";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "chart-order-layout");
 const server = await createServer({ configFile: false, root, esbuild: { jsx: "automatic" }, server: {
@@ -157,6 +158,73 @@ try {
   await page.evaluate(() => ["same-buy-a","same-buy-b","same-sell","nearby-sell"].forEach(id => window.repro.finishOrder(id)));
   await page.waitForFunction(() => document.querySelectorAll("[data-order-group]").length === 0);
 
+  await page.evaluate(() => {
+    window.repro.addOrder("priority-buy", "LIMIT", 5.0);
+    window.repro.addOrder("priority-sell", "STOP_LIMIT", 4.7, "SELL");
+    window.repro.setTimerPrice(5.0);
+  });
+  const priorityPill = page.locator('[data-order-pill-visual="priority-buy"]');
+  await priorityPill.waitFor();
+  assert(await priorityPill.isVisible(), await priorityPill.evaluate(el => el.outerHTML));
+  const pixelAtPill = async (target = page, pill = priorityPill) => {
+    const box = await pill.boundingBox();
+    const axisLeft = await target.getByTestId("chart-host").evaluate(host => {
+      const row = host.querySelector(".tv-lightweight-charts table").rows[0];
+      return row.cells[row.cells.length - 1].getBoundingClientRect().left;
+    });
+    const png = PNG.sync.read(await target.screenshot());
+    const offset = (Math.floor(box.y + box.height - 4) * png.width + Math.floor(Math.max(box.x + 3, axisLeft + 4))) * 4;
+    return [...png.data.subarray(offset, offset + 3)];
+  };
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(50);
+  assert.deepEqual(await pixelAtPill(), [242,54,69], "The timer must paint over a resting order pill");
+  const priorityPoint = await page.evaluate(() => window.repro.pointForPrice(5.0));
+  await page.mouse.move(priorityPoint.x, priorityPoint.y);
+  await page.waitForTimeout(50);
+  await page.screenshot({ path:path.resolve(root,"../.report/chart-priority-native.png") });
+  assert.deepEqual(await pixelAtPill(), [19,23,34], "The native crosshair price must paint over the resting pill and timer");
+  await page.keyboard.down("Shift");
+  await page.waitForTimeout(50);
+  assert.deepEqual(await pixelAtPill(), [8,153,129], "The colored preview must paint over the resting pill and timer");
+  await page.keyboard.up("Shift");
+  await page.getByTestId("order-label-priority-buy").hover();
+  await page.waitForTimeout(50);
+  const foreground = await pixelAtPill();
+  assert(foreground[0] < 50 && foreground[1] < 50 && foreground[2] < 60, "Hover must reveal the whole pill above other labels");
+  assert.equal(await page.evaluate(() => {
+    const box = document.querySelector('[data-testid="order-label-priority-buy"]').getBoundingClientRect();
+    return document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)?.dataset.testid;
+  }), "order-label-priority-buy", "The visible pill must retain its real input target");
+  await page.mouse.move(priorityPoint.x, priorityPoint.y);
+  await page.mouse.down();
+  assert.equal(await priorityPill.evaluate(el => el.style.zIndex), "11", "Dragging the plot line must promote its pill");
+  await page.mouse.move(priorityPoint.x, priorityPoint.y - 12);
+  await page.waitForTimeout(30);
+  assert.equal(await priorityPill.textContent(), await page.locator('[data-order-ids="priority-buy"] [data-order-chip]').textContent(), "The graphic must mirror the proposed order price");
+  await page.keyboard.press("Escape");
+  await page.mouse.up();
+  assert.equal(await priorityPill.evaluate(el => el.style.zIndex), "1", "Canceling a plot drag must restore resting priority");
+  await page.keyboard.press("Tab");
+  await page.getByTestId("order-label-priority-buy").focus();
+  assert.equal(await priorityPill.evaluate(el => el.style.zIndex), "11", "Keyboard focus must reveal a covered pill");
+  await page.getByTestId("chart-host").focus();
+  assert.equal(await priorityPill.evaluate(el => el.style.zIndex), "1", "Leaving keyboard focus must restore resting priority");
+  const axisHandle = await page.getByTestId("order-label-priority-buy").boundingBox();
+  await page.mouse.move(axisHandle.x + axisHandle.width / 2, axisHandle.y + axisHandle.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(axisHandle.x + axisHandle.width / 2, axisHandle.y + axisHandle.height / 2 - 12);
+  await page.mouse.up();
+  await page.waitForTimeout(50);
+  assert.equal(await priorityPill.evaluate(el => el.style.zIndex), "11", "Release over the replaced pill must retain ordinary hover priority");
+  await page.mouse.move(0, 0);
+  assert.equal(await priorityPill.evaluate(el => el.style.zIndex), "1", "Leaving the released pill must end its hover priority");
+  const bounds = await page.locator('[data-order-ids="priority-buy"] [data-order-chip]').boundingBox();
+  assert.deepEqual(await priorityPill.boundingBox(), bounds, "Graphic and control bounds must agree");
+  await page.screenshot({ path: path.resolve(root, "../.report/chart-price-label-priority.png") });
+  await page.evaluate(() => { window.repro.setTimerPrice(null); ["priority-buy","priority-sell"].forEach(id => window.repro.finishOrder(id)); });
+  await page.waitForFunction(() => document.querySelectorAll("[data-order-group]").length === 0);
+
   await page.evaluate(() => window.repro.addOrder("pending-cancel", "LIMIT", 5.0));
   await page.locator('[data-testid="order-label-pending-cancel"]').waitFor();
   await page.evaluate(() => window.repro.setNextCancelBehavior("pending"));
@@ -195,6 +263,13 @@ try {
   const orderStates = states.slice(2);
   assert(orderStates.every(state => JSON.stringify(state.range) === JSON.stringify(baseline.range)), "Order changes must preserve the manually zoomed time viewport");
   assert(orderStates.every(state => Math.abs(state.candleY - baseline.candleY) <= 1), "Order changes must preserve the price scale");
+  const beforeScale = await measure();
+  const scaleHost = await page.getByTestId("chart-host").boundingBox();
+  await page.mouse.move(scaleHost.x + scaleHost.width - 12, scaleHost.y + 60);
+  await page.mouse.down();
+  await page.mouse.move(scaleHost.x + scaleHost.width - 12, scaleHost.y + 100);
+  await page.mouse.up();
+  assert.notEqual((await measure()).candleY, beforeScale.candleY, "Native price-scale dragging must still work outside pill controls");
 
   const productionPage = await browser.newPage({ viewport: { width: 1000, height: 800 } });
   const productionErrors = [];
@@ -310,7 +385,9 @@ try {
     if (risk.label.visible) {
       assert(Math.abs(risk.label.left - risk.gutterLeft) <= 1 && risk.label.right <= risk.hostRight && risk.label.top >= risk.paneTop && risk.label.bottom <= risk.paneBottom,
         "The plain preview price must stay on the axis inside the main pane");
-      assert(risk.chips.every(chip => risk.label.bottom <= chip.top || risk.label.top >= chip.bottom), "Preview prices and placed pills must not overlap");
+      const prospectiveY = await productionPage.getByTestId("chart-host").evaluate(host => Number(host.dataset.orderCursorY) + host.getBoundingClientRect().top);
+      const boundedY = Math.max(risk.paneTop + 10.5, Math.min(prospectiveY, risk.paneBottom - 10.5));
+      assert(Math.abs((risk.label.top + risk.label.bottom) / 2 - boundedY) <= 1, "Preview price must remain at its actual candidate price, even near selected pills");
       assert.equal(risk.label.color, "rgb(255, 255, 255)");
       assert.equal(risk.label.fontSize, "12px");
       assert.equal(risk.label.fontWeight, "400");
@@ -347,6 +424,11 @@ try {
     await productionPage.mouse.move(cursor.x, hostBox.y + hostBox.height * 0.30);
     if (theme === "dark") await productionPage.mouse.down();
     else await productionPage.mouse.click(cursor.x, hostBox.y + hostBox.height * 0.30);
+    const selectedBuy = await productionPage.locator("[data-risk-price='buy']").boundingBox();
+    await productionPage.mouse.move(cursor.x + 40, selectedBuy.y + selectedBuy.height / 2 + 3);
+    await productionPage.waitForTimeout(50);
+    assert.deepEqual(await pixelAtPill(productionPage, productionPage.locator('[data-order-pill-visual="buy"]')), [242,54,69],
+      "The colored SELL preview must paint over the nearby resting BUY draft pill");
     await productionPage.mouse.move(cursor.x + 40, hostBox.y + hostBox.height * 0.50);
     await productionPage.waitForFunction(() => document.querySelector("[data-risk-readout]").innerText.includes("shares · Est. risk $"));
     const moving = await checkRisk();
@@ -376,6 +458,24 @@ try {
     assert(preview.chips.length === 2 && preview.chips[0].title.includes("BUY STOP-LIMIT") && preview.chips[1].title.includes("SELL STOP-LIMIT"), "Both compact risk chips must expose order details on hover");
     assert(preview.chips.every(chip => chip.title.includes("planned shares") && chip.title.includes("Held by eTape") && chip.title.includes("fees/execution risk excluded") && !chip.title.includes("est. risk")), "Tooltips must retain shares and custody without risk amounts");
     assert.deepEqual(preview.chips.map(chip => chip.color),["rgb(8, 153, 129)","rgb(242, 54, 69)"],"Risk draft colors must match submitted BUY/SELL chips");
+    for (const side of ["buy", "sell"]) {
+      const handle = productionPage.locator(`[data-risk-price='${side}']`);
+      const graphic = productionPage.locator(`[data-order-pill-visual='${side}']`);
+      const box = await handle.boundingBox();
+      await productionPage.mouse.move(cursor.x, box.y + box.height / 2);
+      await productionPage.waitForTimeout(50);
+      assert.deepEqual(await pixelAtPill(productionPage, graphic), [19,23,34], `Native cursor price must cover the resting ${side} draft pill`);
+      await handle.hover();
+      await productionPage.waitForTimeout(50);
+      assert.deepEqual(await pixelAtPill(productionPage, graphic), [12,16,23], `Hover must reveal the ${side} draft pill`);
+      await handle.click();
+      await handle.focus(); // Preserve pointer-origin focus before switching to the keyboard.
+      await productionPage.mouse.click(cursor.x, box.y + box.height / 2);
+      assert.equal(await graphic.evaluate(el => el.style.zIndex), "1", "Pointer interaction away from the pill must end keyboard-focus promotion");
+      await productionPage.keyboard.press("ArrowUp");
+      assert.equal(await graphic.evaluate(el => el.style.zIndex), "11", "Consumed keyboard edits must still promote their focused draft pill");
+      assert.equal(await productionPage.locator('[data-order-pill-layer] [style*="z-index: 11"]').count(), 1, "Only one draft pill may be in front");
+    }
     await productionPage.screenshot({ path: path.resolve(root, `../.report/chart-risk-entry-${theme}.png`) });
     await productionPage.keyboard.press("Enter");
     await productionPage.getByTestId("chart-risk-entry").waitFor({ state: "hidden" });
