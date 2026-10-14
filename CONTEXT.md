@@ -277,6 +277,10 @@ _Avoid_: Per-button shortcut display, keycap setting
 
 ## Chart Viewport
 
+**Bar Close Timer**:
+The intraday chart's read-only price-axis badge combining the latest eligible chart price with the time remaining until the current bar closes.
+_Avoid_: Bar timer, session countdown
+
 **Crosshair Sync**:
 A saved, opt-in Chart Panel preference for sharing crosshair time and stock-price positions across open workspaces with other enabled Chart Panels in the same Link Group displaying the same symbol.
 _Avoid_: Scanner Sync, symbol sync
