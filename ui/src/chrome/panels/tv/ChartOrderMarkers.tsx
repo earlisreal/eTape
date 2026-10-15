@@ -171,7 +171,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
     const color = highlight ? "#fff29a" : "transparent";
     const chip = row.querySelector<HTMLElement>("[data-order-price]");
     if (chip && drag.current) {
-      chip.textContent = `${sideText(drag.current.marker)} ${priceText(price)}`;
+      chip.textContent = priceText(price);
       chip.title = tooltip(drag.current.marker, price, highlight);
       chip.style.borderColor = color;
       const proposal = riskProposal(drag.current.marker, price);
@@ -414,7 +414,7 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
             title={`${group.markers.map(marker => tooltip(marker, marker.price, !!group.pending)).join("\n\n")}${status ? `\n${status}` : ""}`}
             aria-label={group.markers.length > 1 ? `${group.markers.length} ${first.order.side} orders at ${priceText(group.price)}; choose an order` : `${orderTitle(first)} at ${priceText(group.price)}; drag or use arrow keys to adjust`}
             style={{ border:0, background:"transparent", color:"inherit", height:"100%", padding:"0 5px", cursor:first.draggable ? "ns-resize" : "pointer", font:"inherit" }}>
-            {sideText(first)} {priceText(group.price)}{group.markers.length > 1 ? ` (${group.markers.length})` : ""}
+            {priceText(group.price)}{group.markers.length > 1 ? ` (${group.markers.length})` : ""}
           </button>
           {group.markers.length === 1 && <button type="button" disabled={action?.kind === "cancel"}
             aria-label={first.order.riskEntryId?"Cancel Protection":`Cancel ${orderTitle(first)}`} title={first.order.riskEntryId?"Cancel Protection — cancels remaining buy and linked sells; leaves shares open":`Cancel ${orderTitle(first)}`} onClick={() => void cancelOrder(first)}

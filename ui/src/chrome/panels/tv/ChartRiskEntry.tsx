@@ -203,7 +203,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     chip.style.top = `${chipYs[endpoints.indexOf(side)]}px`;
                     const button = chip.querySelector<HTMLButtonElement>("[data-risk-price]");
                     if (button && price !== undefined) {
-                        button.textContent = `${side === "buy" ? "B" : "S"} ${price.toFixed(price < 1 ? 4 : 2)}`;
+                        button.textContent = price.toFixed(price < 1 ? 4 : 2);
                         const limit = side === "buy" ? s?.buyLimit : s?.sellLimit;
                         button.title = `${draft.complete ? `${qty.toLocaleString("en-US")} planned shares` : "Choose both prices to size shares"}\n${side === "buy" ? "BUY" : "SELL"} STOP-LIMIT · limit ${limit?.toFixed(limit < 1 ? 4 : 2) ?? "pending"}\nHeld by eTape · DAY ${deadline} · fees/execution risk excluded\n${draft.busy || draft.unknown ? "" : "Enter send · "}Esc cancel`;
                         button.setAttribute("aria-label", `${side === "buy" ? "Buy" : "Sell"} trigger ${price.toFixed(price < 1 ? 4 : 2)}; drag or use arrow keys to adjust`);

@@ -62,7 +62,7 @@ it("keeps a nearby colored preview at the actual price instead of shifting aroun
     fireEvent.pointerMove(host, {pointerId:1,clientX:100,clientY:209});
     flushFrames();
     expect(host.querySelector<HTMLElement>("[data-risk-preview-price]")?.style.top).toBe("209px");
-    await waitFor(() => expect(host.querySelector("[data-order-pill-visual='buy']")?.textContent).toBe("B 10.00×"));
+    await waitFor(() => expect(host.querySelector("[data-order-pill-visual='buy']")?.textContent).toBe("10.00×"));
 });
 it("shows a plain preview price, retains selected pills, and edits the first BUY without completing or sending", async () => {
     const {host,sendCommand,facadeRef} = mount(true);
@@ -85,7 +85,7 @@ it("shows a plain preview price, retains selected pills, and edits the first BUY
     fireEvent.pointerDown(host,{pointerId:2,button:0,clientX:100,clientY:200});
     fireEvent.pointerMove(window,{pointerId:2,clientX:100,clientY:190});
     fireEvent.pointerUp(window,{pointerId:2});
-    expect(host.querySelector("[data-risk-price='buy']")?.textContent).toBe("B 10.10");
+    expect(host.querySelector("[data-risk-price='buy']")?.textContent).toBe("10.10");
     expect(host.querySelector<HTMLElement>("[data-risk-chip='sell']")?.style.display).toBe("none");
     expect(facadeRef.current.setOrderCrosshair).toHaveBeenLastCalledWith(null);
     fireEvent.keyDown(window,{key:"Enter"});
@@ -102,6 +102,8 @@ it("promotes only the edited draft pill and clears its graphics on context chang
     fireEvent.pointerDown(buy,{pointerId:2,button:0,clientX:480,clientY:200});
     fireEvent.pointerMove(window,{pointerId:2,clientX:480,clientY:190});
     flushFrames();
+    expect(buy.textContent).toBe("10.10");
+    expect(host.querySelector("[data-order-pill-visual='buy']")?.textContent).toBe("10.10×");
     expect(host.querySelector<HTMLElement>("[data-order-pill-visual='buy']")?.style.zIndex).toBe("11");
     expect(host.querySelector<HTMLElement>("[data-order-pill-visual='sell']")?.style.zIndex).toBe("1");
     fireEvent.pointerUp(window,{pointerId:2});
@@ -142,7 +144,8 @@ it("previews two clicks and sends one risk-sized pair on Enter", async () => {
     fireEvent.pointerUp(window, { pointerId: 2, button: 0, clientX: 100, clientY: 220 });
     const buy = host.querySelector<HTMLButtonElement>("[data-risk-price='buy']")!;
     await waitFor(() => expect(buy.title).toContain("500 planned shares"));
-    expect(buy.textContent).toBe("B 10.00");
+    expect(buy.textContent).toBe("10.00");
+    expect(host.querySelector("[data-risk-price='sell']")?.textContent).toBe("9.80");
     expect(buy.title).toContain("Enter send · Esc cancel");
     expect(buy.title).not.toContain("$100.00");
     expect(host.querySelector("[data-risk-detail]")?.textContent).toBe("");
@@ -153,6 +156,20 @@ it("previews two clicks and sends one risk-sized pair on Enter", async () => {
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("SubmitRiskEntry", expect.objectContaining({ buyStop: 10, sellStop: 9.8, maxQty: 500, value: 100, mode: "Dollar" })));
     fireEvent.keyDown(window, { key: "Enter" });
     expect(sendCommand.mock.calls.filter(([name]) => name === "SubmitRiskEntry")).toHaveLength(1);
+});
+it("keeps sub-dollar precision and semantic sides on selected draft pills", async () => {
+    const {host,facadeRef} = mount();
+    facadeRef.current.coordinateToPrice = (y: number) => 1.05 - y / 1000;
+    facadeRef.current.priceToCoordinate = (price: number) => (1.05 - price) * 1000;
+    initiateChartRiskEntry(template);
+    placeRiskPair(host);
+    for (const [side,price] of [["buy","0.8500"],["sell","0.8300"]] as const) {
+        const button = host.querySelector<HTMLButtonElement>(`[data-risk-price='${side}']`)!;
+        expect(button.textContent).toBe(price);
+        expect(button.getAttribute("aria-label")).toContain(side === "buy" ? "Buy" : "Sell");
+        expect(button.title).toContain(`${side.toUpperCase()} STOP-LIMIT`);
+        await waitFor(() => expect(host.querySelector(`[data-order-pill-visual='${side}']`)?.textContent).toBe(`${price}×`));
+    }
 });
 it("updates the provisional arrow and sizing on successive mouse frames, hides outside the pane, and relayouts without a mouse move", () => {
     const {host,sendCommand,facadeRef,layoutRef} = mount();
@@ -440,7 +457,7 @@ it("drags a draft price on the axis and discards the pair from either X", async 
     expect(host.querySelector<HTMLElement>("[data-risk-chip='buy']")?.style.display).toBe("flex");
     fireEvent.pointerUp(window,{pointerId:3,clientX:470,clientY:190});
     await waitFor(() => expect(buy.title).toContain("333 planned shares"));
-    expect(buy.textContent).toBe("B 10.10");
+    expect(buy.textContent).toBe("10.10");
     expect(host.querySelector("[data-risk-readout]")?.textContent).toBe("333 shares · Est. risk $99.90");
     fireEvent.keyDown(buy,{key:"ArrowUp"});
     expect(host.querySelector("[data-risk-readout]")?.textContent).toBe("322 shares · Est. risk $99.82");

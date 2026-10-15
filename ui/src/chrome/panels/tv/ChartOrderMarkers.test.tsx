@@ -41,7 +41,7 @@ describe("ChartOrderMarkers", () => {
   });
   it("keeps resting pill graphics behind cursor labels without duplicating interactive controls", async () => {
     const {host} = mount();
-    await waitFor(() => expect(host.querySelector("[data-order-pill-visual]")?.textContent).toBe("B 100.00×"));
+    await waitFor(() => expect(host.querySelector("[data-order-pill-visual]")?.textContent).toBe("100.00×"));
     const visual = host.querySelector<HTMLElement>("[data-order-pill-visual]")!;
     expect(visual.style.zIndex).toBe("1");
     expect(visual.getAttribute("aria-hidden")).toBe("true");
@@ -93,6 +93,8 @@ describe("ChartOrderMarkers", () => {
     fireEvent.pointerUp(window,{pointerId:2});
     expect(sendCommand).not.toHaveBeenCalled();
     fireEvent.pointerMove(window,{pointerId:1,clientX:100,clientY:184});
+    expect(screen.getByTestId("order-label-near").textContent).toBe("115.00");
+    expect(host.querySelector("[data-order-pill-visual='near']")?.textContent).toBe("115.00×");
     fireEvent.pointerUp(window,{pointerId:1});
     await waitFor(() => expect(sendCommand).toHaveBeenCalledWith("ReplaceOrder",expect.objectContaining({orderId:"near",limitPrice:115})));
     expect(sendCommand).toHaveBeenCalledTimes(1);
@@ -116,10 +118,20 @@ describe("ChartOrderMarkers", () => {
     expect(sendCommand).not.toHaveBeenCalled();
     fireEvent.pointerDown(host,{button:0,pointerId:1,clientX:100,clientY:200});
     fireEvent.pointerMove(window,{pointerId:1,clientX:100,clientY:190});
+    expect(host.querySelector("[data-order-pill-visual='o1']")?.textContent).toBe("110.00×");
     fireEvent.keyDown(window,{key:"Escape"});
     fireEvent.pointerUp(window,{pointerId:1});
     expect(sendCommand).not.toHaveBeenCalled();
-    expect(screen.getByTestId("order-label-o1").textContent).toBe("B 100.00");
+    expect(screen.getByTestId("order-label-o1").textContent).toBe("100.00");
+    expect(host.querySelector("[data-order-pill-visual='o1']")?.textContent).toBe("100.00×");
+  });
+  it.each(["BUY", "COVER", "SELL", "SHORT"] as const)("keeps sub-dollar precision and semantic side for %s", async (side) => {
+    const {host} = mount([{...base,side,limitPrice:0.1234}]);
+    const price = screen.getByTestId("order-label-o1");
+    expect(price.textContent).toBe("0.1234");
+    expect(price.getAttribute("aria-label")).toContain(side);
+    expect(price.title).toContain(`${side} LIMIT`);
+    await waitFor(() => expect(host.querySelector("[data-order-pill-visual='o1']")?.textContent).toBe("0.1234×"));
   });
   it("uses compact side-colored axis chips, shares tooltips, and a same-side chooser", async () => {
     const { host, sendCommand } = mount([base, {...base,id:"o2"}, {...base,id:"sell",side:"SELL"}]);
@@ -129,9 +141,9 @@ describe("ChartOrderMarkers", () => {
     expect(groups[0].style.getPropertyValue("--order-color")).toBe(getTvChrome("light").up);
     expect(groups[1].style.getPropertyValue("--order-color")).toBe(getTvChrome("light").down);
     const buy = screen.getByTestId("order-label-o1");
-    expect(buy.textContent).toBe("B 100.00 (2)");
+    expect(buy.textContent).toBe("100.00 (2)");
     expect(buy.title).toContain("10 shares\nBUY LIMIT · limit 100.00");
-    expect(screen.getByTestId("order-label-sell").textContent).toBe("S 100.00");
+    expect(screen.getByTestId("order-label-sell").textContent).toBe("100.00");
     expect(host.querySelector("[data-order-risk]")).toBeNull();
     fireEvent.click(buy);
     fireEvent.click(screen.getAllByRole("button", {name:"Cancel BUY 10 LIMIT"})[1]);

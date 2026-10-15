@@ -18,11 +18,11 @@ selection keeps a thin outline without an amber fill; double-click loads the
 symbol into the linked group.
 
 Grouped charts project open orders into an imperative overlay with compact
-`B price ×` / `S price ×` controls on the right price axis. BUY/COVER uses chart
+`price ×` controls on the right price axis, without B/S prefixes. BUY/COVER uses chart
 green and SELL/SHORT chart red across LIMIT, STOP_LIMIT, LIT and draft previews.
-Hover the price for shares, order type, execution limit and current status;
+Hover the price for shares, side, order type, execution limit and current status;
 routine left-edge labels and risk amounts are hidden. Same-side, same-type
-orders at one price share a count chip and individual-order chooser; opposing
+orders at one price share a `price (count)` chip and individual-order chooser; opposing
 sides stay separate. Nearby chips are spaced without moving their price lines.
 Drag a working price or use its arrow keys to adjust; × keeps the existing cancel
 target. The overlay follows the execution store; market ticks stay outside React

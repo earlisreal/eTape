@@ -143,11 +143,11 @@ try {
   await page.waitForFunction(() => document.querySelectorAll("[data-order-group]").length === 3);
   const chips = await page.locator("[data-order-chip]").evaluateAll(nodes => nodes.map(node => {
     const box = node.getBoundingClientRect();
-    return { top:box.top,bottom:box.bottom,right:box.right,color:getComputedStyle(node).color,text:node.innerText };
+    return { top:box.top,bottom:box.bottom,right:box.right,color:getComputedStyle(node).color,price:node.querySelector("[data-order-price]").textContent };
   }).sort((a,b) => a.top-b.top));
   assert(chips.every((chip,index) => !index || chip.top >= chips[index-1].bottom), "Same and neighboring price chips must remain individually clickable");
-  assert(chips.some(chip => chip.text.includes("B 5.00 (2)") && chip.color === "rgb(8, 153, 129)"), "BUY chips must group only BUY orders and use chart green");
-  assert(chips.some(chip => chip.text.includes("S 5.00") && chip.color === "rgb(242, 54, 69)"), "SELL chips must remain separate and use chart red");
+  assert(chips.some(chip => chip.price === "5.00 (2)" && chip.color === "rgb(8, 153, 129)"), "BUY chips must show only price and count, group only BUY orders and use chart green");
+  assert(chips.some(chip => chip.price === "5.00" && chip.color === "rgb(242, 54, 69)"), "SELL chips must show only price, remain separate and use chart red");
   const axisHost = await page.getByTestId("chart-host").boundingBox();
   assert(chips.every(chip => Math.abs(chip.right - axisHost.x - axisHost.width) <= 1), "Working chips must sit on the right price axis");
   await page.getByTestId("order-label-same-buy-a").click();

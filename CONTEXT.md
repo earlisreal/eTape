@@ -244,7 +244,7 @@ A read-only price-axis label for the prospective Chart Order Gesture or Chart Ri
 _Avoid_: Native crosshair price label, price pill
 
 **Order Price Pill**:
-The side-and-price control on the chart's price axis for a selected Chart Risk Entry draft endpoint or an existing order, with a × action scoped to that draft or order.
+The price control on the chart's price axis for a selected Chart Risk Entry draft endpoint or an existing order, with side indicated by color and described in hover details. Single pills include a scoped × action; grouped orders show a count and an individual-order chooser.
 _Avoid_: Preview price label, chip
 
 **Action Template**:
