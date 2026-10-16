@@ -52,6 +52,24 @@ function wrap(props: PanelProps) {
 }
 
 describe("AccountPanel", () => {
+  it("formats sub-dollar position and fill prices while keeping account and position P&L at two decimals", () => {
+    const { props, stores } = mkProps();
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: status(true) });
+    stores.exec.apply({ kind: "snapshot", topic: "exec.account", key: "alpaca-paper", payload: acct("alpaca-paper", { equity: 0.1234 }) });
+    const prices = [0.1234, 0.5, 1, 0];
+    stores.exec.apply({ kind: "snapshot", topic: "exec.positions", payload: prices.map((avgPrice, i) => pos({ symbol: `US.P${i}`, avgPrice, unrealizedPnl: 0.1234 })) });
+    stores.fills.ingest(prices.map((price, i) => ({ venue: "alpaca-paper", orderId: `fill-${i}`, symbol: `US.P${i}`, side: "BUY", qty: 1, price, tsMs: i + 1 })));
+    wrap(props);
+    expect(screen.getByTestId("acct-equity").textContent).toBe("$0.12");
+    for (const [i, want] of ["0.1234", "0.5000", "1.00", "0.00"].entries()) {
+      const tr = screen.getByTestId(`flatten-alpaca-paper-US.P${i}`).closest("tr")!;
+      expect(tr.querySelector('[data-column="avgPrice"]')?.textContent).toBe(want);
+      expect(tr.querySelector('[data-column="unrealizedPnl"]')?.textContent).toBe("0.12");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Fills" }));
+    expect([...screen.getByTestId("fills-table").querySelectorAll('tbody [data-column="price"]')].map((cell) => cell.textContent))
+      .toEqual(["0.00", "1.00", "0.5000", "0.1234"]);
+  });
   it("shows verified protection warnings once in the selected Account across tabs", () => {
     const { props, stores, linkGroups } = mkProps();
     const st = status(false, "alpaca-paper", "alpaca-live");
@@ -617,6 +635,27 @@ describe("AccountPanel", () => {
       expect(state).toContain("CANCEL CONFIRMED");
       expect(state).toContain("expires");
       expect(state).toContain("ET");
+    });
+
+    it("formats sub-dollar instruction and average fill prices in both order tables, preserving placeholders", () => {
+      const { props, stores } = mkProps();
+      const orders = [
+        order("penny", { type: "STOP_LIMIT", limitPrice: 0.1234, stopPrice: 0.12, executedQty: 1, avgFillPrice: 0.1205 }),
+        order("dollar", { type: "STOP_LIMIT", limitPrice: 1, stopPrice: 1.25, executedQty: 1, avgFillPrice: 1 }),
+        order("no-fill", { type: "MARKET", limitPrice: 999, stopPrice: 999 }),
+        order("zero", { limitPrice: 0, executedQty: 1, avgFillPrice: 0 }),
+      ];
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: status(true) });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.orders", payload: orders });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.closedOrders", payload: orders.map((o) => closed({ ...o, status: "CANCELED" })) });
+      wrap(props);
+      for (const tab of ["open", "closed"]) {
+        fireEvent.click(screen.getByTestId(`${tab}-orders-tab`));
+        const rows = [...screen.getByTestId(`${tab}-orders-table`).querySelectorAll("tbody tr")];
+        const instruction = rows.map((tr) => ["price", "stopPrice"].map((col) => tr.querySelector(`[data-column="${col}"]`)?.textContent));
+        expect(instruction).toEqual([["0.1234", "0.1200"], ["1.000", "1.250"], ["—", "—"], ["0.000", "—"]]);
+        if (tab === "closed") expect(rows.map((tr) => tr.querySelector('[data-column="avgFillPrice"]')?.textContent)).toEqual(["0.1205", "1.000", "—", "0.000"]);
+      }
     });
 
     it("merges limit prices under compact headers and sorts unused prices last in both tables", () => {

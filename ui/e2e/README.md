@@ -4,6 +4,9 @@ Account scenarios cover compact columns and protection warning status frames.
 Verified warnings remain visible across Account tabs, failed verification shows
 unverified text, and a resolved exposure removes the warning. These fixtures use
 the isolated demo server and intercepted WebSocket frames.
+Sub-dollar fixtures cover price cells in all five Account tables at normal
+and minimum column widths, assert that four-digit text fits, and retain
+two-decimal total P&L. Screenshots are saved with the test output.
 
 The chart layout regression verifies compact side-colored axis chips, hover
 retention, separate BUY/SELL groups, same-side choosers and nearby-price spacing.

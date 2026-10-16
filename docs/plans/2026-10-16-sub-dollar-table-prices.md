@@ -1,6 +1,6 @@
 # Sub-dollar prices in tables
 
-Status: approved on 2026-10-16; implementation pending.
+Status: implemented on 2026-10-16.
 
 ## Goal
 
@@ -37,9 +37,7 @@ Show exactly four fractional digits for positive per-share prices below $1 in ev
 | Signed Diff/spread `-0.0025` | `-0.0025` | `-0.0025` |
 | Signed Diff/spread `-1.25` | `-1.25` | `-1.250` |
 
-Approval covers the plan only. Implementation remains a separate request.
-
-## Current-code evidence
+## Starting-code evidence
 
 | Surface | Price columns | Current format |
 | --- | --- | --- |
@@ -61,7 +59,7 @@ Approval covers the plan only. Implementation remains a separate request.
 - [vitest.config.ts](../../ui/vitest.config.ts) includes formatter, Account, and Scanner tests in `chrome-regressions`, and ladder/tape state tests in `chart-core`. Existing Watchlist and Trade History test files are absent from every project include list.
 - [Trade CSV export](../../engine/internal/exec/export.go) formats raw values in Go, independently of table strings. No export change is needed.
 
-## Proposed implementation
+## Implementation
 
 1. Reuse `quoteDecimals` in [render/format.ts](../../ui/src/render/format.ts), adding a caller-supplied normal precision defaulting to the existing `QUOTE_DECIMALS` value of three. Retain its positive/finite guard and preserve existing one-argument callers. Continue to use `formatPrice(value, decimals)` for the final string. Do not alter `formatPrice` globally or add a separate formatting framework.
 2. Update price cells in [AccountPanel.tsx](../../ui/src/chrome/panels/AccountPanel.tsx), [TradeHistoryTable.tsx](../../ui/src/chrome/panels/TradeHistoryTable.tsx), [ScannerPanel.tsx](../../ui/src/chrome/panels/ScannerPanel.tsx), and [WatchlistPanel.tsx](../../ui/src/chrome/panels/WatchlistPanel.tsx), passing each cell's current normal precision to `quoteDecimals`. Keep their existing missing-value guards, numeric sorting, column IDs, and saved widths. For Diff, select precision using `quoteDecimals(Math.abs(diff), 2)` and format the signed `diff` value; preserve the calculation.
@@ -81,9 +79,7 @@ For implementation, run from `ui`:
 - `npm run lint`, `npm run build`, and `npx playwright test e2e/account-columns.spec.ts` with deterministic sub-dollar fixtures across Account tabs and normal/narrow widths.
 - Validate Markdown links and run `git diff --check`.
 
-For this prose-only plan, validate Markdown links and whitespace; engine/UI suites and waiting for hosted CI are not required under [AGENTS.md](../../AGENTS.md#validation). Commit approved plan documentation with `docs(plans):` and complete main integration/push under the [Git instructions](../../AGENTS.md#git).
-
-Once implementation is requested and complete, update this plan's status and commit only task changes. Fetch/integrate `origin/main`, merge into local `main`, push, and wait for the successful complete [CI workflow](../../.github/workflows/ci.yml) on the pushed commit, as required by [AGENTS.md](../../AGENTS.md#validation). Preserve unrelated working changes and report every skipped required check with its reason.
+Before handoff, commit only task changes, fetch/integrate `origin/main`, merge into local `main`, push, and wait for the successful complete [CI workflow](../../.github/workflows/ci.yml) on the pushed commit, as required by [AGENTS.md](../../AGENTS.md#validation). Preserve unrelated working changes and report every skipped required check with its reason.
 
 ## Non-goals
 

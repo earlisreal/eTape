@@ -108,7 +108,7 @@ export function liveView(src: TapeSource): TapeView {
 export function buildTapeRows(
   src: TapeSource,
   view: TapeView,
-  opts: { symbol: string; minSize: number; maxRows: number; latestPrice?: number | null | undefined },
+  opts: { symbol: string; minSize: number; maxRows: number },
 ): { rows: TapeRow[]; paused: boolean; scanned: number } {
   const last = src.lastSeq();
   // An anchor is only meaningful if it is still within the retained window:
@@ -138,7 +138,6 @@ export function buildTapeRows(
     raw.push(t);
     seqs.push(s);
   }
-  const decimals = quoteDecimals(opts.latestPrice);
   const rows = raw.map((t, i) => {
     const condition = t.condition;
     const rangeEligible = t.rangeEligible;
@@ -147,7 +146,7 @@ export function buildTapeRows(
     return {
       seq: seqs[i],
       time: formatTapeTime(t.ts),
-      price: formatPrice(t.price, decimals),
+      price: formatPrice(t.price, quoteDecimals(t.price)),
       size: formatSize(t.size),
       direction: t.direction,
       significance: t.significance ?? "none",

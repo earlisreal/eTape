@@ -8,6 +8,12 @@ and unpriced values add no visual row. Boundary rows use the warning palette,
 have no depth bar, size, order mark, or trade flash, and are never dashed
 markers or order/risk controls.
 
+Each price row and each bid/ask readout chooses precision from its own value:
+four decimal places for positive prices below $1, otherwise three. LULD
+Boundary Rows, bottom fallbacks, and accessible LULD values follow the same
+rule without requiring a latest trade. Spread uses four places for nonzero
+sub-dollar magnitudes, preserving its sign; zero remains `0.000`.
+
 When a Link Group has a selected Execution Venue, a non-flat Open Position for
 the ladder symbol with a finite positive Average Entry Price can project an
 Average-Entry Row cue. The cue uses exact numeric equality against ordinary

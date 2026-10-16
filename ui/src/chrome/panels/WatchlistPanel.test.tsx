@@ -34,6 +34,17 @@ function renderPanel(
 }
 
 describe("WatchlistPanel", () => {
+  it("formats each Last price with four places only below one dollar", () => {
+    const { watchlist } = renderPanel();
+    const prices = [0.1234, 0.5, 0.99996, 1, 0, null];
+    const symbols = prices.map((_, i) => `US.P${i}`);
+    act(() => watchlist.apply({ kind: "snapshot", topic: "watchlist.rows", payload: {
+      refreshedAt: new Date().toISOString(), symbols,
+      rows: prices.map((last, i) => ({ symbol: symbols[i], last, changePct: 0, volume: 100 })),
+    } }));
+    const cells = [...document.querySelectorAll("tbody tr")].map((tr) => tr.querySelectorAll("td")[1].textContent);
+    expect(cells).toEqual(["0.1234", "0.5000", "1.0000", "1.00", "0.00", "—"]);
+  });
   it("renders rows in the snapshot's payload order (symbols array), not the rows array's order", () => {
     const { watchlist } = renderPanel();
     act(() => watchlist.apply({ kind: "snapshot", topic: "watchlist.rows",

@@ -1,5 +1,5 @@
 import { test, expect, type Locator, type Page } from "@playwright/test";
-import type { Order, ProtectionWarning } from "../src/wire/contract";
+import type { ClosedTradeRow, Fill, Order, PositionRow, ProtectionWarning } from "../src/wire/contract";
 
 async function expectNoHorizontalOverflow(locator: Locator, name: string): Promise<void> {
   const metrics = await locator.evaluate((table) => ({
@@ -149,5 +149,65 @@ test("account order columns merge limit prices with compact headers and ET dates
     for (const column of ["price", "stopPrice"]) await expect(market.locator(`[data-column="${column}"]`)).toHaveText("—");
     await expectNoHorizontalOverflow(table, `${tab} orders with historical dates`);
     await table.screenshot({ path: `.playwright-mcp/account-price-${tab}-orders.png` });
+  }
+});
+
+test("sub-dollar prices fit all Account tables at normal and minimum column widths", async ({ page }, testInfo) => {
+  const now = Date.now();
+  const order: Order = {
+    venue: "sim-paper", id: "penny-order", symbol: "US.PENNY", side: "BUY", type: "STOP_LIMIT", tif: "DAY", session: "AUTO",
+    qty: 100, leavesQty: 60, executedQty: 40, limitPrice: 0.1234, stopPrice: 0.12, avgFillPrice: 0.1205,
+    status: "PARTIALLY_FILLED", rejectReason: "", replacesId: "", createdMs: now, updatedMs: now,
+  };
+  const position: PositionRow = { venue: "sim-paper", symbol: "US.PENNY", qty: 100, avgPrice: 0.1234, unrealizedPnl: 0.25, dayBasis: 0.1234, openedMs: now };
+  const fill: Fill = { venue: "sim-paper", orderId: order.id, symbol: order.symbol, side: "BUY", qty: 40, price: 0.1205, tsMs: now };
+  const trade: ClosedTradeRow = { venue: "sim-paper", symbol: order.symbol, qty: 100, isLong: true,
+    entryPrice: 0.1234, exitPrice: 0.1259, realized: 0.25, openMs: now - 1000, closeMs: now, seq: 1 };
+  await page.routeWebSocket("**/ws", (socket) => {
+    const server = socket.connectToServer();
+    server.onMessage((message) => {
+      if (typeof message !== "string") { socket.send(message); return; }
+      const frame = JSON.parse(message);
+      if (frame.kind === "snapshot") {
+        if (frame.topic === "exec.positions") frame.payload = [position];
+        if (frame.topic === "exec.orders") {
+          frame.payload = [order];
+          socket.send(JSON.stringify({ kind: "snapshot", topic: "exec.fills", payload: [fill] }));
+          socket.send(JSON.stringify({ kind: "snapshot", topic: "exec.trades", payload: [trade] }));
+        }
+        if (frame.topic === "exec.closedOrders") frame.payload = [{ ...order, status: "CANCELED" }];
+        if (frame.topic === "exec.trades") frame.payload = [trade];
+      }
+      socket.send(JSON.stringify(frame));
+    });
+  });
+  await addAccountPanel(page);
+  await page.getByRole("button", { name: "link group", exact: true }).click();
+  await page.getByRole("button", { name: "Blue group", exact: true }).click();
+  await page.getByTestId("acct-venue").selectOption("sim-paper");
+
+  const expectPricesFit = async (table: Locator, prices: Record<string, string>, screenshot: string) => {
+    for (const [column, text] of Object.entries(prices)) {
+      const cell = table.locator(`tbody [data-column="${column}"]`).first();
+      await expect(cell).toHaveText(text);
+      await cell.scrollIntoViewIfNeeded();
+      await expect(cell).toBeInViewport();
+      expect(await cell.evaluate((el) => el.scrollWidth <= el.clientWidth), `${column} text should fit its column`).toBe(true);
+    }
+    await page.screenshot({ path: testInfo.outputPath(screenshot) });
+  };
+  for (const width of [1280, 360]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.getByTestId("open-orders-tab").click();
+    await expectPricesFit(page.getByTestId("open-orders-table"), { price: "0.1234", stopPrice: "0.1200" }, `sub-dollar-${width}-open.png`);
+    await page.getByTestId("closed-orders-tab").click();
+    await expectPricesFit(page.getByTestId("closed-orders-table"), { price: "0.1234", stopPrice: "0.1200", avgFillPrice: "0.1205" }, `sub-dollar-${width}-closed.png`);
+    await page.getByRole("button", { name: /^Positions/ }).click();
+    await expectPricesFit(page.locator("table").filter({ has: page.locator("[data-column='flatten']") }), { avgPrice: "0.1234" }, `sub-dollar-${width}-positions.png`);
+    await page.getByRole("button", { name: "Fills", exact: true }).click();
+    await expectPricesFit(page.getByTestId("fills-table").locator("table"), { price: "0.1205" }, `sub-dollar-${width}-fills.png`);
+    await page.getByRole("button", { name: "Trade History", exact: true }).click();
+    await expectPricesFit(page.getByTestId("trade-history-table"), { entryPrice: "0.1234", exitPrice: "0.1259", diff: "0.0025" }, `sub-dollar-${width}-history.png`);
+    await expect(page.getByTestId("trade-history-table").locator('tbody [data-column="realized"]')).toHaveText("0.25");
   }
 });

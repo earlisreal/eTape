@@ -4,11 +4,11 @@ Create one focused Markdown file per approved change. Name `YYYY-MM-DD-short-fea
 
 Approved, implementation pending:
 
-- [Sub-dollar prices in tables](2026-10-16-sub-dollar-table-prices.md)
 - [Visible Range Volume Profile Indicator](2026-10-10-volume-profile-indicator.md)
 
 Implemented:
 
+- [Sub-dollar prices in tables](2026-10-16-sub-dollar-table-prices.md)
 - [Chart Risk Entry error toasts](2026-10-16-chart-risk-entry-error-toasts.md)
 - [Price-only Order Price Pills](2026-10-16-price-only-order-pills.md)
 - [Chart Risk Entry acceptance without a recent trade](2026-10-15-chart-risk-accept-without-ticks.md)

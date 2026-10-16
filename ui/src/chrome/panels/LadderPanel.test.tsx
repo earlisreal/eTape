@@ -198,6 +198,16 @@ describe("LadderPanel", () => {
     expect(container.querySelector("canvas")?.getAttribute("aria-label")).toContain("registry as of 2026-07-01");
   });
 
+  it("publishes mixed-price LULD bounds without a latest trade", () => {
+    const { stores, surface, container } = renderLadder();
+    stores.book.apply({ kind: "snapshot", topic: "md.book", payload: {
+      symbol: "US.AAPL", bids: [{ price: 0.9999, size: 10 }], asks: [{ price: 1, size: 20 }], ts: "t",
+      estimatedLuld: { lower: 0.9998, upper: 1.25, reference: 1, tier: "T1", state: "estimated", reason: "", registryAsOf: "2026-07-01" },
+    } });
+    surface().paint();
+    expect(container.querySelector("canvas")?.getAttribute("aria-label")).toContain("values 0.9998–1.250");
+  });
+
   it("publishes the selected venue's Average-Entry Row state and accessible name", () => {
     const { stores, surface, linkGroups, container } = renderLadder();
     linkGroups.focusVenue("green", "alpaca-paper");

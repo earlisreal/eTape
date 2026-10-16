@@ -50,6 +50,30 @@ function renderHarness(props: ReturnType<typeof mkProps>["props"], venue: string
 }
 
 describe("TradeHistoryTable", () => {
+  it("preserves sub-dollar Entry, Exit and signed Diff precision without changing total P&L", () => {
+    const { props, stores } = mkProps();
+    stores.trades.apply(snap([
+      row({ seq: 1, entryPrice: 0.1234, exitPrice: 0.1259, realized: 0.025 }),
+      row({ seq: 2, entryPrice: 0.5, exitPrice: 0.4975, realized: -0.025 }),
+      row({ seq: 3, entryPrice: 1, exitPrice: 1, realized: 0 }),
+      row({ seq: 4, entryPrice: 2.5, exitPrice: 1.25, realized: -12.5 }),
+      row({ seq: 5, entryPrice: 0, exitPrice: 0.99996, realized: 10 }),
+    ]));
+    renderHarness(props, "alpaca-paper");
+    const expected = [
+      ["0.1234", "0.1259", "0.0025", "0.03"],
+      ["0.5000", "0.4975", "-0.0025", "-0.03"],
+      ["1.00", "1.00", "0.00", "0.00"],
+      ["2.50", "1.25", "-1.25", "-12.50"],
+      ["0.00", "1.0000", "1.0000", "10.00"],
+    ];
+    expected.forEach((values, i) => {
+      const tr = screen.getByTestId(`trade-${i + 1}`);
+      expect(["entryPrice", "exitPrice", "diff", "realized"].map((col) => tr.querySelector(`[data-column="${col}"]`)?.textContent)).toEqual(values);
+    });
+    fireEvent.click(screen.getByTestId("trade-history-table").querySelector('th[data-column="entryPrice"]')!);
+    expect([...document.querySelectorAll("tbody tr")].map((tr) => tr.getAttribute("data-testid"))).toEqual(["trade-4", "trade-3", "trade-2", "trade-1", "trade-5"]);
+  });
   it("shows Diff as Exit minus Entry immediately after Exit and removes Venue", () => {
     const { props, stores } = mkProps();
     act(() => stores.trades.apply(snap([row({ seq: 1, entryPrice: 100, exitPrice: 104.5 })])));

@@ -2,7 +2,7 @@
 // palette arrive in the state so painting is deterministic (goldens).
 import type { Book, BookLevel, EstimatedLULD, TickDirection, Order } from "../../wire/contract";
 import type { Palette } from "../palette";
-import { formatPrice, quoteDecimals, QUOTE_DECIMALS } from "../format";
+import { formatPrice, quoteDecimals } from "../format";
 import { isWorking, sideIsSell } from "../../wire/orderStatus";
 
 export const MIN_LADDER_LEVELS = 1;
@@ -46,11 +46,6 @@ export interface TradeFlash {
   atMs: number;
 }
 
-export interface LastTrade {
-  price: number;
-  direction: TickDirection;
-}
-
 export interface LadderPaintState {
   symbol: string;
   entitled: boolean;
@@ -59,12 +54,10 @@ export interface LadderPaintState {
   bids: LadderEntry[];
   askFallback: LULDBoundaryRow | null;
   bidFallback: LULDBoundaryRow | null;
-  decimals: number;
   spread: number | null;
   luld: EstimatedLULD | null;
   averageEntryPrice: number | null;
   averageEntryRowVisible: boolean;
-  last: LastTrade | null;
   flash: TradeFlash | null;
   orders: OrderMark[];
   nowMs: number;
@@ -228,19 +221,18 @@ function luldReason(reason: string): string {
   }
 }
 
-function luldValues(luld: EstimatedLULD, decimals: number): string {
-  return `${formatPrice(luld.lower, decimals)}–${formatPrice(luld.upper, decimals)}`;
+function luldValues(luld: EstimatedLULD): string {
+  return `${formatPrice(luld.lower, quoteDecimals(luld.lower))}–${formatPrice(luld.upper, quoteDecimals(luld.upper))}`;
 }
 
 export function luldAccessibleText(
   symbol: string,
   luld: EstimatedLULD | null | undefined,
   averageEntryRowVisible = false,
-  decimals = QUOTE_DECIMALS,
 ): string {
   const averageEntry = averageEntryRowVisible ? "; Average-Entry Row visible" : "";
   if (!luld) return `DOM ladder ${symbol}${averageEntry}`;
-  const values = luld.state === "estimated" || luld.state === "frozen" ? `; values ${luldValues(luld, decimals)}` : "";
+  const values = luld.state === "estimated" || luld.state === "frozen" ? `; values ${luldValues(luld)}` : "";
   const registry = luld.registryAsOf ? `; registry as of ${luld.registryAsOf}` : "";
   const reason = luld.reason ? `; reason ${luldReason(luld.reason)}` : "";
   return `DOM ladder ${symbol}; Estimated LULD state ${luld.state}${values}; tier ${luld.tier}${registry}${reason}${averageEntry}`;
@@ -251,7 +243,6 @@ export function buildLadderState(args: {
   book: Book | undefined;
   orders: Order[];
   flash: TradeFlash | null;
-  last: LastTrade | null;
   nowMs: number;
   width: number;
   height: number;
@@ -275,13 +266,11 @@ export function buildLadderState(args: {
     bids: sides.bids,
     askFallback: sides.askFallback,
     bidFallback: sides.bidFallback,
-    decimals: quoteDecimals(args.last?.price),
     spread,
     luld: args.book?.estimatedLuld ?? null,
     averageEntryPrice,
     averageEntryRowVisible: hasVisibleAverageEntryRow(sides.bids, sides.bidFallback, averageEntryPrice, rowOffset, visibleRows)
       || hasVisibleAverageEntryRow(sides.asks, sides.askFallback, averageEntryPrice, rowOffset, visibleRows),
-    last: args.last,
     flash: args.flash,
     orders: workingOrderMarks(args.orders, args.symbol),
     nowMs: args.nowMs,

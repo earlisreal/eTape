@@ -3,6 +3,7 @@ import type { PanelProps } from "./registry";
 import type { WatchlistRow } from "../../gen/wsmsg";
 import { useTheme } from "../ThemeProvider";
 import { FONTS } from "../../render/palette";
+import { formatPrice, quoteDecimals } from "../../render/format";
 import { formatChangePct, formatCompactShares } from "../format";
 import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
 import { bareSymbol } from "../exec/orderStatus";
@@ -147,7 +148,7 @@ export function WatchlistPanel({ config, stores, linkGroups, commands, group: gr
                   boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : "none",
                   transition: "background 120ms ease" }}>
                 <td style={symCell}>{bareSymbol(r.symbol)}</td>
-                <td style={{ ...numCell, opacity: stale ? 0.55 : 1 }}>{r.last === null ? "—" : r.last.toFixed(2)}</td>
+                <td style={{ ...numCell, opacity: stale ? 0.55 : 1 }}>{r.last === null ? "—" : formatPrice(r.last, quoteDecimals(r.last, 2))}</td>
                 <td style={{ ...numCell, opacity: stale ? 0.55 : 1,
                   color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>
                   {formatChangePct(r.changePct)}

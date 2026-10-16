@@ -3,7 +3,7 @@
 // growing outward from the divider. Logical rows share one scroll offset;
 // beyond-depth LULD fallbacks occupy each side's bottom visible slot.
 import { FONTS } from "../palette";
-import { formatPrice, formatSize } from "../format";
+import { formatPrice, formatSize, quoteDecimals } from "../format";
 import {
   flashAlpha,
   LADDER_HEADER_H,
@@ -142,11 +142,11 @@ function drawSide(
     ctx.fillText(formatSize(row.size), PAD, midY);
     ctx.textAlign = "right";
     ctx.fillStyle = p.up;
-    ctx.fillText(formatPrice(row.price, s.decimals), mid - PAD, midY);
+    ctx.fillText(formatPrice(row.price, quoteDecimals(row.price)), mid - PAD, midY);
   } else {
     ctx.textAlign = "left";
     ctx.fillStyle = p.down;
-    ctx.fillText(formatPrice(row.price, s.decimals), mid + PAD, midY);
+    ctx.fillText(formatPrice(row.price, quoteDecimals(row.price)), mid + PAD, midY);
     ctx.textAlign = "right";
     ctx.fillStyle = p.text;
     ctx.fillText(formatSize(row.size), w - PAD, midY);
@@ -186,10 +186,10 @@ function drawLULDBoundary(
     ctx.textAlign = "left";
     ctx.fillText(label, PAD, midY);
     ctx.textAlign = "right";
-    ctx.fillText(formatPrice(row.price, s.decimals), mid - PAD, midY);
+    ctx.fillText(formatPrice(row.price, quoteDecimals(row.price)), mid - PAD, midY);
   } else {
     ctx.textAlign = "left";
-    ctx.fillText(formatPrice(row.price, s.decimals), mid + PAD, midY);
+    ctx.fillText(formatPrice(row.price, quoteDecimals(row.price)), mid + PAD, midY);
     ctx.textAlign = "right";
     ctx.fillText(label, s.width - PAD, midY);
   }
@@ -200,7 +200,7 @@ function spreadLabel(s: LadderPaintState): string {
   const bid = s.bids.find((row) => !isLULDBoundaryRow(row));
   const ask = s.asks.find((row) => !isLULDBoundaryRow(row));
   if (!bid || !ask || s.spread === null) return "";
-  return `${formatPrice(bid.price, s.decimals)} × ${formatPrice(ask.price, s.decimals)} · spread ${formatPrice(s.spread, s.decimals)}`;
+  return `${formatPrice(bid.price, quoteDecimals(bid.price))} × ${formatPrice(ask.price, quoteDecimals(ask.price))} · spread ${formatPrice(s.spread, quoteDecimals(Math.abs(s.spread)))}`;
 }
 
 function drawCentered(ctx: CanvasRenderingContext2D, s: LadderPaintState, title: string, sub?: string): void {

@@ -86,38 +86,36 @@ describe("buildTapeRows", () => {
     expect(rows[0]).toMatchObject({ time: "09:30:05", price: "3.500", size: "1,428" });
   });
 
-  it("uses four fixed places for every row when the live latest price is sub-dollar", () => {
+  it("formats mixed rows by their own price, including older sub-dollar prints", () => {
     const one = srcFrom([
-      mkTick(1, { price: 2.5 }),
-      mkTick(2, { price: 0.25 }),
+      mkTick(1, { price: 0.1234 }),
+      mkTick(2, { price: 2.5 }),
+      mkTick(3, { price: 0.25 }),
     ]);
     const { rows } = buildTapeRows(one, liveView(one), {
-      symbol: "US.AAPL", minSize: 0, maxRows: 2, latestPrice: 0.25,
+      symbol: "US.AAPL", minSize: 0, maxRows: 3,
     });
-    expect(rows.map((row) => row.price)).toEqual(["0.2500", "2.5000"]);
+    expect(rows.map((row) => row.price)).toEqual(["0.2500", "2.500", "0.1234"]);
   });
 
-  it("keeps paused filtered history tied to the live latest price", () => {
+  it("keeps paused filtered history precision independent of the latest price", () => {
     const source = srcFrom([
-      mkTick(1, { price: 2.5, size: 300 }),
-      mkTick(2, { price: 0.25, size: 100 }),
+      mkTick(1, { price: 0.1234, size: 300 }),
+      mkTick(2, { price: 2.5, size: 100 }),
       mkTick(3, { price: 3, size: 300 }),
     ]);
     const { rows, paused } = buildTapeRows(source, { anchorSeq: 1, generation: 1 }, {
-      symbol: "US.AAPL", minSize: 300, maxRows: 1, latestPrice: 0.5,
+      symbol: "US.AAPL", minSize: 300, maxRows: 1,
     });
     expect(paused).toBe(true);
-    expect(rows[0].price).toBe("2.5000");
+    expect(rows[0].price).toBe("0.1234");
   });
 
-  it("falls back to three places at one dollar or without a live latest price", () => {
-    const one = srcFrom([mkTick(1, { price: 1 })]);
-    expect(buildTapeRows(one, liveView(one), {
-      symbol: "US.AAPL", minSize: 0, maxRows: 1, latestPrice: 1,
-    }).rows[0].price).toBe("1.000");
+  it.each([[1, "1.000"], [0, "0.000"], [0.99996, "1.0000"]] as const)("formats the raw boundary price %s as %s", (price, want) => {
+    const one = srcFrom([mkTick(1, { price })]);
     expect(buildTapeRows(one, liveView(one), {
       symbol: "US.AAPL", minSize: 0, maxRows: 1,
-    }).rows[0].price).toBe("1.000");
+    }).rows[0].price).toBe(want);
   });
 
   it("is empty (not crashing) on an empty ring", () => {

@@ -16,7 +16,6 @@ import {
   LADDER_ROW_H,
   maxLadderOffset,
   normalizeLadderLevels,
-  type LastTrade,
   type TradeFlash,
 } from "../../render/ladder/ladderState";
 import { paintLadder } from "../../render/ladder/paintLadder";
@@ -70,19 +69,15 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
 
     const seedSymbol = symbolPropRef.current ?? configuredSymbol ?? "";
     let symbol = linkGroups.symbolFor(groupRef.current) ?? seedSymbol;
-    let last: LastTrade | null = null;
     let flash: TradeFlash | null = null;
     let tapeGen = stores.tape.generation(symbol);
     let tapeSeq = 0;
 
-    // Seed "last trade" from this symbol's own ring — O(1) via lastTick(), not
-    // the old backward scan over the (formerly global, now per-symbol) ring.
-    const seedLast = (): void => {
-      const t = stores.tape.lastTick(symbol);
-      last = t ? { price: t.price, direction: t.direction } : null;
+    // Baseline this symbol's ring so reseeding never replays old trade flashes.
+    const seedTape = (): void => {
       tapeSeq = stores.tape.source(symbol).lastSeq();
     };
-    seedLast();
+    seedTape();
 
     const reseedForGroup = () => {
       const next = linkGroups.symbolFor(groupRef.current) ?? symbolPropRef.current ?? configuredSymbol ?? "";
@@ -95,7 +90,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
         // or the very next paint would compare the new symbol's generation
         // against the OLD symbol's stale value and misfire the reconnect branch.
         tapeGen = stores.tape.generation(symbol);
-        seedLast();
+        seedTape();
       }
       forceRef.current++;
     };
@@ -141,7 +136,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
         if (tapeGen !== stores.tape.generation(symbol)) {
           tapeGen = stores.tape.generation(symbol);
           flash = null;
-          seedLast();
+          seedTape();
         }
         // Per-symbol source: every entry here IS `symbol`, so no more filtering —
         // the walk only visits new ticks for this symbol (was: the whole global ring).
@@ -150,7 +145,6 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
         for (let q = Math.max(tapeSeq + 1, src.oldestSeq()); q <= tip; q++) {
           const t = src.tickBySeq(q);
           if (t) {
-            last = { price: t.price, direction: t.direction };
             flash = { price: t.price, direction: t.direction, atMs: performance.now() };
           }
         }
@@ -175,7 +169,6 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
           orders: stores.exec.workingOrdersFor(symbol),
           averageEntryPrice,
           flash,
-          last,
           nowMs: performance.now(),
           width: w,
           height: h,
@@ -183,7 +176,7 @@ export function LadderPanel({ config, stores, scheduler, width, height, linkGrou
           levels: levelsRef.current,
           rowOffset: scrollOffsetRef.current,
         });
-        const accessibleText = luldAccessibleText(symbol, paintState.luld, paintState.averageEntryRowVisible, paintState.decimals);
+        const accessibleText = luldAccessibleText(symbol, paintState.luld, paintState.averageEntryRowVisible);
         if (accessibleText !== lastAccessibleText) {
           canvas.setAttribute("aria-label", accessibleText);
           lastAccessibleText = accessibleText;

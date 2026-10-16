@@ -74,6 +74,13 @@ describe("paintTape goldens (full-row color)", () => {
   for (const mode of ["light", "dark"] as const) {
     const palette = getPalette(mode);
 
+    it(`mixed prices around one dollar — ${mode}`, () => {
+      const mixed = sourceFor([0.0001, 0.1234, 0.99996, 1, 2.5].map((price, i) => mkTick(i + 1, { price })));
+      const { rows, paused } = buildTapeRows(mixed, liveView(mixed), { symbol: "US.AAPL", minSize: 0, maxRows: 20 });
+      expectGolden(`tapecolor-mixed-prices-${mode}`, renderScene(W, H, (ctx) =>
+        paintTape(ctx, { rows, paused, width: W, height: H, palette })));
+    });
+
     it(`live tape — buy/sell/neutral mix — ${mode}`, () => {
       const { rows, paused } = buildTapeRows(src, liveView(src), { symbol: "US.AAPL", minSize: 0, maxRows: 20 });
       expectGolden(`tapecolor-live-${mode}`, renderScene(W, H, (ctx) =>

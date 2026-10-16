@@ -47,6 +47,22 @@ describe("quoteDecimals", () => {
 });
 
 describe("formatPrice / formatSize", () => {
+  it.each([
+    [0.0001, "0.0001", "0.0001"],
+    [0.5, "0.5000", "0.5000"],
+    [0.9999, "0.9999", "0.9999"],
+    [0.99996, "1.0000", "1.0000"],
+    [0.00001, "0.0000", "0.0000"],
+    [1, "1.00", "1.000"],
+    [2.5, "2.50", "2.500"],
+    [0, "0.00", "0.000"],
+  ] as const)("formats raw price %s with each caller's normal precision", (price, two, three) => {
+    expect(formatPrice(price, quoteDecimals(price, 2))).toBe(two);
+    expect(formatPrice(price, quoteDecimals(price))).toBe(three);
+  });
+  it.each([null, undefined, NaN, Infinity, -Infinity, -0.5])("preserves the normal precision fallback for %s", (price) => {
+    expect(quoteDecimals(price, 2)).toBe(2);
+  });
   it("prints a uniform decimal column", () => {
     expect(formatPrice(3.5, 2)).toBe("3.50");
   });

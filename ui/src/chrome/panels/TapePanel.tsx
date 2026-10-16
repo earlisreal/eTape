@@ -153,7 +153,6 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
       const symbol = symbolRef.current;
       const { rows } = buildTapeRows(stores.tape.source(symbolRef.current), viewRef.current, {
         symbol, minSize: minSizeRef.current, maxRows: Math.ceil(canvasH / TAPE_ROW_H) + 1,
-        latestPrice: stores.tape.lastTick(symbol)?.price ?? null,
       });
       const row = rows[rowIndex];
       if (!row) {
@@ -201,7 +200,6 @@ export function TapePanel({ config, stores, scheduler, width, height, linkGroups
           symbol,
           minSize: minSizeRef.current,
           maxRows: Math.ceil(canvasH / TAPE_ROW_H) + 1,
-          latestPrice: stores.tape.lastTick(symbol)?.price ?? null,
         });
         // Guard here, not just inside recordScan: skipping the call avoids
         // building the template-literal id on every paint while disabled.

@@ -4,7 +4,7 @@ import type { PanelProps } from "./registry";
 import type { ScannerFilters, ScannerSession } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
 import { FONTS } from "../../render/palette";
-import { formatTapeTime } from "../../render/format";
+import { formatPrice, formatTapeTime, quoteDecimals } from "../../render/format";
 import { appendSsrMarker, formatChangePct, formatCompactShares, formatDollarTurnover, formatRelativeVolume, formatShortInterest, msUntilEtMidnight } from "../format";
 import { formatFilterSummary } from "./scannerFilter";
 import { toggleSort, sortIndicator, type SortState } from "../sortColumns";
@@ -386,7 +386,7 @@ export function ScannerPanel(
                   switch (column.col) {
                     case "sym": return <td key={column.col} style={symCell} title={r.shortSellRestricted ? "Short Sell Restricted — derived Rule 201 estimate" : undefined}>{appendSsrMarker(bareSymbol(r.symbol), r.shortSellRestricted)}</td>;
                     case "changePct": return <td key={column.col} style={{ ...numCell, color: r.changePct === null ? palette.textMuted : r.changePct > 0 ? palette.up : r.changePct < 0 ? palette.down : palette.text }}>{formatChangePct(r.changePct)}</td>;
-                    case "last": return <td key={column.col} style={numCell}>{r.last === null ? "—" : r.last.toFixed(2)}</td>;
+                    case "last": return <td key={column.col} style={numCell}>{r.last === null ? "—" : formatPrice(r.last, quoteDecimals(r.last, 2))}</td>;
                     case "float": return <td key={column.col} style={numCell}>{formatCompactShares(r.floatShares)}</td>;
                     case "relVol": return <td key={column.col} style={numCell} title="Latest daily volume divided by the mean of up to 50 preceding daily bars.">{formatRelativeVolume(r.relativeVolume)}</td>;
                     case "vol": return <td key={column.col} style={numCell} title="Latest reported base daily volume.">{formatCompactShares(r.volume)}</td>;

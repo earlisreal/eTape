@@ -42,6 +42,20 @@ function renderPanel(
 }
 
 describe("ScannerPanel", () => {
+  it("formats sub-dollar Last prices without changing dollar turnover", () => {
+    const { scanner } = renderPanel();
+    const prices = [0.1234, 0.5, 0.99996, 1, 0, null];
+    act(() => scanner.apply({ kind: "snapshot", topic: "scanner.rank", key: "premarket", payload: {
+      refreshedAt: new Date().toISOString(),
+      rows: prices.map((last, i) => ({ ...scannerShortInterestDefaults, symbol: `US.P${i}`,
+        last, changePct: i + 1, floatShares: 1000, volume: 100, turnover: 0.1234 })),
+    } }));
+    for (const [i, want] of ["0.1234", "0.5000", "1.0000", "1.00", "0.00", "—"].entries()) {
+      const cells = screen.getByText(`P${i}`).closest("tr")!.querySelectorAll("td");
+      expect(cells[2].textContent).toBe(want);
+      expect(cells[7].textContent).toBe("0.12");
+    }
+  });
   it("owns Scanner Sound while unmuted and persists a panel-local mute", () => {
     const scannerSound = vi.spyOn(soundEngine, "scannerHit").mockImplementation(() => {});
     const { scanner, onConfigChange, unmount } = renderPanel();

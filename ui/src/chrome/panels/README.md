@@ -29,6 +29,13 @@ PRICE holds the limit price for LIMIT, STOP_LIMIT, and LIT; STOP holds the
 trigger for STOP, STOP_LIMIT, and LIT. Unused price fields show `—`.
 TYPE uses MKT/LMT/STP/STPLMT/LIT. Saved Stop Limit sorting maps to PRICE with its
 direction preserved; existing widths for surviving columns remain in use.
+Account price columns, Scanner Last, and Watchlist Last show four decimal
+places for positive prices below $1, including trailing zeros. Prices at $1
+and above and numeric zero keep each column's existing precision; unavailable
+or inapplicable prices keep `—`. Trade History Diff uses four places for
+nonzero magnitudes below $1, preserving its sign. Balances, total P&L, fees,
+and Dollar Turnover retain their existing formats. Formatting never changes
+stored values, numeric sorting, or exported trade data.
 Open QTY remains the remaining share count when available; Closed QTY is the
 original quantity alongside FILLED and AVG FILL. TIME shows submitted time
 for Open Orders and closed time for Closed Orders. Both show

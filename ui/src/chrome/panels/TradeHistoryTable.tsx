@@ -2,7 +2,7 @@ import { useMemo, useState, useSyncExternalStore } from "react";
 import type { PanelProps } from "./registry";
 import type { ClosedTradeRow } from "../../wire/contract";
 import { useTheme } from "../ThemeProvider";
-import { formatPrice, formatSize, formatClock, formatDuration } from "../../render/format";
+import { formatPrice, formatSize, formatClock, formatDuration, quoteDecimals } from "../../render/format";
 import { bareSymbol } from "../exec/orderStatus";
 import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
 import { ColumnGroup, ColumnResizeHandle, useResizableColumns, type ResizableColumn } from "./ResizableColumns";
@@ -101,9 +101,9 @@ export function TradeHistoryTable({
               <tr key={r.seq} data-testid={`trade-${r.seq}`} style={{ textAlign: "center", borderTop: `1px solid ${palette.border}` }}>
                 <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
                 <td data-column="qty">{formatSize(r.qty)}</td>
-                <td data-column="entryPrice">{formatPrice(r.entryPrice, 2)}</td>
-                <td data-column="exitPrice">{formatPrice(r.exitPrice, 2)}</td>
-                <td data-column="diff">{formatPrice(r.exitPrice - r.entryPrice, 2)}</td>
+                <td data-column="entryPrice">{formatPrice(r.entryPrice, quoteDecimals(r.entryPrice, 2))}</td>
+                <td data-column="exitPrice">{formatPrice(r.exitPrice, quoteDecimals(r.exitPrice, 2))}</td>
+                <td data-column="diff">{formatPrice(r.exitPrice - r.entryPrice, quoteDecimals(Math.abs(r.exitPrice - r.entryPrice), 2))}</td>
                 <td data-column="realized" style={{ color: r.realized >= 0 ? palette.up : palette.down }}>{formatPrice(r.realized, 2)}</td>
                 <td data-column="openMs" style={{ color: palette.textMuted }}>{formatClock(r.openMs)}</td>
                 <td data-column="closeMs" style={{ color: palette.textMuted }}>{formatClock(r.closeMs)}</td>

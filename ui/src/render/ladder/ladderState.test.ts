@@ -201,18 +201,10 @@ describe("flashAlpha", () => {
 
 describe("buildLadderState", () => {
   const palette = getPalette("light");
-  const base = { symbol: "US.AAPL", book: book(), orders: [], flash: null, last: null, nowMs: 0, width: 300, height: 486, palette };
-  it("derives spread from all visible prices; decimals are fixed at 3 (no flicker as sub-penny ticks arrive)", () => {
+  const base = { symbol: "US.AAPL", book: book(), orders: [], flash: null, nowMs: 0, width: 300, height: 486, palette };
+  it("derives spread from the book", () => {
     const s = buildLadderState(base);
     expect(s.spread).toBeCloseTo(0.02, 9);
-    expect(s.decimals).toBe(3);
-  });
-  it("uses four decimals for a sub-dollar latest trade", () => {
-    expect(buildLadderState({ ...base, last: { price: 0.5, direction: "BUY" } }).decimals).toBe(4);
-  });
-  it("keeps the three-decimal fallback at exactly one dollar and without a trade", () => {
-    expect(buildLadderState({ ...base, last: { price: 1, direction: "BUY" } }).decimals).toBe(3);
-    expect(buildLadderState(base).decimals).toBe(3);
   });
   it("has null spread when a side is empty", () => {
     const s = buildLadderState({ ...base, book: book({ asks: [] }) });
@@ -264,7 +256,7 @@ describe("buildLadderState", () => {
     expect(sides.askFallback).toEqual({ kind: "luld", price: 130, frozen: false });
     const maxOffset = maxLadderOffset(deep, 5, 36 + 3 * 22);
     const scrolled = buildLadderState({
-      symbol: "US.AAPL", book: deep, orders: [], flash: null, last: null, nowMs: 0,
+      symbol: "US.AAPL", book: deep, orders: [], flash: null, nowMs: 0,
       width: 300, height: 36 + 3 * 22, palette: getPalette("light"), levels: 5, rowOffset: maxOffset,
     });
     expect(scrolled.bids.slice(maxOffset, maxOffset + 2).some((row) => !isLULDBoundaryRow(row) && row.price === 96)).toBe(true);
@@ -274,7 +266,7 @@ describe("buildLadderState", () => {
     const state = buildLadderState({
       symbol: "US.AAPL",
       book: book({ estimatedLuld: luld({ state: "frozen", reason: "provider_status" }) }),
-      orders: [], flash: null, last: null, nowMs: 0, width: 300, height: 80,
+      orders: [], flash: null, nowMs: 0, width: 300, height: 80,
       palette: getPalette("light"), levels: 10, rowOffset: 1,
     });
     expect(state.bids.findIndex(isLULDBoundaryRow)).toBe(2);
@@ -304,12 +296,12 @@ describe("buildLadderState", () => {
     expect(luldAccessibleText("US.AAPL", luld({ state: "frozen", reason: "provider_status" })))
       .toContain("state frozen; values 3.475–3.515; tier T1; registry as of 2026-07-01; reason PROVIDER STATUS");
   });
-  it("uses the selected precision for sub-dollar LULD accessibility values", () => {
-    expect(luldAccessibleText("US.PENNY", luld({ lower: 0.3475, upper: 0.3515 }), false, 4))
-      .toContain("values 0.3475–0.3515");
+  it("formats each LULD accessibility bound independently without a trade", () => {
+    expect(luldAccessibleText("US.PENNY", luld({ lower: 0.3475, upper: 1.25 })))
+      .toContain("values 0.3475–1.250");
   });
 
-  it("uses one selected precision for rows, spread, and LULD fallbacks", () => {
+  it("formats sub-dollar rows, spread, and LULD fallbacks without a trade", () => {
     const testBook = book({
       bids: [{ price: 0.349, size: 10 }],
       asks: [{ price: 0.351, size: 20 }],
@@ -321,11 +313,30 @@ describe("buildLadderState", () => {
       beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, setLineDash() {},
     } as unknown as CanvasRenderingContext2D;
     paintLadder(ctx, buildLadderState({
-      ...base, book: testBook, last: { price: 0.5, direction: "BUY" }, height: 80, levels: 1,
+      ...base, book: testBook, height: 80, levels: 1,
     }));
     expect(texts).toContain("0.3490 × 0.3510 · spread 0.0020");
     expect(texts).toContain("0.3000");
     expect(texts).toContain("0.4000");
+  });
+
+  it.each([
+    [0.9999, 1, "0.9999 × 1.000 · spread 0.0001"],
+    [1, 0.9999, "1.000 × 0.9999 · spread -0.0001"],
+    [1, 1, "1.000 × 1.000 · spread 0.000"],
+  ])("formats mixed-price rows and signed spread for bid %s / ask %s", (bid, ask, strip) => {
+    const { ctx, draws } = recordingContext();
+    const state = buildLadderState({ ...base, averageEntryPrice: bid, book: book({
+      bids: [{ price: bid, size: 10 }], asks: [{ price: ask, size: 20 }],
+      estimatedLuld: luld({ lower: 0.9998, upper: 1.25 }),
+    }) });
+    paintLadder(ctx, state);
+    const texts = draws.map((draw) => draw.text);
+    expect(texts).toContain(strip);
+    expect(texts).toContain("0.9998");
+    expect(texts).toContain("1.250");
+    expect(draws.some((draw) => draw.text === strip.split(" × ")[0] && draw.font.startsWith("700 "))).toBe(true);
+    expect(luldAccessibleText(state.symbol, state.luld, state.averageEntryRowVisible)).toContain("values 0.9998–1.250");
   });
 
   it("keeps the BBO strip and omits dashed markers", () => {
@@ -342,7 +353,7 @@ describe("buildLadderState", () => {
       beginPath() {}, moveTo() {}, lineTo() {}, stroke() {}, setLineDash() { dashed++; },
     } as unknown as CanvasRenderingContext2D;
     paintLadder(ctx, buildLadderState({
-      symbol: "US.AAPL", book: testBook, orders: [], flash: null, last: null, nowMs: 0,
+      symbol: "US.AAPL", book: testBook, orders: [], flash: null, nowMs: 0,
       width: 300, height: 80, palette: getPalette("light"), levels: 10,
     }));
     expect(texts).toContain("99.000 × 101.000 · spread 2.000");
@@ -353,7 +364,7 @@ describe("buildLadderState", () => {
 
 describe("Average-Entry Row", () => {
   const palette = getPalette("light");
-  const base = { symbol: "US.AAPL", book: book(), orders: [], flash: null, last: null, nowMs: 0, width: 300, height: 480, palette };
+  const base = { symbol: "US.AAPL", book: book(), orders: [], flash: null, nowMs: 0, width: 300, height: 480, palette };
 
   it("matches a valid exact real row and bolds its price and size", () => {
     const state = buildLadderState({ ...base, averageEntryPrice: 3.49 });

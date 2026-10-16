@@ -43,12 +43,21 @@ const workingOrders: Order[] = [
 describe("paintLadder goldens (two-column layout)", () => {
   for (const mode of ["light", "dark"] as const) {
     const palette = getPalette(mode);
-    const base = { orders: [] as Order[], flash: null, last: null, nowMs: NOW, width: W, height: H, palette };
+    const base = { orders: [] as Order[], flash: null, nowMs: NOW, width: W, height: H, palette };
+
+    it(`mixed prices around one dollar with Average Entry and LULD — ${mode}`, () => {
+      const s = buildLadderState({ ...base, symbol: "US.PENNY", averageEntryPrice: 0.9999, book: {
+        symbol: "US.PENNY", ts: "t",
+        bids: [{ price: 0.9999, size: 300 }, { price: 0.9998, size: 100 }],
+        asks: [{ price: 1, size: 200 }, { price: 1.0001, size: 400 }],
+        estimatedLuld: { lower: 0.98, upper: 1.02, reference: 1, tier: "T1", state: "estimated", reason: "", registryAsOf: "2026-07-01" },
+      } });
+      expectGolden(`ladder2col-mixed-prices-${mode}`, renderScene(W, H, (ctx) => paintLadder(ctx, s)));
+    });
 
     it(`full book with working-order marks (both sides) — ${mode}`, () => {
       const s = buildLadderState({
         ...base, symbol: "US.AAPL", book: fullBook(), orders: workingOrders,
-        last: { price: 3.51, direction: "BUY" },
       });
       expectGolden(`ladder2col-full-${mode}`, renderScene(W, H, (ctx) => paintLadder(ctx, s)));
     });
@@ -71,7 +80,6 @@ describe("paintLadder goldens (two-column layout)", () => {
     it(`last-trade flash mid-decay — ${mode}`, () => {
       const s = buildLadderState({
         ...base, symbol: "US.AAPL", book: fullBook(),
-        last: { price: 3.51, direction: "BUY" },
         flash: { price: 3.51, direction: "BUY", atMs: NOW - FLASH_MS / 2 }, // alpha 0.5
       });
       expectGolden(`ladder2col-flash-${mode}`, renderScene(W, H, (ctx) => paintLadder(ctx, s)));

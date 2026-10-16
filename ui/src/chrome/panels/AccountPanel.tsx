@@ -11,7 +11,7 @@ import { useAccountDemand } from "../exec/useAccountDemand";
 import { useOrderConfig } from "../exec/useOrderConfig";
 import { resolvePlaceTemplate } from "../exec/resolveTemplate";
 import type { PlaceOrderTemplate } from "../exec/actionTemplate";
-import { formatClock, formatEtDateTime, formatPrice, formatSize } from "../../render/format";
+import { formatClock, formatEtDateTime, formatPrice, formatSize, quoteDecimals } from "../../render/format";
 import { displayStatus, STATUS_LABEL, sideLabel, bareSymbol, abbrevType, isTerminal, isWorking, type DisplayStatus } from "../exec/orderStatus";
 import { toggleSort, sortRows, sortIndicator, type SortState } from "../sortColumns";
 import type { OrderView } from "../../data/ExecStore";
@@ -169,7 +169,7 @@ function readClosedSort(s: Record<string, unknown>): SortState {
 function OrderPriceCells({ order }: { order: Pick<Order, "type" | "limitPrice" | "stopPrice"> }): JSX.Element {
   return <>{ORDER_PRICE_COLUMNS.map((column) => {
     const value = ORDER_PRICE_ACCESSORS[column.col](order);
-    const text = value === null ? "—" : typeof value === "number" ? formatPrice(value, 3) : value;
+    const text = value === null ? "—" : typeof value === "number" ? formatPrice(value, quoteDecimals(value)) : value;
     return <td key={column.col} data-column={column.col} title={text} style={{ padding: "2px 8px", overflow: "hidden", textOverflow: "ellipsis" }}>{text}</td>;
   })}</>;
 }
@@ -305,7 +305,7 @@ function OrdersTable({
                 ? `${order.deferredPositionPct}% position` : formatSize(order.qty)}</td>
               <td data-column="executedQty">{formatSize(order.executedQty)}</td>
               <OrderPriceCells order={order} />
-              <td data-column="avgFillPrice">{order.executedQty > 0 ? formatPrice(order.avgFillPrice, 3) : "—"}</td>
+              <td data-column="avgFillPrice">{order.executedQty > 0 ? formatPrice(order.avgFillPrice, quoteDecimals(order.avgFillPrice)) : "—"}</td>
               <td data-column="state">{danger ? <span className="chip chip-rejected" data-chip="rejected">{STATUS_LABEL[order.status]}</span>
                 : <span style={{ color: muted ? palette.textMuted : palette.text }}>{STATUS_LABEL[order.status]}</span>}
                 {custody && <div style={{ color: palette.textMuted, fontSize: 10 }}>{custody}</div>}</td>
@@ -480,7 +480,7 @@ function PositionsTable({
                     boxShadow: selected ? `inset 0 0 0 1px ${palette.accent}` : "none", transition: "background 120ms ease" }}>
                   <td data-column="symbol" style={{ padding: "2px 8px" }}>{bareSymbol(r.symbol)}</td>
                   <td data-column="qty" style={{ color: r.qty >= 0 ? palette.up : palette.down }}>{formatSize(r.qty)}</td>
-                  <td data-column="avgPrice">{formatPrice(r.avgPrice, 2)}</td>
+                  <td data-column="avgPrice">{formatPrice(r.avgPrice, quoteDecimals(r.avgPrice, 2))}</td>
                   {(() => {
                     const quote = stores.quote.get(r.symbol);
                     const dUnrealized = displayUnrealized(quote, r.avgPrice, r.qty, r.unrealizedPnl);
@@ -538,7 +538,7 @@ function FillsTable({ stores, palette, venue, cycleStartMs, config, onConfigChan
       </th>)}
     </tr></thead><tbody>{fills.map((f, n) => <tr key={`${f.orderId}-${f.tsMs}-${n}`} style={{ borderTop:`1px solid ${palette.border}` }}>
       <td data-column="symbol" style={cell}>{bareSymbol(f.symbol)}</td><td data-column="side" style={cell}>{sideLabel(f.side)}</td>
-      <td data-column="qty" style={cell}>{formatSize(f.qty)}</td><td data-column="price" style={cell}>{formatPrice(f.price, 2)}</td>
+      <td data-column="qty" style={cell}>{formatSize(f.qty)}</td><td data-column="price" style={cell}>{formatPrice(f.price, quoteDecimals(f.price, 2))}</td>
       <td data-column="time" style={cell}>{formatClock(f.tsMs)}</td><td data-column="orderId" style={cell}>{f.orderId}</td>
     </tr>)}</tbody></table>
   </div>;

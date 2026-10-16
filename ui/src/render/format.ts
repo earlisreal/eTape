@@ -29,14 +29,13 @@ export function formatPrice(price: number, decimals: number): string {
 }
 
 /**
- * Fixed decimal count for live quote/limit-price display (ladder bid/ask, order
- * ticket, tape prints): a value-derived count (priceDecimals) flickers as ticks
- * cross a sub-penny boundary, so these surfaces pin to 3 instead.
+ * Fixed precision by price range, rather than by incoming fractional digits:
+ * four below $1, otherwise the caller's normal precision (three by default).
  */
 export const QUOTE_DECIMALS = 3;
 
-export function quoteDecimals(price: number | null | undefined): number {
-  return typeof price === "number" && Number.isFinite(price) && price > 0 && price < 1 ? 4 : QUOTE_DECIMALS;
+export function quoteDecimals(price: number | null | undefined, normalDecimals = QUOTE_DECIMALS): number {
+  return typeof price === "number" && Number.isFinite(price) && price > 0 && price < 1 ? 4 : normalDecimals;
 }
 
 // Module-level Intl formatter singletons. These surfaces (ladder, tape) call
