@@ -1,7 +1,7 @@
 # Chart Risk Entry error toasts
 
 Status: approved — Earl confirmed shared understanding on 2026-10-16;
-implementation pending.
+implemented.
 
 Implementation: [plan](../../docs/plans/2026-10-16-chart-risk-entry-error-toasts.md).
 
@@ -79,3 +79,5 @@ No live orders are part of planning or validation.
   existing pause/reconciliation behavior retained.
 - Q9: Earl confirmed the plan and shared understanding. Approval covers the
   planning documents; implementation remains a separate request.
+- Earl requested implementation on 2026-10-16; the entry feedback behavior is
+  implemented without engine or WebSocket contract changes.

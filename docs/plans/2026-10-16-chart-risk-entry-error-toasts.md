@@ -1,7 +1,7 @@
 # Chart Risk Entry error toasts
 
 Status: approved — Earl confirmed shared understanding on 2026-10-16;
-implementation pending.
+implemented.
 
 Design: [specification](../../.scratch/chart-risk-entry-error-toasts/spec.md).
 

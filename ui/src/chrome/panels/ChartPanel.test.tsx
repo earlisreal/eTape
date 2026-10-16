@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, cleanup, fireEvent, within, screen, act } from "@testing-library/react";
 import { ThemeProvider } from "../ThemeProvider";
+import { ToastProvider } from "../Toast";
 
 // Mock lightweight-charts so the panel test never touches a real canvas.
 // timeScaleApi is a stable object (not a fresh literal per call) so a test can hold
@@ -96,12 +97,12 @@ function renderChart(id = "c1", sharedStores?: ReturnType<typeof makeStores>, sh
   const config = { id, panelId: "chart", group: "green" as const, settings: { symbol: "US.AAPL", timeframe: "1m", ...settingsOverride } };
   const onConfigChange = vi.fn();
   const panel = (group?: PanelConfig["group"], symbol?: string) => (
-    <ThemeProvider>
+    <ThemeProvider><ToastProvider>
       <ChartPanel config={config} stores={stores} scheduler={scheduler} width={400} height={300}
         linkGroups={linkGroups} commands={commands} onConfigChange={onConfigChange}
         monitoring={monitoring}
         {...(group === undefined ? {} : { group })} {...(symbol === undefined ? {} : { symbol })} />
-    </ThemeProvider>
+    </ToastProvider></ThemeProvider>
   );
   const utils = render(panel());
   return { ...utils, stores, onConfigChange, scheduler, commands, linkGroups,

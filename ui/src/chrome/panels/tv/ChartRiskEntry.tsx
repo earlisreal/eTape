@@ -9,6 +9,7 @@ import { CHART_RISK_ENTRY_EVENT, type OrderConfig, type RiskEntryTemplate } from
 import { riskEntrySize } from "../../exec/riskEntry";
 import type { LinkGroup, LinkGroups } from "../../linkGroups";
 import { modalTracker } from "../../modalTracker";
+import { useToasts } from "../../Toast";
 import { attachOrderPillLayer } from "./orderPillLayer";
 interface Props {
     chrome: TvChrome;
@@ -43,6 +44,7 @@ type Draft = {
     error?: string;
 };
 export function ChartRiskEntry(props: Props): JSX.Element {
+    const { push } = useToasts();
     const rootRef = useRef<HTMLDivElement | null>(null);
     const pillLayer = useRef<ReturnType<typeof attachOrderPillLayer> | null>(null);
     useEffect(() => {
@@ -250,13 +252,19 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (!draft?.complete || draft.busy || draft.unknown || draft.buy === undefined || draft.sell === undefined)
                 return;
             const current = draft;
+            const symbol = latest.current.symbol;
+            const notify = (reason: string, unknown = false) => {
+                const detail = unknown ? "status unknown. Verify Orders; do not resubmit." + (reason ? ` ${reason}` : "") : reason;
+                push({ level: unknown ? "warn" : "danger", text: `${symbol} (${venue}) Chart Risk Entry ${detail}` });
+            };
             // Refresh custody/session at submit; eligible trades govern activation.
             current.busy = true;
             paint();
             try {
-                current.route = await latest.current.sendQuery("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol: latest.current.symbol, riskEntry: true }) as StopLimitRoutePreview;
+                current.route = await latest.current.sendQuery("QueryStopLimitRoute", { tif: "DAY", session: "EXTENDED", symbol, riskEntry: true }) as StopLimitRoutePreview;
             }
             catch {
+                notify("not sent: Engine preview unavailable.");
                 if (draft === current) {
                     current.busy = false;
                     current.error = "Engine preview unavailable.";
@@ -272,13 +280,16 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             if (error || !s || !s.qty) {
                 current.busy = false;
                 current.error = error || "Zero shares.";
+                notify(`not sent: ${current.error}`);
                 paint();
                 return;
             }
-            const args: SubmitRiskEntryArgs = { venue, symbol: latest.current.symbol, buyStop: current.buy!, sellStop: current.sell!, mode: current.template.mode, value: current.template.value,
+            const args: SubmitRiskEntryArgs = { venue, symbol, buyStop: current.buy!, sellStop: current.sell!, mode: current.template.mode, value: current.template.value,
                 maxQty: Math.min(current.maxQty, s.qty), buyCushion: current.template.buyCushion, sellCushion: current.template.sellCushion };
             try {
                 const ack = await latest.current.sendCommand("SubmitRiskEntry", args);
+                if (ack.ambiguous) notify(ack.reason || "", true);
+                else if (ack.status !== "accepted") notify(`rejected: ${ack.reason || "Pair rejected."}`);
                 if (draft !== current)
                     return;
                 if (ack.ambiguous) {
@@ -290,11 +301,12 @@ export function ChartRiskEntry(props: Props): JSX.Element {
                     clear();
                 else {
                     current.busy = false;
-                    current.error = ack.reason ?? "Pair rejected.";
+                    current.error = ack.reason || "Pair rejected.";
                     paint();
                 }
             }
-            catch {
+            catch (error) {
+                notify(error instanceof Error ? error.message : "", true);
                 if (draft === current) {
                     current.unknown = true;
                     current.busy = false;
@@ -498,7 +510,7 @@ export function ChartRiskEntry(props: Props): JSX.Element {
             window.removeEventListener("pointercancel", clear);
             rootRef.current?.removeEventListener("click", click);
         };
-    }, [props.active, props.group, props.symbol, props.contextKey, props.activeTool, props.config.templates, props.layoutRef, venue]);
+    }, [props.active, props.group, props.symbol, props.contextKey, props.activeTool, props.config.templates, props.layoutRef, venue, push]);
     return <div ref={rootRef} data-testid="chart-risk-entry" style={{ display: "none", position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none" }}>
     <div data-order-line data-risk-buy style={{ position: "absolute", left: 0, borderTop: `2px dashed ${props.chrome.up}` }}/>
     <div data-order-line data-risk-sell style={{ position: "absolute", left: 0, borderTop: `2px dashed ${props.chrome.down}` }}/>

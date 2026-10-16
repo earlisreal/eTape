@@ -7,6 +7,9 @@ import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
 import { getTvChrome } from "../../../render/chart/tvTheme";
 import { initiateChartRiskEntry, type RiskEntryTemplate } from "../../exec/actionTemplate";
 import { ChartRiskEntry } from "./ChartRiskEntry";
+import { ThemeProvider } from "../../ThemeProvider";
+import { ToastProvider } from "../../Toast";
+import type { AckMsg, StopLimitRoutePreview } from "../../../wire/contract";
 const template: RiskEntryTemplate = { kind: "risk", id: "r", label: "Risk", mode: "Dollar", value: 100, buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } };
 function mount(auto = false, preset = template) {
     const stores = makeStores();
@@ -18,11 +21,11 @@ function mount(auto = false, preset = template) {
     document.body.append(host);
     host.getBoundingClientRect = () => ({ x: 0, y: 0, top: 0, left: 0, right: 500, bottom: 400, width: 500, height: 400, toJSON: () => ({}) });
     const facadeRef = { current: { setOrderCrosshair: vi.fn(), priceScaleWidth: () => 60, paneHeights: () => [400], coordinateToPrice: (y: number) => 12 - y / 100, priceToCoordinate: (p: number) => (12 - p) * 100 } as unknown as ChartApiFacade };
-    const sendCommand = vi.fn(async (name: string, args: unknown) => { void name; void args; return { kind: "ack" as const, corrId: "1", status: "accepted" as const, orderId: "E1" }; });
-    const sendQuery = vi.fn(async () => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "RTH", deadlineMs: Date.now() + 100000, hasTrustedEligiblePrint: true, lastEligiblePrice: 9, lastEligibleTsMs: Date.now() }));
+    const sendCommand = vi.fn(async (name: string, args: unknown): Promise<AckMsg> => { void name; void args; return { kind: "ack", corrId: "1", status: "accepted", orderId: "E1" }; });
+    const sendQuery = vi.fn(async (): Promise<StopLimitRoutePreview> => ({ route: "ENGINE_HELD", effectiveSession: "EXTENDED", phase: "RTH", deadlineMs: Date.now() + 100000, hasTrustedEligiblePrint: true, lastEligiblePrice: 9, lastEligibleTsMs: Date.now() }));
     const layoutRef = { current: () => {} };
     const element = (symbol = "AAPL") => <ChartRiskEntry chrome={getTvChrome("light")} panelId="chart" active group="green" symbol={symbol} contextKey="1m" hostRef={{ current: host }} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} config={{ activeVenue: "sim", templates: [preset], chartRiskAutoSend: auto }} configLoaded activeTool="select" chooserOpenRef={{ current: false }} layoutRef={layoutRef} sendCommand={sendCommand} sendQuery={sendQuery}/>;
-    const result = render(element(), { container: host });
+    const result = render(element(), { container: host, wrapper: ({ children }) => <ThemeProvider><ToastProvider>{children}</ToastProvider></ThemeProvider> });
     sendCommand.mockClear();
     return { ...result, host, sendCommand, sendQuery, facadeRef, layoutRef, stores, changeSymbol: (symbol: string) => result.rerender(element(symbol)) };
 }
@@ -53,6 +56,74 @@ beforeEach(() => {
     vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => { frames.set(++frameId, cb); return frameId; });
     vi.stubGlobal("cancelAnimationFrame", (id: number) => frames.delete(id));
     vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+});
+it.each(["manual", "drag", "click"] as const)("toasts a closed-session failure once per %s attempt and keeps prices", async mode => {
+    const { host, sendCommand, sendQuery, layoutRef } = mount(mode !== "manual");
+    const reason = "risk entry is unavailable outside PRE/RTH/POST";
+    sendQuery.mockResolvedValue({ ...await sendQuery(), reason });
+    sendQuery.mockClear();
+    initiateChartRiskEntry(template);
+    await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toContain(reason));
+    expect(screen.queryByRole("alert")).toBeNull();
+    placeRiskPair(host, mode === "click" ? "click" : "drag");
+    if (mode === "manual") {
+        expect(screen.queryByRole("alert")).toBeNull();
+        fireEvent.keyDown(window, { key: "Enter" });
+    }
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(1));
+    expect(screen.getByRole("alert").textContent).toBe(`AAPL (sim) Chart Risk Entry not sent: ${reason}`);
+    expect(host.querySelector("[data-risk-price='buy']")?.textContent).toBe("10.00");
+    expect(host.querySelector("[data-risk-price='sell']")?.textContent).toBe("9.80");
+    layoutRef.current(); flushFrames();
+    expect(screen.getAllByRole("alert")).toHaveLength(1);
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
+    expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
+    sendQuery.mockResolvedValue({ ...await sendQuery(), reason: "" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    await waitFor(() => expect(screen.getByTestId("chart-risk-entry").style.display).toBe("none"));
+    expect(screen.getAllByRole("alert")).toHaveLength(2);
+});
+it.each(["query", "blocked", "fallback", "ambiguous", "throw"])("reports %s submission feedback without retrying unknown orders", async outcome => {
+    const { host, sendCommand, sendQuery } = mount(true);
+    initiateChartRiskEntry(template);
+    await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe(""));
+    if (outcome === "query") sendQuery.mockRejectedValueOnce(new Error("offline"));
+    else if (outcome === "throw") sendCommand.mockRejectedValueOnce(new Error("disconnected"));
+    else sendCommand.mockResolvedValueOnce({ kind: "ack", corrId: "1", status: "blocked", reason: outcome === "blocked" ? "Insufficient funds" : "", ambiguous: outcome === "ambiguous" });
+    placeRiskPair(host);
+    const expected = outcome === "query" ? "not sent: Engine preview unavailable." : outcome === "blocked" ? "rejected: Insufficient funds"
+        : outcome === "fallback" ? "rejected: Pair rejected." : `status unknown. Verify Orders; do not resubmit.${outcome === "throw" ? " disconnected" : ""}`;
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe(`AAPL (sim) Chart Risk Entry ${expected}`));
+    if (outcome === "ambiguous" || outcome === "throw") {
+        fireEvent.keyDown(window, { key: "Enter" });
+        expect(sendCommand.mock.calls.filter(([name]) => name === "SubmitRiskEntry")).toHaveLength(1);
+        expect(screen.getAllByRole("alert")).toHaveLength(1);
+    }
+});
+it.each(["blocked", "ambiguous", "throw", "query"])("reports a late %s result without changing a replacement draft", async outcome => {
+    const { host, sendCommand, sendQuery, changeSymbol } = mount(true);
+    initiateChartRiskEntry(template);
+    await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe(""));
+    let finish!: () => void;
+    if (outcome === "query") {
+        sendQuery.mockReturnValueOnce(new Promise((_resolve, reject) => { finish = () => reject(new Error("offline")); }));
+    } else {
+        sendCommand.mockReturnValueOnce(new Promise((resolve, reject) => { finish = () => {
+            if (outcome === "throw") reject(new Error("offline"));
+            else resolve({ kind: "ack", corrId: "1", status: "blocked", reason: "Venue rejected", ambiguous: outcome === "ambiguous" });
+        }; }));
+    }
+    placeRiskPair(host);
+    await waitFor(() => expect(finish).toBeDefined());
+    changeSymbol("MSFT");
+    initiateChartRiskEntry(template);
+    await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe(""));
+    finish();
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("AAPL (sim) Chart Risk Entry"));
+    expect(host.querySelector("[data-risk-detail]")?.textContent).toContain("Click BUY");
+    expect(host.querySelector("[data-risk-status]")?.textContent).toBe("");
+    expect(sendCommand.mock.calls.filter(([name]) => name === "SubmitRiskEntry")).toHaveLength(outcome === "query" ? 0 : 1);
 });
 it("keeps a nearby colored preview at the actual price instead of shifting around a selected pill", async () => {
     const {host} = mount();
@@ -417,6 +488,7 @@ it.each(["locked", "disconnected", "stale account"])("revalidates %s execution a
     placeRiskPair(host);
     const reason = blocker === "locked" ? "Trading is locked. Arm the engine first." : blocker === "disconnected" ? "Venue or position data unavailable; reconcile first." : "Fresh account data required.";
     await waitFor(() => expect(host.querySelector("[data-risk-status]")?.textContent).toBe(reason));
+    expect(screen.getByRole("alert").textContent).toContain(reason);
     expect(sendQuery).toHaveBeenCalledTimes(2);
     expect(sendCommand).not.toHaveBeenCalledWith("SubmitRiskEntry", expect.anything());
 });

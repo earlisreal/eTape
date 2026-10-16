@@ -17,6 +17,54 @@ const status: ExecStatus = {
   masterArmed: true, global: { maxDayLoss: 0, maxSymbolPositionValue: 0, maxSymbolPositionShares: 0 },
   venues: [{ venue: "alpaca-paper", broker: "alpaca", connected: true, reconcilePending: false, positionDataReady: true, flattenPending: false, note: "", lastReconcileMs: null, gate: { maxOrderValue: 0, maxPositionValue: 0, maxPositionShares: 0, maxOpenOrders: 0 } }],
 };
+const riskEntry: NonNullable<Order["riskEntry"]> = { stopId: "stop", budget: 100, mode: "Dollar", buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } };
+const activationUnknown = (id: string, over: Partial<Order> = {}) => order(id, {
+  riskEntry, held: { phase: "UNKNOWN", deadlineMs: 100, pausedReason: "activation outcome unknown: timeout" }, ...over,
+});
+
+describe("ExecStore.onRiskActivationUnknown", () => {
+  it("reports new uncertainty once, suppresses snapshot history, and permits a later rejection", () => {
+    const store = new ExecStore(), unknown = vi.fn(), rejected = vi.fn();
+    store.onRiskActivationUnknown(unknown); store.onOrderRejected(rejected);
+    store.apply(snap("exec.orders", [activationUnknown("old")]));
+    store.apply(delta("exec.orders", activationUnknown("old")));
+    expect(unknown).not.toHaveBeenCalled();
+    store.apply(delta("exec.orders", activationUnknown("new")));
+    store.apply(delta("exec.orders", activationUnknown("new")));
+    store.apply(snap("exec.orders", [activationUnknown("new")]));
+    store.apply(delta("exec.orders", activationUnknown("new")));
+    expect(unknown).toHaveBeenCalledTimes(1);
+    store.apply(delta("exec.orders", activationUnknown("new", { status: "REJECTED", rejectReason: "broker rejected" })));
+    expect(rejected).toHaveBeenCalledTimes(1);
+    expect(unknown).toHaveBeenCalledTimes(1);
+  });
+  it("excludes protection, unrelated uncertainty and terminal rows retaining held metadata", () => {
+    const store = new ExecStore(), cb = vi.fn();
+    store.onRiskActivationUnknown(cb);
+    const protection = activationUnknown("protection", { riskEntryId: "entry" });
+    delete protection.riskEntry;
+    store.apply(delta("exec.orders", protection));
+    const exclusions: Partial<Order>[] = [
+      { held: { phase: "UNKNOWN", deadlineMs: 100, pausedReason: "restart reconciliation required" } },
+      { held: { phase: "UNKNOWN", deadlineMs: 100, pausedReason: "cancel outcome unknown" } },
+      { held: { phase: "ACTIVATING", deadlineMs: 100 } },
+      ...(["REJECTED", "CANCELED", "EXPIRED", "FILLED"] as const).map(status => ({ status })),
+    ];
+    exclusions.forEach((over, i) => store.apply(delta("exec.orders", activationUnknown(String(i), over))));
+    expect(cb).not.toHaveBeenCalled();
+  });
+  it("isolates listener errors and removes subscriptions", () => {
+    const store = new ExecStore(), cb = vi.fn();
+    const offBad = store.onRiskActivationUnknown(() => { throw new Error("listener failed"); });
+    const off = store.onRiskActivationUnknown(cb);
+    store.apply(delta("exec.orders", activationUnknown("first")));
+    expect(cb).toHaveBeenCalledTimes(1);
+    expect(store.orders()).toHaveLength(1);
+    offBad(); off();
+    store.apply(delta("exec.orders", activationUnknown("second")));
+    expect(cb).toHaveBeenCalledTimes(1);
+  });
+});
 
 describe("ExecStore", () => {
   it("keyed account upsert by venue", () => {

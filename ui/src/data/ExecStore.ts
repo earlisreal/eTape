@@ -5,6 +5,12 @@ import { isWorking } from "../wire/orderStatus";
 export interface OptimisticOrder { args: SubmitOrderArgs; id: string; createdMs: number }
 export interface OrderView { order: Order; optimistic: boolean }
 
+function riskActivationUnknown(order: Order | undefined): boolean {
+  // shortcut: engine reason text identifies activation uncertainty; use a typed outcome if wording changes.
+  return !!order?.riskEntry && isWorking(order.status) && order.held?.phase === "UNKNOWN"
+    && !!order.held.pausedReason?.startsWith("activation outcome unknown:");
+}
+
 interface ExecState {
   accounts: Map<string, AccountRow>;
   positions: PositionRow[];
@@ -27,12 +33,18 @@ function synthOptimistic(o: OptimisticOrder): Order {
 
 export class ExecStore extends ReactStore<ExecState> {
   private readonly rejectListeners = new Set<(order: Order) => void>();
+  private readonly activationUnknownListeners = new Set<(order: Order) => void>();
 
   constructor() { super({ accounts: new Map(), positions: [], orders: new Map(), closedOrders: new Map(), optimistic: new Map(), status: null, statusSnapshotRevision: 0 }); }
 
   onOrderRejected(cb: (order: Order) => void): () => void {
     this.rejectListeners.add(cb);
     return () => { this.rejectListeners.delete(cb); };
+  }
+
+  onRiskActivationUnknown(cb: (order: Order) => void): () => void {
+    this.activationUnknownListeners.add(cb);
+    return () => { this.activationUnknownListeners.delete(cb); };
   }
 
   apply(m: SnapshotMsg | DeltaMsg): void {
@@ -53,6 +65,11 @@ export class ExecStore extends ReactStore<ExecState> {
         const list = m.kind === "snapshot" ? (m.payload as Order[]) : [m.payload as Order];
         if (m.kind === "snapshot") orders.clear();
         for (const o of list) {
+          if (m.kind === "delta" && riskActivationUnknown(o) && !riskActivationUnknown(cur.orders.get(o.id))) {
+            for (const cb of this.activationUnknownListeners) {
+              try { cb(o); } catch { /* a listener must never break order ingestion */ }
+            }
+          }
           if (m.kind === "delta" && o.status === "REJECTED" && cur.orders.get(o.id)?.status !== "REJECTED") {
             for (const cb of this.rejectListeners) {
               try { cb(o); } catch { /* a listener must never break order ingestion */ }

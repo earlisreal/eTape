@@ -68,6 +68,15 @@ the accepted entry waits for a qualifying fresh trade until normal expiry or
 cancellation. A failed route query or another admission blocker retains the
 draft with its reason; Enter or a completed price correction starts another
 attempt. Unknown outcomes cannot be resent, and there is no UI retry loop.
+Each failed attempt also shows one standard four-second error toast with its
+symbol, Execution Venue, and reason, including closed-session blockers. Auto-send
+reports after completing SELL or a price correction; manual mode reports on Enter.
+Late failure replies still identify the original submission after changing chart
+context. Later entry activation/broker rejection or unknown activation shows once
+in every open workspace window. Unknown outcomes warn to verify Orders and avoid
+resubmitting; a later confirmed rejection is a distinct alert. Repeated deltas,
+repaints, and initial/reconnect snapshots do not replay failure toasts. Persistent
+draft/order status remains available after dismissal.
 Submitted linked markers always request edits on release, showing updated shares
 on hover and an above-budget warning after activation. Waiting linked protection
 shows planned shares; deferred position sizing shows its percentage until the

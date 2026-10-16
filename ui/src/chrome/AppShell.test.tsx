@@ -15,7 +15,7 @@ import { ThemeProvider } from "./ThemeProvider";
 import { ToastProvider } from "./Toast";
 import { OrderConfigProvider } from "./exec/useOrderConfig";
 import { SoundConfigProvider } from "../sound/SoundConfigProvider";
-import type { AccountRow, ExecStatus, VenueStatus, WatchlistRow } from "../wire/contract";
+import type { AccountRow, ExecStatus, Order, VenueStatus, WatchlistRow } from "../wire/contract";
 import { TAPE_MIN_WIDTH } from "../render/tape/tapeLayout";
 import { DockviewApi } from "dockview";
 import type { HotkeyTargetChannel, HotkeyTargetMessage } from "./hotkeyTarget";
@@ -84,8 +84,8 @@ class TargetChannel implements HotkeyTargetChannel {
 
 const scannerShortInterestDefaults = { turnover: null, sessionVolume: null, shortInterest: null, shortInterestAsOf: null } as const;
 
-function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApplied?: () => void; onRender?: () => void; hotkeyTargetChannel?: HotkeyTargetChannel }) {
-  const stores = makeStores();
+function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApplied?: () => void; onRender?: () => void; hotkeyTargetChannel?: HotkeyTargetChannel; stores?: ReturnType<typeof makeStores> }) {
+  const stores = opts?.stores ?? makeStores();
   const scheduler = new Scheduler(browserRaf, () => {});
   const linkGroups = new LinkGroups(new BroadcastChannelBus(), () => {});
   const commands = {
@@ -103,7 +103,7 @@ function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApp
   };
   // Debounce as fast as possible so tests don't need real timers/sleeps.
   const workspaceStore = new WorkspaceStore(client, 1);
-  render(
+  const view = render(
     <ThemeProvider><ToastProvider><OrderConfigProvider commands={commands}>
       <SoundConfigProvider commands={commands}>
         <Profiler id="AppShell" onRender={() => opts?.onRender?.()}>
@@ -115,8 +115,56 @@ function mount(seed: Workspace, opts?: { workspaceName?: string; onTransitionApp
       </SoundConfigProvider>
     </OrderConfigProvider></ToastProvider></ThemeProvider>,
   );
-  return { saved, workspaceStore, linkGroups, stores, commands };
+  return { ...view, saved, workspaceStore, linkGroups, stores, commands };
 }
+
+describe("Chart Risk Entry lifecycle toasts", () => {
+  const seed: Workspace = { name: "default", layoutVersion: 8, panels: [{ id: "connection-1", panelId: "connection-status", group: null, settings: {} }], layout: null };
+  const entry = (over: Partial<Order> = {}): Order => ({
+    venue: "sim", id: "entry", symbol: "AAPL", side: "BUY", type: "STOP_LIMIT", tif: "DAY", session: "EXTENDED",
+    qty: 10, limitPrice: 10, stopPrice: 10, status: "REJECTED", executedQty: 0, leavesQty: 0,
+    avgFillPrice: 0, rejectReason: "trigger gate: trading locked", replacesId: "", createdMs: 1, updatedMs: 2,
+    riskEntry: { stopId: "stop", budget: 100, mode: "Dollar", buyCushion: { value: 0, unit: "$" }, sellCushion: { value: 0, unit: "$" } }, ...over,
+  });
+  it("reports each new outcome in each mounted workspace without replay or duplicate pair emissions", async () => {
+    const stores = makeStores();
+    const first = mount(seed, { stores, workspaceName: "first" });
+    const second = mount(seed, { stores, workspaceName: "second" });
+    const unknown = entry({ status: "ACCEPTED", held: { phase: "UNKNOWN", deadlineMs: 100, pausedReason: "activation outcome unknown: timeout" } });
+    act(() => stores.exec.apply({ kind: "snapshot", topic: "exec.orders", payload: [entry({ id: "historical" })] }));
+    expect(screen.queryAllByRole("alert")).toHaveLength(0);
+    act(() => {
+      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: unknown });
+      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: unknown });
+    });
+    expect(screen.getAllByRole("alert")).toHaveLength(2);
+    expect(within(first.container).getByRole("alert").textContent).toContain("AAPL (sim) Chart Risk Entry status unknown");
+    expect(within(second.container).getByRole("alert").textContent).toContain("Verify Orders; do not resubmit.");
+    act(() => {
+      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: entry() });
+      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: entry() });
+      stores.exec.apply({ kind: "snapshot", topic: "exec.orders", payload: [entry()] });
+    });
+    expect(screen.getAllByText("AAPL (sim) Chart Risk Entry rejected: trigger gate: trading locked")).toHaveLength(2);
+    expect(screen.getAllByRole("alert")).toHaveLength(4);
+    first.unmount();
+    act(() => stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: entry({ id: "retry", rejectReason: "" }) }));
+    expect(screen.getAllByText("AAPL (sim) Chart Risk Entry rejected: Pair rejected.")).toHaveLength(1);
+    second.unmount();
+  });
+  it("ignores unrelated/protective rejections while preserving deferred stop-sell feedback", () => {
+    const { stores } = mount(seed);
+    const ordinary = entry({ id: "ordinary" });
+    delete ordinary.riskEntry;
+    act(() => {
+      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: ordinary });
+      stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { ...ordinary, id: "protection", riskEntryId: "entry" } });
+    });
+    expect(screen.queryByRole("alert")).toBeNull();
+    act(() => stores.exec.apply({ kind: "delta", topic: "exec.orders", payload: { ...ordinary, id: "deferred", deferredPositionPct: 50, rejectReason: "no position" } }));
+    expect(screen.getByRole("alert").textContent).toBe("AAPL (sim) 50% stop-sell rejected: no position");
+  });
+});
 
 describe("AppShell execution subscription", () => {
   const seed: Workspace = {

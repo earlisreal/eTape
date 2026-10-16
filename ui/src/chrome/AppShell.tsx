@@ -345,9 +345,16 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   }, [commands]);
   useSoundWiring(stores);
   useEffect(() => stores.exec.onOrderRejected((order) => {
+    if (order.riskEntry) {
+      toast.push({ level: "danger", text: `${order.symbol} (${order.venue}) Chart Risk Entry rejected: ${order.rejectReason || "Pair rejected."}` });
+      return;
+    }
     if (order.deferredPositionPct === undefined) return;
     const detail = order.rejectReason || "position data unavailable";
     toast.push({ level: "danger", text: `${order.symbol} (${order.venue}) ${order.deferredPositionPct}% stop-sell rejected: ${detail}` });
+  }), [stores.exec, toast]);
+  useEffect(() => stores.exec.onRiskActivationUnknown((order) => {
+    toast.push({ level: "warn", text: `${order.symbol} (${order.venue}) Chart Risk Entry status unknown. Verify Orders; do not resubmit. ${order.held?.pausedReason ?? ""}` });
   }), [stores.exec, toast]);
   // Task 13: mirror Settings-modal open/close into the module-level modalTracker
   // singleton so every already-mounted PanelFrame (frozen-closure-created, can't

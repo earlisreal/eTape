@@ -91,6 +91,7 @@ export default defineConfig({
         test: {
           name: 'exec',
           include: [
+            'src/data/ExecStore.test.ts',
             'src/chrome/exec/actionTemplate.test.ts', 'src/chrome/exec/commands.test.ts',
             'src/chrome/exec/fireTemplate.test.ts', 'src/chrome/exec/OrderSettingsSection.test.tsx',
             'src/chrome/exec/resolveTemplate.test.ts', 'src/chrome/exec/useHotkeys.test.tsx',
