@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"math"
 	"time"
 
 	"github.com/earlisreal/eTape/engine/internal/session"
@@ -108,6 +109,10 @@ func ResolveLimitIfTouchedRoute(now time.Time, tif TIF, requested OrderSession) 
 }
 
 func StopLimitTriggered(side Side, price, stop float64) bool {
+	// Canonicalize tick-aligned triggers without rounding sub-cent market prints.
+	if validLimitIfTouchedPrice(stop) {
+		stop = math.Round(stop*10000) / 10000
+	}
 	switch side {
 	case SideBuy, SideCover:
 		return price >= stop
@@ -122,9 +127,9 @@ func HeldOrderTriggered(typ OrderType, side Side, price, trigger float64) bool {
 	if typ == TypeLimitIfTouched {
 		switch side {
 		case SideBuy, SideCover:
-			return price <= trigger
+			return StopLimitTriggered(SideSell, price, trigger)
 		case SideSell, SideShort:
-			return price >= trigger
+			return StopLimitTriggered(SideBuy, price, trigger)
 		default:
 			return false
 		}

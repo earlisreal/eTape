@@ -53,6 +53,8 @@ describe("chart order markers", () => {
   it("snaps to cents above one dollar and ten-thousandths below", () => {
     expect(snapOrderMarkerPrice(2.567)).toBe(2.57);
     expect(snapOrderMarkerPrice(0.98676)).toBe(0.9868);
+    expect(snapOrderMarkerPrice(3.07)).toBe(3.07);
+    expect(snapOrderMarkerPrice(0.9869)).toBe(0.9869);
   });
 
   it("keeps previous and requested prices visible for an ambiguous venue replace", () => {

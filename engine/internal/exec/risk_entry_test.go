@@ -43,6 +43,34 @@ func newRiskCore(t *testing.T) (*Core, *clock.Fake, *heldTestBroker, context.Con
 	return c, clk, b, ctx
 }
 
+func TestRiskEntryTriggersAtChartRoundedPrice(t *testing.T) {
+	c, clk, broker, ctx := newRiskCoreWithoutPrint(t)
+	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 3.0700000000000003, SellStop: 3.04,
+		Mode: "Dollar", Value: 0.5, MaxQty: 4, BuyCushion: LimitCushion{Value: 1, Unit: "%"}, SellCushion: LimitCushion{Value: 1, Unit: "%"}})
+	if !ack.Accepted {
+		t.Fatalf("admission: %+v", ack)
+	}
+	waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 3.0699))
+	waitHeldOrder(t, c, ack.OrderID, HeldArmed)
+	select {
+	case req := <-broker.submits:
+		t.Fatalf("submitted below trigger: %+v", req)
+	default:
+	}
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 3.07))
+	select {
+	case req := <-broker.submits:
+		if req.ClientOrderID != ack.OrderID || req.Type != TypeLimit || req.Qty != 4 || req.LimitPrice != 3.11 {
+			t.Fatalf("triggered child: %+v", req)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("$3.07 touch did not activate chart-rounded buy stop")
+	}
+}
+
 func TestRiskEntryWaitsForFreshPrint(t *testing.T) {
 	for _, state := range []string{"missing", "stale"} {
 		t.Run(state, func(t *testing.T) {

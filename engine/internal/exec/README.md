@@ -60,8 +60,10 @@ late entry fills can create a fresh warning.
 
 An EXTENDED DAY STOP_LIMIT submitted during pre/postmarket is persisted as one
 engine-held parent order; no venue order or buying-power reservation exists
-before trigger. Only fresh Last-Eligible prints can trigger it. On trigger, the
-same order row becomes a linked venue LIMIT child, with a durable child client
+before trigger. Only fresh Last-Eligible prints can trigger it. The engine compares
+tick-aligned triggers at their canonical decimal value so chart rounding noise
+cannot prevent an exact touch; market prints retain sub-cent precision. On trigger,
+the same order row becomes a linked venue LIMIT child, with a durable child client
 ID written before submission. Restart recovery adopts a found child but never
 reposts an absent or ambiguous activation. Feed loss, restart, and clean exit
 pause pretrigger custody for manual Resume; clean exit also persists cancel

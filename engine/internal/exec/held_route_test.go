@@ -1,6 +1,8 @@
 package exec
 
 import (
+	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -157,5 +159,36 @@ func TestHeldOrderTriggerDirection(t *testing.T) {
 		if got := HeldOrderTriggered(tt.typ, tt.side, tt.price, tt.stop); got != tt.want {
 			t.Errorf("trigger(%s,%s,%v,%v)=%v want %v", tt.typ, tt.side, tt.price, tt.stop, got, tt.want)
 		}
+	}
+}
+
+func TestHeldOrderTriggerIgnoresTickRoundingNoise(t *testing.T) {
+	for _, typ := range []OrderType{TypeStopLimit, TypeLimitIfTouched} {
+		for _, side := range []Side{SideBuy, SideCover, SideSell, SideShort} {
+			for _, trigger := range []float64{3.07, 0.9869} {
+				t.Run(fmt.Sprintf("%s/%s/%v", typ, side, trigger), func(t *testing.T) {
+					for _, toward := range []float64{0, math.Inf(1)} {
+						stored := math.Nextafter(trigger, toward)
+						if !HeldOrderTriggered(typ, side, trigger, stored) {
+							t.Fatalf("exact touch %v did not trigger stored %.17g", trigger, stored)
+						}
+						below := side == SideBuy || side == SideCover
+						if typ == TypeLimitIfTouched {
+							below = !below
+						}
+						price := trigger + 1e-9
+						if below {
+							price = trigger - 1e-9
+						}
+						if HeldOrderTriggered(typ, side, price, stored) {
+							t.Fatalf("unreached trigger fired: price %.17g, trigger %.17g", price, stored)
+						}
+					}
+				})
+			}
+		}
+	}
+	if StopLimitTriggered(SideBuy, 3.07004, 3.07005) {
+		t.Fatal("sub-tick stop was rounded down")
 	}
 }

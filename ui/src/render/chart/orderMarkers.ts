@@ -55,7 +55,7 @@ export function chartOrderMarkers(orders: Iterable<Order>, venue: string, symbol
 
 export function snapOrderMarkerPrice(price: number): number {
   const tick = price >= 1 ? 0.01 : 0.0001;
-  return Math.round((price + Number.EPSILON) / tick) * tick;
+  return Number((Math.round((price + Number.EPSILON) / tick) * tick).toFixed(tick === 0.01 ? 2 : 4));
 }
 
 export function nearestPriceLines<T extends { price: number }>(lines: T[], y: number,
