@@ -26,7 +26,7 @@ function mount(orders: Order[] = [base], config?: OrderConfig) {
     availableCash={100000} buyingPower={100000}
     sendCommand={sendCommand} hostRef={hostRef} facadeRef={facadeRef} rightAxisWidth={60}
     layoutRef={layoutRef} chooserOpenRef={chooserOpenRef} {...(config ? {config} : {})} />, { container:host });
-  return { ...utils, host, sendCommand };
+  return { ...utils, host, sendCommand, layoutRef };
 }
 
 beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.spyOn(document, "hasFocus").mockReturnValue(true); });
@@ -58,6 +58,19 @@ describe("ChartOrderMarkers", () => {
       riskEntry:{stopId:"closed-stop",budget:10,mode:"Dollar",buyCushion:{value:0,unit:"$"},sellCushion:{value:0,unit:"$"},failure:"protection interrupted"} }]);
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.queryByText(/shares remain/)).toBeNull();
+  });
+  it("clips horizontal lines under overlapping pills and clears the clip when they move away", async () => {
+    const {host,layoutRef} = mount();
+    await waitFor(() => expect(host.querySelector("[data-order-pill-visual]")).not.toBeNull());
+    const visual = host.querySelector<HTMLElement>("[data-order-pill-visual]")!;
+    const line = host.querySelector<HTMLElement>("[data-order-line]:not([data-order-confirmed-line])")!;
+    visual.getBoundingClientRect = () => new DOMRect(440,190,60,20);
+    line.getBoundingClientRect = () => new DOMRect(0,200,450,2);
+    layoutRef.current();
+    expect(line.style.clipPath).toBe("inset(0 10px 0 0)");
+    visual.getBoundingClientRect = () => new DOMRect(440,220,60,20);
+    layoutRef.current();
+    expect(line.style.clipPath).toBe("inset(0 0px 0 0)");
   });
   it("gives drag priority over hover and focus, then restores focus or resting priority and disposes graphics", () => {
     const {host,unmount} = mount([base,{...base,id:"sell",side:"SELL",limitPrice:105}]);

@@ -500,8 +500,8 @@ export function ChartRiskEntry(props: Props): JSX.Element {
         };
     }, [props.active, props.group, props.symbol, props.contextKey, props.activeTool, props.config.templates, props.layoutRef, venue]);
     return <div ref={rootRef} data-testid="chart-risk-entry" style={{ display: "none", position: "absolute", inset: 0, zIndex: 10, pointerEvents: "none" }}>
-    <div data-risk-buy style={{ position: "absolute", left: 0, borderTop: `2px dashed ${props.chrome.up}` }}/>
-    <div data-risk-sell style={{ position: "absolute", left: 0, borderTop: `2px dashed ${props.chrome.down}` }}/>
+    <div data-order-line data-risk-buy style={{ position: "absolute", left: 0, borderTop: `2px dashed ${props.chrome.up}` }}/>
+    <div data-order-line data-risk-sell style={{ position: "absolute", left: 0, borderTop: `2px dashed ${props.chrome.down}` }}/>
     <div data-risk-preview-price aria-hidden="true" style={{ display: "none", position: "absolute", transform: "translateY(-50%)", height: 21,
       boxSizing: "border-box", padding: "0 6px 0 10px", borderRadius: "0 2px 2px 0", color: "#fff",
       font: `12px/21px ${TV_FONT}`, textAlign: "left", whiteSpace: "nowrap", overflow: "hidden", pointerEvents: "none" }} />

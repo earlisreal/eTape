@@ -159,6 +159,26 @@ try {
   await page.waitForFunction(() => document.querySelectorAll("[data-order-group]").length === 0);
 
   await page.evaluate(() => {
+    for (let i = 0; i < 100; i++) window.repro.addOrder(`wide-${i}`, "LIMIT", 5.0);
+  });
+  const wideGroup = page.locator('[data-order-group][data-order-ids^="wide-"]');
+  const widePill = page.locator('[data-order-pill-visual^="wide-"]');
+  await widePill.waitFor();
+  await page.mouse.move(0, 0);
+  const wideBox = await widePill.boundingBox();
+  const wideLine = wideGroup.locator('> div[aria-hidden="true"]:not([data-order-confirmed-line])');
+  const wideLineBox = await wideLine.boundingBox();
+  assert(wideBox.x + 6 < wideLineBox.x + wideLineBox.width, `The wide pill must extend into the horizontal line's bounds: ${JSON.stringify({wideBox,wideLineBox})}`);
+  const pillWithLine = PNG.sync.read(await page.screenshot({clip:wideBox}));
+  await wideLine.evaluate(el => { el.style.visibility = "hidden"; });
+  const pillWithoutLine = PNG.sync.read(await page.screenshot({clip:wideBox}));
+  assert(pillWithLine.data.equals(pillWithoutLine.data), "The horizontal order line must be hidden behind the entire resting pill");
+  await page.evaluate(() => {
+    for (let i = 0; i < 100; i++) window.repro.finishOrder(`wide-${i}`);
+  });
+  await page.waitForFunction(() => document.querySelectorAll("[data-order-group]").length === 0);
+
+  await page.evaluate(() => {
     window.repro.addOrder("priority-buy", "LIMIT", 5.0);
     window.repro.addOrder("priority-sell", "STOP_LIMIT", 4.7, "SELL");
     window.repro.setTimerPrice(5.0);

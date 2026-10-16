@@ -402,9 +402,9 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
       return <div key={group.key} data-order-group="true" data-order-ids={ids.join(",")} data-price={group.price}
         data-confirmed-price={group.pending?.confirmedPrice ?? ""} data-kind={group.kind}
         style={{ position:"absolute", left:0, right:0, top:0, height:0, opacity, pointerEvents:"none", "--order-color":color } as CSSProperties}>
-        <div data-order-confirmed-line="true" aria-hidden="true" style={{ display:group.pending ? "block" : "none", position:"absolute", left:0, right:props.rightAxisWidth, top:0, height:2, opacity:.28,
+        <div data-order-line data-order-confirmed-line="true" aria-hidden="true" style={{ display:group.pending ? "block" : "none", position:"absolute", left:0, right:props.rightAxisWidth, top:0, height:2, opacity:.28,
           background:"repeating-linear-gradient(90deg,var(--order-color) 0 8px,transparent 8px 13px)", pointerEvents:"none" }} />
-        <div aria-hidden="true" style={{ position:"absolute", left:0, right:props.rightAxisWidth, top:stackIndex, height:2,
+        <div data-order-line aria-hidden="true" style={{ position:"absolute", left:0, right:props.rightAxisWidth, top:stackIndex, height:2,
           background:"repeating-linear-gradient(90deg,var(--order-color) 0 8px,transparent 8px 13px)", pointerEvents:"none" }} />
         <div data-order-chip style={{ position:"absolute", opacity:0, top:stackIndex * 20 - 10, right:0, display:"flex", alignItems:"center", height:20,
           boxSizing:"border-box",border:`1px solid ${color}`, borderRadius:3, background:"rgba(12,16,23,.96)", color, pointerEvents:"auto", font:"600 10px ui-monospace,monospace", whiteSpace:"nowrap" }}>

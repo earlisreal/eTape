@@ -82,6 +82,8 @@ release restores hover/focus priority without waiting for acknowledgement.
 The original transparent DOM buttons retain drag, ×, keyboard and chooser
 behavior above the native canvas. Graphics mirror their content and bounds
 imperatively, are inert and hidden from accessibility, and add no focus stops.
+Horizontal order lines are clipped at overlapping pill bounds so dashes stay
+behind wide or displaced pills, including risk drafts and pending-price guides.
 Risk Entry preview labels follow the actual snapped candidate price with only
 pane-edge bounds; collision spacing applies to resting pills alone.
 

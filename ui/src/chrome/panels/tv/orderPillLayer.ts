@@ -27,6 +27,16 @@ function createLayer(host: HTMLElement) {
     // Each graphic interleaves with LWC's canvases; the slot creates no stacking context.
     if (timer ? slot.nextSibling !== timer : host.lastChild !== slot) host.insertBefore(slot, timer);
   };
+  // Keep pills below cursor labels while masking higher order overlays at their bounds.
+  const clipLines = () => {
+    const boxes = [...pills.values()].map(({ visual }) => visual.getBoundingClientRect()).filter(box => box.width && box.height);
+    for (const root of roots) for (const line of root.querySelectorAll<HTMLElement>("[data-order-line]")) {
+      const lineBox = line.getBoundingClientRect();
+      let right = 0;
+      for (const box of boxes) if (lineBox.top < box.bottom && lineBox.bottom > box.top) right = Math.max(right, lineBox.right - box.left);
+      line.style.clipPath = `inset(0 ${right}px 0 0)`;
+    }
+  };
   const sync = (root: HTMLElement) => {
     place();
     const sources = new Set(root.querySelectorAll<HTMLElement>(selector));
@@ -61,6 +71,7 @@ function createLayer(host: HTMLElement) {
         left: `${box.left - hostBox.left}px`, top: `${box.top - hostBox.top}px`, right: "auto", bottom: "auto",
         width: `${box.width}px`, height: `${box.height}px`, transform: "none" });
     }
+    clipLines();
     priority();
   };
   const over = (event: PointerEvent) => { hovered = locate(event.target); priority(); };
@@ -97,6 +108,7 @@ function createLayer(host: HTMLElement) {
       clear(root);
       for (const [pill, entry] of pills) if (entry.root === root) { entry.visual.remove(); pills.delete(pill); }
       roots.delete(root);
+      clipLines();
       if (roots.size) return;
       cancelAnimationFrame(frame); slot.remove(); layers.delete(host);
       host.removeEventListener("pointerover", over); host.removeEventListener("pointerout", out);
