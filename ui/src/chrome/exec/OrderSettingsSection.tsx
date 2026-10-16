@@ -319,7 +319,7 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
         />
         <div style={{ display: "flex", gap: 5, alignItems: "center" }}>
           <input
-            data-testid={`tmpl-hotkey-${t.id}`} readOnly value={t.hotkey ?? ""} placeholder="press keys"
+            data-testid={`tmpl-hotkey-${t.id}`} readOnly value={t.hotkey?.replace(" ", "Space") ?? ""} placeholder="press keys"
             onKeyDown={(e) => {
               // Must stop propagation, not just preventDefault: the real hotkey
               // engine (useHotkeys, mounted globally in AppShell) listens on

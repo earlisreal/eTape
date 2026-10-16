@@ -76,6 +76,17 @@ describe("OrderSettingsSection", () => {
     expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").hotkey).toBe("Ctrl+Alt+7");
   });
 
+  it.each([false, true])("labels Space when capturing a hotkey (ctrlKey=%s)", (ctrlKey) => {
+    const { onSave } = wrap();
+    const cap = screen.getByTestId("tmpl-hotkey-buy-5k") as HTMLInputElement;
+    fireEvent.keyDown(cap, { key: " ", code: "Space", ctrlKey });
+    expect(cap.value).toBe(ctrlKey ? "Ctrl+Space" : "Space");
+    expect(screen.getByText("Space").tagName).toBe("KBD");
+    fireEvent.click(screen.getByTestId("save"));
+    const saved = onSave.mock.calls[0][0];
+    expect(saved.templates.find((t: { id: string }) => t.id === "buy-5k").hotkey).toBe(ctrlKey ? "Ctrl+ " : " ");
+  });
+
   it("nudges the offset up by 0.05 via the stepper button", () => {
     const { onSave } = wrap();
     fireEvent.click(screen.getByTestId("offset-buy-5k-up"));

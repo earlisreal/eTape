@@ -5,7 +5,7 @@
 import { useTheme } from "../ThemeProvider";
 
 const KEY_LABEL: Record<string, string> = {
-  Ctrl: "Ctrl", Alt: "⌥", Shift: "⇧", Meta: "⌘", Backspace: "⌫", Enter: "⏎", Escape: "Esc",
+  Ctrl: "Ctrl", Alt: "⌥", Shift: "⇧", Meta: "⌘", Backspace: "⌫", Enter: "⏎", Escape: "Esc", " ": "Space",
 };
 
 export function Keycap({ combo, danger }: { combo: string; danger?: boolean }): JSX.Element {
