@@ -4,6 +4,7 @@ Create one focused Markdown file per approved change. Name `YYYY-MM-DD-short-fea
 
 Approved, implementation pending:
 
+- [Chart Risk Entry error toasts](2026-10-16-chart-risk-entry-error-toasts.md)
 - [Visible Range Volume Profile Indicator](2026-10-10-volume-profile-indicator.md)
 
 Implemented:
