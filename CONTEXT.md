@@ -117,6 +117,58 @@ _Avoid_: Global Scanner alert, Scanner Sync sound
 A saved per-Scanner Panel preference that excludes that panel from making its workspace window eligible for Scanner Sound. It defaults to unmuted and remains subordinate to the global sound controls.
 _Avoid_: Global Scanner mute, sound off
 
+**Price Alert**:
+A saved, symbol-specific at-or-above or at-or-below condition on the Last-Eligible Price, shared across Workspaces and restored after eTape restarts. It fires once and has no automatic daily expiry.
+_Avoid_: Stop order, price alarm, chart drawing
+
+**Monitoring Price Alert**:
+An enabled Price Alert whose live market data is available for evaluation during its selected sessions. Saving an alert alone does not establish that it is Monitoring.
+_Avoid_: Saved alert, enabled alert
+
+**Waiting for Data**:
+A saved, enabled Price Alert's state when live data is not ready or was interrupted. Monitoring resumes automatically on fresh eligible data; a quiet symbol alone does not establish an interruption.
+_Avoid_: Paused by you, expired alert
+
+**Waiting for Data Capacity**:
+A saved, enabled Price Alert's state when subscription capacity is unavailable for its symbol. It begins monitoring automatically when capacity and fresh eligible data become available.
+_Avoid_: Monitoring, rejected alert
+
+**Paused Price Alert**:
+A Price Alert whose monitoring the trader explicitly suspended. Automatic data recovery does not resume it.
+_Avoid_: Waiting for Data, Waiting for Data Capacity
+
+**Triggered Price Alert**:
+A saved Price Alert whose condition has fired and whose monitoring has stopped. It requires Rearm before another trigger; its past Price Alert Triggers are independent of that state.
+_Avoid_: Active alert, canceled alert
+
+**Price Alert Trigger**:
+A retained record of one occurrence when a Price Alert met its condition. It survives Rearm or deletion of the saved alert and remains until its own history entry is deleted.
+_Avoid_: Price Alert, current alert state
+
+**Alerts Panel**:
+A dockable Workspace panel for managing saved Price Alerts and reviewing Price Alert Triggers across all Workspaces.
+_Avoid_: Alerts drawer, chart-local alerts list
+
+**Price Alert Line**:
+A dashed chart-level mark representing a saved Price Alert's absolute dollar target. The target remains unchanged by stock splits until the trader edits it.
+_Avoid_: Order line, chart drawing
+
+**Alert Price Tag**:
+A bell-marked chart price-axis control for reviewing or editing a Price Alert's target. A drag previews a proposed price that requires Save before it replaces the target.
+_Avoid_: Order Price Pill, Preview Price Label
+
+**Price Alert Sound**:
+The Beacon cue for a new Price Alert Trigger or burst of triggers, emitted once across open Workspaces and subject to the global sound enable and volume settings. Silently recorded triggers remain available for review without replayed sounds after a Workspace opens or sound is unmuted.
+_Avoid_: Scanner Sound, order fill sound
+
+**Target Met on Resume**:
+A trigger reason indicating that the first fresh Last-Eligible Price after monitoring resumes satisfies a Price Alert. It does not identify when the condition first became true while monitoring was unavailable.
+_Avoid_: Missed historical trigger, replayed alert
+
+**Rearm**:
+The trader's explicit return of a Triggered Price Alert to monitoring for another notification.
+_Avoid_: Repeat, acknowledge
+
 **Stock Info Panel**:
 A symbol-bearing panel that displays fundamentals and news for the focused symbol of its selected Link Group. It is not a Scanner Sync target.
 _Avoid_: News panel
