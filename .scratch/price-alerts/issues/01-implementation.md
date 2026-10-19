@@ -40,6 +40,32 @@ pass; scoped Go lint passes. Demo verification confirms saved monitoring and a
 fresh-trade trigger retained in History. Full local validation and hosted CI
 remain pending.
 
+## Review against f319de94
+
+### Standards
+
+No hard documented-standard violations. One judgment call: duplicated chart
+price snapping/display logic could drift. Resolved by sharing alert price helpers
+based on the existing `quoteDecimals` convention.
+
+### Spec
+
+Two P2 findings, both resolved and verified by the Spec reviewer:
+
+- Chart bell/menu/drag creation rounded dollar targets to two decimals while
+  the application uses three. A failing bell-creation regression now passes;
+  shared snapping/display retains existing dollar and sub-dollar precision.
+- Alert graphics could cover execution graphics at the same price. A failing
+  combined overlay test now passes; passive alerts insert below execution
+  graphics and stay there on hover/focus.
+
+Standards: 0 hard violations, 1 optional smell resolved. Spec: 2 findings resolved;
+no remaining finding in the follow-up review.
+
+Full validation additionally caught a stale sound-default fixture (updated for
+the new enabled flag) and an unintended shortening of ordinary subscription
+hysteresis (fixed; the existing hysteresis test and alert-reclamation tests pass).
+
 ## Comments
 
 ### 2026-10-19

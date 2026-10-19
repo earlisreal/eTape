@@ -16,7 +16,7 @@ function createLayer(host: HTMLElement) {
   const priority = () => {
     const active = [dragged, hovered, focused].find(pill => pill && pills.has(pill));
     for (const [pill, { visual }] of pills) {
-      const zIndex = pill === active ? "11" : "1";
+      const zIndex = pill === active && !pill.matches("[data-alert-chip]") ? "11" : "1";
       if (visual.style.zIndex !== zIndex) visual.style.zIndex = zIndex;
       const outlined = pill === active && pill === focused;
       if (visual.style.outlineStyle !== (outlined ? "solid" : "none")) visual.style.outline = outlined ? "2px solid currentColor" : "none";
@@ -57,7 +57,12 @@ function createLayer(host: HTMLElement) {
         visual.setAttribute("inert", "");
         visual.style.pointerEvents = "none";
         for (const child of visual.querySelectorAll<HTMLElement>("*")) child.style.pointerEvents = "none";
-        if (entry) entry.visual.replaceWith(visual); else slot.append(visual);
+        if (entry) entry.visual.replaceWith(visual);
+        else if(pill.matches("[data-alert-chip]")) {
+          // Equal native-canvas layers retain execution graphics' precedence.
+          const order=[...pills].find(([source])=>!source.matches("[data-alert-chip]"));
+          slot.insertBefore(visual,order?.[1].visual??null);
+        }else slot.append(visual);
         entry = { root, visual, html }; pills.set(pill, entry);
       }
       let visible = true, opacity = 1;

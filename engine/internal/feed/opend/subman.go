@@ -524,7 +524,8 @@ func (m *subManager) pass(ctx context.Context) {
 		}
 		// Background alerts yield to ordinary demand as soon as the provider's
 		// minimum hold permits, even while the alert still wants this symbol.
-		if !want[k] && !bySymbol[k.Symbol].ordinary && now.Sub(st.subscribedAt) >= m.opt.MinHold {
+		priority, stillDemanded := bySymbol[k.Symbol]
+		if !want[k] && stillDemanded && !priority.ordinary && now.Sub(st.subscribedAt) >= m.opt.MinHold {
 			removes = append(removes, k)
 			removed[k] = true
 			continue

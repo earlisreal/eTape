@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { createChart, createTextWatermark, CandlestickSeries, BarSeries, HistogramSeries, LineSeries, AreaSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type LogicalRange, type Coordinate, type MouseEventParams } from "lightweight-charts";
 import type { PanelProps } from "./registry";
 import { ChartPriceAlerts } from "../alerts/ChartPriceAlerts";
+import { snapAlertPrice,alertPriceText } from "../alerts/price";
 import { PriceAlertEditor,type AlertEdit } from "../alerts/PriceAlertEditor";
 import { ChartController, type ManagedViewportMode } from "../../render/chart/ChartController";
 import { clampRightScroll, RIGHT_OFFSET_BARS, usesBoundaryManagedFollow, type ChartType } from "../../render/chart/chartTheme";
@@ -1253,7 +1254,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     }
     items.push({ label: "Reset chart view", onClick: () => { controllerRef.current?.resetZoom(); forceRepaintRef.current = true; } });
     const price = facadeRef.current?.coordinateToPrice(m.y) ?? null;
-    if(price!==null&&price>0)items.push({label:`Create price alert at ${formatPrice(price,quoteDecimals(price))}…`,onClick:()=>setAlertEdit({symbol:chartSymbol,price:Number(price.toFixed(price<1?4:2))})});
+    if(price!==null&&price>0)items.push({label:`Create price alert at $${alertPriceText(price)}…`,onClick:()=>setAlertEdit({symbol:chartSymbol,price:snapAlertPrice(price)})});
     if (price !== null) items.push({ label: `Copy price ${price.toFixed(2)}`, onClick: () => void navigator.clipboard?.writeText(price.toFixed(2)) });
     items.push("separator");
     items.push({ label: "Remove all drawings", danger: true, onClick: clearAllDrawings });

@@ -6,6 +6,8 @@ import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
 import { ChartOrderMarkers } from "./ChartOrderMarkers";
 import { getTvChrome } from "../../../render/chart/tvTheme";
 import type { OrderConfig } from "../../exec/actionTemplate";
+import { ChartPriceAlerts } from "../../alerts/ChartPriceAlerts";
+import { PriceAlertStore } from "../../../data/PriceAlertStore";
 
 const base: Order = {
   venue:"sim", id:"o1", symbol:"US.AAPL", side:"BUY", type:"LIMIT", tif:"DAY", session:"AUTO",
@@ -13,7 +15,7 @@ const base: Order = {
   avgFillPrice:0, rejectReason:"", replacesId:"", createdMs:1, updatedMs:1,
 };
 
-function mount(orders: Order[] = [base], config?: OrderConfig) {
+function mount(orders: Order[] = [base], config?: OrderConfig, withAlert=false) {
   const host = document.createElement("div");
   host.getBoundingClientRect = () => ({ x:0, y:0, top:0, left:0, right:500, bottom:400, width:500, height:400, toJSON:() => ({}) });
   const hostRef = { current:host };
@@ -22,16 +24,28 @@ function mount(orders: Order[] = [base], config?: OrderConfig) {
   const chooserOpenRef = { current:false };
   const sendCommand = vi.fn(async ():Promise<AckMsg> => ({ kind:"ack", corrId:"c1", status:"accepted" }));
   document.body.append(host);
-  const utils = render(<ChartOrderMarkers chrome={getTvChrome("light")} orders={orders} venue="sim" symbol="US.AAPL" pinned={false}
+  const alertStore=new PriceAlertStore();
+  alertStore.apply({kind:"snapshot",topic:"alerts.state",payload:{alerts:[{id:"a",symbol:"US.AAPL",price:100,state:"monitoring",condition:"at-or-above",label:"",sessions:{pre:true,rth:true,post:true},version:1,createdMs:1,updatedMs:1}],history:[],historyTotal:0,revision:1,error:""}});
+  const utils = render(<><ChartOrderMarkers chrome={getTvChrome("light")} orders={orders} venue="sim" symbol="US.AAPL" pinned={false}
     availableCash={100000} buyingPower={100000}
     sendCommand={sendCommand} hostRef={hostRef} facadeRef={facadeRef} rightAxisWidth={60}
-    layoutRef={layoutRef} chooserOpenRef={chooserOpenRef} {...(config ? {config} : {})} />, { container:host });
+    layoutRef={layoutRef} chooserOpenRef={chooserOpenRef} {...(config ? {config} : {})} />
+    {withAlert&&<ChartPriceAlerts store={alertStore} commands={{sendCommand}} symbol="US.AAPL" hostRef={hostRef} facadeRef={facadeRef} layoutRef={{current:()=>{}}} rightAxisWidth={60} paneHeight={400} enabled={true}/>}</>, { container:host });
   return { ...utils, host, sendCommand, layoutRef };
 }
 
 beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.spyOn(document, "hasFocus").mockReturnValue(true); });
 
 describe("ChartOrderMarkers", () => {
+  it("keeps an order graphic above an alert at the same price",async()=>{
+    const {host}=mount([base],undefined,true);
+    await waitFor(()=>expect(host.querySelectorAll("[data-order-pill-visual]").length).toBeGreaterThan(1));
+    const order=host.querySelector<HTMLElement>("[data-order-pill-visual='o1']")!;
+    const alert=[...host.querySelectorAll<HTMLElement>("[data-order-pill-visual]")].find(v=>v!==order&&v.textContent?.includes("100"))!;
+    expect(order.compareDocumentPosition(alert)&Node.DOCUMENT_POSITION_PRECEDING).not.toBe(0);
+    fireEvent.pointerOver(screen.getByRole("button",{name:/Edit price alert/}));
+    expect(alert.style.zIndex).toBe("1");
+  });
   it("keeps the market-data waiting reason in hover details without a chart label", () => {
     const {host} = mount([{...base,type:"STOP_LIMIT",stopPrice:100,held:{phase:"WAITING",deadlineMs:9999999999999,pausedReason:"Waiting for market data"},
       riskEntry:{stopId:"s",budget:100,mode:"Dollar",buyCushion:{value:0,unit:"$"},sellCushion:{value:0,unit:"$"}}}]);

@@ -35,3 +35,12 @@ it("dragging previews a target and requires Save before sending a mutation",asyn
  fireEvent.click(screen.getByRole("button",{name:"Save alert"}));
  await waitFor(()=>expect(sendCommand).toHaveBeenCalledWith("UpsertPriceAlert",expect.objectContaining({id:"a",version:1,price:.54})));
 });
+
+it("bell creation preserves the established three-decimal dollar precision",async()=>{
+ const store=new PriceAlertStore(),host=document.createElement("div");document.body.append(host);
+ host.getBoundingClientRect=()=>({x:0,y:0,top:0,left:0,right:500,bottom:400,width:500,height:400,toJSON:()=>({})});
+ const sendCommand=vi.fn(async()=>({kind:"ack" as const,corrId:"c",status:"accepted" as const}));
+ render(<ChartPriceAlerts store={store} commands={{sendCommand}} symbol="US.TEST" hostRef={{current:host}} facadeRef={{current:{priceToCoordinate:()=>100,coordinateToPrice:()=>5.555,setPanZoomEnabled:()=>{}}}} layoutRef={{current:()=>{}}} rightAxisWidth={60} paneHeight={400} enabled={true} armed={true}/>,{container:host});
+ fireEvent(host,new MouseEvent("pointerdown",{bubbles:true,button:0,clientX:100,clientY:100}));
+ await waitFor(()=>expect(screen.getByLabelText<HTMLInputElement>("Target price").value).toBe("5.555"));
+});

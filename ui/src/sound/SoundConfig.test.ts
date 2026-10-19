@@ -40,7 +40,7 @@ describe("sanitizeSoundConfig", () => {
 
   it("DEFAULT_SOUND_CONFIG matches the approved spec", () => {
     expect(DEFAULT_SOUND_CONFIG).toEqual({
-      enabled: true, sessionVoiceEnabled: true, volume: 0.6, fillSound: "twoTone",
+      enabled: true, priceAlertEnabled: true, sessionVoiceEnabled: true, volume: 0.6, fillSound: "twoTone",
       placeClick: true, rejectSound: "alertBeeps", scannerSound: "arpeggio",
       sessionVoice: "googleUsEnglish",
     });

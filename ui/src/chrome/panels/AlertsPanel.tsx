@@ -4,9 +4,8 @@ import type { PanelProps } from "./registry";
 import type { PriceAlert,PriceAlertTrigger } from "../../wire/contract";
 import { PriceAlertEditor,type AlertEdit } from "../alerts/PriceAlertEditor";
 import { viewAlertChart } from "../alerts/navigation";
-import { formatPrice,quoteDecimals } from "../../render/format";
+import { alertPriceText as price } from "../alerts/price";
 
-const price=(p:number)=>formatPrice(p,quoteDecimals(p));
 const states:Record<string,string>={monitoring:"Monitoring","waiting-data":"Waiting for data","waiting-capacity":"Waiting for data capacity","outside-session":"Outside selected sessions",paused:"Paused",triggered:"Triggered"};
 export function AlertsPanel({stores,commands}:Pick<PanelProps,"stores"|"commands">):JSX.Element {
  const s=useSyncExternalStore(cb=>stores.priceAlerts.subscribe(cb),()=>stores.priceAlerts.getSnapshot());

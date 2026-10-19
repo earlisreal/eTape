@@ -5,6 +5,7 @@ import type { PriceAlertStore } from "../../data/PriceAlertStore";
 import { PriceAlertEditor,type AlertCommands,type AlertEdit } from "./PriceAlertEditor";
 import { attachOrderPillLayer } from "../panels/tv/orderPillLayer";
 import { IconBell } from "../panels/tv/tvIcons";
+import { snapAlertPrice,alertPriceText } from "./price";
 
 interface Props {
  store:PriceAlertStore;commands:AlertCommands;symbol:string;
@@ -40,7 +41,7 @@ export function ChartPriceAlerts(props:Props):JSX.Element {
    row.style.top=`${Math.round(y)}px`;visible.push({row,y,alert:a});
    const chip=row.querySelector<HTMLElement>("[data-alert-chip]");
    if(chip){chip.style.display="flex";chip.dataset.ids=a.id;
-    const text=chip.querySelector("[data-alert-text]");if(text)text.textContent=price<1?price.toFixed(4):price.toFixed(2);}
+    const text=chip.querySelector("[data-alert-text]");if(text)text.textContent=alertPriceText(price);}
   }
   visible.sort((a,b)=>a.y-b.y);
   for(let i=0;i<visible.length;){
@@ -55,7 +56,7 @@ export function ChartPriceAlerts(props:Props):JSX.Element {
    const point=hover.current;
    const price=point&&p.armed?facade.coordinateToPrice(point.y):null;
    preview.style.display=price!==null&&price>0&&point&&point.y>12&&point.y<p.paneHeight-12?"block":"none";
-   if(point){preview.style.top=`${point.y}px`;const text=preview.querySelector("span");if(text&&price!==null)text.textContent=price<1?price.toFixed(4):price.toFixed(2);}
+   if(point){preview.style.top=`${point.y}px`;const text=preview.querySelector("span");if(text&&price!==null)text.textContent=alertPriceText(price);}
   }
   layer.current?.sync();
  };
@@ -73,7 +74,7 @@ export function ChartPriceAlerts(props:Props):JSX.Element {
    if(y<0||y>props.paneHeight||e.clientX-r.left>r.width-props.rightAxisWidth)return;
    const price=props.facadeRef.current?.coordinateToPrice(y);
    e.preventDefault();e.stopImmediatePropagation();props.onDisarm?.();
-   if(price!==null&&price!==undefined&&price>0)setEdit({symbol:props.symbol,price:Number(price.toFixed(price<1?4:2))});
+   if(price!==null&&price!==undefined&&price>0)setEdit({symbol:props.symbol,price:snapAlertPrice(price)});
   };
   let frame=0;
   const move=(e:PointerEvent)=>{const r=host.getBoundingClientRect();hover.current={x:e.clientX-r.left,y:e.clientY-r.top};if(!frame)frame=requestAnimationFrame(()=>{frame=0;layout();});};
@@ -93,7 +94,7 @@ export function ChartPriceAlerts(props:Props):JSX.Element {
   const chip=e.currentTarget.parentElement;
   props.facadeRef.current?.setPanZoomEnabled(false);layer.current?.drag(chip);
   const cleanup=()=>{window.removeEventListener("pointermove",move,true);window.removeEventListener("pointerup",up,true);props.facadeRef.current?.setPanZoomEnabled(true);layer.current?.drag(null);drag.current=null;};
-  const move=(ev:PointerEvent)=>{const d=drag.current;if(!d)return;const y=ev.clientY-host.getBoundingClientRect().top;const price=props.facadeRef.current?.coordinateToPrice(y);if(price===null||price===undefined||price<=0||y<0||y>props.paneHeight)return;d.moved ||=Math.abs(ev.clientY-d.start)>3;d.price=Number(price.toFixed(price<1?4:2));layout();};
+  const move=(ev:PointerEvent)=>{const d=drag.current;if(!d)return;const y=ev.clientY-host.getBoundingClientRect().top;const price=props.facadeRef.current?.coordinateToPrice(y);if(price===null||price===undefined||price<=0||y<0||y>props.paneHeight)return;d.moved ||=Math.abs(ev.clientY-d.start)>3;d.price=snapAlertPrice(price);layout();};
   const up=(ev:PointerEvent)=>{const d=drag.current;cleanup();if(!d)return;ev.preventDefault();ev.stopImmediatePropagation();suppressClick.current=d.moved;if(d.moved)open(alert,d.price);else open(alert);layout();};
   drag.current={alert,price:alert.price,moved:false,start:e.clientY,cleanup};
   window.addEventListener("pointermove",move,true);window.addEventListener("pointerup",up,true);
