@@ -15,4 +15,10 @@ Current durable domain decisions:
 - Watchlist membership is authoritative engine state; row snapshots may lag membership and render placeholders.
 - Time & Sales Significant Prints are Go UI-hub annotations: separate RTH/Extended 2,000-print learning pools reset on the 20:00 ET cycle, emit low-rate `md.tape.status`, and carry `none`/`large`/`exceptional` on generated tick contracts. Minimum Trade Size is display-only.
 
+Approved feature designs awaiting implementation:
+
+- [Engine-Held Trailing Stops](../../.scratch/engine-trailing-stops/spec.md):
+  standalone SELL/COVER trails, Chart Risk Entry protection conversion and
+  trailing preset modes; confirmed 2026-10-20.
+
 Create focused approved specifications here as `YYYY-MM-DD-short-feature.md`. After implementation, keep durable decisions current and remove obsolete proposal detail.

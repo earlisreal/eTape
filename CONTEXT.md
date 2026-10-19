@@ -60,6 +60,10 @@ _Avoid_: Borrowable, easy to borrow, short-authorized
 A non-flat position in one symbol held at one Execution Venue.
 _Avoid_: Holding, open trade
 
+**Position Cycle**:
+One uninterrupted period during which an Execution Venue holds a non-flat position in a symbol on the same side. Returning flat or reversing ends that cycle; a later position begins a new one.
+_Avoid_: Order lifetime, trading session
+
 **Average Entry Price**:
 The quantity-weighted cost basis of an Open Position at its Execution Venue. It survives a partial exit and resets when the position reverses direction.
 _Avoid_: Avg price, average fill price, market average
@@ -240,8 +244,16 @@ _Avoid_: Previous extended-session close
 ## Order Entry
 
 **Chart Risk Entry**:
-A long entry sized to a loss budget from two chart-selected prices, with a linked protective sell stop.
+A long entry sized to a loss budget from two chart-selected prices, with a linked protective sell stop governed by its Protection Mode.
 _Avoid_: Risk confirmation, bracket (when referring to this entry tool)
+
+**Protection Mode**:
+A Chart Risk Entry preset's choice of fixed-stop, dollar-distance, percentage-distance or Candle Trail protection for its linked sell exit.
+_Avoid_: Order type, sizing mode
+
+**Initial Stop Price**:
+The chart-selected protective trigger used to size Chart Risk Entry. For a preset that begins with trailing Protection Mode, it remains that long protection's minimum trigger price.
+_Avoid_: Execution limit, Trail Distance
 
 **Limit-if-Touched (LIT)**:
 A conditional order that activates a Limit Order when the trigger price is reached or passed: at or below for BUY/COVER, at or above for SELL/SHORT. Its trigger price and execution limit are distinct; activation does not guarantee a fill.
@@ -254,6 +266,26 @@ _Avoid_: Synthetic stop-limit, broker stop-limit, local stop order
 **Engine-Held Limit-if-Touched**:
 A Limit-if-Touched instruction retained by eTape until a Last-Eligible Price satisfies its trigger, when it creates a linked Limit Order at its Execution Venue. Before activation, no broker order exists.
 _Avoid_: Native LIT, broker-held LIT
+
+**Engine-Held Trailing Stop**:
+A position-reducing conditional exit retained by eTape whose stop price follows favorable market movement or a Candle Trail. Its trigger creates a linked Limit Order at its original Execution Venue.
+_Avoid_: Broker trailing stop, trailing entry order
+
+**High-Water Mark (HWM)**:
+The highest Last-Eligible Price observed since a long-position Engine-Held Trailing Stop began trailing. It is independent of the position's entry price and the trading day's earlier high.
+_Avoid_: Day high, entry price
+
+**Low-Water Mark (LWM)**:
+The lowest Last-Eligible Price observed since a short-position Engine-Held Trailing Stop began trailing. It is independent of the position's entry price and the trading day's earlier low.
+_Avoid_: Day low, entry price
+
+**Trail Distance**:
+The dollar or percentage distance between a trailing stop's favorable price watermark and its stop price.
+_Avoid_: Limit Cushion, Quote Offset
+
+**Candle Trail**:
+An Engine-Held Trailing Stop whose stop price follows the protective boundary of completed real candles on its selected timeframe, moving only in the direction that tightens protection.
+_Avoid_: Current-candle trail, indicator stop
 
 **Live Held LIT Acknowledgement**:
 A trader's explicit acceptance that an Engine-Held Limit-if-Touched has no broker order or protection before activation, scoped to one live Execution Venue account identity. It is separate from Stop-Limit acknowledgement.
@@ -268,7 +300,7 @@ The order session used to determine custody and venue behavior after resolving a
 _Avoid_: Requested session, displayed session
 
 **Held Phase**:
-The current pre-terminal stage of an Engine-Held Stop-Limit or LIT: Waiting, Armed, Paused, Activating, or Working. It is distinct from the Order's accepted, filled, canceled, expired, or rejected status.
+The current pre-terminal stage of an Engine-Held Stop-Limit, LIT or Trailing Stop, such as Waiting, Armed, Paused, Activating or Working. It is distinct from the Order's accepted, filled, canceled, expired or rejected status.
 _Avoid_: Order status, broker status
 
 **Deferred Position Sizing**:
@@ -276,8 +308,12 @@ A stop-sell size expressed as a percentage of the latest broker-confirmed long p
 _Avoid_: Planned buy quantity, linked entry sizing
 
 **Limit Cushion**:
-The non-negative distance from a Stop-Limit or Limit-if-Touched template's trigger price to its resulting limit price, added for BUY/COVER and subtracted for SELL/SHORT.
+The non-negative distance from a conditional order's trigger price to its resulting limit price, added for BUY/COVER and subtracted for SELL/SHORT.
 _Avoid_: Price offset, slippage
+
+**Quote Offset**:
+A signed dollar or percentage adjustment to a selected market-price reference, such as Bid or Ask, used to calculate an execution limit.
+_Avoid_: Trail Distance, Limit Cushion
 
 **Chart Order Gesture**:
 An exact keyboard-modifier and primary-click binding that invokes one Stop-Limit or Limit-if-Touched Action Template, using the clicked chart price as its trigger. One modifier press can create at most one order.
