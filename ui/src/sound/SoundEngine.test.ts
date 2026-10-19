@@ -24,6 +24,16 @@ function make(now: () => number) {
 }
 
 describe("SoundEngine", () => {
+  it("plays Beacon only while enabled, unlocked and not already playing", () => {
+    const player=fakePlayer(); player.isReady=()=>true;
+    const eng=new SoundEngine(player,()=>1000);
+    eng.setConfig({...DEFAULT_SOUND_CONFIG,priceAlertEnabled:false});
+    expect(eng.canPlayPriceAlert()).toBe(false);
+    eng.priceAlert(); expect(player.played).toHaveLength(0);
+    eng.setConfig({...DEFAULT_SOUND_CONFIG,priceAlertEnabled:true});
+    expect(eng.canPlayPriceAlert()).toBe(true);
+    eng.priceAlert();eng.priceAlert();expect(player.played).toHaveLength(1);
+  });
   let t = 0;
   const now = () => t;
   beforeEach(() => { t = 100_000; });

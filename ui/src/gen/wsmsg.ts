@@ -9,6 +9,7 @@
 
 // ---- topics ----
 export type Topic =
+  | "alerts.state" | "alerts.trigger"
   | "md.quote" | "md.book" | "md.tape" | "md.tape.status" | "md.bars" | "md.indicator"
   | "scanner.rank" | "scanner.hit"
   | "news.item"
@@ -987,4 +988,79 @@ export interface TestConnectionResult {
  * stability). A UI-triggered demo relaunch takes no knobs — just -demo.
  */
 export interface StartDemoArgs {
+}
+
+//////////
+// source: pricealerts.go
+
+export interface PriceAlertSessions {
+  pre: boolean;
+  rth: boolean;
+  post: boolean;
+}
+export interface PriceAlert {
+  id: string;
+  symbol: string;
+  condition: string;
+  price: number /* float64 */;
+  label: string;
+  sessions: PriceAlertSessions;
+  state: string;
+  version: number /* uint64 */;
+  createdMs: number /* int64 */;
+  updatedMs: number /* int64 */;
+}
+export interface PriceAlertTrigger {
+  id: string;
+  alertId: string;
+  symbol: string;
+  condition: string;
+  price: number /* float64 */;
+  actualPrice: number /* float64 */;
+  label: string;
+  sessions: PriceAlertSessions;
+  session: string;
+  tsMs: number /* int64 */;
+  reason: string;
+}
+export interface PriceAlertState {
+  alerts: PriceAlert[];
+  history: PriceAlertTrigger[];
+  historyTotal: number /* int */;
+  revision: number /* uint64 */;
+  error: string;
+}
+export interface PriceAlertNotification {
+  id: string;
+  triggers: PriceAlertTrigger[];
+  expiresMs: number /* int64 */;
+}
+export interface UpsertPriceAlertArgs {
+  id: string;
+  version: number /* uint64 */;
+  rearm: boolean;
+  symbol: string;
+  condition: string;
+  price: number /* float64 */;
+  label: string;
+  sessions: PriceAlertSessions;
+}
+export interface PriceAlertActionArgs {
+  id: string;
+  version: number /* uint64 */;
+  paused: boolean;
+}
+export interface ClaimPriceAlertNotificationArgs {
+  id: string;
+  kind: string;
+}
+export interface PriceAlertHistoryArgs {
+  beforeId: string;
+}
+export interface PriceAlertPreviewArgs {
+  symbol: string;
+}
+export interface PriceAlertPreview {
+  price: number /* float64 */;
+  tsMs: number /* int64 */;
 }

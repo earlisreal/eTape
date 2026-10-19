@@ -130,6 +130,8 @@ export default defineConfig({
           name: 'chrome-regressions',
           include: [
             'src/sound/**/*.test.{ts,tsx}',
+            'src/chrome/alerts/**/*.test.{ts,tsx}',
+            'src/data/PriceAlertStore.test.ts',
             'src/chrome/ThemeProvider.test.tsx',
             'src/chrome/exec/useOrderConfig.test.tsx',
             'src/chrome/AppShell.test.tsx',

@@ -10,12 +10,14 @@ import "encoding/json"
 type Topic string
 
 const (
-	TopicQuote      Topic = "md.quote"
-	TopicBook       Topic = "md.book"
-	TopicTape       Topic = "md.tape"
-	TopicTapeStatus Topic = "md.tape.status"
-	TopicBars       Topic = "md.bars"
-	TopicIndicator  Topic = "md.indicator"
+	TopicAlertsState   Topic = "alerts.state"
+	TopicAlertsTrigger Topic = "alerts.trigger"
+	TopicQuote         Topic = "md.quote"
+	TopicBook          Topic = "md.book"
+	TopicTape          Topic = "md.tape"
+	TopicTapeStatus    Topic = "md.tape.status"
+	TopicBars          Topic = "md.bars"
+	TopicIndicator     Topic = "md.indicator"
 
 	TopicScannerRank   Topic = "scanner.rank"
 	TopicScannerHit    Topic = "scanner.hit"
@@ -40,6 +42,7 @@ const (
 
 // AllTopics is the set a client may subscribe to (server-side allow-list).
 var AllTopics = map[Topic]bool{
+	TopicAlertsState: true, TopicAlertsTrigger: true,
 	TopicQuote: true, TopicBook: true, TopicTape: true, TopicTapeStatus: true, TopicBars: true, TopicIndicator: true,
 	TopicScannerRank: true, TopicScannerHit: true, TopicNews: true, TopicStockDetail: true, TopicWatchlistRows: true,
 	TopicExecAccount: true, TopicExecPositions: true, TopicExecOrders: true,

@@ -19,6 +19,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/feed"
 	"github.com/earlisreal/eTape/engine/internal/locates"
 	"github.com/earlisreal/eTape/engine/internal/md"
+	"github.com/earlisreal/eTape/engine/internal/pricealert"
 	"github.com/earlisreal/eTape/engine/internal/scan"
 	"github.com/earlisreal/eTape/engine/internal/session"
 	"github.com/earlisreal/eTape/engine/internal/uihub/wsmsg"
@@ -138,6 +139,7 @@ type knownSymbolBox struct{ fn func(string) bool }
 // method (symbol-existence validation for EnsureSymbol/FocusGroup) — a
 // field and a method can't share a name on the same type.
 type commands struct {
+	priceAlerts           atomic.Pointer[pricealert.Manager]
 	ex                    execDoer
 	cfg                   configStore
 	ind                   indicatorCtl
@@ -221,6 +223,9 @@ func ackFromCmd(a exec.CmdAck) wsmsg.AckMsg {
 }
 
 func (cd *commands) handle(ctx context.Context, name string, args json.RawMessage, connID uint64, reply func(wsmsg.AckMsg)) (wsmsg.AckMsg, bool) {
+	if ack, handled := cd.handlePriceAlert(name, args, connID); handled {
+		return ack, false
+	}
 	switch name {
 	case "SubmitRiskEntry":
 		var a wsmsg.SubmitRiskEntryArgs

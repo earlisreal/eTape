@@ -2,7 +2,7 @@
 
 Status: ready-for-agent
 Approved: 2026-10-19
-Implementation: not started; feature implementation is a separate task.
+Implementation: engine and UI implemented; validation and review in progress.
 
 ## Goal
 
@@ -240,4 +240,4 @@ review.
 Earl approved the complete design, including Alerts / History tabs, Add Panel
 entry, editor-based Rearm, explicit navigation without changing Link Group
 symbols, and General / Sounds Beacon enable/Preview without per-alert mute.
-Feature implementation remains a separate task.
+Feature implementation was subsequently authorized through the implement skill.

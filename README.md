@@ -7,6 +7,7 @@
 **A free, open-source day-trading platform — read the tape, work the ladder, fire orders from hotkeys.**
 
 Real-time charts · Level 2 DOM ladder · Time & Sales · Pre-market scanner · Multi-broker execution
+· Saved price alerts with sound
 
 ![Go](https://img.shields.io/badge/engine-Go%201.26-00ADD8?logo=go&logoColor=white)
 ![React](https://img.shields.io/badge/UI-React%2018%20%2B%20TypeScript-3178C6?logo=typescript&logoColor=white)

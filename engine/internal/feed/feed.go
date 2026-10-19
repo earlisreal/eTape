@@ -227,6 +227,7 @@ type Demand struct {
 	Symbol         string
 	Subs           []SubType
 	Focused        bool // focused symbols survive LRU eviction under quota pressure
+	Background     bool // admitted only after ordinary chart/watch/execution demand
 	WantsHistory   bool // request archive warming or focused history preparation
 	BackgroundSeed bool // cache seed may wait behind interactive panel loads
 	CachedDaily    bool // chart demand: seed empty daily archive from OpenD cache

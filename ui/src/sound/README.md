@@ -1,5 +1,12 @@
 # Sound
 
+Price alerts use the approved 650 ms Beacon cue: two short rounded 740 Hz pulses
+and one longer pulse. The global price-alert listener handles only live deltas,
+claims one playback per engine burst across all connections, and drops muted,
+locked, disconnected, or overlapping playback. Unlock/unmute never replays a
+missed cue. General → Sounds exposes its enable toggle and Preview; master enable
+and volume apply to alerts. Monitoring and history continue without any window.
+
 Web Audio order-event cues and Session Transition Announcements. Inputs: normalized execution events, session transitions, and preferences; output: local audio. Unlock audio only through user gesture; failures never block execution UI. Test: `npx vitest run --project chrome-regressions` (includes the sound tests).
 
 The first pointer or keyboard gesture unlocks the shared AudioContext and preloads

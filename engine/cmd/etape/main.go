@@ -41,6 +41,7 @@ import (
 	"github.com/earlisreal/eTape/engine/internal/md"
 	"github.com/earlisreal/eTape/engine/internal/news"
 	"github.com/earlisreal/eTape/engine/internal/openbrowser"
+	"github.com/earlisreal/eTape/engine/internal/pricealert"
 	"github.com/earlisreal/eTape/engine/internal/quota"
 	"github.com/earlisreal/eTape/engine/internal/scan"
 	"github.com/earlisreal/eTape/engine/internal/session"
@@ -575,6 +576,20 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		Eligibility:        venueEligibilityRegistry(vbs),
 		FocusMainWorkspace: focusMainWorkspace,
 	}, execCore, st, core, venueAdm, venueProbe, restartInPlace, startDemo, locateProviders)
+	alerts, alertErr := pricealert.New(pricealert.Options{Clock: uihubClk, Repository: st,
+		OnSnapshot: func(s pricealert.Snapshot) { hub.Publish(wsmsg.TopicAlertsState, "", uihub.MapPriceAlertState(s)) },
+		OnNotification: func(n pricealert.Notification) {
+			hub.Publish(wsmsg.TopicAlertsTrigger, "", uihub.MapPriceAlertNotification(n))
+		},
+	})
+	if alertErr != nil {
+		log.Error("load price alerts", "err", alertErr)
+		_ = st.Close()
+		return 1, false, nil
+	}
+	hub.SetPriceAlerts(alerts)
+	alertsDone := make(chan struct{})
+	go func() { defer close(alertsDone); alerts.Run(ctx) }()
 	hubDone := make(chan struct{})
 	recordingHub.Store(hub)
 	go func() { defer close(hubDone); _ = hub.Run(ctx) }()
@@ -648,7 +663,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	// Non-sim live venues (tradezero/alpaca/moomoo) are fed by their own
 	// broker connection and don't implement simSink, so the type assertion in
 	// simSinksOf selects the right set.
-	go markBridge(ctx, core, execCore, simSinksOf(vbs))
+	go markBridge(ctx, core, execCore, simSinksOf(vbs), alerts)
 
 	// --- feed (live OpenD or synthetic demo) ---
 	var pipeWG sync.WaitGroup
@@ -757,6 +772,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 		}
 	}
 	hub.SetFeed(feedForHub) // enables on-demand EnsureSymbol/ReleaseSymbol + FocusGroup probe
+	alerts.SetDemand(engineAlertDemand{feed: feedForHub})
 	hub.SetKnownSymbol(st.HasArchivedSymbol)
 
 	var prepareChart func(sym string, done func(ok bool))
@@ -948,6 +964,7 @@ func boot(ctx context.Context, onListening func(addr string), onShutdownSummary 
 	}
 	<-accountDone // account poller stopped: no more baseline SetConfig writes
 	brokerWG.Wait()
+	<-alertsDone // durable alert writes have stopped before closing the store
 	if err := st.Close(); err != nil {
 		log.Error("close store", "err", err)
 	}
@@ -1153,7 +1170,7 @@ func simSinksOf(vbs []venueBroker) []simSink {
 // only as of Task 1 — Task 2 makes fills price off it). Non-sim live venues
 // get marks/books from their own broker feed instead and are excluded from
 // sinks by simSinksOf.
-func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks []simSink) {
+func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks []simSink, alerts ...*pricealert.Manager) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -1165,6 +1182,9 @@ func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks [
 			}
 		case p := <-core.EligiblePrints():
 			execCore.FeedEligiblePrint(ctx, exec.EligiblePrint{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs, RecvTsMs: p.RecvTsMs, Seq: p.Seq, Gap: p.Gap})
+			for _, a := range alerts {
+				a.Feed(pricealert.Print{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs, RecvTsMs: p.RecvTsMs, Seq: p.Seq, Gap: p.Gap})
+			}
 		case bk := <-core.Books():
 			for _, s := range sinks {
 				s.SetBook(bk.Symbol, bk)

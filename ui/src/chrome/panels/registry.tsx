@@ -15,6 +15,7 @@ import { ScannerPanel } from "./ScannerPanel";
 import { WatchlistPanel } from "./WatchlistPanel";
 import { StockInfoPanel } from "./StockInfoPanel";
 import { AccountPanel } from "./AccountPanel";
+import { AlertsPanel } from "./AlertsPanel";
 import { OrderTicketPanel } from "./OrderTicketPanel";
 import { LocatesPanel } from "./LocatesPanel";
 import { TAPE_MIN_WIDTH } from "../../render/tape/tapeLayout";
@@ -104,6 +105,7 @@ const stockInfoPanel: PanelDef = {
 // Plan 5 adds the execution surfaces (account-bar / positions / open-orders /
 // order-ticket). Plan 6 owns Playwright smoke E2E + ui/dist static serving.
 export const PANELS: Record<string, PanelDef> = {
+  alerts: {component:AlertsPanel,topics:["alerts.state","alerts.trigger"],title:"Alerts",glyph:"♧",description:"Saved price alerts and trigger history",symbolBearing:false},
   "connection-status": {
     component: ({ stores }) => <ConnectionStatusPanel health={stores.health} />,
     topics: ["sys.health", "sys.events", "sys.session", "sys.boot"],
@@ -238,7 +240,7 @@ export const DEV_PANELS = new Set(["smoke-painter"]);
 export const isDevPanel = (panelId: string): boolean => DEV_PANELS.has(panelId);
 
 const CATALOG_ORDER = ["chart", "ladder", "tape", "scanner", "watchlist", "stock-info", "locates",
-  "account", "order-ticket", "connection-status"];
+  "account", "order-ticket", "alerts", "connection-status"];
 // "account-bar", "positions", and (as of Task 8) "open-orders" all stay
 // registered in PANELS (above) as back-compat aliases for saved workspace docs,
 // but are intentionally absent from the Add Panel catalog — only the merged

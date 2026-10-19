@@ -46,6 +46,7 @@ packages:
 
       // ---- topics ----
       export type Topic =
+        | "alerts.state" | "alerts.trigger"
         | "md.quote" | "md.book" | "md.tape" | "md.tape.status" | "md.bars" | "md.indicator"
         | "scanner.rank" | "scanner.hit"
         | "news.item"

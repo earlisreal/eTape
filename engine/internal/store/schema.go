@@ -32,6 +32,13 @@ CREATE INDEX IF NOT EXISTS idx_bar_archive_ranges_lookup
 CREATE TABLE IF NOT EXISTS config (
   key TEXT PRIMARY KEY, value TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS price_alerts (
+  id TEXT PRIMARY KEY, payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS price_alert_triggers (
+  id TEXT PRIMARY KEY, alert_id TEXT NOT NULL, ts INTEGER NOT NULL, payload TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_price_alert_triggers_ts ON price_alert_triggers(ts);
 CREATE TABLE IF NOT EXISTS sys_events (
   seq    INTEGER PRIMARY KEY AUTOINCREMENT,
   ts     INTEGER NOT NULL,

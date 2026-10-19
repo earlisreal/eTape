@@ -44,6 +44,14 @@ trigger print. Immediate activation rechecks print freshness after subscription.
 See the [execution core guide](internal/exec/README.md) for partial/late fills,
 disarm, cancellation, recovery and phase-checked chart amendments.
 
+## Price alerts
+
+Saved price alerts run independently of open charts, browser windows, trading
+arm state, and execution venues. Fresh Last-Eligible prints evaluate one-shot
+thresholds during each alert's selected daytime sessions. Background ticker
+demand waits behind ordinary demand; history persists even when a definition is
+deleted. See the [price-alert lifecycle](internal/pricealert/README.md).
+
 ## Release builds
 
 The release targets build the UI, embed it, and cross-compile with CGO disabled:

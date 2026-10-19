@@ -2,6 +2,8 @@ import { useContext, useEffect, useRef, useState, useSyncExternalStore } from "r
 import { createPortal } from "react-dom";
 import { createChart, createTextWatermark, CandlestickSeries, BarSeries, HistogramSeries, LineSeries, AreaSeries, type IChartApi, type ISeriesApi, type Time, type Logical, type LogicalRange, type Coordinate, type MouseEventParams } from "lightweight-charts";
 import type { PanelProps } from "./registry";
+import { ChartPriceAlerts } from "../alerts/ChartPriceAlerts";
+import { PriceAlertEditor,type AlertEdit } from "../alerts/PriceAlertEditor";
 import { ChartController, type ManagedViewportMode } from "../../render/chart/ChartController";
 import { clampRightScroll, RIGHT_OFFSET_BARS, usesBoundaryManagedFollow, type ChartType } from "../../render/chart/chartTheme";
 import type { ChartApiFacade, CrosshairMove, LwcSeries } from "../../render/chart/ChartApiFacade";
@@ -181,6 +183,8 @@ function makeFacade(chart: IChartApi, palette: Palette, host: HTMLElement): {
 }
 
 export function ChartPanel({ config, stores, scheduler, width, height, linkGroups, commands, onConfigChange, group: groupProp, symbol: symbolProp, monitoring, active }: PanelProps): JSX.Element {
+  const [alertArmed,setAlertArmed]=useState(false);
+  const [alertEdit,setAlertEdit]=useState<AlertEdit|null>(null);
   const hostRef = useRef<HTMLDivElement | null>(null);
   const controllerRef = useRef<ChartController | null>(null);
   const setFacadePaletteRef = useRef<((p: Palette) => void) | null>(null);
@@ -241,6 +245,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     return styleStore.isReady() || !styleStore.isConnected();
   });
   const [chartSymbol, setChartSymbol] = useState(symbol);
+  useEffect(()=>{setAlertArmed(false);setAlertEdit(null);},[chartSymbol,timeframe]);
   const stockDetail = useSyncExternalStore(
     (cb) => stores.stockDetail.subscribe(cb),
     () => stores.stockDetail.detailFor(chartSymbol),
@@ -284,6 +289,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
   const refreshSelRef = useRef<() => void>(() => {});
   const facadeRef = useRef<ChartApiFacade | null>(null);
   const orderMarkerLayoutRef = useRef<() => void>(() => {});
+  const alertLayoutRef = useRef<() => void>(() => {});
   const riskEntryLayoutRef = useRef<() => void>(() => {});
   const orderChooserOpenRef = useRef(false);
   const drawingsPrimRef = useRef<DrawingsPrimitive | null>(null);
@@ -938,6 +944,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         setLastPriceTag((prev) =>
           prev === next || (prev && next && prev.y === next.y && prev.up === next.up && prev.price === next.price) ? prev : next);
         orderMarkerLayoutRef.current();
+        alertLayoutRef.current();
         riskEntryLayoutRef.current();
       },
     });
@@ -1246,6 +1253,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
     }
     items.push({ label: "Reset chart view", onClick: () => { controllerRef.current?.resetZoom(); forceRepaintRef.current = true; } });
     const price = facadeRef.current?.coordinateToPrice(m.y) ?? null;
+    if(price!==null&&price>0)items.push({label:`Create price alert at ${formatPrice(price,quoteDecimals(price))}…`,onClick:()=>setAlertEdit({symbol:chartSymbol,price:Number(price.toFixed(price<1?4:2))})});
     if (price !== null) items.push({ label: `Copy price ${price.toFixed(2)}`, onClick: () => void navigator.clipboard?.writeText(price.toFixed(2)) });
     items.push("separator");
     items.push({ label: "Remove all drawings", danger: true, onClick: clearAllDrawings });
@@ -1296,8 +1304,10 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         onContextMenu={onContextMenu}>
         {chartSymbol ? <>
           {drawingToolsVisible && <TVDrawingRail chrome={chrome} activeTool={activeTool} hideAll={hideAll} symbol={chartSymbol}
+            alertArmed={alertArmed} onAlertTool={()=>{setAlertArmed(v=>!v);setActiveTool("select");interactionRef.current?.setTool("select");}}
             stylesReady={drawingStylesReady}
             onSelectTool={(t) => {
+              setAlertArmed(false);
               if (t !== "select" && t !== "measure" && !drawingStylesReady) return;
               setActiveTool(t); interactionRef.current?.setTool(t);
             }}
@@ -1314,13 +1324,15 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
           <ChartOrderMarkers chrome={chrome} orders={execSnapshot.orders.values()} venue={linkGroups.venueFor(group) ?? ""} symbol={chartSymbol}
             availableCash={execSnapshot.accounts.get(linkGroups.venueFor(group) ?? "")?.availableCash ?? 0} buyingPower={execSnapshot.accounts.get(linkGroups.venueFor(group) ?? "")?.buyingPower ?? 0}
             pinned={group === null} sendCommand={commands.sendCommand} hostRef={hostRef} facadeRef={facadeRef}
-            rightAxisWidth={rightAxisWidth} layoutRef={orderMarkerLayoutRef} chooserOpenRef={orderChooserOpenRef} config={orderConfig.config} activeTool={activeTool} />
+            rightAxisWidth={rightAxisWidth} layoutRef={orderMarkerLayoutRef} chooserOpenRef={orderChooserOpenRef} config={orderConfig.config} activeTool={alertArmed?"measure":activeTool} />
           <ChartConditionalOrderEntry chrome={chrome} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
-            symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={activeTool} chooserOpenRef={orderChooserOpenRef}
+            symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={alertArmed?"measure":activeTool} chooserOpenRef={orderChooserOpenRef}
             sendCommand={commands.sendCommand} sendQuery={commands.sendQuery} />
           <ChartRiskEntry chrome={chrome} panelId={config.id} active={!!active} contextKey={timeframe} hostRef={hostRef} facadeRef={facadeRef} stores={stores} linkGroups={linkGroups} group={group}
-            symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={activeTool} chooserOpenRef={orderChooserOpenRef} layoutRef={riskEntryLayoutRef}
+            symbol={chartSymbol} config={orderConfig.config} configLoaded={orderConfig.loaded} activeTool={alertArmed?"measure":activeTool} chooserOpenRef={orderChooserOpenRef} layoutRef={riskEntryLayoutRef}
             sendCommand={commands.sendCommand} sendQuery={commands.sendQuery} />
+          <ChartPriceAlerts key={`${chartSymbol}:${timeframe}`} store={stores.priceAlerts} commands={commands} symbol={chartSymbol} hostRef={hostRef} facadeRef={facadeRef} layoutRef={alertLayoutRef}
+            rightAxisWidth={rightAxisWidth} paneHeight={paneOffsets[1]??height} enabled={activeTool==="select"&&!alertArmed} armed={alertArmed} onDisarm={()=>setAlertArmed(false)}/>
           {selection && (
             <TVFloatingToolbar key={selection.id} chrome={chrome} kind={selection.kind} rect={selection.rect} color={selection.color} width={selection.width} lineStyle={selection.lineStyle}
               fill={selection.fill} fillColor={selection.fillColor} fillOpacity={selection.fillOpacity}
@@ -1350,6 +1362,7 @@ export function ChartPanel({ config, stores, scheduler, width, height, linkGroup
         );
       })()}
       {chartSettingsOpen && <ChartSettingsDialog chrome={chrome} settings={chartSettings} onClose={() => setChartSettingsOpen(false)} onApply={applyChartSettings} />}
+      {alertEdit&&<PriceAlertEditor {...alertEdit} commands={commands} onClose={()=>setAlertEdit(null)}/>}
     </div>
   );
 }

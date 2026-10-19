@@ -93,6 +93,10 @@ export function SoundsSection(): JSX.Element {
         <span style={{ width: 90 }}>Volume</span>
         <input data-testid="sound-volume" type="range" min={0} max={1} step={0.05} value={config.volume} onChange={(e) => save({ ...config, volume: Number(e.target.value) })} />
       </div>
+      <div style={row}>
+        <label><input data-testid="sound-price-alert-on" type="checkbox" checked={config.priceAlertEnabled} onChange={e=>save({...config,priceAlertEnabled:e.target.checked})}/>Price alert · Beacon</label>
+        <button aria-label="Preview price alert sound" disabled={!config.priceAlertEnabled} onClick={()=>soundEngine.previewPriceAlert()}>▶</button>
+      </div>
     </div>
   );
 }

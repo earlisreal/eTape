@@ -355,10 +355,11 @@ func (m *subManager) kickWorker() {
 // slots pinned by moomoo's min-hold rule). Caller holds m.mu.
 func (m *subManager) desired(capSlots int) (map[subKey]bool, []string) {
 	type symDemand struct {
-		symbol  string
-		focused bool
-		latest  time.Time
-		subs    map[feed.SubType]bool
+		symbol   string
+		ordinary bool
+		focused  bool
+		latest   time.Time
+		subs     map[feed.SubType]bool
 	}
 	bySym := make(map[string]*symDemand)
 	for _, ds := range m.demands {
@@ -374,6 +375,7 @@ func (m *subManager) desired(capSlots int) (map[subKey]bool, []string) {
 			sd.subs[s] = true
 		}
 		sd.focused = sd.focused || ds.d.Focused
+		sd.ordinary = sd.ordinary || !ds.d.Background
 		if ds.lastEnsure.After(sd.latest) {
 			sd.latest = ds.lastEnsure
 		}
@@ -383,6 +385,9 @@ func (m *subManager) desired(capSlots int) (map[subKey]bool, []string) {
 		order = append(order, sd)
 	}
 	sort.Slice(order, func(i, j int) bool {
+		if order[i].ordinary != order[j].ordinary {
+			return order[i].ordinary
+		}
 		if order[i].focused != order[j].focused {
 			return order[i].focused
 		}
@@ -475,13 +480,15 @@ func (m *subManager) pass(ctx context.Context) {
 		}
 	}
 	type priority struct {
-		focused bool
-		latest  time.Time
+		ordinary bool
+		focused  bool
+		latest   time.Time
 	}
 	bySymbol := map[string]priority{}
 	for _, ds := range m.demands {
 		current := bySymbol[ds.d.Symbol]
 		current.focused = current.focused || ds.d.Focused
+		current.ordinary = current.ordinary || !ds.d.Background
 		if ds.lastEnsure.After(current.latest) {
 			current.latest = ds.lastEnsure
 		}
@@ -489,6 +496,9 @@ func (m *subManager) pass(ctx context.Context) {
 	}
 	sort.Slice(adds, func(i, j int) bool {
 		a, b := bySymbol[adds[i].Symbol], bySymbol[adds[j].Symbol]
+		if a.ordinary != b.ordinary {
+			return a.ordinary
+		}
 		if a.focused != b.focused {
 			return a.focused
 		}
@@ -510,6 +520,13 @@ func (m *subManager) pass(ctx context.Context) {
 	removed := make(map[subKey]bool)
 	for k, st := range m.active {
 		if m.optional[k] {
+			continue
+		}
+		// Background alerts yield to ordinary demand as soon as the provider's
+		// minimum hold permits, even while the alert still wants this symbol.
+		if !want[k] && !bySymbol[k.Symbol].ordinary && now.Sub(st.subscribedAt) >= m.opt.MinHold {
+			removes = append(removes, k)
+			removed[k] = true
 			continue
 		}
 		if want[k] || st.droppedAt.IsZero() {

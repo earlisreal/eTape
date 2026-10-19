@@ -1,5 +1,15 @@
 # UI
 
+Add **Alerts** through Add Panel to manage engine-owned price alerts across all
+workspaces. Its Alerts tab holds saved definitions; History retains every trigger,
+including entries whose definition was deleted. Create via the chart's bell tool
+or context menu; drag a dashed amber level to preview, then confirm in the shared
+exact-price editor. Cancel and Escape discard proposals. Explicit View chart
+focuses a matching chart or opens a pinned one without changing Link Groups.
+The low-rate alert store is separate from live tick rendering. Live burst popups
+and Beacon audio use engine connection claims so windows cannot duplicate sound.
+Use General → Sounds for Beacon enable/Preview and existing master volume.
+
 Named workspaces are cataloged in engine config (`windows.v1`) by stable UUID; `main` is unnamed and immutable. `monitoring` is the reserved permanent Monitoring Workspace: the catalog opens or reuses its named browser window, and its first missing document is seeded with four unassigned charts, a Scanner, and unassigned Stock Info. Browser Web Locks serialize catalog edits and prevent deletion while a workspace is open.
 
 React/Vite shell around imperative market-data stores and renderers. Wire messages enter `src/wire`, route into `src/data`, then panels/controllers schedule chart or canvas work. The Account panel keeps live Open Orders and the read-only Closed Orders projection in the imperative execution store; the upper tab is session-local while each table's sort preference is persisted. Time & Sales ticks retain the engine-stamped Significant Print level in the imperative tape ring; the separate `md.tape.status` read model feeds read-only settings text. React owns layout/settings, never high-frequency payload state.

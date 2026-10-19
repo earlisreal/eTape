@@ -36,7 +36,8 @@ type venueMeta struct {
 }
 
 type mirror struct {
-	global wsmsg.GlobalLimitsView
+	priceAlerts wsmsg.PriceAlertState
+	global      wsmsg.GlobalLimitsView
 
 	// market data (keyed by symbol unless noted)
 	quotes          map[string]wsmsg.Quote
@@ -399,6 +400,8 @@ func (m *mirror) execStatus() wsmsg.ExecStatus {
 // get a snapshot). Broadcast of these is event-driven, done by the hub directly.
 func (m *mirror) applyPub(s staged) {
 	switch s.Topic {
+	case wsmsg.TopicAlertsState:
+		m.priceAlerts = s.Payload.(wsmsg.PriceAlertState)
 	case wsmsg.TopicScannerRank:
 		payload := s.Payload.(wsmsg.ScannerRankPayload)
 		if payload.Status == "deleted" {
@@ -468,6 +471,9 @@ func (m *mirror) appendEvent(e wsmsg.SysEvent) {
 
 // snapshotFrames serializes current state for a new subscriber to `topic`.
 func (m *mirror) snapshotFrames(topic wsmsg.Topic) []staged {
+	if topic == wsmsg.TopicAlertsState {
+		return []staged{{Topic: topic, Payload: m.priceAlerts}}
+	}
 	var out []staged
 	switch topic {
 	case wsmsg.TopicQuote:

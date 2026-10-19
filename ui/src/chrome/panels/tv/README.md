@@ -1,5 +1,14 @@
 # TradingView Chart Integration
 
+The bell tool and chart menu open the shared price-alert editor. Amber dashed
+levels and bell tags follow chart coordinates imperatively without changing
+autoscale; overlapping tags open a chooser. Dragging previews a price and opens
+the editor on release; only Save mutates the alert. Paused tags include a pause
+indicator, triggered levels disappear, and Alerts panel editing remains available.
+Alert tag graphics share the passive pill layer behind native cursor/timer labels;
+order controls keep input priority. Bell selection suspends order gestures until
+it is cancelled or the creation editor opens. No modifier binding is added.
+
 Lightweight Charts adapter and chart-specific UI integration. Inputs: bar/indicator/drawing stores plus current Free Float and Alpaca borrow classification from the low-frequency Stock Detail store; these values are independent of crosshair/bar updates. Volume is the single local bar-derived Chart Indicator, labeled `Vol` directly below Float; engine indicator values come from the engine store; Volume Profile uses its own captured-print query. Indicator corrections use a monotonic-safe full-data replacement, while tail growth/revision stays incremental. Outputs: imperative series/marker mutations and live legend writes. Visible labels use primary text, hidden labels are muted, and hidden values stay mounted but blank. Preserve stable controller ownership and dispose subscriptions on unmount. Test: `npm test -- tv`.
 
 Chart Order Gestures retain the first click while a missing or expired route

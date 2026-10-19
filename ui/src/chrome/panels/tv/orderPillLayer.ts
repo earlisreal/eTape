@@ -1,4 +1,4 @@
-const selector = "[data-order-chip],[data-risk-chip]";
+const selector = "[data-order-chip],[data-risk-chip],[data-alert-chip]";
 const layers = new WeakMap<HTMLElement, ReturnType<typeof createLayer>>();
 
 function createLayer(host: HTMLElement) {

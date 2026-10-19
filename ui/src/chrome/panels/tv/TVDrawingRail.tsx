@@ -14,10 +14,12 @@ import { TV_FONT, TV_GEOM, type TvChrome } from "../../../render/chart/tvTheme";
 import type { Tool } from "../../../render/chart/drawings/interaction";
 import { IconGrip, IconTrend, IconHLine, IconExtended, IconRect, IconMeasure, IconEye, IconEyeOff, IconTrash } from "./tvIcons";
 import { HoverButton } from "../../controls/HoverButton";
+import { IconBell } from "./tvIcons";
 
 export interface RailPos { x: number; y: number }
 
 export interface TVDrawingRailProps {
+  alertArmed?:boolean; onAlertTool?:()=>void;
   chrome: TvChrome; activeTool: Tool; hideAll: boolean; symbol: string;
   stylesReady: boolean;
   onSelectTool: (t: Tool) => void; onToggleHideAll: () => void;
@@ -27,7 +29,7 @@ export interface TVDrawingRailProps {
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), Math.max(lo, hi));
 
-export function TVDrawingRail({ chrome, activeTool, hideAll, symbol, stylesReady, onSelectTool, onToggleHideAll, hasSelection, onDeleteSelection, onClearAll, initialPos, onPosChange }: TVDrawingRailProps): JSX.Element {
+export function TVDrawingRail({ chrome, activeTool, hideAll, symbol, stylesReady, onSelectTool, onToggleHideAll, hasSelection, onDeleteSelection, onClearAll, initialPos, onPosChange,alertArmed,onAlertTool }: TVDrawingRailProps): JSX.Element {
   const [confirm, setConfirm] = useState(false);
   const [pos, setPos] = useState<RailPos | null>(initialPos ?? null);
   const railRef = useRef<HTMLDivElement | null>(null);
@@ -108,6 +110,7 @@ export function TVDrawingRail({ chrome, activeTool, hideAll, symbol, stylesReady
         <IconGrip size={14} />
       </div>
 
+      {onAlertTool&&<HoverButton aria-label="price alert tool" title="Create price alert" aria-pressed={!!alertArmed} style={btn(!!alertArmed)} hoverStyle={toolHover(!!alertArmed)} onClick={onAlertTool}><IconBell size={16}/></HoverButton>}
       <HoverButton aria-label="trend line" title="Trend line" style={btn(activeTool === "trendline")} hoverStyle={toolHover(activeTool === "trendline")}
         disabled={!stylesReady}
         onClick={() => toggleTool("trendline", activeTool === "trendline")}><IconTrend size={16} /></HoverButton>

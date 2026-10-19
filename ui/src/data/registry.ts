@@ -1,6 +1,7 @@
 import type { SnapshotMsg, DeltaMsg, TopicName, Tick } from "../wire/contract";
 import { perf } from "../perf/PerfMonitor";
 import { QuoteStore } from "./QuoteStore";
+import { PriceAlertStore } from "./PriceAlertStore";
 import { BookStore } from "./BookStore";
 import { TapeRing } from "./TapeRing";
 import { TapeStatusStore } from "./TapeStatusStore";
@@ -21,6 +22,7 @@ import { DrawingStore } from "../render/chart/drawings/store";
 import { DrawingToolStyleStore } from "../render/chart/drawings/toolStyles";
 
 export interface Stores {
+  priceAlerts: PriceAlertStore;
   quote: QuoteStore;
   book: BookStore;
   tape: TapeRing;
@@ -44,6 +46,7 @@ export interface Stores {
 
 export function makeStores(): Stores {
   return {
+    priceAlerts: new PriceAlertStore(),
     quote: new QuoteStore(),
     book: new BookStore(),
     tape: new TapeRing(),
@@ -68,6 +71,8 @@ export function makeStores(): Stores {
 
 export function routeToStore(stores: Stores, m: SnapshotMsg | DeltaMsg): void {
   switch (m.topic) {
+    case "alerts.state":
+    case "alerts.trigger": stores.priceAlerts.apply(m); return;
     case "md.quote": stores.quote.apply(m); return;
     case "md.book": stores.book.apply(m); return;
     case "md.tape": {

@@ -143,6 +143,10 @@ func (s *Store) writer(flush time.Duration) {
 					ON CONFLICT(venue) DO UPDATE SET start_ts=excluded.start_ts,payload=excluded.payload`, v.venue, v.startMs, v.payload)
 				v.done <- err
 				continue
+			case priceAlertOp:
+				commit()
+				v.done <- s.commitPriceAlerts(v.change)
+				continue
 			case archiveRangeOp:
 				commit()
 				v.done <- s.commitArchiveRange(v)

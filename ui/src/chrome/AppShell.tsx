@@ -35,6 +35,7 @@ import { useOrderConfig } from "./exec/useOrderConfig";
 import { useHotkeys } from "./exec/useHotkeys";
 import { useAutoUnlockOnStartup } from "./exec/useAutoUnlockOnStartup";
 import { useSoundWiring } from "../sound/useSoundWiring";
+import { PriceAlertNotifications } from "./alerts/PriceAlertNotifications";
 import { NewWindowModal } from "./NewWindowModal";
 import { mutateWindows, readWindows } from "./catalogs";
 import { openWorkspaceWindow } from "./windows";
@@ -789,6 +790,18 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     scannerSyncRuntime.replace(next);
   }, [scannerPlan, scannerSyncRuntime, selectScannerSource, syncConfig, toggleScannerSync, workspaceName, ws]);
 
+  useEffect(()=>{
+    const view=(e:Event)=>{
+      if(!ws)return;
+      const symbol=(e as CustomEvent<string>).detail;
+      if(typeof symbol!=="string")return;
+      const existing=(wsRef.current??ws).panels.find(p=>p.panelId==="chart"&&(p.group===null?p.settings.symbol:linkGroups.symbolFor(p.group))===symbol);
+      if(existing)apiRef.current?.getPanel(existing.id)?.focus();else addPanel("chart",{symbol});
+    };
+    window.addEventListener("etape:alert-chart",view);return()=>window.removeEventListener("etape:alert-chart",view);
+  });
+
+
   if (!ws) return <div style={{ padding: 12 }}>loading workspace…</div>;
 
   // A stable per-panel onConfigChange MERGES a settings patch into
@@ -837,13 +850,13 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
   // can't run synchronously. If the workspace was empty, dockview isn't
   // mounted yet: it mounts fresh on the next render and its onReady seeds the
   // grid directly from the now-updated ws.panels, so no queued action is needed.
-  const addPanel = (panelId: string) => {
+  const addPanel = (panelId: string, initialSettings?:Record<string,unknown>) => {
     const def = PANELS[panelId];
     if (!def) return;
     const id = `${panelId}-${crypto.randomUUID().slice(0, 8)}`;
     const settings: Record<string, unknown> = panelId === "chart" ? { timeframe: "1m" }
       : panelId === "scanner" ? { scannerFilters: { ...DEFAULT_SCANNER_FILTERS } } : {};
-    const config: PanelConfig = { id, panelId, group: null, settings };
+    const config: PanelConfig = { id, panelId, group: null, settings:{...settings,...initialSettings} };
     const current = wsRef.current ?? ws;
     const next = { ...current, panels: [...current.panels, config] };
     wsRef.current = next;
@@ -1012,6 +1025,11 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
     else addPanel("connection-status");
   };
 
+  const onViewAlerts=()=>{
+    const existing=(wsRef.current??ws).panels.find(p=>p.panelId==="alerts");
+    if(existing)apiRef.current?.getPanel(existing.id)?.focus();else addPanel("alerts");
+  };
+
   const onNewWindow = () => setNewWindowOpen(true);
   const onOpenMonitoring = () => { setAddOpen(false); openWorkspaceWindow(MONITORING_WORKSPACE_ID); };
 
@@ -1105,6 +1123,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
           )}
         </div>
         <BootStatusBanner boot={stores.boot} />
+        <PriceAlertNotifications store={stores.priceAlerts} commands={commands} onViewAlerts={onViewAlerts}/>
         <DemoBanner session={stores.session} />
         <FeedStatusBanner health={stores.health} boot={stores.boot} engineState={engineState} onOpenConnection={onOpenConnection} />
         {showAlpacaHint && <AlpacaBackfillBanner onSetup={openAlpacaSetup} onDismiss={dismissAlpacaHint} />}

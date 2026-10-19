@@ -7,6 +7,7 @@ export type SessionVoiceId = "googleUsEnglish" | "zira";
 
 export interface SoundConfig {
   enabled: boolean;                     // master
+  priceAlertEnabled: boolean;
   sessionVoiceEnabled: boolean;
   volume: number;                       // 0..1
   fillSound: FillSoundId | "off";
@@ -20,6 +21,7 @@ export const SOUND_CONFIG_KEY = "soundConfig";
 
 export const DEFAULT_SOUND_CONFIG: SoundConfig = {
   enabled: true,
+  priceAlertEnabled: true,
   sessionVoiceEnabled: true,
   volume: 0.6,
   fillSound: "twoTone",
@@ -75,6 +77,7 @@ export function sanitizeSoundConfig(raw: unknown): SoundConfig {
   const r = raw as Record<string, unknown>;
   return {
     enabled: typeof r.enabled === "boolean" ? r.enabled : DEFAULT_SOUND_CONFIG.enabled,
+    priceAlertEnabled: typeof r.priceAlertEnabled === "boolean" ? r.priceAlertEnabled : DEFAULT_SOUND_CONFIG.priceAlertEnabled,
     sessionVoiceEnabled: typeof r.sessionVoiceEnabled === "boolean" ? r.sessionVoiceEnabled : DEFAULT_SOUND_CONFIG.sessionVoiceEnabled,
     volume: sanitizeVolume(r.volume),
     fillSound: optionOrOff(r.fillSound, FILL_SOUND_IDS, DEFAULT_SOUND_CONFIG.fillSound),

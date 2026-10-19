@@ -1,4 +1,5 @@
 import type { Side } from "../wire/contract";
+import { beacon } from "./beacon";
 import { sideIsSell } from "../wire/orderStatus";
 import { DEFAULT_SOUND_CONFIG, type SessionVoiceId, type SoundConfig } from "./SoundConfig";
 import { WebAudioPatchPlayer, resolvePatch, type PatchPlayer, type Variant } from "./patches";
@@ -28,6 +29,10 @@ export interface SoundSink {
 }
 
 export class SoundEngine implements SoundApi, SoundSink {
+  private priceAlertUntil=0;
+  canPlayPriceAlert():boolean {return this.cfg.enabled&&this.cfg.priceAlertEnabled&&this.cfg.volume>0&&this.player.isReady?.()===true&&this.now()>=this.priceAlertUntil;}
+  priceAlert():void {if(!this.canPlayPriceAlert())return;this.priceAlertUntil=this.now()+650;this.player.play(beacon,"buy");}
+  previewPriceAlert():void {if(this.cfg.priceAlertEnabled)this.player.play(beacon,"buy");}
   private cfg: SoundConfig = { ...DEFAULT_SOUND_CONFIG };
   private readonly lastPlay = new Map<string, number>();
 

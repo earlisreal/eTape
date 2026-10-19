@@ -253,6 +253,7 @@ export function resolvePatch(kind: "fill" | "place" | "reject" | "scanner", id: 
 // ---- real player: owns the AudioContext lifecycle ----
 
 export interface PatchPlayer {
+  isReady?(): boolean;
   unlock(): void; // lazily create + resume the AudioContext (call from a user gesture)
   setMasterVolume(v: number): void; // master gain = v*v (perceptual taper)
   play(fn: PatchFn, variant: Variant): void; // schedule immediately; drop if context isn't running
@@ -261,6 +262,7 @@ export interface PatchPlayer {
 }
 
 export class WebAudioPatchPlayer implements PatchPlayer {
+  isReady():boolean {return this.ctx?.state==="running";}
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
   private volume = 0.6;

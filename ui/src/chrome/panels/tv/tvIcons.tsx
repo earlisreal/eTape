@@ -2,6 +2,8 @@
 // Geometry is refined against TV screenshots during the manual fidelity pass.
 import type { ReactNode } from "react";
 
+export function IconBell({size=16}:{size?:number}):JSX.Element {return <Svg size={size}><path d="M4 11h8l-1-2V6a3 3 0 0 0-6 0v3l-1 2Z"/><path d="M6.5 13a1.5 1.5 0 0 0 3 0"/></Svg>;}
+
 function Svg({ size = 16, children }: { size?: number | undefined; children: ReactNode }): JSX.Element {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none"

@@ -1,5 +1,16 @@
 # UI Hub
 
+`alerts.state` is a low-rate full snapshot of saved price alerts and the newest
+100 independent history records, with a revision, total history count, and
+storage error. `alerts.trigger` carries live-only burst notifications and has no
+snapshot replay. The generated Go-owned DTOs are in `wsmsg/pricealerts.go`.
+`UpsertPriceAlert`, `PausePriceAlert`, `DeletePriceAlert`, and
+`DeletePriceAlertTrigger` mutate this notification-only domain; version checks
+reject stale definition edits. `PreviewPriceAlert` returns only a recent trusted
+eligible price (zero means unavailable). `QueryPriceAlertHistory` pages older
+records using `beforeId`. `ClaimPriceAlertNotification` grants popup/sound rights
+against the authenticated connection identity, once per live engine burst.
+
 `exec.status` includes optional per-venue `protectionWarnings`, projected by
 Core with verified current quantities or checking/unverified state. Account
 renders this single projection without joining independently coalesced order
