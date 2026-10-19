@@ -1,7 +1,7 @@
 # Implement price alerts with sound
 
 Status: ready-for-agent
-Implementation: complete; validation and review in progress
+Implementation: complete
 Spec: [Approved price alerts](../spec.md)
 Review baseline: `f319de945cb99284929b9765eb4b71f7783cebd0`
 
@@ -32,13 +32,27 @@ Use vertical red/green slices, with focused tests and regular UI typechecking.
 
 ## Validation
 
-Focused engine lifecycle, persistence, history, storage-recovery, capacity,
-WebSocket, and notification-claim tests pass. Focused race tests pass for the
-changed engine seams. Focused UI editor, panel/history, drag/save, notification,
-sound, chart/order-marker, and AppShell tests pass. UI typecheck, lint, and build
-pass; scoped Go lint passes. Demo verification confirms saved monitoring and a
-fresh-trade trigger retained in History. Full local validation and hosted CI
-remain pending.
+- Full Go suite: passed (`go test -p 1 ./...`), including synthesis and recorder
+  load guards. Initial sandbox runs hit denied atomic renames/helper cleanup;
+  concurrent runs hit wall-clock load budgets. The successful run used an
+  approved unsandboxed shell, a workspace test-temp directory, normal runtime
+  parallelism, and serialized packages.
+- Go vet, engine build, full golangci-lint, and `gen-ts-check`: passed.
+- Focused race checks cover alert lifecycle, storage recovery, WebSocket claims,
+  background demand, normal hysteresis, and the mark bridge.
+- All 1,426 UI tests passed, including canvas goldens. Golden/native-canvas tests
+  needed the approved unsandboxed shell for the Windows font host. UI lint,
+  typecheck, and production build passed; Vite retains its bundle-size advisory.
+- Demo browser verification: panel creation, saved monitoring across tab closure,
+  already-met warning, a fresh eligible trigger and independent History entry,
+  explicit pinned-chart navigation, bell creation, amber level/tag, exact editor,
+  and cancellation. Synthetic data only; trading remained locked.
+- Markdown local links: 43 checked across 9 changed Markdown files; no missing
+  target. `git diff --check`: passed.
+- Broad Playwright automation was not run; proportional UI verification used the
+  focused public UI tests and the actual demo browser workflow above.
+- Merge/push and a successful full hosted CI run on the pushed main commit are
+  required before handoff; the final reply records that result.
 
 ## Review against f319de94
 

@@ -2,7 +2,7 @@
 
 Status: ready-for-agent
 Approved: 2026-10-19
-Implementation: engine and UI implemented; validation and review in progress.
+Implementation: complete; local validation and two-axis review passed.
 
 ## Goal
 
