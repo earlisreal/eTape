@@ -84,7 +84,7 @@ func (c *Core) configureTrail(ctx context.Context, venue VenueID, id string, obs
 		_ = c.acquireHeldDemand(ctx, previous)
 		return blocked("execution evidence expired while acquiring subscriptions")
 	}
-	if config.Mode == "CANDLE" {
+	if convert && config.Mode == "CANDLE" {
 		c.candleTrailCandidate(o.Symbol, o.Side, &t)
 		if t.Reference == nil || t.Reference.StartMs < config.Sessions.windowStart(c.clk.Now()) {
 			return blocked("waiting for a verified completed candle; current protection retained")

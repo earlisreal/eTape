@@ -155,6 +155,7 @@ type Core struct {
 	positionExecIDs     map[string]bool
 	protectionChecks    map[VenueID]*protectionCheck
 	protectionRevision  map[VenueID]uint64
+	trailPositionChecks map[VenueID]*trailPositionCheck
 }
 
 // CoreConfig configures NewCore.
@@ -217,6 +218,7 @@ func NewCore(cfg CoreConfig) *Core {
 		positionExecIDs:        make(map[string]bool),
 		protectionChecks:       make(map[VenueID]*protectionCheck),
 		protectionRevision:     make(map[VenueID]uint64),
+		trailPositionChecks:    make(map[VenueID]*trailPositionCheck),
 		heldLiveIdentity:       cloneVenueStrings(cfg.HeldStopLimitLiveIdentity),
 		heldLiveAck:            cloneVenueStrings(cfg.HeldStopLimitAcknowledged),
 		heldLiveLITAck:         cloneVenueStrings(cfg.HeldLimitIfTouchedAcknowledged),
@@ -825,6 +827,9 @@ func (c *Core) applyPositionFill(e OrderFilled, prior Order, hadPrior bool) {
 		}
 		c.positionExecIDs[key] = true
 	}
+	if c.trailPositionChecks[e.F.Venue] != nil {
+		return
+	}
 	// Use the order's cumulative delta, not the push's last-fill quantity. A
 	// reconnect snapshot can already include a queued fill; the next fill push
 	// then reports a cumulative quantity whose delta is smaller than F.Qty.
@@ -844,6 +849,9 @@ func (c *Core) applyPositionEffect(e BrokerPositionEffect) bool {
 			return false
 		}
 		c.positionExecIDs[key] = true
+	}
+	if c.trailPositionChecks[e.Venue] != nil {
+		return false
 	}
 	delta := e.Qty
 	if !longward(e.Side) {
@@ -1118,6 +1126,9 @@ func newOrderFromRequest(req OrderRequest, now int64) Order {
 }
 
 func (c *Core) checkSellLeaves(req OrderRequest, leaves float64, excludeID string) (bool, string) {
+	if c.trailPositionChecks[req.Venue] != nil {
+		return false, "position attribution pending; reconcile orders and positions"
+	}
 	if c.state.Venue(req.Venue).FlattenPending {
 		return false, "venue flatten is awaiting authoritative reconciliation"
 	}
@@ -1480,8 +1491,20 @@ func (c *Core) emitStatus() {
 }
 
 func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
+	if result, ok := be.(trailPositionCheckResult); ok {
+		c.finishTrailPositionCheck(ctx, result)
+		return
+	}
+	// The result wraps an observational BrokerSnapshot, which accounts for its
+	// own effects. Do not account for the same position change at both levels.
+	if result, ok := be.(protectionCheckResult); ok {
+		c.finishProtectionCheck(ctx, result)
+		c.refreshProtectionWarnings(ctx)
+		return
+	}
 	beforeExposure := c.trailExposure()
-	defer c.retireReducedOwnership(ctx, beforeExposure)
+	c.checkAbsoluteTrailAttribution(ctx, be, beforeExposure)
+	defer func() { c.retireReducedOwnership(ctx, beforeExposure) }()
 	defer func() {
 		switch e := be.(type) {
 		case Event:
@@ -1494,8 +1517,6 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		c.refreshProtectionWarnings(ctx)
 	}()
 	switch e := be.(type) {
-	case protectionCheckResult:
-		c.finishProtectionCheck(ctx, e)
 	case HeldActivationOutcome:
 		before := c.order(e.OID)
 		if before.Held == nil || before.Held.ChildClientID == "" ||
@@ -1558,6 +1579,9 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 			cancelUnknown := before.Action != nil && before.Action.Kind == ActionCancel && before.Action.Phase == ActionUnknown
 			sendCancel := wasCancelRequested && (!before.Held.CancelSent || cancelUnknown)
 			h.Phase, h.PausedReason, h.ChildBrokerID = HeldWorking, "", accepted.BrokerOrderID
+			if c.trailPositionChecks[before.Venue] != nil {
+				h.PausedReason = trailAttributionPending
+			}
 			if wasCancelRequested {
 				h.Phase, h.PausedReason, h.CancelRequested, h.CancelSent = HeldCancelRequested, "cancel requested", true, true
 			}
@@ -1682,6 +1706,9 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		if v == "" {
 			v = e.Account.Venue
 		}
+		if c.trailPositionChecks[v] != nil && !c.trailSnapshotCurrent(v, e) {
+			return
+		}
 		c.protectionRevision[v]++
 		acct := e.Account
 		acct.Venue = v
@@ -1704,6 +1731,12 @@ func (c *Core) handleBrokerEvent(ctx context.Context, be BrokerEvent) {
 		}
 		c.state.ReconcileOpenOrders(v, local)
 		c.state.ReconcileExternalOpenOrders(v, external)
+		if check := c.trailPositionChecks[v]; check != nil {
+			delete(c.trailPositionChecks, v)
+			beforeExposure = nil
+			c.retireReducedOwnership(ctx, check.before)
+			c.trailAttributionReason(v, "")
+		}
 		for _, o := range local {
 			c.confirmSellSubmit(v, o.ID)
 			if e.observational {

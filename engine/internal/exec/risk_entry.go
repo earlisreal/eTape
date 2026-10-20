@@ -266,6 +266,9 @@ func (c *Core) beginRiskExit(ctx context.Context, entry Order) bool {
 
 // Protection is scoped to confirmed fills from this entry, never the whole position.
 func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling bool) {
+	if c.trailPositionChecks[entry.Venue] != nil {
+		return
+	}
 	if entry.RiskEntry == nil {
 		return
 	}

@@ -2,7 +2,7 @@
 // submit registers the optimistic PendingNew row (keyed by the ack's orderId) and
 // raises the flash/block/unknown-outcome toast. Cancel-all/last are composed from CancelOrder over
 // the working set — the engine's token buckets pace the burst.
-import type { AckMsg, StopLimitRoutePreview, SubmitOrderArgs, ReplaceOrderArgs, VenueID, SubmitTrailArgs, TrailConfig } from "../../wire/contract";
+import type { AckMsg, StopLimitRoutePreview, SubmitOrderArgs, ReplaceOrderArgs, VenueID, SubmitTrailArgs, TrailConfig, Order } from "../../wire/contract";
 import {canConvertProtection,trailError} from "./trailing";
 import type { ExecStore } from "../../data/ExecStore";
 import type { ToastApi } from "../Toast";
@@ -49,6 +49,13 @@ export class OrderCommands {
   async resumeHeld(venue:string,orderId:string):Promise<void> {
     const ack=await this.d.cmd.sendCommand("ResumeHeldOrder",{venue,orderId});
     this.trailFeedback(ack,venue,"Trail resumed; waiting for fresh execution data");
+  }
+  async editTrail(order:Order,config:TrailConfig):Promise<boolean> {
+    const error=trailError(config);
+    if(error){this.d.toast.push({level:"danger",text:error});return false;}
+    const ack=await this.d.cmd.sendCommand("EditTrail",{venue:order.venue,orderId:order.id,expectedHeldPhase:order.held!.phase,expectedStop:order.stopPrice,config});
+    this.trailFeedback(ack,order.venue,"Trail updated");
+    return ack.status==="accepted" || !!ack.ambiguous;
   }
   async convertFocusedProtection(venue:string,symbol:string,config:TrailConfig):Promise<void> {
     const orders=this.d.exec.orders().filter(v=>!v.optimistic).map(v=>v.order);

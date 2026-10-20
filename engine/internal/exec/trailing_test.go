@@ -205,6 +205,66 @@ func TestRiskTrailManualReductionCannotBeRestoredByIndependentBuy(t *testing.T) 
 	}
 }
 
+func TestWaitingCandleTrailCanBeEditedBeforeExecutionReferenceExists(t *testing.T) {
+	c, clk, b, ctx := newHeldCore(t, time.Date(2026, 10, 20, 10, 0, 0, 0, session.Loc()))
+	b.ev <- BrokerPositions{V: "v", Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 100}}}
+	waitPosition(t, c, "AAPL", 100)
+	config := TrailConfig{Mode: "CANDLE", Timeframe: "1m", Sessions: TrailSessions{RTH: true}, Pricing: "CUSHION"}
+	a := c.Do(SubmitTrail{Venue: "v", Symbol: "AAPL", Side: SideSell, PositionPct: 100, Config: config})
+	if !a.Accepted {
+		t.Fatal(a)
+	}
+	waitHeldOrder(t, c, a.OrderID, HeldWaiting)
+	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 10))
+	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
+		time.Sleep(time.Millisecond)
+	}
+	config.Timeframe = "5m"
+	if ack := c.Do(EditTrail{Venue: "v", OrderID: a.OrderID, ExpectedHeldPhase: HeldWaiting, Config: config}); !ack.Accepted {
+		t.Fatal(ack)
+	}
+	stop := waitOrder(t, c, a.OrderID, func(o Order) bool { return o.Held.Trail.Config.Timeframe == "5m" })
+	if stop.StopPrice != 0 || stop.Held.Phase != HeldWaiting {
+		t.Fatalf("edit fabricated a reference: %+v", stop)
+	}
+}
+
+func TestConversionPreservesReductionsBeforeTrailWasEnabled(t *testing.T) {
+	c, clk, broker, ctx := newRiskCore(t)
+	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500})
+	if !ack.Accepted {
+		t.Fatal(ack)
+	}
+	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	select {
+	case <-broker.submits:
+	case <-time.After(time.Second):
+		t.Fatal("no entry")
+	}
+	broker.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
+	broker.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 100, Price: 10, TsMs: clk.Now().UnixMilli()}, CumQty: 100, AvgPrice: 10}
+	stop := waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.Qty == 100 })
+	broker.ev <- BrokerPosition{Position: Position{Venue: "v", Symbol: "AAPL", Qty: 60, AvgPrice: 10}}
+	waitPosition(t, c, "AAPL", 60)
+	broker.ev <- BrokerPosition{Position: Position{Venue: "v", Symbol: "AAPL", Qty: 100, AvgPrice: 10}}
+	waitPosition(t, c, "AAPL", 100)
+	if a := c.Do(ConvertProtectionToTrail{Venue: "v", OrderID: stop.ID, ExpectedHeldPhase: stop.Held.Phase, ExpectedStop: stop.StopPrice, Config: TrailConfig{Mode: "PRICE", Value: .3, Pricing: "CUSHION"}}); !a.Accepted {
+		t.Fatal(a)
+	}
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.8))
+	select {
+	case child := <-broker.submits:
+		if child.Qty != 60 {
+			t.Fatalf("conversion sold unrelated shares: %+v", child)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no protective exit")
+	}
+}
+
 func TestWaitingQuoteTrailCancelReleasesReservation(t *testing.T) {
 	c, clk, b, ctx := newHeldCore(t, time.Date(2026, 10, 20, 10, 0, 0, 0, session.Loc()))
 	b.ev <- BrokerPositions{V: "v", Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 100}}}
@@ -317,6 +377,23 @@ func TestCandleAdvanceDoesNotTriggerAgainstPrintBeforeReferenceOnPartialFill(t *
 }
 
 func TestTrailingLateFillCleanupDoesNotDoubleCountLinkedFillSnapshot(t *testing.T) {
+	testTrailingLateFillSnapshot(t, false, false, false)
+}
+
+func TestTrailingPositionBeforeFillReconcilesWithoutCancelingRemainder(t *testing.T) {
+	testTrailingLateFillSnapshot(t, true, false, false)
+}
+
+func TestTrailingReconciliationRejectsSnapshotBeforeObservedLateBuyFill(t *testing.T) {
+	testTrailingLateFillSnapshot(t, true, true, false)
+}
+
+func TestTrailingReconciliationAcceptsConfirmedTerminalExitAbsentFromOpenOrders(t *testing.T) {
+	testTrailingLateFillSnapshot(t, true, false, true)
+}
+
+func testTrailingLateFillSnapshot(t *testing.T, positionFirst, lateWhilePending, terminalExit bool) {
+	t.Helper()
 	c, clk, b, ctx := newRiskCore(t)
 	a := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500, Protection: &TrailConfig{Mode: "PRICE", Value: .3, Pricing: "CUSHION"}})
 	if !a.Accepted {
@@ -341,10 +418,84 @@ func TestTrailingLateFillCleanupDoesNotDoubleCountLinkedFillSnapshot(t *testing.
 		t.Fatal("no exit")
 	}
 	b.ev <- OrderAccepted{V: "v", OID: entry.RiskEntry.StopID, Ts: clk.Now().UnixMilli()}
+	stop := waitHeldOrder(t, c, entry.RiskEntry.StopID, HeldWorking)
+	var release chan struct{}
+	if positionFirst {
+		release = make(chan struct{})
+		started := make(chan struct{}, 2)
+		b.mu.Lock()
+		b.snapshotStarted, b.snapshotRelease = started, release
+		b.mu.Unlock()
+		b.ev <- BrokerPositions{V: "v", Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 60, AvgPrice: 10}}}
+		select {
+		case <-started:
+		case <-time.After(time.Second):
+			t.Fatal("ambiguous attribution did not request reconciliation")
+		}
+	}
 	b.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.RiskEntry.StopID, Symbol: "AAPL", Side: SideSell, Qty: 40, Price: 9.8, TsMs: clk.Now().UnixMilli()}, PositionExecID: "sell40", CumQty: 40, LeavesQty: 60, AvgPrice: 9.8}
 	waitPosition(t, c, "AAPL", 60)
-	b.ev <- BrokerPosition{Position: Position{Venue: "v", Symbol: "AAPL", Qty: 60, AvgPrice: 10}}
-	b.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 20, Price: 10, TsMs: clk.Now().UnixMilli()}, PositionExecID: "late20", CumQty: 120, AvgPrice: 10}
+	if positionFirst {
+		waitOrder(t, c, stop.ID, func(o Order) bool { return o.ExecutedQty == 40 })
+		stop.ExecutedQty, stop.LeavesQty, stop.Status = 40, 60, StatusPartiallyFilled
+		entry.ExecutedQty, entry.Status, entry.LeavesQty = 100, StatusCanceled, 0
+		if terminalExit {
+			b.ev <- OrderCanceled{V: "v", OID: stop.ID, Ts: clk.Now().UnixMilli()}
+			waitOrder(t, c, stop.ID, func(o Order) bool { return o.Status == StatusCanceled })
+		}
+		positionQty := 60.0
+		if lateWhilePending {
+			b.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 20, Price: 10, TsMs: clk.Now().UnixMilli()}, PositionExecID: "late20", CumQty: 120, AvgPrice: 10}
+			waitOrder(t, c, entry.ID, func(o Order) bool { return o.ExecutedQty == 120 })
+			c.PublishBrokerEvent(BrokerSnapshot{V: "v", Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 80, AvgPrice: 10}}, Orders: []Order{entry, stop}})
+			c.Do(Disarm{})
+			entry.ExecutedQty, positionQty = 120, 80
+		}
+		b.mu.Lock()
+		b.positions = []Position{{Venue: "v", Symbol: "AAPL", Qty: positionQty, AvgPrice: 10}}
+		b.orders[stop.ID], b.orders[entry.ID] = stop, entry
+		if lateWhilePending {
+			delete(b.orders, entry.ID)
+		}
+		if terminalExit {
+			delete(b.orders, stop.ID)
+		}
+		b.mu.Unlock()
+		close(release)
+		if terminalExit {
+			waitPosition(t, c, "AAPL", 60)
+			ack := c.Do(SubmitOrder{Venue: "v", Symbol: "AAPL", Side: SideSell, Type: TypeLimit, TIF: TIFDay, Session: SessionExtended, Qty: 1, LimitPrice: 9.8})
+			if !ack.Accepted {
+				t.Fatalf("terminal exit kept venue blocked: %+v", ack)
+			}
+			return
+		}
+		remaining := waitOrder(t, c, stop.ID, func(o Order) bool {
+			return o.Held.Phase == HeldWorking && o.Held.PausedReason == "" && o.ExecutedQty == 40
+		})
+		if remaining.Held.Trail.Retired || remaining.LeavesQty != 60 {
+			t.Fatalf("working remainder changed: %+v", remaining)
+		}
+	}
+	if !lateWhilePending {
+		b.ev <- BrokerPosition{Position: Position{Venue: "v", Symbol: "AAPL", Qty: 60, AvgPrice: 10}}
+		b.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 20, Price: 10, TsMs: clk.Now().UnixMilli()}, PositionExecID: "late20", CumQty: 120, AvgPrice: 10}
+	}
+	if lateWhilePending {
+		deadline := time.After(time.Second)
+		for {
+			select {
+			case update := <-c.Updates():
+				if got, ok := update.(OrderUpdate); ok && got.Order.RiskEntryID == entry.ID && got.Order.ID != stop.ID && got.Order.Qty == 20 && got.Order.Held.Phase == HeldPaused {
+					return
+				}
+			case child := <-b.submits:
+				t.Fatalf("reconciliation unexpectedly submitted cleanup: %+v", child)
+			case <-deadline:
+				t.Fatal("reconciliation lost the observed late-fill exposure")
+			}
+		}
+	}
 	select {
 	case cleanup := <-b.submits:
 		if cleanup.ClientOrderID == entry.RiskEntry.StopID || cleanup.Type != TypeLimit || cleanup.Qty != 20 || cleanup.LimitPrice != 9.8 {

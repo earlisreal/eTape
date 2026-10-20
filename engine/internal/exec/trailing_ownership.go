@@ -14,10 +14,8 @@ func (c *Core) trailExposure() map[string]ownedExposure {
 			if entry.RiskEntry == nil {
 				continue
 			}
-			stop := c.order(entry.RiskEntry.StopID)
-			if stop.Held == nil || stop.Held.Trail == nil {
-				continue
-			}
+			// Keep ownership while protection is fixed too: a later conversion
+			// must not adopt shares bought independently after a manual exit.
 			e := ownedExposure{position: vs.Positions[entry.Symbol].Qty, entries: entry.ExecutedQty}
 			for _, exit := range vs.Orders {
 				if exit.RiskEntryID == entry.ID {
@@ -34,6 +32,9 @@ func (c *Core) trailExposure() map[string]ownedExposure {
 // snapshot cannot retire the same shares a second time.
 func (c *Core) retireReducedOwnership(ctx context.Context, before map[string]ownedExposure) {
 	for id, after := range c.trailExposure() {
+		if c.trailPositionChecks[c.order(id).Venue] != nil {
+			continue
+		}
 		prior, ok := before[id]
 		if !ok {
 			continue

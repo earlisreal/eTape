@@ -296,16 +296,7 @@ func (c *Core) advanceTrail(ctx context.Context, o Order, p EligiblePrint, delib
 			return
 		}
 	}
-	tick := .0001
-	if candidate >= 1 {
-		tick = .01
-	}
-	if o.Side == SideCover {
-		candidate = math.Ceil(candidate/tick-1e-9) * tick
-	} else {
-		candidate = math.Floor(candidate/tick+1e-9) * tick
-	}
-	candidate = math.Round(candidate*10000) / 10000
+	candidate = roundTrailPrice(candidate, o.Side)
 	if o.Side == SideCover {
 		if t.Stop == 0 || candidate < t.Stop {
 			t.Stop = candidate
@@ -394,21 +385,25 @@ func (c *Core) activateTrailQuote(ctx context.Context, o Order) {
 		c.rejectTrail(ctx, o, "invalid quote-derived limit")
 		return
 	}
-	tick := .0001
-	if price >= 1 {
-		tick = .01
-	}
-	if o.Side == SideCover {
-		price = math.Ceil(price/tick-1e-9) * tick
-	} else {
-		price = math.Floor(price/tick+1e-9) * tick
-	}
-	t.Limit = math.Round(price*10000) / 10000
+	t.Limit = roundTrailPrice(price, o.Side)
 	if err := c.saveTrail(o, t, HeldWaitingQuote, ""); err != nil {
 		c.syslog("exec.trail", err.Error())
 		return
 	}
 	c.activateHeld(ctx, c.order(o.ID))
+}
+
+func roundTrailPrice(price float64, side Side) float64 {
+	tick := .0001
+	if price >= 1 {
+		tick = .01
+	}
+	if side == SideCover {
+		price = math.Ceil(price/tick-1e-9) * tick
+	} else {
+		price = math.Floor(price/tick+1e-9) * tick
+	}
+	return math.Round(price*10000) / 10000
 }
 
 func (c *Core) rejectTrail(ctx context.Context, o Order, reason string) {

@@ -2,7 +2,8 @@ import { useContext, useEffect, useMemo, useRef, useState, useSyncExternalStore 
 import { createPortal } from "react-dom";
 import type { PanelProps } from "./registry";
 import { HoverButton } from "../controls/HoverButton";
-import type { ClosedOrder, Fill, Order, PositionRow, Quote } from "../../wire/contract";
+import type { ClosedOrder, Fill, Order, PositionRow, Quote, TrailConfig } from "../../wire/contract";
+import { TrailEditor } from "../exec/TrailEditor";
 import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
@@ -193,6 +194,14 @@ function OrdersTable({
   const [openSort, setOpenSort] = useState<SortState>(() => readOrdersSort(config.settings));
   const [closedSort, setClosedSort] = useState<SortState>(() => readClosedSort(config.settings));
   const [todayMs, setTodayMs] = useState(Date.now);
+  const [trailEdit,setTrailEdit]=useState<{order:Order;config:TrailConfig}|null>(null);
+  const [trailBusy,setTrailBusy]=useState(false);
+  const applyTrail=async()=>{
+    if(!trailEdit || trailBusy)return;
+    setTrailBusy(true);
+    try { if(await oc.editTrail(trailEdit.order,trailEdit.config))setTrailEdit(null); }
+    finally { setTrailBusy(false); }
+  };
   useEffect(() => {
     let timer = 0;
     const refresh = () => {
@@ -236,6 +245,13 @@ function OrdersTable({
   );
   return (
     <div data-testid="orders-table" style={{ height, flexShrink: 0, overflow: "hidden", display: "flex", flexDirection: "column", background: palette.bg, color: palette.text, fontSize: 12 }}>
+      {trailEdit && createPortal(<section role="dialog" aria-label="Edit trailing stop" onKeyDown={e=>{e.stopPropagation();if(e.key==="Escape"&&!trailBusy)setTrailEdit(null);}}
+        style={{position:"fixed",left:"20%",right:"20%",top:"20%",padding:12,background:palette.surface,color:palette.text,border:`1px solid ${palette.border}`,zIndex:1000}}>
+        <div>Edit trail · {trailEdit.order.symbol} · edits cannot loosen its stop</div>
+        <TrailEditor value={trailEdit.config} lockMode lockSessions onChange={config=>setTrailEdit({...trailEdit,config})}/>
+        <button type="button" disabled={trailBusy} onClick={()=>void applyTrail()}>Apply trail</button>
+        <button type="button" disabled={trailBusy} onClick={()=>setTrailEdit(null)}>Close</button>
+      </section>,document.body)}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "0 8px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
         {upperTab(`Open Orders (${views.length})`, tab === "open", () => setTab("open"), "open-orders-tab")}
         {upperTab(`Closed Orders (${closedRows.length})`, tab === "closed", () => setTab("closed"), "closed-orders-tab")}
@@ -276,7 +292,7 @@ function OrdersTable({
               <td data-column="state">{variant ? <span className={`chip chip-${variant}`} data-chip={variant}>{STATUS_LABEL[ds]}</span>
                 : <span style={{ color: palette.textMuted }}>{STATUS_LABEL[ds]}</span>}
                 {custody && <div style={{ color: palette.textMuted, fontSize: 10 }}>{custody}</div>}</td>
-              <td data-column="actions">{order.held?.trail && !order.held.trail.retired && order.held.phase==="PAUSED" && <button type="button" aria-label="Resume trail" onClick={()=>void oc.resumeHeld(order.venue,order.id)}>Resume</button>}{(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
+              <td data-column="actions">{order.held?.trail && !order.held.trail.retired && !order.held.trail.triggered && ["WAITING","ARMED"].includes(order.held.phase) && <button type="button" aria-label="Edit trail" onClick={()=>{const current=stores.exec.liveOrder(order.id)??order;setTrailEdit({order:current,config:current.held!.trail!.config});}}>Edit</button>}{order.held?.trail && !order.held.trail.retired && order.held.phase==="PAUSED" && <button type="button" aria-label="Resume trail" onClick={()=>void oc.resumeHeld(order.venue,order.id)}>Resume</button>}{(working || optimistic) ? <HoverButton data-testid={`cancel-${order.id}`} onClick={() => void oc.cancel(order.venue, order.id)}
                 style={{ fontSize: 10, padding: "1px 6px", border: `1px solid ${palette.border}`, background: "transparent", color: palette.text, cursor: "pointer" }}>Cancel</HoverButton> : null}</td>
             </tr>;
           })}</tbody>

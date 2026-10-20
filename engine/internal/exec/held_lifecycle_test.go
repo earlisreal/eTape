@@ -55,18 +55,20 @@ func (s *heldTestStore) ReadExecOrderHistoriesFor(ids []string) ([]EventEnvelope
 func (*heldTestStore) QueryFillsSince(context.Context, int64) ([]FillRow, error) { return nil, nil }
 
 type heldTestBroker struct {
-	ev            chan BrokerEvent
-	submits       chan OrderRequest
-	mu            sync.Mutex
-	orders        map[string]Order
-	positions     []Position
-	flattenErr    error
-	submitErr     error
-	submitBlockID string
-	submitRelease <-chan struct{}
-	replaceErr    error
-	cancelErr     error
-	cancelCalls   int
+	ev              chan BrokerEvent
+	submits         chan OrderRequest
+	mu              sync.Mutex
+	orders          map[string]Order
+	positions       []Position
+	flattenErr      error
+	submitErr       error
+	submitBlockID   string
+	submitRelease   <-chan struct{}
+	replaceErr      error
+	cancelErr       error
+	cancelCalls     int
+	snapshotStarted chan struct{}
+	snapshotRelease <-chan struct{}
 }
 
 func newHeldTestBroker() *heldTestBroker {
@@ -127,7 +129,24 @@ func (b *heldTestBroker) Flatten(context.Context) error {
 	return b.flattenErr
 }
 func (*heldTestBroker) ResetBalance(context.Context, float64) error { return nil }
-func (b *heldTestBroker) Snapshot(context.Context) (AccountSnapshot, []Position, []Order, error) {
+func (b *heldTestBroker) Snapshot(ctx context.Context) (AccountSnapshot, []Position, []Order, error) {
+	b.mu.Lock()
+	started, release := b.snapshotStarted, b.snapshotRelease
+	b.mu.Unlock()
+	if started != nil {
+		select {
+		case started <- struct{}{}:
+		case <-ctx.Done():
+			return AccountSnapshot{}, nil, nil, ctx.Err()
+		}
+	}
+	if release != nil {
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return AccountSnapshot{}, nil, nil, ctx.Err()
+		}
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	orders := make([]Order, 0, len(b.orders))

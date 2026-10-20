@@ -29,6 +29,14 @@ independent additions. Triggering cancels remaining buying. Healthy uncovered
 late fills receive separate linked LIMIT cleanup, with frozen main-child
 quantities and quote reservations counted once.
 
+An absolute position reduction arriving before a working linked exit's fill
+temporarily blocks further exits and cleanup while a combined order/position
+snapshot establishes ownership. The existing LIMIT and reservation remain.
+Raced, failed or incomplete snapshots leave a visible attribution-pending
+reason and require venue reconciliation; they never infer a match by quantity.
+Confirmed terminal exits may be absent from open-order snapshots. Late fills
+discovered during reconciliation require manual recovery.
+
 `ConvertProtectionToTrail` changes healthy filled primary WAITING/ARMED
 protection atomically, retaining its owner, current confirmed stop bound and
 deadline. Missing data, stale observed state, paused/uncertain/working children

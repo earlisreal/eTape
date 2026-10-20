@@ -75,6 +75,34 @@ func finishProtectionAnswer(t *testing.T, c *Core, b *protectionTestBroker, ctx 
 	}
 }
 
+func TestProtectionObservationRetiresEachReductionOnce(t *testing.T) {
+	c, b, ctx := newProtectionCore(t)
+	stop := c.order("stop")
+	stop.Status, stop.Qty, stop.LeavesQty = StatusAccepted, 3, 3
+	stop.Held = &HeldOrder{Phase: HeldPaused, DeadlineMs: c.now() + 60000}
+	c.state.Apply(OrderSubmitted{Order: stop})
+	runCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() { defer close(done); _ = c.Run(runCtx) }()
+	t.Cleanup(func() { cancel(); <-done })
+	c.Do(Disarm{})
+	expectProtectionRequest(t, b)
+	b.answers <- protectionSnapshotAnswer{positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 1}}}
+	waitOrder(t, c, "stop", func(o Order) bool { return o.Qty == 1 })
+	// A command is a barrier after the complete snapshot handler, including defers.
+	c.Do(Disarm{})
+	for {
+		select {
+		case update := <-c.Updates():
+			if got, ok := update.(OrderUpdate); ok && got.Order.ID == "stop" && got.Order.Qty != 1 {
+				t.Fatalf("one snapshot retired exposure twice: %+v", got.Order)
+			}
+		default:
+			return
+		}
+	}
+}
+
 func TestProtectionWarningsVerifyActualQuantityWithoutOrderActions(t *testing.T) {
 	c, b, ctx := newProtectionCore(t)
 	// A snapshot through the ordinary risk synchronization path could trigger this stop.

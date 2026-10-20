@@ -1,6 +1,8 @@
 # Engine-Held Trailing Stops
 
-Status: executing the [approved specification](../../.scratch/engine-trailing-stops/spec.md).
+Status: implemented the [approved specification](../../.scratch/engine-trailing-stops/spec.md).
+Local validation and independent review are complete. Full hosted CI is required
+on the final pushed main commit before handoff.
 
 ## Scope and sequence
 
@@ -42,7 +44,43 @@ hosted CI on the pushed main commit. No live orders are authorized.
 - Focused regressions cover long/short ratchets, exact touch, frozen quote
   reservations, manual reductions, partial/late fills, restart/flat retirement,
   candle provenance/causality/corrections/timeframe edits and chart controls.
-- Full validation and the fixed-base two-axis review are in progress. Initial
-  validation exposed Windows sandbox temporary-file rename denials, test focus
-  modality assumptions, the new order-type expectation and curated enum parity;
-  those are addressed. Wall-clock performance guards are being rerun serially.
+- Local validation: full Go suite (serial), full short race suite, final focused
+  execution race suite, vet, golangci-lint, engine build, generated-contract
+  drift, UI typecheck/lint/build and full UI tests (1,436) pass. Documentation
+  links and git diff --check pass. Windows sandbox rename restrictions required
+  running the affected checks outside the sandbox; performance checks ran
+  serially. No required local check was skipped.
+- Browser chart layout/overlay, light/dark risk controls and narrow multipane
+  harness pass. Optional broad Playwright: 12 pass, 22 fail, one closed-session
+  skip. An isolated unchanged approved-spec checkout reproduced 21 failures
+  (existing picker/selectors/import fixtures and market-session assumptions).
+  The reconnect case passes from a fresh workspace. Repeating it in the same
+  demo run passes once, then fails setup because the named workspace already
+  has its preset applied (the test still waits for the Trading preset card).
+  The
+  temporary baseline worktree was archived; its dependency junction cleanup
+  required restoring local UI dependencies with npm ci, subsequently verified.
+
+## Standards review
+
+The independent review found no documented-standard breaches. One P3 judgment
+call identified duplicated directional tick rounding; both stop and quote-limit
+paths now use the same small helper. The finding is resolved.
+
+## Spec review
+
+Seven confirmed findings were resolved with public-seam regressions: nested
+observational snapshot accounting; ownership reductions preceding conversion;
+missing Orders-row Edit before a candle price exists; reverse position/fill
+ordering; stale owner cumulative fills; terminal exits omitted from open-order
+snapshots; and terminal owners omitted after late fills. The highest severity
+was P1. The independent reviewer confirmed all reported issues resolved.
+
+Attribution uncertainty preserves an existing LIMIT and reservation while
+blocking additional exits. Combined order/position reconciliation applies
+ownership once, rejects stale executions, and exposes late fills discovered
+during reconciliation for manual recovery. Waiting Candle Trail edits retain
+fresh-print validation without requiring an initial completed reference.
+
+Review totals: Standards one P3 judgment call resolved, zero hard violations;
+Spec seven findings resolved, highest P1. No confirmed findings remain open.

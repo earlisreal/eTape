@@ -11,6 +11,7 @@ import { FakeBus, FakeBusHub } from "../../../test/fakes";
 import type { AckMsg, AccountRow, ClosedOrder, ClosedTradeRow, ExecStatus, Order, PositionRow, SubmitOrderArgs } from "../../wire/contract";
 import type { PanelProps } from "./registry";
 import type { LinkGroup } from "../linkGroups";
+import { newTrailConfig } from "../exec/trailing";
 
 function mkProps(group: LinkGroup = "green", groupProp?: LinkGroup) {
   const stores = makeStores();
@@ -842,6 +843,16 @@ describe("AccountPanel", () => {
       });
       expect(screen.getByText("Open Orders (1)")).toBeTruthy();
       expect(screen.queryByText("Filled")).toBeNull();
+    });
+    it("edits a waiting candle trail before it has a chart price",async()=>{
+      const {props,stores,sent}=mkProps();wrap(props);
+      const config={...newTrailConfig(),mode:"CANDLE",timeframe:"1m"};
+      act(()=>{stores.exec.apply({kind:"snapshot",topic:"exec.status",payload:status(true)});stores.exec.apply({kind:"snapshot",topic:"exec.orders",payload:[order("waiting-trail",{type:"TRAILING_STOP",side:"SELL",stopPrice:0,limitPrice:0,held:{phase:"WAITING",deadlineMs:9999999999999,trail:{config,watermark:0,stop:0,limit:0}}})]});});
+      fireEvent.click(screen.getByRole("button",{name:"Edit trail"}));
+      expect((screen.getByLabelText("Trail mode") as HTMLSelectElement).disabled).toBe(true);
+      fireEvent.change(screen.getByLabelText("Trail timeframe"),{target:{value:"5m"}});
+      fireEvent.click(screen.getByRole("button",{name:"Apply trail"}));
+      await waitFor(()=>expect(sent).toContainEqual({name:"EditTrail",args:{venue:"alpaca-paper",orderId:"waiting-trail",expectedHeldPhase:"WAITING",expectedStop:0,config:{...config,timeframe:"5m"}}}));
     });
     it("shows a trail waiting reason and permits scoped Resume even before a stop line exists",async()=>{
       const {props,stores,sent}=mkProps();wrap(props);
