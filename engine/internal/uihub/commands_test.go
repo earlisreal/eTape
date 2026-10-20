@@ -60,6 +60,15 @@ func (s *spyCfg) DeleteConfig(k string) { s.deleted = k }
 
 type spyInd struct{ ensured, released string }
 
+func TestCommandsRejectRemovedProtectionConversion(t *testing.T) {
+	ex := &spyExec{ack: exec.CmdAck{Accepted: true}}
+	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})
+	ack, _ := cd.handle(context.Background(), "ConvertProtectionToTrail", json.RawMessage(`{"venue":"sim","orderId":"protect","expectedHeldPhase":"ARMED","expectedStop":9.8,"config":{"mode":"PRICE","value":0.3}}`), 0, func(wsmsg.AckMsg) {})
+	if ack.Status != "blocked" || ex.last != nil {
+		t.Fatalf("removed conversion reached execution: %+v, %#v", ack, ex.last)
+	}
+}
+
 func TestCommandsSubmitTrailPreservesExecutionRecipe(t *testing.T) {
 	ex := &spyExec{ack: exec.CmdAck{Accepted: true, OrderID: "trail"}}
 	cd := newCommands(ex, &spyCfg{}, &spyInd{}, &spyDemandCtl{}, &spyVenueAdmin{}, func() Feed { return nil }, &spyVenueTester{})

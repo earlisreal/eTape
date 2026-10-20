@@ -65,6 +65,5 @@ export function fireTemplate(
     case "CancelAllFocused": void oc.cancelAll("focused", ctx.symbol || undefined, { feedback: "action", venue: ctx.venue }); break;
     case "CancelAllEverything": void oc.cancelAll("everything", undefined, { feedback: "action" }); break;
     case "KillSwitch": void oc.kill(); break;
-	case "ConvertProtectionToTrail": if(t.trail) void oc.convertFocusedProtection(ctx.venue,ctx.symbol,t.trail);else toast.push({level:"danger",text:"Configure the conversion trail first."}); break;
   }
 }

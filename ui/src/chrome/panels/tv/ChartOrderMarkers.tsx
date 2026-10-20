@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent } from "react";
 import type { AckMsg, Order, ReplaceOrderArgs, TrailConfig } from "../../../wire/contract";
 import {TrailEditor} from "../../exec/TrailEditor";
-import {canConvertProtection,newTrailConfig,trailDetails,trailError,trailModeLabel} from "../../exec/trailing";
+import {trailDetails,trailError,trailModeLabel} from "../../exec/trailing";
 import type { ChartApiFacade } from "../../../render/chart/ChartApiFacade";
 import { chartOrderMarkers, nearestPriceLines, orderActionPending, orderMarkerChipYs, snapOrderMarkerPrice, type ChartOrderMarker } from "../../../render/chart/orderMarkers";
 import type { OrderConfig, PlaceOrderTemplate } from "../../exec/actionTemplate";
@@ -78,27 +78,25 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
   props.chooserOpenRef.current = chooserLatest.current;
   const groupsLatest = useRef(groups); groupsLatest.current = groups;
   const [announcement, setAnnouncement] = useState("");
-  const [trailEdit,setTrailEdit]=useState<{order:Order;config:TrailConfig;convert:boolean}|null>(null);
+  const [trailEdit,setTrailEdit]=useState<{order:Order;config:TrailConfig}|null>(null);
   const [trailBusy,setTrailBusy]=useState(false);
-  const openTrail=(o:Order,convert:boolean)=>{
+  const openTrail=(o:Order)=>{
     o=props.execStore?.liveOrder(o.id)??o;
-    const owner=orders.find(e=>e.id===o.riskEntryId);
-    setTrailEdit({order:o,convert,config:o.held?.trail?.config??{...newTrailConfig(),pricing:"CUSHION",cushion:owner?.riskEntry?.sellCushion??{value:0,unit:"$"}}});
+    if(o.held?.trail)setTrailEdit({order:o,config:o.held.trail.config});
   };
   const applyTrail=async()=>{
     if(!trailEdit || trailBusy)return;
     const error=trailError(trailEdit.config);if(error){setAnnouncement(`Trail rejected: ${error}`);return;}
-    const {order,config,convert}=trailEdit;setTrailBusy(true);
+    const {order,config}=trailEdit;setTrailBusy(true);
     try {
-      const ack=await props.sendCommand(convert?"ConvertProtectionToTrail":"EditTrail",{venue:order.venue,orderId:order.id,expectedHeldPhase:order.held!.phase,expectedStop:order.stopPrice,config});
+      const ack=await props.sendCommand("EditTrail",{venue:order.venue,orderId:order.id,expectedHeldPhase:order.held!.phase,expectedStop:order.stopPrice,config});
       if(ack.ambiguous){setAnnouncement("Trail outcome unknown; verify Orders.");setTrailEdit(null);}
       else if(ack.status!=="accepted")setAnnouncement(`Trail rejected: ${ack.reason??"unknown reason"}`);
-      else {setAnnouncement(convert?"Protection converted to trail.":"Trail updated.");setTrailEdit(null);}
+      else {setAnnouncement("Trail updated.");setTrailEdit(null);}
     }catch{setAnnouncement("Trail outcome unknown; verify Orders.");setTrailEdit(null);}finally{setTrailBusy(false);}
   };
   const trailActions=(o:Order)=> <>
-    {o.held?.trail && !o.held.trail.retired && !o.held.trail.triggered && ["WAITING","ARMED"].includes(o.held.phase) && <button type="button" aria-label="Edit trail" onClick={()=>openTrail(o,false)}>Edit</button>}
-    {canConvertProtection(o,orders) && <button type="button" aria-label="Convert to trail" onClick={()=>openTrail(o,true)}>Trail</button>}
+    {o.held?.trail && !o.held.trail.retired && !o.held.trail.triggered && ["WAITING","ARMED"].includes(o.held.phase) && <button type="button" aria-label="Edit trail" onClick={()=>openTrail(o)}>Edit</button>}
     {o.held?.trail && !o.held.trail.retired && o.held.phase==="PAUSED" && <button type="button" aria-label="Resume trail" onClick={()=>void props.sendCommand("ResumeHeldOrder",{venue:o.venue,orderId:o.id}).then(a=>setAnnouncement(a.status==="accepted"?"Trail resumed; waiting for fresh data.":`Resume rejected: ${a.reason??"unknown"}`))}>Resume</button>}
   </>;
 
@@ -486,10 +484,10 @@ export function ChartOrderMarkers(props: Props): JSX.Element {
         </div>}
       </div>;
     })}
-    {trailEdit && <section role="dialog" aria-label={trailEdit.convert?"Convert protection to trail":"Edit trailing stop"} data-drawing-ui="true" onKeyDown={e=>{e.stopPropagation();if(e.key==="Escape"&&!trailBusy)setTrailEdit(null);}}
+    {trailEdit && <section role="dialog" aria-label="Edit trailing stop" data-drawing-ui="true" onKeyDown={e=>{e.stopPropagation();if(e.key==="Escape"&&!trailBusy)setTrailEdit(null);}}
       style={{position:"absolute",left:10,right:10,top:20,padding:10,background:props.chrome.surface,color:props.chrome.text,border:"1px solid currentColor",pointerEvents:"auto",zIndex:30}}>
-      <div>{trailEdit.convert?"Convert protection to trail":"Edit trail"} · {trailEdit.order.symbol} · current stop {priceText(trailEdit.order.stopPrice)} · edits cannot loosen it</div>
-      <TrailEditor value={trailEdit.config} lockMode={!trailEdit.convert} lockSessions onChange={config=>setTrailEdit({...trailEdit,config})}/>
+      <div>Edit trail · {trailEdit.order.symbol} · current stop {priceText(trailEdit.order.stopPrice)} · edits cannot loosen it</div>
+      <TrailEditor value={trailEdit.config} lockMode lockSessions onChange={config=>setTrailEdit({...trailEdit,config})}/>
       <button type="button" disabled={trailBusy} onClick={()=>void applyTrail()}>Apply trail</button><button type="button" disabled={trailBusy} onClick={()=>setTrailEdit(null)}>Close</button>
     </section>}
     {/unknown|rejected|unavailable|zero shares/i.test(announcement) && <div role="status" style={{position:"absolute",left:10,bottom:10,maxWidth:"80%",color:"#ff9d72",background:"#0c1017",fontSize:11}}>{announcement}</div>}

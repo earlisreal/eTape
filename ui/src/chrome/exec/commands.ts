@@ -3,7 +3,7 @@
 // raises the flash/block/unknown-outcome toast. Cancel-all/last are composed from CancelOrder over
 // the working set — the engine's token buckets pace the burst.
 import type { AckMsg, StopLimitRoutePreview, SubmitOrderArgs, ReplaceOrderArgs, VenueID, SubmitTrailArgs, TrailConfig, Order } from "../../wire/contract";
-import {canConvertProtection,trailError} from "./trailing";
+import {trailError} from "./trailing";
 import type { ExecStore } from "../../data/ExecStore";
 import type { ToastApi } from "../Toast";
 import type { SoundApi } from "../../sound/SoundEngine";
@@ -56,15 +56,6 @@ export class OrderCommands {
     const ack=await this.d.cmd.sendCommand("EditTrail",{venue:order.venue,orderId:order.id,expectedHeldPhase:order.held!.phase,expectedStop:order.stopPrice,config});
     this.trailFeedback(ack,order.venue,"Trail updated");
     return ack.status==="accepted" || !!ack.ambiguous;
-  }
-  async convertFocusedProtection(venue:string,symbol:string,config:TrailConfig):Promise<void> {
-    const orders=this.d.exec.orders().filter(v=>!v.optimistic).map(v=>v.order);
-    const targets=orders.filter(o=>o.venue===venue && o.symbol===symbol && canConvertProtection(o,orders));
-    if(!venue || !symbol || targets.length!==1){this.d.toast.push({level:"warn",text:"Convert to Trail requires one eligible filled primary protection in this venue and symbol."});return;}
-    const o=targets[0];
-    const error=trailError(config);if(error){this.d.toast.push({level:"danger",text:error});return;}
-    const ack=await this.d.cmd.sendCommand("ConvertProtectionToTrail",{venue,orderId:o.id,expectedHeldPhase:o.held!.phase,expectedStop:o.stopPrice,config});
-    this.trailFeedback(ack,venue,"Protection converted to trail");
   }
   private trailFeedback(ack:AckMsg,venue:string,success:string):void {
     if(ack.ambiguous)this.d.toast.push({level:"warn",text:ambiguousText(venue)});

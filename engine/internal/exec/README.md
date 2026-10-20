@@ -37,11 +37,11 @@ reason and require venue reconciliation; they never infer a match by quantity.
 Confirmed terminal exits may be absent from open-order snapshots. Late fills
 discovered during reconciliation require manual recovery.
 
-`ConvertProtectionToTrail` changes healthy filled primary WAITING/ARMED
-protection atomically, retaining its owner, current confirmed stop bound and
-deadline. Missing data, stale observed state, paused/uncertain/working children
-and zero-fill setups reject conversion. `EditTrail` changes parameters within
-the existing mode and cannot loosen the bound. Trailing presets, including
+Fixed protection cannot be converted in place. Cancel it, wait for confirmed
+cancellation, then submit a separate standalone trail. Shared protection and
+quantity guards reject overlapping or uncertain exits. `EditTrail` changes
+parameters of an existing trail within its mode and cannot loosen the bound.
+Trailing presets, including
 zero-fill preparation and fixed fallback, expire across engine runs.
 
 The execution writer owns prices, reservations, position cycles and durable

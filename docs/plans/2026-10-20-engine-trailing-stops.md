@@ -1,8 +1,32 @@
 # Engine-Held Trailing Stops
 
 Status: implemented the [approved specification](../../.scratch/engine-trailing-stops/spec.md).
-Local validation and independent review are complete. Full hosted CI is required
-on the final pushed main commit before handoff.
+Local validation and independent review are complete. Full hosted CI passed on
+implementation commit `7c5a8ed2`; see the hosted validation record below.
+
+## Subsequent scope change
+
+Earl removed fixed-protection conversion on 2026-10-20. The chart Trail button,
+conversion management action/hotkey, client and engine command are removed.
+Saved conversion templates/Deck cells are dropped on load/import. Replace
+fixed protection manually by canceling it, confirming cancellation, and placing
+a separate standalone trail. Initial Chart Risk Entry trailing presets and
+same-mode edits of existing trails remain supported. Earlier conversion and
+review references below describe the original implementation history.
+
+Removal validation: full Go tests, execution/uihub race tests, engine build/vet/
+lint, generated-contract drift, UI lint/typecheck/build and all 1,438 UI tests
+pass. Regressions cover the absent chart conversion button, dropped legacy
+shortcuts/Deck cells, rejected legacy WebSocket command, and cancellation
+followed by a separate standalone trail. Markdown links and diff whitespace
+checks pass. No live orders or broad optional browser rerun were needed; the
+focused chart tests cover the removed control. Full hosted CI remains the
+code-handoff gate for this follow-up.
+
+Follow-up Standards review: no documented-standard breaches or clear new
+baseline smells. Follow-up Spec review: no actionable deviations from the
+requested conversion removal. Both reviews were read-only; neither found an
+open issue in the removal delta.
 
 ## Scope and sequence
 
@@ -95,3 +119,10 @@ the passing local full-suite command and preventing simultaneous synthetic-feed
 and recording-capacity load generators. No test or threshold was removed.
 The pushed follow-up commit must pass the complete hosted workflow before
 handoff, including Linux full/race/vet/lint/contracts, Windows full and UI.
+
+The [full hosted run](https://github.com/earlisreal/eTape/actions/runs/39417619999)
+passed all three jobs on `7c5a8ed2331ad2cb97537e1a515090e3b2478930`:
+Linux engine full/race/vet/lint/contracts, Windows full engine tests, and UI
+lint/tests/build. The Windows README checklist now uses the same serial command.
+The final validation-record/checklist commit changes prose only; its hosted
+rerun is not required for handoff under the documentation exception in AGENTS.md.

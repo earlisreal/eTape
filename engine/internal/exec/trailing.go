@@ -222,7 +222,7 @@ func (c *Core) handleSubmitTrail(ctx context.Context, cm SubmitTrail) CmdAck {
 	}
 	for _, o := range c.state.Venue(cm.Venue).Orders {
 		if o.Symbol == cm.Symbol && o.Working() && (o.RiskEntryID != "" || o.Held != nil && o.Held.Trail != nil) {
-			return blocked("position already has managed protection; edit or convert it")
+			return blocked("position already has managed protection; cancel it before placing a new trail")
 		}
 	}
 	shares := c.state.VenuePositionShares(cm.Venue, cm.Symbol)

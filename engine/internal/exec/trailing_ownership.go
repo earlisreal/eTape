@@ -14,8 +14,7 @@ func (c *Core) trailExposure() map[string]ownedExposure {
 			if entry.RiskEntry == nil {
 				continue
 			}
-			// Keep ownership while protection is fixed too: a later conversion
-			// must not adopt shares bought independently after a manual exit.
+			// Fixed and trailing protection both retain confirmed entry ownership.
 			e := ownedExposure{position: vs.Positions[entry.Symbol].Qty, entries: entry.ExecutedQty}
 			for _, exit := range vs.Orders {
 				if exit.RiskEntryID == entry.ID {

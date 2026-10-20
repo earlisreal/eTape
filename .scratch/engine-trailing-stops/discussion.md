@@ -383,3 +383,7 @@ Sources: [submission/position handling](../../engine/internal/exec/core.go),
   consolidate the complete behavior in spec.md. No further product-decision
   blocker was found; all shared design decisions are settled. Finalize and
   publish documentation under repository standing Git authorization.
+- 2026-10-20: After implementation, Earl removed the protection-pill Trail
+  button and the conversion feature entirely. Cancel protection and submit a
+  separate standalone trail manually. This supersedes the earlier conversion
+  decisions; Chart Risk Entry presets can still select trailing protection.
