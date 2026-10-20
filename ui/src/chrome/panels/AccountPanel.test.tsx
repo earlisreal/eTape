@@ -53,6 +53,47 @@ function wrap(props: PanelProps) {
 }
 
 describe("AccountPanel", () => {
+  it("keeps the selected group's environment through canceled/accepted switches and metadata updates", () => {
+    const { props, stores, linkGroups } = mkProps();
+    const st = status(false, "alpaca-paper", "other");
+    st.venues[0].env = "paper";
+    st.venues[1].env = "live";
+    st.venues[1].connected = false;
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: st });
+    wrap(props);
+    expect(screen.getByTestId("venue-environment-badge").textContent).toBe("PAPER");
+    act(() => linkGroups.focusVenue("blue", "other"));
+    expect(screen.getByTestId("venue-environment-badge").textContent).toBe("PAPER");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    try {
+      fireEvent.change(screen.getByTestId("acct-venue"), { target: { value: "other" } });
+      expect(confirm).toHaveBeenCalledOnce();
+      expect(linkGroups.venueFor("green")).toBe("alpaca-paper");
+      expect(screen.getByTestId("venue-environment-badge").textContent).toBe("PAPER");
+      confirm.mockReturnValue(true);
+      fireEvent.change(screen.getByTestId("acct-venue"), { target: { value: "other" } });
+      expect(linkGroups.venueFor("green")).toBe("other");
+      expect(screen.getByTestId("venue-environment-badge").textContent).toBe("LIVE");
+      act(() => stores.exec.apply({ kind: "delta", topic: "exec.status", payload: {
+        ...st, venues: [st.venues[0], { ...st.venues[1], env: "paper", broker: "sim" }],
+      } }));
+      expect(screen.getByTestId("venue-environment-badge").textContent).toBe("SIM");
+      act(() => stores.exec.apply({ kind: "delta", topic: "exec.status", payload: { ...st, venues: [st.venues[0]] } }));
+      expect(screen.queryByTestId("venue-environment-badge")).toBeNull();
+    } finally {
+      confirm.mockRestore();
+    }
+  });
+
+  it("shows no venue environment for a pinned panel", () => {
+    const { props, stores } = mkProps(null);
+    const st = status(false);
+    st.venues[0].env = "live";
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: st });
+    wrap(props);
+    expect(screen.queryByTestId("venue-environment-badge")).toBeNull();
+  });
+
   it("formats sub-dollar position and fill prices while keeping account and position P&L at two decimals", () => {
     const { props, stores } = mkProps();
     stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: status(true) });

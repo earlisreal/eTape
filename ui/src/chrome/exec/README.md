@@ -27,6 +27,14 @@ paper accounts in addition to its live risk venues. The Account strip exposes
 the single broker/calculated Day P&L, eTape cycle Realized P&L, source label,
 and stale timestamp. Test: `npm test -- exec`.
 
+Account and Order Ticket Panel Headers show the selected venue's static LIVE,
+PAPER, or SIM badge beside its selector, using the same display classification
+as the Top Bar hotkey target. LIVE uses the existing red chip; PAPER/SIM are
+neutral. Classification comes from the exact venue's `exec.status` environment
+and simulator broker identity, never its ID. Unknown metadata and pinned panels
+show no badge. Trading locks and connection state do not change an available
+environment badge; it describes the account rather than submission readiness.
+
 Risk Action Templates save dollar risk, Risk Cash %, or Risk BP %, separate buy
 and sell Limit Cushions, and a hotkey. The hotkey starts only the active grouped
 Chart Panel in the foreground window. The chart publishes account demand for

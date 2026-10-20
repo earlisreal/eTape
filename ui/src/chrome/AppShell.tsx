@@ -77,7 +77,7 @@ function appShellExecSignature(stores: Stores): string {
   const status = stores.exec.status();
   if (status === null) return "pending";
   const venues = status.venues
-    .map((v) => `${v.venue}:${v.broker}`)
+    .map((v) => `${v.venue}:${v.broker}:${v.env ?? ""}`)
     .sort()
     .join(",");
   return `ready|armed=${status.masterArmed ? 1 : 0}|venues=${venues}`;
@@ -1115,6 +1115,7 @@ export function AppShell({ workspaceName, stores, scheduler, workspaceStore, lin
             onOpenPractice={() => setPracticeOpen(true)}
             commands={commands}
             targetCue={targetCueFor(hotkeyTarget)}
+            targetVenue={execStatus?.venues.find((v) => v.venue === hotkeyTarget?.venue)}
           />
           {addOpen && (
             <div className="popover" style={{ top: 40, right: 160, width: 580, maxHeight: "70vh", overflow: "auto" }}>

@@ -144,6 +144,7 @@ export default defineConfig({
             'src/chrome/SessionClock.test.tsx',
             'src/chrome/SettingsModal.test.tsx',
             'src/chrome/TopBar.test.tsx',
+            'src/chrome/PanelFrame.test.tsx',
             'src/chrome/backup.test.ts',
             'src/chrome/crosshairSync.test.ts',
             'src/chrome/windows.test.ts',

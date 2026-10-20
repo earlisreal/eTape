@@ -6,9 +6,10 @@ import { useTheme } from "./ThemeProvider";
 import { Button } from "./controls/Button";
 import type { LinkGroup } from "./linkGroups";
 import type { HotkeyTarget } from "./hotkeyTarget";
-import type { VenueID } from "../wire/contract";
+import type { VenueID, VenueStatus } from "../wire/contract";
 import type { VenueInstrumentEligibility } from "../gen/wsmsg";
 import { bareSymbol } from "./exec/orderStatus";
+import { VenueEnvironmentBadge, venueEnvironment } from "./exec/VenueEnvironmentBadge";
 
 interface TopBarCommands {
   sendQuery(name: string, args: unknown): Promise<unknown>;
@@ -43,6 +44,7 @@ export interface TopBarProps {
   onOpenPractice: () => void;
   commands?: TopBarCommands;
   targetCue?: HotkeyTargetCue;
+  targetVenue?: VenueStatus | undefined;
 }
 
 export type HotkeyTargetCueState = "ready" | "no-target" | "ungrouped" | "missing-symbol" | "missing-venue";
@@ -99,7 +101,7 @@ function EligibilityTiles({ value, palette }: { value: VenueInstrumentEligibilit
   );
 }
 
-function TargetCue({ cue, palette, commands }: { cue: HotkeyTargetCue; palette: ReturnType<typeof useTheme>["palette"]; commands?: TopBarCommands | undefined }): JSX.Element {
+function TargetCue({ cue, venueStatus, palette, commands }: { cue: HotkeyTargetCue; venueStatus?: VenueStatus | undefined; palette: ReturnType<typeof useTheme>["palette"]; commands?: TopBarCommands | undefined }): JSX.Element {
   const eligibilityKey = cue.state === "ready" ? `${cue.venue}\u0000${cue.symbol}` : "";
   const [eligibility, setEligibility] = useState<{ key: string; value: VenueInstrumentEligibility | null }>({ key: "", value: null });
   useEffect(() => {
@@ -140,14 +142,17 @@ function TargetCue({ cue, palette, commands }: { cue: HotkeyTargetCue; palette: 
   const label = cue.state === "ready"
     ? `${symbol} · ${venue}`
     : `Hotkeys blocked · ${reason}${cue.state === "no-target" ? "" : ` · ${symbol} · ${venue}`}`;
+  const environment = venueEnvironment(cue.group !== null && cue.venue && cue.venue === venueStatus?.venue ? venueStatus : undefined);
+  const accessibleLabel = environment ? `${label} · ${environment}` : label;
   return (
     <span className="top-bar-target-cue" data-testid="hotkey-target-cue" data-state={cue.state} role="status"
-      aria-label={label} title={label}
+      aria-label={accessibleLabel} title={accessibleLabel}
       style={{ display: "inline-flex", alignItems: "center", gap: 5, minWidth: 0,
         color: cue.state === "ready" ? palette.textMuted : palette.danger, fontSize: 11, whiteSpace: "nowrap" }}>
       <span data-testid="hotkey-target-dot" aria-hidden="true"
         style={{ width: 7, height: 7, borderRadius: "50%", background: dot, flex: "0 0 auto" }} />
       <span className="top-bar-target-label">{label}</span>
+      <VenueEnvironmentBadge environment={environment} />
       {eligibility.key === eligibilityKey && eligibility.value && <EligibilityTiles value={eligibility.value} palette={palette} />}
     </span>
   );
@@ -160,7 +165,7 @@ export function TopBar(p: TopBarProps): JSX.Element {
   const { palette } = useTheme();
   const cue = p.targetCue ?? targetCueFor(null);
   return (
-    <div className="top-bar" data-testid="top-bar" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)", alignItems: "center", gap: 10,
+    <div className="top-bar" data-testid="top-bar" style={{ display: "grid", gridTemplateColumns: "minmax(max-content, 1fr) minmax(0, auto) minmax(max-content, 1fr)", alignItems: "center", gap: 10,
       padding: "7px 12px", background: palette.surface, borderBottom: `1px solid ${palette.border}` }}>
       <div className="top-bar-left" style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
         <span className="serif" style={{ fontWeight: 600, fontSize: 14 }}>eTape</span>
@@ -169,7 +174,7 @@ export function TopBar(p: TopBarProps): JSX.Element {
         <SessionClock />
       </div>
       <div className="top-bar-target" style={{ display: "flex", alignItems: "center", justifyContent: "center", minWidth: 0, maxWidth: "100%" }}>
-        <TargetCue cue={cue} palette={palette} commands={p.commands} />
+        <TargetCue cue={cue} venueStatus={p.targetVenue} palette={palette} commands={p.commands} />
       </div>
       <div className="top-bar-actions" style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 10, minWidth: 0 }}>
         <Button onClick={p.onAddPanel}>+ Add panel</Button>

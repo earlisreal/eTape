@@ -8,6 +8,7 @@ import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
 import { requiresLiveConfirmation, useVenueSelection } from "../exec/venueSelection";
+import { VenueEnvironmentBadge, venueEnvironment } from "../exec/VenueEnvironmentBadge";
 import { useAccountDemand } from "../exec/useAccountDemand";
 import { useOrderConfig } from "../exec/useOrderConfig";
 import { resolvePlaceTemplate } from "../exec/resolveTemplate";
@@ -591,7 +592,7 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
     selectVenue(next);
   };
   const venueSelect = (
-    <select data-testid="acct-venue" className="ctl mono" value={venue} disabled={group === null} onChange={(e) => changeVenue(e.target.value)}
+    <select data-testid="acct-venue" className="ctl mono venue-selector" value={venue} title={venue || undefined} disabled={group === null} onChange={(e) => changeVenue(e.target.value)}
       style={{ padding: "2px 9px", margin: "1px 0" }}>
       {group === null && <option value="">Choose a Link Group</option>}
       {venues.map((v) => <option key={v} value={v}>{v}</option>)}
@@ -600,8 +601,9 @@ export function AccountPanel({ config, stores, commands, onConfigChange, linkGro
   const previousVenue = linkGroups.previousVenueFor(group);
   const oldOrders = previousVenue ? stores.exec.orders().filter((o) => o.order.venue === previousVenue && (o.optimistic || isWorking(o.order.status))).length : 0;
   const headerActions = (
-    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+    <div style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
       {venueSelect}
+      <VenueEnvironmentBadge environment={venueEnvironment(venueStatus)} />
     </div>
   );
 

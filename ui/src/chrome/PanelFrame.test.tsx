@@ -69,6 +69,7 @@ const paneApis = [
   { attachPrimitive: vi.fn(), getHeight: vi.fn(() => 120), getStretchFactor: vi.fn(() => 1), setStretchFactor: vi.fn() },
 ];
 const chartApi = {
+  options: vi.fn(() => ({ crosshair: { horzLine: { visible: true, labelBackgroundColor: "#777" } }, localization: {} })),
   addSeries: vi.fn(() => ({ setData: vi.fn(), update: vi.fn(), applyOptions: vi.fn(), setSeriesOrder: vi.fn(),
     attachPrimitive: vi.fn(), priceToCoordinate: vi.fn(() => 0), coordinateToPrice: vi.fn(() => 0) })),
   removeSeries: vi.fn(),
@@ -654,7 +655,7 @@ describe("PanelFrame — DemandRegistry wiring (Task 10)", () => {
     } as unknown as import("../wire/DemandRegistry").DemandRegistry;
     renderFrame({ panelId: "chart", group: null, settings: { symbol: "US.AAPL" }, demandRegistry: reg });
     await waitFor(() => expect(calls.some((c) => c.m === "ensure")).toBe(true));
-    expect(calls.find((c) => c.m === "ensure")!.args).toEqual(["m-chart", "US.AAPL", "watch"]);
+    expect(calls.find((c) => c.m === "ensure")!.args).toEqual(["m-chart", "US.AAPL", "chart"]);
   });
 
   it("releases on unmount", () => {
@@ -678,7 +679,7 @@ describe("PanelFrame — DemandRegistry wiring (Task 10)", () => {
     // matching every other typeKey-driven test in this file.
     renderFrame({ panelId: "chart", group: null, settings: { symbol: "US.AAPL" }, demandRegistry: reg, onConfigChange, api: fakePanelApi(true) });
     typeKey("z"); typeKey("z"); typeKey("z"); typeKey("z"); typeKey("Enter");
-    await waitFor(() => expect(ensure).toHaveBeenCalledWith("m-chart", "US.ZZZZ", "watch"));
+    await waitFor(() => expect(ensure).toHaveBeenCalledWith("m-chart", "US.ZZZZ", "chart"));
     expect(onConfigChange).not.toHaveBeenCalledWith(expect.objectContaining({ symbol: "US.ZZZZ" }));
   });
 });

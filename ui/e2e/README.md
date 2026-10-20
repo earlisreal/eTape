@@ -1,5 +1,12 @@
 # End-to-End Tests
 
+Venue environment checks use intercepted demo status frames to verify LIVE
+badges in the Top Bar, Account, and Order Ticket Panel Headers. They cover long
+venue IDs, light/dark themes, narrow windows, and cross-window metadata updates;
+the engine remains sim-only. Run with ticketless coverage on a spare port:
+`npx playwright test e2e/ticketless-hotkeys.spec.ts e2e/venue-environment.spec.ts`.
+Screenshots are retained in the test output directory.
+
 Account scenarios cover compact columns and protection warning status frames.
 Verified warnings remain visible across Account tabs, failed verification shows
 unverified text, and a resolved exposure removes the warning. These fixtures use

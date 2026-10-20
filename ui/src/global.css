@@ -142,6 +142,9 @@ input.numfield { -moz-appearance: textfield; appearance: textfield; }
    danger color: LIVE badges/headers, kill switch, rejects). */
 .chip-set { color: var(--accent); border-color: var(--accent); background: rgba(154,106,27,.08); }
 .chip-live { color: var(--danger); border-color: var(--danger); background: rgba(168,30,48,.06); }
+.chip-neutral { color: var(--text-muted); border-color: var(--border-strong); background: transparent; }
+.venue-environment-badge { flex: 0 0 auto; white-space: nowrap; font-family: "IBM Plex Sans", system-ui, sans-serif; }
+.venue-selector { min-width: 0; }
 /* Tinted header for a LIVE venue's card (same wash as .chip-live's background,
    applied to a wider area) — venue-card header row, VenuesSection. */
 .venue-card-header-live { background: rgba(168,30,48,.06); }

@@ -8,6 +8,7 @@ import { useTheme } from "../ThemeProvider";
 import { useToasts } from "../Toast";
 import { useOrderCommands } from "../exec/useOrderCommands";
 import { requiresLiveConfirmation, useVenueSelection } from "../exec/venueSelection";
+import { VenueEnvironmentBadge, venueEnvironment } from "../exec/VenueEnvironmentBadge";
 import { useOrderConfig } from "../exec/useOrderConfig";
 import { useThrottledQuote } from "../exec/useThrottledQuote";
 import { resolveShares, type SizingMode } from "../exec/sizing";
@@ -182,7 +183,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
   // lands immediately left of PanelFrame's close button — same layout as
   // TapePanel's lone header gear, extended with the venue picker.
   const headerActions = (
-    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 4, minWidth: 0 }}>
       {sessionMode.mode === "demo" && (
         <span data-testid="practice-badge" style={{
           padding: "1px 6px", borderRadius: 3,
@@ -207,7 +208,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
           ···
         </span>
       )}
-      <select data-testid="venue" className="ctl mono" value={venue} disabled={group === null} onChange={(e) => {
+      <select data-testid="venue" className="ctl mono venue-selector" value={venue} title={venue || undefined} disabled={group === null} onChange={(e) => {
         const next = e.target.value;
         if (requiresLiveConfirmation(status, venue, next) && !window.confirm("Switch this Link Group from paper to live trading?")) return;
         selectVenue(next);
@@ -215,6 +216,7 @@ export function OrderTicketPanel({ config, stores, commands, linkGroups, group: 
         {group === null && <option value="">Choose a Link Group</option>}
         {venues.map((v) => <option key={v} value={v}>{v}</option>)}
       </select>
+      <VenueEnvironmentBadge environment={venueEnvironment(venueStatus)} />
       <button type="button" data-testid="open-settings" aria-label="order settings"
         onClick={() => openSettings?.openOrderSettings()}
         style={{ display: "inline-flex", border: "none", background: "transparent", color: palette.textMuted, cursor: "pointer", padding: 3 }}>

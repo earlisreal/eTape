@@ -25,6 +25,7 @@ test.describe("ticketless cross-window hotkeys", () => {
     const runId = Math.random().toString(36).slice(2);
     const otherWorkspace = `e2e-ticketless-other-${runId}`;
     await gotoMainTrading(page);
+    await page.getByTestId("venue").selectOption("sim-paper");
 
     // Remove the ticket before configuring or firing the hotkey. The linked
     // DOM panel remains the only execution context used by this test.
@@ -34,9 +35,9 @@ test.describe("ticketless cross-window hotkeys", () => {
 
     // Establish a real blue-group focus, ending on DRGO so the deterministic
     // demo feed has a quote to validate and submit.
-    const domPanel = page.locator(".ledger-header", { hasText: "DOM Ladder" }).locator("xpath=..");
+    const domPanel = page.getByRole("region", { name: "ladder", exact: true });
     await domPanel.getByTestId("panel-body").click();
-    await expect(domPanel).toHaveClass(/panel-focused/);
+    await expect(domPanel.locator(".panel-focused")).toHaveCount(1);
     await page.keyboard.type("ECLP");
     await page.keyboard.press("Enter");
     await expect(domPanel.getByTestId("panel-symbol")).toHaveText("ECLP");
@@ -45,6 +46,7 @@ test.describe("ticketless cross-window hotkeys", () => {
     await expect(domPanel.getByTestId("panel-symbol")).toHaveText("DRGO");
     await expect(page.getByTestId("hotkey-target-cue")).toHaveAttribute("data-state", "ready");
     await expect(page.getByTestId("hotkey-target-cue")).toHaveAccessibleName(/DRGO.*sim-paper/i);
+    await expect(page.getByTestId("hotkey-target-cue").getByTestId("venue-environment-badge")).toHaveText("SIM");
     await page.waitForTimeout(5_000); // allow the demo feed to publish the first quote
 
     await seedHotkey(page);
@@ -60,6 +62,7 @@ test.describe("ticketless cross-window hotkeys", () => {
     await other.bringToFront();
     await expect(other.getByTestId("hotkey-target-cue")).toHaveAttribute("data-state", "ready");
     await expect(other.getByTestId("hotkey-target-cue")).toHaveAccessibleName(/DRGO.*sim-paper/i);
+    await expect(other.getByTestId("hotkey-target-cue").getByTestId("venue-environment-badge")).toHaveText("SIM");
     await other.keyboard.press("Control+1");
     await expect(other.getByRole("alert")).toContainText(/BUY .* DRGO @/i, { timeout: 10_000 });
     await expect(page.getByTestId("pos-row-sim-paper-US.DRGO")).toBeVisible({ timeout: 10_000 });
@@ -69,13 +72,14 @@ test.describe("ticketless cross-window hotkeys", () => {
     await page.bringToFront();
     await page.getByRole("button", { name: "+ Add panel" }).click();
     await page.locator(".popover").getByText("Stock Info", { exact: true }).click();
-    const stockPanel = page.getByRole("tabpanel", { name: "Stock Info" });
+    const stockPanel = page.getByRole("tabpanel", { name: "Stock Info" }).last();
     await page.getByRole("tab", { name: "Stock Info", exact: true }).first().click();
     await page.getByRole("tab", { name: "Stock Info", exact: true }).last().click();
     await stockPanel.getByTestId("panel-body").click();
     await expect(page.getByTestId("hotkey-target-cue")).toHaveAttribute("data-state", "ungrouped");
     await other.bringToFront();
     await expect(other.getByTestId("hotkey-target-cue")).toHaveAttribute("data-state", "ungrouped");
+    await expect(other.getByTestId("hotkey-target-cue").getByTestId("venue-environment-badge")).toHaveCount(0);
     await other.keyboard.press("Control+1");
     await expect(other.getByText(/hotkey blocked — target panel is ungrouped/i)).toBeVisible();
 

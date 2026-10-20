@@ -190,6 +190,39 @@ describe("AppShell execution subscription", () => {
     cycleStartMs: 0, cycleRealized: 0,
   });
 
+  it("refreshes environment metadata for the same cross-window target without retargeting", async () => {
+    const channel = new TargetChannel();
+    const { stores } = mount(seed, { hotkeyTargetChannel: channel });
+    await waitFor(() => expect(screen.getByText("Link")).toBeTruthy());
+    act(() => {
+      stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: status(false, [
+        venue(), venue({ venue: "other", env: "paper", broker: "sim" }),
+      ]) });
+      channel.emit({ type: "target", target: {
+        ownerWindow: "other-window", panel: "remote-panel", group: "green", symbol: "US.NVDA", venue: "alpaca-paper", revision: 100,
+      } });
+    });
+    expect(screen.queryByTestId("venue-environment-badge")).toBeNull();
+    act(() => stores.exec.apply({ kind: "delta", topic: "exec.status", payload: status(false, [
+      venue({ env: "live", connected: false }), venue({ venue: "other", env: "paper", broker: "sim" }),
+    ]) }));
+    expect(screen.getByTestId("venue-environment-badge").textContent).toBe("LIVE");
+    expect(screen.getByTestId("hotkey-target-cue").getAttribute("aria-label")).toContain("NVDA · alpaca-paper · LIVE");
+    act(() => stores.exec.apply({ kind: "delta", topic: "exec.status", payload: status(false, [
+      venue({ env: "paper" }), venue({ venue: "other", env: "paper", broker: "sim" }),
+    ]) }));
+    expect(screen.getByTestId("venue-environment-badge").textContent).toBe("PAPER");
+    act(() => channel.emit({ type: "target", target: {
+      ownerWindow: "other-window", panel: "remote-panel", group: "blue", symbol: "US.NVDA", venue: "other", revision: 101,
+    } }));
+    expect(screen.getByTestId("venue-environment-badge").textContent).toBe("SIM");
+    act(() => stores.exec.apply({ kind: "delta", topic: "exec.status", payload: status(false, [venue({ env: "live" })]) }));
+    expect(screen.queryByTestId("venue-environment-badge")).toBeNull();
+    act(() => channel.emit({ type: "clear", ownerWindow: "other-window", panel: "remote-panel", revision: 102 }));
+    expect(screen.getByTestId("hotkey-target-cue").getAttribute("data-state")).toBe("no-target");
+    expect(channel.messages.some((message) => message.type === "target")).toBe(false);
+  });
+
   it("does not re-render for sequential account-only updates", async () => {
     let renders = 0;
     const { stores } = mount(seed, { onRender: () => { renders++; } });

@@ -488,7 +488,7 @@ export function PanelFrame(
         ) : null}
         {def?.headerActions && (
           <div ref={setActionsSlot} data-testid="panel-header-actions"
-            style={{ display: "inline-flex", alignItems: "center", gap: 2, flex: "0 0 auto" }} />
+            style={{ display: "inline-flex", alignItems: "center", gap: 2, flex: "0 1 auto", minWidth: 0 }} />
         )}
         <HoverButton type="button" aria-label="close panel" onClick={onClose}
           style={{ border: "none", background: "transparent", color: palette.textMuted, cursor: "pointer", fontSize: 13, padding: "0 2px", lineHeight: 1 }}>

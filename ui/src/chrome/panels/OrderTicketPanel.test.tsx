@@ -33,6 +33,43 @@ const wrap = (p: PanelProps) => render(
 );
 
 describe("OrderTicketPanel", () => {
+  it("keeps the selected group's environment through canceled/accepted switches and metadata updates", () => {
+    const { props, stores, linkGroups } = mkProps();
+    const paper = { ...status().venues[0], env: "paper" };
+    const live = { ...paper, venue: "other", env: "live", connected: false };
+    const st = { ...status(), masterArmed: false, venues: [paper, live] };
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: st });
+    wrap(props);
+    expect(screen.getByTestId("venue-environment-badge").textContent).toBe("PAPER");
+    act(() => linkGroups.focusVenue("blue", "other"));
+    expect(screen.getByTestId("venue-environment-badge").textContent).toBe("PAPER");
+    const confirm = vi.spyOn(window, "confirm").mockReturnValue(false);
+    try {
+      fireEvent.change(screen.getByTestId("venue"), { target: { value: "other" } });
+      expect(confirm).toHaveBeenCalledOnce();
+      expect(linkGroups.venueFor("green")).toBe("alpaca-paper");
+      expect(screen.getByTestId("venue-environment-badge").textContent).toBe("PAPER");
+      confirm.mockReturnValue(true);
+      fireEvent.change(screen.getByTestId("venue"), { target: { value: "other" } });
+      expect(linkGroups.venueFor("green")).toBe("other");
+      expect(screen.getByTestId("venue-environment-badge").textContent).toBe("LIVE");
+      act(() => stores.exec.apply({ kind: "delta", topic: "exec.status", payload: { ...st, venues: [paper, { ...live, env: "paper", broker: "sim" }] } }));
+      expect(screen.getByTestId("venue-environment-badge").textContent).toBe("SIM");
+      act(() => stores.exec.apply({ kind: "delta", topic: "exec.status", payload: { ...st, venues: [paper] } }));
+      expect(screen.queryByTestId("venue-environment-badge")).toBeNull();
+    } finally {
+      confirm.mockRestore();
+    }
+  });
+
+  it("shows no venue environment for a pinned panel", () => {
+    const { props, stores } = mkProps();
+    props.config.group = null;
+    stores.exec.apply({ kind: "snapshot", topic: "exec.status", payload: { ...status(), venues: [{ ...status().venues[0], env: "live" }] } });
+    wrap(props);
+    expect(screen.queryByTestId("venue-environment-badge")).toBeNull();
+  });
+
   it("submits a configured trail as position percentage without fixed price fields", async () => {
     const {props,stores,linkGroups,sent}=mkProps();
     act(()=>{stores.exec.apply({kind:"snapshot",topic:"exec.status" as never,payload:status()});linkGroups.focus("green","US.AAPL");});
