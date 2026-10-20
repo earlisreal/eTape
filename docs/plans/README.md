@@ -4,6 +4,7 @@ Create one focused Markdown file per approved change. Name `YYYY-MM-DD-short-fea
 
 Approved, implementation pending:
 
+- [Alert and Watchlist symbol navigation](2026-10-21-alert-panel-symbol-navigation.md)
 - [Visible Range Volume Profile Indicator](2026-10-10-volume-profile-indicator.md)
 
 Implemented:
