@@ -6,6 +6,12 @@ Startup/storage failure warns through existing sys.events while market data
 continues. Shutdown joins recording producers before draining the archive;
 execution SQLite schema and persistence remain independent.
 
+Engine-held protective stops corroborate suspicious prices against separate
+trade/book evidence with a 100 ms receipt budget. Unresolved adverse crossings
+retain the exit fallback; unconfirmed favorable prices cannot tighten trailing
+watermarks. Raw chart/alert prices and native broker stops retain their existing
+behavior. See [protective price evidence](internal/exec/README.md#protective-price-evidence).
+
 Startup launches pollers while optional per-venue Alpaca asset directories load concurrently. OpenD subscriptions and independent candle/book/ticker/quote seeds can start immediately; only rate-limited requests retain restart cooldowns. OpenD and Alpaca history save atomic request timestamps beside the database to reuse expired windows on ordinary launches and preserve remaining waits on rapid restarts. Unknown state retains the initial 31-second OpenD / one-minute Alpaca history fallback. Level 2 and Time & Sales have no chart-history readiness dependency.
 
 Go process owns external connections, normalized market state, persistence, scanning, execution, and UI transport.

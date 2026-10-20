@@ -213,7 +213,7 @@ func TestCancelFixedProtectionThenPlaceIndependentTrail(t *testing.T) {
 	}
 	entry := waitOrder(t, c, a.OrderID, func(o Order) bool { return o.RiskEntry != nil })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
 	select {
 	case <-broker.submits:
 	case <-time.After(time.Second):
@@ -239,7 +239,7 @@ func TestCancelFixedProtectionThenPlaceIndependentTrail(t *testing.T) {
 		t.Fatal(ack)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.7))
+	feedCorroboratedPrint(t, c, ctx, eligible(3, clk.Now(), 9.7))
 	select {
 	case child := <-broker.submits:
 		if child.ClientOrderID != ack.OrderID || child.ClientOrderID == stop.ID || child.Qty != 100 || math.Abs(child.LimitPrice-9.7) > 1e-9 {

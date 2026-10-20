@@ -50,7 +50,7 @@ before implementation.
   [Chart Risk Entry](../../engine/internal/exec/risk_entry.go),
   [trailing prices](../../engine/internal/exec/trailing.go) and
   [trailing commands](../../engine/internal/exec/trailing_commands.go) also
-  evaluate cached prices on placement, fills, edits/conversion and Resume.
+  evaluate cached prices on placement, fills, edits and Resume.
   Guarding only the live-print loop would leave bypasses.
 - [Market-data execution events](../../engine/internal/md/execution.go)
   already order prints, books and candles independently of chart output.
@@ -116,8 +116,8 @@ An out-of-repository Go-overlay diagnostic has been run against the real
 execution Core with the existing fake broker and fake clock. It reproduces
 the $6 stop activating zero milliseconds after the synthetic $5.23 candidate,
 despite supplied $6.30/$6.34 book evidence and recovery at +98 ms. The test's
-no-activation assertion currently fails in three repeated runs, as expected
-before implementation.
+no-activation assertion failed in three repeated runs before implementation;
+the ported repository regression now passes with explicitly usable book evidence.
 This is a policy reproduction under the stated usable-book assumption, not
 a complete archived replay or proof that the historical book was usable.
 Port the scenario into repository regression coverage during implementation.
@@ -201,7 +201,7 @@ neither changes the Limit Cushion nor guarantees execution after a gap.
 ### Lifecycle and admission
 
 Route live prints, new protection, cached admission/amendment, confirmed
-entry fills, trail creation/edit/conversion and untriggered Resume through
+entry fills, trail creation/edit and untriggered Resume through
 the same protective evidence policy. Preserve ordinary raw-price consumers.
 Continuations of an already authorized trigger, including late-fill cleanup
 and an existing triggered trail waiting for quotes, do not start another window.
@@ -238,7 +238,7 @@ Chart Risk Entry's initial fixed fallback. A new standalone trail remains
 in the existing Waiting phase until its starting price is corroborated;
 it has no initialized trailing protection before that point. An established
 trail retains its accepted watermark and stop while further favorable prices
-are unresolved. No new order state or confirmation dialog is proposed.
+are unresolved. No new order state or confirmation dialog is added.
 
 The implemented policy and read-only sample results are recorded in
 [calibration evidence](../../.scratch/protective-stop-spike-filter/calibration.md)
@@ -325,7 +325,7 @@ Cover:
 - Bootstrap; missing/zero/independently old book clocks; crossed/wide books;
   stale anchors; subscription quota denial; recording disabled; reconnect
   and real feed gaps. No invented clock or historical-book match.
-- Placement, amendment, confirmed/late fills, conversion and Resume cache
+- Placement, amendment, confirmed/late fills and Resume cache
   paths; cancellation/pause/expiry/flat/reversal during confirmation; original
   trigger continuations without a second waiting window.
 - Unchanged LIT, entries, manual exits, global marks, charts and alerts.
@@ -342,8 +342,8 @@ After implementation, commit only task changes, integrate/push main and wait
 for successful full hosted CI on that exact pushed main commit, including
 its engine, race/vet/lint/contract, Windows and UI jobs, per
 [AGENTS.md](../../AGENTS.md) and [CI](../../.github/workflows/ci.yml).
-For this prose-only draft, validate links/whitespace; engine/UI and hosted
-CI gates do not apply.
+The implementation follows these code validation gates; no prose-only
+exception applies.
 
 ## Rollout, rollback and limits
 

@@ -264,15 +264,21 @@ func (c *Core) protectionDeadline(ctx context.Context) int64 {
 }
 
 func (c *Core) logProtection(o Order, a pendingProtection, verdict string) {
-	b, _ := c.protectionBook(o.Symbol)
+	b, usable := c.protectionBook(o.Symbol)
 	deadline, elapsed := int64(0), int64(0)
 	if a.print.ReceiptMs > 0 {
 		deadline, elapsed = a.print.ReceiptMs+protectionWait.Milliseconds(), c.now()-a.print.ReceiptMs
 	}
 	detail, _ := json.Marshal(struct {
-		Order, Symbol, Verdict                                    string
-		Price, Reference, Bid, Ask                                float64
-		Sequence, ReceiptMs, BookReceiptMs, DeadlineMs, ElapsedMs int64
-	}{o.ID, o.Symbol, verdict, a.print.Price, a.reference.Price, b.Bid, b.Ask, a.print.Seq, a.print.ReceiptMs, b.ReceiptMs, deadline, elapsed})
+		Order, Symbol, Verdict                                            string
+		Price, Reference, Bid, Ask                                        float64
+		Sequence, TimestampMs, RecvTsMs, ReceiptMs, DeadlineMs, ElapsedMs int64
+		BookReceiptMs, BidReceiptMs, AskReceiptMs                         int64
+		BookUsable                                                        bool
+		BookGeneration, BookCoverage                                      uint64
+		BidTsMs, AskTsMs                                                  *int64
+	}{Order: o.ID, Symbol: o.Symbol, Verdict: verdict, Price: a.print.Price, Reference: a.reference.Price, Bid: b.Bid, Ask: b.Ask,
+		Sequence: a.print.Seq, TimestampMs: a.print.TsMs, RecvTsMs: a.print.RecvTsMs, ReceiptMs: a.print.ReceiptMs, DeadlineMs: deadline, ElapsedMs: elapsed,
+		BookReceiptMs: b.ReceiptMs, BidReceiptMs: b.bidReceiptMs, AskReceiptMs: b.askReceiptMs, BookUsable: usable, BookGeneration: b.Generation, BookCoverage: b.Coverage, BidTsMs: b.BidTsMs, AskTsMs: b.AskTsMs})
 	c.syslog("exec.protection_price", string(detail))
 }
