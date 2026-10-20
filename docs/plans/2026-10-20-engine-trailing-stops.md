@@ -1,8 +1,8 @@
 # Engine-Held Trailing Stops
 
 Status: implemented the [approved specification](../../.scratch/engine-trailing-stops/spec.md).
-Local validation and independent review are complete. Full hosted CI is required
-on the final pushed main commit before handoff.
+Local validation and independent review are complete. Full hosted CI passed on
+implementation commit `7c5a8ed2`; see the hosted validation record below.
 
 ## Scope and sequence
 
@@ -95,3 +95,10 @@ the passing local full-suite command and preventing simultaneous synthetic-feed
 and recording-capacity load generators. No test or threshold was removed.
 The pushed follow-up commit must pass the complete hosted workflow before
 handoff, including Linux full/race/vet/lint/contracts, Windows full and UI.
+
+The [full hosted run](https://github.com/earlisreal/eTape/actions/runs/39417619999)
+passed all three jobs on `7c5a8ed2331ad2cb97537e1a515090e3b2478930`:
+Linux engine full/race/vet/lint/contracts, Windows full engine tests, and UI
+lint/tests/build. The Windows README checklist now uses the same serial command.
+The final validation-record/checklist commit changes prose only; its hosted
+rerun is not required for handoff under the documentation exception in AGENTS.md.
