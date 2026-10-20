@@ -43,7 +43,7 @@ its usable-book count therefore overestimates available production proof.
   prints or cached evaluations.
 - Book residence: at most 250 ms, nonnegative local age, with acknowledged
   current subscription/connection evidence and independent positive side
-  clocks. Provider clocks are not subtracted from local wall time.
+  clocks no more than 250 ms apart. Provider clocks are not subtracted from local wall time.
 - Book coherence: positive, non-crossed sides and spread no more than 1% of
   midpoint. Unknown/zero/regressing clocks and broader books are unusable.
 - Book price buffer: the greater of one spread and two order-price increments
