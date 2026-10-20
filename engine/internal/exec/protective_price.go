@@ -55,6 +55,7 @@ func (c *Core) protectionBook(symbol string) (TrailBook, bool) {
 	if !ok || b.clockInvalid || b.Generation == 0 || b.Coverage == 0 || b.ReceiptMs <= 0 || age < 0 || age > protectionBookAge.Milliseconds() ||
 		b.bidReceiptMs <= 0 || b.askReceiptMs <= 0 || c.now()-b.bidReceiptMs > protectionBookAge.Milliseconds() || c.now()-b.askReceiptMs > protectionBookAge.Milliseconds() ||
 		b.BidTsMs == nil || b.AskTsMs == nil || *b.BidTsMs <= 0 || *b.AskTsMs <= 0 ||
+		max(*b.BidTsMs, *b.AskTsMs)-min(*b.BidTsMs, *b.AskTsMs) > protectionBookAge.Milliseconds() ||
 		!finitePositive(b.Bid) || !finitePositive(b.Ask) || b.Bid > b.Ask || b.Ask-b.Bid > (b.Bid+b.Ask)*.005 {
 		return b, false
 	}

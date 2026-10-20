@@ -326,6 +326,7 @@ func TestProtectionBookRejectsUnknownStaleRegressingAndWideEvidence(t *testing.T
 		func(b *TrailBook) { b.Ask = 11 },
 		func(b *TrailBook) { b.Bid = 11 },
 		func(b *TrailBook) { z := int64(3100); b.BidTsMs = &z },
+		func(b *TrailBook) { z := int64(3451); b.AskTsMs = &z },
 	} {
 		clear(c.trailBooks)
 		c.handleTrailBook(context.Background(), book)

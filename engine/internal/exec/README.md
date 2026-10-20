@@ -73,7 +73,7 @@ or second nearby print; Chart Risk Entry retains its fixed fallback. Completed
 candle calculations are unchanged, with their print trigger guarded.
 
 Book proof requires acknowledged current coverage/connection, positive separate
-side clocks, no clock regression, at most 250 ms of local residence for both
+side clocks, no clock regression, at most 250 ms between side clocks and of local residence for both
 sides, positive non-crossed prices and spread at most 1% of midpoint. Unchanged
 side clocks retain their original local age. Provider clocks are not subtracted
 from local time. Book support allows one spread or two order-price increments;
