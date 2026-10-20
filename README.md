@@ -61,7 +61,7 @@ and the broker of your choice for execution, and everything else is free and ope
 - **Engine-held trailing protection.** Price, percentage and completed-candle
   trails support long SELL and short COVER exits from the ticket or saved
   hotkey/Deck templates. Chart Risk Entry presets can start with trailing
-  protection, and an eligible filled protective stop can convert in place.
+  protection. To replace fixed protection, cancel it and submit a new trail.
   Trails belong to the current position cycle and engine run; triggers submit
   one LIMIT using a quote offset or stop-relative cushion. See the
   [execution guide](engine/internal/exec/README.md#trailing-stops).

@@ -13,6 +13,12 @@ describe("action templates", () => {
 });
 
 describe("normalizeOrderConfig", () => {
+  it("removes retired conversion shortcuts and their Deck cells on load or import",()=>{
+    const config=normalizeOrderConfig(JSON.parse('{"activeVenue":"sim","templates":[{"kind":"manage","id":"old-trail","label":"Convert","action":"ConvertProtectionToTrail","hotkey":"Ctrl+T","deck":true},{"kind":"manage","id":"cancel","label":"Cancel","action":"CancelLast","hotkey":"Ctrl+X"}],"hotkeyDeck":{"rows":[["old-trail","cancel"]],"showHotkeyLabels":true}}'));
+    expect(config.templates.map(t=>t.id)).toEqual(["cancel"]);
+    expect(config.hotkeyDeck?.rows).toEqual([["cancel"]]);
+    expect(normalizeOrderConfig(config)).toEqual(config);
+  });
   it("normalizes partial imported trail settings without inventing a distance or accepting market execution",()=>{
     const config=normalizeOrderConfig(JSON.parse('{"activeVenue":"sim","templates":[{"kind":"place","id":"t","label":"Trail","type":"TRAILING_STOP","side":"SELL","tif":"DAY","priceSource":"Bid","priceOffset":0,"sizing":{"mode":"PositionFraction","pct":100},"trail":{"mode":"PRICE","pricing":"MARKET"}}]}'));
     const t=config.templates[0];

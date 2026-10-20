@@ -4,11 +4,12 @@ Trailing Stop in the ticket and saved order templates shares Price, Percent or
 Candle settings, position-percentage sizing, PRE/RTH/POST windows and quote or
 cushion execution. No positive distance is invented. Chart Risk Entry presets
 default to Fixed and can choose trailing protection while retaining both chart
-prices and the initial stop floor. A management template can Convert Protection
-to Trail in its scoped venue/symbol; ambiguous or ineligible targets reject.
+prices and the initial stop floor. Replacing fixed protection is manual: cancel
+it, confirm cancellation, then submit a separate standalone trail. Retired
+conversion templates and their Deck cells are removed on settings load/import.
 
 Grouped charts draw the engine's derived stop with mode/state, hover details,
-Edit/Resume/Cancel controls and conversion for eligible filled protection.
+Edit/Resume/Cancel controls.
 Derived prices cannot be dragged or arrow-moved. A missing initial reference
 creates no fabricated line; Open Orders retains waiting reasons and Resume.
 Progress uses an imperative ExecStore lane and frame-coalesced chart/ladder

@@ -1,10 +1,10 @@
 import type { TrailConfig, LimitCushion } from "../../wire/contract";
 
-export function TrailEditor({value:c,onChange,lockMode=false,lockSessions=false,cushionOnly=false,inheritCushion=false}: {
-  value:TrailConfig;onChange(c:TrailConfig):void;lockMode?:boolean;lockSessions?:boolean;cushionOnly?:boolean;inheritCushion?:boolean;
+export function TrailEditor({value:c,onChange,lockMode=false,lockSessions=false,cushionOnly=false}: {
+  value:TrailConfig;onChange(c:TrailConfig):void;lockMode?:boolean;lockSessions?:boolean;cushionOnly?:boolean;
 }):JSX.Element {
   const amount=(label:string,key:"buffer"|"cushion"|"offset")=><label>{label} <input aria-label={label} className="field" type="number" step="any" min={key==="offset"?undefined:0}
-    value={inheritCushion && key==="cushion" && c[key].unit===""?"":c[key].value} placeholder={inheritCushion && key==="cushion"?"inherit":undefined} onChange={e=>onChange({...c,[key]:{value:Number(e.target.value),unit:c[key].unit||"$"}})} style={{width:78}}/>
+    value={c[key].value} onChange={e=>onChange({...c,[key]:{value:Number(e.target.value),unit:c[key].unit||"$"}})} style={{width:78}}/>
     <select aria-label={`${label} unit`} className="field" value={c[key].unit||"$"} onChange={e=>onChange({...c,[key]:{...c[key],unit:e.target.value} as LimitCushion})}><option>$</option><option>%</option></select></label>;
   return <fieldset style={{display:"flex",flexWrap:"wrap",gap:6,border:"1px solid currentColor",padding:6}}><legend>Trailing stop</legend>
     <label>Mode <select aria-label="Trail mode" className="field" value={c.mode} disabled={lockMode} onChange={e=>onChange({...c,mode:e.target.value})}>
@@ -16,6 +16,5 @@ export function TrailEditor({value:c,onChange,lockMode=false,lockSessions=false,
     {!cushionOnly && <label>Execution <select aria-label="Trail execution" className="field" value={c.pricing} onChange={e=>onChange({...c,pricing:e.target.value})}><option value="QUOTE">Quote Offset</option><option value="CUSHION">Limit Cushion</option></select></label>}
     {c.pricing==="QUOTE" && !cushionOnly?<><select aria-label="Trail quote side" className="field" value={c.quoteSide} onChange={e=>onChange({...c,quoteSide:e.target.value})}><option value="">Sell Bid / Cover Ask</option><option value="BID">Bid</option><option value="ASK">Ask</option></select>{amount("Quote offset","offset")}</>:amount("Trail limit cushion","cushion")}
     <small style={{flexBasis:"100%"}}>Held by eTape for this engine run. A trigger sends one LIMIT; an unfilled limit can leave exposure open.</small>
-    {inheritCushion && <small>A blank cushion inherits the current protection's Sell Limit Cushion.</small>}
   </fieldset>;
 }

@@ -2,6 +2,7 @@ package exec
 
 import (
 	"context"
+	"math"
 	"math/rand"
 	"testing"
 	"time"
@@ -15,16 +16,6 @@ func (d *heldDemandStub) AcquireTrail(ctx context.Context, id, symbol string, _ 
 }
 
 type verifiedBookDemand struct{ heldDemandStub }
-
-type trailLeaseDemand struct {
-	heldDemandStub
-	requested chan TrailConfig
-}
-
-func (d *trailLeaseDemand) AcquireTrail(ctx context.Context, id, symbol string, config TrailConfig) error {
-	d.requested <- config
-	return d.Acquire(ctx, id, symbol)
-}
 
 func (*verifiedBookDemand) TrailBookCoverage(string) uint64 { return 42 }
 
@@ -123,55 +114,6 @@ func TestCandlePresetClearlyRetainsFixedProtectionBeforeReferenceReady(t *testin
 	}
 }
 
-func TestConvertProtectionToTrailPreservesConfirmedStopAndOwner(t *testing.T) {
-	c, clk, broker, ctx := newRiskCore(t)
-	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500})
-	if !ack.Accepted {
-		t.Fatal(ack)
-	}
-	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
-	convert := ConvertProtectionToTrail{Venue: "v", OrderID: entry.RiskEntry.StopID, ExpectedHeldPhase: HeldArmed, ExpectedStop: 9.8, Config: TrailConfig{Mode: "PRICE", Value: .30, Pricing: "CUSHION"}}
-	if c.Do(convert).Accepted {
-		t.Fatal("zero-fill conversion accepted")
-	}
-	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
-	select {
-	case <-broker.submits:
-	case <-time.After(time.Second):
-		t.Fatal("entry did not activate")
-	}
-	broker.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
-	broker.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 100, Price: 10, TsMs: clk.Now().UnixMilli()}, CumQty: 100, AvgPrice: 10}
-	waitOrder(t, c, convert.OrderID, func(o Order) bool { return o.Qty == 100 })
-	demand := &trailLeaseDemand{requested: make(chan TrailConfig, 4)}
-	c.Do(ConfigureHeldDemand{Demand: demand})
-	candleConvert := convert
-	candleConvert.Config.Mode = "CANDLE"
-	candleConvert.Config.Timeframe = "1m"
-	if c.Do(candleConvert).Accepted {
-		t.Fatal("converted without verified candle data")
-	}
-	select {
-	case request := <-demand.requested:
-		if request.Mode != "CANDLE" {
-			t.Fatal(request)
-		}
-	default:
-		t.Fatal("conversion could never acquire candle evidence without a chart")
-	}
-	if ack := c.Do(convert); !ack.Accepted {
-		t.Fatal(ack)
-	}
-	stop := waitOrder(t, c, convert.OrderID, func(o Order) bool { return o.Held.Trail != nil })
-	if stop.StopPrice != 9.8 || stop.RiskEntryID != entry.ID || stop.Qty != 100 {
-		t.Fatalf("conversion lost protection: %+v", stop)
-	}
-	if c.Do(convert).Accepted {
-		t.Fatal("converted twice")
-	}
-}
-
 func TestRiskTrailManualReductionCannotBeRestoredByIndependentBuy(t *testing.T) {
 	c, clk, broker, ctx := newRiskCore(t)
 	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500, Protection: &TrailConfig{Mode: "PRICE", Value: .30, Pricing: "CUSHION"}})
@@ -229,7 +171,7 @@ func TestWaitingCandleTrailCanBeEditedBeforeExecutionReferenceExists(t *testing.
 	}
 }
 
-func TestConversionPreservesReductionsBeforeTrailWasEnabled(t *testing.T) {
+func TestFixedProtectionKeepsOwnedCoverageAfterManualReduction(t *testing.T) {
 	c, clk, broker, ctx := newRiskCore(t)
 	ack := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500})
 	if !ack.Accepted {
@@ -245,23 +187,65 @@ func TestConversionPreservesReductionsBeforeTrailWasEnabled(t *testing.T) {
 	}
 	broker.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
 	broker.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 100, Price: 10, TsMs: clk.Now().UnixMilli()}, CumQty: 100, AvgPrice: 10}
-	stop := waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.Qty == 100 })
+	waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.Qty == 100 })
 	broker.ev <- BrokerPosition{Position: Position{Venue: "v", Symbol: "AAPL", Qty: 60, AvgPrice: 10}}
 	waitPosition(t, c, "AAPL", 60)
 	broker.ev <- BrokerPosition{Position: Position{Venue: "v", Symbol: "AAPL", Qty: 100, AvgPrice: 10}}
 	waitPosition(t, c, "AAPL", 100)
-	if a := c.Do(ConvertProtectionToTrail{Venue: "v", OrderID: stop.ID, ExpectedHeldPhase: stop.Held.Phase, ExpectedStop: stop.StopPrice, Config: TrailConfig{Mode: "PRICE", Value: .3, Pricing: "CUSHION"}}); !a.Accepted {
-		t.Fatal(a)
-	}
 	clk.Advance(time.Millisecond)
 	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.8))
 	select {
 	case child := <-broker.submits:
 		if child.Qty != 60 {
-			t.Fatalf("conversion sold unrelated shares: %+v", child)
+			t.Fatalf("fixed protection sold unrelated shares: %+v", child)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("no protective exit")
+	}
+}
+
+func TestCancelFixedProtectionThenPlaceIndependentTrail(t *testing.T) {
+	c, clk, broker, ctx := newRiskCore(t)
+	a := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500})
+	if !a.Accepted {
+		t.Fatal(a)
+	}
+	entry := waitOrder(t, c, a.OrderID, func(o Order) bool { return o.RiskEntry != nil })
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	select {
+	case <-broker.submits:
+	case <-time.After(time.Second):
+		t.Fatal("no entry")
+	}
+	broker.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
+	broker.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 100, Price: 10, TsMs: clk.Now().UnixMilli()}, CumQty: 100, AvgPrice: 10}
+	stop := waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.Qty == 100 })
+	config := TrailConfig{Mode: "PRICE", Value: .3, Sessions: TrailSessions{RTH: true}, Pricing: "CUSHION"}
+	trail := SubmitTrail{Venue: "v", Symbol: "AAPL", Side: SideSell, PositionPct: 100, Config: config}
+	if c.Do(trail).Accepted {
+		t.Fatal("overlapping protection accepted before cancellation")
+	}
+	if c.Do(EditTrail{Venue: "v", OrderID: stop.ID, ExpectedHeldPhase: stop.Held.Phase, ExpectedStop: stop.StopPrice, Config: config}).Accepted {
+		t.Fatal("EditTrail converted fixed protection")
+	}
+	if ack := c.Do(CancelOrder{Venue: "v", OrderID: stop.ID}); !ack.Accepted {
+		t.Fatal(ack)
+	}
+	waitOrder(t, c, stop.ID, func(o Order) bool { return o.Status == StatusCanceled })
+	ack := c.Do(trail)
+	if !ack.Accepted {
+		t.Fatal(ack)
+	}
+	clk.Advance(time.Millisecond)
+	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.7))
+	select {
+	case child := <-broker.submits:
+		if child.ClientOrderID != ack.OrderID || child.ClientOrderID == stop.ID || child.Qty != 100 || math.Abs(child.LimitPrice-9.7) > 1e-9 {
+			t.Fatalf("wrong replacement trail: %+v", child)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("manual replacement trail did not trigger")
 	}
 }
 
@@ -303,33 +287,6 @@ func TestTrailingPresetCannotResumePreparationAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitOrder(t, recovered, a.OrderID, func(o Order) bool { return o.Status == StatusCanceled })
-}
-
-func TestQuoteConversionCancelsRemainingEntryAtTriggerBeforeQuoteReady(t *testing.T) {
-	c, clk, b, ctx := newRiskCore(t)
-	a := c.Do(SubmitRiskEntry{Venue: "v", Symbol: "AAPL", BuyStop: 10, SellStop: 9.8, Mode: "Dollar", Value: 100, MaxQty: 500})
-	if !a.Accepted {
-		t.Fatal(a)
-	}
-	entry := waitOrder(t, c, a.OrderID, func(o Order) bool { return o.RiskEntry != nil })
-	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
-	select {
-	case <-b.submits:
-	case <-time.After(time.Second):
-		t.Fatal("no buy")
-	}
-	b.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
-	b.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 100, Price: 10, TsMs: clk.Now().UnixMilli()}, CumQty: 100, AvgPrice: 10}
-	waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.Qty == 100 })
-	converted := c.Do(ConvertProtectionToTrail{Venue: "v", OrderID: entry.RiskEntry.StopID, ExpectedHeldPhase: HeldArmed, ExpectedStop: 9.8, Config: TrailConfig{Mode: "PRICE", Value: .3, Pricing: "QUOTE", QuoteSide: "BID"}})
-	if !converted.Accepted {
-		t.Fatal(converted)
-	}
-	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.8))
-	waitHeldOrder(t, c, entry.RiskEntry.StopID, HeldWaitingQuote)
-	waitOrder(t, c, entry.ID, func(o Order) bool { return o.RiskEntry.Closing })
 }
 
 func TestCandleAdvanceDoesNotTriggerAgainstPrintBeforeReferenceOnPartialFill(t *testing.T) {

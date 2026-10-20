@@ -4,7 +4,7 @@
 import type { Side, OrderType, TIF, OrderSession, VenueID, LimitCushion, TrailConfig } from "../../wire/contract";
 import type { SizingSpec } from "./sizing";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
-import {newTrailConfig,newConversionConfig} from "./trailing";
+import {newTrailConfig} from "./trailing";
 
 export type DeckColor = "auto" | "green" | "red" | "bronze" | "neutral" | "danger";
 export type ChartBinding = "Ctrl" | "Alt" | "Shift" | "Ctrl+Alt" | "Ctrl+Shift" | "Alt+Shift";
@@ -31,8 +31,9 @@ export interface PlaceOrderTemplate {
   deck?: boolean;   // absent => hotkey-only, not shown in deck
   deckColor?: DeckColor;   // absent => "auto"
 }
-export type ManagementAction = "CancelLast" | "CancelAllFocused" | "CancelAllEverything" | "KillSwitch" | "ConvertProtectionToTrail";
-export interface ManagementTemplate { kind: "manage"; id: string; label: string; action: ManagementAction; trail?:TrailConfig; hotkey?: string; deck?: boolean; deckColor?: DeckColor }
+export const MANAGEMENT_ACTIONS = ["CancelLast", "CancelAllFocused", "CancelAllEverything", "KillSwitch"] as const;
+export type ManagementAction = typeof MANAGEMENT_ACTIONS[number];
+export interface ManagementTemplate { kind: "manage"; id: string; label: string; action: ManagementAction; hotkey?: string; deck?: boolean; deckColor?: DeckColor }
 export interface RiskEntryTemplate {
 	protection?: TrailConfig | undefined;
   kind: "risk"; id: string; label: string; hotkey?: string; deck?: boolean; deckColor?: DeckColor;
@@ -88,7 +89,6 @@ function normalizeTemplate(t: ActionTemplate): ActionTemplate {
       buyCushion: cushion(t.buyCushion), sellCushion,
       ...(t.protection?{protection:normalizeTrail(t.protection,{...newTrailConfig(),pricing:"CUSHION",cushion:sellCushion})}:{})};
   }
-  if(t.kind==="manage" && t.action==="ConvertProtectionToTrail")return {...t,trail:normalizeTrail(t.trail,newConversionConfig())};
   if (t.kind !== "place") return t;
   let sizing = t.sizing;
   if (sizing.mode === "PositionFraction" && sizing.pct === undefined) {
@@ -163,7 +163,7 @@ function normalizeHotkeyDeck(raw: unknown, templates: ActionTemplate[]): HotkeyD
 export function normalizeOrderConfig(config: OrderConfig): OrderConfig {
   const raw = config.extHoursMarketBufferPct;
   const extHoursMarketBufferPct = raw === undefined || Number.isNaN(raw) ? 1.0 : Math.min(EXT_BUFFER_MAX, Math.max(EXT_BUFFER_MIN, raw));
-  const normalized = config.templates.map(normalizeTemplate);
+  const normalized = config.templates.filter(t=>t.kind!=="manage" || MANAGEMENT_ACTIONS.includes(t.action)).map(normalizeTemplate);
   const usedChartBindings = new Set<ChartBinding>();
   const templates = normalized.map((template) => {
     if (template.kind !== "place" || !template.chartBinding) return template;

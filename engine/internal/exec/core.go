@@ -907,10 +907,8 @@ func (c *Core) handleCmd(ctx context.Context, cmd Command) CmdAck {
 	switch cm := cmd.(type) {
 	case SubmitTrail:
 		return c.handleSubmitTrail(ctx, cm)
-	case ConvertProtectionToTrail:
-		return c.configureTrail(ctx, cm.Venue, cm.OrderID, cm.ExpectedHeldPhase, cm.ExpectedStop, cm.Config, true)
 	case EditTrail:
-		return c.configureTrail(ctx, cm.Venue, cm.OrderID, cm.ExpectedHeldPhase, cm.ExpectedStop, cm.Config, false)
+		return c.configureTrail(ctx, cm.Venue, cm.OrderID, cm.ExpectedHeldPhase, cm.ExpectedStop, cm.Config)
 	case SubmitRiskEntry:
 		return c.handleRiskEntry(ctx, cm)
 	case SubmitOrder:

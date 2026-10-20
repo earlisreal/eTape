@@ -236,13 +236,10 @@ func (cd *commands) handle(ctx context.Context, name string, args json.RawMessag
 			return blocked("trail requires SELL or COVER"), false
 		}
 		return ackFromCmd(cd.ex.Do(exec.SubmitTrail{Venue: exec.VenueID(a.Venue), Symbol: a.Symbol, Side: sideFromWire(a.Side), PositionPct: a.PositionPct, Config: trailConfigFromWire(a.Config)})), false
-	case "ConvertProtectionToTrail", "EditTrail":
+	case "EditTrail":
 		var a wsmsg.ConfigureTrailArgs
 		if json.Unmarshal(args, &a) != nil {
 			return blocked("bad args"), false
-		}
-		if name == "ConvertProtectionToTrail" {
-			return ackFromCmd(cd.ex.Do(exec.ConvertProtectionToTrail{Venue: exec.VenueID(a.Venue), OrderID: a.OrderID, ExpectedHeldPhase: exec.HeldPhase(a.ExpectedHeldPhase), ExpectedStop: a.ExpectedStop, Config: trailConfigFromWire(a.Config)})), false
 		}
 		return ackFromCmd(cd.ex.Do(exec.EditTrail{Venue: exec.VenueID(a.Venue), OrderID: a.OrderID, ExpectedHeldPhase: exec.HeldPhase(a.ExpectedHeldPhase), ExpectedStop: a.ExpectedStop, Config: trailConfigFromWire(a.Config)})), false
 	case "SubmitRiskEntry":

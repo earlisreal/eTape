@@ -4,7 +4,6 @@ export function newTrailConfig(side: "SELL" | "COVER" = "SELL"): TrailConfig {
   return {mode:"PRICE",value:0,sessions:{pre:true,rth:true,post:true},pricing:"QUOTE",quoteSide:side==="SELL"?"BID":"ASK",
     cushion:{value:0,unit:"$"},offset:{value:0,unit:"$"},timeframe:"1m",buffer:{value:0,unit:"$"}};
 }
-export function newConversionConfig():TrailConfig {return {...newTrailConfig(),pricing:"CUSHION",cushion:{value:0,unit:""}};}
 export function trailError(c: TrailConfig, positionPct = 100): string | undefined {
   if (!(positionPct>0 && positionPct<=100)) return "Position percentage must be in (0, 100].";
   if (!["PRICE","PERCENT","CANDLE"].includes(c.mode)) return "Choose a supported trail mode.";
@@ -15,11 +14,6 @@ export function trailError(c: TrailConfig, positionPct = 100): string | undefine
   if (!c.sessions.pre && !c.sessions.rth && !c.sessions.post) return "Select at least one session.";
   if (c.pricing!=="CUSHION" && c.pricing!=="QUOTE" || c.pricing==="QUOTE" && c.quoteSide!=="BID" && c.quoteSide!=="ASK") return "Choose a valid execution recipe.";
   return undefined;
-}
-export function canConvertProtection(order: Order, orders: Order[]): boolean {
-  const entry=orders.find(e=>e.id===order.riskEntryId && e.venue===order.venue && e.symbol===order.symbol);
-  return !!entry?.riskEntry && entry.riskEntry.stopId===order.id && entry.executedQty>0 && !entry.riskEntry.closing && !entry.riskEntry.failure && !entry.riskEntry.protectionCanceled &&
-    ["SUBMITTED","ACCEPTED","PARTIALLY_FILLED"].includes(order.status) && !order.held?.trail && !!order.held && ["WAITING","ARMED"].includes(order.held.phase) && !order.held.childClientId && !order.held.cancelRequested && !["REQUESTED","UNKNOWN"].includes(order.action?.phase??"");
 }
 export function trailDetails(order: Order): string {
   const t=order.held?.trail;if(!t)return "";

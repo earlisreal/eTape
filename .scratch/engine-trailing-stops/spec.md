@@ -1,16 +1,16 @@
 # Engine-Held Trailing Stops
 
-Status: Approved design — Earl confirmed all decisions Q1–Q33 on 2026-10-20.
-Grilling is complete; the decision frontier is empty. Implementation has not
-been requested or started.
+Status: Implemented. Earl confirmed Q1–Q33 on 2026-10-20 and subsequently
+removed fixed-stop conversion: cancel protection and submit a new standalone
+trail manually. Chart Risk Entry's initial trailing Protection Mode remains.
 
 ## Outcome and scope
 
 Provide engine-owned trailing exits for existing long and short positions,
 with dollar-distance, percentage-distance and completed-candle modes. Place
 them from the Order Ticket or an Action Template hotkey/Deck Button, track the
-derived stop on matching charts, convert existing Chart Risk Entry protection,
-or select trailing protection in the Chart Risk Entry preset itself.
+derived stop on matching charts, or select trailing protection in the Chart
+Risk Entry preset itself.
 
 A stop hit activates an ordinary LIMIT, with either stop-relative Limit Cushion
 or Bid/Ask plus Quote Offset. A triggered LIMIT may remain unfilled or partially
@@ -42,8 +42,8 @@ supplies no approved policy for this feature.
   ready Open Position at admission. Changing a Link Group, chart symbol,
   workspace or browser cannot retarget it.
 - Allow one managed trailing/protection strategy per Position Cycle. If Chart
-  Risk Entry already provides protection, use conversion rather than placing
-  another standalone trail. Multiple cleanup children from one linked entry
+  Risk Entry already provides protection, cancel it and confirm cancellation
+  before placing a standalone trail. Multiple cleanup children from one linked entry
   are still one strategy.
 - Standalone sizing is a percentage of the current confirmed position when
   the stop triggers, default 100%. Resolve abs(position shares) times percentage,
@@ -136,7 +136,7 @@ semantics while checking fresh current evidence and observed phases.
 | Recipe | Calculation and default |
 | --- | --- |
 | Quote Offset | Selected Bid or Ask plus signed dollar offset, or selected reference times (1 plus signed percent / 100). Standalone default: SELL Bid / COVER Ask, zero offset. |
-| Limit Cushion | SELL stop minus cushion; COVER stop plus cushion. Percentage uses the frozen trigger price. Manual conversion inherits its existing Sell Cushion by default. |
+| Limit Cushion | SELL stop minus cushion; COVER stop plus cushion. Percentage uses the frozen trigger price. |
 | New Chart Risk Entry trailing preset | Retains its stop-relative Sell Limit Cushion; entry sizing has a concrete initial limit basis. |
 
 Either quote side may be deliberately selected; no hidden marketability
@@ -199,27 +199,22 @@ it to an ordinary resumable Fixed preset and restore trailing indirectly.
 Uncertain BUY and SELL children still require broker reconciliation. Fixed-mode
 presets retain their existing behavior.
 
-## Manual conversion
+## Manual replacement
 
-Offer Convert to Trail for healthy primary protection after at least one
-confirmed entry fill, while it remains pretrigger Waiting/Armed. Allow partial
-entry fills. Reject zero-fill, Paused, Activating, Working and unresolved
-protection, stale observed phases and missing/ambiguous targets.
+Do not offer fixed-stop conversion through chart pills, management templates,
+hotkeys or engine commands. Remove saved conversion templates and Deck cells
+on settings load/import; never reinterpret them as cancellation actions.
 
-Conversion requires ready price/candle data; otherwise leave the existing
-protection unchanged. Preserve entry ownership, remaining confirmed coverage,
-late-fill handling, sessions and original deadline. Convert atomically in
-place rather than invoking Cancel Protection and submitting a separate exit.
+To change existing fixed protection to a trail, cancel protection, confirm its
+cancellation, then submit a separate standalone trailing stop from the ticket
+or a trail template. Apply normal current-position sizing, session/deadline
+and competing-exit guards. This new order has its own identity and does not
+inherit the canceled protection's entry ownership or stop floor.
 
-Use the currently confirmed protective stop, including prior edits, as the
-conversion floor. A trailing preset also retains its enduring Initial Stop
-Price floor. Seed new trailing progress from fresh current evidence; never
+Chart Risk Entry presets can still start with trailing protection and retain
+their enduring Initial Stop Price floor. Existing trails remain editable only
+within their current mode. Seed progress from fresh current evidence, never
 from an earlier day high/low.
-
-Inheritance of a stop bound is not inheritance of the old execution limit or
-an assurance of unchanged dollar risk. A trader choosing Bid/Ask execution
-during conversion deliberately changes that execution-pricing recipe. Keep
-the existing reviewed entry quantity; do not resize or buy more shares.
 
 ## Sessions, data loss and retirement
 
@@ -227,8 +222,8 @@ the existing reviewed entry quantity; do not resize or buy more shares.
   selected daytime session and never carry overnight. Reject admission with
   no remaining eligible window. Use the authoritative exchange calendar,
   including early closes.
-- Converted protection retains its original sessions/deadline. New trailing
-  risk presets inherit Chart Risk Entry's PRE/RTH/POST through DataClose.
+- New trailing risk presets inherit Chart Risk Entry's PRE/RTH/POST through
+  DataClose. Manually placed replacement trails choose their own sessions.
 - Evaluate eligible-print exchange time and current engine time against the
   permitted sessions. Disabled sessions do not update watermark/candle stops
   or submit new children; existing limits retain their stated venue/session
@@ -275,12 +270,8 @@ Provide scoped Edit, Resume and Cancel through the pill/order controls.
 Disable dragging or arrow-moving a derived trailing price; parameter edits
 preserve the SELL floor or COVER ceiling. Edit only within the current trailing
 mode and before trigger; pending/uncertain/working children use their ordinary
-order-management rules. No reverse conversion or between-trail-mode switch
-initially.
-
-Offer conversion on the eligible protection pill and a scoped hotkey resolving
-the single eligible owner in its venue+symbol context. Never guess an order
-from a different venue or an ambiguous selection.
+order-management rules. No in-place fixed/trailing conversion or between-trail-mode
+switch is supported.
 
 Reuse Live Held Stop-Limit Acknowledgement for the same live account identity,
 with clear engine-held/run-bound lifetime details. Do not add another per-order
@@ -334,14 +325,13 @@ Update relevant READMEs when the behavior is implemented.
 
 ## Validation and implementation boundary
 
-This task has changed design documentation only. Validate local Markdown
-targets/anchors, whitespace and git diff --check. Engine/UI checks and hosted
-CI are not required for prose-only design documentation.
+The feature and subsequent conversion removal change runtime code. Validate
+local Markdown links and whitespace alongside focused engine/UI checks.
 
 Implementation must cover the examples above and meaningful lifecycle/race
 cases: partial/late fills, deduplication, external reductions, competing exits,
 pending quotes, same-side reconnect ambiguity, feed/candle causality, restart
-before first fill, manual conversion races, cancellation uncertainty, disarm,
+before first fill, manual cancel-and-replace, cancellation uncertainty, disarm,
 session boundaries and early closes, quota/readiness without charts or
 recording, chart scoping and settings import/export. Run focused engine/UI
 tests and required build/type/lint/race/generated-contract checks; before code
@@ -350,6 +340,9 @@ Use sim/paper for runtime validation; this session authorizes no live orders.
 
 ## Comments
 
+- 2026-10-20: Earl removed protective-stop conversion after implementation.
+  Replacement is manual cancellation followed by a new standalone trail;
+  initial Chart Risk Entry trailing presets remain supported.
 - 2026-10-20: Earl accepted recommendations Q1–Q7, Q8–Q18, Q19–Q22 and Q23–Q33.
   Preserved the [discussion](discussion.md), consolidated this specification,
   and reviewed consistency without finding a new product-decision blocker.

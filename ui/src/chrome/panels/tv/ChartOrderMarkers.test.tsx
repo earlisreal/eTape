@@ -39,6 +39,12 @@ function mount(orders: Order[] = [base], config?: OrderConfig, withAlert=false) 
 beforeEach(() => { cleanup(); document.body.replaceChildren(); vi.spyOn(document, "hasFocus").mockReturnValue(true); });
 
 describe("ChartOrderMarkers", () => {
+  it("keeps fixed protective stops without offering conversion",()=>{
+    const entry:Order={...base,executedQty:10,riskEntry:{stopId:"protect",budget:100,mode:"Dollar",buyCushion:{value:0,unit:"$"},sellCushion:{value:0,unit:"$"}}};
+    mount([entry,{...base,id:"protect",side:"SELL",type:"STOP_LIMIT",stopPrice:99,limitPrice:99,riskEntryId:entry.id,held:{phase:"ARMED",deadlineMs:9999999999999}}]);
+    expect(screen.getByTestId("order-label-protect")).toBeTruthy();
+    expect(screen.queryByRole("button",{name:"Convert to trail"})).toBeNull();
+  });
   it("renders a derived trail line, disables price dragging, and submits a scoped parameter edit",async()=>{
     const {host,sendCommand}=mount([{...base,type:"TRAILING_STOP",side:"SELL",stopPrice:99,held:{phase:"ARMED",deadlineMs:9999999999999,trail:{config:{mode:"PRICE",value:1,sessions:{pre:true,rth:true,post:true},pricing:"CUSHION",cushion:{value:0,unit:"$"},offset:{value:0,unit:"$"},buffer:{value:0,unit:"$"}},watermark:100,stop:99,limit:99}}}]);
     const label=screen.getByTestId("order-label-o1");

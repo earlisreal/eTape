@@ -23,14 +23,14 @@ import type { ExecStore } from "../../data/ExecStore";
 import type { PriceSource, PriceOffsetUnit } from "./priceSource";
 import type { SizingSpec, SizingMode } from "./sizing";
 import {
-  CHART_BINDINGS, DEFAULT_TEMPLATES, normalizeOrderConfig, type ActionTemplate, type ChartBinding, type DeckColor, type ManagementAction,
+  CHART_BINDINGS, DEFAULT_TEMPLATES, MANAGEMENT_ACTIONS, normalizeOrderConfig, type ActionTemplate, type ChartBinding, type DeckColor, type ManagementAction,
   type HotkeyDeckConfig, type OrderConfig, type PlaceOrderTemplate, type RiskEntryTemplate,
 } from "./actionTemplate";
 import { normalizeCombo } from "./hotkeys";
 import { Keycap } from "./Keycap";
 import { StepField } from "./StepField";
 import {TrailEditor} from "./TrailEditor";
-import {newTrailConfig,newConversionConfig} from "./trailing";
+import {newTrailConfig} from "./trailing";
 
 interface PendingAcknowledgements {
   keys: Set<string>;
@@ -66,7 +66,6 @@ const SESSION_LABEL: Record<OrderSession, string> = { AUTO: "Auto", RTH: "Regula
 const SOURCES: PriceSource[] = ["Bid", "Ask", "Last", "Mid"];
 const MODES: SizingMode[] = ["Dollar", "CashPct", "BuyingPowerPct", "Shares", "PositionFraction"];
 const MODE_LABEL: Record<SizingMode, string> = { Dollar: "Dollar", CashPct: "Cash %", BuyingPowerPct: "BP %", Shares: "Shares", PositionFraction: "Pos %" };
-const MANAGE_ACTIONS: ManagementAction[] = ["CancelLast", "CancelAllFocused", "CancelAllEverything", "KillSwitch", "ConvertProtectionToTrail"];
 
 const OFFSET_STEP = 0.05;
 const CUSHION_STEP = 0.05;
@@ -536,11 +535,10 @@ function TemplateCard({ t, palette, dup, chartBindingDup, isFirst, isLast, rawEd
         <div style={fieldRow}>
           <div style={fieldGroup}>
             <span style={fieldLabel}>Action</span>
-            <select aria-label={`action-${t.id}`} className="field" value={t.action} onChange={(e) => patch(t.id, { action: e.target.value as ManagementAction,...(e.target.value==="ConvertProtectionToTrail"?{trail:t.trail??newConversionConfig()}:{}) })} style={{ width: 200 }}>
-              {MANAGE_ACTIONS.map((a) => <option key={a}>{a}</option>)}
+            <select aria-label={`action-${t.id}`} className="field" value={t.action} onChange={(e) => patch(t.id, { action: e.target.value as ManagementAction })} style={{ width: 200 }}>
+              {MANAGEMENT_ACTIONS.map((a) => <option key={a}>{a}</option>)}
             </select>
           </div>
-          {t.action==="ConvertProtectionToTrail" && <TrailEditor value={t.trail??newConversionConfig()} lockSessions inheritCushion onChange={c=>patch(t.id,{trail:c})}/>}
         </div>
       )}
 
