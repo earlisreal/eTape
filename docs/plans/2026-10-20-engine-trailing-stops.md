@@ -84,3 +84,14 @@ fresh-print validation without requiring an initial completed reference.
 
 Review totals: Standards one P3 judgment call resolved, zero hard violations;
 Spec seven findings resolved, highest P1. No confirmed findings remain open.
+
+## Hosted validation
+
+The first implementation run passed UI lint/tests/build. Windows reproduced
+the baseline recording-capacity timing failure: commit lag was 1,107ms against
+a 1,000ms guard, versus 1,010ms on the approved-spec baseline; neither lost data.
+Windows CI now runs the full Go suite with package parallelism one, matching
+the passing local full-suite command and preventing simultaneous synthetic-feed
+and recording-capacity load generators. No test or threshold was removed.
+The pushed follow-up commit must pass the complete hosted workflow before
+handoff, including Linux full/race/vet/lint/contracts, Windows full and UI.

@@ -65,7 +65,8 @@ jobs:
 
       - name: go test (full)
         working-directory: engine
-        run: go test ./...
+        # Capacity tests must not compete with other package load generators.
+        run: go test -p 1 ./...
 
   ui:
     # Golden PNGs are generated on Windows. Cairo/Pango text rasterization is
