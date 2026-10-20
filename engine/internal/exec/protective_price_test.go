@@ -252,6 +252,22 @@ func TestProtectionUnknownReceiptUsesImmediateAdverseFallback(t *testing.T) {
 	}
 }
 
+func TestProtectionUnknownRecoveryReceiptCannotRefuteCrossing(t *testing.T) {
+	c, clk, _, ctx, id := fixedProtectionCore(t)
+	clk.Advance(time.Millisecond)
+	rawProtectionPrint(t, c, ctx, eligible(2, clk.Now(), 5.23))
+	clk.Advance(50 * time.Millisecond)
+	p := eligible(3, clk.Now(), 6.34)
+	p.ReceiptMs = 0
+	rawProtectionPrint(t, c, ctx, p)
+	c.PreviewEligiblePrint(ctx, "AAPL")
+	clk.Advance(50 * time.Millisecond)
+	c.PreviewEligiblePrint(ctx, "AAPL")
+	if _, activation := protectionHistory(t, c, id); activation == 0 {
+		t.Fatal("unknown recovery receipt refuted the unresolved crossing")
+	}
+}
+
 func TestProtectionTimeoutDoesNotRatchetOppositeVenue(t *testing.T) {
 	clk := clock.NewFake(time.Date(2026, 10, 20, 4, 0, 0, 0, session.Loc()))
 	longBroker, shortBroker := newHeldTestBroker(), newHeldTestBroker()

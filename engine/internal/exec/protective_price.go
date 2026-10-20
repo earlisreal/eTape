@@ -213,13 +213,14 @@ func (c *Core) resolveProtection(ctx context.Context, symbol string) {
 		if c.now() >= a.print.ReceiptMs+protectionWait.Milliseconds() {
 			continue
 		}
+		later := p.Seq > a.print.Seq && p.ReceiptMs > 0 && p.ReceiptMs >= a.print.ReceiptMs && p.ReceiptMs <= c.now() && c.freshEligiblePrint(p)
 		if book && protectionBookSupports(b, a.print.Price) {
 			c.authorizeProtection(ctx, o, a, "book_confirmed")
-		} else if p.Seq > a.print.Seq && book && a.reference.Seq > 0 &&
+		} else if later && book && a.reference.Seq > 0 &&
 			protectionBookSupports(b, a.reference.Price) && protectionBookSupports(b, p.Price) {
 			delete(c.protectionPending, id)
 			c.logProtection(o, a, "refuted")
-		} else if p.Seq > a.print.Seq && nearProtectionPrice(p.Price, a.print.Price) && (!book || protectionBookSupports(b, p.Price)) {
+		} else if later && nearProtectionPrice(p.Price, a.print.Price) && (!book || protectionBookSupports(b, p.Price)) {
 			c.authorizeProtection(ctx, o, a, "print_confirmed")
 		}
 	}
