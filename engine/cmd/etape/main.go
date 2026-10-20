@@ -1182,7 +1182,7 @@ func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks [
 			}
 		case p := <-core.EligiblePrints():
 			if core.ExecutionEvents() == nil {
-				execCore.FeedEligiblePrint(ctx, exec.EligiblePrint{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs, RecvTsMs: p.RecvTsMs, Seq: p.Seq, Gap: p.Gap})
+				execCore.FeedEligiblePrint(ctx, exec.EligiblePrint{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs, RecvTsMs: p.RecvTsMs, ReceiptMs: p.ReceiptMs, Seq: p.Seq, Gap: p.Gap})
 			}
 			for _, a := range alerts {
 				a.Feed(pricealert.Print{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs, RecvTsMs: p.RecvTsMs, Seq: p.Seq, Gap: p.Gap})
@@ -1193,10 +1193,10 @@ func markBridge(ctx context.Context, core *md.Core, execCore *exec.Core, sinks [
 			}
 		case e := <-core.ExecutionEvents():
 			if p := e.Print; p != nil {
-				execCore.FeedEligiblePrint(ctx, exec.EligiblePrint{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs, RecvTsMs: p.RecvTsMs, Seq: p.Seq, Gap: p.Gap})
+				execCore.FeedEligiblePrint(ctx, exec.EligiblePrint{Symbol: p.Symbol, Price: p.Price, TsMs: p.TsMs, RecvTsMs: p.RecvTsMs, ReceiptMs: p.ReceiptMs, Seq: p.Seq, Gap: p.Gap})
 			}
 			if b := e.Book; b != nil {
-				execCore.FeedTrailBook(ctx, exec.TrailBook{Symbol: b.Symbol, Bid: b.Bid, Ask: b.Ask, Generation: b.Generation, Coverage: b.Coverage})
+				execCore.FeedTrailBook(ctx, exec.TrailBook{Symbol: b.Symbol, Bid: b.Bid, Ask: b.Ask, Generation: b.Generation, Coverage: b.Coverage, ReceiptMs: b.ReceiptMs, BidTsMs: b.BidTsMs, AskTsMs: b.AskTsMs})
 			}
 			if b := e.Candle; b != nil {
 				execCore.FeedTrailCandle(ctx, exec.TrailCandle{Symbol: b.Symbol, Timeframe: b.Timeframe, StartMs: b.StartMs, EndMs: b.EndMs, Low: b.Low, High: b.High, Verified: b.Verified})
@@ -1287,7 +1287,14 @@ func (d engineHeldDemand) Acquire(ctx context.Context, orderID, symbol string) e
 	return nil
 }
 
-func (d engineHeldDemand) Release(orderID string) { d.feed.Release("held-stop/" + orderID) }
+func (d engineHeldDemand) EnsureProtectionBook(orderID, symbol string) {
+	d.feed.Ensure(feed.Demand{ID: "held-price/" + orderID, Symbol: symbol, Subs: []feed.SubType{feed.SubBook}, Background: true})
+}
+
+func (d engineHeldDemand) Release(orderID string) {
+	d.feed.Release("held-stop/" + orderID)
+	d.feed.Release("held-price/" + orderID)
+}
 
 type scannerFilterConfig interface {
 	GetConfig(string) (string, bool, error)

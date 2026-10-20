@@ -32,7 +32,7 @@ func newRiskCoreWithoutPrint(t *testing.T) (*Core, *clock.Fake, *heldTestBroker,
 func newRiskCore(t *testing.T) (*Core, *clock.Fake, *heldTestBroker, context.Context) {
 	t.Helper()
 	c, clk, b, ctx := newRiskCoreWithoutPrint(t)
-	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 9))
+	feedCorroboratedPrint(t, c, ctx, eligible(1, clk.Now(), 9))
 	until := time.Now().Add(time.Second)
 	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
 		if time.Now().After(until) {
@@ -52,7 +52,7 @@ func TestRiskEntryTriggersAtChartRoundedPrice(t *testing.T) {
 	}
 	waitHeldOrder(t, c, ack.OrderID, HeldWaiting)
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 3.0699))
+	feedCorroboratedPrint(t, c, ctx, eligible(1, clk.Now(), 3.0699))
 	waitHeldOrder(t, c, ack.OrderID, HeldArmed)
 	select {
 	case req := <-broker.submits:
@@ -60,7 +60,7 @@ func TestRiskEntryTriggersAtChartRoundedPrice(t *testing.T) {
 	default:
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 3.07))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 3.07))
 	select {
 	case req := <-broker.submits:
 		if req.ClientOrderID != ack.OrderID || req.Type != TypeLimit || req.Qty != 4 || req.LimitPrice != 3.11 {
@@ -76,7 +76,7 @@ func TestRiskEntryWaitsForFreshPrint(t *testing.T) {
 		t.Run(state, func(t *testing.T) {
 			c, clk, broker, ctx := newRiskCoreWithoutPrint(t)
 			if state == "stale" {
-				c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 10.1))
+				feedCorroboratedPrint(t, c, ctx, eligible(1, clk.Now(), 10.1))
 				until := time.Now().Add(time.Second)
 				for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
 					if time.Now().After(until) {
@@ -100,7 +100,7 @@ func TestRiskEntryWaitsForFreshPrint(t *testing.T) {
 			default:
 			}
 			clk.Advance(time.Millisecond)
-			c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+			feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
 			entry = waitHeldOrder(t, c, entry.ID, HeldActivating)
 			if entry.Held.PausedReason != "" {
 				t.Fatalf("waiting reason survived activation: %+v", entry.Held)
@@ -186,7 +186,7 @@ func TestRiskEntryWaitingForDataPausesOnFeedGap(t *testing.T) {
 		t.Fatalf("feed gap did not pause custody: %+v", paused.Held)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 10.1))
+	feedCorroboratedPrint(t, c, ctx, eligible(1, clk.Now(), 10.1))
 	until := time.Now().Add(time.Second)
 	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
 		if time.Now().After(until) {
@@ -289,7 +289,7 @@ func TestRiskEntryPartialFillProtectionSurvivesDisarm(t *testing.T) {
 	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
 	stop := waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.Held != nil })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
 	select {
 	case req := <-broker.submits:
 		if req.Side != SideBuy || req.Qty != 500 {
@@ -305,7 +305,7 @@ func TestRiskEntryPartialFillProtectionSurvivesDisarm(t *testing.T) {
 		t.Fatalf("disarm: %+v", disarm)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.8))
+	feedCorroboratedPrint(t, c, ctx, eligible(3, clk.Now(), 9.8))
 	select {
 	case req := <-broker.submits:
 		if req.Side != SideSell || req.Qty != 100 || req.LimitPrice != 9.8 {
@@ -322,13 +322,13 @@ func TestRiskEntryLateFillsDoNotDuplicatePausedProtection(t *testing.T) {
 	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
 	stop := waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.Held != nil })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
 	<-broker.submits
 	broker.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
 	broker.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 100, Price: 10, TsMs: clk.Now().UnixMilli()}, CumQty: 100, AvgPrice: 10}
 	waitOrder(t, c, stop.ID, func(o Order) bool { return o.Qty == 100 })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.8))
+	feedCorroboratedPrint(t, c, ctx, eligible(3, clk.Now(), 9.8))
 	<-broker.submits
 	broker.ev <- OrderAccepted{V: "v", OID: stop.ID, Ts: clk.Now().UnixMilli()}
 	c.FeedEligiblePrint(ctx, EligiblePrint{Gap: true})
@@ -386,7 +386,7 @@ func TestRiskEntryDragRevalidatesEntryActivation(t *testing.T) {
 		t.Fatalf("original budget sizing: %+v", entry)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10.2))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10.2))
 	<-broker.submits
 	broker.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
 	waitHeldOrder(t, c, entry.ID, HeldWorking)
@@ -426,7 +426,7 @@ func TestRiskEntryReconciledFillsGrowPausedProtection(t *testing.T) {
 	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
 	stop := waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.Held != nil })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
 	<-broker.submits
 	broker.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
 	waitHeldOrder(t, c, entry.ID, HeldWorking)
@@ -444,7 +444,7 @@ func TestRiskEntryReconciledFillsGrowPausedProtection(t *testing.T) {
 		t.Fatal("reconciliation automatically resumed protection")
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.9))
+	feedCorroboratedPrint(t, c, ctx, eligible(3, clk.Now(), 9.9))
 	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
 		time.Sleep(time.Millisecond)
 	}
@@ -452,7 +452,7 @@ func TestRiskEntryReconciledFillsGrowPausedProtection(t *testing.T) {
 		t.Fatalf("resume: %+v", resume)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(4, clk.Now(), 9.8))
+	feedCorroboratedPrint(t, c, ctx, eligible(4, clk.Now(), 9.8))
 	select {
 	case req := <-broker.submits:
 		if req.Side != SideSell || req.Qty != 100 {
@@ -482,13 +482,13 @@ func TestRiskEntryReconciledLateFillRequiresResume(t *testing.T) {
 	entry := waitOrder(t, c, ack.OrderID, func(o Order) bool { return o.RiskEntry != nil })
 	stop := waitOrder(t, c, entry.RiskEntry.StopID, func(o Order) bool { return o.Held != nil })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 10))
 	<-broker.submits
 	broker.ev <- OrderAccepted{V: "v", OID: entry.ID, Ts: clk.Now().UnixMilli()}
 	broker.ev <- OrderFilled{F: Fill{Venue: "v", OrderID: entry.ID, Symbol: "AAPL", Side: SideBuy, Qty: 100, Price: 10, TsMs: clk.Now().UnixMilli()}, CumQty: 100, AvgPrice: 10}
 	waitOrder(t, c, stop.ID, func(o Order) bool { return o.Qty == 100 })
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(3, clk.Now(), 9.8))
+	feedCorroboratedPrint(t, c, ctx, eligible(3, clk.Now(), 9.8))
 	<-broker.submits
 	broker.ev <- OrderAccepted{V: "v", OID: stop.ID, Ts: clk.Now().UnixMilli()}
 	stop = waitHeldOrder(t, c, stop.ID, HeldWorking)
@@ -497,7 +497,7 @@ func TestRiskEntryReconciledLateFillRequiresResume(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(4, clk.Now(), 9.8))
+	feedCorroboratedPrint(t, c, ctx, eligible(4, clk.Now(), 9.8))
 	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
 		time.Sleep(time.Millisecond)
 	}

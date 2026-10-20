@@ -254,6 +254,20 @@ func TestDecodePushBookUsesTypoField(t *testing.T) {
 	if be.Book.TsMs != 1782146001500 { // max(bid, ask) server recv time
 		t.Fatalf("book TsMs = %d", be.Book.TsMs)
 	}
+	if be.Book.BidTsMs == nil || *be.Book.BidTsMs != 1782146001000 || be.Book.AskTsMs == nil || *be.Book.AskTsMs != 1782146001500 {
+		t.Fatalf("independent clocks lost: %+v", be.Book)
+	}
+}
+
+func TestOptionalBookClock(t *testing.T) {
+	if optionalTsMs(nil) != nil {
+		t.Fatal("missing clock fabricated")
+	}
+	for _, input := range []float64{0, -1} {
+		if got := optionalTsMs(&input); got == nil || *got != 0 {
+			t.Fatalf("unknown clock %v: %v", input, got)
+		}
+	}
 }
 
 func TestDecodePushBasicQot(t *testing.T) {

@@ -1,5 +1,12 @@
 # External API Dependencies
 
+Protective-price corroboration carries OpenD's separate optional bid/ask
+server clocks and local frame receipt through execution independently of
+recording. It does not assume provider/local synchronization or NBBO coverage.
+Optional background BOOK demand cannot block required protective TICKER
+coverage; unknown book evidence retains the bounded adverse fallback. See
+[execution policy](../engine/internal/exec/README.md#protective-price-evidence).
+
 Tick recording uses received OpenD TICKER and K_1M data, plus best-effort BOOK
 for existing US TICKER subscriptions. BOOK is provider-specific, not certified
 NBBO; retain independent bid/ask clocks and optional presence. Cached reports

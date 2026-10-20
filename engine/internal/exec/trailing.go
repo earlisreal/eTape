@@ -73,11 +73,15 @@ type TrailState struct {
 }
 
 type TrailBook struct {
-	Coverage   uint64
-	Symbol     string
-	Bid, Ask   float64
-	Generation uint64
-	Gap        bool
+	ReceiptMs                  int64
+	BidTsMs, AskTsMs           *int64
+	clockInvalid               bool
+	bidReceiptMs, askReceiptMs int64
+	Coverage                   uint64
+	Symbol                     string
+	Bid, Ask                   float64
+	Generation                 uint64
+	Gap                        bool
 }
 
 // Prints, books and candle evidence share one ordered, lossless execution lane.
@@ -109,7 +113,32 @@ func (c *Core) handleTrailBook(ctx context.Context, book TrailBook) {
 	if c.trailBooks == nil {
 		c.trailBooks = make(map[string]TrailBook)
 	}
+	book.bidReceiptMs, book.askReceiptMs = book.ReceiptMs, book.ReceiptMs
+	if old, ok := c.trailBooks[book.Symbol]; ok && old.Generation == book.Generation && old.Coverage == book.Coverage {
+		if old.BidTsMs != nil && book.BidTsMs != nil && *old.BidTsMs == *book.BidTsMs {
+			book.bidReceiptMs = old.bidReceiptMs
+		}
+		if old.AskTsMs != nil && book.AskTsMs != nil && *old.AskTsMs == *book.AskTsMs {
+			book.askReceiptMs = old.askReceiptMs
+		}
+		book.clockInvalid = old.clockInvalid || old.ReceiptMs > book.ReceiptMs ||
+			old.BidTsMs != nil && book.BidTsMs != nil && *book.BidTsMs < *old.BidTsMs ||
+			old.AskTsMs != nil && book.AskTsMs != nil && *book.AskTsMs < *old.AskTsMs
+	}
 	c.trailBooks[book.Symbol] = book
+	if s := c.protectionPrices[book.Symbol]; s != nil && s.candidate.Seq > 0 && c.now() < s.candidate.ReceiptMs+protectionWait.Milliseconds() {
+		if b, usable := c.protectionBook(book.Symbol); usable && protectionBookSupports(b, s.candidate.Price) {
+			s.reference, s.latest, s.accepted = s.candidate, s.candidate, true
+			s.candidate = EligiblePrint{}
+			for _, id := range c.heldOrderIDs() {
+				o := c.order(id)
+				if o.Symbol == book.Symbol && o.Held.Trail != nil && c.protectionCanWait(o) && s.latest.RecvTsMs > o.CreatedMs && s.latest.RecvTsMs > o.Held.ResumeAfterMs {
+					c.advanceTrail(ctx, o, s.latest, false)
+				}
+			}
+		}
+	}
+	c.resolveProtection(ctx, book.Symbol)
 	for _, id := range c.heldOrderIDs() {
 		o := c.order(id)
 		if o.Symbol == book.Symbol && o.Held.Phase == HeldWaitingQuote {
@@ -244,6 +273,7 @@ func (c *Core) handleSubmitTrail(ctx context.Context, cm SubmitTrail) CmdAck {
 		c.releaseHeld(o.ID)
 		return blocked(err.Error())
 	}
+	c.requestProtectionBook(o)
 	if p, ok := c.lastEligible[o.Symbol]; ok && c.printHealthy && c.freshEligiblePrint(p) {
 		c.advanceTrail(ctx, o, p, true)
 	}
@@ -257,6 +287,10 @@ func (c *Core) saveTrail(o Order, trail TrailState, phase HeldPhase, reason stri
 }
 
 func (c *Core) advanceTrail(ctx context.Context, o Order, p EligiblePrint, deliberate bool) {
+	c.advanceTrailPrice(ctx, o, p, deliberate, false)
+}
+
+func (c *Core) advanceTrailPrice(ctx context.Context, o Order, p EligiblePrint, deliberate, adverse bool) {
 	t := *o.Held.Trail
 	if o.RiskEntryID != "" && o.Qty <= 0 {
 		return
@@ -271,7 +305,17 @@ func (c *Core) advanceTrail(ctx context.Context, o Order, p EligiblePrint, delib
 	if t.Retired || t.Triggered || !t.Config.Sessions.allows(c.clk.Now()) || !t.Config.Sessions.allows(time.UnixMilli(p.TsMs)) {
 		return
 	}
-	if t.Watermark == 0 || o.Side == SideSell && p.Price > t.Watermark || o.Side == SideCover && p.Price < t.Watermark {
+	accepted := c.protectionPriceAccepted(p)
+	if !accepted && !adverse && t.Config.Mode != "CANDLE" && (!deliberate || t.Watermark == 0 && t.Floor == 0) {
+		c.deferProtection(o, p)
+		if t.Watermark == 0 && t.Floor == 0 && o.Held.PausedReason != "waiting for corroborated price" {
+			if err := c.saveTrail(o, t, HeldWaiting, "waiting for corroborated price"); err != nil {
+				c.syslog("exec.trail", err.Error())
+			}
+		}
+		return
+	}
+	if accepted && (t.Watermark == 0 || o.Side == SideSell && p.Price > t.Watermark || o.Side == SideCover && p.Price < t.Watermark) {
 		t.Watermark = p.Price
 	}
 	distance := t.Config.Value
@@ -281,6 +325,9 @@ func (c *Core) advanceTrail(ctx context.Context, o Order, p EligiblePrint, delib
 	candidate := t.Watermark - distance
 	if o.Side == SideCover {
 		candidate = t.Watermark + distance
+	}
+	if t.Watermark == 0 {
+		candidate = t.Stop
 	}
 	if t.Config.Mode == "CANDLE" {
 		latest := c.trailCandles[o.Symbol+"/"+t.Config.Timeframe]
@@ -316,7 +363,8 @@ func (c *Core) advanceTrail(ctx context.Context, o Order, p EligiblePrint, delib
 		}
 		t.Limit = limit
 	}
-	t.Triggered = StopLimitTriggered(o.Side, p.Price, t.Stop)
+	crossed := StopLimitTriggered(o.Side, p.Price, t.Stop)
+	t.Triggered = crossed && (accepted || adverse)
 	phase, reason := HeldArmed, ""
 	if t.Config.Mode == "CANDLE" && t.Reference == nil && t.Floor > 0 {
 		reason = "fixed fallback; waiting for a verified completed candle"
@@ -341,6 +389,9 @@ func (c *Core) advanceTrail(ctx context.Context, o Order, p EligiblePrint, delib
 	if err := c.saveTrail(o, t, phase, reason); err != nil {
 		c.syslog("exec.trail", err.Error())
 		return
+	}
+	if crossed && !t.Triggered {
+		c.deferProtection(c.order(o.ID), p)
 	}
 	if t.Triggered {
 		if o.RiskEntryID != "" && !c.beginRiskExit(ctx, c.riskOwner(o)) {

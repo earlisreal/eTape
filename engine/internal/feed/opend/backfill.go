@@ -189,11 +189,13 @@ func (b *backfill) bookSnapshot(ctx context.Context, symbol string) (feed.Book, 
 	}
 	s2c := resp.GetS2C()
 	return feed.Book{
-		Source: f.Source,
-		Symbol: symbol,
-		TsMs:   tsMs(max(s2c.GetSvrRecvTimeBidTimestamp(), s2c.GetSvrRecvTimeAskTimestamp())),
-		Bids:   decodeBookLevels(s2c.GetOrderBookBidList()),
-		Asks:   decodeBookLevels(s2c.GetOrderBookAskList()),
+		Source:  f.Source,
+		Symbol:  symbol,
+		TsMs:    tsMs(max(s2c.GetSvrRecvTimeBidTimestamp(), s2c.GetSvrRecvTimeAskTimestamp())),
+		BidTsMs: optionalTsMs(s2c.SvrRecvTimeBidTimestamp),
+		AskTsMs: optionalTsMs(s2c.SvrRecvTimeAskTimestamp),
+		Bids:    decodeBookLevels(s2c.GetOrderBookBidList()),
+		Asks:    decodeBookLevels(s2c.GetOrderBookAskList()),
 	}, nil
 }
 

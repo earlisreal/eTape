@@ -62,6 +62,17 @@ func formatSymbol(s *qotcommon.Security) string {
 // tsMs converts moomoo's epoch-seconds float64 timestamps to epoch ms.
 func tsMs(sec float64) int64 { return int64(math.Round(sec * 1000)) }
 
+func optionalTsMs(sec *float64) *int64 {
+	if sec == nil {
+		return nil
+	}
+	var ms int64
+	if !math.IsNaN(*sec) && !math.IsInf(*sec, 0) && *sec >= 0 && *sec < float64(math.MaxInt64)/1000 {
+		ms = tsMs(*sec)
+	}
+	return &ms
+}
+
 func decodeDirection(d int32) feed.Direction {
 	switch qotcommon.TickerDirection(d) {
 	case qotcommon.TickerDirection_TickerDirection_Bid:
@@ -347,11 +358,13 @@ func DecodePush(f Frame) ([]feed.Event, error) {
 			return nil, fmt.Errorf("opend: book push without security")
 		}
 		book := feed.Book{
-			Source: f.Source,
-			Symbol: formatSymbol(s2c.GetSecurity()),
-			TsMs:   tsMs(math.Max(s2c.GetSvrRecvTimeBidTimestamp(), s2c.GetSvrRecvTimeAskTimestamp())),
-			Bids:   decodeBookLevels(s2c.GetOrderBookBidList()),
-			Asks:   decodeBookLevels(s2c.GetOrderBookAskList()),
+			Source:  f.Source,
+			Symbol:  formatSymbol(s2c.GetSecurity()),
+			TsMs:    tsMs(math.Max(s2c.GetSvrRecvTimeBidTimestamp(), s2c.GetSvrRecvTimeAskTimestamp())),
+			BidTsMs: optionalTsMs(s2c.SvrRecvTimeBidTimestamp),
+			AskTsMs: optionalTsMs(s2c.SvrRecvTimeAskTimestamp),
+			Bids:    decodeBookLevels(s2c.GetOrderBookBidList()),
+			Asks:    decodeBookLevels(s2c.GetOrderBookAskList()),
 		}
 		return []feed.Event{feed.BookEvent{Book: book}}, nil
 

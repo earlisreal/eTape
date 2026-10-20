@@ -9,10 +9,12 @@ import (
 )
 
 type ExecutionBook struct {
-	Coverage   uint64
-	Symbol     string
-	Bid, Ask   float64
-	Generation uint64
+	ReceiptMs        int64
+	BidTsMs, AskTsMs *int64
+	Coverage         uint64
+	Symbol           string
+	Bid, Ask         float64
+	Generation       uint64
 }
 type ExecutionCandle struct {
 	Symbol, Timeframe string
@@ -93,7 +95,7 @@ func (c *Core) executionBook(e feed.BookEvent) {
 	if c.executionState.generation == 0 {
 		c.executionState.generation = 1
 	}
-	b := ExecutionBook{Symbol: e.Book.Symbol, Generation: c.executionState.generation, Coverage: e.ExecutionRevision}
+	b := ExecutionBook{Symbol: e.Book.Symbol, Generation: c.executionState.generation, Coverage: e.ExecutionRevision, ReceiptMs: e.Book.Source.ReceiptMs, BidTsMs: e.Book.BidTsMs, AskTsMs: e.Book.AskTsMs}
 	if len(e.Book.Bids) > 0 {
 		b.Bid = e.Book.Bids[0].Price
 	}
@@ -188,6 +190,6 @@ func (c *Core) executionTick(t feed.Tick, coverage feed.Coverage) {
 		}
 	}
 	if t.LastEligible {
-		c.executionEmit(ExecutionEvent{Print: &EligiblePrint{Symbol: t.Symbol, Price: t.Price, TsMs: t.TsMs, RecvTsMs: t.RecvTsMs, Seq: t.Seq}})
+		c.executionEmit(ExecutionEvent{Print: &EligiblePrint{Symbol: t.Symbol, Price: t.Price, TsMs: t.TsMs, RecvTsMs: t.RecvTsMs, ReceiptMs: t.SourceRef().ReceiptMs, Seq: t.Seq}})
 	}
 }

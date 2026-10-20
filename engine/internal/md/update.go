@@ -116,12 +116,13 @@ type Mark struct {
 // EligiblePrint is the separate execution-grade lane for new, real-time
 // Last-Eligible prints. It is never coalesced into chart bars or marks.
 type EligiblePrint struct {
-	Symbol   string
-	Price    float64
-	TsMs     int64
-	RecvTsMs int64
-	Seq      int64
-	Gap      bool
+	Symbol    string
+	ReceiptMs int64 // local frame arrival, independent of provider clocks/recording
+	Price     float64
+	TsMs      int64
+	RecvTsMs  int64
+	Seq       int64
+	Gap       bool
 }
 
 // Bar is the md-side bar: raw OHLCV plus tick-derived delta fields and

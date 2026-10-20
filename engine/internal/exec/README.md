@@ -49,6 +49,43 @@ submission intent. Engine-owned Ticker/Book/K_1M demand survives chart closure;
 Go-owned WebSocket projections expose state and reference snapshots. Validate
 through `go test ./internal/exec` and lifecycle race tests; use sim/paper only.
 
+## Protective price evidence
+
+Engine-held protective stops use separate price evidence. Charts, alerts,
+entries, simulation marks, manual exits and native broker stops retain their
+reported prices. A price more than 1% (or two order-price increments) from the
+accepted protective reference, or outside a coherent fresh book plus tolerance,
+requires corroboration. Supporting book evidence admits a genuine gap immediately;
+a distinct nearby eligible print can corroborate only without a usable contrary book.
+
+An unresolved adverse crossing activates through the existing sizing,
+reservation, session and execution gates after 100 ms from local frame receipt.
+Repeats and cached placement/edit/fill checks cannot restart that deadline.
+A recovery refutes a crossing only with usable agreeing book evidence.
+The execution loop services overdue work before later evidence; this budget
+does not guarantee feed, scheduling, submission or fill latency. Missing receipt
+metadata grants no extra wait. Cancellation, pause, expiry and position-cycle
+changes invalidate pending decisions.
+
+Favorable unconfirmed prints never initialize or tighten PRICE/PERCENT
+watermarks, including at timeout. Standalone trails wait for a supporting book
+or second nearby print; Chart Risk Entry retains its fixed fallback. Completed
+candle calculations are unchanged, with their print trigger guarded.
+
+Book proof requires acknowledged current coverage/connection, positive separate
+side clocks, no clock regression, at most 250 ms of local residence for both
+sides, positive non-crossed prices and spread at most 1% of midpoint. Unchanged
+side clocks retain their original local age. Provider clocks are not subtracted
+from local time. Book support allows one spread or two order-price increments;
+print proximity allows 0.25% or that same increment floor. These are uncertainty
+tolerances, not legal trade tick sizes or a claim of NBBO coverage. Each protected
+order requests optional background BOOK demand; missing quota never blocks its
+required TICKER lease. Candidate decisions use `exec.protection_price` logs.
+
+See the [approved plan](../../../docs/plans/2026-10-20-protective-stop-spike-filter.md)
+and [calibration evidence](../../../.scratch/protective-stop-spike-filter/calibration.md).
+Validate with `go test ./internal/exec` and the lifecycle race suite.
+
 ## Existing execution lifecycle
 
 Broker-neutral lifecycle, gates, routing, reconciliation, and round-trip

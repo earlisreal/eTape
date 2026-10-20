@@ -415,12 +415,13 @@ type ReplaceRequest struct {
 // EligiblePrint is fed only from newly accepted real-time last-eligible
 // prints. Gap suspends held-order evaluation until explicit Resume.
 type EligiblePrint struct {
-	Symbol   string
-	Price    float64
-	TsMs     int64
-	RecvTsMs int64
-	Seq      int64
-	Gap      bool
+	Symbol    string
+	ReceiptMs int64
+	Price     float64
+	TsMs      int64
+	RecvTsMs  int64
+	Seq       int64
+	Gap       bool
 }
 
 // EligiblePrintPreview is exposed only while a recent, newly received print

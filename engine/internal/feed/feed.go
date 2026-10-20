@@ -191,11 +191,13 @@ type BookLevel struct {
 // Book is a full replacement snapshot of the visible depth (10 levels on US
 // LV3). TsMs is OpenD's server receive time — display only, never bucketing.
 type Book struct {
-	Source SourceRef
-	Symbol string
-	TsMs   int64
-	Bids   []BookLevel
-	Asks   []BookLevel
+	Source  SourceRef
+	Symbol  string
+	TsMs    int64
+	BidTsMs *int64 // independent provider clock; nil and zero remain distinct
+	AskTsMs *int64
+	Bids    []BookLevel
+	Asks    []BookLevel
 }
 
 // Bar is a raw OHLCV bar keyed by its bucket START (epoch ms). The adapter

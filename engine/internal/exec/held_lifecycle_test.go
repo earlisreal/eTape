@@ -286,7 +286,54 @@ func waitFlattenPending(t *testing.T, c *Core, venue VenueID, pending bool) {
 }
 
 func eligible(seq int64, at time.Time, price float64) EligiblePrint {
-	return EligiblePrint{Symbol: "AAPL", Price: price, TsMs: at.UnixMilli(), RecvTsMs: at.UnixMilli(), Seq: seq}
+	return EligiblePrint{Symbol: "AAPL", Price: price, TsMs: at.UnixMilli(), RecvTsMs: at.UnixMilli(), ReceiptMs: at.UnixMilli(), Seq: seq}
+}
+
+// Normal-market fixtures include explicit book evidence. Anomaly tests use
+// raw FeedEligiblePrint/FeedTrailBook to control missing or conflicting evidence.
+func feedProtectionBook(t *testing.T, c *Core, ctx context.Context, b TrailBook) {
+	t.Helper()
+	at := c.clk.Now().UnixMilli()
+	if b.ReceiptMs == 0 {
+		b.ReceiptMs = at
+	}
+	if b.BidTsMs == nil {
+		b.BidTsMs = &at
+	}
+	if b.AskTsMs == nil {
+		b.AskTsMs = &at
+	}
+	done := make(chan struct{})
+	select {
+	case c.printCh <- executionInput{Book: &b, Done: done}:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("book was not processed")
+	}
+}
+
+func feedCorroboratedPrint(t *testing.T, c *Core, ctx context.Context, p EligiblePrint) {
+	t.Helper()
+	coverage := uint64(1)
+	if d, ok := c.heldDemand.(BookCoverageController); ok {
+		coverage = d.TrailBookCoverage(p.Symbol)
+	}
+	feedProtectionBook(t, c, ctx, TrailBook{Symbol: p.Symbol, Bid: p.Price, Ask: p.Price, Generation: 1, Coverage: coverage})
+	done := make(chan struct{})
+	select {
+	case c.printCh <- executionInput{Print: p, Done: done}:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("print was not processed")
+	}
 }
 
 func TestEngineHeldStopLimitPostsOneLimitOnlyAfterEligibleTrigger(t *testing.T) {
@@ -622,10 +669,10 @@ func TestDeferredPositionStopSellSizesAtTriggerAndGuardsLaterSells(t *testing.T)
 	broker.ev <- BrokerPositions{V: "v", Positions: []Position{{Venue: "v", Symbol: "AAPL", Qty: 40, AvgPrice: 100}}}
 	waitPosition(t, c, "AAPL", 40)
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 100))
+	feedCorroboratedPrint(t, c, ctx, eligible(1, clk.Now(), 100))
 	waitHeldOrder(t, c, ack.OrderID, HeldArmed)
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(2, clk.Now(), 98))
+	feedCorroboratedPrint(t, c, ctx, eligible(2, clk.Now(), 98))
 	activated := waitHeldOrder(t, c, ack.OrderID, HeldActivating)
 	if activated.Qty != 20 || activated.Held.ResolvedQty != 20 {
 		t.Fatalf("trigger-time 50%% size = %+v, want 20 shares", activated)
@@ -653,7 +700,7 @@ func TestDeferredPositionStopSellHitWhileFlatRejectsPermanently(t *testing.T) {
 	now := time.Date(2026, 9, 30, 10, 0, 0, 0, session.Loc())
 	c, clk, broker, ctx := newHeldCore(t, now)
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 10))
+	feedCorroboratedPrint(t, c, ctx, eligible(1, clk.Now(), 10))
 	deadline := time.After(time.Second)
 	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
 		select {
@@ -757,7 +804,7 @@ func TestDeferredPositionStopPausesUntilReconcileAndManualResume(t *testing.T) {
 	waitPosition(t, c, "AAPL", 40)
 	waitPositionReadiness(t, c, "v", true)
 	clk.Advance(time.Millisecond)
-	c.FeedEligiblePrint(ctx, eligible(1, clk.Now(), 100))
+	feedCorroboratedPrint(t, c, ctx, eligible(1, clk.Now(), 100))
 	deadline := time.After(time.Second)
 	for !c.PreviewEligiblePrint(ctx, "AAPL").Trusted {
 		select {

@@ -213,6 +213,7 @@ func (c *Core) handleRiskEntry(ctx context.Context, cm SubmitRiskEntry) CmdAck {
 	if fresh && c.freshEligiblePrint(last) && deadline > c.now() && StopLimitTriggered(SideBuy, last.Price, entry.StopPrice) {
 		c.activateHeld(ctx, entry)
 	}
+	c.requestProtectionBook(stop)
 	return CmdAck{Accepted: true, OrderID: entry.ID}
 }
 
@@ -306,7 +307,7 @@ func (c *Core) syncRiskProtection(ctx context.Context, entry Order, reconciling 
 				if stop.Held.Trail != nil {
 					c.advanceTrail(ctx, stop, last, false)
 				} else if StopLimitTriggered(SideSell, last.Price, stop.StopPrice) {
-					c.activateHeld(ctx, stop)
+					c.activateProtectedStop(ctx, stop, last)
 				}
 			}
 		}
@@ -520,7 +521,7 @@ func (c *Core) replaceRisk(ctx context.Context, cm ReplaceOrder, o Order) CmdAck
 			current = stop
 		}
 		if StopLimitTriggered(current.Side, last.Price, current.StopPrice) {
-			c.activateHeld(ctx, current)
+			c.activateProtectedStop(ctx, current, last)
 		}
 	}
 	return CmdAck{Accepted: true, OrderID: o.ID}

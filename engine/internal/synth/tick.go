@@ -175,6 +175,7 @@ func genTicks(rng *rand.Rand, spec SymbolSpec, ps *priceState, b *bookState, ses
 		}
 
 		tk := feed.Tick{
+			Source:    &feed.SourceRef{ReceiptMs: tsMs},
 			Symbol:    symbol,
 			Seq:       seq,
 			TsMs:      tsMs,
